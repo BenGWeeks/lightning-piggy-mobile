@@ -7,6 +7,7 @@ import * as bitcoin from 'bitcoinjs-lib';
 import { createReverseSwap, claimSwap, getReverseSwapFees } from './boltzService';
 import { getBlockHeight, broadcastRawTx, getClaimFeeEstimate, isTxKnown } from './onchainService';
 import { verifyReverseSwap, verifyReverseLockup } from '../utils/reverseSwapVerify';
+import { CLAIM_TX_MAX_VSIZE } from '../utils/reverseSwapAmounts';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 jest.mock('./onchainService', () => ({
   getBlockHeight: jest.fn(),
@@ -202,6 +203,81 @@ describe('creation before funding', () => {
     const tx = lockup(swap.lockupAddress, swap.onchainAmount);
     return { swap, lockup: verifyReverseLockup(tx.toHex(), swap) };
   }
+  // #1175: fees 0.5% + 1,000 lockup; the claim is budgeted at 3 sat/vB (2 now,
+  // plus headroom) × 152 vB = 456. A 98,044-sat recipient therefore needs a
+  // 98,500 lockup and a 100,000-sat invoice.
+  it('creates an exact-recipient swap with onchainAmount = recipient + claim fee', async () => {
+    mutate = (s) => {
+      delete (s as { onchainAmount?: number }).onchainAmount; // Boltz omits it
+      return s;
+    };
+    const swap = await createReverseSwap(fixture().lockupAddress, 98044, undefined, 'recipient');
+    const body = JSON.parse(
+      fetchMock.mock.calls.find(([, init]) => init?.method === 'POST')[1].body,
+    );
+    expect(body.onchainAmount).toBe(98500);
+    expect(body).not.toHaveProperty('invoiceAmount');
+    expect(swap).toMatchObject({
+      onchainAmount: 98500,
+      recipientAmount: 98044,
+      invoiceAmount: 100000,
+    });
+  });
+  it('rejects an exact-recipient swap whose lockup or invoice differs from the quote', async () => {
+    mutate = (s) => {
+      s.onchainAmount = 98499;
+      return s;
+    };
+    await expect(
+      createReverseSwap(fixture().lockupAddress, 98044, undefined, 'recipient'),
+    ).rejects.toThrow(/amount/);
+    mutate = (s) => {
+      delete (s as { onchainAmount?: number }).onchainAmount;
+      return s;
+    };
+    // One sat more for the recipient prices a 100,002-sat invoice, but Boltz
+    // returned a 100,000-sat one: refuse rather than pay for the wrong swap.
+    await expect(
+      createReverseSwap(fixture().lockupAddress, 98045, undefined, 'recipient'),
+    ).rejects.toThrow(/invoice amount|amount does not match/);
+  });
+  it('checks Boltz limits against the invoice the recipient amount implies', async () => {
+    // 199,000 for the recipient is under the 200,000 maximum, the invoice is not.
+    await expect(
+      createReverseSwap(fixture().lockupAddress, 199000, undefined, 'recipient'),
+    ).rejects.toThrow(/limits/);
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+  });
+  // The claim pays a P2TR address here (152 vB): the 456-sat budget covers
+  // live rates of 2 and 3 sat/vB but not 4, where the live fee is paid.
+  it.each([
+    [2, 98044, true],
+    [3, 98044, true],
+    [4, 98500 - 152 * 4, false],
+  ])(
+    'claims an exact-recipient swap at live rate %i sat/vB → pays %i',
+    async (rate, paid, exact) => {
+      const preimage = new Uint8Array(32).fill(5);
+      const swap = {
+        ...fixture(CLAIM, bitcoin.crypto.sha256(preimage), HEIGHT + 144, true),
+        recipientAmount: 98044,
+        preimage: toHex(preimage),
+        claimPrivateKey: toHex(PRIVATE),
+      };
+      const tx = lockup(swap.lockupAddress, swap.onchainAmount);
+      jest.mocked(getClaimFeeEstimate).mockResolvedValueOnce(rate);
+      const claim = await claimSwap(
+        { ...swap, id: `exact-${rate}` },
+        verifyReverseLockup(tx.toHex(), swap),
+        fixture(REFUND).lockupAddress,
+      );
+      const raw = jest.mocked(broadcastRawTx).mock.calls[0][0];
+      expect(bitcoin.Transaction.fromHex(raw).virtualSize()).toBe(CLAIM_TX_MAX_VSIZE);
+      expect(Number(bitcoin.Transaction.fromHex(raw).outs[0].value)).toBe(paid);
+      expect(claim).toEqual({ txId: bitcoin.Transaction.fromHex(raw).getId(), outputSats: paid });
+      expect(paid === 98044).toBe(exact);
+    },
+  );
   it('builds a verifiable script-path claim using the current Electrum fee estimate', async () => {
     const preimage = new Uint8Array(32).fill(5);
     const swap = {
@@ -211,13 +287,18 @@ describe('creation before funding', () => {
     };
     const tx = lockup(swap.lockupAddress, swap.onchainAmount);
     jest.mocked(getClaimFeeEstimate).mockResolvedValueOnce(4);
-    await claimSwap(swap, verifyReverseLockup(tx.toHex(), swap), fixture(REFUND).lockupAddress);
+    const result = await claimSwap(
+      swap,
+      verifyReverseLockup(tx.toHex(), swap),
+      fixture(REFUND).lockupAddress,
+    );
     expect(getClaimFeeEstimate).toHaveBeenCalledWith(3);
     const raw = jest.mocked(broadcastRawTx).mock.calls[0][0];
     const claim = bitcoin.Transaction.fromHex(raw);
     // Fee = the signed claim's real vsize × rate, not the 180 vB budget (#1174).
     expect(claim.virtualSize()).toBeLessThan(180);
     expect(Number(claim.outs[0].value)).toBe(98500 - claim.virtualSize() * 4);
+    expect(result.outputSats).toBe(98500 - claim.virtualSize() * 4);
     expect(toHex(claim.ins[0].witness[1])).toBe(toHex(preimage));
     const script = claim.ins[0].witness[2];
     const leaf = bitcoin.crypto.taggedHash(
@@ -265,9 +346,9 @@ describe('creation before funding', () => {
       await jest.advanceTimersByTimeAsync(1000); // visibility poll backoff
       expect(isTxKnown).toHaveBeenCalledWith(verified.txId);
       await jest.advanceTimersByTimeAsync(2000 + 4000); // broadcast backoff
-      await expect(claiming).resolves.toBe(
-        bitcoin.Transaction.fromHex(jest.mocked(broadcastRawTx).mock.calls[2][0]).getId(),
-      );
+      await expect(claiming).resolves.toMatchObject({
+        txId: bitcoin.Transaction.fromHex(jest.mocked(broadcastRawTx).mock.calls[2][0]).getId(),
+      });
       expect(broadcastRawTx).toHaveBeenCalledTimes(3);
     } finally {
       jest.useRealTimers();

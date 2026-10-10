@@ -37,6 +37,7 @@ import * as boltzService from '../services/boltzService';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as SecureStore from 'expo-secure-store';
 
+const CLAIM = { txId: 'claim-tx', outputSats: 28500 };
 const SWAP = {
   id: 'sw1',
   invoice: 'lnbc30u1p...',
@@ -124,7 +125,7 @@ function holdInvoiceSwap() {
   // Broadcasting the claim reveals the preimage; Boltz then settles the HTLC.
   claimSwap.mockImplementation(async (swap: typeof SWAP) => {
     state.settlePayment(swap.preimage);
-    return 'claim-tx';
+    return CLAIM;
   });
   return { state, payInvoice };
 }
@@ -170,6 +171,12 @@ describe('persistReverseSwap', () => {
     ).toBeGreaterThan((SecureStore.setItemAsync as jest.Mock).mock.invocationCallOrder[0]);
   });
 
+  it('records the exact recipient amount so recovery claims the same (#1175)', async () => {
+    await persistReverseSwap({ ...SWAP, recipientAmount: 28640 }, 'bc1qdest');
+    const raw = (SecureStore.setItemAsync as jest.Mock).mock.calls[0][1];
+    expect(JSON.parse(raw)).toMatchObject({ onchainAmount: 29000, recipientAmount: 28640 });
+  });
+
   it('rejects when the index write fails, so no payable handle exists', async () => {
     (swapRecoveryService.registerPendingSwap as jest.Mock).mockRejectedValueOnce(
       new Error('Invalid pending swap index'),
@@ -194,7 +201,7 @@ describe('payAndClaimReverseSwap — hold invoice', () => {
     expect(state.paymentSettled).toBe(false);
 
     state.releaseLockup();
-    await expect(done).resolves.toBe('claim-tx');
+    await expect(done).resolves.toBe(CLAIM);
 
     expect(claimSwap).toHaveBeenCalledWith(SWAP, LOCKUP, 'bc1qdest');
     expect(state.paymentSettled).toBe(true);
@@ -277,13 +284,13 @@ describe('payAndClaimReverseSwap — hold invoice', () => {
 
   it('a lockup that beats a failing payment still claims — lockup evidence wins', async () => {
     const { state, payInvoice } = holdInvoiceSwap();
-    claimSwap.mockResolvedValue('claim-tx');
+    claimSwap.mockResolvedValue(CLAIM);
     const done = run({ payInvoice });
     await flush();
     state.releaseLockup();
     await flush();
     state.failPayment(named('ReplyTimeoutError'));
-    await expect(done).resolves.toBe('claim-tx');
+    await expect(done).resolves.toBe(CLAIM);
   });
 
   it('claim failure → SwapSettlingError, record kept, held payment detached', async () => {
@@ -302,11 +309,11 @@ describe('payAndClaimReverseSwap — hold invoice', () => {
 
   it('returns after a bounded grace when the claimed payment is slow to settle', async () => {
     const { state, payInvoice } = holdInvoiceSwap();
-    claimSwap.mockResolvedValue('claim-tx'); // Boltz hasn't settled yet
+    claimSwap.mockResolvedValue(CLAIM); // Boltz hasn't settled yet
     const done = run({ payInvoice, paymentSettleGraceMs: 20 });
     await flush();
     state.releaseLockup();
-    await expect(done).resolves.toBe('claim-tx');
+    await expect(done).resolves.toBe(CLAIM);
     expect(state.paymentSettled).toBe(false);
     expect(state.paySignal?.aborted).toBe(true);
     state.failPayment(named('ReplyTimeoutError')); // late, and harmless
@@ -345,12 +352,12 @@ describe('payAndClaimReverseSwap — cancellation', () => {
     claimSwap.mockImplementation(async (swap: typeof SWAP) => {
       ctrl.abort();
       state.settlePayment(swap.preimage);
-      return 'claim-tx';
+      return CLAIM;
     });
     const done = run({ payInvoice, signal: ctrl.signal });
     await flush();
     state.releaseLockup();
-    await expect(done).resolves.toBe('claim-tx');
+    await expect(done).resolves.toBe(CLAIM);
   });
 });
 
@@ -371,7 +378,7 @@ it.each(['recordClaimedFromPreimage', 'recordReverseSwapLegs', 'unregisterPendin
     const done = run({ payInvoice });
     await flush();
     state.releaseLockup();
-    await expect(done).resolves.toBe('claim-tx');
+    await expect(done).resolves.toBe(CLAIM);
     if (method !== 'unregisterPendingSwap')
       expect(SecureStore.deleteItemAsync).not.toHaveBeenCalled();
   },
@@ -382,7 +389,7 @@ it('keeps recovery indexed when secret deletion fails after claim', async () => 
   const done = run({ payInvoice });
   await flush();
   state.releaseLockup();
-  await expect(done).resolves.toBe('claim-tx');
+  await expect(done).resolves.toBe(CLAIM);
   expect(swapRecoveryService.unregisterPendingSwap).not.toHaveBeenCalled();
 });
 it('does not announce dispatch if the wallet throws synchronously', async () => {
@@ -504,7 +511,7 @@ describe('payAndClaimReverseSwap — dead swap (#1167)', () => {
     const done = run({ payInvoice });
     await flush();
     state.releaseLockup();
-    await expect(done).resolves.toBe('claim-tx');
+    await expect(done).resolves.toBe(CLAIM);
     state.failLockup(new Error('Swap failed with status: swap.expired')); // no-op: already settled
   });
 

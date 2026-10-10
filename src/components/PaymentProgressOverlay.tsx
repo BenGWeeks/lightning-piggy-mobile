@@ -75,6 +75,9 @@ interface Props {
    * plain Lightning send that's slow to confirm. On a successful swap send,
    * a hint notes the on-chain leg still has to confirm. */
   inFlightIsSwap?: boolean;
+  /** A completed swap send's two sides (#1175): the success subtitle states
+   *  what the recipient got and what the wallet paid, fees included. */
+  swapReceipt?: { recipientSats: number; paidSats: number } | null;
   /** Current stage of a Boltz reverse swap send, shown as a status line while
    *  the swap is in flight (#1167). */
   swapStage?: ReverseSwapSendStage | null;
@@ -327,6 +330,7 @@ export default function PaymentProgressOverlay({
   onDismiss,
   onCancel,
   inFlightIsSwap = false,
+  swapReceipt = null,
   swapStage = null,
   canContinueInBackground = false,
 }: Props) {
@@ -471,6 +475,12 @@ export default function PaymentProgressOverlay({
           ? t('paymentProgressOverlay.fromRecipient', { name: recipientName })
           : t('paymentProgressOverlay.toRecipient', { name: recipientName })
         : undefined;
+    if (!isReceive && inFlightIsSwap && swapReceipt && swapReceipt.paidSats > 0) {
+      subtitle = t('paymentProgressOverlay.swapReceipt', {
+        received: swapReceipt.recipientSats.toLocaleString(),
+        paid: swapReceipt.paidSats.toLocaleString(),
+      });
+    }
   } else if (state === 'connection-lost') {
     title = t('paymentProgressOverlay.connectionLostTitle');
     subtitle = t('paymentProgressOverlay.connectionLostSubtitle');

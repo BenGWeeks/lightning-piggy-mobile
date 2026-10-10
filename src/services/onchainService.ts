@@ -546,12 +546,50 @@ export async function isWatchOnly(walletId: string): Promise<boolean> {
  */
 const MIN_FEE_RATE = 1;
 const MAX_FEE_RATE = 500;
+/** Fee rate (sat/vB) `sendTransaction` uses when the caller doesn't pick one. */
+export const DEFAULT_SEND_FEE_RATE = 2;
+
+// Placeholder scripts for fee dry-runs: a Taproot recipient (Boltz lockups are
+// P2TR; BIP-86 test vector) and a P2WPKH change output (BIP-173 test vector,
+// the same type as the BIP-84 wallet's change). Pinning the change script
+// stops BDK deriving — and burning — a fresh change address per estimate.
+const DRY_RUN_RECIPIENT = 'bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr';
+const DRY_RUN_CHANGE = 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4';
+
+/**
+ * Miner fee `sendTransaction` would pay to send `amountSats` from this wallet
+ * at `feeRate`: builds (never signs or broadcasts) the transaction against
+ * the wallet's last-synced UTXOs, so multi-input sends are priced honestly.
+ * Null when the wallet can't build it (unsynced, or the amount exceeds the
+ * balance) — a guessed size could badly under-state a multi-input send.
+ */
+export async function estimateSendFee(
+  walletId: string,
+  amountSats: number,
+  feeRate: number = DEFAULT_SEND_FEE_RATE,
+): Promise<number | null> {
+  try {
+    const wallet = await getBdkWallet(walletId);
+    const recipient = await (await new Address().create(DRY_RUN_RECIPIENT)).scriptPubKey();
+    const change = await (await new Address().create(DRY_RUN_CHANGE)).scriptPubKey();
+    let txBuilder = await new TxBuilder().create();
+    txBuilder = await txBuilder.addRecipient(recipient, amountSats);
+    txBuilder = await txBuilder.feeRate(feeRate);
+    txBuilder = await txBuilder.drainTo(change);
+    const result = await txBuilder.finish(wallet);
+    const fee = result.txDetails.fee ?? (await result.psbt.feeAmount());
+    if (Number.isSafeInteger(fee) && fee > 0) return fee;
+  } catch (e) {
+    console.warn('estimateSendFee: dry-run failed:', e);
+  }
+  return null;
+}
 
 export async function sendTransaction(
   walletId: string,
   toAddress: string,
   amountSats: number,
-  feeRate: number = 2,
+  feeRate: number = DEFAULT_SEND_FEE_RATE,
 ): Promise<string> {
   console.log(
     `[BDK] sendTransaction enter walletId=${walletId} to=${toAddress} sats=${amountSats}`,

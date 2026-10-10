@@ -357,6 +357,8 @@ export async function recordSubmarineSwapLegs(
 
 interface PersistedReverseSwap {
   onchainAmount?: number;
+  /** Exact-recipient swaps (#1175): the claim pays exactly this. */
+  recipientAmount?: number;
   claimFeeRate?: number;
   timeoutBlockHeight?: number;
   id: string;
@@ -694,6 +696,7 @@ async function recoverSwap(swapId: string): Promise<void> {
       id: swap.id,
       invoice: '',
       onchainAmount: swap.onchainAmount ?? amount,
+      recipientAmount: swap.recipientAmount,
       timeoutBlockHeight: swap.timeoutBlockHeight ?? 0,
       claimFeeRate: swap.claimFeeRate,
       lockupAddress: swap.lockupAddress,
@@ -711,13 +714,16 @@ async function recoverSwap(swapId: string): Promise<void> {
       visibilityTime: 8000,
     });
     let claimTxId: string;
+    let claimedSats: number;
     try {
       reverseSwap.timeoutBlockHeight ||= reverseRefundHeight(swap.swapTree);
-      claimTxId = await boltzService.claimSwap(
+      const claim = await boltzService.claimSwap(
         reverseSwap,
         verifyReverseLockup(txHex, reverseSwap),
         swap.destinationAddress,
       );
+      claimTxId = claim.txId;
+      claimedSats = claim.outputSats;
     } catch (e) {
       // Claim broadcast / signing failed. Add to attention so the row badges
       // yellow and the detail sheet's "Retry claim" button gets the user's
@@ -733,7 +739,7 @@ async function recoverSwap(swapId: string): Promise<void> {
     Toast.show({
       type: 'success',
       text1: 'Swap recovered',
-      text2: `${amount.toLocaleString()} sats claimed to your on-chain wallet`,
+      text2: `${claimedSats.toLocaleString()} sats claimed to your on-chain wallet`,
       position: 'top',
       visibilityTime: 10000,
     });

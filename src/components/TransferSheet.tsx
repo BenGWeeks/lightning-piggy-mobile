@@ -1,4 +1,5 @@
 import { useTransferSwapFees } from '../utils/useTransferSwapFees';
+import { useTransferFeeEstimate } from '../hooks/useTransferFeeEstimate';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
@@ -137,7 +138,6 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   // concurrent recoverPendingSwaps() calls before `disabled` flips. The
   // ref is checked + set synchronously inside the onPress closure.
   const retryInFlightRef = useRef(false);
-  const [feeEstimate, setFeeEstimate] = useState<string | null>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
   const scrollRef = useRef<any>(null);
@@ -241,31 +241,12 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   const swapQuote = useTransferSwapFees(transferType, visible);
   const cachedBoltzFees = swapQuote.fees;
 
-  // Update fee estimate display based on cached fees + current amount
-  useEffect(() => {
-    if (!transferType || currentSats <= 0) {
-      setFeeEstimate(null);
-      return;
-    }
-    if (transferType === 'ln-to-ln') {
-      setFeeEstimate('~0 sats \u00B7 Instant (Lightning)');
-    } else if (transferType === 'ln-to-onchain' && cachedBoltzFees) {
-      const fee = boltzService.calculateSwapFee(currentSats, cachedBoltzFees);
-      setFeeEstimate(`~${fee.toLocaleString()} sats \u00B7 ~10-60 min`);
-    } else if (transferType === 'onchain-to-ln' && cachedBoltzFees) {
-      const fee = boltzService.calculateSwapFee(currentSats, cachedBoltzFees);
-      setFeeEstimate(`~${fee.toLocaleString()} sats \u00B7 ~10-60 min`);
-    } else if (transferType === 'onchain-to-onchain') {
-      onchainService
-        .estimateOnchainFee()
-        .then((fees) => {
-          setFeeEstimate(`~${fees.medium.toLocaleString()} sats \u00B7 ~10-60 min`);
-        })
-        .catch(() => {
-          setFeeEstimate('Fee estimate unavailable');
-        });
-    }
-  }, [transferType, currentSats, cachedBoltzFees]);
+  const feeEstimate = useTransferFeeEstimate({
+    transferType,
+    currentSats,
+    swapFees: cachedBoltzFees,
+    sourceId,
+  });
 
   useEffect(() => {
     if (visible) {
@@ -314,7 +295,6 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       // still running, the in-flight ref must stay true so a second
       // tap is correctly rejected — the ref is cleared by the IIFE's
       // own finally block when its work actually completes.
-      setFeeEstimate(null);
       setSourceDropdownOpen(false);
       setDestDropdownOpen(false);
       // Cross-profile state resets on every open — opening with a
@@ -688,12 +668,12 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
             // Final status: replace the "underway" copy in THIS sheet session
             // only — a reopened sheet belongs to a different transfer.
             if (sessionRef.current === iifeSession) {
-              setProgressMsg(reverseSwapCompleteMessage(onchainAmount, claimed));
+              setProgressMsg(reverseSwapCompleteMessage(onchainAmount, claimed.txId));
             }
             Toast.show({
               type: 'success',
               text1: 'Swap complete',
-              text2: `${onchainAmount.toLocaleString()} sats (less claim fee) claimed on-chain. Claim tx ${claimed.slice(0, 10)}…`,
+              text2: `${onchainAmount.toLocaleString()} sats (less claim fee) claimed on-chain. Claim tx ${claimed.txId.slice(0, 10)}…`,
               position: 'top',
               visibilityTime: 10000,
             });

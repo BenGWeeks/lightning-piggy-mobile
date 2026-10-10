@@ -39,6 +39,8 @@ const SWAP = {
   refundPublicKey: 'refund-pub',
   swapTree: { foo: 'bar' },
   invoice: 'lnbc30u1p...',
+  recipientAmount: 30000,
+  invoiceAmount: 30612,
 };
 
 const neverLockup = () =>
@@ -53,7 +55,7 @@ const named = (name: string, message = name) => {
 const params = (over: Partial<Parameters<typeof executeReverseSwap>[0]> = {}) => ({
   walletId: 'w1',
   destinationAddress: 'bc1qdest',
-  amountSats: 30000,
+  recipientSats: 30000,
   signal: new AbortController().signal,
   payInvoice: jest.fn(async () => ({ preimage: 'preimage-hex' })),
   onReplyTimeout: jest.fn(),
@@ -69,12 +71,19 @@ beforeEach(() => {
     amount: 9000,
     txHex: 'fixture',
   });
-  (boltzService.claimSwap as jest.Mock).mockResolvedValue('claim-tx-id');
+  (boltzService.claimSwap as jest.Mock).mockResolvedValue({
+    txId: 'claim-tx-id',
+    outputSats: 30000,
+  });
 });
 
 describe('executeReverseSwap — #891 error contract', () => {
-  it('happy path: resolves and drops the recovery record', async () => {
-    await expect(executeReverseSwap(params())).resolves.toBeUndefined();
+  it('happy path: resolves with what the recipient got and what was paid', async () => {
+    await expect(executeReverseSwap(params())).resolves.toEqual({
+      claimTxId: 'claim-tx-id',
+      recipientSats: 30000,
+      paidSats: 30612,
+    });
     // Secrets persisted with hardened keychain accessibility...
     expect(SecureStore.setItemAsync).toHaveBeenCalledWith('boltz_swap_sw1', expect.any(String), {
       keychainAccessible: 'AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY',
@@ -180,7 +189,12 @@ describe('executeReverseSwap — hold invoice', () => {
     const quote = { pairHash: 'h', percentage: 0.5, minerFee: 1, minAmount: 1, maxAmount: 9 };
     const payInvoice = jest.fn(async () => ({ preimage: 'preimage-hex' }));
     await executeReverseSwap(params({ approvedQuote: quote, payInvoice }));
-    expect(boltzService.createReverseSwap).toHaveBeenCalledWith('bc1qdest', 30000, quote);
+    expect(boltzService.createReverseSwap).toHaveBeenCalledWith(
+      'bc1qdest',
+      30000,
+      quote,
+      'recipient',
+    );
     const persistAt = (SecureStore.setItemAsync as jest.Mock).mock.invocationCallOrder[0];
     const indexAt = (swapRecoveryService.registerPendingSwap as jest.Mock).mock
       .invocationCallOrder[0];
@@ -208,9 +222,11 @@ describe('executeReverseSwap — hold invoice', () => {
     const payInvoice = jest.fn(() => new Promise((resolve) => (settle = resolve)));
     (boltzService.claimSwap as jest.Mock).mockImplementation(async () => {
       settle({ preimage: SWAP.preimage }); // Boltz settles the hold invoice
-      return 'claim-tx-id';
+      return { txId: 'claim-tx-id', outputSats: 30000 };
     });
-    await expect(executeReverseSwap(params({ payInvoice }))).resolves.toBeUndefined();
+    await expect(executeReverseSwap(params({ payInvoice }))).resolves.toMatchObject({
+      claimTxId: 'claim-tx-id',
+    });
     expect(payInvoice).toHaveBeenCalledTimes(1);
     expect(swapRecoveryService.recoverPendingSwaps).not.toHaveBeenCalled();
     expect(SecureStore.deleteItemAsync).toHaveBeenCalledWith('boltz_swap_sw1');
