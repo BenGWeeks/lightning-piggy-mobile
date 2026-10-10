@@ -30,6 +30,11 @@ name: Alerts near Bitcoin shops — toggle, radius preset, quiet hours
 - tapOn:
     id: 'profile-icon'
 
+- scrollUntilVisible:
+    element:
+      id: 'drawer-row-notifications'
+    direction: DOWN
+    timeout: 10000
 - tapOn:
     id: 'drawer-row-notifications'
 - waitForAnimationToEnd:

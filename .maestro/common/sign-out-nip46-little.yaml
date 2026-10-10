@@ -16,6 +16,11 @@ name: Internal — sign the active NIP-46 Little Piggy session out
             id: 'drawer-sign-out'
           direction: DOWN
           timeout: 5000
+      - scrollUntilVisible:
+          element:
+            id: 'drawer-sign-out'
+          direction: DOWN
+          timeout: 10000
       - tapOn:
           id: 'drawer-sign-out'
       # Confirm by testID (button set varies by signer, #1223)

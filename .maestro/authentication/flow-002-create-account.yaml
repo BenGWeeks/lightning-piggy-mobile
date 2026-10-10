@@ -30,6 +30,11 @@ name: Create Nostr Account Test
     timeout: 5000
 
 # Sign out if already logged in
+- scrollUntilVisible:
+    element:
+      id: 'drawer-sign-out'
+    direction: DOWN
+    timeout: 10000
 - tapOn:
     id: 'drawer-sign-out'
     optional: true
@@ -137,6 +142,11 @@ name: Create Nostr Account Test
     optional: true
 - waitForAnimationToEnd:
     timeout: 2000
+- scrollUntilVisible:
+    element:
+      id: 'drawer-sign-out'
+    direction: DOWN
+    timeout: 10000
 - tapOn:
     id: 'drawer-sign-out'
     optional: true

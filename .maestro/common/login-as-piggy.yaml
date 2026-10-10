@@ -26,6 +26,11 @@ name: Internal — login as the nsec passed via PIGGY_NSEC env var
 - waitForAnimationToEnd:
     timeout: 5000
 
+- scrollUntilVisible:
+    element:
+      id: 'drawer-sign-out'
+    direction: DOWN
+    timeout: 10000
 - tapOn:
     id: 'drawer-sign-out'
     optional: true
