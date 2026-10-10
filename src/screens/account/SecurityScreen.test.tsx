@@ -63,7 +63,7 @@ it('a failed threshold save is caught: toast, and the stored value is shown agai
   });
 });
 
-it('shows the per-account hint once, not under every section', () => {
+it('says once, in the scope header, that these settings follow the account', () => {
   const ui = render(<SecurityScreen />);
-  expect(ui.getAllByText('securityScreen.perAccountHint')).toHaveLength(1);
+  expect(ui.getAllByText('settingsScope.forThisAccount')).toHaveLength(1);
 });
