@@ -143,6 +143,7 @@ export class MarmotPushRegistrar {
   private chain: Promise<unknown> = Promise.resolve();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
+  private readonly settledListeners = new Set<() => void>();
 
   constructor(private readonly deps: RegistrarDeps) {}
 
@@ -180,7 +181,14 @@ export class MarmotPushRegistrar {
   sync(opts: { interactive: boolean; groupIdHex?: string }): Promise<SyncResult> {
     const run = this.chain.then(() => this.runSync(opts));
     this.chain = run.catch(() => undefined);
+    void run.finally(() => this.settledListeners.forEach((l) => l())).catch(() => undefined);
     return run;
+  }
+
+  /** Called after every pass (e.g. to refresh a "N chats pending" status). */
+  onSettled(listener: () => void): () => void {
+    this.settledListeners.add(listener);
+    return () => this.settledListeners.delete(listener);
   }
 
   /** Groups that still need a signature for the current registration. */
@@ -194,6 +202,17 @@ export class MarmotPushRegistrar {
       if (action.type === 'publish' || action.type === 'remove') n++;
     }
     return n;
+  }
+
+  /** We left (or were removed from) this group: forget what we published
+   * there. Explicit — never inferred from a group missing from a load,
+   * which may just have failed to load. */
+  forgetGroup(groupIdHex: string): void {
+    const run = this.chain.then(async () => {
+      await this.deps.backend.remove(NAMESPACE, groupIdHex);
+      await this.deps.backend.remove(TS_NAMESPACE, groupIdHex);
+    });
+    this.chain = run.catch(() => undefined);
   }
 
   /** Stop for good; resolves once an in-flight pass has settled. */
@@ -257,7 +276,6 @@ export class MarmotPushRegistrar {
         if (__DEV__) console.warn('[MarmotPush] registration step failed:', e);
       }
     }
-    await this.forgetDepartedGroups(opts.groupIdHex ? null : groups);
     return result;
   }
 
@@ -316,17 +334,6 @@ export class MarmotPushRegistrar {
     if (!(await this.deps.send(group.idHex, tokenUpdateEvent(record)))) return false;
     await this.save(group.idHex, { record, leaves: [...group.leaves] });
     return true;
-  }
-
-  /** Drop what we stored for groups we're no longer in. */
-  private async forgetDepartedGroups(groups: RegistrarGroup[] | null): Promise<void> {
-    if (!groups || this.stopped) return;
-    const current = new Set(groups.map((g) => g.idHex));
-    for (const ns of [NAMESPACE, TS_NAMESPACE]) {
-      for (const id of await this.deps.backend.keys(ns)) {
-        if (!current.has(id)) await this.deps.backend.remove(ns, id);
-      }
-    }
   }
 
   private async load(groupIdHex: string): Promise<Shared | null> {

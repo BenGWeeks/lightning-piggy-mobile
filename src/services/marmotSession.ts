@@ -264,9 +264,14 @@ export class MarmotSession {
         this.emitGroupsChanged();
       });
     }
-    for (const evt of ['left', 'removed', 'destroyed', 'disbanded', 'unloaded'] as const) {
-      groups.on(evt, () => this.emitGroupsChanged());
+    for (const evt of ['left', 'removed', 'destroyed', 'disbanded'] as const) {
+      groups.on(evt, (id: Uint8Array, ..._rest: unknown[]) => {
+        // We're out of it: forget what we published there (MIP-05 state).
+        this.pushRegistration.forgetGroup(bytesToHex(id));
+        this.emitGroupsChanged();
+      });
     }
+    groups.on('unloaded', () => this.emitGroupsChanged());
     try {
       // Inside the try: a store failure must still open the `ready` gate, or
       // every send/join awaiting it would hang instead of erroring.

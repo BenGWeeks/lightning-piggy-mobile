@@ -19,6 +19,7 @@ import { createSharedAccountStyles } from '../screens/account/sharedStyles';
 import {
   disableMarmotPush,
   enableMarmotPush,
+  subscribeMarmotPushStatus,
   loadMarmotPushSettings,
   parseServerKey,
   pendingMarmotPushGroups,
@@ -69,8 +70,11 @@ const MarmotPushSection: React.FC = () => {
       setCustomServer(s.customServer);
       if (s.enabled) void refreshPending();
     });
+    // The token read and group passes finish in the background.
+    const unsubscribe = subscribeMarmotPushStatus(() => void refreshPending());
     return () => {
       alive = false;
+      unsubscribe();
     };
   }, [refreshPending]);
 

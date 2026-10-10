@@ -138,6 +138,15 @@ let started = false;
 // removed account's, being torn down) while waiting for the next one.
 let awaitingSession: { stale: MarmotSession | null } | null = null;
 let chain: Promise<unknown> = Promise.resolve();
+const statusListeners = new Set<() => void>();
+const watchedSessions = new WeakSet<MarmotSession>();
+const notifyStatus = () => statusListeners.forEach((l) => l());
+
+/** Fires whenever the token or a group pass settles — for the Settings status. */
+export function subscribeMarmotPushStatus(listener: () => void): () => void {
+  statusListeners.add(listener);
+  return () => statusListeners.delete(listener);
+}
 // In-memory mirror of RETIRE_PENDING_KEY: no token is handed out meanwhile.
 let retiring = false;
 
@@ -192,7 +201,12 @@ const currentServer = () => settings.customServer ?? builtInServer();
 /** Hand the registration to `session` and sync it in the background. */
 function applyTo(session: MarmotSession | null): void {
   setLiveMarmotSession(session !== null);
+  notifyStatus();
   if (!session) return;
+  if (!watchedSessions.has(session)) {
+    watchedSessions.add(session);
+    session.pushRegistration.onSettled(notifyStatus);
+  }
   if (awaitingSession && session !== awaitingSession.stale) {
     awaitingSession = null;
     void serial(() => refreshAfterRetirement(session));
@@ -265,6 +279,7 @@ export function startMarmotPushRegistration(): () => void {
       } catch (e) {
         // Offline / no token right now: keep whatever the groups have.
         if (__DEV__) console.warn('[MarmotPush] token refresh failed:', e);
+        notifyStatus();
         return;
       }
     } else {
@@ -370,6 +385,7 @@ export async function setMarmotPushServer(pubkey: string | null): Promise<Enable
 /** Groups of the active account still waiting for a signature; null when
  * push is on but this phone has no token yet (Finish setup retries it). */
 export async function pendingMarmotPushGroups(): Promise<number | null> {
+  await ensureSettings();
   const session = getMarmotSession();
   if (settings.enabled && registration === undefined) return null;
   if (!session || registration === undefined) return 0;

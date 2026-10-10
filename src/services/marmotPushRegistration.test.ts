@@ -11,6 +11,7 @@ const mockSession = {
     schedule: jest.fn(),
     sync: jest.fn(async () => ({ published: 2, removed: 0, pending: 0, declined: false })),
     pendingCount: jest.fn(async () => 0),
+    onSettled: jest.fn(() => () => undefined),
   },
 };
 let mockActive: typeof mockSession | null = mockSession;
@@ -283,6 +284,7 @@ describe('ordering of device-level changes', () => {
     await new Promise((r) => setTimeout(r, 0));
     await new Promise((r) => setTimeout(r, 0));
     expect(lastRegistration()).toBeNull();
+    expect(await pendingMarmotPushGroups()).toBeNull(); // shown as "not set up yet"
     const listener = (Notifications.addPushTokenListener as jest.Mock).mock.calls.at(-1)?.[0];
     listener({ type: 'android', data: 'late-token' });
     await new Promise((r) => setTimeout(r, 0));

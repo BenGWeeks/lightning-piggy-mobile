@@ -171,10 +171,17 @@ describe('MarmotPushRegistrar', () => {
     expect(parsePushPayload(447, t.sent[1].content, Date.now()).records[0].leaf).toBe(3);
   });
 
-  it('forgets groups it has left', async () => {
+  it('forgets a group it has left (told explicitly — never inferred from a partial load)', async () => {
     const t = setup();
     t.registrar.setRegistration(reg('token-1'));
     await t.registrar.sync({ interactive: false });
+    // A group missing from a (partial) load is NOT forgotten…
+    t.setGroups([group('aa'.repeat(16))]);
+    await t.registrar.sync({ interactive: false });
+    t.setGroups([group('aa'.repeat(16)), group('bb'.repeat(16))]);
+    expect((await t.registrar.sync({ interactive: false })).published).toBe(0);
+    // …only an explicit leave is.
+    t.registrar.forgetGroup('bb'.repeat(16));
     t.setGroups([group('aa'.repeat(16))]);
     await t.registrar.sync({ interactive: false });
     // Rejoining the departed group publishes afresh rather than assuming.
