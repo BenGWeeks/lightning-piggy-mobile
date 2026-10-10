@@ -96,7 +96,10 @@ const KeyBackupScreen: React.FC = () => {
     Toast.show({ type: 'success', text1: t('keyBackupScreen.markedBackedUp') });
   };
 
-  if (!targetPubkey) {
+  // No account, or one that has since been signed out (e.g. a stale
+  // restored navigation state) — there is no key to talk about.
+  const knownAccount = isActive || identities.some((i) => i.pubkey === targetPubkey);
+  if (!targetPubkey || !knownAccount) {
     return (
       <AccountScreenLayout title={t('keyBackupScreen.title')}>
         <Text style={styles.paragraph}>{t('keyBackupScreen.notSignedIn')}</Text>
