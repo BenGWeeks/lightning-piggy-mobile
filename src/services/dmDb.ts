@@ -468,23 +468,26 @@ export async function deleteMarmotRowsOfKinds(owner: string, kinds: readonly num
 }
 
 /**
- * Delete `owner`'s Marmot rows with these message ids that `sender` authored —
- * a "delete for everyone" from the sender (the author check lives in the SQL,
- * so a peer can never remove a message they didn't send).
+ * Delete `owner`'s Marmot rows with these message ids in one conversation — a
+ * "delete for everyone". `sender` restricts it to messages that account wrote
+ * (the author check lives in the SQL, so a peer can never remove a message they
+ * didn't send); pass null for an admin removal, which may take any member's.
  */
-export async function deleteMarmotMessagesBySender(
+export async function deleteMarmotMessages(
   owner: string,
+  conversation: string,
   messageIds: readonly string[],
-  sender: string,
+  sender: string | null,
 ): Promise<void> {
   if (messageIds.length === 0) return;
   const db = await getLocalDb();
   for (let i = 0; i < messageIds.length; i += VAR_CHUNK) {
     const slice = messageIds.slice(i, i + VAR_CHUNK);
     await db.execute(
-      `DELETE FROM dm_messages WHERE owner = ? AND protocol = 'marmot' AND sender = ?
+      `DELETE FROM dm_messages WHERE owner = ? AND protocol = 'marmot' AND conversation = ?
+         ${sender === null ? '' : 'AND sender = ?'}
          AND event_id IN (${slice.map(() => '?').join(',')});`,
-      [owner, sender, ...slice],
+      [owner, conversation, ...(sender === null ? [] : [sender]), ...slice],
     );
   }
 }

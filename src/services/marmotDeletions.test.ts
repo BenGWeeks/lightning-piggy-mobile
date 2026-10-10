@@ -59,9 +59,20 @@ describe('parseMarmotDeletion', () => {
         anyAuthor: true,
       });
     });
-    it('is ignored from a non-admin, in a 1:1 chat, or with a wrong payload', () => {
-      expect(parseMarmotDeletion(remove({ pubkey: PEER }), GROUP)).toBeNull();
-      expect(parseMarmotDeletion(remove(), { ...DM, adminPubkeys: [ADMIN] })).toBeNull();
+    it('from a non-admin only counts as the author deleting their own message', () => {
+      expect(parseMarmotDeletion(remove({ pubkey: PEER }), GROUP)).toEqual({
+        targets: [MSG],
+        deleter: PEER,
+        anyAuthor: false,
+      });
+    });
+    it('is how White Noise deletes in a 1:1 chat (both members are admins)', () => {
+      expect(parseMarmotDeletion(remove({ pubkey: PEER }), DM)).toMatchObject({
+        deleter: PEER,
+        anyAuthor: true,
+      });
+    });
+    it('is ignored with a wrong payload', () => {
       expect(parseMarmotDeletion(remove({ content: '{"v":1,"action":"ban"}' }), GROUP)).toBeNull();
       expect(parseMarmotDeletion(remove({ content: '{"v":1}' }), GROUP)).toBeNull();
       expect(parseMarmotDeletion(remove({ content: 'nope' }), GROUP)).toBeNull();

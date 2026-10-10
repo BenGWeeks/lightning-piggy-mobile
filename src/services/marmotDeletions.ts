@@ -50,9 +50,11 @@ const isRemoveAction = (content: string): boolean => {
 };
 
 /**
- * The deletion a rumor asks for, or null when it isn't one / isn't allowed to
- * be one. Admin removals (4891) are only honoured in multi-member groups from
- * one of the group's admins; a 1:1 chat has no moderation role.
+ * The deletion a rumor asks for, or null when it isn't one. White Noise's
+ * "Delete for everyone" is kind 5 from an ordinary member, but kind 4891 from
+ * an admin (every member of a 1:1 chat is one — the "An admin deleted this
+ * message" it shows). A 4891 from a listed admin may remove anyone's message;
+ * from anyone else it only counts as the author deleting their own.
  */
 export function parseMarmotDeletion(
   rumor: MarmotRumor,
@@ -64,10 +66,11 @@ export function parseMarmotDeletion(
     return targets.length > 0 ? { targets, deleter, anyAuthor: false } : null;
   }
   if (rumor.kind === MARMOT_ADMIN_REMOVE_KIND) {
-    if (group.isDm || !group.adminPubkeys.some((a) => a.toLowerCase() === deleter)) return null;
     if (!isRemoveAction(rumor.content)) return null;
     const target = eTargets(rumor.tags.filter((t) => t[0] === 'e').slice(0, 1))[0];
-    return target ? { targets: [target], deleter, anyAuthor: true } : null;
+    if (!target) return null;
+    const isAdmin = group.adminPubkeys.some((a) => a.toLowerCase() === deleter);
+    return { targets: [target], deleter, anyAuthor: isAdmin };
   }
   return null;
 }

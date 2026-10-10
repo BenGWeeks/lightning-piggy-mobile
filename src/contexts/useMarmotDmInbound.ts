@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import type React from 'react';
 
 import {
-  deleteMarmotMessagesBySender,
+  deleteMarmotMessages,
   deleteMarmotRowsOfKinds,
   getConversationMessages,
   upsertDmMessages,
@@ -45,14 +45,14 @@ export function useMarmotDmInbound(
     // always lands after the upsert of a row it targets.
     const ledger = new DeletionLedger();
     // Keyed `peer|deleter`: one store pass per pair, however many ids a replay carries.
-    let removals = new Map<string, { peer: string; sender: string; ids: Set<string> }>();
+    let removals = new Map<string, { peer: string; sender: string | null; ids: Set<string> }>();
     let chain: Promise<void> = Promise.resolve();
 
     const applyRemovals = async (batch: typeof removals) => {
       for (const { peer, sender, ids: idSet } of batch.values()) {
         const ids = [...idSet];
         try {
-          await deleteMarmotMessagesBySender(pubkey, ids, sender);
+          await deleteMarmotMessages(pubkey, peer, ids, sender);
           // The Messages list: drop the entry, then fall back to the thread's
           // newest remaining message so the preview never shows deleted text.
           const gone = new Set(ids);
@@ -121,8 +121,10 @@ export function useMarmotDmInbound(
         rows = rows.filter(
           (r) => !(deletion.targets.includes(r.eventId) && mayDelete(deletion, r.sender)),
         );
-        const key = `${peer}|${deletion.deleter}`;
-        const pending = removals.get(key) ?? { peer, sender: deletion.deleter, ids: new Set() };
+        // An admin removal may take either member's message; else only the deleter's own.
+        const sender = deletion.anyAuthor ? null : deletion.deleter;
+        const key = `${peer}|${sender}`;
+        const pending = removals.get(key) ?? { peer, sender, ids: new Set() };
         deletion.targets.forEach((id) => pending.ids.add(id));
         removals.set(key, pending);
         // A notification already showing the deleted text goes too (only a
