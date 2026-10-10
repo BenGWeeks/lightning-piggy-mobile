@@ -1758,7 +1758,8 @@
     "marmotPushUnavailable": "This phone couldn't get a push token from Apple/Google. On Android this needs Google Play services.",
     "marmotPushDeclined": "Your signer declined, so push isn't set up in every chat yet. Tap Finish setup to try again.",
     "marmotPushOn": "Push notifications are on",
-    "marmotPushOff": "Push notifications are off"
+    "marmotPushOff": "Push notifications are off",
+    "marmotPushRetirePending": "Push is off. Apple/Google couldn't be reached to delete this phone's push token — the app will retry next time it opens."
   },
   "sendAmountSection": {
     "fixedAmount": "Fixed amount",

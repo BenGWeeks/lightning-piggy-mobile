@@ -5,7 +5,7 @@ jest.mock('expo-task-manager', () => ({
 jest.mock('./notificationService', () => ({
   dismissNotificationsFor: jest.fn(async () => 0),
   fireMessageNotification: jest.fn(async () => 'id'),
-  lastMessageNotificationAt: jest.fn(() => 0),
+  lastMarmotNotificationAt: jest.fn(() => 0),
 }));
 
 import * as TaskManager from 'expo-task-manager';
@@ -69,8 +69,16 @@ describe('handleMarmotPushWake', () => {
     expect(d.notified).toBe(0);
   });
 
+  it('is covered when the session showed the message just BEFORE the push (usual order)', async () => {
+    const wait = jest.fn(async () => undefined);
+    const d = deps({ hasLiveSession: () => true, lastNotifiedAt: () => 9_000, wait });
+    expect(await handleMarmotPushWake(d)).toBe('covered');
+    expect(wait).not.toHaveBeenCalled();
+    expect(d.notified).toBe(0);
+  });
+
   it('falls back to the generic alert when the running session stayed quiet', async () => {
-    const d = deps({ hasLiveSession: () => true, lastNotifiedAt: () => 9_000 });
+    const d = deps({ hasLiveSession: () => true, lastNotifiedAt: () => 10_000 - 31_000 });
     expect(await handleMarmotPushWake(d)).toBe('notified');
     expect(d.notified).toBe(1);
   });
@@ -80,7 +88,7 @@ describe('handleMarmotPushWake', () => {
     expect(dismissNotificationsFor).toHaveBeenCalledWith({ genericMessages: true });
     // kind 'dm' with no thread id = a no-thread ping → the Messages list.
     expect(fireMessageNotification).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: 'dm', threadId: '__push__', data: {} }),
+      expect.objectContaining({ kind: 'dm', threadId: '__push__', data: { marmotPush: true } }),
     );
   });
 });

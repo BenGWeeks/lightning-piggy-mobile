@@ -116,6 +116,8 @@ export interface NotificationData {
   wrapId?: string;
   /** Account the notification belongs to, so clearing stays per account. */
   owner?: string;
+  /** The generic "New message" a Marmot push wake posted (Android). */
+  marmotPush?: boolean;
 }
 
 /** Typed payload every caller passes to `fireNotification`. Centralising
@@ -494,7 +496,10 @@ export type NotificationTarget =
    * Notifications without a recorded owner (older versions) are left alone. */
   | { owner: string }
   /** The one tray notification behind a history row (#1143). */
-  | { historyId: string };
+  | { historyId: string }
+  /** The generic alerts Marmot push wakes posted — superseded once the app
+   * shows the real Marmot message. */
+  | { marmotPushAlerts: true };
 
 /** Pure: does a delivered notification's `data` belong to `target`? */
 export function notificationMatchesTarget(
@@ -512,6 +517,7 @@ export function notificationMatchesTarget(
   if ('cacheCoord' in target) return data.kind === 'cache' && data.cacheCoord === target.cacheCoord;
   if ('owner' in target) return data.owner?.toLowerCase() === target.owner.toLowerCase();
   if ('historyId' in target) return data.historyId === target.historyId;
+  if ('marmotPushAlerts' in target) return data.marmotPush === true;
   return (data.kind === 'dm' || data.kind === 'group') && !data.conversationPubkey && !data.groupId;
 }
 
@@ -566,12 +572,16 @@ export function markHistoryReadFor(target: NotificationTarget): Promise<void> {
  */
 export async function dismissNotificationsFor(target: NotificationTarget): Promise<number> {
   try {
-    const matching = (request: Notifications.NotificationRequest) =>
-      request.identifier !== FOREGROUND_SERVICE_NOTIFICATION_ID &&
-      notificationMatchesTarget(
-        request.content.data as NotificationData & { kind?: string },
-        target,
-      );
+    const matching = (request: Notifications.NotificationRequest) => {
+      if (request.identifier === FOREGROUND_SERVICE_NOTIFICATION_ID) return false;
+      const data = request.content.data as (NotificationData & { kind?: string }) | null;
+      // A server-sent Marmot alert (iOS) carries no data: it is a generic
+      // "New message" — cleared with the generic pings / push alerts.
+      if (isRemotePushRequest(request) && !data?.kind) {
+        return 'genericMessages' in target || 'marmotPushAlerts' in target;
+      }
+      return notificationMatchesTarget(data, target);
+    };
     const [presented, scheduled] = await Promise.all([
       Notifications.getPresentedNotificationsAsync(),
       Notifications.getAllScheduledNotificationsAsync(),
@@ -594,15 +604,28 @@ export async function dismissNotificationsFor(target: NotificationTarget): Promi
   }
 }
 
+const isRemotePushRequest = (request: Notifications.NotificationRequest) =>
+  (request.trigger as { type?: string } | null)?.type === 'push';
+
 /** True for a notification that came from a push server, not from us. */
 export function isRemotePush(notification: Notifications.Notification): boolean {
-  return (notification.request.trigger as { type?: string } | null)?.type === 'push';
+  return isRemotePushRequest(notification.request);
 }
 
-// When a message notification with content last went out — lets a push
-// wake tell whether the running app already covered it.
-let lastMessageNotifiedAt = 0;
-export const lastMessageNotificationAt = (): number => lastMessageNotifiedAt;
+const isMarmotMessage = (data: NotificationData) =>
+  data.conversationProtocol === 'marmot' || !!data.groupId?.startsWith('marmot:');
+
+// When the app last showed a Marmot message itself — lets a push wake tell
+// whether the running app already covered it.
+let lastMarmotNotifiedAt = 0;
+export const lastMarmotNotificationAt = (): number => lastMarmotNotifiedAt;
+
+// iOS with Marmot push on: the server's APNs alert covers a backgrounded
+// app, so the app's own Marmot alerts would be a duplicate there.
+let marmotRemoteAlerts = false;
+export function setMarmotRemoteAlertsEnabled(on: boolean): void {
+  marmotRemoteAlerts = on;
+}
 
 /**
  * Fire a message (DM or group) notification, suppressed when the user is
@@ -619,6 +642,8 @@ export async function fireMessageNotification(opts: {
   owner?: string;
 }): Promise<string | null> {
   if (isThreadActivelyViewed(opts.threadId)) return null;
+  const marmot = isMarmotMessage(opts.data);
+  if (marmot && marmotRemoteAlerts && !appInForeground && Platform.OS === 'ios') return null;
   const id = await fireNotification({
     kind: opts.kind,
     title: opts.title,
@@ -626,8 +651,11 @@ export async function fireMessageNotification(opts: {
     data: opts.data,
     owner: opts.owner,
   });
-  // Sentinel threads (`__background__`, `__push__`) are generic pings.
-  if (id && !opts.threadId.startsWith('__')) lastMessageNotifiedAt = Date.now();
+  if (id && marmot) {
+    lastMarmotNotifiedAt = Date.now();
+    // The real message is on screen now: drop the generic push alert(s).
+    void dismissNotificationsFor({ marmotPushAlerts: true });
+  }
   return id;
 }
 
@@ -776,5 +804,6 @@ export function __resetForTests(): void {
   appInForeground = true;
   activeThreadId = null;
   activeCacheCoord = null;
-  lastMessageNotifiedAt = 0;
+  lastMarmotNotifiedAt = 0;
+  marmotRemoteAlerts = false;
 }

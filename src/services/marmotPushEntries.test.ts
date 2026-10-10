@@ -131,7 +131,7 @@ describe('our 447 / 449 entries', () => {
     expect(Object.values(state).map((s) => s.record)).toEqual([null]);
   });
 
-  it('seals the token afresh per record (unlinkable across groups)', () => {
+  it('seals the token afresh per record (the fingerprint stays the same)', () => {
     const a = buildOwnRecord(REG, me, 2, 1);
     const b = buildOwnRecord(REG, me, 2, 1);
     expect(a.encryptedToken).not.toBe(b.encryptedToken);

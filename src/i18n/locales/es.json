@@ -1758,7 +1758,8 @@
     "marmotPushUnavailable": "Este teléfono no pudo obtener un token push de Apple/Google. En Android se necesitan los servicios de Google Play.",
     "marmotPushDeclined": "Tu firmador lo rechazó, así que el push aún no está configurado en todos los chats. Toca Terminar configuración para volver a intentarlo.",
     "marmotPushOn": "Las notificaciones push están activadas",
-    "marmotPushOff": "Las notificaciones push están desactivadas"
+    "marmotPushOff": "Las notificaciones push están desactivadas",
+    "marmotPushRetirePending": "El push está desactivado. No se pudo contactar con Apple/Google para borrar el token push de este teléfono; la app lo reintentará la próxima vez que se abra."
   },
   "sendAmountSection": {
     "fixedAmount": "Cantidad fija",

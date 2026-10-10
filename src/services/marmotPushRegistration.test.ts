@@ -5,6 +5,7 @@ import { Platform } from 'react-native';
 import type { DeviceRegistration } from './marmotPushEntries';
 
 const mockSession = {
+  pubkey: 'active-account',
   pushRegistration: {
     setRegistration: jest.fn(),
     schedule: jest.fn(),
@@ -13,16 +14,19 @@ const mockSession = {
   },
 };
 let mockActive: typeof mockSession | null = mockSession;
+let mockSessionListener: ((s: unknown) => void) | null = null;
 
 jest.mock('./marmotSession', () => ({
   getMarmotSession: () => mockActive,
   subscribeMarmotSession: (l: (s: unknown) => void) => {
+    mockSessionListener = l;
     l(mockActive);
     return () => undefined;
   },
 }));
 jest.mock('./notificationService', () => ({
   requestNotificationPermission: jest.fn(async () => true),
+  setMarmotRemoteAlertsEnabled: jest.fn(),
 }));
 jest.mock('./marmotNetwork', () => ({
   createPushTransport: () => ({ inboxRelays: async () => ['wss://inbox.example'] }),
@@ -50,6 +54,7 @@ import {
   parseServerKey,
   retireMarmotPushForAccount,
   setMarmotPushServer,
+  startMarmotPushRegistration,
 } from './marmotPushRegistration';
 import { requestNotificationPermission } from './notificationService';
 
@@ -86,6 +91,7 @@ describe('server selection', () => {
       BUILT_IN_SERVERS.preview.pubkey,
     );
     expect(parseServerKey('npub1nope')).toBeNull();
+    expect(parseServerKey('ff'.repeat(32))).toBeNull(); // not a curve point
     expect(parseServerKey('abc')).toBeNull();
   });
 });
@@ -130,7 +136,7 @@ describe('enable / disable', () => {
 
   it('disabling retracts (null registration) and then deletes the native token', async () => {
     await enableMarmotPush();
-    await disableMarmotPush();
+    expect((await disableMarmotPush()).tokenDeleted).toBe(true);
     expect(lastRegistration()).toBeNull();
     expect(mockSession.pushRegistration.sync).toHaveBeenLastCalledWith({ interactive: true });
     expect(Notifications.unregisterForNotificationsAsync).toHaveBeenCalled();
@@ -152,15 +158,53 @@ describe('enable / disable', () => {
     await expect(setMarmotPushServer('npub1nope')).rejects.toThrow();
   });
 
-  it('removing an account deletes the token and re-registers a fresh one', async () => {
+  it('a failed token deletion is reported and retried at the next start', async () => {
     await enableMarmotPush();
+    (Notifications.unregisterForNotificationsAsync as jest.Mock).mockRejectedValueOnce(
+      new Error('offline'),
+    );
+    expect((await disableMarmotPush()).tokenDeleted).toBe(false);
+    expect(await AsyncStorage.getItem('marmot_push_retire_pending_v1')).toBe('1');
+    (Notifications.unregisterForNotificationsAsync as jest.Mock).mockClear();
+    const stop = startMarmotPushRegistration();
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(Notifications.unregisterForNotificationsAsync).toHaveBeenCalled();
+    expect(await AsyncStorage.getItem('marmot_push_retire_pending_v1')).toBeNull();
+    stop();
+  });
+
+  it('removing ANOTHER account deletes the token and re-signs this one interactively', async () => {
+    await enableMarmotPush();
+    mockSession.pushRegistration.sync.mockClear();
     (Notifications.getDevicePushTokenAsync as jest.Mock).mockResolvedValueOnce({
       type: 'android',
       data: 'fcm-token-2',
     });
-    await retireMarmotPushForAccount();
+    await retireMarmotPushForAccount('removed-account');
     expect(Notifications.unregisterForNotificationsAsync).toHaveBeenCalled();
     expect(Notifications.unregisterTaskAsync).not.toHaveBeenCalled();
     expect(lastRegistration()?.token).toEqual(new TextEncoder().encode('fcm-token-2'));
+    expect(mockSession.pushRegistration.sync).toHaveBeenCalledWith({ interactive: true });
+  });
+
+  it('removing the ACTIVE account waits for the next account before re-registering', async () => {
+    const stop = startMarmotPushRegistration();
+    await enableMarmotPush();
+    (Notifications.getDevicePushTokenAsync as jest.Mock).mockClear();
+    await retireMarmotPushForAccount('active-account');
+    expect(Notifications.unregisterForNotificationsAsync).toHaveBeenCalled();
+    // No other account yet: no new token is requested.
+    expect(Notifications.getDevicePushTokenAsync).not.toHaveBeenCalled();
+    const next = {
+      ...mockSession,
+      pubkey: 'next-account',
+      pushRegistration: { ...mockSession.pushRegistration, sync: jest.fn(async () => null) },
+    };
+    mockSessionListener?.(next);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(Notifications.getDevicePushTokenAsync).toHaveBeenCalled();
+    expect(next.pushRegistration.sync).toHaveBeenCalledWith({ interactive: true });
+    stop();
   });
 });

@@ -271,6 +271,60 @@ describe('MarmotPushRegistrar', () => {
     expect((await fresh.sync({ interactive: false })).removed).toBe(1);
   });
 
+  it('a pass overtaken mid-signature (session stopped) never publishes', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const sent: number[] = [];
+    const registrar = new MarmotPushRegistrar({
+      pubkey: ME,
+      silentSigner: true,
+      backend: createMemoryMarmotBackend(),
+      ready: Promise.resolve(),
+      groups: () => [group('aa'.repeat(16)), group('bb'.repeat(16))],
+      sign: async (tpl) => {
+        await gate;
+        return finalizeEvent({ ...tpl }, sk) as unknown as Awaited<ReturnType<Sign>>;
+      },
+      send: async (_id, ev) => (sent.push(ev.kind), true),
+    });
+    registrar.setRegistration(reg('token-1'));
+    const pass = registrar.sync({ interactive: true });
+    await new Promise((r) => setTimeout(r, 0));
+    const stopped = registrar.stop();
+    release();
+    await pass;
+    await stopped;
+    expect(sent).toEqual([]);
+  });
+
+  it('a registration change mid-pass abandons the stale pass', async () => {
+    const t = setup();
+    t.registrar.setRegistration(reg('token-1'));
+    const first = t.registrar.sync({ interactive: false });
+    t.registrar.setRegistration(reg('token-2'));
+    await first;
+    await t.registrar.sync({ interactive: false });
+    const live = await memberView(t.sent, group('aa'.repeat(16)));
+    expect(Object.values(live).map((v) => v.record?.fingerprint)).toEqual([
+      reg('token-2').fingerprint,
+    ]);
+  });
+
+  it('re-enabling after a removal outranks our own tombstone, even if the clock went back', async () => {
+    const g = group('aa'.repeat(16));
+    const t = setup({ groups: [g] });
+    t.registrar.setRegistration(reg('token-1'));
+    await t.registrar.sync({ interactive: false });
+    t.registrar.setRegistration(null);
+    await t.registrar.sync({ interactive: true });
+    t.tick(-500); // clock rollback
+    t.registrar.setRegistration(reg('token-1'));
+    await t.registrar.sync({ interactive: false });
+    expect(t.sent.map((x) => x.kind)).toEqual([447, 449, 447]);
+    const live = Object.values(await memberView(t.sent, g)).filter((v) => v.record);
+    expect(live).toHaveLength(1);
+  });
+
   it('stop() makes later passes no-ops', async () => {
     const t = setup();
     t.registrar.setRegistration(reg('token-1'));

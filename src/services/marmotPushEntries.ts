@@ -48,8 +48,10 @@ export interface SignedProof {
 type ProofTemplate = ReturnType<typeof ownerProofEvent>;
 export type Sign = (template: ProofTemplate) => Promise<SignedProof>;
 
-/** Our unsigned token record for one group: the token is sealed afresh per
- * group, so the same device's records can't be linked across groups. */
+/** Our unsigned token record for one group. The token is sealed afresh per
+ * group (no shared ciphertext), but the spec-required fingerprint is the
+ * same everywhere, so someone in two of our groups can tell the records
+ * belong to one device. */
 export function buildOwnRecord(
   reg: DeviceRegistration,
   member: string,

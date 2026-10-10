@@ -1730,7 +1730,8 @@
     "marmotPushUnavailable": "Телефон не зміг отримати push-токен від Apple/Google. На Android для цього потрібні сервіси Google Play.",
     "marmotPushDeclined": "Підписувач відхилив запит, тож push ще налаштовано не в усіх чатах. Натисніть «Завершити налаштування», щоб спробувати знову.",
     "marmotPushOn": "Push-сповіщення увімкнено",
-    "marmotPushOff": "Push-сповіщення вимкнено"
+    "marmotPushOff": "Push-сповіщення вимкнено",
+    "marmotPushRetirePending": "Push вимкнено. Не вдалося зв'язатися з Apple/Google, щоб видалити push-токен цього телефона — застосунок спробує знову під час наступного запуску."
   },
   "sendAmountSection": {
     "fixedAmount": "Фіксована сума",

@@ -70,7 +70,7 @@ export async function wipeDmStoresForAccount(pubkey: string): Promise<void> {
     await deleteMarmotStateForOwner(pubkey);
     // Its groups still hold this device's push token (the signer is gone,
     // so no signed removals): delete the token at Apple/Google instead.
-    await retireMarmotPushForAccount();
+    await retireMarmotPushForAccount(pubkey);
   } catch (e) {
     if (__DEV__) console.warn('[Marmot] per-owner state wipe failed:', e);
   }

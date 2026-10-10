@@ -46,7 +46,8 @@ import {
   markHistoryReadFor,
   markHistoryEntryRead,
   isRemotePush,
-  lastMessageNotificationAt,
+  lastMarmotNotificationAt,
+  setMarmotRemoteAlertsEnabled,
 } from './notificationService';
 import { setActivePubkeyForWalletStorage } from './walletStorageService';
 
@@ -572,17 +573,23 @@ describe('Marmot push (MIP-05) receive side', () => {
     });
   });
 
-  it('records when a real message notification went out — not generic pings', async () => {
+  it('records when a Marmot message was shown — not NIP-17 ones or generic pings', async () => {
     setNotificationsForeground(false);
-    expect(lastMessageNotificationAt()).toBe(0);
     await fireMessageNotification({
       kind: 'dm',
       threadId: '__push__',
       title: 'New message',
       body: 'x',
-      data: {},
+      data: { marmotPush: true },
     });
-    expect(lastMessageNotificationAt()).toBe(0);
+    await fireMessageNotification({
+      kind: 'dm',
+      threadId: 'peer',
+      title: 'Alice',
+      body: 'nip17',
+      data: { conversationPubkey: 'peer', conversationProtocol: 'nip17' },
+    });
+    expect(lastMarmotNotificationAt()).toBe(0);
     const before = Date.now();
     await fireMessageNotification({
       kind: 'group',
@@ -591,6 +598,67 @@ describe('Marmot push (MIP-05) receive side', () => {
       body: 'hi',
       data: { groupId: 'marmot:abc' },
     });
-    expect(lastMessageNotificationAt()).toBeGreaterThanOrEqual(before);
+    expect(lastMarmotNotificationAt()).toBeGreaterThanOrEqual(before);
+  });
+
+  it('the real Marmot message clears the generic push alert', async () => {
+    setNotificationsForeground(false);
+    mockGetPresented.mockResolvedValueOnce([
+      {
+        request: {
+          identifier: 'push-alert',
+          content: { data: { kind: 'dm', marmotPush: true } },
+          trigger: { type: 'timeInterval' },
+        },
+      },
+      {
+        request: {
+          identifier: 'other-dm',
+          content: { data: { kind: 'dm', conversationPubkey: 'x' } },
+          trigger: { type: 'timeInterval' },
+        },
+      },
+    ]);
+    await fireMessageNotification({
+      kind: 'dm',
+      threadId: 'marmot-peer',
+      title: 'Bob',
+      body: 'hi',
+      data: { conversationPubkey: 'peer', conversationProtocol: 'marmot' },
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(mockDismiss).toHaveBeenCalledWith('push-alert');
+    expect(mockDismiss).not.toHaveBeenCalledWith('other-dm');
+  });
+
+  it('opening Messages clears a data-less server alert (iOS)', async () => {
+    mockDismiss.mockClear();
+    mockGetPresented.mockResolvedValueOnce([
+      { request: { identifier: 'apns-alert', content: { data: {} }, trigger: { type: 'push' } } },
+    ]);
+    expect(await dismissNotificationsFor({ genericMessages: true })).toBe(1);
+    expect(mockDismiss).toHaveBeenCalledWith('apns-alert');
+  });
+
+  it('on iOS with push on, a backgrounded app leaves Marmot alerts to the server', async () => {
+    const { Platform } = jest.requireActual('react-native');
+    const original = Platform.OS;
+    Object.defineProperty(Platform, 'OS', { configurable: true, get: () => 'ios' });
+    try {
+      setMarmotRemoteAlertsEnabled(true);
+      setNotificationsForeground(false);
+      const marmot = {
+        kind: 'dm' as const,
+        threadId: 't',
+        title: 'Bob',
+        body: 'hi',
+        data: { conversationPubkey: 'p', conversationProtocol: 'marmot' as const },
+      };
+      expect(await fireMessageNotification(marmot)).toBeNull();
+      setNotificationsForeground(true);
+      expect(await fireMessageNotification(marmot)).not.toBeNull();
+    } finally {
+      Object.defineProperty(Platform, 'OS', { configurable: true, get: () => original });
+    }
   });
 });

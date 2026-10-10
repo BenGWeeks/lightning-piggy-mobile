@@ -6,8 +6,10 @@
 // message to this task — even when the app was swiped away — and we post
 // the same generic alert ourselves, unless the app already said it:
 //   - foreground: the live Marmot session shows the real message → nothing;
-//   - background but still running: give the session a moment to receive
-//     and notify with details; post the generic alert only if it didn't;
+//   - background but still running: if the session showed a Marmot message
+//     just before (the usual order) or within a short grace period after,
+//     that covers it; otherwise post the generic alert — and the session
+//     clears it if the real message turns up later;
 //   - not running (headless): post the generic alert straight away.
 // The generic alert is a "no-thread" message ping: tapping it opens the
 // Messages list, and opening that list clears it (#1142).
@@ -21,12 +23,15 @@ import { AppState } from 'react-native';
 import {
   dismissNotificationsFor,
   fireMessageNotification,
-  lastMessageNotificationAt,
+  lastMarmotNotificationAt,
 } from './notificationService';
 
 export const MARMOT_PUSH_WAKE_TASK = 'lp-marmot-push-wake';
 /** How long a running session gets to post the detailed notification. */
 const LIVE_SESSION_GRACE_MS = 6_000;
+/** The sender publishes the message BEFORE the trigger, so a running app
+ * has often shown it already when the push lands — look back this far. */
+const COVERED_LOOKBACK_MS = 30_000;
 
 // Set by marmotPushRegistration while the app has a Marmot session (kept
 // as a flag so this module — loaded at every JS start, headless included —
@@ -57,14 +62,15 @@ export async function postGenericPushAlert(): Promise<void> {
     threadId: '__push__',
     title: 'New message',
     body: 'Open Lightning Piggy to read',
-    data: {},
+    // Marked so the real Marmot notification can replace it.
+    data: { marmotPush: true },
   });
 }
 
 const defaultDeps: WakeDeps = {
   isForeground: () => AppState.currentState === 'active',
   hasLiveSession: () => liveSession,
-  lastNotifiedAt: lastMessageNotificationAt,
+  lastNotifiedAt: lastMarmotNotificationAt,
   wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   now: Date.now,
   notify: postGenericPushAlert,
@@ -74,8 +80,11 @@ export async function handleMarmotPushWake(deps: WakeDeps = defaultDeps): Promis
   if (deps.isForeground()) return 'foreground';
   const arrived = deps.now();
   if (deps.hasLiveSession()) {
+    if (deps.lastNotifiedAt() >= arrived - COVERED_LOOKBACK_MS) return 'covered';
     await deps.wait(LIVE_SESSION_GRACE_MS);
-    if (deps.isForeground() || deps.lastNotifiedAt() >= arrived) return 'covered';
+    if (deps.isForeground() || deps.lastNotifiedAt() >= arrived - COVERED_LOOKBACK_MS) {
+      return 'covered';
+    }
   }
   await deps.notify();
   return 'notified';

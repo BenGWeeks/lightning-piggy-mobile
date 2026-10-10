@@ -9,6 +9,7 @@
 // which kills every copy the group members hold.
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { secp256k1 } from '@noble/curves/secp256k1.js';
 import * as Application from 'expo-application';
 import * as Notifications from 'expo-notifications';
 import { nip19 } from 'nostr-tools';
@@ -19,12 +20,14 @@ import type { SyncResult } from './marmotPushRegistrar';
 import { deviceTokenBytes, tokenFingerprint, type PushPlatform } from './marmotPushToken';
 import { createPushTransport } from './marmotNetwork';
 import { getMarmotSession, subscribeMarmotSession, type MarmotSession } from './marmotSession';
-import { requestNotificationPermission } from './notificationService';
+import { requestNotificationPermission, setMarmotRemoteAlertsEnabled } from './notificationService';
 import { MARMOT_PUSH_WAKE_TASK, setLiveMarmotSession } from './marmotPushWake';
 
 const ENABLED_KEY = 'marmot_push_enabled_v1';
 /** Custom server: JSON `{ pubkey, relayHint? }`; absent = the built-in one. */
 const SERVER_KEY = 'marmot_push_server_v1';
+/** Set while a token deletion at Apple/Google still has to be retried. */
+const RETIRE_PENDING_KEY = 'marmot_push_retire_pending_v1';
 const TOKEN_TIMEOUT_MS = 20_000;
 const RELAY_LOOKUP_TIMEOUT_MS = 8_000;
 
@@ -72,7 +75,13 @@ export function parseServerKey(input: string): string | null {
       return null;
     }
   }
-  return /^[0-9a-f]{64}$/.test(hex) ? hex : null;
+  if (!/^[0-9a-f]{64}$/.test(hex)) return null;
+  try {
+    secp256k1.Point.fromHex(`02${hex}`); // must be a real curve point
+    return hex;
+  } catch {
+    return null;
+  }
 }
 
 export interface MarmotPushSettings {
@@ -103,6 +112,9 @@ let settings: MarmotPushSettings = { enabled: false, customServer: null };
 // session must not take "not read yet" for "push off" (it would retract).
 let registration: DeviceRegistration | null | undefined = undefined;
 let started = false;
+// After an account removal deleted the token: the session to skip (the
+// removed account's, being torn down) while waiting for the next one.
+let awaitingSession: { stale: MarmotSession | null } | null = null;
 
 const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T> =>
   Promise.race([
@@ -129,10 +141,20 @@ function toRegistration(platform: PushPlatform, raw: string, server: PushServer)
 
 const currentServer = () => settings.customServer ?? builtInServer();
 
+/** iOS: while push is on, the server's alert speaks for a backgrounded app. */
+const updateRemoteAlerts = () =>
+  setMarmotRemoteAlertsEnabled(Platform.OS === 'ios' && settings.enabled && !!registration);
+
 /** Hand the registration to `session` and sync it in the background. */
 function applyTo(session: MarmotSession | null): void {
   setLiveMarmotSession(session !== null);
-  if (!session || registration === undefined) return;
+  if (!session) return;
+  if (awaitingSession && session !== awaitingSession.stale) {
+    awaitingSession = null;
+    void refreshAfterRetirement(session);
+    return;
+  }
+  if (registration === undefined) return;
   session.pushRegistration.setRegistration(registration);
   session.pushRegistration.schedule();
 }
@@ -167,6 +189,10 @@ export function startMarmotPushRegistration(): () => void {
   });
   void (async () => {
     settings = await loadMarmotPushSettings();
+    // A deletion that failed last time (offline): finish it first.
+    if (await AsyncStorage.getItem(RETIRE_PENDING_KEY).catch(() => null)) {
+      await retireDeviceToken();
+    }
     if (settings.enabled) {
       try {
         registration = await readRegistration(currentServer());
@@ -181,6 +207,7 @@ export function startMarmotPushRegistration(): () => void {
       // account's session wasn't running).
       registration = null;
     }
+    updateRemoteAlerts();
     applyTo(getMarmotSession());
   })();
   return () => {
@@ -209,18 +236,25 @@ export async function enableMarmotPush(): Promise<EnableOutcome> {
   settings.enabled = true;
   await AsyncStorage.setItem(ENABLED_KEY, '1');
   await registerWakeTask();
+  updateRemoteAlerts();
   return { status: 'enabled', sync: await syncMarmotPushNow() };
+}
+
+export interface DisableOutcome {
+  sync: SyncResult | null;
+  /** False when Apple/Google couldn't be reached — retried at next start. */
+  tokenDeleted: boolean;
 }
 
 /** Turn push off (user action): retract from every group, then delete the
  * token at Apple/Google so copies the members already hold stop working. */
-export async function disableMarmotPush(): Promise<SyncResult | null> {
+export async function disableMarmotPush(): Promise<DisableOutcome> {
   settings.enabled = false;
   await AsyncStorage.setItem(ENABLED_KEY, '0');
   registration = null;
-  const result = await syncMarmotPushNow().catch(() => null);
-  await retireDeviceToken();
-  return result;
+  updateRemoteAlerts();
+  const sync = await syncMarmotPushNow().catch(() => null);
+  return { sync, tokenDeleted: await retireDeviceToken() };
 }
 
 /** Use `server` (or the built-in one, for null) — re-registers if on. */
@@ -247,28 +281,53 @@ export async function pendingMarmotPushGroups(): Promise<number> {
 }
 
 /**
- * An account is being removed from this device: its signer is already gone,
- * so instead of signed removals, delete the token at Apple/Google (every
- * copy in that account's groups goes dead) and register a fresh one for
- * whoever is still signed in.
+ * An account is being removed from this device. Its signer is already gone,
+ * so it can't sign removals: delete the token at Apple/Google instead (on
+ * Android every copy in that account's groups goes dead; iOS may hand the
+ * same APNs token back later, so there revocation is best-effort — MIP-05
+ * "Best-effort revocation"). A fresh token is only fetched once another
+ * account's session is running, and its groups are re-signed then as part
+ * of this user action (a remote signer may prompt).
  */
-export async function retireMarmotPushForAccount(): Promise<void> {
+export async function retireMarmotPushForAccount(pubkey: string): Promise<void> {
   if (!settings.enabled) return;
+  registration = undefined;
+  updateRemoteAlerts();
   await retireDeviceToken();
+  const current = getMarmotSession();
+  if (current && current.pubkey !== pubkey) {
+    await refreshAfterRetirement(current);
+    return;
+  }
+  awaitingSession = { stale: current };
+}
+
+async function refreshAfterRetirement(session: MarmotSession): Promise<void> {
+  if (!settings.enabled) return;
   try {
     registration = await readRegistration(currentServer());
   } catch {
-    // No fresh token yet: unknown, not "off" — the next start retries.
-    registration = undefined;
+    return; // unknown, not "off" — the next start retries
   }
-  applyTo(getMarmotSession());
+  updateRemoteAlerts();
+  session.pushRegistration.setRegistration(registration);
+  void session.pushRegistration.sync({ interactive: true }).catch(() => undefined);
 }
 
-async function retireDeviceToken(): Promise<void> {
-  await Notifications.unregisterForNotificationsAsync().catch(() => undefined);
+/** Delete the token at Apple/Google; on failure remember to retry. */
+async function retireDeviceToken(): Promise<boolean> {
+  let deleted = true;
+  try {
+    await Notifications.unregisterForNotificationsAsync();
+    await AsyncStorage.removeItem(RETIRE_PENDING_KEY);
+  } catch {
+    deleted = false;
+    await AsyncStorage.setItem(RETIRE_PENDING_KEY, '1').catch(() => undefined);
+  }
   if (Platform.OS === 'android' && !settings.enabled) {
     await Notifications.unregisterTaskAsync(MARMOT_PUSH_WAKE_TASK).catch(() => undefined);
   }
+  return deleted;
 }
 
 /** Android delivers our (data-only) push to this task; iOS shows the

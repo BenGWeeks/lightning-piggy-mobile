@@ -17,7 +17,7 @@
 // A token rotation on the same server re-publishes with a newer owner_ts,
 // which supersedes the old record by the spec's ordering rule — no 449.
 
-import type { PushRecord } from './marmotPush';
+import type { PushRecord, Removal } from './marmotPush';
 import {
   buildOwnRecord,
   removalFor,
@@ -30,6 +30,10 @@ import {
 import type { MarmotKvBackend } from './marmotStore';
 
 const NAMESPACE = 'pushShare';
+// Per group: the highest owner_ts we ever signed (447 or 449). Kept even
+// after a removal, so a later entry always outranks our own tombstone —
+// whatever the clock does.
+const TS_NAMESPACE = 'pushShareTs';
 // Batches group churn (joins, loads, commits) into one pass, off the
 // latency-sensitive startup path.
 const SCHEDULE_DELAY_MS = 3_000;
@@ -114,6 +118,9 @@ export function planGroup(
   return { type: 'publish', ...(replaces ? { replaces } : {}) };
 }
 
+/** The pass was overtaken (session stopped / registration changed). */
+class Superseded extends Error {}
+
 class SignerRefused extends Error {
   constructor(readonly cause: unknown) {
     super('push: signer did not sign the owner proof');
@@ -124,6 +131,8 @@ export class MarmotPushRegistrar {
   // undefined = not known yet (token still being read): passes do nothing,
   // so a slow start can never be mistaken for "push turned off".
   private registration: DeviceRegistration | null | undefined = undefined;
+  /** Bumped on every change, so an in-flight pass can tell it's stale. */
+  private generation = 0;
   private chain: Promise<unknown> = Promise.resolve();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
@@ -132,7 +141,9 @@ export class MarmotPushRegistrar {
 
   /** The token to announce, or null to retract it everywhere. */
   setRegistration(reg: DeviceRegistration | null): void {
+    if (reg === this.registration) return;
     this.registration = reg;
+    this.generation++;
   }
 
   /** Background pass (debounced): never prompts a remote signer. */
@@ -187,13 +198,19 @@ export class MarmotPushRegistrar {
     const result: SyncResult = { published: 0, removed: 0, pending: 0, declined: false };
     await this.deps.ready;
     const reg = this.registration;
+    const gen = this.generation;
     if (this.stopped || reg === undefined) return result;
+    // Off and nothing ever published: nothing to look at.
+    if (reg === null && (await this.deps.backend.keys(NAMESPACE)).length === 0) return result;
+    const live = () => {
+      if (this.stopped || gen !== this.generation) throw new Superseded();
+    };
     const groups = this.deps
       .groups()
       .filter((g) => !opts.groupIdHex || g.idHex === opts.groupIdHex);
     const mayPrompt = this.deps.silentSigner || opts.interactive;
     for (const group of groups) {
-      if (this.stopped) break;
+      if (this.stopped || gen !== this.generation) break;
       const shared = await this.load(group.idHex);
       const action = planGroup(shared, reg, group);
       if (action.type === 'none') continue;
@@ -214,13 +231,14 @@ export class MarmotPushRegistrar {
       try {
         const done =
           action.type === 'remove'
-            ? await this.retract(group, action.record)
-            : await this.publish(group, reg as DeviceRegistration, action.replaces, shared);
+            ? await this.retract(group, action.record, live)
+            : await this.publish(group, reg as DeviceRegistration, action.replaces, shared, live);
         if (!done) result.pending++;
         else if (action.type === 'remove') result.removed++;
         else result.published++;
       } catch (e) {
         result.pending++;
+        if (e instanceof Superseded) break;
         // A remote signer refusing (or timing out) = the user said no: stop
         // asking for the rest of this pass.
         if (e instanceof SignerRefused && !this.deps.silentSigner) result.declined = true;
@@ -237,17 +255,34 @@ export class MarmotPushRegistrar {
       throw new SignerRefused(e);
     });
 
-  private nextTs(after?: PushRecord): number {
+  /** A stamp above anything we signed in this group (and above `after`). */
+  private async nextTs(groupIdHex: string, after?: PushRecord): Promise<number> {
     const now = (this.deps.now ?? Date.now)();
-    return Math.max(now, (after?.ownerTs ?? 0) + 1);
+    const highWater = Number((await this.deps.backend.get(TS_NAMESPACE, groupIdHex)) ?? 0) || 0;
+    return Math.max(now, highWater + 1, (after?.ownerTs ?? 0) + 1);
   }
 
-  private async retract(group: RegistrarGroup, record: PushRecord): Promise<boolean> {
-    const removal = await signEntry(
-      removalFor(record, this.nextTs(record)),
-      group.idHex,
-      this.sign,
-    );
+  /** Sign an entry — only while this pass is still current — and record
+   * its stamp as the group's high-water mark before it can be published. */
+  private async signLive<T extends Omit<PushRecord, 'ownerSig'> | Omit<Removal, 'ownerSig'>>(
+    groupIdHex: string,
+    entry: T,
+    live: () => void,
+  ): Promise<T & { ownerSig: string }> {
+    live();
+    const signed = await signEntry(entry, groupIdHex, this.sign);
+    live();
+    await this.deps.backend.set(TS_NAMESPACE, groupIdHex, String(entry.ownerTs));
+    return signed;
+  }
+
+  private async retract(
+    group: RegistrarGroup,
+    record: PushRecord,
+    live: () => void,
+  ): Promise<boolean> {
+    const ts = await this.nextTs(group.idHex, record);
+    const removal = await this.signLive(group.idHex, removalFor(record, ts), live);
     if (!(await this.deps.send(group.idHex, tokenRemovalEvent(removal)))) return false;
     await this.deps.backend.remove(NAMESPACE, group.idHex);
     return true;
@@ -258,11 +293,13 @@ export class MarmotPushRegistrar {
     reg: DeviceRegistration,
     replaces: PushRecord | undefined,
     shared: Shared | null,
+    live: () => void,
   ): Promise<boolean> {
-    if (replaces && !(await this.retract(group, replaces))) return false;
+    if (replaces && !(await this.retract(group, replaces, live))) return false;
     const previous = shared?.record.leaf === group.ownLeaf ? shared.record : undefined;
-    const unsigned = buildOwnRecord(reg, this.deps.pubkey, group.ownLeaf, this.nextTs(previous));
-    const record = await signEntry(unsigned, group.idHex, this.sign);
+    const ts = await this.nextTs(group.idHex, previous);
+    const unsigned = buildOwnRecord(reg, this.deps.pubkey, group.ownLeaf, ts);
+    const record = await this.signLive(group.idHex, unsigned, live);
     if (!(await this.deps.send(group.idHex, tokenUpdateEvent(record)))) return false;
     await this.save(group.idHex, { record, leaves: [...group.leaves] });
     return true;
@@ -271,9 +308,11 @@ export class MarmotPushRegistrar {
   /** Drop what we stored for groups we're no longer in. */
   private async forgetDepartedGroups(groups: RegistrarGroup[] | null): Promise<void> {
     if (!groups || this.stopped) return;
-    const live = new Set(groups.map((g) => g.idHex));
-    for (const id of await this.deps.backend.keys(NAMESPACE)) {
-      if (!live.has(id)) await this.deps.backend.remove(NAMESPACE, id);
+    const current = new Set(groups.map((g) => g.idHex));
+    for (const ns of [NAMESPACE, TS_NAMESPACE]) {
+      for (const id of await this.deps.backend.keys(ns)) {
+        if (!current.has(id)) await this.deps.backend.remove(ns, id);
+      }
     }
   }
 

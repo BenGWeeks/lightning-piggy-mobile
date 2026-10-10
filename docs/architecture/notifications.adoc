@@ -246,7 +246,9 @@ in both servers' 10050) so a lookup can never change the signed records.
    mode). `marmotPushWake.ts` (defined from `index.ts`, so it also runs
    headless after the app was swiped away) posts the generic "New message"
    ping itself — unless the app is in the foreground, or a running session
-   posted the detailed notification within 6 s.
+   showed a Marmot message in the 30 s before the push (the sender publishes
+   the message first) or the 6 s after it. If the real message turns up
+   later, showing it clears the generic ping.
 . Tapping the generic alert opens the Messages list (no thread id), and
   focusing that list clears it (#1142). A burst of pushes replaces one
   generic alert instead of stacking.
@@ -254,12 +256,18 @@ in both servers' 10050) so a lookup can never change the signed records.
 *No double alerts.* A remote push that arrives while the app is open is
 hidden by the `setNotificationHandler` in `notificationService.ts`
 (`isRemotePush`) — the live session already notifies with the real message.
+On iOS with push on, the reverse holds while the app is backgrounded: the
+server's alert covers it, so the app's own Marmot alerts are skipped
+(`setMarmotRemoteAlertsEnabled`). Opening the Messages list also clears the
+data-less server alerts.
 
 *Turning it off* sends a signed kind-449 removal into each group, then deletes
-the token at Apple/Google (`unregisterForNotificationsAsync`), so copies the
-members already hold stop working. *Removing an account* can't sign removals
-(its key is gone), so it deletes the token instead and registers a fresh one
-for any account still signed in.
+the token at Apple/Google (`unregisterForNotificationsAsync`; retried at the
+next start if offline), so copies the members already hold stop working.
+*Removing an account* can't sign removals (its key is gone), so it deletes
+the token instead and registers a fresh one once another account's session
+runs. iOS may return the same APNs token after re-registering, so revocation
+there is best-effort.
 
 *Privacy* (shown next to the switch): Apple/Google learn that the phone got a
 notification and when, not what it says. Our server learns nothing about who

@@ -107,8 +107,13 @@ const MarmotPushSection: React.FC = () => {
         if (on) Toast.show({ type: 'success', text1: t('securityScreen.marmotPushOn') });
       } else {
         setEnabled(false);
-        reportSync(await disableMarmotPush());
-        Toast.show({ type: 'success', text1: t('securityScreen.marmotPushOff') });
+        const off = await disableMarmotPush();
+        reportSync(off.sync);
+        Toast.show(
+          off.tokenDeleted
+            ? { type: 'success', text1: t('securityScreen.marmotPushOff') }
+            : { type: 'info', text1: t('securityScreen.marmotPushRetirePending') },
+        );
       }
     } finally {
       setBusy(false);
