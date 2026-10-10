@@ -1177,7 +1177,7 @@
     "accuracyOsm": "± {{meters}} m · OpenStreetMap",
     "unsupportedA11y": "Tipo de mensaje no compatible, kind {{kind}}",
     "unsupportedText": "Tipo de mensaje no compatible (kind {{kind}})",
-    "marmotInvite": "Te envió una invitación a un chat de Marmot: se abre como chat de Marmot en tus Mensajes.",
+    "marmotInvite": "Te envió una invitación a un chat de Marmot: se abre como chat de Marmot en tus Mensajes. Si no se abre aquí, la invitación puede ser para otro teléfono o una clave de invitación antigua. Pídele que te invite de nuevo.",
     "marmotMessage": "Evento de grupo de Marmot: abre el chat de Marmot para leerlo.",
     "marmotInvitePreview": "Invitación a chat de Marmot",
     "marmotMessagePreview": "Mensaje de Marmot",
@@ -2420,7 +2420,8 @@
   },
   "marmotSend": {
     "noKeyPackage": "No encontramos un paquete de claves de Marmot en los relays de esta persona. Puede que tenga que abrir su app de Marmot para que publique uno; mientras tanto, usa NIP-17.",
-    "outdatedKeyPackage": "El paquete de claves de Marmot de esta persona ha caducado o usa una versión antigua de Marmot con la que Lightning Piggy aún no puede comunicarse. Debería arreglarse si abre o actualiza su app de Marmot; por ahora, usa NIP-17."
+    "outdatedKeyPackage": "El paquete de claves de Marmot de esta persona ha caducado o usa una versión antigua de Marmot con la que Lightning Piggy aún no puede comunicarse. Debería arreglarse si abre o actualiza su app de Marmot; por ahora, usa NIP-17.",
+    "inviteNotDelivered": "No pudimos enviar la invitación: ningún relay la aceptó. Revisa tu conexión e inténtalo de nuevo."
   },
   "signOutPrompt": {
     "walletsRemoved": "También se eliminarán de este teléfono las carteras conectadas a esta cuenta, incluidas las frases de recuperación guardadas aquí. Guarda sus frases de recuperación y datos de conexión por separado antes de cerrar sesión.",
@@ -2473,5 +2474,17 @@
     "keptInAmberBody": "Lightning Piggy nunca ve la clave secreta de esta cuenta. Haz una copia desde Amber. Las frases de recuperación de carteras guardadas en Lightning Piggy necesitan una copia aparte antes de cerrar sesión.",
     "keptInSigner": "Tu clave está guardada en tu app firmante",
     "keptInSignerBody": "Lightning Piggy nunca ve la clave secreta de esta cuenta. Haz una copia desde tu app de firma. Las frases de recuperación de carteras guardadas en Lightning Piggy necesitan una copia aparte antes de cerrar sesión."
+  },
+  "marmotInvitationKeys": {
+    "removingTitle": "Quitando las claves de invitación…",
+    "removingBody": "Aprueba las solicitudes en tu firmador para terminar de cerrar sesión. Puede tardar un minuto.",
+    "notRemovedTitle": "No se quitaron las claves de invitación",
+    "notRemovedBody": "No pudimos quitar de los relés las claves de invitación de Marmot de esta cuenta, así que es posible que sigan llegando invitaciones de Marmot a este teléfono. Lo volveremos a intentar automáticamente la próxima vez que esta cuenta inicie sesión aquí."
+  },
+  "marmotInvite": {
+    "progressTitle": "Invitando dispositivos… {{done}} de {{total}}",
+    "progressBody": "Aprueba cada solicitud en tu firmador: cada teléfono o app que usa esta persona necesita su propia invitación.",
+    "notReachedTitle": "Invitación aún no entregada",
+    "notReachedBody": "Todavía no pudimos entregar la invitación a {{names}}. Lightning Piggy lo seguirá intentando automáticamente."
   }
 }

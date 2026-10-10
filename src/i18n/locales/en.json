@@ -1177,7 +1177,7 @@
     "accuracyOsm": "± {{meters}} m · OpenStreetMap",
     "unsupportedA11y": "Unsupported message type, kind {{kind}}",
     "unsupportedText": "Unsupported message type (kind {{kind}})",
-    "marmotInvite": "Sent you a Marmot chat invite — it opens as a Marmot chat in your Messages.",
+    "marmotInvite": "Sent you a Marmot chat invite — it opens as a Marmot chat in your Messages. If it doesn't open here, the invitation may be for another phone or an old invitation key. Ask them to invite you again.",
     "marmotMessage": "Marmot group event — open the Marmot chat to read it.",
     "marmotInvitePreview": "Marmot chat invite",
     "marmotMessagePreview": "Marmot message",
@@ -2420,7 +2420,8 @@
   },
   "marmotSend": {
     "noKeyPackage": "We couldn't find a Marmot key package on this person's relays. They may need to open their Marmot app so it can publish one — or use NIP-17 for now.",
-    "outdatedKeyPackage": "This person's Marmot key package has expired, or uses an older version of Marmot that Lightning Piggy can't talk to yet. Opening or updating their Marmot app should fix it — use NIP-17 for now."
+    "outdatedKeyPackage": "This person's Marmot key package has expired, or uses an older version of Marmot that Lightning Piggy can't talk to yet. Opening or updating their Marmot app should fix it — use NIP-17 for now.",
+    "inviteNotDelivered": "We couldn't send the invitation — no relay accepted it. Check your connection and try again."
   },
   "signOutPrompt": {
     "walletsRemoved": "Any wallets connected to this account, including recovery phrases stored here, will also be removed from this phone. Save their recovery phrases and connection details separately before signing out.",
@@ -2473,5 +2474,17 @@
     "keptInAmberBody": "Lightning Piggy never sees this account's secret key. Back it up from Amber. Wallet recovery phrases stored in Lightning Piggy need a separate backup before signing out.",
     "keptInSigner": "Your key is kept in your signer app",
     "keptInSignerBody": "Lightning Piggy never sees this account's secret key. Back it up from your signer app. Wallet recovery phrases stored in Lightning Piggy need a separate backup before signing out."
+  },
+  "marmotInvitationKeys": {
+    "removingTitle": "Removing invitation keys…",
+    "removingBody": "Approve the requests in your signer to finish signing out. This can take a minute.",
+    "notRemovedTitle": "Invitation keys not removed",
+    "notRemovedBody": "We couldn't remove this account's Marmot invitation keys from relays, so new Marmot invites may still be sent to this phone. We'll try again automatically the next time this account signs in here."
+  },
+  "marmotInvite": {
+    "progressTitle": "Inviting devices… {{done}} of {{total}}",
+    "progressBody": "Approve each request in your signer — every phone or app this person uses needs its own invitation.",
+    "notReachedTitle": "Invitation not delivered yet",
+    "notReachedBody": "We couldn't deliver the invitation to {{names}} yet. Lightning Piggy will keep trying automatically."
   }
 }
