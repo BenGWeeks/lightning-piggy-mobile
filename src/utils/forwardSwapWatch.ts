@@ -93,7 +93,12 @@ export async function watchForwardSwap(watch: ForwardSwapWatch): Promise<void> {
       // Terminal: the Lightning leg will never arrive, so its placeholder
       // goes on the next refresh (the lockup is a real leg).
       markSwapPlaceholdersResolved(swapId);
-      await watch.onFailed(msg);
+      try {
+        await watch.onFailed(msg);
+      } catch (e) {
+        // Keep the never-throws contract: callers fire this and forget it.
+        console.warn('[Transfer] submarine refund prompt failed:', e);
+      }
     } else {
       Toast.show({
         type: 'info',

@@ -89,6 +89,12 @@ describe('watchForwardSwap', () => {
     );
   });
 
+  it('never throws, even if the refund prompt does', async () => {
+    wait.mockRejectedValue(new Error('Swap failed with status: swap.expired'));
+    const args = { ...watchArgs(), onFailed: jest.fn(async () => Promise.reject(new Error('x'))) };
+    await expect(watchForwardSwap(args)).resolves.toBeUndefined();
+  });
+
   it('an explicit Boltz failure resolves the placeholder and goes to refund', async () => {
     wait.mockRejectedValue(new Error('Swap failed with status: transaction.lockupFailed'));
     const args = watchArgs();
