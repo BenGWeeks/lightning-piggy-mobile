@@ -40,7 +40,8 @@ interface Props {
   styles: InvitationKeysStyles;
   disabled: boolean;
   onRefresh: () => void;
-  onStop: (device: InvitationDevice, label: string) => void;
+  /** `summary` names the device for the confirmation, e.g. "White Noise · Last updated 3 days ago". */
+  onStop: (device: InvitationDevice, summary: string) => void;
 }
 
 export default memo(function InvitationDeviceRow({
@@ -127,7 +128,7 @@ export default memo(function InvitationDeviceRow({
           accessibilityLabel={t('invitationKeys.stopA11y', { device: label, age })}
           disabled={disabled}
           style={[styles.button, disabled && styles.disabled]}
-          onPress={() => onStop(device, label)}
+          onPress={() => onStop(device, `${label} · ${age}`)}
           testID={`invitation-device-stop-${id}`}
         >
           <Text style={styles.buttonText}>{t('invitationKeys.stop')}</Text>
