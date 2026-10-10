@@ -223,7 +223,7 @@ After changing `.env`, restart Metro (`npm start`) so the new value gets inlined
 
 ### Releases
 
-Releases go through the GitHub Release workflow, not manual builds: bump with `npm version <patch|minor|major>`, push `main --follow-tags`, then publish a GitHub Release for the tag. `.github/workflows/release.yml` runs EAS cloud builds for both platforms, submits iOS to TestFlight and attaches the Android APK to the Release. `eas build --local` is only an offline fallback. See [docs/DEPLOYMENT.adoc](docs/DEPLOYMENT.adoc) → "Cutting a release". For a tester APK, `eas build --platform android --profile preview`.
+Releases go through the GitHub Release workflow, not manual builds: bump with `npm version <patch|minor|major>`, run `git push origin main --follow-tags`, then publish a GitHub Release for the tag. `.github/workflows/release.yml` runs EAS cloud builds for both platforms, submits iOS to TestFlight and attaches the Android APK to the Release. `eas build --local` is only an offline fallback. See [docs/DEPLOYMENT.adoc](docs/DEPLOYMENT.adoc) → "Cutting a release". For a tester APK, `eas build --platform android --profile preview`.
 
 ## Project Structure
 
