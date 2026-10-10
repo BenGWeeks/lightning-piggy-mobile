@@ -100,7 +100,9 @@ case "${1:-}" in
     api POST /pair
     ;;
   pair-from-screen)
-    printf '%s' "${2:-20}" | API_TIMEOUT=$((${2:-20} + 30)) api POST /pair-from-screen
+    secs="${2:-20}"
+    [[ "$secs" =~ ^[0-9]+$ ]] || { echo "pair-from-screen: seconds must be a whole number" >&2; exit 1; }
+    printf '%s' "$secs" | API_TIMEOUT=$((10#$secs + 30)) api POST /pair-from-screen
     ;;
   status) api GET /status ;;
   reset-stats) api POST /stats/reset </dev/null ;;

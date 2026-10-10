@@ -69,9 +69,10 @@ cleanup() {
     find "$DBG" \( -path '*flow-132*' -o -path '*flow-134*' -o -path '*flow-135*' -o -path '*/restore*' \) \
       -name '*.png' -delete 2>/dev/null
     if grep -rqE 'nsec1[0-9a-z]{20,}' "$DBG" 2>/dev/null; then
-      echo "!! redaction failed — debug output NOT kept" >&2; rm -rf "$DBG"
+      echo "!! redaction failed — debug output NOT kept" >&2
+    else
+      mkdir -p "$OUT/debug" && cp -r "$DBG"/. "$OUT/debug/"
     fi
-    mkdir -p "$OUT/debug" && cp -r "$DBG"/. "$OUT/debug/" 2>/dev/null
     rm -rf "$DBG"
   fi
   [ $started_bunker -eq 1 ] && bash scripts/nip46-test-bunker.sh stop >/dev/null
