@@ -233,13 +233,13 @@ describe('creation before funding', () => {
     );
     expect(schnorr.verify(claim.ins[0].witness[0], digest, CLAIM.slice(1))).toBe(true);
   });
-  it('caps the claim fee at the quoted budget and survives a failed estimate', async () => {
-    const { swap, lockup: verified } = claimable('budget-cap-swap');
-    // A mis-scaled (sat/kvB-sized) estimate is capped at 180 vB × quoted 3.
+  it('caps a bogus claim fee estimate and survives a failed one', async () => {
+    const { swap, lockup: verified } = claimable('fee-cap-swap');
+    // A mis-scaled (sat/kvB-sized) estimate is capped at 10 × (180 vB × quoted 3).
     jest.mocked(getClaimFeeEstimate).mockResolvedValueOnce(2229);
     await claimSwap({ ...swap, claimFeeRate: 3 }, verified, fixture(REFUND).lockupAddress);
     let claim = bitcoin.Transaction.fromHex(jest.mocked(broadcastRawTx).mock.calls[0][0]);
-    expect(Number(claim.outs[0].value)).toBe(98500 - 540);
+    expect(Number(claim.outs[0].value)).toBe(98500 - 5400);
     // No live estimate: the quoted rate is used, on the real vsize.
     jest.mocked(getClaimFeeEstimate).mockRejectedValueOnce(new Error('electrum down'));
     await claimSwap(

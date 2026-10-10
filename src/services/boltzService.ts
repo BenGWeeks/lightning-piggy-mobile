@@ -45,7 +45,7 @@ import {
 } from './swapBroadcast';
 import {
   CLAIM_FEE_TARGET_BLOCKS,
-  claimFeeBudget,
+  claimFeeCap,
   claimFeeSats,
   selectClaimFeeRate,
 } from '../utils/swapClaimFee';
@@ -381,7 +381,7 @@ async function broadcastClaim(
 ): Promise<string> {
   const onchainService = require('./onchainService') as typeof import('./onchainService');
   // Live ~30-min estimate, unrounded; if Electrum can't answer, fall back to
-  // the rate the swap was quoted with. Capped at the quoted claim budget (#1174).
+  // the rate the swap was quoted with. Capped only against a bogus estimate (#1174).
   let liveRate: number | null = null;
   try {
     liveRate = await onchainService.getClaimFeeEstimate(CLAIM_FEE_TARGET_BLOCKS);
@@ -389,7 +389,7 @@ async function broadcastClaim(
     console.warn('[Boltz] Claim fee estimate unavailable; using the quoted rate:', error);
   }
   const feeRate = selectClaimFeeRate(liveRate, swap.claimFeeRate);
-  const feeBudget = claimFeeBudget(swap.claimFeeRate);
+  const feeCap = claimFeeCap(swap.claimFeeRate);
   // Repeat structural/deadline checks immediately before disclosing our preimage.
   const claimKey = ecc.pointFromScalar(Buffer.from(swap.claimPrivateKey, 'hex'), true);
   if (!claimKey) throw new Error('Invalid saved reverse claim key');
@@ -400,7 +400,7 @@ async function broadcastClaim(
     currentBlockHeight: await onchainService.getBlockHeight(),
     minClaimBlocks: REVERSE_CLAIM_MARGIN,
     // Upper bound: the real claim is smaller than REVERSE_CLAIM_VBYTES.
-    claimFeeSats: claimFeeSats(REVERSE_CLAIM_VBYTES, feeRate, feeBudget),
+    claimFeeSats: claimFeeSats(REVERSE_CLAIM_VBYTES, feeRate, feeCap),
   });
   const verifiedLockup = verifyReverseLockup(lockup.txHex, swap);
   if (
@@ -481,14 +481,14 @@ async function broadcastClaim(
   // so a placeholder gives the final witness size.
   tx.setWitness(0, [Buffer.alloc(64), preimageBytes, claimScript, controlBlock]);
   const vsize = tx.virtualSize();
-  const fee = claimFeeSats(vsize, feeRate, feeBudget);
+  const fee = claimFeeSats(vsize, feeRate, feeCap);
   const outputAmount = lockup.amount - fee;
   if (outputAmount <= 546) {
     throw new Error(`Claim amount (${lockup.amount}) too small after fee (${fee})`);
   }
   tx.outs[0].value = BigInt(outputAmount);
   console.log(
-    `[Boltz] Claim fee ${fee} sats (${vsize} vB at ${feeRate.toFixed(2)} sat/vB, budget ${feeBudget ?? 'none'})`,
+    `[Boltz] Claim fee ${fee} sats (${vsize} vB at ${feeRate.toFixed(2)} sat/vB, cap ${feeCap ?? 'none'})`,
   );
 
   // Compute sighash for Taproot script-path (BIP-341, SIGHASH_DEFAULT)

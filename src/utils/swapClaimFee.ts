@@ -10,8 +10,15 @@ import { REVERSE_CLAIM_VBYTES } from './reverseSwapVerify';
  * which overpaid roughly 3.5× on a quiet network: Core's conservative
  * 2-block estimate, rounded up to a whole sat/vB with a floor of 2, times a
  * size budget ~29% above the real 140 vB claim. Now we use a ~30-minute
- * target, keep the rate fractional, charge the measured vsize, and cap the
- * total at the budget the swap was quoted with.
+ * target, keep the rate fractional and charge the measured vsize.
+ *
+ * The cap is a guard, not a budget: it stops a mis-scaled or bogus estimate
+ * (e.g. sat/kvB read as sat/vB, ~1000×) from draining the claim, but leaves
+ * room to outbid a genuine fee spike. The claim reveals the preimage and is
+ * never fee-bumped, so an underpriced claim that misses Boltz's refund
+ * timeout loses the whole swap. A cap at exactly the quoted budget would
+ * do that whenever fees rise after the quote — recovery re-claims with the
+ * same persisted quote, so retries would stay underpriced too.
  */
 
 /** Confirmation target for the live estimate. The claim reveals the
@@ -23,6 +30,10 @@ export const MIN_CLAIM_FEE_RATE = 1;
 /** Legacy default when neither a live estimate nor a quoted rate exists. */
 export const FALLBACK_CLAIM_FEE_RATE = 2;
 const MAX_SANE_FEE_RATE = 5000;
+/** How far above the quoted claim budget the fee may go before we treat the
+ *  estimate as bogus. Normal claims sit well *under* the budget (#1174:
+ *  168 sats against a 540-sat budget). */
+export const CLAIM_FEE_BUDGET_HEADROOM = 10;
 
 function isUsableRate(rate: unknown): rate is number {
   return typeof rate === 'number' && Number.isFinite(rate) && rate > 0 && rate <= MAX_SANE_FEE_RATE;
@@ -47,17 +58,23 @@ export function claimFeeBudget(quotedRate: number | undefined): number | undefin
   return isUsableRate(quotedRate) ? Math.ceil(REVERSE_CLAIM_VBYTES * quotedRate) : undefined;
 }
 
+/** Most the claim may pay (sats): the quoted budget plus generous headroom. */
+export function claimFeeCap(quotedRate: number | undefined): number | undefined {
+  const budget = claimFeeBudget(quotedRate);
+  return budget === undefined ? undefined : budget * CLAIM_FEE_BUDGET_HEADROOM;
+}
+
 /**
  * Absolute claim fee in sats for a transaction of `vsize` vbytes: the rate
- * times the measured size, capped at the quoted budget, but never below
- * the relay floor (a claim that can't relay is worse than a slightly
+ * times the measured size, capped at `cap` (see `claimFeeCap`), but never
+ * below the relay floor (a claim that can't relay is worse than a slightly
  * dearer one).
  */
-export function claimFeeSats(vsize: number, feeRate: number, budget?: number): number {
+export function claimFeeSats(vsize: number, feeRate: number, cap?: number): number {
   if (!Number.isSafeInteger(vsize) || vsize <= 0) throw new Error(`Invalid claim vsize ${vsize}`);
   if (!Number.isFinite(feeRate)) throw new Error(`Invalid claim fee rate ${feeRate}`);
   const floor = Math.ceil(vsize * MIN_CLAIM_FEE_RATE);
   let fee = Math.ceil(vsize * Math.max(MIN_CLAIM_FEE_RATE, feeRate));
-  if (budget !== undefined) fee = Math.min(fee, budget);
+  if (cap !== undefined) fee = Math.min(fee, cap);
   return Math.max(fee, floor);
 }

@@ -1,6 +1,8 @@
 import {
+  CLAIM_FEE_BUDGET_HEADROOM,
   FALLBACK_CLAIM_FEE_RATE,
   claimFeeBudget,
+  claimFeeCap,
   claimFeeSats,
   selectClaimFeeRate,
 } from './swapClaimFee';
@@ -45,6 +47,11 @@ describe('claimFeeBudget', () => {
   it('is undefined for a legacy record without a quoted rate', () => {
     expect(claimFeeBudget(undefined)).toBeUndefined();
     expect(claimFeeBudget(NaN)).toBeUndefined();
+    expect(claimFeeCap(undefined)).toBeUndefined();
+  });
+
+  it('caps at the budget plus headroom, not at the budget itself', () => {
+    expect(claimFeeCap(3)).toBe(540 * CLAIM_FEE_BUDGET_HEADROOM);
   });
 });
 
@@ -54,7 +61,7 @@ describe('claimFeeSats', () => {
     const oldFee = Math.ceil(REVERSE_CLAIM_VBYTES * Math.max(2, Math.ceil(2.229)));
     expect(oldFee).toBe(540);
     // New: measured vsize × the ~3-block estimate (1.194 sat/vB at the time).
-    const fee = claimFeeSats(REAL_CLAIM_VSIZE, selectClaimFeeRate(1.194, 3), claimFeeBudget(3));
+    const fee = claimFeeSats(REAL_CLAIM_VSIZE, selectClaimFeeRate(1.194, 3), claimFeeCap(3));
     expect(fee).toBe(168);
   });
 
@@ -63,9 +70,16 @@ describe('claimFeeSats', () => {
     expect(claimFeeSats(141, 1.11)).toBe(157);
   });
 
-  it('caps a mis-scaled estimate (sat/kvB read as sat/vB) at the quoted budget', () => {
+  it('caps a mis-scaled estimate (sat/kvB read as sat/vB)', () => {
     // 2229 sat/kvB = 2.229 sat/vB; a units slip would ask for ~312k sats.
-    expect(claimFeeSats(REAL_CLAIM_VSIZE, 2229, claimFeeBudget(3))).toBe(540);
+    expect(claimFeeSats(REAL_CLAIM_VSIZE, 2229, claimFeeCap(3))).toBe(5400);
+  });
+
+  it('still outbids a genuine fee spike above the quoted budget', () => {
+    // Quoted at 2 sat/vB (budget 360), recovered after fees rose to 8 sat/vB:
+    // a budget-capped claim (≈2.6 sat/vB) could miss the refund timeout.
+    expect(claimFeeSats(REAL_CLAIM_VSIZE, 8, claimFeeCap(2))).toBe(1120);
+    expect(claimFeeSats(REAL_CLAIM_VSIZE, 8, claimFeeCap(2))).toBeGreaterThan(claimFeeBudget(2)!);
   });
 
   it('never drops below the relay floor, even if the budget is smaller', () => {
