@@ -7,20 +7,20 @@ import Toast from '../components/BrandedToast';
 import { getMarmotSession } from '../services/marmotSession';
 import {
   loadInvitationKeys,
-  oldInvitationKeys,
-  removeInvitationKeys,
+  removeInvitationDevices,
   type InvitationInventory,
-  type InvitationKey,
 } from '../services/marmotInvitationKeys';
+import { groupInvitationDevices, type InvitationDevice } from '../services/marmotInvitationDevices';
 
+const EMPTY: InvitationInventory = { keys: [], partial: false };
+/** Signer approvals one removal needs: the deletion, plus one replacement per device. */
+export const signerApprovals = (devices: number) => devices + 1;
+
+/** State + actions for "Devices that can get new chats" (#1236). */
 export function useInvitationKeys() {
-  const { pubkey, userRelays, signEvent } = useNostr();
+  const { pubkey, userRelays, signEvent, signerType } = useNostr();
   const t = useTranslation();
-  const [inventory, setInventory] = useState<InvitationInventory>({
-    keys: [],
-    partial: false,
-    paused: false,
-  });
+  const [inventory, setInventory] = useState<InvitationInventory>(EMPTY);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
@@ -29,6 +29,7 @@ export function useInvitationKeys() {
   const sequence = useRef(0);
   const action = useRef(false);
   const relays = useMemo(() => userRelays.map((r) => r.url), [userRelays]);
+
   const reload = useCallback(async () => {
     const seq = ++sequence.current;
     if (!pubkey) return;
@@ -43,9 +44,10 @@ export function useInvitationKeys() {
       if (seq === sequence.current) setLoading(false);
     }
   }, [pubkey, relays]);
+
   useFocusEffect(
     useCallback(() => {
-      setInventory({ keys: [], partial: false, paused: false });
+      setInventory(EMPTY);
       void reload();
       return () => {
         ++sequence.current;
@@ -53,19 +55,48 @@ export function useInvitationKeys() {
     }, [reload]),
   );
 
-  const perform = useCallback(
-    async (selected?: InvitationKey[]) => {
+  // One action at a time; the list is re-read afterwards either way.
+  const run = useCallback(
+    async (task: () => Promise<void>) => {
       if (!pubkey || action.current) return;
       action.current = true;
       setBusy(true);
       try {
-        const session = getMarmotSession();
-        if (selected) {
-          await removeInvitationKeys({
+        await task();
+      } finally {
+        action.current = false;
+        setBusy(false);
+        if (owner.current === pubkey) await reload();
+      }
+    },
+    [pubkey, reload],
+  );
+
+  const refresh = useCallback(() => {
+    void run(async () => {
+      const session = getMarmotSession();
+      const published =
+        session?.pubkey === pubkey
+          ? await session.refreshInvitationKey().catch(() => false)
+          : false;
+      if (owner.current !== pubkey) return;
+      // Only a relay's acceptance counts: success is never assumed.
+      if (published) Toast.show({ type: 'success', text1: t('invitationKeys.refreshed') });
+      else
+        Alert.alert(t('invitationKeys.refreshFailedTitle'), t('invitationKeys.refreshFailedBody'));
+    });
+  }, [run, pubkey, t]);
+
+  const remove = useCallback(
+    (devices: InvitationDevice[], bulk: boolean) => {
+      void run(async () => {
+        if (!pubkey) return;
+        try {
+          const removed = await removeInvitationDevices({
             owner: pubkey,
-            selected,
-            inventory: inventory.keys,
+            devices,
             relays,
+            onlyIfStillOld: bulk,
             isCurrent: () => owner.current === pubkey,
             sign: async (template) => {
               const event = await signEvent(template);
@@ -73,72 +104,94 @@ export function useInvitationKeys() {
               return event;
             },
           });
-        } else {
-          if (session?.pubkey !== pubkey) throw new Error('Session unavailable');
-          await session.refreshInvitationKey();
+          if (owner.current !== pubkey) return;
+          if (removed === 0)
+            Toast.show({ type: 'info', text1: t('invitationKeys.nothingRemoved') });
+          else
+            Toast.show({
+              type: 'success',
+              text1: t(bulk ? 'invitationKeys.removedOld' : 'invitationKeys.stopped', {
+                count: removed,
+              }),
+            });
+        } catch {
+          if (owner.current === pubkey)
+            Alert.alert(t('invitationKeys.failedTitle'), t('invitationKeys.failedBody'));
         }
-        if (owner.current === pubkey)
-          Toast.show({
-            type: 'success',
-            text1: t(selected ? 'invitationKeys.removed' : 'invitationKeys.refreshed'),
-          });
-      } catch {
-        if (owner.current === pubkey)
-          Alert.alert(t('invitationKeys.failedTitle'), t('invitationKeys.failedBody'));
-      } finally {
-        action.current = false;
-        setBusy(false);
-        if (owner.current === pubkey) await reload();
-      }
+      });
     },
-    [pubkey, inventory.keys, relays, signEvent, t, reload],
+    [run, pubkey, relays, signEvent, t],
   );
-  const confirm = useCallback(
-    (selected: InvitationKey[], old = false) => {
+
+  // Amber / NIP-46 prompt once per signature; a local key signs silently.
+  const approvalsNote = useCallback(
+    (devices: number) =>
+      signerType === 'nsec'
+        ? ''
+        : `\n\n${t('invitationKeys.signerApprovals', { count: signerApprovals(devices) })}`,
+    [signerType, t],
+  );
+
+  const devices = useMemo(
+    () => groupInvitationDevices(inventory.keys, inventory.localSlot),
+    [inventory.keys, inventory.localSlot],
+  );
+  // An incomplete scan can't tell an old device from one we failed to see refreshed.
+  const oldDevices = useMemo(
+    () => (inventory.partial ? [] : devices.filter((d) => d.old)),
+    [devices, inventory.partial],
+  );
+
+  const stopInvites = useCallback(
+    (device: InvitationDevice, label: string) => {
       const confirmedOwner = pubkey;
       Alert.alert(
-        t(old ? 'invitationKeys.removeOld' : 'invitationKeys.removeTitle'),
-        t(old ? 'invitationKeys.removeOldBody' : 'invitationKeys.removeBody'),
+        t('invitationKeys.stopTitle', { device: label }),
+        t('invitationKeys.stopBody') + approvalsNote(1),
         [
           { text: t('invitationKeys.cancel'), style: 'cancel' },
           {
-            text: t('invitationKeys.remove'),
+            text: t('invitationKeys.stopConfirm'),
             style: 'destructive',
             onPress: () => {
-              if (owner.current === confirmedOwner) void perform(selected);
+              if (owner.current === confirmedOwner) remove([device], false);
             },
           },
         ],
       );
     },
-    [pubkey, t, perform],
+    [pubkey, t, approvalsNote, remove],
   );
-  const remove = useCallback(
-    (key: InvitationKey) => {
-      const versions = inventory.keys.filter((k) => k.slot === key.slot);
-      // Removing the current version retires its slot, preventing older relays
-      // from continuing to advertise a superseded version as current.
-      confirm(versions[0]?.event.id === key.event.id ? versions : [key]);
-    },
-    [inventory.keys, confirm],
-  );
-  const old = useMemo(
-    () => (inventory.partial ? [] : oldInvitationKeys(inventory.keys)),
-    [inventory.keys, inventory.partial],
-  );
-  const removeOld = useCallback(() => confirm(old, true), [confirm, old]);
-  const refresh = useCallback(() => {
-    void perform();
-  }, [perform]);
+
+  const removeOld = useCallback(() => {
+    const confirmedOwner = pubkey;
+    const selected = oldDevices;
+    Alert.alert(
+      t('invitationKeys.removeOldTitle', { count: selected.length }),
+      t('invitationKeys.removeOldBody') + approvalsNote(selected.length),
+      [
+        { text: t('invitationKeys.cancel'), style: 'cancel' },
+        {
+          text: t('invitationKeys.removeOldConfirm'),
+          style: 'destructive',
+          onPress: () => {
+            if (owner.current === confirmedOwner) remove(selected, true);
+          },
+        },
+      ],
+    );
+  }, [pubkey, oldDevices, t, approvalsNote, remove]);
+
   return {
-    ...inventory,
+    devices,
+    partial: inventory.partial,
     loading,
     busy,
     error,
     reload,
-    remove,
-    removeOld,
     refresh,
-    oldCount: old.length,
+    stopInvites,
+    removeOld,
+    oldCount: oldDevices.length,
   };
 }

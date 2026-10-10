@@ -14,8 +14,7 @@ See docs/DEPLOYMENT.adoc → "TestFlight 'What to Test' automation".
 
 ### New
 
-- **Invitation keys.** Settings → Nostr → Invitation keys shows which devices can receive new encrypted chat invitations; refresh this phone’s key or remove obsolete keys with confirmation.
-
+- **Devices that can get new chats.** Account → Nostr → Advanced → Devices that can get new chats lists each device people can start a private chat with (this phone, other Lightning Piggy devices, White Noise), with when each last updated. Refresh this phone, stop invites to a device you no longer use, or remove every device that hasn't updated for 30 days.
 - **Notifications screen.** A bell on Home shows unread alerts; tap it to see the last 30 days of messages, payments, zaps and Piglet finds, open any of them, or mark all as read.
 - **Clearer relay settings.** Account → Nostr now leads with Your relays and DM inbox relays, each showing a live connection dot; app defaults and geo-cache relays sit under Advanced.
 - **Backup image servers.** Account → Nostr → Image servers (Blossom): add backup servers and pick a primary. Uploads switch to a backup if the primary is down and are copied to the others. Publish shares the list with other Nostr apps.

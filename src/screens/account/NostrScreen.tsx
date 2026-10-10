@@ -6,6 +6,7 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import AccountScreenLayout from './AccountScreenLayout';
 import PublishedRelayListsSection from '../../components/PublishedRelayListsSection';
 import AdvancedRelaysSection from '../../components/AdvancedRelaysSection';
+import { ChevronRight } from 'lucide-react-native';
 import BlossomServersSection from '../../components/BlossomServersSection';
 import { useRelayConnectionStatus } from '../../hooks/useRelayConnectionStatus';
 import { createSharedAccountStyles } from './sharedStyles';
@@ -98,20 +99,27 @@ const NostrScreen: React.FC = () => {
 
   return (
     <AccountScreenLayout title={t('nostrScreen.title')}>
-      <TouchableOpacity
-        testID="nostr-invitation-keys"
-        accessibilityRole="button"
-        style={styles.experimentalRow}
-        onPress={() => navigation.navigate('AccountInvitationKeys')}
-      >
-        <Text style={styles.experimentalLabel}>{t('invitationKeys.title')}</Text>
-      </TouchableOpacity>
       <PublishedRelayListsSection connection={connStatus} />
       <AdvancedRelaysSection
         connection={connStatus}
         deviceRelays={deviceRelays}
         onRemoveDeviceRelay={handleRemoveRelay}
-      />
+      >
+        {/* Moves to Settings → Messages with the settings restructure. */}
+        <TouchableOpacity
+          testID="nostr-invitation-keys"
+          accessibilityRole="button"
+          accessibilityLabel={t('invitationKeys.title')}
+          style={styles.experimentalRow}
+          onPress={() => navigation.navigate('AccountInvitationKeys')}
+        >
+          <View style={styles.experimentalTextBlock}>
+            <Text style={styles.experimentalLabel}>{t('invitationKeys.title')}</Text>
+            <Text style={styles.experimentalSubtitle}>{t('invitationKeys.entrySubtitle')}</Text>
+          </View>
+          <ChevronRight size={20} color={colors.white} />
+        </TouchableOpacity>
+      </AdvancedRelaysSection>
 
       <BlossomServersSection />
 
