@@ -141,4 +141,38 @@ describe('useDmInbox account scoping', () => {
     act(() => setterForA((prev) => [entry('late-a'), ...prev]));
     expect(result.current.dmInbox.map((e) => e.id)).toEqual(['b-msg']);
   });
+  it('parks a hydrate issued before the hook renders the new account, then applies it', async () => {
+    const { result, rerender } = renderInbox(A);
+    // switchIdentity / login: setPubkey(B) then hydrate(B) — the hydrate can
+    // resolve before the provider re-renders with B.
+    await act(() => result.current.hydrateDmInboxFromCache(B));
+    expect(result.current.dmInbox).toEqual([]);
+    rerender(optionsFor(B));
+    expect(result.current.dmInbox.map((e) => e.id)).toEqual(['b-msg']);
+  });
+
+  it('ignores a late hydrate for an account already switched away from, without blocking the new one', async () => {
+    const { result, rerender } = renderInbox(A);
+    rerender(optionsFor(B));
+    await act(() => result.current.hydrateDmInboxFromCache(A));
+    expect(result.current.dmInbox).toEqual([]);
+    await act(() => result.current.hydrateDmInboxFromCache(B));
+    expect(result.current.dmInbox.map((e) => e.id)).toEqual(['b-msg']);
+  });
+
+  it("aborts the previous account's in-flight refresh on a switch", async () => {
+    let seenSignal: AbortSignal | undefined;
+    fetchMock.mockImplementationOnce((_pk, _relays, opts) => {
+      seenSignal = opts?.signal;
+      return new Promise(() => {});
+    });
+    const { result, rerender } = renderInbox(A);
+    await act(async () => {
+      void result.current.refreshDmInbox({ force: true });
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+    });
+    expect(seenSignal?.aborted).toBe(false);
+    rerender(optionsFor(B));
+    expect(seenSignal?.aborted).toBe(true);
+  });
 });

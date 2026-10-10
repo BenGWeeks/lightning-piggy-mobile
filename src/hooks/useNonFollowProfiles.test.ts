@@ -98,4 +98,23 @@ describe('useNonFollowProfiles', () => {
     await waitFor(() => expect(result.current.contactInfoMap.get(PARTNER)?.name).toBe('partner'));
     expect(fetchProfiles).toHaveBeenCalledTimes(2);
   });
+  it("hydrates each account's own disk cache and never applies a stale one after a switch", async () => {
+    await AsyncStorage.setItem(
+      nonFollowProfilesKey(A),
+      JSON.stringify({ [PARTNER]: profile('cached-for-a') }),
+    );
+    const fetchProfiles = jest.fn(async () => new Map<string, NostrProfile>());
+    // Switch to B in the same tick, before A's disk read resolves.
+    const { result, rerender } = setup(fetchProfiles);
+    rerender({ pubkey: B, dmInbox: [], contacts: [] });
+    await act(async () => {});
+    expect(result.current.nonFollowProfiles.size).toBe(0);
+    expect(await AsyncStorage.getItem(nonFollowProfilesKey(B))).toBeNull();
+
+    // Back on A, its own disk cache paints (the fetch mock returns nothing).
+    rerender({ pubkey: A, dmInbox: [entry(PARTNER)], contacts: [] });
+    await waitFor(() =>
+      expect(result.current.contactInfoMap.get(PARTNER)?.name).toBe('cached-for-a'),
+    );
+  });
 });

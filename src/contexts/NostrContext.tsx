@@ -20,7 +20,6 @@ import {
 import * as amberService from '../services/amberService';
 import * as nostrConnectService from '../services/nostrConnectService';
 import type { NostrProfile, NostrContact, RelayConfig, SignerType, Nip46Connection } from '../types/nostr'; // prettier-ignore
-import type { DmInboxEntry } from '../utils/conversationSummaries';
 import { getUserRelays, setUserRelays, mergeRelays } from '../services/nostrRelayStorage';
 import { perAccountKey } from '../services/perAccountStorage';
 import {
@@ -48,8 +47,7 @@ import { useContactActions } from './useContactActions';
 import { useNip46Login, restoreNip46Session } from './useNip46Login';
 import { nip46Sign } from './nip46DmDecrypt';
 import type { EncryptedUpload } from '../services/imageUploadService';
-import { nip04PlaintextCache, clearMemoisedSecretKey } from './nostrSecretKeyCache';
-import { stopNativeDmEngineGlobal } from './nativeDmEngine';
+import { dropIdentityKeyMaterial, useIdentityMemoryReset } from './resetIdentityMemoryState';
 import { AMBER_NIP17_ENABLED_KEY_LEGACY } from './nostrDmCache';
 import { wipeAccountCaches } from './accountCacheWipe';
 import { wipeLocalDmStore } from '../services/localDb';
@@ -72,7 +70,7 @@ import {
   readCachedWithTtl,
   persistMergedProfileCache,
 } from './nostrCacheKeys';
-import type { RefreshDmInboxOptions, SignedEvent, ConversationMessage } from './nostrContextTypes';
+import type { SignedEvent, ConversationMessage } from './nostrContextTypes';
 import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
 
 export { OWN_PROFILE_CACHE_KEY_BASE } from './nostrCacheKeys';
@@ -459,6 +457,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setAmberNip44Permission,
     knownWrapIdsRef,
   } = useDmInbox({ pubkey, isLoggedIn, signerType, followPubkeys, getReadRelays });
+  // Identity-transition teardown (switch + add-account logins); see helper.
+  const { resetIdentityMemory, activateLoginPubkey } = useIdentityMemoryReset(pubkey, setPubkey, {
+    setProfile,
+    setContacts,
+    setDmInbox,
+    setAmberNip44Permission,
+    resetRelayLists,
+  });
 
   // Group-messaging cluster (#707). The NIP-17 group send + kind-30200
   // group-state publish callbacks live in `useGroupMessaging`. The provider
@@ -1016,7 +1022,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
 
         const { pubkey: pk } = nostrService.decodeNsec(trimmed);
-        setPubkey(pk);
+        activateLoginPubkey(pk);
 
         // Store credentials in the legacy single-active-identity slots via the
         // canonical writer (hardened, device-only keychain) AND register the
@@ -1078,7 +1084,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setIsLoggingIn(false);
       }
     },
-    [loadRelays, loadProfile, loadContacts, loadContactsFromCache, hydrateDmInboxFromCache],
+    [
+      activateLoginPubkey,
+      loadRelays,
+      loadProfile,
+      loadContacts,
+      loadContactsFromCache,
+      hydrateDmInboxFromCache,
+    ],
   );
 
   const loginWithAmber = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
@@ -1090,7 +1103,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // Native module uses startActivityForResult — returns pubkey directly
       const pk = await amberService.requestPublicKey();
 
-      setPubkey(pk);
+      activateLoginPubkey(pk);
       await persistActiveIdentityKeys({ pubkey: pk, signerType: 'amber' });
       const next = await upsertIdentity({
         pubkey: pk,
@@ -1139,12 +1152,19 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } finally {
       setIsLoggingIn(false);
     }
-  }, [loadRelays, loadProfile, loadContacts, loadContactsFromCache, hydrateDmInboxFromCache]);
+  }, [
+    activateLoginPubkey,
+    loadRelays,
+    loadProfile,
+    loadContacts,
+    loadContactsFromCache,
+    hydrateDmInboxFromCache,
+  ]);
 
   // NIP-46 login lives in its own hook (#283); see useNip46Login.
   const loginWithNip46 = useNip46Login({
     setIsLoggingIn,
-    setPubkey,
+    setPubkey: activateLoginPubkey,
     setSignerType,
     setIsLoggedIn,
     loadRelays,
@@ -1158,14 +1178,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // Extracted so the multi-account sign-out path can call it without
   // coupling to the active-identity teardown logic (#288).
   const logout = useCallback(async () => {
-    clearMemoisedSecretKey();
-    // Belt-and-braces (Stage 2 M2 key lifecycle): the live sub's teardown
-    // stops its own engine handle, but a logout must never race a native
-    // rust-nostr pool still holding this account's parsed key — force the
-    // native stop + single-entry key-cache clear.
-    void stopNativeDmEngineGlobal();
+    dropIdentityKeyMaterial();
     setAmberNip44Permission('unknown');
-    nip04PlaintextCache.clear();
     // Drop the in-memory NIP-17 wrap-id dedup Set — without this, a
     // sign-out then sign-back-in to the SAME pubkey would keep wrap
     // ids from the prior session alive in memory, and any wrap whose
@@ -1300,22 +1314,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (__DEV__) console.warn(`[Nostr] switchIdentity: ${nextPubkey} not in registry`);
         return;
       }
-      // Tear down the previous identity's in-memory state. Persistent
-      // caches (per-account namespaced) are kept on disk so a switch
-      // back is instant.
-      clearMemoisedSecretKey();
-      // Same Stage 2 M2 belt-and-braces as logout: the switched-away
-      // identity's key must not survive in the native engine / key cache.
-      void stopNativeDmEngineGlobal();
-      nip04PlaintextCache.clear();
-      setAmberNip44Permission('unknown');
-      setProfile(null);
-      setContacts([]);
-      // Reset the NIP-65 slice only — user-added overrides are an
-      // in-app preference and shared across identities (matches the
-      // logout behaviour).
-      resetRelayLists();
-      setDmInbox([]);
+      // Tear down the previous identity's in-memory state (on-disk caches
+      // are per-account namespaced and kept, so a switch back is instant).
+      resetIdentityMemory();
 
       // Promote the target identity to "active" everywhere — write the legacy
       // single-identity SecureStore slots and clear the other signer's stale
@@ -1353,14 +1354,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     },
     [
       pubkey,
-      resetRelayLists,
+      resetIdentityMemory,
       loadContactsFromCache,
       hydrateDmInboxFromCache,
       loadRelays,
       loadProfile,
       loadContacts,
-      setAmberNip44Permission,
-      setDmInbox,
     ],
   );
 

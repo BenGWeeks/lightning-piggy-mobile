@@ -25,7 +25,6 @@ declare -A MAP_CLONE_BASELINE=(
   ["src/screens/ExploreHomeScreen.tsx"]=3
   ["src/screens/HuntPiggyDetailScreen.tsx"]=3
   ["src/screens/HuntScreen.tsx"]=2
-  ["src/screens/MessagesScreen.tsx"]=1
   ["src/screens/MyPigletsScreen.tsx"]=3
 )
 

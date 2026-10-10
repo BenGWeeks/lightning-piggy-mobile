@@ -47,6 +47,8 @@ import {
 } from '../utils/conversationSummaries';
 import { useStableRowIdentity } from '../utils/stableRowIdentity';
 import { useNonFollowProfiles } from '../hooks/useNonFollowProfiles';
+import { EMPTY_DM_INBOX } from '../contexts/dmInboxScope';
+import type { NostrContact } from '../types/nostr';
 // __DEV__-only marketplace-order fixture seeding. The helper is a no-op outside
 // __DEV__ and is only invoked behind a __DEV__-gated button, so it never runs at
 // runtime in a release build (the module may still be present in the bundle).
@@ -58,6 +60,8 @@ type MessagesNavigation = CompositeNavigationProp<
   BottomTabNavigationProp<MainTabParamList, 'Messages'>,
   NativeStackNavigationProp<RootStackParamList>
 >;
+
+const NO_CONTACTS: NostrContact[] = [];
 
 const MessagesScreen: React.FC = () => {
   const colors = useThemeColors();
@@ -394,8 +398,16 @@ const MessagesScreen: React.FC = () => {
   });
 
   // useDeferredValue lets React deprioritise the (O(n)) summary rebuild when an urgent update — e.g. a tab-bar tap, scroll gesture — comes in during a relay-burst flush. The user's tap renders against the previous dmInbox; the new summary lands on the next idle frame. Keeps the bottom nav snappy when 25 wraps batch-flush via the live-sub queue (queueInboxEntry / flushPendingInbox).
-  const deferredDmInbox = useDeferredValue(dmInbox);
-  const deferredContacts = useDeferredValue(contacts);
+  // The deferred snapshot is tagged with its account: the render right after a
+  // switch would otherwise still show the previous account's (deferred) rows.
+  const ownedListInputs = useMemo(
+    () => ({ owner: pubkey, dmInbox, contacts }),
+    [pubkey, dmInbox, contacts],
+  );
+  const deferredInputs = useDeferredValue(ownedListInputs);
+  const deferredIsCurrent = deferredInputs.owner === pubkey;
+  const deferredDmInbox = deferredIsCurrent ? deferredInputs.dmInbox : EMPTY_DM_INBOX;
+  const deferredContacts = deferredIsCurrent ? deferredInputs.contacts : NO_CONTACTS;
   // Build the DM summaries first — this is always part of the inbox
   // regardless of the zap-counterparties toggle. Pass the tier-aware
   // trust set (#547) as a defence-in-depth filter. NostrContext's

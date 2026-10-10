@@ -2,6 +2,7 @@ import {
   applyScopedDmInboxUpdate,
   EMPTY_DM_INBOX,
   INITIAL_SCOPED_DM_INBOX,
+  linkAbortSignals,
   selectScopedDmInbox,
   type ScopedDmInbox,
 } from './dmInboxScope';
@@ -54,5 +55,39 @@ describe('applyScopedDmInboxUpdate', () => {
   it('claims an unowned initial state for the active writer', () => {
     const next = applyScopedDmInboxUpdate(INITIAL_SCOPED_DM_INBOX, A, A, [entry('a1')]);
     expect(next).toEqual({ owner: A, entries: [entry('a1')] });
+  });
+});
+
+describe('linkAbortSignals', () => {
+  it('passes the account signal through when there is no caller signal', () => {
+    const account = new AbortController();
+    expect(linkAbortSignals(undefined, account.signal).signal).toBe(account.signal);
+  });
+
+  it('fires when either the caller or the account aborts', () => {
+    const caller = new AbortController();
+    const account = new AbortController();
+    const a = linkAbortSignals(caller.signal, account.signal);
+    caller.abort();
+    expect(a.signal.aborted).toBe(true);
+
+    const b = linkAbortSignals(new AbortController().signal, account.signal);
+    account.abort();
+    expect(b.signal.aborted).toBe(true);
+  });
+
+  it('stops following its inputs once disposed', () => {
+    const caller = new AbortController();
+    const account = new AbortController();
+    const linked = linkAbortSignals(caller.signal, account.signal);
+    linked.dispose();
+    account.abort();
+    expect(linked.signal.aborted).toBe(false);
+  });
+
+  it('starts aborted when an input already is', () => {
+    const caller = new AbortController();
+    caller.abort();
+    expect(linkAbortSignals(caller.signal, new AbortController().signal).signal.aborted).toBe(true);
   });
 });

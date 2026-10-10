@@ -48,6 +48,7 @@ import { useMarmotDmInbound } from './useMarmotDmInbound';
 import {
   applyScopedDmInboxUpdate,
   INITIAL_SCOPED_DM_INBOX,
+  linkAbortSignals,
   selectScopedDmInbox,
   type ScopedDmInbox,
 } from './dmInboxScope';
@@ -116,16 +117,32 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
   // teardown flush) are dropped instead of painting under the new one.
   const [scopedInbox, setScopedInbox] = useState<ScopedDmInbox>(INITIAL_SCOPED_DM_INBOX);
   const dmInbox = selectScopedDmInbox(scopedInbox, pubkey);
-  // The account inbox writes are accepted for. Follows the `pubkey` prop when
-  // it changes (assigned in render so it is current before any effect
-  // cleanup flushes), and is claimed eagerly by `hydrateDmInboxFromCache` so
-  // a hydrate issued just after setPubkey isn't mistaken for a stale write.
+  // The account inbox writes are accepted for. Mirrors the `pubkey` prop,
+  // assigned in render so it is current before any effect cleanup flushes.
   const activeOwnerRef = useRef<string | null>(pubkey);
-  const lastPubkeyPropRef = useRef<string | null>(pubkey);
-  if (lastPubkeyPropRef.current !== pubkey) {
-    lastPubkeyPropRef.current = pubkey;
-    activeOwnerRef.current = pubkey;
-  }
+  activeOwnerRef.current = pubkey;
+  // Aborts the previous account's in-flight refresh on a switch, so it stops
+  // decrypting / group-routing (whose side effects aren't owner-scoped) for
+  // an account that is no longer active.
+  const accountAbortRef = useRef<{ owner: string; ctrl: AbortController } | null>(null);
+  const accountSignalFor = useCallback((owner: string): AbortSignal => {
+    const cur = accountAbortRef.current;
+    if (cur && cur.owner === owner) return cur.ctrl.signal;
+    cur?.ctrl.abort();
+    const next = { owner, ctrl: new AbortController() };
+    accountAbortRef.current = next;
+    return next.ctrl.signal;
+  }, []);
+  useEffect(
+    () => () => {
+      const cur = accountAbortRef.current;
+      if (cur && cur.owner === pubkey) {
+        cur.ctrl.abort();
+        accountAbortRef.current = null;
+      }
+    },
+    [pubkey],
+  );
   /** A setState-compatible writer bound to `owner`'s inbox. */
   const inboxSetterFor = useCallback(
     (owner: string | null): DmInboxSetter =>
@@ -208,18 +225,26 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
    * retired. The one-time migration runs first (memoised; a Map lookup once
    * done) so a just-updated install hydrates the pre-#848 kind-4-only
    * threads its blobs held. Called from session-restore + post-login flows. */
+  const pendingHydrateRef = useRef<{ owner: string; entries: DmInboxEntry[] } | null>(null);
   const hydrateDmInboxFromCache = useCallback(
     async (pk: string) => {
-      // Callers invoke this for the identity they've just activated (right
-      // after setPubkey), so claim ownership now rather than waiting for the
-      // re-render — later writes for the previous account are then dropped.
-      activeOwnerRef.current = pk;
       await ensureDmStoreMigrated(pk);
       const dbLatest = await loadInboxEntries(pk).catch(() => [] as DmInboxEntry[]);
-      if (dbLatest.length > 0) inboxSetterFor(pk)(dbLatest);
+      if (dbLatest.length === 0) return;
+      // Callers hydrate right after setPubkey(pk). If this hook hasn't
+      // rendered pk yet, park the entries until it does (effect below) rather
+      // than claiming ownership early — a late hydrate for an account the user
+      // has already switched away from then simply never applies.
+      if (activeOwnerRef.current === pk) inboxSetterFor(pk)(dbLatest);
+      else pendingHydrateRef.current = { owner: pk, entries: dbLatest };
     },
     [inboxSetterFor],
   );
+  useEffect(() => {
+    const pending = pendingHydrateRef.current;
+    pendingHydrateRef.current = null;
+    if (pubkey && pending?.owner === pubkey) inboxSetterFor(pubkey)(pending.entries);
+  }, [pubkey, inboxSetterFor]);
 
   /**
    * Decrypt one NIP-04 payload with whichever signer is active. Returns
@@ -437,6 +462,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       const passesFollowGate = (pk: string): boolean => includeNonFollows || refreshFollows.has(pk);
 
       let refreshCompleted = false; // set after commit; gates the stamp (#788 — see helper)
+      let disposeSignal: () => void = () => {};
 
       const task = (async () => {
         setDmInboxLoading(true);
@@ -457,7 +483,14 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           // refresh (store already populated) keeps the real signal, so #412's
           // fast tab-hopper abort is fully intact.
           const mustCompleteRebuild = isColdStart && !(await hasStoredWraps(refreshForPubkey));
-          const effectiveSignal = mustCompleteRebuild ? undefined : signal;
+          // A cold rebuild ignores the caller's (tab-hop) abort, but every
+          // refresh stops when its account is switched away from.
+          const linked = linkAbortSignals(
+            mustCompleteRebuild ? undefined : signal,
+            accountSignalFor(refreshForPubkey),
+          );
+          disposeSignal = linked.dispose;
+          const effectiveSignal = linked.signal;
           if (__DEV__ && mustCompleteRebuild) {
             console.log('[Perf] refreshDmInbox: cold rebuild — running to completion (F1)');
           }
@@ -582,7 +615,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
             // Stop decrypting on abort (releases the JS thread, #412) but BREAK
             // rather than return: the k4Rows decrypted so far are idempotent
             // and persist below, then the productive-abort commit paints them
-            // (F1, #849). A cold rebuild's effectiveSignal never aborts here.
+            // (F1, #849). A cold rebuild only aborts on an account switch.
             if (effectiveSignal?.aborted) break;
             const batch = k4ToDecrypt.slice(i, i + DECRYPT_YIELD_EVERY);
             const batchResults = await Promise.all(
@@ -686,8 +719,8 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           // the closure's own `pubkey` always equals `refreshForPubkey`.
           if (!isStillActive() || refreshForSigner !== signerType) return;
 
-          // Abort handling (F1, #849). For a cold REBUILD, effectiveSignal is
-          // undefined (never aborts), so this guard is false and we always
+          // Abort handling (F1, #849). For a cold REBUILD, effectiveSignal only
+          // aborts on an account switch (returned above), so we always
           // commit — the rebuild paints the freshly-decrypted inbox.
           // For a WARM refresh, effectiveSignal IS the real signal: a tab-hop
           // that aborted before decrypting anything fresh skips the commit,
@@ -756,7 +789,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
               String(newLastSeen),
             ).catch(() => {});
           }
-          // A cold rebuild (effectiveSignal undefined) that reached here
+          // A cold rebuild (caller abort ignored) that reached here
           // finished its backlog → claim the full cursor stamp. A WARM
           // productive-but-aborted sweep painted from the DB but did NOT finish
           // the backlog → leave refreshCompleted false so it gets the short
@@ -765,6 +798,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
         } catch (error) {
           if (__DEV__) console.warn('[Nostr] refreshDmInbox failed:', error);
         } finally {
+          disposeSignal();
           setDmInboxLoading(false);
         }
       })();
@@ -807,6 +841,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       amberNip44DecryptSilent,
       inboxSetterFor,
       setDmInbox,
+      accountSignalFor,
     ],
   );
   // Keep the self-ref pointed at the latest refreshDmInbox closure.

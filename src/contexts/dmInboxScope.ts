@@ -52,3 +52,30 @@ export function applyScopedDmInboxUpdate(
   if (prev.owner === writer && next === prev.entries) return prev;
   return { owner: writer, entries: next };
 }
+
+/**
+ * An AbortSignal that fires when either input does. `dispose` detaches the
+ * listeners — the account signal outlives many refreshes, so each refresh
+ * must release its hook on it when done.
+ */
+export function linkAbortSignals(
+  primary: AbortSignal | undefined,
+  account: AbortSignal,
+): { signal: AbortSignal; dispose: () => void } {
+  if (!primary) return { signal: account, dispose: () => {} };
+  const ctrl = new AbortController();
+  const abort = (): void => ctrl.abort();
+  if (primary.aborted || account.aborted) {
+    ctrl.abort();
+    return { signal: ctrl.signal, dispose: () => {} };
+  }
+  primary.addEventListener('abort', abort, { once: true });
+  account.addEventListener('abort', abort, { once: true });
+  return {
+    signal: ctrl.signal,
+    dispose: () => {
+      primary.removeEventListener('abort', abort);
+      account.removeEventListener('abort', abort);
+    },
+  };
+}

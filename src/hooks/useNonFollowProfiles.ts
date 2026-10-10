@@ -13,14 +13,16 @@ interface OwnedProfiles {
   profiles: Map<string, NostrProfile>;
 }
 
-/** Merge `incoming` into `owner`'s profiles; another owner's map is discarded. */
+/** Merge `incoming` into `owner`'s profiles; another owner's map is discarded.
+ * Runs once per kind-0 batch fetch / disk read, never per relay event. */
 function mergeOwnedProfiles(
-  prev: OwnedProfiles,
+  current: OwnedProfiles,
   owner: string,
   incoming: Iterable<[string, NostrProfile]>,
   { keepExisting }: { keepExisting: boolean },
 ): OwnedProfiles {
-  const next = new Map(prev.owner === owner ? prev.profiles : EMPTY_PROFILES);
+  const base = current.owner === owner ? current.profiles : EMPTY_PROFILES;
+  const next = new Map(base);
   for (const [pk, prof] of incoming) {
     const key = pk.toLowerCase();
     if (keepExisting && next.has(key)) continue;

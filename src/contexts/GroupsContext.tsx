@@ -442,14 +442,21 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // group so the Messages tab re-sorts. The listener fires after the
   // append, so a fresh load reflects the new tail.
   useEffect(() => {
+    // A read that resolves after `groups` changes (e.g. an account switch
+    // reset) must not merge the old account's activity into the new state.
+    let active = true;
     const unsub = subscribeGroupMessages((groupId) => {
       const g = groups.find((x) => x.id === groupId);
       if (!g) return;
       loadGroupMessages(groupId).then((msgs) => {
+        if (!active) return;
         setActivityByGroup((prev) => ({ ...prev, [groupId]: activityFromMessages(g, msgs) }));
       });
     });
-    return unsub;
+    return () => {
+      active = false;
+      unsub();
+    };
   }, [groups]);
 
   // Anti-spam: a group is visible only if at least one OTHER member is
