@@ -13,7 +13,7 @@ jest.mock('../services/marmotSession', () => ({
   MARMOT_CHAT_KIND: 9,
   subscribeMarmotSession: (cb: (session: unknown) => void) => {
     cb({
-      pubkey: 'alice',
+      pubkey: 'a'.repeat(64),
       listGroups: () => [],
       subscribe: (handlers: { onMessage: typeof mockOnMessage }) => {
         mockOnMessage = handlers.onMessage;
@@ -44,10 +44,10 @@ const group = {
   relays: [],
   createdAt: 1,
   isDm: false,
-  memberPubkeys: ['alice', 'bob'],
+  memberPubkeys: ['a'.repeat(64), 'bob'],
   adminPubkeys: [],
 };
-const remove = (target: string, sender = 'alice') =>
+const remove = (target: string, sender = 'a'.repeat(64)) =>
   ({
     group,
     rumor: {
@@ -67,28 +67,28 @@ beforeEach(async () => {
 });
 afterEach(() => jest.useRealTimers());
 it('applies a deletion after 2001 unrelated targets evict it before flush, then blocks replay after remount', async () => {
-  await appendGroupMessage('g', {
+  await appendGroupMessage('a'.repeat(64), 'g', {
     id,
-    senderPubkey: 'alice',
+    senderPubkey: 'a'.repeat(64),
     text: 'deleted plaintext',
     createdAt: 1,
   });
-  const { unmount } = renderHook(() => useMarmotGroups('alice'));
+  const { unmount } = renderHook(() => useMarmotGroups('a'.repeat(64)));
   await act(async () => {
     mockOnMessage(remove(id));
     mockOnMessage(remove(id, 'bob'));
     for (let i = 0; i < 2001; i++) mockOnMessage(remove(i.toString(16).padStart(64, '0'), 'bob'));
     await jest.advanceTimersByTimeAsync(150);
   });
-  expect(await loadGroupMessages('g')).toEqual([]);
+  expect(await loadGroupMessages('a'.repeat(64), 'g')).toEqual([]);
   unmount();
-  renderHook(() => useMarmotGroups('alice'));
+  renderHook(() => useMarmotGroups('a'.repeat(64)));
   await act(async () => {
     mockOnMessage({
       group,
       rumor: {
         id,
-        pubkey: 'alice',
+        pubkey: 'a'.repeat(64),
         kind: 9,
         content: 'deleted plaintext',
         tags: [],
@@ -97,7 +97,7 @@ it('applies a deletion after 2001 unrelated targets evict it before flush, then 
     } as MarmotMessageEvent);
     await jest.advanceTimersByTimeAsync(150);
   });
-  expect(await loadGroupMessages('g')).toEqual([]);
+  expect(await loadGroupMessages('a'.repeat(64), 'g')).toEqual([]);
 });
 
 const message = (msgId: string, sender: string, text: string) =>
@@ -107,19 +107,24 @@ const message = (msgId: string, sender: string, text: string) =>
   }) as MarmotMessageEvent;
 
 it('drops a message whose delete lands in the same batch, and keeps the rest', async () => {
-  renderHook(() => useMarmotGroups('alice'));
+  renderHook(() => useMarmotGroups('a'.repeat(64)));
   await act(async () => {
     mockOnMessage(message(id, 'bob', 'deleted'));
     mockOnMessage(message('b'.repeat(64), 'bob', 'kept'));
     mockOnMessage(remove(id, 'bob'));
     await jest.advanceTimersByTimeAsync(150);
   });
-  expect((await loadGroupMessages('g')).map((m) => m.text)).toEqual(['kept']);
+  expect((await loadGroupMessages('a'.repeat(64), 'g')).map((m) => m.text)).toEqual(['kept']);
 });
 
 it("ignores a member's delete of someone else's message, and a non-admin's kind 4891", async () => {
-  await appendGroupMessage('g', { id, senderPubkey: 'alice', text: 'mine', createdAt: 1 });
-  renderHook(() => useMarmotGroups('alice'));
+  await appendGroupMessage('a'.repeat(64), 'g', {
+    id,
+    senderPubkey: 'a'.repeat(64),
+    text: 'mine',
+    createdAt: 1,
+  });
+  renderHook(() => useMarmotGroups('a'.repeat(64)));
   const adminRemove = {
     group,
     rumor: {
@@ -136,14 +141,14 @@ it("ignores a member's delete of someone else's message, and a non-admin's kind 
     mockOnMessage(adminRemove);
     await jest.advanceTimersByTimeAsync(150);
   });
-  expect((await loadGroupMessages('g')).map((m) => m.text)).toEqual(['mine']);
+  expect((await loadGroupMessages('a'.repeat(64), 'g')).map((m) => m.text)).toEqual(['mine']);
   // With admin rights, the same 4891 removes it.
   const promoted = { ...group, adminPubkeys: ['bob'] };
   await act(async () => {
     mockOnMessage({ ...adminRemove, group: promoted });
     await jest.advanceTimersByTimeAsync(150);
   });
-  expect(await loadGroupMessages('g')).toEqual([]);
+  expect(await loadGroupMessages('a'.repeat(64), 'g')).toEqual([]);
 });
 
 const editOf = (target: string, content: string, created_at: number, editId: string, by = 'bob') =>
@@ -153,20 +158,20 @@ const editOf = (target: string, content: string, created_at: number, editId: str
   }) as MarmotMessageEvent;
 
 it('overlays an edit that arrives before its message, and ignores a forged one', async () => {
-  renderHook(() => useMarmotGroups('alice'));
+  renderHook(() => useMarmotGroups('a'.repeat(64)));
   await act(async () => {
     mockOnMessage(editOf(id, 'forged', 9, 'f'.repeat(64), 'mallory'));
     mockOnMessage(editOf(id, 'edited', 2, 'e'.repeat(64)));
     mockOnMessage(message(id, 'bob', 'original'));
     await jest.advanceTimersByTimeAsync(150);
   });
-  expect(await loadGroupMessages('g')).toEqual([
+  expect(await loadGroupMessages('a'.repeat(64), 'g')).toEqual([
     expect.objectContaining({ id, text: 'edited', editedAt: 2, editId: 'e'.repeat(64) }),
   ]);
 });
 
 it('applies an edit to a stored message, but never after its delete in the same batch', async () => {
-  renderHook(() => useMarmotGroups('alice'));
+  renderHook(() => useMarmotGroups('a'.repeat(64)));
   await act(async () => {
     mockOnMessage(message(id, 'bob', 'original'));
     mockOnMessage(message('b'.repeat(64), 'bob', 'other'));
@@ -178,5 +183,5 @@ it('applies an edit to a stored message, but never after its delete in the same 
     mockOnMessage(remove(id, 'bob'));
     await jest.advanceTimersByTimeAsync(150);
   });
-  expect((await loadGroupMessages('g')).map((m) => m.text)).toEqual(['other v2']);
+  expect((await loadGroupMessages('a'.repeat(64), 'g')).map((m) => m.text)).toEqual(['other v2']);
 });

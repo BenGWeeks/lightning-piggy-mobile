@@ -104,6 +104,7 @@ export async function appendGroupMessage(
   await ensureGroupMessagesMigrated();
   const key = requireOwnerKey(owner, groupId);
   return mutateGroupStorage(key, async () => {
+    requireOwnerKey(owner, groupId);
     const existing = await readLog(key);
     const map = new Map<string, GroupMessage>();
     for (const m of existing) map.set(m.id, m);
@@ -180,7 +181,9 @@ export async function deleteGroupMessagesForOwner(owner: string | null | undefin
   } finally {
     const prefix = groupMessagesOwnerPrefix(pk);
     const keys = (await AsyncStorage.getAllKeys()).filter((k) => k.startsWith(prefix));
-    if (keys.length > 0) await AsyncStorage.multiRemove(keys);
+    await Promise.all(
+      keys.map((key) => mutateGroupStorage(key, () => AsyncStorage.removeItem(key))),
+    );
   }
 }
 
@@ -214,6 +217,7 @@ export async function removeGroupMessage(
   await ensureGroupMessagesMigrated();
   const key = requireOwnerKey(owner, groupId);
   return mutateGroupStorage(key, async () => {
+    requireOwnerKey(owner, groupId);
     const existing = await readLog(key);
     const filtered = existing.filter((m) => m.id !== messageId);
     if (filtered.length === existing.length) return existing;
@@ -253,6 +257,7 @@ export async function editGroupMessages(
   await ensureGroupMessagesMigrated();
   const key = requireOwnerKey(owner, groupId);
   return mutateGroupStorage(key, async () => {
+    requireOwnerKey(owner, groupId);
     const next = await readLog(key);
     const indexById = new Map(next.map((m, i) => [m.id, i]));
     let changed = false;
@@ -298,6 +303,7 @@ export async function removeGroupMessagesWhere(
   await ensureGroupMessagesMigrated();
   const key = requireOwnerKey(owner, groupId);
   return mutateGroupStorage(key, async () => {
+    requireOwnerKey(owner, groupId);
     const existing = await readLog(key);
     const filtered = existing.filter((m) => !shouldRemove(m));
     if (filtered.length === existing.length) return existing;
