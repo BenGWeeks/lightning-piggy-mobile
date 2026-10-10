@@ -11,6 +11,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import * as Application from 'expo-application';
+import { requireOptionalNativeModule } from 'expo-modules-core';
 import * as Notifications from 'expo-notifications';
 import { nip19 } from 'nostr-tools';
 import { Platform } from 'react-native';
@@ -161,9 +162,20 @@ const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T> =>
     new Promise<T>((_, reject) => setTimeout(() => reject(new Error('push: timed out')), ms)),
   ]);
 
+// expo-notifications' getDevicePushTokenAsync() keeps a REJECTED promise
+// cached until the JS runtime restarts, so one transient failure (offline,
+// Play services busy) would stick. Ask the native module directly instead.
+const nativeTokens = requireOptionalNativeModule<{ getDevicePushTokenAsync(): Promise<string> }>(
+  'ExpoPushTokenManager',
+);
+const readNativeToken = async (): Promise<{ type: string; data: unknown }> =>
+  nativeTokens
+    ? { type: Platform.OS, data: await nativeTokens.getDevicePushTokenAsync() }
+    : Notifications.getDevicePushTokenAsync();
+
 /** This device's native token as a registration for `server`. */
 async function readRegistration(server: PushServer): Promise<DeviceRegistration> {
-  const native = await withTimeout(Notifications.getDevicePushTokenAsync(), TOKEN_TIMEOUT_MS);
+  const native = await withTimeout(readNativeToken(), TOKEN_TIMEOUT_MS);
   return toRegistration(native.type === 'ios' ? 'apns' : 'fcm', String(native.data), server);
 }
 

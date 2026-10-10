@@ -92,6 +92,12 @@ const sameRegistration = (r: PushRecord, reg: DeviceRegistration) =>
   r.fingerprint === reg.fingerprint &&
   (r.relayHint ?? '') === (reg.relayHint?.trim() ? reg.relayHint : '');
 
+const sameDevice = (a: DeviceRegistration, b: DeviceRegistration) =>
+  a.server === b.server &&
+  a.platform === b.platform &&
+  a.fingerprint === b.fingerprint &&
+  (a.relayHint ?? '') === (b.relayHint ?? '');
+
 /** Pure: what a group needs, given what we published there before. */
 export function planGroup(
   shared: Shared | null,
@@ -141,7 +147,10 @@ export class MarmotPushRegistrar {
 
   /** The token to announce, or null to retract it everywhere. */
   setRegistration(reg: DeviceRegistration | null): void {
-    if (reg === this.registration) return;
+    // A repeat of the same registration (e.g. the OS re-reporting the same
+    // token) must not abandon a pass that is already publishing it.
+    const cur = this.registration;
+    if (reg === cur || (reg && cur && sameDevice(reg, cur))) return;
     this.registration = reg;
     this.generation++;
   }

@@ -335,6 +335,33 @@ describe('MarmotPushRegistrar', () => {
   });
 });
 
+describe('repeated identical registrations', () => {
+  it('do not abandon a pass that is publishing them', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const sent: number[] = [];
+    const registrar = new MarmotPushRegistrar({
+      pubkey: ME,
+      silentSigner: true,
+      backend: createMemoryMarmotBackend(),
+      ready: Promise.resolve(),
+      groups: () => [group('aa'.repeat(16))],
+      sign: async (tpl) => {
+        await gate;
+        return finalizeEvent({ ...tpl }, sk) as unknown as Awaited<ReturnType<Sign>>;
+      },
+      send: async (_id, ev) => (sent.push(ev.kind), true),
+    });
+    registrar.setRegistration(reg('token-1'));
+    const pass = registrar.sync({ interactive: true });
+    await new Promise((r) => setTimeout(r, 0));
+    registrar.setRegistration(reg('token-1')); // same token, new object
+    release();
+    expect((await pass).published).toBe(1);
+    expect(sent).toEqual([447]);
+  });
+});
+
 describe('planGroup', () => {
   const g = group('aa'.repeat(16));
   it('is a no-op with nothing published and push off', () => {

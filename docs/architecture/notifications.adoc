@@ -256,10 +256,9 @@ in both servers' 10050) so a lookup can never change the signed records.
 *No double alerts.* A remote push that arrives while the app is open is
 hidden by the `setNotificationHandler` in `notificationService.ts`
 (`isRemotePush`) — the live session already notifies with the real message.
-On iOS with push on, the reverse holds while the app is backgrounded: the
-server's alert covers it, so the app's own Marmot alerts are skipped
-(`setMarmotRemoteAlertsEnabled`). Opening the Messages list also clears the
-data-less server alerts.
+When the app shows a Marmot message itself, it clears any generic push
+alert already in the tray (ours on Android, the server's data-less one on
+iOS); opening the Messages list clears them too.
 
 *Turning it off* sends a signed kind-449 removal into each group, then deletes
 the token at Apple/Google (`unregisterForNotificationsAsync`; retried at the

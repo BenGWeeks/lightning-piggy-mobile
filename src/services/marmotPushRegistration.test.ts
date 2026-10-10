@@ -38,6 +38,17 @@ jest.mock('expo-notifications', () => ({
   registerTaskAsync: jest.fn(async () => null),
   unregisterTaskAsync: jest.fn(async () => null),
 }));
+// The native token module, driven through the same controllable mock.
+jest.mock('expo-modules-core', () => ({
+  ...jest.requireActual('expo-modules-core'),
+  requireOptionalNativeModule: (name: string) =>
+    name === 'ExpoPushTokenManager'
+      ? {
+          getDevicePushTokenAsync: async () =>
+            (await jest.requireMock('expo-notifications').getDevicePushTokenAsync()).data,
+        }
+      : null,
+}));
 jest.mock('expo-task-manager', () => ({
   isTaskDefined: () => true,
   defineTask: jest.fn(),
@@ -278,5 +289,16 @@ describe('ordering of device-level changes', () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(lastRegistration()?.token).toEqual(new TextEncoder().encode('late-token'));
     stop();
+  });
+});
+
+describe('native token reads', () => {
+  it('a transient failure can be retried (no cached rejection)', async () => {
+    (Notifications.getDevicePushTokenAsync as jest.Mock).mockRejectedValueOnce(
+      new Error('SERVICE_NOT_AVAILABLE'),
+    );
+    expect((await enableMarmotPush()).status).toBe('unavailable');
+    expect((await enableMarmotPush()).status).toBe('enabled');
+    expect(Notifications.getDevicePushTokenAsync).toHaveBeenCalledTimes(2);
   });
 });

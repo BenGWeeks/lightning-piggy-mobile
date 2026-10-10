@@ -68,11 +68,12 @@ export async function wipeDmStoresForAccount(pubkey: string): Promise<void> {
     // A stopped session's queued push-state writes must not land after this.
     await quiesceMarmotSession(pubkey);
     await deleteMarmotStateForOwner(pubkey);
-    // Its groups still hold this device's push token (the signer is gone,
-    // so no signed removals): delete the token at Apple/Google instead.
-    await retireMarmotPushForAccount(pubkey);
   } catch (e) {
     if (__DEV__) console.warn('[Marmot] per-owner state wipe failed:', e);
   }
+  // Independent of the wipe above: its groups still hold this device's push
+  // token (the signer is gone, so no signed removals) — delete the token at
+  // Apple/Google instead (retried at next start if that fails).
+  await retireMarmotPushForAccount(pubkey).catch(() => undefined);
   forgetDmStoreMigration(pubkey);
 }
