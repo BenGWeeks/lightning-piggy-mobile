@@ -7,7 +7,7 @@
 //     wallet) and a changed push token register straight away, debounced so
 //     a burst of toggles is ONE signature;
 //   - plain app start never prompts, except for the 7-day refresh the
-//     watcher needs (registrations expire after 60 days unrefreshed);
+//     watcher needs (registrations are deleted after 30 days unrefreshed);
 //   - a relay-list change alone is folded into the next registration (a
 //     silent nsec signer re-registers right away);
 //   - anything else a remote signer can't do now is left "pending" for the

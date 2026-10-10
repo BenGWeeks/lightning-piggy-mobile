@@ -340,9 +340,12 @@ is:
 
 *Settings.* Under the push switch (Settings → Security → Push notifications),
 "More push notifications" lists four toggles — Messages (NIP-04/17), Zaps,
-Mentions, Payments — each off by default and only switchable while push is on
-(they need the device token the push switch obtains). The privacy note there
-says what the watcher learns.
+Mentions, Payments — each off by default and only switchable while *this
+account's* push is on (they need the device token the push switch obtains).
+Like the Marmot switch, everything is per account: the registrar only gets the
+token for an account that turned push on itself (`currentPushDevice(pubkey)`),
+so switching to or adding an account never registers it with the watcher. The
+privacy note there says what the watcher learns.
 
 *What a registration contains.* `{v:1, action, app, platform, token,
 apns_env?, categories, relays, nwc, ts}` — `app` is the build's application id
@@ -368,7 +371,7 @@ that is a prompt, so `planWatcherSync` decides:
 
 | Category toggle (debounced 2 s — a burst is one signature) | register | register
 | All categories off | unregister | unregister
-| Push switched off | unregister first (Settings; bounded at 20 s), then Marmot push deletes the token | same — if declined, the token deletion still ends Android pushes
+| Push switched off | unregister first (Settings; bounded at 20 s), then Marmot push deletes the token — or, if another account still uses push and the unregister didn't go through, replaces it | same — if declined, the token deletion still ends Android pushes
 | Push token changed | register | register
 | NWC wallet added / removed | register | register
 | Relay-list change only | register (10 s settle) | folded into the next registration
@@ -376,7 +379,7 @@ that is a prompt, so `planWatcherSync` decides:
 | App start, registration ≥ 7 days old | refresh | refresh (the only start-time prompt)
 | App start, an earlier change never went through | register | *pending* — "Retry" in Settings
 | Sign-out of the active account | unregister *before* the key is wiped (bounded at 20 s), then the token is deleted (Marmot push teardown) | same (one prompt; if declined or unanswered, the token deletion still ends Android pushes)
-| Removing another signed-in account | its key isn't the active signer: the token deletion kills the registration on Android; iOS best-effort (APNs may reissue the token; the watcher expires registrations after 60 days) | same
+| Removing another signed-in account | its key isn't the active signer: the token deletion kills the registration on Android; iOS best-effort (APNs may reissue the token; the watcher deletes registrations not refreshed for 30 days) | same
 |===
 
 Everything runs on one serial chain, and every signer instance (Marmot
@@ -423,10 +426,14 @@ exposes only `userInfo.body` as data, so the thread id identifies it.
   The Marmot wake task (which sees every push, and taps on Android) ignores
   watcher pushes.
 
-*Privacy.* Apple/Google learn that a notification arrived and when. For these
+*Privacy.* Apple/Google learn that a notification arrived, when, and — from
+the alert itself — which kind (message, zap, mention or payment). For these
 categories the watcher additionally learns the user's public key, linked to
 the app id and (encrypted) device token, the relays listed, the NWC connection
-keys (Payments), and *when* matching events arrive. It can't read DMs or NWC
+keys and which wallet service they belong to (Payments), and *when* matching
+events arrive. Its subscriptions are visible to the relays it watches: a
+relay can see that our server is filtering for the user's key. A registration
+that isn't refreshed is deleted after 30 days. It can't read DMs or NWC
 traffic (they stay encrypted, and it doesn't try); mentions, zap receipts and
 NIP-04 envelopes are public events whose author (and, for a mention, text) it
 sees like any relay does. Registrations travel inside gift wraps from throwaway
