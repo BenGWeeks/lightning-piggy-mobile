@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
+import React, { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Platform, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { Smartphone } from 'lucide-react-native';
 
@@ -29,7 +30,7 @@ import { createSecurityScreenStyles } from '../styles/SecurityScreen.styles';
  * never inherits it. The privacy trade-off (and, for remote-signer users,
  * what approving costs them) sits behind "Privacy details" right above the
  * switch. The notification server is one choice for the whole phone, so it
- * lives under "On this phone" (NotificationServerSection).
+ * lives under Settings → Advanced (NotificationServerSection).
  */
 const MarmotPushSection: React.FC = () => {
   const colors = useThemeColors();
@@ -51,26 +52,28 @@ const MarmotPushSection: React.FC = () => {
     setPending(await pendingMarmotPushGroups(pubkey).catch(() => null));
   }, [pubkey]);
 
-  useEffect(() => {
-    let alive = true;
-    setEnabled(false);
-    if (!pubkey) return;
-    void loadMarmotPushSettings(pubkey)
-      .catch(() => null)
-      .then((s) => {
-        if (!s) return;
-        if (!alive) return;
-        setEnabled(s.enabled);
-        setOtherAccounts(s.otherAccounts);
-        if (s.enabled) void refreshPending();
-      });
-    // The token read and group passes finish in the background.
-    const unsubscribe = subscribeMarmotPushStatus(() => void refreshPending());
-    return () => {
-      alive = false;
-      unsubscribe();
-    };
-  }, [pubkey, refreshPending]);
+  useFocusEffect(
+    useCallback(() => {
+      let alive = true;
+      setEnabled(false);
+      if (!pubkey) return;
+      void loadMarmotPushSettings(pubkey)
+        .catch(() => null)
+        .then((s) => {
+          if (!s) return;
+          if (!alive) return;
+          setEnabled(s.enabled);
+          setOtherAccounts(s.otherAccounts);
+          if (s.enabled) void refreshPending();
+        });
+      // The token read and group passes finish in the background.
+      const unsubscribe = subscribeMarmotPushStatus(() => void refreshPending());
+      return () => {
+        alive = false;
+        unsubscribe();
+      };
+    }, [pubkey, refreshPending]),
+  );
 
   const reportSync = useCallback(
     (result: SyncResult | null) => {

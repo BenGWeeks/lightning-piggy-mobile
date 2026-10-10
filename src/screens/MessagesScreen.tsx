@@ -36,6 +36,7 @@ import CreateGroupSheet from '../components/CreateGroupSheet';
 import type { GroupSummary } from '../types/groups';
 import { MessageCircle } from 'lucide-react-native';
 import TabHeader from '../components/TabHeader';
+import AmberPermissionBanner from '../components/AmberPermissionBanner';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import {
@@ -665,6 +666,7 @@ const MessagesScreen: React.FC = () => {
         title={t('messagesScreen.title')}
         icon={<MessageCircle size={20} color={colors.brandPink} />}
       />
+      <AmberPermissionBanner />
       <View style={styles.headerExtras}>
         <View style={styles.chipRow}>
           {searchExpanded ? (

@@ -87,6 +87,8 @@ const NotificationsScreen = lazyScreen(() => import('../screens/NotificationsScr
 const ProfileScreen = lazyScreen(() => import('../screens/account/ProfileScreen'));
 const WalletsScreen = lazyScreen(() => import('../screens/account/WalletsScreen'));
 const InvitationKeysScreen = lazyScreen(() => import('../screens/account/InvitationKeysScreen'));
+const AdvancedScreen = lazyScreen(() => import('../screens/account/AdvancedScreen'));
+const MessageSettingsScreen = lazyScreen(() => import('../screens/account/MessageSettingsScreen'));
 const NostrScreen = lazyScreen(() => import('../screens/account/NostrScreen'));
 const OnChainScreen = lazyScreen(() => import('../screens/account/OnChainScreen'));
 const DisplayLanguageScreen = lazyScreen(() => import('../screens/account/DisplayLanguageScreen'));
@@ -569,6 +571,8 @@ function MainDrawer() {
       <AccountDrawer.Screen name="MainTabs" component={HomeTabs} />
       <AccountDrawer.Screen name="AccountProfile" component={ProfileScreen} />
       <AccountDrawer.Screen name="AccountWallets" component={WalletsScreen} />
+      <AccountDrawer.Screen name="AccountAdvanced" component={AdvancedScreen} />
+      <AccountDrawer.Screen name="AccountMessages" component={MessageSettingsScreen} />
       <AccountDrawer.Screen name="AccountNostr" component={NostrScreen} />
       <AccountDrawer.Screen name="AccountInvitationKeys" component={InvitationKeysScreen} />
       <AccountDrawer.Screen name="AccountOnChain" component={OnChainScreen} />

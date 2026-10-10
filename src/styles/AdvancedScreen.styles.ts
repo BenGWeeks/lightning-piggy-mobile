@@ -1,10 +1,31 @@
 import { StyleSheet } from 'react-native';
 import type { Palette } from './palettes';
 
-export const createNostrScreenStyles = (colors: Palette) =>
+export const createAdvancedScreenStyles = (colors: Palette) =>
   StyleSheet.create({
-    // Experimental section (#1057) — native crypto tester toggle. Matches the
-    // white-on-gradient look of the rest of this screen.
+    sectionGap: {
+      marginTop: 28,
+    },
+    // A row that opens a sub-page (Nostr network, Bitcoin network).
+    navRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      backgroundColor: 'rgba(255,255,255,0.1)',
+      borderRadius: 12,
+      paddingVertical: 14,
+      paddingHorizontal: 14,
+      marginTop: 8,
+    },
+    navIcon: {
+      width: 24,
+      alignItems: 'center',
+    },
+    navText: {
+      flex: 1,
+    },
+    // Switch rows (Experimental #1057, Developer options) and the nav rows
+    // above share this white-on-gradient look.
     experimentalRow: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -40,4 +61,4 @@ export const createNostrScreenStyles = (colors: Palette) =>
     },
   });
 
-export type NostrScreenStyles = ReturnType<typeof createNostrScreenStyles>;
+export type AdvancedScreenStyles = ReturnType<typeof createAdvancedScreenStyles>;
