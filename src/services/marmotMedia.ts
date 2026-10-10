@@ -27,6 +27,7 @@ import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 
 import { encodeMarmotMediaUrl } from '../utils/encryptedFileUrl';
 import type { MarmotImageParams } from '../utils/messageContent';
+import { t } from '../i18n';
 
 type Group = MarmotGroup<GroupRumorHistory>;
 type GroupState = Group['state'];
@@ -68,14 +69,43 @@ export function candidateMediaStates(group: Group): GroupState[] {
   return states;
 }
 
-/** The image attachments of a Marmot chat event (non-images are ignored). */
-export function imageAttachments(tags: string[][]): MediaAttachment[] {
-  // Versioned parse: v1 and v2 references; an invalid one is skipped.
-  return getMediaAttachments(tags).filter((a) => a.mediaType.startsWith('image/'));
+/** Attachment types the app renders inline: photos and voice notes. */
+export const isRenderableMediaType = (mime: string) =>
+  mime.startsWith('image/') || mime.startsWith('audio/');
+
+/** All `imeta` attachments of a Marmot chat event (versioned parse: v1 and
+ * v2 references; an invalid one is skipped). */
+export function allAttachments(tags: string[][]): MediaAttachment[] {
+  return getMediaAttachments(tags);
+}
+
+/** The attachments of a Marmot chat event we render inline — photos and
+ * voice notes (anything else is ignored; see {@link unsupportedAttachmentText}). */
+export function renderableAttachments(tags: string[][]): MediaAttachment[] {
+  return allAttachments(tags).filter((a) => isRenderableMediaType(a.mediaType));
 }
 
 /**
- * Derive every candidate key for a rumor's image attachments. `states` must
+ * Secret-free stand-in text for a chat event whose attachment didn't make it
+ * to a photo / voice bubble (an unsupported type like a video or PDF, or a
+ * photo / voice note whose keys we couldn't derive) — so the bubble says so
+ * rather than being empty. Names the file and type only: never a URL or
+ * key. Null if the event carries no attachment.
+ */
+export function attachmentFallbackText(tags: string[][]): string | null {
+  const a = allAttachments(tags)[0];
+  if (!a) return null;
+  const name = a.filename.replace(/[\r\n]+/g, ' ').slice(0, 80);
+  return t(
+    isRenderableMediaType(a.mediaType)
+      ? 'messageBubble.attachmentUnavailable'
+      : 'messageBubble.unsupportedAttachment',
+    { name, type: a.mediaType },
+  );
+}
+
+/**
+ * Derive every candidate key for a rumor's renderable attachments. `states` must
  * be captured when the message is processed — retained epochs are pruned
  * later, after which the media can no longer be decrypted.
  */
@@ -86,7 +116,7 @@ export async function deriveMediaKeys(
   tags: string[][],
 ): Promise<MarmotMediaKeys> {
   const keys: MarmotMediaKeys = {};
-  for (const a of imageAttachments(tags)) {
+  for (const a of renderableAttachments(tags)) {
     const url = mediaFetchUrl(a, policy);
     if (!url) continue;
     const derived = await Promise.all(
@@ -97,14 +127,14 @@ export async function deriveMediaKeys(
   return keys;
 }
 
-/** The stored message text for a Marmot photo, or null if `tags` carry no
- * image attachment we hold keys for. Only the first image renders. */
+/** The stored message text for a Marmot photo or voice note, or null if `tags` carry no
+ * image attachment we hold keys for. Only the first attachment renders. */
 export function marmotMediaText(
   tags: string[][],
   keys: MarmotMediaKeys | undefined,
 ): string | null {
   if (!keys) return null;
-  for (const a of imageAttachments(tags)) {
+  for (const a of renderableAttachments(tags)) {
     const ref = keys[a.ciphertextSha256];
     if (!ref?.url || !ref.keysHex?.length) continue;
     return encodeMarmotMediaUrl({
@@ -121,7 +151,7 @@ export function marmotMediaText(
   return null;
 }
 
-/** Encrypt a photo for `group` under its current epoch, in the group's
+/** Encrypt a photo / voice note for `group` under its current epoch, in the group's
  * media version. */
 export async function encryptMarmotMedia(
   group: Group,
@@ -155,8 +185,8 @@ export function marmotImetaTag(attachment: MediaAttachment, blobUrl: string): st
   });
 }
 
-/** Decrypt a fetched Marmot photo (verifies both hashes and the AEAD tag). */
-export function decryptMarmotImage(
+/** Decrypt a fetched Marmot photo or voice note (verifies both hashes and the AEAD tag). */
+export function decryptMarmotMedia(
   encrypted: Uint8Array,
   image: { mime: string; nonceHex?: string; marmot: MarmotImageParams },
 ): Uint8Array {

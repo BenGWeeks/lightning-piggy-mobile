@@ -6,7 +6,7 @@ import { Buffer } from 'buffer';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createDecryptedImageStyles } from '../styles/DecryptedImage.styles';
 import { decryptFile } from '../services/encryptedFile';
-import { decryptMarmotImage } from '../services/marmotMedia';
+import { decryptMarmotMedia } from '../services/marmotMedia';
 import type { MarmotImageParams } from '../utils/messageContent';
 
 /**
@@ -117,7 +117,7 @@ const DecryptedImage: React.FC<Props> = ({
           if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
           const cipher = new Uint8Array(await res.arrayBuffer());
           const plain = marmotParams
-            ? decryptMarmotImage(cipher, {
+            ? decryptMarmotMedia(cipher, {
                 mime: mime ?? 'image/jpeg',
                 nonceHex,
                 marmot: marmotParams,

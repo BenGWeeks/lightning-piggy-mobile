@@ -4,6 +4,7 @@ import { Alert } from '../components/BrandedAlert';
 import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import {
   stripImageMetadata,
+  readFileAsBase64,
   uploadEncryptedBlob,
   type EncryptedUpload,
 } from '../services/imageUploadService';
@@ -15,7 +16,7 @@ import {
 import { nprofileEncode, buildProfileRelayHints } from '../services/nostrService';
 import type { PickedFriend } from '../components/FriendPickerSheet';
 import { giphyEnvelope, type Gif } from '../services/giphyService';
-import type { MarmotImage } from '../services/marmotSend';
+import { MARMOT_VOICE_MIME, marmotVoiceFilename, type MarmotImage } from '../services/marmotSend';
 import { sendClearingDraft } from '../utils/composerDraft';
 
 /**
@@ -39,9 +40,9 @@ export interface ComposerSendStrategy {
    *  optimistic append. Returns true on success. The `kind` lets the wrapper
    *  pick the right failure copy ("voice note" vs "image"). */
   sendFile: (file: EncryptedUpload, kind: 'voice' | 'image') => Promise<boolean>;
-  /** Optional photo sender that owns encryption + upload itself — a Marmot
-   *  thread sends photos the Marmot way (MIP-04), keyed by the MLS group,
-   *  so they skip the AES-GCM upload. Owns the optimistic append. */
+  /** Optional photo / voice-note sender that owns encryption + upload itself —
+   *  a Marmot thread sends them the Marmot way (MIP-04), keyed by the MLS
+   *  group, so they skip the AES-GCM upload. Owns the optimistic append. */
   sendImage?: (image: MarmotImage) => Promise<boolean>;
   /** Send GIFs in White Noise's two-line envelope (URL + `via GIPHY`) —
    *  Marmot threads, where White Noise only renders a GIF in that shape. */
@@ -240,16 +241,30 @@ export function useComposerActions({
   );
 
   // Voice-note send (#235): encrypt the recorded .m4a on-device (AES-256-GCM),
-  // upload the CIPHERTEXT to Blossom, then send a NIP-17 kind-15 file message.
+  // upload the CIPHERTEXT to Blossom, then send a NIP-17 kind-15 file message —
+  // or, in a Marmot thread, MIP-04 media (kind 9 + `imeta`).
   const handleSendVoiceNote = useCallback(
-    async (uri: string) => {
+    async (uri: string, durationMs = 0) => {
       // Preflight BEFORE the expensive encrypt + Blossom upload: bail if a send
       // is already in flight or there's no valid target (group not loaded).
       if (uploadingVoice || strategy.canSend?.() === false) return false;
       setUploadingVoice(true);
       try {
-        const file = await uploadEncryptedBlob(uri, signEvent, 'audio/mp4');
-        const ok = await strategy.sendFile(file, 'voice');
+        let ok: boolean;
+        if (strategy.sendImage) {
+          // Marmot thread: MIP-04 media like photos, so White Noise shows a player.
+          ok = await strategy.sendImage({
+            uri,
+            base64: await readFileAsBase64(uri),
+            mime: MARMOT_VOICE_MIME,
+            filename: marmotVoiceFilename(durationMs),
+          });
+        } else {
+          ok = await strategy.sendFile(
+            await uploadEncryptedBlob(uri, signEvent, 'audio/mp4'),
+            'voice',
+          );
+        }
         if (!ok) return false;
         setVoiceSheetOpen(false);
         closeAttachPanel();

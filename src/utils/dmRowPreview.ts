@@ -31,7 +31,13 @@ export function dmRowPreview(content: string, wireKind: number): string {
   if (wireKind === NWC_SHARE_KIND) return nwcSharePreviewFromContent(content);
   // `#lpe=1` is the encrypted-file fragment marker (see encryptedFileUrl.ts);
   // its `&k=…&n=…` params are the decryption secret, so never let it through.
-  if (wireKind === 15 && content.includes('#lpe=1')) return '📎 Attachment';
+  if (wireKind === 15 && content.includes('#lpe=1')) {
+    // The mime rides in the fragment (`m=audio%2Fmp4`); name voice notes as such.
+    const mime = new URLSearchParams(content.slice(content.indexOf('#') + 1)).get('m') ?? '';
+    return mime.startsWith('audio/')
+      ? `🎤 ${t('messageBubble.voiceMessagePreview')}`
+      : '📎 Attachment';
+  }
   if (isMarmotKind(wireKind))
     return `🔒 ${t(wireKind === MARMOT_WELCOME_KIND ? 'messageBubble.marmotInvitePreview' : 'messageBubble.marmotMessagePreview')}`;
   return pollPreviewFromContent(content, wireKind) ?? orderPreviewFromContent(content, wireKind);

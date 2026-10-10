@@ -93,6 +93,8 @@ export interface ParsedVoiceNote {
   encrypted: boolean;
   keyHex?: string;
   nonceHex?: string;
+  /** Set for a Marmot (MIP-04) voice note — decrypted with these instead of AES-GCM. */
+  marmot?: MarmotImageParams;
 }
 
 /**
@@ -119,6 +121,10 @@ export function parseVoiceNote(text: string): ParsedVoiceNote | null {
       // than show a voice-note card that would fail when the user hits play.
       // `alg` is always emitted by our encoder, so absence is tolerated.
       const alg = params.get('alg') ?? 'aes-gcm';
+      if (isMarmotMediaVersion(alg)) {
+        const marmot = parseMarmotMedia(alg, mime, nonceHex, params, 'audio/');
+        return marmot && { url, mime, encrypted: true, nonceHex, marmot };
+      }
       if (alg !== 'aes-gcm') return null;
       // Only audio here — encrypted images are handled separately (#688).
       if (!keyHex || !nonceHex || !mime.startsWith('audio/')) return null;
@@ -159,7 +165,7 @@ export interface ParsedImageMessage {
   marmot?: MarmotImageParams;
 }
 
-/** The MIP-04 fields a Marmot photo needs to decrypt (see encodeMarmotMediaUrl). */
+/** The MIP-04 fields a Marmot photo / voice note needs to decrypt (see encodeMarmotMediaUrl). */
 export interface MarmotImageParams {
   version: MarmotMediaVersion;
   keysHex: string[];
@@ -190,7 +196,10 @@ export function parseImageMessage(text: string): ParsedImageMessage | null {
       const nonceHex = params.get('n') ?? undefined;
       const mime = params.get('m') ?? 'application/octet-stream';
       const alg = params.get('alg') ?? 'aes-gcm';
-      if (isMarmotMediaVersion(alg)) return parseMarmotImage(alg, url, mime, nonceHex, params);
+      if (isMarmotMediaVersion(alg)) {
+        const marmot = parseMarmotMedia(alg, mime, nonceHex, params, 'image/');
+        return marmot && { url, mime, encrypted: true, nonceHex, marmot };
+      }
       // Otherwise we only implement AES-GCM (see encryptedFile.ts). A kind-15
       // file with a different `alg` falls back to plain rendering rather than
       // show an image card that fails to decrypt. `alg` is always emitted by
@@ -205,26 +214,22 @@ export function parseImageMessage(text: string): ParsedImageMessage | null {
   return plain ? { url: plain, mime: 'image/jpeg', encrypted: false } : null;
 }
 
-function parseMarmotImage(
+/** The MIP-04 fields of a `#lpe=1&alg=encrypted-media-v*` fragment, or null
+ * if incomplete or `mime` isn't of the wanted family (`image/` / `audio/`). */
+function parseMarmotMedia(
   version: MarmotMediaVersion,
-  url: string,
   mime: string,
   nonceHex: string | undefined,
   params: URLSearchParams,
-): ParsedImageMessage | null {
+  mimePrefix: 'image/' | 'audio/',
+): MarmotImageParams | null {
   const keysHex = (params.get('k') ?? '').split(',').filter(Boolean);
   const filename = params.get('f');
   const plaintextSha256 = params.get('ps');
   const ciphertextSha256 = params.get('cs');
-  if (!mime.startsWith('image/') || keysHex.length === 0 || !nonceHex) return null;
+  if (!mime.startsWith(mimePrefix) || keysHex.length === 0 || !nonceHex) return null;
   if (!filename || !plaintextSha256 || !ciphertextSha256) return null;
-  return {
-    url,
-    mime,
-    encrypted: true,
-    nonceHex,
-    marmot: { version, keysHex, filename, plaintextSha256, ciphertextSha256 },
-  };
+  return { version, keysHex, filename, plaintextSha256, ciphertextSha256 };
 }
 
 export function extractInvoice(text: string): DecodedInvoice | null {

@@ -258,7 +258,11 @@ export function useGroupComposerActions(params: {
         },
       });
       if (!result.success) {
-        Alert.alert('Send failed', result.error ?? 'Could not send image.');
+        Alert.alert(
+          'Send failed',
+          result.error ??
+            `Could not send ${image.mime.startsWith('audio/') ? 'voice note' : 'image'}.`,
+        );
         if (optimistic.current) {
           await optimistic.current.persisted;
           await removeOptimisticRow(optimistic.current.row.id);

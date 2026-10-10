@@ -39,7 +39,7 @@ interface Props {
    * sends today (#235). Resolve `false` when nothing was sent, so the
    * sheet lets the user tap Send again with the same recording.
    */
-  onSend: (uri: string) => void | boolean | Promise<void | boolean>;
+  onSend: (uri: string, durationMs?: number) => void | boolean | Promise<void | boolean>;
   /**
    * When true, the Send button shows a spinner and stays disabled
    * while the parent's upload + post is in flight. Cancel only
@@ -502,7 +502,10 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
       }
       // `false` = not sent (failed, or the user cancelled a NIP-17 fallback):
       // the sheet keeps the recording, so let a later tap send it.
-      if ((await onSend(recordedUri)) === false) sendInFlightRef.current = false;
+      const durationMs = Math.round(
+        (playbackDuration || recorderState.durationMillis / 1000) * 1000,
+      );
+      if ((await onSend(recordedUri, durationMs)) === false) sendInFlightRef.current = false;
     } catch (err) {
       // Parent's onSend may throw — clear the guard so the user can
       // retry without remounting the sheet.
@@ -514,7 +517,7 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
     // reset the ref on the next open. Holding it true in the meantime
     // prevents a third tap from racing in if the user happens to keep
     // jabbing the button while the sheet is animating away.
-  }, [recordedUri, sending, onSend, player, t]);
+  }, [recordedUri, sending, onSend, player, t, playbackDuration, recorderState.durationMillis]);
 
   const renderBackdrop = useCallback(
     (props: BottomSheetBackdropProps) => (
