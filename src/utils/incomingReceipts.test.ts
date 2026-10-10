@@ -4,6 +4,8 @@ import {
   settledIncomingHashes,
   isValidPaymentHash,
   shouldSeedBaseline,
+  isStaleReceipt,
+  STALE_RECEIPT_MS,
   type AnnouncedReceipt,
 } from './incomingReceipts';
 import type { WalletTransaction } from '../types/wallet';
@@ -32,7 +34,7 @@ describe('pickNewReceipts (#653 — dedup receives by payment_hash)', () => {
   it('returns a settled incoming tx with an unseen hash', () => {
     const txns = [tx({ type: 'incoming', amount: 111, settled_at: 100, paymentHash: H1 })];
     expect(pickNewReceipts(txns, new Set())).toEqual([
-      { paymentHash: H1, amountSats: 111, settledAt: 100 },
+      { paymentHash: H1, amountSats: 111, settledAt: 100, reportedSettledAt: 100 },
     ]);
   });
 
@@ -73,7 +75,7 @@ describe('pickNewReceipts (#653 — dedup receives by payment_hash)', () => {
       tx({ type: 'incoming', amount: 222, settled_at: 200, paymentHash: H2 }),
     ];
     expect(pickNewReceipts(txns, new Set([H1]))).toEqual([
-      { paymentHash: H2, amountSats: 222, settledAt: 200 },
+      { paymentHash: H2, amountSats: 222, settledAt: 200, reportedSettledAt: 200 },
     ]);
   });
 });
@@ -151,4 +153,34 @@ it('announces and baselines Coinos settled rows without settlement timestamps', 
   expect(settledIncomingHashes([receipt])).toEqual(new Set([H1]));
   expect(pickNewReceipts([receipt], settledIncomingHashes([receipt]))).toEqual([]);
   expect(pickNewReceipts([{ ...receipt, settled: false }], new Set())).toEqual([]);
+});
+
+describe('isStaleReceipt (catch-up payments notify quietly)', () => {
+  const now = 1_700_000_000_000;
+  it('is fresh within the window and stale past it', () => {
+    expect(isStaleReceipt(now / 1000 - 30, now)).toBe(false);
+    expect(isStaleReceipt((now - STALE_RECEIPT_MS - 1000) / 1000, now)).toBe(true);
+    expect(isStaleReceipt(now / 1000 - 3 * 3600, now)).toBe(true);
+  });
+  it('treats a missing timestamp as fresh, so a live payment is never silenced', () => {
+    expect(isStaleReceipt(undefined, now)).toBe(false);
+    expect(isStaleReceipt(null, now)).toBe(false);
+    expect(isStaleReceipt(0, now)).toBe(false);
+  });
+});
+
+describe('pickNewReceipts reportedSettledAt', () => {
+  it("carries the wallet's settled_at only — never created_at", () => {
+    const [withSettle] = pickNewReceipts(
+      [tx({ type: 'incoming', amount: 1, settled_at: 100, created_at: 50, paymentHash: H1 })],
+      new Set(),
+    );
+    expect(withSettle.reportedSettledAt).toBe(100);
+    const [noSettle] = pickNewReceipts(
+      [tx({ type: 'incoming', amount: 1, created_at: 50, settled: true, paymentHash: H1 })],
+      new Set(),
+    );
+    expect(noSettle.settledAt).toBe(50);
+    expect(noSettle.reportedSettledAt).toBeUndefined();
+  });
 });

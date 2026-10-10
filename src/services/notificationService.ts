@@ -54,6 +54,9 @@ import type { DmProtocol } from '../utils/dmProtocol';
 // orphans the user's per-channel mute state in system Settings.
 const CHANNEL_MESSAGES = 'messages';
 const CHANNEL_PAYMENTS = 'payments';
+// LOW importance: catch-up payments land in the shade with no sound or
+// heads-up, even if the app is backgrounded before the post fires.
+const CHANNEL_PAYMENTS_QUIET = 'payments-quiet';
 // Low-importance channel for the persistent "watching for messages"
 // foreground-service notification (#279 realtime upgrade). LOW so it
 // never buzzes or pops a banner — it's the ongoing status chip Android
@@ -103,6 +106,9 @@ export interface NotificationData {
   cacheCoord?: string;
   /** Links a tray notification to its in-app history row (#1143). */
   historyId?: string;
+  /** Post without a heads-up banner or sound — drawer + history only. Read by
+   * the foreground handler; used for catch-up payments found on app open. */
+  quiet?: boolean;
   /** NIP-17 gift-wrap id of a message the background couldn't decrypt: on
    * tap, its conversation is resolved once the app has decrypted it (#1154). */
   wrapId?: string;
@@ -163,12 +169,18 @@ export async function ensureNotificationsInitialised(): Promise<void> {
 
 async function initialiseInternal(): Promise<void> {
   Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowBanner: true,
-      shouldShowList: true,
-      shouldPlaySound: true,
-      shouldSetBadge: false,
-    }),
+    handleNotification: async (notification) => {
+      // A `quiet` notification still lands in the drawer, just without the
+      // heads-up banner or sound (Android: expo marks it silent, which also
+      // stops the HIGH channel from popping it).
+      const quiet = notification.request.content.data?.quiet === true;
+      return {
+        shouldShowBanner: !quiet,
+        shouldShowList: true,
+        shouldPlaySound: !quiet,
+        shouldSetBadge: false,
+      };
+    },
   });
 
   if (Platform.OS === 'android') {
@@ -197,6 +209,16 @@ async function initialiseInternal(): Promise<void> {
       importance: Notifications.AndroidImportance.HIGH,
       description: 'Incoming Lightning, on-chain payments, and zaps',
       lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
+    });
+    await Notifications.setNotificationChannelAsync(CHANNEL_PAYMENTS_QUIET, {
+      name: 'Earlier payments',
+      importance: Notifications.AndroidImportance.LOW,
+      description: 'Payments that arrived while the app was closed, shown quietly',
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
+      // Explicitly silent, not just LOW importance: a user who raises the
+      // channel's importance in Settings still gets no sound or buzz.
+      sound: null,
+      enableVibrate: false,
     });
     // Importance LOW = no sound, no heads-up banner. This is the channel
     // the persistent foreground-service chip rides on (#279 realtime
@@ -362,6 +384,7 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
     // so the tap-router can reopen the right thread, which then loads the
     // actual message from the local store once the user has unlocked.
     const presented = lockScreenContent ? payload : { ...payload, ...genericFor(payload.kind) };
+    const quiet = payload.data?.quiet === true;
 
     const id = await Notifications.scheduleNotificationAsync({
       content: {
@@ -370,7 +393,10 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
         // `data` rides through to the tap handler. Always include
         // `kind` so the deep-link router can dispatch by source.
         data: { kind: payload.kind, ...(payload.data ?? {}), historyId, owner },
-        sound: 'default',
+        // Quiet is enforced natively too (not only by the foreground handler),
+        // so it holds if the app is backgrounded before the 1 s trigger fires.
+        sound: quiet ? false : 'default',
+        ...(quiet ? { interruptionLevel: 'passive' as const } : {}),
       },
       // Android: a TIME_INTERVAL trigger is the supported way to pin a
       // notification to a specific channel (`channelId` lives on the trigger,
@@ -384,7 +410,7 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
           ? {
               type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
               seconds: 1,
-              channelId: channelForKind(payload.kind),
+              channelId: quiet ? CHANNEL_PAYMENTS_QUIET : channelForKind(payload.kind),
             }
           : null,
     });
@@ -620,6 +646,8 @@ export async function firePaymentNotification(opts: {
   /** Stable id of the payment (its hash, or a fallback for on-chain), so a
    * retried notification doesn't add a second history row. */
   sourceId?: string;
+  /** Catch-up payment (settled well before we noticed it): drawer only. */
+  quiet?: boolean;
 }): Promise<string | null> {
   const noun = opts.kind === 'zap' ? 'Zap' : 'Payment';
   const sats = opts.amountSats.toLocaleString();
@@ -629,7 +657,13 @@ export async function firePaymentNotification(opts: {
     kind: opts.kind,
     title: `${noun} received`,
     body,
-    data: opts.walletId ? { walletId: opts.walletId } : undefined,
+    data:
+      opts.walletId || opts.quiet
+        ? {
+            ...(opts.walletId ? { walletId: opts.walletId } : {}),
+            ...(opts.quiet ? { quiet: true } : {}),
+          }
+        : undefined,
     owner: opts.owner,
     historyKey: opts.sourceId
       ? `payment:${opts.walletId ?? ''}:${opts.sourceId.toLowerCase()}`

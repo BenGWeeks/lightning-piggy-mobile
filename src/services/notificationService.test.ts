@@ -24,6 +24,7 @@ jest.mock('expo-notifications', () => ({
   SchedulableTriggerInputTypes: { TIME_INTERVAL: 'timeInterval' },
 }));
 
+import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { listNotifications } from './notificationHistory';
 import {
@@ -36,6 +37,7 @@ import {
   firePaymentNotification,
   fireCacheNotification,
   fireNotification,
+  ensureNotificationsInitialised,
   setLockScreenContentEnabled,
   __resetForTests,
   notificationMatchesTarget,
@@ -170,6 +172,50 @@ describe('firePaymentNotification', () => {
     const id = await firePaymentNotification({ kind: 'payment', amountSats: 42 });
     expect(id).toBe('notif-id');
     expect(mockScheduleNotificationAsync).toHaveBeenCalled();
+  });
+
+  it('marks a catch-up payment quiet (and leaves a live one unflagged)', async () => {
+    await firePaymentNotification({ kind: 'zap', amountSats: 21, walletId: 'w1', quiet: true });
+    expect(lastScheduledContent()?.data).toMatchObject({
+      kind: 'zap',
+      walletId: 'w1',
+      quiet: true,
+    });
+    await firePaymentNotification({ kind: 'zap', amountSats: 21, walletId: 'w1' });
+    expect(lastScheduledContent()?.data).not.toHaveProperty('quiet');
+  });
+
+  it('enforces quiet natively — no sound, passive on iOS — so it holds in the background', async () => {
+    await firePaymentNotification({ kind: 'zap', amountSats: 21, walletId: 'w1', quiet: true });
+    expect(lastScheduledContent()).toMatchObject({ sound: false, interruptionLevel: 'passive' });
+    await firePaymentNotification({ kind: 'zap', amountSats: 21, walletId: 'w1' });
+    expect(lastScheduledContent()?.sound).toBe('default');
+    expect(lastScheduledContent()).not.toHaveProperty('interruptionLevel');
+  });
+});
+
+describe('foreground presentation', () => {
+  const present = async (data: Record<string, unknown>) => {
+    await ensureNotificationsInitialised();
+    const { handleNotification } = jest.mocked(Notifications.setNotificationHandler).mock
+      .calls[0][0]!;
+    return handleNotification({ request: { content: { data } } } as never);
+  };
+
+  it('pops a normal notification as a banner with sound', async () => {
+    await expect(present({ kind: 'payment' })).resolves.toMatchObject({
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: true,
+    });
+  });
+
+  it('puts a quiet one in the drawer only — no banner, no sound', async () => {
+    await expect(present({ kind: 'zap', quiet: true })).resolves.toMatchObject({
+      shouldShowBanner: false,
+      shouldShowList: true,
+      shouldPlaySound: false,
+    });
   });
 });
 

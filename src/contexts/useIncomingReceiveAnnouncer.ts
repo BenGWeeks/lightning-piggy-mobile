@@ -11,7 +11,7 @@ import { walletLabel, type WalletState } from '../types/wallet';
 import { incomingPaymentSourceFor } from './incomingPaymentSource';
 import { markPaymentsSeen } from '../services/paymentNotificationDedupe';
 import { getActivePubkey } from '../services/walletStorageService';
-import type { IncomingPayment } from './WalletContext';
+import type { IncomingPayment } from './incomingPayment';
 
 interface Params {
   wallets: WalletState[];
@@ -107,6 +107,7 @@ export function useIncomingReceiveAnnouncer({
         source: newest.source ?? 'lightning',
         // Already detected from a current tx list — skip the redundant refresh.
         fromTxList: true,
+        settledAt: newest.reportedSettledAt,
       });
     }
   }, [wallets, seenReceiptsRef, persistSeenReceipts, setLastIncomingPayment]);

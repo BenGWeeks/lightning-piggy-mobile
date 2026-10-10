@@ -6,6 +6,9 @@ export interface NewReceipt {
   amountSats: number;
   /** Unix seconds the payment settled — used to pick the newest deterministically. */
   settledAt: number;
+  /** The wallet's own `settled_at`, when present — unlike `settledAt`, never
+   * falls back to the invoice's creation time, so it can judge staleness. */
+  reportedSettledAt?: number;
 }
 
 // A Lightning payment hash is 32 bytes → 64 hex chars. Some NWC backends return
@@ -42,6 +45,7 @@ export function pickNewReceipts(
       paymentHash: tx.paymentHash,
       amountSats: tx.amount,
       settledAt: tx.settled_at ?? tx.created_at ?? 0,
+      ...(tx.settled_at ? { reportedSettledAt: tx.settled_at } : {}),
     });
   }
   return fresh;
@@ -98,4 +102,18 @@ export function settledIncomingHashes(transactions: readonly WalletTransaction[]
     }
   }
   return hashes;
+}
+
+// A receipt that settled this long before we noticed it is "catch-up" news —
+// typically a payment that landed while the app was closed and is only found by
+// the tx-list refresh on open. It still gets a notification (drawer + in-app
+// history), just a quiet one, so opening the app isn't greeted by a heads-up
+// banner about a zap from hours ago.
+export const STALE_RECEIPT_MS = 5 * 60 * 1000;
+
+// `settledAtSec` is Unix seconds (NWC `settled_at`); a missing / zero value is
+// treated as fresh so a backend that omits it never silences a live payment.
+export function isStaleReceipt(settledAtSec: number | undefined | null, nowMs: number): boolean {
+  if (!settledAtSec || settledAtSec <= 0) return false;
+  return nowMs - settledAtSec * 1000 > STALE_RECEIPT_MS;
 }

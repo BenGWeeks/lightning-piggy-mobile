@@ -35,6 +35,7 @@ import FriendPickerSheet, { PickedFriend } from './FriendPickerSheet';
 import BoltzReceiveSheet from './BoltzReceiveSheet';
 import type { RootStackParamList } from '../navigation/types';
 import type { DmProtocol } from '../utils/dmProtocol';
+import { isStaleReceipt } from '../utils/incomingReceipts';
 
 // On-chain address fetching is done via WalletContext.getReceiveAddress
 
@@ -369,7 +370,10 @@ const ReceiveSheet: React.FC<Props> = ({
     if (
       lastIncomingPayment &&
       selectedWallet &&
-      lastIncomingPayment.walletId === selectedWallet.id
+      lastIncomingPayment.walletId === selectedWallet.id &&
+      // A catch-up receipt (settled long before we noticed it) isn't a
+      // payment to this QR — and nothing clears it, as no overlay shows.
+      !isStaleReceipt(lastIncomingPayment.settledAt, lastIncomingPayment.at)
     ) {
       setPaymentReceived(true);
     }
