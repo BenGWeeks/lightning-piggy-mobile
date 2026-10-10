@@ -33,6 +33,7 @@ import {
 } from './marmotSession';
 import { createMemoryMarmotBackend, decodeMarmotValue, encodeMarmotValue } from './marmotStore';
 import { storedMarmotContent } from './marmotInbox';
+import { MarmotWelcomeDeliveryError } from './marmotInvitees';
 import { decryptMarmotMedia, marmotImetaTag } from './marmotMedia';
 import { parseImageMessage, parseVoiceNote } from '../utils/messageContent';
 
@@ -207,6 +208,22 @@ function makeSession(
     getWriteRelays: () => [RELAY],
     getLookupRelays: () => [RELAY],
     groupBackfillPageSize: pageSize,
+  });
+  session.subscribe({ onMessage: (m) => inbox.push(m) });
+  return { ...who, session, inbox };
+}
+
+/** Another install of an existing account: same key, its own device state. */
+function makeInstall(relay: ReturnType<typeof makeRelay>, who: ReturnType<typeof makeSigner>) {
+  const inbox: MarmotMessageEvent[] = [];
+  const session = new MarmotSession({
+    pubkey: who.pubkey,
+    signerType: 'nsec',
+    signer: who.signer,
+    network: relay.network,
+    backend: createMemoryMarmotBackend(),
+    getWriteRelays: () => [RELAY],
+    getLookupRelays: () => [RELAY],
   });
   session.subscribe({ onMessage: (m) => inbox.push(m) });
   return { ...who, session, inbox };
@@ -917,6 +934,120 @@ describe('MarmotSession (no WebCrypto)', () => {
 
     alice.session.stop();
     bob.session.stop();
+  }, 60_000);
+
+  it('multi-device: invites every device of a contact; one conversation, attributed per account', async () => {
+    const relay = makeRelay();
+    // Fault injection (installed before the sessions capture `publish`):
+    // reject the next N Welcome gift wraps.
+    const publish = relay.network.publish;
+    let rejectWraps = 0;
+    relay.network.publish = async (relays, event) => {
+      if (event.kind === 1059 && rejectWraps > 0) {
+        rejectWraps--;
+        return Object.fromEntries(relays.map((r) => [r, { from: r, ok: false, message: 'no' }]));
+      }
+      return publish(relays, event);
+    };
+    const big = makeSession(relay);
+    const bigOtherPhone = makeInstall(relay, big);
+    const littleId = makeSigner();
+    const [phone, tablet] = [makeInstall(relay, littleId), makeInstall(relay, littleId)];
+    await Promise.all([big, bigOtherPhone, phone, tablet].map((p) => p.session.start()));
+    const kps = (pk: string) => relay.events.filter((e) => e.kind === 30443 && e.pubkey === pk);
+    await waitFor(() => kps(littleId.pubkey).length === 2 && kps(big.pubkey).length === 2);
+    // A third Little key package that can't be used (bad signature, new slot):
+    // skipped, the two good devices still join.
+    const broken = JSON.parse(JSON.stringify(kps(littleId.pubkey)[0])) as NostrEvent;
+    broken.tags = [...broken.tags.filter((t) => t[0] !== 'd'), ['d', 'b'.repeat(64)]];
+    broken.created_at += 5;
+    relay.events.push(broken);
+
+    // One of the two Welcomes fails to publish: logged, not fatal — the
+    // commit still adds both devices.
+    rejectWraps = 1;
+    const dm = await big.session.getOrCreateDm(littleId.pubkey);
+    // Three leaves (Big + two Little devices), still ONE DM with ONE member.
+    expect(dm).toMatchObject({ isDm: true, memberPubkeys: [littleId.pubkey] });
+    // Our own other phone is never invited (that would be device linking).
+    expect(unwrapWelcomes(relay, big)).toHaveLength(0);
+    // One Welcome per device, each naming that device's key package.
+    const welcomes = unwrapWelcomes(relay, littleId);
+    expect(welcomes).toHaveLength(1);
+    // The surviving Welcome carries both devices' secrets: either can join.
+    for (const device of [phone, tablet]) {
+      const joined = await device.session.acceptWelcome(welcomes[0]);
+      expect(joined).toMatchObject({ id: dm.id, isDm: true, memberPubkeys: [big.pubkey] });
+    }
+
+    // Both devices reply; Big sees one conversation, both attributed to Little.
+    const fromPhone = buildMarmotRumor(littleId.pubkey, {
+      kind: MARMOT_CHAT_KIND,
+      content: 'phone',
+    });
+    const fromTablet = buildMarmotRumor(littleId.pubkey, {
+      kind: MARMOT_CHAT_KIND,
+      content: 'tablet',
+    });
+    await phone.session.sendRumor(dm.id, fromPhone);
+    await waitFor(() => tablet.inbox.some((m) => m.rumor.id === fromPhone.id));
+    await tablet.session.sendRumor(dm.id, fromTablet);
+    await waitFor(() => big.inbox.filter((m) => m.group.id === dm.id).length >= 2);
+    const received = big.inbox.filter((m) => m.group.id === dm.id);
+    expect(received.map((m) => [m.rumor.content, m.rumor.pubkey])).toEqual([
+      ['phone', littleId.pubkey],
+      ['tablet', littleId.pubkey],
+    ]);
+    expect(big.session.listGroups()).toHaveLength(1);
+    expect(await big.session.dmGroupIdsWith(littleId.pubkey)).toEqual([dm.id]);
+
+    // Big's message reaches both of Little's devices.
+    const hello = buildMarmotRumor(big.pubkey, { kind: MARMOT_CHAT_KIND, content: 'hi both' });
+    await big.session.sendRumor(dm.id, hello);
+    await waitFor(() => [phone, tablet].every((d) => d.inbox.some((m) => m.rumor.id === hello.id)));
+    [big, bigOtherPhone, phone, tablet].forEach((p) => p.session.stop());
+  }, 90_000);
+
+  it('multi-device: a second Welcome for a group we already joined is handled, not retried', async () => {
+    const relay = makeRelay();
+    const big = makeSession(relay);
+    const little = makeSession(relay);
+    await Promise.all([big.session.start(), little.session.start()]);
+    await waitFor(() => relay.events.some((e) => e.kind === 30443 && e.pubkey === little.pubkey));
+    const dm = await big.session.getOrCreateDm(little.pubkey);
+    const [welcome] = unwrapWelcomes(relay, little);
+    expect(await little.session.acceptWelcome(welcome)).toMatchObject({ id: dm.id });
+    // The same Welcome under another rumor id (one gift wrap per invited
+    // device of our account): no duplicate group, nothing left pending.
+    const twin = buildMarmotRumor(welcome.pubkey, {
+      kind: welcome.kind,
+      content: welcome.content,
+      tags: [...welcome.tags, ['client', 'second device']],
+      created_at: welcome.created_at,
+    });
+    expect(await little.session.acceptWelcome(twin)).toBeNull();
+    expect(little.session.listGroups()).toHaveLength(1);
+    big.session.stop();
+    little.session.stop();
+  }, 60_000);
+
+  it('multi-device: no group is left behind when every Welcome fails', async () => {
+    const relay = makeRelay();
+    const publish = relay.network.publish;
+    relay.network.publish = async (relays, event) =>
+      event.kind === 1059
+        ? Object.fromEntries(relays.map((r) => [r, { from: r, ok: false, message: 'no' }]))
+        : publish(relays, event);
+    const big = makeSession(relay);
+    const little = makeSession(relay);
+    await Promise.all([big.session.start(), little.session.start()]);
+    await waitFor(() => relay.events.some((e) => e.kind === 30443 && e.pubkey === little.pubkey));
+    await expect(big.session.getOrCreateDm(little.pubkey)).rejects.toBeInstanceOf(
+      MarmotWelcomeDeliveryError,
+    );
+    expect(big.session.listGroups()).toEqual([]);
+    big.session.stop();
+    little.session.stop();
   }, 60_000);
 
   it('refuses to start a chat with someone who has no key package', async () => {

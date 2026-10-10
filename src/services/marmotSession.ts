@@ -27,7 +27,6 @@ import { bytesToHex } from '@noble/hashes/utils.js';
 import { getEventHash, type Event as NostrEvent, type Filter } from 'nostr-tools';
 
 import type { SignerType } from '../types/nostr';
-import { relayListFromTags } from '../utils/relayListEvents';
 import { installMarmotCryptoProvider, marmotCryptoProvider } from './marmotCryptoProvider';
 import {
   candidateMediaStates,
@@ -47,7 +46,7 @@ import {
   trackKeyPackageAcceptance,
 } from './marmotKeyPackageLifecycle';
 import { retryPendingRetirement } from './marmotKeyPackageRetire';
-import { MarmotNoKeyPackageError, newestEvent, pickKeyPackage } from './marmotKeyPackages';
+import { fetchDevices, inviteDevices, resolveInvitees } from './marmotInvitees';
 import { createMarmotNetwork, createPushTransport } from './marmotNetwork';
 import {
   leafKey,
@@ -424,7 +423,8 @@ export class MarmotSession {
 
   /** Whether `peer` has published a Marmot key package we could invite. */
   async canMessage(peer: string): Promise<boolean> {
-    return (await this.fetchKeyPackage(peer).catch(() => null)) !== null;
+    const lookup = this.opts.getLookupRelays();
+    return (await fetchDevices(this.client.network, lookup, peer).catch(() => [])).length > 0;
   }
 
   async getOrCreateDm(peer: string): Promise<MarmotGroupSummary> {
@@ -456,16 +456,16 @@ export class MarmotSession {
     // publishing could never bootstrap a chat (each fails on the other's
     // missing key package). Not awaited: the invite doesn't depend on it.
     void this.ensureKeyPackage();
-    // Resolve every key package first so a missing one fails before we
+    // Resolve every invitee's devices first so a missing one fails before we
     // create an orphan group.
-    const keyPackages = await Promise.all(members.map((m) => this.requireKeyPackage(m)));
+    const devices = await this.invitees(members);
     const group = await this.client.groups.create(name, {
       description: opts.description ?? '',
       relays: this.writeRelays(),
       adminPubkeys: opts.adminPubkeys ?? [this.pubkey],
     });
     try {
-      for (const kp of keyPackages) await this.client.groups.invite(group.id, kp);
+      await inviteDevices(this.client.groups, group.idStr, this.pubkey, devices);
     } catch (e) {
       // Don't leave an empty, invisible group (and its relay sub) behind —
       // a retry would otherwise create another one each time.
@@ -479,9 +479,8 @@ export class MarmotSession {
   }
 
   async addMembers(appGroupId: string, members: string[]): Promise<void> {
-    const keyPackages = await Promise.all(members.map((m) => this.requireKeyPackage(m)));
-    const mlsId = toMlsGroupId(appGroupId);
-    for (const kp of keyPackages) await this.client.groups.invite(mlsId, kp);
+    const devices = await this.invitees(members);
+    await inviteDevices(this.client.groups, toMlsGroupId(appGroupId), this.pubkey, devices);
     this.emitGroupsChanged();
   }
 
@@ -631,6 +630,11 @@ export class MarmotSession {
     return this.opts.getWriteRelays();
   }
 
+  /** Each invitee's devices; throws for anyone with none we can invite. */
+  private invitees(members: string[]) {
+    return resolveInvitees(this.client.network, this.opts.getLookupRelays(), this.pubkey, members);
+  }
+
   private summarise(g: SessionGroup): MarmotGroupSummary {
     const view = g.groupData;
     const me = this.pubkey.toLowerCase();
@@ -643,8 +647,10 @@ export class MarmotSession {
       description: view?.description ?? '',
       memberPubkeys: others,
       adminPubkeys: (view?.adminPubkeys ?? []).map((p) => p.toLowerCase()),
-      // White Noise DM: unnamed, two members. ≤2 so a DM mid-creation (just
-      // us, invite not yet committed) never flashes up as a 1-member group.
+      // White Noise DM: unnamed, two ACCOUNTS — `members` is distinct pubkeys,
+      // so a contact on several devices (3+ leaves) is still a DM. ≤2 so a DM
+      // mid-creation (just us, invite not yet committed) never flashes up as
+      // a 1-member group.
       isDm: name === '' && members.length <= 2,
       relays: g.relays ?? [],
       createdAt: this.firstSeen.get(g.idStr) ?? Date.now(),
@@ -782,38 +788,6 @@ export class MarmotSession {
     this.pushRegistration.schedule();
     const groups = this.listGroups();
     for (const l of this.listeners) l.onGroupsChanged?.(groups);
-  }
-
-  private async requireKeyPackage(peer: string): Promise<NostrEvent> {
-    const kp = await this.fetchKeyPackage(peer);
-    if (!kp) throw new MarmotNoKeyPackageError(peer);
-    return kp;
-  }
-
-  /** Newest kind-30443 from the peer's NIP-65 write relays (spec: transports/nostr.md). */
-  private async fetchKeyPackage(peer: string): Promise<NostrEvent | null> {
-    const author = peer.toLowerCase();
-    const network = this.client.network;
-    const lookup = this.opts.getLookupRelays();
-    // Lookup relays can lag: take the NEWEST relay list, not the first (#1202).
-    const relayList = newestEvent(
-      (await network.request(lookup, {
-        kinds: [10002],
-        authors: [author],
-        limit: 1,
-      })) as NostrEvent[],
-    );
-    const writeSet = relayList
-      ? relayListFromTags(relayList.tags)
-          .filter((r) => r.write)
-          .map((r) => r.url)
-      : [];
-    const events = (await network.request([...writeSet, ...lookup], {
-      kinds: [30443],
-      authors: [author],
-      limit: 20,
-    })) as NostrEvent[];
-    return pickKeyPackage(peer, events);
   }
 
   /**
