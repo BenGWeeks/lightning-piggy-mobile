@@ -2479,5 +2479,33 @@
     "removingBody": "Approve the requests in your signer to finish signing out. This can take a minute.",
     "notRemovedTitle": "Invitation keys not removed",
     "notRemovedBody": "We couldn't remove this account's Marmot invitation keys from relays, so new Marmot invites may still be sent to this phone. We'll try again automatically the next time this account signs in here."
+  },
+  "invitationKeys": {
+    "cancel": "Cancel",
+    "title": "Invitation keys",
+    "description": "Invitation keys let people start encrypted chats with your devices. Each device keeps its own private key. This list shows keys found on your relays, grouped by device slot.",
+    "thisPhone": "Lightning Piggy (this phone)",
+    "otherDevice": "Lightning Piggy (another device)",
+    "unknownClient": "Unknown app",
+    "slot": "Device slot %{slot}…",
+    "published": "Published: %{date}",
+    "expires": "Expires: %{date}",
+    "unknownExpiry": "Unknown",
+    "relays": "Relays:\n%{relays}",
+    "refresh": "Refresh this phone’s key",
+    "remove": "Remove",
+    "removeOld": "Remove all old",
+    "reload": "Check relays again",
+    "paused": "This phone is no longer publishing an invitation key. Refresh its key to receive new invitations here.",
+    "partial": "Some relays could not be checked or reached the result limit. This list may be incomplete. Remove all old is unavailable until every relay can be checked.",
+    "loadFailed": "Could not check invitation keys. Try again when connected.",
+    "empty": "No published invitation keys found.",
+    "removeTitle": "Remove invitation key?",
+    "removeBody": "New invitations may stop reaching this device. Removing its newest key also removes older versions in the same device slot. Existing chats stay available. Relays may take time to update.",
+    "removeOldBody": "Remove keys older than 30 days or expired, only from device slots with no fresh key. This phone’s keys are kept. Those other devices may need to publish a new key before receiving invitations.",
+    "removed": "Invitation key removal requested",
+    "refreshed": "This phone’s invitation key refreshed",
+    "failedTitle": "Could not update invitation keys",
+    "failedBody": "Some relays or your signer did not respond. Check the list again before retrying. If this phone’s key was removed, use Refresh to publish a new one."
   }
 }

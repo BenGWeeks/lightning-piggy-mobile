@@ -86,6 +86,7 @@ const UnsupportedEntityScreen = lazyScreen(() => import('../screens/UnsupportedE
 const NotificationsScreen = lazyScreen(() => import('../screens/NotificationsScreen'));
 const ProfileScreen = lazyScreen(() => import('../screens/account/ProfileScreen'));
 const WalletsScreen = lazyScreen(() => import('../screens/account/WalletsScreen'));
+const InvitationKeysScreen = lazyScreen(() => import('../screens/account/InvitationKeysScreen'));
 const NostrScreen = lazyScreen(() => import('../screens/account/NostrScreen'));
 const OnChainScreen = lazyScreen(() => import('../screens/account/OnChainScreen'));
 const DisplayScreen = lazyScreen(() => import('../screens/account/DisplayScreen'));
@@ -568,6 +569,7 @@ function MainDrawer() {
       <AccountDrawer.Screen name="AccountProfile" component={ProfileScreen} />
       <AccountDrawer.Screen name="AccountWallets" component={WalletsScreen} />
       <AccountDrawer.Screen name="AccountNostr" component={NostrScreen} />
+      <AccountDrawer.Screen name="AccountInvitationKeys" component={InvitationKeysScreen} />
       <AccountDrawer.Screen name="AccountOnChain" component={OnChainScreen} />
       <AccountDrawer.Screen name="AccountDisplay" component={DisplayScreen} />
       <AccountDrawer.Screen name="AccountAppearance" component={AppearanceScreen} />
