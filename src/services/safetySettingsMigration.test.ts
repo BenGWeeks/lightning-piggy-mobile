@@ -3,7 +3,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { perAccountKey } from './perAccountStorage';
 import { getSendThreshold, setSendThreshold } from './sendThresholdService';
 import { loadSecretMode, saveSecretMode } from './secretModeService';
-import { loadWotSettings, saveWotSettings } from './wotSettingsService';
+import { loadWotSettings, peekWotSettings, saveWotSettings } from './wotSettingsService';
+import { __resetAccountSettingsCacheForTests } from './accountSettingsCache';
 import {
   __resetForTests as resetLinkPreview,
   getLinkPreviewEnabled,
@@ -14,6 +15,7 @@ import {
   __resetSafetyMigrationForTests,
   ensureSafetySettingsMigrated,
   migrateSafetySettingsToPerAccount,
+  SAFETY_MIGRATION_DONE_KEY,
   SAFETY_SETTING_BASES,
 } from './safetySettingsMigration';
 import { PER_ACCOUNT_STORAGE_BASES } from './perAccountStorage';
@@ -53,6 +55,7 @@ beforeEach(async () => {
   await AsyncStorage.clear();
   __resetSafetyMigrationForTests();
   resetLinkPreview();
+  __resetAccountSettingsCacheForTests();
   mockLoadIdentities.mockReset();
   mockLoadIdentities.mockResolvedValue(registry(BIG, MIDDLE));
 });
@@ -192,4 +195,56 @@ it('does not write a new preference over a failed migration', async () => {
   mockLoadIdentities.mockRejectedValueOnce(new Error('locked registry'));
   await expect(setSendThreshold(1000, BIG)).rejects.toThrow('locked registry');
   expect(await getSendThreshold(MIDDLE)).toBe(50000);
+});
+
+describe('ensureSafetySettingsMigrated', () => {
+  it('persists a done flag so later launches skip the copy', async () => {
+    await AsyncStorage.setItem('secret_mode', 'true');
+    await ensureSafetySettingsMigrated(BIG);
+    expect(await AsyncStorage.getItem(SAFETY_MIGRATION_DONE_KEY)).toBe('true');
+    // Next launch: a stray device value (e.g. an old build wrote one) is NOT
+    // fanned out again — the migration really is one-time.
+    __resetSafetyMigrationForTests();
+    await AsyncStorage.setItem('send_threshold_sats_v1', 'off');
+    await ensureSafetySettingsMigrated(BIG);
+    expect(await AsyncStorage.getItem(perAccountKey('send_threshold_sats_v1', BIG))).toBeNull();
+  });
+
+  it('keeps the legacy device keys when the identity registry is empty', async () => {
+    mockLoadIdentities.mockResolvedValue(registry());
+    await AsyncStorage.setItem('@lp:wot-settings:v1', JSON.stringify({ wotTier: 'friends' }));
+    await AsyncStorage.setItem('link_preview_enabled_v1', 'false');
+    await ensureSafetySettingsMigrated(BIG);
+    // The caller's account inherits the old values...
+    expect((await loadWotSettings(BIG)).wotTier).toBe('friends');
+    // ...but the device keys survive and the run is not marked done, so
+    // accounts we couldn't see yet don't fall back to the wider defaults.
+    expect(await AsyncStorage.getItem('@lp:wot-settings:v1')).not.toBeNull();
+    expect(await AsyncStorage.getItem('link_preview_enabled_v1')).toBe('false');
+    expect(await AsyncStorage.getItem(SAFETY_MIGRATION_DONE_KEY)).toBeNull();
+    // Next launch, with the registry readable: Middle inherits, then cleanup.
+    __resetSafetyMigrationForTests();
+    mockLoadIdentities.mockResolvedValue(registry(BIG, MIDDLE));
+    await ensureSafetySettingsMigrated(BIG);
+    expect((await loadWotSettings(MIDDLE)).wotTier).toBe('friends');
+    expect(await getLinkPreviewEnabled(MIDDLE)).toBe(false);
+    expect(await AsyncStorage.getItem('@lp:wot-settings:v1')).toBeNull();
+    expect(await AsyncStorage.getItem(SAFETY_MIGRATION_DONE_KEY)).toBe('true');
+  });
+
+  it("prewarms every registered account's trust tier for an instant, gated-correct switch", async () => {
+    await saveWotSettings({ wotTier: 'friends' }, MIDDLE);
+    __resetAccountSettingsCacheForTests();
+    __resetSafetyMigrationForTests(); // cold start
+    expect(peekWotSettings(MIDDLE)).toBeNull();
+    await loadWotSettings(BIG); // only the active account is loaded
+    expect(peekWotSettings(MIDDLE)).toEqual({ wotTier: 'friends' });
+    expect(peekWotSettings(BIG)).toEqual({ wotTier: 'all' });
+  });
+
+  it('sign-out forgets the account in the sync mirror', async () => {
+    await saveWotSettings({ wotTier: 'friends' }, BIG);
+    await wipeAccountCaches(BIG);
+    expect(peekWotSettings(BIG)).toBeNull();
+  });
 });

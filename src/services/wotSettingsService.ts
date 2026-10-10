@@ -8,6 +8,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { perAccountKey } from './perAccountStorage';
 import { ensureSafetySettingsMigrated, WOT_SETTINGS_KEY_BASE } from './safetySettingsMigration';
+import { peekAccountSetting, rememberAccountSetting } from './accountSettingsCache';
 
 // Stored PER ACCOUNT (`perAccountKey(base, pubkey)`): on a shared family phone
 // each person picks their own "who can message me" tier.
@@ -43,12 +44,10 @@ const DEFAULTS: WotSettings = { wotTier: 'all' };
 // silently re-introduce the empty-rail symptom #627 was filed to fix.
 const isWotTier = (v: unknown): v is WotTier => v === 'friends' || v === 'fof' || v === 'all';
 
-export const loadWotSettings = async (pubkey: string | null): Promise<WotSettings> => {
-  if (!pubkey) return DEFAULTS;
+/** Parse a stored payload; anything unparseable falls through to DEFAULTS. */
+const parseWotSettings = (raw: string | null): WotSettings => {
+  if (!raw) return DEFAULTS;
   try {
-    await ensureSafetySettingsMigrated(pubkey);
-    const raw = await AsyncStorage.getItem(perAccountKey(WOT_STORAGE_KEY_BASE, pubkey));
-    if (!raw) return DEFAULTS;
     const parsed = JSON.parse(raw);
     // New shape — wotTier present and valid.
     if (parsed && typeof parsed === 'object' && isWotTier(parsed.wotTier)) {
@@ -59,7 +58,34 @@ export const loadWotSettings = async (pubkey: string | null): Promise<WotSetting
     if (parsed && typeof parsed === 'object' && typeof parsed.filterEnabled === 'boolean') {
       return { wotTier: parsed.filterEnabled ? 'friends' : 'all' };
     }
-    return DEFAULTS;
+  } catch {
+    // fall through
+  }
+  return DEFAULTS;
+};
+
+/**
+ * The account's tier if it is already known this session (prewarmed at
+ * startup for every registered account, or loaded/saved since), else `null`
+ * — meaning "unknown: stay gated". Synchronous, for the first render after an
+ * account switch.
+ */
+export const peekWotSettings = (pubkey: string | null): WotSettings | null => {
+  const raw = peekAccountSetting(WOT_STORAGE_KEY_BASE, pubkey);
+  return raw === undefined ? null : parseWotSettings(raw);
+};
+
+export const loadWotSettings = async (pubkey: string | null): Promise<WotSettings> => {
+  if (!pubkey) return DEFAULTS;
+  try {
+    await ensureSafetySettingsMigrated(pubkey);
+    const raw = await AsyncStorage.getItem(perAccountKey(WOT_STORAGE_KEY_BASE, pubkey));
+    // Once known (prewarm, or a save that landed while we awaited), the
+    // session mirror is authoritative — never let this read roll it back.
+    const known = peekAccountSetting(WOT_STORAGE_KEY_BASE, pubkey);
+    if (known !== undefined) return parseWotSettings(known);
+    rememberAccountSetting(WOT_STORAGE_KEY_BASE, pubkey, raw);
+    return parseWotSettings(raw);
   } catch {
     return DEFAULTS;
   }
@@ -70,12 +96,11 @@ export const saveWotSettings = async (
   pubkey: string | null,
 ): Promise<void> => {
   if (!pubkey) return;
+  const raw = JSON.stringify(settings);
+  rememberAccountSetting(WOT_STORAGE_KEY_BASE, pubkey, raw);
   try {
     await ensureSafetySettingsMigrated(pubkey);
-    await AsyncStorage.setItem(
-      perAccountKey(WOT_STORAGE_KEY_BASE, pubkey),
-      JSON.stringify(settings),
-    );
+    await AsyncStorage.setItem(perAccountKey(WOT_STORAGE_KEY_BASE, pubkey), raw);
   } catch {
     // Best-effort; in-memory state still drives the session.
   }

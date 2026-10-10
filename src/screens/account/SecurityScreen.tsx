@@ -10,6 +10,7 @@ import { useNostr } from '../../contexts/NostrContext';
 import { createSecurityScreenStyles } from '../../styles/SecurityScreen.styles';
 import MarmotPushSection from '../../components/MarmotPushSection';
 import DetailsDisclosure from '../../components/DetailsDisclosure';
+import { Toast } from '../../components/BrandedToast';
 import {
   DEFAULT_HIGH_VALUE_SEND_THRESHOLD_SATS,
   getSendThreshold,
@@ -120,17 +121,34 @@ const SecurityScreen: React.FC = () => {
     }
   };
 
+  // `setSendThreshold` rejects (no active account, or the per-account
+  // migration couldn't read the identity registry). Don't leave the screen
+  // showing a value that wasn't saved: re-read the stored one and say so.
+  const saveThreshold = async (value: number | null) => {
+    try {
+      await setSendThreshold(value, pubkey);
+    } catch {
+      Toast.show({
+        type: 'error',
+        text1: t('securityScreen.thresholdSaveFailed'),
+        position: 'top',
+      });
+      const stored = await getSendThreshold(pubkey).catch(() => null);
+      setThresholdState(stored ?? DEFAULT_HIGH_VALUE_SEND_THRESHOLD_SATS);
+    }
+  };
+
   const handlePickPreset = async (value: number | null) => {
     setThresholdState(value);
     setCustomDraft('');
-    await setSendThreshold(value, pubkey);
+    await saveThreshold(value);
   };
 
   const handleCustomSave = async () => {
     const parsed = parseInt(customDraft.replace(/[^0-9]/g, ''), 10);
     if (!Number.isFinite(parsed) || parsed <= 0) return;
     setThresholdState(parsed);
-    await setSendThreshold(parsed, pubkey);
+    await saveThreshold(parsed);
   };
 
   const customActive = threshold !== null && !PRESETS.some((p) => p.value === threshold);
@@ -197,7 +215,6 @@ const SecurityScreen: React.FC = () => {
         </Text>
       </View>
       <Text style={sharedAccountStyles.fieldHint}>{t('securityScreen.linkPreviewsHint')}</Text>
-      <Text style={sharedAccountStyles.fieldHint}>{t('securityScreen.perAccountHint')}</Text>
       <View style={styles.toggleRow}>
         <Text style={[styles.optionLabel, styles.toggleLabel]}>
           {t('securityScreen.showLinkPreviews')}

@@ -69,3 +69,47 @@ it('preserves existing default accounts when another account changes first', asy
   await saveAccountPref(CURRENCY_PREF_KEY_BASE, 'GBP', BIG);
   expect(await loadAccountPref(CURRENCY_PREF_KEY_BASE, MIDDLE)).toBe('USD');
 });
+
+describe('prewarm (no flash on the first switch after a cold start)', () => {
+  it("knows every registered account's values once any account has loaded", async () => {
+    await AsyncStorage.setItem(perAccountKey(CURRENCY_PREF_KEY_BASE, MIDDLE), 'EUR');
+    await AsyncStorage.setItem(perAccountKey(LOCALE_PREF_KEY_BASE, MIDDLE), 'uk');
+    expect(peekAccountPref(CURRENCY_PREF_KEY_BASE, MIDDLE)).toBeNull();
+    // Cold start: only the ACTIVE account (Big) is loaded...
+    await loadAccountPref(CURRENCY_PREF_KEY_BASE, BIG);
+    // ...yet switching to Middle renders Middle's values on the first frame.
+    expect(peekAccountPref(CURRENCY_PREF_KEY_BASE, MIDDLE)).toBe('EUR');
+    expect(peekAccountPref(LOCALE_PREF_KEY_BASE, MIDDLE)).toBe('uk');
+  });
+});
+
+describe('revision guard (a late load never overwrites a save)', () => {
+  it('a save that lands while a new account is still loading its template wins', async () => {
+    await saveAccountPref(CURRENCY_PREF_KEY_BASE, 'GBP', BIG); // template = GBP
+    // Hold Little's template read open so the user's pick lands in between.
+    const get = AsyncStorage.getItem as jest.Mock;
+    const real = get.getMockImplementation() as (k: string) => Promise<string | null>;
+    let release!: () => void;
+    get.mockImplementation((k: string) =>
+      k === 'phone_template:user_fiat_currency'
+        ? new Promise((resolve) => {
+            const readNow = real(k); // GBP, read before the save below
+            release = () => resolve(readNow);
+          })
+        : real(k),
+    );
+    const pending = loadAccountPref(CURRENCY_PREF_KEY_BASE, LITTLE);
+    await waitFor(() => release !== undefined);
+    get.mockImplementation(real);
+    await saveAccountPref(CURRENCY_PREF_KEY_BASE, 'EUR', LITTLE);
+    release();
+    expect(await pending).toBe('EUR');
+    expect(await AsyncStorage.getItem(perAccountKey(CURRENCY_PREF_KEY_BASE, LITTLE))).toBe('EUR');
+    expect(peekAccountPref(CURRENCY_PREF_KEY_BASE, LITTLE)).toBe('EUR');
+  });
+});
+
+async function waitFor(condition: () => boolean): Promise<void> {
+  for (let i = 0; i < 50 && !condition(); i += 1) await new Promise((r) => setTimeout(r, 0));
+  if (!condition()) throw new Error('condition never became true');
+}

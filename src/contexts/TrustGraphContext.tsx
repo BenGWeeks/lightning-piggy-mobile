@@ -5,6 +5,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -36,6 +37,7 @@ import {
 // import { fetchL2Follows, loadL2Cache, persistL2Cache } from '../services/trustGraphFetcher';
 import {
   loadWotSettings,
+  peekWotSettings,
   saveWotSettings,
   type WotSettings,
   type WotTier,
@@ -74,7 +76,13 @@ interface TrustGraphContextType {
   // (e.g. GroupsContext's `visibleGroups` filter).
   isTrustedAtTier: (tier: WotTier, pubkey: string) => boolean;
   // Active tier (#535). Replaces the legacy `filterEnabled` boolean.
+  // While the active account's saved tier is still unknown this reports
+  // the narrowest tier ('friends') — see `wotTierReady`.
   wotTier: WotTier;
+  // False while the active account's saved tier is still loading (cold
+  // start, or a switch to an account added this session). Every consumer is
+  // already gated during that window because `wotTier` reads 'friends'.
+  wotTierReady: boolean;
   // Persist + apply a new tier. Wider tiers (fof / all) are gated on
   // secretMode at the UI layer (WebOfTrustBottomSheet); this setter
   // doesn't enforce the gate so a power user with secretMode flipped
@@ -96,7 +104,10 @@ interface ProviderProps {
   children: ReactNode;
 }
 
-const DEFAULT_WOT_SETTINGS: WotSettings = { wotTier: 'all' };
+// Shown while the active account's saved tier is unknown. Narrowest tier, so
+// a family member set to Friends never sees strangers' conversations, caches
+// or events for even one frame on a shared phone (#1224 review).
+const HYDRATING_TIER: WotTier = 'friends';
 
 export const TrustGraphProvider: React.FC<ProviderProps> = ({ children }) => {
   const { pubkey } = useNostr();
@@ -146,55 +157,48 @@ export const TrustGraphProvider: React.FC<ProviderProps> = ({ children }) => {
     };
   }, []);
 
-  // Persisted tier. Initialise synchronously to the same `'all'` value
-  // `wotSettingsService.DEFAULTS` uses (#627) so a brand-new user sees
-  // content from the first paint, not after AsyncStorage's async round
-  // trip. The trade-off vs. initialising to the narrow 'friends' tier:
+  // Persisted tier, PER ACCOUNT (shared family phone). Resolution order:
+  //   1. the value loaded for THIS account (owner-tagged via
+  //      `useAccountState`, so a switch never renders the previous
+  //      account's tier);
+  //   2. the session mirror (`peekWotSettings`) — prewarmed at startup for
+  //      every registered account, so switching between known accounts is
+  //      instant and exact;
+  //   3. unknown → HYDRATING_TIER ('friends') until the load resolves.
   //
-  //   - brand-new user (no payload)         → init 'all',     load 'all'      → content visible immediately ✓
-  //   - existing user with persisted 'all'  → init 'all',     load 'all'      → no transition ✓
-  //   - existing user with persisted 'fof'  → init 'all',     load narrows    → ≤one frame of wider content before settling ✗ small flash
-  //   - existing user with persisted 'friends' → init 'all',  load narrows    → ≤one frame of wider content before settling ✗ small flash
-  //
-  // The "empty rail for new users" symptom is the one #627 was filed to
-  // fix — it's the user-facing regression we deliberately accept the
-  // small wide→narrow flash to avoid. Existing users with a narrower
-  // explicit choice see at most ~one frame of widened content during
-  // app launch (AsyncStorage round-trip is ~50-200 ms on Hermes), which
-  // is imperceptible in practice and only fires at cold-start.
-  //
-  // DMs are protected separately by `GroupsContext.effectiveWotTier`,
-  // which clamps `wotTier === 'all'` back to 'friends' for the Messages
-  // surface when secretMode is off — so the wider init never widens DM
-  // visibility regardless of secretMode state.
+  // Trade-off vs. #627 (which initialised to 'all' so brand-new users don't
+  // see an empty rail): a user on 'all' now sees at most one AsyncStorage
+  // round trip (~50-200 ms) of narrower content at cold start before it
+  // widens. Narrow→wide is the safe direction; wide→narrow leaked
+  // strangers' messages on account switch.
   //
   // Legacy boolean payloads are migrated inside `loadWotSettings`.
-  //
-  // The tier is PER ACCOUNT (shared family phone) and owner-tagged via
-  // `useAccountState`, so switching accounts never renders the previous
-  // account's tier.
-  const [storedSettings, setStoredSettings] = useAccountState<WotSettings>(
-    pubkey,
-    DEFAULT_WOT_SETTINGS,
-  );
+  const [loadedSettings, setLoadedSettings] = useAccountState<WotSettings | null>(pubkey, null);
+  // Bumped by setWotTier so a load that started before the user picked a
+  // tier can't roll the picker back when it resolves.
+  const changeVersion = useRef(0);
   useEffect(() => {
     let cancelled = false;
+    const version = changeVersion.current;
     loadWotSettings(pubkey).then((loaded) => {
-      if (!cancelled) setStoredSettings(loaded);
+      if (!cancelled && version === changeVersion.current) setLoadedSettings(loaded);
     });
     return () => {
       cancelled = true;
     };
-  }, [pubkey, setStoredSettings]);
+  }, [pubkey, setLoadedSettings]);
 
-  const wotTier = storedSettings.wotTier;
+  const knownSettings = loadedSettings ?? peekWotSettings(pubkey);
+  const wotTierReady = knownSettings !== null;
+  const wotTier: WotTier = knownSettings?.wotTier ?? HYDRATING_TIER;
 
   const setWotTier = useCallback(
     (next: WotTier) => {
-      setStoredSettings({ wotTier: next });
+      changeVersion.current += 1;
+      setLoadedSettings({ wotTier: next });
       saveWotSettings({ wotTier: next }, pubkey).catch(() => {});
     },
-    [pubkey, setStoredSettings],
+    [pubkey, setLoadedSettings],
   );
 
   // For 'friends' tier the trust set is L1 + user + seeds.
@@ -257,6 +261,7 @@ export const TrustGraphProvider: React.FC<ProviderProps> = ({ children }) => {
       trustSetForTier,
       isTrustedAtTier,
       wotTier,
+      wotTierReady,
       setWotTier,
       l2Loading,
       l2Size: l2Follows.size,
@@ -268,6 +273,7 @@ export const TrustGraphProvider: React.FC<ProviderProps> = ({ children }) => {
       trustSetForTier,
       isTrustedAtTier,
       wotTier,
+      wotTierReady,
       setWotTier,
       l2Loading,
       l2Follows,

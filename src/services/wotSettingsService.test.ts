@@ -6,7 +6,8 @@
 //   2. The legacy boolean payload migrates correctly so users on pre-#535
 //      installs don't have their explicit choice ignored.
 
-import { loadWotSettings, saveWotSettings } from './wotSettingsService';
+import { loadWotSettings, peekWotSettings, saveWotSettings } from './wotSettingsService';
+import { __resetAccountSettingsCacheForTests } from './accountSettingsCache';
 
 jest.mock('@react-native-async-storage/async-storage', () => {
   let store: Record<string, string> = {};
@@ -42,6 +43,36 @@ beforeEach(() => {
   AsyncStorage.__reset();
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   require('./safetySettingsMigration').__resetSafetyMigrationForTests();
+  __resetAccountSettingsCacheForTests();
+});
+
+describe('peekWotSettings (sync mirror for account switches)', () => {
+  it('is unknown (null) until the account has been loaded or saved', async () => {
+    expect(peekWotSettings(PK)).toBeNull();
+    expect(peekWotSettings(null)).toBeNull();
+    await loadWotSettings(PK);
+    expect(peekWotSettings(PK)).toEqual({ wotTier: 'all' });
+    await saveWotSettings({ wotTier: 'friends' }, OTHER);
+    expect(peekWotSettings(OTHER)).toEqual({ wotTier: 'friends' });
+  });
+
+  it('a load that resolves after a save never rolls the tier back', async () => {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ wotTier: 'all' }));
+    await loadWotSettings(OTHER); // finish the one-time migration first
+    let release!: () => void;
+    AsyncStorage.getItem.mockImplementationOnce(
+      (k: string) =>
+        new Promise((resolve) => {
+          release = () => resolve(k === STORAGE_KEY ? JSON.stringify({ wotTier: 'all' }) : null);
+        }),
+    );
+    const pending = loadWotSettings(PK);
+    await new Promise((r) => setTimeout(r, 0));
+    await saveWotSettings({ wotTier: 'friends' }, PK);
+    release();
+    expect((await pending).wotTier).toBe('friends');
+    expect(peekWotSettings(PK)).toEqual({ wotTier: 'friends' });
+  });
 });
 
 describe('wotSettingsService', () => {

@@ -26,7 +26,7 @@ import { GROUP_MESSAGES_KEY_PREFIX } from '../services/groupMessagesStorageServi
 import { clearCacheStorage as clearNostrPlacesCache } from '../services/nostrPlacesStorage';
 import { clearNotificationHistory } from '../services/notificationHistory';
 import { PER_ACCOUNT_SETTING_BASES } from '../services/safetySettingsMigration';
-import { forgetAccountPrefs } from '../services/accountDisplayPrefs';
+import { forgetAccountSettings } from '../services/accountSettingsCache';
 import { forgetLinkPreviewMirror } from '../services/linkPreviewPreference';
 import { WATCHER_PUSH_KEY_BASE } from '../services/watcherPushStore';
 import {
@@ -127,7 +127,7 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
     walletListKey,
   ];
   forgetLinkPreviewMirror(loggedOutPubkey);
-  forgetAccountPrefs(loggedOutPubkey);
+  forgetAccountSettings(loggedOutPubkey);
   const allKeys = await AsyncStorage.getAllKeys();
   const convPrefix = DM_CONV_CACHE_PREFIX + loggedOutPubkey + '_';
   const lastSeenPrefix = DM_CONV_LAST_SEEN_PREFIX + loggedOutPubkey + '_';
