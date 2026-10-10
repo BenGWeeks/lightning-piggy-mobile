@@ -1479,12 +1479,10 @@
     "grantPermissionInAmber": "Permitir que Amber desbloquee tus mensajes",
     "noProfilePubkey": "Sin clave pública de perfil — inicia sesión primero.",
     "amberRoundTripMismatch": "Discrepancia en la verificación de Amber — puede que el permiso no esté configurado.",
-    "experimental": "Experimental",
-    "nativeCryptoHint": "Ejecuta el cifrado NIP-44 y la verificación de firmas a través del módulo nativo rust-nostr en lugar de JavaScript. Función para testers: observa los registros [PerfBlock] nostrCrypto y desactívala si algo falla.",
+    "nativeCryptoHint": "Usa el código integrado de tu teléfono, en lugar del de la app, para cifrar mensajes y verificar firmas. Puede ser más rápido. Aún está en pruebas: desactívalo si los mensajes dejan de enviarse o cargarse.",
     "nativeCryptoLabel": "Cifrado más rápido (beta)",
     "nativeCryptoRestartCaption": "Reinicia la app para aplicar.",
     "nativeCryptoUnavailable": "No disponible en este dispositivo",
-    "nativeCryptoA11y": "Activar cripto nativa",
     "nativeCryptoActiveYes": "Activa en esta sesión: sí",
     "nativeCryptoActiveNo": "Activa en esta sesión: no",
     "notInUse": "No se usa ahora",
@@ -1504,11 +1502,11 @@
     "electrumServerA11y": "Servidor Electrum",
     "useSsl": "Usar SSL",
     "hint": "Las carteras on-chain usan este servidor Electrum para leer saldos y difundir transacciones. Apúntalo a tu propio servidor si no quieres filtrar direcciones a uno público.",
-    "defaultWalletTitle": "Predeterminada para reembolsos",
-    "defaultWalletEmpty": "Aún no hay carteras on-chain. Añade una en Carteras para establecer un destino predeterminado para reembolsos de Boltz y futuros flujos de recepción on-chain.",
+    "defaultWalletTitle": "Cartera predeterminada para reembolsos",
+    "defaultWalletEmpty": "Aún no hay carteras on-chain. Añade una para elegir adónde van los reembolsos de swaps fallidos.",
     "defaultWalletRowA11y": "Establecer {{wallet}} como cartera on-chain predeterminada",
     "walletFallback": "cartera",
-    "defaultWalletHint": "Se usa como destino de reembolso para swaps de Boltz on-chain → Lightning fallidos y como destino predeterminado para cualquier futuro flujo de recepción on-chain. Toca una fila activa para borrar la elección y volver a la primera cartera."
+    "defaultWalletHint": "Si falla un swap entre on-chain y Lightning, el reembolso va a esta cartera. Toca la cartera seleccionada para borrarla y usar tu primera cartera on-chain."
   },
   "orderPaymentActions": {
     "paymentReceivedA11y": "Pago recibido",
@@ -2521,20 +2519,22 @@
   },
   "advancedScreen": {
     "title": "Avanzado",
-    "notificationServer": "Servidor de notificaciones",
     "developerOptions": "Opciones de desarrollo",
-    "secretMode": "Modo secreto",
-    "secretHint": "Muestra herramientas experimentales y más acciones de cartera.",
-    "secretConfirmTitle": "¿Activar el modo secreto?",
-    "secretConfirmBody": "El modo secreto muestra herramientas experimentales y más acciones de cartera. Actívalo solo si entiendes estas opciones.",
-    "enableSecret": "Activar"
+    "secretMode": "Mostrar funciones experimentales",
+    "secretHint": "También llamado modo secreto. Desbloquea funciones aún en pruebas, como importar la frase semilla de una cartera y filtros de Red de Confianza más amplios.",
+    "secretConfirmTitle": "¿Mostrar funciones experimentales?",
+    "secretConfirmBody": "Estas funciones aún están en pruebas y pueden cambiar o fallar. Actívalas solo si te parece bien.",
+    "enableSecret": "Activar",
+    "nostrNetworkSubtitle": "Tus relays y el almacenamiento de fotos y notas de voz",
+    "bitcoinNetworkSubtitle": "Servidor Electrum y servidor de swaps",
+    "experimentalFeatures": "Funciones experimentales",
+    "encryption": "Cifrado"
   },
   "messageSettingsScreen": {
     "title": "Mensajes",
-    "whoCanMessage": "Quién puede enviarme mensajes",
-    "friends": "Amigos",
-    "fof": "Amigos de amigos",
-    "all": "Todos"
+    "trustTitle": "De quién ves publicaciones y mensajes",
+    "trustHint": "Este filtro de Red de Confianza también decide lo que ves en el Mapa, en Eventos y en Grupos.",
+    "trustRowA11y": "De quién ves publicaciones y mensajes: {{tier}}"
   },
   "hermesProfiler": {
     "title": "Perfilador de rendimiento (desarrollo)",

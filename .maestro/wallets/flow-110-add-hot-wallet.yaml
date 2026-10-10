@@ -2,7 +2,7 @@ appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Add Hot Wallet Test
 ---
 # Imports a hot wallet via mnemonic seed phrase.
-# Pre-requisite: Developer mode must be enabled (Advanced → Developer options → Secret Mode).
+# Pre-requisite: Developer mode must be enabled (Advanced → Experimental features → Show experimental features, a.k.a. Secret Mode).
 # Run: source .env && maestro test -e MAESTRO_MNEMONIC="$MAESTRO_MNEMONIC1" -e WALLET_NAME="Hot Wallet 1" .maestro/wallets/flow-110-add-hot-wallet.yaml
 
 # Wait for app to be ready

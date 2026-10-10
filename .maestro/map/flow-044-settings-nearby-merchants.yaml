@@ -70,16 +70,6 @@ name: Alerts near Bitcoin shops — toggle, radius preset, quiet hours
 - assertVisible:
     id: 'settings-quiet-hours-toggle'
 
-# The notification server is one choice for the whole phone, so it's on
-# the phone half too (below the shop alerts), not beside instant alerts.
-- scrollUntilVisible:
-    element:
-      id: 'notification-server-section'
-    direction: DOWN
-    timeout: 15000
-- assertVisible:
-    id: 'security-marmot-push-advanced'
-
 # Back out of the drawer screen.
 - scrollUntilVisible:
     element:

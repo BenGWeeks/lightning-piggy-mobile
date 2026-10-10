@@ -37,6 +37,11 @@ name: Account Drawer Test
 - waitForAnimationToEnd:
     timeout: 3000
 - assertVisible: 'Wallets'
+- scrollUntilVisible:
+    element:
+      id: 'account-back-button'
+    direction: UP
+    timeout: 15000
 - tapOn:
     id: 'account-back-button'
 - waitForAnimationToEnd:
@@ -60,6 +65,11 @@ name: Account Drawer Test
     timeout: 3000
 - assertVisible:
     id: 'currency-search'
+- scrollUntilVisible:
+    element:
+      id: 'account-back-button'
+    direction: UP
+    timeout: 15000
 - tapOn:
     id: 'account-back-button'
 - waitForAnimationToEnd:
@@ -79,6 +89,11 @@ name: Account Drawer Test
     timeout: 3000
 - assertVisible:
     id: 'display-language-currency-row'
+- scrollUntilVisible:
+    element:
+      id: 'account-back-button'
+    direction: UP
+    timeout: 15000
 - tapOn:
     id: 'account-back-button'
 - waitForAnimationToEnd:
@@ -122,7 +137,22 @@ name: Account Drawer Test
           id: 'advanced-secret-mode-toggle'
           checked: false
 
+# The phone-wide settings (Bitcoin network, notification server) sit under
+# "On this phone", below the account half.
+- scrollUntilVisible:
+    element:
+      id: 'notification-server-section'
+    direction: DOWN
+    timeout: 15000
+- assertVisible:
+    id: 'advanced-bitcoin-network'
+
 # --- 5. Back to Home ---
+- scrollUntilVisible:
+    element:
+      id: 'account-back-button'
+    direction: UP
+    timeout: 15000
 - tapOn:
     id: 'account-back-button'
 - waitForAnimationToEnd:

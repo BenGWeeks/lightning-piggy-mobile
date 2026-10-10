@@ -220,8 +220,9 @@ Maestro's debug output under `$OUT`.
 
 == Settings restructure (#1222)
 
-`flow-072-secret-mode.yaml` enables the visible Secret Mode switch in Advanced
-→ Developer options and accepts its confirmation. It intentionally leaves the
+`flow-072-secret-mode.yaml` enables the visible "Show experimental features"
+(Secret Mode) switch in Advanced → Experimental features and accepts its
+confirmation. It intentionally leaves the
 mode enabled for wallet-import flows. `flow-094-account-drawer.yaml` checks
 cancellation and enable/disable while preserving the initial mode. Neither
 flow uses the About version label anymore. Invitation keys will belong in

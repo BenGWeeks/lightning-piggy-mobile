@@ -1479,12 +1479,10 @@
     "grantPermissionInAmber": "Let Amber unlock your messages",
     "noProfilePubkey": "No profile pubkey — log in first.",
     "amberRoundTripMismatch": "Amber round-trip mismatch — permission may not be set.",
-    "experimental": "Experimental",
-    "nativeCryptoHint": "Runs NIP-44 encryption and signature checks through the native rust-nostr module instead of JavaScript. Tester feature — watch the [PerfBlock] nostrCrypto logs and turn it off if anything misbehaves.",
+    "nativeCryptoHint": "Uses your phone's own built-in code, instead of the app's, to encrypt messages and check signatures. This can be faster. Still being tested: turn it off if messages stop sending or loading.",
     "nativeCryptoLabel": "Faster encryption (beta)",
     "nativeCryptoRestartCaption": "Restart the app to apply.",
     "nativeCryptoUnavailable": "Unavailable on this device",
-    "nativeCryptoA11y": "Enable native crypto",
     "nativeCryptoActiveYes": "Active this session: yes",
     "nativeCryptoActiveNo": "Active this session: no",
     "notInUse": "Not in use right now",
@@ -1504,11 +1502,11 @@
     "electrumServerA11y": "Electrum server",
     "useSsl": "Use SSL",
     "hint": "On-chain wallets use this Electrum server to read balances and broadcast transactions. Point this at your own server if you don't want to leak addresses to a public one.",
-    "defaultWalletTitle": "Default for refunds",
-    "defaultWalletEmpty": "No on-chain wallets yet. Add one via Wallets to set a default destination for Boltz refunds and future on-chain receive flows.",
+    "defaultWalletTitle": "Default wallet for refunds",
+    "defaultWalletEmpty": "No on-chain wallets yet. Add one to choose where refunds from failed swaps go.",
     "defaultWalletRowA11y": "Set {{wallet}} as default on-chain wallet",
     "walletFallback": "wallet",
-    "defaultWalletHint": "Used as the refund destination for failed Boltz on-chain → Lightning swaps and as the default destination for any future on-chain receive flows. Tap an active row to clear the choice and fall back to the first wallet."
+    "defaultWalletHint": "If a swap between on-chain and Lightning fails, the refund goes to this wallet. Tap the selected wallet to clear it and use your first on-chain wallet instead."
   },
   "orderPaymentActions": {
     "paymentReceivedA11y": "Payment received",
@@ -2521,20 +2519,22 @@
   },
   "advancedScreen": {
     "title": "Advanced",
-    "notificationServer": "Notification server",
     "developerOptions": "Developer options",
-    "secretMode": "Secret Mode",
-    "secretHint": "Show experimental tools and additional wallet actions.",
-    "secretConfirmTitle": "Turn on Secret Mode?",
-    "secretConfirmBody": "Secret Mode reveals experimental tools and additional wallet actions. Only enable it if you understand these options.",
-    "enableSecret": "Turn on"
+    "secretMode": "Show experimental features",
+    "secretHint": "Also called Secret Mode. Unlocks features still being tested, such as importing a wallet seed phrase and wider Web of Trust filters.",
+    "secretConfirmTitle": "Show experimental features?",
+    "secretConfirmBody": "These features are still being tested and may change or break. Only turn this on if you're comfortable with that.",
+    "enableSecret": "Turn on",
+    "nostrNetworkSubtitle": "Your relays and photo & voice-note storage",
+    "bitcoinNetworkSubtitle": "Electrum server and swap server",
+    "experimentalFeatures": "Experimental features",
+    "encryption": "Encryption"
   },
   "messageSettingsScreen": {
     "title": "Messages",
-    "whoCanMessage": "Who can message me",
-    "friends": "Friends",
-    "fof": "Friends of friends",
-    "all": "Everyone"
+    "trustTitle": "Whose posts and messages you see",
+    "trustHint": "This Web of Trust filter also decides what you see on the Map, in Events and in Groups.",
+    "trustRowA11y": "Whose posts and messages you see: {{tier}}"
   },
   "hermesProfiler": {
     "title": "Performance profiler (dev)",

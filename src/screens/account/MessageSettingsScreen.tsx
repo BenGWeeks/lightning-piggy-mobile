@@ -12,7 +12,22 @@ import { createAdvancedScreenStyles } from '../../styles/AdvancedScreen.styles';
 import { getLinkPreviewEnabled, setLinkPreviewEnabled } from '../../services/linkPreviewPreference';
 import WebOfTrustBottomSheet from '../../components/WebOfTrustBottomSheet';
 import AmberPermissionSection from '../../components/AmberPermissionSection';
+import SettingsScopeHeader from '../../components/SettingsScopeHeader';
 
+// Same names as the Web of Trust sheet this row opens (and the filter chip
+// on Messages, Map and Events).
+const TIER_TITLE = {
+  friends: 'webOfTrustBottomSheet.friendsTitle',
+  fof: 'webOfTrustBottomSheet.fofTitle',
+  all: 'webOfTrustBottomSheet.allTitle',
+} as const;
+
+/**
+ * Settings → Messages: everything here follows the signed-in account. The
+ * trust row is the one shared Web of Trust filter — the same setting as the
+ * chip on Messages, Map, Events and Groups — so it's labelled as a "whose
+ * content you see" filter, not as a rule about who may message you.
+ */
 const MessageSettingsScreen: React.FC = () => {
   const colors = useThemeColors();
   const t = useTranslation();
@@ -39,21 +54,26 @@ const MessageSettingsScreen: React.FC = () => {
   };
   return (
     <AccountScreenLayout title={t('messageSettingsScreen.title')}>
+      <SettingsScopeHeader scope="account" testID="messages-account" />
       <TouchableOpacity
         style={advanced.navRow}
         onPress={() => setTrustOpen(true)}
         accessibilityRole="button"
-        accessibilityLabel={t('messageSettingsScreen.whoCanMessage')}
+        accessibilityLabel={t('messageSettingsScreen.trustRowA11y', {
+          tier: t(TIER_TITLE[wotTier]),
+        })}
+        accessibilityHint={t('messageSettingsScreen.trustHint')}
         testID="messages-trust-tier"
       >
         <View style={advanced.navText}>
-          <Text style={sharedAccountStyles.sectionLabel}>
-            {t('messageSettingsScreen.whoCanMessage')}
+          <Text style={advanced.experimentalLabel}>{t('messageSettingsScreen.trustTitle')}</Text>
+          <Text style={advanced.experimentalSubtitle} testID="messages-trust-tier-value">
+            {t(TIER_TITLE[wotTier])}
           </Text>
-          <Text style={sharedAccountStyles.fieldHint}>{t(`messageSettingsScreen.${wotTier}`)}</Text>
         </View>
         <ChevronRight size={20} color={colors.white} />
       </TouchableOpacity>
+      <Text style={sharedAccountStyles.fieldHint}>{t('messageSettingsScreen.trustHint')}</Text>
       <View style={[styles.headerRow, styles.sectionGap]}>
         <Link2 size={22} color={colors.white} />
         <Text style={[sharedAccountStyles.sectionLabel, styles.headerLabel]}>

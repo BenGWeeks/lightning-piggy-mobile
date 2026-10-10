@@ -53,6 +53,9 @@ export const createAdvancedScreenStyles = (colors: Palette) =>
       fontSize: 12,
       marginTop: 2,
     },
+    devCard: {
+      marginTop: 8,
+    },
     experimentalActive: {
       color: 'rgba(255,255,255,0.7)',
       fontSize: 12,
