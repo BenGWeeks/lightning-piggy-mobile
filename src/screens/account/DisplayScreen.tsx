@@ -1,5 +1,6 @@
 import React, { useDeferredValue, useMemo, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, FlatList } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { Check, Search } from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
 import { createSharedAccountStyles } from './sharedStyles';
@@ -8,6 +9,7 @@ import { useThemeColors } from '../../contexts/ThemeContext';
 import { useTranslation } from '../../contexts/LocaleContext';
 import { createDisplayScreenStyles } from '../../styles/DisplayScreen.styles';
 import { CURRENCY_LIST, type CurrencyInfo } from '../../services/fiatService';
+import type { AccountDrawerNavigation } from '../../navigation/types';
 
 // Substring match against code OR name (case-insensitive). Mirrors the
 // Wallet of Satoshi picker pattern — typing "kr" matches both "KRW" and
@@ -26,11 +28,21 @@ const DisplayScreen: React.FC = () => {
   const sharedAccountStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const styles = useMemo(() => createDisplayScreenStyles(colors), [colors]);
   const { currency, setCurrency } = useWallet();
+  const navigation = useNavigation<AccountDrawerNavigation>();
   const [search, setSearch] = useState('');
   // Defer the filter pass off the keystroke so the input stays responsive
   // even with 38 rows re-rendering. Same pattern as FriendPickerSheet.
   const deferredSearch = useDeferredValue(search);
   const filtered = useMemo(() => filterCurrencies(deferredSearch), [deferredSearch]);
+
+  // Picking a currency finishes the job: go straight back to Display &
+  // language (where the row shows the new choice) rather than leaving the
+  // user on a 38-row list with no "Done".
+  const handlePick = (code: CurrencyInfo['code']) => {
+    void setCurrency(code);
+    setSearch('');
+    navigation.navigate('AccountDisplayLanguage');
+  };
 
   const renderItem = ({ item }: { item: CurrencyInfo }) => {
     const active = item.code === currency;
@@ -38,7 +50,7 @@ const DisplayScreen: React.FC = () => {
       <TouchableOpacity
         accessibilityRole="button"
         style={[styles.row, active && styles.rowActive]}
-        onPress={() => setCurrency(item.code)}
+        onPress={() => handlePick(item.code)}
         accessibilityLabel={t('displayScreen.currencyItem', { code: item.code, name: item.name })}
         accessibilityState={{ selected: active }}
         testID={`currency-${item.code}`}

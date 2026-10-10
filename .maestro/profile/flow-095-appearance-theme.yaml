@@ -72,6 +72,11 @@ name: Appearance Theme Toggle Test
     id: 'appearance-system-check'
 
 # --- 3. Navigate away (Home) and back — preference held ---
+- scrollUntilVisible:
+    element:
+      id: 'account-back-button'
+    direction: UP
+    timeout: 15000
 - tapOn:
     id: 'account-back-button'
 - waitForAnimationToEnd:
