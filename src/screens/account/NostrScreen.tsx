@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, Switch } from 'react-native';
 import { Alert } from '../../components/BrandedAlert';
-import { useFocusEffect } from '@react-navigation/native';
+import type { AccountDrawerNavigation } from '../../navigation/types';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import AccountScreenLayout from './AccountScreenLayout';
 import PublishedRelayListsSection from '../../components/PublishedRelayListsSection';
 import AdvancedRelaysSection from '../../components/AdvancedRelaysSection';
@@ -22,6 +23,7 @@ import {
 
 const NostrScreen: React.FC = () => {
   const t = useTranslation();
+  const navigation = useNavigation<AccountDrawerNavigation>();
   const colors = useThemeColors();
   const sharedAccountStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const styles = useMemo(() => createNostrScreenStyles(colors), [colors]);
@@ -96,6 +98,14 @@ const NostrScreen: React.FC = () => {
 
   return (
     <AccountScreenLayout title={t('nostrScreen.title')}>
+      <TouchableOpacity
+        testID="nostr-invitation-keys"
+        accessibilityRole="button"
+        style={styles.experimentalRow}
+        onPress={() => navigation.navigate('AccountInvitationKeys')}
+      >
+        <Text style={styles.experimentalLabel}>{t('invitationKeys.title')}</Text>
+      </TouchableOpacity>
       <PublishedRelayListsSection connection={connStatus} />
       <AdvancedRelaysSection
         connection={connStatus}
