@@ -22,7 +22,7 @@
     "zapTheTeam": "Haz un zap al equipo",
     "sendFeedback": "Enviar comentarios",
     "couldNotLoadTeamProfile": "No se pudo cargar el perfil del equipo",
-    "aboutBody": "Una cartera Lightning y cliente Nostr creado para familias. Conecta tus carteras, envía mensajes a tus amigos y hazles zaps por Lightning.",
+    "aboutBody": "Una cartera Lightning y cliente Nostr para ahorradores inteligentes y sus familias. Conecta tus carteras, envía mensajes a tus amigos y hazles zaps por Lightning.",
     "openWebsite": "Abrir lightningpiggy.com",
     "appVersion": "Versión de la app {{version}}"
   },
@@ -860,7 +860,7 @@
     "ntag424Desc": " — todavía no compatibles (requieren autenticación AES, GH #558)."
   },
   "huntFilterSheet": {
-    "difficulty1": "A pie de calle, un niño lo encontraría",
+    "difficulty1": "A pie de calle, cualquiera lo encontraría",
     "difficulty2": "Fácil, apto para principiantes",
     "difficulty3": "Escondite astuto, requiere buscar",
     "difficulty4": "Críptico, tipo rompecabezas",

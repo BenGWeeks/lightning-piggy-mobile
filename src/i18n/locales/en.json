@@ -22,7 +22,7 @@
     "zapTheTeam": "Zap the Team",
     "sendFeedback": "Send Feedback",
     "couldNotLoadTeamProfile": "Could not load team profile",
-    "aboutBody": "A Lightning wallet + Nostr client built for families. Connect your wallets, message friends, and zap them over Lightning.",
+    "aboutBody": "A Lightning wallet + Nostr client for smart savers and their families. Connect your wallets, message friends, and zap them over Lightning.",
     "openWebsite": "Open lightningpiggy.com",
     "appVersion": "App version {{version}}"
   },
@@ -860,7 +860,7 @@
     "ntag424Desc": " — not supported yet (needs AES auth, GH #558)."
   },
   "huntFilterSheet": {
-    "difficulty1": "Walk-up, child can find it",
+    "difficulty1": "Walk-up, anyone can find it",
     "difficulty2": "Easy, beginner-friendly",
     "difficulty3": "Cunning hide, takes a look",
     "difficulty4": "Cryptic, puzzle-like",

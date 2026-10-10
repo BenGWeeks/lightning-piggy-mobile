@@ -47,8 +47,14 @@
 
 ## Naming
 
-- The brand is **Lightning Piggy** — never shorten to "LP" in user-facing strings. "LP" only belongs in internal type / variable names (`isLpPiggy`) and code comments.
+Terminology follows the Lightning Piggy website (`LightningPiggy/website`), which is the source of truth for copy.
+
+- The brand is **Lightning Piggy** — never shorten to "LP" in user-facing strings. "LP" only belongs in internal type / variable names (`isLpPiggy`) and code comments. Never "the Lightning Piggy project", "The Lightning Piggy Project" or "Lightning Piggy Foundation" (it isn't incorporated) — just "Lightning Piggy".
+- **Audience: "smart savers"** — never "kids", "children", "young savers", "youngsters" or "little ones" when describing who the app is for. Pair it with the family: "for smart savers and their families". Reword the sentence where a straight swap reads oddly, rather than forcing it.
+- **Lightning Piggy is a family app** (parents and children use it together) — never a "kids' app". Prefer "family", "the whole family" and "parent or guardian".
+- "Child" is only acceptable as a precise account-role / legal term (e.g. a parent-managed account for an under-13), and neutral phrasing is preferred even there if it keeps the meaning.
 - Geo-caches published by this app are called **Piglets** in UI copy (the wallet is the "Piggy", a cache stash is its "Piglet"). Vanilla NIP-GC caches stay "NIP-GC cache".
+- Keep "sats" in Latin script in every translation. The website isn't localised; "smart savers" is "ahorradores inteligentes" in `es` and "розумні заощаджувачі" in `uk`.
 
 ## Code Style
 
