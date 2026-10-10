@@ -12,6 +12,7 @@ import {
   payableBolt11,
   type ParsedOrderEvent,
 } from './orderEvents';
+import { indexMessagesById, resolveQuote, type MessageQuote } from './messageQuote';
 import { NWC_SHARE_KIND, parseNwcShare, type NwcShareCard } from './nwcShareMessage';
 
 // The row variants ConversationScreen's FlatList renders. Extracted from the
@@ -32,6 +33,10 @@ export type Item =
       // the target for per-message NIP-25 reactions + zaps (#205). Undefined
       // for optimistic-local sends and warm-cache rows without a rumor id.
       rumorId?: string;
+      // Marmot reply: the quoted parent shown above the text.
+      quote?: MessageQuote;
+      // Marmot edit: the text is an author's replacement of the original.
+      edited?: boolean;
     }
   | {
       kind: 'zap';
@@ -140,6 +145,10 @@ export interface ConversationMessageInput {
   // NIP-17 inner-rumor id (#857) — the delivery-store key; stable across the
   // optimistic row and its relay echo. Set on sent rows only.
   rumorId?: string;
+  // Marmot reply: id of the message this one quotes.
+  replyTo?: string;
+  // Marmot edit: `created_at` of the edit the text now holds.
+  editedAt?: number;
 }
 
 // Local-only formatter — only used for the dayHeader rule between
@@ -298,6 +307,7 @@ export function buildConversationItems(
   olderOrderAmounts?: ReadonlyMap<string, number | undefined>,
 ): Item[] {
   const expectedAmounts = collectApprovedOrderAmounts(messages, olderOrderAmounts);
+  const byId = indexMessagesById(messages);
   const msgItems: TimedItem[] = messages.flatMap((m): TimedItem[] => {
     // Marketplace order / receipt rows (kind 16/17) store order JSON in `text`;
     // render them as an order card rather than a chat bubble (#market).
@@ -483,6 +493,8 @@ export function buildConversationItems(
         deliveryStatus: m.deliveryStatus,
         wireKind: m.wireKind,
         rumorId: m.rumorId,
+        ...(m.replyTo ? { quote: resolveQuote(m.replyTo, byId) } : {}),
+        ...(m.editedAt ? { edited: true } : {}),
       },
     ];
   });

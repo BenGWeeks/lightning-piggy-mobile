@@ -595,3 +595,40 @@ describe('orderIdsNeedingHistory', () => {
     ).toEqual(['forged']);
   });
 });
+
+describe('buildConversationItems — Marmot replies and edits', () => {
+  const base = (over: Partial<ConversationMessageInput>): ConversationMessageInput => ({
+    id: 'm',
+    fromMe: false,
+    text: 'x',
+    createdAt: 1,
+    wireKind: 14,
+    ...over,
+  });
+  const messageItems = (msgs: ConversationMessageInput[]) =>
+    buildConversationItems(msgs, []).filter((i) => i.kind === 'message');
+
+  it('attaches the quoted parent to a reply', () => {
+    const items = messageItems([
+      base({ id: 'p', fromMe: true, text: 'parent text', createdAt: 1 }),
+      base({ id: 'r', text: 'the reply', createdAt: 2, replyTo: 'p' }),
+    ]);
+    const reply = items.find((i) => i.id === 'dm-r');
+    expect(reply).toMatchObject({ quote: { text: 'parent text', fromMe: true } });
+    expect(items.find((i) => i.id === 'dm-p')).not.toHaveProperty('quote');
+  });
+
+  it('flags a reply whose parent is not loaded', () => {
+    const [reply] = messageItems([base({ id: 'r', replyTo: 'old' })]);
+    expect(reply).toMatchObject({ quote: { text: null } });
+  });
+
+  it('marks an edited message', () => {
+    const items = messageItems([
+      base({ id: 'e', text: 'v2', editedAt: 5 }),
+      base({ id: 'n', text: 'plain' }),
+    ]);
+    expect(items.find((i) => i.id === 'dm-e')).toMatchObject({ edited: true });
+    expect(items.find((i) => i.id === 'dm-n')).not.toHaveProperty('edited');
+  });
+});

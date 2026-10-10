@@ -6,6 +6,7 @@
 import { textForRumor } from '../utils/nip17Unwrap';
 import type { DmMessageRow } from './dmDb';
 import type { GroupMessage } from './groupMessagesStorageService';
+import { marmotReplyParent } from './marmotEdits';
 import { attachmentFallbackText, marmotMediaText, type MarmotMediaKeys } from './marmotMedia';
 import { MARMOT_CHAT_KIND, type MarmotMessageEvent, type MarmotRumor } from './marmotSession';
 
@@ -74,6 +75,7 @@ export function marmotRumorToDmRow(owner: string, event: MarmotMessageEvent): Dm
   const me = owner.toLowerCase();
   const fromMe = rumor.pubkey.toLowerCase() === me;
   const stored = storedMarmotContent(rumor, event.mediaKeys);
+  const replyTo = marmotReplyParent(rumor);
   return {
     owner,
     // The Marmot app-event id is stable across every member's copy.
@@ -88,6 +90,7 @@ export function marmotRumorToDmRow(owner: string, event: MarmotMessageEvent): Dm
     // delivery-store key for our own rows (#857) — same as NIP-17.
     rumorId: rumor.id,
     protocol: 'marmot',
+    ...(replyTo ? { replyTo } : {}),
   };
 }
 
@@ -95,10 +98,12 @@ export function marmotRumorToGroupMessage(
   rumor: MarmotRumor,
   mediaKeys?: MarmotMediaKeys,
 ): GroupMessage {
+  const replyTo = marmotReplyParent(rumor);
   return {
     id: rumor.id,
     senderPubkey: rumor.pubkey.toLowerCase(),
     text: storedMarmotContent(rumor, mediaKeys).text,
     createdAt: rumor.created_at,
+    ...(replyTo ? { replyTo } : {}),
   };
 }

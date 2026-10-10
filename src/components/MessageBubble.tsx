@@ -30,10 +30,12 @@ import { marmotBubbleKey } from '../utils/dmProtocol';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { type DeliveryStatus } from '../utils/dmDeliveryStatus';
 import { extractUrls } from '../utils/extractUrls';
-import { linkifySegments, hasLink } from '../utils/linkify';
 import { isBlocklisted } from '../services/linkPreviewBlocklist';
 import type { MessageReactionState } from '../utils/reactions';
 import MessageLinkPreview from './MessageLinkPreview';
+import { MessageQuote } from './MessageQuote';
+import { LinkifiedText } from './LinkifiedText';
+import type { MessageQuote as MessageQuoteData } from '../utils/messageQuote';
 import MessageInvoiceActions from './MessageInvoiceActions';
 import VoiceNotePlayer from './VoiceNotePlayer';
 import DecryptedImage from './DecryptedImage';
@@ -150,6 +152,10 @@ interface Props {
   // has already reacted) the existing reaction event id so the parent can
   // NIP-09 delete. Optional — when omitted the pills are display-only.
   onToggleReaction?: (emoji: string, existingReactionId: string | null) => void;
+  // Marmot reply: the quoted parent shown above the text.
+  quote?: MessageQuoteData;
+  // Marmot edit: show an "Edited" mark in the footer.
+  edited?: boolean;
 }
 
 type Styles = MessageBubbleStyles;
@@ -261,15 +267,24 @@ const MessageBubble: React.FC<Props> = ({
   onLongPress,
   reactions,
   onToggleReaction,
+  quote,
+  edited,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createMessageBubbleStyles(colors), [colors]);
   const t = useTranslation();
 
-  // Sender label only renders on group bubbles for incoming messages —
-  // identical to existing GroupConversationScreen behaviour. Pulled into
-  // a single render slot so every variant gets it for free.
-  const SenderLabel = senderName ? <Text style={styles.senderLabel}>{senderName}</Text> : null;
+  // Sender label (group bubbles, incoming) + a Marmot reply's quote: one header
+  // slot every variant renders, so photo / GIF / invoice replies show it too.
+  const quoteProps = { styles, fromMe, messageId: id, testIdPrefix };
+  const QuoteStrip = quote ? <MessageQuote {...quoteProps} quote={quote} /> : null;
+  const BubbleHeader =
+    senderName || QuoteStrip ? (
+      <>
+        {senderName ? <Text style={styles.senderLabel}>{senderName}</Text> : null}
+        {QuoteStrip}
+      </>
+    ) : null;
 
   // Reaction pill row (#205) — rendered beneath every variant by wrapping the
   // bubble row in a column so the pills sit on the same axis as the bubble
@@ -370,6 +385,7 @@ const MessageBubble: React.FC<Props> = ({
       deliveryStatus={deliveryStatus}
       onOpenInfo={openInfo}
       infoTint={infoTint}
+      edited={edited}
     />
   );
 
@@ -386,7 +402,7 @@ const MessageBubble: React.FC<Props> = ({
           accessibilityRole="imagebutton"
           testID={`${testIdPrefix}-gif-${id}`}
         >
-          {SenderLabel}
+          {BubbleHeader}
           <ExpoImage
             source={{ uri: content.url }}
             style={styles.gifImage}
@@ -491,7 +507,7 @@ const MessageBubble: React.FC<Props> = ({
           }
           testID={`${testIdPrefix}-live-location-${id}`}
         >
-          {SenderLabel}
+          {BubbleHeader}
           {centreLat !== null && centreLon !== null ? (
             <View style={styles.locationMap}>
               <LibreMiniMap
@@ -561,7 +577,7 @@ const MessageBubble: React.FC<Props> = ({
         id={id}
         testIdPrefix={testIdPrefix}
         styles={styles}
-        senderLabel={SenderLabel}
+        senderLabel={BubbleHeader}
         footer={renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
         myLat={myLat}
         myLon={myLon}
@@ -591,7 +607,7 @@ const MessageBubble: React.FC<Props> = ({
           )}
           testID={`${testIdPrefix}-unsupported-${id}`}
         >
-          {SenderLabel}
+          {BubbleHeader}
           <Text style={styles.unsupportedText}>
             {t(marmotBubbleKey(content.rawKind) ?? 'messageBubble.unsupportedText', {
               kind: content.rawKind,
@@ -627,7 +643,7 @@ const MessageBubble: React.FC<Props> = ({
         testIdPrefix={testIdPrefix}
         styles={styles}
         colors={colors}
-        senderLabel={SenderLabel}
+        senderLabel={BubbleHeader}
       />
     );
   }
@@ -645,7 +661,7 @@ const MessageBubble: React.FC<Props> = ({
         styles={styles}
         image={image}
         fromMe={fromMe}
-        senderLabel={SenderLabel}
+        senderLabel={BubbleHeader}
         onOpenImageFullscreen={onOpenImageFullscreen}
         onLongPress={onLongPress}
         testID={`${testIdPrefix}-image-${id}`}
@@ -670,6 +686,7 @@ const MessageBubble: React.FC<Props> = ({
         fromMe={fromMe}
         createdAt={createdAt}
         senderName={senderName}
+        header={QuoteStrip}
         testID={`${testIdPrefix}-voice-${id}`}
         footer={
           fromMe && deliveryStatus
@@ -696,7 +713,7 @@ const MessageBubble: React.FC<Props> = ({
           style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}
           testID={`${testIdPrefix}-secret-${id}`}
         >
-          {SenderLabel}
+          {BubbleHeader}
           <Text style={[styles.invoiceLabel, fromMe && styles.invoiceLabelMe]}>
             {t('messageBubble.secretMode')}
           </Text>
@@ -741,7 +758,7 @@ const MessageBubble: React.FC<Props> = ({
           style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}
           testID={`${testIdPrefix}-bitcoin-${id}`}
         >
-          {SenderLabel}
+          {BubbleHeader}
           <Text style={[styles.invoiceLabel, fromMe && styles.invoiceLabelMe]}>
             {fromMe ? t('messageBubble.onchainAddressSent') : t('messageBubble.onchainAddress')}
           </Text>
@@ -786,7 +803,7 @@ const MessageBubble: React.FC<Props> = ({
           style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}
           testID={`${testIdPrefix}-invoice-${id}`}
         >
-          {SenderLabel}
+          {BubbleHeader}
           <Text style={[styles.invoiceLabel, fromMe && styles.invoiceLabelMe]}>
             {fromMe ? t('messageBubble.invoiceSent') : t('messageBubble.invoiceReceived')}
           </Text>
@@ -858,7 +875,7 @@ const MessageBubble: React.FC<Props> = ({
           accessibilityLabel={t('messageBubble.sharedContactA11y', { name: displayName })}
           testID={`${testIdPrefix}-contact-${id}`}
         >
-          {SenderLabel}
+          {BubbleHeader}
           <Text style={[styles.contactLabel, fromMe && styles.contactLabelMe]}>
             {fromMe ? t('messageBubble.contactShared') : t('messageBubble.contact')}
           </Text>
@@ -912,7 +929,7 @@ const MessageBubble: React.FC<Props> = ({
           style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}
           testID={`${testIdPrefix}-lnaddr-${id}`}
         >
-          {SenderLabel}
+          {BubbleHeader}
           <Text style={[styles.invoiceLabel, fromMe && styles.invoiceLabelMe]}>
             {fromMe ? t('messageBubble.addressSent') : t('messageBubble.lightningAddress')}
           </Text>
@@ -962,31 +979,14 @@ const MessageBubble: React.FC<Props> = ({
         ]}
         testID={isNip04 ? `${testIdPrefix}-nip04-bubble-${id}` : `${testIdPrefix}-text-${id}`}
       >
-        {SenderLabel}
-        <Text style={[styles.bubbleText, fromMe && styles.bubbleTextMe]}>
-          {hasLink(text)
-            ? linkifySegments(text).map((seg, i) =>
-                seg.url ? (
-                  <Text
-                    key={i}
-                    style={[styles.bubbleLink, fromMe && styles.bubbleLinkMe]}
-                    onPress={() => {
-                      // openURL rejects on a malformed URL / missing handler —
-                      // swallow so a bad link can't raise an unhandled rejection.
-                      void Linking.openURL(seg.url as string).catch(() => {});
-                    }}
-                    accessibilityRole="link"
-                    accessibilityLabel={t('messageBubble.openLink', { url: seg.url })}
-                    testID={`${testIdPrefix}-link-${id}-${i}`}
-                  >
-                    {seg.text}
-                  </Text>
-                ) : (
-                  seg.text
-                ),
-              )
-            : text}
-        </Text>
+        {BubbleHeader}
+        <LinkifiedText
+          text={text}
+          fromMe={fromMe}
+          styles={styles}
+          messageId={id}
+          testIdPrefix={testIdPrefix}
+        />
         {previewUrl ? <MessageLinkPreview url={previewUrl} eventId={id} fromMe={fromMe} /> : null}
         {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
       </Pressable>

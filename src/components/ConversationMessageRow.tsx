@@ -10,6 +10,7 @@ import type { ConversationStyles } from '../styles/ConversationScreen.styles';
 import type { Item } from '../utils/conversationItems';
 import type { NwcShareCard as NwcShareCardData } from '../utils/nwcShareMessage';
 import { formatTime } from '../utils/messageContent';
+import { withPeerName } from '../utils/messageQuote';
 import { orderCardHeader, shortOrderId } from '../utils/orderEvents';
 
 // Reuse MessageBubble's own prop types so the pass-through handlers can never
@@ -56,6 +57,8 @@ export interface ConversationMessageRowProps {
   // Recipient taps Add on a shared-NWC card → parent re-confirms the trust
   // warning and runs the NWC import path.
   onAddNwc: (card: NwcShareCardData) => void;
+  /** The contact's display name — who a 1:1 reply's quoted parent is from. */
+  peerName?: string;
 }
 
 /**
@@ -93,6 +96,7 @@ function ConversationMessageRow({
   reactions,
   onToggleReaction,
   onAddNwc,
+  peerName,
 }: ConversationMessageRowProps): React.ReactElement {
   if (item.kind === 'dayHeader') {
     return (
@@ -267,6 +271,8 @@ function ConversationMessageRow({
       onLongPress={onLongPress}
       reactions={reactions}
       onToggleReaction={onToggleReaction}
+      quote={item.kind === 'message' ? withPeerName(item.quote, peerName) : undefined}
+      edited={item.kind === 'message' ? item.edited : undefined}
       testIdPrefix="conversation"
     />
   );

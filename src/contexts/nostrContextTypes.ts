@@ -57,4 +57,8 @@ export interface ConversationMessage {
   rumorId?: string;
   // Explicit thread protocol (Marmot). Absent = derived from `wireKind`.
   protocol?: DmProtocol;
+  // Marmot reply: id of the message this one quotes.
+  replyTo?: string;
+  // Marmot edit: `created_at` of the edit `text` now holds (the "edited" mark).
+  editedAt?: number;
 }

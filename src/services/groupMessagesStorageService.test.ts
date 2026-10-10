@@ -12,6 +12,8 @@ import {
   loadGroupMessages,
   removeGroupMessage,
   removeGroupMessagesWhere,
+  editGroupMessages,
+  editGroupMessage,
   GROUP_MESSAGES_KEY_PREFIX,
   type GroupMessage,
 } from './groupMessagesStorageService';
@@ -256,4 +258,113 @@ it.each([false, true])('serializes append and deletion (append first: %s)', asyn
   release();
   await Promise.all([first, second]);
   expect((await loadGroupMessages(GROUP)).map((m) => m.text)).toEqual(['new send']);
+});
+
+describe('editGroupMessage', () => {
+  const ID = 'a'.repeat(64);
+  beforeEach(async () => {
+    await appendGroupMessage(GROUP, wrap(ID, 'v1', 1));
+  });
+  it('replaces the text for the author and marks it edited', async () => {
+    expect(await editGroupMessage(GROUP, ID, SENDER, 'v2', 50)).toBe(true);
+    expect((await loadGroupMessages(GROUP))[0]).toMatchObject({ text: 'v2', editedAt: 50 });
+  });
+  it('ignores an edit from anyone else', async () => {
+    expect(await editGroupMessage(GROUP, ID, OTHER_SENDER, 'hijack', 50)).toBe(false);
+    expect((await loadGroupMessages(GROUP))[0].text).toBe('v1');
+  });
+  it('is latest-wins by the edit time', async () => {
+    await editGroupMessage(GROUP, ID, SENDER, 'v3', 90);
+    expect(await editGroupMessage(GROUP, ID, SENDER, 'v2', 50)).toBe(false);
+    expect((await loadGroupMessages(GROUP))[0].text).toBe('v3');
+  });
+  it('leaves a replayed original alone once edited', async () => {
+    await editGroupMessage(GROUP, ID, SENDER, 'v2', 50);
+    await appendGroupMessage(GROUP, wrap(ID, 'v1', 1));
+    expect((await loadGroupMessages(GROUP))[0].text).toBe('v2');
+  });
+  it('does not rewrite a photo or voice note', async () => {
+    await appendGroupMessage(GROUP, wrap('b'.repeat(64), 'https://x/y#lpe=1&k=a&n=b', 2));
+    expect(await editGroupMessage(GROUP, 'b'.repeat(64), SENDER, 'text', 50)).toBe(false);
+  });
+});
+
+it('serializes edits with deletion so a stale edit cannot restore deleted plaintext', async () => {
+  await appendGroupMessage(GROUP, wrap('deleted', 'secret', 1));
+  await appendGroupMessage(GROUP, wrap('edited', 'v1', 2));
+  let release!: () => void;
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const pause = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const original = AsyncStorage.setItem;
+  (AsyncStorage.setItem as jest.Mock).mockImplementationOnce(async (key, value) => {
+    entered();
+    await pause;
+    return original(key, value);
+  });
+  const edit = editGroupMessage(GROUP, 'edited', SENDER, 'v2', 3);
+  await started;
+  const removal = removeGroupMessagesWhere(GROUP, (m) => m.id === 'deleted');
+  release();
+  await Promise.all([edit, removal]);
+  expect((await loadGroupMessages(GROUP)).map((m) => m.text)).toEqual(['v2']);
+});
+
+describe('editGroupMessages', () => {
+  const edit = (target: string, content: string, editedAt: number, editId: string) => ({
+    target,
+    content,
+    editor: SENDER,
+    editedAt,
+    editId,
+  });
+
+  it('applies a whole batch with one load and one write', async () => {
+    await appendGroupMessage(GROUP, wrap('m1', 'a', 1));
+    await appendGroupMessage(GROUP, wrap('m2', 'b', 2));
+    const getItem = jest.spyOn(AsyncStorage, 'getItem');
+    const setItem = jest.spyOn(AsyncStorage, 'setItem');
+    getItem.mockClear();
+    setItem.mockClear();
+    expect(await editGroupMessages(GROUP, [edit('m1', 'A', 5, 'x'), edit('m2', 'B', 5, 'y')])).toBe(
+      true,
+    );
+    expect(getItem).toHaveBeenCalledTimes(1);
+    expect(setItem).toHaveBeenCalledTimes(1);
+    expect((await loadGroupMessages(GROUP)).map((m) => m.text)).toEqual(['A', 'B']);
+  });
+
+  it('writes nothing when no edit applies (a replayed history)', async () => {
+    await appendGroupMessage(GROUP, wrap('m1', 'a', 1));
+    await editGroupMessages(GROUP, [edit('m1', 'A', 5, 'x')]);
+    const setItem = jest.spyOn(AsyncStorage, 'setItem');
+    setItem.mockClear();
+    expect(await editGroupMessages(GROUP, [edit('m1', 'A', 5, 'x')])).toBe(false);
+    expect(setItem).not.toHaveBeenCalled();
+  });
+
+  it('settles same-second edits on the higher edit id', async () => {
+    await appendGroupMessage(GROUP, wrap('m1', 'a', 1));
+    await editGroupMessages(GROUP, [edit('m1', 'v3', 5, '2')]);
+    await editGroupMessages(GROUP, [edit('m1', 'v2', 5, '1')]);
+    expect((await loadGroupMessages(GROUP))[0]).toMatchObject({ text: 'v3', editId: '2' });
+  });
+
+  it('never rewrites a poll, vote or order (stored as JSON) or a legacy text poll', async () => {
+    await appendGroupMessage(GROUP, wrap('poll', '{"question":"Pizza?","options":[]}', 1));
+    await appendGroupMessage(
+      GROUP,
+      wrap('legacy', '[POLL]\nquestion: Pizza?\noption:1: Yes\noption:2: No', 2),
+    );
+    expect(
+      await editGroupMessages(GROUP, [
+        edit('poll', 'swap', 5, 'x'),
+        edit('legacy', 'swap', 5, 'y'),
+      ]),
+    ).toBe(false);
+  });
 });

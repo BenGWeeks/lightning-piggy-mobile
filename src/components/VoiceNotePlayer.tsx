@@ -96,6 +96,8 @@ interface Props {
   /** Optional time + delivery-tick footer (#856). When supplied it replaces
    *  the bare timestamp so a sent voice note shows its delivery tick. */
   footer?: React.ReactNode;
+  /** Shown under the sender label — a Marmot reply's quoted parent. */
+  header?: React.ReactNode;
 }
 
 const VoiceNotePlayer: React.FC<Props> = ({
@@ -110,6 +112,7 @@ const VoiceNotePlayer: React.FC<Props> = ({
   mime,
   testID,
   footer,
+  header,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -238,6 +241,7 @@ const VoiceNotePlayer: React.FC<Props> = ({
     <View style={[styles.row, fromMe ? styles.rowRight : styles.rowLeft]}>
       <View style={[styles.bubble, fromMe ? styles.bubbleMe : styles.bubbleThem]}>
         {senderName ? <Text style={styles.senderLabel}>{senderName}</Text> : null}
+        {header}
         <Text
           style={[
             styles.title,

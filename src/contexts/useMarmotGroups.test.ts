@@ -145,3 +145,38 @@ it("ignores a member's delete of someone else's message, and a non-admin's kind 
   });
   expect(await loadGroupMessages('g')).toEqual([]);
 });
+
+const editOf = (target: string, content: string, created_at: number, editId: string, by = 'bob') =>
+  ({
+    group,
+    rumor: { id: editId, pubkey: by, kind: 1009, content, tags: [['e', target]], created_at },
+  }) as MarmotMessageEvent;
+
+it('overlays an edit that arrives before its message, and ignores a forged one', async () => {
+  renderHook(() => useMarmotGroups('alice'));
+  await act(async () => {
+    mockOnMessage(editOf(id, 'forged', 9, 'f'.repeat(64), 'mallory'));
+    mockOnMessage(editOf(id, 'edited', 2, 'e'.repeat(64)));
+    mockOnMessage(message(id, 'bob', 'original'));
+    await jest.advanceTimersByTimeAsync(150);
+  });
+  expect(await loadGroupMessages('g')).toEqual([
+    expect.objectContaining({ id, text: 'edited', editedAt: 2, editId: 'e'.repeat(64) }),
+  ]);
+});
+
+it('applies an edit to a stored message, but never after its delete in the same batch', async () => {
+  renderHook(() => useMarmotGroups('alice'));
+  await act(async () => {
+    mockOnMessage(message(id, 'bob', 'original'));
+    mockOnMessage(message('b'.repeat(64), 'bob', 'other'));
+    await jest.advanceTimersByTimeAsync(150);
+  });
+  await act(async () => {
+    mockOnMessage(editOf('b'.repeat(64), 'other v2', 2, '2'.repeat(64)));
+    mockOnMessage(editOf(id, 'edited', 2, 'e'.repeat(64)));
+    mockOnMessage(remove(id, 'bob'));
+    await jest.advanceTimersByTimeAsync(150);
+  });
+  expect((await loadGroupMessages('g')).map((m) => m.text)).toEqual(['other v2']);
+});
