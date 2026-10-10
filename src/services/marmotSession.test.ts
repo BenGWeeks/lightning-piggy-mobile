@@ -26,6 +26,8 @@ import {
   MarmotUnusableKeyPackageError,
   isUsableKeyPackage,
   buildMarmotRumor,
+  quiesceMarmotSession,
+  setMarmotSession,
   type MarmotMessageEvent,
   type MarmotRumor,
 } from './marmotSession';
@@ -229,6 +231,206 @@ describe('MarmotSession (no WebCrypto)', () => {
   afterAll(() =>
     Object.defineProperty(globalThis.crypto, 'subtle', { value: realSubtle, configurable: true }),
   );
+
+  it('drains key publication before account cleanup and cannot republish after stopping', async () => {
+    const relay = makeRelay();
+    const publish = relay.network.publish;
+    let release!: () => void;
+    let publishing = false;
+    const blocked = new Promise<void>((resolve) => (release = resolve));
+    relay.network.publish = async (relays, event) => {
+      if (event.kind === 30443) {
+        publishing = true;
+        await blocked;
+      }
+      return publish(relays, event);
+    };
+    const alice = makeSession(relay);
+    setMarmotSession(alice.session);
+    try {
+      await alice.session.start();
+      await waitFor(() => publishing);
+      let drained = false;
+      const cleanup = quiesceMarmotSession(alice.pubkey).then(() => (drained = true));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(drained).toBe(false);
+      release();
+      await cleanup;
+      await alice.session.ensureKeyPackage();
+      expect(relay.events.filter((e) => e.kind === 30443)).toHaveLength(1);
+    } finally {
+      release();
+      setMarmotSession(null);
+    }
+  }, 60_000);
+
+  /** A session whose kind-30443 signing waits for `gate` (an unanswered Amber / NIP-46 prompt). */
+  function sessionWithSlowSigner(relay: ReturnType<typeof makeRelay>, gate: Promise<void>) {
+    const who = makeSigner();
+    const backend = createMemoryMarmotBackend();
+    const session = new MarmotSession({
+      pubkey: who.pubkey,
+      signerType: 'nsec',
+      signer: {
+        ...who.signer,
+        signEvent: async (draft: Parameters<typeof finalizeEvent>[0]) => {
+          if (draft.kind === 30443) await gate;
+          return finalizeEvent(draft, who.sk);
+        },
+      },
+      network: relay.network,
+      backend,
+      getWriteRelays: () => [RELAY],
+      getLookupRelays: () => [RELAY],
+      keyPackageDrainMs: 200,
+    });
+    return { ...who, session, backend };
+  }
+
+  it('sign-out never hangs on a signer prompt nobody answers', async () => {
+    const relay = makeRelay();
+    const never = new Promise<void>(() => undefined);
+    const alice = sessionWithSlowSigner(relay, never);
+    setMarmotSession(alice.session);
+    try {
+      await alice.session.start();
+      await waitFor(
+        () =>
+          (alice.session as unknown as { keyPackageRuns: { current: unknown } }).keyPackageRuns
+            .current !== null,
+      );
+      const started = Date.now();
+      await quiesceMarmotSession(alice.pubkey);
+      expect(Date.now() - started).toBeLessThan(2_000);
+    } finally {
+      setMarmotSession(null);
+    }
+  }, 30_000);
+
+  it('a signer answer arriving after the wipe publishes and writes nothing', async () => {
+    const relay = makeRelay();
+    let answer!: () => void;
+    const late = new Promise<void>((resolve) => (answer = resolve));
+    const alice = sessionWithSlowSigner(relay, late);
+    setMarmotSession(alice.session);
+    try {
+      await alice.session.start();
+      await waitFor(
+        () =>
+          (alice.session as unknown as { keyPackageRuns: { current: unknown } }).keyPackageRuns
+            .current !== null,
+      );
+      await quiesceMarmotSession(alice.pubkey);
+      for (const ns of ['keyPackages', 'meta']) await alice.backend.clear(ns); // the wipe
+      answer(); // the user approves the prompt after signing out
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(relay.events.filter((e) => e.kind === 30443)).toHaveLength(0);
+      expect(await alice.backend.keys('keyPackages')).toEqual([]);
+      expect(await alice.backend.keys('meta')).toEqual([]);
+    } finally {
+      setMarmotSession(null);
+    }
+  }, 30_000);
+
+  it('bounds the wait for a stuck relay publish, and fences its late write', async () => {
+    const relay = makeRelay();
+    const publish = relay.network.publish;
+    let release!: () => void;
+    const stuck = new Promise<void>((resolve) => (release = resolve));
+    relay.network.publish = async (relays, event) => {
+      if (event.kind === 30443) await stuck;
+      return publish(relays, event);
+    };
+    const alice = sessionWithSlowSigner(relay, Promise.resolve());
+    setMarmotSession(alice.session);
+    try {
+      await alice.session.start();
+      await waitFor(
+        () =>
+          (alice.session as unknown as { keyPackageRuns: { current: unknown } }).keyPackageRuns
+            .current !== null,
+      );
+      const started = Date.now();
+      await quiesceMarmotSession(alice.pubkey); // keyPackageDrainMs: 200
+      expect(Date.now() - started).toBeLessThan(2_000);
+      await alice.backend.clear('keyPackages'); // the wipe
+      release();
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(await alice.backend.keys('keyPackages')).toEqual([]);
+    } finally {
+      release();
+      setMarmotSession(null);
+    }
+  }, 30_000);
+
+  it('keeps a Welcome for our own key retryable when the join fails, even as "No matching secret"', async () => {
+    const relay = makeRelay();
+    const alice = makeSession(relay);
+    const bobKeys = makeSigner();
+    const bobBackend = createMemoryMarmotBackend();
+    const bob = new MarmotSession({
+      pubkey: bobKeys.pubkey,
+      signerType: 'nsec',
+      signer: bobKeys.signer,
+      network: relay.network,
+      backend: bobBackend,
+      getWriteRelays: () => [RELAY],
+      getLookupRelays: () => [RELAY],
+    });
+    await Promise.all([alice.session.start(), bob.start()]);
+    await waitFor(() => relay.events.some((e) => e.kind === 30443 && e.pubkey === bobKeys.pubkey));
+    await alice.session.getOrCreateDm(bobKeys.pubkey);
+    const [welcome] = unwrapWelcomes(relay, bobKeys);
+
+    // marmot-ts reports only the LAST key's error — here from an unrelated key.
+    const join = jest
+      .spyOn(MarmotClient.prototype, 'joinGroupFromWelcome')
+      .mockRejectedValueOnce(
+        new Error(
+          'Failed to join group with any matching key package. Last error: No matching secret found',
+        ),
+      );
+    expect(await bob.acceptWelcome(welcome)).toBeNull();
+    expect(await bobBackend.get('welcomes', welcome.id)).toBeNull();
+    expect(await bobBackend.keys('pendingWelcomes')).toEqual([welcome.id]);
+    join.mockRestore();
+    expect(await bob.acceptWelcome(welcome)).not.toBeNull(); // the retry joins
+    alice.session.stop();
+    bob.stop();
+  }, 60_000);
+
+  it("drops a Welcome meant for another of the account's devices", async () => {
+    const relay = makeRelay();
+    const alice = makeSession(relay);
+    const bobKeys = makeSigner();
+    const device = (backend = createMemoryMarmotBackend()) => ({
+      backend,
+      session: new MarmotSession({
+        pubkey: bobKeys.pubkey,
+        signerType: 'nsec',
+        signer: bobKeys.signer,
+        network: relay.network,
+        backend,
+        getWriteRelays: () => [RELAY],
+        getLookupRelays: () => [RELAY],
+      }),
+    });
+    const phone = device();
+    await Promise.all([alice.session.start(), phone.session.start()]);
+    await waitFor(() => relay.events.some((e) => e.kind === 30443 && e.pubkey === bobKeys.pubkey));
+    await alice.session.getOrCreateDm(bobKeys.pubkey); // invites the phone's key package
+    const [welcome] = unwrapWelcomes(relay, bobKeys);
+
+    const tablet = device();
+    await tablet.session.start();
+    await waitFor(
+      () => relay.events.filter((e) => e.kind === 30443 && e.pubkey === bobKeys.pubkey).length > 1,
+    );
+    expect(await tablet.session.acceptWelcome(welcome)).toBeNull();
+    expect(await tablet.backend.get('welcomes', welcome.id)).not.toBeNull(); // handled for good
+    expect(await tablet.backend.keys('pendingWelcomes')).toEqual([]);
+    for (const s of [alice.session, phone.session, tablet.session]) s.stop();
+  }, 60_000);
 
   it('round-trips the KV codec (bytes + bigint nested in objects)', () => {
     const value = {
