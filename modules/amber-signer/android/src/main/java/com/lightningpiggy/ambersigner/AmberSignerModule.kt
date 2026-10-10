@@ -14,14 +14,13 @@ import expo.modules.kotlin.exception.CodedException
 
 class AmberSignerModule : Module() {
     /**
-     * The one Amber Intent that may be outstanding (Amber can only show one
-     * approval sheet at a time, so the module is single-flight: a second launch
-     * while this is set rejects with `BUSY`).
-     *
-     * [requestCode] carries a per-launch sequence number, so a result that arrives
-     * after this request was abandoned can never settle a newer one.
+     * The one Amber Intent that may be outstanding. Amber shows one approval
+     * sheet at a time, so the module is single-flight: a second launch while
+     * this is set rejects with `BUSY`.
      */
     private class PendingRequest(
+        val op: Int,
+        /** Unique per launch, so a late result can never settle a newer request. */
         val requestCode: Int,
         val promise: Promise,
         val startedAtMs: Long,
@@ -29,21 +28,33 @@ class AmberSignerModule : Module() {
         var leftForeground: Boolean,
     )
 
-    private val lock = Any()
-    private var pending: PendingRequest? = null // guarded by lock
-    private var nextSeq = 0 // guarded by lock
-    @Volatile private var inForeground = true
+    // All request state is confined to the main thread: activity results and
+    // lifecycle callbacks arrive there, and launches are posted there, so a
+    // launch can never interleave with a pause/resume or a result.
     private val mainHandler = Handler(Looper.getMainLooper())
+    private var pending: PendingRequest? = null
+    private var nextSeq = 0
+    private var inForeground = true
+    /** Bumped on every pause; a resume check only fires if no pause followed it. */
+    private var pauseCount = 0
+    /**
+     * Codes of requests settled without a result (resume, watchdog, eviction)
+     * whose Amber activity may still answer. Skipped when allocating, so a
+     * late result can't match a newer request; dropped once it arrives.
+     */
+    private val abandonedCodes = LinkedHashSet<Int>()
 
     companion object {
         private const val TAG = "AmberSigner"
 
-        // Request codes are REQUEST_CODE_BASE | op << 8 | (seq & 0xFF): the
-        // high nibble marks the code as ours (other modules' results also
-        // reach OnActivityResult), the op picks the result parser, and the
-        // sequence number ties a result to the launch that asked for it.
-        // Max 0xA6FF, inside the 16 bits startActivityForResult allows.
+        // Request codes are REQUEST_CODE_BASE | seq (12 bits): the high nibble
+        // marks the code as ours (other modules' results also reach
+        // OnActivityResult) and the sequence ties a result to its launch.
+        // Max 0xAFFF, inside the 16 bits startActivityForResult allows.
         private const val REQUEST_CODE_BASE = 0xA000
+        private const val SEQ_MASK = 0x0FFF
+        private const val MAX_ABANDONED = 1024
+
         private const val OP_GET_PUBLIC_KEY = 1
         private const val OP_SIGN_EVENT = 2
         private const val OP_NIP04_ENCRYPT = 3
@@ -55,7 +66,8 @@ class AmberSignerModule : Module() {
         // the request still pending means none is coming. The short grace is
         // belt-and-braces against any dispatch reordering.
         private const val RESUME_GRACE_MS = 500L
-        // Amber never came up (Lightning Piggy stayed in the foreground).
+        // How long Lightning Piggy may keep window focus after a launch before
+        // we conclude Amber never came up. Re-armed while focus is elsewhere.
         private const val LAUNCH_WATCHDOG_MS = 15_000L
         // Backstop: a request this old is evicted by the next launch rather
         // than answering it with BUSY forever.
@@ -64,24 +76,29 @@ class AmberSignerModule : Module() {
         private const val AMBER_PACKAGE = "com.greenart7c3.nostrsigner"
         private const val AMBER_AUTHORITY = "com.greenart7c3.nostrsigner"
 
-        private fun requestCodeFor(op: Int, seq: Int) =
-            REQUEST_CODE_BASE or (op shl 8) or (seq and 0xFF)
-
-        private fun isAmberRequestCode(code: Int) = (code and 0xF000) == REQUEST_CODE_BASE
-
-        private fun opOf(code: Int) = (code shr 8) and 0xF
+        private fun isAmberRequestCode(code: Int) = (code and SEQ_MASK.inv()) == REQUEST_CODE_BASE
 
         private fun noResult(message: String) = CodedException("NO_RESULT", message, null)
     }
 
-    /** Detaches [req] if it is still the outstanding request; false if it already settled. */
-    private fun takeIfCurrent(req: PendingRequest): Boolean = synchronized(lock) {
-        if (pending === req) {
-            pending = null
-            true
-        } else {
-            false
+    /** Next request code not held by an abandoned request (main thread). */
+    private fun allocateRequestCode(): Int {
+        while (true) {
+            val code = REQUEST_CODE_BASE or (nextSeq++ and SEQ_MASK)
+            if (code !in abandonedCodes) return code
         }
+    }
+
+    /**
+     * Settles [req] as NO_RESULT if it is still the outstanding request, and
+     * remembers its code so a late result is ignored (main thread).
+     */
+    private fun abandon(req: PendingRequest, message: String) {
+        if (pending !== req) return
+        pending = null
+        abandonedCodes.add(req.requestCode)
+        if (abandonedCodes.size > MAX_ABANDONED) abandonedCodes.remove(abandonedCodes.first())
+        req.promise.reject(noResult(message))
     }
 
     override fun definition() = ModuleDefinition {
@@ -89,27 +106,28 @@ class AmberSignerModule : Module() {
 
         OnActivityEntersBackground {
             inForeground = false
-            synchronized(lock) { pending?.leftForeground = true }
+            pauseCount++
+            pending?.leftForeground = true
         }
 
         // Back in Lightning Piggy with the request still pending: Amber handed
         // focus elsewhere, or the user switched away from its sheet. No result
         // will arrive for it, so settle it instead of leaving it to block every
-        // later request with BUSY (#1186).
+        // later request with BUSY (#1186). A pause inside the grace window (the
+        // user went straight back to Amber) cancels the check.
         OnActivityEntersForeground {
             inForeground = true
-            val req = synchronized(lock) { pending?.takeIf { it.leftForeground } }
-                ?: return@OnActivityEntersForeground
+            val req = pending?.takeIf { it.leftForeground } ?: return@OnActivityEntersForeground
+            val pausesAtResume = pauseCount
             mainHandler.postDelayed({
-                if (takeIfCurrent(req)) {
-                    req.promise.reject(noResult("Returned to Lightning Piggy without a result from Amber"))
+                if (inForeground && pauseCount == pausesAtResume) {
+                    abandon(req, "Returned to Lightning Piggy without a result from Amber")
                 }
             }, RESUME_GRACE_MS)
         }
 
         OnDestroy {
             mainHandler.removeCallbacksAndMessages(null)
-            synchronized(lock) { pending = null }
         }
 
         OnActivityResult { _, payload ->
@@ -118,15 +136,15 @@ class AmberSignerModule : Module() {
             val data = payload.data
 
             if (!isAmberRequestCode(requestCode)) return@OnActivityResult
-            val req = synchronized(lock) {
-                pending?.takeIf { it.requestCode == requestCode }?.also { pending = null }
-            }
+            val req = pending?.takeIf { it.requestCode == requestCode }
             if (req == null) {
-                // A late result for a request we already settled (resume,
-                // watchdog or eviction) — never apply it to a newer request.
+                // A late result for a request we already settled — never apply
+                // it to a newer request.
+                abandonedCodes.remove(requestCode)
                 Log.w(TAG, "Ignoring Amber result for a settled request (code=$requestCode)")
                 return@OnActivityResult
             }
+            pending = null
             val promise = req.promise
 
             if (resultCode != Activity.RESULT_OK) {
@@ -134,7 +152,7 @@ class AmberSignerModule : Module() {
                 return@OnActivityResult
             }
 
-            when (opOf(requestCode)) {
+            when (req.op) {
                 OP_GET_PUBLIC_KEY -> {
                     val result = data?.getStringExtra("signature") ?: ""
                     val packageName = data?.getStringExtra("package") ?: AMBER_PACKAGE
@@ -361,51 +379,63 @@ class AmberSignerModule : Module() {
         promise: Promise,
         build: (activity: Activity, requestCode: Int) -> Unit,
     ) {
+        mainHandler.post { launchOnMain(op, promise, build) }
+    }
+
+    private fun launchOnMain(
+        op: Int,
+        promise: Promise,
+        build: (activity: Activity, requestCode: Int) -> Unit,
+    ) {
         val activity = appContext.currentActivity
         if (activity == null) {
             promise.reject(CodedException("NO_ACTIVITY", "No current activity", null))
             return
         }
         val now = SystemClock.elapsedRealtime()
-        var evicted: PendingRequest? = null
-        val req = synchronized(lock) {
-            val current = pending
-            if (current != null && now - current.startedAtMs >= STALE_AFTER_MS) {
-                evicted = current
-                pending = null
-            }
-            if (pending != null) {
-                null
-            } else {
-                PendingRequest(
-                    requestCode = requestCodeFor(op, nextSeq++),
-                    promise = promise,
-                    startedAtMs = now,
-                    // Launched while backgrounded: the next resume settles it.
-                    leftForeground = !inForeground,
-                ).also { pending = it }
+        pending?.let { current ->
+            if (now - current.startedAtMs >= STALE_AFTER_MS) {
+                abandon(current, "Amber never answered an earlier request")
             }
         }
-        evicted?.promise?.reject(noResult("Amber never answered an earlier request"))
-        if (req == null) {
+        if (pending != null) {
             promise.reject(CodedException("BUSY", "Another Amber request is already in progress", null))
             return
         }
+        val req = PendingRequest(
+            op = op,
+            requestCode = allocateRequestCode(),
+            promise = promise,
+            startedAtMs = now,
+            // Launched while backgrounded: the next resume settles it.
+            leftForeground = !inForeground,
+        )
+        pending = req
         try {
             build(activity, req.requestCode)
         } catch (e: Exception) {
-            if (takeIfCurrent(req)) {
-                promise.reject(CodedException("LAUNCH_FAILED", "Failed to launch Amber: ${e.message}", e))
-            }
+            pending = null
+            promise.reject(CodedException("LAUNCH_FAILED", "Failed to launch Amber: ${e.message}", e))
             return
         }
-        // Amber should cover Lightning Piggy (pausing it) within moments. If
-        // we are still in the foreground with nothing back, it never opened.
+        armLaunchWatchdog(req)
+    }
+
+    /**
+     * Amber normally covers Lightning Piggy (pausing it) at once. If we still
+     * hold window focus [LAUNCH_WATCHDOG_MS] later with nothing back, Amber
+     * never came up. Without focus (e.g. Amber beside us in multi-window, or a
+     * system dialog) it may still be answering, so check again later.
+     */
+    private fun armLaunchWatchdog(req: PendingRequest) {
         mainHandler.postDelayed({
-            val neverOpened = synchronized(lock) {
-                (pending === req && !req.leftForeground).also { if (it) pending = null }
+            if (pending !== req || req.leftForeground) return@postDelayed
+            val focused = appContext.currentActivity?.hasWindowFocus() == true
+            if (inForeground && focused) {
+                abandon(req, "Amber did not open")
+            } else {
+                armLaunchWatchdog(req)
             }
-            if (neverOpened) req.promise.reject(noResult("Amber did not open"))
         }, LAUNCH_WATCHDOG_MS)
     }
 }
