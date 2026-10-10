@@ -12,6 +12,7 @@ import { ChevronDown, ChevronRight, Smartphone } from 'lucide-react-native';
 import { nip19 } from 'nostr-tools';
 
 import Toast from './BrandedToast';
+import DetailsDisclosure from './DetailsDisclosure';
 import { useNostr } from '../contexts/NostrContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -39,8 +40,8 @@ const shortNpub = (hex: string) => {
 
 /**
  * Settings → Security: opt-in Marmot push (MIP-05). Off by default; the
- * privacy trade-off is spelled out before the switch, and remote-signer
- * users are told what approving costs them.
+ * privacy trade-off (and, for remote-signer users, what approving costs
+ * them) sits behind "Privacy details" right above the switch.
  */
 const MarmotPushSection: React.FC = () => {
   const colors = useThemeColors();
@@ -175,13 +176,18 @@ const MarmotPushSection: React.FC = () => {
             : 'securityScreen.marmotPushHintAndroid',
         )}
       </Text>
-      <Text style={styles.privacyNote}>{t('securityScreen.marmotPushPrivacy')}</Text>
-      {remoteSigner && (
-        <Text style={styles.privacyNote}>{t('securityScreen.marmotPushSignerNote')}</Text>
-      )}
+      <DetailsDisclosure
+        label={t('securityScreen.privacyDetails')}
+        testID="security-marmot-push-details"
+        paragraphs={[
+          t('securityScreen.marmotPushPrivacy'),
+          Platform.OS === 'android' && t('securityScreen.marmotPushGoogleFree'),
+          remoteSigner && t('securityScreen.marmotPushSignerNote'),
+        ]}
+      />
 
       <View style={screen.toggleRow}>
-        <Text style={[screen.optionLabel, styles.toggleLabel]}>
+        <Text style={[screen.optionLabel, screen.toggleLabel]}>
           {t('securityScreen.marmotPushToggle')}
         </Text>
         {busy ? (

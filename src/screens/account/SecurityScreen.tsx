@@ -7,6 +7,7 @@ import { useThemeColors } from '../../contexts/ThemeContext';
 import { useTranslation } from '../../contexts/LocaleContext';
 import { createSecurityScreenStyles } from '../../styles/SecurityScreen.styles';
 import MarmotPushSection from '../../components/MarmotPushSection';
+import DetailsDisclosure from '../../components/DetailsDisclosure';
 import {
   DEFAULT_HIGH_VALUE_SEND_THRESHOLD_SATS,
   getSendThreshold,
@@ -179,7 +180,9 @@ const SecurityScreen: React.FC = () => {
       </View>
       <Text style={sharedAccountStyles.fieldHint}>{t('securityScreen.linkPreviewsHint')}</Text>
       <View style={styles.toggleRow}>
-        <Text style={styles.optionLabel}>{t('securityScreen.showLinkPreviews')}</Text>
+        <Text style={[styles.optionLabel, styles.toggleLabel]}>
+          {t('securityScreen.showLinkPreviews')}
+        </Text>
         <Switch
           value={linkPreviewOn}
           onValueChange={handleToggleLinkPreview}
@@ -200,7 +203,9 @@ const SecurityScreen: React.FC = () => {
         {t('securityScreen.notificationContentHint')}
       </Text>
       <View style={styles.toggleRow}>
-        <Text style={styles.optionLabel}>{t('securityScreen.showMessagePaymentDetails')}</Text>
+        <Text style={[styles.optionLabel, styles.toggleLabel]}>
+          {t('securityScreen.showMessagePaymentDetails')}
+        </Text>
         <Switch
           value={lockScreenContentOn}
           onValueChange={handleToggleLockScreenContent}
@@ -222,8 +227,19 @@ const SecurityScreen: React.FC = () => {
           <Text style={sharedAccountStyles.fieldHint}>
             {t('securityScreen.backgroundNotificationsHint')}
           </Text>
+          <DetailsDisclosure
+            label={t('securityScreen.details')}
+            testID="security-background-dm-details"
+            paragraphs={[
+              t('securityScreen.backgroundDetailsNoGoogle'),
+              t('securityScreen.backgroundDetailsBattery'),
+              t('securityScreen.backgroundDetailsPayments'),
+            ]}
+          />
           <View style={styles.toggleRow}>
-            <Text style={styles.optionLabel}>{t('securityScreen.watchForMessages')}</Text>
+            <Text style={[styles.optionLabel, styles.toggleLabel]}>
+              {t('securityScreen.watchForMessages')}
+            </Text>
             <Switch
               value={backgroundDmOn}
               onValueChange={handleToggleBackgroundDm}

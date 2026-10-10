@@ -950,7 +950,7 @@ three package names is `google-services.json` in the repo root.
 
 === Marmot push: enabling says "couldn't get a push token"
 
-The switch (Account → Security → "Message notifications via push (Marmot)")
+The switch (Account → Security → Push notifications → "Marmot messages")
 needs a native token from Apple/Google. On Android that means Google Play
 services: de-Googled phones (GrapheneOS without sandboxed Play, microG builds
 without FCM) and the LP emulator AVD (a Google APIs-less image) can't get one,

@@ -4,16 +4,6 @@ import type { Palette } from './palettes';
 
 export const createMarmotPushSectionStyles = (colors: Palette) =>
   StyleSheet.create({
-    privacyNote: {
-      color: 'rgba(255,255,255,0.75)',
-      fontSize: 12,
-      lineHeight: 17,
-      marginTop: 8,
-    },
-    toggleLabel: {
-      flex: 1,
-      marginRight: 8,
-    },
     statusRow: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -45,6 +35,7 @@ export const createMarmotPushSectionStyles = (colors: Palette) =>
       paddingVertical: 4,
     },
     advancedToggleText: {
+      flexShrink: 1,
       color: colors.white,
       fontSize: 13,
       fontWeight: '600',

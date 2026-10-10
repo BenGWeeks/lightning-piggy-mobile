@@ -37,6 +37,7 @@ export const createAccountScreenLayoutStyles = (colors: Palette) =>
       alignItems: 'center',
     },
     title: {
+      flexShrink: 1,
       color: colors.white,
       fontSize: 28,
       fontWeight: '700',

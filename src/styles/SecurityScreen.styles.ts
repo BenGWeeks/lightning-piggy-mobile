@@ -11,6 +11,8 @@ export const createSecurityScreenStyles = (colors: Palette) =>
       marginBottom: 6,
     },
     headerLabel: {
+      // Shrink (and wrap) beside the icon rather than run off the screen.
+      flexShrink: 1,
       marginBottom: 0,
     },
     sectionGap: {
@@ -72,6 +74,12 @@ export const createSecurityScreenStyles = (colors: Palette) =>
       fontSize: 13,
       color: colors.textSupplementary,
       fontWeight: '500',
+    },
+    // The text half of a toggleRow: takes the remaining width and wraps, so a
+    // long label (or a large system font) can never push the Switch off-card.
+    toggleLabel: {
+      flex: 1,
+      marginRight: 12,
     },
     toggleRow: {
       flexDirection: 'row',
