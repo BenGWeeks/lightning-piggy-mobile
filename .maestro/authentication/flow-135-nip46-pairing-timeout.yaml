@@ -45,5 +45,10 @@ name: NIP-46 pairing the bunker never answers → "took too long" error, Big sti
     env:
       ACTION: mode
       MODE: approve
+# Big must still be the active account — checked directly (by npub), not via
+# a login/switch that could paper over a regression.
 - pressKey: back
-- runFlow: ../common/login-nsec-big.yaml
+- runFlow: ../common/open-drawer.yaml
+- assertVisible:
+    text: 'npub1enkml7d…65f4st'
+- pressKey: back

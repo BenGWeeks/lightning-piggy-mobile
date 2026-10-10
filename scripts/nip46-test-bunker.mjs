@@ -383,6 +383,7 @@ const server = createServer((req, res) => {
         }
         return send(200, {
           pk,
+          device: DEVICE,
           mode: readMode(),
           clients: clients.size,
           relays: [...subscribed],

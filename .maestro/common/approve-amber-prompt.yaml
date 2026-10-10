@@ -25,14 +25,16 @@ name: Internal — answer any Amber signing / connection prompts that are showin
       text: 'Accept|Reject|Connect|Confirm'
     timeout: ${AMBER_WAIT_MS || 4000}
     optional: true
-# Only ever answer AMBER's screens: the loop runs while an Amber window
-# (resource ids in Amber's package) is on top, so LP's own dialogs — which can
-# also say "Confirm" — are never touched.
+# Only ever answer AMBER's screens: every Amber prompt (connect, single,
+# batched) prints the requesting app's package id as text, which LP's own UI
+# never shows — so LP's dialogs (which can also say "Confirm") are never
+# touched. (Amber's prompt activity is Compose without resource ids, so an
+# id-based guard can't see it.)
 - repeat:
     times: ${AMBER_MAX_PROMPTS || 6}
     while:
       visible:
-        id: 'com\.greenart7c3\.nostrsigner:id/.*'
+        text: 'com\.lightningpiggy\.app(\.dev|\.preview)?'
     commands:
       # Android's notification-permission dialog can sit on top of Amber's
       # first prompt (curly apostrophe → regex dot).

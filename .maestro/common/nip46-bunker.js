@@ -17,10 +17,11 @@
 //   COUNTER  for ACTION=expect-count: a key of /status `counts`
 //            (e.g. "sign_event:kind=13", "verdict:decline")
 //   MIN      for ACTION=expect-count: minimum value (default 1)
-//   NIP46_PORT  control port (default 8746)
+//   MAESTRO_NIP46_PORT  control port (default 8746; exported by the runner)
 //
 // Sets `output.nip46` to the bunker's JSON reply (mode / counts / paired).
-var port = typeof NIP46_PORT !== 'undefined' && NIP46_PORT ? NIP46_PORT : '8746';
+var port =
+  typeof MAESTRO_NIP46_PORT !== 'undefined' && MAESTRO_NIP46_PORT ? MAESTRO_NIP46_PORT : '8746';
 var base = 'http://127.0.0.1:' + port;
 var action = typeof ACTION !== 'undefined' ? ACTION : 'status';
 var token = typeof MAESTRO_NIP46_TOKEN !== 'undefined' ? MAESTRO_NIP46_TOKEN : '';

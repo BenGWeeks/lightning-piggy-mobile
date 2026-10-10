@@ -171,8 +171,11 @@ Maestro's debug output under `$OUT`.
   Little.
 * *Amber is a third-party app*: `common/amber-import-key.yaml` and
   `common/approve-amber-prompt.yaml` use Amber's own English copy as text
-  selectors ("Use your private key", "Connect", "Accept", "Reject" — Amber
-  v6.6.7). No coordinates anywhere.
+  selectors ("Use your private key", "Connect", "Accept", "Reject",
+  "Approve" / "Confirm" on its batched-requests sheet — Amber v6.6.7), and
+  only while Amber's prompt is on screen (it prints the requesting app id,
+  `com.lightningpiggy.app.dev`, which LP's own UI never shows). No
+  coordinates anywhere.
 * *The bunker is driven from the flow*: `common/nip46-bunker.js` (via
   `runScript`) flips its mode (`approve` / `decline` / `silent` / `-all`
   variants), answers LP's pairing QR (the bunker screencaps the device and
@@ -185,16 +188,22 @@ Maestro's debug output under `$OUT`.
 
 === Secrets in signer-matrix flows
 
-* nsecs reach Maestro only through the environment: `set -a; source .env`
-  and Maestro picks up `MAESTRO_*` itself (no `-e MAESTRO_NSEC_…=` on the
-  command line, where `ps` can see it).
+* nsecs reach Maestro only through the environment: the runner exports just
+  `MAESTRO_NSEC_{BIG,MIDDLE,LITTLE}` (nothing else from `.env`) and Maestro
+  picks up `MAESTRO_*` itself — no `-e MAESTRO_NSEC_…=` on the command line,
+  where `ps` can see it. Run the matrix through `scripts/signer-matrix-e2e.sh`;
+  to run one flow by hand, export those three the same way, plus
+  `MAESTRO_NIP46_TOKEN="$(cat "$(bash scripts/nip46-test-bunker.sh token-file)")"`
+  for the NIP-46 flows.
 * Every `inputText` of an nsec carries a `label:`, so Maestro's console shows
   "Enter the Piggy nsec (redacted)" instead of the key.
 * Maestro's debug output (`~/.maestro/tests/<run>/commands-*.json`,
-  `maestro.log`) still records the *evaluated* command, nsec included. The
-  runner sends it to a private temp dir and redacts `nsec1…` before keeping
-  it. If you run these flows by hand, pass `--debug-output` to a temp dir and
-  delete it afterwards.
+  `maestro.log`) still records the *evaluated* command, nsec included, and
+  its environment (the bunker token). The runner sends it to a private temp
+  dir, redacts `nsec1…` and the token, drops the automatic screenshots of the
+  NIP-46 flows (one could show the pairing QR, which carries the pairing
+  secret) and discards it entirely if redaction fails. If you run these flows
+  by hand, pass `--debug-output` to a temp dir and delete it afterwards.
 * The bunker reads Little's nsec from `.env` with `grep` and hands it to node
   on stdin — never argv, the environment, its state dir or its log.
 

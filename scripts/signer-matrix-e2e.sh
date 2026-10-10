@@ -37,8 +37,10 @@ if [[ "$DEVICE" != emulator-* && "${SIGNER_MATRIX_ALLOW_DEVICE:-}" != 1 ]]; then
 fi
 FLOWS=("$@"); [ ${#FLOWS[@]} -eq 0 ] && FLOWS=(132 133 134)
 if [ -n "${LOCK_FILE:-}" ]; then
-  exec 9>>"$LOCK_FILE"
-  echo "waiting for $LOCK_FILE…"; flock 9
+  # Fail closed: never drive a shared emulator without the lock.
+  exec 9>>"$LOCK_FILE" || { echo "cannot open $LOCK_FILE" >&2; exit 2; }
+  echo "waiting for $LOCK_FILE…"
+  flock 9 || { echo "could not lock $LOCK_FILE" >&2; exit 2; }
 fi
 OUT="${OUT:-$(mktemp -d /tmp/signer-matrix.XXXX)}"; mkdir -p "$OUT"
 DBG="$(mktemp -d)"; chmod 700 "$DBG"
@@ -56,9 +58,19 @@ restore_device() { # best effort: Big active, Middle/Little out, bunker back to 
 }
 
 cleanup() {
-  # Redact any nsec Maestro wrote into its debug output, keep the rest.
+  # Redact what Maestro wrote into its debug output (typed nsecs, the bunker
+  # token from its env dump) and drop its automatic screenshots from NIP-46
+  # flows — one could show LP's pairing QR, which carries the pairing secret.
   if [ -d "$DBG" ]; then
     grep -rlZ 'nsec1' "$DBG" 2>/dev/null | xargs -0r sed -i -E 's/nsec1[0-9a-z]+/nsec1[redacted]/g'
+    if [ -n "${MAESTRO_NIP46_TOKEN:-}" ]; then
+      grep -rlZF "$MAESTRO_NIP46_TOKEN" "$DBG" 2>/dev/null | xargs -0r sed -i "s/$MAESTRO_NIP46_TOKEN/[redacted]/g"
+    fi
+    find "$DBG" \( -path '*flow-132*' -o -path '*flow-134*' -o -path '*flow-135*' -o -path '*/restore*' \) \
+      -name '*.png' -delete 2>/dev/null
+    if grep -rqE 'nsec1[0-9a-z]{20,}' "$DBG" 2>/dev/null; then
+      echo "!! redaction failed — debug output NOT kept" >&2; rm -rf "$DBG"
+    fi
     mkdir -p "$OUT/debug" && cp -r "$DBG"/. "$OUT/debug/" 2>/dev/null
     rm -rf "$DBG"
   fi
@@ -76,9 +88,12 @@ need_bunker() {
     NIP46_DEVICE="$DEVICE" bash scripts/nip46-test-bunker.sh start >/dev/null || return 1
     started_bunker=1
   fi
+  # A bunker started earlier for another device would screencap the wrong one.
+  bash scripts/nip46-test-bunker.sh status | grep -q "\"device\":\"$DEVICE\"" \
+    || { echo "!! running bunker is bound to another device — stop it first"; return 1; }
   bunker_used=1
   MAESTRO_NIP46_TOKEN="$(cat "$(bash scripts/nip46-test-bunker.sh token-file)")"
-  export MAESTRO_NIP46_TOKEN
+  export MAESTRO_NIP46_TOKEN MAESTRO_NIP46_PORT="${NIP46_PORT:-8746}"
 }
 
 run_flow() { # path

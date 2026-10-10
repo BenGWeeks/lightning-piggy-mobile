@@ -12,8 +12,7 @@ name: Signer matrix setup — import Middle Piggy's key into a fresh Amber
 # com.greenart7c3.nostrsigner` (wipes Amber's keys — emulator only).
 #
 # Run (the nsec comes from the environment, never the command line):
-#   set -a; source .env; set +a
-#   maestro --device emulator-5554 test .maestro/authentication/flow-131-amber-import-middle.yaml
+#   bash scripts/signer-matrix-e2e.sh setup-amber
 - runFlow:
     file: ../common/amber-import-key.yaml
     env:
