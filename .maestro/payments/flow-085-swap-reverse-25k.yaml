@@ -1,9 +1,9 @@
 appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Boltz reverse swap — full happy path, 25k sats Lightning → on-chain
 ---
-# REAL-MONEY TEST. Issues a Boltz reverse swap of 25,000 sats from
-# the AVD's active Lightning wallet (Big Piggy NWC) to Big Piggy's
-# own on-chain address. Costs:
+# REAL-MONEY TEST. Issues a Boltz reverse swap that delivers exactly
+# 25,000 sats (#1175: fees go on top) from the AVD's active Lightning
+# wallet (Big Piggy NWC) to Big Piggy's own on-chain address. Costs:
 #
 #   - Boltz service fee: ~0.5-1.5 % of amount = ~125-375 sats
 #   - On-chain miner fee for the claim tx: ~150-500 sats (varies)
@@ -72,11 +72,15 @@ name: Boltz reverse swap — full happy path, 25k sats Lightning → on-chain
     id: 'send-paste-go'
 
 # Wait for Boltz fee fetch to complete + render — same pattern as
-# test-swap-reverse-fee-render.yaml.
+# flow-086. The quote states both sides: the recipient gets exactly the
+# BIP-21 amount and the wallet pays it plus every fee.
 - extendedWaitUntil:
     visible:
-      text: '.*Swap fee:.*sats.*'
+      id: 'send-swap-you-pay'
     timeout: 12000
+- assertVisible:
+    id: 'send-swap-recipient-gets'
+    text: 'Recipient gets 25,000 sats'
 
 - takeScreenshot: pre-send-25k
 

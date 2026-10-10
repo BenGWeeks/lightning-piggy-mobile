@@ -31,6 +31,12 @@ import {
   REVERSE_CLAIM_MARGIN,
 } from '../utils/reverseSwapVerify';
 import { verifyReverseSwapInvoice } from '../utils/boltzVerify';
+import {
+  CLAIM_TX_MAX_VSIZE,
+  planReverseClaim,
+  quoteClaimFeeRate,
+  quoteExactRecipient,
+} from '../utils/reverseSwapAmounts';
 import { singleFlightClaim } from '../utils/swapClaimSingleFlight';
 import { verifySubmarineSwap } from '../utils/submarineSwapVerify';
 import { amountSatsFromBolt11 } from '../utils/bolt11';
@@ -89,6 +95,11 @@ export interface ReverseSwapResult {
   invoice: string;
   /** On-chain amount Boltz will lock (after their fees) */
   onchainAmount: number;
+  /** Exact-recipient swaps (#1175): what the claim pays the destination.
+   *  Absent on invoice-amount swaps, whose claim fee comes off the lockup. */
+  recipientAmount?: number;
+  /** The hold invoice's amount — what the paying wallet is charged. */
+  invoiceAmount?: number;
   timeoutBlockHeight: number;
   /** Lockup Bitcoin address (base58/bech32 string) — not hex */
   lockupAddress: string;
@@ -174,9 +185,17 @@ export async function getReverseSwapFees(backend?: string): Promise<SwapFees> {
   const data = await res.json();
 
   const pair = parseBoltzPair(data?.BTC?.BTC, 'reverse');
-  const { getSwapClaimFeeRate } = require('./onchainService') as typeof import('./onchainService');
-  const claimFeeRate = await getSwapClaimFeeRate();
-  return { ...pair, minerFee: REVERSE_CLAIM_VBYTES * claimFeeRate, claimFeeRate, backend };
+  const { getClaimFeeEstimate } = require('./onchainService') as typeof import('./onchainService');
+  // Price the claim the way it will be built (#1174, #1175): the live
+  // ~30-minute estimate (rounded up to a stable whole rate) on the measured
+  // claim size — not the old 2-block × 180 vB over-estimate.
+  const claimFeeRate = quoteClaimFeeRate(await getClaimFeeEstimate(CLAIM_FEE_TARGET_BLOCKS));
+  return {
+    ...pair,
+    minerFee: claimFeeSats(CLAIM_TX_MAX_VSIZE, claimFeeRate),
+    claimFeeRate,
+    backend,
+  };
 }
 
 /** @deprecated Use getReverseSwapFees instead */
@@ -221,8 +240,17 @@ export function isQuoteChangedError(error: unknown): error is QuoteChangedError 
   return (error as Error)?.name === 'QuoteChangedError' && !!(error as QuoteChangedError).quote;
 }
 
+/** Which side of a reverse swap the caller's amount fixes. */
+export type ReverseSwapAmountSide = 'invoice' | 'recipient';
+
 /**
  * Create a reverse submarine swap: Lightning → on-chain.
+ *
+ * `amountIs: 'recipient'` (#1175) makes `amountSats` exactly what reaches
+ * `onchainAddress`: we ask Boltz to lock it plus our claim fee (v2
+ * `onchainAmount`) and every fee lands on the invoice. `'invoice'` keeps the
+ * legacy meaning — the invoice is `amountSats` and fees come off the
+ * on-chain side.
  *
  * Returns swap details including the Lightning invoice to pay and the
  * data needed to later claim the on-chain funds.
@@ -231,6 +259,7 @@ export async function createReverseSwap(
   onchainAddress: string,
   amountSats: number,
   approvedQuote?: SwapFees,
+  amountIs: ReverseSwapAmountSide = 'invoice',
 ): Promise<ReverseSwapResult> {
   const backend = await getSwapBackend();
   console.log(
@@ -256,9 +285,23 @@ export async function createReverseSwap(
     throw new QuoteChangedError(fees);
   if (!fees.pairHash || fees.lockupMinerFee === undefined)
     throw new Error('Incomplete reverse swap fee quote');
-  if (amountSats < fees.minAmount || amountSats > fees.maxAmount)
+  // Exact-recipient: price the claim at the approved budget (never below the
+  // live one — checked above) so the invoice matches what the user approved.
+  const recipientQuote =
+    amountIs === 'recipient'
+      ? quoteExactRecipient(amountSats, {
+          ...fees,
+          minerFee: Math.max(fees.minerFee, approvedQuote?.minerFee ?? 0),
+          claimFeeRate:
+            Math.max(fees.claimFeeRate ?? 0, approvedQuote?.claimFeeRate ?? 0) || undefined,
+        })
+      : null;
+  // Boltz applies its limits to the invoice (hold invoice) amount.
+  const invoiceAmount = recipientQuote?.invoiceSats ?? amountSats;
+  if (invoiceAmount < fees.minAmount || invoiceAmount > fees.maxAmount)
     throw new Error('Reverse swap amount is outside the server limits');
   const expectedAmount =
+    recipientQuote?.lockupSats ??
     amountSats - Math.ceil(amountSats * (fees.percentage / 100)) - fees.lockupMinerFee;
 
   // Generate preimage and its SHA-256 hash
@@ -281,7 +324,9 @@ export async function createReverseSwap(
       preimageHash,
       claimPublicKey,
       claimAddress: onchainAddress,
-      invoiceAmount: amountSats,
+      ...(recipientQuote
+        ? { onchainAmount: recipientQuote.lockupSats }
+        : { invoiceAmount: amountSats }),
       pairHash: fees.pairHash,
     }),
   });
@@ -292,6 +337,11 @@ export async function createReverseSwap(
   }
 
   const data: unknown = await res.json();
+  // Boltz only echoes `onchainAmount` when we fixed the invoice; when we fixed
+  // the lockup it is ours by definition. A present-but-different value still
+  // fails verification, and the lockup tx itself is later checked against it.
+  if (recipientQuote && data && typeof data === 'object' && !('onchainAmount' in data))
+    (data as { onchainAmount?: number }).onchainAmount = recipientQuote.lockupSats;
   verifyReverseSwap(data, {
     preimageHash: preimageHashBytes,
     claimPublicKey: claimKeys.publicKey,
@@ -308,13 +358,15 @@ export async function createReverseSwap(
   verifyReverseSwapInvoice({
     invoice: data.invoice,
     expectedPaymentHash: preimageHash,
-    expectedAmountSats: amountSats,
+    expectedAmountSats: invoiceAmount,
   });
   await pinSwapBackend(data.id, backend);
   return {
     id: data.id,
     invoice: data.invoice,
     onchainAmount: data.onchainAmount,
+    ...(recipientQuote ? { recipientAmount: recipientQuote.recipientSats } : {}),
+    invoiceAmount,
     claimFeeRate: fees.claimFeeRate,
     timeoutBlockHeight: data.timeoutBlockHeight,
     lockupAddress: data.lockupAddress,
@@ -364,11 +416,17 @@ export async function waitForLockup(
  * After Boltz locks BTC on-chain in a Taproot HTLC, we claim it by
  * revealing the preimage and signing with our claim key via script-path.
  */
+/** A broadcast claim: its txid and what it paid the destination. */
+export interface ReverseClaim {
+  txId: string;
+  outputSats: number;
+}
+
 export async function claimSwap(
   swap: ReverseSwapResult,
   lockup: { txId: string; vout: number; amount: number; txHex: string },
   destinationAddress: string,
-): Promise<string> {
+): Promise<ReverseClaim> {
   return singleFlightClaim(`${swap.id}:${lockup.txId}:${lockup.vout}`, () =>
     broadcastClaim(swap, lockup, destinationAddress),
   );
@@ -378,7 +436,7 @@ async function broadcastClaim(
   swap: ReverseSwapResult,
   lockup: { txId: string; vout: number; amount: number; txHex: string },
   destinationAddress: string,
-): Promise<string> {
+): Promise<ReverseClaim> {
   const onchainService = require('./onchainService') as typeof import('./onchainService');
   // Live ~30-min estimate, unrounded; if Electrum can't answer, fall back to
   // the rate the swap was quoted with. Capped only against a bogus estimate (#1174).
@@ -393,14 +451,20 @@ async function broadcastClaim(
   // Repeat structural/deadline checks immediately before disclosing our preimage.
   const claimKey = ecc.pointFromScalar(Buffer.from(swap.claimPrivateKey, 'hex'), true);
   if (!claimKey) throw new Error('Invalid saved reverse claim key');
+  const exactBudgetSats =
+    swap.recipientAmount !== undefined ? swap.onchainAmount - swap.recipientAmount : undefined;
   verifyReverseSwap(swap, {
     preimageHash: sha256(Buffer.from(swap.preimage, 'hex')),
     claimPublicKey: claimKey,
     expectedAmount: swap.onchainAmount,
     currentBlockHeight: await onchainService.getBlockHeight(),
     minClaimBlocks: REVERSE_CLAIM_MARGIN,
-    // Upper bound: the real claim is smaller than REVERSE_CLAIM_VBYTES.
-    claimFeeSats: claimFeeSats(REVERSE_CLAIM_VBYTES, feeRate, feeCap),
+    // Upper bound on the live claim fee — or the smaller exact-recipient
+    // budget (#1175), which is planned against the measured size below.
+    claimFeeSats: Math.max(
+      0,
+      Math.min(claimFeeSats(REVERSE_CLAIM_VBYTES, feeRate, feeCap), exactBudgetSats ?? Infinity),
+    ),
   });
   const verifiedLockup = verifyReverseLockup(lockup.txHex, swap);
   if (
@@ -481,14 +545,26 @@ async function broadcastClaim(
   // so a placeholder gives the final witness size.
   tx.setWitness(0, [Buffer.alloc(64), preimageBytes, claimScript, controlBlock]);
   const vsize = tx.virtualSize();
-  const fee = claimFeeSats(vsize, feeRate, feeCap);
-  const outputAmount = lockup.amount - fee;
+  const requiredFeeSats = claimFeeSats(vsize, feeRate, feeCap);
+  // Exact-recipient swaps (#1175) pay the destination precisely when their
+  // budget covers that fee; otherwise, and for legacy swaps, the fee comes
+  // out of the lockup — confirming before Boltz can refund wins.
+  const plan = planReverseClaim({
+    lockupSats: lockup.amount,
+    requiredFeeSats,
+    recipientSats: swap.recipientAmount,
+  });
+  if (swap.recipientAmount !== undefined && !plan.exact)
+    console.warn(
+      `[Boltz] Claim fee for ${swap.id} rose past its budget; paying ${plan.outputSats} not ${swap.recipientAmount}`,
+    );
+  const outputAmount = plan.outputSats;
   if (outputAmount <= 546) {
-    throw new Error(`Claim amount (${lockup.amount}) too small after fee (${fee})`);
+    throw new Error(`Claim amount (${lockup.amount}) too small after fee (${plan.feeSats})`);
   }
   tx.outs[0].value = BigInt(outputAmount);
   console.log(
-    `[Boltz] Claim fee ${fee} sats (${vsize} vB at ${feeRate.toFixed(2)} sat/vB, cap ${feeCap ?? 'none'})`,
+    `[Boltz] Claim fee ${plan.feeSats} sats (${vsize} vB, live ${feeRate.toFixed(2)} sat/vB, cap ${feeCap ?? 'none'})`,
   );
 
   // Compute sighash for Taproot script-path (BIP-341, SIGHASH_DEFAULT)
@@ -522,7 +598,7 @@ async function broadcastClaim(
     missingInputsWindowMs: CLAIM_MISSING_INPUTS_WINDOW_MS,
   });
   console.log(`[Boltz] Claim tx broadcast successfully: ${txId}`);
-  return txId;
+  return { txId, outputSats: outputAmount };
 }
 
 /**

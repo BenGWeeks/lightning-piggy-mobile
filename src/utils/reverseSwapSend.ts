@@ -16,7 +16,8 @@ export interface ReverseSwapParams {
   walletId: string;
   /** On-chain BTC address the swapped funds are claimed to. */
   destinationAddress: string;
-  amountSats: number;
+  /** Exactly what the destination receives; every fee is paid on top (#1175). */
+  recipientSats: number;
   approvedQuote?: boltzService.SwapFees;
   signal: AbortSignal;
   /** Usually WalletContext's `payInvoiceForWallet`. */
@@ -24,6 +25,15 @@ export interface ReverseSwapParams {
   onReplyTimeout: () => void;
   onPaymentDispatched?: () => void;
   onStage?: (stage: ReverseSwapSendStage) => void;
+}
+
+/** What a completed send delivered and what it cost. */
+export interface ReverseSwapReceipt {
+  claimTxId: string;
+  /** What the claim paid the destination. */
+  recipientSats: number;
+  /** The Lightning invoice the wallet paid (excluding any routing fee). */
+  paidSats: number;
 }
 
 /**
@@ -34,16 +44,18 @@ export interface ReverseSwapParams {
  * #891 error contract). Swap creation / persistence failures propagate as-is
  * — nothing has been paid yet.
  */
-export async function executeReverseSwap(params: ReverseSwapParams): Promise<void> {
-  const { walletId, destinationAddress, amountSats, signal, payInvoice, onReplyTimeout } = params;
+export async function executeReverseSwap(params: ReverseSwapParams): Promise<ReverseSwapReceipt> {
+  const { walletId, destinationAddress, recipientSats, signal, payInvoice, onReplyTimeout } =
+    params;
   params.onStage?.('createSwap');
   const swap = await boltzService.createReverseSwap(
     destinationAddress,
-    amountSats,
+    recipientSats,
     params.approvedQuote,
+    'recipient',
   );
   const persisted = await persistReverseSwap(swap, destinationAddress);
-  await payAndClaimReverseSwap({
+  const claim = await payAndClaimReverseSwap({
     persisted,
     walletId,
     payInvoice,
@@ -52,4 +64,9 @@ export async function executeReverseSwap(params: ReverseSwapParams): Promise<voi
     onPaymentDispatched: params.onPaymentDispatched,
     onStage: params.onStage,
   });
+  return {
+    claimTxId: claim.txId,
+    recipientSats: claim.outputSats,
+    paidSats: swap.invoiceAmount ?? 0,
+  };
 }

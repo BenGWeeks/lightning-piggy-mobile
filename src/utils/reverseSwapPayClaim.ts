@@ -74,6 +74,8 @@ export async function persistReverseSwap(
       refundPublicKey: swap.refundPublicKey,
       swapTree: swap.swapTree,
       onchainAmount: swap.onchainAmount,
+      // Exact-recipient swaps (#1175): recovery must claim the same amount.
+      recipientAmount: swap.recipientAmount,
       timeoutBlockHeight: swap.timeoutBlockHeight,
       claimFeeRate: swap.claimFeeRate,
     }),
@@ -125,7 +127,7 @@ const detailOf = (e: unknown) => (e instanceof Error ? e.message || e.toString()
  * the swap's address and amount (and re-verifies it). `payInvoice` is called
  * exactly once; nothing here retries a payment.
  *
- * Resolves with the claim txid. Error contract — so the caller can map each
+ * Resolves with the broadcast claim (txid + amount paid out). Error contract — so the caller can map each
  * outcome to the right overlay state instead of a blanket "Payment failed":
  *   - `ReplyTimeoutError` — rethrown as-is. The wallet's pay reply was
  *     ambiguous; the payment status is UNKNOWN and may have settled.
@@ -138,7 +140,9 @@ const detailOf = (e: unknown) => (e instanceof Error ? e.message || e.toString()
  * The recovery record is dropped on success and when Boltz proves the swap
  * dead (mirroring swapRecoveryService); it is kept on every other failure.
  */
-export async function payAndClaimReverseSwap(params: PayAndClaimParams): Promise<string> {
+export async function payAndClaimReverseSwap(
+  params: PayAndClaimParams,
+): Promise<boltzService.ReverseClaim> {
   const { swap, destinationAddress } = params.persisted;
   const { signal } = params;
   // Pre-commit cancel: don't dispatch the payment or start a lockup watch.
@@ -250,7 +254,8 @@ export async function payAndClaimReverseSwap(params: PayAndClaimParams): Promise
     // which is what lets Boltz settle the hold invoice.
     committed = true;
     params.onStage?.('claimSwap');
-    const claimTxId = await boltzService.claimSwap(swap, lockup.value, destinationAddress);
+    const claim = await boltzService.claimSwap(swap, lockup.value, destinationAddress);
+    const claimTxId = claim.txId;
     // Success → drop the recovery record and record the claim so
     // TransactionList can badge the row 'done' and the detail sheet can
     // show the broadcast claim txid.
@@ -272,7 +277,7 @@ export async function payAndClaimReverseSwap(params: PayAndClaimParams): Promise
       params.paymentSettleGraceMs ?? PAYMENT_SETTLE_GRACE_MS,
       swap.id,
     );
-    return claimTxId;
+    return claim;
   } catch (e) {
     // Leave the persisted record in place so swapRecoveryService can retry.
     const detail = detailOf(e);

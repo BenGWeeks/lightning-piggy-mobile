@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { View, Text, TouchableOpacity, BackHandler, Linking } from 'react-native';
+import { View, Text, TouchableOpacity, BackHandler } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { Alert } from './BrandedAlert';
 import { Toast } from './BrandedToast';
@@ -20,7 +20,7 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createSendSheetStyles } from '../styles/SendSheet.styles';
 import { satsToFiatString } from '../services/fiatService';
-import { getSendThreshold, shouldConfirmSend } from '../services/sendThresholdService';
+import { useLargeSendConfirm } from '../hooks/useLargeSendConfirm';
 import SendWalletSelector from './SendWalletSelector';
 import SendPastePane from './SendPastePane';
 import SendActionButtons from './SendActionButtons';
@@ -36,7 +36,18 @@ import { useSendSheetInput } from '../hooks/useSendSheetInput';
 import { useSendInputMode } from '../hooks/useSendInputMode';
 import * as boltzService from '../services/boltzService';
 import * as onchainService from '../services/onchainService';
-import { executeReverseSwap, isSwapSettlingError } from '../utils/reverseSwapSend';
+import {
+  executeReverseSwap,
+  isSwapSettlingError,
+  type ReverseSwapReceipt,
+} from '../utils/reverseSwapSend';
+import { quoteExactRecipient } from '../utils/reverseSwapAmounts';
+import {
+  reverseSwapAmountBounds,
+  reverseSwapSendBlocker,
+  shortOnchainAddress,
+} from '../utils/onchainSwapSend';
+import SendOnchainFeeRow from './SendOnchainFeeRow';
 import { npubEncode } from '../services/nostrService';
 import { recordOutgoing as recordOutgoingCounterparty } from '../services/zapCounterpartyStorage';
 import { isReplyTimeoutError, isConnectionError } from '../services/nwcService';
@@ -96,6 +107,7 @@ const SendSheet: React.FC<Props> = ({
   } = useWallet();
   const { btcPrice } = useWalletLive();
   const { signZapRequest } = useNostr();
+  const confirmLargeSend = useLargeSendConfirm();
   const { contacts } = useNostrContacts();
   const [capturedWalletId, setCapturedWalletId] = useState<string | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -142,6 +154,7 @@ const SendSheet: React.FC<Props> = ({
   const [boltzFees, setBoltzFees] = useState<boltzService.SwapFees | null>(null);
   const [loadingBoltzFees, setLoadingBoltzFees] = useState(false);
   const [onchainFeeEstimate, setOnchainFeeEstimate] = useState<string | null>(null);
+  const [swapReceipt, setSwapReceipt] = useState<ReverseSwapReceipt | null>(null);
   const {
     progressState,
     progressError,
@@ -207,6 +220,20 @@ const SendSheet: React.FC<Props> = ({
   const walletId = selectedWallet?.id ?? null;
   const walletBalance = selectedWallet?.balance ?? null;
   const walletName = selectedWallet ? walletLabel(selectedWallet) : t('sendSheet.walletFallback');
+  // On-chain sends from a hot on-chain wallet go direct; anything else hops
+  // through a Boltz reverse swap that delivers exactly `currentSats` and adds
+  // every fee on top (#1175) — so its limits and confirmations use the total.
+  const isHotOnchainWallet =
+    selectedWallet?.walletType === 'onchain' && selectedWallet?.onchainImportMethod === 'mnemonic';
+  const onchainViaBoltz = isOnchainAddress && !isHotOnchainWallet;
+  const swapQuote =
+    onchainViaBoltz && boltzFees && currentSats > 0
+      ? quoteExactRecipient(currentSats, boltzFees)
+      : null;
+  const swapBounds = useMemo(
+    () => (onchainViaBoltz && boltzFees ? reverseSwapAmountBounds(boltzFees, walletBalance) : null),
+    [onchainViaBoltz, boltzFees, walletBalance],
+  );
 
   useEffect(() => {
     openSessionRef.current += 1;
@@ -357,47 +384,39 @@ const SendSheet: React.FC<Props> = ({
     // sits right next to the Send button, so a type-then-immediately-Send can
     // outrun the state flush. The ref is written synchronously in onChangeText.
     const submittedMemo = memoRef.current;
-    // High-value confirmation gate (issue #82). Prompt the user before we
-    // touch the abort controller / spinner / progress overlay so a Cancel
-    // tap leaves the form exactly as it was. The amount used here matches
-    // what the user is actually authorising — BOLT11's embedded amount
-    // wins because that's the value `payInvoiceForWallet(...)` will pull
-    // from the invoice; a leftover `satsValue` from a previous entry
-    // would otherwise mis-state the confirmation. Only fall back to the
-    // typed `currentSats` for zero-amount invoices, Lightning addresses,
-    // and on-chain flows where there is no embedded amount to honour.
-    const decodedAmount = decoded?.amountSats ?? 0;
-    const authorisedAmount = decodedAmount > 0 ? decodedAmount : currentSats;
-    const threshold = await getSendThreshold();
-    if (shouldConfirmSend(authorisedAmount, threshold)) {
-      const recipientLabel =
-        recipientName ||
-        (isLightningAddress(invoiceData) ? invoiceData : null) ||
-        decoded?.description ||
-        t('sendSheet.thisRecipient');
-      const fiat =
-        btcPrice !== null ? ` (${satsToFiatString(authorisedAmount, btcPrice, currency)})` : '';
-      const confirmed = await new Promise<boolean>((resolve) => {
+    // A swap send must fit Boltz's limits and the balance for the TOTAL paid.
+    if (onchainViaBoltz) {
+      const blocker = boltzFees
+        ? reverseSwapSendBlocker(currentSats, boltzFees, walletBalance)
+        : null;
+      if (!boltzFees || blocker) {
         Alert.alert(
-          t('sendSheet.confirmLargeSendTitle'),
-          t('sendSheet.confirmLargeSendBody', {
-            amount: authorisedAmount.toLocaleString(),
-            fiat,
-            recipient: recipientLabel,
-          }),
-          [
-            { text: t('sendSheet.cancel'), style: 'cancel', onPress: () => resolve(false) },
-            { text: t('sendSheet.confirm'), onPress: () => resolve(true) },
-          ],
+          t('sendSheet.error'),
+          blocker ? t(blocker.key, blocker.params) : t('sendSheet.feeUnavailable'),
         );
-      });
-      if (!confirmed) return;
+        return;
+      }
     }
+    // High-value confirmation gate (#82) — see useLargeSendConfirm.
+    const decodedAmount = decoded?.amountSats ?? 0;
+    const confirmed = await confirmLargeSend({
+      amountSats: decodedAmount > 0 ? decodedAmount : currentSats,
+      // Name the destination itself — never the "Send to on-chain address" label.
+      recipient: isOnchainAddress
+        ? shortOnchainAddress(invoiceData)
+        : recipientName ||
+          (isLightningAddress(invoiceData) ? invoiceData : null) ||
+          decoded?.description ||
+          t('sendSheet.thisRecipient'),
+      swapQuote,
+    });
+    if (!confirmed) return;
     // Every async overlay update below is scoped to THIS send: once it is
     // superseded or continued in the background it must not repaint.
     const send = beginSend();
     const { signal } = send.controller;
     const { onReplyTimeout } = callbacksFor(send);
+    setSwapReceipt(null);
     setSending(true);
     try {
       if (isOnchainAddress) {
@@ -406,10 +425,7 @@ const SendSheet: React.FC<Props> = ({
           setSending(false);
           return;
         }
-        if (
-          selectedWallet?.walletType === 'onchain' &&
-          selectedWallet?.onchainImportMethod === 'mnemonic'
-        ) {
+        if (isHotOnchainWallet) {
           // Direct on-chain send from hot wallet
           await onchainService.sendTransaction(walletId!, invoiceData, currentSats);
         } else {
@@ -421,15 +437,17 @@ const SendSheet: React.FC<Props> = ({
           // failed".
           if (!boltzFees) throw new Error(t('sendSheet.feeUnavailable'));
           setInFlightIsSwap(true);
-          await executeReverseSwap({
+          const receipt = await executeReverseSwap({
             walletId: walletId!,
             destinationAddress: invoiceData,
-            amountSats: currentSats,
+            recipientSats: currentSats,
             approvedQuote: boltzFees,
             signal,
             payInvoice: payInvoiceForWallet,
             ...callbacksFor(send),
           });
+          // A send continued in the background must not repaint a newer one.
+          if (ownsOverlay(send)) setSwapReceipt(receipt);
         }
       } else if (isLightningAddress(invoiceData) || isLnurl) {
         if (!lnurlParams) {
@@ -655,7 +673,7 @@ const SendSheet: React.FC<Props> = ({
       }
       const message = quoteChanged
         ? t('sendSheet.quoteChanged', {
-            fee: boltzService.calculateSwapFee(currentSats, quoteChanged).toLocaleString(),
+            fee: quoteExactRecipient(currentSats, quoteChanged).feeSats.toLocaleString(),
           })
         : swapNotPaid
           ? t('paymentProgressOverlay.swapNotPaid')
@@ -715,16 +733,10 @@ const SendSheet: React.FC<Props> = ({
   // needs the permission, and it handles a missing one with its own prompt.
   if (!visible) return null;
 
-  // On-chain sends from a hot on-chain wallet go direct; otherwise they
-  // hop through a Boltz reverse swap whose server-reported min/max must
-  // gate the amount step (not the LNURL range).
-  const onchainViaBoltz =
-    isOnchainAddress &&
-    !(
-      selectedWallet?.walletType === 'onchain' && selectedWallet?.onchainImportMethod === 'mnemonic'
-    );
-  const amountMinSats = onchainViaBoltz ? boltzFees?.minAmount : lnurlParams?.minSats;
-  const amountMaxSats = onchainViaBoltz ? boltzFees?.maxAmount : lnurlParams?.maxSats;
+  // A swap's amount step is gated by Boltz's limits on the recipient side,
+  // capped so recipient + fees fit the balance (not the LNURL range).
+  const amountMinSats = onchainViaBoltz ? swapBounds?.minSats : lnurlParams?.minSats;
+  const amountMaxSats = onchainViaBoltz ? swapBounds?.maxSats : lnurlParams?.maxSats;
 
   const canSend = isOnchainAddress
     ? currentSats > 0 && !loadingBoltzFees
@@ -866,52 +878,14 @@ const SendSheet: React.FC<Props> = ({
                     </Text>
                   )}
 
-                  {/* Fee estimate for on-chain addresses. When the
-                      payment goes through Boltz (anything that isn't
-                      a *mnemonic* on-chain wallet) show the Boltz
-                      logo so users know who is brokering the swap \u2014
-                      same affordance as TransferSheet. The mnemonic
-                      hot-wallet path bypasses Boltz and broadcasts
-                      directly via BDK, so its logo is suppressed.
-                      Watch-only / xpub on-chain wallets *do* still
-                      hop through Boltz (they can't sign), so they
-                      get the logo too. Mirrors the routing predicate
-                      at SendSheet.tsx:411-415. */}
                   {isOnchainAddress && currentSats > 0 && (
-                    <View style={styles.feeRow}>
-                      {!(
-                        selectedWallet?.walletType === 'onchain' &&
-                        selectedWallet?.onchainImportMethod === 'mnemonic'
-                      ) && (
-                        <TouchableOpacity
-                          accessibilityRole="link"
-                          testID="send-boltz-info"
-                          onPress={() => Linking.openURL('https://boltz.exchange')}
-                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                          accessibilityLabel={t('sendSheet.poweredByBoltz')}
-                        >
-                          <ExpoImage
-                            source={require('../../assets/images/boltz-logo.png')}
-                            style={styles.boltzLogo}
-                            contentFit="contain"
-                          />
-                        </TouchableOpacity>
-                      )}
-                      <Text style={styles.feeText}>
-                        {selectedWallet?.walletType === 'onchain' &&
-                        selectedWallet?.onchainImportMethod === 'mnemonic'
-                          ? (onchainFeeEstimate ?? t('sendSheet.estimatingFee'))
-                          : loadingBoltzFees
-                            ? t('sendSheet.loadingFees')
-                            : boltzFees
-                              ? t('sendSheet.swapFee', {
-                                  fee: boltzService
-                                    .calculateSwapFee(currentSats, boltzFees)
-                                    .toLocaleString(),
-                                })
-                              : t('sendSheet.feeUnavailable')}
-                      </Text>
-                    </View>
+                    <SendOnchainFeeRow
+                      viaBoltz={onchainViaBoltz}
+                      hotWalletFee={onchainFeeEstimate}
+                      loadingFees={loadingBoltzFees}
+                      quote={swapQuote}
+                      styles={styles}
+                    />
                   )}
 
                   {/* Memo / comment field for Lightning address payments */}
@@ -1000,6 +974,7 @@ const SendSheet: React.FC<Props> = ({
         onDismiss={handleOverlayDismiss}
         onCancel={handleCancelPayment}
         inFlightIsSwap={inFlightIsSwap}
+        swapReceipt={swapReceipt}
         swapStage={swapStage}
         canContinueInBackground={canContinueInBackground}
       />

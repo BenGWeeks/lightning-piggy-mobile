@@ -218,6 +218,14 @@ export const createSendSheetStyles = (colors: Palette) =>
       height: 40,
       borderRadius: 8,
     },
+    // Two-line swap quote ("Recipient gets …" / "You pay …") beside the logo.
+    feeLines: {
+      flexShrink: 1,
+      gap: 2,
+    },
+    feeTextStart: {
+      textAlign: 'left',
+    },
     resetText: {
       color: colors.brandPink,
       fontSize: 13,

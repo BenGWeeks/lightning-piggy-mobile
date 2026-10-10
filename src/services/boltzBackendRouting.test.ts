@@ -39,6 +39,7 @@ jest.mock('../utils/submarineSwapVerify', () => ({ verifySubmarineSwap: jest.fn(
 jest.mock('./onchainService', () => ({
   getBlockHeight: async () => 900000,
   getSwapClaimFeeRate: async () => 2,
+  getClaimFeeEstimate: async () => 2,
 }));
 jest.mock('../utils/boltzVerify', () => ({ verifyReverseSwapInvoice: jest.fn() }));
 jest.mock('../utils/lockupTx', () => ({

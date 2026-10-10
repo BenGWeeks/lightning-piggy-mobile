@@ -57,7 +57,7 @@ beforeEach(() => {
       transaction: { id: 'untrusted-server-id', hex: tx.toHex() },
     }),
   });
-  jest.mocked(claimSwap).mockResolvedValue('claim-tx');
+  jest.mocked(claimSwap).mockResolvedValue({ txId: 'claim-tx', outputSats: 1 });
 });
 it.each([false, true])(
   'passes verified transaction data and timeout to the claimant (legacy=%s)',
@@ -78,6 +78,23 @@ it.each([false, true])(
     expect(mockStore.has(`boltz_swap_${base.id}`)).toBe(false);
   },
 );
+it('claims an exact-recipient swap for the persisted recipient amount (#1175)', async () => {
+  mockStore.set(
+    `boltz_swap_${base.id}`,
+    JSON.stringify({
+      ...base,
+      timeoutBlockHeight: 900144,
+      onchainAmount: 10000,
+      recipientAmount: 9640,
+    }),
+  );
+  await recoverPendingSwaps();
+  expect(claimSwap).toHaveBeenCalledWith(
+    expect.objectContaining({ onchainAmount: 10000, recipientAmount: 9640 }),
+    expect.objectContaining({ amount: 10000 }),
+    address,
+  );
+});
 it('preserves recovery secrets and refuses an underfunded lockup', async () => {
   mockStore.set(
     `boltz_swap_${base.id}`,
