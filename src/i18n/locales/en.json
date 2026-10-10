@@ -310,9 +310,7 @@
     "closeFullscreenGif": "Close full-screen GIF",
     "shareContactTitle": "Share a contact with {{name}}",
     "shareContactSubtitle": "They'll see it as a Nostr profile card they can open.",
-    "typing": "typing…",
-    "marmotFallbackTitle": "Sent with NIP-17",
-    "marmotFallbackBody": "{{name}} can't receive Marmot yet, so this thread now uses NIP-17."
+    "typing": "typing…"
   },
   "nwcShareSheet": {
     "title": "Share a wallet",
@@ -2403,5 +2401,18 @@
       "no-valid-servers": "None of these servers can be published — use addresses starting with https://.",
       "busy": "A publish is already in progress."
     }
+  },
+  "marmotFallback": {
+    "titleNoKeyPackage": "{{name}} isn't on Marmot yet",
+    "titleOutdated": "{{name}}'s Marmot app is out of date",
+    "body": "Send this with NIP-17 instead? It's still end-to-end encrypted, but Marmot hides more about who you're talking to.",
+    "willNotify": "We'll also let them know you tried Marmot.",
+    "cancel": "Cancel",
+    "confirm": "Send with NIP-17",
+    "note": "I tried to message you on Marmot (more private). Open a Marmot app such as White Noise or Lightning Piggy and we can chat that way."
+  },
+  "marmotSend": {
+    "noKeyPackage": "We couldn't find a Marmot key package on this person's relays. They may need to open their Marmot app so it can publish one — or use NIP-17 for now.",
+    "outdatedKeyPackage": "This person's Marmot app uses an older version of Marmot that Lightning Piggy can't talk to yet — use NIP-17 for now."
   }
 }

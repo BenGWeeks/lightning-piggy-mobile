@@ -1,6 +1,11 @@
 import { getEventHash } from 'nostr-tools';
 
-import { MarmotNoKeyPackageError, setMarmotSession, type MarmotSession } from './marmotSession';
+import {
+  MarmotNoKeyPackageError,
+  MarmotUnusableKeyPackageError,
+  setMarmotSession,
+  type MarmotSession,
+} from './marmotSession';
 import { marmotDelivery, sendMarmotDm } from './marmotSend';
 
 const ME = 'a'.repeat(64);
@@ -78,8 +83,22 @@ describe('sendMarmotDm', () => {
     // Flagged so the 1:1 composer re-sends it over NIP-17 instead.
     expect(result).toEqual({
       success: false,
-      error: expect.stringMatching(/set up Marmot/),
-      marmotUnreachable: true,
+      error: expect.stringMatching(/open their Marmot app/),
+      marmotUnreachable: 'noKeyPackage',
+    });
+  });
+
+  it('flags an unusable (older-Marmot) key package as outdated', async () => {
+    fakeSession({
+      getOrCreateDm: async () => {
+        throw new MarmotUnusableKeyPackageError(PEER);
+      },
+    });
+    const result = await sendMarmotDm(ME, PEER, { kind: 14, content: 'hi' });
+    expect(result).toEqual({
+      success: false,
+      error: expect.stringMatching(/older version of Marmot/),
+      marmotUnreachable: 'outdatedKeyPackage',
     });
   });
 

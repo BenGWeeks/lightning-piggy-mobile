@@ -272,16 +272,11 @@ const ConversationScreen: React.FC = () => {
     [presentContactSheet],
   );
 
-  // The peer can't be reached over Marmot, so the message went over NIP-17:
-  // move the thread there (same in-place switch as the protocol picker).
+  // The peer can't be reached over Marmot and the user chose to send over
+  // NIP-17: move the thread there (same in-place switch as the protocol picker).
   const handleMarmotFallback = useCallback(() => {
     navigation.setParams({ protocol: 'nip17' });
-    Toast.show({
-      type: 'info',
-      text1: t('conversationScreen.marmotFallbackTitle'),
-      text2: t('conversationScreen.marmotFallbackBody', { name }),
-    });
-  }, [navigation, t, name]);
+  }, [navigation]);
 
   // Append an optimistic local- message to BOTH React state (instant
   // paint) AND the per-conversation cache on disk (survives back-then-
@@ -303,6 +298,7 @@ const ConversationScreen: React.FC = () => {
     handleSendGif,
     handleSendVoiceNote,
     shareNwcWallet,
+    offerNip17ForText,
   } = useConversationComposerActions({
     protocol,
     pubkey,
@@ -888,6 +884,7 @@ const ConversationScreen: React.FC = () => {
         onSent={(payload) => {
           appendOptimisticLocal(payload);
         }}
+        onMarmotUnreachable={offerNip17ForText}
       />
       <SendSheet
         visible={sendSheetOpen}

@@ -12,6 +12,15 @@ import { useComposerActions } from './useComposerActions';
 import { NWC_SHARE_KIND, serializeNwcShare, type NwcShareCard } from '../utils/nwcShareMessage';
 import type { SendHooks, SendResult } from '../contexts/useMessageSend';
 import { sendMarmotImage, type MarmotImage } from '../services/marmotSend';
+import {
+  askMarmotFallback,
+  hasSentMarmotFallbackNote,
+  markMarmotFallbackNoteSent,
+  marmotFallbackNoteText,
+  marmotFallbackPromptCopy,
+  nip17FallbackReason,
+  type MarmotUnreachableReason,
+} from '../services/marmotFallback';
 
 // Upper bound before the optimistic bubble's pending Clock flips to the red
 // failed tick if the send hasn't settled (#857). Past nostr-tools' ~4.4s relay
@@ -39,8 +48,8 @@ export function useConversationComposerActions(params: {
   setContactPickerOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setGifPickerOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setVoiceSheetOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  /** A Marmot send was re-sent over NIP-17 because the peer can't be reached
-   *  over Marmot — the screen switches the thread and tells the user. */
+  /** The user chose to send over NIP-17 because the peer can't be reached
+   *  over Marmot — the screen switches the thread to NIP-17. */
   onMarmotFallback?: () => void;
 }) {
   const {
@@ -128,8 +137,8 @@ export function useConversationComposerActions(params: {
         },
       ) => Promise<SendResult>,
       // Run instead of the failure alert when the peer can't be reached over
-      // Marmot (no usable key package) — re-sends over NIP-17.
-      fallback?: () => Promise<boolean>,
+      // Marmot (no usable key package) — offers to send over NIP-17.
+      fallback?: (reason: MarmotUnreachableReason) => Promise<boolean>,
     ): Promise<boolean> => {
       let eventId: string | null = null;
       // Target relays for THIS send, captured from onRumorReady. Carried onto the
@@ -192,7 +201,7 @@ export function useConversationComposerActions(params: {
             result.delivery ?? failedDelivery({ eventId, relays: targetRelays }),
           );
         } else if (!result.success) {
-          if (result.marmotUnreachable && fallback) return fallback();
+          if (result.marmotUnreachable && fallback) return fallback(result.marmotUnreachable);
           // Never reached the rumor stage (e.g. not logged in) — no bubble was
           // painted, so fall back to the alert.
           Alert.alert('Send failed', result.error ?? 'Could not send message.');
@@ -206,15 +215,30 @@ export function useConversationComposerActions(params: {
   );
 
   // Someone Marmot can't reach (no key package, or a legacy one the classic
-  // White Noise app still publishes) still gets the message: re-send it over
-  // NIP-17, then the screen moves the thread there.
-  const viaNip17 = useCallback(
-    async (send: () => Promise<boolean>): Promise<boolean> => {
-      const ok = await send();
-      if (ok) onMarmotFallback?.();
-      return ok;
+  // White Noise app still publishes): ask before sending over NIP-17 instead.
+  // Cancel (or dismiss) sends nothing, so the composer keeps the draft. On
+  // yes: send it, move the thread to NIP-17 (so later messages don't ask
+  // again) and — once per thread — tell the peer we tried Marmot.
+  const offerNip17 = useCallback(
+    async (reason: MarmotUnreachableReason, send: () => Promise<boolean>): Promise<boolean> => {
+      const noteSent = !myPubkey || (await hasSentMarmotFallbackNote(myPubkey, pubkey));
+      const copy = marmotFallbackPromptCopy(reason, name, noteSent);
+      if (!(await askMarmotFallback(Alert.alert, copy))) return false;
+      if (!(await send())) return false;
+      onMarmotFallback?.();
+      if (!noteSent && myPubkey) {
+        // Claimed before sending so it never goes twice; a note that fails
+        // keeps its red-tick bubble for Re-publish. Not awaited: the user's
+        // own send is done, so the composer clears now.
+        await markMarmotFallbackNoteSent(myPubkey, pubkey);
+        const note = marmotFallbackNoteText();
+        void sendWithBubble(note, 'nip17', (hooks) =>
+          sendDirectMessage(pubkey, note, { protocol: 'nip17', ...hooks }),
+        );
+      }
+      return true;
     },
-    [onMarmotFallback],
+    [myPubkey, pubkey, name, onMarmotFallback, sendWithBubble, sendDirectMessage],
   );
 
   const sendText = useCallback(
@@ -224,11 +248,11 @@ export function useConversationComposerActions(params: {
           text,
           p,
           (hooks) => sendDirectMessage(pubkey, text, { protocol: p, ...hooks }),
-          p === 'marmot' ? () => viaNip17(() => send('nip17')) : undefined,
+          p === 'marmot' ? (reason) => offerNip17(reason, () => send('nip17')) : undefined,
         );
       return send(sendProtocol);
     },
-    [protocol, pubkey, sendDirectMessage, sendWithBubble, viaNip17],
+    [protocol, pubkey, sendDirectMessage, sendWithBubble, offerNip17],
   );
 
   const sendFile = useCallback(
@@ -238,9 +262,8 @@ export function useConversationComposerActions(params: {
       sendProtocol: DmProtocol = protocol,
     ): Promise<boolean> => {
       const result = await sendFileMessage(pubkey, file, sendProtocol);
-      if (!result.success && result.marmotUnreachable && sendProtocol === 'marmot') {
-        return viaNip17(() => sendFile(file, kind, 'nip17'));
-      }
+      const reason = nip17FallbackReason(result, sendProtocol);
+      if (reason) return offerNip17(reason, () => sendFile(file, kind, 'nip17'));
       if (!result.success) {
         const what = kind === 'image' ? 'image' : 'voice note';
         Alert.alert('Send failed', result.error ?? `Could not send ${what}.`);
@@ -264,7 +287,7 @@ export function useConversationComposerActions(params: {
       void appendLocalDmMessage(pubkey, optimistic);
       return true;
     },
-    [pubkey, sendFileMessage, setMessages, appendLocalDmMessage, protocol, viaNip17],
+    [pubkey, sendFileMessage, setMessages, appendLocalDmMessage, protocol, offerNip17],
   );
 
   // Marmot photos go the Marmot way (MIP-04) so White Noise and other Marmot
@@ -278,8 +301,8 @@ export function useConversationComposerActions(params: {
           myPubkey
             ? sendMarmotImage(myPubkey, { peer: pubkey }, image, signEvent, hooks)
             : Promise.resolve({ success: false, error: 'Not signed in' }),
-        () =>
-          viaNip17(async () =>
+        (reason) =>
+          offerNip17(reason, async () =>
             sendFile(
               await uploadEncryptedBlob(image.uri, signEvent, image.mime, image.base64),
               'image',
@@ -287,7 +310,7 @@ export function useConversationComposerActions(params: {
             ),
           ),
       ),
-    [myPubkey, pubkey, signEvent, sendWithBubble, sendFile, viaNip17],
+    [myPubkey, pubkey, signEvent, sendWithBubble, sendFile, offerNip17],
   );
 
   // Share an NWC wallet (#431). The connection string is a bearer secret sent
@@ -392,5 +415,19 @@ export function useConversationComposerActions(params: {
   // `sendText` re-exposed as `resendText` for the delivery sheet's Re-publish
   // (#856). It runs the full send path (publish + optimistic row + tick), so a
   // re-publish is indistinguishable from a fresh send and gets its own bubble.
-  return { ...actions, appendOptimisticLocal, resendText: sendText, shareNwcWallet };
+  // For a send made outside the composer (the in-thread invoice sheet) that
+  // Marmot couldn't deliver: the same ask-then-NIP-17 flow, with its bubble.
+  const offerNip17ForText = useCallback(
+    (reason: MarmotUnreachableReason, text: string) =>
+      offerNip17(reason, () => sendText(text, 'nip17')),
+    [offerNip17, sendText],
+  );
+
+  return {
+    ...actions,
+    appendOptimisticLocal,
+    resendText: sendText,
+    shareNwcWallet,
+    offerNip17ForText,
+  };
 }
