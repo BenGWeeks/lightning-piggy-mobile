@@ -10,6 +10,7 @@ import MarmotPushSection from '../../components/MarmotPushSection';
 import SettingsScopeHeader from '../../components/SettingsScopeHeader';
 import NotificationPermissionRow from '../../components/NotificationPermissionRow';
 import ShopAlertsSection from '../../components/ShopAlertsSection';
+import NotificationServerSection from '../../components/NotificationServerSection';
 import DetailsDisclosure from '../../components/DetailsDisclosure';
 import {
   getLockScreenContentEnabled,
@@ -23,11 +24,12 @@ import {
 import { startBackgroundDmWatch, stopBackgroundDmWatch } from '../../services/backgroundDmService';
 
 /**
- * Settings → Notifications: every notification setting in one place, split
- * by where it's stored. "For this account" follows the signed-in account
- * (push registrations are per account); "On this phone" applies to every
- * account on the device (system permission, lock-screen content, the
- * Android background watch and the shop geofences).
+ * Settings → Notifications: every notification setting in one place. The
+ * system permission comes first because every alert below depends on it;
+ * the rest is split by where it's stored. "For this account" follows the
+ * signed-in account (push registrations are per account); "On this phone"
+ * applies to every account on the device (lock-screen content, the Android
+ * background watch, the shop geofences and the notification server).
  */
 const NotificationSettingsScreen: React.FC = () => {
   const colors = useThemeColors();
@@ -71,11 +73,12 @@ const NotificationSettingsScreen: React.FC = () => {
 
   return (
     <AccountScreenLayout title={t('notificationSettingsScreen.title')}>
+      <NotificationPermissionRow />
+
       <SettingsScopeHeader scope="account" testID="notifications-account" />
       <MarmotPushSection />
 
       <SettingsScopeHeader scope="phone" spaced testID="notifications-phone" />
-      <NotificationPermissionRow />
 
       <View style={[screen.headerRow, screen.sectionGap]}>
         <BellRing size={22} color={colors.white} />
@@ -133,6 +136,8 @@ const NotificationSettingsScreen: React.FC = () => {
       )}
 
       <ShopAlertsSection />
+
+      <NotificationServerSection />
     </AccountScreenLayout>
   );
 };

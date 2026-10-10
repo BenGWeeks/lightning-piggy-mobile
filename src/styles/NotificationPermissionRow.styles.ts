@@ -4,39 +4,49 @@ import type { Palette } from './palettes';
 
 export const createNotificationPermissionRowStyles = (colors: Palette) =>
   StyleSheet.create({
-    permissionRow: {
+    allowedRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'space-between',
+      gap: 8,
+      marginBottom: 16,
+    },
+    allowedText: {
+      flex: 1,
+      fontSize: 13,
+      color: colors.white,
+    },
+    banner: {
+      flexDirection: 'row',
+      alignItems: 'center',
       gap: 12,
       paddingHorizontal: 14,
       paddingVertical: 12,
       borderRadius: 10,
       borderWidth: 1,
-      borderColor: colors.divider,
+      borderColor: colors.brandPink,
       backgroundColor: colors.surface,
-      marginTop: 12,
+      marginBottom: 16,
     },
-    permissionText: {
+    bannerText: {
       flex: 1,
     },
-    permissionTitle: {
+    bannerTitle: {
       fontSize: 15,
       color: colors.textHeader,
       fontWeight: '600',
     },
-    permissionStatus: {
+    bannerStatus: {
       fontSize: 13,
       color: colors.textSupplementary,
       marginTop: 2,
     },
-    permissionButton: {
+    bannerButton: {
       paddingHorizontal: 14,
       paddingVertical: 8,
       borderRadius: 18,
       backgroundColor: colors.brandPink,
     },
-    permissionButtonText: {
+    bannerButtonText: {
       color: colors.white,
       fontSize: 13,
       fontWeight: '700',

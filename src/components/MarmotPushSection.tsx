@@ -1,15 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Platform,
-  Switch,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
-import { ChevronDown, ChevronRight, Smartphone } from 'lucide-react-native';
-import { nip19 } from 'nostr-tools';
+import { ActivityIndicator, Platform, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { Smartphone } from 'lucide-react-native';
 
 import Toast from './BrandedToast';
 import DetailsDisclosure from './DetailsDisclosure';
@@ -22,12 +13,9 @@ import {
   enableMarmotPush,
   subscribeMarmotPushStatus,
   loadMarmotPushSettings,
-  parseServerKey,
   pendingMarmotPushGroups,
-  setMarmotPushServer,
   syncMarmotPushNow,
   type EnableOutcome,
-  type PushServer,
 } from '../services/marmotPushRegistration';
 import type { SyncResult } from '../services/marmotPushRegistrar';
 import { unregisterWatcherPush } from '../services/watcherPush';
@@ -35,17 +23,13 @@ import WatcherPushSection from './WatcherPushSection';
 import { createMarmotPushSectionStyles } from '../styles/MarmotPushSection.styles';
 import { createSecurityScreenStyles } from '../styles/SecurityScreen.styles';
 
-const shortNpub = (hex: string) => {
-  const npub = nip19.npubEncode(hex);
-  return `${npub.slice(0, 12)}…${npub.slice(-6)}`;
-};
-
 /**
  * Settings → Notifications → For this account: opt-in Marmot push (MIP-05) for the signed-in
  * account. Off by default, and per account: another account on this phone
  * never inherits it. The privacy trade-off (and, for remote-signer users,
  * what approving costs them) sits behind "Privacy details" right above the
- * switch.
+ * switch. The notification server is one choice for the whole phone, so it
+ * lives under "On this phone" (NotificationServerSection).
  */
 const MarmotPushSection: React.FC = () => {
   const colors = useThemeColors();
@@ -60,9 +44,6 @@ const MarmotPushSection: React.FC = () => {
   const [busy, setBusy] = useState(false);
   // null = on, but no push token yet.
   const [pending, setPending] = useState<number | null>(0);
-  const [customServer, setCustomServer] = useState<PushServer | null>(null);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [draft, setDraft] = useState('');
   const remoteSigner = signerType === 'amber' || signerType === 'nip46';
 
   const refreshPending = useCallback(async () => {
@@ -81,7 +62,6 @@ const MarmotPushSection: React.FC = () => {
         if (!alive) return;
         setEnabled(s.enabled);
         setOtherAccounts(s.otherAccounts);
-        setCustomServer(s.customServer);
         if (s.enabled) void refreshPending();
       });
     // The token read and group passes finish in the background.
@@ -153,28 +133,6 @@ const MarmotPushSection: React.FC = () => {
     setBusy(true);
     try {
       reportSync(await syncMarmotPushNow(pubkey));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const applyServer = async (server: string | null) => {
-    if (server !== null && !parseServerKey(server)) {
-      Toast.show({ type: 'error', text1: t('securityScreen.marmotPushServerInvalid') });
-      return;
-    }
-    setBusy(true);
-    try {
-      const outcome = await setMarmotPushServer(server);
-      if (pubkey) {
-        const saved = await loadMarmotPushSettings(pubkey);
-        setCustomServer(saved.customServer);
-        setEnabled(saved.enabled); // the real state — a failed change leaves push on
-      }
-      setDraft('');
-      if (outcome) reportEnable(outcome);
-    } catch {
-      Toast.show({ type: 'error', text1: t('securityScreen.marmotPushUnavailable') });
     } finally {
       setBusy(false);
     }
@@ -254,72 +212,6 @@ const MarmotPushSection: React.FC = () => {
       )}
 
       <WatcherPushSection pushEnabled={enabled} />
-
-      <TouchableOpacity
-        style={styles.advancedToggle}
-        onPress={() => setAdvancedOpen((v) => !v)}
-        accessibilityRole="button"
-        accessibilityState={{ expanded: advancedOpen }}
-        accessibilityLabel={t('securityScreen.marmotPushAdvanced')}
-        testID="security-marmot-push-advanced"
-      >
-        {advancedOpen ? (
-          <ChevronDown size={16} color={colors.white} />
-        ) : (
-          <ChevronRight size={16} color={colors.white} />
-        )}
-        <Text style={styles.advancedToggleText}>{t('securityScreen.marmotPushAdvanced')}</Text>
-      </TouchableOpacity>
-
-      {advancedOpen && (
-        <View style={styles.advancedCard}>
-          <Text style={styles.advancedText} testID="security-marmot-push-server-current">
-            {customServer
-              ? t('securityScreen.marmotPushServerCustom', { npub: shortNpub(customServer.pubkey) })
-              : t('securityScreen.marmotPushServerDefault')}
-          </Text>
-          <Text style={styles.advancedText}>{t('securityScreen.marmotPushServerHint')}</Text>
-          <TextInput
-            style={styles.serverInput}
-            value={draft}
-            onChangeText={setDraft}
-            placeholder={t('securityScreen.marmotPushServerPlaceholder')}
-            placeholderTextColor={colors.textSupplementary}
-            autoCapitalize="none"
-            autoCorrect={false}
-            accessibilityLabel={t('securityScreen.marmotPushServerLabel')}
-            testID="security-marmot-push-server-input"
-          />
-          <View style={styles.advancedButtons}>
-            <TouchableOpacity
-              style={styles.primaryButton}
-              onPress={() => applyServer(draft)}
-              disabled={busy || draft.trim() === ''}
-              accessibilityRole="button"
-              accessibilityLabel={t('securityScreen.marmotPushServerSave')}
-              testID="security-marmot-push-server-save"
-            >
-              <Text style={styles.primaryButtonText}>
-                {t('securityScreen.marmotPushServerSave')}
-              </Text>
-            </TouchableOpacity>
-            {customServer && (
-              <TouchableOpacity
-                style={styles.secondaryButton}
-                onPress={() => applyServer(null)}
-                disabled={busy}
-                accessibilityRole="button"
-                accessibilityLabel={t('securityScreen.marmotPushServerReset')}
-                testID="security-marmot-push-server-reset"
-              >
-                <Text style={styles.secondaryButtonText}>
-                  {t('securityScreen.marmotPushServerReset')}
-                </Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        </View>
-      )}
     </>
   );
 };

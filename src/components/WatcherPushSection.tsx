@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { BellPlus } from 'lucide-react-native';
 
 import Toast from './BrandedToast';
 import DetailsDisclosure from './DetailsDisclosure';
@@ -34,7 +35,7 @@ const LABEL: Record<WatcherCategory, string> = {
 };
 
 /**
- * Settings → Security, inside the push section: what Lightning Piggy's
+ * Settings → Notifications, below instant alerts: what Lightning Piggy's
  * notification watcher should tell this phone about. Every category is off
  * by default and only switchable while push is on (it needs the device token
  * the Marmot push switch obtains). Toggles save at once; the registration
@@ -104,7 +105,12 @@ const WatcherPushSection: React.FC<{ pushEnabled: boolean }> = ({ pushEnabled })
 
   return (
     <View testID="security-watcher-push">
-      <Text style={styles.subHeader}>{t('securityScreen.watcherPush')}</Text>
+      <View style={[screen.headerRow, screen.sectionGap]}>
+        <BellPlus size={22} color={colors.white} />
+        <Text style={[shared.sectionLabel, screen.headerLabel]}>
+          {t('securityScreen.watcherPush')}
+        </Text>
+      </View>
       <Text style={shared.fieldHint}>{t('securityScreen.watcherPushHint')}</Text>
       <DetailsDisclosure
         label={t('securityScreen.privacyDetails')}

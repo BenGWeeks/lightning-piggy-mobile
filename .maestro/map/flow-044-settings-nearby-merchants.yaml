@@ -35,7 +35,13 @@ name: Alerts near Bitcoin shops — toggle, radius preset, quiet hours
 - waitForAnimationToEnd:
     timeout: 1500
 
-# The shop alerts sit at the bottom of the "On this phone" half.
+# The system-permission status sits above both halves of the screen.
+- extendedWaitUntil:
+    visible:
+      id: 'notifications-permission-row'
+    timeout: 10000
+
+# The shop alerts sit near the end of the "On this phone" half.
 - scrollUntilVisible:
     element:
       id: 'settings-quiet-hours-toggle'
@@ -63,6 +69,16 @@ name: Alerts near Bitcoin shops — toggle, radius preset, quiet hours
     timeout: 600
 - assertVisible:
     id: 'settings-quiet-hours-toggle'
+
+# The notification server is one choice for the whole phone, so it's on
+# the phone half too (below the shop alerts), not beside instant alerts.
+- scrollUntilVisible:
+    element:
+      id: 'notification-server-section'
+    direction: DOWN
+    timeout: 15000
+- assertVisible:
+    id: 'security-marmot-push-advanced'
 
 # Back out of the drawer screen.
 - scrollUntilVisible:
