@@ -343,6 +343,9 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
           if (__DEV__) console.log(`[Nostr] live kind-4 ${ev.id.slice(0, 8)} empty-plaintext`);
           return;
         }
+        // A decrypt that outlived its account must not repopulate the cache
+        // the switch just cleared.
+        if (cancelled || !isCurrentOwner()) return;
         nip04PlaintextCache.set(ev.id, plaintext);
       } else if (__DEV__) {
         console.log(`[Nostr] live kind-4 ${ev.id.slice(0, 8)} dedup-cache`);
@@ -634,7 +637,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
           // a one-tap grant button; without it, the live sub would
           // silently fail every wrap until the user re-enabled
           // Amber's blanket nip44_decrypt.
-          setAmberNip44Permission('denied');
+          if (!cancelled && isCurrentOwner()) setAmberNip44Permission('denied');
           return;
         }
         if (__DEV__) console.warn('[Nostr] live Amber NIP-17 unwrap failed:', error);

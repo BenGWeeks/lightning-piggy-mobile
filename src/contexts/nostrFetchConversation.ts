@@ -184,7 +184,7 @@ export async function fetchConversationFor(
         if (plaintext === null) return null;
         // Cache the successful decrypt. Event ids are immutable so
         // we can store unconditionally — no staleness possible.
-        nip04PlaintextCache.set(t.ev.id, plaintext);
+        if (!signal?.aborted) nip04PlaintextCache.set(t.ev.id, plaintext);
         const fromMe = t.ev.pubkey === pubkey;
         return { idx: t.idx, fromMe, text: plaintext, ev: t.ev };
       }),
