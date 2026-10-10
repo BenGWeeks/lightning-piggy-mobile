@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useNostr } from '../contexts/NostrContext';
+import { useAccountState } from '../contexts/useAccountState';
 import type { Palette } from '../styles/palettes';
 import { fetchLinkPreview } from '../services/linkPreviewFetcher';
 import {
@@ -32,7 +34,9 @@ function deriveDomain(url: string): string {
 const MessageLinkPreview: React.FC<Props> = ({ url, eventId, fromMe = false }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors, fromMe), [colors, fromMe]);
-  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const { pubkey } = useNostr();
+  // Owner-tagged: never shows the previous account's preference after a switch.
+  const [enabled, setEnabled] = useAccountState<boolean | null>(pubkey, null);
   const [preview, setPreview] = useState<LinkPreview | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
 
@@ -40,17 +44,17 @@ const MessageLinkPreview: React.FC<Props> = ({ url, eventId, fromMe = false }) =
   // the Security-screen switch flips this card live.
   useEffect(() => {
     let cancelled = false;
-    getLinkPreviewEnabled().then((v) => {
+    getLinkPreviewEnabled(pubkey).then((v) => {
       if (!cancelled) setEnabled(v);
     });
-    const unsub = subscribeLinkPreviewEnabled((v) => {
-      if (!cancelled) setEnabled(v);
+    const unsub = subscribeLinkPreviewEnabled((owner, v) => {
+      if (!cancelled && owner === pubkey) setEnabled(v);
     });
     return () => {
       cancelled = true;
       unsub();
     };
-  }, []);
+  }, [pubkey, setEnabled]);
 
   // Kick the OG fetch once we know the preference is on. Re-runs if
   // the URL changes — clearing the previous preview synchronously so

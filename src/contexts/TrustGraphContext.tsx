@@ -9,6 +9,7 @@ import React, {
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNostr, useNostrContacts } from './NostrContext';
+import { useAccountState } from './useAccountState';
 import {
   DEFAULT_SEED_PUBKEYS,
   computeTrustSet,
@@ -95,6 +96,8 @@ interface ProviderProps {
   children: ReactNode;
 }
 
+const DEFAULT_WOT_SETTINGS: WotSettings = { wotTier: 'all' };
+
 export const TrustGraphProvider: React.FC<ProviderProps> = ({ children }) => {
   const { pubkey } = useNostr();
   const { contacts } = useNostrContacts();
@@ -166,17 +169,33 @@ export const TrustGraphProvider: React.FC<ProviderProps> = ({ children }) => {
   // visibility regardless of secretMode state.
   //
   // Legacy boolean payloads are migrated inside `loadWotSettings`.
-  const [storedSettings, setStoredSettings] = useState<WotSettings>({ wotTier: 'all' });
+  //
+  // The tier is PER ACCOUNT (shared family phone) and owner-tagged via
+  // `useAccountState`, so switching accounts never renders the previous
+  // account's tier.
+  const [storedSettings, setStoredSettings] = useAccountState<WotSettings>(
+    pubkey,
+    DEFAULT_WOT_SETTINGS,
+  );
   useEffect(() => {
-    loadWotSettings().then(setStoredSettings);
-  }, []);
+    let cancelled = false;
+    loadWotSettings(pubkey).then((loaded) => {
+      if (!cancelled) setStoredSettings(loaded);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [pubkey, setStoredSettings]);
 
   const wotTier = storedSettings.wotTier;
 
-  const setWotTier = useCallback((next: WotTier) => {
-    setStoredSettings({ wotTier: next });
-    saveWotSettings({ wotTier: next }).catch(() => {});
-  }, []);
+  const setWotTier = useCallback(
+    (next: WotTier) => {
+      setStoredSettings({ wotTier: next });
+      saveWotSettings({ wotTier: next }, pubkey).catch(() => {});
+    },
+    [pubkey, setStoredSettings],
+  );
 
   // For 'friends' tier the trust set is L1 + user + seeds.
   // For 'fof' tier it adds L2 (cached friends-of-follows).

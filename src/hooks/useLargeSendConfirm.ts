@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import { Alert } from '../components/BrandedAlert';
 import { useTranslation } from '../contexts/LocaleContext';
+import { useNostr } from '../contexts/NostrContext';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { satsToFiatString } from '../services/fiatService';
 import { getSendThreshold, shouldConfirmSend } from '../services/sendThresholdService';
@@ -21,6 +22,8 @@ export function useLargeSendConfirm() {
   const t = useTranslation();
   const { currency } = useWallet();
   const { btcPrice } = useWalletLive();
+  // The ACTIVE account's threshold — it is a per-account setting.
+  const { pubkey } = useNostr();
   return useCallback(
     async (opts: {
       amountSats: number;
@@ -30,7 +33,7 @@ export function useLargeSendConfirm() {
     }): Promise<boolean> => {
       const { recipient, swapQuote } = opts;
       const authorised = swapQuote?.invoiceSats ?? opts.amountSats;
-      if (!shouldConfirmSend(authorised, await getSendThreshold())) return true;
+      if (!shouldConfirmSend(authorised, await getSendThreshold(pubkey))) return true;
       const fiatOf = (sats: number) =>
         btcPrice !== null ? ` (${satsToFiatString(sats, btcPrice, currency)})` : '';
       const body = swapQuote
@@ -53,6 +56,6 @@ export function useLargeSendConfirm() {
         ]);
       });
     },
-    [t, currency, btcPrice],
+    [t, currency, btcPrice, pubkey],
   );
 }

@@ -5,6 +5,7 @@ import AccountScreenLayout from './AccountScreenLayout';
 import { createSharedAccountStyles } from './sharedStyles';
 import { useThemeColors } from '../../contexts/ThemeContext';
 import { useTranslation } from '../../contexts/LocaleContext';
+import { useNostr } from '../../contexts/NostrContext';
 import { createSecurityScreenStyles } from '../../styles/SecurityScreen.styles';
 import MarmotPushSection from '../../components/MarmotPushSection';
 import DetailsDisclosure from '../../components/DetailsDisclosure';
@@ -49,6 +50,7 @@ const PRESETS: { value: number | null; labelKey: string; sublabelKey: string }[]
 const SecurityScreen: React.FC = () => {
   const colors = useThemeColors();
   const t = useTranslation();
+  const { pubkey } = useNostr();
   const sharedAccountStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const styles = useMemo(() => createSecurityScreenStyles(colors), [colors]);
   const [threshold, setThresholdState] = useState<number | null>(
@@ -62,20 +64,33 @@ const SecurityScreen: React.FC = () => {
   const isAndroid = Platform.OS === 'android';
 
   useEffect(() => {
-    getSendThreshold().then((t) => {
+    getLockScreenContentEnabled().then(setLockScreenContentOn);
+    if (isAndroid) loadBackgroundDmEnabled().then(setBackgroundDmOn);
+  }, [isAndroid]);
+
+  // Per-account settings: (re)load for the ACTIVE account, and ignore a late
+  // answer for an account we've since switched away from.
+  useEffect(() => {
+    let cancelled = false;
+    setCustomDraft('');
+    getSendThreshold(pubkey).then((t) => {
+      if (cancelled) return;
       setThresholdState(t);
       // If the saved threshold doesn't match a preset, surface it in the custom row.
       const isPreset = PRESETS.some((p) => p.value === t);
       if (!isPreset && t !== null) setCustomDraft(String(t));
     });
-    getLinkPreviewEnabled().then(setLinkPreviewOn);
-    getLockScreenContentEnabled().then(setLockScreenContentOn);
-    if (isAndroid) loadBackgroundDmEnabled().then(setBackgroundDmOn);
-  }, [isAndroid]);
+    getLinkPreviewEnabled(pubkey).then((v) => {
+      if (!cancelled) setLinkPreviewOn(v);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [pubkey]);
 
   const handleToggleLinkPreview = async (next: boolean) => {
     setLinkPreviewOn(next);
-    await setLinkPreviewEnabled(next);
+    await setLinkPreviewEnabled(next, pubkey);
   };
 
   const handleToggleLockScreenContent = async (next: boolean) => {
@@ -106,14 +121,14 @@ const SecurityScreen: React.FC = () => {
   const handlePickPreset = async (value: number | null) => {
     setThresholdState(value);
     setCustomDraft('');
-    await setSendThreshold(value);
+    await setSendThreshold(value, pubkey);
   };
 
   const handleCustomSave = async () => {
     const parsed = parseInt(customDraft.replace(/[^0-9]/g, ''), 10);
     if (!Number.isFinite(parsed) || parsed <= 0) return;
     setThresholdState(parsed);
-    await setSendThreshold(parsed);
+    await setSendThreshold(parsed, pubkey);
   };
 
   const customActive = threshold !== null && !PRESETS.some((p) => p.value === threshold);
@@ -127,6 +142,7 @@ const SecurityScreen: React.FC = () => {
         </Text>
       </View>
       <Text style={sharedAccountStyles.fieldHint}>{t('securityScreen.confirmLargeSendsHint')}</Text>
+      <Text style={sharedAccountStyles.fieldHint}>{t('securityScreen.perAccountHint')}</Text>
 
       <View style={styles.optionList}>
         {PRESETS.map((opt) => {
@@ -179,6 +195,7 @@ const SecurityScreen: React.FC = () => {
         </Text>
       </View>
       <Text style={sharedAccountStyles.fieldHint}>{t('securityScreen.linkPreviewsHint')}</Text>
+      <Text style={sharedAccountStyles.fieldHint}>{t('securityScreen.perAccountHint')}</Text>
       <View style={styles.toggleRow}>
         <Text style={[styles.optionLabel, styles.toggleLabel]}>
           {t('securityScreen.showLinkPreviews')}

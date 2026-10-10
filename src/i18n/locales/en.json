@@ -1730,6 +1730,7 @@
     "title": "Security",
     "confirmLargeSends": "Confirm large sends",
     "confirmLargeSendsHint": "Show an \"Are you sure?\" prompt before dispatching a Lightning payment or moving funds between wallets at or above this many sats. Smaller sends stay one-tap. Default: 10,000 sats.",
+    "perAccountHint": "For this account only. Other accounts on this phone keep their own setting.",
     "custom": "Custom",
     "customPlaceholder": "e.g. 25000",
     "customThresholdLabel": "Custom threshold in sats",

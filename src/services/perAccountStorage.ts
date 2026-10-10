@@ -33,6 +33,17 @@ export const PER_ACCOUNT_STORAGE_BASES: readonly string[] = [
   // GroupsScreen "following only" toggle (per-account: filter prefs
   // travel with the identity, not the device).
   'groups_following_only',
+  // Safety settings (confirm-large-sends threshold, Web of Trust tier, Secret
+  // Mode, link previews): per account on a shared family phone. Read/written
+  // through perAccountKey; `safetySettingsMigration` fans the legacy device
+  // value out to every account and deletes it.
+  'send_threshold_sats_v1',
+  '@lp:wot-settings:v1',
+  'secret_mode',
+  'link_preview_enabled_v1',
+  // Language + fiat currency (device key stays as the new-account template).
+  'app_locale_preference',
+  'user_fiat_currency',
   // Wallet metadata list — wallets become per-account in multi-account.
   'wallet_list',
   // Nostr social-graph caches
@@ -54,7 +65,6 @@ export const PER_ACCOUNT_STORAGE_BASES: readonly string[] = [
 // them):
 //   - electrum_server, blossom_server  -> device-level config
 //   - app_theme_preference             -> UI preference
-//   - secret_mode                         -> debug toggle
 //   - learn_progress                   -> user-level (not identity-level)
 //   - messages_window_days             -> UI preference
 //   - messages_show_zap_counterparties -> UI preference

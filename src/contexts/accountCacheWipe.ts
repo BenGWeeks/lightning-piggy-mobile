@@ -25,6 +25,9 @@ import {
 import { GROUP_MESSAGES_KEY_PREFIX } from '../services/groupMessagesStorageService';
 import { clearCacheStorage as clearNostrPlacesCache } from '../services/nostrPlacesStorage';
 import { clearNotificationHistory } from '../services/notificationHistory';
+import { PER_ACCOUNT_SETTING_BASES } from '../services/safetySettingsMigration';
+import { forgetAccountPrefs } from '../services/accountDisplayPrefs';
+import { forgetLinkPreviewMirror } from '../services/linkPreviewPreference';
 import { WATCHER_PUSH_KEY_BASE } from '../services/watcherPushStore';
 import {
   AMBER_NIP17_CACHE_KEY_BASE,
@@ -118,8 +121,13 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
     `nostr_group_activity_${loggedOutPubkey}`,
     `nostr_groups_${loggedOutPubkey}`,
     `groups_following_only_${loggedOutPubkey}`,
+    // Per-account safety settings (threshold, trust tier, Secret Mode, link
+    // previews): only THIS account's values go; other accounts keep theirs.
+    ...PER_ACCOUNT_SETTING_BASES.map((base) => perAccountKey(base, loggedOutPubkey)),
     walletListKey,
   ];
+  forgetLinkPreviewMirror(loggedOutPubkey);
+  forgetAccountPrefs(loggedOutPubkey);
   const allKeys = await AsyncStorage.getAllKeys();
   const convPrefix = DM_CONV_CACHE_PREFIX + loggedOutPubkey + '_';
   const lastSeenPrefix = DM_CONV_LAST_SEEN_PREFIX + loggedOutPubkey + '_';

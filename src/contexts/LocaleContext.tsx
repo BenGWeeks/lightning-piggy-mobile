@@ -1,5 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, { createContext, useCallback, useContext, useEffect, useMemo } from 'react';
 import { useLocales } from 'expo-localization';
 import type { Scope, TranslateOptions } from 'i18n-js';
 import i18n, {
@@ -9,7 +8,17 @@ import i18n, {
   type SupportedLocale,
 } from '../i18n';
 
-const STORAGE_KEY = 'app_locale_preference';
+import { useActivePubkey } from '../hooks/useActivePubkey';
+import { useAccountState } from './useAccountState';
+import {
+  LOCALE_PREF_KEY_BASE,
+  loadAccountPref,
+  peekAccountPref,
+  saveAccountPref,
+} from '../services/accountDisplayPrefs';
+
+const isPref = (v: string | null): v is LocalePreference =>
+  v === 'system' || (!!v && isSupportedLocale(v));
 
 export type LocalePreference = 'system' | SupportedLocale;
 
@@ -32,36 +41,38 @@ export function resolveLocale(
 }
 
 export const LocaleProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [preference, setPreferenceState] = useState<LocalePreference>('system');
+  // Language is PER ACCOUNT (shared family phone). Owner-tagged so a switch
+  // never renders the previous account's language; `empty` is the account's
+  // already-seen value (sync) or 'system'.
+  const activePubkey = useActivePubkey();
+  const seen = peekAccountPref(LOCALE_PREF_KEY_BASE, activePubkey);
+  const [preference, setPreferenceState] = useAccountState<LocalePreference>(
+    activePubkey,
+    isPref(seen) ? seen : 'system',
+  );
   // `useLocales()` re-renders this provider if the OS locale changes
   // (mirrors ThemeContext's `Appearance.addChangeListener` for 'system' mode).
   const deviceLocales = useLocales();
 
-  // Load persisted preference on mount. If nothing is stored, stay on
-  // 'system' so the app follows the device locale out of the box.
+  // Load the active account's preference (its own, else the phone default,
+  // else stay on 'system' so the app follows the device locale).
   useEffect(() => {
     let mounted = true;
-    AsyncStorage.getItem(STORAGE_KEY)
-      .then((stored) => {
-        if (!mounted) return;
-        if (stored === 'system' || (stored && isSupportedLocale(stored))) {
-          setPreferenceState(stored as LocalePreference);
-        }
-      })
-      .catch(() => {
-        // Failed reads fall back to the default. No surface needed.
-      });
+    loadAccountPref(LOCALE_PREF_KEY_BASE, activePubkey).then((stored) => {
+      if (mounted && isPref(stored)) setPreferenceState(stored);
+    });
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [activePubkey, setPreferenceState]);
 
-  const setPreference = useCallback((pref: LocalePreference) => {
-    setPreferenceState(pref);
-    AsyncStorage.setItem(STORAGE_KEY, pref).catch(() => {
-      // Best-effort persistence; the in-memory change has already taken effect.
-    });
-  }, []);
+  const setPreference = useCallback(
+    (pref: LocalePreference) => {
+      setPreferenceState(pref);
+      saveAccountPref(LOCALE_PREF_KEY_BASE, pref, activePubkey).catch(() => {});
+    },
+    [activePubkey, setPreferenceState],
+  );
 
   const deviceLanguageCode = deviceLocales[0]?.languageCode ?? null;
   const locale = resolveLocale(preference, deviceLanguageCode);

@@ -6,23 +6,23 @@
  * dispatched. Below the threshold, sends stay snappy / one-tap.
  *
  * Configurable via Account → Security (`SecurityScreen`): Off / 1k / 10k /
- * 100k / Custom. The default 10,000-sat threshold applies to **new installs
- * only** — `initialiseSendThresholdForNewInstall` runs once on cold-start
- * and writes the "Off" sentinel for existing installs (anything with an
- * already-populated `wallet_list` or `onboarding_complete` flag), so
- * upgraders keep their previous one-tap behaviour and have to opt in to
- * confirmations from the Security screen.
- *
- * Acceptance bullet from the issue:
- *   "Default threshold applied for new users only."
+ * 100k / Custom, **per account**. Every new account starts at the default
+ * 10,000-sat threshold; accounts that existed before the per-account change
+ * inherit the old device-wide value (see `safetySettingsMigration`).
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { perAccountKey } from './perAccountStorage';
+import { ensureSafetySettingsMigrated, SEND_THRESHOLD_KEY_BASE } from './safetySettingsMigration';
 
 /** Default threshold in sats (~£5 at typical prices). Issue #82. */
 export const DEFAULT_HIGH_VALUE_SEND_THRESHOLD_SATS = 10_000;
 
-/** AsyncStorage key the Account → Security settings UI reads/writes. */
-export const HIGH_VALUE_SEND_THRESHOLD_STORAGE_KEY = 'send_threshold_sats_v1';
+/**
+ * Base AsyncStorage key; the threshold is stored PER ACCOUNT
+ * (`perAccountKey(base, pubkey)`) because several family members share one
+ * phone and one person's choice must not apply to the others.
+ */
+export const HIGH_VALUE_SEND_THRESHOLD_STORAGE_KEY = SEND_THRESHOLD_KEY_BASE;
 
 /**
  * Sentinel string written when the user explicitly disables the
@@ -52,9 +52,14 @@ export function shouldConfirmSend(amountSats: number, thresholdSats: number | nu
  *
  * Returns `null` when the user has explicitly set "Off".
  */
-export async function getSendThreshold(): Promise<number | null> {
+export async function getSendThreshold(pubkey: string | null): Promise<number | null> {
+  // No active account yet: confirm at the default rather than skip the check.
+  if (!pubkey) return DEFAULT_HIGH_VALUE_SEND_THRESHOLD_SATS;
   try {
-    const raw = await AsyncStorage.getItem(HIGH_VALUE_SEND_THRESHOLD_STORAGE_KEY);
+    await ensureSafetySettingsMigrated(pubkey);
+    const raw = await AsyncStorage.getItem(
+      perAccountKey(HIGH_VALUE_SEND_THRESHOLD_STORAGE_KEY, pubkey),
+    );
     if (raw === null) return DEFAULT_HIGH_VALUE_SEND_THRESHOLD_SATS;
     if (raw === OFF_SENTINEL) return null;
     // Strictly numeric — parseInt('10000oops', 10) is 10000, which would silently honour a corrupt stored value instead of falling back to the default.
@@ -75,9 +80,15 @@ export async function getSendThreshold(): Promise<number | null> {
  * Persist the user's chosen threshold. Pass `null` to disable confirmations.
  * Used by the Account → Security settings screen (`SecurityScreen`).
  */
-export async function setSendThreshold(thresholdSats: number | null): Promise<void> {
+export async function setSendThreshold(
+  thresholdSats: number | null,
+  pubkey: string | null,
+): Promise<void> {
+  if (!pubkey) throw new Error('Cannot save the send threshold without an active account');
+  await ensureSafetySettingsMigrated(pubkey);
+  const key = perAccountKey(HIGH_VALUE_SEND_THRESHOLD_STORAGE_KEY, pubkey);
   if (thresholdSats === null) {
-    await AsyncStorage.setItem(HIGH_VALUE_SEND_THRESHOLD_STORAGE_KEY, OFF_SENTINEL);
+    await AsyncStorage.setItem(key, OFF_SENTINEL);
     return;
   }
   // Floor first, then validate the floored integer — rejects fractional
@@ -87,33 +98,5 @@ export async function setSendThreshold(thresholdSats: number | null): Promise<vo
   if (!Number.isFinite(floored) || floored < 1) {
     throw new Error(`Invalid send threshold: ${thresholdSats}`);
   }
-  await AsyncStorage.setItem(HIGH_VALUE_SEND_THRESHOLD_STORAGE_KEY, String(floored));
-}
-
-/**
- * One-time-on-cold-start initialisation: distinguish a fresh install from
- * an upgrade so the 10k default only applies to new users.
- *
- * - **Fresh install** (no `wallet_list` and no `onboarding_complete`):
- *   leave the storage key unset → `getSendThreshold` returns the 10k
- *   default.
- * - **Upgrade** (either of those keys is present): write the "Off"
- *   sentinel so the previously-frictionless behaviour is preserved.
- *   Existing users opt into confirmations from Account → Security.
- *
- * Idempotent: short-circuits once the storage key is populated (with
- * either a number or the OFF sentinel). Safe to call on every cold
- * start; intended to run after `migrateLegacy()` so the install-state
- * signals are stable.
- */
-export async function initialiseSendThresholdForNewInstall(): Promise<void> {
-  const existing = await AsyncStorage.getItem(HIGH_VALUE_SEND_THRESHOLD_STORAGE_KEY);
-  if (existing !== null) return; // Already initialised — nothing to do.
-  const walletList = await AsyncStorage.getItem('wallet_list');
-  const onboarded = await AsyncStorage.getItem('onboarding_complete');
-  const isUpgrade = (walletList && walletList !== '[]') || onboarded === 'true';
-  if (isUpgrade) {
-    await AsyncStorage.setItem(HIGH_VALUE_SEND_THRESHOLD_STORAGE_KEY, OFF_SENTINEL);
-  }
-  // Fresh install path: leave key unset; getSendThreshold returns the default.
+  await AsyncStorage.setItem(key, String(floored));
 }

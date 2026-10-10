@@ -31,7 +31,16 @@ import {
 } from '../services/nostrService';
 import { perAccountKey } from '../services/perAccountStorage';
 import { useTrustGraph } from './TrustGraphContext';
-import { saveWotSettings, type WotTier } from '../services/wotSettingsService';
+import {
+  saveWotSettings,
+  WOT_STORAGE_KEY_BASE,
+  type WotTier,
+} from '../services/wotSettingsService';
+import { loadSecretMode, saveSecretMode } from '../services/secretModeService';
+import {
+  ensureSafetySettingsMigrated,
+  SECRET_MODE_KEY_BASE,
+} from '../services/safetySettingsMigration';
 import { deriveInitialWotTier } from '../utils/wotMigration';
 import { dmRowPreview } from '../utils/dmRowPreview';
 import { isMarmotGroupId } from '../services/marmotSession';
@@ -178,7 +187,9 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const activeOwner = useRef(pubkey);
   activeOwner.current = pubkey;
   const [loading, setLoading] = useState(true);
-  const [secretMode, setSecretModeState] = useState(false);
+  // Per account (shared family phone): owner-tagged so a switch never shows
+  // the previous account's Secret Mode for even one render.
+  const [secretMode, setSecretModeState] = useAccountState(pubkey, false);
   // Tier source-of-truth lives in TrustGraphContext (#547). We read it here
   // so visibleGroups can apply the same trust filter the Map / Hunt / Events
   // surfaces use — keeping the three-tier model unified across the app.
@@ -233,31 +244,22 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
   }, [pubkey, setGroups]);
 
-  // Load persisted secret-mode flag with a one-shot migration from the
-  // pre-rename 'dev_mode' key. Without this, anyone who'd already
-  // unlocked the mode before that PR would silently revert to locked on
-  // upgrade (and the legacy key would linger in AsyncStorage forever).
-  // Read both, prefer the new key if present, otherwise migrate the
-  // legacy value forward + delete the old key.
+  // Load the ACTIVE account's persisted secret-mode flag. The old device-wide
+  // `secret_mode` (and pre-rename `dev_mode`) value is copied into every
+  // account's namespace by `safetySettingsMigration`.
   useEffect(() => {
-    (async () => {
-      const secret = await AsyncStorage.getItem('secret_mode');
-      if (secret !== null) {
-        setSecretModeState(secret === 'true');
-        return;
-      }
-      const legacy = await AsyncStorage.getItem('dev_mode');
-      if (legacy !== null) {
-        setSecretModeState(legacy === 'true');
-        await AsyncStorage.setItem('secret_mode', legacy);
-        await AsyncStorage.removeItem('dev_mode');
-      }
-    })();
-  }, [pubkey]);
+    let cancelled = false;
+    loadSecretMode(pubkey).then((v) => {
+      if (!cancelled) setSecretModeState(v);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [pubkey, setSecretModeState]);
 
   // One-shot legacy → tier migration (#547). The pre-#547 Messages /
   // Groups filter persisted a boolean `followingOnly` per account; the
-  // unified WoT tier lives in a single device-wide key (`@lp:wot-settings:v1`).
+  // unified WoT tier lives in a per-account key (`@lp:wot-settings:v1_<pubkey>`).
   // On first run after the upgrade we derive a starting tier from the
   // legacy boolean (+ secretMode) so the user's intent survives intact:
   //   followingOnly=true                       → 'friends'
@@ -282,10 +284,13 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const done = await AsyncStorage.getItem(WOT_MIGRATION_DONE_KEY);
       if (done === 'true') return;
       try {
+        // Make sure the device-wide → per-account copy has landed first, so
+        // the "already saved" probe below sees the real per-account value.
+        await ensureSafetySettingsMigrated(pubkey);
         // Skip if the user has already saved an explicit wotTier — the
         // loadWotSettings call inside TrustGraphContext returns defaults
         // for a missing key, so we have to probe the raw storage slot.
-        const existing = await AsyncStorage.getItem('@lp:wot-settings:v1');
+        const existing = await AsyncStorage.getItem(perAccountKey(WOT_STORAGE_KEY_BASE, pubkey));
         if (existing !== null) {
           await AsyncStorage.setItem(WOT_MIGRATION_DONE_KEY, 'true');
           return;
@@ -295,7 +300,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         // legacy key was never written.
         const raw = await AsyncStorage.getItem(perAccountKey(FOLLOWING_ONLY_KEY_BASE, pubkey));
         const followingOnlyLegacy: boolean | null = raw === null ? null : raw !== 'false';
-        const secretRaw = await AsyncStorage.getItem('secret_mode');
+        const secretRaw = await AsyncStorage.getItem(perAccountKey(SECRET_MODE_KEY_BASE, pubkey));
         const secret = secretRaw === 'true';
         const next = deriveInitialWotTier({
           followingOnly: followingOnlyLegacy,
@@ -305,7 +310,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         // TrustGraphContext's setter, which would also schedule a render)
         // and then notify the in-memory state so the UI picks it up on
         // the next render without waiting for loadWotSettings to re-run.
-        await saveWotSettings({ wotTier: next });
+        await saveWotSettings({ wotTier: next }, pubkey);
         setWotTier(next);
         await AsyncStorage.setItem(WOT_MIGRATION_DONE_KEY, 'true');
       } catch {
@@ -323,10 +328,13 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // had its own local useState which didn't reach the rest of the app,
   // so e.g. the "All" WoT tier stayed greyed out until a full app
   // restart re-read AsyncStorage from inside GroupsProvider.
-  const setSecretMode = useCallback((next: boolean) => {
-    setSecretModeState(next);
-    AsyncStorage.setItem('secret_mode', next ? 'true' : 'false').catch(() => {});
-  }, []);
+  const setSecretMode = useCallback(
+    (next: boolean) => {
+      setSecretModeState(next);
+      saveSecretMode(next, pubkey).catch(() => {});
+    },
+    [pubkey, setSecretModeState],
+  );
 
   // `effectiveWotTier` previously clamped 'all' → 'friends' when secret
   // mode was off (#547 parental-control hard-lock). That clamp has been

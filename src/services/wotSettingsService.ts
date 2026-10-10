@@ -6,8 +6,12 @@
 // boolean are migrated on load: `false` (off) → 'all', `true` (on) → 'friends'.
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { perAccountKey } from './perAccountStorage';
+import { ensureSafetySettingsMigrated, WOT_SETTINGS_KEY_BASE } from './safetySettingsMigration';
 
-const STORAGE_KEY = '@lp:wot-settings:v1';
+// Stored PER ACCOUNT (`perAccountKey(base, pubkey)`): on a shared family phone
+// each person picks their own "who can message me" tier.
+export const WOT_STORAGE_KEY_BASE = WOT_SETTINGS_KEY_BASE;
 
 // The 3 tiers from issue #535. Default 'all' — every signed event surfaces
 // on Geo-caches + Events rails so a brand-new user (no follows yet) sees
@@ -39,9 +43,11 @@ const DEFAULTS: WotSettings = { wotTier: 'all' };
 // silently re-introduce the empty-rail symptom #627 was filed to fix.
 const isWotTier = (v: unknown): v is WotTier => v === 'friends' || v === 'fof' || v === 'all';
 
-export const loadWotSettings = async (): Promise<WotSettings> => {
+export const loadWotSettings = async (pubkey: string | null): Promise<WotSettings> => {
+  if (!pubkey) return DEFAULTS;
   try {
-    const raw = await AsyncStorage.getItem(STORAGE_KEY);
+    await ensureSafetySettingsMigrated(pubkey);
+    const raw = await AsyncStorage.getItem(perAccountKey(WOT_STORAGE_KEY_BASE, pubkey));
     if (!raw) return DEFAULTS;
     const parsed = JSON.parse(raw);
     // New shape — wotTier present and valid.
@@ -59,9 +65,17 @@ export const loadWotSettings = async (): Promise<WotSettings> => {
   }
 };
 
-export const saveWotSettings = async (settings: WotSettings): Promise<void> => {
+export const saveWotSettings = async (
+  settings: WotSettings,
+  pubkey: string | null,
+): Promise<void> => {
+  if (!pubkey) return;
   try {
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+    await ensureSafetySettingsMigrated(pubkey);
+    await AsyncStorage.setItem(
+      perAccountKey(WOT_STORAGE_KEY_BASE, pubkey),
+      JSON.stringify(settings),
+    );
   } catch {
     // Best-effort; in-memory state still drives the session.
   }

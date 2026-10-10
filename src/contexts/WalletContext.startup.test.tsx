@@ -46,9 +46,6 @@ jest.mock('../services/nostrService', () => ({
   parseZapReceipt: jest.fn(() => ({ senderPubkey: 'alice', comment: 'hi', anonymous: false })),
   fetchProfiles: jest.fn(async () => new Map()),
 }));
-jest.mock('../services/sendThresholdService', () => ({
-  initialiseSendThresholdForNewInstall: jest.fn(async () => {}),
-}));
 jest.mock('../services/fiatService', () => ({
   ...jest.requireActual('../services/fiatService'),
   getBtcPrice: jest.fn(async () => null),

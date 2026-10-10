@@ -12,7 +12,6 @@ import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nwcService from '../services/nwcService';
 import * as nostrService from '../services/nostrService';
-import { initialiseSendThresholdForNewInstall } from '../services/sendThresholdService';
 import * as lnurlService from '../services/lnurlService';
 import * as zapCounterpartyStorage from '../services/zapCounterpartyStorage';
 import * as zapSenderProfileStorage from '../services/zapSenderProfileStorage';
@@ -25,6 +24,14 @@ import { mapOnchainTransactions } from '../utils/onchainTransactions';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as onchainService from '../services/onchainService';
 import * as walletStorage from '../services/walletStorageService';
+import { useActivePubkey } from '../hooks/useActivePubkey';
+import { useAccountState } from './useAccountState';
+import {
+  CURRENCY_PREF_KEY_BASE,
+  loadAccountPref,
+  peekAccountPref,
+  saveAccountPref,
+} from '../services/accountDisplayPrefs';
 import { rearmBackgroundWatchAfterNwcWalletAdded } from '../services/backgroundDmService';
 import { CURRENCIES, FiatCurrency, getBtcPrice } from '../services/fiatService';
 import { WalletLiveContext } from './WalletLiveContext';
@@ -57,7 +64,9 @@ let __walletProviderHydratedLogged = false;
 
 export type { IncomingPayment } from './incomingPayment';
 
-const CURRENCY_KEY = 'user_fiat_currency';
+const CURRENCY_KEY = CURRENCY_PREF_KEY_BASE;
+const isFiatCurrency = (v: string | null): v is FiatCurrency =>
+  !!v && (CURRENCIES as readonly string[]).includes(v);
 const BTC_PRICE_CACHE_PREFIX = 'btc_price_';
 
 // The #P-tagged outgoing zap-receipt relay fetch is expensive (500-event
@@ -223,7 +232,14 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [isOnboarded, setIsOnboarded] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [walletsHydrated, setWalletsHydrated] = useState(false);
-  const [currency, setCurrencyState] = useState<FiatCurrency>('USD');
+  // Fiat currency is PER ACCOUNT (shared family phone): owner-tagged so a switch
+  // never shows the previous account's currency.
+  const activePubkey = useActivePubkey();
+  const seenCurrency = peekAccountPref(CURRENCY_KEY, activePubkey);
+  const [currency, setCurrencyState] = useAccountState<FiatCurrency>(
+    activePubkey,
+    isFiatCurrency(seenCurrency) ? seenCurrency : 'USD',
+  );
   const [btcPrice, setBtcPrice] = useState<number | null>(null);
   const [lastIncomingPayment, setLastIncomingPayment] = useState<IncomingPayment | null>(null);
   const priceInterval = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -277,7 +293,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const setCurrency = useCallback(async (cur: FiatCurrency) => {
     setCurrencyState(cur);
-    await AsyncStorage.setItem(CURRENCY_KEY, cur);
+    await saveAccountPref(CURRENCY_KEY, cur, walletStorage.getActivePubkey());
     const price = await getBtcPrice(cur);
     setBtcPrice(price);
     if (price != null) {
@@ -362,31 +378,36 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     );
   }, []);
 
+  // Load the ACTIVE account's currency (its own, else the phone default, else
+  // USD) at startup and on every account switch, then hydrate the cached BTC
+  // price so the fiat column renders on first paint and refresh it. The
+  // currency-change effects below keep the price interval in step.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const saved = await loadAccountPref(CURRENCY_KEY, activePubkey);
+      if (cancelled) return;
+      const cur: FiatCurrency = isFiatCurrency(saved) ? saved : 'USD';
+      setCurrencyState(cur);
+      AsyncStorage.getItem(`${BTC_PRICE_CACHE_PREFIX}${cur}`)
+        .then((raw) => {
+          if (cancelled || raw == null) return;
+          const n = Number(raw);
+          if (Number.isFinite(n) && n > 0) setBtcPrice(n);
+        })
+        .catch(() => {});
+      fetchPrice(cur);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activePubkey, fetchPrice, setCurrencyState]);
+
   // Startup: load prefs, migrate, reconnect all wallets
   useEffect(() => {
     let isStartupCurrent = captureWalletIdentity();
     (async () => {
       try {
-        // Load user preferences
-        const savedCurrency = await AsyncStorage.getItem(CURRENCY_KEY);
-        const cur = (CURRENCIES as readonly string[]).includes(savedCurrency ?? '')
-          ? (savedCurrency as FiatCurrency)
-          : 'USD';
-        setCurrencyState(cur);
-        // Hydrate cached BTC price from disk so the fiat column renders
-        // on first paint — without this, every cold start shows an
-        // empty/zero fiat value for 1-3 s while the CoinGecko fetch
-        // round-trips. `fetchPrice` below overwrites with the fresh
-        // value once it arrives.
-        AsyncStorage.getItem(`${BTC_PRICE_CACHE_PREFIX}${cur}`)
-          .then((raw) => {
-            if (raw == null) return;
-            const n = Number(raw);
-            if (Number.isFinite(n) && n > 0) setBtcPrice(n);
-          })
-          .catch(() => {});
-        fetchPrice(cur);
-
         // Check onboarding status (independent of wallet-list key —
         // ONBOARDING_KEY isn't per-account namespaced).
         const onboarded = await walletStorage.isOnboarded();
@@ -416,14 +437,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           const onboardedAfterMigration = await walletStorage.isOnboarded();
           setIsOnboarded(onboardedAfterMigration);
         }
-        if (!isStartupCurrent()) return;
-
-        // Distinguish new-install vs upgrade for the high-value-send
-        // confirmation default — runs after migrateLegacy so the install-
-        // state signals (wallet_list, onboarding_complete) are stable.
-        // Idempotent; short-circuits once initialised (#82 acceptance).
-        if (!isStartupCurrent()) return;
-        await initialiseSendThresholdForNewInstall();
         if (!isStartupCurrent()) return;
 
         // Load and reconnect all wallets
