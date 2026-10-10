@@ -76,6 +76,10 @@ export function buildOwnRecord(
  * the returned event must match the request exactly, its id must be the
  * locally recomputed one, and the BIP-340 signature must verify.
  */
+/** The signer handed back something other than a valid signature over the
+ * exact owner-proof event we asked for. */
+export class OwnerProofMismatch extends Error {}
+
 export function ownerSigFromSigned(expected: ProofTemplate, signed: SignedProof): string {
   const id = getEventHash(expected);
   const same =
@@ -85,7 +89,7 @@ export function ownerSigFromSigned(expected: ProofTemplate, signed: SignedProof)
     signed.kind === expected.kind &&
     signed.content === expected.content &&
     JSON.stringify(signed.tags) === JSON.stringify(expected.tags);
-  if (!same) throw new Error('push: signer returned a different owner-proof event');
+  if (!same) throw new OwnerProofMismatch('push: signer returned a different owner-proof event');
   let valid = false;
   try {
     valid =
@@ -94,7 +98,7 @@ export function ownerSigFromSigned(expected: ProofTemplate, signed: SignedProof)
   } catch {
     valid = false;
   }
-  if (!valid) throw new Error('push: owner-proof signature does not verify');
+  if (!valid) throw new OwnerProofMismatch('push: owner-proof signature does not verify');
   return signed.sig;
 }
 

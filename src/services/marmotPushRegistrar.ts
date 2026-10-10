@@ -19,6 +19,7 @@
 
 import type { PushRecord, Removal } from './marmotPush';
 import {
+  OwnerProofMismatch,
   buildOwnRecord,
   removalFor,
   signEntry,
@@ -249,9 +250,10 @@ export class MarmotPushRegistrar {
       } catch (e) {
         result.pending++;
         if (e instanceof Superseded) break;
-        // A remote signer refusing (or timing out) = the user said no: stop
-        // asking for the rest of this pass.
-        if (e instanceof SignerRefused && !this.deps.silentSigner) result.declined = true;
+        // A remote signer refusing, timing out or returning a bad signature:
+        // stop asking it for the rest of this pass.
+        const signerFailed = e instanceof SignerRefused || e instanceof OwnerProofMismatch;
+        if (signerFailed && !this.deps.silentSigner) result.declined = true;
         if (__DEV__) console.warn('[MarmotPush] registration step failed:', e);
       }
     }

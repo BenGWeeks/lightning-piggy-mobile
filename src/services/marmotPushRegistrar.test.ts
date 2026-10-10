@@ -212,6 +212,29 @@ describe('MarmotPushRegistrar', () => {
       expect(retry).toMatchObject({ published: 2, declined: false });
     });
 
+    it('stops asking after a signer returns a bad signature', async () => {
+      let prompts = 0;
+      const sent: number[] = [];
+      const registrar = new MarmotPushRegistrar({
+        pubkey: ME,
+        silentSigner: false,
+        backend: createMemoryMarmotBackend(),
+        ready: Promise.resolve(),
+        groups: () => [group('aa'.repeat(16)), group('bb'.repeat(16))],
+        sign: async (tpl) => {
+          prompts++;
+          const ev = finalizeEvent({ ...tpl }, sk);
+          return { ...ev, sig: '00'.repeat(64) } as unknown as Awaited<ReturnType<Sign>>;
+        },
+        send: async (_id, ev) => (sent.push(ev.kind), true),
+      });
+      registrar.setRegistration(reg('token-1'));
+      const r = await registrar.sync({ interactive: true });
+      expect(r).toMatchObject({ published: 0, pending: 2, declined: true });
+      expect(prompts).toBe(1);
+      expect(sent).toEqual([]);
+    });
+
     it('sending in a group sets up just that group', async () => {
       const t = setup({ silent: false });
       t.registrar.setRegistration(reg('token-1'));

@@ -221,7 +221,11 @@ export class MarmotSession {
       pubkey: opts.pubkey,
       silentSigner: opts.signerType === 'nsec',
       backend: this.backend,
-      ready: this.ready,
+      // A previous session of this account (A → B → A) may still be
+      // finishing a publish + write: wait for it before planning anything.
+      ready: Promise.all([this.ready, pushDrains.get(opts.pubkey)?.catch(() => undefined)]).then(
+        () => undefined,
+      ),
       groups: () =>
         this.client.groups.loaded
           .filter((g) => g.status === 'active')
