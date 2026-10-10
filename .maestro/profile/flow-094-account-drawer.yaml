@@ -66,6 +66,19 @@ name: Account Drawer Test
     timeout: 3000
 - assertVisible:
     id: 'display-language-currency-row'
+# Picking a currency also returns to Display & language. Tap the one that's
+# already selected so the flow doesn't change the account's currency.
+- tapOn:
+    id: 'display-language-currency-row'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'currency-[A-Z]{3}'
+    selected: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible:
+    id: 'display-language-currency-row'
 - tapOn:
     id: 'account-back-button'
 - waitForAnimationToEnd:
