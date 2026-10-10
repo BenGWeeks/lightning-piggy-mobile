@@ -1,7 +1,7 @@
 /**
  * One-way, no-loss migration of group-chat history from the legacy
  * device-wide `group_messages_<groupId>` blobs to per-account
- * `group_messages_<owner>:<groupId>` keys (#1240).
+ * `group_history_<owner>:<groupId>` keys (#1240).
  *
  * Why copy instead of re-key: a legacy blob can't be attributed to a single
  * account — two local accounts in the same group shared one blob — and Marmot
@@ -13,9 +13,9 @@
  *    encrypted DB (`marmot_kv`, read-only). Activity rollups are deliberately
  *    NOT evidence: pre-#1214 builds saved one account's rollup under another
  *    account's key, so trusting them would copy history across accounts;
- *  - copies MERGE into any existing per-account log (union by id), so a
- *    re-run after a crash between "copy" and "delete" converges instead of
- *    duplicating or clobbering;
+ *  - copies MERGE into any existing per-account log (union by id, uncapped),
+ *    so a re-run after a crash between "copy" and "delete" converges instead
+ *    of duplicating, clobbering or truncating;
  *  - the legacy key is removed only after every copy is written;
  *  - a blob with no known owner is KEPT on disk (never loaded, logged) — it is
  *    adopted on a later launch if an account picks the group up again;
@@ -24,7 +24,9 @@
  *
  * The same pass prunes, once, the activity rollup entries that leaked into
  * another account's `nostr_group_activity_<pk>` (their previews are the other
- * account's plaintext and would outlive its sign-out).
+ * account's plaintext and would outlive its sign-out). Until that prune has
+ * succeeded, `loadGroupActivity` reads as empty, so a leaked rollup is never
+ * hydrated — the next save then overwrites it with the account's own groups.
  *
  * Runs once per app process, before any group history or rollup read (the
  * storage services await `ensureGroupMessagesMigrated()`), so nothing writes
@@ -36,9 +38,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { GroupMessage } from './groupMessagesStorageService';
 import { groupMessagesKey, legacyGroupIdFromKey, normaliseGroupOwner } from './groupMessagesKeys';
 import { listMarmotOwnersForGroup } from './marmotStore';
-
-/** Mirrors the per-group cap in groupMessagesStorageService. */
-export const GROUP_MESSAGES_CAP = 500;
 
 /** Set once the leaked activity-rollup entries have been pruned. */
 export const GROUP_ACTIVITY_PRUNED_KEY = 'group_activity_owner_pruned_v1';
@@ -81,7 +80,11 @@ function parseLog(raw: string | null): GroupMessage[] | null {
   return Array.isArray(parsed) ? (parsed as GroupMessage[]) : null;
 }
 
-/** Union by id (newer createdAt wins a collision), oldest first, capped. */
+/**
+ * Union by id (newer createdAt wins a collision), oldest first. Deliberately
+ * NOT capped: the migration must never be the thing that drops a message —
+ * the normal per-group cap applies on the next append, as it always has.
+ */
 export function mergeGroupLogs(a: GroupMessage[], b: GroupMessage[]): GroupMessage[] {
   const byId = new Map<string, GroupMessage>();
   for (const m of [...a, ...b]) {
@@ -89,8 +92,7 @@ export function mergeGroupLogs(a: GroupMessage[], b: GroupMessage[]): GroupMessa
     const prior = byId.get(m.id);
     if (!prior || prior.createdAt < m.createdAt) byId.set(m.id, m);
   }
-  const all = Array.from(byId.values()).sort((x, y) => x.createdAt - y.createdAt);
-  return all.length <= GROUP_MESSAGES_CAP ? all : all.slice(all.length - GROUP_MESSAGES_CAP);
+  return Array.from(byId.values()).sort((x, y) => x.createdAt - y.createdAt);
 }
 
 /** groupId → owners, from every account's saved group list. */

@@ -36,7 +36,7 @@ The app uses two storage mechanisms with different security levels:
 
 ==== AsyncStorage (Unencrypted)
 
-`@react-native-async-storage/async-storage` stores mostly non-sensitive data — the keys below contain pubkeys, settings, and public profile metadata. Decrypted *1:1 DM* plaintext no longer lives here: as of #848/#850 it persists exclusively in the SQLCipher-encrypted local DB (see <<Message Content at Rest (Threat Model)>>). The remaining known exception is decrypted *group-chat* plaintext (`group_messages_<ownerPubkey>:<groupId>`, `nostr_group_activity_<pubkey>`) — see the residual-risk note in that section.
+`@react-native-async-storage/async-storage` stores mostly non-sensitive data — the keys below contain pubkeys, settings, and public profile metadata. Decrypted *1:1 DM* plaintext no longer lives here: as of #848/#850 it persists exclusively in the SQLCipher-encrypted local DB (see <<Message Content at Rest (Threat Model)>>). The remaining known exception is decrypted *group-chat* plaintext (`group_history_<ownerPubkey>:<groupId>`, `nostr_group_activity_<pubkey>`) — see the residual-risk note in that section.
 
 [cols="2,3", options="header"]
 |===
@@ -70,7 +70,7 @@ The app uses two storage mechanisms with different security levels:
 
 Existing device settings are copied once into every registered account without overwriting account values. Legacy device keys are removed only after every copy succeeds; interrupted migration retries safely. The older `dev_mode` flag is migrated too. Account-owned React state masks values from the previous account during switching; fiat exchange rates are also scoped to the current currency.
 
-NOTE: The app still stores **decrypted group-message plaintext** in AsyncStorage to power `GroupConversationScreen` and the group previews on the Messages tab (`group_messages_<ownerPubkey>:<groupId>`, `nostr_group_activity_<pubkey>`). This is the known at-rest residual — 1:1 DM plaintext moved to the encrypted DB in #848/#850. See <<Message Content at Rest (Threat Model)>> below.
+NOTE: The app still stores **decrypted group-message plaintext** in AsyncStorage to power `GroupConversationScreen` and the group previews on the Messages tab (`group_history_<ownerPubkey>:<groupId>`, `nostr_group_activity_<pubkey>`). This is the known at-rest residual — 1:1 DM plaintext moved to the encrypted DB in #848/#850. See <<Message Content at Rest (Threat Model)>> below.
 
 === NWC URL Security
 
@@ -180,7 +180,7 @@ This section documents where decrypted Nostr message content lives on disk and w
 | `marmot_kv` table in `lightningpiggy.db`, keyed by owner (see `DATA_STORAGE.adoc` → "Marmot (MLS) state")
 | Same SQLCipher protection. Deleted per account on sign-out (`deleteMarmotStateForOwner`).
 
-| Group-chat plaintext (`group_messages_<ownerPubkey>:<groupId>`, `nostr_group_activity_<pubkey>`), NIP-17 *and* Marmot groups
+| Group-chat plaintext (`group_history_<ownerPubkey>:<groupId>`, `nostr_group_activity_<pubkey>`), NIP-17 *and* Marmot groups
 | AsyncStorage (unencrypted)
 | **Known residual.** App sandbox + OS file-based encryption only. Stored per account and wiped only for the account being signed out (#944, #1240) — other accounts on the device keep their history. Legacy device-wide `group_messages_<groupId>` blobs from before #1240 are copied to each owning account and then deleted; a blob no local account owns is kept on disk unread (see `DATA_STORAGE.adoc`); moving it into the encrypted store is the tracked follow-up. A Marmot group photo's row embeds its file keys (`#lpe=1` URL), so the residual covers those photos too.
 
@@ -201,7 +201,7 @@ What it cannot protect against (out of scope at the app layer):
 
 * **Compelled or observed device unlock.** After first unlock the keystore will serve the DB key to the app; an adversary who can compel the passcode (or seize the phone unlocked and keep it powered) operates as the user. Raising this bar needs an *app-level* lock that gates the DB-key read behind a separate credential/biometric, plus optionally a panic-wipe — tracked as follow-ups, deliberately not bundled into the storage migration.
 * **Rooted device with the app running.** Decrypted rows transit RAM while rendered.
-* **Group-chat residual.** Until group messages get the same treatment, `group_messages_*` is readable from an unlocked seized device (including any unowned legacy blob the #1240 migration kept).
+* **Group-chat residual.** Until group messages get the same treatment, `group_history_*` (and any unowned legacy `group_messages_*` blob the #1240 migration kept) is readable from an unlocked seized device.
 * **Relay-side copies.** At-rest encryption protects the device only; NIP-17 wraps remain on relays and are re-fetchable by anyone holding the nsec. Marmot kind-445 events also stay on relays, but the nsec alone can't decrypt them — that needs the MLS group state in `marmot_kv` (and MLS forward secrecy means even that can't read epochs it has already deleted).
 
 ==== What servers see: Marmot messaging

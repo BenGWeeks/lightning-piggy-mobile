@@ -9,7 +9,7 @@ import {
   groupMessagesOwnerPrefix,
   normaliseGroupOwner,
 } from './groupMessagesKeys';
-import { ensureGroupMessagesMigrated, GROUP_MESSAGES_CAP as CAP } from './groupMessagesMigration';
+import { ensureGroupMessagesMigrated } from './groupMessagesMigration';
 
 /**
  * In-thread message stored locally, per-group. We persist what the user
@@ -35,7 +35,7 @@ export interface GroupMessage {
 }
 
 // Account scoping (#1240): history is keyed per owner —
-// `group_messages_<owner>:<groupId>` (layout in groupMessagesKeys.ts). Two
+// `group_history_<owner>:<groupId>` (layout in groupMessagesKeys.ts). Two
 // local accounts in the same group (synthetic NIP-17 rooms, kind-30200 and
 // Marmot ids are the same for every member) each get their own log, and an
 // account's sign-out deletes only its own logs (accountCacheWipe). Every
@@ -81,6 +81,7 @@ export async function loadGroupMessages(
 // optimistically appended on send — so both rows persisted and the user
 // saw the same message (e.g. a GIF) twice.
 const LOCAL_ECHO_MATCH_WINDOW_SECS = 30;
+const CAP = 500;
 
 export async function appendGroupMessage(
   owner: string | null | undefined,

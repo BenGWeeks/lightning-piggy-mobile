@@ -43,7 +43,7 @@ changing how anything is stored.
   and per-conversation caches (`nostr_dm_conv_v1_*`) are *retired* — #850
   migrates them into the encrypted DB and deletes them (verified).
   Remaining known plaintext: decrypted *group-chat* logs
-  (`group_messages_<ownerPubkey>:<groupId>`, one per account — #1240) and group previews
+  (`group_history_<ownerPubkey>:<groupId>`, one per account — #1240) and group previews
   (`nostr_group_activity_<pubkey>`) — see the residual-risk note under
   <<threat>>.
 | Mixed (mostly public/cache; group-chat plaintext is the known residual)
@@ -132,11 +132,11 @@ possibly while powered on and after first unlock.
 * *Wallet + identity secrets* (`nsec`, NWC URLs, mnemonics, xpubs, LNURL-w
   bearers, the DB key) are individually keystore-wrapped — same story.
 * *Known residual plaintext (accepted, tracked):* decrypted *group-chat* logs
-  (`group_messages_<ownerPubkey>:<groupId>`, `nostr_group_activity_<pubkey>`)
+  (`group_history_<ownerPubkey>:<groupId>`, `nostr_group_activity_<pubkey>`)
   still live in AsyncStorage — each account's logs are wiped on that account's
   sign-out (#944, #1240) but readable from a seized unlocked device until they
   get the same encrypted-store treatment (follow-up). This includes *Marmot*
-  group logs (`group_messages_<ownerPubkey>:marmot:<mls group id>`),
+  group logs (`group_history_<ownerPubkey>:marmot:<mls group id>`),
   whose photo rows embed the photo's file keys in the `#lpe=1` URL. Marmot
   1:1 rows and all MLS state are in the encrypted DB.
 * *Group-chat logs are per account (#1240).* Before #1240 they were
@@ -148,8 +148,13 @@ possibly while powered on and after first unlock.
   a later launch if an account picks the group up. Activity rollups are not
   ownership evidence — pre-#1214 builds saved one account's rollup under
   another's key — and the same pass prunes those leaked rollup entries once
-  (flag `group_activity_owner_pruned_v1`). Group history and rollup reads
-  await the migration and never fall back to a legacy key.
+  (flag `group_activity_owner_pruned_v1`; until it succeeds a rollup reads
+  as empty). Copies are merged uncapped, so the migration never drops a
+  message. The per-account prefix (`group_history_`) is deliberately
+  disjoint from the legacy one: group ids come off relays, so a crafted id
+  like `<pubkey>:g_room` must never be readable as that account's history.
+  Group history and rollup reads await the migration and never fall back to
+  a legacy key.
   Public caches (places, profiles, geo-caches) are public data by
   definition; the eventual move into the one encrypted DB is a metadata-
   privacy nicety, not a confidentiality requirement.

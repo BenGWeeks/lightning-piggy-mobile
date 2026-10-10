@@ -7,7 +7,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
   GROUP_ACTIVITY_PRUNED_KEY,
-  GROUP_MESSAGES_CAP,
   mergeGroupLogs,
   resetGroupMessagesMigrationForTests,
   runGroupMessagesMigration,
@@ -15,10 +14,17 @@ import {
 } from './groupMessagesMigration';
 import { groupMessagesKey, legacyGroupMessagesKey } from './groupMessagesKeys';
 import { loadGroupMessages, type GroupMessage } from './groupMessagesStorageService';
+import { loadGroupActivity } from './groupsStorageService';
 
 jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
 );
+
+// The DB-backed default lookup, for paths that run the real gate.
+const mockMarmotOwners = jest.fn(async (_mls: string): Promise<string[]> => []);
+jest.mock('./marmotStore', () => ({
+  listMarmotOwnersForGroup: (mls: string) => mockMarmotOwners(mls),
+}));
 
 const PARENT = '1'.repeat(64);
 const CHILD = '2'.repeat(64);
@@ -278,15 +284,46 @@ describe('one-time prune of leaked activity rollup entries', () => {
     expect(await AsyncStorage.getItem(`nostr_group_activity_${CHILD}`)).toBe(rollup);
     expect(await AsyncStorage.getItem(GROUP_ACTIVITY_PRUNED_KEY)).toBeNull();
   });
+
+  it('loadGroupActivity reads empty while the prune is pending, and only owned entries after', async () => {
+    const leaked = JSON.stringify({
+      [MARMOT_GROUP]: entry("parent's marmot plaintext"),
+      g_child: entry('mine'),
+    });
+    await seedGroupList(CHILD, ['g_child']);
+    await AsyncStorage.setItem(`nostr_group_activity_${CHILD}`, leaked);
+    mockMarmotOwners.mockRejectedValueOnce(new Error('db locked'));
+
+    expect(await loadGroupActivity(CHILD)).toEqual({}); // prune failed → not hydrated
+    expect(await AsyncStorage.getItem(`nostr_group_activity_${CHILD}`)).toBe(leaked);
+
+    resetGroupMessagesMigrationForTests(); // next launch: DB readable
+    mockMarmotOwners.mockResolvedValueOnce([PARENT]);
+    expect(Object.keys(await loadGroupActivity(CHILD))).toEqual(['g_child']);
+  });
 });
 
 describe('mergeGroupLogs', () => {
-  it('keeps the newest rows under the per-group cap', () => {
-    const a = Array.from({ length: GROUP_MESSAGES_CAP }, (_, i) => msg(`a${i}`, i));
-    const merged = mergeGroupLogs(a, [msg('newest', GROUP_MESSAGES_CAP + 1)]);
-    expect(merged).toHaveLength(GROUP_MESSAGES_CAP);
+  it('never truncates: a full legacy blob plus owned rows keeps every message', () => {
+    const legacy = Array.from({ length: 500 }, (_, i) => msg(`a${i}`, i));
+    const merged = mergeGroupLogs([msg('newest', 501)], legacy);
+    expect(merged).toHaveLength(501);
+    expect(merged[0].id).toBe('a0');
     expect(merged[merged.length - 1].id).toBe('newest');
-    expect(merged[0].id).toBe('a1');
+  });
+});
+
+describe('crafted group ids (#1240 review)', () => {
+  it("a legacy id shaped like '<pubkey>:g_room' is migrated as an ordinary group, never read as that account's history", async () => {
+    const crafted = `${PARENT}:g_room`;
+    await seedLegacy(crafted, [msg('child-only', 1)]);
+    await seedGroupList(CHILD, [crafted]);
+
+    const result = await runGroupMessagesMigration(noMarmot);
+
+    expect(result.migrated).toEqual({ [crafted]: [CHILD] });
+    expect(await readOwned(CHILD, crafted)).toEqual([msg('child-only', 1)]);
+    expect(await loadGroupMessages(PARENT, 'g_room')).toEqual([]);
   });
 });
 
