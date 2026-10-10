@@ -34,16 +34,32 @@ import {
   MarmotNoKeyPackageError,
   MarmotUnusableKeyPackageError,
   newestEvent,
+  newestKeyPackagePerSlot,
 } from './marmotKeyPackages';
+import { advertisesMediaV2 } from './marmotKeyPackageLifecycle';
+import type { MarmotWelcomeOutbox } from './marmotWelcomeOutbox';
 
 const KEY_PACKAGE_KIND = 30443;
-/** A slot not refreshed for this long is treated as an abandoned install. */
-export const DEVICE_MAX_AGE_SECS = 30 * 24 * 60 * 60;
+const DAY_SECS = 24 * 60 * 60;
+/**
+ * A slot not refreshed within this long is treated as an abandoned install.
+ * Per client, from how often each one republishes: White Noise rotates at 30
+ * days; Lightning Piggy refreshes weekly (14 = two missed refreshes), and
+ * untagged slots get the same short window. Each invited device costs the
+ * user's signer two operations (seal + encryption) — a dead install is a
+ * wasted Amber / NIP-46 approval.
+ */
+export const WHITE_NOISE_MAX_AGE_SECS = 35 * DAY_SECS;
+export const DEVICE_MAX_AGE_SECS = 14 * DAY_SECS;
 /** At most this many devices per person (newest first) — bounds the commit. */
 export const MAX_DEVICES_PER_PERSON = 10;
 /** Per-relay cap on a peer's key-package query (newest per slot is kept). */
 const KEY_PACKAGE_QUERY_LIMIT = 50;
 const WHITE_NOISE_CLIENT = /white\s*noise/i;
+const isWhiteNoise = (e: NostrEvent) =>
+  e.tags.some((t) => t[0] === 'client' && WHITE_NOISE_CLIENT.test(t[1] ?? ''));
+const maxAgeFor = (e: NostrEvent) =>
+  isWhiteNoise(e) ? WHITE_NOISE_MAX_AGE_SECS : DEVICE_MAX_AGE_SECS;
 
 type CommitIntent = ReturnType<typeof createInviteIntent>;
 type Yield = () => Promise<void> | void;
@@ -91,10 +107,13 @@ function isValidDeviceKeyPackage(e: NostrEvent, peer: string, nowSecs: number): 
 
 /**
  * The key packages to invite `peer` with — one per device: the newest event
- * per `d` slot, valid, published within 30 days, newest first, at most 10.
- * If no slot is that fresh, the newest valid one is still used (a contact
- * whose only install hasn't refreshed lately must stay reachable).
- * Returns [] when they published none; throws when none is usable.
+ * per `d` slot (retired slots skipped), valid, compatible (media v2),
+ * recently refreshed for its client (maxAgeFor), newest first. If none
+ * qualifies, the newest compatible (else newest valid) one is still used —
+ * a contact whose only install is old or quiet must stay reachable. The per-person cap is applied once each key
+ * is checked against the group (buildInviteBatch), so a rejected one makes
+ * room for the next. Returns [] when they published none (or only retired
+ * slots); throws when none is usable.
  */
 export async function selectDeviceKeyPackages(
   peer: string,
@@ -103,15 +122,8 @@ export async function selectDeviceKeyPackages(
 ): Promise<NostrEvent[]> {
   const p = peer.toLowerCase();
   const nowSecs = opts.nowSecs ?? Math.floor(Date.now() / 1000);
-  const newestPerSlot = new Map<string, NostrEvent>();
-  for (const e of events) {
-    if (e.kind !== KEY_PACKAGE_KIND || e.pubkey.toLowerCase() !== p) continue;
-    const slot = e.tags.find((t) => t[0] === 'd')?.[1] ?? e.id;
-    const prev = newestPerSlot.get(slot);
-    if (!prev || e.created_at > prev.created_at) newestPerSlot.set(slot, e);
-  }
-  const candidates = [...newestPerSlot.values()].sort(
-    (a, b) => b.created_at - a.created_at || a.id.localeCompare(b.id),
+  const candidates = newestKeyPackagePerSlot(
+    events.filter((e) => e.kind === KEY_PACKAGE_KIND && e.pubkey.toLowerCase() === p),
   );
   const valid: NostrEvent[] = [];
   for (const e of candidates) {
@@ -123,8 +135,13 @@ export async function selectDeviceKeyPackages(
     if (candidates.length > 0) throw new MarmotUnusableKeyPackageError(peer);
     return [];
   }
-  const fresh = valid.filter((e) => e.created_at >= nowSecs - DEVICE_MAX_AGE_SECS);
-  return (fresh.length > 0 ? fresh : valid.slice(0, 1)).slice(0, MAX_DEVICES_PER_PERSON);
+  // Compatible = advertises encrypted media v2 (0x800b). White Noise requires
+  // it of EVERY member and silently drops a Welcome whose tree holds one leaf
+  // without it — so one outdated install would hide the chat from all of the
+  // group's White Noise users (seen on device with old Marmot test installs).
+  const compatible = valid.filter((e) => advertisesMediaV2([e]));
+  const fresh = compatible.filter((e) => e.created_at >= nowSecs - maxAgeFor(e));
+  return fresh.length > 0 ? fresh : [compatible[0] ?? valid[0]];
 }
 
 export interface InviteBatch {
@@ -153,6 +170,7 @@ export function buildInviteBatch(
   for (const [person, keyPackages] of devicesByPerson) {
     let added = 0;
     for (const kp of keyPackages) {
+      if (added >= MAX_DEVICES_PER_PERSON) break;
       const verdict = evaluateKeyPackageForGroup(state, kp);
       if (!verdict.eligible) {
         if (__DEV__) {
@@ -182,32 +200,29 @@ export function buildInviteBatch(
   };
 }
 
-/** Every Welcome in the commit failed to publish — nobody can join. */
+/** No invited person's Welcome reached a relay — nobody can join. */
 export class MarmotWelcomeDeliveryError extends Error {
-  constructor(readonly failed: number) {
-    super(`Could not deliver any of ${failed} Marmot invitation(s)`);
+  constructor(readonly people: string[]) {
+    super(`Could not deliver the Marmot invitation to ${people.length} person(s)`);
     this.name = 'MarmotWelcomeDeliveryError';
   }
 }
 
-/**
- * Check the commit's Welcome fan-out. Some devices missing their Welcome is
- * fine (the others joined; logged). Throws only when every one failed.
- */
-export function checkWelcomeDelivery(results: GroupPublishResult[]): void {
-  const outcomes = results.flatMap((r) =>
-    r.welcomeDelivery.kind === 'attempted' ? r.welcomeDelivery.outcomes : [],
-  );
-  const failed = outcomes.filter((o) => o.kind === 'failed');
-  if (failed.length === 0) return;
-  if (__DEV__) {
-    for (const o of failed) {
-      console.warn(
-        `[Marmot] Welcome to ${o.recipient.pubkey.slice(0, 8)} (key package ${o.recipient.keyPackageEventId.slice(0, 12)}) failed: ${o.error}`,
-      );
+/** People with at least one device whose Welcome a relay accepted. */
+export function deliveredAccounts(results: GroupPublishResult[]): Set<string> {
+  const delivered = new Set<string>();
+  for (const r of results) {
+    if (r.welcomeDelivery.kind !== 'attempted') continue;
+    for (const o of r.welcomeDelivery.outcomes) {
+      if (o.kind === 'succeeded') delivered.add(o.recipient.pubkey.toLowerCase());
+      else if (__DEV__) {
+        console.warn(
+          `[Marmot] Welcome to ${o.recipient.pubkey.slice(0, 8)} (key package ${o.recipient.keyPackageEventId.slice(0, 12)}) failed: ${o.error}`,
+        );
+      }
     }
   }
-  if (failed.length === outcomes.length) throw new MarmotWelcomeDeliveryError(failed.length);
+  return delivered;
 }
 
 /** The peer's fresh, valid key packages — one per device. */
@@ -236,9 +251,7 @@ export async function fetchDevices(
  * clients (Lightning Piggy on two phones) get every device. Groups always do.
  */
 export function devicesForDm(devices: NostrEvent[]): NostrEvent[] {
-  const whiteNoise = devices.find((e) =>
-    e.tags.some((t) => t[0] === 'client' && WHITE_NOISE_CLIENT.test(t[1] ?? '')),
-  );
+  const whiteNoise = devices.find(isWhiteNoise);
   return whiteNoise ? [whiteNoise] : devices;
 }
 
@@ -262,21 +275,50 @@ export async function resolveInvitees(
   return new Map(peers.map((p, i) => [p, opts.dm ? devicesForDm(lists[i]) : lists[i]]));
 }
 
-/** Add every device in ONE commit (one Welcome) so each of them joins. */
+export interface InviteResult {
+  /** People none of whose devices got their Welcome yet (queued for retry). */
+  undelivered: string[];
+}
+
+/**
+ * Add every device in ONE commit (one Welcome) so each of them joins. A
+ * Welcome no relay accepted is republished once straight away and then kept
+ * in the outbox for retry — no second Add commit, no new signer prompt.
+ * `onProgress` ticks as each device's Welcome is sent (with Amber / NIP-46
+ * each one is an approval).
+ */
 export async function inviteDevices(
   groups: Pick<MarmotClient['groups'], 'get' | 'send'>,
+  outbox: Pick<MarmotWelcomeOutbox, 'capture' | 'resend' | 'enqueue'>,
   mlsId: string,
   actorPubkey: string,
   devices: Map<string, NostrEvent[]>,
-): Promise<void> {
+  onProgress?: (done: number, total: number) => void,
+): Promise<InviteResult> {
   const group = await groups.get(mlsId);
   const batch = buildInviteBatch(group.state, actorPubkey, devices);
   if (batch.unreachable.length > 0 || !batch.intent) {
     throw new MarmotUnusableKeyPackageError(batch.unreachable[0] ?? '');
   }
-  checkWelcomeDelivery(await groups.send(mlsId, batch.intent));
+  const intent = batch.intent;
+  const total = intent.welcomeRecipients?.length ?? 0;
+  let done = 0;
+  onProgress?.(0, total);
+  const { result, failed } = await outbox.capture(
+    () => groups.send(mlsId, intent),
+    () => onProgress?.(++done, total),
+  );
+  const delivered = deliveredAccounts(result);
+  const stillFailed = failed.length > 0 ? await outbox.resend(failed) : [];
+  for (const w of failed) if (!stillFailed.includes(w)) delivered.add(w.recipient);
+  if (stillFailed.length > 0) await outbox.enqueue(mlsId, stillFailed);
+  const undelivered = [...devices.keys()].filter((p) => !delivered.has(p));
   if (__DEV__) {
     const counts = [...batch.devices].map(([p, n]) => `${p.slice(0, 8)}×${n}`).join(', ');
-    console.log(`[Marmot] invited ${counts} into ${mlsId.slice(0, 8)}`);
+    console.log(
+      `[Marmot] invited ${counts} into ${mlsId.slice(0, 8)}` +
+        (undelivered.length > 0 ? `; ${undelivered.length} not reached yet` : ''),
+    );
   }
+  return { undelivered };
 }

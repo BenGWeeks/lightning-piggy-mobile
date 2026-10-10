@@ -22,6 +22,8 @@ import {
   type MarmotMessageEvent,
 } from '../services/marmotSession';
 import { fireMessageNotification } from '../services/notificationService';
+import { Toast } from '../components/BrandedToast';
+import { t } from '../i18n';
 import type { Group } from '../types/groups';
 import { notifyGroupMessage } from './nostrEventBus';
 
@@ -56,7 +58,11 @@ export interface MarmotGroupsApi {
  * group messages (coalesced: one append pass + one notify per group per
  * ≤150 ms burst — #perf).
  */
-export function useMarmotGroups(pubkey: string | null): MarmotGroupsApi {
+export function useMarmotGroups(
+  pubkey: string | null,
+  /** Display name for a pubkey (for "invitation not delivered yet"). */
+  nameOf: (pubkey: string) => string = (pk) => pk.slice(0, 8),
+): MarmotGroupsApi {
   const [summaries, setSummaries] = useAccountState(pubkey, EMPTY_SUMMARIES);
 
   useEffect(() => {
@@ -211,10 +217,25 @@ export function useMarmotGroups(pubkey: string | null): MarmotGroupsApi {
     [session],
   );
 
+  // Their Welcome is retried automatically; just say so.
+  const reportUndelivered = useCallback(
+    (people: string[]) => {
+      if (people.length === 0) return;
+      Toast.show({
+        type: 'info',
+        text1: t('marmotInvite.notReachedTitle'),
+        text2: t('marmotInvite.notReachedBody', { names: people.map(nameOf).join(', ') }),
+      });
+    },
+    [nameOf],
+  );
   const create = useCallback(
-    async (name: string, memberPubkeys: string[]) =>
-      toGroup(await session().createGroup(name.trim(), [...new Set(memberPubkeys)])),
-    [session],
+    async (name: string, memberPubkeys: string[]) => {
+      const group = await session().createGroup(name.trim(), [...new Set(memberPubkeys)]);
+      reportUndelivered(group.undelivered);
+      return toGroup(group);
+    },
+    [session, reportUndelivered],
   );
   const rename = useCallback(
     async (groupId: string, name: string) => {
@@ -229,10 +250,10 @@ export function useMarmotGroups(pubkey: string | null): MarmotGroupsApi {
     async (groupId: string, pubkeys: string[]) => {
       const existing = new Set(current(groupId)?.memberPubkeys ?? []);
       const toAdd = [...new Set(pubkeys)].filter((pk) => !existing.has(pk));
-      if (toAdd.length > 0) await session().addMembers(groupId, toAdd);
+      if (toAdd.length > 0) reportUndelivered(await session().addMembers(groupId, toAdd));
       return current(groupId);
     },
-    [session, current],
+    [session, current, reportUndelivered],
   );
   const removeMember = useCallback(
     async (groupId: string, pubkey: string) => {

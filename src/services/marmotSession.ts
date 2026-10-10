@@ -46,7 +46,13 @@ import {
   trackKeyPackageAcceptance,
 } from './marmotKeyPackageLifecycle';
 import { retryPendingRetirement } from './marmotKeyPackageRetire';
-import { fetchDevices, inviteDevices, resolveInvitees } from './marmotInvitees';
+import {
+  fetchDevices,
+  inviteDevices,
+  MarmotWelcomeDeliveryError,
+  resolveInvitees,
+} from './marmotInvitees';
+import { MarmotWelcomeOutbox } from './marmotWelcomeOutbox';
 import { createMarmotNetwork, createPushTransport } from './marmotNetwork';
 import {
   leafKey,
@@ -60,7 +66,7 @@ import { MarmotPushNotifier, type PushGroup } from './marmotPushNotifier';
 import { MarmotPushRegistrar } from './marmotPushRegistrar';
 import { createMarmotSigner } from './marmotSigner';
 import * as fence from './marmotSessionFence';
-import { isPermanentWelcomeFailure } from './marmotWelcomeFailure';
+import { isPermanentWelcomeFailure, isWelcomeForJoinedGroup } from './marmotWelcomeFailure';
 import {
   createMarmotKvStore,
   createSqliteMarmotBackend,
@@ -144,6 +150,8 @@ export interface MarmotMessageEvent {
 export interface MarmotSessionListener {
   onMessage?: (event: MarmotMessageEvent) => void;
   onGroupsChanged?: (groups: MarmotGroupSummary[]) => void;
+  /** Invitations sent so far (each one is a signer approval on Amber / NIP-46). */
+  onInviteProgress?: (progress: { done: number; total: number }) => void;
 }
 
 export interface MarmotSessionOptions {
@@ -195,6 +203,7 @@ export class MarmotSession {
   private readonly joiningWelcomes = new Set<string>();
   private readonly deliveredRumors = new Set<string>();
   private readonly push: MarmotPushNotifier;
+  private readonly outbox: MarmotWelcomeOutbox;
   /** MIP-05: announcing THIS device's push token in our groups. */
   readonly pushRegistration: MarmotPushRegistrar;
   private connection: { unsubscribe(): void } | null = null;
@@ -214,7 +223,10 @@ export class MarmotSession {
     const backend = opts.backend ?? createSqliteMarmotBackend(opts.pubkey);
     this.backend = fence.fenceBackend(backend, this.gate); // drops writes after a wipe
     const store = <T>(ns: string) => createMarmotKvStore<T>(this.backend, ns);
-    const network = opts.network ?? createMarmotNetwork(opts.getLookupRelays);
+    this.outbox = new MarmotWelcomeOutbox(this.backend);
+    const network = this.outbox.wrapNetwork(
+      opts.network ?? createMarmotNetwork(opts.getLookupRelays),
+    );
     this.push = new MarmotPushNotifier({
       pubkey: opts.pubkey,
       backend: this.backend,
@@ -313,6 +325,7 @@ export class MarmotSession {
     // account that has used Marmot before and needs its package kept fresh).
     void this.keepKeyPackageFresh();
     void this.retryPendingWelcomes();
+    void this.outbox.flush(() => this.gate.stopped).catch(() => undefined);
   }
 
   /** Re-attempt Welcomes whose join failed transiently in an earlier session. */
@@ -449,7 +462,7 @@ export class MarmotSession {
     name: string,
     members: string[],
     opts: { description?: string; adminPubkeys?: string[] } = {},
-  ): Promise<MarmotGroupSummary> {
+  ): Promise<MarmotGroupSummary & { undelivered: string[] }> {
     await this.ready;
     // First Marmot use: become reachable ourselves BEFORE resolving the
     // invitees — otherwise two remote-signer accounts that both deferred
@@ -457,8 +470,7 @@ export class MarmotSession {
     // missing key package). Not awaited: the invite doesn't depend on it.
     void this.ensureKeyPackage();
     // Resolve every invitee's devices first so a missing one fails before we
-    // create an orphan group.
-    // White Noise DM shape: unnamed, one other person (see devicesForDm).
+    // create an orphan group. DM shape: unnamed, one other (devicesForDm).
     const devices = await this.invitees(members, { dm: name === '' && members.length === 1 });
     const group = await this.client.groups.create(name, {
       description: opts.description ?? '',
@@ -466,23 +478,33 @@ export class MarmotSession {
       adminPubkeys: opts.adminPubkeys ?? [this.pubkey],
     });
     try {
-      await inviteDevices(this.client.groups, group.idStr, this.pubkey, devices);
+      const { undelivered } = await this.inviteAll(group.idStr, devices);
+      // Nobody can join: drop it so a retry starts clean (no queued Welcomes).
+      if (undelivered.length === devices.size) throw new MarmotWelcomeDeliveryError(undelivered);
+      return { ...this.summarise(group), undelivered };
     } catch (e) {
       // Don't leave an empty, invisible group (and its relay sub) behind —
       // a retry would otherwise create another one each time.
       await this.client.groups.destroy(group.id).catch(() => undefined);
+      await this.outbox.drop(group.idStr).catch(() => undefined);
       this.emitGroupsChanged();
       throw e;
     }
-    if (__DEV__)
-      console.log(`[Marmot] created ${group.idStr.slice(0, 8)}, invited ${members.length}`);
-    return this.summarise(group);
   }
 
-  async addMembers(appGroupId: string, members: string[]): Promise<void> {
+  /** Invite `members`' devices; resolves with the people not reached yet
+   * (their invitations are retried automatically — no re-invite needed). */
+  async addMembers(appGroupId: string, members: string[]): Promise<string[]> {
     const devices = await this.invitees(members);
-    await inviteDevices(this.client.groups, toMlsGroupId(appGroupId), this.pubkey, devices);
+    const { undelivered } = await this.inviteAll(toMlsGroupId(appGroupId), devices);
     this.emitGroupsChanged();
+    return undelivered;
+  }
+
+  private inviteAll(mlsId: string, devices: Map<string, NostrEvent[]>) {
+    const progress = (done: number, total: number) =>
+      this.listeners.forEach((l) => l.onInviteProgress?.({ done, total }));
+    return inviteDevices(this.client.groups, this.outbox, mlsId, this.pubkey, devices, progress);
   }
 
   async removeMember(appGroupId: string, member: string): Promise<void> {
@@ -613,7 +635,9 @@ export class MarmotSession {
       return this.summarise(group);
     } catch (e) {
       // Permanent = no key we hold opens it (another device's / a deleted key).
-      const permanent = await isPermanentWelcomeFailure(this.client.keyPackages, welcomeRumor, e);
+      const permanent =
+        (await isWelcomeForJoinedGroup(this.client, welcomeRumor)) ||
+        (await isPermanentWelcomeFailure(this.client.keyPackages, welcomeRumor, e));
       if (permanent) await markHandled();
       if (__DEV__) {
         const kp = welcomeRumor.tags.find((t) => t[0] === 'e')?.[1]?.slice(0, 12);

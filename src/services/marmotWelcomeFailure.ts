@@ -7,7 +7,8 @@
 // matching secret" from an unrelated retained key. Dropping that invite
 // would lose a valid chat for good.
 
-import { getWelcome, type KeyPackageManager } from '@internet-privacy/marmot-ts';
+import { getWelcome, type KeyPackageManager, type MarmotClient } from '@internet-privacy/marmot-ts';
+import { bytesToHex } from '@noble/hashes/utils.js';
 
 type WelcomeRumor = Parameters<typeof getWelcome>[0];
 
@@ -40,4 +41,20 @@ export async function isPermanentWelcomeFailure(
   } catch {
     return false;
   }
+}
+
+/**
+ * A Welcome for a group we're already in — permanent too. A contact who
+ * invited several of our devices sends one Welcome per device, all
+ * gift-wrapped to our account; after joining from the first, the rest still
+ * match a key we hold (so the check above calls them retryable) but can only
+ * ever fail with "group already exists".
+ */
+export async function isWelcomeForJoinedGroup(
+  client: Pick<MarmotClient, 'readInviteGroupInfo' | 'groups'>,
+  rumor: Parameters<MarmotClient['readInviteGroupInfo']>[0],
+): Promise<boolean> {
+  const info = await client.readInviteGroupInfo(rumor).catch(() => null);
+  const idHex = info ? bytesToHex(info.groupContext.groupId) : null;
+  return !!idHex && client.groups.loaded.some((g) => g.idStr === idHex);
 }

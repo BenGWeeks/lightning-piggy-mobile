@@ -23,7 +23,7 @@ import {
   type SyntheticRoomInput,
 } from '../services/groupRoutingRegistry';
 import { loadGroupMessages } from '../services/groupMessagesStorageService';
-import { useNostr, subscribeGroupMessages } from './NostrContext';
+import { useNostr, useNostrContacts, subscribeGroupMessages } from './NostrContext';
 import {
   DEFAULT_RELAYS,
   GROUP_STATE_KIND,
@@ -183,6 +183,7 @@ const EMPTY_ACTIVITY: Record<string, GroupActivity> = {};
 export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // NIP-17 groups (AsyncStorage-persisted). Marmot groups are merged in below.
   const { publishGroupState, pubkey, relays, isLoggedIn } = useNostr();
+  const { contacts } = useNostrContacts();
   const [storedGroups, setGroups] = useAccountState(pubkey, EMPTY_GROUPS);
   const activeOwner = useRef(pubkey);
   activeOwner.current = pubkey;
@@ -203,7 +204,14 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // on mount from AsyncStorage and kept fresh by the inbound-message
   // listener below + a local hook from GroupConversationScreen sends.
   const [activityByGroup, setActivityByGroup] = useAccountState(pubkey, EMPTY_ACTIVITY);
-  const marmot = useMarmotGroups(pubkey);
+  const contactName = useCallback(
+    (pk: string) => {
+      const c = contacts.find((x) => x.pubkey === pk);
+      return c?.petname || c?.profile?.displayName || c?.profile?.name || pk.slice(0, 8);
+    },
+    [contacts],
+  );
+  const marmot = useMarmotGroups(pubkey, contactName);
   const groups = useMemo(() => [...storedGroups, ...marmot.groups], [storedGroups, marmot.groups]);
   // Track the latest reconciler in a ref so the subscription effect can
   // call it without re-subscribing on every group state change.

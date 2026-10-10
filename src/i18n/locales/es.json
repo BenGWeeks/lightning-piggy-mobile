@@ -2420,7 +2420,8 @@
   },
   "marmotSend": {
     "noKeyPackage": "No encontramos un paquete de claves de Marmot en los relays de esta persona. Puede que tenga que abrir su app de Marmot para que publique uno; mientras tanto, usa NIP-17.",
-    "outdatedKeyPackage": "El paquete de claves de Marmot de esta persona ha caducado o usa una versión antigua de Marmot con la que Lightning Piggy aún no puede comunicarse. Debería arreglarse si abre o actualiza su app de Marmot; por ahora, usa NIP-17."
+    "outdatedKeyPackage": "El paquete de claves de Marmot de esta persona ha caducado o usa una versión antigua de Marmot con la que Lightning Piggy aún no puede comunicarse. Debería arreglarse si abre o actualiza su app de Marmot; por ahora, usa NIP-17.",
+    "inviteNotDelivered": "No pudimos enviar la invitación: ningún relay la aceptó. Revisa tu conexión e inténtalo de nuevo."
   },
   "signOutPrompt": {
     "walletsRemoved": "También se eliminarán de este teléfono las carteras conectadas a esta cuenta, incluidas las frases de recuperación guardadas aquí. Guarda sus frases de recuperación y datos de conexión por separado antes de cerrar sesión.",
@@ -2479,5 +2480,11 @@
     "removingBody": "Aprueba las solicitudes en tu firmador para terminar de cerrar sesión. Puede tardar un minuto.",
     "notRemovedTitle": "No se quitaron las claves de invitación",
     "notRemovedBody": "No pudimos quitar de los relés las claves de invitación de Marmot de esta cuenta, así que es posible que sigan llegando invitaciones de Marmot a este teléfono. Lo volveremos a intentar automáticamente la próxima vez que esta cuenta inicie sesión aquí."
+  },
+  "marmotInvite": {
+    "progressTitle": "Invitando dispositivos… {{done}} de {{total}}",
+    "progressBody": "Aprueba cada solicitud en tu firmante: cada teléfono o app que usa esta persona necesita su propia invitación.",
+    "notReachedTitle": "Invitación aún no entregada",
+    "notReachedBody": "Todavía no pudimos entregar la invitación a {{names}}. Lightning Piggy lo seguirá intentando automáticamente."
   }
 }
