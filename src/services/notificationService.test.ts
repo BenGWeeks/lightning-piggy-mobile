@@ -42,6 +42,8 @@ import {
   __resetForTests,
   notificationMatchesTarget,
   dismissNotificationsFor,
+  marmotMessageRefMatcher,
+  retractMarmotMessageNotifications,
   FOREGROUND_SERVICE_NOTIFICATION_ID,
   markHistoryReadFor,
   markHistoryEntryRead,
@@ -357,14 +359,19 @@ describe('clearing read notifications (#1142)', () => {
     ).toBe(false);
   });
 
-  it('matches the notification showing one message by its id', () => {
-    expect(notificationMatchesTarget({ kind: 'dm', messageId: 'm1' }, { messageId: 'm1' })).toBe(
-      true,
-    );
-    expect(notificationMatchesTarget({ kind: 'dm', messageId: 'm2' }, { messageId: 'm1' })).toBe(
-      false,
-    );
-    expect(notificationMatchesTarget({ kind: 'dm' }, { messageId: 'm1' })).toBe(false);
+  it('matches a deleted Marmot message by id, account, group and authorised author', () => {
+    const matches = marmotMessageRefMatcher([
+      { owner: 'alice', groupId: 'g', messageId: 'm1', sender: 'bob' },
+      { owner: 'alice', groupId: 'g', messageId: 'm2', sender: null },
+    ]);
+    const data = { owner: 'alice', marmotGroupId: 'g', senderPubkey: 'BOB' };
+    expect(matches({ ...data, messageId: 'm1' })).toBe(true);
+    expect(matches({ ...data, messageId: 'm1', senderPubkey: 'mallory' })).toBe(false);
+    expect(matches({ ...data, messageId: 'm2', senderPubkey: 'carol' })).toBe(true); // admin
+    expect(matches({ ...data, messageId: 'm1', owner: 'other' })).toBe(false);
+    expect(matches({ ...data, messageId: 'm1', marmotGroupId: 'h' })).toBe(false);
+    expect(matches({ ...data, messageId: 'm3' })).toBe(false);
+    expect(matches({})).toBe(false);
   });
 
   it('matches groups, cache find-logs and generic message pings separately', () => {
@@ -757,6 +764,8 @@ describe('notification watcher pushes', () => {
   });
 });
 
+const bobRef = { owner: 'alice', groupId: 'g', messageId: 'm', sender: 'bob' };
+
 it('suppresses creation paused before scheduling when an authorized scoped deletion arrives', async () => {
   let release!: (value: boolean) => void;
   let entered!: () => void;
@@ -779,12 +788,10 @@ it('suppresses creation paused before scheduling when an authorized scoped delet
     },
   });
   await started;
-  await dismissNotificationsFor({
-    messageId: 'm',
-    owner: 'alice',
-    marmotGroupId: 'g',
-    senderPubkey: 'bob',
-  });
+  // In-memory cancellation only: no tray query.
+  mockGetPresented.mockClear();
+  await retractMarmotMessageNotifications([bobRef], { tray: false });
+  expect(mockGetPresented).not.toHaveBeenCalled();
   release(false);
   expect(await firing).toBeNull();
   expect(mockScheduleNotificationAsync).not.toHaveBeenCalled();
@@ -816,12 +823,17 @@ it.each(['bob', 'mallory', 'other-account', 'other-group'])(
     await started;
     mockCancel.mockClear();
     mockDismiss.mockClear();
-    await dismissNotificationsFor({
-      messageId: 'm',
-      owner: scope === 'other-account' ? scope : 'alice',
-      marmotGroupId: scope === 'other-group' ? scope : 'g',
-      senderPubkey: scope === 'mallory' ? scope : 'bob',
-    });
+    await retractMarmotMessageNotifications(
+      [
+        {
+          messageId: 'm',
+          owner: scope === 'other-account' ? scope : 'alice',
+          groupId: scope === 'other-group' ? scope : 'g',
+          sender: scope === 'mallory' ? scope : 'bob',
+        },
+      ],
+      { tray: false },
+    );
     release('late-notification');
     expect(await firing).toBe(scope === 'bob' ? null : 'late-notification');
     if (scope === 'bob') {
@@ -830,3 +842,24 @@ it.each(['bob', 'mallory', 'other-account', 'other-group'])(
     } else expect(mockCancel).not.toHaveBeenCalledWith('late-notification');
   },
 );
+
+it('clears every deleted message from the tray in one query', async () => {
+  const shown = (identifier: string, data: Record<string, unknown>) => ({
+    request: { identifier, content: { data } },
+  });
+  const base = { owner: 'alice', marmotGroupId: 'g', senderPubkey: 'bob' };
+  mockGetPresented.mockClear();
+  mockDismiss.mockClear();
+  mockGetPresented.mockResolvedValueOnce([
+    shown('n1', { ...base, messageId: 'm1' }),
+    shown('n2', { ...base, messageId: 'm2' }),
+    shown('n3', { ...base, messageId: 'm3' }),
+  ]);
+  const refs = ['m1', 'm2', ...Array.from({ length: 500 }, (_, i) => `x${i}`)].map((messageId) => ({
+    ...bobRef,
+    messageId,
+  }));
+  expect(await retractMarmotMessageNotifications(refs, { tray: true })).toBe(2);
+  expect(mockGetPresented).toHaveBeenCalledTimes(1);
+  expect(mockDismiss.mock.calls).toEqual([['n1'], ['n2']]);
+});

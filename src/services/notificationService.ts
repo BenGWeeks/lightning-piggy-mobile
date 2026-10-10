@@ -546,9 +546,7 @@ export type NotificationTarget =
   | { historyId: string }
   /** The generic alerts Marmot push wakes posted — superseded once the app
    * shows the real Marmot message. */
-  | { marmotPushAlerts: true }
-  /** The notification showing one message's text (Marmot, by app-event id). */
-  | { messageId: string; owner?: string; marmotGroupId?: string; senderPubkey?: string };
+  | { marmotPushAlerts: true };
 
 /** Pure: does a delivered notification's `data` belong to `target`? */
 export function notificationMatchesTarget(
@@ -556,14 +554,6 @@ export function notificationMatchesTarget(
   target: NotificationTarget,
 ): boolean {
   if (!data) return false;
-  if ('messageId' in target)
-    return (
-      data.messageId === target.messageId &&
-      (!target.owner || data.owner === target.owner) &&
-      (!target.marmotGroupId || data.marmotGroupId === target.marmotGroupId) &&
-      (!target.senderPubkey ||
-        data.senderPubkey?.toLowerCase() === target.senderPubkey.toLowerCase())
-    );
   if ('conversationPubkey' in target)
     return (
       data.conversationPubkey?.toLowerCase() === target.conversationPubkey.toLowerCase() &&
@@ -628,45 +618,102 @@ export function markHistoryReadFor(target: NotificationTarget): Promise<void> {
  * foreground-service notification. Best-effort: returns how many it cleared.
  */
 export async function dismissNotificationsFor(target: NotificationTarget): Promise<number> {
-  for (const flight of inFlightNotifications) {
-    if (notificationMatchesTarget(flight.data, target)) flight.cancelled = true;
+  return dismissRequestsWhere((request) => {
+    // The watcher's "New message" is a generic ping like the Marmot one —
+    // cleared with them (so a Marmot welcome announced by both collapses).
+    // Its other categories aren't messages.
+    const watcher = watcherCategoryOf(request);
+    if (watcher) {
+      return watcher === 'dm' && ('genericMessages' in target || 'marmotPushAlerts' in target);
+    }
+    const data = request.content.data as (NotificationData & { kind?: string }) | null;
+    // A server-sent Marmot alert (iOS) carries no data: it is a generic
+    // "New message" — cleared with the generic pings / push alerts.
+    if (isRemotePushRequest(request) && !data?.kind) {
+      return 'genericMessages' in target || 'marmotPushAlerts' in target;
+    }
+    return notificationMatchesTarget(data, target);
+  });
+}
+
+/** One Marmot message whose notification a "delete for everyone" retracts. */
+export interface MarmotMessageRef {
+  owner: string;
+  groupId: string;
+  messageId: string;
+  /** The author the deletion is valid for; null = an admin removal (any author). */
+  sender: string | null;
+}
+
+/** Pure: a matcher for notifications showing any of `refs` (indexed by id). */
+export function marmotMessageRefMatcher(
+  refs: readonly MarmotMessageRef[],
+): (data: NotificationData | null | undefined) => boolean {
+  const byId = new Map<string, MarmotMessageRef[]>();
+  for (const ref of refs) {
+    const list = byId.get(ref.messageId) ?? [];
+    list.push(ref);
+    byId.set(ref.messageId, list);
   }
+  return (data) => {
+    const candidates = data?.messageId ? byId.get(data.messageId) : undefined;
+    return !!candidates?.some(
+      (ref) =>
+        data!.owner === ref.owner &&
+        data!.marmotGroupId === ref.groupId &&
+        (ref.sender === null || data!.senderPubkey?.toLowerCase() === ref.sender.toLowerCase()),
+    );
+  };
+}
+
+/**
+ * Retract notifications that show deleted Marmot messages. Notifications
+ * still being created are always cancelled (in memory, cheap). `tray: true`
+ * also clears delivered/pending ones from the OS tray — one tray query for
+ * the whole set, so callers batch (live deletions, plus one sweep for the
+ * deletions a history replay re-delivers).
+ */
+export async function retractMarmotMessageNotifications(
+  refs: readonly MarmotMessageRef[],
+  { tray }: { tray: boolean },
+): Promise<number> {
+  if (refs.length === 0) return 0;
+  const matches = marmotMessageRefMatcher(refs);
+  for (const flight of inFlightNotifications) {
+    if (matches(flight.data)) flight.cancelled = true;
+  }
+  if (!tray) return 0;
+  return dismissRequestsWhere((request) =>
+    matches(request.content.data as NotificationData | null),
+  );
+}
+
+/** Dismiss delivered + cancel pending notifications `matching` selects. Never
+ * touches the foreground-service notification. Best-effort count. */
+async function dismissRequestsWhere(
+  matching: (request: Notifications.NotificationRequest) => boolean,
+): Promise<number> {
   try {
-    const matching = (request: Notifications.NotificationRequest) => {
-      if (request.identifier === FOREGROUND_SERVICE_NOTIFICATION_ID) return false;
-      // The watcher's "New message" is a generic ping like the Marmot one —
-      // cleared with them (so a Marmot welcome announced by both collapses).
-      // Its other categories aren't messages.
-      const watcher = watcherCategoryOf(request);
-      if (watcher) {
-        return watcher === 'dm' && ('genericMessages' in target || 'marmotPushAlerts' in target);
-      }
-      const data = request.content.data as (NotificationData & { kind?: string }) | null;
-      // A server-sent Marmot alert (iOS) carries no data: it is a generic
-      // "New message" — cleared with the generic pings / push alerts.
-      if (isRemotePushRequest(request) && !data?.kind) {
-        return 'genericMessages' in target || 'marmotPushAlerts' in target;
-      }
-      return notificationMatchesTarget(data, target);
-    };
+    const select = (request: Notifications.NotificationRequest) =>
+      request.identifier !== FOREGROUND_SERVICE_NOTIFICATION_ID && matching(request);
     const [presented, scheduled] = await Promise.all([
       Notifications.getPresentedNotificationsAsync(),
       Notifications.getAllScheduledNotificationsAsync(),
     ]);
     const ids = presented
       .map((n) => n.request)
-      .filter(matching)
+      .filter(select)
       .map((r) => r.identifier);
     // Android fires on a 1 s TIME_INTERVAL trigger, so one can still be
     // pending as the thread opens — cancel it rather than let it appear.
-    const pending = scheduled.filter(matching).map((r) => r.identifier);
+    const pending = scheduled.filter(select).map((r) => r.identifier);
     await Promise.all([
       ...ids.map((id) => Notifications.dismissNotificationAsync(id)),
       ...pending.map((id) => Notifications.cancelScheduledNotificationAsync(id)),
     ]);
     return ids.length + pending.length;
   } catch (err) {
-    if (__DEV__) console.warn('[notificationService] dismissNotificationsFor failed:', err);
+    if (__DEV__) console.warn('[notificationService] notification dismissal failed:', err);
     return 0;
   }
 }

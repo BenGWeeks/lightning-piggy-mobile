@@ -59,12 +59,8 @@ describe('parseMarmotDeletion', () => {
         anyAuthor: true,
       });
     });
-    it('from a non-admin only counts as the author deleting their own message', () => {
-      expect(parseMarmotDeletion(remove({ pubkey: PEER }), GROUP)).toEqual({
-        targets: [MSG],
-        deleter: PEER,
-        anyAuthor: false,
-      });
+    it('from a non-admin has no effect at all (spec: unauthorized → no deletion effect)', () => {
+      expect(parseMarmotDeletion(remove({ pubkey: PEER }), GROUP)).toBeNull();
     });
     it('is how White Noise deletes in a 1:1 chat (both members are admins)', () => {
       expect(parseMarmotDeletion(remove({ pubkey: PEER }), DM)).toMatchObject({
@@ -75,7 +71,64 @@ describe('parseMarmotDeletion', () => {
     it('is ignored with a wrong payload', () => {
       expect(parseMarmotDeletion(remove({ content: '{"v":1,"action":"ban"}' }), GROUP)).toBeNull();
       expect(parseMarmotDeletion(remove({ content: '{"v":1}' }), GROUP)).toBeNull();
+      expect(
+        parseMarmotDeletion(remove({ content: '{"v":"1","action":"remove"}' }), GROUP),
+      ).toBeNull();
+      expect(parseMarmotDeletion(remove({ content: '[1,"remove"]' }), GROUP)).toBeNull();
       expect(parseMarmotDeletion(remove({ content: 'nope' }), GROUP)).toBeNull();
+    });
+    it('accepts the keys in any order and with whitespace', () => {
+      const content = ' { "action" : "remove", "v" : 1 } ';
+      expect(parseMarmotDeletion(remove({ content }), GROUP)).not.toBeNull();
+    });
+    it('rejects duplicate JSON keys, even when the last value is valid', () => {
+      for (const content of [
+        '{"v":1,"action":"ban","action":"remove"}',
+        '{"v":2,"v":1,"action":"remove"}',
+        '{"v":{"x":1},"v":1,"action":"remove"}',
+        '{"v":1,"action":"remove","v":1}',
+      ]) {
+        expect(parseMarmotDeletion(remove({ content }), GROUP)).toBeNull();
+      }
+    });
+    it('needs exactly one e tag holding a lowercase hex id', () => {
+      expect(
+        parseMarmotDeletion(
+          remove({
+            tags: [
+              ['e', MSG],
+              ['e', MSG],
+            ],
+          }),
+          GROUP,
+        ),
+      ).toBeNull();
+      expect(
+        parseMarmotDeletion(
+          remove({
+            tags: [
+              ['e', 'e'.repeat(64)],
+              ['e', MSG],
+            ],
+          }),
+          GROUP,
+        ),
+      ).toBeNull();
+      expect(parseMarmotDeletion(remove({ tags: [['e', MSG.toUpperCase()]] }), GROUP)).toBeNull();
+      expect(parseMarmotDeletion(remove({ tags: [['e', 'short']] }), GROUP)).toBeNull();
+      expect(parseMarmotDeletion(remove({ tags: [] }), GROUP)).toBeNull();
+      // Trailing elements and other tags are ignored.
+      expect(
+        parseMarmotDeletion(
+          remove({
+            tags: [
+              ['e', MSG, 'wss://relay'],
+              ['p', ME],
+            ],
+          }),
+          GROUP,
+        ),
+      ).toMatchObject({ targets: [MSG] });
     });
   });
 });

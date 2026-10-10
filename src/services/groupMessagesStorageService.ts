@@ -1,6 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { mutateGroupStorage } from './groupStorageQueue';
-import { isMarmotDeleted } from './marmotDeletionStore';
 
 /**
  * In-thread message stored locally, per-group. We persist what the user
@@ -53,9 +52,7 @@ export async function appendGroupMessage(
   message: GroupMessage,
 ): Promise<GroupMessage[]> {
   return mutateGroupStorage(groupId, async () => {
-    const deleted = await isMarmotDeleted(groupId, message.id, message.senderPubkey);
     const existing = await loadGroupMessages(groupId);
-    if (deleted) return existing;
     const map = new Map<string, GroupMessage>();
     for (const m of existing) map.set(m.id, m);
 

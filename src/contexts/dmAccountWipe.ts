@@ -11,6 +11,7 @@ import {
 } from './nostrDmCache';
 import { forgetDmStoreMigration, pendingDmStoreMigration } from './dmStoreMigrationRunner';
 import { deleteMarmotStateForOwner } from '../services/marmotStore';
+import { forgetMarmotDeletionsForOwner } from '../services/marmotDeletionStore';
 import { quiesceMarmotSession } from '../services/marmotSession';
 import { retireMarmotPushForAccount } from '../services/marmotPushRegistration';
 
@@ -68,6 +69,7 @@ export async function wipeDmStoresForAccount(pubkey: string): Promise<void> {
     // A stopped session's queued push-state writes must not land after this.
     await quiesceMarmotSession(pubkey);
     await deleteMarmotStateForOwner(pubkey);
+    await forgetMarmotDeletionsForOwner(pubkey);
   } catch (e) {
     if (__DEV__) console.warn('[Marmot] per-owner state wipe failed:', e);
   }
