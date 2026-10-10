@@ -623,7 +623,6 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
                 nip04FreshDecrypts++;
                 const plaintext = await decryptNip04ViaSigner(t.partnerPubkey, t.ev.content);
                 if (plaintext === null) return null;
-                // An account switch aborts this refresh; don't refill the cleared cache.
                 if (!effectiveSignal?.aborted) nip04PlaintextCache.set(t.ev.id, plaintext);
                 return { t, plaintext };
               }),
