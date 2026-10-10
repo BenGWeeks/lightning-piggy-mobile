@@ -33,6 +33,7 @@ jest.mock('expo-screen-capture', () => ({
 
 beforeEach(() => {
   jest.clearAllMocks();
+  AppState.currentState = 'active';
   jest.spyOn(AppState, 'addEventListener').mockReturnValue({ remove: jest.fn() });
 });
 
@@ -88,29 +89,81 @@ it('discards a pending key read when the target changes', async () => {
   expect(copySensitiveText).not.toHaveBeenCalled();
 });
 
-it.each(['background', 'blur'] as const)(
-  'invalidates pending authentication on %s',
+it('invalidates pending authentication on blur', async () => {
+  let finish!: (passed: boolean) => void;
+  jest
+    .mocked(authenticateForKeyReveal)
+    .mockImplementationOnce(() => new Promise((r) => (finish = r)));
+  const { result } = setup();
+  let pending!: Promise<void>;
+  await act(async () => {
+    pending = result.current.toggleReveal();
+    await Promise.resolve();
+  });
+  act(() => mockFocusCleanup?.());
+  await act(async () => {
+    finish(true);
+    await pending;
+  });
+  expect(loadAccountNsec).not.toHaveBeenCalled();
+  expect(result.current).toMatchObject({ nsec: null, revealed: false, hasUnlocked: false });
+});
+
+function appState(state: 'active' | 'background') {
+  AppState.currentState = state;
+  const listen = jest.mocked(AppState.addEventListener);
+  listen.mock.calls[listen.mock.calls.length - 1][1](state);
+}
+
+it.each(['resume', 'remove-account'] as const)(
+  'keeps Android credential authentication pending until %s',
   async (event) => {
     let finish!: (passed: boolean) => void;
     jest
       .mocked(authenticateForKeyReveal)
       .mockImplementationOnce(() => new Promise((r) => (finish = r)));
-    const listen = jest.spyOn(AppState, 'addEventListener');
-    const { result } = setup();
+    const { result, rerender } = setup();
     let pending!: Promise<void>;
     await act(async () => {
       pending = result.current.toggleReveal();
       await Promise.resolve();
     });
-    act(() => {
-      if (event === 'blur') mockFocusCleanup?.();
-      else listen.mock.calls[listen.mock.calls.length - 1][1]('background');
-    });
+    act(() => appState('background'));
     await act(async () => {
       finish(true);
+      await Promise.resolve();
+    });
+    // Even successful native auth must not load or reveal a key in background.
+    expect(loadAccountNsec).not.toHaveBeenCalled();
+    expect(result.current.nsec).toBeNull();
+    if (event === 'remove-account') rerender({ pubkey: null });
+    await act(async () => {
+      appState('active');
       await pending;
     });
-    expect(loadAccountNsec).not.toHaveBeenCalled();
-    expect(result.current).toMatchObject({ nsec: null, revealed: false, hasUnlocked: false });
+    if (event === 'resume') {
+      expect(result.current).toMatchObject({ nsec: 'test-secret-account-a', revealed: true });
+    } else {
+      expect(loadAccountNsec).not.toHaveBeenCalled();
+      expect(result.current).toMatchObject({ nsec: null, revealed: false, busy: false });
+    }
   },
 );
+
+it('still invalidates a pending storage read when the app backgrounds after authentication', async () => {
+  let finish!: (key: string) => void;
+  jest.mocked(loadAccountNsec).mockImplementationOnce(() => new Promise((r) => (finish = r)));
+  const { result } = setup();
+  let pending!: Promise<void>;
+  await act(async () => {
+    pending = result.current.toggleReveal();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  act(() => appState('background'));
+  await act(async () => {
+    finish('test-secret-account-a');
+    await pending;
+  });
+  expect(result.current).toMatchObject({ nsec: null, revealed: false, hasUnlocked: false });
+});

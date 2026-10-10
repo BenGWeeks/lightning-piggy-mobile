@@ -48,10 +48,15 @@ export function useKeyBackupReveal(pubkey: string | null): KeyBackupReveal {
   const focusedRef = useRef(false);
   const generationRef = useRef(0);
   const unlockingRef = useRef(false);
+  const authenticatingRef = useRef(false);
+  const foregroundWaitRef = useRef<((active: boolean) => void) | null>(null);
 
   const lock = useCallback(() => {
     generationRef.current += 1;
     unlockingRef.current = false;
+    authenticatingRef.current = false;
+    foregroundWaitRef.current?.(false);
+    foregroundWaitRef.current = null;
     setLoadedKey(null);
     setBusy(false);
     setError(null);
@@ -64,10 +69,15 @@ export function useKeyBackupReveal(pubkey: string | null): KeyBackupReveal {
   useFocusEffect(
     useCallback(() => {
       focusedRef.current = true;
-      // Background (not 'inactive' — the iOS Face ID sheet and Android
-      // device-credential screen pass through it mid-auth) re-locks.
+      // Android 7–10 opens the PIN/pattern prompt in a separate activity,
+      // which reports background (not inactive). Keep only that pending
+      // authentication alive; no key is read until the app is active again.
       const sub = AppState.addEventListener('change', (state) => {
-        if (state === 'background') lock();
+        if (state === 'background' && !authenticatingRef.current) lock();
+        if (state === 'active') {
+          foregroundWaitRef.current?.(true);
+          foregroundWaitRef.current = null;
+        }
       });
       return () => {
         focusedRef.current = false;
@@ -123,13 +133,22 @@ export function useKeyBackupReveal(pubkey: string | null): KeyBackupReveal {
     try {
       const gate = await keyRevealGate();
       if (!isCurrent()) return null;
-      const passed =
-        gate === 'device-auth'
-          ? await authenticateForKeyReveal({
-              promptMessage: t('keyBackupScreen.authPrompt'),
-              cancelLabel: t('keyBackupScreen.cancel'),
-            })
-          : await confirmWithoutScreenLock();
+      let passed: boolean;
+      if (gate === 'device-auth') {
+        authenticatingRef.current = true;
+        passed = await authenticateForKeyReveal({
+          promptMessage: t('keyBackupScreen.authPrompt'),
+          cancelLabel: t('keyBackupScreen.cancel'),
+        });
+        if (passed && isCurrent() && AppState.currentState !== 'active') {
+          passed = await new Promise<boolean>((resolve) => {
+            foregroundWaitRef.current = resolve;
+          });
+        }
+        if (isCurrent()) authenticatingRef.current = false;
+      } else {
+        passed = await confirmWithoutScreenLock();
+      }
       if (!isCurrent()) return null;
       if (!passed) {
         if (gate === 'device-auth') setError('auth-failed');
@@ -148,6 +167,7 @@ export function useKeyBackupReveal(pubkey: string | null): KeyBackupReveal {
       return null;
     } finally {
       if (isCurrent()) {
+        authenticatingRef.current = false;
         unlockingRef.current = false;
         setBusy(false);
       }
