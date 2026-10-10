@@ -7,6 +7,8 @@ import { createSharedAccountStyles } from './sharedStyles';
 import { useThemeColors } from '../../contexts/ThemeContext';
 import { useTranslation } from '../../contexts/LocaleContext';
 import { useTrustGraph } from '../../contexts/TrustGraphContext';
+import { useNostr } from '../../contexts/NostrContext';
+import { useAccountState } from '../../contexts/useAccountState';
 import { createSecurityScreenStyles } from '../../styles/SecurityScreen.styles';
 import { createAdvancedScreenStyles } from '../../styles/AdvancedScreen.styles';
 import { getLinkPreviewEnabled, setLinkPreviewEnabled } from '../../services/linkPreviewPreference';
@@ -35,22 +37,25 @@ const MessageSettingsScreen: React.FC = () => {
   const styles = useMemo(() => createSecurityScreenStyles(colors), [colors]);
   const advanced = useMemo(() => createAdvancedScreenStyles(colors), [colors]);
   const { wotTier } = useTrustGraph();
-  const [linkPreviewOn, setLinkPreviewOn] = useState(true);
+  const { pubkey } = useNostr();
+  // Per account (#1231): reload for the active account, ignore a late answer
+  // for one we've switched away from.
+  const [linkPreviewOn, setLinkPreviewOn] = useAccountState<boolean>(pubkey, true);
   const [trustOpen, setTrustOpen] = useState(false);
   useFocusEffect(
     useCallback(() => {
       let alive = true;
-      void getLinkPreviewEnabled().then((enabled) => {
+      void getLinkPreviewEnabled(pubkey).then((enabled) => {
         if (alive) setLinkPreviewOn(enabled);
       });
       return () => {
         alive = false;
       };
-    }, []),
+    }, [pubkey, setLinkPreviewOn]),
   );
   const handleToggleLinkPreview = async (next: boolean) => {
     setLinkPreviewOn(next);
-    await setLinkPreviewEnabled(next);
+    await setLinkPreviewEnabled(next, pubkey);
   };
   return (
     <AccountScreenLayout title={t('messageSettingsScreen.title')}>

@@ -9,6 +9,7 @@ import { useAccountState } from '../../contexts/useAccountState';
 import { useNostr } from '../../contexts/NostrContext';
 import { createSecurityScreenStyles } from '../../styles/SecurityScreen.styles';
 import KeyBackupEntry from '../../components/KeyBackupEntry';
+import SettingsScopeHeader from '../../components/SettingsScopeHeader';
 import { Toast } from '../../components/BrandedToast';
 import {
   DEFAULT_HIGH_VALUE_SEND_THRESHOLD_SATS,
@@ -101,6 +102,7 @@ const SecurityScreen: React.FC = () => {
   return (
     <AccountScreenLayout title={t('securityScreen.title')}>
       <KeyBackupEntry />
+      <SettingsScopeHeader scope="account" testID="security-account" />
       <View style={styles.headerRow}>
         <ShieldCheck size={22} color={colors.white} />
         <Text style={[sharedAccountStyles.sectionLabel, styles.headerLabel]}>
@@ -108,7 +110,6 @@ const SecurityScreen: React.FC = () => {
         </Text>
       </View>
       <Text style={sharedAccountStyles.fieldHint}>{t('securityScreen.confirmLargeSendsHint')}</Text>
-      <Text style={sharedAccountStyles.fieldHint}>{t('securityScreen.perAccountHint')}</Text>
 
       <View style={styles.optionList}>
         {PRESETS.map((opt) => {
