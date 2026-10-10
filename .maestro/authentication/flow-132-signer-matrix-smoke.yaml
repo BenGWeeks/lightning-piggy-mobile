@@ -1,6 +1,8 @@
 appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Signer matrix smoke — Big (nsec), Middle (Amber), Little (NIP-46) each reach Home
 ---
+# NOTE: on a stock build NIP-46 pairing can't complete until #1198 is fixed
+# (LP's only pairing relay, relay.nsec.app, is down) — see docs/TESTING.adoc.
 # Logs in as each Piggy with its signer and checks Home + the drawer identity:
 #   Big Piggy    → nsec (local key)
 #   Middle Piggy → Amber (NIP-55, Android Intent IPC)

@@ -1,6 +1,8 @@
 appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: NIP-17 DM as Little Piggy via NIP-46 — bunker approves, declines, never answers
 ---
+# NOTE: on a stock build NIP-46 pairing can't complete until #1198 is fixed
+# (LP's only pairing relay, relay.nsec.app, is down) — see docs/TESTING.adoc.
 # Signer matrix: NIP-17 1:1 send through a NIP-46 remote signer, driving the
 # local test bunker's modes from the flow (runScript → its 127.0.0.1 API):
 #
@@ -8,9 +10,10 @@ name: NIP-17 DM as Little Piggy via NIP-46 — bunker approves, declines, never 
 #   B. Little (NIP-46) opens it (gift-wrap unwrap via the bunker) and replies
 #      with the bunker in APPROVE mode → delivered, no failure tick.
 #   C. DECLINE: bunker answers sign_event / *_encrypt with an error → the
-#      bubble must settle to "Send failed" (red tick) instead of hanging.
+#      bubble must settle to "Send failed" (red tick) instead of hanging
+#      (asserted after reopening the thread — see #1207).
 #   D. TIMEOUT: bunker never answers → LP's 20 s send watchdog must flip the
-#      bubble to "Send failed".
+#      bubble to "Send failed" (also asserted after a reopen, #1207).
 #   E. Restore: Little signed out (Big promoted back); as Big, the APPROVE
 #      reply arrived and the declined / timed-out ones never did.
 #
@@ -139,7 +142,7 @@ name: NIP-17 DM as Little Piggy via NIP-46 — bunker approves, declines, never 
     env:
       ACTION: expect-count
       COUNTER: 'verdict:decline'
-# Known bug (NIP-46-SEND-UX): in the open thread the failed bubble is a
+# Known bug #1207: in the open thread the failed bubble is a
 # 1 px-tall, invisible row and the draft stays in the composer; the red tick
 # only shows once the thread is reopened. Reopen, then assert. Drop the
 # reopen once the bug is fixed so the flow checks the live thread.
@@ -191,7 +194,7 @@ name: NIP-17 DM as Little Piggy via NIP-46 — bunker approves, declines, never 
     visible: 'NEVER-MATCHES-wait-for-the-send-watchdog'
     timeout: 25000
     optional: true
-# Known bug (NIP-46-SEND-UX): in the open thread the failed bubble is a
+# Known bug #1207: in the open thread the failed bubble is a
 # 1 px-tall, invisible row and the draft stays in the composer; the red tick
 # only shows once the thread is reopened. Reopen, then assert. Drop the
 # reopen once the bug is fixed so the flow checks the live thread.

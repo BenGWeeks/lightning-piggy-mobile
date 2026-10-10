@@ -309,6 +309,22 @@ The control API is bound to `127.0.0.1` and needs the bunker's per-start token
 it as `MAESTRO_NIP46_TOKEN` for the flows. Pairing URIs may only name
 allow-listed relays.
 
+===== Known app issues the matrix surfaces
+
+* *#1198* — LP pairs NIP-46 only over `wss://relay.nsec.app`, which is down, so
+  on a stock build the NIP-46 steps (132's Little login, 134, 135) can't pair:
+  the sheet shows "Pairing took too long" after ~10 s. To exercise the rest of
+  the NIP-46 stack locally, point `NIP46_DEFAULT_RELAY` in
+  `NostrLoginSheet.tsx` at an allow-listed relay (e.g. `wss://nos.lol`) in a
+  scratch checkout — the bunker follows whatever relay the pairing URI names.
+* *#1207* — after a NIP-46 decline / timeout the failed bubble only renders
+  once the thread is reopened; flow 134 reopens it before asserting.
+* *#1164* — the DM protocol picker can stay open after a pick; the flows swipe
+  it closed (`common/close-protocol-picker.yaml`).
+* *#1199 / #1200* — Amber prompts on Marmot use (twice on Reject; unsolicited /
+  duplicated identity-proof prompts) — `approve-amber-prompt.yaml` answers
+  them and the runner counts them.
+
 ===== Counting signer prompts (PR #1177 push registration)
 
 #1177 promises that remote signers are only asked on a user action — one
