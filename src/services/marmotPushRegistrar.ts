@@ -52,6 +52,9 @@ interface Shared {
   record: PushRecord;
   /** The group's leaves when it was last sent — a new leaf means a resend. */
   leaves: string[];
+  /** Written BEFORE publishing (write-ahead) and false until a relay took
+   * it: a record that may have gone out is never forgotten. */
+  acked?: boolean;
 }
 
 type AppEvent = ReturnType<typeof tokenUpdateEvent>;
@@ -113,6 +116,7 @@ export function planGroup(
     return shared ? { type: 'forget' } : { type: 'none' };
   }
   if (current && sameRegistration(current.record, reg)) {
+    if (current.acked === false) return { type: 'resend' }; // may not have landed
     const added = [...group.leaves].some((l) => !current.leaves.includes(l));
     return added ? { type: 'resend' } : { type: 'none' };
   }
@@ -338,8 +342,12 @@ export class MarmotPushRegistrar {
     const ts = await this.nextTs(group.idHex, previous);
     const unsigned = buildOwnRecord(reg, this.deps.pubkey, group.ownLeaf, ts);
     const record = await this.signLive(group.idHex, unsigned, live);
+    const leaves = [...group.leaves];
+    // Write-ahead: once it may be out there, a later pass must know to
+    // retract or re-send it — even if the write after publishing fails.
+    await this.save(group.idHex, { record, leaves, acked: false });
     if (!(await this.deps.send(group.idHex, tokenUpdateEvent(record)))) return false;
-    await this.save(group.idHex, { record, leaves: [...group.leaves] });
+    await this.save(group.idHex, { record, leaves });
     return true;
   }
 

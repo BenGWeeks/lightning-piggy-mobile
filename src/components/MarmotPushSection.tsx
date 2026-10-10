@@ -64,12 +64,15 @@ const MarmotPushSection: React.FC = () => {
 
   useEffect(() => {
     let alive = true;
-    void loadMarmotPushSettings().then((s) => {
-      if (!alive) return;
-      setEnabled(s.enabled);
-      setCustomServer(s.customServer);
-      if (s.enabled) void refreshPending();
-    });
+    void loadMarmotPushSettings()
+      .catch(() => null)
+      .then((s) => {
+        if (!s) return;
+        if (!alive) return;
+        setEnabled(s.enabled);
+        setCustomServer(s.customServer);
+        if (s.enabled) void refreshPending();
+      });
     // The token read and group passes finish in the background.
     const unsubscribe = subscribeMarmotPushStatus(() => void refreshPending());
     return () => {
@@ -147,6 +150,8 @@ const MarmotPushSection: React.FC = () => {
       setEnabled(saved.enabled); // the real state — a failed change leaves push on
       setDraft('');
       if (outcome) reportEnable(outcome);
+    } catch {
+      Toast.show({ type: 'error', text1: t('securityScreen.marmotPushUnavailable') });
     } finally {
       setBusy(false);
     }

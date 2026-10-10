@@ -437,6 +437,65 @@ describe('stopping mid-publish', () => {
   });
 });
 
+describe('write-ahead', () => {
+  it('a publish whose follow-up write failed is still retracted on a server change', async () => {
+    const backend = createMemoryMarmotBackend();
+    let failAckWrite = true;
+    const flaky = {
+      ...backend,
+      set: async (ns: string, k: string, v: string) => {
+        if (ns === 'pushShare' && failAckWrite && !JSON.parse(v).hasOwnProperty('acked')) {
+          failAckWrite = false;
+          throw new Error('disk full');
+        }
+        return backend.set(ns, k, v);
+      },
+    };
+    const sent: number[] = [];
+    const registrar = new MarmotPushRegistrar({
+      pubkey: ME,
+      silentSigner: true,
+      backend: flaky,
+      ready: Promise.resolve(),
+      groups: () => [group('aa'.repeat(16))],
+      sign: async (tpl) => finalizeEvent({ ...tpl }, sk) as unknown as Awaited<ReturnType<Sign>>,
+      send: async (_id, ev) => (sent.push(ev.kind), true),
+    });
+    registrar.setRegistration(reg('token-1', SERVER_A));
+    expect((await registrar.sync({ interactive: false })).pending).toBe(1);
+    registrar.setRegistration(reg('token-1', SERVER_B));
+    await registrar.sync({ interactive: false });
+    expect(sent).toEqual([447, 449, 447]);
+  });
+
+  it('an unacknowledged publish is re-sent (same signed record, no new signature)', async () => {
+    let accept = false;
+    let signs = 0;
+    const contents: string[] = [];
+    const registrar = new MarmotPushRegistrar({
+      pubkey: ME,
+      silentSigner: true,
+      backend: createMemoryMarmotBackend(),
+      ready: Promise.resolve(),
+      groups: () => [group('aa'.repeat(16))],
+      sign: async (tpl) => {
+        signs++;
+        return finalizeEvent({ ...tpl }, sk) as unknown as Awaited<ReturnType<Sign>>;
+      },
+      send: async (_id, ev) => (contents.push(ev.content), accept),
+    });
+    registrar.setRegistration(reg('token-1'));
+    expect((await registrar.sync({ interactive: false })).pending).toBe(1); // relays refused
+    accept = true;
+    await registrar.sync({ interactive: false });
+    expect(signs).toBe(1);
+    expect(contents).toHaveLength(2);
+    expect(contents[1]).toBe(contents[0]);
+    expect((await registrar.sync({ interactive: false })).pending).toBe(0);
+    expect(contents).toHaveLength(2);
+  });
+});
+
 describe('failures stay per group', () => {
   it('a failed store read or resend leaves that group pending and the rest proceed', async () => {
     const backend = createMemoryMarmotBackend();

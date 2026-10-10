@@ -107,10 +107,12 @@ export interface MarmotPushSettings {
   customServer: PushServer | null;
 }
 
+/** The stored settings. Throws when storage can't be read — an unreadable
+ * setting must never be taken for "off" or "default server". */
 export async function loadMarmotPushSettings(): Promise<MarmotPushSettings> {
   const [enabled, server] = await Promise.all([
-    AsyncStorage.getItem(ENABLED_KEY).catch(() => null),
-    AsyncStorage.getItem(SERVER_KEY).catch(() => null),
+    AsyncStorage.getItem(ENABLED_KEY),
+    AsyncStorage.getItem(SERVER_KEY),
   ]);
   let customServer: PushServer | null = null;
   try {
@@ -156,6 +158,7 @@ function serial<T>(op: () => Promise<T>): Promise<T> {
   return run;
 }
 
+/** Hydrate once; throws (and retries next time) when storage is unreadable. */
 async function ensureSettings(): Promise<void> {
   if (settingsLoaded) return;
   settings = await loadMarmotPushSettings();
@@ -266,7 +269,12 @@ export function startMarmotPushRegistration(): () => void {
     });
   });
   void serial(async () => {
-    await ensureSettings();
+    try {
+      await ensureSettings();
+    } catch {
+      notifyStatus(); // unreadable: stay "unknown" — publish nothing, retract nothing
+      return;
+    }
     // A deletion that failed last time (offline): finish it first, and only
     // then hand out a token again.
     if (await retirementPending()) {
@@ -309,7 +317,11 @@ export async function enableMarmotPush(): Promise<EnableOutcome> {
 }
 
 async function enableNow(): Promise<EnableOutcome> {
-  await ensureSettings();
+  try {
+    await ensureSettings();
+  } catch {
+    return { status: 'unavailable' };
+  }
   // An old token still waiting to be deleted: try once more. Either way the
   // user now wants push on, so the marker can't be left to delete the token
   // we're about to hand out at the next start.
@@ -340,7 +352,8 @@ export interface DisableOutcome {
  * token at Apple/Google so copies the members already hold stop working. */
 export function disableMarmotPush(): Promise<DisableOutcome> {
   return serial(async () => {
-    await ensureSettings();
+    // Explicitly off — an unreadable store doesn't change that.
+    await ensureSettings().catch(() => undefined);
     settings.enabled = false;
     await AsyncStorage.setItem(ENABLED_KEY, '0');
     registration = null;
@@ -385,7 +398,13 @@ export async function setMarmotPushServer(pubkey: string | null): Promise<Enable
 /** Groups of the active account still waiting for a signature; null when
  * push is on but this phone has no token yet (Finish setup retries it). */
 export async function pendingMarmotPushGroups(): Promise<number | null> {
-  await ensureSettings();
+  if (
+    !(await ensureSettings().then(
+      () => true,
+      () => false,
+    ))
+  )
+    return null;
   const session = getMarmotSession();
   if (settings.enabled && registration === undefined) return null;
   if (!session || registration === undefined) return 0;
@@ -406,8 +425,12 @@ export async function pendingMarmotPushGroups(): Promise<number | null> {
  */
 export function retireMarmotPushForAccount(pubkey: string): Promise<boolean> {
   return serial(async () => {
-    await ensureSettings();
-    if (!settings.enabled) return true;
+    // Unreadable settings: assume it was on — deleting a token is the safe side.
+    const known = await ensureSettings().then(
+      () => true,
+      () => false,
+    );
+    if (known && !settings.enabled) return true;
     registration = undefined;
     if (!(await retireDeviceToken())) return false;
     const current = getMarmotSession();
@@ -428,8 +451,10 @@ async function refreshAfterRetirement(session: MarmotSession): Promise<void> {
   void session.pushRegistration.sync({ interactive: true }).catch(() => undefined);
 }
 
+/** An unreadable marker counts as pending: handing out a token that should
+ * have been deleted is the worse mistake. */
 const retirementPending = async () => {
-  retiring = (await AsyncStorage.getItem(RETIRE_PENDING_KEY).catch(() => null)) === '1';
+  retiring = (await AsyncStorage.getItem(RETIRE_PENDING_KEY).catch(() => '1')) === '1';
   return retiring;
 };
 
