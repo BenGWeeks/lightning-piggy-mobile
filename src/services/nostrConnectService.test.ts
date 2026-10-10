@@ -200,6 +200,19 @@ describe('encrypt/decrypt delegation', () => {
     );
   });
 
+  it('normalises a bare-string rejection from nostr-tools into "NIP-46 signer denied <method>"', async () => {
+    // nostr-tools' BunkerSigner rejects with the bunker's raw error text, not an Error.
+    mockSigner.nip44Decrypt.mockRejectedValueOnce('Permission denied: user rejected nip44_decrypt');
+    await expect(svc.requestNip44Decrypt('ct', 'peer', '')).rejects.toThrow(
+      'NIP-46 signer denied nip44_decrypt',
+    );
+  });
+
+  it('passes through a non-permission bare-string rejection unchanged', async () => {
+    mockSigner.nip04Encrypt.mockRejectedValueOnce('network timeout');
+    await expect(svc.requestNip04Encrypt('p', 'peer', '')).rejects.toThrow('network timeout');
+  });
+
   it('passes through a non-permission error unchanged', async () => {
     mockSigner.nip04Encrypt.mockRejectedValueOnce(new Error('network timeout'));
     await expect(svc.requestNip04Encrypt('p', 'peer', '')).rejects.toThrow('network timeout');
