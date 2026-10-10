@@ -41,10 +41,11 @@ describe('followUpSwapSettlement (#1179)', () => {
     expect(refresh).toHaveBeenCalledTimes(SWAP_SETTLE_REFRESH_DELAYS_MS.length);
   });
 
-  it('the schedule spans the ~8 min reserve hold seen on LNbits, and then some', () => {
+  it('outlasts the reserve holds seen on LNbits (8 min, then 22–26 min), within an hour', () => {
     const total = SWAP_SETTLE_REFRESH_DELAYS_MS.reduce((a, b) => a + b, 0);
-    expect(total).toBeGreaterThanOrEqual(15 * 60_000);
-    expect(total).toBeLessThanOrEqual(30 * 60_000);
+    expect(total).toBeGreaterThanOrEqual(35 * 60_000);
+    expect(total).toBeLessThanOrEqual(60 * 60_000);
+    expect(SWAP_SETTLE_REFRESH_DELAYS_MS.length).toBeLessThanOrEqual(12);
   });
 
   it('a failing refresh does not end the follow-up', async () => {

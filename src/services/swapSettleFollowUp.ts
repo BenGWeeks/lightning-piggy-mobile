@@ -8,17 +8,19 @@ import type { WalletTransaction } from '../types/wallet';
  * Boltz's invoice is a hold invoice. The wallet's pay call can give up before
  * Boltz settles it, and the wallet then holds the payment — with a routing-fee
  * reserve on top — as "pending" until its own background check resolves it.
- * LNbits took ~8 min and held 640 sats in the 2026-10-10 run. The app's
+ * LNbits held it ~8 min (a 640-sat reserve) in one 2026-10-10 run and
+ * 22–26 min (a 107-sat reserve) in the next. The app's
  * balance refresh is event-driven (focus / foreground), so without this the
  * reserve-reduced balance stayed on screen indefinitely.
  *
  * Bounded by design (CLAUDE.md → "Relay filters are always bounded"): at most
- * `SWAP_SETTLE_REFRESH_DELAYS_MS.length` refreshes over ~22 minutes, stopping
+ * `SWAP_SETTLE_REFRESH_DELAYS_MS.length` refreshes over ~42 minutes, stopping
  * as soon as the leg settles. One follow-up per wallet+payment: a repeat call
  * replaces the earlier one rather than stacking pollers.
  */
 export const SWAP_SETTLE_REFRESH_DELAYS_MS: readonly number[] = [
-  15_000, 30_000, 60_000, 120_000, 120_000, 180_000, 180_000, 300_000, 300_000,
+  15_000, 30_000, 60_000, 120_000, 120_000, 180_000, 180_000, 300_000, 300_000, 300_000, 300_000,
+  600_000,
 ];
 
 export interface SwapSettleFollowUp {
