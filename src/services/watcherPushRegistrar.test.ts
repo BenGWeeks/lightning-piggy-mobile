@@ -416,14 +416,18 @@ describe('WatcherPushRegistrar lifecycle', () => {
     expect(h.store.get(USER)?.lastTs).toBeGreaterThan(0);
   });
 
-  it('no relay accepting it is a failure, not a registration', async () => {
+  it('no relay acking it is a failure — kept as "possibly registered", so push-off still unregisters', async () => {
     const h = harness({ publishOk: false });
     h.registrar.setContext(ctx());
     h.registrar.onDeviceChanged();
     await h.registrar.setCategory('dm', true);
     await h.advance(3_000);
     expect(h.registrar.getStatus().last).toBe('failed');
-    expect(h.store.get(USER)?.registered).toBeNull();
+    // A relay may have taken it without the ack arriving.
+    expect(h.store.get(USER)?.registered).toMatchObject({ fingerprint: 'unconfirmed' });
+    const signs = h.signs;
+    await h.registrar.unregisterNow();
+    expect(h.signs).toBe(signs + 1); // an unregister is signed and sent for it
   });
 
   it('waits for the token: a toggle before it is known registers once it arrives', async () => {
@@ -636,6 +640,49 @@ describe('WatcherPushRegistrar push-off vs an in-flight registration', () => {
     release!();
     await h.advance(100);
     expect(h.published).toHaveLength(0);
+  });
+});
+
+describe('WatcherPushRegistrar per-account token', () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  it('a register never goes out once its account no longer has the token — even with no device event', async () => {
+    const h = harness();
+    let release: (() => void) | null = null;
+    const original = h.deps.signer;
+    h.deps.signer = (pk, type, cancelled) => {
+      const s = original(pk, type, cancelled);
+      return {
+        ...s,
+        signEvent: (t) => new Promise((r) => (release = () => r(finalizeEvent(t, userSk)))),
+      };
+    };
+    h.registrar.setContext(ctx());
+    h.registrar.onDeviceChanged();
+    await h.registrar.setCategory('dm', true);
+    await h.advance(2_500);
+    expect(release).not.toBeNull();
+    // Push turned off for THIS account while another keeps the phone's token:
+    // its device view goes null; no onDeviceChanged reaches the registrar.
+    h.setDevice(null);
+    release!();
+    await h.advance(100);
+    expect(h.published).toHaveLength(0);
+  });
+
+  it('switching to an account without push takes its (null) device view — no stale snapshot', async () => {
+    const h = harness({ device: null });
+    h.registrar.setContext(ctx());
+    h.registrar.onDeviceChanged();
+    await h.advance(3_000);
+    // That account turns push on: a real change, scheduled once.
+    h.setDevice({ platform: 'fcm', token: FCM });
+    h.registrar.onDeviceChanged();
+    h.registrar.onDeviceChanged(); // a repeat announcement changes nothing
+    await h.registrar.setCategory('dm', true);
+    await h.advance(3_000);
+    expect(h.published).toHaveLength(1);
   });
 });
 

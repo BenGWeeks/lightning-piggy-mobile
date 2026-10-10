@@ -1,7 +1,7 @@
 // Recognising and routing the notification watcher's pushes.
 //
 // The watcher sends a generic alert ("New message", "Zap received", …) with
-// data `{ source: 'lp-watcher', category, kind }`, collapsed per category
+// data `{ source: 'lp-watcher', category }`, collapsed per category
 // (APNs thread-id / collapse-id and the FCM tag are `lp-<category>`). Which of
 // those survive to JS depends on the platform and how the alert was posted:
 //   - Android, app running: `content.data` carries the data;
@@ -9,6 +9,9 @@
 //     identifier for it carries the tag (`…foreign_notifications?tag=lp-dm&id=0`);
 //   - iOS: expo only exposes `userInfo.body` as data, so it is null — but
 //     `threadIdentifier` (and the collapse id as identifier) is `lp-<category>`.
+// On iOS it also sends ONE silent background push when a device first
+// registers (an admission check): data `{ source: 'lp-watcher', type:
+// 'validate' }`, no alert. It is never shown and never wakes anything.
 // Pure — no expo imports — so it's unit-testable and safe in a headless task.
 
 // Type-only: the protocol module pulls in crypto, which a headless wake
@@ -27,6 +30,15 @@ const FOREIGN_TAG = /[?&]tag=lp-(dm|zap|mention|payment)(?:&|$)/;
 interface RequestLike {
   identifier?: string | null;
   content?: { data?: unknown; threadIdentifier?: string | null } | null;
+}
+
+/** The watcher's silent admission check (iOS, once per registration): a
+ * notification request, or a background-task payload (`{ data, … }`). */
+export function isWatcherValidation(input: unknown): boolean {
+  if (!input || typeof input !== 'object') return false;
+  const o = input as { data?: unknown; content?: { data?: unknown } | null };
+  const data = (o.content?.data ?? o.data ?? input) as { source?: unknown; type?: unknown } | null;
+  return !!data && data.source === WATCHER_SOURCE && data.type === 'validate';
 }
 
 /** The watcher category of a notification request, or null if it isn't one. */

@@ -320,7 +320,7 @@ delivery.
 MIP-05 only covers Marmot groups, where the *sender* triggers the push. For
 everything else there is no sender-side mechanism, so Lightning Piggy runs a
 small open-source *watcher*
-(https://github.com/BenGWeeks/lightning-piggy-notifications[lightning-piggy-notifications],
+(https://github.com/BenGWeeks/lightning-piggy-watcher[lightning-piggy-watcher],
 npub `npub17hcchazg4akxq4ccuskxmxegl2euyz8je7h6xjthekeyz8pux78qfzgph2`) that
 watches relays for events addressed to registered users and sends the same
 kind of content-free push. Its `PROTOCOL.md` is the wire contract; the app side
@@ -400,11 +400,16 @@ inbox relays accepted the wrap.
 *Receiving.* The watcher sends a generic alert (title "Lightning Piggy"; "New
 message" / "Zap received" / "New mention" / "Payment received") collapsed per
 category (`lp-<category>` as APNs thread/collapse id and FCM tag), with data
-`{source: "lp-watcher", category, kind}`. What reaches JS differs: Android
-in the foreground has the data; an alert the OS posted while backgrounded is
-known only by its tag (in expo's foreign-notification identifier); on iOS expo
-exposes only `userInfo.body` as data, so the thread id identifies it.
-`watcherCategoryOf` checks all three.
+`{source: "lp-watcher", category}` (nothing finer — no Nostr kind). What
+reaches JS differs: Android in the foreground has the data; an alert the OS
+posted while backgrounded is known only by its tag (in expo's
+foreign-notification identifier); on iOS expo exposes only `userInfo.body` as
+data, so the thread id identifies it. `watcherCategoryOf` checks all three.
+On iOS the watcher also sends ONE silent background push when a device first
+registers (an admission check, `{source: "lp-watcher", type: "validate"}`, no
+alert): it reaches no JS task (the Marmot wake task is registered on Android
+only, and drops every watcher payload anyway) and the foreground handler
+hides it (`isWatcherValidation`).
 
 * *Foreground:* messages, zaps and wallet activity are suppressed — the open
   app shows them itself (live inbox; `PaymentNotifier` with the real amount).

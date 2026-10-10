@@ -685,7 +685,7 @@ describe('notification watcher pushes', () => {
     });
     const androidPayment = watcherPush({
       identifier: '0:1',
-      content: { data: { source: 'lp-watcher', category: 'payment', kind: '23196' } },
+      content: { data: { source: 'lp-watcher', category: 'payment' } },
     });
     const mention = watcherPush({ identifier: 'lp-mention', content: { data: null } });
     // No 2 s Marmot "covered?" wait: these resolve immediately.
@@ -697,6 +697,22 @@ describe('notification watcher pushes', () => {
     expect(await handler.handleNotification(mention)).toMatchObject({
       shouldShowBanner: true,
       shouldShowList: true,
+    });
+  });
+
+  it("never shows the watcher's silent admission check (iOS validate push)", async () => {
+    await ensureNotificationsInitialised();
+    const handler = (Notifications.setNotificationHandler as jest.Mock).mock.calls.at(-1)?.[0];
+    const validate = watcherPush({
+      identifier: 'x',
+      content: { data: { source: 'lp-watcher', type: 'validate' } },
+    });
+    // Resolves at once (no 2 s Marmot wait) and shows nothing.
+    expect(await handler.handleNotification(validate)).toEqual({
+      shouldShowBanner: false,
+      shouldShowList: false,
+      shouldPlaySound: false,
+      shouldSetBadge: false,
     });
   });
 

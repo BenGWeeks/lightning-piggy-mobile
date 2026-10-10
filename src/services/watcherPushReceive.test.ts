@@ -1,5 +1,6 @@
 import {
   isWatcherTaskPayload,
+  isWatcherValidation,
   showWatcherPushInForeground,
   watcherCategoryOf,
   watcherTapData,
@@ -10,7 +11,7 @@ describe('watcherCategoryOf', () => {
     expect(
       watcherCategoryOf({
         identifier: '0:123',
-        content: { data: { source: 'lp-watcher', category: 'zap', kind: '9735' } },
+        content: { data: { source: 'lp-watcher', category: 'zap' } }, // no `kind` is sent
       }),
     ).toBe('zap');
     // Watcher-sourced but an unknown category: not routable.
@@ -88,5 +89,25 @@ describe('foreground + tap policy', () => {
     expect(watcherTapData('mention')).toEqual({ kind: 'mention' });
     expect(watcherTapData('zap')).toEqual({ kind: 'payment' });
     expect(watcherTapData('payment')).toEqual({ kind: 'payment' });
+  });
+});
+
+describe("the watcher's silent admission check (iOS, once per registration)", () => {
+  const validate = { source: 'lp-watcher', type: 'validate' };
+
+  it('is recognised as a background-task payload and as a request', () => {
+    // expo's iOS background-task shape: everything but `aps` under `data`.
+    expect(isWatcherValidation({ data: validate, notification: null })).toBe(true);
+    expect(isWatcherValidation({ identifier: 'x', content: { data: validate } })).toBe(true);
+    expect(isWatcherValidation({ data: { source: 'lp-watcher', category: 'dm' } })).toBe(false);
+    expect(isWatcherValidation({ data: { type: 'validate' } })).toBe(false);
+    expect(isWatcherValidation(null)).toBe(false);
+  });
+
+  it('wakes nothing and routes nowhere', () => {
+    // The Marmot wake task drops it (no generic "New message")…
+    expect(isWatcherTaskPayload({ data: validate, notification: null })).toBe(true);
+    // …and it has no category, so no tap target or foreground policy applies.
+    expect(watcherCategoryOf({ identifier: 'x', content: { data: validate } })).toBe(null);
   });
 });

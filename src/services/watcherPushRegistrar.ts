@@ -95,6 +95,10 @@ export function planWatcherSync(args: {
   return interactive || due ? 'register' : 'defer';
 }
 
+/** Fingerprint of a registration that may have reached the watcher but was
+ * never confirmed: matches nothing, so the next pass re-sends it. */
+const UNCONFIRMED = 'unconfirmed';
+
 export type WatcherSyncOutcome =
   | 'registered'
   | 'unregistered'
@@ -165,7 +169,9 @@ export class WatcherPushRegistrar {
       return;
     }
     if (!prev || prev.pubkey !== next.pubkey || prev.signerType !== next.signerType) {
-      // Another account: its own state, nothing carried over.
+      // Another account: its own state, nothing carried over — including the
+      // device snapshot (the token is per account: null unless it opted in).
+      this.seenDevice = this.deps.device();
       this.triggers.clear();
       this.setStatus({ last: null });
       this.schedule('start');
@@ -185,12 +191,14 @@ export class WatcherPushRegistrar {
   onDeviceChanged(): void {
     const device = this.deps.device();
     const first = this.seenDevice === undefined;
+    const changed = device?.token !== this.seenDevice?.token;
     // A different token (or none): a registration in flight for the old one
     // is pointless — and after push-off, must not go out at all.
-    if (!first && device?.token !== this.seenDevice?.token) this.generation++;
+    if (!first && changed) this.generation++;
     this.seenDevice = device;
     if (!device) return;
-    this.schedule(first ? 'start' : 'token');
+    if (first) this.schedule('start');
+    else if (changed) this.schedule('token');
   }
 
   // --- user actions ---------------------------------------------------------
@@ -349,9 +357,13 @@ export class WatcherPushRegistrar {
     // Is this account still the one we manage? Its state is only written then
     // (a signed-out account's state was wiped and must stay wiped).
     const current = () => this.ctx?.pubkey === ctx.pubkey;
-    // A register must not go out for an account that left meanwhile; an
-    // unregister is bound to its account and only stops when abandoned.
-    const stillValid = () => (unregister ? !cancelled() : generation === this.generation);
+    // A register must not go out for an account that left meanwhile, or whose
+    // token went away (push turned off for it); an unregister is bound to its
+    // account and only stops when abandoned.
+    const stillValid = () =>
+      unregister
+        ? !cancelled()
+        : generation === this.generation && this.deps.device()?.token === device?.token;
     const reg = state.registered;
     if (unregister && !reg) return this.finish('unchanged');
     if (
@@ -390,6 +402,22 @@ export class WatcherPushRegistrar {
       );
       // Signed out / switched while the signer was busy: drop it.
       if (!stillValid()) return this.finish('unavailable');
+      // Write-ahead: a relay may take the registration even if its ack never
+      // arrives. Until confirmed, record it as "possibly registered" — so an
+      // unregister still goes out for it, and a later pass retries.
+      if (built && current()) {
+        await this.deps.save(ctx.pubkey, {
+          ...sent,
+          registered: {
+            fingerprint: UNCONFIRMED,
+            coreFingerprint: UNCONFIRMED,
+            tokenHash: built.desired.tokenHash,
+            platform: built.body.platform,
+            app: built.body.app,
+            at: this.deps.now(),
+          },
+        });
+      }
       if (!(await this.deps.publish(wrap, stillValid))) {
         return this.finish(stillValid() ? 'failed' : 'unavailable');
       }

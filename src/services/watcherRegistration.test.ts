@@ -118,17 +118,36 @@ describe('selectRegistrationRelays', () => {
     ]);
   });
 
-  it("leaves out the watcher's own relays, dedupes, and caps at 8", () => {
+  it("leaves the watcher's own relays out for DMs / zaps / mentions, dedupes, and caps at 8", () => {
     const read = Array.from({ length: 12 }, (_, i) => `wss://r${i}.example.com`);
     const out = selectRegistrationRelays(ALL, {
-      nwc: ['wss://nos.lol/', 'wss://relay.damus.io'],
-      inbox: ['wss://relay.primal.net', 'wss://r0.example.com'],
-      read,
+      nwc: [],
+      inbox: ['wss://relay.primal.net', 'wss://nos.lol/', 'wss://r0.example.com'],
+      read: ['wss://relay.damus.io', ...read],
     });
     expect(out).toHaveLength(8);
     expect(out[0]).toBe('wss://r0.example.com');
     expect(out).not.toContain('wss://nos.lol');
+    expect(out).not.toContain('wss://relay.primal.net');
+    expect(out).not.toContain('wss://relay.damus.io');
     expect(new Set(out).size).toBe(out.length);
+  });
+
+  it('always lists an NWC wallet relay — even a watcher default (it sends NWC filters only to listed relays)', () => {
+    // e.g. a Primal wallet on relay.primal.net: dropping it would mean no payment pushes.
+    const out = selectRegistrationRelays(ALL, {
+      nwc: ['wss://relay.primal.net', 'wss://nos.lol/'],
+      inbox: ['wss://relay.primal.net', 'wss://inbox.example.com'],
+      read: ['wss://relay.damus.io'],
+    });
+    expect(out).toEqual(['wss://relay.primal.net', 'wss://nos.lol', 'wss://inbox.example.com']);
+    // Payment off: the wallet relay isn't needed, and a default inbox relay stays out.
+    expect(
+      selectRegistrationRelays(
+        { ...ALL, payment: false },
+        { nwc: ['wss://relay.primal.net'], inbox: ['wss://relay.primal.net'], read: [] },
+      ),
+    ).toEqual([]);
   });
 });
 

@@ -50,7 +50,11 @@ import {
   recordNotification,
 } from './notificationHistory';
 import { getActivePubkey, subscribeActivePubkey } from './walletStorageService';
-import { showWatcherPushInForeground, watcherCategoryOf } from './watcherPushReceive';
+import {
+  isWatcherValidation,
+  showWatcherPushInForeground,
+  watcherCategoryOf,
+} from './watcherPushReceive';
 import type { DmProtocol } from '../utils/dmProtocol';
 
 // Android notification channel ids. Stable strings — changing them
@@ -180,6 +184,15 @@ async function initialiseInternal(): Promise<void> {
       // The notification watcher's generic alert: the open app already shows
       // what it announces (see showWatcherPushInForeground).
       const watcher = watcherCategoryOf(notification.request);
+      // The watcher's silent admission check (iOS) is never shown.
+      if (isWatcherValidation(notification.request)) {
+        return {
+          shouldShowBanner: false,
+          shouldShowList: false,
+          shouldPlaySound: false,
+          shouldSetBadge: false,
+        };
+      }
       if (watcher || isRemotePush(notification)) {
         // Android's push is a data-only wake with nothing to show — the wake
         // task (marmotPushWake) owns its generic alert. iOS's carries the

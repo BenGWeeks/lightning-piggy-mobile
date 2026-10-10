@@ -2,7 +2,7 @@
 // pass the WATCHER's own parser. The watcher is a separate repo, so its
 // `unwrapRegistration` / `parseRegistration` / `normalizeRelayUrl` are
 // vendored below, verbatim in logic, from
-//   github.com/BenGWeeks/lightning-piggy-notifications @ 28b1776
+//   github.com/BenGWeeks/lightning-piggy-watcher @ 3d6e06d
 //   src/registration.ts + src/relayUrl.ts (MIT)
 // with two runtime swaps only: node:crypto's sha256 → @noble/hashes, and
 // node:net's isIP → a regex. Re-sync this block if PROTOCOL.md changes.

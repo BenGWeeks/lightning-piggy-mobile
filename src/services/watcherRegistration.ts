@@ -1,6 +1,6 @@
 // Registration with Lightning Piggy's notification WATCHER — the wire format.
 //
-// The watcher (github.com/BenGWeeks/lightning-piggy-notifications) watches
+// The watcher (github.com/BenGWeeks/lightning-piggy-watcher) watches
 // relays for events addressed to registered users (NIP-04 / NIP-17 DMs, zap
 // receipts, mentions, NWC wallet notifications) and sends a content-free push.
 // There is no HTTP API: the app gift-wraps (NIP-59) a kind-8480 rumor to the
@@ -177,23 +177,29 @@ export function normaliseWatcherRelay(input: string): string | null {
  * The relays the watcher should watch for this user, most important first and
  * capped at 8: the NWC wallet relays (payments are only ever published there),
  * then the DM inbox (kind 10050), then the read relays (kind 10002: NIP-04 DMs,
- * zap receipts, mentions). The watcher's own relays are left out — it always
- * watches those.
+ * zap receipts, mentions). The watcher sends NWC filters ONLY to relays listed
+ * here (PROTOCOL.md), so a wallet relay is always listed — even one of the
+ * watcher's own defaults (e.g. relay.primal.net). Only DM / read relays that
+ * are watcher defaults are left out: it always watches those for DMs, zaps
+ * and mentions.
  */
 export function selectRegistrationRelays(
   categories: WatcherCategories,
   sources: { nwc: string[]; inbox: string[]; read: string[] },
 ): string[] {
-  const exclude = new Set(WATCHER_DEFAULT_RELAYS);
-  const ordered = [
-    ...(categories.payment ? sources.nwc : []),
-    ...(categories.dm ? sources.inbox : []),
-    ...(categories.dm || categories.zap || categories.mention ? sources.read : []),
+  const defaults = new Set(WATCHER_DEFAULT_RELAYS);
+  const ordered: { url: string; nwc: boolean }[] = [
+    ...(categories.payment ? sources.nwc : []).map((url) => ({ url, nwc: true })),
+    ...(categories.dm ? sources.inbox : []).map((url) => ({ url, nwc: false })),
+    ...(categories.dm || categories.zap || categories.mention ? sources.read : []).map((url) => ({
+      url,
+      nwc: false,
+    })),
   ];
   const out: string[] = [];
-  for (const raw of ordered) {
-    const n = normaliseWatcherRelay(raw);
-    if (!n || exclude.has(n) || out.includes(n)) continue;
+  for (const { url, nwc } of ordered) {
+    const n = normaliseWatcherRelay(url);
+    if (!n || (!nwc && defaults.has(n)) || out.includes(n)) continue;
     out.push(n);
     if (out.length === MAX_REGISTRATION_RELAYS) break;
   }
