@@ -1743,7 +1743,7 @@
     "marmotPushToggle": "Message notifications via push (Marmot)",
     "marmotPushSignerNote": "Your signer will ask you to approve one signature per chat: now for the chats you already have, and later the first time you send a message in a new chat.",
     "marmotPushAllSet": "Set up in all your Marmot chats.",
-    "marmotPushPending": "{{count}} chat(s) still need your signer's approval.",
+    "marmotPushPending": "{{count}} chat(s) not set up yet.",
     "marmotPushFinish": "Finish setup",
     "marmotPushAdvanced": "Advanced: notification server",
     "marmotPushServerDefault": "Using Lightning Piggy's notification server.",

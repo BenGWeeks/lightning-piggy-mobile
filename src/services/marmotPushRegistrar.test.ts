@@ -437,6 +437,34 @@ describe('stopping mid-publish', () => {
   });
 });
 
+describe('failures stay per group', () => {
+  it('a failed store read or resend leaves that group pending and the rest proceed', async () => {
+    const backend = createMemoryMarmotBackend();
+    const failing = {
+      ...backend,
+      get: async (ns: string, k: string) => {
+        if (ns === 'pushShare' && k === 'aa'.repeat(16)) throw new Error('db locked');
+        return backend.get(ns, k);
+      },
+    };
+    const sent: string[] = [];
+    const registrar = new MarmotPushRegistrar({
+      pubkey: ME,
+      silentSigner: true,
+      backend: failing,
+      ready: Promise.resolve(),
+      groups: () => [group('aa'.repeat(16)), group('bb'.repeat(16))],
+      sign: async (tpl) => finalizeEvent({ ...tpl }, sk) as unknown as Awaited<ReturnType<Sign>>,
+      send: async (id) => (sent.push(id), true),
+    });
+    registrar.setRegistration(reg('token-1'));
+    const r = await registrar.sync({ interactive: false });
+    expect(r).toMatchObject({ published: 1, pending: 1 });
+    expect(sent).toEqual(['bb'.repeat(16)]);
+    expect(await registrar.pendingCount()).toBe(1);
+  });
+});
+
 describe('planGroup', () => {
   const g = group('aa'.repeat(16));
   it('is a no-op with nothing published and push off', () => {

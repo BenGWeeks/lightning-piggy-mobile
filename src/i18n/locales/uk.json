@@ -1715,7 +1715,7 @@
     "marmotPushToggle": "Сповіщення про повідомлення через push (Marmot)",
     "marmotPushSignerNote": "Ваш підписувач попросить схвалити один підпис для кожного чату: зараз — для наявних чатів, а пізніше — коли ви вперше надішлете повідомлення в новому чаті.",
     "marmotPushAllSet": "Налаштовано в усіх ваших чатах Marmot.",
-    "marmotPushPending": "Чатів, що ще чекають на схвалення підписувача: {{count}}.",
+    "marmotPushPending": "Чатів, ще не налаштованих: {{count}}.",
     "marmotPushFinish": "Завершити налаштування",
     "marmotPushAdvanced": "Додатково: сервер сповіщень",
     "marmotPushServerDefault": "Використовується сервер сповіщень Lightning Piggy.",

@@ -191,15 +191,20 @@ export class MarmotPushRegistrar {
     return () => this.settledListeners.delete(listener);
   }
 
-  /** Groups that still need a signature for the current registration. */
+  /** Groups not yet in line with the current registration. */
   async pendingCount(): Promise<number> {
     await this.deps.ready;
     const reg = this.registration;
     if (reg === undefined) return 0;
     let n = 0;
     for (const group of this.deps.groups()) {
-      const action = planGroup(await this.load(group.idHex), reg, group);
-      if (action.type === 'publish' || action.type === 'remove') n++;
+      // Anything still to send counts (a resend needs no signature, but the
+      // group still lacks our record); an unreadable group counts too.
+      const action = await this.load(group.idHex).then(
+        (shared) => planGroup(shared, reg, group).type,
+        () => 'unknown',
+      );
+      if (action !== 'none' && action !== 'forget') n++;
     }
     return n;
   }
@@ -240,25 +245,27 @@ export class MarmotPushRegistrar {
     const mayPrompt = this.deps.silentSigner || opts.interactive;
     for (const group of groups) {
       if (this.stopped || gen !== this.generation) break;
-      const shared = await this.load(group.idHex);
-      const action = planGroup(shared, reg, group);
-      if (action.type === 'none') continue;
-      if (action.type === 'forget') {
-        await this.deps.backend.remove(NAMESPACE, group.idHex);
-        continue;
-      }
-      if (action.type === 'resend') {
-        if (this.stopped || gen !== this.generation) break;
-        if (shared && (await this.deps.send(group.idHex, tokenUpdateEvent(shared.record)))) {
-          await this.save(group.idHex, { record: shared.record, leaves: [...group.leaves] });
-        } else result.pending++;
-        continue;
-      }
-      if (!mayPrompt || result.declined) {
-        result.pending++;
-        continue;
-      }
+      // One group's failure (a store read, a relay, the signer) never stops
+      // the others; it stays pending for a later pass.
       try {
+        const shared = await this.load(group.idHex);
+        const action = planGroup(shared, reg, group);
+        if (action.type === 'none') continue;
+        if (action.type === 'forget') {
+          await this.deps.backend.remove(NAMESPACE, group.idHex);
+          continue;
+        }
+        if (action.type === 'resend') {
+          live();
+          if (shared && (await this.deps.send(group.idHex, tokenUpdateEvent(shared.record)))) {
+            await this.save(group.idHex, { record: shared.record, leaves: [...group.leaves] });
+          } else result.pending++;
+          continue;
+        }
+        if (!mayPrompt || result.declined) {
+          result.pending++;
+          continue;
+        }
         const done =
           action.type === 'remove'
             ? await this.retract(group, action.record, live)
@@ -336,8 +343,10 @@ export class MarmotPushRegistrar {
     return true;
   }
 
+  /** What we last published in the group; null when nothing. A failed
+   * store read THROWS — planning from "nothing" would forget to retract. */
   private async load(groupIdHex: string): Promise<Shared | null> {
-    const raw = await this.deps.backend.get(NAMESPACE, groupIdHex).catch(() => null);
+    const raw = await this.deps.backend.get(NAMESPACE, groupIdHex);
     if (!raw) return null;
     try {
       const parsed = JSON.parse(raw) as Shared;
