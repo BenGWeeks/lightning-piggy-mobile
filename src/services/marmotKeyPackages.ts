@@ -48,23 +48,57 @@ export class MarmotNoKeyPackageError extends Error {
 }
 
 /**
+ * A retired slot's placeholder, not a key package: what a signed-out install
+ * publishes into its slot (#1204) — no content and/or no `i` tag.
+ */
+export const isRetiredKeyPackagePlaceholder = (e: NostrEvent) =>
+  !e.content || !e.tags.some((t) => t[0] === 'i' && t[1]);
+
+/**
+ * The newest event per publication slot (`d`; newestEvent tie-break), newest
+ * first — skipping slots whose newest event is a retirement placeholder. The
+ * whole slot goes, not just the placeholder: an older event in it may linger
+ * on a relay that missed the replacement, but its private key is gone.
+ */
+export function newestKeyPackagePerSlot(events: NostrEvent[]): NostrEvent[] {
+  const bySlot = new Map<string, NostrEvent[]>();
+  for (const e of events) {
+    const slot = e.tags.find((t) => t[0] === 'd')?.[1] ?? e.id;
+    bySlot.set(slot, [...(bySlot.get(slot) ?? []), e]);
+  }
+  return [...bySlot.values()]
+    .map((slotEvents) => newestEvent(slotEvents)!)
+    .filter((e) => !isRetiredKeyPackagePlaceholder(e))
+    .sort((a, b) => b.created_at - a.created_at || a.id.localeCompare(b.id));
+}
+
+/**
  * The key package to invite `peer` with: newest per publication slot (`d`),
  * then newest first; the first the library will accept — a peer's client may
  * have published an expired / over-long one alongside a good one (or only
- * bad ones). Null when they published none; throws when none is usable.
+ * bad ones). Null when they published none (or only retired slots); throws
+ * when none is usable.
  */
 export function pickKeyPackage(peer: string, events: NostrEvent[]): NostrEvent | null {
-  const newestPerSlot = new Map<string, NostrEvent>();
-  for (const e of events) {
-    const slot = e.tags.find((t) => t[0] === 'd')?.[1] ?? e.id;
-    const prev = newestPerSlot.get(slot);
-    if (!prev || e.created_at > prev.created_at) newestPerSlot.set(slot, e);
-  }
-  const candidates = [...newestPerSlot.values()].sort(
-    (a, b) => b.created_at - a.created_at || a.id.localeCompare(b.id),
-  );
+  const candidates = newestKeyPackagePerSlot(events);
   const usable = candidates.find((e) => isUsableKeyPackage(e));
   if (usable) return usable;
   if (candidates.length > 0) throw new MarmotUnusableKeyPackageError(peer);
   return null;
+}
+
+/** The newest event by `created_at` (lower id breaks a tie) — relays can lag,
+ * so the first one a multi-relay query returns may be stale. */
+export function newestEvent<T extends { created_at: number; id: string }>(
+  events: T[],
+): T | undefined {
+  return events.reduce<T | undefined>(
+    (best, e) =>
+      !best ||
+      e.created_at > best.created_at ||
+      (e.created_at === best.created_at && e.id < best.id)
+        ? e
+        : best,
+    undefined,
+  );
 }

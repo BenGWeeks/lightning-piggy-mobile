@@ -18,13 +18,12 @@ import {
   deserializeApplicationData,
   getGroupMembers,
   getPubkeyLeafNodeIndexes,
-  GROUP_ENCRYPTED_MEDIA_V2_COMPONENT_ID,
   Proposals,
   GroupRumorHistory,
   type MarmotGroup,
 } from '@internet-privacy/marmot-ts';
 import type { EventSigner } from 'applesauce-core';
-import { bytesToHex, randomBytes } from '@noble/hashes/utils.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
 import { getEventHash, type Event as NostrEvent, type Filter } from 'nostr-tools';
 
 import type { SignerType } from '../types/nostr';
@@ -38,7 +37,17 @@ import {
   type MarmotMediaKeys,
 } from './marmotMedia';
 import { forgetMarmotDeletionsForGroup } from './marmotDeletionStore';
-import { MarmotNoKeyPackageError, pickKeyPackage } from './marmotKeyPackages';
+import { spreadProposals } from './marmotProposals';
+import {
+  advertisesMediaV2,
+  ensureKeyPackageSlot,
+  maintainKeyPackage,
+  monotonicKeyPackageSigner,
+  SingleFlight,
+  trackKeyPackageAcceptance,
+} from './marmotKeyPackageLifecycle';
+import { retryPendingRetirement } from './marmotKeyPackageRetire';
+import { MarmotNoKeyPackageError, newestEvent, pickKeyPackage } from './marmotKeyPackages';
 import { createMarmotNetwork, createPushTransport } from './marmotNetwork';
 import {
   leafKey,
@@ -51,6 +60,8 @@ import type { SignedProof } from './marmotPushEntries';
 import { MarmotPushNotifier, type PushGroup } from './marmotPushNotifier';
 import { MarmotPushRegistrar } from './marmotPushRegistrar';
 import { createMarmotSigner } from './marmotSigner';
+import * as fence from './marmotSessionFence';
+import { isPermanentWelcomeFailure } from './marmotWelcomeFailure';
 import {
   createMarmotKvStore,
   createSqliteMarmotBackend,
@@ -63,9 +74,8 @@ import type { Rumor } from 'applesauce-common/helpers/gift-wrap';
 export const MARMOT_CHAT_KIND = 9;
 /** App-level group id prefix, distinguishing Marmot groups from NIP-17 ones. */
 export const MARMOT_GROUP_ID_PREFIX = 'marmot:';
-/** Marks our key packages (`client` tag) — NOT the slot id; see keyPackageSlot. */
+/** Marks our key packages (`client` tag) — NOT the slot id; see ensureKeyPackageSlot. */
 const CLIENT_NAME = 'Lightning Piggy';
-const SLOT_ID_HEX = /^[0-9a-f]{64}$/;
 const GROUP_EVENT_KIND = 445;
 // Re-read this far behind the newest INGESTED kind-445 (honest clock drift
 // between members). The watermark only advances after ingestion and ignores
@@ -86,15 +96,8 @@ type SessionGroup = MarmotGroup<GroupRumorHistory>;
 const MAX_FUTURE_SKEW_SECS = 5 * 60;
 const isPlausibleTimestamp = (createdAt: number) =>
   createdAt <= Math.floor(Date.now() / 1000) + MAX_FUTURE_SKEW_SECS;
-// A Welcome that can never be joined: not for a key package we hold (spent
-// or deleted), or structurally invalid. Anything else is retried.
-const PERMANENT_WELCOME_FAILURE =
-  /No matching KeyPackage|Invalid welcome event|Expected welcome event kind/i;
-const MEDIA_V2_COMPONENT_TAG = `0x${GROUP_ENCRYPTED_MEDIA_V2_COMPONENT_ID.toString(16)}`;
-const advertisesMediaV2 = (events: NostrEvent[]) =>
-  events.some((e) =>
-    e.tags.some((t) => t[0] === 'app_components' && t.includes(MEDIA_V2_COMPONENT_TAG)),
-  );
+// Sign-out waits at most this long for an in-flight key-package publish.
+const KEY_PACKAGE_DRAIN_MS = 5_000;
 const isMediaKeys = (v: unknown): v is MarmotMediaKeys =>
   !!v &&
   typeof v === 'object' &&
@@ -157,6 +160,8 @@ export interface MarmotSessionOptions {
   network?: ReturnType<typeof createMarmotNetwork>;
   /** Test seam: kind-445 backfill page size (default 500). */
   groupBackfillPageSize?: number;
+  /** Test seam: sign-out's wait for a key-package publish (default 5 s). */
+  keyPackageDrainMs?: number;
 }
 
 export const toAppGroupId = (mlsGroupIdHex: string) => `${MARMOT_GROUP_ID_PREFIX}${mlsGroupIdHex}`;
@@ -194,7 +199,11 @@ export class MarmotSession {
   /** MIP-05: announcing THIS device's push token in our groups. */
   readonly pushRegistration: MarmotPushRegistrar;
   private connection: { unsubscribe(): void } | null = null;
-  private stopped = false;
+  // Single-flight: start-up, resume, a new chat and a join can all ask at
+  // once; one asking mid-run (e.g. a join just spent our key) gets a rerun.
+  private readonly keyPackageRuns = new SingleFlight(() => this.maintainKeyPackages());
+  private readonly gate = fence.createStopGate();
+  private readonly acceptedKeyPackages = new Set<string>();
   private markReady!: () => void;
   /** Resolves once stored groups are loaded — joins must not race loadAll. */
   private readonly ready = new Promise<void>((resolve) => (this.markReady = resolve));
@@ -203,7 +212,8 @@ export class MarmotSession {
     installMarmotCryptoProvider();
     this.opts = opts;
     this.pubkey = opts.pubkey;
-    this.backend = opts.backend ?? createSqliteMarmotBackend(opts.pubkey);
+    const backend = opts.backend ?? createSqliteMarmotBackend(opts.pubkey);
+    this.backend = fence.fenceBackend(backend, this.gate); // drops writes after a wipe
     const store = <T>(ns: string) => createMarmotKvStore<T>(this.backend, ns);
     const network = opts.network ?? createMarmotNetwork(opts.getLookupRelays);
     this.push = new MarmotPushNotifier({
@@ -237,9 +247,13 @@ export class MarmotSession {
         return Object.values(await this.sendRumor(toAppGroupId(idHex), rumor)).some(Boolean);
       },
     });
+    // Abandoned on stop: a late Amber / NIP-46 answer can't publish after sign-out.
+    const cancelled = () => this.gate.stopped;
+    const clientSigner =
+      opts.signer ?? createMarmotSigner(this.pubkey, opts.signerType, { cancelled });
     this.client = new MarmotClient({
-      signer,
-      network: this.boundGroupQueries(network),
+      signer: fence.fenceSigner(monotonicKeyPackageSigner(clientSigner), this.gate),
+      network: this.boundGroupQueries(trackKeyPackageAcceptance(network, this.acceptedKeyPackages)),
       cryptoProvider: marmotCryptoProvider,
       groupStateStore: store('groups'),
       keyPackageStore: store('keyPackages'),
@@ -291,23 +305,21 @@ export class MarmotSession {
     } finally {
       this.markReady();
     }
-    if (this.stopped) return;
+    if (this.gate.stopped) return;
     this.connection = groups.connectAll({ fallbackRelays: this.opts.getWriteRelays() });
     this.emitGroupsChanged();
     // Publishing a key package needs a signature. Local keys sign silently;
     // Amber / NIP-46 would prompt on every app start for an Alpha feature the
     // user may never open — so for them it waits for first Marmot use (or an
     // account that has used Marmot before and needs its package kept fresh).
-    if (this.opts.signerType === 'nsec' || (await this.client.keyPackages.count()) > 0) {
-      void this.ensureKeyPackage();
-    }
+    void this.keepKeyPackageFresh();
     void this.retryPendingWelcomes();
   }
 
   /** Re-attempt Welcomes whose join failed transiently in an earlier session. */
   private async retryPendingWelcomes(): Promise<void> {
     for (const id of await this.backend.keys('pendingWelcomes')) {
-      if (this.stopped) return;
+      if (this.gate.stopped) return;
       const raw = await this.backend.get('pendingWelcomes', id);
       if (!raw) continue;
       try {
@@ -319,15 +331,20 @@ export class MarmotSession {
   }
 
   stop(): void {
-    this.stopped = true;
+    this.gate.stop();
+    const run = this.keyPackageRuns.current;
+    const pushStopped = Promise.all([this.push.stop(), this.pushRegistration.stop()]);
+    fence.trackStoppedSession(this.pubkey, this.gate, Promise.all([run, pushStopped]));
     // Accumulated: an earlier session of the same account (A → B → A) may
-    // still be finishing a write the wipe must wait for.
+    // still be finishing a write the wipe must wait for. A key-package run
+    // only gets a bounded wait — its signer was just abandoned.
+    const drainMs = this.opts.keyPackageDrainMs ?? KEY_PACKAGE_DRAIN_MS;
     pushDrains.set(
       this.pubkey,
       Promise.all([
         pushDrains.get(this.pubkey),
-        this.push.stop(),
-        this.pushRegistration.stop(),
+        fence.settleWithin(run, drainMs),
+        pushStopped,
       ]).then(() => undefined),
     );
     this.connection?.unsubscribe();
@@ -345,32 +362,40 @@ export class MarmotSession {
   }
 
   /** Publish an unused key package so others can start chats with us. */
-  async ensureKeyPackage(): Promise<void> {
+  ensureKeyPackage(): Promise<void> {
+    return this.gate.stopped ? Promise.resolve() : this.keyPackageRuns.run();
+  }
+
+  /** Start-up / app resume: refresh, but never a first remote-signer prompt. */
+  async keepKeyPackageFresh(): Promise<void> {
+    if (this.opts.signerType === 'nsec' || (await this.client.keyPackages.count()) > 0) {
+      await this.ensureKeyPackage();
+    }
+  }
+
+  private async maintainKeyPackages(): Promise<void> {
+    if (this.gate.stopped) return; // a rerun queued before sign-out
     try {
-      const keyPackages = this.client.keyPackages;
-      // Pre-fix builds used a fixed, non-hex `d` slot, which spec-conformant
-      // clients (White Noise) reject — retire those (publishes a NIP-09 delete).
-      const malformed = (await keyPackages.list()).filter(
-        (kp) => kp.identifier !== undefined && !SLOT_ID_HEX.test(kp.identifier),
-      );
-      if (malformed.length > 0) await keyPackages.purge(malformed.map((kp) => kp.keyPackageRef));
-      // White Noise requires every invitee to support encrypted media v2
-      // (0x800b) — key packages published before we did can't be invited by
-      // it. Republish them in place (same slot, so relays replace them).
-      const lacksMediaV2 = (await keyPackages.list()).filter(
-        (kp) =>
-          !kp.used && !kp.nonCurrent && kp.published?.length && !advertisesMediaV2(kp.published),
-      );
-      for (const kp of lacksMediaV2) {
-        await keyPackages.rotate(kp.keyPackageRef, {
-          relays: this.writeRelays(),
-          client: CLIENT_NAME,
-        });
-      }
-      await keyPackages.ensurePublished({
+      // Refresh weekly into the same slot, and republish when ours predates
+      // a capability White Noise requires of every invitee (encrypted media
+      // v2, 0x800b). Replaced keys are retired per the retention policy.
+      const cancelled = () => this.gate.stopped;
+      const slot = await this.gate.guard(ensureKeyPackageSlot(this.backend));
+      await maintainKeyPackage(this.client.keyPackages, {
         relays: this.writeRelays(),
-        identifier: await this.keyPackageSlot(),
+        slot,
         client: CLIENT_NAME,
+        isUpToDate: advertisesMediaV2,
+        wasAccepted: (id) => this.acceptedKeyPackages.has(id),
+        cancelled,
+      });
+      // A sign-out of this account here whose relay cleanup failed: retry it
+      // now the account's signer is back (and already in use).
+      await retryPendingRetirement({
+        owner: this.pubkey,
+        keepSlot: slot,
+        cancelled,
+        sign: (t) => this.client.signer.signEvent(t) as Promise<NostrEvent>,
       });
     } catch (e) {
       if (__DEV__) console.warn('[Marmot] key package publish failed:', e);
@@ -587,8 +612,13 @@ export class MarmotSession {
       void this.ensureKeyPackage(); // the joined key package is now spent
       return this.summarise(group);
     } catch (e) {
-      if (PERMANENT_WELCOME_FAILURE.test(String((e as Error)?.message ?? e))) await markHandled();
-      if (__DEV__) console.warn('[Marmot] could not join from welcome:', e);
+      // Permanent = no key we hold opens it (another device's / a deleted key).
+      const permanent = await isPermanentWelcomeFailure(this.client.keyPackages, welcomeRumor, e);
+      if (permanent) await markHandled();
+      if (__DEV__) {
+        const kp = welcomeRumor.tags.find((t) => t[0] === 'e')?.[1]?.slice(0, 12);
+        console.warn(`[Marmot] welcome for key package ${kp} failed (permanent: ${permanent}):`, e);
+      }
       return null;
     } finally {
       this.joiningWelcomes.delete(id);
@@ -765,11 +795,14 @@ export class MarmotSession {
     const author = peer.toLowerCase();
     const network = this.client.network;
     const lookup = this.opts.getLookupRelays();
-    const [relayList] = (await network.request(lookup, {
-      kinds: [10002],
-      authors: [author],
-      limit: 1,
-    })) as NostrEvent[];
+    // Lookup relays can lag: take the NEWEST relay list, not the first (#1202).
+    const relayList = newestEvent(
+      (await network.request(lookup, {
+        kinds: [10002],
+        authors: [author],
+        limit: 1,
+      })) as NostrEvent[],
+    );
     const writeSet = relayList
       ? relayListFromTags(relayList.tags)
           .filter((r) => r.write)
@@ -888,19 +921,6 @@ export class MarmotSession {
     };
   }
 
-  /**
-   * The kind-30443 `d` slot: 32 random bytes, hex, generated once per account
-   * per device and reused for every replacement (transports/nostr.md — it
-   * MUST NOT be derived from identity material).
-   */
-  private async keyPackageSlot(): Promise<string> {
-    const stored = await this.backend.get('meta', 'keyPackageSlot');
-    if (stored && SLOT_ID_HEX.test(stored)) return stored;
-    const slot = bytesToHex(randomBytes(32));
-    await this.backend.set('meta', 'keyPackageSlot', slot);
-    return slot;
-  }
-
   private async loadWatermarks(): Promise<void> {
     for (const [ns, map] of [
       ['watermark', this.watermarks],
@@ -912,33 +932,6 @@ export class MarmotSession {
       }
     }
   }
-}
-
-type CommitOptions = NonNullable<Parameters<MarmotClient['groups']['commit']>[1]>;
-type SingleProposalAction = Extract<
-  NonNullable<CommitOptions['extraProposals']>[number],
-  (...args: never[]) => unknown
->;
-
-/**
- * marmot-ts 0.6.1-next pushes an array-returning ProposalAction's result into
- * the commit UN-flattened (engine/group-engine.js), so builders like
- * `proposeRemoveUser` / `proposeUpdateMetadata` produce a malformed commit.
- * Split one into `count` single-proposal actions.
- */
-function spreadProposals(
-  action: (ctx: Parameters<SingleProposalAction>[0]) => Promise<unknown[]>,
-  count: number,
-): SingleProposalAction[] {
-  return Array.from(
-    { length: count },
-    (_, i) =>
-      (async (ctx: Parameters<SingleProposalAction>[0]) => {
-        const proposals = await action(ctx);
-        if (proposals.length !== count) throw new Error('marmot: unexpected proposal count');
-        return proposals[i];
-      }) as SingleProposalAction,
-  );
 }
 
 export {
@@ -963,6 +956,8 @@ export async function quiesceMarmotSession(owner: string): Promise<void> {
   if (active?.pubkey === owner) active.stop();
   await pushDrains.get(owner)?.catch(() => undefined);
   pushDrains.delete(owner);
+  // Anything still running past the bounded wait must not touch the wipe.
+  fence.fenceStoppedSessions(owner);
 }
 
 export function getMarmotSession(): MarmotSession | null {
