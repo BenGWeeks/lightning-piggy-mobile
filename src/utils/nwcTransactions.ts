@@ -77,7 +77,10 @@ export function mapNwcTransactions(
           : tx.state === 'pending' || tx.state === 'failed' || tx.state === 'expired'
             ? false
             : undefined,
-      walletPending: tx.state === 'pending' ? true : undefined,
+      // The wallet's own verdict, before any proof: it says pending, or (no
+      // NIP-47 `state`, as LNbits sends) it reports no settle time (#1179).
+      walletPending:
+        tx.state === 'pending' || (tx.state === undefined && !tx.settled_at) ? true : undefined,
       created_at: tx.created_at ?? undefined,
       bolt11: tx.invoice,
       invoice: tx.invoice,
