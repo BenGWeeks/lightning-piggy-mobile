@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 import * as nip19 from 'nostr-tools/nip19';
 import * as AmberSigner from '../../modules/amber-signer';
-import { toAmberSignerError } from './amberErrors';
+import { AmberSignerError, toAmberSignerError } from './amberErrors';
 
 /**
  * Runs an Amber call that may launch an approval Intent, rethrowing any
@@ -14,6 +14,16 @@ async function viaAmber<T>(call: () => Promise<T>): Promise<T> {
   } catch (e) {
     throw toAmberSignerError(e);
   }
+}
+
+/**
+ * Amber answers Reject with RESULT_OK and an empty payload rather than a
+ * cancelled result (seen on Amber 6.6.7), so an empty answer is the user
+ * declining — never a success to hand on (#1186).
+ */
+function requireAnswer(answer: string | undefined): string {
+  if (answer) return answer;
+  throw new AmberSignerError('CANCELLED', 'declined', 'Amber returned an empty answer (rejected)');
 }
 
 export function isAmberSupported(): boolean {
@@ -30,7 +40,7 @@ export async function requestPublicKey(): Promise<string> {
     throw new Error('Amber is only supported on Android');
   }
   const result = await viaAmber(() => AmberSigner.getPublicKey());
-  let pk = result.pubkey;
+  let pk = requireAnswer(result.pubkey);
 
   // Amber may return npub (bech32) instead of hex — convert if needed
   if (pk.startsWith('npub1')) {
@@ -52,6 +62,8 @@ export async function requestEventSignature(
     throw new Error('Amber is only supported on Android');
   }
   const result = await viaAmber(() => AmberSigner.signEvent(eventJson, eventId, currentUser));
+  // Either field proves Amber signed; both empty is a Reject.
+  requireAnswer(result.event || result.signature);
   return { signature: result.signature, event: result.event };
 }
 
@@ -66,7 +78,7 @@ export async function requestNip04Encrypt(
   const { result } = await viaAmber(() =>
     AmberSigner.nip04Encrypt(plaintext, recipientPubkey, currentUser),
   );
-  return result;
+  return requireAnswer(result);
 }
 
 export async function requestNip04Decrypt(
@@ -80,7 +92,7 @@ export async function requestNip04Decrypt(
   const { result } = await viaAmber(() =>
     AmberSigner.nip04Decrypt(ciphertext, senderPubkey, currentUser),
   );
-  return result;
+  return requireAnswer(result);
 }
 
 export async function requestNip44Encrypt(
@@ -94,7 +106,7 @@ export async function requestNip44Encrypt(
   const { result } = await viaAmber(() =>
     AmberSigner.nip44Encrypt(plaintext, recipientPubkey, currentUser),
   );
-  return result;
+  return requireAnswer(result);
 }
 
 export async function requestNip44Decrypt(
@@ -108,7 +120,7 @@ export async function requestNip44Decrypt(
   const { result } = await viaAmber(() =>
     AmberSigner.nip44Decrypt(ciphertext, senderPubkey, currentUser),
   );
-  return result;
+  return requireAnswer(result);
 }
 
 /**

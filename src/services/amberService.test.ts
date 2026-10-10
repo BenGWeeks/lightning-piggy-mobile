@@ -146,3 +146,35 @@ describe('signer queue interplay', () => {
     expect(maxInFlight).toBe(1);
   });
 });
+
+describe('amberService empty answers (Amber Reject)', () => {
+  // Amber answers Reject with RESULT_OK and an empty payload, not CANCELLED.
+  const empties: [string, keyof typeof mockNative, unknown, () => Promise<unknown>][] = [
+    ['requestPublicKey', 'getPublicKey', { pubkey: '', package: 'p' }, () => amberService.requestPublicKey()], // prettier-ignore
+    ['requestEventSignature', 'signEvent', { signature: '', event: '' }, () => amberService.requestEventSignature('{}', '', PUBKEY)], // prettier-ignore
+    ['requestNip04Encrypt', 'nip04Encrypt', { result: '' }, () => amberService.requestNip04Encrypt('m', PUBKEY, PUBKEY)], // prettier-ignore
+    ['requestNip04Decrypt', 'nip04Decrypt', { result: '' }, () => amberService.requestNip04Decrypt('c', PUBKEY, PUBKEY)], // prettier-ignore
+    ['requestNip44Encrypt', 'nip44Encrypt', { result: '' }, () => amberService.requestNip44Encrypt('m', PUBKEY, PUBKEY)], // prettier-ignore
+    ['requestNip44Decrypt', 'nip44Decrypt', { result: '' }, () => amberService.requestNip44Decrypt('c', PUBKEY, PUBKEY)], // prettier-ignore
+  ];
+
+  it.each(empties)('%s treats an empty answer as declined', async (_, fn, answer, call) => {
+    mockNative[fn].mockResolvedValueOnce(answer);
+    const err = await call().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AmberSignerError);
+    expect(err).toMatchObject({ code: 'CANCELLED', kind: 'declined' });
+  });
+
+  it('accepts a signature-only answer from Amber', async () => {
+    mockNative.signEvent.mockResolvedValueOnce({ signature: 'sig', event: '' });
+    await expect(amberService.requestEventSignature('{}', '', PUBKEY)).resolves.toEqual({
+      signature: 'sig',
+      event: '',
+    });
+  });
+
+  it('leaves the silent decrypt untouched', async () => {
+    mockNative.nip44DecryptSilent.mockResolvedValueOnce({ result: '' });
+    await expect(amberService.requestNip44DecryptSilent('c', PUBKEY, PUBKEY)).resolves.toBe('');
+  });
+});
