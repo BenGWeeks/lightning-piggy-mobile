@@ -4,7 +4,11 @@ import { perAccountKey } from './perAccountStorage';
 import { getSendThreshold, setSendThreshold } from './sendThresholdService';
 import { loadSecretMode, saveSecretMode } from './secretModeService';
 import { loadWotSettings, saveWotSettings } from './wotSettingsService';
-import { getLinkPreviewEnabled, setLinkPreviewEnabled } from './linkPreviewPreference';
+import {
+  __resetForTests as resetLinkPreview,
+  getLinkPreviewEnabled,
+  setLinkPreviewEnabled,
+} from './linkPreviewPreference';
 import { wipeAccountCaches } from '../contexts/accountCacheWipe';
 import {
   __resetSafetyMigrationForTests,
@@ -48,6 +52,7 @@ const registry = (...pks: string[]) => ({
 beforeEach(async () => {
   await AsyncStorage.clear();
   __resetSafetyMigrationForTests();
+  resetLinkPreview();
   mockLoadIdentities.mockReset();
   mockLoadIdentities.mockResolvedValue(registry(BIG, MIDDLE));
 });
@@ -172,4 +177,19 @@ describe('sign-out wipe', () => {
     expect((await loadWotSettings(MIDDLE)).wotTier).toBe('fof');
     expect(await getLinkPreviewEnabled(MIDDLE)).toBe(false);
   });
+});
+
+it('preserves pre-rename dev_mode for every existing account', async () => {
+  await AsyncStorage.setItem('dev_mode', 'true');
+  await migrateSafetySettingsToPerAccount([BIG, MIDDLE]);
+  expect(await loadSecretMode(BIG)).toBe(true);
+  expect(await loadSecretMode(MIDDLE)).toBe(true);
+  expect(await AsyncStorage.getItem('dev_mode')).toBeNull();
+  expect(await AsyncStorage.getItem('secret_mode')).toBeNull();
+});
+it('does not write a new preference over a failed migration', async () => {
+  await AsyncStorage.setItem('send_threshold_sats_v1', '50000');
+  mockLoadIdentities.mockRejectedValueOnce(new Error('locked registry'));
+  await expect(setSendThreshold(1000, BIG)).rejects.toThrow('locked registry');
+  expect(await getSendThreshold(MIDDLE)).toBe(50000);
 });

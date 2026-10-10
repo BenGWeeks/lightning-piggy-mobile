@@ -41,7 +41,7 @@ export const PER_ACCOUNT_STORAGE_BASES: readonly string[] = [
   '@lp:wot-settings:v1',
   'secret_mode',
   'link_preview_enabled_v1',
-  // Language + fiat currency (device key stays as the new-account template).
+  // Language + fiat currency (separate phone_template keys seed new accounts).
   'app_locale_preference',
   'user_fiat_currency',
   // Wallet metadata list — wallets become per-account in multi-account.

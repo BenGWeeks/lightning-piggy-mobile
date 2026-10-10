@@ -1,14 +1,15 @@
 // Per-account language and fiat currency. Family members sharing one phone each
 // keep their own; switching accounts applies the new account's values.
 //
-// Storage: `perAccountKey(base, pubkey)` per account, PLUS the original
-// device-wide key kept as the "phone default". It is the template a brand-new
-// account starts from (the phone's current choice / system language) and is
-// rewritten on every change, so it always holds the most recent choice made on
-// this phone. A read prefers the account's own value, then the phone default.
+// A separate phone template supplies the first value for a new account.
+// Snapshot that value once; later changes by other accounts cannot change it.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { perAccountKey } from './perAccountStorage';
-import { ensureSafetySettingsMigrated } from './safetySettingsMigration';
+import {
+  ensureSafetySettingsMigrated,
+  phoneTemplateKey,
+  displayDefault,
+} from './safetySettingsMigration';
 
 export const LOCALE_PREF_KEY_BASE = 'app_locale_preference';
 export const CURRENCY_PREF_KEY_BASE = 'user_fiat_currency';
@@ -30,10 +31,16 @@ export async function loadAccountPref(base: string, pubkey: string | null): Prom
       const own = await AsyncStorage.getItem(perAccountKey(base, pubkey));
       if (own !== null) {
         cache.set(cacheId(base, pubkey), own);
+        await AsyncStorage.setItem(phoneTemplateKey(base), own);
         return own;
       }
     }
-    return await AsyncStorage.getItem(base);
+    const value = (await AsyncStorage.getItem(phoneTemplateKey(base))) ?? displayDefault(base);
+    if (pubkey) {
+      await AsyncStorage.setItem(perAccountKey(base, pubkey), value);
+      cache.set(cacheId(base, pubkey), value);
+    }
+    return value;
   } catch {
     return null;
   }
@@ -50,7 +57,7 @@ export async function saveAccountPref(
       await ensureSafetySettingsMigrated(pubkey);
       await AsyncStorage.setItem(perAccountKey(base, pubkey), value);
     }
-    await AsyncStorage.setItem(base, value); // phone default for new accounts
+    await AsyncStorage.setItem(phoneTemplateKey(base), value); // phone default for new accounts
   } catch {
     // Best-effort; in-memory state already took effect.
   }

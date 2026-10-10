@@ -5,6 +5,7 @@ import AccountScreenLayout from './AccountScreenLayout';
 import { createSharedAccountStyles } from './sharedStyles';
 import { useThemeColors } from '../../contexts/ThemeContext';
 import { useTranslation } from '../../contexts/LocaleContext';
+import { useAccountState } from '../../contexts/useAccountState';
 import { useNostr } from '../../contexts/NostrContext';
 import { createSecurityScreenStyles } from '../../styles/SecurityScreen.styles';
 import MarmotPushSection from '../../components/MarmotPushSection';
@@ -53,11 +54,12 @@ const SecurityScreen: React.FC = () => {
   const { pubkey } = useNostr();
   const sharedAccountStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const styles = useMemo(() => createSecurityScreenStyles(colors), [colors]);
-  const [threshold, setThresholdState] = useState<number | null>(
+  const [threshold, setThresholdState] = useAccountState<number | null>(
+    pubkey,
     DEFAULT_HIGH_VALUE_SEND_THRESHOLD_SATS,
   );
-  const [customDraft, setCustomDraft] = useState<string>('');
-  const [linkPreviewOn, setLinkPreviewOn] = useState<boolean>(true);
+  const [customDraft, setCustomDraft] = useAccountState<string>(pubkey, '');
+  const [linkPreviewOn, setLinkPreviewOn] = useAccountState<boolean>(pubkey, true);
   const [lockScreenContentOn, setLockScreenContentOn] = useState<boolean>(false);
   // Background DM watch is Android-only (iOS can't hold a background socket).
   const [backgroundDmOn, setBackgroundDmOn] = useState<boolean>(false);
@@ -86,7 +88,7 @@ const SecurityScreen: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [pubkey]);
+  }, [pubkey, setCustomDraft, setThresholdState, setLinkPreviewOn]);
 
   const handleToggleLinkPreview = async (next: boolean) => {
     setLinkPreviewOn(next);

@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Linking, Text, TouchableOpacity, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useNostr } from '../contexts/NostrContext';
 import { useAccountState } from '../contexts/useAccountState';
-import type { Palette } from '../styles/palettes';
+import { createMessageLinkPreviewStyles } from '../styles/MessageLinkPreview.styles';
 import { fetchLinkPreview } from '../services/linkPreviewFetcher';
 import {
   getLinkPreviewEnabled,
@@ -33,7 +33,7 @@ function deriveDomain(url: string): string {
 
 const MessageLinkPreview: React.FC<Props> = ({ url, eventId, fromMe = false }) => {
   const colors = useThemeColors();
-  const styles = useMemo(() => createStyles(colors, fromMe), [colors, fromMe]);
+  const styles = useMemo(() => createMessageLinkPreviewStyles(colors, fromMe), [colors, fromMe]);
   const { pubkey } = useNostr();
   // Owner-tagged: never shows the previous account's preference after a switch.
   const [enabled, setEnabled] = useAccountState<boolean | null>(pubkey, null);
@@ -83,7 +83,7 @@ const MessageLinkPreview: React.FC<Props> = ({ url, eventId, fromMe = false }) =
   // Preference disabled, blocklisted, or fetch yielded no metadata —
   // render nothing extra. The bare URL stays clickable in the
   // surrounding bubble text.
-  if (enabled === false) return null;
+  if (enabled !== true) return null;
   if (isBlocklisted(url)) return null;
   if (!loading && !preview) return null;
 
@@ -138,51 +138,5 @@ const MessageLinkPreview: React.FC<Props> = ({ url, eventId, fromMe = false }) =
     </TouchableOpacity>
   );
 };
-
-const createStyles = (colors: Palette, fromMe: boolean) =>
-  StyleSheet.create({
-    card: {
-      marginTop: 6,
-      borderRadius: 12,
-      borderWidth: 1,
-      borderColor: fromMe ? 'rgba(255,255,255,0.4)' : colors.brandPink,
-      backgroundColor: fromMe ? 'rgba(255,255,255,0.08)' : colors.surface,
-      overflow: 'hidden',
-      maxWidth: 280,
-    },
-    tapTarget: {},
-    image: {
-      width: '100%',
-      height: 140,
-      backgroundColor: colors.background,
-    },
-    body: {
-      paddingHorizontal: 12,
-      paddingVertical: 10,
-      gap: 4,
-    },
-    loadingRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-    },
-    urlFallback: {
-      flex: 1,
-      fontSize: 12,
-      color: fromMe ? 'rgba(255,255,255,0.85)' : colors.textSupplementary,
-    },
-    title: {
-      fontSize: 14,
-      fontWeight: '700',
-      color: fromMe ? colors.white : colors.textHeader,
-    },
-    domain: {
-      fontSize: 11,
-      color: fromMe ? 'rgba(255,255,255,0.7)' : colors.textSupplementary,
-      textTransform: 'uppercase',
-      letterSpacing: 0.4,
-      marginTop: 2,
-    },
-  });
 
 export default MessageLinkPreview;

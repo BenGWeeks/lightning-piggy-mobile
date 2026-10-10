@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef } from 'react';
 import { useLocales } from 'expo-localization';
 import type { Scope, TranslateOptions } from 'i18n-js';
 import i18n, {
@@ -54,12 +54,16 @@ export const LocaleProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // (mirrors ThemeContext's `Appearance.addChangeListener` for 'system' mode).
   const deviceLocales = useLocales();
 
+  const changeVersion = useRef(0);
+
   // Load the active account's preference (its own, else the phone default,
   // else stay on 'system' so the app follows the device locale).
   useEffect(() => {
     let mounted = true;
+    const version = changeVersion.current;
     loadAccountPref(LOCALE_PREF_KEY_BASE, activePubkey).then((stored) => {
-      if (mounted && isPref(stored)) setPreferenceState(stored);
+      if (mounted && version === changeVersion.current && isPref(stored))
+        setPreferenceState(stored);
     });
     return () => {
       mounted = false;
@@ -68,6 +72,7 @@ export const LocaleProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const setPreference = useCallback(
     (pref: LocalePreference) => {
+      changeVersion.current += 1;
       setPreferenceState(pref);
       saveAccountPref(LOCALE_PREF_KEY_BASE, pref, activePubkey).catch(() => {});
     },

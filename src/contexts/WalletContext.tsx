@@ -24,16 +24,9 @@ import { mapOnchainTransactions } from '../utils/onchainTransactions';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as onchainService from '../services/onchainService';
 import * as walletStorage from '../services/walletStorageService';
-import { useActivePubkey } from '../hooks/useActivePubkey';
-import { useAccountState } from './useAccountState';
-import {
-  CURRENCY_PREF_KEY_BASE,
-  loadAccountPref,
-  peekAccountPref,
-  saveAccountPref,
-} from '../services/accountDisplayPrefs';
+import { useAccountCurrency } from './useAccountCurrency';
 import { rearmBackgroundWatchAfterNwcWalletAdded } from '../services/backgroundDmService';
-import { CURRENCIES, FiatCurrency, getBtcPrice } from '../services/fiatService';
+import { FiatCurrency } from '../services/fiatService';
 import { WalletLiveContext } from './WalletLiveContext';
 import { useOnchainIncomingPoll } from './useOnchainIncomingPoll';
 import { useWalletIdentityHydration } from './useWalletIdentityHydration';
@@ -63,11 +56,6 @@ let __walletProviderFirstRenderLogged = false;
 let __walletProviderHydratedLogged = false;
 
 export type { IncomingPayment } from './incomingPayment';
-
-const CURRENCY_KEY = CURRENCY_PREF_KEY_BASE;
-const isFiatCurrency = (v: string | null): v is FiatCurrency =>
-  !!v && (CURRENCIES as readonly string[]).includes(v);
-const BTC_PRICE_CACHE_PREFIX = 'btc_price_';
 
 // The #P-tagged outgoing zap-receipt relay fetch is expensive (500-event
 // filter). With local-storage attribution being the common path, this
@@ -232,17 +220,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [isOnboarded, setIsOnboarded] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [walletsHydrated, setWalletsHydrated] = useState(false);
-  // Fiat currency is PER ACCOUNT (shared family phone): owner-tagged so a switch
-  // never shows the previous account's currency.
-  const activePubkey = useActivePubkey();
-  const seenCurrency = peekAccountPref(CURRENCY_KEY, activePubkey);
-  const [currency, setCurrencyState] = useAccountState<FiatCurrency>(
-    activePubkey,
-    isFiatCurrency(seenCurrency) ? seenCurrency : 'USD',
-  );
-  const [btcPrice, setBtcPrice] = useState<number | null>(null);
+  const { currency, setCurrency, btcPrice } = useAccountCurrency();
   const [lastIncomingPayment, setLastIncomingPayment] = useState<IncomingPayment | null>(null);
-  const priceInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   // Per-wallet last-seen balance. NOT used to detect/attribute receives any
   // more (that's done by transaction hash — see seenReceiptsRef); it's only a
   // trigger: a balance *increase* means something settled, so we refresh the
@@ -290,29 +269,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     activeWallet?.walletType === 'onchain' ? true : (activeWallet?.isConnected ?? false);
   const balance = activeWallet?.balance ?? null;
   const walletAlias = activeWallet?.walletAlias ?? activeWallet?.alias ?? null;
-
-  const setCurrency = useCallback(async (cur: FiatCurrency) => {
-    setCurrencyState(cur);
-    await saveAccountPref(CURRENCY_KEY, cur, walletStorage.getActivePubkey());
-    const price = await getBtcPrice(cur);
-    setBtcPrice(price);
-    if (price != null) {
-      AsyncStorage.setItem(`${BTC_PRICE_CACHE_PREFIX}${cur}`, String(price)).catch(() => {});
-    }
-  }, []);
-
-  const fetchPrice = useCallback(async (cur: FiatCurrency) => {
-    const price = await getBtcPrice(cur);
-    setBtcPrice(price);
-    // Persist for cold-start hydration — without this, GBP/USD/etc. show
-    // empty for the first 1-3 s of every cold start while we wait on the
-    // CoinGecko fetch. Cached value is "stale-ok": still in the right
-    // ballpark for converting balance/transactions, and the next interval
-    // tick (5 min) or focus refresh replaces it.
-    if (price != null) {
-      AsyncStorage.setItem(`${BTC_PRICE_CACHE_PREFIX}${cur}`, String(price)).catch(() => {});
-    }
-  }, []);
 
   const updateWalletInState = useCallback((walletId: string, updates: Partial<WalletState>) => {
     // No-op bail-out (unchanged poll → same `wallets` identity) lives in mergeWalletUpdate.
@@ -377,31 +333,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       prev.map((w) => (w.id === walletId ? { ...w, transactions: [tx, ...w.transactions] } : w)),
     );
   }, []);
-
-  // Load the ACTIVE account's currency (its own, else the phone default, else
-  // USD) at startup and on every account switch, then hydrate the cached BTC
-  // price so the fiat column renders on first paint and refresh it. The
-  // currency-change effects below keep the price interval in step.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const saved = await loadAccountPref(CURRENCY_KEY, activePubkey);
-      if (cancelled) return;
-      const cur: FiatCurrency = isFiatCurrency(saved) ? saved : 'USD';
-      setCurrencyState(cur);
-      AsyncStorage.getItem(`${BTC_PRICE_CACHE_PREFIX}${cur}`)
-        .then((raw) => {
-          if (cancelled || raw == null) return;
-          const n = Number(raw);
-          if (Number.isFinite(n) && n > 0) setBtcPrice(n);
-        })
-        .catch(() => {});
-      fetchPrice(cur);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [activePubkey, fetchPrice, setCurrencyState]);
 
   // Startup: load prefs, migrate, reconnect all wallets
   useEffect(() => {
@@ -607,7 +538,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // Mount-once startup. `hydrateSeenReceipts` is a stable useCallback; adding
     // it would (wrongly) re-run the whole startup hydration.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchPrice]);
+  }, []);
 
   // Hold the latest wallets in a ref for consumers (the NWC watchdog, the
   // fire-and-forget tx fetch) that must read fresh state without re-keying
@@ -627,32 +558,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setActiveWalletId,
     setLastIncomingPayment,
   });
-
-  // Refresh BTC price every 5 minutes
-  useEffect(() => {
-    priceInterval.current = setInterval(() => fetchPrice(currency), 5 * 60 * 1000);
-    return () => {
-      if (priceInterval.current) clearInterval(priceInterval.current);
-    };
-  }, [currency, fetchPrice]);
-
-  // Retry the fiat-price fetch when the app comes to foreground if we
-  // don't yet have a rate. Covers the cold-start-offline case: app
-  // launches without internet → `fetchPrice` returns null → `btcPrice`
-  // stays null → the wallet card's fiat line + the sats↔fiat toggle in
-  // `AmountEntryScreen` both silently disable (they gate on
-  // `btcPrice !== null`). Without this retry, the user has to wait up
-  // to 5 min for the interval tick or kill + relaunch the app to recover
-  // once connectivity returns. Gate on `btcPrice === null` so we don't
-  // spam CoinGecko in the happy path where the rate is already cached.
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', (next) => {
-      if (next === 'active' && btcPrice === null) {
-        fetchPrice(currency);
-      }
-    });
-    return () => sub.remove();
-  }, [btcPrice, currency, fetchPrice]);
 
   // NWC connection watchdog: 30 s WebSocket-health check + reconnect —
   // extracted per-responsibility hook (see useNwcConnectionWatchdog).

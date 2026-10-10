@@ -355,7 +355,7 @@ Distinguishes three reply outcomes:
 Hot wallet (mnemonic import) is available behind a **secret mode** toggle:
 
 - **Enable**: Triple-tap the version number at the bottom of Account settings
-- **Stored**: `secret_mode` flag in AsyncStorage (persists across sessions)
+- **Stored**: `secret_mode_<pubkey>` flag in AsyncStorage (per account, persists across sessions)
 - **Visual**: Version displays "(secret)" suffix when enabled
 
 **Mnemonic import flow:**

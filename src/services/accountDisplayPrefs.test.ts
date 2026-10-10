@@ -37,8 +37,8 @@ describe('per-account language and currency', () => {
     expect(await AsyncStorage.getItem(perAccountKey(CURRENCY_PREF_KEY_BASE, MIDDLE))).toBe('GBP');
     // A brand-new account starts from the phone's current value.
     expect(await loadAccountPref(CURRENCY_PREF_KEY_BASE, LITTLE)).toBe('GBP');
-    // The device key was not deleted.
-    expect(await AsyncStorage.getItem(LOCALE_PREF_KEY_BASE)).toBe('es');
+    // Legacy device keys are deleted after copying.
+    expect(await AsyncStorage.getItem(LOCALE_PREF_KEY_BASE)).toBeNull();
   });
 
   it('keeps accounts independent and switches instantly via the sync mirror', async () => {
@@ -54,7 +54,18 @@ describe('per-account language and currency', () => {
     expect(peekAccountPref(LOCALE_PREF_KEY_BASE, MIDDLE)).toBe('en');
   });
 
-  it('returns null when nothing is stored anywhere', async () => {
-    expect(await loadAccountPref(CURRENCY_PREF_KEY_BASE, LITTLE)).toBeNull();
+  it('snapshots the default when nothing is stored anywhere', async () => {
+    expect(await loadAccountPref(CURRENCY_PREF_KEY_BASE, LITTLE)).toBe('USD');
   });
+});
+
+it('snapshots a new account default so later changes by someone else do not follow it', async () => {
+  await saveAccountPref(CURRENCY_PREF_KEY_BASE, 'GBP', BIG);
+  expect(await loadAccountPref(CURRENCY_PREF_KEY_BASE, LITTLE)).toBe('GBP');
+  await saveAccountPref(CURRENCY_PREF_KEY_BASE, 'EUR', BIG);
+  expect(await loadAccountPref(CURRENCY_PREF_KEY_BASE, LITTLE)).toBe('GBP');
+});
+it('preserves existing default accounts when another account changes first', async () => {
+  await saveAccountPref(CURRENCY_PREF_KEY_BASE, 'GBP', BIG);
+  expect(await loadAccountPref(CURRENCY_PREF_KEY_BASE, MIDDLE)).toBe('USD');
 });

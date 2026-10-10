@@ -18,12 +18,15 @@ export const WOT_SETTINGS_KEY_BASE = '@lp:wot-settings:v1';
 export const SECRET_MODE_KEY_BASE = 'secret_mode';
 export const LINK_PREVIEW_KEY_BASE = 'link_preview_enabled_v1';
 
-/** Display prefs that are per account but whose device key lives on as the
- * "phone default" template for new accounts (see accountDisplayPrefs). */
+/** Display preferences retain a separate template for new accounts. */
 export const TEMPLATE_PREF_BASES: readonly string[] = [
   'app_locale_preference',
   'user_fiat_currency',
 ];
+
+export const phoneTemplateKey = (base: string): string => `phone_template:${base}`;
+export const displayDefault = (base: string): string =>
+  base === 'app_locale_preference' ? 'system' : 'USD';
 
 /** Device-wide keys that are now stored per account (and deleted once copied). */
 export const SAFETY_SETTING_BASES: readonly string[] = [
@@ -47,15 +50,26 @@ export const PER_ACCOUNT_SETTING_BASES: readonly string[] = [
 export async function migrateSafetySettingsToPerAccount(pubkeys: readonly string[]): Promise<void> {
   const owners = Array.from(new Set(pubkeys.filter(Boolean)));
   if (owners.length === 0) return;
+  // Preserve the pre-rename Secret Mode value before fanning it out.
+  const oldSecret = await AsyncStorage.getItem('dev_mode');
+  if (oldSecret !== null && (await AsyncStorage.getItem(SECRET_MODE_KEY_BASE)) === null) {
+    await AsyncStorage.setItem(SECRET_MODE_KEY_BASE, oldSecret);
+  }
   for (const base of PER_ACCOUNT_SETTING_BASES) {
     const legacy = await AsyncStorage.getItem(base);
-    if (legacy === null) continue;
+    const isDisplay = TEMPLATE_PREF_BASES.includes(base);
+    if (legacy === null && !isDisplay) continue;
+    const value =
+      legacy ?? (await AsyncStorage.getItem(phoneTemplateKey(base))) ?? displayDefault(base);
     for (const owner of owners) {
       const key = perAccountKey(base, owner);
-      if ((await AsyncStorage.getItem(key)) === null) await AsyncStorage.setItem(key, legacy);
+      if ((await AsyncStorage.getItem(key)) === null) await AsyncStorage.setItem(key, value);
     }
-    // Template prefs keep their device key as the new-account default.
-    if (!TEMPLATE_PREF_BASES.includes(base)) await AsyncStorage.removeItem(base);
+    if (isDisplay && (await AsyncStorage.getItem(phoneTemplateKey(base))) === null) {
+      await AsyncStorage.setItem(phoneTemplateKey(base), value);
+    }
+    if (base === SECRET_MODE_KEY_BASE) await AsyncStorage.removeItem('dev_mode');
+    await AsyncStorage.removeItem(base);
   }
 }
 
@@ -66,7 +80,7 @@ let done = false;
  * Run the migration once per process against the identity registry plus
  * `extraPubkey` (the caller's account, in case the registry write races).
  * Every per-account getter/setter awaits this first so no read can observe a
- * half-migrated state. Failures are swallowed and retried on the next call.
+ * half-migrated state. Failures reject and are retried on the next call.
  */
 export function ensureSafetySettingsMigrated(extraPubkey?: string | null): Promise<void> {
   if (done) return Promise.resolve();
@@ -78,8 +92,6 @@ export function ensureSafetySettingsMigrated(extraPubkey?: string | null): Promi
         if (extraPubkey) owners.push(extraPubkey);
         await migrateSafetySettingsToPerAccount(owners);
         done = owners.length > 0;
-      } catch {
-        // Retry next call; readers fall back to defaults meanwhile.
       } finally {
         inFlight = null;
       }
