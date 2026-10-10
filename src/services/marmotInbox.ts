@@ -6,7 +6,7 @@
 import { textForRumor } from '../utils/nip17Unwrap';
 import type { DmMessageRow } from './dmDb';
 import type { GroupMessage } from './groupMessagesStorageService';
-import { marmotMediaText, type MarmotMediaKeys } from './marmotMedia';
+import { attachmentFallbackText, marmotMediaText, type MarmotMediaKeys } from './marmotMedia';
 import { MARMOT_CHAT_KIND, type MarmotMessageEvent, type MarmotRumor } from './marmotSession';
 
 /** NIP-17's chat kind — the app's text pipeline (renderer, message-info,
@@ -27,9 +27,9 @@ export function storedKindForMarmot(kind: number): number {
 }
 
 /**
- * Stored text + kind for a Marmot app event. A photo (MIP-04: kind 9 with an
- * `imeta` attachment) is stored like a NIP-17 encrypted file — the `#lpe=1`
- * URL, kind 15 — so the image bubble and the redacted previews apply; its
+ * Stored text + kind for a Marmot app event. A photo or voice note (MIP-04: kind 9
+ * with an `imeta` attachment) is stored like a NIP-17 encrypted file — the
+ * `#lpe=1` URL, kind 15 — so the image / voice bubble and the redacted previews apply; its
  * file keys come from the session (`mediaKeys`). A caption is dropped.
  */
 export function storedMarmotContent(
@@ -39,6 +39,10 @@ export function storedMarmotContent(
   if (rumor.kind === MARMOT_CHAT_KIND) {
     const media = marmotMediaText(rumor.tags, mediaKeys);
     if (media) return { text: media, kind: APP_FILE_KIND };
+    // An attachment we can't show (unsupported type, or no keys): say so
+    // instead of an empty bubble. A real caption wins.
+    const fallback = !rumor.content.trim() && attachmentFallbackText(rumor.tags);
+    if (fallback) return { text: fallback, kind: APP_TEXT_KIND };
   }
   return { text: textForRumor(rumor), kind: storedKindForMarmot(rumor.kind) };
 }

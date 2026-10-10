@@ -31,8 +31,8 @@ import {
 } from './marmotSession';
 import { createMemoryMarmotBackend, decodeMarmotValue, encodeMarmotValue } from './marmotStore';
 import { storedMarmotContent } from './marmotInbox';
-import { decryptMarmotImage, marmotImetaTag } from './marmotMedia';
-import { parseImageMessage } from '../utils/messageContent';
+import { decryptMarmotMedia, marmotImetaTag } from './marmotMedia';
+import { parseImageMessage, parseVoiceNote } from '../utils/messageContent';
 
 const RELAY = 'wss://relay.test';
 
@@ -629,10 +629,45 @@ describe('MarmotSession (no WebCrypto)', () => {
     expect(stored.kind).toBe(15);
     const image = parseImageMessage(stored.text)!;
     expect(image).toMatchObject({ url, mime: 'image/png', encrypted: true });
-    expect(decryptMarmotImage(enc.encrypted, { ...image, marmot: image.marmot! })).toEqual(photo);
+    expect(decryptMarmotMedia(enc.encrypted, { ...image, marmot: image.marmot! })).toEqual(photo);
 
-    // Without keys (none derived) the event stays plain text — never a broken image.
-    expect(storedMarmotContent(received.rumor, undefined)).toEqual({ text: '', kind: 14 });
+    // Without keys (none derived) it's a labelled fallback — never an empty bubble.
+    expect(storedMarmotContent(received.rumor, undefined)).toEqual({
+      text: "Couldn't open attachment: photo.png",
+      kind: 14,
+    });
+
+    alice.session.stop();
+    bob.session.stop();
+  }, 60_000);
+
+  it('voice notes: audio/mp4 media (White Noise shape) decrypts into the voice-note bubble', async () => {
+    const relay = makeRelay();
+    const alice = makeSession(relay);
+    const bob = makeSession(relay);
+    await Promise.all([alice.session.start(), bob.session.start()]);
+    await waitFor(() => relay.events.some((e) => e.kind === 30443 && e.pubkey === bob.pubkey));
+    const dm = await alice.session.getOrCreateDm(bob.pubkey);
+    await bob.session.acceptWelcome(unwrapWelcomes(relay, bob)[0]);
+
+    const clip = new Uint8Array(2048).map((_, i) => (i * 7) % 256);
+    const enc = await alice.session.encryptMedia(dm.id, clip, 'audio/mp4', 'voice-2000ms.m4a');
+    const url = `https://blossom.example/${enc.attachment.ciphertextSha256}.bin`;
+    const rumor = buildMarmotRumor(alice.pubkey, {
+      kind: MARMOT_CHAT_KIND,
+      content: '',
+      tags: [marmotImetaTag(enc.attachment, url)],
+    });
+    await alice.session.sendRumor(dm.id, rumor);
+    await waitFor(() => bob.inbox.some((m) => m.rumor.id === rumor.id));
+
+    const received = bob.inbox.find((m) => m.rumor.id === rumor.id)!;
+    const stored = storedMarmotContent(received.rumor, received.mediaKeys);
+    expect(stored.kind).toBe(15);
+    expect(parseImageMessage(stored.text)).toBeNull();
+    const voice = parseVoiceNote(stored.text)!;
+    expect(voice).toMatchObject({ url, mime: 'audio/mp4', encrypted: true });
+    expect(decryptMarmotMedia(enc.encrypted, { ...voice, marmot: voice.marmot! })).toEqual(clip);
 
     alice.session.stop();
     bob.session.stop();

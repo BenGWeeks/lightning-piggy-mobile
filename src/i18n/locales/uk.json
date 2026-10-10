@@ -596,6 +596,7 @@
     "attach": "Прикріпити",
     "sendMessage": "Надіслати повідомлення групі",
     "zapUnavailable": "Надіслати zap (недоступно — у групі немає єдиного одержувача)",
+    "walletUnavailable": "Поділитися гаманцем (недоступно — гаманцем можна ділитися лише в особистих чатах)",
     "shareContactTitle": "Поділитися контактом з {{name}}",
     "shareContactSubtitle": "Вони побачать це як картку профілю Nostr, яку можна відкрити.",
     "closeFullscreenGif": "Закрити повноекранний GIF"
@@ -1152,6 +1153,9 @@
     "marmotMessage": "Подія групи Marmot — відкрийте чат Marmot, щоб прочитати.",
     "marmotInvitePreview": "Запрошення до чату Marmot",
     "marmotMessagePreview": "Повідомлення Marmot",
+    "voiceMessagePreview": "Голосове повідомлення",
+    "unsupportedAttachment": "Непідтримуване вкладення: {{name}} ({{type}})",
+    "attachmentUnavailable": "Не вдалося відкрити вкладення: {{name}}",
     "secretMode": "Секретний режим",
     "secretModeSenderMemo": "Lightning Piggy запропонує одержувачу кнопку для перемикання Секретного режиму.",
     "secretModeReceiverMemo": "Розблоковує розробницькі / просунуті функції в Lightning Piggy.",

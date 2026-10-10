@@ -30,5 +30,7 @@ See docs/DEPLOYMENT.adoc → "TestFlight 'What to Test' automation".
 
 ### Fixed
 
+- **Wallet is visible but disabled in group chat attachments.** Wallet connections can only be shared in one-to-one chats.
+
 - **Relay dots show the real connection status** instead of always red.
 - **Signer declines stop the inbox refresh.** When a Nostr Connect signer refuses a request, the app now stops checking messages once instead of asking the signer again for every message.

@@ -624,6 +624,7 @@
     "attach": "Attach",
     "sendMessage": "Send group message",
     "zapUnavailable": "Send a zap (unavailable — no single recipient in a group)",
+    "walletUnavailable": "Share a wallet (unavailable — wallets can only be shared in one-to-one chats)",
     "shareContactTitle": "Share a contact with {{name}}",
     "shareContactSubtitle": "They'll see it as a Nostr profile card they can open.",
     "closeFullscreenGif": "Close full-screen GIF"
@@ -1180,6 +1181,9 @@
     "marmotMessage": "Marmot group event — open the Marmot chat to read it.",
     "marmotInvitePreview": "Marmot chat invite",
     "marmotMessagePreview": "Marmot message",
+    "voiceMessagePreview": "Voice message",
+    "unsupportedAttachment": "Unsupported attachment: {{name}} ({{type}})",
+    "attachmentUnavailable": "Couldn't open attachment: {{name}}",
     "secretMode": "Secret Mode",
     "secretModeSenderMemo": "Lightning Piggy will offer the recipient a button to toggle Secret Mode.",
     "secretModeReceiverMemo": "Unlocks dev / power-user surfaces in Lightning Piggy.",

@@ -1,3 +1,5 @@
+import { marmotImetaTag } from './marmotMedia';
+import { parseVoiceNote } from '../utils/messageContent';
 import { marmotRumorToDmRow, marmotRumorToGroupMessage, storedKindForMarmot } from './marmotInbox';
 import type { MarmotGroupSummary } from './marmotSession';
 
@@ -65,5 +67,45 @@ describe('marmotInbox', () => {
       text: 'oink',
       createdAt: 100,
     });
+  });
+});
+
+describe('marmotInbox — attachments', () => {
+  const CT = 'ab'.repeat(32);
+  const URL = `https://blossom.example/${CT}.bin`;
+  const media = (mediaType: string, filename: string) => ({
+    version: 'encrypted-media-v2' as const,
+    locators: [],
+    ciphertextSha256: CT,
+    plaintextSha256: 'cd'.repeat(32),
+    nonce: 'ef'.repeat(12),
+    mediaType,
+    filename,
+  });
+  const withTag = (mediaType: string, filename: string, content = '') =>
+    rumor({ content, tags: [marmotImetaTag(media(mediaType, filename), URL)] } as never);
+  const keys = { [CT]: { url: URL, keysHex: ['11'.repeat(32)] } };
+
+  it('stores a White Noise voice note (audio/mp4 imeta) as a kind-15 voice row, in 1:1 and groups', () => {
+    const r = withTag('audio/mp4', 'voice-2000ms.m4a');
+    const row = marmotRumorToDmRow(ME, { group: dm, rumor: r, mediaKeys: keys })!;
+    expect(row.wireKind).toBe(15);
+    expect(parseVoiceNote(row.content)).toMatchObject({ url: URL, mime: 'audio/mp4' });
+    expect(parseVoiceNote(marmotRumorToGroupMessage(r, keys).text)).not.toBeNull();
+  });
+
+  it('shows a label, never an empty bubble, for an attachment it cannot render', () => {
+    const r = withTag('application/pdf', 'doc.pdf');
+    const row = marmotRumorToDmRow(ME, { group: dm, rumor: r, mediaKeys: keys })!;
+    expect(row).toMatchObject({
+      content: 'Unsupported attachment: doc.pdf (application/pdf)',
+      wireKind: 14,
+    });
+    expect(marmotRumorToGroupMessage(r).text).toContain('doc.pdf');
+  });
+
+  it('keeps a real caption over the fallback', () => {
+    const r = withTag('application/pdf', 'doc.pdf', 'see attached');
+    expect(marmotRumorToDmRow(ME, { group: dm, rumor: r })!.content).toBe('see attached');
   });
 });
