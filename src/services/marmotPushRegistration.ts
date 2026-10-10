@@ -140,6 +140,8 @@ let started = false;
 // removed account's, being torn down) while waiting for the next one.
 let awaitingSession: { stale: MarmotSession | null } | null = null;
 let chain: Promise<unknown> = Promise.resolve();
+// In-memory mirror of RETIRE_PENDING_KEY: no token is handed out meanwhile.
+let retiring = false;
 
 function serial<T>(op: () => Promise<T>): Promise<T> {
   const run = chain.then(op, op);
@@ -216,10 +218,14 @@ export function startMarmotPushRegistration(): () => void {
   const unsubscribe = subscribeMarmotSession(applyTo);
   const tokenSub = Notifications.addPushTokenListener((native) => {
     void serial(async () => {
-      if (!settings.enabled || registration === undefined) return;
+      // Also recovers a startup read that failed / timed out: a token that
+      // arrives later is taken — unless a deletion is still outstanding or
+      // we're waiting for another account after an account removal.
+      if (!settings.enabled || retiring || awaitingSession) return;
       try {
         const platform = native.type === 'ios' ? 'apns' : 'fcm';
         registration = toRegistration(platform, String(native.data), currentServer());
+        await registerWakeTask();
         applyTo(getMarmotSession());
       } catch {
         // malformed token — keep the previous registration
@@ -276,6 +282,7 @@ async function enableNow(): Promise<EnableOutcome> {
   if (await retirementPending()) {
     await retireDeviceToken();
     await AsyncStorage.removeItem(RETIRE_PENDING_KEY).catch(() => undefined);
+    retiring = false;
   }
   try {
     registration = await readRegistration(currentServer());
@@ -368,8 +375,10 @@ async function refreshAfterRetirement(session: MarmotSession): Promise<void> {
   void session.pushRegistration.sync({ interactive: true }).catch(() => undefined);
 }
 
-const retirementPending = async () =>
-  (await AsyncStorage.getItem(RETIRE_PENDING_KEY).catch(() => null)) === '1';
+const retirementPending = async () => {
+  retiring = (await AsyncStorage.getItem(RETIRE_PENDING_KEY).catch(() => null)) === '1';
+  return retiring;
+};
 
 /** Delete the token at Apple/Google; on failure remember to retry. */
 async function retireDeviceToken(): Promise<boolean> {
@@ -377,8 +386,10 @@ async function retireDeviceToken(): Promise<boolean> {
   try {
     await Notifications.unregisterForNotificationsAsync();
     await AsyncStorage.removeItem(RETIRE_PENDING_KEY);
+    retiring = false;
   } catch {
     deleted = false;
+    retiring = true;
     await AsyncStorage.setItem(RETIRE_PENDING_KEY, '1').catch(() => undefined);
   }
   if (Platform.OS === 'android' && !settings.enabled) {
@@ -413,5 +424,6 @@ export function __resetMarmotPushForTests(): void {
   settingsLoaded = false;
   registration = undefined;
   awaitingSession = null;
+  retiring = false;
   chain = Promise.resolve();
 }

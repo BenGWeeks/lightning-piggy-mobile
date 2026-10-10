@@ -262,4 +262,21 @@ describe('ordering of device-level changes', () => {
     expect((await enableMarmotPush()).status).toBe('enabled');
     expect(await AsyncStorage.getItem('marmot_push_retire_pending_v1')).toBeNull();
   });
+
+  it('a token that arrives after a failed startup read is still taken', async () => {
+    await AsyncStorage.setItem('marmot_push_enabled_v1', '1');
+    (Notifications.getDevicePushTokenAsync as jest.Mock).mockRejectedValueOnce(
+      new Error('timed out'),
+    );
+    const stop = startMarmotPushRegistration();
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(lastRegistration()).toBeNull();
+    const listener = (Notifications.addPushTokenListener as jest.Mock).mock.calls.at(-1)?.[0];
+    listener({ type: 'android', data: 'late-token' });
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(lastRegistration()?.token).toEqual(new TextEncoder().encode('late-token'));
+    stop();
+  });
 });

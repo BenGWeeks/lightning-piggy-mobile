@@ -16,6 +16,7 @@ import {
   postGenericPushAlert,
   type WakeDeps,
 } from './marmotPushWake';
+import * as notificationService from './notificationService';
 import { dismissNotificationsFor, fireMessageNotification } from './notificationService';
 
 function deps(over: Partial<WakeDeps> = {}): WakeDeps & { notified: number } {
@@ -78,7 +79,7 @@ describe('handleMarmotPushWake', () => {
   });
 
   it('falls back to the generic alert when the running session stayed quiet', async () => {
-    const d = deps({ hasLiveSession: () => true, lastNotifiedAt: () => 10_000 - 31_000 });
+    const d = deps({ hasLiveSession: () => true, lastNotifiedAt: () => 10_000 - 16_000 });
     expect(await handleMarmotPushWake(d)).toBe('notified');
     expect(d.notified).toBe(1);
   });
@@ -108,5 +109,13 @@ describe('handleMarmotPushWake', () => {
     expect(fireMessageNotification).toHaveBeenCalledWith(
       expect.objectContaining({ kind: 'dm', threadId: '__push__', data: { marmotPush: true } }),
     );
+  });
+
+  it('a real Marmot alert landing while the generic one is posted clears it', async () => {
+    const last = notificationService.lastMarmotNotificationAt as jest.Mock;
+    last.mockReturnValueOnce(0).mockReturnValueOnce(12_345);
+    (dismissNotificationsFor as jest.Mock).mockClear();
+    await postGenericPushAlert();
+    expect(dismissNotificationsFor).toHaveBeenLastCalledWith({ marmotPushAlerts: true });
   });
 });

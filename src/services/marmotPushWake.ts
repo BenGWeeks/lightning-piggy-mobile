@@ -30,8 +30,10 @@ export const MARMOT_PUSH_WAKE_TASK = 'lp-marmot-push-wake';
 /** How long a running session gets to post the detailed notification. */
 const LIVE_SESSION_GRACE_MS = 6_000;
 /** The sender publishes the message BEFORE the trigger, so a running app
- * has often shown it already when the push lands — look back this far. */
-const COVERED_LOOKBACK_MS = 30_000;
+ * has often shown it already when the push lands — look back this far.
+ * A push carries no message id, so this is a heuristic: kept short so an
+ * earlier, unrelated alert rarely stands in for this one. */
+const COVERED_LOOKBACK_MS = 15_000;
 
 // Set by marmotPushRegistration while the app has a Marmot session (kept
 // as a flag so this module — loaded at every JS start, headless included —
@@ -54,6 +56,7 @@ export interface WakeDeps {
 
 /** "New message" with no thread: a tap opens the Messages list. */
 export async function postGenericPushAlert(): Promise<void> {
+  const before = lastMarmotNotificationAt();
   // One generic alert at a time: a burst of pushes replaces it, not stacks.
   await dismissNotificationsFor({ genericMessages: true });
   await fireMessageNotification({
@@ -65,6 +68,11 @@ export async function postGenericPushAlert(): Promise<void> {
     // Marked so the real Marmot notification can replace it.
     data: { marmotPush: true },
   });
+  // The real message landed while we were posting: it already tried to
+  // clear us before we existed, so clear ourselves.
+  if (lastMarmotNotificationAt() !== before) {
+    await dismissNotificationsFor({ marmotPushAlerts: true });
+  }
 }
 
 const defaultDeps: WakeDeps = {

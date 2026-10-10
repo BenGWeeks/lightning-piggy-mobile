@@ -246,7 +246,7 @@ in both servers' 10050) so a lookup can never change the signed records.
    mode). `marmotPushWake.ts` (defined from `index.ts`, so it also runs
    headless after the app was swiped away) posts the generic "New message"
    ping itself — unless the app is in the foreground, or a running session
-   showed a Marmot message in the 30 s before the push (the sender publishes
+   showed a Marmot message in the 15 s before the push (the sender publishes
    the message first) or the 6 s after it. If the real message turns up
    later, showing it clears the generic ping.
 . Tapping the generic alert opens the Messages list (no thread id), and
@@ -268,6 +268,14 @@ next start if offline), so copies the members already hold stop working.
 the token instead and registers a fresh one once another account's session
 runs. iOS may return the same APNs token after re-registering, so revocation
 there is best-effort.
+
+*Known residuals.* A push carries no message id (by design — the server
+must learn nothing), so de-duplication is a heuristic: on Android a recent
+Marmot alert for an *earlier* message can stand in for this push's generic
+one (the look-back is kept short), and on iOS an app that is still running
+for a few seconds after being backgrounded can show both its own alert and
+the server's. Exact matching would need a message correlation the protocol
+doesn't carry (and an iOS notification service extension).
 
 *Privacy* (shown next to the switch): Apple/Google learn that the phone got a
 notification and when, not what it says. Our server learns nothing about who
