@@ -37,12 +37,14 @@ class AmberSignerModule : Module() {
     private var inForeground = true
     /** Bumped on every pause; a resume check only fires if no pause followed it. */
     private var pauseCount = 0
+    /** Set (from any thread) when the module is torn down; posted work checks it. */
+    @Volatile private var destroyed = false
     /**
      * Codes of requests settled without a result (resume, watchdog, eviction)
-     * whose Amber activity may still answer. Skipped when allocating, so a
-     * late result can't match a newer request; dropped once it arrives.
+     * whose Amber activity may still answer. Never reallocated while held, so
+     * a late result can't match a newer request; dropped once it arrives.
      */
-    private val abandonedCodes = LinkedHashSet<Int>()
+    private val abandonedCodes = HashSet<Int>()
 
     companion object {
         private const val TAG = "AmberSigner"
@@ -53,7 +55,6 @@ class AmberSignerModule : Module() {
         // Max 0xAFFF, inside the 16 bits startActivityForResult allows.
         private const val REQUEST_CODE_BASE = 0xA000
         private const val SEQ_MASK = 0x0FFF
-        private const val MAX_ABANDONED = 1024
 
         private const val OP_GET_PUBLIC_KEY = 1
         private const val OP_SIGN_EVENT = 2
@@ -81,12 +82,13 @@ class AmberSignerModule : Module() {
         private fun noResult(message: String) = CodedException("NO_RESULT", message, null)
     }
 
-    /** Next request code not held by an abandoned request (main thread). */
-    private fun allocateRequestCode(): Int {
-        while (true) {
+    /** Next request code not held by an abandoned request, or null if none is free (main thread). */
+    private fun allocateRequestCode(): Int? {
+        repeat(SEQ_MASK + 1) {
             val code = REQUEST_CODE_BASE or (nextSeq++ and SEQ_MASK)
             if (code !in abandonedCodes) return code
         }
+        return null
     }
 
     /**
@@ -97,7 +99,6 @@ class AmberSignerModule : Module() {
         if (pending !== req) return
         pending = null
         abandonedCodes.add(req.requestCode)
-        if (abandonedCodes.size > MAX_ABANDONED) abandonedCodes.remove(abandonedCodes.first())
         req.promise.reject(noResult(message))
     }
 
@@ -120,13 +121,17 @@ class AmberSignerModule : Module() {
             val req = pending?.takeIf { it.leftForeground } ?: return@OnActivityEntersForeground
             val pausesAtResume = pauseCount
             mainHandler.postDelayed({
-                if (inForeground && pauseCount == pausesAtResume) {
+                if (!destroyed && inForeground && pauseCount == pausesAtResume) {
                     abandon(req, "Returned to Lightning Piggy without a result from Amber")
                 }
             }, RESUME_GRACE_MS)
         }
 
+        // May run off the main thread: flag first so anything posted after the
+        // purge (e.g. a launch from a ContentResolver query still in flight)
+        // sees it and does nothing.
         OnDestroy {
+            destroyed = true
             mainHandler.removeCallbacksAndMessages(null)
         }
 
@@ -379,7 +384,7 @@ class AmberSignerModule : Module() {
         promise: Promise,
         build: (activity: Activity, requestCode: Int) -> Unit,
     ) {
-        mainHandler.post { launchOnMain(op, promise, build) }
+        mainHandler.post { if (!destroyed) launchOnMain(op, promise, build) }
     }
 
     private fun launchOnMain(
@@ -402,9 +407,14 @@ class AmberSignerModule : Module() {
             promise.reject(CodedException("BUSY", "Another Amber request is already in progress", null))
             return
         }
+        val requestCode = allocateRequestCode()
+        if (requestCode == null) {
+            promise.reject(CodedException("LAUNCH_FAILED", "No free Amber request code", null))
+            return
+        }
         val req = PendingRequest(
             op = op,
-            requestCode = allocateRequestCode(),
+            requestCode = requestCode,
             promise = promise,
             startedAtMs = now,
             // Launched while backgrounded: the next resume settles it.
@@ -424,13 +434,16 @@ class AmberSignerModule : Module() {
     /**
      * Amber normally covers Lightning Piggy (pausing it) at once. If we still
      * hold window focus [LAUNCH_WATCHDOG_MS] later with nothing back, Amber
-     * never came up. Without focus (e.g. Amber beside us in multi-window, or a
-     * system dialog) it may still be answering, so check again later.
+     * never came up. Without focus (e.g. a system dialog) it may still be
+     * answering, so check again later. In multi-window both apps can stay
+     * resumed and focus moves with the user's taps, so focus proves nothing
+     * there; the resume check and stale eviction still apply.
      */
     private fun armLaunchWatchdog(req: PendingRequest) {
         mainHandler.postDelayed({
-            if (pending !== req || req.leftForeground) return@postDelayed
-            val focused = appContext.currentActivity?.hasWindowFocus() == true
+            if (destroyed || pending !== req || req.leftForeground) return@postDelayed
+            val activity = appContext.currentActivity
+            val focused = activity?.hasWindowFocus() == true && !activity.isInMultiWindowMode
             if (inForeground && focused) {
                 abandon(req, "Amber did not open")
             } else {
