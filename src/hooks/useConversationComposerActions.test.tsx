@@ -230,7 +230,8 @@ describe('useConversationComposerActions.sendText — optimistic + failed-keep-b
     });
     expect(sentProtocols()).toEqual(['marmot']);
     expect(onMarmotFallback).not.toHaveBeenCalled();
-    expect(setDraft).not.toHaveBeenCalled();
+    // Cleared on tap, then the draft comes back untouched.
+    expect(setDraft.mock.calls).toEqual([[''], ['hi']]);
     expect(mockAppendLocalDmMessage).not.toHaveBeenCalled();
     expect(await AsyncStorage.getAllKeys()).toEqual([]);
   });
