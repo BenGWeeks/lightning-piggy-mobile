@@ -2461,7 +2461,8 @@
     "chatChangingVoice": "This chat is changing right now — try sending the voice note again.",
     "chatChangingPhoto": "This chat is changing right now — try sending the photo again.",
     "noRelayAcceptedVoice": "No relay accepted the voice note",
-    "noRelayAcceptedPhoto": "No relay accepted the photo"
+    "noRelayAcceptedPhoto": "No relay accepted the photo",
+    "inviteNotDelivered": "We couldn't send the invitation — no relay accepted it. Check your connection and try again."
   },
   "signOutPrompt": {
     "walletsRemoved": "Any wallets connected to this account, including recovery phrases stored here, will also be removed from this phone. Save their recovery phrases and connection details separately before signing out.",
@@ -2547,5 +2548,11 @@
     "removingBody": "Approve the requests in your signer to finish signing out. This can take a minute.",
     "notRemovedTitle": "Invitation keys not removed",
     "notRemovedBody": "We couldn't remove this account's Marmot invitation keys from relays, so new Marmot invites may still be sent to this phone. We'll try again automatically the next time this account signs in here."
+  },
+  "marmotInvite": {
+    "progressTitle": "Inviting devices… {{done}} of {{total}}",
+    "progressBody": "Approve each request in your signer — every phone or app this person uses needs its own invitation.",
+    "notReachedTitle": "Invitation not delivered yet",
+    "notReachedBody": "We couldn't deliver the invitation to {{names}} yet. Lightning Piggy will keep trying automatically."
   }
 }

@@ -27,7 +27,7 @@ import {
   loadGroupMessages,
   reviveGroupHistoryOwner,
 } from '../services/groupMessagesStorageService';
-import { useNostr, subscribeGroupMessages } from './NostrContext';
+import { useNostr, useNostrContacts, subscribeGroupMessages } from './NostrContext';
 import {
   DEFAULT_RELAYS,
   GROUP_STATE_KIND,
@@ -190,6 +190,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // Re-activating a signed-out account lifts its group-history write guard
   // (#1240). Layout effect: before any child effect can write its history.
   useLayoutEffect(() => reviveGroupHistoryOwner(pubkey), [pubkey]);
+  const { contacts } = useNostrContacts();
   const [storedGroups, setGroups] = useAccountState(pubkey, EMPTY_GROUPS);
   const activeOwner = useRef(pubkey);
   activeOwner.current = pubkey;
@@ -210,7 +211,14 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // on mount from AsyncStorage and kept fresh by the inbound-message
   // listener below + a local hook from GroupConversationScreen sends.
   const [activityByGroup, setActivityByGroup] = useAccountState(pubkey, EMPTY_ACTIVITY);
-  const marmot = useMarmotGroups(pubkey);
+  const contactName = useCallback(
+    (pk: string) => {
+      const c = contacts.find((x) => x.pubkey === pk);
+      return c?.petname || c?.profile?.displayName || c?.profile?.name || pk.slice(0, 8);
+    },
+    [contacts],
+  );
+  const marmot = useMarmotGroups(pubkey, contactName);
   const groups = useMemo(() => [...storedGroups, ...marmot.groups], [storedGroups, marmot.groups]);
   // Track the latest reconciler in a ref so the subscription effect can
   // call it without re-subscribing on every group state change.

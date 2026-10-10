@@ -7,11 +7,12 @@ import type { Event as NostrEvent } from 'nostr-tools';
 
 import { installMarmotCryptoProvider, marmotCryptoProvider } from './marmotCryptoProvider';
 import {
-  checkWelcomeDelivery,
+  buildInviteBatch,
+  deliveredAccounts,
   DEVICE_MAX_AGE_SECS,
   devicesForDm,
-  MarmotWelcomeDeliveryError,
   MAX_DEVICES_PER_PERSON,
+  WHITE_NOISE_MAX_AGE_SECS,
   resolveInvitees,
   selectDeviceKeyPackages,
 } from './marmotInvitees';
@@ -88,24 +89,113 @@ describe('selectDeviceKeyPackages', () => {
     expect(picked.map((e) => e.id)).not.toContain(olderA.id);
   });
 
-  it('drops devices older than 30 days, but keeps the newest if all are stale', async () => {
-    const fresh = devices[0];
-    const stale = resign(devices[1], little.sk, now - DEVICE_MAX_AGE_SECS - DAY);
-    const picked = await selectDeviceKeyPackages(little.pubkey, [stale, fresh], { nowSecs: now });
-    expect(picked.map((e) => e.id)).toEqual([fresh.id]);
+  /** Re-sign with a client tag and/or without media v2 (0x800b) advertised. */
+  const variant = (e: NostrEvent, o: { client?: string; mediaV2?: boolean; at?: number }) =>
+    finalizeEvent(
+      {
+        kind: e.kind,
+        content: e.content,
+        created_at: o.at ?? e.created_at,
+        tags: [
+          ...e.tags
+            .filter((t) => t[0] !== 'client')
+            .map((t) =>
+              t[0] === 'app_components' && o.mediaV2 === false
+                ? t.filter((v) => v !== '0x800b')
+                : t,
+            ),
+          ...(o.client ? [['client', o.client]] : []),
+        ],
+      },
+      little.sk,
+    );
 
-    const staler = resign(devices[2], little.sk, now - DEVICE_MAX_AGE_SECS - 2 * DAY);
-    const onlyStale = await selectDeviceKeyPackages(little.pubkey, [staler, stale], {
-      nowSecs: now,
-    });
-    expect(onlyStale.map((e) => e.id)).toEqual([stale.id]);
+  it('freshness depends on the client: White Noise 35 days, others 14', async () => {
+    const at = (days: number) => now - days * DAY;
+    const lp20 = variant(devices[0], { client: 'Lightning Piggy', at: at(20) });
+    const wn20 = variant(devices[1], { client: 'White Noise Android', at: at(20) });
+    const wn40 = variant(devices[2], { client: 'White Noise Android', at: at(40) });
+    const bare10 = variant(devices[3], { at: at(10) });
+    const bare15 = variant(devices[4], { at: at(15) });
+    const picked = await selectDeviceKeyPackages(
+      little.pubkey,
+      [lp20, wn20, wn40, bare10, bare15],
+      {
+        nowSecs: now,
+      },
+    );
+    expect(picked.map((e) => e.id)).toEqual([bare10.id, wn20.id]);
+    expect(DEVICE_MAX_AGE_SECS).toBe(14 * DAY);
+    expect(WHITE_NOISE_MAX_AGE_SECS).toBe(35 * DAY);
+    // Nothing fresh: the newest valid one still keeps the contact reachable.
+    const onlyStale = await selectDeviceKeyPackages(little.pubkey, [wn40, lp20], { nowSecs: now });
+    expect(onlyStale.map((e) => e.id)).toEqual([lp20.id]);
   });
 
-  it('caps a person at 10 devices, keeping the newest', async () => {
+  it('skips installs without encrypted media v2 (White Noise drops the whole Welcome)', async () => {
+    const old = variant(devices[0], { mediaV2: false, at: now - 60 });
+    const current = variant(devices[1], { at: now - 120 });
+    expect(
+      (await selectDeviceKeyPackages(little.pubkey, [old, current], { nowSecs: now })).map(
+        (e) => e.id,
+      ),
+    ).toEqual([current.id]);
+    // An old install is still used when it's all they have (1:1 stays possible).
+    expect(
+      (await selectDeviceKeyPackages(little.pubkey, [old], { nowSecs: now })).map((e) => e.id),
+    ).toEqual([old.id]);
+  });
+
+  it('a retired slot (empty placeholder) counts as no key package, not an outdated one', async () => {
+    const placeholder = finalizeEvent(
+      {
+        kind: 30443,
+        content: '',
+        created_at: devices[0].created_at + 10,
+        tags: devices[0].tags.filter((t) => t[0] === 'd'),
+      },
+      little.sk,
+    );
+    expect(await selectDeviceKeyPackages(little.pubkey, [devices[0], placeholder])).toEqual([]);
+  });
+
+  it('caps a person at 10 devices AFTER group checks, so a rejected key makes room', async () => {
+    const big = makeAccount();
+    const client = new MarmotClient({
+      signer: big.signer,
+      network: {
+        publish: async (relays: string[]) =>
+          Object.fromEntries(relays.map((r) => [r, { from: r, ok: true }])),
+        request: async () => [],
+        subscription: () => ({ subscribe: () => ({ unsubscribe: () => undefined }) }),
+        getUserInboxRelays: async () => [RELAY],
+      },
+      cryptoProvider: marmotCryptoProvider,
+      groupStateStore: new InMemoryKeyValueStore(),
+      keyPackageStore: new InMemoryKeyValueStore(),
+    });
+    const group = await client.groups.create('Cap', { relays: [RELAY] });
     const dated = devices.map((e, i) => resign(e, little.sk, now - i * 60));
-    const picked = await selectDeviceKeyPackages(little.pubkey, dated, { nowSecs: now });
-    expect(picked).toHaveLength(MAX_DEVICES_PER_PERSON);
-    expect(picked.map((e) => e.id)).toEqual(dated.slice(0, 10).map((e) => e.id));
+    // The newest one advertises proposals it doesn't support: the group rejects it.
+    const bad = finalizeEvent(
+      {
+        kind: 30443,
+        content: dated[0].content,
+        created_at: dated[0].created_at,
+        tags: dated[0].tags.map((t) => (t[0] === 'mls_proposals' ? [t[0], '0x0001'] : t)),
+      },
+      little.sk,
+    );
+    const batch = buildInviteBatch(
+      group.state,
+      big.pubkey,
+      new Map([[little.pubkey, [bad, ...dated.slice(1)]]]),
+    );
+    expect(batch.devices.get(little.pubkey)).toBe(MAX_DEVICES_PER_PERSON);
+    expect(batch.intent?.welcomeRecipients?.map((r) => r.keyPackageEventId)).toEqual(
+      dated.slice(1, 11).map((e) => e.id),
+    );
+    expect(batch.unreachable).toEqual([]);
   });
 
   it('rejects bad signatures, expired keys and a foreign credential', async () => {
@@ -185,41 +275,35 @@ describe('selectDeviceKeyPackages', () => {
   });
 });
 
-describe('checkWelcomeDelivery', () => {
-  const recipient = (id: string) => ({ pubkey: 'a'.repeat(64), keyPackageEventId: id });
-  const result = (outcomes: { kind: 'succeeded' | 'failed'; id: string }[]) =>
+describe('deliveredAccounts', () => {
+  const result = (outcomes: { kind: 'succeeded' | 'failed'; pubkey: string }[]) =>
     [
       {
         welcomeDelivery: {
           kind: 'attempted',
-          outcomes: outcomes.map((o) =>
-            o.kind === 'failed'
-              ? { kind: 'failed', recipient: recipient(o.id), error: 'relay said no' }
-              : { kind: 'succeeded', recipient: recipient(o.id), response: {} },
-          ),
+          outcomes: outcomes.map((o, i) => ({
+            kind: o.kind,
+            recipient: { pubkey: o.pubkey, keyPackageEventId: String(i).repeat(64) },
+            ...(o.kind === 'failed' ? { error: 'relay said no' } : { response: {} }),
+          })),
         },
       },
     ] as unknown as GroupPublishResult[];
 
-  it('tolerates some devices missing their Welcome, throws only when all fail', () => {
-    expect(() =>
-      checkWelcomeDelivery(
-        result([
-          { kind: 'succeeded', id: '1'.repeat(64) },
-          { kind: 'failed', id: '2'.repeat(64) },
-        ]),
-      ),
-    ).not.toThrow();
-    expect(() =>
-      checkWelcomeDelivery(
-        result([
-          { kind: 'failed', id: '1'.repeat(64) },
-          { kind: 'failed', id: '2'.repeat(64) },
-        ]),
-      ),
-    ).toThrow(MarmotWelcomeDeliveryError);
-    expect(() =>
-      checkWelcomeDelivery([{ welcomeDelivery: { kind: 'notRequired' } }] as GroupPublishResult[]),
-    ).not.toThrow();
+  it('counts a person as reached when any one of their devices got a Welcome', () => {
+    const bob = 'b'.repeat(64);
+    const carol = 'c'.repeat(64);
+    const delivered = deliveredAccounts(
+      result([
+        { kind: 'failed', pubkey: bob },
+        { kind: 'succeeded', pubkey: bob },
+        { kind: 'failed', pubkey: carol },
+        { kind: 'failed', pubkey: carol },
+      ]),
+    );
+    expect([...delivered]).toEqual([bob]);
+    expect(
+      deliveredAccounts([{ welcomeDelivery: { kind: 'notRequired' } }] as GroupPublishResult[]),
+    ).toEqual(new Set());
   });
 });
