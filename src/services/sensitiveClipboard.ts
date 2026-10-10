@@ -1,27 +1,31 @@
-// Copy a secret (e.g. an nsec) to the clipboard and clear it again after
-// a short window, unless the user has since copied something else.
-//
-// Only a SHA-256 fingerprint of the secret is kept for the comparison —
-// never the secret itself — and the timer lives at module scope so it
-// still fires after the screen that copied it has unmounted.
-//
-// Platform caveats (best effort, never throws):
-//  - The timer is a JS timer: if the app is backgrounded it fires when the
-//    app next runs, so the clear may happen later than the window.
-//  - Android 10+ blocks clipboard reads from the background; the read
-//    returns empty and we skip the clear rather than clobber the clipboard.
-//  - iOS 16+ may show its "Allow Paste" prompt if the clipboard now holds
-//    content from ANOTHER app; reading our own content is prompt-free.
+// Copy a secret and clear it after a short window unless another value
+// replaced it. Keep only its fingerprint, never the secret, for expiry.
+// Android disallows background clipboard reads, so retry an expired clear
+// after returning to the foreground. OS suspension can delay expiry.
+import { AppState, type NativeEventSubscription } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
 
 export const SENSITIVE_CLIPBOARD_CLEAR_MS = 60_000;
 
-let pending: { timer: ReturnType<typeof setTimeout>; fingerprint: string } | null = null;
+type PendingClear = {
+  timer: ReturnType<typeof setTimeout>;
+  fingerprint: string;
+  expiresAt: number;
+  subscription: NativeEventSubscription;
+};
+let pending: PendingClear | null = null;
 
 function fingerprint(text: string): string {
   return bytesToHex(sha256(utf8ToBytes(text)));
+}
+
+function cancelPending(): void {
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  pending.subscription.remove();
+  pending = null;
 }
 
 export async function copySensitiveText(
@@ -29,26 +33,38 @@ export async function copySensitiveText(
   clearAfterMs: number = SENSITIVE_CLIPBOARD_CLEAR_MS,
 ): Promise<void> {
   await Clipboard.setStringAsync(text);
-  if (pending) clearTimeout(pending.timer);
-  const fp = fingerprint(text);
-  const timer = setTimeout(() => {
-    void clearIfUnchanged(fp);
-  }, clearAfterMs);
-  pending = { timer, fingerprint: fp };
+  cancelPending();
+  const entry: PendingClear = {
+    fingerprint: fingerprint(text),
+    expiresAt: Date.now() + clearAfterMs,
+    timer: setTimeout(() => void clearIfUnchanged(entry), clearAfterMs),
+    subscription: AppState.addEventListener('change', (state) => {
+      if (state !== 'active' || pending !== entry) return;
+      clearTimeout(entry.timer);
+      // Stagger resume work; also preserve the full copy window if not expired.
+      entry.timer = setTimeout(
+        () => void clearIfUnchanged(entry),
+        Math.max(3000, entry.expiresAt - Date.now()),
+      );
+    }),
+  };
+  pending = entry;
 }
 
-async function clearIfUnchanged(fp: string): Promise<void> {
-  if (pending?.fingerprint === fp) pending = null;
+async function clearIfUnchanged(entry: PendingClear): Promise<void> {
+  if (pending !== entry || AppState.currentState !== 'active') return;
   try {
     const current = await Clipboard.getStringAsync();
-    if (current && fingerprint(current) === fp) await Clipboard.setStringAsync('');
+    if (pending !== entry || AppState.currentState !== 'active') return;
+    if (current && fingerprint(current) === entry.fingerprint) await Clipboard.setStringAsync('');
+    if (pending === entry) cancelPending();
   } catch {
-    // Best effort — see the platform caveats above.
+    // Best effort: leave the fingerprint pending for the next foreground retry.
+    // iOS may require paste permission if another app replaced the content.
   }
 }
 
-/** Test hook: drop any scheduled clear. */
+/** Test hook: drop any scheduled clear and foreground listener. */
 export function __resetSensitiveClipboardForTests(): void {
-  if (pending) clearTimeout(pending.timer);
-  pending = null;
+  cancelPending();
 }

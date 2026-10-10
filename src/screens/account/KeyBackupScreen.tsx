@@ -53,7 +53,9 @@ const KeyBackupScreen: React.FC = () => {
     ? activeSignerType
     : identities.find((i) => i.pubkey === targetPubkey)?.signerType;
 
-  const knownAccount = identities.some((i) => i.pubkey === targetPubkey);
+  // NIP-46 is a live session, not an entry in the nsec/Amber registry.
+  const knownAccount =
+    (isActive && activeSignerType === 'nip46') || identities.some((i) => i.pubkey === targetPubkey);
 
   const [backedUp, setBackedUp] = useState(false);
   const [cachedName, setCachedName] = useState<string | null>(null);
