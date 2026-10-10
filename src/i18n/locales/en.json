@@ -134,6 +134,13 @@
     "addWalletButton": "Add Wallet",
     "connectButton": "Connect"
   },
+  "amberSigner": {
+    "declined": "The request was declined or closed in Amber. Try again and approve it in Amber.",
+    "noResponse": "Amber didn't send an answer back to Lightning Piggy. Try again — Amber will reopen.",
+    "busy": "Amber is still handling another request. Finish or close it in Amber, then try again.",
+    "unavailable": "Couldn't open Amber. Check that it's installed, then try again.",
+    "failed": "Amber couldn't complete the request. Try again."
+  },
   "alphabetBar": {
     "alphabetIndex": "Alphabet index",
     "jumpTo": "Jump to {{letter}}",
@@ -690,7 +697,7 @@
     "savedLocallyDropPin": "Saved locally — drop a pin to publish",
     "savedLocallyDropPinBody": "Public Piggies need a location pin so finders can discover them.",
     "couldNotSignListing": "Could not sign Piggy listing",
-    "couldNotSignListingBody": "Sign-in / Amber declined. Saved locally; retry publish later.",
+    "couldNotSignListingBody": "Your signer didn't return a signature. Saved locally; retry publish later.",
     "piggyRepublished": "Piggy republished 🐷",
     "piggyPublished": "Piggy published 🐷",
     "updatedListingLive": "Updated listing live on relays.",

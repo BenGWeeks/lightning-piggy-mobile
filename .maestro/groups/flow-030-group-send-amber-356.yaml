@@ -8,7 +8,7 @@ name: Group send via Amber — #356 regression (no Send-failed alert)
 # to Amber's main "Applications" launcher instead of its NIP-59 Sign
 # Event sheet, because we were stripping the `pubkey` field from the
 # seal JSON. The user backed out, LP raised:
-#   "Send failed - User cancelled the Amber request"
+#   "Send failed - User cancelled the Amber request" (now "…declined or closed in Amber…", #1186)
 #
 # Post-fix: the Intent reaches Amber's sign prompt; with blanket
 # permissions ("Approve basic actions") pre-granted by
@@ -68,8 +68,13 @@ name: Group send via Amber — #356 regression (no Send-failed alert)
 # BrandedAlert. Post-fix it must not appear.
 - assertNotVisible:
     text: 'Send failed'
+# Amber failure copy (#1186): declined / no response / busy.
 - assertNotVisible:
-    text: 'User cancelled the Amber request'
+    text: '.*declined or closed in Amber.*'
+- assertNotVisible:
+    text: '.*send an answer back to Lightning Piggy.*'
+- assertNotVisible:
+    text: '.*Amber is still handling another request.*'
 
 # AND the message must actually land in the thread. The composer
 # clears on success, and the rumor we just signed comes back through
