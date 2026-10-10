@@ -671,3 +671,78 @@ describe('Marmot push (MIP-05) receive side', () => {
     expect(mockDismiss).toHaveBeenCalledWith('apns-alert');
   });
 });
+
+describe('notification watcher pushes', () => {
+  const watcherPush = (request: Record<string, unknown>) =>
+    ({ request: { trigger: { type: 'push' }, content: { data: null }, ...request } }) as never;
+
+  it('in the foreground: hides messages, zaps and wallet activity; shows mentions — at once', async () => {
+    await ensureNotificationsInitialised();
+    const handler = (Notifications.setNotificationHandler as jest.Mock).mock.calls.at(-1)?.[0];
+    const iosDm = watcherPush({
+      identifier: 'lp-dm',
+      content: { data: null, threadIdentifier: 'lp-dm' },
+    });
+    const androidPayment = watcherPush({
+      identifier: '0:1',
+      content: { data: { source: 'lp-watcher', category: 'payment' } },
+    });
+    const mention = watcherPush({ identifier: 'lp-mention', content: { data: null } });
+    // No 2 s Marmot "covered?" wait: these resolve immediately.
+    expect(await handler.handleNotification(iosDm)).toMatchObject({ shouldShowBanner: false });
+    expect(await handler.handleNotification(androidPayment)).toMatchObject({
+      shouldShowBanner: false,
+      shouldPlaySound: false,
+    });
+    expect(await handler.handleNotification(mention)).toMatchObject({
+      shouldShowBanner: true,
+      shouldShowList: true,
+    });
+  });
+
+  it("never shows the watcher's silent admission check (iOS validate push)", async () => {
+    await ensureNotificationsInitialised();
+    const handler = (Notifications.setNotificationHandler as jest.Mock).mock.calls.at(-1)?.[0];
+    const validate = watcherPush({
+      identifier: 'x',
+      content: { data: { source: 'lp-watcher', type: 'validate' } },
+    });
+    // Resolves at once (no 2 s Marmot wait) and shows nothing.
+    expect(await handler.handleNotification(validate)).toEqual({
+      shouldShowBanner: false,
+      shouldShowList: false,
+      shouldPlaySound: false,
+      shouldSetBadge: false,
+    });
+  });
+
+  it('a watcher "New message" clears with the generic pings and Marmot push alerts; other categories never do', async () => {
+    mockDismiss.mockClear();
+    const presentedList = [
+      {
+        request: {
+          identifier: 'expo-notifications://foreign_notifications?tag=lp-dm&id=0',
+          content: { data: {} },
+          trigger: null,
+        },
+      },
+      {
+        request: {
+          identifier: 'lp-zap',
+          content: { data: null, threadIdentifier: 'lp-zap' },
+          trigger: { type: 'push' },
+        },
+      },
+      { request: { identifier: 'n9', content: { data: { kind: 'dm', marmotPush: true } } } },
+    ];
+    mockGetPresented.mockResolvedValueOnce(presentedList);
+    expect(await dismissNotificationsFor({ marmotPushAlerts: true })).toBe(2);
+    expect(mockDismiss.mock.calls).toEqual([
+      ['expo-notifications://foreign_notifications?tag=lp-dm&id=0'],
+      ['n9'],
+    ]);
+    mockDismiss.mockClear();
+    mockGetPresented.mockResolvedValueOnce(presentedList);
+    expect(await dismissNotificationsFor({ groupId: 'g1' })).toBe(0);
+  });
+});

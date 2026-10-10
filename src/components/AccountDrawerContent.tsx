@@ -35,6 +35,7 @@ import type { Palette } from '../styles/palettes';
 import { createAccountDrawerContentStyles } from '../styles/AccountDrawerContent.styles';
 import { appVersionLabel } from '../utils/appVersion';
 import { isSupportedImageUrl } from '../utils/imageUrl';
+import { unregisterWatcherBeforeSignOut } from '../services/watcherPush';
 import type { AccountDrawerParamList } from '../navigation/types';
 
 interface SectionRow {
@@ -225,6 +226,8 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
         onPress: async () => {
           setSigningOut(true);
           try {
+            // While the signer exists: drop this phone from the notification watcher.
+            if (pubkey) await unregisterWatcherBeforeSignOut(pubkey);
             await logout();
           } finally {
             setSigningOut(false);

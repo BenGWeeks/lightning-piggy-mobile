@@ -121,3 +121,37 @@ describe('handleMarmotPushWake', () => {
     expect(dismissNotificationsFor).toHaveBeenLastCalledWith({ marmotPushAlerts: true });
   });
 });
+
+describe('the wake task and notification-watcher pushes', () => {
+  // The task (registered once at module load) also sees the watcher's pushes
+  // and taps on them: those must never post a Marmot "New message".
+  const task = () =>
+    (TaskManager.defineTask as jest.Mock).mock.calls.find(
+      (c) => c[0] === MARMOT_PUSH_WAKE_TASK,
+    )?.[1] as (body: { data: unknown; error: unknown }) => Promise<void>;
+
+  it('ignores a watcher push and a tap on a watcher alert', async () => {
+    (fireMessageNotification as jest.Mock).mockClear();
+    await task()({ data: { data: { source: 'lp-watcher', category: 'zap' } }, error: null });
+    await task()({
+      data: {
+        actionIdentifier: 'default',
+        notification: { request: { identifier: 'lp-dm', content: { data: null } } },
+      },
+      error: null,
+    });
+    expect(fireMessageNotification).not.toHaveBeenCalled();
+  });
+
+  it('ignores a tap on any other notification too (a response is not a wake)', async () => {
+    (fireMessageNotification as jest.Mock).mockClear();
+    await task()({
+      data: {
+        actionIdentifier: 'default',
+        notification: { request: { identifier: 'uuid', content: { data: { kind: 'payment' } } } },
+      },
+      error: null,
+    });
+    expect(fireMessageNotification).not.toHaveBeenCalled();
+  });
+});

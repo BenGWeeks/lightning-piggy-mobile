@@ -5,10 +5,12 @@
 This document explains how Lightning Piggy delivers OS-level
 notifications (incoming DMs, group messages, payments, zaps) to a
 backgrounded or closed app *without* depending on Firebase Cloud
-Messaging or any other Google Play Services component. The one exception
-is opt-in and off by default: Marmot push (MIP-05), a content-free
+Messaging or any other Google Play Services component. The exceptions
+are opt-in and off by default: Marmot push (MIP-05), a content-free
 "New message" wake through Apple/Google — see "Marmot messages and
-MIP-05 push" below.
+MIP-05 push" below — and, under the same push switch, the notification
+watcher's per-category alerts for DMs, zaps, mentions and NWC wallet
+activity — see "The notification watcher" below.
 
 It is the canonical reference for the foundation landed in PR for
 issue https://github.com/BenGWeeks/lightning-piggy-mobile/issues/279[#279].
@@ -312,6 +314,143 @@ fingerprint in every chat — hence the per-account opt-in above.
 Android app receives no FCM messages until it is opened again (an Android
 rule). Pushes are best-effort (MIP-05): a missed push never affects message
 delivery.
+
+== The notification watcher (DMs, zaps, mentions, payments)
+
+MIP-05 only covers Marmot groups, where the *sender* triggers the push. For
+everything else there is no sender-side mechanism, so Lightning Piggy runs a
+small open-source *watcher*
+(https://github.com/BenGWeeks/lightning-piggy-watcher[lightning-piggy-watcher],
+npub `npub17hcchazg4akxq4ccuskxmxegl2euyz8je7h6xjthekeyz8pux78qfzgph2`) that
+watches relays for events addressed to registered users and sends the same
+kind of content-free push. Its `PROTOCOL.md` is the wire contract; the app side
+is:
+
+[cols="2,5"]
+|===
+| Module | Role
+
+| `watcherRegistration.ts` | Pure wire format: the kind-8480 rumor, the NIP-59 wrap (seal signed by the user's signer), NWC proofs, relay selection, fingerprints. Checked against a vendored copy of the watcher's own parser (`watcherRegistrationConformance.test.ts`).
+| `watcherPushRegistrar.ts` | Lifecycle: when to (re)register / unregister, debounce, `ts` monotonicity, status.
+| `watcherPushStore.ts` | Per-account state in AsyncStorage (`watcher_push_v1_<pubkey>`): categories, last `ts`, what was last registered (a hash of the token, never the token itself).
+| `watcherPushTransport.ts` | Publishes the wrap to the watcher's kind-10050 relays (damus is skipped while others are listed: it requires NIP-42 AUTH and rate-limits).
+| `watcherPush.ts` / `WatcherPushBridge.tsx` | Wiring: the token from `marmotPushRegistration.ts` (shared — one native token per phone), the signer (`createMarmotSigner`), the account's relays and NWC wallets.
+| `watcherPushReceive.ts` | Recognising a watcher push on each platform, foreground policy, tap routing.
+|===
+
+*Settings.* Under the push switch (Settings → Security → Push notifications),
+"More push notifications" lists four toggles — Messages (NIP-04/17), Zaps,
+Mentions, Payments — each off by default and only switchable while *this
+account's* push is on (they need the device token the push switch obtains).
+Like the Marmot switch, everything is per account: the registrar only gets the
+token for an account that turned push on itself (`currentPushDevice(pubkey)`),
+so switching to or adding an account never registers it with the watcher. The
+privacy note there says what the watcher learns.
+
+*What a registration contains.* `{v:1, action, app, platform, token,
+apns_env?, categories, relays, nwc, ts}` — `app` is the build's application id
+(`.dev` / `.preview` / production, all accepted by the watcher; also the APNs
+topic), `apns_env` comes from `getIosPushNotificationServiceEnvironmentAsync`
+(`development` → `sandbox`). `relays` (≤8, public `wss://` hostnames only,
+normalised the way the watcher does) are, in priority order: the NWC wallet
+relays (only if Payments is on — NWC notifications are only published there),
+the user's DM inbox (kind 10050, if Messages is on), then their read relays
+(kind 10002). The watcher's own relays (nos.lol, primal, damus) are left out:
+it always watches those. `nwc` holds up to 3 connections (the first NWC wallets
+in display order), each with a BIP-340 proof signed by that connection's own
+secret over `sha256("lightning-piggy-watcher/nwc/v1:<user>:<wallet>")`, so only
+the holder of the connection secret can claim its notifications.
+
+*When it registers — and when the signer is asked.* A registration is one seal
+(one NIP-44 encryption + one signature by the user's key). For Amber / NIP-46
+that is a prompt, so `planWatcherSync` decides:
+
+[cols="3,2,2"]
+|===
+| Trigger | nsec | Amber / NIP-46
+
+| Category toggle (debounced 2 s — a burst is one signature) | register | register
+| All categories off | unregister | unregister
+| Push switched off | unregister first (Settings; bounded at 20 s), then Marmot push deletes the token — or, if another account still uses push and the unregister didn't go through, replaces it | same — if declined, the token deletion still ends Android pushes
+| Push token changed | register | register
+| NWC wallet added / removed | register | register
+| Relay-list change only | register (10 s settle) | folded into the next registration
+| App start, registration < 7 days old | nothing | nothing
+| App start, registration ≥ 7 days old | refresh | refresh (the only start-time prompt)
+| App start, an earlier change never went through | register | *pending* — "Retry" in Settings
+| Sign-out of the active account | unregister *before* the key is wiped (bounded at 20 s), then the token is deleted (Marmot push teardown) | same (one prompt; if declined or unanswered, the token deletion still ends Android pushes)
+| Removing another signed-in account | its key isn't the active signer: the token deletion kills the registration on Android; iOS best-effort (APNs may reissue the token; the watcher deletes registrations not refreshed for 30 days) | same
+|===
+
+Everything runs on one serial chain, and every signer instance (Marmot
+sessions included) shares one intent queue — Amber rejects concurrent intents.
+A registration prepared for an account that signs out or switches meanwhile is
+dropped before publishing; a sign-out unregister stays bound to the account it
+was asked for (never a successor) and is abandoned if the sign-out stops
+waiting for it.
+`ts = max(now, lastTs + 1)` — if the clock went back far enough that this
+would be over 2 min ahead, the registration waits (shown as pending) rather
+than send a `ts` the watcher refuses; a watermark more than 6 h ahead can't be
+one the watcher accepted and is ignored — and is persisted *before* publishing, so a crash
+after the publish can't reuse it; the watcher accepts `ts` up to 6 h old and
+2 min ahead and treats anything not newer as stale. The watcher never replies
+(a reply would itself be a push), so "registered" means at least one of its
+inbox relays accepted the wrap.
+
+*Receiving.* The watcher sends a generic alert (title "Lightning Piggy"; "New
+message" / "Zap received" / "New mention" / "Payment received") collapsed per
+category (`lp-<category>` as APNs thread/collapse id and FCM tag), with data
+`{source: "lp-watcher", category}` (nothing finer — no Nostr kind). What
+reaches JS differs: Android in the foreground has the data; an alert the OS
+posted while backgrounded is known only by its tag (in expo's
+foreign-notification identifier); on iOS expo exposes only `userInfo.body` as
+data, so the thread id identifies it. `watcherCategoryOf` checks all three.
+On iOS the watcher also sends ONE silent background push when a device first
+registers (an admission check, `{source: "lp-watcher", type: "validate"}`, no
+alert): it reaches no JS task (the Marmot wake task is registered on Android
+only, and drops every watcher payload anyway) and the foreground handler
+hides it (`isWatcherValidation`).
+
+* *Foreground:* messages, zaps and wallet activity are suppressed — the open
+  app shows them itself (live inbox; `PaymentNotifier` with the real amount).
+  Mentions still show: the app has no live mention surface.
+* *Payments wording:* NWC notifications are encrypted, so the watcher can't
+  tell `payment_received` from `payment_sent`, and its alert says "Payment
+  received" either way. The app can't rewrite a background alert (no iOS
+  notification service extension; Android notification messages are posted by
+  the OS), so instead the Settings copy says plainly that the alert may come
+  for a payment you sent, and the alert is suppressed while the app is open —
+  which is when in-app payments are made.
+* *Taps:* Messages → the Messages list; Mentions → Notifications; Zaps and
+  Payments → Home (wallet).
+* *Duplicates:* a Marmot welcome is a kind-1059 gift wrap, so the watcher
+  announces it as "New message" while Transponder may also wake for it. The
+  watcher's "New message" is treated as one of the generic message pings:
+  the Marmot wake's "one generic alert at a time" replaces it, showing the
+  real Marmot message clears it, and opening the Messages list clears both.
+  The Marmot wake task (which sees every push, and taps on Android) ignores
+  watcher pushes.
+
+*Privacy.* Apple/Google learn that a notification arrived, when, and — from
+the alert itself — which kind (message, zap, mention or payment). For these
+categories the watcher additionally learns the user's public key, linked to
+the app id and (encrypted) device token, the relays listed, the NWC connection
+keys and which wallet service they belong to (Payments), and *when* matching
+events arrive. Its subscriptions are visible to the relays it watches: a
+relay can see that our server is filtering for the user's key. A registration
+that isn't refreshed is deleted after 30 days. It can't read DMs or NWC
+traffic (they stay encrypted, and it doesn't try); mentions, zap receipts and
+NIP-04 envelopes are public events whose author (and, for a mention, text) it
+sees like any relay does. Registrations travel inside gift wraps from throwaway
+keys, so relays don't see who registered; the watcher never sees the user's
+IP address.
+
+*Known limits.* The watcher can't see DMs on auth-gated inbox relays
+(relay.damus.io requires NIP-42 AUTH for kind 1059 — see TROUBLESHOOTING); a
+NIP-17 self-copy of a message sent from another device alerts "New message";
+anyone can publish a kind 9735, so a forged zap receipt can trigger "Zap
+received" (rate-limited by the watcher).
+
 
 == Status (as of the foundation PR)
 

@@ -49,16 +49,63 @@ const toTemplate = (draft: Draft, pubkey: string) => ({
   pubkey,
 });
 
-export function createMarmotSigner(pubkey: string, signerType: SignerType): EventSigner {
-  const enqueue = createSerialQueue();
+// ONE queue for every signer instance (each Marmot session, the notification
+// watcher's registrations): Amber rejects an intent while another is open.
+const enqueue = createSerialQueue();
 
+const ABANDON_POLL_MS = 250;
+
+/** Settle with `p`, or reject as soon as `cancelled()` turns true — so an
+ * abandoned request gives the shared queue back instead of holding it until
+ * a remote signer that may never answer (an offline NIP-46 bunker) does. */
+function abandonable<T>(p: Promise<T>, cancelled: () => boolean): Promise<T> {
+  let timer: ReturnType<typeof setInterval> | undefined;
+  const gaveUp = new Promise<never>((_, reject) => {
+    timer = setInterval(() => {
+      if (cancelled()) reject(new Error('marmot signer: request abandoned'));
+    }, ABANDON_POLL_MS);
+  });
+  return Promise.race([p, gaveUp]).finally(() => clearInterval(timer));
+}
+
+/**
+ * `opts.cancelled` is checked when a queued request reaches the front, right
+ * before the backend (an Amber / NIP-46 prompt) is asked — so a request whose
+ * caller has moved on (e.g. an account that signed out) never prompts — and
+ * while it is open, so abandoning it frees the queue for everyone else.
+ */
+export function createMarmotSigner(
+  pubkey: string,
+  signerType: SignerType,
+  opts: { cancelled?: () => boolean } = {},
+): EventSigner {
+  const { cancelled } = opts;
+  const run = <T>(task: () => Promise<T>): Promise<T> => {
+    if (!cancelled) return enqueue(task);
+    return new Promise<T>((resolve, reject) => {
+      void enqueue(async () => {
+        if (cancelled()) {
+          reject(new Error('marmot signer: request abandoned'));
+          return;
+        }
+        const request = task();
+        const forCaller = abandonable(request, cancelled);
+        forCaller.then(resolve, reject);
+        // The caller hears "abandoned" at once, but the queue is only given
+        // back when the backend is free again: Amber's intent stays open until
+        // the user answers it (the next one would fail with BUSY), whereas a
+        // NIP-46 request may never settle (offline bunker).
+        await (signerType === 'amber' ? request : forCaller).catch(() => undefined);
+      });
+    });
+  };
   const parseSigned = (json: string | null | undefined, who: string): Signed => {
     if (!json) throw new Error(`marmot signer: ${who} returned no signed event`);
     return JSON.parse(json) as Signed;
   };
 
   const signEvent = (draft: Draft): Promise<Signed> =>
-    enqueue(async () => {
+    run(async () => {
       const template = toTemplate(draft, pubkey);
       switch (signerType) {
         case 'nsec':
@@ -86,7 +133,7 @@ export function createMarmotSigner(pubkey: string, signerType: SignerType): Even
 
   const nip44 = {
     encrypt: (peer: string, plaintext: string) =>
-      enqueue(async () => {
+      run(async () => {
         switch (signerType) {
           case 'nsec':
             return nip44EncryptForRecipient(plaintext, await loadSecretKey(), peer);
@@ -97,7 +144,7 @@ export function createMarmotSigner(pubkey: string, signerType: SignerType): Even
         }
       }),
     decrypt: (peer: string, ciphertext: string) =>
-      enqueue(async () => {
+      run(async () => {
         switch (signerType) {
           case 'nsec':
             return nip44DecryptFrom(ciphertext, await loadSecretKey(), peer);

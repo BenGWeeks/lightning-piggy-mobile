@@ -979,3 +979,30 @@ TestFlight build.
   re-send that follows a membership change).
 * With the app in the foreground, pushes are deliberately silent — the open app
   notifies with the real message itself.
+
+=== Notification watcher: no "New message" push for some DMs
+
+The watcher (`lightning-piggy-watcher` on black-panther) can only see gift
+wraps on relays that serve them to it. `relay.damus.io` requires NIP-42 AUTH to
+read kind 1059 and the watcher can only authenticate as itself, so DMs that
+land *only* on damus are invisible to it (its logs show `"reason":"auth-required"`
+for damus). DMs on nos.lol, relay.primal.net and the user's other public inbox
+relays (kind 10050, included in the registration) are seen. Damus also
+rate-limits, so the app publishes registrations to the watcher's other inbox
+relays and only falls back to damus when nothing else is listed.
+
+To check a registration end to end:
+`ssh benweeks@black-panther.local 'docker logs lightning-piggy-watcher --since 10m'`
+shows `registration … result: registered` (with the categories, relay count and
+NWC count), then `event matched` per event and the push result. A token Apple /
+Google reject (`push token invalid; registration removed`) means the app must
+register again — it does so when the token changes or at the 7-day refresh.
+
+=== Notification watcher: Settings says "Your latest changes haven't reached the notification server yet"
+
+With Amber or a NIP-46 signer, the app never asks for a signature on a plain
+app start (except the weekly refresh). A change that didn't go through earlier
+(signer declined, offline) waits for the user: tap *Retry* under the switches.
+The emulator has no Google Play services, so it never gets a push token and
+the switches stay unavailable there — test on a phone.
+

@@ -50,6 +50,11 @@ import {
   recordNotification,
 } from './notificationHistory';
 import { getActivePubkey, subscribeActivePubkey } from './walletStorageService';
+import {
+  isWatcherValidation,
+  showWatcherPushInForeground,
+  watcherCategoryOf,
+} from './watcherPushReceive';
 import type { DmProtocol } from '../utils/dmProtocol';
 
 // Android notification channel ids. Stable strings — changing them
@@ -176,11 +181,25 @@ async function initialiseInternal(): Promise<void> {
     // A remote (Marmot) push while the app is open is redundant: the live
     // session shows the real message itself, so the generic one stays quiet.
     handleNotification: async (notification) => {
-      if (isRemotePush(notification)) {
+      // The notification watcher's generic alert: the open app already shows
+      // what it announces (see showWatcherPushInForeground).
+      const watcher = watcherCategoryOf(notification.request);
+      // The watcher's silent admission check (iOS) is never shown.
+      if (isWatcherValidation(notification.request)) {
+        return {
+          shouldShowBanner: false,
+          shouldShowList: false,
+          shouldPlaySound: false,
+          shouldSetBadge: false,
+        };
+      }
+      if (watcher || isRemotePush(notification)) {
         // Android's push is a data-only wake with nothing to show — the wake
         // task (marmotPushWake) owns its generic alert. iOS's carries the
         // server's alert: shown unless the app has the message already.
-        const show = Platform.OS === 'ios' && !(await remotePushCoveredInForeground());
+        const show = watcher
+          ? showWatcherPushInForeground(watcher)
+          : Platform.OS === 'ios' && !(await remotePushCoveredInForeground());
         return {
           shouldShowBanner: show,
           shouldShowList: show,
@@ -578,6 +597,13 @@ export async function dismissNotificationsFor(target: NotificationTarget): Promi
   try {
     const matching = (request: Notifications.NotificationRequest) => {
       if (request.identifier === FOREGROUND_SERVICE_NOTIFICATION_ID) return false;
+      // The watcher's "New message" is a generic ping like the Marmot one —
+      // cleared with them (so a Marmot welcome announced by both collapses).
+      // Its other categories aren't messages.
+      const watcher = watcherCategoryOf(request);
+      if (watcher) {
+        return watcher === 'dm' && ('genericMessages' in target || 'marmotPushAlerts' in target);
+      }
       const data = request.content.data as (NotificationData & { kind?: string }) | null;
       // A server-sent Marmot alert (iOS) carries no data: it is a generic
       // "New message" — cleared with the generic pings / push alerts.

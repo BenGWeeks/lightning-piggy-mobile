@@ -77,6 +77,8 @@ import {
   startMarmotPushRegistration,
   pendingMarmotPushGroups,
   syncMarmotPushNow,
+  currentPushDevice,
+  subscribePushDevice,
   __resetMarmotPushForTests,
 } from './marmotPushRegistration';
 import { requestNotificationPermission } from './notificationService';
@@ -487,6 +489,14 @@ describe('per-account opt-in (two accounts on one phone stay unlinkable)', () =>
     );
   });
 
+  it('turning push off while the watcher may still hold the token replaces it for the other account', async () => {
+    await AsyncStorage.setItem(enabledKey('parent-account'), '1');
+    await enableMarmotPush(ME);
+    expect((await disableMarmotPush(ME, { stillRegistered: true })).tokenDeleted).toBe(true);
+    expect(Notifications.unregisterForNotificationsAsync).toHaveBeenCalled();
+    expect(Notifications.unregisterTaskAsync).not.toHaveBeenCalled();
+  });
+
   it('turning push off for one account keeps the token for another that still uses it', async () => {
     await AsyncStorage.setItem(enabledKey('parent-account'), '1');
     await enableMarmotPush(ME);
@@ -629,5 +639,49 @@ describe('per-account opt-in (two accounts on one phone stay unlinkable)', () =>
     mockActive = null;
     await expect(loadMarmotPushSettings(ME)).rejects.toThrow();
     expect(await AsyncStorage.getItem('marmot_push_enabled_v1')).toBe('1');
+  });
+});
+
+describe('the device token, shared with the notification watcher', () => {
+  it('is exposed raw (FCM string) and announced on enable, change-free re-reads and disable', async () => {
+    const seen: unknown[] = [];
+    const unsubscribe = subscribePushDevice(() => seen.push(currentPushDevice(ME)));
+    expect(currentPushDevice(ME)).toBeUndefined();
+    await enableMarmotPush(ME);
+    expect(currentPushDevice(ME)).toEqual({ platform: 'fcm', token: 'fcm-token-1' });
+    // Same token again (Finish setup): no new announcement.
+    await syncMarmotPushNow(ME);
+    await disableMarmotPush(ME);
+    expect(currentPushDevice(ME)).toBeNull();
+    expect(seen).toEqual([{ platform: 'fcm', token: 'fcm-token-1' }, null]);
+    unsubscribe();
+  });
+
+  it('APNs tokens come back as lowercase hex', async () => {
+    Object.defineProperty(Platform, 'OS', { configurable: true, get: () => 'ios' });
+    try {
+      (Notifications.getDevicePushTokenAsync as jest.Mock).mockResolvedValueOnce({
+        type: 'ios',
+        data: 'AB'.repeat(32),
+      });
+      await enableMarmotPush(ME);
+      expect(currentPushDevice(ME)).toEqual({ platform: 'apns', token: 'ab'.repeat(32) });
+    } finally {
+      Object.defineProperty(Platform, 'OS', { configurable: true, get: () => 'android' });
+    }
+  });
+
+  it('is account-scoped: another account never gets it; turning one off is announced', async () => {
+    await AsyncStorage.setItem(enabledKey('parent-account'), '1');
+    await enableMarmotPush(ME);
+    expect(currentPushDevice('child-account')).toBeNull();
+    expect(currentPushDevice(null)).toBeNull();
+    expect(currentPushDevice('parent-account')).toEqual({ platform: 'fcm', token: 'fcm-token-1' });
+    const seen: unknown[] = [];
+    const unsubscribe = subscribePushDevice(() => seen.push(currentPushDevice(ME)));
+    await disableMarmotPush(ME); // the parent keeps the token
+    expect(seen).toEqual([null]);
+    expect(currentPushDevice('parent-account')).not.toBeNull();
+    unsubscribe();
   });
 });

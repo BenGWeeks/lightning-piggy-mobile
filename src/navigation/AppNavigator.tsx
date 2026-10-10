@@ -200,6 +200,7 @@ export const navigateToUnsupportedEntity = (entity: string, detail?: string): bo
  *  - dm            → the 1:1 Conversation thread
  *  - group         → the GroupConversation thread
  *  - payment / zap → the Home (wallet) tab
+ *  - mention       → the Notifications screen (notification watcher push)
  *
  * Called from the notification-response listener in App.tsx. Returns false
  * if the nav tree isn't ready yet (caller retries on cold start).
@@ -293,6 +294,11 @@ export const navigateFromNotification = (data: {
           });
       });
     }
+    return true;
+  }
+  // A mention (notification watcher push) → the Notifications screen.
+  if (data.kind === 'mention') {
+    navigationRef.navigate('Notifications');
     return true;
   }
   // payment / zap (or anything else) → wallet home.

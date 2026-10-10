@@ -1,0 +1,127 @@
+import {
+  isWatcherTaskPayload,
+  isWatcherValidation,
+  showWatcherPushInForeground,
+  watcherCategoryOf,
+  watcherTapData,
+} from './watcherPushReceive';
+
+describe('watcherCategoryOf', () => {
+  it('reads the data payload (Android, app running)', () => {
+    expect(
+      watcherCategoryOf({
+        identifier: '0:123',
+        content: { data: { source: 'lp-watcher', category: 'zap' } }, // no `kind` is sent
+      }),
+    ).toBe('zap');
+    // Watcher-sourced but an unknown category: not routable.
+    expect(watcherCategoryOf({ content: { data: { source: 'lp-watcher', category: 'x' } } })).toBe(
+      null,
+    );
+  });
+
+  it("reads the OS-posted notification's tag (Android, backgrounded)", () => {
+    expect(
+      watcherCategoryOf({
+        identifier: 'expo-notifications://foreign_notifications?tag=lp-payment&id=0',
+        content: { data: { 'android.title': 'Lightning Piggy' } },
+      }),
+    ).toBe('payment');
+  });
+
+  it('reads the thread id / collapse id (iOS, data is null)', () => {
+    expect(
+      watcherCategoryOf({ identifier: 'ABC', content: { data: null, threadIdentifier: 'lp-dm' } }),
+    ).toBe('dm');
+    expect(watcherCategoryOf({ identifier: 'lp-mention', content: { data: null } })).toBe(
+      'mention',
+    );
+  });
+
+  it("ignores the app's own and Marmot notifications", () => {
+    expect(watcherCategoryOf({ identifier: 'lp-bg-dm-foreground', content: { data: {} } })).toBe(
+      null,
+    );
+    expect(
+      watcherCategoryOf({
+        identifier: 'uuid',
+        content: { data: { kind: 'dm', marmotPush: true } },
+      }),
+    ).toBe(null);
+    expect(
+      watcherCategoryOf({ identifier: 'x', content: { data: null, threadIdentifier: '' } }),
+    ).toBe(null);
+    expect(watcherCategoryOf(null)).toBe(null);
+  });
+});
+
+describe('isWatcherTaskPayload', () => {
+  it('recognises a received watcher push (Android + iOS task shapes)', () => {
+    expect(isWatcherTaskPayload({ data: { source: 'lp-watcher', category: 'dm' } })).toBe(true);
+    expect(isWatcherTaskPayload({ source: 'lp-watcher' })).toBe(true);
+  });
+
+  it('recognises a tap on a watcher alert', () => {
+    expect(
+      isWatcherTaskPayload({
+        actionIdentifier: 'expo.modules.notifications.actions.DEFAULT',
+        notification: { request: { identifier: 'x', content: { threadIdentifier: 'lp-zap' } } },
+      }),
+    ).toBe(true);
+  });
+
+  it('lets a Marmot (Transponder) wake through', () => {
+    expect(isWatcherTaskPayload({ data: { dataString: null }, notification: null })).toBe(false);
+    expect(isWatcherTaskPayload(undefined)).toBe(false);
+  });
+});
+
+describe('foreground + tap policy', () => {
+  it('only mentions show while the app is open', () => {
+    expect(showWatcherPushInForeground('mention')).toBe(true);
+    expect(showWatcherPushInForeground('dm')).toBe(false);
+    expect(showWatcherPushInForeground('zap')).toBe(false);
+    expect(showWatcherPushInForeground('payment')).toBe(false);
+  });
+
+  it('routes messages to Messages, mentions to Notifications, money to Home', () => {
+    expect(watcherTapData('dm')).toEqual({ kind: 'dm' });
+    expect(watcherTapData('mention')).toEqual({ kind: 'mention' });
+    expect(watcherTapData('zap')).toEqual({ kind: 'payment' });
+    expect(watcherTapData('payment')).toEqual({ kind: 'payment' });
+  });
+});
+
+describe("the watcher's silent admission check (iOS, once per registration)", () => {
+  const validate = { source: 'lp-watcher', type: 'validate' };
+
+  it('is recognised as a background-task payload and as a request', () => {
+    // expo's iOS background-task shape: everything but `aps` under `data`.
+    expect(isWatcherValidation({ data: validate, notification: null })).toBe(true);
+    expect(isWatcherValidation({ identifier: 'x', content: { data: validate } })).toBe(true);
+    expect(isWatcherValidation({ data: { source: 'lp-watcher', category: 'dm' } })).toBe(false);
+    expect(isWatcherValidation({ data: { type: 'validate' } })).toBe(false);
+    expect(isWatcherValidation(null)).toBe(false);
+  });
+
+  it('wakes nothing and routes nowhere', () => {
+    // The Marmot wake task drops it (no generic "New message")…
+    expect(isWatcherTaskPayload({ data: validate, notification: null })).toBe(true);
+    // …and it has no category, so no tap target or foreground policy applies.
+    expect(watcherCategoryOf({ identifier: 'x', content: { data: validate } })).toBe(null);
+  });
+});
+
+describe('serialized task data (expo `dataString`)', () => {
+  it('reads the watcher source from a JSON dataString too', () => {
+    const dataString = JSON.stringify({ source: 'lp-watcher', category: 'zap' });
+    expect(isWatcherTaskPayload({ data: { dataString }, notification: null })).toBe(true);
+    const validate = JSON.stringify({ source: 'lp-watcher', type: 'validate' });
+    expect(isWatcherValidation({ data: { dataString: validate }, notification: null })).toBe(true);
+    // A Marmot wake (no watcher source anywhere) is still a Marmot wake.
+    expect(isWatcherTaskPayload({ data: { dataString: '{}' }, notification: null })).toBe(false);
+    expect(isWatcherTaskPayload({ data: { dataString: 'not json' }, notification: null })).toBe(
+      false,
+    );
+  });
+});
