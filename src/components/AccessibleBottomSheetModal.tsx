@@ -58,6 +58,9 @@ const AccessibleBottomSheetModal = forwardRef(function AccessibleBottomSheetModa
  * the sheet. Generic over the `present(data)` payload, like the library's
  * (`forwardRef` erases generics, hence the cast — same trick the library uses).
  */
+// Value + type share the name on purpose (as in the library) so call sites
+// keep `useRef<BottomSheetModal>` and `<BottomSheetModal>` unchanged.
+// eslint-disable-next-line @typescript-eslint/no-redeclare
 export const BottomSheetModal = AccessibleBottomSheetModal as <T = unknown>(
   props: AccessibleBottomSheetModalProps<T> & {
     ref?: React.ForwardedRef<GorhomBottomSheetModal<T>>;
