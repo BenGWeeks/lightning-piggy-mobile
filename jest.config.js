@@ -61,4 +61,11 @@ module.exports = {
     },
   },
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json'],
+  // Local runs default to half the cores so several worktrees / agents running
+  // the suite at once don't each claim every core and push the dev machine into
+  // memory thrash. CI keeps Jest's own default. Override with JEST_MAX_WORKERS.
+  // (Spread so the key is absent on CI — Jest rejects maxWorkers: undefined.)
+  ...(process.env.JEST_MAX_WORKERS || !process.env.CI
+    ? { maxWorkers: process.env.JEST_MAX_WORKERS || '50%' }
+    : {}),
 };
