@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useRef } from 'react';
 import { DEFAULT_DM_PROTOCOL, type DmProtocol } from '../utils/dmProtocol';
 import { Alert } from '../components/BrandedAlert';
 import { useNostr } from '../contexts/NostrContext';
@@ -214,31 +214,51 @@ export function useConversationComposerActions(params: {
     [pubkey, appendLocalDmMessage, setMessages],
   );
 
-  // Someone Marmot can't reach (no key package, or a legacy one the classic
-  // White Noise app still publishes): ask before sending over NIP-17 instead.
-  // Cancel (or dismiss) sends nothing, so the composer keeps the draft. On
-  // yes: send it, move the thread to NIP-17 (so later messages don't ask
-  // again) and — once per thread — tell the peer we tried Marmot.
+  // Someone Marmot can't reach (no key package, or one this version of
+  // Marmot can't use): ask before sending over NIP-17 instead. Cancel (or
+  // dismiss) sends nothing, so the composer keeps the draft. On yes: move the
+  // thread to NIP-17 first (so a failed send's bubble stays visible and later
+  // messages don't ask again), send it, and — once per thread — tell the peer
+  // we tried Marmot. Overlapping sends (a photo uploading while text goes)
+  // share one dialog and one note.
+  const pendingAnswerRef = useRef<Promise<boolean> | null>(null);
+  const noteClaimedRef = useRef(new Set<string>());
+  const askOnce = useCallback(
+    (reason: MarmotUnreachableReason): Promise<boolean> => {
+      if (!pendingAnswerRef.current) {
+        pendingAnswerRef.current = (async () => {
+          const noteSent = !myPubkey || (await hasSentMarmotFallbackNote(myPubkey, pubkey));
+          return askMarmotFallback(Alert.alert, marmotFallbackPromptCopy(reason, name, noteSent));
+        })().finally(() => {
+          pendingAnswerRef.current = null;
+        });
+      }
+      return pendingAnswerRef.current;
+    },
+    [myPubkey, pubkey, name],
+  );
   const offerNip17 = useCallback(
     async (reason: MarmotUnreachableReason, send: () => Promise<boolean>): Promise<boolean> => {
-      const noteSent = !myPubkey || (await hasSentMarmotFallbackNote(myPubkey, pubkey));
-      const copy = marmotFallbackPromptCopy(reason, name, noteSent);
-      if (!(await askMarmotFallback(Alert.alert, copy))) return false;
-      if (!(await send())) return false;
+      if (!(await askOnce(reason))) return false;
       onMarmotFallback?.();
-      if (!noteSent && myPubkey) {
-        // Claimed before sending so it never goes twice; a note that fails
-        // keeps its red-tick bubble for Re-publish. Not awaited: the user's
-        // own send is done, so the composer clears now.
-        await markMarmotFallbackNoteSent(myPubkey, pubkey);
-        const note = marmotFallbackNoteText();
-        void sendWithBubble(note, 'nip17', (hooks) =>
-          sendDirectMessage(pubkey, note, { protocol: 'nip17', ...hooks }),
-        );
+      if (!(await send())) return false;
+      const claim = `${myPubkey}:${pubkey}`;
+      if (myPubkey && !noteClaimedRef.current.has(claim)) {
+        // Claimed (in memory, then on disk) before sending so it never goes
+        // twice; a note that fails keeps its red-tick bubble for Re-publish.
+        noteClaimedRef.current.add(claim);
+        if (!(await hasSentMarmotFallbackNote(myPubkey, pubkey))) {
+          await markMarmotFallbackNoteSent(myPubkey, pubkey);
+          const note = marmotFallbackNoteText();
+          // Not awaited: the user's own send is done, so the composer clears now.
+          void sendWithBubble(note, 'nip17', (hooks) =>
+            sendDirectMessage(pubkey, note, { protocol: 'nip17', ...hooks }),
+          );
+        }
       }
       return true;
     },
-    [myPubkey, pubkey, name, onMarmotFallback, sendWithBubble, sendDirectMessage],
+    [askOnce, myPubkey, pubkey, onMarmotFallback, sendWithBubble, sendDirectMessage],
   );
 
   const sendText = useCallback(

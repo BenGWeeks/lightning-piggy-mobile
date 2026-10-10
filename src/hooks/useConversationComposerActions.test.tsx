@@ -175,6 +175,51 @@ describe('useConversationComposerActions.sendText — optimistic + failed-keep-b
     expect(mockAlert.mock.calls[1][1]).not.toMatch(/let them know/);
   });
 
+  it('moves the thread to NIP-17 before sending, so a failed send stays visible', async () => {
+    const order: string[] = [];
+    mockSendDirectMessage.mockImplementation(
+      async (_pk: string, _text: string, hooks?: SendHooks): Promise<SendResult> => {
+        order.push(`send:${hooks?.protocol}`);
+        return hooks?.protocol === 'marmot'
+          ? { success: false, error: 'no key package', marmotUnreachable: 'noKeyPackage' }
+          : { success: true };
+      },
+    );
+    answerAlertWith('Send with NIP-17');
+    const { result } = setup('marmot', () => order.push('switch'));
+    await act(async () => {
+      await result.current.handleSend();
+    });
+    expect(order.slice(0, 3)).toEqual(['send:marmot', 'switch', 'send:nip17']);
+  });
+
+  it('shares one dialog and one note between overlapping sends', async () => {
+    marmotUnreachableThenNip17();
+    let pressConfirm: (() => void) | undefined;
+    mockAlert.mockImplementation(
+      (_title: string, _message: string, buttons: BrandedAlertButton[]) => {
+        pressConfirm = buttons[1].onPress;
+      },
+    );
+    const { result } = setup('marmot', jest.fn());
+    let both: Promise<unknown> | undefined;
+    await act(async () => {
+      both = Promise.all([
+        result.current.offerNip17ForText('noKeyPackage', 'first'),
+        result.current.offerNip17ForText('noKeyPackage', 'second'),
+      ]);
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await act(async () => {
+      pressConfirm?.();
+      await both;
+    });
+    expect(mockAlert).toHaveBeenCalledTimes(1);
+    const notes = sentTexts().filter((x) => x.startsWith('I tried to message you on Marmot'));
+    expect(notes).toHaveLength(1);
+    expect(sentTexts()).toEqual(expect.arrayContaining(['first', 'second']));
+  });
+
   it('sends nothing and keeps the draft when the user cancels', async () => {
     marmotUnreachableThenNip17();
     answerAlertWith('Cancel');
@@ -200,7 +245,7 @@ describe('useConversationComposerActions.sendText — optimistic + failed-keep-b
       sent = await result.current.offerNip17ForText('outdatedKeyPackage', 'lnbc1invoice');
     });
     expect(sent).toBe(true);
-    expect(mockAlert.mock.calls[0][0]).toBe("Big Piggy's Marmot app is out of date");
+    expect(mockAlert.mock.calls[0][0]).toBe("Big Piggy's Marmot app needs opening or updating");
     expect(sentTexts()[0]).toBe('lnbc1invoice');
     expect(sentProtocols()[0]).toBe('nip17');
     expect(onMarmotFallback).toHaveBeenCalledTimes(1);

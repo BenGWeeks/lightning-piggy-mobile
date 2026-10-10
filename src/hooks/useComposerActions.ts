@@ -226,16 +226,18 @@ export function useComposerActions({
     async (uri: string) => {
       // Preflight BEFORE the expensive encrypt + Blossom upload: bail if a send
       // is already in flight or there's no valid target (group not loaded).
-      if (uploadingVoice || strategy.canSend?.() === false) return;
+      if (uploadingVoice || strategy.canSend?.() === false) return false;
       setUploadingVoice(true);
       try {
         const file = await uploadEncryptedBlob(uri, signEvent, 'audio/mp4');
         const ok = await strategy.sendFile(file, 'voice');
-        if (!ok) return;
+        if (!ok) return false;
         setVoiceSheetOpen(false);
         closeAttachPanel();
+        return true;
       } catch (error) {
         Alert.alert('Upload failed', error instanceof Error ? error.message : 'Please try again.');
+        return false;
       } finally {
         setUploadingVoice(false);
       }

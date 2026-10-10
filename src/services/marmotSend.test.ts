@@ -97,7 +97,7 @@ describe('sendMarmotDm', () => {
     const result = await sendMarmotDm(ME, PEER, { kind: 14, content: 'hi' });
     expect(result).toEqual({
       success: false,
-      error: expect.stringMatching(/older version of Marmot/),
+      error: expect.stringMatching(/expired, or uses an older version of Marmot/),
       marmotUnreachable: 'outdatedKeyPackage',
     });
   });

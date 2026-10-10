@@ -37,7 +37,7 @@ describe('marmotFallbackPromptCopy', () => {
       "Little Piggy isn't on Marmot yet",
     );
     expect(marmotFallbackPromptCopy('outdatedKeyPackage', 'Little Piggy', false).title).toBe(
-      "Little Piggy's Marmot app is out of date",
+      "Little Piggy's Marmot app needs opening or updating",
     );
   });
 

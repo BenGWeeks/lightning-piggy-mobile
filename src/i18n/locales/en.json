@@ -2404,7 +2404,7 @@
   },
   "marmotFallback": {
     "titleNoKeyPackage": "{{name}} isn't on Marmot yet",
-    "titleOutdated": "{{name}}'s Marmot app is out of date",
+    "titleOutdated": "{{name}}'s Marmot app needs opening or updating",
     "body": "Send this with NIP-17 instead? It's still end-to-end encrypted, but Marmot hides more about who you're talking to.",
     "willNotify": "We'll also let them know you tried Marmot.",
     "cancel": "Cancel",
@@ -2413,6 +2413,6 @@
   },
   "marmotSend": {
     "noKeyPackage": "We couldn't find a Marmot key package on this person's relays. They may need to open their Marmot app so it can publish one — or use NIP-17 for now.",
-    "outdatedKeyPackage": "This person's Marmot app uses an older version of Marmot that Lightning Piggy can't talk to yet — use NIP-17 for now."
+    "outdatedKeyPackage": "This person's Marmot key package has expired, or uses an older version of Marmot that Lightning Piggy can't talk to yet. Opening or updating their Marmot app should fix it — use NIP-17 for now."
   }
 }
