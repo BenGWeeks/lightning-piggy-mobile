@@ -45,6 +45,9 @@ const recipientOf = (e: NostrEvent) => e.tags.find((t) => t[0] === 'p')?.[1]?.to
 export class MarmotWelcomeOutbox {
   private readonly captures = new Set<{ failed: CapturedWrap[]; onWrap?: () => void }>();
   private publishRaw: Publish | null = null;
+  /** Captures run one at a time: gift wraps are encrypted, so a failed one
+   * can't be traced to its group — two invites at once would swap them. */
+  private captureChain: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly backend: MarmotKvBackend) {}
 
@@ -69,18 +72,23 @@ export class MarmotWelcomeOutbox {
     } as N;
   }
 
-  /** Run `fn`, collecting the gift wraps no relay accepted meanwhile. */
-  async capture<T>(
+  /** Run `fn` (after any capture already running), collecting the gift
+   * wraps no relay accepted meanwhile. */
+  capture<T>(
     fn: () => Promise<T>,
     onWrap?: () => void,
   ): Promise<{ result: T; failed: CapturedWrap[] }> {
-    const c = { failed: [] as CapturedWrap[], onWrap };
-    this.captures.add(c);
-    try {
-      return { result: await fn(), failed: c.failed };
-    } finally {
-      this.captures.delete(c);
-    }
+    const run = this.captureChain.then(async () => {
+      const c = { failed: [] as CapturedWrap[], onWrap };
+      this.captures.add(c);
+      try {
+        return { result: await fn(), failed: c.failed };
+      } finally {
+        this.captures.delete(c);
+      }
+    });
+    this.captureChain = run.catch(() => undefined);
+    return run;
   }
 
   /** Republish each wrap once; returns those still not accepted. */

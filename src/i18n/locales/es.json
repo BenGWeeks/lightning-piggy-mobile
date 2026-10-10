@@ -2483,7 +2483,7 @@
   },
   "marmotInvite": {
     "progressTitle": "Invitando dispositivos… {{done}} de {{total}}",
-    "progressBody": "Aprueba cada solicitud en tu firmante: cada teléfono o app que usa esta persona necesita su propia invitación.",
+    "progressBody": "Aprueba cada solicitud en tu firmador: cada teléfono o app que usa esta persona necesita su propia invitación.",
     "notReachedTitle": "Invitación aún no entregada",
     "notReachedBody": "Todavía no pudimos entregar la invitación a {{names}}. Lightning Piggy lo seguirá intentando automáticamente."
   }
