@@ -84,6 +84,8 @@ tags:
           text: '•+'
       - assertNotVisible:
           text: 'nsec1.*'
+      # Copy only renders on a dev client built with modules/secure-clipboard
+      # (it's hidden rather than falling back to a plain clipboard write).
       - assertVisible:
           id: 'key-backup-copy'
       - assertVisible:

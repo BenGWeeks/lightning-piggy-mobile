@@ -5,7 +5,8 @@ import { useCallback } from 'react';
 import { Alert, type BrandedAlertButton } from '../components/BrandedAlert';
 import { useTranslation } from '../contexts/LocaleContext';
 import { isKeyBackedUp } from '../services/keyBackupStatus';
-import { buildSignOutPrompt } from '../utils/signOutPrompt';
+import { getWalletListForPubkey } from '../services/crossProfileWalletService';
+import { buildSignOutPrompt, type SignOutWallet } from '../utils/signOutPrompt';
 import type { SignerType } from '../types/nostr';
 
 export interface SignOutConfirmRequest {
@@ -26,11 +27,16 @@ export function useSignOutConfirm(): (req: SignOutConfirmRequest) => Promise<voi
         req.signerType === 'amber' || req.signerType === 'nip46'
           ? false
           : await isKeyBackedUp(req.pubkey);
+      // A failed read falls back to the generic wallet warning (undefined).
+      const wallets: SignOutWallet[] | undefined = await getWalletListForPubkey(req.pubkey).catch(
+        () => undefined,
+      );
       const prompt = buildSignOutPrompt({
         signerType: req.signerType,
         displayName: req.displayName,
         backedUp,
         otherAccountCount: req.otherAccountCount,
+        wallets,
       });
       const cancel: BrandedAlertButton = {
         text: t('signOutPrompt.cancel'),

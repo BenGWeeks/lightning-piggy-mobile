@@ -57,8 +57,11 @@ describe('keyRevealGate', () => {
   it('falls back to an explicit confirmation with no screen lock', async () => {
     mockLevel.mockResolvedValue(0);
     expect(await keyRevealGate()).toBe('confirm-only');
+  });
+
+  it('fails closed to device auth when the enrolment check errors', async () => {
     mockLevel.mockRejectedValue(new Error('no module'));
-    expect(await keyRevealGate()).toBe('confirm-only');
+    expect(await keyRevealGate()).toBe('device-auth');
   });
 });
 

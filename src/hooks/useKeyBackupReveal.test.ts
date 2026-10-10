@@ -4,17 +4,28 @@ import * as ScreenCapture from 'expo-screen-capture';
 import { useKeyBackupReveal } from './useKeyBackupReveal';
 import { authenticateForKeyReveal, loadAccountNsec } from '../services/accountKeyAccess';
 import { copySensitiveText } from '../services/sensitiveClipboard';
+import { Alert } from '../components/BrandedAlert';
 
-let mockFocusCleanup: (() => void) | void;
+// Every live focus-effect cleanup; `blur()` runs them all, like navigation does.
+const mockFocusCleanups = new Set<() => void>();
 jest.mock('@react-navigation/native', () => ({
   useFocusEffect: (callback: () => void | (() => void)) => {
     const React = jest.requireActual('react');
     React.useEffect(() => {
-      mockFocusCleanup = callback();
-      return () => mockFocusCleanup?.();
+      const cleanup = callback();
+      if (!cleanup) return;
+      mockFocusCleanups.add(cleanup);
+      return () => {
+        if (mockFocusCleanups.delete(cleanup)) cleanup();
+      };
     }, [callback]);
   },
 }));
+function blur() {
+  const cleanups = [...mockFocusCleanups];
+  mockFocusCleanups.clear();
+  cleanups.forEach((cleanup) => cleanup());
+}
 jest.mock('../contexts/LocaleContext', () => ({ useTranslation: () => (key: string) => key }));
 jest.mock('../components/BrandedAlert', () => ({ Alert: { alert: jest.fn() } }));
 jest.mock('../services/accountKeyAccess', () => ({
@@ -100,7 +111,7 @@ it('invalidates pending authentication on blur', async () => {
     pending = result.current.toggleReveal();
     await Promise.resolve();
   });
-  act(() => mockFocusCleanup?.());
+  act(() => blur());
   await act(async () => {
     finish(true);
     await pending;
@@ -166,4 +177,114 @@ it('still invalidates a pending storage read when the app backgrounds after auth
     await pending;
   });
   expect(result.current).toMatchObject({ nsec: null, revealed: false, hasUnlocked: false });
+});
+
+describe('screen-capture protection', () => {
+  // Drain the promise chain between the hook's awaits.
+  const flush = async () => {
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+  };
+
+  it('is requested as soon as the screen is focused, before any key is loaded', () => {
+    setup();
+    expect(ScreenCapture.preventScreenCaptureAsync).toHaveBeenCalledWith('key-backup');
+    expect(authenticateForKeyReveal).not.toHaveBeenCalled();
+    expect(loadAccountNsec).not.toHaveBeenCalled();
+  });
+
+  it('holds while focused and is released on blur', async () => {
+    const { result } = setup();
+    await act(() => result.current.toggleReveal());
+    expect(ScreenCapture.allowScreenCaptureAsync).not.toHaveBeenCalled();
+    act(() => blur());
+    expect(ScreenCapture.allowScreenCaptureAsync).toHaveBeenCalledWith('key-backup');
+  });
+
+  it('is not requested when there is no local key to protect', () => {
+    renderHook(() => useKeyBackupReveal(null));
+    expect(ScreenCapture.preventScreenCaptureAsync).not.toHaveBeenCalled();
+  });
+
+  it('does not unlock or reveal until a delayed protection call settles', async () => {
+    let enable!: () => void;
+    jest
+      .mocked(ScreenCapture.preventScreenCaptureAsync)
+      .mockImplementationOnce(() => new Promise<void>((r) => (enable = r)));
+    const { result } = setup();
+    let pending!: Promise<void>;
+    await act(async () => {
+      pending = result.current.toggleReveal();
+      await flush();
+    });
+    expect(authenticateForKeyReveal).not.toHaveBeenCalled();
+    expect(result.current).toMatchObject({ nsec: null, revealed: false });
+    await act(async () => {
+      enable();
+      await pending;
+    });
+    expect(Alert.alert).not.toHaveBeenCalled();
+    expect(result.current).toMatchObject({ nsec: 'test-secret-account-a', revealed: true });
+  });
+
+  function pressUnprotectedButton(testID: string) {
+    const call = jest.mocked(Alert.alert).mock.calls.at(-1)!;
+    expect(call[0]).toBe('keyBackupScreen.unprotectedTitle');
+    call[2]!.find((b) => b.testID === testID)!.onPress!();
+  }
+
+  it('warns before revealing when protection is rejected, and stays hidden on cancel', async () => {
+    jest
+      .mocked(ScreenCapture.preventScreenCaptureAsync)
+      .mockRejectedValueOnce(new Error('unsupported'));
+    const { result } = setup();
+    let pending!: Promise<void>;
+    await act(async () => {
+      pending = result.current.toggleReveal();
+      await flush();
+    });
+    expect(authenticateForKeyReveal).not.toHaveBeenCalled();
+    await act(async () => {
+      pressUnprotectedButton('key-backup-unprotected-cancel');
+      await pending;
+    });
+    expect(loadAccountNsec).not.toHaveBeenCalled();
+    expect(result.current).toMatchObject({ nsec: null, revealed: false });
+  });
+
+  it('reveals after the warning only when the user explicitly continues', async () => {
+    jest
+      .mocked(ScreenCapture.preventScreenCaptureAsync)
+      .mockRejectedValueOnce(new Error('unsupported'));
+    const { result } = setup();
+    let pending!: Promise<void>;
+    await act(async () => {
+      pending = result.current.toggleReveal();
+      await flush();
+    });
+    await act(async () => {
+      pressUnprotectedButton('key-backup-unprotected-confirm');
+      await pending;
+    });
+    expect(authenticateForKeyReveal).toHaveBeenCalledTimes(1);
+    expect(result.current).toMatchObject({ nsec: 'test-secret-account-a', revealed: true });
+  });
+
+  it('drops a pending warning if the screen blurs before the user answers', async () => {
+    jest
+      .mocked(ScreenCapture.preventScreenCaptureAsync)
+      .mockRejectedValueOnce(new Error('unsupported'));
+    const { result } = setup();
+    let pending!: Promise<void>;
+    await act(async () => {
+      pending = result.current.toggleReveal();
+      await flush();
+    });
+    act(() => blur());
+    await act(async () => {
+      pressUnprotectedButton('key-backup-unprotected-confirm');
+      await pending;
+    });
+    expect(loadAccountNsec).not.toHaveBeenCalled();
+    expect(result.current).toMatchObject({ nsec: null, revealed: false });
+  });
 });

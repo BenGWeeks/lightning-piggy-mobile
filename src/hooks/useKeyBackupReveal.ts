@@ -1,13 +1,17 @@
 // State machine behind the Back up your key screen (#1223): gate the key
 // behind device authentication, hold it only while the screen is focused,
-// block screenshots while it's in memory, and copy it with auto-clear.
+// block screenshots for the screen's whole focused lifetime, and copy it
+// through the platform's secret clipboard.
 //
 // Security invariants:
 //  - The nsec is read from SecureStore only after the gate passes, and is
 //    dropped from state on blur, on app background and on unmount.
+//  - Screen-capture protection is requested on focus, before the key can
+//    load, and a reveal waits for it to settle; if it failed, the user is
+//    warned before the key is shown.
 //  - It never leaves this hook except as the `nsec` value the screen
 //    renders — no logs, toasts, analytics or navigation params.
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import * as ScreenCapture from 'expo-screen-capture';
@@ -50,6 +54,9 @@ export function useKeyBackupReveal(pubkey: string | null): KeyBackupReveal {
   const unlockingRef = useRef(false);
   const authenticatingRef = useRef(false);
   const foregroundWaitRef = useRef<((active: boolean) => void) | null>(null);
+  // Resolves true once capture protection is on for this focus, false if
+  // the platform refused it (or the screen isn't protecting anything).
+  const protectionRef = useRef<Promise<boolean>>(Promise.resolve(false));
 
   const lock = useCallback(() => {
     generationRef.current += 1;
@@ -87,18 +94,34 @@ export function useKeyBackupReveal(pubkey: string | null): KeyBackupReveal {
     }, [lock]),
   );
 
-  // Block screenshots / screen recording / the recents thumbnail while the
-  // key is in memory (FLAG_SECURE on Android; app-switcher blur on iOS).
-  const keyLoaded = nsec !== null;
-  useEffect(() => {
-    if (!keyLoaded) return;
-    ScreenCapture.preventScreenCaptureAsync(SCREEN_CAPTURE_KEY).catch(() => {});
-    if (Platform.OS === 'ios') ScreenCapture.enableAppSwitcherProtectionAsync().catch(() => {});
-    return () => {
-      ScreenCapture.allowScreenCaptureAsync(SCREEN_CAPTURE_KEY).catch(() => {});
-      if (Platform.OS === 'ios') ScreenCapture.disableAppSwitcherProtectionAsync().catch(() => {});
-    };
-  }, [keyLoaded]);
+  // Block screenshots / screen recording / the recents thumbnail for as long
+  // as a local-key screen is focused (FLAG_SECURE on Android; capture block
+  // + app-switcher blur on iOS) — not just once the key has loaded, so no
+  // frame showing the key can ever be painted before protection is asked
+  // for. Keyed on having a key to protect, not on which account it is.
+  const protect = pubkey !== null;
+  useFocusEffect(
+    useCallback(() => {
+      if (!protect) {
+        protectionRef.current = Promise.resolve(false);
+        return;
+      }
+      const enable = async () => {
+        await ScreenCapture.preventScreenCaptureAsync(SCREEN_CAPTURE_KEY);
+        if (Platform.OS === 'ios') await ScreenCapture.enableAppSwitcherProtectionAsync();
+      };
+      protectionRef.current = enable().then(
+        () => true,
+        () => false,
+      );
+      return () => {
+        protectionRef.current = Promise.resolve(false);
+        ScreenCapture.allowScreenCaptureAsync(SCREEN_CAPTURE_KEY).catch(() => {});
+        if (Platform.OS === 'ios')
+          ScreenCapture.disableAppSwitcherProtectionAsync().catch(() => {});
+      };
+    }, [protect]),
+  );
 
   const confirmWithoutScreenLock = useCallback(
     () =>
@@ -117,6 +140,31 @@ export function useKeyBackupReveal(pubkey: string | null): KeyBackupReveal {
             testID: 'key-backup-no-lock-confirm',
           },
         ]);
+      }),
+    [t],
+  );
+
+  const confirmUnprotectedReveal = useCallback(
+    () =>
+      new Promise<boolean>((resolve) => {
+        Alert.alert(
+          t('keyBackupScreen.unprotectedTitle'),
+          t('keyBackupScreen.unprotectedMessage'),
+          [
+            {
+              text: t('keyBackupScreen.cancel'),
+              style: 'cancel',
+              onPress: () => resolve(false),
+              testID: 'key-backup-unprotected-cancel',
+            },
+            {
+              text: t('keyBackupScreen.unprotectedConfirm'),
+              style: 'destructive',
+              onPress: () => resolve(true),
+              testID: 'key-backup-unprotected-confirm',
+            },
+          ],
+        );
       }),
     [t],
   );
@@ -180,9 +228,16 @@ export function useKeyBackupReveal(pubkey: string | null): KeyBackupReveal {
       return;
     }
     const generation = generationRef.current;
+    const isCurrent = () => focusedRef.current && generationRef.current === generation;
+    // Never show the key before capture protection has settled; if the
+    // platform refused it, say so before going any further.
+    const isProtected = await protectionRef.current;
+    if (!isCurrent()) return;
+    if (!isProtected && !(await confirmUnprotectedReveal())) return;
+    if (!isCurrent()) return;
     const key = await unlock();
-    if (key && focusedRef.current && generationRef.current === generation) setRevealed(true);
-  }, [revealed, unlock]);
+    if (key && isCurrent()) setRevealed(true);
+  }, [revealed, unlock, confirmUnprotectedReveal]);
 
   const copy = useCallback(async () => {
     const generation = generationRef.current;

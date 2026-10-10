@@ -1,0 +1,9 @@
+{
+  "platforms": ["android", "apple"],
+  "apple": {
+    "modules": ["SecureClipboardModule"]
+  },
+  "android": {
+    "modules": ["com.lightningpiggy.secureclipboard.SecureClipboardModule"]
+  }
+}

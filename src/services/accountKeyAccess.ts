@@ -31,13 +31,16 @@ export type KeyRevealGate = 'device-auth' | 'confirm-only';
  * How to gate the reveal: real device authentication when the phone has a
  * screen lock or biometrics enrolled, otherwise an explicit in-app
  * confirmation (we can't prove who's holding an unlocked-by-default phone).
+ * Only a positive "nothing enrolled" answer downgrades to the confirmation;
+ * if the check itself errors we fail closed and still ask the OS to
+ * authenticate (a failure there surfaces as "couldn't confirm it's you").
  */
 export async function keyRevealGate(): Promise<KeyRevealGate> {
   try {
     const level = await LocalAuthentication.getEnrolledLevelAsync();
     return level === LocalAuthentication.SecurityLevel.NONE ? 'confirm-only' : 'device-auth';
   } catch {
-    return 'confirm-only';
+    return 'device-auth';
   }
 }
 

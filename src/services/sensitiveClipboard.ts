@@ -1,9 +1,18 @@
-// Copy a secret and clear it after a short window unless another value
-// replaced it. Keep only its fingerprint, never the secret, for expiry.
-// Android disallows background clipboard reads, so retry an expired clear
-// after returning to the foreground. OS suspension can delay expiry.
-import { AppState, type NativeEventSubscription } from 'react-native';
+// Copy a secret with the platform's protections (#1223), via the local
+// SecureClipboard module: Android marks the clip sensitive (masked preview,
+// kept out of Gboard's history); iOS writes it local-only (no Universal
+// Clipboard) with an OS-enforced expiry.
+//
+// Android has no clipboard expiry, so we also clear it after a short window
+// unless another value replaced it — best effort only: it can't reach a
+// keyboard's own history, and OS suspension can delay it. Keep only the
+// fingerprint, never the secret, for that. Android disallows background
+// clipboard reads, so retry an expired clear after returning to the
+// foreground. iOS skips the JS clear: the native expiry covers it, and a
+// read after another app copied something would raise the paste prompt.
+import { AppState, Platform, type NativeEventSubscription } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
+import { isSecureClipboardAvailable, setSecretStringAsync } from '../../modules/secure-clipboard';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
 
@@ -28,12 +37,22 @@ function cancelPending(): void {
   pending = null;
 }
 
+/**
+ * Whether secrets can be copied safely on this build. False on a dev client
+ * built before the native module existed — hide Copy rather than fall back
+ * to a plain clipboard write.
+ */
+export function canCopySensitiveText(): boolean {
+  return isSecureClipboardAvailable();
+}
+
 export async function copySensitiveText(
   text: string,
   clearAfterMs: number = SENSITIVE_CLIPBOARD_CLEAR_MS,
 ): Promise<void> {
-  await Clipboard.setStringAsync(text);
+  await setSecretStringAsync(text, clearAfterMs);
   cancelPending();
+  if (Platform.OS === 'ios') return;
   const entry: PendingClear = {
     fingerprint: fingerprint(text),
     expiresAt: Date.now() + clearAfterMs,

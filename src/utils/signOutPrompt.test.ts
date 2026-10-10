@@ -69,3 +69,36 @@ describe('buildSignOutPrompt', () => {
     expect(many.paragraphs[2].params).toEqual({ count: 3 });
   });
 });
+
+describe('wallet paragraph', () => {
+  const keys = (wallets?: Parameters<typeof buildSignOutPrompt>[0]['wallets']) =>
+    buildSignOutPrompt({ ...base, signerType: 'amber', wallets }).paragraphs;
+
+  it('is dropped when the account has no wallets', () => {
+    expect(keys([]).map((x) => x.key)).toEqual(['signOutPrompt.amber']);
+  });
+
+  it('uses a short connected-wallets line when no recovery phrase is stored', () => {
+    const p = keys([
+      { alias: 'Pocket money', walletType: 'nwc' },
+      { alias: 'Savings', walletType: 'onchain', onchainImportMethod: 'xpub' },
+    ]);
+    expect(p[1]).toEqual({ key: 'signOutPrompt.walletsConnected' });
+  });
+
+  it('names every wallet whose recovery phrase is stored here', () => {
+    const p = keys([
+      { alias: 'Pocket money', walletType: 'nwc' },
+      { alias: 'Savings', walletType: 'onchain', onchainImportMethod: 'mnemonic' },
+      { alias: 'Gift', walletType: 'onchain', onchainImportMethod: 'generated' },
+    ]);
+    expect(p[1]).toEqual({
+      key: 'signOutPrompt.walletsWithPhrase',
+      params: { wallets: 'Savings, Gift' },
+    });
+  });
+
+  it('falls back to the generic warning when the wallet list is unknown', () => {
+    expect(keys(undefined)[1]).toEqual({ key: 'signOutPrompt.walletsRemoved' });
+  });
+});

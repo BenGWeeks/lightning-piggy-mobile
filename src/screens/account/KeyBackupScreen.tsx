@@ -13,7 +13,10 @@ import { useTranslation } from '../../contexts/LocaleContext';
 import { useKeyBackupReveal } from '../../hooks/useKeyBackupReveal';
 import { isKeyBackedUp, markKeyBackedUp } from '../../services/keyBackupStatus';
 import { perAccountKey } from '../../services/perAccountStorage';
-import { SENSITIVE_CLIPBOARD_CLEAR_MS } from '../../services/sensitiveClipboard';
+import {
+  SENSITIVE_CLIPBOARD_CLEAR_MS,
+  canCopySensitiveText,
+} from '../../services/sensitiveClipboard';
 import { createKeyBackupScreenStyles } from '../../styles/KeyBackupScreen.styles';
 import type { AccountDrawerParamList } from '../../navigation/types';
 import type { NostrProfile } from '../../types/nostr';
@@ -32,7 +35,8 @@ function shortNpub(pubkey: string): string {
 /**
  * Back up your key (#1223). For a local-key ("nsec") account: explain what
  * the key is, gate it behind device authentication, show it masked with an
- * eye toggle, copy with clipboard auto-clear, and record the user's "I've
+ * eye toggle, copy through the platform's secret clipboard (Copy is hidden
+ * on a build without it — reveal-only), and record the user's "I've
  * saved it" per account. Amber / NIP-46 accounts get a short note instead —
  * their key never lives in this app.
  *
@@ -137,6 +141,7 @@ const KeyBackupScreen: React.FC = () => {
   }
 
   const showKey = reveal.revealed && reveal.nsec;
+  const canCopy = canCopySensitiveText();
   return (
     <AccountScreenLayout title={t('keyBackupScreen.title')}>
       <Text style={styles.accountName}>{t('keyBackupScreen.account', { name: displayName })}</Text>
@@ -197,20 +202,22 @@ const KeyBackupScreen: React.FC = () => {
         </Text>
       )}
 
-      <TouchableOpacity
-        style={styles.secondaryButton}
-        onPress={handleCopy}
-        disabled={reveal.busy}
-        accessibilityRole="button"
-        accessibilityLabel={t('keyBackupScreen.copyKey')}
-        testID="key-backup-copy"
-      >
-        <View style={styles.buttonRow}>
-          <Copy size={18} color={colors.white} />
-          <Text style={styles.secondaryButtonText}>{t('keyBackupScreen.copyKey')}</Text>
-        </View>
-      </TouchableOpacity>
-      {copied && (
+      {canCopy && (
+        <TouchableOpacity
+          style={styles.secondaryButton}
+          onPress={handleCopy}
+          disabled={reveal.busy}
+          accessibilityRole="button"
+          accessibilityLabel={t('keyBackupScreen.copyKey')}
+          testID="key-backup-copy"
+        >
+          <View style={styles.buttonRow}>
+            <Copy size={18} color={colors.white} />
+            <Text style={styles.secondaryButtonText}>{t('keyBackupScreen.copyKey')}</Text>
+          </View>
+        </TouchableOpacity>
+      )}
+      {canCopy && copied && (
         <Text style={styles.hint} testID="key-backup-copied-note">
           {t('keyBackupScreen.copiedNote', {
             seconds: Math.round(SENSITIVE_CLIPBOARD_CLEAR_MS / 1000),

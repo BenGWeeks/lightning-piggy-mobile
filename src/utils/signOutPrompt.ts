@@ -8,6 +8,17 @@
 // Pure (no React, no storage) so every variant is unit-testable; the
 // caller resolves the i18n refs with `t()` and renders the branded Alert.
 import type { SignerType } from '../types/nostr';
+import type { WalletMetadata } from '../types/wallet';
+
+export type SignOutWallet = Pick<WalletMetadata, 'alias' | 'walletType' | 'onchainImportMethod'>;
+
+/** On-chain wallets whose recovery phrase (mnemonic) lives on this phone. */
+export function hasStoredRecoveryPhrase(w: SignOutWallet): boolean {
+  return (
+    w.walletType === 'onchain' &&
+    (w.onchainImportMethod === 'mnemonic' || w.onchainImportMethod === 'generated')
+  );
+}
 
 export type SignOutPromptVariant = 'nsec-unbacked' | 'nsec-backed' | 'amber' | 'nip46';
 
@@ -20,6 +31,11 @@ export interface SignOutPromptInput {
   backedUp: boolean;
   /** Other accounts on this phone that will stay signed in. */
   otherAccountCount: number;
+  /**
+   * The account's wallets, which sign-out deletes for every signer.
+   * `undefined` = couldn't be read, so fall back to a generic warning.
+   */
+  wallets?: SignOutWallet[];
 }
 
 export interface I18nRef {
@@ -69,8 +85,20 @@ export function buildSignOutPrompt(input: SignOutPromptInput): SignOutPrompt {
       break;
   }
 
-  // Wallet secrets are wiped for every signer, independently of the Nostr key.
-  paragraphs.push({ key: 'signOutPrompt.walletsRemoved' });
+  // Wallet secrets are wiped for every signer, independently of the Nostr
+  // key. Name the wallets whose recovery phrase is about to be deleted —
+  // that's money, and easy to skim past in a generic line.
+  const wallets = input.wallets;
+  if (!wallets) {
+    paragraphs.push({ key: 'signOutPrompt.walletsRemoved' });
+  } else if (wallets.length > 0) {
+    const withPhrase = wallets.filter(hasStoredRecoveryPhrase).map((w) => w.alias);
+    paragraphs.push(
+      withPhrase.length > 0
+        ? { key: 'signOutPrompt.walletsWithPhrase', params: { wallets: withPhrase.join(', ') } }
+        : { key: 'signOutPrompt.walletsConnected' },
+    );
+  }
 
   if (input.otherAccountCount > 0) {
     paragraphs.push({
