@@ -45,6 +45,8 @@ import {
   FOREGROUND_SERVICE_NOTIFICATION_ID,
   markHistoryReadFor,
   markHistoryEntryRead,
+  isRemotePush,
+  lastMarmotNotificationAt,
 } from './notificationService';
 import { setActivePubkeyForWalletStorage } from './walletStorageService';
 
@@ -543,5 +545,129 @@ describe('repeated sources in the tray (#1143)', () => {
     const history = await listNotifications(owner);
     expect(history).toHaveLength(1); // one row despite the retry
     expect(history[0].delivered).toBe(true);
+  });
+});
+
+describe('Marmot push (MIP-05) receive side', () => {
+  const notification = (trigger: unknown) =>
+    ({ request: { identifier: 'n', content: { data: {} }, trigger } }) as never;
+
+  it('tells remote pushes apart from our own local notifications', () => {
+    expect(isRemotePush(notification({ type: 'push' }))).toBe(true);
+    expect(isRemotePush(notification({ type: 'timeInterval', seconds: 1 }))).toBe(false);
+    expect(isRemotePush(notification(null))).toBe(false);
+  });
+
+  it("never shows Android's data-only push (the wake task owns the alert)", async () => {
+    const { Platform } = jest.requireActual('react-native');
+    const original = Platform.OS;
+    Object.defineProperty(Platform, 'OS', { configurable: true, get: () => 'android' });
+    try {
+      await ensureNotificationsInitialised();
+      const handler = (Notifications.setNotificationHandler as jest.Mock).mock.calls.at(-1)?.[0];
+      expect(await handler.handleNotification(notification({ type: 'push' }))).toMatchObject({
+        shouldShowBanner: false,
+        shouldPlaySound: false,
+      });
+    } finally {
+      Object.defineProperty(Platform, 'OS', { configurable: true, get: () => original });
+    }
+  });
+
+  it('in the foreground, hides a remote push only once the app has shown the message', async () => {
+    await ensureNotificationsInitialised();
+    const handler = (Notifications.setNotificationHandler as jest.Mock).mock.calls.at(-1)?.[0];
+    jest.useFakeTimers();
+    const pending = handler.handleNotification(notification({ type: 'push' }));
+    await jest.advanceTimersByTimeAsync(2_000);
+    // Nothing shown (e.g. another account's push) → the generic alert shows.
+    expect(await pending).toMatchObject({ shouldShowBanner: true });
+    jest.useRealTimers();
+    // The open thread counts as shown.
+    setNotificationsForeground(true);
+    setActiveThread('marmot-thread');
+    await fireMessageNotification({
+      kind: 'dm',
+      threadId: 'marmot-thread',
+      title: 'Bob',
+      body: 'hi',
+      data: { conversationPubkey: 'p', conversationProtocol: 'marmot' },
+    });
+    expect(await handler.handleNotification(notification({ type: 'push' }))).toMatchObject({
+      shouldShowBanner: false,
+      shouldShowList: false,
+      shouldPlaySound: false,
+    });
+    expect(await handler.handleNotification(notification(null))).toMatchObject({
+      shouldShowBanner: true,
+      shouldShowList: true,
+    });
+  });
+
+  it('records when a Marmot message was shown — not NIP-17 ones or generic pings', async () => {
+    setNotificationsForeground(false);
+    await fireMessageNotification({
+      kind: 'dm',
+      threadId: '__push__',
+      title: 'New message',
+      body: 'x',
+      data: { marmotPush: true },
+    });
+    await fireMessageNotification({
+      kind: 'dm',
+      threadId: 'peer',
+      title: 'Alice',
+      body: 'nip17',
+      data: { conversationPubkey: 'peer', conversationProtocol: 'nip17' },
+    });
+    expect(lastMarmotNotificationAt()).toBe(0);
+    const before = Date.now();
+    await fireMessageNotification({
+      kind: 'group',
+      threadId: 'marmot:abc',
+      title: 'Family',
+      body: 'hi',
+      data: { groupId: 'marmot:abc' },
+    });
+    expect(lastMarmotNotificationAt()).toBeGreaterThanOrEqual(before);
+  });
+
+  it('the real Marmot message clears the generic push alert', async () => {
+    setNotificationsForeground(false);
+    mockGetPresented.mockResolvedValueOnce([
+      {
+        request: {
+          identifier: 'push-alert',
+          content: { data: { kind: 'dm', marmotPush: true } },
+          trigger: { type: 'timeInterval' },
+        },
+      },
+      {
+        request: {
+          identifier: 'other-dm',
+          content: { data: { kind: 'dm', conversationPubkey: 'x' } },
+          trigger: { type: 'timeInterval' },
+        },
+      },
+    ]);
+    await fireMessageNotification({
+      kind: 'dm',
+      threadId: 'marmot-peer',
+      title: 'Bob',
+      body: 'hi',
+      data: { conversationPubkey: 'peer', conversationProtocol: 'marmot' },
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(mockDismiss).toHaveBeenCalledWith('push-alert');
+    expect(mockDismiss).not.toHaveBeenCalledWith('other-dm');
+  });
+
+  it('opening Messages clears a data-less server alert (iOS)', async () => {
+    mockDismiss.mockClear();
+    mockGetPresented.mockResolvedValueOnce([
+      { request: { identifier: 'apns-alert', content: { data: {} }, trigger: { type: 'push' } } },
+    ]);
+    expect(await dismissNotificationsFor({ genericMessages: true })).toBe(1);
+    expect(mockDismiss).toHaveBeenCalledWith('apns-alert');
   });
 });

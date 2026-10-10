@@ -17,7 +17,6 @@ import {
   createApplicationMessageIntent,
   deserializeApplicationData,
   getGroupMembers,
-  getKeyPackageLifetime,
   getPubkeyLeafNodeIndexes,
   GROUP_ENCRYPTED_MEDIA_V2_COMPONENT_ID,
   Proposals,
@@ -26,7 +25,7 @@ import {
 } from '@internet-privacy/marmot-ts';
 import type { EventSigner } from 'applesauce-core';
 import { bytesToHex, randomBytes } from '@noble/hashes/utils.js';
-import { getEventHash, verifyEvent, type Event as NostrEvent, type Filter } from 'nostr-tools';
+import { getEventHash, type Event as NostrEvent, type Filter } from 'nostr-tools';
 
 import type { SignerType } from '../types/nostr';
 import { relayListFromTags } from '../utils/relayListEvents';
@@ -38,6 +37,7 @@ import {
   imageAttachments,
   type MarmotMediaKeys,
 } from './marmotMedia';
+import { MarmotNoKeyPackageError, pickKeyPackage } from './marmotKeyPackages';
 import { createMarmotNetwork, createPushTransport } from './marmotNetwork';
 import {
   leafKey,
@@ -46,7 +46,9 @@ import {
   PUSH_TOKEN_UPDATE_KIND,
   PUSH_TRIGGERING_KINDS,
 } from './marmotPush';
+import type { SignedProof } from './marmotPushEntries';
 import { MarmotPushNotifier, type PushGroup } from './marmotPushNotifier';
+import { MarmotPushRegistrar } from './marmotPushRegistrar';
 import { createMarmotSigner } from './marmotSigner';
 import {
   createMarmotKvStore,
@@ -188,6 +190,8 @@ export class MarmotSession {
   private readonly joiningWelcomes = new Set<string>();
   private readonly deliveredRumors = new Set<string>();
   private readonly push: MarmotPushNotifier;
+  /** MIP-05: announcing THIS device's push token in our groups. */
+  readonly pushRegistration: MarmotPushRegistrar;
   private connection: { unsubscribe(): void } | null = null;
   private stopped = false;
   private markReady!: () => void;
@@ -212,8 +216,28 @@ export class MarmotSession {
           }
         : createPushTransport(opts.getLookupRelays),
     });
+    const signer = opts.signer ?? createMarmotSigner(opts.pubkey, opts.signerType);
+    this.pushRegistration = new MarmotPushRegistrar({
+      pubkey: opts.pubkey,
+      silentSigner: opts.signerType === 'nsec',
+      backend: this.backend,
+      // A previous session of this account (A → B → A) may still be
+      // finishing a publish + write: wait for it before planning anything.
+      ready: Promise.all([this.ready, pushDrains.get(opts.pubkey)?.catch(() => undefined)]).then(
+        () => undefined,
+      ),
+      groups: () =>
+        this.client.groups.loaded
+          .filter((g) => g.status === 'active')
+          .map((g) => ({ ...this.pushGroup(g), ownLeaf: g.state.privatePath.leafIndex })),
+      sign: (template) => signer.signEvent(template) as Promise<SignedProof>,
+      send: async (idHex, event) => {
+        const rumor = buildMarmotRumor(this.pubkey, event);
+        return Object.values(await this.sendRumor(toAppGroupId(idHex), rumor)).some(Boolean);
+      },
+    });
     this.client = new MarmotClient({
-      signer: opts.signer ?? createMarmotSigner(opts.pubkey, opts.signerType),
+      signer,
       network: this.boundGroupQueries(network),
       cryptoProvider: marmotCryptoProvider,
       groupStateStore: store('groups'),
@@ -240,9 +264,14 @@ export class MarmotSession {
         this.emitGroupsChanged();
       });
     }
-    for (const evt of ['left', 'removed', 'destroyed', 'disbanded', 'unloaded'] as const) {
-      groups.on(evt, () => this.emitGroupsChanged());
+    for (const evt of ['left', 'removed', 'destroyed', 'disbanded'] as const) {
+      groups.on(evt, (id: Uint8Array, ..._rest: unknown[]) => {
+        // We're out of it: forget what we published there (MIP-05 state).
+        this.pushRegistration.forgetGroup(bytesToHex(id));
+        this.emitGroupsChanged();
+      });
     }
+    groups.on('unloaded', () => this.emitGroupsChanged());
     try {
       // Inside the try: a store failure must still open the `ready` gate, or
       // every send/join awaiting it would hang instead of erroring.
@@ -286,7 +315,16 @@ export class MarmotSession {
 
   stop(): void {
     this.stopped = true;
-    pushDrains.set(this.pubkey, this.push.stop());
+    // Accumulated: an earlier session of the same account (A → B → A) may
+    // still be finishing a write the wipe must wait for.
+    pushDrains.set(
+      this.pubkey,
+      Promise.all([
+        pushDrains.get(this.pubkey),
+        this.push.stop(),
+        this.pushRegistration.stop(),
+      ]).then(() => undefined),
+    );
     this.connection?.unsubscribe();
     this.connection = null;
     for (const g of this.client.groups.loaded) {
@@ -509,6 +547,7 @@ export class MarmotSession {
       Object.values(byRelay).some(Boolean)
     ) {
       this.push.trigger(this.pushGroup(sent));
+      this.pushRegistration.onUserSend(sent.idStr);
     }
     return byRelay;
   }
@@ -705,6 +744,7 @@ export class MarmotSession {
   }
 
   private emitGroupsChanged(): void {
+    this.pushRegistration.schedule();
     const groups = this.listGroups();
     for (const l of this.listeners) l.onGroupsChanged?.(groups);
   }
@@ -735,22 +775,7 @@ export class MarmotSession {
       authors: [author],
       limit: 20,
     })) as NostrEvent[];
-    // Newest per publication slot (`d`), then newest first; take the first
-    // one the library will accept — a peer's client may have published an
-    // expired / over-long one alongside a good one (or only bad ones).
-    const newestPerSlot = new Map<string, NostrEvent>();
-    for (const e of events) {
-      const slot = e.tags.find((t) => t[0] === 'd')?.[1] ?? e.id;
-      const prev = newestPerSlot.get(slot);
-      if (!prev || e.created_at > prev.created_at) newestPerSlot.set(slot, e);
-    }
-    const candidates = [...newestPerSlot.values()].sort(
-      (a, b) => b.created_at - a.created_at || a.id.localeCompare(b.id),
-    );
-    const usable = candidates.find((e) => isUsableKeyPackage(e));
-    if (usable) return usable;
-    if (candidates.length > 0) throw new MarmotUnusableKeyPackageError(peer);
-    return null;
+    return pickKeyPackage(peer, events);
   }
 
   /**
@@ -911,48 +936,11 @@ function spreadProposals(
   );
 }
 
-// Mirrors marmot-ts's invite-time KeyPackage checks (createInviteIntent): a
-// valid signature, the singleton d / i / mls_protocol_version=1.0 tags, and a
-// LeafNode lifetime within the 7,261,200 s cap and current (±1 h grace).
-const KEY_PACKAGE_LIFETIME_CAP_SECS = 7_261_200;
-const KEY_PACKAGE_LIFETIME_GRACE_SECS = 3_600;
-export function isUsableKeyPackage(
-  e: NostrEvent,
-  nowSecs = Math.floor(Date.now() / 1000),
-): boolean {
-  const single = (name: string) => {
-    const tags = e.tags.filter((t) => t[0] === name);
-    return tags.length === 1 ? tags[0][1] : undefined;
-  };
-  if (!single('d') || !single('i') || single('mls_protocol_version') !== '1.0') return false;
-  if (!verifyEvent(e)) return false;
-  const lifetime = getKeyPackageLifetime(e);
-  if (!lifetime) return false;
-  const notBefore = Number(lifetime.notBefore);
-  const notAfter = Number(lifetime.notAfter);
-  return (
-    notAfter - notBefore <= KEY_PACKAGE_LIFETIME_CAP_SECS &&
-    nowSecs >= notBefore - KEY_PACKAGE_LIFETIME_GRACE_SECS &&
-    nowSecs <= notAfter + KEY_PACKAGE_LIFETIME_GRACE_SECS
-  );
-}
-
-/** The peer published key packages, but none Marmot can accept: expired,
- * over-long lifetime, or an older Marmot format the v2 library can't decode
- * (e.g. MDK 0.8.x / older White Noise) — the peer needs a current client. */
-export class MarmotUnusableKeyPackageError extends Error {
-  constructor(readonly pubkey: string) {
-    super(`No usable Marmot key package for ${pubkey.slice(0, 8)}`);
-    this.name = 'MarmotUnusableKeyPackageError';
-  }
-}
-
-export class MarmotNoKeyPackageError extends Error {
-  constructor(readonly pubkey: string) {
-    super(`No Marmot key package published for ${pubkey.slice(0, 8)}`);
-    this.name = 'MarmotNoKeyPackageError';
-  }
-}
+export {
+  isUsableKeyPackage,
+  MarmotNoKeyPackageError,
+  MarmotUnusableKeyPackageError,
+} from './marmotKeyPackages';
 
 // --- active-session registry ---------------------------------------------------
 

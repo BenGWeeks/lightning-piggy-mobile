@@ -52,7 +52,7 @@ Measured impact: qemu writes dropped **~755 MB/s -> ~10 MB/s**, I/O pressure **6
 | Emulator throws repeated "System UI isn't responding" / "Process system isn't responding" / per-Google-app "isn't responding" ANR dialogs on the `google_apis` AVD (contact avatars never load in Messages, relays stall, Maestro flows die with `Terminated`)
 | The android-34 **google_apis** system image bundles Google apps (Digital Wellbeing, Quicksearch / the Google app, Maps) and a full GMS that churn in the background under the software GPU (`-gpu swiftshader_indirect`), throwing ANR dialogs that steal window focus, starve the Nostr relay websockets + avatar image downloads (so Messages-list profile pictures stay on the default pig placeholder), and abort Maestro runs mid-flow. An in-guest System UI restart (`adb shell am force-stop com.android.systemui`) does **not** hold — it re-ANRs within seconds. First rule out the RAM-snapshot writeback issue above by doing a true cold boot (`adb emu kill`, then relaunch with `-no-snapshot`, not `-no-snapshot-load`); that often clears the ANRs, though the GMS churn can still return under load. +
 *The biggest offender is core GMS, not the bundled apps.* The **"Process system isn't responding"** dialog specifically is `system_server` being pegged (~175% CPU) by `com.google.android.gms.persistent`, which loops ANR-ing and crashing on `.chimera.PersistentIntentOperationService` (`adb logcat \| grep "ANR in"` shows it). Disabling Wellbeing/Quicksearch/Maps quiets the focus-stealing app dialogs but NOT this one — you have to disable GMS itself to stop it. Confirmed harmless here: after disabling GMS, CPU dropped to ~370/400 idle, the ANRs stopped, and the app (which uses no GMS) ran fine. +
-*The app needs none of Google Play Services*, so the image flavour is avoidable entirely: maps use MapLibre (`@maplibre/maplibre-react-native` — self-rendered OSM vector tiles, not Google Maps), notifications are local-only (`expo-notifications`, "No FCM" per `app.config.ts`), and `expo-location` runs on the platform provider — set the emulator's GPS with `adb emu geo fix 0.0589 52.2964` or Extended Controls → Location (the dev-pin env-var approach was removed in PR #597). There are no `com.google.android.gms` references in the native Android config. +
+*The app needs none of Google Play Services*, so the image flavour is avoidable entirely: maps use MapLibre (`@maplibre/maplibre-react-native` — self-rendered OSM vector tiles, not Google Maps), notifications are local-first (`expo-notifications`; FCM is used only by the opt-in Marmot push — `googleServicesFile` in `app.config.ts`, with FCM auto-init off until the user turns push on), and `expo-location` runs on the platform provider — set the emulator's GPS with `adb emu geo fix 0.0589 52.2964` or Extended Controls → Location (the dev-pin env-var approach was removed in PR #597). Disabling GMS is fine for everything except that opt-in push: with GMS off the AVD can't get an FCM token, so Marmot push can't be tested on it (re-enable GMS, or use a phone). +
 *Quick fix (reversible, keeps app data — re-apply after each cold boot, like the keyboard gates above):* +
 [source,bash]
 ----
@@ -937,3 +937,45 @@ reviews for now". Wait for the window to pass, then comment
 Codex review, for example
 `codex exec -m gpt-6.1-sol -c sandbox_mode="danger-full-access" "<prompt>" < /dev/null`
 (see the `codex exec` section above).
+
+=== Firebase project creation via CLI returns 403
+
+`firebase projects:create` (or adding Firebase to an existing Google Cloud
+project) fails with HTTP 403 / `PERMISSION_DENIED` until the account has
+accepted the Firebase terms of service. That can only be done in the browser:
+open https://console.firebase.google.com once with the same Google account and
+accept the terms, then re-run the CLI. The Lightning Piggy project
+(`lightning-piggy-app-62493`) already exists; its Android client config for all
+three package names is `google-services.json` in the repo root.
+
+=== Marmot push: enabling says "couldn't get a push token"
+
+The switch (Account → Security → Push notifications → "Marmot messages")
+needs a native token from Apple/Google. On Android that means Google Play
+services: de-Googled phones (GrapheneOS without sandboxed Play, microG builds
+without FCM), emulator images without Google APIs, and a `google_apis` AVD with
+GMS disabled (the ANR workaround above — as on the LP emulator) can't get one,
+so the switch turns itself back off. Use a phone with Play services, or a
+`google_apis` / `google_play` emulator image with GMS enabled.
+
+On iOS the APNs environment follows the build's *signing*, not the bundle id.
+The Simulator and `expo run:ios` dev clients get sandbox tokens, served by the
+dev Transponder (`npub15vns5zhkr3vq95rg330gmtea6mz2xs24um0hey396nd06p8kfl9say2equ`).
+An EAS-built `.dev` app on a physical iPhone gets *production* tokens, which no
+server serves for the `.dev` topic — test real-device iOS push with a preview or
+TestFlight build.
+
+=== Marmot push: no notification arrives on Android
+
+* A *force-stopped* app (Settings → Force stop, or `adb shell am force-stop`)
+  receives no FCM messages until it is opened again — an Android rule. To test
+  "app closed", swipe it away from Recents or use `adb shell am kill <package>`
+  after pressing Home.
+* Check the server got the trigger and delivered it:
+  `ssh benweeks@black-panther.local 'docker logs lightning-piggy-transponder-preview --since 10m'`
+  (`lightning-piggy-transponder` for production).
+* The sender only wakes devices whose records it has: our 447 must have reached
+  the group (the sender must be a member when it was published, or receive the
+  re-send that follows a membership change).
+* With the app in the foreground, pushes are deliberately silent — the open app
+  notifies with the real message itself.

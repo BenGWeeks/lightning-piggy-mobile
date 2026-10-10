@@ -4,6 +4,10 @@
 // "pong: <text>" to every message. Uses marmot-ts's own WebCrypto provider,
 // so it also cross-checks LP's pure-JS Hermes crypto over the wire.
 //   source .env && MAESTRO_NSEC_BOT=$MAESTRO_NSEC_LITTLE node --input-type=module < scripts/marmot-peer-bot.mjs
+// BOT_PUSH=1: also act as a MIP-05 sender — remember the push-token records
+// members publish (kinds 447/449) and, after every message the bot sends,
+// gift-wrap kind-446 triggers to their notification servers (as White Noise
+// and Lightning Piggy do), so a closed app on the other side gets woken.
 import {
   MarmotClient,
   createApplicationMessageIntent,
@@ -17,7 +21,15 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { mkdirSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { nip19, getPublicKey, finalizeEvent, nip44, matchFilters } from 'nostr-tools';
+import {
+  nip19,
+  nip59,
+  getPublicKey,
+  finalizeEvent,
+  generateSecretKey,
+  nip44,
+  matchFilters,
+} from 'nostr-tools';
 import { SimplePool } from 'nostr-tools/pool';
 import { randomBytes, bytesToHex } from '@noble/hashes/utils.js';
 
@@ -140,6 +152,63 @@ const client = new MarmotClient({
   lifecycleStore: fileStore('lifecycle'),
 });
 
+// --- BOT_PUSH: minimal MIP-05 sender (test tool — no owner-sig checks) ---
+const pushStore = fileStore('push');
+const recordKey = (e) => `${e.member_id_hex}|${e.leaf_index}|${e.platform}|${e.server_pubkey_hex}`;
+async function ingestPush(group, r) {
+  if (![447, 448, 449].includes(r.kind)) return false;
+  let body;
+  try {
+    body = JSON.parse(r.content);
+  } catch {
+    return true;
+  }
+  const records = (await pushStore.getItem(group.idStr)) ?? {};
+  for (const e of body.tokens ?? []) {
+    const prev = records[recordKey(e)];
+    if (!prev || e.owner_ts > prev.owner_ts) records[recordKey(e)] = e;
+  }
+  // A removal leaves a tombstone (as the app does), so an older update that
+  // arrives later can't bring the token back.
+  for (const e of body.removals ?? []) {
+    const prev = records[recordKey(e)];
+    if (!prev || e.owner_ts > prev.owner_ts) records[recordKey(e)] = { ...e, removed: true };
+  }
+  await pushStore.setItem(group.idStr, records);
+  log(`PUSH records in ${group.idStr.slice(0, 8)}: ${Object.keys(records).length}`);
+  return true;
+}
+async function triggerPush(group) {
+  if (!process.env.BOT_PUSH) return;
+  const records = Object.values((await pushStore.getItem(group.idStr)) ?? {}).filter(
+    (e) => !e.removed && e.member_id_hex !== pk,
+  );
+  const byServer = new Map();
+  for (const e of records) {
+    const t = byServer.get(e.server_pubkey_hex) ?? { hints: new Set(), tokens: [] };
+    t.tokens.push(e.encrypted_token);
+    if (e.relay_hint) t.hints.add(e.relay_hint);
+    byServer.set(e.server_pubkey_hex, t);
+  }
+  for (const [server, { hints, tokens }] of byServer) {
+    let relays = [...hints];
+    if (!relays.length) {
+      const [inbox] = (
+        await network.request(RELAYS, { kinds: [10050], authors: [server], limit: 1 })
+      ).sort((a, b) => b.created_at - a.created_at);
+      relays = inbox?.tags.filter((t) => t[0] === 'relay').map((t) => t[1]) ?? [];
+    }
+    const content = Buffer.concat(tokens.map((t) => Buffer.from(t, 'base64'))).toString('base64');
+    const wrap = nip59.wrapEvent(
+      { kind: 446, content, tags: [['v', 'marmot-push-v1']] },
+      generateSecretKey(),
+      server,
+    );
+    await Promise.allSettled(pool.publish(relays, wrap));
+    log(`PUSH trigger → ${server.slice(0, 8)} (${tokens.length} token(s)) via ${relays.join(',')}`);
+  }
+}
+
 const wire = (group) => {
   group.on('applicationMessage', async (data) => {
     const r = deserializeApplicationData(data);
@@ -147,6 +216,7 @@ const wire = (group) => {
       `RECV kind=${r.kind} from=${r.pubkey.slice(0, 8)} content=${JSON.stringify(r.content.slice(0, 120))} tags=${JSON.stringify(r.tags).slice(0, 160)}`,
     );
     if (r.pubkey === pk) return;
+    if (await ingestPush(group, r)) return; // token gossip — never answered
     // Never answer another bot's pong (two bots in one group would loop).
     if (r.content.startsWith('pong: ')) return;
     // A photo (MIP-04): fetch + verify + decrypt it, as White Noise would.
@@ -170,6 +240,7 @@ const wire = (group) => {
       });
       await client.groups.send(group.id, createApplicationMessageIntent(reply));
       log('SENT reply', reply.id.slice(0, 8));
+      await triggerPush(group);
     } catch (e) {
       log('reply failed (relay?)', e?.message ?? e); // keep the bot alive mid-test
     }
@@ -233,6 +304,9 @@ const dmWith = (target) =>
     const members = getGroupMembers(g.state).map((m) => m.toLowerCase());
     return (g.groupData?.name ?? '') === '' && members.length === 2 && members.includes(target);
   });
+// BOT_INITIATE_DELAY_S: wait before saying hello — lets the group backfill
+// (e.g. the other side's push-token records) land first.
+await new Promise((r) => setTimeout(r, Number(process.env.BOT_INITIATE_DELAY_S ?? 0) * 1000));
 if (process.env.BOT_INITIATE_TO && hasDmWith(process.env.BOT_INITIATE_TO.toLowerCase())) {
   // Say hello in the existing DM so the flow can wait for it (proves the app
   // is reading this group before it replies).
@@ -244,6 +318,7 @@ if (process.env.BOT_INITIATE_TO && hasDmWith(process.env.BOT_INITIATE_TO.toLower
       createApplicationMessageIntent(createChatRumor({ pubkey: pk, content: text })),
     );
     log('DM with target already exists — SENT hello in', dm.idStr.slice(0, 8));
+    await triggerPush(dm);
   } catch (e) {
     log('hello in existing DM failed:', e?.message ?? e);
   }
@@ -265,6 +340,7 @@ if (process.env.BOT_INITIATE_TO && hasDmWith(process.env.BOT_INITIATE_TO.toLower
       createApplicationMessageIntent(createChatRumor({ pubkey: pk, content: text })),
     );
     log('SENT initiate text');
+    await triggerPush(group);
   } catch (e) {
     log('initiate failed:', e?.message ?? e);
   }

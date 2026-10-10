@@ -5,7 +5,10 @@
 This document explains how Lightning Piggy delivers OS-level
 notifications (incoming DMs, group messages, payments, zaps) to a
 backgrounded or closed app *without* depending on Firebase Cloud
-Messaging or any other Google Play Services component.
+Messaging or any other Google Play Services component. The one exception
+is opt-in and off by default: Marmot push (MIP-05), a content-free
+"New message" wake through Apple/Google — see "Marmot messages and
+MIP-05 push" below.
 
 It is the canonical reference for the foundation landed in PR for
 issue https://github.com/BenGWeeks/lightning-piggy-mobile/issues/279[#279].
@@ -20,7 +23,7 @@ setup, delivery limits and device validation. Payment checks cover Android NWC
 wallets; the foundation background worker itself only checks messages and cache
 activity. Its iOS scheduling estimates below are not a guaranteed delivery bound.
 
-== Why no FCM
+== Why local-first (no FCM by default)
 
 Lightning Piggy targets users on de-Googled Android distributions
 (GrapheneOS, CalyxOS, /e/OS, microG-flashed stock ROMs). FCM
@@ -32,6 +35,9 @@ Standard React Native push libraries (`react-native-firebase/messaging`,
 `@notifee/react-native` with FCM transport, OneSignal, etc.) all sit
 on top of FCM and inherit this constraint. They are excluded from
 Lightning Piggy's dependency graph by policy, not just preference.
+(`expo-notifications` itself links the Firebase Messaging SDK on Android;
+it stays dormant — auto-init disabled by `plugins/withFcmAutoInitDisabled.js`
+— until the user turns on Marmot push, and nothing else depends on it.)
 
 Apple Push Notification service (APNs) is the equivalent on iOS but
 requires us to operate a remote push server that holds an APNs token
@@ -41,6 +47,13 @@ is out for the same architectural reason that FCM is out: there is
 no remote sender. iOS notifications therefore arrive via local
 notifications fired by the JS runtime when it next runs (see
 "iOS background story" below).
+
+Marmot changed one part of this: MIP-05 defines a remote sender that
+learns nothing about the message — a notification server that only turns
+an encrypted device token into a content-free native push. Lightning Piggy
+runs one per app (a MIP-05 Transponder) and offers it as an *opt-in* for
+Marmot chats. Everything above still holds when it is off (the default),
+and on a de-Googled Android it simply can't be turned on.
 
 == The three pieces
 
@@ -53,7 +66,8 @@ notifications fired by the JS runtime when it next runs (see
 to every trigger site (DM rumor decrypt, payment settle, zap receipt).
 Owns Android channels, the foreground permission flow, and the
 lock-screen content privacy preference. Backed by `expo-notifications`
-LOCAL notifications (no FCM token requested).
+LOCAL notifications (no FCM token requested unless the user opts into
+Marmot push).
 
 | `expo-background-task` + `src/services/backgroundSyncService.ts`
 | The cross-platform background worker — WorkManager on Android,
@@ -114,8 +128,10 @@ iOS has no equivalent to Android's foreground service. The two
 alternatives we evaluated:
 
 1. **Silent push via APNs** — requires us to run a remote server
-   that holds APNs tokens and forwards events. *Rejected* — same
-   architectural reason as FCM (no backend).
+   that holds APNs tokens and forwards events. *Rejected* as the general
+   mechanism — same architectural reason as FCM (no backend). For Marmot
+   chats only, the opt-in MIP-05 push (below) is the exception: our
+   notification server sends a generic alert, never message content.
 2. **`audio` background mode keep-alive trick** — plays a near-silent
    audio stream so iOS keeps the app process alive. App Store
    review reliably rejects this. *Rejected.*
@@ -186,27 +202,116 @@ This seam exists so we can:
 
 == Marmot messages and MIP-05 push
 
-Marmot (MLS) messages raise the same local notifications as NIP-17 ones, but
-only while the app is running and its Marmot session is up
+Marmot (MLS) messages raise the same local notifications as NIP-17 ones
+while the app is running and its Marmot session is up
 (`useMarmotDmInbound` / `useMarmotGroups` → `fireMessageNotification`). The
 background detect-and-ping worker and the Android background message watch
-subscribe to gift wraps (kind 1059), not to kind-445 group events, so a
-Marmot message that arrives while the app is closed raises no alert.
+subscribe to gift wraps (kind 1059), not to kind-445 group events, so without
+push a Marmot message that arrives while the app is closed raises no alert.
 
-Marmot's own push scheme (MIP-05) is implemented on the *send* side only:
-when we message a group, `marmotPushNotifier.ts` gift-wraps the other
-members' encrypted device tokens to their notification server, which wakes
-their phones (White Noise users, via White Noise's Transponder). The app
-requests no push token and sends nothing to Apple or Google itself.
+*Send side.* When we message a group, `marmotPushNotifier.ts` gift-wraps the
+other members' encrypted device tokens to their notification server, which
+wakes their phones (White Noise users via White Noise's Transponder, Lightning
+Piggy users via ours).
 
-Receiving MIP-05 pushes would need a Lightning Piggy notification server
-holding the app's APNs / FCM credentials, plus app-side registration (a
-native token, encrypted to that server and gossiped in each group). A server
-is deployed on `black-panther` (`npub1v5lrt4u7vhfnmxwk6c3uepcsrvs4jqyy3z3jrfm5kw73yp0wv2ts5pnwjs`)
-but its credentials are pending and the app side is not built. Doing it
-would revisit "Why no FCM" above: FCM delivery still needs Google Play
-Services on Android, so de-Googled devices would keep relying on local
-notifications. See `SOLUTION_DESIGN.adoc` → "Marmot (MLS) messaging".
+*Receive side (opt-in per account, off by default).* Settings → Security →
+"Message notifications via push (Marmot)". The phone has one token, so every
+account that publishes it shows the same fingerprint in its chats; two
+accounts on one phone (a parent and a smart saver, say) would become linkable
+by anyone who chats with both. So the switch is stored per account
+(`marmot_push_enabled_v1_<pubkey>`): a session only carries the token if its
+own account opted in, an account that is added or switched to never inherits
+it, and enabling it while another account on the phone has it shows "Other
+accounts on this phone also use push; people who chat with both could tell
+they're on the same phone." A pre-release device-wide switch migrates to the
+account that was active, only.
+
+. `marmotPushRegistration.ts` asks Apple/Google for this device's *native*
+  token (`getDevicePushTokenAsync` — FCM on Android, APNs on iOS; never Expo's
+  push service) and picks the notification server by app id:
++
+[cols="2,3,2"]
+|===
+| App id | Server (Transponder) | Notes
+
+| `com.lightningpiggy.app` | `npub1v5lrt4u7vhfnmxwk6c3uepcsrvs4jqyy3z3jrfm5kw73yp0wv2ts5pnwjs` | APNs topic = production bundle id
+| `com.lightningpiggy.app.preview` | `npub1rzy2h0rhqmn44tqepvy4h93082878cackvked5lp3wghzkwe3rmsetjeya` | APNs topic = preview bundle id
+| `com.lightningpiggy.app.dev` | `npub15vns5zhkr3vq95rg330gmtea6mz2xs24um0hey396nd06p8kfl9say2equ` (overridable at bundle time with `EXPO_PUBLIC_MARMOT_PUSH_DEV_SERVER`) | APNs *sandbox* environment, topic = dev bundle id; FCM too. The APNs environment follows the build's signing, not the bundle id: the iOS Simulator and `expo run:ios` dev clients get sandbox tokens (served), but an EAS-built `.dev` app on a physical iPhone gets production tokens, which no server serves for the `.dev` topic
+|===
++
+An "Advanced" field accepts another server's npub (it must hold Lightning
+Piggy's APNs/FCM credentials to deliver); its relay hint is the first relay of
+its kind-10050 list. The built-in servers use a fixed hint (`wss://nos.lol`,
+in both servers' 10050) so a lookup can never change the signed records.
+. `marmotPushToken.ts` seals the token to the server (MIP-05 "Token
+  encryption"); `marmotPushRegistrar.ts` publishes it in every Marmot group as
+  a kind-447 self-update with an owner proof — see `SOLUTION_DESIGN.adoc` →
+  "Marmot (MLS) messaging" for the protocol and signer details.
+. Other members' clients now trigger our server, which sends a content-free
+  push:
+** *iOS* — the server sends a generic APNs alert ("Lightning Piggy" / "New
+   message"), shown by the OS.
+** *Android* — FCM delivers a data-only message (Transponder has no FCM alert
+   mode). `marmotPushWake.ts` (defined from `index.ts`, so it also runs
+   headless after the app was swiped away) posts the generic "New message"
+   ping itself — unless the app (foreground or a running session in the
+   background) showed a Marmot message in the 15 s before the push (the sender publishes
+   the message first) or the 6 s after it. If the real message turns up
+   later, showing it clears the generic ping.
+. Tapping the generic alert opens the Messages list (no thread id), and
+  focusing that list clears it (#1142). A burst of pushes replaces one
+  generic alert instead of stacking.
+
+*No double alerts.* A remote push that arrives while the app is open is
+hidden by the `setNotificationHandler` in `notificationService.ts`
+(`isRemotePush`) — but only once the app has *shown* a Marmot message (an
+alert, or the message landing in the open thread) within the last 15 s,
+waiting up to 2 s for it. Being in the foreground alone proves nothing: the
+push may be for another signed-in account, or arrive before the session has
+the message. (That applies to iOS's server alert; Android's data-only push
+is never shown itself — the wake task, which applies the same evidence rule,
+owns its generic alert.)
+When the app shows a Marmot message itself, it clears any generic push
+alert already in the tray (ours on Android, the server's data-less one on
+iOS); opening the Messages list clears them too.
+
+*Turning it off* sends a signed kind-449 removal into each of that account's
+groups, then — once no account on the phone still uses push — deletes the
+token at Apple/Google (`unregisterForNotificationsAsync`; retried at the next
+start if offline), so copies the members already hold stop working. While
+another account still uses it, the token is kept only if every group took
+the signed removal; if the signer declined or the pass didn't finish, the
+token is replaced (deleted, and a new one fetched for the accounts still on
+push) so the leftover records can't link the two accounts. Enabling push
+never hands out a token whose deletion is still owed. *Removing an
+account* that had push on can't sign removals (its key is gone), so it
+deletes the token instead and fetches a fresh one only if another account
+opted in. iOS may return the same APNs token after re-registering, so
+revocation there is best-effort.
+
+*Known residuals.* A push carries no message id (by design — the server
+must learn nothing), so de-duplication is a heuristic: on Android a recent
+Marmot alert for an *earlier* message can stand in for this push's generic
+one (the look-back is kept short), and on iOS an app that is still running
+for a few seconds after being backgrounded can show both its own alert and
+the server's. Exact matching would need a message correlation the protocol
+doesn't carry (and an iOS notification service extension).
+
+*Privacy* (behind "Privacy details" next to the switch): Apple/Google learn
+that the phone got a notification and when, not what it says. Our server gets
+device tokens sealed so only it can open them, and opens them only to deliver
+each push: it receives gift-wrapped triggers from fresh ephemeral keys and
+decrypts the device tokens in each, so it can see how many
+phones one message fans out to and how often this phone is woken, but not who
+sent it, which chat it was, or who you are. People in your Marmot chats can
+see that this phone has push on, and the same phone shows the same token
+fingerprint in every chat — hence the per-account opt-in above.
+
+*Limits.* On de-Googled Android there is no FCM token, so enabling reports
+"unavailable" and the local paths above remain the only ones. A force-stopped
+Android app receives no FCM messages until it is opened again (an Android
+rule). Pushes are best-effort (MIP-05): a missed push never affects message
+delivery.
 
 == Status (as of the foundation PR)
 

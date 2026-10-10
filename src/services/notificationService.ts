@@ -5,10 +5,12 @@
  *
  * Architectural commitments (see docs/architecture/notifications.adoc):
  *
- * 1. NO Firebase / FCM / Google Play Services dependency. The app must
- *    work on GrapheneOS, microG, and other un-googled devices. We use
- *    `expo-notifications` LOCAL notifications only — the OS renders the
- *    notification, no remote push server is involved. Background wake-up
+ * 1. Local-first: NO Google Play Services needed. The app must work on
+ *    GrapheneOS, microG, and other un-googled devices, so every alert with
+ *    content is an `expo-notifications` LOCAL notification. The one remote
+ *    path is the OPT-IN Marmot push (MIP-05, off by default): a
+ *    content-free "New message" wake via FCM / APNs and our notification
+ *    server — see marmotPushRegistration.ts / marmotPushWake.ts. Background wake-up
  *    (so we can decide to fire a notification while the UI isn't mounted)
  *    is done by `expo-background-task` — WorkManager on Android,
  *    BGTaskScheduler on iOS (see src/services/backgroundTask.ts) — both
@@ -114,6 +116,8 @@ export interface NotificationData {
   wrapId?: string;
   /** Account the notification belongs to, so clearing stays per account. */
   owner?: string;
+  /** The generic "New message" a Marmot push wake posted (Android). */
+  marmotPush?: boolean;
 }
 
 /** Typed payload every caller passes to `fireNotification`. Centralising
@@ -169,7 +173,21 @@ export async function ensureNotificationsInitialised(): Promise<void> {
 
 async function initialiseInternal(): Promise<void> {
   Notifications.setNotificationHandler({
+    // A remote (Marmot) push while the app is open is redundant: the live
+    // session shows the real message itself, so the generic one stays quiet.
     handleNotification: async (notification) => {
+      if (isRemotePush(notification)) {
+        // Android's push is a data-only wake with nothing to show — the wake
+        // task (marmotPushWake) owns its generic alert. iOS's carries the
+        // server's alert: shown unless the app has the message already.
+        const show = Platform.OS === 'ios' && !(await remotePushCoveredInForeground());
+        return {
+          shouldShowBanner: show,
+          shouldShowList: show,
+          shouldPlaySound: show,
+          shouldSetBadge: false,
+        };
+      }
       // A `quiet` notification still lands in the drawer, just without the
       // heads-up banner or sound (Android: expo marks it silent, which also
       // stops the HIGH channel from popping it).
@@ -482,7 +500,10 @@ export type NotificationTarget =
    * Notifications without a recorded owner (older versions) are left alone. */
   | { owner: string }
   /** The one tray notification behind a history row (#1143). */
-  | { historyId: string };
+  | { historyId: string }
+  /** The generic alerts Marmot push wakes posted — superseded once the app
+   * shows the real Marmot message. */
+  | { marmotPushAlerts: true };
 
 /** Pure: does a delivered notification's `data` belong to `target`? */
 export function notificationMatchesTarget(
@@ -500,6 +521,7 @@ export function notificationMatchesTarget(
   if ('cacheCoord' in target) return data.kind === 'cache' && data.cacheCoord === target.cacheCoord;
   if ('owner' in target) return data.owner?.toLowerCase() === target.owner.toLowerCase();
   if ('historyId' in target) return data.historyId === target.historyId;
+  if ('marmotPushAlerts' in target) return data.marmotPush === true;
   return (data.kind === 'dm' || data.kind === 'group') && !data.conversationPubkey && !data.groupId;
 }
 
@@ -554,12 +576,16 @@ export function markHistoryReadFor(target: NotificationTarget): Promise<void> {
  */
 export async function dismissNotificationsFor(target: NotificationTarget): Promise<number> {
   try {
-    const matching = (request: Notifications.NotificationRequest) =>
-      request.identifier !== FOREGROUND_SERVICE_NOTIFICATION_ID &&
-      notificationMatchesTarget(
-        request.content.data as NotificationData & { kind?: string },
-        target,
-      );
+    const matching = (request: Notifications.NotificationRequest) => {
+      if (request.identifier === FOREGROUND_SERVICE_NOTIFICATION_ID) return false;
+      const data = request.content.data as (NotificationData & { kind?: string }) | null;
+      // A server-sent Marmot alert (iOS) carries no data: it is a generic
+      // "New message" — cleared with the generic pings / push alerts.
+      if (isRemotePushRequest(request) && !data?.kind) {
+        return 'genericMessages' in target || 'marmotPushAlerts' in target;
+      }
+      return notificationMatchesTarget(data, target);
+    };
     const [presented, scheduled] = await Promise.all([
       Notifications.getPresentedNotificationsAsync(),
       Notifications.getAllScheduledNotificationsAsync(),
@@ -582,6 +608,36 @@ export async function dismissNotificationsFor(target: NotificationTarget): Promi
   }
 }
 
+// A remote push while the app is open: hide it only once the app shows it
+// has the message itself (a recent Marmot alert or the open thread) —
+// another signed-in account's push, or one that beats the session, still
+// shows. expo drops a handler that takes over ~3 s, so wait at most 2 s.
+const FOREGROUND_COVER_LOOKBACK_MS = 15_000;
+const FOREGROUND_COVER_WAIT_MS = 2_000;
+async function remotePushCoveredInForeground(): Promise<boolean> {
+  const arrived = Date.now();
+  const covered = () => lastMarmotNotifiedAt >= arrived - FOREGROUND_COVER_LOOKBACK_MS;
+  if (covered()) return true;
+  await new Promise((resolve) => setTimeout(resolve, FOREGROUND_COVER_WAIT_MS));
+  return covered();
+}
+
+const isRemotePushRequest = (request: Notifications.NotificationRequest) =>
+  (request.trigger as { type?: string } | null)?.type === 'push';
+
+/** True for a notification that came from a push server, not from us. */
+export function isRemotePush(notification: Notifications.Notification): boolean {
+  return isRemotePushRequest(notification.request);
+}
+
+const isMarmotMessage = (data: NotificationData) =>
+  data.conversationProtocol === 'marmot' || !!data.groupId?.startsWith('marmot:');
+
+// When the app last showed a Marmot message itself — lets a push wake tell
+// whether the running app already covered it.
+let lastMarmotNotifiedAt = 0;
+export const lastMarmotNotificationAt = (): number => lastMarmotNotifiedAt;
+
 /**
  * Fire a message (DM or group) notification, suppressed when the user is
  * actively viewing that exact thread. `threadId` is the partner pubkey
@@ -596,14 +652,26 @@ export async function fireMessageNotification(opts: {
   data: NotificationData;
   owner?: string;
 }): Promise<string | null> {
-  if (isThreadActivelyViewed(opts.threadId)) return null;
-  return fireNotification({
+  const marmot = isMarmotMessage(opts.data);
+  if (isThreadActivelyViewed(opts.threadId)) {
+    // Shown on screen instead — still proof the app has this message.
+    if (marmot) lastMarmotNotifiedAt = Date.now();
+    return null;
+  }
+  const id = await fireNotification({
     kind: opts.kind,
     title: opts.title,
     body: opts.body,
     data: opts.data,
     owner: opts.owner,
   });
+  if (id && marmot) {
+    lastMarmotNotifiedAt = Date.now();
+    // The real message is on screen now: drop the generic push alert(s) —
+    // ours (Android) and a data-less server alert already delivered (iOS).
+    void dismissNotificationsFor({ marmotPushAlerts: true });
+  }
+  return id;
 }
 
 /**
@@ -751,4 +819,5 @@ export function __resetForTests(): void {
   appInForeground = true;
   activeThreadId = null;
   activeCacheCoord = null;
+  lastMarmotNotifiedAt = 0;
 }

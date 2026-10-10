@@ -8,9 +8,9 @@
 // content-free native push. We never see a device token, the server never
 // sees the message or the group.
 //
-// Receiving pushes on OUR devices needs a Lightning Piggy notification server
-// (Apple/Google only deliver with the app's own credentials), so this module
-// only reads other members' records and triggers them.
+// Registering OUR device's token (the 447/449 we publish) lives in
+// marmotPushEntries.ts / marmotPushRegistrar.ts; this module reads other
+// members' records and triggers them.
 //
 // Spec: marmot features/push-notifications.md + transports/nostr.md ("Push
 // notification delivery"). Everything here is advisory: a bad record is
@@ -22,20 +22,20 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, hexToBytes, utf8ToBytes } from '@noble/hashes/utils.js';
 import { generateSecretKey, getEventHash, nip59, type Event as NostrEvent } from 'nostr-tools';
 
+import { ENCRYPTED_TOKEN_LEN, PLATFORM_BYTE, type PushPlatform } from './marmotPushToken';
+
 export const PUSH_TRIGGER_KIND = 446;
 export const PUSH_TOKEN_UPDATE_KIND = 447;
 export const PUSH_TOKEN_LIST_KIND = 448;
 export const PUSH_TOKEN_REMOVAL_KIND = 449;
 const OWNER_PROOF_KIND = 451;
-const PUSH_VERSION = 'marmot-push-v1';
-const ENCRYPTED_TOKEN_LEN = 1084;
+export const PUSH_VERSION = 'marmot-push-v1';
 const MAX_ENTRIES = 32;
 // MDK caps one gift wrap at 19 tokens to stay under relay size limits.
 const TOKENS_PER_WRAP = 19;
 const MAX_FUTURE_MS = 3_600_000;
 const RECORD_DOMAIN = 'marmot-push-token-record-v1';
 const REMOVAL_DOMAIN = 'marmot-push-token-removal-v1';
-const PLATFORM_BYTE = { apns: 1, fcm: 2 } as const;
 
 /** App kinds whose send wakes the other members (MDK: chat and poll; not
  * reactions, edits, deletes, push gossip or kinds White Noise can't show). */
@@ -58,7 +58,7 @@ const HEX128 = /^[0-9a-f]{128}$/;
 const FINGERPRINT = /^sha256:[0-9a-f]{24}$/;
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 
-type Platform = keyof typeof PLATFORM_BYTE;
+export type Platform = PushPlatform;
 
 export interface PushRecord {
   member: string;
@@ -73,7 +73,7 @@ export interface PushRecord {
   ownerSig: string;
 }
 
-type Removal = Omit<PushRecord, 'relayHint' | 'encryptedToken'>;
+export type Removal = Omit<PushRecord, 'relayHint' | 'encryptedToken'>;
 
 interface Stamp {
   ts: number;
@@ -170,8 +170,9 @@ export function parsePushPayload(
 
 // --- owner authentication + ordering ----------------------------------------
 
-/** Id of the local-only kind-451 owner-proof event the owner signed. */
-export function ownerProofEventId(entry: Removal | PushRecord, groupIdHex: string): string {
+/** The local-only kind-451 owner-proof event (unsigned, never published)
+ * whose signature is an entry's `owner_sig`. */
+export function ownerProofEvent(entry: Removal | PushRecord, groupIdHex: string) {
   const isRecord = 'encryptedToken' in entry;
   const tags = [
     ['d', isRecord ? RECORD_DOMAIN : REMOVAL_DOMAIN],
@@ -185,13 +186,18 @@ export function ownerProofEventId(entry: Removal | PushRecord, groupIdHex: strin
     ['relay_hint', isRecord ? (entry.relayHint ?? '') : ''],
     ...(isRecord ? [['encrypted_token_encoding', 'base64']] : []),
   ];
-  return getEventHash({
+  return {
     pubkey: entry.member,
     created_at: 0,
     kind: OWNER_PROOF_KIND,
     tags,
     content: isRecord ? entry.encryptedToken : '',
-  });
+  };
+}
+
+/** Id of the local-only kind-451 owner-proof event the owner signed. */
+export function ownerProofEventId(entry: Removal | PushRecord, groupIdHex: string): string {
+  return getEventHash(ownerProofEvent(entry, groupIdHex));
 }
 
 export function verifyOwnerSig(entry: Removal | PushRecord, groupIdHex: string): boolean {

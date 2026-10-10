@@ -12,6 +12,7 @@ import {
 import { forgetDmStoreMigration, pendingDmStoreMigration } from './dmStoreMigrationRunner';
 import { deleteMarmotStateForOwner } from '../services/marmotStore';
 import { quiesceMarmotSession } from '../services/marmotSession';
+import { retireMarmotPushForAccount } from '../services/marmotPushRegistration';
 
 /**
  * Per-account DM-store wipe, called from NostrContext's `wipeAccountCaches`
@@ -70,5 +71,11 @@ export async function wipeDmStoresForAccount(pubkey: string): Promise<void> {
   } catch (e) {
     if (__DEV__) console.warn('[Marmot] per-owner state wipe failed:', e);
   }
+  // Independent of the wipe above: its groups still hold this device's push
+  // token (the signer is gone, so no signed removals) — delete the token at
+  // Apple/Google instead (retried at next start if that fails).
+  const retired = await retireMarmotPushForAccount(pubkey).catch(() => false);
+  if (!retired && __DEV__)
+    console.warn('[Account] push retirement incomplete (token deletion is retried at next start)');
   forgetDmStoreMigration(pubkey);
 }

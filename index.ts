@@ -8,6 +8,9 @@ import './src/services/backgroundTask';
 // global scope so the native Android foreground service (and the BootReceiver
 // after a reboot) can run it even when no React tree is mounted (#279).
 import './src/services/backgroundDmHeadlessTask';
+// Side-effect import: defines the Marmot push-wake task (MIP-05) in the
+// global scope so an FCM message can run it with no React tree mounted.
+import './src/services/marmotPushWake';
 
 // Anchor T0 at the FIRST line of JS execution (this module is the
 // app's entry point per registerRootComponent below). Every later

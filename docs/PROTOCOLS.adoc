@@ -94,10 +94,10 @@ A third DM/group transport, wire-compatible with White Noise; full design in `SO
 | 450 (local-only) | Account-identity proof embedded in each MLS leaf, binding the leaf's signature key to the Nostr account. Signed by the account key alongside every key package; never published.
 | 444 | Welcome (group invite), NIP-59 gift-wrapped to the invitee's kind-10050 inbox — unwrapped by the NIP-17 inbox path (follow gate applies) and routed by `marmotWelcomeRouter`.
 | 445 | Group event (MLS commits + application messages), `h`-tagged with the Nostr group id; signed by per-message ephemeral keys.
-| 1059 → 446 | MIP-05 push trigger: a kind-446 rumor (concatenated encrypted device tokens, `["v","marmot-push-v1"]`) gift-wrapped to a notification server. Send side only.
+| 1059 → 446 | MIP-05 push trigger: a kind-446 rumor (concatenated encrypted device tokens, `["v","marmot-push-v1"]`) gift-wrapped to a notification server.
 | 9 (inner) | Chat text. With an `imeta` tag, a MIP-04 photo. A GIF is the GIPHY URL plus a `via GIPHY` line.
 | 7 / 5 (inner) | Reaction (`content` = emoji, `e` = message id) and its retraction (`e` = reaction id), in 1:1 Marmot threads.
-| 447 / 448 / 449 (inner) | MIP-05 push-token update / list / removal, gossiped by group members. Kept as push state, never shown.
+| 447 / 448 / 449 (inner) | MIP-05 push-token update / list / removal, gossiped by group members. Kept as push state, never shown. We publish 447 (our own record) and 449 when push is on / turned off; we never send 448 or empty 447 requests.
 | 451 (local-only) | MIP-05 owner proof that each push record's signature covers. Never published.
 | Other inner kinds | 15 (voice notes / files), 1068 (polls), 16/17 (orders), NWC shares: the same rumor NIP-17 carries, unchanged.
 |===
@@ -108,9 +108,9 @@ Inner events are unsigned rumors (MLS authenticates the sender). Inner kinds tha
 
 A photo is a kind-9 event with an `imeta` tag (`encrypted-media-v2`; v1 is still read). The blob on Blossom is ChaCha20-Poly1305 ciphertext; its key is derived from the MLS group's epoch secret and the `imeta` fields, so the key never travels in the message and can only be *derived* while that epoch's state is retained. The receiver derives one candidate key per retained epoch on arrival and stores them (in `mediaKeys:<group>` and the stored message row), so an already-received photo stays decryptable on this device after the epoch is gone, until those copies are deleted. It verifies both the plaintext and ciphertext SHA-256 on decrypt. Only a public-https Blossom URL that commits to the ciphertext hash is fetched. Ciphertext is uploaded as `application/octet-stream`, with fallback servers for Blossom hosts that refuse it (HTTP 415).
 
-==== MIP-05 push notifications (send side)
+==== MIP-05 push notifications
 
-Members publish encrypted native push tokens inside the group (447/448, removals 449; ≤32 entries, `v` = `marmot-push-v1`). Each entry is checked against its owner's kind-451 signature and ordered per (member, leaf, platform, server) by `(owner_ts, SHA-256(SignedRecord))`, with removal tombstones. After sending a kind 9 or 1068, the app gift-wraps the other members' tokens (≤19 per wrap) as kind-446 triggers to each token's notification server, published only to the records' relay hints or the server's own kind-10050 inbox. The server decrypts the token and sends a content-free push. Lightning Piggy doesn't yet publish tokens of its own, so it can't receive Marmot pushes (that needs a Lightning Piggy notification server — see `SOLUTION_DESIGN.adoc`).
+Members publish encrypted native push tokens inside the group (447/448, removals 449; ≤32 entries, `v` = `marmot-push-v1`). Each entry is checked against its owner's kind-451 signature and ordered per (member, leaf, platform, server) by `(owner_ts, SHA-256(SignedRecord))`, with removal tombstones. After sending a kind 9 or 1068, the app gift-wraps the other members' tokens (≤19 per wrap) as kind-446 triggers to each token's notification server, published only to the records' relay hints or the server's own kind-10050 inbox. The server decrypts the token and sends a content-free push. With the opt-in receive side on, the app seals its own native FCM/APNs token to Lightning Piggy's notification server (per-app-id Transponder) and publishes it as a kind-447 self-update in each group, with a kind-451 owner proof signed by the user; turning it off publishes 449 removals. Details — token encryption, owner-proof checks, when a remote signer is asked — in `SOLUTION_DESIGN.adoc` → "Marmot (MLS) messaging".
 
 ==== Fallback and interop
 

@@ -43,7 +43,7 @@ revoke the NWC connection) and then tell us.
 
 ## What is out of scope
 
-- The companion service [`BenGWeeks/lightning-piggy-notifications`](https://github.com/BenGWeeks/lightning-piggy-notifications)
+- The companion service [`BenGWeeks/lightning-piggy-watcher`](https://github.com/BenGWeeks/lightning-piggy-watcher)
   has its own policy; please report issues there.
 - Vulnerabilities in third-party wallets, relays, LNbits instances, Nostr clients (for example Amber or
   White Noise) or the Boltz service. Report those to their maintainers.

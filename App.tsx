@@ -40,6 +40,7 @@ import {
   requestNotificationPermission,
   setNotificationsForeground,
   markHistoryEntryRead,
+  isRemotePush,
 } from './src/services/notificationService';
 import { registerBackgroundSync } from './src/services/backgroundTask';
 import { setSubmarineRefundHandler } from './src/services/swapRecoveryService';
@@ -173,9 +174,13 @@ export default function App() {
     // identity to hydrate), so an older tap can't override a newer one.
     let latestTap = 0;
     const routeFromResponse = (response: Notifications.NotificationResponse | null) => {
-      const data = response?.notification?.request?.content?.data as
+      const raw = response?.notification?.request?.content?.data as
         | { kind?: string; conversationPubkey?: string; groupId?: string; walletId?: string }
         | undefined;
+      // A Marmot push alert (iOS, shown by the OS) carries no data: it means
+      // "a message arrived" → the Messages list.
+      const data =
+        response && isRemotePush(response.notification) && !raw?.kind ? { kind: 'dm' } : raw;
       if (!data) return;
       // The tapped notification's in-app history row is now read (#1143).
       const { historyId, owner } = data as { historyId?: string; owner?: string };

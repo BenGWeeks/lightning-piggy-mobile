@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 
+import { startMarmotPushRegistration } from '../services/marmotPushRegistration';
 import { MarmotSession, setMarmotSession } from '../services/marmotSession';
 import { DEFAULT_RELAYS } from '../services/nostrService';
 import { RELAY_LIST_INDEXERS } from '../utils/relayListEvents';
@@ -20,6 +21,18 @@ export function MarmotBridge(): null {
   const { isLoggedIn, pubkey, signerType, relays } = useNostr();
   const relaysRef = useRef(relays);
   relaysRef.current = relays;
+
+  // Opt-in Marmot push (MIP-05): one device token, opted into per account —
+  // each session only carries it if its own account turned push on.
+  // Staggered like the session itself — nothing on first paint needs it.
+  useEffect(() => {
+    let stop: (() => void) | null = null;
+    const timer = setTimeout(() => (stop = startMarmotPushRegistration()), START_DELAY_MS);
+    return () => {
+      clearTimeout(timer);
+      stop?.();
+    };
+  }, []);
 
   useEffect(() => {
     if (!isLoggedIn || !pubkey || !signerType) return;
