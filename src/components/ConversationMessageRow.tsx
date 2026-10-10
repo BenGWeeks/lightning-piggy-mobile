@@ -271,7 +271,7 @@ function ConversationMessageRow({
       onLongPress={onLongPress}
       reactions={reactions}
       onToggleReaction={onToggleReaction}
-      quote={item.kind === 'message' ? withPeerName(item.quote, peerName) : undefined}
+      quote={'quote' in item ? withPeerName(item.quote, peerName) : undefined}
       edited={item.kind === 'message' ? item.edited : undefined}
       testIdPrefix="conversation"
     />

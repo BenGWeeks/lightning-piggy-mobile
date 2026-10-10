@@ -55,6 +55,8 @@ export type Item =
       createdAt: number;
       // Reaction/zap target (#205) — see the `message` variant.
       rumorId?: string;
+      // Marmot reply: the quoted parent (see the `message` variant).
+      quote?: MessageQuote;
     }
   | {
       kind: 'liveLocationMarker';
@@ -71,6 +73,8 @@ export type Item =
       createdAt: number;
       // Reaction/zap target (#205) — see the `message` variant.
       rumorId?: string;
+      // Marmot reply: the quoted parent (see the `message` variant).
+      quote?: MessageQuote;
     }
   | {
       // Marketplace order / receipt card (#market) — a kind-16/17 event a
@@ -114,6 +118,8 @@ export type Item =
       pollId: string;
       poll: DisplayPoll;
       createdAt: number;
+      // Marmot reply: the quoted parent (see the `message` variant).
+      quote?: MessageQuote;
       // Reaction/zap target + delivery tick, for parity with message/gif/
       // location items. Present on optimistic sent rows (the store has no
       // rumorId column, so incoming rows carry none — same as gif/location).
@@ -426,6 +432,9 @@ export function buildConversationItems(
     // shape used by the group screen (via `classifyMessageContent`)
     // — keeps gif / geo / poll detection in one place.
     const classified = classifyMessageContent(m.text);
+    // A Marmot reply quotes its parent whatever the bubble: text, GIF,
+    // location or poll.
+    const quoted = m.replyTo ? { quote: resolveQuote(m.replyTo, byId) } : {};
     // Vote messages aren't shown as bubbles — they're aggregated into the
     // referenced poll's tally by the screen, so drop them from the row list.
     if (classified.kind === 'pollVote') return [];
@@ -438,6 +447,7 @@ export function buildConversationItems(
           url: classified.url,
           createdAt: m.createdAt,
           rumorId: m.rumorId,
+          ...quoted,
         },
       ];
     }
@@ -450,6 +460,7 @@ export function buildConversationItems(
           location: classified.location,
           createdAt: m.createdAt,
           rumorId: m.rumorId,
+          ...quoted,
         },
       ];
     }
@@ -467,6 +478,7 @@ export function buildConversationItems(
           rumorId: m.rumorId,
           deliveryStatus: m.deliveryStatus,
           wireKind: m.wireKind,
+          ...quoted,
         },
       ];
     }
@@ -493,7 +505,7 @@ export function buildConversationItems(
         deliveryStatus: m.deliveryStatus,
         wireKind: m.wireKind,
         rumorId: m.rumorId,
-        ...(m.replyTo ? { quote: resolveQuote(m.replyTo, byId) } : {}),
+        ...quoted,
         ...(m.editedAt ? { edited: true } : {}),
       },
     ];

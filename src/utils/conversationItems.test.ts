@@ -623,6 +623,25 @@ describe('buildConversationItems — Marmot replies and edits', () => {
     expect(reply).toMatchObject({ quote: { text: null } });
   });
 
+  it('quotes the parent on GIF and location replies too (not just text)', () => {
+    const items = buildConversationItems(
+      [
+        base({ id: 'p', fromMe: true, text: 'parent text', createdAt: 1 }),
+        base({ id: 'g', text: 'https://media.giphy.com/media/abc/giphy.gif', replyTo: 'p' }),
+        base({ id: 'l', text: 'geo:51.5,-0.12', replyTo: 'p' }),
+      ],
+      [],
+    );
+    expect(items.find((i) => i.id === 'dm-g')).toMatchObject({
+      kind: 'gif',
+      quote: { text: 'parent text' },
+    });
+    expect(items.find((i) => i.id === 'dm-l')).toMatchObject({
+      kind: 'location',
+      quote: { text: 'parent text' },
+    });
+  });
+
   it('marks an edited message', () => {
     const items = messageItems([
       base({ id: 'e', text: 'v2', editedAt: 5 }),
