@@ -10,8 +10,8 @@ nationality, personal appearance, race, caste, color, religion, or sexual identi
 We pledge to act and interact in ways that contribute to an open, welcoming, diverse, inclusive, and healthy
 community.
 
-Lightning Piggy is used by families, including children and their parents. We ask everyone to keep that in
-mind, and to keep all project spaces appropriate for a young audience.
+Lightning Piggy is a family app, used by smart savers of all ages and their families. Please keep all
+project spaces family-friendly.
 
 ## Our Standards
 
