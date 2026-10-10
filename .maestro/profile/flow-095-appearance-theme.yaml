@@ -30,6 +30,11 @@ name: Appearance Theme Toggle Test
     id: 'profile-icon'
 - waitForAnimationToEnd:
     timeout: 3000
+- scrollUntilVisible:
+    element:
+      id: 'drawer-row-display-language'
+    direction: DOWN
+    timeout: 10000
 - tapOn:
     id: 'drawer-row-display-language'
 - waitForAnimationToEnd:
@@ -88,6 +93,11 @@ name: Appearance Theme Toggle Test
     id: 'profile-icon'
 - waitForAnimationToEnd:
     timeout: 3000
+- scrollUntilVisible:
+    element:
+      id: 'drawer-row-display-language'
+    direction: DOWN
+    timeout: 10000
 - tapOn:
     id: 'drawer-row-display-language'
 - waitForAnimationToEnd:
@@ -116,6 +126,11 @@ name: Appearance Theme Toggle Test
     id: 'profile-icon'
 - waitForAnimationToEnd:
     timeout: 3000
+- scrollUntilVisible:
+    element:
+      id: 'drawer-row-display-language'
+    direction: DOWN
+    timeout: 10000
 - tapOn:
     id: 'drawer-row-display-language'
 - waitForAnimationToEnd:

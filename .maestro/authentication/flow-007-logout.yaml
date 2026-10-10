@@ -28,6 +28,11 @@ name: Nostr Logout Test
       id: 'drawer-sign-out'
     timeout: 5000
 
+- scrollUntilVisible:
+    element:
+      id: 'drawer-sign-out'
+    direction: DOWN
+    timeout: 10000
 - tapOn:
     id: 'drawer-sign-out'
 - waitForAnimationToEnd:

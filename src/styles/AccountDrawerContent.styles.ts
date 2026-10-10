@@ -133,6 +133,17 @@ export const createAccountDrawerContentStyles = (colors: Palette) =>
       width: 24,
       alignItems: 'center',
     },
+    sectionHeading: {
+      color: colors.textSupplementary,
+      fontSize: 12,
+      fontWeight: '700',
+      textTransform: 'uppercase',
+      paddingHorizontal: 20,
+      paddingTop: 16,
+      paddingBottom: 6,
+    },
+    rowText: { flex: 1 },
+    rowSubtitle: { color: colors.textSupplementary, fontSize: 12, marginTop: 3 },
     rowLabel: {
       color: colors.textBody,
       fontSize: 16,
