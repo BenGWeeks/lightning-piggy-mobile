@@ -558,9 +558,25 @@ describe('Marmot push (MIP-05) receive side', () => {
     expect(isRemotePush(notification(null))).toBe(false);
   });
 
-  it('hides a remote push while the app is open, shows local ones', async () => {
+  it('in the foreground, hides a remote push only once the app has shown the message', async () => {
     await ensureNotificationsInitialised();
     const handler = (Notifications.setNotificationHandler as jest.Mock).mock.calls.at(-1)?.[0];
+    jest.useFakeTimers();
+    const pending = handler.handleNotification(notification({ type: 'push' }));
+    await jest.advanceTimersByTimeAsync(2_000);
+    // Nothing shown (e.g. another account's push) → the generic alert shows.
+    expect(await pending).toMatchObject({ shouldShowBanner: true });
+    jest.useRealTimers();
+    // The open thread counts as shown.
+    setNotificationsForeground(true);
+    setActiveThread('marmot-thread');
+    await fireMessageNotification({
+      kind: 'dm',
+      threadId: 'marmot-thread',
+      title: 'Bob',
+      body: 'hi',
+      data: { conversationPubkey: 'p', conversationProtocol: 'marmot' },
+    });
     expect(await handler.handleNotification(notification({ type: 'push' }))).toMatchObject({
       shouldShowBanner: false,
       shouldShowList: false,

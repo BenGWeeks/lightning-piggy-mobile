@@ -177,10 +177,11 @@ async function initialiseInternal(): Promise<void> {
     // session shows the real message itself, so the generic one stays quiet.
     handleNotification: async (notification) => {
       if (isRemotePush(notification)) {
+        const show = !(await remotePushCoveredInForeground());
         return {
-          shouldShowBanner: false,
-          shouldShowList: false,
-          shouldPlaySound: false,
+          shouldShowBanner: show,
+          shouldShowList: show,
+          shouldPlaySound: show,
           shouldSetBadge: false,
         };
       }
@@ -604,6 +605,20 @@ export async function dismissNotificationsFor(target: NotificationTarget): Promi
   }
 }
 
+// A remote push while the app is open: hide it only once the app shows it
+// has the message itself (a recent Marmot alert or the open thread) —
+// another signed-in account's push, or one that beats the session, still
+// shows. expo drops a handler that takes over ~3 s, so wait at most 2 s.
+const FOREGROUND_COVER_LOOKBACK_MS = 15_000;
+const FOREGROUND_COVER_WAIT_MS = 2_000;
+async function remotePushCoveredInForeground(): Promise<boolean> {
+  const arrived = Date.now();
+  const covered = () => lastMarmotNotifiedAt >= arrived - FOREGROUND_COVER_LOOKBACK_MS;
+  if (covered()) return true;
+  await new Promise((resolve) => setTimeout(resolve, FOREGROUND_COVER_WAIT_MS));
+  return covered();
+}
+
 const isRemotePushRequest = (request: Notifications.NotificationRequest) =>
   (request.trigger as { type?: string } | null)?.type === 'push';
 
@@ -634,8 +649,12 @@ export async function fireMessageNotification(opts: {
   data: NotificationData;
   owner?: string;
 }): Promise<string | null> {
-  if (isThreadActivelyViewed(opts.threadId)) return null;
   const marmot = isMarmotMessage(opts.data);
+  if (isThreadActivelyViewed(opts.threadId)) {
+    // Shown on screen instead — still proof the app has this message.
+    if (marmot) lastMarmotNotifiedAt = Date.now();
+    return null;
+  }
   const id = await fireNotification({
     kind: opts.kind,
     title: opts.title,

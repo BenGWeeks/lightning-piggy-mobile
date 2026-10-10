@@ -43,10 +43,12 @@ describe('handleMarmotPushWake', () => {
     );
   });
 
-  it('stays silent in the foreground — the live session shows the message', async () => {
-    const d = deps({ isForeground: () => true });
-    expect(await handleMarmotPushWake(d)).toBe('foreground');
-    expect(d.notified).toBe(0);
+  it('in the foreground, stays silent only when the app showed the message', async () => {
+    const shown = deps({ isForeground: () => true, lastNotifiedAt: () => 9_000 });
+    expect(await handleMarmotPushWake(shown)).toBe('covered');
+    // e.g. a push for another signed-in account: nothing on screen covers it.
+    const unseen = deps({ isForeground: () => true, now: () => 100_000, lastNotifiedAt: () => 0 });
+    expect(await handleMarmotPushWake(unseen)).toBe('notified');
   });
 
   it('posts the generic alert straight away when the app is not running', async () => {

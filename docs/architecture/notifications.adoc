@@ -245,8 +245,8 @@ in both servers' 10050) so a lookup can never change the signed records.
 ** *Android* — FCM delivers a data-only message (Transponder has no FCM alert
    mode). `marmotPushWake.ts` (defined from `index.ts`, so it also runs
    headless after the app was swiped away) posts the generic "New message"
-   ping itself — unless the app is in the foreground, or a running session
-   showed a Marmot message in the 15 s before the push (the sender publishes
+   ping itself — unless the app (foreground or a running session in the
+   background) showed a Marmot message in the 15 s before the push (the sender publishes
    the message first) or the 6 s after it. If the real message turns up
    later, showing it clears the generic ping.
 . Tapping the generic alert opens the Messages list (no thread id), and
@@ -255,7 +255,11 @@ in both servers' 10050) so a lookup can never change the signed records.
 
 *No double alerts.* A remote push that arrives while the app is open is
 hidden by the `setNotificationHandler` in `notificationService.ts`
-(`isRemotePush`) — the live session already notifies with the real message.
+(`isRemotePush`) — but only once the app has *shown* a Marmot message (an
+alert, or the message landing in the open thread) within the last 15 s,
+waiting up to 2 s for it. Being in the foreground alone proves nothing: the
+push may be for another signed-in account, or arrive before the session has
+the message. The Android wake task applies the same evidence rule.
 When the app shows a Marmot message itself, it clears any generic push
 alert already in the tray (ours on Android, the server's data-less one on
 iOS); opening the Messages list clears them too.

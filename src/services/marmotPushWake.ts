@@ -5,7 +5,6 @@
 // alert ("New message"), shown by the OS. Android: FCM delivers a data-only
 // message to this task — even when the app was swiped away — and we post
 // the same generic alert ourselves, unless the app already said it:
-//   - foreground: the live Marmot session shows the real message → nothing;
 //   - background but still running: if the session showed a Marmot message
 //     just before (the usual order) or within a short grace period after,
 //     that covers it; otherwise post the generic alert — and the session
@@ -43,7 +42,7 @@ export function setLiveMarmotSession(live: boolean): void {
   liveSession = live;
 }
 
-export type WakeOutcome = 'foreground' | 'covered' | 'notified';
+export type WakeOutcome = 'covered' | 'notified';
 
 export interface WakeDeps {
   isForeground: () => boolean;
@@ -96,17 +95,14 @@ export function handleMarmotPushWake(deps: WakeDeps = defaultDeps): Promise<Wake
 }
 
 async function handleOne(deps: WakeDeps, arrived: number): Promise<WakeOutcome> {
-  if (deps.isForeground()) return 'foreground';
-  if (deps.hasLiveSession()) {
-    if (deps.lastNotifiedAt() >= arrived - COVERED_LOOKBACK_MS) return 'covered';
+  // Only evidence counts — the app having shown a Marmot message (alert or
+  // open thread). Being in the foreground alone proves nothing: the push
+  // may be for another signed-in account, or beat the session.
+  const covered = () => deps.lastNotifiedAt() >= arrived - COVERED_LOOKBACK_MS;
+  if (deps.hasLiveSession() || deps.isForeground()) {
+    if (covered()) return 'covered';
     await deps.wait(LIVE_SESSION_GRACE_MS);
-    if (deps.isForeground() || deps.lastNotifiedAt() >= arrived - COVERED_LOOKBACK_MS) {
-      return 'covered';
-    }
-  }
-  // Re-checked right before posting: the real message may have just landed.
-  if (deps.lastNotifiedAt() >= arrived - COVERED_LOOKBACK_MS && deps.hasLiveSession()) {
-    return 'covered';
+    if (covered()) return 'covered';
   }
   await deps.notify();
   return 'notified';

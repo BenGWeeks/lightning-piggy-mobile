@@ -138,9 +138,11 @@ const MarmotPushSection: React.FC = () => {
     setBusy(true);
     try {
       const outcome = await setMarmotPushServer(pubkey);
-      setCustomServer((await loadMarmotPushSettings()).customServer);
+      const saved = await loadMarmotPushSettings();
+      setCustomServer(saved.customServer);
+      setEnabled(saved.enabled); // the real state — a failed change leaves push on
       setDraft('');
-      if (outcome && !reportEnable(outcome)) setEnabled(false);
+      if (outcome) reportEnable(outcome);
     } finally {
       setBusy(false);
     }

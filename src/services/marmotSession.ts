@@ -306,9 +306,15 @@ export class MarmotSession {
 
   stop(): void {
     this.stopped = true;
+    // Accumulated: an earlier session of the same account (A → B → A) may
+    // still be finishing a write the wipe must wait for.
     pushDrains.set(
       this.pubkey,
-      Promise.all([this.push.stop(), this.pushRegistration.stop()]).then(() => undefined),
+      Promise.all([
+        pushDrains.get(this.pubkey),
+        this.push.stop(),
+        this.pushRegistration.stop(),
+      ]).then(() => undefined),
     );
     this.connection?.unsubscribe();
     this.connection = null;

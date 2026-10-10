@@ -347,7 +347,22 @@ export async function setMarmotPushServer(pubkey: string | null): Promise<Enable
     if (custom) await AsyncStorage.setItem(SERVER_KEY, JSON.stringify(custom));
     else await AsyncStorage.removeItem(SERVER_KEY);
     settings.customServer = custom;
-    return settings.enabled ? enableNow() : null;
+    if (!settings.enabled) return null;
+    // Same phone token, new server: re-seal it — no new token read that
+    // could fail half-way through the change.
+    if (registration) {
+      const server = currentServer();
+      const { platform, token, fingerprint } = registration;
+      registration = {
+        platform,
+        token,
+        fingerprint,
+        server: server.pubkey,
+        ...(server.relayHint ? { relayHint: server.relayHint } : {}),
+      };
+      return { status: 'enabled', sync: await syncActiveSession() };
+    }
+    return enableNow();
   });
 }
 
