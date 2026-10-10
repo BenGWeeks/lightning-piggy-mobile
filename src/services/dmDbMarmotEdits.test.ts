@@ -83,3 +83,47 @@ it('returns exactly the rows a delete removed (RETURNING)', async () => {
   expect(await deleteMarmotMessages('me', 'peer', [ID, 'f'.repeat(64)], 'peer')).toEqual([ID]);
   expect(await stored()).toBeUndefined();
 });
+
+describe('our own sends (#1237): a `local-` row carrying the Marmot id as rumor id', () => {
+  const MINE = 'a'.repeat(64);
+  const mine = (over: Partial<DmMessageRow> = {}) =>
+    row({
+      eventId: `local-${MINE}`,
+      rumorId: MINE,
+      sender: 'me',
+      fromMe: true,
+      content: 'typo',
+      createdAt: 10,
+      ...over,
+    });
+  const myEdit = (content: string, editedAt: number) => ({
+    ...edit(content, editedAt, 'x', 'me'),
+    target: MINE,
+  });
+  const mineStored = async () =>
+    (await getConversationMessages('me', 'peer', { limit: 10, protocol: 'marmot' })).filter(
+      (r) => r.fromMe,
+    );
+
+  beforeEach(async () => {
+    await upsertDmMessages([mine()]);
+  });
+
+  it('an edit to the Marmot id reaches the local row', async () => {
+    expect(await applyMarmotEdits('me', [myEdit('fixed', 20)])).toHaveLength(1);
+    expect(await mineStored()).toMatchObject([{ eventId: `local-${MINE}`, content: 'fixed' }]);
+  });
+
+  it('a delete of the Marmot id removes the local row, returning its row id', async () => {
+    expect(await deleteMarmotMessages('me', 'peer', [MINE], 'me')).toEqual([`local-${MINE}`]);
+    expect(await mineStored()).toEqual([]);
+  });
+
+  it('the replayed original still retires the edited local row (no duplicate), then the edit replays', async () => {
+    await applyMarmotEdits('me', [myEdit('fixed', 20)]);
+    await upsertDmMessages([mine({ eventId: MINE })]); // history replay: original text 'typo'
+    expect((await mineStored()).map((r) => r.eventId)).toEqual([MINE]);
+    await applyMarmotEdits('me', [myEdit('fixed', 20)]);
+    expect(await mineStored()).toMatchObject([{ eventId: MINE, content: 'fixed', editedAt: 20 }]);
+  });
+});

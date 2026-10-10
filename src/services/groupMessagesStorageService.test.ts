@@ -17,6 +17,7 @@ import {
   deleteGroupMessagesForOwner,
   listPersistedGroupWrapIds,
   reviveGroupHistoryOwner,
+  rekeyGroupMessage,
   type GroupMessage,
 } from './groupMessagesStorageService';
 import { resetGroupMessagesMigrationForTests } from './groupMessagesMigration';
@@ -543,5 +544,58 @@ describe('sign-out leaves no legacy plaintext behind (#689, #1240 review)', () =
 
     expect((await loadGroupMessages(OWNER_B, 'marmot:cd34')).map((m) => m.text)).toEqual(['x']);
     expect(await AsyncStorage.getItem('group_messages_marmot:cd34')).toBeNull();
+  });
+});
+
+describe('rekeyGroupMessage (#1237)', () => {
+  const REAL = 'c'.repeat(64);
+  const sent = (id: string, text = 'hi'): GroupMessage => ({
+    id,
+    senderPubkey: SENDER,
+    text,
+    createdAt: 10,
+  });
+  it('moves an optimistic row onto its sent event id so it can be edited', async () => {
+    await appendGroupMessage(OWNER, GROUP, sent('local_1_a'));
+    await rekeyGroupMessage(OWNER, GROUP, 'local_1_a', REAL);
+    expect((await loadGroupMessages(OWNER, GROUP)).map((m) => m.id)).toEqual([REAL]);
+    expect(await editGroupMessage(OWNER, GROUP, REAL, SENDER, 'v2', 50)).toBe(true);
+  });
+  it('just drops the local copy when the real row is already stored', async () => {
+    await appendGroupMessage(OWNER, GROUP, sent('local_1_a', 'a'));
+    await appendGroupMessage(OWNER, GROUP, sent(REAL, 'b'));
+    await rekeyGroupMessage(OWNER, GROUP, 'local_1_a', REAL);
+    expect(await loadGroupMessages(OWNER, GROUP)).toEqual([sent(REAL, 'b')]);
+  });
+  it('a replay of the real event then dedups by id (no second bubble)', async () => {
+    await appendGroupMessage(OWNER, GROUP, sent('local_1_a'));
+    await rekeyGroupMessage(OWNER, GROUP, 'local_1_a', REAL);
+    await appendGroupMessage(OWNER, GROUP, sent(REAL));
+    expect(await loadGroupMessages(OWNER, GROUP)).toHaveLength(1);
+  });
+  it('queues with other writes, so a concurrent inbound append is not lost', async () => {
+    await appendGroupMessage(OWNER, GROUP, sent('local_1_a'));
+    await Promise.all([
+      rekeyGroupMessage(OWNER, GROUP, 'local_1_a', REAL),
+      appendGroupMessage(OWNER, GROUP, {
+        ...sent('d'.repeat(64), 'inbound'),
+        senderPubkey: OTHER_SENDER,
+      }),
+    ]);
+    expect((await loadGroupMessages(OWNER, GROUP)).map((m) => m.id).sort()).toEqual(
+      [REAL, 'd'.repeat(64)].sort(),
+    );
+  });
+  it('is a no-op for an unknown local id', async () => {
+    await appendGroupMessage(OWNER, GROUP, sent(REAL));
+    await rekeyGroupMessage(OWNER, GROUP, 'local_x', 'e'.repeat(64));
+    expect((await loadGroupMessages(OWNER, GROUP)).map((m) => m.id)).toEqual([REAL]);
+  });
+  it('refuses to write for a signed-out account (#1240 guard)', async () => {
+    await appendGroupMessage(OWNER, GROUP, sent('local_1_a'));
+    await deleteGroupMessagesForOwner(OWNER);
+    await expect(rekeyGroupMessage(OWNER, GROUP, 'local_1_a', REAL)).rejects.toThrow('signed-out');
+    reviveGroupHistoryOwner(OWNER);
+    expect(await loadGroupMessages(OWNER, GROUP)).toEqual([]);
   });
 });

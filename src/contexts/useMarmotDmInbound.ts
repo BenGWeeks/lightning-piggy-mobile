@@ -79,7 +79,9 @@ export function useMarmotDmInbound(
         if (disposed) return prev;
         let touched = false;
         const next = prev.map((e) => {
-          const c = e.protocol === 'marmot' ? byId.get(e.id) : undefined;
+          // By rumor id too: our own send's entry keeps its `local-` id.
+          const c =
+            e.protocol === 'marmot' ? (byId.get(e.id) ?? byId.get(e.rumorId ?? '')) : undefined;
           if (!c || e.partnerPubkey !== c.conversation) return e;
           touched = true;
           return {

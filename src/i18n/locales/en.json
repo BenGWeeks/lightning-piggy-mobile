@@ -291,7 +291,10 @@
     "attach": "Attach",
     "messageInput": "Message input",
     "recordVoiceNote": "Record a voice note",
-    "sendMessage": "Send message"
+    "sendMessage": "Send message",
+    "editingMessage": "Editing message",
+    "cancelEdit": "Cancel editing",
+    "saveEdit": "Save edit"
   },
   "conversationScreen": {
     "couldNotStartLiveShareTitle": "Could not start live share",
@@ -1144,7 +1147,17 @@
     "reactionFailedBody": "Could not publish your reaction. Check your relays and try again.",
     "copyText": "Copy text",
     "copied": "Copied",
-    "moreEmoji": "More emoji"
+    "moreEmoji": "More emoji",
+    "edit": "Edit",
+    "delete": "Delete for everyone"
+  },
+  "messageEdit": {
+    "deleteTitle": "Delete for everyone?",
+    "deleteBody": "It will be removed for everyone in this chat. Copies other apps already showed in notifications may remain.",
+    "deleteConfirm": "Delete",
+    "cancel": "Cancel",
+    "editFailed": "Couldn't edit the message",
+    "deleteFailed": "Couldn't delete the message"
   },
   "messageBubble": {
     "quoteYou": "You",

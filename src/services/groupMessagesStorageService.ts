@@ -227,6 +227,32 @@ export async function removeGroupMessage(
 }
 
 /**
+ * Give an optimistic `local_*` row the id its sent event really has (a Marmot
+ * send learns it only once sent), so edits and deletes can target it (#1237).
+ * If the real row is already stored, the local copy is just dropped. Runs
+ * through the group storage queue. Returns the updated list.
+ */
+export async function rekeyGroupMessage(
+  owner: string | null | undefined,
+  groupId: string,
+  localId: string,
+  realId: string,
+): Promise<GroupMessage[]> {
+  await ensureGroupMessagesMigrated();
+  const key = requireOwnerKey(owner, groupId);
+  return mutateGroupStorage(key, async () => {
+    requireOwnerKey(owner, groupId);
+    const existing = await readLog(key);
+    if (!existing.some((m) => m.id === localId)) return existing;
+    const next = existing.some((m) => m.id === realId)
+      ? existing.filter((m) => m.id !== localId)
+      : existing.map((m) => (m.id === localId ? { ...m, id: realId } : m));
+    await AsyncStorage.setItem(key, JSON.stringify(next));
+    return next;
+  });
+}
+
+/**
  * Whether a stored group message is plain chat text its author may edit — not
  * a photo / voice note (an `#lpe=1` URL), a structured poll, vote or order
  * (stored as JSON), or a legacy text poll / vote. The DM store gets the same

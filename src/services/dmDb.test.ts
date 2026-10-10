@@ -138,7 +138,8 @@ describe('dmDb', () => {
       expect(selectSql).toContain(
         "COALESCE(protocol, CASE WHEN wire_kind = 4 THEN 'nip04' ELSE 'nip17' END) = ?",
       );
-      expect(selectParams).toEqual([OWNER, 'convA', 'hi', 'nip17', 100, 100]);
+      expect(selectSql).toContain('(content = ? OR (rumor_id IS NOT NULL AND rumor_id = ?))');
+      expect(selectParams).toEqual([OWNER, 'convA', 'hi', null, 'nip17', 100, 100]);
       const [deleteSql, deleteParams] = mockExecute.mock.calls[1];
       expect(deleteSql).toContain('DELETE FROM dm_messages');
       expect(deleteParams).toEqual([OWNER, 'local-42']);
@@ -383,15 +384,22 @@ describe('dmDb', () => {
       expect(sql).toContain("protocol = 'marmot'");
       expect(sql).toContain('conversation = ?');
       expect(sql).toContain('sender = ?');
-      expect(sql).toContain('event_id IN (?,?)');
+      // By rumor id too: our own `local-` send row carries the Marmot id there (#1237).
+      expect(sql).toContain('(event_id IN (?,?) OR rumor_id IN (?,?))');
       expect(sql).toContain('RETURNING event_id');
-      expect(params).toEqual([OWNER, 'convA', 'peer', 'm1', 'm2']);
+      expect(params).toEqual([OWNER, 'convA', 'peer', 'm1', 'm2', 'm1', 'm2']);
     });
     it('an admin removal (null sender) takes any member’s message', async () => {
       await deleteMarmotMessages(OWNER, 'convA', ['m1'], null);
       const [sql, params] = mockExecute.mock.calls[0];
       expect(sql).not.toContain('sender = ?');
-      expect(params).toEqual([OWNER, 'convA', 'm1']);
+      expect(params).toEqual([OWNER, 'convA', 'm1', 'm1']);
+    });
+    it('chunks so both id lists stay under the SQLite variable cap', async () => {
+      const ids = Array.from({ length: 600 }, (_, i) => `m${i}`);
+      await deleteMarmotMessages(OWNER, 'convA', ids, 'peer');
+      expect(mockExecute).toHaveBeenCalledTimes(3);
+      for (const [, params] of mockExecute.mock.calls) expect(params.length).toBeLessThan(999);
     });
     it('does nothing for no ids', async () => {
       await deleteMarmotMessages(OWNER, 'convA', [], 'peer');

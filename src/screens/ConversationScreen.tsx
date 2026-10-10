@@ -66,17 +66,18 @@ import { useConversationComposerActions } from '../hooks/useConversationComposer
 import { useMessageInfoSheet } from '../hooks/useMessageInfoSheet';
 import { useConversationTimeline } from '../hooks/useConversationTimeline';
 import { useConversationLiveLocation } from '../hooks/useConversationLiveLocation';
-import type { Item } from '../utils/conversationItems';
+import type { ConversationMessageInput, Item } from '../utils/conversationItems';
+import { useMessageActionsMenu } from '../hooks/useMessageActionsMenu';
 import { useConversationReactions } from '../hooks/useConversationReactions';
 import { useReactionBackend } from '../hooks/useReactionBackend';
 import { useConversationLoader } from '../hooks/useConversationLoader';
 import DeliveryDetailSheet from '../components/DeliveryDetailSheet';
 import { createConversationScreenStyles } from '../styles/ConversationScreen.styles';
 import { useTypingIndicator } from '../hooks/useTypingIndicator';
-import { Toast } from '../components/BrandedToast';
-import * as Clipboard from 'expo-clipboard';
 
 type ConversationRoute = RouteProp<RootStackParamList, 'Conversation'>;
+// A row's Marmot event id: own sends keep a `local-` row id but carry it as rumorId.
+const marmotIdOf = (m: ConversationMessageInput) => m.rumorId ?? m.id;
 type ConversationNavigation = NativeStackNavigationProp<RootStackParamList, 'Conversation'>;
 
 const ConversationScreen: React.FC = () => {
@@ -472,13 +473,24 @@ const ConversationScreen: React.FC = () => {
     onZapMessage: () => setSendSheetOpen(true),
   });
 
-  const copyText = actionsForMessage?.copyText;
-  const handleCopyText = useCallback(async () => {
-    if (!copyText) return;
-    await Clipboard.setStringAsync(copyText);
-    Toast.show({ type: 'success', text1: t('messageActionsSheet.copied') });
-    closeMessageActions();
-  }, [copyText, t, closeMessageActions]);
+  // Copy text, plus Edit / Delete for everyone on your own messages in a
+  // Marmot chat (#1237) — sheet + composer props.
+  const marmotTarget = useMemo(
+    () => (protocol === 'marmot' ? { peer: pubkey } : null),
+    [protocol, pubkey],
+  );
+  const menu = useMessageActionsMenu({
+    myPubkey,
+    target: marmotTarget,
+    messages,
+    setMessages,
+    idOf: marmotIdOf,
+    draft,
+    setDraft,
+    actioned: actionsForMessage,
+    closeActions: closeMessageActions,
+    onSend: handleSend,
+  });
 
   // Ephemeral "typing…" indicator (#dm-typing). `pubkey` is the peer here.
   const { isPeerTyping, notifyTyping } = useTypingIndicator(pubkey);
@@ -737,7 +749,7 @@ const ConversationScreen: React.FC = () => {
             setDraft(text);
             notifyTyping();
           }}
-          onSend={handleSend}
+          {...menu.composer}
           onStartVoiceNote={() => setVoiceSheetOpen(true)}
           sending={sending}
           disabled={!isLoggedIn}
@@ -931,7 +943,7 @@ const ConversationScreen: React.FC = () => {
             ? handleZapMessage
             : undefined
         }
-        onCopyText={copyText ? handleCopyText : undefined}
+        {...menu.sheet}
       />
       <ContactProfileSheet
         visible={profileSheetVisible}

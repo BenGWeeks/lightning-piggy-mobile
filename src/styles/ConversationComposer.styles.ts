@@ -16,6 +16,25 @@ export const createConversationComposerStyles = (
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: colors.divider,
     },
+    // "Editing message" bar above the input row (#1237).
+    editBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      paddingHorizontal: opts.paddingHorizontal + 6,
+      paddingVertical: 8,
+      backgroundColor: colors.surface,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.divider,
+      borderLeftWidth: 3,
+      borderLeftColor: colors.brandPink,
+    },
+    editBannerText: {
+      flex: 1,
+      fontSize: 13,
+      fontWeight: '700',
+      color: colors.brandPink,
+    },
     input: {
       flex: 1,
       minHeight: 40,

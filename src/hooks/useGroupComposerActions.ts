@@ -4,6 +4,7 @@ import { useNostr, notifyGroupMessage } from '../contexts/NostrContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import {
   appendGroupMessage,
+  rekeyGroupMessage,
   removeGroupMessage,
   type GroupMessage,
 } from '../services/groupMessagesStorageService';
@@ -136,6 +137,21 @@ export function useGroupComposerActions(params: {
     [group, myPubkey, setMessages],
   );
 
+  // A Marmot send learns its event id only once sent: move the optimistic row
+  // onto it so the message can be edited / deleted for everyone (#1237).
+  const adoptRumorId = useCallback(
+    async (rowId: string, rumorId: string | undefined): Promise<void> => {
+      if (!group || !rumorId) return;
+      setMessages((prev) => prev.map((m) => (m.id === rowId ? { ...m, id: rumorId } : m)));
+      try {
+        setMessages(await rekeyGroupMessage(myPubkey, group.id, rowId, rumorId));
+      } catch (err) {
+        if (__DEV__) console.warn('[GroupConversationScreen] rekeyGroupMessage failed:', err);
+      }
+    },
+    [group, myPubkey, setMessages],
+  );
+
   const sendText = useCallback(
     async (text: string): Promise<boolean> => {
       if (!group || !myPubkey) return false;
@@ -178,6 +194,7 @@ export function useGroupComposerActions(params: {
         alertSavedOnRelayOnly();
         return false;
       }
+      if (optimistic.current) await adoptRumorId(optimistic.current.row.id, result.rumorId);
       return true;
     },
     [
@@ -187,6 +204,7 @@ export function useGroupComposerActions(params: {
       appendOptimisticGroupRow,
       removeOptimisticRow,
       alertSavedOnRelayOnly,
+      adoptRumorId,
     ],
   );
 
@@ -234,6 +252,7 @@ export function useGroupComposerActions(params: {
         alertSavedOnRelayOnly();
         return false;
       }
+      if (optimistic.current) await adoptRumorId(optimistic.current.row.id, result.rumorId);
       return true;
     },
     [
@@ -243,6 +262,7 @@ export function useGroupComposerActions(params: {
       appendOptimisticGroupRow,
       removeOptimisticRow,
       alertSavedOnRelayOnly,
+      adoptRumorId,
     ],
   );
 
@@ -254,8 +274,10 @@ export function useGroupComposerActions(params: {
       const optimistic: { current: { row: GroupMessage; persisted: Promise<boolean> } | null } = {
         current: null,
       };
+      let rumorId: string | undefined;
       const result = await sendMarmotImage(myPubkey, { groupId: group.id }, image, signEvent, {
-        onRumorReady: ({ text }) => {
+        onRumorReady: ({ text, eventId }) => {
+          rumorId = eventId;
           optimistic.current = appendOptimisticGroupRow(text);
         },
       });
@@ -279,6 +301,7 @@ export function useGroupComposerActions(params: {
         alertSavedOnRelayOnly();
         return false;
       }
+      if (optimistic.current) await adoptRumorId(optimistic.current.row.id, rumorId);
       return true;
     },
     [
@@ -289,6 +312,7 @@ export function useGroupComposerActions(params: {
       removeOptimisticRow,
       alertSavedOnRelayOnly,
       t,
+      adoptRumorId,
     ],
   );
 

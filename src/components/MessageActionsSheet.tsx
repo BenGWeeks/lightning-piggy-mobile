@@ -6,7 +6,7 @@ import {
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
 import { BottomSheetModal } from './AccessibleBottomSheetModal';
-import { Copy, Plus, Zap } from 'lucide-react-native';
+import { Copy, Pencil, Plus, Trash2, Zap } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createMessageActionsSheetStyles } from '../styles/MessageActionsSheet.styles';
@@ -63,6 +63,12 @@ interface Props {
   /** Copies the message's text. Undefined (row hidden) for non-text
    *  messages — photos, polls, wallet shares. */
   onCopyText?: () => void;
+  /** Edit your own text message (Marmot chats only, #1237). Undefined = hidden. */
+  onEdit?: () => void;
+  /** Delete your own message for everyone (Marmot chats only). Undefined = hidden. */
+  onDelete?: () => void;
+  /** Show the emoji reaction row. Off where reactions aren't supported (groups). */
+  showReactions?: boolean;
 }
 
 const MessageActionsSheet: React.FC<Props> = ({
@@ -72,6 +78,9 @@ const MessageActionsSheet: React.FC<Props> = ({
   onToggleReaction,
   onZap,
   onCopyText,
+  onEdit,
+  onDelete,
+  showReactions = true,
 }) => {
   const colors = useThemeColors();
   const t = useTranslation();
@@ -137,20 +146,24 @@ const MessageActionsSheet: React.FC<Props> = ({
       handleIndicatorStyle={styles.handleIndicator}
     >
       <BottomSheetView style={styles.content}>
-        <Text style={styles.title}>{t('messageActionsSheet.title')}</Text>
-        <View style={styles.emojiRow} testID="message-actions-emoji-row">
-          {QUICK_REACTIONS.map(renderEmoji)}
-          <TouchableOpacity
-            style={[styles.emojiButton, showMore && styles.emojiButtonActive]}
-            onPress={() => setShowMore((v) => !v)}
-            accessibilityLabel={t('messageActionsSheet.moreEmoji')}
-            accessibilityState={{ expanded: showMore }}
-            testID="message-actions-more-emoji"
-          >
-            <Plus size={22} color={colors.textHeader} />
-          </TouchableOpacity>
-        </View>
-        {showMore ? (
+        {showReactions ? (
+          <>
+            <Text style={styles.title}>{t('messageActionsSheet.title')}</Text>
+            <View style={styles.emojiRow} testID="message-actions-emoji-row">
+              {QUICK_REACTIONS.map(renderEmoji)}
+              <TouchableOpacity
+                style={[styles.emojiButton, showMore && styles.emojiButtonActive]}
+                onPress={() => setShowMore((v) => !v)}
+                accessibilityLabel={t('messageActionsSheet.moreEmoji')}
+                accessibilityState={{ expanded: showMore }}
+                testID="message-actions-more-emoji"
+              >
+                <Plus size={22} color={colors.textHeader} />
+              </TouchableOpacity>
+            </View>
+          </>
+        ) : null}
+        {showReactions && showMore ? (
           <View style={styles.moreEmojiGrid} testID="message-actions-more-emoji-grid">
             {MORE_REACTIONS.map(renderEmoji)}
           </View>
@@ -164,6 +177,28 @@ const MessageActionsSheet: React.FC<Props> = ({
           >
             <Copy size={18} color={colors.textHeader} />
             <Text style={styles.copyButtonText}>{t('messageActionsSheet.copyText')}</Text>
+          </TouchableOpacity>
+        ) : null}
+        {onEdit ? (
+          <TouchableOpacity
+            style={styles.copyButton}
+            onPress={onEdit}
+            accessibilityLabel={t('messageActionsSheet.edit')}
+            testID="message-action-edit"
+          >
+            <Pencil size={18} color={colors.textHeader} />
+            <Text style={styles.copyButtonText}>{t('messageActionsSheet.edit')}</Text>
+          </TouchableOpacity>
+        ) : null}
+        {onDelete ? (
+          <TouchableOpacity
+            style={styles.copyButton}
+            onPress={onDelete}
+            accessibilityLabel={t('messageActionsSheet.delete')}
+            testID="message-action-delete"
+          >
+            <Trash2 size={18} color={colors.red} />
+            <Text style={styles.deleteButtonText}>{t('messageActionsSheet.delete')}</Text>
           </TouchableOpacity>
         ) : null}
         {onZap ? (

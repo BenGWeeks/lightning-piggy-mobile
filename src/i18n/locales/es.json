@@ -291,7 +291,10 @@
     "attach": "Adjuntar",
     "messageInput": "Campo de mensaje",
     "recordVoiceNote": "Grabar una nota de voz",
-    "sendMessage": "Enviar mensaje"
+    "sendMessage": "Enviar mensaje",
+    "editingMessage": "Editando mensaje",
+    "cancelEdit": "Cancelar edición",
+    "saveEdit": "Guardar cambios"
   },
   "conversationScreen": {
     "couldNotStartLiveShareTitle": "No se pudo iniciar la ubicación en directo",
@@ -1144,7 +1147,17 @@
     "reactionFailedBody": "No se pudo publicar tu reacción. Revisa tus relays e inténtalo de nuevo.",
     "copyText": "Copiar texto",
     "copied": "Copiado",
-    "moreEmoji": "Más emojis"
+    "moreEmoji": "Más emojis",
+    "edit": "Editar",
+    "delete": "Eliminar para todos"
+  },
+  "messageEdit": {
+    "deleteTitle": "¿Eliminar para todos?",
+    "deleteBody": "Se eliminará para todos en este chat. Puede que sigan las copias que otras apps ya mostraron en notificaciones.",
+    "deleteConfirm": "Eliminar",
+    "cancel": "Cancelar",
+    "editFailed": "No se pudo editar el mensaje",
+    "deleteFailed": "No se pudo eliminar el mensaje"
   },
   "messageBubble": {
     "quoteYou": "Tú",

@@ -54,7 +54,7 @@ import { wipeAccountCaches } from './accountCacheWipe';
 import { wipeLocalDmStore } from '../services/localDb';
 import { useDmInbox } from './useDmInbox';
 import { DmInboxContext } from './DmInboxContext';
-import { useGroupMessaging, type GroupSendHooks } from './useGroupMessaging';
+import { useGroupMessaging, type GroupSendHooks, type GroupSendResult } from './useGroupMessaging';
 import { useCacheNotifications } from './useCacheNotifications';
 import { useNip65Relays, type AdoptResult } from './useNip65Relays';
 import {
@@ -233,7 +233,7 @@ interface NostrContextType extends UseReactionActionsResult {
       file?: EncryptedUpload;
     },
     hooks?: GroupSendHooks,
-  ) => Promise<{ success: boolean; wrapsPublished?: number; error?: string }>;
+  ) => Promise<GroupSendResult>;
   /**
    * Publish a parameterised-replaceable kind-30200 group-state event for
    * client-side group consensus. Idempotent on (creator, d-tag) — relays
