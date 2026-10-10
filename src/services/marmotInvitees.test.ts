@@ -9,6 +9,7 @@ import { installMarmotCryptoProvider, marmotCryptoProvider } from './marmotCrypt
 import {
   checkWelcomeDelivery,
   DEVICE_MAX_AGE_SECS,
+  devicesForDm,
   MarmotWelcomeDeliveryError,
   MAX_DEVICES_PER_PERSON,
   resolveInvitees,
@@ -125,6 +126,31 @@ describe('selectDeviceKeyPackages', () => {
       selectDeviceKeyPackages(little.pubkey, [good], { nowSecs: now + 365 * DAY }),
     ).rejects.toBeInstanceOf(MarmotUnusableKeyPackageError);
     expect(await selectDeviceKeyPackages(little.pubkey, [])).toEqual([]);
+  });
+
+  it('1:1s with a White Noise user get their newest White Noise device only', async () => {
+    const asClient = (e: NostrEvent, client: string, createdAt: number) =>
+      finalizeEvent(
+        {
+          kind: e.kind,
+          content: e.content,
+          created_at: createdAt,
+          tags: [...e.tags.filter((t) => t[0] !== 'client'), ['client', client]],
+        },
+        little.sk,
+      );
+    const lpPhone = asClient(devices[0], 'Lightning Piggy', now);
+    const lpTablet = asClient(devices[1], 'Lightning Piggy', now - 60);
+    const wnNew = asClient(devices[2], 'White Noise Android', now - 120);
+    const wnOld = asClient(devices[3], 'White Noise Android', now - 180);
+    const all = await selectDeviceKeyPackages(little.pubkey, [wnOld, lpTablet, wnNew, lpPhone], {
+      nowSecs: now,
+    });
+    expect(all).toHaveLength(4);
+    // White Noise counts leaves to spot a DM: one White Noise device keeps it a DM there.
+    expect(devicesForDm(all)).toEqual([wnNew]);
+    // Lightning Piggy-only contacts get every device in a 1:1 too.
+    expect(devicesForDm([lpPhone, lpTablet])).toEqual([lpPhone, lpTablet]);
   });
 
   it('yields between signature checks', async () => {

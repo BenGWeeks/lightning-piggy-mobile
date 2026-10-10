@@ -458,7 +458,8 @@ export class MarmotSession {
     void this.ensureKeyPackage();
     // Resolve every invitee's devices first so a missing one fails before we
     // create an orphan group.
-    const devices = await this.invitees(members);
+    // White Noise DM shape: unnamed, one other person (see devicesForDm).
+    const devices = await this.invitees(members, { dm: name === '' && members.length === 1 });
     const group = await this.client.groups.create(name, {
       description: opts.description ?? '',
       relays: this.writeRelays(),
@@ -631,8 +632,9 @@ export class MarmotSession {
   }
 
   /** Each invitee's devices; throws for anyone with none we can invite. */
-  private invitees(members: string[]) {
-    return resolveInvitees(this.client.network, this.opts.getLookupRelays(), this.pubkey, members);
+  private invitees(members: string[], opts?: { dm?: boolean }) {
+    const lookup = this.opts.getLookupRelays();
+    return resolveInvitees(this.client.network, lookup, this.pubkey, members, opts);
   }
 
   private summarise(g: SessionGroup): MarmotGroupSummary {
