@@ -9,7 +9,7 @@ import {
   groupMessagesOwnerPrefix,
   normaliseGroupOwner,
 } from './groupMessagesKeys';
-import { ensureGroupMessagesMigrated } from './groupMessagesMigration';
+import { ensureGroupMessagesMigrated, releaseLegacyGroupLogs } from './groupMessagesMigration';
 
 /**
  * In-thread message stored locally, per-group. We persist what the user
@@ -48,10 +48,22 @@ function ownerKey(owner: string | null | undefined, groupId: string): string | n
   return pk ? groupMessagesKey(pk, groupId) : null;
 }
 
+// Accounts signed out in this process. A write that lands after sign-out
+// (a Marmot flush on unmount, a group rumor still being routed) must not
+// recreate the deleted history; cleared when the account becomes active again.
+const retiredOwners = new Set<string>();
+
+/** Lift the sign-out write guard — call when `owner` becomes the active account. */
+export function reviveGroupHistoryOwner(owner: string | null | undefined): void {
+  const pk = normaliseGroupOwner(owner);
+  if (pk) retiredOwners.delete(pk);
+}
+
 function requireOwnerKey(owner: string | null | undefined, groupId: string): string {
-  const key = ownerKey(owner, groupId);
-  if (!key) throw new Error('Group history needs the signed-in account');
-  return key;
+  const pk = normaliseGroupOwner(owner);
+  if (!pk) throw new Error('Group history needs the signed-in account');
+  if (retiredOwners.has(pk)) throw new Error('Group history write for a signed-out account');
+  return groupMessagesKey(pk, groupId);
 }
 
 async function readLog(key: string): Promise<GroupMessage[]> {
@@ -88,6 +100,7 @@ export async function appendGroupMessage(
   groupId: string,
   message: GroupMessage,
 ): Promise<GroupMessage[]> {
+  requireOwnerKey(owner, groupId); // fail fast for a signed-out account
   await ensureGroupMessagesMigrated();
   const key = requireOwnerKey(owner, groupId);
   return mutateGroupStorage(key, async () => {
@@ -150,17 +163,25 @@ export async function clearGroupMessages(
 }
 
 /**
- * Delete every group log belonging to `owner` (sign-out / account wipe).
- * Other accounts' logs — even for the same group — are untouched, as are
- * unowned legacy blobs the migration kept.
+ * Sign-out / account wipe: delete every group log belonging to `owner`, and
+ * every legacy device-wide blob no remaining account can claim
+ * (`releaseLegacyGroupLogs`). Other accounts' logs — even for the same group
+ * — are untouched. MUST run before the account's group list and Marmot state
+ * are deleted, so attribution still sees them. From the first line on, writes
+ * for `owner` are refused until it becomes active again.
  */
 export async function deleteGroupMessagesForOwner(owner: string | null | undefined): Promise<void> {
-  await ensureGroupMessagesMigrated();
   const pk = normaliseGroupOwner(owner);
   if (!pk) return;
-  const prefix = groupMessagesOwnerPrefix(pk);
-  const keys = (await AsyncStorage.getAllKeys()).filter((k) => k.startsWith(prefix));
-  if (keys.length > 0) await AsyncStorage.multiRemove(keys);
+  retiredOwners.add(pk);
+  await ensureGroupMessagesMigrated();
+  try {
+    await releaseLegacyGroupLogs(pk);
+  } finally {
+    const prefix = groupMessagesOwnerPrefix(pk);
+    const keys = (await AsyncStorage.getAllKeys()).filter((k) => k.startsWith(prefix));
+    if (keys.length > 0) await AsyncStorage.multiRemove(keys);
+  }
 }
 
 /**

@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Group, GroupActivity } from '../types/groups';
-import { ensureGroupMessagesMigrated, GROUP_ACTIVITY_PRUNED_KEY } from './groupMessagesMigration';
+import { ensureGroupMessagesMigrated, GROUP_ACTIVITY_RESET_KEY } from './groupMessagesMigration';
 import { perAccountKey } from './perAccountStorage';
 
 // Account scoping: per-account namespaced under `nostr_groups_${pubkey}`
@@ -58,14 +58,14 @@ function isValidGroupActivity(v: unknown): v is GroupActivity {
 }
 
 export async function loadGroupActivity(pubkey: string): Promise<Record<string, GroupActivity>> {
-  // The #1240 migration prunes rollup entries leaked from other accounts —
-  // read only after it, and treat the cache as empty until the prune has
-  // succeeded, or a stale copy would be hydrated and saved back. (It's a
-  // rebuildable cache: the per-group loads repopulate it and the next save
-  // overwrites the leaked blob with this account's own groups.)
+  // The #1240 migration deletes every pre-#1240 rollup once (they could hold
+  // previews leaked from other accounts) — read only after it, and treat the
+  // cache as empty until that reset has succeeded, or a stale copy would be
+  // hydrated and saved back. It's a rebuildable cache: the per-group loads
+  // repopulate it from this account's own history.
   await ensureGroupMessagesMigrated();
   try {
-    if ((await AsyncStorage.getItem(GROUP_ACTIVITY_PRUNED_KEY)) === null) return {};
+    if ((await AsyncStorage.getItem(GROUP_ACTIVITY_RESET_KEY)) === null) return {};
     const raw = await AsyncStorage.getItem(GROUP_ACTIVITY_KEY(pubkey));
     if (!raw) return {};
     const parsed = JSON.parse(raw);

@@ -6,7 +6,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
-  GROUP_ACTIVITY_PRUNED_KEY,
+  GROUP_ACTIVITY_RESET_KEY,
+  releaseLegacyGroupLogs,
   mergeGroupLogs,
   resetGroupMessagesMigrationForTests,
   runGroupMessagesMigration,
@@ -15,6 +16,7 @@ import {
 import { groupMessagesKey, legacyGroupMessagesKey } from './groupMessagesKeys';
 import { loadGroupMessages, type GroupMessage } from './groupMessagesStorageService';
 import { loadGroupActivity } from './groupsStorageService';
+import { syntheticGroupIdForParticipants } from '../utils/syntheticGroupId';
 
 jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
@@ -41,7 +43,10 @@ const msg = (id: string, createdAt: number, text = id): GroupMessage => ({
 
 let warnSpy: jest.SpyInstance;
 
-const noMarmot: GroupMessagesMigrationDeps = { marmotOwners: async () => [] };
+const noMarmot: Partial<GroupMessagesMigrationDeps> = {
+  marmotOwners: async () => [],
+  registeredAccounts: async () => [],
+};
 
 async function seedLegacy(groupId: string, log: GroupMessage[]): Promise<void> {
   await AsyncStorage.setItem(legacyGroupMessagesKey(groupId), JSON.stringify(log));
@@ -72,16 +77,16 @@ afterEach(() => warnSpy.mockRestore());
 describe('runGroupMessagesMigration', () => {
   it('copies a shared legacy blob to EVERY owner listing the group, then deletes it', async () => {
     const log = [msg('m1', 1), msg('m2', 2)];
-    await seedLegacy('s_room', log);
-    await seedGroupList(PARENT, ['s_room', 'g_other']);
-    await seedGroupList(CHILD, ['s_room']);
+    await seedLegacy('g_room', log);
+    await seedGroupList(PARENT, ['g_room', 'g_other']);
+    await seedGroupList(CHILD, ['g_room']);
 
     const result = await runGroupMessagesMigration(noMarmot);
 
-    expect(result.migrated).toEqual({ s_room: [PARENT, CHILD].sort() });
-    expect(await readOwned(PARENT, 's_room')).toEqual(log);
-    expect(await readOwned(CHILD, 's_room')).toEqual(log);
-    expect(await AsyncStorage.getItem(legacyGroupMessagesKey('s_room'))).toBeNull();
+    expect(result.migrated).toEqual({ g_room: [PARENT, CHILD].sort() });
+    expect(await readOwned(PARENT, 'g_room')).toEqual(log);
+    expect(await readOwned(CHILD, 'g_room')).toEqual(log);
+    expect(await AsyncStorage.getItem(legacyGroupMessagesKey('g_room'))).toBeNull();
   });
 
   it('attributes Marmot blobs from the encrypted Marmot state (read-only lookup)', async () => {
@@ -120,7 +125,7 @@ describe('runGroupMessagesMigration', () => {
     const result = await runGroupMessagesMigration(noMarmot);
 
     expect(result.unowned).toEqual(['g_orphan']);
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('kept 1 unowned'));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('1 unowned'));
     expect(JSON.parse((await AsyncStorage.getItem(legacyGroupMessagesKey('g_orphan')))!)).toEqual(
       log,
     );
@@ -187,7 +192,7 @@ describe('runGroupMessagesMigration', () => {
 
     const second = await runGroupMessagesMigration(noMarmot);
 
-    expect(second).toEqual({ migrated: {}, unowned: [], deferred: [], prunedActivity: 0 });
+    expect(second).toEqual({ migrated: {}, unowned: [], deferred: [], resetActivity: 0 });
     expect(await AsyncStorage.multiGet(await AsyncStorage.getAllKeys())).toEqual(snapshot);
   });
 
@@ -199,10 +204,12 @@ describe('runGroupMessagesMigration', () => {
     // "Crash" on the second owner's copy (PARENT's lands first — sorted).
     const setItem = AsyncStorage.setItem as jest.Mock;
     const real = setItem.getMockImplementation()!;
-    let calls = 0;
+    let killed = false;
     setItem.mockImplementation(async (k: string, v: string) => {
-      calls += 1;
-      if (calls === 2) throw new Error('process killed');
+      if (!killed && k === groupMessagesKey(CHILD, 'g_1')) {
+        killed = true;
+        throw new Error('process killed');
+      }
       return real(k, v);
     });
     try {
@@ -228,11 +235,11 @@ describe('runGroupMessagesMigration', () => {
     const result = await runGroupMessagesMigration({ marmotOwners });
 
     expect(marmotOwners).not.toHaveBeenCalled();
-    expect(result).toEqual({ migrated: {}, unowned: [], deferred: [], prunedActivity: 0 });
+    expect(result).toEqual({ migrated: {}, unowned: [], deferred: [], resetActivity: 0 });
   });
 });
 
-describe('one-time prune of leaked activity rollup entries', () => {
+describe('one-time reset of activity rollups', () => {
   const entry = (text: string) => ({
     lastActivityAt: 1,
     lastText: text,
@@ -240,66 +247,122 @@ describe('one-time prune of leaked activity rollup entries', () => {
     recentSenderPubkeys: [],
   });
 
-  it("drops entries for groups the rollup's account doesn't own, keeps its own", async () => {
-    await seedGroupList(CHILD, ['g_child']);
+  it('deletes every rollup once (they may hold previews leaked from other accounts)', async () => {
     await AsyncStorage.setItem(
       `nostr_group_activity_${CHILD}`,
-      JSON.stringify({
-        g_child: entry('mine'),
-        g_parent: entry("parent's plaintext"),
-        [MARMOT_GROUP]: entry("parent's marmot plaintext"),
-        'marmot:c0ffee': entry('child marmot'),
-      }),
+      JSON.stringify({ g_parent: entry("parent's plaintext") }),
     );
-    const marmotOwners = async (mls: string) => (mls === 'c0ffee' ? [CHILD] : [PARENT]);
+    await AsyncStorage.setItem(`nostr_group_activity_${PARENT}`, JSON.stringify({}));
 
-    const result = await runGroupMessagesMigration({ marmotOwners });
+    const result = await runGroupMessagesMigration(noMarmot);
 
-    expect(result.prunedActivity).toBe(2);
-    const kept = JSON.parse((await AsyncStorage.getItem(`nostr_group_activity_${CHILD}`))!);
-    expect(Object.keys(kept).sort()).toEqual(['g_child', 'marmot:c0ffee']);
-    expect(await AsyncStorage.getItem(GROUP_ACTIVITY_PRUNED_KEY)).toBe('1');
+    expect(result.resetActivity).toBe(2);
+    expect(await AsyncStorage.getItem(`nostr_group_activity_${CHILD}`)).toBeNull();
+    expect(await AsyncStorage.getItem(GROUP_ACTIVITY_RESET_KEY)).toBe('1');
   });
 
-  it('runs once: a later foreign entry is left alone after the flag is set', async () => {
+  it('runs once: a rollup rebuilt afterwards is kept', async () => {
     await runGroupMessagesMigration(noMarmot);
-    await AsyncStorage.setItem(
-      `nostr_group_activity_${CHILD}`,
-      JSON.stringify({ g_parent: entry('x') }),
-    );
+    await AsyncStorage.setItem(`nostr_group_activity_${CHILD}`, JSON.stringify({ g: entry('x') }));
 
-    expect((await runGroupMessagesMigration(noMarmot)).prunedActivity).toBe(0);
+    expect((await runGroupMessagesMigration(noMarmot)).resetActivity).toBe(0);
+    expect(await AsyncStorage.getItem(`nostr_group_activity_${CHILD}`)).not.toBeNull();
   });
 
-  it('changes nothing and retries later when a Marmot lookup fails', async () => {
-    const rollup = JSON.stringify({ g_parent: entry('x'), [MARMOT_GROUP]: entry('y') });
-    await AsyncStorage.setItem(`nostr_group_activity_${CHILD}`, rollup);
+  it('loadGroupActivity never hydrates a pre-reset rollup', async () => {
+    await AsyncStorage.setItem(
+      `nostr_group_activity_${CHILD}`,
+      JSON.stringify({ g_parent: entry("parent's plaintext") }),
+    );
+    expect(await loadGroupActivity(CHILD)).toEqual({});
+    expect(await AsyncStorage.getItem(`nostr_group_activity_${CHILD}`)).toBeNull();
+  });
+});
 
-    await runGroupMessagesMigration({
+describe('synthetic NIP-17 rooms: membership check on saved lists (#1240 review)', () => {
+  const LITTLE = '4'.repeat(64);
+  const room = syntheticGroupIdForParticipants([PARENT, CHILD, LITTLE]);
+  const listWith = (owner: string, members: string[]) =>
+    AsyncStorage.setItem(
+      `nostr_groups_${owner}`,
+      JSON.stringify([{ id: room, memberPubkeys: members }]),
+    );
+
+  it('copies to an account whose own list entry re-derives the room id', async () => {
+    await seedLegacy(room, [msg('m1', 1)]);
+    await listWith(PARENT, [CHILD, LITTLE]); // members exclude the viewer
+    await listWith(CHILD, [PARENT, LITTLE]);
+
+    expect((await runGroupMessagesMigration(noMarmot)).migrated[room]).toEqual(
+      [PARENT, CHILD].sort(),
+    );
+  });
+
+  it("ignores an entry leaked from another account's list (pre-#1214)", async () => {
+    const parentOnly = syntheticGroupIdForParticipants([PARENT, LITTLE, OTHER]);
+    await seedLegacy(parentOnly, [msg('m1', 1)]);
+    // CHILD's list holds the parent's entry verbatim: members = parent's view.
+    await AsyncStorage.setItem(
+      `nostr_groups_${CHILD}`,
+      JSON.stringify([{ id: parentOnly, memberPubkeys: [LITTLE, OTHER] }]),
+    );
+
+    const result = await runGroupMessagesMigration(noMarmot);
+
+    expect(result.unowned).toEqual([parentOnly]);
+    expect(await readOwned(CHILD, parentOnly)).toBeNull();
+  });
+});
+
+describe('releaseLegacyGroupLogs — sign-out cleanup (#689, #1240 review)', () => {
+  it('deletes blobs nobody can claim, copies newly-owned ones, keeps nothing behind', async () => {
+    await seedLegacy('g_orphan', [msg('m1', 1)]); // no owner
+    await seedLegacy('g_bad', []);
+    await AsyncStorage.setItem(legacyGroupMessagesKey('g_bad'), '{corrupt');
+    await seedGroupList(CHILD, ['g_bad']);
+
+    const r = await releaseLegacyGroupLogs(CHILD, {
+      ...noMarmot,
+      registeredAccounts: async () => [],
+    });
+
+    expect(r.deleted.sort()).toEqual(['g_bad', 'g_orphan']);
+    const left = (await AsyncStorage.getAllKeys()).filter((k) => k.startsWith('group_messages_'));
+    expect(left).toEqual([]);
+  });
+
+  it('keeps a deferred Marmot blob while another account remains, deletes it when none does', async () => {
+    await seedLegacy(MARMOT_GROUP, [msg('m1', 1)]);
+    const failing = async () => {
+      throw new Error('db locked');
+    };
+
+    const withOther = await releaseLegacyGroupLogs(CHILD, {
+      marmotOwners: failing,
+      registeredAccounts: async () => [CHILD, PARENT],
+    });
+    expect(withOther.kept).toEqual([MARMOT_GROUP]);
+
+    const lastOne = await releaseLegacyGroupLogs(CHILD, {
+      marmotOwners: failing,
+      registeredAccounts: async () => [CHILD],
+    });
+    expect(lastOne.deleted).toEqual([MARMOT_GROUP]);
+    expect(await AsyncStorage.getItem(legacyGroupMessagesKey(MARMOT_GROUP))).toBeNull();
+  });
+
+  it("counts an unregistered (NIP-46) account's group data as another account", async () => {
+    await seedLegacy(MARMOT_GROUP, [msg('m1', 1)]);
+    await AsyncStorage.setItem(groupMessagesKey(OTHER, 'g_x'), '[]');
+
+    const r = await releaseLegacyGroupLogs(CHILD, {
       marmotOwners: async () => {
         throw new Error('db locked');
       },
+      registeredAccounts: async () => [CHILD],
     });
 
-    expect(await AsyncStorage.getItem(`nostr_group_activity_${CHILD}`)).toBe(rollup);
-    expect(await AsyncStorage.getItem(GROUP_ACTIVITY_PRUNED_KEY)).toBeNull();
-  });
-
-  it('loadGroupActivity reads empty while the prune is pending, and only owned entries after', async () => {
-    const leaked = JSON.stringify({
-      [MARMOT_GROUP]: entry("parent's marmot plaintext"),
-      g_child: entry('mine'),
-    });
-    await seedGroupList(CHILD, ['g_child']);
-    await AsyncStorage.setItem(`nostr_group_activity_${CHILD}`, leaked);
-    mockMarmotOwners.mockRejectedValueOnce(new Error('db locked'));
-
-    expect(await loadGroupActivity(CHILD)).toEqual({}); // prune failed → not hydrated
-    expect(await AsyncStorage.getItem(`nostr_group_activity_${CHILD}`)).toBe(leaked);
-
-    resetGroupMessagesMigrationForTests(); // next launch: DB readable
-    mockMarmotOwners.mockResolvedValueOnce([PARENT]);
-    expect(Object.keys(await loadGroupActivity(CHILD))).toEqual(['g_child']);
+    expect(r.kept).toEqual([MARMOT_GROUP]);
   });
 });
 
@@ -330,11 +393,11 @@ describe('crafted group ids (#1240 review)', () => {
 describe('storage reads wait for the migration', () => {
   it('shows migrated history to the owner on first load, and not to another account', async () => {
     const log = [msg('m1', 1)];
-    await seedLegacy('s_room', log);
-    await seedGroupList(PARENT, ['s_room']);
+    await seedLegacy('g_room', log);
+    await seedGroupList(PARENT, ['g_room']);
 
-    expect(await loadGroupMessages(PARENT, 's_room')).toEqual(log);
-    expect(await loadGroupMessages(CHILD, 's_room')).toEqual([]);
-    expect(await AsyncStorage.getItem(legacyGroupMessagesKey('s_room'))).toBeNull();
+    expect(await loadGroupMessages(PARENT, 'g_room')).toEqual(log);
+    expect(await loadGroupMessages(CHILD, 'g_room')).toEqual([]);
+    expect(await AsyncStorage.getItem(legacyGroupMessagesKey('g_room'))).toBeNull();
   });
 });

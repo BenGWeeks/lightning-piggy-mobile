@@ -4,6 +4,7 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -22,7 +23,10 @@ import {
   setSyntheticGroupReconciler,
   type SyntheticRoomInput,
 } from '../services/groupRoutingRegistry';
-import { loadGroupMessages } from '../services/groupMessagesStorageService';
+import {
+  loadGroupMessages,
+  reviveGroupHistoryOwner,
+} from '../services/groupMessagesStorageService';
 import { useNostr, subscribeGroupMessages } from './NostrContext';
 import {
   DEFAULT_RELAYS,
@@ -183,6 +187,9 @@ const EMPTY_ACTIVITY: Record<string, GroupActivity> = {};
 export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // NIP-17 groups (AsyncStorage-persisted). Marmot groups are merged in below.
   const { publishGroupState, pubkey, relays, isLoggedIn } = useNostr();
+  // Re-activating a signed-out account lifts its group-history write guard
+  // (#1240). Layout effect: before any child effect can write its history.
+  useLayoutEffect(() => reviveGroupHistoryOwner(pubkey), [pubkey]);
   const [storedGroups, setGroups] = useAccountState(pubkey, EMPTY_GROUPS);
   const activeOwner = useRef(pubkey);
   activeOwner.current = pubkey;

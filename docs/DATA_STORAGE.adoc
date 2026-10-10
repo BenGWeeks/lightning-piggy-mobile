@@ -142,15 +142,20 @@ possibly while powered on and after first unlock.
 * *Group-chat logs are per account (#1240).* Before #1240 they were
   device-wide (`group_messages_<groupId>`) and any sign-out deleted every
   account's logs. On upgrade, `groupMessagesMigration.ts` *copies* each legacy
-  blob to every local account that owns the group (its `nostr_groups_<pk>`
-  lists it, or its `marmot_kv` state holds it), and only then deletes the
-  legacy key. A blob no account owns stays on disk, unread; it is adopted on
-  a later launch if an account picks the group up. Activity rollups are not
-  ownership evidence — pre-#1214 builds saved one account's rollup under
-  another's key — and the same pass prunes those leaked rollup entries once
-  (flag `group_activity_owner_pruned_v1`; until it succeeds a rollup reads
-  as empty). Copies are merged uncapped, so the migration never drops a
-  message. The per-account prefix (`group_history_`) is deliberately
+  blob to every local account that is a member of the group (its
+  `nostr_groups_<pk>` lists it — for a synthetic NIP-17 room only if the id
+  re-derives from that entry's members plus the account — or its `marmot_kv`
+  state holds it), and only then deletes the legacy key. A shared legacy log
+  therefore lands in *every* member account; per-account separation applies
+  to history from then on. A blob no account owns is never shown and is
+  deleted at the next sign-out (`releaseLegacyGroupLogs`, which first
+  re-attributes it); one whose Marmot lookup failed is kept only while
+  another account remains. The first pass also deletes every
+  `nostr_group_activity_*` rollup once (flag
+  `group_activity_rollups_reset_v1`; pre-#1214 builds leaked previews into
+  them, and they rebuild from each account's own history). Copies are merged
+  uncapped, so the migration never drops a message. Writes for an account
+  that has just been signed out are refused until it is active again. The per-account prefix (`group_history_`) is deliberately
   disjoint from the legacy one: group ids come off relays, so a crafted id
   like `<pubkey>:g_room` must never be readable as that account's history.
   Group history and rollup reads await the migration and never fall back to

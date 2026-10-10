@@ -16,13 +16,28 @@ import {
   editGroupMessage,
   deleteGroupMessagesForOwner,
   listPersistedGroupWrapIds,
+  reviveGroupHistoryOwner,
   type GroupMessage,
 } from './groupMessagesStorageService';
+import { resetGroupMessagesMigrationForTests } from './groupMessagesMigration';
 import { groupMessagesKey, legacyGroupMessagesKey } from './groupMessagesKeys';
 
 jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
 );
+
+// Controls the encrypted-DB Marmot owner lookup and the account registry.
+const mockMarmotOwners = jest.fn(async (_mls: string): Promise<string[]> => []);
+jest.mock('./marmotStore', () => ({
+  listMarmotOwnersForGroup: (mls: string) => mockMarmotOwners(mls),
+}));
+let mockRegistered: string[] = [];
+jest.mock('./identitiesStore', () => ({
+  loadIdentities: async () => ({
+    identities: mockRegistered.map((pubkey) => ({ pubkey })),
+    activePubkey: null,
+  }),
+}));
 
 const GROUP = 'g1';
 const OWNER = '1'.repeat(64);
@@ -32,6 +47,9 @@ const OTHER_SENDER = 'b'.repeat(64);
 
 beforeEach(async () => {
   await AsyncStorage.clear();
+  // A test that signs an owner out must not leave it retired for the next.
+  reviveGroupHistoryOwner(OWNER);
+  reviveGroupHistoryOwner(OWNER_B);
 });
 
 const local = (id: string, text: string, createdAt: number, sender = SENDER): GroupMessage => ({
@@ -450,5 +468,80 @@ describe('editGroupMessages', () => {
         edit('legacy', 'swap', 5, 'y'),
       ]),
     ).toBe(false);
+  });
+});
+
+describe('sign-out write guard (#1240 review)', () => {
+  afterEach(() => {
+    reviveGroupHistoryOwner(OWNER);
+    reviveGroupHistoryOwner(OWNER_B);
+  });
+
+  it('refuses a late append after the account was signed out, until it is active again', async () => {
+    await appendGroupMessage(OWNER, GROUP, wrap('a'.repeat(64), 'before', 1700000000));
+    await deleteGroupMessagesForOwner(OWNER);
+
+    // e.g. useMarmotGroups' unmount flush, or a rumor still being routed.
+    await expect(
+      appendGroupMessage(OWNER, GROUP, wrap('b'.repeat(64), 'late', 1700000001)),
+    ).rejects.toThrow('signed-out');
+    await expect(removeGroupMessage(OWNER, GROUP, 'x')).rejects.toThrow('signed-out');
+    expect((await AsyncStorage.getAllKeys()).filter((k) => k.startsWith('group_history_'))).toEqual(
+      [],
+    );
+
+    reviveGroupHistoryOwner(OWNER); // signed back in
+    await appendGroupMessage(OWNER, GROUP, wrap('c'.repeat(64), 'again', 1700000002));
+    expect(await loadGroupMessages(OWNER, GROUP)).toHaveLength(1);
+  });
+
+  it("doesn't affect another account", async () => {
+    await deleteGroupMessagesForOwner(OWNER);
+    await appendGroupMessage(OWNER_B, GROUP, wrap('d'.repeat(64), 'parent', 1700000003));
+    expect(await loadGroupMessages(OWNER_B, GROUP)).toHaveLength(1);
+  });
+});
+
+describe('sign-out leaves no legacy plaintext behind (#689, #1240 review)', () => {
+  beforeEach(() => {
+    resetGroupMessagesMigrationForTests();
+    mockRegistered = [];
+  });
+  afterEach(() => reviveGroupHistoryOwner(OWNER));
+
+  it('migration deferred at launch (Marmot DB unreadable) → last sign-out → nothing left', async () => {
+    mockMarmotOwners.mockRejectedValue(new Error('db locked'));
+    await AsyncStorage.setItem(
+      'group_messages_marmot:ab12',
+      JSON.stringify([wrap('a'.repeat(64), 'x', 1)]),
+    );
+    await AsyncStorage.setItem('group_messages_g_left_before_upgrade', JSON.stringify([]));
+    expect(await loadGroupMessages(OWNER, 'marmot:ab12')).toEqual([]); // launch: deferred, unshown
+    mockRegistered = [OWNER];
+
+    await deleteGroupMessagesForOwner(OWNER);
+
+    const left = (await AsyncStorage.getAllKeys()).filter((k) =>
+      /^group_(messages|history)_/.test(k),
+    );
+    expect(left).toEqual([]);
+    mockMarmotOwners.mockReset();
+    mockMarmotOwners.mockResolvedValue([]);
+  });
+
+  it('a legacy blob the remaining account owns is copied to it, not deleted', async () => {
+    mockMarmotOwners.mockRejectedValueOnce(new Error('db locked')); // launch run
+    await AsyncStorage.setItem(
+      'group_messages_marmot:cd34',
+      JSON.stringify([wrap('a'.repeat(64), 'x', 1)]),
+    );
+    expect(await loadGroupMessages(OWNER_B, 'marmot:cd34')).toEqual([]);
+    mockRegistered = [OWNER, OWNER_B];
+    mockMarmotOwners.mockResolvedValueOnce([OWNER_B]); // sign-out run: DB readable again
+
+    await deleteGroupMessagesForOwner(OWNER);
+
+    expect((await loadGroupMessages(OWNER_B, 'marmot:cd34')).map((m) => m.text)).toEqual(['x']);
+    expect(await AsyncStorage.getItem('group_messages_marmot:cd34')).toBeNull();
   });
 });

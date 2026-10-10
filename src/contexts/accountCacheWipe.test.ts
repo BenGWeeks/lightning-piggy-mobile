@@ -8,7 +8,11 @@ import {
 } from './nostrCacheKeys';
 import { NOTIFICATION_HISTORY_KEY_BASE } from '../services/notificationHistory';
 import { isKeyBackedUp, markKeyBackedUp } from '../services/keyBackupStatus';
-import { appendGroupMessage, loadGroupMessages } from '../services/groupMessagesStorageService';
+import {
+  appendGroupMessage,
+  loadGroupMessages,
+  reviveGroupHistoryOwner,
+} from '../services/groupMessagesStorageService';
 import { resetGroupMessagesMigrationForTests } from '../services/groupMessagesMigration';
 import { groupMessagesKey, legacyGroupMessagesKey } from '../services/groupMessagesKeys';
 import { wipeDecryptedMediaForOwner } from '../services/decryptedMediaCache';
@@ -54,21 +58,22 @@ it("wipes only the signed-out account's group history, migrating legacy blobs fi
   const row = (id: string, text: string) => ({ id, senderPubkey: PK, text, createdAt: 1 });
   // A not-yet-migrated device-wide blob for a group BOTH accounts are in.
   await AsyncStorage.setItem(
-    legacyGroupMessagesKey('s_family'),
+    legacyGroupMessagesKey('g_family'),
     JSON.stringify([row('m1', 'shared before upgrade')]),
   );
-  await AsyncStorage.setItem(`nostr_groups_${PK}`, JSON.stringify([{ id: 's_family' }]));
-  await AsyncStorage.setItem(`nostr_groups_${OTHER_PK}`, JSON.stringify([{ id: 's_family' }]));
+  await AsyncStorage.setItem(`nostr_groups_${PK}`, JSON.stringify([{ id: 'g_family' }]));
+  await AsyncStorage.setItem(`nostr_groups_${OTHER_PK}`, JSON.stringify([{ id: 'g_family' }]));
 
   await wipeAccountCaches(PK);
 
-  expect(await AsyncStorage.getItem(groupMessagesKey(PK, 's_family'))).toBeNull();
-  expect((await loadGroupMessages(OTHER_PK, 's_family')).map((m) => m.text)).toEqual([
+  expect(await AsyncStorage.getItem(groupMessagesKey(PK, 'g_family'))).toBeNull();
+  expect((await loadGroupMessages(OTHER_PK, 'g_family')).map((m) => m.text)).toEqual([
     'shared before upgrade',
   ]);
-  expect(await AsyncStorage.getItem(legacyGroupMessagesKey('s_family'))).toBeNull();
+  expect(await AsyncStorage.getItem(legacyGroupMessagesKey('g_family'))).toBeNull();
 
   // And after migration: the other account's own logs survive a later wipe.
+  reviveGroupHistoryOwner(PK); // PK signs back in
   await appendGroupMessage(PK, 'g_kids', row('m2', 'child'));
   await appendGroupMessage(OTHER_PK, 'g_kids', row('m3', 'parent'));
   await wipeAccountCaches(PK);
