@@ -12,6 +12,8 @@ import { uploadEncryptedBlobToBlossom, type BlossomSigner } from './blossomServi
 import { marmotKindForAppKind } from './marmotInbox';
 import { marmotImetaTag } from './marmotMedia';
 import { getBlossomServers } from './walletStorageService';
+import type { MarmotUnreachableReason } from './marmotFallback';
+import { t } from '../i18n';
 import {
   MarmotNoKeyPackageError,
   MarmotUnusableKeyPackageError,
@@ -43,25 +45,27 @@ export function marmotDelivery(
   };
 }
 
-/** A user-facing reason a Marmot send couldn't start, or null. */
+/** Why Marmot can't reach the peer at all (so NIP-17 would still work), or null. */
+function marmotUnreachableReason(e: unknown): MarmotUnreachableReason | null {
+  if (e instanceof MarmotNoKeyPackageError) return 'noKeyPackage';
+  // Seen in the wild: legacy MDK 0.8.x key packages (the classic White Noise
+  // app still ships it) that this current-protocol library can't decode, and
+  // expired ones. Not the peer's fault — the protocols differ.
+  if (e instanceof MarmotUnusableKeyPackageError) return 'outdatedKeyPackage';
+  return null;
+}
+
+/** A user-facing reason a Marmot send couldn't start. */
 export function marmotSendError(e: unknown): string {
-  if (e instanceof MarmotNoKeyPackageError) {
-    return "This person hasn't set up Marmot yet — try NIP-17 instead.";
-  }
-  if (e instanceof MarmotUnusableKeyPackageError) {
-    // Seen in the wild: legacy MDK 0.8.x key packages (the classic White
-    // Noise app still ships it) that this current-protocol library can't
-    // decode, and expired ones. Not the peer's fault — the protocols differ.
-    return "This person's Marmot app uses an older version of Marmot that Lightning Piggy can't talk to yet — use NIP-17 for now.";
-  }
+  const reason = marmotUnreachableReason(e);
+  if (reason) return t(`marmotSend.${reason}`);
   return (e as Error)?.message || 'Marmot send failed';
 }
 
-/** A failed send's result: the user-facing reason, plus whether the peer
- * simply can't be reached over Marmot (so NIP-17 would still work). */
+/** A failed send's result: the user-facing reason, plus why the peer can't be
+ * reached over Marmot when that's the cause (so NIP-17 would still work). */
 function marmotFailure(e: unknown): SendResult {
-  const marmotUnreachable =
-    e instanceof MarmotNoKeyPackageError || e instanceof MarmotUnusableKeyPackageError;
+  const marmotUnreachable = marmotUnreachableReason(e);
   return {
     success: false,
     error: marmotSendError(e),

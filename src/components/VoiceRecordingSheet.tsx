@@ -36,9 +36,10 @@ interface Props {
   /**
    * Called once the user taps Send. The parent uploads `uri` to Blossom and
    * sends the resulting URL as the message body — same path as image / GIF
-   * sends today (#235).
+   * sends today (#235). Resolve `false` when nothing was sent, so the
+   * sheet lets the user tap Send again with the same recording.
    */
-  onSend: (uri: string) => void | Promise<void>;
+  onSend: (uri: string) => void | boolean | Promise<void | boolean>;
   /**
    * When true, the Send button shows a spinner and stays disabled
    * while the parent's upload + post is in flight. Cancel only
@@ -499,7 +500,9 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
         // rather than blocking the send because we couldn't stat the
         // file.
       }
-      await onSend(recordedUri);
+      // `false` = not sent (failed, or the user cancelled a NIP-17 fallback):
+      // the sheet keeps the recording, so let a later tap send it.
+      if ((await onSend(recordedUri)) === false) sendInFlightRef.current = false;
     } catch (err) {
       // Parent's onSend may throw — clear the guard so the user can
       // retry without remounting the sheet.

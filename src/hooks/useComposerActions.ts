@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import { Alert } from '../components/BrandedAlert';
 import { useNostr, useNostrContacts } from '../contexts/NostrContext';
@@ -16,6 +16,7 @@ import { nprofileEncode, buildProfileRelayHints } from '../services/nostrService
 import type { PickedFriend } from '../components/FriendPickerSheet';
 import { giphyEnvelope, type Gif } from '../services/giphyService';
 import type { MarmotImage } from '../services/marmotSend';
+import { sendClearingDraft } from '../utils/composerDraft';
 
 /**
  * The send-side behaviour that differs between the 1:1 and group composers —
@@ -93,13 +94,31 @@ export function useComposerActions({
 
   const closeAttachPanel = useCallback(() => setAttachPanelOpen(false), [setAttachPanelOpen]);
 
+  // Latest input text, for restoring a draft without clobbering new typing.
+  const draftRef = useRef(draft);
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
+
+  // The input clears as soon as Send is tapped (the optimistic bubble is
+  // already showing) and the text comes back if nothing was sent — a failed
+  // send, or a cancelled NIP-17 fallback — unless the user has typed since.
   const handleSend = useCallback(async () => {
     const text = draft.trim();
     if (!text || sending) return;
     setSending(true);
     try {
-      const ok = await (strategy.sendMessage ?? strategy.sendText)(text);
-      if (ok) setDraft('');
+      await sendClearingDraft(
+        draft,
+        {
+          get: () => draftRef.current,
+          set: (value) => {
+            draftRef.current = value;
+            setDraft(value);
+          },
+        },
+        () => (strategy.sendMessage ?? strategy.sendText)(text),
+      );
     } finally {
       setSending(false);
     }
@@ -226,16 +245,18 @@ export function useComposerActions({
     async (uri: string) => {
       // Preflight BEFORE the expensive encrypt + Blossom upload: bail if a send
       // is already in flight or there's no valid target (group not loaded).
-      if (uploadingVoice || strategy.canSend?.() === false) return;
+      if (uploadingVoice || strategy.canSend?.() === false) return false;
       setUploadingVoice(true);
       try {
         const file = await uploadEncryptedBlob(uri, signEvent, 'audio/mp4');
         const ok = await strategy.sendFile(file, 'voice');
-        if (!ok) return;
+        if (!ok) return false;
         setVoiceSheetOpen(false);
         closeAttachPanel();
+        return true;
       } catch (error) {
         Alert.alert('Upload failed', error instanceof Error ? error.message : 'Please try again.');
+        return false;
       } finally {
         setUploadingVoice(false);
       }

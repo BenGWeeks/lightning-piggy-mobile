@@ -317,9 +317,7 @@
     "closeFullscreenGif": "Cerrar el GIF a pantalla completa",
     "shareContactTitle": "Compartir un contacto con {{name}}",
     "shareContactSubtitle": "Lo verán como una tarjeta de perfil de Nostr que pueden abrir.",
-    "typing": "escribiendo…",
-    "marmotFallbackTitle": "Enviado con NIP-17",
-    "marmotFallbackBody": "{{name}} todavía no puede recibir Marmot, así que esta conversación ahora usa NIP-17."
+    "typing": "escribiendo…"
   },
   "nwcShareSheet": {
     "title": "Compartir una cartera",
@@ -2410,5 +2408,18 @@
       "no-valid-servers": "Ninguno de estos servidores se puede publicar: usa direcciones que empiecen por https://.",
       "busy": "Ya hay una publicación en curso."
     }
+  },
+  "marmotFallback": {
+    "titleNoKeyPackage": "{{name}} todavía no está en Marmot",
+    "titleOutdated": "{{name}} tiene que abrir o actualizar su app de Marmot",
+    "body": "¿Enviarlo con NIP-17? Sigue cifrado de extremo a extremo, pero Marmot oculta más sobre con quién hablas.",
+    "willNotify": "También le avisaremos de que intentaste usar Marmot.",
+    "cancel": "Cancelar",
+    "confirm": "Enviar con NIP-17",
+    "note": "Intenté escribirte por Marmot (más privado). Abre una app de Marmot como White Noise o Lightning Piggy y podremos chatear por ahí."
+  },
+  "marmotSend": {
+    "noKeyPackage": "No encontramos un paquete de claves de Marmot en los relays de esta persona. Puede que tenga que abrir su app de Marmot para que publique uno; mientras tanto, usa NIP-17.",
+    "outdatedKeyPackage": "El paquete de claves de Marmot de esta persona ha caducado o usa una versión antigua de Marmot con la que Lightning Piggy aún no puede comunicarse. Debería arreglarse si abre o actualiza su app de Marmot; por ahora, usa NIP-17."
   }
 }

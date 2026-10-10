@@ -35,6 +35,7 @@ import FriendPickerSheet, { PickedFriend } from './FriendPickerSheet';
 import BoltzReceiveSheet from './BoltzReceiveSheet';
 import type { RootStackParamList } from '../navigation/types';
 import type { DmProtocol } from '../utils/dmProtocol';
+import type { MarmotUnreachableReason } from '../services/marmotFallback';
 import { isStaleReceipt } from '../utils/incomingReceipts';
 
 // On-chain address fetching is done via WalletContext.getReceiveAddress
@@ -64,6 +65,10 @@ interface Props {
   // The conversation view uses this to append the outgoing message
   // locally, since the Nostr subscription only sees inbound events.
   onSent?: (payload: string) => void;
+  // A `presetProtocol: 'marmot'` send the peer can't receive: the
+  // conversation asks before re-sending it over NIP-17 (and paints its own
+  // bubble). Resolves false when the user cancels — nothing was sent.
+  onMarmotUnreachable?: (reason: MarmotUnreachableReason, payload: string) => Promise<boolean>;
 }
 
 type Mode = 'address' | 'amount';
@@ -77,6 +82,7 @@ const ReceiveSheet: React.FC<Props> = ({
   presetGroup,
   onSendToGroup,
   onSent,
+  onMarmotUnreachable,
 }) => {
   const colors = useThemeColors();
   const t = useTranslation();
@@ -445,7 +451,7 @@ const ReceiveSheet: React.FC<Props> = ({
           : mode === 'address'
             ? `lightning:${friendShareValue}`
             : friendShareValue;
-        const result = await sendDirectMessage(
+        let result = await sendDirectMessage(
           friend.pubkey,
           payload,
           presetProtocol && friend.pubkey === presetFriend?.pubkey
@@ -453,6 +459,10 @@ const ReceiveSheet: React.FC<Props> = ({
             : undefined,
         );
         if (result.success) onSent?.(payload);
+        else if (result.marmotUnreachable && onMarmotUnreachable) {
+          if (!(await onMarmotUnreachable(result.marmotUnreachable, payload))) return;
+          result = { success: true };
+        }
         if (!result.success) {
           Toast.show({
             type: 'error',
@@ -501,6 +511,7 @@ const ReceiveSheet: React.FC<Props> = ({
       presetFriend,
       presetProtocol,
       onSent,
+      onMarmotUnreachable,
     ],
   );
 

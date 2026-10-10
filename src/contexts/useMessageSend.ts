@@ -13,6 +13,7 @@ import type { EncryptedUpload } from '../services/imageUploadService';
 import type { DmSendResult } from '../services/nostrService';
 import type { SignerType, RelayConfig } from '../types/nostr';
 import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
+import type { MarmotUnreachableReason } from '../services/marmotFallback';
 
 // A send carries the per-relay delivery breakdown so the optimistic bubble can
 // show its tick and persist it (#856). `success` means the send FULLY delivered
@@ -28,8 +29,8 @@ export interface SendResult {
   error?: string;
   delivery?: DeliveryStatus;
   /** A Marmot send that failed because the peer has no usable key package —
-   *  the caller may fall back to NIP-17. */
-  marmotUnreachable?: boolean;
+   *  why, so the caller can offer NIP-17 instead. */
+  marmotUnreachable?: MarmotUnreachableReason;
 }
 
 // Per-send options. `protocol` picks the wire format for a send (defaults to

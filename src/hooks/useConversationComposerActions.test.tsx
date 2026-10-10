@@ -1,4 +1,6 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { DmProtocol } from '../utils/dmProtocol';
+import type { BrandedAlertButton } from '../components/BrandedAlert';
 import { renderHook, act } from '@testing-library/react-native';
 import { useConversationComposerActions } from './useConversationComposerActions';
 import { getDmDeliveryStatus, __resetDmDeliveryStore } from '../utils/dmDeliveryStore';
@@ -15,6 +17,7 @@ jest.mock('../contexts/NostrContext', () => ({
     sendDirectMessage: mockSendDirectMessage,
     sendFileMessage: jest.fn(),
     appendLocalDmMessage: mockAppendLocalDmMessage,
+    pubkey: 'f'.repeat(64),
     isLoggedIn: true,
     signEvent: jest.fn(),
     relays: [],
@@ -52,11 +55,19 @@ function setup(protocol?: DmProtocol, onMarmotFallback?: () => void) {
       onMarmotFallback,
     }),
   );
-  return { result, setMessages };
+  return { result, setMessages, setDraft };
+}
+
+// Answer the next branded alert by pressing the button with this label.
+function answerAlertWith(label: string) {
+  mockAlert.mockImplementation((_title: string, _message: string, buttons: BrandedAlertButton[]) =>
+    buttons.find((b) => b.text === label)?.onPress?.(),
+  );
 }
 
 describe('useConversationComposerActions.sendText — optimistic + failed-keep-bubble (#857)', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await AsyncStorage.clear();
     __resetDmDeliveryStore();
     mockSendDirectMessage.mockReset();
     mockAppendLocalDmMessage.mockClear();
@@ -107,31 +118,164 @@ describe('useConversationComposerActions.sendText — optimistic + failed-keep-b
     );
   });
 
-  it('re-sends over NIP-17 (and switches the thread) when Marmot cannot reach the peer', async () => {
+  // Marmot fails (no key package) before any bubble; NIP-17 sends succeed.
+  function marmotUnreachableThenNip17() {
     mockSendDirectMessage.mockImplementation(
       async (_pk: string, _text: string, hooks?: SendHooks): Promise<SendResult> => {
         if (hooks?.protocol === 'marmot') {
-          // No key package / a legacy one: fails before any bubble is painted.
-          return { success: false, error: 'older Marmot', marmotUnreachable: true };
+          return { success: false, error: 'no key package', marmotUnreachable: 'noKeyPackage' };
         }
-        hooks?.onRumorReady?.({ eventId: EVENT_ID, kind: 14, relays: RELAYS });
+        hooks?.onRumorReady?.({ eventId: `${EVENT_ID}-${_text}`, kind: 14, relays: RELAYS });
         return { success: true };
       },
     );
+  }
+  const sentProtocols = () =>
+    mockSendDirectMessage.mock.calls.map((c) => (c[2] as SendHooks).protocol);
+  const sentTexts = () => mockSendDirectMessage.mock.calls.map((c) => c[1] as string);
+
+  it('asks before sending over NIP-17 when Marmot cannot reach the peer', async () => {
+    marmotUnreachableThenNip17();
+    answerAlertWith('Send with NIP-17');
     const onMarmotFallback = jest.fn();
-    const { result } = setup('marmot', onMarmotFallback);
+    const { result, setDraft } = setup('marmot', onMarmotFallback);
     await act(async () => {
       await result.current.handleSend();
     });
-    expect(mockSendDirectMessage.mock.calls.map((c) => (c[2] as SendHooks).protocol)).toEqual([
-      'marmot',
-      'nip17',
-    ]);
+    expect(mockAlert).toHaveBeenCalledTimes(1);
+    expect(mockAlert.mock.calls[0][0]).toBe("Big Piggy isn't on Marmot yet");
+    expect(mockAlert.mock.calls[0][1]).toMatch(/let them know you tried Marmot/);
+    // The message, then (once) the note telling them we tried Marmot.
+    expect(sentProtocols()).toEqual(['marmot', 'nip17', 'nip17']);
+    expect(sentTexts()[1]).toBe('hi');
+    expect(sentTexts()[2]).toMatch(/^I tried to message you on Marmot/);
     expect(onMarmotFallback).toHaveBeenCalledTimes(1);
-    expect(mockAlert).not.toHaveBeenCalled();
-    // The bubble is the NIP-17 send's: not filed under the Marmot thread.
-    expect(mockAppendLocalDmMessage).toHaveBeenCalledTimes(1);
-    expect(mockAppendLocalDmMessage.mock.calls[0][1]).not.toHaveProperty('protocol');
+    expect(setDraft).toHaveBeenCalledWith('');
+    // Both bubbles are NIP-17 rows: not filed under the Marmot thread.
+    expect(mockAppendLocalDmMessage).toHaveBeenCalledTimes(2);
+    for (const call of mockAppendLocalDmMessage.mock.calls) {
+      expect(call[1]).not.toHaveProperty('protocol');
+    }
+  });
+
+  it('sends the note only once per thread', async () => {
+    marmotUnreachableThenNip17();
+    answerAlertWith('Send with NIP-17');
+    const first = setup('marmot', jest.fn());
+    await act(async () => {
+      await first.result.current.handleSend();
+    });
+    mockSendDirectMessage.mockClear();
+    const second = setup('marmot', jest.fn());
+    await act(async () => {
+      await second.result.current.handleSend();
+    });
+    expect(sentProtocols()).toEqual(['marmot', 'nip17']);
+    // …and the dialog no longer promises one.
+    expect(mockAlert.mock.calls[1][1]).not.toMatch(/let them know/);
+  });
+
+  it('moves the thread to NIP-17 before sending, so a failed send stays visible', async () => {
+    const order: string[] = [];
+    mockSendDirectMessage.mockImplementation(
+      async (_pk: string, _text: string, hooks?: SendHooks): Promise<SendResult> => {
+        order.push(`send:${hooks?.protocol}`);
+        return hooks?.protocol === 'marmot'
+          ? { success: false, error: 'no key package', marmotUnreachable: 'noKeyPackage' }
+          : { success: true };
+      },
+    );
+    answerAlertWith('Send with NIP-17');
+    const { result } = setup('marmot', () => order.push('switch'));
+    await act(async () => {
+      await result.current.handleSend();
+    });
+    expect(order.slice(0, 3)).toEqual(['send:marmot', 'switch', 'send:nip17']);
+  });
+
+  it('shares one dialog and one note between overlapping sends', async () => {
+    marmotUnreachableThenNip17();
+    let pressConfirm: (() => void) | undefined;
+    mockAlert.mockImplementation(
+      (_title: string, _message: string, buttons: BrandedAlertButton[]) => {
+        pressConfirm = buttons[1].onPress;
+      },
+    );
+    const { result } = setup('marmot', jest.fn());
+    let both: Promise<unknown> | undefined;
+    await act(async () => {
+      both = Promise.all([
+        result.current.offerNip17ForText('noKeyPackage', 'first'),
+        result.current.offerNip17ForText('noKeyPackage', 'second'),
+      ]);
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await act(async () => {
+      pressConfirm?.();
+      await both;
+    });
+    expect(mockAlert).toHaveBeenCalledTimes(1);
+    const notes = sentTexts().filter((x) => x.startsWith('I tried to message you on Marmot'));
+    expect(notes).toHaveLength(1);
+    expect(sentTexts()).toEqual(expect.arrayContaining(['first', 'second']));
+  });
+
+  it('tries the note again next time if it failed to send', async () => {
+    let noteFails = true;
+    mockSendDirectMessage.mockImplementation(
+      async (_pk: string, text: string, hooks?: SendHooks): Promise<SendResult> => {
+        if (hooks?.protocol === 'marmot') {
+          return { success: false, error: 'no key package', marmotUnreachable: 'noKeyPackage' };
+        }
+        if (text.startsWith('I tried') && noteFails) return { success: false, error: 'offline' };
+        return { success: true };
+      },
+    );
+    answerAlertWith('Send with NIP-17');
+    const first = setup('marmot', jest.fn());
+    await act(async () => {
+      await first.result.current.handleSend();
+    });
+    expect(await AsyncStorage.getAllKeys()).toEqual([]);
+    noteFails = false;
+    mockSendDirectMessage.mockClear();
+    await act(async () => {
+      await first.result.current.handleSend();
+    });
+    expect(sentTexts().filter((x) => x.startsWith('I tried'))).toHaveLength(1);
+    expect(await AsyncStorage.getAllKeys()).toHaveLength(1);
+  });
+
+  it('sends nothing and keeps the draft when the user cancels', async () => {
+    marmotUnreachableThenNip17();
+    answerAlertWith('Cancel');
+    const onMarmotFallback = jest.fn();
+    const { result, setDraft } = setup('marmot', onMarmotFallback);
+    await act(async () => {
+      await result.current.handleSend();
+    });
+    expect(sentProtocols()).toEqual(['marmot']);
+    expect(onMarmotFallback).not.toHaveBeenCalled();
+    // Cleared on tap, then the draft comes back untouched.
+    expect(setDraft.mock.calls).toEqual([[''], ['hi']]);
+    expect(mockAppendLocalDmMessage).not.toHaveBeenCalled();
+    expect(await AsyncStorage.getAllKeys()).toEqual([]);
+  });
+
+  it('offers the same choice for a send made outside the composer (invoice)', async () => {
+    marmotUnreachableThenNip17();
+    answerAlertWith('Send with NIP-17');
+    const onMarmotFallback = jest.fn();
+    const { result } = setup('marmot', onMarmotFallback);
+    let sent = false;
+    await act(async () => {
+      sent = await result.current.offerNip17ForText('outdatedKeyPackage', 'lnbc1invoice');
+    });
+    expect(sent).toBe(true);
+    expect(mockAlert.mock.calls[0][0]).toBe("Big Piggy's Marmot app needs opening or updating");
+    expect(sentTexts()[0]).toBe('lnbc1invoice');
+    expect(sentProtocols()[0]).toBe('nip17');
+    expect(onMarmotFallback).toHaveBeenCalledTimes(1);
   });
 
   it('does not fall back for an ordinary Marmot failure', async () => {
