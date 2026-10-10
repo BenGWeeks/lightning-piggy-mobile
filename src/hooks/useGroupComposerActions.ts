@@ -88,7 +88,7 @@ export function useGroupComposerActions(params: {
       // actually landed, mirroring the pre-#1033 ordering.
       setMessages((prev) => [...prev, local]);
       setTimeout(scrollToEnd, 0);
-      const persisted = appendGroupMessage(group.id, local)
+      const persisted = appendGroupMessage(myPubkey, group.id, local)
         .then((next) => {
           setMessages(next);
           notifyGroupMessage(group.id, local);
@@ -128,12 +128,12 @@ export function useGroupComposerActions(params: {
       if (!group) return;
       setMessages((prev) => prev.filter((m) => m.id !== rowId));
       try {
-        await removeGroupMessage(group.id, rowId);
+        await removeGroupMessage(myPubkey, group.id, rowId);
       } catch (err) {
         if (__DEV__) console.warn('[GroupConversationScreen] removeGroupMessage failed:', err);
       }
     },
-    [group, setMessages],
+    [group, myPubkey, setMessages],
   );
 
   const sendText = useCallback(

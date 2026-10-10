@@ -168,7 +168,7 @@ const GroupConversationScreen: React.FC = () => {
     if (!loadedGroupId) return;
     let cancelled = false;
     setLoadingMessages(true);
-    loadGroupMessages(loadedGroupId)
+    loadGroupMessages(myPubkey, loadedGroupId)
       .then((loaded) => {
         if (!cancelled) {
           setMessages(loaded);
@@ -193,7 +193,7 @@ const GroupConversationScreen: React.FC = () => {
     let cancelled = false;
     const unsubscribe = subscribeGroupMessages((groupId) => {
       if (groupId !== loadedGroupId) return;
-      loadGroupMessages(loadedGroupId)
+      loadGroupMessages(myPubkey, loadedGroupId)
         .then((loaded) => {
           if (!cancelled) setMessages(loaded);
         })

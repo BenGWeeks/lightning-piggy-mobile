@@ -164,18 +164,18 @@ export function useMarmotGroups(pubkey: string | null): MarmotGroupsApi {
         }
       }
       for (const [groupId, messages] of byGroup) {
-        for (const m of messages) await appendGroupMessage(groupId, m);
+        for (const m of messages) await appendGroupMessage(pubkey, groupId, m);
         // Edits to messages stored by earlier batches / sessions: one pass.
-        const edited = await editGroupMessages(groupId, editsIn.get(groupId) ?? []);
+        const edited = await editGroupMessages(pubkey, groupId, editsIn.get(groupId) ?? []);
         // Erase what's already stored (earlier batches / sessions).
         const groupDeletions = deletedIn.get(groupId);
         if (groupDeletions) {
-          await removeGroupMessagesWhere(groupId, (m) =>
+          await removeGroupMessagesWhere(pubkey, groupId, (m) =>
             groupDeletions.some((d) => d.targets.includes(m.id) && mayDelete(d, m.senderPubkey)),
           );
         }
         if (messages.length > 0 || groupDeletions || edited) {
-          const remaining = await loadGroupMessages(groupId);
+          const remaining = await loadGroupMessages(pubkey, groupId);
           if (!disposed) notifyGroupMessage(groupId, remaining[remaining.length - 1]);
         }
       }

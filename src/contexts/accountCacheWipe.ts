@@ -23,7 +23,7 @@ import {
   BLOSSOM_SERVERS_PUBLISHED_KEY_BASE,
   BLOSSOM_SERVERS_CREATED_AT_KEY_BASE,
 } from '../services/walletStorageService';
-import { GROUP_MESSAGES_KEY_PREFIX } from '../services/groupMessagesStorageService';
+import { deleteGroupMessagesForOwner } from '../services/groupMessagesStorageService';
 import { clearCacheStorage as clearNostrPlacesCache } from '../services/nostrPlacesStorage';
 import { clearNotificationHistory } from '../services/notificationHistory';
 import { PER_ACCOUNT_SETTING_BASES } from '../services/safetySettingsMigration';
@@ -138,10 +138,16 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
   const lastSeenPrefix = DM_CONV_LAST_SEEN_PREFIX + loggedOutPubkey + '_';
   for (const k of allKeys) {
     if (k.startsWith(convPrefix) || k.startsWith(lastSeenPrefix)) toRemove.push(k);
-    // group_messages_* holds decrypted group-chat plaintext keyed by random
-    // group id (not pubkey). Treat it like DM plaintext (#689): decrypted
-    // content must not survive logout / account wipe, so remove every blob.
-    if (k.startsWith(GROUP_MESSAGES_KEY_PREFIX)) toRemove.push(k);
+  }
+  // Decrypted group-chat plaintext (#689) — ONLY this account's logs (#1240):
+  // other accounts on the device keep theirs, and Marmot history can't be
+  // re-fetched. Runs before the group lists / Marmot state below are deleted,
+  // so a not-yet-migrated legacy blob is still attributed to this account
+  // (copied to every owner, then this owner's copy removed here).
+  try {
+    await deleteGroupMessagesForOwner(loggedOutPubkey);
+  } catch (e) {
+    if (__DEV__) console.warn('[wipeAccountCaches] group history wipe failed:', e);
   }
   // Best-effort so a transient multiRemove rejection can't abort the wipe below.
   await bestEffortMultiRemove(toRemove);

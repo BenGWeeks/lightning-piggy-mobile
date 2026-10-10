@@ -430,7 +430,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     (async () => {
       const updates: Record<string, GroupActivity> = {};
       for (const g of missing) {
-        const msgs = await loadGroupMessages(g.id);
+        const msgs = await loadGroupMessages(pubkey, g.id);
         updates[g.id] = activityFromMessages(g, msgs);
       }
       if (!cancelled && Object.keys(updates).length > 0) {
@@ -453,7 +453,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const unsub = subscribeGroupMessages((groupId) => {
       const g = groups.find((x) => x.id === groupId);
       if (!g) return;
-      loadGroupMessages(groupId).then((msgs) => {
+      loadGroupMessages(pubkey, groupId).then((msgs) => {
         if (!active) return;
         setActivityByGroup((prev) => ({ ...prev, [groupId]: activityFromMessages(g, msgs) }));
       });

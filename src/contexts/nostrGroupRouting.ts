@@ -119,7 +119,7 @@ export async function tryRouteGroupRumor(
     createdAt: rumor.created_at,
   };
   try {
-    await appendGroupMessage(group.id, message);
+    await appendGroupMessage(viewerPubkey, group.id, message);
     if (shouldAbort()) return { kind: 'group-no-match' };
     notifyGroupMessage(group.id, message);
   } catch (e) {

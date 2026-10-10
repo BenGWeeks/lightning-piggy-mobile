@@ -43,7 +43,7 @@ changing how anything is stored.
   and per-conversation caches (`nostr_dm_conv_v1_*`) are *retired* — #850
   migrates them into the encrypted DB and deletes them (verified).
   Remaining known plaintext: decrypted *group-chat* logs
-  (`group_messages_<groupId>`) and group previews
+  (`group_messages_<ownerPubkey>:<groupId>`, one per account — #1240) and group previews
   (`nostr_group_activity_<pubkey>`) — see the residual-risk note under
   <<threat>>.
 | Mixed (mostly public/cache; group-chat plaintext is the known residual)
@@ -132,12 +132,22 @@ possibly while powered on and after first unlock.
 * *Wallet + identity secrets* (`nsec`, NWC URLs, mnemonics, xpubs, LNURL-w
   bearers, the DB key) are individually keystore-wrapped — same story.
 * *Known residual plaintext (accepted, tracked):* decrypted *group-chat* logs
-  (`group_messages_<groupId>`, `nostr_group_activity_<pubkey>`) still live in
-  AsyncStorage — wiped on logout (#944) but readable from a seized unlocked
-  device until they get the same encrypted-store treatment (follow-up).
-  This includes *Marmot* group logs (`group_messages_marmot:<mls group id>`),
+  (`group_messages_<ownerPubkey>:<groupId>`, `nostr_group_activity_<pubkey>`)
+  still live in AsyncStorage — each account's logs are wiped on that account's
+  sign-out (#944, #1240) but readable from a seized unlocked device until they
+  get the same encrypted-store treatment (follow-up). This includes *Marmot*
+  group logs (`group_messages_<ownerPubkey>:marmot:<mls group id>`),
   whose photo rows embed the photo's file keys in the `#lpe=1` URL. Marmot
   1:1 rows and all MLS state are in the encrypted DB.
+* *Group-chat logs are per account (#1240).* Before #1240 they were
+  device-wide (`group_messages_<groupId>`) and any sign-out deleted every
+  account's logs. On upgrade, `groupMessagesMigration.ts` *copies* each legacy
+  blob to every local account that owns the group (its `nostr_groups_<pk>` /
+  `nostr_group_activity_<pk>` lists it, or its `marmot_kv` state holds it),
+  and only then deletes the legacy key. A blob no account owns stays on disk,
+  unread; it is adopted on a later launch if an account picks the group up.
+  The storage service awaits the migration before any read or write and never
+  falls back to a legacy key.
   Public caches (places, profiles, geo-caches) are public data by
   definition; the eventual move into the one encrypted DB is a metadata-
   privacy nicety, not a confidentiality requirement.

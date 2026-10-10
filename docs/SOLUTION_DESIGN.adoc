@@ -815,7 +815,7 @@ The existing NIP-17 decrypt loop (`refreshDmInbox` + per-thread inline decrypt) 
 |===
 | Result | Caller behaviour
 
-| `routed` | Persisted to `groupMessagesStorageService` keyed by `group.id`; `notifyGroupMessage()` fires; caller continues to the next wrap.
+| `routed` | Persisted to `groupMessagesStorageService` keyed by viewer + `group.id`; `notifyGroupMessage()` fires; caller continues to the next wrap.
 | `group-no-match` | Group-shaped rumor (≥2 OTHER participants) but no locally-known group whose roster matches the participant set. Dropped; caller continues. CRITICAL: caller must NOT fall through to `partnerFromRumor`, which would arbitrarily pick the first p-tag and bucket the rumor as a 1:1 DM.
 | `not-group` | 1:1 DM (or malformed). Caller proceeds with the existing `partnerFromRumor` + cache path.
 |===
@@ -858,7 +858,9 @@ This is why the UI says "Leave" rather than "Delete" — it's local-only and oth
 
 === Account scoping caveat
 
-`nostr_groups` and per-group `group_messages_${groupId}` keys are NOT yet namespaced per-account. Cross-account leak on the same device is prevented at logout: `NostrContext.logout` removes `nostr_groups` and scans for keys starting with `group_messages_` to multi-remove them. Per-account namespacing (`nostr_groups_${pubkey}` etc.) is still needed before multi-account switching without a logout in between can ship — tracked as a follow-up.
+Group lists (`nostr_groups_${pubkey}`, #288) and group-chat history (`group_messages_${pubkey}:${groupId}`, #1240) are both per account. Every history read and write passes the active account, so two local accounts in the same group (synthetic NIP-17 rooms, kind-30200 and Marmot groups all share one id across members) never see each other's stored history, and signing out deletes only that account's logs (`deleteGroupMessagesForOwner` in `wipeAccountCaches`) — a family member's sign-out no longer wipes everyone's chats, which matters because Marmot history can't be re-fetched.
+
+Upgrade path: the old device-wide `group_messages_${groupId}` blobs can't be attributed to one account, so `groupMessagesMigration.ts` copies each one to *every* local account that owns the group (group list, activity rollup, or Marmot state in `marmot_kv`), merging by message id, and deletes the legacy key only after all copies are written. It's idempotent and crash-safe (a re-run converges), runs once per launch before any group read, and keeps (without showing) any blob no account owns.
 
 === Inbox surfacing
 
