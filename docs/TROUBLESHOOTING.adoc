@@ -955,9 +955,14 @@ needs a native token from Apple/Google. On Android that means Google Play
 services: de-Googled phones (GrapheneOS without sandboxed Play, microG builds
 without FCM) and the LP emulator AVD (a Google APIs-less image) can't get one,
 so the switch turns itself back off. Use a phone with Play services, or an
-emulator image that includes Google Play. On iOS, a dev-client build gets a
-sandbox APNs token that our servers (production APNs) can't deliver to — test
-iOS push with a preview or TestFlight build.
+emulator image that includes Google Play.
+
+On iOS the APNs environment follows the build's *signing*, not the bundle id.
+The Simulator and `expo run:ios` dev clients get sandbox tokens, served by the
+dev Transponder (`npub15vns5zhkr3vq95rg330gmtea6mz2xs24um0hey396nd06p8kfl9say2equ`).
+An EAS-built `.dev` app on a physical iPhone gets *production* tokens, which no
+server serves for the `.dev` topic — test real-device iOS push with a preview or
+TestFlight build.
 
 === Marmot push: no notification arrives on Android
 

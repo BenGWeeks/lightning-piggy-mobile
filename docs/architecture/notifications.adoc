@@ -227,7 +227,7 @@ notifications via push (Marmot)":
 
 | `com.lightningpiggy.app` | `npub1v5lrt4u7vhfnmxwk6c3uepcsrvs4jqyy3z3jrfm5kw73yp0wv2ts5pnwjs` | APNs topic = production bundle id
 | `com.lightningpiggy.app.preview` | `npub1rzy2h0rhqmn44tqepvy4h93082878cackvked5lp3wghzkwe3rmsetjeya` | APNs topic = preview bundle id
-| `com.lightningpiggy.app.dev` | Android: the preview server (same Firebase project). iOS: the sandbox-APNs server (topic = dev bundle id) once deployed. Either overridable at bundle time with `EXPO_PUBLIC_MARMOT_PUSH_DEV_SERVER` | A dev client gets *sandbox* APNs tokens, which the production-APNs servers can't use
+| `com.lightningpiggy.app.dev` | `npub15vns5zhkr3vq95rg330gmtea6mz2xs24um0hey396nd06p8kfl9say2equ` (overridable at bundle time with `EXPO_PUBLIC_MARMOT_PUSH_DEV_SERVER`) | APNs *sandbox* environment, topic = dev bundle id; FCM too. The APNs environment follows the build's signing, not the bundle id: the iOS Simulator and `expo run:ios` dev clients get sandbox tokens (served), but an EAS-built `.dev` app on a physical iPhone gets production tokens, which no server serves for the `.dev` topic
 |===
 +
 An "Advanced" field accepts another server's npub (it must hold Lightning

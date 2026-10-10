@@ -89,21 +89,19 @@ beforeEach(async () => {
 });
 
 describe('server selection', () => {
-  it('uses the production server only for the production app id', () => {
+  it('picks the server by app id (dev → the sandbox/dev server)', () => {
     expect(builtInServer('com.lightningpiggy.app')).toBe(BUILT_IN_SERVERS.production);
     expect(builtInServer('com.lightningpiggy.app.preview')).toBe(BUILT_IN_SERVERS.preview);
-    // Dev on Android shares the preview server (same Firebase project).
-    expect(builtInServer('com.lightningpiggy.app.dev', 'android', '')).toBe(
-      BUILT_IN_SERVERS.preview,
+    expect(parseServerKey('npub15vns5zhkr3vq95rg330gmtea6mz2xs24um0hey396nd06p8kfl9say2equ')).toBe(
+      BUILT_IN_SERVERS.development.pubkey,
     );
+    expect(builtInServer('com.lightningpiggy.app.dev', '')).toBe(BUILT_IN_SERVERS.development);
     // A bundle-time override wins for dev builds only.
     const npub = 'npub1v5lrt4u7vhfnmxwk6c3uepcsrvs4jqyy3z3jrfm5kw73yp0wv2ts5pnwjs';
-    expect(builtInServer('com.lightningpiggy.app.dev', 'ios', npub)).toEqual({
+    expect(builtInServer('com.lightningpiggy.app.dev', npub)).toEqual({
       pubkey: BUILT_IN_SERVERS.production.pubkey,
     });
-    expect(builtInServer('com.lightningpiggy.app.preview', 'ios', npub)).toBe(
-      BUILT_IN_SERVERS.preview,
-    );
+    expect(builtInServer('com.lightningpiggy.app.preview', npub)).toBe(BUILT_IN_SERVERS.preview);
   });
 
   it('parses npub and hex keys and rejects junk', () => {

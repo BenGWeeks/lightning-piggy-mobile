@@ -44,18 +44,15 @@ export interface PushServer {
  * that bundle id). Relay hints are fixed (each server lists nos.lol in its
  * kind-10050) so a hint lookup can never churn the signed records.
  *
- * The dev build: on Android it shares the preview server (same Firebase
- * project → FCM delivers to `.dev` too). On iOS a dev client gets SANDBOX
- * APNs tokens, which only a sandbox-environment server with the `.dev`
- * topic can use — `devIosSandbox`, once deployed. Either can be overridden
- * at bundle time with `EXPO_PUBLIC_MARMOT_PUSH_DEV_SERVER` (npub or hex;
- * dev builds only), e.g. to point at a local Transponder.
+ * The dev build has its own server: APNs SANDBOX environment, topic
+ * `com.lightningpiggy.app.dev`, plus FCM. The APNs environment follows the
+ * build's signing, not the bundle id: the iOS Simulator and locally built
+ * (`expo run:ios`) dev clients get sandbox tokens (served), but an EAS-built
+ * `.dev` app on a physical iPhone gets production tokens, which no server
+ * serves for the `.dev` topic. Overridable at bundle time with
+ * `EXPO_PUBLIC_MARMOT_PUSH_DEV_SERVER` (npub or hex; dev builds only).
  */
-export const BUILT_IN_SERVERS: {
-  production: PushServer;
-  preview: PushServer;
-  devIosSandbox: PushServer | null;
-} = {
+export const BUILT_IN_SERVERS: Record<'production' | 'preview' | 'development', PushServer> = {
   production: {
     pubkey: '653e35d79e65d33d99d6d623cc87101b2159008488a321a774b3bd1205ee6297',
     relayHint: 'wss://nos.lol',
@@ -64,22 +61,22 @@ export const BUILT_IN_SERVERS: {
     pubkey: '1888abbc7706e75aac190b095b962f3a8fe3e3b8b32d96d3e18b917159d988f7',
     relayHint: 'wss://nos.lol',
   },
-  devIosSandbox: null,
+  development: {
+    pubkey: 'a3270a0af61c5802d0688c5e8daf3dd6c4a34155e6df7c9225d4dafd04f64fcb',
+    relayHint: 'wss://nos.lol',
+  },
 };
 
 const DEV_SERVER_OVERRIDE = process.env.EXPO_PUBLIC_MARMOT_PUSH_DEV_SERVER ?? '';
 
 export function builtInServer(
   appId: string | null = Application.applicationId,
-  os: string = Platform.OS,
   devOverride: string = DEV_SERVER_OVERRIDE,
 ): PushServer {
   if (appId === 'com.lightningpiggy.app') return BUILT_IN_SERVERS.production;
   if (appId === 'com.lightningpiggy.app.preview') return BUILT_IN_SERVERS.preview;
   const override = devOverride ? parseServerKey(devOverride) : null;
-  if (override) return { pubkey: override };
-  if (os === 'ios' && BUILT_IN_SERVERS.devIosSandbox) return BUILT_IN_SERVERS.devIosSandbox;
-  return BUILT_IN_SERVERS.preview;
+  return override ? { pubkey: override } : BUILT_IN_SERVERS.development;
 }
 
 /** Parse an npub / hex server key; null when it isn't a valid key. */
