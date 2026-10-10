@@ -145,14 +145,22 @@ function bindRumor(rumorJson: string, sealPubkey: string, skip: Skip): DecodedRu
   return rumor;
 }
 
+/** A NIP-46 bunker's refusal must reach the ingest loop: `ingestInboxWraps`
+ *  stops on it (`stopOnPermissionDenied`) instead of re-asking the bunker for
+ *  every wrap. Any other decrypt failure stays a skip, as before. */
+function rethrowSignerDenial(error: unknown): void {
+  if (/NIP-46 signer denied/i.test((error as Error)?.message ?? '')) throw error;
+}
+
 /**
  * Two-layer NIP-17 unwrap: wrap → seal → rumor. Takes a `decryptNip44`
  * callback so the same logic works for nsec (pure JS via nostr-tools) and
  * for Amber (IPC via amberService). The callback must throw on failure.
  *
- * Returns null (never throws) on any verification / shape failure so
- * callers can skip bad wraps without crashing the inbox. Reasons for a
- * null return are logged through the injected `onSkip` hook.
+ * Returns null on any verification / shape failure so callers can skip bad
+ * wraps without crashing the inbox. Reasons for a null return are logged
+ * through the injected `onSkip` hook. The one exception: a NIP-46 signer
+ * denial is rethrown, so the ingest loop can stop instead of re-asking.
  */
 export async function unwrapWrapViaNip44(
   wrap: RawGiftWrapEvent,
@@ -171,6 +179,7 @@ export async function unwrapWrapViaNip44(
   try {
     sealJson = await decryptNip44(wrap.content, wrap.pubkey);
   } catch (error) {
+    rethrowSignerDenial(error);
     return skip(`wrap decrypt failed: ${(error as Error)?.message ?? 'unknown'}`);
   }
   const seal = parseValidSeal(sealJson, skip);
@@ -180,6 +189,7 @@ export async function unwrapWrapViaNip44(
   try {
     rumorJson = await decryptNip44(seal.content, seal.pubkey);
   } catch (error) {
+    rethrowSignerDenial(error);
     return skip(`seal decrypt failed: ${(error as Error)?.message ?? 'unknown'}`);
   }
   return bindRumor(rumorJson, seal.pubkey, skip);

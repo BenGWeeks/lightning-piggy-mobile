@@ -55,7 +55,10 @@ let _signerPromise: Promise<BunkerSigner> | null = null;
  *  appear. False negatives just surface as a generic error to the
  *  caller — no harm done. */
 function isPermissionError(err: unknown): boolean {
-  const msg = (err as Error)?.message?.toLowerCase() ?? '';
+  // nostr-tools' BunkerSigner rejects with the bunker's raw error string
+  // (not an Error), so read the string form as well as `.message`.
+  const raw = typeof err === 'string' ? err : ((err as Error)?.message ?? '');
+  const msg = raw.toLowerCase();
   return (
     msg.includes('permission') ||
     msg.includes('denied') ||
