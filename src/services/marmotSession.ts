@@ -37,7 +37,6 @@ import {
   type MarmotMediaKeys,
 } from './marmotMedia';
 import { forgetMarmotDeletionsForGroup } from './marmotDeletionStore';
-import { spreadProposals } from './marmotProposals';
 import {
   advertisesMediaV2,
   ensureKeyPackageSlot,
@@ -47,6 +46,8 @@ import {
   trackKeyPackageAcceptance,
 } from './marmotKeyPackageLifecycle';
 import { retryPendingRetirement } from './marmotKeyPackageRetire';
+import { KeyPackageRefreshRequests } from './marmotKeyRefresh';
+import { spreadProposals } from './marmotProposals';
 import { MarmotNoKeyPackageError, newestEvent, pickKeyPackage } from './marmotKeyPackages';
 import { createMarmotNetwork, createPushTransport } from './marmotNetwork';
 import {
@@ -98,6 +99,8 @@ const isPlausibleTimestamp = (createdAt: number) =>
   createdAt <= Math.floor(Date.now() / 1000) + MAX_FUTURE_SKEW_SECS;
 // Sign-out waits at most this long for an in-flight key-package publish.
 const KEY_PACKAGE_DRAIN_MS = 5_000;
+// A manual Refresh gives up after this (one run ahead of it + a signer prompt).
+const KEY_PACKAGE_REFRESH_TIMEOUT_MS = 90_000;
 const isMediaKeys = (v: unknown): v is MarmotMediaKeys =>
   !!v &&
   typeof v === 'object' &&
@@ -204,6 +207,7 @@ export class MarmotSession {
   private readonly keyPackageRuns = new SingleFlight(() => this.maintainKeyPackages());
   private readonly gate = fence.createStopGate();
   private readonly acceptedKeyPackages = new Set<string>();
+  private readonly refreshes = new KeyPackageRefreshRequests();
   private markReady!: () => void;
   /** Resolves once stored groups are loaded — joins must not race loadAll. */
   private readonly ready = new Promise<void>((resolve) => (this.markReady = resolve));
@@ -366,6 +370,14 @@ export class MarmotSession {
     return this.gate.stopped ? Promise.resolve() : this.keyPackageRuns.run();
   }
 
+  /** Manual Refresh (#1236): publish a new key package now. True once a relay took it. */
+  refreshInvitationKey(): Promise<boolean> {
+    if (this.gate.stopped) return Promise.resolve(false);
+    const answer = this.refreshes.request(KEY_PACKAGE_REFRESH_TIMEOUT_MS);
+    void this.keyPackageRuns.run(); // queues behind a run in flight, never beside it
+    return this.gate.guard(answer);
+  }
+
   /** Start-up / app resume: refresh, but never a first remote-signer prompt. */
   async keepKeyPackageFresh(): Promise<void> {
     if (this.opts.signerType === 'nsec' || (await this.client.keyPackages.count()) > 0) {
@@ -375,20 +387,22 @@ export class MarmotSession {
 
   private async maintainKeyPackages(): Promise<void> {
     if (this.gate.stopped) return; // a rerun queued before sign-out
+    const refresh = this.refreshes.claim(); // a manual Refresh forces a publish
     try {
       // Refresh weekly into the same slot, and republish when ours predates
       // a capability White Noise requires of every invitee (encrypted media
       // v2, 0x800b). Replaced keys are retired per the retention policy.
       const cancelled = () => this.gate.stopped;
       const slot = await this.gate.guard(ensureKeyPackageSlot(this.backend));
-      await maintainKeyPackage(this.client.keyPackages, {
+      const outcome = await maintainKeyPackage(this.client.keyPackages, {
         relays: this.writeRelays(),
         slot,
         client: CLIENT_NAME,
-        isUpToDate: advertisesMediaV2,
+        isUpToDate: refresh.forced ? () => false : advertisesMediaV2,
         wasAccepted: (id) => this.acceptedKeyPackages.has(id),
         cancelled,
       });
+      refresh.settle(outcome === 'published');
       // A sign-out of this account here whose relay cleanup failed: retry it
       // now the account's signer is back (and already in use).
       await retryPendingRetirement({
@@ -398,6 +412,7 @@ export class MarmotSession {
         sign: (t) => this.client.signer.signEvent(t) as Promise<NostrEvent>,
       });
     } catch (e) {
+      refresh.settle(false); // no-op if it already succeeded
       if (__DEV__) console.warn('[Marmot] key package publish failed:', e);
     }
   }

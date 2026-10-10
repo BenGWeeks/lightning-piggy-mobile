@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, Switch } from 'react-native';
 import { Alert } from '../../components/BrandedAlert';
-import { useFocusEffect } from '@react-navigation/native';
+import type { AccountDrawerNavigation } from '../../navigation/types';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import AccountScreenLayout from './AccountScreenLayout';
 import PublishedRelayListsSection from '../../components/PublishedRelayListsSection';
 import AdvancedRelaysSection from '../../components/AdvancedRelaysSection';
+import { ChevronRight } from 'lucide-react-native';
 import BlossomServersSection from '../../components/BlossomServersSection';
 import { useRelayConnectionStatus } from '../../hooks/useRelayConnectionStatus';
 import { createSharedAccountStyles } from './sharedStyles';
@@ -22,6 +24,7 @@ import {
 
 const NostrScreen: React.FC = () => {
   const t = useTranslation();
+  const navigation = useNavigation<AccountDrawerNavigation>();
   const colors = useThemeColors();
   const sharedAccountStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const styles = useMemo(() => createNostrScreenStyles(colors), [colors]);
@@ -101,7 +104,22 @@ const NostrScreen: React.FC = () => {
         connection={connStatus}
         deviceRelays={deviceRelays}
         onRemoveDeviceRelay={handleRemoveRelay}
-      />
+      >
+        {/* Moves to Settings → Messages with the settings restructure. */}
+        <TouchableOpacity
+          testID="nostr-invitation-keys"
+          accessibilityRole="button"
+          accessibilityLabel={t('invitationKeys.title')}
+          style={styles.experimentalRow}
+          onPress={() => navigation.navigate('AccountInvitationKeys')}
+        >
+          <View style={styles.experimentalTextBlock}>
+            <Text style={styles.experimentalLabel}>{t('invitationKeys.title')}</Text>
+            <Text style={styles.experimentalSubtitle}>{t('invitationKeys.entrySubtitle')}</Text>
+          </View>
+          <ChevronRight size={20} color={colors.white} />
+        </TouchableOpacity>
+      </AdvancedRelaysSection>
 
       <BlossomServersSection />
 
