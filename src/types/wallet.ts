@@ -92,6 +92,10 @@ export interface WalletTransaction {
   settled_at?: number | null;
   /** Explicit wallet settlement state; some providers omit settled_at. */
   settled?: boolean;
+  /** The wallet itself still reports the payment pending, even when a local
+   *  payment proof already counts it `settled`. Until it flips, the wallet
+   *  may still hold a routing-fee reserve against the balance (#1179). */
+  walletPending?: boolean;
   blockHeight?: number | null;
   /** Also set for Boltz claim txs, not just plain on-chain. */
   txid?: string;

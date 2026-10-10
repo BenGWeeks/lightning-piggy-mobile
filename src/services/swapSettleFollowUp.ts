@@ -34,7 +34,12 @@ export interface SwapSettleFollowUp {
 
 const active = new Map<string, () => void>();
 
-/** Schedule the follow-up refreshes; returns a cancel function. */
+/**
+ * Schedule the follow-up refreshes; returns a cancel function. Deliberately
+ * not tied to the screen that started it — the leg can settle long after the
+ * Send / Move sheet closed. If `isDone` stops seeing fresh wallet state, the
+ * schedule still ends on its own.
+ */
 export function followUpSwapSettlement(followUp: SwapSettleFollowUp): () => void {
   active.get(followUp.key)?.();
   const delays = followUp.delaysMs ?? SWAP_SETTLE_REFRESH_DELAYS_MS;
@@ -64,9 +69,10 @@ export function followUpSwapSettlement(followUp: SwapSettleFollowUp): () => void
 }
 
 /**
- * Done when the wallet now reports the swap's Lightning leg settled — or the
- * wallet is gone (removed, or the user switched profile), leaving nothing to
- * refresh.
+ * Done when the wallet itself now reports the swap's Lightning leg settled —
+ * a local payment proof alone isn't enough, since the wallet can keep the
+ * payment (and its fee reserve) pending after replying — or the wallet is
+ * gone (removed, or the user switched profile), leaving nothing to refresh.
  */
 export function isSwapLegDone(
   wallets: readonly { id: string; transactions?: readonly WalletTransaction[] }[],
@@ -78,5 +84,5 @@ export function isSwapLegDone(
   const leg = wallet.transactions?.find(
     (tx) => tx.type === 'outgoing' && tx.paymentHash === paymentHash && !tx.optimistic,
   );
-  return !!leg && isTransactionSettled(leg);
+  return !!leg && isTransactionSettled(leg) && !leg.walletPending;
 }

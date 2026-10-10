@@ -98,6 +98,17 @@ describe('isSwapLegDone', () => {
     );
   });
 
+  it("a local payment proof isn't enough while the wallet still reports it pending", () => {
+    // mapNwcTransactions: settled (proof-backed) + walletPending (provider state).
+    expect(
+      isSwapLegDone(
+        [{ id: 'w', transactions: [leg({ settled: true, walletPending: true })] }],
+        'w',
+        HASH,
+      ),
+    ).toBe(false);
+  });
+
   it('an optimistic row is not the wallet speaking', () => {
     expect(
       isSwapLegDone(

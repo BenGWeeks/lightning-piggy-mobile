@@ -16,9 +16,10 @@ export const SWAP_SEND_STEPS = [
  * (`payAndLockup`): Boltz's invoice is a HOLD invoice, so the payment stays
  * pending until our claim reveals the preimage, and Boltz reports nothing
  * between "HTLC accepted" and "lockup broadcast". What the app does observe
- * is the dispatch of the payment, so that splits the stage in two: before
- * it the wallet is paying; after it, Boltz is locking up on-chain. The
- * verified lockup starts the claim.
+ * is the dispatch of the payment request to the wallet, so that splits the
+ * stage in two — "Sending the Lightning payment" is ticked once it's SENT
+ * (not once Boltz accepted it; nothing reports that), then we wait for
+ * Boltz's lockup. The verified lockup starts the claim.
  */
 export function swapSendActiveStep(
   stage: ReverseSwapSendStage | null,
