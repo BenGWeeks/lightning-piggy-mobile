@@ -5,10 +5,12 @@
  *
  * Architectural commitments (see docs/architecture/notifications.adoc):
  *
- * 1. NO Firebase / FCM / Google Play Services dependency. The app must
- *    work on GrapheneOS, microG, and other un-googled devices. We use
- *    `expo-notifications` LOCAL notifications only — the OS renders the
- *    notification, no remote push server is involved. Background wake-up
+ * 1. Local-first: NO Google Play Services needed. The app must work on
+ *    GrapheneOS, microG, and other un-googled devices, so every alert with
+ *    content is an `expo-notifications` LOCAL notification. The one remote
+ *    path is the OPT-IN Marmot push (MIP-05, off by default): a
+ *    content-free "New message" wake via FCM / APNs and our notification
+ *    server — see marmotPushRegistration.ts / marmotPushWake.ts. Background wake-up
  *    (so we can decide to fire a notification while the UI isn't mounted)
  *    is done by `expo-background-task` — WorkManager on Android,
  *    BGTaskScheduler on iOS (see src/services/backgroundTask.ts) — both
@@ -169,7 +171,17 @@ export async function ensureNotificationsInitialised(): Promise<void> {
 
 async function initialiseInternal(): Promise<void> {
   Notifications.setNotificationHandler({
+    // A remote (Marmot) push while the app is open is redundant: the live
+    // session shows the real message itself, so the generic one stays quiet.
     handleNotification: async (notification) => {
+      if (isRemotePush(notification)) {
+        return {
+          shouldShowBanner: false,
+          shouldShowList: false,
+          shouldPlaySound: false,
+          shouldSetBadge: false,
+        };
+      }
       // A `quiet` notification still lands in the drawer, just without the
       // heads-up banner or sound (Android: expo marks it silent, which also
       // stops the HIGH channel from popping it).
@@ -582,6 +594,16 @@ export async function dismissNotificationsFor(target: NotificationTarget): Promi
   }
 }
 
+/** True for a notification that came from a push server, not from us. */
+export function isRemotePush(notification: Notifications.Notification): boolean {
+  return (notification.request.trigger as { type?: string } | null)?.type === 'push';
+}
+
+// When a message notification with content last went out — lets a push
+// wake tell whether the running app already covered it.
+let lastMessageNotifiedAt = 0;
+export const lastMessageNotificationAt = (): number => lastMessageNotifiedAt;
+
 /**
  * Fire a message (DM or group) notification, suppressed when the user is
  * actively viewing that exact thread. `threadId` is the partner pubkey
@@ -597,13 +619,16 @@ export async function fireMessageNotification(opts: {
   owner?: string;
 }): Promise<string | null> {
   if (isThreadActivelyViewed(opts.threadId)) return null;
-  return fireNotification({
+  const id = await fireNotification({
     kind: opts.kind,
     title: opts.title,
     body: opts.body,
     data: opts.data,
     owner: opts.owner,
   });
+  // Sentinel threads (`__background__`, `__push__`) are generic pings.
+  if (id && !opts.threadId.startsWith('__')) lastMessageNotifiedAt = Date.now();
+  return id;
 }
 
 /**
@@ -751,4 +776,5 @@ export function __resetForTests(): void {
   appInForeground = true;
   activeThreadId = null;
   activeCacheCoord = null;
+  lastMessageNotifiedAt = 0;
 }

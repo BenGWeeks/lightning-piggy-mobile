@@ -107,11 +107,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       // docs/architecture/notifications.adoc for rationale.
       //
       // Trade-off: BGTaskScheduler cadence is OS-controlled; expect
-      // ~30 min between executions in practice. iOS realtime DM
-      // notifications are NOT achievable without APNs + a remote
-      // server, and the project explicitly rejects that path. The
-      // ~30 min latency is the iOS reality we accept; surface it in
-      // onboarding when the iOS build ships.
+      // ~30 min between executions in practice. Realtime iOS alerts need
+      // APNs: the opt-in Marmot push (MIP-05) provides them for Marmot
+      // chats via our notification server, which sends a content-free
+      // "New message" alert — no `remote-notification` background mode
+      // is needed for that.
       UIBackgroundModes: ['fetch', 'processing'],
     },
   },
@@ -158,19 +158,26 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // permissions/options needed; just links the native module.
     'expo-localization',
     // expo-notifications config plugin sets the Android notification
-    // small icon + colour, and is a no-op on iOS beyond linking the native
-    // module. The small icon is a white PiggyBank silhouette (lucide
-    // PiggyBank glyph) — Android renders the small icon as a flat mask and
-    // tints it with `color`, so it shows as a pink pig in the status bar /
-    // shade. We rely on local (not remote) notifications only — no FCM
-    // token is requested. See src/services/notificationService.ts.
+    // small icon + colour. The small icon is a white PiggyBank silhouette
+    // (lucide PiggyBank glyph) — Android renders the small icon as a flat
+    // mask and tints it with `color`, so it shows as a pink pig in the
+    // status bar / shade. Alerts with content are always LOCAL; the only
+    // remote path is the opt-in Marmot push (MIP-05), whose FCM / APNs
+    // token is requested only once the user turns it on — see
+    // src/services/marmotPushRegistration.ts. `mode` sets the iOS
+    // `aps-environment` entitlement: ad-hoc (preview) and App Store builds
+    // talk to production APNs; only the dev client uses the sandbox.
     [
       'expo-notifications',
       {
         icon: './assets/notification-icon.png',
         color: '#e91e63',
+        mode: IS_DEV ? 'development' : 'production',
       },
     ],
+    // Firebase is initialised (googleServicesFile below) but FCM stays
+    // dormant until the user opts into Marmot push.
+    './plugins/withFcmAutoInitDisabled',
     // expo-background-task (#279): runs the detect-and-ping background sync
     // periodically via WorkManager (Android) + BGTaskScheduler (iOS). The
     // plugin wires the required Info.plist BGTask identifier + Android
@@ -224,7 +231,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // NB: geofence alerts (#467) also use local notifications, but
     // `expo-notifications` is already registered above (for #279) — listing
     // it twice makes the second config win silently, so keep the single
-    // entry above. No FCM / no remote push — all fired on-device.
+    // entry above. Geofence alerts are fired on-device.
     'expo-task-manager',
     // expo-build-properties — inject R8/proguard keep rules into the CNG
     // prebuild output. Production builds run R8 minification, which strips
@@ -264,6 +271,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     },
     predictiveBackGestureEnabled: false,
     package: getAndroidPackage(),
+    // Firebase client config for all three package names (Firebase project
+    // lightning-piggy-app-62493). Not a secret — Google's guidance is that
+    // client config ships in the app. Used only for the opt-in Marmot push.
+    googleServicesFile: './google-services.json',
     // Android-only `lightning:` deep-link registration (see comment on
     // top-level `scheme`). The intent filter wakes the app on an NFC
     // tag tap or a `Linking.openURL('lightning:lnurl1…')`. Android

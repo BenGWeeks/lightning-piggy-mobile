@@ -1,0 +1,67 @@
+{
+  "project_info": {
+    "project_number": "767243146662",
+    "project_id": "lightning-piggy-app-62493",
+    "storage_bucket": "lightning-piggy-app-62493.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:767243146662:android:af6bd87f31c911f40eab67",
+        "android_client_info": {
+          "package_name": "com.lightningpiggy.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCN67dontx12VULZAr2pUEviM3iA-Rno0Y"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:767243146662:android:5876a2492650ee630eab67",
+        "android_client_info": {
+          "package_name": "com.lightningpiggy.app.dev"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCN67dontx12VULZAr2pUEviM3iA-Rno0Y"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:767243146662:android:14fbd4256c2d5fcf0eab67",
+        "android_client_info": {
+          "package_name": "com.lightningpiggy.app.preview"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCN67dontx12VULZAr2pUEviM3iA-Rno0Y"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

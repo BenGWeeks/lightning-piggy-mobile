@@ -937,3 +937,39 @@ reviews for now". Wait for the window to pass, then comment
 Codex review, for example
 `codex exec -m gpt-6.1-sol -c sandbox_mode="danger-full-access" "<prompt>" < /dev/null`
 (see the `codex exec` section above).
+
+=== Firebase project creation via CLI returns 403
+
+`firebase projects:create` (or adding Firebase to an existing Google Cloud
+project) fails with HTTP 403 / `PERMISSION_DENIED` until the account has
+accepted the Firebase terms of service. That can only be done in the browser:
+open https://console.firebase.google.com once with the same Google account and
+accept the terms, then re-run the CLI. The Lightning Piggy project
+(`lightning-piggy-app-62493`) already exists; its Android client config for all
+three package names is `google-services.json` in the repo root.
+
+=== Marmot push: enabling says "couldn't get a push token"
+
+The switch (Account → Security → "Message notifications via push (Marmot)")
+needs a native token from Apple/Google. On Android that means Google Play
+services: de-Googled phones (GrapheneOS without sandboxed Play, microG builds
+without FCM) and the LP emulator AVD (a Google APIs-less image) can't get one,
+so the switch turns itself back off. Use a phone with Play services, or an
+emulator image that includes Google Play. On iOS, a dev-client build gets a
+sandbox APNs token that our servers (production APNs) can't deliver to — test
+iOS push with a preview or TestFlight build.
+
+=== Marmot push: no notification arrives on Android
+
+* A *force-stopped* app (Settings → Force stop, or `adb shell am force-stop`)
+  receives no FCM messages until it is opened again — an Android rule. To test
+  "app closed", swipe it away from Recents or use `adb shell am kill <package>`
+  after pressing Home.
+* Check the server got the trigger and delivered it:
+  `ssh benweeks@black-panther.local 'docker logs lightning-piggy-transponder-preview --since 10m'`
+  (`lightning-piggy-transponder` for production).
+* The sender only wakes devices whose records it has: our 447 must have reached
+  the group (the sender must be a member when it was published, or receive the
+  re-send that follows a membership change).
+* With the app in the foreground, pushes are deliberately silent — the open app
+  notifies with the real message itself.
