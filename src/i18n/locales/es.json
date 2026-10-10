@@ -630,6 +630,7 @@
     "attach": "Adjuntar",
     "sendMessage": "Enviar mensaje al grupo",
     "zapUnavailable": "Enviar un zap (no disponible: no hay un único destinatario en un grupo)",
+    "walletUnavailable": "Compartir una cartera (no disponible: las carteras solo se comparten en chats individuales)",
     "shareContactTitle": "Compartir un contacto con {{name}}",
     "shareContactSubtitle": "Lo verán como una tarjeta de perfil de Nostr que pueden abrir.",
     "closeFullscreenGif": "Cerrar GIF en pantalla completa"
