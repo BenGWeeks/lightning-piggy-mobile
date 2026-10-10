@@ -83,7 +83,11 @@ const DisplayScreen: React.FC = () => {
   );
 
   return (
-    <AccountScreenLayout title={t('displayScreen.currency')} scrollable={false}>
+    <AccountScreenLayout
+      title={t('displayScreen.currency')}
+      scrollable={false}
+      parent="AccountDisplayLanguage"
+    >
       <View style={styles.listCard}>
         <FlatList
           data={filtered}

@@ -42,17 +42,30 @@ name: Account Drawer Test
 - waitForAnimationToEnd:
     timeout: 3000
 
-# --- 3. Navigate to Display and back ---
+# --- 3. Navigate to Display & language and back ---
 - tapOn:
     id: 'profile-icon'
 - waitForAnimationToEnd:
     timeout: 2000
 - tapOn:
-    id: 'drawer-row-display'
+    id: 'drawer-row-display-language'
 - waitForAnimationToEnd:
     timeout: 3000
 - assertVisible:
-    id: 'display-name-input'
+    id: 'display-language-currency-row'
+# The currency picker is a sub-page: its back returns to Display & language.
+- tapOn:
+    id: 'display-language-currency-row'
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible:
+    id: 'currency-search'
+- tapOn:
+    id: 'account-back-button'
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible:
+    id: 'display-language-currency-row'
 - tapOn:
     id: 'account-back-button'
 - waitForAnimationToEnd:
