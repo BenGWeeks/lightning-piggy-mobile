@@ -32,6 +32,7 @@ import {
   deleteAsync,
   getInfoAsync,
   makeDirectoryAsync,
+  moveAsync,
   readDirectoryAsync,
   writeAsStringAsync,
 } from 'expo-file-system/legacy';
@@ -258,12 +259,21 @@ async function resolveUncached(
         })
       : decryptFile(cipher, keyHex as string, nonceHex);
     assertCurrent();
+    // Write to this writer's own temp file, then move it into place: a reader
+    // never sees a half-written file, and a cancelled writer only ever
+    // deletes its own temp — never a file a newer request already published.
+    const tmp = `${uri}.${gen}-${Math.random().toString(36).slice(2)}.tmp`;
     await makeDirectoryAsync(dir, { intermediates: true });
-    await writeAsStringAsync(uri, Buffer.from(plain).toString('base64'), { encoding: 'base64' });
+    await writeAsStringAsync(tmp, Buffer.from(plain).toString('base64'), { encoding: 'base64' });
     if (generationOf(ownerDir) !== gen) {
       // Wiped / switched while writing: don't leave the plaintext behind.
-      await deleteAsync(uri, { idempotent: true }).catch(() => {});
+      await deleteAsync(tmp, { idempotent: true }).catch(() => {});
       throw new DecryptedMediaCancelledError();
+    }
+    if ((await getInfoAsync(uri)).exists) {
+      await deleteAsync(tmp, { idempotent: true }).catch(() => {}); // published meanwhile
+    } else {
+      await moveAsync({ from: tmp, to: uri });
     }
   }
   assertCurrent();
@@ -278,6 +288,10 @@ async function resolveUncached(
 export async function wipeDecryptedMediaForOwner(pubkey: string): Promise<void> {
   const ownerDir = ownerDirName(pubkey);
   bump(ownerDir);
+  // Signing out the active account retires its session right away, so a
+  // bubble mounting during the rest of the logout can't decrypt (and write)
+  // again for it; requests wait for the next account instead.
+  if (activeOwner === pubkey.toLowerCase()) activeOwner = null;
   for (const k of [...memory.keys()]) if (k.startsWith(`${ownerDir}/`)) memory.delete(k);
   for (const k of [...inflight.keys()]) if (k.startsWith(`${ownerDir}/`)) inflight.delete(k);
   const dir = ownerDirUri(pubkey);
@@ -292,12 +306,15 @@ export async function cleanupLegacyDecryptedMedia(): Promise<void> {
   const base = cacheBase();
   if (!base) return;
   const names = await readDirectoryAsync(base);
-  await Promise.allSettled(
+  const results = await Promise.allSettled(
     names
       .filter((n) => LEGACY_FILE_RE.test(n))
       .map((n) => deleteAsync(`${base}${n}`, { idempotent: true })),
   );
-  await AsyncStorage.setItem(LEGACY_CLEANUP_FLAG_KEY, '1');
+  // Only mark it done once every file is gone; otherwise retry next time.
+  if (results.every((r) => r.status === 'fulfilled')) {
+    await AsyncStorage.setItem(LEGACY_CLEANUP_FLAG_KEY, '1');
+  }
 }
 
 /** Test-only: reset module state between cases. */

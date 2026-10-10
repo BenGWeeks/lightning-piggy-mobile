@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { deleteAsync } from 'expo-file-system/legacy';
 import { encryptFile } from './encryptedFile';
 import {
   DecryptedMediaCancelledError,
@@ -26,6 +27,12 @@ jest.mock('expo-file-system/legacy', () => ({
   }),
   deleteAsync: jest.fn(async (uri: string) => {
     for (const k of [...mockFiles.keys()]) if (k === uri || k.startsWith(uri)) mockFiles.delete(k);
+  }),
+  moveAsync: jest.fn(async ({ from, to }: { from: string; to: string }) => {
+    const data = mockFiles.get(from);
+    if (data === undefined) throw new Error(`move: ${from} missing`);
+    mockFiles.delete(from);
+    mockFiles.set(to, data);
   }),
   readDirectoryAsync: jest.fn(async (dir: string) =>
     [...mockFiles.keys()]
@@ -111,7 +118,8 @@ describe('decryptedMediaCache', () => {
     expect(filesUnder(A)).toEqual([]);
     expect(peekDecryptedMedia(ref)).toBeNull();
     expect(filesUnder(B)).toEqual([uriB]);
-    // Next play decrypts again.
+    // Signing back in, the next play decrypts again.
+    setDecryptedMediaOwner(A);
     await resolveDecryptedMedia(ref);
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
@@ -177,6 +185,42 @@ describe('decryptedMediaCache', () => {
     }
   });
 
+  it('signing out the active account retires it: a later request writes nothing for it', async () => {
+    setDecryptedMediaOwner(A);
+    await resolveDecryptedMedia(ref);
+    await wipeDecryptedMediaForOwner(A);
+    jest.useFakeTimers();
+    const late = resolveDecryptedMedia(ref); // e.g. a bubble mounting mid-logout
+    jest.advanceTimersByTime(15_000);
+    await expect(late).rejects.toThrow(/No active account/);
+    expect(filesUnder(A)).toEqual([]);
+  });
+
+  it('a cancelled writer never deletes the file a newer request published (A → B → A)', async () => {
+    setDecryptedMediaOwner(A);
+    let release!: () => void;
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = () =>
+            resolve({
+              ok: true,
+              status: 200,
+              arrayBuffer: async () => sealed.ciphertext.slice().buffer,
+            });
+        }),
+    );
+    const stale = resolveDecryptedMedia(ref);
+    await new Promise((r) => setImmediate(r));
+    setDecryptedMediaOwner(B);
+    setDecryptedMediaOwner(A);
+    const uri = await resolveDecryptedMedia(ref);
+    release();
+    await expect(stale).rejects.toBeInstanceOf(DecryptedMediaCancelledError);
+    expect(filesUnder(A)).toEqual([uri]);
+    expect([...plaintextOf(uri)]).toEqual([...PLAIN]);
+  });
+
   it('waits for an account to become active (cold start) before decrypting', async () => {
     const pending = resolveDecryptedMedia(ref);
     await new Promise((r) => setImmediate(r));
@@ -206,6 +250,17 @@ describe('decryptedMediaCache', () => {
     mockFiles.set('file:///cache/lp-voice-new.m4a', 'x');
     await cleanupLegacyDecryptedMedia();
     expect(mockFiles.has('file:///cache/lp-voice-new.m4a')).toBe(true);
+  });
+
+  it('retries the legacy cleanup later if a file could not be deleted', async () => {
+    await AsyncStorage.removeItem(LEGACY_CLEANUP_FLAG_KEY);
+    mockFiles.set('file:///cache/lp-voice-stuck.m4a', 'x');
+    (deleteAsync as jest.Mock).mockRejectedValueOnce(new Error('EBUSY'));
+    await cleanupLegacyDecryptedMedia();
+    expect(await AsyncStorage.getItem(LEGACY_CLEANUP_FLAG_KEY)).toBeNull();
+    await cleanupLegacyDecryptedMedia();
+    expect(mockFiles.size).toBe(0);
+    expect(await AsyncStorage.getItem(LEGACY_CLEANUP_FLAG_KEY)).toBe('1');
   });
 
   it('schedules the legacy sweep when an account first becomes active', async () => {
