@@ -1,7 +1,12 @@
 import { useAccountState } from './useAccountState';
 import { useCallback, useEffect, useMemo } from 'react';
 
-import { appendGroupMessage, type GroupMessage } from '../services/groupMessagesStorageService';
+import {
+  appendGroupMessage,
+  removeGroupMessagesWhere,
+  type GroupMessage,
+} from '../services/groupMessagesStorageService';
+import { DeletionLedger, parseMarmotDeletion } from '../services/marmotDeletions';
 import {
   isMarmotMessageKind,
   marmotRumorToGroupMessage,
@@ -14,7 +19,7 @@ import {
   type MarmotGroupSummary,
   type MarmotMessageEvent,
 } from '../services/marmotSession';
-import { fireMessageNotification } from '../services/notificationService';
+import { dismissNotificationsFor, fireMessageNotification } from '../services/notificationService';
 import type { Group } from '../types/groups';
 import { notifyGroupMessage } from './nostrEventBus';
 
@@ -78,26 +83,57 @@ export function useMarmotGroups(pubkey: string | null): MarmotGroupsApi {
         });
       return chain;
     };
+    // "Delete for everyone": what has been deleted per group (arrival order
+    // and history replays can put a delete before its target).
+    const ledger = new DeletionLedger();
     const writeBatch = async (batch: MarmotMessageEvent[]) => {
       const byGroup = new Map<string, GroupMessage[]>();
+      const deletedIn = new Set<string>();
       for (const { group, rumor, mediaKeys } of batch) {
         const list = byGroup.get(group.id) ?? [];
-        list.push(marmotRumorToGroupMessage(rumor, mediaKeys));
         byGroup.set(group.id, list);
+        if (parseMarmotDeletion(rumor, group)) {
+          deletedIn.add(group.id);
+          continue;
+        }
+        const message = marmotRumorToGroupMessage(rumor, mediaKeys);
+        // Deleted before it was stored (arrived after its delete, or replayed).
+        if (!ledger.blocks(message.id, message.senderPubkey, group.id)) list.push(message);
       }
       for (const [groupId, messages] of byGroup) {
         for (const m of messages) await appendGroupMessage(groupId, m);
-        notifyGroupMessage(groupId, messages[messages.length - 1]);
+        // Erase what's already stored (earlier batches / sessions).
+        if (deletedIn.has(groupId)) {
+          await removeGroupMessagesWhere(groupId, (m) =>
+            ledger.blocks(m.id, m.senderPubkey, groupId),
+          );
+        }
+        if (messages.length > 0 || deletedIn.has(groupId)) {
+          notifyGroupMessage(groupId, messages[messages.length - 1]);
+        }
       }
     };
 
     const onMessage = (event: MarmotMessageEvent) => {
       if (event.group.isDm) return; // useMarmotDmInbound owns these
+      const deletion = parseMarmotDeletion(event.rumor, event.group);
+      if (deletion) {
+        ledger.add(deletion, event.group.id);
+        pending.push(event);
+        if (!timer) timer = setTimeout(() => void flush(), FLUSH_MS);
+        // A notification already showing the deleted text goes too (only a
+        // live deletion can have one — a replayed old one has long gone).
+        if (event.rumor.created_at >= openedAtSec - NOTIFY_SKEW_SEC) {
+          for (const messageId of deletion.targets) void dismissNotificationsFor({ messageId });
+        }
+        return;
+      }
       if (!isMarmotMessageKind(event.rumor.kind)) return; // plumbing, not a message
       pending.push(event);
       if (!timer) timer = setTimeout(() => void flush(), FLUSH_MS);
       const { rumor, group } = event;
       const fromMe = rumor.pubkey.toLowerCase() === pubkey.toLowerCase();
+      if (ledger.blocks(rumor.id, rumor.pubkey, group.id)) return; // already deleted
       if (!fromMe && rumor.created_at >= openedAtSec - NOTIFY_SKEW_SEC) {
         // Redacted like the DM inbox: a photo's stored text embeds its keys.
         const stored = storedMarmotContent(rumor, event.mediaKeys);
@@ -107,7 +143,7 @@ export function useMarmotGroups(pubkey: string | null): MarmotGroupsApi {
           threadId: group.id,
           title: group.name || 'New group message',
           body: text,
-          data: { groupId: group.id },
+          data: { groupId: group.id, messageId: rumor.id },
           owner: pubkey,
         });
       }

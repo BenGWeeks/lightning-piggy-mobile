@@ -7,9 +7,10 @@ import { type GroupMessage } from '../services/groupMessagesStorageService';
  * polling. Listeners are scoped to (groupId) so an open thread doesn't
  * re-render on unrelated traffic.
  */
-type GroupMessageListener = (groupId: string, message: GroupMessage) => void;
+/** `message` is absent when the change is a removal (no new tail message). */
+type GroupMessageListener = (groupId: string, message?: GroupMessage) => void;
 const groupMessageListeners = new Set<GroupMessageListener>();
-export function notifyGroupMessage(groupId: string, message: GroupMessage): void {
+export function notifyGroupMessage(groupId: string, message?: GroupMessage): void {
   for (const l of groupMessageListeners) {
     try {
       l(groupId, message);

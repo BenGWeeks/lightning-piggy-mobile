@@ -468,6 +468,28 @@ export async function deleteMarmotRowsOfKinds(owner: string, kinds: readonly num
 }
 
 /**
+ * Delete `owner`'s Marmot rows with these message ids that `sender` authored —
+ * a "delete for everyone" from the sender (the author check lives in the SQL,
+ * so a peer can never remove a message they didn't send).
+ */
+export async function deleteMarmotMessagesBySender(
+  owner: string,
+  messageIds: readonly string[],
+  sender: string,
+): Promise<void> {
+  if (messageIds.length === 0) return;
+  const db = await getLocalDb();
+  for (let i = 0; i < messageIds.length; i += VAR_CHUNK) {
+    const slice = messageIds.slice(i, i + VAR_CHUNK);
+    await db.execute(
+      `DELETE FROM dm_messages WHERE owner = ? AND protocol = 'marmot' AND sender = ?
+         AND event_id IN (${slice.map(() => '?').join(',')});`,
+      [owner, sender, ...slice],
+    );
+  }
+}
+
+/**
  * Delete every row belonging to `owner` — the per-account half of the logout
  * wipe (#848). When the LAST identity signs out, NostrContext additionally
  * calls `wipeLocalDmStore` (localDb) to delete the DB file + keystore key.

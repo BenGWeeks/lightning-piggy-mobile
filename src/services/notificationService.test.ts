@@ -357,6 +357,16 @@ describe('clearing read notifications (#1142)', () => {
     ).toBe(false);
   });
 
+  it('matches the notification showing one message by its id', () => {
+    expect(notificationMatchesTarget({ kind: 'dm', messageId: 'm1' }, { messageId: 'm1' })).toBe(
+      true,
+    );
+    expect(notificationMatchesTarget({ kind: 'dm', messageId: 'm2' }, { messageId: 'm1' })).toBe(
+      false,
+    );
+    expect(notificationMatchesTarget({ kind: 'dm' }, { messageId: 'm1' })).toBe(false);
+  });
+
   it('matches groups, cache find-logs and generic message pings separately', () => {
     expect(notificationMatchesTarget({ kind: 'group', groupId: 'g1' }, { groupId: 'g1' })).toBe(
       true,

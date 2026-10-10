@@ -123,6 +123,9 @@ export interface NotificationData {
   owner?: string;
   /** The generic "New message" a Marmot push wake posted (Android). */
   marmotPush?: boolean;
+  /** Marmot app-event id of the message shown — lets a "delete for everyone"
+   * clear the tray notification that still carries its text. */
+  messageId?: string;
 }
 
 /** Typed payload every caller passes to `fireNotification`. Centralising
@@ -522,7 +525,9 @@ export type NotificationTarget =
   | { historyId: string }
   /** The generic alerts Marmot push wakes posted — superseded once the app
    * shows the real Marmot message. */
-  | { marmotPushAlerts: true };
+  | { marmotPushAlerts: true }
+  /** The notification showing one message's text (Marmot, by app-event id). */
+  | { messageId: string };
 
 /** Pure: does a delivered notification's `data` belong to `target`? */
 export function notificationMatchesTarget(
@@ -541,6 +546,7 @@ export function notificationMatchesTarget(
   if ('owner' in target) return data.owner?.toLowerCase() === target.owner.toLowerCase();
   if ('historyId' in target) return data.historyId === target.historyId;
   if ('marmotPushAlerts' in target) return data.marmotPush === true;
+  if ('messageId' in target) return data.messageId === target.messageId;
   return (data.kind === 'dm' || data.kind === 'group') && !data.conversationPubkey && !data.groupId;
 }
 

@@ -128,6 +128,22 @@ export async function removeGroupMessage(
   return filtered;
 }
 
+/**
+ * Remove every stored message `shouldRemove` flags — a Marmot "delete for
+ * everyone" erasing the plaintext at rest. Returns the remaining list; writes
+ * only when something was removed.
+ */
+export async function removeGroupMessagesWhere(
+  groupId: string,
+  shouldRemove: (message: GroupMessage) => boolean,
+): Promise<GroupMessage[]> {
+  const existing = await loadGroupMessages(groupId);
+  const filtered = existing.filter((m) => !shouldRemove(m));
+  if (filtered.length === existing.length) return existing;
+  await AsyncStorage.setItem(KEY(groupId), JSON.stringify(filtered));
+  return filtered;
+}
+
 // Scan AsyncStorage for every blob under GROUP_MESSAGES_KEY_PREFIX and return
 // the set of message ids that look like NIP-17 wrap ids (64-char hex —
 // `local_*` optimistic rows are excluded). Used by NostrContext to

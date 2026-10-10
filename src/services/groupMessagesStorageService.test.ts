@@ -11,6 +11,7 @@ import {
   clearGroupMessages,
   loadGroupMessages,
   removeGroupMessage,
+  removeGroupMessagesWhere,
   GROUP_MESSAGES_KEY_PREFIX,
   type GroupMessage,
 } from './groupMessagesStorageService';
@@ -213,5 +214,19 @@ describe('GROUP_MESSAGES_KEY_PREFIX — logout-wipe contract', () => {
     const groupKeys = keys.filter((k) => k.startsWith(GROUP_MESSAGES_KEY_PREFIX));
     expect(groupKeys).toContain(`${GROUP_MESSAGES_KEY_PREFIX}${GROUP}`);
     expect(groupKeys).toHaveLength(1);
+  });
+});
+
+describe('removeGroupMessagesWhere', () => {
+  it('erases flagged messages from storage and leaves the rest', async () => {
+    await appendGroupMessage(GROUP, wrap('a'.repeat(64), 'secret', 1));
+    await appendGroupMessage(GROUP, wrap('b'.repeat(64), 'keep', 2, OTHER_SENDER));
+    const left = await removeGroupMessagesWhere(GROUP, (m) => m.text === 'secret');
+    expect(left.map((m) => m.text)).toEqual(['keep']);
+    expect((await loadGroupMessages(GROUP)).map((m) => m.text)).toEqual(['keep']);
+    expect(JSON.stringify(await AsyncStorage.getAllKeys())).toContain(GROUP);
+    expect(await AsyncStorage.getItem(`${GROUP_MESSAGES_KEY_PREFIX}${GROUP}`)).not.toContain(
+      'secret',
+    );
   });
 });

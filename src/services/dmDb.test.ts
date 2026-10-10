@@ -26,6 +26,7 @@ import {
   hasStoredWraps,
   hasConversationWith,
   deleteDmMessagesForOwner,
+  deleteMarmotMessagesBySender,
   type DmMessageRow,
   getConversationForEvent,
 } from './dmDb';
@@ -369,6 +370,21 @@ describe('dmDb', () => {
       );
       // A first-ever optimistic send must not fake a completed ingest (#850).
       expect(sql).toContain(`event_id NOT LIKE 'local-%'`);
+    });
+  });
+
+  describe('deleteMarmotMessagesBySender', () => {
+    it('deletes Marmot rows by id, only those the deleter sent', async () => {
+      await deleteMarmotMessagesBySender(OWNER, ['m1', 'm2'], 'peer');
+      const [sql, params] = mockExecute.mock.calls[0];
+      expect(sql).toContain("protocol = 'marmot'");
+      expect(sql).toContain('sender = ?');
+      expect(sql).toContain('event_id IN (?,?)');
+      expect(params).toEqual([OWNER, 'peer', 'm1', 'm2']);
+    });
+    it('does nothing for no ids', async () => {
+      await deleteMarmotMessagesBySender(OWNER, [], 'peer');
+      expect(mockExecute).not.toHaveBeenCalled();
     });
   });
 
