@@ -83,6 +83,24 @@ describe('handleMarmotPushWake', () => {
     expect(d.notified).toBe(1);
   });
 
+  it('handles overlapping wakes one at a time', async () => {
+    let notified = 0;
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const d = deps({
+      notify: async () => {
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((r) => setTimeout(r, 5));
+        notified++;
+        inFlight--;
+      },
+    });
+    await Promise.all([handleMarmotPushWake(d), handleMarmotPushWake(d)]);
+    expect(notified).toBe(2);
+    expect(maxInFlight).toBe(1);
+  });
+
   it('the generic alert replaces an earlier one and routes to Messages', async () => {
     await postGenericPushAlert();
     expect(dismissNotificationsFor).toHaveBeenCalledWith({ genericMessages: true });

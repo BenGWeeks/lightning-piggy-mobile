@@ -20,7 +20,7 @@ import type { SyncResult } from './marmotPushRegistrar';
 import { deviceTokenBytes, tokenFingerprint, type PushPlatform } from './marmotPushToken';
 import { createPushTransport } from './marmotNetwork';
 import { getMarmotSession, subscribeMarmotSession, type MarmotSession } from './marmotSession';
-import { requestNotificationPermission, setMarmotRemoteAlertsEnabled } from './notificationService';
+import { requestNotificationPermission } from './notificationService';
 import { MARMOT_PUSH_WAKE_TASK, setLiveMarmotSession } from './marmotPushWake';
 
 const ENABLED_KEY = 'marmot_push_enabled_v1';
@@ -39,13 +39,22 @@ export interface PushServer {
 
 /**
  * Lightning Piggy's Transponder instances. Apple/Google only deliver with
- * the app's own credentials, so each app id has its own server. The dev
- * build shares the preview server (same Firebase project → FCM works; its
- * APNs topic is the preview bundle id, so iOS dev builds get no pushes).
- * Relay hints are fixed (each server lists nos.lol in its kind-10050) so a
- * hint lookup can never churn the signed records.
+ * the app's own credentials, so each app id has its own server (APNs topic =
+ * that bundle id). Relay hints are fixed (each server lists nos.lol in its
+ * kind-10050) so a hint lookup can never churn the signed records.
+ *
+ * The dev build: on Android it shares the preview server (same Firebase
+ * project → FCM delivers to `.dev` too). On iOS a dev client gets SANDBOX
+ * APNs tokens, which only a sandbox-environment server with the `.dev`
+ * topic can use — `devIosSandbox`, once deployed. Either can be overridden
+ * at bundle time with `EXPO_PUBLIC_MARMOT_PUSH_DEV_SERVER` (npub or hex;
+ * dev builds only), e.g. to point at a local Transponder.
  */
-export const BUILT_IN_SERVERS: Record<'production' | 'preview', PushServer> = {
+export const BUILT_IN_SERVERS: {
+  production: PushServer;
+  preview: PushServer;
+  devIosSandbox: PushServer | null;
+} = {
   production: {
     pubkey: '653e35d79e65d33d99d6d623cc87101b2159008488a321a774b3bd1205ee6297',
     relayHint: 'wss://nos.lol',
@@ -54,12 +63,22 @@ export const BUILT_IN_SERVERS: Record<'production' | 'preview', PushServer> = {
     pubkey: '1888abbc7706e75aac190b095b962f3a8fe3e3b8b32d96d3e18b917159d988f7',
     relayHint: 'wss://nos.lol',
   },
+  devIosSandbox: null,
 };
 
-export function builtInServer(appId: string | null = Application.applicationId): PushServer {
-  return appId === 'com.lightningpiggy.app'
-    ? BUILT_IN_SERVERS.production
-    : BUILT_IN_SERVERS.preview;
+const DEV_SERVER_OVERRIDE = process.env.EXPO_PUBLIC_MARMOT_PUSH_DEV_SERVER ?? '';
+
+export function builtInServer(
+  appId: string | null = Application.applicationId,
+  os: string = Platform.OS,
+  devOverride: string = DEV_SERVER_OVERRIDE,
+): PushServer {
+  if (appId === 'com.lightningpiggy.app') return BUILT_IN_SERVERS.production;
+  if (appId === 'com.lightningpiggy.app.preview') return BUILT_IN_SERVERS.preview;
+  const override = devOverride ? parseServerKey(devOverride) : null;
+  if (override) return { pubkey: override };
+  if (os === 'ios' && BUILT_IN_SERVERS.devIosSandbox) return BUILT_IN_SERVERS.devIosSandbox;
+  return BUILT_IN_SERVERS.preview;
 }
 
 /** Parse an npub / hex server key; null when it isn't a valid key. */
@@ -106,8 +125,13 @@ export async function loadMarmotPushSettings(): Promise<MarmotPushSettings> {
 }
 
 // --- runtime state -------------------------------------------------------------
+//
+// Every device-level change — startup restore, enable, disable, server
+// change, account removal — runs on ONE chain, so a slow token read can
+// never land after (and undo) a later change.
 
 let settings: MarmotPushSettings = { enabled: false, customServer: null };
+let settingsLoaded = false;
 // undefined until known: the token is read asynchronously at start, and a
 // session must not take "not read yet" for "push off" (it would retract).
 let registration: DeviceRegistration | null | undefined = undefined;
@@ -115,6 +139,19 @@ let started = false;
 // After an account removal deleted the token: the session to skip (the
 // removed account's, being torn down) while waiting for the next one.
 let awaitingSession: { stale: MarmotSession | null } | null = null;
+let chain: Promise<unknown> = Promise.resolve();
+
+function serial<T>(op: () => Promise<T>): Promise<T> {
+  const run = chain.then(op, op);
+  chain = run.catch(() => undefined);
+  return run;
+}
+
+async function ensureSettings(): Promise<void> {
+  if (settingsLoaded) return;
+  settings = await loadMarmotPushSettings();
+  settingsLoaded = true;
+}
 
 const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T> =>
   Promise.race([
@@ -141,17 +178,13 @@ function toRegistration(platform: PushPlatform, raw: string, server: PushServer)
 
 const currentServer = () => settings.customServer ?? builtInServer();
 
-/** iOS: while push is on, the server's alert speaks for a backgrounded app. */
-const updateRemoteAlerts = () =>
-  setMarmotRemoteAlertsEnabled(Platform.OS === 'ios' && settings.enabled && !!registration);
-
 /** Hand the registration to `session` and sync it in the background. */
 function applyTo(session: MarmotSession | null): void {
   setLiveMarmotSession(session !== null);
   if (!session) return;
   if (awaitingSession && session !== awaitingSession.stale) {
     awaitingSession = null;
-    void refreshAfterRetirement(session);
+    void serial(() => refreshAfterRetirement(session));
     return;
   }
   if (registration === undefined) return;
@@ -161,7 +194,11 @@ function applyTo(session: MarmotSession | null): void {
 
 /** A user-initiated pass over the active account's groups ("Finish setup"):
  * a remote signer may prompt. */
-export async function syncMarmotPushNow(): Promise<SyncResult | null> {
+export function syncMarmotPushNow(): Promise<SyncResult | null> {
+  return serial(syncActiveSession);
+}
+
+async function syncActiveSession(): Promise<SyncResult | null> {
   const session = getMarmotSession();
   if (!session || registration === undefined) return null;
   session.pushRegistration.setRegistration(registration);
@@ -178,20 +215,23 @@ export function startMarmotPushRegistration(): () => void {
   started = true;
   const unsubscribe = subscribeMarmotSession(applyTo);
   const tokenSub = Notifications.addPushTokenListener((native) => {
-    if (!settings.enabled) return;
-    try {
-      const platform = native.type === 'ios' ? 'apns' : 'fcm';
-      registration = toRegistration(platform, String(native.data), currentServer());
-      applyTo(getMarmotSession());
-    } catch {
-      // malformed token — keep the previous registration
-    }
+    void serial(async () => {
+      if (!settings.enabled || registration === undefined) return;
+      try {
+        const platform = native.type === 'ios' ? 'apns' : 'fcm';
+        registration = toRegistration(platform, String(native.data), currentServer());
+        applyTo(getMarmotSession());
+      } catch {
+        // malformed token — keep the previous registration
+      }
+    });
   });
-  void (async () => {
-    settings = await loadMarmotPushSettings();
-    // A deletion that failed last time (offline): finish it first.
-    if (await AsyncStorage.getItem(RETIRE_PENDING_KEY).catch(() => null)) {
-      await retireDeviceToken();
+  void serial(async () => {
+    await ensureSettings();
+    // A deletion that failed last time (offline): finish it first, and only
+    // then hand out a token again.
+    if (await retirementPending()) {
+      if (!(await retireDeviceToken())) return;
     }
     if (settings.enabled) {
       try {
@@ -207,9 +247,8 @@ export function startMarmotPushRegistration(): () => void {
       // account's session wasn't running).
       registration = null;
     }
-    updateRemoteAlerts();
     applyTo(getMarmotSession());
-  })();
+  });
   return () => {
     unsubscribe();
     tokenSub.remove();
@@ -226,7 +265,18 @@ export type EnableOutcome =
 /** Turn push on (user action): permission, token, then every group. */
 export async function enableMarmotPush(): Promise<EnableOutcome> {
   if (!(await requestNotificationPermission())) return { status: 'no-permission' };
-  settings = await loadMarmotPushSettings();
+  return serial(enableNow);
+}
+
+async function enableNow(): Promise<EnableOutcome> {
+  await ensureSettings();
+  // An old token still waiting to be deleted: try once more. Either way the
+  // user now wants push on, so the marker can't be left to delete the token
+  // we're about to hand out at the next start.
+  if (await retirementPending()) {
+    await retireDeviceToken();
+    await AsyncStorage.removeItem(RETIRE_PENDING_KEY).catch(() => undefined);
+  }
   try {
     registration = await readRegistration(currentServer());
   } catch (e) {
@@ -236,8 +286,7 @@ export async function enableMarmotPush(): Promise<EnableOutcome> {
   settings.enabled = true;
   await AsyncStorage.setItem(ENABLED_KEY, '1');
   await registerWakeTask();
-  updateRemoteAlerts();
-  return { status: 'enabled', sync: await syncMarmotPushNow() };
+  return { status: 'enabled', sync: await syncActiveSession() };
 }
 
 export interface DisableOutcome {
@@ -248,13 +297,15 @@ export interface DisableOutcome {
 
 /** Turn push off (user action): retract from every group, then delete the
  * token at Apple/Google so copies the members already hold stop working. */
-export async function disableMarmotPush(): Promise<DisableOutcome> {
-  settings.enabled = false;
-  await AsyncStorage.setItem(ENABLED_KEY, '0');
-  registration = null;
-  updateRemoteAlerts();
-  const sync = await syncMarmotPushNow().catch(() => null);
-  return { sync, tokenDeleted: await retireDeviceToken() };
+export function disableMarmotPush(): Promise<DisableOutcome> {
+  return serial(async () => {
+    await ensureSettings();
+    settings.enabled = false;
+    await AsyncStorage.setItem(ENABLED_KEY, '0');
+    registration = null;
+    const sync = await syncActiveSession().catch(() => null);
+    return { sync, tokenDeleted: await retireDeviceToken() };
+  });
 }
 
 /** Use `server` (or the built-in one, for null) — re-registers if on. */
@@ -265,11 +316,13 @@ export async function setMarmotPushServer(pubkey: string | null): Promise<Enable
     if (!hex) throw new Error('push: invalid server key');
     custom = { pubkey: hex, ...(await lookupRelayHint(hex)) };
   }
-  if (custom) await AsyncStorage.setItem(SERVER_KEY, JSON.stringify(custom));
-  else await AsyncStorage.removeItem(SERVER_KEY);
-  settings.customServer = custom;
-  if (!settings.enabled) return null;
-  return enableMarmotPush();
+  return serial(async () => {
+    await ensureSettings();
+    if (custom) await AsyncStorage.setItem(SERVER_KEY, JSON.stringify(custom));
+    else await AsyncStorage.removeItem(SERVER_KEY);
+    settings.customServer = custom;
+    return settings.enabled ? enableNow() : null;
+  });
 }
 
 /** Groups of the active account still waiting for a signature. */
@@ -285,34 +338,38 @@ export async function pendingMarmotPushGroups(): Promise<number> {
  * so it can't sign removals: delete the token at Apple/Google instead (on
  * Android every copy in that account's groups goes dead; iOS may hand the
  * same APNs token back later, so there revocation is best-effort — MIP-05
- * "Best-effort revocation"). A fresh token is only fetched once another
- * account's session is running, and its groups are re-signed then as part
- * of this user action (a remote signer may prompt).
+ * "Best-effort revocation"). Only once the deletion succeeded (else it is
+ * retried at the next start, before any token is handed out) is a fresh
+ * token fetched — when another account's session runs — and that account's
+ * groups re-signed as part of this user action (a remote signer may prompt).
+ * Returns false when the deletion has to be retried.
  */
-export async function retireMarmotPushForAccount(pubkey: string): Promise<void> {
-  if (!settings.enabled) return;
-  registration = undefined;
-  updateRemoteAlerts();
-  await retireDeviceToken();
-  const current = getMarmotSession();
-  if (current && current.pubkey !== pubkey) {
-    await refreshAfterRetirement(current);
-    return;
-  }
-  awaitingSession = { stale: current };
+export function retireMarmotPushForAccount(pubkey: string): Promise<boolean> {
+  return serial(async () => {
+    await ensureSettings();
+    if (!settings.enabled) return true;
+    registration = undefined;
+    if (!(await retireDeviceToken())) return false;
+    const current = getMarmotSession();
+    if (current && current.pubkey !== pubkey) await refreshAfterRetirement(current);
+    else awaitingSession = { stale: current };
+    return true;
+  });
 }
 
 async function refreshAfterRetirement(session: MarmotSession): Promise<void> {
-  if (!settings.enabled) return;
+  if (!settings.enabled || (await retirementPending())) return;
   try {
     registration = await readRegistration(currentServer());
   } catch {
     return; // unknown, not "off" — the next start retries
   }
-  updateRemoteAlerts();
   session.pushRegistration.setRegistration(registration);
   void session.pushRegistration.sync({ interactive: true }).catch(() => undefined);
 }
+
+const retirementPending = async () =>
+  (await AsyncStorage.getItem(RETIRE_PENDING_KEY).catch(() => null)) === '1';
 
 /** Delete the token at Apple/Google; on failure remember to retry. */
 async function retireDeviceToken(): Promise<boolean> {
@@ -348,4 +405,13 @@ async function lookupRelayHint(server: string): Promise<{ relayHint?: string }> 
   } catch {
     return {};
   }
+}
+
+/** Test seam: forget module state between tests. */
+export function __resetMarmotPushForTests(): void {
+  settings = { enabled: false, customServer: null };
+  settingsLoaded = false;
+  registration = undefined;
+  awaitingSession = null;
+  chain = Promise.resolve();
 }

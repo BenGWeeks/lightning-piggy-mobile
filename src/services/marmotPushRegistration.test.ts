@@ -26,7 +26,6 @@ jest.mock('./marmotSession', () => ({
 }));
 jest.mock('./notificationService', () => ({
   requestNotificationPermission: jest.fn(async () => true),
-  setMarmotRemoteAlertsEnabled: jest.fn(),
 }));
 jest.mock('./marmotNetwork', () => ({
   createPushTransport: () => ({ inboxRelays: async () => ['wss://inbox.example'] }),
@@ -55,6 +54,7 @@ import {
   retireMarmotPushForAccount,
   setMarmotPushServer,
   startMarmotPushRegistration,
+  __resetMarmotPushForTests,
 } from './marmotPushRegistration';
 import { requestNotificationPermission } from './notificationService';
 
@@ -73,6 +73,7 @@ beforeAll(() => {
 beforeEach(async () => {
   await AsyncStorage.clear();
   jest.clearAllMocks();
+  __resetMarmotPushForTests();
   mockActive = mockSession;
 });
 
@@ -80,8 +81,18 @@ describe('server selection', () => {
   it('uses the production server only for the production app id', () => {
     expect(builtInServer('com.lightningpiggy.app')).toBe(BUILT_IN_SERVERS.production);
     expect(builtInServer('com.lightningpiggy.app.preview')).toBe(BUILT_IN_SERVERS.preview);
-    // Dev shares the preview server (same Firebase project).
-    expect(builtInServer('com.lightningpiggy.app.dev')).toBe(BUILT_IN_SERVERS.preview);
+    // Dev on Android shares the preview server (same Firebase project).
+    expect(builtInServer('com.lightningpiggy.app.dev', 'android', '')).toBe(
+      BUILT_IN_SERVERS.preview,
+    );
+    // A bundle-time override wins for dev builds only.
+    const npub = 'npub1v5lrt4u7vhfnmxwk6c3uepcsrvs4jqyy3z3jrfm5kw73yp0wv2ts5pnwjs';
+    expect(builtInServer('com.lightningpiggy.app.dev', 'ios', npub)).toEqual({
+      pubkey: BUILT_IN_SERVERS.production.pubkey,
+    });
+    expect(builtInServer('com.lightningpiggy.app.preview', 'ios', npub)).toBe(
+      BUILT_IN_SERVERS.preview,
+    );
   });
 
   it('parses npub and hex keys and rejects junk', () => {
@@ -206,5 +217,49 @@ describe('enable / disable', () => {
     expect(Notifications.getDevicePushTokenAsync).toHaveBeenCalled();
     expect(next.pushRegistration.sync).toHaveBeenCalledWith({ interactive: true });
     stop();
+  });
+});
+
+describe('ordering of device-level changes', () => {
+  it('a slow startup token read cannot undo a later disable', async () => {
+    await AsyncStorage.setItem('marmot_push_enabled_v1', '1');
+    let release!: (v: unknown) => void;
+    (Notifications.getDevicePushTokenAsync as jest.Mock).mockImplementationOnce(
+      () => new Promise((r) => (release = r)),
+    );
+    const stop = startMarmotPushRegistration();
+    await new Promise((r) => setTimeout(r, 0));
+    const disabled = disableMarmotPush();
+    release({ type: 'android', data: 'late-token' });
+    await disabled;
+    expect(lastRegistration()).toBeNull();
+    expect((await loadMarmotPushSettings()).enabled).toBe(false);
+    stop();
+  });
+
+  it('account removal before settings are restored still deletes the token', async () => {
+    await AsyncStorage.setItem('marmot_push_enabled_v1', '1');
+    expect(await retireMarmotPushForAccount('removed-account')).toBe(true);
+    expect(Notifications.unregisterForNotificationsAsync).toHaveBeenCalled();
+  });
+
+  it('a failed deletion on account removal hands out no replacement token', async () => {
+    await enableMarmotPush();
+    (Notifications.getDevicePushTokenAsync as jest.Mock).mockClear();
+    (Notifications.unregisterForNotificationsAsync as jest.Mock).mockRejectedValueOnce(
+      new Error('offline'),
+    );
+    expect(await retireMarmotPushForAccount('removed-account')).toBe(false);
+    expect(Notifications.getDevicePushTokenAsync).not.toHaveBeenCalled();
+    expect(await AsyncStorage.getItem('marmot_push_retire_pending_v1')).toBe('1');
+  });
+
+  it('re-enabling clears a stale deletion marker so it cannot kill the new token', async () => {
+    await AsyncStorage.setItem('marmot_push_retire_pending_v1', '1');
+    (Notifications.unregisterForNotificationsAsync as jest.Mock).mockRejectedValueOnce(
+      new Error('offline'),
+    );
+    expect((await enableMarmotPush()).status).toBe('enabled');
+    expect(await AsyncStorage.getItem('marmot_push_retire_pending_v1')).toBeNull();
   });
 });

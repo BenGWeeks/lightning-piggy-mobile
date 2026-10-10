@@ -219,6 +219,7 @@ export class MarmotPushRegistrar {
         continue;
       }
       if (action.type === 'resend') {
+        if (this.stopped || gen !== this.generation) break;
         if (shared && (await this.deps.send(group.idHex, tokenUpdateEvent(shared.record)))) {
           await this.save(group.idHex, { record: shared.record, leaves: [...group.leaves] });
         } else result.pending++;
@@ -273,6 +274,7 @@ export class MarmotPushRegistrar {
     const signed = await signEntry(entry, groupIdHex, this.sign);
     live();
     await this.deps.backend.set(TS_NAMESPACE, groupIdHex, String(entry.ownerTs));
+    live(); // right before the caller publishes
     return signed;
   }
 

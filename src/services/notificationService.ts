@@ -620,13 +620,6 @@ const isMarmotMessage = (data: NotificationData) =>
 let lastMarmotNotifiedAt = 0;
 export const lastMarmotNotificationAt = (): number => lastMarmotNotifiedAt;
 
-// iOS with Marmot push on: the server's APNs alert covers a backgrounded
-// app, so the app's own Marmot alerts would be a duplicate there.
-let marmotRemoteAlerts = false;
-export function setMarmotRemoteAlertsEnabled(on: boolean): void {
-  marmotRemoteAlerts = on;
-}
-
 /**
  * Fire a message (DM or group) notification, suppressed when the user is
  * actively viewing that exact thread. `threadId` is the partner pubkey
@@ -643,7 +636,6 @@ export async function fireMessageNotification(opts: {
 }): Promise<string | null> {
   if (isThreadActivelyViewed(opts.threadId)) return null;
   const marmot = isMarmotMessage(opts.data);
-  if (marmot && marmotRemoteAlerts && !appInForeground && Platform.OS === 'ios') return null;
   const id = await fireNotification({
     kind: opts.kind,
     title: opts.title,
@@ -653,7 +645,8 @@ export async function fireMessageNotification(opts: {
   });
   if (id && marmot) {
     lastMarmotNotifiedAt = Date.now();
-    // The real message is on screen now: drop the generic push alert(s).
+    // The real message is on screen now: drop the generic push alert(s) —
+    // ours (Android) and a data-less server alert already delivered (iOS).
     void dismissNotificationsFor({ marmotPushAlerts: true });
   }
   return id;
@@ -805,5 +798,4 @@ export function __resetForTests(): void {
   activeThreadId = null;
   activeCacheCoord = null;
   lastMarmotNotifiedAt = 0;
-  marmotRemoteAlerts = false;
 }

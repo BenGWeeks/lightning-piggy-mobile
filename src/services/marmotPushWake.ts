@@ -76,15 +76,29 @@ const defaultDeps: WakeDeps = {
   notify: postGenericPushAlert,
 };
 
-export async function handleMarmotPushWake(deps: WakeDeps = defaultDeps): Promise<WakeOutcome> {
-  if (deps.isForeground()) return 'foreground';
+// Wakes are handled one at a time: two overlapping pushes must not both find
+// no alert and both post one.
+let wakeChain: Promise<unknown> = Promise.resolve();
+
+export function handleMarmotPushWake(deps: WakeDeps = defaultDeps): Promise<WakeOutcome> {
   const arrived = deps.now();
+  const run = wakeChain.then(() => handleOne(deps, arrived));
+  wakeChain = run.catch(() => undefined);
+  return run;
+}
+
+async function handleOne(deps: WakeDeps, arrived: number): Promise<WakeOutcome> {
+  if (deps.isForeground()) return 'foreground';
   if (deps.hasLiveSession()) {
     if (deps.lastNotifiedAt() >= arrived - COVERED_LOOKBACK_MS) return 'covered';
     await deps.wait(LIVE_SESSION_GRACE_MS);
     if (deps.isForeground() || deps.lastNotifiedAt() >= arrived - COVERED_LOOKBACK_MS) {
       return 'covered';
     }
+  }
+  // Re-checked right before posting: the real message may have just landed.
+  if (deps.lastNotifiedAt() >= arrived - COVERED_LOOKBACK_MS && deps.hasLiveSession()) {
+    return 'covered';
   }
   await deps.notify();
   return 'notified';

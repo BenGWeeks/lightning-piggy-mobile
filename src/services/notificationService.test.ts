@@ -47,7 +47,6 @@ import {
   markHistoryEntryRead,
   isRemotePush,
   lastMarmotNotificationAt,
-  setMarmotRemoteAlertsEnabled,
 } from './notificationService';
 import { setActivePubkeyForWalletStorage } from './walletStorageService';
 
@@ -638,27 +637,5 @@ describe('Marmot push (MIP-05) receive side', () => {
     ]);
     expect(await dismissNotificationsFor({ genericMessages: true })).toBe(1);
     expect(mockDismiss).toHaveBeenCalledWith('apns-alert');
-  });
-
-  it('on iOS with push on, a backgrounded app leaves Marmot alerts to the server', async () => {
-    const { Platform } = jest.requireActual('react-native');
-    const original = Platform.OS;
-    Object.defineProperty(Platform, 'OS', { configurable: true, get: () => 'ios' });
-    try {
-      setMarmotRemoteAlertsEnabled(true);
-      setNotificationsForeground(false);
-      const marmot = {
-        kind: 'dm' as const,
-        threadId: 't',
-        title: 'Bob',
-        body: 'hi',
-        data: { conversationPubkey: 'p', conversationProtocol: 'marmot' as const },
-      };
-      expect(await fireMessageNotification(marmot)).toBeNull();
-      setNotificationsForeground(true);
-      expect(await fireMessageNotification(marmot)).not.toBeNull();
-    } finally {
-      Object.defineProperty(Platform, 'OS', { configurable: true, get: () => original });
-    }
   });
 });
