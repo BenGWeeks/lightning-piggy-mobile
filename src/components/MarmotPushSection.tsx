@@ -116,6 +116,7 @@ const MarmotPushSection: React.FC = () => {
       } else {
         setEnabled(false);
         const off = await disableMarmotPush();
+        // (disable never throws — it reports what it couldn't do)
         reportSync(off.sync);
         Toast.show(
           !off.saved

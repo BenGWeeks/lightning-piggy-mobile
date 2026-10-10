@@ -336,14 +336,21 @@ async function enableNow(): Promise<EnableOutcome> {
     }
     retiring = false;
   }
+  let next: DeviceRegistration;
   try {
-    registration = await readRegistration(currentServer());
+    next = await readRegistration(currentServer());
   } catch (e) {
     if (__DEV__) console.warn('[MarmotPush] no device token:', e);
     return { status: 'unavailable' };
   }
+  // Persist first, then commit: a failed write must leave push off.
+  try {
+    await AsyncStorage.setItem(ENABLED_KEY, '1');
+  } catch {
+    return { status: 'unavailable' };
+  }
   settings.enabled = true;
-  await AsyncStorage.setItem(ENABLED_KEY, '1');
+  registration = next;
   await registerWakeTask();
   return { status: 'enabled', sync: await syncActiveSession() };
 }

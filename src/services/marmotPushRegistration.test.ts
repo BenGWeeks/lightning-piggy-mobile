@@ -335,4 +335,19 @@ describe('native token reads', () => {
     expect((await enableMarmotPush()).status).toBe('unavailable');
     expect((await enableMarmotPush()).status).toBe('enabled');
   });
+
+  it('a failed enable write leaves push off — even with a token callback in flight', async () => {
+    const stop = startMarmotPushRegistration();
+    await new Promise((r) => setTimeout(r, 0));
+    mockSession.pushRegistration.setRegistration.mockClear();
+    (AsyncStorage.setItem as jest.Mock).mockRejectedValueOnce(new Error('disk full'));
+    expect((await enableMarmotPush()).status).toBe('unavailable');
+    const listener = (Notifications.addPushTokenListener as jest.Mock).mock.calls.at(-1)?.[0];
+    listener({ type: 'android', data: 'fcm-token-1' });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(mockSession.pushRegistration.setRegistration).not.toHaveBeenCalledWith(
+      expect.objectContaining({ platform: 'fcm' }),
+    );
+    stop();
+  });
 });
