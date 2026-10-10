@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity } from 'react-native';
 import {
   MapPin,
   Zap,
@@ -13,7 +13,7 @@ import {
   Wallet,
 } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
-import type { Palette } from '../styles/palettes';
+import { createAttachPanelStyles } from '../styles/AttachPanel.styles';
 
 interface Props {
   onShareLocation: () => void;
@@ -95,7 +95,7 @@ const AttachPanel: React.FC<Props> = ({
   walletAccessibilityLabel,
 }) => {
   const colors = useThemeColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createAttachPanelStyles(colors), [colors]);
 
   // Build the visible tile list in display order. Tiles whose callback
   // wasn't provided (because the feature is unavailable in this build)
@@ -217,51 +217,5 @@ const AttachPanel: React.FC<Props> = ({
     </View>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    panel: {
-      // Intrinsic-sized: the 4-col grid drives the panel's height, so
-      // we don't have to guess a keyboard height to fit. Sits above
-      // the composer inside KeyboardStickyView; opening it dismisses
-      // the IME (handled in ConversationScreen) so the panel + composer
-      // stack never has to also accommodate the keyboard.
-      backgroundColor: colors.surface,
-      paddingHorizontal: 16,
-      paddingTop: 16,
-      paddingBottom: 8,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: colors.divider,
-    },
-    grid: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      // 4 columns: each tile claims 25 % of the row width. The
-      // negative gap is replaced by per-tile bottom margin so wrapping
-      // doesn't leave hanging horizontal gaps.
-    },
-    tile: {
-      width: '25%',
-      alignItems: 'center',
-      marginBottom: 16,
-      gap: 6,
-    },
-    tileDisabled: {
-      opacity: 0.4,
-    },
-    iconCircle: {
-      width: 56,
-      height: 56,
-      borderRadius: 28,
-      backgroundColor: colors.brandPink,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    label: {
-      color: colors.textBody,
-      fontSize: 12,
-      fontWeight: '600',
-    },
-  });
 
 export default AttachPanel;

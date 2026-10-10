@@ -2,7 +2,7 @@ appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Group attach panel — Zap + Wallet (disabled), Invoice, Contact tiles render
 ---
 # Verifies that opening the inline AttachPanel inside a group chat
-# surfaces all 7 tiles, including the three that were missing before
+# surfaces the attachment tiles, including the three that were missing before
 # #237: Zap (rendered but disabled), Invoice, and Contact.
 #
 # Safety constraints:
