@@ -50,14 +50,15 @@ const MarmotPushSection: React.FC = () => {
   const styles = useMemo(() => createMarmotPushSectionStyles(colors), [colors]);
   const [enabled, setEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [pending, setPending] = useState(0);
+  // null = on, but no push token yet.
+  const [pending, setPending] = useState<number | null>(0);
   const [customServer, setCustomServer] = useState<PushServer | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [draft, setDraft] = useState('');
   const remoteSigner = signerType === 'amber' || signerType === 'nip46';
 
   const refreshPending = useCallback(async () => {
-    setPending(await pendingMarmotPushGroups().catch(() => 0));
+    setPending(await pendingMarmotPushGroups().catch(() => null));
   }, []);
 
   useEffect(() => {
@@ -186,11 +187,13 @@ const MarmotPushSection: React.FC = () => {
       {enabled && (
         <View style={styles.statusRow} testID="security-marmot-push-status">
           <Text style={styles.statusText}>
-            {pending > 0
-              ? t('securityScreen.marmotPushPending', { count: pending })
-              : t('securityScreen.marmotPushAllSet')}
+            {pending === null
+              ? t('securityScreen.marmotPushNoToken')
+              : pending > 0
+                ? t('securityScreen.marmotPushPending', { count: pending })
+                : t('securityScreen.marmotPushAllSet')}
           </Text>
-          {pending > 0 && !busy && (
+          {(pending === null || pending > 0) && !busy && (
             <TouchableOpacity
               style={styles.pillButton}
               onPress={handleFinish}

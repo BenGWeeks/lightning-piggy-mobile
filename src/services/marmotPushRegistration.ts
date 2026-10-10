@@ -211,7 +211,17 @@ export function syncMarmotPushNow(): Promise<SyncResult | null> {
 
 async function syncActiveSession(): Promise<SyncResult | null> {
   const session = getMarmotSession();
-  if (!session || registration === undefined) return null;
+  if (!session) return null;
+  // On but no token yet (the startup read failed): retry it now.
+  if (registration === undefined && settings.enabled && !retiring && !awaitingSession) {
+    try {
+      registration = await readRegistration(currentServer());
+      await registerWakeTask();
+    } catch {
+      return null;
+    }
+  }
+  if (registration === undefined) return null;
   session.pushRegistration.setRegistration(registration);
   return session.pushRegistration.sync({ interactive: true });
 }
@@ -342,8 +352,11 @@ export async function setMarmotPushServer(pubkey: string | null): Promise<Enable
 }
 
 /** Groups of the active account still waiting for a signature. */
-export async function pendingMarmotPushGroups(): Promise<number> {
+/** Groups of the active account still waiting for a signature; null when
+ * push is on but this phone has no token yet (Finish setup retries it). */
+export async function pendingMarmotPushGroups(): Promise<number | null> {
   const session = getMarmotSession();
+  if (settings.enabled && registration === undefined) return null;
   if (!session || registration === undefined) return 0;
   session.pushRegistration.setRegistration(registration);
   return session.pushRegistration.pendingCount();

@@ -362,6 +362,49 @@ describe('repeated identical registrations', () => {
   });
 });
 
+describe('stopping mid-publish', () => {
+  it('still records a publish that already happened, so it can be retracted later', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const backend = createMemoryMarmotBackend();
+    const g = group('aa'.repeat(16));
+    const signer: Sign = async (tpl) =>
+      finalizeEvent({ ...tpl }, sk) as unknown as Awaited<ReturnType<Sign>>;
+    const a = new MarmotPushRegistrar({
+      pubkey: ME,
+      silentSigner: true,
+      backend,
+      ready: Promise.resolve(),
+      groups: () => [g],
+      sign: signer,
+      send: async () => {
+        await gate;
+        return true;
+      },
+    });
+    a.setRegistration(reg('token-1', SERVER_A));
+    const pass = a.sync({ interactive: true });
+    await new Promise((r) => setTimeout(r, 0));
+    const stopped = a.stop();
+    release();
+    await pass;
+    await stopped;
+    const sent: number[] = [];
+    const b = new MarmotPushRegistrar({
+      pubkey: ME,
+      silentSigner: true,
+      backend,
+      ready: Promise.resolve(),
+      groups: () => [g],
+      sign: signer,
+      send: async (_id, ev) => (sent.push(ev.kind), true),
+    });
+    b.setRegistration(reg('token-1', SERVER_B));
+    await b.sync({ interactive: false });
+    expect(sent).toEqual([449, 447]);
+  });
+});
+
 describe('planGroup', () => {
   const g = group('aa'.repeat(16));
   it('is a no-op with nothing published and push off', () => {

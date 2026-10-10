@@ -65,6 +65,8 @@ import {
   retireMarmotPushForAccount,
   setMarmotPushServer,
   startMarmotPushRegistration,
+  pendingMarmotPushGroups,
+  syncMarmotPushNow,
   __resetMarmotPushForTests,
 } from './marmotPushRegistration';
 import { requestNotificationPermission } from './notificationService';
@@ -298,5 +300,19 @@ describe('native token reads', () => {
     expect((await enableMarmotPush()).status).toBe('unavailable');
     expect((await enableMarmotPush()).status).toBe('enabled');
     expect(Notifications.getDevicePushTokenAsync).toHaveBeenCalledTimes(2);
+  });
+
+  it('Finish setup retries a token read that failed at startup', async () => {
+    await AsyncStorage.setItem('marmot_push_enabled_v1', '1');
+    (Notifications.getDevicePushTokenAsync as jest.Mock).mockRejectedValueOnce(
+      new Error('offline'),
+    );
+    const stop = startMarmotPushRegistration();
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(await pendingMarmotPushGroups()).toBeNull();
+    expect(await syncMarmotPushNow()).toMatchObject({ published: 2 });
+    expect(lastRegistration()).not.toBeNull();
+    stop();
   });
 });

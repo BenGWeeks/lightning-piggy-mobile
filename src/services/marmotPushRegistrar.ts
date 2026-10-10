@@ -338,8 +338,11 @@ export class MarmotPushRegistrar {
     }
   }
 
+  // Written even after stop(): it records a publish that already happened
+  // (a later pass must know to retract it), and stop() resolves only once
+  // the running pass — this write included — has finished, so an account
+  // wipe waiting on it can't be overtaken.
   private async save(groupIdHex: string, shared: Shared): Promise<void> {
-    if (this.stopped) return;
     await this.deps.backend.set(NAMESPACE, groupIdHex, JSON.stringify(shared));
   }
 }
