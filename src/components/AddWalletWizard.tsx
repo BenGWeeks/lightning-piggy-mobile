@@ -11,11 +11,11 @@ import {
 import { Alert } from './BrandedAlert';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import {
-  BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetScrollView,
   BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
+import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 import { useWallet } from '../contexts/WalletContext';

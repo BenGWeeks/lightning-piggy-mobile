@@ -9,11 +9,11 @@ import {
   Platform,
 } from 'react-native';
 import {
-  BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
+import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import { Unlock, AlertCircle } from 'lucide-react-native';
 import { cancelNfcOperation, isNfcEnabled, unlockHuntTag } from '../services/nfcService';
 import { useThemeColors } from '../contexts/ThemeContext';

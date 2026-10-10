@@ -1,11 +1,11 @@
 import React, { useMemo, useRef, useEffect, useCallback } from 'react';
 import { Text, TouchableOpacity, StyleSheet } from 'react-native';
 import {
-  BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
+import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import { Share2, Send, ExternalLink, Nfc } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';

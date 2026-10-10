@@ -9,11 +9,11 @@ import Animated, {
   cancelAnimation,
 } from 'react-native-reanimated';
 import {
-  BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
+import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import {
   useAudioRecorder,
   useAudioRecorderState,

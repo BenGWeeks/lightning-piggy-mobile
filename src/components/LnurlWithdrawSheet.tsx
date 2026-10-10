@@ -20,12 +20,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator, Keyboard, Platform } from 'react-native';
 import {
-  BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
   BottomSheetScrollView,
   BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
+import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import { Gift, PartyPopper } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';

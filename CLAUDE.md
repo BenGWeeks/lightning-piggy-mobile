@@ -55,6 +55,7 @@
 - Prettier and ESLint must pass before committing
 - TypeScript strict mode — `npx tsc --noEmit` must pass
 - Use the branded `Alert` from `src/components/BrandedAlert.tsx`, not React Native's native `Alert.alert` — the branded one matches the app's theme (pink/blue) and is testable via `id: 'branded-alert-button-N'` in Maestro flows. ESLint enforces this via `no-restricted-imports`.
+- Import `BottomSheetModal` from `src/components/AccessibleBottomSheetModal.tsx`, never from `@gorhom/bottom-sheet` directly. The library defaults sheet content to `accessible={true}`, which on iOS collapses the whole sheet into one "Bottom Sheet" element — VoiceOver can't reach any control inside and Maestro's iOS hierarchy shows no testIDs. The wrapper forces `accessible={false}`. ESLint enforces this via `no-restricted-imports`.
 - Use the branded `Toast` from `src/components/BrandedToast.tsx`, not `react-native-toast-message` directly — matches the app's pink/blue theme. ESLint enforces this via `no-restricted-imports`.
 
 ## Performance rules

@@ -1,11 +1,11 @@
 import React, { useRef, useEffect, useCallback, useMemo, useState } from 'react';
 import { View, StyleSheet, BackHandler } from 'react-native';
 import {
-  BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
+import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import QrWithIdentityToggle from './QrWithIdentityToggle';
 import NfcWriteSheet from './NfcWriteSheet';
 import { isNfcSupported } from '../services/nfcService';

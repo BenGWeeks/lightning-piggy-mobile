@@ -100,6 +100,16 @@ module.exports = [
               message:
                 "Use the branded Alert from src/components/BrandedAlert.tsx instead. Import via the relative path matching this file's location (e.g. '../components/BrandedAlert' from src/screens/, './BrandedAlert' from src/components/). See CLAUDE.md → Code Style.",
             },
+            {
+              // Lives in this src/** block (not a new one) because flat
+              // config REPLACES a rule's options per matching block — a
+              // separate block would silently drop the Alert restriction.
+              // The wrapper itself opts out with an inline disable.
+              name: '@gorhom/bottom-sheet',
+              importNames: ['BottomSheetModal', 'default'],
+              message:
+                "Import BottomSheetModal from src/components/AccessibleBottomSheetModal instead — the library defaults sheet content to accessible={true}, which on iOS collapses the whole sheet into one 'Bottom Sheet' element that VoiceOver and Maestro can't see inside. See CLAUDE.md → Code Style.",
+            },
           ],
         },
       ],

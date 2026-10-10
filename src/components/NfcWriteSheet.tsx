@@ -9,11 +9,11 @@ import {
   Platform,
 } from 'react-native';
 import {
-  BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
+import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import { Nfc, AlertCircle, Copy, Eye, EyeOff, Lock } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
 import { Toast } from './BrandedToast';

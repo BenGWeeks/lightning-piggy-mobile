@@ -12,12 +12,12 @@ import { Alert } from './BrandedAlert';
 import { Image } from 'expo-image';
 import Svg, { Path, Circle } from 'react-native-svg';
 import {
-  BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
   BottomSheetTextInput,
   BottomSheetFlatList,
 } from '@gorhom/bottom-sheet';
+import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';

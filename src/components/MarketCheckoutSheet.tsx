@@ -2,11 +2,11 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { View, Text, TouchableOpacity, Linking, ActivityIndicator } from 'react-native';
 import { Image } from 'expo-image';
 import {
-  BottomSheetModal,
   BottomSheetScrollView,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
 } from '@gorhom/bottom-sheet';
+import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import { Zap, Plus, Minus, Check, ExternalLink, LogIn } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';

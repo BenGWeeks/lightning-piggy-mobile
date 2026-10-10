@@ -1,11 +1,11 @@
 import React, { useRef, useEffect, useCallback, useMemo } from 'react';
 import { StyleSheet, BackHandler } from 'react-native';
 import {
-  BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
+import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import ContactProfileBody, { ContactProfileBodyData } from './ContactProfileBody';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';

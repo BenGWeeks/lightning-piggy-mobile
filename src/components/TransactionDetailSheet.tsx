@@ -2,11 +2,11 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { View, Text, TouchableOpacity, Linking, ActivityIndicator } from 'react-native';
 import { Image } from 'expo-image';
 import {
-  BottomSheetModal,
   BottomSheetView,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
 } from '@gorhom/bottom-sheet';
+import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import * as Clipboard from 'expo-clipboard';
 import Toast from './BrandedToast';
 import { satsToFiatString } from '../services/fiatService';
