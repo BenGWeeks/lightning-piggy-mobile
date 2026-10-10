@@ -14,6 +14,7 @@ import {
   partnerFromRumor,
   classifyRumor,
   unwrapWrapNsec,
+  unwrapWrapViaNip44,
   type DecodedRumor,
 } from './nip17Unwrap';
 
@@ -374,5 +375,48 @@ describe('unwrapWrapNsec (NIP-17 nsec decrypt, post-#802)', () => {
     expect(out).toBeNull();
     // Skipped specifically for the pubkey-binding mismatch, not a decrypt error.
     expect(onSkip).toHaveBeenCalledWith(expect.stringContaining('!='), expect.any(String));
+  });
+});
+
+describe('unwrapWrapViaNip44 (NIP-46 signer denials reach the ingest loop)', () => {
+  // Minimal wrap and seal shapes: the decrypt is a stub, so only the wrap's
+  // id/pubkey/content and the seal's pubkey/content/kind have to be valid.
+  const wrap = { id: 'w'.repeat(64), pubkey: PK_A, content: 'ciphertext' } as unknown as Parameters<
+    typeof unwrapWrapNsec
+  >[0];
+  const sealJson = JSON.stringify({
+    kind: 13,
+    pubkey: PK_B,
+    content: 'inner',
+    created_at: 1,
+    tags: [],
+  });
+  const denied = () => Promise.reject(new Error('NIP-46 signer denied nip44_decrypt'));
+
+  it('rethrows a NIP-46 signer denial from the wrap decrypt, so the loop can stop', async () => {
+    const onSkip = jest.fn();
+    await expect(unwrapWrapViaNip44(wrap, denied, onSkip)).rejects.toThrow(
+      'NIP-46 signer denied nip44_decrypt',
+    );
+    expect(onSkip).not.toHaveBeenCalled();
+  });
+
+  it('rethrows a NIP-46 signer denial from the seal decrypt', async () => {
+    const onSkip = jest.fn();
+    const decrypt = jest.fn().mockResolvedValueOnce(sealJson).mockImplementationOnce(denied);
+    await expect(unwrapWrapViaNip44(wrap, decrypt, onSkip)).rejects.toThrow(
+      'NIP-46 signer denied nip44_decrypt',
+    );
+    expect(onSkip).not.toHaveBeenCalled();
+  });
+
+  it('still skips any other decrypt failure rather than throwing', async () => {
+    const onSkip = jest.fn();
+    const failure = () => Promise.reject(new Error('invalid MAC'));
+    await expect(unwrapWrapViaNip44(wrap, failure, onSkip)).resolves.toBeNull();
+    expect(onSkip).toHaveBeenCalledWith(
+      expect.stringContaining('wrap decrypt failed'),
+      'w'.repeat(64),
+    );
   });
 });

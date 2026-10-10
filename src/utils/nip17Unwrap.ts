@@ -154,6 +154,13 @@ function bindRumor(rumorJson: string, sealPubkey: string, skip: Skip): DecodedRu
  * callers can skip bad wraps without crashing the inbox. Reasons for a
  * null return are logged through the injected `onSkip` hook.
  */
+/** A NIP-46 bunker's refusal must reach the ingest loop: `ingestInboxWraps`
+ *  stops on it (`stopOnPermissionDenied`) instead of re-asking the bunker for
+ *  every wrap. Any other decrypt failure stays a skip, as before. */
+function rethrowSignerDenial(error: unknown): void {
+  if (/NIP-46 signer denied/i.test((error as Error)?.message ?? '')) throw error;
+}
+
 export async function unwrapWrapViaNip44(
   wrap: RawGiftWrapEvent,
   decryptNip44: Nip44Decrypt,
@@ -171,6 +178,7 @@ export async function unwrapWrapViaNip44(
   try {
     sealJson = await decryptNip44(wrap.content, wrap.pubkey);
   } catch (error) {
+    rethrowSignerDenial(error);
     return skip(`wrap decrypt failed: ${(error as Error)?.message ?? 'unknown'}`);
   }
   const seal = parseValidSeal(sealJson, skip);
@@ -180,6 +188,7 @@ export async function unwrapWrapViaNip44(
   try {
     rumorJson = await decryptNip44(seal.content, seal.pubkey);
   } catch (error) {
+    rethrowSignerDenial(error);
     return skip(`seal decrypt failed: ${(error as Error)?.message ?? 'unknown'}`);
   }
   return bindRumor(rumorJson, seal.pubkey, skip);
