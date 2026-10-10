@@ -177,17 +177,47 @@ export async function getBlockHeight(): Promise<number> {
   }
 }
 
-/** Fee estimate from the configured Electrum server, not the swap operator. */
-export async function getSwapClaimFeeRate(): Promise<number> {
+/** Unrounded sat/vB estimate from the configured Electrum server for
+ *  `targetBlocks`. The reverse-swap claim is built with this (#1174). */
+export async function getClaimFeeEstimate(targetBlocks: number): Promise<number> {
   const chain = await getBlockchain();
   try {
-    const rate = (await chain.estimateFee(2)).asSatPerVb();
+    const rate = (await chain.estimateFee(targetBlocks)).asSatPerVb();
     if (!Number.isFinite(rate) || rate <= 0 || rate > 5000)
       throw new Error('Invalid Electrum claim fee estimate');
-    return Math.max(2, Math.ceil(rate));
+    return rate;
   } catch (error) {
     if (blockchain === chain) disconnectElectrum();
     throw error;
+  }
+}
+
+/** Fee estimate from the configured Electrum server, not the swap operator. */
+export async function getSwapClaimFeeRate(): Promise<number> {
+  return Math.max(2, Math.ceil(await getClaimFeeEstimate(2)));
+}
+
+/**
+ * Whether the configured backend's Esplora REST twin already knows `txId`
+ * (mempool or chain). `null` when it can't tell — a custom Electrum host
+ * with no Esplora counterpart, or a network/HTTP error — so callers treat
+ * it as "unknown", never as "absent".
+ */
+export async function isTxKnown(txId: string): Promise<boolean | null> {
+  if (!/^[0-9a-f]{64}$/i.test(txId)) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ESPLORA_TIMEOUT_MS);
+  try {
+    const base = await getEsploraBase();
+    // Not `/tx/:txid/status`: Esplora answers that 200 `{confirmed:false}`
+    // even for a tx it has never seen. `/tx/:txid` is 404 until it's known.
+    const res = await fetch(`${base}/tx/${txId}`, { signal: controller.signal });
+    if (res.ok) return true;
+    return res.status === 404 ? false : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 

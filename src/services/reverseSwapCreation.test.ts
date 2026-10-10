@@ -5,12 +5,14 @@ import { p2tr, Script } from '@scure/btc-signer';
 import { keyAggregate, keyAggExport } from '@scure/btc-signer/musig2.js';
 import * as bitcoin from 'bitcoinjs-lib';
 import { createReverseSwap, claimSwap, getReverseSwapFees } from './boltzService';
-import { getBlockHeight, broadcastRawTx, getSwapClaimFeeRate } from './onchainService';
+import { getBlockHeight, broadcastRawTx, getClaimFeeEstimate, isTxKnown } from './onchainService';
 import { verifyReverseSwap, verifyReverseLockup } from '../utils/reverseSwapVerify';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 jest.mock('./onchainService', () => ({
   getBlockHeight: jest.fn(),
   getSwapClaimFeeRate: jest.fn(async () => 2),
+  getClaimFeeEstimate: jest.fn(async () => 2),
+  isTxKnown: jest.fn(async () => true),
   broadcastRawTx: jest.fn(),
 }));
 const HEIGHT = 900000;
@@ -189,6 +191,17 @@ describe('creation before funding', () => {
     ).rejects.toThrow(/changed/);
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
   });
+  function claimable(id = 'reverse-test') {
+    const preimage = new Uint8Array(32).fill(5);
+    const swap = {
+      ...fixture(CLAIM, bitcoin.crypto.sha256(preimage), HEIGHT + 144, true),
+      id,
+      preimage: toHex(preimage),
+      claimPrivateKey: toHex(PRIVATE),
+    };
+    const tx = lockup(swap.lockupAddress, swap.onchainAmount);
+    return { swap, lockup: verifyReverseLockup(tx.toHex(), swap) };
+  }
   it('builds a verifiable script-path claim using the current Electrum fee estimate', async () => {
     const preimage = new Uint8Array(32).fill(5);
     const swap = {
@@ -197,11 +210,14 @@ describe('creation before funding', () => {
       claimPrivateKey: toHex(PRIVATE),
     };
     const tx = lockup(swap.lockupAddress, swap.onchainAmount);
-    jest.mocked(getSwapClaimFeeRate).mockResolvedValueOnce(4);
+    jest.mocked(getClaimFeeEstimate).mockResolvedValueOnce(4);
     await claimSwap(swap, verifyReverseLockup(tx.toHex(), swap), fixture(REFUND).lockupAddress);
+    expect(getClaimFeeEstimate).toHaveBeenCalledWith(3);
     const raw = jest.mocked(broadcastRawTx).mock.calls[0][0];
     const claim = bitcoin.Transaction.fromHex(raw);
-    expect(Number(claim.outs[0].value)).toBe(98500 - 180 * 4);
+    // Fee = the signed claim's real vsize × rate, not the 180 vB budget (#1174).
+    expect(claim.virtualSize()).toBeLessThan(180);
+    expect(Number(claim.outs[0].value)).toBe(98500 - claim.virtualSize() * 4);
     expect(toHex(claim.ins[0].witness[1])).toBe(toHex(preimage));
     const script = claim.ins[0].witness[2];
     const leaf = bitcoin.crypto.taggedHash(
@@ -216,6 +232,46 @@ describe('creation before funding', () => {
       leaf,
     );
     expect(schnorr.verify(claim.ins[0].witness[0], digest, CLAIM.slice(1))).toBe(true);
+  });
+  it('caps the claim fee at the quoted budget and survives a failed estimate', async () => {
+    const { swap, lockup: verified } = claimable('budget-cap-swap');
+    // A mis-scaled (sat/kvB-sized) estimate is capped at 180 vB × quoted 3.
+    jest.mocked(getClaimFeeEstimate).mockResolvedValueOnce(2229);
+    await claimSwap({ ...swap, claimFeeRate: 3 }, verified, fixture(REFUND).lockupAddress);
+    let claim = bitcoin.Transaction.fromHex(jest.mocked(broadcastRawTx).mock.calls[0][0]);
+    expect(Number(claim.outs[0].value)).toBe(98500 - 540);
+    // No live estimate: the quoted rate is used, on the real vsize.
+    jest.mocked(getClaimFeeEstimate).mockRejectedValueOnce(new Error('electrum down'));
+    await claimSwap(
+      { ...swap, id: 'estimate-down-swap', claimFeeRate: 1.5 },
+      verified,
+      fixture(REFUND).lockupAddress,
+    );
+    claim = bitcoin.Transaction.fromHex(jest.mocked(broadcastRawTx).mock.calls[1][0]);
+    expect(Number(claim.outs[0].value)).toBe(98500 - Math.ceil(claim.virtualSize() * 1.5));
+  });
+  it('waits for the lockup to reach the backend and retries missing inputs (#1174)', async () => {
+    jest.useFakeTimers();
+    try {
+      const { swap, lockup: verified } = claimable('lockup-race-swap');
+      jest.mocked(isTxKnown).mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+      const missing = new Error('bad-txns-inputs-missingorspent');
+      jest
+        .mocked(broadcastRawTx)
+        .mockRejectedValueOnce(missing)
+        .mockRejectedValueOnce(missing)
+        .mockResolvedValueOnce(undefined);
+      const claiming = claimSwap(swap, verified, fixture(REFUND).lockupAddress);
+      await jest.advanceTimersByTimeAsync(1000); // visibility poll backoff
+      expect(isTxKnown).toHaveBeenCalledWith(verified.txId);
+      await jest.advanceTimersByTimeAsync(2000 + 4000); // broadcast backoff
+      await expect(claiming).resolves.toBe(
+        bitcoin.Transaction.fromHex(jest.mocked(broadcastRawTx).mock.calls[2][0]).getId(),
+      );
+      expect(broadcastRawTx).toHaveBeenCalledTimes(3);
+    } finally {
+      jest.useRealTimers();
+    }
   });
   it('refuses to disclose a preimage after the safe claim window has passed', async () => {
     const preimage = new Uint8Array(32).fill(5);

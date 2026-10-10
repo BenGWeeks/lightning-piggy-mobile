@@ -38,6 +38,17 @@ import { extractLockupFromTxHex } from '../utils/lockupTx';
 import { fetchWithTimeout } from './boltzApi';
 import { getSwapBackend, getSwapBackendForId, pinSwapBackend } from './swapBackendService';
 import { waitForSwapStatus } from './boltzSwapStatus';
+import {
+  CLAIM_MISSING_INPUTS_WINDOW_MS,
+  broadcastWithRetry,
+  waitForTxVisible,
+} from './swapBroadcast';
+import {
+  CLAIM_FEE_TARGET_BLOCKS,
+  claimFeeBudget,
+  claimFeeSats,
+  selectClaimFeeRate,
+} from '../utils/swapClaimFee';
 
 // Re-exported for back-compat: the HTTP transport and the swap-status
 // subscription/classification layer now live in dedicated modules, but
@@ -357,10 +368,9 @@ export async function claimSwap(
   swap: ReverseSwapResult,
   lockup: { txId: string; vout: number; amount: number; txHex: string },
   destinationAddress: string,
-  feeRate: number = swap.claimFeeRate ?? 2,
 ): Promise<string> {
   return singleFlightClaim(`${swap.id}:${lockup.txId}:${lockup.vout}`, () =>
-    broadcastClaim(swap, lockup, destinationAddress, feeRate),
+    broadcastClaim(swap, lockup, destinationAddress),
   );
 }
 
@@ -368,22 +378,29 @@ async function broadcastClaim(
   swap: ReverseSwapResult,
   lockup: { txId: string; vout: number; amount: number; txHex: string },
   destinationAddress: string,
-  feeRate: number,
 ): Promise<string> {
+  const onchainService = require('./onchainService') as typeof import('./onchainService');
+  // Live ~30-min estimate, unrounded; if Electrum can't answer, fall back to
+  // the rate the swap was quoted with. Capped at the quoted claim budget (#1174).
+  let liveRate: number | null = null;
+  try {
+    liveRate = await onchainService.getClaimFeeEstimate(CLAIM_FEE_TARGET_BLOCKS);
+  } catch (error) {
+    console.warn('[Boltz] Claim fee estimate unavailable; using the quoted rate:', error);
+  }
+  const feeRate = selectClaimFeeRate(liveRate, swap.claimFeeRate);
+  const feeBudget = claimFeeBudget(swap.claimFeeRate);
   // Repeat structural/deadline checks immediately before disclosing our preimage.
-  const { getBlockHeight, getSwapClaimFeeRate } =
-    require('./onchainService') as typeof import('./onchainService');
-  // Use a current two-block estimate; this still cannot guarantee confirmation.
-  feeRate = Math.max(feeRate, await getSwapClaimFeeRate());
   const claimKey = ecc.pointFromScalar(Buffer.from(swap.claimPrivateKey, 'hex'), true);
   if (!claimKey) throw new Error('Invalid saved reverse claim key');
   verifyReverseSwap(swap, {
     preimageHash: sha256(Buffer.from(swap.preimage, 'hex')),
     claimPublicKey: claimKey,
     expectedAmount: swap.onchainAmount,
-    currentBlockHeight: await getBlockHeight(),
+    currentBlockHeight: await onchainService.getBlockHeight(),
     minClaimBlocks: REVERSE_CLAIM_MARGIN,
-    claimFeeSats: Math.ceil(REVERSE_CLAIM_VBYTES * feeRate),
+    // Upper bound: the real claim is smaller than REVERSE_CLAIM_VBYTES.
+    claimFeeSats: claimFeeSats(REVERSE_CLAIM_VBYTES, feeRate, feeBudget),
   });
   const verifiedLockup = verifyReverseLockup(lockup.txHex, swap);
   if (
@@ -401,18 +418,11 @@ async function broadcastClaim(
   const claimLeafVersion = swap.swapTree.claimLeaf.version ?? 0xc0;
   const refundLeafVersion = swap.swapTree.refundLeaf.version ?? 0xc0;
 
-  // Conservative upper bound for a single-input script-path claim.
-  const fee = Math.ceil(REVERSE_CLAIM_VBYTES * feeRate);
-  const outputAmount = lockup.amount - fee;
-  if (outputAmount <= 546) {
-    throw new Error(`Claim amount (${lockup.amount}) too small after fee (${fee})`);
-  }
-
-  // Build transaction
+  // Build transaction. The output value is set once the fee is known.
   const tx = new bitcoin.Transaction();
   tx.version = 2;
   tx.addInput(Buffer.from(lockup.txId, 'hex').reverse(), lockup.vout, 0xfffffffd);
-  tx.addOutput(bitcoin.address.toOutputScript(destinationAddress), BigInt(outputAmount));
+  tx.addOutput(bitcoin.address.toOutputScript(destinationAddress), 0n);
 
   // Compute tapleaf hashes
   const claimLeafHash = bitcoin.crypto.taggedHash(
@@ -467,6 +477,20 @@ async function broadcastClaim(
     refundLeafHash, // merkle proof (sibling of claim leaf)
   ]);
 
+  // Size the claim exactly (#1174): a BIP-340 signature is always 64 bytes,
+  // so a placeholder gives the final witness size.
+  tx.setWitness(0, [Buffer.alloc(64), preimageBytes, claimScript, controlBlock]);
+  const vsize = tx.virtualSize();
+  const fee = claimFeeSats(vsize, feeRate, feeBudget);
+  const outputAmount = lockup.amount - fee;
+  if (outputAmount <= 546) {
+    throw new Error(`Claim amount (${lockup.amount}) too small after fee (${fee})`);
+  }
+  tx.outs[0].value = BigInt(outputAmount);
+  console.log(
+    `[Boltz] Claim fee ${fee} sats (${vsize} vB at ${feeRate.toFixed(2)} sat/vB, budget ${feeBudget ?? 'none'})`,
+  );
+
   // Compute sighash for Taproot script-path (BIP-341, SIGHASH_DEFAULT)
   const prevOutScript = bitcoin.address.toOutputScript(swap.lockupAddress);
   const sighash = tx.hashForWitnessV1(
@@ -483,61 +507,22 @@ async function broadcastClaim(
   // Set witness: <sig> <preimage> <claim_script> <control_block>
   tx.setWitness(0, [sig, preimageBytes, claimScript, controlBlock]);
 
-  // Broadcast via the configured Electrum server (BDK).
-  //
-  // Retry on transient failures: when waitForLockup returns at
-  // `transaction.mempool`, Boltz has just broadcast the lockup tx but
-  // it may not yet have propagated to *our* Electrum server. The first
-  // claim broadcast can then fail because the input UTXO it spends
-  // from is unknown to our Electrum, and BDK surfaces this with an
-  // empty `localizedMessage` that historically reached the user as a
-  // bare "unknown Error". A short exponential-backoff retry papers
-  // over the propagation race in the common case (~5–15 s gap) and
-  // makes the underlying Electrum complaint visible if the failure
-  // turns out to be terminal. See issue #481.
+  // Broadcast via the configured Electrum server (BDK). When waitForLockup
+  // returns at `transaction.mempool`, Boltz broadcast the lockup moments ago
+  // and our backend may not have it yet (#481, #1174). Wait (bounded) until
+  // it does, then retry "missing inputs" rejections over a longer bounded
+  // window. Exhausting it throws; the caller treats that as still settling
+  // and recovery re-claims from the persisted record.
   const txId = tx.getId();
+  const lockupVisible = await waitForTxVisible(() => onchainService.isTxKnown(lockup.txId));
+  if (!lockupVisible)
+    console.log(`[Boltz] Lockup ${lockup.txId} not seen yet; broadcasting anyway`);
   console.log(`[Boltz] Broadcasting claim tx: ${txId} (${tx.toHex().length / 2} bytes)`);
-  const onchainService = require('./onchainService') as typeof import('./onchainService');
-  await broadcastWithRetry(() => onchainService.broadcastRawTx(tx.toHex()), 'claim', txId);
+  await broadcastWithRetry(() => onchainService.broadcastRawTx(tx.toHex()), 'claim', txId, {
+    missingInputsWindowMs: CLAIM_MISSING_INPUTS_WINDOW_MS,
+  });
   console.log(`[Boltz] Claim tx broadcast successfully: ${txId}`);
   return txId;
-}
-
-// Retry broadcast against transient Electrum propagation gaps. Throws
-// the *last* error with a contextualised message so the caller doesn't
-// surface a bare "unknown Error" if BDK gave us a null message.
-async function broadcastWithRetry(
-  fn: () => Promise<void>,
-  label: 'claim' | 'refund',
-  txId: string,
-  maxAttempts: number = 4,
-): Promise<void> {
-  let lastError: unknown;
-  let delayMs = 2000;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      await fn();
-      if (attempt > 1) {
-        console.log(`[Boltz] ${label} broadcast succeeded on attempt ${attempt}/${maxAttempts}`);
-      }
-      return;
-    } catch (e) {
-      lastError = e;
-      const msg = e instanceof Error ? e.message || e.toString() : String(e);
-      console.warn(
-        `[Boltz] ${label} broadcast attempt ${attempt}/${maxAttempts} failed for ${txId}: ${msg || '(no message)'}`,
-      );
-      if (attempt < maxAttempts) {
-        await new Promise((r) => setTimeout(r, delayMs));
-        delayMs *= 2;
-      }
-    }
-  }
-  const detail =
-    lastError instanceof Error ? lastError.message || lastError.toString() : String(lastError);
-  throw new Error(
-    `Boltz ${label} broadcast failed after ${maxAttempts} attempts (${detail || 'no underlying message — likely Electrum propagation gap or RPC error'})`,
-  );
 }
 
 /**
