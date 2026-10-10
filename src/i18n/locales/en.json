@@ -2517,8 +2517,8 @@
     "refreshFailedBody": "No relay accepted the new invitation key, or your signer didn't answer. Check your connection and try again.",
     "stop": "Stop invites to this device",
     "stopA11y": "Stop invites to %{device}, %{age}",
-    "stopTitle": "Stop invites to %{device}?",
-    "stopBody": "New chats will stop going to this device. If it's still in use, it may miss new chats until it next refreshes its invitation key, which can take up to a week. Existing chats aren't affected.",
+    "stopTitle": "Stop invites to this device?",
+    "stopBody": "%{device}\n\nNew chats will stop going to this device. If it's still in use, it may miss new chats until it next refreshes its invitation key, which can take up to a week. Existing chats aren't affected.",
     "stopConfirm": "Stop invites",
     "stopped": "Invites to that device stopped",
     "removeOld": {

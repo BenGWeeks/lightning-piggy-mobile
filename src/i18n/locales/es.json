@@ -2517,8 +2517,8 @@
     "refreshFailedBody": "Ningún relé aceptó la nueva clave de invitación o tu firmador no respondió. Revisa tu conexión e inténtalo de nuevo.",
     "stop": "Dejar de enviar invitaciones a este dispositivo",
     "stopA11y": "Dejar de enviar invitaciones a %{device}, %{age}",
-    "stopTitle": "¿Dejar de enviar invitaciones a %{device}?",
-    "stopBody": "Los chats nuevos dejarán de llegar a este dispositivo. Si todavía se usa, puede perderse chats nuevos hasta que vuelva a actualizar su clave de invitación, lo que puede tardar hasta una semana. Tus chats actuales no se ven afectados.",
+    "stopTitle": "¿Dejar de enviar invitaciones a este dispositivo?",
+    "stopBody": "%{device}\n\nLos chats nuevos dejarán de llegar a este dispositivo. Si todavía se usa, puede perderse chats nuevos hasta que vuelva a actualizar su clave de invitación, lo que puede tardar hasta una semana. Tus chats actuales no se ven afectados.",
     "stopConfirm": "Dejar de enviar",
     "stopped": "Ya no se envían invitaciones a ese dispositivo",
     "removeOld": {

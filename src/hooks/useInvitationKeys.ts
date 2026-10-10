@@ -143,11 +143,11 @@ export function useInvitationKeys() {
   );
 
   const stopInvites = useCallback(
-    (device: InvitationDevice, label: string) => {
+    (device: InvitationDevice, summary: string) => {
       const confirmedOwner = pubkey;
       Alert.alert(
-        t('invitationKeys.stopTitle', { device: label }),
-        t('invitationKeys.stopBody') + approvalsNote(1),
+        t('invitationKeys.stopTitle'),
+        t('invitationKeys.stopBody', { device: summary }) + approvalsNote(1),
         [
           { text: t('invitationKeys.cancel'), style: 'cancel' },
           {
