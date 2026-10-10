@@ -35,20 +35,31 @@ export const SHEET_CONTENT_A11Y_PROPS = {
 
 type ForcedA11yProp = keyof typeof SHEET_CONTENT_A11Y_PROPS;
 
-export type AccessibleBottomSheetModalProps = Omit<BottomSheetModalProps, ForcedA11yProp>;
+export type AccessibleBottomSheetModalProps<T = unknown> = Omit<
+  BottomSheetModalProps<T>,
+  ForcedA11yProp
+>;
 
 /** Ref type — same imperative API (`present`, `dismiss`, …) as the library's. */
-export type BottomSheetModal = GorhomBottomSheetModal;
+export type BottomSheetModal<T = unknown> = GorhomBottomSheetModal<T>;
+
+const AccessibleBottomSheetModal = forwardRef(function AccessibleBottomSheetModal(
+  props: AccessibleBottomSheetModalProps,
+  ref: React.ForwardedRef<GorhomBottomSheetModal>,
+) {
+  return <GorhomBottomSheetModal {...props} {...SHEET_CONTENT_A11Y_PROPS} ref={ref} />;
+});
 
 /**
  * Drop-in replacement for `@gorhom/bottom-sheet`'s `BottomSheetModal` that
  * keeps sheet content reachable by VoiceOver / TalkBack / Maestro. Use this
  * for every sheet (ESLint enforces it). The a11y props are applied last and
  * omitted from the prop type so a call site can't accidentally re-collapse
- * the sheet.
+ * the sheet. Generic over the `present(data)` payload, like the library's
+ * (`forwardRef` erases generics, hence the cast — same trick the library uses).
  */
-export const BottomSheetModal = forwardRef<GorhomBottomSheetModal, AccessibleBottomSheetModalProps>(
-  function AccessibleBottomSheetModal(props, ref) {
-    return <GorhomBottomSheetModal {...props} {...SHEET_CONTENT_A11Y_PROPS} ref={ref} />;
+export const BottomSheetModal = AccessibleBottomSheetModal as <T = unknown>(
+  props: AccessibleBottomSheetModalProps<T> & {
+    ref?: React.ForwardedRef<GorhomBottomSheetModal<T>>;
   },
-);
+) => React.ReactElement | null;
