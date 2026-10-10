@@ -74,6 +74,8 @@ export async function wipeDmStoresForAccount(pubkey: string): Promise<void> {
   // Independent of the wipe above: its groups still hold this device's push
   // token (the signer is gone, so no signed removals) — delete the token at
   // Apple/Google instead (retried at next start if that fails).
-  await retireMarmotPushForAccount(pubkey).catch(() => undefined);
+  const retired = await retireMarmotPushForAccount(pubkey).catch(() => false);
+  if (!retired && __DEV__)
+    console.warn('[Account] push retirement incomplete (token deletion is retried at next start)');
   forgetDmStoreMigration(pubkey);
 }

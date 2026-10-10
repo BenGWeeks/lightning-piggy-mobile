@@ -16,6 +16,11 @@ export const createMarmotPushSectionStyles = (colors: Palette) =>
       color: colors.white,
       fontSize: 13,
     },
+    noticeText: {
+      color: colors.white,
+      fontSize: 13,
+      marginTop: 8,
+    },
     pillButton: {
       paddingHorizontal: 14,
       paddingVertical: 8,

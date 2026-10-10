@@ -39,18 +39,22 @@ const shortNpub = (hex: string) => {
 };
 
 /**
- * Settings → Security: opt-in Marmot push (MIP-05). Off by default; the
- * privacy trade-off (and, for remote-signer users, what approving costs
- * them) sits behind "Privacy details" right above the switch.
+ * Settings → Security: opt-in Marmot push (MIP-05) for the signed-in
+ * account. Off by default, and per account: another account on this phone
+ * never inherits it. The privacy trade-off (and, for remote-signer users,
+ * what approving costs them) sits behind "Privacy details" right above the
+ * switch.
  */
 const MarmotPushSection: React.FC = () => {
   const colors = useThemeColors();
   const t = useTranslation();
-  const { signerType } = useNostr();
+  const { signerType, pubkey } = useNostr();
   const shared = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const screen = useMemo(() => createSecurityScreenStyles(colors), [colors]);
   const styles = useMemo(() => createMarmotPushSectionStyles(colors), [colors]);
   const [enabled, setEnabled] = useState(false);
+  // Another account on this phone has push on (same token → linkable).
+  const [otherAccounts, setOtherAccounts] = useState(false);
   const [busy, setBusy] = useState(false);
   // null = on, but no push token yet.
   const [pending, setPending] = useState<number | null>(0);
@@ -60,17 +64,21 @@ const MarmotPushSection: React.FC = () => {
   const remoteSigner = signerType === 'amber' || signerType === 'nip46';
 
   const refreshPending = useCallback(async () => {
-    setPending(await pendingMarmotPushGroups().catch(() => null));
-  }, []);
+    if (!pubkey) return;
+    setPending(await pendingMarmotPushGroups(pubkey).catch(() => null));
+  }, [pubkey]);
 
   useEffect(() => {
     let alive = true;
-    void loadMarmotPushSettings()
+    setEnabled(false);
+    if (!pubkey) return;
+    void loadMarmotPushSettings(pubkey)
       .catch(() => null)
       .then((s) => {
         if (!s) return;
         if (!alive) return;
         setEnabled(s.enabled);
+        setOtherAccounts(s.otherAccounts);
         setCustomServer(s.customServer);
         if (s.enabled) void refreshPending();
       });
@@ -80,7 +88,7 @@ const MarmotPushSection: React.FC = () => {
       alive = false;
       unsubscribe();
     };
-  }, [refreshPending]);
+  }, [pubkey, refreshPending]);
 
   const reportSync = useCallback(
     (result: SyncResult | null) => {
@@ -108,15 +116,16 @@ const MarmotPushSection: React.FC = () => {
   );
 
   const handleToggle = async (next: boolean) => {
+    if (!pubkey) return;
     setBusy(true);
     try {
       if (next) {
-        const on = reportEnable(await enableMarmotPush());
+        const on = reportEnable(await enableMarmotPush(pubkey));
         setEnabled(on);
         if (on) Toast.show({ type: 'success', text1: t('securityScreen.marmotPushOn') });
       } else {
         setEnabled(false);
-        const off = await disableMarmotPush();
+        const off = await disableMarmotPush(pubkey);
         // (disable never throws — it reports what it couldn't do)
         reportSync(off.sync);
         Toast.show(
@@ -133,25 +142,28 @@ const MarmotPushSection: React.FC = () => {
   };
 
   const handleFinish = async () => {
+    if (!pubkey) return;
     setBusy(true);
     try {
-      reportSync(await syncMarmotPushNow());
+      reportSync(await syncMarmotPushNow(pubkey));
     } finally {
       setBusy(false);
     }
   };
 
-  const applyServer = async (pubkey: string | null) => {
-    if (pubkey !== null && !parseServerKey(pubkey)) {
+  const applyServer = async (server: string | null) => {
+    if (server !== null && !parseServerKey(server)) {
       Toast.show({ type: 'error', text1: t('securityScreen.marmotPushServerInvalid') });
       return;
     }
     setBusy(true);
     try {
-      const outcome = await setMarmotPushServer(pubkey);
-      const saved = await loadMarmotPushSettings();
-      setCustomServer(saved.customServer);
-      setEnabled(saved.enabled); // the real state — a failed change leaves push on
+      const outcome = await setMarmotPushServer(server);
+      if (pubkey) {
+        const saved = await loadMarmotPushSettings(pubkey);
+        setCustomServer(saved.customServer);
+        setEnabled(saved.enabled); // the real state — a failed change leaves push on
+      }
       setDraft('');
       if (outcome) reportEnable(outcome);
     } catch {
@@ -194,6 +206,7 @@ const MarmotPushSection: React.FC = () => {
           <ActivityIndicator color={colors.brandPink} testID="security-marmot-push-busy" />
         ) : (
           <Switch
+            disabled={!pubkey}
             value={enabled}
             onValueChange={handleToggle}
             accessibilityLabel={t('securityScreen.marmotPushToggle')}
@@ -203,6 +216,12 @@ const MarmotPushSection: React.FC = () => {
           />
         )}
       </View>
+
+      {otherAccounts && (
+        <Text style={styles.noticeText} testID="security-marmot-push-other-accounts">
+          {t('securityScreen.marmotPushOtherAccounts')}
+        </Text>
+      )}
 
       {enabled && (
         <View style={styles.statusRow} testID="security-marmot-push-status">

@@ -22,7 +22,8 @@ export function MarmotBridge(): null {
   const relaysRef = useRef(relays);
   relaysRef.current = relays;
 
-  // Opt-in Marmot push (MIP-05): device-level, outlives account switches.
+  // Opt-in Marmot push (MIP-05): one device token, opted into per account —
+  // each session only carries it if its own account turned push on.
   // Staggered like the session itself — nothing on first paint needs it.
   useEffect(() => {
     let stop: (() => void) | null = null;

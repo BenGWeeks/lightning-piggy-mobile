@@ -1,18 +1,26 @@
-// Device-level switch for Marmot push (MIP-05): owns the opt-in setting, the
-// native FCM / APNs token, and which notification server it is sealed to,
-// and hands the resulting registration to the active account's Marmot
-// session (whose MarmotPushRegistrar announces it in each group).
+// Marmot push (MIP-05): owns each account's opt-in, this device's native
+// FCM / APNs token, and which notification server it is sealed to, and hands
+// the resulting registration to the running account's Marmot session (whose
+// MarmotPushRegistrar announces it in each group).
 //
-// Off by default. Turning it on asks Apple/Google for this device's raw push
-// token (`getDevicePushTokenAsync` — never Expo's push service); turning it
-// off retracts the token from every group and deletes it at Apple/Google,
-// which kills every copy the group members hold.
+// The opt-in is PER ACCOUNT and off by default. The phone has one token, so
+// every account that turns push on shows the same token fingerprint in its
+// chats — two accounts on one phone (e.g. a parent and a smart saver) would
+// become linkable. So an account only ever publishes the token after its own
+// opt-in; switching to (or adding) another account never registers it.
+//
+// Turning it on asks Apple/Google for this device's raw push token
+// (`getDevicePushTokenAsync` — never Expo's push service); turning it off
+// retracts the token from that account's groups and, once no account on the
+// phone uses push, deletes it at Apple/Google, which kills every copy the
+// group members hold.
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import * as Application from 'expo-application';
 import { requireOptionalNativeModule } from 'expo-modules-core';
 import * as Notifications from 'expo-notifications';
+import * as SecureStore from 'expo-secure-store';
 import { nip19 } from 'nostr-tools';
 import { Platform } from 'react-native';
 
@@ -20,13 +28,21 @@ import type { DeviceRegistration } from './marmotPushEntries';
 import type { SyncResult } from './marmotPushRegistrar';
 import { deviceTokenBytes, tokenFingerprint, type PushPlatform } from './marmotPushToken';
 import { createPushTransport } from './marmotNetwork';
+import { perAccountKey } from './perAccountStorage';
+import { getActivePubkey } from './walletStorageService';
 import { getMarmotSession, subscribeMarmotSession, type MarmotSession } from './marmotSession';
 import { requestNotificationPermission } from './notificationService';
 import { MARMOT_PUSH_WAKE_TASK, setLiveMarmotSession } from './marmotPushWake';
 
+/** Per account (`perAccountKey`): '1' = this account opted in. */
 const ENABLED_KEY = 'marmot_push_enabled_v1';
+const ENABLED_PREFIX = `${ENABLED_KEY}_`;
 /** Custom server: JSON `{ pubkey, relayHint? }`; absent = the built-in one. */
 const SERVER_KEY = 'marmot_push_server_v1';
+/** SecureStore (a second store, so it holds when AsyncStorage won't): JSON
+ * list of removed accounts whose opt-in key couldn't be deleted — honoured
+ * and retried at every hydration, so a re-login never revives the opt-in. */
+const FORGOTTEN_KEY = 'marmot_push_forgotten_v1';
 /** Set while a token deletion at Apple/Google still has to be retried. */
 const RETIRE_PENDING_KEY = 'marmot_push_retire_pending_v1';
 const TOKEN_TIMEOUT_MS = 20_000;
@@ -102,18 +118,66 @@ export function parseServerKey(input: string): string | null {
 }
 
 export interface MarmotPushSettings {
+  /** This account opted in. */
   enabled: boolean;
-  /** A custom server, or null for the built-in one. */
+  /** Another account on this phone has push on — enabling here makes the
+   * two linkable by anyone who chats with both (same token fingerprint). */
+  otherAccounts: boolean;
+  /** A custom server (device-wide), or null for the built-in one. */
   customServer: PushServer | null;
 }
 
-/** The stored settings. Throws when storage can't be read — an unreadable
- * setting must never be taken for "off" or "default server". */
-export async function loadMarmotPushSettings(): Promise<MarmotPushSettings> {
-  const [enabled, server] = await Promise.all([
-    AsyncStorage.getItem(ENABLED_KEY),
+interface StoredSettings {
+  /** Accounts (lowercase hex) that opted in. */
+  enabledAccounts: Set<string>;
+  /** Accounts that ever opted in ('1' or '0' stored): their groups may still
+   * hold the token if a retraction never completed. */
+  everEnabled: Set<string>;
+  customServer: PushServer | null;
+}
+
+const accountKey = (pubkey: string) => perAccountKey(ENABLED_KEY, pubkey.toLowerCase());
+
+/** Every account's opt-in plus the server. Throws when storage can't be read
+ * — an unreadable setting must never be taken for "off" or "default server". */
+async function readStoredSettings(): Promise<StoredSettings> {
+  // Bound before any await: an account switch mid-read can't move it.
+  const legacyOwner = (getActivePubkey() ?? getMarmotSession()?.pubkey)?.toLowerCase();
+  const keys = (await AsyncStorage.getAllKeys()).filter((k) => k.startsWith(ENABLED_PREFIX));
+  const [entries, server, legacy] = await Promise.all([
+    keys.length ? AsyncStorage.multiGet(keys) : Promise.resolve([] as [string, string | null][]),
     AsyncStorage.getItem(SERVER_KEY),
+    AsyncStorage.getItem(ENABLED_KEY),
   ]);
+  const account = (k: string) => k.slice(ENABLED_PREFIX.length);
+  const enabledAccounts = new Set(entries.filter(([, v]) => v === '1').map(([k]) => account(k)));
+  const forgotten = await readForgotten();
+  if (forgotten.length > 0) {
+    const remaining: string[] = [];
+    for (const a of forgotten) {
+      enabledAccounts.delete(a);
+      const removed = await AsyncStorage.removeItem(accountKey(a)).then(
+        () => true,
+        () => false,
+      );
+      if (!removed) remaining.push(a);
+    }
+    if (remaining.length < forgotten.length) await writeForgotten(remaining).catch(() => undefined);
+  }
+  const everEnabled = new Set(keys.map(account));
+  // Builds before the per-account opt-in had one device-wide switch: it
+  // belongs to the account that was active then — never to the others, and
+  // never over any per-account choice already recorded (e.g. a later "off").
+  if (legacy !== null) {
+    if (legacy === '1' && keys.length === 0) {
+      // Owner not known yet: "unreadable" for now — touch nothing, retry.
+      if (!legacyOwner) throw new Error('push: legacy opt-in owner not known yet');
+      await AsyncStorage.setItem(accountKey(legacyOwner), '1');
+      enabledAccounts.add(legacyOwner);
+      everEnabled.add(legacyOwner);
+    }
+    await AsyncStorage.removeItem(ENABLED_KEY);
+  }
   let customServer: PushServer | null = null;
   try {
     const parsed = server ? (JSON.parse(server) as PushServer) : null;
@@ -121,7 +185,35 @@ export async function loadMarmotPushSettings(): Promise<MarmotPushSettings> {
   } catch {
     customServer = null;
   }
-  return { enabled: enabled === '1', customServer };
+  return { enabledAccounts, everEnabled, customServer };
+}
+
+async function readForgotten(): Promise<string[]> {
+  const raw = await SecureStore.getItemAsync(FORGOTTEN_KEY);
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((a): a is string => typeof a === 'string') : [];
+  } catch {
+    return []; // corrupt: nothing recoverable in it
+  }
+}
+
+async function writeForgotten(accounts: string[]): Promise<void> {
+  if (accounts.length === 0) await SecureStore.deleteItemAsync(FORGOTTEN_KEY);
+  else await SecureStore.setItemAsync(FORGOTTEN_KEY, JSON.stringify(accounts));
+}
+
+/** `pubkey`'s settings — the one shared hydration plus this run's changes.
+ * Throws when storage can't be read. */
+export async function loadMarmotPushSettings(pubkey: string): Promise<MarmotPushSettings> {
+  await ensureSettings();
+  const me = pubkey.toLowerCase();
+  return {
+    enabled: isEnabled(me),
+    otherAccounts: enabledAccounts().some((a) => a !== me),
+    customServer: settings.customServer,
+  };
 }
 
 // --- runtime state -------------------------------------------------------------
@@ -130,10 +222,21 @@ export async function loadMarmotPushSettings(): Promise<MarmotPushSettings> {
 // change, account removal — runs on ONE chain, so a slow token read can
 // never land after (and undo) a later change.
 
-let settings: MarmotPushSettings = { enabled: false, customServer: null };
+let settings: StoredSettings = {
+  enabledAccounts: new Set(),
+  everEnabled: new Set(),
+  customServer: null,
+};
 let settingsLoaded = false;
-// undefined until known: the token is read asynchronously at start, and a
-// session must not take "not read yet" for "push off" (it would retract).
+// This run's explicit per-account changes (enable / disable / removal). They
+// win over the stored set, so a late or failed read can never resurrect "on"
+// for an account the user just turned off — nor drop another account's
+// opt-in it never touched.
+const explicit = new Map<string, boolean>();
+// This phone's token, sealed to the current server — held while ANY account
+// uses push; null once none does. undefined until known: the token is read
+// asynchronously at start, and a session must not take "not read yet" for
+// "push off" (it would retract).
 let registration: DeviceRegistration | null | undefined = undefined;
 let started = false;
 // After an account removal deleted the token: the session to skip (the
@@ -160,13 +263,13 @@ function serial<T>(op: () => Promise<T>): Promise<T> {
 
 let hydrating: Promise<void> | null = null;
 
-/** Hydrate once — one shared read, applied only if no change has set the
- * settings meanwhile (a late read must never resurrect "on"). Throws (and
- * retries next time) when storage is unreadable. */
+/** Hydrate once — one shared read; this run's explicit changes stay on top
+ * of it (see `explicit`). Throws (and retries next time) when storage is
+ * unreadable. */
 function ensureSettings(): Promise<void> {
   if (settingsLoaded) return Promise.resolve();
-  hydrating ??= loadMarmotPushSettings()
-    .then((stored) => {
+  hydrating ??= readStoredSettings()
+    .then((stored: StoredSettings) => {
       if (settingsLoaded) return;
       settings = stored;
       settingsLoaded = true;
@@ -212,8 +315,28 @@ function toRegistration(platform: PushPlatform, raw: string, server: PushServer)
 }
 
 const currentServer = () => settings.customServer ?? builtInServer();
+const isEnabled = (pubkey: string): boolean => {
+  const me = pubkey.toLowerCase();
+  return explicit.get(me) ?? settings.enabledAccounts.has(me);
+};
+/** Accounts with push on (stored, with this run's changes on top). */
+const enabledAccounts = (): string[] => [
+  ...new Set([
+    ...[...settings.enabledAccounts].filter((a) => explicit.get(a) !== false),
+    ...[...explicit].filter(([, on]) => on).map(([a]) => a),
+  ]),
+];
+const anyEnabled = (): boolean => enabledAccounts().length > 0;
 
-/** Hand the registration to `session` and sync it in the background. */
+/** What `pubkey`'s groups should carry: this phone's token only if that
+ * account opted in, null (retract) if it didn't, undefined while unknown. */
+function registrationFor(pubkey: string): DeviceRegistration | null | undefined {
+  const me = pubkey.toLowerCase();
+  if (!explicit.has(me) && !settingsLoaded) return undefined;
+  return isEnabled(me) ? registration : null;
+}
+
+/** Hand `session` its account's registration and sync it in the background. */
 function applyTo(session: MarmotSession | null): void {
   setLiveMarmotSession(session !== null);
   notifyStatus();
@@ -227,22 +350,25 @@ function applyTo(session: MarmotSession | null): void {
     void serial(() => refreshAfterRetirement(session));
     return;
   }
-  if (registration === undefined) return;
-  session.pushRegistration.setRegistration(registration);
+  const reg = registrationFor(session.pubkey);
+  if (reg === undefined) return;
+  session.pushRegistration.setRegistration(reg);
   session.pushRegistration.schedule();
 }
 
-/** A user-initiated pass over the active account's groups ("Finish setup"):
- * a remote signer may prompt. */
-export function syncMarmotPushNow(): Promise<SyncResult | null> {
-  return serial(syncActiveSession);
+/** A user-initiated pass over `pubkey`'s groups ("Finish setup"): a remote
+ * signer may prompt. */
+export function syncMarmotPushNow(pubkey: string): Promise<SyncResult | null> {
+  return serial(() => syncAccountSession(pubkey));
 }
 
-async function syncActiveSession(): Promise<SyncResult | null> {
+/** Sync the running session — only if it is `pubkey`'s (an account switch
+ * mid-action must not touch the next account's groups). */
+async function syncAccountSession(pubkey: string): Promise<SyncResult | null> {
   const session = getMarmotSession();
-  if (!session) return null;
+  if (!session || session.pubkey.toLowerCase() !== pubkey.toLowerCase()) return null;
   // On but no token yet (the startup read failed): retry it now.
-  if (registration === undefined && settings.enabled && !retiring && !awaitingSession) {
+  if (registration === undefined && isEnabled(pubkey) && !retiring && !awaitingSession) {
     try {
       registration = await readRegistration(currentServer());
       await registerWakeTask();
@@ -250,15 +376,17 @@ async function syncActiveSession(): Promise<SyncResult | null> {
       return null;
     }
   }
-  if (registration === undefined) return null;
-  session.pushRegistration.setRegistration(registration);
+  const reg = registrationFor(pubkey);
+  if (reg === undefined) return null;
+  session.pushRegistration.setRegistration(reg);
   return session.pushRegistration.sync({ interactive: true });
 }
 
 /**
- * Once, at app start: restore the setting, refresh the token without
- * prompting, and keep every future session registered. Never asks a remote
- * signer — changed groups wait for a user action (see MarmotPushRegistrar).
+ * Once, at app start: restore the settings, refresh the token without
+ * prompting, and keep every future session in line with ITS account's
+ * opt-in. Never asks a remote signer — changed groups wait for a user action
+ * (see MarmotPushRegistrar).
  */
 export function startMarmotPushRegistration(): () => void {
   if (started) return () => undefined;
@@ -269,7 +397,7 @@ export function startMarmotPushRegistration(): () => void {
       // Also recovers a startup read that failed / timed out: a token that
       // arrives later is taken — unless a deletion is still outstanding or
       // we're waiting for another account after an account removal.
-      if (!settings.enabled || retiring || awaitingSession) return;
+      if (!anyEnabled() || retiring || awaitingSession) return;
       try {
         const platform = native.type === 'ios' ? 'apns' : 'fcm';
         registration = toRegistration(platform, String(native.data), currentServer());
@@ -292,7 +420,7 @@ export function startMarmotPushRegistration(): () => void {
     if (await retirementPending()) {
       if (!(await retireDeviceToken())) return;
     }
-    if (settings.enabled) {
+    if (anyEnabled()) {
       try {
         registration = await readRegistration(currentServer());
         await registerWakeTask();
@@ -303,8 +431,8 @@ export function startMarmotPushRegistration(): () => void {
         return;
       }
     } else {
-      // Off: retract anything still published (e.g. turned off while the
-      // account's session wasn't running).
+      // Off everywhere: retract anything still published (e.g. turned off
+      // while the account's session wasn't running).
       registration = null;
     }
     applyTo(getMarmotSession());
@@ -322,31 +450,24 @@ export type EnableOutcome =
   /** No token from Apple/Google — e.g. no Google Play services. */
   | { status: 'unavailable' };
 
-/** Turn push on (user action): permission, token, then every group. */
-export async function enableMarmotPush(): Promise<EnableOutcome> {
+/** Turn push on for `pubkey` (user action): permission, token, then that
+ * account's groups. Other accounts on the phone are left as they are. */
+export async function enableMarmotPush(pubkey: string): Promise<EnableOutcome> {
   if (!(await requestNotificationPermission())) return { status: 'no-permission' };
-  return serial(enableNow);
+  return serial(() => enableNow(pubkey));
 }
 
-async function enableNow(): Promise<EnableOutcome> {
+async function enableNow(pubkey: string): Promise<EnableOutcome> {
   try {
     await ensureSettings();
   } catch {
     return { status: 'unavailable' };
   }
-  // An old token still waiting to be deleted: try once more. Either way the
-  // user now wants push on, so the marker can't be left to delete the token
-  // we're about to hand out at the next start.
-  if (await retirementPending()) {
-    await retireDeviceToken();
-    // The marker must be gone for good before a new token is handed out,
-    // or the next start would delete it.
-    try {
-      await AsyncStorage.removeItem(RETIRE_PENDING_KEY);
-    } catch {
-      return { status: 'unavailable' };
-    }
-    retiring = false;
+  // An old token still waiting to be deleted (e.g. a removed account's,
+  // whose groups may still hold it): it must really be gone before this
+  // account publishes a token — else the two would be linkable. Retryable.
+  if ((await retirementPending()) && !(await retireDeviceToken())) {
+    return { status: 'unavailable' };
   }
   let next: DeviceRegistration;
   try {
@@ -355,43 +476,73 @@ async function enableNow(): Promise<EnableOutcome> {
     if (__DEV__) console.warn('[MarmotPush] no device token:', e);
     return { status: 'unavailable' };
   }
-  // Persist first, then commit: a failed write must leave push off.
+  // Persist first, then commit: a failed write must leave push off. Then
+  // lift a tombstone from an earlier removal of this account (it would turn
+  // the fresh opt-in back off at the next start) — only after the opt-in is
+  // written, so a failure never leaves a stale '1' unprotected.
   try {
-    await AsyncStorage.setItem(ENABLED_KEY, '1');
+    await AsyncStorage.setItem(accountKey(pubkey), '1');
   } catch {
     return { status: 'unavailable' };
   }
-  settings.enabled = true;
-  settingsLoaded = true;
+  try {
+    const forgotten = await readForgotten();
+    const me = pubkey.toLowerCase();
+    if (forgotten.includes(me)) await writeForgotten(forgotten.filter((a) => a !== me));
+  } catch {
+    await AsyncStorage.setItem(accountKey(pubkey), '0').catch(() => undefined);
+    return { status: 'unavailable' };
+  }
+  explicit.set(pubkey.toLowerCase(), true);
   registration = next;
   await registerWakeTask();
-  return { status: 'enabled', sync: await syncActiveSession() };
+  return { status: 'enabled', sync: await syncAccountSession(pubkey) };
 }
 
 export interface DisableOutcome {
   sync: SyncResult | null;
-  /** False when Apple/Google couldn't be reached — retried at next start. */
+  /** False when Apple/Google couldn't be reached — retried at next start.
+   * True too when the token is kept because another account still uses it. */
   tokenDeleted: boolean;
   /** False when the "off" setting couldn't be stored (it may come back on). */
   saved: boolean;
 }
 
-/** Turn push off (user action): retract from every group, then delete the
- * token at Apple/Google so copies the members already hold stop working. */
-export function disableMarmotPush(): Promise<DisableOutcome> {
+/** Turn push off for `pubkey` (user action): retract from its groups, then
+ * — once no account on the phone uses push — delete the token at
+ * Apple/Google so copies the members already hold stop working. */
+export function disableMarmotPush(pubkey: string): Promise<DisableOutcome> {
   return serial(async () => {
     // Explicitly off — an unreadable store doesn't change that.
-    await ensureSettings().catch(() => undefined);
-    settings.enabled = false;
-    settingsLoaded = true; // explicit now — no late read may override it
-    registration = null;
-    // Retract + revoke regardless of whether the setting could be saved.
-    const saved = await AsyncStorage.setItem(ENABLED_KEY, '0').then(
+    const known = await ensureSettings().then(
       () => true,
       () => false,
     );
-    const sync = await syncActiveSession().catch(() => null);
-    const tokenDeleted = await retireDeviceToken();
+    explicit.set(pubkey.toLowerCase(), false); // no late read may override it
+    // Unknown whether others use it: treat as none (revoking is the safe side).
+    const othersUsePush = known && anyEnabled();
+    if (!othersUsePush) registration = null;
+    // Retract + revoke regardless of whether the setting could be saved.
+    const saved = await AsyncStorage.setItem(accountKey(pubkey), '0').then(
+      () => true,
+      () => false,
+    );
+    const session = getMarmotSession();
+    const sync = await syncAccountSession(pubkey).catch(() => null);
+    // Another account still uses the token. If every one of this account's
+    // groups took the signed removal, that is its retraction — keep the token.
+    // Otherwise (declined, failed, or not this account's session) its groups
+    // may still hold it, linking it to the other account: replace the token.
+    const retracted =
+      !!session &&
+      !!sync &&
+      !sync.declined &&
+      sync.pending === 0 &&
+      getMarmotSession() === session && // not cut short by an account switch
+      !(await session.pushRegistration.holdsRecords().catch(() => true));
+    const tokenDeleted = !othersUsePush
+      ? await retireDeviceToken()
+      : retracted || (await rotateDeviceToken());
     return { sync, tokenDeleted, saved };
   });
 }
@@ -409,7 +560,7 @@ export async function setMarmotPushServer(pubkey: string | null): Promise<Enable
     if (custom) await AsyncStorage.setItem(SERVER_KEY, JSON.stringify(custom));
     else await AsyncStorage.removeItem(SERVER_KEY);
     settings.customServer = custom;
-    if (!settings.enabled) return null;
+    if (!anyEnabled()) return null;
     // Same phone token, new server: re-seal it — no new token read that
     // could fail half-way through the change.
     if (registration) {
@@ -422,16 +573,17 @@ export async function setMarmotPushServer(pubkey: string | null): Promise<Enable
         server: server.pubkey,
         ...(server.relayHint ? { relayHint: server.relayHint } : {}),
       };
-      return { status: 'enabled', sync: await syncActiveSession() };
+      const active = getMarmotSession()?.pubkey;
+      return { status: 'enabled', sync: active ? await syncAccountSession(active) : null };
     }
-    return enableNow();
+    const active = getActivePubkey();
+    return active && isEnabled(active) ? enableNow(active) : null;
   });
 }
 
-/** Groups of the active account still waiting for a signature. */
-/** Groups of the active account still waiting for a signature; null when
- * push is on but this phone has no token yet (Finish setup retries it). */
-export async function pendingMarmotPushGroups(): Promise<number | null> {
+/** `pubkey`'s groups still waiting for a signature; null when its push is
+ * on but this phone has no token yet (Finish setup retries it). */
+export async function pendingMarmotPushGroups(pubkey: string): Promise<number | null> {
   if (
     !(await ensureSettings().then(
       () => true,
@@ -439,23 +591,28 @@ export async function pendingMarmotPushGroups(): Promise<number | null> {
     ))
   )
     return null;
+  if (isEnabled(pubkey) && registration === undefined) return null;
   const session = getMarmotSession();
-  if (settings.enabled && registration === undefined) return null;
-  if (!session || registration === undefined) return 0;
-  session.pushRegistration.setRegistration(registration);
+  if (!session || session.pubkey.toLowerCase() !== pubkey.toLowerCase()) return 0;
+  const reg = registrationFor(pubkey);
+  if (reg === undefined) return 0;
+  session.pushRegistration.setRegistration(reg);
   return session.pushRegistration.pendingCount();
 }
 
 /**
- * An account is being removed from this device. Its signer is already gone,
- * so it can't sign removals: delete the token at Apple/Google instead (on
- * Android every copy in that account's groups goes dead; iOS may hand the
- * same APNs token back later, so there revocation is best-effort — MIP-05
- * "Best-effort revocation"). Only once the deletion succeeded (else it is
- * retried at the next start, before any token is handed out) is a fresh
- * token fetched — when another account's session runs — and that account's
- * groups re-signed as part of this user action (a remote signer may prompt).
- * Returns false when the deletion has to be retried.
+ * An account is being removed from this device. If it ever had push on
+ * (even if later turned off — a declined or unfinished retraction may have
+ * left the token in its groups), its signer is already gone, so it can't
+ * sign removals: delete the token at Apple/Google instead (on Android every
+ * copy in that account's groups goes dead; iOS may hand the same APNs token
+ * back later, so there revocation is best-effort — MIP-05 "Best-effort
+ * revocation"). Only once the deletion succeeded (else it is retried at the
+ * next start, before any token is handed out) is a fresh token fetched —
+ * only if another account opted in — and the running account's groups
+ * re-signed as part of this user action (a remote signer may prompt).
+ * Returns false when the deletion has to be retried, or the account's
+ * opt-in couldn't be forgotten.
  */
 export function retireMarmotPushForAccount(pubkey: string): Promise<boolean> {
   return serial(async () => {
@@ -464,23 +621,72 @@ export function retireMarmotPushForAccount(pubkey: string): Promise<boolean> {
       () => true,
       () => false,
     );
-    if (known && !settings.enabled) return true;
+    const me = pubkey.toLowerCase();
+    // Ever opted in — even if it later turned push off, a declined or
+    // unfinished retraction may have left the token in its groups.
+    const hadPush = !known || explicit.has(me) || settings.everEnabled.has(me);
+    if (!hadPush) return true; // its groups never held the token
+    // Forget its opt-in, so a later re-login starts with push off ('0' if
+    // the key can't be removed).
+    explicit.set(me, false);
+    const forgotten = await AsyncStorage.removeItem(accountKey(pubkey)).then(
+      () => true,
+      () => tombstone(me),
+    );
     registration = undefined;
     if (!(await retireDeviceToken())) return false;
     const current = getMarmotSession();
     if (current && current.pubkey !== pubkey) await refreshAfterRetirement(current);
     else awaitingSession = { stale: current };
-    return true;
+    return forgotten;
   });
 }
 
-async function refreshAfterRetirement(session: MarmotSession): Promise<void> {
-  if (!settings.enabled || (await retirementPending())) return;
+/** The opt-in key couldn't be deleted: record the account in SecureStore
+ * (honoured + retried at every hydration), and mark it off as well. */
+async function tombstone(account: string): Promise<boolean> {
+  const marked = await readForgotten()
+    .then((list) => (list.includes(account) ? undefined : writeForgotten([...list, account])))
+    .then(
+      () => true,
+      () => false,
+    );
+  const zeroed = await AsyncStorage.setItem(accountKey(account), '0').then(
+    () => true,
+    () => false,
+  );
+  return marked || zeroed;
+}
+
+/** Delete the token and fetch a new one for the accounts still on push —
+ * their sessions re-publish it as they run (a remote signer waits for the
+ * user). False when the deletion has to be retried (next start). */
+async function rotateDeviceToken(): Promise<boolean> {
+  registration = undefined;
+  if (!(await retireDeviceToken())) return false;
   try {
     registration = await readRegistration(currentServer());
+    await registerWakeTask();
+  } catch {
+    // unknown, not "off" — the next start (or Finish setup) retries
+  }
+  return true;
+}
+
+async function refreshAfterRetirement(session: MarmotSession): Promise<void> {
+  if (await retirementPending()) return;
+  if (!anyEnabled()) {
+    registration = null; // nobody left on push: no new token at all
+    return;
+  }
+  try {
+    registration = await readRegistration(currentServer());
+    await registerWakeTask();
   } catch {
     return; // unknown, not "off" — the next start retries
   }
+  // Other opted-in accounts get the new token when their sessions run.
+  if (!isEnabled(session.pubkey)) return;
   session.pushRegistration.setRegistration(registration);
   void session.pushRegistration.sync({ interactive: true }).catch(() => undefined);
 }
@@ -504,7 +710,7 @@ async function retireDeviceToken(): Promise<boolean> {
     retiring = true;
     await AsyncStorage.setItem(RETIRE_PENDING_KEY, '1').catch(() => undefined);
   }
-  if (Platform.OS === 'android' && !settings.enabled) {
+  if (Platform.OS === 'android' && !anyEnabled()) {
     await Notifications.unregisterTaskAsync(MARMOT_PUSH_WAKE_TASK).catch(() => undefined);
   }
   return deleted;
@@ -532,8 +738,9 @@ async function lookupRelayHint(server: string): Promise<{ relayHint?: string }> 
 
 /** Test seam: forget module state between tests. */
 export function __resetMarmotPushForTests(): void {
-  settings = { enabled: false, customServer: null };
+  settings = { enabledAccounts: new Set(), everEnabled: new Set(), customServer: null };
   settingsLoaded = false;
+  explicit.clear();
   hydrating = null;
   registration = undefined;
   awaitingSession = null;

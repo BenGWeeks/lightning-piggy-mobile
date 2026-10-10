@@ -214,8 +214,17 @@ other members' encrypted device tokens to their notification server, which
 wakes their phones (White Noise users via White Noise's Transponder, Lightning
 Piggy users via ours).
 
-*Receive side (opt-in, off by default).* Settings → Security → "Message
-notifications via push (Marmot)":
+*Receive side (opt-in per account, off by default).* Settings → Security →
+"Message notifications via push (Marmot)". The phone has one token, so every
+account that publishes it shows the same fingerprint in its chats; two
+accounts on one phone (a parent and a smart saver, say) would become linkable
+by anyone who chats with both. So the switch is stored per account
+(`marmot_push_enabled_v1_<pubkey>`): a session only carries the token if its
+own account opted in, an account that is added or switched to never inherits
+it, and enabling it while another account on the phone has it shows "Other
+accounts on this phone also use push; people who chat with both could tell
+they're on the same phone." A pre-release device-wide switch migrates to the
+account that was active, only.
 
 . `marmotPushRegistration.ts` asks Apple/Google for this device's *native*
   token (`getDevicePushTokenAsync` — FCM on Android, APNs on iOS; never Expo's
@@ -266,13 +275,19 @@ When the app shows a Marmot message itself, it clears any generic push
 alert already in the tray (ours on Android, the server's data-less one on
 iOS); opening the Messages list clears them too.
 
-*Turning it off* sends a signed kind-449 removal into each group, then deletes
-the token at Apple/Google (`unregisterForNotificationsAsync`; retried at the
-next start if offline), so copies the members already hold stop working.
-*Removing an account* can't sign removals (its key is gone), so it deletes
-the token instead and registers a fresh one once another account's session
-runs. iOS may return the same APNs token after re-registering, so revocation
-there is best-effort.
+*Turning it off* sends a signed kind-449 removal into each of that account's
+groups, then — once no account on the phone still uses push — deletes the
+token at Apple/Google (`unregisterForNotificationsAsync`; retried at the next
+start if offline), so copies the members already hold stop working. While
+another account still uses it, the token is kept only if every group took
+the signed removal; if the signer declined or the pass didn't finish, the
+token is replaced (deleted, and a new one fetched for the accounts still on
+push) so the leftover records can't link the two accounts. Enabling push
+never hands out a token whose deletion is still owed. *Removing an
+account* that had push on can't sign removals (its key is gone), so it
+deletes the token instead and fetches a fresh one only if another account
+opted in. iOS may return the same APNs token after re-registering, so
+revocation there is best-effort.
 
 *Known residuals.* A push carries no message id (by design — the server
 must learn nothing), so de-duplication is a heuristic: on Android a recent
@@ -282,10 +297,14 @@ for a few seconds after being backgrounded can show both its own alert and
 the server's. Exact matching would need a message correlation the protocol
 doesn't carry (and an iOS notification service extension).
 
-*Privacy* (shown next to the switch): Apple/Google learn that the phone got a
-notification and when, not what it says. Our server learns nothing about who
-you talk to: it receives only gift-wrapped triggers from fresh ephemeral keys
-and decrypts a device token from each.
+*Privacy* (behind "Privacy details" next to the switch): Apple/Google learn
+that the phone got a notification and when, not what it says. Our server only
+ever sees sealed device tokens: it receives gift-wrapped triggers from fresh
+ephemeral keys and decrypts the device tokens in each, so it can see how many
+phones one message fans out to and how often this phone is woken, but not who
+sent it, which chat it was, or who you are. People in your Marmot chats can
+see that this phone has push on, and the same phone shows the same token
+fingerprint in every chat — hence the per-account opt-in above.
 
 *Limits.* On de-Googled Android there is no FCM token, so enabling reports
 "unavailable" and the local paths above remain the only ones. A force-stopped

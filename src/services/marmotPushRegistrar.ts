@@ -195,6 +195,13 @@ export class MarmotPushRegistrar {
     return () => this.settledListeners.delete(listener);
   }
 
+  /** True while any group may still hold a record we published: the journal
+   * keeps an entry until its removal was sent (or the leaf died). */
+  async holdsRecords(): Promise<boolean> {
+    await this.deps.ready;
+    return (await this.deps.backend.keys(NAMESPACE)).length > 0;
+  }
+
   /** Groups not yet in line with the current registration. */
   async pendingCount(): Promise<number> {
     await this.deps.ready;
