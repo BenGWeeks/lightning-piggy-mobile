@@ -30,9 +30,6 @@
     "profile": "Perfil",
     "wallets": "Carteras",
     "onChain": "On-chain",
-    "currency": "Moneda",
-    "appearance": "Apariencia",
-    "language": "Idioma",
     "security": "Seguridad",
     "about": "Acerca de",
     "switchToAccount": "Cambiar a {{name}}",
@@ -42,7 +39,8 @@
     "signInOrCreate": "Iniciar sesión o crear cuenta",
     "signInButton": "Iniciar sesión / Crear cuenta",
     "signOut": "Cerrar sesión",
-    "notifications": "Notificaciones"
+    "notifications": "Notificaciones",
+    "displayLanguage": "Pantalla e idioma"
   },
   "accountSwitcherSheet": {
     "accounts": "Cuentas",
@@ -158,7 +156,6 @@
     "decimalPoint": "Punto decimal"
   },
   "appearanceScreen": {
-    "title": "Apariencia",
     "system": "Sistema",
     "themeSystemDesc": "Seguir la configuración del dispositivo",
     "themeLight": "Claro",
@@ -177,12 +174,11 @@
     "animationHint": "La animación que se muestra mientras se envía un pago. Ambas cambian de morado a verde cuando el pago se completa."
   },
   "languageScreen": {
-    "title": "Idioma",
     "sectionLabel": "Idioma",
     "systemDesc": "Seguir el idioma del dispositivo",
     "alwaysLanguage": "Siempre {{language}}",
     "a11y": "Idioma {{label}}",
-    "hint": "Traduce el texto de la interfaz de la app. Actualmente activo: {{language}}. Por ahora solo hay un par de pantallas traducidas; llegarán más en próximas actualizaciones (#137)."
+    "hint": "Cambia el idioma de los textos de la app. Ahora: {{language}}."
   },
   "btcMapAttribution": {
     "a11yLabel": "Con tecnología de BTC Map — abre btcmap.org",
@@ -2517,5 +2513,10 @@
     "forThisAccountHint": "Cada cuenta de este teléfono elige las suyas.",
     "onThisPhone": "En este teléfono",
     "onThisPhoneHint": "Igual para todas las cuentas de este teléfono."
+  },
+  "displayLanguageScreen": {
+    "title": "Pantalla e idioma",
+    "change": "Cambiar",
+    "currencyRowA11y": "Moneda: {{code}} {{name}}. Cambiar moneda"
   }
 }

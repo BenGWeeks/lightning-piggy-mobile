@@ -30,9 +30,6 @@
     "profile": "Профіль",
     "wallets": "Гаманці",
     "onChain": "On-chain",
-    "currency": "Валюта",
-    "appearance": "Вигляд",
-    "language": "Мова",
     "security": "Безпека",
     "about": "Про застосунок",
     "switchToAccount": "Перейти до {{name}}",
@@ -42,7 +39,8 @@
     "signInOrCreate": "Увійти або створити акаунт",
     "signInButton": "Увійти / Створити акаунт",
     "signOut": "Вийти",
-    "notifications": "Сповіщення"
+    "notifications": "Сповіщення",
+    "displayLanguage": "Екран і мова"
   },
   "accountSwitcherSheet": {
     "accounts": "Акаунти",
@@ -158,7 +156,6 @@
     "decimalPoint": "Десяткова кома"
   },
   "appearanceScreen": {
-    "title": "Вигляд",
     "system": "Системний",
     "themeSystemDesc": "Слідувати налаштуванню пристрою",
     "themeLight": "Світла",
@@ -177,12 +174,11 @@
     "animationHint": "Анімація, що показується під час надсилання платежу. Обидві переходять з фіолетового в зелений, коли платіж успішний."
   },
   "languageScreen": {
-    "title": "Мова",
     "sectionLabel": "Мова",
     "systemDesc": "Слідувати мові пристрою",
     "alwaysLanguage": "Завжди {{language}}",
     "a11y": "Мова {{label}}",
-    "hint": "Перекладає текст інтерфейсу застосунку. Зараз активна: {{language}}. Поки що перекладено лише кілька екранів — решта зʼявиться в наступних оновленнях (#137)."
+    "hint": "Змінює мову текстів застосунку. Зараз: {{language}}."
   },
   "btcMapAttribution": {
     "a11yLabel": "Працює на BTC Map — відкриває btcmap.org",
@@ -2517,5 +2513,10 @@
     "forThisAccountHint": "Кожен обліковий запис на цьому телефоні налаштовує їх окремо.",
     "onThisPhone": "На цьому телефоні",
     "onThisPhoneHint": "Однаково для всіх облікових записів на цьому телефоні."
+  },
+  "displayLanguageScreen": {
+    "title": "Екран і мова",
+    "change": "Змінити",
+    "currencyRowA11y": "Валюта: {{code}} {{name}}. Змінити валюту"
   }
 }

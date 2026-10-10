@@ -30,9 +30,6 @@
     "profile": "Profile",
     "wallets": "Wallets",
     "onChain": "On-chain",
-    "currency": "Currency",
-    "appearance": "Appearance",
-    "language": "Language",
     "security": "Security",
     "about": "About",
     "switchToAccount": "Switch to {{name}}",
@@ -42,7 +39,8 @@
     "signInOrCreate": "Sign in or create account",
     "signInButton": "Sign In / Create Account",
     "signOut": "Sign Out",
-    "notifications": "Notifications"
+    "notifications": "Notifications",
+    "displayLanguage": "Display & language"
   },
   "accountSwitcherSheet": {
     "accounts": "Accounts",
@@ -158,7 +156,6 @@
     "decimalPoint": "Decimal point"
   },
   "appearanceScreen": {
-    "title": "Appearance",
     "system": "System",
     "themeSystemDesc": "Follow your device setting",
     "themeLight": "Light",
@@ -177,12 +174,11 @@
     "animationHint": "The animation shown while a payment is being sent. Both fade from purple to green when the payment succeeds."
   },
   "languageScreen": {
-    "title": "Language",
     "sectionLabel": "Language",
     "systemDesc": "Follow your device language",
     "alwaysLanguage": "Always {{language}}",
     "a11y": "{{label}} language",
-    "hint": "Translates the app's UI text. Currently active: {{language}}. Only a couple of screens are translated so far — more land in follow-up updates (#137)."
+    "hint": "Changes the language of the app's text. Now showing: {{language}}."
   },
   "btcMapAttribution": {
     "a11yLabel": "Powered by BTC Map — opens btcmap.org",
@@ -2517,5 +2513,10 @@
     "forThisAccountHint": "Each account on this phone chooses its own.",
     "onThisPhone": "On this phone",
     "onThisPhoneHint": "The same for every account on this phone."
+  },
+  "displayLanguageScreen": {
+    "title": "Display & language",
+    "change": "Change",
+    "currencyRowA11y": "Currency: {{code}} {{name}}. Change currency"
   }
 }
