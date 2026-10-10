@@ -144,7 +144,7 @@ export const MARKET_PRODUCTS: MarketProduct[] = [
     id: 'robotechy-lightning-piggy',
     title: 'Lightning Piggy',
     description:
-      'Electronic cash piggy bank for children that accepts Bitcoin sent over Lightning.',
+      'Electronic cash piggy bank for smart savers that accepts Bitcoin sent over Lightning.',
     priceSats: gbpToSats(60),
     priceFiatLabel: '£60',
     image:

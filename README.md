@@ -6,7 +6,7 @@
   </picture>
 </p>
 
-A mobile Bitcoin Lightning wallet built with Expo/React Native, connecting via Nostr Wallet Connect (NWC) with Nostr social features.
+A mobile Bitcoin Lightning wallet for smart savers and their families, built with Expo/React Native, connecting via Nostr Wallet Connect (NWC) with Nostr social features.
 
 <p align="center">
   <img alt="Explore" src="docs/images/app-hero-02-explore.webp" width="19%">

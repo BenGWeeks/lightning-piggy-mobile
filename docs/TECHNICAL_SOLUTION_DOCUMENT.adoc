@@ -1,5 +1,5 @@
 = Technical Solution Document
-Lightning Piggy — A Lightning Wallet for Kids
+Lightning Piggy — A Lightning Wallet for Smart Savers and Their Families
 :doctype: book
 :toc: macro
 :toclevels: 2

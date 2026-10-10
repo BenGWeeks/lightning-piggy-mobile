@@ -394,7 +394,7 @@ Transactions are owned by `WalletContext` (not local HomeScreen state):
 
 == Overview
 
-Lightning Piggy is a Lightning wallet app for kids built with React Native (Expo). The Nostr integration adds social features: identity, friends, profile management, and zaps. Nostr is optional — the app works as a standalone wallet without it.
+Lightning Piggy is a Lightning wallet app for smart savers and their families, built with React Native (Expo). The Nostr integration adds social features: identity, friends, profile management, and zaps. Nostr is optional — the app works as a standalone wallet without it.
 
 == Architecture
 
@@ -659,7 +659,7 @@ A single-flight guard (`useRef<Promise>`) coalesces overlapping `refreshDmInbox`
 
 === Following-only filter
 
-"Following only" is treated as a safety boundary for the kids-oriented UX: DMs from strangers are hidden from the inbox, the cache, and the thread view. The filter is enforced in three places:
+"Following only" is treated as a safety boundary for the family-oriented UX: DMs from strangers are hidden from the inbox, the cache, and the thread view. The filter is enforced in three places:
 
 1. `refreshDmInbox` — gates decrypt attempts (NIP-04) or cache writes + state commits (NIP-17).
 2. `buildDmSummaries` — re-applies when summaries are built from state, so unfollowing is immediately reflected without waiting for the next fetch.
@@ -903,7 +903,7 @@ The app includes a safety tip on profile edit and account creation screens:
 
 > "Tip: You don't need to use your real name or photo for your profile."
 
-This is a gentle, non-intrusive reminder appropriate for a kids' app without requiring age verification.
+This is a gentle, non-intrusive reminder appropriate for a family app, without requiring age verification.
 
 == Direct Messaging Performance Architecture (Issues #176, #177, #190)
 
