@@ -12,7 +12,8 @@ import {
 } from '../services/nativeCryptoPreference';
 
 /**
- * Settings → Advanced → Experimental: "Faster encryption (beta)" — routes
+ * Settings → Advanced → On this phone → Encryption: "Faster encryption
+ * (beta)" — routes
  * NIP-44 encryption and signature checks through the native rust-nostr
  * module (#1057). Moved from the Nostr screen.
  */
@@ -52,7 +53,7 @@ const NativeCryptoSection: React.FC = () => {
 
   return (
     <View style={styles.sectionGap} testID="advanced-experimental">
-      <Text style={shared.sectionLabel}>{t('nostrScreen.experimental')}</Text>
+      <Text style={shared.sectionLabel}>{t('advancedScreen.encryption')}</Text>
       <Text style={shared.fieldHint}>{t('nostrScreen.nativeCryptoHint')}</Text>
       <View style={[styles.experimentalRow, !available && styles.experimentalRowDisabled]}>
         <View style={styles.experimentalTextBlock}>
@@ -67,7 +68,8 @@ const NativeCryptoSection: React.FC = () => {
           value={available && on}
           onValueChange={handleToggle}
           disabled={!available}
-          accessibilityLabel={t('nostrScreen.nativeCryptoA11y')}
+          accessibilityLabel={t('nostrScreen.nativeCryptoLabel')}
+          accessibilityHint={t('nostrScreen.nativeCryptoHint')}
           testID="nostr-native-crypto-toggle"
           trackColor={{ false: colors.divider, true: colors.brandPink }}
           thumbColor={available && on ? colors.white : undefined}

@@ -7,12 +7,14 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createSharedAccountStyles } from '../screens/account/sharedStyles';
 import { createAboutScreenStyles } from '../styles/AboutScreen.styles';
+import { createAdvancedScreenStyles } from '../styles/AdvancedScreen.styles';
 
 const HermesProfilerSection: React.FC = () => {
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createAboutScreenStyles(colors), [colors]);
   const sharedAccountStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
+  const advanced = useMemo(() => createAdvancedScreenStyles(colors), [colors]);
   // Hermes sampling profiler — gated on __DEV__ || EXPO_PUBLIC_KEEP_PERF_LOGS
   // so it never ships to production builds. Start writes samples in
   // memory; Stop & Share dumps a .cpuprofile + opens the OS share sheet
@@ -91,50 +93,52 @@ const HermesProfilerSection: React.FC = () => {
     }
   };
 
+  // Developer options only exist in dev / perf builds, header included.
+  if (!profilerAvailable) return null;
+
   return (
-    <>
-      {profilerAvailable && (
-        <View style={[sharedAccountStyles.card, { marginTop: 16 }]} testID="hermes-profiler-card">
-          <Text style={styles.aboutTitle}>{t('hermesProfiler.title')}</Text>
-          <Text style={styles.aboutBody}>{t('hermesProfiler.hint')}</Text>
-          <View style={styles.profilerRow}>
-            <TouchableOpacity
-              onPress={handleProfilerStart}
-              disabled={profilerRecording || profilerBusy}
-              style={[
-                styles.profilerButton,
-                (profilerRecording || profilerBusy) && styles.profilerButtonDisabled,
-              ]}
-              accessibilityLabel={t('hermesProfiler.startA11y')}
-              testID="hermes-profiler-start"
-            >
-              <Text style={styles.profilerButtonText}>
-                {profilerRecording ? t('hermesProfiler.recording') : t('hermesProfiler.start')}
+    <View style={advanced.sectionGap} testID="advanced-developer-options">
+      <Text style={sharedAccountStyles.sectionLabel}>{t('advancedScreen.developerOptions')}</Text>
+      <View style={[sharedAccountStyles.card, advanced.devCard]} testID="hermes-profiler-card">
+        <Text style={styles.aboutTitle}>{t('hermesProfiler.title')}</Text>
+        <Text style={styles.aboutBody}>{t('hermesProfiler.hint')}</Text>
+        <View style={styles.profilerRow}>
+          <TouchableOpacity
+            onPress={handleProfilerStart}
+            disabled={profilerRecording || profilerBusy}
+            style={[
+              styles.profilerButton,
+              (profilerRecording || profilerBusy) && styles.profilerButtonDisabled,
+            ]}
+            accessibilityLabel={t('hermesProfiler.startA11y')}
+            testID="hermes-profiler-start"
+          >
+            <Text style={styles.profilerButtonText}>
+              {profilerRecording ? t('hermesProfiler.recording') : t('hermesProfiler.start')}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={handleProfilerStopAndShare}
+            disabled={!profilerRecording || profilerBusy}
+            style={[
+              styles.profilerButton,
+              styles.profilerButtonPrimary,
+              (!profilerRecording || profilerBusy) && styles.profilerButtonDisabled,
+            ]}
+            accessibilityLabel={t('hermesProfiler.stopA11y')}
+            testID="hermes-profiler-stop"
+          >
+            {profilerBusy ? (
+              <ActivityIndicator color={colors.white} />
+            ) : (
+              <Text style={[styles.profilerButtonText, styles.profilerButtonTextPrimary]}>
+                {t('hermesProfiler.stop')}
               </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={handleProfilerStopAndShare}
-              disabled={!profilerRecording || profilerBusy}
-              style={[
-                styles.profilerButton,
-                styles.profilerButtonPrimary,
-                (!profilerRecording || profilerBusy) && styles.profilerButtonDisabled,
-              ]}
-              accessibilityLabel={t('hermesProfiler.stopA11y')}
-              testID="hermes-profiler-stop"
-            >
-              {profilerBusy ? (
-                <ActivityIndicator color={colors.white} />
-              ) : (
-                <Text style={[styles.profilerButtonText, styles.profilerButtonTextPrimary]}>
-                  {t('hermesProfiler.stop')}
-                </Text>
-              )}
-            </TouchableOpacity>
-          </View>
+            )}
+          </TouchableOpacity>
         </View>
-      )}
-    </>
+      </View>
+    </View>
   );
 };
 export default HermesProfilerSection;

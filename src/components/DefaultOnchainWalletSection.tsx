@@ -5,6 +5,7 @@ import { createSharedAccountStyles } from '../screens/account/sharedStyles';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { useWallet } from '../contexts/WalletContext';
+import { useNostr } from '../contexts/NostrContext';
 import {
   getDefaultOnchainWalletId,
   setDefaultOnchainWalletId,
@@ -22,6 +23,7 @@ const DefaultOnchainWalletSection: React.FC = () => {
   const shared = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const styles = useMemo(() => createDefaultOnchainWalletSectionStyles(colors), [colors]);
   const { wallets } = useWallet();
+  const { pubkey } = useNostr();
   const [defaultId, setDefaultId] = useState<string | null>(null);
 
   // Empty list = the section renders a hint prompting the user to add one.
@@ -32,6 +34,7 @@ const DefaultOnchainWalletSection: React.FC = () => {
 
   useEffect(() => {
     let alive = true;
+    setDefaultId(null);
     getDefaultOnchainWalletId()
       .then((id) => {
         if (alive) setDefaultId(id);
@@ -45,7 +48,7 @@ const DefaultOnchainWalletSection: React.FC = () => {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [pubkey]);
 
   const handlePick = async (walletId: string) => {
     // Toggle off if tapping the active default — falls back to first-onchain heuristic.

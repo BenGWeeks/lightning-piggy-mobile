@@ -525,5 +525,5 @@ specifics it needs:
 In development or performance-log builds, open Settings → Advanced → Developer
 options → Performance profiler. Start recording, reproduce the slow action,
 then return and choose Stop & share. The profiler is no longer on Help & about.
-Secret Mode is a separate visible switch in Developer options; turning it on
-requires confirmation. About's version label no longer toggles it (#1222).
+Secret Mode is a separate visible switch ("Show experimental features", under
+Advanced → Experimental features); turning it on requires confirmation. About's version label no longer toggles it (#1222).
