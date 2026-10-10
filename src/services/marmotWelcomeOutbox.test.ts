@@ -87,3 +87,33 @@ describe('MarmotWelcomeOutbox', () => {
     expect(await outbox.pending()).toHaveLength(100);
   });
 });
+
+describe('MarmotWelcomeOutbox concurrency', () => {
+  it('runs invites one at a time so each keeps only its own refused wraps', async () => {
+    const net = makeNetwork();
+    const outbox = new MarmotWelcomeOutbox(createMemoryMarmotBackend());
+    const network = outbox.wrapNetwork(net.network);
+    let releaseA!: () => void;
+    const gateA = new Promise<void>((r) => (releaseA = r));
+    const order: string[] = [];
+    const a = outbox.capture(async () => {
+      order.push('a:start');
+      await gateA;
+      await network.publish(['wss://a'], wrap('a'.repeat(64)));
+      order.push('a:end');
+    });
+    const b = outbox.capture(async () => {
+      order.push('b:start');
+      await network.publish(['wss://a'], wrap('b'.repeat(64)));
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(order).toEqual(['a:start']); // b waits for a
+    releaseA();
+    const [ra, rb] = await Promise.all([a, b]);
+    expect(ra.failed.map((w) => w.event.id)).toEqual(['a'.repeat(64)]);
+    expect(rb.failed.map((w) => w.event.id)).toEqual(['b'.repeat(64)]);
+    // A failed invite doesn't block the next one.
+    await expect(outbox.capture(() => Promise.reject(new Error('boom')))).rejects.toThrow('boom');
+    expect((await outbox.capture(async () => 'ok')).result).toBe('ok');
+  });
+});
