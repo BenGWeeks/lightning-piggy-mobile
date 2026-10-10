@@ -37,7 +37,7 @@ export function selectScopedDmInbox(
 
 /**
  * Apply one inbox write on behalf of `writer`. `activeOwner` is the account
- * that was active when the write was issued; a write from any other account
+ * that is active when React applies the write; a write from any other account
  * is stale and leaves the state untouched.
  */
 export function applyScopedDmInboxUpdate(

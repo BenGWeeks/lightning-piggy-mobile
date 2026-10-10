@@ -118,3 +118,19 @@ describe('useNonFollowProfiles', () => {
     );
   });
 });
+
+it('re-arms kind-0 loading for the new account and rejects the old account response', async () => {
+  const finish: ((profiles: Map<string, NostrProfile>) => void)[] = [];
+  const fetchProfiles = jest.fn(
+    () => new Promise<Map<string, NostrProfile>>((resolve) => finish.push(resolve)),
+  );
+  const { result, rerender } = setup(fetchProfiles);
+  await waitFor(() => expect(fetchProfiles).toHaveBeenCalledTimes(1));
+  rerender({ pubkey: B, dmInbox: [entry(PARTNER)], contacts: [] });
+  await waitFor(() => expect(fetchProfiles).toHaveBeenCalledTimes(2));
+  await act(async () => finish[1](new Map([[PARTNER, profile('for-b')]])));
+  await act(async () => finish[0](new Map([[PARTNER, profile('stale-for-a')]])));
+  expect(result.current.contactInfoMap.get(PARTNER)?.name).toBe('for-b');
+  expect(await AsyncStorage.getItem(nonFollowProfilesKey(B))).toContain('for-b');
+  expect(await AsyncStorage.getItem(nonFollowProfilesKey(B))).not.toContain('stale-for-a');
+});

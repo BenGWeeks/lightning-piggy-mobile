@@ -1,6 +1,6 @@
 import { useLiveMessageIndicator } from '../hooks/useLiveMessageIndicator';
 import NewMessagesPill from '../components/NewMessagesPill';
-import React, { useState, useMemo, useCallback, useRef, useEffect, useDeferredValue } from 'react';
+import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import DmProtocolPickerSheet from '../components/DmProtocolPickerSheet';
 import { DEFAULT_DM_PROTOCOL, dmMessageThreadId, type DmProtocol } from '../utils/dmProtocol';
 import {
@@ -47,6 +47,7 @@ import {
 } from '../utils/conversationSummaries';
 import { useStableRowIdentity } from '../utils/stableRowIdentity';
 import { useNonFollowProfiles } from '../hooks/useNonFollowProfiles';
+import { useAccountDeferredValue } from '../contexts/useAccountState';
 import { EMPTY_DM_INBOX } from '../contexts/dmInboxScope';
 import type { NostrContact } from '../types/nostr';
 // __DEV__-only marketplace-order fixture seeding. The helper is a no-op outside
@@ -62,6 +63,7 @@ type MessagesNavigation = CompositeNavigationProp<
 >;
 
 const NO_CONTACTS: NostrContact[] = [];
+const EMPTY_LIST_INPUTS = { dmInbox: EMPTY_DM_INBOX, contacts: NO_CONTACTS };
 
 const MessagesScreen: React.FC = () => {
   const colors = useThemeColors();
@@ -400,14 +402,12 @@ const MessagesScreen: React.FC = () => {
   // useDeferredValue lets React deprioritise the (O(n)) summary rebuild when an urgent update — e.g. a tab-bar tap, scroll gesture — comes in during a relay-burst flush. The user's tap renders against the previous dmInbox; the new summary lands on the next idle frame. Keeps the bottom nav snappy when 25 wraps batch-flush via the live-sub queue (queueInboxEntry / flushPendingInbox).
   // The deferred snapshot is tagged with its account: the render right after a
   // switch would otherwise still show the previous account's (deferred) rows.
-  const ownedListInputs = useMemo(
-    () => ({ owner: pubkey, dmInbox, contacts }),
-    [pubkey, dmInbox, contacts],
+  const listInputs = useMemo(() => ({ dmInbox, contacts }), [dmInbox, contacts]);
+  const { dmInbox: deferredDmInbox, contacts: deferredContacts } = useAccountDeferredValue(
+    pubkey,
+    listInputs,
+    EMPTY_LIST_INPUTS,
   );
-  const deferredInputs = useDeferredValue(ownedListInputs);
-  const deferredIsCurrent = deferredInputs.owner === pubkey;
-  const deferredDmInbox = deferredIsCurrent ? deferredInputs.dmInbox : EMPTY_DM_INBOX;
-  const deferredContacts = deferredIsCurrent ? deferredInputs.contacts : NO_CONTACTS;
   // Build the DM summaries first — this is always part of the inbox
   // regardless of the zap-counterparties toggle. Pass the tier-aware
   // trust set (#547) as a defence-in-depth filter. NostrContext's

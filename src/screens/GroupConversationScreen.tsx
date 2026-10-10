@@ -1,3 +1,4 @@
+import { useAccountState } from '../contexts/useAccountState';
 import { useLiveMessageIndicator } from '../hooks/useLiveMessageIndicator';
 import NewMessagesPill from '../components/NewMessagesPill';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -84,6 +85,8 @@ interface MemberRow {
   picture: string | null;
 }
 
+const EMPTY_MESSAGES: GroupMessage[] = [];
+
 const GroupConversationScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   // The composer's own keyboard wiring lives in ConversationComposer
@@ -106,8 +109,9 @@ const GroupConversationScreen: React.FC = () => {
   const { contacts } = useNostrContacts();
   const [renameVisible, setRenameVisible] = useState(false);
   const [membersSheetVisible, setMembersSheetVisible] = useState(false);
-  const [draft, setDraft] = useState('');
-  const [messages, setMessages] = useState<GroupMessage[]>([]);
+  const messageOwner = myPubkey ? `${myPubkey}:${route.params.groupId}` : null;
+  const [draft, setDraft] = useAccountState(messageOwner, '');
+  const [messages, setMessages] = useAccountState(messageOwner, EMPTY_MESSAGES);
   const [loadingMessages, setLoadingMessages] = useState(true);
   const [attachPanelOpen, setAttachPanelOpen] = useState(false);
   const [gifPickerOpen, setGifPickerOpen] = useState(false);
@@ -172,7 +176,7 @@ const GroupConversationScreen: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [loadedGroupId, myPubkey]);
+  }, [loadedGroupId, myPubkey, setMessages]);
 
   // Live updates: NostrContext fires `subscribeGroupMessages` when an
   // inbound NIP-17 wrap decrypts to a kind-14 rumor that matches this
@@ -196,7 +200,7 @@ const GroupConversationScreen: React.FC = () => {
       cancelled = true;
       unsubscribe();
     };
-  }, [loadedGroupId, myPubkey]);
+  }, [loadedGroupId, myPubkey, setMessages]);
 
   const liveEntries = useMemo(
     () => messages.map((message) => ({ id: message.id, createdAt: message.createdAt })),

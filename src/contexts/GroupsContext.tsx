@@ -1,3 +1,4 @@
+import { useAccountState } from './useAccountState';
 import React, {
   createContext,
   useCallback,
@@ -167,9 +168,15 @@ function activityFromMessages(
 
 const GroupsContext = createContext<GroupsContextType | undefined>(undefined);
 
+const EMPTY_GROUPS: Group[] = [];
+const EMPTY_ACTIVITY: Record<string, GroupActivity> = {};
+
 export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // NIP-17 groups (AsyncStorage-persisted). Marmot groups are merged in below.
-  const [storedGroups, setGroups] = useState<Group[]>([]);
+  const { publishGroupState, pubkey, relays, isLoggedIn } = useNostr();
+  const [storedGroups, setGroups] = useAccountState(pubkey, EMPTY_GROUPS);
+  const activeOwner = useRef(pubkey);
+  activeOwner.current = pubkey;
   const [loading, setLoading] = useState(true);
   const [secretMode, setSecretModeState] = useState(false);
   // Tier source-of-truth lives in TrustGraphContext (#547). We read it here
@@ -184,17 +191,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // Per-group activity rollup (last message + recent senders). Populated
   // on mount from AsyncStorage and kept fresh by the inbound-message
   // listener below + a local hook from GroupConversationScreen sends.
-  const [activityByGroup, setActivityByGroup] = useState<Record<string, GroupActivity>>({});
-  const { publishGroupState, pubkey, relays, isLoggedIn } = useNostr();
-  // Drop the previous account's groups + activity in the same render the
-  // active pubkey changes, so its group rows never paint under the next
-  // account (and its activity isn't merged into the new account's cache).
-  const [groupsOwner, setGroupsOwner] = useState(pubkey);
-  if (groupsOwner !== pubkey) {
-    setGroupsOwner(pubkey);
-    setGroups([]);
-    setActivityByGroup({});
-  }
+  const [activityByGroup, setActivityByGroup] = useAccountState(pubkey, EMPTY_ACTIVITY);
   const marmot = useMarmotGroups(pubkey);
   const groups = useMemo(() => [...storedGroups, ...marmot.groups], [storedGroups, marmot.groups]);
   // Track the latest reconciler in a ref so the subscription effect can
@@ -234,7 +231,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return () => {
       cancelled = true;
     };
-  }, [pubkey]);
+  }, [pubkey, setGroups]);
 
   // Load persisted secret-mode flag with a one-shot migration from the
   // pre-rename 'dev_mode' key. Without this, anyone who'd already
@@ -366,8 +363,8 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // so NostrContext's NIP-17 decrypt loop can resolve which group an
   // inbound rumor belongs to without going through context.
   useEffect(() => {
-    setKnownGroups(storedGroups); // NIP-17 routing only — never match a Marmot group
-  }, [storedGroups]);
+    setKnownGroups(storedGroups, pubkey); // NIP-17 routing only — never match a Marmot group
+  }, [storedGroups, pubkey]);
 
   // Eagerly hydrate `activityByGroup` from the disk cache as soon as the
   // user identity is known. Without this, the Messages tab renders group
@@ -397,7 +394,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return () => {
       cancelled = true;
     };
-  }, [isLoggedIn, pubkey]);
+  }, [isLoggedIn, pubkey, setActivityByGroup]);
 
   // Persist `activityByGroup` after every change so the next cold start
   // can hydrate from this cache. Debounced via setTimeout to coalesce
@@ -435,7 +432,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return () => {
       cancelled = true;
     };
-  }, [groups, activityByGroup]);
+  }, [groups, activityByGroup, pubkey, setActivityByGroup]);
 
   // Inbound group messages are persisted by NostrContext's NIP-17 routing
   // loop; we just need to refresh the activity rollup for the affected
@@ -457,7 +454,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       active = false;
       unsub();
     };
-  }, [groups]);
+  }, [groups, pubkey, setActivityByGroup]);
 
   // Anti-spam: a group is visible only if at least one OTHER member is
   // in the viewer's trust set at the current tier (#547). For 'friends'
@@ -486,12 +483,11 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // immediately, and (b) `saveGroups` always serialises the post-
   // mutation array.
   const groupsRef = useRef<Group[]>([]);
-  useEffect(() => {
-    groupsRef.current = storedGroups;
-  }, [storedGroups]);
+  groupsRef.current = storedGroups;
 
   const persist = useCallback(
     async (mutate: (curr: Group[]) => Group[]): Promise<Group[]> => {
+      if (activeOwner.current !== pubkey) return [];
       const after = mutate(groupsRef.current);
       // Update the ref BEFORE setGroups so a concurrent caller scheduled
       // immediately after this one reads the fresh array — otherwise
@@ -502,7 +498,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       await saveGroups(pubkey, after);
       return after;
     },
-    [pubkey],
+    [pubkey, setGroups],
   );
 
   // Synthetic-room reconciler: invoked from NostrContext's group routing
@@ -570,8 +566,12 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
       return resolved;
     };
-    setSyntheticGroupReconciler((input) =>
-      reconcileSyntheticRef.current ? reconcileSyntheticRef.current(input) : Promise.resolve(null),
+    setSyntheticGroupReconciler(
+      (input) =>
+        reconcileSyntheticRef.current
+          ? reconcileSyntheticRef.current(input)
+          : Promise.resolve(null),
+      pubkey,
     );
     return () => {
       // Drop the registry pointer on unmount so a stale closure can't
@@ -579,7 +579,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setSyntheticGroupReconciler(null);
       reconcileSyntheticRef.current = null;
     };
-  }, [persist]);
+  }, [persist, pubkey]);
 
   const createGroup = useCallback(
     async (name: string, memberPubkeys: string[], protocol?: 'marmot'): Promise<Group> => {
@@ -832,11 +832,12 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     if (!isLoggedIn || !pubkey) return;
     const readRelays = relays.filter((r) => r.read).map((r) => r.url);
     const targetRelays = Array.from(new Set([...readRelays, ...DEFAULT_RELAYS]));
+    let active = true;
     const unsubscribe = subscribeGroupStateForViewer({
       viewerPubkey: pubkey,
       relays: targetRelays,
       onEvent: (ev) => {
-        if (ev.kind !== GROUP_STATE_KIND) return;
+        if (!active || ev.kind !== GROUP_STATE_KIND) return;
         const dTag = ev.tags.find((t) => t[0] === 'd')?.[1];
         const nameTag = ev.tags.find((t) => t[0] === 'name')?.[1];
         if (!dTag || !nameTag) return;
@@ -873,7 +874,10 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           });
       },
     });
-    return unsubscribe;
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, [isLoggedIn, pubkey, relays]);
 
   // Join visibleGroups × activity. Groups that haven't loaded yet get a

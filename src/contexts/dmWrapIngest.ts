@@ -146,7 +146,12 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
         if (!rumor) return null;
         // Multi-recipient (group) rumors: route to group storage and
         // short-circuit the DM path — the 1:1 inbox never sees them.
-        const routeResult = await tryRouteGroupRumor(rumor, owner, wrap.id);
+        const routeResult = await tryRouteGroupRumor(
+          rumor,
+          owner,
+          wrap.id,
+          () => signal?.aborted === true,
+        );
         if (routeResult.kind !== 'not-group') {
           if (skipKey) {
             skipSet.add(wrap.id);
@@ -169,7 +174,7 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
         }
         // A Marmot invite from a trusted sender: join it (the row below
         // still records the invite in this NIP-17 thread).
-        routeMarmotWelcome(rumor, owner);
+        if (!signal?.aborted) routeMarmotWelcome(rumor, owner);
         const text = textForRumor(rumor);
         // For a structured rumor (order kind 16/17, or an NWC wallet share) the
         // stored `text` is non-human JSON — the in-memory inbox preview must show

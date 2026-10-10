@@ -64,7 +64,8 @@ export function createLiveRumorSurfacer(
     // group surface, not the 1:1 inbox. tryRouteGroupRumor handles
     // appendGroupMessage + notifyGroupMessage internally so an open
     // GroupConversationScreen auto-refreshes.
-    const routeResult = await tryRouteGroupRumor(rumor, viewerPubkey, wrapId);
+    const routeResult = await tryRouteGroupRumor(rumor, viewerPubkey, wrapId, shouldAbort);
+    if (shouldAbort()) return;
     if (routeResult.kind !== 'not-group') {
       // OS notification (#279) — fired HERE (live path) not inside
       // tryRouteGroupRumor (which also runs on batch refresh). Only for
@@ -75,6 +76,7 @@ export function createLiveRumorSurfacer(
         // claimWrapNotification: dedupe vs the background watch (#279).
         if (sender.toLowerCase() !== viewerPubkey.toLowerCase() && claimWrapNotification(wrapId)) {
           void fireMessageNotification({
+            owner: viewerPubkey,
             kind: 'group',
             threadId: routeResult.group.id,
             title: routeResult.group.name || 'New group message',
@@ -182,6 +184,7 @@ export function createLiveRumorSurfacer(
     // dedupes vs the background watch running in the same JS context.
     if (!partnership.fromMe && isFreshArrival(rumor.created_at) && claimWrapNotification(wrapId)) {
       void fireMessageNotification({
+        owner: viewerPubkey,
         kind: 'dm',
         threadId: dmThreadId(partnership.partnerPubkey, protocolForWireKind(rumor.kind)),
         title: 'New message',

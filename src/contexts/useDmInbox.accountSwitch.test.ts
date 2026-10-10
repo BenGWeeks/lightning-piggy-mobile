@@ -7,6 +7,7 @@ import type React from 'react';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
 import { loadInboxEntries } from '../services/dmInbox';
 import { fetchInboxDmEvents } from '../services/nostrService';
+import { startLiveDmSubscription } from './nostrLiveDmSub';
 import { useMarmotDmInbound } from './useMarmotDmInbound';
 import { useDmInbox, type UseDmInboxOptions } from './useDmInbox';
 
@@ -175,4 +176,47 @@ describe('useDmInbox account scoping', () => {
     rerender(optionsFor(B));
     expect(seenSignal?.aborted).toBe(true);
   });
+});
+
+it('serializes a rapid A → B → A refresh without joining cancelled work', async () => {
+  let releaseA: () => void = () => {};
+  fetchMock.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        releaseA = () => resolve({ kind4: [], kind1059: [] } as never);
+      }),
+  );
+  const { result, rerender } = renderInbox(A);
+  let first: Promise<void>;
+  await act(async () => {
+    first = result.current.refreshDmInbox({ force: true });
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+  });
+  rerender(optionsFor(B));
+  await act(() => result.current.refreshDmInbox({ force: true }));
+  rerender(optionsFor(A));
+  let next: Promise<void>;
+  let concurrent: Promise<void>;
+  await act(async () => {
+    next = result.current.refreshDmInbox({ force: true });
+    concurrent = result.current.refreshDmInbox({ force: true });
+    await Promise.resolve();
+  });
+  expect(fetchMock.mock.calls.filter(([owner]) => owner === A)).toHaveLength(1);
+  await act(async () => {
+    releaseA();
+    await Promise.all([first!, next!, concurrent!]);
+  });
+  expect(fetchMock.mock.calls.filter(([owner]) => owner === A)).toHaveLength(2);
+  expect(result.current.dmInbox.map((e) => e.id)).toEqual(['a-msg']);
+});
+
+it('invalidates the live subscription owner before old events can surface', () => {
+  const { result, rerender } = renderInbox(A);
+  act(() => result.current.armLiveDmSub());
+  const subscribe = startLiveDmSubscription as jest.MockedFunction<typeof startLiveDmSubscription>;
+  const oldSubscription = subscribe.mock.calls[subscribe.mock.calls.length - 1][0];
+  expect(oldSubscription.isCurrentOwner?.()).toBe(true);
+  rerender(optionsFor(B));
+  expect(oldSubscription.isCurrentOwner?.()).toBe(false);
 });

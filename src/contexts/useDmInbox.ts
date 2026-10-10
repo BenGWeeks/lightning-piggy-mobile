@@ -147,8 +147,9 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
   const inboxSetterFor = useCallback(
     (owner: string | null): DmInboxSetter =>
       (action) => {
-        const active = activeOwnerRef.current;
-        setScopedInbox((prev) => applyScopedDmInboxUpdate(prev, owner, active, action));
+        setScopedInbox((prev) =>
+          applyScopedDmInboxUpdate(prev, owner, activeOwnerRef.current, action),
+        );
       },
     [],
   );
@@ -204,11 +205,9 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
   // they don't race on the skip-set file + encrypted-store writes.
   // Keyed by account: a refresh still running for the previous account must
   // not be piggy-backed on (or awaited) by the new account's refresh.
-  const dmInboxInFlight = useRef<{
-    pubkey: string;
-    promise: Promise<void>;
-    includeNonFollows: boolean;
-  } | null>(null);
+  const dmInboxInFlight = useRef(
+    new Map<string, { promise: Promise<void>; includeNonFollows: boolean; signal: AbortSignal }>(),
+  );
   /** `performance.now()` of the last COMPLETED `refreshDmInbox` (`0` before
    * any) and the account it ran for. Drives the cold-start + freshness-TTL
    * gates — see dmRefreshGate. A different account reads as `0`, so its first
@@ -437,12 +436,14 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       // Single-flight: piggy-back on in-flight task ONLY when its includeNonFollows matches; otherwise wait then re-run with the wider option.
       // A refresh in flight for a previous account is ignored here — its
       // writes are dropped by the owner scope, so there's nothing to wait for.
-      const inFlight = dmInboxInFlight.current;
-      if (inFlight && inFlight.pubkey === pubkey) {
-        if (inFlight.includeNonFollows === includeNonFollows) {
+      const inFlight = dmInboxInFlight.current.get(pubkey);
+      if (inFlight) {
+        if (inFlight.includeNonFollows === includeNonFollows && !inFlight.signal.aborted) {
           return inFlight.promise;
         }
         await inFlight.promise;
+        if (activeOwnerRef.current !== pubkey) return;
+        return refreshDmInboxRef.current?.(opts);
       }
 
       // Capture local references once so the closure isn't affected by
@@ -461,6 +462,8 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       const refreshFollows = followPubkeys;
       const passesFollowGate = (pk: string): boolean => includeNonFollows || refreshFollows.has(pk);
 
+      if (!isStillActive()) return;
+      const accountSignal = accountSignalFor(refreshForPubkey);
       let refreshCompleted = false; // set after commit; gates the stamp (#788 — see helper)
       let disposeSignal: () => void = () => {};
 
@@ -485,10 +488,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           const mustCompleteRebuild = isColdStart && !(await hasStoredWraps(refreshForPubkey));
           // A cold rebuild ignores the caller's (tab-hop) abort, but every
           // refresh stops when its account is switched away from.
-          const linked = linkAbortSignals(
-            mustCompleteRebuild ? undefined : signal,
-            accountSignalFor(refreshForPubkey),
-          );
+          const linked = linkAbortSignals(mustCompleteRebuild ? undefined : signal, accountSignal);
           disposeSignal = linked.dispose;
           const effectiveSignal = linked.signal;
           if (__DEV__ && mustCompleteRebuild) {
@@ -799,11 +799,15 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           if (__DEV__) console.warn('[Nostr] refreshDmInbox failed:', error);
         } finally {
           disposeSignal();
-          setDmInboxLoading(false);
+          if (isStillActive()) setDmInboxLoading(false);
         }
       })();
 
-      dmInboxInFlight.current = { pubkey: refreshForPubkey, promise: task, includeNonFollows };
+      dmInboxInFlight.current.set(refreshForPubkey, {
+        promise: task,
+        includeNonFollows,
+        signal: accountSignal,
+      });
       try {
         await task;
         // Stamp only for a refresh that COMPLETED its work — gate on
@@ -813,7 +817,8 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
         }
       } finally {
         // Only clear our own marker — a newer account's refresh may own it.
-        if (dmInboxInFlight.current?.promise === task) dmInboxInFlight.current = null;
+        if (dmInboxInFlight.current.get(refreshForPubkey)?.promise === task)
+          dmInboxInFlight.current.delete(refreshForPubkey);
         const __perfBlockMs = Math.round(performance.now() - __perfBlockStart);
         // Only surface costly refreshes — sub-200 ms ones aren't
         // contributors to the multi-second freezes we're hunting.
@@ -952,6 +957,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
     return startLiveDmSubscription({
       viewerPubkey: pubkey,
       activeSigner: signerType,
+      isCurrentOwner: () => activeOwnerRef.current === pubkey,
       pubkey,
       signerType,
       readRelays: getReadRelays(),

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useAccountState } from './useAccountState';
+import { useCallback, useEffect, useMemo } from 'react';
 
 import { appendGroupMessage, type GroupMessage } from '../services/groupMessagesStorageService';
 import {
@@ -16,6 +17,8 @@ import {
 import { fireMessageNotification } from '../services/notificationService';
 import type { Group } from '../types/groups';
 import { notifyGroupMessage } from './nostrEventBus';
+
+const EMPTY_SUMMARIES: MarmotGroupSummary[] = [];
 
 const FLUSH_MS = 150;
 const NOTIFY_SKEW_SEC = 120;
@@ -47,13 +50,7 @@ export interface MarmotGroupsApi {
  * ≤150 ms burst — #perf).
  */
 export function useMarmotGroups(pubkey: string | null): MarmotGroupsApi {
-  const [summaries, setSummaries] = useState<MarmotGroupSummary[]>([]);
-  // Same-render reset on account switch (see GroupsContext).
-  const [summariesOwner, setSummariesOwner] = useState(pubkey);
-  if (summariesOwner !== pubkey) {
-    setSummariesOwner(pubkey);
-    setSummaries([]);
-  }
+  const [summaries, setSummaries] = useAccountState(pubkey, EMPTY_SUMMARIES);
 
   useEffect(() => {
     if (!pubkey) {
@@ -132,7 +129,7 @@ export function useMarmotGroups(pubkey: string | null): MarmotGroupsApi {
       if (timer) clearTimeout(timer);
       void flush();
     };
-  }, [pubkey]);
+  }, [pubkey, setSummaries]);
 
   const groups = useMemo(() => summaries.filter((g) => !g.isDm).map(toGroup), [summaries]);
 

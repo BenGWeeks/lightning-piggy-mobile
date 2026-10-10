@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
+import { useAccountState } from '../contexts/useAccountState';
 import { AppState } from 'react-native';
 import { useNostr } from '../contexts/NostrContext';
 import {
@@ -10,10 +11,12 @@ import {
 } from '../services/notificationHistory';
 import { dismissNotificationsFor } from '../services/notificationService';
 
+const EMPTY_ENTRIES: NotificationHistoryEntry[] = [];
+
 /** The active account's notification history (#1143), kept live. */
 export function useNotificationHistory() {
   const { pubkey } = useNostr();
-  const [entries, setEntries] = useState<NotificationHistoryEntry[]>([]);
+  const [entries, setEntries] = useAccountState(pubkey, EMPTY_ENTRIES);
 
   useEffect(() => {
     setEntries([]);
@@ -42,7 +45,7 @@ export function useNotificationHistory() {
       appStateSub.remove();
       if (resumeTimer) clearTimeout(resumeTimer);
     };
-  }, [pubkey]);
+  }, [pubkey, setEntries]);
 
   const unreadCount = useMemo(() => entries.filter((e) => !e.read).length, [entries]);
 
