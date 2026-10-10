@@ -111,3 +111,17 @@ describe("the watcher's silent admission check (iOS, once per registration)", ()
     expect(watcherCategoryOf({ identifier: 'x', content: { data: validate } })).toBe(null);
   });
 });
+
+describe('serialized task data (expo `dataString`)', () => {
+  it('reads the watcher source from a JSON dataString too', () => {
+    const dataString = JSON.stringify({ source: 'lp-watcher', category: 'zap' });
+    expect(isWatcherTaskPayload({ data: { dataString }, notification: null })).toBe(true);
+    const validate = JSON.stringify({ source: 'lp-watcher', type: 'validate' });
+    expect(isWatcherValidation({ data: { dataString: validate }, notification: null })).toBe(true);
+    // A Marmot wake (no watcher source anywhere) is still a Marmot wake.
+    expect(isWatcherTaskPayload({ data: { dataString: '{}' }, notification: null })).toBe(false);
+    expect(isWatcherTaskPayload({ data: { dataString: 'not json' }, notification: null })).toBe(
+      false,
+    );
+  });
+});

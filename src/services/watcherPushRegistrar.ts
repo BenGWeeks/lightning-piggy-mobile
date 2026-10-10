@@ -246,7 +246,10 @@ export class WatcherPushRegistrar {
     this.generation++;
     const ctx = this.ctx;
     const device = this.deps.device() ?? null;
-    if (!ctx) return Promise.resolve(true);
+    // No account context yet (e.g. before wallets hydrate): we can't know
+    // what the watcher holds, so this is NOT a confirmed unregister — the
+    // caller then replaces the token rather than keeping it.
+    if (!ctx) return Promise.resolve(false);
     return this.serial(async () => {
       if (cancelled()) return false;
       let state: WatcherAccountState;

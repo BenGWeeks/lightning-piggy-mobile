@@ -32,12 +32,26 @@ interface RequestLike {
   content?: { data?: unknown; threadIdentifier?: string | null } | null;
 }
 
+/** A background-task payload's data: expo flattens the push's data keys
+ * into `data`, and may also carry them as a JSON `dataString` — read both. */
+function taskData(data: unknown): Record<string, unknown> | null {
+  if (!data || typeof data !== 'object') return null;
+  const d = data as Record<string, unknown>;
+  if (d.source !== undefined || typeof d.dataString !== 'string') return d;
+  try {
+    const parsed: unknown = JSON.parse(d.dataString);
+    return parsed && typeof parsed === 'object' ? { ...d, ...(parsed as object) } : d;
+  } catch {
+    return d;
+  }
+}
+
 /** The watcher's silent admission check (iOS, once per registration): a
  * notification request, or a background-task payload (`{ data, … }`). */
 export function isWatcherValidation(input: unknown): boolean {
   if (!input || typeof input !== 'object') return false;
   const o = input as { data?: unknown; content?: { data?: unknown } | null };
-  const data = (o.content?.data ?? o.data ?? input) as { source?: unknown; type?: unknown } | null;
+  const data = taskData(o.content?.data ?? o.data ?? input);
   return !!data && data.source === WATCHER_SOURCE && data.type === 'validate';
 }
 
@@ -61,7 +75,7 @@ export function isWatcherTaskPayload(payload: unknown): boolean {
     source?: unknown;
     notification?: { request?: RequestLike } | null;
   };
-  if (p.data?.source === WATCHER_SOURCE || p.source === WATCHER_SOURCE) return true;
+  if (taskData(p.data)?.source === WATCHER_SOURCE || p.source === WATCHER_SOURCE) return true;
   return watcherCategoryOf(p.notification?.request) !== null;
 }
 

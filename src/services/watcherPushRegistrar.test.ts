@@ -686,6 +686,13 @@ describe('WatcherPushRegistrar per-account token', () => {
   });
 });
 
+describe('WatcherPushRegistrar unregister without an account', () => {
+  it('is not reported as done when there is no account context', async () => {
+    const h = harness();
+    await expect(h.registrar.unregisterNow()).resolves.toBe(false);
+  });
+});
+
 describe('WatcherPushRegistrar account isolation', () => {
   beforeEach(() => jest.useFakeTimers());
   afterEach(() => jest.useRealTimers());
