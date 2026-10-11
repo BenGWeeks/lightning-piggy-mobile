@@ -28,12 +28,14 @@ export type AccountDrawerParamList = {
   MainTabs: NavigatorScreenParams<MainTabParamList>;
   AccountProfile: undefined;
   AccountWallets: undefined;
+  AccountAdvanced: undefined;
+  AccountMessages: undefined;
   AccountNostr: undefined;
   AccountInvitationKeys: undefined;
   AccountOnChain: undefined;
-  AccountDisplay: undefined;
-  AccountAppearance: undefined;
-  AccountLanguage: undefined;
+  AccountDisplayLanguage: undefined;
+  /** Currency picker, pushed from Display & language. */
+  AccountCurrency: undefined;
   AccountNotifications: undefined;
   AccountSecurity: undefined;
   // Back up your key (#1223). `pubkey` (public, hex) picks the account —

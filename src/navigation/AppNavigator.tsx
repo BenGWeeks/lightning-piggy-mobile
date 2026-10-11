@@ -87,11 +87,12 @@ const NotificationsScreen = lazyScreen(() => import('../screens/NotificationsScr
 const ProfileScreen = lazyScreen(() => import('../screens/account/ProfileScreen'));
 const WalletsScreen = lazyScreen(() => import('../screens/account/WalletsScreen'));
 const InvitationKeysScreen = lazyScreen(() => import('../screens/account/InvitationKeysScreen'));
+const AdvancedScreen = lazyScreen(() => import('../screens/account/AdvancedScreen'));
+const MessageSettingsScreen = lazyScreen(() => import('../screens/account/MessageSettingsScreen'));
 const NostrScreen = lazyScreen(() => import('../screens/account/NostrScreen'));
 const OnChainScreen = lazyScreen(() => import('../screens/account/OnChainScreen'));
+const DisplayLanguageScreen = lazyScreen(() => import('../screens/account/DisplayLanguageScreen'));
 const DisplayScreen = lazyScreen(() => import('../screens/account/DisplayScreen'));
-const AppearanceScreen = lazyScreen(() => import('../screens/account/AppearanceScreen'));
-const LanguageScreen = lazyScreen(() => import('../screens/account/LanguageScreen'));
 const NotificationSettingsScreen = lazyScreen(
   () => import('../screens/account/NotificationSettingsScreen'),
 );
@@ -570,12 +571,13 @@ function MainDrawer() {
       <AccountDrawer.Screen name="MainTabs" component={HomeTabs} />
       <AccountDrawer.Screen name="AccountProfile" component={ProfileScreen} />
       <AccountDrawer.Screen name="AccountWallets" component={WalletsScreen} />
+      <AccountDrawer.Screen name="AccountAdvanced" component={AdvancedScreen} />
+      <AccountDrawer.Screen name="AccountMessages" component={MessageSettingsScreen} />
       <AccountDrawer.Screen name="AccountNostr" component={NostrScreen} />
       <AccountDrawer.Screen name="AccountInvitationKeys" component={InvitationKeysScreen} />
       <AccountDrawer.Screen name="AccountOnChain" component={OnChainScreen} />
-      <AccountDrawer.Screen name="AccountDisplay" component={DisplayScreen} />
-      <AccountDrawer.Screen name="AccountAppearance" component={AppearanceScreen} />
-      <AccountDrawer.Screen name="AccountLanguage" component={LanguageScreen} />
+      <AccountDrawer.Screen name="AccountDisplayLanguage" component={DisplayLanguageScreen} />
+      <AccountDrawer.Screen name="AccountCurrency" component={DisplayScreen} />
       <AccountDrawer.Screen name="AccountNotifications" component={NotificationSettingsScreen} />
       <AccountDrawer.Screen name="AccountSecurity" component={SecurityScreen} />
       <AccountDrawer.Screen name="AccountKeyBackup" component={KeyBackupScreen} />

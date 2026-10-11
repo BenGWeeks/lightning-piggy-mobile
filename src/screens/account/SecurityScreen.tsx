@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo } from 'react';
-import { View, Text, TextInput, TouchableOpacity, Switch } from 'react-native';
-import { Check, ShieldCheck, Link2 } from 'lucide-react-native';
+import { View, Text, TextInput, TouchableOpacity } from 'react-native';
+import { Check, ShieldCheck } from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
 import { createSharedAccountStyles } from './sharedStyles';
 import { useThemeColors } from '../../contexts/ThemeContext';
@@ -9,13 +9,13 @@ import { useAccountState } from '../../contexts/useAccountState';
 import { useNostr } from '../../contexts/NostrContext';
 import { createSecurityScreenStyles } from '../../styles/SecurityScreen.styles';
 import KeyBackupEntry from '../../components/KeyBackupEntry';
+import SettingsScopeHeader from '../../components/SettingsScopeHeader';
 import { Toast } from '../../components/BrandedToast';
 import {
   DEFAULT_HIGH_VALUE_SEND_THRESHOLD_SATS,
   getSendThreshold,
   setSendThreshold,
 } from '../../services/sendThresholdService';
-import { getLinkPreviewEnabled, setLinkPreviewEnabled } from '../../services/linkPreviewPreference';
 
 // Preset thresholds for the radio rows (sats). `null` = "Off".
 // Labels/sublabels are i18n keys resolved at render time (see below).
@@ -49,7 +49,6 @@ const SecurityScreen: React.FC = () => {
     DEFAULT_HIGH_VALUE_SEND_THRESHOLD_SATS,
   );
   const [customDraft, setCustomDraft] = useAccountState<string>(pubkey, '');
-  const [linkPreviewOn, setLinkPreviewOn] = useAccountState<boolean>(pubkey, true);
 
   // Per-account settings: (re)load for the ACTIVE account, and ignore a late
   // answer for an account we've since switched away from.
@@ -63,18 +62,10 @@ const SecurityScreen: React.FC = () => {
       const isPreset = PRESETS.some((p) => p.value === t);
       if (!isPreset && t !== null) setCustomDraft(String(t));
     });
-    getLinkPreviewEnabled(pubkey).then((v) => {
-      if (!cancelled) setLinkPreviewOn(v);
-    });
     return () => {
       cancelled = true;
     };
-  }, [pubkey, setCustomDraft, setThresholdState, setLinkPreviewOn]);
-
-  const handleToggleLinkPreview = async (next: boolean) => {
-    setLinkPreviewOn(next);
-    await setLinkPreviewEnabled(next, pubkey);
-  };
+  }, [pubkey, setCustomDraft, setThresholdState]);
 
   // `setSendThreshold` rejects (no active account, or the per-account
   // migration couldn't read the identity registry). Don't leave the screen
@@ -111,6 +102,7 @@ const SecurityScreen: React.FC = () => {
   return (
     <AccountScreenLayout title={t('securityScreen.title')}>
       <KeyBackupEntry />
+      <SettingsScopeHeader scope="account" testID="security-account" />
       <View style={styles.headerRow}>
         <ShieldCheck size={22} color={colors.white} />
         <Text style={[sharedAccountStyles.sectionLabel, styles.headerLabel]}>
@@ -118,7 +110,6 @@ const SecurityScreen: React.FC = () => {
         </Text>
       </View>
       <Text style={sharedAccountStyles.fieldHint}>{t('securityScreen.confirmLargeSendsHint')}</Text>
-      <Text style={sharedAccountStyles.fieldHint}>{t('securityScreen.perAccountHint')}</Text>
 
       <View style={styles.optionList}>
         {PRESETS.map((opt) => {
@@ -162,27 +153,6 @@ const SecurityScreen: React.FC = () => {
           </View>
           {customActive && <Check size={18} color={colors.brandPink} />}
         </View>
-      </View>
-
-      <View style={[styles.headerRow, styles.sectionGap]}>
-        <Link2 size={22} color={colors.white} />
-        <Text style={[sharedAccountStyles.sectionLabel, styles.headerLabel]}>
-          {t('securityScreen.linkPreviews')}
-        </Text>
-      </View>
-      <Text style={sharedAccountStyles.fieldHint}>{t('securityScreen.linkPreviewsHint')}</Text>
-      <View style={styles.toggleRow}>
-        <Text style={[styles.optionLabel, styles.toggleLabel]}>
-          {t('securityScreen.showLinkPreviews')}
-        </Text>
-        <Switch
-          value={linkPreviewOn}
-          onValueChange={handleToggleLinkPreview}
-          accessibilityLabel={t('securityScreen.showLinkPreviewsA11y')}
-          testID="security-link-preview-toggle"
-          trackColor={{ false: colors.divider, true: colors.brandPink }}
-          thumbColor={linkPreviewOn ? colors.white : undefined}
-        />
       </View>
     </AccountScreenLayout>
   );

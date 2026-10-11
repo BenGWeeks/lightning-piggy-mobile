@@ -1,13 +1,9 @@
 import { StyleSheet } from 'react-native';
 import type { Palette } from './palettes';
 
-// Radio-style option rows for the Language screen's locale picker. Moved
-// verbatim from AppearanceScreen.styles.ts (#1058) — language promoted to
-// its own top-level account section, so this screen only ever renders one
-// option list (no `section` wrapper needed). Extracted per the
-// styles-in-their-own-file convention (CLAUDE.md → File size and
-// modularity).
-export const createLanguageScreenStyles = (colors: Palette) =>
+// Radio-style option rows (Theme, Sending animation, Language) on the
+// Display & language screen.
+export const createSettingsOptionListStyles = (colors: Palette) =>
   StyleSheet.create({
     optionList: {
       gap: 8,
@@ -46,5 +42,3 @@ export const createLanguageScreenStyles = (colors: Palette) =>
       marginTop: 2,
     },
   });
-
-export type LanguageScreenStyles = ReturnType<typeof createLanguageScreenStyles>;
