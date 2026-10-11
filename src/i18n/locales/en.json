@@ -2253,6 +2253,12 @@
       "retry": "Retry",
       "publishFailed": "Couldn't publish. Please try again."
     },
+    "feedbackActions": {
+      "commentActions": "Comment actions",
+      "reviewActions": "Review actions",
+      "edit": "Edit",
+      "delete": "Delete"
+    },
     "reviews": {
       "signIn": "Sign in to write a review",
       "write": "Write a review",
@@ -2266,14 +2272,35 @@
       "count": {
         "one": "{{count}} review",
         "other": "{{count}} reviews"
-      }
+      },
+      "yours": "You've reviewed this product",
+      "editOpen": "Edit review",
+      "cancel": "Cancel",
+      "deleteTitle": "Delete your review?",
+      "deleteBody": "We'll ask relays to delete it and hide it here straight away. Some relays or apps may ignore the request or have already copied it, so it may not disappear everywhere.",
+      "deleteConfirm": "Delete",
+      "deleted": "Delete request sent",
+      "posted": "Review posted",
+      "updated": "Review updated",
+      "deleteFailed": "Couldn't delete your review. Please try again."
     },
     "comments": {
       "placeholder": "Add a comment",
       "post": "Post comment",
       "signIn": "Sign in to comment",
       "empty": "No comments yet. Be the first to start the discussion!",
-      "loadError": "Failed to load comments"
+      "loadError": "Failed to load comments",
+      "editedMarker": "Edited",
+      "editing": "Editing your comment",
+      "save": "Save changes",
+      "cancel": "Cancel",
+      "deleteTitle": "Delete this comment?",
+      "deleteBody": "We'll ask relays to delete it and hide it here straight away. Some relays or apps may ignore the request or have already copied it, so it may not disappear everywhere.",
+      "deleteConfirm": "Delete",
+      "deleted": "Delete request sent",
+      "updated": "Comment updated",
+      "deleteFailed": "Couldn't delete the comment. Please try again.",
+      "editFailed": "Couldn't save your edit. Please try again."
     },
     "checkout": {
       "orderPlaced": "Order placed",

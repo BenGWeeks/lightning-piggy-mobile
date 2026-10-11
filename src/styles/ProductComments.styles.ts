@@ -3,7 +3,8 @@ import type { Palette } from './palettes';
 
 /**
  * Styles for {@link ProductComments} — the comments tab body: a compose box
- * (or sign-in prompt) and the list of top-level comment rows.
+ * (or sign-in prompt, or edit state) and the list of top-level comment rows
+ * ({@link ProductCommentItem}, incl. its Edit / Delete actions).
  */
 export const createProductCommentsStyles = (colors: Palette) =>
   StyleSheet.create({
@@ -54,7 +55,11 @@ export const createProductCommentsStyles = (colors: Palette) =>
       alignItems: 'center',
       justifyContent: 'space-between',
     },
+    itemMeta: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     when: { fontSize: 12, color: colors.textSupplementary },
+    editingBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    editingText: { fontSize: 13, fontWeight: '700', color: colors.textHeader },
+    editingCancel: { fontSize: 13, fontWeight: '700', color: colors.brandPink },
     itemText: { fontSize: 14, color: colors.textBody, lineHeight: 20 },
     state: {
       fontSize: 13,
