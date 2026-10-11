@@ -1,8 +1,9 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, Switch, TouchableOpacity } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { Link2, ChevronRight } from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
+import type { AccountDrawerNavigation } from '../../navigation/types';
 import { createSharedAccountStyles } from './sharedStyles';
 import { useThemeColors } from '../../contexts/ThemeContext';
 import { useTranslation } from '../../contexts/LocaleContext';
@@ -33,6 +34,7 @@ const TIER_TITLE = {
 const MessageSettingsScreen: React.FC = () => {
   const colors = useThemeColors();
   const t = useTranslation();
+  const navigation = useNavigation<AccountDrawerNavigation>();
   const sharedAccountStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const styles = useMemo(() => createSecurityScreenStyles(colors), [colors]);
   const advanced = useMemo(() => createAdvancedScreenStyles(colors), [colors]);
@@ -100,7 +102,21 @@ const MessageSettingsScreen: React.FC = () => {
         />
       </View>
       <AmberPermissionSection />
-      {/* Invitation keys belong here when the Marmot agent's screen lands (#1222). */}
+      {/* Invitation keys are per account, so they sit under "For this account". */}
+      <TouchableOpacity
+        testID="nostr-invitation-keys"
+        accessibilityRole="button"
+        accessibilityLabel={t('invitationKeys.title')}
+        accessibilityHint={t('invitationKeys.entrySubtitle')}
+        style={[advanced.navRow, advanced.sectionGap]}
+        onPress={() => navigation.navigate('AccountInvitationKeys')}
+      >
+        <View style={advanced.navText}>
+          <Text style={advanced.experimentalLabel}>{t('invitationKeys.title')}</Text>
+          <Text style={advanced.experimentalSubtitle}>{t('invitationKeys.entrySubtitle')}</Text>
+        </View>
+        <ChevronRight size={20} color={colors.white} />
+      </TouchableOpacity>
       <WebOfTrustBottomSheet visible={trustOpen} onClose={() => setTrustOpen(false)} />
     </AccountScreenLayout>
   );
