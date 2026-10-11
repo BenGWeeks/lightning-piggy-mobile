@@ -1023,11 +1023,12 @@ can be set for the simulator app without changing accounts or rebuilding:
 
 [source,bash]
 ----
-xcrun simctl spawn booted defaults write com.lightningpiggy.app.dev RCT_jsLocation -string <host>:<port>
 xcrun simctl terminate booted com.lightningpiggy.app.dev
-xcrun simctl launch booted com.lightningpiggy.app.dev
+xcrun simctl launch booted com.lightningpiggy.app.dev -RCT_jsLocation <host>:<port>
 ----
 
-Use only the locked simulator lane, then restore its designated main Metro
-host and cold-launch when the session ends. This is a simulator testing setting,
+The launch argument overrides the app-container preference for that process;
+simulator-wide `defaults write` may not reach the app-container preference.
+Use only the locked simulator lane, then cold-launch with its designated main
+Metro host when the session ends. This is a simulator testing setting,
 not an application configuration change.
