@@ -131,6 +131,7 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
 
   const openProduct = useCallback(
     (product: MarketProduct) => {
+      perfLog('[PerfBlock] market product tap');
       navigation.navigate('MarketProductDetail', { productId: product.id, product });
     },
     [navigation],
