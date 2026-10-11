@@ -98,23 +98,25 @@ jobs:
             exit 0
           fi
 
-          # Candidate run ids, newest first, with the exact-commit match promoted to the front.
-          IDS=$(echo "$RUNS" | jq -r --arg sha "$WANT" \
-            '(map(select(.headSha==$sha)) + map(select(.headSha!=$sha)))[].databaseId')
+          # Only a baseline for EXACTLY the commit this PR merges into is comparable;
+          # an older main baseline could pass or fail a PR wrongly, so anything else
+          # falls back to building that exact commit's coverage below.
+          IDS=$(echo "$RUNS" | jq -r --arg sha "$WANT" 'map(select(.headSha==$sha))[].databaseId')
 
           for ID in $IDS; do
             rm -rf "$DEST"; mkdir -p "$DEST"
             gh run download "$ID" --repo "$REPO" -n coverage-baseline -D "$DEST" 2>/dev/null || continue
             # Validate: sha present, pct numeric.
             if node -e "const p=require('$DEST/coverage-summary.json').total.lines.pct; process.exit(typeof p==='number'?0:1)" 2>/dev/null \
-               && [[ -s "$DEST/sha.txt" ]]; then
+               && [[ -s "$DEST/sha.txt" ]] \
+               && [[ "$(tr -d '[:space:]' < "$DEST/sha.txt")" == "$WANT" ]]; then
               SHA=$(tr -d '[:space:]' < "$DEST/sha.txt")
               {
                 echo "found=true"
                 echo "summary=$DEST/coverage-summary.json"
                 echo "sha=$SHA"
               } >> "$GITHUB_OUTPUT"
-              if [[ "$SHA" == "$WANT" ]]; then KIND="exact match for the commit this PR merges into"; else KIND="newest successful main run, NOT the merge target ($WANT)"; fi
+              KIND="exact match for the commit this PR merges into"
               echo "Using cached main baseline $SHA (run $ID) — $KIND."
               {
                 echo "### Coverage baseline"
@@ -123,14 +125,21 @@ jobs:
               exit 0
             fi
           done
-          echo "No usable cached baseline found — falling back to a fresh main run."
+          echo "No cached baseline for merge target $WANT — falling back to building it."
+          echo "want=$WANT" >> "$GITHUB_OUTPUT"
 
       # --- fallback: no cached baseline, so build main's coverage here (the old behaviour) ---
       - name: Checkout main (fallback baseline)
         if: github.event_name == 'pull_request' && steps.baseline.outputs.found != 'true'
         run: |
-          git fetch origin main --depth=1
-          git worktree add /tmp/main-baseline origin/main
+          # Build the exact commit the PR merges into (not whatever main is now).
+          TARGET="${{ steps.baseline.outputs.want }}"
+          if [[ -n "$TARGET" ]] && git fetch origin "$TARGET" --depth=1 2>/dev/null; then
+            git worktree add /tmp/main-baseline "$TARGET"
+          else
+            git fetch origin main --depth=1
+            git worktree add /tmp/main-baseline origin/main
+          fi
 
       - name: Install dependencies (fallback main baseline)
         if: github.event_name == 'pull_request' && steps.baseline.outputs.found != 'true'
