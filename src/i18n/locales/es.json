@@ -1739,7 +1739,7 @@
   },
   "securityScreen": {
     "presetOff": "Desactivado",
-    "presetOffSub": "Nunca confirmar — cada envío es de un toque",
+    "presetOffSub": "Nunca confirmar — cada pago es de un toque",
     "preset1k": "1.000 sats",
     "preset1kSub": "~£0,50 — confirmar a partir de este importe",
     "preset10k": "10.000 sats",
