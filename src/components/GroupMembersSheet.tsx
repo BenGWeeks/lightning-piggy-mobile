@@ -145,20 +145,26 @@ const GroupMembersSheet: React.FC<Props> = ({
       if (followInFlight.current) return;
       followInFlight.current = true;
       setFollowPendingPubkey(m.pubkey);
-      let ok = false;
+      // `false` = the follow path already gave its own feedback (e.g. the
+      // "Couldn't load your follow list" toast, #1271) or the signer was
+      // declined: don't replace it. Only an unexpected throw gets ours.
+      let outcome: 'followed' | 'declined' | 'error' = 'error';
       try {
-        ok = await followContact(m.pubkey);
+        outcome = (await followContact(m.pubkey)) ? 'followed' : 'declined';
       } catch (e) {
         if (__DEV__) console.warn('[Group] follow failed:', e);
       } finally {
         followInFlight.current = false;
         setFollowPendingPubkey(null);
       }
-      Toast.show(
-        ok
-          ? { type: 'success', text1: t('groupMembersSheet.followedToast', { name: m.name }) }
-          : { type: 'error', text1: t('groupMembersSheet.followFailed', { name: m.name }) },
-      );
+      if (outcome === 'followed') {
+        Toast.show({
+          type: 'success',
+          text1: t('groupMembersSheet.followedToast', { name: m.name }),
+        });
+      } else if (outcome === 'error') {
+        Toast.show({ type: 'error', text1: t('groupMembersSheet.followFailed', { name: m.name }) });
+      }
     },
     [followContact, t],
   );
