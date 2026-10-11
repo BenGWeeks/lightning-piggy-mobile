@@ -4,6 +4,12 @@ import { isNewerEdit } from '../utils/marmotEditOrder';
 import { isPollVoteMessage, parsePoll } from '../utils/pollMessage';
 import { mutateGroupStorage } from './groupStorageQueue';
 import type { MarmotEdit } from './marmotEdits';
+import {
+  groupMessagesKey,
+  groupMessagesOwnerPrefix,
+  normaliseGroupOwner,
+} from './groupMessagesKeys';
+import { ensureGroupMessagesMigrated, releaseLegacyGroupLogs } from './groupMessagesMigration';
 
 /**
  * In-thread message stored locally, per-group. We persist what the user
@@ -28,25 +34,56 @@ export interface GroupMessage {
   editId?: string;
 }
 
-// Account scoping: keyed only by groupId, not by viewer pubkey. These
-// blobs hold decrypted group-chat plaintext, so to prevent a cross-account
-// privacy leak NostrContext.wipeAccountCaches scans AsyncStorage for keys
-// with the GROUP_MESSAGES_KEY_PREFIX and removes them on logout / account
-// wipe. Per-account namespacing tracked as a follow-up alongside
-// multi-account switching.
-export const GROUP_MESSAGES_KEY_PREFIX = 'group_messages_';
-const KEY = (groupId: string): string => `${GROUP_MESSAGES_KEY_PREFIX}${groupId}`;
-const CAP = 500;
+// Account scoping (#1240): history is keyed per owner —
+// `group_history_<owner>:<groupId>` (layout in groupMessagesKeys.ts). Two
+// local accounts in the same group (synthetic NIP-17 rooms, kind-30200 and
+// Marmot ids are the same for every member) each get their own log, and an
+// account's sign-out deletes only its own logs (accountCacheWipe). Every
+// function awaits the one-time legacy migration (groupMessagesMigration.ts)
+// first and never falls back to a legacy device-wide key. A missing / invalid
+// owner reads as empty and refuses to write.
 
-export async function loadGroupMessages(groupId: string): Promise<GroupMessage[]> {
+function ownerKey(owner: string | null | undefined, groupId: string): string | null {
+  const pk = normaliseGroupOwner(owner);
+  return pk ? groupMessagesKey(pk, groupId) : null;
+}
+
+// Accounts signed out in this process. A write that lands after sign-out
+// (a Marmot flush on unmount, a group rumor still being routed) must not
+// recreate the deleted history; cleared when the account becomes active again.
+const retiredOwners = new Set<string>();
+
+/** Lift the sign-out write guard — call when `owner` becomes the active account. */
+export function reviveGroupHistoryOwner(owner: string | null | undefined): void {
+  const pk = normaliseGroupOwner(owner);
+  if (pk) retiredOwners.delete(pk);
+}
+
+function requireOwnerKey(owner: string | null | undefined, groupId: string): string {
+  const pk = normaliseGroupOwner(owner);
+  if (!pk) throw new Error('Group history needs the signed-in account');
+  if (retiredOwners.has(pk)) throw new Error('Group history write for a signed-out account');
+  return groupMessagesKey(pk, groupId);
+}
+
+async function readLog(key: string): Promise<GroupMessage[]> {
   try {
-    const raw = await AsyncStorage.getItem(KEY(groupId));
+    const raw = await AsyncStorage.getItem(key);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as GroupMessage[];
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
   }
+}
+
+export async function loadGroupMessages(
+  owner: string | null | undefined,
+  groupId: string,
+): Promise<GroupMessage[]> {
+  await ensureGroupMessagesMigrated();
+  const key = ownerKey(owner, groupId);
+  return key ? readLog(key) : [];
 }
 
 // Window in seconds for matching an inbound real-event message against a
@@ -56,13 +93,19 @@ export async function loadGroupMessages(groupId: string): Promise<GroupMessage[]
 // optimistically appended on send — so both rows persisted and the user
 // saw the same message (e.g. a GIF) twice.
 const LOCAL_ECHO_MATCH_WINDOW_SECS = 30;
+const CAP = 500;
 
 export async function appendGroupMessage(
+  owner: string | null | undefined,
   groupId: string,
   message: GroupMessage,
 ): Promise<GroupMessage[]> {
-  return mutateGroupStorage(groupId, async () => {
-    const existing = await loadGroupMessages(groupId);
+  requireOwnerKey(owner, groupId); // fail fast for a signed-out account
+  await ensureGroupMessagesMigrated();
+  const key = requireOwnerKey(owner, groupId);
+  return mutateGroupStorage(key, async () => {
+    requireOwnerKey(owner, groupId);
+    const existing = await readLog(key);
     const map = new Map<string, GroupMessage>();
     for (const m of existing) map.set(m.id, m);
 
@@ -106,15 +149,42 @@ export async function appendGroupMessage(
     }
     const all = Array.from(map.values()).sort((a, b) => a.createdAt - b.createdAt);
     const capped = all.length <= CAP ? all : all.slice(all.length - CAP);
-    await AsyncStorage.setItem(KEY(groupId), JSON.stringify(capped));
+    await AsyncStorage.setItem(key, JSON.stringify(capped));
     return capped;
   });
 }
 
-export async function clearGroupMessages(groupId: string): Promise<void> {
-  return mutateGroupStorage(groupId, async () => {
-    await AsyncStorage.removeItem(KEY(groupId));
-  });
+export async function clearGroupMessages(
+  owner: string | null | undefined,
+  groupId: string,
+): Promise<void> {
+  await ensureGroupMessagesMigrated();
+  const key = ownerKey(owner, groupId);
+  if (key) await mutateGroupStorage(key, () => AsyncStorage.removeItem(key));
+}
+
+/**
+ * Sign-out / account wipe: delete every group log belonging to `owner`, and
+ * every legacy device-wide blob no remaining account can claim
+ * (`releaseLegacyGroupLogs`). Other accounts' logs — even for the same group
+ * — are untouched. MUST run before the account's group list and Marmot state
+ * are deleted, so attribution still sees them. From the first line on, writes
+ * for `owner` are refused until it becomes active again.
+ */
+export async function deleteGroupMessagesForOwner(owner: string | null | undefined): Promise<void> {
+  const pk = normaliseGroupOwner(owner);
+  if (!pk) return;
+  retiredOwners.add(pk);
+  await ensureGroupMessagesMigrated();
+  try {
+    await releaseLegacyGroupLogs(pk);
+  } finally {
+    const prefix = groupMessagesOwnerPrefix(pk);
+    const keys = (await AsyncStorage.getAllKeys()).filter((k) => k.startsWith(prefix));
+    await Promise.all(
+      keys.map((key) => mutateGroupStorage(key, () => AsyncStorage.removeItem(key))),
+    );
+  }
 }
 
 /**
@@ -140,14 +210,18 @@ export async function clearGroupMessages(groupId: string): Promise<void> {
  * can cause this function to reject.
  */
 export async function removeGroupMessage(
+  owner: string | null | undefined,
   groupId: string,
   messageId: string,
 ): Promise<GroupMessage[]> {
-  return mutateGroupStorage(groupId, async () => {
-    const existing = await loadGroupMessages(groupId);
+  await ensureGroupMessagesMigrated();
+  const key = requireOwnerKey(owner, groupId);
+  return mutateGroupStorage(key, async () => {
+    requireOwnerKey(owner, groupId);
+    const existing = await readLog(key);
     const filtered = existing.filter((m) => m.id !== messageId);
     if (filtered.length === existing.length) return existing;
-    await AsyncStorage.setItem(KEY(groupId), JSON.stringify(filtered));
+    await AsyncStorage.setItem(key, JSON.stringify(filtered));
     return filtered;
   });
 }
@@ -175,12 +249,16 @@ export function isEditableGroupText(text: string): boolean {
  * edit already applied (isNewerEdit). Returns whether anything changed.
  */
 export async function editGroupMessages(
+  owner: string | null | undefined,
   groupId: string,
   edits: readonly MarmotEdit[],
 ): Promise<boolean> {
   if (edits.length === 0) return false;
-  return mutateGroupStorage(groupId, async () => {
-    const next = await loadGroupMessages(groupId);
+  await ensureGroupMessagesMigrated();
+  const key = requireOwnerKey(owner, groupId);
+  return mutateGroupStorage(key, async () => {
+    requireOwnerKey(owner, groupId);
+    const next = await readLog(key);
     const indexById = new Map(next.map((m, i) => [m.id, i]));
     let changed = false;
     for (const edit of edits) {
@@ -192,13 +270,14 @@ export async function editGroupMessages(
       next[i] = { ...target, text: edit.content, editedAt: edit.editedAt, editId: edit.editId };
       changed = true;
     }
-    if (changed) await AsyncStorage.setItem(KEY(groupId), JSON.stringify(next));
+    if (changed) await AsyncStorage.setItem(key, JSON.stringify(next));
     return changed;
   });
 }
 
 /** One edit — see `editGroupMessages`. */
 export function editGroupMessage(
+  owner: string | null | undefined,
   groupId: string,
   messageId: string,
   editor: string,
@@ -206,7 +285,7 @@ export function editGroupMessage(
   editedAt: number,
   editId = '',
 ): Promise<boolean> {
-  return editGroupMessages(groupId, [
+  return editGroupMessages(owner, groupId, [
     { target: messageId, editor, content: text, editedAt, editId },
   ]);
 }
@@ -217,29 +296,39 @@ export function editGroupMessage(
  * only when something was removed.
  */
 export async function removeGroupMessagesWhere(
+  owner: string | null | undefined,
   groupId: string,
   shouldRemove: (message: GroupMessage) => boolean,
 ): Promise<GroupMessage[]> {
-  return mutateGroupStorage(groupId, async () => {
-    const existing = await loadGroupMessages(groupId);
+  await ensureGroupMessagesMigrated();
+  const key = requireOwnerKey(owner, groupId);
+  return mutateGroupStorage(key, async () => {
+    requireOwnerKey(owner, groupId);
+    const existing = await readLog(key);
     const filtered = existing.filter((m) => !shouldRemove(m));
     if (filtered.length === existing.length) return existing;
-    await AsyncStorage.setItem(KEY(groupId), JSON.stringify(filtered));
+    await AsyncStorage.setItem(key, JSON.stringify(filtered));
     return filtered;
   });
 }
 
-// Scan AsyncStorage for every blob under GROUP_MESSAGES_KEY_PREFIX and return
+// Scan AsyncStorage for every one of `owner`'s group logs and return
 // the set of message ids that look like NIP-17 wrap ids (64-char hex —
 // `local_*` optimistic rows are excluded). Used by NostrContext to
 // pre-seed `knownWrapIds` on cold start so the live DM sub doesn't
 // redundantly decrypt + re-route group wraps it already processed in
 // a previous session. Single AsyncStorage round-trip per stored group.
 const WRAP_ID_PATTERN = /^[0-9a-f]{64}$/;
-export async function listPersistedGroupWrapIds(): Promise<string[]> {
+export async function listPersistedGroupWrapIds(
+  owner: string | null | undefined,
+): Promise<string[]> {
+  await ensureGroupMessagesMigrated();
+  const pk = normaliseGroupOwner(owner);
+  if (!pk) return [];
   try {
+    const prefix = groupMessagesOwnerPrefix(pk);
     const keys = await AsyncStorage.getAllKeys();
-    const groupKeys = keys.filter((k) => k.startsWith(GROUP_MESSAGES_KEY_PREFIX));
+    const groupKeys = keys.filter((k) => k.startsWith(prefix));
     if (groupKeys.length === 0) return [];
     const pairs = await AsyncStorage.multiGet(groupKeys);
     const ids: string[] = [];

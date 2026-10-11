@@ -4,6 +4,7 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -22,7 +23,10 @@ import {
   setSyntheticGroupReconciler,
   type SyntheticRoomInput,
 } from '../services/groupRoutingRegistry';
-import { loadGroupMessages } from '../services/groupMessagesStorageService';
+import {
+  loadGroupMessages,
+  reviveGroupHistoryOwner,
+} from '../services/groupMessagesStorageService';
 import { useNostr, subscribeGroupMessages } from './NostrContext';
 import {
   DEFAULT_RELAYS,
@@ -183,6 +187,9 @@ const EMPTY_ACTIVITY: Record<string, GroupActivity> = {};
 export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // NIP-17 groups (AsyncStorage-persisted). Marmot groups are merged in below.
   const { publishGroupState, pubkey, relays, isLoggedIn } = useNostr();
+  // Re-activating a signed-out account lifts its group-history write guard
+  // (#1240). Layout effect: before any child effect can write its history.
+  useLayoutEffect(() => reviveGroupHistoryOwner(pubkey), [pubkey]);
   const [storedGroups, setGroups] = useAccountState(pubkey, EMPTY_GROUPS);
   const activeOwner = useRef(pubkey);
   activeOwner.current = pubkey;
@@ -430,7 +437,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     (async () => {
       const updates: Record<string, GroupActivity> = {};
       for (const g of missing) {
-        const msgs = await loadGroupMessages(g.id);
+        const msgs = await loadGroupMessages(pubkey, g.id);
         updates[g.id] = activityFromMessages(g, msgs);
       }
       if (!cancelled && Object.keys(updates).length > 0) {
@@ -453,7 +460,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const unsub = subscribeGroupMessages((groupId) => {
       const g = groups.find((x) => x.id === groupId);
       if (!g) return;
-      loadGroupMessages(groupId).then((msgs) => {
+      loadGroupMessages(pubkey, groupId).then((msgs) => {
         if (!active) return;
         setActivityByGroup((prev) => ({ ...prev, [groupId]: activityFromMessages(g, msgs) }));
       });

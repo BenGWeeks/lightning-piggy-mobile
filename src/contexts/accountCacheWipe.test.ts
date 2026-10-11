@@ -8,7 +8,13 @@ import {
 } from './nostrCacheKeys';
 import { NOTIFICATION_HISTORY_KEY_BASE } from '../services/notificationHistory';
 import { isKeyBackedUp, markKeyBackedUp } from '../services/keyBackupStatus';
-
+import {
+  appendGroupMessage,
+  loadGroupMessages,
+  reviveGroupHistoryOwner,
+} from '../services/groupMessagesStorageService';
+import { resetGroupMessagesMigrationForTests } from '../services/groupMessagesMigration';
+import { groupMessagesKey, legacyGroupMessagesKey } from '../services/groupMessagesKeys';
 import { wipeDecryptedMediaForOwner } from '../services/decryptedMediaCache';
 
 jest.mock('../services/decryptedMediaCache', () => ({
@@ -16,6 +22,7 @@ jest.mock('../services/decryptedMediaCache', () => ({
 }));
 
 const PK = 'a'.repeat(64);
+const OTHER_PK = 'b'.repeat(64);
 
 it("removes the signed-out account's relay-list caches and baselines", async () => {
   const keys = [
@@ -42,4 +49,34 @@ it("drops the signed-out account's key-backup flag but keeps other accounts' (#1
 it("deletes the signed-out account's decrypted voice notes and photos (#1241)", async () => {
   await wipeAccountCaches(PK);
   expect(wipeDecryptedMediaForOwner).toHaveBeenCalledWith(PK);
+});
+
+// #1240: a family shares one phone — signing out the child's account must
+// leave the parent's group chats (Marmot history can't be re-fetched).
+it("wipes only the signed-out account's group history, migrating legacy blobs first", async () => {
+  resetGroupMessagesMigrationForTests();
+  const row = (id: string, text: string) => ({ id, senderPubkey: PK, text, createdAt: 1 });
+  // A not-yet-migrated device-wide blob for a group BOTH accounts are in.
+  await AsyncStorage.setItem(
+    legacyGroupMessagesKey('g_family'),
+    JSON.stringify([row('m1', 'shared before upgrade')]),
+  );
+  await AsyncStorage.setItem(`nostr_groups_${PK}`, JSON.stringify([{ id: 'g_family' }]));
+  await AsyncStorage.setItem(`nostr_groups_${OTHER_PK}`, JSON.stringify([{ id: 'g_family' }]));
+
+  await wipeAccountCaches(PK);
+
+  expect(await AsyncStorage.getItem(groupMessagesKey(PK, 'g_family'))).toBeNull();
+  expect((await loadGroupMessages(OTHER_PK, 'g_family')).map((m) => m.text)).toEqual([
+    'shared before upgrade',
+  ]);
+  expect(await AsyncStorage.getItem(legacyGroupMessagesKey('g_family'))).toBeNull();
+
+  // And after migration: the other account's own logs survive a later wipe.
+  reviveGroupHistoryOwner(PK); // PK signs back in
+  await appendGroupMessage(PK, 'g_kids', row('m2', 'child'));
+  await appendGroupMessage(OTHER_PK, 'g_kids', row('m3', 'parent'));
+  await wipeAccountCaches(PK);
+  expect(await loadGroupMessages(PK, 'g_kids')).toEqual([]);
+  expect((await loadGroupMessages(OTHER_PK, 'g_kids')).map((m) => m.text)).toEqual(['parent']);
 });
