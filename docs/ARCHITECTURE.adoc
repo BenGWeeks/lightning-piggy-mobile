@@ -237,7 +237,7 @@ full wire formats.
 | 9735 | NIP-57 zap receipt | `nostrService.ts` (`fetchZapReceipts`, `parseZapReceipt`)
 | 10002 | NIP-65 relay list | `nostrService.ts` (`fetchRelayList`)
 | 30443 | Marmot key package | `marmotSession.ts` (`ensureKeyPackage`)
-| 20069 | Ephemeral live-location coordinate (in-DM sharing) | live-location feature
+| 20069 | Live-location coordinate update — ephemeral NIP-17 event signed by a session key, or an inner Marmot app event | `liveLocationSender.ts`
 | 31923 | NIP-52 calendar event (meetups, read-only) | Explore → Events
 | 37516 | NIP-GC geo-cache listing ("Piglet") | `nostrPlacesService.ts`
 |===

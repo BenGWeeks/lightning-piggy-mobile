@@ -118,27 +118,31 @@ Members publish encrypted native push tokens inside the group (447/448, removals
 
 * A 1:1 send to someone with no usable key package (none, expired, or a legacy MDK 0.8 one from the classic White Noise app) is re-sent over NIP-17 and the thread switches to NIP-17.
 * Key packages are read from the peer's NIP-65 write relays plus the lookup relays; the newest per `d` slot that passes the library's invite checks is used.
-* Typing indicators (ephemeral, content-free) and live-location pings (kind 20069) are not carried over MLS.
+* Typing indicators (ephemeral, content-free) are not carried over MLS. Live location is (#1300): in a Marmot chat the markers and coordinate updates are MLS application messages — see the next section.
 
-=== Live location: kind-20069 pings + NIP-17 markers (#206)
+=== Live location: tagged markers + coordinate updates (#206, #1300)
 
-Live-location sharing rides on the DM pipeline above plus one ephemeral event kind. A share has three on-wire parts:
+A share is a *start marker*, a stream of *coordinate updates*, and an *end marker*. Markers ride the chat's own transport; updates depend on it.
 
 [cols="1,3",options="header"]
 |===
 | Part | Wire format
 
-| *Start marker* (NIP-17 DM)
-| A normal kind-14 rumor (sealed + gift-wrapped as usual) whose body is, first line first: `[live-location:start]`, then a `geo:<lat>,<lon>` (optionally `;u=<accuracy>`) URI, then a JSON metadata line `{"sessionId":"…","durationMs":900000,"startedAt":<epoch_ms>}`. The sentinel MUST be the first non-empty line to classify (quoting it mid-body does not).
+| *Start / end marker* (any chat)
+| An ordinary chat message — NIP-17 kind 14, or Marmot kind 9 in a Marmot 1:1 or group. The `content` is readable text for other clients: `📍 Sharing my live location for 1 h` (or `📍 Live location ended`) and a `https://maps.google.com/maps?q=<lat>,<lon>` link, which White Noise draws as its native map card. The machine-readable part is a tag, `["live-location", "start"\|"end", <sessionId>, <startedAt ms>, <durationMs>, "geo:<lat>,<lon>;u=<acc>"]` (geo empty on an end with no fix), plus a NIP-31 `alt` tag. A NIP-17 start also carries `["live-location-key", <session pubkey>, <32-byte secret hex>]`. `textForRumor` stores a tagged marker as the internal sentinel text (`[live-location:start]` + JSON + `geo:` block) that the bubble renders; previews show a label, never the stored marker.
 
-| *Pings* (kind 20069, ephemeral)
-| Published every ~30 s while the watcher runs. Ephemeral (20000–29999) so relays don't persist them — a late joiner sees the share via the start marker, then live pings as they arrive. The NIP-04-encrypted JSON payload carries `{ sessionId, lat, lon, accuracy, heading, ts }` — `sessionId` is validated on decode so a ping is matched to its share (a `['d', sessionId]` tag also scopes the subscription filter).
+| *Updates — Marmot*
+| Inner app event kind 20069 (NIP-01's ephemeral range: "not expected to be stored") inside a normal kind-445 MLS application message; `content` = JSON `{ sessionId, lat, lon, accuracy, heading, ts }`, no tags. MLS gives end-to-end encryption and sender authentication (the receiver trusts only the start marker's sender), so no NIP-04 and no `p`/`d` metadata. Receivers never store them as rows, the session keeps them out of the durable rumor history (whose newest-500 window protects real messages) and out of the delivered-dedupe cache. Option (b) — an ephemeral *outer* event — was rejected: Marmot group traffic is kind 445 only, and a NIP-40 `expiration` tag is only allowed when the group's retention component is on.
 
-| *End marker* (NIP-17 DM)
-| First line `[live-location:end]`. Coordinates are OPTIONAL here — if the sender stops with no GPS fix the `geo:` URI is omitted (never a `0,0` pin), and the parser still classifies it so the receiver bubble flips to "ended". A failed end-marker send is retried (sender state machine `stopPending`) until it lands.
+| *Updates — NIP-17*
+| Ephemeral kind 20069, signed by the share's *session key* (from the start marker), *no tags*, `content` NIP-44 v2 encrypted with the start marker's secret as the conversation key. Relays learn neither sender, recipient nor session; neither side needs a signer (Amber / NIP-46 work in the background). Receivers subscribe with `authors=[session pubkeys]`. Shares from older builds (author-signed, `p` + `d` tags, NIP-04) are still received.
 |===
 
-Durations are capped to `MAX_DURATION_MS` (8 h) at parse time. Sessions are scoped to the sender's pubkey in storage so an identity switch can't resume one account's share under another. See `src/services/liveLocationService.ts` (wire format), `liveLocationStateMachine.ts` (lifecycle), and `LiveLocationContext.tsx` (orchestration).
+*Cadence.* An update goes out when the sharer moved ≥ 25 m and ≥ 30 s passed since the last, or as a heartbeat when still — every 2 min on NIP-17, 5 min on Marmot (its updates are stored kind-445 events). Worst case for an 8 h Marmot share moving non-stop: 960 events (about 1 MB on relays); still: 96.
+
+*Background.* `startLocationUpdatesAsync` + a TaskManager task: an Android location foreground service (plus an ongoing "Sharing your location with … · Stop sharing" notification), iOS `UIBackgroundModes: location` with the blue indicator. Both need only "While in use". Without them the share falls back to the foreground-only watcher and pauses in the background.
+
+Durations are capped to `MAX_DURATION_MS` (8 h) at parse time. Sessions are scoped to the sender's pubkey; an account switch or sign-out stops the share, and that account's next start sends the end markers. See `liveLocationWire.ts` (wire format), `liveLocationPolicy.ts` (cadence), `liveLocationSender.ts`, `liveLocationTracker.ts`, `liveLocationUpdateStore.ts` (coalesced receiver) and `LiveLocationContext.tsx`.
 
 === Sharing rich objects in a DM: the publish-and-reference pattern (interop)
 
@@ -160,7 +164,7 @@ Two hard constraints:
 * *The referenced object is public.* The DM envelope stays private (the pointer is inside the encrypted kind-14), but the referenced event is a normal published event anyone can fetch with the `naddr`/`nevent`. There is **no interoperable way to share a _private_ rich object**: per NIP-17, other clients only unwrap kinds *14 (chat), 15 (file), and 7 (reaction)* from a gift wrap — a gift-wrapped kind-31923 or kind-1068 is invisible to them. Private + rich + interoperable: pick two.
 * *Tag rules differ inside a kind-14.* Referencing an **event** → add a `q` (quote) tag (safe, conventional). Referencing a **profile** → content only, *never* a `p` tag — in NIP-17 the kind-14 `p` tags are the chat participants, so tagging a mentioned person would add them to the conversation and re-route a copy to them.
 
-*Location is the genuine exception.* There is no location *event kind* anywhere in the NIPs — NIP-52 carries location as a `location` string tag + a `g` geohash tag on a calendar event, and Amethyst's own "location" is geohash-tagged notes (NIP-73 geohash scope) + a geohash feed. So there is no published "location object" to point an `naddr` at, and the best-effort for a point in a DM is a `geo:` URI in the `content` (a client that decrypts the DM may linkify it). A live, moving pin in a DM is therefore *inherently app-specific* — which is exactly why our live location is a private convention (`[live-location]` markers + kind-20069 pings) rather than a portable card. Polls (NIP-88) are public-only for the same family of reasons (votes must be public to tally), so our `[POLL]` DM encoding is likewise app-private by necessity.
+*Location is the genuine exception.* There is no location *event kind* anywhere in the NIPs — NIP-52 carries location as a `location` string tag + a `g` geohash tag on a calendar event, and Amethyst's own "location" is geohash-tagged notes (NIP-73 geohash scope) + a geohash feed. So there is no published "location object" to point an `naddr` at, and the best-effort for a point in a DM is a `geo:` URI in the `content` (a client that decrypts the DM may linkify it). A live, moving pin in a DM is therefore *inherently app-specific* — which is exactly why the live part of our live location is a private convention (a `live-location` tag + kind-20069 updates) — though its markers now read as an ordinary location message with a maps link in every client. Polls (NIP-88) are public-only for the same family of reasons (votes must be public to tally), so our `[POLL]` DM encoding is likewise app-private by necessity.
 
 *Why not add a `g` geohash tag to the markers?* Because inside NIP-17 the kind-14's tags are encrypted (the rumor is sealed + gift-wrapped), a `g` tag would be *private* — but that also means relays never see it and so cannot index it. The whole purpose of a `g` tag is relay-side `#g` discovery (geohash feeds), which is impossible on an encrypted rumor. So the tag would add no discovery value and ~no rendering value over the `geo:` URI already in the body. It is **not** worth adding. (Geohash tags *are* best practice on *public* events — kind-1 geo-notes, kind-31923 calendar events — precisely because relays index them; that rationale evaporates inside an encrypted DM.) The one real rule it illustrates: never move location onto the *outer* gift wrap (kind 1059) or seal (kind 13) — only the `["p", recipient]` routing tag belongs there, and anything sensitive must stay inside the encrypted kind-14.
 
