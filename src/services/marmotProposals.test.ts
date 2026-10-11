@@ -1,5 +1,6 @@
 import {
   appDataDictionaryIsLast,
+  needsAppDataDictionaryAlignment,
   proposeAppDataDictionaryLast,
   withAppDataDictionaryLast,
 } from './marmotProposals';
@@ -38,5 +39,20 @@ describe('app_data_dictionary extension order (#1309)', () => {
     expect(proposal.proposalType).toBe(7); // group_context_extensions (RFC 9420)
     expect(proposal.groupContextExtensions.extensions).toEqual([caps, dict]);
     expect(proposal.groupContextExtensions.extensions[1]).toBe(dict); // same object, same bytes
+  });
+
+  it('aligns only an unaligned group with no staged app_data_update', () => {
+    const state = (extensions: number[], staged: number[] = []) => ({
+      groupContext: { extensions: extensions.map((t) => ext(t)) },
+      unappliedProposals: Object.fromEntries(
+        staged.map((proposalType, i) => [`ref${i}`, { proposal: { proposalType } }]),
+      ),
+    });
+    expect(needsAppDataDictionaryAlignment(state([6, 3]))).toBe(true);
+    expect(needsAppDataDictionaryAlignment(state([6, 3], [10]))).toBe(true); // a staged SelfRemove is fine
+    expect(needsAppDataDictionaryAlignment(state([3, 6]))).toBe(false); // already aligned (MDK groups)
+    // A staged app_data_update is bundled ahead of our proposals and may not
+    // precede a GroupContextExtensions proposal: leave that commit alone.
+    expect(needsAppDataDictionaryAlignment(state([6, 3], [8]))).toBe(false);
   });
 });

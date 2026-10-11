@@ -3,6 +3,7 @@
 import type { MarmotClient } from '@internet-privacy/marmot-ts';
 import {
   appDataDictionaryExtensionType,
+  appDataUpdateProposalType,
   defaultProposalTypes,
 } from '@internet-privacy/marmot-ts/mls';
 
@@ -39,6 +40,23 @@ type ExtensionLike = { extensionType: number };
 export function appDataDictionaryIsLast(extensions: readonly ExtensionLike[]): boolean {
   const i = extensions.findIndex((e) => e.extensionType === appDataDictionaryExtensionType);
   return i === -1 || i === extensions.length - 1;
+}
+
+/**
+ * Whether a commit built on `state` should carry {@link proposeAppDataDictionaryLast}:
+ * the dictionary isn't last yet, and no staged `app_data_update` proposal
+ * exists. ts-mls bundles staged proposals (by reference) ahead of the commit's
+ * own, and an `app_data_update` may not precede a GroupContextExtensions
+ * proposal, so in that rare case this commit can't realign (a later one will).
+ */
+export function needsAppDataDictionaryAlignment(state: {
+  groupContext: { extensions: readonly ExtensionLike[] };
+  unappliedProposals: Record<string, { proposal: { proposalType: number } }>;
+}): boolean {
+  if (appDataDictionaryIsLast(state.groupContext.extensions)) return false;
+  return !Object.values(state.unappliedProposals).some(
+    (p) => p.proposal.proposalType === appDataUpdateProposalType,
+  );
 }
 
 /** The same extensions, in the same order, with `app_data_dictionary` moved to the end. */

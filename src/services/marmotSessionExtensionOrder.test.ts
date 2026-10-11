@@ -92,4 +92,37 @@ describe('MarmotSession metadata commits stay MDK-compatible (#1309)', () => {
 
     for (const p of [alice, bob]) p.session.stop();
   }, 120_000);
+
+  it('aligns when the first metadata commit removes an admin (engine-spliced update)', async () => {
+    const relay = makeRelay();
+    const [alice, bob, carol] = [makeSession(relay), makeSession(relay), makeSession(relay)];
+    await Promise.all([alice, bob, carol].map((p) => p.session.start()));
+    await waitFor(
+      () =>
+        relay.events.filter(
+          (e) => e.kind === 30443 && [bob.pubkey, carol.pubkey].includes(e.pubkey),
+        ).length === 2,
+    );
+    // Bob is an admin from creation, so this group has had no metadata commit.
+    const group = await alice.session.createGroup('Piggy Bank', [bob.pubkey, carol.pubkey], {
+      adminPubkeys: [alice.pubkey, bob.pubkey],
+    });
+    for (const who of [bob, carol]) {
+      const [welcome] = unwrapWelcomes(relay, who);
+      expect(await who.session.acceptWelcome(welcome)).not.toBeNull();
+    }
+    expect(appDataDictionaryIsLast((await groupContext(alice.session, group.id)).extensions)).toBe(
+      false,
+    );
+
+    // marmot-ts splices the admin-policy update into the Remove commit itself.
+    await alice.session.removeMember(group.id, bob.pubkey);
+    const after = await groupContext(alice.session, group.id);
+    expect(after.extensions.map((e) => e.extensionType)).toEqual(openMlsOrder(after.extensions));
+    expect(alice.session.getGroup(group.id)?.adminPubkeys).toEqual([alice.pubkey]);
+    await waitFor(() => carol.session.getGroup(group.id)?.adminPubkeys.length === 1);
+    expect(await groupContext(carol.session, group.id)).toEqual(after);
+
+    for (const p of [alice, bob, carol]) p.session.stop();
+  }, 120_000);
 });
