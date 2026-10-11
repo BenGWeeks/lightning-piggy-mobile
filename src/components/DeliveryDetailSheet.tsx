@@ -27,6 +27,9 @@ function kindLabel(info: MessageInfo, tr: ReturnType<typeof useTranslation>): st
   return tr(`deliveryDetailSheet.${label.key}`, 'kind' in label ? { kind: label.kind } : undefined);
 }
 
+// Which id the Event ID row holds (see MessageInfo.idKind).
+const ID_LABEL_KEY = { event: 'eventId', rumor: 'rumorId', wrap: 'wrapId' } as const;
+
 function shortEventId(id: string): string {
   return id.length > 16 ? `${id.slice(0, 8)}…${id.slice(-8)}` : id;
 }
@@ -36,7 +39,7 @@ function shortEventId(id: string): string {
  * shows the per-relay delivery breakdown (coloured ✓/✗) + a Re-publish action;
  * for a RECEIVED message it shows just the metadata (no relay breakdown, no
  * Re-publish). Both show the protocol (NIP-04 / NIP-17 gift-wrapped / Marmot),
- * Kind, and a copyable Event ID.
+ * Kind, and a copyable id labelled by what it is (event / rumor / gift wrap).
  * The decisions live in `utils/messageInfo`. Modal-based, like BrandedAlert.
  */
 export default function DeliveryDetailSheet({
@@ -181,7 +184,9 @@ export default function DeliveryDetailSheet({
             </View>
             {info.eventId ? (
               <View style={styles.metaRow}>
-                <Text style={styles.metaLabel}>{tr('deliveryDetailSheet.eventId')}</Text>
+                <Text style={styles.metaLabel}>
+                  {tr(`deliveryDetailSheet.${ID_LABEL_KEY[info.idKind ?? 'event']}`)}
+                </Text>
                 <TouchableOpacity
                   style={styles.copyRow}
                   onPress={copyEventId}

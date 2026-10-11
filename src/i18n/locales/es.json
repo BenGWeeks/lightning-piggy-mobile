@@ -437,6 +437,8 @@
     "protocol": "Protocolo",
     "kind": "Tipo",
     "eventId": "ID del evento",
+    "rumorId": "ID del rumor",
+    "wrapId": "ID del envoltorio",
     "copyEventIdAccessibility": "Copiar ID del evento",
     "status": "Estado",
     "republish": "Volver a publicar",

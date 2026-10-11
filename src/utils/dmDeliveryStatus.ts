@@ -109,6 +109,9 @@ export interface MessageInfo {
   // The message's protocol (set by `buildMessageInfo`). Marmot rumors reuse
   // NIP-17's kinds, so the kind alone can't tell them apart.
   protocol?: DmProtocol;
+  // What `eventId` is: a NIP-04 event, a NIP-17 / Marmot rumor (not on relays
+  // by itself), or the NIP-17 gift wrap we received.
+  idKind?: 'event' | 'rumor' | 'wrap';
   // Present only for sent messages — drives the relay breakdown + tick.
   deliveryStatus?: DeliveryStatus;
   // Raw text to hand Re-publish (sent kind-14 only); empty otherwise.

@@ -69,6 +69,10 @@ export interface MessageInfoInput {
   resendText: string;
 }
 
+/** Optimistic rows carry a local placeholder id (`local-…` 1:1, `local_…`
+ * group) that no relay or peer knows — never show it as an event id. */
+const isLocalId = (id: string) => /^local[-_]/.test(id);
+
 /**
  * Builds the sheet's `MessageInfo` plus whether Re-publish is offered.
  *
@@ -92,8 +96,16 @@ export function buildMessageInfo(input: MessageInfoInput): {
   const effective: DmProtocol =
     input.protocol === 'marmot' ? 'marmot' : protocolForWireKind(wireKind);
 
-  // A tracked send knows its rumor (Marmot / NIP-17) or event (NIP-04) id.
-  const eventId = deliveryStatus?.eventId ?? input.rowId;
+  // Which id this is. A tracked send knows its rumor (Marmot / NIP-17) or
+  // event (NIP-04) id; otherwise it's the row id.
+  const rawId = deliveryStatus?.eventId ?? input.rowId;
+  const eventId = isLocalId(rawId) ? '' : rawId;
+  const idKind: MessageInfo['idKind'] =
+    effective === 'nip04'
+      ? 'event'
+      : effective === 'marmot' || deliveryStatus?.eventId
+        ? 'rumor'
+        : 'wrap';
 
   const { resendText } = input;
 
@@ -104,6 +116,7 @@ export function buildMessageInfo(input: MessageInfoInput): {
     info: {
       direction: fromMe ? 'sent' : 'received',
       eventId,
+      idKind,
       wireKind,
       protocol: effective,
       deliveryStatus,

@@ -131,6 +131,7 @@ describe('useMessageInfoSheet', () => {
     expect(info.protocol).toBe('marmot');
     expect(protocolLabel(info.wireKind, info.protocol)).toBe('Marmot (MLS)');
     expect(messageKindLabel(info.wireKind, info.protocol!)).toEqual({ key: 'marmotChat', kind: 9 });
+    expect(info.idKind).toBe('rumor');
     act(() => result.current.resendFromInfo());
     expect(groupResend).toHaveBeenCalledWith('hi');
   });
@@ -144,6 +145,7 @@ describe('useMessageInfoSheet', () => {
     });
     const info = result.current.info!;
     expect(protocolLabel(info.wireKind, info.protocol)).toBe('NIP-17 (gift-wrapped)');
+    expect(info.idKind).toBe('wrap');
   });
 
   it('closeInfo clears the sheet', () => {

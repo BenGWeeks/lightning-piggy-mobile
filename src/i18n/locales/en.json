@@ -437,6 +437,8 @@
     "protocol": "Protocol",
     "kind": "Kind",
     "eventId": "Event ID",
+    "rumorId": "Rumor ID",
+    "wrapId": "Gift wrap ID",
     "copyEventIdAccessibility": "Copy event ID",
     "status": "Status",
     "republish": "Re-publish",
