@@ -4,6 +4,7 @@ import { Image } from 'expo-image';
 import { Play } from 'lucide-react-native';
 import NostrContent from '../nostr/NostrContent';
 import MarketProductCard from '../MarketProductCard';
+import ReplyContext from './ReplyContext';
 import { useThemeColors } from '../../contexts/ThemeContext';
 import { useTranslation } from '../../contexts/LocaleContext';
 import { relativeTime } from '../../utils/relativeTime';
@@ -26,6 +27,7 @@ interface Props {
 
 const STATUS_KEYS: Record<Exclude<ProfileStatus, 'loading'>, string> = {
   emptyPosts: 'friendNoteFeed.noPostsYet',
+  onlyReplies: 'profileTabs.onlyReplies',
   emptyMedia: 'profileTabs.noMedia',
   emptyProducts: 'profileTabs.noProducts',
   productsUnavailable: 'profileTabs.productsUnavailable',
@@ -47,6 +49,12 @@ const ProfileFeedRow: React.FC<Props> = ({ row, styles, onOpenImage, onOpenProdu
           testID={`contact-profile-note-card-${row.event.id.slice(0, 12)}`}
         >
           <Text style={styles.postTime}>{relativeTime(row.event.created_at)}</Text>
+          {row.reply ? (
+            <ReplyContext
+              reply={row.reply}
+              testID={`profile-reply-context-${row.event.id.slice(0, 12)}`}
+            />
+          ) : null}
           <NostrContent content={row.event.content} onImagePress={onOpenImage} />
         </View>
       );

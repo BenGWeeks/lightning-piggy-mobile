@@ -3,10 +3,13 @@
 // two products per grid row, or one status row (loading / empty). Kept out
 // of the screen so the tab → rows logic is unit-testable.
 import { extractNoteMedia, type NoteMediaItem } from './noteMedia';
+import { isReply, replyTarget, type ReplyTarget } from './nip10';
 import type { AuthorFeedEvent } from '../services/authorFeedService';
 import type { MarketProduct } from '../data/marketProducts';
 
 export type ProfileTab = 'posts' | 'media' | 'products';
+/** Posts tab filter: top-level posts only (default), or posts and replies. */
+export type PostsMode = 'posts' | 'all';
 
 export const MEDIA_COLUMNS = 3;
 export const PRODUCT_COLUMNS = 2;
@@ -20,12 +23,19 @@ export interface MediaTile {
 export type ProfileStatus =
   | 'loading'
   | 'emptyPosts'
+  | 'onlyReplies'
   | 'emptyMedia'
   | 'emptyProducts'
   | 'productsUnavailable';
 
 export type ProfileRow =
-  | { type: 'post'; key: string; event: AuthorFeedEvent }
+  | {
+      type: 'post';
+      key: string;
+      event: AuthorFeedEvent;
+      /** Set for replies in "Posts & replies" mode: what it replies to. */
+      reply: ReplyTarget | null;
+    }
   | { type: 'media'; key: string; tiles: MediaTile[] }
   | { type: 'products'; key: string; products: MarketProduct[] }
   | { type: 'status'; key: string; status: ProfileStatus };
@@ -57,6 +67,8 @@ export function chunk<T>(items: readonly T[], size: number): T[][] {
 
 export interface ProfileRowsInput {
   tab: ProfileTab;
+  /** Posts tab filter; defaults to top-level posts only. */
+  postsMode?: PostsMode;
   feed: readonly AuthorFeedEvent[];
   feedLoading: boolean;
   products: readonly MarketProduct[];
@@ -93,7 +105,25 @@ export function buildProfileRows(input: ProfileRowsInput): ProfileRow[] {
       tiles: row,
     }));
   }
-  const posts = input.feed.filter((e) => e.kind === 1);
-  if (posts.length === 0) return status(input.feedLoading ? 'loading' : 'emptyPosts');
-  return posts.map((event) => ({ type: 'post', key: event.id, event }));
+  const all = input.postsMode === 'all';
+  const notes = input.feed.filter((e) => e.kind === 1);
+  const posts = all ? notes : notes.filter((e) => !isReply(e));
+  if (posts.length === 0) {
+    if (input.feedLoading) return status('loading');
+    // Only replies loaded so far — point at the other mode.
+    return status(notes.length > 0 ? 'onlyReplies' : 'emptyPosts');
+  }
+  return posts.map((event) => ({
+    type: 'post',
+    key: event.id,
+    event,
+    reply: all ? replyTarget(event) : null,
+  }));
+}
+
+/** Top-level posts in a (sorted) feed — what "Posts" mode can show. */
+export function countTopLevelPosts(feed: readonly AuthorFeedEvent[]): number {
+  let n = 0;
+  for (const e of feed) if (e.kind === 1 && !isReply(e)) n++;
+  return n;
 }

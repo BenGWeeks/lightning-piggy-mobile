@@ -80,6 +80,24 @@ export const createNostrContentStyles = (colors: Palette) =>
       paddingVertical: 10,
       gap: 6,
     },
+    cardCompact: {
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      gap: 4,
+    },
+    cardBodyCompact: {
+      fontSize: 12,
+      lineHeight: 16,
+    },
+    replyBlock: {
+      gap: 6,
+    },
+    // "Replying to @Name" line above a reply on the Posts tab.
+    replyContext: {
+      fontSize: 12,
+      lineHeight: 20,
+      color: colors.textSupplementary,
+    },
     cardHeader: {
       flexDirection: 'row',
       alignItems: 'center',

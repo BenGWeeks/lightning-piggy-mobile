@@ -23,6 +23,12 @@ export const ARTICLE_KIND = 30023;
 interface Props {
   token: EmbedRef;
   styles: NostrContentStyles;
+  /**
+   * Compact preview (a reply's parent on the Posts tab): smaller, two lines,
+   * and renders nothing when the event can't be found — the caller already
+   * shows its own context line.
+   */
+  compact?: boolean;
 }
 
 const tagValue = (event: Event, name: string) => event.tags.find((t) => t[0] === name)?.[1];
@@ -43,14 +49,19 @@ function openOnWeb(raw: string): void {
  * Shows a skeleton while the batched fetch runs; notes and articles open on
  * the web (there's no in-app note view yet — #540).
  */
-const EmbeddedEventCard: React.FC<Props> = ({ token, styles }) => {
+const EmbeddedEventCard: React.FC<Props> = ({ token, styles, compact = false }) => {
   const t = useTranslation();
   const { result, loading } = useEmbeddedEvent(token);
   const event = result?.event ?? null;
   const kind = event?.kind ?? token.kind;
   const shortId = token.type === 'event' ? token.id.slice(0, 12) : token.identifier.slice(0, 24);
 
-  if (loading) return <EmbedSkeleton styles={styles} testID={`nostr-embed-skeleton-${shortId}`} />;
+  if (loading) {
+    return (
+      <EmbedSkeleton styles={styles} compact={compact} testID={`nostr-embed-skeleton-${shortId}`} />
+    );
+  }
+  if (compact && !event) return null;
 
   if (kind === PRODUCT_KIND) {
     return result?.product ? (
@@ -70,20 +81,23 @@ const EmbeddedEventCard: React.FC<Props> = ({ token, styles }) => {
   const preview = previewText(event.content) || t('nostrContent.emptyPost');
   return (
     <TouchableOpacity
-      style={styles.card}
+      style={[styles.card, compact && styles.cardCompact]}
       onPress={() => openOnWeb(token.raw)}
       accessibilityRole="button"
       accessibilityLabel={t('nostrContent.embeddedPostA11y', { text: preview.slice(0, 120) })}
-      testID={`nostr-embed-note-${shortId}`}
+      testID={`${compact ? 'nostr-embed-parent' : 'nostr-embed-note'}-${shortId}`}
       activeOpacity={0.8}
     >
       <View style={styles.cardHeader}>
         <View style={styles.cardAuthor}>
-          <AuthorInline pubkey={event.pubkey} size={22} />
+          <AuthorInline pubkey={event.pubkey} size={compact ? 18 : 22} />
         </View>
         <Text style={styles.cardTime}>{relativeTime(event.created_at)}</Text>
       </View>
-      <Text style={styles.cardBody} numberOfLines={5}>
+      <Text
+        style={[styles.cardBody, compact && styles.cardBodyCompact]}
+        numberOfLines={compact ? 2 : 5}
+      >
         {preview}
       </Text>
     </TouchableOpacity>

@@ -4,6 +4,9 @@ import {
   Text,
   TouchableOpacity,
   ActivityIndicator,
+  type LayoutChangeEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   Linking,
   Share,
   useWindowDimensions,
@@ -23,6 +26,8 @@ import SendSheet from '../components/SendSheet';
 import ContactProfileHeader from '../components/profile/ContactProfileHeader';
 import ProfileTabBar from '../components/profile/ProfileTabBar';
 import ProfileFeedRow from '../components/profile/ProfileFeedRow';
+import ProfileStickyBar from '../components/profile/ProfileStickyBar';
+import PostsFilterSwitch from '../components/profile/PostsFilterSwitch';
 import FriendPickerSheet, { PickedFriend } from '../components/FriendPickerSheet';
 import { type ContactProfileBodyData } from '../components/ContactProfileBody';
 import FullscreenImageModal from '../components/FullscreenImageModal';
@@ -32,8 +37,18 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createContactProfileScreenStyles } from '../styles/ContactProfileScreen.styles';
 import { createProfileTabsStyles } from '../styles/ProfileTabs.styles';
-import { profileHeaderLayout } from '../utils/profileHeaderLayout';
-import { buildProfileRows, type ProfileRow, type ProfileTab } from '../utils/profileFeedRows';
+import {
+  profileHeaderLayout,
+  profileStickyPhase,
+  type ProfileStickyPhase,
+} from '../utils/profileHeaderLayout';
+import {
+  buildProfileRows,
+  countTopLevelPosts,
+  type PostsMode,
+  type ProfileRow,
+  type ProfileTab,
+} from '../utils/profileFeedRows';
 import { useProfileFeed } from '../hooks/useProfileFeed';
 import { useSellerProducts } from '../hooks/useSellerProducts';
 import type { MarketProduct } from '../data/marketProducts';
@@ -49,6 +64,11 @@ import type { RootStackParamList } from '../navigation/types';
 
 type ContactProfileNavigation = NativeStackNavigationProp<RootStackParamList, 'ContactProfile'>;
 type ContactProfileRoute = RouteProp<RootStackParamList, 'ContactProfile'>;
+
+/** "Posts" mode auto-pages (past replies) until it has this many posts… */
+const MIN_TOP_LEVEL_POSTS = 10;
+/** …or has fetched this many extra pages for this person + filter. */
+const MAX_AUTO_PAGES = 4;
 
 // Full-page friends profile route. Layout follows Primal/Damus
 // convention: back chevron pinned top-left, the identity header
@@ -85,6 +105,8 @@ const ContactProfileScreen: React.FC = () => {
   // refetches.
   const [notesReloadNonce, setNotesReloadNonce] = useState(0);
   const [tab, setTab] = useState<ProfileTab>('posts');
+  // Posts tab filter: top-level posts by default, or posts and replies.
+  const [postsMode, setPostsMode] = useState<PostsMode>('posts');
   // Products are fetched only once their tab has been opened.
   const [productsOpened, setProductsOpened] = useState(false);
 
@@ -107,6 +129,7 @@ const ContactProfileScreen: React.FC = () => {
     setContact(paramContact);
     // A different person starts on Posts, with Products not yet fetched.
     setTab('posts');
+    setPostsMode('posts');
     setProductsOpened(false);
   }, [paramIdentityKey]);
 
@@ -440,6 +463,7 @@ const ContactProfileScreen: React.FC = () => {
       contact.pubkey
         ? buildProfileRows({
             tab,
+            postsMode,
             feed: feed.events,
             feedLoading: feed.loading && feed.hasRelays,
             products: seller.products,
@@ -450,6 +474,7 @@ const ContactProfileScreen: React.FC = () => {
     [
       contact.pubkey,
       tab,
+      postsMode,
       feed.events,
       feed.loading,
       feed.hasRelays,
@@ -458,6 +483,24 @@ const ContactProfileScreen: React.FC = () => {
       seller.incomplete,
     ],
   );
+
+  // "Posts" hides replies, so a page can be mostly invisible. Keep paging
+  // until there are enough top-level posts or the feed ends — bounded per
+  // person + filter, after which "Load more" stays available.
+  const autoPagesRef = useRef(0);
+  useEffect(() => {
+    autoPagesRef.current = 0;
+  }, [contact.pubkey, postsMode]);
+  const topLevelCount = useMemo(() => countTopLevelPosts(feed.events), [feed.events]);
+  const { loadMore, loading: feedLoading, loadingMore, reachedEnd } = feed;
+  const feedSize = feed.events.length;
+  useEffect(() => {
+    if (tab !== 'posts' || postsMode !== 'posts') return;
+    if (feedLoading || loadingMore || reachedEnd || feedSize === 0) return;
+    if (topLevelCount >= MIN_TOP_LEVEL_POSTS || autoPagesRef.current >= MAX_AUTO_PAGES) return;
+    autoPagesRef.current += 1;
+    void loadMore();
+  }, [tab, postsMode, feedLoading, loadingMore, reachedEnd, feedSize, topLevelCount, loadMore]);
 
   const openProduct = useCallback(
     (product: MarketProduct) =>
@@ -477,9 +520,34 @@ const ContactProfileScreen: React.FC = () => {
   );
   const openQr = useCallback(() => setQrSheetOpen(true), []);
 
+  // Pinned app bar (#1332 review): the tab bar's offset in the list is
+  // measured once laid out; the scroll handler only commits state when the
+  // phase actually changes (three values), never per scroll event.
+  const tabBarYRef = useRef<number | null>(null);
+  const scrollYRef = useRef(0);
+  const [stickyPhase, setStickyPhase] = useState<ProfileStickyPhase>(0);
+  const updateStickyPhase = useCallback(() => {
+    const next = profileStickyPhase(scrollYRef.current, insets.top, tabBarYRef.current);
+    setStickyPhase((prev) => (prev === next ? prev : next));
+  }, [insets.top]);
+  const handleScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      scrollYRef.current = e.nativeEvent.contentOffset.y;
+      updateStickyPhase();
+    },
+    [updateStickyPhase],
+  );
+  const handleTabBarLayout = useCallback(
+    (e: LayoutChangeEvent) => {
+      tabBarYRef.current = e.nativeEvent.layout.y;
+      updateStickyPhase();
+    },
+    [updateStickyPhase],
+  );
+
   const listHeader = useMemo(
     () => (
-      <>
+      <View>
         <ContactProfileHeader
           contact={contact}
           styles={styles}
@@ -499,9 +567,14 @@ const ContactProfileScreen: React.FC = () => {
           onSaveLightningAddress={handleSetLightningAddress}
         />
         {contact.pubkey ? (
-          <ProfileTabBar active={tab} onChange={selectTab} styles={tabStyles} />
+          <View onLayout={handleTabBarLayout}>
+            <ProfileTabBar active={tab} onChange={selectTab} styles={tabStyles} />
+          </View>
         ) : null}
-      </>
+        {contact.pubkey && tab === 'posts' ? (
+          <PostsFilterSwitch mode={postsMode} onChange={setPostsMode} styles={tabStyles} />
+        ) : null}
+      </View>
     ),
     [
       contact,
@@ -522,6 +595,8 @@ const ContactProfileScreen: React.FC = () => {
       tab,
       selectTab,
       tabStyles,
+      handleTabBarLayout,
+      postsMode,
     ],
   );
 
@@ -596,7 +671,19 @@ const ContactProfileScreen: React.FC = () => {
         showsVerticalScrollIndicator={false}
         refreshing={refreshing}
         onRefresh={handleRefresh}
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
         testID="contact-profile-list"
+      />
+
+      <ProfileStickyBar
+        phase={stickyPhase}
+        topInset={insets.top}
+        title={contact.name}
+        showTabs={!!contact.pubkey}
+        tab={tab}
+        onChangeTab={selectTab}
+        styles={tabStyles}
       />
 
       {npub && (

@@ -35,6 +35,34 @@ export const createProfileTabsStyles = (colors: Palette) =>
       color: colors.brandPink,
       fontWeight: '700',
     },
+    // Posts / Posts & replies switch at the top of the Posts tab.
+    segmented: {
+      flexDirection: 'row',
+      alignSelf: 'flex-start',
+      marginHorizontal: 16,
+      marginBottom: 10,
+      padding: 2,
+      borderRadius: 16,
+      backgroundColor: colors.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.divider,
+    },
+    segment: {
+      paddingHorizontal: 12,
+      paddingVertical: 5,
+      borderRadius: 14,
+    },
+    segmentActive: {
+      backgroundColor: colors.brandPink,
+    },
+    segmentText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.textSupplementary,
+    },
+    segmentTextActive: {
+      color: colors.white,
+    },
     postCard: {
       backgroundColor: colors.surface,
       borderRadius: 12,
@@ -112,6 +140,36 @@ export const createProfileTabsStyles = (colors: Palette) =>
       borderRadius: 16,
       borderWidth: 1,
       borderColor: colors.brandPink,
+    },
+    // Pinned app bar (#1332 review): solid background from the very top of
+    // the screen (under the status bar / cutout) down past the back / ⋯
+    // row, with the tab bar appended once it sticks.
+    stickyBar: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      zIndex: 5,
+      backgroundColor: colors.background,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.divider,
+    },
+    stickyTitleRow: {
+      // Leaves room for the floating back / ⋯ buttons (36 dp + 8 dp margins).
+      height: 52,
+      justifyContent: 'center',
+      paddingHorizontal: 64,
+    },
+    stickyTitle: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: colors.textHeader,
+      textAlign: 'center',
+    },
+    stickyTabBar: {
+      marginTop: 0,
+      marginBottom: 0,
+      borderBottomWidth: 0,
     },
     loadMoreText: {
       fontSize: 13,

@@ -1,4 +1,10 @@
-import { buildProfileRows, chunk, collectMediaTiles, sortFeed } from './profileFeedRows';
+import {
+  buildProfileRows,
+  chunk,
+  collectMediaTiles,
+  countTopLevelPosts,
+  sortFeed,
+} from './profileFeedRows';
 import type { AuthorFeedEvent } from '../services/authorFeedService';
 import type { MarketProduct } from '../data/marketProducts';
 
@@ -54,7 +60,32 @@ describe('buildProfileRows', () => {
       tab: 'posts',
       feed: [ev('1', 2), ev('2', 1, { kind: 20 })],
     });
-    expect(rows).toEqual([{ type: 'post', key: '1', event: ev('1', 2) }]);
+    expect(rows).toEqual([{ type: 'post', key: '1', event: ev('1', 2), reply: null }]);
+  });
+
+  it('hides replies by default and shows them with context in Posts & replies', () => {
+    const parent = '2'.repeat(64);
+    const feed = [
+      ev('top', 3),
+      ev('re', 2, { tags: [['e', parent, '', 'reply', 'b'.repeat(64)]] }),
+      ev('quote', 1, { tags: [['q', parent]] }),
+    ];
+    const posts = buildProfileRows({ ...base, tab: 'posts', feed });
+    expect(posts.map((r) => r.key)).toEqual(['top', 'quote']);
+    const all = buildProfileRows({ ...base, tab: 'posts', postsMode: 'all', feed });
+    expect(all.map((r) => r.key)).toEqual(['top', 're', 'quote']);
+    const reply = all[1];
+    expect(reply.type === 'post' && reply.reply?.ref.id).toBe(parent);
+    expect(reply.type === 'post' && reply.reply?.authorPubkey).toBe('b'.repeat(64));
+    expect(all[0].type === 'post' && all[0].reply).toBeNull();
+    expect(countTopLevelPosts(feed)).toBe(2);
+  });
+
+  it('says when only replies are loaded in Posts mode', () => {
+    const feed = [ev('re', 2, { tags: [['e', '2'.repeat(64)]] })];
+    expect(buildProfileRows({ ...base, tab: 'posts', feed })[0]).toMatchObject({
+      status: 'onlyReplies',
+    });
   });
 
   it('shows loading then empty status rows', () => {

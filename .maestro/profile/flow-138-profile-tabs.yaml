@@ -1,5 +1,5 @@
 appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
-name: Profile tabs — Posts, Media, Products + bio mention chip (#1332)
+name: Profile tabs — Posts (+ replies filter), Media, Products + bio mention chip (#1332)
 ---
 # Read-only: opens RobotechyShop's public profile (a real seller with Market
 # listings and picture posts) through the nostr: deep link and walks the
@@ -18,6 +18,15 @@ name: Profile tabs — Posts, Media, Products + bio mention chip (#1332)
 - extendedWaitUntil:
     visible: { id: 'contact-profile-note-card-.*' }
     timeout: 30000
+
+# Posts filter: top-level posts by default; "Posts & replies" adds replies,
+# each with a "Replying to @Name" line (RobotechyShop's notes are mostly
+# replies, so the context line shows up quickly).
+- tapOn: { id: 'profile-posts-filter-replies' }
+- extendedWaitUntil:
+    visible: { id: 'profile-reply-context-.*' }
+    timeout: 30000
+- tapOn: { id: 'profile-posts-filter-posts' }
 
 # Media: a grid of picture / video posts.
 - tapOn: { id: 'profile-tab-media' }

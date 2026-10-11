@@ -570,7 +570,12 @@
     "noMedia": "No photos or videos yet",
     "noProducts": "Nothing for sale on the Market yet",
     "loadMore": "Load more",
-    "productsUnavailable": "Couldn’t load this seller’s listings. Pull down to try again."
+    "productsUnavailable": "Couldn’t load this seller’s listings. Pull down to try again.",
+    "filterPosts": "Posts",
+    "filterPostsAndReplies": "Posts & replies",
+    "replyingTo": "Replying to",
+    "replyingToPost": "Replying to a post",
+    "onlyReplies": "Only replies so far — switch to Posts & replies to see them"
   },
   "nostrContent": {
     "openProfile": "Open the profile of {{name}}",

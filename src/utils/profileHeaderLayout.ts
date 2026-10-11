@@ -77,3 +77,30 @@ export function profileHeaderLayout(
     actionRowWidth: requiredWidth(s, iconCount, fontScale, showFollow),
   };
 }
+
+/** Height of the floating back / ⋯ row below the status bar (8 + 36 + 8). */
+export const PROFILE_TOP_BAR_HEIGHT = 52;
+/** Banner height in ContactProfileScreen.styles (`bannerContainer`). */
+export const PROFILE_BANNER_HEIGHT = 200;
+
+/**
+ * What the pinned app bar shows at a scroll offset (#1332 review):
+ *   0 — nothing: the banner is still under the floating back / ⋯ buttons;
+ *   1 — a solid bar (safe-area inset + button row) once the banner has
+ *       scrolled out from under the buttons, so content never shows
+ *       through the status bar or behind the buttons;
+ *   2 — that bar plus the tab bar stuck below it, once the in-list tab bar
+ *       reaches the bar's bottom edge.
+ * `tabBarY` is the tab bar's offset in the list content (null = unmeasured).
+ */
+export type ProfileStickyPhase = 0 | 1 | 2;
+export function profileStickyPhase(
+  scrollY: number,
+  topInset: number,
+  tabBarY: number | null,
+): ProfileStickyPhase {
+  const barBottom = topInset + PROFILE_TOP_BAR_HEIGHT;
+  if (tabBarY !== null && scrollY >= tabBarY - barBottom) return 2;
+  if (scrollY >= PROFILE_BANNER_HEIGHT - barBottom) return 1;
+  return 0;
+}
