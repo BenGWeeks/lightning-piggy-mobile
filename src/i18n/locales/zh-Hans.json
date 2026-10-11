@@ -28,7 +28,7 @@
   },
   "accountDrawerContent": {
     "profile": "资料与二维码",
-    "wallets": "钱包",
+    "wallets": "管理钱包",
     "security": "安全与备份",
     "about": "帮助与关于",
     "switchToAccount": "切换到{{name}}",
@@ -2121,7 +2121,7 @@
     "xpubCopied": "扩展公钥已复制到剪贴板。"
   },
   "walletsScreen": {
-    "title": "钱包",
+    "title": "管理钱包",
     "noWallets": "尚未连接钱包。添加一个开始使用吧。",
     "walletCount": "{{count}}个钱包（{{connected}}个已连接）",
     "onChainSuffix": "（链上）",

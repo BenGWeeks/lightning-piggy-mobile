@@ -318,12 +318,11 @@ allow-listed relays.
 
 ===== Known app issues the matrix surfaces
 
-* *#1198* — LP pairs NIP-46 only over `wss://relay.nsec.app`, which is down, so
-  on a stock build the NIP-46 steps (132's Little login, 134, 135) can't pair:
-  the sheet shows "Pairing took too long" after ~10 s. To exercise the rest of
-  the NIP-46 stack locally, point `NIP46_DEFAULT_RELAY` in
-  `NostrLoginSheet.tsx` at an allow-listed relay (e.g. `wss://nos.lol`) in a
-  scratch checkout — the bunker follows whatever relay the pairing URI names.
+* *#1198* — the app used to pair NIP-46 only over `wss://relay.nsec.app`,
+  which is dead. Since #1326 the pairing URI names `NIP46_PAIRING_RELAYS`
+  (`src/services/nostrRelayDefaults.ts`: primal, ditto.pub, nos.lol), and the
+  test bunker listens on the same relays by default. The misleading "Pairing
+  took too long" copy for an unreachable relay is still tracked in #1198.
 * *#1213* — with a reachable relay, NIP-46 pairing never times out, so
   flow 135 fails until it's fixed.
 * *#1207* — after a NIP-46 decline / timeout the failed bubble only renders

@@ -28,7 +28,7 @@
   },
   "accountDrawerContent": {
     "profile": "Profil & QR",
-    "wallets": "Wallets",
+    "wallets": "Wallets verwalten",
     "security": "Sicherheit & Backup",
     "about": "Hilfe & Info",
     "switchToAccount": "Zu {{name}} wechseln",
@@ -2121,7 +2121,7 @@
     "xpubCopied": "Erweiterter öffentlicher Schlüssel in die Zwischenablage kopiert."
   },
   "walletsScreen": {
-    "title": "Wallets",
+    "title": "Wallets verwalten",
     "noWallets": "Keine Wallets verbunden. Füge eine hinzu, um loszulegen.",
     "walletCount": "{{count}} Wallets ({{connected}} verbunden)",
     "onChainSuffix": " (On-Chain)",

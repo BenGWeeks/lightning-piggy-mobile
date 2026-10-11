@@ -1,8 +1,8 @@
 appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: NIP-46 pairing the bunker never answers → "took too long" error, Big still signed in
 ---
-# NOTE: on a stock build NIP-46 pairing can't complete until #1198 is fixed
-# (LP's only pairing relay, relay.nsec.app, is down) — see docs/TESTING.adoc.
+# NOTE: pairing runs over NIP46_PAIRING_RELAYS (primal, ditto.pub, nos.lol) since
+# #1326; before that its only relay, relay.nsec.app, was dead (#1198).
 # EXPECTED TO FAIL until #1213 is fixed: with a reachable relay LP's 120 s
 # pairing timeout never fires (nostr-tools treats maxWait as an EOSE timeout).
 # Signer matrix: the NIP-46 login sheet's pairing timeout. The bunker is put in

@@ -28,7 +28,7 @@
   },
   "accountDrawerContent": {
     "profile": "Profil és QR",
-    "wallets": "Pénztárcák",
+    "wallets": "Pénztárcák kezelése",
     "security": "Biztonság és mentés",
     "about": "Súgó és névjegy",
     "switchToAccount": "Váltás erre: {{name}}",
@@ -2121,7 +2121,7 @@
     "xpubCopied": "Kiterjesztett nyilvános kulcs a vágólapra másolva."
   },
   "walletsScreen": {
-    "title": "Pénztárcák",
+    "title": "Pénztárcák kezelése",
     "noWallets": "Nincs csatlakoztatott pénztárca. Adj hozzá egyet a kezdéshez.",
     "walletCount": "{{count}} pénztárca ({{connected}} csatlakoztatva)",
     "onChainSuffix": " (on-chain)",

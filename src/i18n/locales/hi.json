@@ -28,7 +28,7 @@
   },
   "accountDrawerContent": {
     "profile": "प्रोफ़ाइल और QR कोड",
-    "wallets": "वॉलेट",
+    "wallets": "वॉलेट मैनेज करें",
     "security": "सुरक्षा और बैकअप",
     "about": "मदद और जानकारी",
     "switchToAccount": "{{name}} पर जाएँ",
@@ -2121,7 +2121,7 @@
     "xpubCopied": "एक्सटेंडेड पब्लिक की क्लिपबोर्ड पर कॉपी हो गई।"
   },
   "walletsScreen": {
-    "title": "वॉलेट",
+    "title": "वॉलेट मैनेज करें",
     "noWallets": "कोई वॉलेट कनेक्ट नहीं है। शुरू करने के लिए एक जोड़ें।",
     "walletCount": "{{count}} वॉलेट ({{connected}} कनेक्ट हैं)",
     "onChainSuffix": " (ऑन-चेन)",

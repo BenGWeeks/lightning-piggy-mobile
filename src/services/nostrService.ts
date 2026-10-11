@@ -9,6 +9,7 @@ import type { Filter } from 'nostr-tools/filter';
 import { querySyncAbortable } from './relayQuery';
 import { fetchProfilesBatch } from './nostrProfileBatch';
 import { pool, connectedRelays, trackRelays } from './nostrPool';
+import { DEFAULT_RELAYS, PROFILE_RELAYS } from './nostrRelayDefaults';
 import * as nip19 from 'nostr-tools/nip19';
 import * as nip04 from 'nostr-tools/nip04';
 import {
@@ -123,21 +124,9 @@ export function onCurrentUserPubkeyChange(fn: (pubkey: string | null) => void): 
   return () => _pubkeyListeners.delete(fn);
 }
 
-export const DEFAULT_RELAYS = [
-  'wss://relay.damus.io',
-  'wss://relay.nostr.band',
-  'wss://nos.lol',
-  'wss://relay.primal.net',
-];
-
-// Relays that aggregate profile metadata across the network
-const PROFILE_RELAYS = [
-  'wss://purplepag.es',
-  'wss://relay.nostr.band',
-  'wss://relay.primal.net',
-  'wss://relay.damus.io',
-  'wss://nos.lol',
-];
+// The built-in relay lists live in `./nostrRelayDefaults` (audited there,
+// guarded by its test). Re-exported for the many existing call sites.
+export { DEFAULT_RELAYS };
 
 export function decodeNsec(nsec: string): { pubkey: string; secretKey: Uint8Array } {
   const decoded = nip19.decode(nsec);

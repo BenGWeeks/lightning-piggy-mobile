@@ -28,7 +28,7 @@
   },
   "accountDrawerContent": {
     "profile": "Profil i kod QR",
-    "wallets": "Portfele",
+    "wallets": "Zarządzaj portfelami",
     "security": "Bezpieczeństwo i kopia zapasowa",
     "about": "Pomoc i informacje",
     "switchToAccount": "Przełącz na konto: {{name}}",
@@ -2123,7 +2123,7 @@
     "xpubCopied": "Rozszerzony klucz publiczny skopiowany do schowka."
   },
   "walletsScreen": {
-    "title": "Portfele",
+    "title": "Zarządzaj portfelami",
     "noWallets": "Brak połączonych portfeli. Dodaj jeden, aby zacząć.",
     "walletCount": "Portfele: {{count}} (połączone: {{connected}})",
     "onChainSuffix": " (on-chain)",

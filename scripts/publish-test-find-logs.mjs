@@ -30,12 +30,7 @@ const DEFAULT_COORD =
   '37516:b8d38e654adff224418002ae752155a84a86dab6fa94b4bc9e81ca9e25dce9e7:big-piggy-geo-cache-1';
 const CACHE_COORD = process.env.CACHE_COORD ?? DEFAULT_COORD;
 
-const RELAYS = [
-  'wss://relay.damus.io',
-  'wss://relay.nostr.band',
-  'wss://nos.lol',
-  'wss://relay.primal.net',
-];
+const RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net'];
 
 // Three realistic-looking finds — different tones (terse / chatty /
 // pictures-or-it-didn't-happen) + different sats amounts. Each is
