@@ -780,7 +780,7 @@ reply timeout`).
 *Fixes:* rebalance or add inbound liquidity on the channels the loop uses, or give Boltz its own LND node. A shared node also needs self-payments allowed in Boltz: upstream Boltz never sets LND's `allow_self_payment`, so incoming swaps fail with `self-payments not allowed` unless the backend image is patched to pass `allowSelfPayment: true`. Re-apply the patch after every Boltz image upgrade.
 
 | On-chain send shows "Fee estimate unavailable" or "Swap fees could not be loaded. Check your connection or VPN, then retry.", and every swap fails
-| The default swap server, `api.boltz.exchange` (`DEFAULT_SWAP_BACKEND` in `swapBackendService.ts`), is no longer operating: as of 2026-10-09 the hostname doesn't resolve. Until the default changes (#1169), save a working Boltz-compatible server under Account → On-chain → *Swap server URL* → *Check and save*.
+| The former public server, `api.boltz.exchange`, does not resolve (rechecked 2026-10-11). New installations no longer select a default (#1169). With no server selected, Send, Move, and swap-based Receive explain where to add one: Account → On-chain → *Swap server URL* → *Check and save*. A configured but unreachable server produces the connection/quote error instead. Direct hot-wallet sends do not require a swap server. See link:SWAP_BACKEND.adoc[Choosing a swap backend].
 
 | Receive shows "Couldn't generate invoice" with "This NWC connection has been retired; create a new one"
 | The second line is the wallet service's NWC error. `ReceiveSheet.tsx` shows the error message verbatim under the toast title; Lightning Piggy doesn't produce this text. The wallet has retired that connection. Create a new NWC connection in the wallet service, then in Lightning Piggy remove the wallet (wallet settings → *Remove*) and add it again with the new connection string. An NWC wallet's connection string can't be edited in place.
@@ -1014,3 +1014,20 @@ app start (except the weekly refresh). A change that didn't go through earlier
 The emulator has no Google Play services, so it never gets a push token and
 the switches stay unavailable there — test on a phone.
 
+
+=== iOS simulator shows "No script URL provided" after a development-client deep link
+
+First confirm the selected Metro is reachable from the Mac (`curl http://<host>:<port>/status`).
+If the installed debug build ignores the deep link, React Native's debug host
+can be set for the simulator app without changing accounts or rebuilding:
+
+[source,bash]
+----
+xcrun simctl spawn booted defaults write com.lightningpiggy.app.dev RCT_jsLocation -string <host>:<port>
+xcrun simctl terminate booted com.lightningpiggy.app.dev
+xcrun simctl launch booted com.lightningpiggy.app.dev
+----
+
+Use only the locked simulator lane, then restore its designated main Metro
+host and cold-launch when the session ends. This is a simulator testing setting,
+not an application configuration change.

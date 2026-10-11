@@ -11,7 +11,6 @@ import {
   stripLightningPrefix,
 } from '../utils/sendSheetInput';
 import * as boltzService from '../services/boltzService';
-import * as onchainService from '../services/onchainService';
 import type { NfcTagContent } from '../services/nfcService';
 
 /**
@@ -47,9 +46,6 @@ export function useSendSheetInput(opts: {
   setDecoded: Dispatch<SetStateAction<DecodedInvoice | null>>;
   setScanned: (v: boolean) => void;
   setSatsValue: (v: string) => void;
-  setLoadingBoltzFees: (v: boolean) => void;
-  setBoltzFees: (v: boltzService.SwapFees | null) => void;
-  setOnchainFeeEstimate: (v: string | null) => void;
 }): {
   processInput: (data: string) => void;
   resetInputForOpen: () => void;
@@ -71,9 +67,6 @@ export function useSendSheetInput(opts: {
     setDecoded,
     setScanned,
     setSatsValue,
-    setLoadingBoltzFees,
-    setBoltzFees,
-    setOnchainFeeEstimate,
   } = opts;
   const t = useTranslation();
   const invalidInvoiceAlertVisible = useRef(false);
@@ -148,29 +141,6 @@ export function useSendSheetInput(opts: {
       if (bip21Amount) {
         setSatsValue(bip21Amount.toString());
       }
-      // Fetch fees (Boltz for LN wallets, miner fee for hot wallets)
-      setLoadingBoltzFees(true);
-      boltzService
-        .getSwapFees()
-        .then((fees) => {
-          setBoltzFees(fees);
-        })
-        .catch((err) => {
-          console.warn('Failed to fetch Boltz fees:', err);
-          setBoltzFees(null);
-        })
-        .finally(() => {
-          setLoadingBoltzFees(false);
-        });
-      // Fetch on-chain fee estimate for hot wallets
-      onchainService
-        .estimateOnchainFee()
-        .then((fees) => {
-          setOnchainFeeEstimate(t('sendSheet.minerFee', { fee: fees.medium.toLocaleString() }));
-        })
-        .catch((err) => {
-          console.warn('Failed to estimate on-chain fee:', err);
-        });
     } else if (/^ln/i.test(input) && !isLnurlString(input)) {
       // All invoice entry points share this gate. A missing amount is valid
       // only after decoding succeeds (including the bech32 checksum/network).

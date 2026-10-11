@@ -83,6 +83,8 @@ type Step = 'amount' | 'qr';
 const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
   const colors = useThemeColors();
   const t = useTranslation();
+  const translation = useRef(t);
+  translation.current = t;
   const styles = useMemo(() => createBoltzReceiveSheetStyles(colors), [colors]);
   const {
     wallets,
@@ -205,7 +207,13 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
         .then((f) => {
           if (sessionRef.current === session) setFees(f);
         })
-        .catch((e) => console.warn('[BoltzReceive] Fee fetch failed:', e));
+        .catch((e: unknown) => {
+          if (sessionRef.current !== session) return;
+          setCreateError(
+            e instanceof Error ? e.message : translation.current('swapBackend.quoteFailed'),
+          );
+          setStep('qr');
+        });
     } else {
       bottomSheetRef.current?.dismiss();
     }
@@ -374,6 +382,11 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
   const handleConfirmAmount = useCallback(
     async (sats: number) => {
       if (!walletId || !wallet) return;
+      if (!fees) {
+        setCreateError(t('swapBackend.loadingQuote'));
+        setStep('qr');
+        return;
+      }
       // Capture the initiating identity before any async work, so an identity
       // switch mid-create can't re-attribute this swap's refund (#1124).
       const ownerPubkey = getActivePubkey() ?? undefined;

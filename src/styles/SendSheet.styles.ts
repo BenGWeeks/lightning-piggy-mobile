@@ -12,9 +12,6 @@ export const createSendSheetStyles = (colors: Palette) =>
       backgroundColor: colors.divider,
       width: 40,
     },
-    content: {
-      flex: 1,
-    },
     innerContent: {
       padding: 20,
       paddingBottom: 40,

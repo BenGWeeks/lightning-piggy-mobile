@@ -12,7 +12,7 @@ import Toast from './BrandedToast';
 import { satsToFiatString } from '../services/fiatService';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useNostr, useNostrContacts } from '../contexts/NostrContext';
-import { DEFAULT_SWAP_BACKEND, getSwapBackendForId } from '../services/swapBackendService';
+import { LEGACY_SWAP_BACKEND, getSwapBackendForId } from '../services/swapBackendService';
 import { fetchWithTimeout } from '../services/boltzApi';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as nwcService from '../services/nwcService';
@@ -206,7 +206,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
   const canContactBoltz =
     !!tx?.swapId &&
     supportBackend?.id === tx.swapId &&
-    supportBackend.backend === DEFAULT_SWAP_BACKEND;
+    supportBackend.backend === LEGACY_SWAP_BACKEND;
   const isBoltzSwap = useMemo(() => swapRecoveryService.isBoltzTransaction(tx), [tx]);
 
   useEffect(() => {
