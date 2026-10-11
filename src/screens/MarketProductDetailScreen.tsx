@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Linking } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Linking, RefreshControl } from 'react-native';
 import { Image } from 'expo-image';
 import { ChevronLeft, Zap, ExternalLink } from 'lucide-react-native';
 import type { CompositeNavigationProp } from '@react-navigation/native';
@@ -14,6 +14,9 @@ import VendorAvatar from '../components/VendorAvatar';
 import ProductFeedbackTabs from '../components/ProductFeedbackTabs';
 import NostrLoginSheet from '../components/NostrLoginSheet';
 import MarketCheckoutSheet from '../components/MarketCheckoutSheet';
+import { Toast } from '../components/BrandedToast';
+import { usePullToRefresh, useRegisterRefresher } from '../hooks/usePullToRefresh';
+import { useLatestListing } from '../hooks/useLatestListing';
 import type {
   ExploreNavigation,
   MarketProductDetailRoute,
@@ -40,7 +43,8 @@ interface Props {
  * shop URL otherwise), followed by Nostr Reviews (kind 31555) + Comments (kind
  * 1111) in an underlined tabbed section — mirroring the companion website's
  * product page. Reviews/comments are shown only when the seller has a Nostr
- * identity to root them on.
+ * identity to root them on. Pull down to refresh the listing (it may have
+ * been edited) and load new reviews / comments (#1301).
  */
 const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
@@ -53,13 +57,21 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const [loginVisible, setLoginVisible] = useState(false);
   const [checkoutVisible, setCheckoutVisible] = useState(false);
 
-  const product = useMemo(
+  const routeProduct = useMemo(
     () =>
       route.params.product?.id === route.params.productId
         ? route.params.product
         : MARKET_PRODUCTS.find((p) => p.id === route.params.productId),
     [route.params.productId, route.params.product],
   );
+  const { product, refresh: refreshListing } = useLatestListing(routeProduct);
+  // Pull-to-refresh: the listing plus each mounted feedback section (#1301).
+  const onRefreshError = useCallback(
+    () => Toast.show({ type: 'error', text1: t('market.detail.refreshFailed') }),
+    [t],
+  );
+  const { refreshing, onRefresh, register } = usePullToRefresh(onRefreshError);
+  useRegisterRefresher(register, refreshListing);
   const vendor = useMemo(() => (product ? sellerOf(product) : undefined), [product]);
   // Memoised so the comment-thread root identity stays stable across renders.
   const feedback = useMemo(
@@ -144,10 +156,19 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
       </View>
 
       <ScrollView
+        testID="market-product-detail-scroll"
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.brandPink}
+            colors={[colors.brandPink]}
+          />
+        }
       >
         <View style={[styles.imageWrap, imageAspect ? { aspectRatio: imageAspect } : null]}>
           {hasImage ? (
@@ -238,6 +259,7 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
               coord={feedback.reviewCoord}
               commentRoot={feedback.commentRoot}
               onRequestSignIn={onRequestSignIn}
+              registerRefresh={register}
             />
           </View>
         ) : (

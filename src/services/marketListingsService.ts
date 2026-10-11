@@ -1,6 +1,8 @@
 import { verifyEvent, type Event, type Filter } from 'nostr-tools';
 import { pool, trackRelays } from './nostrPool';
+import { querySyncAbortable } from './relayQuery';
 import { reduceMarketListings } from '../utils/marketListings';
+import { addressRefs, deletionFilters, idRefs } from '../utils/nip09';
 import type { MarketProduct } from '../data/marketProducts';
 
 export interface MarketListingsResult {
@@ -179,4 +181,49 @@ export function fetchMarketListings(
         });
     }
   });
+}
+
+/**
+ * Re-fetch ONE listing (pull-to-refresh on its product page, #1301): the
+ * newest revision of `current`'s address plus its author's kind-5s, reduced
+ * by the same rules as the feed. Resolves null when the listing is gone
+ * (deleted, sold, expired) and rejects only when every relay failed.
+ */
+export async function fetchListingRevision(
+  current: Event,
+  relays: string[],
+  signal: AbortSignal,
+  maxWait = 3000,
+): Promise<MarketProduct | null> {
+  const d = current.tags.find((t) => t[0] === 'd')?.[1];
+  if (!d || relays.length === 0) return null;
+  trackRelays(relays);
+  const opts = { maxWait, signal };
+  const [revisions, deletions] = await Promise.all([
+    querySyncAbortable(
+      pool,
+      relays,
+      { kinds: [current.kind], authors: [current.pubkey], '#d': [d], limit: 10 },
+      { ...opts, rejectOnAllRelaysFailure: true },
+    ),
+    // Best-effort, like the feed: a failed lookup just applies no deletion.
+    Promise.all(
+      [
+        ...deletionFilters('a', addressRefs([current])),
+        ...deletionFilters('e', idRefs([current])),
+      ].map((filter) => querySyncAbortable(pool, relays, filter, opts)),
+    ).then(
+      (batches) => batches.flat(),
+      () => [] as Event[],
+    ),
+  ]);
+  // `#d` is only a relay-side request — keep revisions of THIS address only.
+  const sameAddress = revisions.filter(
+    (e) => e.kind === current.kind && e.tags.find((t) => t[0] === 'd')?.[1] === d,
+  );
+  const [product] = reduceMarketListings(
+    [current, ...sameAddress, ...deletions],
+    new Set([current.pubkey]),
+  );
+  return product ?? null;
 }

@@ -2,19 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import type { Event as NostrEvent } from 'nostr-tools';
 import { useNostr } from '../contexts/NostrContext';
-import { DEFAULT_RELAYS, pool, trackRelays } from '../services/nostrService';
-import { querySyncAbortable } from '../services/relayQuery';
+import { DEFAULT_RELAYS } from '../services/nostrService';
+import { queryCommentDeletions, queryCommentEvents } from '../services/productFeedbackQueries';
 import {
-  DEFAULT_COMMENTS_LIMIT,
-  belongsToRoot,
-  commentFilterForRoot,
   commentRootRef,
   directReplies,
   topLevelComments,
   type CommentRoot,
 } from '../utils/productComments';
 import { reconcileComments } from '../utils/commentEdits';
-import { DELETION_KIND, deletionFilters, idRefs } from '../utils/nip09';
+import { mergeFeedback, refreshSince } from '../utils/feedbackRefresh';
 
 export interface UseProductComments {
   /** Every visible comment in the thread (all depths) — deleted and
@@ -32,6 +29,12 @@ export interface UseProductComments {
    */
   error: boolean;
   refetch: () => void;
+  /**
+   * Pull-to-refresh (#1301): fetch only comments newer than the newest loaded
+   * (minus slack) plus fresh author deletions, and merge them in with one
+   * batched update. Rejects when every relay failed.
+   */
+  refresh: (signal: AbortSignal) => Promise<void>;
   /** Show a comment we just published at once (before the refetch sees it). */
   addLocally: (comment: NostrEvent) => void;
   /** Hide a comment at once (deleted / replaced); returns the undo. */
@@ -58,6 +61,11 @@ export function useProductComments(root: CommentRoot | null): UseProductComments
   useEffect(() => {
     localAddedRef.current = localAdded;
   }, [localAdded]);
+  // The loaded set, read by `refresh` (its `since` + merge base).
+  const loadedRef = useRef({ events, deletions });
+  useEffect(() => {
+    loadedRef.current = { events, deletions };
+  }, [events, deletions]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const [tick, setTick] = useState(0);
@@ -85,45 +93,31 @@ export function useProductComments(root: CommentRoot | null): UseProductComments
         return;
       }
       const controller = new AbortController();
+      const { signal } = controller;
       setLoading(true);
       setError(false);
-      // Register the relays we open so nostrService.cleanup() closes them.
-      trackRelays(readRelays);
-      querySyncAbortable(pool, readRelays, commentFilterForRoot(root, DEFAULT_COMMENTS_LIMIT), {
-        maxWait: 5000,
-        rejectOnAllRelaysFailure: true,
-        signal: controller.signal,
-      })
-        .then((evs) => {
-          if (controller.signal.aborted) return;
-          // The `#A` filter is only a relay-side request — keep only comments
-          // whose ROOT tag is this product before storing/counting them.
-          const comments = evs.filter((e) => belongsToRoot(e, root));
+      queryCommentEvents(readRelays, root, { signal })
+        .then((comments) => {
+          if (signal.aborted) return;
           setEvents(comments);
           setLoading(false);
           // Then the kind-5s naming them (most relays already dropped what was
           // deleted; this covers the ones that kept it). Best-effort: a failed
           // lookup just keeps the previous deletions.
-          return Promise.all(
-            deletionFilters('e', idRefs([...comments, ...localAddedRef.current])).map((filter) =>
-              querySyncAbortable(pool, readRelays, filter, {
-                maxWait: 4000,
-                signal: controller.signal,
-              }),
-            ),
-          ).then(
-            (batches) => {
-              if (controller.signal.aborted) return;
-              setDeletions(batches.flat().filter((e) => e.kind === DELETION_KIND));
+          return queryCommentDeletions(readRelays, [...comments, ...localAddedRef.current], {
+            signal,
+          }).then(
+            (dels) => {
+              if (!signal.aborted) setDeletions(dels);
             },
             () => undefined,
           );
         })
         .catch(() => {
-          if (!controller.signal.aborted) setError(true);
+          if (!signal.aborted) setError(true);
         })
         .finally(() => {
-          if (!controller.signal.aborted) setLoading(false);
+          if (!signal.aborted) setLoading(false);
         });
       return () => controller.abort();
       // `root` is memoised upstream; `rootRef` is the stable re-run trigger.
@@ -144,6 +138,30 @@ export function useProductComments(root: CommentRoot | null): UseProductComments
   const getDirectReplies = useCallback(
     (parentId: string) => directReplies(visible, parentId),
     [visible],
+  );
+
+  // `signal` is owned by the page's pull-to-refresh (aborted on its timeout
+  // and on unmount).
+  const refresh = useCallback(
+    async (signal: AbortSignal) => {
+      if (!root) return;
+      const loaded = loadedRef.current;
+      // Same budget + deletion reasoning as useProductReviews.refresh.
+      const opts = { signal, since: refreshSince(loaded.events), maxWait: 3000 };
+      const comments = await queryCommentEvents(readRelays, root, opts);
+      const dels = await queryCommentDeletions(
+        readRelays,
+        [...loaded.events, ...comments, ...localAddedRef.current],
+        opts,
+      ).catch(() => [] as NostrEvent[]);
+      if (signal.aborted) return;
+      const merged = mergeFeedback(loadedRef.current, { events: comments, deletions: dels });
+      // One batched update for the whole refresh (React batches these).
+      setEvents(merged.events);
+      setDeletions(merged.deletions);
+      setError(false);
+    },
+    [root, readRelays],
   );
 
   // One setState per user action (never per relay event).
@@ -167,6 +185,7 @@ export function useProductComments(root: CommentRoot | null): UseProductComments
     loading,
     error,
     refetch,
+    refresh,
     addLocally,
     hideLocally,
   };

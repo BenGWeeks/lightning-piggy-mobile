@@ -5,6 +5,7 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import type { CommentRoot } from '../utils/productComments';
 import { createProductFeedbackTabsStyles } from '../styles/ProductFeedbackTabs.styles';
+import type { RegisterRefresher } from '../hooks/usePullToRefresh';
 import ProductReviews from './ProductReviews';
 import ProductComments from './ProductComments';
 
@@ -15,6 +16,8 @@ interface Props {
   commentRoot: CommentRoot;
   /** Opens the login sheet for signed-out compose attempts. */
   onRequestSignIn: () => void;
+  /** The product page's pull-to-refresh; each mounted section joins it. */
+  registerRefresh?: RegisterRefresher;
 }
 
 type Tab = 'reviews' | 'comments';
@@ -27,7 +30,12 @@ type Tab = 'reviews' | 'comments';
  * stays mounted (hidden when inactive), so switching back never refetches or
  * loses an in-progress compose, and the counts stay live in the tab labels.
  */
-const ProductFeedbackTabs: React.FC<Props> = ({ coord, commentRoot, onRequestSignIn }) => {
+const ProductFeedbackTabs: React.FC<Props> = ({
+  coord,
+  commentRoot,
+  onRequestSignIn,
+  registerRefresh,
+}) => {
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createProductFeedbackTabsStyles(colors), [colors]);
@@ -81,7 +89,12 @@ const ProductFeedbackTabs: React.FC<Props> = ({ coord, commentRoot, onRequestSig
 
       <View style={styles.body}>
         <View style={tab === 'reviews' ? styles.visible : styles.hidden}>
-          <ProductReviews coord={coord} onRequestSignIn={onRequestSignIn} onCount={onReviewCount} />
+          <ProductReviews
+            coord={coord}
+            onRequestSignIn={onRequestSignIn}
+            onCount={onReviewCount}
+            registerRefresh={registerRefresh}
+          />
         </View>
         <View style={tab === 'comments' ? styles.visible : styles.hidden}>
           {commentsMounted ? (
@@ -89,6 +102,7 @@ const ProductFeedbackTabs: React.FC<Props> = ({ coord, commentRoot, onRequestSig
               root={commentRoot}
               onRequestSignIn={onRequestSignIn}
               onCount={onCommentCount}
+              registerRefresh={registerRefresh}
             />
           ) : null}
         </View>

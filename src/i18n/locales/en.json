@@ -2248,7 +2248,8 @@
       "goBack": "Go back",
       "buyFrom": "Buy from {{seller}}",
       "buyAccessibility": "Buy {{title}} from {{seller}}",
-      "noFeedback": "Reviews and comments aren't available for this seller yet — they need a Nostr identity to anchor feedback on."
+      "noFeedback": "Reviews and comments aren't available for this seller yet — they need a Nostr identity to anchor feedback on.",
+      "refreshFailed": "Couldn't refresh this product — check your connection and try again."
     },
     "modes": {
       "soon": "Soon",
