@@ -3,6 +3,7 @@ import { pool, trackRelays } from './nostrPool';
 import { querySyncAbortable } from './relayQuery';
 import { reduceMarketListings } from '../utils/marketListings';
 import { addressRefs, deletionFilters, idRefs } from '../utils/nip09';
+import { hasValidSignature } from '../utils/eventSignature';
 import type { MarketProduct } from '../data/marketProducts';
 
 export interface MarketListingsResult {
@@ -188,6 +189,11 @@ export function fetchMarketListings(
  * newest revision of `current`'s address plus its author's kind-5s, reduced
  * by the same rules as the feed. Resolves null when the listing is gone
  * (deleted, sold, expired) and rejects only when every relay failed.
+ *
+ * Every fetched event's signature is checked here rather than trusting the
+ * pool's verifier: a forged "newer revision" (another price or shop URL) or
+ * a forged deletion must never reach the page. Events the pool already
+ * verified are memoised by nostr-tools, so this costs nothing extra then.
  */
 export async function fetchListingRevision(
   current: Event,
@@ -217,12 +223,17 @@ export async function fetchListingRevision(
       () => [] as Event[],
     ),
   ]);
-  // `#d` is only a relay-side request — keep revisions of THIS address only.
+  // `#d` / `authors` are only relay-side requests — keep signed revisions of
+  // THIS address only (reduceMarketListings re-checks the author too).
   const sameAddress = revisions.filter(
-    (e) => e.kind === current.kind && e.tags.find((t) => t[0] === 'd')?.[1] === d,
+    (e) =>
+      e.kind === current.kind &&
+      e.pubkey === current.pubkey &&
+      e.tags.find((t) => t[0] === 'd')?.[1] === d &&
+      hasValidSignature(e),
   );
   const [product] = reduceMarketListings(
-    [current, ...sameAddress, ...deletions],
+    [current, ...sameAddress, ...deletions.filter(hasValidSignature)],
     new Set([current.pubkey]),
   );
   return product ?? null;

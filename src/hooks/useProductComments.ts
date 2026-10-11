@@ -146,9 +146,13 @@ export function useProductComments(root: CommentRoot | null): UseProductComments
     async (signal: AbortSignal) => {
       if (!root) return;
       const loaded = loadedRef.current;
-      // Same budget + deletion reasoning as useProductReviews.refresh.
-      const opts = { signal, since: refreshSince(loaded.events), maxWait: 3000 };
-      const comments = await queryCommentEvents(readRelays, root, opts);
+      // Same budget, signature and deletion reasoning as
+      // useProductReviews.refresh.
+      const opts = { signal, maxWait: 3000, verify: true };
+      const comments = await queryCommentEvents(readRelays, root, {
+        ...opts,
+        since: refreshSince(loaded.events),
+      });
       const dels = await queryCommentDeletions(
         readRelays,
         [...loaded.events, ...comments, ...localAddedRef.current],

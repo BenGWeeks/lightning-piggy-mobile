@@ -1,4 +1,4 @@
-import type { Event as NostrEvent, Filter } from 'nostr-tools';
+import { finalizeEvent, type Event as NostrEvent, type Filter } from 'nostr-tools';
 import {
   REVIEWS_LIMIT,
   queryCommentDeletions,
@@ -58,6 +58,32 @@ describe('queryReviewEvents', () => {
     await queryReviewEvents(RELAYS, COORD, { signal, since: 1234, maxWait: 3000 });
     expect(filters()[0]).toMatchObject({ since: 1234, limit: REVIEWS_LIMIT });
     expect(query.mock.calls[0][3]).toMatchObject({ maxWait: 3000 });
+  });
+});
+
+describe('verify', () => {
+  const key = new Uint8Array(32).fill(3);
+  const signed = finalizeEvent(
+    { kind: REVIEW_KIND, created_at: 100, content: '', tags: [['d', COORD]] },
+    key,
+  );
+  // Rebuilt from JSON: object spread would copy nostr-tools' memoised
+  // "verified" Symbol marker along with the fields.
+  const forged = { ...JSON.parse(JSON.stringify(signed)), content: 'tampered' } as NostrEvent;
+
+  it('drops events with a bad signature when asked', async () => {
+    query.mockResolvedValue([signed, forged]);
+    const got = await queryReviewEvents(RELAYS, COORD, {
+      signal: new AbortController().signal,
+      verify: true,
+    });
+    expect(got).toEqual([signed]);
+  });
+
+  it('leaves the pool-verified first load alone by default', async () => {
+    query.mockResolvedValue([signed, forged]);
+    const got = await queryReviewEvents(RELAYS, COORD, { signal: new AbortController().signal });
+    expect(got).toHaveLength(2);
   });
 });
 

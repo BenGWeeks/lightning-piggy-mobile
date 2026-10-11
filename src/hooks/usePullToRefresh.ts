@@ -8,6 +8,13 @@ export type RegisterRefresher = (refresher: Refresher) => () => void;
 /** How long the spinner may run before the refresh counts as failed. */
 export const PULL_REFRESH_TIMEOUT_MS = 8000;
 
+export interface PullToRefreshOptions {
+  /** False turns pull-to-refresh off (default true). */
+  enabled?: boolean;
+  /** Spinner budget (default {@link PULL_REFRESH_TIMEOUT_MS}). */
+  timeoutMs?: number;
+}
+
 /**
  * Pull-to-refresh for a page assembled from independent data sources (#1301):
  * each section registers its own {@link Refresher} (so a lazily-mounted
@@ -15,8 +22,15 @@ export const PULL_REFRESH_TIMEOUT_MS = 8000;
  * parallel. `refreshing` stays true until every refresher settles or the
  * timeout fires — then the shared signal is aborted so nothing keeps running,
  * and `onError` is called once if any refresher failed or time ran out.
+ *
+ * `enabled: false` turns the pull off (`enabled` is returned so the page can
+ * omit its RefreshControl) — e.g. a page previewing an unpublished draft has
+ * nothing on relays to refresh.
  */
-export function usePullToRefresh(onError: () => void, timeoutMs = PULL_REFRESH_TIMEOUT_MS) {
+export function usePullToRefresh(
+  onError: () => void,
+  { enabled = true, timeoutMs = PULL_REFRESH_TIMEOUT_MS }: PullToRefreshOptions = {},
+) {
   const refreshers = useRef(new Set<Refresher>());
   const inFlight = useRef<AbortController | null>(null);
   const onErrorRef = useRef(onError);
@@ -36,7 +50,7 @@ export function usePullToRefresh(onError: () => void, timeoutMs = PULL_REFRESH_T
   }, []);
 
   const onRefresh = useCallback(() => {
-    if (inFlight.current) return;
+    if (!enabled || inFlight.current) return;
     const controller = new AbortController();
     inFlight.current = controller;
     setRefreshing(true);
@@ -58,9 +72,9 @@ export function usePullToRefresh(onError: () => void, timeoutMs = PULL_REFRESH_T
         inFlight.current = null;
         setRefreshing(false);
       });
-  }, [timeoutMs]);
+  }, [enabled, timeoutMs]);
 
-  return { refreshing, onRefresh, register };
+  return { enabled, refreshing, onRefresh, register };
 }
 
 /** Registers `refresher` with a page's {@link usePullToRefresh} while mounted. */

@@ -64,13 +64,17 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         : MARKET_PRODUCTS.find((p) => p.id === route.params.productId),
     [route.params.productId, route.params.product],
   );
-  const { product, refresh: refreshListing } = useLatestListing(routeProduct);
+  const { product, withdrawn, refresh: refreshListing } = useLatestListing(routeProduct);
   // Pull-to-refresh: the listing plus each mounted feedback section (#1301).
   const onRefreshError = useCallback(
     () => Toast.show({ type: 'error', text1: t('market.detail.refreshFailed') }),
     [t],
   );
-  const { refreshing, onRefresh, register } = usePullToRefresh(onRefreshError);
+  // Every product page shown today is published. A page that previews an
+  // unpublished draft must pass `enabled: false` — there's nothing on relays
+  // to refresh, and its `d` tag must not be queried.
+  const pull = usePullToRefresh(onRefreshError, { enabled: true });
+  const { register } = pull;
   useRegisterRefresher(register, refreshListing);
   const vendor = useMemo(() => (product ? sellerOf(product) : undefined), [product]);
   // Memoised so the comment-thread root identity stays stable across renders.
@@ -162,12 +166,14 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={colors.brandPink}
-            colors={[colors.brandPink]}
-          />
+          pull.enabled ? (
+            <RefreshControl
+              refreshing={pull.refreshing}
+              onRefresh={pull.onRefresh}
+              tintColor={colors.brandPink}
+              colors={[colors.brandPink]}
+            />
+          ) : undefined
         }
       >
         <View style={[styles.imageWrap, imageAspect ? { aspectRatio: imageAspect } : null]}>
@@ -210,45 +216,54 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
           </View>
 
           <Text style={styles.description}>{product.description}</Text>
-          {product.listing ? (
-            <TouchableOpacity
-              style={styles.buyButton}
-              testID="market-contact-seller"
-              accessibilityLabel={t('market.live.contactSeller')}
-              onPress={() =>
-                navigation.navigate('Conversation', {
-                  pubkey: product.listing!.event.pubkey,
-                  name: sellerName,
-                  picture: null,
-                })
-              }
-            >
-              <Text style={styles.buyText}>{t('market.live.contactSeller')}</Text>
-            </TouchableOpacity>
-          ) : null}
+          {withdrawn ? (
+            // A refresh found the listing deleted, sold or expired.
+            <View style={styles.withdrawn} testID="market-product-detail-withdrawn">
+              <Text style={styles.withdrawnText}>{t('market.detail.unavailable')}</Text>
+            </View>
+          ) : (
+            <>
+              {product.listing ? (
+                <TouchableOpacity
+                  style={styles.buyButton}
+                  testID="market-contact-seller"
+                  accessibilityLabel={t('market.live.contactSeller')}
+                  onPress={() =>
+                    navigation.navigate('Conversation', {
+                      pubkey: product.listing!.event.pubkey,
+                      name: sellerName,
+                      picture: null,
+                    })
+                  }
+                >
+                  <Text style={styles.buyText}>{t('market.live.contactSeller')}</Text>
+                </TouchableOpacity>
+              ) : null}
 
-          <TouchableOpacity
-            style={styles.buyButton}
-            onPress={openShop}
-            testID="market-product-detail-buy"
-            activeOpacity={0.85}
-            accessibilityLabel={t('market.detail.buyAccessibility', {
-              title: product.title,
-              seller: sellerName,
-            })}
-          >
-            <Zap size={16} color={colors.white} strokeWidth={2.5} fill={colors.white} />
-            <Text style={styles.buyText}>
-              {product.listing
-                ? t('market.live.openListing')
-                : t('market.detail.buyFrom', { seller: sellerName })}
-            </Text>
-            {/* In-app checkout for opted-in products; the external-link glyph is
-                only shown when tapping Buy leaves the app for the seller's website. */}
-            {checkoutTarget ? null : (
-              <ExternalLink size={16} color={colors.white} strokeWidth={2.5} />
-            )}
-          </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.buyButton}
+                onPress={openShop}
+                testID="market-product-detail-buy"
+                activeOpacity={0.85}
+                accessibilityLabel={t('market.detail.buyAccessibility', {
+                  title: product.title,
+                  seller: sellerName,
+                })}
+              >
+                <Zap size={16} color={colors.white} strokeWidth={2.5} fill={colors.white} />
+                <Text style={styles.buyText}>
+                  {product.listing
+                    ? t('market.live.openListing')
+                    : t('market.detail.buyFrom', { seller: sellerName })}
+                </Text>
+                {/* In-app checkout for opted-in products; the external-link glyph is
+                  only shown when tapping Buy leaves the app for the seller's website. */}
+                {checkoutTarget ? null : (
+                  <ExternalLink size={16} color={colors.white} strokeWidth={2.5} />
+                )}
+              </TouchableOpacity>
+            </>
+          )}
         </View>
 
         <View style={styles.divider} />

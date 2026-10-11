@@ -72,6 +72,19 @@ export const createMarketProductDetailStyles = (colors: Palette) =>
       marginTop: 4,
     },
     buyText: { color: colors.white, fontWeight: '800', fontSize: 15 },
+    // Replaces the buy affordances when a refresh finds the listing gone.
+    withdrawn: {
+      padding: 14,
+      borderRadius: 12,
+      backgroundColor: colors.surface,
+      marginTop: 4,
+    },
+    withdrawnText: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: colors.textSupplementary,
+      textAlign: 'center',
+    },
 
     divider: {
       height: 1,

@@ -144,11 +144,16 @@ export function useProductReviews(coord: string | null): UseProductReviews {
       if (!coord) return;
       const loaded = loadedRef.current;
       // Short per-query deadlines keep events + deletions inside the page's
-      // ~8 s refresh budget even with a dead relay. Deletions are looked up
-      // for everything shown (an old review may have been deleted since),
-      // but only kind-5s newer than what was loaded can be new.
-      const opts = { signal, since: refreshSince(loaded.events), maxWait: 3000 };
-      const evs = await queryReviewEvents(readRelays, coord, opts);
+      // ~8 s refresh budget even with a dead relay. Signatures are checked
+      // here (not left to the pool) before anything is merged. Deletions are
+      // looked up for everything shown with no `since` — an old review may
+      // have been deleted since, or the first lookup may have failed; the
+      // lookup is already bounded per id.
+      const opts = { signal, maxWait: 3000, verify: true };
+      const evs = await queryReviewEvents(readRelays, coord, {
+        ...opts,
+        since: refreshSince(loaded.events),
+      });
       const dels = await queryReviewDeletions(
         readRelays,
         [...loaded.events, ...evs, ...localAddedRef.current],

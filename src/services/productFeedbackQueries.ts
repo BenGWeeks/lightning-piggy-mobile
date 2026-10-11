@@ -14,6 +14,7 @@ import {
   type CommentRoot,
 } from '../utils/productComments';
 import { DELETION_KIND, addressRefs, deletionFilters, idRefs } from '../utils/nip09';
+import { hasValidSignature } from '../utils/eventSignature';
 
 /** Review query limit (one review per author per product). */
 export const REVIEWS_LIMIT = 500;
@@ -24,16 +25,24 @@ export interface FeedbackQueryOptions {
   since?: number;
   /** Per-query deadline (ms). */
   maxWait?: number;
+  /**
+   * Drop events whose signature doesn't check out, instead of trusting the
+   * pool's verifier (pull-to-refresh merges with this on, #1301).
+   */
+  verify?: boolean;
 }
 
 const withSince = (filter: Filter, since?: number): Filter =>
   since === undefined ? filter : { ...filter, since };
 
+const signedOnly = (events: NostrEvent[], verify?: boolean): NostrEvent[] =>
+  verify ? events.filter(hasValidSignature) : events;
+
 /** Reviews whose `d` is `coord`. Rejects only when every relay failed. */
 export function queryReviewEvents(
   relays: string[],
   coord: string,
-  { signal, since, maxWait = 4000 }: FeedbackQueryOptions,
+  { signal, since, maxWait = 4000, verify }: FeedbackQueryOptions,
 ): Promise<NostrEvent[]> {
   // Register the relays we open so nostrService.cleanup() closes them.
   trackRelays(relays);
@@ -42,7 +51,7 @@ export function queryReviewEvents(
     relays,
     withSince({ kinds: [REVIEW_KIND], '#d': [coord], limit: REVIEWS_LIMIT }, since),
     { maxWait, signal, rejectOnAllRelaysFailure: true },
-  );
+  ).then((evs) => signedOnly(evs, verify));
 }
 
 /**
@@ -52,7 +61,7 @@ export function queryReviewEvents(
 export function queryCommentEvents(
   relays: string[],
   root: CommentRoot,
-  { signal, since, maxWait = 5000 }: FeedbackQueryOptions,
+  { signal, since, maxWait = 5000, verify }: FeedbackQueryOptions,
 ): Promise<NostrEvent[]> {
   trackRelays(relays);
   return querySyncAbortable(
@@ -60,19 +69,29 @@ export function queryCommentEvents(
     relays,
     withSince(commentFilterForRoot(root, DEFAULT_COMMENTS_LIMIT), since),
     { maxWait, signal, rejectOnAllRelaysFailure: true },
-  ).then((evs) => evs.filter((e) => belongsToRoot(e, root)));
+  ).then((evs) =>
+    signedOnly(
+      evs.filter((e) => belongsToRoot(e, root)),
+      verify,
+    ),
+  );
 }
 
 function queryDeletions(
   relays: string[],
   filters: Filter[],
-  { signal, since, maxWait = 4000 }: FeedbackQueryOptions,
+  { signal, since, maxWait = 4000, verify }: FeedbackQueryOptions,
 ): Promise<NostrEvent[]> {
   return Promise.all(
     filters.map((filter) =>
       querySyncAbortable(pool, relays, withSince(filter, since), { maxWait, signal }),
     ),
-  ).then((batches) => batches.flat().filter((e) => e.kind === DELETION_KIND));
+  ).then((batches) =>
+    signedOnly(
+      batches.flat().filter((e) => e.kind === DELETION_KIND),
+      verify,
+    ),
+  );
 }
 
 /** Author kind-5s naming `reviews` by address (replaceable) or by id. */

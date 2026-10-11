@@ -9,8 +9,9 @@ import type { MarketProduct } from '../data/marketProducts';
  * listing (kind 30402 / 30018) is replaceable by its `d` tag, so `refresh`
  * re-fetches its newest revision; only a NEWER revision of the same listing
  * replaces what's shown. Curated catalogue products (no `listing`) are
- * returned as-is. A listing withdrawn since the page opened keeps showing —
- * the feed drops it on its own refresh.
+ * returned as-is. `withdrawn` turns true when a refresh finds the listing
+ * gone — deleted by its seller (kind 5), sold / inactive, or expired — so the
+ * page can stop offering to buy it.
  */
 export function useLatestListing(product: MarketProduct | undefined) {
   const { relays } = useNostr();
@@ -19,6 +20,7 @@ export function useLatestListing(product: MarketProduct | undefined) {
     return r.length > 0 ? r : DEFAULT_RELAYS;
   }, [relays]);
   const [fresh, setFresh] = useState<MarketProduct | null>(null);
+  const [withdrawn, setWithdrawn] = useState(false);
 
   const current = product?.listing?.event;
   // `id` encodes kind + author + `d`, so equal ids are the same listing.
@@ -35,7 +37,9 @@ export function useLatestListing(product: MarketProduct | undefined) {
       const base = shown?.listing;
       if (!shown || !base) return;
       const next = await fetchListingRevision(base.event, readRelays, signal);
-      if (signal.aborted || !next?.listing || next.listing.event.id === base.event.id) return;
+      if (signal.aborted) return;
+      setWithdrawn(!next);
+      if (!next?.listing || next.listing.event.id === base.event.id) return;
       // Keep the seller's display name the feed resolved from contacts — the
       // parser alone only knows a shortened pubkey.
       setFresh({
@@ -47,5 +51,5 @@ export function useLatestListing(product: MarketProduct | undefined) {
     [shown, readRelays],
   );
 
-  return { product: shown, refresh };
+  return { product: shown, withdrawn, refresh };
 }
