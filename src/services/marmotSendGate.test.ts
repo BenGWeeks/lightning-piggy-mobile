@@ -75,4 +75,16 @@ describe('submitWhenSettled — never hand marmot-ts a send it would queue (#128
       false,
     );
   });
+
+  it('builds a function intent from the state at submit time, not when called (#1309)', async () => {
+    const g = Object.assign(fakeGroup('Syncing'), { state: 'before the wait' });
+    setTimeout(() => {
+      g.state = 'staged during the wait';
+      g.convergenceStatus = 'Settled';
+    }, 250);
+    const build = jest.fn((group: { state: unknown }) => ({ ...intent, seen: group.state }));
+    await submitWhenSettled(asGroup(g), build as never, { timeoutMs: 5_000 });
+    expect(build).toHaveBeenCalledTimes(1);
+    expect(g.submitIntent).toHaveBeenCalledWith({ ...intent, seen: 'staged during the wait' });
+  });
 });
