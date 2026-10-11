@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { View, Text, TouchableOpacity, BackHandler, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useOnchainSendQuote } from '../utils/useOnchainSendQuote';
+import { useSheetKeyboardRestore } from '../utils/useSheetKeyboardRestore';
 import { onchainSendEligibility } from '../utils/onchainSendEligibility';
 import { Image as ExpoImage } from 'expo-image';
 import { Alert } from './BrandedAlert';
@@ -182,6 +183,9 @@ const SendSheet: React.FC<Props> = ({
   // Let dynamic sizing measure intrinsic content; tall forms scroll above
   // the safe-area inset rather than clipping the trailing action buttons.
   const keyboardHeight = useKeyboardHeight();
+  // gorhom's keyboardBlurBehavior="restore" leaves a dynamically sized sheet
+  // floating mid-screen on iOS once the keyboard closes; snap it back.
+  useSheetKeyboardRestore(bottomSheetRef, visible);
 
   // Amount-less bolt11 (`lnbc1…` with no amount prefix) — recipient lets
   // the sender pick the amount. NIP-47 `pay_invoice` accepts an optional
