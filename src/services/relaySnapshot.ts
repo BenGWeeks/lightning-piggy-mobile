@@ -24,18 +24,15 @@ export interface RelaySnapshotOptions {
   deadline: number;
   /** How long the remaining relays get after the first full answer. */
   graceMs: number;
-  /** Called with each event that passed the relay layer (dedup via `alreadyHave`). */
+  /** Called with each event that passed the relay layer. */
   onEvent: (event: Event) => void;
-  /**
-   * Skip events we already hold. The relay checks this BEFORE parsing and
-   * verifying, so duplicates from other relays cost nothing.
-   */
-  alreadyHave?: (id: string) => boolean;
 }
 
 export interface RelaySnapshotResult {
   /** Relays that sent EOSE for every filter before the snapshot ended. */
   answered: string[];
+  /** Relays that sent anything (an event or an EOSE) — reachable, if slow. */
+  responded: string[];
   /** Some relay returned as many events as a filter's `limit` (results cut off). */
   truncated: boolean;
   /**
@@ -48,13 +45,18 @@ export interface RelaySnapshotResult {
 }
 
 export function collectRelaySnapshot(opts: RelaySnapshotOptions): Promise<RelaySnapshotResult> {
-  const { urls, filters, signal, deadline, graceMs, onEvent, alreadyHave } = opts;
+  const { urls, filters, signal, deadline, graceMs, onEvent } = opts;
   const remaining = deadline - Date.now();
   if (signal.aborted || remaining <= 0 || urls.length === 0) {
-    return Promise.resolve({ answered: [], truncated: false, truncatedSince: null });
+    return Promise.resolve({ answered: [], responded: [], truncated: false, truncatedSince: null });
   }
   if (filters.length === 0) {
-    return Promise.resolve({ answered: [...urls], truncated: false, truncatedSince: null });
+    return Promise.resolve({
+      answered: [...urls],
+      responded: [...urls],
+      truncated: false,
+      truncatedSince: null,
+    });
   }
 
   return new Promise((resolve) => {
@@ -65,6 +67,7 @@ export function collectRelaySnapshot(opts: RelaySnapshotOptions): Promise<RelayS
     let settledRelays = 0;
     let graceTimer: ReturnType<typeof setTimeout> | null = null;
     const answered: string[] = [];
+    const heard = new Set<string>();
     const subscriptions: { close: () => void }[] = [];
 
     const finish = () => {
@@ -75,7 +78,12 @@ export function collectRelaySnapshot(opts: RelaySnapshotOptions): Promise<RelayS
       signal.removeEventListener('abort', finish);
       subscriptions.forEach((s) => s.close());
       const floors = truncatedOldest.map((oldest) => oldest());
-      resolve({ answered, truncated, truncatedSince: floors.length ? Math.max(...floors) : null });
+      resolve({
+        answered,
+        responded: urls.filter((u) => heard.has(u)),
+        truncated,
+        truncatedSince: floors.length ? Math.max(...floors) : null,
+      });
     };
     const deadlineTimer = setTimeout(finish, remaining);
     signal.addEventListener('abort', finish, { once: true });
@@ -113,17 +121,14 @@ export function collectRelaySnapshot(opts: RelaySnapshotOptions): Promise<RelayS
               // Keep the relay's own EOSE timeout past our deadline so a
               // timeout can never masquerade as a real EOSE.
               eoseTimeout: remaining * 2,
-              alreadyHaveEvent: alreadyHave,
               receivedEvent: () => {
+                heard.add(url);
                 // Count everything the relay sends, duplicates included: the
                 // relay's `limit` counts them too, so counting after dedup
                 // would make a cut-off reply look complete.
                 if (filter.limit !== undefined && ++received >= filter.limit && !flagged) {
                   flagged = true;
                   truncated = true;
-                  // Duplicates skipped via `alreadyHave` don't update `oldest`,
-                  // so this can only read NEWER than the true floor — the safe
-                  // direction (callers then treat the cut as mattering).
                   truncatedOldest.push(() => (Number.isFinite(oldest) ? oldest : Infinity));
                 }
               },
@@ -131,7 +136,10 @@ export function collectRelaySnapshot(opts: RelaySnapshotOptions): Promise<RelayS
                 if (event.created_at < oldest) oldest = event.created_at;
                 if (!finished) onEvent(event);
               },
-              oneose: () => filterDone(true),
+              oneose: () => {
+                heard.add(url);
+                filterDone(true);
+              },
               onclose: () => filterDone(false),
             });
             subscriptions.push(sub);

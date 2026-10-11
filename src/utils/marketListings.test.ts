@@ -305,3 +305,34 @@ it('selectVerifiedListings reports a first page once, as soon as it is verified'
     events[1].id,
   ]);
 });
+
+it('selectVerifiedListings: a forged newest copy cannot give an old fallback a cap slot', async () => {
+  const sk = new Uint8Array(32).fill(12);
+  const seller = getPublicKey(sk);
+  const make = (d: string, created_at: number) =>
+    finalizeEvent(
+      {
+        kind: 30402,
+        created_at,
+        content: d,
+        tags: [
+          ['d', d],
+          ['title', d],
+          ['price', '1', 'SAT'],
+        ],
+      },
+      sk,
+    );
+  const oldA = make('a', 1);
+  const forgedA = { ...make('a', 100), sig: '0'.repeat(128) };
+  const b = make('b', 50);
+  const result = await selectVerifiedListings([oldA, forgedA, b], new Set([seller]), {
+    verify: (e) => e.sig !== '0'.repeat(128),
+    maybeYield: async () => {},
+    cap: 1,
+  });
+  expect(
+    reduceMarketListings(result.events, new Set([seller])).map((p) => p.listing?.event.created_at),
+  ).toEqual([50]);
+  expect(result.overflow).toBe(true);
+});

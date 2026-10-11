@@ -175,6 +175,49 @@ export function reduceMarketListings(
   );
 }
 
+interface Candidate {
+  address: string;
+  index: number;
+  event: Event;
+}
+
+/** Binary heap of candidate revisions, newest first (`newerFirst` order). */
+function createCandidateHeap() {
+  const items: Candidate[] = [];
+  const before = (a: number, b: number) => newerFirst(items[a].event, items[b].event) < 0;
+  const swap = (a: number, b: number) => ([items[a], items[b]] = [items[b], items[a]]);
+  return {
+    push(candidate: Candidate) {
+      items.push(candidate);
+      for (let i = items.length - 1; i > 0; ) {
+        const parent = (i - 1) >> 1;
+        if (!before(i, parent)) break;
+        swap(i, parent);
+        i = parent;
+      }
+    },
+    pop(): Candidate | undefined {
+      if (items.length === 0) return undefined;
+      const top = items[0];
+      const last = items.pop()!;
+      if (items.length > 0) {
+        items[0] = last;
+        for (let i = 0; ; ) {
+          const l = 2 * i + 1;
+          const r = l + 1;
+          let best = i;
+          if (l < items.length && before(l, best)) best = l;
+          if (r < items.length && before(r, best)) best = r;
+          if (best === i) break;
+          swap(i, best);
+          i = best;
+        }
+      }
+      return top;
+    },
+  };
+}
+
 /**
  * Verify lazily: only the revision that would win each address, newest
  * listings first, and stop once `cap` renderable products are confirmed.
@@ -182,7 +225,9 @@ export function reduceMarketListings(
  * A follow set's listings can run to ~1,200 events and a schnorr check costs
  * ~25 ms on a phone, so verifying everything up front pinned the JS thread
  * for tens of seconds (#1274). A revision that fails verification is skipped,
- * so a forged newer copy can't hide the real listing. Deletions (kind 5) are
+ * so a forged newer copy can't hide the real listing. Copies that share an id
+ * but differ in signature are separate candidates: a bad-signature copy of a
+ * genuine payload just falls through to the good one. Deletions (kind 5) are
  * passed through: the caller verifies those as they arrive (there are few).
  *
  * Returns the events to hand to `reduceMarketListings`, whether more
@@ -218,32 +263,34 @@ export async function selectVerifiedListings(
     else revisions.set(address, [event]);
   }
   for (const list of revisions.values()) list.sort(newerFirst);
-  const addresses = [...revisions.keys()].sort((a, b) =>
-    newerFirst(revisions.get(a)![0], revisions.get(b)![0]),
-  );
+  // Candidates are taken newest-first across ALL addresses. When a revision
+  // fails verification, that address's next revision re-enters at ITS own
+  // time — so a forged newer copy can't let an old fallback take a cap slot
+  // ahead of genuinely newer listings.
+  const heap = createCandidateHeap();
+  for (const [address, list] of revisions) heap.push({ address, index: 0, event: list[0] });
   const winners: Event[] = [];
   let rendered = 0;
   let checked = 0;
   let overflow = false;
-  for (const address of addresses) {
-    let winner: Event | undefined;
-    for (const revision of revisions.get(address)!) {
-      await opts.maybeYield();
-      checked++;
-      if (opts.verify(revision)) {
-        winner = revision;
-        break;
-      }
+  for (let next = heap.pop(); next; next = heap.pop()) {
+    await opts.maybeYield();
+    checked++;
+    if (!opts.verify(next.event)) {
+      const list = revisions.get(next.address)!;
+      const index = next.index + 1;
+      if (index < list.length) heap.push({ address: next.address, index, event: list[index] });
+      continue;
     }
-    if (!winner) continue;
-    if (!isDeleted(winner, address) && parseMarketListing(winner, opts.now)) {
+    const winner = next.event;
+    if (!isDeleted(winner, next.address) && parseMarketListing(winner, opts.now)) {
       if (++rendered > opts.cap) {
         overflow = true;
         break;
       }
     }
     winners.push(winner);
-    if (rendered === opts.firstPage?.size && winners.length > 0) {
+    if (rendered === opts.firstPage?.size) {
       opts.firstPage.ready([...winners, ...deletions]);
       opts.firstPage = undefined;
     }

@@ -232,6 +232,74 @@ it("doesn't let a forged copy carrying a real listing's id squat it", async () =
   expect(result.products.map((p) => p.listing?.event.content)).toEqual(['Book']);
 });
 
+it('keeps the genuine copy when a bad-signature copy of the same payload arrives first', async () => {
+  const badSig = JSON.parse(JSON.stringify({ ...event, sig: '0'.repeat(128) })); // same id, bad sig
+  const pending = start(['wss://a.example', 'wss://b.example']);
+  await flush();
+  deliver(pass('listings', 'wss://a.example')[0], badSig);
+  deliver(pass('listings', 'wss://b.example')[0], JSON.parse(JSON.stringify(event)));
+  await Promise.all([answer('wss://a.example'), answer('wss://b.example')]);
+  expect((await pending).products.map((p) => p.listing?.event.sig)).toEqual([event.sig]);
+});
+
+it('asks for deletions on every relay that responded, not only those that finished', async () => {
+  const pending = start(['wss://a.example', 'wss://b.example']);
+  await flush();
+  deliver(pass('listings', 'wss://b.example')[0], event); // b serves a listing but never EOSEs
+  pass('listings', 'wss://a.example')[0].c.oneose();
+  await flush();
+  jest.advanceTimersByTime(2000);
+  await flush();
+  expect(pass('deletions', 'wss://b.example').length).toBeGreaterThan(0);
+  const del = finalizeEvent(
+    { kind: 5, created_at: 300, content: '', tags: [['e', event.id]] },
+    key,
+  );
+  deliver(pass('deletions', 'wss://b.example')[1], del);
+  pass('deletions', 'wss://a.example').forEach((s) => s.c.oneose());
+  await flush();
+  jest.advanceTimersByTime(2000);
+  expect((await pending).products).toEqual([]);
+});
+
+it('honours deletions even when the listing budget is full', async () => {
+  jest.useRealTimers();
+  const pending = start();
+  await flush();
+  const [listings] = pass('listings');
+  for (let i = 0; i < 1200; i++) {
+    deliver(
+      listings,
+      finalizeEvent(
+        {
+          kind: 30402,
+          created_at: 1000 + i,
+          content: `Item ${i}`,
+          tags: [
+            ['d', `item-${i}`],
+            ['title', `Item ${i}`],
+            ['price', '1', 'SAT'],
+          ],
+        },
+        key,
+      ),
+    );
+  }
+  listings.c.oneose();
+  await flush();
+  // The newest listing is withdrawn; its deletion arrives after the budget filled.
+  const del = finalizeEvent(
+    { kind: 5, created_at: 5000, content: '', tags: [['a', `30402:${author}:item-1199`]] },
+    key,
+  );
+  deliver(pass('deletions')[0], del);
+  pass('deletions').forEach((s) => s.c.oneose());
+  const result = await pending;
+  expect(result.products.some((p) => p.listing?.event.tags.some((t) => t[1] === 'item-1199'))).toBe(
+    false,
+  );
+}, 60000);
+
 it('closes subscriptions on abort and ignores late relay events', async () => {
   const controller = new AbortController();
   const pending = fetchMarketListings([author], ['wss://example.com'], controller.signal);
@@ -319,6 +387,8 @@ it('lets an oversized newer revision hide the older one instead of resurrecting 
 });
 
 it('bounds oversized-revision markers by the shared event budget', async () => {
+  // Real timers: the trusted stand-ins pass through the yielding selection.
+  jest.useRealTimers();
   const pending = start();
   await flush();
   const [listings] = pass('listings');

@@ -24,6 +24,8 @@ export interface MarketListingsResult {
 
 const MAX_AUTHORS = 1024;
 const MAX_EVENTS = 1200;
+/** Deletions get their own budget so a full listing pass can't starve them. */
+const MAX_DELETIONS = 600;
 const MAX_PRODUCTS = 250;
 /** Listings painted before the rest are verified — about two screens of grid. */
 const FIRST_PAGE = 12;
@@ -80,10 +82,18 @@ export async function fetchMarketListings(
   const deadline = startedAt + TIMEOUT_MS;
   let limited = keys.length > MAX_AUTHORS || dropped;
   let received = 0;
+  // Keyed by id AND signature: the id doesn't cover the signature, so a
+  // bad-signature copy of a genuine payload must not displace the good copy.
   const events = new Map<string, Event>();
+  let listingCount = 0;
+  let deletionCount = 0;
+  const budgetFull = (deletion: boolean) =>
+    deletion ? deletionCount >= MAX_DELETIONS : listingCount >= MAX_EVENTS;
+  // Oversized stand-ins were verified before their payload was stripped.
+  const trusted = new WeakSet<Event>();
   // Verified-but-oversized events are never rendered, yet still take part in
   // revision ordering and deletion. Keep small, non-renderable stand-ins
-  // (sharing the event budget) instead of the payloads.
+  // (sharing their kind's budget) instead of the payloads.
   const suppressions = new Map<string, Event>();
   // Signatures: the pool only structure-checks listing kinds (see
   // SKIP_VERIFY_KINDS in nostrService); listings are verified lazily below,
@@ -101,7 +111,7 @@ export async function fetchMarketListings(
   // A bulk deletion over the tag limit still withdraws listings: keep a
   // trimmed copy with only the e / own-listing a tags.
   const suppressOversizedDeletion = (event: Event) => {
-    if (suppressions.has(event.id) || events.size + suppressions.size >= MAX_EVENTS) return;
+    if (suppressions.has(event.id) || budgetFull(true)) return;
     const tags = event.tags
       .filter(
         (t) =>
@@ -113,7 +123,10 @@ export async function fetchMarketListings(
       .slice(0, MAX_EVENTS)
       .map((t) => [t[0], t[1]]);
     if (tags.length === 0 || !verified(event)) return;
-    suppressions.set(event.id, { ...event, content: '', tags });
+    const standIn = { ...event, content: '', tags };
+    trusted.add(standIn);
+    suppressions.set(event.id, standIn);
+    deletionCount++;
   };
   const suppressOversized = (event: Event) => {
     limited = true;
@@ -136,18 +149,21 @@ export async function fetchMarketListings(
         (existing.created_at === event.created_at && existing.id <= event.id))
     )
       return;
-    if (!existing && events.size + suppressions.size >= MAX_EVENTS) return;
+    if (!existing && budgetFull(false)) return;
     if (!verified(event)) return;
     // Same id/kind/created_at as the real revision so it competes normally;
     // empty content + a non-active status make it non-renderable.
-    suppressions.set(address, {
+    const standIn = {
       ...event,
       content: '',
       tags: [
         ['d', d],
         ['status', 'oversized'],
       ],
-    });
+    };
+    trusted.add(standIn);
+    suppressions.set(address, standIn);
+    if (!existing) listingCount++;
   };
   const ingest = (event: Event) => {
     received++;
@@ -156,18 +172,20 @@ export async function fetchMarketListings(
       suppressOversized(event);
       return;
     }
-    if (events.has(event.id)) return;
-    if (events.size + suppressions.size >= MAX_EVENTS) {
+    const key = `${event.id}:${event.sig}`;
+    if (events.has(key)) return;
+    const deletion = event.kind === 5;
+    if (budgetFull(deletion)) {
       limited = true;
       return;
     }
-    // Listings are verified later (winners only), but must hash to their id
-    // NOW: `alreadyHave` dedupes by id, so a forged payload carrying a real
-    // listing's id would otherwise squat it and get the genuine copy skipped.
-    const ok = event.kind === 5 ? verified(event) : idMatches(event);
-    if (ok) events.set(event.id, event);
+    // Listings are verified later (winners only); a payload that doesn't even
+    // hash to its id is junk, so drop it now before it takes budget.
+    if (!(deletion ? verified(event) : idMatches(event))) return;
+    events.set(key, event);
+    if (deletion) deletionCount++;
+    else listingCount++;
   };
-  const alreadyHave = (id: string) => events.has(id);
 
   const listings = await collectRelaySnapshot({
     urls,
@@ -176,34 +194,33 @@ export async function fetchMarketListings(
     deadline,
     graceMs: GRACE_MS,
     onEvent: ingest,
-    alreadyHave,
   });
   const listingsDoneAt = Date.now();
   const candidates = [...events.values(), ...suppressions.values()].filter((e) => e.kind !== 5);
-  // Ask the relays that answered pass 1 — they hold these listings, so they
-  // are the ones likely to hold the deletions too.
+  // Ask every relay that responded in pass 1 (not just those that finished
+  // in time — one that served listings may hold their deletions too). Relays
+  // that never answered at all are left out, so they can't stall pass 2.
   const deletions =
     candidates.length === 0 || signal.aborted
-      ? { answered: urls, truncated: false, truncatedSince: null }
+      ? { answered: urls, responded: urls, truncated: false, truncatedSince: null }
       : await collectRelaySnapshot({
-          urls: listings.answered.length > 0 ? listings.answered : urls,
+          urls: listings.responded.length > 0 ? listings.responded : urls,
           filters: listingDeletionFilters(candidates),
           signal,
           deadline,
           graceMs: GRACE_MS,
           onEvent: ingest,
-          alreadyHave,
         });
 
   let firstPageAt = 0;
   // Budget-gated yields keep taps responsive while winners are verified.
   const scheduler = createYieldScheduler({ signal, safetyEvery: 32 });
   const selection = await selectVerifiedListings(
-    signal.aborted ? [] : [...events.values()],
+    signal.aborted ? [] : [...events.values(), ...suppressions.values()],
     scope,
     {
       // Once aborted, fail fast instead of verifying the rest for nothing.
-      verify: (event) => !signal.aborted && verified(event),
+      verify: (event) => !signal.aborted && (trusted.has(event) || verified(event)),
       maybeYield: scheduler.maybeYield,
       cap: MAX_PRODUCTS,
       firstPage: onFirstPage && {
@@ -211,15 +228,13 @@ export async function fetchMarketListings(
         ready: (picked) => {
           if (signal.aborted) return;
           firstPageAt = Date.now();
-          onFirstPage(reduceMarketListings([...picked, ...suppressions.values()], scope));
+          onFirstPage(reduceMarketListings(picked, scope));
         },
       },
     },
   );
   scheduler.dispose();
-  const products = signal.aborted
-    ? []
-    : reduceMarketListings([...selection.events, ...suppressions.values()], scope);
+  const products = signal.aborted ? [] : reduceMarketListings(selection.events, scope);
   const result = {
     products: products.slice(0, MAX_PRODUCTS),
     // Transport problems only. Reaching MAX_PRODUCTS is a deliberate display
