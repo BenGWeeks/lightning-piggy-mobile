@@ -106,3 +106,31 @@ it('does not acquire or send a location when the group is unavailable', async ()
   expect(alert).not.toHaveBeenCalled();
   expect(mockSendGroup).not.toHaveBeenCalled();
 });
+
+it('re-asks and sends to the latest roster when members change while the dialog is open', async () => {
+  const { result, rerender } = renderHook(
+    (props: { group: Group }) => useGroupComposerActions({ ...params, group: props.group }),
+    { initialProps: { group } },
+  );
+  let pending!: Promise<void>;
+  await act(async () => {
+    pending = result.current.handleShareLocation();
+  });
+  expect(alert.mock.calls[0][0]).toBe('Share your location with the 2 people in Family?');
+
+  // A roster update removes Little Piggy while the confirmation is still open.
+  const smaller: Group = { ...group, memberPubkeys: ['me', 'big'], updatedAt: 2 };
+  rerender({ group: smaller });
+  await act(async () => {
+    alert.mock.calls[0][2]![1].onPress!();
+  });
+  expect(mockSendGroup).not.toHaveBeenCalled();
+  expect(alert.mock.calls[1][0]).toBe('Share your location with the other person in Family?');
+
+  await act(async () => {
+    alert.mock.calls[1][2]![1].onPress!();
+    await pending;
+  });
+  expect(mockSendGroup).toHaveBeenCalledTimes(1);
+  expect(mockSendGroup.mock.calls[0][0].memberPubkeys).toEqual(['me', 'big']);
+});
