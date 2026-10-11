@@ -7,7 +7,7 @@ import { isReply, replyTarget, type ReplyTarget } from './nip10';
 import type { AuthorFeedEvent } from '../services/authorFeedService';
 import type { MarketProduct } from '../data/marketProducts';
 
-export type ProfileTab = 'posts' | 'media' | 'products';
+export type ProfileTab = 'posts' | 'media' | 'shop';
 /** Posts tab filter: top-level posts only (default), or posts and replies. */
 export type PostsMode = 'posts' | 'all';
 
@@ -25,8 +25,8 @@ export type ProfileStatus =
   | 'emptyPosts'
   | 'onlyReplies'
   | 'emptyMedia'
-  | 'emptyProducts'
-  | 'productsUnavailable';
+  | 'emptyShop'
+  | 'shopUnavailable';
 
 export type ProfileRow =
   | {
@@ -81,14 +81,14 @@ export function buildProfileRows(input: ProfileRowsInput): ProfileRow[] {
   const status = (s: ProfileStatus): ProfileRow[] => [
     { type: 'status', key: `status-${s}`, status: s },
   ];
-  if (input.tab === 'products') {
+  if (input.tab === 'shop') {
     if (input.products.length === 0)
       return status(
         input.productsLoading
           ? 'loading'
           : input.productsIncomplete
-            ? 'productsUnavailable'
-            : 'emptyProducts',
+            ? 'shopUnavailable'
+            : 'emptyShop',
       );
     return chunk(input.products, PRODUCT_COLUMNS).map((products) => ({
       type: 'products',

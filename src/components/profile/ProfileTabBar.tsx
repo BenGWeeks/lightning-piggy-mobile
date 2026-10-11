@@ -6,11 +6,11 @@ import type { ProfileTabsStyles } from '../../styles/ProfileTabs.styles';
 
 const TABS: {
   tab: ProfileTab;
-  label: 'profileTabs.posts' | 'profileTabs.media' | 'profileTabs.products';
+  label: 'profileTabs.posts' | 'profileTabs.media' | 'profileTabs.shop';
 }[] = [
   { tab: 'posts', label: 'profileTabs.posts' },
   { tab: 'media', label: 'profileTabs.media' },
-  { tab: 'products', label: 'profileTabs.products' },
+  { tab: 'shop', label: 'profileTabs.shop' },
 ];
 
 interface Props {
@@ -23,7 +23,7 @@ interface Props {
   testIDPrefix?: string;
 }
 
-/** Posts · Media · Products tabs on a profile (#1332). */
+/** Posts · Media · Shop tabs on a profile (#1332). */
 const ProfileTabBar: React.FC<Props> = ({
   active,
   onChange,

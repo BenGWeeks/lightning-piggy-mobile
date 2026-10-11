@@ -1,7 +1,7 @@
 // Sizing for the profile header's identity row (#1332). The design (#439) is
 // the avatar overlapping the banner on the left, and the QR / zap / message
-// buttons plus the Follow pill on ONE row to its right, centred in the strip
-// below the banner. That row used to `flexWrap`, so on a ~400 dp phone (or
+// buttons plus the Follow pill on ONE row to its right, fully below the
+// banner with a clear gap, roughly centred on the part of the avatar below it. That row used to `flexWrap`, so on a ~400 dp phone (or
 // with a larger system font) the buttons wrapped onto a second line that
 // floated over the banner. Instead, pick a compact size whenever the regular
 // one wouldn't fit. Pure, so the breakpoint is unit-tested.
@@ -11,10 +11,14 @@ export interface ProfileHeaderLayout {
   avatarSize: number;
   /** Avatar plus its border ring. */
   avatarOuter: number;
-  /** How far the avatar pulls up into the banner (half its height). */
+  /** How far the avatar pulls up into the banner (~40% of its height). */
   overlap: number;
-  /** Height of the strip under the banner the action row centres in. */
-  actionStripHeight: number;
+  /**
+   * Offset of the action row's top from the identity row's top. The row
+   * starts `overlap` above the banner's bottom edge, so the buttons clear
+   * the banner by `actionTop - overlap` (= ACTION_GAP).
+   */
+  actionTop: number;
   iconSize: number;
   iconGap: number;
   followPaddingH: number;
@@ -28,6 +32,10 @@ export interface ProfileHeaderLayout {
 const SCREEN_PADDING = 16;
 const AVATAR_BORDER = 3;
 const ROW_GAP = 12;
+/** Clear space between the banner's bottom edge and the tops of the buttons. */
+export const ACTION_GAP = 12;
+/** Share of the avatar that overlaps the banner. */
+const OVERLAP_RATIO = 0.4;
 const ACTIONS_FOLLOW_GAP = 8;
 const FOLLOW_FONT = 14;
 // Average bold glyph width as a share of the font size, and the longest
@@ -66,13 +74,13 @@ export function profileHeaderLayout(
   const compact = available(regular) < requiredWidth(regular, iconCount, fontScale, showFollow);
   const s = compact ? sizes(true) : regular;
   const avatarOuter = s.avatarSize + 2 * AVATAR_BORDER;
-  const overlap = Math.round(avatarOuter / 2);
+  const overlap = Math.round(avatarOuter * OVERLAP_RATIO);
   return {
     compact,
     ...s,
     avatarOuter,
     overlap,
-    actionStripHeight: avatarOuter - overlap,
+    actionTop: overlap + ACTION_GAP,
     availableWidth: available(s),
     actionRowWidth: requiredWidth(s, iconCount, fontScale, showFollow),
   };

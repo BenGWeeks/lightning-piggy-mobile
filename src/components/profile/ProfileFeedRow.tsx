@@ -29,8 +29,8 @@ const STATUS_KEYS: Record<Exclude<ProfileStatus, 'loading'>, string> = {
   emptyPosts: 'friendNoteFeed.noPostsYet',
   onlyReplies: 'profileTabs.onlyReplies',
   emptyMedia: 'profileTabs.noMedia',
-  emptyProducts: 'profileTabs.noProducts',
-  productsUnavailable: 'profileTabs.productsUnavailable',
+  emptyShop: 'profileTabs.noShopItems',
+  shopUnavailable: 'profileTabs.shopUnavailable',
 };
 
 /**
@@ -80,7 +80,7 @@ const ProfileFeedRow: React.FC<Props> = ({ row, styles, onOpenImage, onOpenProdu
                 sellerName={product.sellerName}
                 onPress={onOpenProduct}
                 variant="grid"
-                testID={`profile-product-card-${product.id}`}
+                testID={`profile-shop-item-${product.id}`}
               />
             </View>
           ))}

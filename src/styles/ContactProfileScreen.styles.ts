@@ -5,8 +5,8 @@ import type { ProfileHeaderLayout } from '../utils/profileHeaderLayout';
 /**
  * Profile page (ContactProfileScreen + ContactProfileHeader). The identity
  * row is sized by `profileHeaderLayout` (#1332): the avatar overlaps the
- * banner by half its height, and the action buttons + Follow pill sit on ONE
- * non-wrapping row, vertically centred in the strip below the banner.
+ * banner, and the action buttons + Follow pill sit on ONE non-wrapping row
+ * fully below the banner, a clear gap under its bottom edge.
  */
 export const createContactProfileScreenStyles = (colors: Palette, layout: ProfileHeaderLayout) =>
   StyleSheet.create({
@@ -46,18 +46,21 @@ export const createContactProfileScreenStyles = (colors: Palette, layout: Profil
       width: '100%',
       height: '100%',
     },
+    // Top-aligned: the avatar pulls up into the banner by `overlap`; the
+    // action row starts `actionTop` below the row's top, i.e. a clear
+    // ACTION_GAP under the banner's bottom edge. The row is as tall as the
+    // taller of the two, so the name below always clears the avatar.
     identityRow: {
       flexDirection: 'row',
-      alignItems: 'flex-end',
+      alignItems: 'flex-start',
       paddingHorizontal: 16,
       marginTop: -layout.overlap,
       gap: 12,
     },
-    // Exactly the strip below the banner, so centring the row in it lines the
-    // buttons up with each other AND keeps them off the banner.
     identityActionsBlock: {
       flex: 1,
-      height: layout.actionStripHeight,
+      marginTop: layout.actionTop,
+      height: layout.iconSize,
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'flex-end',

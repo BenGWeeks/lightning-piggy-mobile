@@ -13,7 +13,7 @@ interface State {
 
 /**
  * One seller's live Market listings (NIP-99 kind 30402) for the profile's
- * Products tab — the Market's own snapshot (`fetchMarketListings`), scoped to
+ * Shop tab — the Market's own snapshot (`fetchMarketListings`), scoped to
  * a single author, so signatures and the seller's deletions are verified
  * exactly as on the Market screen. Fetched lazily: only once the tab is
  * opened (`enabled`), only while the screen is focused, and once per

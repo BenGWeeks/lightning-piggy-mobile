@@ -101,13 +101,13 @@ const ContactProfileScreen: React.FC = () => {
   const [nfcWriteVisible, setNfcWriteVisible] = useState(false);
   const [nfcSupported, setNfcSupported] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  // Bumped on pull-to-refresh so the feed re-subscribes and the Products tab
+  // Bumped on pull-to-refresh so the feed re-subscribes and the Shop tab
   // refetches.
   const [notesReloadNonce, setNotesReloadNonce] = useState(0);
   const [tab, setTab] = useState<ProfileTab>('posts');
   // Posts tab filter: top-level posts by default, or posts and replies.
   const [postsMode, setPostsMode] = useState<PostsMode>('posts');
-  // Products are fetched only once their tab has been opened.
+  // The Shop tab's listings are fetched only once it has been opened.
   const [productsOpened, setProductsOpened] = useState(false);
 
   // React Navigation may reuse this screen instance and only update params
@@ -127,7 +127,7 @@ const ContactProfileScreen: React.FC = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     setContact(paramContact);
-    // A different person starts on Posts, with Products not yet fetched.
+    // A different person starts on Posts, with their Shop not yet fetched.
     setTab('posts');
     setPostsMode('posts');
     setProductsOpened(false);
@@ -450,13 +450,13 @@ const ContactProfileScreen: React.FC = () => {
   const styles = useMemo(() => createContactProfileScreenStyles(colors, layout), [colors, layout]);
   const tabStyles = useMemo(() => createProfileTabsStyles(colors), [colors]);
 
-  // Posts + Media share one focus-gated feed subscription; Products load on
+  // Posts + Media share one focus-gated feed subscription; the Shop loads on
   // first open of their tab.
   const feed = useProfileFeed(contact.pubkey, notesReloadNonce);
   const seller = useSellerProducts(contact.pubkey, productsOpened, notesReloadNonce, contact.name);
   const selectTab = useCallback((next: ProfileTab) => {
     setTab(next);
-    if (next === 'products') setProductsOpened(true);
+    if (next === 'shop') setProductsOpened(true);
   }, []);
   const rows = useMemo(
     () =>
@@ -600,9 +600,9 @@ const ContactProfileScreen: React.FC = () => {
     ],
   );
 
-  // Posts / Media page backwards on demand; nothing to page on Products (the
+  // Posts / Media page backwards on demand; nothing to page on Shop (the
   // seller's listings come in one bounded snapshot).
-  const canPage = tab !== 'products' && feed.events.length > 0 && !feed.reachedEnd;
+  const canPage = tab !== 'shop' && feed.events.length > 0 && !feed.reachedEnd;
   const listFooter = canPage ? (
     <View style={tabStyles.footer}>
       {feed.loadingMore ? (

@@ -93,15 +93,15 @@ describe('buildProfileRows', () => {
       status: 'loading',
     });
     expect(buildProfileRows({ ...base, tab: 'media' })[0]).toMatchObject({ status: 'emptyMedia' });
-    expect(buildProfileRows({ ...base, tab: 'products' })[0]).toMatchObject({
-      status: 'emptyProducts',
+    expect(buildProfileRows({ ...base, tab: 'shop' })[0]).toMatchObject({
+      status: 'emptyShop',
     });
   });
 
   it('says listings could not be loaded rather than "nothing for sale"', () => {
-    expect(
-      buildProfileRows({ ...base, tab: 'products', productsIncomplete: true })[0],
-    ).toMatchObject({ status: 'productsUnavailable' });
+    expect(buildProfileRows({ ...base, tab: 'shop', productsIncomplete: true })[0]).toMatchObject({
+      status: 'shopUnavailable',
+    });
   });
 
   it('chunks media into rows of three and products into rows of two', () => {
@@ -112,7 +112,7 @@ describe('buildProfileRows', () => {
     expect(media.map((r) => (r.type === 'media' ? r.tiles.length : 0))).toEqual([3, 1]);
     const products = buildProfileRows({
       ...base,
-      tab: 'products',
+      tab: 'shop',
       products: [product('a'), product('b'), product('c')],
     });
     expect(products.map((r) => r.key)).toEqual(['products-a', 'products-c']);

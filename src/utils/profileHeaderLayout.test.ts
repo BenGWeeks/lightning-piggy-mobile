@@ -14,12 +14,25 @@ describe('profileHeaderLayout', () => {
     expect(profileHeaderLayout(430, 1.6).compact).toBe(true);
   });
 
-  it('keeps the action row inside the strip below the banner', () => {
-    for (const width of [320, 360, 411, 430, 800]) {
-      const l = profileHeaderLayout(width, 1);
-      expect(l.overlap + l.actionStripHeight).toBe(l.avatarOuter);
-      // The buttons fit in the strip, so they never poke up into the banner.
-      expect(l.iconSize).toBeLessThanOrEqual(l.actionStripHeight);
+  it('puts the action row fully below the banner with a clear gap, centred on the avatar', () => {
+    for (const [width, font] of [
+      [320, 1],
+      [360, 1],
+      [411, 1],
+      [411, 1.3],
+      [576, 1],
+      [800, 1],
+    ]) {
+      const l = profileHeaderLayout(width, font);
+      // Gap between the banner's bottom edge and the buttons' tops.
+      expect(l.actionTop - l.overlap).toBeGreaterThanOrEqual(10);
+      expect(l.actionTop - l.overlap).toBeLessThanOrEqual(12);
+      // Roughly centred on the part of the avatar below the banner.
+      const buttonsCentre = l.actionTop + l.iconSize / 2;
+      const avatarBelowCentre = (l.overlap + l.avatarOuter) / 2;
+      expect(Math.abs(buttonsCentre - avatarBelowCentre)).toBeLessThanOrEqual(8);
+      // The avatar still overlaps the banner.
+      expect(l.overlap).toBeGreaterThan(20);
     }
   });
 

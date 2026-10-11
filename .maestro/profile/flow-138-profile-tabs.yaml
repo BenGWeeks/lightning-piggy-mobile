@@ -1,5 +1,5 @@
 appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
-name: Profile tabs — Posts (+ replies filter), Media, Products + bio mention chip (#1332)
+name: Profile tabs — Posts (+ replies filter), Media, Shop + bio mention chip (#1332)
 ---
 # Read-only: opens RobotechyShop's public profile (a real seller with Market
 # listings and picture posts) through the nostr: deep link and walks the
@@ -34,10 +34,10 @@ name: Profile tabs — Posts (+ replies filter), Media, Products + bio mention c
     visible: { id: 'profile-media-tile-.*' }
     timeout: 30000
 
-# Products: the seller's verified NIP-99 listings, as Market cards.
-- tapOn: { id: 'profile-tab-products' }
+# Shop: the seller's verified NIP-99 listings, as Market cards.
+- tapOn: { id: 'profile-tab-shop' }
 - extendedWaitUntil:
-    visible: { id: 'profile-product-card-.*' }
+    visible: { id: 'profile-shop-item-.*' }
     timeout: 45000
 
 - tapOn: { id: 'profile-tab-posts' }
