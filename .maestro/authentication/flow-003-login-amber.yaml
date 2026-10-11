@@ -21,6 +21,11 @@ name: Nostr Login via Amber
     timeout: 3000
 
 # Sign out first if already logged in, to make this script idempotent
+- scrollUntilVisible:
+    element:
+      id: 'drawer-sign-out'
+    direction: DOWN
+    timeout: 10000
 - tapOn:
     id: 'drawer-sign-out'
     optional: true

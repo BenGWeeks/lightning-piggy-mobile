@@ -23,6 +23,11 @@ name: Nostr Login Test (dev variant)
     timeout: 5000
 
 # Sign out if a previous session is still active
+- scrollUntilVisible:
+    element:
+      id: 'drawer-sign-out'
+    direction: DOWN
+    timeout: 10000
 - tapOn:
     id: 'drawer-sign-out'
     optional: true

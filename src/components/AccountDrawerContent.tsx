@@ -41,56 +41,71 @@ interface SectionRow {
   label: string;
   icon: React.ReactNode;
   testID: string;
+  subtitle: string;
+  /** Heading shown above this row (starts a group). */
+  section?: string;
+  /** Divider above this row: ends the "Your account" group. */
+  dividerBefore?: boolean;
 }
 
 const buildSectionRows = (colors: Palette, t: ReturnType<typeof useTranslation>): SectionRow[] => [
   {
     name: 'AccountProfile',
     label: t('accountDrawerContent.profile'),
+    subtitle: t('accountDrawerContent.profileHint'),
+    section: t('accountDrawerContent.yourAccount'),
     icon: <User size={22} color={colors.textBody} />,
     testID: 'drawer-row-profile',
   },
   {
     name: 'AccountWallets',
     label: t('accountDrawerContent.wallets'),
+    subtitle: t('accountDrawerContent.walletsHint'),
     icon: <Wallet size={22} color={colors.textBody} />,
     testID: 'drawer-row-wallets',
   },
   {
-    name: 'AccountAdvanced',
-    label: t('advancedScreen.title'),
-    icon: <Settings size={22} color={colors.textBody} />,
-    testID: 'drawer-row-advanced',
-  },
-  {
     name: 'AccountMessages',
     label: t('messageSettingsScreen.title'),
+    subtitle: t('accountDrawerContent.messagesHint'),
     icon: <MessageCircle size={22} color={colors.textBody} />,
     testID: 'drawer-row-messages',
   },
   {
-    name: 'AccountDisplayLanguage',
-    label: t('accountDrawerContent.displayLanguage'),
-    icon: <PaletteIcon size={22} color={colors.textBody} />,
-    testID: 'drawer-row-display-language',
-  },
-  {
     name: 'AccountNotifications',
     label: t('accountDrawerContent.notifications'),
+    subtitle: t('accountDrawerContent.notificationsHint'),
     icon: <Bell size={22} color={colors.textBody} />,
     testID: 'drawer-row-notifications',
   },
   {
     name: 'AccountSecurity',
     label: t('accountDrawerContent.security'),
+    subtitle: t('accountDrawerContent.securityHint'),
     icon: <ShieldCheck size={22} color={colors.textBody} />,
     testID: 'drawer-row-security',
   },
   {
+    name: 'AccountDisplayLanguage',
+    label: t('accountDrawerContent.displayLanguage'),
+    subtitle: t('accountDrawerContent.displayLanguageHint'),
+    dividerBefore: true,
+    icon: <PaletteIcon size={22} color={colors.textBody} />,
+    testID: 'drawer-row-display-language',
+  },
+  {
     name: 'AccountAbout',
     label: t('accountDrawerContent.about'),
+    subtitle: t('accountDrawerContent.aboutHint'),
     icon: <Info size={22} color={colors.textBody} />,
     testID: 'drawer-row-about',
+  },
+  {
+    name: 'AccountAdvanced',
+    label: t('advancedScreen.title'),
+    subtitle: t('accountDrawerContent.advancedHint'),
+    icon: <Settings size={22} color={colors.textBody} />,
+    testID: 'drawer-row-advanced',
   },
 ];
 
@@ -362,20 +377,31 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
 
         {/* Section rows */}
         {sectionRows.map((row) => (
-          <TouchableOpacity
-            accessibilityRole="button"
-            key={row.name}
-            style={styles.row}
-            onPress={() => {
-              props.navigation.closeDrawer();
-              props.navigation.navigate(row.name);
-            }}
-            accessibilityLabel={row.label}
-            testID={row.testID}
-          >
-            <View style={styles.rowIcon}>{row.icon}</View>
-            <Text style={styles.rowLabel}>{row.label}</Text>
-          </TouchableOpacity>
+          <React.Fragment key={row.name}>
+            {row.dividerBefore && <View style={styles.divider} />}
+            {row.section && (
+              <Text style={styles.sectionHeading} accessibilityRole="header">
+                {row.section}
+              </Text>
+            )}
+            <TouchableOpacity
+              accessibilityRole="button"
+              style={styles.row}
+              onPress={() => {
+                props.navigation.closeDrawer();
+                props.navigation.navigate(row.name);
+              }}
+              accessibilityLabel={row.label}
+              accessibilityHint={row.subtitle}
+              testID={row.testID}
+            >
+              <View style={styles.rowIcon}>{row.icon}</View>
+              <View style={styles.rowText}>
+                <Text style={styles.rowLabel}>{row.label}</Text>
+                <Text style={styles.rowSubtitle}>{row.subtitle}</Text>
+              </View>
+            </TouchableOpacity>
+          </React.Fragment>
         ))}
 
         <View style={styles.divider} />
@@ -387,7 +413,9 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
           style={[styles.row, (!isLoggedIn || signingOut) && styles.rowDisabled]}
           onPress={handleSignOut}
           disabled={!isLoggedIn || signingOut}
-          accessibilityLabel={t('accountDrawerContent.signOut')}
+          accessibilityLabel={t('accountDrawerContent.signOutOf', {
+            name: displayName || t('accountDrawerContent.accountFallback'),
+          })}
           testID="drawer-sign-out"
         >
           <View style={styles.rowIcon}>
@@ -396,7 +424,9 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
           <Text
             style={[styles.rowLabel, { color: isLoggedIn ? colors.red : colors.textSupplementary }]}
           >
-            {t('accountDrawerContent.signOut')}
+            {t('accountDrawerContent.signOutOf', {
+              name: displayName || t('accountDrawerContent.accountFallback'),
+            })}
           </Text>
         </TouchableOpacity>
       </DrawerContentScrollView>

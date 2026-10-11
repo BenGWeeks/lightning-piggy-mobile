@@ -52,6 +52,11 @@ name: Account Drawer Test
     id: 'profile-icon'
 - waitForAnimationToEnd:
     timeout: 2000
+- scrollUntilVisible:
+    element:
+      id: 'drawer-row-display-language'
+    direction: DOWN
+    timeout: 10000
 - tapOn:
     id: 'drawer-row-display-language'
 - waitForAnimationToEnd:
@@ -102,6 +107,11 @@ name: Account Drawer Test
 # --- 4. Advanced: verify confirmation, cancellation and state restoration ---
 - tapOn:
     id: 'profile-icon'
+- scrollUntilVisible:
+    element:
+      id: 'drawer-row-advanced'
+    direction: DOWN
+    timeout: 10000
 - tapOn:
     id: 'drawer-row-advanced'
 - scrollUntilVisible:

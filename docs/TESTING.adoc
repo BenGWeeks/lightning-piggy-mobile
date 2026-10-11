@@ -444,3 +444,16 @@ convert /tmp/screen.png -resize 1200x1200\> /tmp/screen_small.png
 ----
 
 The `\>` flag ensures ImageMagick only shrinks images that exceed 1200px — smaller images are left unchanged.
+
+== Settings navigation (#1222)
+
+The drawer groups Profile & QR, Wallets, Messages, Notifications and Safety &
+backup under Your account. A divider follows, then Display & language, Help &
+about and Advanced. The last action is Sign out of the named account.
+
+Maestro drawer flows scroll to stable row IDs because subtitles make the
+menu taller. Network settings are reached through Advanced; currency is a
+sub-page of Display & language. Both sub-pages return to their parent with
+the in-app back button and Android back. The Secret Mode switch ("Show
+experimental features") lives under Advanced → Experimental features and asks
+for confirmation when turned on.
