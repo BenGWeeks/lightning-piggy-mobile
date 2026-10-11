@@ -6,7 +6,11 @@ import { Toast } from '../components/BrandedToast';
 import type { ContactListFetchResult } from '../services/contactListSync';
 import type { NostrContact, RelayConfig } from '../types/nostr';
 import { useContactActions } from './useContactActions';
-import { isAccountCreatedHere, markAccountCreatedHere } from '../services/newAccountContactList';
+import {
+  __resetForTests,
+  isAccountCreatedHere,
+  markAccountCreatedHere,
+} from '../services/newAccountContactList';
 
 const ME = 'a'.repeat(64);
 const BIG = 'b'.repeat(64);
@@ -54,6 +58,7 @@ function setup(contacts: NostrContact[]) {
 beforeEach(async () => {
   jest.clearAllMocks();
   await AsyncStorage.clear();
+  __resetForTests();
   jest.spyOn(SecureStore, 'getItemAsync').mockResolvedValue('nsec1test');
 });
 
@@ -174,6 +179,24 @@ describe('useContactActions follow path (#1271)', () => {
     await act(async () => {
       await result.current.followContact(BIG); // already in the list: no publish
     });
+    expect(nostrService.signAndPublishEvent).not.toHaveBeenCalled();
+    expect(await isAccountCreatedHere(ME)).toBe(false);
+  });
+
+  it('an unverifiable list revokes the created-here flag, so a later empty answer refuses', async () => {
+    await markAccountCreatedHere(ME);
+    mockFetch.mockResolvedValueOnce({ status: 'failed', sawList: true });
+    mockFetch.mockResolvedValueOnce({ status: 'empty', confirmedBy: 3 });
+    const { result } = setup([]);
+    let first = true;
+    let second = true;
+    await act(async () => {
+      first = await result.current.followContact(NEW);
+    });
+    await act(async () => {
+      second = await result.current.followContact(NEW);
+    });
+    expect([first, second]).toEqual([false, false]);
     expect(nostrService.signAndPublishEvent).not.toHaveBeenCalled();
     expect(await isAccountCreatedHere(ME)).toBe(false);
   });

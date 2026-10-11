@@ -17,11 +17,17 @@ import { perAccountKey } from './perAccountStorage';
 const CREATED_HERE_KEY_BASE = 'lp_account_created_here';
 const flagKey = (pubkey: string) => perAccountKey(CREATED_HERE_KEY_BASE, pubkey.toLowerCase());
 
+// Revocations take effect in memory immediately, so a write racing the
+// storage update (or a storage failure) can't still see the flag this session.
+const revoked = new Set<string>();
+
 export async function markAccountCreatedHere(pubkey: string): Promise<void> {
+  revoked.delete(pubkey.toLowerCase());
   await AsyncStorage.setItem(flagKey(pubkey), '1');
 }
 
 export async function isAccountCreatedHere(pubkey: string): Promise<boolean> {
+  if (revoked.has(pubkey.toLowerCase())) return false;
   try {
     return (await AsyncStorage.getItem(flagKey(pubkey))) === '1';
   } catch {
@@ -29,8 +35,19 @@ export async function isAccountCreatedHere(pubkey: string): Promise<boolean> {
   }
 }
 
+/**
+ * Revoke for good. Both removing the key and overwriting it are attempted, so
+ * either succeeding is enough to survive a restart (only exactly '1' counts).
+ */
 export async function clearAccountCreatedHere(pubkey: string): Promise<void> {
-  await AsyncStorage.removeItem(flagKey(pubkey)).catch(() => {});
+  revoked.add(pubkey.toLowerCase());
+  const key = flagKey(pubkey);
+  await Promise.allSettled([AsyncStorage.setItem(key, '0'), AsyncStorage.removeItem(key)]);
+}
+
+/** Test-only: forget in-memory revocations, as an app restart would. */
+export function __resetForTests(): void {
+  revoked.clear();
 }
 
 /**

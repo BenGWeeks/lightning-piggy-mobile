@@ -1,5 +1,6 @@
 import type { Filter } from 'nostr-tools/filter';
 import { verifyEvent, type Event as NostrEvent } from 'nostr-tools/pure';
+import { normalizeURL } from 'nostr-tools/utils';
 import { pool } from './nostrPool';
 import { LP_CLIENT_TAG } from './nip89ClientTag';
 import { tagsToContacts } from '../utils/contacts';
@@ -35,8 +36,12 @@ export type ContactListFetchResult =
    * user genuinely has no list yet, e.g. a brand-new account.
    */
   | { status: 'empty'; confirmedBy: number }
-  /** Anything less certain: too few answers, timeouts, or an unverifiable list. */
-  | { status: 'failed' };
+  /**
+   * Anything less certain: too few answers, timeouts, or an unverifiable list.
+   * `sawList`: a kind-3 from the author DID arrive (it just couldn't be
+   * verified), so the account definitely has a list somewhere.
+   */
+  | { status: 'failed'; sawList?: boolean };
 
 export type ContactChange =
   | { type: 'follow'; pubkey: string; relay?: string | null; petname?: string | null }
@@ -108,7 +113,20 @@ export function fetchLatestContactList(
   } = {},
 ): Promise<ContactListFetchResult> {
   const author = pubkey.toLowerCase();
-  const urls = [...new Set(relays)];
+  // Normalise before de-duplicating: the pool shares one socket per
+  // normalised URL, so `wss://x` and `wss://x/` must not count as two
+  // confirmations.
+  const urls = [
+    ...new Set(
+      relays.map((r) => {
+        try {
+          return normalizeURL(r);
+        } catch {
+          return r;
+        }
+      }),
+    ),
+  ];
   if (urls.length === 0) return Promise.resolve({ status: 'failed' });
   const isAuthorKind3 = (e: unknown): boolean => {
     const ev = e as Partial<NostrEvent> | null;
@@ -142,7 +160,7 @@ export function fetchLatestContactList(
       } else if (unverifiable === 0 && confirmedBy >= MIN_EMPTY_CONFIRMATIONS) {
         result = { status: 'empty', confirmedBy };
       } else {
-        result = { status: 'failed' };
+        result = unverifiable > 0 ? { status: 'failed', sawList: true } : { status: 'failed' };
       }
       if (__DEV__) {
         console.log(
@@ -193,9 +211,10 @@ export function fetchLatestContactList(
  * - `found`: the relays' newest verified kind-3, or the one this session last
  *   published if that's newer (relays can lag right after a write);
  * - `empty`: relays positively confirmed there's no list. Trusted ONLY for an
- *   account created in Lightning Piggy on this device (`allowEmpty`, see
- *   `newAccountContactList`): start from this session's own list or an empty
- *   one. An imported / signed-in key's real list may live on relays we don't
+ *   account created in Lightning Piggy on this device that has never been
+ *   seen with a list (`allowEmpty`, see `newAccountContactList` and
+ *   `prepareContactListUpdate`): start from this session's own list or an
+ *   empty one. An imported / signed-in key's real list may live on relays we don't
  *   query, so for it `empty` refuses like `failed`;
  * - `failed`: refuse. The app's local `contacts` is never a base (#1271): it
  *   may never have loaded, and even a non-empty copy can be up to a day stale
@@ -275,6 +294,7 @@ export async function prepareContactListUpdate({
   change,
   lastPublished,
   allowEmptyList = false,
+  onListSeen,
   fetchLatest = fetchLatestContactList,
 }: {
   pubkey: string;
@@ -286,6 +306,12 @@ export async function prepareContactListUpdate({
   lastPublished?: ContactListBase | null;
   /** The account was created in Lightning Piggy on this device (may start a fresh list). */
   allowEmptyList?: boolean;
+  /**
+   * Called (and awaited) as soon as the fetch shows the account has a kind-3
+   * (verified or not), BEFORE anything is decided: revoke "created here" so
+   * the empty-list path can never be used for it again.
+   */
+  onListSeen?: () => Promise<void>;
   fetchLatest?: typeof fetchLatestContactList;
 }): Promise<{
   event: { kind: 3; created_at: number; tags: string[][]; content: string };
@@ -295,7 +321,13 @@ export async function prepareContactListUpdate({
   listSeen: boolean;
 } | null> {
   const fetched = await fetchLatest(pubkey, relays);
-  const base = resolveContactListBase(fetched, lastPublished, { allowEmpty: allowEmptyList });
+  const listSeen =
+    fetched.status === 'found' || (fetched.status === 'failed' && fetched.sawList === true);
+  if (listSeen) await onListSeen?.();
+  // A non-empty local list means the app has seen (or built) a list for this
+  // account, so "relays have none" is wrong somewhere: never start fresh then.
+  const allowEmpty = allowEmptyList && !listSeen && localContacts.length === 0;
+  const base = resolveContactListBase(fetched, lastPublished, { allowEmpty });
   if (!base) return null;
   const event = applyContactChange(base, change);
   const before = followSet(base.tags);
@@ -305,6 +337,6 @@ export async function prepareContactListUpdate({
     event,
     contacts: contactsFromEvent(event.tags, localContacts),
     changed,
-    listSeen: fetched.status === 'found',
+    listSeen,
   };
 }

@@ -161,6 +161,7 @@ export function useContactActions({
           // Only an account created here may start a fresh list when relays
           // confirm it has none; an imported key's list may be elsewhere.
           allowEmptyList: await isAccountCreatedHere(pubkey),
+          onListSeen: () => clearAccountCreatedHere(pubkey),
         });
         if (!update) {
           // No verified relay copy to build on: publishing from the local
@@ -168,7 +169,6 @@ export function useContactActions({
           Toast.show({ type: 'error', text1: t('followList.unavailable') });
           return false;
         }
-        if (update.listSeen) void clearAccountCreatedHere(pubkey);
         if (update.changed) {
           if (!(await publishContactList(update.event))) return false;
           lastPublished.current.set(pubkey, {
@@ -176,7 +176,7 @@ export function useContactActions({
             content: update.event.content,
             createdAt: update.event.created_at,
           });
-          void clearAccountCreatedHere(pubkey);
+          await clearAccountCreatedHere(pubkey);
         }
         const cKey = perAccountKey(CONTACTS_CACHE_KEY_BASE, pubkey);
         startTransition(() =>

@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
+  __resetForTests,
   clearAccountCreatedHere,
   isAccountCreatedHere,
   markAccountCreatedHere,
@@ -16,6 +17,8 @@ const SK = new Uint8Array(32).fill(1);
 
 beforeEach(async () => {
   await AsyncStorage.clear();
+  __resetForTests();
+  jest.restoreAllMocks();
 });
 
 describe('newAccountContactList (#1271)', () => {
@@ -54,6 +57,15 @@ describe('newAccountContactList (#1271)', () => {
     expect(await isAccountCreatedHere(PK)).toBe(true);
     expect(await isAccountCreatedHere('b'.repeat(64))).toBe(false);
     await clearAccountCreatedHere(PK);
+    expect(await isAccountCreatedHere(PK)).toBe(false);
+  });
+
+  it('revocation survives a failed delete and a restart', async () => {
+    await markAccountCreatedHere(PK);
+    jest.spyOn(AsyncStorage, 'removeItem').mockRejectedValueOnce(new Error('disk full'));
+    await clearAccountCreatedHere(PK);
+    expect(await isAccountCreatedHere(PK)).toBe(false);
+    __resetForTests(); // app restart: in-memory revocations gone
     expect(await isAccountCreatedHere(PK)).toBe(false);
   });
 });

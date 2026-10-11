@@ -100,6 +100,33 @@ describe('prepareContactListUpdate (#1271)', () => {
     expect(update).toBeNull();
   });
 
+  it('LP-created account with a non-empty local list: an empty answer still refuses', async () => {
+    const update = await prepareContactListUpdate({
+      pubkey: 'a'.repeat(64),
+      relays: ['wss://r1', 'wss://r2'],
+      localContacts: [contact(BIG)],
+      change: { type: 'follow', pubkey: NEW },
+      allowEmptyList: true,
+      fetchLatest: async () => ({ status: 'empty', confirmedBy: 2 }),
+    });
+    expect(update).toBeNull();
+  });
+
+  it('revokes via onListSeen (before deciding) when an unverifiable list arrives', async () => {
+    const onListSeen = jest.fn(async () => {});
+    const update = await prepareContactListUpdate({
+      pubkey: 'a'.repeat(64),
+      relays: ['wss://r1', 'wss://r2'],
+      localContacts: [],
+      change: { type: 'follow', pubkey: NEW },
+      allowEmptyList: true,
+      onListSeen,
+      fetchLatest: async () => ({ status: 'failed', sawList: true }),
+    });
+    expect(update).toBeNull();
+    expect(onListSeen).toHaveBeenCalledTimes(1);
+  });
+
   it('reports listSeen when the relays returned a list', async () => {
     const update = await prepareContactListUpdate({
       pubkey: 'a'.repeat(64),
@@ -207,7 +234,8 @@ describe('fetchLatestContactList', () => {
   const relaysOf =
     (scripts: Record<string, Script | 'down'>): ConnectContactListRelay =>
     async (url) => {
-      const script = scripts[url];
+      // The fetch hands us normalised URLs (`wss://a` → `wss://a/`).
+      const script = scripts[url] ?? scripts[url.replace(/\/$/, '')];
       if (!script || script === 'down') throw new Error('connection failed');
       return {
         subscribe: (_filters, h) => {
@@ -288,6 +316,14 @@ describe('fetchLatestContactList', () => {
     });
   });
 
+  it('counts URL aliases of one relay as a single confirmation', async () => {
+    const res = await fetchLatestContactList(me, ['wss://a.example', 'wss://a.example/'], {
+      timeoutMs: 1000,
+      connect: relaysOf({ 'wss://a.example/': eose }),
+    });
+    expect(res).toEqual({ status: 'failed' });
+  });
+
   it("is 'failed' when no relay connects", async () => {
     await expect(fetch({ 'wss://a': 'down', 'wss://b': 'down' })).resolves.toEqual({
       status: 'failed',
@@ -302,6 +338,7 @@ describe('fetchLatestContactList', () => {
     };
     await expect(fetch({ 'wss://a': invalid, 'wss://b': eose, 'wss://c': eose })).resolves.toEqual({
       status: 'failed',
+      sawList: true,
     });
     const bad: Script = (h) => {
       h.onevent(forged);
@@ -309,6 +346,7 @@ describe('fetchLatestContactList', () => {
     };
     await expect(fetch({ 'wss://a': bad, 'wss://b': eose, 'wss://c': eose })).resolves.toEqual({
       status: 'failed',
+      sawList: true,
     });
   });
 
