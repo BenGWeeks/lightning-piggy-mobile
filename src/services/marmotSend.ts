@@ -116,12 +116,13 @@ export async function sendMarmotDm(
 }
 
 /** Send an app rumor into a Marmot group (multi-member). Same "send the
- * rumor as built" rule as {@link sendMarmotDm}. */
+ * rumor as built" rule as {@link sendMarmotDm}. Resolves the sent Marmot
+ * event's id as `rumorId`. */
 export async function sendMarmotGroupRumor(
   pubkey: string,
   appGroupId: string,
   draft: MarmotDraft,
-): Promise<{ success: boolean; wrapsPublished?: number; error?: string }> {
+): Promise<{ success: boolean; wrapsPublished?: number; error?: string; rumorId?: string }> {
   try {
     const session = requireMarmotSession(pubkey);
     const rumor = buildMarmotRumor(pubkey, {
@@ -132,8 +133,9 @@ export async function sendMarmotGroupRumor(
     });
     const byRelay = await session.sendRumor(appGroupId, rumor);
     const accepted = Object.values(byRelay).filter(Boolean).length;
+    // The Marmot id (not the app rumor's): what edits / deletes must target.
     return accepted > 0
-      ? { success: true, wrapsPublished: accepted }
+      ? { success: true, wrapsPublished: accepted, rumorId: rumor.id }
       : { success: false, error: 'No relay accepted the message' };
   } catch (e) {
     return { success: false, error: marmotSendError(e) };

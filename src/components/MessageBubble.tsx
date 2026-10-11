@@ -687,6 +687,7 @@ const MessageBubble: React.FC<Props> = ({
         createdAt={createdAt}
         senderName={senderName}
         header={QuoteStrip}
+        onLongPress={onLongPress}
         testID={`${testIdPrefix}-voice-${id}`}
         footer={
           fromMe && deliveryStatus

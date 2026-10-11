@@ -291,7 +291,10 @@
     "attach": "Adjuntar",
     "messageInput": "Campo de mensaje",
     "recordVoiceNote": "Grabar una nota de voz",
-    "sendMessage": "Enviar mensaje"
+    "sendMessage": "Enviar mensaje",
+    "editingMessage": "Editando mensaje",
+    "cancelEdit": "Cancelar edición",
+    "saveEdit": "Guardar cambios"
   },
   "conversationScreen": {
     "couldNotStartLiveShareTitle": "No se pudo iniciar la ubicación en directo",
@@ -1144,7 +1147,21 @@
     "reactionFailedBody": "No se pudo publicar tu reacción. Revisa tus relays e inténtalo de nuevo.",
     "copyText": "Copiar texto",
     "copied": "Copiado",
-    "moreEmoji": "Más emojis"
+    "moreEmoji": "Más emojis",
+    "edit": "Editar",
+    "delete": "Eliminar para todos"
+  },
+  "messageEdit": {
+    "deleteTitle": "¿Eliminar para todos?",
+    "deleteBody": "Se eliminará para todos en este chat. Quien ya haya visto una notificación puede conservar una copia.",
+    "deleteConfirm": "Eliminar",
+    "cancel": "Cancelar",
+    "editFailed": "No se pudo editar el mensaje",
+    "deleteFailed": "No se pudo eliminar el mensaje",
+    "noChat": "Todavía no hay un chat Marmot con esta persona.",
+    "notYours": "Solo puedes cambiar tus propios mensajes.",
+    "emptyEdit": "Una edición necesita algo de texto.",
+    "noRelay": "Ningún relé aceptó el cambio. Comprueba tu conexión e inténtalo de nuevo."
   },
   "messageBubble": {
     "quoteYou": "Tú",

@@ -163,7 +163,8 @@ async function upsertOne(tx: Executor, m: DmMessageRow): Promise<void> {
     // scan as the table grows. Same ±LOCAL_DM_ECHO_WINDOW_SECS rule.
     const res = await tx.execute(
       `SELECT event_id, delivery_status, rumor_id, created_at FROM dm_messages
-        WHERE owner = ? AND conversation = ? AND from_me = 1 AND content = ?
+        WHERE owner = ? AND conversation = ? AND from_me = 1
+          AND (content = ? OR (rumor_id IS NOT NULL AND rumor_id = ?))
           AND event_id LIKE '${LOCAL_DM_ID_PREFIX}%'
           AND ${PROTOCOL_SQL} = ?
           AND created_at BETWEEN ? - ${LOCAL_DM_ECHO_WINDOW_SECS} AND ? + ${LOCAL_DM_ECHO_WINDOW_SECS};`,
@@ -172,6 +173,9 @@ async function upsertOne(tx: Executor, m: DmMessageRow): Promise<void> {
         m.owner,
         m.conversation,
         m.content,
+        // Or the same send by rumor id: a Marmot edit (#1237) may have changed
+        // the local row's text before its original is replayed.
+        m.rumorId ?? null,
         protocolForWireKind(m.wireKind, m.protocol),
         m.createdAt,
         m.createdAt,
@@ -510,8 +514,8 @@ export async function applyMarmotEdits(
     for (const edit of edits) {
       const res = await tx.execute(
         `UPDATE dm_messages SET content = ?, edited_at = ?, edit_id = ?
-          WHERE owner = ? AND event_id = ? AND protocol = 'marmot' AND sender = ?
-            AND wire_kind = 14
+          WHERE owner = ? AND (event_id = ? OR rumor_id = ?) AND protocol = 'marmot'
+            AND sender = ? AND wire_kind = 14
             AND (edited_at IS NULL OR edited_at < ?
                  OR (edited_at = ? AND COALESCE(edit_id, '') < ?))
           RETURNING conversation;`,
@@ -520,6 +524,8 @@ export async function applyMarmotEdits(
           edit.editedAt,
           edit.editId,
           owner,
+          edit.target,
+          // Our own send keeps a `local-` row id until the replay, but carries the id here.
           edit.target,
           edit.editor,
           edit.editedAt,
@@ -533,6 +539,15 @@ export async function applyMarmotEdits(
   });
   return changed;
 }
+
+/** Row ids "delete for everyone" removed this session — so an open thread's
+ * in-memory copy of an optimistic `local-` send (kept across reloads until its
+ * echo lands, see keepPendingLocalRows) is dropped, not resurrected (#1237). */
+const deletedRowIds = new Set<string>();
+const DELETED_ROW_CAP = 500;
+
+/** Whether `rowId` was removed by a Marmot "delete for everyone" this session. */
+export const wasDmRowDeleted = (rowId: string): boolean => deletedRowIds.has(rowId);
 
 /**
  * Delete `owner`'s Marmot rows with these message ids in one conversation — a
@@ -549,15 +564,26 @@ export async function deleteMarmotMessages(
   if (messageIds.length === 0) return [];
   const db = await getLocalDb();
   const deleted: string[] = [];
-  for (let i = 0; i < messageIds.length; i += VAR_CHUNK) {
-    const slice = messageIds.slice(i, i + VAR_CHUNK);
+  // Matched by rumor id too, so our own optimistic `local-` send row goes with
+  // it (#1237). Each id binds twice: half-size chunks.
+  const step = VAR_CHUNK / 2;
+  for (let i = 0; i < messageIds.length; i += step) {
+    const slice = messageIds.slice(i, i + step);
+    const ids = slice.map(() => '?').join(',');
     const result = await db.execute(
       `DELETE FROM dm_messages WHERE owner = ? AND protocol = 'marmot' AND conversation = ?
          ${sender === null ? '' : 'AND sender = ?'}
-         AND event_id IN (${slice.map(() => '?').join(',')}) RETURNING event_id;`,
-      [owner, conversation, ...(sender === null ? [] : [sender]), ...slice],
+         AND (event_id IN (${ids}) OR rumor_id IN (${ids})) RETURNING event_id;`,
+      [owner, conversation, ...(sender === null ? [] : [sender]), ...slice, ...slice],
     );
     deleted.push(...(result.rows ?? []).map((row) => String(row.event_id)));
+  }
+  for (const id of deleted) {
+    deletedRowIds.delete(id); // re-insert → newest in eviction order
+    deletedRowIds.add(id);
+  }
+  while (deletedRowIds.size > DELETED_ROW_CAP) {
+    deletedRowIds.delete(deletedRowIds.values().next().value as string);
   }
   return deleted;
 }

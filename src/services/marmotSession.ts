@@ -557,6 +557,19 @@ export class MarmotSession {
     return byRelay;
   }
 
+  /** Run one of our own sent events through the listeners, as if received:
+   * MLS never echoes our sends back, so this applies them via the inbound path. */
+  deliverOwn(appGroupId: string, rumor: MarmotRumor): void {
+    const g = this.client.groups.loaded.find((x) => x.idStr === toMlsGroupId(appGroupId));
+    if (g) this.deliver(g, rumor);
+  }
+
+  /** Drop an event from the group history (it's saved before publishing), so a
+   * send no relay accepted doesn't replay and apply locally at next start. */
+  async forgetRumor(appGroupId: string, rumorId: string): Promise<void> {
+    await this.backend.remove(historyNamespace(toMlsGroupId(appGroupId)), rumorId);
+  }
+
   /**
    * Join from a decrypted kind-444 Welcome rumor (delivered gift-wrapped and
    * already unwrapped by the NIP-17 inbox path). Returns null when the
