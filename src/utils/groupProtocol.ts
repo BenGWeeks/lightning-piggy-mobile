@@ -7,3 +7,17 @@ import type { DmProtocol } from './dmProtocol';
 export function groupDmProtocol(group: Pick<Group, 'protocol'>): DmProtocol {
   return group.protocol ?? 'nip17';
 }
+
+/** Whether the viewer may rename the group or change its members. NIP-17
+ * groups are editable by anyone; a Marmot group only by its admins, because
+ * MLS rejects a non-admin's commit. A group that hasn't loaded yet is treated
+ * as editable (nothing to act on). Pubkeys compare case-insensitively. */
+export function canManageGroup(
+  group: Pick<Group, 'protocol' | 'adminPubkeys'> | undefined,
+  selfPubkey: string | null | undefined,
+): boolean {
+  if (!group?.protocol) return true;
+  if (!selfPubkey) return false;
+  const me = selfPubkey.toLowerCase();
+  return (group.adminPubkeys ?? []).some((pk) => pk.toLowerCase() === me);
+}

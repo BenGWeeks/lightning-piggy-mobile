@@ -35,6 +35,8 @@ import { shortNpub } from '../utils/shortNpub';
 import RenameGroupSheet from '../components/RenameGroupSheet';
 import GroupMembersSheet from '../components/GroupMembersSheet';
 import GroupHeaderActions from '../components/GroupHeaderActions';
+import GroupHeaderTitle from '../components/GroupHeaderTitle';
+import { canManageGroup } from '../utils/groupProtocol';
 import AttachPanel from '../components/AttachPanel';
 import ConversationComposer from '../components/ConversationComposer';
 import BrandGradientBackground from '../components/BrandGradientBackground';
@@ -648,25 +650,11 @@ const GroupConversationScreen: React.FC = () => {
               />
             </Svg>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.titleTouch}
-            onPress={() => setRenameVisible(true)}
-            accessibilityLabel={t('groupConversationScreen.renameGroup')}
-            testID="group-title"
-          >
-            <Text style={styles.title} numberOfLines={1}>
-              {group.name}
-            </Text>
-            <Svg width={14} height={14} viewBox="0 0 24 24" fill="none">
-              <Path
-                d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"
-                stroke={colors.white}
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </Svg>
-          </TouchableOpacity>
+          <GroupHeaderTitle
+            name={group.name}
+            canRename={canManageGroup(group, myPubkey)}
+            onRename={() => setRenameVisible(true)}
+          />
           <GroupHeaderActions group={group} onLeave={handleLeave} />
         </View>
         {/* Tappable member-count line — opens GroupMembersSheet for

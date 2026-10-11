@@ -26,12 +26,6 @@ export const createGroupConversationScreenStyles = (colors: Palette) =>
       justifyContent: 'center',
       alignItems: 'center',
     },
-    titleTouch: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      flexShrink: 1,
-    },
     title: {
       color: colors.white,
       fontSize: 22,
