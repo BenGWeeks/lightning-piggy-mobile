@@ -2,7 +2,6 @@ import React, { useRef, useCallback, useState } from 'react';
 import {
   View,
   FlatList,
-  StyleSheet,
   ViewToken,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -12,6 +11,7 @@ import WalletCard, { CARD_WIDTH, CARD_MARGIN } from './WalletCard';
 import AddWalletCard from './AddWalletCard';
 import { FiatCurrency } from '../services/fiatService';
 import { perfLog } from '../utils/perfLog';
+import { walletCarouselStyles as styles } from '../styles/WalletCarousel.styles';
 import { markWalletSwipeSettled, markWalletSwitchRequested } from '../utils/walletSwipeTiming';
 
 let __walletCarouselFirstRenderLogged = false;
@@ -144,31 +144,5 @@ const WalletCarousel: React.FC<WalletCarouselProps> = ({
     </View>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    paddingTop: 8,
-  },
-  listContent: {},
-  dots: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 8,
-    paddingTop: 12,
-    paddingBottom: 4,
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  dotActive: {
-    backgroundColor: '#FFFFFF',
-  },
-  dotInactive: {
-    backgroundColor: 'rgba(255, 255, 255, 0.4)',
-  },
-});
 
 export default WalletCarousel;

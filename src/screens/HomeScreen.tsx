@@ -205,6 +205,11 @@ const HomeScreen: React.FC = () => {
   // them, with a small indicator only while fresh data is actually fetching.
   const loadingTransactions = isLoading && transactions.length === 0;
 
+  // Read the active wallet through a ref so `handleRefresh` (and with it the
+  // RefreshControl element every warm list shares) keeps its identity across
+  // swipes; a new element per swipe would re-render every warm list (#1304).
+  const activeWalletIdRef = useRef(activeWalletId);
+  activeWalletIdRef.current = activeWalletId;
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
@@ -216,12 +221,13 @@ const HomeScreen: React.FC = () => {
         console.warn('[Home] pull-to-refresh swap recovery failed:', e);
       });
       // Explicit pull-to-refresh: force a fetch, ignoring the 30 s freshness.
-      if (activeWalletId) await refreshNow(activeWalletId);
+      const walletId = activeWalletIdRef.current;
+      if (walletId) await refreshNow(walletId);
     } finally {
       // A rejected refresh must never strand the pull-to-refresh spinner.
       setRefreshing(false);
     }
-  }, [activeWalletId, refreshNow]);
+  }, [refreshNow]);
 
   // Stable RefreshControl ELEMENT. Passing a fresh element on every render
   // made the (Pure) FlatList inside TransactionList re-render on every Home

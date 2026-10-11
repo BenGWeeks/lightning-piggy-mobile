@@ -68,6 +68,7 @@ const WarmTransactionLists: React.FC<Props> = ({
           <View
             key={id}
             style={shown ? styles.shown : styles.hidden}
+            pointerEvents={shown ? 'auto' : 'none'}
             importantForAccessibility={shown ? 'auto' : 'no-hide-descendants'}
             accessibilityElementsHidden={!shown}
           >

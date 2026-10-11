@@ -128,6 +128,13 @@ const TransactionList: React.FC<Props> = ({ transactions, refreshControl, curren
     undefined,
   );
   const [zapContact, setZapContact] = useState<CounterpartyContact | null>(null);
+  // The detail / zap / profile sheets mount the first time a row is tapped and
+  // then stay mounted (so their close animations still run). Zap and profile
+  // only open from the detail sheet, so one flag covers all three. Home keeps
+  // neighbouring wallets' lists mounted but hidden (#1304); without this each
+  // hidden list would carry three closed sheets that re-render on every
+  // wallet-context change.
+  const [sheetsArmed, setSheetsArmed] = useState(false);
 
   // Subscribe to swapRecoveryService's attention set + claimed-hash cache
   // so rows re-render when a recovery pass / synchronous claim updates
@@ -222,6 +229,7 @@ const TransactionList: React.FC<Props> = ({ transactions, refreshControl, curren
   // callback identity every render.
   const onPressTx = useCallback(
     (tx: TransactionDetailData, ic: TransactionIconState | undefined) => {
+      setSheetsArmed(true);
       setDetail(tx);
       setDetailIconState(ic);
     },
@@ -294,86 +302,90 @@ const TransactionList: React.FC<Props> = ({ transactions, refreshControl, curren
         removeClippedSubviews
         testID="transaction-list"
       />
-      <TransactionDetailSheet
-        visible={detail !== null}
-        tx={detail}
-        iconState={detailIconState}
-        onClose={() => setDetail(null)}
-        onCounterpartyPress={(contact) => {
-          setDetail(null);
-          setSheetContact(contact);
-          setProfileSheetVisible(true);
-        }}
-        onZapCounterparty={(contact) => {
-          setDetail(null);
-          setZapContact(contact);
-        }}
-        onMessageCounterparty={(contact) => {
-          setDetail(null);
-          navigation.navigate('Conversation', {
-            pubkey: contact.pubkey,
-            name: contact.name,
-            picture: contact.picture,
-            lightningAddress: contact.lightningAddress,
-          });
-        }}
-      />
-      <SendSheet
-        visible={zapContact !== null}
-        onClose={() => setZapContact(null)}
-        initialAddress={zapContact?.lightningAddress ?? undefined}
-        initialPicture={zapContact?.picture ?? undefined}
-        recipientPubkey={zapContact?.pubkey ?? undefined}
-        recipientName={zapContact?.name ?? undefined}
-      />
-      <ContactProfileSheet
-        visible={profileSheetVisible}
-        onClose={() => setProfileSheetVisible(false)}
-        contact={sheetContact}
-        onViewFullProfile={() => {
-          if (!sheetContact) return;
-          setProfileSheetVisible(false);
-          navigation.navigate('ContactProfile', { contact: sheetContact });
-        }}
-        onMessage={
-          sheetContact?.pubkey
-            ? () => {
-                const c = sheetContact;
-                if (!c?.pubkey) return;
-                setProfileSheetVisible(false);
-                navigation.navigate('Conversation', {
-                  pubkey: c.pubkey,
-                  name: c.name,
-                  picture: c.picture,
-                  lightningAddress: c.lightningAddress,
-                });
-              }
-            : undefined
-        }
-        onZap={
-          // Require both a pubkey AND a lightning address — SendSheet's
-          // zap path needs a real pubkey to attach the zap receipt to
-          // (NIP-57 verification fails on an empty-string sender).
-          // Anonymous-zap counterparties (no pubkey) hide the icon
-          // rather than silently mis-target.
-          sheetContact?.pubkey && sheetContact.lightningAddress
-            ? () => {
-                const c = sheetContact;
-                if (!c?.pubkey) return;
-                setProfileSheetVisible(false);
-                setZapContact({
-                  pubkey: c.pubkey,
-                  name: c.name,
-                  picture: c.picture,
-                  lightningAddress: c.lightningAddress,
-                  banner: c.banner ?? null,
-                  nip05: c.nip05 ?? null,
-                  source: 'nostr',
-                });
-              }
-            : undefined
-        }
-      />
+      {sheetsArmed ? (
+        <>
+          <TransactionDetailSheet
+            visible={detail !== null}
+            tx={detail}
+            iconState={detailIconState}
+            onClose={() => setDetail(null)}
+            onCounterpartyPress={(contact) => {
+              setDetail(null);
+              setSheetContact(contact);
+              setProfileSheetVisible(true);
+            }}
+            onZapCounterparty={(contact) => {
+              setDetail(null);
+              setZapContact(contact);
+            }}
+            onMessageCounterparty={(contact) => {
+              setDetail(null);
+              navigation.navigate('Conversation', {
+                pubkey: contact.pubkey,
+                name: contact.name,
+                picture: contact.picture,
+                lightningAddress: contact.lightningAddress,
+              });
+            }}
+          />
+          <SendSheet
+            visible={zapContact !== null}
+            onClose={() => setZapContact(null)}
+            initialAddress={zapContact?.lightningAddress ?? undefined}
+            initialPicture={zapContact?.picture ?? undefined}
+            recipientPubkey={zapContact?.pubkey ?? undefined}
+            recipientName={zapContact?.name ?? undefined}
+          />
+          <ContactProfileSheet
+            visible={profileSheetVisible}
+            onClose={() => setProfileSheetVisible(false)}
+            contact={sheetContact}
+            onViewFullProfile={() => {
+              if (!sheetContact) return;
+              setProfileSheetVisible(false);
+              navigation.navigate('ContactProfile', { contact: sheetContact });
+            }}
+            onMessage={
+              sheetContact?.pubkey
+                ? () => {
+                    const c = sheetContact;
+                    if (!c?.pubkey) return;
+                    setProfileSheetVisible(false);
+                    navigation.navigate('Conversation', {
+                      pubkey: c.pubkey,
+                      name: c.name,
+                      picture: c.picture,
+                      lightningAddress: c.lightningAddress,
+                    });
+                  }
+                : undefined
+            }
+            onZap={
+              // Require both a pubkey AND a lightning address — SendSheet's
+              // zap path needs a real pubkey to attach the zap receipt to
+              // (NIP-57 verification fails on an empty-string sender).
+              // Anonymous-zap counterparties (no pubkey) hide the icon
+              // rather than silently mis-target.
+              sheetContact?.pubkey && sheetContact.lightningAddress
+                ? () => {
+                    const c = sheetContact;
+                    if (!c?.pubkey) return;
+                    setProfileSheetVisible(false);
+                    setZapContact({
+                      pubkey: c.pubkey,
+                      name: c.name,
+                      picture: c.picture,
+                      lightningAddress: c.lightningAddress,
+                      banner: c.banner ?? null,
+                      nip05: c.nip05 ?? null,
+                      source: 'nostr',
+                    });
+                  }
+                : undefined
+            }
+          />
+        </>
+      ) : null}
     </>
   );
 };
