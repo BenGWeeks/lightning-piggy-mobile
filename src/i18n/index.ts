@@ -4,6 +4,7 @@ import enJson from './locales/en.json';
 import esJson from './locales/es.json';
 import ukJson from './locales/uk.json';
 import type { Translations } from './locales/types';
+import { registerPluralRules } from './plurals';
 
 // #137 infra: seeded with en + es to prove the pipeline end-to-end (tab
 // bar labels). fr/de/nl (named in the issue) land as their own follow-up
@@ -32,6 +33,38 @@ export function isSupportedLocale(code: string): code is SupportedLocale {
   return (SUPPORTED_LOCALES as readonly string[]).includes(code);
 }
 
+/**
+ * Map a device locale (a BCP-47 tag such as `es-MX`, `zh-Hans-CN`, `zh_TW`, or
+ * a bare language code such as `uk`) to the catalogue that serves it, or
+ * `null` when there is none. Chinese is the one language whose catalogue key
+ * carries a script: every `zh*` tag maps to `zh-Hans` (Simplified), including
+ * Traditional (`zh-Hant`, `zh-TW`, `zh-HK`) until a Traditional catalogue
+ * exists, since Simplified is far more readable to them than English.
+ */
+export function supportedLocaleForDevice(tag: string | null | undefined): SupportedLocale | null {
+  if (!tag) return null;
+  const language = tag.split(/[-_]/)[0].toLowerCase();
+  const candidate = language === 'zh' ? 'zh-Hans' : language;
+  return isSupportedLocale(candidate) ? candidate : null;
+}
+
+/**
+ * BCP-47 tag to hand to `Intl` / `toLocale*String` when formatting numbers and
+ * dates for a catalogue locale. Identical to the catalogue code except where
+ * the CLDR default numbering system isn't what our users see in payment apps:
+ * Marathi defaults to Devanagari digits (१,२३४), but Indian wallets show
+ * Western digits, so pin `latn` (Hindi already defaults to it; pinned too so
+ * both stay in step). Indian digit grouping (1,23,456) is kept, as expected.
+ */
+const INTL_TAG_OVERRIDES: Partial<Record<string, string>> = {
+  hi: 'hi-u-nu-latn',
+  mr: 'mr-u-nu-latn',
+};
+
+export function intlLocaleFor(locale: SupportedLocale): string {
+  return INTL_TAG_OVERRIDES[locale] ?? locale;
+}
+
 /** Shared config every I18n instance in the app uses — kept in one place
  *  so the module-level singleton below and LocaleContext's per-locale
  *  render instances can't drift apart. */
@@ -40,6 +73,8 @@ export function createI18nInstance(locale: SupportedLocale): I18n {
   instance.defaultLocale = 'en';
   instance.enableFallback = true;
   instance.locale = locale;
+  // CLDR plural rules per locale (i18n-js defaults to English rules for all).
+  registerPluralRules(instance);
   return instance;
 }
 
