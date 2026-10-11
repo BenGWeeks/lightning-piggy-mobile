@@ -254,3 +254,36 @@ describe('pushes for traffic that shows nothing (phantom "New message")', () => 
     expect(await listNotifications(OWNER)).toHaveLength(0);
   });
 });
+
+describe('a push wake caused by our own send (e.g. from another of our devices)', () => {
+  const ME = 'a'.repeat(64);
+  beforeEach(async () => {
+    await AsyncStorage.clear();
+    __resetNotificationHistoryForTests();
+    __resetPushWakeForTests();
+  });
+
+  it('is covered when the only new traffic is our own message — no generic "New message"', async () => {
+    // The live session decrypted our own message (authored by ME): authenticated traffic.
+    noteMarmotGroupTraffic(ME, Date.now() / 1000);
+    const d = deps({
+      hasLiveSession: () => true,
+      now: () => Date.now(),
+      lastTrafficAt: lastMarmotTrafficAt,
+    });
+    expect(await handleMarmotPushWake(d)).toBe('covered');
+    expect(d.notified).toBe(0);
+  });
+
+  it('replaces a headless generic alert once the session decrypts that self-authored message', async () => {
+    const posted = Date.now();
+    await recordNotification(
+      ME,
+      { kind: 'dm', title: 'New message', body: 'x', data: { marmotPush: true } },
+      posted,
+    );
+    // Our message was sent a few seconds before the push that woke us.
+    await settlePushPlaceholders(ME, posted - 5_000);
+    expect(await listNotifications(ME)).toHaveLength(0);
+  });
+});

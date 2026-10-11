@@ -5,6 +5,7 @@
 import type { Event as NostrEvent } from 'nostr-tools';
 
 import { MarmotWelcomeDeliveryError } from './marmotInvitees';
+import * as pushWake from './marmotPushWake';
 import { MARMOT_CHAT_KIND, MarmotSession, buildMarmotRumor } from './marmotSession';
 import {
   RELAY,
@@ -84,8 +85,17 @@ describe('MarmotSession multi-device invites (no WebCrypto)', () => {
       kind: MARMOT_CHAT_KIND,
       content: 'tablet',
     });
+    const traffic = jest.spyOn(pushWake, 'noteMarmotGroupTraffic');
     await phone.session.sendRumor(dm.id, fromPhone);
     await waitFor(() => tablet.inbox.some((m) => m.rumor.id === fromPhone.id));
+    // Sent from another device of the SAME account: it arrives authored by our
+    // own pubkey (so the hooks show it as ours and never alert), and still
+    // counts as authenticated traffic — a push wake it caused is covered.
+    expect(tablet.inbox.find((m) => m.rumor.id === fromPhone.id)?.rumor.pubkey).toBe(
+      littleId.pubkey,
+    );
+    expect(traffic).toHaveBeenCalledWith(littleId.pubkey, fromPhone.created_at);
+    traffic.mockRestore();
     await tablet.session.sendRumor(dm.id, fromTablet);
     await waitFor(() => big.inbox.filter((m) => m.group.id === dm.id).length >= 2);
     const received = big.inbox.filter((m) => m.group.id === dm.id);
