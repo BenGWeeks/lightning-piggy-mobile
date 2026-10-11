@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Alert as BrandedAlert } from '../components/BrandedAlert';
 import Toast from '../components/BrandedToast';
 import { useGroups } from '../contexts/GroupsContext';
@@ -24,21 +24,15 @@ export function useGroupAdminActions(group: Group | undefined) {
   const inFlight = useRef(false);
   const groupId = group?.id;
   const admins = group?.adminPubkeys;
-  // The confirm dialog outlives the render that opened it: build the update
-  // from the admin set as it is when the user confirms, not when they tapped.
-  const latestAdmins = useRef(admins);
-  useEffect(() => {
-    latestAdmins.current = admins;
-  }, [admins]);
 
   const commit = useCallback(
     async (m: GroupMemberRow, action: 'add' | 'remove') => {
-      const current = latestAdmins.current;
-      if (!groupId || !current || inFlight.current) return;
+      if (!groupId || inFlight.current) return;
       inFlight.current = true;
       setPendingPubkey(m.pubkey);
       try {
-        await setGroupAdmins(groupId, buildAdminUpdate(current, m.pubkey, action));
+        // Built from the admin set at commit time, not when the menu opened.
+        await setGroupAdmins(groupId, (current) => buildAdminUpdate(current, m.pubkey, action));
         Toast.show({
           type: 'success',
           text1: t(

@@ -535,20 +535,22 @@ export class MarmotSession {
     this.emitGroupsChanged();
   }
 
-  /** Replace the group's admin set (MIP-01 `admin_pubkeys`) — admins only. */
-  async setAdmins(appGroupId: string, adminPubkeys: string[]): Promise<void> {
-    const mlsId = toMlsGroupId(appGroupId);
-    const members = new Set(
-      getGroupMembers((await this.client.groups.get(mlsId)).state).map((p) => p.toLowerCase()),
-    );
-    const admins = normaliseAdmins(adminPubkeys);
-    if (admins.length === 0) throw new LastAdminError();
-    if (admins.some((p) => !members.has(p))) throw new Error('marmot: an admin must be a member');
+  /**
+   * Change the group's admin set (MIP-01 `admin_pubkeys`) — admins only.
+   * `update` maps the current set to the new one and runs as the commit is
+   * built, after the send gate settles, so a concurrent change by another
+   * admin is built upon rather than overwritten with a stale list.
+   */
+  async setAdmins(appGroupId: string, update: (current: string[]) => string[]): Promise<void> {
     // An admin-only update yields exactly one admin-policy proposal.
-    await this.commit(
-      mlsId,
-      spreadProposals(Proposals.proposeUpdateMetadata({ adminPubkeys: admins }), 1),
-    );
+    const proposal = spreadProposals(async (ctx) => {
+      const members = new Set(getGroupMembers(ctx.state).map((p) => p.toLowerCase()));
+      const admins = normaliseAdmins(update(normaliseAdmins(ctx.groupData.adminPubkeys)));
+      if (admins.length === 0) throw new LastAdminError();
+      if (admins.some((p) => !members.has(p))) throw new Error('marmot: an admin must be a member');
+      return Proposals.proposeUpdateMetadata({ adminPubkeys: admins })(ctx);
+    }, 1);
+    await this.commit(toMlsGroupId(appGroupId), proposal);
     this.emitGroupsChanged();
   }
 

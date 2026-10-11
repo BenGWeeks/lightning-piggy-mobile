@@ -56,6 +56,12 @@ export const createGroupMembersSheetStyles = (colors: Palette) =>
       height: 40,
       borderRadius: 20,
     },
+    rowProfile: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
     rowNameWrap: {
       flex: 1,
       flexDirection: 'row',

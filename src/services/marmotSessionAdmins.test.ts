@@ -41,7 +41,7 @@ describe('MarmotSession group admins (no WebCrypto)', () => {
     }
 
     // Make Bob an admin; every member sees it.
-    await alice.session.setAdmins(group.id, [alice.pubkey, bob.pubkey]);
+    await alice.session.setAdmins(group.id, (current) => [...current, bob.pubkey]);
     const both = sorted([alice.pubkey, bob.pubkey]);
     expect(sorted(alice.session.getGroup(group.id)!.adminPubkeys)).toEqual(both);
     await waitFor(() => bob.session.getGroup(group.id)?.adminPubkeys.length === 2);
@@ -55,10 +55,12 @@ describe('MarmotSession group admins (no WebCrypto)', () => {
 
     // Never an empty admin set, never a non-member.
     await waitForSettled(alice.session, group.id);
-    await expect(alice.session.setAdmins(group.id, [])).rejects.toBeInstanceOf(LastAdminError);
-    await expect(alice.session.setAdmins(group.id, [alice.pubkey, 'f'.repeat(64)])).rejects.toThrow(
-      /must be a member/,
+    await expect(alice.session.setAdmins(group.id, () => [])).rejects.toBeInstanceOf(
+      LastAdminError,
     );
+    await expect(
+      alice.session.setAdmins(group.id, (current) => [...current, 'f'.repeat(64)]),
+    ).rejects.toThrow(/must be a member/);
 
     // Removing an admin takes them out of `admins` in the same commit (an
     // admin with no leaf is invalid; marmot-ts splices that update in).

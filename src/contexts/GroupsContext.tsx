@@ -111,9 +111,10 @@ interface GroupsContextType {
    * the updated group, or null if the group doesn't exist or the
    * pubkey wasn't a member. Re-publishes group state on success. */
   removeMemberFromGroup: (groupId: string, pubkey: string) => Promise<Group | null>;
-  /** Marmot only: replace the group's admin set (an MLS commit; rejects for
-   * NIP-17 groups, which have no admins). */
-  setGroupAdmins: (groupId: string, adminPubkeys: string[]) => Promise<void>;
+  /** Marmot only: change the group's admin set — `update` maps the current set
+   * to the new one at commit time (an MLS commit; rejects for NIP-17 groups,
+   * which have no admins). */
+  setGroupAdmins: (groupId: string, update: (current: string[]) => string[]) => Promise<void>;
   deleteGroup: (groupId: string) => Promise<void>;
   getGroup: (groupId: string) => Group | undefined;
   /**
@@ -758,9 +759,9 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   );
 
   const setGroupAdmins = useCallback(
-    async (groupId: string, adminPubkeys: string[]): Promise<void> => {
+    async (groupId: string, update: (current: string[]) => string[]): Promise<void> => {
       if (!isMarmotGroupId(groupId)) throw new Error('Only Marmot groups have admins');
-      await marmot.setAdmins(groupId, adminPubkeys);
+      await marmot.setAdmins(groupId, update);
     },
     [marmot],
   );
