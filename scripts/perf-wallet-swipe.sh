@@ -5,9 +5,9 @@
 # screen when the card settled).
 #
 # Swipes back and forth between the first two wallet cards SWIPES times
-# (Maestro, testID selectors only), then reads the
-# `[Perf] WalletSwipe settled→list <id> <n>ms` markers (src/utils/walletSwipeTiming.ts)
-# and prints p50 / p95 / max.
+# (Maestro, testID selectors only), then reads the `[Perf] WalletSwipe
+# switch→list` / `settled→list` markers (src/utils/walletSwipeTiming.ts) and
+# prints p50 / p95 / max for each. `switch→list` is the main metric.
 #
 # Needs a dev build (or EXPO_PUBLIC_KEEP_PERF_LOGS=1), the app open on Home,
 # and an account with 2+ wallets.
@@ -57,16 +57,17 @@ else
   adb -s "$DEVICE" logcat -d -s ReactNativeJS:V > "$OUT/markers.log"
 fi
 
-grep -o 'WalletSwipe settled→list [0-9a-f-]* [0-9]*ms' "$OUT/markers.log" \
-  | awk '{gsub("ms","",$4); print $4}' > "$OUT/samples.txt"
-
-python3 - "$OUT/samples.txt" <<'PY'
+for metric in 'switch→list' 'settled→list'; do
+  grep -o "WalletSwipe $metric [0-9a-f-]* [0-9]*ms" "$OUT/markers.log" \
+    | awk '{gsub("ms","",$4); print $4}' > "$OUT/samples.txt"
+  python3 - "$OUT/samples.txt" "$metric" <<'PY'
 import sys
 xs = sorted(int(l) for l in open(sys.argv[1]) if l.strip())
 if not xs:
-    sys.exit("no WalletSwipe markers found")
+    sys.exit(f"no {sys.argv[2]} markers found")
 def pct(p):
     return xs[min(len(xs) - 1, int(round(p / 100 * (len(xs) - 1))))]
-print(f"swipes={len(xs)} p50={pct(50)}ms p95={pct(95)}ms max={xs[-1]}ms samples={xs}")
+print(f"{sys.argv[2]}: swipes={len(xs)} p50={pct(50)}ms p95={pct(95)}ms max={xs[-1]}ms samples={xs}")
 PY
+done
 echo "→ $OUT"

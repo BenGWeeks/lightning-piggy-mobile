@@ -17,7 +17,7 @@ import { useNostr } from '../contexts/NostrContext';
 import { Home } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import TransactionList from '../components/TransactionList';
+import WarmTransactionLists from '../components/WarmTransactionLists';
 import HomeSheets from '../components/HomeSheets';
 import type { HomeSheetActions } from '../hooks/useHomeSheetState';
 import WalletCarousel from '../components/WalletCarousel';
@@ -393,15 +393,23 @@ const HomeScreen: React.FC = () => {
         </View>
       </View>
 
-      {/* Transaction list. The list branch renders TransactionList's FlatList
+      {/* Transaction lists. Each warm list renders TransactionList's FlatList
           directly as the scroller (passing the RefreshControl through), so the
           list virtualizes properly. The non-list branches (welcome / add-wallet
           / first-load spinner) stay in a ScrollView so pull-to-refresh keeps
           working on them too. */}
       <View style={styles.transactionsWrapper}>
-        {showTransactionList ? (
-          <TransactionList transactions={transactions} refreshControl={homeRefreshControl} />
-        ) : (
+        {/* One list per warm wallet (active + neighbours), kept mounted so a
+            swipe reveals already-rendered rows (#1304). Hidden, not unmounted,
+            while an empty / add-wallet / first-load state shows instead. */}
+        <WarmTransactionLists
+          wallets={wallets}
+          activeWalletId={hasWallets ? activeWalletId : null}
+          visible={showTransactionList}
+          currency={currency}
+          refreshControl={homeRefreshControl}
+        />
+        {showTransactionList ? null : (
           <ScrollView style={styles.transactionsContainer} refreshControl={homeRefreshControl}>
             {!hasWallets ? (
               <WelcomeWalletPrompt onGetStarted={() => sheetsRef.current?.openWizard()} />

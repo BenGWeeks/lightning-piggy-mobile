@@ -12,7 +12,7 @@ import WalletCard, { CARD_WIDTH, CARD_MARGIN } from './WalletCard';
 import AddWalletCard from './AddWalletCard';
 import { FiatCurrency } from '../services/fiatService';
 import { perfLog } from '../utils/perfLog';
-import { markWalletSwipeSettled } from '../utils/walletSwipeTiming';
+import { markWalletSwipeSettled, markWalletSwitchRequested } from '../utils/walletSwipeTiming';
 
 let __walletCarouselFirstRenderLogged = false;
 
@@ -73,6 +73,7 @@ const WalletCarousel: React.FC<WalletCarouselProps> = ({
       // buttons even though the user's just-added wallet still reports
       // isConnected: true (see #166).
       if (item.type === 'wallet') {
+        markWalletSwitchRequested(item.wallet.id);
         onWalletChange(item.wallet.id);
       }
     },

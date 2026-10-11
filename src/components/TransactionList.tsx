@@ -5,7 +5,8 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import { useWallet, useWalletLive } from '../contexts/WalletContext';
+import { useWalletLive } from '../contexts/WalletContext';
+import type { FiatCurrency } from '../services/fiatService';
 import { useNostrContacts } from '../contexts/NostrContext';
 import ContactProfileSheet from './ContactProfileSheet';
 import type { ContactProfileBodyData } from './ContactProfileBody';
@@ -37,6 +38,11 @@ interface Props {
   // Forwarded to the FlatList so Home's pull-to-refresh keeps working now
   // that the list is the scroller (it used to live on Home's ScrollView).
   refreshControl?: React.ReactElement<RefreshControlProps>;
+  // Passed in (not read from WalletContext) so a memoised list doesn't
+  // re-render on every wallet-context change — e.g. Home keeps the
+  // neighbouring wallets' lists mounted but hidden, and a swipe must not
+  // re-render them (#1304).
+  currency: FiatCurrency;
 }
 
 // Translate function shape as provided by the `useTranslation()` hook. Passed
@@ -62,7 +68,7 @@ function formatDayHeader(ts: number, t: Translate): string {
   });
 }
 
-const TransactionList: React.FC<Props> = ({ transactions, refreshControl }) => {
+const TransactionList: React.FC<Props> = ({ transactions, refreshControl, currency }) => {
   // Per-mount first-render marker. The previous module-scope `let`
   // never reset, so navigating away + back (or switching wallets,
   // which forces a remount via the activeWalletId effect) silently
@@ -75,7 +81,6 @@ const TransactionList: React.FC<Props> = ({ transactions, refreshControl }) => {
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createTransactionListStyles(colors), [colors]);
-  const { currency, activeWalletId } = useWallet();
   const { btcPrice } = useWalletLive();
   const { contacts } = useNostrContacts();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -188,16 +193,10 @@ const TransactionList: React.FC<Props> = ({ transactions, refreshControl }) => {
   const [sheetContact, setSheetContact] = useState<ContactProfileBodyData | null>(null);
   const [profileSheetVisible, setProfileSheetVisible] = useState(false);
 
-  // Collapse the list back to the first page when the active wallet
-  // changes, but NOT on every transactions-array update. WalletContext
-  // polls balances/transactions every few seconds and emits a new array
-  // reference each time; keying the reset on `transactions` would fire the
-  // effect on every poll and snap the user back to the top mid-scroll.
-  // HomeScreen renders TransactionList without a `key` so it doesn't remount
-  // on wallet switch — we reset explicitly here instead.
-  useEffect(() => {
-    setPagesLoaded(1);
-  }, [activeWalletId]);
+  // Paging is per instance: Home renders one list per (warm) wallet, keyed by
+  // wallet id, so a wallet switch shows a different instance rather than
+  // re-windowing this one (#1304). A new `transactions` array from a poll keeps
+  // the current page, so the user isn't snapped back to the top mid-scroll.
 
   const sorted = useMemo(() => sortTransactions(transactions), [transactions]);
   const visibleTransactions = useMemo(
@@ -379,4 +378,4 @@ const TransactionList: React.FC<Props> = ({ transactions, refreshControl }) => {
   );
 };
 
-export default TransactionList;
+export default React.memo(TransactionList);
