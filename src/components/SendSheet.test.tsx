@@ -108,6 +108,7 @@ jest.mock('./SendScanPane', () => {
 });
 jest.mock('../hooks/useSendSheetLnurl', () => ({ useSendSheetLnurl: () => undefined }));
 const mockProcessInput = jest.fn();
+const mockResetInputForOpen = jest.fn();
 // The sheet's own setters, so a test can play out a resolved target + amount.
 type InputArgs = {
   applyPasteText: (v: string) => void;
@@ -122,6 +123,7 @@ jest.mock('../hooks/useSendSheetInput', () => ({
     mockInputArgs = args;
     return {
       processInput: mockProcessInput,
+      resetInputForOpen: mockResetInputForOpen,
       handleBarCodeScanned: jest.fn(),
       handleNfcContent: jest.fn(),
       handlePaste: jest.fn(),
@@ -162,6 +164,7 @@ beforeEach(() => {
   mockNativeKeystroke = null;
   mockInputArgs = null;
   mockProcessInput.mockClear();
+  mockResetInputForOpen.mockClear();
 });
 afterEach(() => {
   jest.runOnlyPendingTimers();
@@ -299,6 +302,14 @@ it('a previous open never prefills over a reopen with another address', () => {
   view.rerender(<SendSheet visible onClose={onClose} initialAddress="b@example.com" />);
   act(() => jest.runOnlyPendingTimers());
   expect(mockProcessInput.mock.calls).toEqual([['b@example.com']]);
+});
+
+it('reopens with invoice intake unblocked (the sheet stays mounted between opens)', () => {
+  const view = render(<SendSheet visible onClose={onClose} />);
+  expect(mockResetInputForOpen).toHaveBeenCalledTimes(1);
+  view.rerender(<SendSheet visible={false} onClose={onClose} />);
+  view.rerender(<SendSheet visible onClose={onClose} />);
+  expect(mockResetInputForOpen).toHaveBeenCalledTimes(2);
 });
 
 it('a previous prefill never processes into a plain reopen', () => {

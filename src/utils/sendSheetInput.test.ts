@@ -10,7 +10,6 @@ import {
   editAddressPrefill,
   isLnurlString,
   isLightningAddress,
-  isValidInvoice,
   lnurlFixedAmountSats,
   stripLightningPrefix,
 } from './sendSheetInput';
@@ -42,15 +41,6 @@ describe('sendSheetInput detectors', () => {
     });
   });
 
-  describe('isValidInvoice', () => {
-    it('matches the bolt11 HRPs', () => {
-      expect(isValidInvoice(INVOICE_WITH_AMOUNT)).toBe(true);
-      expect(isValidInvoice(AMOUNTLESS_INVOICE)).toBe(true);
-      expect(isValidInvoice(INVOICE_WITH_AMOUNT.toUpperCase())).toBe(true);
-      expect(isValidInvoice('alice@example.com')).toBe(false);
-    });
-  });
-
   describe('stripLightningPrefix', () => {
     it('strips a case-insensitive lightning: prefix and surrounding whitespace', () => {
       expect(stripLightningPrefix('lightning:lnbc100n1p')).toBe('lnbc100n1p');
@@ -63,9 +53,11 @@ describe('sendSheetInput detectors', () => {
     });
     it('keeps a prefixed bolt11 invoice payable — the strip yields a valid invoice', () => {
       // The defect users hit: pasting `lightning:lnbc…` (copied with the URI
-      // scheme) must still decode/pay. After stripping, isValidInvoice agrees.
-      expect(isValidInvoice('lightning:lnbc100n1p')).toBe(false); // prefix not stripped → rejected
-      expect(isValidInvoice(stripLightningPrefix(`lightning:${INVOICE_WITH_AMOUNT}`))).toBe(true);
+      // scheme) must still decode/pay. After stripping, it decodes.
+      expect(decodeInvoice(`lightning:${INVOICE_WITH_AMOUNT}`)).toBeNull(); // prefix not stripped
+      expect(
+        decodeInvoice(stripLightningPrefix(`lightning:${INVOICE_WITH_AMOUNT}`)),
+      ).not.toBeNull();
     });
   });
 
@@ -130,8 +122,12 @@ describe('decodeInvoice with real BOLT11 vectors', () => {
     ['wrong checksum', WRONG_CHECKSUM_INVOICE],
     ['wrong network with a valid checksum', bech32.encode('lnzz2500u', words, false)],
     ['incomplete invoice', 'lnbc1partial'],
+    ['checksum-valid empty payload (no payment hash)', 'lnbc1w4pnfm'],
+    ['valid checksum but no payment hash section', bech32.encode('lnbc', words.slice(0, 7), false)],
   ])('rejects %s rather than returning amountless fields', (_, invoice) => {
     expect(decodeInvoice(invoice)).toBeNull();
-    expect(isValidInvoice(invoice)).toBe(false);
+  });
+  it('decodes an uppercase invoice (QR alphanumeric mode)', () => {
+    expect(decodeInvoice(INVOICE_WITH_AMOUNT.toUpperCase())?.amountSats).toBe(250000);
   });
 });

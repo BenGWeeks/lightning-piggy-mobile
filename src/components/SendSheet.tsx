@@ -238,6 +238,7 @@ const SendSheet: React.FC<Props> = ({
       setDecoded(null);
       setScanned(false);
       setSending(false);
+      resetInputForOpen();
       // Default to the paste tab unless the camera is actually usable — opening
       // on a scanner that can't start (permission denied) is a dead-end; the
       // user can still switch to Scan, which prompts for access. A first open
@@ -354,24 +355,30 @@ const SendSheet: React.FC<Props> = ({
   // Input-intake: classify a scanned/pasted/typed target and drive decoded-send
   // state. Extracted to keep SendSheet under the file-size cap — see
   // useSendSheetInput (mirrors useSendSheetLnurl above).
-  const { processInput, handleBarCodeScanned, handleNfcContent, handlePaste, handlePasteSubmit } =
-    useSendSheetInput({
-      scanned,
-      pasteTextRef,
-      activePubkey,
-      recipientName,
-      applyPasteText,
-      onInvalidInvoice: () => selectInputMode('paste'),
-      setIsOnchainAddress,
-      setIsLnurl,
-      setInvoiceData,
-      setDecoded,
-      setScanned,
-      setSatsValue,
-      setLoadingBoltzFees,
-      setBoltzFees,
-      setOnchainFeeEstimate,
-    });
+  const {
+    processInput,
+    resetInputForOpen,
+    handleBarCodeScanned,
+    handleNfcContent,
+    handlePaste,
+    handlePasteSubmit,
+  } = useSendSheetInput({
+    scanned,
+    pasteTextRef,
+    activePubkey,
+    recipientName,
+    applyPasteText,
+    onInvalidInvoice: () => selectInputMode('paste'),
+    setIsOnchainAddress,
+    setIsLnurl,
+    setInvoiceData,
+    setDecoded,
+    setScanned,
+    setSatsValue,
+    setLoadingBoltzFees,
+    setBoltzFees,
+    setOnchainFeeEstimate,
+  });
 
   const handleSend = async () => {
     if (!invoiceData) return;

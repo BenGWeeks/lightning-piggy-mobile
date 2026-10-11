@@ -106,3 +106,31 @@ it('allows a fresh attempt after native dismissal of the error', () => {
   expect(opts.setInvoiceData).toHaveBeenLastCalledWith(INVOICE_WITH_AMOUNT);
   expect(opts.setScanned).toHaveBeenLastCalledWith(true);
 });
+
+it('reopening the sheet clears a guard left by an alert that never settled', () => {
+  const { result, opts } = setup();
+  act(() => result.current.processInput(DROPPED_CHARACTER_INVOICE));
+  // The alert was displaced without either callback firing; intake is blocked.
+  act(() => result.current.processInput(INVOICE_WITH_AMOUNT));
+  expect(opts.setInvoiceData).not.toHaveBeenCalledWith(INVOICE_WITH_AMOUNT);
+  act(() => result.current.resetInputForOpen());
+  act(() => result.current.processInput(INVOICE_WITH_AMOUNT));
+  expect(opts.setInvoiceData).toHaveBeenLastCalledWith(INVOICE_WITH_AMOUNT);
+  expect(opts.setScanned).toHaveBeenLastCalledWith(true);
+});
+
+it.each(['lno1qcp4256ypq', 'lightning:LNO1QCP4256YPQ'])(
+  'explains that a BOLT12 offer is not supported yet (%s)',
+  (offer) => {
+    const { result, opts } = setup();
+    act(() => result.current.processInput(offer));
+    expect(Alert.alert).toHaveBeenCalledWith(
+      'sendSheet.offerUnsupportedTitle',
+      'sendSheet.offerUnsupportedBody',
+      expect.any(Array),
+      expect.any(Object),
+    );
+    expect(opts.setScanned).not.toHaveBeenCalledWith(true);
+    expect(opts.onInvalidInvoice).toHaveBeenCalledTimes(1);
+  },
+);

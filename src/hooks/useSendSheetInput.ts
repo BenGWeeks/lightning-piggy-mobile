@@ -52,6 +52,7 @@ export function useSendSheetInput(opts: {
   setOnchainFeeEstimate: (v: string | null) => void;
 }): {
   processInput: (data: string) => void;
+  resetInputForOpen: () => void;
   handleBarCodeScanned: (e: { data: string }) => void;
   handleNfcContent: (content: NfcTagContent) => void;
   handlePaste: () => Promise<void>;
@@ -76,6 +77,37 @@ export function useSendSheetInput(opts: {
   } = opts;
   const t = useTranslation();
   const invalidInvoiceAlertVisible = useRef(false);
+
+  // A new Send session starts with intake open. The sheet stays mounted, so a
+  // guard left set by an alert that never settled must not carry over.
+  const resetInputForOpen = () => {
+    invalidInvoiceAlertVisible.current = false;
+  };
+
+  const rejectInvoiceInput = (input: string, titleKey: string, bodyKey: string) => {
+    setInvoiceData(null);
+    setDecoded(null);
+    setScanned(false);
+    setSatsValue('');
+    setIsOnchainAddress(false);
+    setIsLnurl(false);
+    // Return to an editable field and stop the camera. Otherwise the same
+    // rejected QR would reopen the alert as soon as the user dismisses it.
+    applyPasteText(input);
+    onInvalidInvoice();
+    // A camera can deliver the same bad QR on every frame. Keep one alert
+    // visible, then allow another attempt when the user dismisses it.
+    invalidInvoiceAlertVisible.current = true;
+    const dismiss = () => {
+      invalidInvoiceAlertVisible.current = false;
+    };
+    Alert.alert(
+      t(titleKey),
+      t(bodyKey),
+      [{ text: t('sendSheet.invalidInvoiceDismiss'), onPress: dismiss }],
+      { onDismiss: dismiss },
+    );
+  };
 
   const processInput = (data: string) => {
     if (invalidInvoiceAlertVisible.current) return;
@@ -142,30 +174,18 @@ export function useSendSheetInput(opts: {
     } else if (/^ln/i.test(input) && !isLnurlString(input)) {
       // All invoice entry points share this gate. A missing amount is valid
       // only after decoding succeeds (including the bech32 checksum/network).
+      if (/^lno1/i.test(input)) {
+        // BOLT12 offer — well-formed, just not payable here yet.
+        rejectInvoiceInput(
+          input,
+          'sendSheet.offerUnsupportedTitle',
+          'sendSheet.offerUnsupportedBody',
+        );
+        return;
+      }
       const invoice = decodeInvoice(input);
       if (!invoice) {
-        setInvoiceData(null);
-        setDecoded(null);
-        setScanned(false);
-        setSatsValue('');
-        setIsOnchainAddress(false);
-        setIsLnurl(false);
-        // Return to an editable field and stop the camera. Otherwise the same
-        // rejected QR would reopen the alert as soon as the user dismisses it.
-        applyPasteText(input);
-        onInvalidInvoice();
-        // A camera can deliver the same bad QR on every frame. Keep one alert
-        // visible, then allow another attempt when the user dismisses it.
-        invalidInvoiceAlertVisible.current = true;
-        const dismiss = () => {
-          invalidInvoiceAlertVisible.current = false;
-        };
-        Alert.alert(
-          t('sendSheet.invalidInvoiceTitle'),
-          t('sendSheet.invalidInvoiceBody'),
-          [{ text: t('sendSheet.invalidInvoiceDismiss'), onPress: dismiss }],
-          { onDismiss: dismiss },
-        );
+        rejectInvoiceInput(input, 'sendSheet.invalidInvoiceTitle', 'sendSheet.invalidInvoiceBody');
         return;
       }
       setIsOnchainAddress(false);
@@ -231,5 +251,12 @@ export function useSendSheetInput(opts: {
     }
   };
 
-  return { processInput, handleBarCodeScanned, handleNfcContent, handlePaste, handlePasteSubmit };
+  return {
+    processInput,
+    resetInputForOpen,
+    handleBarCodeScanned,
+    handleNfcContent,
+    handlePaste,
+    handlePasteSubmit,
+  };
 }

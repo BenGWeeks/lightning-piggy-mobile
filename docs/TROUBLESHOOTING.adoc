@@ -161,10 +161,6 @@ Empty output = nothing in flight; positive output shows projects ahead of you in
 | iOS dev client shows `Cannot read property reload of undefined` with `hmr.ts` / `window.location.reload` in the stack
 | The Expo development HMR connection can fail while loading a split bundle. Cold-launch first; if the error returns on opening a lazy screen, run an isolated test Metro with `EXPO_NO_METRO_LAZY=1 npm start -- --port <port>` and reopen its development-client URL. This disables development bundle splitting only and does not change application code or clear app data. This stack is distinct from the BDK / `NativeDevSettings.reload` symptom below. Restore the shared simulator's original Metro URL after testing.
 
-| Native iOS simulator dev build ignores an Expo development-client URL or shows `No script URL provided`
-| Check that the intended Metro responds to `/status` from the Mac. A native React Native dev build can use the simulator app's `RCT_jsLocation` preference rather than the Expo development-client URL. With the assigned simulator lock held, terminate the dev app, set the host with `xcrun simctl spawn <simulator-udid> defaults write com.lightningpiggy.app.dev RCT_jsLocation -string <metro-host>:<port>`, then launch the app again. Restore the shared host/port before releasing the lock; do not clear app data. +
-For Send-sheet verification, the simulator's accessibility tree may omit the visible bottom-sheet controls. Use the Metro inspector for the assigned simulator only to invoke existing controls by testID or the app's exported `navigateToSend` entry point, then inspect actual simulator screenshots. Document this instrumentation in the PR: it verifies the rendered Send/intake behavior, not native gestures or OS URL dispatch. A generic `lightning:` simulator URL can open a different installed wallet; Android's package-targeted intent remains a separate OS-routing check.
-
 | Metro not connecting to device over USB
 | Run `adb reverse tcp:8081 tcp:8081` for USB port forwarding before launching the app.
 
