@@ -14,8 +14,6 @@ interface Props {
   /** Relays added on this device only (before published lists existed). */
   deviceRelays: string[];
   onRemoveDeviceRelay: (url: string) => void;
-  /** Other advanced tools, shown first when expanded. */
-  children?: React.ReactNode;
 }
 
 /**
@@ -27,7 +25,6 @@ export default function AdvancedRelaysSection({
   connection,
   deviceRelays,
   onRemoveDeviceRelay,
-  children,
 }: Props) {
   const colors = useThemeColors();
   const t = useTranslation();
@@ -67,7 +64,6 @@ export default function AdvancedRelaysSection({
       </TouchableOpacity>
       {open && (
         <>
-          {children}
           <Text style={styles.subTitle}>{t('nostrScreen.defaultRelaysTitle')}</Text>
           {readOnlyList(DEFAULT_RELAYS, 'default-relay-list')}
           <Text style={shared.fieldHint}>{t('nostrScreen.defaultRelaysHint')}</Text>

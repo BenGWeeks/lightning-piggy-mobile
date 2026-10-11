@@ -78,7 +78,11 @@ export default function InvitationKeysScreen() {
   );
 
   return (
-    <AccountScreenLayout title={t('invitationKeys.title')} scrollable={false} parent="AccountNostr">
+    <AccountScreenLayout
+      title={t('invitationKeys.title')}
+      scrollable={false}
+      parent="AccountMessages"
+    >
       <FlatList
         testID="invitation-keys-list"
         style={styles.list}
