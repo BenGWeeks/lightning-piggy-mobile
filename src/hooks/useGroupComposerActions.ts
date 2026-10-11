@@ -10,6 +10,8 @@ import { encodeEncryptedFileUrl } from '../utils/encryptedFileUrl';
 import type { EncryptedUpload } from '../services/imageUploadService';
 import type { Group } from '../types/groups';
 import { useComposerActions } from './useComposerActions';
+import type { SharedLocation } from '../services/locationService';
+import { confirmLocationShare } from '../utils/confirmLocationShare';
 import { sendMarmotImage, type MarmotImage } from '../services/marmotSend';
 import { isMarmotGroupId } from '../services/marmotSession';
 
@@ -292,9 +294,27 @@ export function useGroupComposerActions(params: {
   // Memoise the strategy so the shared hook's callbacks (which depend on it)
   // keep stable identities across renders.
   const isMarmot = !!group && isMarmotGroupId(group.id);
+  const confirmLocation = useCallback(
+    (location: SharedLocation) => {
+      if (!group || !myPubkey) return Promise.resolve(false);
+      return confirmLocationShare(location, {
+        group: group.name,
+        memberPubkeys: group.memberPubkeys,
+        myPubkey,
+      });
+    },
+    [group, myPubkey],
+  );
+
   const strategy = useMemo(
-    () => ({ sendText, sendFile, ...(isMarmot ? { sendImage, gifEnvelope: true } : {}), canSend }),
-    [sendText, sendFile, sendImage, isMarmot, canSend],
+    () => ({
+      sendText,
+      sendFile,
+      ...(isMarmot ? { sendImage, gifEnvelope: true } : {}),
+      canSend,
+      confirmLocation,
+    }),
+    [sendText, sendFile, sendImage, isMarmot, canSend, confirmLocation],
   );
 
   const actions = useComposerActions({
