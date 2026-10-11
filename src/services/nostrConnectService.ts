@@ -326,12 +326,12 @@ export async function requestNip44DecryptSilent(
  * Format follows the NIP-46 spec, section "Nostr Connect URIs":
  *   nostrconnect://<client-pub>?relay=<url>&secret=<hex>&perms=<csv>&name=<urlenc>
  *
- * Multiple `relay=` params can be repeated — we keep one for now
- * (the caller's default is `wss://relay.nsec.app`; see NostrLoginSheet).
+ * `relay=` is repeated once per relay in `relays` (NIP46_PAIRING_RELAYS by
+ * default; see NostrLoginSheet), so the bunker can answer on any of them.
  */
 export function buildPairingUri(input: {
   clientPubkey: string;
-  relay: string;
+  relays: string[];
   secret: string;
   perms: string[];
   name?: string;
@@ -341,7 +341,7 @@ export function buildPairingUri(input: {
   // in sync with what BunkerSigner.fromURI parses on the other side.
   return createNostrConnectURI({
     clientPubkey: input.clientPubkey,
-    relays: [input.relay],
+    relays: input.relays,
     secret: input.secret,
     perms: input.perms,
     name: input.name,
@@ -380,7 +380,7 @@ export function buildPairingUri(input: {
 export async function awaitBunkerPair(input: {
   clientSecretKey: Uint8Array;
   clientPubkey: string;
-  relay: string;
+  relays: string[];
   secret: string;
   perms: string[];
   name: string;
@@ -389,7 +389,7 @@ export async function awaitBunkerPair(input: {
 }): Promise<{ signer: BunkerSigner; connection: Nip46Connection; userPubkey: string }> {
   const uri = buildPairingUri({
     clientPubkey: input.clientPubkey,
-    relay: input.relay,
+    relays: input.relays,
     secret: input.secret,
     perms: input.perms,
     name: input.name,
@@ -424,7 +424,7 @@ export async function awaitBunkerPair(input: {
   const connection: Nip46Connection = {
     remoteSignerPubkey: signer.bp.pubkey,
     userPubkey,
-    relays: [input.relay],
+    relays: input.relays,
     clientSecretKeyHex: bytesToHex(input.clientSecretKey),
     perms: input.perms.join(','),
   };

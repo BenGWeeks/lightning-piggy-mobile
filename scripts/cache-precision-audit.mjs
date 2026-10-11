@@ -12,12 +12,7 @@ import WebSocket from 'ws';
 
 const prefix = process.argv[2];
 
-const RELAYS = [
-  'wss://relay.damus.io',
-  'wss://relay.nostr.band',
-  'wss://nos.lol',
-  'wss://relay.primal.net',
-];
+const RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net'];
 
 // Build the REQ filter. If a geohash prefix is given, narrow by `#g`
 // (a NIP-32 indexed tag — relays that don't index it will return more

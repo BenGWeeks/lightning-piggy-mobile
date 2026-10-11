@@ -234,12 +234,7 @@ console.log('--- event id ---');
 console.log(evt.id);
 
 // Publish to LP's default relays + a couple of broadly-indexed ones
-const RELAYS = [
-  'wss://relay.damus.io',
-  'wss://relay.nostr.band',
-  'wss://nos.lol',
-  'wss://relay.primal.net',
-];
+const RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net'];
 
 const pool = new SimplePool();
 const results = await Promise.allSettled(pool.publish(RELAYS, evt));

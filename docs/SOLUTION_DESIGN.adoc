@@ -494,28 +494,43 @@ Events are published to the user's **write relays** (from NIP-65), falling back 
 
 === Default Relays
 
+The built-in lists live in `src/services/nostrRelayDefaults.ts`; its test fails if a relay known to be dead comes back (#1326).
+
 [source,typescript]
 ----
 DEFAULT_RELAYS = [
   'wss://relay.damus.io',
-  'wss://relay.nostr.band',
-  'wss://nos.lol',
   'wss://relay.primal.net',
+  'wss://relay.ditto.pub',
+  'wss://relay.coinos.io',
+  'wss://nos.lol', // extra only: down in Oct 2026
 ]
 ----
 
 === Profile Relays
 
-Additional aggregator relays queried when fetching profiles for better coverage:
+Additional aggregator relays queried when fetching profiles for better coverage (nostr.land is read-only for non-members, so it's only used here):
 
 [source,typescript]
 ----
 PROFILE_RELAYS = [
   'wss://purplepag.es',
-  'wss://relay.nostr.band',
+  'wss://user.kindpag.es',
   'wss://relay.primal.net',
+  'wss://relay.damus.io',
+  'wss://nostr.land',
 ]
 ----
+
+=== Relay health
+
+`src/services/relayHealth.ts` remembers relays that fail to connect, and both relay pools (the shared one in `src/services/nostrPool.ts` and the market snapshot's, via the `withRelayHealth` mixin in `src/services/healthAwarePool.ts`) skip them:
+
+* Two corroborated connect failures or timeouts park a relay for 15 min, doubling per further failure up to 6 h. A success clears it. A failure only counts if another relay connected within 30 s, so an offline phone doesn't park everything.
+* Subscriptions and publishes leave parked relays out, but always keep the healthiest 2 relays of a request.
+* Every connection attempt is capped at 5 s. Before, nostr-tools used 80 % of the query's `maxWait`, so a 15 s query waited 12 s for a relay that never answered.
+* State is in memory, with a debounced AsyncStorage copy, so known-dead relays are skipped from the first query after a cold start.
+* Users' own kind-10002 lists are never rewritten. A dead relay in them is just skipped while it's parked.
 
 === NIP-65 User Relays
 
@@ -749,7 +764,7 @@ Marmot is MLS (RFC 9420) carried over Nostr, wire-compatible with White Noise. A
 | `src/contexts/useMarmotDmInbound.ts` / `useMarmotGroups.ts` | Inbound DM rows into `dm_messages` + the Messages inbox, and GroupsContext's Marmot half (group list, membership changes as MLS commits, the group log) — both coalesced per ≤150 ms burst, with local notifications for messages from others.
 |===
 
-*Library pin.* The package is a vendored tarball (`vendor/internet-privacy-marmot-ts-0.6.1-pr83.624102f.tgz`, `file:` dependency in `package.json`): `marmot-ts` built from upstream PR #83 (encrypted media v2 + the `0x800b` media component, live-tested against MDK by its author). Without it White Noise can neither start a chat with a Lightning Piggy user (our key packages wouldn't advertise `0x800b`, which every White Noise group requires) nor show photos in the chats we start. Switch back to the npm release once it ships, and re-check two workarounds then: `spreadProposals()` in `marmotSession.ts` (this build pushes an array-returning proposal action into a commit un-flattened, so remove-member and rename are split into single-proposal actions), and the `@ungap/structured-clone` polyfill in `src/polyfills.ts` (Hermes has no `structuredClone`, which the library uses to deep-copy client state).
+*Library pin.* The package is a vendored tarball (`vendor/internet-privacy-marmot-ts-0.6.1-pr83.624102f.tgz`, `file:` dependency in `package.json`): `marmot-ts` built from upstream PR #83 (encrypted media v2 + the `0x800b` media component, live-tested against MDK by its author). Without it White Noise can neither start a chat with a Lightning Piggy user (our key packages wouldn't advertise `0x800b`, which every White Noise group requires) nor show photos in the chats we start. Switch back to the npm release once it ships, and re-check three workarounds then: `spreadProposals()` in `marmotSession.ts` (this build pushes an array-returning proposal action into a commit un-flattened, so remove-member and rename are split into single-proposal actions), the `@ungap/structured-clone` polyfill in `src/polyfills.ts` (Hermes has no `structuredClone`, which the library uses to deep-copy client state), and `alignCommitForMdk()` in `marmotProposals.ts` (this build creates groups with the `app_data_dictionary` extension first, unlike MDK, so metadata commits fork Lightning Piggy and White Noise apart in both directions until the group is realigned; every commit we send, including the founding invite, realigns it, #1309).
 
 *Interop conventions (White Noise).*
 
@@ -989,7 +1004,7 @@ Every DM-relevant `fetch*` in `src/services/nostrService.ts` merges the user's o
 const allRelays = [...new Set([...relays, ...DEFAULT_RELAYS])];
 ----
 
-This deliberately over-fetches so users with a sparse kind-10002 (e.g. a single-relay declaration) still see messages that landed on more popular relays. `DEFAULT_RELAYS` currently = `damus.io` / `nostr.band` / `nos.lol` / `primal.net`.
+This deliberately over-fetches so users with a sparse kind-10002 (e.g. a single-relay declaration) still see messages that landed on more popular relays. `DEFAULT_RELAYS` currently = `damus.io` / `primal.net` / `ditto.pub` / `coinos.io` / `nos.lol` (see `src/services/nostrRelayDefaults.ts`).
 
 === Perf instrumentation
 
@@ -1096,7 +1111,7 @@ Reusable kind-0 lookup with layered caching:
 
 . **In-memory `zapSenderProfileStorage`** — already populated for any pubkey the wallet has ever seen as a zap sender or contact.
 . **AsyncStorage fallback** — `zapSenderProfileStorage.get(pubkey)` reads from disk on miss.
-. **Relay fetch** — `nostrService.fetchProfile(pubkey, readRelays)` unions the user's NIP-65 read relays with `PROFILE_RELAYS` (purplepag.es / nostr.band / primal.net). Result is written back to the cache.
+. **Relay fetch** — `nostrService.fetchProfile(pubkey, readRelays)` unions the user's NIP-65 read relays with `PROFILE_RELAYS` (purplepag.es / user.kindpag.es / primal.net / damus.io / nostr.land). Result is written back to the cache.
 
 Consumers (hider chip on `HuntPiggyDetailScreen`, finder chip on each find-log row, organiser row on `EventDetailScreen`) all resolve instantly for any pubkey the user has interacted with before, and degrade gracefully to a pubkey-prefix fallback when neither cache nor relay yields a name.
 

@@ -19,12 +19,7 @@ import * as nip19 from 'nostr-tools/nip19';
 import * as nip17 from 'nostr-tools/nip17';
 import { getPublicKey } from 'nostr-tools/pure';
 
-const RELAYS = [
-  'wss://relay.damus.io',
-  'wss://relay.nostr.band',
-  'wss://nos.lol',
-  'wss://relay.primal.net',
-];
+const RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net'];
 
 if (!existsSync('.env')) {
   console.error('No .env in cwd — run from the repo root.');
