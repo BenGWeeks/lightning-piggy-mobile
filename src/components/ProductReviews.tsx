@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -6,7 +6,7 @@ import { useNostr } from '../contexts/NostrContext';
 import { useProductReviews } from '../hooks/useProductReviews';
 import { usePublishProductFeedback } from '../hooks/usePublishProductFeedback';
 import { relativeTime } from '../utils/relativeTime';
-import type { ParsedReview } from '../utils/productReviews';
+import { STARS_MAX, type ParsedReview } from '../utils/productReviews';
 import { FEEDBACK_PAGE_SIZE } from '../utils/marketFeedback';
 import type { Palette } from '../styles/palettes';
 import {
@@ -55,7 +55,18 @@ const ReviewForm: React.FC<{
   submitting: boolean;
   canPublish: boolean;
   onRequestSignIn: () => void;
-}> = ({ existing, styles, colors, onSubmit, submitting, canPublish, onRequestSignIn }) => {
+  /** Shown only while editing an existing review — collapses the form again. */
+  onCancel?: () => void;
+}> = ({
+  existing,
+  styles,
+  colors,
+  onSubmit,
+  submitting,
+  canPublish,
+  onRequestSignIn,
+  onCancel,
+}) => {
   const t = useTranslation();
   const existingStars = existing ? Math.round(existing.stars) : 0;
   const existingText = existing?.text ?? '';
@@ -138,6 +149,37 @@ const ReviewForm: React.FC<{
           </Text>
         )}
       </TouchableOpacity>
+      {onCancel ? (
+        <TouchableOpacity
+          style={styles.cancel}
+          onPress={onCancel}
+          disabled={submitting}
+          accessibilityRole="button"
+          testID="product-review-cancel"
+        >
+          <Text style={styles.cancelText}>{t('market.reviews.cancelEdit')}</Text>
+        </TouchableOpacity>
+      ) : null}
+    </View>
+  );
+};
+
+/** Collapsed state once the user has reviewed: a note plus "Edit review". */
+const OwnReviewSummary: React.FC<{ styles: Styles; onEdit: () => void }> = ({ styles, onEdit }) => {
+  const t = useTranslation();
+  return (
+    <View style={styles.ownSummary} testID="product-review-own">
+      <Text style={styles.ownSummaryText}>{t('market.reviews.yours')}</Text>
+      <TouchableOpacity
+        style={styles.editButton}
+        onPress={onEdit}
+        accessibilityRole="button"
+        accessibilityLabel={t('market.reviews.edit')}
+        testID="product-review-edit"
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      >
+        <Text style={styles.editText}>{t('market.reviews.edit')}</Text>
+      </TouchableOpacity>
     </View>
   );
 };
@@ -182,9 +224,42 @@ const ProductReviews: React.FC<Props> = ({ coord, onRequestSignIn, onCount }) =>
     return reviews.find((r) => r.pubkey.toLowerCase() === lower);
   }, [reviews, pubkey]);
 
+  // Once the user has a review, the form collapses to a short summary with an
+  // "Edit review" button; editing reopens it prefilled. `posted` bridges the
+  // gap between a successful publish and the relay serving the review back
+  // (the refetch below), so the form doesn't reopen empty in the meantime.
+  const [editing, setEditing] = useState(false);
+  const [posted, setPosted] = useState<ParsedReview | undefined>(undefined);
+  // The draft never carries across identities or products (screens stay
+  // mounted through account switches).
+  useEffect(() => {
+    setEditing(false);
+    setPosted(undefined);
+  }, [coord, pubkey]);
+  const existing = ownReview ?? posted;
+  const startEditing = useCallback(() => setEditing(true), []);
+  const stopEditing = useCallback(() => setEditing(false), []);
+
   const onSubmit = async (stars: number, content: string) => {
+    const wasUpdate = existing !== undefined;
     try {
       await publishReview({ coord, stars, content });
+      setPosted({
+        id: '',
+        pubkey: pubkey ?? '',
+        rating: stars / STARS_MAX,
+        stars,
+        categories: [],
+        text: content,
+        createdAt: Math.floor(Date.now() / 1000),
+      });
+      setEditing(false);
+      Toast.show({
+        type: 'success',
+        text1: t(wasUpdate ? 'market.reviews.updated' : 'market.reviews.posted'),
+        position: 'top',
+        visibilityTime: 2500,
+      });
       // Relays need a beat to serve the new event back; refresh shortly after.
       // Track the timer so unmount can cancel it (see cleanup effect above).
       if (refetchTimer.current) clearTimeout(refetchTimer.current);
@@ -212,18 +287,23 @@ const ProductReviews: React.FC<Props> = ({ coord, onRequestSignIn, onCount }) =>
         </View>
       ) : null}
 
-      <ReviewForm
-        // Keyed on the identity too: the account switcher keeps screens
-        // mounted, and a draft must never carry over to another pubkey.
-        key={`${coord}:${pubkey ?? ''}`}
-        existing={ownReview}
-        styles={styles}
-        colors={colors}
-        onSubmit={onSubmit}
-        submitting={publishing}
-        canPublish={canPublish}
-        onRequestSignIn={onRequestSignIn}
-      />
+      {existing && canPublish && !editing ? (
+        <OwnReviewSummary styles={styles} onEdit={startEditing} />
+      ) : (
+        <ReviewForm
+          // Keyed on the identity too: the account switcher keeps screens
+          // mounted, and a draft must never carry over to another pubkey.
+          key={`${coord}:${pubkey ?? ''}`}
+          existing={existing}
+          styles={styles}
+          colors={colors}
+          onSubmit={onSubmit}
+          submitting={publishing}
+          canPublish={canPublish}
+          onRequestSignIn={onRequestSignIn}
+          onCancel={existing ? stopEditing : undefined}
+        />
+      )}
 
       {error ? (
         <View>
