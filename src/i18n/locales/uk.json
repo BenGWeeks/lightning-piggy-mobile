@@ -2164,7 +2164,7 @@
     "fromSeller": "від {{seller}}",
     "screen": {
       "title": "Маркет",
-      "tagline": "Придбайте Lightning Piggy і Bitcoin-мерч",
+      "tagline": "Купуйте та продавайте за sats",
       "back": "Назад до Огляду",
       "showing": "Показано: {{label}}",
       "searchPlaceholder": "Пошук товарів або продавців",
