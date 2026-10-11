@@ -87,7 +87,19 @@ it('does not reopen the error on every camera frame, and allows retry after dism
     result.current.handleBarCodeScanned({ data: DROPPED_CHARACTER_INVOICE });
   });
   expect(Alert.alert).toHaveBeenCalledTimes(1);
+  expect(opts.setScanned).toHaveBeenCalledTimes(1);
+  act(() => result.current.handleBarCodeScanned({ data: AMOUNTLESS_INVOICE }));
+  expect(opts.setScanned).not.toHaveBeenCalledWith(true);
   act(() => jest.mocked(Alert.alert).mock.calls[0][2]?.[0].onPress?.());
   act(() => result.current.handleBarCodeScanned({ data: AMOUNTLESS_INVOICE }));
+  expect(opts.setScanned).toHaveBeenLastCalledWith(true);
+});
+
+it('allows a fresh attempt after native dismissal of the error', () => {
+  const { result, opts } = setup();
+  act(() => result.current.processInput(DROPPED_CHARACTER_INVOICE));
+  act(() => jest.mocked(Alert.alert).mock.calls[0][3]?.onDismiss?.());
+  act(() => result.current.processInput(INVOICE_WITH_AMOUNT));
+  expect(opts.setInvoiceData).toHaveBeenLastCalledWith(INVOICE_WITH_AMOUNT);
   expect(opts.setScanned).toHaveBeenLastCalledWith(true);
 });

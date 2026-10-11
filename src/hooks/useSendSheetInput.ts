@@ -76,6 +76,7 @@ export function useSendSheetInput(opts: {
   const invalidInvoiceAlertVisible = useRef(false);
 
   const processInput = (data: string) => {
+    if (invalidInvoiceAlertVisible.current) return;
     let input = stripLightningPrefix(data);
     let bip21Amount: number | null = null;
     if (input.toLowerCase().startsWith('bitcoin:')) {
@@ -149,18 +150,16 @@ export function useSendSheetInput(opts: {
         setIsLnurl(false);
         // A camera can deliver the same bad QR on every frame. Keep one alert
         // visible, then allow another attempt when the user dismisses it.
-        if (!invalidInvoiceAlertVisible.current) {
-          invalidInvoiceAlertVisible.current = true;
-          const dismiss = () => {
-            invalidInvoiceAlertVisible.current = false;
-          };
-          Alert.alert(
-            t('sendSheet.invalidInvoiceTitle'),
-            t('sendSheet.invalidInvoiceBody'),
-            [{ text: t('sendSheet.invalidInvoiceDismiss'), onPress: dismiss }],
-            { onDismiss: dismiss },
-          );
-        }
+        invalidInvoiceAlertVisible.current = true;
+        const dismiss = () => {
+          invalidInvoiceAlertVisible.current = false;
+        };
+        Alert.alert(
+          t('sendSheet.invalidInvoiceTitle'),
+          t('sendSheet.invalidInvoiceBody'),
+          [{ text: t('sendSheet.invalidInvoiceDismiss'), onPress: dismiss }],
+          { onDismiss: dismiss },
+        );
         return;
       }
       setIsOnchainAddress(false);
