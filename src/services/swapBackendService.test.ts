@@ -2,6 +2,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import {
   DEFAULT_SWAP_BACKEND,
+  LEGACY_SWAP_BACKEND,
+  requireSwapBackend,
   normalizeSwapBackend,
   getSwapBackend,
   checkAndSaveSwapBackend,
@@ -9,6 +11,8 @@ import {
   pinSwapBackend,
   getSwapBackendForId,
   swapWebSocketUrl,
+  swapQuoteErrorKey,
+  NoSwapServerError,
 } from './swapBackendService';
 
 const mockStore = new Map<string, string>();
@@ -113,7 +117,7 @@ it('keeps existing and legacy swaps on their original server after settings chan
   await pinSwapBackend('second-swap', await getSwapBackend());
   expect(await getSwapBackendForId('first-swap')).toBe('https://first.example/v2');
   expect(await getSwapBackendForId('second-swap')).toBe('https://second.example/v2');
-  expect(await getSwapBackendForId('legacy-swap')).toBe(DEFAULT_SWAP_BACKEND);
+  expect(await getSwapBackendForId('legacy-swap')).toBe(LEGACY_SWAP_BACKEND);
 });
 it('rejects simultaneous reused IDs without overwriting the original server', async () => {
   const results = await Promise.allSettled([
@@ -126,7 +130,7 @@ it('rejects simultaneous reused IDs without overwriting the original server', as
 it.each(['boltz_swap_', 'submarine_swap_'])('protects old recovery records: %s', async (prefix) => {
   mockStore.set(`${prefix}old`, '{}');
   await expect(pinSwapBackend('old', 'https://new.example')).rejects.toThrow('reused');
-  expect(await getSwapBackendForId('old')).toBe(DEFAULT_SWAP_BACKEND);
+  expect(await getSwapBackendForId('old')).toBe(LEGACY_SWAP_BACKEND);
 });
 it('does not proceed when pin persistence fails, and permits a later retry', async () => {
   jest.mocked(SecureStore.setItemAsync).mockRejectedValueOnce(new Error('full'));
@@ -218,4 +222,29 @@ it('does not verify a draft whose request was cancelled while parsing its body',
     'cancelled',
   );
   expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+});
+
+it('does not select the retired public server for a new installation', async () => {
+  expect(await getSwapBackend()).toBe('');
+  expect(mockFetch).not.toHaveBeenCalled();
+});
+
+it('fails before network I/O when a new swap has no selected server', async () => {
+  await expect(requireSwapBackend()).rejects.toMatchObject({ name: 'NoSwapServerError' });
+  expect(mockFetch).not.toHaveBeenCalled();
+});
+it('clears the selected server without altering pinned or legacy swaps', async () => {
+  await checkAndSaveSwapBackend('https://old.example');
+  await pinSwapBackend('pending', await requireSwapBackend());
+  mockFetch.mockClear();
+  await expect(checkAndSaveSwapBackend('  ')).resolves.toBe('');
+  expect(await getSwapBackend()).toBe('');
+  expect(await getSwapBackendForId('pending')).toBe('https://old.example/v2');
+  expect(await getSwapBackendForId('legacy')).toBe(LEGACY_SWAP_BACKEND);
+  expect(mockFetch).not.toHaveBeenCalled();
+});
+
+it('maps quote failures to translatable keys, not raw server text', () => {
+  expect(swapQuoteErrorKey(new NoSwapServerError())).toBe('swapBackend.notConfigured');
+  expect(swapQuoteErrorKey(new Error('Boltz API error: 503'))).toBe('swapBackend.quoteFailed');
 });

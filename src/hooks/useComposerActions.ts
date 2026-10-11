@@ -47,10 +47,8 @@ export interface ComposerSendStrategy {
   /** Send GIFs in White Noise's two-line envelope (URL + `via GIPHY`) —
    *  Marmot threads, where White Noise only renders a GIF in that shape. */
   gifEnvelope?: boolean;
-  /** Optional gate before a location send. The 1:1 composer shows a confirm
-   *  dialog (and resolves true/false); the group composer omits it and sends
-   *  immediately. */
-  confirmLocation?: (loc: SharedLocation) => Promise<boolean>;
+  /** Consent gate before a location send, supplied by both chat composers. */
+  confirmLocation: (loc: SharedLocation) => Promise<boolean>;
   /** Optional preflight: return false when there's no valid send target (e.g.
    *  group/identity not loaded). Lets the shared hook skip an expensive
    *  encrypt + Blossom upload (voice / image) that would only fail downstream.
@@ -197,7 +195,7 @@ export function useComposerActions({
   }, [isLoggedIn, uploadingImage, sending, strategy, closeAttachPanel, uploadAndSendImage]);
 
   const handleShareLocation = useCallback(async () => {
-    if (sharingLocation) return;
+    if (sharingLocation || strategy.canSend?.() === false) return;
     closeAttachPanel();
     setSharingLocation(true);
     try {
@@ -206,9 +204,7 @@ export function useComposerActions({
         Alert.alert('Could not share location', result.message);
         return;
       }
-      const proceed = strategy.confirmLocation
-        ? await strategy.confirmLocation(result.location)
-        : true;
+      const proceed = await strategy.confirmLocation(result.location);
       if (proceed) await strategy.sendText(formatGeoMessage(result.location));
     } finally {
       setSharingLocation(false);

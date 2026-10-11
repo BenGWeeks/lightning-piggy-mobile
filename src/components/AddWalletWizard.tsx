@@ -1,21 +1,16 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  ActivityIndicator,
-  Keyboard,
-  Platform,
-  Image,
-} from 'react-native';
+import { View, Text, TouchableOpacity, ActivityIndicator, Image } from 'react-native';
 import { Alert } from './BrandedAlert';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import {
   BottomSheetBackdrop,
   BottomSheetScrollView,
   BottomSheetTextInput,
+  type BottomSheetScrollViewMethods,
 } from '@gorhom/bottom-sheet';
 import { BottomSheetModal } from './AccessibleBottomSheetModal';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAddWalletWizardKeyboard } from '../utils/useAddWalletWizardKeyboard';
 import * as Clipboard from 'expo-clipboard';
 import { useWallet } from '../contexts/WalletContext';
 import { useGroups } from '../contexts/GroupsContext';
@@ -56,10 +51,11 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [coinosOpen, setCoinosOpen] = useState(false);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
-  const scrollRef = useRef<any>(null);
+  const scrollRef = useRef<BottomSheetScrollViewMethods>(null);
+  const insets = useSafeAreaInsets();
+  const paddingBottom = useAddWalletWizardKeyboard(visible, step, scrollRef);
   // No explicit snapPoints — content-height only, not user-draggable.
 
   const reset = useCallback(() => {
@@ -227,24 +223,6 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
     }
   }, [visible]);
 
-  useEffect(() => {
-    // Skip listener registration when no sheet is open — without this,
-    // keyboardHeight state churn from typing in unrelated sheets
-    // (SendSheet, NostrLoginSheet) would re-render this wizard.
-    if (!visible && !coinosOpen) return;
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const showSub = Keyboard.addListener(showEvent, (e) => {
-      setKeyboardHeight(e.endCoordinates.height);
-      setTimeout(() => scrollRef.current?.scrollToEnd?.({ animated: true }), 100);
-    });
-    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
-    return () => {
-      showSub.remove();
-      hideSub.remove();
-    };
-  }, [visible, coinosOpen]);
-
   // Note: we deliberately don't early-return on `!visible`. The CoinOS
   // create-sheet is rendered alongside this wizard and needs to outlive
   // the wizard's dismissal — the user's path is "Add Wallet → Create
@@ -285,6 +263,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
         backdropComponent={renderBackdrop}
         backgroundStyle={styles.sheetBackground}
         handleIndicatorStyle={styles.handle}
+        topInset={insets.top}
         keyboardBehavior="interactive"
         keyboardBlurBehavior="restore"
         android_keyboardInputMode="adjustResize"
@@ -292,10 +271,12 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
         <BottomSheetScrollView
           ref={scrollRef}
           style={styles.content}
-          contentContainerStyle={{ paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 60 }}
+          contentContainerStyle={{ paddingBottom }}
           keyboardShouldPersistTaps="handled"
         >
-          <Text style={styles.title}>{stepTitle[step]}</Text>
+          <Text style={styles.title} testID="wizard-step-title">
+            {stepTitle[step]}
+          </Text>
 
           {/* Step: Wallet Type Selection */}
           {step === 'type' && (

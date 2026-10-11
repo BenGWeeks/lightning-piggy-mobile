@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { File, Paths } from 'expo-file-system';
 import { utf8ByteSize } from '../utils/byteSize';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
-import { LOCAL_DM_ID_PREFIX, LOCAL_DM_ECHO_WINDOW_SECS } from '../services/dmDb';
+import { LOCAL_DM_ID_PREFIX, LOCAL_DM_ECHO_WINDOW_SECS, wasDmRowDeleted } from '../services/dmDb';
 import type { ConversationMessage } from './nostrContextTypes';
 import { protocolForWireKind } from '../utils/dmProtocol';
 
@@ -343,8 +343,9 @@ export function keepPendingLocalRows(
   fetched: ConversationMessage[],
 ): ConversationMessage[] {
   const fetchedIds = new Set(fetched.map((m) => m.id));
+  // A row deleted for everyone isn't pending — it's gone (#1237).
   const pending = current.filter(
-    (m) => m.id.startsWith(LOCAL_DM_ID_PREFIX) && !fetchedIds.has(m.id),
+    (m) => m.id.startsWith(LOCAL_DM_ID_PREFIX) && !fetchedIds.has(m.id) && !wasDmRowDeleted(m.id),
   );
   return pending.length === 0 ? fetched : dedupeLocalEchoes([...fetched, ...pending]);
 }

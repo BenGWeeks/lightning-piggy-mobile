@@ -12,6 +12,7 @@ import {
   payableBolt11,
   type ParsedOrderEvent,
 } from './orderEvents';
+import { indexMessagesById, resolveQuote, type MessageQuote } from './messageQuote';
 import { NWC_SHARE_KIND, parseNwcShare, type NwcShareCard } from './nwcShareMessage';
 
 // The row variants ConversationScreen's FlatList renders. Extracted from the
@@ -32,6 +33,10 @@ export type Item =
       // the target for per-message NIP-25 reactions + zaps (#205). Undefined
       // for optimistic-local sends and warm-cache rows without a rumor id.
       rumorId?: string;
+      // Marmot reply: the quoted parent shown above the text.
+      quote?: MessageQuote;
+      // Marmot edit: the text is an author's replacement of the original.
+      edited?: boolean;
     }
   | {
       kind: 'zap';
@@ -50,6 +55,8 @@ export type Item =
       createdAt: number;
       // Reaction/zap target (#205) — see the `message` variant.
       rumorId?: string;
+      // Marmot reply: the quoted parent (see the `message` variant).
+      quote?: MessageQuote;
     }
   | {
       kind: 'liveLocationMarker';
@@ -66,6 +73,8 @@ export type Item =
       createdAt: number;
       // Reaction/zap target (#205) — see the `message` variant.
       rumorId?: string;
+      // Marmot reply: the quoted parent (see the `message` variant).
+      quote?: MessageQuote;
     }
   | {
       // Marketplace order / receipt card (#market) — a kind-16/17 event a
@@ -109,6 +118,8 @@ export type Item =
       pollId: string;
       poll: DisplayPoll;
       createdAt: number;
+      // Marmot reply: the quoted parent (see the `message` variant).
+      quote?: MessageQuote;
       // Reaction/zap target + delivery tick, for parity with message/gif/
       // location items. Present on optimistic sent rows (the store has no
       // rumorId column, so incoming rows carry none — same as gif/location).
@@ -140,6 +151,10 @@ export interface ConversationMessageInput {
   // NIP-17 inner-rumor id (#857) — the delivery-store key; stable across the
   // optimistic row and its relay echo. Set on sent rows only.
   rumorId?: string;
+  // Marmot reply: id of the message this one quotes.
+  replyTo?: string;
+  // Marmot edit: `created_at` of the edit the text now holds.
+  editedAt?: number;
 }
 
 // Local-only formatter — only used for the dayHeader rule between
@@ -298,6 +313,7 @@ export function buildConversationItems(
   olderOrderAmounts?: ReadonlyMap<string, number | undefined>,
 ): Item[] {
   const expectedAmounts = collectApprovedOrderAmounts(messages, olderOrderAmounts);
+  const byId = indexMessagesById(messages);
   const msgItems: TimedItem[] = messages.flatMap((m): TimedItem[] => {
     // Marketplace order / receipt rows (kind 16/17) store order JSON in `text`;
     // render them as an order card rather than a chat bubble (#market).
@@ -416,6 +432,9 @@ export function buildConversationItems(
     // shape used by the group screen (via `classifyMessageContent`)
     // — keeps gif / geo / poll detection in one place.
     const classified = classifyMessageContent(m.text);
+    // A Marmot reply quotes its parent whatever the bubble: text, GIF,
+    // location or poll.
+    const quoted = m.replyTo ? { quote: resolveQuote(m.replyTo, byId) } : {};
     // Vote messages aren't shown as bubbles — they're aggregated into the
     // referenced poll's tally by the screen, so drop them from the row list.
     if (classified.kind === 'pollVote') return [];
@@ -428,6 +447,7 @@ export function buildConversationItems(
           url: classified.url,
           createdAt: m.createdAt,
           rumorId: m.rumorId,
+          ...quoted,
         },
       ];
     }
@@ -440,6 +460,7 @@ export function buildConversationItems(
           location: classified.location,
           createdAt: m.createdAt,
           rumorId: m.rumorId,
+          ...quoted,
         },
       ];
     }
@@ -457,6 +478,7 @@ export function buildConversationItems(
           rumorId: m.rumorId,
           deliveryStatus: m.deliveryStatus,
           wireKind: m.wireKind,
+          ...quoted,
         },
       ];
     }
@@ -483,6 +505,8 @@ export function buildConversationItems(
         deliveryStatus: m.deliveryStatus,
         wireKind: m.wireKind,
         rumorId: m.rumorId,
+        ...quoted,
+        ...(m.editedAt ? { edited: true } : {}),
       },
     ];
   });

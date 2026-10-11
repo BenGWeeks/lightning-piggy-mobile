@@ -86,6 +86,22 @@ export function createSqliteMarmotBackend(owner: string): MarmotKvBackend {
   };
 }
 
+/**
+ * Accounts on this device holding state for one MLS group (read-only): its
+ * group state, or rows in its history / media-key namespaces (which outlive a
+ * leave). Used by the group-history migration (#1240) to attribute legacy
+ * device-wide blobs to their owners.
+ */
+export async function listMarmotOwnersForGroup(mlsGroupIdHex: string): Promise<string[]> {
+  const db = await getLocalDb();
+  const res = await db.execute(
+    `SELECT DISTINCT owner FROM marmot_kv
+       WHERE (namespace = 'groups' AND key = ?) OR namespace = ? OR namespace = ?;`,
+    [mlsGroupIdHex, `history:${mlsGroupIdHex}`, `mediaKeys:${mlsGroupIdHex}`],
+  );
+  return (res.rows ?? []).map((r) => String(r.owner));
+}
+
 /** Delete every Marmot row for `owner` (per-account sign-out). */
 export async function deleteMarmotStateForOwner(owner: string): Promise<void> {
   const db = await getLocalDb();

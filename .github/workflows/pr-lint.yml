@@ -5,6 +5,12 @@ on:
     types: [opened, edited, reopened, synchronize]
     branches: [main]
 
+# A new push to a PR cancels its older in-flight run (frees macOS runners).
+# Runs on main / manual runs are keyed by run_id, so they are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   pull-requests: read
 

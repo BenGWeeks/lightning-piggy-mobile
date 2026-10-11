@@ -66,17 +66,19 @@ import { useConversationComposerActions } from '../hooks/useConversationComposer
 import { useMessageInfoSheet } from '../hooks/useMessageInfoSheet';
 import { useConversationTimeline } from '../hooks/useConversationTimeline';
 import { useConversationLiveLocation } from '../hooks/useConversationLiveLocation';
-import type { Item } from '../utils/conversationItems';
+import type { ConversationMessageInput, Item } from '../utils/conversationItems';
+import { useMessageActionsMenu } from '../hooks/useMessageActionsMenu';
+import { useStartLiveLocationShare } from '../hooks/useStartLiveLocationShare';
 import { useConversationReactions } from '../hooks/useConversationReactions';
 import { useReactionBackend } from '../hooks/useReactionBackend';
 import { useConversationLoader } from '../hooks/useConversationLoader';
 import DeliveryDetailSheet from '../components/DeliveryDetailSheet';
 import { createConversationScreenStyles } from '../styles/ConversationScreen.styles';
 import { useTypingIndicator } from '../hooks/useTypingIndicator';
-import { Toast } from '../components/BrandedToast';
-import * as Clipboard from 'expo-clipboard';
 
 type ConversationRoute = RouteProp<RootStackParamList, 'Conversation'>;
+// A row's Marmot event id: own sends keep a `local-` row id but carry it as rumorId.
+const marmotIdOf = (m: ConversationMessageInput) => m.rumorId ?? m.id;
 type ConversationNavigation = NativeStackNavigationProp<RootStackParamList, 'Conversation'>;
 
 const ConversationScreen: React.FC = () => {
@@ -129,7 +131,7 @@ const ConversationScreen: React.FC = () => {
     armLiveDmSub();
   }, [armLiveDmSub]);
   const { wallets, addNwcWallet } = useWallet();
-  const { startShare, stopShare } = useLiveLocation();
+  const { stopShare } = useLiveLocation();
 
   // Thread data lifecycle — read-through paint, background relay top-up,
   // abort-on-unmount, single-flight refresh (#868) — lives in this hook.
@@ -340,23 +342,14 @@ const ConversationScreen: React.FC = () => {
     await handleShareLocation();
   }, [handleShareLocation]);
 
-  // Live-location: kick off a continuously-updating share. The provider
-  // owns the watcher + ephemeral kind-20069 publishing; we just trigger
-  // it and let the in-thread bubble (rendered via the start marker DM
-  // that the provider sends as a side-effect) drive the visible state.
-  const handleShareLive = useCallback(
-    async (durationMs: number) => {
-      setLiveLocationPickerOpen(false);
-      const result = await startShare(pubkey, durationMs, protocol);
-      if (!result.ok) {
-        Alert.alert(t('conversationScreen.couldNotStartLiveShareTitle'), result.error);
-        return;
-      }
-      // Append the exact published marker text so the optimistic bubble dedupes against the relay echo (mergeConversationMessages matches on identical text — a hand-built copy with a different startedAt would leave two "started" bubbles).
-      appendOptimisticLocal(result.markerText);
-    },
-    [pubkey, startShare, appendOptimisticLocal, t, protocol],
-  );
+  const closeLiveLocationPicker = useCallback(() => setLiveLocationPickerOpen(false), []);
+  const handleShareLive = useStartLiveLocationShare({
+    pubkey,
+    name,
+    protocol,
+    closePicker: closeLiveLocationPicker,
+    appendOptimisticLocal,
+  });
 
   const handleStopLive = useCallback(
     async (sessionId: string) => {
@@ -381,11 +374,10 @@ const ConversationScreen: React.FC = () => {
     [t],
   );
 
-  // My live position for the location-card mini-maps (#206) — the blue
-  // "me" dot + accuracy halo. Shared GPS subscription, retained for this
-  // screen's lifetime (see UserLocationContext). Tapping a card's mini-map
-  // opens the full-screen Map, mirroring the detail screens' affordance.
-  const { pos: myPos } = useUserLocation();
+  // Mini-maps may show an existing fix, but opening a DM (even one with
+  // location messages) must never request permission or retain a GPS watch.
+  // Sharing location or explicitly opening the full map owns that consent.
+  const { pos: myPos } = useUserLocation({ enabled: false });
   // `Map` lives in the Explore sub-stack, so target it through the
   // Explore tab rather than the root stack (the detail screens reach it
   // via a CompositeNavigationProp; ConversationScreen is root-stack only).
@@ -473,13 +465,21 @@ const ConversationScreen: React.FC = () => {
     onZapMessage: () => setSendSheetOpen(true),
   });
 
-  const copyText = actionsForMessage?.copyText;
-  const handleCopyText = useCallback(async () => {
-    if (!copyText) return;
-    await Clipboard.setStringAsync(copyText);
-    Toast.show({ type: 'success', text1: t('messageActionsSheet.copied') });
-    closeMessageActions();
-  }, [copyText, t, closeMessageActions]);
+  // Copy text, plus Edit / Delete for everyone on your own messages in a
+  // Marmot chat (#1237) — sheet + composer props.
+  const menu = useMessageActionsMenu({
+    myPubkey,
+    scope: myPubkey ? `${myPubkey}:${pubkey}:${protocol}` : null,
+    marmotPeer: protocol === 'marmot' ? pubkey : null,
+    messages,
+    setMessages,
+    idOf: marmotIdOf,
+    draft,
+    setDraft,
+    actioned: actionsForMessage,
+    closeActions: closeMessageActions,
+    onSend: handleSend,
+  });
 
   // Ephemeral "typing…" indicator (#dm-typing). `pubkey` is the peer here.
   const { isPeerTyping, notifyTyping } = useTypingIndicator(pubkey);
@@ -515,6 +515,7 @@ const ConversationScreen: React.FC = () => {
         reactions={reactionsForItem(item)}
         onToggleReaction={buildOnToggleReaction(item)}
         onAddNwc={addSharedWallet}
+        peerName={name}
       />
     ),
     [
@@ -535,6 +536,7 @@ const ConversationScreen: React.FC = () => {
       myPos,
       picture,
       profile,
+      name,
       onOpenMap,
       styles,
       colors,
@@ -736,7 +738,7 @@ const ConversationScreen: React.FC = () => {
             setDraft(text);
             notifyTyping();
           }}
-          onSend={handleSend}
+          {...menu.composer}
           onStartVoiceNote={() => setVoiceSheetOpen(true)}
           sending={sending}
           disabled={!isLoggedIn}
@@ -930,7 +932,7 @@ const ConversationScreen: React.FC = () => {
             ? handleZapMessage
             : undefined
         }
-        onCopyText={copyText ? handleCopyText : undefined}
+        {...menu.sheet}
       />
       <ContactProfileSheet
         visible={profileSheetVisible}

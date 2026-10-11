@@ -103,6 +103,33 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       textDecorationLine: 'underline',
       fontWeight: '600',
     },
+    // Quoted parent of a Marmot reply — a tinted strip with an accent bar at
+    // the top of the bubble (WhatsApp / White Noise style).
+    quoteBlock: {
+      borderLeftWidth: 3,
+      borderLeftColor: colors.brandPink,
+      backgroundColor: 'rgba(124,139,154,0.16)',
+      borderRadius: 6,
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      marginBottom: 6,
+    },
+    quoteBlockMe: {
+      borderLeftColor: colors.white,
+      backgroundColor: 'rgba(255,255,255,0.22)',
+    },
+    quoteAuthor: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: colors.brandPink,
+    },
+    quoteAuthorMe: { color: colors.white },
+    quoteText: {
+      fontSize: 13,
+      color: colors.textSupplementary,
+    },
+    quoteTextMe: { color: 'rgba(255,255,255,0.9)' },
+    quoteTextMissing: { fontStyle: 'italic' },
     bubbleTime: {
       fontSize: 10,
       color: colors.textSupplementary,

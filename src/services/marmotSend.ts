@@ -13,6 +13,7 @@ import { marmotKindForAppKind } from './marmotInbox';
 import { marmotImetaTag } from './marmotMedia';
 import { getBlossomServers } from './walletStorageService';
 import type { MarmotUnreachableReason } from './marmotFallback';
+import { MarmotWelcomeDeliveryError } from './marmotInvitees';
 import { t } from '../i18n';
 import {
   MarmotNoKeyPackageError,
@@ -59,6 +60,7 @@ function marmotUnreachableReason(e: unknown): MarmotUnreachableReason | null {
 export function marmotSendError(e: unknown): string {
   const reason = marmotUnreachableReason(e);
   if (reason) return t(`marmotSend.${reason}`);
+  if (e instanceof MarmotWelcomeDeliveryError) return t('marmotSend.inviteNotDelivered');
   return (e as Error)?.message || 'Marmot send failed';
 }
 
@@ -116,12 +118,13 @@ export async function sendMarmotDm(
 }
 
 /** Send an app rumor into a Marmot group (multi-member). Same "send the
- * rumor as built" rule as {@link sendMarmotDm}. */
+ * rumor as built" rule as {@link sendMarmotDm}. Resolves the sent Marmot
+ * event's id as `rumorId`. */
 export async function sendMarmotGroupRumor(
   pubkey: string,
   appGroupId: string,
   draft: MarmotDraft,
-): Promise<{ success: boolean; wrapsPublished?: number; error?: string }> {
+): Promise<{ success: boolean; wrapsPublished?: number; error?: string; rumorId?: string }> {
   try {
     const session = requireMarmotSession(pubkey);
     const rumor = buildMarmotRumor(pubkey, {
@@ -132,8 +135,9 @@ export async function sendMarmotGroupRumor(
     });
     const byRelay = await session.sendRumor(appGroupId, rumor);
     const accepted = Object.values(byRelay).filter(Boolean).length;
+    // The Marmot id (not the app rumor's): what edits / deletes must target.
     return accepted > 0
-      ? { success: true, wrapsPublished: accepted }
+      ? { success: true, wrapsPublished: accepted, rumorId: rumor.id }
       : { success: false, error: 'No relay accepted the message' };
   } catch (e) {
     return { success: false, error: marmotSendError(e) };
@@ -194,7 +198,6 @@ export async function sendMarmotImage(
     const filename =
       image.filename ?? `photo.${image.mime.split('/')[1]?.replace('jpeg', 'jpg') || 'jpg'}`;
     const isVoice = image.mime.startsWith('audio/');
-    const what = isVoice ? 'voice note' : 'photo';
     // The file key is bound to the epoch we encrypt under. If a commit moves
     // the group on during a slow upload, a member added by it never held that
     // epoch and couldn't decrypt — so re-encrypt under the new one.
@@ -216,7 +219,7 @@ export async function sendMarmotImage(
     }
     // Never send media some members provably can't decrypt.
     if (!sealed)
-      throw new Error(`This chat is changing right now — try sending the ${what} again.`);
+      throw new Error(t(isVoice ? 'marmotSend.chatChangingVoice' : 'marmotSend.chatChangingPhoto'));
     const { attachment, keyHex } = sealed;
     const rumor = buildMarmotRumor(pubkey, {
       kind: MARMOT_CHAT_KIND,
@@ -241,7 +244,11 @@ export async function sendMarmotImage(
     hooks?.onDeliveryFinalized?.(delivery);
     return delivery.delivered
       ? { success: true, delivery }
-      : { success: false, delivery, error: `No relay accepted the ${what}` };
+      : {
+          success: false,
+          delivery,
+          error: t(isVoice ? 'marmotSend.noRelayAcceptedVoice' : 'marmotSend.noRelayAcceptedPhoto'),
+        };
   } catch (e) {
     return marmotFailure(e);
   }

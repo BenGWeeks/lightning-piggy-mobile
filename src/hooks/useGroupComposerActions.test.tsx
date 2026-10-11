@@ -50,6 +50,11 @@ jest.mock('../components/BrandedAlert', () => ({
   Alert: { alert: (...args: unknown[]) => mockAlert(...args) },
 }));
 
+// Identity translator: the hook reads `t` from LocaleContext. A stable
+// function so the hook's callbacks keep their identities across renders.
+const mockT = (key: string) => key;
+jest.mock('../contexts/LocaleContext', () => ({ useTranslation: () => mockT }));
+
 // useComposerActions has its own side-effects we don't need for these tests.
 jest.mock('./useComposerActions', () => ({
   useComposerActions: () => ({ handleSend: jest.fn() }),
@@ -194,8 +199,8 @@ describe('useGroupComposerActions — failure path removes the optimistic row (#
     // setMessages called at least once for the optimistic row.
     expect(setMessages).toHaveBeenCalled();
 
-    // removeGroupMessage called with the group id so the row is retracted.
-    expect(mockRemoveGroupMessage).toHaveBeenCalledWith(GROUP_ID, expect.any(String));
+    // removeGroupMessage called with the owner + group id so the row is retracted.
+    expect(mockRemoveGroupMessage).toHaveBeenCalledWith(mockMyPubkey, GROUP_ID, expect.any(String));
   });
 
   it('does not wipe the visible thread when removeGroupMessage rejects on a transient storage error', async () => {
@@ -217,7 +222,7 @@ describe('useGroupComposerActions — failure path removes the optimistic row (#
       await result.current.sendText('hello');
     });
 
-    expect(mockRemoveGroupMessage).toHaveBeenCalledWith(GROUP_ID, expect.any(String));
+    expect(mockRemoveGroupMessage).toHaveBeenCalledWith(mockMyPubkey, GROUP_ID, expect.any(String));
 
     // The regression this guards against: a caller that did
     // `setMessages(await removeGroupMessage(...))` and treated a rejection

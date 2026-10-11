@@ -104,6 +104,8 @@ export const BubbleFooter: React.FC<{
   // coloured (sent) bubble, supplementary grey on a surface (received) one — so
   // it reads on either background.
   infoTint: string;
+  // Marmot edit: prefix the time with an "Edited" mark.
+  edited?: boolean;
 }> = ({
   styles,
   messageId,
@@ -113,12 +115,16 @@ export const BubbleFooter: React.FC<{
   deliveryStatus,
   onOpenInfo,
   infoTint,
+  edited,
 }) => {
   const t = useTranslation();
+  const time = edited
+    ? `${t('messageBubbleFooter.edited')} · ${formatTime(createdAt)}`
+    : formatTime(createdAt);
   const showTick = fromMe && !!deliveryStatus;
   // No info handler and no tick → plain timestamp (e.g. a legacy row).
   if (!onOpenInfo && !showTick) {
-    return <Text style={timeStyle}>{formatTime(createdAt)}</Text>;
+    return <Text style={timeStyle}>{time}</Text>;
   }
   return (
     <TouchableOpacity
@@ -163,7 +169,7 @@ export const BubbleFooter: React.FC<{
       ) : null}
       {/* Footer-row time zeroes the standalone bubbleTime top margin so the
           tick sits level with the timestamp (Copilot #858). */}
-      <Text style={[timeStyle, styles.bubbleFooterTime]}>{formatTime(createdAt)}</Text>
+      <Text style={[timeStyle, styles.bubbleFooterTime]}>{time}</Text>
       {showTick ? (
         <DeliveryTick
           styles={styles}

@@ -165,11 +165,11 @@ Lightning Piggy is an [Expo](https://expo.dev) / React Native app (SDK 55, RN 0.
 
 - `amber-signer` — Android-only NIP-55 (Amber) intent bridge for signing.
 - `background-dm-service` — Android-only persistent foreground service that hosts the opt-in background message watch (and NWC incoming-payment checks).
-- `nostr-native` — Kotlin / Swift wrapper over rust-nostr (NIP-44 and Schnorr) for off-JS-thread crypto; falls back to pure JS where it is not linked.
+- `nostr-native` — Kotlin / Swift wrapper over rust-nostr. Its NIP-44 and Schnorr primitives are an experimental, off-by-default setting and are synchronous, so they still run on the JS thread; only the async relay-engine functions move work off it. Falls back to pure JS where it is not linked.
 - `bdk-rn` — Bitcoin Dev Kit (Rust, via UniFFI) for on-chain wallets, a fork pinned in `package.json`.
 - `plugins/` — Expo config plugins: `withAdjustResize`, `withAmberQueries`, `withFcmAutoInitDisabled`, `withForegroundService`, `withLargeHeap`, `withNfc`, `withTransparentSplashIcon`.
 
-Background delivery is opt-in: `expo-background-task` (WorkManager / BGTaskScheduler) does periodic detect-and-ping, and on Android the foreground service adds near-realtime message and NWC payment checks.
+Background delivery has an always-on part and opt-in parts. Periodic detect-and-ping via `expo-background-task` (WorkManager / BGTaskScheduler) is registered on every launch, subject to the OS's scheduling limits. The Android foreground service (near-realtime message and NWC payment checks) and Marmot instant alerts (MIP-05 push) are both opt-in, under Settings → Notifications.
 
 **Key data flows.**
 
@@ -256,12 +256,12 @@ docs/               # Architecture, protocols, deployment, troubleshooting
 
 The Explore tab pulls in a small set of Expo modules beyond the wallet + Nostr core. All are listed in [docs/PACKAGES.adoc](docs/PACKAGES.adoc); the Explore-specific additions are:
 
-| Package                                            | Used by                                    | Why                                                                                                         |
-| -------------------------------------------------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
-| `react-native-webview`                             | `ExploreMiniMap`, `MapScreen`              | Leaflet WebView for OSM tile rendering — no Google Maps API key, no billing setup.                          |
-| `expo-asset` + `expo-file-system` + `expo-sharing` | `HuntCreateScreen` "Save STL"              | Ships the 188 KB Piggy Bag Charm STL inside the APK, copies it out on tap, and shares via the system sheet. |
-| `expo-calendar`                                    | `EventDetailScreen` "Add to Calendar"      | Native calendar insert with lazy permission prompt.                                                         |
-| `expo-notifications`                               | Geofence "Nearby merchants" feature (#467) | Foreground pings when the user walks past a Bitcoin merchant.                                               |
+| Package                                            | Used by                                      | Why                                                                                                         |
+| -------------------------------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `react-native-webview`                             | `ExploreMiniMap`, `MapScreen`                | Leaflet WebView for OSM tile rendering — no Google Maps API key, no billing setup.                          |
+| `expo-asset` + `expo-file-system` + `expo-sharing` | `HuntCreateScreen` "Save STL"                | Ships the 188 KB Piggy Bag Charm STL inside the APK, copies it out on tap, and shares via the system sheet. |
+| `expo-calendar`                                    | `EventDetailScreen` "Add to Calendar"        | Native calendar insert with lazy permission prompt.                                                         |
+| `expo-notifications`                               | "Alerts near Bitcoin shops" geofences (#467) | Foreground pings when the user walks past a Bitcoin merchant.                                               |
 
 ## Screenshots
 

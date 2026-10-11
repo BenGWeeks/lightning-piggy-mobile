@@ -79,6 +79,11 @@ export const createMessageActionsSheetStyles = (colors: Palette) =>
       fontWeight: '700',
       color: colors.textHeader,
     },
+    deleteButtonText: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: colors.red,
+    },
     zapButtonText: {
       fontSize: 16,
       fontWeight: '700',

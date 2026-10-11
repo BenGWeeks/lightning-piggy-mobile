@@ -2,6 +2,7 @@ import { act, renderHook } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useMarmotDmInbound } from './useMarmotDmInbound';
 import {
+  applyMarmotEdits,
   deleteMarmotMessages,
   getConversationMessages,
   upsertDmMessages,
@@ -32,6 +33,7 @@ jest.mock('../services/marmotSession', () => ({
   },
 }));
 jest.mock('../services/dmDb', () => ({
+  applyMarmotEdits: jest.fn().mockResolvedValue([]),
   deleteMarmotMessages: jest.fn().mockResolvedValue([]),
   deleteMarmotRowsOfKinds: jest.fn().mockResolvedValue(undefined),
   getConversationMessages: jest.fn(),
@@ -213,4 +215,71 @@ it('queries the tray for live deletions at once, and replayed ones in one later 
   });
   expect(tray()).toHaveLength(2);
   expect(tray()[1][0]).toHaveLength(30);
+});
+
+const editOf = (target: string, content: string, created_at: number, editId: string) =>
+  ({
+    ...deletion,
+    rumor: { id: editId, kind: 1009, pubkey: 'bob', tags: [['e', target]], content, created_at },
+  }) as MarmotMessageEvent;
+
+it('lets a deletion win over an edit and its message in the same batch', async () => {
+  renderHook(() => useMarmotDmInbound('alice', jest.fn()));
+  await act(async () => {
+    mockOnMessage(chat(id, 'bob'));
+    mockOnMessage(editOf(id, 'edited', 4, 'e'.repeat(64)));
+    mockOnMessage(deletion);
+    await jest.advanceTimersByTimeAsync(150);
+  });
+  expect(upsertDmMessages).not.toHaveBeenCalled();
+  expect(applyMarmotEdits).not.toHaveBeenCalled();
+});
+
+it('overlays an edit that arrives before its message (same batch)', async () => {
+  renderHook(() => useMarmotDmInbound('alice', jest.fn()));
+  await act(async () => {
+    mockOnMessage(editOf(id, 'edited', 4, 'e'.repeat(64)));
+    mockOnMessage(chat(id, 'bob'));
+    await jest.advanceTimersByTimeAsync(150);
+  });
+  const [rows] = (upsertDmMessages as jest.Mock).mock.calls[0];
+  expect(rows).toEqual([
+    expect.objectContaining({
+      eventId: id,
+      content: 'edited',
+      editedAt: 4,
+      editId: 'e'.repeat(64),
+    }),
+  ]);
+});
+
+it('settles same-second edits on the higher edit id, whatever the arrival order', async () => {
+  renderHook(() => useMarmotDmInbound('alice', jest.fn()));
+  await act(async () => {
+    mockOnMessage(editOf(id, 'v3', 4, '2'.repeat(64)));
+    mockOnMessage(editOf(id, 'v2', 4, '1'.repeat(64)));
+    mockOnMessage(chat(id, 'bob'));
+    await jest.advanceTimersByTimeAsync(150);
+  });
+  expect((upsertDmMessages as jest.Mock).mock.calls[0][0][0].content).toBe('v3');
+  expect(
+    (applyMarmotEdits as jest.Mock).mock.calls[0][1].map((e: { content: string }) => e.content),
+  ).toEqual(['v3']);
+});
+
+it('applies a burst of edits with one inbox update and one thread reload per peer', async () => {
+  const targets = ['1', '2', '3'].map((c) => c.repeat(64));
+  (applyMarmotEdits as jest.Mock).mockImplementationOnce(async (_owner, edits) =>
+    edits.map((edit: { target: string }) => ({ edit, conversation: 'bob' })),
+  );
+  const setter = jest.fn();
+  renderHook(() => useMarmotDmInbound('alice', setter));
+  await act(async () => {
+    targets.forEach((t, i) => mockOnMessage(editOf(t, `v${i}`, 4, `${i}`.repeat(64))));
+    await jest.advanceTimersByTimeAsync(150);
+  });
+  expect(applyMarmotEdits).toHaveBeenCalledTimes(1);
+  expect((applyMarmotEdits as jest.Mock).mock.calls[0][1]).toHaveLength(3);
+  expect(setter).toHaveBeenCalledTimes(1);
+  expect(notifyDmMessage).toHaveBeenCalledTimes(1);
 });

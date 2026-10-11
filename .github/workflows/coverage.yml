@@ -1,17 +1,32 @@
 name: Coverage
 
-# Runs Jest with coverage on PRs and on main, and fails the PR if its
-# line-coverage drops below main's by more than the noise floor.
+# Runs Jest with coverage and fails the PR if its line coverage drops below
+# main's by more than the noise floor (0.5pp).
 #
-# Strategy: re-run jest on main inside the same workflow (no artifact
-# branch / gh-pages cache to maintain). Slower but zero-config and
-# always reflects the *current* main, not a stale snapshot.
+# Baseline strategy: every push to main runs Jest once and uploads the
+# json-summary as the `coverage-baseline` artifact (with the commit SHA). A PR
+# downloads the newest successful main baseline instead of re-running Jest on
+# main, so the suite runs ONCE per PR. If no usable baseline can be found
+# (expired, first run, API failure) the job falls back to the old behaviour and
+# runs Jest on main itself — the gate never silently passes.
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+
+# A new push to a PR cancels that PR's older in-flight run; runs on main are
+# keyed by run_id so they are never cancelled or collapsed (each main commit
+# must produce its baseline artifact).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# `actions: read` lets the job list main's runs and download their artifacts.
+permissions:
+  contents: read
+  actions: read
 
 jobs:
   coverage:
@@ -36,77 +51,123 @@ jobs:
       - name: Run Jest with coverage (PR)
         run: npm run test:coverage -- --passWithNoTests
 
-      - name: Read PR coverage
-        id: pr_cov
+      # --- push to main: publish this commit's coverage as the PR baseline ---
+      # Only reached when the Jest step above succeeded, so a red main never
+      # becomes a baseline.
+      - name: Record coverage baseline
+        if: github.event_name == 'push'
         run: |
-          if [[ ! -f coverage/coverage-summary.json ]]; then
-            echo "pct=0" >> "$GITHUB_OUTPUT"
-            echo "PR coverage summary missing — treating as 0%."
+          mkdir -p baseline
+          cp coverage/coverage-summary.json baseline/coverage-summary.json
+          echo "$GITHUB_SHA" > baseline/sha.txt
+          echo "Baseline for main@$GITHUB_SHA: $(node -e "console.log(require('./baseline/coverage-summary.json').total.lines.pct)")% lines" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage baseline
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-baseline
+          path: baseline/
+          retention-days: 30
+          if-no-files-found: error
+
+      # --- pull request: reuse main's baseline instead of re-running Jest ---
+      # Prefers the baseline built from the exact main commit this PR's merge
+      # ref sits on (HEAD^1); otherwise takes the newest successful one. Any
+      # failure (no runs, expired artifact, API error, malformed JSON) leaves
+      # found=false so the fallback below runs main's coverage as before.
+      - name: Find main coverage baseline
+        if: github.event_name == 'pull_request'
+        id: baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set +e
+          DEST=/tmp/baseline-dl
+
+          # checkout of a PR is a merge commit: first parent = main tip it merges into.
+          WANT=$(git rev-parse --verify -q HEAD^1 || true)
+          if [[ -z "$(git rev-parse --verify -q HEAD^2)" ]]; then WANT="$BASE_SHA"; fi
+
+          RUNS=$(gh run list --repo "$REPO" --workflow coverage.yml --branch main \
+            --event push --status success --limit 30 --json databaseId,headSha)
+          if [[ $? -ne 0 || -z "$RUNS" ]]; then
+            echo "Could not list main coverage runs — falling back to a fresh main run."
             exit 0
           fi
-          # Jest writes "Unknown" (string) when no tests ran — coerce to 0.
-          PCT=$(node -e "const p=require('./coverage/coverage-summary.json').total.lines.pct; console.log(typeof p === 'number' ? p : 0)")
-          echo "pct=$PCT" >> "$GITHUB_OUTPUT"
-          echo "PR line coverage: $PCT%"
 
-      # On PRs, also build coverage for the merge target so we can compare.
-      # On push-to-main this step is skipped — main *is* the new baseline.
-      - name: Checkout main (for baseline)
-        if: github.event_name == 'pull_request'
+          # Only a baseline for EXACTLY the commit this PR merges into is comparable;
+          # an older main baseline could pass or fail a PR wrongly, so anything else
+          # falls back to building that exact commit's coverage below.
+          IDS=$(echo "$RUNS" | jq -r --arg sha "$WANT" 'map(select(.headSha==$sha))[].databaseId')
+
+          for ID in $IDS; do
+            rm -rf "$DEST"; mkdir -p "$DEST"
+            gh run download "$ID" --repo "$REPO" -n coverage-baseline -D "$DEST" 2>/dev/null || continue
+            # Validate: sha present, pct numeric.
+            if node -e "const p=require('$DEST/coverage-summary.json').total.lines.pct; process.exit(typeof p==='number'?0:1)" 2>/dev/null \
+               && [[ -s "$DEST/sha.txt" ]] \
+               && [[ "$(tr -d '[:space:]' < "$DEST/sha.txt")" == "$WANT" ]]; then
+              SHA=$(tr -d '[:space:]' < "$DEST/sha.txt")
+              {
+                echo "found=true"
+                echo "summary=$DEST/coverage-summary.json"
+                echo "sha=$SHA"
+              } >> "$GITHUB_OUTPUT"
+              KIND="exact match for the commit this PR merges into"
+              echo "Using cached main baseline $SHA (run $ID) — $KIND."
+              {
+                echo "### Coverage baseline"
+                echo "Cached from main@\`$SHA\` (run $ID) — $KIND."
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+          done
+          echo "No cached baseline for merge target $WANT — falling back to building it."
+          echo "want=$WANT" >> "$GITHUB_OUTPUT"
+
+      # --- fallback: no cached baseline, so build main's coverage here (the old behaviour) ---
+      - name: Checkout main (fallback baseline)
+        if: github.event_name == 'pull_request' && steps.baseline.outputs.found != 'true'
         run: |
-          git fetch origin main --depth=1
-          git worktree add /tmp/main-baseline origin/main
+          # Build the exact commit the PR merges into (not whatever main is now).
+          TARGET="${{ steps.baseline.outputs.want }}"
+          if [[ -n "$TARGET" ]] && git fetch origin "$TARGET" --depth=1 2>/dev/null; then
+            git worktree add /tmp/main-baseline "$TARGET"
+          else
+            git fetch origin main --depth=1
+            git worktree add /tmp/main-baseline origin/main
+          fi
 
-      - name: Install dependencies (main baseline)
-        if: github.event_name == 'pull_request'
+      - name: Install dependencies (fallback main baseline)
+        if: github.event_name == 'pull_request' && steps.baseline.outputs.found != 'true'
         working-directory: /tmp/main-baseline
         run: npm ci
 
-      - name: Run Jest with coverage (main baseline)
-        if: github.event_name == 'pull_request'
+      - name: Run Jest with coverage (fallback main baseline)
+        if: github.event_name == 'pull_request' && steps.baseline.outputs.found != 'true'
         working-directory: /tmp/main-baseline
         # If main has no jest config yet (first time the gate runs after merge),
         # tolerate it — the baseline is treated as 0% and the PR can only improve.
         run: npm run test:coverage -- --passWithNoTests || echo "Main baseline jest run failed — treating as 0%."
 
-      - name: Read main baseline coverage
-        if: github.event_name == 'pull_request'
-        id: main_cov
+      - name: Note fallback baseline
+        if: github.event_name == 'pull_request' && steps.baseline.outputs.found != 'true'
         run: |
-          SUMMARY=/tmp/main-baseline/coverage/coverage-summary.json
-          if [[ ! -f "$SUMMARY" ]]; then
-            echo "pct=0" >> "$GITHUB_OUTPUT"
-            echo "Main baseline coverage summary missing — treating as 0%."
-            exit 0
-          fi
-          PCT=$(node -e "const p=require('$SUMMARY').total.lines.pct; console.log(typeof p === 'number' ? p : 0)")
-          echo "pct=$PCT" >> "$GITHUB_OUTPUT"
-          echo "Main line coverage: $PCT%"
+          {
+            echo "### Coverage baseline"
+            echo "No cached baseline artifact — ran Jest on main@\`$(git -C /tmp/main-baseline rev-parse HEAD)\` in this job instead."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Compare coverage
         if: github.event_name == 'pull_request'
         env:
-          PR_PCT: ${{ steps.pr_cov.outputs.pct }}
-          MAIN_PCT: ${{ steps.main_cov.outputs.pct }}
           # Tolerated regression in percentage points. Tweak in this file only.
           NOISE_FLOOR: '0.5'
-        run: |
-          echo "PR:   $PR_PCT%"
-          echo "main: $MAIN_PCT%"
-          echo "noise floor: $NOISE_FLOOR pp"
-
-          # awk handles floats; bash arithmetic is integer-only.
-          DROPPED=$(awk -v pr="$PR_PCT" -v main="$MAIN_PCT" -v nf="$NOISE_FLOOR" \
-            'BEGIN { print (pr < main - nf) ? "yes" : "no" }')
-
-          if [[ "$DROPPED" == "yes" ]]; then
-            echo "::error::Coverage regressed: $PR_PCT% < $MAIN_PCT% - $NOISE_FLOOR pp"
-            echo "Add unit tests to recover coverage. See docs/TESTING.adoc and"
-            echo "scripts/coverage-priorities.sh for help picking what to cover."
-            exit 1
-          fi
-
-          echo "Coverage gate passed."
+          BASELINE_SUMMARY: ${{ steps.baseline.outputs.found == 'true' && steps.baseline.outputs.summary || '/tmp/main-baseline/coverage/coverage-summary.json' }}
+        run: bash scripts/compare-coverage.sh coverage/coverage-summary.json "$BASELINE_SUMMARY" "$NOISE_FLOOR"
 
       - name: Upload PR coverage report
         if: github.event_name == 'pull_request'

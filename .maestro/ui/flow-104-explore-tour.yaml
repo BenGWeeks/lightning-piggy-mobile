@@ -112,7 +112,7 @@ name: Explore tour — captures screenshots for the PR description
 - waitForAnimationToEnd:
     timeout: 1000
 
-# 09 — Account drawer → Nearby merchants settings (toggle + radius
+# 09 — Account drawer → Notifications settings (shop alerts toggle + radius
 # preset chips + quiet hours toggle).
 - tapOn:
     id: 'tab-home'
@@ -125,11 +125,21 @@ name: Explore tour — captures screenshots for the PR description
 - waitForAnimationToEnd:
     timeout: 1000
 - tapOn:
-    id: 'drawer-row-nearby'
+    id: 'drawer-row-notifications'
 - waitForAnimationToEnd:
     timeout: 1500
+- scrollUntilVisible:
+    element:
+      id: 'settings-nearby-merchants-toggle'
+    direction: DOWN
+    timeout: 15000
 - takeScreenshot: 09-settings-nearby-merchants
 
+- scrollUntilVisible:
+    element:
+      id: 'account-back-button'
+    direction: UP
+    timeout: 15000
 - tapOn:
     id: 'account-back-button'
 - waitForAnimationToEnd:

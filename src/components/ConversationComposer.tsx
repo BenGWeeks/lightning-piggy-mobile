@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
-import { ActivityIndicator, TextInput, TouchableOpacity } from 'react-native';
-import { Plus, Send, Mic } from 'lucide-react-native';
+import { ActivityIndicator, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Plus, Send, Mic, Pencil, X } from 'lucide-react-native';
 import Svg, { Path } from 'react-native-svg';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import {
@@ -81,6 +81,12 @@ export interface ConversationComposerProps {
   attachButtonHasBackground?: boolean;
   /** Composer container horizontal padding. 1:1 ships 10, group ships 12. Default 10. */
   composerPaddingHorizontal?: number;
+  /**
+   * Set while the input holds an edit of one of your messages (#1237): shows
+   * an "Editing message" bar with a cancel button, and Send saves the edit.
+   * Attachments and voice notes are off meanwhile.
+   */
+  editing?: { onCancel: () => void };
   testIDs?: {
     input?: string;
     attach?: string;
@@ -113,6 +119,7 @@ const ConversationComposer: React.FC<ConversationComposerProps> = ({
   sendButtonVariant = 'icon',
   attachButtonHasBackground = false,
   composerPaddingHorizontal = 10,
+  editing,
   testIDs,
   accessibilityLabels,
 }) => {
@@ -143,19 +150,38 @@ const ConversationComposer: React.FC<ConversationComposerProps> = ({
   // WhatsApp/Signal pattern (#235): show the mic while the input is empty (and
   // voice is supported here), swap to Send the moment the user types.
   const showMic =
-    attachmentsEnabled && !!onStartVoiceNote && !value.trim() && !sending && !disabled;
+    attachmentsEnabled && !!onStartVoiceNote && !value.trim() && !sending && !disabled && !editing;
+  const attachBlocked = !attachmentsEnabled || disabled || sending || attachDisabled || !!editing;
+  const sendLabel = editing
+    ? t('conversationComposer.saveEdit')
+    : (accessibilityLabels?.send ?? t('conversationComposer.sendMessage'));
 
   return (
     <KeyboardStickyView offset={{ closed: 0, opened: 0 }}>
-      {attachmentsEnabled && attachOpen ? attachPanel : null}
+      {attachmentsEnabled && attachOpen && !editing ? attachPanel : null}
+      {editing ? (
+        <View style={styles.editBanner} testID="composer-edit-banner">
+          <Pencil size={14} color={colors.brandPink} />
+          <Text style={styles.editBannerText}>{t('conversationComposer.editingMessage')}</Text>
+          <TouchableOpacity
+            onPress={editing.onCancel}
+            accessibilityLabel={t('conversationComposer.cancelEdit')}
+            testID="composer-edit-cancel"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <X size={18} color={colors.textSupplementary} />
+          </TouchableOpacity>
+        </View>
+      ) : null}
       <Animated.View style={[styles.composer, composerSafeAreaStyle]}>
         <TouchableOpacity
-          style={[styles.attachButton, !attachmentsEnabled && styles.sendButtonDisabled]}
+          style={[
+            styles.attachButton,
+            (!attachmentsEnabled || editing) && styles.sendButtonDisabled,
+          ]}
           onPress={onAttachToggle}
-          disabled={!attachmentsEnabled || disabled || sending || attachDisabled}
-          accessibilityState={{
-            disabled: !attachmentsEnabled || disabled || sending || attachDisabled,
-          }}
+          disabled={attachBlocked}
+          accessibilityState={{ disabled: attachBlocked }}
           accessibilityHint={
             attachmentsEnabled ? undefined : t('conversationComposer.attachmentsNip17Only')
           }
@@ -196,7 +222,7 @@ const ConversationComposer: React.FC<ConversationComposerProps> = ({
             style={[styles.sendButtonLarge, sendDisabled && styles.sendButtonDisabled]}
             onPress={onSend}
             disabled={sendDisabled}
-            accessibilityLabel={accessibilityLabels?.send ?? t('conversationComposer.sendMessage')}
+            accessibilityLabel={sendLabel}
             testID={testIDs?.send}
           >
             {sending ? (
@@ -218,7 +244,7 @@ const ConversationComposer: React.FC<ConversationComposerProps> = ({
             style={styles.sendButton}
             onPress={onSend}
             disabled={sendDisabled}
-            accessibilityLabel={accessibilityLabels?.send ?? t('conversationComposer.sendMessage')}
+            accessibilityLabel={sendLabel}
             testID={testIDs?.send}
           >
             {sending ? (

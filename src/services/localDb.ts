@@ -82,6 +82,13 @@ const ADDED_COLUMNS: readonly { name: string; ddl: string }[] = [
   // Explicit thread protocol for transports whose inner kinds overlap NIP-17's
   // (Marmot). NULL = derive from wire_kind (4 → NIP-04, else NIP-17).
   { name: 'protocol', ddl: 'ALTER TABLE dm_messages ADD COLUMN protocol TEXT;' },
+  // Marmot reply: id of the message this one quotes (NULL = not a reply).
+  { name: 'reply_to', ddl: 'ALTER TABLE dm_messages ADD COLUMN reply_to TEXT;' },
+  // Marmot edit: `created_at` of the edit whose text `content` now holds
+  // (NULL = never edited). Orders competing edits; latest wins.
+  { name: 'edited_at', ddl: 'ALTER TABLE dm_messages ADD COLUMN edited_at INTEGER;' },
+  // Marmot edit: id of that edit event — breaks an `edited_at` tie (higher wins).
+  { name: 'edit_id', ddl: 'ALTER TABLE dm_messages ADD COLUMN edit_id TEXT;' },
 ];
 
 let dbPromise: Promise<DB> | null = null;

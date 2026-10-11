@@ -43,6 +43,15 @@ export interface GroupSendHooks {
   onRumorReady?: (meta: { rumorId: string; kind: number }) => void;
 }
 
+/** A group send's outcome. `rumorId`: the sent Marmot event's id (Marmot
+ * groups only) — what edits and deletes of the message target. */
+export interface GroupSendResult {
+  success: boolean;
+  wrapsPublished?: number;
+  error?: string;
+  rumorId?: string;
+}
+
 /**
  * The two group callbacks the provider re-exposes through the context
  * value: a NIP-17 group send and the kind-30200 group-state publish.
@@ -60,7 +69,7 @@ export interface UseGroupMessagingResult {
       file?: EncryptedUpload;
     },
     hooks?: GroupSendHooks,
-  ) => Promise<{ success: boolean; wrapsPublished?: number; error?: string }>;
+  ) => Promise<GroupSendResult>;
   publishGroupState: (input: {
     groupId: string;
     name: string;
@@ -97,7 +106,7 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
         file?: EncryptedUpload;
       },
       hooks?: GroupSendHooks,
-    ): Promise<{ success: boolean; wrapsPublished?: number; error?: string }> => {
+    ): Promise<GroupSendResult> => {
       if (!pubkey || !isLoggedIn) return { success: false, error: 'Not logged in' };
       const text = (input.text ?? '').trim();
       if (!input.file && !text) return { success: false, error: 'Empty message' };

@@ -33,7 +33,6 @@
     "currency": "Currency",
     "appearance": "Appearance",
     "language": "Language",
-    "nearbyMerchants": "Nearby merchants",
     "security": "Security",
     "about": "About",
     "switchToAccount": "Switch to {{name}}",
@@ -42,7 +41,8 @@
     "showNpubQr": "Show npub QR",
     "signInOrCreate": "Sign in or create account",
     "signInButton": "Sign In / Create Account",
-    "signOut": "Sign Out"
+    "signOut": "Sign Out",
+    "notifications": "Notifications"
   },
   "accountSwitcherSheet": {
     "accounts": "Accounts",
@@ -291,7 +291,10 @@
     "attach": "Attach",
     "messageInput": "Message input",
     "recordVoiceNote": "Record a voice note",
-    "sendMessage": "Send message"
+    "sendMessage": "Send message",
+    "editingMessage": "Editing message",
+    "cancelEdit": "Cancel editing",
+    "saveEdit": "Save edit"
   },
   "conversationScreen": {
     "couldNotStartLiveShareTitle": "Could not start live share",
@@ -1144,9 +1147,28 @@
     "reactionFailedBody": "Could not publish your reaction. Check your relays and try again.",
     "copyText": "Copy text",
     "copied": "Copied",
-    "moreEmoji": "More emoji"
+    "moreEmoji": "More emoji",
+    "edit": "Edit",
+    "delete": "Delete for everyone"
+  },
+  "messageEdit": {
+    "deleteTitle": "Delete for everyone?",
+    "deleteBody": "It will be removed for everyone in this chat. Anyone who already saw a notification may still have a copy.",
+    "deleteConfirm": "Delete",
+    "cancel": "Cancel",
+    "editFailed": "Couldn't edit the message",
+    "deleteFailed": "Couldn't delete the message",
+    "noChat": "There's no Marmot chat with this person yet.",
+    "notYours": "You can only change your own messages.",
+    "emptyEdit": "An edit needs some text.",
+    "noRelay": "No relay accepted the change. Check your connection and try again."
   },
   "messageBubble": {
+    "quoteYou": "You",
+    "quoteSomeone": "Someone",
+    "quoteUnavailable": "Earlier message",
+    "quoteMissingA11y": "Reply to an earlier message",
+    "quoteA11y": "Replying to {{author}}: {{text}}",
     "imageSent": "Image sent",
     "imageReceived": "Image received",
     "sharedImage": "Shared image",
@@ -1177,7 +1199,7 @@
     "accuracyOsm": "± {{meters}} m · OpenStreetMap",
     "unsupportedA11y": "Unsupported message type, kind {{kind}}",
     "unsupportedText": "Unsupported message type (kind {{kind}})",
-    "marmotInvite": "Sent you a Marmot chat invite — it opens as a Marmot chat in your Messages.",
+    "marmotInvite": "Sent you a Marmot chat invite — it opens as a Marmot chat in your Messages. If it doesn't open here, the invitation may be for another phone or an old invitation key. Ask them to invite you again.",
     "marmotMessage": "Marmot group event — open the Marmot chat to read it.",
     "marmotInvitePreview": "Marmot chat invite",
     "marmotMessagePreview": "Marmot message",
@@ -1214,6 +1236,7 @@
     "reactionAdd": "Add {{emoji}} reaction ({{count}} so far)"
   },
   "messageBubbleFooter": {
+    "edited": "Edited",
     "messageSending": "Message sending",
     "sendFailed": "Send failed",
     "sentAllRelays": "Sent to all relays",
@@ -1294,8 +1317,8 @@
     "pigletDeletionRequested": "Deletion requested",
     "deleteFailed": "Delete failed"
   },
-  "nearbyScreen": {
-    "title": "Nearby merchants",
+  "shopAlerts": {
+    "title": "Alerts near Bitcoin shops",
     "ok": "OK",
     "locationPermissionTitle": "Location permission required",
     "locationPermissionMessage": "Granting \"While in use\" location is the first step before we can ask for \"Always\".",
@@ -1309,7 +1332,7 @@
     "alertMeNearShops": "Alert me near Bitcoin shops",
     "geofencingOn": "Geofencing is on — we'll alert you when you walk near a merchant.",
     "geofencingOff": "Off. Turn this on to opt in to background-location alerts.",
-    "enableAlertsLabel": "Enable nearby merchant alerts",
+    "enableAlertsLabel": "Alerts near Bitcoin shops",
     "alertRadius": "Alert radius",
     "radiusMeters": "{{meters}} m",
     "quietHours": "Quiet hours",
@@ -1738,28 +1761,28 @@
     "notificationContentHint": "When OFF, notifications tell you a message or payment arrived but never include the details — you'll see \"New message\" rather than the text, and \"Payment received\" rather than the amount, both on the lock screen and in the notification shade. Turn ON to include the full content. Default: OFF.",
     "showMessagePaymentDetails": "Show message & payment details",
     "showMessagePaymentDetailsA11y": "Show message and payment details in notifications",
-    "backgroundNotifications": "Background messages and payments",
+    "backgroundNotifications": "Background checks",
     "details": "Details",
     "privacyDetails": "Privacy details",
     "backgroundNotificationsHint": "Checks for messages and Lightning payments about once a minute while the app is closed. Uses more battery.",
     "backgroundDetailsNoGoogle": "No Google services or push server needed. While it's on, a status notification stays in your notification bar.",
     "backgroundDetailsBattery": "For reliable alerts while your phone is idle, allow Unrestricted battery use for Lightning Piggy in Android settings.",
     "backgroundDetailsPayments": "Payments are checked on NWC wallets that allow transaction-history access. On-chain payments aren't monitored.",
-    "watchForMessages": "Background checks",
-    "marmotPush": "Push notifications",
-    "marmotPushHintAndroid": "Get Marmot message alerts while the app is closed, via Google's push service.",
-    "marmotPushHintIos": "Get Marmot message alerts while the app is closed, via Apple's push service.",
-    "marmotPushPrivacy": "Apple/Google learn that your phone got a notification and when, but not what it says: every push just says 'New message' and the app fills in the details once it opens. Our notification server receives device tokens sealed so only it can open them, and opens them only to deliver each push — it can see how many phones a message went to and how often this phone is woken, but not who sent it, which chat it was, or who you are. People in your Marmot chats can see that this phone has push on; the same phone shows the same fingerprint in every chat.",
+    "watchForMessages": "Check for messages and payments while closed",
+    "marmotPush": "Instant alerts (secure chats)",
+    "marmotPushHintAndroid": "Get alerts for your secure chats (Marmot) while the app is closed, via Google's push service.",
+    "marmotPushHintIos": "Get alerts for your secure chats (Marmot) while the app is closed, via Apple's push service.",
+    "marmotPushPrivacy": "Apple/Google learn that your phone got a notification and when, but not what it says: every push just says 'New message' and the app fills in the details once it opens. Our notification server receives device tokens sealed so only it can open them, and opens them only to deliver each push — it can see how many phones a message went to and how often this phone is woken, but not who sent it, which chat it was, or who you are. People in your secure chats can see that this phone has push on; the same phone shows the same fingerprint in every chat.",
     "marmotPushOtherAccounts": "Other accounts on this phone also use push; people who chat with both could tell they're on the same phone.",
-    "marmotPushGoogleFree": "Rather not use Google? The background checks above alert you without it.",
-    "marmotPushToggle": "Marmot messages",
-    "marmotPushSignerNote": "Your signer will ask you to approve one signature per chat: now for the chats you already have, and later the first time you send a message in a new chat.",
-    "marmotPushAllSet": "Set up in all your Marmot chats.",
-    "marmotPushPending": "{{count}} chat(s) not set up yet.",
+    "marmotPushGoogleFree": "Rather not use Google? \"Check for messages and payments while closed\", under On this phone, alerts you without it.",
+    "marmotPushToggle": "Instant alerts",
+    "marmotPushSignerNote": "Your signer will ask you to approve one signature per secure chat: now for the chats you already have, and later the first time you send a message in a new one.",
+    "marmotPushAllSet": "Set up in all your secure chats.",
+    "marmotPushPending": "{{count}} secure chat(s) not set up yet.",
     "marmotPushFinish": "Finish setup",
-    "marmotPushAdvanced": "Advanced: notification server",
-    "marmotPushServerDefault": "Using Lightning Piggy's notification server.",
-    "marmotPushServerCustom": "Using a custom notification server: {{npub}}",
+    "marmotPushAdvanced": "Change notification server",
+    "marmotPushServerDefault": "Instant alerts for every account on this phone go through Lightning Piggy's notification server.",
+    "marmotPushServerCustom": "Instant alerts for every account on this phone go through a custom notification server: {{npub}}",
     "marmotPushServerHint": "Only a server holding Lightning Piggy's Apple/Google push credentials can deliver to this app.",
     "marmotPushServerPlaceholder": "npub1…",
     "marmotPushServerLabel": "Notification server npub",
@@ -1768,18 +1791,18 @@
     "marmotPushServerInvalid": "That isn't a valid npub.",
     "marmotPushNoPermission": "Allow notifications for Lightning Piggy in your system settings first.",
     "marmotPushUnavailable": "This phone couldn't get a push token from Apple/Google. On Android this needs Google Play services.",
-    "marmotPushDeclined": "Your signer declined, so push isn't set up in every chat yet. Tap Finish setup to try again.",
-    "marmotPushOn": "Push notifications are on",
-    "marmotPushOff": "Push notifications are off",
+    "marmotPushDeclined": "Your signer declined, so instant alerts aren't set up in every secure chat yet. Tap Finish setup to try again.",
+    "marmotPushOn": "Instant alerts are on",
+    "marmotPushOff": "Instant alerts are off",
     "marmotPushSaveFailed": "Push was turned off for now, but the setting couldn't be saved. Turn it off again later.",
     "marmotPushNoToken": "Not set up yet: this phone has no push token right now.",
     "marmotPushRetirePending": "Push is off. Apple/Google couldn't be reached to delete this phone's push token — the app will retry next time it opens.",
-    "watcherPush": "More push notifications",
+    "watcherPush": "More alerts",
     "watcherPushHint": "Extra alerts from Lightning Piggy's notification server, even when the app is closed.",
     "watcherPushPrivacy": "Lightning Piggy's notification server watches your relays for direct messages (NIP-04 and NIP-17), zaps and mentions of you. Apple/Google learn that a notification arrived, when, and which kind (message, zap, mention or payment). Our server learns your public key, which relays you use and, for Payments, your wallet connections' keys and which wallet service they belong to — and when events arrive for you. It can't read your messages or wallet activity, which stay encrypted. Mentions, zaps and older NIP-04 messages carry public details that it sees like any relay does. Your relays can see that our server is watching your public key. Turning a category off removes it from the server; a registration that isn't refreshed is deleted after 30 days.",
     "watcherPaymentNote": "Payments covers activity on your connected NWC wallets (up to 3). Payment details stay encrypted, so the server can't tell money in from money out: you may also get an alert when a payment is sent from that wallet, by you or by another device connected to it. It stays quiet while the app is open.",
     "watcherSignerNote": "Your signer will ask you to approve one signature when you change these settings, and about once a week to keep them active.",
-    "watcherNeedsPush": "Turn on push notifications above to choose these.",
+    "watcherNeedsPush": "Turn on instant alerts above to choose these.",
     "watcherDm": "Messages",
     "watcherZap": "Zaps",
     "watcherMention": "Mentions",
@@ -1789,7 +1812,8 @@
     "watcherPending": "Your latest changes haven't reached the notification server yet.",
     "watcherFailed": "Couldn't update the notification server. Your signer may have declined, or you're offline.",
     "watcherRetry": "Retry",
-    "watcherSaveFailed": "Couldn't save that setting."
+    "watcherSaveFailed": "Couldn't save that setting.",
+    "marmotPushServerTitle": "Notification server"
   },
   "sendAmountSection": {
     "fixedAmount": "Fixed amount",
@@ -1812,6 +1836,11 @@
     "qrViewfinder": "QR code viewfinder"
   },
   "sendSheet": {
+    "invalidInvoiceDismiss": "OK",
+    "invalidInvoiceTitle": "Invalid invoice",
+    "invalidInvoiceBody": "This invoice is invalid or incomplete — check it and try again.",
+    "offerUnsupportedTitle": "Lightning offers aren't supported yet",
+    "offerUnsupportedBody": "This is a Lightning offer (BOLT12), which Lightning Piggy can't pay yet. Ask for a Lightning invoice or Lightning address instead.",
     "walletFallback": "Wallet",
     "payTo": "Pay to {{name}}",
     "sendToOnchain": "Send to on-chain address",
@@ -1851,6 +1880,7 @@
     "swapRecipientGets": "Recipient gets {{amount}} sats",
     "swapYouPay": "You pay {{total}} sats (fees ~{{fee}} sats) · ~10-60 min",
     "swapInsufficientBalance": "This send costs {{total}} sats ({{amount}} sats + ~{{fee}} sats in fees), but your balance is {{balance}} sats.",
+    "onchainInsufficientFunds": "Your balance can't cover this amount plus the miner fee.",
     "feeUnavailable": "Fee estimate unavailable",
     "quoteChanged": "Nothing was sent. The swap fee is now ~{{fee}} sats. Review it and tap Send to continue.",
     "quoteChangedTitle": "Swap Fee Changed",
@@ -1861,7 +1891,8 @@
     "editAddress": "Edit address",
     "resetLabel": "Scan or paste a different invoice",
     "resetText": "Scan / paste different invoice",
-    "balance": "Balance: {{balance}} sats ({{fiat}})"
+    "balance": "Balance: {{balance}} sats ({{fiat}})",
+    "balanceUnavailable": "Wallet balance unavailable — refresh your wallet before sending."
   },
   "starRating": {
     "readOnly": "{{value}} out of {{max}} stars",
@@ -2156,10 +2187,13 @@
     "hint": "Use a Boltz-compatible Bitcoin mainnet server over HTTPS. Connect your VPN first for a private server. This device’s new swaps use the saved server; existing swaps keep their original server.",
     "save": "Check and save",
     "checking": "Checking…",
-    "default": "Use Boltz default URL",
+    "default": "Clear swap server URL",
     "saved": "Swap server saved. New swaps will use this server.",
     "saveError": "Server not saved. Check the URL and connection.",
-    "loadError": "Could not load the saved server. No server has been changed."
+    "loadError": "Could not load the saved server. No server has been changed.",
+    "notConfigured": "No swap server set — add one in the account menu → On-chain.",
+    "placeholder": "https://your-swap-server.example",
+    "cleared": "No swap server set. Existing swaps keep their original server."
   },
   "market": {
     "sats": "{{amount}} sats",
@@ -2420,7 +2454,15 @@
   },
   "marmotSend": {
     "noKeyPackage": "We couldn't find a Marmot key package on this person's relays. They may need to open their Marmot app so it can publish one — or use NIP-17 for now.",
-    "outdatedKeyPackage": "This person's Marmot key package has expired, or uses an older version of Marmot that Lightning Piggy can't talk to yet. Opening or updating their Marmot app should fix it — use NIP-17 for now."
+    "outdatedKeyPackage": "This person's Marmot key package has expired, or uses an older version of Marmot that Lightning Piggy can't talk to yet. Opening or updating their Marmot app should fix it — use NIP-17 for now.",
+    "sendFailedTitle": "Send failed",
+    "couldNotSendVoice": "Could not send voice note.",
+    "couldNotSendPhoto": "Could not send image.",
+    "chatChangingVoice": "This chat is changing right now — try sending the voice note again.",
+    "chatChangingPhoto": "This chat is changing right now — try sending the photo again.",
+    "noRelayAcceptedVoice": "No relay accepted the voice note",
+    "noRelayAcceptedPhoto": "No relay accepted the photo",
+    "inviteNotDelivered": "We couldn't send the invitation — no relay accepted it. Check your connection and try again."
   },
   "signOutPrompt": {
     "walletsRemoved": "Any wallets connected to this account, including recovery phrases stored here, will also be removed from this phone. Save their recovery phrases and connection details separately before signing out.",
@@ -2473,5 +2515,44 @@
     "keptInAmberBody": "Lightning Piggy never sees this account's secret key. Back it up from Amber. Wallet recovery phrases stored in Lightning Piggy need a separate backup before signing out.",
     "keptInSigner": "Your key is kept in your signer app",
     "keptInSignerBody": "Lightning Piggy never sees this account's secret key. Back it up from your signer app. Wallet recovery phrases stored in Lightning Piggy need a separate backup before signing out."
+  },
+  "notificationSettingsScreen": {
+    "title": "Notifications",
+    "permissionTitle": "Notifications for Lightning Piggy",
+    "permissionAllowed": "Notifications are allowed in your phone's settings.",
+    "permissionBlocked": "Off in your phone's settings, so no alerts can show",
+    "permissionTurnOn": "Turn on"
+  },
+  "settingsScope": {
+    "forThisAccount": "For this account",
+    "forThisAccountHint": "Each account on this phone chooses its own.",
+    "onThisPhone": "On this phone",
+    "onThisPhoneHint": "The same for every account on this phone."
+  },
+  "locationSharing": {
+    "directTitle": "Share your location with {{name}}?",
+    "liveTitle": "Share your live location with {{name}}?",
+    "groupTitle": {
+      "one": "Share your location with the other person in {{group}}?",
+      "other": "Share your location with the {{count}} people in {{group}}?"
+    },
+    "warning": "Only share your location with people you know and trust. Your message is end-to-end encrypted, and they'll see a map preview from OpenStreetMap.",
+    "cancel": "Cancel",
+    "share": "Share",
+    "groupEmptyTitle": "No one to share with yet",
+    "groupEmptyBody": "There's no one else in {{group}} yet. Add someone to the group, then share your location.",
+    "ok": "OK"
+  },
+  "marmotInvitationKeys": {
+    "removingTitle": "Removing invitation keys…",
+    "removingBody": "Approve the requests in your signer to finish signing out. This can take a minute.",
+    "notRemovedTitle": "Invitation keys not removed",
+    "notRemovedBody": "We couldn't remove this account's Marmot invitation keys from relays, so new Marmot invites may still be sent to this phone. We'll try again automatically the next time this account signs in here."
+  },
+  "marmotInvite": {
+    "progressTitle": "Inviting devices… {{done}} of {{total}}",
+    "progressBody": "Approve each request in your signer — every phone or app this person uses needs its own invitation.",
+    "notReachedTitle": "Invitation not delivered yet",
+    "notReachedBody": "We couldn't deliver the invitation to {{names}} yet. Lightning Piggy will keep trying automatically."
   }
 }

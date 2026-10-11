@@ -109,3 +109,22 @@ describe('marmotInbox — attachments', () => {
     expect(marmotRumorToDmRow(ME, { group: dm, rumor: r })!.content).toBe('see attached');
   });
 });
+
+describe('marmotInbox replies', () => {
+  const PARENT = 'c'.repeat(64);
+  const reply = rumor({}) && {
+    ...rumor(),
+    tags: [
+      ['e', PARENT],
+      ['q', PARENT],
+    ],
+  };
+  it('carries the quoted parent onto the DM row and the group message', () => {
+    expect(marmotRumorToDmRow(ME, { group: dm, rumor: reply })).toMatchObject({ replyTo: PARENT });
+    expect(marmotRumorToGroupMessage(reply)).toMatchObject({ replyTo: PARENT });
+  });
+  it('leaves replyTo off a plain message', () => {
+    expect(marmotRumorToDmRow(ME, { group: dm, rumor: rumor() })).not.toHaveProperty('replyTo');
+    expect(marmotRumorToGroupMessage(rumor())).not.toHaveProperty('replyTo');
+  });
+});

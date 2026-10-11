@@ -3,25 +3,32 @@ import { useCallback, useEffect, useMemo } from 'react';
 
 import {
   appendGroupMessage,
+  editGroupMessages,
+  isEditableGroupText,
   loadGroupMessages,
   removeGroupMessagesWhere,
   type GroupMessage,
 } from '../services/groupMessagesStorageService';
 import { mayDelete, parseMarmotDeletion, type MarmotDeletion } from '../services/marmotDeletions';
 import { MarmotDeletionTracker } from '../services/marmotDeletionTracker';
+import { EditLedger, parseMarmotEdit, type MarmotEdit } from '../services/marmotEdits';
 import {
   isMarmotMessageKind,
   marmotRumorToGroupMessage,
+  storedKindForMarmot,
   storedMarmotContent,
 } from '../services/marmotInbox';
 import { dmRowPreview } from '../utils/dmRowPreview';
 import { requireMarmotSession } from '../services/marmotSend';
 import {
+  MARMOT_CHAT_KIND,
   subscribeMarmotSession,
   type MarmotGroupSummary,
   type MarmotMessageEvent,
 } from '../services/marmotSession';
 import { fireMessageNotification } from '../services/notificationService';
+import { Toast } from '../components/BrandedToast';
+import { t } from '../i18n';
 import type { Group } from '../types/groups';
 import { notifyGroupMessage } from './nostrEventBus';
 
@@ -56,7 +63,11 @@ export interface MarmotGroupsApi {
  * group messages (coalesced: one append pass + one notify per group per
  * ≤150 ms burst — #perf).
  */
-export function useMarmotGroups(pubkey: string | null): MarmotGroupsApi {
+export function useMarmotGroups(
+  pubkey: string | null,
+  /** Display name for a pubkey (for "invitation not delivered yet"). */
+  nameOf: (pubkey: string) => string = (pk) => pk.slice(0, 8),
+): MarmotGroupsApi {
   const [summaries, setSummaries] = useAccountState(pubkey, EMPTY_SUMMARIES);
 
   useEffect(() => {
@@ -89,51 +100,92 @@ export function useMarmotGroups(pubkey: string | null): MarmotGroupsApi {
     // "Delete for everyone": what has been deleted per group (arrival order
     // and history replays can put a delete before its target).
     const deletions = new MarmotDeletionTracker(pubkey, openedAtSec);
+    // Edits (kind 1009): the latest per message, for one arriving before (or
+    // replayed after) its target.
+    const edits = new EditLedger();
+    type Incoming =
+      | { event: MarmotMessageEvent; message: GroupMessage }
+      | { groupId: string; edit: MarmotEdit };
     const writeBatch = async (batch: MarmotMessageEvent[]) => {
       const byGroup = new Map<string, GroupMessage[]>();
       const deletedIn = new Map<string, MarmotDeletion[]>();
-      const incoming: { event: MarmotMessageEvent; message: GroupMessage }[] = [];
+      const incoming: Incoming[] = [];
       for (const event of batch) {
         const { group, rumor, mediaKeys } = event;
         if (!byGroup.has(group.id)) byGroup.set(group.id, []);
+        const edit = parseMarmotEdit(rumor);
+        if (edit) {
+          incoming.push({ groupId: group.id, edit });
+          continue;
+        }
         const deletion = parseMarmotDeletion(rumor, group);
         if (deletion) {
           deletedIn.set(group.id, [...(deletedIn.get(group.id) ?? []), deletion]);
           continue;
         }
-        incoming.push({ event, message: marmotRumorToGroupMessage(rumor, mediaKeys) });
+        let message = marmotRumorToGroupMessage(rumor, mediaKeys);
+        // An edit may have arrived first (or the history replays).
+        const overlay =
+          storedMarmotContent(rumor, mediaKeys).kind === storedKindForMarmot(MARMOT_CHAT_KIND) &&
+          isEditableGroupText(message.text)
+            ? edits.latestFor(message.id, message.senderPubkey, group.id)
+            : undefined;
+        if (overlay) {
+          message = {
+            ...message,
+            text: overlay.content,
+            editedAt: overlay.editedAt,
+            editId: overlay.editId,
+          };
+        }
+        incoming.push({ event, message });
       }
-      // Deleted before it was stored (arrived after its delete, or replayed):
-      // one tombstone query for the whole batch, after this batch's deletions
-      // are durable. Fails closed (the history replays them next start), and
-      // the removals below still run.
-      let live: typeof incoming = [];
+      // Deleted messages (arrived after their delete, or replayed) and edits of
+      // deleted messages are dropped: one tombstone query for the whole batch,
+      // after this batch's deletions are durable. Fails closed (the history
+      // replays them next start), and the removals below still run.
+      let live: Incoming[] = [];
       try {
         await deletions.persist();
-        live = await deletions.filterLive(incoming, ({ event, message }) => ({
-          scope: event.group.id,
-          id: message.id,
-          sender: message.senderPubkey,
-        }));
+        live = await deletions.filterLive(incoming, (item) =>
+          'edit' in item
+            ? { scope: item.groupId, id: item.edit.target, sender: item.edit.editor }
+            : {
+                scope: item.event.group.id,
+                id: item.message.id,
+                sender: item.message.senderPubkey,
+              },
+        );
       } catch (e) {
         if (__DEV__) console.warn('[Marmot] deletion check failed:', e);
       }
-      for (const { event, message } of live) byGroup.get(event.group.id)!.push(message);
+      const editsIn = new Map<string, MarmotEdit[]>();
+      const arrived: MarmotMessageEvent[] = [];
+      for (const item of live) {
+        if ('edit' in item) {
+          editsIn.set(item.groupId, [...(editsIn.get(item.groupId) ?? []), item.edit]);
+        } else {
+          byGroup.get(item.event.group.id)!.push(item.message);
+          arrived.push(item.event);
+        }
+      }
       for (const [groupId, messages] of byGroup) {
-        for (const m of messages) await appendGroupMessage(groupId, m);
+        for (const m of messages) await appendGroupMessage(pubkey, groupId, m);
+        // Edits to messages stored by earlier batches / sessions: one pass.
+        const edited = await editGroupMessages(pubkey, groupId, editsIn.get(groupId) ?? []);
         // Erase what's already stored (earlier batches / sessions).
         const groupDeletions = deletedIn.get(groupId);
         if (groupDeletions) {
-          await removeGroupMessagesWhere(groupId, (m) =>
+          await removeGroupMessagesWhere(pubkey, groupId, (m) =>
             groupDeletions.some((d) => d.targets.includes(m.id) && mayDelete(d, m.senderPubkey)),
           );
         }
-        if (messages.length > 0 || groupDeletions) {
-          const remaining = await loadGroupMessages(groupId);
+        if (messages.length > 0 || groupDeletions || edited) {
+          const remaining = await loadGroupMessages(pubkey, groupId);
           if (!disposed) notifyGroupMessage(groupId, remaining[remaining.length - 1]);
         }
       }
-      for (const { event } of live) notifyMessage(event);
+      for (const event of arrived) notifyMessage(event);
     };
 
     const onMessage = (event: MarmotMessageEvent) => {
@@ -141,6 +193,13 @@ export function useMarmotGroups(pubkey: string | null): MarmotGroupsApi {
       const deletion = parseMarmotDeletion(event.rumor, event.group);
       if (deletion) {
         deletions.note(event.group.id, deletion, event.rumor.created_at);
+        pending.push(event);
+        if (!timer) timer = setTimeout(() => void flush(), FLUSH_MS);
+        return;
+      }
+      const edit = parseMarmotEdit(event.rumor);
+      if (edit) {
+        edits.add(edit, event.group.id);
         pending.push(event);
         if (!timer) timer = setTimeout(() => void flush(), FLUSH_MS);
         return;
@@ -211,10 +270,25 @@ export function useMarmotGroups(pubkey: string | null): MarmotGroupsApi {
     [session],
   );
 
+  // Their Welcome is retried automatically; just say so.
+  const reportUndelivered = useCallback(
+    (people: string[]) => {
+      if (people.length === 0) return;
+      Toast.show({
+        type: 'info',
+        text1: t('marmotInvite.notReachedTitle'),
+        text2: t('marmotInvite.notReachedBody', { names: people.map(nameOf).join(', ') }),
+      });
+    },
+    [nameOf],
+  );
   const create = useCallback(
-    async (name: string, memberPubkeys: string[]) =>
-      toGroup(await session().createGroup(name.trim(), [...new Set(memberPubkeys)])),
-    [session],
+    async (name: string, memberPubkeys: string[]) => {
+      const group = await session().createGroup(name.trim(), [...new Set(memberPubkeys)]);
+      reportUndelivered(group.undelivered);
+      return toGroup(group);
+    },
+    [session, reportUndelivered],
   );
   const rename = useCallback(
     async (groupId: string, name: string) => {
@@ -229,10 +303,10 @@ export function useMarmotGroups(pubkey: string | null): MarmotGroupsApi {
     async (groupId: string, pubkeys: string[]) => {
       const existing = new Set(current(groupId)?.memberPubkeys ?? []);
       const toAdd = [...new Set(pubkeys)].filter((pk) => !existing.has(pk));
-      if (toAdd.length > 0) await session().addMembers(groupId, toAdd);
+      if (toAdd.length > 0) reportUndelivered(await session().addMembers(groupId, toAdd));
       return current(groupId);
     },
-    [session, current],
+    [session, current, reportUndelivered],
   );
   const removeMember = useCallback(
     async (groupId: string, pubkey: string) => {

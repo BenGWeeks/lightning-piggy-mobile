@@ -44,27 +44,28 @@ import FriendPickerSheet from '../components/FriendPickerSheet';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import type { ContactProfileBodyData } from '../components/ContactProfileBody';
 import MessageBubble from '../components/MessageBubble';
+import MessageActionsSheet from '../components/MessageActionsSheet';
+import { useMessageActionsMenu, type ActionedMessage } from '../hooks/useMessageActionsMenu';
+import { isMarmotGroupId } from '../services/marmotSession';
 import DeliveryDetailSheet from '../components/DeliveryDetailSheet';
 import { useMessageInfoSheet } from '../hooks/useMessageInfoSheet';
 import SecretModeCelebration from '../components/SecretModeCelebration';
 import { isConfigured as isGifConfigured } from '../services/giphyService';
 import { buildOsmViewUrl, type SharedLocation } from '../services/locationService';
 import { fetchProfile, DEFAULT_RELAYS } from '../services/nostrService';
-import { loadGroupMessages, type GroupMessage } from '../services/groupMessagesStorageService';
+import { indexMessagesById, resolveQuote, type MessageQuote } from '../utils/messageQuote';
+import {
+  isEditableGroupText,
+  loadGroupMessages,
+  type GroupMessage,
+} from '../services/groupMessagesStorageService';
 import {
   classifyMessageContent,
   deriveGroupWireKind,
   extractSharedContact,
   type BubbleContent,
 } from '../utils/messageContent';
-import { buildPollMessage, buildVoteMessage, parsePoll, parseVote } from '../utils/pollMessage';
-import {
-  legacyPollToStored,
-  tallyPoll,
-  type PollTally,
-  type StoredPoll,
-  type VoteRecord,
-} from '../utils/nip88Poll';
+import { useGroupPolls } from '../hooks/useGroupPolls';
 import { sanitizeDisplayText } from '../utils/sanitizeDisplayText';
 import { usePaidInvoiceTracker } from '../hooks/usePaidInvoiceTracker';
 import type { NostrProfile } from '../types/nostr';
@@ -77,7 +78,11 @@ type GroupConversationNavigation = NativeStackNavigationProp<
 
 // Pre-classified variant of GroupMessage — created in a useMemo so
 // classifyMessageContent is NOT called inside the hot renderMessage path.
-type ClassifiedMessage = GroupMessage & { content: BubbleContent; wireKind: 14 | 15 };
+type ClassifiedMessage = GroupMessage & {
+  content: BubbleContent;
+  wireKind: 14 | 15;
+  quote?: MessageQuote;
+};
 
 interface MemberRow {
   pubkey: string;
@@ -86,6 +91,9 @@ interface MemberRow {
 }
 
 const EMPTY_MESSAGES: GroupMessage[] = [];
+const groupMessageId = (m: GroupMessage) => m.id;
+const noReaction = () => {};
+const NO_ACTION: ActionedMessage | null = null;
 
 const GroupConversationScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
@@ -163,7 +171,7 @@ const GroupConversationScreen: React.FC = () => {
     if (!loadedGroupId) return;
     let cancelled = false;
     setLoadingMessages(true);
-    loadGroupMessages(loadedGroupId)
+    loadGroupMessages(myPubkey, loadedGroupId)
       .then((loaded) => {
         if (!cancelled) {
           setMessages(loaded);
@@ -188,7 +196,7 @@ const GroupConversationScreen: React.FC = () => {
     let cancelled = false;
     const unsubscribe = subscribeGroupMessages((groupId) => {
       if (groupId !== loadedGroupId) return;
-      loadGroupMessages(loadedGroupId)
+      loadGroupMessages(myPubkey, loadedGroupId)
         .then((loaded) => {
           if (!cancelled) setMessages(loaded);
         })
@@ -311,6 +319,25 @@ const GroupConversationScreen: React.FC = () => {
     canResend: canResendFromInfo,
   } = useMessageInfoSheet(resendText);
 
+  // Long-press your own message in a Marmot group: Copy text, Edit, Delete
+  // for everyone (#1237). Groups have no reactions, so nothing else to offer.
+  const [actioned, setActioned] = useAccountState<ActionedMessage | null>(messageOwner, NO_ACTION);
+  const closeActions = useCallback(() => setActioned(null), [setActioned]);
+  const marmotGroupId = group && isMarmotGroupId(group.id) ? group.id : null;
+  const menu = useMessageActionsMenu({
+    myPubkey,
+    scope: messageOwner,
+    marmotGroupId,
+    messages,
+    setMessages,
+    idOf: groupMessageId,
+    draft,
+    setDraft,
+    actioned,
+    closeActions,
+    onSend: handleSend,
+  });
+
   const closeAttachPanel = useCallback(() => setAttachPanelOpen(false), []);
   // Mirror ConversationScreen's openAttachPanel: dismiss the IME first
   // so the panel + composer + keyboard never have to stack. Without this,
@@ -421,83 +448,48 @@ const GroupConversationScreen: React.FC = () => {
   // Vote messages are dropped from the visible list — they're already
   // rolled into the referenced poll's tally via pollAggregates below, so
   // showing them as bubbles would just duplicate the vote in the thread.
-  const classifiedMessages = useMemo<ClassifiedMessage[]>(
+  const classifiedMessages = useMemo<ClassifiedMessage[]>(() => {
+    // Marmot replies: resolve each quoted parent against the loaded history.
+    // One id index (with each parent's sender) — no per-reply scan.
+    const me = myPubkey?.toLowerCase();
+    const byId = indexMessagesById(
+      messages.map((m) => ({
+        id: m.id,
+        senderPubkey: m.senderPubkey,
+        fromMe: m.senderPubkey.toLowerCase() === me,
+        text: m.text,
+        wireKind: deriveGroupWireKind(m.text),
+      })),
+    );
+    const quoteFor = (m: GroupMessage): MessageQuote | undefined => {
+      const quote = resolveQuote(m.replyTo, byId);
+      const parent = m.replyTo ? byId.get(m.replyTo) : undefined;
+      return quote && parent && !parent.fromMe
+        ? { ...quote, authorName: memberNameByPubkey.get(parent.senderPubkey) }
+        : quote;
+    };
     // Sanitise before classify so a tofu placeholder (#764) never reaches
     // the bubble's text branch. Vote messages are dropped from the visible
     // list — they're already rolled into the referenced poll's tally.
-    () =>
-      messages
-        .map((m) => ({
-          ...m,
-          content: classifyMessageContent(sanitizeDisplayText(m.text)),
-          // Derive the real NIP-17 kind (14 chat / 15 encrypted file) from the
-          // stored text rather than hard-coding 14, so the info sheet reports
-          // kind-15 for voice/image file bubbles. Precomputed here (not in the
-          // hot renderMessage path) alongside the content classification.
-          wireKind: deriveGroupWireKind(m.text),
-        }))
-        .filter((m) => m.content.kind !== 'pollVote'),
-    [messages],
-  );
+    return messages
+      .map((m) => ({
+        ...m,
+        quote: quoteFor(m),
+        content: classifyMessageContent(sanitizeDisplayText(m.text)),
+        // Derive the real NIP-17 kind (14 chat / 15 encrypted file) from the
+        // stored text rather than hard-coding 14, so the info sheet reports
+        // kind-15 for voice/image file bubbles. Precomputed here (not in the
+        // hot renderMessage path) alongside the content classification.
+        wireKind: deriveGroupWireKind(m.text),
+      }))
+      .filter((m) => m.content.kind !== 'pollVote');
+  }, [messages, myPubkey, memberNameByPubkey]);
 
-  // Per-poll aggregates over the entire group history. Group messages carry a
-  // real `senderPubkey` (unlike 1:1 where we synthesise a per-direction voter
-  // id), so the tally gets accurate last-write-wins per member. Groups keep the
-  // TEXT-encoded poll format (the group message store is text-only — no inner
-  // wireKind/tags column), so structured NIP-88 is 1:1-only for now (#203);
-  // legacy polls are adapted to the shared display/tally shape here.
-  const pollAggregates = useMemo<Map<string, PollTally>>(() => {
-    const polls: StoredPoll[] = [];
-    const votes: VoteRecord[] = [];
-    for (const m of messages) {
-      const p = parsePoll(m.text);
-      if (p) {
-        polls.push(legacyPollToStored(m.id, p));
-        continue;
-      }
-      const v = parseVote(m.text);
-      if (v) {
-        votes.push({
-          pollId: v.pollId,
-          voter: m.senderPubkey,
-          optionIds: [String(v.optionId)],
-          createdAt: m.createdAt,
-        });
-      }
-    }
-    const out = new Map<string, PollTally>();
-    for (const poll of polls) out.set(poll.pollId, tallyPoll(poll, votes, myPubkey ?? null));
-    return out;
-  }, [messages, myPubkey]);
-
-  // Poll attach handlers — the composer returns the validated question +
-  // options; groups serialise them to the text body and hand off to sendText
-  // (the same path the GIF / location / contact-share attachments use). Vote
-  // sends use sendText too so the optimistic local-append behaviour matches.
-  const handleSendPoll = useCallback(
-    async (question: string, options: string[]): Promise<boolean> => {
-      let body: string;
-      try {
-        body = buildPollMessage(question, options);
-      } catch (err) {
-        Alert.alert('Could not send poll', err instanceof Error ? err.message : 'Invalid poll.');
-        return false;
-      }
-      return sendText(body);
-    },
-    [sendText],
-  );
-
-  const handleVotePoll = useCallback(
-    async (pollId: string, optionId: string) => {
-      const optNum = Number(optionId);
-      const payload = buildVoteMessage(pollId, Number.isFinite(optNum) ? optNum : 0);
-      const ok = await sendText(payload);
-      if (!ok) {
-        Alert.alert('Vote failed', 'Could not record your vote.');
-      }
-    },
-    [sendText],
+  // Text-encoded group polls: tallies + send / vote (see useGroupPolls).
+  const { pollAggregates, handleSendPoll, handleVotePoll } = useGroupPolls(
+    messages,
+    myPubkey,
+    sendText,
   );
 
   const trackedMessages = useMemo(
@@ -546,11 +538,30 @@ const GroupConversationScreen: React.FC = () => {
           // sheet shows "Not tracked").
           wireKind={item.wireKind}
           onShowInfo={handleShowInfo}
+          quote={item.quote}
+          edited={item.editedAt !== undefined}
+          onLongPress={
+            fromMe && marmotGroupId
+              ? () =>
+                  setActioned({
+                    targetId: item.id,
+                    fromMe,
+                    // Same rule the store applies to edits.
+                    ...(item.content.kind === 'text' &&
+                    isEditableGroupText(item.text) &&
+                    item.text.trim() !== ''
+                      ? { copyText: item.text }
+                      : {}),
+                  })
+              : undefined
+          }
           testIdPrefix="group-conversation"
         />
       );
     },
     [
+      marmotGroupId,
+      setActioned,
       myPubkey,
       memberNameByPubkey,
       sharedProfiles,
@@ -735,7 +746,7 @@ const GroupConversationScreen: React.FC = () => {
         <ConversationComposer
           value={draft}
           onChangeText={setDraft}
-          onSend={handleSend}
+          {...menu.composer}
           onStartVoiceNote={() => setVoiceSheetOpen(true)}
           sending={sending}
           onAttachToggle={() => (attachPanelOpen ? closeAttachPanel() : openAttachPanel())}
@@ -898,6 +909,15 @@ const GroupConversationScreen: React.FC = () => {
           ) : null}
         </Pressable>
       </Modal>
+
+      <MessageActionsSheet
+        visible={actioned !== null}
+        onClose={closeActions}
+        myReactions={{}}
+        onToggleReaction={noReaction}
+        showReactions={false}
+        {...menu.sheet}
+      />
 
       <ContactProfileSheet
         visible={profileSheetVisible}

@@ -1,7 +1,10 @@
 import { useEffect, useRef } from 'react';
+import { AppState } from 'react-native';
 
+import { Toast } from '../components/BrandedToast';
+import { t } from '../i18n';
 import { startMarmotPushRegistration } from '../services/marmotPushRegistration';
-import { MarmotSession, setMarmotSession } from '../services/marmotSession';
+import { getMarmotSession, MarmotSession, setMarmotSession } from '../services/marmotSession';
 import { DEFAULT_RELAYS } from '../services/nostrService';
 import { RELAY_LIST_INDEXERS } from '../utils/relayListEvents';
 import { useNostr } from './NostrContext';
@@ -34,6 +37,29 @@ export function MarmotBridge(): null {
     };
   }, []);
 
+  // Android can keep the process alive for weeks: re-check the weekly key
+  // package refresh on resume (#1210) — staggered, it's not latency-sensitive.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const sub = AppState.addEventListener('change', (state) => {
+      if (timer) clearTimeout(timer);
+      timer =
+        state === 'active'
+          ? setTimeout(
+              () =>
+                void getMarmotSession()
+                  ?.keepKeyPackageFresh()
+                  .catch(() => undefined),
+              START_DELAY_MS,
+            )
+          : null;
+    });
+    return () => {
+      if (timer) clearTimeout(timer);
+      sub.remove();
+    };
+  }, []);
+
   useEffect(() => {
     if (!isLoggedIn || !pubkey || !signerType) return;
     const unique = (urls: string[]) => [...new Set(urls)];
@@ -57,6 +83,19 @@ export function MarmotBridge(): null {
         getLookupRelays: lookupRelays,
       });
       setMarmotSession(session);
+      // Amber / NIP-46 ask once per invited device: say how far along we are.
+      if (signerType !== 'nsec') {
+        session.subscribe({
+          onInviteProgress: ({ done, total }) => {
+            if (total < 2) return;
+            Toast.show({
+              type: 'info',
+              text1: t('marmotInvite.progressTitle', { done, total }),
+              text2: t('marmotInvite.progressBody'),
+            });
+          },
+        });
+      }
       session.start().catch((e) => {
         if (__DEV__) console.warn('[Marmot] session start failed:', e);
       });

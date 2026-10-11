@@ -70,6 +70,7 @@ import * as onchainService from '../services/onchainService';
 import { getActivePubkey, getDefaultOnchainWalletId } from '../services/walletStorageService';
 import { buildSwapPlaceholders, markSwapPlaceholdersResolved } from '../utils/swapPendingMerge';
 import { blockEta } from '../utils/blockEta';
+import { useReceiveSwapFees } from '../utils/useReceiveSwapFees';
 
 interface Props {
   visible: boolean;
@@ -132,9 +133,9 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
   const [refunding, setRefunding] = useState(false);
   const [refundedTxId, setRefundedTxId] = useState<string | null>(null);
 
-  // Boltz fee schedule — fetched once on open so we can render min/max +
-  // the expected service fee before the user commits to an amount.
-  const [fees, setFees] = useState<boltzService.SwapFees | null>(null);
+  // Boltz fee schedule — fetched on open so we can render min/max + the
+  // expected service fee, and re-fetched on confirm if that first try failed.
+  const { fees, ensureFees, adopt: adoptFees } = useReceiveSwapFees(visible);
 
   // Track the bottom-sheet ref so we can present/dismiss imperatively.
   const bottomSheetRef = useRef<BottomSheetModal>(null);
@@ -193,19 +194,7 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
       setPhase('awaiting-payment');
       setRefunding(false);
       setRefundedTxId(null);
-      // Clear any prior session's fee schedule so a failed re-fetch falls
-      // back to the fresh fallback constants instead of showing stale min/max.
-      setFees(null);
       bottomSheetRef.current?.present();
-
-      // Fetch fees in the background — non-blocking.
-      const session = sessionRef.current;
-      boltzService
-        .getSubmarineSwapFees()
-        .then((f) => {
-          if (sessionRef.current === session) setFees(f);
-        })
-        .catch((e) => console.warn('[BoltzReceive] Fee fetch failed:', e));
     } else {
       bottomSheetRef.current?.dismiss();
     }
@@ -377,6 +366,12 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
       // Capture the initiating identity before any async work, so an identity
       // switch mid-create can't re-attribute this swap's refund (#1124).
       const ownerPubkey = getActivePubkey() ?? undefined;
+      // The sheet can be closed (Android back) and reopened mid-create. This
+      // flow still finishes the swap it started (persisted for recovery), but
+      // must not write into the new session's UI — e.g. a stale fee result's
+      // `finally` clearing a newer confirmation's in-flight state.
+      const session = sessionRef.current;
+      const isCurrent = () => sessionRef.current === session;
       // Mark the flow in-flight *synchronously*, before the state updates below
       // schedule a re-render. `swapInFlightRef` is otherwise refreshed only
       // during render, so without this there's a brief window where a stray
@@ -389,6 +384,15 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
       setCreateError(null);
 
       try {
+        // Step 0 — a fee schedule. If the one fetched on open failed, try
+        // again now rather than replaying that error (offline → back online).
+        const quote = await ensureFees();
+        if ('stale' in quote) return;
+        if ('errorKey' in quote) {
+          if (isCurrent()) setCreateError(t(quote.errorKey));
+          return;
+        }
+
         // Step 1 — make an LN invoice on the destination NWC wallet for
         // exactly the requested amount. Boltz takes its fee from the
         // *on-chain* side (so the sender pays slightly more than `sats`),
@@ -396,11 +400,7 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
         const invoice = await makeInvoiceForWallet(walletId, sats, t('boltzReceive.invoiceMemo'));
 
         // Step 2 — create the swap with Boltz.
-        const created = await boltzService.createSubmarineSwapForward(
-          invoice,
-          sats,
-          fees ?? undefined,
-        );
+        const created = await boltzService.createSubmarineSwapForward(invoice, sats, quote.fees);
 
         // Step 3 — pre-fetch a refund destination snapshot from one of the
         // user's on-chain wallets. If none exists, warn the user: recovery
@@ -446,18 +446,20 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
         // replaces the pending row even if the sheet is closed first (#895).
         await swapRecoveryService.recordSubmarineSwapLegs(null, invoice, created.id);
 
+        if (!isCurrent()) return;
         setSwap(created);
         setPhase('awaiting-payment');
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         console.warn('[BoltzReceive] Swap creation failed:', msg);
-        if (boltzService.isQuoteChangedError(e)) setFees(e.quote);
+        if (!isCurrent()) return;
+        if (boltzService.isQuoteChangedError(e)) adoptFees(e.quote);
         setCreateError(msg);
       } finally {
-        setCreating(false);
+        if (isCurrent()) setCreating(false);
       }
     },
-    [walletId, wallet, makeInvoiceForWallet, pickRefundDestination, t, fees],
+    [walletId, wallet, makeInvoiceForWallet, pickRefundDestination, t, ensureFees, adoptFees],
   );
 
   const handleRefund = useCallback(async () => {

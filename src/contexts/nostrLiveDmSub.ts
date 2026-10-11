@@ -716,7 +716,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       // cold start re-decrypts + re-routes the same group wraps the
       // relay re-streams since the last `since` cursor.
       const dmCount = knownWrapIds.size;
-      const groupWrapIds = await listPersistedGroupWrapIds();
+      const groupWrapIds = await listPersistedGroupWrapIds(viewerPubkey);
       for (const id of groupWrapIds) knownWrapIds.add(id);
       if (__DEV__) {
         console.log(
