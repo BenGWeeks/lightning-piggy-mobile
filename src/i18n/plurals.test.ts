@@ -95,6 +95,13 @@ describe('catalogue plurals end to end', () => {
     expect(createI18nInstance('pl').t('market.reviews.count', { count })).toBe(expected);
   });
 
+  it('zh-Hans: resolves the script-keyed catalogue and uses its single form', () => {
+    const zh = createI18nInstance('zh-Hans');
+    expect(zh.t('tabs.home')).toBe('首页');
+    expect(zh.t('market.reviews.count', { count: 1 })).toBe('1条评价');
+    expect(zh.t('market.reviews.count', { count: 5 })).toBe('5条评价');
+  });
+
   it('keeps the dedicated zero message', () => {
     expect(createI18nInstance('en').t('invitationKeys.removeOld', { count: 0 })).toBe(
       'Remove old devices',

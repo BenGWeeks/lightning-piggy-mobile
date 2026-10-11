@@ -46,6 +46,22 @@ describe('supportedLocaleForDevice', () => {
     expect(supportedLocaleForDevice('EN-gb')).toBe('en');
   });
 
+  it('maps every Chinese tag to Simplified (Traditional falls back to it for now)', () => {
+    for (const tag of [
+      'zh',
+      'zh-CN',
+      'zh-Hans',
+      'zh-Hans-CN',
+      'zh_CN',
+      'zh-SG',
+      'zh-Hant-TW',
+      'zh-TW',
+    ]) {
+      expect(supportedLocaleForDevice(tag)).toBe('zh-Hans');
+    }
+    expect(resolveLocale('system', 'zh-Hans-CN')).toBe('zh-Hans');
+  });
+
   it('returns null for a language without a catalogue, or no tag at all', () => {
     expect(supportedLocaleForDevice('fr-FR')).toBeNull();
     expect(supportedLocaleForDevice('')).toBeNull();

@@ -34,6 +34,7 @@ const LOCALE_LABELS: Record<(typeof SUPPORTED_LOCALES)[number], string> = {
   pl: 'Polski',
   uk: 'Українська',
   mr: 'मराठी',
+  'zh-Hans': '中文（简体）',
 };
 
 /**
