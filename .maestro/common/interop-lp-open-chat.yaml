@@ -1,0 +1,37 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+---
+# Building block (never run alone) for .maestro/interop/: open one Lightning
+# Piggy chat by its exact Messages-row testID, ${ROW_ID} — e.g.
+# `group-row-marmot:<group id>` for the run's fresh group, or
+# `conversation-row-<middle hex>:marmot` for the Marmot 1:1. The runner passes
+# the id of a group it just created, so this can never open a real chat.
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 15000
+# A cold start may restore the last chat; back out to the tabs.
+- repeat:
+    times: 3
+    while:
+      notVisible:
+        id: 'tab-messages'
+    commands:
+      - pressKey: back
+      - waitForAnimationToEnd:
+          timeout: 1500
+- tapOn:
+    id: 'tab-messages'
+- scrollUntilVisible:
+    element:
+      id: '${ROW_ID}'
+    direction: DOWN
+    timeout: 60000
+    visibilityPercentage: 50
+- tapOn:
+    id: '${ROW_ID}'
+- extendedWaitUntil:
+    visible:
+      id: '(group-message-input|conversation-input)'
+    timeout: 90000
+- waitForAnimationToEnd:
+    timeout: 5000

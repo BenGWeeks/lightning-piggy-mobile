@@ -1,0 +1,18 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Interop — Lightning Piggy receives the scripted sender's message after its own rename
+---
+# After flow-149's rename, the scripted sender (which processed Lightning
+# Piggy's rename commit) sent "IO<tag> after-rename". Lightning Piggy must
+# show it — the group still works for Lightning Piggy after its own change.
+#
+# Env: ROW_ID=group-row-marmot:<group id>, TAG=<run tag>.
+- runFlow:
+    file: ../common/interop-lp-open-chat.yaml
+- scrollUntilVisible:
+    label: 'IO-CHECK lp-side.after-rename'
+    element:
+      text: 'IO${TAG} after-rename'
+    direction: DOWN
+    timeout: 60000
+    optional: true
+- takeScreenshot: lp-after-rename

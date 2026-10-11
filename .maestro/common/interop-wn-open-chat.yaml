@@ -1,0 +1,37 @@
+appId: dev.ipf.whitenoise.android
+---
+# Building block (never run alone) for .maestro/interop/: open the run's
+# group in White Noise (third-party UI — text selectors only, its English copy
+# as of White Noise Android 2026.10.3) and accept the invite if it's pending.
+# ${WN_CHAT} is the exact group name the runner created ("IO <tag>"), so it
+# can't match a real chat. White Noise must be on the Little Piggy account.
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 10000
+# Back out of any open chat to the chat list.
+- repeat:
+    times: 3
+    while:
+      notVisible:
+        text: 'Chats'
+    commands:
+      - pressKey: back
+      - waitForAnimationToEnd:
+          timeout: 1500
+- scrollUntilVisible:
+    element:
+      text: '${WN_CHAT}'
+    direction: DOWN
+    timeout: 90000
+- tapOn:
+    text: '${WN_CHAT}'
+- runFlow:
+    when:
+      visible:
+        text: 'Accept'
+    commands:
+      - tapOn:
+          text: 'Accept'
+      - waitForAnimationToEnd:
+          timeout: 5000

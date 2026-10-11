@@ -1,0 +1,181 @@
+appId: dev.ipf.whitenoise.android
+name: Interop — White Noise renders what the scripted Marmot sender sent (group)
+---
+# White Noise side of flow-145: same group, same items, asserted with text
+# selectors (White Noise is a third-party app; no testIDs). White Noise must be
+# signed in as Little Piggy — the runner checks the invite is visible.
+#
+# Fragility: these selectors depend on White Noise's English copy and
+# rendering (2026.10.3). It renders Markdown and decodes HTML entities, so
+# those items match on the marker only; media match on the filename White
+# Noise exposes as the bubble's accessibility label.
+#
+# Env: WN_CHAT="IO <tag>", TAG=<run tag>.
+- runFlow:
+    file: ../common/interop-wn-open-chat.yaml
+- scrollUntilVisible:
+    label: 'IO-CHECK contact'
+    element:
+      text: '(?s).*IO${TAG} contact.*'
+    direction: UP
+    timeout: 20000
+    visibilityPercentage: 30
+    optional: true
+- takeScreenshot: wn-group-contact
+- scrollUntilVisible:
+    label: 'IO-CHECK location'
+    element:
+      text: '(?s).*IO${TAG} location.*'
+    direction: UP
+    timeout: 20000
+    visibilityPercentage: 30
+    optional: true
+- takeScreenshot: wn-group-location
+- scrollUntilVisible:
+    label: 'IO-CHECK invoice'
+    element:
+      text: '(?s).*IO${TAG} invoice lnbc.*'
+    direction: UP
+    timeout: 20000
+    visibilityPercentage: 30
+    optional: true
+- takeScreenshot: wn-group-invoice
+- scrollUntilVisible:
+    label: 'IO-CHECK voice'
+    element:
+      text: '.*interop-voice.*'
+    direction: UP
+    timeout: 20000
+    visibilityPercentage: 30
+    optional: true
+- takeScreenshot: wn-group-voice
+- scrollUntilVisible:
+    label: 'IO-CHECK image'
+    element:
+      text: '.*interop-image.*'
+    direction: UP
+    timeout: 20000
+    visibilityPercentage: 30
+    optional: true
+- takeScreenshot: wn-group-image
+- scrollUntilVisible:
+    label: 'IO-CHECK edit'
+    element:
+      text: '.*IO${TAG} editme v2 edited.*'
+    direction: UP
+    timeout: 20000
+    visibilityPercentage: 30
+    optional: true
+- takeScreenshot: wn-group-edit
+- assertNotVisible:
+    label: 'IO-CHECK delete'
+    text: '.*IO${TAG} deleteme should disappear.*'
+    optional: true
+- scrollUntilVisible:
+    label: 'IO-CHECK reply'
+    element:
+      text: '.*IO${TAG} reply: replying to plain.*'
+    direction: UP
+    timeout: 20000
+    visibilityPercentage: 30
+    optional: true
+- takeScreenshot: wn-group-reply
+- scrollUntilVisible:
+    label: 'IO-CHECK text.zw'
+    element:
+      text: '(?s).*IO${TAG} zw.*'
+    direction: UP
+    timeout: 20000
+    visibilityPercentage: 30
+    optional: true
+- takeScreenshot: wn-group-text-zw
+- scrollUntilVisible:
+    label: 'IO-CHECK text.word'
+    element:
+      text: '(?s).*IO${TAG} word.*'
+    direction: UP
+    timeout: 20000
+    visibilityPercentage: 30
+    optional: true
+- takeScreenshot: wn-group-text-word
+- scrollUntilVisible:
+    label: 'IO-CHECK text.long'
+    element:
+      text: '(?s).*IO${TAG} long.*'
+    direction: UP
+    timeout: 20000
+    visibilityPercentage: 30
+    optional: true
+- takeScreenshot: wn-group-text-long
+- scrollUntilVisible:
+    label: 'IO-CHECK text.html'
+    element:
+      text: '(?s).*IO${TAG} html.*'
+    direction: UP
+    timeout: 20000
+    visibilityPercentage: 30
+    optional: true
+- takeScreenshot: wn-group-text-html
+- scrollUntilVisible:
+    label: 'IO-CHECK text.js'
+    element:
+      text: '(?s).*IO${TAG} js.*'
+    direction: UP
+    timeout: 20000
+    visibilityPercentage: 30
+    optional: true
+- takeScreenshot: wn-group-text-js
+- scrollUntilVisible:
+    label: 'IO-CHECK text.json'
+    element:
+      text: '(?s).*IO${TAG} json.*'
+    direction: UP
+    timeout: 20000
+    visibilityPercentage: 30
+    optional: true
+- takeScreenshot: wn-group-text-json
+- scrollUntilVisible:
+    label: 'IO-CHECK text.md'
+    element:
+      text: '(?s).*IO${TAG} md.*'
+    direction: UP
+    timeout: 20000
+    visibilityPercentage: 30
+    optional: true
+- takeScreenshot: wn-group-text-md
+- scrollUntilVisible:
+    label: 'IO-CHECK text.emoji'
+    element:
+      text: '(?s).*IO${TAG} emoji.*'
+    direction: UP
+    timeout: 20000
+    visibilityPercentage: 30
+    optional: true
+- takeScreenshot: wn-group-text-emoji
+- scrollUntilVisible:
+    label: 'IO-CHECK react'
+    element:
+      text: '❤️, 1 reaction'
+    direction: UP
+    timeout: 20000
+    visibilityPercentage: 30
+    optional: true
+- takeScreenshot: wn-group-react
+- scrollUntilVisible:
+    label: 'IO-CHECK text.zh'
+    element:
+      text: '.*IO${TAG} zh: .*'
+    direction: UP
+    timeout: 20000
+    visibilityPercentage: 30
+    optional: true
+- takeScreenshot: wn-group-text-zh
+- scrollUntilVisible:
+    label: 'IO-CHECK text.plain'
+    element:
+      text: '.*IO${TAG} plain: .*'
+    direction: UP
+    timeout: 20000
+    visibilityPercentage: 30
+    optional: true
+- takeScreenshot: wn-group-text-plain

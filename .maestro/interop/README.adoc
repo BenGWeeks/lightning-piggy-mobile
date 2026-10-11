@@ -1,0 +1,116 @@
+= Marmot interop suite (Lightning Piggy ↔ White Noise)
+
+A replayable check that Lightning Piggy's Marmot (MLS) chats interoperate
+with White Noise. One run covers the matrix in minutes, holding a device lock
+only while Maestro is driving.
+
+== How it works
+
+. *Scripted sender, no UI.* `scripts/interop/marmot-sender.mjs` signs in as a
+  test Piggy (Middle by default) on its *own* MLS device, creates a fresh group
+  `IO <tag>` and invites every Lightning Piggy install of Big Piggy and Little
+  Piggy's White Noise in one commit (the multi-device path, #1239). It then
+  sends the item set from `scripts/interop/items.mjs`: the text set (plain,
+  Chinese, emoji, Markdown, JSON, JavaScript, HTML, a long post, a 300-letter
+  word, zero-width/RTL/Zalgo), a reply, two reactions and an un-react, an edit,
+  a delete, an image and a voice note (MIP-04, on White Noise's Blossom
+  servers), an invoice (an *expired* 21-sat test invoice — never payable), a
+  location and a contact card. It also opens a Marmot 1:1 with Big for the
+  reply/reaction subset, since Lightning Piggy has no reactions in groups yet.
+. *Maestro verifies on screen*, one labelled, `optional` check per item, so a
+  missing item doesn't hide the rest. Every message carries the run's marker
+  `IO<tag> <item>`, so a check can never pass on a leftover bubble.
+. *Lightning Piggy → White Noise:* Lightning Piggy sends its own items through
+  the real UI (flow-147). The scripted member confirms they arrived on the
+  wire (`listen`), and White Noise confirms they render (flow-148).
+. *Membership/metadata changes:* the sender makes Big an admin, Lightning
+  Piggy renames the group and sends straight away (the #1309 path), and both
+  apps are checked for the post-change messages.
+
+|===
+| Flow | Device app | Checks
+
+| `flow-145-interop-lp-receives-group` | Lightning Piggy | every sender item in the group
+| `flow-146-interop-wn-receives-group` | White Noise | every sender item in the group (accepts the invite)
+| `flow-147-interop-lp-sends-group` | Lightning Piggy | sends text, edit, delete, photo
+| `flow-148-interop-wn-receives-lp` | White Noise | Lightning Piggy's items + post-rename/admin messages + new name
+| `flow-149-interop-lp-rename-after-admin` | Lightning Piggy | sees the admin-change message, renames, sends
+| `flow-150-interop-lp-receives-after-rename` | Lightning Piggy | receives after its own rename
+| `flow-151-interop-lp-receives-dm` | Lightning Piggy | reply quote, reactions, un-react, edit, delete in a Marmot 1:1
+|===
+
+Shared building blocks: `common/interop-lp-open-chat.yaml` (opens a chat by
+its exact Messages-row testID) and `common/interop-wn-open-chat.yaml` (opens
+the run's group in White Noise by its exact name and accepts the invite).
+
+== Running it
+
+Prerequisites on the device (default `emulator-5554`):
+
+* Lightning Piggy dev client signed in as *Big Piggy*.
+* White Noise (`dev.ipf.whitenoise.android`) signed in as *Little Piggy*, and
+  that account active (White Noise supports several accounts; an invite for
+  another account switches it).
+* `.env` with `MAESTRO_NSEC_BIG`, `MAESTRO_NSEC_MIDDLE`, `MAESTRO_NSEC_LITTLE`.
+* Maestro on `PATH`, `jq`, Node.
+
+[source,bash]
+----
+bash scripts/interop/run.sh
+# against a branch bundle on your own Metro (restored to 8090 afterwards):
+METRO_PORT=8271 bash scripts/interop/run.sh
+# Lightning Piggy only:
+SKIP_WN=1 bash scripts/interop/run.sh
+----
+
+Output: `~/lp-interop-runs/<date>-<tag>/` with `matrix.md`, `screenshots/` and
+`logs/` (Maestro output and the sender's JSON lines, nsecs redacted).
+
+Locks: the runner takes `$LOCK_DIR/emulator.lock` (default
+`/tmp/claude-$UID`) only around Maestro steps, with `maestro.lock` inside it
+per flow, so other users of the lane get turns between steps.
+
+The sender is also useful on its own, e.g. to poke an existing group:
+
+[source,bash]
+----
+source .env && export INTEROP_NSEC=$MAESTRO_NSEC_MIDDLE
+node scripts/interop/marmot-sender.mjs create --state /tmp/io.json --name "IO test" \
+  --invite "<big hex>@Lightning Piggy,<little hex>@White Noise"
+node scripts/interop/marmot-sender.mjs send --state /tmp/io.json --tag abcd --only text,reply,react
+node scripts/interop/marmot-sender.mjs rename --state /tmp/io.json --name "IO renamed"
+node scripts/interop/marmot-sender.mjs listen --state /tmp/io.json --seconds 60 --expect "hello"
+----
+
+== Safety
+
+* Only the three Piggy test accounts are ever involved; groups are created
+  fresh per run and opened by their exact id / name.
+* Nothing is paid: the invoice is expired, and no zap or wallet action runs.
+* The sender never uses relay.damus.io (it rate-limit-bans the dev machine's
+  IP). It uses nos.lol, relay.primal.net and nostr.mom, and Welcomes go to
+  each invitee's kind-10050 inbox.
+* Each run adds one group to every invited install of Big Piggy and to Little
+  Piggy's White Noise. They're labelled `IO <tag>`.
+
+== Known gaps and fragility
+
+* *White Noise selectors are text-based* (third-party UI, no testIDs) and tied
+  to its English copy and rendering in 2026.10.3: it renders Markdown and
+  decodes HTML entities (checks match the marker only), and labels media by
+  filename. A White Noise release can break them without any interop change.
+* *Groups have no reactions or Reply in Lightning Piggy* (#1328), so the
+  reaction checks in flow-145 are expected to fail until that ships; the 1:1
+  flow (flow-151) covers reactions.
+* *#1309*: after a Lightning Piggy rename or admin change, White Noise stops
+  receiving. flow-148's `lp.after-lp-rename` / `lp.renamed-title` checks
+  fail until it's fixed.
+* Not covered yet: polls (White Noise has none), live location, leave /
+  remove member, White Noise-initiated 1:1s and White Noise *sending* (its
+  composer and long-press menus aren't in the accessibility tree; the
+  scripted sender stands in for a White Noise peer on the wire), Amethyst.
+* Maestro's `inputText` is ASCII-safe only, so Lightning Piggy's own sends use
+  ASCII; the Unicode text set runs in the sender → app direction.
+* The sender's MLS state lives in `~/.cache/lp-interop-sender/<pubkey>`. If
+  it's deleted, old run groups become unreachable for the sender (new runs
+  are unaffected).

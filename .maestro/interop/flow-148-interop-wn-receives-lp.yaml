@@ -1,0 +1,81 @@
+appId: dev.ipf.whitenoise.android
+name: Interop — White Noise renders what Lightning Piggy sent (group), plus post-change messages
+---
+# White Noise side of flow-147, then the membership-change checks: after the
+# runner's rename / admin change, the scripted sender and Lightning Piggy
+# each send one more message (flow-149), and White Noise must show them and
+# the new name. A miss there is #1309 ("White Noise stops receiving after a
+# Lightning Piggy rename or admin change").
+#
+# Env: WN_CHAT="IO <tag>" (the original name — White Noise keeps its row even
+# if it never learns the rename), TAG=<run tag>.
+- runFlow:
+    file: ../common/interop-wn-open-chat.yaml
+- scrollUntilVisible:
+    label: 'IO-CHECK lp.after-lp-rename'
+    element:
+      text: '.*IO${TAG}L after-lp-rename.*'
+    direction: UP
+    timeout: 20000
+    optional: true
+- scrollUntilVisible:
+    label: 'IO-CHECK lp.after-admins'
+    element:
+      text: '.*IO${TAG} after-admins.*'
+    direction: UP
+    timeout: 20000
+    optional: true
+- scrollUntilVisible:
+    label: 'IO-CHECK lp.after-rename'
+    element:
+      text: '.*IO${TAG} after-rename.*'
+    direction: UP
+    timeout: 20000
+    optional: true
+- assertVisible:
+    label: 'IO-CHECK lp.renamed-title'
+    text: 'IO ${TAG} renamed'
+    optional: true
+- takeScreenshot: wn-lp-after-changes
+- scrollUntilVisible:
+    label: 'IO-CHECK lp.image'
+    element:
+      text: '.*(photo|image|interop).*'
+    direction: UP
+    timeout: 20000
+    optional: true
+- takeScreenshot: wn-lp-image
+- assertNotVisible:
+    label: 'IO-CHECK lp.delete'
+    text: '.*IO${TAG}L deleteme should disappear.*'
+    optional: true
+- scrollUntilVisible:
+    label: 'IO-CHECK lp.edit'
+    element:
+      text: '.*IO${TAG}L editme v1 EDITED.*'
+    direction: UP
+    timeout: 20000
+    optional: true
+- takeScreenshot: wn-lp-edit
+- scrollUntilVisible:
+    label: 'IO-CHECK lp.long'
+    element:
+      text: '(?s).*IO${TAG}L long.*'
+    direction: UP
+    timeout: 20000
+    optional: true
+- scrollUntilVisible:
+    label: 'IO-CHECK lp.md'
+    element:
+      text: '(?s).*IO${TAG}L md.*'
+    direction: UP
+    timeout: 20000
+    optional: true
+- scrollUntilVisible:
+    label: 'IO-CHECK lp.plain'
+    element:
+      text: '.*IO${TAG}L plain.*'
+    direction: UP
+    timeout: 20000
+    optional: true
+- takeScreenshot: wn-lp-text

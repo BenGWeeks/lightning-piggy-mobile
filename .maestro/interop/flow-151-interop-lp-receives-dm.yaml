@@ -1,0 +1,82 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Interop — Lightning Piggy renders replies, reactions, edits and deletes in a Marmot 1:1
+---
+# Lightning Piggy only has reactions and Reply in Marmot 1:1 chats (groups
+# have none — #1328), so the runner also has the scripted sender open a
+# White Noise-shaped Marmot DM with Big Piggy (no name, both admins) and send
+# the interaction subset of the item set into it.
+#
+# Env: ROW_ID=conversation-row-<sender hex>:marmot, TAG=<run tag>.
+- runFlow:
+    file: ../common/interop-lp-open-chat.yaml
+- scrollUntilVisible:
+    label: 'IO-CHECK dm.edit'
+    element:
+      text: 'IO${TAG} editme v2 edited'
+    direction: UP
+    timeout: 20000
+    visibilityPercentage: 30
+    optional: true
+- takeScreenshot: lp-dm-edit
+- assertNotVisible:
+    label: 'IO-CHECK dm.delete'
+    text: 'IO${TAG} deleteme should disappear'
+    optional: true
+- scrollUntilVisible:
+    label: 'IO-CHECK dm.reply'
+    element:
+      text: 'IO${TAG} reply: replying to plain'
+    direction: UP
+    timeout: 20000
+    visibilityPercentage: 30
+    optional: true
+- takeScreenshot: lp-dm-reply
+- scrollUntilVisible:
+    label: 'IO-CHECK dm.reply.quote'
+    element:
+      id: 'conversation-quote-.*'
+    direction: UP
+    timeout: 20000
+    visibilityPercentage: 30
+    optional: true
+- takeScreenshot: lp-dm-reply-quote
+- scrollUntilVisible:
+    label: 'IO-CHECK dm.text.emoji'
+    element:
+      text: 'IO${TAG} emoji: .*'
+    direction: UP
+    timeout: 20000
+    visibilityPercentage: 30
+    optional: true
+- takeScreenshot: lp-dm-text-emoji
+- assertNotVisible:
+    label: 'IO-CHECK dm.unreact'
+    id: 'conversation-reaction-.*-👍'
+    optional: true
+- scrollUntilVisible:
+    label: 'IO-CHECK dm.text.zh'
+    element:
+      text: 'IO${TAG} zh: .*'
+    direction: UP
+    timeout: 20000
+    visibilityPercentage: 30
+    optional: true
+- takeScreenshot: lp-dm-text-zh
+- scrollUntilVisible:
+    label: 'IO-CHECK dm.react'
+    element:
+      id: 'conversation-reaction-.*-❤️'
+    direction: UP
+    timeout: 20000
+    visibilityPercentage: 30
+    optional: true
+- takeScreenshot: lp-dm-react
+- scrollUntilVisible:
+    label: 'IO-CHECK dm.text.plain'
+    element:
+      text: 'IO${TAG} plain: .*'
+    direction: UP
+    timeout: 20000
+    visibilityPercentage: 30
+    optional: true
+- takeScreenshot: lp-dm-text-plain

@@ -1,0 +1,88 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Interop — Lightning Piggy sends the item set into the run's Marmot group
+---
+# Lightning Piggy → others. Big Piggy sends ASCII text items, an image, an
+# edit and a delete through the real UI into the run's fresh group. The
+# runner then verifies them twice: on the wire (marmot-sender.mjs `listen`,
+# the scripted member) and on screen (flow-148, White Noise).
+#
+# Markers are `IO<tag>L <key>` (L = sent by Lightning Piggy). Maestro's
+# inputText is ASCII-safe; the Unicode text set is covered by the
+# scripted-sender direction (flow-145 / flow-146).
+#
+# The photo comes from the system photo picker (an OS surface — no testIDs);
+# the runner pushes .maestro/interop/fixtures/interop-image.png to the device
+# first, and the picker's own accessibility label "Photo taken on …" selects
+# the newest photo.
+#
+# Env: ROW_ID=group-row-marmot:<group id>, TAG=<run tag>.
+- runFlow:
+    file: ../common/interop-lp-open-chat.yaml
+- tapOn:
+    id: 'group-message-input'
+- inputText: 'IO${TAG}L plain: TEST please ignore, sent from Lightning Piggy'
+- tapOn:
+    id: 'group-send-button'
+- tapOn:
+    id: 'group-message-input'
+- inputText: 'IO${TAG}L md: **bold** _italic_ `code`'
+- tapOn:
+    id: 'group-send-button'
+- tapOn:
+    id: 'group-message-input'
+- inputText: 'IO${TAG}L long: Piggy saving sentence one. Piggy saving sentence two. Piggy saving sentence three. Piggy saving sentence four. Piggy saving sentence five. Piggy saving sentence six.'
+- tapOn:
+    id: 'group-send-button'
+- tapOn:
+    id: 'group-message-input'
+- inputText: 'IO${TAG}L editme v1'
+- tapOn:
+    id: 'group-send-button'
+- tapOn:
+    id: 'group-message-input'
+- inputText: 'IO${TAG}L deleteme should disappear'
+- tapOn:
+    id: 'group-send-button'
+- hideKeyboard
+- waitForAnimationToEnd:
+    timeout: 5000
+# Edit: the composer is prefilled with the old text; append to it (Maestro's
+# eraseText doesn't clear a prefilled RN TextInput reliably).
+- longPressOn:
+    text: 'IO${TAG}L editme v1'
+- tapOn:
+    id: 'message-action-edit'
+- inputText: ' EDITED'
+- tapOn:
+    id: 'group-send-button'
+- hideKeyboard
+- waitForAnimationToEnd:
+    timeout: 5000
+- longPressOn:
+    text: 'IO${TAG}L deleteme should disappear'
+- tapOn:
+    id: 'message-action-delete'
+- runFlow:
+    when:
+      visible:
+        id: 'branded-alert-button-1'
+    commands:
+      - tapOn:
+          id: 'branded-alert-button-1'
+- waitForAnimationToEnd:
+    timeout: 3000
+# Photo via the attachment panel + system picker.
+- tapOn:
+    id: 'group-attach-button'
+- tapOn:
+    id: 'attach-send-image'
+- extendedWaitUntil:
+    visible:
+      text: 'Photo taken on .*'
+    timeout: 15000
+- tapOn:
+    text: 'Photo taken on .*'
+    index: 0
+- waitForAnimationToEnd:
+    timeout: 15000
+- takeScreenshot: lp-sent-group
