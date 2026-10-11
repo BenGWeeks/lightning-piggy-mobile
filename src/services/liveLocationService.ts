@@ -28,8 +28,7 @@
  *      a kind in this range we can migrate.
  */
 
-import type { SharedLocation } from './locationService';
-import { buildOsmViewUrl, formatGeoMessage } from './locationService';
+import { buildOsmViewUrl, formatGeoMessage, type SharedLocation } from '../utils/geoMessage';
 
 /**
  * Ephemeral kind for live-location coordinate pings. NIP-01 reserves

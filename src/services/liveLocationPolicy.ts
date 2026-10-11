@@ -14,7 +14,7 @@
 
 import { haversineMetres } from '../utils/geohash';
 import { expiryFor, type LivePingPayload } from './liveLocationService';
-import type { SharedLocation } from './locationService';
+import type { SharedLocation } from '../utils/geoMessage';
 import type { OutgoingSession } from './liveLocationStateMachine';
 
 export const LIVE_UPDATE_MIN_INTERVAL_MS = 30_000;

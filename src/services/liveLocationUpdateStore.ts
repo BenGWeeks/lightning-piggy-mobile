@@ -15,7 +15,7 @@
  * can never move someone else's marker.
  */
 
-import type { SharedLocation } from './locationService';
+import type { SharedLocation } from '../utils/geoMessage';
 import type { LivePingPayload } from './liveLocationService';
 
 export interface LiveUpdate {

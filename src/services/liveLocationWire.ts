@@ -25,7 +25,7 @@
  */
 
 import { t } from '../i18n';
-import type { SharedLocation } from './locationService';
+import type { SharedLocation } from '../utils/geoMessage';
 import {
   LIVE_LOCATION_PING_KIND,
   MAX_DURATION_MS,
