@@ -48,6 +48,10 @@ import {
 } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useLocale } from '../contexts/LocaleContext';
+import {
+  crossDevicePrizeLine as formatCrossDevicePrizeLine,
+  validatedSatsLine as formatValidatedSatsLine,
+} from '../utils/huntPrizeLines';
 import { useNostr } from '../contexts/NostrContext';
 import { createHuntCreateScreenStyles } from '../styles/HuntCreateScreen.styles';
 import {
@@ -1152,30 +1156,16 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
 
   // ----- presentation helpers ------------------------------------------------
 
-  const validatedSatsLine = (() => {
-    if (stage.kind !== 'validated') return null;
-    const min = msatToSats(stage.params.minWithdrawable);
-    const max = msatToSats(stage.params.maxWithdrawable);
-    // Never advertise "0 sats per claim" — a 0/undefined maxWithdrawable
-    // means we don't actually know the prize (link not present, or an
-    // older record), not that the prize is zero (#681 review).
-    if (max <= 0) return null;
-    return min === max
-      ? t('huntCreateScreen.satsPerClaim', { amount: max.toLocaleString(formatLocale) })
-      : t('huntCreateScreen.satsPerClaimRange', {
-          min: min.toLocaleString(formatLocale),
-          max: max.toLocaleString(formatLocale),
-        });
-  })();
-  // Prize hint for the cross-device card — taken from the editable field
-  // (pre-filled from the published `amount`). Shown only when known/>0; we
-  // never surface "0 sats" or a green "validated" tick we didn't earn.
-  const crossDevicePrizeLine = (() => {
-    const n = parseInt(amountSatsText.trim(), 10);
-    return Number.isFinite(n) && n > 0
-      ? t('huntCreateScreen.prizeLine', { amount: n.toLocaleString(formatLocale) })
+  const validatedSatsLine =
+    stage.kind === 'validated'
+      ? formatValidatedSatsLine(
+          stage.params.minWithdrawable,
+          stage.params.maxWithdrawable,
+          t,
+          formatLocale,
+        )
       : null;
-  })();
+  const crossDevicePrizeLine = formatCrossDevicePrizeLine(amountSatsText, t, formatLocale);
 
   // True when the NFC step's primary button should be enabled. Step 5
   // (Publish) sets stage='saved' or 'wrote-nfc' in the fresh-hide
