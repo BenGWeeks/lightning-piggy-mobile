@@ -1,0 +1,102 @@
+/**
+ * The ongoing "Sharing your location with … · Stop sharing" notification for
+ * an active live-location share (#1300), Android only.
+ *
+ * expo-location's foreground-service notification (which keeps the share
+ * running in the background) can't carry action buttons — tapping it only
+ * opens the app — so this companion notification carries the Stop action.
+ * The action doesn't open the app (`opensAppToForeground: false`); the
+ * provider's response listener stops every share. Tapping the body opens the
+ * chat. iOS has no ongoing notifications: there the system's blue location
+ * pill is the indicator, and tapping it opens the app.
+ */
+
+import { Platform } from 'react-native';
+import * as Notifications from 'expo-notifications';
+import { t } from '../i18n';
+
+export const LIVE_LOCATION_STOP_ACTION = 'stop-live-location';
+const CATEGORY = 'live-location';
+const CHANNEL = 'live-location';
+const NOTIFICATION_ID = 'live-location-share';
+
+let prepared: Promise<void> | null = null;
+
+function prepare(): Promise<void> {
+  prepared ??= (async () => {
+    await Notifications.setNotificationChannelAsync(CHANNEL, {
+      name: t('liveLocationTracking.channelName'),
+      importance: Notifications.AndroidImportance.LOW,
+      sound: null,
+      vibrationPattern: null,
+      showBadge: false,
+    });
+    await Notifications.setNotificationCategoryAsync(CATEGORY, [
+      {
+        identifier: LIVE_LOCATION_STOP_ACTION,
+        buttonTitle: t('liveLocationTracking.stopAction'),
+        options: { opensAppToForeground: false },
+      },
+    ]);
+  })().catch((e) => {
+    prepared = null;
+    throw e;
+  });
+  return prepared;
+}
+
+/** Notification copy for the active shares (pure — unit-tested). */
+export function liveShareNotificationText(
+  shares: { label?: string; groupId?: string; expiresAt: number }[],
+  formatTime: (ms: number) => string,
+): { title: string; body: string } {
+  const until = Math.max(...shares.map((s) => s.expiresAt));
+  const body = t('liveLocationTracking.body', { time: formatTime(until) });
+  if (shares.length === 1) {
+    const [s] = shares;
+    const name =
+      s.label || t(s.groupId ? 'liveLocationTracking.aGroup' : 'liveLocationTracking.aFriend');
+    return { title: t('liveLocationTracking.titleOne', { name }), body };
+  }
+  return { title: t('liveLocationTracking.titleMany', { count: shares.length }), body };
+}
+
+/**
+ * Show (or refresh) the ongoing notification. `route` makes a tap on its body
+ * open the chat, through the app's normal notification router.
+ */
+export async function showLiveShareNotification(input: {
+  title: string;
+  body: string;
+  route?: { kind: 'dm'; conversationPubkey: string } | { kind: 'group'; groupId: string };
+}): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  try {
+    await prepare();
+    await Notifications.scheduleNotificationAsync({
+      identifier: NOTIFICATION_ID,
+      content: {
+        title: input.title,
+        body: input.body,
+        sticky: true,
+        autoDismiss: false,
+        categoryIdentifier: CATEGORY,
+        priority: Notifications.AndroidNotificationPriority.LOW,
+        // `quiet`: no heads-up banner or sound (see notificationService).
+        data: { ...(input.route ?? {}), quiet: true, liveLocation: true },
+      },
+      trigger: { channelId: CHANNEL },
+    });
+  } catch {
+    // Best-effort: the share works without it (Stop stays in the chat).
+  }
+}
+
+export async function dismissLiveShareNotification(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  await Notifications.dismissNotificationAsync(NOTIFICATION_ID).catch(() => undefined);
+}
+
+/** True for a press of the notification's Stop sharing action. */
+export const isLiveShareStopResponse = (response: Notifications.NotificationResponse | null) =>
+  response?.actionIdentifier === LIVE_LOCATION_STOP_ACTION;

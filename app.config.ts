@@ -214,7 +214,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       'expo-location',
       {
         locationWhenInUsePermission:
-          'Allow Lightning Piggy to access your location to show nearby Bitcoin merchants and so you can share it (one-shot or live for a chosen duration) in a private message.',
+          'Allow Lightning Piggy to access your location to show nearby Bitcoin merchants and so you can share it in a chat, once or live for a time you choose. A live share keeps updating while the app is in the background until it ends or you stop it.',
         // Background location is needed for the opt-in "Alerts near Bitcoin
         // shops" (#467) — geofences fire even when the app is backgrounded
         // so the user gets the notification while walking past the shop.
@@ -224,6 +224,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         locationAlwaysAndWhenInUsePermission:
           'Allow Lightning Piggy to access your location even when the app is closed so we can alert you when you walk past a Bitcoin-accepting merchant. You can turn this off any time in Settings → Notifications → Alerts near Bitcoin shops.',
         isAndroidBackgroundLocationEnabled: true,
+        // iOS `UIBackgroundModes: location` (#1300): a live-location share
+        // keeps sending updates with the app minimised or the phone locked,
+        // like WhatsApp, under the "While in use" permission (iOS shows its
+        // blue location indicator). The geofence alerts above need it too.
+        // Android's equivalent — a location foreground service with a
+        // persistent notification — is already enabled by the line above
+        // (it defaults `isAndroidForegroundServiceEnabled` to true).
+        isIosBackgroundLocationEnabled: true,
       },
     ],
     // expo-audio — short voice-note recording in the message composer

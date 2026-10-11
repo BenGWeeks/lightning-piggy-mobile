@@ -11,6 +11,9 @@ import './src/services/backgroundDmHeadlessTask';
 // Side-effect import: defines the Marmot push-wake task (MIP-05) in the
 // global scope so an FCM message can run it with no React tree mounted.
 import './src/services/marmotPushWake';
+// Side-effect import: defines the live-location background task (#1300) so
+// the OS can deliver location updates while a share runs in the background.
+import './src/services/liveLocationTask';
 
 // Anchor T0 at the FIRST line of JS execution (this module is the
 // app's entry point per registerRootComponent below). Every later
