@@ -115,11 +115,12 @@ export class MarmotPushNotifier {
     try {
       for (const { server, relayHints, tokens } of targets) {
         if (this.stopped) return;
-        // Spec publish targets: the records' relay hints, else the server's
-        // own 10050 inbox — never a default relay.
-        const relays = relayHints.length
-          ? relayHints
-          : await this.deps.transport.inboxRelays(server).catch(() => []);
+        // The records' relay hints AND the server's own 10050 inbox — never a
+        // default relay. One wrap carries every token for this server, so a
+        // stale hint (older builds advertised nos.lol, now down) must not
+        // swallow the trigger for the records that carry no hint.
+        const inbox = await this.deps.transport.inboxRelays(server).catch(() => [] as string[]);
+        const relays = [...new Set([...relayHints, ...inbox])];
         if (relays.length === 0) continue;
         // One server's failure (e.g. wrap encryption throwing) must not cost
         // the other servers their triggers.

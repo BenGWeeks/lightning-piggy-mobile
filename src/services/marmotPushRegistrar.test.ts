@@ -135,6 +135,49 @@ describe('MarmotPushRegistrar', () => {
     expect(view[0].record?.fingerprint).toBe(reg('token-2').fingerprint);
   });
 
+  it('dropping the relay hint re-signs each group exactly once — no 449, no loop', async () => {
+    // Built-in servers used to carry a nos.lol hint; records published then
+    // must be replaced by hint-less ones so senders use the server's 10050.
+    const g = group('aa'.repeat(16));
+    const t = setup({ groups: [g] });
+    t.registrar.setRegistration(reg('token-1'));
+    await t.registrar.sync({ interactive: false });
+    const noHint: DeviceRegistration = { ...reg('token-1'), relayHint: undefined };
+    t.registrar.setRegistration(noHint);
+    t.tick();
+    expect(await t.registrar.sync({ interactive: false })).toMatchObject({ published: 1 });
+    expect(t.sent.map((s) => s.kind)).toEqual([447, 447]);
+    const view = Object.values(await memberView(t.sent, g));
+    expect(view).toHaveLength(1);
+    expect(view[0].record).not.toHaveProperty('relayHint');
+    // Further passes (app restarts, group churn) leave it alone.
+    for (let i = 0; i < 3; i++) {
+      t.registrar.setRegistration({ ...noHint });
+      expect(await t.registrar.sync({ interactive: false })).toMatchObject({
+        published: 0,
+        pending: 0,
+      });
+    }
+    expect(await t.registrar.pendingCount()).toBe(0);
+    expect(t.prompts()).toBe(2);
+    expect(t.sent).toHaveLength(2);
+  });
+
+  it('a remote signer leaves the hint change pending in the background (no prompt)', async () => {
+    const g = group('aa'.repeat(16));
+    const t = setup({ groups: [g], silent: false });
+    t.registrar.setRegistration(reg('token-1'));
+    await t.registrar.sync({ interactive: true });
+    const noHint: DeviceRegistration = { ...reg('token-1'), relayHint: undefined };
+    t.registrar.setRegistration(noHint);
+    expect(await t.registrar.sync({ interactive: false })).toMatchObject({ pending: 1 });
+    expect(t.prompts()).toBe(1);
+    // The next user action (a send / "Finish setup") signs it, once.
+    expect(await t.registrar.sync({ interactive: true })).toMatchObject({ published: 1 });
+    expect(await t.registrar.sync({ interactive: true })).toMatchObject({ published: 0 });
+    expect(t.prompts()).toBe(2);
+  });
+
   it('moving to another server retracts the old record key first', async () => {
     const g = group('aa'.repeat(16));
     const t = setup({ groups: [g] });

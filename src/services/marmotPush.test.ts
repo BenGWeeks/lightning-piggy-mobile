@@ -186,6 +186,22 @@ describe('MIP-05 record state', () => {
     state = pruneToLeaves(state, new Set([leafKey(alice.pk, 1)]));
     expect(selectTriggerTargets(state, alice.pk, new Set([leafKey(alice.pk, 1)]))).toEqual([]);
   });
+
+  it('a record without a relay hint yields no hints (the sender uses the server 10050)', async () => {
+    // relay_hint: undefined is dropped by JSON.stringify, as a hint-less sender omits it.
+    const noHint = signedRecord(bob, { relayHint: undefined });
+    const state = await applyPushPayload(
+      {},
+      448,
+      payload('tokens', [noHint]),
+      { ...GROUP, leaves },
+      NOW,
+    );
+    expect(Object.values(state)[0].record).not.toHaveProperty('relayHint');
+    expect(selectTriggerTargets(state, alice.pk, leaves)).toEqual([
+      { server: 'ee'.repeat(32), relayHints: [], tokens: [expect.any(String)] },
+    ]);
+  });
 });
 
 describe('MIP-05 trigger (kind 446)', () => {

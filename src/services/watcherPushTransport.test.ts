@@ -15,7 +15,7 @@ import {
   publishToWatcher,
   watcherPublishTargets,
 } from './watcherPushTransport';
-import { WATCHER_PUBKEY } from './watcherRegistration';
+import { WATCHER_DEFAULT_RELAYS, WATCHER_PUBKEY } from './watcherRegistration';
 
 const wrap = { id: 'w', kind: 1059 } as never;
 
@@ -28,8 +28,12 @@ beforeEach(() => {
 describe('watcherPublishTargets', () => {
   it("prefers the watcher's open inbox relays over auth-gated damus", () => {
     expect(
-      watcherPublishTargets(['wss://relay.damus.io', 'wss://nos.lol/', 'wss://relay.primal.net']),
-    ).toEqual(['wss://nos.lol', 'wss://relay.primal.net']);
+      watcherPublishTargets([
+        'wss://relay.damus.io',
+        'wss://relay.ditto.pub/',
+        'wss://relay.primal.net',
+      ]),
+    ).toEqual(['wss://relay.ditto.pub', 'wss://relay.primal.net']);
   });
 
   it('keeps a relay path as written (paths are case-sensitive)', () => {
@@ -39,7 +43,7 @@ describe('watcherPublishTargets', () => {
   });
 
   it('falls back to the defaults, and to damus only when nothing else is listed', () => {
-    expect(watcherPublishTargets([])).toEqual(['wss://nos.lol', 'wss://relay.primal.net']);
+    expect(watcherPublishTargets([])).toEqual(WATCHER_DEFAULT_RELAYS);
     expect(watcherPublishTargets(['wss://relay.damus.io'])).toEqual(['wss://relay.damus.io']);
   });
 });
@@ -50,19 +54,24 @@ describe('publishToWatcher', () => {
       {
         created_at: 1,
         tags: [
-          ['relay', 'wss://nos.lol'],
+          ['relay', 'wss://relay.ditto.pub'],
           ['relay', 'wss://inbox.example.com'],
         ],
       },
     ]);
     mockPublish.mockReturnValue([Promise.reject(new Error('blocked')), Promise.resolve('ok')]);
     await expect(publishToWatcher(wrap)).resolves.toBe(true);
+    // Looked up on the watcher's own relays — never damus (AUTH-gated) or nos.lol (down).
+    expect(mockQuerySync.mock.calls[0][0]).toEqual(WATCHER_DEFAULT_RELAYS);
     expect(mockQuerySync.mock.calls[0][1]).toEqual({
       kinds: [10050],
       authors: [WATCHER_PUBKEY],
       limit: 1,
     });
-    expect(mockPublish).toHaveBeenCalledWith(['wss://nos.lol', 'wss://inbox.example.com'], wrap);
+    expect(mockPublish).toHaveBeenCalledWith(
+      ['wss://relay.ditto.pub', 'wss://inbox.example.com'],
+      wrap,
+    );
     // The inbox list is cached.
     await publishToWatcher(wrap);
     expect(mockQuerySync).toHaveBeenCalledTimes(1);
@@ -72,6 +81,6 @@ describe('publishToWatcher', () => {
     mockQuerySync.mockRejectedValue(new Error('offline'));
     mockPublish.mockReturnValue([Promise.reject(new Error('x')), Promise.reject(new Error('y'))]);
     await expect(publishToWatcher(wrap)).resolves.toBe(false);
-    expect(mockPublish).toHaveBeenCalledWith(['wss://nos.lol', 'wss://relay.primal.net'], wrap);
+    expect(mockPublish).toHaveBeenCalledWith(WATCHER_DEFAULT_RELAYS, wrap);
   });
 });

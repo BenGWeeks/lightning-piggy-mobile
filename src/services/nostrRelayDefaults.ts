@@ -53,3 +53,18 @@ export const NIP46_PAIRING_RELAYS = [
   'wss://relay.ditto.pub',
   'wss://nos.lol',
 ];
+
+/**
+ * Where Lightning Piggy's Marmot push servers (Transponder) listen and publish
+ * their kind-10050 inbox list. Push records carry no relay hint, so a sender
+ * finds a server's relays from that 10050 — these are queried first so the
+ * lookup lands where the list lives. Server-side setting: keep in step with
+ * the servers' config (no app release needed to move them; this list only
+ * helps the lookup).
+ */
+export const MARMOT_PUSH_SERVER_RELAYS = [
+  'wss://relay.eu.whitenoise.chat',
+  'wss://relay.ditto.pub',
+  'wss://relay.coinos.io',
+  'wss://relay.primal.net',
+];

@@ -136,6 +136,12 @@ describe('server selection', () => {
     expect(builtInServer('com.lightningpiggy.app.preview', npub)).toBe(BUILT_IN_SERVERS.preview);
   });
 
+  it('built-in servers carry no relay hint (their relays are a server-side setting)', () => {
+    for (const server of Object.values(BUILT_IN_SERVERS)) {
+      expect(server).not.toHaveProperty('relayHint');
+    }
+  });
+
   it('parses npub and hex keys and rejects junk', () => {
     const npub = 'npub1v5lrt4u7vhfnmxwk6c3uepcsrvs4jqyy3z3jrfm5kw73yp0wv2ts5pnwjs';
     expect(parseServerKey(npub)).toBe(BUILT_IN_SERVERS.production.pubkey);
@@ -170,8 +176,9 @@ describe('enable / disable', () => {
     expect(reg).toMatchObject({
       platform: 'fcm',
       server: BUILT_IN_SERVERS.production.pubkey,
-      relayHint: 'wss://nos.lol',
     });
+    // Built-in servers carry no hint: senders use the server's own 10050.
+    expect(reg).not.toHaveProperty('relayHint');
     expect(reg?.fingerprint).toMatch(/^sha256:[0-9a-f]{24}$/);
   });
 

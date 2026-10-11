@@ -8,11 +8,14 @@ import type { Event as NostrEvent, Filter } from 'nostr-tools';
 
 import { dmInboxRelaysFromTags, isRelayUrl } from '../utils/relayListEvents';
 import { pool, trackRelays } from './nostrPool';
-import { DEFAULT_RELAYS } from './nostrService';
+import { DEFAULT_RELAYS, MARMOT_PUSH_SERVER_RELAYS } from './nostrRelayDefaults';
 
 const REQUEST_MAX_WAIT_MS = 6_000;
 const PUBLISH_TIMEOUT_MS = 10_000;
 const INBOX_CACHE_TTL_MS = 10 * 60_000;
+/** A server whose 10050 wasn't found is asked again sooner — but not on
+ * every message we send. */
+const INBOX_MISS_TTL_MS = 60_000;
 
 const asArray = (f: Filter | Filter[]) => (Array.isArray(f) ? f : [f]);
 const cleanRelays = (relays: string[]) => [...new Set(relays.filter(isRelayUrl))];
@@ -97,8 +100,8 @@ export function createMarmotNetwork(getFallbackRelays: () => string[]): NostrNet
 /**
  * Strict relay access for MIP-05 push triggers: publish ONLY to the given
  * relays and read a server's inbox list without falling back to defaults —
- * the spec's publish targets are the records' relay hints, else the server's
- * own 10050 inbox; anywhere else would just leak the trigger.
+ * triggers go to the records' relay hints and the server's own 10050 inbox;
+ * anywhere else would just leak the trigger.
  */
 export interface PushTransport {
   publish(relays: string[], event: NostrEvent): Promise<void>;
@@ -106,6 +109,26 @@ export interface PushTransport {
 }
 
 export function createPushTransport(getLookupRelays: () => string[]): PushTransport {
+  // Per server: its 10050 relays (cached, so a busy chat doesn't re-query on
+  // every send) and any lookup in flight (concurrent triggers share it).
+  const cache = new Map<string, { relays: string[]; at: number }>();
+  const inFlight = new Map<string, Promise<string[]>>();
+  const lookup = async (pubkey: string): Promise<string[]> => {
+    // Our push servers' own relays first: that's where their 10050 lives.
+    // Bounded by maxWait; the pool skips relays known to be down.
+    const relays = cleanRelays([
+      ...MARMOT_PUSH_SERVER_RELAYS,
+      ...getLookupRelays(),
+      ...DEFAULT_RELAYS,
+    ]);
+    const events = await pool.querySync(
+      relays,
+      { kinds: [10050], authors: [pubkey], limit: 1 },
+      { maxWait: REQUEST_MAX_WAIT_MS },
+    );
+    const latest = events.sort((a, b) => b.created_at - a.created_at)[0];
+    return latest ? cleanRelays(dmInboxRelaysFromTags(latest.tags)) : [];
+  };
   return {
     async publish(relays, event) {
       const targets = cleanRelays(relays);
@@ -115,15 +138,20 @@ export function createPushTransport(getLookupRelays: () => string[]): PushTransp
         pool.publish(targets, event).map((p) => withTimeout(p, PUBLISH_TIMEOUT_MS)),
       );
     },
-    async inboxRelays(pubkey) {
-      const lookup = cleanRelays([...getLookupRelays(), ...DEFAULT_RELAYS]);
-      const events = await pool.querySync(
-        lookup,
-        { kinds: [10050], authors: [pubkey], limit: 1 },
-        { maxWait: REQUEST_MAX_WAIT_MS },
-      );
-      const latest = events.sort((a, b) => b.created_at - a.created_at)[0];
-      return latest ? cleanRelays(dmInboxRelaysFromTags(latest.tags)) : [];
+    inboxRelays(pubkey) {
+      const hit = cache.get(pubkey);
+      const ttl = hit?.relays.length ? INBOX_CACHE_TTL_MS : INBOX_MISS_TTL_MS;
+      if (hit && Date.now() - hit.at < ttl) return Promise.resolve(hit.relays);
+      const pending = inFlight.get(pubkey);
+      if (pending) return pending;
+      const run = lookup(pubkey)
+        .then((relays) => {
+          cache.set(pubkey, { relays, at: Date.now() });
+          return relays;
+        })
+        .finally(() => inFlight.delete(pubkey));
+      inFlight.set(pubkey, run);
+      return run;
     },
   };
 }

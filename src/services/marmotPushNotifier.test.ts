@@ -61,23 +61,48 @@ function setup() {
 }
 
 describe('MarmotPushNotifier', () => {
-  it("publishes a trigger to the record's relay hint only", async () => {
-    const { notifier, published, group, settle, transport } = setup();
+  it("publishes a trigger to the record's relay hint plus the server's own inbox", async () => {
+    const { notifier, published, group, settle } = setup();
     const g = group([leafKey(me, 0), leafKey(bob, 1)]);
     await notifier.ingest(g, 447, tokenPayload({ relayHint: 'wss://relay.eu.whitenoise.chat' }));
     notifier.trigger(g);
     await settle();
-    expect(published).toEqual([{ relays: ['wss://relay.eu.whitenoise.chat'], kind: 1059 }]);
-    expect(transport.inboxRelays).not.toHaveBeenCalled();
+    expect(published).toEqual([
+      { relays: ['wss://relay.eu.whitenoise.chat', 'wss://server-inbox.example'], kind: 1059 },
+    ]);
   });
 
   it("falls back to the server's own inbox relays when no record has a hint", async () => {
-    const { notifier, published, group, settle } = setup();
+    const { notifier, published, group, settle, transport } = setup();
     const g = group([leafKey(bob, 1)]);
     await notifier.ingest(g, 448, tokenPayload());
     notifier.trigger(g);
     await settle();
+    expect(transport.inboxRelays).toHaveBeenCalledWith(SERVER);
     expect(published).toEqual([{ relays: ['wss://server-inbox.example'], kind: 1059 }]);
+  });
+
+  it("a stale hint on one device's record doesn't strand a hint-less device on the same server", async () => {
+    const { notifier, published, group, settle } = setup();
+    const g = group([leafKey(bob, 1), leafKey(bob, 2)]);
+    // An older build still advertising the dead nos.lol, and a current build with no hint.
+    await notifier.ingest(g, 448, tokenPayload({ leaf: 1, relayHint: 'wss://nos.lol' }));
+    await notifier.ingest(g, 448, tokenPayload({ leaf: 2 }));
+    notifier.trigger(g);
+    await settle();
+    expect(published).toEqual([
+      { relays: ['wss://nos.lol', 'wss://server-inbox.example'], kind: 1059 },
+    ]);
+  });
+
+  it("publishes nothing when there's no hint and the server's 10050 can't be found", async () => {
+    const { notifier, published, group, settle, transport } = setup();
+    transport.inboxRelays.mockRejectedValueOnce(new Error('timeout'));
+    const g = group([leafKey(bob, 1)]);
+    await notifier.ingest(g, 448, tokenPayload());
+    notifier.trigger(g);
+    await settle();
+    expect(published).toEqual([]);
   });
 
   it('never wakes our own devices, and forgets a member whose leaf left', async () => {

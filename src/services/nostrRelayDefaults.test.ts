@@ -1,7 +1,12 @@
 // Guard: the app's built-in relay lists must not contain a relay known to be
 // dead (#1326), and no list may lean on the relays that are down right now.
 // If a relay here comes back for good, remove it from DEAD_RELAYS deliberately.
-import { DEFAULT_RELAYS, NIP46_PAIRING_RELAYS, PROFILE_RELAYS } from './nostrRelayDefaults';
+import {
+  DEFAULT_RELAYS,
+  MARMOT_PUSH_SERVER_RELAYS,
+  NIP46_PAIRING_RELAYS,
+  PROFILE_RELAYS,
+} from './nostrRelayDefaults';
 import { GC_RELAYS } from './geocacheRelays';
 import { MARKET_RELAYS } from '../utils/marketListingsQuery';
 import { RELAY_LIST_INDEXERS } from '../utils/relayListEvents';
@@ -18,6 +23,7 @@ const LISTS: Record<string, readonly string[]> = {
   DEFAULT_RELAYS,
   PROFILE_RELAYS,
   NIP46_PAIRING_RELAYS,
+  MARMOT_PUSH_SERVER_RELAYS,
   GC_RELAYS,
   MARKET_RELAYS,
   RELAY_LIST_INDEXERS,

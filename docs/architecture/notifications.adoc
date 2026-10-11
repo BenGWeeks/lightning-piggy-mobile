@@ -243,8 +243,16 @@ account that was active, only.
 +
 An "Advanced" field accepts another server's npub (it must hold Lightning
 Piggy's APNs/FCM credentials to deliver); its relay hint is the first relay of
-its kind-10050 list. The built-in servers use a fixed hint (`wss://nos.lol`,
-in both servers' 10050) so a lookup can never change the signed records.
+its kind-10050 list. The built-in servers carry *no* relay hint: senders (White
+Noise's MDK and our notifier) send a trigger only to the record's hint when it
+has one, so a hint pins every sender to that relay until each member re-signs
+(the old fixed `wss://nos.lol` hint went dead with nos.lol). Without one,
+senders look up the server's kind-10050 — currently `relay.eu.whitenoise.chat`,
+`relay.ditto.pub`, `relay.coinos.io` and `relay.primal.net`, which the servers
+also subscribe to — so moving the servers to other relays (e.g. one Lightning
+Piggy hosts) is a server-side change with nothing to re-sign. Records published
+with the old hint are re-signed once, without it (one signer prompt per group
+for Amber / NIP-46, at the next send or "Finish setup").
 . `marmotPushToken.ts` seals the token to the server (MIP-05 "Token
   encryption"); `marmotPushRegistrar.ts` publishes it in every Marmot group as
   a kind-447 self-update with an owner proof — see `SOLUTION_DESIGN.adoc` →
@@ -355,8 +363,9 @@ topic), `apns_env` comes from `getIosPushNotificationServiceEnvironmentAsync`
 normalised the way the watcher does) are, in priority order: the NWC wallet
 relays (only if Payments is on — NWC notifications are only published there),
 the user's DM inbox (kind 10050, if Messages is on), then their read relays
-(kind 10002). The watcher's own relays (nos.lol, primal, damus) are left out:
-it always watches those. `nwc` holds up to 3 connections (the first NWC wallets
+(kind 10002). The watcher's own relays (`WATCHER_DEFAULT_RELAYS`: primal,
+ditto.pub, coinos.io, relay.eu.whitenoise.chat — the watcher's `WATCHER_RELAYS`)
+are left out: it always watches those. `nwc` holds up to 3 connections (the first NWC wallets
 in display order), each with a BIP-340 proof signed by that connection's own
 secret over `sha256("lightning-piggy-watcher/nwc/v1:<user>:<wallet>")`, so only
 the holder of the connection secret can claim its notifications.
