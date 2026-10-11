@@ -1,6 +1,7 @@
 import { renderHook } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nwcService from '../services/nwcService';
+import * as onchainService from '../services/onchainService';
 import { useWalletTransactionsFetch } from './useWalletTransactionsFetch';
 import type { WalletState } from '../types/wallet';
 
@@ -63,6 +64,16 @@ describe('useWalletTransactionsFetch', () => {
   it('resolves false when the identity switched mid-fetch', async () => {
     jest.mocked(nwcService.listTransactions).mockResolvedValue([]);
     const { fetch, deps } = setup(false);
+    await expect(fetch('w1')).resolves.toBe(false);
+    expect(deps.updateWalletInState).not.toHaveBeenCalled();
+  });
+
+  it('keeps the cached list and resolves false when an on-chain sync fails', async () => {
+    jest
+      .mocked(onchainService.syncAndRefresh)
+      .mockResolvedValue({ ok: false, balance: null, transactions: [] });
+    const { fetch, deps } = setup();
+    deps.walletsRef.current = [{ ...wallet, walletType: 'onchain' } as WalletState];
     await expect(fetch('w1')).resolves.toBe(false);
     expect(deps.updateWalletInState).not.toHaveBeenCalled();
   });

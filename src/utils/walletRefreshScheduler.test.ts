@@ -186,4 +186,81 @@ describe('createWalletRefreshScheduler', () => {
     expect(fetch).toHaveBeenLastCalledWith('b', { force: false });
     expect(fetch).toHaveBeenCalledTimes(2);
   });
+
+  it('retries once when re-activated mid-fetch and that fetch fails (e.g. a reconnect)', async () => {
+    let fail!: (ok: boolean) => void;
+    fetch.mockImplementationOnce(() => new Promise<boolean>((r) => (fail = r)));
+    const s = make();
+    s.activate('a');
+    jest.advanceTimersByTime(WALLET_SWIPE_SETTLE_MS);
+    s.activate('a'); // availability flipped while the first fetch runs
+    fail(false);
+    await flush();
+    expect(s.isLoading('a')).toBe(true); // retry is due
+    jest.advanceTimersByTime(WALLET_SWIPE_SETTLE_MS);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    await flush();
+    jest.advanceTimersByTime(WALLET_SWIPE_SETTLE_MS * 10);
+    expect(fetch).toHaveBeenCalledTimes(2); // once only, no loop
+  });
+
+  it('does not retry a mid-fetch re-activation once the user swiped elsewhere', async () => {
+    let fail!: (ok: boolean) => void;
+    fetch.mockImplementationOnce(() => new Promise<boolean>((r) => (fail = r)));
+    const s = make();
+    s.activate('a');
+    jest.advanceTimersByTime(WALLET_SWIPE_SETTLE_MS);
+    s.activate('a');
+    s.activate(null); // now on the add card
+    fail(false);
+    await flush();
+    jest.advanceTimersByTime(WALLET_SWIPE_SETTLE_MS);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('a failed refresh clears an earlier success, so swiping back retries', async () => {
+    const s = make();
+    s.activate('a');
+    jest.advanceTimersByTime(WALLET_SWIPE_SETTLE_MS);
+    await flush(); // loaded OK
+    fetch.mockResolvedValueOnce(false);
+    await s.refreshNow('a'); // pull-to-refresh fails
+    s.activate('b');
+    s.activate('a'); // within the original 30 s window
+    jest.advanceTimersByTime(WALLET_SWIPE_SETTLE_MS);
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(fetch).toHaveBeenLastCalledWith('a', { force: false });
+  });
+
+  it('queues pull-to-refresh behind a running fetch so the newest result commits last', async () => {
+    const order: string[] = [];
+    let finishBackground!: (ok: boolean) => void;
+    fetch
+      .mockImplementationOnce(
+        () =>
+          new Promise<boolean>((r) => {
+            finishBackground = (ok) => {
+              order.push('background');
+              r(ok);
+            };
+          }),
+      )
+      .mockImplementationOnce(async () => {
+        order.push('forced');
+        return true;
+      });
+    const s = make();
+    s.activate('a');
+    jest.advanceTimersByTime(WALLET_SWIPE_SETTLE_MS);
+    const forced = s.refreshNow('a');
+    await flush();
+    expect(fetch).toHaveBeenCalledTimes(1); // forced waits its turn
+    expect(s.isLoading('a')).toBe(true);
+    finishBackground(true);
+    await expect(forced).resolves.toBe(true);
+    expect(order).toEqual(['background', 'forced']);
+    expect(fetch).toHaveBeenLastCalledWith('a', { force: true });
+    await flush();
+    expect(s.isLoading('a')).toBe(false);
+  });
 });

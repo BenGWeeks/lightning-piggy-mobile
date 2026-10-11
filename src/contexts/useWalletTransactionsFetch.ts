@@ -69,6 +69,10 @@ export function useWalletTransactionsFetch({
           // Single sync for both balance + transactions (avoids double Electrum sync)
           const result = await onchainService.syncAndRefresh(walletId);
           if (!isCurrent()) return false;
+          // A failed sync returns `{ ok: false, transactions: [] }` — keep the
+          // cached list rather than committing (and persisting) an empty one,
+          // and report failure so the caller retries.
+          if (!result.ok) return false;
           if (result.balance !== null) {
             updateWalletInState(walletId, { balance: result.balance });
           }

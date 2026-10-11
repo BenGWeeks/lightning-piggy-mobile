@@ -8,11 +8,13 @@
  *   30 s) isn't refetched on activation. Pull-to-refresh (`refreshNow`)
  *   bypasses both rules.
  * - **Failures don't count**: only a successful fetch stamps the wallet as
- *   fresh, so a failed or timed-out fetch is retried the next time the card is
+ *   fresh (a failure clears an earlier stamp), so a failed or timed-out fetch is retried the next time the card is
  *   activated (or its connection comes back), not stranded until
  *   pull-to-refresh.
- * - **One fetch per wallet**: activating a wallet that's already fetching
- *   doesn't start a second fetch.
+ * - **One fetch per wallet at a time**: activating a wallet that's already
+ *   fetching doesn't start another; if that fetch then fails, it's retried once
+ *   (debounced). Pull-to-refresh queues behind a running fetch, so the newest
+ *   result always commits last.
  *
  * Cached transactions are already in wallet state from launch hydration, so
  * the card shows them straight away. This only schedules the background
@@ -60,8 +62,15 @@ export function createWalletRefreshScheduler({
   now = Date.now,
 }: WalletRefreshSchedulerOptions): WalletRefreshScheduler {
   const lastLoadedAt = new Map<string, number>();
-  // A counter, not a set: a pull-to-refresh can overlap a background fetch.
-  const inFlight = new Map<string, number>();
+  // Fetches are serialised per wallet: `chains` holds the tail of each wallet's
+  // queue and `busy` counts its queued + running fetches. Serialising means a
+  // pull-to-refresh queued behind a background fetch always commits last, and
+  // the latest outcome is the one that sets (or clears) freshness.
+  const chains = new Map<string, Promise<void>>();
+  const busy = new Map<string, number>();
+  // Wallets activated again while a fetch was running: retried if it fails.
+  const retryIfFailed = new Set<string>();
+  let activeId: string | null = null;
   let pendingId: string | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -78,54 +87,82 @@ export function createWalletRefreshScheduler({
   };
 
   const isDue = (walletId: string): boolean =>
-    !inFlight.has(walletId) && !isWalletFresh(lastLoadedAt.get(walletId), now(), freshMs);
+    !busy.has(walletId) && !isWalletFresh(lastLoadedAt.get(walletId), now(), freshMs);
 
-  const run = async (walletId: string, force: boolean): Promise<boolean> => {
-    inFlight.set(walletId, (inFlight.get(walletId) ?? 0) + 1);
-    notify();
+  const attempt = async (walletId: string, force: boolean): Promise<boolean> => {
     let ok = false;
     try {
       ok = await fetch(walletId, { force });
     } catch {
       ok = false;
     }
+    // Only a success counts as loaded; a failure clears an older success so
+    // the next activation retries instead of trusting a stale stamp.
     if (ok) lastLoadedAt.set(walletId, now());
-    const left = (inFlight.get(walletId) ?? 1) - 1;
-    if (left > 0) inFlight.set(walletId, left);
-    else inFlight.delete(walletId);
-    notify();
+    else lastLoadedAt.delete(walletId);
     return ok;
+  };
+
+  const schedule = (walletId: string): void => {
+    pendingId = walletId;
+    timer = setTimeout(() => {
+      timer = null;
+      pendingId = null;
+      // Re-check: a pull-to-refresh may have loaded it during the settle wait.
+      if (!isDue(walletId)) {
+        notify();
+        return;
+      }
+      void enqueue(walletId, false);
+    }, settleMs);
+  };
+
+  const enqueue = (walletId: string, force: boolean): Promise<boolean> => {
+    busy.set(walletId, (busy.get(walletId) ?? 0) + 1);
+    notify();
+    // Start at once when idle; otherwise queue behind the running fetch.
+    const prev = chains.get(walletId);
+    const result = prev ? prev.then(() => attempt(walletId, force)) : attempt(walletId, force);
+    const tail = result.then(() => undefined);
+    chains.set(walletId, tail);
+    return result.then((ok) => {
+      const left = (busy.get(walletId) ?? 1) - 1;
+      if (left > 0) busy.set(walletId, left);
+      else busy.delete(walletId);
+      if (chains.get(walletId) === tail) chains.delete(walletId);
+      if (ok || left > 0) {
+        if (ok) retryIfFailed.delete(walletId);
+      } else if (retryIfFailed.delete(walletId) && activeId === walletId && pendingId === null) {
+        // It was re-activated mid-fetch (e.g. its NWC connection came back)
+        // and that fetch failed: retry once, debounced like any activation.
+        schedule(walletId);
+      }
+      notify();
+      return ok;
+    });
   };
 
   return {
     activate(walletId) {
+      activeId = walletId;
       const hadPending = cancelPending();
+      if (walletId !== null && busy.has(walletId)) retryIfFailed.add(walletId);
       if (walletId === null || !isDue(walletId)) {
         if (hadPending) notify();
         return;
       }
-      pendingId = walletId;
-      timer = setTimeout(() => {
-        timer = null;
-        pendingId = null;
-        // Re-check: a pull-to-refresh may have loaded it during the settle wait.
-        if (!isDue(walletId)) {
-          notify();
-          return;
-        }
-        void run(walletId, false);
-      }, settleMs);
+      schedule(walletId);
       notify();
     },
 
     refreshNow(walletId) {
       if (pendingId === walletId) cancelPending();
-      return run(walletId, true);
+      return enqueue(walletId, true);
     },
 
     isLoading(walletId) {
       if (walletId === null) return false;
-      return pendingId === walletId || inFlight.has(walletId);
+      return pendingId === walletId || busy.has(walletId);
     },
   };
 }
