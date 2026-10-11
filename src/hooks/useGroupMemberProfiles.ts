@@ -18,14 +18,15 @@ const toMemberProfile = (p: {
   picture: p.picture ?? null,
 });
 
-/** Merge `incoming` into `prev`, returning `prev` itself when nothing changed. */
+/** Merge `incoming` into `current`, returning `current` itself when nothing
+ * changed. Runs once per cache read / batch fetch, never per relay event. */
 function mergeProfiles(
-  prev: ReadonlyMap<string, MemberProfile>,
+  current: ReadonlyMap<string, MemberProfile>,
   incoming: Iterable<[string, MemberProfile]>,
 ): ReadonlyMap<string, MemberProfile> {
   let next: Map<string, MemberProfile> | null = null;
   for (const [pk, prof] of incoming) {
-    const cur = prev.get(pk);
+    const cur = current.get(pk);
     if (
       cur &&
       cur.name === prof.name &&
@@ -34,10 +35,10 @@ function mergeProfiles(
     ) {
       continue;
     }
-    next ??= new Map(prev);
+    next ??= new Map(current);
     next.set(pk, prof);
   }
-  return next ?? prev;
+  return next ?? current;
 }
 
 interface Options {
