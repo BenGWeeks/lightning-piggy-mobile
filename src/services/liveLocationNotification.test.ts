@@ -43,6 +43,7 @@ describe('persisted shares (#1300 fields)', () => {
     groupId: 'marmot:g1',
     label: 'Piggy Pals',
     stopRequested: true,
+    wire: 2,
   };
   it('round-trip group id, label and stopRequested', async () => {
     await savePersistedSessions(ME, [base]);
@@ -60,4 +61,23 @@ describe('persisted shares (#1300 fields)', () => {
     const [loaded] = await loadPersistedSessions(ME);
     expect(loaded.groupId).toBeUndefined();
   });
+});
+
+it('ends (does not resume) a share persisted by an older build', async () => {
+  const ME = 'c'.repeat(64);
+  const legacy = {
+    sessionId: 'old',
+    senderPubkey: ME,
+    recipientPubkey: 'd'.repeat(64),
+    startedAt: 1,
+    durationMs: 2,
+    lastPingAt: null,
+    status: 'active' as const,
+    startMarkerSent: true,
+    endMarkerSent: false,
+  };
+  await savePersistedSessions(ME, [legacy]);
+  const [loaded] = await loadPersistedSessions(ME);
+  expect(loaded.stopRequested).toBe(true);
+  expect(loaded.wire).toBeUndefined();
 });

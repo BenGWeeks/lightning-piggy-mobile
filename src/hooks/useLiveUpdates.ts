@@ -5,6 +5,7 @@ import {
   getLiveUpdate,
   getLiveUpdatesVersion,
   ingestLiveUpdate,
+  liveKey,
   subscribeLiveUpdates,
   type LiveUpdate,
 } from '../services/liveLocationUpdateStore';
@@ -36,7 +37,7 @@ const sharesKey = (shares: WatchedShare[]) =>
 
 /**
  * Read the coalesced update store (#1300) for `shares`: the latest fix per
- * sessionId from each share's trusted sender. Re-renders at most once per
+ * share, keyed `sender:sessionId` (liveKey). Re-renders at most once per
  * store flush (≤150 ms), never per relay / MLS event.
  */
 export function useLiveUpdates(shares: WatchedShare[]): Record<string, LiveUpdate | undefined> {
@@ -46,7 +47,7 @@ export function useLiveUpdates(shares: WatchedShare[]): Record<string, LiveUpdat
     const out: Record<string, LiveUpdate | undefined> = {};
     for (const s of shares) {
       const u = getLiveUpdate(s.sender, s.sessionId);
-      if (u) out[s.sessionId] = u;
+      if (u) out[liveKey(s.sender, s.sessionId)] = u;
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- key is the stable surrogate for shares; version bumps once per flush

@@ -28,7 +28,7 @@ import {
   LIVE_UPDATE_MIN_INTERVAL_MS,
   type TrackedFix,
 } from './liveLocationPolicy';
-import { loadPersistedSessions } from './liveLocationStorage';
+import { loadPersistedSessions, savePersistedSessions } from './liveLocationStorage';
 import { sendLiveUpdate } from './liveLocationSender';
 import { dismissLiveShareNotification } from './liveLocationNotification';
 import type { OutgoingSession } from './liveLocationStateMachine';
@@ -42,7 +42,7 @@ export type TrackingMode = 'background' | 'foreground';
 /** Shared by the provider and the headless path (see header). */
 export const liveUpdateDispatcher = createLiveUpdateDispatcher();
 
-type FixHandler = (fix: TrackedFix) => void;
+type FixHandler = (fix: TrackedFix) => Promise<unknown> | void;
 let handler: FixHandler | null = null;
 let watcher: Location.LocationSubscription | null = null;
 let mode: TrackingMode | null = null;
@@ -53,6 +53,27 @@ export function setLiveLocationFixHandler(next: FixHandler | null): void {
 }
 
 export const getTrackingMode = (): TrackingMode | null => mode;
+
+/** True while a LiveLocationProvider is mounted to handle fixes and Stop. */
+export const hasLiveLocationFixHandler = (): boolean => handler !== null;
+
+/**
+ * "Stop sharing" pressed with no provider mounted (the UI was destroyed while
+ * the share ran on): stop tracking now and mark the owner's shares so the
+ * provider sends their end markers on the next app open.
+ */
+export async function stopSharingHeadless(): Promise<void> {
+  const ctx = await loadTrackingContext();
+  if (ctx) {
+    const persisted = await loadPersistedSessions(ctx.owner);
+    await savePersistedSessions(
+      ctx.owner,
+      persisted.map((s) => ({ ...s, stopRequested: true })),
+    );
+  }
+  await stopTracking();
+  await dismissLiveShareNotification();
+}
 
 function toFix(loc: Location.LocationObject): TrackedFix {
   const { latitude, longitude, accuracy, heading } = loc.coords;
@@ -128,7 +149,8 @@ async function runHeadless(fix: TrackedFix): Promise<void> {
 export async function handleTaskLocations(locations: Location.LocationObject[] | undefined) {
   const fix = newestFix(locations);
   if (!fix) return;
-  if (handler) handler(fix);
+  // Await the sends: the OS may suspend us once the task's promise settles.
+  if (handler) await handler(fix);
   else await runHeadless(fix);
 }
 
@@ -136,7 +158,20 @@ export async function handleTaskLocations(locations: Location.LocationObject[] |
  * Start delivering fixes (idempotent). Prefers background updates; falls
  * back to a foreground-only watcher. Resolves with the mode in use.
  */
-export async function startTracking(ctx: TrackingContext): Promise<TrackingMode> {
+export function startTracking(ctx: TrackingContext): Promise<TrackingMode> {
+  return serial(() => startTrackingNow(ctx));
+}
+
+// Native start / stop run one at a time, in call order: a Stop issued while a
+// start is pending runs after it (and undoes it) instead of racing it.
+let lifecycle: Promise<unknown> = Promise.resolve();
+function serial<T>(op: () => Promise<T>): Promise<T> {
+  const run = lifecycle.then(op, op);
+  lifecycle = run.catch(() => undefined);
+  return run;
+}
+
+async function startTrackingNow(ctx: TrackingContext): Promise<TrackingMode> {
   await AsyncStorage.setItem(TRACKING_KEY, JSON.stringify(ctx)).catch(() => undefined);
   if (mode === 'background') return mode;
   try {
@@ -177,7 +212,11 @@ export async function startTracking(ctx: TrackingContext): Promise<TrackingMode>
 }
 
 /** Stop every fix source and forget the tracking context. */
-export async function stopTracking(): Promise<void> {
+export function stopTracking(): Promise<void> {
+  return serial(stopTrackingNow);
+}
+
+async function stopTrackingNow(): Promise<void> {
   watcher?.remove();
   watcher = null;
   mode = null;

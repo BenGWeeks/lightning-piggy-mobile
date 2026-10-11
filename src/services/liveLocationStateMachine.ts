@@ -60,6 +60,10 @@ export interface OutgoingSession {
    *  share, so on its next hydrate the share ends (end marker) instead of
    *  resuming. */
   stopRequested?: boolean;
+  /** Wire version the share was started with. 2 = #1300 (tagged markers,
+   *  session-key / MLS updates). Absent = started by an older build, whose
+   *  receivers expect the old pings — such a share is ended, not resumed. */
+  wire?: 2;
 }
 
 export type Action =
@@ -75,6 +79,7 @@ export type Action =
       protocol?: 'marmot';
       groupId?: string;
       label?: string;
+      wire?: 2;
     }
   /** A coordinate ping just published — bumps `lastPingAt`. */
   | { type: 'ping'; sessionId: string; now: number }
@@ -125,6 +130,7 @@ export function reduce(
         ...(action.protocol ? { protocol: action.protocol } : {}),
         ...(action.groupId ? { groupId: action.groupId } : {}),
         ...(action.label ? { label: action.label } : {}),
+        ...(action.wire ? { wire: action.wire } : {}),
       });
       return next;
     }
@@ -192,7 +198,9 @@ export function reduce(
       // Terminal or already pending — nothing to do.
       if (session.status === 'ended' || session.status === 'expired') return state;
       const next = new Map(state);
-      next.set(action.sessionId, { ...session, status: 'expired' });
+      // stopRequested persists the decision: a restart (or the headless
+      // tracker) must not resume a share the user stopped.
+      next.set(action.sessionId, { ...session, status: 'expired', stopRequested: true });
       return next;
     }
     case 'stop': {

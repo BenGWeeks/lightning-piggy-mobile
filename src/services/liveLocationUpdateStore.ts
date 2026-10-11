@@ -33,7 +33,10 @@ const listeners = new Set<() => void>();
 let version = 0;
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
-const keyFor = (sender: string, sessionId: string) => `${sender.toLowerCase()}:${sessionId}`;
+/** A live session's identity: its owner's pubkey + its session id. */
+export const liveKey = (sender: string, sessionId: string) =>
+  `${sender.toLowerCase()}:${sessionId}`;
+const keyFor = liveKey;
 
 function scheduleFlush(): void {
   if (flushTimer) return;

@@ -4,6 +4,7 @@ import {
   type InboundLiveSession,
 } from '../services/liveLocationService';
 import { DM_INBOX_REFRESH_TTL_MS } from '../contexts/nostrDmCache';
+import { liveKey } from '../services/liveLocationUpdateStore';
 import { useNostr, useNostrContacts, useNostrDmInbox } from '../contexts/NostrContext';
 import type { NostrProfile } from '../types/nostr';
 import {
@@ -189,7 +190,7 @@ export function useFriendsLiveLocations(opts: { enabled: boolean }): FriendLiveL
     }
     const out: FriendLiveLocation[] = [];
     for (const s of byPeer.values()) {
-      const loc = updates[s.sessionId]?.location ?? s.startLocation;
+      const loc = updates[liveKey(s.pubkey, s.sessionId)]?.location ?? s.startLocation;
       const avatarUri =
         contactPicByPubkey.get(s.pubkey) ?? fetchedProfiles[s.pubkey]?.picture ?? null;
       out.push({

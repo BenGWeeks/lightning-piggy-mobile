@@ -16,6 +16,9 @@ import * as Notifications from 'expo-notifications';
 import { t } from '../i18n';
 
 export const LIVE_LOCATION_STOP_ACTION = 'stop-live-location';
+/** Notification task (defined in liveLocationTask.ts) that receives the Stop
+ *  press even when the app process has to be started for it. */
+export const LIVE_LOCATION_STOP_TASK = 'lp-live-location-stop';
 const CATEGORY = 'live-location';
 const CHANNEL = 'live-location';
 const NOTIFICATION_ID = 'live-location-share';
@@ -73,6 +76,7 @@ export async function showLiveShareNotification(input: {
   if (Platform.OS !== 'android') return;
   try {
     await prepare();
+    await Notifications.registerTaskAsync(LIVE_LOCATION_STOP_TASK).catch(() => undefined);
     await Notifications.scheduleNotificationAsync({
       identifier: NOTIFICATION_ID,
       content: {
@@ -95,8 +99,11 @@ export async function showLiveShareNotification(input: {
 export async function dismissLiveShareNotification(): Promise<void> {
   if (Platform.OS !== 'android') return;
   await Notifications.dismissNotificationAsync(NOTIFICATION_ID).catch(() => undefined);
+  await Notifications.unregisterTaskAsync(LIVE_LOCATION_STOP_TASK).catch(() => undefined);
 }
 
 /** True for a press of the notification's Stop sharing action. */
-export const isLiveShareStopResponse = (response: Notifications.NotificationResponse | null) =>
-  response?.actionIdentifier === LIVE_LOCATION_STOP_ACTION;
+export const isLiveShareStopResponse = (response: unknown): boolean =>
+  !!response &&
+  typeof response === 'object' &&
+  (response as { actionIdentifier?: unknown }).actionIdentifier === LIVE_LOCATION_STOP_ACTION;

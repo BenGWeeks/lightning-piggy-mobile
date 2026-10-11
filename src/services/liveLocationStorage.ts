@@ -35,6 +35,7 @@ interface PersistedSession {
   groupId?: string;
   label?: string;
   stopRequested?: boolean;
+  wire?: 2;
 }
 
 /**
@@ -87,7 +88,10 @@ export async function loadPersistedSessions(pubkey: string): Promise<OutgoingSes
           ? { groupId: e.groupId }
           : {}),
         ...(typeof e.label === 'string' ? { label: e.label.slice(0, 80) } : {}),
-        ...(e.stopRequested === true ? { stopRequested: true } : {}),
+        // A share an older build started (no wire version) can't continue:
+        // its receivers expect the old pings. End it instead of resuming.
+        ...(e.stopRequested === true || e.wire !== 2 ? { stopRequested: true } : {}),
+        ...(e.wire === 2 ? { wire: 2 as const } : {}),
       });
     }
     return out;
@@ -122,6 +126,7 @@ export async function savePersistedSessions(
       ...(session.groupId ? { groupId: session.groupId } : {}),
       ...(session.label ? { label: session.label } : {}),
       ...(session.stopRequested ? { stopRequested: true } : {}),
+      ...(session.wire ? { wire: session.wire } : {}),
     });
   }
   try {

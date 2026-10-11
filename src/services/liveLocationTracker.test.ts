@@ -21,9 +21,10 @@ import {
   newestFix,
   setLiveLocationFixHandler,
   startTracking,
+  stopSharingHeadless,
   stopTracking,
 } from './liveLocationTracker';
-import { savePersistedSessions } from './liveLocationStorage';
+import { loadPersistedSessions, savePersistedSessions } from './liveLocationStorage';
 import type { OutgoingSession } from './liveLocationStateMachine';
 
 const loc = Location as jest.Mocked<typeof Location>;
@@ -43,6 +44,7 @@ const session = (over: Partial<OutgoingSession> = {}): OutgoingSession => ({
   status: 'paused',
   startMarkerSent: true,
   endMarkerSent: false,
+  wire: 2,
   ...over,
 });
 
@@ -135,4 +137,14 @@ it('headless: stops tracking once nothing is left to share', async () => {
   expect(mockSend).not.toHaveBeenCalled();
   expect(loc.stopLocationUpdatesAsync).toHaveBeenCalled();
   expect(getTrackingMode()).toBeNull();
+});
+
+it('Stop with no provider mounted stops tracking and marks the shares to end on next open', async () => {
+  loc.startLocationUpdatesAsync.mockResolvedValue(undefined);
+  await startTracking({ owner: ME, relays: [] });
+  await savePersistedSessions(ME, [session()]);
+  await stopSharingHeadless();
+  expect(getTrackingMode()).toBeNull();
+  const [stored] = await loadPersistedSessions(ME);
+  expect(stored.stopRequested).toBe(true);
 });

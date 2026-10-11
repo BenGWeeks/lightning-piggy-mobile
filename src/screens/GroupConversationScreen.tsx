@@ -533,6 +533,7 @@ const GroupConversationScreen: React.FC = () => {
           liveLocationStatus={liveLoc.liveLocationBubbleStatus}
           liveLocationRemainingMs={liveLoc.liveLocationBubbleRemaining}
           onStopLiveLocation={liveLoc.stopLive}
+          liveLocationSender={item.senderPubkey}
           onOpenGifFullscreen={setFullscreenGifUrl}
           pollAggregates={pollAggregates}
           onVotePoll={handleVotePoll}

@@ -38,7 +38,8 @@ import { formatTime } from '../utils/messageContent';
 import { MAX_DURATION_MS, expiryFor, newSessionId } from '../services/liveLocationService';
 import {
   liveMarkerDraft,
-  liveMarkerInternalText,
+  liveMarkerTags,
+  liveMarkerTextForRumor,
   type LiveMarkerWire,
 } from '../services/liveLocationWire';
 import { getCurrentLocation, type SharedLocation } from '../services/locationService';
@@ -113,11 +114,15 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   // Mirror state into a ref so the fix handler / ticks read the current map
   // without re-binding every render.
   const sessionsRef = useRef(sessions);
+  // The account whose stored shares have been read into `sessions`. Persisting
+  // before that would overwrite them — on an account switch the first render
+  // still holds the previous account's map.
+  const hydratedForRef = useRef<string | null>(null);
   useEffect(() => {
     sessionsRef.current = sessions;
     // Best-effort persist on every transition, scoped to the active identity
     // so an account switch can't resume these under another key.
-    if (pubkey) {
+    if (pubkey && hydratedForRef.current === pubkey) {
       void savePersistedSessions(
         pubkey,
         [...sessions.values()].filter((s) => s.senderPubkey === pubkey),
@@ -131,6 +136,9 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   // Freshest fix the tracker delivered (end-marker fallback) + start fixes.
   const lastFixRef = useRef<{ location: SharedLocation; at: number } | null>(null);
+  // Shares being stopped: excluded from updates before their state commits.
+  const stoppingRef = useRef<Set<string>>(new Set());
+  const stopInFlightRef = useRef<Set<string>>(new Set());
   const startLocationRef = useRef<Map<string, SharedLocation>>(new Map());
 
   // Account switch / sign-out: stop sharing now. The departing account's
@@ -142,8 +150,12 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     const previous = lastIdentityRef.current;
     if (previous === current) return;
     lastIdentityRef.current = current;
+    hydratedForRef.current = null;
+    // First identity on a cold start: nothing to stop (a background share may
+    // be running and is picked up by the hydrate below).
+    if (!previous) return;
     const leftover = [...sessionsRef.current.values()].filter((s) => s.status !== 'ended');
-    if (previous && leftover.length > 0) {
+    if (leftover.length > 0) {
       void savePersistedSessions(
         previous,
         leftover.map((s) => ({ ...s, stopRequested: true })),
@@ -233,6 +245,7 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         ...(protocol ? { protocol } : {}),
         ...(groupId ? { groupId } : {}),
         ...(target.label ? { label: target.label } : {}),
+        wire: 2,
       };
       // NIP-17 only: a per-session update channel, announced in the marker.
       const channel = protocol ? null : newLiveUpdateChannel();
@@ -262,7 +275,8 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         ok: true,
         sessionId,
         location: fix.location,
-        markerText: liveMarkerInternalText(wire),
+        // Stored text exactly as the echo will produce it (via the wire tags).
+        markerText: liveMarkerTextForRumor({ kind: 14, tags: liveMarkerTags(wire) }) ?? '',
       };
     },
     [pubkey, isLoggedIn, dispatch, sendMarker],
@@ -273,37 +287,46 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       const session = sessionsRef.current.get(sessionId);
       if (!session) return { ok: false, error: 'Session not found' };
       if (session.status === 'ended') return { ok: true };
-      liveUpdateDispatcher.forget(sessionId);
-      // Final position for the end marker: a fresh tracker fix if we have one
-      // (no extra GPS request — this may run in the background), else a new
-      // fix, else the start location; never a fabricated 0,0 pin.
-      const recent = lastFixRef.current;
-      let finalLocation: SharedLocation | null =
-        recent && Date.now() - recent.at < FRESH_FIX_MS ? recent.location : null;
-      if (!finalLocation) {
-        const fix = await getCurrentLocation();
-        finalLocation = fix.ok
-          ? fix.location
-          : (recent?.location ?? startLocationRef.current.get(sessionId) ?? null);
-      }
-      const sent = await sendMarker(session, {
-        phase: 'end',
-        sessionId,
-        startedAt: session.startedAt,
-        durationMs: session.durationMs,
-        location: finalLocation,
-      });
-      if (sent) {
+      // One end marker at a time per share (the drain loop retries too).
+      if (stopInFlightRef.current.has(sessionId)) return { ok: true };
+      stopInFlightRef.current.add(sessionId);
+      // Stop streaming NOW, and persist that (stopRequested) before the slow
+      // part — the final fix and the end marker — so neither a fix arriving
+      // meanwhile nor a restart / the headless tracker resumes it. A failed
+      // end marker stays retryable: the drain loop below re-sends it.
+      stoppingRef.current.add(sessionId);
+      dispatch({ type: 'stopPending', sessionId });
+      try {
+        // Final position for the end marker: a fresh tracker fix if we have
+        // one (no extra GPS request — this may run in the background), else a
+        // new fix, else the start location; never a fabricated 0,0 pin.
+        const recent = lastFixRef.current;
+        let finalLocation: SharedLocation | null =
+          recent && Date.now() - recent.at < FRESH_FIX_MS ? recent.location : null;
+        if (!finalLocation) {
+          const fix = await getCurrentLocation();
+          finalLocation = fix.ok
+            ? fix.location
+            : (recent?.location ?? startLocationRef.current.get(sessionId) ?? null);
+        }
+        const sent = await sendMarker(session, {
+          phase: 'end',
+          sessionId,
+          startedAt: session.startedAt,
+          durationMs: session.durationMs,
+          location: finalLocation,
+        });
+        if (!sent) return { ok: false, error: 'Failed to send live-location end marker.' };
         dispatch({ type: 'endMarkerSent', sessionId });
         dispatch({ type: 'stop', sessionId });
         startLocationRef.current.delete(sessionId);
+        stoppingRef.current.delete(sessionId);
+        liveUpdateDispatcher.forget(sessionId);
         void deleteUpdateChannel(sessionId);
         return { ok: true };
+      } finally {
+        stopInFlightRef.current.delete(sessionId);
       }
-      // End marker failed — keep it retryable (updates stop, not ended) so the
-      // drain loop below retries until the peer is told we stopped.
-      dispatch({ type: 'stopPending', sessionId });
-      return { ok: false, error: 'Failed to send live-location end marker.' };
     },
     [dispatch, sendMarker],
   );
@@ -322,7 +345,11 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     const owner = pubkey;
     setLiveLocationFixHandler((fix) => {
       lastFixRef.current = { location: fix.location, at: Date.now() };
-      void liveUpdateDispatcher.handleFix(fix, sessionsRef.current.values(), (s, p) =>
+      const live = [...sessionsRef.current.values()].filter(
+        (s) => !stoppingRef.current.has(s.sessionId),
+      );
+      // Returned so the background task waits for the sends to finish.
+      return liveUpdateDispatcher.handleFix(fix, live, (s, p) =>
         sendLiveUpdate(owner, s, p, writeRelaysRef.current),
       );
     });
@@ -442,7 +469,9 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     let cancelled = false;
     void (async () => {
       const persisted = await loadPersistedSessions(pubkey);
-      if (cancelled || persisted.length === 0) return;
+      if (cancelled) return;
+      hydratedForRef.current = pubkey;
+      if (persisted.length === 0) return;
       setSessions((prev) => {
         const next = new Map(prev);
         const now = Date.now();
