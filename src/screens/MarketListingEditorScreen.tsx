@@ -14,7 +14,7 @@ import type { Event } from 'nostr-tools';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { useSellerShop } from '../hooks/useSellerShop';
-import { useSellerActions } from '../hooks/useSellerActions';
+import { SellerFetchError, StaleRevisionError, useSellerActions } from '../hooks/useSellerActions';
 import { useListingPhotoUpload } from '../hooks/useListingPhotoUpload';
 import { Alert } from '../components/BrandedAlert';
 import { Toast } from '../components/BrandedToast';
@@ -56,7 +56,7 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
   const [showErrors, setShowErrors] = useState(false);
   // Revision the form was loaded from: an untouched form follows newer
   // revisions; a touched one asks before overwriting them.
-  const [baseId, setBaseId] = useState<string | null>(null);
+  const [base, setBase] = useState<Event | null>(null);
   const [dirty, setDirty] = useState(false);
 
   const existing = useMemo(
@@ -73,11 +73,11 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
   // shipping zone switched on.
   useEffect(() => {
     if (existing) {
-      if (draft && (dirty || existing.id === baseId)) return;
+      if (draft && (dirty || existing.id === base?.id)) return;
       const parsed = parseListingDraft(existing);
       setDraft(parsed);
       setCategoriesText(parsed.categories.join(', '));
-      setBaseId(existing.id);
+      setBase(existing);
     } else if (!draft && !editDTag && shop) {
       setDraft({
         dTag: newIdentifier('item'),
@@ -91,7 +91,7 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
         shipping: snapshot.zones.map((z) => ({ coordinate: z.coordinate, extraCost: '' })),
       });
     }
-  }, [draft, dirty, baseId, existing, editDTag, shop, snapshot.zones]);
+  }, [draft, dirty, base, existing, editDTag, shop, snapshot.zones]);
 
   const fullDraft = useMemo(
     () => (draft ? { ...draft, categories: splitCategories(categoriesText) } : null),
@@ -150,15 +150,34 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const onPublish = useCallback(async () => {
     if (!fullDraft || !checkValid()) return;
-    const publish = async () => {
+    // The base is the revision the FORM was loaded from (not whatever the
+    // store holds now), so a newer revision that arrived since is caught.
+    const editBase = editDTag ? (base ?? existing) : null;
+    const publish = async (force: boolean) => {
       try {
-        await saveListing(fullDraft, existing);
+        await saveListing(fullDraft, editBase, { force });
         Toast.show({
           type: 'success',
-          text1: existing ? t('market.sell.editor.updated') : t('market.sell.editor.published'),
+          text1: editBase ? t('market.sell.editor.updated') : t('market.sell.editor.published'),
         });
         navigation.goBack();
       } catch (e) {
+        if (e instanceof SellerFetchError) {
+          Toast.show({ type: 'error', text1: t('market.sell.loadFailedTryAgain') });
+          return;
+        }
+        if (e instanceof StaleRevisionError) {
+          Alert.alert(t('market.sell.conflictTitle'), t('market.sell.editor.conflictBody'), [
+            {
+              text: t('market.sell.cancel'),
+              style: 'cancel',
+              // Show the newer revision instead of the stale form.
+              onPress: () => setDirty(false),
+            },
+            { text: t('market.sell.overwrite'), onPress: () => void publish(true) },
+          ]);
+          return;
+        }
         Toast.show({
           type: 'error',
           text1: t('market.sell.editor.publishFailed'),
@@ -166,15 +185,8 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
         });
       }
     };
-    if (existing && baseId && existing.id !== baseId) {
-      Alert.alert(t('market.sell.conflictTitle'), t('market.sell.editor.conflictBody'), [
-        { text: t('market.sell.cancel'), style: 'cancel' },
-        { text: t('market.sell.overwrite'), onPress: () => void publish() },
-      ]);
-      return;
-    }
-    await publish();
-  }, [fullDraft, existing, baseId, checkValid, saveListing, navigation, t]);
+    await publish(false);
+  }, [fullDraft, editDTag, base, existing, checkValid, saveListing, navigation, t]);
 
   const onDelete = useCallback(() => {
     if (!existing) return;

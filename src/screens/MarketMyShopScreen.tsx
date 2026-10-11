@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -38,17 +38,26 @@ const MarketMyShopScreen: React.FC<Props> = ({ navigation }) => {
   const t = useTranslation();
   const styles = useMemo(() => createMarketSellerStyles(colors), [colors]);
   const { pubkey, snapshot, status, refresh, canPublish } = useSellerShop();
-  const { deleteListing } = useSellerActions(snapshot);
+  const { deleteListing, busy } = useSellerActions(snapshot);
   const [loginVisible, setLoginVisible] = useState(false);
 
   const shop = useMemo(
     () => parseShopDraft(snapshot.shop, snapshot.zones),
     [snapshot.shop, snapshot.zones],
   );
-  const rows = useMemo<Row[]>(
-    () => snapshot.listings.map((event) => ({ event, draft: parseListingDraft(event) })),
-    [snapshot.listings],
-  );
+  // Re-use a row (and so its parsed draft) while the event is unchanged, so
+  // the memoised rows skip re-rendering on unrelated store updates.
+  const rowCache = useRef(new Map<string, Row>());
+  const rows = useMemo<Row[]>(() => {
+    const next = new Map<string, Row>();
+    const out = snapshot.listings.map((event) => {
+      const row = rowCache.current.get(event.id) ?? { event, draft: parseListingDraft(event) };
+      next.set(event.id, row);
+      return row;
+    });
+    rowCache.current = next;
+    return out;
+  }, [snapshot.listings]);
 
   const onEdit = useCallback(
     (dTag: string) => navigation.navigate('MarketListingEditor', { dTag }),
@@ -63,6 +72,9 @@ const MarketMyShopScreen: React.FC<Props> = ({ navigation }) => {
   );
   const onDelete = useCallback(
     (event: Event) => {
+      // One change at a time: two quick deletes would both rebuild the shop
+      // from the same snapshot.
+      if (busy) return;
       const title = parseListingDraft(event).title;
       Alert.alert(t('market.sell.deleteTitle'), t('market.sell.deleteBody', { title }), [
         { text: t('market.sell.cancel'), style: 'cancel' },
@@ -83,7 +95,7 @@ const MarketMyShopScreen: React.FC<Props> = ({ navigation }) => {
         },
       ]);
     },
-    [deleteListing, t],
+    [deleteListing, busy, t],
   );
 
   const renderItem = useCallback(

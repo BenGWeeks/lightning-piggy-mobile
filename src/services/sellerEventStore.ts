@@ -16,6 +16,9 @@ interface AccountState {
 }
 
 const accounts = new Map<string, AccountState>();
+// Signed-out accounts: a fetch or publish still in flight when the account
+// was wiped must not re-create its store or cache.
+const forgotten = new Set<string>();
 const listeners = new Set<() => void>();
 const MAX_EVENTS = 1000;
 const KEEP_DELETIONS = 200;
@@ -68,6 +71,7 @@ export function sellerStoreState(pubkey: string): Readonly<AccountState> {
 
 /** Merge events (fetched or just signed) into the account's set. */
 export function addSellerEvents(pubkey: string, events: readonly Event[], fetched = false) {
+  if (forgotten.has(pubkey)) return;
   const state = account(pubkey);
   for (const event of events) {
     if (event.pubkey === pubkey) state.events.set(event.id, event);
@@ -78,6 +82,7 @@ export function addSellerEvents(pubkey: string, events: readonly Event[], fetche
 }
 
 export function setSellerHidden(pubkey: string, hidden: ReadonlyMap<string, number>) {
+  if (forgotten.has(pubkey)) return;
   const state = account(pubkey);
   state.hidden = new Map(hidden);
   changed(state);
@@ -89,6 +94,7 @@ export function restoreSellerAccount(
   events: readonly Event[],
   hidden: ReadonlyMap<string, number>,
 ) {
+  if (forgotten.has(pubkey)) return;
   const state = account(pubkey);
   if (state.restored) return;
   state.restored = true;
@@ -111,9 +117,20 @@ export const sellerCacheStorageKey = (pubkey: string) => `market-seller-events:$
 /** Drop a signed-out account's in-memory events. */
 export function forgetSellerAccount(pubkey: string) {
   accounts.delete(pubkey);
+  forgotten.add(pubkey);
+}
+
+/** The account is active again (signed back in): accept its events. */
+export function reviveSellerAccount(pubkey: string) {
+  forgotten.delete(pubkey);
+}
+
+export function isSellerAccountForgotten(pubkey: string): boolean {
+  return forgotten.has(pubkey);
 }
 
 /** Test seam. */
 export function resetSellerStore() {
   accounts.clear();
+  forgotten.clear();
 }

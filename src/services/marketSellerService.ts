@@ -2,21 +2,22 @@
 // Gamma Markets events and publish newly signed ones. Thin shell over the
 // pure builders/reducer in utils/marketSeller*.
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { Event } from 'nostr-tools';
+import { verifyEvent, type Event } from 'nostr-tools';
 import { pool, trackRelays, DEFAULT_RELAYS, publishSignedEvent } from './nostrService';
 import {
   sellerCacheStorageKey as cacheKey,
   sellerHiddenStorageKey as hiddenKey,
+  isSellerAccountForgotten,
   sellerStoreState,
 } from './sellerEventStore';
 import { reduceSellerSnapshot } from '../utils/marketSellerSnapshot';
 import { querySyncAbortable } from './relayQuery';
+import { createYieldScheduler } from '../contexts/nostrDecryptPacing';
 import {
   COLLECTION_KIND,
   DELETION_KIND,
   LISTING_KIND,
   SHIPPING_OPTION_KIND,
-  SHOP_COLLECTION_D,
 } from '../utils/marketSellerEvents';
 
 const FETCH_MAX_WAIT_MS = 8000;
@@ -32,10 +33,56 @@ export function sellerRelays(relays: readonly { url: string; write: boolean; rea
 }
 
 /**
+ * Keep only events this author really signed: relays ignore `authors` /
+ * `kinds` at will, and a forged "own" listing must never become the base of
+ * an edit that the user then re-signs. Verification yields between events
+ * so a large snapshot can't wedge the JS thread.
+ */
+export async function verifiedOwnEvents(
+  events: readonly Event[],
+  pubkey: string,
+  kinds: readonly number[],
+  signal?: AbortSignal,
+): Promise<Event[]> {
+  const scheduler = createYieldScheduler({ signal, safetyEvery: 25 });
+  const out: Event[] = [];
+  const seen = new Set<string>();
+  try {
+    for (const event of events) {
+      if (signal?.aborted) break;
+      if (event.pubkey !== pubkey || !kinds.includes(event.kind) || seen.has(event.id)) continue;
+      seen.add(event.id);
+      let ok = false;
+      try {
+        // Verify a clean copy: nostr-tools trusts a cached `verified` symbol
+        // on the object, which a copied / forged event can carry along.
+        ok = verifyEvent({
+          id: event.id,
+          pubkey: event.pubkey,
+          created_at: event.created_at,
+          kind: event.kind,
+          tags: event.tags,
+          content: event.content,
+          sig: event.sig,
+        });
+      } catch {
+        ok = false;
+      }
+      if (ok) out.push(event);
+      await scheduler.maybeYield();
+    }
+  } finally {
+    scheduler.dispose();
+  }
+  return out;
+}
+
+/**
  * One bounded snapshot of the seller's listings, shop, zones and deletions.
- * The shop + zones are a separate query so a long history of unrelated
- * deletions (kind 5 is shared with every other feature) can't crowd them out
- * of the relay's `limit`.
+ * FAILS CLOSED: a relay set that times out before EOSE is an error, never an
+ * empty "no shop" — saving a blank setup would replace the real shop. The
+ * shop + zones and the market deletions are separate queries so other
+ * features' kind-5s (and a long listing history) can't crowd them out.
  */
 export async function fetchSellerEvents(input: {
   pubkey: string;
@@ -48,8 +95,9 @@ export async function fetchSellerEvents(input: {
     maxWait: FETCH_MAX_WAIT_MS,
     signal: input.signal,
     rejectOnAllRelaysFailure: true,
+    rejectOnTimeout: true,
   };
-  const [shop, listings] = await Promise.all([
+  const batches = await Promise.all([
     querySyncAbortable(
       pool,
       input.relays,
@@ -59,31 +107,58 @@ export async function fetchSellerEvents(input: {
     querySyncAbortable(
       pool,
       input.relays,
-      { kinds: [LISTING_KIND, DELETION_KIND], authors: [pubkey], limit: 300 },
+      { kinds: [LISTING_KIND], authors: [pubkey], limit: 300 },
+      params,
+    ),
+    querySyncAbortable(
+      pool,
+      input.relays,
+      {
+        kinds: [DELETION_KIND],
+        authors: [pubkey],
+        '#k': [String(LISTING_KIND), String(SHIPPING_OPTION_KIND), String(COLLECTION_KIND)],
+        limit: 200,
+      },
       params,
     ),
   ]);
-  // `authors` / `kinds` are only a request — never trust a relay to honour them.
-  return [...shop, ...listings].filter((e) => e.pubkey === pubkey && SELLER_KINDS.includes(e.kind));
+  return verifiedOwnEvents(batches.flat(), pubkey, SELLER_KINDS, input.signal);
 }
 
 /**
- * Targeted look-up of the user's shop collection, made right before a
- * first-time setup is saved: a blank setup must never replace a shop that a
- * slow relay simply hadn't returned yet.
+ * The newest verified revision of one of the user's addressable events, or
+ * null when relays completed with none. Used right before publishing so an
+ * edit never silently overwrites a newer revision made elsewhere (and a
+ * first-time shop never replaces a shop a slow relay hadn't returned).
+ * Fails closed on timeout.
  */
-export async function fetchShopCollection(input: {
+export async function fetchLatestRevision(input: {
   pubkey: string;
+  kind: number;
+  dTag: string;
   relays: string[];
-}): Promise<Event[]> {
+}): Promise<Event | null> {
   const pubkey = input.pubkey.toLowerCase();
+  trackRelays(input.relays);
   const events = await querySyncAbortable(
     pool,
     input.relays,
-    { kinds: [COLLECTION_KIND], authors: [pubkey], '#d': [SHOP_COLLECTION_D], limit: 5 },
-    { maxWait: FETCH_MAX_WAIT_MS, rejectOnAllRelaysFailure: true },
+    { kinds: [input.kind], authors: [pubkey], '#d': [input.dTag], limit: 5 },
+    { maxWait: FETCH_MAX_WAIT_MS, rejectOnAllRelaysFailure: true, rejectOnTimeout: true },
   );
-  return events.filter((e) => e.pubkey === pubkey && e.kind === COLLECTION_KIND);
+  const own = (await verifiedOwnEvents(events, pubkey, [input.kind])).filter(
+    (e) => e.tags.find((t) => t[0] === 'd')?.[1] === input.dTag,
+  );
+  let newest: Event | null = null;
+  for (const e of own) {
+    if (
+      !newest ||
+      e.created_at > newest.created_at ||
+      (e.created_at === newest.created_at && e.id < newest.id)
+    )
+      newest = e;
+  }
+  return newest;
 }
 
 /** Publish to the seller's relays; resolves once ONE relay accepts, rejects
@@ -165,6 +240,7 @@ export async function loadSellerCache(pubkey: string): Promise<Event[]> {
 
 /** Persist the account's current snapshot from the in-memory store. */
 export async function persistSellerSnapshot(pubkey: string): Promise<void> {
+  if (isSellerAccountForgotten(pubkey)) return;
   const state = sellerStoreState(pubkey);
   const all = [...state.events.values()];
   const snapshot = reduceSellerSnapshot(all, pubkey, state.hidden);

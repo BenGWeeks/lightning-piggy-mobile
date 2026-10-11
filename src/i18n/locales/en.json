@@ -2535,7 +2535,8 @@
         "previewBanner": "Preview — this is how shoppers will see your listing. It isn't published yet."
       },
       "conflictTitle": "Changed elsewhere",
-      "overwrite": "Save anyway"
+      "overwrite": "Save anyway",
+      "loadFailedTryAgain": "Couldn't load your shop. Try again."
     },
     "markdown": {
       "openLinkTitle": "Open link?",

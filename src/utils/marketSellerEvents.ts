@@ -32,7 +32,13 @@ export { SHIPPING_OPTION_KIND };
 /** `d` of the one collection that represents the user's shop. */
 export const SHOP_COLLECTION_D = 'lightning-piggy-shop';
 /** Currencies a seller may price in: sats first, then the app's fiat list. */
-export const SELLER_CURRENCIES: readonly string[] = ['SATS', ...CURRENCIES];
+export const SELLER_CURRENCIES: readonly string[] = ['SATS', ...CURRENCIES, 'BTC'];
+
+/** Upper-case a currency, folding the `SAT` spelling into `SATS`. */
+export const normaliseCurrency = (currency: string) => {
+  const upper = currency.trim().toUpperCase();
+  return upper === 'SAT' ? 'SATS' : upper;
+};
 export const MAX_LISTING_IMAGES = 8;
 export const MAX_LISTING_CATEGORIES = 10;
 export const MAX_SHIPPING_ZONES = 10;
@@ -51,7 +57,9 @@ export interface ShopDraft {
   currency: string;
 }
 
-/** One shipping zone (a 30406 option). Its cost is in the shop currency. */
+/** One shipping zone (a 30406 option). New zones start in the shop
+ * currency; an existing zone keeps its own (a shop can price UK shipping in
+ * GBP and US shipping in USD). */
 export interface ShippingZoneDraft {
   dTag: string;
   name: string;
@@ -59,6 +67,7 @@ export interface ShippingZoneDraft {
   countries: string[];
   /** Decimal string, e.g. "3.50". */
   cost: string;
+  currency: string;
 }
 
 /** A listing's link to one shipping option plus its per-product surcharge. */
@@ -140,7 +149,7 @@ export function validateListingDraft(draft: ListingDraft): SellerDraftError[] {
   const errors: SellerDraftError[] = [];
   const title = draft.title.trim();
   if (!title || title.length > 200) errors.push('title');
-  if (!SELLER_CURRENCIES.includes(draft.currency.toUpperCase())) errors.push('currency');
+  if (!SELLER_CURRENCIES.includes(normaliseCurrency(draft.currency))) errors.push('currency');
   else if (normaliseAmount(draft.price, draft.currency) === null) errors.push('price');
   const quantity = draft.quantity.trim();
   if (quantity && (!/^\d{1,9}$/.test(quantity) || Number(quantity) > 1e9)) errors.push('quantity');
@@ -165,10 +174,17 @@ export function validateShop(
   const errors: SellerDraftError[] = [];
   const name = shop.name.trim();
   if (!name || name.length > 100) errors.push('shopName');
-  if (!SELLER_CURRENCIES.includes(shop.currency.toUpperCase())) errors.push('currency');
+  if (!SELLER_CURRENCIES.includes(normaliseCurrency(shop.currency))) errors.push('currency');
   if (zones.length > MAX_SHIPPING_ZONES) errors.push('zones');
   if (zones.some((z) => !z.name.trim() || z.name.trim().length > 100)) errors.push('zoneName');
-  if (zones.some((z) => normaliseAmount(z.cost, shop.currency) === null)) errors.push('zoneCost');
+  if (
+    zones.some(
+      (z) =>
+        !SELLER_CURRENCIES.includes(normaliseCurrency(z.currency)) ||
+        normaliseAmount(z.cost, z.currency) === null,
+    )
+  )
+    errors.push('zoneCost');
   if (zones.some((z) => z.countries.some((c) => !isKnownCountry(c)))) errors.push('zoneCountries');
   return errors;
 }
@@ -204,16 +220,16 @@ export const shopCoordinate = (pubkey: string) =>
  * rejects an empty one. */
 export function buildShippingZoneTemplate(
   zone: ShippingZoneDraft,
-  currency: string,
   previous?: Event | null,
 ): EventTemplate {
+  const currency = normaliseCurrency(zone.currency);
   const cost = normaliseAmount(zone.cost, currency);
   if (cost === null) throw new Error('Invalid shipping cost');
   const countries = [...new Set(zone.countries.map((c) => c.trim().toUpperCase()))].filter(Boolean);
   const tags: string[][] = [
     ['d', zone.dTag],
     ['title', zone.name.trim()],
-    ['price', cost, currency.toUpperCase()],
+    ['price', cost, currency],
   ];
   if (countries.length > 0) tags.push(['country', ...countries]);
   const service = tagValue(previous?.tags ?? [], 'service') ?? 'standard';
@@ -239,7 +255,7 @@ export function buildShopTemplate(input: {
   ];
   for (const coord of new Set(input.productCoordinates)) tags.push(['a', coord]);
   for (const coord of new Set(input.zoneCoordinates)) tags.push(['shipping_option', coord]);
-  tags.push(['currency', input.shop.currency.toUpperCase()]);
+  tags.push(['currency', normaliseCurrency(input.shop.currency)]);
   const managed = new Set(['d', 'title', 'a', 'shipping_option', 'currency']);
   tags.push(...preservedTags(input.previous, (t) => managed.has(t[0])));
   return { kind: COLLECTION_KIND, content: input.shop.description.trim(), tags };
@@ -253,7 +269,7 @@ export function buildListingTemplate(input: {
   previous?: Event | null;
 }): EventTemplate {
   const { draft, pubkey, previous } = input;
-  const currency = draft.currency.toUpperCase();
+  const currency = normaliseCurrency(draft.currency);
   const price = normaliseAmount(draft.price, currency);
   if (price === null) throw new Error('Invalid price');
   const prevTags = previous?.tags ?? [];
@@ -279,7 +295,11 @@ export function buildListingTemplate(input: {
   ];
   const quantity = draft.quantity.trim();
   if (quantity) tags.push(['stock', String(Number(quantity))]);
-  draft.images.forEach((url, i) => tags.push(['image', url, '', String(i)]));
+  // Keep the dimensions another client published for an image we still use.
+  const dims = new Map(
+    prevTags.filter((t) => t[0] === 'image' && t[1]).map((t) => [t[1], t[2] ?? '']),
+  );
+  draft.images.forEach((url, i) => tags.push(['image', url, dims.get(url) ?? '', String(i)]));
   for (const category of normaliseCategories(draft.categories)) tags.push(['t', category]);
   for (const s of shipping) {
     const extra = s.extraCost.trim() ? normaliseAmount(s.extraCost, currency) : null;
@@ -327,7 +347,7 @@ export function parseListingDraft(event: Pick<Event, 'tags' | 'content'>): Listi
     description: event.content,
     images: [...new Set(images)],
     price: price?.[1] ?? '',
-    currency: (price?.[2] ?? 'SATS').toUpperCase(),
+    currency: normaliseCurrency(price?.[2] ?? 'SATS'),
     quantity: tagValue(event.tags, 'stock') ?? '',
     categories: normaliseCategories(event.tags.filter((t) => t[0] === 't').map((t) => t[1] ?? '')),
     shipping: event.tags
@@ -358,6 +378,7 @@ export function zoneDraftFromOption(option: ShippingOption): ShippingZoneDraft {
     name: option.title,
     countries: [...option.countries],
     cost: String(option.baseAmount),
+    currency: normaliseCurrency(option.currency),
   };
 }
 

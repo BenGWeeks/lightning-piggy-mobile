@@ -2,7 +2,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { finalizeEvent, getPublicKey, type Event } from 'nostr-tools';
 import {
   fetchSellerEvents,
-  fetchShopCollection,
+  fetchLatestRevision,
+  verifiedOwnEvents,
   loadHiddenListings,
   loadSellerCache,
   persistSellerSnapshot,
@@ -15,6 +16,7 @@ import {
   forgetSellerAccount,
   resetSellerStore,
   restoreSellerAccount,
+  reviveSellerAccount,
   sellerStoreState,
   setSellerHidden,
 } from './sellerEventStore';
@@ -88,7 +90,7 @@ describe('sellerRelays', () => {
 });
 
 describe('fetchSellerEvents', () => {
-  it('queries the shop + zones apart from listings + deletions, and drops foreign events', async () => {
+  it('runs bounded, fail-closed queries and keeps only verified own events', async () => {
     const mine = listing('a');
     const theirs = finalizeEvent(
       { kind: 30402, created_at: 1, content: '', tags: [['d', 'x']] },
@@ -97,51 +99,84 @@ describe('fetchSellerEvents', () => {
     const note = sign({ kind: 1, content: 'gm', tags: [] });
     (querySyncAbortable as jest.Mock)
       .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([mine, theirs, note]);
+      .mockResolvedValueOnce([mine, theirs, note])
+      .mockResolvedValueOnce([]);
     await expect(fetchSellerEvents({ pubkey, relays: ['wss://r.example'] })).resolves.toEqual([
       mine,
     ]);
-    const filters = (querySyncAbortable as jest.Mock).mock.calls.map((c) => c[2]);
-    // Kind 5 is shared with other features: it must not share a `limit` with the shop.
-    expect(filters).toEqual([
+    const calls = (querySyncAbortable as jest.Mock).mock.calls;
+    // Kind 5 is shared with other features: market deletions are their own
+    // `#k`-filtered query so they can't crowd the shop or listings out.
+    expect(calls.map((c) => c[2])).toEqual([
       { kinds: [30405, 30406], authors: [pubkey], limit: 100 },
-      { kinds: [30402, 5], authors: [pubkey], limit: 300 },
+      { kinds: [30402], authors: [pubkey], limit: 300 },
+      { kinds: [5], authors: [pubkey], '#k': ['30402', '30406', '30405'], limit: 200 },
     ]);
-    expect((querySyncAbortable as jest.Mock).mock.calls[0][3]).toEqual(
-      expect.objectContaining({ maxWait: 8000, rejectOnAllRelaysFailure: true }),
-    );
+    for (const call of calls)
+      expect(call[3]).toEqual(
+        expect.objectContaining({
+          maxWait: 8000,
+          rejectOnAllRelaysFailure: true,
+          rejectOnTimeout: true,
+        }),
+      );
   });
 
-  it('fails when either query fails, never returning a partial "no shop"', async () => {
+  it('fails on a relay timeout instead of returning an empty "no shop"', async () => {
     (querySyncAbortable as jest.Mock)
-      .mockRejectedValueOnce(new Error('All relays failed to connect'))
-      .mockResolvedValueOnce([listing('a')]);
+      .mockRejectedValueOnce(new Error('Relay query timed out before EOSE'))
+      .mockResolvedValue([]);
     await expect(fetchSellerEvents({ pubkey, relays: ['wss://r.example'] })).rejects.toThrow(
-      'All relays failed',
+      'timed out',
     );
   });
 });
 
-describe('fetchShopCollection', () => {
-  it('looks up exactly the shop coordinate', async () => {
-    const shop = sign(
-      buildShopTemplate({
-        shop: { name: 'TEST', description: '', currency: 'GBP' },
-        pubkey,
-        productCoordinates: [],
-        zoneCoordinates: [],
-      }),
+describe('verifiedOwnEvents', () => {
+  it('drops a forged "own" event (bad signature) and other authors', async () => {
+    const real = listing('a', 100);
+    const forged = { ...listing('a', 200), content: 'PAY ME ELSEWHERE' };
+    const foreign = finalizeEvent(
+      { kind: 30402, created_at: 300, content: '', tags: [['d', 'a']] },
+      new Uint8Array(32).fill(1),
     );
-    (querySyncAbortable as jest.Mock).mockResolvedValue([shop, listing('a')]);
-    await expect(fetchShopCollection({ pubkey, relays: ['wss://r.example'] })).resolves.toEqual([
-      shop,
+    await expect(verifiedOwnEvents([real, forged, foreign], pubkey, [30402])).resolves.toEqual([
+      real,
     ]);
+  });
+});
+
+describe('fetchLatestRevision', () => {
+  it('returns the newest verified revision of exactly that coordinate, failing closed', async () => {
+    const v1 = listing('a', 100);
+    const v2 = listing('a', 200);
+    const forged = { ...listing('a', 300), sig: 'f'.repeat(128) };
+    const other = listing('b', 400);
+    (querySyncAbortable as jest.Mock).mockResolvedValue([v1, forged, v2, other]);
+    await expect(
+      fetchLatestRevision({ pubkey, kind: 30402, dTag: 'a', relays: ['wss://r.example'] }),
+    ).resolves.toBe(v2);
     expect((querySyncAbortable as jest.Mock).mock.calls[0][2]).toEqual({
-      kinds: [30405],
+      kinds: [30402],
       authors: [pubkey],
-      '#d': ['lightning-piggy-shop'],
+      '#d': ['a'],
       limit: 5,
     });
+    expect((querySyncAbortable as jest.Mock).mock.calls[0][3]).toEqual(
+      expect.objectContaining({ rejectOnTimeout: true }),
+    );
+  });
+
+  it('is null only when relays completed with nothing', async () => {
+    (querySyncAbortable as jest.Mock).mockResolvedValue([]);
+    await expect(
+      fetchLatestRevision({
+        pubkey,
+        kind: 30405,
+        dTag: 'lightning-piggy-shop',
+        relays: ['wss://r'],
+      }),
+    ).resolves.toBeNull();
   });
 });
 
@@ -173,7 +208,13 @@ describe('hidden listings and the persisted snapshot', () => {
 
   it('persists only the winning revisions plus deletions, and restores them', async () => {
     const zone = sign(
-      buildShippingZoneTemplate({ dTag: 'z', name: 'UK', countries: ['GB'], cost: '3' }, 'GBP'),
+      buildShippingZoneTemplate({
+        dTag: 'z',
+        name: 'UK',
+        countries: ['GB'],
+        cost: '3',
+        currency: 'GBP',
+      }),
     );
     const shop = sign(
       buildShopTemplate({
@@ -229,6 +270,15 @@ describe('sellerEventStore', () => {
     expect(sellerStoreState(pubkey).hidden.get('c')).toBe(1);
     forgetSellerAccount(pubkey);
     expect(sellerStoreState(pubkey).events.size).toBe(0);
+  });
+
+  it('ignores late writes for a signed-out account until it is active again', () => {
+    forgetSellerAccount(pubkey);
+    addSellerEvents(pubkey, [listing('late')]);
+    expect(sellerStoreState(pubkey).events.size).toBe(0);
+    reviveSellerAccount(pubkey);
+    addSellerEvents(pubkey, [listing('back')]);
+    expect(sellerStoreState(pubkey).events.size).toBe(1);
   });
 
   it('compacts superseded revisions past the cap instead of refusing new events', () => {

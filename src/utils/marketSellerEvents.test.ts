@@ -160,6 +160,30 @@ describe('listing events (kind 30402)', () => {
     expect(tags).toContainEqual(['type', 'simple', 'physical']);
   });
 
+  it('keeps image dimensions from the previous revision and edits SAT / BTC listings', () => {
+    const previous = sign({
+      kind: 30402,
+      content: '',
+      tags: [
+        ['d', 'item-abc'],
+        ['price', '2100', 'SAT'],
+        ['image', 'https://blossom.example/a.jpg', '800x600', '0'],
+      ],
+    });
+    const parsed = parseListingDraft(previous);
+    expect(parsed.currency).toBe('SATS');
+    expect(validateListingDraft({ ...parsed, title: 'x' })).toEqual([]);
+    const { tags } = buildListingTemplate({
+      draft: { ...parsed, title: 'x' },
+      pubkey,
+      nowSeconds: 1,
+      previous,
+    });
+    expect(tags).toContainEqual(['image', 'https://blossom.example/a.jpg', '800x600', '0']);
+    expect(tags).toContainEqual(['price', '2100', 'SATS']);
+    expect(validateListingDraft(draft({ currency: 'BTC', price: '0.0005' }))).toEqual([]);
+  });
+
   it('parses images in sort order and drops duplicates (Robotechy repeats images)', () => {
     const parsed = parseListingDraft({
       content: '',
@@ -222,10 +246,11 @@ describe('shipping zones (kind 30406)', () => {
     name: 'UK Royal Mail',
     countries: ['gb', 'GB', 'IM'],
     cost: '3.5',
+    currency: 'GBP',
   };
 
   it('round-trips through the checkout parser', () => {
-    const event = sign(buildShippingZoneTemplate(zone, 'gbp'));
+    const event = sign(buildShippingZoneTemplate({ ...zone, currency: 'gbp' }));
     const option = parseShippingOptionEvent(event)!;
     expect(option).toMatchObject({
       coordinate: zoneCoord('zone-uk'),
@@ -239,7 +264,7 @@ describe('shipping zones (kind 30406)', () => {
   });
 
   it('omits the country tag for worldwide (an empty tag is rejected by readers)', () => {
-    const event = sign(buildShippingZoneTemplate({ ...zone, countries: [] }, 'GBP'));
+    const event = sign(buildShippingZoneTemplate({ ...zone, countries: [], currency: 'GBP' }));
     expect(event.tags.find((t) => t[0] === 'country')).toBeUndefined();
     expect(parseShippingOptionEvent(event)!.countries).toEqual([]);
   });
@@ -254,15 +279,23 @@ describe('shipping zones (kind 30406)', () => {
         ['duration', '1', '2', 'D'],
       ],
     });
-    const { tags, content } = buildShippingZoneTemplate(zone, 'GBP', previous);
+    const { tags, content } = buildShippingZoneTemplate(zone, previous);
     expect(content).toBe('Tracked');
     expect(tags).toContainEqual(['service', 'express']);
     expect(tags).toContainEqual(['duration', '1', '2', 'D']);
     expect(tags.filter((t) => t[0] === 'service')).toHaveLength(1);
   });
 
+  it("keeps each zone's own currency (a USD zone in a GBP shop stays USD)", () => {
+    const us = sign(buildShippingZoneTemplate({ ...zone, dTag: 'us', cost: '5', currency: 'USD' }));
+    const draft = zoneDraftFromOption(parseShippingOptionEvent(us)!);
+    expect(draft.currency).toBe('USD');
+    expect(buildShippingZoneTemplate(draft, us).tags).toContainEqual(['price', '5', 'USD']);
+    expect(validateShop({ name: 'Shop', description: '', currency: 'GBP' }, [draft])).toEqual([]);
+  });
+
   it('rejects a bad cost', () => {
-    expect(() => buildShippingZoneTemplate({ ...zone, cost: 'free' }, 'GBP')).toThrow();
+    expect(() => buildShippingZoneTemplate({ ...zone, cost: 'free', currency: 'GBP' })).toThrow();
   });
 });
 
@@ -289,7 +322,15 @@ describe('shop collection (kind 30405)', () => {
 
   it('falls back to the zone currency when the shop has no currency tag', () => {
     const option = parseShippingOptionEvent(
-      sign(buildShippingZoneTemplate({ dTag: 'z', name: 'Z', countries: [], cost: '1' }, 'USD')),
+      sign(
+        buildShippingZoneTemplate({
+          dTag: 'z',
+          name: 'Z',
+          countries: [],
+          cost: '1',
+          currency: 'USD',
+        }),
+      ),
     )!;
     expect(parseShopDraft({ content: '', tags: [['title', 'X']] }, [option])!.currency).toBe('USD');
     expect(parseShopDraft(null, [])).toBeNull();
@@ -297,7 +338,13 @@ describe('shop collection (kind 30405)', () => {
 
   it('validates the settings form', () => {
     const shop = { name: 'Shop', description: '', currency: 'GBP' };
-    const ok: ShippingZoneDraft = { dTag: 'z', name: 'UK', countries: ['GB'], cost: '2' };
+    const ok: ShippingZoneDraft = {
+      dTag: 'z',
+      name: 'UK',
+      countries: ['GB'],
+      cost: '2',
+      currency: 'GBP',
+    };
     expect(validateShop(shop, [ok])).toEqual([]);
     expect(validateShop({ ...shop, name: '' }, [])).toContain('shopName');
     expect(validateShop(shop, [{ ...ok, name: '' }])).toContain('zoneName');

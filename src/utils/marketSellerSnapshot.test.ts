@@ -30,7 +30,7 @@ const listing = (d: string, title: string, created_at: number, secret = key) =>
   );
 const zone = (d: string, created_at: number) =>
   sign(
-    buildShippingZoneTemplate({ dTag: d, name: d, countries: [], cost: '1' }, 'GBP'),
+    buildShippingZoneTemplate({ dTag: d, name: d, countries: [], cost: '1', currency: 'GBP' }),
     created_at,
   );
 

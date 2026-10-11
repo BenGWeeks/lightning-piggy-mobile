@@ -11,6 +11,7 @@ import {
 import {
   addSellerEvents,
   restoreSellerAccount,
+  reviveSellerAccount,
   sellerStoreState,
   subscribeSellerStore,
 } from '../services/sellerEventStore';
@@ -55,6 +56,8 @@ export function useSellerShop(): UseSellerShop {
         return;
       }
       let cancelled = false;
+      // This screen only runs for the signed-in account.
+      reviveSellerAccount(pubkey);
       const state = sellerStoreState(pubkey);
       if (!state.restored) {
         // Instant paint from the persisted snapshot; the relay fetch below

@@ -2535,7 +2535,8 @@
         "previewBanner": "Vista previa: así verán tu anuncio los compradores. Aún no está publicado."
       },
       "conflictTitle": "Cambiado en otro lugar",
-      "overwrite": "Guardar de todos modos"
+      "overwrite": "Guardar de todos modos",
+      "loadFailedTryAgain": "No se pudo cargar tu tienda. Inténtalo de nuevo."
     },
     "markdown": {
       "openLinkTitle": "¿Abrir enlace?",
