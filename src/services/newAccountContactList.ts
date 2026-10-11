@@ -77,7 +77,13 @@ export async function setUpNewAccountContactList({
   relays: string[];
   publish?: typeof nostrService.signAndPublishEvent;
 }): Promise<boolean> {
-  await markAccountCreatedHere(pubkey);
+  try {
+    await markAccountCreatedHere(pubkey);
+  } catch (e) {
+    // Without the flag the empty-list path just stays closed (safe); still
+    // publish the empty list so later follows have one to build on.
+    if (__DEV__) console.warn('[ContactList] could not flag new account:', e);
+  }
   try {
     await publish(nostrService.createContactListEvent([]), secretKey, relays);
   } catch (e) {

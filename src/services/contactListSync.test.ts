@@ -324,6 +324,12 @@ describe('fetchLatestContactList', () => {
     expect(res).toEqual({ status: 'failed' });
   });
 
+  it("is 'failed', not 'empty', when a connected relay is still silent at the cap", async () => {
+    await expect(
+      fetch({ 'wss://a': eose, 'wss://b': eose, 'wss://c': silent }, 50),
+    ).resolves.toEqual({ status: 'failed' });
+  });
+
   it("is 'failed' when no relay connects", async () => {
     await expect(fetch({ 'wss://a': 'down', 'wss://b': 'down' })).resolves.toEqual({
       status: 'failed',

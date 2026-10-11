@@ -86,4 +86,13 @@ describe('newAccountContactList (#1271)', () => {
     await clearAccountCreatedHere(PK);
     expect(await isAccountCreatedHere(PK)).toBe(false);
   });
+
+  it('still publishes the empty list if the flag cannot be stored', async () => {
+    jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('disk full'));
+    const publish = jest.fn(async () => undefined);
+    await expect(
+      setUpNewAccountContactList({ pubkey: PK, secretKey: SK, relays: ['wss://r'], publish }),
+    ).resolves.toBe(true);
+    expect(publish).toHaveBeenCalledTimes(1);
+  });
 });

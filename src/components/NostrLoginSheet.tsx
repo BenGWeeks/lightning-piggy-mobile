@@ -187,6 +187,8 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
       pubkey: newPubkey,
       secretKey,
       relays: nostrService.DEFAULT_RELAYS,
+    }).catch((e) => {
+      if (__DEV__) console.warn('[ContactList] new-account setup failed:', e);
     });
 
     // Publish initial profile with display name (best-effort, don't block)

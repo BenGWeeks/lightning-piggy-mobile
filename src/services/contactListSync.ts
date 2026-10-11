@@ -91,7 +91,8 @@ type RelayState = 'pending' | 'eose' | 'failed';
  * "done" can't be trusted here (#1271): nostr-tools counts a relay that failed
  * to connect, or that hit its eoseTimeout, as EOSE. So:
  * - our eoseTimeout is far past the overall cap, so every EOSE seen is real;
- * - only relays that connected AND sent EOSE count towards `empty`;
+ * - only relays that connected AND sent EOSE count towards `empty`, and only
+ *   once every relay has answered or failed (none still pending);
  * - every kind-3 from the author counts, including ones that fail signature
  *   checks (`oninvalidevent`). A list we can't verify means `failed`, never
  *   `empty`, because a dropped event followed by EOSE is exactly how an
@@ -157,7 +158,13 @@ export function fetchLatestContactList(
           status: 'found',
           base: { tags: best.tags, content: best.content, createdAt: best.created_at },
         };
-      } else if (unverifiable === 0 && confirmedBy >= MIN_EMPTY_CONFIRMATIONS) {
+      } else if (
+        unverifiable === 0 &&
+        confirmedBy >= MIN_EMPTY_CONFIRMATIONS &&
+        // A relay still pending at the cap (connected but silent) might hold
+        // the list: "empty" needs every relay to have answered or failed.
+        [...states.values()].every((st) => st !== 'pending')
+      ) {
         result = { status: 'empty', confirmedBy };
       } else {
         result = unverifiable > 0 ? { status: 'failed', sawList: true } : { status: 'failed' };
