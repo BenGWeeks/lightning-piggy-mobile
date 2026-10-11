@@ -2,14 +2,15 @@ import { I18n } from 'i18n-js';
 import type { Scope, TranslateOptions } from 'i18n-js';
 import enJson from './locales/en.json';
 import esJson from './locales/es.json';
+import huJson from './locales/hu.json';
 import ukJson from './locales/uk.json';
 import type { Translations } from './locales/types';
 import { registerPluralRules } from './plurals';
 
-// #137 infra: seeded with en + es to prove the pipeline end-to-end (tab
-// bar labels). fr/de/nl (named in the issue) land as their own follow-up
-// batches, same as every other surface — see the issue's "extract in
-// batches per surface" plan.
+// #137 infra; languages added in batches since (#1312). Adding one: drop
+// `locales/<code>.json` next to en.json, import + register it below, add a
+// CLDR rule in plurals.ts and a native-name label in DisplayLanguageScreen.
+// catalogues.test.ts then guards key parity, placeholders and plural forms.
 //
 // Locale catalogues are plain JSON (not .ts) so a translation-only
 // contribution — the issue explicitly calls this out as a good first
@@ -19,14 +20,15 @@ import { registerPluralRules } from './plurals';
 // misspells) a key, same guarantee a hand-written .ts file would give.
 const en: Translations = enJson;
 const es: Translations = esJson;
+const hu: Translations = huJson;
 const uk: Translations = ukJson;
 
 /** Raw catalogue dict — exported so LocaleContext can build its own
  *  per-locale I18n instance for rendering (see the render-purity note
  *  there) without duplicating the JSON imports. */
-export const translations = { en, es, uk };
+export const translations = { en, es, hu, uk };
 
-export const SUPPORTED_LOCALES = ['en', 'es', 'uk'] as const;
+export const SUPPORTED_LOCALES = ['en', 'es', 'hu', 'uk'] as const;
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
 
 export function isSupportedLocale(code: string): code is SupportedLocale {

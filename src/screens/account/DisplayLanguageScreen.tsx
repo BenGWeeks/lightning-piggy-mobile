@@ -29,6 +29,7 @@ import type { AccountDrawerNavigation } from '../../navigation/types';
 const LOCALE_LABELS: Record<(typeof SUPPORTED_LOCALES)[number], string> = {
   en: 'English',
   es: 'Español',
+  hu: 'Magyar',
   uk: 'Українська',
 };
 
