@@ -12,6 +12,7 @@ import {
 } from './sellerEventStore';
 import { reduceSellerSnapshot } from '../utils/marketSellerSnapshot';
 import { querySyncAbortable } from './relayQuery';
+import { selectHealthyRelays } from './relayHealth';
 import { createYieldScheduler } from '../contexts/nostrDecryptPacing';
 import {
   COLLECTION_KIND,
@@ -89,7 +90,9 @@ export async function queryQuorum(
   filter: Filter,
   signal?: AbortSignal,
 ): Promise<Event[]> {
-  const unique = [...new Set(relays)];
+  // Relays parked as dead (#1326) neither burn a timeout nor count against
+  // the quorum; selectHealthyRelays always keeps the healthiest two.
+  const unique = selectHealthyRelays([...new Set(relays)]);
   const results = await Promise.allSettled(
     unique.map((relay) =>
       querySyncAbortable(pool, [relay], filter, {
