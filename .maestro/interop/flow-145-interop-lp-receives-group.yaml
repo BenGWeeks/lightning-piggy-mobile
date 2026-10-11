@@ -6,10 +6,13 @@ name: Interop — Lightning Piggy renders what the scripted Marmot sender sent (
 # invite Big Piggy's installs + Little Piggy's White Noise, and send the item
 # set in scripts/interop/items.mjs. Expects Lightning Piggy signed in as Big.
 #
+# The thread is an inverted list: Maestro's `direction: DOWN` walks back to
+# older messages here (UP would move towards the newest).
+#
 # Every check is `optional` and labelled `IO-CHECK <item>`: the runner reads
 # COMPLETED / WARNED per label from Maestro's output to build the matrix, so
 # one missing item doesn't hide the rest. Items are checked newest-first while
-# scrolling up from the bottom of the thread.
+# walking back from the newest message.
 #
 # Env: ROW_ID=group-row-marmot:<group id>, TAG=<run tag>.
 - runFlow:
@@ -18,7 +21,7 @@ name: Interop — Lightning Piggy renders what the scripted Marmot sender sent (
     label: 'IO-CHECK contact'
     element:
       id: 'group-conversation-contact-.*'
-    direction: UP
+    direction: DOWN
     timeout: 20000
     visibilityPercentage: 30
     optional: true
@@ -27,7 +30,7 @@ name: Interop — Lightning Piggy renders what the scripted Marmot sender sent (
     label: 'IO-CHECK location'
     element:
       id: 'group-conversation-location-.*'
-    direction: UP
+    direction: DOWN
     timeout: 20000
     visibilityPercentage: 30
     optional: true
@@ -36,7 +39,7 @@ name: Interop — Lightning Piggy renders what the scripted Marmot sender sent (
     label: 'IO-CHECK invoice'
     element:
       id: 'group-conversation-invoice-.*'
-    direction: UP
+    direction: DOWN
     timeout: 20000
     visibilityPercentage: 30
     optional: true
@@ -45,7 +48,7 @@ name: Interop — Lightning Piggy renders what the scripted Marmot sender sent (
     label: 'IO-CHECK voice'
     element:
       id: 'group-conversation-voice-.*'
-    direction: UP
+    direction: DOWN
     timeout: 20000
     visibilityPercentage: 30
     optional: true
@@ -54,7 +57,7 @@ name: Interop — Lightning Piggy renders what the scripted Marmot sender sent (
     label: 'IO-CHECK image'
     element:
       id: 'group-conversation-image-.*'
-    direction: UP
+    direction: DOWN
     timeout: 20000
     visibilityPercentage: 30
     optional: true
@@ -63,7 +66,7 @@ name: Interop — Lightning Piggy renders what the scripted Marmot sender sent (
     label: 'IO-CHECK edit'
     element:
       text: 'IO${TAG} editme v2 edited'
-    direction: UP
+    direction: DOWN
     timeout: 20000
     visibilityPercentage: 30
     optional: true
@@ -80,7 +83,7 @@ name: Interop — Lightning Piggy renders what the scripted Marmot sender sent (
     label: 'IO-CHECK reply'
     element:
       text: 'IO${TAG} reply: replying to plain'
-    direction: UP
+    direction: DOWN
     timeout: 20000
     visibilityPercentage: 30
     optional: true
@@ -89,7 +92,7 @@ name: Interop — Lightning Piggy renders what the scripted Marmot sender sent (
     label: 'IO-CHECK reply.quote'
     element:
       id: 'group-conversation-quote-.*'
-    direction: UP
+    direction: DOWN
     timeout: 20000
     visibilityPercentage: 30
     optional: true
@@ -98,7 +101,7 @@ name: Interop — Lightning Piggy renders what the scripted Marmot sender sent (
     label: 'IO-CHECK text.zw'
     element:
       text: '(?s)IO${TAG} zw: .*'
-    direction: UP
+    direction: DOWN
     timeout: 20000
     visibilityPercentage: 30
     optional: true
@@ -107,7 +110,7 @@ name: Interop — Lightning Piggy renders what the scripted Marmot sender sent (
     label: 'IO-CHECK text.word'
     element:
       text: '(?s)IO${TAG} word: .*'
-    direction: UP
+    direction: DOWN
     timeout: 20000
     visibilityPercentage: 30
     optional: true
@@ -116,7 +119,7 @@ name: Interop — Lightning Piggy renders what the scripted Marmot sender sent (
     label: 'IO-CHECK text.long'
     element:
       text: '(?s)IO${TAG} long: .*'
-    direction: UP
+    direction: DOWN
     timeout: 20000
     visibilityPercentage: 30
     optional: true
@@ -125,7 +128,7 @@ name: Interop — Lightning Piggy renders what the scripted Marmot sender sent (
     label: 'IO-CHECK text.html'
     element:
       text: '(?s)IO${TAG} html: .*'
-    direction: UP
+    direction: DOWN
     timeout: 20000
     visibilityPercentage: 30
     optional: true
@@ -134,7 +137,7 @@ name: Interop — Lightning Piggy renders what the scripted Marmot sender sent (
     label: 'IO-CHECK text.js'
     element:
       text: '(?s)IO${TAG} js: .*'
-    direction: UP
+    direction: DOWN
     timeout: 20000
     visibilityPercentage: 30
     optional: true
@@ -143,7 +146,7 @@ name: Interop — Lightning Piggy renders what the scripted Marmot sender sent (
     label: 'IO-CHECK text.json'
     element:
       text: '(?s)IO${TAG} json: .*'
-    direction: UP
+    direction: DOWN
     timeout: 20000
     visibilityPercentage: 30
     optional: true
@@ -152,7 +155,7 @@ name: Interop — Lightning Piggy renders what the scripted Marmot sender sent (
     label: 'IO-CHECK text.md'
     element:
       text: '(?s)IO${TAG} md: .*'
-    direction: UP
+    direction: DOWN
     timeout: 20000
     visibilityPercentage: 30
     optional: true
@@ -161,7 +164,7 @@ name: Interop — Lightning Piggy renders what the scripted Marmot sender sent (
     label: 'IO-CHECK text.emoji'
     element:
       text: 'IO${TAG} emoji: .*'
-    direction: UP
+    direction: DOWN
     timeout: 20000
     visibilityPercentage: 30
     optional: true
@@ -174,7 +177,7 @@ name: Interop — Lightning Piggy renders what the scripted Marmot sender sent (
     label: 'IO-CHECK text.zh'
     element:
       text: 'IO${TAG} zh: .*'
-    direction: UP
+    direction: DOWN
     timeout: 20000
     visibilityPercentage: 30
     optional: true
@@ -183,7 +186,7 @@ name: Interop — Lightning Piggy renders what the scripted Marmot sender sent (
     label: 'IO-CHECK react'
     element:
       id: 'group-conversation-reaction-.*-❤️'
-    direction: UP
+    direction: DOWN
     timeout: 20000
     visibilityPercentage: 30
     optional: true
@@ -192,7 +195,7 @@ name: Interop — Lightning Piggy renders what the scripted Marmot sender sent (
     label: 'IO-CHECK text.plain'
     element:
       text: 'IO${TAG} plain: .*'
-    direction: UP
+    direction: DOWN
     timeout: 20000
     visibilityPercentage: 30
     optional: true

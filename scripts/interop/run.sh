@@ -81,8 +81,12 @@ flow() { # file [KEY=VALUE ...] — one Maestro run under maestro.lock
   local args=(-e TAG="$TAG")
   for kv in "$@"; do args+=(-e "$kv"); done
   say "maestro $(basename "$f")"
+  local name; name="$(basename "$f" .yaml)"
+  # --debug-output keeps Maestro's per-command JSON (status per labelled
+  # IO-CHECK), which matrix.mjs reads; piped stdout doesn't carry it.
   (cd "$OUT/screenshots" && flock -w 3600 "$LOCK_DIR/maestro.lock" \
-    maestro --device "$DEVICE" test "${args[@]}" "$f") 2>&1 | redact >"$OUT/logs/$(basename "$f" .yaml).log"
+    maestro --device "$DEVICE" test --debug-output "$OUT/logs/maestro-$name" "${args[@]}" "$f") \
+    2>&1 | redact >"$OUT/logs/$name.log"
 }
 export -f flow say redact set_metro metro_host is_emulator device_setup device_restore
 export DEVICE OUT TAG LOCK_DIR FIXTURE_ON_DEVICE FLOWS METRO_PORT

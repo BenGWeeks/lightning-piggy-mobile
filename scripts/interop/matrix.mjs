@@ -3,7 +3,7 @@
 // Reads Maestro logs (logs/flow-*.log, `IO-CHECK <key>` labels with
 // COMPLETED / WARNED / FAILED), the sender's JSON-lines logs and the
 // screenshots folder. Pure file parsing — safe to re-run on an old folder.
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { itemPlan } from './items.mjs';
 
@@ -65,26 +65,52 @@ out.push(
   '',
 );
 
-for (const [file, title, shotPrefix] of FLOWS) {
-  const text = read(`${file}.log`);
-  if (!text) continue;
-  const rows = [];
-  const seen = new Set();
-  for (const line of text.split('\n')) {
-    const m = line.match(/IO-CHECK (\S+?)(?:\.\.\.|\s).*?(COMPLETED|WARNED|FAILED|SKIPPED)/);
-    if (!m || seen.has(m[1])) continue;
-    seen.add(m[1]);
-    const key = m[1].replace(/^(dm|lp|lp-side)\./, '');
-    const shot = shots.find((s) => s.startsWith(shotPrefix) && s.includes(key.replace(/\./g, '-')));
-    rows.push(
-      `| ${STATUS[m[2]]} | \`${m[1]}\` | ${expectFor[key] ?? ''} | ${shot ? `screenshots/${shot}` : ''} |`,
-    );
+/** Labelled IO-CHECK results from Maestro's --debug-output commands JSON. */
+function checksFor(flow) {
+  const root = join(logs, `maestro-${flow}`);
+  if (!existsSync(root)) return null;
+  const files = [];
+  const walk = (d) => {
+    for (const f of readdirSync(d)) {
+      const p = join(d, f);
+      if (statSync(p).isDirectory()) walk(p);
+      else if (f.startsWith('commands-') && f.endsWith('.json')) files.push(p);
+    }
+  };
+  walk(root);
+  const results = [];
+  for (const f of files) {
+    for (const entry of JSON.parse(readFileSync(f, 'utf8'))) {
+      const cmd = Object.values(entry.command ?? {})[0];
+      const label = typeof cmd === 'object' && cmd ? cmd.label : undefined;
+      if (label?.startsWith('IO-CHECK ')) {
+        results.push({
+          key: label.slice(9),
+          status: entry.metadata?.status ?? 'UNKNOWN',
+          at: entry.metadata?.timestamp ?? 0,
+        });
+      }
+    }
   }
-  const crashed = /FAILED/.test(text) && !rows.length;
+  return results.sort((a, b) => a.at - b.at);
+}
+
+for (const [file, title, shotPrefix] of FLOWS) {
+  const checks = checksFor(file);
+  const text = read(`${file}.log`);
+  if (!checks && !text) continue;
   out.push(`## ${title}`, '');
-  if (crashed) out.push(`Flow failed before its checks — see \`logs/${file}.log\`.`, '');
-  if (rows.length)
-    out.push('| Result | Check | Expected | Screenshot |', '|---|---|---|---|', ...rows, '');
+  if (!checks?.length) {
+    out.push(`No check results — the flow stopped early; see \`logs/${file}.log\`.`, '');
+    continue;
+  }
+  const rows = checks.map(({ key: label, status }) => {
+    const key = label.replace(/^(dm|lp|lp-side)\./, '');
+    const want = `${shotPrefix}${key.replace(/\./g, '-')}.png`;
+    const shot = shots.find((s) => s === want);
+    return `| ${STATUS[status] ?? status} | \`${label}\` | ${expectFor[key] ?? ''} | ${shot ? `screenshots/${shot}` : ''} |`;
+  });
+  out.push('| Result | Check | Expected | Screenshot |', '|---|---|---|---|', ...rows, '');
 }
 
 // Wire check: did the scripted member receive Lightning Piggy's sends?
