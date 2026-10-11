@@ -1,10 +1,18 @@
 import React, { useRef, useCallback, useState } from 'react';
-import { View, FlatList, StyleSheet, ViewToken } from 'react-native';
+import {
+  View,
+  FlatList,
+  StyleSheet,
+  ViewToken,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from 'react-native';
 import { WalletState } from '../types/wallet';
 import WalletCard, { CARD_WIDTH, CARD_MARGIN } from './WalletCard';
 import AddWalletCard from './AddWalletCard';
 import { FiatCurrency } from '../services/fiatService';
 import { perfLog } from '../utils/perfLog';
+import { markWalletSwipeSettled } from '../utils/walletSwipeTiming';
 
 let __walletCarouselFirstRenderLogged = false;
 
@@ -71,6 +79,15 @@ const WalletCarousel: React.FC<WalletCarouselProps> = ({
     [onWalletChange, onAddCardActiveChange],
   );
 
+  // Swipe-latency probe (#1304): the card the scroll came to rest on.
+  const onMomentumScrollEnd = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const wallet = wallets[Math.round(e.nativeEvent.contentOffset.x / SNAP_INTERVAL)];
+      if (wallet) markWalletSwipeSettled(wallet.id);
+    },
+    [wallets],
+  );
+
   const viewabilityConfig = useRef({ viewAreaCoveragePercentThreshold: 50 }).current;
 
   const renderItem = useCallback(
@@ -103,6 +120,7 @@ const WalletCarousel: React.FC<WalletCarouselProps> = ({
         snapToAlignment="start"
         decelerationRate="fast"
         onViewableItemsChanged={onViewableItemsChanged}
+        onMomentumScrollEnd={onMomentumScrollEnd}
         viewabilityConfig={viewabilityConfig}
         contentContainerStyle={styles.listContent}
         getItemLayout={(_, index) => ({

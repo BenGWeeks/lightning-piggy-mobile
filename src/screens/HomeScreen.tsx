@@ -29,9 +29,15 @@ import { ArrowDownIcon, ArrowUpIcon, ArrowLeftRightIcon } from '../components/ic
 import { createHomeScreenStyles } from '../styles/HomeScreen.styles';
 import { isSendableWallet } from '../utils/walletCapabilities';
 import { perfLog } from '../utils/perfLog';
+import { noteWalletListCommitted } from '../utils/walletSwipeTiming';
 import { useActiveWalletRefresh } from '../hooks/useActiveWalletRefresh';
+import { WALLET_FRESH_MS } from '../utils/walletRefreshScheduler';
+import type { WalletState } from '../types/wallet';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import type { MainTabParamList } from '../navigation/types';
+
+// How often swiping to an on-chain card may trigger its (heavy) BDK sync.
+const ONCHAIN_SWIPE_FRESH_MS = 5 * 60_000;
 
 const HomeScreen: React.FC = () => {
   const colors = useThemeColors();
@@ -159,21 +165,45 @@ const HomeScreen: React.FC = () => {
   const isWalletAvailable =
     activeWallet?.walletType === 'onchain' ? true : (activeWallet?.isConnected ?? false);
 
-  // Transactions from the active wallet (owned by WalletContext). They're
-  // hydrated from the per-wallet cache at launch, so a newly active card shows
-  // its cached list immediately while this refreshes it in the background:
-  // ~300 ms after the card settles, skipped if it loaded in the last 30 s, and
-  // retried after a failure (#1304).
+  // Transactions from the active wallet (owned by WalletContext). Every
+  // wallet's list is hydrated from its per-wallet cache at launch and kept in
+  // memory, so a newly active card renders its own rows in the same commit.
+  // `useActiveWalletRefresh` refreshes it in the background (~300 ms after the
+  // card settles, skipped if it loaded recently, retried after a failure) and
+  // then warms the neighbouring cards so the next swipe is current too (#1304).
   const transactions = activeWallet?.transactions ?? [];
-  const { isRefreshing, refreshNow } = useActiveWalletRefresh({
+  const getNeighbours = useCallback((walletId: string) => {
+    const list = walletsRef.current;
+    const i = list.findIndex((w) => w.id === walletId);
+    if (i < 0) return [];
+    // Right first (the likelier next swipe), then left. NWC only: an on-chain
+    // refresh is a BDK sync that holds the JS thread for seconds, which would
+    // stall the very swipe it's meant to speed up.
+    return [list[i + 1], list[i - 1]]
+      .filter((w): w is WalletState => w?.walletType === 'nwc')
+      .map((w) => w.id);
+  }, []);
+  // On-chain refreshes are that same heavy sync: refresh them on swipe at most
+  // every 5 min (pull-to-refresh still forces one).
+  const freshMsFor = useCallback(
+    (walletId: string) =>
+      walletsRef.current.find((w) => w.id === walletId)?.walletType === 'onchain'
+        ? ONCHAIN_SWIPE_FRESH_MS
+        : WALLET_FRESH_MS,
+    [],
+  );
+  const { isLoading, isFetching, refreshNow } = useActiveWalletRefresh({
     activeWalletId,
     available: isWalletAvailable,
     fetchWallet,
+    getNeighbours,
+    freshMsFor,
   });
 
-  // Full spinner only while an empty wallet's first load is due or in flight;
-  // a wallet with cached rows keeps showing them under a small indicator.
-  const loadingTransactions = isRefreshing && transactions.length === 0;
+  // Full spinner only while an empty wallet's first load is due or running —
+  // never an empty state while fetching. A wallet with cached rows keeps showing
+  // them, with a small indicator only while fresh data is actually fetching.
+  const loadingTransactions = isLoading && transactions.length === 0;
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -269,6 +299,11 @@ const HomeScreen: React.FC = () => {
     !addCardActive &&
     activeWalletId !== null &&
     !(loadingTransactions && transactions.length === 0);
+
+  // Swipe-latency probe (#1304): which wallet's list this commit shows.
+  useEffect(() => {
+    noteWalletListCommitted(showTransactionList ? activeWalletId : null);
+  }, [showTransactionList, activeWalletId]);
 
   return (
     <View style={styles.container}>
@@ -390,7 +425,7 @@ const HomeScreen: React.FC = () => {
             )}
           </ScrollView>
         )}
-        {showTransactionList && isRefreshing && !refreshing && transactions.length > 0 ? (
+        {showTransactionList && isFetching && !refreshing && transactions.length > 0 ? (
           // Background refresh of a wallet that already shows cached rows (#1304).
           <View
             style={styles.refreshingIndicator}

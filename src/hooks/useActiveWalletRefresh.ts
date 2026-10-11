@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef } from 'react';
 import {
+  WALLET_FRESH_MS,
   createWalletRefreshScheduler,
   type WalletFetcher,
   type WalletRefreshScheduler,
@@ -16,19 +17,33 @@ interface Options {
   available: boolean;
   /** Fetches one wallet; resolves `true` when a fresh list was committed. */
   fetchWallet: WalletFetcher;
+  /** Wallets to warm after `walletId` loads, nearest first (read when prefetching). */
+  getNeighbours?: (walletId: string) => readonly string[];
+  /** Per-wallet freshness window (read when deciding). */
+  freshMsFor?: (walletId: string) => number;
 }
 
 /**
- * Loads the active wallet's transactions when its card becomes active (#1304),
- * using the debounce + 30 s freshness rules in `walletRefreshScheduler`.
- * Returns whether the active wallet is refreshing (for the small indicator) and
- * a forced `refreshNow` for pull-to-refresh.
+ * Keeps the active wallet's transactions (and its neighbours') fresh as cards
+ * become active (#1304), using the debounce, freshness and prefetch rules in
+ * `walletRefreshScheduler`. The cached list renders from memory immediately;
+ * this only drives background refreshes. Returns the active wallet's loading
+ * state and a forced `refreshNow` for pull-to-refresh.
  *
  * Re-renders only when a fetch starts, settles or is scheduled or cancelled,
  * never per relay event.
  */
-export function useActiveWalletRefresh({ activeWalletId, available, fetchWallet }: Options): {
-  isRefreshing: boolean;
+export function useActiveWalletRefresh({
+  activeWalletId,
+  available,
+  fetchWallet,
+  getNeighbours,
+  freshMsFor,
+}: Options): {
+  /** The active wallet's refresh is due (debouncing) or fetching. */
+  isLoading: boolean;
+  /** A fetch for the active wallet is actually running (or queued). */
+  isFetching: boolean;
   refreshNow: (walletId: string) => Promise<boolean>;
 } {
   const [, bump] = useReducer((n: number) => n + 1, 0);
@@ -36,11 +51,17 @@ export function useActiveWalletRefresh({ activeWalletId, available, fetchWallet 
   // stale closure and a new fetcher identity doesn't re-trigger activation.
   const fetchRef = useRef(fetchWallet);
   fetchRef.current = fetchWallet;
+  const neighboursRef = useRef(getNeighbours);
+  neighboursRef.current = getNeighbours;
+  const freshRef = useRef(freshMsFor);
+  freshRef.current = freshMsFor;
 
   const schedulerRef = useRef<WalletRefreshScheduler | null>(null);
   if (schedulerRef.current === null) {
     schedulerRef.current = createWalletRefreshScheduler({
       fetch: (id, opts) => fetchRef.current(id, opts),
+      getNeighbours: (id) => neighboursRef.current?.(id) ?? [],
+      freshMsFor: (id) => freshRef.current?.(id) ?? WALLET_FRESH_MS,
       onChange: bump,
     });
   }
@@ -56,5 +77,9 @@ export function useActiveWalletRefresh({ activeWalletId, available, fetchWallet 
 
   const refreshNow = useCallback((walletId: string) => scheduler.refreshNow(walletId), [scheduler]);
 
-  return { isRefreshing: scheduler.isLoading(activeWalletId), refreshNow };
+  return {
+    isLoading: scheduler.isLoading(activeWalletId),
+    isFetching: scheduler.isFetching(activeWalletId),
+    refreshNow,
+  };
 }

@@ -263,4 +263,115 @@ describe('createWalletRefreshScheduler', () => {
     await flush();
     expect(s.isLoading('a')).toBe(false);
   });
+
+  describe('neighbour prefetch', () => {
+    const neighbours: Record<string, string[]> = { b: ['c', 'a'], c: ['b'], a: ['b'] };
+    const makeWithNeighbours = () =>
+      createWalletRefreshScheduler({
+        fetch,
+        onChange,
+        now: () => clock,
+        getNeighbours: (id) => neighbours[id] ?? [],
+      });
+
+    it('warms neighbours one at a time after the active card loads', async () => {
+      const resolvers: ((ok: boolean) => void)[] = [];
+      fetch.mockImplementation(() => new Promise<boolean>((r) => resolvers.push(r)));
+      const s = makeWithNeighbours();
+      s.activate('b');
+      jest.advanceTimersByTime(WALLET_SWIPE_SETTLE_MS);
+      expect(fetch.mock.calls.map((c) => c[0])).toEqual(['b']);
+      resolvers[0](true);
+      await flush();
+      expect(fetch.mock.calls.map((c) => c[0])).toEqual(['b', 'c']); // one at a time
+      expect(s.isLoading('b')).toBe(false); // neighbour work never shows on the active card
+      resolvers[1](true);
+      await flush();
+      expect(fetch.mock.calls.map((c) => c[0])).toEqual(['b', 'c', 'a']);
+      resolvers[2](true);
+      await flush();
+    });
+
+    it('makes the next swipe instant: a prefetched neighbour is fresh', async () => {
+      const s = makeWithNeighbours();
+      s.activate('b');
+      jest.advanceTimersByTime(WALLET_SWIPE_SETTLE_MS);
+      await flush();
+      await flush();
+      expect(fetch).toHaveBeenCalledTimes(3);
+      s.activate('c');
+      expect(s.isLoading('c')).toBe(false);
+      jest.advanceTimersByTime(WALLET_SWIPE_SETTLE_MS);
+      await flush();
+      expect(fetch).toHaveBeenCalledTimes(3); // c fresh; its neighbour b fresh too
+    });
+
+    it('warms neighbours of an already-fresh card after it settles', async () => {
+      const s = makeWithNeighbours();
+      await s.refreshNow('b');
+      fetch.mockClear();
+      s.activate('b');
+      jest.advanceTimersByTime(WALLET_SWIPE_SETTLE_MS);
+      await flush();
+      expect(fetch.mock.calls[0]).toEqual(['c', { force: false }]);
+    });
+
+    it('stops the queue when the user swipes on', async () => {
+      const resolvers: ((ok: boolean) => void)[] = [];
+      fetch.mockImplementation(() => new Promise<boolean>((r) => resolvers.push(r)));
+      const s = makeWithNeighbours();
+      s.activate('b');
+      jest.advanceTimersByTime(WALLET_SWIPE_SETTLE_MS);
+      resolvers[0](true);
+      await flush(); // c prefetch running
+      s.activate(null); // swiped onto the add card
+      resolvers[1](true);
+      await flush();
+      expect(fetch.mock.calls.map((c) => c[0])).toEqual(['b', 'c']); // a never starts
+    });
+
+    it('does not prefetch when the active card failed to load', async () => {
+      fetch.mockResolvedValueOnce(false);
+      const s = makeWithNeighbours();
+      s.activate('b');
+      jest.advanceTimersByTime(WALLET_SWIPE_SETTLE_MS);
+      await flush();
+      await flush();
+      expect(fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not prefetch during a fast flick', () => {
+      const s = makeWithNeighbours();
+      s.activate('a');
+      jest.advanceTimersByTime(100);
+      s.activate('b');
+      jest.advanceTimersByTime(100);
+      expect(fetch).not.toHaveBeenCalled();
+    });
+  });
+
+  it('honours a per-wallet freshness window', async () => {
+    const s = createWalletRefreshScheduler({
+      fetch,
+      now: () => clock,
+      freshMsFor: (id) => (id === 'chain' ? 5 * 60_000 : WALLET_FRESH_MS),
+    });
+    await s.refreshNow('chain');
+    clock += WALLET_FRESH_MS * 2;
+    s.activate('chain');
+    jest.advanceTimersByTime(WALLET_SWIPE_SETTLE_MS);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports fetching separately from due', async () => {
+    const s = make();
+    s.activate('a');
+    expect(s.isLoading('a')).toBe(true);
+    expect(s.isFetching('a')).toBe(false); // only debouncing
+    jest.advanceTimersByTime(WALLET_SWIPE_SETTLE_MS);
+    expect(s.isFetching('a')).toBe(true);
+    await flush();
+    expect(s.isFetching('a')).toBe(false);
+    expect(s.isFetching(null)).toBe(false);
+  });
 });

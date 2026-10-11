@@ -29,12 +29,12 @@ describe('useActiveWalletRefresh', () => {
     expect(fetchWallet).toHaveBeenCalledWith('a', { force: false });
 
     rerender({ activeWalletId: 'b', available: true }); // swipe to the next card
-    expect(result.current.isRefreshing).toBe(true);
+    expect(result.current.isLoading).toBe(true);
     await act(async () => {
       jest.advanceTimersByTime(WALLET_SWIPE_SETTLE_MS);
     });
     expect(fetchWallet).toHaveBeenLastCalledWith('b', { force: false });
-    expect(result.current.isRefreshing).toBe(false);
+    expect(result.current.isLoading).toBe(false);
   });
 
   it('retries a fetch that failed while disconnected once the wallet reconnects', async () => {
@@ -77,5 +77,20 @@ describe('useActiveWalletRefresh', () => {
     unmount();
     jest.advanceTimersByTime(WALLET_SWIPE_SETTLE_MS);
     expect(fetchWallet).not.toHaveBeenCalled();
+  });
+
+  it('prefetches the neighbours it is given once the active card loads', async () => {
+    renderHook(() =>
+      useActiveWalletRefresh({
+        activeWalletId: 'b',
+        available: true,
+        fetchWallet,
+        getNeighbours: () => ['c'],
+      }),
+    );
+    await act(async () => {
+      jest.advanceTimersByTime(WALLET_SWIPE_SETTLE_MS);
+    });
+    expect(fetchWallet.mock.calls.map((c) => c[0])).toEqual(['b', 'c']);
   });
 });
