@@ -23,7 +23,7 @@ const SettingsScopeHeader: React.FC<Props> = ({ scope, spaced, testID }) => {
   const styles = useMemo(() => createSettingsScopeHeaderStyles(colors), [colors]);
   const account = scope === 'account';
   return (
-    <View style={spaced && styles.gap} testID={testID}>
+    <View style={[styles.container, spaced && styles.gap]} testID={testID}>
       <Text style={styles.header} accessibilityRole="header">
         {t(account ? 'settingsScope.forThisAccount' : 'settingsScope.onThisPhone')}
       </Text>

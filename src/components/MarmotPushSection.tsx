@@ -140,7 +140,7 @@ const MarmotPushSection: React.FC = () => {
 
   return (
     <>
-      <View style={[screen.headerRow, screen.sectionGap]}>
+      <View style={screen.headerRow}>
         <Smartphone size={22} color={colors.white} />
         <Text style={[shared.sectionLabel, screen.headerLabel]}>
           {t('securityScreen.marmotPush')}

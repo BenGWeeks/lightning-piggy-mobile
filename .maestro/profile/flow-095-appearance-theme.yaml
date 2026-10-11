@@ -31,9 +31,16 @@ name: Appearance Theme Toggle Test
 - waitForAnimationToEnd:
     timeout: 3000
 - tapOn:
-    id: 'drawer-row-appearance'
+    id: 'drawer-row-display-language'
 - waitForAnimationToEnd:
     timeout: 3000
+# Theme and Sending animation sit under "On this phone", below Currency and
+# Language on the Display & language screen (#1222).
+- scrollUntilVisible:
+    element:
+      id: 'appearance-dark'
+    direction: DOWN
+    timeout: 15000
 
 # All three options render
 - assertVisible:
@@ -65,6 +72,11 @@ name: Appearance Theme Toggle Test
     id: 'appearance-system-check'
 
 # --- 3. Navigate away (Home) and back — preference held ---
+- scrollUntilVisible:
+    element:
+      id: 'account-back-button'
+    direction: UP
+    timeout: 15000
 - tapOn:
     id: 'account-back-button'
 - waitForAnimationToEnd:
@@ -77,9 +89,16 @@ name: Appearance Theme Toggle Test
 - waitForAnimationToEnd:
     timeout: 3000
 - tapOn:
-    id: 'drawer-row-appearance'
+    id: 'drawer-row-display-language'
 - waitForAnimationToEnd:
     timeout: 3000
+# Theme and Sending animation sit under "On this phone", below Currency and
+# Language on the Display & language screen (#1222).
+- scrollUntilVisible:
+    element:
+      id: 'appearance-dark'
+    direction: DOWN
+    timeout: 15000
 - assertVisible:
     id: 'appearance-dark-check'
 
@@ -98,9 +117,16 @@ name: Appearance Theme Toggle Test
 - waitForAnimationToEnd:
     timeout: 3000
 - tapOn:
-    id: 'drawer-row-appearance'
+    id: 'drawer-row-display-language'
 - waitForAnimationToEnd:
     timeout: 3000
+# Theme and Sending animation sit under "On this phone", below Currency and
+# Language on the Display & language screen (#1222).
+- scrollUntilVisible:
+    element:
+      id: 'appearance-dark'
+    direction: DOWN
+    timeout: 15000
 - assertVisible:
     id: 'appearance-dark-check'
 

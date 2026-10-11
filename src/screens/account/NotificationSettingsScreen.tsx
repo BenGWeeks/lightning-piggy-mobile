@@ -80,7 +80,7 @@ const NotificationSettingsScreen: React.FC = () => {
 
       <SettingsScopeHeader scope="phone" spaced testID="notifications-phone" />
 
-      <View style={[screen.headerRow, screen.sectionGap]}>
+      <View style={screen.headerRow}>
         <BellRing size={22} color={colors.white} />
         <Text style={[shared.sectionLabel, screen.headerLabel]}>
           {t('securityScreen.notificationContent')}
