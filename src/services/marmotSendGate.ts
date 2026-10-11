@@ -14,7 +14,7 @@
 // `Settled` without the timer. A group that doesn't settle in time fails the
 // send with MarmotGroupNotReadyError (the normal send-failed path — the user
 // can retry) and leaves nothing queued to go out later behind that retry.
-// Upstream report: /tmp/claude-1000/reviews/marmot-ts-upstream-1280.md.
+// Upstream: a marmot-ts report is tracked in #1280 (link it here once filed).
 
 import { groupLifecycleStates, type MarmotGroup } from '@internet-privacy/marmot-ts';
 
