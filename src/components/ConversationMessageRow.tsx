@@ -4,6 +4,7 @@ import { Zap } from 'lucide-react-native';
 import MessageBubble from './MessageBubble';
 import OrderPaymentActions from './OrderPaymentActions';
 import NwcShareCard from './NwcShareCard';
+import MarmotInviteFailedNotice from './MarmotInviteFailedNotice';
 import type { TransactionDetailData } from './TransactionDetailSheet';
 import type { Palette } from '../styles/palettes';
 import type { ConversationStyles } from '../styles/ConversationScreen.styles';
@@ -59,6 +60,8 @@ export interface ConversationMessageRowProps {
   onAddNwc: (card: NwcShareCardData) => void;
   /** The contact's display name — who a 1:1 reply's quoted parent is from. */
   peerName?: string;
+  /** A failed Marmot invite's "Ask for a new invite" (#1269). */
+  onAskForInvite?: () => void;
 }
 
 /**
@@ -97,6 +100,7 @@ function ConversationMessageRow({
   onToggleReaction,
   onAddNwc,
   peerName,
+  onAskForInvite,
 }: ConversationMessageRowProps): React.ReactElement {
   if (item.kind === 'dayHeader') {
     return (
@@ -220,6 +224,17 @@ function ConversationMessageRow({
         createdAt={item.createdAt}
         colors={colors}
         onAdd={onAddNwc}
+      />
+    );
+  }
+  if (item.kind === 'marmotInviteFailed') {
+    return (
+      <MarmotInviteFailedNotice
+        id={item.id}
+        createdAt={item.createdAt}
+        peerName={peerName}
+        colors={colors}
+        onAskAgain={onAskForInvite}
       />
     );
   }

@@ -1235,6 +1235,7 @@
     "marmotMessage": "Evento de grupo de Marmot: abre el chat de Marmot para leerlo.",
     "marmotInvitePreview": "Invitación a chat de Marmot",
     "marmotMessagePreview": "Mensaje de Marmot",
+    "marmotInviteFailedPreview": "No se pudo abrir la invitación al chat seguro",
     "voiceMessagePreview": "Mensaje de voz",
     "unsupportedAttachment": "Adjunto no compatible: {{name}} ({{type}})",
     "attachmentUnavailable": "No se pudo abrir el adjunto: {{name}}",
@@ -2607,6 +2608,12 @@
     "removingBody": "Aprueba las solicitudes en tu firmador para terminar de cerrar sesión. Puede tardar un minuto.",
     "notRemovedTitle": "No se quitaron las claves de invitación",
     "notRemovedBody": "No pudimos quitar de los relés las claves de invitación de Marmot de esta cuenta, así que es posible que sigan llegando invitaciones de Marmot a este teléfono. Lo volveremos a intentar automáticamente la próxima vez que esta cuenta inicie sesión aquí."
+  },
+  "marmotInviteFailed": {
+    "notice": "{{name}} te invitó a un chat seguro, pero no se pudo abrir. Pídele que te invite de nuevo.",
+    "someone": "Alguien",
+    "askAgain": "Pedir una nueva invitación",
+    "askDraft": "¡Hola! No pude abrir tu invitación al chat seguro en mi teléfono. ¿Puedes invitarme de nuevo?"
   },
   "marmotInvite": {
     "progressTitle": "Invitando dispositivos… {{done}} de {{total}}",

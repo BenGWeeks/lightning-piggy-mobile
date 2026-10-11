@@ -134,17 +134,18 @@ export function makeInstall(
   who: ReturnType<typeof makeSigner>,
 ) {
   const inbox: MarmotMessageEvent[] = [];
+  const backend = createMemoryMarmotBackend();
   const session = new MarmotSession({
     pubkey: who.pubkey,
     signerType: 'nsec',
     signer: who.signer,
     network: relay.network,
-    backend: createMemoryMarmotBackend(),
+    backend,
     getWriteRelays: () => [RELAY],
     getLookupRelays: () => [RELAY],
   });
   session.subscribe({ onMessage: (m) => inbox.push(m) });
-  return { ...who, session, inbox };
+  return { ...who, session, inbox, backend };
 }
 
 /** What the NIP-17 inbox path does for a kind-1059 Welcome: unwrap → rumor. */
