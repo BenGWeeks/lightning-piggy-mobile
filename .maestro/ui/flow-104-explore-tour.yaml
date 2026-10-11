@@ -124,6 +124,11 @@ name: Explore tour — captures screenshots for the PR description
     duration: 400
 - waitForAnimationToEnd:
     timeout: 1000
+- scrollUntilVisible:
+    element:
+      id: 'drawer-row-notifications'
+    direction: DOWN
+    timeout: 10000
 - tapOn:
     id: 'drawer-row-notifications'
 - waitForAnimationToEnd:

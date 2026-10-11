@@ -15,6 +15,11 @@ name: Nostr Login Test
     timeout: 5000
 
 # Sign out first if already logged in (drawer row is enabled only when logged in)
+- scrollUntilVisible:
+    element:
+      id: 'drawer-sign-out'
+    direction: DOWN
+    timeout: 10000
 - tapOn:
     id: 'drawer-sign-out'
     optional: true

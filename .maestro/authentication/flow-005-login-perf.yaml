@@ -22,6 +22,11 @@ name: Login to Friends Performance Test
     timeout: 5000
 
 # Sign out if already logged in
+- scrollUntilVisible:
+    element:
+      id: 'drawer-sign-out'
+    direction: DOWN
+    timeout: 10000
 - tapOn:
     id: 'drawer-sign-out'
     optional: true
