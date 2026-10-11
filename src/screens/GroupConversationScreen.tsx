@@ -36,7 +36,7 @@ import RenameGroupSheet from '../components/RenameGroupSheet';
 import GroupMembersSheet from '../components/GroupMembersSheet';
 import GroupHeaderActions from '../components/GroupHeaderActions';
 import GroupHeaderTitle from '../components/GroupHeaderTitle';
-import { canManageGroup } from '../utils/groupProtocol';
+import { canManageGroup } from '../utils/groupAdmins';
 import AttachPanel from '../components/AttachPanel';
 import ConversationComposer from '../components/ConversationComposer';
 import BrandPatternBackground from '../components/BrandPatternBackground';

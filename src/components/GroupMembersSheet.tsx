@@ -19,7 +19,7 @@ import FriendPickerSheet, { type PickedFriend } from './FriendPickerSheet';
 import GroupMemberListRow from './GroupMemberListRow';
 import type { GroupMemberRow } from '../utils/groupMemberRows';
 import { useGroupAdminActions } from '../hooks/useGroupAdminActions';
-import { canManageGroup } from '../utils/groupProtocol';
+import { canManageGroup } from '../utils/groupAdmins';
 
 interface Props {
   visible: boolean;
