@@ -416,6 +416,8 @@
     "kind4": "Mensaje directo (tipo 4)",
     "kind14": "Mensaje directo (tipo 14)",
     "kind15": "Mensaje de archivo (tipo 15)",
+    "marmotChat": "Mensaje de chat (tipo {{kind}})",
+    "marmotMedia": "Mensaje multimedia (tipo {{kind}})",
     "unknown": "Desconocido",
     "kindN": "Tipo {{kind}}",
     "sendingToRelays": "Enviando a {{total}} relays…",

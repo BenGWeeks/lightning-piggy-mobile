@@ -18,9 +18,41 @@
 import type { DeliveryStatus, MessageInfo } from './dmDeliveryStatus';
 import { protocolForWireKind, type DmProtocol } from './dmProtocol';
 
+/** Marmot's chat-message rumor kind (`MARMOT_CHAT_KIND` in marmotSession —
+ * mirrored so this pure util doesn't pull in the MLS session module). */
+const MARMOT_CHAT_RUMOR_KIND = 9;
+
 /** The app's stored text / file kinds (NIP-17's). */
 const TEXT_KIND = 14;
+const FILE_KIND = 15;
 const NIP04_KIND = 4;
+
+/** i18n key (under `deliveryDetailSheet.`) + interpolated kind for the Kind row. */
+export type MessageKindLabel =
+  | { key: 'kind4' | 'kind14' | 'kind15' | 'unknown' }
+  | { key: 'marmotChat' | 'marmotMedia' | 'kindN'; kind: number };
+
+/**
+ * The Kind row. NIP-04 / NIP-17 show the event / rumor kind as stored. A
+ * Marmot row stored as 14 or 15 was a kind-9 rumor on the wire, so it reads
+ * "Chat message (kind 9)" / "Media message (kind 9)"; other Marmot kinds
+ * (polls 1068, orders 16/17, …) travel unchanged.
+ */
+export function messageKindLabel(
+  wireKind: number | undefined,
+  protocol: DmProtocol,
+): MessageKindLabel {
+  if (wireKind === undefined) return { key: 'unknown' };
+  if (protocol === 'marmot') {
+    if (wireKind === TEXT_KIND) return { key: 'marmotChat', kind: MARMOT_CHAT_RUMOR_KIND };
+    if (wireKind === FILE_KIND) return { key: 'marmotMedia', kind: MARMOT_CHAT_RUMOR_KIND };
+    return { key: 'kindN', kind: wireKind };
+  }
+  if (wireKind === NIP04_KIND) return { key: 'kind4' };
+  if (wireKind === TEXT_KIND) return { key: 'kind14' };
+  if (wireKind === FILE_KIND) return { key: 'kind15' };
+  return { key: 'kindN', kind: wireKind };
+}
 
 export interface MessageInfoInput {
   /** The thread's protocol. 1:1 threads are partitioned by protocol; a group

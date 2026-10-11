@@ -1,6 +1,7 @@
 import { renderHook, act } from '@testing-library/react-native';
 import { useMessageInfoSheet } from './useMessageInfoSheet';
 import { protocolLabel, type DeliveryStatus } from '../utils/dmDeliveryStatus';
+import { messageKindLabel } from '../utils/messageInfo';
 
 // The message-info sheet (#856): direction mapping + the Re-publish gate.
 // Re-publish is offered ONLY for a sent kind-14 text message with a payload —
@@ -118,7 +119,7 @@ describe('useMessageInfoSheet', () => {
   });
 
   // #1296: the group screen passes its protocol — a Marmot group's message
-  // reads Marmot (MLS), and Re-publish goes back through the group's
+  // reads Marmot (MLS) / kind 9, and Re-publish goes back through the group's
   // own (Marmot) send fn, never a NIP-17 path.
   it('a Marmot group message reports Marmot and re-publishes through the group send', () => {
     const groupResend = jest.fn().mockResolvedValue(true);
@@ -129,6 +130,7 @@ describe('useMessageInfoSheet', () => {
     const info = result.current.info!;
     expect(info.protocol).toBe('marmot');
     expect(protocolLabel(info.wireKind, info.protocol)).toBe('Marmot (MLS)');
+    expect(messageKindLabel(info.wireKind, info.protocol!)).toEqual({ key: 'marmotChat', kind: 9 });
     act(() => result.current.resendFromInfo());
     expect(groupResend).toHaveBeenCalledWith('hi');
   });

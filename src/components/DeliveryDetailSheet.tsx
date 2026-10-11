@@ -12,18 +12,19 @@ import {
   summariseDelivery,
   type MessageInfo,
 } from '../utils/dmDeliveryStatus';
+import { messageKindLabel } from '../utils/messageInfo';
+import { protocolForWireKind } from '../utils/dmProtocol';
 import { createDeliveryDetailSheetStyles } from '../styles/DeliveryDetailSheet.styles';
 
-// Human label for a NIP-04/17 message kind shown in the metadata block.
-// Takes the hook translator (`useTranslation()`'s return) so the label tracks
-// the live UI locale — the module-level `t` can lag during a locale switch.
-function kindLabel(kind: number | undefined, tr: ReturnType<typeof useTranslation>): string {
-  if (kind === 4) return tr('deliveryDetailSheet.kind4');
-  if (kind === 14) return tr('deliveryDetailSheet.kind14');
-  if (kind === 15) return tr('deliveryDetailSheet.kind15');
-  return kind === undefined
-    ? tr('deliveryDetailSheet.unknown')
-    : tr('deliveryDetailSheet.kindN', { kind });
+// Human label for the message kind (decided by `messageKindLabel`: Marmot
+// rows read kind 9, not the stored 14/15). Takes the hook translator so the
+// label tracks the live UI locale — the module-level `t` can lag a switch.
+function kindLabel(info: MessageInfo, tr: ReturnType<typeof useTranslation>): string {
+  const label = messageKindLabel(
+    info.wireKind,
+    info.protocol ?? protocolForWireKind(info.wireKind),
+  );
+  return tr(`deliveryDetailSheet.${label.key}`, 'kind' in label ? { kind: label.kind } : undefined);
 }
 
 function shortEventId(id: string): string {
@@ -34,8 +35,9 @@ function shortEventId(id: string): string {
  * Message-info sheet shown on tapping a DM bubble (#856). For a SENT message it
  * shows the per-relay delivery breakdown (coloured ✓/✗) + a Re-publish action;
  * for a RECEIVED message it shows just the metadata (no relay breakdown, no
- * Re-publish). Both show the protocol (NIP-17 gift-wrapped vs NIP-04), Kind,
- * and a copyable Event ID. Modal-based, same visual family as BrandedAlert.
+ * Re-publish). Both show the protocol (NIP-04 / NIP-17 gift-wrapped / Marmot),
+ * Kind, and a copyable Event ID.
+ * The decisions live in `utils/messageInfo`. Modal-based, like BrandedAlert.
  */
 export default function DeliveryDetailSheet({
   info,
@@ -44,8 +46,8 @@ export default function DeliveryDetailSheet({
 }: {
   info: MessageInfo | null;
   onClose: () => void;
-  // Re-publish the message (sent kind-14 text only). Optional — when omitted
-  // (received messages, non-text, kind-15) the button is hidden.
+  // Re-publish over the thread's own protocol. Optional — hidden when omitted
+  // (received, non-text, files — `buildMessageInfo`'s canResend).
   onResend?: () => void;
 }): React.ReactElement | null {
   const colors = useThemeColors();
@@ -175,7 +177,7 @@ export default function DeliveryDetailSheet({
             </View>
             <View style={styles.metaRow}>
               <Text style={styles.metaLabel}>{tr('deliveryDetailSheet.kind')}</Text>
-              <Text style={styles.metaValue}>{kindLabel(info.wireKind, tr)}</Text>
+              <Text style={styles.metaValue}>{kindLabel(info, tr)}</Text>
             </View>
             {info.eventId ? (
               <View style={styles.metaRow}>

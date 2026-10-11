@@ -388,6 +388,8 @@
     "kind4": "Пряме повідомлення (kind 4)",
     "kind14": "Пряме повідомлення (kind 14)",
     "kind15": "Файлове повідомлення (kind 15)",
+    "marmotChat": "Повідомлення чату (kind {{kind}})",
+    "marmotMedia": "Медіаповідомлення (kind {{kind}})",
     "unknown": "Невідомо",
     "kindN": "Kind {{kind}}",
     "sendingToRelays": "Надсилання на {{total}} релеїв…",
