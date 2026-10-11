@@ -1851,6 +1851,7 @@
     "swapRecipientGets": "Recipient gets {{amount}} sats",
     "swapYouPay": "You pay {{total}} sats (fees ~{{fee}} sats) · ~10-60 min",
     "swapInsufficientBalance": "This send costs {{total}} sats ({{amount}} sats + ~{{fee}} sats in fees), but your balance is {{balance}} sats.",
+    "onchainInsufficientFunds": "Your balance can't cover this amount plus the miner fee.",
     "feeUnavailable": "Fee estimate unavailable",
     "quoteChanged": "Nothing was sent. The swap fee is now ~{{fee}} sats. Review it and tap Send to continue.",
     "quoteChangedTitle": "Swap Fee Changed",

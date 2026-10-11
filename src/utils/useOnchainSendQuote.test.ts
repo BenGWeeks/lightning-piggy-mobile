@@ -1,11 +1,11 @@
 import { act, renderHook } from '@testing-library/react-native';
 import { useOnchainSendQuote } from './useOnchainSendQuote';
 import { getReverseSwapFees, type SwapFees } from '../services/boltzService';
-import { estimateSendFee } from '../services/onchainService';
+import { estimateSendFeeResult } from '../services/onchainService';
 import { NoSwapServerError } from '../services/swapBackendService';
 
 jest.mock('../services/boltzService', () => ({ getReverseSwapFees: jest.fn() }));
-jest.mock('../services/onchainService', () => ({ estimateSendFee: jest.fn() }));
+jest.mock('../services/onchainService', () => ({ estimateSendFeeResult: jest.fn() }));
 const fees: SwapFees = { percentage: 0.5, minerFee: 304, minAmount: 1000, maxAmount: 1000000 };
 const base = {
   visible: true,
@@ -74,18 +74,77 @@ it('discards a resolved quote when the amount changes or the sheet closes', asyn
   expect(result.current).toMatchObject({ loading: false, fees: null });
 });
 it('prices direct sends with the selected wallet without consulting a swap server', async () => {
-  jest.mocked(estimateSendFee).mockResolvedValueOnce(321);
+  jest.mocked(estimateSendFeeResult).mockResolvedValueOnce({ kind: 'fee', feeSats: 321 });
   const { result } = renderHook(() => useOnchainSendQuote({ ...base, viaSwap: false }));
   await act(async () => {});
-  expect(estimateSendFee).toHaveBeenCalledWith('one', 20000);
+  // Priced against the real recipient script, not a placeholder.
+  expect(estimateSendFeeResult).toHaveBeenCalledWith('one', 20000, { toAddress: 'bc1-test' });
   expect(getReverseSwapFees).not.toHaveBeenCalled();
   expect(result.current).toMatchObject({ directFeeSats: 321, fees: null, loading: false });
 });
 it('withholds a direct quote when its transaction cannot be built', async () => {
-  jest.mocked(estimateSendFee).mockResolvedValueOnce(null);
+  jest.mocked(estimateSendFeeResult).mockResolvedValueOnce({ kind: 'error' });
   const { result } = renderHook(() => useOnchainSendQuote({ ...base, viaSwap: false }));
   await act(async () => {});
-  expect(result.current).toMatchObject({ directFeeSats: null, loading: false });
+  expect(result.current).toMatchObject({
+    directFeeSats: null,
+    directShortfall: null,
+    errorKey: 'sendSheet.feeUnavailable',
+    loading: false,
+  });
+});
+it('reports an unfundable direct send as a shortfall, not a fee error', async () => {
+  jest
+    .mocked(estimateSendFeeResult)
+    .mockResolvedValueOnce({ kind: 'insufficient', neededSats: 20210, availableSats: 4851 });
+  const { result } = renderHook(() => useOnchainSendQuote({ ...base, viaSwap: false }));
+  await act(async () => {});
+  expect(result.current).toMatchObject({
+    directFeeSats: null,
+    directShortfall: { neededSats: 20210, availableSats: 4851 },
+    errorKey: null,
+    loading: false,
+  });
+});
+it('re-prices a direct send after a wallet sync without the target changing', async () => {
+  jest
+    .mocked(estimateSendFeeResult)
+    .mockResolvedValueOnce({ kind: 'insufficient', neededSats: 20210, availableSats: 4851 })
+    .mockResolvedValueOnce({ kind: 'fee', feeSats: 210 });
+  const direct = { ...base, viaSwap: false, walletSyncKey: '4851:3' };
+  const { result, rerender } = renderHook((props: typeof direct) => useOnchainSendQuote(props), {
+    initialProps: direct,
+  });
+  await act(async () => {});
+  expect(result.current.directShortfall).not.toBeNull();
+  rerender({ ...direct, walletSyncKey: '54851:4' });
+  expect(result.current.loading).toBe(true);
+  await act(async () => {});
+  expect(result.current).toMatchObject({ directFeeSats: 210, directShortfall: null });
+});
+it('does not refetch swap fees on our own wallet syncs', async () => {
+  jest.mocked(getReverseSwapFees).mockResolvedValue(fees);
+  const swap = { ...base, walletSyncKey: '1:1' };
+  const { result, rerender } = renderHook((props: typeof swap) => useOnchainSendQuote(props), {
+    initialProps: swap,
+  });
+  await act(async () => {});
+  rerender({ ...swap, walletSyncKey: '2:2' });
+  expect(result.current.loading).toBe(false);
+  expect(getReverseSwapFees).toHaveBeenCalledTimes(1);
+});
+it('retries a failed swap quote on demand', async () => {
+  jest
+    .mocked(getReverseSwapFees)
+    .mockRejectedValueOnce(new Error('Boltz API error: 503'))
+    .mockResolvedValueOnce(fees);
+  const { result } = renderHook(() => useOnchainSendQuote(base));
+  await act(async () => {});
+  expect(result.current.errorKey).toBe('swapBackend.quoteFailed');
+  act(() => result.current.retry());
+  expect(result.current).toMatchObject({ loading: true, errorKey: null });
+  await act(async () => {});
+  expect(result.current).toMatchObject({ fees, errorKey: null, loading: false });
 });
 it('adopts a server-refreshed quote for the same send after preflight rejects stale fees', async () => {
   jest.mocked(getReverseSwapFees).mockResolvedValue(fees);

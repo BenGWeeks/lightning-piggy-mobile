@@ -1851,6 +1851,7 @@
     "swapRecipientGets": "El destinatario recibe {{amount}} sats",
     "swapYouPay": "Pagas {{total}} sats (comisiones ~{{fee}} sats) · ~10-60 min",
     "swapInsufficientBalance": "Este envío cuesta {{total}} sats ({{amount}} sats + ~{{fee}} sats de comisiones), pero tu saldo es de {{balance}} sats.",
+    "onchainInsufficientFunds": "Tu saldo no cubre este importe más la comisión de minería.",
     "feeUnavailable": "Estimación de comisión no disponible",
     "quoteChanged": "No se envió nada. La comisión del swap ahora es de ~{{fee}} sats. Revísala y toca Enviar para continuar.",
     "quoteChangedTitle": "La comisión del swap ha cambiado",

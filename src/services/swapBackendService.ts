@@ -17,6 +17,9 @@ export class NoSwapServerError extends Error {
 }
 export const isNoSwapServerError = (error: unknown): error is NoSwapServerError =>
   error instanceof Error && error.name === 'NoSwapServerError';
+/** i18n key for a failed fee quote — never the raw server/network text. */
+export const swapQuoteErrorKey = (error: unknown): string =>
+  isNoSwapServerError(error) ? 'swapBackend.notConfigured' : 'swapBackend.quoteFailed';
 const SETTING_KEY = 'swap_backend_url_v1';
 
 /** Accept an HTTPS origin or API base, including reverse-proxy path prefixes. */

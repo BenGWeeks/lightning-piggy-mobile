@@ -11,6 +11,8 @@ import {
   pinSwapBackend,
   getSwapBackendForId,
   swapWebSocketUrl,
+  swapQuoteErrorKey,
+  NoSwapServerError,
 } from './swapBackendService';
 
 const mockStore = new Map<string, string>();
@@ -240,4 +242,9 @@ it('clears the selected server without altering pinned or legacy swaps', async (
   expect(await getSwapBackendForId('pending')).toBe('https://old.example/v2');
   expect(await getSwapBackendForId('legacy')).toBe(LEGACY_SWAP_BACKEND);
   expect(mockFetch).not.toHaveBeenCalled();
+});
+
+it('maps quote failures to translatable keys, not raw server text', () => {
+  expect(swapQuoteErrorKey(new NoSwapServerError())).toBe('swapBackend.notConfigured');
+  expect(swapQuoteErrorKey(new Error('Boltz API error: 503'))).toBe('swapBackend.quoteFailed');
 });

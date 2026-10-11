@@ -1014,21 +1014,3 @@ app start (except the weekly refresh). A change that didn't go through earlier
 The emulator has no Google Play services, so it never gets a push token and
 the switches stay unavailable there — test on a phone.
 
-
-=== iOS simulator shows "No script URL provided" after a development-client deep link
-
-First confirm the selected Metro is reachable from the Mac (`curl http://<host>:<port>/status`).
-If the installed debug build ignores the deep link, React Native's debug host
-can be set for the simulator app without changing accounts or rebuilding:
-
-[source,bash]
-----
-xcrun simctl terminate booted com.lightningpiggy.app.dev
-xcrun simctl launch booted com.lightningpiggy.app.dev -RCT_jsLocation <host>:<port>
-----
-
-The launch argument overrides the app-container preference for that process;
-simulator-wide `defaults write` may not reach the app-container preference.
-Use only the locked simulator lane, then cold-launch with its designated main
-Metro host when the session ends. This is a simulator testing setting,
-not an application configuration change.

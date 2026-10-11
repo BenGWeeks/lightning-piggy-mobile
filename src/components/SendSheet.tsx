@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { View, Text, TouchableOpacity, BackHandler } from 'react-native';
+import { View, Text, TouchableOpacity, BackHandler, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useOnchainSendQuote } from '../utils/useOnchainSendQuote';
 import { onchainSendEligibility } from '../utils/onchainSendEligibility';
@@ -219,6 +219,8 @@ const SendSheet: React.FC<Props> = ({
     walletId,
     viaSwap: onchainViaBoltz,
     amountSats: currentSats,
+    // A sync that changes the balance or history re-prices a direct send.
+    walletSyncKey: `${walletBalance}:${selectedWallet?.transactions?.length ?? 0}`,
   });
   const boltzFees = onchainQuote.fees;
   const onchainEligibility = onchainSendEligibility({
@@ -717,7 +719,6 @@ const SendSheet: React.FC<Props> = ({
         ref={bottomSheetRef}
         onChange={handleSheetChange}
         topInset={insets.top}
-        bottomInset={insets.bottom}
         enablePanDownToClose
         backdropComponent={renderBackdrop}
         handleIndicatorStyle={styles.handleIndicator}
@@ -749,9 +750,16 @@ const SendSheet: React.FC<Props> = ({
           </BottomSheetView>
         ) : (
           <BottomSheetScrollView
-            contentContainerStyle={[
-              { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40 },
-            ]}
+            contentContainerStyle={{
+              // iOS: gorhom lifts the sheet over the keyboard itself; extra
+              // padding there grows the dynamic height and leaves the sheet
+              // floating after the keyboard closes. The resting pad clears
+              // the home indicator (no bottomInset — that leaves a backdrop strip).
+              paddingBottom:
+                Platform.OS === 'android' && keyboardHeight > 0
+                  ? keyboardHeight + 80
+                  : 40 + insets.bottom,
+            }}
             keyboardShouldPersistTaps="handled"
           >
             <View style={styles.innerContent}>
@@ -857,6 +865,7 @@ const SendSheet: React.FC<Props> = ({
                       blocker={onchainEligibility.reason}
                       loadingFees={onchainQuote.loading}
                       quote={swapQuote}
+                      onRetry={onchainQuote.errorKey ? onchainQuote.retry : undefined}
                       styles={styles}
                     />
                   )}

@@ -1823,6 +1823,7 @@
     "swapRecipientGets": "Отримувач отримає {{amount}} sats",
     "swapYouPay": "Ви сплатите {{total}} sats (комісії ~{{fee}} sats) · ~10-60 хв",
     "swapInsufficientBalance": "Це надсилання коштує {{total}} sats ({{amount}} sats + ~{{fee}} sats комісій), але ваш баланс — {{balance}} sats.",
+    "onchainInsufficientFunds": "Вашого балансу не вистачає на цю суму разом із комісією майнерам.",
     "feeUnavailable": "Оцінка комісії недоступна",
     "quoteChanged": "Нічого не надіслано. Комісія за обмін тепер ~{{fee}} sats. Перевірте її та натисніть «Надіслати», щоб продовжити.",
     "quoteChangedTitle": "Комісія обміну змінилася",

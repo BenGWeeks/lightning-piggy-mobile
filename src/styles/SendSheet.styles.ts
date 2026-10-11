@@ -226,6 +226,16 @@ export const createSendSheetStyles = (colors: Palette) =>
     feeTextStart: {
       textAlign: 'left',
     },
+    // Why Send is disabled (insufficient balance, no quote) — warning colour.
+    blockerText: {
+      color: colors.red,
+      fontWeight: '600',
+    },
+    feeColumn: {
+      alignItems: 'center',
+      alignSelf: 'center',
+      gap: 2,
+    },
     resetText: {
       color: colors.brandPink,
       fontSize: 13,
