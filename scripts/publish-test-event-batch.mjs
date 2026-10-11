@@ -144,12 +144,7 @@ const { sk, pk } = resolvePiggy(ROLE);
 console.log(`Signing as ${ROLE} Piggy.`);
 console.log(`Publishing ${FIXTURES.length} events as ${nip19.npubEncode(pk)}\n`);
 
-const RELAYS = [
-  'wss://relay.damus.io',
-  'wss://relay.nostr.band',
-  'wss://nos.lol',
-  'wss://relay.primal.net',
-];
+const RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net'];
 
 const pool = new SimplePool();
 const now = Math.floor(Date.now() / 1000);

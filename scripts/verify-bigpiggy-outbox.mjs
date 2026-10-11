@@ -18,12 +18,7 @@ import { SimplePool } from 'nostr-tools/pool';
 import * as nip19 from 'nostr-tools/nip19';
 import { getPublicKey } from 'nostr-tools/pure';
 
-const RELAYS = [
-  'wss://relay.damus.io',
-  'wss://relay.nostr.band',
-  'wss://nos.lol',
-  'wss://relay.primal.net',
-];
+const RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net'];
 
 const nsec = process.env.MAESTRO_NSEC_BIG;
 if (!nsec) {

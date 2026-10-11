@@ -1,8 +1,8 @@
 appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: NIP-17 DM as Little Piggy via NIP-46 — bunker approves, declines, never answers
 ---
-# NOTE: on a stock build NIP-46 pairing can't complete until #1198 is fixed
-# (LP's only pairing relay, relay.nsec.app, is down) — see docs/TESTING.adoc.
+# NOTE: pairing runs over NIP46_PAIRING_RELAYS (primal, ditto.pub, nos.lol) since
+# #1326; before that its only relay, relay.nsec.app, was dead (#1198).
 # Signer matrix: NIP-17 1:1 send through a NIP-46 remote signer, driving the
 # local test bunker's modes from the flow (runScript → its 127.0.0.1 API):
 #

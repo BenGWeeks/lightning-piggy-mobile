@@ -3,6 +3,7 @@ import type { AbstractSimplePool } from 'nostr-tools/abstract-pool';
 import { pool, trackRelays } from './nostrPool';
 import { querySyncAbortable } from './relayQuery';
 import { acquireMarketListingsPool } from './marketListingsPool';
+import { selectHealthyRelays } from './relayHealth';
 import { collectRelaySnapshot } from './relaySnapshot';
 import { verifyEventCached } from './nostrVerifyCache';
 import { nostrGetEventHash } from './nostrCrypto';
@@ -95,7 +96,11 @@ export async function fetchMarketListings(
   const keys = [...new Set(authors.filter((a) => /^[a-f0-9]{64}$/.test(a)))].sort();
   const scope = new Set(keys.slice(0, MAX_AUTHORS));
   if (signal.aborted || scope.size === 0) return { products: [], incomplete: false };
-  const { urls, dropped } = marketSnapshotRelays(relays);
+  const planned = marketSnapshotRelays(relays);
+  // Leave out relays parked as dead (#1326): they'd only burn a connect
+  // timeout each. The healthiest 2 are always kept.
+  const urls = selectHealthyRelays(planned.urls);
+  const dropped = planned.dropped;
   if (urls.length === 0) return { products: [], incomplete: true };
   // A dedicated structure-only pool: every event is verified here before use
   // (see marketListingsPool). Its sockets close when the last snapshot ends.

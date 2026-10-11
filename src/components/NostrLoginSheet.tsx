@@ -29,14 +29,9 @@ import { setUpNewAccountContactList } from '../services/newAccountContactList';
 import { useNostr } from '../contexts/NostrContext';
 import * as nostrService from '../services/nostrService';
 import * as nostrConnectService from '../services/nostrConnectService';
-
-/** Default relay used in the `nostrconnect://` pairing URI. Picked
- *  because it's well-connected, accepts unauthenticated publishes, and
- *  is the default that Clave / nsec.app / Aegis all subscribe to out
- *  of the box. Users who run their own bunker on a private relay can
- *  edit this in a follow-up if needed — pair-time URI customisation
- *  is out of scope for the initial cut. */
-const NIP46_DEFAULT_RELAY = 'wss://relay.nsec.app';
+// Relays named in the `nostrconnect://` pairing URI (several, so one dead
+// relay can't break sign-in: #1198, #1326).
+import { NIP46_PAIRING_RELAYS } from '../services/nostrRelayDefaults';
 
 /** NIP-46 perms we ask for at pair time. Covers everything the app
  *  needs to function as a Nostr client today: read profile / contacts,
@@ -267,7 +262,7 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
     const secret = bytesToHex(secretBytes);
     const uri = nostrConnectService.buildPairingUri({
       clientPubkey,
-      relay: NIP46_DEFAULT_RELAY,
+      relays: NIP46_PAIRING_RELAYS,
       secret,
       perms: NIP46_PERMS,
       name: 'Lightning Piggy',
@@ -285,7 +280,7 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
       const { signer, connection } = await nostrConnectService.awaitBunkerPair({
         clientSecretKey,
         clientPubkey,
-        relay: NIP46_DEFAULT_RELAY,
+        relays: NIP46_PAIRING_RELAYS,
         secret,
         perms: NIP46_PERMS,
         name: 'Lightning Piggy',

@@ -78,10 +78,10 @@ beforeEach(async () => {
 });
 
 describe('buildPairingUri', () => {
-  it('delegates to mockCreateNostrConnectURI with a single-relay array', () => {
+  it('delegates to mockCreateNostrConnectURI with every pairing relay', () => {
     const uri = svc.buildPairingUri({
       clientPubkey: 'clientpub',
-      relay: 'wss://relay.example',
+      relays: ['wss://relay.example', 'wss://relay2.example'],
       secret: 'deadbeef',
       perms: ['sign_event'],
       name: 'Lightning Piggy',
@@ -89,7 +89,7 @@ describe('buildPairingUri', () => {
     expect(uri).toBe('nostrconnect://mock-uri');
     expect(mockCreateNostrConnectURI).toHaveBeenCalledWith({
       clientPubkey: 'clientpub',
-      relays: ['wss://relay.example'],
+      relays: ['wss://relay.example', 'wss://relay2.example'],
       secret: 'deadbeef',
       perms: ['sign_event'],
       name: 'Lightning Piggy',
@@ -232,7 +232,7 @@ describe('awaitBunkerPair', () => {
     const result = await svc.awaitBunkerPair({
       clientSecretKey: new Uint8Array([1, 2, 3, 4]),
       clientPubkey: 'clientpub',
-      relay: 'wss://relay.example',
+      relays: ['wss://relay.example'],
       secret: 'deadbeef',
       perms: ['sign_event', 'nip44_decrypt'],
       name: 'Lightning Piggy',
@@ -265,7 +265,7 @@ describe('awaitBunkerPair', () => {
     const result = await svc.awaitBunkerPair({
       clientSecretKey: new Uint8Array([9]),
       clientPubkey: 'clientpub',
-      relay: 'wss://relay.example',
+      relays: ['wss://relay.example'],
       secret: 'deadbeef',
       perms: ['sign_event'],
       name: 'Lightning Piggy',

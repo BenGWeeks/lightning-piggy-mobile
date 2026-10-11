@@ -22,12 +22,7 @@ if (authorFilter && !/^[0-9a-f]{64}$/.test(authorFilter)) {
   process.exit(2);
 }
 
-const RELAYS = [
-  'wss://relay.damus.io',
-  'wss://relay.nostr.band',
-  'wss://nos.lol',
-  'wss://relay.primal.net',
-];
+const RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net'];
 
 // `#L` filter matches any event whose tags contain ["L", "com.lightningpiggy.app"]
 // — that's how the app stamps every Piggy listing (see LP_LABEL_NAMESPACE in
