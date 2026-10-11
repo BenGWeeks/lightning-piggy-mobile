@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -24,6 +24,7 @@ import ListingPhotosField from '../components/ListingPhotosField';
 import ListingShippingPicker from '../components/ListingShippingPicker';
 import { createMarketSellerStyles } from '../styles/MarketSeller.styles';
 import {
+  MAX_LISTING_IMAGES,
   buildListingTemplate,
   newIdentifier,
   parseListingDraft,
@@ -112,9 +113,24 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
     setDirty(true);
     setCategoriesText(text);
   }, []);
+  // One pick at a time: the add tile only disables once the upload starts,
+  // so a second tap during the permission prompt / picker must not start
+  // another; and never exceed the cap or add the same photo twice.
+  const picking = useRef(false);
   const onAddPhoto = useCallback(async () => {
-    const url = await pickAndUpload();
-    if (url) editDraft((prev) => ({ ...prev, images: [...prev.images, url] }));
+    if (picking.current) return;
+    picking.current = true;
+    try {
+      const url = await pickAndUpload();
+      if (url)
+        editDraft((prev) =>
+          prev.images.length >= MAX_LISTING_IMAGES || prev.images.includes(url)
+            ? prev
+            : { ...prev, images: [...prev.images, url] },
+        );
+    } finally {
+      picking.current = false;
+    }
   }, [pickAndUpload, editDraft]);
   const onRemovePhoto = useCallback(
     (index: number) =>
