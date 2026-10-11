@@ -27,7 +27,6 @@ import { bytesToHex } from '@noble/hashes/utils.js';
 import { getEventHash, type Event as NostrEvent, type Filter } from 'nostr-tools';
 
 import type { SignerType } from '../types/nostr';
-import { relayListFromTags } from '../utils/relayListEvents';
 import { installMarmotCryptoProvider, marmotCryptoProvider } from './marmotCryptoProvider';
 import {
   candidateMediaStates,
@@ -47,7 +46,13 @@ import {
   trackKeyPackageAcceptance,
 } from './marmotKeyPackageLifecycle';
 import { retryPendingRetirement } from './marmotKeyPackageRetire';
-import { MarmotNoKeyPackageError, newestEvent, pickKeyPackage } from './marmotKeyPackages';
+import {
+  fetchDevices,
+  inviteDevices,
+  MarmotWelcomeDeliveryError,
+  resolveInvitees,
+} from './marmotInvitees';
+import { MarmotWelcomeOutbox } from './marmotWelcomeOutbox';
 import { createMarmotNetwork, createPushTransport } from './marmotNetwork';
 import {
   leafKey,
@@ -61,7 +66,7 @@ import { MarmotPushNotifier, type PushGroup } from './marmotPushNotifier';
 import { MarmotPushRegistrar } from './marmotPushRegistrar';
 import { createMarmotSigner } from './marmotSigner';
 import * as fence from './marmotSessionFence';
-import { isPermanentWelcomeFailure } from './marmotWelcomeFailure';
+import { isPermanentWelcomeFailure, isWelcomeForJoinedGroup } from './marmotWelcomeFailure';
 import {
   createMarmotKvStore,
   createSqliteMarmotBackend,
@@ -145,6 +150,8 @@ export interface MarmotMessageEvent {
 export interface MarmotSessionListener {
   onMessage?: (event: MarmotMessageEvent) => void;
   onGroupsChanged?: (groups: MarmotGroupSummary[]) => void;
+  /** Invitations sent so far (each one is a signer approval on Amber / NIP-46). */
+  onInviteProgress?: (progress: { done: number; total: number }) => void;
 }
 
 export interface MarmotSessionOptions {
@@ -196,6 +203,7 @@ export class MarmotSession {
   private readonly joiningWelcomes = new Set<string>();
   private readonly deliveredRumors = new Set<string>();
   private readonly push: MarmotPushNotifier;
+  private readonly outbox: MarmotWelcomeOutbox;
   /** MIP-05: announcing THIS device's push token in our groups. */
   readonly pushRegistration: MarmotPushRegistrar;
   private connection: { unsubscribe(): void } | null = null;
@@ -215,7 +223,10 @@ export class MarmotSession {
     const backend = opts.backend ?? createSqliteMarmotBackend(opts.pubkey);
     this.backend = fence.fenceBackend(backend, this.gate); // drops writes after a wipe
     const store = <T>(ns: string) => createMarmotKvStore<T>(this.backend, ns);
-    const network = opts.network ?? createMarmotNetwork(opts.getLookupRelays);
+    this.outbox = new MarmotWelcomeOutbox(this.backend, () => this.gate.stopped);
+    const network = this.outbox.wrapNetwork(
+      opts.network ?? createMarmotNetwork(opts.getLookupRelays),
+    );
     this.push = new MarmotPushNotifier({
       pubkey: opts.pubkey,
       backend: this.backend,
@@ -314,6 +325,7 @@ export class MarmotSession {
     // account that has used Marmot before and needs its package kept fresh).
     void this.keepKeyPackageFresh();
     void this.retryPendingWelcomes();
+    void this.outbox.flush().catch(() => undefined);
   }
 
   /** Re-attempt Welcomes whose join failed transiently in an earlier session. */
@@ -424,7 +436,8 @@ export class MarmotSession {
 
   /** Whether `peer` has published a Marmot key package we could invite. */
   async canMessage(peer: string): Promise<boolean> {
-    return (await this.fetchKeyPackage(peer).catch(() => null)) !== null;
+    const lookup = this.opts.getLookupRelays();
+    return (await fetchDevices(this.client.network, lookup, peer).catch(() => [])).length > 0;
   }
 
   async getOrCreateDm(peer: string): Promise<MarmotGroupSummary> {
@@ -449,40 +462,49 @@ export class MarmotSession {
     name: string,
     members: string[],
     opts: { description?: string; adminPubkeys?: string[] } = {},
-  ): Promise<MarmotGroupSummary> {
+  ): Promise<MarmotGroupSummary & { undelivered: string[] }> {
     await this.ready;
     // First Marmot use: become reachable ourselves BEFORE resolving the
     // invitees — otherwise two remote-signer accounts that both deferred
     // publishing could never bootstrap a chat (each fails on the other's
     // missing key package). Not awaited: the invite doesn't depend on it.
     void this.ensureKeyPackage();
-    // Resolve every key package first so a missing one fails before we
-    // create an orphan group.
-    const keyPackages = await Promise.all(members.map((m) => this.requireKeyPackage(m)));
+    // Resolve every invitee's devices first so a missing one fails before we
+    // create an orphan group. DM shape: unnamed, one other (devicesForDm).
+    const devices = await this.invitees(members, { dm: name === '' && members.length === 1 });
     const group = await this.client.groups.create(name, {
       description: opts.description ?? '',
       relays: this.writeRelays(),
       adminPubkeys: opts.adminPubkeys ?? [this.pubkey],
     });
     try {
-      for (const kp of keyPackages) await this.client.groups.invite(group.id, kp);
+      const { undelivered } = await this.inviteAll(group.idStr, devices);
+      // Nobody can join: drop it so a retry starts clean (no queued Welcomes).
+      if (undelivered.length === devices.size) throw new MarmotWelcomeDeliveryError(undelivered);
+      return { ...this.summarise(group), undelivered };
     } catch (e) {
       // Don't leave an empty, invisible group (and its relay sub) behind —
       // a retry would otherwise create another one each time.
       await this.client.groups.destroy(group.id).catch(() => undefined);
+      await this.outbox.drop(group.idStr).catch(() => undefined);
       this.emitGroupsChanged();
       throw e;
     }
-    if (__DEV__)
-      console.log(`[Marmot] created ${group.idStr.slice(0, 8)}, invited ${members.length}`);
-    return this.summarise(group);
   }
 
-  async addMembers(appGroupId: string, members: string[]): Promise<void> {
-    const keyPackages = await Promise.all(members.map((m) => this.requireKeyPackage(m)));
-    const mlsId = toMlsGroupId(appGroupId);
-    for (const kp of keyPackages) await this.client.groups.invite(mlsId, kp);
+  /** Invite `members`' devices; resolves with the people not reached yet
+   * (their invitations are retried automatically — no re-invite needed). */
+  async addMembers(appGroupId: string, members: string[]): Promise<string[]> {
+    const devices = await this.invitees(members);
+    const { undelivered } = await this.inviteAll(toMlsGroupId(appGroupId), devices);
     this.emitGroupsChanged();
+    return undelivered;
+  }
+
+  private inviteAll(mlsId: string, devices: Map<string, NostrEvent[]>) {
+    const progress = (done: number, total: number) =>
+      this.listeners.forEach((l) => l.onInviteProgress?.({ done, total }));
+    return inviteDevices(this.client.groups, this.outbox, mlsId, this.pubkey, devices, progress);
   }
 
   async removeMember(appGroupId: string, member: string): Promise<void> {
@@ -626,7 +648,9 @@ export class MarmotSession {
       return this.summarise(group);
     } catch (e) {
       // Permanent = no key we hold opens it (another device's / a deleted key).
-      const permanent = await isPermanentWelcomeFailure(this.client.keyPackages, welcomeRumor, e);
+      const permanent =
+        (await isWelcomeForJoinedGroup(this.client, welcomeRumor)) ||
+        (await isPermanentWelcomeFailure(this.client.keyPackages, welcomeRumor, e));
       if (permanent) await markHandled();
       if (__DEV__) {
         const kp = welcomeRumor.tags.find((t) => t[0] === 'e')?.[1]?.slice(0, 12);
@@ -644,6 +668,12 @@ export class MarmotSession {
     return this.opts.getWriteRelays();
   }
 
+  /** Each invitee's devices; throws for anyone with none we can invite. */
+  private invitees(members: string[], opts?: { dm?: boolean }) {
+    const lookup = this.opts.getLookupRelays();
+    return resolveInvitees(this.client.network, lookup, this.pubkey, members, opts);
+  }
+
   private summarise(g: SessionGroup): MarmotGroupSummary {
     const view = g.groupData;
     const me = this.pubkey.toLowerCase();
@@ -656,8 +686,10 @@ export class MarmotSession {
       description: view?.description ?? '',
       memberPubkeys: others,
       adminPubkeys: (view?.adminPubkeys ?? []).map((p) => p.toLowerCase()),
-      // White Noise DM: unnamed, two members. ≤2 so a DM mid-creation (just
-      // us, invite not yet committed) never flashes up as a 1-member group.
+      // White Noise DM: unnamed, two ACCOUNTS — `members` is distinct pubkeys,
+      // so a contact on several devices (3+ leaves) is still a DM. ≤2 so a DM
+      // mid-creation (just us, invite not yet committed) never flashes up as
+      // a 1-member group.
       isDm: name === '' && members.length <= 2,
       relays: g.relays ?? [],
       createdAt: this.firstSeen.get(g.idStr) ?? Date.now(),
@@ -795,38 +827,6 @@ export class MarmotSession {
     this.pushRegistration.schedule();
     const groups = this.listGroups();
     for (const l of this.listeners) l.onGroupsChanged?.(groups);
-  }
-
-  private async requireKeyPackage(peer: string): Promise<NostrEvent> {
-    const kp = await this.fetchKeyPackage(peer);
-    if (!kp) throw new MarmotNoKeyPackageError(peer);
-    return kp;
-  }
-
-  /** Newest kind-30443 from the peer's NIP-65 write relays (spec: transports/nostr.md). */
-  private async fetchKeyPackage(peer: string): Promise<NostrEvent | null> {
-    const author = peer.toLowerCase();
-    const network = this.client.network;
-    const lookup = this.opts.getLookupRelays();
-    // Lookup relays can lag: take the NEWEST relay list, not the first (#1202).
-    const relayList = newestEvent(
-      (await network.request(lookup, {
-        kinds: [10002],
-        authors: [author],
-        limit: 1,
-      })) as NostrEvent[],
-    );
-    const writeSet = relayList
-      ? relayListFromTags(relayList.tags)
-          .filter((r) => r.write)
-          .map((r) => r.url)
-      : [];
-    const events = (await network.request([...writeSet, ...lookup], {
-      kinds: [30443],
-      authors: [author],
-      limit: 20,
-    })) as NostrEvent[];
-    return pickKeyPackage(peer, events);
   }
 
   /**

@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { AppState } from 'react-native';
 
+import { Toast } from '../components/BrandedToast';
+import { t } from '../i18n';
 import { startMarmotPushRegistration } from '../services/marmotPushRegistration';
 import { getMarmotSession, MarmotSession, setMarmotSession } from '../services/marmotSession';
 import { DEFAULT_RELAYS } from '../services/nostrService';
@@ -81,6 +83,19 @@ export function MarmotBridge(): null {
         getLookupRelays: lookupRelays,
       });
       setMarmotSession(session);
+      // Amber / NIP-46 ask once per invited device: say how far along we are.
+      if (signerType !== 'nsec') {
+        session.subscribe({
+          onInviteProgress: ({ done, total }) => {
+            if (total < 2) return;
+            Toast.show({
+              type: 'info',
+              text1: t('marmotInvite.progressTitle', { done, total }),
+              text2: t('marmotInvite.progressBody'),
+            });
+          },
+        });
+      }
       session.start().catch((e) => {
         if (__DEV__) console.warn('[Marmot] session start failed:', e);
       });

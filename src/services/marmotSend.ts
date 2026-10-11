@@ -13,6 +13,7 @@ import { marmotKindForAppKind } from './marmotInbox';
 import { marmotImetaTag } from './marmotMedia';
 import { getBlossomServers } from './walletStorageService';
 import type { MarmotUnreachableReason } from './marmotFallback';
+import { MarmotWelcomeDeliveryError } from './marmotInvitees';
 import { t } from '../i18n';
 import {
   MarmotNoKeyPackageError,
@@ -59,6 +60,7 @@ function marmotUnreachableReason(e: unknown): MarmotUnreachableReason | null {
 export function marmotSendError(e: unknown): string {
   const reason = marmotUnreachableReason(e);
   if (reason) return t(`marmotSend.${reason}`);
+  if (e instanceof MarmotWelcomeDeliveryError) return t('marmotSend.inviteNotDelivered');
   return (e as Error)?.message || 'Marmot send failed';
 }
 
