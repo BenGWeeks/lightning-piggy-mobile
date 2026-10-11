@@ -313,6 +313,81 @@ it('honours deletions even when the listing budget is full', async () => {
   );
 }, 60000);
 
+/** A kind-5 that hashes to its id but carries a junk signature. */
+const forgedDeletion = (i: number, target: string[]) => {
+  const unsigned = { ...event, kind: 5, created_at: 3000 + i, content: '', tags: [target] };
+  return JSON.parse(
+    JSON.stringify({ ...unsigned, id: getEventHash(unsigned), sig: '0'.repeat(128) }),
+  );
+};
+
+it('fails closed when forged deletions flood: a withdrawn listing stays hidden', async () => {
+  jest.useRealTimers();
+  const pending = start();
+  await flush();
+  deliver(pass('listings')[0], event);
+  pass('listings')[0].c.oneose();
+  await flush();
+  const [deletionSub] = pass('deletions');
+  // 70 forgeries first (more than either failure cap)…
+  for (let i = 0; i < 70; i++) {
+    deliver(deletionSub, forgedDeletion(i, ['e', i.toString(16).padStart(64, '0')]));
+  }
+  // …then the seller's genuine withdrawal, which the checks never reach.
+  deliver(
+    deletionSub,
+    finalizeEvent(
+      { kind: 5, created_at: 9000, content: '', tags: [['a', `30402:${author}:book`]] },
+      key,
+    ),
+  );
+  pass('deletions').forEach((s) => s.c.oneose());
+  const result = await pending;
+  expect(result.products).toEqual([]);
+  expect(result.incomplete).toBe(true);
+  expect(verify.mock.calls.filter(([e]) => e.kind === 5).length).toBeLessThanOrEqual(32);
+}, 30000);
+
+it('ignores a few forged deletions: the listing stays and the snapshot is complete', async () => {
+  const pending = start();
+  await flush();
+  deliver(pass('listings')[0], event);
+  pass('listings')[0].c.oneose();
+  await flush();
+  for (let i = 0; i < 3; i++) {
+    deliver(pass('deletions')[0], forgedDeletion(i, ['a', `30402:${author}:book`]));
+  }
+  pass('deletions').forEach((s) => s.c.oneose());
+  expect(await pending).toMatchObject({ products: [expect.anything()], incomplete: false });
+});
+
+it('caps synchronous checks of forged oversized events and fails closed', async () => {
+  const pending = start();
+  await flush();
+  const [listings] = pass('listings');
+  deliver(listings, event);
+  for (let i = 0; i < 40; i++) {
+    const unsigned = {
+      ...event,
+      created_at: 500 + i,
+      content: 'x'.repeat(40000),
+      tags: [
+        ['d', `big-${i}`],
+        ['title', 'Big'],
+      ],
+    };
+    deliver(
+      listings,
+      JSON.parse(JSON.stringify({ ...unsigned, id: getEventHash(unsigned), sig: '0'.repeat(128) })),
+    );
+  }
+  await answer();
+  const result = await pending;
+  // Oversized checks stopped at the cap (the listing winner adds one more).
+  expect(verify.mock.calls.length).toBeLessThanOrEqual(16 + 1);
+  expect(result).toMatchObject({ incomplete: true, products: [expect.anything()] });
+});
+
 it('gives up on a flood of forged signatures and flags the snapshot incomplete', async () => {
   jest.useRealTimers();
   const pending = start();
