@@ -45,17 +45,6 @@ export const createGroupConversationScreenStyles = (colors: Palette) =>
       marginTop: 8,
       marginLeft: 48,
     },
-    actionButton: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      backgroundColor: 'rgba(255,255,255,0.2)',
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    deleteIconButton: {
-      backgroundColor: 'rgba(0,0,0,0.15)',
-    },
     content: {
       flex: 1,
       backgroundColor: colors.background,

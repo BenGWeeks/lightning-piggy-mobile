@@ -20,7 +20,6 @@ import {
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import { Image as ExpoImage } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
-import { LogOut } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -35,6 +34,7 @@ import { buildGroupMemberRows } from '../utils/groupMemberRows';
 import { shortNpub } from '../utils/shortNpub';
 import RenameGroupSheet from '../components/RenameGroupSheet';
 import GroupMembersSheet from '../components/GroupMembersSheet';
+import GroupHeaderActions from '../components/GroupHeaderActions';
 import AttachPanel from '../components/AttachPanel';
 import ConversationComposer from '../components/ConversationComposer';
 import BrandGradientBackground from '../components/BrandGradientBackground';
@@ -667,15 +667,7 @@ const GroupConversationScreen: React.FC = () => {
               />
             </Svg>
           </TouchableOpacity>
-          <View style={{ flex: 1 }} />
-          <TouchableOpacity
-            style={[styles.actionButton, styles.deleteIconButton]}
-            onPress={handleLeave}
-            accessibilityLabel={t('groupConversationScreen.leaveGroupTitle')}
-            testID="leave-group-button"
-          >
-            <LogOut size={18} color={colors.white} strokeWidth={2} />
-          </TouchableOpacity>
+          <GroupHeaderActions group={group} onLeave={handleLeave} />
         </View>
         {/* Tappable member-count line — opens GroupMembersSheet for
             add/remove. Replaces the inert text + horizontal chip strip
