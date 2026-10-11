@@ -24,7 +24,7 @@ name: Explore tour — captures screenshots for the PR description
 - waitForAnimationToEnd:
     timeout: 10000
 
-# 01 — Home tab as the user lands. Captures the new bottom tab bar
+# 01 — Wallets tab as the user lands. Captures the new bottom tab bar
 # (Home / Messages / Explore / Friends with the Compass icon).
 - takeScreenshot: 01-tab-bar-home
 
@@ -115,7 +115,7 @@ name: Explore tour — captures screenshots for the PR description
 # 09 — Account drawer → Notifications settings (shop alerts toggle + radius
 # preset chips + quiet hours toggle).
 - tapOn:
-    id: 'tab-home'
+    id: 'tab-wallets'
 - waitForAnimationToEnd:
     timeout: 1500
 - swipe:

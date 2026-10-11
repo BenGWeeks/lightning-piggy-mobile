@@ -11,7 +11,7 @@
     "electrumSaveError": "Electrum सेटिंग्स लोड या सेव नहीं हो सकीं। होस्टनेम और पोर्ट जाँचें, फिर दोबारा कोशिश करें।"
   },
   "tabs": {
-    "home": "होम",
+    "wallets": "वॉलेट",
     "messages": "मैसेज",
     "explore": "एक्सप्लोर",
     "friends": "दोस्त"
@@ -1235,6 +1235,7 @@
     "marmotMessage": "Marmot ग्रुप इवेंट — इसे पढ़ने के लिए Marmot चैट खोलें।",
     "marmotInvitePreview": "Marmot चैट इनवाइट",
     "marmotMessagePreview": "Marmot मैसेज",
+    "marmotInviteFailedPreview": "सुरक्षित चैट का इनवाइट खोला नहीं जा सका",
     "voiceMessagePreview": "वॉइस मैसेज",
     "unsupportedAttachment": "इस अटैचमेंट का सपोर्ट नहीं है: {{name}} ({{type}})",
     "attachmentUnavailable": "अटैचमेंट नहीं खुल सका: {{name}}",
@@ -2025,7 +2026,7 @@
     "back": "वापस",
     "cantOpenTitle": "माफ़ करें — इसे खोल नहीं सकते",
     "message": "Lightning Piggy अभी {{entity}} को सपोर्ट नहीं करता। आप इसे इसके लिए बने Nostr क्लाइंट में खोल सकते हैं या ऐप में वापस जा सकते हैं।",
-    "backToHome": "होम पर लौटें"
+    "backToWallets": "वॉलेट पर वापस जाएँ"
   },
   "voiceRecordingSheet": {
     "waveformAccessibility": "वॉइस मैसेज की वेवफ़ॉर्म",
@@ -2607,6 +2608,12 @@
     "removingBody": "लॉग आउट पूरा करने के लिए अपने साइनर में अनुरोधों को मंज़ूरी दें। इसमें एक मिनट लग सकता है।",
     "notRemovedTitle": "इनविटेशन की नहीं हट सकीं",
     "notRemovedBody": "हम इस अकाउंट की Marmot इनविटेशन की रिले से नहीं हटा सके, इसलिए इस फ़ोन पर नए Marmot इनवाइट अब भी आ सकते हैं। अगली बार इस अकाउंट के यहाँ लॉग इन करने पर हम अपने-आप फिर से कोशिश करेंगे।"
+  },
+  "marmotInviteFailed": {
+    "notice": "{{name}} ने आपको सुरक्षित चैट में इनवाइट किया, लेकिन वह खोला नहीं जा सका। उनसे दोबारा इनवाइट करने को कहें।",
+    "someone": "किसी",
+    "askAgain": "नया इनवाइट माँगें",
+    "askDraft": "नमस्ते! आपका सुरक्षित चैट इनवाइट मेरे फ़ोन पर नहीं खुल पाया। क्या आप मुझे फिर से इनवाइट कर सकते हैं?"
   },
   "marmotInvite": {
     "progressTitle": "डिवाइस को इनवाइट भेज रहे हैं… {{total}} में से {{done}}",

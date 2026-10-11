@@ -26,7 +26,7 @@ name: Send — unresolvable address surfaces an error + stays editable in place 
     timeout: 8000
 
 - tapOn:
-    id: 'tab-home'
+    id: 'tab-wallets'
 - waitForAnimationToEnd:
     timeout: 3000
 

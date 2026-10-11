@@ -27,7 +27,7 @@ cat > "$LOGDIR/_home.yaml" <<EOF
 appId: $PKG
 ---
 - tapOn:
-    id: 'tab-home'
+    id: 'tab-wallets'
 - extendedWaitUntil:
     visible:
       text: '${GREETING}.*'

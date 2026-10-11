@@ -13,7 +13,7 @@ name: Nostr Login Test (dev variant)
 
 # Open the account drawer
 - tapOn:
-    id: 'tab-home'
+    id: 'tab-wallets'
     optional: true
 - waitForAnimationToEnd:
     timeout: 3000

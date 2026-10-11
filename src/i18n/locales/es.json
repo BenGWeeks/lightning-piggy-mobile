@@ -11,7 +11,7 @@
     "electrumSaveError": "No se pudieron cargar o guardar los ajustes de Electrum. Comprueba el nombre del servidor y el puerto e inténtalo de nuevo."
   },
   "tabs": {
-    "home": "Inicio",
+    "wallets": "Carteras",
     "messages": "Mensajes",
     "explore": "Explorar",
     "friends": "Amigos"
@@ -1235,6 +1235,7 @@
     "marmotMessage": "Evento de grupo de Marmot: abre el chat de Marmot para leerlo.",
     "marmotInvitePreview": "Invitación a chat de Marmot",
     "marmotMessagePreview": "Mensaje de Marmot",
+    "marmotInviteFailedPreview": "No se pudo abrir la invitación al chat seguro",
     "voiceMessagePreview": "Mensaje de voz",
     "unsupportedAttachment": "Adjunto no compatible: {{name}} ({{type}})",
     "attachmentUnavailable": "No se pudo abrir el adjunto: {{name}}",
@@ -2025,7 +2026,7 @@
     "back": "Atrás",
     "cantOpenTitle": "Lo sentimos, no se puede abrir esto",
     "message": "Lightning Piggy aún no admite {{entity}}. Puedes abrirlo en un cliente Nostr dedicado o volver a la aplicación.",
-    "backToHome": "Volver al inicio"
+    "backToWallets": "Volver a Carteras"
   },
   "voiceRecordingSheet": {
     "waveformAccessibility": "Forma de onda de la nota de voz",
@@ -2607,6 +2608,12 @@
     "removingBody": "Aprueba las solicitudes en tu app de firma para terminar de cerrar sesión. Puede tardar un minuto.",
     "notRemovedTitle": "No se quitaron las claves de invitación",
     "notRemovedBody": "No pudimos quitar de los relays las claves de invitación de Marmot de esta cuenta, así que es posible que sigan llegando invitaciones de Marmot a este teléfono. Lo volveremos a intentar automáticamente la próxima vez que esta cuenta inicie sesión aquí."
+  },
+  "marmotInviteFailed": {
+    "notice": "{{name}} te invitó a un chat seguro, pero no se pudo abrir. Pídele que te invite de nuevo.",
+    "someone": "Alguien",
+    "askAgain": "Pedir una nueva invitación",
+    "askDraft": "¡Hola! No pude abrir tu invitación al chat seguro en mi teléfono. ¿Puedes invitarme de nuevo?"
   },
   "marmotInvite": {
     "progressTitle": "Invitando dispositivos… {{done}} de {{total}}",

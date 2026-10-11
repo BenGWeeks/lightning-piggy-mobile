@@ -17,7 +17,7 @@ name: Internal — login as the nsec passed via PIGGY_NSEC env var
     timeout: 10000
 
 - tapOn:
-    id: 'tab-home'
+    id: 'tab-wallets'
     optional: true
 - waitForAnimationToEnd:
     timeout: 3000
@@ -90,5 +90,5 @@ name: Internal — login as the nsec passed via PIGGY_NSEC env var
     timeout: 1500
 - extendedWaitUntil:
     visible:
-      id: 'tab-home'
+      id: 'tab-wallets'
     timeout: 8000

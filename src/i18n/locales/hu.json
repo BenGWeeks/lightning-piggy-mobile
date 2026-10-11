@@ -11,7 +11,7 @@
     "electrumSaveError": "Az Electrum beállításait nem sikerült betölteni vagy menteni. Ellenőrizd a gazdagépnevet és a portot, majd próbáld újra."
   },
   "tabs": {
-    "home": "Kezdőlap",
+    "wallets": "Pénztárcák",
     "messages": "Üzenetek",
     "explore": "Felfedezés",
     "friends": "Barátok"
@@ -1235,6 +1235,7 @@
     "marmotMessage": "Marmot-csoportesemény – az elolvasásához nyisd meg a Marmot-csevegést.",
     "marmotInvitePreview": "Marmot-csevegés meghívása",
     "marmotMessagePreview": "Marmot-üzenet",
+    "marmotInviteFailedPreview": "A biztonságos csevegésre szóló meghívót nem sikerült megnyitni",
     "voiceMessagePreview": "Hangüzenet",
     "unsupportedAttachment": "Nem támogatott melléklet: {{name}} ({{type}})",
     "attachmentUnavailable": "A mellékletet nem sikerült megnyitni: {{name}}",
@@ -2025,7 +2026,7 @@
     "back": "Vissza",
     "cantOpenTitle": "Sajnos ezt nem lehet megnyitni",
     "message": "A Lightning Piggy még nem támogatja ezt: {{entity}}. Megnyithatod egy dedikált Nostr-kliensben, vagy térj vissza az alkalmazásba.",
-    "backToHome": "Vissza a Kezdőlapra"
+    "backToWallets": "Vissza a pénztárcákhoz"
   },
   "voiceRecordingSheet": {
     "waveformAccessibility": "Hangüzenet hullámformája",
@@ -2607,6 +2608,12 @@
     "removingBody": "A kijelentkezés befejezéséhez hagyd jóvá a kéréseket az aláíródban. Ez eltarthat egy percig.",
     "notRemovedTitle": "A meghívókulcsok nem lettek eltávolítva",
     "notRemovedBody": "Nem tudtuk eltávolítani a fiók Marmot-meghívókulcsait a relay-ekről, ezért az új Marmot-meghívók még érkezhetnek erre a telefonra. Automatikusan újra megpróbáljuk, amikor a fiók legközelebb bejelentkezik itt."
+  },
+  "marmotInviteFailed": {
+    "notice": "{{name}} meghívott egy biztonságos csevegésbe, de nem sikerült megnyitni. Kérd meg, hogy hívjon meg újra.",
+    "someone": "Valaki",
+    "askAgain": "Új meghívó kérése",
+    "askDraft": "Szia! A biztonságos csevegésre szóló meghívódat nem tudtam megnyitni a telefonomon. Meghívnál újra?"
   },
   "marmotInvite": {
     "progressTitle": "Eszközök meghívása… {{done}} / {{total}}",

@@ -1,5 +1,5 @@
 import * as nip19 from 'nostr-tools/nip19';
-import { protocolForWireKind, type DmProtocol } from './dmProtocol';
+import { MARMOT_WELCOME_KIND, protocolForWireKind, type DmProtocol } from './dmProtocol';
 import type { WalletState, WalletTransaction } from '../types/wallet';
 import type { NostrContact, NostrProfile } from '../types/nostr';
 import { parsePoll, isPollVoteMessage } from './pollMessage';
@@ -32,6 +32,8 @@ export interface ConversationSummary {
   lastComment: string;
   anonymous: boolean;
   protocol?: DmProtocol;
+  /** The latest entry is a Marmot invite that couldn't be opened (#1269). */
+  marmotInviteFailed?: boolean;
 }
 
 function displayNameFor(
@@ -282,6 +284,8 @@ export function buildDmSummaries(
       lastComment: entry.text,
       anonymous: false,
       protocol,
+      // Only failed invites reach here as kind 444 (see withMarmotInviteRows).
+      ...(entry.wireKind === MARMOT_WELCOME_KIND ? { marmotInviteFailed: true } : {}),
     });
   }
 

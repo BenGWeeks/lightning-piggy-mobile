@@ -14,6 +14,7 @@ import {
 } from './orderEvents';
 import { indexMessagesById, resolveQuote, type MessageQuote } from './messageQuote';
 import { NWC_SHARE_KIND, parseNwcShare, type NwcShareCard } from './nwcShareMessage';
+import { MARMOT_WELCOME_KIND } from './dmProtocol';
 
 // The row variants ConversationScreen's FlatList renders. Extracted from the
 // screen (with the pure build logic below) to keep the screen file under the
@@ -105,6 +106,14 @@ export type Item =
       id: string;
       fromMe: boolean;
       rawKind: number;
+      createdAt: number;
+    }
+  | {
+      // A Marmot invite (kind-444 Welcome) that couldn't be opened (#1269).
+      // Joined / pending invites never become an item — they're hidden.
+      kind: 'marmotInviteFailed';
+      id: string;
+      fromMe: false;
       createdAt: number;
     }
   | {
@@ -306,16 +315,21 @@ export function orderIdsNeedingHistory(messages: ConversationMessageInput[]): st
 // Merge classified DM messages with wallet zap rows, sort newest-first, and
 // interleave "Today / Yesterday / <date>" dividers between day groups.
 // `olderOrderAmounts` — approved totals for orders outside the loaded slice
-// (see `collectApprovedOrderAmounts`).
+// (see `collectApprovedOrderAmounts`). `failedInvites` — this partner's Marmot
+// invites that couldn't be opened, from the Marmot session's record (#1269).
 export function buildConversationItems(
   messages: ConversationMessageInput[],
   zapItems: TimedItem[],
   olderOrderAmounts?: ReadonlyMap<string, number | undefined>,
+  failedInvites: readonly { id: string; createdAt: number }[] = [],
   locale?: string,
 ): Item[] {
   const expectedAmounts = collectApprovedOrderAmounts(messages, olderOrderAmounts);
   const byId = indexMessagesById(messages);
   const msgItems: TimedItem[] = messages.flatMap((m): TimedItem[] => {
+    // A Marmot invite's gift wrap: never a bubble. Joined ones have their
+    // own chat; failed ones are drawn from the session's record below.
+    if (m.wireKind === MARMOT_WELCOME_KIND) return [];
     // Marketplace order / receipt rows (kind 16/17) store order JSON in `text`;
     // render them as an order card rather than a chat bubble (#market).
     if (m.wireKind === 16 || m.wireKind === 17) {
@@ -515,6 +529,14 @@ export function buildConversationItems(
   // its kind-16 order card is also present (#market dedup) — a selector over the
   // assembled set, so the two events can arrive in either order.
   const deduped = suppressDuplicateOrderInvoiceNotes(msgItems);
+  for (const f of failedInvites) {
+    deduped.push({
+      kind: 'marmotInviteFailed',
+      id: `invite-${f.id}`,
+      fromMe: false,
+      createdAt: f.createdAt,
+    });
+  }
 
   // Descending order — index 0 is newest. The FlatList is `inverted`, so
   // index 0 renders at the visual bottom (chat default) and the

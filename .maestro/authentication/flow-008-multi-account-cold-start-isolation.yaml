@@ -37,7 +37,7 @@ name: Multi-account cold-start wallet isolation regression guard (#442)
     timeout: 15000
 - extendedWaitUntil:
     visible:
-      id: 'tab-home'
+      id: 'tab-wallets'
     timeout: 30000
 
 - takeScreenshot: 01-cold-start

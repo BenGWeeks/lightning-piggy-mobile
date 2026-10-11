@@ -11,7 +11,7 @@
     "electrumSaveError": "Electrum settings could not be loaded or saved. Check the hostname and port, then try again."
   },
   "tabs": {
-    "home": "Home",
+    "wallets": "Wallets",
     "messages": "Messages",
     "explore": "Explore",
     "friends": "Friends"
@@ -1235,6 +1235,7 @@
     "marmotMessage": "Marmot group event — open the Marmot chat to read it.",
     "marmotInvitePreview": "Marmot chat invite",
     "marmotMessagePreview": "Marmot message",
+    "marmotInviteFailedPreview": "Secure chat invite couldn't be opened",
     "voiceMessagePreview": "Voice message",
     "unsupportedAttachment": "Unsupported attachment: {{name}} ({{type}})",
     "attachmentUnavailable": "Couldn't open attachment: {{name}}",
@@ -2025,7 +2026,7 @@
     "back": "Back",
     "cantOpenTitle": "Sorry — can't open this",
     "message": "Lightning Piggy doesn't support {{entity}} yet. You can open it in a dedicated Nostr client, or head back to the app.",
-    "backToHome": "Back to Home"
+    "backToWallets": "Back to Wallets"
   },
   "voiceRecordingSheet": {
     "waveformAccessibility": "Voice note waveform",
@@ -2607,6 +2608,12 @@
     "removingBody": "Approve the requests in your signer to finish signing out. This can take a minute.",
     "notRemovedTitle": "Invitation keys not removed",
     "notRemovedBody": "We couldn't remove this account's Marmot invitation keys from relays, so new Marmot invites may still be sent to this phone. We'll try again automatically the next time this account signs in here."
+  },
+  "marmotInviteFailed": {
+    "notice": "{{name}} invited you to a secure chat, but it couldn't be opened. Ask them to invite you again.",
+    "someone": "Someone",
+    "askAgain": "Ask for a new invite",
+    "askDraft": "Hi! Your secure chat invite couldn't be opened on my phone. Could you invite me again?"
   },
   "marmotInvite": {
     "progressTitle": "Inviting devices… {{done}} of {{total}}",

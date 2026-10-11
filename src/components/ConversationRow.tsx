@@ -91,7 +91,13 @@ const ConversationRow: React.FC<Props> = ({ summary, onPress }) => {
             {timestamp}
           </Text>
         </View>
-        <Text style={styles.preview} numberOfLines={1}>
+        <Text
+          style={styles.preview}
+          numberOfLines={1}
+          testID={
+            summary.marmotInviteFailed ? `conversation-invite-failed-${summary.id}` : undefined
+          }
+        >
           {preview}
         </Text>
       </View>

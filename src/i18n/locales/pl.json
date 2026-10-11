@@ -11,7 +11,7 @@
     "electrumSaveError": "Nie udało się wczytać ani zapisać ustawień Electrum. Sprawdź nazwę hosta i port, a potem spróbuj ponownie."
   },
   "tabs": {
-    "home": "Start",
+    "wallets": "Portfele",
     "messages": "Wiadomości",
     "explore": "Odkrywaj",
     "friends": "Znajomi"
@@ -1235,6 +1235,7 @@
     "marmotMessage": "Zdarzenie grupy Marmot — otwórz czat Marmot, aby je przeczytać.",
     "marmotInvitePreview": "Zaproszenie do czatu Marmot",
     "marmotMessagePreview": "Wiadomość Marmot",
+    "marmotInviteFailedPreview": "Nie udało się otworzyć zaproszenia do bezpiecznego czatu",
     "voiceMessagePreview": "Wiadomość głosowa",
     "unsupportedAttachment": "Nieobsługiwany załącznik: {{name}} ({{type}})",
     "attachmentUnavailable": "Nie udało się otworzyć załącznika: {{name}}",
@@ -2027,7 +2028,7 @@
     "back": "Wstecz",
     "cantOpenTitle": "Przepraszamy — nie da się tego otworzyć",
     "message": "Lightning Piggy jeszcze nie obsługuje tego typu: {{entity}}. Możesz otworzyć go w dedykowanej aplikacji Nostr albo wrócić do aplikacji.",
-    "backToHome": "Wróć do Startu"
+    "backToWallets": "Wróć do portfeli"
   },
   "voiceRecordingSheet": {
     "waveformAccessibility": "Przebieg fali wiadomości głosowej",
@@ -2613,6 +2614,12 @@
     "removingBody": "Zatwierdź prośby w swojej aplikacji podpisującej, aby dokończyć wylogowanie. Może to potrwać minutę.",
     "notRemovedTitle": "Nie usunięto kluczy zaproszeń",
     "notRemovedBody": "Nie udało się usunąć z przekaźników kluczy zaproszeń Marmot tego konta, więc nowe zaproszenia Marmot mogą nadal trafiać na ten telefon. Spróbujemy ponownie automatycznie przy następnym logowaniu tego konta tutaj."
+  },
+  "marmotInviteFailed": {
+    "notice": "{{name}} zaprasza cię do bezpiecznego czatu, ale nie udało się go otworzyć. Poproś o ponowne zaproszenie.",
+    "someone": "Ktoś",
+    "askAgain": "Poproś o nowe zaproszenie",
+    "askDraft": "Cześć! Nie udało mi się otworzyć twojego zaproszenia do bezpiecznego czatu na telefonie. Możesz zaprosić mnie jeszcze raz?"
   },
   "marmotInvite": {
     "progressTitle": "Zapraszanie urządzeń… {{done}} z {{total}}",

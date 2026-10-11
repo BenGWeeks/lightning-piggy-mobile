@@ -158,7 +158,7 @@ describe.each(others)('%s catalogue', (locale) => {
 describe('uk catalogue (#948 spot checks)', () => {
   it('keeps long-standing translations rather than the English source', () => {
     const uk = leaves(translations.uk as unknown as Tree);
-    expect(uk.get('tabs.home')).toBe('Головна');
+    expect(uk.get('tabs.wallets')).toBe('Гаманці');
     expect(uk.get('aboutScreen.sendFeedback')).toBe('Надіслати відгук');
     expect(uk.get('orderPaymentActions.scanHint')).toBe('Відскануйте будь-яким гаманцем Lightning');
   });

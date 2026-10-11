@@ -15,18 +15,18 @@ name: Signer matrix smoke — Big (nsec), Middle (Amber), Little (NIP-46) each r
 #   bash scripts/signer-matrix-e2e.sh 132
 - runFlow: ../common/login-nsec-big.yaml
 - assertVisible:
-    id: 'tab-home'
+    id: 'tab-wallets'
 - takeScreenshot: signer-matrix-132-big-nsec-home
 
 - runFlow: ../common/login-amber-middle.yaml
 - assertVisible:
-    id: 'tab-home'
+    id: 'tab-wallets'
 - takeScreenshot: signer-matrix-132-middle-amber-home
 
 - runFlow: ../common/login-nsec-big.yaml
 - runFlow: ../common/login-nip46-little.yaml
 - assertVisible:
-    id: 'tab-home'
+    id: 'tab-wallets'
 - takeScreenshot: signer-matrix-132-little-nip46-home
 
 # Restore: Little out (hands back to Big), Middle out, Big active.

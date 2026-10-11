@@ -51,6 +51,8 @@ import { useStableRowIdentity } from '../utils/stableRowIdentity';
 import { useNonFollowProfiles } from '../hooks/useNonFollowProfiles';
 import { useAccountDeferredValue } from '../contexts/useAccountState';
 import { EMPTY_DM_INBOX } from '../contexts/dmInboxScope';
+import { useFailedMarmotInvites } from '../hooks/useFailedMarmotInvites';
+import { withMarmotInviteRows } from '../utils/marmotInviteRows';
 import type { NostrContact } from '../types/nostr';
 // __DEV__-only marketplace-order fixture seeding. The helper is a no-op outside
 // __DEV__ and is only invoked behind a __DEV__-gated button, so it never runs at
@@ -420,14 +422,26 @@ const MessagesScreen: React.FC = () => {
   // is load-bearing — keep it enforced everywhere a summary is built.
   // Skip the gate only when effectiveWotTier === 'all' (which itself is
   // already secret-mode-gated by GroupsContext's hard-lock).
+  // Marmot invites (#1269): joined / pending ones are hidden (the chat shows
+  // on its own); ones that couldn't be opened get an explanatory row.
+  const failedInvites = useFailedMarmotInvites(pubkey);
+  const failedInvitePreview = `🔒 ${t('messageBubble.marmotInviteFailedPreview')}`;
   const dmSummaries = useMemo(() => {
     return buildDmSummaries(
-      deferredDmInbox,
+      withMarmotInviteRows(deferredDmInbox, failedInvites, failedInvitePreview),
       deferredContacts,
       enforceFollowingOnly ? followPubkeys : undefined,
       nonFollowProfiles,
     );
-  }, [deferredDmInbox, deferredContacts, enforceFollowingOnly, followPubkeys, nonFollowProfiles]);
+  }, [
+    deferredDmInbox,
+    failedInvites,
+    failedInvitePreview,
+    deferredContacts,
+    enforceFollowingOnly,
+    followPubkeys,
+    nonFollowProfiles,
+  ]);
   // Build the zap-counterparties memo separately so that toggling
   // `showZapCounterparties` off doesn't make every wallet update churn
   // the merged summary list — when the toggle is off this memo is built

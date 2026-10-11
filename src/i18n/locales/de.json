@@ -11,7 +11,7 @@
     "electrumSaveError": "Die Electrum-Einstellungen konnten nicht geladen oder gespeichert werden. Prüfe Hostnamen und Port und versuche es dann erneut."
   },
   "tabs": {
-    "home": "Start",
+    "wallets": "Wallets",
     "messages": "Nachrichten",
     "explore": "Entdecken",
     "friends": "Freunde"
@@ -1235,6 +1235,7 @@
     "marmotMessage": "Marmot-Gruppenevent – öffne den Marmot-Chat, um es zu lesen.",
     "marmotInvitePreview": "Marmot-Chat-Einladung",
     "marmotMessagePreview": "Marmot-Nachricht",
+    "marmotInviteFailedPreview": "Einladung zum sicheren Chat konnte nicht geöffnet werden",
     "voiceMessagePreview": "Sprachnachricht",
     "unsupportedAttachment": "Nicht unterstützter Anhang: {{name}} ({{type}})",
     "attachmentUnavailable": "Anhang konnte nicht geöffnet werden: {{name}}",
@@ -2025,7 +2026,7 @@
     "back": "Zurück",
     "cantOpenTitle": "Das lässt sich leider nicht öffnen",
     "message": "Lightning Piggy unterstützt {{entity}} noch nicht. Du kannst es in einem speziellen Nostr-Client öffnen oder zurück zur App gehen.",
-    "backToHome": "Zurück zum Start"
+    "backToWallets": "Zurück zu Wallets"
   },
   "voiceRecordingSheet": {
     "waveformAccessibility": "Wellenform der Sprachnachricht",
@@ -2607,6 +2608,12 @@
     "removingBody": "Bestätige die Anfragen in deinem Signer, um die Abmeldung abzuschließen. Das kann eine Minute dauern.",
     "notRemovedTitle": "Einladungsschlüssel nicht entfernt",
     "notRemovedBody": "Wir konnten die Marmot-Einladungsschlüssel dieses Kontos nicht von den Relays entfernen, daher werden neue Marmot-Einladungen möglicherweise weiterhin an dieses Handy gesendet. Wir versuchen es automatisch erneut, wenn sich dieses Konto das nächste Mal hier anmeldet."
+  },
+  "marmotInviteFailed": {
+    "notice": "{{name}} hat dich zu einem sicheren Chat eingeladen, aber er konnte nicht geöffnet werden. Bitte um eine neue Einladung.",
+    "someone": "Jemand",
+    "askAgain": "Neue Einladung anfragen",
+    "askDraft": "Hi! Deine Einladung zum sicheren Chat ließ sich auf meinem Handy nicht öffnen. Kannst du mich noch mal einladen?"
   },
   "marmotInvite": {
     "progressTitle": "Geräte werden eingeladen… {{done}} von {{total}}",

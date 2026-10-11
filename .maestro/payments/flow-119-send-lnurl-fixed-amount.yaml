@@ -33,7 +33,7 @@ name: Send — fixed-amount LNURL (min = max) skips the amount prompt
     commands:
       - runFlow:
           when:
-            notVisible: { id: 'tab-home' }
+            notVisible: { id: 'tab-wallets' }
           commands:
             # Generous: a restored conversation can freeze the JS thread
             # for >30s while the DM inbox decrypts (#695).
@@ -57,9 +57,9 @@ name: Send — fixed-amount LNURL (min = max) skips the amount prompt
       - waitForAnimationToEnd: { timeout: 2000 }
 
 - extendedWaitUntil:
-    visible: { id: 'tab-home' }
+    visible: { id: 'tab-wallets' }
     timeout: 30000
-- tapOn: { id: 'tab-home' }
+- tapOn: { id: 'tab-wallets' }
 - tapOn: { id: 'btn-send' }
 - waitForAnimationToEnd: { timeout: 4000 }
 

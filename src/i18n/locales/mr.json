@@ -11,7 +11,7 @@
     "electrumSaveError": "Electrum सेटिंग्ज लोड किंवा सेव्ह करता आल्या नाहीत. होस्टनेम आणि पोर्ट तपासा, मग पुन्हा प्रयत्न करा."
   },
   "tabs": {
-    "home": "होम",
+    "wallets": "वॉलेट",
     "messages": "मेसेज",
     "explore": "एक्सप्लोर",
     "friends": "मित्र"
@@ -1235,6 +1235,7 @@
     "marmotMessage": "Marmot ग्रुप इव्हेंट — वाचण्यासाठी Marmot चॅट उघडा.",
     "marmotInvitePreview": "Marmot चॅट आमंत्रण",
     "marmotMessagePreview": "Marmot मेसेज",
+    "marmotInviteFailedPreview": "सुरक्षित चॅटचे आमंत्रण उघडता आले नाही",
     "voiceMessagePreview": "व्हॉइस मेसेज",
     "unsupportedAttachment": "असमर्थित अटॅचमेंट: {{name}} ({{type}})",
     "attachmentUnavailable": "अटॅचमेंट उघडता आली नाही: {{name}}",
@@ -2025,7 +2026,7 @@
     "back": "मागे",
     "cantOpenTitle": "क्षमस्व — हे उघडता येत नाही",
     "message": "Lightning Piggy अजून {{entity}} समर्थित करत नाही. तुम्ही ते खास Nostr क्लायंटमध्ये उघडू शकता, किंवा ॲपमध्ये परत जा.",
-    "backToHome": "होमकडे परत जा"
+    "backToWallets": "वॉलेटवर परत जा"
   },
   "voiceRecordingSheet": {
     "waveformAccessibility": "व्हॉइस नोट वेव्हफॉर्म",
@@ -2607,6 +2608,12 @@
     "removingBody": "साइन आउट पूर्ण करण्यासाठी तुमच्या साइनरमधील विनंत्या मंजूर करा. यासाठी एखादे मिनिट लागू शकते.",
     "notRemovedTitle": "आमंत्रण की काढल्या नाहीत",
     "notRemovedBody": "या खात्याच्या Marmot आमंत्रण की आम्ही रिलेंवरून काढू शकलो नाही, त्यामुळे नवीन Marmot आमंत्रणे अजूनही या फोनवर येऊ शकतात. या खात्याने पुढच्या वेळी इथे साइन इन केल्यावर आम्ही आपोआप पुन्हा प्रयत्न करू."
+  },
+  "marmotInviteFailed": {
+    "notice": "सुरक्षित चॅटचे आमंत्रण आले ({{name}}), पण ते उघडता आले नाही. पुन्हा आमंत्रण पाठवायला सांगा.",
+    "someone": "कोणीतरी",
+    "askAgain": "नवीन आमंत्रण मागा",
+    "askDraft": "नमस्कार! तुमचे सुरक्षित चॅटचे आमंत्रण माझ्या फोनवर उघडले नाही. मला पुन्हा आमंत्रण पाठवू शकाल का?"
   },
   "marmotInvite": {
     "progressTitle": "डिव्हाइसना आमंत्रण देत आहे… {{total}} पैकी {{done}}",

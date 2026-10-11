@@ -484,6 +484,8 @@ const ConversationScreen: React.FC = () => {
   // Ephemeral "typing…" indicator (#dm-typing). `pubkey` is the peer here.
   const { isPeerTyping, notifyTyping } = useTypingIndicator(pubkey);
 
+  // Failed Marmot invite → draft a "please invite me again" for them (#1269).
+  const askForInvite = useCallback(() => setDraft(t('marmotInviteFailed.askDraft')), [t]);
   const renderItem = useCallback(
     ({ item }: { item: Item }) => (
       <ConversationMessageRow
@@ -516,6 +518,7 @@ const ConversationScreen: React.FC = () => {
         onToggleReaction={buildOnToggleReaction(item)}
         onAddNwc={addSharedWallet}
         peerName={name}
+        onAskForInvite={askForInvite}
       />
     ),
     [
@@ -543,6 +546,7 @@ const ConversationScreen: React.FC = () => {
       reactionsForItem,
       buildOnLongPress,
       buildOnToggleReaction,
+      askForInvite,
     ],
   );
 

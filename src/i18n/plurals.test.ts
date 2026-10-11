@@ -135,7 +135,7 @@ describe('catalogue plurals end to end', () => {
 
   it('zh-Hans: resolves the script-keyed catalogue and uses its single form', () => {
     const zh = createI18nInstance('zh-Hans');
-    expect(zh.t('tabs.home')).toBe('首页');
+    expect(zh.t('tabs.wallets')).toBe('钱包');
     expect(zh.t('market.reviews.count', { count: 1 })).toBe('1条评价');
     expect(zh.t('market.reviews.count', { count: 5 })).toBe('5条评价');
   });

@@ -11,7 +11,7 @@
     "electrumSaveError": "无法加载或保存Electrum设置。请检查主机名和端口，然后重试。"
   },
   "tabs": {
-    "home": "首页",
+    "wallets": "钱包",
     "messages": "消息",
     "explore": "探索",
     "friends": "好友"
@@ -1235,6 +1235,7 @@
     "marmotMessage": "Marmot群组事件——请打开Marmot聊天阅读。",
     "marmotInvitePreview": "Marmot聊天邀请",
     "marmotMessagePreview": "Marmot消息",
+    "marmotInviteFailedPreview": "无法打开安全聊天邀请",
     "voiceMessagePreview": "语音消息",
     "unsupportedAttachment": "不支持的附件：{{name}}（{{type}}）",
     "attachmentUnavailable": "无法打开附件：{{name}}",
@@ -2025,7 +2026,7 @@
     "back": "返回",
     "cantOpenTitle": "抱歉——无法打开",
     "message": "Lightning Piggy暂不支持{{entity}}。你可以在专门的Nostr客户端中打开，或返回应用。",
-    "backToHome": "返回首页"
+    "backToWallets": "返回钱包"
   },
   "voiceRecordingSheet": {
     "waveformAccessibility": "语音消息波形",
@@ -2607,6 +2608,12 @@
     "removingBody": "请在你的签名器中批准这些请求，以完成退出登录。这可能需要一分钟。",
     "notRemovedTitle": "邀请密钥未移除",
     "notRemovedBody": "我们无法从中继上移除此账户的Marmot邀请密钥，因此新的Marmot邀请仍可能发到这部手机。下次此账户在这里登录时，我们会自动重试。"
+  },
+  "marmotInviteFailed": {
+    "notice": "{{name}}邀请你加入安全聊天，但邀请无法打开。请让对方重新邀请你。",
+    "someone": "有人",
+    "askAgain": "请求重新邀请",
+    "askDraft": "嗨！你的安全聊天邀请在我的手机上打不开。可以再邀请我一次吗？"
   },
   "marmotInvite": {
     "progressTitle": "正在邀请设备…{{done}}/{{total}}",

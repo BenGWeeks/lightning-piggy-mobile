@@ -323,7 +323,7 @@ of money flow and routes to the matching surface. There are two directions:
 * **Claim FROM** (money *in*): an LNURL-withdraw voucher → the withdraw
   claim flow (`HuntFoundScreen`). Introduced in #341 / #468.
 * **Pay TO** (money *out*): an invoice, Lightning Address, or LNURL-pay
-  endpoint → the `SendSheet` on the Home tab. Introduced in #756.
+  endpoint → the `SendSheet` on the Wallets tab. Introduced in #756.
 
 The critical rule: for LNURL forms the direction is keyed off the
 **resolved `tag`** (`payRequest` vs `withdrawRequest`), *never* the bech32

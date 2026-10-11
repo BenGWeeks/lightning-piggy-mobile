@@ -31,10 +31,10 @@ name: Internal — login as the nsec passed via MAESTRO_NSEC_BIG
     appId: com.lightningpiggy.app.dev
     clearState: true
 # Cold-launch ceiling — bundle load + JS init can be slow on a fresh
-# install. The instant tab-home is visible we move on.
+# install. The instant tab-wallets is visible we move on.
 - extendedWaitUntil:
     visible:
-      id: 'tab-home'
+      id: 'tab-wallets'
     timeout: 20000
 
 - tapOn:
@@ -71,10 +71,10 @@ name: Internal — login as the nsec passed via MAESTRO_NSEC_BIG
     optional: true
 
 # Final signed-in signal. The drawer auto-closes and we're back on
-# MainTabs — tab-home re-appearing is the most reliable indicator.
+# MainTabs — tab-wallets re-appearing is the most reliable indicator.
 # Generous ceiling because the relay handshake + initial NIP-04/17
 # decrypt can take a few seconds.
 - extendedWaitUntil:
     visible:
-      id: 'tab-home'
+      id: 'tab-wallets'
     timeout: 15000
