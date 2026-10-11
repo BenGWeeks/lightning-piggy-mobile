@@ -8,6 +8,7 @@ import {
   __resetRelayHealthForTests,
   hydrateRelayHealth,
   isRelayParked,
+  noteNetworkActivity,
   parkedRelays,
   recordRelayFailure,
   recordRelaySuccess,
@@ -112,6 +113,25 @@ describe('offline protection (corroboration)', () => {
   });
 });
 
+describe('corroboration sources', () => {
+  it("a relay's own earlier success doesn't corroborate its own failures", () => {
+    recordRelaySuccess(DEAD, T0);
+    recordRelayFailure(DEAD, T0 + 1000);
+    recordRelayFailure(DEAD, T0 + 2000);
+    expect(isRelayParked(DEAD, T0 + 3000)).toBe(false);
+  });
+
+  it('traffic on open sockets corroborates, long after the last new connection', () => {
+    recordRelaySuccess(OK, T0);
+    const later = T0 + 10 * 60_000; // healthy sockets stay open, no new connects
+    noteNetworkActivity(later);
+    recordRelayFailure(DEAD, later + 1);
+    noteNetworkActivity(later + 5000);
+    recordRelayFailure(DEAD, later + 5001);
+    expect(isRelayParked(DEAD, later + 5002)).toBe(true);
+  });
+});
+
 describe('selectHealthyRelays', () => {
   it('returns the list untouched when nothing is parked', () => {
     const list = [OK, DEAD, OK2];
@@ -156,6 +176,15 @@ describe('persistence', () => {
     __resetRelayHealthForTests();
     await hydrateRelayHealth(t + PARK_BASE_MS + PARK_MAX_MS + 1);
     expect(parkedRelays(t)).toEqual([]);
+  });
+
+  it('never restores a stored park for a relay that connected this session', async () => {
+    const t = failCorroborated(DEAD, 2);
+    await __persistRelayHealthForTests();
+    __resetRelayHealthForTests();
+    recordRelaySuccess(DEAD, t); // recovered before hydration finished
+    await hydrateRelayHealth(t);
+    expect(isRelayParked(DEAD, t)).toBe(false);
   });
 
   it('ignores garbage in storage', async () => {

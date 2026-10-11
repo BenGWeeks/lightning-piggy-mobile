@@ -16,8 +16,8 @@
  *    `PARK_BASE_MS` (15 min), doubling per further failure up to
  *    `PARK_MAX_MS` (6 h). When the park lapses the relay gets one fresh try:
  *    success clears everything, another failure re-parks it for twice as long.
- *  - A failure only counts when some OTHER relay connected within
- *    `CORROBORATION_WINDOW_MS` of it. With no network at all, every relay
+ *  - A failure only counts when some OTHER relay connected, or traffic
+ *    arrived on an open socket, within `CORROBORATION_WINDOW_MS` of it. With no network at all, every relay
  *    fails and none succeeds, so an offline phone doesn't park the whole
  *    list. A failure seen before any success (common at cold start, when a
  *    refused connection beats the healthy relays' TLS handshakes) is held as
@@ -67,8 +67,41 @@ interface RelayHealthEntry {
 }
 
 const entries = new Map<string, RelayHealthEntry>();
-let lastAnySuccessAt = 0;
+/**
+ * Recent proof that the network works, by source: a relay key for a new
+ * connection, or NETWORK_ACTIVITY for traffic on an already-open socket.
+ * A relay's own success never corroborates its own failure.
+ */
+const recentSuccess = new Map<string, number>();
+const NETWORK_ACTIVITY = '*';
+/** Relays seen this session; hydration never overrides what we learned live. */
+const touched = new Set<string>();
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
+
+function corroborated(key: string, now: number): boolean {
+  for (const [source, at] of recentSuccess) {
+    if (source !== key && now - at <= CORROBORATION_WINDOW_MS) return true;
+  }
+  return false;
+}
+
+function noteSuccess(source: string, now: number): void {
+  recentSuccess.set(source, now);
+  if (recentSuccess.size > 32) {
+    for (const [k, at] of recentSuccess) {
+      if (now - at > CORROBORATION_WINDOW_MS) recentSuccess.delete(k);
+    }
+  }
+  // The network works: failures of OTHER relays held as unconfirmed within
+  // the window were real relay failures, not an offline phone.
+  for (const [key, entry] of entries) {
+    if (entry.unconfirmedAt === undefined || key === source) continue;
+    const at = entry.unconfirmedAt;
+    entry.unconfirmedAt = undefined;
+    if (now - at <= CORROBORATION_WINDOW_MS) countFailure(key, entry, at);
+    else if (entry.failures === 0) entries.delete(key);
+  }
+}
 
 /** Normalise like the pool does, so `wss://x` and `wss://X/` share an entry. */
 export function relayKey(url: string): string {
@@ -108,34 +141,39 @@ function evictIfFull(): void {
 
 /** A NEW connection to `url` opened (not a reused, already-open socket). */
 export function recordRelaySuccess(url: string, now: number = Date.now()): void {
-  lastAnySuccessAt = now;
   const own = relayKey(url);
+  touched.add(own);
   const ownEntry = entries.get(own);
   if (ownEntry) {
     entries.delete(own);
     if (ownEntry.failures > 0) schedulePersist();
   }
-  // The network works: failures held as unconfirmed within the window were
-  // real relay failures, not an offline phone.
-  for (const [key, entry] of entries) {
-    if (entry.unconfirmedAt === undefined) continue;
-    const at = entry.unconfirmedAt;
-    entry.unconfirmedAt = undefined;
-    if (now - at <= CORROBORATION_WINDOW_MS) countFailure(key, entry, at);
-    else if (entry.failures === 0) entries.delete(key);
-  }
+  noteSuccess(own, now);
+}
+
+let lastActivityAt = 0;
+/**
+ * Traffic arrived on an open socket (an event, a publish OK): the network
+ * works right now, which corroborates other relays' connect failures.
+ * Throttled to once a second, so it's cheap enough to call per event.
+ */
+export function noteNetworkActivity(now: number = Date.now()): void {
+  if (now - lastActivityAt < 1000) return;
+  lastActivityAt = now;
+  noteSuccess(NETWORK_ACTIVITY, now);
 }
 
 /** Connecting to `url` failed or timed out (not aborted by the caller). */
 export function recordRelayFailure(url: string, now: number = Date.now()): void {
   const key = relayKey(url);
+  touched.add(key);
   let entry = entries.get(key);
   if (!entry) {
     entry = { failures: 0, parkedUntil: 0, lastFailureAt: now };
     entries.set(key, entry);
     evictIfFull();
   }
-  if (now - lastAnySuccessAt <= CORROBORATION_WINDOW_MS) countFailure(key, entry, now);
+  if (corroborated(key, now)) countFailure(key, entry, now);
   else entry.unconfirmedAt = now;
 }
 
@@ -236,7 +274,7 @@ export async function hydrateRelayHealth(now: number = Date.now()): Promise<void
       continue;
     }
     if (Math.max(item.p, item.l) + PARK_MAX_MS < now) continue;
-    if (entries.has(item.u)) continue;
+    if (touched.has(item.u) || entries.has(item.u)) continue;
     entries.set(item.u, { failures: item.f, parkedUntil: item.p, lastFailureAt: item.l });
   }
   evictIfFull();
@@ -245,7 +283,9 @@ export async function hydrateRelayHealth(now: number = Date.now()): Promise<void
 /** Test seam: wipe state and cancel a pending write. */
 export function __resetRelayHealthForTests(): void {
   entries.clear();
-  lastAnySuccessAt = 0;
+  recentSuccess.clear();
+  touched.clear();
+  lastActivityAt = 0;
   if (persistTimer) clearTimeout(persistTimer);
   persistTimer = null;
 }

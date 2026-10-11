@@ -4,6 +4,7 @@ import { normalizeURL } from 'nostr-tools/utils';
 import {
   RELAY_CONNECT_TIMEOUT_MS,
   RELAY_SKIPPED_REASON,
+  noteNetworkActivity,
   recordRelayFailure,
   recordRelaySuccess,
   selectHealthyRelays,
@@ -18,8 +19,9 @@ type PoolClass = abstract new (...args: any[]) => AbstractSimplePool;
  * snapshot's pool (`./marketListingsPool`).
  *
  * - Every connection attempt is capped at `RELAY_CONNECT_TIMEOUT_MS` and its
- *   outcome feeds `./relayHealth`. Only NEW connections count as a success; a
- *   reused open socket proves nothing about the network right now.
+ *   outcome feeds `./relayHealth`, once per physical attempt. Only NEW
+ *   connections count as a relay success; a reused open socket proves nothing.
+ *   Events and publish OKs on open sockets corroborate that the network works.
  * - Subscriptions (and so `querySync` / `get` / `subscribeMany`) leave out
  *   parked relays, so aggregate EOSE no longer waits on them.
  * - Publishes skip parked relays too. The returned array still lines up with
@@ -32,28 +34,40 @@ type PoolClass = abstract new (...args: any[]) => AbstractSimplePool;
  */
 export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
   abstract class HealthAware extends Base {
-    async ensureRelay(
+    /** One recorded outcome per physical connection attempt, by relay. */
+    private readonly connectAttempts = new Map<string, Promise<void>>();
+
+    ensureRelay(
       url: string,
       params?: { connectionTimeout?: number; abort?: AbortSignal },
     ): ReturnType<AbstractSimplePool['ensureRelay']> {
+      let key = url;
       let wasConnected = false;
       try {
-        wasConnected = this.relays.get(normalizeURL(url))?.connected === true;
+        key = normalizeURL(url);
+        wasConnected = this.relays.get(key)?.connected === true;
       } catch {
-        // Unparseable URL: super.ensureRelay throws below and we record it.
+        // Unparseable URL: super.ensureRelay rejects below and we record it.
       }
       const connectionTimeout = Math.min(
         params?.connectionTimeout ?? RELAY_CONNECT_TIMEOUT_MS,
         RELAY_CONNECT_TIMEOUT_MS,
       );
-      try {
-        const relay = await super.ensureRelay(url, { ...params, connectionTimeout });
-        if (!wasConnected) recordRelaySuccess(url);
-        return relay;
-      } catch (err) {
-        if (!params?.abort?.aborted) recordRelayFailure(url);
-        throw err;
-      }
+      const relay = super.ensureRelay(url, { ...params, connectionTimeout });
+      // A reused open socket proves nothing either way. Concurrent callers
+      // share nostr-tools' single connection promise, so only the caller that
+      // started the attempt records its outcome, and an abort by that caller
+      // (which rejects every waiter) records nothing.
+      if (wasConnected || this.connectAttempts.has(key)) return relay;
+      const outcome = relay.then(
+        () => recordRelaySuccess(url),
+        () => {
+          if (!params?.abort?.aborted) recordRelayFailure(url);
+        },
+      );
+      this.connectAttempts.set(key, outcome);
+      void outcome.finally(() => this.connectAttempts.delete(key));
+      return relay;
     }
 
     subscribeMap(
@@ -62,7 +76,15 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
     ): ReturnType<AbstractSimplePool['subscribeMap']> {
       const keep = new Set(selectHealthyRelays(requests.map((r) => r.url)));
       const healthy = requests.filter((r) => keep.has(r.url));
-      return super.subscribeMap(healthy.length === requests.length ? requests : healthy, params);
+      const { onevent } = params;
+      return super.subscribeMap(healthy.length === requests.length ? requests : healthy, {
+        ...params,
+        // Events arriving prove the network works (corroborates failures).
+        onevent: (event) => {
+          noteNetworkActivity();
+          onevent?.(event);
+        },
+      });
     }
 
     publish(
@@ -72,8 +94,18 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
     ): Promise<string>[] {
       const keep = new Set(selectHealthyRelays(relays));
       const kept = relays.filter((r) => keep.has(r));
-      if (kept.length === relays.length) return super.publish(relays, event, params);
-      const results = super.publish(kept, event, params);
+      const results = super.publish(kept, event, params).map((p) => {
+        // An OK from a relay proves the network works (corroborates failures).
+        // nostr-tools RESOLVES a failed connect with "connection failure: …".
+        p.then(
+          (reason) => {
+            if (!String(reason).startsWith('connection failure')) noteNetworkActivity();
+          },
+          () => {},
+        );
+        return p;
+      });
+      if (kept.length === relays.length) return results;
       let next = 0;
       return relays.map((r) =>
         keep.has(r) ? results[next++] : Promise.reject(new Error(RELAY_SKIPPED_REASON)),

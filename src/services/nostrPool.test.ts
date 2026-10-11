@@ -78,6 +78,39 @@ describe('subscriptions', () => {
 });
 
 describe('ensureRelay', () => {
+  it('counts one failure for concurrent callers sharing one connect attempt', async () => {
+    let fail: (reason: string) => void = () => {};
+    const shared = new Promise<never>((_, reject) => {
+      fail = reject;
+    });
+    jest.spyOn(SimplePool.prototype, 'ensureRelay').mockReturnValue(shared);
+    recordRelaySuccess('wss://witness.example/');
+    const calls = [pool.ensureRelay(DEAD), pool.ensureRelay(DEAD), pool.ensureRelay(DEAD)];
+    fail('connection timed out');
+    await Promise.allSettled(calls);
+    await Promise.resolve();
+    // Three rejections, one physical attempt: not parked (needs 2 failures).
+    expect(isRelayParked(DEAD)).toBe(false);
+  });
+
+  it('records nothing when the initiating caller aborts, even for other waiters', async () => {
+    let fail: (reason: unknown) => void = () => {};
+    const shared = new Promise<never>((_, reject) => {
+      fail = reject;
+    });
+    jest.spyOn(SimplePool.prototype, 'ensureRelay').mockReturnValue(shared);
+    recordRelaySuccess('wss://witness.example/');
+    const aborted = new AbortController();
+    const calls = [pool.ensureRelay(DEAD, { abort: aborted.signal }), pool.ensureRelay(DEAD)];
+    aborted.abort();
+    fail('aborted');
+    await Promise.allSettled(calls);
+    // A second, independent real failure alone must not park it.
+    jest.spyOn(SimplePool.prototype, 'ensureRelay').mockRejectedValue('connection failed');
+    await expect(pool.ensureRelay(DEAD)).rejects.toBeDefined();
+    expect(isRelayParked(DEAD)).toBe(false);
+  });
+
   it('caps the connect timeout and records a new connection as healthy', async () => {
     park(DEAD);
     const ensure = jest
