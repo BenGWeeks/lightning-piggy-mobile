@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import { Alert } from '../components/BrandedAlert';
 import { useNostr, notifyGroupMessage } from '../contexts/NostrContext';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -12,6 +12,8 @@ import { encodeEncryptedFileUrl } from '../utils/encryptedFileUrl';
 import type { EncryptedUpload } from '../services/imageUploadService';
 import type { Group } from '../types/groups';
 import { useComposerActions } from './useComposerActions';
+import type { SharedLocation } from '../services/locationService';
+import { confirmGroupLocationShare } from '../utils/confirmLocationShare';
 import { sendMarmotImage, type MarmotImage } from '../services/marmotSend';
 import { isMarmotGroupId } from '../services/marmotSession';
 
@@ -62,6 +64,15 @@ export function useGroupComposerActions(params: {
   const { sendGroupMessage, pubkey: myPubkey, signEvent } = useNostr();
   const t = useTranslation();
 
+  // Latest group + identity, read at send time. A location send awaits a
+  // consent dialog, during which a roster update can land; the send must go
+  // to the roster the user just approved, not the one captured when the
+  // share started (#1253 review).
+  const latestRef = useRef({ group, myPubkey });
+  useLayoutEffect(() => {
+    latestRef.current = { group, myPubkey };
+  }, [group, myPubkey]);
+
   // Optimistically append a `local_…` row (dup window vs the inbound self-wrap
   // is a known follow-up, PR #227) and scroll to it.
   //
@@ -72,11 +83,17 @@ export function useGroupComposerActions(params: {
   // `persisted` (never rejects) so callers can await it and judge the outcome
   // once the relay send has resolved.
   const appendOptimisticGroupRow = useCallback(
-    (text: string): { row: GroupMessage; persisted: Promise<boolean> } | null => {
-      if (!group || !myPubkey) return null;
+    (
+      text: string,
+      // sendText passes its send-time snapshot so the row lands in the thread
+      // the message actually went to, not the one this callback closed over.
+      targetGroup = group,
+      targetPubkey = myPubkey,
+    ): { row: GroupMessage; persisted: Promise<boolean> } | null => {
+      if (!targetGroup || !targetPubkey) return null;
       const local: GroupMessage = {
         id: `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        senderPubkey: myPubkey,
+        senderPubkey: targetPubkey,
         text,
         createdAt: Math.floor(Date.now() / 1000),
       };
@@ -89,10 +106,10 @@ export function useGroupComposerActions(params: {
       // actually landed, mirroring the pre-#1033 ordering.
       setMessages((prev) => [...prev, local]);
       setTimeout(scrollToEnd, 0);
-      const persisted = appendGroupMessage(myPubkey, group.id, local)
+      const persisted = appendGroupMessage(targetPubkey, targetGroup.id, local)
         .then((next) => {
           setMessages(next);
-          notifyGroupMessage(group.id, local);
+          notifyGroupMessage(targetGroup.id, local);
           return true;
         })
         .catch((err: unknown) => {
@@ -125,11 +142,11 @@ export function useGroupComposerActions(params: {
   // swallow the error since there's no user-facing action to take on a
   // failed cleanup of an already-failed send.
   const removeOptimisticRow = useCallback(
-    async (rowId: string): Promise<void> => {
-      if (!group) return;
+    async (rowId: string, targetGroup = group): Promise<void> => {
+      if (!targetGroup) return;
       setMessages((prev) => prev.filter((m) => m.id !== rowId));
       try {
-        await removeGroupMessage(myPubkey, group.id, rowId);
+        await removeGroupMessage(myPubkey, targetGroup.id, rowId);
       } catch (err) {
         if (__DEV__) console.warn('[GroupConversationScreen] removeGroupMessage failed:', err);
       }
@@ -140,11 +157,16 @@ export function useGroupComposerActions(params: {
   // A Marmot send learns its event id only once sent: move the optimistic row
   // onto it so the message can be edited / deleted for everyone (#1237).
   const adoptRumorId = useCallback(
-    async (rowId: string, rumorId: string | undefined): Promise<void> => {
-      if (!group || !rumorId) return;
+    async (
+      rowId: string,
+      rumorId: string | undefined,
+      targetGroup = group,
+      owner = myPubkey,
+    ): Promise<void> => {
+      if (!targetGroup || !owner || !rumorId) return;
       setMessages((prev) => prev.map((m) => (m.id === rowId ? { ...m, id: rumorId } : m)));
       try {
-        setMessages(await rekeyGroupMessage(myPubkey, group.id, rowId, rumorId));
+        setMessages(await rekeyGroupMessage(owner, targetGroup.id, rowId, rumorId));
       } catch (err) {
         if (__DEV__) console.warn('[GroupConversationScreen] rekeyGroupMessage failed:', err);
       }
@@ -154,6 +176,7 @@ export function useGroupComposerActions(params: {
 
   const sendText = useCallback(
     async (text: string): Promise<boolean> => {
+      const { group, myPubkey } = latestRef.current;
       if (!group || !myPubkey) return false;
 
       // Optimistic bubble: painted synchronously from onRumorReady, before any
@@ -172,7 +195,7 @@ export function useGroupComposerActions(params: {
         },
         {
           onRumorReady: () => {
-            optimistic.current = appendOptimisticGroupRow(text);
+            optimistic.current = appendOptimisticGroupRow(text, group, myPubkey);
           },
         },
       );
@@ -184,7 +207,7 @@ export function useGroupComposerActions(params: {
         // setMessages can't re-add the row after removal.
         if (optimistic.current) {
           await optimistic.current.persisted;
-          await removeOptimisticRow(optimistic.current.row.id);
+          await removeOptimisticRow(optimistic.current.row.id, group);
         }
         return false;
       }
@@ -194,12 +217,11 @@ export function useGroupComposerActions(params: {
         alertSavedOnRelayOnly();
         return false;
       }
-      if (optimistic.current) await adoptRumorId(optimistic.current.row.id, result.rumorId);
+      if (optimistic.current)
+        await adoptRumorId(optimistic.current.row.id, result.rumorId, group, myPubkey);
       return true;
     },
     [
-      group,
-      myPubkey,
       sendGroupMessage,
       appendOptimisticGroupRow,
       removeOptimisticRow,
@@ -323,9 +345,30 @@ export function useGroupComposerActions(params: {
   // Memoise the strategy so the shared hook's callbacks (which depend on it)
   // keep stable identities across renders.
   const isMarmot = !!group && isMarmotGroupId(group.id);
+  const confirmLocation = useCallback(
+    (location: SharedLocation) =>
+      confirmGroupLocationShare(location, () => {
+        const { group, myPubkey } = latestRef.current;
+        if (!group || !myPubkey) return null;
+        return {
+          group: group.name,
+          groupId: group.id,
+          memberPubkeys: group.memberPubkeys,
+          myPubkey,
+        };
+      }),
+    [],
+  );
+
   const strategy = useMemo(
-    () => ({ sendText, sendFile, ...(isMarmot ? { sendImage, gifEnvelope: true } : {}), canSend }),
-    [sendText, sendFile, sendImage, isMarmot, canSend],
+    () => ({
+      sendText,
+      sendFile,
+      ...(isMarmot ? { sendImage, gifEnvelope: true } : {}),
+      canSend,
+      confirmLocation,
+    }),
+    [sendText, sendFile, sendImage, isMarmot, canSend, confirmLocation],
   );
 
   const actions = useComposerActions({

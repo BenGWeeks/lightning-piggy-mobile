@@ -68,6 +68,7 @@ import { useConversationTimeline } from '../hooks/useConversationTimeline';
 import { useConversationLiveLocation } from '../hooks/useConversationLiveLocation';
 import type { ConversationMessageInput, Item } from '../utils/conversationItems';
 import { useMessageActionsMenu } from '../hooks/useMessageActionsMenu';
+import { useStartLiveLocationShare } from '../hooks/useStartLiveLocationShare';
 import { useConversationReactions } from '../hooks/useConversationReactions';
 import { useReactionBackend } from '../hooks/useReactionBackend';
 import { useConversationLoader } from '../hooks/useConversationLoader';
@@ -130,7 +131,7 @@ const ConversationScreen: React.FC = () => {
     armLiveDmSub();
   }, [armLiveDmSub]);
   const { wallets, addNwcWallet } = useWallet();
-  const { startShare, stopShare } = useLiveLocation();
+  const { stopShare } = useLiveLocation();
 
   // Thread data lifecycle — read-through paint, background relay top-up,
   // abort-on-unmount, single-flight refresh (#868) — lives in this hook.
@@ -341,23 +342,14 @@ const ConversationScreen: React.FC = () => {
     await handleShareLocation();
   }, [handleShareLocation]);
 
-  // Live-location: kick off a continuously-updating share. The provider
-  // owns the watcher + ephemeral kind-20069 publishing; we just trigger
-  // it and let the in-thread bubble (rendered via the start marker DM
-  // that the provider sends as a side-effect) drive the visible state.
-  const handleShareLive = useCallback(
-    async (durationMs: number) => {
-      setLiveLocationPickerOpen(false);
-      const result = await startShare(pubkey, durationMs, protocol);
-      if (!result.ok) {
-        Alert.alert(t('conversationScreen.couldNotStartLiveShareTitle'), result.error);
-        return;
-      }
-      // Append the exact published marker text so the optimistic bubble dedupes against the relay echo (mergeConversationMessages matches on identical text — a hand-built copy with a different startedAt would leave two "started" bubbles).
-      appendOptimisticLocal(result.markerText);
-    },
-    [pubkey, startShare, appendOptimisticLocal, t, protocol],
-  );
+  const closeLiveLocationPicker = useCallback(() => setLiveLocationPickerOpen(false), []);
+  const handleShareLive = useStartLiveLocationShare({
+    pubkey,
+    name,
+    protocol,
+    closePicker: closeLiveLocationPicker,
+    appendOptimisticLocal,
+  });
 
   const handleStopLive = useCallback(
     async (sessionId: string) => {
