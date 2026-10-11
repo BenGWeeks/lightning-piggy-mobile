@@ -30,6 +30,9 @@ import { createGroupConversationScreenStyles } from '../styles/GroupConversation
 import { useGroups } from '../contexts/GroupsContext';
 import { useNostr, useNostrContacts, subscribeGroupMessages } from '../contexts/NostrContext';
 import { useGroupComposerActions } from '../hooks/useGroupComposerActions';
+import { useGroupMemberProfiles } from '../hooks/useGroupMemberProfiles';
+import { buildGroupMemberRows } from '../utils/groupMemberRows';
+import { shortNpub } from '../utils/shortNpub';
 import RenameGroupSheet from '../components/RenameGroupSheet';
 import GroupMembersSheet from '../components/GroupMembersSheet';
 import AttachPanel from '../components/AttachPanel';
@@ -84,12 +87,7 @@ type ClassifiedMessage = GroupMessage & {
   quote?: MessageQuote;
 };
 
-interface MemberRow {
-  pubkey: string;
-  name: string;
-  picture: string | null;
-}
-
+const EMPTY_PUBKEYS: string[] = [];
 const EMPTY_MESSAGES: GroupMessage[] = [];
 const groupMessageId = (m: GroupMessage) => m.id;
 const noReaction = () => {};
@@ -113,7 +111,7 @@ const GroupConversationScreen: React.FC = () => {
   const t = useTranslation();
   const styles = useMemo(() => createGroupConversationScreenStyles(colors), [colors]);
   const { getGroup, deleteGroup, secretMode, setSecretMode } = useGroups();
-  const { pubkey: myPubkey, profile: myProfile } = useNostr();
+  const { pubkey: myPubkey, profile: myProfile, fetchProfilesForPubkeys } = useNostr();
   const { contacts } = useNostrContacts();
   const [renameVisible, setRenameVisible] = useState(false);
   const [membersSheetVisible, setMembersSheetVisible] = useState(false);
@@ -236,39 +234,30 @@ const GroupConversationScreen: React.FC = () => {
   // matching Signal / WhatsApp / Telegram (#473). The "You" suffix on
   // the self row is wired via `memberNameByPubkey` below + the sheet's
   // own self-row marker.
-  const members: MemberRow[] = useMemo(() => {
-    if (!group) return [];
-    const byPubkey = new Map(contacts.map((c) => [c.pubkey, c]));
-    // Dedupe against self (case-insensitive) before mapping. Defends
-    // against legacy / accidentally-self-included memberPubkeys lists
-    // that would otherwise produce a double "You" row + an off-by-one
-    // header count.
-    const myLower = myPubkey?.toLowerCase();
-    const others: MemberRow[] = group.memberPubkeys
-      .filter((pk) => !myLower || pk.toLowerCase() !== myLower)
-      .map((pk) => {
-        const c = byPubkey.get(pk);
-        return {
-          pubkey: pk,
-          name:
-            c?.profile?.displayName ||
-            c?.profile?.name ||
-            c?.petname ||
-            `${pk.slice(0, 8)}...${pk.slice(-4)}`,
-          picture: c?.profile?.picture ?? null,
-        };
-      });
-    if (!myPubkey) return others;
-    const selfRow: MemberRow = {
-      pubkey: myPubkey,
-      name:
-        myProfile?.displayName ||
-        myProfile?.name ||
-        `${myPubkey.slice(0, 8)}...${myPubkey.slice(-4)}`,
-      picture: myProfile?.picture ?? null,
-    };
-    return [selfRow, ...others];
-  }, [group, contacts, myPubkey, myProfile]);
+  // Members the viewer doesn't follow resolve through the shared profile
+  // cache, plus one bounded kind-0 batch while the members sheet is open
+  // (#1268). Rows feed the header count, sender labels and the sheet.
+  const memberPubkeys = group?.memberPubkeys ?? EMPTY_PUBKEYS;
+  const memberProfiles = useGroupMemberProfiles({
+    memberPubkeys,
+    selfPubkey: myPubkey,
+    contacts,
+    enabled: membersSheetVisible,
+    fetchProfilesForPubkeys,
+  });
+  const members = useMemo(
+    () =>
+      group
+        ? buildGroupMemberRows({
+            memberPubkeys,
+            selfPubkey: myPubkey,
+            selfProfile: myProfile,
+            contacts,
+            profiles: memberProfiles,
+          })
+        : [],
+    [group, memberPubkeys, myPubkey, myProfile, contacts, memberProfiles],
+  );
 
   const memberNameByPubkey = useMemo(() => {
     const map = new Map<string, string>();
@@ -508,7 +497,7 @@ const GroupConversationScreen: React.FC = () => {
       const fromMe = item.senderPubkey === myPubkey;
       const senderName = fromMe
         ? null
-        : (memberNameByPubkey.get(item.senderPubkey) ?? `${item.senderPubkey.slice(0, 8)}…`);
+        : (memberNameByPubkey.get(item.senderPubkey) ?? shortNpub(item.senderPubkey));
       // Reuse the shared bubble — same renderer 1:1 chats use, so contact /
       // invoice / location / image / GIF / poll cards all render identically
       // across chat types (#239). The classifier handles geo: + GIF + poll
@@ -821,16 +810,18 @@ const GroupConversationScreen: React.FC = () => {
         visible={membersSheetVisible}
         groupId={group.id}
         onClose={() => setMembersSheetVisible(false)}
+        members={members}
         onMemberTap={(pk) => {
           // Close the manage-members sheet first so the preview sheet
           // doesn't stack on top of an open sheet — keeps the back-stack
           // predictable and matches the FriendPickerSheet handoff.
           const c = contacts.find((x) => x.pubkey === pk);
+          const m = members.find((x) => x.pubkey === pk);
           setMembersSheetVisible(false);
           presentContactSheet({
             pubkey: pk,
-            name: c?.profile?.displayName || c?.profile?.name || c?.petname || `${pk.slice(0, 8)}…`,
-            picture: c?.profile?.picture ?? null,
+            name: m?.name ?? shortNpub(pk),
+            picture: m?.picture ?? null,
             banner: c?.profile?.banner ?? null,
             nip05: c?.profile?.nip05 ?? null,
             lightningAddress: c?.profile?.lud16 ?? null,

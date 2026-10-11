@@ -648,7 +648,13 @@
     "youTag": " · tú",
     "removeMember": "Eliminar a {{name}}",
     "addMembers": "Añadir miembros",
-    "pickFriendSubtitle": "Elige un amigo para añadir a este grupo"
+    "pickFriendSubtitle": "Elige un amigo para añadir a este grupo",
+    "follow": "Seguir",
+    "following": "Siguiendo",
+    "followMember": "Seguir a {{name}}",
+    "followingA11y": "Sigues a {{name}}",
+    "followedToast": "Ahora sigues a {{name}}",
+    "followFailed": "No se pudo seguir a {{name}}. Inténtalo de nuevo."
   },
   "groupsScreen": {
     "back": "Atrás",

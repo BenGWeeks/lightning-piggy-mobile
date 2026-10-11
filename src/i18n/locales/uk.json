@@ -620,7 +620,13 @@
     "youTag": " · ви",
     "removeMember": "Видалити {{name}}",
     "addMembers": "Додати учасників",
-    "pickFriendSubtitle": "Оберіть друга, щоб додати до цієї групи"
+    "pickFriendSubtitle": "Оберіть друга, щоб додати до цієї групи",
+    "follow": "Стежити",
+    "following": "Ви стежите",
+    "followMember": "Стежити за {{name}}",
+    "followingA11y": "Ви стежите за {{name}}",
+    "followedToast": "Тепер ви стежите за {{name}}",
+    "followFailed": "Не вдалося стежити за {{name}}. Спробуйте ще раз."
   },
   "groupsScreen": {
     "back": "Назад",

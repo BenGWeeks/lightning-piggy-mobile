@@ -66,6 +66,35 @@ export const createGroupMembersSheetStyles = (colors: Palette) =>
       fontWeight: '400',
       color: colors.textSupplementary,
     },
+    followingMarker: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+    followingText: {
+      fontSize: 13,
+      fontWeight: '500',
+      color: colors.textSupplementary,
+    },
+    followButton: {
+      minWidth: 72,
+      height: 32,
+      paddingHorizontal: 12,
+      borderRadius: 16,
+      backgroundColor: colors.brandPink,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 4,
+    },
+    followButtonDisabled: {
+      opacity: 0.5,
+    },
+    followButtonText: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: colors.white,
+    },
     removeButton: {
       width: 32,
       height: 32,
@@ -92,3 +121,5 @@ export const createGroupMembersSheetStyles = (colors: Palette) =>
       color: colors.brandPink,
     },
   });
+
+export type GroupMembersSheetStyles = ReturnType<typeof createGroupMembersSheetStyles>;

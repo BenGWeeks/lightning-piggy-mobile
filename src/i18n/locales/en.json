@@ -648,7 +648,13 @@
     "youTag": " · you",
     "removeMember": "Remove {{name}}",
     "addMembers": "Add members",
-    "pickFriendSubtitle": "Pick a friend to add to this group"
+    "pickFriendSubtitle": "Pick a friend to add to this group",
+    "follow": "Follow",
+    "following": "Following",
+    "followMember": "Follow {{name}}",
+    "followingA11y": "You follow {{name}}",
+    "followedToast": "You're now following {{name}}",
+    "followFailed": "Couldn't follow {{name}}. Please try again."
   },
   "groupsScreen": {
     "back": "Back",
