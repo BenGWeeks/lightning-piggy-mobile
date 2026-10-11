@@ -5,6 +5,7 @@ import { useTranslation } from '../contexts/LocaleContext';
 import { useNostr } from '../contexts/NostrContext';
 import { useProductComments } from '../hooks/useProductComments';
 import { useProductCommentActions } from '../hooks/useProductCommentActions';
+import { useRegisterRefresher, type RegisterRefresher } from '../hooks/usePullToRefresh';
 import type { CommentRoot } from '../utils/productComments';
 import { FEEDBACK_PAGE_SIZE } from '../utils/marketFeedback';
 import { createProductCommentsStyles } from '../styles/ProductComments.styles';
@@ -17,6 +18,8 @@ interface Props {
   onRequestSignIn: () => void;
   /** Reports the current top-level comment count up to the tab bar. */
   onCount?: (count: number) => void;
+  /** Joins the product page's pull-to-refresh (#1301). */
+  registerRefresh?: RegisterRefresher;
 }
 
 /**
@@ -26,11 +29,13 @@ interface Props {
  * `utils/commentEdits`; the compose + edit/delete orchestration in
  * `useProductCommentActions`.
  */
-const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount }) => {
+const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount, registerRefresh }) => {
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createProductCommentsStyles(colors), [colors]);
-  const { topLevel, loading, error, refetch, addLocally, hideLocally } = useProductComments(root);
+  const { topLevel, loading, error, refetch, refresh, addLocally, hideLocally } =
+    useProductComments(root);
+  useRegisterRefresher(registerRefresh, refresh);
   const { pubkey } = useNostr();
   const {
     content,

@@ -2,17 +2,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import type { Event as NostrEvent } from 'nostr-tools';
 import { useNostr } from '../contexts/NostrContext';
-import { DEFAULT_RELAYS, pool, trackRelays } from '../services/nostrService';
-import { querySyncAbortable } from '../services/relayQuery';
+import { DEFAULT_RELAYS } from '../services/nostrService';
+import { queryReviewDeletions, queryReviewEvents } from '../services/productFeedbackQueries';
 import {
-  REVIEW_KIND,
   aggregateReviews,
+  parseReviewEvent,
   reviewAddress,
   visibleReviews,
   type ParsedReview,
   type ReviewAggregate,
 } from '../utils/productReviews';
-import { DELETION_KIND, addressRefs, deletionFilters, idRefs } from '../utils/nip09';
+import { DELETION_KIND } from '../utils/nip09';
+import { mergeFeedback, refreshSince } from '../utils/feedbackRefresh';
 
 export interface UseProductReviews {
   reviews: ParsedReview[];
@@ -25,6 +26,12 @@ export interface UseProductReviews {
    */
   error: boolean;
   refetch: () => void;
+  /**
+   * Pull-to-refresh (#1301): fetch only reviews newer than the newest loaded
+   * (minus slack) plus fresh author deletions, and merge them in with one
+   * batched update. Rejects when every relay failed.
+   */
+  refresh: (signal: AbortSignal) => Promise<void>;
   /** Show a review we just published at once (before the refetch sees it). */
   addLocally: (review: NostrEvent) => void;
   /** Hide your review at once (deleted) — every version up to the one
@@ -57,6 +64,14 @@ export function useProductReviews(coord: string | null): UseProductReviews {
   useEffect(() => {
     localAddedRef.current = localAdded;
   }, [localAdded]);
+  // The loaded set, read by `refresh` (its `since` + merge base).
+  const loadedRef = useRef({ events, deletions });
+  // Bumped by every load and refresh: only the newest one may commit, so a
+  // slow first load can't overwrite (or resurrect over) a newer refresh.
+  const generationRef = useRef(0);
+  useEffect(() => {
+    loadedRef.current = { events, deletions };
+  }, [events, deletions]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const [tick, setTick] = useState(0);
@@ -81,48 +96,33 @@ export function useProductReviews(coord: string | null): UseProductReviews {
         return;
       }
       const controller = new AbortController();
+      const { signal } = controller;
+      const generation = ++generationRef.current;
+      const superseded = () => signal.aborted || generation !== generationRef.current;
       setLoading(true);
       setError(false);
-      // Register the relays we open so nostrService.cleanup() closes them.
-      trackRelays(readRelays);
-      querySyncAbortable(
-        pool,
-        readRelays,
-        { kinds: [REVIEW_KIND], '#d': [coord], limit: 500 },
-        { maxWait: 4000, signal: controller.signal, rejectOnAllRelaysFailure: true },
-      )
+      queryReviewEvents(readRelays, coord, { signal })
         .then((evs) => {
-          if (controller.signal.aborted) return;
+          if (superseded()) return;
           setEvents(evs);
           setLoading(false);
           // Then the kind-5s naming them — by address (what we and most
           // clients send for a replaceable review) and by id. Best-effort: a
           // failed lookup keeps the previous deletions.
-          const mine = [...evs, ...localAddedRef.current];
-          const filters = [
-            ...deletionFilters('a', addressRefs(mine)),
-            ...deletionFilters('e', idRefs(mine)),
-          ];
-          return Promise.all(
-            filters.map((filter) =>
-              querySyncAbortable(pool, readRelays, filter, {
-                maxWait: 4000,
-                signal: controller.signal,
-              }),
-            ),
-          ).then(
-            (batches) => {
-              if (controller.signal.aborted) return;
-              setDeletions(batches.flat().filter((e) => e.kind === DELETION_KIND));
+          return queryReviewDeletions(readRelays, [...evs, ...localAddedRef.current], {
+            signal,
+          }).then(
+            (dels) => {
+              if (!superseded()) setDeletions(dels);
             },
             () => undefined,
           );
         })
         .catch(() => {
-          if (!controller.signal.aborted) setError(true);
+          if (!superseded()) setError(true);
         })
         .finally(() => {
-          if (!controller.signal.aborted) setLoading(false);
+          if (!signal.aborted) setLoading(false);
         });
       return () => controller.abort();
     }, [coord, readRelays, tick]),
@@ -141,6 +141,44 @@ export function useProductReviews(coord: string | null): UseProductReviews {
     );
   }, [events, localAdded, deletions, localDeletions, coord]);
   const aggregate = useMemo(() => aggregateReviews(reviews), [reviews]);
+
+  // `signal` is owned by the page's pull-to-refresh (aborted on its timeout
+  // and on unmount).
+  const refresh = useCallback(
+    async (signal: AbortSignal) => {
+      if (!coord) return;
+      const generation = ++generationRef.current;
+      const loaded = loadedRef.current;
+      // Short per-query deadlines keep events + deletions inside the page's
+      // ~8 s refresh budget even with a dead relay. Signatures are checked
+      // here (not left to the pool) before anything is merged. Deletions are
+      // looked up for everything shown with no `since` — an old review may
+      // have been deleted since, or the first lookup may have failed; the
+      // lookup is already bounded per id.
+      const opts = { signal, maxWait: 3000, verify: true };
+      const evs = await queryReviewEvents(readRelays, coord, {
+        ...opts,
+        since: refreshSince(loaded.events),
+      });
+      const dels = await queryReviewDeletions(
+        readRelays,
+        [...loaded.events, ...evs, ...localAddedRef.current],
+        opts,
+      ).catch(() => [] as NostrEvent[]);
+      // A newer load or refresh started meanwhile — it owns the state.
+      if (signal.aborted || generation !== generationRef.current) return;
+      const merged = mergeFeedback(
+        loadedRef.current,
+        { events: evs, deletions: dels },
+        (e) => parseReviewEvent(e, coord) !== null,
+      );
+      // One batched update for the whole refresh (React batches these).
+      setEvents(merged.events);
+      setDeletions(merged.deletions);
+      setError(false);
+    },
+    [coord, readRelays],
+  );
 
   // One setState per user action (never per relay event).
   const addLocally = useCallback((review: NostrEvent) => {
@@ -168,5 +206,5 @@ export function useProductReviews(coord: string | null): UseProductReviews {
     [coord],
   );
 
-  return { reviews, aggregate, loading, error, refetch, addLocally, hideLocally };
+  return { reviews, aggregate, loading, error, refetch, refresh, addLocally, hideLocally };
 }

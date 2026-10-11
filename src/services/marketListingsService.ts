@@ -1,6 +1,9 @@
 import { verifyEvent, type Event, type Filter } from 'nostr-tools';
 import { pool, trackRelays } from './nostrPool';
+import { querySyncAbortable } from './relayQuery';
 import { reduceMarketListings } from '../utils/marketListings';
+import { addressRefs, deletionFilters, idRefs } from '../utils/nip09';
+import { hasValidSignature } from '../utils/eventSignature';
 import type { MarketProduct } from '../data/marketProducts';
 
 export interface MarketListingsResult {
@@ -179,4 +182,59 @@ export function fetchMarketListings(
         });
     }
   });
+}
+
+/**
+ * Re-fetch ONE listing (pull-to-refresh on its product page, #1301): the
+ * newest revision of `current`'s address plus its author's kind-5s, reduced
+ * by the same rules as the feed. Resolves null when the listing is gone
+ * (deleted, sold, expired) and rejects only when every relay failed.
+ *
+ * Every fetched event's signature is checked here rather than trusting the
+ * pool's verifier: a forged "newer revision" (another price or shop URL) or
+ * a forged deletion must never reach the page. Events the pool already
+ * verified are memoised by nostr-tools, so this costs nothing extra then.
+ */
+export async function fetchListingRevision(
+  current: Event,
+  relays: string[],
+  signal: AbortSignal,
+  maxWait = 3000,
+): Promise<MarketProduct | null> {
+  const d = current.tags.find((t) => t[0] === 'd')?.[1];
+  if (!d || relays.length === 0) return null;
+  trackRelays(relays);
+  const opts = { maxWait, signal };
+  const revisions = await querySyncAbortable(
+    pool,
+    relays,
+    { kinds: [current.kind], authors: [current.pubkey], '#d': [d], limit: 10 },
+    { ...opts, rejectOnAllRelaysFailure: true },
+  );
+  // `#d` / `authors` are only relay-side requests — keep signed revisions of
+  // THIS address only (reduceMarketListings re-checks the author too).
+  const sameAddress = revisions.filter(
+    (e) =>
+      e.kind === current.kind &&
+      e.pubkey === current.pubkey &&
+      e.tags.find((t) => t[0] === 'd')?.[1] === d &&
+      hasValidSignature(e),
+  );
+  // Then the seller's kind-5s naming the address or ANY of the revisions
+  // (one deleted by `e` id only must still withdraw). Best-effort, like the
+  // feed: a failed lookup just applies no deletion.
+  const known = [current, ...sameAddress];
+  const deletions = await Promise.all(
+    [...deletionFilters('a', addressRefs([current])), ...deletionFilters('e', idRefs(known))].map(
+      (filter) => querySyncAbortable(pool, relays, filter, opts),
+    ),
+  ).then(
+    (batches) => batches.flat(),
+    () => [] as Event[],
+  );
+  const [product] = reduceMarketListings(
+    [current, ...sameAddress, ...deletions.filter(hasValidSignature)],
+    new Set([current.pubkey]),
+  );
+  return product ?? null;
 }

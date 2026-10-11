@@ -2248,7 +2248,8 @@
       "goBack": "Volver",
       "buyFrom": "Comprar de {{seller}}",
       "buyAccessibility": "Comprar {{title}} de {{seller}}",
-      "noFeedback": "Las reseñas y los comentarios aún no están disponibles para este vendedor: necesita una identidad de Nostr para anclar las opiniones."
+      "noFeedback": "Las reseñas y los comentarios aún no están disponibles para este vendedor: necesita una identidad de Nostr para anclar las opiniones.",
+      "refreshFailed": "No se pudo actualizar este producto: comprueba tu conexión y vuelve a intentarlo."
     },
     "modes": {
       "soon": "Pronto",

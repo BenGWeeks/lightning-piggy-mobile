@@ -5,6 +5,7 @@ import { useTranslation } from '../contexts/LocaleContext';
 import { useNostr } from '../contexts/NostrContext';
 import { useProductReviews } from '../hooks/useProductReviews';
 import { useProductReviewActions } from '../hooks/useProductReviewActions';
+import { useRegisterRefresher, type RegisterRefresher } from '../hooks/usePullToRefresh';
 import { FEEDBACK_PAGE_SIZE } from '../utils/marketFeedback';
 import { createProductReviewsStyles } from '../styles/ProductReviews.styles';
 import { StarRating } from './StarRating';
@@ -18,6 +19,8 @@ interface Props {
   onRequestSignIn: () => void;
   /** Reports the current review count up to the tab bar. */
   onCount?: (count: number) => void;
+  /** Joins the product page's pull-to-refresh (#1301). */
+  registerRefresh?: RegisterRefresher;
 }
 
 /**
@@ -26,13 +29,14 @@ interface Props {
  * Pure logic lives in `utils/productReviews` + `utils/nip09`; the
  * write/edit/delete orchestration in `useProductReviewActions`.
  */
-const ProductReviews: React.FC<Props> = ({ coord, onRequestSignIn, onCount }) => {
+const ProductReviews: React.FC<Props> = ({ coord, onRequestSignIn, onCount, registerRefresh }) => {
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createProductReviewsStyles(colors), [colors]);
   const { pubkey } = useNostr();
-  const { reviews, aggregate, loading, error, refetch, addLocally, hideLocally } =
+  const { reviews, aggregate, loading, error, refetch, refresh, addLocally, hideLocally } =
     useProductReviews(coord);
+  useRegisterRefresher(registerRefresh, refresh);
 
   useEffect(() => {
     onCount?.(aggregate.count);
