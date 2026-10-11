@@ -416,6 +416,8 @@
     "kind4": "私信（类型4）",
     "kind14": "私信（类型14）",
     "kind15": "文件消息（类型15）",
+    "marmotChat": "聊天消息（类型{{kind}}）",
+    "marmotMedia": "媒体消息（类型{{kind}}）",
     "unknown": "未知",
     "kindN": "类型{{kind}}",
     "sendingToRelays": "正在发送到{{total}}个中继…",
@@ -435,6 +437,8 @@
     "protocol": "协议",
     "kind": "类型",
     "eventId": "事件ID",
+    "rumorId": "Rumor事件ID",
+    "wrapId": "礼物封装ID",
     "copyEventIdAccessibility": "复制事件ID",
     "status": "状态",
     "republish": "重新发布",
@@ -2248,7 +2252,8 @@
       "goBack": "返回",
       "buyFrom": "向{{seller}}购买",
       "buyAccessibility": "向{{seller}}购买{{title}}",
-      "noFeedback": "此卖家暂不支持评价和评论——需要有Nostr身份才能关联反馈。"
+      "noFeedback": "此卖家暂不支持评价和评论——需要有Nostr身份才能关联反馈。",
+      "refreshFailed": "无法刷新此商品，请检查网络连接后重试。"
     },
     "modes": {
       "soon": "即将推出",

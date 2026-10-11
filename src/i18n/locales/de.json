@@ -416,6 +416,8 @@
     "kind4": "Direktnachricht (Kind 4)",
     "kind14": "Direktnachricht (Kind 14)",
     "kind15": "Dateinachricht (Kind 15)",
+    "marmotChat": "Chatnachricht (Kind {{kind}})",
+    "marmotMedia": "Mediennachricht (Kind {{kind}})",
     "unknown": "Unbekannt",
     "kindN": "Kind {{kind}}",
     "sendingToRelays": "Wird an {{total}} Relays gesendet…",
@@ -435,6 +437,8 @@
     "protocol": "Protokoll",
     "kind": "Kind",
     "eventId": "Event-ID",
+    "rumorId": "Rumor-ID",
+    "wrapId": "Gift-Wrap-ID",
     "copyEventIdAccessibility": "Event-ID kopieren",
     "status": "Status",
     "republish": "Erneut senden",
@@ -2248,7 +2252,8 @@
       "goBack": "Zurück",
       "buyFrom": "Bei {{seller}} kaufen",
       "buyAccessibility": "{{title}} bei {{seller}} kaufen",
-      "noFeedback": "Bewertungen und Kommentare sind für diesen Verkäufer noch nicht verfügbar – dafür braucht er eine Nostr-Identität."
+      "noFeedback": "Bewertungen und Kommentare sind für diesen Verkäufer noch nicht verfügbar – dafür braucht er eine Nostr-Identität.",
+      "refreshFailed": "Dieses Produkt konnte nicht aktualisiert werden – prüfe deine Verbindung und versuche es erneut."
     },
     "modes": {
       "soon": "Bald",

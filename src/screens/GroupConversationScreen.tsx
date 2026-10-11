@@ -299,20 +299,20 @@ const GroupConversationScreen: React.FC = () => {
 
   // Tap a group bubble → the same message-info sheet 1:1 chats use (#856).
   // Group sends aren't per-relay tracked (no delivery store), so the sheet
-  // shows the protocol/kind/event-id metadata + a Re-publish for sent text.
+  // shows the protocol/kind/id metadata + a Re-publish for sent text.
+  const marmotGroupId = group && isMarmotGroupId(group.id) ? group.id : null;
   const {
     info: messageSheetInfo,
     showInfo: handleShowInfo,
     closeInfo: closeMessageInfo,
     resendFromInfo: handleResendFromInfo,
     canResend: canResendFromInfo,
-  } = useMessageInfoSheet(resendText);
+  } = useMessageInfoSheet(resendText, marmotGroupId ? 'marmot' : 'nip17');
 
   // Long-press your own message in a Marmot group: Copy text, Edit, Delete
   // for everyone (#1237). Groups have no reactions, so nothing else to offer.
   const [actioned, setActioned] = useAccountState<ActionedMessage | null>(messageOwner, NO_ACTION);
   const closeActions = useCallback(() => setActioned(null), [setActioned]);
-  const marmotGroupId = group && isMarmotGroupId(group.id) ? group.id : null;
   const menu = useMessageActionsMenu({
     myPubkey,
     scope: messageOwner,
@@ -520,8 +520,8 @@ const GroupConversationScreen: React.FC = () => {
           onVotePoll={handleVotePoll}
           onToggleSecretMode={handleToggleSecretMode}
           isInvoicePaid={isInvoicePaid}
-          // Group DMs are NIP-17 gift-wrapped: kind-14 chat or kind-15 encrypted
-          // file (voice/image). The info sheet reads the protocol/kind off this,
+          // Stored kind: 14 chat or 15 encrypted file (voice/image) — a Marmot
+          // group's kind-9 rumors are stored the same way. The info sheet reads this,
           // so pass the per-message wireKind derived above rather than a hard
           // 14. Group sends aren't per-relay tracked, so no deliveryStatus (the
           // sheet shows "Not tracked").

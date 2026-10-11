@@ -416,6 +416,8 @@
     "kind4": "Direct message (kind 4)",
     "kind14": "Direct message (kind 14)",
     "kind15": "File message (kind 15)",
+    "marmotChat": "Chat message (kind {{kind}})",
+    "marmotMedia": "Media message (kind {{kind}})",
     "unknown": "Unknown",
     "kindN": "Kind {{kind}}",
     "sendingToRelays": "Sending to {{total}} relays…",
@@ -435,6 +437,8 @@
     "protocol": "Protocol",
     "kind": "Kind",
     "eventId": "Event ID",
+    "rumorId": "Rumor ID",
+    "wrapId": "Gift wrap ID",
     "copyEventIdAccessibility": "Copy event ID",
     "status": "Status",
     "republish": "Re-publish",
@@ -2248,7 +2252,8 @@
       "goBack": "Go back",
       "buyFrom": "Buy from {{seller}}",
       "buyAccessibility": "Buy {{title}} from {{seller}}",
-      "noFeedback": "Reviews and comments aren't available for this seller yet — they need a Nostr identity to anchor feedback on."
+      "noFeedback": "Reviews and comments aren't available for this seller yet — they need a Nostr identity to anchor feedback on.",
+      "refreshFailed": "Couldn't refresh this product — check your connection and try again."
     },
     "modes": {
       "soon": "Soon",

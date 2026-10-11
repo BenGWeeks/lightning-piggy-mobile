@@ -416,6 +416,8 @@
     "kind4": "Közvetlen üzenet (4-es típus)",
     "kind14": "Közvetlen üzenet (14-es típus)",
     "kind15": "Fájlüzenet (15-ös típus)",
+    "marmotChat": "Csevegőüzenet (típus: {{kind}})",
+    "marmotMedia": "Médiaüzenet (típus: {{kind}})",
     "unknown": "Ismeretlen",
     "kindN": "Típus: {{kind}}",
     "sendingToRelays": "Küldés {{total}} relay-re…",
@@ -435,6 +437,8 @@
     "protocol": "Protokoll",
     "kind": "Típus",
     "eventId": "Esemény-azonosító",
+    "rumorId": "Rumor-azonosító",
+    "wrapId": "Gift-wrap-azonosító",
     "copyEventIdAccessibility": "Esemény-azonosító másolása",
     "status": "Állapot",
     "republish": "Újraközzététel",
@@ -2248,7 +2252,8 @@
       "goBack": "Vissza",
       "buyFrom": "Vásárlás: {{seller}}",
       "buyAccessibility": "{{title}} megvásárlása, eladó: {{seller}}",
-      "noFeedback": "Ennél az eladónál még nem érhetők el értékelések és hozzászólások – a visszajelzésekhez Nostr-azonosság kell."
+      "noFeedback": "Ennél az eladónál még nem érhetők el értékelések és hozzászólások – a visszajelzésekhez Nostr-azonosság kell.",
+      "refreshFailed": "Nem sikerült frissíteni a terméket – ellenőrizd a kapcsolatot, és próbáld újra."
     },
     "modes": {
       "soon": "Hamarosan",
