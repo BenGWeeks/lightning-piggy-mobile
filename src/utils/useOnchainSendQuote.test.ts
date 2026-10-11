@@ -94,3 +94,22 @@ it('adopts a server-refreshed quote for the same send after preflight rejects st
   act(() => result.current.adopt({ ...fees, percentage: 3 }));
   expect(result.current.fees?.percentage).toBe(3);
 });
+
+it('rejects an old send callback after reopening the identical target', async () => {
+  const replacement = deferred<SwapFees>();
+  jest
+    .mocked(getReverseSwapFees)
+    .mockResolvedValueOnce(fees)
+    .mockReturnValueOnce(replacement.promise);
+  const { result, rerender } = renderHook((props: typeof base) => useOnchainSendQuote(props), {
+    initialProps: base,
+  });
+  await act(async () => {});
+  const oldAdopt = result.current.adopt;
+  rerender({ ...base, visible: false });
+  rerender(base);
+  act(() => oldAdopt(fees));
+  expect(result.current).toMatchObject({ fees: null, loading: true });
+  await act(async () => replacement.resolve({ ...fees, percentage: 4 }));
+  expect(result.current.fees?.percentage).toBe(4);
+});

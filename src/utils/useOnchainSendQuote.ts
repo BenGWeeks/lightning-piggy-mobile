@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { getReverseSwapFees, type SwapFees } from '../services/boltzService';
 import { estimateSendFee } from '../services/onchainService';
 import { isNoSwapServerError } from '../services/swapBackendService';
@@ -17,12 +17,14 @@ export function useOnchainSendQuote({
   viaSwap: boolean;
   amountSats: number;
 }) {
-  const key =
-    visible && address && walletId
-      ? JSON.stringify([address, walletId, viaSwap, amountSats])
-      : null;
+  // An object identity also distinguishes closing/reopening the exact same
+  // target from the old session, including callbacks captured by an old send.
+  const key = useMemo(
+    () => (visible && address && walletId ? { address, walletId, viaSwap, amountSats } : null),
+    [visible, address, walletId, viaSwap, amountSats],
+  );
   const [result, setResult] = useState<{
-    key: string;
+    key: NonNullable<typeof key>;
     fees: SwapFees | null;
     directFeeSats: number | null;
     errorKey: string | null;

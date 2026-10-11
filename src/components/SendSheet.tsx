@@ -733,7 +733,7 @@ const SendSheet: React.FC<Props> = ({
          *  height and the ScrollView's content height to become
          *  circular references, clipping the keypad's last row. */}
         {step === 'amount' ? (
-          <BottomSheetView>
+          <BottomSheetView style={styles.amountContent}>
             <AmountEntryScreen
               initialSats={currentSats}
               title={t('sendSheet.enterAmountTitle')}
