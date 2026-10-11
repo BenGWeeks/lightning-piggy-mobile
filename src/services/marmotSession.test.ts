@@ -33,6 +33,7 @@ import {
   makeSigner,
   unwrapWelcomes,
   waitFor,
+  waitForSettled,
 } from './marmotSessionTestKit';
 
 function makeClient(network: ReturnType<typeof makeRelay>['network']) {
@@ -415,6 +416,9 @@ describe('MarmotSession (no WebCrypto)', () => {
     await alice.session.removeMember(group.id, carol.pubkey);
     expect(alice.session.getGroup(group.id)?.memberPubkeys).toEqual([bob.pubkey]);
     await waitFor(() => !bob.session.getGroup(group.id)?.memberPubkeys.includes(carol.pubkey));
+    // Let Bob's client settle on the removal commit before he sends: a send in
+    // the settle window can stay queued forever in marmot-ts (#1280).
+    await waitForSettled(bob.session, group.id);
 
     const msg = buildMarmotRumor(bob.pubkey, { kind: MARMOT_CHAT_KIND, content: 'just us now' });
     await bob.session.sendRumor(group.id, msg);
