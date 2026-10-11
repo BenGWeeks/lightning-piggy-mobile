@@ -882,46 +882,6 @@ codex exec -c sandbox_mode="danger-full-access" "<prompt>" < /dev/null
 (The sandbox override is the separate workaround for Codex's bubblewrap
 sandbox failing on this machine.)
 
-=== Opening a direct message requests location permission (#1195)
-
-`ConversationScreen` used to retain `useUserLocation()` for the location-card
-mini-map's blue viewer dot. Retaining the shared subscription requests foreground
-permission and starts GPS, even when the conversation has no location messages.
-The conversation now uses `useUserLocation({ enabled: false })`: it can display
-an existing shared fix, but cannot start or keep the watch alive. Receiving a
-live-location message requires only the sender's coordinates, not the viewer's GPS.
-
-Permission remains intentional: Attach → Location → current/live location starts
-sharing; tapping a location card's mini-map explicitly opens the full map, whose
-own location consumer can request permission. Merely rendering either kind of
-location card in a conversation stays passive, including with permission granted.
-
-Regression check: reset the dev app's location permission, open a DM and verify
-there is no prompt; choose a location-sharing action and verify permission is
-requested there. `UserLocationContext.test.tsx` also verifies passive consumers
-make no location API calls and cannot keep another consumer's GPS watch alive.
-
-=== iOS simulator stays on the old Metro after a development-client link
-
-A simulator debug build can keep loading its existing Metro even after
-`simctl openurl` receives an `expo-development-client` URL. Check the server's
-actual connections (`lsof -iTCP:<port> -Pn`) before accepting branch screenshots.
-If the native delegate uses `RCTBundleURLProvider`, set its `RCT_jsLocation`
-preference in the installed app's data container while the app is stopped:
-
-[source,bash]
-----
-# Run on the Mac, inside the simulator lane's lock.
-sim_app_data=$(xcrun simctl get_app_container booted com.lightningpiggy.app.dev data)
-xcrun simctl terminate booted com.lightningpiggy.app.dev
-xcrun simctl spawn booted defaults write "$sim_app_data/Library/Preferences/com.lightningpiggy.app.dev.plist" RCT_jsLocation -string "192.168.1.35:8112"
-xcrun simctl launch booted com.lightningpiggy.app.dev
-----
-
-Use your assigned branch port, verify the connection reaches that worktree's
-Metro, and restore `192.168.1.35:8090` with the same stop/write/launch sequence
-before releasing the lock. No native rebuild or account reset is required.
-
 === Jest in a git worktree: "Could not locate module uint8array-tools mapped as …"
 
 `jest.config.js` maps `uint8array-tools` to
