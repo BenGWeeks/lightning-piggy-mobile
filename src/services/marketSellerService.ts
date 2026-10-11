@@ -2,7 +2,7 @@
 // Gamma Markets events and publish newly signed ones. Thin shell over the
 // pure builders/reducer in utils/marketSeller*.
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { verifyEvent, type Event } from 'nostr-tools';
+import { verifyEvent, type Event, type Filter } from 'nostr-tools';
 import { pool, trackRelays, DEFAULT_RELAYS, publishSignedEvent } from './nostrService';
 import {
   sellerCacheStorageKey as cacheKey,
@@ -78,9 +78,42 @@ export async function verifiedOwnEvents(
 }
 
 /**
+ * Query each relay on its own and require a QUORUM — at least half of them
+ * (min 1) completing with EOSE — before an answer counts. Fewer is "unknown"
+ * and rejects: an empty answer from one fast relay must not read as "no
+ * shop", while one dead relay in the user's list mustn't block everything.
+ * Returns the union of the relays that completed.
+ */
+export async function queryQuorum(
+  relays: readonly string[],
+  filter: Filter,
+  signal?: AbortSignal,
+): Promise<Event[]> {
+  const unique = [...new Set(relays)];
+  const results = await Promise.allSettled(
+    unique.map((relay) =>
+      querySyncAbortable(pool, [relay], filter, {
+        maxWait: FETCH_MAX_WAIT_MS,
+        signal,
+        rejectOnAllRelaysFailure: true,
+        rejectOnTimeout: true,
+      }),
+    ),
+  );
+  const answered = results.filter(
+    (r): r is PromiseFulfilledResult<Event[]> => r.status === 'fulfilled',
+  );
+  const quorum = Math.max(1, Math.ceil(unique.length / 2));
+  if (signal?.aborted || answered.length < quorum) {
+    throw new Error(`Only ${answered.length} of ${unique.length} relays answered`);
+  }
+  return answered.flatMap((r) => r.value);
+}
+
+/**
  * One bounded snapshot of the seller's listings, shop, zones and deletions.
- * FAILS CLOSED: a relay set that times out before EOSE is an error, never an
- * empty "no shop" — saving a blank setup would replace the real shop. The
+ * FAILS CLOSED: without a relay quorum it's an error, never an empty
+ * "no shop" — saving a blank setup would replace the real shop. The
  * shop + zones and the market deletions are separate queries so other
  * features' kind-5s (and a long listing history) can't crowd them out.
  */
@@ -91,27 +124,18 @@ export async function fetchSellerEvents(input: {
 }): Promise<Event[]> {
   const pubkey = input.pubkey.toLowerCase();
   trackRelays(input.relays);
-  const params = {
-    maxWait: FETCH_MAX_WAIT_MS,
-    signal: input.signal,
-    rejectOnAllRelaysFailure: true,
-    rejectOnTimeout: true,
-  };
   const batches = await Promise.all([
-    querySyncAbortable(
-      pool,
+    queryQuorum(
       input.relays,
       { kinds: [COLLECTION_KIND, SHIPPING_OPTION_KIND], authors: [pubkey], limit: 100 },
-      params,
+      input.signal,
     ),
-    querySyncAbortable(
-      pool,
+    queryQuorum(
       input.relays,
       { kinds: [LISTING_KIND], authors: [pubkey], limit: 300 },
-      params,
+      input.signal,
     ),
-    querySyncAbortable(
-      pool,
+    queryQuorum(
       input.relays,
       {
         kinds: [DELETION_KIND],
@@ -119,7 +143,7 @@ export async function fetchSellerEvents(input: {
         '#k': [String(LISTING_KIND), String(SHIPPING_OPTION_KIND), String(COLLECTION_KIND)],
         limit: 200,
       },
-      params,
+      input.signal,
     ),
   ]);
   return verifiedOwnEvents(batches.flat(), pubkey, SELLER_KINDS, input.signal);
@@ -140,12 +164,12 @@ export async function fetchLatestRevision(input: {
 }): Promise<Event | null> {
   const pubkey = input.pubkey.toLowerCase();
   trackRelays(input.relays);
-  const events = await querySyncAbortable(
-    pool,
-    input.relays,
-    { kinds: [input.kind], authors: [pubkey], '#d': [input.dTag], limit: 5 },
-    { maxWait: FETCH_MAX_WAIT_MS, rejectOnAllRelaysFailure: true, rejectOnTimeout: true },
-  );
+  const events = await queryQuorum(input.relays, {
+    kinds: [input.kind],
+    authors: [pubkey],
+    '#d': [input.dTag],
+    limit: 5,
+  });
   const own = (await verifiedOwnEvents(events, pubkey, [input.kind])).filter(
     (e) => e.tags.find((t) => t[0] === 'd')?.[1] === input.dTag,
   );

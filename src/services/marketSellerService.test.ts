@@ -3,6 +3,7 @@ import { finalizeEvent, getPublicKey, type Event } from 'nostr-tools';
 import {
   fetchSellerEvents,
   fetchLatestRevision,
+  queryQuorum,
   verifiedOwnEvents,
   loadHiddenListings,
   loadSellerCache,
@@ -127,7 +128,34 @@ describe('fetchSellerEvents', () => {
       .mockRejectedValueOnce(new Error('Relay query timed out before EOSE'))
       .mockResolvedValue([]);
     await expect(fetchSellerEvents({ pubkey, relays: ['wss://r.example'] })).rejects.toThrow(
-      'timed out',
+      'Only 0 of 1 relays answered',
+    );
+  });
+});
+
+describe('queryQuorum', () => {
+  const filter = { kinds: [30405], authors: ['a'.repeat(64)], limit: 5 };
+  it('counts an answer only when at least half the relays complete', async () => {
+    const shop = listing('s');
+    (querySyncAbortable as jest.Mock)
+      .mockResolvedValueOnce([shop])
+      .mockRejectedValueOnce(new Error('Relay query timed out before EOSE'))
+      .mockResolvedValueOnce([]);
+    await expect(queryQuorum(['wss://a', 'wss://b', 'wss://c'], filter)).resolves.toEqual([shop]);
+    // One relay per query, each failing closed on its own timeout.
+    expect((querySyncAbortable as jest.Mock).mock.calls.map((c) => c[1])).toEqual([
+      ['wss://a'],
+      ['wss://b'],
+      ['wss://c'],
+    ]);
+  });
+  it('is "unknown" (rejects) when most relays time out, even if one says empty', async () => {
+    (querySyncAbortable as jest.Mock)
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce(new Error('timed out'))
+      .mockRejectedValueOnce(new Error('timed out'));
+    await expect(queryQuorum(['wss://a', 'wss://b', 'wss://c'], filter)).rejects.toThrow(
+      'Only 1 of 3',
     );
   });
 });
