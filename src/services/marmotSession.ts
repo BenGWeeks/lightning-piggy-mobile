@@ -24,7 +24,7 @@ import {
 } from '@internet-privacy/marmot-ts';
 import type { EventSigner } from 'applesauce-core';
 import { bytesToHex } from '@noble/hashes/utils.js';
-import { getEventHash, type Event as NostrEvent, type Filter } from 'nostr-tools';
+import { getEventHash, type Event as NostrEvent } from 'nostr-tools';
 
 import type { SignerType } from '../types/nostr';
 import { installMarmotCryptoProvider, marmotCryptoProvider } from './marmotCryptoProvider';
@@ -32,11 +32,11 @@ import {
   candidateMediaStates,
   deriveMediaKeys,
   encryptMarmotMedia,
+  isMediaKeys,
   renderableAttachments,
   type MarmotMediaKeys,
 } from './marmotMedia';
 import { forgetMarmotDeletionsForGroup } from './marmotDeletionStore';
-import { spreadProposals } from './marmotProposals';
 import {
   advertisesMediaV2,
   ensureKeyPackageSlot,
@@ -52,7 +52,10 @@ import {
   MarmotWelcomeDeliveryError,
   resolveInvitees,
 } from './marmotInvitees';
+import { KeyPackageRefreshRequests } from './marmotKeyRefresh';
+import { spreadProposals } from './marmotProposals';
 import { MarmotWelcomeOutbox } from './marmotWelcomeOutbox';
+import { boundGroupQueries } from './marmotGroupBackfill';
 import { createMarmotNetwork, createPushTransport } from './marmotNetwork';
 import {
   leafKey,
@@ -81,39 +84,16 @@ export const MARMOT_CHAT_KIND = 9;
 export const MARMOT_GROUP_ID_PREFIX = 'marmot:';
 /** Marks our key packages (`client` tag) — NOT the slot id; see ensureKeyPackageSlot. */
 const CLIENT_NAME = 'Lightning Piggy';
-const GROUP_EVENT_KIND = 445;
-// Re-read this far behind the newest INGESTED kind-445 (honest clock drift
-// between members). The watermark only advances after ingestion and ignores
-// future-dated events, so a short margin loses nothing — and every second of
-// margin is re-fetched and trial-decrypted on the JS thread at each app start
-// (spec: `since` is a fetch hint — transports/nostr.md).
-const GROUP_BACKFILL_SLACK_SECS = 10 * 60;
-const GROUP_BACKFILL_LIMIT = 500;
 const DELIVERED_CACHE_SIZE = 2_000;
 // Startup replay window + retained history per group (see replayHistory).
 const HISTORY_REPLAY_SECS = 7 * 24 * 60 * 60;
 const HISTORY_KEEP = 500;
 const historyNamespace = (groupIdHex: string) => `history:${groupIdHex}`;
 type SessionGroup = MarmotGroup<GroupRumorHistory>;
-// Relay `created_at` is sender-controlled: an event dated in the future
-// (anyone can publish a kind-445 with a group's public `h` tag) must never
-// push the durable since-watermark past real traffic.
-const MAX_FUTURE_SKEW_SECS = 5 * 60;
-const isPlausibleTimestamp = (createdAt: number) =>
-  createdAt <= Math.floor(Date.now() / 1000) + MAX_FUTURE_SKEW_SECS;
 // Sign-out waits at most this long for an in-flight key-package publish.
 const KEY_PACKAGE_DRAIN_MS = 5_000;
-const isMediaKeys = (v: unknown): v is MarmotMediaKeys =>
-  !!v &&
-  typeof v === 'object' &&
-  Object.values(v).every(
-    (ref) =>
-      !!ref &&
-      typeof (ref as { url?: unknown }).url === 'string' &&
-      Array.isArray((ref as { keysHex?: unknown }).keysHex),
-  );
-// Safety stop for the paged backfill (500 × 40 = 20k events per group).
-const GROUP_BACKFILL_MAX_PAGES = 40;
+// A manual Refresh gives up after this (one run ahead of it + a signer prompt).
+const KEY_PACKAGE_REFRESH_TIMEOUT_MS = 90_000;
 
 export interface MarmotRumor {
   id: string;
@@ -212,6 +192,7 @@ export class MarmotSession {
   private readonly keyPackageRuns = new SingleFlight(() => this.maintainKeyPackages());
   private readonly gate = fence.createStopGate();
   private readonly acceptedKeyPackages = new Set<string>();
+  private readonly refreshes = new KeyPackageRefreshRequests();
   private markReady!: () => void;
   /** Resolves once stored groups are loaded — joins must not race loadAll. */
   private readonly ready = new Promise<void>((resolve) => (this.markReady = resolve));
@@ -264,7 +245,11 @@ export class MarmotSession {
       opts.signer ?? createMarmotSigner(this.pubkey, opts.signerType, { cancelled });
     this.client = new MarmotClient({
       signer: fence.fenceSigner(monotonicKeyPackageSigner(clientSigner), this.gate),
-      network: this.boundGroupQueries(trackKeyPackageAcceptance(network, this.acceptedKeyPackages)),
+      network: boundGroupQueries(trackKeyPackageAcceptance(network, this.acceptedKeyPackages), {
+        watermarks: this.watermarks,
+        persist: (h, createdAt) => void this.backend.set('watermark', h, String(createdAt)),
+        pageSize: opts.groupBackfillPageSize,
+      }),
       cryptoProvider: marmotCryptoProvider,
       groupStateStore: store('groups'),
       keyPackageStore: store('keyPackages'),
@@ -378,6 +363,14 @@ export class MarmotSession {
     return this.gate.stopped ? Promise.resolve() : this.keyPackageRuns.run();
   }
 
+  /** Manual Refresh (#1236): publish a new key package now. True once a relay took it. */
+  refreshInvitationKey(): Promise<boolean> {
+    if (this.gate.stopped) return Promise.resolve(false);
+    const answer = this.refreshes.request(KEY_PACKAGE_REFRESH_TIMEOUT_MS);
+    void this.keyPackageRuns.run(); // queues behind a run in flight, never beside it
+    return this.gate.guard(answer);
+  }
+
   /** Start-up / app resume: refresh, but never a first remote-signer prompt. */
   async keepKeyPackageFresh(): Promise<void> {
     if (this.opts.signerType === 'nsec' || (await this.client.keyPackages.count()) > 0) {
@@ -387,20 +380,22 @@ export class MarmotSession {
 
   private async maintainKeyPackages(): Promise<void> {
     if (this.gate.stopped) return; // a rerun queued before sign-out
+    const refresh = this.refreshes.claim(); // a manual Refresh forces a publish
     try {
       // Refresh weekly into the same slot, and republish when ours predates
       // a capability White Noise requires of every invitee (encrypted media
       // v2, 0x800b). Replaced keys are retired per the retention policy.
       const cancelled = () => this.gate.stopped;
       const slot = await this.gate.guard(ensureKeyPackageSlot(this.backend));
-      await maintainKeyPackage(this.client.keyPackages, {
+      const outcome = await maintainKeyPackage(this.client.keyPackages, {
         relays: this.writeRelays(),
         slot,
         client: CLIENT_NAME,
-        isUpToDate: advertisesMediaV2,
+        isUpToDate: refresh.forced ? () => false : advertisesMediaV2,
         wasAccepted: (id) => this.acceptedKeyPackages.has(id),
         cancelled,
       });
+      refresh.settle(outcome === 'published');
       // A sign-out of this account here whose relay cleanup failed: retry it
       // now the account's signer is back (and already in use).
       await retryPendingRetirement({
@@ -410,6 +405,7 @@ export class MarmotSession {
         sign: (t) => this.client.signer.signEvent(t) as Promise<NostrEvent>,
       });
     } catch (e) {
+      refresh.settle(false); // no-op if it already succeeded
       if (__DEV__) console.warn('[Marmot] key package publish failed:', e);
     }
   }
@@ -827,111 +823,6 @@ export class MarmotSession {
     this.pushRegistration.schedule();
     const groups = this.listGroups();
     for (const l of this.listeners) l.onGroupsChanged?.(groups);
-  }
-
-  /**
-   * marmot-ts backfills a group with an UNBOUNDED `{kinds:[445], #h}` filter
-   * on every connect. Bound it (#perf rules) without losing history:
-   *  - `since` = newest *ingested* event − slack, so app start doesn't
-   *    re-download a group's whole history;
-   *  - the backfill pages backwards in `limit`-sized pages, so a device that
-   *    was offline through > `limit` events still gets every commit it needs
-   *    to decrypt later epochs;
-   *  - the durable watermark only advances once that backfill is ingested.
-   *    GroupsManager.connect drains the backfill BEFORE opening the live
-   *    subscription, so a request's newest timestamp is held as pending and
-   *    committed when the subscription for that group opens.
-   */
-  private boundGroupQueries(
-    network: ReturnType<typeof createMarmotNetwork>,
-  ): ReturnType<typeof createMarmotNetwork> {
-    const groupH = (f: Filter) =>
-      f.kinds?.includes(GROUP_EVENT_KIND) && f.since === undefined ? f['#h']?.[0] : undefined;
-    const bound = (f: Filter): Filter => {
-      const h = groupH(f);
-      if (!h) return f;
-      const seen = this.watermarks.get(h);
-      return {
-        ...f,
-        limit: f.limit ?? this.opts.groupBackfillPageSize ?? GROUP_BACKFILL_LIMIT,
-        ...(seen ? { since: seen - GROUP_BACKFILL_SLACK_SECS } : {}),
-      };
-    };
-    const pending = new Map<string, number>();
-    const commit = (h: string, createdAt: number) => {
-      if (!isPlausibleTimestamp(createdAt)) return;
-      if (createdAt <= (this.watermarks.get(h) ?? 0)) return;
-      this.watermarks.set(h, createdAt);
-      void this.backend.set('watermark', h, String(createdAt));
-    };
-    const hOf = (e: NostrEvent) => e.tags.find((t) => t[0] === 'h')?.[1];
-
-    /** Page a bounded group filter backwards until a short page. */
-    const backfill = async (relays: string[], f: Filter): Promise<NostrEvent[]> => {
-      const limit = f.limit ?? GROUP_BACKFILL_LIMIT;
-      const byId = new Map<string, NostrEvent>();
-      let until: number | undefined;
-      for (let page = 0; page < GROUP_BACKFILL_MAX_PAGES; page++) {
-        const events = (await network.request(relays, {
-          ...f,
-          ...(until !== undefined ? { until } : {}),
-        })) as NostrEvent[];
-        const before = byId.size;
-        for (const e of events) byId.set(e.id, e);
-        if (events.length < limit || byId.size === before) break;
-        until = Math.min(...events.map((e) => e.created_at));
-      }
-      return [...byId.values()];
-    };
-
-    return {
-      ...network,
-      request: async (relays, filters) => {
-        const list = (Array.isArray(filters) ? filters : [filters]) as Filter[];
-        const batches = await Promise.all(
-          list.map((f) =>
-            groupH(f)
-              ? backfill(relays, bound(f))
-              : (network.request(relays, f) as Promise<NostrEvent[]>),
-          ),
-        );
-        const byId = new Map<string, NostrEvent>();
-        for (const e of batches.flat()) byId.set(e.id, e);
-        for (const e of byId.values()) {
-          const h = e.kind === GROUP_EVENT_KIND ? hOf(e) : undefined;
-          if (h && isPlausibleTimestamp(e.created_at) && e.created_at > (pending.get(h) ?? 0)) {
-            pending.set(h, e.created_at);
-          }
-        }
-        return [...byId.values()];
-      },
-      subscription: (relays, filters) => {
-        const list = (Array.isArray(filters) ? filters : [filters]) as Filter[];
-        const inner = network.subscription(relays, list.map(bound));
-        return {
-          subscribe: (observer) => {
-            // Backfill for these groups has been ingested — commit it.
-            for (const f of list) {
-              const h = groupH(f);
-              const ts = h ? pending.get(h) : undefined;
-              if (h && ts) {
-                commit(h, ts);
-                pending.delete(h);
-              }
-            }
-            return inner.subscribe({
-              ...observer,
-              next: (e) => {
-                const ev = e as NostrEvent;
-                const h = ev.kind === GROUP_EVENT_KIND ? hOf(ev) : undefined;
-                if (h) commit(h, ev.created_at);
-                observer.next?.(e);
-              },
-            });
-          },
-        };
-      },
-    };
   }
 
   private async loadWatermarks(): Promise<void> {
