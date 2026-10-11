@@ -1,8 +1,8 @@
 appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
-name: Display language — switch locale and capture Home, Messages and the picker
+name: Display language — switch locale and capture Wallets, Messages and the picker
 ---
 # Switches the active account's language in Settings › Display & language,
-# then captures the language picker, Home and Messages in that language (the
+# then captures the language picker, Wallets and Messages in that language (the
 # i18n screenshots for #1312: text overflow, glyph fallback for 中文 and
 # Devanagari).
 #
@@ -62,10 +62,10 @@ name: Display language — switch locale and capture Home, Messages and the pick
           timeout: 2000
       - runFlow: ../common/close-sheets.yaml
       - tapOn:
-          id: 'tab-home'
+          id: 'tab-wallets'
       - waitForAnimationToEnd:
           timeout: 4000
-      - takeScreenshot: ${SHOT}-home
+      - takeScreenshot: ${SHOT}-wallets
       - runFlow: ../common/open-messages.yaml
       - waitForAnimationToEnd:
           timeout: 4000
