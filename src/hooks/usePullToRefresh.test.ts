@@ -1,6 +1,20 @@
 import { act, renderHook } from '@testing-library/react-native';
 import { usePullToRefresh, type Refresher } from './usePullToRefresh';
 
+// Focus effects run like mount effects here; `mockBlur` simulates leaving.
+let mockBlur: (() => void) | undefined;
+jest.mock('@react-navigation/native', () => {
+  const { useEffect } = jest.requireActual('react');
+  return {
+    useFocusEffect: (effect: () => (() => void) | void) =>
+      useEffect(() => {
+        const cleanup = effect();
+        mockBlur = cleanup || undefined;
+        return cleanup;
+      }, [effect]),
+  };
+});
+
 beforeEach(() => jest.useFakeTimers());
 afterEach(() => jest.useRealTimers());
 
@@ -105,4 +119,23 @@ it('leaving the page cancels the refresh without an error toast', async () => {
   });
   expect(seen?.aborted).toBe(true);
   expect(onError).not.toHaveBeenCalled();
+});
+
+it('blurring the page cancels the refresh without an error toast', async () => {
+  const { h, onError } = setup();
+  let seen: AbortSignal | undefined;
+  act(() => {
+    h.result.current.register((signal) => {
+      seen = signal;
+      return new Promise(() => {});
+    });
+  });
+  act(() => h.result.current.onRefresh());
+  act(() => mockBlur?.());
+  await act(async () => {
+    jest.advanceTimersByTime(10_000);
+  });
+  expect(seen?.aborted).toBe(true);
+  expect(onError).not.toHaveBeenCalled();
+  expect(h.result.current.refreshing).toBe(false);
 });

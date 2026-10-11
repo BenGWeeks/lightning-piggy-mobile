@@ -63,6 +63,9 @@ export function useProductComments(root: CommentRoot | null): UseProductComments
   }, [localAdded]);
   // The loaded set, read by `refresh` (its `since` + merge base).
   const loadedRef = useRef({ events, deletions });
+  // Bumped by every load and refresh: only the newest one may commit, so a
+  // slow first load can't overwrite (or resurrect over) a newer refresh.
+  const generationRef = useRef(0);
   useEffect(() => {
     loadedRef.current = { events, deletions };
   }, [events, deletions]);
@@ -94,11 +97,13 @@ export function useProductComments(root: CommentRoot | null): UseProductComments
       }
       const controller = new AbortController();
       const { signal } = controller;
+      const generation = ++generationRef.current;
+      const superseded = () => signal.aborted || generation !== generationRef.current;
       setLoading(true);
       setError(false);
       queryCommentEvents(readRelays, root, { signal })
         .then((comments) => {
-          if (signal.aborted) return;
+          if (superseded()) return;
           setEvents(comments);
           setLoading(false);
           // Then the kind-5s naming them (most relays already dropped what was
@@ -108,13 +113,13 @@ export function useProductComments(root: CommentRoot | null): UseProductComments
             signal,
           }).then(
             (dels) => {
-              if (!signal.aborted) setDeletions(dels);
+              if (!superseded()) setDeletions(dels);
             },
             () => undefined,
           );
         })
         .catch(() => {
-          if (!signal.aborted) setError(true);
+          if (!superseded()) setError(true);
         })
         .finally(() => {
           if (!signal.aborted) setLoading(false);
@@ -145,6 +150,7 @@ export function useProductComments(root: CommentRoot | null): UseProductComments
   const refresh = useCallback(
     async (signal: AbortSignal) => {
       if (!root) return;
+      const generation = ++generationRef.current;
       const loaded = loadedRef.current;
       // Same budget, signature and deletion reasoning as
       // useProductReviews.refresh.
@@ -158,7 +164,8 @@ export function useProductComments(root: CommentRoot | null): UseProductComments
         [...loaded.events, ...comments, ...localAddedRef.current],
         opts,
       ).catch(() => [] as NostrEvent[]);
-      if (signal.aborted) return;
+      // A newer load or refresh started meanwhile — it owns the state.
+      if (signal.aborted || generation !== generationRef.current) return;
       const merged = mergeFeedback(loadedRef.current, { events: comments, deletions: dels });
       // One batched update for the whole refresh (React batches these).
       setEvents(merged.events);

@@ -11,7 +11,9 @@ import type { MarketProduct } from '../data/marketProducts';
  * replaces what's shown. Curated catalogue products (no `listing`) are
  * returned as-is. `withdrawn` turns true when a refresh finds the listing
  * gone — deleted by its seller (kind 5), sold / inactive, or expired — so the
- * page can stop offering to buy it.
+ * page can stop offering to buy it. It stays true for the life of the page:
+ * that was signed evidence, and a later refresh that happens to hit lagging
+ * relays (still serving the old active revision) must not bring Buy back.
  */
 export function useLatestListing(product: MarketProduct | undefined) {
   const { relays } = useNostr();
@@ -24,11 +26,14 @@ export function useLatestListing(product: MarketProduct | undefined) {
 
   const current = product?.listing?.event;
   // `id` encodes kind + author + `d`, so equal ids are the same listing.
+  // Newer wins, ties broken by lower event id — reduceMarketListings' order.
+  const freshEvent = fresh?.listing?.event;
   const shown =
-    fresh?.listing &&
+    freshEvent &&
     current &&
-    fresh.id === product?.id &&
-    fresh.listing.event.created_at > current.created_at
+    fresh?.id === product?.id &&
+    (freshEvent.created_at > current.created_at ||
+      (freshEvent.created_at === current.created_at && freshEvent.id < current.id))
       ? fresh
       : product;
 
@@ -38,7 +43,7 @@ export function useLatestListing(product: MarketProduct | undefined) {
       if (!shown || !base) return;
       const next = await fetchListingRevision(base.event, readRelays, signal);
       if (signal.aborted) return;
-      setWithdrawn(!next);
+      if (!next) setWithdrawn(true);
       if (!next?.listing || next.listing.event.id === base.event.id) return;
       // Keep the seller's display name the feed resolved from contacts — the
       // parser alone only knows a shortened pubkey.

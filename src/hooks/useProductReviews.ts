@@ -66,6 +66,9 @@ export function useProductReviews(coord: string | null): UseProductReviews {
   }, [localAdded]);
   // The loaded set, read by `refresh` (its `since` + merge base).
   const loadedRef = useRef({ events, deletions });
+  // Bumped by every load and refresh: only the newest one may commit, so a
+  // slow first load can't overwrite (or resurrect over) a newer refresh.
+  const generationRef = useRef(0);
   useEffect(() => {
     loadedRef.current = { events, deletions };
   }, [events, deletions]);
@@ -94,11 +97,13 @@ export function useProductReviews(coord: string | null): UseProductReviews {
       }
       const controller = new AbortController();
       const { signal } = controller;
+      const generation = ++generationRef.current;
+      const superseded = () => signal.aborted || generation !== generationRef.current;
       setLoading(true);
       setError(false);
       queryReviewEvents(readRelays, coord, { signal })
         .then((evs) => {
-          if (signal.aborted) return;
+          if (superseded()) return;
           setEvents(evs);
           setLoading(false);
           // Then the kind-5s naming them — by address (what we and most
@@ -108,13 +113,13 @@ export function useProductReviews(coord: string | null): UseProductReviews {
             signal,
           }).then(
             (dels) => {
-              if (!signal.aborted) setDeletions(dels);
+              if (!superseded()) setDeletions(dels);
             },
             () => undefined,
           );
         })
         .catch(() => {
-          if (!signal.aborted) setError(true);
+          if (!superseded()) setError(true);
         })
         .finally(() => {
           if (!signal.aborted) setLoading(false);
@@ -142,6 +147,7 @@ export function useProductReviews(coord: string | null): UseProductReviews {
   const refresh = useCallback(
     async (signal: AbortSignal) => {
       if (!coord) return;
+      const generation = ++generationRef.current;
       const loaded = loadedRef.current;
       // Short per-query deadlines keep events + deletions inside the page's
       // ~8 s refresh budget even with a dead relay. Signatures are checked
@@ -159,7 +165,8 @@ export function useProductReviews(coord: string | null): UseProductReviews {
         [...loaded.events, ...evs, ...localAddedRef.current],
         opts,
       ).catch(() => [] as NostrEvent[]);
-      if (signal.aborted) return;
+      // A newer load or refresh started meanwhile — it owns the state.
+      if (signal.aborted || generation !== generationRef.current) return;
       const merged = mergeFeedback(
         loadedRef.current,
         { events: evs, deletions: dels },

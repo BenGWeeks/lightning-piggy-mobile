@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 
 /** One piece of a page's refresh; must honour `signal` (timeout / unmount). */
 export type Refresher = (signal: AbortSignal) => Promise<void>;
@@ -39,8 +40,10 @@ export function usePullToRefresh(
   }, [onError]);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Leaving the page cancels an in-flight refresh (and its error toast).
-  useEffect(() => () => inFlight.current?.abort(), []);
+  // Leaving the page — blur (another screen pushed on top, a tab switch) or
+  // unmount — cancels an in-flight refresh and its error toast, so a hidden
+  // page does no relay work (focus-lifecycle rule).
+  useFocusEffect(useCallback(() => () => inFlight.current?.abort(), []));
 
   const register = useCallback<RegisterRefresher>((refresher) => {
     refreshers.current.add(refresher);

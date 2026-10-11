@@ -205,24 +205,12 @@ export async function fetchListingRevision(
   if (!d || relays.length === 0) return null;
   trackRelays(relays);
   const opts = { maxWait, signal };
-  const [revisions, deletions] = await Promise.all([
-    querySyncAbortable(
-      pool,
-      relays,
-      { kinds: [current.kind], authors: [current.pubkey], '#d': [d], limit: 10 },
-      { ...opts, rejectOnAllRelaysFailure: true },
-    ),
-    // Best-effort, like the feed: a failed lookup just applies no deletion.
-    Promise.all(
-      [
-        ...deletionFilters('a', addressRefs([current])),
-        ...deletionFilters('e', idRefs([current])),
-      ].map((filter) => querySyncAbortable(pool, relays, filter, opts)),
-    ).then(
-      (batches) => batches.flat(),
-      () => [] as Event[],
-    ),
-  ]);
+  const revisions = await querySyncAbortable(
+    pool,
+    relays,
+    { kinds: [current.kind], authors: [current.pubkey], '#d': [d], limit: 10 },
+    { ...opts, rejectOnAllRelaysFailure: true },
+  );
   // `#d` / `authors` are only relay-side requests — keep signed revisions of
   // THIS address only (reduceMarketListings re-checks the author too).
   const sameAddress = revisions.filter(
@@ -231,6 +219,18 @@ export async function fetchListingRevision(
       e.pubkey === current.pubkey &&
       e.tags.find((t) => t[0] === 'd')?.[1] === d &&
       hasValidSignature(e),
+  );
+  // Then the seller's kind-5s naming the address or ANY of the revisions
+  // (one deleted by `e` id only must still withdraw). Best-effort, like the
+  // feed: a failed lookup just applies no deletion.
+  const known = [current, ...sameAddress];
+  const deletions = await Promise.all(
+    [...deletionFilters('a', addressRefs([current])), ...deletionFilters('e', idRefs(known))].map(
+      (filter) => querySyncAbortable(pool, relays, filter, opts),
+    ),
+  ).then(
+    (batches) => batches.flat(),
+    () => [] as Event[],
   );
   const [product] = reduceMarketListings(
     [current, ...sameAddress, ...deletions.filter(hasValidSignature)],

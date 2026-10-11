@@ -86,6 +86,20 @@ describe('fetchListingRevision', () => {
     expect(await fetchListingRevision(current, RELAYS, signal())).toBeNull();
   });
 
+  it('withdraws when the seller deleted the fetched newer revision by id only', async () => {
+    const newer = listing(200, 'New title');
+    const del = finalizeEvent(
+      { kind: 5, created_at: 250, content: '', tags: [['e', newer.id]] },
+      SELLER_KEY,
+    );
+    query.mockImplementation((_pool, _relays, filter: Filter) =>
+      Promise.resolve(
+        filter.kinds?.includes(5) ? (filter['#e']?.includes(newer.id) ? [del] : []) : [newer],
+      ),
+    );
+    expect(await fetchListingRevision(current, RELAYS, signal())).toBeNull();
+  });
+
   it('ignores a forged deletion', async () => {
     const del = finalizeEvent(
       { kind: 5, created_at: 150, content: '', tags: [['a', `30402:${SELLER}:book`]] },

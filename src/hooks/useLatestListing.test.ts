@@ -59,7 +59,7 @@ it('shows a newer revision but keeps the contact-resolved seller name', async ()
   expect(h.result.current.withdrawn).toBe(false);
 });
 
-it('marks the listing withdrawn when a refresh finds it gone, and clears it if it returns', async () => {
+it('marks the listing withdrawn when a refresh finds it gone, and keeps it withdrawn', async () => {
   const shown = live('1', 100, 'Old', 'Friend');
   fetchRevision.mockResolvedValue(null);
   const h = renderHook(() => useLatestListing(shown));
@@ -67,9 +67,18 @@ it('marks the listing withdrawn when a refresh finds it gone, and clears it if i
   expect(h.result.current.withdrawn).toBe(true);
   expect(h.result.current.product).toBe(shown);
 
+  // A lagging relay still serving the old active revision can't undo it.
   fetchRevision.mockResolvedValue(live('1', 100, 'Old', 'x'));
   await act(() => h.result.current.refresh(signal()));
-  expect(h.result.current.withdrawn).toBe(false);
+  expect(h.result.current.withdrawn).toBe(true);
+});
+
+it('shows a same-second revision that wins the lower-id tie-break', async () => {
+  const shown = live('5', 100, 'Old', 'Friend');
+  fetchRevision.mockResolvedValue(live('3', 100, 'Tie winner', 'x'));
+  const h = renderHook(() => useLatestListing(shown));
+  await act(() => h.result.current.refresh(signal()));
+  expect(h.result.current.product?.title).toBe('Tie winner');
 });
 
 it('ignores a result that arrives after the refresh was aborted', async () => {
