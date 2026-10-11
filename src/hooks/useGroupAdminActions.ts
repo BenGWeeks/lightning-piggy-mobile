@@ -5,7 +5,12 @@ import { useGroups } from '../contexts/GroupsContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { marmotSendError } from '../services/marmotSend';
 import type { Group } from '../types/groups';
-import { buildAdminUpdate, canRemoveAdmin, isGroupAdmin } from '../utils/groupAdmins';
+import {
+  buildAdminUpdate,
+  canRemoveAdmin,
+  isGroupAdmin,
+  LastAdminError,
+} from '../utils/groupAdmins';
 import type { GroupMemberRow } from '../utils/groupMemberRows';
 
 /**
@@ -46,7 +51,15 @@ export function useGroupAdminActions(group: Group | undefined) {
         });
       } catch (e) {
         if (__DEV__) console.warn('[Group] admin change failed:', e);
-        BrandedAlert.alert(t('groupMembersSheet.adminChangeFailedTitle'), marmotSendError(e));
+        if (e instanceof LastAdminError) {
+          // Another admin stepped down while ours was waiting to commit.
+          BrandedAlert.alert(
+            t('groupMembersSheet.lastAdminTitle'),
+            t('groupMembersSheet.lastAdminMessage'),
+          );
+        } else {
+          BrandedAlert.alert(t('groupMembersSheet.adminChangeFailedTitle'), marmotSendError(e));
+        }
       } finally {
         inFlight.current = false;
         setPendingPubkey(null);
