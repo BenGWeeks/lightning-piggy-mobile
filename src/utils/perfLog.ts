@@ -18,7 +18,7 @@
 // `process.env.EXPO_PUBLIC_*` at bundle time, so the literal-string
 // comparison dead-code-eliminates the rest of this file in normal
 // release builds where the flag is unset.
-const PERF_LOGS_ENABLED = __DEV__ || process.env.EXPO_PUBLIC_KEEP_PERF_LOGS === '1';
+export const PERF_LOGS_ENABLED = __DEV__ || process.env.EXPO_PUBLIC_KEEP_PERF_LOGS === '1';
 let T0: number | null = null;
 
 export function perfT0(): number {

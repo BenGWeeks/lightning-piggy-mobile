@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, Linking, RefreshControl } from 'react-native';
 import { Image } from 'expo-image';
 import { ChevronLeft, Zap, ExternalLink } from 'lucide-react-native';
@@ -10,6 +10,7 @@ import { createMarketProductDetailStyles } from '../styles/MarketProductDetailSc
 import { MARKET_PRODUCTS, sellerOf } from '../data/marketProducts';
 import { marketFeedbackContext } from '../utils/marketFeedback';
 import { marketCheckoutTarget } from '../utils/marketCheckout';
+import { perfLog } from '../utils/perfLog';
 import VendorAvatar from '../components/VendorAvatar';
 import ProductFeedbackTabs from '../components/ProductFeedbackTabs';
 import NostrLoginSheet from '../components/NostrLoginSheet';
@@ -49,6 +50,8 @@ interface Props {
 const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
   const t = useTranslation();
+  // Pairs with `market product tap` on the Market screen: tap-to-first-commit.
+  useEffect(() => perfLog('[PerfBlock] market product detail shown'), []);
   const styles = useMemo(() => createMarketProductDetailStyles(colors), [colors]);
   const [imageFailed, setImageFailed] = useState(false);
   // Real aspect ratio of the product image, learned on load, so the hero
