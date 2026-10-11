@@ -1857,6 +1857,7 @@
     "swapRecipientGets": "El destinatario recibe {{amount}} sats",
     "swapYouPay": "Pagas {{total}} sats (comisiones ~{{fee}} sats) · ~10-60 min",
     "swapInsufficientBalance": "Este envío cuesta {{total}} sats ({{amount}} sats + ~{{fee}} sats de comisiones), pero tu saldo es de {{balance}} sats.",
+    "onchainInsufficientFunds": "Tu saldo no cubre este importe más la comisión de minería.",
     "feeUnavailable": "Estimación de comisión no disponible",
     "quoteChanged": "No se envió nada. La comisión del swap ahora es de ~{{fee}} sats. Revísala y toca Enviar para continuar.",
     "quoteChangedTitle": "La comisión del swap ha cambiado",
@@ -1867,7 +1868,8 @@
     "editAddress": "Editar dirección",
     "resetLabel": "Escanear o pegar otra factura",
     "resetText": "Escanear / pegar otra factura",
-    "balance": "Saldo: {{balance}} sats ({{fiat}})"
+    "balance": "Saldo: {{balance}} sats ({{fiat}})",
+    "balanceUnavailable": "Saldo no disponible — actualiza tu cartera antes de enviar."
   },
   "starRating": {
     "readOnly": "{{value}} de {{max}} estrellas",
@@ -2162,10 +2164,13 @@
     "hint": "Usa un servidor compatible con Boltz para la red principal de Bitcoin mediante HTTPS. Conecta primero tu VPN si el servidor es privado. Los nuevos swaps de este dispositivo usarán el servidor guardado; los existentes conservarán su servidor original.",
     "save": "Comprobar y guardar",
     "checking": "Comprobando…",
-    "default": "Usar la URL predeterminada de Boltz",
+    "default": "Borrar URL del servidor de swaps",
     "saved": "Servidor guardado. Los nuevos swaps usarán este servidor.",
     "saveError": "No se guardó el servidor. Comprueba la URL y la conexión.",
-    "loadError": "No se pudo cargar el servidor guardado. No se ha cambiado ningún servidor."
+    "loadError": "No se pudo cargar el servidor guardado. No se ha cambiado ningún servidor.",
+    "notConfigured": "No hay servidor de swaps configurado — añade uno en el menú de cuenta → On-chain.",
+    "placeholder": "https://tu-servidor-de-swaps.example",
+    "cleared": "No hay servidor de swaps configurado. Los swaps existentes conservan su servidor original."
   },
   "market": {
     "sats": "{{amount}} sats",

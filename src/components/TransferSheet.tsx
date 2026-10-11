@@ -1,3 +1,4 @@
+import TransferSwapQuoteStatus from './TransferSwapQuoteStatus';
 import { useTransferSwapFees } from '../utils/useTransferSwapFees';
 import { useTransferFeeEstimate } from '../hooks/useTransferFeeEstimate';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
@@ -1244,17 +1245,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                   )}
                 </TouchableOpacity>
 
-                {swapQuote.failed && (
-                  <View testID="transfer-swap-quote-error">
-                    <Text style={styles.warningText}>{t('swapBackend.quoteFailed')}</Text>
-                    <TouchableOpacity onPress={swapQuote.retry} testID="transfer-swap-quote-retry">
-                      <Text style={styles.feeText}>{t('swapBackend.retryQuote')}</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-                {swapQuote.loading && (
-                  <Text style={styles.feeText}>{t('swapBackend.loadingQuote')}</Text>
-                )}
+                <TransferSwapQuoteStatus {...swapQuote} styles={styles} />
 
                 {/* Fee estimate */}
                 {feeEstimate && (

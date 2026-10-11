@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { bech32 } from 'bech32';
 import { schnorr, secp256k1 } from '@noble/curves/secp256k1.js';
 import { ripemd160 } from '@noble/hashes/legacy.js';
@@ -149,7 +150,8 @@ describe('createSubmarineSwapForward', () => {
   let mutate: (response: SubmarineSwapResponse) => unknown;
   let fetchMock: jest.Mock;
   let xOnlyResponse = false;
-  beforeEach(() => {
+  beforeEach(async () => {
+    await AsyncStorage.setItem('swap_backend_url_v1', 'https://swaps.example/v2');
     jest.mocked(getBlockHeight).mockResolvedValue(HEIGHT);
     mutate = (response) => response;
     xOnlyResponse = false;

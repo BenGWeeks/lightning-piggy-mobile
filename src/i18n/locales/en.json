@@ -1857,6 +1857,7 @@
     "swapRecipientGets": "Recipient gets {{amount}} sats",
     "swapYouPay": "You pay {{total}} sats (fees ~{{fee}} sats) · ~10-60 min",
     "swapInsufficientBalance": "This send costs {{total}} sats ({{amount}} sats + ~{{fee}} sats in fees), but your balance is {{balance}} sats.",
+    "onchainInsufficientFunds": "Your balance can't cover this amount plus the miner fee.",
     "feeUnavailable": "Fee estimate unavailable",
     "quoteChanged": "Nothing was sent. The swap fee is now ~{{fee}} sats. Review it and tap Send to continue.",
     "quoteChangedTitle": "Swap Fee Changed",
@@ -1867,7 +1868,8 @@
     "editAddress": "Edit address",
     "resetLabel": "Scan or paste a different invoice",
     "resetText": "Scan / paste different invoice",
-    "balance": "Balance: {{balance}} sats ({{fiat}})"
+    "balance": "Balance: {{balance}} sats ({{fiat}})",
+    "balanceUnavailable": "Wallet balance unavailable — refresh your wallet before sending."
   },
   "starRating": {
     "readOnly": "{{value}} out of {{max}} stars",
@@ -2162,10 +2164,13 @@
     "hint": "Use a Boltz-compatible Bitcoin mainnet server over HTTPS. Connect your VPN first for a private server. This device’s new swaps use the saved server; existing swaps keep their original server.",
     "save": "Check and save",
     "checking": "Checking…",
-    "default": "Use Boltz default URL",
+    "default": "Clear swap server URL",
     "saved": "Swap server saved. New swaps will use this server.",
     "saveError": "Server not saved. Check the URL and connection.",
-    "loadError": "Could not load the saved server. No server has been changed."
+    "loadError": "Could not load the saved server. No server has been changed.",
+    "notConfigured": "No swap server set — add one in the account menu → On-chain.",
+    "placeholder": "https://your-swap-server.example",
+    "cleared": "No swap server set. Existing swaps keep their original server."
   },
   "market": {
     "sats": "{{amount}} sats",

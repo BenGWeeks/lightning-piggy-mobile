@@ -1,6 +1,7 @@
 import { act, renderHook } from '@testing-library/react-native';
 import { getReverseSwapFees, getSubmarineSwapFees, type SwapFees } from '../services/boltzService';
 import { useTransferSwapFees } from './useTransferSwapFees';
+import { NoSwapServerError } from '../services/swapBackendService';
 jest.mock('../services/boltzService', () => ({
   getReverseSwapFees: jest.fn(),
   getSubmarineSwapFees: jest.fn(),
@@ -74,4 +75,12 @@ it('ignores an adopt captured before the direction changed', async () => {
   await act(async () => {});
   await act(async () => staleAdopt({ ...reverse, pairHash: 'late' }));
   expect(result.current.fees).toEqual(submarine);
+});
+
+it('explains an unset server for either direction', async () => {
+  jest.mocked(getReverseSwapFees).mockRejectedValueOnce(new NoSwapServerError());
+  const { result } = renderHook(() => useTransferSwapFees('ln-to-onchain', true));
+  await act(async () => {});
+  expect(result.current.errorKey).toBe('swapBackend.notConfigured');
+  expect(result.current.failed).toBe(true);
 });

@@ -53,7 +53,7 @@ export default function SwapBackendSettings() {
       const saved = await checkAndSaveSwapBackend(url);
       if (!mounted.current) return;
       setUrl(saved);
-      setMessage(t('swapBackend.saved'));
+      setMessage(t(saved ? 'swapBackend.saved' : 'swapBackend.cleared'));
     } catch (error) {
       if (!mounted.current) return;
       setMessage(`${t('swapBackend.saveError')} ${error instanceof Error ? error.message : ''}`);
@@ -73,7 +73,7 @@ export default function SwapBackendSettings() {
           setMessage('');
         }}
         editable={!loading && !busy}
-        placeholder={DEFAULT_SWAP_BACKEND}
+        placeholder={t('swapBackend.placeholder')}
         placeholderTextColor={colors.textSupplementary}
         autoCapitalize="none"
         autoCorrect={false}
@@ -92,9 +92,9 @@ export default function SwapBackendSettings() {
       <TouchableOpacity
         style={shared.saveButton}
         onPress={save}
-        disabled={loading || busy || !url.trim()}
+        disabled={loading || busy}
         accessibilityRole="button"
-        accessibilityState={{ disabled: loading || busy || !url.trim(), busy }}
+        accessibilityState={{ disabled: loading || busy, busy }}
         accessibilityLabel={t('swapBackend.save')}
         testID="swap-backend-save"
       >

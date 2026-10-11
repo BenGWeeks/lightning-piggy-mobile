@@ -70,6 +70,7 @@ import * as onchainService from '../services/onchainService';
 import { getActivePubkey, getDefaultOnchainWalletId } from '../services/walletStorageService';
 import { buildSwapPlaceholders, markSwapPlaceholdersResolved } from '../utils/swapPendingMerge';
 import { blockEta } from '../utils/blockEta';
+import { useReceiveSwapFees } from '../utils/useReceiveSwapFees';
 
 interface Props {
   visible: boolean;
@@ -132,9 +133,9 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
   const [refunding, setRefunding] = useState(false);
   const [refundedTxId, setRefundedTxId] = useState<string | null>(null);
 
-  // Boltz fee schedule — fetched once on open so we can render min/max +
-  // the expected service fee before the user commits to an amount.
-  const [fees, setFees] = useState<boltzService.SwapFees | null>(null);
+  // Boltz fee schedule — fetched on open so we can render min/max + the
+  // expected service fee, and re-fetched on confirm if that first try failed.
+  const { fees, ensureFees, adopt: adoptFees } = useReceiveSwapFees(visible);
 
   // Track the bottom-sheet ref so we can present/dismiss imperatively.
   const bottomSheetRef = useRef<BottomSheetModal>(null);
@@ -193,19 +194,7 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
       setPhase('awaiting-payment');
       setRefunding(false);
       setRefundedTxId(null);
-      // Clear any prior session's fee schedule so a failed re-fetch falls
-      // back to the fresh fallback constants instead of showing stale min/max.
-      setFees(null);
       bottomSheetRef.current?.present();
-
-      // Fetch fees in the background — non-blocking.
-      const session = sessionRef.current;
-      boltzService
-        .getSubmarineSwapFees()
-        .then((f) => {
-          if (sessionRef.current === session) setFees(f);
-        })
-        .catch((e) => console.warn('[BoltzReceive] Fee fetch failed:', e));
     } else {
       bottomSheetRef.current?.dismiss();
     }
@@ -389,6 +378,15 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
       setCreateError(null);
 
       try {
+        // Step 0 — a fee schedule. If the one fetched on open failed, try
+        // again now rather than replaying that error (offline → back online).
+        const quote = await ensureFees();
+        if ('stale' in quote) return;
+        if ('errorKey' in quote) {
+          setCreateError(t(quote.errorKey));
+          return;
+        }
+
         // Step 1 — make an LN invoice on the destination NWC wallet for
         // exactly the requested amount. Boltz takes its fee from the
         // *on-chain* side (so the sender pays slightly more than `sats`),
@@ -396,11 +394,7 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
         const invoice = await makeInvoiceForWallet(walletId, sats, t('boltzReceive.invoiceMemo'));
 
         // Step 2 — create the swap with Boltz.
-        const created = await boltzService.createSubmarineSwapForward(
-          invoice,
-          sats,
-          fees ?? undefined,
-        );
+        const created = await boltzService.createSubmarineSwapForward(invoice, sats, quote.fees);
 
         // Step 3 — pre-fetch a refund destination snapshot from one of the
         // user's on-chain wallets. If none exists, warn the user: recovery
@@ -451,13 +445,13 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         console.warn('[BoltzReceive] Swap creation failed:', msg);
-        if (boltzService.isQuoteChangedError(e)) setFees(e.quote);
+        if (boltzService.isQuoteChangedError(e)) adoptFees(e.quote);
         setCreateError(msg);
       } finally {
         setCreating(false);
       }
     },
-    [walletId, wallet, makeInvoiceForWallet, pickRefundDestination, t, fees],
+    [walletId, wallet, makeInvoiceForWallet, pickRefundDestination, t, ensureFees, adoptFees],
   );
 
   const handleRefund = useCallback(async () => {
