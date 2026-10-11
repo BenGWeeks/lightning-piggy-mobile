@@ -1,5 +1,6 @@
 import type { Event, Filter } from 'nostr-tools';
-import { pool } from './nostrPool';
+import type { AbstractSimplePool } from 'nostr-tools/abstract-pool';
+import { pool as sharedPool } from './nostrPool';
 
 /**
  * One-shot "what do these relays hold right now" query: subscribe each relay
@@ -26,6 +27,8 @@ export interface RelaySnapshotOptions {
   graceMs: number;
   /** Called with each event that passed the relay layer. */
   onEvent: (event: Event) => void;
+  /** Pool to subscribe through (default: the shared, fully verifying pool). */
+  relayPool?: Pick<AbstractSimplePool, 'ensureRelay'>;
 }
 
 export interface RelaySnapshotResult {
@@ -45,7 +48,7 @@ export interface RelaySnapshotResult {
 }
 
 export function collectRelaySnapshot(opts: RelaySnapshotOptions): Promise<RelaySnapshotResult> {
-  const { urls, filters, signal, deadline, graceMs, onEvent } = opts;
+  const { urls, filters, signal, deadline, graceMs, onEvent, relayPool = sharedPool } = opts;
   const remaining = deadline - Date.now();
   if (signal.aborted || remaining <= 0 || urls.length === 0) {
     return Promise.resolve({ answered: [], responded: [], truncated: false, truncatedSince: null });
@@ -100,7 +103,7 @@ export function collectRelaySnapshot(opts: RelaySnapshotOptions): Promise<RelayS
     };
 
     for (const url of urls) {
-      pool
+      relayPool
         .ensureRelay(url, { connectionTimeout: remaining })
         .then((relay) => {
           if (finished) return;

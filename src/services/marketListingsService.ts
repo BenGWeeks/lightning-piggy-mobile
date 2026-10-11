@@ -1,6 +1,8 @@
 import type { Event } from 'nostr-tools';
+import type { AbstractSimplePool } from 'nostr-tools/abstract-pool';
 import { pool, trackRelays } from './nostrPool';
 import { querySyncAbortable } from './relayQuery';
+import { acquireMarketListingsPool } from './marketListingsPool';
 import { collectRelaySnapshot } from './relaySnapshot';
 import { verifyEventCached } from './nostrVerifyCache';
 import { nostrGetEventHash } from './nostrCrypto';
@@ -26,6 +28,12 @@ const MAX_AUTHORS = 1024;
 const MAX_EVENTS = 1200;
 /** Deletions get their own budget so a full listing pass can't starve them. */
 const MAX_DELETIONS = 600;
+/**
+ * Forged signatures tolerated per snapshot before giving up (and flagging it
+ * incomplete). Every candidate already hashes to its id, so failures mean a
+ * relay is serving fakes — it must not buy ~25 ms of verification apiece.
+ */
+const MAX_FAILED_CHECKS = 64;
 const MAX_PRODUCTS = 250;
 /** Listings painted before the rest are verified — about two screens of grid. */
 const FIRST_PAGE = 12;
@@ -75,12 +83,35 @@ export async function fetchMarketListings(
   if (signal.aborted || scope.size === 0) return { products: [], incomplete: false };
   const { urls, dropped } = marketSnapshotRelays(relays);
   if (urls.length === 0) return { products: [], incomplete: true };
-  trackRelays(urls);
+  // A dedicated structure-only pool: every event is verified here before use
+  // (see marketListingsPool). Its sockets close when the last snapshot ends.
+  const lease = acquireMarketListingsPool(urls);
+  try {
+    return await runSnapshot(
+      scope,
+      keys.length > MAX_AUTHORS || dropped,
+      urls,
+      lease.pool,
+      signal,
+      onFirstPage,
+    );
+  } finally {
+    lease.release();
+  }
+}
 
+async function runSnapshot(
+  scope: ReadonlySet<string>,
+  initiallyLimited: boolean,
+  urls: string[],
+  relayPool: Pick<AbstractSimplePool, 'ensureRelay'>,
+  signal: AbortSignal,
+  onFirstPage: ((products: MarketProduct[]) => void) | undefined,
+): Promise<MarketListingsResult> {
   const startedAt = Date.now();
   const probe = PERF_LOGS_ENABLED ? startJsStallProbe() : null;
   const deadline = startedAt + TIMEOUT_MS;
-  let limited = keys.length > MAX_AUTHORS || dropped;
+  let limited = initiallyLimited;
   let received = 0;
   // Keyed by id AND signature: the id doesn't cover the signature, so a
   // bad-signature copy of a genuine payload must not displace the good copy.
@@ -181,7 +212,7 @@ export async function fetchMarketListings(
     }
     // Listings are verified later (winners only); a payload that doesn't even
     // hash to its id is junk, so drop it now before it takes budget.
-    if (!(deletion ? verified(event) : idMatches(event))) return;
+    if (!idMatches(event)) return;
     events.set(key, event);
     if (deletion) deletionCount++;
     else listingCount++;
@@ -194,6 +225,7 @@ export async function fetchMarketListings(
     deadline,
     graceMs: GRACE_MS,
     onEvent: ingest,
+    relayPool,
   });
   const listingsDoneAt = Date.now();
   const candidates = [...events.values(), ...suppressions.values()].filter((e) => e.kind !== 5);
@@ -210,11 +242,27 @@ export async function fetchMarketListings(
           deadline,
           graceMs: GRACE_MS,
           onEvent: ingest,
+          relayPool,
         });
 
   let firstPageAt = 0;
   // Budget-gated yields keep taps responsive while winners are verified.
   const scheduler = createYieldScheduler({ signal, safetyEvery: 32 });
+  // Deletions arrive unverified (structure-only pool); check them here, with
+  // yields, before any of them can hide a listing.
+  let failedChecks = 0;
+  for (const [key, event] of events) {
+    if (event.kind !== 5) continue;
+    if (signal.aborted || failedChecks >= MAX_FAILED_CHECKS) {
+      events.delete(key);
+      continue;
+    }
+    await scheduler.maybeYield();
+    if (!verified(event)) {
+      failedChecks++;
+      events.delete(key);
+    }
+  }
   const selection = await selectVerifiedListings(
     signal.aborted ? [] : [...events.values(), ...suppressions.values()],
     scope,
@@ -223,6 +271,7 @@ export async function fetchMarketListings(
       verify: (event) => !signal.aborted && (trusted.has(event) || verified(event)),
       maybeYield: scheduler.maybeYield,
       cap: MAX_PRODUCTS,
+      maxFailures: MAX_FAILED_CHECKS - failedChecks,
       firstPage: onFirstPage && {
         size: FIRST_PAGE,
         ready: (picked) => {
@@ -243,6 +292,8 @@ export async function fetchMarketListings(
     incomplete:
       signal.aborted ||
       limited ||
+      failedChecks >= MAX_FAILED_CHECKS ||
+      selection.gaveUp ||
       listingsCutMattered(listings.truncatedSince, products, selection.overflow) ||
       deletions.truncated ||
       listings.answered.length === 0 ||

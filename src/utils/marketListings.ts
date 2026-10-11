@@ -243,10 +243,16 @@ export async function selectVerifiedListings(
     maybeYield: () => Promise<void>;
     cap: number;
     now?: number;
+    /**
+     * Stop after this many failed checks. Every candidate passed an id-hash
+     * check, so failures mean forged signatures — a hostile relay flooding
+     * fakes must not buy unbounded verification work.
+     */
+    maxFailures?: number;
     /** Called once, as soon as `firstPage.size` renderable winners are verified. */
     firstPage?: { size: number; ready: (events: Event[]) => void };
   },
-): Promise<{ events: Event[]; overflow: boolean; checked: number }> {
+): Promise<{ events: Event[]; overflow: boolean; checked: number; gaveUp: boolean }> {
   const isDeleted = deletionIndex(events, authors);
   const deletions: Event[] = [];
   const revisions = new Map<string, Event[]>();
@@ -273,10 +279,16 @@ export async function selectVerifiedListings(
   let rendered = 0;
   let checked = 0;
   let overflow = false;
+  let failures = 0;
+  let gaveUp = false;
   for (let next = heap.pop(); next; next = heap.pop()) {
     await opts.maybeYield();
     checked++;
     if (!opts.verify(next.event)) {
+      if (opts.maxFailures !== undefined && ++failures >= opts.maxFailures) {
+        gaveUp = true;
+        break;
+      }
       const list = revisions.get(next.address)!;
       const index = next.index + 1;
       if (index < list.length) heap.push({ address: next.address, index, event: list[index] });
@@ -295,5 +307,5 @@ export async function selectVerifiedListings(
       opts.firstPage = undefined;
     }
   }
-  return { events: [...winners, ...deletions], overflow, checked };
+  return { events: [...winners, ...deletions], overflow, checked, gaveUp };
 }

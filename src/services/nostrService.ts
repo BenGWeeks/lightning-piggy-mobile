@@ -78,16 +78,9 @@ export { __resetVerifiedEventCache, __verifiedEventCacheSize };
 //   The real integrity comes from the seal/rumor layer inside (unwrapped
 //   with our secret key in `unwrapGiftWrap`). Saving ~1–5 ms × N per
 //   cold-start inbox burst. `validateEvent()` (JSON structure) still runs.
-// - 30018 / 30402 marketplace listings: NOT trusted unverified — they are
-//   verified LAZILY by `marketListingsService`, which checks only each
-//   address's winning revision (newest first, up to the render cap). A
-//   follow set's listings run to ~1,200 events; verifying all of them up
-//   front here blocked the JS thread for 25-90 s (#1274). Any new consumer
-//   of these kinds must verify what it uses (`verifyEventCached`).
-//
 // Other kinds keep the full schnorr — DMs (4 / 14), reactions, zap
 // requests/receipts, comment kinds (1111), found logs (7516), etc.
-const SKIP_VERIFY_KINDS = new Set<number>([37516, 31923, 1059, 30018, 30402]);
+const SKIP_VERIFY_KINDS = new Set<number>([37516, 31923, 1059]);
 
 pool.verifyEvent = ((event: NostrEvent): event is VerifiedEvent => {
   // Structural check only for the kinds above. Their ids are NOT added to

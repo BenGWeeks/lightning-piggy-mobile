@@ -1,10 +1,22 @@
 import { finalizeEvent, getEventHash, getPublicKey, type Filter } from 'nostr-tools';
 import { fetchMarketListings, listingsCutMattered } from './marketListingsService';
-import { pool } from './nostrPool';
 import { LISTING_LIMIT } from '../utils/marketListingsQuery';
 import { nostrVerifyEvent } from './nostrCrypto';
 import { __resetVerifiedEventCache } from './nostrVerifyCache';
 jest.mock('./nostrPool', () => ({ pool: { ensureRelay: jest.fn() }, trackRelays: jest.fn() }));
+jest.mock('./marketListingsPool', () => {
+  const ensureRelay = jest.fn();
+  const release = jest.fn();
+  return {
+    acquireMarketListingsPool: () => ({ pool: { ensureRelay }, release }),
+    __mocks: { ensureRelay, release },
+  };
+});
+const poolMocks = (
+  jest.requireMock('./marketListingsPool') as {
+    __mocks: { ensureRelay: jest.Mock; release: jest.Mock };
+  }
+).__mocks;
 jest.mock('./nostrCrypto', () => {
   const actual = jest.requireActual('./nostrCrypto');
   return { ...actual, nostrVerifyEvent: jest.fn(actual.nostrVerifyEvent) };
@@ -38,7 +50,7 @@ interface Sub {
   filters: Filter[];
   c: Callbacks;
 }
-const ensureRelay = pool.ensureRelay as jest.Mock;
+const ensureRelay = poolMocks.ensureRelay;
 const verify = nostrVerifyEvent as unknown as jest.Mock;
 let subs: Sub[];
 let close: jest.Mock;
@@ -70,6 +82,7 @@ beforeEach(() => {
   close = jest.fn();
   up = new Set(['wss://example.com', 'wss://a.example', 'wss://b.example']);
   verify.mockClear();
+  poolMocks.release.mockClear();
   __resetVerifiedEventCache();
   ensureRelay.mockReset();
   ensureRelay.mockImplementation((url: string) =>
@@ -299,6 +312,46 @@ it('honours deletions even when the listing budget is full', async () => {
     false,
   );
 }, 60000);
+
+it('gives up on a flood of forged signatures and flags the snapshot incomplete', async () => {
+  jest.useRealTimers();
+  const pending = start();
+  await flush();
+  for (let i = 0; i < 100; i++) {
+    const unsigned = {
+      ...event,
+      created_at: 2000 + i,
+      tags: [
+        ['d', `fake-${i}`],
+        ['title', 'Fake'],
+        ['price', '1', 'SAT'],
+      ],
+    };
+    deliver(
+      pass('listings')[0],
+      JSON.parse(JSON.stringify({ ...unsigned, id: getEventHash(unsigned), sig: '0'.repeat(128) })),
+    );
+  }
+  deliver(pass('listings')[0], event);
+  await answer();
+  const result = await pending;
+  expect(result.incomplete).toBe(true);
+  expect(verify.mock.calls.length).toBeLessThanOrEqual(64);
+}, 30000);
+
+it('returns its dedicated relay pool lease when done, and on abort', async () => {
+  const done = start();
+  await flush();
+  await answer();
+  await done;
+  expect(poolMocks.release).toHaveBeenCalledTimes(1);
+  const controller = new AbortController();
+  const aborted = fetchMarketListings([author], ['wss://example.com'], controller.signal);
+  await flush();
+  controller.abort();
+  await aborted;
+  expect(poolMocks.release).toHaveBeenCalledTimes(2);
+});
 
 it('closes subscriptions on abort and ignores late relay events', async () => {
   const controller = new AbortController();

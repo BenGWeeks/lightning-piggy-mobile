@@ -149,10 +149,11 @@ describe('pool.verifyEvent — skip-verify kinds (#739 Fix 5)', () => {
     expect(pool.verifyEvent(makeEvent(31923) as Parameters<typeof pool.verifyEvent>[0])).toBe(true);
   });
 
-  it('marketplace listings (30018 / 30402) are left to the market service to verify', () => {
+  it('keeps verifying marketplace listings: a bad-signature 30018 / 30402 is rejected (#1274)', () => {
+    // Other readers (product page, seller editor) rely on the shared pool's check.
     for (const kind of [30018, 30402]) {
       expect(pool.verifyEvent(makeEvent(kind) as Parameters<typeof pool.verifyEvent>[0])).toBe(
-        true,
+        false,
       );
     }
   });
@@ -160,7 +161,7 @@ describe('pool.verifyEvent — skip-verify kinds (#739 Fix 5)', () => {
   it('never lets a structurally-validated id vouch for a signed kind (#1274)', () => {
     // Same claimed id as the skip-kind event above, now on kind 1: the old
     // cache remembered validate-only ids, so this forged event skipped schnorr.
-    expect(pool.verifyEvent(makeEvent(30402) as Parameters<typeof pool.verifyEvent>[0])).toBe(true);
+    expect(pool.verifyEvent(makeEvent(37516) as Parameters<typeof pool.verifyEvent>[0])).toBe(true);
     expect(pool.verifyEvent(makeEvent(1) as Parameters<typeof pool.verifyEvent>[0])).toBe(false);
   });
 
