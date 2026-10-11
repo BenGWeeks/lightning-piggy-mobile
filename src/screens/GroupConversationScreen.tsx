@@ -39,7 +39,7 @@ import GroupHeaderTitle from '../components/GroupHeaderTitle';
 import { canManageGroup } from '../utils/groupProtocol';
 import AttachPanel from '../components/AttachPanel';
 import ConversationComposer from '../components/ConversationComposer';
-import BrandGradientBackground from '../components/BrandGradientBackground';
+import BrandPatternBackground from '../components/BrandPatternBackground';
 import GifPickerSheet from '../components/GifPickerSheet';
 import PollComposerSheet from '../components/PollComposerSheet';
 import ReceiveSheet from '../components/ReceiveSheet';
@@ -570,7 +570,7 @@ const GroupConversationScreen: React.FC = () => {
   if (!group) {
     return (
       <View style={styles.container}>
-        <BrandGradientBackground />
+        <BrandPatternBackground variant="messages-weave" />
         <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
           <View style={styles.titleRow}>
             <TouchableOpacity
@@ -631,7 +631,7 @@ const GroupConversationScreen: React.FC = () => {
     // the keyboard-handling via KeyboardStickyView, so the screen's own
     // wrapper is just a plain View that stacks header + content + composer.
     <View style={styles.container}>
-      <BrandGradientBackground />
+      <BrandPatternBackground variant="messages-weave" />
       <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
         <View style={styles.titleRow}>
           <TouchableOpacity
