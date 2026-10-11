@@ -111,6 +111,9 @@ interface GroupsContextType {
    * the updated group, or null if the group doesn't exist or the
    * pubkey wasn't a member. Re-publishes group state on success. */
   removeMemberFromGroup: (groupId: string, pubkey: string) => Promise<Group | null>;
+  /** Marmot only: replace the group's admin set (an MLS commit; rejects for
+   * NIP-17 groups, which have no admins). */
+  setGroupAdmins: (groupId: string, adminPubkeys: string[]) => Promise<void>;
   deleteGroup: (groupId: string) => Promise<void>;
   getGroup: (groupId: string) => Group | undefined;
   /**
@@ -754,6 +757,14 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     [persist, publishGroupState, marmot],
   );
 
+  const setGroupAdmins = useCallback(
+    async (groupId: string, adminPubkeys: string[]): Promise<void> => {
+      if (!isMarmotGroupId(groupId)) throw new Error('Only Marmot groups have admins');
+      await marmot.setAdmins(groupId, adminPubkeys);
+    },
+    [marmot],
+  );
+
   const deleteGroup = useCallback(
     async (groupId: string): Promise<void> => {
       // A Marmot group is left (an MLS self-remove), not just forgotten.
@@ -938,6 +949,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       renameGroup,
       addMembersToGroup,
       removeMemberFromGroup,
+      setGroupAdmins,
       deleteGroup,
       getGroup,
       reconcileFromGroupStateEvent,
@@ -956,6 +968,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       renameGroup,
       addMembersToGroup,
       removeMemberFromGroup,
+      setGroupAdmins,
       deleteGroup,
       getGroup,
       reconcileFromGroupStateEvent,

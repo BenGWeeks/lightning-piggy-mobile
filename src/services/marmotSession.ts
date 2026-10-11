@@ -2,9 +2,9 @@
 //
 // Owns the marmot-ts `MarmotClient`: loads + connects every group, keeps an
 // unused key package published, and exposes the handful of operations the
-// app needs (send, create DM/group, invite, remove, rename, leave, accept an
-// invite). Decrypted application messages are fanned out to listeners as
-// plain rumors — `marmotInbox` decides where they're stored.
+// app needs (send, create DM/group, invite, remove, rename, set admins,
+// leave, accept an invite). Decrypted application messages are fanned out to
+// listeners as plain rumors — `marmotInbox` decides where they're stored.
 //
 // Conventions shared with White Noise (interop):
 //   - a DM is a 2-member group with an EMPTY name where both people are admins;
@@ -27,6 +27,7 @@ import { bytesToHex } from '@noble/hashes/utils.js';
 import { getEventHash, type Event as NostrEvent } from 'nostr-tools';
 
 import type { SignerType } from '../types/nostr';
+import { LastAdminError, normaliseAdmins } from '../utils/groupAdmins';
 import { installMarmotCryptoProvider, marmotCryptoProvider } from './marmotCryptoProvider';
 import {
   candidateMediaStates,
@@ -526,10 +527,28 @@ export class MarmotSession {
   async removeMember(appGroupId: string, member: string): Promise<void> {
     const mlsId = toMlsGroupId(appGroupId);
     const pk = member.toLowerCase();
-    // One Remove per device leaf the member holds.
+    // One Remove per device leaf the member holds. (Removing an admin also
+    // drops them from `admins`: marmot-ts splices that update in itself.)
     const leaves = getPubkeyLeafNodeIndexes((await this.client.groups.get(mlsId)).state, pk);
     if (leaves.length === 0) return;
     await this.commit(mlsId, spreadProposals(Proposals.proposeRemoveUser(pk), leaves.length));
+    this.emitGroupsChanged();
+  }
+
+  /** Replace the group's admin set (MIP-01 `admin_pubkeys`) — admins only. */
+  async setAdmins(appGroupId: string, adminPubkeys: string[]): Promise<void> {
+    const mlsId = toMlsGroupId(appGroupId);
+    const members = new Set(
+      getGroupMembers((await this.client.groups.get(mlsId)).state).map((p) => p.toLowerCase()),
+    );
+    const admins = normaliseAdmins(adminPubkeys);
+    if (admins.length === 0) throw new LastAdminError();
+    if (admins.some((p) => !members.has(p))) throw new Error('marmot: an admin must be a member');
+    // An admin-only update yields exactly one admin-policy proposal.
+    await this.commit(
+      mlsId,
+      spreadProposals(Proposals.proposeUpdateMetadata({ adminPubkeys: admins }), 1),
+    );
     this.emitGroupsChanged();
   }
 

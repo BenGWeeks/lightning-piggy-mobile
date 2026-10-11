@@ -1,7 +1,7 @@
 import React from 'react';
 import { ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
-import { Check, UserPlus, UserRound, X } from 'lucide-react-native';
+import { Check, Ellipsis, UserPlus, UserRound, X } from 'lucide-react-native';
 import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 import type { GroupMembersSheetStyles } from '../styles/GroupMembersSheet.styles';
@@ -13,6 +13,10 @@ interface Props {
   styles: GroupMembersSheetStyles;
   colors: Palette;
   canRemove: boolean;
+  /** Marmot only: this member is in the group's `admin_pubkeys`. */
+  isAdmin: boolean;
+  /** An admin action on this row is committing — admin changes are single-flight. */
+  adminActionsDisabled?: boolean;
   /** This row's Follow is publishing. */
   followPending: boolean;
   /** Another row's Follow is publishing — follows are single-flight. */
@@ -20,12 +24,15 @@ interface Props {
   onPress?: (member: GroupMemberRow) => void;
   onRemove: (member: GroupMemberRow) => void;
   onFollow: (member: GroupMemberRow) => void;
+  /** Present = the viewer may change this member's admin status ("⋯" menu). */
+  onAdminActions?: (member: GroupMemberRow) => void;
 }
 
 /**
  * One member row in `GroupMembersSheet`: avatar, name, follow status
  * (Following marker / Follow button, never on the self row — #1268) and the
- * admin-only Remove button. Memoised; every handler takes the row back so the
+ * admin-only Remove button, plus (Marmot) an Admin badge and the admin-only
+ * "⋯" admin menu. Memoised; every handler takes the row back so the
  * parent can pass stable callbacks.
  */
 const GroupMemberListRow: React.FC<Props> = ({
@@ -33,11 +40,14 @@ const GroupMemberListRow: React.FC<Props> = ({
   styles,
   colors,
   canRemove,
+  isAdmin,
+  adminActionsDisabled = false,
   followPending,
   followDisabled,
   onPress,
   onRemove,
   onFollow,
+  onAdminActions,
 }) => {
   const t = useTranslation();
   const tid = member.pubkey.slice(0, 12);
@@ -63,10 +73,24 @@ const GroupMemberListRow: React.FC<Props> = ({
           <UserRound size={22} color={colors.textBody} strokeWidth={1.75} />
         )}
       </View>
-      <Text style={styles.rowName} numberOfLines={1}>
-        {member.name}
-        {member.isSelf ? <Text style={styles.youTag}>{t('groupMembersSheet.youTag')}</Text> : null}
-      </Text>
+      <View style={styles.rowNameWrap}>
+        <Text style={styles.rowName} numberOfLines={1}>
+          {member.name}
+          {member.isSelf ? (
+            <Text style={styles.youTag}>{t('groupMembersSheet.youTag')}</Text>
+          ) : null}
+        </Text>
+        {isAdmin ? (
+          <View
+            style={styles.adminBadge}
+            accessible
+            accessibilityLabel={t('groupMembersSheet.adminA11y', { name: member.name })}
+            testID={`group-member-admin-badge-${tid}`}
+          >
+            <Text style={styles.adminBadgeText}>{t('groupMembersSheet.admin')}</Text>
+          </View>
+        ) : null}
+      </View>
       {member.isSelf ? null : member.following ? (
         <View
           style={styles.followingMarker}
@@ -98,6 +122,20 @@ const GroupMemberListRow: React.FC<Props> = ({
           )}
         </TouchableOpacity>
       )}
+      {onAdminActions ? (
+        <TouchableOpacity
+          style={[styles.actionsButton, adminActionsDisabled && styles.followButtonDisabled]}
+          onPress={() => onAdminActions(member)}
+          disabled={adminActionsDisabled}
+          accessibilityRole="button"
+          accessibilityLabel={t('groupMembersSheet.adminActions', { name: member.name })}
+          accessibilityState={{ disabled: adminActionsDisabled }}
+          testID={`group-member-actions-${tid}`}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Ellipsis size={18} color={colors.textBody} strokeWidth={2.5} />
+        </TouchableOpacity>
+      ) : null}
       {canRemove && !member.isSelf ? (
         <TouchableOpacity
           style={styles.removeButton}

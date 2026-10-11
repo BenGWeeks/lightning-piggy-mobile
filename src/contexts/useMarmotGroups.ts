@@ -54,6 +54,7 @@ export interface MarmotGroupsApi {
   rename: (groupId: string, name: string) => Promise<boolean>;
   addMembers: (groupId: string, pubkeys: string[]) => Promise<Group | null>;
   removeMember: (groupId: string, pubkey: string) => Promise<Group | null>;
+  setAdmins: (groupId: string, adminPubkeys: string[]) => Promise<void>;
   leave: (groupId: string) => Promise<void>;
 }
 
@@ -315,10 +316,14 @@ export function useMarmotGroups(
     },
     [session, current],
   );
+  const setAdmins = useCallback(
+    (groupId: string, adminPubkeys: string[]) => session().setAdmins(groupId, adminPubkeys),
+    [session],
+  );
   const leave = useCallback((groupId: string) => session().leave(groupId), [session]);
 
   return useMemo(
-    () => ({ groups, create, rename, addMembers, removeMember, leave }),
-    [groups, create, rename, addMembers, removeMember, leave],
+    () => ({ groups, create, rename, addMembers, removeMember, setAdmins, leave }),
+    [groups, create, rename, addMembers, removeMember, setAdmins, leave],
   );
 }
