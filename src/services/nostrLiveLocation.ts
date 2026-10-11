@@ -1,10 +1,93 @@
+import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
+import { generateSecretKey, getPublicKey } from 'nostr-tools';
 import type { Filter } from 'nostr-tools/filter';
 import * as nip04 from 'nostr-tools/nip04';
+import { nip44Decrypt, nip44Encrypt, nostrFinalizeEvent } from './nostrCrypto';
 import { pool, trackRelays } from './nostrService';
+import { LIVE_LOCATION_PING_KIND, type LiveUpdateKey } from './liveLocationService';
 
 // Ephemeral kind-20069 live-location ping helpers (#206). Extracted from
-// nostrService (#703 — keep that over-cap file from growing); behaviour is
-// unchanged.
+// nostrService (#703 — keep that over-cap file from growing).
+//
+// Two update shapes exist on the relays:
+//   - session-key updates (#1300, current): signed by a throwaway per-session
+//     key, NO tags, NIP-44 encrypted under a secret shared in the start marker
+//     — relays learn neither sender, recipient nor session, and neither side
+//     needs a signer (so Amber / NIP-46 work in the background);
+//   - legacy pings (older builds): signed by the user, `p` + `d` tags, NIP-04.
+
+/** A NIP-17 share's update channel, including the session's secret key. */
+export interface LiveUpdateChannel extends LiveUpdateKey {
+  /** Hex secret key of the session pubkey — sender side only. */
+  sessionSecretKey: string;
+}
+
+/** Mint a fresh update channel for a new NIP-17 share. */
+export function newLiveUpdateChannel(): LiveUpdateChannel {
+  const sk = generateSecretKey();
+  return {
+    pubkey: getPublicKey(sk),
+    secret: bytesToHex(generateSecretKey()),
+    sessionSecretKey: bytesToHex(sk),
+  };
+}
+
+/** Sign + encrypt one session-key update (no tags, no user identity). */
+export function createSessionLiveUpdateEvent(
+  channel: LiveUpdateChannel,
+  payloadJson: string,
+  nowSec: number = Math.floor(Date.now() / 1000),
+) {
+  return nostrFinalizeEvent(
+    {
+      kind: LIVE_LOCATION_PING_KIND,
+      created_at: nowSec,
+      tags: [],
+      content: nip44Encrypt(payloadJson, hexToBytes(channel.secret)),
+    },
+    hexToBytes(channel.sessionSecretKey),
+  );
+}
+
+/** Decrypt a session-key update's content; null if it doesn't decrypt. */
+export function decryptSessionLiveUpdate(secretHex: string, content: string): string | null {
+  try {
+    return nip44Decrypt(content, hexToBytes(secretHex));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * ONE relay REQ for the session-key updates of every watched NIP-17 share:
+ * `authors` = the session pubkeys announced in their start markers. Bounded
+ * by `since` (earliest share start) and `limit`.
+ */
+export function subscribeSessionLiveUpdates(input: {
+  sessionPubkeys: string[];
+  since: number;
+  relays: string[];
+  onEvent: (ev: { pubkey: string; content: string; created_at: number }) => void;
+}): () => void {
+  if (input.sessionPubkeys.length === 0) return () => {};
+  trackRelays(input.relays);
+  const filter: Filter = {
+    kinds: [LIVE_LOCATION_PING_KIND],
+    authors: input.sessionPubkeys,
+    since: input.since,
+    limit: 50,
+  };
+  const sub = pool.subscribeMany(input.relays, filter, {
+    onevent: (ev) => input.onEvent(ev),
+  });
+  return () => {
+    try {
+      sub.close();
+    } catch {
+      // best-effort
+    }
+  };
+}
 
 /**
  * Build an ephemeral kind-20069 live-location ping. Body is NIP-04
@@ -39,54 +122,8 @@ export async function createLiveLocationPingEvent(
 }
 
 /**
- * Subscribe to ephemeral kind-N events for the viewer's pubkey, filtered
- * by sessionId. `since` is set to the live-share start time so we don't
- * pick up stale pings if a relay (incorrectly) cached one — a defensive
- * measure since spec-conformant relays will drop ephemerals on disconnect
- * but real-world relays sometimes hold them briefly in memory.
- *
- * Returns an unsubscribe function. The caller is responsible for
- * decrypting the inbound event content with their own secret key.
- */
-export function subscribeLiveLocationPings(input: {
-  viewerPubkey: string;
-  senderPubkey: string;
-  sessionId: string;
-  kind: number;
-  /** Unix epoch SECONDS — defaults to now-60 to cope with clock drift. */
-  since?: number;
-  relays: string[];
-  onEvent: (ev: {
-    id: string;
-    pubkey: string;
-    kind: number;
-    created_at: number;
-    tags: string[][];
-    content: string;
-  }) => void;
-}): () => void {
-  trackRelays(input.relays);
-  const filter: Filter = {
-    kinds: [input.kind],
-    authors: [input.senderPubkey],
-    '#p': [input.viewerPubkey],
-    '#d': [input.sessionId],
-    since: input.since ?? Math.floor(Date.now() / 1000) - 60,
-  };
-  const sub = pool.subscribeMany(input.relays, filter, {
-    onevent: (ev) => input.onEvent(ev),
-  });
-  return () => {
-    try {
-      sub.close();
-    } catch {
-      // best-effort
-    }
-  };
-}
-
-/**
- * Subscribe to live-location pings for MANY sessions over a SINGLE relay REQ.
+ * LEGACY receive path (shares started by older builds): subscribe to
+ * author-signed NIP-04 pings for MANY sessions over a SINGLE relay REQ.
  * The full-Map "friends sharing with me" layer can watch a dozen concurrent
  * inbound shares; opening one REQ per session (as the per-conversation viewer
  * does for its handful) floods relays — nos.lol / Primal reject with "too many
@@ -124,6 +161,7 @@ export function subscribeLiveLocationPingsMulti(input: {
     '#p': [input.viewerPubkey],
     '#d': input.sessionIds,
     since: input.since,
+    limit: 50,
   };
   const sub = pool.subscribeMany(input.relays, filter, {
     onevent: (ev) => input.onEvent(ev),
