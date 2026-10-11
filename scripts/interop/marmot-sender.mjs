@@ -72,7 +72,12 @@ if (!flags.state) die('--state <file> is required');
 
 const nsec = process.env.INTEROP_NSEC;
 if (!nsec?.startsWith('nsec1')) die('set INTEROP_NSEC to a test Piggy nsec (never printed)');
-const sk = nip19.decode(nsec).data;
+let sk;
+try {
+  sk = nip19.decode(nsec).data;
+} catch {
+  die('INTEROP_NSEC is not a valid nsec'); // never echo the decoder's message: it contains the key
+}
 const pk = getPublicKey(sk);
 const log = (...a) => console.error(new Date().toISOString().slice(11, 19), ...a);
 
@@ -205,7 +210,9 @@ async function openGroup() {
 /** Subscribe and give the group a moment to catch up on other members'
  * commits (a stale epoch would make our sends undecryptable for them). */
 async function connectAndSettle(seconds = Number(flags.settle ?? 8)) {
-  client.groups.connectAll({ fallbackRelays: RELAYS });
+  // Only this run's group: connecting every stored group would consume other
+  // runs' messages without anything recording them.
+  await client.groups.connect(run.groupId, { fallbackRelays: RELAYS });
   await new Promise((r) => setTimeout(r, seconds * 1000));
 }
 
@@ -223,16 +230,19 @@ async function freshKeyPackages(target, clientFilter) {
     since,
     limit: 50,
   });
+  // Newest event per slot first — an empty newest event means the slot was
+  // retired, and an older copy from a lagging relay must not resurrect it.
   const bySlot = new Map();
   for (const e of events) {
-    const clientTag = e.tags.find((t) => t[0] === 'client')?.[1] ?? '';
-    if (clientFilter && !clientTag.toLowerCase().includes(clientFilter.toLowerCase())) continue;
-    if (!e.content) continue; // a retired slot (empty replacement)
     const slot = e.tags.find((t) => t[0] === 'd')?.[1] ?? e.id;
     const prev = bySlot.get(slot);
     if (!prev || e.created_at > prev.created_at) bySlot.set(slot, e);
   }
-  return [...bySlot.values()];
+  return [...bySlot.values()].filter((e) => {
+    if (!e.content) return false;
+    const clientTag = e.tags.find((t) => t[0] === 'client')?.[1] ?? '';
+    return !clientFilter || clientTag.toLowerCase().includes(clientFilter.toLowerCase());
+  });
 }
 
 async function cmdCreate() {
@@ -278,17 +288,27 @@ async function cmdCreate() {
       }
     }
   }
+  const delivered = new Set();
   if (welcomeRecipients.length) {
-    await client.groups.send(group.id, {
+    const results = await client.groups.send(group.id, {
       kind: 'commit',
       actorPubkey: pk,
       extraProposals,
       welcomeRecipients,
     });
+    for (const r of Array.isArray(results) ? results : [results]) {
+      if (r?.welcomeDelivery?.kind !== 'attempted') continue;
+      for (const o of r.welcomeDelivery.outcomes) {
+        if (o.kind === 'succeeded') delivered.add(o.recipient.pubkey.toLowerCase());
+        else log(`Welcome to ${o.recipient.pubkey.slice(0, 8)} failed: ${o.error}`);
+      }
+    }
   }
-  Object.assign(run, { groupId: group.idStr, name, dm, sender: pk, invited, items: {} });
+  const unreached = targets.map((t) => t.hex).filter((h) => !delivered.has(h));
+  Object.assign(run, { groupId: group.idStr, name, dm, sender: pk, invited, unreached, items: {} });
   saveRun(run);
-  out({ ok: invited.length > 0, groupId: group.idStr, name, invited });
+  out({ ok: unreached.length === 0, groupId: group.idStr, name, invited, unreached });
+  if (unreached.length) process.exit(1);
 }
 
 async function cmdSend() {
@@ -379,7 +399,7 @@ async function cmdListen() {
     });
     if (expects.length && expects.every((e) => e.hit)) finish();
   });
-  client.groups.connectAll({ fallbackRelays: RELAYS });
+  await client.groups.connect(group.id, { fallbackRelays: RELAYS });
   const finish = () => {
     out({
       done: true,
