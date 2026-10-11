@@ -7,8 +7,9 @@
  * external fetcher): connect + EOSE time, NIP-11, whether an unknown key may
  * write, and how far back the relay serves events. Rules:
  *  - every list has at least 3 healthy relays run by different operators;
- *  - nos.lol / nostr.mom (one server, down at the time of writing) only appear
- *    as an extra alongside enough healthy relays, never as a list's backbone;
+ *  - nos.lol / nostr.mom (one server, intermittently unreachable /
+ *    rate-limited for some IPs) only appear as an extra alongside enough
+ *    healthy relays, never as a list's backbone;
  *  - relay.nostr.band, relay.nostr.net and relay.nsec.app are gone (dead);
  *  - relay.snort.social isn't used: it's an in-memory relay (memlay) that
  *    serves nothing older than about an hour.

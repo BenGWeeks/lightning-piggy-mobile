@@ -246,7 +246,8 @@ Piggy's APNs/FCM credentials to deliver); its relay hint is the first relay of
 its kind-10050 list. The built-in servers carry *no* relay hint: White Noise
 (MDK) sends a trigger only to the record's hint when it has one, so a hint pins
 it to that relay until each member re-signs (the old fixed `wss://nos.lol` hint
-went dead with nos.lol); our own notifier sends to the hints *and* the server's
+stranded every trigger, because our self-hosted servers can't reach nos.lol from
+their IP); our own notifier sends to the hints *and* the server's
 10050. Without one,
 senders look up the server's kind-10050 — currently `relay.eu.whitenoise.chat`,
 `relay.ditto.pub`, `relay.coinos.io` and `relay.primal.net`, which the servers

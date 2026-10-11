@@ -61,7 +61,7 @@ describe('publishToWatcher', () => {
     ]);
     mockPublish.mockReturnValue([Promise.reject(new Error('blocked')), Promise.resolve('ok')]);
     await expect(publishToWatcher(wrap)).resolves.toBe(true);
-    // Looked up on the watcher's own relays — never damus (AUTH-gated) or nos.lol (down).
+    // Looked up on the watcher's own relays — never damus (AUTH-gated) or nos.lol (unreachable from the watcher's IP).
     expect(mockQuerySync.mock.calls[0][0]).toEqual(WATCHER_DEFAULT_RELAYS);
     expect(mockQuerySync.mock.calls[0][1]).toEqual({
       kinds: [10050],

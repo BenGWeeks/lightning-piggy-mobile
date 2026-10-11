@@ -12,7 +12,7 @@ import { MARKET_RELAYS } from '../utils/marketListingsQuery';
 import { RELAY_LIST_INDEXERS } from '../utils/relayListEvents';
 
 const DEAD_RELAYS = ['relay.nostr.band', 'relay.nostr.net', 'relay.nsec.app'];
-/** Down at the time of writing (one server); allowed only as an extra. */
+/** Intermittently unreachable / rate-limited for some IPs (one server); allowed only as an extra. */
 const UNRELIABLE_RELAYS = ['nos.lol', 'nostr.mom'];
 /** In-memory relay with ~1 h retention: useless as a default store. */
 const NOT_A_STORE = ['relay.snort.social'];

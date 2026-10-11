@@ -64,9 +64,10 @@ export interface PushServer {
  * hint when it has one, and looks up the server's kind-10050 inbox only when
  * it doesn't (our MarmotPushNotifier sends to both). A hint baked into the
  * signed records pins those senders to that relay until each member re-signs
- * (nos.lol went down and took every trigger with it). Without one, the
- * server's relays are a server-side change (its subscriptions + its 10050)
- * with nothing to re-sign — e.g. moving to a relay Lightning Piggy hosts.
+ * (our servers can't reach nos.lol from their self-hosted IP, so every
+ * trigger sent there was lost). Without one, the server's relays are a
+ * server-side change (its subscriptions + its 10050) with nothing to
+ * re-sign — e.g. moving to a relay Lightning Piggy hosts.
  * Dropping the old hint makes each group's record re-sign once
  * (MarmotPushRegistrar compares the hint).
  *

@@ -85,7 +85,7 @@ describe('MarmotPushNotifier', () => {
   it("a stale hint on one device's record doesn't strand a hint-less device on the same server", async () => {
     const { notifier, published, group, settle } = setup();
     const g = group([leafKey(bob, 1), leafKey(bob, 2)]);
-    // An older build still advertising the dead nos.lol, and a current build with no hint.
+    // An older build still advertising nos.lol (unreachable from our servers' IP), and a current build with no hint.
     await notifier.ingest(g, 448, tokenPayload({ leaf: 1, relayHint: 'wss://nos.lol' }));
     await notifier.ingest(g, 448, tokenPayload({ leaf: 2 }));
     notifier.trigger(g);

@@ -122,8 +122,9 @@ export class MarmotPushNotifier {
         if (this.stopped) return;
         // The records' relay hints AND the server's own 10050 inbox — never a
         // default relay. One wrap carries every token for this server, so a
-        // stale hint (older builds advertised nos.lol, now down) must not
-        // swallow the trigger for the records that carry no hint.
+        // stale hint (older builds advertised nos.lol, which our self-hosted
+        // servers can't reach from their IP) must not swallow the trigger for
+        // the records that carry no hint.
         const inbox = await inboxes[i];
         const relays = [...new Set([...relayHints, ...inbox])];
         if (relays.length === 0) continue;
