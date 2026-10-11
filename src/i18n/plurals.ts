@@ -40,6 +40,33 @@ export const CARDINAL_RULES = {
 
 export type PluralLocale = keyof typeof CARDINAL_RULES;
 
+const CLDR_ORDER: PluralCategory[] = ['zero', 'one', 'two', 'few', 'many', 'other'];
+
+export function isPluralLocale(locale: string): locale is PluralLocale {
+  return Object.prototype.hasOwnProperty.call(CARDINAL_RULES, locale);
+}
+
+/**
+ * The plural forms a catalogue for `locale` must define: every CLDR category
+ * a whole-number count (0–200) can select, plus `other` (always the final
+ * fallback), in CLDR order. e.g. uk/pl → one, few, many, other; de/hu/hi/mr →
+ * one, other; zh-Hans → other. Edge categories real counts never hit (Spanish
+ * `many` for exact millions) are left to the `other` fallback.
+ *
+ * Single source of truth shared by the runtime tests (catalogues.test.ts) and
+ * the catalogue sync tooling, so the two can never disagree. Throws for a
+ * locale without a rule, so a new language can't silently skip plurals.
+ */
+export function requiredPluralCategories(locale: string): PluralCategory[] {
+  if (!isPluralLocale(locale)) {
+    throw new Error(`No CLDR plural rule for "${locale}" — add it to CARDINAL_RULES`);
+  }
+  const rule = CARDINAL_RULES[locale];
+  const needed = new Set<PluralCategory>(['other']);
+  for (let n = 0; n <= 200; n++) needed.add(rule(n));
+  return CLDR_ORDER.filter((c) => needed.has(c));
+}
+
 /**
  * Ordered list of plural keys i18n-js should try for `count` in `locale`;
  * it uses the first one the catalogue entry defines.

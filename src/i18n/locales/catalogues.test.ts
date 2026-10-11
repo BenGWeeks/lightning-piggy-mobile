@@ -1,5 +1,5 @@
 import { SUPPORTED_LOCALES, translations } from '..';
-import { CARDINAL_RULES } from '../plurals';
+import { CARDINAL_RULES, requiredPluralCategories } from '../plurals';
 
 type Tree = { [key: string]: string | Tree };
 
@@ -120,12 +120,7 @@ describe.each(others)('%s catalogue', (locale) => {
   });
 
   it('defines every plural form a whole-number count can need (CLDR)', () => {
-    // Categories real counts (0-200) hit, e.g. one/few/many for Polish and
-    // Ukrainian. Edge categories such as Spanish `many` (exact millions,
-    // "1.000.000 de …") are left to the `other` fallback in plurals.ts.
-    const rule = CARDINAL_RULES[locale];
-    const needed = new Set<string>(['other']);
-    for (let n = 0; n <= 200; n++) needed.add(rule(n));
+    const needed = requiredPluralCategories(locale);
     const errors: string[] = [];
     for (const [path, node] of pluralObjects(tree)) {
       for (const category of needed) {

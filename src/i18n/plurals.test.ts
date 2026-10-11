@@ -4,6 +4,7 @@ import {
   CARDINAL_RULES,
   pinCountlessSingulars,
   pluralKeys,
+  requiredPluralCategories,
   registerPluralRules,
   type PluralLocale,
 } from './plurals';
@@ -147,4 +148,60 @@ describe('catalogue plurals end to end', () => {
       'Remove 2 old devices',
     );
   });
+});
+
+describe('requiredPluralCategories (shared with the catalogue tooling)', () => {
+  it.each([
+    ['uk', ['one', 'few', 'many', 'other']],
+    ['pl', ['one', 'few', 'many', 'other']],
+    ['de', ['one', 'other']],
+    ['hu', ['one', 'other']],
+    ['hi', ['one', 'other']],
+    ['mr', ['one', 'other']],
+    ['es', ['one', 'other']],
+    ['en', ['one', 'other']],
+    ['zh-Hans', ['other']],
+  ])('%s needs %j', (locale, expected) => {
+    expect(requiredPluralCategories(locale)).toEqual(expected);
+  });
+
+  it('throws for a locale without a CLDR rule', () => {
+    expect(() => requiredPluralCategories('fr')).toThrow(/No CLDR plural rule/);
+  });
+});
+
+// Through the real translate path: createI18nInstance is what LocaleContext
+// renders with (useLocale().t), so this is the runtime, not a helper.
+describe('runtime translate picks the CLDR form (1 / 2 / 5 / 21 / 22)', () => {
+  const COUNTS_RT = [1, 2, 5, 21, 22];
+  it.each([
+    ['uk', ['1 відгук', '2 відгуки', '5 відгуків', '21 відгук', '22 відгуки']],
+    ['pl', ['1 opinia', '2 opinie', '5 opinii', '21 opinii', '22 opinie']],
+    ['de', ['1 Bewertung', '2 Bewertungen', '5 Bewertungen', '21 Bewertungen', '22 Bewertungen']],
+    ['hu', ['1 értékelés', '2 értékelés', '5 értékelés', '21 értékelés', '22 értékelés']],
+    ['zh-Hans', ['1条评价', '2条评价', '5条评价', '21条评价', '22条评价']],
+    ['hi', ['1 रिव्यू', '2 रिव्यू', '5 रिव्यू', '21 रिव्यू', '22 रिव्यू']],
+    ['mr', ['1 रिव्ह्यू', '2 रिव्ह्यू', '5 रिव्ह्यू', '21 रिव्ह्यू', '22 रिव्ह्यू']],
+  ] as const)('%s market.reviews.count', (locale, expected) => {
+    const t = createI18nInstance(locale);
+    expect(COUNTS_RT.map((count) => t.t('market.reviews.count', { count }))).toEqual(expected);
+  });
+
+  // hu / hi / mr nouns don't change form, so prove the category choice on the
+  // very instance the app uses: its registered pluralizer must follow CLDR.
+  it.each(['uk', 'pl', 'hu', 'de', 'zh-Hans', 'hi', 'mr'] as const)(
+    '%s instance has the CLDR pluralizer registered',
+    (locale) => {
+      const instance = createI18nInstance(locale);
+      const pluralizer = instance.pluralization.get(locale);
+      for (const n of [0, ...COUNTS_RT]) {
+        expect(pluralizer(instance, n)).toContain(CARDINAL_RULES[locale](n));
+      }
+      // Not i18n-js's English default: Ukrainian 22 is `few`, Chinese 1 is `other`.
+      if (locale === 'uk') expect(pluralizer(instance, 22)[0]).toBe('few');
+      if (locale === 'zh-Hans') {
+        expect(pluralizer(instance, 1).filter((k) => k !== '=1')[0]).toBe('other');
+      }
+    },
+  );
 });

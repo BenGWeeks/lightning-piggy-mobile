@@ -1928,9 +1928,9 @@
     "input": "Ocena",
     "rate": {
       "one": "Oceń na {{count}} gwiazdkę",
-      "other": "Oceń na {{count}} gwiazdki",
       "few": "Oceń na {{count}} gwiazdki",
-      "many": "Oceń na {{count}} gwiazdek"
+      "many": "Oceń na {{count}} gwiazdek",
+      "other": "Oceń na {{count}} gwiazdki"
     }
   },
   "tipSheet": {
@@ -2303,9 +2303,9 @@
       "loadError": "Nie udało się wczytać opinii",
       "count": {
         "one": "{{count}} opinia",
-        "other": "{{count}} opinii",
         "few": "{{count}} opinie",
-        "many": "{{count}} opinii"
+        "many": "{{count}} opinii",
+        "other": "{{count}} opinii"
       },
       "yours": "Ten produkt został przez ciebie oceniony",
       "editOpen": "Edytuj opinię",
@@ -2596,9 +2596,9 @@
     "liveTitle": "Udostępnić swoją lokalizację na żywo? Odbiorca: {{name}}",
     "groupTitle": {
       "one": "Udostępnić swoją lokalizację drugiej osobie w grupie {{group}}?",
-      "other": "Udostępnić swoją lokalizację osobom w grupie {{group}} (liczba: {{count}})?",
       "few": "Udostępnić swoją lokalizację {{count}} osobom w grupie {{group}}?",
-      "many": "Udostępnić swoją lokalizację {{count}} osobom w grupie {{group}}?"
+      "many": "Udostępnić swoją lokalizację {{count}} osobom w grupie {{group}}?",
+      "other": "Udostępnić swoją lokalizację osobom w grupie {{group}} (liczba: {{count}})?"
     },
     "warning": "Udostępniaj lokalizację tylko osobom, które znasz i którym ufasz. Twoja wiadomość jest szyfrowana end-to-end, a odbiorcy zobaczą podgląd mapy z OpenStreetMap.",
     "cancel": "Anuluj",
@@ -2632,15 +2632,15 @@
     "updatedJustNow": "Ostatnia aktualizacja: przed chwilą",
     "updatedHours": {
       "one": "Ostatnia aktualizacja: %{count} godzinę temu",
-      "other": "Ostatnia aktualizacja: %{count} godziny temu",
       "few": "Ostatnia aktualizacja: %{count} godziny temu",
-      "many": "Ostatnia aktualizacja: %{count} godzin temu"
+      "many": "Ostatnia aktualizacja: %{count} godzin temu",
+      "other": "Ostatnia aktualizacja: %{count} godziny temu"
     },
     "updatedDays": {
       "one": "Ostatnia aktualizacja: %{count} dzień temu",
-      "other": "Ostatnia aktualizacja: %{count} dnia temu",
       "few": "Ostatnia aktualizacja: %{count} dni temu",
-      "many": "Ostatnia aktualizacja: %{count} dni temu"
+      "many": "Ostatnia aktualizacja: %{count} dni temu",
+      "other": "Ostatnia aktualizacja: %{count} dnia temu"
     },
     "details": "Szczegóły",
     "detailsA11y": "Pokaż szczegóły urządzenia: %{device}",
@@ -2650,9 +2650,9 @@
     "unknownExpiry": "nieznane",
     "versions": {
       "one": "%{count} kopia znaleziona na przekaźnikach",
-      "other": "%{count} kopii znalezionej na przekaźnikach",
       "few": "%{count} kopie znalezione na przekaźnikach",
-      "many": "%{count} kopii znalezionych na przekaźnikach"
+      "many": "%{count} kopii znalezionych na przekaźnikach",
+      "other": "%{count} kopii znalezionej na przekaźnikach"
     },
     "relays": "Udostępniono na:\n%{relays}",
     "refresh": "Odśwież",
@@ -2669,31 +2669,31 @@
     "removeOld": {
       "zero": "Usuń stare urządzenia",
       "one": "Usuń %{count} stare urządzenie",
-      "other": "Usuń %{count} starego urządzenia",
       "few": "Usuń %{count} stare urządzenia",
-      "many": "Usuń %{count} starych urządzeń"
+      "many": "Usuń %{count} starych urządzeń",
+      "other": "Usuń %{count} starego urządzenia"
     },
     "removeOldA11y": {
       "zero": "Usuń stare urządzenia. Brak do usunięcia",
       "one": "Usuń %{count} stare urządzenie",
-      "other": "Usuń %{count} starego urządzenia",
       "few": "Usuń %{count} stare urządzenia",
-      "many": "Usuń %{count} starych urządzeń"
+      "many": "Usuń %{count} starych urządzeń",
+      "other": "Usuń %{count} starego urządzenia"
     },
     "removeOldHint": "Stare urządzenia nie zaktualizowały klucza zaproszenia od 30 dni lub klucz wygasł. Ten telefon nigdy nie jest usuwany.",
     "removeOldTitle": {
       "one": "Usunąć %{count} stare urządzenie?",
-      "other": "Usunąć %{count} starego urządzenia?",
       "few": "Usunąć %{count} stare urządzenia?",
-      "many": "Usunąć %{count} starych urządzeń?"
+      "many": "Usunąć %{count} starych urządzeń?",
+      "other": "Usunąć %{count} starego urządzenia?"
     },
     "removeOldBody": "Nowe czaty przestaną trafiać na urządzenia, które nie były aktualizowane od 30 dni. Urządzenie, które zaktualizuje się przed zakończeniem, zostanie zachowane. Istniejące czaty nie ulegną zmianie.",
     "removeOldConfirm": "Usuń",
     "removedOld": {
       "one": "Usunięto %{count} stare urządzenie",
-      "other": "Usunięto %{count} starego urządzenia",
       "few": "Usunięto %{count} stare urządzenia",
-      "many": "Usunięto %{count} starych urządzeń"
+      "many": "Usunięto %{count} starych urządzeń",
+      "other": "Usunięto %{count} starego urządzenia"
     },
     "nothingRemoved": "Nic nie usunięto: te urządzenia zdążyły się zaktualizować",
     "signerApprovals": "Twoja aplikacja podpisująca poprosi o zatwierdzenie (liczba próśb: %{count}).",
