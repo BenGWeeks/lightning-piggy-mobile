@@ -49,6 +49,8 @@ import FriendPickerSheet from '../components/FriendPickerSheet';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import type { ContactProfileBodyData } from '../components/ContactProfileBody';
 import MessageBubble from '../components/MessageBubble';
+import LiveLocationDurationPicker from '../components/LiveLocationDurationPicker';
+import { useGroupLiveLocation } from '../hooks/useGroupLiveLocation';
 import MessageActionsSheet from '../components/MessageActionsSheet';
 import { useMessageActionsMenu, type ActionedMessage } from '../hooks/useMessageActionsMenu';
 import { isMarmotGroupId } from '../services/marmotSession';
@@ -476,6 +478,16 @@ const GroupConversationScreen: React.FC = () => {
       .filter((m) => m.content.kind !== 'pollVote');
   }, [messages, myPubkey, memberNameByPubkey]);
 
+  // Live location (#1300): chooser + live bubbles' read models (Marmot groups).
+  const liveLoc = useGroupLiveLocation({
+    groupId: group?.id ?? null,
+    marmotGroupId,
+    groupName: group?.name ?? '',
+    messages: classifiedMessages,
+    handleShareLocation,
+    closeAttachPanel,
+  });
+
   // Text-encoded group polls: tallies + send / vote (see useGroupPolls).
   const { pollAggregates, handleSendPoll, handleVotePoll } = useGroupPolls(
     messages,
@@ -517,6 +529,10 @@ const GroupConversationScreen: React.FC = () => {
           onPayLightningAddress={handlePayInvoice}
           onOpenContact={openSharedContact}
           onOpenLocation={openLocation}
+          liveLocationLatest={liveLoc.liveLocationLatest}
+          liveLocationStatus={liveLoc.liveLocationBubbleStatus}
+          liveLocationRemainingMs={liveLoc.liveLocationBubbleRemaining}
+          onStopLiveLocation={liveLoc.stopLive}
           onOpenGifFullscreen={setFullscreenGifUrl}
           pollAggregates={pollAggregates}
           onVotePoll={handleVotePoll}
@@ -559,6 +575,10 @@ const GroupConversationScreen: React.FC = () => {
       handlePayInvoice,
       openSharedContact,
       openLocation,
+      liveLoc.liveLocationLatest,
+      liveLoc.liveLocationBubbleStatus,
+      liveLoc.liveLocationBubbleRemaining,
+      liveLoc.stopLive,
       pollAggregates,
       handleVotePoll,
       handleToggleSecretMode,
@@ -738,7 +758,7 @@ const GroupConversationScreen: React.FC = () => {
           }}
           attachPanel={
             <AttachPanel
-              onShareLocation={handleShareLocation}
+              onShareLocation={liveLoc.openLocation}
               onSendImage={handlePickAndSendImage}
               onTakePhoto={handleTakeAndSendPhoto}
               onSendGif={isGifConfigured() ? () => setGifPickerOpen(true) : undefined}
@@ -772,6 +792,13 @@ const GroupConversationScreen: React.FC = () => {
           }
         />
       </View>
+
+      <LiveLocationDurationPicker
+        visible={liveLoc.pickerOpen}
+        onClose={liveLoc.closePicker}
+        onChooseSnapshot={liveLoc.shareSnapshot}
+        onChooseLive={liveLoc.shareLive}
+      />
 
       <VoiceRecordingSheet
         visible={voiceSheetOpen}

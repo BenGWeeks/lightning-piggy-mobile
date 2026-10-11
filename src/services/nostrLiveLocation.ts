@@ -1,7 +1,6 @@
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import { generateSecretKey, getPublicKey } from 'nostr-tools';
 import type { Filter } from 'nostr-tools/filter';
-import * as nip04 from 'nostr-tools/nip04';
 import { nip44Decrypt, nip44Encrypt, nostrFinalizeEvent } from './nostrCrypto';
 import { pool, trackRelays } from './nostrService';
 import { LIVE_LOCATION_PING_KIND, type LiveUpdateKey } from './liveLocationService';
@@ -86,38 +85,6 @@ export function subscribeSessionLiveUpdates(input: {
     } catch {
       // best-effort
     }
-  };
-}
-
-/**
- * Build an ephemeral kind-20069 live-location ping. Body is NIP-04
- * encrypted with the sender's secret so only the recipient can read
- * the coordinates; tags carry `['p', recipient]` for relay routing
- * (mainstream relays index `#p`) and `['d', sessionId]` so the
- * receiver's subscription can filter by session — the same sender
- * may have multiple concurrent shares running to different peers.
- *
- * NIP-01 mandates that relays drop events in the 20000-29999 range
- * after fan-out, which is exactly what we want for a high-frequency
- * coordinate stream — no relay-side history to clutter the receiver
- * the next time they open the conversation.
- */
-export async function createLiveLocationPingEvent(
-  senderSecretKey: Uint8Array,
-  recipientPubkey: string,
-  sessionId: string,
-  payloadJson: string,
-  kind: number,
-): Promise<{ kind: number; created_at: number; tags: string[][]; content: string }> {
-  const ciphertext = await nip04.encrypt(senderSecretKey, recipientPubkey, payloadJson);
-  return {
-    kind,
-    created_at: Math.floor(Date.now() / 1000),
-    tags: [
-      ['p', recipientPubkey],
-      ['d', sessionId],
-    ],
-    content: ciphertext,
   };
 }
 
