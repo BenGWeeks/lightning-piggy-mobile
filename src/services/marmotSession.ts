@@ -56,6 +56,7 @@ import { KeyPackageRefreshRequests } from './marmotKeyRefresh';
 import { spreadProposals } from './marmotProposals';
 import { MarmotWelcomeOutbox } from './marmotWelcomeOutbox';
 import { boundGroupQueries } from './marmotGroupBackfill';
+import { submitWhenSettled, type GroupSendIntent } from './marmotSendGate';
 import { createMarmotNetwork, createPushTransport } from './marmotNetwork';
 import {
   leafKey,
@@ -90,6 +91,7 @@ const HISTORY_REPLAY_SECS = 7 * 24 * 60 * 60;
 const HISTORY_KEEP = 500;
 const historyNamespace = (groupIdHex: string) => `history:${groupIdHex}`;
 type SessionGroup = MarmotGroup<GroupRumorHistory>;
+type CommitProposals = ReturnType<typeof spreadProposals>;
 // Sign-out waits at most this long for an in-flight key-package publish.
 const KEY_PACKAGE_DRAIN_MS = 5_000;
 // A manual Refresh gives up after this (one run ahead of it + a signer prompt).
@@ -500,7 +502,25 @@ export class MarmotSession {
   private inviteAll(mlsId: string, devices: Map<string, NostrEvent[]>) {
     const progress = (done: number, total: number) =>
       this.listeners.forEach((l) => l.onInviteProgress?.({ done, total }));
-    return inviteDevices(this.client.groups, this.outbox, mlsId, this.pubkey, devices, progress);
+    const groups = {
+      get: (id: string) => this.client.groups.get(id),
+      send: (id: string, intent: GroupSendIntent) => this.sendIntent(id, intent),
+    };
+    return inviteDevices(groups, this.outbox, mlsId, this.pubkey, devices, progress);
+  }
+
+  /** Every outbound group intent goes through here: never queued inside
+   * marmot-ts, where a misfired settle check could strand it (#1280). */
+  private async sendIntent(mlsId: string, intent: GroupSendIntent, timeoutMs?: number) {
+    return submitWhenSettled(await this.client.groups.get(mlsId), intent, {
+      timeoutMs,
+      cancelled: () => this.gate.stopped,
+    });
+  }
+
+  private async commit(mlsId: string, extraProposals: CommitProposals): Promise<void> {
+    const actorPubkey = await this.client.signer.getPublicKey();
+    await this.sendIntent(mlsId, { kind: 'commit', actorPubkey, extraProposals });
   }
 
   async removeMember(appGroupId: string, member: string): Promise<void> {
@@ -509,17 +529,16 @@ export class MarmotSession {
     // One Remove per device leaf the member holds.
     const leaves = getPubkeyLeafNodeIndexes((await this.client.groups.get(mlsId)).state, pk);
     if (leaves.length === 0) return;
-    await this.client.groups.commit(mlsId, {
-      extraProposals: spreadProposals(Proposals.proposeRemoveUser(pk), leaves.length),
-    });
+    await this.commit(mlsId, spreadProposals(Proposals.proposeRemoveUser(pk), leaves.length));
     this.emitGroupsChanged();
   }
 
   async rename(appGroupId: string, name: string): Promise<void> {
-    await this.client.groups.commit(toMlsGroupId(appGroupId), {
-      // A name-only update yields exactly one group-profile proposal.
-      extraProposals: spreadProposals(Proposals.proposeUpdateMetadata({ name }), 1),
-    });
+    // A name-only update yields exactly one group-profile proposal.
+    await this.commit(
+      toMlsGroupId(appGroupId),
+      spreadProposals(Proposals.proposeUpdateMetadata({ name }), 1),
+    );
     this.emitGroupsChanged();
   }
 
@@ -571,11 +590,17 @@ export class MarmotSession {
     await this.backend.set(`mediaKeys:${toMlsGroupId(appGroupId)}`, rumorId, JSON.stringify(keys));
   }
 
-  /** Send an app event; resolves with relay URL → accepted. */
-  async sendRumor(appGroupId: string, rumor: MarmotRumor): Promise<Record<string, boolean>> {
-    const results = await this.client.groups.send(
+  /** Send an app event; resolves with relay URL → accepted. Rejects with
+   * MarmotGroupNotReadyError if the group is still mid-change (#1280). */
+  async sendRumor(
+    appGroupId: string,
+    rumor: MarmotRumor,
+    opts: { settleTimeoutMs?: number } = {},
+  ): Promise<Record<string, boolean>> {
+    const results = await this.sendIntent(
       toMlsGroupId(appGroupId),
       createApplicationMessageIntent(rumor),
+      opts.settleTimeoutMs,
     );
     const byRelay: Record<string, boolean> = {};
     for (const r of results) {

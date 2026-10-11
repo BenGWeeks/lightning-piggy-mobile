@@ -2462,7 +2462,8 @@
     "chatChangingPhoto": "Este chat está cambiando ahora mismo; intenta enviar la foto de nuevo.",
     "noRelayAcceptedVoice": "Ningún relay aceptó la nota de voz",
     "noRelayAcceptedPhoto": "Ningún relay aceptó la foto",
-    "inviteNotDelivered": "No pudimos enviar la invitación: ningún relay la aceptó. Revisa tu conexión e inténtalo de nuevo."
+    "inviteNotDelivered": "No pudimos enviar la invitación: ningún relay la aceptó. Revisa tu conexión e inténtalo de nuevo.",
+    "chatNotReady": "Este chat todavía se está poniendo al día con un cambio reciente, así que no se completó. Inténtalo de nuevo en un momento."
   },
   "signOutPrompt": {
     "walletsRemoved": "También se eliminarán de este teléfono las carteras conectadas a esta cuenta, incluidas las frases de recuperación guardadas aquí. Guarda sus frases de recuperación y datos de conexión por separado antes de cerrar sesión.",
