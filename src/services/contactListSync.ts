@@ -1,7 +1,6 @@
 import type { Filter } from 'nostr-tools/filter';
 import { verifyEvent, type Event as NostrEvent } from 'nostr-tools/pure';
-import { pool, trackRelays } from './nostrPool';
-import { isRelayFailureReason } from './relayQuery';
+import { pool } from './nostrPool';
 import { LP_CLIENT_TAG } from './nip89ClientTag';
 import { tagsToContacts } from '../utils/contacts';
 import { normalizePubkey } from '../utils/pubkey';
@@ -31,12 +30,12 @@ export type ContactListFetchResult =
   /** Newest signature-verified kind-3 from the relays. */
   | { status: 'found'; base: ContactListBase }
   /**
-   * Aggregate EOSE with no kind-3. NOT proof the user has none: nostr-tools
-   * counts a relay that failed to connect (and an eoseTimeout) as EOSE, and an
-   * event dropped before `onevent` still ends in EOSE. Never trusted on its own.
+   * At least `MIN_EMPTY_CONFIRMATIONS` relays CONNECTED and sent a real EOSE,
+   * and no relay delivered any kind-3 from the author (valid or not): the
+   * user genuinely has no list yet, e.g. a brand-new account.
    */
-  | { status: 'none' }
-  /** No relay answered in time, or all of them failed: we know nothing. */
+  | { status: 'empty'; confirmedBy: number }
+  /** Anything less certain: too few answers, timeouts, or an unverifiable list. */
   | { status: 'failed' };
 
 export type ContactChange =
@@ -45,15 +44,32 @@ export type ContactChange =
 
 // Hard cap on the whole fetch. Generous: on a busy device the JS thread can
 // sit on relay replies for seconds (measured: nothing processed within 5 s on
-// a loaded emulator), and a fetch that finds nothing refuses the write.
+// a loaded emulator), and a fetch that can't decide refuses the write.
 export const CONTACT_LIST_FETCH_TIMEOUT_MS = 10000;
-// Per-relay window handed to nostr-tools as `maxWait`: a relay that hasn't
-// sent EOSE by then is treated as done (nostr-tools' eoseTimeout), and one
-// that can't connect fails at ~5 s. So a dead relay can't hold every follow
-// for the full cap, while a live relay that's merely slow (< 6 s) still gets
-// heard. We never stop early on the first event: an older copy can arrive
-// before the newest one.
-export const CONTACT_LIST_RELAY_WINDOW_MS = 6000;
+// Per-relay connection timeout, so a dead relay is written off quickly.
+export const CONTACT_LIST_CONNECT_TIMEOUT_MS = 5000;
+// Relays that must positively confirm "no kind-3" before we treat the list as
+// empty and publish a fresh one.
+export const MIN_EMPTY_CONFIRMATIONS = 2;
+
+/** The slice of a nostr-tools relay this module needs (injectable for tests). */
+export interface ContactListRelay {
+  subscribe(
+    filters: Filter[],
+    params: {
+      onevent: (event: NostrEvent) => void;
+      oninvalidevent: (event: unknown) => void;
+      oneose: () => void;
+      onclose: (reason: string) => void;
+      eoseTimeout: number;
+    },
+  ): { close: () => void };
+}
+export type ConnectContactListRelay = (url: string, timeoutMs: number) => Promise<ContactListRelay>;
+
+// The pool's shared socket per relay (no extra connections).
+const connectViaPool: ConnectContactListRelay = (url, timeoutMs) =>
+  pool.ensureRelay(url, { connectionTimeout: timeoutMs }) as unknown as Promise<ContactListRelay>;
 
 /** Replaceable-event order: newer `created_at` wins; on a tie, the lowest id. */
 function isNewerKind3(candidate: NostrEvent, current: NostrEvent | null): boolean {
@@ -62,105 +78,139 @@ function isNewerKind3(candidate: NostrEvent, current: NostrEvent | null): boolea
   return candidate.id < current.id;
 }
 
+type RelayState = 'pending' | 'eose' | 'failed';
+
 /**
- * Fetch the user's newest kind-3, bounded by `limit: 1` per relay, the
- * per-relay window and the overall timeout (finishing early on aggregate
- * EOSE). Only events that are authored by `pubkey` AND pass a full schnorr
- * check count. A forged list from a hostile relay would otherwise be signed
- * and republished as the user's own.
+ * Fetch the user's newest kind-3 with one `limit: 1` subscription per relay,
+ * tracking each relay's connection and EOSE ourselves. The pool's aggregate
+ * "done" can't be trusted here (#1271): nostr-tools counts a relay that failed
+ * to connect, or that hit its eoseTimeout, as EOSE. So:
+ * - our eoseTimeout is far past the overall cap, so every EOSE seen is real;
+ * - only relays that connected AND sent EOSE count towards `empty`;
+ * - every kind-3 from the author counts, including ones that fail signature
+ *   checks (`oninvalidevent`). A list we can't verify means `failed`, never
+ *   `empty`, because a dropped event followed by EOSE is exactly how an
+ *   existing list once got overwritten.
+ * Only events authored by `pubkey` that pass a full schnorr check can be a
+ * base. A forged list must never be signed and republished as the user's.
  */
 export function fetchLatestContactList(
   pubkey: string,
   relays: string[],
-  timeoutMs: number = CONTACT_LIST_FETCH_TIMEOUT_MS,
-  relayWindowMs: number = CONTACT_LIST_RELAY_WINDOW_MS,
+  {
+    timeoutMs = CONTACT_LIST_FETCH_TIMEOUT_MS,
+    connectTimeoutMs = CONTACT_LIST_CONNECT_TIMEOUT_MS,
+    connect = connectViaPool,
+  }: {
+    timeoutMs?: number;
+    connectTimeoutMs?: number;
+    connect?: ConnectContactListRelay;
+  } = {},
 ): Promise<ContactListFetchResult> {
   const author = pubkey.toLowerCase();
   const urls = [...new Set(relays)];
   if (urls.length === 0) return Promise.resolve({ status: 'failed' });
-  trackRelays(urls);
+  const isAuthorKind3 = (e: unknown): boolean => {
+    const ev = e as Partial<NostrEvent> | null;
+    return ev?.kind === 3 && typeof ev.pubkey === 'string' && ev.pubkey.toLowerCase() === author;
+  };
   return new Promise((resolve) => {
+    const states = new Map<string, RelayState>(urls.map((u) => [u, 'pending']));
+    const subs: { close: () => void }[] = [];
     let best: NostrEvent | null = null;
-    let seen = 0;
-    let closeReasons: unknown[] = [];
-    const startedAt = Date.now();
+    let unverifiable = 0;
     let settled = false;
-    let sub: { close: () => void } | null = null;
-    const finish = (outcome: 'eose' | 'failed') => {
+    const startedAt = Date.now();
+    const finish = () => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      if (__DEV__) {
-        console.log(
-          `[ContactList] kind-3 fetch ${best ? 'found' : outcome} after ${Date.now() - startedAt}ms ` +
-            `(${seen} event(s) from ${urls.length} relay(s); close reasons: ${JSON.stringify(closeReasons)})`,
-        );
+      for (const sub of subs) {
+        try {
+          sub.close();
+        } catch {
+          // already closed
+        }
       }
-      try {
-        sub?.close();
-      } catch {
-        // already closing
-      }
+      const confirmedBy = [...states.values()].filter((st) => st === 'eose').length;
+      let result: ContactListFetchResult;
       if (best) {
-        resolve({
+        result = {
           status: 'found',
           base: { tags: best.tags, content: best.content, createdAt: best.created_at },
-        });
+        };
+      } else if (unverifiable === 0 && confirmedBy >= MIN_EMPTY_CONFIRMATIONS) {
+        result = { status: 'empty', confirmedBy };
       } else {
-        resolve({ status: outcome === 'eose' ? 'none' : 'failed' });
+        result = { status: 'failed' };
       }
+      if (__DEV__) {
+        console.log(
+          `[ContactList] kind-3 fetch ${result.status} after ${Date.now() - startedAt}ms ` +
+            `(EOSE from ${confirmedBy}/${urls.length} relay(s), ${unverifiable} unverifiable)`,
+        );
+      }
+      resolve(result);
     };
-    const timer = setTimeout(() => finish('failed'), timeoutMs);
-    try {
-      sub = pool.subscribeMany(urls, { kinds: [3], authors: [author], limit: 1 } as Filter, {
-        maxWait: Math.min(relayWindowMs, timeoutMs),
-        onevent(event: NostrEvent) {
-          seen++;
-          if (event.kind !== 3 || event.pubkey.toLowerCase() !== author) return;
-          if (!isNewerKind3(event, best)) return;
-          if (!verifyEvent(event)) return;
-          best = event;
-        },
-        oneose() {
-          // nostr-tools emits aggregate EOSE right before aggregate close when
-          // every relay FAILED; let onclose classify that first.
-          queueMicrotask(() => finish('eose'));
-        },
-        onclose(reasons: (string | { url: string; reason: string })[]) {
-          closeReasons = reasons;
-          const allFailed = reasons.length > 0 && reasons.every(isRelayFailureReason);
-          finish(allFailed ? 'failed' : 'eose');
-        },
-      });
-    } catch {
-      finish('failed');
-    }
-    if (settled) {
-      try {
-        sub?.close();
-      } catch {
-        // already closed
-      }
+    const settle = (url: string, state: Exclude<RelayState, 'pending'>) => {
+      if (settled || states.get(url) !== 'pending') return;
+      states.set(url, state);
+      if ([...states.values()].every((st) => st !== 'pending')) finish();
+    };
+    const timer = setTimeout(finish, timeoutMs);
+    for (const url of urls) {
+      connect(url, Math.min(connectTimeoutMs, timeoutMs))
+        .then((relay) => {
+          if (settled) return;
+          const sub = relay.subscribe([{ kinds: [3], authors: [author], limit: 1 } as Filter], {
+            // Far past our cap: nostr-tools' synthetic EOSE must never fire first.
+            eoseTimeout: timeoutMs * 3,
+            onevent(event) {
+              if (!isAuthorKind3(event)) return;
+              if (!verifyEvent(event)) {
+                unverifiable++;
+                return;
+              }
+              if (isNewerKind3(event, best)) best = event;
+            },
+            oninvalidevent(event) {
+              if (isAuthorKind3(event)) unverifiable++;
+            },
+            oneose: () => settle(url, 'eose'),
+            onclose: () => settle(url, 'failed'),
+          });
+          subs.push(sub);
+          if (settled) sub.close();
+        })
+        .catch(() => settle(url, 'failed'));
     }
   });
 }
 
 /**
  * Pick what a follow/unfollow is applied to, or `null` to refuse publishing.
- * Only a complete, verified kind-3 qualifies: the relays' newest, or the one
- * this session last published if that's newer (relays can lag right after a
- * write). The app's local `contacts` is never a base (#1271): it may never
- * have loaded, and even a non-empty copy can be up to a day stale (a follow
- * made in another client would be deleted). `none` doesn't help either: an
- * aggregate EOSE can come from relays that timed out or failed, so it can't
- * prove the user has no list. (Cost: an account with no kind-3 anywhere can't
- * make its first follow here.)
+ * The base must be a complete list we can vouch for:
+ * - `found`: the relays' newest verified kind-3, or the one this session last
+ *   published if that's newer (relays can lag right after a write);
+ * - `empty`: relays positively confirmed there's no list. Trusted ONLY for an
+ *   account created in Lightning Piggy on this device (`allowEmpty`, see
+ *   `newAccountContactList`): start from this session's own list or an empty
+ *   one. An imported / signed-in key's real list may live on relays we don't
+ *   query, so for it `empty` refuses like `failed`;
+ * - `failed`: refuse. The app's local `contacts` is never a base (#1271): it
+ *   may never have loaded, and even a non-empty copy can be up to a day stale
+ *   (a follow made in another client would be deleted).
  */
 export function resolveContactListBase(
   fetched: ContactListFetchResult,
   lastPublished?: ContactListBase | null,
+  { allowEmpty = false }: { allowEmpty?: boolean } = {},
 ): ContactListBase | null {
-  if (fetched.status !== 'found') return null;
+  if (fetched.status === 'failed') return null;
+  if (fetched.status === 'empty') {
+    if (!allowEmpty) return null;
+    return lastPublished ?? { tags: [], content: '', createdAt: 0 };
+  }
   if (lastPublished && lastPublished.createdAt > fetched.base.createdAt) return lastPublished;
   return fetched.base;
 }
@@ -224,6 +274,7 @@ export async function prepareContactListUpdate({
   localContacts,
   change,
   lastPublished,
+  allowEmptyList = false,
   fetchLatest = fetchLatestContactList,
 }: {
   pubkey: string;
@@ -233,18 +284,27 @@ export async function prepareContactListUpdate({
   change: ContactChange;
   /** The kind-3 this session last published for `pubkey`, if any. */
   lastPublished?: ContactListBase | null;
+  /** The account was created in Lightning Piggy on this device (may start a fresh list). */
+  allowEmptyList?: boolean;
   fetchLatest?: typeof fetchLatestContactList;
 }): Promise<{
   event: { kind: 3; created_at: number; tags: string[][]; content: string };
   contacts: NostrContact[];
   changed: boolean;
+  /** A kind-3 for the account exists on the relays (so it's no longer "new"). */
+  listSeen: boolean;
 } | null> {
   const fetched = await fetchLatest(pubkey, relays);
-  const base = resolveContactListBase(fetched, lastPublished);
+  const base = resolveContactListBase(fetched, lastPublished, { allowEmpty: allowEmptyList });
   if (!base) return null;
   const event = applyContactChange(base, change);
   const before = followSet(base.tags);
   const after = followSet(event.tags);
   const changed = before.size !== after.size || [...after].some((pk) => !before.has(pk));
-  return { event, contacts: contactsFromEvent(event.tags, localContacts), changed };
+  return {
+    event,
+    contacts: contactsFromEvent(event.tags, localContacts),
+    changed,
+    listSeen: fetched.status === 'found',
+  };
 }

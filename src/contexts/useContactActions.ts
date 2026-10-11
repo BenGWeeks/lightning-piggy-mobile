@@ -14,6 +14,7 @@ import {
   type ContactChange,
   type ContactListBase,
 } from '../services/contactListSync';
+import { clearAccountCreatedHere, isAccountCreatedHere } from '../services/newAccountContactList';
 import { Toast } from '../components/BrandedToast';
 import { t } from '../i18n';
 import type { NostrContact, RelayConfig, SignerType } from '../types/nostr';
@@ -157,6 +158,9 @@ export function useContactActions({
           localContacts: contacts,
           change,
           lastPublished: lastPublished.current.get(pubkey),
+          // Only an account created here may start a fresh list when relays
+          // confirm it has none; an imported key's list may be elsewhere.
+          allowEmptyList: await isAccountCreatedHere(pubkey),
         });
         if (!update) {
           // No verified relay copy to build on: publishing from the local
@@ -164,6 +168,7 @@ export function useContactActions({
           Toast.show({ type: 'error', text1: t('followList.unavailable') });
           return false;
         }
+        if (update.listSeen) void clearAccountCreatedHere(pubkey);
         if (update.changed) {
           if (!(await publishContactList(update.event))) return false;
           lastPublished.current.set(pubkey, {
@@ -171,6 +176,7 @@ export function useContactActions({
             content: update.event.content,
             createdAt: update.event.created_at,
           });
+          void clearAccountCreatedHere(pubkey);
         }
         const cKey = perAccountKey(CONTACTS_CACHE_KEY_BASE, pubkey);
         startTransition(() =>

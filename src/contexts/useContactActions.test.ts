@@ -1,10 +1,12 @@
 import { act, renderHook } from '@testing-library/react-native';
 import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nostrService from '../services/nostrService';
 import { Toast } from '../components/BrandedToast';
 import type { ContactListFetchResult } from '../services/contactListSync';
 import type { NostrContact, RelayConfig } from '../types/nostr';
 import { useContactActions } from './useContactActions';
+import { isAccountCreatedHere, markAccountCreatedHere } from '../services/newAccountContactList';
 
 const ME = 'a'.repeat(64);
 const BIG = 'b'.repeat(64);
@@ -49,8 +51,9 @@ function setup(contacts: NostrContact[]) {
   return { result, setContacts };
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   jest.clearAllMocks();
+  await AsyncStorage.clear();
   jest.spyOn(SecureStore, 'getItemAsync').mockResolvedValue('nsec1test');
 });
 
@@ -94,7 +97,7 @@ describe('useContactActions follow path (#1271)', () => {
   });
 
   it('does not publish when relays only report EOSE (no kind-3) and the local list is empty', async () => {
-    mockFetch.mockResolvedValue({ status: 'none' });
+    mockFetch.mockResolvedValue({ status: 'empty', confirmedBy: 2 });
     const { result } = setup([]);
     let ok = true;
     await act(async () => {
@@ -131,6 +134,48 @@ describe('useContactActions follow path (#1271)', () => {
     expect(calls).toHaveLength(2);
     const last = calls[1][0].tags.filter((t: string[]) => t[0] === 'p').map((t: string[]) => t[1]);
     expect(last).toEqual([BIG, NEW, OTHER]);
+  });
+
+  it('account created here: relays confirm no list → first follow publishes [new] and clears the flag', async () => {
+    await markAccountCreatedHere(ME);
+    mockFetch.mockResolvedValue({ status: 'empty', confirmedBy: 2 });
+    const { result } = setup([]);
+    let ok = false;
+    await act(async () => {
+      ok = await result.current.followContact(NEW);
+    });
+    expect(ok).toBe(true);
+    const published = (nostrService.signAndPublishEvent as jest.Mock).mock.calls[0][0];
+    expect(published.tags.filter((t: string[]) => t[0] === 'p').map((t: string[]) => t[1])).toEqual(
+      [NEW],
+    );
+    expect(await isAccountCreatedHere(ME)).toBe(false);
+  });
+
+  it('imported account: relays answering empty → refuse, nothing published', async () => {
+    mockFetch.mockResolvedValue({ status: 'empty', confirmedBy: 3 });
+    const { result } = setup([]);
+    let ok = true;
+    await act(async () => {
+      ok = await result.current.followContact(NEW);
+    });
+    expect(ok).toBe(false);
+    expect(nostrService.signAndPublishEvent).not.toHaveBeenCalled();
+    expect(Toast.show).toHaveBeenCalledWith(expect.objectContaining({ type: 'error' }));
+  });
+
+  it('clears the created-here flag once a relay list has been seen', async () => {
+    await markAccountCreatedHere(ME);
+    mockFetch.mockResolvedValue({
+      status: 'found',
+      base: { tags: [['p', BIG]], content: '', createdAt: 10 },
+    });
+    const { result } = setup([]);
+    await act(async () => {
+      await result.current.followContact(BIG); // already in the list: no publish
+    });
+    expect(nostrService.signAndPublishEvent).not.toHaveBeenCalled();
+    expect(await isAccountCreatedHere(ME)).toBe(false);
   });
 
   it('unfollow removes only that person from the relay list', async () => {

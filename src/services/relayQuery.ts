@@ -2,18 +2,6 @@ import type { SimplePool } from 'nostr-tools/pool';
 import type { Filter } from 'nostr-tools/filter';
 import type { Event as NostrEvent } from 'nostr-tools/pure';
 
-const RELAY_FAILURE_REASON =
-  /^(?:relay )?connection (?:failed|timed out|closed|skipped by allowConnectingToRelay)$|^websocket closed$|^auth timed out$|^auth was required|^auth-required:|^restricted:/;
-
-/**
- * True when a nostr-tools subscription close reason means the relay never
- * served the query (see the verbatim reason list in `querySyncAbortable`'s
- * `onclose`), as opposed to a deliberate close after EOSE.
- */
-export function isRelayFailureReason(reason: string | { url: string; reason: string }): boolean {
-  return RELAY_FAILURE_REASON.test(typeof reason === 'string' ? reason : reason.reason);
-}
-
 /**
  * Abortable variant of `pool.querySync`. nostr-tools' `querySync` collects
  * events until EOSE but its public *type* omits the `abort` param — even though
@@ -112,7 +100,11 @@ export function querySyncAbortable(
           !params.signal?.aborted &&
           events.length === 0 &&
           reasons.length > 0 &&
-          reasons.every(isRelayFailureReason);
+          reasons.every((reason) =>
+            /^(?:relay )?connection (?:failed|timed out|closed|skipped by allowConnectingToRelay)$|^websocket closed$|^auth timed out$|^auth was required|^auth-required:|^restricted:/.test(
+              typeof reason === 'string' ? reason : reason.reason,
+            ),
+          );
         finish(allFailed ? new Error('All relays failed to connect') : undefined);
       },
     });

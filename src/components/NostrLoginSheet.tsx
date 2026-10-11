@@ -25,6 +25,7 @@ import { bytesToHex } from '@noble/hashes/utils.js';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createNostrLoginSheetStyles } from '../styles/NostrLoginSheet.styles';
+import { setUpNewAccountContactList } from '../services/newAccountContactList';
 import { useNostr } from '../contexts/NostrContext';
 import * as nostrService from '../services/nostrService';
 import * as nostrConnectService from '../services/nostrConnectService';
@@ -177,6 +178,16 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
       setCreating(false);
       return;
     }
+
+    // Brand-new key: flag it as created here and publish an empty follow
+    // list, so later follows always have a kind-3 to build on (#1271).
+    // Best-effort and never for imported / signed-in keys.
+    const { pubkey: newPubkey, secretKey } = nostrService.decodeNsec(generatedNsec);
+    void setUpNewAccountContactList({
+      pubkey: newPubkey,
+      secretKey,
+      relays: nostrService.DEFAULT_RELAYS,
+    });
 
     // Publish initial profile with display name (best-effort, don't block)
     const published = await publishProfile({

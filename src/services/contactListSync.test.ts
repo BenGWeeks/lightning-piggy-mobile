@@ -1,12 +1,13 @@
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure';
-import { pool } from './nostrPool';
 import {
   applyContactChange,
   fetchLatestContactList,
   prepareContactListUpdate,
   resolveContactListBase,
+  type ConnectContactListRelay,
   type ContactListBase,
   type ContactListFetchResult,
+  type ContactListRelay,
 } from './contactListSync';
 import type { NostrContact } from '../types/nostr';
 
@@ -74,6 +75,43 @@ describe('prepareContactListUpdate (#1271)', () => {
     expect(update).toBeNull();
   });
 
+  it('LP-created account: 2+ relays confirm no list → the first follow publishes [new]', async () => {
+    const update = await prepareContactListUpdate({
+      pubkey: 'a'.repeat(64),
+      relays: ['wss://r1', 'wss://r2'],
+      localContacts: [],
+      change: { type: 'follow', pubkey: NEW },
+      allowEmptyList: true,
+      fetchLatest: async () => ({ status: 'empty', confirmedBy: 2 }),
+    });
+    expect(pTags(update!.event.tags)).toEqual([NEW]);
+    expect(update!.event.content).toBe('');
+    expect(update!.listSeen).toBe(false);
+  });
+
+  it('imported / signed-in account: 2+ relays answering empty still refuses', async () => {
+    const update = await prepareContactListUpdate({
+      pubkey: 'a'.repeat(64),
+      relays: ['wss://r1', 'wss://r2', 'wss://r3'],
+      localContacts: [],
+      change: { type: 'follow', pubkey: NEW },
+      fetchLatest: async () => ({ status: 'empty', confirmedBy: 3 }),
+    });
+    expect(update).toBeNull();
+  });
+
+  it('reports listSeen when the relays returned a list', async () => {
+    const update = await prepareContactListUpdate({
+      pubkey: 'a'.repeat(64),
+      relays: ['wss://r'],
+      localContacts: [],
+      change: { type: 'follow', pubkey: NEW },
+      allowEmptyList: true,
+      fetchLatest: async () => found(),
+    });
+    expect(update?.listSeen).toBe(true);
+  });
+
   it('reports no change when the relay list already follows them (no signer prompt)', async () => {
     const update = await prepareContactListUpdate({
       pubkey: 'a'.repeat(64),
@@ -100,12 +138,20 @@ describe('prepareContactListUpdate (#1271)', () => {
 });
 
 describe('resolveContactListBase', () => {
-  it('refuses when relays report no kind-3 (EOSE is not proof there is none)', () => {
-    expect(resolveContactListBase({ status: 'none' })).toBeNull();
+  it('refuses a confirmed-empty answer for an account not created here', () => {
+    expect(resolveContactListBase({ status: 'empty', confirmedBy: 2 })).toBeNull();
+  });
+
+  it('starts an empty list for an account created here', () => {
+    expect(
+      resolveContactListBase({ status: 'empty', confirmedBy: 2 }, null, { allowEmpty: true }),
+    ).toEqual({ tags: [], content: '', createdAt: 0 });
   });
 
   it('refuses when the fetch fails, even with a list published earlier this session', () => {
-    expect(resolveContactListBase({ status: 'failed' }, relayBase)).toBeNull();
+    expect(
+      resolveContactListBase({ status: 'failed' }, relayBase, { allowEmpty: true }),
+    ).toBeNull();
   });
 
   it('uses the relay list', () => {
@@ -155,48 +201,56 @@ describe('fetchLatestContactList', () => {
       ),
     );
 
-  type Handlers = {
-    onevent: (e: unknown) => void;
-    oneose: () => void;
-    onclose: (reasons: string[]) => void;
-  };
-  const mockRelays = (drive: (h: Handlers) => void) =>
-    jest.spyOn(pool, 'subscribeMany').mockImplementation(((
-      _relays: string[],
-      _filter: unknown,
-      h: Handlers,
-    ) => {
-      setTimeout(() => drive(h), 0);
-      return { close: jest.fn() };
-    }) as unknown as typeof pool.subscribeMany);
-
-  afterEach(() => jest.restoreAllMocks());
+  type Params = Parameters<ContactListRelay['subscribe']>[1];
+  type Script = (h: Params) => void;
+  /** Fake relays: 'down' rejects the connection; a function scripts the subscription. */
+  const relaysOf =
+    (scripts: Record<string, Script | 'down'>): ConnectContactListRelay =>
+    async (url) => {
+      const script = scripts[url];
+      if (!script || script === 'down') throw new Error('connection failed');
+      return {
+        subscribe: (_filters, h) => {
+          setTimeout(() => script(h), 0);
+          return { close: jest.fn() };
+        },
+      };
+    };
+  const eose: Script = (h) => h.oneose();
+  const silent: Script = () => {};
+  const fetch = (urls: Record<string, Script | 'down'>, timeoutMs = 1000) =>
+    fetchLatestContactList(me, Object.keys(urls), { timeoutMs, connect: relaysOf(urls) });
 
   it('returns the newest verified kind-3 and ignores forged or foreign events', async () => {
     const older = kind3(100, [BIG]);
     const newest = kind3(200, [BIG, LITTLE]);
-    const forged = { ...kind3(300, [NEW]), sig: 'f'.repeat(128) };
     const foreign = kind3(400, [NEW], generateSecretKey());
-    mockRelays((h) => {
-      [older, newest, forged, foreign].forEach((e) => h.onevent(e));
-      h.oneose();
+    const res = await fetch({
+      'wss://a': (h) => {
+        h.onevent(older);
+        h.onevent(foreign);
+        h.oneose();
+      },
+      'wss://b': (h) => {
+        h.onevent(newest);
+        h.oneose();
+      },
     });
-    const res = await fetchLatestContactList(me, ['wss://a', 'wss://b'], 1000);
-    expect(res.status).toBe('found');
     expect(res.status === 'found' && pTags(res.base.tags)).toEqual([BIG, LITTLE]);
   });
 
   it('does not stop at the first copy: a newer one from a slower relay still wins', async () => {
-    const older = kind3(100, [BIG]);
-    const newer = kind3(200, [BIG, LITTLE]);
-    mockRelays((h) => {
-      h.onevent(older);
-      setTimeout(() => {
-        h.onevent(newer);
+    const res = await fetch({
+      'wss://fast': (h) => {
+        h.onevent(kind3(100, [BIG]));
         h.oneose();
-      }, 50);
+      },
+      'wss://slow': (h) =>
+        setTimeout(() => {
+          h.onevent(kind3(200, [BIG, LITTLE]));
+          h.oneose();
+        }, 50),
     });
-    const res = await fetchLatestContactList(me, ['wss://fast', 'wss://slow'], 2000);
     expect(res.status === 'found' && pTags(res.base.tags)).toEqual([BIG, LITTLE]);
   });
 
@@ -208,44 +262,65 @@ describe('fetchLatestContactList', () => {
       [low, high],
       [high, low],
     ]) {
-      mockRelays((h) => {
-        order.forEach((e) => h.onevent(e));
-        h.oneose();
+      const res = await fetch({
+        'wss://a': (h) => {
+          order.forEach((e) => h.onevent(e));
+          h.oneose();
+        },
       });
-      const res = await fetchLatestContactList(me, ['wss://a'], 1000);
       expect(res.status === 'found' && pTags(res.base.tags)).toEqual(pTags(low.tags));
-      jest.restoreAllMocks();
     }
   });
 
-  it('returns the found copy when the overall timeout hits before EOSE', async () => {
-    const list = kind3(200, [BIG, LITTLE]);
-    mockRelays((h) => h.onevent(list)); // never EOSEs
-    const res = await fetchLatestContactList(me, ['wss://a'], 40);
-    expect(res.status).toBe('found');
-  });
-
-  it("reports 'none' when relays answer with no kind-3", async () => {
-    mockRelays((h) => h.oneose());
-    await expect(fetchLatestContactList(me, ['wss://a'], 1000)).resolves.toEqual({
-      status: 'none',
+  it("is 'empty' only when 2+ relays connected and sent EOSE with no kind-3", async () => {
+    await expect(fetch({ 'wss://a': eose, 'wss://b': eose, 'wss://c': 'down' })).resolves.toEqual({
+      status: 'empty',
+      confirmedBy: 2,
     });
   });
 
-  it("reports 'failed' when every relay fails to connect", async () => {
-    mockRelays((h) => {
+  it("is 'failed' when only one relay confirms (the rest down or silent)", async () => {
+    await expect(fetch({ 'wss://a': eose, 'wss://b': 'down' })).resolves.toEqual({
+      status: 'failed',
+    });
+    await expect(fetch({ 'wss://a': eose, 'wss://b': silent }, 50)).resolves.toEqual({
+      status: 'failed',
+    });
+  });
+
+  it("is 'failed' when no relay connects", async () => {
+    await expect(fetch({ 'wss://a': 'down', 'wss://b': 'down' })).resolves.toEqual({
+      status: 'failed',
+    });
+  });
+
+  it("is 'failed', never 'empty', when the author's list arrives but can't be verified", async () => {
+    const forged = { ...kind3(300, [NEW]), sig: 'f'.repeat(128) };
+    const invalid: Script = (h) => {
+      h.oninvalidevent(kind3(200, [BIG])); // dropped by the relay's own check
       h.oneose();
-      h.onclose(['connection failed', 'relay connection timed out']);
+    };
+    await expect(fetch({ 'wss://a': invalid, 'wss://b': eose, 'wss://c': eose })).resolves.toEqual({
+      status: 'failed',
     });
-    await expect(fetchLatestContactList(me, ['wss://a', 'wss://b'], 1000)).resolves.toEqual({
+    const bad: Script = (h) => {
+      h.onevent(forged);
+      h.oneose();
+    };
+    await expect(fetch({ 'wss://a': bad, 'wss://b': eose, 'wss://c': eose })).resolves.toEqual({
       status: 'failed',
     });
   });
 
-  it("reports 'failed' on timeout with nothing received", async () => {
-    mockRelays(() => {});
-    await expect(fetchLatestContactList(me, ['wss://a'], 20)).resolves.toEqual({
+  it('a relay closing the subscription does not count as a confirmation', async () => {
+    const closed: Script = (h) => h.onclose('restricted: no');
+    await expect(fetch({ 'wss://a': eose, 'wss://b': closed })).resolves.toEqual({
       status: 'failed',
     });
+  });
+
+  it('returns the found copy when the overall timeout hits before EOSE', async () => {
+    const res = await fetch({ 'wss://a': (h) => h.onevent(kind3(200, [BIG])) }, 40);
+    expect(res.status).toBe('found');
   });
 });
