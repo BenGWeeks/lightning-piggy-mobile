@@ -17,16 +17,18 @@ interface StarRatingProps {
 }
 
 /**
- * Read-only star rating. Renders a full row of empty stars with a clipped
- * overlay of filled stars whose width is the fractional fill — mirroring the
- * website's partial-star treatment without per-star fraction maths.
+ * Read-only star rating. Whole stars are drawn filled or empty directly; only
+ * a fractional star clips a filled glyph inside its own fixed-size box.
+ *
+ * It used to clip ONE percentage-width overlay of five filled stars. On
+ * Android that overlay wasn't clipped inside the review rows, so every row
+ * showed five filled stars whatever the rating (#1276). Drawing per star
+ * means a whole-star rating involves no clipping at all.
  */
 export const StarRating: React.FC<StarRatingProps> = ({ value, size = 16, testID }) => {
   const colors = useThemeColors();
   const t = useTranslation();
   const clamped = Math.max(0, Math.min(STARS_MAX, value));
-  const fillPct = (clamped / STARS_MAX) * 100;
-  const stars = Array.from({ length: STARS_MAX });
 
   return (
     <View
@@ -37,20 +39,34 @@ export const StarRating: React.FC<StarRatingProps> = ({ value, size = 16, testID
         max: STARS_MAX,
       })}
     >
-      {stars.map((_, i) => (
-        <Star key={`bg-${i}`} size={size} color={colors.divider} strokeWidth={2} />
-      ))}
-      <View style={[styles.overlay, { width: `${fillPct}%` }]} pointerEvents="none">
-        {stars.map((_, i) => (
-          <Star
-            key={`fg-${i}`}
-            size={size}
-            color={colors.amber}
-            fill={colors.amber}
-            strokeWidth={2}
-          />
-        ))}
-      </View>
+      {Array.from({ length: STARS_MAX }, (_, i) => {
+        // How much of star i is filled: 1 = whole, 0 = empty, else partial.
+        const fill = Math.max(0, Math.min(1, clamped - i));
+        const whole = fill >= 1;
+        return (
+          <View
+            key={i}
+            style={{ width: size, height: size }}
+            testID={
+              testID
+                ? `${testID}-star-${i + 1}-${whole ? 'full' : fill > 0 ? 'partial' : 'empty'}`
+                : undefined
+            }
+          >
+            <Star
+              size={size}
+              color={whole ? colors.amber : colors.divider}
+              fill={whole ? colors.amber : 'none'}
+              strokeWidth={2}
+            />
+            {fill > 0 && !whole ? (
+              <View style={[styles.partial, { width: size * fill }]} pointerEvents="none">
+                <Star size={size} color={colors.amber} fill={colors.amber} strokeWidth={2} />
+              </View>
+            ) : null}
+          </View>
+        );
+      })}
     </View>
   );
 };
