@@ -11,6 +11,7 @@ jest.mock('../services/notificationService', () => ({
   fireMessageNotification: (...a: unknown[]) => mockFire(...a),
   dismissNotificationsFor: (...a: unknown[]) => mockDismiss(...a),
   cancelInFlightNotifications: (...a: unknown[]) => mockCancelInFlight(...a),
+  isThreadActivelyViewed: () => false,
 }));
 jest.mock('../services/notificationHistory', () => ({
   removeNotificationsWhere: (...a: unknown[]) => mockRemove(...a),
@@ -155,4 +156,18 @@ it("a late decrypt (sub opened after the message) keeps a friend's placeholder â
   expect(mockRemove).not.toHaveBeenCalled();
   // Undecided: the background sync may still ping for it.
   expect(wasWrapHandled('late')).toBe(false);
+});
+
+it('keeps the placeholder when the real alert could not be written', async () => {
+  claimWrapNotification('failed');
+  noteContentlessWrapAlert('failed');
+  mockFire.mockResolvedValueOnce(null); // e.g. no owner / storage failure, thread not on screen
+  await surfacer()(
+    { pubkey: PEER, created_at: now(), kind: 14, tags: [['p', ME]], content: 'hi' },
+    'failed',
+  );
+  await flush();
+  expect(mockFire).toHaveBeenCalled();
+  expect(mockDismiss).not.toHaveBeenCalled();
+  expect(mockRemove).not.toHaveBeenCalled();
 });

@@ -166,39 +166,51 @@ describe('review r2: placeholders are replaced, never lost', () => {
     expect(await listNotifications(OWNER)).toHaveLength(0);
   });
 
-  it('a collapsed tray entry says how many messages it stands for', async () => {
-    setNotificationsForeground(false);
-    const peer = 'e'.repeat(64);
-    for (let i = 0; i < 2; i++)
-      await fireMessageNotification({
-        owner: OWNER,
-        kind: 'dm',
-        threadId: peer,
-        title: 'New message',
-        body: 'm',
-        data: { conversationPubkey: peer, conversationProtocol: 'marmot', messageId: `m${i}` },
-      });
-    expect(lastScheduledContent()?.data).toMatchObject({ threadCount: 2, messageId: 'm1' });
-  });
-
-  it("deleting one message doesn't dismiss a collapsed entry that also stands for earlier ones", async () => {
-    const ref = { owner: OWNER, groupId: 'marmot:g', messageId: 'm1', sender: null };
-    const req = (threadCount?: number) => ({
-      identifier: `n${threadCount ?? 1}`,
-      content: {
-        data: {
-          owner: OWNER,
-          marmotGroupId: 'marmot:g',
-          messageId: 'm1',
-          ...(threadCount ? { threadCount } : {}),
+  it('a real alert dismisses only its own placeholders in the tray (not every account / group)', async () => {
+    const mine = await placeholder(T + 2_000);
+    mockGetPresented.mockResolvedValueOnce([
+      {
+        request: {
+          identifier: 'mine',
+          content: { data: { marmotPush: true, historyId: mine.id } },
+          trigger: { type: 'timeInterval' },
         },
       },
-      trigger: { type: 'timeInterval' },
-    });
-    mockGetPresented.mockResolvedValueOnce([{ request: req(3) }, { request: req() }]);
+      {
+        request: {
+          identifier: 'other',
+          content: { data: { marmotPush: true, historyId: 'other-row' } },
+          trigger: { type: 'timeInterval' },
+        },
+      },
+    ]);
+    mockDismiss.mockClear();
+    // Android posts these placeholders itself (iOS has only the server's alerts).
+    const { Platform } = jest.requireActual('react-native');
+    const original = Platform.OS;
+    Object.defineProperty(Platform, 'OS', { configurable: true, get: () => 'android' });
+    try {
+      await dropMarmotPushAlerts(OWNER, T);
+    } finally {
+      Object.defineProperty(Platform, 'OS', { configurable: true, get: () => original });
+    }
+    expect(mockDismiss).toHaveBeenCalledWith('mine');
+    expect(mockDismiss).not.toHaveBeenCalledWith('other');
+  });
+
+  it('a "delete for everyone" dismisses even a collapsed entry (it shows the deleted text)', async () => {
+    const ref = { owner: OWNER, groupId: 'marmot:g', messageId: 'm1', sender: null };
+    mockGetPresented.mockResolvedValueOnce([
+      {
+        request: {
+          identifier: 'n',
+          content: { data: { owner: OWNER, marmotGroupId: 'marmot:g', messageId: 'm1' } },
+          trigger: { type: 'timeInterval' },
+        },
+      },
+    ]);
     mockDismiss.mockClear();
     expect(await retractMarmotMessageNotifications([ref], { tray: true })).toBe(1);
-    expect(mockDismiss).toHaveBeenCalledWith('n1');
-    expect(mockDismiss).not.toHaveBeenCalledWith('n3');
+    expect(mockDismiss).toHaveBeenCalledWith('n');
   });
 });

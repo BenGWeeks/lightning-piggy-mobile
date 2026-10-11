@@ -134,8 +134,6 @@ export interface NotificationData {
   messageId?: string;
   marmotGroupId?: string;
   senderPubkey?: string;
-  /** The tray entry stands for this many messages of its thread (collapsed). */
-  threadCount?: number;
 }
 
 /** Typed payload every caller passes to `fireNotification`. Centralising
@@ -427,11 +425,7 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
     const collapseKey = threadCollapseKey(payload.kind, payload.data);
     // Awaited (best-effort, never throws): a headless background task can be
     // torn down as soon as delivery resolves, losing a detached write.
-    const {
-      duplicateDelivered,
-      id: historyId,
-      count,
-    } = await recordNotification(owner ?? null, {
+    const { duplicateDelivered, id: historyId } = await recordNotification(owner ?? null, {
       ...payload,
       id: payload.historyKey ?? `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
       collapseKey,
@@ -460,13 +454,7 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
         body: presented.body,
         // `data` rides through to the tap handler. Always include
         // `kind` so the deep-link router can dispatch by source.
-        data: {
-          kind: payload.kind,
-          ...(payload.data ?? {}),
-          historyId,
-          owner,
-          ...(count > 1 ? { threadCount: count } : {}),
-        },
+        data: { kind: payload.kind, ...(payload.data ?? {}), historyId, owner },
         // Quiet is enforced natively too (not only by the foreground handler),
         // so it holds if the app is backgrounded before the 1 s trigger fires.
         sound: quiet ? false : 'default',
@@ -686,12 +674,11 @@ export async function retractMarmotMessageNotifications(
   const matches = marmotMessageRefMatcher(refs);
   cancelInFlightNotifications(matches);
   if (!tray) return 0;
-  return dismissRequestsWhere((request) => {
-    const data = request.content.data as NotificationData | null;
-    // A collapsed entry also stands for the thread's earlier messages: one
-    // deletion mustn't take their alert with it.
-    return matches(data) && !((data?.threadCount ?? 1) > 1);
-  });
+  // A collapsed entry showing the deleted text goes too (privacy first); its
+  // history row still records the thread's earlier messages.
+  return dismissRequestsWhere((request) =>
+    matches(request.content.data as NotificationData | null),
+  );
 }
 
 /** Cancel notifications still being created whose `data` `matches` — the
@@ -782,6 +769,7 @@ export async function fireMessageNotification(opts: {
     // Shown on screen instead — still proof the app has this message.
     if (marmot) {
       lastMarmotNotifiedAt = Date.now();
+      noteMarmotMessageShown(opts.data.messageId);
       void dropMarmotPushAlerts(opts.owner, opts.sentAt ?? Date.now());
     }
     return null;
@@ -796,12 +784,27 @@ export async function fireMessageNotification(opts: {
   });
   if (id && marmot) {
     lastMarmotNotifiedAt = Date.now();
+    noteMarmotMessageShown(opts.data.messageId);
     // After the real alert is recorded — the placeholder is replaced, never
     // deleted in the hope something else is written.
     void dropMarmotPushAlerts(opts.owner, opts.sentAt ?? Date.now());
   }
   return id;
 }
+
+// Marmot messages that have their own row (alerted) or were on screen: a push
+// placeholder must never be turned into a second row for one (bounded).
+const shownMarmotMessages = new Set<string>();
+function noteMarmotMessageShown(messageId: string | undefined): void {
+  if (!messageId) return;
+  shownMarmotMessages.add(messageId);
+  if (shownMarmotMessages.size > 500) {
+    shownMarmotMessages.delete(shownMarmotMessages.values().next().value as string);
+  }
+}
+/** True once a Marmot message was alerted (its own row) or shown on screen. */
+export const marmotMessageShown = (messageId: string): boolean =>
+  shownMarmotMessages.has(messageId);
 
 /** A push placeholder posted up to this long after a message was sent can be
  * the alert for it (push latency + the wake's grace + clock skew). */
@@ -815,12 +818,15 @@ const PLACEHOLDER_SKEW_MS = 5_000;
  * "New message" beside it.
  */
 export async function dropMarmotPushAlerts(owner?: string, sentAt?: number): Promise<void> {
-  await dismissNotificationsFor({ marmotPushAlerts: true });
   const account = owner ?? getActivePubkey();
+  // No time (the Messages list opened): every one — the list shows them now.
+  // iOS: the server's data-less alerts, which have no rows, are cleared too.
+  if (sentAt === undefined || Platform.OS === 'ios')
+    await dismissNotificationsFor({ marmotPushAlerts: true });
   if (!account) return;
   // Only the rows this message can stand for (posted just after it was sent);
-  // with no time (the Messages list opened) all of them — it shows them now.
-  await removeNotificationsWhere(
+  // their tray entries with them.
+  const removed = await removeNotificationsWhere(
     account,
     (e) =>
       e.data.marmotPush === true &&
@@ -828,6 +834,8 @@ export async function dropMarmotPushAlerts(owner?: string, sentAt?: number): Pro
         (e.createdAt >= sentAt - PLACEHOLDER_SKEW_MS &&
           e.createdAt <= sentAt + PLACEHOLDER_MATCH_MS)),
   );
+  if (sentAt !== undefined && removed.length)
+    await dismissNotificationsFor({ historyIds: removed });
 }
 
 /**
@@ -974,4 +982,5 @@ export function __resetForTests(): void {
   cachedLockScreenContent = null;
   __resetNotificationFocusForTests();
   lastMarmotNotifiedAt = 0;
+  shownMarmotMessages.clear();
 }

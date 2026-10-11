@@ -11,7 +11,7 @@ import { upsertDmMessages, type DmMessageRow } from '../services/dmDb';
 import { dmRowPreview } from '../utils/dmRowPreview';
 import { notifyDmMessage } from './nostrEventBus';
 import { tryRouteGroupRumor } from './nostrGroupRouting';
-import { fireMessageNotification } from '../services/notificationService';
+import { fireMessageNotification, isThreadActivelyViewed } from '../services/notificationService';
 import {
   claimWrapNotification,
   markWrapHandled,
@@ -81,10 +81,16 @@ export function createLiveRumorSurfacer(
       markWrapHandled(wrapId);
       if (placeholder) void retractContentlessWrapAlert(viewerPubkey, wrapId);
     };
-    const alertReplacing = (fire: () => Promise<unknown>) => {
+    const alertReplacing = (threadId: string, fire: () => Promise<string | null>) => {
       markWrapHandled(wrapId);
       void Promise.resolve(fire())
-        .then(() => (placeholder ? retractContentlessWrapAlert(viewerPubkey, wrapId) : undefined))
+        .then((id) =>
+          // Replaced only if the real alert was written (or the thread is on
+          // screen) — a failed post keeps the placeholder.
+          placeholder && (id || isThreadActivelyViewed(threadId))
+            ? retractContentlessWrapAlert(viewerPubkey, wrapId)
+            : undefined,
+        )
         .catch(() => undefined);
     };
 
@@ -105,7 +111,7 @@ export function createLiveRumorSurfacer(
       } else if (isFreshArrival(routed.message.createdAt)) {
         // claimWrapNotification: dedupe vs the background watch (#279).
         if (claimWrapNotification(wrapId) || placeholder)
-          alertReplacing(() =>
+          alertReplacing(routed.group.id, () =>
             fireMessageNotification({
               owner: viewerPubkey,
               kind: 'group',
@@ -222,7 +228,7 @@ export function createLiveRumorSurfacer(
     if (partnership.fromMe) nothingToSee();
     else if (isFreshArrival(rumor.created_at)) {
       if (claimWrapNotification(wrapId) || placeholder)
-        alertReplacing(() =>
+        alertReplacing(dmThreadId(partnership.partnerPubkey, protocolForWireKind(rumor.kind)), () =>
           fireMessageNotification({
             owner: viewerPubkey,
             kind: 'dm',

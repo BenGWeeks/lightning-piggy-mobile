@@ -2,10 +2,12 @@ jest.mock('expo-task-manager', () => ({
   isTaskDefined: () => false,
   defineTask: jest.fn(),
 }));
+const mockShown = new Set<string>();
 jest.mock('./notificationService', () => ({
   dismissNotificationsFor: jest.fn(async () => 0),
   dropMarmotPushAlerts: jest.fn(async () => undefined),
   PLACEHOLDER_MATCH_MS: 60_000,
+  marmotMessageShown: (id: string) => mockShown.has(id),
   fireMessageNotification: jest.fn(async () => 'id'),
   lastMarmotNotificationAt: jest.fn(() => 0),
 }));
@@ -22,6 +24,7 @@ import {
   noteMarmotGroupTraffic,
   placeholderOutcome,
   postGenericPushAlert,
+  setMarmotCatchingUp,
   settlePushPlaceholders,
   type MarmotTraffic,
   type WakeDeps,
@@ -351,5 +354,73 @@ describe('a push wake caused by our own send (e.g. from another of our devices)'
     noteMarmotGroupTraffic(ME, traffic((posted - 5_000) / 1000, { fromMe: true }), posted + 1_000);
     await settlePushPlaceholders(ME);
     expect(await listNotifications(ME)).toHaveLength(0);
+  });
+});
+
+describe('review r4: no duplicate row, no early retract during a backfill', () => {
+  const T2 = Date.now();
+  const placeholder = (at: number) =>
+    recordNotification(
+      ME,
+      { kind: 'dm', title: 'New message', body: 'x', data: { marmotPush: true } },
+      at,
+    );
+  beforeEach(async () => {
+    await AsyncStorage.clear();
+    __resetNotificationHistoryForTests();
+    __resetPushWakeForTests();
+    mockShown.clear();
+  });
+
+  it('a message that already alerted (its own row) retracts the placeholder instead of duplicating it', async () => {
+    // Pushed at 10:00:06 for a message sent at 10:00:00; the app opened ~44 s later and alerted it.
+    const { id } = await placeholder(T2);
+    mockShown.add('m1');
+    noteMarmotGroupTraffic(ME, traffic((T2 - 6_000) / 1000, { messageId: 'm1' }), T2 + 44_000);
+    expect(await settlePushPlaceholders(ME)).toEqual([id]);
+    expect(await listNotifications(ME)).toHaveLength(0); // the real row lives elsewhere — no second one
+  });
+
+  it('nothing settles while the backfill is draining: a later-decrypted peer message still replaces it', async () => {
+    jest.useFakeTimers();
+    try {
+      const now = Date.now();
+      await placeholder(now);
+      setMarmotCatchingUp(ME, true);
+      // Group A decrypts first: only our own message (from desktop White Noise) in the window.
+      noteMarmotGroupTraffic(
+        ME,
+        traffic(now / 1000 - 20, { fromMe: true, groupId: 'marmot:a' }),
+        now,
+      );
+      await jest.advanceTimersByTimeAsync(5_000);
+      expect(await listNotifications(ME)).toHaveLength(1); // not retracted mid-backfill
+      // Group B's message decrypts a moment later (not fresh: no alert of its own).
+      noteMarmotGroupTraffic(ME, traffic(now / 1000 - 6, { groupId: 'marmot:b' }), now);
+      setMarmotCatchingUp(ME, false); // every group live
+      await jest.advanceTimersByTimeAsync(2_000);
+    } finally {
+      jest.useRealTimers();
+    }
+    const rows = await listNotifications(ME);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: 'group', data: { groupId: 'marmot:b' } });
+  });
+
+  it('settle is a true debounce: a stream of events keeps postponing it', async () => {
+    jest.useFakeTimers();
+    try {
+      const now = Date.now();
+      await placeholder(now);
+      for (let i = 0; i < 4; i++) {
+        noteMarmotGroupTraffic(ME, traffic(now / 1000 - 20, { fromMe: true }), now);
+        await jest.advanceTimersByTimeAsync(1_000); // < debounce each time
+        expect(await listNotifications(ME)).toHaveLength(1);
+      }
+      await jest.advanceTimersByTimeAsync(2_000);
+    } finally {
+      jest.useRealTimers();
+    }
+    expect(await listNotifications(ME)).toHaveLength(0); // quiet, caught up, own-only → retracted
   });
 });

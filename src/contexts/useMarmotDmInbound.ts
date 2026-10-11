@@ -292,6 +292,8 @@ export function useMarmotDmInbound(
           owner: pubkey,
           shouldSuppress: async () =>
             disposed || (await deletions.isDeleted(groupId, row.eventId, row.sender)),
+          // Which push placeholders this message stands for (marmotPushWake).
+          sentAt: row.createdAt * 1000,
         });
       }
     };

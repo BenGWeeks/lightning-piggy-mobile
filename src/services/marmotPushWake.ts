@@ -40,6 +40,7 @@ import {
   dropMarmotPushAlerts,
   fireMessageNotification,
   lastMarmotNotificationAt,
+  marmotMessageShown,
   PLACEHOLDER_MATCH_MS,
 } from './notificationService';
 import { isWatcherTaskPayload } from './watcherPushReceive';
@@ -78,6 +79,8 @@ export interface MarmotTraffic {
   /** Where it shows: the 1:1 peer, or the group. */
   conversationPubkey?: string;
   groupId?: string;
+  /** The app-event id — a message that already has its own row is skipped. */
+  messageId?: string;
 }
 type Seen = MarmotTraffic & { owner: string; at: number };
 
@@ -88,6 +91,26 @@ let recent: Seen[] = [];
 // Unknown at start: a headless run (another JS context) may have posted one.
 let placeholdersMayExist = true;
 let settleTimer: ReturnType<typeof setTimeout> | null = null;
+// Accounts whose session is still draining its backfill: what a placeholder
+// stood for may not be decrypted yet, so nothing is settled until it's done.
+const catchingUp = new Set<string>();
+
+/** Debounced (each event restarts it) and held while catching up. */
+function scheduleSettle(owner: string): void {
+  if (!placeholdersMayExist) return;
+  if (settleTimer) clearTimeout(settleTimer);
+  settleTimer = setTimeout(() => {
+    settleTimer = null;
+    if (!catchingUp.has(owner)) void settlePushPlaceholders(owner);
+  }, SETTLE_DEBOUNCE_MS);
+}
+
+/** Set by the session: true from start until every group's backfill has
+ * drained (its live subscription opened). Clearing it settles. */
+export function setMarmotCatchingUp(owner: string, catching: boolean): void {
+  if (catching) catchingUp.add(owner);
+  else if (catchingUp.delete(owner)) scheduleSettle(owner);
+}
 
 /**
  * The Marmot session decrypted an app event (live or from a backfill). O(1)
@@ -99,11 +122,7 @@ export function noteMarmotGroupTraffic(owner: string, t: MarmotTraffic, now = Da
   if (at >= now - FRESH_TRAFFIC_MS) lastTrafficAt = now;
   recent.push({ ...t, owner, at });
   if (recent.length > TRAFFIC_KEEP) recent = recent.slice(-TRAFFIC_KEEP);
-  if (!placeholdersMayExist || settleTimer) return;
-  settleTimer = setTimeout(() => {
-    settleTimer = null;
-    void settlePushPlaceholders(owner);
-  }, SETTLE_DEBOUNCE_MS);
+  scheduleSettle(owner);
 }
 
 /**
@@ -121,20 +140,26 @@ export type PlaceholderOutcome =
   | { kind: 'replace'; conversationPubkey?: string; groupId?: string };
 
 /**
- * Pure: what decrypted traffic says about a placeholder posted at `postedAt`.
- * Only events sent shortly before it was posted can be what woke us. A
- * peer's message → it becomes that conversation's row; only our own or
- * non-message events → nothing to show, retract; nothing in the window yet →
+ * Pure: what decrypted traffic (the session has caught up) says about a
+ * placeholder posted at `postedAt`. Only events sent shortly before it was
+ * posted can be what woke us. A peer's message without a row of its own →
+ * the placeholder becomes that conversation's row; otherwise (our own or
+ * non-message events, or messages already alerted / on screen) → retract,
+ * the real row exists or there's nothing to show; nothing in the window →
  * keep it (the message may still be on its way).
  */
 export function placeholderOutcome(
   postedAt: number,
-  traffic: readonly Pick<Seen, 'at' | 'fromMe' | 'message' | 'conversationPubkey' | 'groupId'>[],
+  traffic: readonly (Pick<Seen, 'at' | 'fromMe' | 'message' | 'conversationPubkey' | 'groupId'> & {
+    shown?: boolean;
+  })[],
 ): PlaceholderOutcome {
   const window = traffic.filter(
     (t) => t.at >= postedAt - PLACEHOLDER_MATCH_MS && t.at <= postedAt + PLACEHOLDER_SKEW_MS,
   );
-  const peer = window.filter((t) => t.message && !t.fromMe).sort((a, b) => b.at - a.at)[0];
+  const peer = window
+    .filter((t) => t.message && !t.fromMe && !t.shown)
+    .sort((a, b) => b.at - a.at)[0];
   if (peer)
     return { kind: 'replace', conversationPubkey: peer.conversationPubkey, groupId: peer.groupId };
   return window.length > 0 ? { kind: 'retract' } : { kind: 'keep' };
@@ -146,7 +171,9 @@ export function placeholderOutcome(
  * guess. Returns the retracted row ids.
  */
 export async function settlePushPlaceholders(owner: string): Promise<string[]> {
-  const traffic = recent.filter((t) => t.owner === owner);
+  const traffic = recent
+    .filter((t) => t.owner === owner)
+    .map((t) => ({ ...t, shown: !!t.messageId && marmotMessageShown(t.messageId) }));
   const removed = await rewriteNotifications(owner, (e) => {
     if (e.data.marmotPush !== true) return e;
     const outcome = placeholderOutcome(e.createdAt, traffic);
@@ -213,9 +240,10 @@ export async function postGenericPushAlert(): Promise<void> {
   if (lastMarmotNotificationAt() !== before) {
     await dropMarmotPushAlerts(undefined, Date.now() - PLACEHOLDER_SKEW_MS);
   } else if (lastTrafficAt !== trafficBefore) {
-    // Traffic landed meanwhile: settle us against it (replace or retract).
+    // Traffic landed meanwhile: the debounced, catch-up-gated settle (never
+    // here, inline) matches us against it once it has all decrypted.
     const owner = recent[recent.length - 1]?.owner;
-    if (owner) await settlePushPlaceholders(owner);
+    if (owner) scheduleSettle(owner);
   }
 }
 
@@ -281,6 +309,7 @@ if (!TaskManager.isTaskDefined(MARMOT_PUSH_WAKE_TASK)) {
 export function __resetPushWakeForTests(): void {
   lastTrafficAt = 0;
   recent = [];
+  catchingUp.clear();
   placeholdersMayExist = true;
   if (settleTimer) clearTimeout(settleTimer);
   settleTimer = null;

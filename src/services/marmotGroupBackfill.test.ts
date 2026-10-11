@@ -94,4 +94,18 @@ describe('boundGroupQueries — bounded, paged kind-445 group backfill', () => {
     expect(watermarks.get(H)).toBe(t + 50);
     expect(persist).toHaveBeenLastCalledWith(H, t + 50);
   });
+
+  it('reports each group live once its backfill has drained (push placeholders wait for it)', async () => {
+    const net = fakeNetwork([groupEvent(1, now() - 100)]);
+    const onLive = jest.fn();
+    const bounded = boundGroupQueries(net.network, {
+      watermarks: new Map(),
+      persist: jest.fn(),
+      onLive,
+    });
+    await bounded.request(['wss://r'], { kinds: [445], '#h': [H] });
+    expect(onLive).not.toHaveBeenCalled(); // fetched, not yet live
+    bounded.subscription(['wss://r'], [{ kinds: [445], '#h': [H] }]).subscribe({});
+    expect(onLive).toHaveBeenCalledWith(H);
+  });
 });

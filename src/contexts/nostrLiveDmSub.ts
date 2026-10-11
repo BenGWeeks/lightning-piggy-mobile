@@ -17,7 +17,7 @@ import {
 import { parseOrderEvent, serializeOrder, orderPreviewText } from '../utils/orderEvents';
 import { nip04PlaintextCache, getMemoisedSecretKey } from './nostrSecretKeyCache';
 import { notifyDmMessage } from './nostrEventBus';
-import { fireMessageNotification } from '../services/notificationService';
+import { fireMessageNotification, isThreadActivelyViewed } from '../services/notificationService';
 import { createLiveRumorSurfacer } from './liveDmRumorSurface';
 import { createLiveDmEngineBridge } from './liveDmEngineBridge';
 import {
@@ -209,14 +209,18 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     // Its contentless alert, though, is replaced by this real one — recorded
     // first, then the placeholder goes.
     const placeholder = takeContentlessWrapAlert(item.entry.id);
-    const dropPlaceholder = () =>
-      placeholder ? retractContentlessWrapAlert(viewerPubkey, item.entry.id) : undefined;
+    const threadId = dmThreadId(item.partnerPubkey, protocolForWireKind(item.entry.wireKind));
+    // Only once the real alert was written (or the thread is on screen).
+    const dropPlaceholder = (id: string | null) =>
+      placeholder && (id || isThreadActivelyViewed(threadId))
+        ? retractContentlessWrapAlert(viewerPubkey, item.entry.id)
+        : undefined;
     if (item.notify && (claimWrapNotification(item.entry.id) || placeholder)) {
       void Promise.resolve(
         fireMessageNotification({
           owner: viewerPubkey,
           kind: 'dm',
-          threadId: dmThreadId(item.partnerPubkey, protocolForWireKind(item.entry.wireKind)),
+          threadId,
           title: item.notify.title,
           body: item.notify.body,
           data: {
