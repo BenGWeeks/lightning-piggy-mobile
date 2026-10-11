@@ -1118,7 +1118,7 @@ A naive `useState([])` on Explore / Hunt / Events would paint a blank rail for o
 | `react-native-svg` | Vector rendering for the BTC Map attribution logo (`BtcMapLogoSvg.tsx`) and the geocaching pin glyphs. SVG paths preserved at any size — no rasterisation fringes at chip-sized renders.
 | `expo-asset` + `expo-file-system` + `expo-sharing` | "Save STL" button on `HuntCreateScreen` — bundles the Piggy Bag Charm 3D-print file (`assets/piggy-bag-charm.stl`, 188 KB) into the APK, copies it out of the bundle on tap, and shares via the system share sheet.
 | `expo-calendar` | "Add to Calendar" affordance on `EventDetailScreen`. Requests `READ_CALENDAR` + `WRITE_CALENDAR` at the moment the user taps the button; declines fall back to a copy-to-clipboard hint.
-| `expo-notifications` | Foreground geofence pings for the opt-in "Nearby merchants" feature (#467). Permission requested lazily, channel created on first opt-in.
+| `expo-notifications` | Foreground geofence pings for the opt-in "Alerts near Bitcoin shops" feature (#467). Permission requested lazily, channel created on first opt-in.
 |===
 
 == Offline cold-start test (`scripts/test-offline-cold-start.sh`)

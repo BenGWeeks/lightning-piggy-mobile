@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, Switch, Platform } from 'react-native';
-import { Check, ShieldCheck, Link2, BellRing, Radio } from 'lucide-react-native';
+import React, { useEffect, useMemo } from 'react';
+import { View, Text, TextInput, TouchableOpacity, Switch } from 'react-native';
+import { Check, ShieldCheck, Link2 } from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
 import { createSharedAccountStyles } from './sharedStyles';
 import { useThemeColors } from '../../contexts/ThemeContext';
@@ -8,9 +8,7 @@ import { useTranslation } from '../../contexts/LocaleContext';
 import { useAccountState } from '../../contexts/useAccountState';
 import { useNostr } from '../../contexts/NostrContext';
 import { createSecurityScreenStyles } from '../../styles/SecurityScreen.styles';
-import MarmotPushSection from '../../components/MarmotPushSection';
 import KeyBackupEntry from '../../components/KeyBackupEntry';
-import DetailsDisclosure from '../../components/DetailsDisclosure';
 import { Toast } from '../../components/BrandedToast';
 import {
   DEFAULT_HIGH_VALUE_SEND_THRESHOLD_SATS,
@@ -18,16 +16,6 @@ import {
   setSendThreshold,
 } from '../../services/sendThresholdService';
 import { getLinkPreviewEnabled, setLinkPreviewEnabled } from '../../services/linkPreviewPreference';
-import {
-  getLockScreenContentEnabled,
-  setLockScreenContentEnabled,
-  requestNotificationPermission,
-} from '../../services/notificationService';
-import {
-  loadBackgroundDmEnabled,
-  setBackgroundDmEnabled,
-} from '../../services/backgroundDmPreference';
-import { startBackgroundDmWatch, stopBackgroundDmWatch } from '../../services/backgroundDmService';
 
 // Preset thresholds for the radio rows (sats). `null` = "Off".
 // Labels/sublabels are i18n keys resolved at render time (see below).
@@ -62,15 +50,6 @@ const SecurityScreen: React.FC = () => {
   );
   const [customDraft, setCustomDraft] = useAccountState<string>(pubkey, '');
   const [linkPreviewOn, setLinkPreviewOn] = useAccountState<boolean>(pubkey, true);
-  const [lockScreenContentOn, setLockScreenContentOn] = useState<boolean>(false);
-  // Background DM watch is Android-only (iOS can't hold a background socket).
-  const [backgroundDmOn, setBackgroundDmOn] = useState<boolean>(false);
-  const isAndroid = Platform.OS === 'android';
-
-  useEffect(() => {
-    getLockScreenContentEnabled().then(setLockScreenContentOn);
-    if (isAndroid) loadBackgroundDmEnabled().then(setBackgroundDmOn);
-  }, [isAndroid]);
 
   // Per-account settings: (re)load for the ACTIVE account, and ignore a late
   // answer for an account we've since switched away from.
@@ -95,31 +74,6 @@ const SecurityScreen: React.FC = () => {
   const handleToggleLinkPreview = async (next: boolean) => {
     setLinkPreviewOn(next);
     await setLinkPreviewEnabled(next, pubkey);
-  };
-
-  const handleToggleLockScreenContent = async (next: boolean) => {
-    setLockScreenContentOn(next);
-    await setLockScreenContentEnabled(next);
-  };
-
-  const handleToggleBackgroundDm = async (next: boolean) => {
-    if (next) {
-      // Turning ON needs notification permission for the persistent chip +
-      // per-message alerts. If the user denies, leave the toggle off rather
-      // than running a watch that can never surface anything.
-      const granted = await requestNotificationPermission();
-      if (!granted) {
-        setBackgroundDmOn(false);
-        return;
-      }
-      setBackgroundDmOn(true);
-      await setBackgroundDmEnabled(true);
-      await startBackgroundDmWatch();
-    } else {
-      setBackgroundDmOn(false);
-      await setBackgroundDmEnabled(false);
-      await stopBackgroundDmWatch();
-    }
   };
 
   // `setSendThreshold` rejects (no active account, or the per-account
@@ -230,67 +184,6 @@ const SecurityScreen: React.FC = () => {
           thumbColor={linkPreviewOn ? colors.white : undefined}
         />
       </View>
-
-      <View style={[styles.headerRow, styles.sectionGap]}>
-        <BellRing size={22} color={colors.white} />
-        <Text style={[sharedAccountStyles.sectionLabel, styles.headerLabel]}>
-          {t('securityScreen.notificationContent')}
-        </Text>
-      </View>
-      <Text style={sharedAccountStyles.fieldHint}>
-        {t('securityScreen.notificationContentHint')}
-      </Text>
-      <View style={styles.toggleRow}>
-        <Text style={[styles.optionLabel, styles.toggleLabel]}>
-          {t('securityScreen.showMessagePaymentDetails')}
-        </Text>
-        <Switch
-          value={lockScreenContentOn}
-          onValueChange={handleToggleLockScreenContent}
-          accessibilityLabel={t('securityScreen.showMessagePaymentDetailsA11y')}
-          testID="security-lockscreen-content-toggle"
-          trackColor={{ false: colors.divider, true: colors.brandPink }}
-          thumbColor={lockScreenContentOn ? colors.white : undefined}
-        />
-      </View>
-
-      {isAndroid && (
-        <>
-          <View style={[styles.headerRow, styles.sectionGap]}>
-            <Radio size={22} color={colors.white} />
-            <Text style={[sharedAccountStyles.sectionLabel, styles.headerLabel]}>
-              {t('securityScreen.backgroundNotifications')}
-            </Text>
-          </View>
-          <Text style={sharedAccountStyles.fieldHint}>
-            {t('securityScreen.backgroundNotificationsHint')}
-          </Text>
-          <DetailsDisclosure
-            label={t('securityScreen.details')}
-            testID="security-background-dm-details"
-            paragraphs={[
-              t('securityScreen.backgroundDetailsNoGoogle'),
-              t('securityScreen.backgroundDetailsBattery'),
-              t('securityScreen.backgroundDetailsPayments'),
-            ]}
-          />
-          <View style={styles.toggleRow}>
-            <Text style={[styles.optionLabel, styles.toggleLabel]}>
-              {t('securityScreen.watchForMessages')}
-            </Text>
-            <Switch
-              value={backgroundDmOn}
-              onValueChange={handleToggleBackgroundDm}
-              accessibilityLabel={t('securityScreen.watchForMessages')}
-              testID="security-background-dm-toggle"
-              trackColor={{ false: colors.divider, true: colors.brandPink }}
-              thumbColor={backgroundDmOn ? colors.white : undefined}
-            />
-          </View>
-        </>
-      )}
-
-      <MarmotPushSection />
     </AccountScreenLayout>
   );
 };

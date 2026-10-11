@@ -89,10 +89,10 @@ const buildSectionRows = (colors: Palette, t: ReturnType<typeof useTranslation>)
     testID: 'drawer-row-language',
   },
   {
-    name: 'AccountNearby',
-    label: t('accountDrawerContent.nearbyMerchants'),
+    name: 'AccountNotifications',
+    label: t('accountDrawerContent.notifications'),
     icon: <Bell size={22} color={colors.textBody} />,
-    testID: 'drawer-row-nearby',
+    testID: 'drawer-row-notifications',
   },
   {
     name: 'AccountSecurity',
