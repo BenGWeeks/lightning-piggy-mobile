@@ -4,11 +4,13 @@ import { Image as ExpoImage } from 'expo-image';
 import { useTranslation } from '../contexts/LocaleContext';
 import type { SendSheetStyles } from '../styles/SendSheet.styles';
 import type { ReverseRecipientQuote } from '../utils/reverseSwapAmounts';
+import type { SendBlocker } from '../utils/onchainSendEligibility';
 
 interface Props {
   /** Paid from a Lightning wallet through a Boltz reverse swap (vs a direct
    *  send from the on-chain hot wallet, which never touches Boltz). */
   viaBoltz: boolean;
+  blocker: SendBlocker | null;
   /** Miner-fee line for the direct hot-wallet send. */
   hotWalletFee: string | null;
   loadingFees: boolean;
@@ -25,16 +27,18 @@ interface Props {
  */
 export default function SendOnchainFeeRow({
   viaBoltz,
+  blocker,
   hotWalletFee,
   loadingFees,
   quote,
   styles,
 }: Props) {
   const t = useTranslation();
+  const reason = blocker ? t(blocker.key, blocker.params) : null;
   if (!viaBoltz) {
     return (
       <View style={styles.feeRow}>
-        <Text style={styles.feeText}>{hotWalletFee ?? t('sendSheet.estimatingFee')}</Text>
+        <Text style={styles.feeText}>{reason ?? hotWalletFee ?? t('sendSheet.estimatingFee')}</Text>
       </View>
     );
   }
@@ -66,9 +70,16 @@ export default function SendOnchainFeeRow({
               fee: quote.feeSats.toLocaleString(),
             })}
           </Text>
+          {reason && (
+            <Text style={styles.feeText} testID="send-onchain-blocker">
+              {reason}
+            </Text>
+          )}
         </View>
       ) : (
-        <Text style={styles.feeText}>{t('sendSheet.feeUnavailable')}</Text>
+        <Text style={[styles.feeText, styles.feeLines]} testID="send-onchain-blocker">
+          {reason ?? t('swapBackend.quoteFailed')}
+        </Text>
       )}
     </View>
   );

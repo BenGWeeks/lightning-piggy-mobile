@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { View, Text, TouchableOpacity, BackHandler } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useOnchainSendQuote } from '../utils/useOnchainSendQuote';
+import { onchainSendEligibility } from '../utils/onchainSendEligibility';
 import { Image as ExpoImage } from 'expo-image';
 import { Alert } from './BrandedAlert';
 import { Toast } from './BrandedToast';
@@ -43,11 +46,7 @@ import {
   type ReverseSwapReceipt,
 } from '../utils/reverseSwapSend';
 import { quoteExactRecipient } from '../utils/reverseSwapAmounts';
-import {
-  reverseSwapAmountBounds,
-  reverseSwapSendBlocker,
-  shortOnchainAddress,
-} from '../utils/onchainSwapSend';
+import { reverseSwapAmountBounds, shortOnchainAddress } from '../utils/onchainSwapSend';
 import SendOnchainFeeRow from './SendOnchainFeeRow';
 import { npubEncode } from '../services/nostrService';
 import { recordOutgoing as recordOutgoingCounterparty } from '../services/zapCounterpartyStorage';
@@ -94,6 +93,7 @@ const SendSheet: React.FC<Props> = ({
     perfLog('SendSheet first render (visible=true)');
   }
   const colors = useThemeColors();
+  const insets = useSafeAreaInsets();
   const t = useTranslation();
   const styles = useMemo(() => createSendSheetStyles(colors), [colors]);
   const { payInvoiceForWallet, addPendingTransaction, activeWalletId, wallets, currency } =
@@ -145,9 +145,6 @@ const SendSheet: React.FC<Props> = ({
   const [activePicture, setActivePicture] = useState(initialPicture);
   const [isOnchainAddress, setIsOnchainAddress] = useState(false);
   const [isLnurl, setIsLnurl] = useState(false);
-  const [boltzFees, setBoltzFees] = useState<boltzService.SwapFees | null>(null);
-  const [loadingBoltzFees, setLoadingBoltzFees] = useState(false);
-  const [onchainFeeEstimate, setOnchainFeeEstimate] = useState<string | null>(null);
   const [swapReceipt, setSwapReceipt] = useState<ReverseSwapReceipt | null>(null);
   const {
     progressState,
@@ -182,12 +179,8 @@ const SendSheet: React.FC<Props> = ({
     setMemoKey((k) => k + 1);
   }, []);
 
-  // No explicit snapPoints — gorhom v5's `enableDynamicSizing={true}`
-  // default sizes the sheet to its content. Trailing action buttons
-  // are rendered as a sticky footer below the scroll view (see the
-  // fixed-footer structure in the render output below) so they stay
-  // reachable even when the form content is tall enough to require
-  // internal scrolling.
+  // Let dynamic sizing measure intrinsic content; tall forms scroll above
+  // the safe-area inset rather than clipping the trailing action buttons.
   const keyboardHeight = useKeyboardHeight();
 
   // Amount-less bolt11 (`lnbc1…` with no amount prefix) — recipient lets
@@ -220,6 +213,20 @@ const SendSheet: React.FC<Props> = ({
   const isHotOnchainWallet =
     selectedWallet?.walletType === 'onchain' && selectedWallet?.onchainImportMethod === 'mnemonic';
   const onchainViaBoltz = isOnchainAddress && !isHotOnchainWallet;
+  const onchainQuote = useOnchainSendQuote({
+    visible,
+    address: isOnchainAddress && scanned ? invoiceData : null,
+    walletId,
+    viaSwap: onchainViaBoltz,
+    amountSats: currentSats,
+  });
+  const boltzFees = onchainQuote.fees;
+  const onchainEligibility = onchainSendEligibility({
+    amountSats: currentSats,
+    balanceSats: walletBalance,
+    viaSwap: onchainViaBoltz,
+    ...onchainQuote,
+  });
   const swapQuote =
     onchainViaBoltz && boltzFees && currentSats > 0
       ? quoteExactRecipient(currentSats, boltzFees)
@@ -367,9 +374,6 @@ const SendSheet: React.FC<Props> = ({
       setDecoded,
       setScanned,
       setSatsValue,
-      setLoadingBoltzFees,
-      setBoltzFees,
-      setOnchainFeeEstimate,
     });
 
   const handleSend = async () => {
@@ -378,18 +382,10 @@ const SendSheet: React.FC<Props> = ({
     // sits right next to the Send button, so a type-then-immediately-Send can
     // outrun the state flush. The ref is written synchronously in onChangeText.
     const submittedMemo = memoRef.current;
-    // A swap send must fit Boltz's limits and the balance for the TOTAL paid.
-    if (onchainViaBoltz) {
-      const blocker = boltzFees
-        ? reverseSwapSendBlocker(currentSats, boltzFees, walletBalance)
-        : null;
-      if (!boltzFees || blocker) {
-        Alert.alert(
-          t('sendSheet.error'),
-          blocker ? t(blocker.key, blocker.params) : t('sendSheet.feeUnavailable'),
-        );
-        return;
-      }
+    if (isOnchainAddress && !onchainEligibility.canSend) {
+      const reason = onchainEligibility.reason!;
+      Alert.alert(t('sendSheet.error'), t(reason.key, reason.params));
+      return;
     }
     // High-value confirmation gate (#82) — see useLargeSendConfirm.
     const decodedAmount = decoded?.amountSats ?? 0;
@@ -651,7 +647,7 @@ const SendSheet: React.FC<Props> = ({
           : error instanceof Error
             ? error.message
             : t('sendSheet.paymentFailed');
-      if (quoteChanged) setBoltzFees(quoteChanged);
+      if (quoteChanged) onchainQuote.adopt(quoteChanged);
       showOutcome(send, 'error', message);
     } finally {
       // Only clear state if this invocation is still the active one.
@@ -678,8 +674,6 @@ const SendSheet: React.FC<Props> = ({
     setActivePicture(undefined);
     setIsOnchainAddress(false);
     setIsLnurl(false);
-    setBoltzFees(null);
-    setLoadingBoltzFees(false);
   };
 
   const handleSheetChange = useCallback(
@@ -710,7 +704,7 @@ const SendSheet: React.FC<Props> = ({
   const amountMaxSats = onchainViaBoltz ? swapBounds?.maxSats : lnurlParams?.maxSats;
 
   const canSend = isOnchainAddress
-    ? currentSats > 0 && !loadingBoltzFees
+    ? onchainEligibility.canSend
     : isAmountlessBolt11
       ? currentSats > 0
       : needsAmount
@@ -722,6 +716,8 @@ const SendSheet: React.FC<Props> = ({
       <BottomSheetModal
         ref={bottomSheetRef}
         onChange={handleSheetChange}
+        topInset={insets.top}
+        bottomInset={insets.bottom}
         enablePanDownToClose
         backdropComponent={renderBackdrop}
         handleIndicatorStyle={styles.handleIndicator}
@@ -737,7 +733,7 @@ const SendSheet: React.FC<Props> = ({
          *  height and the ScrollView's content height to become
          *  circular references, clipping the keypad's last row. */}
         {step === 'amount' ? (
-          <BottomSheetView style={styles.content}>
+          <BottomSheetView>
             <AmountEntryScreen
               initialSats={currentSats}
               title={t('sendSheet.enterAmountTitle')}
@@ -754,7 +750,6 @@ const SendSheet: React.FC<Props> = ({
         ) : (
           <BottomSheetScrollView
             contentContainerStyle={[
-              styles.content,
               { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40 },
             ]}
             keyboardShouldPersistTaps="handled"
@@ -849,11 +844,18 @@ const SendSheet: React.FC<Props> = ({
                     </Text>
                   )}
 
-                  {isOnchainAddress && currentSats > 0 && (
+                  {isOnchainAddress && (currentSats > 0 || onchainQuote.errorKey) && (
                     <SendOnchainFeeRow
                       viaBoltz={onchainViaBoltz}
-                      hotWalletFee={onchainFeeEstimate}
-                      loadingFees={loadingBoltzFees}
+                      hotWalletFee={
+                        onchainQuote.directFeeSats === null
+                          ? null
+                          : t('sendSheet.minerFee', {
+                              fee: onchainQuote.directFeeSats.toLocaleString(),
+                            })
+                      }
+                      blocker={onchainEligibility.reason}
+                      loadingFees={onchainQuote.loading}
                       quote={swapQuote}
                       styles={styles}
                     />

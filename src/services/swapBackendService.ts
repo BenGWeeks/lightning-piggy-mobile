@@ -1,9 +1,22 @@
 import { parseBoltzPair } from './boltzPair';
+import { t } from '../i18n';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { BOLTZ_API, fetchWithTimeout } from './boltzApi';
 
-export const DEFAULT_SWAP_BACKEND = BOLTZ_API;
+// New swaps require an explicit provider. Historical, unpinned swaps remain
+// associated with Boltz so recovery never silently moves to a different server.
+export const DEFAULT_SWAP_BACKEND = '';
+export const LEGACY_SWAP_BACKEND = BOLTZ_API;
+
+export class NoSwapServerError extends Error {
+  constructor() {
+    super(t('swapBackend.notConfigured'));
+    this.name = 'NoSwapServerError';
+  }
+}
+export const isNoSwapServerError = (error: unknown): error is NoSwapServerError =>
+  error instanceof Error && error.name === 'NoSwapServerError';
 const SETTING_KEY = 'swap_backend_url_v1';
 
 /** Accept an HTTPS origin or API base, including reverse-proxy path prefixes. */
@@ -31,7 +44,14 @@ export function normalizeSwapBackend(input: string): string {
 /** Storage failures must not silently switch a private user back to a public server. */
 export async function getSwapBackend(): Promise<string> {
   const saved = await AsyncStorage.getItem(SETTING_KEY);
-  return saved === null ? DEFAULT_SWAP_BACKEND : normalizeSwapBackend(saved);
+  return saved === null || saved.trim() === '' ? DEFAULT_SWAP_BACKEND : normalizeSwapBackend(saved);
+}
+
+/** Fail before any HTTP request or new swap when no provider was selected. */
+export async function requireSwapBackend(): Promise<string> {
+  const backend = await getSwapBackend();
+  if (!backend) throw new NoSwapServerError();
+  return backend;
 }
 
 /** Check both supported BTC swap directions without creating a swap. */
@@ -57,6 +77,10 @@ export async function checkSwapBackend(input: string, signal?: AbortSignal): Pro
 
 /** Checking a draft must not select it as the provider for new swaps. */
 export async function checkAndSaveSwapBackend(input: string): Promise<string> {
+  if (!input.trim()) {
+    await AsyncStorage.removeItem(SETTING_KEY);
+    return DEFAULT_SWAP_BACKEND;
+  }
   const backend = await checkSwapBackend(input);
   await AsyncStorage.setItem(SETTING_KEY, backend);
   return backend;
@@ -72,7 +96,7 @@ function backendKey(swapId: string): string {
 // query its original provider. Never consult the current setting for an old ID.
 export async function getSwapBackendForId(swapId: string): Promise<string> {
   const saved = await SecureStore.getItemAsync(backendKey(swapId));
-  return saved === null || saved === undefined ? DEFAULT_SWAP_BACKEND : normalizeSwapBackend(saved);
+  return saved === null || saved === undefined ? LEGACY_SWAP_BACKEND : normalizeSwapBackend(saved);
 }
 
 let pinQueue: Promise<void> = Promise.resolve();

@@ -2,7 +2,7 @@ import { swapSupportHint } from './swapSupportText';
 import { getSwapBackendForId } from '../services/swapBackendService';
 
 jest.mock('../services/swapBackendService', () => ({
-  DEFAULT_SWAP_BACKEND: 'https://api.boltz.exchange/v2',
+  LEGACY_SWAP_BACKEND: 'https://api.boltz.exchange/v2',
   getSwapBackendForId: jest.fn(),
 }));
 const backendFor = getSwapBackendForId as jest.Mock;

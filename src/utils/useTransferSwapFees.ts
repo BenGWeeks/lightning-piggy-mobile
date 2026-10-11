@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { isNoSwapServerError } from '../services/swapBackendService';
 import { getReverseSwapFees, getSubmarineSwapFees, type SwapFees } from '../services/boltzService';
 
 /** Ignore quotes/errors from another direction, hidden sheet, or superseded request. */
@@ -9,6 +10,7 @@ export function useTransferSwapFees(direction: string | null, visible: boolean) 
     attempt: number;
     fees: SwapFees | null;
     failed: boolean;
+    missingServer?: boolean;
   } | null>(null);
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
   const latest = useRef({ direction, attempt });
@@ -33,8 +35,15 @@ export function useTransferSwapFees(direction: string | null, visible: boolean) 
       .then((fees) => {
         if (!cancelled) setResult({ direction, attempt, fees, failed: false });
       })
-      .catch(() => {
-        if (!cancelled) setResult({ direction, attempt, fees: null, failed: true });
+      .catch((error: unknown) => {
+        if (!cancelled)
+          setResult({
+            direction,
+            attempt,
+            fees: null,
+            failed: true,
+            missingServer: isNoSwapServerError(error),
+          });
       });
     return () => {
       cancelled = true;
@@ -45,6 +54,7 @@ export function useTransferSwapFees(direction: string | null, visible: boolean) 
   return {
     fees: current?.fees ?? null,
     failed: current?.failed ?? false,
+    errorKey: current?.missingServer ? 'swapBackend.notConfigured' : 'swapBackend.quoteFailed',
     loading: visible && needed && !current,
     retry,
     adopt,
