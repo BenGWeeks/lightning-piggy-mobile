@@ -26,12 +26,6 @@ export const createGroupConversationScreenStyles = (colors: Palette) =>
       justifyContent: 'center',
       alignItems: 'center',
     },
-    titleTouch: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      flexShrink: 1,
-    },
     title: {
       color: colors.white,
       fontSize: 22,
@@ -44,17 +38,6 @@ export const createGroupConversationScreenStyles = (colors: Palette) =>
       fontWeight: '500',
       marginTop: 8,
       marginLeft: 48,
-    },
-    actionButton: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      backgroundColor: 'rgba(255,255,255,0.2)',
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    deleteIconButton: {
-      backgroundColor: 'rgba(0,0,0,0.15)',
     },
     content: {
       flex: 1,

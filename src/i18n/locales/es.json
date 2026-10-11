@@ -625,7 +625,7 @@
     "leaveGroupMessage": "¿Quitar \"{{name}}\" de este dispositivo? Los demás miembros conservarán el grupo; podrán volver a añadirte si te escriben de nuevo.",
     "cancel": "Cancelar",
     "leave": "Salir",
-    "renameGroup": "Renombrar grupo",
+    "renameGroup": "Renombrar el grupo {{name}}",
     "manageMembers": "Gestionar miembros",
     "memberCountOne": "{{count}} miembro",
     "memberCountOther": "{{count}} miembros",

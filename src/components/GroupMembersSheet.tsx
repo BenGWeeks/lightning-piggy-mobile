@@ -19,6 +19,7 @@ import FriendPickerSheet, { type PickedFriend } from './FriendPickerSheet';
 import GroupMemberListRow from './GroupMemberListRow';
 import type { GroupMemberRow } from '../utils/groupMemberRows';
 import { useGroupAdminActions } from '../hooks/useGroupAdminActions';
+import { canManageGroup } from '../utils/groupAdmins';
 
 interface Props {
   visible: boolean;
@@ -88,12 +89,12 @@ const GroupMembersSheet: React.FC<Props> = ({
     () => new Set((group?.adminPubkeys ?? []).map((p) => p.toLowerCase())),
     [group?.adminPubkeys],
   );
-  const selfIsAdmin = !!selfPubkey && adminSet.has(selfPubkey.toLowerCase());
-  const canManage = !isMarmot || selfIsAdmin;
+  // Same rule as the header's rename pencil: anyone in NIP-17, admins in Marmot.
+  const canManage = canManageGroup(group, selfPubkey);
   // Only Marmot groups have admins; 1:1 DMs never reach this sheet, so any
   // Marmot group here is multi-member. Non-admins see badges, no actions.
   const { adminPendingPubkey, openAdminActions } = useGroupAdminActions(group);
-  const onAdminActions = isMarmot && selfIsAdmin ? openAdminActions : undefined;
+  const onAdminActions = isMarmot && canManage ? openAdminActions : undefined;
   const reportFailure = useCallback(
     (e: unknown) => {
       if (__DEV__) console.warn('[Group] membership change failed:', e);
