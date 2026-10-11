@@ -22,6 +22,9 @@ jest.mock('../contexts/NostrContext', () => ({
   notifyGroupMessage: jest.fn(),
 }));
 jest.mock('../components/BrandedAlert', () => ({ Alert: { alert: jest.fn() } }));
+// The group composer reads `t` from LocaleContext; a stable identity translator.
+const mockT = (key: string) => key;
+jest.mock('../contexts/LocaleContext', () => ({ useTranslation: () => mockT }));
 jest.mock('../services/locationService', () => ({
   ...jest.requireActual('../services/locationService'),
   getCurrentLocation: jest.fn(),
@@ -164,6 +167,6 @@ it('after a group switch mid-dialog, re-asks and records the optimistic row in t
     await pending;
   });
   expect(mockSendGroup.mock.calls[0][0].groupId).toBe('other-group');
-  expect(append).toHaveBeenCalledWith('other-group', expect.anything());
+  expect(append).toHaveBeenCalledWith(mockPubkey, 'other-group', expect.anything());
   append.mockRestore();
 });
