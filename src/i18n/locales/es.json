@@ -2479,5 +2479,19 @@
     "keptInAmberBody": "Lightning Piggy nunca ve la clave secreta de esta cuenta. Haz una copia desde Amber. Las frases de recuperación de carteras guardadas en Lightning Piggy necesitan una copia aparte antes de cerrar sesión.",
     "keptInSigner": "Tu clave está guardada en tu app firmante",
     "keptInSignerBody": "Lightning Piggy nunca ve la clave secreta de esta cuenta. Haz una copia desde tu app de firma. Las frases de recuperación de carteras guardadas en Lightning Piggy necesitan una copia aparte antes de cerrar sesión."
+  },
+  "locationSharing": {
+    "directTitle": "¿Compartir tu ubicación con {{name}}?",
+    "liveTitle": "¿Compartir tu ubicación en tiempo real con {{name}}?",
+    "groupTitle": {
+      "one": "¿Compartir tu ubicación con la otra persona de {{group}}?",
+      "other": "¿Compartir tu ubicación con las {{count}} personas de {{group}}?"
+    },
+    "warning": "Comparte tu ubicación solo con personas que conoces y en quienes confías. Tu mensaje está cifrado de extremo a extremo y verán una vista previa del mapa de OpenStreetMap.",
+    "cancel": "Cancelar",
+    "share": "Compartir",
+    "groupEmptyTitle": "Todavía no hay nadie con quien compartir",
+    "groupEmptyBody": "Todavía no hay nadie más en {{group}}. Añade a alguien al grupo y luego comparte tu ubicación.",
+    "ok": "Aceptar"
   }
 }
