@@ -257,6 +257,8 @@ export function buildListingTemplate(input: {
   const price = normaliseAmount(draft.price, currency);
   if (price === null) throw new Error('Invalid price');
   const prevTags = previous?.tags ?? [];
+  const prevType = prevTags.find((t) => t[0] === 'type');
+  const prevFrequency = prevTags.find((t) => t[0] === 'price')?.[3];
   const shop = shopCoordinate(pubkey);
   const shipping = draft.shipping.filter(
     (s, i, all) => all.findIndex((o) => o.coordinate === s.coordinate) === i,
@@ -264,11 +266,14 @@ export function buildListingTemplate(input: {
   const tags: string[][] = [
     ['d', draft.dTag],
     ['title', draft.title.trim()],
-    ['price', price, currency],
+    // Keep a subscription interval (4th element) the editor doesn't expose.
+    prevFrequency ? ['price', price, currency, prevFrequency] : ['price', price, currency],
     [
       'type',
-      prevTags.find((t) => t[0] === 'type')?.[1] || 'simple',
-      shipping.length > 0 ? 'physical' : 'digital',
+      prevType?.[1] || 'simple',
+      // Shipping implies physical; otherwise keep the published format
+      // (a physical item can be collect-in-person), defaulting to digital.
+      shipping.length > 0 ? 'physical' : prevType?.[2] || 'digital',
     ],
     ['visibility', tagValue(prevTags, 'visibility') || 'on-sale'],
   ];

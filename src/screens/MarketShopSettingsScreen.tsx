@@ -13,7 +13,8 @@ import { Plus } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { useSellerShop } from '../hooks/useSellerShop';
-import { useSellerActions } from '../hooks/useSellerActions';
+import { ShopExistsError, useSellerActions } from '../hooks/useSellerActions';
+import { Alert } from '../components/BrandedAlert';
 import { Toast } from '../components/BrandedToast';
 import MarketSellerHeader from '../components/MarketSellerHeader';
 import SellerCurrencyChips from '../components/SellerCurrencyChips';
@@ -53,6 +54,14 @@ const MarketShopSettingsScreen: React.FC<Props> = ({ navigation }) => {
   const [form, setForm] = useState<Form | null>(null);
   const [showErrors, setShowErrors] = useState(false);
   const [pickingZone, setPickingZone] = useState<number | null>(null);
+  // The revision the form was loaded from: an untouched form follows newer
+  // revisions; a touched one asks before overwriting them.
+  const [base, setBase] = useState<{ shopId: string | null; zones: string[] } | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const editForm = useCallback((update: (prev: Form | null) => Form | null) => {
+    setDirty(true);
+    setForm(update);
+  }, []);
 
   const newZone = useCallback((): ShippingZoneDraft => {
     const home = deviceCountryCode();
@@ -68,44 +77,46 @@ const MarketShopSettingsScreen: React.FC<Props> = ({ navigation }) => {
   // setup once a COMPLETED fetch shows there isn't one. A failed fetch must
   // not offer a blank form — saving it would replace an existing shop.
   useEffect(() => {
-    if (form) return;
     const existing = parseShopDraft(snapshot.shop, snapshot.zones);
-    if (existing) {
+    if (existing && snapshot.shop) {
+      if (form && (dirty || base?.shopId === snapshot.shop.id)) return;
       setForm({ shop: existing, zones: snapshot.zones.map(zoneDraftFromOption) });
-    } else if (status === 'ready') {
+      setBase({ shopId: snapshot.shop.id, zones: snapshot.zones.map((z) => z.coordinate) });
+    } else if (!form && status === 'ready') {
       setForm({ shop: { name: '', description: '', currency: 'SATS' }, zones: [newZone()] });
+      setBase({ shopId: null, zones: [] });
     }
-  }, [form, snapshot.shop, snapshot.zones, status, newZone]);
+  }, [form, dirty, base, snapshot.shop, snapshot.zones, status, newZone]);
 
   const errors = useMemo(() => (form ? validateShop(form.shop, form.zones) : []), [form]);
 
   const setShop = useCallback(
     (patch: Partial<ShopDraft>) =>
-      setForm((prev) => (prev ? { ...prev, shop: { ...prev.shop, ...patch } } : prev)),
-    [],
+      editForm((prev) => (prev ? { ...prev, shop: { ...prev.shop, ...patch } } : prev)),
+    [editForm],
   );
   const onZoneChange = useCallback(
     (index: number, zone: ShippingZoneDraft) =>
-      setForm((prev) =>
+      editForm((prev) =>
         prev ? { ...prev, zones: prev.zones.map((z, i) => (i === index ? zone : z)) } : prev,
       ),
-    [],
+    [editForm],
   );
   const onZoneRemove = useCallback(
     (index: number) =>
-      setForm((prev) =>
+      editForm((prev) =>
         prev ? { ...prev, zones: prev.zones.filter((_, i) => i !== index) } : prev,
       ),
-    [],
+    [editForm],
   );
   const onAddZone = useCallback(
-    () => setForm((prev) => (prev ? { ...prev, zones: [...prev.zones, newZone()] } : prev)),
-    [newZone],
+    () => editForm((prev) => (prev ? { ...prev, zones: [...prev.zones, newZone()] } : prev)),
+    [newZone, editForm],
   );
   const onPickCountry = useCallback(
     (code: string) => {
       if (pickingZone === null) return;
-      setForm((prev) =>
+      editForm((prev) =>
         prev
           ? {
               ...prev,
@@ -119,7 +130,7 @@ const MarketShopSettingsScreen: React.FC<Props> = ({ navigation }) => {
       );
       setPickingZone(null);
     },
-    [pickingZone],
+    [pickingZone, editForm],
   );
 
   const onSave = useCallback(async () => {
@@ -129,18 +140,36 @@ const MarketShopSettingsScreen: React.FC<Props> = ({ navigation }) => {
       Toast.show({ type: 'error', text1: t('market.sell.shop.fixErrors') });
       return;
     }
-    try {
-      await saveShop(form.shop, form.zones);
-      Toast.show({ type: 'success', text1: t('market.sell.shop.saved') });
-      navigation.goBack();
-    } catch (e) {
-      Toast.show({
-        type: 'error',
-        text1: t('market.sell.shop.saveFailed'),
-        text2: (e as Error).message,
-      });
+    const save = async () => {
+      try {
+        await saveShop(form.shop, form.zones, base?.zones ?? []);
+        Toast.show({ type: 'success', text1: t('market.sell.shop.saved') });
+        navigation.goBack();
+      } catch (e) {
+        if (e instanceof ShopExistsError) {
+          // Reload the form from the shop the relays just returned.
+          Toast.show({ type: 'info', text1: t('market.sell.shop.existingFound') });
+          setDirty(false);
+          setBase(null);
+          setForm(null);
+          return;
+        }
+        Toast.show({
+          type: 'error',
+          text1: t('market.sell.shop.saveFailed'),
+          text2: (e as Error).message,
+        });
+      }
+    };
+    if (snapshot.shop && base?.shopId !== snapshot.shop.id) {
+      Alert.alert(t('market.sell.conflictTitle'), t('market.sell.shop.conflictBody'), [
+        { text: t('market.sell.cancel'), style: 'cancel' },
+        { text: t('market.sell.overwrite'), onPress: () => void save() },
+      ]);
+      return;
     }
-  }, [form, errors, saveShop, navigation, t]);
+    await save();
+  }, [form, errors, base, snapshot.shop, saveShop, navigation, t]);
 
   return (
     <KeyboardAvoidingView

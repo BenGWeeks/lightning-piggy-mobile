@@ -2446,7 +2446,9 @@
         "saving": "Guardando…",
         "saved": "Tienda guardada",
         "saveFailed": "No se pudo guardar tu tienda",
-        "fixErrors": "Revisa los campos marcados"
+        "fixErrors": "Revisa los campos marcados",
+        "existingFound": "Encontramos tu tienda y la cargamos. Revisa los datos y vuelve a guardar.",
+        "conflictBody": "Tu tienda se cambió en otro dispositivo o app desde que la abriste. ¿Guardar tu versión de todos modos?"
       },
       "zone": {
         "name": "Nombre",
@@ -2502,7 +2504,8 @@
         "fixErrors": "Revisa los campos marcados",
         "notFound": "No se encontró este anuncio.",
         "needsShop": "Crea tu tienda antes de anunciar artículos.",
-        "delete": "Eliminar anuncio"
+        "delete": "Eliminar anuncio",
+        "conflictBody": "Este anuncio se cambió en otro dispositivo o app desde que lo abriste. ¿Guardar tu versión de todos modos?"
       },
       "errors": {
         "title": "Añade un título (hasta 200 caracteres).",
@@ -2529,7 +2532,9 @@
         "yourListing": "Este es tu anuncio",
         "editListing": "Editar anuncio",
         "previewBanner": "Vista previa: así verán tu anuncio los compradores. Aún no está publicado."
-      }
+      },
+      "conflictTitle": "Cambiado en otro lugar",
+      "overwrite": "Guardar de todos modos"
     }
   },
   "dmProtocol": {

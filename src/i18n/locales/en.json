@@ -2446,7 +2446,9 @@
         "saving": "Saving…",
         "saved": "Shop saved",
         "saveFailed": "Couldn't save your shop",
-        "fixErrors": "Please check the highlighted fields"
+        "fixErrors": "Please check the highlighted fields",
+        "existingFound": "We found your existing shop and loaded it. Check the details, then save again.",
+        "conflictBody": "Your shop was changed on another device or app since you opened it. Save your version anyway?"
       },
       "zone": {
         "name": "Name",
@@ -2502,7 +2504,8 @@
         "fixErrors": "Please check the highlighted fields",
         "notFound": "This listing couldn't be found.",
         "needsShop": "Set up your shop before listing items.",
-        "delete": "Delete listing"
+        "delete": "Delete listing",
+        "conflictBody": "This listing was changed on another device or app since you opened it. Save your version anyway?"
       },
       "errors": {
         "title": "Add a title (up to 200 characters).",
@@ -2529,7 +2532,9 @@
         "yourListing": "This is your listing",
         "editListing": "Edit listing",
         "previewBanner": "Preview — this is how shoppers will see your listing. It isn't published yet."
-      }
+      },
+      "conflictTitle": "Changed elsewhere",
+      "overwrite": "Save anyway"
     }
   },
   "dmProtocol": {

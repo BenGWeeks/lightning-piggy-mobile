@@ -16,6 +16,7 @@ import {
   DELETION_KIND,
   LISTING_KIND,
   SHIPPING_OPTION_KIND,
+  SHOP_COLLECTION_D,
 } from '../utils/marketSellerEvents';
 
 const FETCH_MAX_WAIT_MS = 8000;
@@ -30,7 +31,12 @@ export function sellerRelays(relays: readonly { url: string; write: boolean; rea
   return [...new Set(write.length > 0 ? write : DEFAULT_RELAYS)].slice(0, MAX_RELAYS);
 }
 
-/** One bounded snapshot of the seller's listings, shop, zones and deletions. */
+/**
+ * One bounded snapshot of the seller's listings, shop, zones and deletions.
+ * The shop + zones are a separate query so a long history of unrelated
+ * deletions (kind 5 is shared with every other feature) can't crowd them out
+ * of the relay's `limit`.
+ */
 export async function fetchSellerEvents(input: {
   pubkey: string;
   relays: string[];
@@ -38,14 +44,46 @@ export async function fetchSellerEvents(input: {
 }): Promise<Event[]> {
   const pubkey = input.pubkey.toLowerCase();
   trackRelays(input.relays);
+  const params = {
+    maxWait: FETCH_MAX_WAIT_MS,
+    signal: input.signal,
+    rejectOnAllRelaysFailure: true,
+  };
+  const [shop, listings] = await Promise.all([
+    querySyncAbortable(
+      pool,
+      input.relays,
+      { kinds: [COLLECTION_KIND, SHIPPING_OPTION_KIND], authors: [pubkey], limit: 100 },
+      params,
+    ),
+    querySyncAbortable(
+      pool,
+      input.relays,
+      { kinds: [LISTING_KIND, DELETION_KIND], authors: [pubkey], limit: 300 },
+      params,
+    ),
+  ]);
+  // `authors` / `kinds` are only a request — never trust a relay to honour them.
+  return [...shop, ...listings].filter((e) => e.pubkey === pubkey && SELLER_KINDS.includes(e.kind));
+}
+
+/**
+ * Targeted look-up of the user's shop collection, made right before a
+ * first-time setup is saved: a blank setup must never replace a shop that a
+ * slow relay simply hadn't returned yet.
+ */
+export async function fetchShopCollection(input: {
+  pubkey: string;
+  relays: string[];
+}): Promise<Event[]> {
+  const pubkey = input.pubkey.toLowerCase();
   const events = await querySyncAbortable(
     pool,
     input.relays,
-    { kinds: SELLER_KINDS, authors: [pubkey], limit: 300 },
-    { maxWait: FETCH_MAX_WAIT_MS, signal: input.signal, rejectOnAllRelaysFailure: true },
+    { kinds: [COLLECTION_KIND], authors: [pubkey], '#d': [SHOP_COLLECTION_D], limit: 5 },
+    { maxWait: FETCH_MAX_WAIT_MS, rejectOnAllRelaysFailure: true },
   );
-  // `authors` / `kinds` are only a request — never trust a relay to honour them.
-  return events.filter((e) => e.pubkey === pubkey && SELLER_KINDS.includes(e.kind));
+  return events.filter((e) => e.pubkey === pubkey && e.kind === COLLECTION_KIND);
 }
 
 /** Publish to the seller's relays; resolves once ONE relay accepts, rejects

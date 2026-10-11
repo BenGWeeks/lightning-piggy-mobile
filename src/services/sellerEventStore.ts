@@ -18,6 +18,35 @@ interface AccountState {
 const accounts = new Map<string, AccountState>();
 const listeners = new Set<() => void>();
 const MAX_EVENTS = 1000;
+const KEEP_DELETIONS = 200;
+
+/** Drop superseded revisions once the set grows past the cap: keep the
+ * newest event per addressable coordinate plus the newest deletions, so a
+ * long-lived session never stops accepting new events. */
+function compact(state: AccountState) {
+  if (state.events.size <= MAX_EVENTS) return;
+  const newest = new Map<string, Event>();
+  const deletions: Event[] = [];
+  for (const event of state.events.values()) {
+    if (event.kind === 5) {
+      deletions.push(event);
+      continue;
+    }
+    const d = event.tags.find((t) => t[0] === 'd')?.[1] ?? '';
+    const key = `${event.kind}:${d}`;
+    const prev = newest.get(key);
+    if (
+      !prev ||
+      event.created_at > prev.created_at ||
+      (event.created_at === prev.created_at && event.id < prev.id)
+    )
+      newest.set(key, event);
+  }
+  deletions.sort((a, b) => b.created_at - a.created_at);
+  state.events = new Map(
+    [...newest.values(), ...deletions.slice(0, KEEP_DELETIONS)].map((e) => [e.id, e]),
+  );
+}
 
 function account(pubkey: string): AccountState {
   let state = accounts.get(pubkey);
@@ -41,9 +70,9 @@ export function sellerStoreState(pubkey: string): Readonly<AccountState> {
 export function addSellerEvents(pubkey: string, events: readonly Event[], fetched = false) {
   const state = account(pubkey);
   for (const event of events) {
-    if (event.pubkey === pubkey && state.events.size < MAX_EVENTS)
-      state.events.set(event.id, event);
+    if (event.pubkey === pubkey) state.events.set(event.id, event);
   }
+  compact(state);
   if (fetched) state.fetchedAt = Date.now();
   changed(state);
 }

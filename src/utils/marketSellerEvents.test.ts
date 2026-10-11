@@ -140,6 +140,26 @@ describe('listing events (kind 30402)', () => {
     expect(tags).not.toContainEqual(['t', 'old']);
   });
 
+  it('keeps a subscription frequency and the published physical format on edit', () => {
+    const previous = sign({
+      kind: 30402,
+      content: '',
+      tags: [
+        ['d', 'item-abc'],
+        ['price', '10', 'GBP', 'M'],
+        ['type', 'simple', 'physical'],
+      ],
+    });
+    const { tags } = buildListingTemplate({
+      draft: draft({ shipping: [] }),
+      pubkey,
+      nowSeconds: 1,
+      previous,
+    });
+    expect(tags).toContainEqual(['price', '12.50', 'GBP', 'M']);
+    expect(tags).toContainEqual(['type', 'simple', 'physical']);
+  });
+
   it('parses images in sort order and drops duplicates (Robotechy repeats images)', () => {
     const parsed = parseListingDraft({
       content: '',

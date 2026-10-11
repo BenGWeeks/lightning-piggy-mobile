@@ -54,6 +54,10 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
   const [draft, setDraft] = useState<ListingDraft | null>(null);
   const [categoriesText, setCategoriesText] = useState('');
   const [showErrors, setShowErrors] = useState(false);
+  // Revision the form was loaded from: an untouched form follows newer
+  // revisions; a touched one asks before overwriting them.
+  const [baseId, setBaseId] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
 
   const existing = useMemo(
     () => (editDTag ? (snapshot.listings.find((e) => dTagOf(e) === editDTag) ?? null) : null),
@@ -64,15 +68,17 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
     [snapshot.shop, snapshot.zones],
   );
 
-  // Seed once: the listing being edited, or a blank draft in the shop's
-  // currency with every shipping zone switched on.
+  // Seed: the listing being edited (re-seeded while untouched if a newer
+  // revision arrives), or a blank draft in the shop's currency with every
+  // shipping zone switched on.
   useEffect(() => {
-    if (draft) return;
     if (existing) {
+      if (draft && (dirty || existing.id === baseId)) return;
       const parsed = parseListingDraft(existing);
       setDraft(parsed);
       setCategoriesText(parsed.categories.join(', '));
-    } else if (!editDTag && shop) {
+      setBaseId(existing.id);
+    } else if (!draft && !editDTag && shop) {
       setDraft({
         dTag: newIdentifier('item'),
         title: '',
@@ -85,7 +91,7 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
         shipping: snapshot.zones.map((z) => ({ coordinate: z.coordinate, extraCost: '' })),
       });
     }
-  }, [draft, existing, editDTag, shop, snapshot.zones]);
+  }, [draft, dirty, baseId, existing, editDTag, shop, snapshot.zones]);
 
   const fullDraft = useMemo(
     () => (draft ? { ...draft, categories: splitCategories(categoriesText) } : null),
@@ -94,20 +100,26 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
   const errors = useMemo(() => (fullDraft ? validateListingDraft(fullDraft) : []), [fullDraft]);
   const invalid = (field: (typeof errors)[number]) => showErrors && errors.includes(field);
 
+  const editDraft = useCallback((change: (prev: ListingDraft) => ListingDraft) => {
+    setDirty(true);
+    setDraft((prev) => (prev ? change(prev) : prev));
+  }, []);
   const update = useCallback(
-    (patch: Partial<ListingDraft>) => setDraft((prev) => (prev ? { ...prev, ...patch } : prev)),
-    [],
+    (patch: Partial<ListingDraft>) => editDraft((prev) => ({ ...prev, ...patch })),
+    [editDraft],
   );
+  const onCategoriesChange = useCallback((text: string) => {
+    setDirty(true);
+    setCategoriesText(text);
+  }, []);
   const onAddPhoto = useCallback(async () => {
     const url = await pickAndUpload();
-    if (url) setDraft((prev) => (prev ? { ...prev, images: [...prev.images, url] } : prev));
-  }, [pickAndUpload]);
+    if (url) editDraft((prev) => ({ ...prev, images: [...prev.images, url] }));
+  }, [pickAndUpload, editDraft]);
   const onRemovePhoto = useCallback(
     (index: number) =>
-      setDraft((prev) =>
-        prev ? { ...prev, images: prev.images.filter((_, i) => i !== index) } : prev,
-      ),
-    [],
+      editDraft((prev) => ({ ...prev, images: prev.images.filter((_, i) => i !== index) })),
+    [editDraft],
   );
 
   const checkValid = useCallback(() => {
@@ -138,21 +150,31 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const onPublish = useCallback(async () => {
     if (!fullDraft || !checkValid()) return;
-    try {
-      await saveListing(fullDraft, existing);
-      Toast.show({
-        type: 'success',
-        text1: existing ? t('market.sell.editor.updated') : t('market.sell.editor.published'),
-      });
-      navigation.goBack();
-    } catch (e) {
-      Toast.show({
-        type: 'error',
-        text1: t('market.sell.editor.publishFailed'),
-        text2: (e as Error).message,
-      });
+    const publish = async () => {
+      try {
+        await saveListing(fullDraft, existing);
+        Toast.show({
+          type: 'success',
+          text1: existing ? t('market.sell.editor.updated') : t('market.sell.editor.published'),
+        });
+        navigation.goBack();
+      } catch (e) {
+        Toast.show({
+          type: 'error',
+          text1: t('market.sell.editor.publishFailed'),
+          text2: (e as Error).message,
+        });
+      }
+    };
+    if (existing && baseId && existing.id !== baseId) {
+      Alert.alert(t('market.sell.conflictTitle'), t('market.sell.editor.conflictBody'), [
+        { text: t('market.sell.cancel'), style: 'cancel' },
+        { text: t('market.sell.overwrite'), onPress: () => void publish() },
+      ]);
+      return;
     }
-  }, [fullDraft, existing, checkValid, saveListing, navigation, t]);
+    await publish();
+  }, [fullDraft, existing, baseId, checkValid, saveListing, navigation, t]);
 
   const onDelete = useCallback(() => {
     if (!existing) return;
@@ -324,7 +346,7 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
               <TextInput
                 style={[styles.input, invalid('categories') && styles.inputError]}
                 value={categoriesText}
-                onChangeText={setCategoriesText}
+                onChangeText={onCategoriesChange}
                 placeholder={t('market.sell.editor.categoriesPlaceholder')}
                 placeholderTextColor={colors.textSupplementary}
                 autoCapitalize="none"

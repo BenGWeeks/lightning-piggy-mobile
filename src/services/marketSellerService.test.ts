@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { finalizeEvent, getPublicKey, type Event } from 'nostr-tools';
 import {
   fetchSellerEvents,
+  fetchShopCollection,
   loadHiddenListings,
   loadSellerCache,
   persistSellerSnapshot,
@@ -87,23 +88,60 @@ describe('sellerRelays', () => {
 });
 
 describe('fetchSellerEvents', () => {
-  it('runs one bounded query and drops events a relay sent for another author or kind', async () => {
+  it('queries the shop + zones apart from listings + deletions, and drops foreign events', async () => {
     const mine = listing('a');
     const theirs = finalizeEvent(
       { kind: 30402, created_at: 1, content: '', tags: [['d', 'x']] },
       new Uint8Array(32).fill(1),
     );
     const note = sign({ kind: 1, content: 'gm', tags: [] });
-    (querySyncAbortable as jest.Mock).mockResolvedValue([mine, theirs, note]);
+    (querySyncAbortable as jest.Mock)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([mine, theirs, note]);
     await expect(fetchSellerEvents({ pubkey, relays: ['wss://r.example'] })).resolves.toEqual([
       mine,
     ]);
-    expect(querySyncAbortable).toHaveBeenCalledWith(
-      expect.anything(),
-      ['wss://r.example'],
-      { kinds: [30402, 30405, 30406, 5], authors: [pubkey], limit: 300 },
+    const filters = (querySyncAbortable as jest.Mock).mock.calls.map((c) => c[2]);
+    // Kind 5 is shared with other features: it must not share a `limit` with the shop.
+    expect(filters).toEqual([
+      { kinds: [30405, 30406], authors: [pubkey], limit: 100 },
+      { kinds: [30402, 5], authors: [pubkey], limit: 300 },
+    ]);
+    expect((querySyncAbortable as jest.Mock).mock.calls[0][3]).toEqual(
       expect.objectContaining({ maxWait: 8000, rejectOnAllRelaysFailure: true }),
     );
+  });
+
+  it('fails when either query fails, never returning a partial "no shop"', async () => {
+    (querySyncAbortable as jest.Mock)
+      .mockRejectedValueOnce(new Error('All relays failed to connect'))
+      .mockResolvedValueOnce([listing('a')]);
+    await expect(fetchSellerEvents({ pubkey, relays: ['wss://r.example'] })).rejects.toThrow(
+      'All relays failed',
+    );
+  });
+});
+
+describe('fetchShopCollection', () => {
+  it('looks up exactly the shop coordinate', async () => {
+    const shop = sign(
+      buildShopTemplate({
+        shop: { name: 'TEST', description: '', currency: 'GBP' },
+        pubkey,
+        productCoordinates: [],
+        zoneCoordinates: [],
+      }),
+    );
+    (querySyncAbortable as jest.Mock).mockResolvedValue([shop, listing('a')]);
+    await expect(fetchShopCollection({ pubkey, relays: ['wss://r.example'] })).resolves.toEqual([
+      shop,
+    ]);
+    expect((querySyncAbortable as jest.Mock).mock.calls[0][2]).toEqual({
+      kinds: [30405],
+      authors: [pubkey],
+      '#d': ['lightning-piggy-shop'],
+      limit: 5,
+    });
   });
 });
 
@@ -191,5 +229,16 @@ describe('sellerEventStore', () => {
     expect(sellerStoreState(pubkey).hidden.get('c')).toBe(1);
     forgetSellerAccount(pubkey);
     expect(sellerStoreState(pubkey).events.size).toBe(0);
+  });
+
+  it('compacts superseded revisions past the cap instead of refusing new events', () => {
+    const revisions = Array.from({ length: 1100 }, (_, i) => listing('same', i + 1));
+    addSellerEvents(pubkey, revisions);
+    const fresh = listing('new', 5000);
+    addSellerEvents(pubkey, [fresh]);
+    const events = sellerStoreState(pubkey).events;
+    expect(events.has(fresh.id)).toBe(true);
+    expect(events.has(revisions[1099].id)).toBe(true);
+    expect(events.size).toBeLessThan(1000);
   });
 });

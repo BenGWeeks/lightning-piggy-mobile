@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from 'react';
 import type { Event } from 'nostr-tools';
 import { useNostr } from '../contexts/NostrContext';
 import {
+  fetchShopCollection,
   persistSellerSnapshot,
   publishSellerEvent,
   saveHiddenListings,
@@ -31,6 +32,15 @@ const sameEvent = (template: EventTemplate, previous: Event | undefined) =>
   JSON.stringify(previous.tags) === JSON.stringify(template.tags);
 
 const dTagOf = (event: Event) => event.tags.find((t) => t[0] === 'd')?.[1] ?? '';
+
+/** Thrown by a first-time shop save when relays turn out to hold a shop the
+ * snapshot hadn't loaded yet — the caller reloads the form from it. */
+export class ShopExistsError extends Error {
+  constructor() {
+    super('Shop already exists');
+    this.name = 'ShopExistsError';
+  }
+}
 
 /**
  * Sign + publish the seller's Gamma Markets events through the app's signer
@@ -90,6 +100,29 @@ export function useSellerActions(snapshot: SellerSnapshot) {
     [pubkey, snapshot.listings],
   );
 
+  /** Products the shop collection should list: everything it already lists
+   * (the loaded snapshot may be a capped cache) plus loaded listings, minus
+   * anything known deleted. */
+  const shopProductCoordinates = useCallback(
+    (add: string[] = [], remove?: string) => {
+      if (!pubkey) return [];
+      const state = sellerStoreState(pubkey);
+      const deleted = new Set(state.hidden.keys());
+      for (const event of state.events.values()) {
+        if (event.kind !== 5) continue;
+        for (const t of event.tags) if (t[0] === 'a' && t[1]) deleted.add(t[1]);
+      }
+      const prefix = `${LISTING_KIND}:${pubkey}:`;
+      const listed = (snapshot.shop?.tags ?? [])
+        .filter((t) => t[0] === 'a' && t[1]?.startsWith(prefix) && !deleted.has(t[1]))
+        .map((t) => t[1]);
+      const all = new Set([...listingCoordinates(), ...listed, ...add]);
+      if (remove) all.delete(remove);
+      return [...all];
+    },
+    [pubkey, snapshot.shop, listingCoordinates],
+  );
+
   const run = useCallback(async <T>(task: () => Promise<T>): Promise<T> => {
     setBusy(true);
     try {
@@ -99,12 +132,21 @@ export function useSellerActions(snapshot: SellerSnapshot) {
     }
   }, []);
 
-  /** Save shop settings: changed zones, a deletion for removed zones, then
-   * the shop collection referencing them all. */
+  /** Save shop settings: changed zones, a deletion for the zones the user
+   * removed (only ones the form was loaded with — a zone that arrived from
+   * relays afterwards is kept), then the shop collection referencing them. */
   const saveShop = useCallback(
-    (shop: ShopDraft, zones: ShippingZoneDraft[]) =>
+    (shop: ShopDraft, zones: ShippingZoneDraft[], baseZoneCoordinates: string[]) =>
       run(async () => {
         if (!pubkey) throw new Error('Not signed in');
+        if (!snapshot.shop) {
+          const found = await fetchShopCollection({ pubkey, relays: relayList });
+          if (found.length > 0) {
+            addSellerEvents(pubkey, found);
+            void persistSellerSnapshot(pubkey);
+            throw new ShopExistsError();
+          }
+        }
         const zoneCoordinates: string[] = [];
         for (const zone of zones) {
           const coordinate = coordinateOf(SHIPPING_OPTION_KIND, pubkey, zone.dTag);
@@ -113,26 +155,40 @@ export function useSellerActions(snapshot: SellerSnapshot) {
           const template = buildShippingZoneTemplate(zone, shop.currency, previous);
           if (!sameEvent(template, previous)) await signAndPublish(template, previous);
         }
-        const removed = snapshot.zones.filter((z) => !zoneCoordinates.includes(z.coordinate));
+        const removed = snapshot.zones.filter(
+          (z) =>
+            baseZoneCoordinates.includes(z.coordinate) && !zoneCoordinates.includes(z.coordinate),
+        );
         if (removed.length > 0) {
+          // Dated no earlier than the newest revision it deletes (NIP-09).
+          const newest = Math.max(...removed.map((z) => z.createdAt));
           await signAndPublish(
             buildDeletionTemplate(
-              removed.map((z) => ({ kind: SHIPPING_OPTION_KIND, coordinate: z.coordinate })),
+              removed.map((z) => ({
+                kind: SHIPPING_OPTION_KIND,
+                coordinate: z.coordinate,
+                eventId: snapshot.zoneEvents.get(z.coordinate)?.id,
+              })),
             ),
+            { created_at: newest - 1 } as Event,
           );
         }
+        // Zones published elsewhere after the form loaded stay referenced.
+        const kept = snapshot.zones
+          .map((z) => z.coordinate)
+          .filter((c) => !baseZoneCoordinates.includes(c) && !zoneCoordinates.includes(c));
         await signAndPublish(
           buildShopTemplate({
             shop,
             pubkey,
-            productCoordinates: listingCoordinates(),
-            zoneCoordinates,
+            productCoordinates: shopProductCoordinates(),
+            zoneCoordinates: [...zoneCoordinates, ...kept],
             previous: snapshot.shop,
           }),
           snapshot.shop,
         );
       }),
-    [pubkey, snapshot, signAndPublish, listingCoordinates, run],
+    [pubkey, snapshot, relayList, signAndPublish, shopProductCoordinates, run],
   );
 
   /** Create or edit (same `d`) a listing. */
@@ -151,10 +207,10 @@ export function useSellerActions(snapshot: SellerSnapshot) {
         );
         const coordinate = coordinateOf(LISTING_KIND, pubkey, draft.dTag);
         const known = listingCoordinates();
-        if (!known.includes(coordinate)) await republishShop([coordinate, ...known]);
+        if (!known.includes(coordinate)) await republishShop(shopProductCoordinates([coordinate]));
         return signed;
       }),
-    [pubkey, signAndPublish, listingCoordinates, republishShop, run],
+    [pubkey, signAndPublish, listingCoordinates, shopProductCoordinates, republishShop, run],
   );
 
   /** NIP-09 delete + hide locally until relays catch up. */
@@ -163,17 +219,19 @@ export function useSellerActions(snapshot: SellerSnapshot) {
       run(async () => {
         if (!pubkey) throw new Error('Not signed in');
         const coordinate = coordinateOf(LISTING_KIND, pubkey, dTagOf(event));
+        // `previous = event` dates the deletion after the revision it deletes.
         const deletion = await signAndPublish(
           buildDeletionTemplate([{ kind: LISTING_KIND, coordinate, eventId: event.id }]),
+          event,
         );
         const hidden = new Map(sellerStoreState(pubkey).hidden);
         hidden.set(coordinate, Math.max(deletion.created_at, event.created_at));
         setSellerHidden(pubkey, hidden);
         await saveHiddenListings(pubkey, hidden);
         void persistSellerSnapshot(pubkey);
-        await republishShop(listingCoordinates().filter((c) => c !== coordinate));
+        await republishShop(shopProductCoordinates([], coordinate));
       }),
-    [pubkey, signAndPublish, listingCoordinates, republishShop, run],
+    [pubkey, signAndPublish, shopProductCoordinates, republishShop, run],
   );
 
   return { busy, saveShop, saveListing, deleteListing };
