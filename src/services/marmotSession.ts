@@ -223,7 +223,7 @@ export class MarmotSession {
     const backend = opts.backend ?? createSqliteMarmotBackend(opts.pubkey);
     this.backend = fence.fenceBackend(backend, this.gate); // drops writes after a wipe
     const store = <T>(ns: string) => createMarmotKvStore<T>(this.backend, ns);
-    this.outbox = new MarmotWelcomeOutbox(this.backend);
+    this.outbox = new MarmotWelcomeOutbox(this.backend, () => this.gate.stopped);
     const network = this.outbox.wrapNetwork(
       opts.network ?? createMarmotNetwork(opts.getLookupRelays),
     );
@@ -325,7 +325,7 @@ export class MarmotSession {
     // account that has used Marmot before and needs its package kept fresh).
     void this.keepKeyPackageFresh();
     void this.retryPendingWelcomes();
-    void this.outbox.flush(() => this.gate.stopped).catch(() => undefined);
+    void this.outbox.flush().catch(() => undefined);
   }
 
   /** Re-attempt Welcomes whose join failed transiently in an earlier session. */

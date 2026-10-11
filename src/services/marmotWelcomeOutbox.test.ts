@@ -57,6 +57,24 @@ describe('MarmotWelcomeOutbox', () => {
     expect(await outbox.pending()).toHaveLength(0);
   });
 
+  it('publishes nothing once the session has stopped (sign-out mid-invite)', async () => {
+    const net = makeNetwork();
+    let stopped = false;
+    const outbox = new MarmotWelcomeOutbox(createMemoryMarmotBackend(), () => stopped);
+    const network = outbox.wrapNetwork(net.network);
+    const { failed } = await outbox.capture(async () => {
+      await network.publish(['wss://a'], wrap('1'.repeat(64)));
+    });
+    await outbox.enqueue('group-a', failed);
+    net.setOnline(true);
+    stopped = true;
+    // The wraps are already signed, so only this check stops a late publish.
+    expect(await outbox.resend(failed)).toEqual(failed);
+    await outbox.flush();
+    expect(net.published).toEqual([]);
+    expect(await outbox.pending()).toHaveLength(1); // kept for the next session
+  });
+
   it('drops a group’s queue, expires old entries and stays bounded', async () => {
     const net = makeNetwork();
     const backend = createMemoryMarmotBackend();

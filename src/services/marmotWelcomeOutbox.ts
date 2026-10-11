@@ -49,7 +49,11 @@ export class MarmotWelcomeOutbox {
    * can't be traced to its group — two invites at once would swap them. */
   private captureChain: Promise<unknown> = Promise.resolve();
 
-  constructor(private readonly backend: MarmotKvBackend) {}
+  constructor(
+    private readonly backend: MarmotKvBackend,
+    /** The session has stopped (sign-out / switch): nothing more is published. */
+    private readonly isStopped: () => boolean = () => false,
+  ) {}
 
   /** The network with its publish observed: failed gift wraps are captured
    * (while an invite runs) and every wrap reports progress. */
@@ -91,10 +95,11 @@ export class MarmotWelcomeOutbox {
     return run;
   }
 
-  /** Republish each wrap once; returns those still not accepted. */
+  /** Republish each wrap once; returns those still not accepted (all of
+   * them once the session has stopped — they stay queued, unpublished). */
   async resend<W extends CapturedWrap>(wraps: W[]): Promise<W[]> {
     const publish = this.publishRaw;
-    if (!publish) return wraps;
+    if (!publish || this.isStopped()) return wraps;
     const results = await Promise.all(
       wraps.map((w) => publish(w.relays, w.event).then(accepted, () => false)),
     );
@@ -123,10 +128,10 @@ export class MarmotWelcomeOutbox {
   }
 
   /** Retry every queued wrap; delivered and expired ones are removed. */
-  async flush(isStopped: () => boolean = () => false): Promise<void> {
+  async flush(): Promise<void> {
     const now = Math.floor(Date.now() / 1000);
     for (const item of await this.pending()) {
-      if (isStopped()) return;
+      if (this.isStopped()) return;
       const expired = now - item.queuedAt > WELCOME_OUTBOX_TTL_SECS;
       if (expired || (await this.resend([item])).length === 0) {
         await this.backend.remove(OUTBOX_NS, item.event.id);
