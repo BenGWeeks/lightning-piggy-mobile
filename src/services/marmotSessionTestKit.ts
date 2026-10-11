@@ -11,7 +11,13 @@ import {
 } from 'nostr-tools';
 import type { Event as NostrEvent, Filter } from 'nostr-tools';
 
-import { MarmotSession, type MarmotMessageEvent, type MarmotRumor } from './marmotSession';
+import type { MarmotClient } from '@internet-privacy/marmot-ts';
+import {
+  MarmotSession,
+  toAppGroupId,
+  type MarmotMessageEvent,
+  type MarmotRumor,
+} from './marmotSession';
 import { createMemoryMarmotBackend } from './marmotStore';
 
 export const RELAY = 'wss://relay.test';
@@ -83,6 +89,21 @@ export async function waitFor(cond: () => boolean, ms = 20_000) {
     if (Date.now() > end) throw new Error('waitFor timed out');
     await new Promise((r) => setTimeout(r, 20));
   }
+}
+
+/**
+ * Wait until `session` has no convergence work pending in the group. A send
+ * during marmot-ts's settle window is queued, and the library can leave it
+ * queued for good (#1280), so tests that send straight after a membership
+ * commit wait for `Settled` first rather than hanging to the Jest timeout.
+ */
+export function waitForSettled(session: MarmotSession, appGroupId: string) {
+  const { groups } = (session as unknown as { client: MarmotClient }).client;
+  return waitFor(
+    () =>
+      groups.loaded.find((g) => toAppGroupId(g.idStr) === appGroupId)?.convergenceStatus ===
+      'Settled',
+  );
 }
 
 export function makeSession(
