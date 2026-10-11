@@ -206,21 +206,27 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     notifyDmMessage(item.partnerPubkey);
     // claimWrapNotification: the background watch (same JS context, no follow
     // gate) may have already notified for this wrap — never post twice (#279).
-    // Its contentless alert, though, is replaced by this real one.
+    // Its contentless alert, though, is replaced by this real one — recorded
+    // first, then the placeholder goes.
     const placeholder = takeContentlessWrapAlert(item.entry.id);
-    if (placeholder) void retractContentlessWrapAlert(viewerPubkey, item.entry.id);
+    const dropPlaceholder = () =>
+      placeholder ? retractContentlessWrapAlert(viewerPubkey, item.entry.id) : undefined;
     if (item.notify && (claimWrapNotification(item.entry.id) || placeholder)) {
-      void fireMessageNotification({
-        owner: viewerPubkey,
-        kind: 'dm',
-        threadId: dmThreadId(item.partnerPubkey, protocolForWireKind(item.entry.wireKind)),
-        title: item.notify.title,
-        body: item.notify.body,
-        data: {
-          conversationPubkey: item.partnerPubkey,
-          conversationProtocol: protocolForWireKind(item.entry.wireKind),
-        },
-      });
+      void Promise.resolve(
+        fireMessageNotification({
+          owner: viewerPubkey,
+          kind: 'dm',
+          threadId: dmThreadId(item.partnerPubkey, protocolForWireKind(item.entry.wireKind)),
+          title: item.notify.title,
+          body: item.notify.body,
+          data: {
+            conversationPubkey: item.partnerPubkey,
+            conversationProtocol: protocolForWireKind(item.entry.wireKind),
+          },
+        }),
+      )
+        .then(dropPlaceholder)
+        .catch(() => undefined);
     }
   };
   setDeferredReplay(replayDeferredFollowGate);
@@ -366,9 +372,10 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       } else if (__DEV__) {
         console.log(`[Nostr] live kind-4 ${ev.id.slice(0, 8)} dedup-cache`);
       }
-      // Decrypted: alerting for it (or not) is this sub's call — background
-      // sync in this context won't re-ping it.
-      markWrapHandled(ev.id);
+      // Handled (background sync in this context won't re-ping it) only once
+      // decided: ours, a known stranger, or alerted below. A message we don't
+      // alert for (not fresh) stays the sync's to ping.
+      if (fromMe || isFreshArrival(ev.created_at)) markWrapHandled(ev.id);
       if (cancelled || !isCurrentOwner() || viewerPubkey !== pubkey || activeSigner !== signerType)
         return;
 
@@ -494,10 +501,10 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         if (__DEV__) console.log(`[Nostr] live kind-${ev.kind} ${ev.id.slice(0, 8)} not-an-order`);
         return;
       }
-      markWrapHandled(ev.id); // see the kind-4 note above
       const fromMe = ev.pubkey === viewerPubkey;
       const recipientTag = ev.tags.find((t) => t[0] === 'p')?.[1]?.toLowerCase();
       const partnerPubkey = fromMe ? recipientTag : ev.pubkey.toLowerCase();
+      if (fromMe || isFreshArrival(ev.created_at)) markWrapHandled(ev.id); // see kind-4
       if (!partnerPubkey || !/^[0-9a-f]{64}$/.test(partnerPubkey)) {
         if (__DEV__) console.log(`[Nostr] live kind-${ev.kind} ${ev.id.slice(0, 8)} no-partner`);
         return;

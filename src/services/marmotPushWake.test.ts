@@ -5,6 +5,7 @@ jest.mock('expo-task-manager', () => ({
 jest.mock('./notificationService', () => ({
   dismissNotificationsFor: jest.fn(async () => 0),
   dropMarmotPushAlerts: jest.fn(async () => undefined),
+  PLACEHOLDER_MATCH_MS: 60_000,
   fireMessageNotification: jest.fn(async () => 'id'),
   lastMarmotNotificationAt: jest.fn(() => 0),
 }));
@@ -17,10 +18,12 @@ import {
   handleMarmotPushWake,
   lastMarmotTrafficAt,
   MARMOT_PUSH_WAKE_TASK,
+  noteMarmotCommit,
   noteMarmotGroupTraffic,
-  PLACEHOLDER_MATCH_MS,
+  placeholderOutcome,
   postGenericPushAlert,
   settlePushPlaceholders,
+  type MarmotTraffic,
   type WakeDeps,
 } from './marmotPushWake';
 import {
@@ -30,6 +33,20 @@ import {
 } from './notificationHistory';
 import * as notificationService from './notificationService';
 import { dismissNotificationsFor, fireMessageNotification } from './notificationService';
+
+const ME = 'a'.repeat(64);
+const PEER = 'b'.repeat(64);
+/** A decrypted app event: a peer's DM message unless overridden. */
+const traffic = (createdAtSec: number, o: Partial<MarmotTraffic> = {}): MarmotTraffic => ({
+  createdAtSec,
+  fromMe: false,
+  message: true,
+  conversationPubkey: PEER,
+  ...o,
+});
+
+// Clears a pending debounced settle timer, which would keep Jest alive.
+afterEach(() => __resetPushWakeForTests());
 
 function deps(over: Partial<WakeDeps> = {}): WakeDeps & { notified: number } {
   const d = {
@@ -125,25 +142,28 @@ describe('handleMarmotPushWake', () => {
     );
   });
 
-  it('a real Marmot alert landing while the generic one is posted clears it', async () => {
+  it('a real Marmot alert landing while the generic one is posted replaces it (just-posted rows only)', async () => {
     const last = notificationService.lastMarmotNotificationAt as jest.Mock;
     last.mockReturnValueOnce(0).mockReturnValueOnce(12_345);
     const drop = notificationService.dropMarmotPushAlerts as jest.Mock;
     drop.mockClear();
     await postGenericPushAlert();
-    // Tray entry AND history row — no nameless row left beside the real one.
-    expect(drop).toHaveBeenCalledTimes(1);
+    // Windowed by time — never "every placeholder".
+    expect(drop).toHaveBeenCalledWith(undefined, expect.any(Number));
   });
 
-  it('group traffic landing while the generic one is posted clears it too', async () => {
+  it('traffic landing while it is posted settles it rather than dropping it', async () => {
+    await AsyncStorage.clear();
+    __resetNotificationHistoryForTests();
+    __resetPushWakeForTests();
     const drop = notificationService.dropMarmotPushAlerts as jest.Mock;
     drop.mockClear();
     (fireMessageNotification as jest.Mock).mockImplementationOnce(async () => {
-      noteMarmotGroupTraffic('a'.repeat(64), Date.now() / 1000);
+      noteMarmotGroupTraffic(ME, traffic(Date.now() / 1000, { fromMe: true }));
       return 'id';
     });
     await postGenericPushAlert();
-    expect(drop).toHaveBeenCalledTimes(1);
+    expect(drop).not.toHaveBeenCalled();
   });
 
   it('leaves the generic alert alone when nothing landed meanwhile', async () => {
@@ -188,8 +208,14 @@ describe('the wake task and notification-watcher pushes', () => {
   });
 });
 
-describe('pushes for traffic that shows nothing (phantom "New message")', () => {
-  const OWNER = 'a'.repeat(64);
+describe('push placeholders: replaced or retracted only on evidence (never lost)', () => {
+  const T = 1_800_000_000_000;
+  const placeholder = (at: number) =>
+    recordNotification(
+      ME,
+      { kind: 'dm', title: 'New message', body: 'x', data: { marmotPush: true } },
+      at,
+    );
   beforeEach(async () => {
     await AsyncStorage.clear();
     __resetNotificationHistoryForTests();
@@ -197,66 +223,107 @@ describe('pushes for traffic that shows nothing (phantom "New message")', () => 
     (dismissNotificationsFor as jest.Mock).mockClear();
   });
 
-  it('fresh group traffic the live session received covers the push (e.g. an invite commit)', async () => {
+  it('fresh group traffic the live session received covers the push', async () => {
     const d = deps({ hasLiveSession: () => true, lastTrafficAt: () => 9_500 });
     expect(await handleMarmotPushWake(d)).toBe('covered');
     expect(d.notified).toBe(0);
-    // Traffic long before the push says nothing about it.
     const stale = deps({ hasLiveSession: () => true, now: () => 100_000, lastTrafficAt: () => 1 });
     expect(await handleMarmotPushWake(stale)).toBe('notified');
   });
 
-  it('counts only live traffic: backfill, replays and future-dated events never cover', () => {
-    const now = 1_800_000_000_000;
-    noteMarmotGroupTraffic(OWNER, now / 1000 - 3600, now); // an hour-old backfill
+  it('counts only live traffic for cover: backfill, replays and future-dated events never cover', () => {
+    noteMarmotGroupTraffic(ME, traffic(T / 1000 - 3600), T); // an hour-old backfill
     expect(lastMarmotTrafficAt()).toBe(0);
-    noteMarmotGroupTraffic(OWNER, now / 1000 + 3600, now); // sender-controlled future
+    noteMarmotGroupTraffic(ME, traffic(T / 1000 + 3600), T); // sender-controlled future
     expect(lastMarmotTrafficAt()).toBe(0);
-    noteMarmotGroupTraffic(OWNER, now / 1000 - 5, now);
-    expect(lastMarmotTrafficAt()).toBe(now);
+    noteMarmotGroupTraffic(ME, traffic(T / 1000 - 5), T);
+    expect(lastMarmotTrafficAt()).toBe(T);
   });
 
-  it('settles only the placeholders the traffic can stand for', async () => {
-    const T = Date.now();
-    const placeholder = (at: number) =>
-      recordNotification(
-        OWNER,
-        { kind: 'dm', title: 'New message', body: 'x', data: { marmotPush: true } },
-        at,
-      );
-    const covered = await placeholder(T);
-    await placeholder(T + 10 * 60_000); // posted long after this traffic: another push
-    await recordNotification(OWNER, { kind: 'dm', title: 'Nodie', body: 'x' }, T);
-    const removed = await settlePushPlaceholders(OWNER, T - PLACEHOLDER_MATCH_MS / 2);
-    expect(removed).toEqual([covered.id]);
-    expect(dismissNotificationsFor).toHaveBeenCalledWith({ historyIds: [covered.id] });
-    const left = await listNotifications(OWNER);
-    expect(left.map((e) => e.title).sort()).toEqual(['New message', 'Nodie']);
-    expect(left.find((e) => e.title === 'New message')?.createdAt).toBe(T + 10 * 60_000);
-  });
-
-  it('group traffic settles a placeholder in one debounced pass', async () => {
+  it('a commit (invite, admin change) covers a wake but never settles a placeholder', async () => {
     jest.useFakeTimers();
     try {
       const now = Date.now();
-      await recordNotification(
-        OWNER,
-        { kind: 'dm', title: 'New message', body: 'x', data: { marmotPush: true } },
-        now,
-      );
-      for (let i = 0; i < 5; i++)
-        noteMarmotGroupTraffic(OWNER, Math.floor(now / 1000) - 3 + i, now);
-      await jest.advanceTimersByTimeAsync(2_000);
+      await placeholder(now);
+      noteMarmotCommit(now);
+      expect(lastMarmotTrafficAt()).toBe(now);
+      await jest.advanceTimersByTimeAsync(5_000);
     } finally {
       jest.useRealTimers();
     }
-    await listNotifications(OWNER);
-    expect(await listNotifications(OWNER)).toHaveLength(0);
+    expect(await listNotifications(ME)).toHaveLength(1);
+  });
+
+  it("a backfill that doesn't reach the placeholder's message keeps it", async () => {
+    await placeholder(T);
+    noteMarmotGroupTraffic(ME, traffic(T / 1000 - 10 * 60, { conversationPubkey: PEER }), T + 1000);
+    expect(await settlePushPlaceholders(ME)).toEqual([]);
+    const [row] = await listNotifications(ME);
+    expect(row.data).toEqual({ marmotPush: true });
+  });
+
+  it("a peer's message (live or backfilled, alerting or not) turns it into that conversation's row, in place", async () => {
+    const { id } = await placeholder(T);
+    noteMarmotGroupTraffic(ME, traffic(T / 1000 - 5, { conversationPubkey: PEER }), T + 1000);
+    expect(await settlePushPlaceholders(ME)).toEqual([]);
+    const rows = await listNotifications(ME);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      id,
+      kind: 'dm',
+      read: false,
+      data: { conversationPubkey: PEER, conversationProtocol: 'marmot' },
+    });
+    expect(rows[0].data.marmotPush).toBeUndefined();
+    expect(dismissNotificationsFor).not.toHaveBeenCalled();
+  });
+
+  it('a group message points it at the group', async () => {
+    await placeholder(T);
+    noteMarmotGroupTraffic(ME, traffic(T / 1000 - 5, { groupId: 'marmot:g' }), T + 1000);
+    await settlePushPlaceholders(ME);
+    expect((await listNotifications(ME))[0]).toMatchObject({
+      kind: 'group',
+      data: { groupId: 'marmot:g' },
+    });
+  });
+
+  it('only our own or non-message traffic in its window retracts it (tray too)', async () => {
+    const { id } = await placeholder(T);
+    noteMarmotGroupTraffic(ME, traffic(T / 1000 - 5, { fromMe: true }), T + 1000);
+    noteMarmotGroupTraffic(ME, traffic(T / 1000 - 4, { message: false }), T + 1000);
+    expect(await settlePushPlaceholders(ME)).toEqual([id]);
+    expect(dismissNotificationsFor).toHaveBeenCalledWith({ historyIds: [id] });
+    expect(await listNotifications(ME)).toHaveLength(0);
+  });
+
+  it("another account's traffic never touches this account's placeholder", async () => {
+    await placeholder(T);
+    noteMarmotGroupTraffic('b'.repeat(64), traffic(T / 1000 - 5, { fromMe: true }), T + 1000);
+    await settlePushPlaceholders(ME);
+    expect(await listNotifications(ME)).toHaveLength(1);
+  });
+
+  it('placeholderOutcome: peer message wins over own traffic; empty window keeps', () => {
+    const at = (s: number, o: Partial<{ fromMe: boolean; message: boolean }> = {}) => ({
+      at: T + s * 1000,
+      fromMe: false,
+      message: true,
+      conversationPubkey: PEER,
+      ...o,
+    });
+    expect(placeholderOutcome(T, [])).toEqual({ kind: 'keep' });
+    expect(placeholderOutcome(T, [at(-120)])).toEqual({ kind: 'keep' }); // before the window
+    expect(placeholderOutcome(T, [at(30)])).toEqual({ kind: 'keep' }); // after it was posted
+    expect(placeholderOutcome(T, [at(-3, { fromMe: true })])).toEqual({ kind: 'retract' });
+    expect(placeholderOutcome(T, [at(-3, { fromMe: true }), at(-2)])).toEqual({
+      kind: 'replace',
+      conversationPubkey: PEER,
+    });
   });
 });
 
 describe('a push wake caused by our own send (e.g. from another of our devices)', () => {
-  const ME = 'a'.repeat(64);
   beforeEach(async () => {
     await AsyncStorage.clear();
     __resetNotificationHistoryForTests();
@@ -264,8 +331,7 @@ describe('a push wake caused by our own send (e.g. from another of our devices)'
   });
 
   it('is covered when the only new traffic is our own message — no generic "New message"', async () => {
-    // The live session decrypted our own message (authored by ME): authenticated traffic.
-    noteMarmotGroupTraffic(ME, Date.now() / 1000);
+    noteMarmotGroupTraffic(ME, traffic(Date.now() / 1000, { fromMe: true }));
     const d = deps({
       hasLiveSession: () => true,
       now: () => Date.now(),
@@ -275,15 +341,15 @@ describe('a push wake caused by our own send (e.g. from another of our devices)'
     expect(d.notified).toBe(0);
   });
 
-  it('replaces a headless generic alert once the session decrypts that self-authored message', async () => {
+  it('retracts a headless generic alert once the session decrypts that self-authored message', async () => {
     const posted = Date.now();
     await recordNotification(
       ME,
       { kind: 'dm', title: 'New message', body: 'x', data: { marmotPush: true } },
       posted,
     );
-    // Our message was sent a few seconds before the push that woke us.
-    await settlePushPlaceholders(ME, posted - 5_000);
+    noteMarmotGroupTraffic(ME, traffic((posted - 5_000) / 1000, { fromMe: true }), posted + 1_000);
+    await settlePushPlaceholders(ME);
     expect(await listNotifications(ME)).toHaveLength(0);
   });
 });

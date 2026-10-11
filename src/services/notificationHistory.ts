@@ -97,7 +97,7 @@ export function recordNotification(
     collapseKey?: string;
   },
   now = Date.now(),
-): Promise<{ duplicateDelivered: boolean; id: string }> {
+): Promise<{ duplicateDelivered: boolean; id: string; count: number }> {
   const isMessage = entry.kind === 'dm' || entry.kind === 'group';
   const record: NotificationHistoryEntry = {
     id: entry.id ?? entry.historyKey ?? `${now}-${Math.random().toString(36).slice(2, 10)}`,
@@ -110,12 +110,13 @@ export function recordNotification(
     ...(entry.historyKey ? { key: entry.historyKey } : {}),
     ...(entry.collapseKey ? { collapse: entry.collapseKey } : {}),
   };
-  const fresh = { duplicateDelivered: false, id: record.id };
+  const fresh = { duplicateDelivered: false, id: record.id, count: 1 };
   if (!pubkey) return Promise.resolve(fresh);
   // A repeat of a source already shown in the tray is reported, so the caller
   // can skip a second tray entry; one whose tray post failed is retried.
   let duplicateDelivered = false;
   let id = record.id;
+  let count = 1;
   return update(pubkey, (entries) => {
     const existing = record.key ? entries.find((e) => e.key === record.key) : undefined;
     if (existing) {
@@ -130,11 +131,39 @@ export function recordNotification(
       : undefined;
     if (!open) return [record, ...entries];
     id = open.id;
-    const merged = { ...record, id, count: (open.count ?? 1) + 1 };
+    count = (open.count ?? 1) + 1;
+    const merged = { ...record, id, count };
     return [merged, ...entries.filter((e) => e !== open)];
   })
-    .then(() => ({ duplicateDelivered, id }))
+    .then(() => ({ duplicateDelivered, id, count }))
     .catch(() => fresh);
+}
+
+/**
+ * Rewrite entries in place: `change` returns the replacement entry, `null` to
+ * delete it, or the entry itself to keep it. One write; none when nothing
+ * changed. Resolves with the ids deleted. Lets a placeholder row be turned
+ * into the real one rather than deleted in the hope another is written.
+ */
+export function rewriteNotifications(
+  pubkey: string,
+  change: (entry: NotificationHistoryEntry) => NotificationHistoryEntry | null,
+): Promise<string[]> {
+  let removed: string[] = [];
+  return update(pubkey, (entries) => {
+    removed = [];
+    let touched = false;
+    const next: NotificationHistoryEntry[] = [];
+    for (const e of entries) {
+      const out = change(e);
+      if (out !== e) touched = true;
+      if (out) next.push(out);
+      else removed.push(e.id);
+    }
+    return touched ? next : entries;
+  })
+    .then(() => removed)
+    .catch(() => []);
 }
 
 /** Delete every entry `match` selects (no write when none match); resolves

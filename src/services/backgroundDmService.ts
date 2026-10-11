@@ -295,6 +295,8 @@ async function handleWrap(input: {
     if (isLiveDmSubArmed()) {
       await waitMs(LIVE_SUB_DECRYPT_GRACE_MS);
       if (wasWrapHandled(ev.id)) return;
+      // Signed out / switched account meanwhile: not this watch's to alert.
+      if (activeWatch?.viewerPubkey !== viewerPubkey) return;
     }
     if (!claimWrapNotification(ev.id)) return;
     // Remembered so the live sub can replace it once it decrypts the wrap.

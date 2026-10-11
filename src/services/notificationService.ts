@@ -52,6 +52,11 @@ import {
 } from './notificationHistory';
 import { getActivePubkey, subscribeActivePubkey } from './walletStorageService';
 import {
+  __resetNotificationFocusForTests,
+  isCacheActivelyViewed,
+  isThreadActivelyViewed,
+} from './notificationFocus';
+import {
   isWatcherValidation,
   showWatcherPushInForeground,
   watcherCategoryOf,
@@ -129,6 +134,8 @@ export interface NotificationData {
   messageId?: string;
   marmotGroupId?: string;
   senderPubkey?: string;
+  /** The tray entry stands for this many messages of its thread (collapsed). */
+  threadCount?: number;
 }
 
 /** Typed payload every caller passes to `fireNotification`. Centralising
@@ -420,7 +427,11 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
     const collapseKey = threadCollapseKey(payload.kind, payload.data);
     // Awaited (best-effort, never throws): a headless background task can be
     // torn down as soon as delivery resolves, losing a detached write.
-    const { duplicateDelivered, id: historyId } = await recordNotification(owner ?? null, {
+    const {
+      duplicateDelivered,
+      id: historyId,
+      count,
+    } = await recordNotification(owner ?? null, {
       ...payload,
       id: payload.historyKey ?? `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
       collapseKey,
@@ -449,7 +460,13 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
         body: presented.body,
         // `data` rides through to the tap handler. Always include
         // `kind` so the deep-link router can dispatch by source.
-        data: { kind: payload.kind, ...(payload.data ?? {}), historyId, owner },
+        data: {
+          kind: payload.kind,
+          ...(payload.data ?? {}),
+          historyId,
+          owner,
+          ...(count > 1 ? { threadCount: count } : {}),
+        },
         // Quiet is enforced natively too (not only by the foreground handler),
         // so it holds if the app is backgrounded before the 1 s trigger fires.
         sound: quiet ? false : 'default',
@@ -488,53 +505,15 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
   }
 }
 
-// --- Foreground-suppression state (#279) ---
-//
-// We never want to buzz the user about the very thread they're staring
-// at. The app root drives `setNotificationsForeground` from AppState, and
-// the open Conversation / GroupConversation screens drive
-// `setActiveThread` on focus / blur. A message trigger then skips the
-// notification only when the app is foreground AND the active thread is
-// the one the message belongs to. Payments are never suppressed — money
-// arriving is always worth surfacing.
-let appInForeground = true;
-let activeThreadId: string | null = null;
-// #740: same idea as `activeThreadId` but keyed on the cache coordinate
-// (`<kind>:<pubkey>:<d>`) so a find-log fired while the user is on that
-// exact HuntPiggyDetail screen stays quiet. Kept independent of the
-// thread id so a cache and a DM thread never collide on the same value.
-let activeCacheCoord: string | null = null;
-
-/** Called by the app root on AppState change. */
-export function setNotificationsForeground(active: boolean): void {
-  appInForeground = active;
-}
-
-/**
- * Called by Conversation / GroupConversation screens on focus (with the
- * partner pubkey or group id) and on blur (with `null`).
- */
-export function setActiveThread(threadId: string | null): void {
-  activeThreadId = threadId;
-}
-
-/** True when the app is foreground AND the user is viewing `threadId`. */
-export function isThreadActivelyViewed(threadId: string): boolean {
-  return appInForeground && activeThreadId === threadId;
-}
-
-/**
- * Called by HuntPiggyDetail / the navigation focus sync on focus (with the
- * cache coord) and on blur (with `null`). Mirrors `setActiveThread` (#740).
- */
-export function setActiveCache(cacheCoord: string | null): void {
-  activeCacheCoord = cacheCoord;
-}
-
-/** True when the app is foreground AND the user is viewing `cacheCoord`. */
-export function isCacheActivelyViewed(cacheCoord: string): boolean {
-  return appInForeground && activeCacheCoord === cacheCoord;
-}
+// Foreground suppression (#279) lives in notificationFocus; re-exported so
+// existing callers keep importing it from here.
+export {
+  isCacheActivelyViewed,
+  isThreadActivelyViewed,
+  setActiveCache,
+  setActiveThread,
+  setNotificationsForeground,
+} from './notificationFocus';
 
 /** What a focused screen has "read", for clearing its delivered
  * notifications (#1142): a 1:1 thread, a group, a cache's find-logs, or the
@@ -707,9 +686,12 @@ export async function retractMarmotMessageNotifications(
   const matches = marmotMessageRefMatcher(refs);
   cancelInFlightNotifications(matches);
   if (!tray) return 0;
-  return dismissRequestsWhere((request) =>
-    matches(request.content.data as NotificationData | null),
-  );
+  return dismissRequestsWhere((request) => {
+    const data = request.content.data as NotificationData | null;
+    // A collapsed entry also stands for the thread's earlier messages: one
+    // deletion mustn't take their alert with it.
+    return matches(data) && !((data?.threadCount ?? 1) > 1);
+  });
 }
 
 /** Cancel notifications still being created whose `data` `matches` — the
@@ -792,13 +774,15 @@ export async function fireMessageNotification(opts: {
   data: NotificationData;
   owner?: string;
   shouldSuppress?: () => Promise<boolean>;
+  /** When the message was sent (ms) — which push placeholders it stands for. */
+  sentAt?: number;
 }): Promise<string | null> {
   const marmot = isMarmotMessage(opts.data);
   if (isThreadActivelyViewed(opts.threadId)) {
     // Shown on screen instead — still proof the app has this message.
     if (marmot) {
       lastMarmotNotifiedAt = Date.now();
-      void dropMarmotPushAlerts(opts.owner);
+      void dropMarmotPushAlerts(opts.owner, opts.sentAt ?? Date.now());
     }
     return null;
   }
@@ -812,10 +796,17 @@ export async function fireMessageNotification(opts: {
   });
   if (id && marmot) {
     lastMarmotNotifiedAt = Date.now();
-    void dropMarmotPushAlerts(opts.owner);
+    // After the real alert is recorded — the placeholder is replaced, never
+    // deleted in the hope something else is written.
+    void dropMarmotPushAlerts(opts.owner, opts.sentAt ?? Date.now());
   }
   return id;
 }
+
+/** A push placeholder posted up to this long after a message was sent can be
+ * the alert for it (push latency + the wake's grace + clock skew). */
+export const PLACEHOLDER_MATCH_MS = 60_000;
+const PLACEHOLDER_SKEW_MS = 5_000;
 
 /**
  * The real Marmot message is shown now: drop the generic push alert(s) — ours
@@ -823,10 +814,20 @@ export async function fireMessageNotification(opts: {
  * history rows, so the history keeps the real message, not a nameless
  * "New message" beside it.
  */
-export async function dropMarmotPushAlerts(owner?: string): Promise<void> {
+export async function dropMarmotPushAlerts(owner?: string, sentAt?: number): Promise<void> {
   await dismissNotificationsFor({ marmotPushAlerts: true });
   const account = owner ?? getActivePubkey();
-  if (account) await removeNotificationsWhere(account, (e) => e.data.marmotPush === true);
+  if (!account) return;
+  // Only the rows this message can stand for (posted just after it was sent);
+  // with no time (the Messages list opened) all of them — it shows them now.
+  await removeNotificationsWhere(
+    account,
+    (e) =>
+      e.data.marmotPush === true &&
+      (sentAt === undefined ||
+        (e.createdAt >= sentAt - PLACEHOLDER_SKEW_MS &&
+          e.createdAt <= sentAt + PLACEHOLDER_MATCH_MS)),
+  );
 }
 
 /**
@@ -971,8 +972,6 @@ export async function dismissForegroundServiceNotification(): Promise<void> {
 export function __resetForTests(): void {
   initialisingPromise = null;
   cachedLockScreenContent = null;
-  appInForeground = true;
-  activeThreadId = null;
-  activeCacheCoord = null;
+  __resetNotificationFocusForTests();
   lastMarmotNotifiedAt = 0;
 }

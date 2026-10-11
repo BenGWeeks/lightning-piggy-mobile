@@ -39,14 +39,16 @@ const ME = 'a'.repeat(64);
 const PEER = 'b'.repeat(64);
 const now = () => Math.floor(Date.now() / 1000);
 
-function surfacer() {
+const flush = () => new Promise((r) => setTimeout(r, 0));
+
+function surfacer({ fresh = true, follows = new Set([PEER]) } = {}) {
   return createLiveRumorSurfacer({
     viewerPubkey: ME,
     isCancelled: () => false,
     shouldAbort: () => false,
-    followPubkeysRef: { current: new Set([PEER]) },
+    followPubkeysRef: { current: follows },
     followGateBuffer: { defer: jest.fn(), reevaluate: jest.fn(), clear: jest.fn(), size: 0 },
-    isFreshArrival: () => true,
+    isFreshArrival: () => fresh,
     queueInboxEntry: jest.fn(),
     knownWrapIds: new Set(),
     chainWrite: (task) => void task(),
@@ -58,14 +60,26 @@ beforeEach(() => {
   __resetForTests();
 });
 
-it('replaces the contentless alert with the real one once decrypted', async () => {
+it('replaces the contentless alert with the real one — recorded first, then the placeholder goes', async () => {
   // The watch posted (and claimed) its contentless alert first.
   claimWrapNotification('w1');
   noteContentlessWrapAlert('w1');
+  let recorded = false;
+  mockFire.mockImplementationOnce(async () => {
+    await flush();
+    recorded = true;
+    return 'id';
+  });
+  mockDismiss.mockImplementationOnce(async () => {
+    expect(recorded).toBe(true); // never delete before the replacement exists
+    return 0;
+  });
   await surfacer()(
     { pubkey: PEER, created_at: now(), kind: 14, tags: [['p', ME]], content: 'hi' },
     'w1',
   );
+  await flush();
+  await flush();
   expect(mockFire).toHaveBeenCalledWith(
     expect.objectContaining({ data: expect.objectContaining({ conversationPubkey: PEER }) }),
   );
@@ -102,7 +116,7 @@ it('touches nothing when no contentless alert was posted, and still marks the wr
   expect(wasWrapHandled('w2')).toBe(true);
 });
 
-it("retracts a stranger's contentless alert at once, but lets a later replay post the real one", async () => {
+it("retracts a stranger's contentless alert once the follow list is known", async () => {
   claimWrapNotification('stranger');
   noteContentlessWrapAlert('stranger');
   const STRANGER = 'c'.repeat(64);
@@ -112,6 +126,33 @@ it("retracts a stranger's contentless alert at once, but lets a later replay pos
   );
   expect(mockFire).not.toHaveBeenCalled();
   expect(mockDismiss).toHaveBeenCalledWith({ wrapId: 'stranger' });
-  // Still noted for the follow-gate replay (which bypasses the watch's claim).
-  expect(takeContentlessWrapAlert('stranger')).toBe(true);
+  expect(takeContentlessWrapAlert('stranger')).toBe(false);
+});
+
+it('keeps it while follows are still loading (may be a friend), for the replay to replace', async () => {
+  claimWrapNotification('maybe');
+  noteContentlessWrapAlert('maybe');
+  await surfacer({ follows: new Set() })(
+    { pubkey: PEER, created_at: now(), kind: 14, tags: [['p', ME]], content: 'hey' },
+    'maybe',
+  );
+  expect(mockDismiss).not.toHaveBeenCalled();
+  expect(mockRemove).not.toHaveBeenCalled();
+  expect(takeContentlessWrapAlert('maybe')).toBe(true);
+});
+
+it("a late decrypt (sub opened after the message) keeps a friend's placeholder — the only alert it has", async () => {
+  // e.g. Amber cold start: the watch alerted; Messages opened 20 min later.
+  claimWrapNotification('late');
+  noteContentlessWrapAlert('late');
+  await surfacer({ fresh: false })(
+    { pubkey: PEER, created_at: now() - 1200, kind: 14, tags: [['p', ME]], content: 'hi' },
+    'late',
+  );
+  await flush();
+  expect(mockFire).not.toHaveBeenCalled();
+  expect(mockDismiss).not.toHaveBeenCalled();
+  expect(mockRemove).not.toHaveBeenCalled();
+  // Undecided: the background sync may still ping for it.
+  expect(wasWrapHandled('late')).toBe(false);
 });

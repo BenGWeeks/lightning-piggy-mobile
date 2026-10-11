@@ -94,7 +94,12 @@ describe('MarmotSession multi-device invites (no WebCrypto)', () => {
     expect(tablet.inbox.find((m) => m.rumor.id === fromPhone.id)?.rumor.pubkey).toBe(
       littleId.pubkey,
     );
-    expect(traffic).toHaveBeenCalledWith(littleId.pubkey, fromPhone.created_at);
+    // …noted as OUR OWN message: it can settle (retract) a push placeholder
+    // it caused, never stand in for a peer's message.
+    expect(traffic).toHaveBeenCalledWith(
+      littleId.pubkey,
+      expect.objectContaining({ createdAtSec: fromPhone.created_at, fromMe: true, message: true }),
+    );
     traffic.mockRestore();
     await tablet.session.sendRumor(dm.id, fromTablet);
     await waitFor(() => big.inbox.filter((m) => m.group.id === dm.id).length >= 2);

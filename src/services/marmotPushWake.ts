@@ -17,9 +17,12 @@
 // worth an alert: White Noise also wakes members after an invite commit, and
 // the message may be one the app shows without alerting (already on screen,
 // our own, deleted). So fresh group traffic the live session received around
-// the push covers it too. And the generic alert is a placeholder: once the
-// session has received the traffic it stood for, its tray entry and history
-// row go — the real message (if any) has its own.
+// the push covers it too. And the generic alert is a placeholder, never
+// deleted in the hope another row is written: when the real message alerts it
+// replaces it; once the session has decrypted the traffic it stood for, a
+// peer's message turns it into that conversation's row (in place), and only
+// traffic that positively shows nothing — our own message, a reaction or
+// other non-message — retracts it.
 //
 // `defineTask` must run in the global scope on every JS start — hence the
 // side-effect import from index.ts.
@@ -27,12 +30,17 @@
 import * as TaskManager from 'expo-task-manager';
 import { AppState } from 'react-native';
 
-import { listNotifications, removeNotificationsWhere } from './notificationHistory';
+import {
+  listNotifications,
+  rewriteNotifications,
+  type NotificationHistoryEntry,
+} from './notificationHistory';
 import {
   dismissNotificationsFor,
   dropMarmotPushAlerts,
   fireMessageNotification,
   lastMarmotNotificationAt,
+  PLACEHOLDER_MATCH_MS,
 } from './notificationService';
 import { isWatcherTaskPayload } from './watcherPushReceive';
 
@@ -46,11 +54,11 @@ const LIVE_SESSION_GRACE_MS = 6_000;
 const COVERED_LOOKBACK_MS = 15_000;
 /** Group traffic sent within this long is live, not a backfill or replay. */
 const FRESH_TRAFFIC_MS = 120_000;
-/** A placeholder posted up to this long after an event was sent can be the
- * alert for it (push latency + the grace above + clock skew). */
-export const PLACEHOLDER_MATCH_MS = 60_000;
+const PLACEHOLDER_SKEW_MS = 5_000;
 const SETTLE_DEBOUNCE_MS = 1_500;
 const MAX_FUTURE_SKEW_MS = 5 * 60_000;
+/** Recent decrypted events kept for matching placeholders (bounded). */
+const TRAFFIC_KEEP = 300;
 
 // Set by marmotPushRegistration while the app has a Marmot session (kept
 // as a flag so this module — loaded at every JS start, headless included —
@@ -60,45 +68,115 @@ export function setLiveMarmotSession(live: boolean): void {
   liveSession = live;
 }
 
+/** One decrypted Marmot app event, as far as a push placeholder cares. */
+export interface MarmotTraffic {
+  /** The event's own time (sender-controlled; checked for plausibility). */
+  createdAtSec: number;
+  fromMe: boolean;
+  /** A chat message — not a reaction, edit, delete, push token… */
+  message: boolean;
+  /** Where it shows: the 1:1 peer, or the group. */
+  conversationPubkey?: string;
+  groupId?: string;
+}
+type Seen = MarmotTraffic & { owner: string; at: number };
+
 // When the live session last received fresh group traffic (wall-clock ms).
 let lastTrafficAt = 0;
 export const lastMarmotTrafficAt = (): number => lastTrafficAt;
-// Newest group event seen (its own `created_at`, ms) and whose session saw it.
-let newestTraffic = { owner: '', at: 0 };
+let recent: Seen[] = [];
 // Unknown at start: a headless run (another JS context) may have posted one.
 let placeholdersMayExist = true;
 let settleTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
- * The Marmot session decrypted an app event (`createdAtSec` = its own time)
- * or processed a commit (now) — authenticated group traffic, live or from a
- * backfill. O(1) per event; any history work is one debounced pass.
+ * The Marmot session decrypted an app event (live or from a backfill). O(1)
+ * per event; matching it against placeholders is one debounced pass.
  */
-export function noteMarmotGroupTraffic(owner: string, createdAtSec: number, now = Date.now()) {
-  const at = createdAtSec * 1000;
+export function noteMarmotGroupTraffic(owner: string, t: MarmotTraffic, now = Date.now()): void {
+  const at = t.createdAtSec * 1000;
   if (!Number.isFinite(at) || at > now + MAX_FUTURE_SKEW_MS) return; // sender-controlled
   if (at >= now - FRESH_TRAFFIC_MS) lastTrafficAt = now;
-  if (newestTraffic.owner === owner && at <= newestTraffic.at) return;
-  newestTraffic = { owner, at };
+  recent.push({ ...t, owner, at });
+  if (recent.length > TRAFFIC_KEEP) recent = recent.slice(-TRAFFIC_KEEP);
   if (!placeholdersMayExist || settleTimer) return;
   settleTimer = setTimeout(() => {
     settleTimer = null;
-    void settlePushPlaceholders(newestTraffic.owner, newestTraffic.at);
+    void settlePushPlaceholders(owner);
   }, SETTLE_DEBOUNCE_MS);
 }
 
 /**
- * Drop `owner`'s generic push alerts that group traffic sent at `trafficAt`
- * (ms) supersedes — tray entry and history row. Returns the removed row ids.
+ * The session processed a commit (e.g. an invite — White Noise pushes for
+ * those too). Only covers a wake arriving now; it never settles a
+ * placeholder: a commit says nothing about the message one stood for.
  */
-export async function settlePushPlaceholders(owner: string, trafficAt: number): Promise<string[]> {
-  const superseded = (e: { data: { marmotPush?: boolean }; createdAt: number }) =>
-    e.data.marmotPush === true && e.createdAt <= trafficAt + PLACEHOLDER_MATCH_MS;
-  const removed = await removeNotificationsWhere(owner, superseded);
+export function noteMarmotCommit(now = Date.now()): void {
+  lastTrafficAt = now;
+}
+
+export type PlaceholderOutcome =
+  | { kind: 'keep' }
+  | { kind: 'retract' }
+  | { kind: 'replace'; conversationPubkey?: string; groupId?: string };
+
+/**
+ * Pure: what decrypted traffic says about a placeholder posted at `postedAt`.
+ * Only events sent shortly before it was posted can be what woke us. A
+ * peer's message → it becomes that conversation's row; only our own or
+ * non-message events → nothing to show, retract; nothing in the window yet →
+ * keep it (the message may still be on its way).
+ */
+export function placeholderOutcome(
+  postedAt: number,
+  traffic: readonly Pick<Seen, 'at' | 'fromMe' | 'message' | 'conversationPubkey' | 'groupId'>[],
+): PlaceholderOutcome {
+  const window = traffic.filter(
+    (t) => t.at >= postedAt - PLACEHOLDER_MATCH_MS && t.at <= postedAt + PLACEHOLDER_SKEW_MS,
+  );
+  const peer = window.filter((t) => t.message && !t.fromMe).sort((a, b) => b.at - a.at)[0];
+  if (peer)
+    return { kind: 'replace', conversationPubkey: peer.conversationPubkey, groupId: peer.groupId };
+  return window.length > 0 ? { kind: 'retract' } : { kind: 'keep' };
+}
+
+/**
+ * Settle `owner`'s generic push alerts against the traffic decrypted so far:
+ * replaced in place or retracted per `placeholderOutcome`, never deleted on a
+ * guess. Returns the retracted row ids.
+ */
+export async function settlePushPlaceholders(owner: string): Promise<string[]> {
+  const traffic = recent.filter((t) => t.owner === owner);
+  const removed = await rewriteNotifications(owner, (e) => {
+    if (e.data.marmotPush !== true) return e;
+    const outcome = placeholderOutcome(e.createdAt, traffic);
+    if (outcome.kind === 'keep') return e;
+    if (outcome.kind === 'retract') return null;
+    return replacedPlaceholder(e, outcome);
+  });
   if (removed.length) await dismissNotificationsFor({ historyIds: removed });
   const left = await listNotifications(owner).catch(() => []);
   placeholdersMayExist = left.some((e) => e.data.marmotPush === true);
   return removed;
+}
+
+/** The placeholder row, now naming where its message is (a tap opens it). */
+function replacedPlaceholder(
+  e: NotificationHistoryEntry,
+  to: { conversationPubkey?: string; groupId?: string },
+): NotificationHistoryEntry {
+  const { marmotPush: _marmotPush, ...rest } = e.data;
+  return to.groupId
+    ? { ...e, kind: 'group', data: { ...rest, groupId: to.groupId } }
+    : {
+        ...e,
+        kind: 'dm',
+        data: {
+          ...rest,
+          conversationPubkey: to.conversationPubkey,
+          conversationProtocol: 'marmot',
+        },
+      };
 }
 
 export type WakeOutcome = 'covered' | 'notified';
@@ -130,11 +208,14 @@ export async function postGenericPushAlert(): Promise<void> {
     data: { marmotPush: true },
   });
   placeholdersMayExist = true;
-  // The real message (or the traffic it stood for) landed while we were
-  // posting: it already tried to clear us before we existed, so clear
-  // ourselves — tray entry and history row.
-  if (lastMarmotNotificationAt() !== before || lastTrafficAt !== trafficBefore) {
-    await dropMarmotPushAlerts();
+  // The real message alerted while we were posting: it already tried to
+  // replace us before we existed, so step aside (rows posted just now only).
+  if (lastMarmotNotificationAt() !== before) {
+    await dropMarmotPushAlerts(undefined, Date.now() - PLACEHOLDER_SKEW_MS);
+  } else if (lastTrafficAt !== trafficBefore) {
+    // Traffic landed meanwhile: settle us against it (replace or retract).
+    const owner = recent[recent.length - 1]?.owner;
+    if (owner) await settlePushPlaceholders(owner);
   }
 }
 
@@ -199,7 +280,7 @@ if (!TaskManager.isTaskDefined(MARMOT_PUSH_WAKE_TASK)) {
 /** Test-only reset of the traffic / placeholder state. */
 export function __resetPushWakeForTests(): void {
   lastTrafficAt = 0;
-  newestTraffic = { owner: '', at: 0 };
+  recent = [];
   placeholdersMayExist = true;
   if (settleTimer) clearTimeout(settleTimer);
   settleTimer = null;

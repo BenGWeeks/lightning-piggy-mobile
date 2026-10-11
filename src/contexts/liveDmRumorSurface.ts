@@ -65,16 +65,27 @@ export function createLiveRumorSurfacer(
 
   return async (rumor: DecodedRumor, wrapId: string): Promise<void> => {
     if (shouldAbort()) return;
-    // Decrypted: whether this wrap deserves an alert is decided here, so the
-    // background watch must not post its contentless one (#279 phantoms).
-    markWrapHandled(wrapId);
-    // A contentless alert the watch already posted for it is replaced by the
-    // real one below — or retracted when the wrap shows nothing new (our own
-    // sent copy, a stranger, a reaction). Claimed by the watch, so the real
-    // alert bypasses the claim.
+    // A contentless alert the background watch posted for this wrap (remote
+    // signer, #279) is a placeholder — never deleted in the hope another alert
+    // is written:
+    //  - shows nothing (our own sent copy, a stranger, no partner, a group
+    //    rumor we can't place): retracted;
+    //  - a real message we alert for: the real alert is recorded FIRST, then
+    //    the placeholder goes (the watch holds the claim, so it bypasses it);
+    //  - a real message we don't alert for now (not fresh — this sub opened
+    //    after it arrived): kept; its row resolves to the conversation.
+    // Each decided case is also marked handled, so neither the watch nor the
+    // background sync pings for it; an undecided one is left to them.
     const placeholder = takeContentlessWrapAlert(wrapId);
-    const retractPlaceholder = () => {
+    const nothingToSee = () => {
+      markWrapHandled(wrapId);
       if (placeholder) void retractContentlessWrapAlert(viewerPubkey, wrapId);
+    };
+    const alertReplacing = (fire: () => Promise<unknown>) => {
+      markWrapHandled(wrapId);
+      void Promise.resolve(fire())
+        .then(() => (placeholder ? retractContentlessWrapAlert(viewerPubkey, wrapId) : undefined))
+        .catch(() => undefined);
     };
 
     // Group-route first — multi-recipient rumors are owned by the
@@ -88,24 +99,24 @@ export function createLiveRumorSurfacer(
       // tryRouteGroupRumor (which also runs on batch refresh). Only for
       // genuinely-fresh messages (backlog has old timestamps → silent),
       // skip my own, and suppressed when the user is viewing this group.
-      if (routeResult.kind === 'routed' && isFreshArrival(routeResult.message.createdAt)) {
-        const sender = routeResult.message.senderPubkey;
+      const routed = routeResult.kind === 'routed' ? routeResult : null;
+      if (!routed || routed.message.senderPubkey.toLowerCase() === viewerPubkey.toLowerCase()) {
+        nothingToSee(); // our own message, or a group rumor we can't place
+      } else if (isFreshArrival(routed.message.createdAt)) {
         // claimWrapNotification: dedupe vs the background watch (#279).
-        if (
-          sender.toLowerCase() !== viewerPubkey.toLowerCase() &&
-          (claimWrapNotification(wrapId) || placeholder)
-        ) {
-          void fireMessageNotification({
-            owner: viewerPubkey,
-            kind: 'group',
-            threadId: routeResult.group.id,
-            title: routeResult.group.name || 'New group message',
-            body: routeResult.message.text,
-            data: { groupId: routeResult.group.id },
-          });
-        }
-      }
-      retractPlaceholder();
+        if (claimWrapNotification(wrapId) || placeholder)
+          alertReplacing(() =>
+            fireMessageNotification({
+              owner: viewerPubkey,
+              kind: 'group',
+              threadId: routed.group.id,
+              title: routed.group.name || 'New group message',
+              body: routed.message.text,
+              data: { groupId: routed.group.id },
+            }),
+          );
+        else markWrapHandled(wrapId); // alerted already
+      } // else: a real group message we don't alert for now — keep any placeholder
       if (__DEV__)
         console.log(`[Nostr] live wrap ${wrapId.slice(0, 8)} group-routed (${routeResult.kind})`);
       return;
@@ -113,7 +124,7 @@ export function createLiveRumorSurfacer(
 
     const partnership = partnerFromRumor(rumor, viewerPubkey);
     if (!partnership) {
-      retractPlaceholder();
+      nothingToSee();
       if (__DEV__) console.log(`[Nostr] live wrap ${wrapId.slice(0, 8)} no-partnership`);
       return;
     }
@@ -149,12 +160,11 @@ export function createLiveRumorSurfacer(
           },
           notify: { title: 'New message', body: deferredText },
         });
-        // Still noted, so the replay once follows hydrate can post the real
-        // alert even though the watch holds the claim.
-        if (placeholder) noteContentlessWrapAlert(wrapId);
       }
-      // A stranger's (or not-yet-followed) wrap: its contentless alert goes now.
-      retractPlaceholder();
+      // Follows known: a stranger — nothing to see. Still hydrating: may be
+      // a friend, so the placeholder stays for the replay to replace.
+      if (partnership.fromMe || followPubkeysRef.current.size > 0) nothingToSee();
+      else if (placeholder) noteContentlessWrapAlert(wrapId);
       return;
     }
 
@@ -209,27 +219,27 @@ export function createLiveRumorSurfacer(
     // old rumor timestamps and stays silent), never my own echo;
     // suppressed when the user is viewing this thread. claimWrapNotification
     // dedupes vs the background watch running in the same JS context.
-    const notify =
-      !partnership.fromMe &&
-      isFreshArrival(rumor.created_at) &&
-      (claimWrapNotification(wrapId) || placeholder);
-    if (notify) {
-      void fireMessageNotification({
-        owner: viewerPubkey,
-        kind: 'dm',
-        threadId: dmThreadId(partnership.partnerPubkey, protocolForWireKind(rumor.kind)),
-        title: 'New message',
-        // Use the already-redacted preview, not raw `rumor.content`: a
-        // structured rumor (order JSON, or an NWC wallet-share bearer
-        // connection string) must never surface its payload in a push body.
-        body: inboxEntry.text,
-        data: {
-          conversationPubkey: partnership.partnerPubkey,
-          conversationProtocol: protocolForWireKind(rumor.kind),
-        },
-      });
-    }
-    retractPlaceholder();
+    if (partnership.fromMe) nothingToSee();
+    else if (isFreshArrival(rumor.created_at)) {
+      if (claimWrapNotification(wrapId) || placeholder)
+        alertReplacing(() =>
+          fireMessageNotification({
+            owner: viewerPubkey,
+            kind: 'dm',
+            threadId: dmThreadId(partnership.partnerPubkey, protocolForWireKind(rumor.kind)),
+            title: 'New message',
+            // Use the already-redacted preview, not raw `rumor.content`: a
+            // structured rumor (order JSON, or an NWC wallet-share bearer
+            // connection string) must never surface its payload in a push body.
+            body: inboxEntry.text,
+            data: {
+              conversationPubkey: partnership.partnerPubkey,
+              conversationProtocol: protocolForWireKind(rumor.kind),
+            },
+          }),
+        );
+      else markWrapHandled(wrapId); // alerted already
+    } // else: a real message we don't alert for now (not fresh) — keep any placeholder
     if (__DEV__)
       console.log(
         `[Nostr] live wrap ${wrapId.slice(0, 8)} surfaced (partner=${partnership.partnerPubkey.slice(0, 8)})`,

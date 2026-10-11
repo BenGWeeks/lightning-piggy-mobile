@@ -69,7 +69,8 @@ import {
 import type { SignedProof } from './marmotPushEntries';
 import { MarmotPushNotifier, type PushGroup } from './marmotPushNotifier';
 import { MarmotPushRegistrar } from './marmotPushRegistrar';
-import { noteMarmotGroupTraffic } from './marmotPushWake';
+import { isMarmotMessageKind } from './marmotKinds';
+import { noteMarmotCommit, noteMarmotGroupTraffic } from './marmotPushWake';
 import { createMarmotSigner } from './marmotSigner';
 import * as fence from './marmotSessionFence';
 import { isPermanentWelcomeFailure, isWelcomeForJoinedGroup } from './marmotWelcomeFailure';
@@ -744,7 +745,7 @@ export class MarmotSession {
     this.wiredGroups.add(g.idStr);
     // Membership / name changes (ours or another member's commit) move the epoch.
     g.on('stateChanged', () => {
-      noteMarmotGroupTraffic(this.pubkey, Date.now() / 1000); // a commit covers its push wake
+      noteMarmotCommit(); // covers a push wake for it (never settles a placeholder)
       this.emitGroupsChanged();
       // A member left → drop their push records (MIP-05 "Record state").
       void this.push.reconcile(this.pushGroup(g)).catch(() => undefined);
@@ -774,7 +775,6 @@ export class MarmotSession {
     const deliveryKey = `${g.idStr}:${rumor.id}`;
     if (this.deliveredRumors.has(deliveryKey)) return;
     this.deliveredRumors.add(deliveryKey);
-    noteMarmotGroupTraffic(this.pubkey, rumor.created_at); // decrypted: covers a push wake
     if (this.deliveredRumors.size > DELIVERED_CACHE_SIZE) {
       this.deliveredRumors.delete(this.deliveredRumors.values().next().value as string);
     }
@@ -811,6 +811,15 @@ export class MarmotSession {
     const event = { group: this.summarise(g), rumor, ...(mediaKeys ? { mediaKeys } : {}) };
     if (__DEV__) console.log(`[Marmot] recv kind ${rumor.kind} in ${g.idStr.slice(0, 8)}`);
     for (const l of this.listeners) l.onMessage?.(event);
+    // Authenticated traffic: covers a push wake, and settles its placeholder.
+    noteMarmotGroupTraffic(this.pubkey, {
+      createdAtSec: rumor.created_at,
+      fromMe: rumor.pubkey.toLowerCase() === this.pubkey.toLowerCase(),
+      message: isMarmotMessageKind(rumor.kind),
+      ...(event.group.isDm
+        ? { conversationPubkey: event.group.memberPubkeys[0] }
+        : { groupId: event.group.id }),
+    });
   }
 
   /**
