@@ -7,7 +7,8 @@ export interface DecodedInvoice {
   expiry: number | null;
 }
 
-export function decodeInvoice(bolt11: string): DecodedInvoice {
+// A decode failure is distinct from a valid invoice with no amount.
+export function decodeInvoice(bolt11: string): DecodedInvoice | null {
   try {
     const decoded = bolt11Decode(bolt11);
     let amountSats: number | null = null;
@@ -25,7 +26,7 @@ export function decodeInvoice(bolt11: string): DecodedInvoice {
     }
     return { amountSats, description, expiry };
   } catch {
-    return { amountSats: null, description: null, expiry: null };
+    return null;
   }
 }
 
@@ -45,13 +46,7 @@ export function isLightningAddress(input: string): boolean {
 }
 
 export function isValidInvoice(data: string): boolean {
-  const lower = data.toLowerCase();
-  return (
-    lower.startsWith('lnbc') ||
-    lower.startsWith('lntb') ||
-    lower.startsWith('lnts') ||
-    lower.startsWith('lnbs')
-  );
+  return decodeInvoice(data) !== null;
 }
 
 // Strip a `lightning:` URI prefix (case-insensitive) that wallets and QR codes
