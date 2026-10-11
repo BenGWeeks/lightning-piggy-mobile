@@ -69,8 +69,9 @@ it.each([[[]], [['me']], [['me', 'me']]] as const)(
 );
 
 describe('confirmGroupLocationShare', () => {
-  const audience = (memberPubkeys: string[], myPubkey = 'me') => ({
+  const audience = (memberPubkeys: string[], myPubkey = 'me', groupId = 'family') => ({
     group: 'Family',
+    groupId,
     memberPubkeys,
     myPubkey,
   });
@@ -116,6 +117,17 @@ describe('confirmGroupLocationShare', () => {
     expect(alert).toHaveBeenCalledTimes(2);
     current = null;
     alert.mock.calls[1][2]![1].onPress!();
+    await expect(consent).resolves.toBe(false);
+  });
+
+  it('asks again when the screen switched to another group with the same members', async () => {
+    let current = audience(['me', 'big']);
+    const consent = confirmGroupLocationShare(location, () => current);
+    current = audience(['me', 'big'], 'me', 'other-group');
+    alert.mock.calls[0][2]![1].onPress!();
+    await flush();
+    expect(alert).toHaveBeenCalledTimes(2);
+    alert.mock.calls[1][2]![0].onPress!();
     await expect(consent).resolves.toBe(false);
   });
 

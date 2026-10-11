@@ -2,7 +2,13 @@ import { Alert } from '../components/BrandedAlert';
 import { t } from '../i18n';
 import { formatCoordsForDisplay, type SharedLocation } from '../services/locationService';
 
-type GroupAudience = { group: string; memberPubkeys: readonly string[]; myPubkey: string };
+type GroupAudience = {
+  group: string;
+  memberPubkeys: readonly string[];
+  myPubkey: string;
+  /** Stable id; the screen can switch groups while the dialog is open. */
+  groupId?: string;
+};
 type LocationAudience = { name: string; live?: boolean } | GroupAudience;
 
 /** The members who would receive a group share: unique, excluding me. */
@@ -50,7 +56,7 @@ export function confirmLocationShare(
 /**
  * Group consent tied to the roster the user actually saw. `getAudience` reads
  * the latest group + identity; if either changes while the dialog is open
- * (someone added or removed, account switched, group gone), the earlier
+ * (someone added or removed, account switched, another group, group gone), the earlier
  * consent no longer describes who would receive the coordinates, so ask again.
  */
 export async function confirmGroupLocationShare(
@@ -64,6 +70,7 @@ export async function confirmGroupLocationShare(
     const now = getAudience();
     if (!now) return false;
     if (
+      now.groupId === asked.groupId &&
       now.myPubkey === asked.myPubkey &&
       otherMembers(now).join(',') === otherMembers(asked).join(',')
     ) {
