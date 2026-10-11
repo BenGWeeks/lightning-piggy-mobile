@@ -34,10 +34,11 @@ name: Display language — switch locale and capture Wallets, Messages and the p
     timeout: 15000
 - tapOn:
     id: 'locale-${LOCALE}'
-- waitForAnimationToEnd:
-    timeout: 2000
-- assertVisible:
-    id: 'locale-${LOCALE}-check'
+# Switching language re-renders the whole screen; give the tick time to land.
+- extendedWaitUntil:
+    visible:
+      id: 'locale-${LOCALE}-check'
+    timeout: 10000
 
 - runFlow:
     when:
