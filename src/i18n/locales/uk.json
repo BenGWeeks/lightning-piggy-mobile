@@ -1784,6 +1784,9 @@
     "qrViewfinder": "Видошукач QR-коду"
   },
   "sendSheet": {
+    "invalidInvoiceDismiss": "Гаразд",
+    "invalidInvoiceTitle": "Недійсний рахунок",
+    "invalidInvoiceBody": "Цей рахунок недійсний або неповний — перевірте його та спробуйте ще раз.",
     "walletFallback": "Гаманець",
     "payTo": "Оплатити {{name}}",
     "sendToOnchain": "Надіслати на on-chain адресу",

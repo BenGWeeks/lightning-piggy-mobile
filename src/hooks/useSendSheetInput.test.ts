@@ -1,0 +1,93 @@
+import { act, renderHook } from '@testing-library/react-native';
+import * as Clipboard from 'expo-clipboard';
+import { Alert } from '../components/BrandedAlert';
+import { useSendSheetInput } from './useSendSheetInput';
+import {
+  AMOUNTLESS_INVOICE,
+  DROPPED_CHARACTER_INVOICE,
+  INVOICE_WITH_AMOUNT,
+} from '../utils/bolt11TestVectors';
+
+jest.mock('expo-clipboard', () => ({ getStringAsync: jest.fn() }));
+jest.mock('../components/BrandedAlert', () => ({ Alert: { alert: jest.fn() } }));
+jest.mock('../contexts/LocaleContext', () => ({ useTranslation: () => (key: string) => key }));
+jest.mock('../services/boltzService', () => ({ isBitcoinAddress: () => false }));
+jest.mock('../services/onchainService', () => ({}));
+
+function setup() {
+  const opts = {
+    scanned: false,
+    pasteTextRef: { current: DROPPED_CHARACTER_INVOICE },
+    applyPasteText: jest.fn(),
+    setIsOnchainAddress: jest.fn(),
+    setIsLnurl: jest.fn(),
+    setInvoiceData: jest.fn(),
+    setDecoded: jest.fn(),
+    setScanned: jest.fn(),
+    setSatsValue: jest.fn(),
+    setLoadingBoltzFees: jest.fn(),
+    setBoltzFees: jest.fn(),
+    setOnchainFeeEstimate: jest.fn(),
+  };
+  return { opts, ...renderHook(() => useSendSheetInput(opts)) };
+}
+
+beforeEach(() => jest.clearAllMocks());
+
+it.each(['paste submit', 'clipboard', 'QR scan', 'deep link', 'NFC'])(
+  'rejects a corrupt invoice from %s before enabling send',
+  async (entry) => {
+    const { result, opts } = setup();
+    jest.mocked(Clipboard.getStringAsync).mockResolvedValue(DROPPED_CHARACTER_INVOICE);
+    await act(async () => {
+      if (entry === 'paste submit') result.current.handlePasteSubmit();
+      if (entry === 'clipboard') await result.current.handlePaste();
+      if (entry === 'QR scan')
+        result.current.handleBarCodeScanned({ data: DROPPED_CHARACTER_INVOICE });
+      if (entry === 'deep link')
+        result.current.processInput(`lightning:${DROPPED_CHARACTER_INVOICE}`);
+      if (entry === 'NFC')
+        result.current.handleNfcContent({
+          type: 'lightning-invoice',
+          data: DROPPED_CHARACTER_INVOICE,
+        });
+    });
+    expect(Alert.alert).toHaveBeenCalledWith(
+      'sendSheet.invalidInvoiceTitle',
+      'sendSheet.invalidInvoiceBody',
+      expect.any(Array),
+      expect.any(Object),
+    );
+    expect(opts.setScanned).not.toHaveBeenCalledWith(true);
+    expect(opts.setInvoiceData).toHaveBeenCalledWith(null);
+    expect(opts.setDecoded).toHaveBeenCalledWith(null);
+    expect(opts.setSatsValue).toHaveBeenCalledWith('');
+  },
+);
+
+it.each([
+  [INVOICE_WITH_AMOUNT, 250000],
+  [AMOUNTLESS_INVOICE, null],
+])(
+  'accepts a valid invoice without confusing missing amount with failure',
+  (invoice, amountSats) => {
+    const { result, opts } = setup();
+    act(() => result.current.processInput(`LIGHTNING:${invoice}`));
+    expect(Alert.alert).not.toHaveBeenCalled();
+    expect(opts.setInvoiceData).toHaveBeenCalledWith(invoice);
+    expect(opts.setDecoded).toHaveBeenCalledWith(expect.objectContaining({ amountSats }));
+    expect(opts.setScanned).toHaveBeenCalledWith(true);
+  },
+);
+
+it('does not reopen the error on every camera frame, and allows retry after dismissal', () => {
+  const { result, opts } = setup();
+  act(() => {
+    result.current.handleBarCodeScanned({ data: DROPPED_CHARACTER_INVOICE });
+    result.current.handleBarCodeScanned({ data: DROPPED_CHARACTER_INVOICE });
+  });
+  expect(Alert.alert).toHaveBeenCalledTimes(1);
+  act(() => jest.mocked(Alert.alert).mock.calls[0][2]?.[0].onPress?.());
+  act(() => result.current.handleBarCodeScanned({ data: AMOUNTLESS_INVOICE }));
+  expect(opts.setScanned).toHaveBeenLastCalledWith(true);
+});

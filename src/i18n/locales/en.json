@@ -1812,6 +1812,9 @@
     "qrViewfinder": "QR code viewfinder"
   },
   "sendSheet": {
+    "invalidInvoiceDismiss": "OK",
+    "invalidInvoiceTitle": "Invalid invoice",
+    "invalidInvoiceBody": "This invoice is invalid or incomplete — check it and try again.",
     "walletFallback": "Wallet",
     "payTo": "Pay to {{name}}",
     "sendToOnchain": "Send to on-chain address",

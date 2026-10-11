@@ -1,4 +1,4 @@
-import { type Dispatch, type RefObject, type SetStateAction } from 'react';
+import { useRef, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import * as Clipboard from 'expo-clipboard';
 import { Alert } from '../components/BrandedAlert';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -7,7 +7,6 @@ import {
   type DecodedInvoice,
   decodeInvoice,
   isLightningAddress,
-  isValidInvoice,
   isLnurlString,
   stripLightningPrefix,
 } from '../utils/sendSheetInput';
@@ -74,6 +73,7 @@ export function useSendSheetInput(opts: {
     setOnchainFeeEstimate,
   } = opts;
   const t = useTranslation();
+  const invalidInvoiceAlertVisible = useRef(false);
 
   const processInput = (data: string) => {
     let input = stripLightningPrefix(data);
@@ -136,11 +136,37 @@ export function useSendSheetInput(opts: {
         .catch((err) => {
           console.warn('Failed to estimate on-chain fee:', err);
         });
-    } else if (isValidInvoice(input)) {
+    } else if (/^ln/i.test(input) && !isLnurlString(input)) {
+      // All invoice entry points share this gate. A missing amount is valid
+      // only after decoding succeeds (including the bech32 checksum/network).
+      const invoice = decodeInvoice(input);
+      if (!invoice) {
+        setInvoiceData(null);
+        setDecoded(null);
+        setScanned(false);
+        setSatsValue('');
+        setIsOnchainAddress(false);
+        setIsLnurl(false);
+        // A camera can deliver the same bad QR on every frame. Keep one alert
+        // visible, then allow another attempt when the user dismisses it.
+        if (!invalidInvoiceAlertVisible.current) {
+          invalidInvoiceAlertVisible.current = true;
+          const dismiss = () => {
+            invalidInvoiceAlertVisible.current = false;
+          };
+          Alert.alert(
+            t('sendSheet.invalidInvoiceTitle'),
+            t('sendSheet.invalidInvoiceBody'),
+            [{ text: t('sendSheet.invalidInvoiceDismiss'), onPress: dismiss }],
+            { onDismiss: dismiss },
+          );
+        }
+        return;
+      }
       setIsOnchainAddress(false);
       setIsLnurl(false);
       setInvoiceData(input);
-      setDecoded(decodeInvoice(input));
+      setDecoded(invoice);
       setScanned(true);
     } else if (isLnurlString(input)) {
       // Raw LNURL (bech32 lnurl1… or cleartext lnurlp://). We can't tell
