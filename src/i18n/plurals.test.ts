@@ -81,6 +81,20 @@ describe('catalogue plurals end to end', () => {
     expect(createI18nInstance('uk').t('market.reviews.count', { count })).toBe(expected);
   });
 
+  it.each([
+    [1, '1 opinia'],
+    [2, '2 opinie'],
+    [4, '4 opinie'],
+    [5, '5 opinii'],
+    [11, '11 opinii'],
+    [12, '12 opinii'],
+    [21, '21 opinii'],
+    [22, '22 opinie'],
+    [25, '25 opinii'],
+  ])('pl: %i reviews → %s', (count, expected) => {
+    expect(createI18nInstance('pl').t('market.reviews.count', { count })).toBe(expected);
+  });
+
   it('keeps the dedicated zero message', () => {
     expect(createI18nInstance('en').t('invitationKeys.removeOld', { count: 0 })).toBe(
       'Remove old devices',

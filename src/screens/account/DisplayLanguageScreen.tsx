@@ -31,6 +31,7 @@ const LOCALE_LABELS: Record<(typeof SUPPORTED_LOCALES)[number], string> = {
   de: 'Deutsch',
   es: 'Español',
   hu: 'Magyar',
+  pl: 'Polski',
   uk: 'Українська',
 };
 

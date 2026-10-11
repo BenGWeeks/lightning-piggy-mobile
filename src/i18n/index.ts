@@ -4,6 +4,7 @@ import enJson from './locales/en.json';
 import deJson from './locales/de.json';
 import esJson from './locales/es.json';
 import huJson from './locales/hu.json';
+import plJson from './locales/pl.json';
 import ukJson from './locales/uk.json';
 import type { Translations } from './locales/types';
 import { registerPluralRules } from './plurals';
@@ -23,14 +24,15 @@ const en: Translations = enJson;
 const de: Translations = deJson;
 const es: Translations = esJson;
 const hu: Translations = huJson;
+const pl: Translations = plJson;
 const uk: Translations = ukJson;
 
 /** Raw catalogue dict — exported so LocaleContext can build its own
  *  per-locale I18n instance for rendering (see the render-purity note
  *  there) without duplicating the JSON imports. */
-export const translations = { en, de, es, hu, uk };
+export const translations = { en, de, es, hu, pl, uk };
 
-export const SUPPORTED_LOCALES = ['en', 'de', 'es', 'hu', 'uk'] as const;
+export const SUPPORTED_LOCALES = ['en', 'de', 'es', 'hu', 'pl', 'uk'] as const;
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
 
 export function isSupportedLocale(code: string): code is SupportedLocale {
