@@ -16,11 +16,20 @@ import {
   peekAccountPref,
   saveAccountPref,
 } from '../services/accountDisplayPrefs';
+import {
+  PSEUDO_LOCALE,
+  createPseudoI18nInstance,
+  isPseudoLocaleAvailable,
+  type PseudoLocale,
+} from '../utils/pseudoLocale';
 
 const isPref = (v: string | null): v is LocalePreference =>
-  v === 'system' || (!!v && isSupportedLocale(v));
+  v === 'system' ||
+  (!!v && isSupportedLocale(v)) ||
+  (v === PSEUDO_LOCALE && isPseudoLocaleAvailable());
 
-export type LocalePreference = 'system' | SupportedLocale;
+/** `en-XA` is the dev/preview-only pseudo-language (#1313), never in prod. */
+export type LocalePreference = 'system' | SupportedLocale | PseudoLocale;
 
 interface LocaleContextValue {
   preference: LocalePreference;
@@ -36,6 +45,8 @@ export function resolveLocale(
   pref: LocalePreference,
   deviceLanguageCode: string | null,
 ): SupportedLocale {
+  // The pseudo-language is generated from en, and formats numbers/dates as en.
+  if (pref === PSEUDO_LOCALE) return 'en';
   if (pref !== 'system') return pref;
   return deviceLanguageCode && isSupportedLocale(deviceLanguageCode) ? deviceLanguageCode : 'en';
 }
@@ -92,7 +103,11 @@ export const LocaleProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // fresh instance keyed on `locale` keeps render pure: it's local to
   // this hook call, so nothing else can observe it half-updated.
   // (Copilot review on #957.)
-  const instance = useMemo(() => createI18nInstance(locale), [locale]);
+  const pseudo = preference === PSEUDO_LOCALE;
+  const instance = useMemo(
+    () => (pseudo ? createPseudoI18nInstance() : createI18nInstance(locale)),
+    [locale, pseudo],
+  );
 
   // The shared singleton is still kept in sync, but only from an effect
   // — after commit, never during render — for non-React call sites that

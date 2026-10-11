@@ -108,6 +108,13 @@ The app supports three Nostr signers, branched on `signerType` in `NostrContext.
 - Pick targets via `bash scripts/coverage-priorities.sh 20` — ranks files by `(churn × LOC × fanout) / (coverage% + 1)`. Top of the list is where bugs hurt most.
 - The `Coverage` GitHub Actions workflow gates every PR: line-coverage may not drop more than 0.5pp vs main.
 
+## Translations
+
+- UI strings live in `src/i18n/locales/<lang>.json`; `en.json` is the source of truth and `SUPPORTED_LOCALES` (`src/i18n/index.ts`) lists the rest. Never hard-code user-facing text — route it through `t()`.
+- **New or changed English strings must be translated into every supported locale in the same PR.** Run `npm run i18n:sync` (lists missing / stale / reworded strings and writes `.i18n-todo/<locale>.json`), `-- --draft` to draft them with a local `claude` / `codex` CLI, review, then `-- --apply` (merges in en.json key order, drops stale keys, validates placeholders and plural forms). `-- --check` exits non-zero while anything is out of date.
+- Follow `docs/i18n/GLOSSARY.md`: brand and protocol names stay untranslated, placeholders stay intact, family-app tone (never "kids' app", never "LP"), per-language register and CLDR plural forms.
+- Check layouts for overflow with the **Pseudo (testing)** language (`en-XA`, dev and preview builds only): every string is accented, ~40% longer and bracketed, so clipped or untranslated text stands out.
+
 ## Pull Request Titles
 
 Follow [Conventional Commits](https://www.conventionalcommits.org/) plus a trailing issue reference when the PR resolves one:
