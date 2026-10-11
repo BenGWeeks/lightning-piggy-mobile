@@ -101,23 +101,21 @@ export function settleWithin(p: Promise<unknown> | null | undefined, ms: number)
   ]).finally(() => clearTimeout(timer));
 }
 
-// Stopped sessions whose work hasn't fully settled yet, per account.
+// Every stopped session per account, kept until that account's wipe fences
+// it. Not just ones with tracked work pending: an untracked late operation (a
+// Welcome join, dropping an unsent edit's history entry) may still reach the
+// backend, so a session is only safe to forget once it is fenced. A gate is a
+// few closures, and sign-out clears the account's entry.
 const lingering = new Map<string, Set<StopGate>>();
 
-/** Remember a stopped session until `settled` — sign-out may need to fence it. */
-export function trackStoppedSession(owner: string, gate: StopGate, settled: Promise<unknown>) {
+/** Remember a stopped session until `owner`'s sign-out fences it. */
+export function trackStoppedSession(owner: string, gate: StopGate): void {
   const gates = lingering.get(owner) ?? new Set<StopGate>();
   gates.add(gate);
   lingering.set(owner, gates);
-  void settled
-    .catch(() => undefined)
-    .then(() => {
-      gates.delete(gate);
-      if (gates.size === 0 && lingering.get(owner) === gates) lingering.delete(owner);
-    });
 }
 
-/** Before wiping `owner`: fence every stopped session that is still busy. */
+/** Before wiping `owner`: fence every stopped session of that account. */
 export function fenceStoppedSessions(owner: string): void {
   for (const gate of lingering.get(owner) ?? []) gate.fence();
   lingering.delete(owner);

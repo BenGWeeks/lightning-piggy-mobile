@@ -334,7 +334,7 @@ export class MarmotSession {
     this.gate.stop();
     const run = this.keyPackageRuns.current;
     const pushStopped = Promise.all([this.push.stop(), this.pushRegistration.stop()]);
-    fence.trackStoppedSession(this.pubkey, this.gate, Promise.all([run, pushStopped]));
+    fence.trackStoppedSession(this.pubkey, this.gate);
     // Accumulated: an earlier session of the same account (A → B → A) may
     // still be finishing a write the wipe must wait for. A key-package run
     // only gets a bounded wait — its signer was just abandoned.

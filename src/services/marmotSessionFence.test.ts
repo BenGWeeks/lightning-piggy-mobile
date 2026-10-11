@@ -75,15 +75,24 @@ describe('marmotSessionFence', () => {
     expect(Date.now() - started).toBeGreaterThanOrEqual(40);
   });
 
-  it('fences stopped sessions still busy at sign-out, and forgets settled ones', async () => {
-    const busy = createStopGate();
-    const done = createStopGate();
-    trackStoppedSession('owner', busy, new Promise(() => undefined));
-    trackStoppedSession('owner', done, Promise.resolve());
-    await Promise.resolve();
-    await Promise.resolve();
+  it("fences every stopped session at its account's sign-out, even after tracked work settled", async () => {
+    const backend = createMemoryMarmotBackend();
+    const settled = createStopGate();
+    const other = createStopGate();
+    const fenced = fenceBackend(backend, settled);
+    settled.stop();
+    trackStoppedSession('owner', settled);
+    trackStoppedSession('someone-else', other);
+    // An untracked late operation (e.g. a Welcome join) still writes after stop…
+    await fenced.set('ns', 'a', '1');
+    expect(await backend.get('ns', 'a')).toBe('1');
     fenceStoppedSessions('owner');
-    expect(busy.fenced).toBe(true);
-    expect(done.fenced).toBe(false);
+    expect(settled.fenced).toBe(true);
+    expect(other.fenced).toBe(false);
+    // …but nothing lands, or is removed, once sign-out has fenced it.
+    await fenced.set('ns', 'b', '2');
+    await fenced.remove('ns', 'a');
+    expect(await backend.get('ns', 'b')).toBeNull();
+    expect(await backend.get('ns', 'a')).toBe('1');
   });
 });
