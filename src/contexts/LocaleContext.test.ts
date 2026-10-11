@@ -1,5 +1,10 @@
 import { resolveLocale } from './LocaleContext';
-import { isSupportedLocale, SUPPORTED_LOCALES, supportedLocaleForDevice } from '../i18n';
+import {
+  intlLocaleFor,
+  isSupportedLocale,
+  SUPPORTED_LOCALES,
+  supportedLocaleForDevice,
+} from '../i18n';
 
 describe('isSupportedLocale (#137)', () => {
   it('accepts every code in SUPPORTED_LOCALES', () => {
@@ -49,5 +54,17 @@ describe('supportedLocaleForDevice', () => {
 
   it('lets resolveLocale follow a full device tag', () => {
     expect(resolveLocale('system', 'es-419')).toBe('es');
+  });
+});
+
+describe('intlLocaleFor', () => {
+  it('formats Marathi amounts with Western digits and Indian grouping', () => {
+    // CLDR's default for mr is Devanagari digits (१२,३४,५६७).
+    expect((1234567).toLocaleString(intlLocaleFor('mr'))).toBe('12,34,567');
+  });
+
+  it('passes other catalogue codes straight through to Intl', () => {
+    expect(intlLocaleFor('de')).toBe('de');
+    expect((1234567).toLocaleString(intlLocaleFor('de'))).toBe('1.234.567');
   });
 });
