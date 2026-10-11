@@ -2253,6 +2253,12 @@
       "retry": "Reintentar",
       "publishFailed": "No se pudo publicar. Inténtalo de nuevo."
     },
+    "feedbackActions": {
+      "commentActions": "Acciones del comentario",
+      "reviewActions": "Acciones de la reseña",
+      "edit": "Editar",
+      "delete": "Eliminar"
+    },
     "reviews": {
       "signIn": "Inicia sesión para escribir una reseña",
       "write": "Escribe una reseña",
@@ -2266,14 +2272,35 @@
       "count": {
         "one": "{{count}} reseña",
         "other": "{{count}} reseñas"
-      }
+      },
+      "yours": "Ya has reseñado este producto",
+      "editOpen": "Editar reseña",
+      "cancel": "Cancelar",
+      "deleteTitle": "¿Eliminar tu reseña?",
+      "deleteBody": "Pediremos a los relays que la eliminen y la ocultaremos aquí de inmediato. Algunos relays o apps pueden ignorar la solicitud o ya tener una copia, así que puede que no desaparezca en todas partes.",
+      "deleteConfirm": "Eliminar",
+      "deleted": "Solicitud de eliminación enviada",
+      "posted": "Reseña publicada",
+      "updated": "Reseña actualizada",
+      "deleteFailed": "No se pudo eliminar tu reseña. Inténtalo de nuevo."
     },
     "comments": {
       "placeholder": "Añade un comentario",
       "post": "Publicar comentario",
       "signIn": "Inicia sesión para comentar",
       "empty": "Aún no hay comentarios. ¡Sé el primero en iniciar la conversación!",
-      "loadError": "No se pudieron cargar los comentarios"
+      "loadError": "No se pudieron cargar los comentarios",
+      "editedMarker": "Editado",
+      "editing": "Editando tu comentario",
+      "save": "Guardar cambios",
+      "cancel": "Cancelar",
+      "deleteTitle": "¿Eliminar este comentario?",
+      "deleteBody": "Pediremos a los relays que lo eliminen y lo ocultaremos aquí de inmediato. Algunos relays o apps pueden ignorar la solicitud o ya tener una copia, así que puede que no desaparezca en todas partes.",
+      "deleteConfirm": "Eliminar",
+      "deleted": "Solicitud de eliminación enviada",
+      "updated": "Comentario actualizado",
+      "deleteFailed": "No se pudo eliminar el comentario. Inténtalo de nuevo.",
+      "editFailed": "No se pudo guardar tu edición. Inténtalo de nuevo."
     },
     "checkout": {
       "orderPlaced": "Pedido realizado",

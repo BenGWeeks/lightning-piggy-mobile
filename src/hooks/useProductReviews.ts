@@ -8,9 +8,11 @@ import {
   REVIEW_KIND,
   aggregateReviews,
   parseReviews,
+  reviewAddress,
   type ParsedReview,
   type ReviewAggregate,
 } from '../utils/productReviews';
+import { DELETION_KIND, addressOf, deletedByAuthor, deletionFilters } from '../utils/nip09';
 
 export interface UseProductReviews {
   reviews: ParsedReview[];
@@ -23,6 +25,11 @@ export interface UseProductReviews {
    */
   error: boolean;
   refetch: () => void;
+  /** Show a review we just published at once (before the refetch sees it). */
+  addLocally: (review: NostrEvent) => void;
+  /** Hide your review at once (deleted) — every version up to the one
+   * shown, like the `a`-tag kind-5 it mirrors; returns the undo. */
+  hideLocally: (review: ParsedReview) => () => void;
 }
 
 /**
@@ -34,6 +41,14 @@ export interface UseProductReviews {
 export function useProductReviews(coord: string | null): UseProductReviews {
   const { relays } = useNostr();
   const [events, setEvents] = useState<NostrEvent[]>([]);
+  // Author kind-5 deletions of the fetched reviews (#1272).
+  const [deletions, setDeletions] = useState<NostrEvent[]>([]);
+  // Optimistic state from this device's own edits/deletes; survives refetches
+  // so a relay that ignores NIP-09 can't bring a deleted review back here.
+  const [localAdded, setLocalAdded] = useState<NostrEvent[]>([]);
+  // Local stand-ins for kind-5s still being published (same shape, so the
+  // one `deletedByAuthor` rule applies to both).
+  const [localDeletions, setLocalDeletions] = useState<NostrEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const [tick, setTick] = useState(0);
@@ -52,6 +67,7 @@ export function useProductReviews(coord: string | null): UseProductReviews {
     useCallback(() => {
       if (!coord) {
         setEvents([]);
+        setDeletions([]);
         setLoading(false);
         setError(false);
         return;
@@ -68,7 +84,34 @@ export function useProductReviews(coord: string | null): UseProductReviews {
         { maxWait: 4000, signal: controller.signal, rejectOnAllRelaysFailure: true },
       )
         .then((evs) => {
-          if (!controller.signal.aborted) setEvents(evs);
+          if (controller.signal.aborted) return;
+          setEvents(evs);
+          setLoading(false);
+          // Then the kind-5s naming them — by address (what we and most
+          // clients send for a replaceable review) and by id. Best-effort: a
+          // failed lookup keeps the previous deletions.
+          const addresses = evs.map(addressOf).filter((a): a is string => !!a);
+          const filters = [
+            ...deletionFilters('a', addresses),
+            ...deletionFilters(
+              'e',
+              evs.map((e) => e.id),
+            ),
+          ];
+          return Promise.all(
+            filters.map((filter) =>
+              querySyncAbortable(pool, readRelays, filter, {
+                maxWait: 4000,
+                signal: controller.signal,
+              }),
+            ),
+          ).then(
+            (batches) => {
+              if (controller.signal.aborted) return;
+              setDeletions(batches.flat().filter((e) => e.kind === DELETION_KIND));
+            },
+            () => undefined,
+          );
         })
         .catch(() => {
           if (!controller.signal.aborted) setError(true);
@@ -82,8 +125,43 @@ export function useProductReviews(coord: string | null): UseProductReviews {
 
   // Exact `d` scoping: the `#d` filter is only a relay-side request, so a
   // review a relay returns for another product must not count here.
-  const reviews = useMemo(() => parseReviews(events, coord ?? undefined), [events, coord]);
+  // Author-deleted and locally hidden versions are dropped BEFORE the
+  // newest-per-author pick, so deleting your review never resurfaces an older
+  // copy of it.
+  const reviews = useMemo(() => {
+    const all = localAdded.length > 0 ? [...events, ...localAdded] : events;
+    const deleted = deletedByAuthor(
+      all,
+      localDeletions.length > 0 ? [...deletions, ...localDeletions] : deletions,
+    );
+    return parseReviews(
+      all.filter((e) => !deleted.has(e.id)),
+      coord ?? undefined,
+    );
+  }, [events, localAdded, deletions, localDeletions, coord]);
   const aggregate = useMemo(() => aggregateReviews(reviews), [reviews]);
 
-  return { reviews, aggregate, loading, error, refetch };
+  // One setState per user action (never per relay event).
+  const addLocally = useCallback((review: NostrEvent) => {
+    setLocalAdded((prev) => (prev.some((e) => e.id === review.id) ? prev : [...prev, review]));
+  }, []);
+  const hideLocally = useCallback(
+    (review: ParsedReview) => {
+      if (!coord) return () => {};
+      const stand: NostrEvent = {
+        id: `local-delete:${review.id}`,
+        pubkey: review.pubkey,
+        kind: DELETION_KIND,
+        created_at: review.createdAt,
+        tags: [['a', reviewAddress(review.pubkey, coord)]],
+        content: '',
+        sig: '',
+      };
+      setLocalDeletions((prev) => [...prev, stand]);
+      return () => setLocalDeletions((prev) => prev.filter((d) => d !== stand));
+    },
+    [coord],
+  );
+
+  return { reviews, aggregate, loading, error, refetch, addLocally, hideLocally };
 }

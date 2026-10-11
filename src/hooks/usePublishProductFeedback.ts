@@ -1,18 +1,38 @@
 import { useCallback, useMemo, useState } from 'react';
+import type { Event as NostrEvent } from 'nostr-tools';
 import { useNostr } from '../contexts/NostrContext';
 import { DEFAULT_RELAYS, publishSignedEvent } from '../services/nostrService';
 import { COMMENT_KIND, buildCommentTags, type CommentRoot } from '../utils/productComments';
-import { buildReviewEvent } from '../utils/productReviews';
+import { buildReviewDeletion, buildReviewEvent, type ParsedReview } from '../utils/productReviews';
+import {
+  buildCommentDeletion,
+  buildCommentEdit,
+  type UnsignedTemplate,
+} from '../utils/commentEdits';
 
 export interface UsePublishProductFeedback {
-  /** Publish (or replace) the signed-in user's review of a product. */
-  publishReview: (input: { coord: string; stars: number; content?: string }) => Promise<void>;
+  /** Publish (or replace — same address = an edit) your review of a product. */
+  publishReview: (input: { coord: string; stars: number; content?: string }) => Promise<NostrEvent>;
+  /** Publish a NIP-09 kind-5 deletion request for your review (`a` + `e`). */
+  deleteReview: (review: Pick<ParsedReview, 'id' | 'pubkey'>, coord: string) => Promise<void>;
   /** Publish a comment on the product, or a reply to another comment. */
   publishComment: (input: {
     root: CommentRoot;
     content: string;
     reply?: CommentRoot;
-  }) => Promise<void>;
+  }) => Promise<NostrEvent>;
+  /**
+   * Edit your comment: publish its replacement, then a kind-5 for `original`.
+   * Resolves with the replacement (null = nothing changed). Rejects only if
+   * the replacement didn't go out; `oldDeleted` is false when it did but the
+   * kind-5 didn't (readers still hide the old one via the `edit` tag).
+   */
+  editComment: (
+    original: NostrEvent,
+    content: string,
+  ) => Promise<{ replacement: NostrEvent; oldDeleted: boolean } | null>;
+  /** Publish a NIP-09 kind-5 deletion request for your comment. */
+  deleteComment: (comment: NostrEvent) => Promise<void>;
   publishing: boolean;
   canPublish: boolean;
 }
@@ -33,7 +53,7 @@ export function usePublishProductFeedback(): UsePublishProductFeedback {
   }, [relays]);
 
   const publish = useCallback(
-    async (template: { kind: number; tags: string[][]; content: string }) => {
+    async (template: UnsignedTemplate): Promise<NostrEvent> => {
       setPublishing(true);
       try {
         const signed = await signEvent({
@@ -44,6 +64,7 @@ export function usePublishProductFeedback(): UsePublishProductFeedback {
         });
         if (!signed) throw new Error('Not signed in');
         await publishSignedEvent(signed, writeRelays);
+        return signed as NostrEvent;
       } finally {
         setPublishing(false);
       }
@@ -53,6 +74,13 @@ export function usePublishProductFeedback(): UsePublishProductFeedback {
 
   const publishReview = useCallback(
     (input: { coord: string; stars: number; content?: string }) => publish(buildReviewEvent(input)),
+    [publish],
+  );
+
+  const deleteReview = useCallback(
+    async (review: Pick<ParsedReview, 'id' | 'pubkey'>, coord: string) => {
+      await publish(buildReviewDeletion(review, coord));
+    },
     [publish],
   );
 
@@ -66,9 +94,38 @@ export function usePublishProductFeedback(): UsePublishProductFeedback {
     [publish],
   );
 
+  const deleteComment = useCallback(
+    async (comment: NostrEvent) => {
+      await publish(buildCommentDeletion(comment));
+    },
+    [publish],
+  );
+
+  const editComment = useCallback(
+    async (original: NostrEvent, content: string) => {
+      const template = buildCommentEdit(original, content);
+      if (!template) return null;
+      const replacement = await publish(template);
+      const oldDeleted = await publish(buildCommentDeletion(original)).then(
+        () => true,
+        () => false,
+      );
+      return { replacement, oldDeleted };
+    },
+    [publish],
+  );
+
   // Gate on a signer that can actually sign (mirrors useMarketCheckout.canOrder):
   // `signEvent` returns null for an unsupported signer type, which would
   // otherwise show the compose form and then fail every submit silently.
   const canPublish = Boolean(isLoggedIn && ['nsec', 'amber', 'nip46'].includes(signerType ?? ''));
-  return { publishReview, publishComment, publishing, canPublish };
+  return {
+    publishReview,
+    deleteReview,
+    publishComment,
+    editComment,
+    deleteComment,
+    publishing,
+    canPublish,
+  };
 }

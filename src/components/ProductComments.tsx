@@ -1,20 +1,14 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ActivityIndicator } from 'react-native';
-import type { Event as NostrEvent } from 'nostr-tools';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { useNostr } from '../contexts/NostrContext';
 import { useProductComments } from '../hooks/useProductComments';
-import { usePublishProductFeedback } from '../hooks/usePublishProductFeedback';
-import { relativeTime } from '../utils/relativeTime';
+import { useProductCommentActions } from '../hooks/useProductCommentActions';
 import type { CommentRoot } from '../utils/productComments';
 import { FEEDBACK_PAGE_SIZE } from '../utils/marketFeedback';
-import {
-  createProductCommentsStyles,
-  type ProductCommentsStyles as Styles,
-} from '../styles/ProductComments.styles';
-import AuthorInline from './AuthorInline';
-import Toast from './BrandedToast';
+import { createProductCommentsStyles } from '../styles/ProductComments.styles';
+import ProductCommentItem from './ProductCommentItem';
 
 interface Props {
   /** The kind-30402 product event the thread is rooted on. */
@@ -25,53 +19,33 @@ interface Props {
   onCount?: (count: number) => void;
 }
 
-const CommentItem = React.memo(function CommentItem({
-  comment,
-  styles,
-}: {
-  comment: NostrEvent;
-  styles: Styles;
-}) {
-  return (
-    <View style={styles.item} testID={`product-comment-${comment.id}`}>
-      <View style={styles.itemHeader}>
-        <AuthorInline pubkey={comment.pubkey} size={26} />
-        <Text style={styles.when}>{relativeTime(comment.created_at ?? 0)}</Text>
-      </View>
-      <Text style={styles.itemText}>{comment.content}</Text>
-    </View>
-  );
-});
-
 /**
  * Comments tab body: a compose box (or sign-in prompt) and the list of
- * top-level comments (NIP-22 kind 1111). Pure logic lives in
- * `utils/productComments`.
+ * top-level comments (NIP-22 kind 1111), with Edit / Delete on your own
+ * (#1272). Pure logic lives in `utils/productComments` and
+ * `utils/commentEdits`; the compose + edit/delete orchestration in
+ * `useProductCommentActions`.
  */
 const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount }) => {
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createProductCommentsStyles(colors), [colors]);
-  const { topLevel, loading, error, refetch } = useProductComments(root);
-  const { publishComment, publishing, canPublish } = usePublishProductFeedback();
+  const { topLevel, loading, error, refetch, addLocally, hideLocally } = useProductComments(root);
   const { pubkey } = useNostr();
-  const [content, setContent] = useState('');
-  // The account switcher keeps screens mounted — a draft typed under one
-  // identity must never be published by the next (or survive logout).
-  useEffect(() => {
-    setContent('');
-  }, [pubkey]);
-
-  // Pending post-publish refetch timer, cleared on unmount so a late fire can
-  // never call refetch (and setState) after this component is gone (Copilot
-  // review on #948).
-  const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
-      if (refetchTimer.current) clearTimeout(refetchTimer.current);
-    },
-    [],
-  );
+  const {
+    content,
+    setContent,
+    inputRef,
+    submit,
+    publishing,
+    canPublish,
+    isEditing,
+    cancelEdit,
+    menuFor,
+    toggleMenu,
+    startEdit,
+    requestDelete,
+  } = useProductCommentActions({ root, pubkey, addLocally, hideLocally, refetch });
 
   useEffect(() => {
     onCount?.(topLevel.length);
@@ -82,30 +56,25 @@ const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount }) =>
   const [visibleCount, setVisibleCount] = useState(FEEDBACK_PAGE_SIZE);
   const hiddenCount = Math.max(0, topLevel.length - visibleCount);
 
-  const submit = async () => {
-    if (!content.trim()) return;
-    try {
-      await publishComment({ root, content });
-      setContent('');
-      // Track the timer so unmount can cancel it (see cleanup effect above).
-      if (refetchTimer.current) clearTimeout(refetchTimer.current);
-      refetchTimer.current = setTimeout(refetch, 1500);
-    } catch {
-      // The draft is kept; tell the user it didn't go out.
-      Toast.show({
-        type: 'error',
-        text1: t('market.feedbackTabs.publishFailed'),
-        position: 'top',
-        visibilityTime: 3000,
-      });
-    }
-  };
-
   return (
     <View testID="product-comments">
       {canPublish ? (
         <View style={styles.form} testID="product-comment-form">
+          {isEditing ? (
+            <View style={styles.editingBar} testID="product-comment-editing">
+              <Text style={styles.editingText}>{t('market.comments.editing')}</Text>
+              <TouchableOpacity
+                onPress={cancelEdit}
+                accessibilityRole="button"
+                hitSlop={8}
+                testID="product-comment-edit-cancel"
+              >
+                <Text style={styles.editingCancel}>{t('market.comments.cancel')}</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
           <TextInput
+            ref={inputRef}
             style={styles.input}
             value={content}
             onChangeText={setContent}
@@ -124,7 +93,9 @@ const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount }) =>
             {publishing ? (
               <ActivityIndicator color={colors.white} size="small" />
             ) : (
-              <Text style={styles.submitText}>{t('market.comments.post')}</Text>
+              <Text style={styles.submitText}>
+                {isEditing ? t('market.comments.save') : t('market.comments.post')}
+              </Text>
             )}
           </TouchableOpacity>
         </View>
@@ -158,7 +129,16 @@ const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount }) =>
       ) : (
         <>
           {topLevel.slice(0, visibleCount).map((c) => (
-            <CommentItem key={c.id} comment={c} styles={styles} />
+            <ProductCommentItem
+              key={c.id}
+              comment={c}
+              styles={styles}
+              isMine={!!pubkey && c.pubkey === pubkey}
+              menuOpen={menuFor === c.id}
+              onToggleMenu={toggleMenu}
+              onEdit={startEdit}
+              onDelete={requestDelete}
+            />
           ))}
           {hiddenCount > 0 ? (
             <TouchableOpacity

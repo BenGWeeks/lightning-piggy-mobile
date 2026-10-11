@@ -2,6 +2,7 @@ import type { Event as NostrEvent } from 'nostr-tools';
 import {
   REVIEW_KIND,
   aggregateReviews,
+  buildReviewDeletion,
   buildReviewEvent,
   dedupeNewestPerAuthor,
   isProductReviewCoord,
@@ -9,6 +10,7 @@ import {
   parseReviews,
   productReviewCoord,
   ratingToStars,
+  reviewAddress,
   starsToRating,
 } from './productReviews';
 
@@ -284,5 +286,21 @@ describe('parseReviews + aggregateReviews', () => {
     const agg = aggregateReviews(reviews);
     expect(agg.count).toBe(2);
     expect(agg.average).toBeCloseTo(4, 6); // (5 + 3) / 2
+  });
+});
+
+describe('buildReviewDeletion', () => {
+  it('deletes the review by its own address and the shown version', () => {
+    const reviewer = 'r'.repeat(64);
+    expect(reviewAddress(reviewer, COORD)).toBe(`${REVIEW_KIND}:${reviewer}:${COORD}`);
+    expect(buildReviewDeletion({ id: 'rev-id', pubkey: reviewer }, COORD)).toEqual({
+      kind: 5,
+      content: '',
+      tags: [
+        ['a', `${REVIEW_KIND}:${reviewer}:${COORD}`],
+        ['e', 'rev-id'],
+        ['k', String(REVIEW_KIND)],
+      ],
+    });
   });
 });

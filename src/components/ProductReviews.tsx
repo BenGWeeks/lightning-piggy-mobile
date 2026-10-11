@@ -1,21 +1,15 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, ActivityIndicator } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { useNostr } from '../contexts/NostrContext';
 import { useProductReviews } from '../hooks/useProductReviews';
-import { usePublishProductFeedback } from '../hooks/usePublishProductFeedback';
-import { relativeTime } from '../utils/relativeTime';
-import type { ParsedReview } from '../utils/productReviews';
+import { useProductReviewActions } from '../hooks/useProductReviewActions';
 import { FEEDBACK_PAGE_SIZE } from '../utils/marketFeedback';
-import type { Palette } from '../styles/palettes';
-import {
-  createProductReviewsStyles,
-  type ProductReviewsStyles as Styles,
-} from '../styles/ProductReviews.styles';
-import { StarRating, StarRatingInput } from './StarRating';
-import AuthorInline from './AuthorInline';
-import Toast from './BrandedToast';
+import { createProductReviewsStyles } from '../styles/ProductReviews.styles';
+import { StarRating } from './StarRating';
+import ProductReviewForm from './ProductReviewForm';
+import ProductReviewItem from './ProductReviewItem';
 
 interface Props {
   /** Review coordinate `a:30402:<merchant>:<dTag>`. */
@@ -26,144 +20,19 @@ interface Props {
   onCount?: (count: number) => void;
 }
 
-/** A single review row: author, stars, relative time and text. */
-const ReviewItem = React.memo(function ReviewItem({
-  review,
-  styles,
-}: {
-  review: ParsedReview;
-  styles: Styles;
-}) {
-  return (
-    <View style={styles.item} testID={`product-review-${review.id || review.pubkey}`}>
-      <View style={styles.itemHeader}>
-        <AuthorInline pubkey={review.pubkey} size={26} />
-        <Text style={styles.when}>{relativeTime(review.createdAt)}</Text>
-      </View>
-      <StarRating value={review.stars} size={14} />
-      {review.text.length > 0 ? <Text style={styles.itemText}>{review.text}</Text> : null}
-    </View>
-  );
-});
-
-/** Compose form (signed-in) or a sign-in prompt (signed-out). */
-const ReviewForm: React.FC<{
-  existing?: ParsedReview;
-  styles: Styles;
-  colors: Palette;
-  onSubmit: (stars: number, content: string) => Promise<void>;
-  submitting: boolean;
-  canPublish: boolean;
-  onRequestSignIn: () => void;
-}> = ({ existing, styles, colors, onSubmit, submitting, canPublish, onRequestSignIn }) => {
-  const t = useTranslation();
-  const existingStars = existing ? Math.round(existing.stars) : 0;
-  const existingText = existing?.text ?? '';
-  const [stars, setStars] = useState(existingStars);
-  const [content, setContent] = useState(existingText);
-  const [hint, setHint] = useState<string | null>(null);
-  // Whether the user has started editing. Once they have, we STOP adopting the
-  // loaded/updated existing review so a late relay response can never clobber
-  // their in-progress input (Copilot review on #948).
-  const [touched, setTouched] = useState(false);
-
-  // Adopt the user's own review into the form only while it is still pristine
-  // (they haven't typed yet). This prefills the form when the existing review
-  // arrives after mount without overwriting edits already in progress.
-  useEffect(() => {
-    if (touched) return;
-    setStars(existingStars);
-    setContent(existingText);
-  }, [existingStars, existingText, touched]);
-
-  const onChangeStars = (next: number) => {
-    setTouched(true);
-    setStars(next);
-  };
-  const onChangeContent = (next: string) => {
-    setTouched(true);
-    setContent(next);
-  };
-
-  if (!canPublish) {
-    return (
-      <TouchableOpacity
-        style={styles.signInCard}
-        onPress={onRequestSignIn}
-        testID="product-review-signin"
-        activeOpacity={0.8}
-      >
-        <Text style={styles.signInText}>{t('market.reviews.signIn')}</Text>
-      </TouchableOpacity>
-    );
-  }
-
-  const submit = async () => {
-    if (stars < 1) {
-      setHint(t('market.reviews.addRating'));
-      return;
-    }
-    setHint(null);
-    await onSubmit(stars, content.trim());
-  };
-
-  return (
-    <View style={styles.form} testID="product-review-form">
-      <Text style={styles.formLabel}>
-        {existing ? t('market.reviews.updateLabel') : t('market.reviews.write')}
-      </Text>
-      <StarRatingInput value={stars} onChange={onChangeStars} testID="product-review-star-input" />
-      <TextInput
-        style={styles.input}
-        value={content}
-        onChangeText={onChangeContent}
-        placeholder={t('market.reviews.placeholder')}
-        placeholderTextColor={colors.textSupplementary}
-        multiline
-        testID="product-review-text"
-      />
-      {hint ? <Text style={styles.hint}>{hint}</Text> : null}
-      <TouchableOpacity
-        style={[styles.submit, submitting && styles.submitDisabled]}
-        onPress={submit}
-        disabled={submitting}
-        testID="product-review-submit"
-        activeOpacity={0.8}
-      >
-        {submitting ? (
-          <ActivityIndicator color={colors.white} size="small" />
-        ) : (
-          <Text style={styles.submitText}>
-            {existing ? t('market.reviews.submitUpdate') : t('market.reviews.submit')}
-          </Text>
-        )}
-      </TouchableOpacity>
-    </View>
-  );
-};
-
 /**
  * Reviews tab body: aggregate stars, a compose form (or sign-in prompt) and
- * the list of reviews (kind 31555). Pure logic lives in `utils/productReviews`.
+ * the list of reviews (kind 31555), with Edit / Delete on your own (#1272).
+ * Pure logic lives in `utils/productReviews` + `utils/nip09`; the
+ * write/edit/delete orchestration in `useProductReviewActions`.
  */
 const ProductReviews: React.FC<Props> = ({ coord, onRequestSignIn, onCount }) => {
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createProductReviewsStyles(colors), [colors]);
   const { pubkey } = useNostr();
-  const { reviews, aggregate, loading, error, refetch } = useProductReviews(coord);
-  const { publishReview, publishing, canPublish } = usePublishProductFeedback();
-
-  // Pending post-publish refetch timer, cleared on unmount so a late fire can
-  // never call refetch (and setState) after this component is gone (Copilot
-  // review on #948).
-  const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
-      if (refetchTimer.current) clearTimeout(refetchTimer.current);
-    },
-    [],
-  );
+  const { reviews, aggregate, loading, error, refetch, addLocally, hideLocally } =
+    useProductReviews(coord);
 
   useEffect(() => {
     onCount?.(aggregate.count);
@@ -182,23 +51,18 @@ const ProductReviews: React.FC<Props> = ({ coord, onRequestSignIn, onCount }) =>
     return reviews.find((r) => r.pubkey.toLowerCase() === lower);
   }, [reviews, pubkey]);
 
-  const onSubmit = async (stars: number, content: string) => {
-    try {
-      await publishReview({ coord, stars, content });
-      // Relays need a beat to serve the new event back; refresh shortly after.
-      // Track the timer so unmount can cancel it (see cleanup effect above).
-      if (refetchTimer.current) clearTimeout(refetchTimer.current);
-      refetchTimer.current = setTimeout(refetch, 1500);
-    } catch {
-      // The form keeps the draft; tell the user it didn't go out.
-      Toast.show({
-        type: 'error',
-        text1: t('market.feedbackTabs.publishFailed'),
-        position: 'top',
-        visibilityTime: 3000,
-      });
-    }
-  };
+  const {
+    submit,
+    publishing,
+    canPublish,
+    formOpen,
+    editing,
+    startEdit,
+    cancelEdit,
+    menuOpen,
+    toggleMenu,
+    requestDelete,
+  } = useProductReviewActions({ coord, pubkey, ownReview, addLocally, hideLocally, refetch });
 
   return (
     <View testID="product-reviews">
@@ -212,18 +76,35 @@ const ProductReviews: React.FC<Props> = ({ coord, onRequestSignIn, onCount }) =>
         </View>
       ) : null}
 
-      <ReviewForm
-        // Keyed on the identity too: the account switcher keeps screens
-        // mounted, and a draft must never carry over to another pubkey.
-        key={`${coord}:${pubkey ?? ''}`}
-        existing={ownReview}
-        styles={styles}
-        colors={colors}
-        onSubmit={onSubmit}
-        submitting={publishing}
-        canPublish={canPublish}
-        onRequestSignIn={onRequestSignIn}
-      />
+      {formOpen || !canPublish ? (
+        <ProductReviewForm
+          // Keyed on the identity too: the account switcher keeps screens
+          // mounted, and a draft must never carry over to another pubkey. And
+          // on write-vs-edit, so deleting mid-edit starts a fresh form.
+          key={`${coord}:${pubkey ?? ''}:${ownReview ? 'edit' : 'new'}`}
+          existing={ownReview}
+          onCancel={editing ? cancelEdit : undefined}
+          styles={styles}
+          colors={colors}
+          onSubmit={submit}
+          submitting={publishing}
+          canPublish={canPublish}
+          onRequestSignIn={onRequestSignIn}
+        />
+      ) : (
+        // You've reviewed it: collapse the form behind "Edit review".
+        <View style={styles.yoursCard} testID="product-review-yours">
+          <Text style={styles.yoursText}>{t('market.reviews.yours')}</Text>
+          <TouchableOpacity
+            style={styles.yoursButton}
+            onPress={startEdit}
+            accessibilityRole="button"
+            testID="product-review-edit-open"
+          >
+            <Text style={styles.yoursButtonText}>{t('market.reviews.editOpen')}</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {error ? (
         <View>
@@ -244,7 +125,16 @@ const ProductReviews: React.FC<Props> = ({ coord, onRequestSignIn, onCount }) =>
       ) : (
         <>
           {reviews.slice(0, visibleCount).map((r) => (
-            <ReviewItem key={r.id || r.pubkey} review={r} styles={styles} />
+            <ProductReviewItem
+              key={r.id || r.pubkey}
+              review={r}
+              styles={styles}
+              isMine={r === ownReview}
+              menuOpen={r === ownReview && menuOpen}
+              onToggleMenu={toggleMenu}
+              onEdit={startEdit}
+              onDelete={requestDelete}
+            />
           ))}
           {hiddenCount > 0 ? (
             <TouchableOpacity
