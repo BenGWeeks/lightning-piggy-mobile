@@ -165,20 +165,45 @@ async function runSnapshot(
       return false;
     }
   };
-  // A bulk deletion over the tag limit still withdraws listings: keep a
-  // trimmed copy with only the e / own-listing a tags.
-  const suppressOversizedDeletion = (event: Event) => {
-    if (suppressions.has(event.id) || budgetFull(true)) return;
-    const tags = event.tags
+  // Ids and addresses of the listings pass 1 found. Deletions (pass 2) only
+  // matter where they hit one of these.
+  let knownTargets = new Set<string>();
+  // The deletion's own targets among `knownTargets`: `e` ids, and `a`
+  // addresses of the deletion author's OWN listings.
+  const relevantTargets = (event: Event) =>
+    event.tags
       .filter(
         (t) =>
-          (t[0] === 'e' && /^[0-9a-f]{64}$/.test(t[1] ?? '')) ||
-          (t[0] === 'a' &&
-            /^(30018|30402):/.test(t[1] ?? '') &&
-            t[1]?.split(':')[1] === event.pubkey),
+          knownTargets.has(t[1] ?? '') &&
+          (t[0] === 'e' || (t[0] === 'a' && t[1]?.split(':')[1] === event.pubkey)),
       )
-      .slice(0, MAX_EVENTS)
-      .map((t) => [t[0], t[1]]);
+      .map((t) => [t[0], t[1]] as [string, string]);
+  // Fail closed for deletions we can't keep whole (budget full, or too large
+  // to verify): remember just their targets among the listings found, newest
+  // deletion time per target, and apply them unverified. Bounded by
+  // `knownTargets`; author-scoped like any deletion. Flags the snapshot.
+  const failClosedTargets = new Map<
+    string,
+    { pubkey: string; tag: [string, string]; at: number }
+  >();
+  const keepFailClosed = (event: Event) => {
+    for (const tag of relevantTargets(event)) {
+      const k = `${event.pubkey}|${tag[0]}|${tag[1]}`;
+      const prev = failClosedTargets.get(k);
+      if (!prev || prev.at < event.created_at) {
+        failClosedTargets.set(k, { pubkey: event.pubkey, tag, at: event.created_at });
+      }
+    }
+  };
+  // A bulk deletion over the tag limit still withdraws listings: keep a
+  // trimmed copy with only its targets among the listings found.
+  const suppressOversizedDeletion = (event: Event) => {
+    if (suppressions.has(event.id)) return;
+    if (budgetFull(true)) {
+      keepFailClosed(event);
+      return;
+    }
+    const tags = relevantTargets(event);
     if (tags.length === 0 || !checkOversized(event)) return;
     const standIn = { ...event, content: '', tags };
     trusted.add(standIn);
@@ -187,7 +212,11 @@ async function runSnapshot(
   };
   const suppressOversized = (event: Event) => {
     limited = true;
-    if (event.content.length > MAX_VERIFY_CHARS) return;
+    if (event.content.length > MAX_VERIFY_CHARS) {
+      // Too large to verify: a deletion still fails closed on its targets.
+      if (event.kind === 5) keepFailClosed(event);
+      return;
+    }
     if (event.kind === 5) {
       suppressOversizedDeletion(event);
       return;
@@ -234,6 +263,8 @@ async function runSnapshot(
     const deletion = event.kind === 5;
     if (budgetFull(deletion)) {
       limited = true;
+      // A deletion that doesn't fit still withdraws what it targets.
+      if (deletion) keepFailClosed(event);
       return;
     }
     // Listings are verified later (winners only); a payload that doesn't even
@@ -255,6 +286,12 @@ async function runSnapshot(
   });
   const listingsDoneAt = Date.now();
   const candidates = [...events.values(), ...suppressions.values()].filter((e) => e.kind !== 5);
+  knownTargets = new Set(
+    candidates.flatMap((e) => {
+      const d = e.tags.find((t) => t[0] === 'd')?.[1];
+      return d ? [e.id, `${e.kind}:${e.pubkey}:${d}`] : [e.id];
+    }),
+  );
   // Ask every relay that responded in pass 1 (not just those that finished
   // in time — one that served listings may hold their deletions too). Relays
   // that never answered at all are left out, so they can't stall pass 2.
@@ -295,8 +332,18 @@ async function runSnapshot(
     }
   }
   const deletionChecksGaveUp = failedDeletionChecks >= MAX_FAILED_DELETION_CHECKS;
+  // Fail-closed targets become unverified, trusted stand-in deletions.
+  const failClosedDeletions: Event[] = [...failClosedTargets.values()].map((t, i) => ({
+    kind: 5,
+    pubkey: t.pubkey,
+    created_at: t.at,
+    content: '',
+    tags: [t.tag],
+    id: `fail-closed-${i}`,
+    sig: '',
+  }));
   const selection = await selectVerifiedListings(
-    signal.aborted ? [] : [...events.values(), ...suppressions.values()],
+    signal.aborted ? [] : [...events.values(), ...suppressions.values(), ...failClosedDeletions],
     scope,
     {
       // Once aborted, fail fast instead of verifying the rest for nothing.
@@ -325,6 +372,7 @@ async function runSnapshot(
       signal.aborted ||
       limited ||
       deletionChecksGaveUp ||
+      failClosedDeletions.length > 0 ||
       oversizedFailures >= MAX_FAILED_OVERSIZED_CHECKS ||
       selection.gaveUp ||
       listingsCutMattered(listings.truncatedSince, products, selection.overflow) ||

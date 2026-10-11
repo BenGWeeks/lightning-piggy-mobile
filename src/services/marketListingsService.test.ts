@@ -348,6 +348,80 @@ it('fails closed when forged deletions flood: a withdrawn listing stays hidden',
   expect(verify.mock.calls.filter(([e]) => e.kind === 5).length).toBeLessThanOrEqual(32);
 }, 30000);
 
+it('fails closed when forged deletions fill the deletion budget first', async () => {
+  jest.useRealTimers();
+  const pending = start();
+  await flush();
+  deliver(pass('listings')[0], event);
+  pass('listings')[0].c.oneose();
+  await flush();
+  const [deletionSub] = pass('deletions');
+  for (let i = 0; i < 600; i++) {
+    deliver(deletionSub, forgedDeletion(i, ['e', i.toString(16).padStart(64, '0')]));
+  }
+  // The genuine withdrawal no longer fits the budget, but still applies.
+  deliver(
+    deletionSub,
+    finalizeEvent({ kind: 5, created_at: 9000, content: '', tags: [['e', event.id]] }, key),
+  );
+  pass('deletions').forEach((s) => s.c.oneose());
+  const result = await pending;
+  expect(result.products).toEqual([]);
+  expect(result.incomplete).toBe(true);
+}, 60000);
+
+it('fails closed on a genuine withdrawal too large to verify', async () => {
+  const pending = start();
+  await flush();
+  deliver(pass('listings')[0], event);
+  pass('listings')[0].c.oneose();
+  await flush();
+  const huge = finalizeEvent(
+    {
+      kind: 5,
+      created_at: 9000,
+      content: 'x'.repeat(1048577),
+      tags: [['a', `30402:${author}:book`]],
+    },
+    key,
+  );
+  deliver(pass('deletions')[0], huge);
+  pass('deletions').forEach((s) => s.c.oneose());
+  const result = await pending;
+  expect(result.products).toEqual([]);
+  expect(result.incomplete).toBe(true);
+}, 30000);
+
+it("a fail-closed deletion can't hide another seller's listing", async () => {
+  const otherKey = new Uint8Array(32).fill(8);
+  // Both sellers are followed, so the other one's deletion is in scope.
+  const pending = fetchMarketListings(
+    [author, getPublicKey(otherKey)],
+    ['wss://example.com'],
+    new AbortController().signal,
+  );
+  await flush();
+  deliver(pass('listings')[0], event);
+  pass('listings')[0].c.oneose();
+  await flush();
+  // Too large to verify and claiming ANOTHER author: it must not touch `author`'s listing.
+  const huge = finalizeEvent(
+    {
+      kind: 5,
+      created_at: 9000,
+      content: 'x'.repeat(1048577),
+      tags: [
+        ['e', event.id],
+        ['a', `30402:${author}:book`],
+      ],
+    },
+    otherKey,
+  );
+  deliver(pass('deletions')[0], huge);
+  pass('deletions').forEach((s) => s.c.oneose());
+  expect((await pending).products).toHaveLength(1);
+}, 30000);
+
 it('ignores a few forged deletions: the listing stays and the snapshot is complete', async () => {
   const pending = start();
   await flush();
