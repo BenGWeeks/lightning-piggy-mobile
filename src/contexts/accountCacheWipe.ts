@@ -15,6 +15,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { perAccountKey } from '../services/perAccountStorage';
 import {
+  forgetSellerAccount,
+  sellerCacheStorageKey,
+  sellerHiddenStorageKey,
+} from '../services/sellerEventStore';
+import {
   deleteNwcUrl,
   deleteXpub,
   deleteMnemonic,
@@ -130,7 +135,11 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
     // previews): only THIS account's values go; other accounts keep theirs.
     ...PER_ACCOUNT_SETTING_BASES.map((base) => perAccountKey(base, loggedOutPubkey)),
     walletListKey,
+    // Market listings this account deleted on this device (#1273).
+    sellerHiddenStorageKey(loggedOutPubkey),
+    sellerCacheStorageKey(loggedOutPubkey),
   ];
+  forgetSellerAccount(loggedOutPubkey);
   forgetLinkPreviewMirror(loggedOutPubkey);
   forgetAccountSettings(loggedOutPubkey);
   const allKeys = await AsyncStorage.getAllKeys();

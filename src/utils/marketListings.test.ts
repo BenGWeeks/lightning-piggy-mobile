@@ -31,6 +31,27 @@ const event = (fields: Partial<Event> = {}, secret = key) =>
   );
 
 describe('market relay listings', () => {
+  it('labels an unresolved seller with a short npub, never raw hex', () => {
+    const product = parseMarketListing(event())!;
+    expect(product.sellerName).toMatch(/^npub1[0-9a-z]{7}…[0-9a-z]{4}$/);
+    expect(product.sellerName).not.toContain(author.slice(0, 8));
+  });
+
+  it('skips Gamma Markets listings marked visibility hidden', () => {
+    const withVisibility = (v: string) =>
+      event({
+        tags: [
+          ['d', 'product-1'],
+          ['title', 'Test listing'],
+          ['price', '50', 'USD'],
+          ['visibility', v],
+        ],
+      });
+    expect(parseMarketListing(withVisibility('hidden'))).toBeNull();
+    expect(parseMarketListing(withVisibility('on-sale'))).not.toBeNull();
+    expect(parseMarketListing(withVisibility('pre-order'))).not.toBeNull();
+  });
+
   it('rejects identifiers too long for a NIP-19 naddr (255 UTF-8 bytes)', () => {
     const withD = (d: string) =>
       event({

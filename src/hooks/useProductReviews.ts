@@ -76,6 +76,10 @@ export function useProductReviews(coord: string | null): UseProductReviews {
   const [error, setError] = useState(false);
   const [tick, setTick] = useState(0);
   const refetch = useCallback(() => setTick((t) => t + 1), []);
+  // One quiet retry before showing an error: right after launch (or a
+  // network blip) every relay can fail its first connection, and a product
+  // with no reviews must read "No reviews yet", not "Failed to load".
+  const autoRetried = useRef(false);
 
   const readRelays = useMemo(() => {
     const r = relays.filter((x) => x.read).map((x) => x.url);
@@ -99,11 +103,13 @@ export function useProductReviews(coord: string | null): UseProductReviews {
       const { signal } = controller;
       const generation = ++generationRef.current;
       const superseded = () => signal.aborted || generation !== generationRef.current;
+      let retryTimer: ReturnType<typeof setTimeout> | undefined;
       setLoading(true);
       setError(false);
       queryReviewEvents(readRelays, coord, { signal })
         .then((evs) => {
           if (superseded()) return;
+          autoRetried.current = false;
           setEvents(evs);
           setLoading(false);
           // Then the kind-5s naming them — by address (what we and most
@@ -119,12 +125,21 @@ export function useProductReviews(coord: string | null): UseProductReviews {
           );
         })
         .catch(() => {
-          if (!superseded()) setError(true);
+          if (superseded()) return;
+          if (!autoRetried.current) {
+            autoRetried.current = true;
+            retryTimer = setTimeout(() => setTick((t) => t + 1), 1500);
+            return;
+          }
+          setError(true);
         })
         .finally(() => {
-          if (!signal.aborted) setLoading(false);
+          if (!signal.aborted && !retryTimer) setLoading(false);
         });
-      return () => controller.abort();
+      return () => {
+        if (retryTimer) clearTimeout(retryTimer);
+        controller.abort();
+      };
     }, [coord, readRelays, tick]),
   );
 

@@ -59,8 +59,6 @@ export const createMarketProductDetailStyles = (colors: Palette) =>
     vendorRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     vendorName: { fontSize: 14, fontWeight: '700', color: colors.textHeader },
 
-    description: { fontSize: 15, color: colors.textBody, lineHeight: 22 },
-
     buyButton: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -109,4 +107,11 @@ export const createMarketProductDetailStyles = (colors: Palette) =>
 
     missing: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
     missingText: { fontSize: 15, color: colors.textSupplementary, textAlign: 'center' },
+    previewBanner: {
+      marginBottom: 12,
+      padding: 12,
+      borderRadius: 12,
+      backgroundColor: colors.zapYellowLight,
+    },
+    previewBannerText: { fontSize: 13, fontWeight: '600', color: colors.zapYellowDark },
   });
