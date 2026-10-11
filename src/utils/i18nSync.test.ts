@@ -9,7 +9,8 @@ import {
   parseSupportedLocales,
   placeholders,
   requiredPluralCategories,
-  translationsFrom,
+  planApply,
+  proposalsFrom,
   validateCatalogue,
   validateEntry,
   type Catalogue,
@@ -39,11 +40,13 @@ const detect = (overrides: Partial<Parameters<typeof detectLocale>[0]>) =>
   });
 
 describe('placeholders', () => {
-  it('collects both interpolation syntaxes, sorted and whitespace-insensitive', () => {
-    expect(placeholders('%{count} of {{ total }} for {{name}}')).toBe(
-      '%{count},{{name}},{{total}}',
-    );
+  it('collects both interpolation syntaxes, sorted', () => {
+    expect(placeholders('%{count} of {{total}} for {{name}}')).toBe('%{count},{{name}},{{total}}');
     expect(placeholders('none')).toBe('');
+  });
+
+  it('treats whitespace inside the braces as a different variable (as i18n-js does)', () => {
+    expect(placeholders('{{ name }}')).not.toBe(placeholders('{{name}}'));
   });
 });
 
@@ -132,6 +135,21 @@ describe('detectLocale', () => {
     ]);
   });
 
+  it('flags an optional plural form the locale keeps when en `other` was reworded', () => {
+    const withMany = {
+      ...es,
+      reviews: {
+        one: '{{count}} reseña',
+        many: '{{count}} de reseñas',
+        other: '{{count}} reseñas',
+      },
+    };
+    const newEn = { ...en, reviews: { one: '{{count}} review', other: '{{count}} ratings' } };
+    const diff = detect({ en: newEn, localeTree: withMany, baseLocaleTree: withMany });
+    expect(diff.changed.map((e) => e.path)).toEqual(['reviews.other', 'reviews.many']);
+    expect(diff.stale).toEqual([]);
+  });
+
   it('skips changed detection without a base, or for a locale new on this branch', () => {
     const newEn = { ...en, greet: 'Hi, {{name}}!' };
     expect(detect({ en: newEn, baseEn: null }).changed).toEqual([]);
@@ -139,8 +157,8 @@ describe('detectLocale', () => {
   });
 });
 
-describe('buildTaskFile / translationsFrom', () => {
-  it('round-trips: a filled task file yields its translations', () => {
+describe('buildTaskFile / proposalsFrom', () => {
+  it('round-trips: a filled task file yields its proposals with their English', () => {
     const diff = detect({ localeTree: { ...es, greet: '' } });
     const task = buildTaskFile(diff, 'abc123');
     expect(task.base).toBe('abc123');
@@ -149,26 +167,77 @@ describe('buildTaskFile / translationsFrom', () => {
       en: 'Hello, {{name}}!',
       translation: '',
     });
-    expect(translationsFrom(task)).toEqual({});
+    expect(proposalsFrom(task)).toEqual({});
     task.entries.greet.translation = '¡Hola, {{name}}!';
-    expect(translationsFrom(task)).toEqual({ greet: '¡Hola, {{name}}!' });
+    expect(proposalsFrom(task)).toEqual({
+      greet: { translation: '¡Hola, {{name}}!', en: 'Hello, {{name}}!' },
+    });
+  });
+
+  it('keeps hand-filled translations when regenerated, unless the English changed', () => {
+    const diff = detect({ localeTree: { ...es, greet: '', tabs: {} } });
+    const first = buildTaskFile(diff, null);
+    first.entries.greet.translation = '¡Hola, {{name}}!';
+    first.entries['tabs.home'].translation = 'Inicio';
+    first.entries['tabs.home'].en = 'Old home';
+    const again = buildTaskFile(diff, null, first);
+    expect(again.entries.greet.translation).toBe('¡Hola, {{name}}!');
+    expect(again.entries['tabs.home'].translation).toBe('');
   });
 
   it('reads a flat draft and ignores non-string / empty values', () => {
-    expect(translationsFrom({ a: 'x', b: '', c: 3 })).toEqual({ a: 'x' });
-    expect(translationsFrom(null)).toEqual({});
+    expect(proposalsFrom({ a: 'x', b: '', c: 3 })).toEqual({ a: { translation: 'x' } });
+    expect(proposalsFrom(null)).toEqual({});
   });
 });
 
 describe('validateEntry', () => {
-  const expected = expectedLeaves(en, ['one', 'other']);
   it('accepts a translation that keeps every placeholder', () => {
-    expect(validateEntry('greet', '¡Hola, {{name}}!', expected)).toBeNull();
+    expect(validateEntry('greet', '¡Hola, {{name}}!', 'Hello, {{name}}!')).toBeNull();
   });
-  it('rejects unknown keys, empty strings and placeholder drift', () => {
-    expect(validateEntry('nope', 'x', expected)).toBe('unknown key nope');
-    expect(validateEntry('greet', ' ', expected)).toBe('empty greet');
-    expect(validateEntry('greet', '¡Hola!', expected)).toMatch(/^placeholders greet/);
+  it('rejects empty strings and placeholder drift', () => {
+    expect(validateEntry('greet', ' ', 'Hello, {{name}}!')).toBe('empty greet');
+    expect(validateEntry('greet', '¡Hola!', 'Hello, {{name}}!')).toMatch(/^placeholders greet/);
+  });
+});
+
+describe('planApply', () => {
+  const newEn = { ...en, tabs: { home: 'Home', friends: 'Family & friends' } };
+  const diff = detect({ en: newEn, localeTree: { ...es, greet: '' } });
+
+  it('accepts valid proposals for keys that still need translating', () => {
+    const plan = planApply(diff, {
+      greet: { translation: '¡Hola, {{name}}!', en: 'Hello, {{name}}!' },
+      'tabs.friends': { translation: 'Familia y amigos' },
+    });
+    expect(plan).toEqual({
+      accepted: { greet: '¡Hola, {{name}}!', 'tabs.friends': 'Familia y amigos' },
+      rejected: [],
+      skipped: [],
+      unresolved: [],
+    });
+  });
+
+  it('never touches keys that no longer need translating', () => {
+    const plan = planApply(diff, { 'tabs.home': { translation: 'Casa' } });
+    expect(plan.accepted).toEqual({});
+    expect(plan.skipped).toEqual(['tabs.home']);
+  });
+
+  it('refuses proposals drafted against different English, or with bad placeholders', () => {
+    const plan = planApply(diff, {
+      'tabs.friends': { translation: 'Amigos', en: 'Friends' },
+      greet: { translation: '¡Hola!' },
+    });
+    expect(plan.accepted).toEqual({});
+    expect(plan.rejected).toEqual([
+      'outdated tabs.friends: drafted for "Friends", English is now "Family & friends"',
+      'placeholders greet: expected "{{name}}", got ""',
+    ]);
+  });
+
+  it('lists reworded strings that still have no new translation', () => {
+    expect(planApply(diff, {}).unresolved).toEqual(['tabs.friends']);
   });
 });
 

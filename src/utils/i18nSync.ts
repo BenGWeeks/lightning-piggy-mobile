@@ -33,12 +33,13 @@ export function flatten(tree: Catalogue, prefix = ''): Map<string, string> {
   return out;
 }
 
-/** Sorted `{{name}}` / `%{name}` interpolations — i18n-js supports both. */
+/**
+ * Sorted `{{name}}` / `%{name}` interpolations — i18n-js supports both.
+ * Compared verbatim: i18n-js reads `{{ name }}` as the variable " name ", so
+ * whitespace inside the braces is a real difference.
+ */
 export function placeholders(s: string): string {
-  return (s.match(/\{\{\s*[\w.]+\s*\}\}|%\{\s*\w+\s*\}/g) ?? [])
-    .map((p) => p.replace(/\s+/g, ''))
-    .sort()
-    .join(',');
+  return (s.match(/\{\{[^{}]*\}\}|%\{[^{}]*\}/g) ?? []).sort().join(',');
 }
 
 /**
@@ -88,16 +89,23 @@ export function expectedLeaves(en: Catalogue, categories: string[]): Map<string,
   return out;
 }
 
-/** True if `path` is an optional extra CLDR form inside an en plural object. */
-function isOptionalPluralForm(en: Catalogue, path: string): boolean {
+/**
+ * For an optional extra CLDR form inside an en plural object (e.g. Spanish
+ * `many`), its source: en's `other` of that object. Otherwise null.
+ */
+function optionalPluralSource(en: Catalogue, path: string): ExpectedLeaf | null {
   const dot = path.lastIndexOf('.');
-  if (dot < 0 || !CLDR_SET.has(path.slice(dot + 1))) return false;
+  if (dot < 0 || !CLDR_SET.has(path.slice(dot + 1))) return null;
   let node: string | Catalogue | undefined = en;
   for (const key of path.slice(0, dot).split('.')) {
-    if (typeof node !== 'object' || node === null) return false;
+    if (typeof node !== 'object' || node === null) return null;
     node = node[key];
   }
-  return typeof node === 'object' && node !== null && isPluralObject(node);
+  if (typeof node !== 'object' || node === null || !isPluralObject(node)) return null;
+  const other = node.other;
+  return typeof other === 'string'
+    ? { sourcePath: `${path.slice(0, dot)}.other`, source: other }
+    : null;
 }
 
 export type TodoReason = 'missing' | 'changed';
@@ -144,9 +152,20 @@ export function detectLocale(input: DetectInput): LocaleDiff {
   const baseEnFlat = baseEn ? flatten(baseEn) : null;
   const baseLocaleFlat = baseLocaleTree ? flatten(baseLocaleTree) : null;
 
+  // Optional plural forms the locale already has are kept, so they must
+  // follow English rewording too.
+  const sources = new Map(expected);
+  const stale: string[] = [];
+  for (const path of localeFlat.keys()) {
+    if (expected.has(path)) continue;
+    const optional = optionalPluralSource(en, path);
+    if (optional) sources.set(path, optional);
+    else stale.push(path);
+  }
+
   const missing: TodoEntry[] = [];
   const changed: TodoEntry[] = [];
-  for (const [path, { sourcePath, source }] of expected) {
+  for (const [path, { sourcePath, source }] of sources) {
     const current = localeFlat.get(path);
     if (current === undefined || !current.trim()) {
       missing.push({ path, reason: 'missing', en: source });
@@ -158,10 +177,6 @@ export function detectLocale(input: DetectInput): LocaleDiff {
     if (baseLocaleFlat.get(path) !== current) continue;
     changed.push({ path, reason: 'changed', en: source, previousEn, previous: current });
   }
-
-  const stale = [...localeFlat.keys()].filter(
-    (path) => !expected.has(path) && !isOptionalPluralForm(en, path),
-  );
   return { locale, missing, changed, stale };
 }
 
@@ -184,10 +199,17 @@ export const TASK_INSTRUCTIONS =
   'Fill in "translation" for each entry (follow docs/i18n/GLOSSARY.md), then run ' +
   '`npm run i18n:sync -- --apply`. Keep every {{placeholder}} / %{placeholder} exactly.';
 
-export function buildTaskFile(diff: LocaleDiff, base: string | null): TaskFile {
+/**
+ * The task file for a diff. Translations already filled in an earlier task
+ * file (`previous`) carry over while their English source is unchanged, so
+ * re-running the sync never discards work in progress.
+ */
+export function buildTaskFile(diff: LocaleDiff, base: string | null, previous?: unknown): TaskFile {
+  const kept = proposalsFrom(previous);
   const entries: TaskFile['entries'] = {};
   for (const { path, ...rest } of [...diff.missing, ...diff.changed]) {
-    entries[path] = { ...rest, translation: '' };
+    const old = kept[path];
+    entries[path] = { ...rest, translation: old && old.en === rest.en ? old.translation : '' };
   }
   return {
     locale: diff.locale,
@@ -198,37 +220,83 @@ export function buildTaskFile(diff: LocaleDiff, base: string | null): TaskFile {
   };
 }
 
-/** Translations from a draft (`{ path: text }`) or a filled-in task file. */
-export function translationsFrom(file: unknown): Record<string, string> {
+/** A proposed translation, with the English it was written against if known. */
+export interface Proposal {
+  translation: string;
+  en?: string;
+}
+
+/**
+ * Proposals from a filled-in task / draft file (entries carry the English
+ * they were translated from) or a hand-written flat `{ path: text }` map.
+ */
+export function proposalsFrom(file: unknown): Record<string, Proposal> {
   if (!file || typeof file !== 'object') return {};
   const record = file as Record<string, unknown>;
-  const out: Record<string, string> = {};
+  const out: Record<string, Proposal> = {};
   if (record.entries && typeof record.entries === 'object') {
-    for (const [path, entry] of Object.entries(record.entries as Record<string, unknown>)) {
-      const translation = (entry as { translation?: unknown } | null)?.translation;
-      if (typeof translation === 'string' && translation.trim()) out[path] = translation;
+    for (const [path, raw] of Object.entries(record.entries as Record<string, unknown>)) {
+      const entry = raw as { translation?: unknown; en?: unknown } | null;
+      if (typeof entry?.translation === 'string' && entry.translation.trim()) {
+        out[path] = {
+          translation: entry.translation,
+          ...(typeof entry.en === 'string' ? { en: entry.en } : {}),
+        };
+      }
     }
     return out;
   }
   for (const [path, value] of Object.entries(record)) {
-    if (typeof value === 'string' && value.trim()) out[path] = value;
+    if (typeof value === 'string' && value.trim()) out[path] = { translation: value };
   }
   return out;
 }
 
-/** Problems with one proposed translation (empty, unknown key, placeholders). */
-export function validateEntry(
-  path: string,
-  translation: string,
-  expected: Map<string, ExpectedLeaf>,
-): string | null {
-  const leaf = expected.get(path);
-  if (!leaf) return `unknown key ${path}`;
+/** Problems with one translation of `source` (empty, placeholder drift). */
+export function validateEntry(path: string, translation: string, source: string): string | null {
   if (!translation.trim()) return `empty ${path}`;
-  if (placeholders(translation) !== placeholders(leaf.source)) {
-    return `placeholders ${path}: expected "${placeholders(leaf.source)}", got "${placeholders(translation)}"`;
+  if (placeholders(translation) !== placeholders(source)) {
+    return `placeholders ${path}: expected "${placeholders(source)}", got "${placeholders(translation)}"`;
   }
   return null;
+}
+
+export interface ApplyPlan {
+  /** Translations safe to merge, by path. */
+  accepted: Record<string, string>;
+  /** Proposals refused, with the reason. */
+  rejected: string[];
+  /** Proposals for keys that no longer need translating (left untouched). */
+  skipped: string[];
+  /** Reworded strings still without a new translation. */
+  unresolved: string[];
+}
+
+/**
+ * Decide which proposals `--apply` may merge. Only keys the locale still
+ * needs (missing or changed) are touched — a leftover draft can never
+ * overwrite a translation that's since been reviewed — and a proposal
+ * written against different English than today's is refused.
+ */
+export function planApply(diff: LocaleDiff, proposals: Record<string, Proposal>): ApplyPlan {
+  const needed = new Map([...diff.missing, ...diff.changed].map((e) => [e.path, e]));
+  const plan: ApplyPlan = { accepted: {}, rejected: [], skipped: [], unresolved: [] };
+  for (const [path, { translation, en }] of Object.entries(proposals)) {
+    const entry = needed.get(path);
+    if (!entry) {
+      plan.skipped.push(path);
+      continue;
+    }
+    if (en !== undefined && en !== entry.en) {
+      plan.rejected.push(`outdated ${path}: drafted for "${en}", English is now "${entry.en}"`);
+      continue;
+    }
+    const problem = validateEntry(path, translation, entry.en);
+    if (problem) plan.rejected.push(problem);
+    else plan.accepted[path] = translation;
+  }
+  plan.unresolved = diff.changed.map((e) => e.path).filter((p) => !(p in plan.accepted));
+  return plan;
 }
 
 /**

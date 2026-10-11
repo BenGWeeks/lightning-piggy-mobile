@@ -24,13 +24,13 @@ import { fileURLToPath } from 'node:url';
 import {
   buildTaskFile,
   detectLocale,
-  expectedLeaves,
   extractJsonObject,
   hasWork,
   mergeCatalogue,
   parseSupportedLocales,
   requiredPluralCategories,
-  translationsFrom,
+  planApply,
+  proposalsFrom,
   validateCatalogue,
   validateEntry,
 } from '../src/utils/i18nSync.ts';
@@ -142,7 +142,9 @@ function writeTodos(diffs, base) {
   mkdirSync(TODO_DIR, { recursive: true });
   for (const diff of diffs) {
     const file = join(TODO_DIR, `${diff.locale}.json`);
-    if (hasWork(diff)) writeJson(file, buildTaskFile(diff, base));
+    // Carry over translations already filled in by hand.
+    const previous = existsSync(file) ? readJson(file) : undefined;
+    if (hasWork(diff)) writeJson(file, buildTaskFile(diff, base, previous));
     else rmSync(file, { force: true });
   }
 }
@@ -233,12 +235,13 @@ function draft(state, opts) {
   }
   const glossary = readFileSync(GLOSSARY, 'utf8');
   for (const diff of state.diffs) {
-    const task = buildTaskFile(diff, state.base);
-    const paths = Object.keys(task.entries);
+    const taskPath = join(TODO_DIR, `${diff.locale}.json`);
+    const task = readJson(taskPath);
+    // Only draft what nobody has translated by hand yet.
+    const paths = Object.keys(task.entries).filter((p) => !task.entries[p].translation.trim());
     if (!paths.length) continue;
-    const expected = expectedLeaves(state.en, requiredPluralCategories(diff.locale));
-    const drafted = {};
     const rejected = [];
+    let drafted = 0;
     for (let i = 0; i < paths.length; i += DRAFT_CHUNK) {
       const chunk = Object.fromEntries(
         paths.slice(i, i + DRAFT_CHUNK).map((p) => [p, task.entries[p]]),
@@ -257,22 +260,23 @@ function draft(state, opts) {
         continue;
       }
       let ok = 0;
-      for (const path of Object.keys(chunk)) {
+      for (const [path, entry] of Object.entries(chunk)) {
         const value = reply[path];
         const problem =
-          typeof value === 'string' ? validateEntry(path, value, expected) : `no draft for ${path}`;
+          typeof value === 'string' ? validateEntry(path, value, entry.en) : `no draft for ${path}`;
         if (problem) rejected.push(problem);
         else {
-          drafted[path] = value;
+          entry.translation = value;
           ok++;
         }
       }
+      drafted += ok;
       console.log(`${ok} ok`);
     }
-    writeJson(join(TODO_DIR, `${diff.locale}.draft.json`), drafted);
-    console.log(
-      `→ .i18n-todo/${diff.locale}.draft.json (${Object.keys(drafted).length}/${paths.length} drafted)`,
-    );
+    // Same shape as the task file, so --apply can check each draft was
+    // written against today's English.
+    writeJson(join(TODO_DIR, `${diff.locale}.draft.json`), task);
+    console.log(`→ .i18n-todo/${diff.locale}.draft.json (${drafted}/${paths.length} drafted)`);
     for (const problem of rejected) console.log(`  ⚠ ${problem}`);
   }
   console.log('\nReview the drafts, then run `npm run i18n:sync -- --apply`.');
@@ -285,46 +289,42 @@ function apply(state) {
   for (const diff of state.diffs) {
     const { locale } = diff;
     const categories = requiredPluralCategories(locale);
-    const expected = expectedLeaves(state.en, categories);
     const taskPath = join(TODO_DIR, `${locale}.json`);
     const draftPath = join(TODO_DIR, `${locale}.draft.json`);
     // A draft wins over the same key filled in by hand in the task file.
-    const proposed = {
-      ...(existsSync(taskPath) ? translationsFrom(readJson(taskPath)) : {}),
-      ...(existsSync(draftPath) ? translationsFrom(readJson(draftPath)) : {}),
-    };
-    const accepted = {};
-    const rejected = [];
-    for (const [path, value] of Object.entries(proposed)) {
-      const problem = validateEntry(path, value, expected);
-      if (problem) rejected.push(problem);
-      else accepted[path] = value;
-    }
+    const plan = planApply(diff, {
+      ...(existsSync(taskPath) ? proposalsFrom(readJson(taskPath)) : {}),
+      ...(existsSync(draftPath) ? proposalsFrom(readJson(draftPath)) : {}),
+    });
 
     const file = join(ROOT, LOCALES_DIR, `${locale}.json`);
     const before = existsSync(file) ? readFileSync(file, 'utf8') : '';
-    const merged = mergeCatalogue(state.en, before ? JSON.parse(before) : {}, accepted);
+    const merged = mergeCatalogue(state.en, before ? JSON.parse(before) : {}, plan.accepted);
     const after = `${JSON.stringify(merged, null, 2)}\n`;
-    if (after !== before) writeFileSync(file, after);
-
     const problems = [
-      ...rejected.map((p) => `rejected ${p}`),
+      ...plan.rejected.map((p) => `rejected ${p}`),
+      ...plan.unresolved.map((p) => `changed ${p}: English was reworded, no new translation`),
       ...validateCatalogue(state.en, merged, categories),
     ];
-    const status = after !== before ? 'updated' : 'unchanged';
-    console.log(
-      `${locale}: ${status} — ${Object.keys(accepted).length} applied, ${diff.stale.length} stale removed`,
-    );
+    for (const path of plan.skipped)
+      console.log(`  · skipped ${path} (no longer needs translating)`);
+
     if (problems.length) {
+      // Validate before writing: a failed apply leaves the catalogue untouched.
       failed = true;
+      console.log(`${locale}: NOT written — ${problems.length} problem(s)`);
       for (const p of problems.slice(0, 40)) console.log(`  ✖ ${p}`);
       if (problems.length > 40) console.log(`  … and ${problems.length - 40} more`);
-    } else {
-      // Clean: the to-do files are spent, and re-applying them later could
-      // overwrite newer translations.
-      rmSync(taskPath, { force: true });
-      rmSync(draftPath, { force: true });
+      continue;
     }
+    if (after !== before) writeFileSync(file, after);
+    console.log(
+      `${locale}: ${after !== before ? 'updated' : 'unchanged'} — ` +
+        `${Object.keys(plan.accepted).length} applied, ${diff.stale.length} stale removed`,
+    );
+    // The to-do files are spent; re-applying them later could only confuse.
+    rmSync(taskPath, { force: true });
+    rmSync(draftPath, { force: true });
   }
   if (failed) fail('Locale validation failed — fix the entries above and re-run --apply.');
   console.log('\n✔ All locales valid.');
