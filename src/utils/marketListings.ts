@@ -117,49 +117,136 @@ export function parseMarketListing(event: Event, now = Date.now() / 1000): Marke
   };
 }
 
+/** Newest revision first; on a timestamp tie the lowest id wins. */
+const newerFirst = (a: Event, b: Event) =>
+  b.created_at - a.created_at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
+/** `kind:pubkey:d` for a listing kind with a `d` tag, else null. */
+function listingAddress(event: Event): string | null {
+  if (![30018, 30402].includes(event.kind)) return null;
+  const d = tag(event, 'd');
+  return d ? `${event.kind}:${event.pubkey}:${d}` : null;
+}
+
+/** NIP-09: whether an author's own kind-5 withdrew this listing revision. */
+function deletionIndex(
+  events: readonly Event[],
+  authors: ReadonlySet<string>,
+): (event: Event, address: string) => boolean {
+  const deletedIds = new Set<string>();
+  const deletedAddresses = new Map<string, number>();
+  for (const event of events) {
+    if (event.kind !== 5 || !authors.has(event.pubkey)) continue;
+    for (const t of event.tags) {
+      if (t[0] === 'e') deletedIds.add(`${event.pubkey}:${t[1]}`);
+      if (t[0] === 'a' && t[1]?.split(':')[1] === event.pubkey) {
+        deletedAddresses.set(t[1], Math.max(deletedAddresses.get(t[1]) ?? 0, event.created_at));
+      }
+    }
+  }
+  return (event, address) =>
+    deletedIds.has(`${event.pubkey}:${event.id}`) ||
+    (deletedAddresses.get(address) ?? -1) >= event.created_at;
+}
+
 /** Newest addressable revision wins, including sold/malformed revisions. */
 export function reduceMarketListings(
   events: readonly Event[],
   authors: ReadonlySet<string>,
   now?: number,
 ): MarketProduct[] {
+  const isDeleted = deletionIndex(events, authors);
   const latest = new Map<string, Event>();
-  const deletedIds = new Set<string>();
-  const deletedAddresses = new Map<string, number>();
   for (const event of events) {
     if (!authors.has(event.pubkey)) continue;
-    if (event.kind === 5) {
-      for (const t of event.tags) {
-        if (t[0] === 'e') deletedIds.add(`${event.pubkey}:${t[1]}`);
-        if (t[0] === 'a' && t[1]?.split(':')[1] === event.pubkey) {
-          deletedAddresses.set(t[1], Math.max(deletedAddresses.get(t[1]) ?? 0, event.created_at));
-        }
-      }
-      continue;
-    }
-    if (![30018, 30402].includes(event.kind)) continue;
-    const d = tag(event, 'd');
-    if (!d) continue;
-    const key = `${event.kind}:${event.pubkey}:${d}`;
-    const previous = latest.get(key);
-    if (
-      !previous ||
-      event.created_at > previous.created_at ||
-      (event.created_at === previous.created_at && event.id < previous.id)
-    )
-      latest.set(key, event);
+    const address = listingAddress(event);
+    if (!address) continue;
+    const previous = latest.get(address);
+    if (!previous || newerFirst(event, previous) < 0) latest.set(address, event);
   }
   const products: MarketProduct[] = [];
   for (const [address, event] of latest) {
-    if (
-      deletedIds.has(`${event.pubkey}:${event.id}`) ||
-      (deletedAddresses.get(address) ?? -1) >= event.created_at
-    )
-      continue;
+    if (isDeleted(event, address)) continue;
     const product = parseMarketListing(event, now);
     if (product) products.push(product);
   }
   return products.sort(
     (a, b) => b.listing!.event.created_at - a.listing!.event.created_at || a.id.localeCompare(b.id),
   );
+}
+
+/**
+ * Verify lazily: only the revision that would win each address, newest
+ * listings first, and stop once `cap` renderable products are confirmed.
+ *
+ * A follow set's listings can run to ~1,200 events and a schnorr check costs
+ * ~25 ms on a phone, so verifying everything up front pinned the JS thread
+ * for tens of seconds (#1274). A revision that fails verification is skipped,
+ * so a forged newer copy can't hide the real listing. Deletions (kind 5) are
+ * passed through: the caller verifies those as they arrive (there are few).
+ *
+ * Returns the events to hand to `reduceMarketListings`, whether more
+ * renderable listings existed beyond `cap`, and how many checks ran.
+ * `firstPage` lets the caller paint the newest listings before the rest are
+ * checked.
+ */
+export async function selectVerifiedListings(
+  events: readonly Event[],
+  authors: ReadonlySet<string>,
+  opts: {
+    verify: (event: Event) => boolean;
+    maybeYield: () => Promise<void>;
+    cap: number;
+    now?: number;
+    /** Called once, as soon as `firstPage.size` renderable winners are verified. */
+    firstPage?: { size: number; ready: (events: Event[]) => void };
+  },
+): Promise<{ events: Event[]; overflow: boolean; checked: number }> {
+  const isDeleted = deletionIndex(events, authors);
+  const deletions: Event[] = [];
+  const revisions = new Map<string, Event[]>();
+  for (const event of events) {
+    if (!authors.has(event.pubkey)) continue;
+    if (event.kind === 5) {
+      deletions.push(event);
+      continue;
+    }
+    const address = listingAddress(event);
+    if (!address) continue;
+    const list = revisions.get(address);
+    if (list) list.push(event);
+    else revisions.set(address, [event]);
+  }
+  for (const list of revisions.values()) list.sort(newerFirst);
+  const addresses = [...revisions.keys()].sort((a, b) =>
+    newerFirst(revisions.get(a)![0], revisions.get(b)![0]),
+  );
+  const winners: Event[] = [];
+  let rendered = 0;
+  let checked = 0;
+  let overflow = false;
+  for (const address of addresses) {
+    let winner: Event | undefined;
+    for (const revision of revisions.get(address)!) {
+      await opts.maybeYield();
+      checked++;
+      if (opts.verify(revision)) {
+        winner = revision;
+        break;
+      }
+    }
+    if (!winner) continue;
+    if (!isDeleted(winner, address) && parseMarketListing(winner, opts.now)) {
+      if (++rendered > opts.cap) {
+        overflow = true;
+        break;
+      }
+    }
+    winners.push(winner);
+    if (rendered === opts.firstPage?.size && winners.length > 0) {
+      opts.firstPage.ready([...winners, ...deletions]);
+      opts.firstPage = undefined;
+    }
+  }
+  return { events: [...winners, ...deletions], overflow, checked };
 }
