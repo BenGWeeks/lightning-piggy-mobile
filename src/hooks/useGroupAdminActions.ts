@@ -103,7 +103,7 @@ export function useGroupAdminActions(group: Group | undefined) {
       const memberIsAdmin = isGroupAdmin(admins, m.pubkey);
       BrandedAlert.alert(
         m.name,
-        undefined,
+        t('groupMembersSheet.adminMenuMessage'),
         [
           memberIsAdmin
             ? {

@@ -643,7 +643,8 @@
     "madeAdminToast": "{{name}} тепер адміністратор",
     "removedAdminToast": "{{name}} більше не адміністратор",
     "youRemovedAdminToast": "Ви більше не адміністратор",
-    "adminChangeFailedTitle": "Не вдалося змінити адміністраторів"
+    "adminChangeFailedTitle": "Не вдалося змінити адміністраторів",
+    "adminMenuMessage": "Адміністратори можуть перейменовувати групу, додавати й видаляти учасників."
   },
   "groupsScreen": {
     "back": "Назад",

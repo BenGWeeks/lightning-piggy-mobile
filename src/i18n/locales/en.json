@@ -671,7 +671,8 @@
     "madeAdminToast": "{{name}} is now an admin",
     "removedAdminToast": "{{name}} is no longer an admin",
     "youRemovedAdminToast": "You're no longer an admin",
-    "adminChangeFailedTitle": "Could not change admins"
+    "adminChangeFailedTitle": "Could not change admins",
+    "adminMenuMessage": "Admins can rename the group and add or remove members."
   },
   "groupsScreen": {
     "back": "Back",
