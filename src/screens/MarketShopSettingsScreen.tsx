@@ -48,7 +48,7 @@ const MarketShopSettingsScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createMarketSellerStyles(colors), [colors]);
-  const { snapshot, status } = useSellerShop();
+  const { snapshot, status, refresh } = useSellerShop();
   const { saveShop, busy } = useSellerActions(snapshot);
   const [form, setForm] = useState<Form | null>(null);
   const [showErrors, setShowErrors] = useState(false);
@@ -65,13 +65,14 @@ const MarketShopSettingsScreen: React.FC<Props> = ({ navigation }) => {
   }, [t]);
 
   // Seed the form once: from the published shop, or blank for a first-time
-  // setup once we know there isn't one.
+  // setup once a COMPLETED fetch shows there isn't one. A failed fetch must
+  // not offer a blank form — saving it would replace an existing shop.
   useEffect(() => {
     if (form) return;
     const existing = parseShopDraft(snapshot.shop, snapshot.zones);
     if (existing) {
       setForm({ shop: existing, zones: snapshot.zones.map(zoneDraftFromOption) });
-    } else if (status === 'ready' || status === 'error') {
+    } else if (status === 'ready') {
       setForm({ shop: { name: '', description: '', currency: 'SATS' }, zones: [newZone()] });
     }
   }, [form, snapshot.shop, snapshot.zones, status, newZone]);
@@ -156,8 +157,24 @@ const MarketShopSettingsScreen: React.FC<Props> = ({ navigation }) => {
       />
       {!form ? (
         <View style={styles.centered}>
-          <ActivityIndicator color={colors.brandPink} />
-          <Text style={styles.muted}>{t('market.sell.loading')}</Text>
+          {status === 'error' ? (
+            <>
+              <Text style={[styles.cardBody, styles.centerText]}>{t('market.sell.loadError')}</Text>
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={refresh}
+                accessibilityLabel={t('market.sell.retry')}
+                testID="shop-settings-retry"
+              >
+                <Text style={styles.secondaryButtonText}>{t('market.sell.retry')}</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <ActivityIndicator color={colors.brandPink} />
+              <Text style={styles.muted}>{t('market.sell.loading')}</Text>
+            </>
+          )}
         </View>
       ) : (
         <>
