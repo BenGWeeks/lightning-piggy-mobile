@@ -68,6 +68,12 @@ export const createNotificationsScreenStyles = (colors: Palette) =>
       justifyContent: 'center',
       alignItems: 'center',
     },
+    avatar: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: colors.background,
+    },
     info: {
       flex: 1,
       minWidth: 0,

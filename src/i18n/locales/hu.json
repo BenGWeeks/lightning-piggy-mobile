@@ -625,7 +625,7 @@
     "leaveGroupMessage": "Eltávolítod ezt az eszközről: „{{name}}”? A többi tag megtartja a csoportot; ha újra írnak neked, visszakerülhetsz.",
     "cancel": "Mégse",
     "leave": "Kilépés",
-    "renameGroup": "Csoport átnevezése",
+    "renameGroup": "Csoport átnevezése: {{name}}",
     "manageMembers": "Tagok kezelése",
     "memberCountOne": "{{count}} tag",
     "memberCountOther": "{{count}} tag",
@@ -2467,6 +2467,7 @@
     "bell": "Értesítések",
     "bellUnread": "Értesítések, {{count}} olvasatlan",
     "markAllRead": "Összes olvasottnak jelölése",
+    "newCount": "Új: {{count}}",
     "emptyTitle": "Még nincs értesítés",
     "emptyText": "Az üzenetek, fizetések és Piglet-találatok, amelyekről értesítést kapsz, 30 napig itt jelennek meg.",
     "kind": {

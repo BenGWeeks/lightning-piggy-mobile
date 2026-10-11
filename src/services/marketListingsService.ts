@@ -29,11 +29,25 @@ const MAX_EVENTS = 1200;
 /** Deletions get their own budget so a full listing pass can't starve them. */
 const MAX_DELETIONS = 600;
 /**
- * Forged signatures tolerated per snapshot before giving up (and flagging it
- * incomplete). Every candidate already hashes to its id, so failures mean a
- * relay is serving fakes — it must not buy ~25 ms of verification apiece.
+ * Forged LISTING signatures tolerated per snapshot before giving up (and
+ * flagging it incomplete). Every candidate already hashes to its id, so
+ * failures mean a relay is serving fakes — it must not buy ~25 ms of
+ * verification apiece.
  */
 const MAX_FAILED_CHECKS = 64;
+/**
+ * Forged DELETION signatures tolerated before deletion checks stop. Past this
+ * the remaining deletions are kept UNCHECKED and still applied (fail closed):
+ * a hostile relay flooding fakes must not get a genuine withdrawal dropped
+ * and a deleted listing shown as live. The snapshot is flagged incomplete.
+ */
+const MAX_FAILED_DELETION_CHECKS = 32;
+/**
+ * Forged oversized events tolerated before their (synchronous, in-callback)
+ * checks stop. Oversized stand-ins can only HIDE a listing, never render one,
+ * so past this they fail closed too, at no further cost.
+ */
+const MAX_FAILED_OVERSIZED_CHECKS = 16;
 const MAX_PRODUCTS = 250;
 /** Listings painted before the rest are verified — about two screens of grid. */
 const FIRST_PAGE = 12;
@@ -126,12 +140,24 @@ async function runSnapshot(
   // revision ordering and deletion. Keep small, non-renderable stand-ins
   // (sharing their kind's budget) instead of the payloads.
   const suppressions = new Map<string, Event>();
-  // Signatures: the pool only structure-checks listing kinds (see
-  // SKIP_VERIFY_KINDS in nostrService); listings are verified lazily below,
-  // winners only. Deletions and oversized stand-ins are few and checked as
-  // they arrive. `verifyEventCached` skips the schnorr for ids already
-  // checked this session, so a refetch doesn't pay for the snapshot again.
+  // Trust contract: this snapshot reads through its OWN structure-only pool
+  // (marketListingsPool), so no event here has had its signature checked.
+  // Listings are verified lazily below (winning revisions only); deletions in
+  // a yielded loop before any can hide a listing; oversized events as they
+  // arrive (rare, capped). The SHARED pool still fully verifies listing kinds
+  // for every other reader — don't add them to its SKIP_VERIFY_KINDS.
+  // `verifyEventCached` skips the schnorr for ids already checked this
+  // session, so a refetch doesn't pay for the snapshot again.
   const verified = verifyEventCached;
+  let oversizedFailures = 0;
+  // Checks an oversized event inside the relay callback, but at most
+  // MAX_FAILED_OVERSIZED_CHECKS forgeries' worth; then fails closed (see above).
+  const checkOversized = (event: Event) => {
+    if (oversizedFailures >= MAX_FAILED_OVERSIZED_CHECKS) return true;
+    if (verified(event)) return true;
+    oversizedFailures++;
+    return false;
+  };
   const idMatches = (event: Event) => {
     try {
       return nostrGetEventHash(event) === event.id;
@@ -139,21 +165,46 @@ async function runSnapshot(
       return false;
     }
   };
-  // A bulk deletion over the tag limit still withdraws listings: keep a
-  // trimmed copy with only the e / own-listing a tags.
-  const suppressOversizedDeletion = (event: Event) => {
-    if (suppressions.has(event.id) || budgetFull(true)) return;
-    const tags = event.tags
+  // Ids and addresses of the listings pass 1 found. Deletions (pass 2) only
+  // matter where they hit one of these.
+  let knownTargets = new Set<string>();
+  // The deletion's own targets among `knownTargets`: `e` ids, and `a`
+  // addresses of the deletion author's OWN listings.
+  const relevantTargets = (event: Event) =>
+    event.tags
       .filter(
         (t) =>
-          (t[0] === 'e' && /^[0-9a-f]{64}$/.test(t[1] ?? '')) ||
-          (t[0] === 'a' &&
-            /^(30018|30402):/.test(t[1] ?? '') &&
-            t[1]?.split(':')[1] === event.pubkey),
+          knownTargets.has(t[1] ?? '') &&
+          (t[0] === 'e' || (t[0] === 'a' && t[1]?.split(':')[1] === event.pubkey)),
       )
-      .slice(0, MAX_EVENTS)
-      .map((t) => [t[0], t[1]]);
-    if (tags.length === 0 || !verified(event)) return;
+      .map((t) => [t[0], t[1]] as [string, string]);
+  // Fail closed for deletions we can't keep whole (budget full, or too large
+  // to verify): remember just their targets among the listings found, newest
+  // deletion time per target, and apply them unverified. Bounded by
+  // `knownTargets`; author-scoped like any deletion. Flags the snapshot.
+  const failClosedTargets = new Map<
+    string,
+    { pubkey: string; tag: [string, string]; at: number }
+  >();
+  const keepFailClosed = (event: Event) => {
+    for (const tag of relevantTargets(event)) {
+      const k = `${event.pubkey}|${tag[0]}|${tag[1]}`;
+      const prev = failClosedTargets.get(k);
+      if (!prev || prev.at < event.created_at) {
+        failClosedTargets.set(k, { pubkey: event.pubkey, tag, at: event.created_at });
+      }
+    }
+  };
+  // A bulk deletion over the tag limit still withdraws listings: keep a
+  // trimmed copy with only its targets among the listings found.
+  const suppressOversizedDeletion = (event: Event) => {
+    if (suppressions.has(event.id)) return;
+    if (budgetFull(true)) {
+      keepFailClosed(event);
+      return;
+    }
+    const tags = relevantTargets(event);
+    if (tags.length === 0 || !checkOversized(event)) return;
     const standIn = { ...event, content: '', tags };
     trusted.add(standIn);
     suppressions.set(event.id, standIn);
@@ -161,7 +212,11 @@ async function runSnapshot(
   };
   const suppressOversized = (event: Event) => {
     limited = true;
-    if (event.content.length > MAX_VERIFY_CHARS) return;
+    if (event.content.length > MAX_VERIFY_CHARS) {
+      // Too large to verify: a deletion still fails closed on its targets.
+      if (event.kind === 5) keepFailClosed(event);
+      return;
+    }
     if (event.kind === 5) {
       suppressOversizedDeletion(event);
       return;
@@ -181,7 +236,7 @@ async function runSnapshot(
     )
       return;
     if (!existing && budgetFull(false)) return;
-    if (!verified(event)) return;
+    if (!checkOversized(event)) return;
     // Same id/kind/created_at as the real revision so it competes normally;
     // empty content + a non-active status make it non-renderable.
     const standIn = {
@@ -208,6 +263,8 @@ async function runSnapshot(
     const deletion = event.kind === 5;
     if (budgetFull(deletion)) {
       limited = true;
+      // A deletion that doesn't fit still withdraws what it targets.
+      if (deletion) keepFailClosed(event);
       return;
     }
     // Listings are verified later (winners only); a payload that doesn't even
@@ -229,6 +286,12 @@ async function runSnapshot(
   });
   const listingsDoneAt = Date.now();
   const candidates = [...events.values(), ...suppressions.values()].filter((e) => e.kind !== 5);
+  knownTargets = new Set(
+    candidates.flatMap((e) => {
+      const d = e.tags.find((t) => t[0] === 'd')?.[1];
+      return d ? [e.id, `${e.kind}:${e.pubkey}:${d}`] : [e.id];
+    }),
+  );
   // Ask every relay that responded in pass 1 (not just those that finished
   // in time — one that served listings may hold their deletions too). Relays
   // that never answered at all are left out, so they can't stall pass 2.
@@ -249,29 +312,45 @@ async function runSnapshot(
   // Budget-gated yields keep taps responsive while winners are verified.
   const scheduler = createYieldScheduler({ signal, safetyEvery: 32 });
   // Deletions arrive unverified (structure-only pool); check them here, with
-  // yields, before any of them can hide a listing.
-  let failedChecks = 0;
+  // yields, before any of them can hide a listing. A deletion that FAILS is
+  // dropped; once too many have failed, the rest stay UNCHECKED and still
+  // apply (fail closed) — dropping them would let a relay flooding forgeries
+  // resurrect a listing its seller withdrew. A deletion can only hide its own
+  // author's listings (the reducer checks), so this can't reach other sellers.
+  let failedDeletionChecks = 0;
   for (const [key, event] of events) {
     if (event.kind !== 5) continue;
-    if (signal.aborted || failedChecks >= MAX_FAILED_CHECKS) {
+    if (signal.aborted) {
       events.delete(key);
       continue;
     }
+    if (failedDeletionChecks >= MAX_FAILED_DELETION_CHECKS) continue;
     await scheduler.maybeYield();
     if (!verified(event)) {
-      failedChecks++;
+      failedDeletionChecks++;
       events.delete(key);
     }
   }
+  const deletionChecksGaveUp = failedDeletionChecks >= MAX_FAILED_DELETION_CHECKS;
+  // Fail-closed targets become unverified, trusted stand-in deletions.
+  const failClosedDeletions: Event[] = [...failClosedTargets.values()].map((t, i) => ({
+    kind: 5,
+    pubkey: t.pubkey,
+    created_at: t.at,
+    content: '',
+    tags: [t.tag],
+    id: `fail-closed-${i}`,
+    sig: '',
+  }));
   const selection = await selectVerifiedListings(
-    signal.aborted ? [] : [...events.values(), ...suppressions.values()],
+    signal.aborted ? [] : [...events.values(), ...suppressions.values(), ...failClosedDeletions],
     scope,
     {
       // Once aborted, fail fast instead of verifying the rest for nothing.
       verify: (event) => !signal.aborted && (trusted.has(event) || verified(event)),
       maybeYield: scheduler.maybeYield,
       cap: MAX_PRODUCTS,
-      maxFailures: MAX_FAILED_CHECKS - failedChecks,
+      maxFailures: MAX_FAILED_CHECKS,
       firstPage: onFirstPage && {
         size: FIRST_PAGE,
         ready: (picked) => {
@@ -292,7 +371,9 @@ async function runSnapshot(
     incomplete:
       signal.aborted ||
       limited ||
-      failedChecks >= MAX_FAILED_CHECKS ||
+      deletionChecksGaveUp ||
+      failClosedDeletions.length > 0 ||
+      oversizedFailures >= MAX_FAILED_OVERSIZED_CHECKS ||
       selection.gaveUp ||
       listingsCutMattered(listings.truncatedSince, products, selection.overflow) ||
       deletions.truncated ||

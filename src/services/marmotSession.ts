@@ -69,6 +69,8 @@ import {
 import type { SignedProof } from './marmotPushEntries';
 import { MarmotPushNotifier, type PushGroup } from './marmotPushNotifier';
 import { MarmotPushRegistrar } from './marmotPushRegistrar';
+import { isMarmotMessageKind } from './marmotKinds';
+import { noteMarmotCommit, noteMarmotGroupTraffic, setMarmotCatchingUp } from './marmotPushWake';
 import { createMarmotSigner } from './marmotSigner';
 import * as fence from './marmotSessionFence';
 import { isPermanentWelcomeFailure, isWelcomeForJoinedGroup } from './marmotWelcomeFailure';
@@ -252,6 +254,7 @@ export class MarmotSession {
         watermarks: this.watermarks,
         persist: (h, createdAt) => void this.backend.set('watermark', h, String(createdAt)),
         pageSize: opts.groupBackfillPageSize,
+        onLive: (h) => this.noteGroupLive(h),
       }),
       cryptoProvider: marmotCryptoProvider,
       groupStateStore: store('groups'),
@@ -305,6 +308,9 @@ export class MarmotSession {
       this.markReady();
     }
     if (this.gate.stopped) return;
+    // Push placeholders wait until every loaded group's backfill has drained.
+    this.groupsToCatchUp = groups.loaded.length;
+    setMarmotCatchingUp(this.pubkey, groups.loaded.length > 0);
     this.connection = groups.connectAll({ fallbackRelays: this.opts.getWriteRelays() });
     this.emitGroupsChanged();
     // Publishing a key package needs a signature. Local keys sign silently;
@@ -743,6 +749,7 @@ export class MarmotSession {
     this.wiredGroups.add(g.idStr);
     // Membership / name changes (ours or another member's commit) move the epoch.
     g.on('stateChanged', () => {
+      noteMarmotCommit(); // covers a push wake for it (never settles a placeholder)
       this.emitGroupsChanged();
       // A member left → drop their push records (MIP-05 "Record state").
       void this.push.reconcile(this.pushGroup(g)).catch(() => undefined);
@@ -808,6 +815,16 @@ export class MarmotSession {
     const event = { group: this.summarise(g), rumor, ...(mediaKeys ? { mediaKeys } : {}) };
     if (__DEV__) console.log(`[Marmot] recv kind ${rumor.kind} in ${g.idStr.slice(0, 8)}`);
     for (const l of this.listeners) l.onMessage?.(event);
+    // Authenticated traffic: covers a push wake, and settles its placeholder.
+    noteMarmotGroupTraffic(this.pubkey, {
+      createdAtSec: rumor.created_at,
+      fromMe: rumor.pubkey.toLowerCase() === this.pubkey.toLowerCase(),
+      message: isMarmotMessageKind(rumor.kind),
+      messageId: rumor.id,
+      ...(event.group.isDm
+        ? { conversationPubkey: event.group.memberPubkeys[0] }
+        : { groupId: event.group.id }),
+    });
   }
 
   /**
@@ -863,6 +880,13 @@ export class MarmotSession {
       await this.backend.remove(ns, old.id);
       await this.backend.remove(`mediaKeys:${g.idStr}`, old.id);
     }
+  }
+
+  private readonly liveGroups = new Set<string>();
+  private groupsToCatchUp = 0;
+  private noteGroupLive(h: string): void {
+    this.liveGroups.add(h);
+    if (this.liveGroups.size >= this.groupsToCatchUp) setMarmotCatchingUp(this.pubkey, false);
   }
 
   private emitGroupsChanged(): void {

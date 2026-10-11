@@ -197,7 +197,7 @@ export interface DmInboxEntry {
 /** Generates the display name shown when we have no kind-0 profile yet.
  * Prefers an npub prefix (what the rest of the app uses when copying a
  * pubkey for users) over raw hex. Returns the pubkey lowercased. */
-function fallbackName(partnerPubkey: string): string {
+export function fallbackName(partnerPubkey: string): string {
   try {
     return nip19.npubEncode(partnerPubkey).slice(0, 12) + '…';
   } catch {

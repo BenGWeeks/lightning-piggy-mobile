@@ -420,13 +420,23 @@ describe('dmDb', () => {
 describe('getConversationForEvent (#1154)', () => {
   it('returns the conversation and wire kind of a stored event, scoped to the owner', async () => {
     mockExecute.mockResolvedValueOnce(
-      rowsResult([{ conversation: 'b'.repeat(64), wire_kind: 14 }]),
+      rowsResult([{ conversation: 'b'.repeat(64), wire_kind: 14, from_me: 0 }]),
     );
     await expect(getConversationForEvent('a'.repeat(64), 'wrap')).resolves.toEqual({
       conversation: 'b'.repeat(64),
       wireKind: 14,
+      fromMe: false,
     });
     expect(mockExecute.mock.calls.at(-1)?.[1]).toEqual(['a'.repeat(64), 'wrap']);
+  });
+
+  it('says when the stored event is our own (a sent copy)', async () => {
+    mockExecute.mockResolvedValueOnce(
+      rowsResult([{ conversation: 'b'.repeat(64), wire_kind: 14, from_me: 1 }]),
+    );
+    await expect(getConversationForEvent('a'.repeat(64), 'wrap')).resolves.toMatchObject({
+      fromMe: true,
+    });
   });
 
   it('returns null until the event has been stored', async () => {

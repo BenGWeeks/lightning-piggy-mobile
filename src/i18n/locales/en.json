@@ -625,7 +625,7 @@
     "leaveGroupMessage": "Remove \"{{name}}\" from this device? Other members will keep the group; you can be re-added if they message you again.",
     "cancel": "Cancel",
     "leave": "Leave",
-    "renameGroup": "Rename group",
+    "renameGroup": "Rename group {{name}}",
     "manageMembers": "Manage members",
     "memberCountOne": "{{count}} member",
     "memberCountOther": "{{count}} members",
@@ -2467,6 +2467,7 @@
     "bell": "Notifications",
     "bellUnread": "Notifications, {{count}} unread",
     "markAllRead": "Mark all read",
+    "newCount": "{{count}} new",
     "emptyTitle": "No notifications yet",
     "emptyText": "Messages, payments and Piglet finds you're notified about will show here for 30 days.",
     "kind": {

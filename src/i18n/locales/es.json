@@ -625,7 +625,7 @@
     "leaveGroupMessage": "¿Quitar \"{{name}}\" de este dispositivo? Los demás miembros conservarán el grupo; podrán volver a añadirte si te escriben de nuevo.",
     "cancel": "Cancelar",
     "leave": "Salir",
-    "renameGroup": "Renombrar grupo",
+    "renameGroup": "Renombrar el grupo {{name}}",
     "manageMembers": "Gestionar miembros",
     "memberCountOne": "{{count}} miembro",
     "memberCountOther": "{{count}} miembros",
@@ -2467,6 +2467,7 @@
     "bell": "Notificaciones",
     "bellUnread": "Notificaciones, {{count}} sin leer",
     "markAllRead": "Marcar todo como leído",
+    "newCount": "{{count}} nuevos",
     "emptyTitle": "Aún no hay notificaciones",
     "emptyText": "Los mensajes, pagos y hallazgos de Piglets de los que te avisemos aparecerán aquí durante 30 días.",
     "kind": {

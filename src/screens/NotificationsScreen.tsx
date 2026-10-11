@@ -6,8 +6,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeft } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import { useNostr, useNostrContacts } from '../contexts/NostrContext';
+import { useNostr, useNostrContacts, useNostrDmInbox } from '../contexts/NostrContext';
+import { useGroups } from '../contexts/GroupsContext';
 import { getConversationForEvent } from '../services/dmDb';
+import { removeNotificationsWhere } from '../services/notificationHistory';
+import { dismissNotificationsFor } from '../services/notificationService';
+import { useNonFollowProfiles } from '../hooks/useNonFollowProfiles';
+import { notificationDisplay, type DisplayIdentity } from '../utils/notificationDisplay';
 import { protocolForWireKind, type DmProtocol } from '../utils/dmProtocol';
 import BrandGradientBackground from '../components/BrandGradientBackground';
 import NotificationRow from '../components/NotificationRow';
@@ -30,18 +35,41 @@ export default function NotificationsScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { contacts } = useNostrContacts();
-  const { pubkey } = useNostr();
+  const { pubkey, fetchProfilesForPubkeys } = useNostr();
+  const { dmInbox } = useNostrDmInbox();
+  const { groups } = useGroups();
   const { entries, unreadCount, markRead, markAllRead } = useNotificationHistory();
+  // Non-followed partners' kind-0s, shared with the Messages list (#664).
+  const { nonFollowProfiles } = useNonFollowProfiles({
+    pubkey,
+    dmInbox,
+    contacts,
+    fetchProfilesForPubkeys,
+  });
 
-  // pubkey → display name, built once per contacts change (not per row).
-  const names = useMemo(() => {
-    const map = new Map<string, string>();
+  // pubkey → name + avatar, the way the Messages list resolves them: a
+  // contact's profile (or petname), else a non-followed sender's profile.
+  // Built once per change (not per row).
+  const people = useMemo(() => {
+    const map = new Map<string, DisplayIdentity>();
+    for (const [key, p] of nonFollowProfiles) {
+      map.set(key.toLowerCase(), {
+        name: p.displayName?.trim() || p.name?.trim(),
+        picture: p.picture,
+      });
+    }
     for (const c of contacts) {
       const name = c.profile?.displayName?.trim() || c.profile?.name?.trim() || c.petname?.trim();
-      if (name) map.set(c.pubkey.toLowerCase(), name);
+      map.set(c.pubkey.toLowerCase(), { name, picture: c.profile?.picture ?? null });
     }
     return map;
-  }, [contacts]);
+  }, [contacts, nonFollowProfiles]);
+  const groupNames = useMemo(
+    () => new Map<string, DisplayIdentity>(groups.map((g) => [g.id, { name: g.name }])),
+    [groups],
+  );
+  const profileFor = useCallback((pk: string) => people.get(pk), [people]);
+  const groupFor = useCallback((id: string) => groupNames.get(id), [groupNames]);
 
   // Rows from alerts the background couldn't decrypt carry only a NIP-17 wrap
   // id; once the app has stored that message, learn its conversation (#1154).
@@ -58,13 +86,24 @@ export default function NotificationsScreen() {
       if (pending.length === 0) return;
       const resolve = async () => {
         const found = new Map(wrapTargets);
+        const ownCopies = new Set<string>();
         for (const e of pending) {
           const row = await getConversationForEvent(pubkey, e.data.wrapId!).catch(() => null);
-          if (row)
+          // The alert was for the copy of a message WE sent (NIP-17 wraps one
+          // to the sender too): nothing new arrived, so drop the row.
+          if (row?.fromMe) ownCopies.add(e.data.wrapId!);
+          else if (row)
             found.set(e.data.wrapId!, {
               pubkey: row.conversation,
               protocol: protocolForWireKind(row.wireKind, row.protocol),
             });
+        }
+        if (cancelled) return;
+        if (ownCopies.size > 0) {
+          const removed = await removeNotificationsWhere(pubkey, (e) =>
+            ownCopies.has(e.data.wrapId ?? ''),
+          );
+          if (removed.length) void dismissNotificationsFor({ historyIds: removed });
         }
         if (!cancelled && found.size > wrapTargets.size) setWrapTargets(found);
       };
@@ -97,23 +136,32 @@ export default function NotificationsScreen() {
           conversationPubkey: resolved.pubkey,
           conversationProtocol: resolved.protocol,
         }),
-        name: (partner && names.get(partner)) || undefined,
+        name: (partner && people.get(partner)?.name) || undefined,
       });
     },
-    [markRead, names, wrapTargets],
+    [markRead, people, wrapTargets],
   );
 
   const renderItem = useCallback(
     ({ item }: { item: NotificationHistoryEntry }) => {
       const resolved = item.data.wrapId ? wrapTargets.get(item.data.wrapId) : undefined;
-      const partner = (item.data.conversationPubkey ?? resolved?.pubkey)?.toLowerCase();
-      const title = (partner && names.get(partner)) || item.title;
+      const { title, picture } = notificationDisplay(item, {
+        partner: item.data.conversationPubkey ?? resolved?.pubkey,
+        profileFor,
+        groupFor,
+      });
       const kindLabel = t(`notifications.kind.${item.kind}`);
+      // A row standing for several messages in one thread says how many.
+      const label =
+        (item.count ?? 1) > 1
+          ? `${kindLabel} · ${t('notifications.newCount', { count: item.count })}`
+          : kindLabel;
       return (
         <NotificationRow
           entry={item}
           title={title}
-          subtitle={item.body ? `${kindLabel} · ${item.body}` : kindLabel}
+          picture={picture}
+          subtitle={item.body ? `${label} · ${item.body}` : label}
           time={formatConversationTimestamp(
             Math.floor(item.createdAt / 1000),
             undefined,
@@ -125,7 +173,7 @@ export default function NotificationsScreen() {
         />
       );
     },
-    [names, wrapTargets, t, colors.brandPink, styles, handlePress, formatLocale],
+    [profileFor, groupFor, wrapTargets, t, colors.brandPink, styles, handlePress, formatLocale],
   );
 
   return (

@@ -625,7 +625,7 @@
     "leaveGroupMessage": "要从此设备移除“{{name}}”吗？其他成员仍会保留该群组；如果他们再次给你发消息，你可以被重新加入。",
     "cancel": "取消",
     "leave": "退出",
-    "renameGroup": "重命名群组",
+    "renameGroup": "重命名群组{{name}}",
     "manageMembers": "管理成员",
     "memberCountOne": "{{count}}位成员",
     "memberCountOther": "{{count}}位成员",
@@ -2467,6 +2467,7 @@
     "bell": "通知",
     "bellUnread": "通知，{{count}}条未读",
     "markAllRead": "全部标为已读",
+    "newCount": "新增{{count}}条",
     "emptyTitle": "暂无通知",
     "emptyText": "你收到的消息、付款和Piglet寻宝通知会在这里保留30天。",
     "kind": {

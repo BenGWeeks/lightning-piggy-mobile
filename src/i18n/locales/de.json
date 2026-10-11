@@ -625,7 +625,7 @@
     "leaveGroupMessage": "„{{name}}“ von diesem Gerät entfernen? Die anderen Mitglieder behalten die Gruppe; du kannst wieder hinzugefügt werden, wenn sie dir erneut schreiben.",
     "cancel": "Abbrechen",
     "leave": "Verlassen",
-    "renameGroup": "Gruppe umbenennen",
+    "renameGroup": "Gruppe {{name}} umbenennen",
     "manageMembers": "Mitglieder verwalten",
     "memberCountOne": "{{count}} Mitglied",
     "memberCountOther": "{{count}} Mitglieder",
@@ -2467,6 +2467,7 @@
     "bell": "Benachrichtigungen",
     "bellUnread": "Benachrichtigungen, {{count}} ungelesen",
     "markAllRead": "Alle als gelesen markieren",
+    "newCount": "{{count}} neu",
     "emptyTitle": "Noch keine Benachrichtigungen",
     "emptyText": "Nachrichten, Zahlungen und Piglet-Funde, über die du benachrichtigt wirst, erscheinen hier 30 Tage lang.",
     "kind": {
