@@ -137,6 +137,7 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
   // Boltz fee schedule — fetched once on open so we can render min/max +
   // the expected service fee before the user commits to an amount.
   const [fees, setFees] = useState<boltzService.SwapFees | null>(null);
+  const [feeError, setFeeError] = useState<string | null>(null);
 
   // Track the bottom-sheet ref so we can present/dismiss imperatively.
   const bottomSheetRef = useRef<BottomSheetModal>(null);
@@ -198,6 +199,7 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
       // Clear any prior session's fee schedule so a failed re-fetch falls
       // back to the fresh fallback constants instead of showing stale min/max.
       setFees(null);
+      setFeeError(null);
       bottomSheetRef.current?.present();
 
       // Fetch fees in the background — non-blocking.
@@ -209,9 +211,10 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
         })
         .catch((e: unknown) => {
           if (sessionRef.current !== session) return;
-          setCreateError(
-            e instanceof Error ? e.message : translation.current('swapBackend.quoteFailed'),
-          );
+          const message =
+            e instanceof Error ? e.message : translation.current('swapBackend.quoteFailed');
+          setFeeError(message);
+          setCreateError(message);
           setStep('qr');
         });
     } else {
@@ -383,7 +386,7 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
     async (sats: number) => {
       if (!walletId || !wallet) return;
       if (!fees) {
-        setCreateError(t('swapBackend.loadingQuote'));
+        setCreateError(feeError ?? t('swapBackend.loadingQuote'));
         setStep('qr');
         return;
       }
@@ -470,7 +473,7 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
         setCreating(false);
       }
     },
-    [walletId, wallet, makeInvoiceForWallet, pickRefundDestination, t, fees],
+    [walletId, wallet, makeInvoiceForWallet, pickRefundDestination, t, fees, feeError],
   );
 
   const handleRefund = useCallback(async () => {
