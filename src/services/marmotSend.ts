@@ -14,6 +14,7 @@ import { marmotImetaTag } from './marmotMedia';
 import { getBlossomServers } from './walletStorageService';
 import type { MarmotUnreachableReason } from './marmotFallback';
 import { MarmotWelcomeDeliveryError } from './marmotInvitees';
+import { MarmotGroupNotReadyError } from './marmotSendGate';
 import { t } from '../i18n';
 import {
   MarmotNoKeyPackageError,
@@ -61,6 +62,7 @@ export function marmotSendError(e: unknown): string {
   const reason = marmotUnreachableReason(e);
   if (reason) return t(`marmotSend.${reason}`);
   if (e instanceof MarmotWelcomeDeliveryError) return t('marmotSend.inviteNotDelivered');
+  if (e instanceof MarmotGroupNotReadyError) return t('marmotSend.chatNotReady');
   return (e as Error)?.message || 'Marmot send failed';
 }
 
