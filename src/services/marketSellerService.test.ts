@@ -195,6 +195,35 @@ describe('fetchLatestRevision', () => {
     );
   });
 
+  it('ignores revisions deleted by NIP-09 (a deleted shop is not an existing shop)', async () => {
+    const shop = sign(
+      buildShopTemplate({
+        shop: { name: 'TEST', description: '', currency: 'GBP' },
+        pubkey,
+        productCoordinates: [],
+        zoneCoordinates: [],
+      }),
+      100,
+    );
+    const deletion = sign(
+      buildDeletionTemplate([
+        { kind: 30405, coordinate: coordinateOf(30405, pubkey, 'lightning-piggy-shop') },
+      ]),
+      150,
+    );
+    (querySyncAbortable as jest.Mock).mockImplementation((_pool, _relays, filter) =>
+      Promise.resolve(filter.kinds[0] === 5 ? [deletion] : [shop]),
+    );
+    await expect(
+      fetchLatestRevision({
+        pubkey,
+        kind: 30405,
+        dTag: 'lightning-piggy-shop',
+        relays: ['wss://r'],
+      }),
+    ).resolves.toBeNull();
+  });
+
   it('is null only when relays completed with nothing', async () => {
     (querySyncAbortable as jest.Mock).mockResolvedValue([]);
     await expect(

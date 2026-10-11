@@ -164,17 +164,39 @@ export async function fetchLatestRevision(input: {
 }): Promise<Event | null> {
   const pubkey = input.pubkey.toLowerCase();
   trackRelays(input.relays);
-  const events = await queryQuorum(input.relays, {
-    kinds: [input.kind],
-    authors: [pubkey],
-    '#d': [input.dTag],
-    limit: 5,
-  });
-  const own = (await verifiedOwnEvents(events, pubkey, [input.kind])).filter(
-    (e) => e.tags.find((t) => t[0] === 'd')?.[1] === input.dTag,
-  );
+  const coordinate = `${input.kind}:${pubkey}:${input.dTag}`;
+  // The revisions plus any NIP-09 deletion of that address: a deleted shop
+  // that some relays still serve is not "an existing shop".
+  const [events, deletions] = await Promise.all([
+    queryQuorum(input.relays, {
+      kinds: [input.kind],
+      authors: [pubkey],
+      '#d': [input.dTag],
+      limit: 5,
+    }),
+    queryQuorum(input.relays, {
+      kinds: [DELETION_KIND],
+      authors: [pubkey],
+      '#a': [coordinate],
+      limit: 20,
+    }),
+  ]);
+  const [own, ownDeletions] = await Promise.all([
+    verifiedOwnEvents(events, pubkey, [input.kind]),
+    verifiedOwnEvents(deletions, pubkey, [DELETION_KIND]),
+  ]);
+  let deletedAt = -1;
+  const deletedIds = new Set<string>();
+  for (const d of ownDeletions) {
+    for (const t of d.tags) {
+      if (t[0] === 'a' && t[1] === coordinate) deletedAt = Math.max(deletedAt, d.created_at);
+      if (t[0] === 'e' && t[1]) deletedIds.add(t[1]);
+    }
+  }
   let newest: Event | null = null;
   for (const e of own) {
+    if (e.tags.find((t) => t[0] === 'd')?.[1] !== input.dTag) continue;
+    if (e.created_at <= deletedAt || deletedIds.has(e.id)) continue;
     if (
       !newest ||
       e.created_at > newest.created_at ||
