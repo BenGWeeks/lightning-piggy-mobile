@@ -1,5 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { isNewerEdit } from '../utils/marmotEditOrder';
+import { isPollVoteMessage, parsePoll } from '../utils/pollMessage';
 import { mutateGroupStorage } from './groupStorageQueue';
+import type { MarmotEdit } from './marmotEdits';
 
 /**
  * In-thread message stored locally, per-group. We persist what the user
@@ -16,6 +19,12 @@ export interface GroupMessage {
   text: string;
   /** Unix seconds — same convention as nostr `created_at`. */
   createdAt: number;
+  /** Marmot reply: id of the message this one quotes. */
+  replyTo?: string;
+  /** Marmot edit: `created_at` of the edit `text` now holds. */
+  editedAt?: number;
+  /** Marmot edit: id of that edit event (breaks `editedAt` ties). */
+  editId?: string;
 }
 
 // Account scoping: keyed only by groupId, not by viewer pubkey. These
@@ -133,6 +142,65 @@ export async function removeGroupMessage(
     await AsyncStorage.setItem(KEY(groupId), JSON.stringify(filtered));
     return filtered;
   });
+}
+
+/**
+ * Whether a stored group message is plain chat text its author may edit — not
+ * a photo / voice note (an `#lpe=1` URL), a structured poll, vote or order
+ * (stored as JSON), or a legacy text poll / vote. The DM store gets the same
+ * guarantee from `wire_kind = 14`.
+ */
+export function isEditableGroupText(text: string): boolean {
+  return (
+    !text.includes('#lpe=1') &&
+    !text.trimStart().startsWith('{') &&
+    !parsePoll(text) &&
+    !isPollVoteMessage(text)
+  );
+}
+
+/**
+ * Apply Marmot edits to a group's stored messages: one load and at most one
+ * write for the whole batch, through the group storage queue (so a concurrent
+ * send or deletion can't interleave). Each edit replaces a message's text only
+ * when its author sent it, the message is editable text, and it outranks any
+ * edit already applied (isNewerEdit). Returns whether anything changed.
+ */
+export async function editGroupMessages(
+  groupId: string,
+  edits: readonly MarmotEdit[],
+): Promise<boolean> {
+  if (edits.length === 0) return false;
+  return mutateGroupStorage(groupId, async () => {
+    const next = await loadGroupMessages(groupId);
+    const indexById = new Map(next.map((m, i) => [m.id, i]));
+    let changed = false;
+    for (const edit of edits) {
+      const i = indexById.get(edit.target);
+      if (i === undefined) continue;
+      const target = next[i];
+      if (target.senderPubkey.toLowerCase() !== edit.editor.toLowerCase()) continue;
+      if (!isEditableGroupText(target.text) || !isNewerEdit(edit, target)) continue;
+      next[i] = { ...target, text: edit.content, editedAt: edit.editedAt, editId: edit.editId };
+      changed = true;
+    }
+    if (changed) await AsyncStorage.setItem(KEY(groupId), JSON.stringify(next));
+    return changed;
+  });
+}
+
+/** One edit — see `editGroupMessages`. */
+export function editGroupMessage(
+  groupId: string,
+  messageId: string,
+  editor: string,
+  text: string,
+  editedAt: number,
+  editId = '',
+): Promise<boolean> {
+  return editGroupMessages(groupId, [
+    { target: messageId, editor, content: text, editedAt, editId },
+  ]);
 }
 
 /**

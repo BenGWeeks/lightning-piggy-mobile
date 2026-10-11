@@ -1119,6 +1119,11 @@
     "moreEmoji": "Більше емодзі"
   },
   "messageBubble": {
+    "quoteYou": "Ви",
+    "quoteSomeone": "Хтось",
+    "quoteUnavailable": "Попереднє повідомлення",
+    "quoteMissingA11y": "Відповідь на попереднє повідомлення",
+    "quoteA11y": "Відповідь на повідомлення від {{author}}: {{text}}",
     "imageSent": "Зображення надіслано",
     "imageReceived": "Зображення отримано",
     "sharedImage": "Спільне зображення",
@@ -1186,6 +1191,7 @@
     "reactionAdd": "Додати реакцію {{emoji}} ({{count}} наразі)"
   },
   "messageBubbleFooter": {
+    "edited": "Змінено",
     "messageSending": "Надсилання повідомлення",
     "sendFailed": "Не вдалося надіслати",
     "sentAllRelays": "Надіслано на всі релеї",

@@ -1147,6 +1147,11 @@
     "moreEmoji": "More emoji"
   },
   "messageBubble": {
+    "quoteYou": "You",
+    "quoteSomeone": "Someone",
+    "quoteUnavailable": "Earlier message",
+    "quoteMissingA11y": "Reply to an earlier message",
+    "quoteA11y": "Replying to {{author}}: {{text}}",
     "imageSent": "Image sent",
     "imageReceived": "Image received",
     "sharedImage": "Shared image",
@@ -1214,6 +1219,7 @@
     "reactionAdd": "Add {{emoji}} reaction ({{count}} so far)"
   },
   "messageBubbleFooter": {
+    "edited": "Edited",
     "messageSending": "Message sending",
     "sendFailed": "Send failed",
     "sentAllRelays": "Sent to all relays",

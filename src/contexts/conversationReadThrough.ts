@@ -24,6 +24,8 @@ export function mapStoredRowsToMessages(rows: DmMessageRow[]): ConversationMessa
     ...(r.deliveryStatus !== undefined ? { deliveryStatus: r.deliveryStatus } : {}),
     ...(r.rumorId !== undefined ? { rumorId: r.rumorId } : {}),
     ...(r.protocol !== undefined ? { protocol: r.protocol } : {}),
+    ...(r.replyTo !== undefined ? { replyTo: r.replyTo } : {}),
+    ...(r.editedAt !== undefined ? { editedAt: r.editedAt } : {}),
   }));
 }
 

@@ -95,7 +95,9 @@ describe('dmDb', () => {
       expect(sql).toContain('COALESCE(excluded.delivery_status, dm_messages.delivery_status)');
       expect(sql).toContain('COALESCE(excluded.rumor_id, dm_messages.rumor_id)');
       expect(sql).toContain('protocol        = COALESCE(excluded.protocol, dm_messages.protocol)');
-      expect(params).toEqual([OWNER, 'e1', 'convA', 100, 's1', 'hi', 0, 14, null, null, null]);
+      expect(params).toEqual([
+        OWNER, 'e1', 'convA', 100, 's1', 'hi', 0, 14, null, null, null, null, null, null,
+      ]); // prettier-ignore
     });
 
     it('serialises deliveryStatus / rumorId onto optimistic local- rows (#850)', async () => {

@@ -515,6 +515,7 @@ const ConversationScreen: React.FC = () => {
         reactions={reactionsForItem(item)}
         onToggleReaction={buildOnToggleReaction(item)}
         onAddNwc={addSharedWallet}
+        peerName={name}
       />
     ),
     [
@@ -535,6 +536,7 @@ const ConversationScreen: React.FC = () => {
       myPos,
       picture,
       profile,
+      name,
       onOpenMap,
       styles,
       colors,

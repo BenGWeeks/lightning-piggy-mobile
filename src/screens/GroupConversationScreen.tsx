@@ -50,6 +50,7 @@ import SecretModeCelebration from '../components/SecretModeCelebration';
 import { isConfigured as isGifConfigured } from '../services/giphyService';
 import { buildOsmViewUrl, type SharedLocation } from '../services/locationService';
 import { fetchProfile, DEFAULT_RELAYS } from '../services/nostrService';
+import { indexMessagesById, resolveQuote, type MessageQuote } from '../utils/messageQuote';
 import { loadGroupMessages, type GroupMessage } from '../services/groupMessagesStorageService';
 import {
   classifyMessageContent,
@@ -77,7 +78,11 @@ type GroupConversationNavigation = NativeStackNavigationProp<
 
 // Pre-classified variant of GroupMessage — created in a useMemo so
 // classifyMessageContent is NOT called inside the hot renderMessage path.
-type ClassifiedMessage = GroupMessage & { content: BubbleContent; wireKind: 14 | 15 };
+type ClassifiedMessage = GroupMessage & {
+  content: BubbleContent;
+  wireKind: 14 | 15;
+  quote?: MessageQuote;
+};
 
 interface MemberRow {
   pubkey: string;
@@ -421,24 +426,42 @@ const GroupConversationScreen: React.FC = () => {
   // Vote messages are dropped from the visible list — they're already
   // rolled into the referenced poll's tally via pollAggregates below, so
   // showing them as bubbles would just duplicate the vote in the thread.
-  const classifiedMessages = useMemo<ClassifiedMessage[]>(
+  const classifiedMessages = useMemo<ClassifiedMessage[]>(() => {
+    // Marmot replies: resolve each quoted parent against the loaded history.
+    // One id index (with each parent's sender) — no per-reply scan.
+    const me = myPubkey?.toLowerCase();
+    const byId = indexMessagesById(
+      messages.map((m) => ({
+        id: m.id,
+        senderPubkey: m.senderPubkey,
+        fromMe: m.senderPubkey.toLowerCase() === me,
+        text: m.text,
+        wireKind: deriveGroupWireKind(m.text),
+      })),
+    );
+    const quoteFor = (m: GroupMessage): MessageQuote | undefined => {
+      const quote = resolveQuote(m.replyTo, byId);
+      const parent = m.replyTo ? byId.get(m.replyTo) : undefined;
+      return quote && parent && !parent.fromMe
+        ? { ...quote, authorName: memberNameByPubkey.get(parent.senderPubkey) }
+        : quote;
+    };
     // Sanitise before classify so a tofu placeholder (#764) never reaches
     // the bubble's text branch. Vote messages are dropped from the visible
     // list — they're already rolled into the referenced poll's tally.
-    () =>
-      messages
-        .map((m) => ({
-          ...m,
-          content: classifyMessageContent(sanitizeDisplayText(m.text)),
-          // Derive the real NIP-17 kind (14 chat / 15 encrypted file) from the
-          // stored text rather than hard-coding 14, so the info sheet reports
-          // kind-15 for voice/image file bubbles. Precomputed here (not in the
-          // hot renderMessage path) alongside the content classification.
-          wireKind: deriveGroupWireKind(m.text),
-        }))
-        .filter((m) => m.content.kind !== 'pollVote'),
-    [messages],
-  );
+    return messages
+      .map((m) => ({
+        ...m,
+        quote: quoteFor(m),
+        content: classifyMessageContent(sanitizeDisplayText(m.text)),
+        // Derive the real NIP-17 kind (14 chat / 15 encrypted file) from the
+        // stored text rather than hard-coding 14, so the info sheet reports
+        // kind-15 for voice/image file bubbles. Precomputed here (not in the
+        // hot renderMessage path) alongside the content classification.
+        wireKind: deriveGroupWireKind(m.text),
+      }))
+      .filter((m) => m.content.kind !== 'pollVote');
+  }, [messages, myPubkey, memberNameByPubkey]);
 
   // Per-poll aggregates over the entire group history. Group messages carry a
   // real `senderPubkey` (unlike 1:1 where we synthesise a per-direction voter
@@ -546,6 +569,8 @@ const GroupConversationScreen: React.FC = () => {
           // sheet shows "Not tracked").
           wireKind={item.wireKind}
           onShowInfo={handleShowInfo}
+          quote={item.quote}
+          edited={item.editedAt !== undefined}
           testIdPrefix="group-conversation"
         />
       );

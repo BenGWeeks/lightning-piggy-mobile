@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import type React from 'react';
 
 import {
+  applyMarmotEdits,
   deleteMarmotMessages,
   deleteMarmotRowsOfKinds,
   getConversationMessages,
@@ -11,6 +12,7 @@ import {
 import { rowsToInboxEntries } from '../services/dmInbox';
 import { mayDelete, parseMarmotDeletion } from '../services/marmotDeletions';
 import { MarmotDeletionTracker } from '../services/marmotDeletionTracker';
+import { EditLedger, isNewerEdit, parseMarmotEdit, type MarmotEdit } from '../services/marmotEdits';
 import { MARMOT_NON_MESSAGE_KINDS, marmotRumorToDmRow } from '../services/marmotInbox';
 import { subscribeMarmotSession, type MarmotMessageEvent } from '../services/marmotSession';
 import { fireMessageNotification } from '../services/notificationService';
@@ -49,7 +51,47 @@ export function useMarmotDmInbound(
     const deletions = new MarmotDeletionTracker(pubkey, openedAtSec);
     // Keyed `group|peer|deleter`: one store pass per pair, however many ids a replay carries.
     let removals = new Map<string, { peer: string; sender: string | null; ids: Set<string> }>();
+    // Edits (kind 1009): the latest per message (for one arriving before its
+    // target, or replayed), and those still to apply to stored rows.
+    const edits = new EditLedger();
+    let editBatch = new Map<string, { groupId: string; edit: MarmotEdit }>();
     let chain: Promise<void> = Promise.resolve();
+
+    // One tombstone query, one transaction, one inbox update and one thread
+    // reload per peer for the whole batch — however many edits it carries.
+    const applyEdits = async (batch: typeof editBatch) => {
+      if (batch.size === 0) return;
+      // An edit never brings back a deleted message.
+      const live = await deletions.filterLive([...batch.values()], ({ groupId, edit }) => ({
+        scope: groupId,
+        id: edit.target,
+        sender: edit.editor,
+      }));
+      if (live.length === 0) return;
+      const changed = await applyMarmotEdits(
+        pubkey,
+        live.map(({ edit }) => edit),
+      );
+      if (disposed || changed.length === 0) return;
+      // The Messages list shows the edited text if it was the latest.
+      const byId = new Map(changed.map((c) => [c.edit.target, c]));
+      setDmInbox((prev) => {
+        if (disposed) return prev;
+        let touched = false;
+        const next = prev.map((e) => {
+          const c = e.protocol === 'marmot' ? byId.get(e.id) : undefined;
+          if (!c || e.partnerPubkey !== c.conversation) return e;
+          touched = true;
+          return {
+            ...e,
+            text: dmRowPreview(c.edit.content, e.wireKind ?? 14),
+            renderText: c.edit.content,
+          };
+        });
+        return touched ? next : prev;
+      });
+      new Set(changed.map((c) => c.conversation)).forEach((peer) => notifyDmMessage(peer));
+    };
 
     const applyRemovals = async (batch: typeof removals) => {
       for (const { peer, sender, ids: idSet } of batch.values()) {
@@ -99,7 +141,9 @@ export function useMarmotDmInbound(
       rows = [];
       const removalBatch = removals;
       removals = new Map();
-      if (batch.length === 0 && removalBatch.size === 0) return;
+      const editsBatch = editBatch;
+      editBatch = new Map();
+      if (batch.length === 0 && removalBatch.size === 0 && editsBatch.size === 0) return;
       // An open thread re-reads the store on notify, so notify only once the
       // batch has committed (else it can re-read stale rows and miss it).
       const peers = new Set(batch.map((r) => r.conversation));
@@ -127,6 +171,12 @@ export function useMarmotDmInbound(
             }
           } catch (e) {
             if (__DEV__) console.warn('[Marmot] DM batch failed:', e);
+          }
+          // Edits after the rows they may target, deletions last (a delete wins).
+          try {
+            await applyEdits(editsBatch);
+          } catch (e) {
+            if (__DEV__) console.warn('[Marmot] DM edit failed:', e);
           }
           // Even when the upsert failed: stored copies must still go.
           await applyRemovals(removalBatch);
@@ -159,8 +209,47 @@ export function useMarmotDmInbound(
         if (!timer) timer = setTimeout(flush, FLUSH_MS);
         return;
       }
-      const row = marmotRumorToDmRow(pubkey, event);
-      if (!row) return;
+      const edit = parseMarmotEdit(event.rumor);
+      if (edit && event.group.isDm && peer) {
+        if (deletions.blocks(event.group.id, edit.target, edit.editor)) return; // deleted
+        edits.add(edit, event.group.id);
+        // Still pending write: overlay it there; else the store update does it.
+        for (const r of rows) {
+          if (
+            r.eventId === edit.target &&
+            r.sender === edit.editor &&
+            r.wireKind === 14 &&
+            isNewerEdit(edit, r)
+          )
+            Object.assign(r, {
+              content: edit.content,
+              editedAt: edit.editedAt,
+              editId: edit.editId,
+            });
+        }
+        // Keyed by editor too: a forged edit must not displace the author's own.
+        const editKey = `${event.group.id}:${edit.target}:${edit.editor}`;
+        const prior = editBatch.get(editKey);
+        if (!prior || isNewerEdit(edit, prior.edit))
+          editBatch.set(editKey, { groupId: event.group.id, edit });
+        if (!timer) timer = setTimeout(flush, FLUSH_MS);
+        return;
+      }
+      const stored = marmotRumorToDmRow(pubkey, event);
+      if (!stored) return;
+      // An edit may have arrived before its message (or the history replays).
+      const overlay =
+        stored.wireKind === 14
+          ? edits.latestFor(stored.eventId, stored.sender, event.group.id)
+          : undefined;
+      const row = overlay
+        ? {
+            ...stored,
+            content: overlay.content,
+            editedAt: overlay.editedAt,
+            editId: overlay.editId,
+          }
+        : stored;
       // Deleted already (the delete arrived first, or the history replays).
       if (deletions.blocks(event.group.id, row.eventId, row.sender)) return;
       groupsByMessage.set(row, event.group.id);
