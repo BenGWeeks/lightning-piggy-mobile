@@ -2517,5 +2517,16 @@
     "forThisAccountHint": "Cada cuenta de este teléfono elige las suyas.",
     "onThisPhone": "En este teléfono",
     "onThisPhoneHint": "Igual para todas las cuentas de este teléfono."
+  },
+  "locationSharing": {
+    "directTitle": "¿Compartir tu ubicación con {{name}}?",
+    "liveTitle": "¿Compartir tu ubicación en tiempo real con {{name}}?",
+    "groupTitle": {
+      "one": "¿Compartir tu ubicación con la {{count}} persona de {{group}}?",
+      "other": "¿Compartir tu ubicación con las {{count}} personas de {{group}}?"
+    },
+    "warning": "Comparte tu ubicación solo con personas que conoces y en quienes confías. Tu mensaje está cifrado de extremo a extremo.",
+    "cancel": "Cancelar",
+    "share": "Compartir"
   }
 }

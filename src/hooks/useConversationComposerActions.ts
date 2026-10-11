@@ -2,7 +2,8 @@ import React, { useCallback, useMemo, useRef } from 'react';
 import { DEFAULT_DM_PROTOCOL, type DmProtocol } from '../utils/dmProtocol';
 import { Alert } from '../components/BrandedAlert';
 import { useNostr } from '../contexts/NostrContext';
-import { formatCoordsForDisplay, type SharedLocation } from '../services/locationService';
+import type { SharedLocation } from '../services/locationService';
+import { confirmLocationShare } from '../utils/confirmLocationShare';
 import { encodeEncryptedFileUrl } from '../utils/encryptedFileUrl';
 import { uploadEncryptedBlob, type EncryptedUpload } from '../services/imageUploadService';
 import type { ConversationMessageInput } from '../utils/conversationItems';
@@ -369,41 +370,8 @@ export function useConversationComposerActions(params: {
     [pubkey, sendNwcShare, setMessages, appendLocalDmMessage, protocol, protocolTag],
   );
 
-  // 1:1 confirms before sharing location. `pressed` guards against `onDismiss`
-  // resolving after a button already did.
   const confirmLocation = useCallback(
-    (loc: SharedLocation) =>
-      new Promise<boolean>((resolve) => {
-        let pressed = false;
-        Alert.alert(
-          `Share location with ${name}?`,
-          `${formatCoordsForDisplay(loc)}\n\nYour message will be end-to-end encrypted. ${name} will see a map preview from OpenStreetMap.`,
-          [
-            {
-              text: 'Cancel',
-              style: 'cancel',
-              onPress: () => {
-                pressed = true;
-                resolve(false);
-              },
-            },
-            {
-              text: 'Share',
-              style: 'default',
-              onPress: () => {
-                pressed = true;
-                resolve(true);
-              },
-            },
-          ],
-          {
-            cancelable: true,
-            onDismiss: () => {
-              if (!pressed) resolve(false);
-            },
-          },
-        );
-      }),
+    (loc: SharedLocation) => confirmLocationShare(loc, { name }),
     [name],
   );
 
