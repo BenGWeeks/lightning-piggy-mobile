@@ -156,7 +156,15 @@ interface RetireFootprintOptions {
   onBeforeSign?: () => void;
   /** Abandon (as 'failed') once this turns true — checked between steps. */
   cancelled?: () => boolean;
+  /**
+   * Before anything is signed: re-decide, from the slot versions relays hold
+   * right now, what to retire — e.g. skip a slot another device refreshed
+   * after the caller looked (#1236). Nothing left → 'nothing'.
+   */
+  recheck?: (onRelays: NostrEvent[]) => { slots: string[]; eventIds: string[] };
 }
+
+const slotOf = (e: NostrEvent) => e.tags.find((t) => t[0] === 'd')?.[1];
 
 /**
  * Delete and replace the given key packages on relays. 'deleted' only when
@@ -190,8 +198,7 @@ export async function retireFootprint(opts: RetireFootprintOptions): Promise<Ret
     }
     return event;
   };
-  const { slots, eventIds } = footprint;
-  if (slots.length === 0 && eventIds.length === 0) return 'nothing';
+  if (footprint.slots.length === 0 && footprint.eventIds.length === 0) return 'nothing';
   try {
     const hints = footprint.relays.filter(isRelayUrl);
     const lookup = [...new Set([...(opts.relays ?? []), ...hints, ...DEFAULT_RELAYS])].filter(
@@ -209,15 +216,19 @@ export async function retireFootprint(opts: RetireFootprintOptions): Promise<Ret
     const targets = [...new Set([...writeRelays, ...lookup])];
     abandoned();
     // Also catch versions of our slot published by an earlier run of this install.
-    const onRelays =
-      slots.length > 0
+    const found =
+      footprint.slots.length > 0
         ? await transport.query(targets, {
             kinds: [KEY_PACKAGE_KIND],
             authors: [owner],
-            '#d': slots,
+            '#d': footprint.slots,
             limit: 50,
           })
         : [];
+    abandoned();
+    const { slots, eventIds } = opts.recheck?.(found) ?? footprint;
+    if (slots.length === 0 && eventIds.length === 0) return 'nothing';
+    const onRelays = found.filter((e) => slots.includes(slotOf(e) ?? ''));
     const ids = [...new Set([...eventIds, ...onRelays.map((e) => e.id)])];
     const deletion = await sign(buildKeyPackageDeletion(owner, slots, ids));
     const deletedOn = new Set(await transport.publish(targets, deletion));

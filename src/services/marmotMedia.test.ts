@@ -3,6 +3,7 @@ import type { MediaAttachment } from '@internet-privacy/marmot-ts';
 import { parseImageMessage, parseVoiceNote } from '../utils/messageContent';
 import {
   attachmentFallbackText,
+  isMediaKeys,
   marmotImetaTag,
   marmotMediaText,
   renderableAttachments,
@@ -74,5 +75,19 @@ describe('voice notes and other attachments', () => {
 
   it('has no fallback when there is no attachment', () => {
     expect(attachmentFallbackText([])).toBeNull();
+  });
+});
+
+describe('isMediaKeys — stored media keys are shape-checked before use', () => {
+  it('accepts per-attachment refs with a url and key list', () => {
+    expect(isMediaKeys({ [CT]: { url: 'https://blossom.example/x', keysHex: ['00'] } })).toBe(true);
+    expect(isMediaKeys({})).toBe(true);
+  });
+
+  it('rejects anything else', () => {
+    expect(isMediaKeys(null)).toBe(false);
+    expect(isMediaKeys('keys')).toBe(false);
+    expect(isMediaKeys({ [CT]: { url: 1, keysHex: [] } })).toBe(false);
+    expect(isMediaKeys({ [CT]: { url: 'https://blossom.example/x' } })).toBe(false);
   });
 });

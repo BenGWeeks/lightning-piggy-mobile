@@ -2253,6 +2253,12 @@
       "retry": "Reintentar",
       "publishFailed": "No se pudo publicar. Inténtalo de nuevo."
     },
+    "feedbackActions": {
+      "commentActions": "Acciones del comentario",
+      "reviewActions": "Acciones de la reseña",
+      "edit": "Editar",
+      "delete": "Eliminar"
+    },
     "reviews": {
       "signIn": "Inicia sesión para escribir una reseña",
       "write": "Escribe una reseña",
@@ -2266,14 +2272,35 @@
       "count": {
         "one": "{{count}} reseña",
         "other": "{{count}} reseñas"
-      }
+      },
+      "yours": "Ya has reseñado este producto",
+      "editOpen": "Editar reseña",
+      "cancel": "Cancelar",
+      "deleteTitle": "¿Eliminar tu reseña?",
+      "deleteBody": "Pediremos a los relays que la eliminen y la ocultaremos aquí de inmediato. Algunos relays o apps pueden ignorar la solicitud o ya tener una copia, así que puede que no desaparezca en todas partes.",
+      "deleteConfirm": "Eliminar",
+      "deleted": "Solicitud de eliminación enviada",
+      "posted": "Reseña publicada",
+      "updated": "Reseña actualizada",
+      "deleteFailed": "No se pudo eliminar tu reseña. Inténtalo de nuevo."
     },
     "comments": {
       "placeholder": "Añade un comentario",
       "post": "Publicar comentario",
       "signIn": "Inicia sesión para comentar",
       "empty": "Aún no hay comentarios. ¡Sé el primero en iniciar la conversación!",
-      "loadError": "No se pudieron cargar los comentarios"
+      "loadError": "No se pudieron cargar los comentarios",
+      "editedMarker": "Editado",
+      "editing": "Editando tu comentario",
+      "save": "Guardar cambios",
+      "cancel": "Cancelar",
+      "deleteTitle": "¿Eliminar este comentario?",
+      "deleteBody": "Pediremos a los relays que lo eliminen y lo ocultaremos aquí de inmediato. Algunos relays o apps pueden ignorar la solicitud o ya tener una copia, así que puede que no desaparezca en todas partes.",
+      "deleteConfirm": "Eliminar",
+      "deleted": "Solicitud de eliminación enviada",
+      "updated": "Comentario actualizado",
+      "deleteFailed": "No se pudo eliminar el comentario. Inténtalo de nuevo.",
+      "editFailed": "No se pudo guardar tu edición. Inténtalo de nuevo."
     },
     "checkout": {
       "orderPlaced": "Pedido realizado",
@@ -2462,7 +2489,8 @@
     "chatChangingPhoto": "Este chat está cambiando ahora mismo; intenta enviar la foto de nuevo.",
     "noRelayAcceptedVoice": "Ningún relay aceptó la nota de voz",
     "noRelayAcceptedPhoto": "Ningún relay aceptó la foto",
-    "inviteNotDelivered": "No pudimos enviar la invitación: ningún relay la aceptó. Revisa tu conexión e inténtalo de nuevo."
+    "inviteNotDelivered": "No pudimos enviar la invitación: ningún relay la aceptó. Revisa tu conexión e inténtalo de nuevo.",
+    "chatNotReady": "Este chat todavía se está poniendo al día con un cambio reciente, así que no se completó. Inténtalo de nuevo en un momento."
   },
   "signOutPrompt": {
     "walletsRemoved": "También se eliminarán de este teléfono las carteras conectadas a esta cuenta, incluidas las frases de recuperación guardadas aquí. Guarda sus frases de recuperación y datos de conexión por separado antes de cerrar sesión.",
@@ -2554,6 +2582,77 @@
     "progressBody": "Aprueba cada solicitud en tu firmador: cada teléfono o app que usa esta persona necesita su propia invitación.",
     "notReachedTitle": "Invitación aún no entregada",
     "notReachedBody": "Todavía no pudimos entregar la invitación a {{names}}. Lightning Piggy lo seguirá intentando automáticamente."
+  },
+  "invitationKeys": {
+    "title": "Dispositivos que pueden recibir chats nuevos",
+    "entrySubtitle": "Mira con qué dispositivos pueden iniciar chats privados contigo",
+    "description": "Para iniciar un chat privado contigo, las apps de otras personas usan una clave de invitación que cada uno de tus dispositivos comparte en tus relés. Quita los dispositivos que ya no usas para que los chats nuevos no vayan a un sitio donde nunca los verás. Tus chats actuales no se ven afectados.",
+    "thisPhone": "Este teléfono",
+    "otherDevice": "Otro dispositivo con Lightning Piggy",
+    "whiteNoise": "White Noise",
+    "otherApp": "Otra app",
+    "oldBadge": "Sin usar más de 30 días",
+    "notShared": "Aún no compartida. Toca Actualizar para que puedan iniciar chats nuevos contigo aquí.",
+    "updatedJustNow": "Actualizado hace un momento",
+    "updatedHours": {
+      "one": "Actualizado hace %{count} hora",
+      "other": "Actualizado hace %{count} horas"
+    },
+    "updatedDays": {
+      "one": "Actualizado hace %{count} día",
+      "other": "Actualizado hace %{count} días"
+    },
+    "details": "Detalles",
+    "detailsA11y": "Mostrar detalles de %{device}",
+    "deviceId": "ID del dispositivo: %{id}…",
+    "app": "App: %{app}",
+    "expires": "La clave de invitación caduca: %{date}",
+    "unknownExpiry": "desconocido",
+    "versions": {
+      "one": "%{count} copia encontrada en los relés",
+      "other": "%{count} copias encontradas en los relés"
+    },
+    "relays": "Compartida en:\n%{relays}",
+    "refresh": "Actualizar",
+    "refreshA11y": "Actualizar la clave de invitación de este teléfono",
+    "refreshed": "Este teléfono está listo para chats nuevos",
+    "refreshFailedTitle": "No se pudo actualizar este teléfono",
+    "refreshFailedBody": "Ningún relé aceptó la nueva clave de invitación o tu firmador no respondió. Revisa tu conexión e inténtalo de nuevo.",
+    "stop": "Dejar de enviar invitaciones a este dispositivo",
+    "stopA11y": "Dejar de enviar invitaciones a %{device}, %{age}",
+    "stopTitle": "¿Dejar de enviar invitaciones a este dispositivo?",
+    "stopBody": "%{device}\n\nLos chats nuevos dejarán de llegar a este dispositivo. Si todavía se usa, puede perderse chats nuevos hasta que vuelva a actualizar su clave de invitación, lo que puede tardar hasta una semana. Tus chats actuales no se ven afectados.",
+    "stopConfirm": "Dejar de enviar",
+    "stopped": "Ya no se envían invitaciones a ese dispositivo",
+    "removeOld": {
+      "zero": "Quitar dispositivos antiguos",
+      "one": "Quitar %{count} dispositivo antiguo",
+      "other": "Quitar %{count} dispositivos antiguos"
+    },
+    "removeOldA11y": {
+      "zero": "Quitar dispositivos antiguos. No hay ninguno",
+      "one": "Quitar %{count} dispositivo antiguo",
+      "other": "Quitar %{count} dispositivos antiguos"
+    },
+    "removeOldHint": "Los dispositivos antiguos no han actualizado su clave de invitación en 30 días, o ha caducado. Este teléfono nunca se quita.",
+    "removeOldTitle": {
+      "one": "¿Quitar %{count} dispositivo antiguo?",
+      "other": "¿Quitar %{count} dispositivos antiguos?"
+    },
+    "removeOldBody": "Los chats nuevos dejarán de llegar a los dispositivos que no se han actualizado en 30 días. Cualquier dispositivo que se actualice antes de terminar se conserva. Tus chats actuales no se ven afectados.",
+    "removeOldConfirm": "Quitar",
+    "removedOld": {
+      "one": "Se quitó %{count} dispositivo antiguo",
+      "other": "Se quitaron %{count} dispositivos antiguos"
+    },
+    "nothingRemoved": "No se quitó nada: esos dispositivos se han actualizado",
+    "signerApprovals": "Tu firmador te pedirá que apruebes %{count} veces.",
+    "reload": "Comprobar de nuevo",
+    "partial": "No se pudieron comprobar algunos relés, así que esta lista puede estar incompleta. Quitar dispositivos antiguos no está disponible hasta que respondan todos.",
+    "loadFailed": "No se pudieron comprobar tus relés. Inténtalo de nuevo cuando tengas conexión.",
+    "cancel": "Cancelar",
+    "failedTitle": "No se pudieron detener las invitaciones",
+    "failedBody": "Algunos relés o tu firmador no respondieron. Toca Comprobar de nuevo y vuelve a intentarlo."
   },
   "followList": {
     "unavailable": "No se pudo cargar tu lista de seguidos — inténtalo de nuevo"

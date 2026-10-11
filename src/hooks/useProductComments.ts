@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import type { Event as NostrEvent } from 'nostr-tools';
 import { useNostr } from '../contexts/NostrContext';
@@ -13,9 +13,12 @@ import {
   topLevelComments,
   type CommentRoot,
 } from '../utils/productComments';
+import { reconcileComments } from '../utils/commentEdits';
+import { DELETION_KIND, deletionFilters, idRefs } from '../utils/nip09';
 
 export interface UseProductComments {
-  /** Every comment in the thread (all depths). */
+  /** Every visible comment in the thread (all depths) — deleted and
+   * superseded (edited) versions already removed. */
   allComments: NostrEvent[];
   /** Comments rooted directly on the product, newest-first. */
   topLevel: NostrEvent[];
@@ -29,6 +32,10 @@ export interface UseProductComments {
    */
   error: boolean;
   refetch: () => void;
+  /** Show a comment we just published at once (before the refetch sees it). */
+  addLocally: (comment: NostrEvent) => void;
+  /** Hide a comment at once (deleted / replaced); returns the undo. */
+  hideLocally: (id: string) => () => void;
 }
 
 /**
@@ -39,6 +46,18 @@ export interface UseProductComments {
 export function useProductComments(root: CommentRoot | null): UseProductComments {
   const { relays } = useNostr();
   const [events, setEvents] = useState<NostrEvent[]>([]);
+  // Author kind-5 deletions of the fetched comments (#1272).
+  const [deletions, setDeletions] = useState<NostrEvent[]>([]);
+  // Optimistic state from this device's own edits/deletes. Survives refetches:
+  // a relay that ignores NIP-09 must not bring a deleted comment back here.
+  const [localAdded, setLocalAdded] = useState<NostrEvent[]>([]);
+  const [localHidden, setLocalHidden] = useState<ReadonlySet<string>>(() => new Set());
+  // Read by the fetch (not a dep): our own posts are checked for deletions
+  // too, in case another device deleted one relays no longer return.
+  const localAddedRef = useRef(localAdded);
+  useEffect(() => {
+    localAddedRef.current = localAdded;
+  }, [localAdded]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const [tick, setTick] = useState(0);
@@ -60,6 +79,7 @@ export function useProductComments(root: CommentRoot | null): UseProductComments
     useCallback(() => {
       if (!root) {
         setEvents([]);
+        setDeletions([]);
         setLoading(false);
         setError(false);
         return;
@@ -75,9 +95,29 @@ export function useProductComments(root: CommentRoot | null): UseProductComments
         signal: controller.signal,
       })
         .then((evs) => {
+          if (controller.signal.aborted) return;
           // The `#A` filter is only a relay-side request — keep only comments
           // whose ROOT tag is this product before storing/counting them.
-          if (!controller.signal.aborted) setEvents(evs.filter((e) => belongsToRoot(e, root)));
+          const comments = evs.filter((e) => belongsToRoot(e, root));
+          setEvents(comments);
+          setLoading(false);
+          // Then the kind-5s naming them (most relays already dropped what was
+          // deleted; this covers the ones that kept it). Best-effort: a failed
+          // lookup just keeps the previous deletions.
+          return Promise.all(
+            deletionFilters('e', idRefs([...comments, ...localAddedRef.current])).map((filter) =>
+              querySyncAbortable(pool, readRelays, filter, {
+                maxWait: 4000,
+                signal: controller.signal,
+              }),
+            ),
+          ).then(
+            (batches) => {
+              if (controller.signal.aborted) return;
+              setDeletions(batches.flat().filter((e) => e.kind === DELETION_KIND));
+            },
+            () => undefined,
+          );
         })
         .catch(() => {
           if (!controller.signal.aborted) setError(true);
@@ -91,11 +131,43 @@ export function useProductComments(root: CommentRoot | null): UseProductComments
     }, [rootRef, readRelays, tick]),
   );
 
-  const topLevel = useMemo(() => (root ? topLevelComments(events, root) : []), [events, root]);
+  const visible = useMemo(
+    () =>
+      reconcileComments(
+        localAdded.length > 0 ? [...events, ...localAdded] : events,
+        deletions,
+        localHidden,
+      ),
+    [events, localAdded, deletions, localHidden],
+  );
+  const topLevel = useMemo(() => (root ? topLevelComments(visible, root) : []), [visible, root]);
   const getDirectReplies = useCallback(
-    (parentId: string) => directReplies(events, parentId),
-    [events],
+    (parentId: string) => directReplies(visible, parentId),
+    [visible],
   );
 
-  return { allComments: events, topLevel, getDirectReplies, loading, error, refetch };
+  // One setState per user action (never per relay event).
+  const addLocally = useCallback((comment: NostrEvent) => {
+    setLocalAdded((prev) => (prev.some((c) => c.id === comment.id) ? prev : [...prev, comment]));
+  }, []);
+  const hideLocally = useCallback((id: string) => {
+    setLocalHidden((prev) => new Set(prev).add(id));
+    return () =>
+      setLocalHidden((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+  }, []);
+
+  return {
+    allComments: visible,
+    topLevel,
+    getDirectReplies,
+    loading,
+    error,
+    refetch,
+    addLocally,
+    hideLocally,
+  };
 }

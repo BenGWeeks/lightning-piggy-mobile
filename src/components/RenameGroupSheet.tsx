@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Text,
   TouchableOpacity,
-  StyleSheet,
   ActivityIndicator,
   BackHandler,
   Keyboard,
@@ -18,8 +17,9 @@ import {
 import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import type { Palette } from '../styles/palettes';
+import { createRenameGroupSheetStyles } from '../styles/RenameGroupSheet.styles';
 import { useGroups } from '../contexts/GroupsContext';
+import { marmotSendError } from '../services/marmotSend';
 
 interface Props {
   visible: boolean;
@@ -30,7 +30,7 @@ interface Props {
 const RenameGroupSheet: React.FC<Props> = ({ visible, groupId, onClose }) => {
   const colors = useThemeColors();
   const t = useTranslation();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createRenameGroupSheetStyles(colors), [colors]);
   const { getGroup, renameGroup } = useGroups();
   const group = groupId ? getGroup(groupId) : undefined;
   const [name, setName] = useState('');
@@ -102,10 +102,16 @@ const RenameGroupSheet: React.FC<Props> = ({ visible, groupId, onClose }) => {
         Alert.alert(t('renameGroupSheet.errorTitle'), t('renameGroupSheet.renameFailedMessage'));
       }
     } catch (err) {
-      // AsyncStorage write failure. Without try/finally `saving` would
-      // stick true and the Save button would stay disabled.
+      // NIP-17: an AsyncStorage write failure. Marmot: a commit that didn't go
+      // out (e.g. the chat is still applying a change, #1280) — say why. Without
+      // try/finally `saving` would stick true and Save would stay disabled.
       if (__DEV__) console.warn('[RenameGroupSheet] renameGroup failed:', err);
-      Alert.alert(t('renameGroupSheet.saveFailedTitle'), t('renameGroupSheet.saveFailedMessage'));
+      Alert.alert(
+        t('renameGroupSheet.saveFailedTitle'),
+        group?.protocol === 'marmot'
+          ? marmotSendError(err)
+          : t('renameGroupSheet.saveFailedMessage'),
+      );
     } finally {
       setSaving(false);
     }
@@ -163,59 +169,5 @@ const RenameGroupSheet: React.FC<Props> = ({ visible, groupId, onClose }) => {
     </BottomSheetModal>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    sheetBackground: {
-      backgroundColor: colors.surface,
-      borderTopLeftRadius: 24,
-      borderTopRightRadius: 24,
-    },
-    handleIndicator: {
-      backgroundColor: colors.divider,
-      width: 40,
-    },
-    content: {
-      paddingHorizontal: 24,
-      paddingTop: 8,
-      paddingBottom: 40,
-    },
-    title: {
-      fontSize: 22,
-      fontWeight: '700',
-      color: colors.textHeader,
-      marginBottom: 16,
-    },
-    label: {
-      fontSize: 14,
-      fontWeight: '600',
-      color: colors.textSupplementary,
-      marginBottom: 6,
-    },
-    input: {
-      backgroundColor: colors.background,
-      borderRadius: 12,
-      padding: 14,
-      fontSize: 15,
-      color: colors.textBody,
-      fontWeight: '500',
-      marginBottom: 24,
-    },
-    saveButton: {
-      backgroundColor: colors.brandPink,
-      height: 52,
-      borderRadius: 12,
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    saveButtonText: {
-      color: colors.white,
-      fontSize: 16,
-      fontWeight: '700',
-    },
-    disabled: {
-      opacity: 0.5,
-    },
-  });
 
 export default RenameGroupSheet;

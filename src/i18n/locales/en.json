@@ -2253,6 +2253,12 @@
       "retry": "Retry",
       "publishFailed": "Couldn't publish. Please try again."
     },
+    "feedbackActions": {
+      "commentActions": "Comment actions",
+      "reviewActions": "Review actions",
+      "edit": "Edit",
+      "delete": "Delete"
+    },
     "reviews": {
       "signIn": "Sign in to write a review",
       "write": "Write a review",
@@ -2266,14 +2272,35 @@
       "count": {
         "one": "{{count}} review",
         "other": "{{count}} reviews"
-      }
+      },
+      "yours": "You've reviewed this product",
+      "editOpen": "Edit review",
+      "cancel": "Cancel",
+      "deleteTitle": "Delete your review?",
+      "deleteBody": "We'll ask relays to delete it and hide it here straight away. Some relays or apps may ignore the request or have already copied it, so it may not disappear everywhere.",
+      "deleteConfirm": "Delete",
+      "deleted": "Delete request sent",
+      "posted": "Review posted",
+      "updated": "Review updated",
+      "deleteFailed": "Couldn't delete your review. Please try again."
     },
     "comments": {
       "placeholder": "Add a comment",
       "post": "Post comment",
       "signIn": "Sign in to comment",
       "empty": "No comments yet. Be the first to start the discussion!",
-      "loadError": "Failed to load comments"
+      "loadError": "Failed to load comments",
+      "editedMarker": "Edited",
+      "editing": "Editing your comment",
+      "save": "Save changes",
+      "cancel": "Cancel",
+      "deleteTitle": "Delete this comment?",
+      "deleteBody": "We'll ask relays to delete it and hide it here straight away. Some relays or apps may ignore the request or have already copied it, so it may not disappear everywhere.",
+      "deleteConfirm": "Delete",
+      "deleted": "Delete request sent",
+      "updated": "Comment updated",
+      "deleteFailed": "Couldn't delete the comment. Please try again.",
+      "editFailed": "Couldn't save your edit. Please try again."
     },
     "checkout": {
       "orderPlaced": "Order placed",
@@ -2462,7 +2489,8 @@
     "chatChangingPhoto": "This chat is changing right now — try sending the photo again.",
     "noRelayAcceptedVoice": "No relay accepted the voice note",
     "noRelayAcceptedPhoto": "No relay accepted the photo",
-    "inviteNotDelivered": "We couldn't send the invitation — no relay accepted it. Check your connection and try again."
+    "inviteNotDelivered": "We couldn't send the invitation — no relay accepted it. Check your connection and try again.",
+    "chatNotReady": "This chat is still catching up on a recent change, so that didn't go through. Try again in a moment."
   },
   "signOutPrompt": {
     "walletsRemoved": "Any wallets connected to this account, including recovery phrases stored here, will also be removed from this phone. Save their recovery phrases and connection details separately before signing out.",
@@ -2554,6 +2582,77 @@
     "progressBody": "Approve each request in your signer — every phone or app this person uses needs its own invitation.",
     "notReachedTitle": "Invitation not delivered yet",
     "notReachedBody": "We couldn't deliver the invitation to {{names}} yet. Lightning Piggy will keep trying automatically."
+  },
+  "invitationKeys": {
+    "title": "Devices that can get new chats",
+    "entrySubtitle": "See which devices people can start new private chats with",
+    "description": "To start a private chat with you, people's apps use an invitation key that each of your devices shares on your relays. Remove devices you no longer use, so new chats don't go somewhere you'll never see them. Your existing chats aren't affected.",
+    "thisPhone": "This phone",
+    "otherDevice": "Another Lightning Piggy device",
+    "whiteNoise": "White Noise",
+    "otherApp": "Another app",
+    "oldBadge": "Not used for 30+ days",
+    "notShared": "Not shared yet. Tap Refresh so people can start new chats with you here.",
+    "updatedJustNow": "Last updated just now",
+    "updatedHours": {
+      "one": "Last updated %{count} hour ago",
+      "other": "Last updated %{count} hours ago"
+    },
+    "updatedDays": {
+      "one": "Last updated %{count} day ago",
+      "other": "Last updated %{count} days ago"
+    },
+    "details": "Details",
+    "detailsA11y": "Show details for %{device}",
+    "deviceId": "Device ID: %{id}…",
+    "app": "App: %{app}",
+    "expires": "Invitation key expires: %{date}",
+    "unknownExpiry": "unknown",
+    "versions": {
+      "one": "%{count} copy found on relays",
+      "other": "%{count} copies found on relays"
+    },
+    "relays": "Shared on:\n%{relays}",
+    "refresh": "Refresh",
+    "refreshA11y": "Refresh this phone's invitation key",
+    "refreshed": "This phone is ready for new chats",
+    "refreshFailedTitle": "Couldn't refresh this phone",
+    "refreshFailedBody": "No relay accepted the new invitation key, or your signer didn't answer. Check your connection and try again.",
+    "stop": "Stop invites to this device",
+    "stopA11y": "Stop invites to %{device}, %{age}",
+    "stopTitle": "Stop invites to this device?",
+    "stopBody": "%{device}\n\nNew chats will stop going to this device. If it's still in use, it may miss new chats until it next refreshes its invitation key, which can take up to a week. Existing chats aren't affected.",
+    "stopConfirm": "Stop invites",
+    "stopped": "Invites to that device stopped",
+    "removeOld": {
+      "zero": "Remove old devices",
+      "one": "Remove %{count} old device",
+      "other": "Remove %{count} old devices"
+    },
+    "removeOldA11y": {
+      "zero": "Remove old devices. None to remove",
+      "one": "Remove %{count} old device",
+      "other": "Remove %{count} old devices"
+    },
+    "removeOldHint": "Old devices haven't updated their invitation key for 30 days, or it has expired. This phone is never removed.",
+    "removeOldTitle": {
+      "one": "Remove %{count} old device?",
+      "other": "Remove %{count} old devices?"
+    },
+    "removeOldBody": "New chats will stop going to devices that haven't updated in 30 days. Any device that updates before we finish is kept. Existing chats aren't affected.",
+    "removeOldConfirm": "Remove",
+    "removedOld": {
+      "one": "Removed %{count} old device",
+      "other": "Removed %{count} old devices"
+    },
+    "nothingRemoved": "Nothing removed: those devices have updated since",
+    "signerApprovals": "Your signer will ask you to approve %{count} times.",
+    "reload": "Check again",
+    "partial": "Some relays couldn't be checked, so this list may be incomplete. Removing old devices is off until every relay answers.",
+    "loadFailed": "Couldn't check your relays. Try again when you're connected.",
+    "cancel": "Cancel",
+    "failedTitle": "Couldn't stop invites",
+    "failedBody": "Some relays or your signer didn't respond. Tap Check again, then retry."
   },
   "followList": {
     "unavailable": "Couldn't load your follow list — try again"

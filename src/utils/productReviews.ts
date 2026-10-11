@@ -11,6 +11,7 @@
 //
 // No React, no I/O — unit-testable in isolation (coverage scope: src/utils).
 import type { Event as NostrEvent } from 'nostr-tools';
+import { deletedByAuthor } from './nip09';
 
 /** Gamma Markets product-review event kind. */
 export const REVIEW_KIND = 31555;
@@ -204,4 +205,46 @@ export function aggregateReviews(reviews: ParsedReview[]): ReviewAggregate {
   if (reviews.length === 0) return { average: 0, count: 0 };
   const sum = reviews.reduce((acc, r) => acc + r.stars, 0);
   return { average: sum / reviews.length, count: reviews.length };
+}
+
+/** The review's own addressable coordinate `31555:<reviewer>:<d>` (#1272). */
+export function reviewAddress(reviewerPubkey: string, coord: string): string {
+  return `${REVIEW_KIND}:${reviewerPubkey}:${coord}`;
+}
+
+/**
+ * The NIP-09 kind-5 request deleting a review (#1272): `a` = the review's
+ * address (every version up to now — a review is replaceable, so an older
+ * copy on a lagging relay must go too), `e` = the version shown, `k` = 31555.
+ * Re-reviewing later publishes a newer version, which the `a` deletion
+ * (bounded by its `created_at`) doesn't cover.
+ */
+export function buildReviewDeletion(
+  review: Pick<ParsedReview, 'id' | 'pubkey'>,
+  coord: string,
+): ReviewEventTemplate {
+  return {
+    kind: 5,
+    content: '',
+    tags: [
+      ['a', reviewAddress(review.pubkey, coord)],
+      ['e', review.id],
+      ['k', String(REVIEW_KIND)],
+    ],
+  };
+}
+
+/**
+ * The reviews to show (#1272): newest valid version per author, then minus
+ * those the author deleted (kind 5). Deletions apply AFTER the pick — a
+ * review is replaceable, so when its current version is deleted (even by `e`
+ * only, as some clients do) an older copy must not resurface in its place.
+ */
+export function visibleReviews(
+  events: NostrEvent[],
+  deletions: NostrEvent[],
+  expectedCoord?: string,
+): ParsedReview[] {
+  const deleted = deletedByAuthor(events, deletions);
+  return parseReviews(events, expectedCoord).filter((r) => !deleted.has(r.id));
 }
