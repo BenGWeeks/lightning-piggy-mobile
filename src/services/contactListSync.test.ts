@@ -89,12 +89,14 @@ describe('prepareContactListUpdate (#1271)', () => {
 });
 
 describe('resolveContactListBase', () => {
-  it('uses the local list when relays confirm there is no kind-3 (first follow)', () => {
-    expect(resolveContactListBase({ status: 'none' }, [])).toEqual({
-      tags: [],
-      content: '',
-      createdAt: 0,
-    });
+  it('refuses when relays report no kind-3 and the local list is empty (EOSE is not proof)', () => {
+    expect(resolveContactListBase({ status: 'none' }, [])).toBeNull();
+  });
+
+  it('builds on a non-empty local list when relays report no kind-3', () => {
+    expect(resolveContactListBase({ status: 'none' }, [contact(BIG)])?.tags).toEqual([
+      ['p', BIG, '', ''],
+    ]);
   });
 
   it('falls back to a non-empty local list when relays fail', () => {
@@ -172,6 +174,15 @@ describe('fetchLatestContactList', () => {
     const res = await fetchLatestContactList(me, ['wss://a', 'wss://b'], 1000);
     expect(res.status).toBe('found');
     expect(res.status === 'found' && pTags(res.base.tags)).toEqual([BIG, LITTLE]);
+  });
+
+  it('uses the first verified kind-3 after a short grace when a relay never answers', async () => {
+    const list = kind3(200, [BIG, LITTLE]);
+    mockRelays((h) => h.onevent(list)); // no EOSE: one relay hangs
+    const started = Date.now();
+    const res = await fetchLatestContactList(me, ['wss://a', 'wss://hung'], 5000, 30);
+    expect(res.status).toBe('found');
+    expect(Date.now() - started).toBeLessThan(1000);
   });
 
   it("reports 'none' when relays answer with no kind-3", async () => {

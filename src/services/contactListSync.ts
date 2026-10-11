@@ -30,7 +30,11 @@ export interface ContactListBase {
 export type ContactListFetchResult =
   /** Newest signature-verified kind-3 from the relays. */
   | { status: 'found'; base: ContactListBase }
-  /** Every relay that answered finished (EOSE) with no kind-3: the user has none. */
+  /**
+   * Aggregate EOSE with no kind-3. NOT proof the user has none: nostr-tools
+   * counts a relay that failed to connect (and an eoseTimeout) as EOSE, and an
+   * event dropped before `onevent` still ends in EOSE. Never trusted on its own.
+   */
   | { status: 'none' }
   /** No relay answered in time, or all of them failed: we know nothing. */
   | { status: 'failed' };
@@ -39,11 +43,19 @@ export type ContactChange =
   | { type: 'follow'; pubkey: string; relay?: string | null; petname?: string | null }
   | { type: 'unfollow'; pubkey: string };
 
-export const CONTACT_LIST_FETCH_TIMEOUT_MS = 5000;
+// Generous: on a busy device the JS thread can sit on relay replies for
+// seconds (measured: nothing processed within 5 s on a loaded emulator). A
+// timeout with no event refuses the write, so too tight a bound blocks follows.
+export const CONTACT_LIST_FETCH_TIMEOUT_MS = 10000;
+// After the first verified kind-3, how long to wait for a newer copy from a
+// slower relay before using it, so one hung relay can't hold a follow for the
+// full timeout.
+export const CONTACT_LIST_NEWER_GRACE_MS = 1500;
 
 /**
  * Fetch the user's newest kind-3, bounded by `limit: 1` per relay and a
- * timeout. Only events that are authored by `pubkey` AND pass a full schnorr
+ * timeout (finishing early on aggregate EOSE, or `graceMs` after the first
+ * verified event). Only events that are authored by `pubkey` AND pass a full schnorr
  * check count. A forged list from a hostile relay would otherwise be signed
  * and republished as the user's own.
  */
@@ -51,6 +63,7 @@ export function fetchLatestContactList(
   pubkey: string,
   relays: string[],
   timeoutMs: number = CONTACT_LIST_FETCH_TIMEOUT_MS,
+  graceMs: number = CONTACT_LIST_NEWER_GRACE_MS,
 ): Promise<ContactListFetchResult> {
   const author = pubkey.toLowerCase();
   const urls = [...new Set(relays)];
@@ -58,12 +71,23 @@ export function fetchLatestContactList(
   trackRelays(urls);
   return new Promise((resolve) => {
     let best: NostrEvent | null = null;
+    let seen = 0;
+    let closeReasons: unknown[] = [];
+    const startedAt = Date.now();
     let settled = false;
     let sub: { close: () => void } | null = null;
+    let graceTimer: ReturnType<typeof setTimeout> | null = null;
     const finish = (outcome: 'eose' | 'failed') => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (graceTimer) clearTimeout(graceTimer);
+      if (__DEV__) {
+        console.log(
+          `[ContactList] kind-3 fetch ${best ? 'found' : outcome} after ${Date.now() - startedAt}ms ` +
+            `(${seen} event(s) from ${urls.length} relay(s); close reasons: ${JSON.stringify(closeReasons)})`,
+        );
+      }
       try {
         sub?.close();
       } catch {
@@ -83,10 +107,12 @@ export function fetchLatestContactList(
       sub = pool.subscribeMany(urls, { kinds: [3], authors: [author], limit: 1 } as Filter, {
         maxWait: timeoutMs + 1000,
         onevent(event: NostrEvent) {
+          seen++;
           if (event.kind !== 3 || event.pubkey.toLowerCase() !== author) return;
           if (best && event.created_at <= best.created_at) return;
           if (!verifyEvent(event)) return;
           best = event;
+          graceTimer ??= setTimeout(() => finish('eose'), graceMs);
         },
         oneose() {
           // nostr-tools emits aggregate EOSE right before aggregate close when
@@ -94,6 +120,7 @@ export function fetchLatestContactList(
           queueMicrotask(() => finish('eose'));
         },
         onclose(reasons: (string | { url: string; reason: string })[]) {
+          closeReasons = reasons;
           const allFailed = reasons.length > 0 && reasons.every(isRelayFailureReason);
           finish(allFailed ? 'failed' : 'eose');
         },
@@ -123,18 +150,18 @@ export function localContactListBase(contacts: readonly NostrContact[]): Contact
 /**
  * Pick what a follow/unfollow is applied to, or `null` to refuse publishing:
  * - relays returned a kind-3 → that (the local copy may be stale or unloaded);
- * - relays confirmed there is none → the local list (empty for a brand-new
- *   user, so their first follow still works);
- * - relays failed → the local list only if it has entries. An empty local
- *   copy here is indistinguishable from "never loaded", and publishing it
- *   would wipe the real list.
+ * - otherwise the local list, but only if it has entries. An empty local
+ *   copy with nothing fetched is indistinguishable from "never loaded", and
+ *   publishing it would replace the user's real list (#1271). This holds even
+ *   for `none`: an aggregate EOSE can come from relays that timed out or
+ *   failed, so it can't prove the user has no list. (Cost: a brand-new
+ *   account with no kind-3 anywhere can't make its first follow here.)
  */
 export function resolveContactListBase(
   fetched: ContactListFetchResult,
   localContacts: readonly NostrContact[],
 ): ContactListBase | null {
   if (fetched.status === 'found') return fetched.base;
-  if (fetched.status === 'none') return localContactListBase(localContacts);
   return localContacts.length > 0 ? localContactListBase(localContacts) : null;
 }
 

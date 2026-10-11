@@ -93,6 +93,17 @@ describe('useContactActions follow path (#1271)', () => {
     expect(Toast.show).toHaveBeenCalledWith(expect.objectContaining({ type: 'error' }));
   });
 
+  it('does not publish when relays only report EOSE (no kind-3) and the local list is empty', async () => {
+    mockFetch.mockResolvedValue({ status: 'none' });
+    const { result } = setup([]);
+    let ok = true;
+    await act(async () => {
+      ok = await result.current.followContact(NEW);
+    });
+    expect(ok).toBe(false);
+    expect(nostrService.signAndPublishEvent).not.toHaveBeenCalled();
+  });
+
   it('unfollow removes only that person from the relay list', async () => {
     mockFetch.mockResolvedValue({
       status: 'found',
