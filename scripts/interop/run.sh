@@ -1,19 +1,18 @@
 #!/usr/bin/env bash
 # Scripted Marmot interop run: Lightning Piggy ↔ White Noise (+ the scripted
-# sender as a third member). One run covers the matrix in minutes:
+# sender as a third member), in two device-lock windows:
 #
-#   1. marmot-sender.mjs (a test Piggy on its own MLS device, no UI) creates a
-#      fresh group "IO <tag>" with Big Piggy's Lightning Piggy installs and
-#      Little Piggy's White Noise, sends the item set, and opens a Marmot 1:1
-#      with Big for the reply/reaction subset.               (no device lock)
-#   2. Maestro: Lightning Piggy asserts every item (group + 1:1), White Noise
-#      asserts every item, Lightning Piggy sends its own items. (device lock)
-#   3. The sender checks Lightning Piggy's items arrived on the wire, then
-#      makes Big an admin and says "after-admins".            (no device lock)
-#   4. Maestro: Lightning Piggy sees it, renames the group, sends again (#1309
-#      path); the sender says "after-rename"; White Noise and Lightning Piggy
-#      assert the post-change messages.                       (device lock)
-#   5. Writes matrix.md + screenshots + raw logs to $OUT.
+#   Window 1: point the app at the run bundle and stop it; marmot-sender.mjs (a
+#     test Piggy on its own MLS device, no UI) creates a fresh group "IO <tag>"
+#     with Big Piggy's Lightning Piggy installs and Little Piggy's White Noise,
+#     sends the item set, and opens a Marmot 1:1 with Big for the
+#     reply/reaction subset. Maestro then checks every item on Lightning Piggy
+#     (group + 1:1) and White Noise, Lightning Piggy sends its own items, and
+#     the sender confirms they arrived on the wire.
+#   Window 2: the sender makes Big an admin and says "after-admins"; Lightning
+#     Piggy renames the group and sends straight away (#1309 path); the sender
+#     says "after-rename"; both apps are checked for the post-change messages.
+#   Then matrix.md + screenshots + redacted logs are written to $OUT.
 #
 #   bash scripts/interop/run.sh
 #
@@ -91,54 +90,60 @@ flow() { # file [KEY=VALUE ...] — one Maestro run under maestro.lock
 export -f flow say redact set_metro metro_host is_emulator device_setup device_restore
 export DEVICE OUT TAG LOCK_DIR FIXTURE_ON_DEVICE FLOWS METRO_PORT
 
-# Run "$@" under the device lock, with setup + restore inside the lock.
+# Run a bash snippet under the device lock, with setup + restore inside it.
 with_device() {
-  flock -w 3600 "$LOCK_DIR/emulator.lock" bash -c '
-    trap device_restore EXIT
-    device_setup
-    '"$*"
+  flock -w 3600 "$LOCK_DIR/emulator.lock" bash -c "trap device_restore EXIT; device_setup; $1"
 }
 
-# --- 1. scripted sender: group + 1:1 ----------------------------------------
-say "run tag $TAG → $OUT"
-say "sender $SENDER (${SENDER_HEX:0:8}) creates group 'IO $TAG' with Big (LP) + Little (WN)"
-invite="$BIG_HEX@Lightning Piggy"
-[ -z "${SKIP_WN:-}" ] && invite="$invite,$LITTLE_HEX@White Noise"
-sender create --state "$STATE" --name "IO $TAG" --invite "$invite" | tee "$OUT/logs/create.json" >/dev/null
-GROUP_ID="$(jq -r '.groupId // empty' "$STATE" 2>/dev/null)"
-[ -n "$GROUP_ID" ] || { say "group creation failed — see logs/sender.err"; exit 1; }
-sender send --state "$STATE" --tag "$TAG" >"$OUT/logs/send-group.jsonl"
-say "sent $(grep -c '"ok":true' "$OUT/logs/send-group.jsonl") / $(wc -l <"$OUT/logs/send-group.jsonl") items into the group"
-sender create --state "$DM_STATE" --dm --invite "$BIG_HEX@Lightning Piggy" >"$OUT/logs/create-dm.json"
-sender send --state "$DM_STATE" --tag "$TAG" \
-  --only text.plain,text.zh,text.emoji,reply,react,react2,unreact,edit.target,edit,delete.target,delete \
-  >"$OUT/logs/send-dm.jsonl"
+# Why the sender runs inside the device lock: if another build of Lightning
+# Piggy (e.g. the lane's default Metro bundle) is running on the device while
+# the sender sends, it joins the group and consumes the MLS messages — they
+# are one-time secrets, so the bundle under test can never show them. Each
+# window therefore points the app at the run bundle, stops it, and only then
+# has the sender act.
+export -f sender
+export STATE DM_STATE BIG_HEX LITTLE_HEX SENDER_HEX SKIP_WN INTEROP_NSEC REPO
+ROW_FILE="$OUT/logs/row-ids.env"
 
-# --- 2. receive checks + Lightning Piggy sends --------------------------------
-ROW="group-row-marmot:$GROUP_ID"
-DM_ROW="conversation-row-$SENDER_HEX:marmot"
-with_device "
-  flow '$FLOWS/flow-145-interop-lp-receives-group.yaml' ROW_ID='$ROW'
-  flow '$FLOWS/flow-151-interop-lp-receives-dm.yaml' ROW_ID='$DM_ROW'
-  [ -z '${SKIP_WN:-}' ] && flow '$FLOWS/flow-146-interop-wn-receives-group.yaml' WN_CHAT='IO $TAG'
-  flow '$FLOWS/flow-147-interop-lp-sends-group.yaml' ROW_ID='$ROW'
-"
+# --- window 1: sender items → checks on both apps; Lightning Piggy sends ----
+say "window 1: sender $SENDER (${SENDER_HEX:0:8}) → group 'IO $TAG' (Big on Lightning Piggy + Little on White Noise) and a 1:1 with Big"
+with_device '
+  adb -s "$DEVICE" shell am force-stop com.lightningpiggy.app.dev
+  invite="$BIG_HEX@Lightning Piggy"; [ -z "${SKIP_WN:-}" ] && invite="$invite,$LITTLE_HEX@White Noise"
+  sender create --state "$STATE" --name "IO $TAG" --invite "$invite" >"$OUT/logs/create.json"
+  GROUP_ID="$(jq -r ".groupId // empty" "$STATE" 2>/dev/null)"
+  [ -n "$GROUP_ID" ] || { say "group creation failed — see logs/sender.err"; exit 1; }
+  echo "ROW=group-row-marmot:$GROUP_ID" >"'"$ROW_FILE"'"
+  sender send --state "$STATE" --tag "$TAG" >"$OUT/logs/send-group.jsonl"
+  say "sent $(grep -c "\"ok\":true" "$OUT/logs/send-group.jsonl") / $(wc -l <"$OUT/logs/send-group.jsonl") items into the group"
+  sender create --state "$DM_STATE" --dm --invite "$BIG_HEX@Lightning Piggy" >"$OUT/logs/create-dm.json"
+  sender send --state "$DM_STATE" --tag "$TAG" \
+    --only text.plain,text.zh,text.emoji,reply,react,react2,unreact,edit.target,edit,delete.target,delete \
+    >"$OUT/logs/send-dm.jsonl"
+  ROW="group-row-marmot:$GROUP_ID"
+  flow "$FLOWS/flow-145-interop-lp-receives-group.yaml" ROW_ID="$ROW"
+  flow "$FLOWS/flow-151-interop-lp-receives-dm.yaml" ROW_ID="conversation-row-$SENDER_HEX:marmot"
+  [ -z "${SKIP_WN:-}" ] && flow "$FLOWS/flow-146-interop-wn-receives-group.yaml" WN_CHAT="IO $TAG"
+  flow "$FLOWS/flow-147-interop-lp-sends-group.yaml" ROW_ID="$ROW"
+  # Wire check of Lightning Piggy'"'"'s sends from the scripted member.
+  sender listen --state "$STATE" --seconds 90 \
+    --expect "IO${TAG}L plain" --expect "IO${TAG}L md" --expect "IO${TAG}L long" \
+    --expect "IO${TAG}L editme v1 EDITED" >"$OUT/logs/listen-lp.jsonl"
+' || exit 1
+source "$ROW_FILE"
 
-# --- 3. wire check of Lightning Piggy's items, then an admin change ---------
-sender listen --state "$STATE" --seconds 90 \
-  --expect "IO${TAG}L plain" --expect "IO${TAG}L md" --expect "IO${TAG}L long" \
-  --expect "IO${TAG}L editme v1 EDITED" >"$OUT/logs/listen-lp.jsonl"
-sender admins --state "$STATE" --set "$SENDER_HEX,$BIG_HEX" >"$OUT/logs/admins.json"
-sender say --state "$STATE" --text "IO$TAG after-admins" >>"$OUT/logs/admins.json"
-
-# --- 4. rename by Lightning Piggy (#1309 path) + post-change checks ---------
-with_device "flow '$FLOWS/flow-149-interop-lp-rename-after-admin.yaml' ROW_ID='$ROW'"
-sender say --state "$STATE" --text "IO$TAG after-rename" >"$OUT/logs/after-rename.json"
-sender info --state "$STATE" >"$OUT/logs/group-info.json"
-with_device "
-  flow '$FLOWS/flow-150-interop-lp-receives-after-rename.yaml' ROW_ID='$ROW'
-  [ -z '${SKIP_WN:-}' ] && flow '$FLOWS/flow-148-interop-wn-receives-lp.yaml' WN_CHAT='IO $TAG'
-"
+# --- window 2: admin change, Lightning Piggy rename (#1309 path), post-change
+say "window 2: admin change → Lightning Piggy renames + sends → checks"
+with_device '
+  adb -s "$DEVICE" shell am force-stop com.lightningpiggy.app.dev
+  sender admins --state "$STATE" --set "$SENDER_HEX,$BIG_HEX" >"$OUT/logs/admins.json"
+  sender say --state "$STATE" --text "IO$TAG after-admins" >>"$OUT/logs/admins.json"
+  flow "$FLOWS/flow-149-interop-lp-rename-after-admin.yaml" ROW_ID="'"$ROW"'"
+  sender say --state "$STATE" --text "IO$TAG after-rename" >"$OUT/logs/after-rename.json"
+  flow "$FLOWS/flow-150-interop-lp-receives-after-rename.yaml" ROW_ID="'"$ROW"'"
+  [ -z "${SKIP_WN:-}" ] && flow "$FLOWS/flow-148-interop-wn-receives-lp.yaml" WN_CHAT="IO $TAG"
+  sender info --state "$STATE" >"$OUT/logs/group-info.json"
+'
 
 # --- 5. matrix ------------------------------------------------------------
 node scripts/interop/matrix.mjs "$OUT" "$TAG" >"$OUT/matrix.md"
