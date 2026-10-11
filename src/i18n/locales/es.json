@@ -2554,5 +2554,8 @@
     "progressBody": "Aprueba cada solicitud en tu firmador: cada teléfono o app que usa esta persona necesita su propia invitación.",
     "notReachedTitle": "Invitación aún no entregada",
     "notReachedBody": "Todavía no pudimos entregar la invitación a {{names}}. Lightning Piggy lo seguirá intentando automáticamente."
+  },
+  "followList": {
+    "unavailable": "No se pudo cargar tu lista de seguidos — inténtalo de nuevo"
   }
 }
