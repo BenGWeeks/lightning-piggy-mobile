@@ -18,7 +18,7 @@ env:
 
 - extendedWaitUntil:
     visible:
-      id: 'tab-home'
+      id: 'tab-wallets'
     timeout: 40000
 
 - tapOn:

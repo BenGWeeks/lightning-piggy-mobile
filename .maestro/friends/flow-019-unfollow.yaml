@@ -58,4 +58,4 @@ name: Unfollow Contact Test
 
 # Return to Home
 - tapOn:
-    text: 'Home tab'
+    text: 'Wallets tab'

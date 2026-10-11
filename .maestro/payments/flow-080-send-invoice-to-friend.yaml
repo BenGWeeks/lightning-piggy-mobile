@@ -22,12 +22,12 @@ name: Send 21 sat Invoice to Friend
 # Wait for the app to be ready
 - extendedWaitUntil:
     visible:
-      id: 'tab-home'
+      id: 'tab-wallets'
     timeout: 40000
 
 # Start on Home
 - tapOn:
-    id: 'tab-home'
+    id: 'tab-wallets'
 - waitForAnimationToEnd:
     timeout: 3000
 

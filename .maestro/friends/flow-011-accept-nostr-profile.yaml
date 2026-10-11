@@ -7,7 +7,7 @@ name: Accept Nostr profile (adopt displayName)
 # the Add Wallet flow / Wallet Settings, not the global account).
 
 # Trigger the login flow (which surfaces the profile-update alert)
-- tapOn: { id: 'tab-home', optional: true }
+- tapOn: { id: 'tab-wallets', optional: true }
 - waitForAnimationToEnd: { timeout: 2000 }
 - tapOn: { id: 'profile-icon' }
 - waitForAnimationToEnd: { timeout: 3000 }

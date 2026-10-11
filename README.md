@@ -11,7 +11,7 @@ A mobile Bitcoin Lightning wallet for smart savers and their families, built wit
 <p align="center">
   <img alt="Explore" src="docs/images/app-hero-02-explore.webp" width="19%">
   <img alt="Map" src="docs/images/app-hero-03-map.webp" width="19%">
-  <img alt="Home" src="docs/images/app-hero-01-wallet.webp" width="19%">
+  <img alt="Wallets" src="docs/images/app-hero-01-wallet.webp" width="19%">
   <img alt="Piglet detail" src="docs/images/app-hero-05-piglet.webp" width="19%">
   <img alt="Geo-caches" src="docs/images/app-hero-04-hunt.webp" width="19%">
 </p>
@@ -133,7 +133,7 @@ Lightning Piggy is an [Expo](https://expo.dev) / React Native app (SDK 55, RN 0.
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Screens & Components  (src/screens, src/components)         │
-│  Home · Messages · Explore · Friends + Account drawer        │
+│  Wallets · Messages · Explore · Friends + Account drawer     │
 ├─────────────────────────────────────────────────────────────┤
 │  Navigation  (src/navigation/AppNavigator.tsx)              │
 │  4 tabs → Explore stack · account drawer · root stack        │
@@ -232,7 +232,7 @@ src/
   components/       # Reusable UI components (SendSheet, ContactProfileSheet, etc.)
   contexts/         # React contexts (WalletContext, NostrContext, ...)
   hooks/            # Per-feature hooks
-  navigation/       # React Navigation: Home · Messages · Explore · Friends tabs + account drawer
+  navigation/       # React Navigation: Wallets · Messages · Explore · Friends tabs + account drawer
   screens/          # Tab and feature screens (Home, Messages, Explore/Hunt/Map, Friends, account/)
   services/         # Business logic (NWC, LNURL, Nostr, Marmot, Boltz, BDK)
   styles/           # Theme and per-component style files

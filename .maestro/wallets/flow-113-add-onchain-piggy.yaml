@@ -16,11 +16,11 @@ name: Add Little Piggy on-chain wallet via clipboard paste
 
 - extendedWaitUntil:
     visible:
-      id: 'tab-home'
+      id: 'tab-wallets'
     timeout: 30000
 
 - tapOn:
-    id: 'tab-home'
+    id: 'tab-wallets'
 - waitForAnimationToEnd:
     timeout: 2000
 

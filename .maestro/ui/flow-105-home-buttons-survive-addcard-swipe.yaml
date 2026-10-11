@@ -11,7 +11,7 @@ name: Home Send/Receive buttons stay enabled after swiping to Add card
 
 - waitForAnimationToEnd: { timeout: 10000 }
 
-- tapOn: { id: 'tab-home' }
+- tapOn: { id: 'tab-wallets' }
 - waitForAnimationToEnd: { timeout: 3000 }
 
 # Receive must be enabled on the wallet card.

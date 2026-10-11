@@ -200,7 +200,7 @@ A large, mostly-stateless service layer grouped by domain. Selected modules:
   (`Profile`, `Wallets`, `Nostr`, `On-Chain`, `Display`, `Appearance`,
   `Nearby`, `Security`, `About`).
 * A **four-tab bottom bar** (test IDs in parentheses):
-  ** *Home* (`tab-home`) — wallet: balance, send, receive, transfer.
+  ** *Wallets* (`tab-wallets`) — wallet: balance, send, receive, transfer.
   ** *Messages* (`tab-messages`) — DM conversation list.
   ** *Explore* (`tab-explore`) — its own stack (below).
   ** *Friends* (`tab-friends`) — Nostr contacts + phone contacts.

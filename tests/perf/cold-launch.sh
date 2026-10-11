@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Cold-launch perf: force-stop → launch → Home tab content visible.
+# Cold-launch perf: force-stop → launch → Wallets tab content visible.
 # Exercises BootSplash dwell, WalletContext boot, NWC enable deferral,
 # and the first render of the Home carousel.
 set +e
@@ -17,7 +17,7 @@ appId: $PKG
 - launchApp
 - extendedWaitUntil:
     visible:
-      id: 'tab-home'
+      id: 'tab-wallets'
     timeout: 30000
 - extendedWaitUntil:
     visible:

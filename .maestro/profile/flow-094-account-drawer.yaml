@@ -14,7 +14,7 @@ name: Account Drawer Test
 
 # Start on Home
 - tapOn:
-    id: 'tab-home'
+    id: 'tab-wallets'
     optional: true
 - waitForAnimationToEnd:
     timeout: 3000

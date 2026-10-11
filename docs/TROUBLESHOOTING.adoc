@@ -821,7 +821,7 @@ Use a dependency directory local to the test checkout, restart Metro with `--cle
 === Maestro secret-mode setup fails or disables an enabled mode
 
 `flow-072-secret-mode.yaml` must return from About using
-`account-back-button` before selecting `tab-home`: account drawer screens have
+`account-back-button` before selecting `tab-wallets`: account drawer screens have
 no tab bar. Navigation is persisted across launches, so starting the app alone
 is not a Home-screen precondition. Triple taps should use Maestro's rapid
 `tapOn.repeat` to fit the release build's one-second gesture window, and the

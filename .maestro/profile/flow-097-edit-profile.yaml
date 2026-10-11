@@ -10,7 +10,7 @@ name: Edit Profile Test
 
 # Open drawer → Profile sub-screen
 - tapOn:
-    text: 'Home tab'
+    text: 'Wallets tab'
     optional: true
 - waitForAnimationToEnd:
     timeout: 3000
@@ -80,5 +80,5 @@ name: Edit Profile Test
 
 # Return to Home
 - tapOn:
-    text: 'Home tab'
+    text: 'Wallets tab'
     optional: true

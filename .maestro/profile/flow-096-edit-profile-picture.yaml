@@ -21,7 +21,7 @@ name: Edit Profile picture upload — #141 regression guard
 
 - extendedWaitUntil:
     visible:
-      id: 'tab-home'
+      id: 'tab-wallets'
     timeout: 40000
 
 # Open drawer → Profile sub-screen

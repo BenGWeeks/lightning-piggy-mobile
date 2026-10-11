@@ -22,13 +22,13 @@ name: SendSheet keeps every character of the zap message (#159, #160 regression 
 # Run: maestro test .maestro/payments/flow-081-sendsheet-typing.yaml
 
 # Launch the app fresh so we are guaranteed a known state. Without
-# this the test was failing at `tab-home is visible` when the previous
+# this the test was failing at `tab-wallets is visible` when the previous
 # test left the app on a different screen (e.g. mid-conversation).
 - launchApp:
     clearState: false
 - extendedWaitUntil:
     visible:
-      id: 'tab-home'
+      id: 'tab-wallets'
     timeout: 40000
 
 # Open a conversation with a known peer. Hardcoded "Little Piggy" —

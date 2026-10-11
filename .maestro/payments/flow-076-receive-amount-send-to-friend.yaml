@@ -12,7 +12,7 @@ name: Receive → Amount → Friend regression guard for #457
 #   1. Provide a deterministic repro the fix can be validated against.
 #   2. Guard against regression once the fix lands.
 #
-# Flow (from a fresh tab-home, AVD signed in as the sender — Big Piggy
+# Flow (from a fresh tab-wallets, AVD signed in as the sender — Big Piggy
 # in the fixture set):
 #
 #   1. Tap btn-receive → ReceiveSheet opens
@@ -43,11 +43,11 @@ name: Receive → Amount → Friend regression guard for #457
     clearState: false
 - extendedWaitUntil:
     visible:
-      id: 'tab-home'
+      id: 'tab-wallets'
     timeout: 30000
 
 - tapOn:
-    id: 'tab-home'
+    id: 'tab-wallets'
 - waitForAnimationToEnd:
     timeout: 2000
 
