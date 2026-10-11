@@ -1,6 +1,7 @@
 import { I18n } from 'i18n-js';
 import type { Scope, TranslateOptions } from 'i18n-js';
 import enJson from './locales/en.json';
+import deJson from './locales/de.json';
 import esJson from './locales/es.json';
 import huJson from './locales/hu.json';
 import ukJson from './locales/uk.json';
@@ -19,6 +20,7 @@ import { registerPluralRules } from './plurals';
 // a `Translations`-typed const fails `tsc` if that file is missing (or
 // misspells) a key, same guarantee a hand-written .ts file would give.
 const en: Translations = enJson;
+const de: Translations = deJson;
 const es: Translations = esJson;
 const hu: Translations = huJson;
 const uk: Translations = ukJson;
@@ -26,9 +28,9 @@ const uk: Translations = ukJson;
 /** Raw catalogue dict — exported so LocaleContext can build its own
  *  per-locale I18n instance for rendering (see the render-purity note
  *  there) without duplicating the JSON imports. */
-export const translations = { en, es, hu, uk };
+export const translations = { en, de, es, hu, uk };
 
-export const SUPPORTED_LOCALES = ['en', 'es', 'hu', 'uk'] as const;
+export const SUPPORTED_LOCALES = ['en', 'de', 'es', 'hu', 'uk'] as const;
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
 
 export function isSupportedLocale(code: string): code is SupportedLocale {

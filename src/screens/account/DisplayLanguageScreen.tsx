@@ -28,6 +28,7 @@ import type { AccountDrawerNavigation } from '../../navigation/types';
 // language so a user stuck in the wrong one can still find theirs.
 const LOCALE_LABELS: Record<(typeof SUPPORTED_LOCALES)[number], string> = {
   en: 'English',
+  de: 'Deutsch',
   es: 'Español',
   hu: 'Magyar',
   uk: 'Українська',
