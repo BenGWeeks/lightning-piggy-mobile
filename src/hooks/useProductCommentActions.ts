@@ -160,8 +160,13 @@ export function useProductCommentActions({
     }
     try {
       const posted = await publishComment({ root, content });
-      // An edit started while this was publishing keeps the composer.
-      setComposer((prev) => (prev.editing ? prev : EMPTY_COMPOSER));
+      // An edit started while this was publishing keeps the composer, but
+      // must not hand the just-posted text back as its "prior draft".
+      setComposer((prev) => {
+        if (!prev.editing) return EMPTY_COMPOSER;
+        if (prev.editing.priorDraft !== content) return prev;
+        return { ...prev, editing: { ...prev.editing, priorDraft: '' } };
+      });
       addLocally(posted);
       scheduleRefetch();
     } catch {
