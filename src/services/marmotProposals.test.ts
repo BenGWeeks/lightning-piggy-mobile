@@ -1,4 +1,5 @@
 import {
+  alignCommitForMdk,
   appDataDictionaryIsLast,
   needsAppDataDictionaryAlignment,
   proposeAppDataDictionaryLast,
@@ -54,5 +55,28 @@ describe('app_data_dictionary extension order (#1309)', () => {
     // A staged app_data_update is bundled ahead of our proposals and may not
     // precede a GroupContextExtensions proposal: leave that commit alone.
     expect(needsAppDataDictionaryAlignment(state([6, 3], [8]))).toBe(false);
+    // A staged GroupContextExtensions proposal: a commit may hold only one.
+    expect(needsAppDataDictionaryAlignment(state([6, 3], [7]))).toBe(false);
+  });
+
+  it('leads a commit (invites included) with the realign proposal only while needed', () => {
+    const group = (extensions: number[], staged: number[] = []) => ({
+      state: {
+        groupContext: { extensions: extensions.map((t) => ext(t)) },
+        unappliedProposals: Object.fromEntries(
+          staged.map((proposalType, i) => [`ref${i}`, { proposal: { proposalType } }]),
+        ),
+      },
+    });
+    const add = { proposalType: 1 };
+    const commit = { kind: 'commit', actorPubkey: 'a', extraProposals: [add] } as never;
+    const aligned = alignCommitForMdk(commit)(group([6, 3])) as { extraProposals: unknown[] };
+    expect(aligned.extraProposals).toHaveLength(2);
+    expect(typeof aligned.extraProposals[0]).toBe('function'); // the realign action
+    expect(aligned.extraProposals[1]).toBe(add);
+    expect(alignCommitForMdk(commit)(group([3, 6]))).toBe(commit); // MDK-created: no-op
+    expect(alignCommitForMdk(commit)(group([6, 3], [7]))).toBe(commit);
+    const message = { kind: 'applicationMessage', payload: new Uint8Array() } as never;
+    expect(alignCommitForMdk(message)(group([6, 3]))).toBe(message);
   });
 });

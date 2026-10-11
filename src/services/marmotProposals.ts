@@ -1,6 +1,7 @@
 // Workarounds for marmot-ts commit building, kept out of the session.
 
 import type { MarmotClient } from '@internet-privacy/marmot-ts';
+import type { GroupSendIntent } from './marmotSendGate';
 import {
   appDataDictionaryExtensionType,
   appDataUpdateProposalType,
@@ -44,18 +45,20 @@ export function appDataDictionaryIsLast(extensions: readonly ExtensionLike[]): b
 
 /**
  * Whether a commit built on `state` should carry {@link proposeAppDataDictionaryLast}:
- * the dictionary isn't last yet, and no staged `app_data_update` proposal
- * exists. ts-mls bundles staged proposals (by reference) ahead of the commit's
- * own, and an `app_data_update` may not precede a GroupContextExtensions
- * proposal, so in that rare case this commit can't realign (a later one will).
+ * the dictionary isn't last yet, and no GroupContextExtensions or
+ * `app_data_update` proposal is staged. ts-mls bundles staged proposals (by
+ * reference) ahead of the commit's own; a commit may hold only one
+ * GroupContextExtensions proposal, and an `app_data_update` may not precede
+ * one. In that rare case this commit doesn't realign (a later one will).
  */
 export function needsAppDataDictionaryAlignment(state: {
   groupContext: { extensions: readonly ExtensionLike[] };
   unappliedProposals: Record<string, { proposal: { proposalType: number } }>;
 }): boolean {
   if (appDataDictionaryIsLast(state.groupContext.extensions)) return false;
-  return !Object.values(state.unappliedProposals).some(
-    (p) => p.proposal.proposalType === appDataUpdateProposalType,
+  const blocking = [defaultProposalTypes.group_context_extensions, appDataUpdateProposalType];
+  return !Object.values(state.unappliedProposals).some((p) =>
+    blocking.includes(p.proposal.proposalType),
   );
 }
 
@@ -88,13 +91,19 @@ export function proposeAppDataDictionaryLast(): SingleProposalAction {
   })) as SingleProposalAction;
 }
 
-/** `proposals`, led by {@link proposeAppDataDictionaryLast} when the group
- * built on `state` still needs aligning (see {@link needsAppDataDictionaryAlignment}). */
-export function alignedForMdk(
-  state: Parameters<typeof needsAppDataDictionaryAlignment>[0],
-  proposals: SingleProposalAction[],
-): SingleProposalAction[] {
-  return needsAppDataDictionaryAlignment(state)
-    ? [proposeAppDataDictionaryLast(), ...proposals]
-    : proposals;
+/**
+ * Builds `intent` for the group's state at the moment it is submitted (after
+ * the send gate settles, so it sees every proposal staged meanwhile): a commit
+ * is led by {@link proposeAppDataDictionaryLast} while the group needs
+ * aligning. Covers invites too, so a group we create is aligned by its first
+ * Add commit, before any White Noise admin can commit to it (#1309).
+ */
+export function alignCommitForMdk(intent: GroupSendIntent) {
+  return (group: { state: Parameters<typeof needsAppDataDictionaryAlignment>[0] }) =>
+    intent.kind === 'commit' && needsAppDataDictionaryAlignment(group.state)
+      ? {
+          ...intent,
+          extraProposals: [proposeAppDataDictionaryLast(), ...(intent.extraProposals ?? [])],
+        }
+      : intent;
 }

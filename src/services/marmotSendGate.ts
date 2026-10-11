@@ -18,7 +18,7 @@
 
 import { groupLifecycleStates, type MarmotGroup } from '@internet-privacy/marmot-ts';
 
-type Group = Pick<MarmotGroup, 'convergenceStatus' | 'lifecycle' | 'submitIntent'>;
+type Group = Pick<MarmotGroup, 'convergenceStatus' | 'lifecycle' | 'submitIntent' | 'state'>;
 export type GroupSendIntent = Parameters<MarmotGroup['submitIntent']>[0];
 type GroupPublishResults = Awaited<ReturnType<MarmotGroup['submitIntent']>>;
 
@@ -40,13 +40,15 @@ export const canPublishNow = (group: Pick<Group, 'convergenceStatus' | 'lifecycl
   group.convergenceStatus === 'Settled' && group.lifecycle === groupLifecycleStates.stable;
 
 /**
- * Submit `intent` once the group can publish it immediately. Rejects with
+ * Submit `intent` once the group can publish it immediately. A function is
+ * called right then, with no await before submitting, to build the intent
+ * from the group's current state. Rejects with
  * MarmotGroupNotReadyError after `timeoutMs`, or with `stoppedError()` as soon
  * as `cancelled()` turns true (sign-out mid-wait).
  */
 export async function submitWhenSettled(
   group: Group,
-  intent: GroupSendIntent,
+  intent: GroupSendIntent | ((group: Group) => GroupSendIntent),
   opts: {
     timeoutMs?: number;
     cancelled?: () => boolean;
@@ -58,7 +60,9 @@ export async function submitWhenSettled(
     if (opts.cancelled?.()) throw opts.stoppedError?.() ?? new Error('marmot: session stopped');
     // Check and submit with no await between: submitIntent reads the same
     // gate synchronously on entry, so this can never land in its queue.
-    if (canPublishNow(group)) return group.submitIntent(intent);
+    if (canPublishNow(group)) {
+      return group.submitIntent(typeof intent === 'function' ? intent(group) : intent);
+    }
     if (Date.now() >= deadline) throw new MarmotGroupNotReadyError();
     await new Promise((resolve) => setTimeout(resolve, SETTLE_POLL_MS));
   }
