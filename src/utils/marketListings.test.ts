@@ -31,6 +31,21 @@ const event = (fields: Partial<Event> = {}, secret = key) =>
   );
 
 describe('market relay listings', () => {
+  it('skips Gamma Markets listings marked visibility hidden', () => {
+    const withVisibility = (v: string) =>
+      event({
+        tags: [
+          ['d', 'product-1'],
+          ['title', 'Test listing'],
+          ['price', '50', 'USD'],
+          ['visibility', v],
+        ],
+      });
+    expect(parseMarketListing(withVisibility('hidden'))).toBeNull();
+    expect(parseMarketListing(withVisibility('on-sale'))).not.toBeNull();
+    expect(parseMarketListing(withVisibility('pre-order'))).not.toBeNull();
+  });
+
   it('rejects identifiers too long for a NIP-19 naddr (255 UTF-8 bytes)', () => {
     const withD = (d: string) =>
       event({

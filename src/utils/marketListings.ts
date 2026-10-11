@@ -63,6 +63,8 @@ export function parseMarketListing(event: Event, now = Date.now() / 1000): Marke
   } else {
     const status = tag(event, 'status');
     if (status && status !== 'active') return null;
+    // Gamma Markets: `visibility` hidden = not for display (default on-sale).
+    if (tag(event, 'visibility') === 'hidden') return null;
     const price = event.tags.find((t) => t[0] === 'price');
     title = tag(event, 'title');
     description = event.content;

@@ -109,4 +109,11 @@ export const createMarketProductDetailStyles = (colors: Palette) =>
 
     missing: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
     missingText: { fontSize: 15, color: colors.textSupplementary, textAlign: 'center' },
+    previewBanner: {
+      marginBottom: 12,
+      padding: 12,
+      borderRadius: 12,
+      backgroundColor: colors.zapYellowLight,
+    },
+    previewBannerText: { fontSize: 13, fontWeight: '600', color: colors.zapYellowDark },
   });

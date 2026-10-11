@@ -1096,3 +1096,44 @@ on the group's state at the moment of submitting. So:
 
 Groups White Noise created are already aligned. A group whose metadata commit
 was already rejected by either side stays split: start a new group.
+
+=== iOS simulator keeps loading the main Metro instead of a worktree's
+
+The iOS dev client reads its bundle host from React Native's `RCT_jsLocation`
+user default. Writing it with `xcrun simctl spawn booted defaults write
+<bundle-id> RCT_jsLocation …` while the app is running does not stick: the app
+flushes its in-memory value when it terminates and overwrites yours. Terminate
+the app first, then write the key into the app container's preferences by path,
+then launch:
+
+[source,bash]
+----
+xcrun simctl terminate booted com.lightningpiggy.app.dev
+C="$(xcrun simctl get_app_container booted com.lightningpiggy.app.dev data)"
+xcrun simctl spawn booted defaults write "$C/Library/Preferences/com.lightningpiggy.app.dev" RCT_jsLocation 192.168.1.35:<port>
+xcrun simctl launch booted com.lightningpiggy.app.dev
+----
+
+Confirm with `ss -tn state established '( sport = :<port> )'` on the Metro host.
+Restore the shared port (8090) the same way when you finish.
+
+If screens then fail with "Could not load bundle" or "Cannot read property
+'reload' of undefined" (`hmr.ts`), the dev client's hot-reload socket dropped and
+lazy screen chunks can no longer load. A flaky link between the simulator host
+and Metro triggers this. Relaunch the app for a fresh socket, and use a
+dependency directory local to the worktree (see "Dynamic imports fail in an
+emulator worktree with shared dependencies").
+
+=== Maestro taps land on the tab bar or the Explore map
+
+The tab bar draws over the bottom of scrolling screens. `scrollUntilVisible` can
+report an input as visible while the tab bar covers it, and the following
+`tapOn` then hits the tab (the Explore tab pops its stack to the top). Add
+`centerElement: true` to `scrollUntilVisible` before tapping fields low on a
+form.
+
+On Explore, the map in the middle of the screen swallows Maestro's default
+centre swipe. Anchor the swipe on a section header instead, for example
+`swipe: { from: { text: "Places near you.*" }, direction: UP }`. Section
+headers expose a combined label ("Places near you — see all"), so match with a
+regex.

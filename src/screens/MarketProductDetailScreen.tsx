@@ -6,6 +6,7 @@ import type { CompositeNavigationProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
+import { useNostr } from '../contexts/NostrContext';
 import { createMarketProductDetailStyles } from '../styles/MarketProductDetailScreen.styles';
 import { MARKET_PRODUCTS, sellerOf } from '../data/marketProducts';
 import { marketFeedbackContext } from '../utils/marketFeedback';
@@ -18,6 +19,7 @@ import MarketCheckoutSheet from '../components/MarketCheckoutSheet';
 import { Toast } from '../components/BrandedToast';
 import { usePullToRefresh, useRegisterRefresher } from '../hooks/usePullToRefresh';
 import { useLatestListing } from '../hooks/useLatestListing';
+import MarketListingDetails from '../components/MarketListingDetails';
 import type {
   ExploreNavigation,
   MarketProductDetailRoute,
@@ -59,6 +61,9 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const [imageAspect, setImageAspect] = useState<number | null>(null);
   const [loginVisible, setLoginVisible] = useState(false);
   const [checkoutVisible, setCheckoutVisible] = useState(false);
+  const { pubkey } = useNostr();
+  // `preview` = an unpublished draft from the listing editor (#1273).
+  const preview = route.params.preview === true;
 
   const routeProduct = useMemo(
     () =>
@@ -73,10 +78,9 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     () => Toast.show({ type: 'error', text1: t('market.detail.refreshFailed') }),
     [t],
   );
-  // Every product page shown today is published. A page that previews an
-  // unpublished draft must pass `enabled: false` — there's nothing on relays
+  // A seller's preview of an unpublished draft (#1273) has nothing on relays
   // to refresh, and its `d` tag must not be queried.
-  const pull = usePullToRefresh(onRefreshError, { enabled: true });
+  const pull = usePullToRefresh(onRefreshError, { enabled: !preview });
   const { register } = pull;
   useRegisterRefresher(register, refreshListing);
   const vendor = useMemo(() => (product ? sellerOf(product) : undefined), [product]);
@@ -135,6 +139,9 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   }
 
   const sellerName = vendor?.name ?? product.sellerName;
+  const listingEvent = product.listing?.event;
+  const isOwnListing = !!listingEvent && !!pubkey && listingEvent.pubkey === pubkey;
+  const listingDTag = listingEvent?.tags.find((tag) => tag[0] === 'd')?.[1];
   const hasImage = product.image.length > 0 && !imageFailed;
 
   return (
@@ -201,6 +208,11 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         </View>
 
         <View style={styles.body}>
+          {preview ? (
+            <View style={styles.previewBanner} testID="market-product-preview-banner">
+              <Text style={styles.previewBannerText}>{t('market.sell.detail.previewBanner')}</Text>
+            </View>
+          ) : null}
           <Text style={styles.title}>{product.title}</Text>
           <View style={styles.priceRow}>
             <Zap size={16} color={colors.brandPink} strokeWidth={2.5} fill={colors.brandPink} />
@@ -219,14 +231,30 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
           </View>
 
           <Text style={styles.description}>{product.description}</Text>
+          {product.listing && !withdrawn ? (
+            <MarketListingDetails
+              event={product.listing.event}
+              currency={product.listing.currency}
+            />
+          ) : null}
           {withdrawn ? (
             // A refresh found the listing deleted, sold or expired.
             <View style={styles.withdrawn} testID="market-product-detail-withdrawn">
               <Text style={styles.withdrawnText}>{t('market.detail.unavailable')}</Text>
             </View>
-          ) : (
+          ) : preview ? null : (
             <>
-              {product.listing ? (
+              {isOwnListing && listingDTag ? (
+                <TouchableOpacity
+                  style={styles.buyButton}
+                  testID="market-edit-own-listing"
+                  accessibilityLabel={t('market.sell.detail.editListing')}
+                  onPress={() => navigation.navigate('MarketListingEditor', { dTag: listingDTag })}
+                >
+                  <Text style={styles.buyText}>{t('market.sell.detail.editListing')}</Text>
+                </TouchableOpacity>
+              ) : null}
+              {product.listing && !isOwnListing ? (
                 <TouchableOpacity
                   style={styles.buyButton}
                   testID="market-contact-seller"
@@ -271,7 +299,7 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
 
         <View style={styles.divider} />
 
-        {feedback ? (
+        {preview ? null : feedback ? (
           <View style={styles.feedbackWrap}>
             <ProductFeedbackTabs
               coord={feedback.reviewCoord}
