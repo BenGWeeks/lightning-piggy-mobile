@@ -2478,11 +2478,14 @@
     "directTitle": "Share your location with {{name}}?",
     "liveTitle": "Share your live location with {{name}}?",
     "groupTitle": {
-      "one": "Share your location with the {{count}} person in {{group}}?",
+      "one": "Share your location with the other person in {{group}}?",
       "other": "Share your location with the {{count}} people in {{group}}?"
     },
-    "warning": "Only share your location with people you know and trust. Your message is end-to-end encrypted.",
+    "warning": "Only share your location with people you know and trust. Your message is end-to-end encrypted, and they'll see a map preview from OpenStreetMap.",
     "cancel": "Cancel",
-    "share": "Share"
+    "share": "Share",
+    "groupEmptyTitle": "No one to share with yet",
+    "groupEmptyBody": "There's no one else in {{group}} yet. Add someone to the group, then share your location.",
+    "ok": "OK"
   }
 }

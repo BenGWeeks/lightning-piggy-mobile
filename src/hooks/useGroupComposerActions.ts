@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { Alert } from '../components/BrandedAlert';
 import { useNostr, notifyGroupMessage } from '../contexts/NostrContext';
 import {
@@ -11,7 +11,7 @@ import type { EncryptedUpload } from '../services/imageUploadService';
 import type { Group } from '../types/groups';
 import { useComposerActions } from './useComposerActions';
 import type { SharedLocation } from '../services/locationService';
-import { confirmLocationShare } from '../utils/confirmLocationShare';
+import { confirmGroupLocationShare } from '../utils/confirmLocationShare';
 import { sendMarmotImage, type MarmotImage } from '../services/marmotSend';
 import { isMarmotGroupId } from '../services/marmotSession';
 
@@ -60,6 +60,15 @@ export function useGroupComposerActions(params: {
   } = params;
 
   const { sendGroupMessage, pubkey: myPubkey, signEvent } = useNostr();
+
+  // Latest group + identity, read at send time. A location send awaits a
+  // consent dialog, during which a roster update can land; the send must go
+  // to the roster the user just approved, not the one captured when the
+  // share started (#1253 review).
+  const latestRef = useRef({ group, myPubkey });
+  useEffect(() => {
+    latestRef.current = { group, myPubkey };
+  }, [group, myPubkey]);
 
   // Optimistically append a `local_…` row (dup window vs the inbound self-wrap
   // is a known follow-up, PR #227) and scroll to it.
@@ -138,6 +147,7 @@ export function useGroupComposerActions(params: {
 
   const sendText = useCallback(
     async (text: string): Promise<boolean> => {
+      const { group, myPubkey } = latestRef.current;
       if (!group || !myPubkey) return false;
 
       // Optimistic bubble: painted synchronously from onRumorReady, before any
@@ -180,14 +190,7 @@ export function useGroupComposerActions(params: {
       }
       return true;
     },
-    [
-      group,
-      myPubkey,
-      sendGroupMessage,
-      appendOptimisticGroupRow,
-      removeOptimisticRow,
-      alertSavedOnRelayOnly,
-    ],
+    [sendGroupMessage, appendOptimisticGroupRow, removeOptimisticRow, alertSavedOnRelayOnly],
   );
 
   const sendFile = useCallback(
@@ -295,15 +298,13 @@ export function useGroupComposerActions(params: {
   // keep stable identities across renders.
   const isMarmot = !!group && isMarmotGroupId(group.id);
   const confirmLocation = useCallback(
-    (location: SharedLocation) => {
-      if (!group || !myPubkey) return Promise.resolve(false);
-      return confirmLocationShare(location, {
-        group: group.name,
-        memberPubkeys: group.memberPubkeys,
-        myPubkey,
-      });
-    },
-    [group, myPubkey],
+    (location: SharedLocation) =>
+      confirmGroupLocationShare(location, () => {
+        const { group, myPubkey } = latestRef.current;
+        if (!group || !myPubkey) return null;
+        return { group: group.name, memberPubkeys: group.memberPubkeys, myPubkey };
+      }),
+    [],
   );
 
   const strategy = useMemo(
