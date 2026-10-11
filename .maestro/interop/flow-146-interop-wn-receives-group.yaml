@@ -13,169 +13,510 @@ name: Interop — White Noise renders what the scripted Marmot sender sent (grou
 # Env: WN_CHAT="IO <tag>", TAG=<run tag>.
 - runFlow:
     file: ../common/interop-wn-open-chat.yaml
-- scrollUntilVisible:
+# Swipe back (finger down = older messages) until it shows, then assert.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        text: '(?s).*IO${TAG} contact.*'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- assertVisible:
     label: 'IO-CHECK contact'
-    element:
-      text: '(?s).*IO${TAG} contact.*'
-    direction: UP
-    timeout: 20000
-    visibilityPercentage: 30
+    text: '(?s).*IO${TAG} contact.*'
     optional: true
+# Missed: go back to the newest message so later checks start from there.
+- runFlow:
+    when:
+      notVisible:
+        text: '(?s).*IO${TAG} contact.*'
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe:
+                direction: UP
+                duration: 300
 - takeScreenshot: wn-group-contact
-- scrollUntilVisible:
+# Swipe back (finger down = older messages) until it shows, then assert.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        text: '(?s).*IO${TAG} location.*'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- assertVisible:
     label: 'IO-CHECK location'
-    element:
-      text: '(?s).*IO${TAG} location.*'
-    direction: UP
-    timeout: 20000
-    visibilityPercentage: 30
+    text: '(?s).*IO${TAG} location.*'
     optional: true
+# Missed: go back to the newest message so later checks start from there.
+- runFlow:
+    when:
+      notVisible:
+        text: '(?s).*IO${TAG} location.*'
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe:
+                direction: UP
+                duration: 300
 - takeScreenshot: wn-group-location
-- scrollUntilVisible:
+# Swipe back (finger down = older messages) until it shows, then assert.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        text: '(?s).*IO${TAG} invoice lnbc.*'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- assertVisible:
     label: 'IO-CHECK invoice'
-    element:
-      text: '(?s).*IO${TAG} invoice lnbc.*'
-    direction: UP
-    timeout: 20000
-    visibilityPercentage: 30
+    text: '(?s).*IO${TAG} invoice lnbc.*'
     optional: true
+# Missed: go back to the newest message so later checks start from there.
+- runFlow:
+    when:
+      notVisible:
+        text: '(?s).*IO${TAG} invoice lnbc.*'
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe:
+                direction: UP
+                duration: 300
 - takeScreenshot: wn-group-invoice
-- scrollUntilVisible:
+# Swipe back (finger down = older messages) until it shows, then assert.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        text: '.*interop-voice.*'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- assertVisible:
     label: 'IO-CHECK voice'
-    element:
-      text: '.*interop-voice.*'
-    direction: UP
-    timeout: 20000
-    visibilityPercentage: 30
+    text: '.*interop-voice.*'
     optional: true
+# Missed: go back to the newest message so later checks start from there.
+- runFlow:
+    when:
+      notVisible:
+        text: '.*interop-voice.*'
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe:
+                direction: UP
+                duration: 300
 - takeScreenshot: wn-group-voice
-- scrollUntilVisible:
+# Swipe back (finger down = older messages) until it shows, then assert.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        text: '.*interop-image.*'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- assertVisible:
     label: 'IO-CHECK image'
-    element:
-      text: '.*interop-image.*'
-    direction: UP
-    timeout: 20000
-    visibilityPercentage: 30
+    text: '.*interop-image.*'
     optional: true
+# Missed: go back to the newest message so later checks start from there.
+- runFlow:
+    when:
+      notVisible:
+        text: '.*interop-image.*'
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe:
+                direction: UP
+                duration: 300
 - takeScreenshot: wn-group-image
-- scrollUntilVisible:
+# Swipe back (finger down = older messages) until it shows, then assert.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        text: '.*IO${TAG} editme v2 edited.*'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- assertVisible:
     label: 'IO-CHECK edit'
-    element:
-      text: '.*IO${TAG} editme v2 edited.*'
-    direction: UP
-    timeout: 20000
-    visibilityPercentage: 30
+    text: '.*IO${TAG} editme v2 edited.*'
     optional: true
+# Missed: go back to the newest message so later checks start from there.
+- runFlow:
+    when:
+      notVisible:
+        text: '.*IO${TAG} editme v2 edited.*'
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe:
+                direction: UP
+                duration: 300
 - takeScreenshot: wn-group-edit
+# "Not shown" check: search the whole thread first, then assert absence,
+# then return to the newest message.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        text: '.*IO${TAG} deleteme should disappear.*'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
 - assertNotVisible:
     label: 'IO-CHECK delete'
     text: '.*IO${TAG} deleteme should disappear.*'
     optional: true
-- scrollUntilVisible:
+- repeat:
+    times: 12
+    commands:
+      - swipe:
+          direction: UP
+          duration: 300
+# Swipe back (finger down = older messages) until it shows, then assert.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        text: '.*IO${TAG} reply: replying to plain.*'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- assertVisible:
     label: 'IO-CHECK reply'
-    element:
-      text: '.*IO${TAG} reply: replying to plain.*'
-    direction: UP
-    timeout: 20000
-    visibilityPercentage: 30
+    text: '.*IO${TAG} reply: replying to plain.*'
     optional: true
+# Missed: go back to the newest message so later checks start from there.
+- runFlow:
+    when:
+      notVisible:
+        text: '.*IO${TAG} reply: replying to plain.*'
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe:
+                direction: UP
+                duration: 300
 - takeScreenshot: wn-group-reply
-- scrollUntilVisible:
+# Swipe back (finger down = older messages) until it shows, then assert.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        text: '(?s).*IO${TAG} zw.*'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- assertVisible:
     label: 'IO-CHECK text.zw'
-    element:
-      text: '(?s).*IO${TAG} zw.*'
-    direction: UP
-    timeout: 20000
-    visibilityPercentage: 30
+    text: '(?s).*IO${TAG} zw.*'
     optional: true
+# Missed: go back to the newest message so later checks start from there.
+- runFlow:
+    when:
+      notVisible:
+        text: '(?s).*IO${TAG} zw.*'
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe:
+                direction: UP
+                duration: 300
 - takeScreenshot: wn-group-text-zw
-- scrollUntilVisible:
+# Swipe back (finger down = older messages) until it shows, then assert.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        text: '(?s).*IO${TAG} word.*'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- assertVisible:
     label: 'IO-CHECK text.word'
-    element:
-      text: '(?s).*IO${TAG} word.*'
-    direction: UP
-    timeout: 20000
-    visibilityPercentage: 30
+    text: '(?s).*IO${TAG} word.*'
     optional: true
+# Missed: go back to the newest message so later checks start from there.
+- runFlow:
+    when:
+      notVisible:
+        text: '(?s).*IO${TAG} word.*'
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe:
+                direction: UP
+                duration: 300
 - takeScreenshot: wn-group-text-word
-- scrollUntilVisible:
+# Swipe back (finger down = older messages) until it shows, then assert.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        text: '(?s).*IO${TAG} long.*'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- assertVisible:
     label: 'IO-CHECK text.long'
-    element:
-      text: '(?s).*IO${TAG} long.*'
-    direction: UP
-    timeout: 20000
-    visibilityPercentage: 30
+    text: '(?s).*IO${TAG} long.*'
     optional: true
+# Missed: go back to the newest message so later checks start from there.
+- runFlow:
+    when:
+      notVisible:
+        text: '(?s).*IO${TAG} long.*'
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe:
+                direction: UP
+                duration: 300
 - takeScreenshot: wn-group-text-long
-- scrollUntilVisible:
+# Swipe back (finger down = older messages) until it shows, then assert.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        text: '(?s).*IO${TAG} html.*'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- assertVisible:
     label: 'IO-CHECK text.html'
-    element:
-      text: '(?s).*IO${TAG} html.*'
-    direction: UP
-    timeout: 20000
-    visibilityPercentage: 30
+    text: '(?s).*IO${TAG} html.*'
     optional: true
+# Missed: go back to the newest message so later checks start from there.
+- runFlow:
+    when:
+      notVisible:
+        text: '(?s).*IO${TAG} html.*'
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe:
+                direction: UP
+                duration: 300
 - takeScreenshot: wn-group-text-html
-- scrollUntilVisible:
+# Swipe back (finger down = older messages) until it shows, then assert.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        text: '(?s).*IO${TAG} js.*'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- assertVisible:
     label: 'IO-CHECK text.js'
-    element:
-      text: '(?s).*IO${TAG} js.*'
-    direction: UP
-    timeout: 20000
-    visibilityPercentage: 30
+    text: '(?s).*IO${TAG} js.*'
     optional: true
+# Missed: go back to the newest message so later checks start from there.
+- runFlow:
+    when:
+      notVisible:
+        text: '(?s).*IO${TAG} js.*'
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe:
+                direction: UP
+                duration: 300
 - takeScreenshot: wn-group-text-js
-- scrollUntilVisible:
+# Swipe back (finger down = older messages) until it shows, then assert.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        text: '(?s).*IO${TAG} json.*'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- assertVisible:
     label: 'IO-CHECK text.json'
-    element:
-      text: '(?s).*IO${TAG} json.*'
-    direction: UP
-    timeout: 20000
-    visibilityPercentage: 30
+    text: '(?s).*IO${TAG} json.*'
     optional: true
+# Missed: go back to the newest message so later checks start from there.
+- runFlow:
+    when:
+      notVisible:
+        text: '(?s).*IO${TAG} json.*'
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe:
+                direction: UP
+                duration: 300
 - takeScreenshot: wn-group-text-json
-- scrollUntilVisible:
+# Swipe back (finger down = older messages) until it shows, then assert.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        text: '(?s).*IO${TAG} md.*'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- assertVisible:
     label: 'IO-CHECK text.md'
-    element:
-      text: '(?s).*IO${TAG} md.*'
-    direction: UP
-    timeout: 20000
-    visibilityPercentage: 30
+    text: '(?s).*IO${TAG} md.*'
     optional: true
+# Missed: go back to the newest message so later checks start from there.
+- runFlow:
+    when:
+      notVisible:
+        text: '(?s).*IO${TAG} md.*'
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe:
+                direction: UP
+                duration: 300
 - takeScreenshot: wn-group-text-md
-- scrollUntilVisible:
+# Swipe back (finger down = older messages) until it shows, then assert.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        text: '(?s).*IO${TAG} emoji.*'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- assertVisible:
     label: 'IO-CHECK text.emoji'
-    element:
-      text: '(?s).*IO${TAG} emoji.*'
-    direction: UP
-    timeout: 20000
-    visibilityPercentage: 30
+    text: '(?s).*IO${TAG} emoji.*'
     optional: true
+# Missed: go back to the newest message so later checks start from there.
+- runFlow:
+    when:
+      notVisible:
+        text: '(?s).*IO${TAG} emoji.*'
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe:
+                direction: UP
+                duration: 300
 - takeScreenshot: wn-group-text-emoji
-- scrollUntilVisible:
+# Swipe back (finger down = older messages) until it shows, then assert.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        text: '❤️, 1 reaction'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- assertVisible:
     label: 'IO-CHECK react'
-    element:
-      text: '❤️, 1 reaction'
-    direction: UP
-    timeout: 20000
-    visibilityPercentage: 30
+    text: '❤️, 1 reaction'
     optional: true
+# Missed: go back to the newest message so later checks start from there.
+- runFlow:
+    when:
+      notVisible:
+        text: '❤️, 1 reaction'
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe:
+                direction: UP
+                duration: 300
 - takeScreenshot: wn-group-react
-- scrollUntilVisible:
+# Swipe back (finger down = older messages) until it shows, then assert.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        text: '.*IO${TAG} zh: .*'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- assertVisible:
     label: 'IO-CHECK text.zh'
-    element:
-      text: '.*IO${TAG} zh: .*'
-    direction: UP
-    timeout: 20000
-    visibilityPercentage: 30
+    text: '.*IO${TAG} zh: .*'
     optional: true
+# Missed: go back to the newest message so later checks start from there.
+- runFlow:
+    when:
+      notVisible:
+        text: '.*IO${TAG} zh: .*'
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe:
+                direction: UP
+                duration: 300
 - takeScreenshot: wn-group-text-zh
-- scrollUntilVisible:
+# Swipe back (finger down = older messages) until it shows, then assert.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        text: '.*IO${TAG} plain: .*'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- assertVisible:
     label: 'IO-CHECK text.plain'
-    element:
-      text: '.*IO${TAG} plain: .*'
-    direction: UP
-    timeout: 20000
-    visibilityPercentage: 30
+    text: '.*IO${TAG} plain: .*'
     optional: true
+# Missed: go back to the newest message so later checks start from there.
+- runFlow:
+    when:
+      notVisible:
+        text: '.*IO${TAG} plain: .*'
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe:
+                direction: UP
+                duration: 300
 - takeScreenshot: wn-group-text-plain

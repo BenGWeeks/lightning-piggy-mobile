@@ -11,71 +11,252 @@ name: Interop — White Noise renders what Lightning Piggy sent (group), plus po
 # if it never learns the rename), TAG=<run tag>.
 - runFlow:
     file: ../common/interop-wn-open-chat.yaml
-- scrollUntilVisible:
+# Swipe back (finger down = older messages) until it shows, then assert.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        text: '.*IO${TAG}L after-lp-rename.*'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- assertVisible:
     label: 'IO-CHECK lp.after-lp-rename'
-    element:
-      text: '.*IO${TAG}L after-lp-rename.*'
-    direction: UP
-    timeout: 20000
+    text: '.*IO${TAG}L after-lp-rename.*'
     optional: true
-- scrollUntilVisible:
+# Missed: go back to the newest message so later checks start from there.
+- runFlow:
+    when:
+      notVisible:
+        text: '.*IO${TAG}L after-lp-rename.*'
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe:
+                direction: UP
+                duration: 300
+# Swipe back (finger down = older messages) until it shows, then assert.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        text: '.*IO${TAG} after-admins.*'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- assertVisible:
     label: 'IO-CHECK lp.after-admins'
-    element:
-      text: '.*IO${TAG} after-admins.*'
-    direction: UP
-    timeout: 20000
+    text: '.*IO${TAG} after-admins.*'
     optional: true
-- scrollUntilVisible:
+# Missed: go back to the newest message so later checks start from there.
+- runFlow:
+    when:
+      notVisible:
+        text: '.*IO${TAG} after-admins.*'
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe:
+                direction: UP
+                duration: 300
+# Swipe back (finger down = older messages) until it shows, then assert.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        text: '.*IO${TAG} after-rename.*'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- assertVisible:
     label: 'IO-CHECK lp.after-rename'
-    element:
-      text: '.*IO${TAG} after-rename.*'
-    direction: UP
-    timeout: 20000
+    text: '.*IO${TAG} after-rename.*'
     optional: true
+# Missed: go back to the newest message so later checks start from there.
+- runFlow:
+    when:
+      notVisible:
+        text: '.*IO${TAG} after-rename.*'
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe:
+                direction: UP
+                duration: 300
 - assertVisible:
     label: 'IO-CHECK lp.renamed-title'
     text: 'IO ${TAG} renamed'
     optional: true
+# Missed: go back to the newest message so later checks start from there.
+- runFlow:
+    when:
+      notVisible:
+        text: 'IO ${TAG} renamed'
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe:
+                direction: UP
+                duration: 300
 - takeScreenshot: wn-lp-after-changes
-- scrollUntilVisible:
+# Swipe back (finger down = older messages) until it shows, then assert.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        text: '.*(photo|image|interop).*'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- assertVisible:
     label: 'IO-CHECK lp.image'
-    element:
-      text: '.*(photo|image|interop).*'
-    direction: UP
-    timeout: 20000
+    text: '.*(photo|image|interop).*'
     optional: true
+# Missed: go back to the newest message so later checks start from there.
+- runFlow:
+    when:
+      notVisible:
+        text: '.*(photo|image|interop).*'
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe:
+                direction: UP
+                duration: 300
 - takeScreenshot: wn-lp-image
+# "Not shown" check: search the whole thread first, then assert absence,
+# then return to the newest message.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        text: '.*IO${TAG}L deleteme should disappear.*'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
 - assertNotVisible:
     label: 'IO-CHECK lp.delete'
     text: '.*IO${TAG}L deleteme should disappear.*'
     optional: true
-- scrollUntilVisible:
+- repeat:
+    times: 12
+    commands:
+      - swipe:
+          direction: UP
+          duration: 300
+# Swipe back (finger down = older messages) until it shows, then assert.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        text: '.*IO${TAG}L editme v1 EDITED.*'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- assertVisible:
     label: 'IO-CHECK lp.edit'
-    element:
-      text: '.*IO${TAG}L editme v1 EDITED.*'
-    direction: UP
-    timeout: 20000
+    text: '.*IO${TAG}L editme v1 EDITED.*'
     optional: true
+# Missed: go back to the newest message so later checks start from there.
+- runFlow:
+    when:
+      notVisible:
+        text: '.*IO${TAG}L editme v1 EDITED.*'
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe:
+                direction: UP
+                duration: 300
 - takeScreenshot: wn-lp-edit
-- scrollUntilVisible:
+# Swipe back (finger down = older messages) until it shows, then assert.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        text: '(?s).*IO${TAG}L long.*'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- assertVisible:
     label: 'IO-CHECK lp.long'
-    element:
-      text: '(?s).*IO${TAG}L long.*'
-    direction: UP
-    timeout: 20000
+    text: '(?s).*IO${TAG}L long.*'
     optional: true
-- scrollUntilVisible:
+# Missed: go back to the newest message so later checks start from there.
+- runFlow:
+    when:
+      notVisible:
+        text: '(?s).*IO${TAG}L long.*'
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe:
+                direction: UP
+                duration: 300
+# Swipe back (finger down = older messages) until it shows, then assert.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        text: '(?s).*IO${TAG}L md.*'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- assertVisible:
     label: 'IO-CHECK lp.md'
-    element:
-      text: '(?s).*IO${TAG}L md.*'
-    direction: UP
-    timeout: 20000
+    text: '(?s).*IO${TAG}L md.*'
     optional: true
-- scrollUntilVisible:
+# Missed: go back to the newest message so later checks start from there.
+- runFlow:
+    when:
+      notVisible:
+        text: '(?s).*IO${TAG}L md.*'
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe:
+                direction: UP
+                duration: 300
+# Swipe back (finger down = older messages) until it shows, then assert.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        text: '.*IO${TAG}L plain.*'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- assertVisible:
     label: 'IO-CHECK lp.plain'
-    element:
-      text: '.*IO${TAG}L plain.*'
-    direction: UP
-    timeout: 20000
+    text: '.*IO${TAG}L plain.*'
     optional: true
+# Missed: go back to the newest message so later checks start from there.
+- runFlow:
+    when:
+      notVisible:
+        text: '.*IO${TAG}L plain.*'
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe:
+                direction: UP
+                duration: 300
 - takeScreenshot: wn-lp-text

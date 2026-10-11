@@ -26,6 +26,12 @@ appId: dev.ipf.whitenoise.android
     timeout: 90000
 - tapOn:
     text: '${WN_CHAT}'
+# The invite bar (Decline / Accept) renders a moment after the thread.
+- extendedWaitUntil:
+    visible:
+      text: '(Accept|Message)'
+    timeout: 20000
+    optional: true
 - runFlow:
     when:
       visible:

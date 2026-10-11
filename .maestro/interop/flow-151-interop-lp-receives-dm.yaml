@@ -6,79 +6,237 @@ name: Interop — Lightning Piggy renders replies, reactions, edits and deletes 
 # White Noise-shaped Marmot DM with Big Piggy (no name, both admins) and send
 # the interaction subset of the item set into it.
 #
-# Inverted list: `direction: DOWN` walks back to older messages.
-#
 # Env: ROW_ID=conversation-row-<sender hex>:marmot, TAG=<run tag>.
 - runFlow:
     file: ../common/interop-lp-open-chat.yaml
-- scrollUntilVisible:
+# Swipe back (finger down = older messages) until it shows, then assert.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        text: 'IO${TAG} editme v2 edited'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- assertVisible:
     label: 'IO-CHECK dm.edit'
-    element:
-      text: 'IO${TAG} editme v2 edited'
-    direction: DOWN
-    timeout: 20000
-    visibilityPercentage: 30
+    text: 'IO${TAG} editme v2 edited'
     optional: true
+# Missed: go back to the newest message so later checks start from there.
+- runFlow:
+    when:
+      notVisible:
+        text: 'IO${TAG} editme v2 edited'
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe:
+                direction: UP
+                duration: 300
 - takeScreenshot: lp-dm-edit
+# "Not shown" check: search the whole thread first, then assert absence,
+# then return to the newest message.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        text: 'IO${TAG} deleteme should disappear'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
 - assertNotVisible:
     label: 'IO-CHECK dm.delete'
     text: 'IO${TAG} deleteme should disappear'
     optional: true
-- scrollUntilVisible:
+- repeat:
+    times: 12
+    commands:
+      - swipe:
+          direction: UP
+          duration: 300
+# Swipe back (finger down = older messages) until it shows, then assert.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        text: 'IO${TAG} reply: replying to plain'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- assertVisible:
     label: 'IO-CHECK dm.reply'
-    element:
-      text: 'IO${TAG} reply: replying to plain'
-    direction: DOWN
-    timeout: 20000
-    visibilityPercentage: 30
+    text: 'IO${TAG} reply: replying to plain'
     optional: true
+# Missed: go back to the newest message so later checks start from there.
+- runFlow:
+    when:
+      notVisible:
+        text: 'IO${TAG} reply: replying to plain'
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe:
+                direction: UP
+                duration: 300
 - takeScreenshot: lp-dm-reply
-- scrollUntilVisible:
+# Swipe back (finger down = older messages) until it shows, then assert.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        id: 'conversation-quote-.*'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- assertVisible:
     label: 'IO-CHECK dm.reply.quote'
-    element:
-      id: 'conversation-quote-.*'
-    direction: DOWN
-    timeout: 20000
-    visibilityPercentage: 30
+    id: 'conversation-quote-.*'
     optional: true
+# Missed: go back to the newest message so later checks start from there.
+- runFlow:
+    when:
+      notVisible:
+        id: 'conversation-quote-.*'
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe:
+                direction: UP
+                duration: 300
 - takeScreenshot: lp-dm-reply-quote
-- scrollUntilVisible:
+# Swipe back (finger down = older messages) until it shows, then assert.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        text: 'IO${TAG} emoji: .*'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- assertVisible:
     label: 'IO-CHECK dm.text.emoji'
-    element:
-      text: 'IO${TAG} emoji: .*'
-    direction: DOWN
-    timeout: 20000
-    visibilityPercentage: 30
+    text: 'IO${TAG} emoji: .*'
     optional: true
+# Missed: go back to the newest message so later checks start from there.
+- runFlow:
+    when:
+      notVisible:
+        text: 'IO${TAG} emoji: .*'
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe:
+                direction: UP
+                duration: 300
 - takeScreenshot: lp-dm-text-emoji
+# "Not shown" check: search the whole thread first, then assert absence,
+# then return to the newest message.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        id: 'conversation-reaction-.*-👍'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
 - assertNotVisible:
     label: 'IO-CHECK dm.unreact'
     id: 'conversation-reaction-.*-👍'
     optional: true
-- scrollUntilVisible:
+- repeat:
+    times: 12
+    commands:
+      - swipe:
+          direction: UP
+          duration: 300
+# Swipe back (finger down = older messages) until it shows, then assert.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        text: 'IO${TAG} zh: .*'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- assertVisible:
     label: 'IO-CHECK dm.text.zh'
-    element:
-      text: 'IO${TAG} zh: .*'
-    direction: DOWN
-    timeout: 20000
-    visibilityPercentage: 30
+    text: 'IO${TAG} zh: .*'
     optional: true
+# Missed: go back to the newest message so later checks start from there.
+- runFlow:
+    when:
+      notVisible:
+        text: 'IO${TAG} zh: .*'
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe:
+                direction: UP
+                duration: 300
 - takeScreenshot: lp-dm-text-zh
-- scrollUntilVisible:
+# Swipe back (finger down = older messages) until it shows, then assert.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        id: 'conversation-reaction-.*-❤️'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- assertVisible:
     label: 'IO-CHECK dm.react'
-    element:
-      id: 'conversation-reaction-.*-❤️'
-    direction: DOWN
-    timeout: 20000
-    visibilityPercentage: 30
+    id: 'conversation-reaction-.*-❤️'
     optional: true
+# Missed: go back to the newest message so later checks start from there.
+- runFlow:
+    when:
+      notVisible:
+        id: 'conversation-reaction-.*-❤️'
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe:
+                direction: UP
+                duration: 300
 - takeScreenshot: lp-dm-react
-- scrollUntilVisible:
+# Swipe back (finger down = older messages) until it shows, then assert.
+- repeat:
+    times: 12
+    while:
+      notVisible:
+        text: 'IO${TAG} plain: .*'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- assertVisible:
     label: 'IO-CHECK dm.text.plain'
-    element:
-      text: 'IO${TAG} plain: .*'
-    direction: DOWN
-    timeout: 20000
-    visibilityPercentage: 30
+    text: 'IO${TAG} plain: .*'
     optional: true
+# Missed: go back to the newest message so later checks start from there.
+- runFlow:
+    when:
+      notVisible:
+        text: 'IO${TAG} plain: .*'
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe:
+                direction: UP
+                duration: 300
 - takeScreenshot: lp-dm-text-plain

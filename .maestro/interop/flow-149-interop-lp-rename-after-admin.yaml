@@ -24,7 +24,6 @@ name: Interop — after an admin change, Lightning Piggy renames the group and s
     id: 'rename-group-input'
 - eraseText: 40
 - inputText: 'IO ${TAG} renamed'
-- hideKeyboard
 - tapOn:
     id: 'rename-group-save'
 - waitForAnimationToEnd:
@@ -38,7 +37,6 @@ name: Interop — after an admin change, Lightning Piggy renames the group and s
 - inputText: 'IO${TAG}L after-lp-rename'
 - tapOn:
     id: 'group-send-button'
-- hideKeyboard
 - waitForAnimationToEnd:
     timeout: 5000
 - takeScreenshot: lp-after-lp-rename

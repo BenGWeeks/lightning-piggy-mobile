@@ -15,6 +15,9 @@ name: Interop — Lightning Piggy sends the item set into the run's Marmot group
 # first, and the picker's own accessibility label "Photo taken on …" selects
 # the newest photo.
 #
+# No hideKeyboard: on the emulator lane (hardware keyboard, no soft keyboard)
+# Maestro's hideKeyboard presses Back and leaves the chat.
+#
 # Env: ROW_ID=group-row-marmot:<group id>, TAG=<run tag>.
 - runFlow:
     file: ../common/interop-lp-open-chat.yaml
@@ -43,7 +46,6 @@ name: Interop — Lightning Piggy sends the item set into the run's Marmot group
 - inputText: 'IO${TAG}L deleteme should disappear'
 - tapOn:
     id: 'group-send-button'
-- hideKeyboard
 - waitForAnimationToEnd:
     timeout: 5000
 # Edit: the composer is prefilled with the old text; append to it (Maestro's
@@ -55,7 +57,6 @@ name: Interop — Lightning Piggy sends the item set into the run's Marmot group
 - inputText: ' EDITED'
 - tapOn:
     id: 'group-send-button'
-- hideKeyboard
 - waitForAnimationToEnd:
     timeout: 5000
 - longPressOn:

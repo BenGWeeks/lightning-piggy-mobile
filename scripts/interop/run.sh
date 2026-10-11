@@ -66,7 +66,7 @@ set_metro() {
 FIXTURE_ON_DEVICE=/sdcard/Pictures/interop-image.png
 device_setup() {
   [ -n "${METRO_PORT:-}" ] && set_metro "$METRO_PORT"
-  adb -s "$DEVICE" push "$FLOWS/fixtures/interop-image.png" "$FIXTURE_ON_DEVICE" >/dev/null
+  adb -s "$DEVICE" push "$FLOWS/fixtures/interop-image.png" "$FIXTURE_ON_DEVICE" >/dev/null 2>&1
   adb -s "$DEVICE" shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE \
     -d "file://$FIXTURE_ON_DEVICE" >/dev/null
 }
