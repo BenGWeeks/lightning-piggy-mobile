@@ -374,6 +374,12 @@ describe('mergeGroupLogs', () => {
     expect(merged[0].id).toBe('a0');
     expect(merged[merged.length - 1].id).toBe('newest');
   });
+
+  it('keeps the edited copy of a message whichever log holds it (#1227)', () => {
+    const edited = { ...msg('m1', 1), text: 'v2', editedAt: 5, editId: 'e' };
+    expect(mergeGroupLogs([msg('m1', 1)], [edited])).toEqual([edited]);
+    expect(mergeGroupLogs([edited], [msg('m1', 1)])).toEqual([edited]);
+  });
 });
 
 describe('crafted group ids (#1240 review)', () => {

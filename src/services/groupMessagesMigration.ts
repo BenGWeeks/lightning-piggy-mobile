@@ -47,6 +47,7 @@ import {
 import { loadIdentities } from './identitiesStore';
 import { listMarmotOwnersForGroup } from './marmotStore';
 import { isSyntheticGroupId, syntheticGroupIdForParticipants } from '../utils/syntheticGroupId';
+import { isNewerEdit } from '../utils/marmotEditOrder';
 
 /** Set once every activity rollup has been deleted (one-time reset). */
 export const GROUP_ACTIVITY_RESET_KEY = 'group_activity_rollups_reset_v1';
@@ -98,16 +99,22 @@ function parseLog(raw: string | null): GroupMessage[] | null {
 }
 
 /**
- * Union by id (newer createdAt wins a collision), oldest first. Deliberately
- * NOT capped: the migration must never be the thing that drops a message —
- * the normal per-group cap applies on the next append, as it always has.
+ * Union by id (newer createdAt wins a collision; at the same createdAt the
+ * later Marmot edit wins — an edit keeps the original's createdAt), oldest
+ * first. Deliberately NOT capped: the migration must never be the thing that
+ * drops a message — the normal per-group cap applies on the next append, as
+ * it always has.
  */
 export function mergeGroupLogs(a: GroupMessage[], b: GroupMessage[]): GroupMessage[] {
   const byId = new Map<string, GroupMessage>();
   for (const m of [...a, ...b]) {
     if (!m || typeof m.id !== 'string') continue;
     const prior = byId.get(m.id);
-    if (!prior || prior.createdAt < m.createdAt) byId.set(m.id, m);
+    const newerEdit =
+      prior?.createdAt === m.createdAt &&
+      m.editedAt !== undefined &&
+      isNewerEdit({ editedAt: m.editedAt, editId: m.editId ?? '' }, prior);
+    if (!prior || prior.createdAt < m.createdAt || newerEdit) byId.set(m.id, m);
   }
   return Array.from(byId.values()).sort((x, y) => x.createdAt - y.createdAt);
 }
