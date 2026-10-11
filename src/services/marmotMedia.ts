@@ -42,6 +42,17 @@ export interface MarmotMediaRef {
 /** Per attachment, keyed by its ciphertext sha256. */
 export type MarmotMediaKeys = Record<string, MarmotMediaRef>;
 
+/** Whether `v` (e.g. parsed from storage) has the shape of MarmotMediaKeys. */
+export const isMediaKeys = (v: unknown): v is MarmotMediaKeys =>
+  !!v &&
+  typeof v === 'object' &&
+  Object.values(v).every(
+    (ref) =>
+      !!ref &&
+      typeof (ref as { url?: unknown }).url === 'string' &&
+      Array.isArray((ref as { keysHex?: unknown }).keysHex),
+  );
+
 /**
  * The URL to fetch an attachment from, or undefined if none is safe. The
  * locator is sender-controlled: only a public-https Blossom URL that commits

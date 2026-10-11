@@ -32,6 +32,7 @@ import {
   candidateMediaStates,
   deriveMediaKeys,
   encryptMarmotMedia,
+  isMediaKeys,
   renderableAttachments,
   type MarmotMediaKeys,
 } from './marmotMedia';
@@ -106,15 +107,6 @@ const isPlausibleTimestamp = (createdAt: number) =>
 const KEY_PACKAGE_DRAIN_MS = 5_000;
 // A manual Refresh gives up after this (one run ahead of it + a signer prompt).
 const KEY_PACKAGE_REFRESH_TIMEOUT_MS = 90_000;
-const isMediaKeys = (v: unknown): v is MarmotMediaKeys =>
-  !!v &&
-  typeof v === 'object' &&
-  Object.values(v).every(
-    (ref) =>
-      !!ref &&
-      typeof (ref as { url?: unknown }).url === 'string' &&
-      Array.isArray((ref as { keysHex?: unknown }).keysHex),
-  );
 // Safety stop for the paged backfill (500 × 40 = 20k events per group).
 const GROUP_BACKFILL_MAX_PAGES = 40;
 
