@@ -174,6 +174,14 @@ describe('verifiedOwnEvents', () => {
   });
 });
 
+describe('verifiedOwnEvents dedupe', () => {
+  it('a forged copy reusing a real id first does not hide the genuine copy', async () => {
+    const real = listing('a', 100);
+    const forgedSameId = { ...real, content: 'tampered' };
+    await expect(verifiedOwnEvents([forgedSameId, real], pubkey, [30402])).resolves.toEqual([real]);
+  });
+});
+
 describe('fetchLatestRevision', () => {
   it('returns the newest verified revision of exactly that coordinate, failing closed', async () => {
     const v1 = listing('a', 100);

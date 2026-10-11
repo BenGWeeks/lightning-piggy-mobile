@@ -51,8 +51,9 @@ export async function verifiedOwnEvents(
   try {
     for (const event of events) {
       if (signal?.aborted) break;
+      // Dedupe on VERIFIED ids only: a forged copy reusing a real id must
+      // not hide the genuine copy another relay returned.
       if (event.pubkey !== pubkey || !kinds.includes(event.kind) || seen.has(event.id)) continue;
-      seen.add(event.id);
       let ok = false;
       try {
         // Verify a clean copy: nostr-tools trusts a cached `verified` symbol
@@ -69,7 +70,10 @@ export async function verifiedOwnEvents(
       } catch {
         ok = false;
       }
-      if (ok) out.push(event);
+      if (ok) {
+        seen.add(event.id);
+        out.push(event);
+      }
       await scheduler.maybeYield();
     }
   } finally {

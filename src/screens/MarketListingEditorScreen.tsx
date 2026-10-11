@@ -187,8 +187,12 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
             {
               text: t('market.sell.cancel'),
               style: 'cancel',
-              // Show the newer revision instead of the stale form.
-              onPress: () => setDirty(false),
+              // Show the newer revision instead of the stale form: clearing
+              // the base too makes the seed effect reload from `existing`.
+              onPress: () => {
+                setDirty(false);
+                setBase(null);
+              },
             },
             { text: t('market.sell.overwrite'), onPress: () => void publish(true) },
           ]);
