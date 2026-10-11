@@ -3,6 +3,7 @@ import type { RawGiftWrapEvent } from '../services/nostrService';
 import { encodeEncryptedFileUrl } from './encryptedFileUrl';
 import { parseOrderEvent, serializeOrder } from './orderEvents';
 import { POLL_KIND, VOTE_KIND, serializePollFromRumor, serializeVoteFromRumor } from './nip88Poll';
+import { liveMarkerTextForRumor } from '../services/liveLocationWire';
 
 /**
  * Shape of a decoded NIP-17 message after two layers of NIP-44 decrypt.
@@ -380,6 +381,10 @@ export function fileMetaFromRumor(rumor: DecodedRumor): ConversationFileMeta | u
  * identically.
  */
 export function textForRumor(rumor: DecodedRumor): string {
+  // A tagged live-location start / end marker (#1300): its readable body is
+  // for other clients; store the internal marker text the bubble renders.
+  const liveMarker = liveMarkerTextForRumor(rumor);
+  if (liveMarker) return liveMarker;
   // Marketplace order / receipt rumor (kind 16/17) — should markets ever
   // gift-wrap these (they're plaintext today), store the canonical order JSON
   // so the conversation renderer shows the same order card the plaintext path

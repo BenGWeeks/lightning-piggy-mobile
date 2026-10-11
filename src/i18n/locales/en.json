@@ -2736,5 +2736,23 @@
   },
   "followList": {
     "unavailable": "Couldn't load your follow list — try again"
+  },
+  "liveLocationWire": {
+    "durationMins": "{{mins}} min",
+    "durationHours": "{{hours}} h",
+    "durationHoursMins": "{{hours}} h {{mins}} min",
+    "startText": "Sharing my live location for {{duration}}",
+    "endText": "Live location ended"
+  },
+  "liveLocationTracking": {
+    "serviceTitle": "Sharing your live location",
+    "serviceBody": "Lightning Piggy keeps sending your location while the app is in the background.",
+    "channelName": "Live location",
+    "titleOne": "Sharing your location with {{name}}",
+    "titleMany": "Sharing your location with {{count}} chats",
+    "body": "Until {{time}}",
+    "stopAction": "Stop sharing",
+    "aGroup": "a group",
+    "aFriend": "a friend"
   }
 }

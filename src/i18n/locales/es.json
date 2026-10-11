@@ -2736,5 +2736,23 @@
   },
   "followList": {
     "unavailable": "No se pudo cargar tu lista de seguidos — inténtalo de nuevo"
+  },
+  "liveLocationWire": {
+    "durationMins": "{{mins}} min",
+    "durationHours": "{{hours}} h",
+    "durationHoursMins": "{{hours}} h {{mins}} min",
+    "startText": "Compartiendo mi ubicación en tiempo real durante {{duration}}",
+    "endText": "Ubicación en tiempo real finalizada"
+  },
+  "liveLocationTracking": {
+    "serviceTitle": "Compartiendo tu ubicación en tiempo real",
+    "serviceBody": "Lightning Piggy sigue enviando tu ubicación mientras la app está en segundo plano.",
+    "channelName": "Ubicación en tiempo real",
+    "titleOne": "Compartiendo tu ubicación con {{name}}",
+    "titleMany": "Compartiendo tu ubicación con {{count}} chats",
+    "body": "Hasta las {{time}}",
+    "stopAction": "Dejar de compartir",
+    "aGroup": "un grupo",
+    "aFriend": "un amigo"
   }
 }

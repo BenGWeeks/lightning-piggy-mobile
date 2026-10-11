@@ -1,6 +1,7 @@
 import { getInboxLatest, getConversationMessages, type DmMessageRow } from './dmDb';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
 import { dmRowPreview } from '../utils/dmRowPreview';
+import { liveMarkerPhaseOf } from './liveLocationService';
 
 // The read seam between the encrypted DM store (dmDb) and the Messages UI
 // (#695 step 3b). NostrContext delegates here instead of walking a giant
@@ -25,6 +26,9 @@ const rowToInboxEntry = (r: DmMessageRow): DmInboxEntry => ({
   // unchanged (#203 / #market / NWC share). All four preview paths route through
   // dmRowPreview so they redact identically.
   text: dmRowPreview(r.content, r.wireKind),
+  // A live-location marker's preview is a label; keep the marker itself for
+  // the consumers that render or scan it (thread, Full Map) — #1300.
+  ...(liveMarkerPhaseOf(r.content) ? { renderText: r.content } : {}),
   wireKind: r.wireKind,
   ...(r.protocol !== undefined ? { protocol: r.protocol } : {}),
 });
