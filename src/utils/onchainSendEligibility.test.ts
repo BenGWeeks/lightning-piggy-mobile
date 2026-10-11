@@ -66,3 +66,46 @@ it('requires a direct-wallet fee estimate without requiring a swap server', () =
     onchainSendEligibility({ ...direct, directFeeSats: 200, balanceSats: 20200 }).canSend,
   ).toBe(true);
 });
+
+describe('direct sends BDK cannot fund', () => {
+  const direct = { ...base, viaSwap: false, fees: null, balanceSats: 4851 } as const;
+  it('shows the balance reason with the total BDK needed, not "fee unavailable"', () => {
+    const result = onchainSendEligibility({
+      ...direct,
+      directShortfall: { neededSats: 20210, availableSats: 4851 },
+    });
+    expect(result).toEqual({
+      canSend: false,
+      reason: {
+        key: 'sendSheet.swapInsufficientBalance',
+        params: {
+          total: (20210).toLocaleString(),
+          amount: (20000).toLocaleString(),
+          fee: (210).toLocaleString(),
+          balance: (4851).toLocaleString(),
+        },
+      },
+    });
+  });
+  it('falls back to the wallet balance when BDK omits what is available', () => {
+    const result = onchainSendEligibility({
+      ...direct,
+      directShortfall: { neededSats: 20210, availableSats: null },
+    });
+    expect(result.reason?.params?.balance).toBe((4851).toLocaleString());
+  });
+  it('still names the balance as the problem when BDK gives no amounts', () => {
+    expect(
+      onchainSendEligibility({
+        ...direct,
+        directShortfall: { neededSats: null, availableSats: null },
+      }),
+    ).toEqual({ canSend: false, reason: { key: 'sendSheet.onchainInsufficientFunds' } });
+  });
+  it('ignores a direct shortfall for a swap send', () => {
+    expect(
+      onchainSendEligibility({ ...base, directShortfall: { neededSats: 1, availableSats: 0 } })
+        .canSend,
+    ).toBe(true);
+  });
+});

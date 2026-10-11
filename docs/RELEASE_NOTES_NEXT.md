@@ -30,6 +30,8 @@ See docs/DEPLOYMENT.adoc → "TestFlight 'What to Test' automation".
 
 ### Fixed
 
+- **No default swap server any more.** Boltz's public server has shut down, so sending to or receiving from a Bitcoin address through a Lightning wallet now needs your own swap server: Account → On-chain → _Swap server URL_ → _Check and save_. Until one is set, Send and Receive say so. Sends straight from an on-chain wallet don't need one.
+- **On-chain Send explains why it's disabled.** It stays off until fees are known, says when your balance can't cover the amount plus fees (and turns back on once the wallet syncs new funds), and offers _Retry fees_ if loading them failed. Swap Receive tries the fees again when you tap _Generate QR_.
 - **Wallet is visible but disabled in group chat attachments.** Wallet connections can only be shared in one-to-one chats.
 
 - **Relay dots show the real connection status** instead of always red.
