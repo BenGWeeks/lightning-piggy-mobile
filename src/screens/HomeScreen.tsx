@@ -14,7 +14,7 @@ import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navig
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';
-import { Home } from 'lucide-react-native';
+import { Wallet } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import TransactionList from '../components/TransactionList';
@@ -314,7 +314,7 @@ const HomeScreen: React.FC = () => {
           // size; section titles (Messages/Friends/Learn) stay bolder to
           // read as section labels.
           titleStyle={{ fontSize: 22, fontWeight: '400' }}
-          icon={<Home size={20} color={colors.brandPink} />}
+          icon={<Wallet size={20} color={colors.brandPink} />}
           rightAccessory={<NotificationBell />}
         />
 
