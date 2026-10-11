@@ -42,7 +42,7 @@ import { verifySubmarineSwap } from '../utils/submarineSwapVerify';
 import { amountSatsFromBolt11 } from '../utils/bolt11';
 import { extractLockupFromTxHex } from '../utils/lockupTx';
 import { fetchWithTimeout } from './boltzApi';
-import { getSwapBackend, getSwapBackendForId, pinSwapBackend } from './swapBackendService';
+import { requireSwapBackend, getSwapBackendForId, pinSwapBackend } from './swapBackendService';
 import { waitForSwapStatus } from './boltzSwapStatus';
 import {
   CLAIM_MISSING_INPUTS_WINDOW_MS,
@@ -179,7 +179,7 @@ function generateClaimKeyPair(): { privateKey: Uint8Array; publicKey: Uint8Array
  * Fetch current reverse swap fee schedule (BTC Lightning → BTC on-chain).
  */
 export async function getReverseSwapFees(backend?: string): Promise<SwapFees> {
-  backend ??= await getSwapBackend();
+  backend ??= await requireSwapBackend();
   const res = await fetchWithTimeout(`${backend}/swap/reverse`);
   if (!res.ok) throw new Error(`Boltz API error: ${res.status}`);
   const data = await res.json();
@@ -205,7 +205,7 @@ export const getSwapFees = getReverseSwapFees;
  * Fetch current submarine swap fee schedule (BTC on-chain → BTC Lightning).
  */
 export async function getSubmarineSwapFees(backend?: string): Promise<SwapFees> {
-  backend ??= await getSwapBackend();
+  backend ??= await requireSwapBackend();
   const res = await fetchWithTimeout(`${backend}/swap/submarine`);
   if (!res.ok) throw new Error(`Boltz API error: ${res.status}`);
   const data = await res.json();
@@ -261,7 +261,7 @@ export async function createReverseSwap(
   approvedQuote?: SwapFees,
   amountIs: ReverseSwapAmountSide = 'invoice',
 ): Promise<ReverseSwapResult> {
-  const backend = await getSwapBackend();
+  const backend = await requireSwapBackend();
   console.log(
     `[Boltz] Creating reverse swap (LN → on-chain) for ${amountSats} sats to ${onchainAddress}`,
   );
@@ -790,7 +790,7 @@ export async function createSubmarineSwapForward(
   requestedAmountSats: number,
   approvedQuote?: SwapFees,
 ): Promise<SubmarineSwapResult> {
-  const backend = await getSwapBackend();
+  const backend = await requireSwapBackend();
   console.log('[Boltz] Creating submarine swap (on-chain → LN)');
   const amount = amountSatsFromBolt11(invoice);
   if (

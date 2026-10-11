@@ -22,6 +22,7 @@ import { Network, AddressIndex, KeychainKind } from 'bdk-rn/lib/lib/enums';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import bs58check from 'bs58check';
 import { getXpub, getMnemonic, getElectrumServer } from './walletStorageService';
+import { classifySendFeeError, type SendFeeEstimate } from '../utils/sendFeeEstimate';
 
 const ADDRESS_INDEX_PREFIX = 'onchain_addr_index_';
 
@@ -558,19 +559,20 @@ const DRY_RUN_CHANGE = 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4';
 
 /**
  * Miner fee `sendTransaction` would pay to send `amountSats` from this wallet
- * at `feeRate`: builds (never signs or broadcasts) the transaction against
- * the wallet's last-synced UTXOs, so multi-input sends are priced honestly.
- * Null when the wallet can't build it (unsynced, or the amount exceeds the
- * balance) — a guessed size could badly under-state a multi-input send.
+ * to `toAddress` (default: a Taproot placeholder, e.g. a Boltz lockup) at
+ * `feeRate`: builds (never signs or broadcasts) the transaction against the
+ * wallet's last-synced UTXOs, so multi-input sends are priced honestly. A
+ * guessed size could badly under-state a multi-input send, so a failed build
+ * is reported, never estimated — `insufficient` when BDK can't fund it.
  */
-export async function estimateSendFee(
+export async function estimateSendFeeResult(
   walletId: string,
   amountSats: number,
-  feeRate: number = DEFAULT_SEND_FEE_RATE,
-): Promise<number | null> {
+  { toAddress = DRY_RUN_RECIPIENT, feeRate = DEFAULT_SEND_FEE_RATE } = {},
+): Promise<SendFeeEstimate> {
   try {
     const wallet = await getBdkWallet(walletId);
-    const recipient = await (await new Address().create(DRY_RUN_RECIPIENT)).scriptPubKey();
+    const recipient = await (await new Address().create(toAddress)).scriptPubKey();
     const change = await (await new Address().create(DRY_RUN_CHANGE)).scriptPubKey();
     let txBuilder = await new TxBuilder().create();
     txBuilder = await txBuilder.addRecipient(recipient, amountSats);
@@ -578,11 +580,23 @@ export async function estimateSendFee(
     txBuilder = await txBuilder.drainTo(change);
     const result = await txBuilder.finish(wallet);
     const fee = result.txDetails.fee ?? (await result.psbt.feeAmount());
-    if (Number.isSafeInteger(fee) && fee > 0) return fee;
+    if (Number.isSafeInteger(fee) && fee > 0) return { kind: 'fee', feeSats: fee };
   } catch (e) {
-    console.warn('estimateSendFee: dry-run failed:', e);
+    const failure = classifySendFeeError(e);
+    if (failure.kind === 'error') console.warn('estimateSendFee: dry-run failed:', e);
+    return failure;
   }
-  return null;
+  return { kind: 'error' };
+}
+
+/** {@link estimateSendFeeResult} as a bare fee — null when it can't be built. */
+export async function estimateSendFee(
+  walletId: string,
+  amountSats: number,
+  feeRate: number = DEFAULT_SEND_FEE_RATE,
+): Promise<number | null> {
+  const result = await estimateSendFeeResult(walletId, amountSats, { feeRate });
+  return result.kind === 'fee' ? result.feeSats : null;
 }
 
 export async function sendTransaction(

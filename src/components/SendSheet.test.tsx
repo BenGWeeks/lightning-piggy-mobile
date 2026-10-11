@@ -10,6 +10,9 @@ import SendSheet from './SendSheet';
 type Permission = { granted: boolean } | null;
 let mockPermission: Permission = null;
 let mockSetPermission: ((p: Permission) => void) | null = null;
+jest.mock('react-native-safe-area-context', () => ({
+  useSafeAreaInsets: () => ({ top: 59, bottom: 34, left: 0, right: 0 }),
+}));
 jest.mock('expo-camera', () => {
   const { useState } = jest.requireActual('react');
   return {

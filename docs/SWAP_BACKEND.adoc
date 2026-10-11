@@ -2,7 +2,9 @@
 
 Account → On-chain → Swap server URL configures the Boltz-compatible server
 used for new Bitcoin mainnet ↔ Lightning swaps on this device, across accounts.
-The default is `https://api.boltz.exchange/v2`.
+No swap server is selected by default. Without one, swap-based Send, Move,
+and Receive explain how to configure a server; new swaps cannot start.
+Direct sends from an on-chain hot wallet do not require a swap server.
 
 Enter an HTTPS server URL (for example `https://swaps.example.com`) or its v2
 API base (`https://swaps.example.com/v2`). Reverse-proxy prefixes and explicit
@@ -10,7 +12,8 @@ ports are supported, for example `https://swaps.example.com:8443/boltz/v2`.
 Select *Check and save*. The app checks both BTC/BTC swap-pair endpoints before
 saving; this checks basic API compatibility, not the operator's trustworthiness,
 liquidity, or full swap execution. Failures leave the saved setting unchanged.
-*Use Boltz default URL* fills the field; *Check and save* applies it.
+*Clear swap server URL* clears the draft; *Check and save* saves the empty
+selection without a network request. Existing swaps keep their original server.
 
 The endpoint must be a Boltz swap backend, not Bitcoin RPC, LND, or a Boltz client.
 This setting does not change the app's Bitcoin network or Electrum server.
@@ -51,7 +54,9 @@ changing the setting cannot transfer an already-created swap to another server.
 
 == Manual verification
 
-. Open On-chain settings and confirm the default URL on a fresh install.
+. Open On-chain settings and confirm the server field is empty on a fresh install.
+. Open Send with a BIP21 address and amount: the missing-server message is shown
+  and Send is disabled. Do not send funds during this check.
 . Enter an invalid URL, HTTP URL, or incompatible HTTPS endpoint: saving fails.
 . Connect WireGuard, enter a compatible private HTTPS endpoint, and save.
 . Restart the app and confirm the setting persists.
@@ -61,3 +66,19 @@ changing the setting cannot transfer an already-created swap to another server.
   transaction details must continue querying the original provider.
 . Disconnect WireGuard: the private server becomes unreachable without any
   fallback requests to the public provider.
+
+== Public endpoint status (2026-10-11)
+
+Boltz's https://api.docs.boltz.exchange/[API documentation] and
+https://github.com/BoltzExchange/boltz-web-app/blob/main/src/configs/mainnet.ts[mainnet configuration]
+still name `https://api.boltz.exchange`; the latter also sets `swapsSuspended: true`.
+Both `api.boltz.exchange` and `boltz.exchange` returned NXDOMAIN in the checks
+for #1169 (including Google public DNS). Neither the documented endpoint nor
+`https://boltz.exchange/api` could be verified as a working public replacement.
+The app therefore has no default for new swaps. The legacy endpoint remains
+only for existing, unpinned swaps; it is not a fallback for new ones.
+
+Send requires a completed quote and a known wallet balance covering the
+recipient amount plus the quoted fees. A changed wallet, destination, amount,
+or sheet session invalidates the displayed quote. Server-side preflight still
+checks the approved swap quote before creating or paying a swap.
