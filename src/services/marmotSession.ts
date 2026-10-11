@@ -54,11 +54,7 @@ import {
   resolveInvitees,
 } from './marmotInvitees';
 import { KeyPackageRefreshRequests } from './marmotKeyRefresh';
-import {
-  needsAppDataDictionaryAlignment,
-  proposeAppDataDictionaryLast,
-  spreadProposals,
-} from './marmotProposals';
+import { alignedForMdk, spreadProposals } from './marmotProposals';
 import { MarmotWelcomeOutbox } from './marmotWelcomeOutbox';
 import { boundGroupQueries } from './marmotGroupBackfill';
 import { submitWhenSettled, type GroupSendIntent } from './marmotSendGate';
@@ -555,12 +551,9 @@ export class MarmotSession {
 
   private async commit(mlsId: string, extraProposals: CommitProposals): Promise<void> {
     const actorPubkey = await this.client.signer.getPublicKey();
-    // Align the GroupContext with MDK's extension order in the same commit, or
-    // White Noise rejects any metadata change (#1309; see marmotProposals.ts).
+    // #1309: realign for White Noise in the same commit (see marmotProposals.ts).
     const { state } = await this.client.groups.get(mlsId);
-    const proposals = needsAppDataDictionaryAlignment(state)
-      ? [proposeAppDataDictionaryLast(), ...extraProposals]
-      : extraProposals;
+    const proposals = alignedForMdk(state, extraProposals);
     await this.sendIntent(mlsId, { kind: 'commit', actorPubkey, extraProposals: proposals });
   }
 

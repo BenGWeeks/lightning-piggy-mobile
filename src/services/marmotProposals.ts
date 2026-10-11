@@ -87,3 +87,14 @@ export function proposeAppDataDictionaryLast(): SingleProposalAction {
     },
   })) as SingleProposalAction;
 }
+
+/** `proposals`, led by {@link proposeAppDataDictionaryLast} when the group
+ * built on `state` still needs aligning (see {@link needsAppDataDictionaryAlignment}). */
+export function alignedForMdk(
+  state: Parameters<typeof needsAppDataDictionaryAlignment>[0],
+  proposals: SingleProposalAction[],
+): SingleProposalAction[] {
+  return needsAppDataDictionaryAlignment(state)
+    ? [proposeAppDataDictionaryLast(), ...proposals]
+    : proposals;
+}
