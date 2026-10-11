@@ -1199,7 +1199,7 @@
     "accuracyOsm": "± {{meters}} m · OpenStreetMap",
     "unsupportedA11y": "Tipo de mensaje no compatible, kind {{kind}}",
     "unsupportedText": "Tipo de mensaje no compatible (kind {{kind}})",
-    "marmotInvite": "Te envió una invitación a un chat de Marmot: se abre como chat de Marmot en tus Mensajes.",
+    "marmotInvite": "Te envió una invitación a un chat de Marmot: se abre como chat de Marmot en tus Mensajes. Si no se abre aquí, la invitación puede ser para otro teléfono o una clave de invitación antigua. Pídele que te invite de nuevo.",
     "marmotMessage": "Evento de grupo de Marmot: abre el chat de Marmot para leerlo.",
     "marmotInvitePreview": "Invitación a chat de Marmot",
     "marmotMessagePreview": "Mensaje de Marmot",
@@ -2541,5 +2541,11 @@
     "groupEmptyTitle": "Todavía no hay nadie con quien compartir",
     "groupEmptyBody": "Todavía no hay nadie más en {{group}}. Añade a alguien al grupo y luego comparte tu ubicación.",
     "ok": "Aceptar"
+  },
+  "marmotInvitationKeys": {
+    "removingTitle": "Quitando las claves de invitación…",
+    "removingBody": "Aprueba las solicitudes en tu firmador para terminar de cerrar sesión. Puede tardar un minuto.",
+    "notRemovedTitle": "No se quitaron las claves de invitación",
+    "notRemovedBody": "No pudimos quitar de los relés las claves de invitación de Marmot de esta cuenta, así que es posible que sigan llegando invitaciones de Marmot a este teléfono. Lo volveremos a intentar automáticamente la próxima vez que esta cuenta inicie sesión aquí."
   }
 }

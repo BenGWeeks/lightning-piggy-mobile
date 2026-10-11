@@ -51,6 +51,7 @@ import type { EncryptedUpload } from '../services/imageUploadService';
 import { dropIdentityKeyMaterial, useIdentityMemoryReset } from './resetIdentityMemoryState';
 import { AMBER_NIP17_ENABLED_KEY_LEGACY } from './nostrDmCache';
 import { wipeAccountCaches } from './accountCacheWipe';
+import * as invitationKeys from '../services/marmotInvitationKeySignOut';
 import { wipeLocalDmStore } from '../services/localDb';
 import { useDmInbox } from './useDmInbox';
 import { DmInboxContext } from './DmInboxContext';
@@ -1120,6 +1121,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // Extracted so the multi-account sign-out path can call it without
   // coupling to the active-identity teardown logic (#288).
   const logout = useCallback(async () => {
+    // While the signer still works: take our invitation keys off relays (#1204).
+    if (pubkey) await invitationKeys.retireInvitationKeys({ owner: pubkey, signerType });
     dropIdentityKeyMaterial();
     setAmberNip44Permission('unknown');
     // Drop the in-memory NIP-17 wrap-id dedup Set — without this, a
@@ -1221,6 +1224,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [
     resetRelayLists,
     pubkey,
+    signerType,
     loadContactsFromCache,
     loadProfileFromCache,
     loadRelays,
@@ -1320,11 +1324,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         await logout();
         return;
       }
+      await invitationKeys.retireStoredInvitationKeys(targetPubkey, identities);
       await wipeAccountCaches(targetPubkey);
       const blob = await removeIdentityFromStore(targetPubkey);
       setIdentities(blob.identities);
     },
-    [pubkey, logout],
+    [pubkey, logout, identities],
   );
 
   const refreshProfile = useCallback(
@@ -1356,57 +1361,6 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     getReadRelays,
     loadContacts,
   });
-
-  const signZapRequest = useCallback(
-    async (
-      recipientPubkey: string,
-      amountSats: number,
-      comment: string,
-      zapEventId?: string,
-    ): Promise<string | null> => {
-      if (!pubkey || !isLoggedIn) return null;
-
-      const readRelays = getReadRelays();
-      const zapEvent = nostrService.createZapRequestEvent(
-        pubkey,
-        recipientPubkey,
-        amountSats * 1000,
-        readRelays,
-        comment,
-        zapEventId,
-      );
-
-      if (signerType === 'nsec') {
-        const nsec = await SecureStore.getItemAsync(NSEC_KEY);
-        if (!nsec) return null;
-        const { secretKey } = nostrService.decodeNsec(nsec);
-        const signed = nostrService.signEvent(zapEvent, secretKey);
-        return JSON.stringify(signed);
-      } else if (signerType === 'amber') {
-        try {
-          const eventJson = JSON.stringify(zapEvent);
-          const { event: signedEventJson } = await amberService.requestEventSignature(
-            eventJson,
-            '',
-            pubkey,
-          );
-          // Amber returns the fully signed event with correct id and sig
-          return signedEventJson || null;
-        } catch {
-          return null;
-        }
-      } else if (signerType === 'nip46') {
-        try {
-          return (await nip46Sign(zapEvent, pubkey)) || null;
-        } catch {
-          return null;
-        }
-      }
-
-      return null;
-    },
-    [pubkey, isLoggedIn, signerType, getReadRelays],
-  );
 
   const publishProfile = useCallback(
     async (profileData: {
@@ -1548,6 +1502,28 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
     },
     [pubkey, isLoggedIn, signerType],
+  );
+
+  const signZapRequest = useCallback(
+    async (
+      recipientPubkey: string,
+      amountSats: number,
+      comment: string,
+      zapEventId?: string,
+    ): Promise<string | null> => {
+      if (!pubkey || !isLoggedIn) return null;
+      const zapEvent = nostrService.createZapRequestEvent(
+        pubkey,
+        recipientPubkey,
+        amountSats * 1000,
+        getReadRelays(),
+        comment,
+        zapEventId,
+      );
+      const signed = await signEvent(zapEvent);
+      return signed ? JSON.stringify(signed) : null;
+    },
+    [pubkey, isLoggedIn, getReadRelays, signEvent],
   );
 
   // Per-message reactions (#205) — publish / retract / fetch. Composed from a

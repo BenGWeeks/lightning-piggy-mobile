@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react';
+import { AppState } from 'react-native';
 
 import { startMarmotPushRegistration } from '../services/marmotPushRegistration';
-import { MarmotSession, setMarmotSession } from '../services/marmotSession';
+import { getMarmotSession, MarmotSession, setMarmotSession } from '../services/marmotSession';
 import { DEFAULT_RELAYS } from '../services/nostrService';
 import { RELAY_LIST_INDEXERS } from '../utils/relayListEvents';
 import { useNostr } from './NostrContext';
@@ -31,6 +32,29 @@ export function MarmotBridge(): null {
     return () => {
       clearTimeout(timer);
       stop?.();
+    };
+  }, []);
+
+  // Android can keep the process alive for weeks: re-check the weekly key
+  // package refresh on resume (#1210) — staggered, it's not latency-sensitive.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const sub = AppState.addEventListener('change', (state) => {
+      if (timer) clearTimeout(timer);
+      timer =
+        state === 'active'
+          ? setTimeout(
+              () =>
+                void getMarmotSession()
+                  ?.keepKeyPackageFresh()
+                  .catch(() => undefined),
+              START_DELAY_MS,
+            )
+          : null;
+    });
+    return () => {
+      if (timer) clearTimeout(timer);
+      sub.remove();
     };
   }, []);
 

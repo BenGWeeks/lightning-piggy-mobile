@@ -1014,3 +1014,32 @@ app start (except the weekly refresh). A change that didn't go through earlier
 The emulator has no Google Play services, so it never gets a push token and
 the switches stay unavailable there — test on a phone.
 
+
+=== Marmot invitation appears on another device
+
+A Marmot invitation targets the private material belonging to one published
+invitation key, not every phone signed into the same Nostr account. Lightning
+Piggy currently selects the newest usable kind-30443 key package. A signed-out
+or unused installation can therefore attract invitations until its key is
+removed or expires.
+
+For White Noise Android 2026.10.3 (MDK 0.12.0, revision `7692e266`), peer key
+packages are discovered through kind-10002 write relays. The Welcome is a
+kind-444 rumor inside a kind-1059 gift wrap addressed to the recipient, delivered
+to kind-10050 inbox relays. Kind 10051 is not required. Check which installation
+published the selected key before changing the transport or assuming the
+Welcome was lost.
+
+On 2026-10-10, Big Piggy's Lightning Piggy-initiated invitation from the hulk
+emulator appeared in Little Piggy's White Noise on the main emulator, including
+the decrypted first message and Accept button. Hulk's White Noise onboarding
+had not published a new key. Checking hulk alone incorrectly suggested that
+Lightning Piggy-initiated Welcomes were incompatible.
+
+Lightning Piggy refreshes this installation's key weekly in the same `d` slot.
+Unused superseded keys retain their private material for 30 days after
+replacement for delayed Welcomes, then are deleted. Used keys are deleted
+once their replacement is confirmed published.
+Account removal waits for pending key publication, requests deletion, and
+publishes an empty replacement for each local slot before wiping local state.
+Relay deletion is best-effort; a warning means old advertisements may remain.
