@@ -1,6 +1,12 @@
 import { I18n } from 'i18n-js';
 import { createI18nInstance } from '.';
-import { CARDINAL_RULES, pluralKeys, registerPluralRules, type PluralLocale } from './plurals';
+import {
+  CARDINAL_RULES,
+  pinCountlessSingulars,
+  pluralKeys,
+  registerPluralRules,
+  type PluralLocale,
+} from './plurals';
 
 const COUNTS = [1, 2, 4, 5, 11, 12, 21, 22, 25];
 
@@ -48,11 +54,12 @@ describe('CLDR plural categories', () => {
 });
 
 describe('pluralKeys fallback order', () => {
-  it('tries zero first for 0, then the CLDR category, then other, then one', () => {
+  it('tries zero (0) / =1 (1) first, then the CLDR category, then other, then one', () => {
     expect(pluralKeys('uk', 0)).toEqual(['zero', 'many', 'other', 'one']);
     expect(pluralKeys('uk', 3)).toEqual(['few', 'other', 'one']);
-    expect(pluralKeys('en', 1)).toEqual(['one', 'other']);
-    expect(pluralKeys('zh-Hans', 1)).toEqual(['other', 'one']);
+    expect(pluralKeys('en', 1)).toEqual(['=1', 'one', 'other']);
+    expect(pluralKeys('uk', 21)).toEqual(['one', 'other']);
+    expect(pluralKeys('zh-Hans', 1)).toEqual(['=1', 'other', 'one']);
   });
 
   it('degrades few/many to other, then one, instead of a missing-translation string', () => {
@@ -63,6 +70,36 @@ describe('pluralKeys fallback order', () => {
     registerPluralRules(i18n);
     expect(i18n.t('onlyOneOther', { count: 5, locale: 'uk' })).toBe('5 other');
     expect(i18n.t('onlyOne', { count: 5, locale: 'pl' })).toBe('5 one');
+  });
+});
+
+describe('pinCountlessSingulars', () => {
+  const tree = {
+    group: { one: 'with the other person', other: 'with the {{count}} people' },
+    reviews: { one: '{{count}} review', other: '{{count}} reviews' },
+    label: 'unchanged',
+  };
+
+  it('pins a count-less one form to =1 where CLDR one covers other numbers', () => {
+    expect(pinCountlessSingulars('uk', tree)).toEqual({
+      group: { '=1': 'with the other person', other: 'with the {{count}} people' },
+      reviews: tree.reviews,
+      label: 'unchanged',
+    });
+  });
+
+  it('leaves locales whose one means exactly 1 untouched', () => {
+    expect(pinCountlessSingulars('en', tree)).toBe(tree);
+    expect(pinCountlessSingulars('pl', tree)).toBe(tree);
+  });
+
+  it('uk: a 21-member group shows the count, a 1-member group the singular sentence', () => {
+    const uk = createI18nInstance('uk');
+    const one = uk.t('locationSharing.groupTitle', { group: 'G', count: 1 });
+    const many = uk.t('locationSharing.groupTitle', { group: 'G', count: 21 });
+    expect(one).not.toContain('1');
+    expect(many).toContain('21');
+    expect(uk.t('market.reviews.count', { count: 21 })).toBe('21 відгук');
   });
 });
 

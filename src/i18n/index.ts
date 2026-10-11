@@ -10,7 +10,7 @@ import hiJson from './locales/hi.json';
 import mrJson from './locales/mr.json';
 import zhHansJson from './locales/zh-Hans.json';
 import type { Translations } from './locales/types';
-import { registerPluralRules } from './plurals';
+import { pinCountlessSingulars, registerPluralRules } from './plurals';
 
 // #137 infra; languages added in batches since (#1312). Adding one: drop
 // `locales/<code>.json` next to en.json, import + register it below, add a
@@ -38,7 +38,26 @@ const zhHans: Translations = zhHansJson;
  *  there) without duplicating the JSON imports. */
 export const translations = { en, de, es, hu, pl, uk, hi, mr, 'zh-Hans': zhHans };
 
-export const SUPPORTED_LOCALES = ['en', 'de', 'es', 'hu', 'pl', 'uk', 'hi', 'mr', 'zh-Hans'] as const;
+/** What I18n instances actually load: the catalogues with singular-only `one`
+ *  forms pinned to `=1` where CLDR `one` covers other numbers (plurals.ts). */
+const runtimeTranslations = Object.fromEntries(
+  Object.entries(translations).map(([locale, catalogue]) => [
+    locale,
+    pinCountlessSingulars(locale as keyof typeof translations, catalogue),
+  ]),
+);
+
+export const SUPPORTED_LOCALES = [
+  'en',
+  'de',
+  'es',
+  'hu',
+  'pl',
+  'uk',
+  'hi',
+  'mr',
+  'zh-Hans',
+] as const;
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
 
 export function isSupportedLocale(code: string): code is SupportedLocale {
@@ -81,7 +100,7 @@ export function intlLocaleFor(locale: SupportedLocale): string {
  *  so the module-level singleton below and LocaleContext's per-locale
  *  render instances can't drift apart. */
 export function createI18nInstance(locale: SupportedLocale): I18n {
-  const instance = new I18n(translations);
+  const instance = new I18n(runtimeTranslations);
   instance.defaultLocale = 'en';
   instance.enableFallback = true;
   instance.locale = locale;

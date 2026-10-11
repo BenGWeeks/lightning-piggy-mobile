@@ -4,6 +4,10 @@ import type { I18n } from 'i18n-js';
 /** CLDR plural category, as returned by make-plural. */
 export type PluralCategory = 'zero' | 'one' | 'two' | 'few' | 'many' | 'other';
 
+/** Plural key i18n-js may look up: a CLDR category, or the explicit
+ *  exactly-one form (`=1`, as in ICU MessageFormat) — see pinCountlessSingulars. */
+export type PluralKey = PluralCategory | '=1';
+
 type CardinalRule = (n: number | string) => PluralCategory;
 
 /**
@@ -42,20 +46,67 @@ export type PluralLocale = keyof typeof CARDINAL_RULES;
  *
  * - `zero` first for a count of 0, as i18n-js does by default, so entries
  *   with a dedicated zero message (e.g. "Remove old devices") keep it.
+ * - `=1` for a count of exactly 1 (only present after pinCountlessSingulars).
  * - then the locale's CLDR category.
  * - then `other`, then `one`, as safety nets: a catalogue entry that lacks
  *   the category (e.g. a `few`/`many` form not yet translated) degrades to
  *   a real sentence instead of a "missing translation" string.
  */
-export function pluralKeys(locale: PluralLocale, count: number): PluralCategory[] {
-  const keys: PluralCategory[] = [];
+export function pluralKeys(locale: PluralLocale, count: number): PluralKey[] {
+  const keys: PluralKey[] = [];
   if (count === 0) keys.push('zero');
+  if (count === 1) keys.push('=1');
   const category = CARDINAL_RULES[locale](Math.abs(count));
   if (!keys.includes(category)) keys.push(category);
   for (const fallback of ['other', 'one'] as const) {
     if (!keys.includes(fallback)) keys.push(fallback);
   }
   return keys;
+}
+
+const COUNT_PLACEHOLDER = /\{\{\s*count\s*\}\}|%\{\s*count\s*\}/;
+const CLDR_KEYS = ['zero', 'one', 'two', 'few', 'many', 'other'];
+
+/** True when CLDR `one` in `locale` covers some whole number other than 1
+ *  (Ukrainian 21, 31…; Hindi 0). */
+function oneCoversOtherNumbers(locale: PluralLocale): boolean {
+  const rule = CARDINAL_RULES[locale];
+  for (let n = 0; n <= 200; n++) if (n !== 1 && rule(n) === 'one') return true;
+  return false;
+}
+
+type CatalogueNode = { [key: string]: string | CatalogueNode };
+
+/**
+ * English `one` forms are often singular-only sentences that never show the
+ * number ("…with the other person in {{group}}?"), and translations mirror
+ * them. That's fine where CLDR `one` means exactly 1, but Ukrainian `one`
+ * also covers 21, 31… — so a 21-member group would read "the other person".
+ * For such locales, a `one` form without a `{{count}}` / `%{count}`
+ * placeholder is moved to the explicit `=1` key: 1 still gets it, and 21
+ * falls through to `other`. `one` forms that DO show the count ("21 відгук")
+ * are left alone. Returns a new tree; the JSON imports are not mutated.
+ */
+export function pinCountlessSingulars<T extends object>(locale: PluralLocale, catalogue: T): T {
+  if (!oneCoversOtherNumbers(locale)) return catalogue;
+  const walk = (node: CatalogueNode): CatalogueNode => {
+    const keys = Object.keys(node);
+    const isPlural = keys.length > 0 && keys.every((k) => CLDR_KEYS.includes(k));
+    if (isPlural) {
+      const one = node.one;
+      if (typeof one !== 'string' || COUNT_PLACEHOLDER.test(one)) return node;
+      const rest = { ...node };
+      delete rest.one;
+      return { ...rest, '=1': one };
+    }
+    const out: CatalogueNode = {};
+    for (const k of keys) {
+      const v = node[k];
+      out[k] = typeof v === 'string' ? v : walk(v);
+    }
+    return out;
+  };
+  return walk(catalogue as unknown as CatalogueNode) as unknown as T;
 }
 
 /** Register the CLDR rule for every catalogue locale on an I18n instance. */
