@@ -2467,6 +2467,7 @@
     "bell": "Notificaciones",
     "bellUnread": "Notificaciones, {{count}} sin leer",
     "markAllRead": "Marcar todo como leído",
+    "newCount": "{{count}} nuevos",
     "emptyTitle": "Aún no hay notificaciones",
     "emptyText": "Los mensajes, pagos y hallazgos de Piglets de los que te avisemos aparecerán aquí durante 30 días.",
     "kind": {

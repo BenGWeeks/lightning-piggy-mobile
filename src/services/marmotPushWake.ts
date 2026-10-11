@@ -13,12 +13,21 @@
 // The generic alert is a "no-thread" message ping: tapping it opens the
 // Messages list, and opening that list clears it (#1142).
 //
+// A push only says "group traffic arrived", and not all traffic is a message
+// worth an alert: White Noise also wakes members after an invite commit, and
+// the message may be one the app shows without alerting (already on screen,
+// our own, deleted). So fresh group traffic the live session received around
+// the push covers it too. And the generic alert is a placeholder: once the
+// session has received the traffic it stood for, its tray entry and history
+// row go — the real message (if any) has its own.
+//
 // `defineTask` must run in the global scope on every JS start — hence the
 // side-effect import from index.ts.
 
 import * as TaskManager from 'expo-task-manager';
 import { AppState } from 'react-native';
 
+import { listNotifications, removeNotificationsWhere } from './notificationHistory';
 import {
   dismissNotificationsFor,
   fireMessageNotification,
@@ -34,6 +43,13 @@ const LIVE_SESSION_GRACE_MS = 6_000;
  * A push carries no message id, so this is a heuristic: kept short so an
  * earlier, unrelated alert rarely stands in for this one. */
 const COVERED_LOOKBACK_MS = 15_000;
+/** Group traffic sent within this long is live, not a backfill or replay. */
+const FRESH_TRAFFIC_MS = 120_000;
+/** A placeholder posted up to this long after an event was sent can be the
+ * alert for it (push latency + the grace above + clock skew). */
+export const PLACEHOLDER_MATCH_MS = 60_000;
+const SETTLE_DEBOUNCE_MS = 1_500;
+const MAX_FUTURE_SKEW_MS = 5 * 60_000;
 
 // Set by marmotPushRegistration while the app has a Marmot session (kept
 // as a flag so this module — loaded at every JS start, headless included —
@@ -43,12 +59,54 @@ export function setLiveMarmotSession(live: boolean): void {
   liveSession = live;
 }
 
+// When the live session last received fresh group traffic (wall-clock ms).
+let lastTrafficAt = 0;
+export const lastMarmotTrafficAt = (): number => lastTrafficAt;
+// Newest group event seen (its own `created_at`, ms) and whose session saw it.
+let newestTraffic = { owner: '', at: 0 };
+// Unknown at start: a headless run (another JS context) may have posted one.
+let placeholdersMayExist = true;
+let settleTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * The Marmot session received a kind-445 group event (live or backfill).
+ * O(1) per event; any history work is one debounced pass.
+ */
+export function noteMarmotGroupTraffic(owner: string, createdAtSec: number, now = Date.now()) {
+  const at = createdAtSec * 1000;
+  if (!Number.isFinite(at) || at > now + MAX_FUTURE_SKEW_MS) return; // sender-controlled
+  if (at >= now - FRESH_TRAFFIC_MS) lastTrafficAt = now;
+  if (newestTraffic.owner === owner && at <= newestTraffic.at) return;
+  newestTraffic = { owner, at };
+  if (!placeholdersMayExist || settleTimer) return;
+  settleTimer = setTimeout(() => {
+    settleTimer = null;
+    void settlePushPlaceholders(newestTraffic.owner, newestTraffic.at);
+  }, SETTLE_DEBOUNCE_MS);
+}
+
+/**
+ * Drop `owner`'s generic push alerts that group traffic sent at `trafficAt`
+ * (ms) supersedes — tray entry and history row. Returns the removed row ids.
+ */
+export async function settlePushPlaceholders(owner: string, trafficAt: number): Promise<string[]> {
+  const superseded = (e: { data: { marmotPush?: boolean }; createdAt: number }) =>
+    e.data.marmotPush === true && e.createdAt <= trafficAt + PLACEHOLDER_MATCH_MS;
+  const removed = await removeNotificationsWhere(owner, superseded);
+  if (removed.length) await dismissNotificationsFor({ historyIds: removed });
+  const left = await listNotifications(owner).catch(() => []);
+  placeholdersMayExist = left.some((e) => e.data.marmotPush === true);
+  return removed;
+}
+
 export type WakeOutcome = 'covered' | 'notified';
 
 export interface WakeDeps {
   isForeground: () => boolean;
   hasLiveSession: () => boolean;
   lastNotifiedAt: () => number;
+  /** When the live session last received fresh group traffic. */
+  lastTrafficAt?: () => number;
   wait: (ms: number) => Promise<void>;
   now: () => number;
   notify: () => Promise<void>;
@@ -68,6 +126,7 @@ export async function postGenericPushAlert(): Promise<void> {
     // Marked so the real Marmot notification can replace it.
     data: { marmotPush: true },
   });
+  placeholdersMayExist = true;
   // The real message landed while we were posting: it already tried to
   // clear us before we existed, so clear ourselves.
   if (lastMarmotNotificationAt() !== before) {
@@ -79,6 +138,7 @@ const defaultDeps: WakeDeps = {
   isForeground: () => AppState.currentState === 'active',
   hasLiveSession: () => liveSession,
   lastNotifiedAt: lastMarmotNotificationAt,
+  lastTrafficAt: lastMarmotTrafficAt,
   wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   now: Date.now,
   notify: postGenericPushAlert,
@@ -97,9 +157,15 @@ export function handleMarmotPushWake(deps: WakeDeps = defaultDeps): Promise<Wake
 
 async function handleOne(deps: WakeDeps, arrived: number): Promise<WakeOutcome> {
   // Only evidence counts — the app having shown a Marmot message (alert or
-  // open thread). Being in the foreground alone proves nothing: the push
-  // may be for another signed-in account, or beat the session.
-  const covered = () => deps.lastNotifiedAt() >= arrived - COVERED_LOOKBACK_MS;
+  // open thread), or its live session having received fresh group traffic
+  // (an invite commit, a message it shows without alerting). Being in the
+  // foreground alone proves nothing: the push may be for another signed-in
+  // account, or beat the session.
+  const since = arrived - COVERED_LOOKBACK_MS;
+  const covered = () => {
+    const traffic = deps.lastTrafficAt?.() ?? 0; // 0 = none seen yet
+    return deps.lastNotifiedAt() >= since || (traffic > 0 && traffic >= since);
+  };
   if (deps.hasLiveSession() || deps.isForeground()) {
     if (covered()) return 'covered';
     await deps.wait(LIVE_SESSION_GRACE_MS);
@@ -124,4 +190,13 @@ if (!TaskManager.isTaskDefined(MARMOT_PUSH_WAKE_TASK)) {
       if (__DEV__) console.warn('[MarmotPush] wake handling failed:', e);
     }
   });
+}
+
+/** Test-only reset of the traffic / placeholder state. */
+export function __resetPushWakeForTests(): void {
+  lastTrafficAt = 0;
+  newestTraffic = { owner: '', at: 0 };
+  placeholdersMayExist = true;
+  if (settleTimer) clearTimeout(settleTimer);
+  settleTimer = null;
 }

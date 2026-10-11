@@ -48,6 +48,7 @@ import {
   markNotificationDelivered,
   markNotificationsReadWhere,
   recordNotification,
+  removeNotificationsWhere,
 } from './notificationHistory';
 import { getActivePubkey, subscribeActivePubkey } from './walletStorageService';
 import {
@@ -413,15 +414,16 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
     // In-app history (#1143) — recorded even without OS permission, so the
     // Notifications screen still lists what happened.
     // One id for the history row and the tray notification, so opening either
-    // can mark / clear the other. A retry of the same source reuses it.
-    const historyId =
-      payload.historyKey ?? `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    // can mark / clear the other. A retry of the same source reuses it, and so
+    // does the next message in a thread whose row is still unread.
     const owner = payload.owner ?? getActivePubkey() ?? undefined;
+    const collapseKey = threadCollapseKey(payload.kind, payload.data);
     // Awaited (best-effort, never throws): a headless background task can be
     // torn down as soon as delivery resolves, losing a detached write.
-    const { duplicateDelivered } = await recordNotification(owner ?? null, {
+    const { duplicateDelivered, id: historyId } = await recordNotification(owner ?? null, {
       ...payload,
-      id: historyId,
+      id: payload.historyKey ?? `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+      collapseKey,
     });
     // Same source already shown in the tray: report it as delivered (so the
     // caller doesn't keep retrying) without posting a second entry.
@@ -439,6 +441,9 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
 
     if ((await payload.shouldSuppress?.()) || flight.cancelled) return null;
     const id = await Notifications.scheduleNotificationAsync({
+      // A thread's alert reuses its row's id, so the next message replaces the
+      // tray entry rather than stacking another beside it.
+      ...(collapseKey ? { identifier: historyId } : {}),
       content: {
         title: presented.title,
         body: presented.body,
@@ -546,7 +551,26 @@ export type NotificationTarget =
   | { historyId: string }
   /** The generic alerts Marmot push wakes posted — superseded once the app
    * shows the real Marmot message. */
-  | { marmotPushAlerts: true };
+  | { marmotPushAlerts: true }
+  /** The contentless alert for one gift wrap (#1154), once it is decrypted. */
+  | { wrapId: string }
+  /** The tray notifications behind several history rows. */
+  | { historyIds: readonly string[] };
+
+/**
+ * Pure: the thread a message alert belongs to, so a burst from one sender is
+ * one tray entry and one history row (updated) rather than one per message.
+ * Undefined for alerts with no known thread (generic pings) and non-messages.
+ */
+export function threadCollapseKey(
+  kind: NotificationKind,
+  data: NotificationData | undefined,
+): string | undefined {
+  if (kind === 'dm' && data?.conversationPubkey)
+    return `dm:${data.conversationProtocol ?? 'nip17'}:${data.conversationPubkey.toLowerCase()}`;
+  if (kind === 'group' && data?.groupId) return `group:${data.groupId}`;
+  return undefined;
+}
 
 /** Pure: does a delivered notification's `data` belong to `target`? */
 export function notificationMatchesTarget(
@@ -565,6 +589,8 @@ export function notificationMatchesTarget(
   if ('owner' in target) return data.owner?.toLowerCase() === target.owner.toLowerCase();
   if ('historyId' in target) return data.historyId === target.historyId;
   if ('marmotPushAlerts' in target) return data.marmotPush === true;
+  if ('wrapId' in target) return data.wrapId === target.wrapId;
+  if ('historyIds' in target) return !!data.historyId && target.historyIds.includes(data.historyId);
   return (data.kind === 'dm' || data.kind === 'group') && !data.conversationPubkey && !data.groupId;
 }
 
@@ -766,7 +792,10 @@ export async function fireMessageNotification(opts: {
   const marmot = isMarmotMessage(opts.data);
   if (isThreadActivelyViewed(opts.threadId)) {
     // Shown on screen instead — still proof the app has this message.
-    if (marmot) lastMarmotNotifiedAt = Date.now();
+    if (marmot) {
+      lastMarmotNotifiedAt = Date.now();
+      void dropMarmotPushAlerts(opts.owner);
+    }
     return null;
   }
   const id = await fireNotification({
@@ -779,11 +808,21 @@ export async function fireMessageNotification(opts: {
   });
   if (id && marmot) {
     lastMarmotNotifiedAt = Date.now();
-    // The real message is on screen now: drop the generic push alert(s) —
-    // ours (Android) and a data-less server alert already delivered (iOS).
-    void dismissNotificationsFor({ marmotPushAlerts: true });
+    void dropMarmotPushAlerts(opts.owner);
   }
   return id;
+}
+
+/**
+ * The real Marmot message is shown now: drop the generic push alert(s) — ours
+ * (Android) and a data-less server alert already delivered (iOS) — AND their
+ * history rows, so the history keeps the real message, not a nameless
+ * "New message" beside it.
+ */
+export async function dropMarmotPushAlerts(owner?: string): Promise<void> {
+  await dismissNotificationsFor({ marmotPushAlerts: true });
+  const account = owner ?? getActivePubkey();
+  if (account) await removeNotificationsWhere(account, (e) => e.data.marmotPush === true);
 }
 
 /**

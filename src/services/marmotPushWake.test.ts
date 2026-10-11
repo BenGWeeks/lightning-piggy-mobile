@@ -10,12 +10,23 @@ jest.mock('./notificationService', () => ({
 
 import * as TaskManager from 'expo-task-manager';
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
+  __resetPushWakeForTests,
   handleMarmotPushWake,
+  lastMarmotTrafficAt,
   MARMOT_PUSH_WAKE_TASK,
+  noteMarmotGroupTraffic,
+  PLACEHOLDER_MATCH_MS,
   postGenericPushAlert,
+  settlePushPlaceholders,
   type WakeDeps,
 } from './marmotPushWake';
+import {
+  __resetNotificationHistoryForTests,
+  listNotifications,
+  recordNotification,
+} from './notificationHistory';
 import * as notificationService from './notificationService';
 import { dismissNotificationsFor, fireMessageNotification } from './notificationService';
 
@@ -153,5 +164,72 @@ describe('the wake task and notification-watcher pushes', () => {
       error: null,
     });
     expect(fireMessageNotification).not.toHaveBeenCalled();
+  });
+});
+
+describe('pushes for traffic that shows nothing (phantom "New message")', () => {
+  const OWNER = 'a'.repeat(64);
+  beforeEach(async () => {
+    await AsyncStorage.clear();
+    __resetNotificationHistoryForTests();
+    __resetPushWakeForTests();
+    (dismissNotificationsFor as jest.Mock).mockClear();
+  });
+
+  it('fresh group traffic the live session received covers the push (e.g. an invite commit)', async () => {
+    const d = deps({ hasLiveSession: () => true, lastTrafficAt: () => 9_500 });
+    expect(await handleMarmotPushWake(d)).toBe('covered');
+    expect(d.notified).toBe(0);
+    // Traffic long before the push says nothing about it.
+    const stale = deps({ hasLiveSession: () => true, now: () => 100_000, lastTrafficAt: () => 1 });
+    expect(await handleMarmotPushWake(stale)).toBe('notified');
+  });
+
+  it('counts only live traffic: backfill, replays and future-dated events never cover', () => {
+    const now = 1_800_000_000_000;
+    noteMarmotGroupTraffic(OWNER, now / 1000 - 3600, now); // an hour-old backfill
+    expect(lastMarmotTrafficAt()).toBe(0);
+    noteMarmotGroupTraffic(OWNER, now / 1000 + 3600, now); // sender-controlled future
+    expect(lastMarmotTrafficAt()).toBe(0);
+    noteMarmotGroupTraffic(OWNER, now / 1000 - 5, now);
+    expect(lastMarmotTrafficAt()).toBe(now);
+  });
+
+  it('settles only the placeholders the traffic can stand for', async () => {
+    const T = Date.now();
+    const placeholder = (at: number) =>
+      recordNotification(
+        OWNER,
+        { kind: 'dm', title: 'New message', body: 'x', data: { marmotPush: true } },
+        at,
+      );
+    const covered = await placeholder(T);
+    await placeholder(T + 10 * 60_000); // posted long after this traffic: another push
+    await recordNotification(OWNER, { kind: 'dm', title: 'Nodie', body: 'x' }, T);
+    const removed = await settlePushPlaceholders(OWNER, T - PLACEHOLDER_MATCH_MS / 2);
+    expect(removed).toEqual([covered.id]);
+    expect(dismissNotificationsFor).toHaveBeenCalledWith({ historyIds: [covered.id] });
+    const left = await listNotifications(OWNER);
+    expect(left.map((e) => e.title).sort()).toEqual(['New message', 'Nodie']);
+    expect(left.find((e) => e.title === 'New message')?.createdAt).toBe(T + 10 * 60_000);
+  });
+
+  it('group traffic settles a placeholder in one debounced pass', async () => {
+    jest.useFakeTimers();
+    try {
+      const now = Date.now();
+      await recordNotification(
+        OWNER,
+        { kind: 'dm', title: 'New message', body: 'x', data: { marmotPush: true } },
+        now,
+      );
+      for (let i = 0; i < 5; i++)
+        noteMarmotGroupTraffic(OWNER, Math.floor(now / 1000) - 3 + i, now);
+      await jest.advanceTimersByTimeAsync(2_000);
+    } finally {
+      jest.useRealTimers();
+    }
+    await listNotifications(OWNER);
+    expect(await listNotifications(OWNER)).toHaveLength(0);
   });
 });

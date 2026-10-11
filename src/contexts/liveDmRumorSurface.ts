@@ -12,7 +12,13 @@ import { dmRowPreview } from '../utils/dmRowPreview';
 import { notifyDmMessage } from './nostrEventBus';
 import { tryRouteGroupRumor } from './nostrGroupRouting';
 import { fireMessageNotification } from '../services/notificationService';
-import { claimWrapNotification } from '../services/dmWrapNotificationDedupe';
+import {
+  claimWrapNotification,
+  markWrapHandled,
+  noteContentlessWrapAlert,
+  retractContentlessWrapAlert,
+  takeContentlessWrapAlert,
+} from '../services/dmWrapNotificationDedupe';
 import { routeMarmotWelcome } from '../services/marmotWelcomeRouter';
 import type { LiveSubFollowGateBuffer } from './liveSubFollowGate';
 
@@ -59,6 +65,17 @@ export function createLiveRumorSurfacer(
 
   return async (rumor: DecodedRumor, wrapId: string): Promise<void> => {
     if (shouldAbort()) return;
+    // Decrypted: whether this wrap deserves an alert is decided here, so the
+    // background watch must not post its contentless one (#279 phantoms).
+    markWrapHandled(wrapId);
+    // A contentless alert the watch already posted for it is replaced by the
+    // real one below — or retracted when the wrap shows nothing new (our own
+    // sent copy, a stranger, a reaction). Claimed by the watch, so the real
+    // alert bypasses the claim.
+    const placeholder = takeContentlessWrapAlert(wrapId);
+    const retractPlaceholder = () => {
+      if (placeholder) void retractContentlessWrapAlert(viewerPubkey, wrapId);
+    };
 
     // Group-route first — multi-recipient rumors are owned by the
     // group surface, not the 1:1 inbox. tryRouteGroupRumor handles
@@ -74,7 +91,10 @@ export function createLiveRumorSurfacer(
       if (routeResult.kind === 'routed' && isFreshArrival(routeResult.message.createdAt)) {
         const sender = routeResult.message.senderPubkey;
         // claimWrapNotification: dedupe vs the background watch (#279).
-        if (sender.toLowerCase() !== viewerPubkey.toLowerCase() && claimWrapNotification(wrapId)) {
+        if (
+          sender.toLowerCase() !== viewerPubkey.toLowerCase() &&
+          (claimWrapNotification(wrapId) || placeholder)
+        ) {
           void fireMessageNotification({
             owner: viewerPubkey,
             kind: 'group',
@@ -85,6 +105,7 @@ export function createLiveRumorSurfacer(
           });
         }
       }
+      retractPlaceholder();
       if (__DEV__)
         console.log(`[Nostr] live wrap ${wrapId.slice(0, 8)} group-routed (${routeResult.kind})`);
       return;
@@ -92,6 +113,7 @@ export function createLiveRumorSurfacer(
 
     const partnership = partnerFromRumor(rumor, viewerPubkey);
     if (!partnership) {
+      retractPlaceholder();
       if (__DEV__) console.log(`[Nostr] live wrap ${wrapId.slice(0, 8)} no-partnership`);
       return;
     }
@@ -127,7 +149,9 @@ export function createLiveRumorSurfacer(
           },
           notify: { title: 'New message', body: deferredText },
         });
-      }
+        // The replay (once follows hydrate) replaces the contentless alert.
+        if (placeholder) noteContentlessWrapAlert(wrapId);
+      } else retractPlaceholder();
       return;
     }
 
@@ -182,7 +206,11 @@ export function createLiveRumorSurfacer(
     // old rumor timestamps and stays silent), never my own echo;
     // suppressed when the user is viewing this thread. claimWrapNotification
     // dedupes vs the background watch running in the same JS context.
-    if (!partnership.fromMe && isFreshArrival(rumor.created_at) && claimWrapNotification(wrapId)) {
+    const notify =
+      !partnership.fromMe &&
+      isFreshArrival(rumor.created_at) &&
+      (claimWrapNotification(wrapId) || placeholder);
+    if (notify) {
       void fireMessageNotification({
         owner: viewerPubkey,
         kind: 'dm',
@@ -198,6 +226,7 @@ export function createLiveRumorSurfacer(
         },
       });
     }
+    retractPlaceholder();
     if (__DEV__)
       console.log(
         `[Nostr] live wrap ${wrapId.slice(0, 8)} surfaced (partner=${partnership.partnerPubkey.slice(0, 8)})`,

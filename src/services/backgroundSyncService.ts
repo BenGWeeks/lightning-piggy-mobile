@@ -36,6 +36,7 @@ import { messageNotificationTarget } from '../utils/messageNotificationTarget';
 import { fetchCachesByAuthor } from './nostrPlacesPublisher';
 import { GC_COMMENT_KIND } from './nostrPlacesService';
 import { isOrderEvent } from '../utils/orderEvents';
+import { isLiveDmSubArmed } from './dmWrapNotificationDedupe';
 
 // Persisted ids we've already accounted for, so repeated wakes never
 // re-ping the same arrival. Bounded (insertion-ordered; oldest dropped
@@ -182,6 +183,12 @@ async function runDmDetectAndPing(
     // in-app, so pinging for it would be a cold-start flood. Stay silent;
     // only arrivals AFTER this baseline ping on later wakes.
     if (!primed) return { pinged: false, freshCount: 0 };
+    // The app is alive with its live DM sub in this JS context (WorkManager
+    // runs the task in the existing React instance): that sub decrypts and
+    // alerts — by name — for exactly the arrivals worth it. A generic ping
+    // here would repeat those alerts up to 15 min later, or announce our own
+    // sent copies and other wraps that show nothing new. Seen-set kept above.
+    if (isLiveDmSubArmed()) return { pinged: false, freshCount: 0 };
 
     const freshCount = fresh.length;
     if (freshCount > 0) {

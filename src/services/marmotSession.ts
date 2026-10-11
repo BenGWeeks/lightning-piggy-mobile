@@ -69,6 +69,7 @@ import {
 import type { SignedProof } from './marmotPushEntries';
 import { MarmotPushNotifier, type PushGroup } from './marmotPushNotifier';
 import { MarmotPushRegistrar } from './marmotPushRegistrar';
+import { noteMarmotGroupTraffic } from './marmotPushWake';
 import { createMarmotSigner } from './marmotSigner';
 import * as fence from './marmotSessionFence';
 import { isPermanentWelcomeFailure, isWelcomeForJoinedGroup } from './marmotWelcomeFailure';

@@ -20,7 +20,13 @@ import { notifyDmMessage } from './nostrEventBus';
 import { fireMessageNotification } from '../services/notificationService';
 import { createLiveRumorSurfacer } from './liveDmRumorSurface';
 import { createLiveDmEngineBridge } from './liveDmEngineBridge';
-import { claimWrapNotification } from '../services/dmWrapNotificationDedupe';
+import {
+  claimWrapNotification,
+  markWrapHandled,
+  noteLiveDmSubArmed,
+  retractContentlessWrapAlert,
+  takeContentlessWrapAlert,
+} from '../services/dmWrapNotificationDedupe';
 import { createYieldScheduler, NIP17_LOOP_YIELD_EVERY } from './nostrDecryptPacing';
 import { capKnownWrapIds } from './knownWrapIdsCap';
 import type { LiveSubFollowGateBuffer, DeferredFollowGateEntry } from './liveSubFollowGate';
@@ -111,6 +117,9 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
   } = params;
   const seen = new Set<string>();
   const SEEN_CAP = 4096;
+  // Tells the background watch in this context that a decrypting sub owns
+  // wrap alerts (see dmWrapNotificationDedupe). Undone in the teardown.
+  noteLiveDmSubArmed(true);
   // In-memory mirror of the encrypted DM store's wrap-id index
   // (#848). Backed by `knownWrapIdsRef` so the Set survives this
   // effect's re-runs (relay-list change → fresh effect instance).
@@ -197,7 +206,10 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     notifyDmMessage(item.partnerPubkey);
     // claimWrapNotification: the background watch (same JS context, no follow
     // gate) may have already notified for this wrap — never post twice (#279).
-    if (item.notify && claimWrapNotification(item.entry.id)) {
+    // Its contentless alert, though, is replaced by this real one.
+    const placeholder = takeContentlessWrapAlert(item.entry.id);
+    if (placeholder) void retractContentlessWrapAlert(viewerPubkey, item.entry.id);
+    if (item.notify && (claimWrapNotification(item.entry.id) || placeholder)) {
       void fireMessageNotification({
         owner: viewerPubkey,
         kind: 'dm',
@@ -272,7 +284,11 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     // fixture with 100+ wraps in the backlog this compressed the
     // cold-start JS-thread occupation window from ~12 s to <1 s.
     // Per issue #505.
-    if (ev.kind === 1059 && knownWrapIds.has(ev.id)) return;
+    if (ev.kind === 1059 && knownWrapIds.has(ev.id)) {
+      // Already stored (and shown): nothing for the background watch to alert.
+      markWrapHandled(ev.id);
+      return;
+    }
     // Eagerly claim this wrap.id in the in-memory dedup Set before
     // doing any async work. The deferred writeChain at the bottom of
     // this handler also does this, but only after AsyncStorage I/O
@@ -754,6 +770,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
 
   return () => {
     cancelled = true;
+    noteLiveDmSubArmed(false);
     // Invalidate any in-flight close signal + pending reconnect FIRST (#934):
     // stopReconnecting() bumps the generation and stops the AppState-resume
     // re-arm BEFORE closeSubscription() below fires `onWrapsClose`

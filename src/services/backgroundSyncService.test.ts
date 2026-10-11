@@ -24,6 +24,10 @@ jest.mock('./nostrPlacesPublisher', () => ({
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { runBackgroundSync } from './backgroundSyncService';
+import {
+  noteLiveDmSubArmed,
+  __resetForTests as __resetDedupeForTests,
+} from './dmWrapNotificationDedupe';
 
 const ME = 'a'.repeat(64);
 const READ_RELAYS = [{ url: 'wss://r.example', read: true, write: true }];
@@ -46,6 +50,7 @@ async function primeCacheComments(ids: string[] = []): Promise<void> {
 
 beforeEach(async () => {
   jest.clearAllMocks();
+  __resetDedupeForTests();
   await AsyncStorage.clear();
   mockLoadIdentities.mockResolvedValue({ identities: [], activePubkey: ME });
   mockGetUserRelays.mockResolvedValue(READ_RELAYS);
@@ -266,4 +271,21 @@ describe('cache-comment detect-and-ping (#740)', () => {
     expect(mockFireMessageNotification).toHaveBeenCalledTimes(1);
     expect(mockFireCacheNotification).not.toHaveBeenCalled();
   });
+});
+
+it('leaves message alerts to the live sub when the app is running (no duplicate / phantom ping)', async () => {
+  await prime([]);
+  const now = Math.floor(Date.now() / 1000);
+  mockQuerySync.mockResolvedValueOnce([
+    { id: 'k4', kind: 4, pubkey: 'b'.repeat(64), created_at: now, tags: [] },
+    { id: 'own-copy', kind: 1059, pubkey: 'eph', created_at: now, tags: [] },
+  ]);
+  noteLiveDmSubArmed(true);
+  const r = await runBackgroundSync();
+  expect(r.pinged).toBe(false);
+  expect(mockFireMessageNotification).not.toHaveBeenCalled();
+  // Still accounted for, so a later headless run doesn't ping for them either.
+  expect(JSON.parse((await AsyncStorage.getItem(SEEN_KEY)) ?? '[]')).toEqual(
+    expect.arrayContaining(['k4', 'own-copy']),
+  );
 });

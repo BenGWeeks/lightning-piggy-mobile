@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useMarmotDmInbound } from './useMarmotDmInbound';
+import { mayNotifyFrom, useMarmotDmInbound } from './useMarmotDmInbound';
 import {
   applyMarmotEdits,
   deleteMarmotMessages,
@@ -282,4 +282,18 @@ it('applies a burst of edits with one inbox update and one thread reload per pee
   expect((applyMarmotEdits as jest.Mock).mock.calls[0][1]).toHaveLength(3);
   expect(setter).toHaveBeenCalledTimes(1);
   expect(notifyDmMessage).toHaveBeenCalledTimes(1);
+});
+
+describe('mayNotifyFrom (WoT phantoms)', () => {
+  const PEER = 'b'.repeat(64);
+  it('alerts only for a followed peer once the follow list is known', () => {
+    expect(mayNotifyFrom(PEER, new Set([PEER]))).toBe(true);
+    expect(mayNotifyFrom(PEER.toUpperCase(), new Set([PEER]))).toBe(true);
+    expect(mayNotifyFrom(PEER, new Set(['c'.repeat(64)]))).toBe(false);
+  });
+
+  it('fails open while the follow list is still loading', () => {
+    expect(mayNotifyFrom(PEER, new Set())).toBe(true);
+    expect(mayNotifyFrom(PEER, undefined)).toBe(true);
+  });
 });

@@ -1,3 +1,4 @@
+import * as mod from './dmWrapNotificationDedupe';
 import { claimWrapNotification, __resetForTests } from './dmWrapNotificationDedupe';
 
 beforeEach(() => __resetForTests());
@@ -25,5 +26,31 @@ describe('claimWrapNotification', () => {
     expect(claimWrapNotification('wrap-599')).toBe(false);
     // ...while the oldest was evicted and can be re-claimed.
     expect(claimWrapNotification('wrap-0')).toBe(true);
+  });
+});
+
+describe('live sub hand-off (contentless phantoms)', () => {
+  beforeEach(() => mod.__resetForTests());
+
+  it('tracks whether a decrypting live sub is armed, per open / teardown', () => {
+    expect(mod.isLiveDmSubArmed()).toBe(false);
+    mod.noteLiveDmSubArmed(true);
+    mod.noteLiveDmSubArmed(true);
+    mod.noteLiveDmSubArmed(false);
+    expect(mod.isLiveDmSubArmed()).toBe(true);
+    mod.noteLiveDmSubArmed(false);
+    mod.noteLiveDmSubArmed(false); // never negative
+    expect(mod.isLiveDmSubArmed()).toBe(false);
+    mod.noteLiveDmSubArmed(true);
+    expect(mod.isLiveDmSubArmed()).toBe(true);
+  });
+
+  it('remembers handled wraps and hands a contentless alert over exactly once', () => {
+    mod.markWrapHandled('w1');
+    expect(mod.wasWrapHandled('w1')).toBe(true);
+    expect(mod.wasWrapHandled('w2')).toBe(false);
+    mod.noteContentlessWrapAlert('w2');
+    expect(mod.takeContentlessWrapAlert('w2')).toBe(true);
+    expect(mod.takeContentlessWrapAlert('w2')).toBe(false);
   });
 });

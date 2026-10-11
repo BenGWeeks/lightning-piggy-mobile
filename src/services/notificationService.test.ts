@@ -49,6 +49,7 @@ import {
   markHistoryEntryRead,
   isRemotePush,
   lastMarmotNotificationAt,
+  threadCollapseKey,
 } from './notificationService';
 import { setActivePubkeyForWalletStorage } from './walletStorageService';
 
@@ -862,4 +863,100 @@ it('clears every deleted message from the tray in one query', async () => {
   expect(await retractMarmotMessageNotifications(refs, { tray: true })).toBe(2);
   expect(mockGetPresented).toHaveBeenCalledTimes(1);
   expect(mockDismiss.mock.calls).toEqual([['n1'], ['n2']]);
+});
+
+describe('phantom "New message" rows', () => {
+  const OWNER = 'f'.repeat(64);
+  const PEER = 'd'.repeat(64);
+
+  it('keys message alerts by thread; generic pings and payments have no thread', () => {
+    expect(
+      threadCollapseKey('dm', {
+        conversationPubkey: PEER.toUpperCase(),
+        conversationProtocol: 'nip04',
+      }),
+    ).toBe(`dm:nip04:${PEER}`);
+    expect(threadCollapseKey('dm', { conversationPubkey: PEER })).toBe(`dm:nip17:${PEER}`);
+    expect(threadCollapseKey('group', { groupId: 'marmot:g' })).toBe('group:marmot:g');
+    expect(threadCollapseKey('dm', { marmotPush: true })).toBeUndefined();
+    expect(threadCollapseKey('dm', { wrapId: 'w' })).toBeUndefined();
+    expect(threadCollapseKey('payment', { walletId: 'w' })).toBeUndefined();
+  });
+
+  it('a burst from one sender is one history row and one (replaced) tray entry', async () => {
+    setNotificationsForeground(false);
+    for (let i = 0; i < 3; i++) {
+      await fireMessageNotification({
+        owner: OWNER,
+        kind: 'dm',
+        threadId: PEER,
+        title: 'New message',
+        body: `m${i}`,
+        data: { conversationPubkey: PEER, conversationProtocol: 'nip04' },
+      });
+    }
+    const rows = await listNotifications(OWNER);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].count).toBe(3);
+    const identifiers = mockScheduleNotificationAsync.mock.calls.map((c) => c[0].identifier);
+    expect(identifiers).toEqual([rows[0].id, rows[0].id, rows[0].id]);
+    expect(lastScheduledContent()?.data).toMatchObject({ historyId: rows[0].id });
+  });
+
+  it('matches a wrap alert and a set of history rows', () => {
+    expect(notificationMatchesTarget({ wrapId: 'w1' }, { wrapId: 'w1' })).toBe(true);
+    expect(notificationMatchesTarget({ wrapId: 'w2' }, { wrapId: 'w1' })).toBe(false);
+    expect(notificationMatchesTarget({ historyId: 'h1' }, { historyIds: ['h0', 'h1'] })).toBe(true);
+    expect(notificationMatchesTarget({}, { historyIds: ['h1'] })).toBe(false);
+  });
+
+  it('the real Marmot message replaces the generic push row in the history', async () => {
+    setNotificationsForeground(false);
+    await fireMessageNotification({
+      owner: OWNER,
+      kind: 'dm',
+      threadId: '__push__',
+      title: 'New message',
+      body: 'x',
+      data: { marmotPush: true },
+    });
+    expect(await listNotifications(OWNER)).toHaveLength(1);
+    await fireMessageNotification({
+      owner: OWNER,
+      kind: 'dm',
+      threadId: `marmot:${PEER}`,
+      title: 'New message',
+      body: 'hi',
+      data: { conversationPubkey: PEER, conversationProtocol: 'marmot' },
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    await listNotifications(OWNER); // drains the history write queue
+    const rows = await listNotifications(OWNER);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].data).toMatchObject({ conversationPubkey: PEER });
+  });
+
+  it('a Marmot message shown on screen also clears the generic push row', async () => {
+    await fireMessageNotification({
+      owner: OWNER,
+      kind: 'dm',
+      threadId: '__push__',
+      title: 'New message',
+      body: 'x',
+      data: { marmotPush: true },
+    });
+    setNotificationsForeground(true);
+    setActiveThread('marmot-open');
+    await fireMessageNotification({
+      owner: OWNER,
+      kind: 'dm',
+      threadId: 'marmot-open',
+      title: 'New message',
+      body: 'hi',
+      data: { conversationPubkey: PEER, conversationProtocol: 'marmot' },
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    await listNotifications(OWNER);
+    expect(await listNotifications(OWNER)).toHaveLength(0);
+  });
 });

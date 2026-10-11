@@ -26,6 +26,11 @@ export interface NotificationHistoryEntry {
   key?: string;
   /** Its tray notification was posted (so a repeat needn't post another). */
   delivered?: boolean;
+  /** Thread the row stands for: a new message there updates this row while
+   * it is unread, instead of stacking one row per message. */
+  collapse?: string;
+  /** How many messages an updated (collapsed) row stands for. */
+  count?: number;
 }
 
 export const NOTIFICATION_HISTORY_KEY_BASE = 'notification_history_v1';
@@ -65,7 +70,11 @@ function update(
   change: (entries: NotificationHistoryEntry[]) => NotificationHistoryEntry[],
 ): Promise<void> {
   const run = queue.then(async () => {
-    const next = pruneHistory(change(await read(pubkey)));
+    const current = await read(pubkey);
+    const changed = change(current);
+    // Unchanged (same array back): skip the write and the listener re-reads.
+    if (changed === current) return;
+    const next = pruneHistory(changed);
     await AsyncStorage.setItem(keyFor(pubkey), JSON.stringify(next)).catch(() => {});
     listeners.forEach((l) => l());
   });
@@ -84,11 +93,11 @@ export function recordNotification(
     historyKey?: string;
     /** Shared with the tray notification's `data.historyId`. */
     id?: string;
+    /** Unread row of the same thread to update instead of adding a row. */
+    collapseKey?: string;
   },
   now = Date.now(),
-): Promise<{ duplicateDelivered: boolean }> {
-  const fresh = { duplicateDelivered: false };
-  if (!pubkey) return Promise.resolve(fresh);
+): Promise<{ duplicateDelivered: boolean; id: string }> {
   const isMessage = entry.kind === 'dm' || entry.kind === 'group';
   const record: NotificationHistoryEntry = {
     id: entry.id ?? entry.historyKey ?? `${now}-${Math.random().toString(36).slice(2, 10)}`,
@@ -99,18 +108,49 @@ export function recordNotification(
     createdAt: now,
     read: false,
     ...(entry.historyKey ? { key: entry.historyKey } : {}),
+    ...(entry.collapseKey ? { collapse: entry.collapseKey } : {}),
   };
+  const fresh = { duplicateDelivered: false, id: record.id };
+  if (!pubkey) return Promise.resolve(fresh);
   // A repeat of a source already shown in the tray is reported, so the caller
   // can skip a second tray entry; one whose tray post failed is retried.
   let duplicateDelivered = false;
+  let id = record.id;
   return update(pubkey, (entries) => {
     const existing = record.key ? entries.find((e) => e.key === record.key) : undefined;
-    if (!existing) return [record, ...entries];
-    duplicateDelivered = existing.delivered === true;
-    return entries;
+    if (existing) {
+      duplicateDelivered = existing.delivered === true;
+      return entries;
+    }
+    // Another message in a thread with an unread row: that row now stands for
+    // both (newest title / routing, moved to the top) — a burst from one
+    // sender is one row, not twenty.
+    const open = record.collapse
+      ? entries.find((e) => !e.read && e.collapse === record.collapse)
+      : undefined;
+    if (!open) return [record, ...entries];
+    id = open.id;
+    const merged = { ...record, id, count: (open.count ?? 1) + 1 };
+    return [merged, ...entries.filter((e) => e !== open)];
   })
-    .then(() => ({ duplicateDelivered }))
+    .then(() => ({ duplicateDelivered, id }))
     .catch(() => fresh);
+}
+
+/** Delete every entry `match` selects (no write when none match); resolves
+ * with the removed ids. For alerts that turned out to show nothing — e.g. a
+ * generic "New message" superseded by the real one. */
+export function removeNotificationsWhere(
+  pubkey: string,
+  match: (entry: NotificationHistoryEntry) => boolean,
+): Promise<string[]> {
+  let removed: string[] = [];
+  return update(pubkey, (entries) => {
+    removed = entries.filter(match).map((e) => e.id);
+    return removed.length ? entries.filter((e) => !match(e)) : entries;
+  })
+    .then(() => removed)
+    .catch(() => []);
 }
 
 /** Note that an entry's tray notification was posted. */

@@ -23,6 +23,7 @@ import {
   setActiveThread,
   setActiveCache,
   dismissNotificationsFor,
+  dropMarmotPushAlerts,
   markHistoryReadFor,
   type NotificationTarget,
 } from '../services/notificationService';
@@ -362,6 +363,9 @@ export function dismissNotificationsForFocusedRoute(): void {
     target = { cacheCoord: params.coord };
   } else if (route?.name === 'Messages') {
     target = { genericMessages: true };
+    // What a Marmot push placeholder announced is on this list now: its
+    // nameless "New message" history row goes, not just its tray entry.
+    void dropMarmotPushAlerts();
   }
   if (target) {
     void dismissNotificationsFor(target);
