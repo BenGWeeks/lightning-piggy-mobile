@@ -243,9 +243,9 @@ export async function reverifyWelcomeOutcomes(
 /**
  * Whose invitation key a Welcome named: `otherDevice` when the kind-30443
  * event is ours but in another install's `d` slot (or we never published one);
- * `notOurs` when it's in our own slot, a stranger's, or gone from relays (an
- * old, deleted key — worth telling the user); `unknown` when relays couldn't
- * be asked.
+ * `notOurs` when it's in our own slot, a stranger's, or gone from relays that
+ * do answer (an old, deleted key — worth telling the user); `unknown` when
+ * relays couldn't be asked or returned nothing at all.
  */
 export async function keyPackageOwner(
   keyPackageId: string | undefined,
@@ -255,14 +255,21 @@ export async function keyPackageOwner(
   if (relays.length === 0) return 'unknown';
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
+    // Relay adapters resolve [] on a timeout or dead connection, so "not
+    // found" only counts once the relays have shown they answer: ask for any
+    // of our own key packages alongside (we, or another device, publish one).
     const events = await Promise.race([
-      network.request(relays, { ids: [keyPackageId], kinds: [KEY_PACKAGE_KIND], limit: 1 }),
+      network.request(relays, [
+        { ids: [keyPackageId], kinds: [KEY_PACKAGE_KIND], limit: 1 },
+        { kinds: [KEY_PACKAGE_KIND], authors: [owner.toLowerCase()], limit: 1 },
+      ]),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error('timeout')), LOOKUP_TIMEOUT_MS);
       }),
     ]);
     const kp = events.find((e) => e.id === keyPackageId);
-    if (!kp || kp.pubkey.toLowerCase() !== owner.toLowerCase()) return 'notOurs';
+    if (!kp) return events.length > 0 ? 'notOurs' : 'unknown';
+    if (kp.pubkey.toLowerCase() !== owner.toLowerCase()) return 'notOurs';
     const slot = kp.tags.find((t) => t[0] === 'd')?.[1];
     return slot && slot !== ownSlot ? 'otherDevice' : 'notOurs';
   } catch {

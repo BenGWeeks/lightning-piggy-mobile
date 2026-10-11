@@ -148,11 +148,13 @@ describe('keyPackageOwner', () => {
   it('is otherDevice for our key package in another install’s slot', async () => {
     const l = lookup([kpEvent(OTHER_SLOT)]);
     expect(await keyPackageOwner('kp1', l)).toBe('otherDevice');
-    expect(l.network.request).toHaveBeenCalledWith(['wss://r'], {
-      ids: ['kp1'],
-      kinds: [30443],
-      limit: 1,
-    });
+    expect(l.network.request).toHaveBeenCalledWith(
+      ['wss://r'],
+      [
+        { ids: ['kp1'], kinds: [30443], limit: 1 },
+        { kinds: [30443], authors: [OWNER], limit: 1 },
+      ],
+    );
     // This install never published one: any of our keys is another device's.
     expect(await keyPackageOwner('kp1', lookup([kpEvent(OTHER_SLOT)], null))).toBe('otherDevice');
   });
@@ -160,12 +162,16 @@ describe('keyPackageOwner', () => {
   it('is notOurs for our own slot, a stranger’s key, or a key gone from relays', async () => {
     expect(await keyPackageOwner('kp1', lookup([kpEvent(OUR_SLOT)]))).toBe('notOurs');
     expect(await keyPackageOwner('kp1', lookup([kpEvent(OTHER_SLOT, MAX)]))).toBe('notOurs');
-    expect(await keyPackageOwner('kp1', lookup([]))).toBe('notOurs');
+    // Gone: the relays answered (they returned our current key) but not kp1.
+    const current = { ...kpEvent(OUR_SLOT), id: 'kpCurrent' };
+    expect(await keyPackageOwner('kp1', lookup([current]))).toBe('notOurs');
     expect(await keyPackageOwner(undefined, lookup([]))).toBe('notOurs');
   });
 
-  it('is unknown when relays can’t be asked', async () => {
+  it('is unknown when relays can’t be asked or return nothing at all', async () => {
     expect(await keyPackageOwner('kp1', lookup(new Error('offline')))).toBe('unknown');
+    // Adapters resolve [] on timeout / dead connections: not proof it's gone.
+    expect(await keyPackageOwner('kp1', lookup([]))).toBe('unknown');
     expect(await keyPackageOwner('kp1', { ...lookup([]), relays: [] })).toBe('unknown');
   });
 });
@@ -183,6 +189,8 @@ describe('permanentFailureOutcome / reverifyWelcomeOutcomes', () => {
     ownSlot: OUR_SLOT,
   });
   const otherDeviceKp = { id: 'kp1', pubkey: OWNER, kind: 30443, tags: [['d', OTHER_SLOT]] };
+  // Relays that answer, without the named key package (it was deleted).
+  const gone = [{ id: 'kpCurrent', pubkey: OWNER, kind: 30443, tags: [['d', OUR_SLOT]] }];
   const noSecret = new Error('No matching secret');
 
   it('classifies malformed, another device’s and genuinely failed invites', async () => {
@@ -192,8 +200,12 @@ describe('permanentFailureOutcome / reverifyWelcomeOutcomes', () => {
     expect(
       await permanentFailureOutcome(rumor({ kp: 'kp1' }), noSecret, lookup([otherDeviceKp])),
     ).toMatchObject({ result: 'otherDevice' });
+    expect(
+      await permanentFailureOutcome(rumor({ kp: 'kp1' }), noSecret, lookup(gone)),
+    ).toMatchObject({ result: 'failed', reason: 'noKey' });
+    // Relays that returned nothing: can't tell yet.
     expect(await permanentFailureOutcome(rumor({ kp: 'kp1' }), noSecret, lookup([]))).toMatchObject(
-      { result: 'failed', reason: 'noKey' },
+      { result: 'unverified' },
     );
   });
 
@@ -215,7 +227,8 @@ describe('permanentFailureOutcome / reverifyWelcomeOutcomes', () => {
     const backend = createMemoryMarmotBackend();
     const o = await permanentFailureOutcome(rumor({ kp: 'kp1' }), noSecret, lookup(new Error('x')));
     await backend.set('welcomes', 'w1', JSON.stringify(o));
-    await reverifyWelcomeOutcomes(backend, lookup([]));
+    expect(await reverifyWelcomeOutcomes(backend, lookup([]))).toBe(false); // still no answer
+    await reverifyWelcomeOutcomes(backend, lookup(gone));
     expect((await loadFailedInvites(backend)).map((f) => f.id)).toEqual(['w1']);
   });
 });

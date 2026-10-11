@@ -362,6 +362,8 @@ describe('MarmotSession (no WebCrypto)', () => {
       ...relay.events.filter((e) => !(e.kind === 30443 && e.pubkey === bob.pubkey)),
     );
     await lost.start();
+    // The relays answer (with this install's new key), just not the old key.
+    await waitFor(() => relay.events.some((e) => e.kind === 30443 && e.pubkey === bob.pubkey));
     expect(await lost.acceptWelcome(welcome)).toBeNull();
     expect(parseWelcomeOutcome(await stale.backend.get('welcomes', welcome.id))).toMatchObject({
       result: 'failed',
