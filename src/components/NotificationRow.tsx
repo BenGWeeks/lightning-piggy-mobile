@@ -1,5 +1,6 @@
 import React from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
+import { Image } from 'expo-image';
 import {
   AlertTriangle,
   MapPin,
@@ -26,6 +27,8 @@ interface Props {
   entry: NotificationHistoryEntry;
   /** Display title (e.g. the sender's name resolved from contacts). */
   title: string;
+  /** The sender's avatar when known; the kind's icon otherwise. */
+  picture?: string | null;
   subtitle: string;
   time: string;
   iconColor: string;
@@ -34,7 +37,16 @@ interface Props {
   onPress: (entry: NotificationHistoryEntry) => void;
 }
 
-function NotificationRow({ entry, title, subtitle, time, iconColor, styles, onPress }: Props) {
+function NotificationRow({
+  entry,
+  title,
+  picture,
+  subtitle,
+  time,
+  iconColor,
+  styles,
+  onPress,
+}: Props) {
   const Icon = ICONS[entry.kind] ?? MessageCircle;
   return (
     <TouchableOpacity
@@ -45,9 +57,19 @@ function NotificationRow({ entry, title, subtitle, time, iconColor, styles, onPr
       accessibilityState={{ selected: !entry.read }}
       testID={`notification-row-${entry.id}`}
     >
-      <View style={styles.iconCircle}>
-        <Icon size={20} color={iconColor} />
-      </View>
+      {picture ? (
+        <Image
+          source={{ uri: picture }}
+          style={styles.avatar}
+          cachePolicy="memory-disk"
+          accessibilityIgnoresInvertColors
+          testID={`notification-avatar-${entry.id}`}
+        />
+      ) : (
+        <View style={styles.iconCircle}>
+          <Icon size={20} color={iconColor} />
+        </View>
+      )}
       <View style={styles.info}>
         <Text style={styles.rowTitle} numberOfLines={1}>
           {title}

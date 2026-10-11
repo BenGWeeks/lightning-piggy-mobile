@@ -10,6 +10,7 @@ import {
   MAX_AGE_MS,
   __resetNotificationHistoryForTests,
   clearNotificationHistory,
+  removeNotificationsWhere,
   type NotificationHistoryEntry,
 } from './notificationHistory';
 
@@ -117,4 +118,87 @@ it('clears an account through the write queue, so a pending record cannot recrea
   const cleared = clearNotificationHistory(A);
   await Promise.all([pending, cleared]);
   expect(await listNotifications(A)).toEqual([]);
+});
+
+describe('per-thread collapse (phantom bursts)', () => {
+  const dm = (title: string, at: number) =>
+    recordNotification(
+      A,
+      {
+        kind: 'dm',
+        title,
+        body: 'x',
+        data: { conversationPubkey: B },
+        collapseKey: `dm:nip04:${B}`,
+      },
+      at,
+    );
+
+  it('updates the unread row of a thread instead of stacking one per message', async () => {
+    const first = await dm('New message', T + 1000);
+    const second = await dm('New message', T + 2000);
+    const third = await dm('Nodie', T + 3000);
+    expect(second.id).toBe(first.id);
+    expect(third.id).toBe(first.id);
+    const list = await listNotifications(A);
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ id: first.id, title: 'Nodie', count: 3, createdAt: T + 3000 });
+  });
+
+  it('starts a new row once the thread row has been read', async () => {
+    const first = await dm('New message', T + 1000);
+    await markNotificationRead(A, first.id);
+    const next = await dm('New message', T + 2000);
+    expect(next.id).not.toBe(first.id);
+    expect(await listNotifications(A)).toHaveLength(2);
+  });
+
+  it('never merges different threads, or rows without a collapse key', async () => {
+    await dm('New message', T + 1000);
+    await recordNotification(
+      A,
+      {
+        kind: 'dm',
+        title: 'Max',
+        body: 'x',
+        data: { conversationPubkey: 'c'.repeat(64) },
+        collapseKey: 'dm:nip17:c',
+      },
+      T + 2000,
+    );
+    await recordNotification(A, { kind: 'dm', title: 'New message', body: 'x' }, T + 3000);
+    await recordNotification(A, { kind: 'dm', title: 'New message', body: 'x' }, T + 4000);
+    expect(await listNotifications(A)).toHaveLength(4);
+  });
+});
+
+describe('removeNotificationsWhere', () => {
+  it('removes only matching rows of that account and reports their ids', async () => {
+    const { id } = await recordNotification(
+      A,
+      { kind: 'dm', title: 'New message', body: 'x', data: { marmotPush: true } },
+      T + 1000,
+    );
+    await recordNotification(A, { kind: 'dm', title: 'Nodie', body: 'x' }, T + 2000);
+    await recordNotification(
+      B,
+      { kind: 'dm', title: 'New message', body: 'x', data: { marmotPush: true } },
+      T + 3000,
+    );
+    const removed = await removeNotificationsWhere(A, (e) => e.data.marmotPush === true);
+    expect(removed).toEqual([id]);
+    expect((await listNotifications(A)).map((e) => e.title)).toEqual(['Nodie']);
+    expect(await listNotifications(B)).toHaveLength(1);
+  });
+
+  it('skips the write (and listener churn) when nothing matches', async () => {
+    await recordNotification(A, { kind: 'dm', title: 'Nodie', body: 'x' }, T + 1000);
+    const listener = jest.fn();
+    subscribeNotificationHistory(listener);
+    const setItem = jest.spyOn(AsyncStorage, 'setItem');
+    const writesBefore = setItem.mock.calls.length;
+    expect(await removeNotificationsWhere(A, () => false)).toEqual([]);
+    expect(setItem.mock.calls.length).toBe(writesBefore);
+    expect(listener).not.toHaveBeenCalled();
+  });
 });

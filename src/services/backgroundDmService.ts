@@ -65,7 +65,12 @@ import { loadIdentities, type StoredIdentity } from './identitiesStore';
 import { perAccountKey } from './perAccountStorage';
 import { CONTACTS_CACHE_KEY_BASE } from '../contexts/nostrCacheKeys';
 import { resolveReadRelays } from './backgroundDmReadRelays';
-import { claimWrapNotification } from './dmWrapNotificationDedupe';
+import {
+  claimWrapNotification,
+  isLiveDmSubArmed,
+  noteContentlessWrapAlert,
+  wasWrapHandled,
+} from './dmWrapNotificationDedupe';
 import * as nostrService from './nostrService';
 import { subscribeInboxDmsForViewer } from './dmLiveSubscription';
 import {
@@ -248,6 +253,12 @@ async function resolveSenderName(pubkey: string, readRelays: string[]): Promise<
  * (Signal sealed-sender style) — we still know a wrap addressed to us
  * arrived, we just can't read it off-screen.
  */
+/** How long the contentless path waits for a live sub to decrypt a wrap. A
+ * remote signer answers in a second or two; a slower one still gets the
+ * contentless alert, which the live sub replaces once it decrypts. */
+export const LIVE_SUB_DECRYPT_GRACE_MS = 8_000;
+const waitMs = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 async function handleWrap(input: {
   ev: nostrService.RawInboxDmEvent;
   viewerPubkey: string;
@@ -277,7 +288,19 @@ async function handleWrap(input: {
   // from posting a second notification — see dmWrapNotificationDedupe.
   if (!decryptWrap) {
     if (!input.backlogSettled()) return;
+    // The app's live sub runs in this JS context and CAN decrypt (it asks the
+    // remote signer): give it a moment. A wrap it decoded is its call — the
+    // self-copy of a message we sent, a stranger's wrap or a reaction must
+    // not raise a contentless "New encrypted message" with nothing behind it.
+    if (isLiveDmSubArmed()) {
+      await waitMs(LIVE_SUB_DECRYPT_GRACE_MS);
+      if (wasWrapHandled(ev.id)) return;
+      // Signed out / switched account meanwhile: not this watch's to alert.
+      if (activeWatch?.viewerPubkey !== viewerPubkey) return;
+    }
     if (!claimWrapNotification(ev.id)) return;
+    // Remembered so the live sub can replace it once it decrypts the wrap.
+    noteContentlessWrapAlert(ev.id);
     await fireMessageNotification({
       kind: 'dm',
       owner: viewerPubkey,

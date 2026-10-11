@@ -39,12 +39,14 @@ export interface GroupBackfillWatermarks {
   persist: (h: string, createdAt: number) => void;
   /** Backfill page size (default 500). */
   pageSize?: number;
+  /** A group's backfill has drained and its live subscription opened. */
+  onLive?: (h: string) => void;
 }
 
 /** `network`, with kind-445 group backfills bounded and paged (see above). */
 export function boundGroupQueries(
   network: NostrNetworkInterface,
-  { watermarks, persist, pageSize }: GroupBackfillWatermarks,
+  { watermarks, persist, pageSize, onLive }: GroupBackfillWatermarks,
 ): NostrNetworkInterface {
   const groupH = (f: Filter) =>
     f.kinds?.includes(GROUP_EVENT_KIND) && f.since === undefined ? f['#h']?.[0] : undefined;
@@ -119,6 +121,7 @@ export function boundGroupQueries(
               commit(h, ts);
               pending.delete(h);
             }
+            if (h) onLive?.(h);
           }
           return inner.subscribe({
             ...observer,

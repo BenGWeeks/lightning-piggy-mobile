@@ -2467,6 +2467,7 @@
     "bell": "Notifications",
     "bellUnread": "Notifications, {{count}} unread",
     "markAllRead": "Mark all read",
+    "newCount": "{{count}} new",
     "emptyTitle": "No notifications yet",
     "emptyText": "Messages, payments and Piglet finds you're notified about will show here for 30 days.",
     "kind": {

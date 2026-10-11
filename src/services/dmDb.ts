@@ -419,10 +419,15 @@ export async function getInboxLatest(owner: string): Promise<DmMessageRow[]> {
 export async function getConversationForEvent(
   owner: string,
   eventId: string,
-): Promise<{ conversation: string; wireKind: number; protocol?: DmProtocol } | null> {
+): Promise<{
+  conversation: string;
+  wireKind: number;
+  protocol?: DmProtocol;
+  fromMe: boolean;
+} | null> {
   const db = await getLocalDb();
   const res = await db.execute(
-    `SELECT conversation, wire_kind, protocol FROM dm_messages
+    `SELECT conversation, wire_kind, protocol, from_me FROM dm_messages
       WHERE owner = ? AND event_id = ? LIMIT 1;`,
     [owner, eventId],
   );
@@ -431,6 +436,7 @@ export async function getConversationForEvent(
   return {
     conversation: String(row.conversation),
     wireKind: Number(row.wire_kind),
+    fromMe: Number(row.from_me) === 1,
     ...(isDmProtocol(row.protocol) ? { protocol: row.protocol } : {}),
   };
 }

@@ -48,8 +48,14 @@ import {
   markNotificationDelivered,
   markNotificationsReadWhere,
   recordNotification,
+  removeNotificationsWhere,
 } from './notificationHistory';
 import { getActivePubkey, subscribeActivePubkey } from './walletStorageService';
+import {
+  __resetNotificationFocusForTests,
+  isCacheActivelyViewed,
+  isThreadActivelyViewed,
+} from './notificationFocus';
 import {
   isWatcherValidation,
   showWatcherPushInForeground,
@@ -413,15 +419,16 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
     // In-app history (#1143) — recorded even without OS permission, so the
     // Notifications screen still lists what happened.
     // One id for the history row and the tray notification, so opening either
-    // can mark / clear the other. A retry of the same source reuses it.
-    const historyId =
-      payload.historyKey ?? `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    // can mark / clear the other. A retry of the same source reuses it, and so
+    // does the next message in a thread whose row is still unread.
     const owner = payload.owner ?? getActivePubkey() ?? undefined;
+    const collapseKey = threadCollapseKey(payload.kind, payload.data);
     // Awaited (best-effort, never throws): a headless background task can be
     // torn down as soon as delivery resolves, losing a detached write.
-    const { duplicateDelivered } = await recordNotification(owner ?? null, {
+    const { duplicateDelivered, id: historyId } = await recordNotification(owner ?? null, {
       ...payload,
-      id: historyId,
+      id: payload.historyKey ?? `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+      collapseKey,
     });
     // Same source already shown in the tray: report it as delivered (so the
     // caller doesn't keep retrying) without posting a second entry.
@@ -439,6 +446,9 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
 
     if ((await payload.shouldSuppress?.()) || flight.cancelled) return null;
     const id = await Notifications.scheduleNotificationAsync({
+      // A thread's alert reuses its row's id, so the next message replaces the
+      // tray entry rather than stacking another beside it.
+      ...(collapseKey ? { identifier: historyId } : {}),
       content: {
         title: presented.title,
         body: presented.body,
@@ -483,53 +493,15 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
   }
 }
 
-// --- Foreground-suppression state (#279) ---
-//
-// We never want to buzz the user about the very thread they're staring
-// at. The app root drives `setNotificationsForeground` from AppState, and
-// the open Conversation / GroupConversation screens drive
-// `setActiveThread` on focus / blur. A message trigger then skips the
-// notification only when the app is foreground AND the active thread is
-// the one the message belongs to. Payments are never suppressed — money
-// arriving is always worth surfacing.
-let appInForeground = true;
-let activeThreadId: string | null = null;
-// #740: same idea as `activeThreadId` but keyed on the cache coordinate
-// (`<kind>:<pubkey>:<d>`) so a find-log fired while the user is on that
-// exact HuntPiggyDetail screen stays quiet. Kept independent of the
-// thread id so a cache and a DM thread never collide on the same value.
-let activeCacheCoord: string | null = null;
-
-/** Called by the app root on AppState change. */
-export function setNotificationsForeground(active: boolean): void {
-  appInForeground = active;
-}
-
-/**
- * Called by Conversation / GroupConversation screens on focus (with the
- * partner pubkey or group id) and on blur (with `null`).
- */
-export function setActiveThread(threadId: string | null): void {
-  activeThreadId = threadId;
-}
-
-/** True when the app is foreground AND the user is viewing `threadId`. */
-export function isThreadActivelyViewed(threadId: string): boolean {
-  return appInForeground && activeThreadId === threadId;
-}
-
-/**
- * Called by HuntPiggyDetail / the navigation focus sync on focus (with the
- * cache coord) and on blur (with `null`). Mirrors `setActiveThread` (#740).
- */
-export function setActiveCache(cacheCoord: string | null): void {
-  activeCacheCoord = cacheCoord;
-}
-
-/** True when the app is foreground AND the user is viewing `cacheCoord`. */
-export function isCacheActivelyViewed(cacheCoord: string): boolean {
-  return appInForeground && activeCacheCoord === cacheCoord;
-}
+// Foreground suppression (#279) lives in notificationFocus; re-exported so
+// existing callers keep importing it from here.
+export {
+  isCacheActivelyViewed,
+  isThreadActivelyViewed,
+  setActiveCache,
+  setActiveThread,
+  setNotificationsForeground,
+} from './notificationFocus';
 
 /** What a focused screen has "read", for clearing its delivered
  * notifications (#1142): a 1:1 thread, a group, a cache's find-logs, or the
@@ -546,7 +518,26 @@ export type NotificationTarget =
   | { historyId: string }
   /** The generic alerts Marmot push wakes posted — superseded once the app
    * shows the real Marmot message. */
-  | { marmotPushAlerts: true };
+  | { marmotPushAlerts: true }
+  /** The contentless alert for one gift wrap (#1154), once it is decrypted. */
+  | { wrapId: string }
+  /** The tray notifications behind several history rows. */
+  | { historyIds: readonly string[] };
+
+/**
+ * Pure: the thread a message alert belongs to, so a burst from one sender is
+ * one tray entry and one history row (updated) rather than one per message.
+ * Undefined for alerts with no known thread (generic pings) and non-messages.
+ */
+export function threadCollapseKey(
+  kind: NotificationKind,
+  data: NotificationData | undefined,
+): string | undefined {
+  if (kind === 'dm' && data?.conversationPubkey)
+    return `dm:${data.conversationProtocol ?? 'nip17'}:${data.conversationPubkey.toLowerCase()}`;
+  if (kind === 'group' && data?.groupId) return `group:${data.groupId}`;
+  return undefined;
+}
 
 /** Pure: does a delivered notification's `data` belong to `target`? */
 export function notificationMatchesTarget(
@@ -565,6 +556,8 @@ export function notificationMatchesTarget(
   if ('owner' in target) return data.owner?.toLowerCase() === target.owner.toLowerCase();
   if ('historyId' in target) return data.historyId === target.historyId;
   if ('marmotPushAlerts' in target) return data.marmotPush === true;
+  if ('wrapId' in target) return data.wrapId === target.wrapId;
+  if ('historyIds' in target) return !!data.historyId && target.historyIds.includes(data.historyId);
   return (data.kind === 'dm' || data.kind === 'group') && !data.conversationPubkey && !data.groupId;
 }
 
@@ -679,13 +672,19 @@ export async function retractMarmotMessageNotifications(
 ): Promise<number> {
   if (refs.length === 0) return 0;
   const matches = marmotMessageRefMatcher(refs);
-  for (const flight of inFlightNotifications) {
-    if (matches(flight.data)) flight.cancelled = true;
-  }
+  cancelInFlightNotifications(matches);
   if (!tray) return 0;
+  // A collapsed entry showing the deleted text goes too (privacy first); its
+  // history row still records the thread's earlier messages.
   return dismissRequestsWhere((request) =>
     matches(request.content.data as NotificationData | null),
   );
+}
+
+/** Cancel notifications still being created whose `data` `matches` — the
+ * tray / history clean-up can't see those yet. Cheap (in memory). */
+export function cancelInFlightNotifications(matches: (data: NotificationData) => boolean): void {
+  for (const flight of inFlightNotifications) if (matches(flight.data)) flight.cancelled = true;
 }
 
 /** Dismiss delivered + cancel pending notifications `matching` selects. Never
@@ -762,11 +761,17 @@ export async function fireMessageNotification(opts: {
   data: NotificationData;
   owner?: string;
   shouldSuppress?: () => Promise<boolean>;
+  /** When the message was sent (ms) — which push placeholders it stands for. */
+  sentAt?: number;
 }): Promise<string | null> {
   const marmot = isMarmotMessage(opts.data);
   if (isThreadActivelyViewed(opts.threadId)) {
     // Shown on screen instead — still proof the app has this message.
-    if (marmot) lastMarmotNotifiedAt = Date.now();
+    if (marmot) {
+      lastMarmotNotifiedAt = Date.now();
+      noteMarmotMessageShown(opts.data.messageId);
+      void dropMarmotPushAlerts(opts.owner, opts.sentAt ?? Date.now());
+    }
     return null;
   }
   const id = await fireNotification({
@@ -779,11 +784,58 @@ export async function fireMessageNotification(opts: {
   });
   if (id && marmot) {
     lastMarmotNotifiedAt = Date.now();
-    // The real message is on screen now: drop the generic push alert(s) —
-    // ours (Android) and a data-less server alert already delivered (iOS).
-    void dismissNotificationsFor({ marmotPushAlerts: true });
+    noteMarmotMessageShown(opts.data.messageId);
+    // After the real alert is recorded — the placeholder is replaced, never
+    // deleted in the hope something else is written.
+    void dropMarmotPushAlerts(opts.owner, opts.sentAt ?? Date.now());
   }
   return id;
+}
+
+// Marmot messages that have their own row (alerted) or were on screen: a push
+// placeholder must never be turned into a second row for one (bounded).
+const shownMarmotMessages = new Set<string>();
+function noteMarmotMessageShown(messageId: string | undefined): void {
+  if (!messageId) return;
+  shownMarmotMessages.add(messageId);
+  if (shownMarmotMessages.size > 500) {
+    shownMarmotMessages.delete(shownMarmotMessages.values().next().value as string);
+  }
+}
+/** True once a Marmot message was alerted (its own row) or shown on screen. */
+export const marmotMessageShown = (messageId: string): boolean =>
+  shownMarmotMessages.has(messageId);
+
+/** A push placeholder posted up to this long after a message was sent can be
+ * the alert for it (push latency + the wake's grace + clock skew). */
+export const PLACEHOLDER_MATCH_MS = 60_000;
+const PLACEHOLDER_SKEW_MS = 5_000;
+
+/**
+ * The real Marmot message is shown now: drop the generic push alert(s) — ours
+ * (Android) and a data-less server alert already delivered (iOS) — AND their
+ * history rows, so the history keeps the real message, not a nameless
+ * "New message" beside it.
+ */
+export async function dropMarmotPushAlerts(owner?: string, sentAt?: number): Promise<void> {
+  const account = owner ?? getActivePubkey();
+  // No time (the Messages list opened): every one — the list shows them now.
+  // iOS: the server's data-less alerts, which have no rows, are cleared too.
+  if (sentAt === undefined || Platform.OS === 'ios')
+    await dismissNotificationsFor({ marmotPushAlerts: true });
+  if (!account) return;
+  // Only the rows this message can stand for (posted just after it was sent);
+  // their tray entries with them.
+  const removed = await removeNotificationsWhere(
+    account,
+    (e) =>
+      e.data.marmotPush === true &&
+      (sentAt === undefined ||
+        (e.createdAt >= sentAt - PLACEHOLDER_SKEW_MS &&
+          e.createdAt <= sentAt + PLACEHOLDER_MATCH_MS)),
+  );
+  if (sentAt !== undefined && removed.length)
+    await dismissNotificationsFor({ historyIds: removed });
 }
 
 /**
@@ -928,8 +980,7 @@ export async function dismissForegroundServiceNotification(): Promise<void> {
 export function __resetForTests(): void {
   initialisingPromise = null;
   cachedLockScreenContent = null;
-  appInForeground = true;
-  activeThreadId = null;
-  activeCacheCoord = null;
+  __resetNotificationFocusForTests();
   lastMarmotNotifiedAt = 0;
+  shownMarmotMessages.clear();
 }

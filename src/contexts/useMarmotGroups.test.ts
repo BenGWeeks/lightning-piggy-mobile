@@ -4,6 +4,7 @@ import { useMarmotGroups } from './useMarmotGroups';
 import { appendGroupMessage, loadGroupMessages } from '../services/groupMessagesStorageService';
 import { getLocalDb } from '../services/localDb';
 import type { MarmotMessageEvent } from '../services/marmotSession';
+import { fireMessageNotification } from '../services/notificationService';
 
 jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
@@ -184,4 +185,47 @@ it('applies an edit to a stored message, but never after its delete in the same 
     await jest.advanceTimersByTimeAsync(150);
   });
   expect((await loadGroupMessages('a'.repeat(64), 'g')).map((m) => m.text)).toEqual(['other v2']);
+});
+
+describe('our own Marmot group messages never alert (any device)', () => {
+  const ME = 'a'.repeat(64);
+  const chat = (pubkey: string, rumorId: string) =>
+    ({
+      group,
+      rumor: {
+        id: rumorId,
+        kind: 9,
+        pubkey,
+        tags: [],
+        content: 'hello group',
+        created_at: Math.floor(Date.now() / 1000),
+      },
+    }) as MarmotMessageEvent;
+
+  it.each([
+    ['the echo of a send from this device', ME],
+    ['a message sent from another of our devices', ME.toUpperCase()],
+  ])('%s: kept in the thread as ours, no alert or history row', async (_label, author) => {
+    (fireMessageNotification as jest.Mock).mockClear();
+    const { unmount } = renderHook(() => useMarmotGroups(ME));
+    await act(async () => {
+      mockOnMessage(chat(author, 'e'.repeat(64)));
+      await jest.advanceTimersByTimeAsync(500);
+    });
+    const stored = await loadGroupMessages(ME, 'g');
+    expect(stored.find((m) => m.id === 'e'.repeat(64))?.senderPubkey).toBe(ME);
+    expect(fireMessageNotification).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  it("still alerts for another member's message (control)", async () => {
+    (fireMessageNotification as jest.Mock).mockClear();
+    const { unmount } = renderHook(() => useMarmotGroups(ME));
+    await act(async () => {
+      mockOnMessage(chat('bob', 'f'.repeat(64)));
+      await jest.advanceTimersByTimeAsync(500);
+    });
+    expect(fireMessageNotification).toHaveBeenCalledTimes(1);
+    unmount();
+  });
 });
