@@ -39,6 +39,35 @@ describe('marmotSessionFence', () => {
     expect((await backend.keys('ns')).sort()).toEqual(['a', 'b']);
   });
 
+  it.each(['remove', 'clear'] as const)(
+    'allows %s until fenced, then preserves a new session’s pending Welcomes',
+    async (operation) => {
+      const shared = createMemoryMarmotBackend();
+      const gate = createStopGate();
+      const oldSession = fenceBackend(shared, gate);
+      const newSession = fenceBackend(shared, createStopGate());
+      const removeWelcome = () =>
+        operation === 'remove'
+          ? oldSession.remove('pendingWelcomes', 'invite')
+          : oldSession.clear('pendingWelcomes');
+
+      await oldSession.set('pendingWelcomes', 'invite', 'original');
+      await removeWelcome();
+      expect(await shared.get('pendingWelcomes', 'invite')).toBeNull();
+      gate.stop();
+      await oldSession.set('pendingWelcomes', 'invite', 'queued');
+      await removeWelcome();
+      expect(await shared.get('pendingWelcomes', 'invite')).toBeNull();
+
+      gate.fence();
+      await newSession.set('pendingWelcomes', 'invite', 'retry');
+      await newSession.set('pendingWelcomes', 'other', 'another retry');
+      await removeWelcome();
+      expect(await newSession.get('pendingWelcomes', 'invite')).toBe('retry');
+      expect(await newSession.get('pendingWelcomes', 'other')).toBe('another retry');
+    },
+  );
+
   it('settleWithin: resolves on settle or timeout, whichever is first', async () => {
     await settleWithin(Promise.reject(new Error('x')), 10_000);
     const started = Date.now();

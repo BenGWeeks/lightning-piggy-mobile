@@ -75,8 +75,12 @@ export function fenceBackend(backend: MarmotKvBackend, gate: StopGate): MarmotKv
   return {
     get: (ns, key) => backend.get(ns, key),
     keys: (ns) => backend.keys(ns),
-    remove: (ns, key) => backend.remove(ns, key),
-    clear: (ns) => backend.clear(ns),
+    remove: async (ns, key) => {
+      if (!gate.fenced) await backend.remove(ns, key);
+    },
+    clear: async (ns) => {
+      if (!gate.fenced) await backend.clear(ns);
+    },
     set: async (ns, key, value) => {
       if (!gate.fenced) await backend.set(ns, key, value);
     },
