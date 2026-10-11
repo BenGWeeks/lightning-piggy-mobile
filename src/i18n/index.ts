@@ -6,6 +6,7 @@ import esJson from './locales/es.json';
 import huJson from './locales/hu.json';
 import plJson from './locales/pl.json';
 import ukJson from './locales/uk.json';
+import hiJson from './locales/hi.json';
 import mrJson from './locales/mr.json';
 import zhHansJson from './locales/zh-Hans.json';
 import type { Translations } from './locales/types';
@@ -28,15 +29,16 @@ const es: Translations = esJson;
 const hu: Translations = huJson;
 const pl: Translations = plJson;
 const uk: Translations = ukJson;
+const hi: Translations = hiJson;
 const mr: Translations = mrJson;
 const zhHans: Translations = zhHansJson;
 
 /** Raw catalogue dict — exported so LocaleContext can build its own
  *  per-locale I18n instance for rendering (see the render-purity note
  *  there) without duplicating the JSON imports. */
-export const translations = { en, de, es, hu, pl, uk, mr, 'zh-Hans': zhHans };
+export const translations = { en, de, es, hu, pl, uk, hi, mr, 'zh-Hans': zhHans };
 
-export const SUPPORTED_LOCALES = ['en', 'de', 'es', 'hu', 'pl', 'uk', 'mr', 'zh-Hans'] as const;
+export const SUPPORTED_LOCALES = ['en', 'de', 'es', 'hu', 'pl', 'uk', 'hi', 'mr', 'zh-Hans'] as const;
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
 
 export function isSupportedLocale(code: string): code is SupportedLocale {

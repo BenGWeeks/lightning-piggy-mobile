@@ -79,6 +79,10 @@ describe('intlLocaleFor', () => {
     expect((1234567).toLocaleString(intlLocaleFor('mr'))).toBe('12,34,567');
   });
 
+  it('keeps Hindi on Western digits with Indian grouping too', () => {
+    expect((1234567).toLocaleString(intlLocaleFor('hi'))).toBe('12,34,567');
+  });
+
   it('passes other catalogue codes straight through to Intl', () => {
     expect(intlLocaleFor('de')).toBe('de');
     expect((1234567).toLocaleString(intlLocaleFor('de'))).toBe('1.234.567');
