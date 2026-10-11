@@ -40,6 +40,7 @@ export function useSendSheetInput(opts: {
   // Programmatic paste-field setter that bumps the uncontrolled input's remount
   // key (see applyPasteText in SendSheet) — used when pasting from the clipboard.
   applyPasteText: (v: string) => void;
+  onInvalidInvoice: () => void;
   setIsOnchainAddress: (v: boolean) => void;
   setIsLnurl: (v: boolean) => void;
   setInvoiceData: (v: string | null) => void;
@@ -62,6 +63,7 @@ export function useSendSheetInput(opts: {
     activePubkey,
     recipientName,
     applyPasteText,
+    onInvalidInvoice,
     setIsOnchainAddress,
     setIsLnurl,
     setInvoiceData,
@@ -148,6 +150,10 @@ export function useSendSheetInput(opts: {
         setSatsValue('');
         setIsOnchainAddress(false);
         setIsLnurl(false);
+        // Return to an editable field and stop the camera. Otherwise the same
+        // rejected QR would reopen the alert as soon as the user dismisses it.
+        applyPasteText(input);
+        onInvalidInvoice();
         // A camera can deliver the same bad QR on every frame. Keep one alert
         // visible, then allow another attempt when the user dismisses it.
         invalidInvoiceAlertVisible.current = true;

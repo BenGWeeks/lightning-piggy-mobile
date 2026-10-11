@@ -19,6 +19,7 @@ function setup() {
     scanned: false,
     pasteTextRef: { current: DROPPED_CHARACTER_INVOICE },
     applyPasteText: jest.fn(),
+    onInvalidInvoice: jest.fn(),
     setIsOnchainAddress: jest.fn(),
     setIsLnurl: jest.fn(),
     setInvoiceData: jest.fn(),
@@ -62,6 +63,8 @@ it.each(['paste submit', 'clipboard', 'QR scan', 'deep link', 'NFC'])(
     expect(opts.setInvoiceData).toHaveBeenCalledWith(null);
     expect(opts.setDecoded).toHaveBeenCalledWith(null);
     expect(opts.setSatsValue).toHaveBeenCalledWith('');
+    expect(opts.applyPasteText).toHaveBeenCalledWith(DROPPED_CHARACTER_INVOICE);
+    expect(opts.onInvalidInvoice).toHaveBeenCalledTimes(1);
   },
 );
 
