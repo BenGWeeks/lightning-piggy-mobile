@@ -150,7 +150,7 @@ describe('MarmotPushRegistrar', () => {
     const view = Object.values(await memberView(t.sent, g));
     expect(view).toHaveLength(1);
     expect(view[0].record).not.toHaveProperty('relayHint');
-    // Further passes (app restarts, group churn) leave it alone.
+    // Further passes leave it alone.
     for (let i = 0; i < 3; i++) {
       t.registrar.setRegistration({ ...noHint });
       expect(await t.registrar.sync({ interactive: false })).toMatchObject({
@@ -161,6 +161,48 @@ describe('MarmotPushRegistrar', () => {
     expect(await t.registrar.pendingCount()).toBe(0);
     expect(t.prompts()).toBe(2);
     expect(t.sent).toHaveLength(2);
+  });
+
+  it('the hint migration survives an upgrade + restarts: one signature, then only free re-sends', async () => {
+    // One store across app runs; each run is a fresh registrar on it.
+    const backend = createMemoryMarmotBackend();
+    const sent: Sent[] = [];
+    let prompts = 0;
+    let clock = 1_000;
+    let groups = [group('aa'.repeat(16))];
+    const run = (registration: DeviceRegistration) => {
+      const r = new MarmotPushRegistrar({
+        pubkey: ME,
+        silentSigner: true,
+        backend,
+        ready: Promise.resolve(),
+        groups: () => groups,
+        sign: async (template) => {
+          prompts++;
+          return finalizeEvent({ ...template }, sk) as unknown as Awaited<ReturnType<Sign>>;
+        },
+        send: async (groupIdHex, event) => {
+          sent.push({ group: groupIdHex, kind: event.kind, content: event.content });
+          return true;
+        },
+        now: () => clock++,
+      });
+      r.setRegistration(registration);
+      return r.sync({ interactive: false });
+    };
+    const noHint: DeviceRegistration = { ...reg('token-1'), relayHint: undefined };
+    await run(reg('token-1')); // old build: the nos.lol hint
+    expect(await run(noHint)).toMatchObject({ published: 1 }); // upgraded build
+    expect(await run(noHint)).toMatchObject({ published: 0, pending: 0 }); // restart
+    groups = [group('aa'.repeat(16), 0, [1, 2])]; // a member joins
+    expect(await run(noHint)).toMatchObject({ published: 0, pending: 0 });
+    expect(await run(noHint)).toMatchObject({ published: 0, pending: 0 });
+    expect(prompts).toBe(2);
+    expect(sent.map((x) => x.kind)).toEqual([447, 447, 447]);
+    expect(sent[2].content).toBe(sent[1].content); // the newcomer got the same signed record
+    expect(parsePushPayload(447, sent[2].content, Date.now()).records[0]).not.toHaveProperty(
+      'relayHint',
+    );
   });
 
   it('a remote signer leaves the hint change pending in the background (no prompt)', async () => {

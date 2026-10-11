@@ -121,6 +121,7 @@ export function createPushTransport(getLookupRelays: () => string[]): PushTransp
       ...getLookupRelays(),
       ...DEFAULT_RELAYS,
     ]);
+    trackRelays(relays); // closed on sign-out like every other relay we open
     const events = await pool.querySync(
       relays,
       { kinds: [10050], authors: [pubkey], limit: 1 },

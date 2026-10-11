@@ -7,6 +7,7 @@ jest.mock('./nostrPool', () => ({
 }));
 
 import { createPushTransport } from './marmotNetwork';
+import { trackRelays } from './nostrPool';
 import { MARMOT_PUSH_SERVER_RELAYS } from './nostrRelayDefaults';
 
 const SERVER = 'ee'.repeat(32);
@@ -43,6 +44,8 @@ describe('createPushTransport().inboxRelays', () => {
     );
     expect(filter).toEqual({ kinds: [10050], authors: [SERVER], limit: 1 });
     expect(opts.maxWait).toBeGreaterThan(0);
+    // Tracked, so sign-out closes the lookup's sockets too.
+    expect(trackRelays).toHaveBeenCalledWith(relays);
   });
 
   it('caches a found list, and shares one lookup between concurrent triggers', async () => {

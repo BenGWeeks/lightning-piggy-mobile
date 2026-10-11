@@ -60,10 +60,10 @@ export interface PushServer {
  * the app's own credentials, so each app id has its own server (APNs topic =
  * that bundle id).
  *
- * No relay hint: senders (White Noise's MDK and our MarmotPushNotifier)
- * deliver a trigger ONLY to the record's hint when it has one, and look up
- * the server's kind-10050 inbox only when it doesn't. A hint baked into the
- * signed records pins every sender to that relay until each member re-signs
+ * No relay hint: White Noise (MDK) delivers a trigger ONLY to the record's
+ * hint when it has one, and looks up the server's kind-10050 inbox only when
+ * it doesn't (our MarmotPushNotifier sends to both). A hint baked into the
+ * signed records pins those senders to that relay until each member re-signs
  * (nos.lol went down and took every trigger with it). Without one, the
  * server's relays are a server-side change (its subscriptions + its 10050)
  * with nothing to re-sign — e.g. moving to a relay Lightning Piggy hosts.
