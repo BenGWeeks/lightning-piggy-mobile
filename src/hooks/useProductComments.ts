@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import type { Event as NostrEvent } from 'nostr-tools';
 import { useNostr } from '../contexts/NostrContext';
@@ -14,7 +14,7 @@ import {
   type CommentRoot,
 } from '../utils/productComments';
 import { reconcileComments } from '../utils/commentEdits';
-import { DELETION_KIND, deletionFilters } from '../utils/nip09';
+import { DELETION_KIND, deletionFilters, idRefs } from '../utils/nip09';
 
 export interface UseProductComments {
   /** Every visible comment in the thread (all depths) — deleted and
@@ -52,6 +52,12 @@ export function useProductComments(root: CommentRoot | null): UseProductComments
   // a relay that ignores NIP-09 must not bring a deleted comment back here.
   const [localAdded, setLocalAdded] = useState<NostrEvent[]>([]);
   const [localHidden, setLocalHidden] = useState<ReadonlySet<string>>(() => new Set());
+  // Read by the fetch (not a dep): our own posts are checked for deletions
+  // too, in case another device deleted one relays no longer return.
+  const localAddedRef = useRef(localAdded);
+  useEffect(() => {
+    localAddedRef.current = localAdded;
+  }, [localAdded]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const [tick, setTick] = useState(0);
@@ -99,10 +105,7 @@ export function useProductComments(root: CommentRoot | null): UseProductComments
           // deleted; this covers the ones that kept it). Best-effort: a failed
           // lookup just keeps the previous deletions.
           return Promise.all(
-            deletionFilters(
-              'e',
-              comments.map((c) => c.id),
-            ).map((filter) =>
+            deletionFilters('e', idRefs([...comments, ...localAddedRef.current])).map((filter) =>
               querySyncAbortable(pool, readRelays, filter, {
                 maxWait: 4000,
                 signal: controller.signal,

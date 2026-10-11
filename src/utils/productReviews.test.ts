@@ -12,6 +12,7 @@ import {
   ratingToStars,
   reviewAddress,
   starsToRating,
+  visibleReviews,
 } from './productReviews';
 
 const MERCHANT = 'a'.repeat(64);
@@ -302,5 +303,43 @@ describe('buildReviewDeletion', () => {
         ['k', String(REVIEW_KIND)],
       ],
     });
+  });
+});
+
+describe('visibleReviews', () => {
+  const reviewer = 'r'.repeat(64);
+  const rev = (id: string, created_at: number) =>
+    ev({
+      id,
+      pubkey: reviewer,
+      created_at,
+      tags: [
+        ['d', COORD],
+        ['rating', '0.8', 'thumb'],
+      ],
+    });
+  const del = (tags: string[][], created_at: number) =>
+    ev({ id: `del-${created_at}`, pubkey: reviewer, kind: 5, created_at, tags });
+  const address = `${REVIEW_KIND}:${reviewer}:${COORD}`;
+
+  it('hides the review when only its current version is deleted by e', () => {
+    const out = visibleReviews(
+      [rev('old', 100), rev('new', 200)],
+      [del([['e', 'new']], 300)],
+      COORD,
+    );
+    expect(out).toEqual([]);
+  });
+
+  it('hides every version up to an a deletion, but shows a later re-review', () => {
+    const before = [rev('v1', 100), rev('v2', 200)];
+    expect(visibleReviews(before, [del([['a', address]], 250)], COORD)).toEqual([]);
+    const out = visibleReviews([...before, rev('v3', 251)], [del([['a', address]], 250)], COORD);
+    expect(out.map((r) => r.id)).toEqual(['v3']);
+  });
+
+  it("ignores another author's deletion", () => {
+    const foreign = { ...del([['a', address]], 300), pubkey: 'x'.repeat(64) };
+    expect(visibleReviews([rev('v1', 100)], [foreign], COORD).map((r) => r.id)).toEqual(['v1']);
   });
 });

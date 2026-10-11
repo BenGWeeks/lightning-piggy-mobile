@@ -3,6 +3,8 @@ import {
   DELETION_KIND,
   DELETION_QUERY_CHUNK,
   addressOf,
+  addressRefs,
+  idRefs,
   deletedByAuthor,
   deletionFilters,
 } from './nip09';
@@ -37,24 +39,35 @@ describe('addressOf', () => {
 });
 
 describe('deletionFilters', () => {
-  it('chunks and de-duplicates values into bounded kind-5 filters', () => {
-    const ids = Array.from({ length: DELETION_QUERY_CHUNK + 5 }, (_, i) => `id${i}`);
-    const filters = deletionFilters('e', [...ids, 'id0']);
+  it('chunks, de-duplicates and author-bounds kind-5 filters', () => {
+    const refs = Array.from({ length: DELETION_QUERY_CHUNK + 5 }, (_, i) => ({
+      value: `id${i}`,
+      author: i % 2 ? ME : OTHER,
+    }));
+    const filters = deletionFilters('e', [...refs, { value: 'id0', author: OTHER }]);
     expect(filters).toHaveLength(2);
     expect(filters[0]).toEqual({
       kinds: [DELETION_KIND],
-      '#e': ids.slice(0, DELETION_QUERY_CHUNK),
+      authors: [OTHER, ME],
+      '#e': refs.slice(0, DELETION_QUERY_CHUNK).map((r) => r.value),
       limit: DELETION_QUERY_CHUNK * 2,
     });
-    expect(filters[1]['#e']).toEqual(ids.slice(DELETION_QUERY_CHUNK));
+    expect(filters[1]['#e']).toEqual(refs.slice(DELETION_QUERY_CHUNK).map((r) => r.value));
     expect(filters[1].limit).toBe(10);
   });
 
-  it('supports #a and returns nothing for no values', () => {
-    expect(deletionFilters('a', ['x'])).toEqual([
-      { kinds: [DELETION_KIND], '#a': ['x'], limit: 2 },
+  it('supports #a and returns nothing for no refs', () => {
+    expect(deletionFilters('a', [{ value: 'x', author: ME }])).toEqual([
+      { kinds: [DELETION_KIND], authors: [ME], '#a': ['x'], limit: 2 },
     ]);
     expect(deletionFilters('e', [])).toEqual([]);
+  });
+
+  it('builds id and address refs from events', () => {
+    expect(idRefs([ev('c1')])).toEqual([{ value: 'c1', author: ME }]);
+    expect(addressRefs([ev('c1'), review('r1', 1)])).toEqual([
+      { value: `31555:${ME}:${D}`, author: ME },
+    ]);
   });
 });
 

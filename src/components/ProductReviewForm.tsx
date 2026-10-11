@@ -11,6 +11,8 @@ const ProductReviewForm: React.FC<{
   existing?: ParsedReview;
   /** Editing an existing review: shows Cancel (collapses the form again). */
   onCancel?: () => void;
+  /** Called on the first change, so the parent keeps a draft's form open. */
+  onDirty?: () => void;
   styles: Styles;
   colors: Palette;
   onSubmit: (stars: number, content: string) => Promise<void>;
@@ -20,6 +22,7 @@ const ProductReviewForm: React.FC<{
 }> = ({
   existing,
   onCancel,
+  onDirty,
   styles,
   colors,
   onSubmit,
@@ -48,10 +51,12 @@ const ProductReviewForm: React.FC<{
   }, [existingStars, existingText, touched]);
 
   const onChangeStars = (next: number) => {
+    if (!touched) onDirty?.();
     setTouched(true);
     setStars(next);
   };
   const onChangeContent = (next: string) => {
+    if (!touched) onDirty?.();
     setTouched(true);
     setContent(next);
   };

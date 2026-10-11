@@ -14,7 +14,7 @@ interface Params {
   /** The signed-in user's current review of this product, if any. */
   ownReview?: ParsedReview;
   addLocally: (review: NostrEvent) => void;
-  hideLocally: (review: ParsedReview) => () => void;
+  hideLocally: (review: ParsedReview) => (deletion: NostrEvent | null) => void;
   refetch: () => void;
 }
 
@@ -36,11 +36,21 @@ export function useProductReviewActions({
   const t = useTranslation();
   const { publishReview, deleteReview, publishing, canPublish } = usePublishProductFeedback();
   const [editing, setEditing] = useState(false);
+  // The form holds typed input — keep it open even if the user's existing
+  // review arrives late from the relays (it would otherwise collapse).
+  const [dirty, setDirty] = useState(false);
+  // Bumped to remount the form fresh (after a delete mid-edit).
+  const [formGen, setFormGen] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
+  // `created_at` of our latest deletion of this review: a re-review must be
+  // newer, or the deletion (inclusive of its own second) would cover it.
+  const lastDeletionAt = useRef(0);
 
   useEffect(() => {
     setEditing(false);
+    setDirty(false);
     setMenuOpen(false);
+    lastDeletionAt.current = 0;
   }, [pubkey, coord]);
 
   // Pending post-publish refetch timer, cleared on unmount so a late fire can
@@ -64,9 +74,15 @@ export function useProductReviewActions({
     async (stars: number, content: string) => {
       const isUpdate = !!ownReview;
       try {
-        const published = await publishReview({ coord, stars, content });
+        const published = await publishReview({
+          coord,
+          stars,
+          content,
+          notBefore: lastDeletionAt.current + 1,
+        });
         addLocally(published);
         setEditing(false);
+        setDirty(false);
         toast('success', isUpdate ? 'market.reviews.updated' : 'market.reviews.posted');
         // Relays need a beat to serve the new event back; refresh shortly after.
         if (refetchTimer.current) clearTimeout(refetchTimer.current);
@@ -81,13 +97,17 @@ export function useProductReviewActions({
 
   const deleteNow = useCallback(
     async (review: ParsedReview) => {
-      const undo = hideLocally(review);
+      const settle = hideLocally(review);
       setEditing(false);
+      setDirty(false);
+      setFormGen((g) => g + 1);
       try {
-        await deleteReview(review, coord);
+        const deletion = await deleteReview(review, coord);
+        lastDeletionAt.current = deletion.created_at;
+        settle(deletion);
         toast('success', 'market.reviews.deleted');
       } catch {
-        undo();
+        settle(null);
         toast('error', 'market.reviews.deleteFailed');
       }
     },
@@ -113,7 +133,11 @@ export function useProductReviewActions({
     setMenuOpen(false);
     setEditing(true);
   }, []);
-  const cancelEdit = useCallback(() => setEditing(false), []);
+  const cancelEdit = useCallback(() => {
+    setEditing(false);
+    setDirty(false);
+  }, []);
+  const markDirty = useCallback(() => setDirty(true), []);
   const toggleMenu = useCallback(() => setMenuOpen((open) => !open), []);
 
   return {
@@ -121,8 +145,11 @@ export function useProductReviewActions({
     publishing,
     canPublish,
     // No review yet: the form is the way in. With one: only while editing.
-    formOpen: !ownReview || editing,
-    editing: editing && !!ownReview,
+    formOpen: !ownReview || editing || dirty,
+    /** The open form is changing an existing review (offers Cancel). */
+    editing: (editing || dirty) && !!ownReview,
+    formKey: `${coord}:${pubkey ?? ''}:${formGen}`,
+    markDirty,
     startEdit,
     cancelEdit,
     menuOpen,

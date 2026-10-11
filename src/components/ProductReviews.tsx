@@ -57,6 +57,8 @@ const ProductReviews: React.FC<Props> = ({ coord, onRequestSignIn, onCount }) =>
     canPublish,
     formOpen,
     editing,
+    formKey,
+    markDirty,
     startEdit,
     cancelEdit,
     menuOpen,
@@ -79,10 +81,11 @@ const ProductReviews: React.FC<Props> = ({ coord, onRequestSignIn, onCount }) =>
       {formOpen || !canPublish ? (
         <ProductReviewForm
           // Keyed on the identity too: the account switcher keeps screens
-          // mounted, and a draft must never carry over to another pubkey. And
-          // on write-vs-edit, so deleting mid-edit starts a fresh form.
-          key={`${coord}:${pubkey ?? ''}:${ownReview ? 'edit' : 'new'}`}
+          // mounted, and a draft must never carry over to another pubkey (and
+          // a delete mid-edit starts a fresh form).
+          key={formKey}
           existing={ownReview}
+          onDirty={markDirty}
           onCancel={editing ? cancelEdit : undefined}
           styles={styles}
           colors={colors}

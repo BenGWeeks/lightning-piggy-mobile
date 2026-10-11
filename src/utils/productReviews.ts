@@ -11,6 +11,7 @@
 //
 // No React, no I/O — unit-testable in isolation (coverage scope: src/utils).
 import type { Event as NostrEvent } from 'nostr-tools';
+import { deletedByAuthor } from './nip09';
 
 /** Gamma Markets product-review event kind. */
 export const REVIEW_KIND = 31555;
@@ -231,4 +232,19 @@ export function buildReviewDeletion(
       ['k', String(REVIEW_KIND)],
     ],
   };
+}
+
+/**
+ * The reviews to show (#1272): newest valid version per author, then minus
+ * those the author deleted (kind 5). Deletions apply AFTER the pick — a
+ * review is replaceable, so when its current version is deleted (even by `e`
+ * only, as some clients do) an older copy must not resurface in its place.
+ */
+export function visibleReviews(
+  events: NostrEvent[],
+  deletions: NostrEvent[],
+  expectedCoord?: string,
+): ParsedReview[] {
+  const deleted = deletedByAuthor(events, deletions);
+  return parseReviews(events, expectedCoord).filter((r) => !deleted.has(r.id));
 }

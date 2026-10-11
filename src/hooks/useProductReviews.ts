@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import type { Event as NostrEvent } from 'nostr-tools';
 import { useNostr } from '../contexts/NostrContext';
@@ -7,12 +7,12 @@ import { querySyncAbortable } from '../services/relayQuery';
 import {
   REVIEW_KIND,
   aggregateReviews,
-  parseReviews,
   reviewAddress,
+  visibleReviews,
   type ParsedReview,
   type ReviewAggregate,
 } from '../utils/productReviews';
-import { DELETION_KIND, addressOf, deletedByAuthor, deletionFilters } from '../utils/nip09';
+import { DELETION_KIND, addressRefs, deletionFilters, idRefs } from '../utils/nip09';
 
 export interface UseProductReviews {
   reviews: ParsedReview[];
@@ -28,8 +28,10 @@ export interface UseProductReviews {
   /** Show a review we just published at once (before the refetch sees it). */
   addLocally: (review: NostrEvent) => void;
   /** Hide your review at once (deleted) — every version up to the one
-   * shown, like the `a`-tag kind-5 it mirrors; returns the undo. */
-  hideLocally: (review: ParsedReview) => () => void;
+   * shown, like the `a`-tag kind-5 it mirrors. Returns `settle`: pass the
+   * signed kind-5 once a relay took it (it replaces the stand-in), or null
+   * to undo. */
+  hideLocally: (review: ParsedReview) => (deletion: NostrEvent | null) => void;
 }
 
 /**
@@ -49,6 +51,12 @@ export function useProductReviews(coord: string | null): UseProductReviews {
   // Local stand-ins for kind-5s still being published (same shape, so the
   // one `deletedByAuthor` rule applies to both).
   const [localDeletions, setLocalDeletions] = useState<NostrEvent[]>([]);
+  // Read by the fetch (not a dep): our own posts are checked for deletions
+  // too, in case another device deleted one relays no longer return.
+  const localAddedRef = useRef(localAdded);
+  useEffect(() => {
+    localAddedRef.current = localAdded;
+  }, [localAdded]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const [tick, setTick] = useState(0);
@@ -90,13 +98,10 @@ export function useProductReviews(coord: string | null): UseProductReviews {
           // Then the kind-5s naming them — by address (what we and most
           // clients send for a replaceable review) and by id. Best-effort: a
           // failed lookup keeps the previous deletions.
-          const addresses = evs.map(addressOf).filter((a): a is string => !!a);
+          const mine = [...evs, ...localAddedRef.current];
           const filters = [
-            ...deletionFilters('a', addresses),
-            ...deletionFilters(
-              'e',
-              evs.map((e) => e.id),
-            ),
+            ...deletionFilters('a', addressRefs(mine)),
+            ...deletionFilters('e', idRefs(mine)),
           ];
           return Promise.all(
             filters.map((filter) =>
@@ -125,17 +130,13 @@ export function useProductReviews(coord: string | null): UseProductReviews {
 
   // Exact `d` scoping: the `#d` filter is only a relay-side request, so a
   // review a relay returns for another product must not count here.
-  // Author-deleted and locally hidden versions are dropped BEFORE the
-  // newest-per-author pick, so deleting your review never resurfaces an older
-  // copy of it.
+  // Newest version per author, minus author deletions (incl. local
+  // stand-ins) — see `visibleReviews`.
   const reviews = useMemo(() => {
     const all = localAdded.length > 0 ? [...events, ...localAdded] : events;
-    const deleted = deletedByAuthor(
+    return visibleReviews(
       all,
       localDeletions.length > 0 ? [...deletions, ...localDeletions] : deletions,
-    );
-    return parseReviews(
-      all.filter((e) => !deleted.has(e.id)),
       coord ?? undefined,
     );
   }, [events, localAdded, deletions, localDeletions, coord]);
@@ -158,7 +159,11 @@ export function useProductReviews(coord: string | null): UseProductReviews {
         sig: '',
       };
       setLocalDeletions((prev) => [...prev, stand]);
-      return () => setLocalDeletions((prev) => prev.filter((d) => d !== stand));
+      return (deletion: NostrEvent | null) =>
+        setLocalDeletions((prev) => {
+          const rest = prev.filter((d) => d !== stand);
+          return deletion ? [...rest, deletion] : rest;
+        });
     },
     [coord],
   );

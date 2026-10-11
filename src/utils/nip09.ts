@@ -22,20 +22,48 @@ export function addressOf(event: NostrEvent): string | null {
   return `${event.kind}:${event.pubkey}:${d}`;
 }
 
-/** Bounded relay filters fetching kind-5s that name `values` by `#e` / `#a`. */
-export function deletionFilters(tag: 'e' | 'a', values: string[]): Filter[] {
-  const unique = Array.from(new Set(values));
+/** Something a kind-5 may name: an event id or address, and its author. */
+export interface DeletionRef {
+  value: string;
+  author: string;
+}
+
+/**
+ * Bounded relay filters fetching kind-5s that name `refs` by `#e` / `#a`.
+ * Restricted to the referenced events' AUTHORS — only their deletions count,
+ * and without it anyone's junk kind-5s could crowd the real one out of the
+ * `limit`.
+ */
+export function deletionFilters(tag: 'e' | 'a', refs: DeletionRef[]): Filter[] {
+  const byValue = new Map<string, string>();
+  for (const r of refs) if (r.value && !byValue.has(r.value)) byValue.set(r.value, r.author);
+  const unique = Array.from(byValue.entries());
   const filters: Filter[] = [];
   for (let i = 0; i < unique.length; i += DELETION_QUERY_CHUNK) {
     const chunk = unique.slice(i, i + DELETION_QUERY_CHUNK);
     // An author deletes each event at most a few times — 2× is a generous
     // bound that still caps a hostile relay.
-    const filter: Filter = { kinds: [DELETION_KIND], limit: chunk.length * 2 };
-    filter[`#${tag}`] = chunk;
+    const filter: Filter = {
+      kinds: [DELETION_KIND],
+      authors: Array.from(new Set(chunk.map(([, author]) => author))),
+      limit: chunk.length * 2,
+    };
+    filter[`#${tag}`] = chunk.map(([value]) => value);
     filters.push(filter);
   }
   return filters;
 }
+
+/** `#e` refs for `events`. */
+export const idRefs = (events: NostrEvent[]): DeletionRef[] =>
+  events.map((e) => ({ value: e.id, author: e.pubkey }));
+
+/** `#a` refs for the addressable ones among `events`. */
+export const addressRefs = (events: NostrEvent[]): DeletionRef[] =>
+  events.flatMap((e) => {
+    const value = addressOf(e);
+    return value ? [{ value, author: e.pubkey }] : [];
+  });
 
 /** Ids of `events` deleted by a kind-5 from the event's own author. */
 export function deletedByAuthor(events: NostrEvent[], deletions: NostrEvent[]): Set<string> {

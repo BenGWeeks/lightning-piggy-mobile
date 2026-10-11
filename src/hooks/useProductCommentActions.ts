@@ -138,7 +138,11 @@ export function useProductCommentActions({
       const original = editing.comment;
       try {
         const result = await editComment(original, content);
-        setComposer(stopEditing);
+        // Only end THIS edit — the user may have moved on to another comment
+        // while it was publishing.
+        setComposer((prev) =>
+          prev.editing?.comment.id === original.id ? stopEditing(prev) : prev,
+        );
         if (!result) return; // unchanged text — nothing to publish
         addLocally(result.replacement);
         hideLocally(original.id);
@@ -156,7 +160,8 @@ export function useProductCommentActions({
     }
     try {
       const posted = await publishComment({ root, content });
-      setComposer(EMPTY_COMPOSER);
+      // An edit started while this was publishing keeps the composer.
+      setComposer((prev) => (prev.editing ? prev : EMPTY_COMPOSER));
       addLocally(posted);
       scheduleRefetch();
     } catch {

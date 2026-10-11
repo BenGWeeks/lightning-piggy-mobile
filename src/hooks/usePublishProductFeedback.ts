@@ -12,9 +12,15 @@ import {
 
 export interface UsePublishProductFeedback {
   /** Publish (or replace — same address = an edit) your review of a product. */
-  publishReview: (input: { coord: string; stars: number; content?: string }) => Promise<NostrEvent>;
+  /** `notBefore`: the earliest `created_at` (after a deletion of this address). */
+  publishReview: (input: {
+    coord: string;
+    stars: number;
+    content?: string;
+    notBefore?: number;
+  }) => Promise<NostrEvent>;
   /** Publish a NIP-09 kind-5 deletion request for your review (`a` + `e`). */
-  deleteReview: (review: Pick<ParsedReview, 'id' | 'pubkey'>, coord: string) => Promise<void>;
+  deleteReview: (review: Pick<ParsedReview, 'id' | 'pubkey'>, coord: string) => Promise<NostrEvent>;
   /** Publish a comment on the product, or a reply to another comment. */
   publishComment: (input: {
     root: CommentRoot;
@@ -53,12 +59,12 @@ export function usePublishProductFeedback(): UsePublishProductFeedback {
   }, [relays]);
 
   const publish = useCallback(
-    async (template: UnsignedTemplate): Promise<NostrEvent> => {
+    async (template: UnsignedTemplate, notBefore = 0): Promise<NostrEvent> => {
       setPublishing(true);
       try {
         const signed = await signEvent({
           kind: template.kind,
-          created_at: Math.floor(Date.now() / 1000),
+          created_at: Math.max(Math.floor(Date.now() / 1000), notBefore),
           tags: template.tags,
           content: template.content,
         });
@@ -73,14 +79,14 @@ export function usePublishProductFeedback(): UsePublishProductFeedback {
   );
 
   const publishReview = useCallback(
-    (input: { coord: string; stars: number; content?: string }) => publish(buildReviewEvent(input)),
+    (input: { coord: string; stars: number; content?: string; notBefore?: number }) =>
+      publish(buildReviewEvent(input), input.notBefore),
     [publish],
   );
 
   const deleteReview = useCallback(
-    async (review: Pick<ParsedReview, 'id' | 'pubkey'>, coord: string) => {
-      await publish(buildReviewDeletion(review, coord));
-    },
+    (review: Pick<ParsedReview, 'id' | 'pubkey'>, coord: string) =>
+      publish(buildReviewDeletion(review, coord)),
     [publish],
   );
 
