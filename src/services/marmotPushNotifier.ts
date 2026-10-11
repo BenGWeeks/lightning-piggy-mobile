@@ -134,7 +134,9 @@ export class MarmotPushNotifier {
           continue;
         }
         if (__DEV__) {
-          console.log(`[Marmot] push trigger → ${server.slice(0, 8)} (${tokens.length} device(s))`);
+          console.log(
+            `[Marmot] push trigger → ${server.slice(0, 8)} (${tokens.length} device(s)) via ${relays.join(', ')}`,
+          );
         }
       }
     } finally {
