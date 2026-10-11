@@ -29,6 +29,9 @@ export const createMarketSellerStyles = (colors: Palette) =>
     },
     headerSpacer: { width: 24 },
     content: { padding: 16, paddingBottom: 48, gap: 12 },
+    // My shop's list header: no form-style bottom padding, so the first
+    // listing sits right under the "Your listings" heading.
+    listHeader: { padding: 16, paddingBottom: 10, gap: 12 },
     centered: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 },
     card: {
       backgroundColor: colors.surface,

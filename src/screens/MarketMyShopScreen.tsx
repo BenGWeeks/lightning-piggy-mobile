@@ -150,7 +150,7 @@ const MarketMyShopScreen: React.FC<Props> = ({ navigation }) => {
   }
 
   const listHeader = (
-    <View style={styles.content}>
+    <View style={styles.listHeader}>
       {shop ? (
         <View style={styles.card} testID="my-shop-card">
           <View style={styles.rowBetween}>
