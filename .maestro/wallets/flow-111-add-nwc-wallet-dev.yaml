@@ -3,11 +3,11 @@ name: Add NWC Wallet (hardened for emulator)
 ---
 - extendedWaitUntil:
     visible:
-      id: 'tab-home'
+      id: 'tab-wallets'
     timeout: 40000
 
 - tapOn:
-    id: 'tab-home'
+    id: 'tab-wallets'
 - waitForAnimationToEnd:
     timeout: 3000
 

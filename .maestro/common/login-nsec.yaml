@@ -50,7 +50,7 @@ name: Internal — make a Piggy the active identity, signed in with its nsec
           id: 'login-button'
       - extendedWaitUntil:
           visible:
-            id: 'tab-home'
+            id: 'tab-wallets'
           timeout: 20000
 
 # 3. Someone else is active and the Piggy isn't registered → add it.
@@ -78,7 +78,7 @@ name: Internal — make a Piggy the active identity, signed in with its nsec
           id: 'login-button'
       - extendedWaitUntil:
           visible:
-            id: 'tab-home'
+            id: 'tab-wallets'
           timeout: 20000
       - runFlow: open-drawer.yaml
 
@@ -90,5 +90,5 @@ name: Internal — make a Piggy the active identity, signed in with its nsec
 - pressKey: back
 - extendedWaitUntil:
     visible:
-      id: 'tab-home'
+      id: 'tab-wallets'
     timeout: 5000

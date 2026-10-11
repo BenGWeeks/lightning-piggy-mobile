@@ -35,11 +35,11 @@ name: Boltz reverse swap — full happy path, 25k sats Lightning → on-chain
     clearState: false
 - extendedWaitUntil:
     visible:
-      id: 'tab-home'
+      id: 'tab-wallets'
     timeout: 30000
 
 - tapOn:
-    id: 'tab-home'
+    id: 'tab-wallets'
 - waitForAnimationToEnd:
     timeout: 2000
 

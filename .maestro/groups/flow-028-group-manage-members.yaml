@@ -29,7 +29,7 @@ name: Group manage-members sheet — open + add picker + remove flow
     timeout: 30000
 # Dev-client bundle reload after launchApp can take 20–60 s on AVD;
 # wait for the tab bar to render before any tap. Matches the pattern
-# in common/login-as.yaml (extendedWaitUntil on tab-home post-login).
+# in common/login-as.yaml (extendedWaitUntil on tab-wallets post-login).
 - extendedWaitUntil:
     visible:
       id: 'tab-messages'

@@ -11,7 +11,7 @@
     "electrumSaveError": "No se pudieron cargar o guardar los ajustes Electrum. Comprueba el servidor y el puerto e inténtalo de nuevo."
   },
   "tabs": {
-    "home": "Inicio",
+    "wallets": "Carteras",
     "messages": "Mensajes",
     "explore": "Explorar",
     "friends": "Amigos"
@@ -2003,7 +2003,7 @@
     "back": "Atrás",
     "cantOpenTitle": "Lo sentimos, no se puede abrir esto",
     "message": "Lightning Piggy aún no admite {{entity}}. Puedes abrirlo en un cliente Nostr dedicado o volver a la aplicación.",
-    "backToHome": "Volver al inicio"
+    "backToWallets": "Volver a Carteras"
   },
   "voiceRecordingSheet": {
     "waveformAccessibility": "Forma de onda de la nota de voz",

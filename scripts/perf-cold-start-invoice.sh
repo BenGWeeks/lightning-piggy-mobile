@@ -3,7 +3,7 @@
 # Measures wall-clock time from a cold app start to a 21-sat Lightning
 # invoice rendering on screen. Captures the full path the user feels:
 #   1. force-stop, launch
-#   2. wait for Home tab to render
+#   2. wait for Wallets tab to render
 #   3. tap Receive
 #   4. tap Enter custom amount
 #   5. tap 2 1 (21 sats), confirm

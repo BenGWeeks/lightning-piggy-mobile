@@ -19,7 +19,7 @@ name: Bottom Sheet Keyboard Slide Test
 # optional so the test no-ops cleanly if the user is signed in (no
 # profile-icon / drawer rendered the same way).
 - tapOn:
-    text: 'Home tab'
+    text: 'Wallets tab'
     optional: true
 - waitForAnimationToEnd:
     timeout: 3000

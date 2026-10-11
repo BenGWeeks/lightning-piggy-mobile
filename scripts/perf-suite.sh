@@ -14,7 +14,7 @@
 #   /tmp/perf-suite-<unix-ts>/<surface>-<n>.txt   per-sample gfxinfo dumps
 #
 # Surfaces measured (each from a cold app start):
-#   - tab-home           Home tab tap after launch
+#   - tab-wallets           Wallets tab tap after launch
 #   - tab-messages       Messages tab tap after launch
 #   - tab-friends        Friends tab tap after launch
 #   - tab-explore        Explore tab tap after launch (Explore hub mount)
@@ -69,14 +69,14 @@ write_flow() {
   printf "appId: %s\n%s\n" "$PKG" "$body" > "$path"
 }
 
-write_flow /tmp/perf-flow-tab-home.yaml "name: tap home
+write_flow /tmp/perf-flow-tab-wallets.yaml "name: tap home
 ---
 - launchApp:
     clearState: false
 - waitForAnimationToEnd:
     timeout: 30000
 - tapOn:
-    id: 'tab-home'"
+    id: 'tab-wallets'"
 
 write_flow /tmp/perf-flow-tab-messages.yaml "name: tap messages
 ---
@@ -384,7 +384,7 @@ cat > "$OUT/summary.md" <<EOF
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 EOF
 
-run_surface "tab-home"        "Home tab cold tap"       "cold-tap" /tmp/perf-flow-tab-home.yaml
+run_surface "tab-wallets"        "Wallets tab cold tap"       "cold-tap" /tmp/perf-flow-tab-wallets.yaml
 run_surface "tab-messages"    "Messages tab cold tap"   "cold-tap" /tmp/perf-flow-tab-messages.yaml
 run_surface "tab-friends"     "Friends tab cold tap"    "cold-tap" /tmp/perf-flow-tab-friends.yaml
 run_surface "tab-explore"     "Explore tab cold tap"    "cold-tap" /tmp/perf-flow-tab-explore.yaml

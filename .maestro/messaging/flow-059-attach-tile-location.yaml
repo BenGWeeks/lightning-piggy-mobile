@@ -76,5 +76,5 @@ name: Attach tile — Location triggers OS permission / share
 # conversation-specific testID.
 - extendedWaitUntil:
     visible:
-      id: 'tab-home'
+      id: 'tab-wallets'
     timeout: 5000

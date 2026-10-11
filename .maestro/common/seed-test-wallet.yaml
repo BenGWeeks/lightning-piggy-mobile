@@ -31,7 +31,7 @@ name: Internal — seed a test wallet via the AddWalletWizard
 #                 visibility assertion never matches.
 #
 # The flow assumes the caller has already logged in (via
-# `common/login-as.yaml` or otherwise) and that the Home tab carousel
+# `common/login-as.yaml` or otherwise) and that the Wallets tab carousel
 # is reachable. It does NOT clear existing wallets — see
 # `common/clear-wallets.yaml` (issue #291 follow-up) for that.
 #
@@ -41,13 +41,13 @@ name: Internal — seed a test wallet via the AddWalletWizard
 # once before invoking this subflow with MAESTRO_TEST_MNEMONIC, or the
 # `wallet-type-mnemonic` tap will time out.
 
-# Wait for the Home tab to be ready before opening the carousel.
+# Wait for the Wallets tab to be ready before opening the carousel.
 - extendedWaitUntil:
     visible:
-      id: 'tab-home'
+      id: 'tab-wallets'
     timeout: 40000
 - tapOn:
-    id: 'tab-home'
+    id: 'tab-wallets'
 - waitForAnimationToEnd:
     timeout: 3000
 

@@ -15,7 +15,7 @@ name: Internal — get LP to the main tabs and open the account drawer
     times: 15
     while:
       notVisible:
-        id: 'tab-home|conversation-back|group-back|account-back-button|contact-profile-back'
+        id: 'tab-wallets|conversation-back|group-back|account-back-button|contact-profile-back'
     commands:
       - runFlow: close-sheets.yaml
       # An Amber account that has used Marmot re-publishes its key package at
@@ -29,7 +29,7 @@ name: Internal — get LP to the main tabs and open the account drawer
 - runFlow: close-sheets.yaml
 - extendedWaitUntil:
     visible:
-      id: 'tab-home|conversation-back|group-back|account-back-button|contact-profile-back'
+      id: 'tab-wallets|conversation-back|group-back|account-back-button|contact-profile-back'
     timeout: 10000
 - repeat:
     times: 4
@@ -42,7 +42,7 @@ name: Internal — get LP to the main tabs and open the account drawer
           timeout: 1500
 - extendedWaitUntil:
     visible:
-      id: 'tab-home|drawer-version'
+      id: 'tab-wallets|drawer-version'
     timeout: 10000
 # Already open (the drawer covers the tab bar) → leave it.
 - runFlow:
@@ -52,7 +52,7 @@ name: Internal — get LP to the main tabs and open the account drawer
     commands:
       - runFlow: close-sheets.yaml
       - tapOn:
-          id: 'tab-home'
+          id: 'tab-wallets'
       - tapOn:
           id: 'profile-icon'
 - extendedWaitUntil:

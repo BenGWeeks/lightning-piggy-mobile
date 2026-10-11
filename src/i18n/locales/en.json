@@ -11,7 +11,7 @@
     "electrumSaveError": "Electrum settings could not be loaded or saved. Check the hostname and port, then try again."
   },
   "tabs": {
-    "home": "Home",
+    "wallets": "Wallets",
     "messages": "Messages",
     "explore": "Explore",
     "friends": "Friends"
@@ -2003,7 +2003,7 @@
     "back": "Back",
     "cantOpenTitle": "Sorry — can't open this",
     "message": "Lightning Piggy doesn't support {{entity}} yet. You can open it in a dedicated Nostr client, or head back to the app.",
-    "backToHome": "Back to Home"
+    "backToWallets": "Back to Wallets"
   },
   "voiceRecordingSheet": {
     "waveformAccessibility": "Voice note waveform",

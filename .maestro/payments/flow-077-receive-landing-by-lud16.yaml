@@ -28,7 +28,7 @@ name: Receive landing depends on wallet's lud16
     timeout: 10000
 
 - tapOn:
-    id: 'tab-home'
+    id: 'tab-wallets'
 - waitForAnimationToEnd:
     timeout: 3000
 

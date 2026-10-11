@@ -25,5 +25,5 @@ name: Internal — switch to an already-registered Piggy account
 - pressKey: back
 - extendedWaitUntil:
     visible:
-      id: 'tab-home'
+      id: 'tab-wallets'
     timeout: 5000

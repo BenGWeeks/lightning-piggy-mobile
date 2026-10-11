@@ -123,6 +123,6 @@ name: Follow and Unfollow Test
 - waitForAnimationToEnd:
     timeout: 15000
 
-# Return to Home tab
+# Return to Wallets tab
 - tapOn:
-    text: 'Home tab'
+    text: 'Wallets tab'

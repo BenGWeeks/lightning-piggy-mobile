@@ -38,7 +38,7 @@ name: Internal — sign Middle Piggy in through Amber (NIP-55)
       AMBER_WAIT_MS: 15000
 - extendedWaitUntil:
     visible:
-      id: 'tab-home'
+      id: 'tab-wallets'
     timeout: 30000
 - runFlow: open-drawer.yaml
 # Identity check by npub (derived from the pubkey), not the display name.

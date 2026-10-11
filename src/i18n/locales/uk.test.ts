@@ -21,7 +21,7 @@ describe('uk locale', () => {
   const ukLeaves = leaves(uk as Tree);
 
   it('keeps long-standing translations rather than the English source', () => {
-    expect(ukLeaves.get('tabs.home')).toBe('Головна');
+    expect(ukLeaves.get('tabs.wallets')).toBe('Гаманці');
     expect(ukLeaves.get('aboutScreen.sendFeedback')).toBe('Надіслати відгук');
     expect(ukLeaves.get('orderPaymentActions.scanHint')).toBe(
       'Відскануйте будь-яким гаманцем Lightning',

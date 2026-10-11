@@ -15,7 +15,7 @@ import {
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createDrawerNavigator } from '@react-navigation/drawer';
-import { Home, MessageCircle, Compass, Users } from 'lucide-react-native';
+import { Wallet, MessageCircle, Compass, Users } from 'lucide-react-native';
 import { useWallet } from '../contexts/WalletContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -435,11 +435,11 @@ function HomeTabs() {
         name="Home"
         component={HomeScreen}
         options={{
-          tabBarLabel: t('tabs.home'),
-          tabBarButtonTestID: 'tab-home',
-          tabBarAccessibilityLabel: 'Home tab',
+          tabBarLabel: t('tabs.wallets'),
+          tabBarButtonTestID: 'tab-wallets',
+          tabBarAccessibilityLabel: 'Wallets tab',
           tabBarIcon: ({ focused, color, size }) => (
-            <Home size={size} color={color} strokeWidth={focused ? 2.5 : 2} />
+            <Wallet size={size} color={color} strokeWidth={focused ? 2.5 : 2} />
           ),
         }}
         listeners={{
