@@ -1036,8 +1036,10 @@ the decrypted first message and Accept button. Hulk's White Noise onboarding
 had not published a new key. Checking hulk alone incorrectly suggested that
 Lightning Piggy-initiated Welcomes were incompatible.
 
-Lightning Piggy refreshes this installation's key weekly in the same `d` slot
-and retains superseded private material for delayed Welcomes until expiry.
+Lightning Piggy refreshes this installation's key weekly in the same `d` slot.
+Unused superseded keys retain their private material for 30 days after
+replacement for delayed Welcomes, then are deleted. Used keys are deleted
+once their replacement is confirmed published.
 Account removal waits for pending key publication, requests deletion, and
 publishes an empty replacement for each local slot before wiping local state.
 Relay deletion is best-effort; a warning means old advertisements may remain.
