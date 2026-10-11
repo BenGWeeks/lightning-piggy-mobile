@@ -366,6 +366,12 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
       // Capture the initiating identity before any async work, so an identity
       // switch mid-create can't re-attribute this swap's refund (#1124).
       const ownerPubkey = getActivePubkey() ?? undefined;
+      // The sheet can be closed (Android back) and reopened mid-create. This
+      // flow still finishes the swap it started (persisted for recovery), but
+      // must not write into the new session's UI — e.g. a stale fee result's
+      // `finally` clearing a newer confirmation's in-flight state.
+      const session = sessionRef.current;
+      const isCurrent = () => sessionRef.current === session;
       // Mark the flow in-flight *synchronously*, before the state updates below
       // schedule a re-render. `swapInFlightRef` is otherwise refreshed only
       // during render, so without this there's a brief window where a stray
@@ -383,7 +389,7 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
         const quote = await ensureFees();
         if ('stale' in quote) return;
         if ('errorKey' in quote) {
-          setCreateError(t(quote.errorKey));
+          if (isCurrent()) setCreateError(t(quote.errorKey));
           return;
         }
 
@@ -440,15 +446,17 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
         // replaces the pending row even if the sheet is closed first (#895).
         await swapRecoveryService.recordSubmarineSwapLegs(null, invoice, created.id);
 
+        if (!isCurrent()) return;
         setSwap(created);
         setPhase('awaiting-payment');
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         console.warn('[BoltzReceive] Swap creation failed:', msg);
+        if (!isCurrent()) return;
         if (boltzService.isQuoteChangedError(e)) adoptFees(e.quote);
         setCreateError(msg);
       } finally {
-        setCreating(false);
+        if (isCurrent()) setCreating(false);
       }
     },
     [walletId, wallet, makeInvoiceForWallet, pickRefundDestination, t, ensureFees, adoptFees],

@@ -10,27 +10,31 @@ export type ReceiveFeeResult = { fees: SwapFees } | { errorKey: string } | { sta
  * user confirms an amount without one, so a failed first quote (offline,
  * server down) recovers instead of replaying the cached error. Errors are i18n
  * keys, never raw server text. Results from a closed/reopened session are
- * dropped (`stale`).
+ * dropped (`stale`); within a session only the newest request (or a quote
+ * `adopt`ed since) may set state, so an older request finishing last can't
+ * overwrite it.
  */
 export function useReceiveSwapFees(visible: boolean) {
   const [fees, setFees] = useState<SwapFees | null>(null);
   const [errorKey, setErrorKey] = useState<string | null>(null);
   const session = useRef(0);
+  const request = useRef(0);
   const feesRef = useRef(fees);
   feesRef.current = fees;
 
   const load = useCallback(async (): Promise<ReceiveFeeResult> => {
     const mine = session.current;
+    const req = ++request.current;
     setErrorKey(null);
     try {
       const next = await getSubmarineSwapFees();
       if (session.current !== mine) return { stale: true };
-      setFees(next);
+      if (request.current === req) setFees(next);
       return { fees: next };
     } catch (error) {
       if (session.current !== mine) return { stale: true };
       const key = swapQuoteErrorKey(error);
-      setErrorKey(key);
+      if (request.current === req) setErrorKey(key);
       return { errorKey: key };
     }
   }, []);
@@ -50,5 +54,11 @@ export function useReceiveSwapFees(visible: boolean) {
     [load],
   );
 
-  return { fees, errorKey, ensureFees, adopt: setFees };
+  /** Take a server-supplied quote (quote changed); supersedes pending fetches. */
+  const adopt = useCallback((quote: SwapFees) => {
+    request.current += 1;
+    setFees(quote);
+  }, []);
+
+  return { fees, errorKey, ensureFees, adopt };
 }

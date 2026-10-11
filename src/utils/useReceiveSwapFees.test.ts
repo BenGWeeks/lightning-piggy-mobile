@@ -53,3 +53,28 @@ it('drops a late result once the sheet has closed', async () => {
   await act(async () => resolve(fees));
   expect(result.current.fees).toBeNull();
 });
+it('keeps the newer schedule when the sheet-open request finishes after a confirm refetch', async () => {
+  let resolveOpen!: (f: SwapFees) => void;
+  const newer: SwapFees = { ...fees, percentage: 0.5 };
+  jest
+    .mocked(getSubmarineSwapFees)
+    .mockReturnValueOnce(new Promise((done) => (resolveOpen = done)))
+    .mockResolvedValueOnce(newer);
+  const { result } = renderHook(() => useReceiveSwapFees(true));
+  await act(async () => {
+    expect(await result.current.ensureFees()).toEqual({ fees: newer });
+  });
+  await act(async () => resolveOpen(fees));
+  expect(result.current.fees).toBe(newer);
+});
+it('keeps an adopted quote over a fetch that was pending when it was adopted', async () => {
+  let resolveOpen!: (f: SwapFees) => void;
+  const adopted: SwapFees = { ...fees, minerFee: 900 };
+  jest
+    .mocked(getSubmarineSwapFees)
+    .mockReturnValueOnce(new Promise((done) => (resolveOpen = done)));
+  const { result } = renderHook(() => useReceiveSwapFees(true));
+  act(() => result.current.adopt(adopted));
+  await act(async () => resolveOpen(fees));
+  expect(result.current.fees).toBe(adopted);
+});
