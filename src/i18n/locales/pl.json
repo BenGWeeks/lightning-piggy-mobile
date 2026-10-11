@@ -703,7 +703,8 @@
     "transfer": "Przenieś",
     "send": "Wyślij",
     "addWallet": "Dodaj portfel",
-    "addWalletText": "+ Dodaj portfel"
+    "addWalletText": "+ Dodaj portfel",
+    "updatingTransactions": "Aktualizowanie transakcji"
   },
   "huntCreateScreen": {
     "ok": "OK",
@@ -1929,9 +1930,9 @@
     "input": "Ocena",
     "rate": {
       "one": "Oceń na {{count}} gwiazdkę",
-      "other": "Oceń na {{count}} gwiazdki",
       "few": "Oceń na {{count}} gwiazdki",
-      "many": "Oceń na {{count}} gwiazdek"
+      "many": "Oceń na {{count}} gwiazdek",
+      "other": "Oceń na {{count}} gwiazdki"
     }
   },
   "tipSheet": {
@@ -2233,7 +2234,7 @@
     "fromSeller": "sprzedawca: {{seller}}",
     "screen": {
       "title": "Rynek",
-      "tagline": "Kup Lightning Piggy i gadżety Bitcoin",
+      "tagline": "Kupuj i sprzedawaj za sats",
       "back": "Wróć do sekcji „Odkrywaj”",
       "showing": "Pokazano: {{label}}",
       "searchPlaceholder": "Szukaj produktów lub sprzedawców",
@@ -2304,9 +2305,9 @@
       "loadError": "Nie udało się wczytać opinii",
       "count": {
         "one": "{{count}} opinia",
-        "other": "{{count}} opinii",
         "few": "{{count}} opinie",
-        "many": "{{count}} opinii"
+        "many": "{{count}} opinii",
+        "other": "{{count}} opinii"
       },
       "yours": "Ten produkt został przez ciebie oceniony",
       "editOpen": "Edytuj opinię",
@@ -2317,7 +2318,8 @@
       "deleted": "Wysłano prośbę o usunięcie",
       "posted": "Opinia opublikowana",
       "updated": "Opinia zaktualizowana",
-      "deleteFailed": "Nie udało się usunąć opinii. Spróbuj ponownie."
+      "deleteFailed": "Nie udało się usunąć opinii. Spróbuj ponownie.",
+      "emptyOwn": "Brak opinii."
     },
     "comments": {
       "placeholder": "Dodaj komentarz",
@@ -2397,6 +2399,158 @@
       "refresh": "Odśwież",
       "openListing": "Otwórz ofertę",
       "contactSeller": "Napisz do sprzedawcy"
+    },
+    "sell": {
+      "myShop": "Mój sklep",
+      "myShopAccessibility": "Otwórz mój sklep, aby sprzedawać produkty",
+      "back": "Wstecz",
+      "signInTitle": "Sprzedawaj własne produkty",
+      "signInBody": "Zaloguj się na swoje konto Nostr, aby założyć sklep i wystawić produkty na sprzedaż.",
+      "signIn": "Zaloguj się",
+      "cannotPublish": "Twój obecny sposób logowania nie pozwala publikować ofert. Użyj klucza, Amber lub aplikacji podpisującej Nostr Connect.",
+      "loading": "Wczytywanie twojego sklepu…",
+      "loadError": "Nie udało się połączyć z twoimi przekaźnikami. Przeciągnij w dół, aby spróbować ponownie.",
+      "retry": "Spróbuj ponownie",
+      "setupTitle": "Załóż swój sklep",
+      "setupBody": "Nadaj sklepowi nazwę, wybierz walutę i określ, dokąd wysyłasz. Potem możesz zacząć wystawiać produkty.",
+      "setupButton": "Załóż sklep",
+      "editShop": "Edytuj sklep",
+      "shipsZones": {
+        "one": "{{count}} opcja dostawy",
+        "few": "{{count}} opcje dostawy",
+        "many": "{{count}} opcji dostawy",
+        "other": "{{count}} opcji dostawy"
+      },
+      "noZones": "Brak opcji dostawy",
+      "sellItem": "Sprzedaj produkt",
+      "yourListings": "Twoje oferty",
+      "noListings": "Nie masz jeszcze żadnych ofert. Dotknij „Sprzedaj produkt”, aby utworzyć pierwszą ofertę.",
+      "edit": "Edytuj",
+      "preview": "Podgląd",
+      "delete": "Usuń",
+      "editAccessibility": "Edytuj: {{title}}",
+      "previewAccessibility": "Podgląd: {{title}}",
+      "deleteAccessibility": "Usuń: {{title}}",
+      "stock": "W magazynie: {{count}}",
+      "stockUntracked": "Stan magazynowy nie jest śledzony",
+      "deleteTitle": "Usunąć tę ofertę?",
+      "deleteBody": "„{{title}}” zniknie z twojego sklepu, a do twoich przekaźników zostanie wysłana prośba o usunięcie.",
+      "cancel": "Anuluj",
+      "deleted": "Oferta usunięta",
+      "deleteFailed": "Nie udało się usunąć oferty",
+      "shop": {
+        "title": "Ustawienia sklepu",
+        "name": "Nazwa sklepu",
+        "namePlaceholder": "np. Rękodzieło Piggy",
+        "description": "Opis",
+        "descriptionPlaceholder": "Co sprzedajesz?",
+        "currency": "Waluta",
+        "currencyHint": "Używana do kosztów dostawy i jako domyślna waluta cen.",
+        "shipping": "Opcje dostawy",
+        "shippingHint": "Każda opcja określa, dokąd wysyłasz i ile to kosztuje. Przy wystawianiu produktów wybierasz spośród tych opcji.",
+        "addZone": "Dodaj opcję dostawy",
+        "save": "Zapisz sklep",
+        "saving": "Zapisywanie…",
+        "saved": "Sklep zapisany",
+        "saveFailed": "Nie udało się zapisać twojego sklepu",
+        "fixErrors": "Sprawdź wyróżnione pola",
+        "existingFound": "Znaleźliśmy i wczytaliśmy twój istniejący sklep. Sprawdź szczegóły, a potem zapisz ponownie.",
+        "conflictBody": "Od otwarcia sklepu jego dane zostały zmienione na innym urządzeniu lub w innej aplikacji. Mimo to zapisać twoją wersję?"
+      },
+      "zone": {
+        "name": "Nazwa",
+        "namePlaceholder": "np. Royal Mail w Wielkiej Brytanii",
+        "cost": "Koszt ({{currency}})",
+        "regions": "Kraje dostawy",
+        "worldwide": "Wysyłka na cały świat",
+        "presetWorldwide": "Wysyłka na cały świat",
+        "presetUk": "Wielka Brytania",
+        "presetEu": "Unia Europejska",
+        "presetNorthAmerica": "USA i Kanada",
+        "addCountry": "Dodaj kraj",
+        "removeCountry": "Usuń: {{country}}",
+        "remove": "Usuń opcję dostawy",
+        "defaultName": "Dostawa standardowa"
+      },
+      "editor": {
+        "newTitle": "Sprzedaj produkt",
+        "editTitle": "Edytuj ofertę",
+        "photos": "Zdjęcia",
+        "addPhoto": "Dodaj zdjęcie",
+        "uploading": "Przesyłanie…",
+        "removePhoto": "Usuń zdjęcie {{index}}",
+        "photoUploadFailed": "Nie udało się przesłać zdjęcia",
+        "permissionNeeded": "Potrzebne uprawnienie",
+        "libraryPermission": "Zezwól na dostęp do biblioteki zdjęć, aby dodać zdjęcia produktu.",
+        "ok": "OK",
+        "title": "Tytuł",
+        "titlePlaceholder": "Co sprzedajesz?",
+        "description": "Opis",
+        "descriptionPlaceholder": "Stan, rozmiar, co zawiera zestaw…",
+        "price": "Cena",
+        "currency": "Waluta",
+        "quantity": "Ilość w magazynie",
+        "quantityPlaceholder": "Zostaw puste, jeśli nie śledzisz stanu",
+        "shipping": "Dostawa",
+        "shippingHint": "Wybierz sposób dostawy tego produktu. Dla produktów cyfrowych lub odbioru osobistego pozostaw wszystkie opcje wyłączone.",
+        "noZones": "Twój sklep nie ma jeszcze opcji dostawy. Dodaj je w ustawieniach sklepu.",
+        "zoneBase": "{{amount}} {{currency}}",
+        "extraCost": "Dopłata za ten produkt ({{currency}})",
+        "extraCostPlaceholder": "0",
+        "toggleZone": "Dostawa: {{name}}",
+        "categories": "Kategorie",
+        "categoriesPlaceholder": "np. rękodzieło, zabawki, sztuka",
+        "categoriesHint": "Oddziel przecinkami.",
+        "preview": "Podgląd",
+        "publish": "Opublikuj ofertę",
+        "update": "Zaktualizuj ofertę",
+        "publishing": "Publikowanie…",
+        "published": "Oferta opublikowana",
+        "updated": "Oferta zaktualizowana",
+        "publishFailed": "Nie udało się opublikować twojej oferty",
+        "fixErrors": "Sprawdź wyróżnione pola",
+        "notFound": "Nie udało się znaleźć tej oferty.",
+        "needsShop": "Załóż sklep, zanim wystawisz produkty.",
+        "delete": "Usuń ofertę",
+        "conflictBody": "Od otwarcia oferty jej dane zostały zmienione na innym urządzeniu lub w innej aplikacji. Mimo to zapisać twoją wersję?"
+      },
+      "errors": {
+        "title": "Dodaj tytuł (do 200 znaków).",
+        "price": "Wpisz cenę, np. 12.50 (w sats tylko liczby całkowite).",
+        "currency": "Wybierz walutę.",
+        "quantity": "Ilość musi być liczbą całkowitą.",
+        "images": "Maksymalnie 8 zdjęć.",
+        "categories": "Maksymalnie 10 kategorii.",
+        "shipping": "Dodatkowe koszty dostawy muszą być liczbami.",
+        "shopName": "Nadaj sklepowi nazwę.",
+        "zones": "Maksymalnie 10 opcji dostawy.",
+        "zoneName": "Każda opcja dostawy musi mieć nazwę.",
+        "zoneCost": "Każda opcja dostawy musi mieć koszt, np. 3.50 (w sats tylko liczby całkowite).",
+        "zoneCountries": "Jeden z krajów nie został rozpoznany."
+      },
+      "detail": {
+        "inStock": "W magazynie: {{count}}",
+        "shipping": "Dostawa",
+        "shippingLoading": "Wczytywanie opcji dostawy…",
+        "shippingError": "Nie udało się wczytać opcji dostawy.",
+        "shippingNone": "Dostawa: napisz do sprzedawcy",
+        "shippingTotal": "{{amount}} {{currency}}",
+        "shippingSplit": "{{amount}} {{currency}} + {{extra}} {{extraCurrency}}",
+        "yourListing": "To twoja oferta",
+        "editListing": "Edytuj ofertę",
+        "previewBanner": "Podgląd — tak kupujący zobaczą twoją ofertę. Nie została jeszcze opublikowana."
+      },
+      "conflictTitle": "Zmieniono w innym miejscu",
+      "overwrite": "Zapisz mimo to",
+      "loadFailedTryAgain": "Nie udało się wczytać twojego sklepu. Spróbuj ponownie."
+    },
+    "markdown": {
+      "openLinkTitle": "Otworzyć link?",
+      "openLinkBody": "Otworzy to {{host}} w twojej przeglądarce.",
+      "open": "Otwórz",
+      "cancel": "Anuluj",
+      "showMore": "Pokaż więcej",
+      "showLess": "Pokaż mniej"
     }
   },
   "dmProtocol": {
@@ -2598,9 +2752,9 @@
     "liveTitle": "Udostępnić swoją lokalizację na żywo? Odbiorca: {{name}}",
     "groupTitle": {
       "one": "Udostępnić swoją lokalizację drugiej osobie w grupie {{group}}?",
-      "other": "Udostępnić swoją lokalizację osobom w grupie {{group}} (liczba: {{count}})?",
       "few": "Udostępnić swoją lokalizację {{count}} osobom w grupie {{group}}?",
-      "many": "Udostępnić swoją lokalizację {{count}} osobom w grupie {{group}}?"
+      "many": "Udostępnić swoją lokalizację {{count}} osobom w grupie {{group}}?",
+      "other": "Udostępnić swoją lokalizację osobom w grupie {{group}} (liczba: {{count}})?"
     },
     "warning": "Udostępniaj lokalizację tylko osobom, które znasz i którym ufasz. Twoja wiadomość jest szyfrowana end-to-end, a odbiorcy zobaczą podgląd mapy z OpenStreetMap.",
     "cancel": "Anuluj",
@@ -2640,15 +2794,15 @@
     "updatedJustNow": "Ostatnia aktualizacja: przed chwilą",
     "updatedHours": {
       "one": "Ostatnia aktualizacja: %{count} godzinę temu",
-      "other": "Ostatnia aktualizacja: %{count} godziny temu",
       "few": "Ostatnia aktualizacja: %{count} godziny temu",
-      "many": "Ostatnia aktualizacja: %{count} godzin temu"
+      "many": "Ostatnia aktualizacja: %{count} godzin temu",
+      "other": "Ostatnia aktualizacja: %{count} godziny temu"
     },
     "updatedDays": {
       "one": "Ostatnia aktualizacja: %{count} dzień temu",
-      "other": "Ostatnia aktualizacja: %{count} dnia temu",
       "few": "Ostatnia aktualizacja: %{count} dni temu",
-      "many": "Ostatnia aktualizacja: %{count} dni temu"
+      "many": "Ostatnia aktualizacja: %{count} dni temu",
+      "other": "Ostatnia aktualizacja: %{count} dnia temu"
     },
     "details": "Szczegóły",
     "detailsA11y": "Pokaż szczegóły urządzenia: %{device}",
@@ -2658,9 +2812,9 @@
     "unknownExpiry": "nieznane",
     "versions": {
       "one": "%{count} kopia znaleziona na przekaźnikach",
-      "other": "%{count} kopii znalezionej na przekaźnikach",
       "few": "%{count} kopie znalezione na przekaźnikach",
-      "many": "%{count} kopii znalezionych na przekaźnikach"
+      "many": "%{count} kopii znalezionych na przekaźnikach",
+      "other": "%{count} kopii znalezionej na przekaźnikach"
     },
     "relays": "Udostępniono na:\n%{relays}",
     "refresh": "Odśwież",
@@ -2677,31 +2831,31 @@
     "removeOld": {
       "zero": "Usuń stare urządzenia",
       "one": "Usuń %{count} stare urządzenie",
-      "other": "Usuń %{count} starego urządzenia",
       "few": "Usuń %{count} stare urządzenia",
-      "many": "Usuń %{count} starych urządzeń"
+      "many": "Usuń %{count} starych urządzeń",
+      "other": "Usuń %{count} starego urządzenia"
     },
     "removeOldA11y": {
       "zero": "Usuń stare urządzenia. Brak do usunięcia",
       "one": "Usuń %{count} stare urządzenie",
-      "other": "Usuń %{count} starego urządzenia",
       "few": "Usuń %{count} stare urządzenia",
-      "many": "Usuń %{count} starych urządzeń"
+      "many": "Usuń %{count} starych urządzeń",
+      "other": "Usuń %{count} starego urządzenia"
     },
     "removeOldHint": "Stare urządzenia nie zaktualizowały klucza zaproszenia od 30 dni lub klucz wygasł. Ten telefon nigdy nie jest usuwany.",
     "removeOldTitle": {
       "one": "Usunąć %{count} stare urządzenie?",
-      "other": "Usunąć %{count} starego urządzenia?",
       "few": "Usunąć %{count} stare urządzenia?",
-      "many": "Usunąć %{count} starych urządzeń?"
+      "many": "Usunąć %{count} starych urządzeń?",
+      "other": "Usunąć %{count} starego urządzenia?"
     },
     "removeOldBody": "Nowe czaty przestaną trafiać na urządzenia, które nie były aktualizowane od 30 dni. Urządzenie, które zaktualizuje się przed zakończeniem, zostanie zachowane. Istniejące czaty nie ulegną zmianie.",
     "removeOldConfirm": "Usuń",
     "removedOld": {
       "one": "Usunięto %{count} stare urządzenie",
-      "other": "Usunięto %{count} starego urządzenia",
       "few": "Usunięto %{count} stare urządzenia",
-      "many": "Usunięto %{count} starych urządzeń"
+      "many": "Usunięto %{count} starych urządzeń",
+      "other": "Usunięto %{count} starego urządzenia"
     },
     "nothingRemoved": "Nic nie usunięto: te urządzenia zdążyły się zaktualizować",
     "signerApprovals": "Twoja aplikacja podpisująca poprosi o zatwierdzenie (liczba próśb: %{count}).",

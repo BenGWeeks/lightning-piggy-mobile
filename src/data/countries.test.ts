@@ -62,3 +62,12 @@ test('a territory locale can preselect its shipping destination', () => {
     spy.mockRestore();
   }
 });
+
+describe('toAlpha2 with country names (#1273)', () => {
+  it('maps English names and common aliases to alpha-2', () => {
+    expect(toAlpha2('United States')).toBe('US');
+    expect(toAlpha2(' united kingdom ')).toBe('GB');
+    expect(toAlpha2('UK')).toBe('GB');
+    expect(toAlpha2('Narnia')).toBe('NARNIA');
+  });
+});

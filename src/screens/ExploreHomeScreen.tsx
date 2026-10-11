@@ -14,6 +14,7 @@ import { useExploreRailsPosition } from '../hooks/useExploreRailsPosition';
 import { useFocusEffect } from '@react-navigation/native';
 import { ChevronRight, Compass, MapPin, PiggyBank, Sparkles } from 'lucide-react-native';
 import TabHeader from '../components/TabHeader';
+import { useTranslation } from '../contexts/LocaleContext';
 import BrandPatternBackground from '../components/BrandPatternBackground';
 import { ContentRail } from '../components/ContentRail';
 import { ExploreMiniMap } from '../components/ExploreMiniMap';
@@ -98,6 +99,7 @@ interface Props {
 const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   const { formatLocale } = useLocale();
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createExploreHomeScreenStyles(colors), [colors]);
   const localStyles = useMemo(() => createExploreHomeRailStyles(colors), [colors]);
   const { radius: maxDistanceMetres } = useNearbyRadius();
@@ -831,11 +833,8 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     return items.slice(0, 50);
   }, [events, posLat, posLon, maxDistanceMetres]);
 
-  // Market products are a static, curated catalogue (no location/relay dep)
-  // sourced from Lightning Piggy preferred sellers — the rail shows a
-  // featured-first teaser; the full list (with the mode selector to widen to
-  // web-of-trust friends) lives behind "See all → Market".
-  // See src/data/marketProducts.ts.
+  // Static, curated catalogue from preferred sellers (src/data/marketProducts.ts):
+  // a featured-first teaser; the full list + mode selector live behind "See all".
   const marketProducts = useMemo(() => featuredFirst(MARKET_PRODUCTS).slice(0, 8), []);
 
   return (
@@ -953,7 +952,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
 
         <ContentRail<MarketProduct>
           title="Market"
-          caption="Buy a Lightning Piggy — from preferred sellers"
+          caption={t('market.screen.tagline')}
           items={marketProducts}
           onSeeAll={onSeeAllMarket}
           seeAllTestId="explore-card-market"

@@ -69,6 +69,9 @@ const ProductReviews: React.FC<Props> = ({ coord, onRequestSignIn, onCount, regi
     toggleMenu,
     requestDelete,
   } = useProductReviewActions({ coord, pubkey, ownReview, addLocally, hideLocally, refetch });
+  // The coordinate is `a:30402:<merchant>:<d>`: sellers don't review their
+  // own products, so they get the list without the form.
+  const isSeller = !!pubkey && coord?.split(':')[2]?.toLowerCase() === pubkey.toLowerCase();
 
   return (
     <View testID="product-reviews">
@@ -82,7 +85,7 @@ const ProductReviews: React.FC<Props> = ({ coord, onRequestSignIn, onCount, regi
         </View>
       ) : null}
 
-      {formOpen || !canPublish ? (
+      {isSeller ? null : formOpen || !canPublish ? (
         <ProductReviewForm
           // Keyed on the identity too: the account switcher keeps screens
           // mounted, and a draft must never carry over to another pubkey (and
@@ -128,7 +131,9 @@ const ProductReviews: React.FC<Props> = ({ coord, onRequestSignIn, onCount, regi
       ) : loading && reviews.length === 0 ? (
         <ActivityIndicator style={styles.loading} color={colors.brandPink} />
       ) : reviews.length === 0 ? (
-        <Text style={styles.state}>{t('market.reviews.empty')}</Text>
+        <Text style={styles.state}>
+          {isSeller ? t('market.reviews.emptyOwn') : t('market.reviews.empty')}
+        </Text>
       ) : (
         <>
           {reviews.slice(0, visibleCount).map((r) => (

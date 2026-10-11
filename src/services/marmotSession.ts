@@ -54,7 +54,7 @@ import {
   resolveInvitees,
 } from './marmotInvitees';
 import { KeyPackageRefreshRequests } from './marmotKeyRefresh';
-import { spreadProposals } from './marmotProposals';
+import { alignCommitForMdk, spreadProposals } from './marmotProposals';
 import { MarmotWelcomeOutbox } from './marmotWelcomeOutbox';
 import { boundGroupQueries } from './marmotGroupBackfill';
 import { submitWhenSettled, type GroupSendIntent } from './marmotSendGate';
@@ -543,7 +543,8 @@ export class MarmotSession {
   /** Every outbound group intent goes through here: never queued inside
    * marmot-ts, where a misfired settle check could strand it (#1280). */
   private async sendIntent(mlsId: string, intent: GroupSendIntent, timeoutMs?: number) {
-    return submitWhenSettled(await this.client.groups.get(mlsId), intent, {
+    // Commits (invites included) realign the group for White Noise (#1309).
+    return submitWhenSettled(await this.client.groups.get(mlsId), alignCommitForMdk(intent), {
       timeoutMs,
       cancelled: () => this.gate.stopped,
     });
