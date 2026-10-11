@@ -122,7 +122,7 @@ const DisplayLanguageScreen: React.FC = () => {
     <AccountScreenLayout title={t('displayLanguageScreen.title')}>
       <SettingsScopeHeader scope="account" testID="display-language-account" />
 
-      <Text style={[shared.sectionLabel, styles.sectionGap]}>{t('displayScreen.currency')}</Text>
+      <Text style={shared.sectionLabel}>{t('displayScreen.currency')}</Text>
       <TouchableOpacity
         style={styles.currencyRow}
         onPress={() => navigation.navigate('AccountCurrency')}
@@ -158,9 +158,7 @@ const DisplayLanguageScreen: React.FC = () => {
 
       <SettingsScopeHeader scope="phone" spaced testID="display-language-phone" />
 
-      <Text style={[shared.sectionLabel, styles.sectionGap]}>
-        {t('appearanceScreen.themeSectionLabel')}
-      </Text>
+      <Text style={shared.sectionLabel}>{t('appearanceScreen.themeSectionLabel')}</Text>
       <SettingsOptionList
         options={themeOptions}
         selected={themePreference}
