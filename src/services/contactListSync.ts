@@ -2,6 +2,7 @@ import type { Filter } from 'nostr-tools/filter';
 import { verifyEvent, type Event as NostrEvent } from 'nostr-tools/pure';
 import { normalizeURL } from 'nostr-tools/utils';
 import { pool } from './nostrPool';
+import { selectHealthyRelays } from './relayHealth';
 import { LP_CLIENT_TAG } from './nip89ClientTag';
 import { tagsToContacts } from '../utils/contacts';
 import { normalizePubkey } from '../utils/pubkey';
@@ -116,10 +117,11 @@ export function fetchLatestContactList(
   const author = pubkey.toLowerCase();
   // Normalise before de-duplicating: the pool shares one socket per
   // normalised URL, so `wss://x` and `wss://x/` must not count as two
-  // confirmations.
+  // confirmations. Relays parked as dead (#1326) are left out: they'd only
+  // hold the follow path for a connect timeout and then count as `failed`.
   const urls = [
     ...new Set(
-      relays.map((r) => {
+      selectHealthyRelays(relays).map((r) => {
         try {
           return normalizeURL(r);
         } catch {
