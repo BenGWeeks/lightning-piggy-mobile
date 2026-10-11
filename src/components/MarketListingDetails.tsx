@@ -47,7 +47,13 @@ const MarketListingDetails: React.FC<Props> = ({ event, currency }) => {
           ))}
         </View>
       ) : null}
-      {shipping.status !== 'none' ? (
+      {shipping.status === 'ready' && shipping.quotes.length === 0 ? (
+        // Referenced options that aren't published (or don't parse): no empty card.
+        <View style={styles.row} testID="market-listing-shipping-contact">
+          <Truck size={16} color={colors.textSupplementary} strokeWidth={2.25} />
+          <Text style={styles.muted}>{t('market.sell.detail.shippingNone')}</Text>
+        </View>
+      ) : shipping.status !== 'none' ? (
         <View style={styles.shipping} testID="market-listing-shipping">
           <View style={styles.row}>
             <Truck size={16} color={colors.textSupplementary} strokeWidth={2.25} />
@@ -63,8 +69,6 @@ const MarketListingDetails: React.FC<Props> = ({ event, currency }) => {
             >
               <Text style={styles.error}>{t('market.sell.detail.shippingError')}</Text>
             </TouchableOpacity>
-          ) : shipping.quotes.length === 0 ? (
-            <Text style={styles.muted}>{t('market.sell.detail.shippingNone')}</Text>
           ) : (
             shipping.quotes.map((q) => (
               <View key={q.option.coordinate} style={styles.quote}>
@@ -77,17 +81,19 @@ const MarketListingDetails: React.FC<Props> = ({ event, currency }) => {
                   </Text>
                 </View>
                 <Text style={styles.price}>
-                  {q.totalAmount !== null
-                    ? t('market.sell.detail.shippingTotal', {
-                        amount: formatMarketAmount(q.totalAmount, q.currency),
-                        currency: q.currency,
-                      })
-                    : t('market.sell.detail.shippingSplit', {
-                        amount: formatMarketAmount(q.baseAmount, q.currency),
-                        currency: q.currency,
-                        extra: formatMarketAmount(q.extraAmount, currency),
-                        extraCurrency: currency,
-                      })}
+                  {q.totalAmount === 0
+                    ? t('market.free')
+                    : q.totalAmount !== null
+                      ? t('market.sell.detail.shippingTotal', {
+                          amount: formatMarketAmount(q.totalAmount, q.currency),
+                          currency: q.currency,
+                        })
+                      : t('market.sell.detail.shippingSplit', {
+                          amount: formatMarketAmount(q.baseAmount, q.currency),
+                          currency: q.currency,
+                          extra: formatMarketAmount(q.extraAmount, currency),
+                          extraCurrency: currency,
+                        })}
                 </Text>
               </View>
             ))

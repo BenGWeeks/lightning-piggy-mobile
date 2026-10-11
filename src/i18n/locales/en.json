@@ -2314,7 +2314,8 @@
       "deleted": "Delete request sent",
       "posted": "Review posted",
       "updated": "Review updated",
-      "deleteFailed": "Couldn't delete your review. Please try again."
+      "deleteFailed": "Couldn't delete your review. Please try again.",
+      "emptyOwn": "No reviews yet."
     },
     "comments": {
       "placeholder": "Add a comment",
@@ -2526,7 +2527,7 @@
         "shipping": "Shipping",
         "shippingLoading": "Loading shipping options…",
         "shippingError": "Couldn't load shipping options.",
-        "shippingNone": "No shipping options published — ask the seller.",
+        "shippingNone": "Shipping: contact the seller",
         "shippingTotal": "{{amount}} {{currency}}",
         "shippingSplit": "{{amount}} {{currency}} + {{extra}} {{extraCurrency}}",
         "yourListing": "This is your listing",
@@ -2535,6 +2536,14 @@
       },
       "conflictTitle": "Changed elsewhere",
       "overwrite": "Save anyway"
+    },
+    "markdown": {
+      "openLinkTitle": "Open link?",
+      "openLinkBody": "This opens {{host}} in your browser.",
+      "open": "Open",
+      "cancel": "Cancel",
+      "showMore": "Show more",
+      "showLess": "Show less"
     }
   },
   "dmProtocol": {

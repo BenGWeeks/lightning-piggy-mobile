@@ -2270,7 +2270,8 @@
       "deleted": "Запит на видалення надіслано",
       "posted": "Відгук опубліковано",
       "updated": "Відгук оновлено",
-      "deleteFailed": "Не вдалося видалити відгук. Спробуйте ще раз."
+      "deleteFailed": "Не вдалося видалити відгук. Спробуйте ще раз.",
+      "emptyOwn": "Відгуків ще немає."
     },
     "comments": {
       "placeholder": "Додати коментар",
@@ -2482,7 +2483,7 @@
         "shipping": "Доставка",
         "shippingLoading": "Завантаження варіантів доставки…",
         "shippingError": "Не вдалося завантажити варіанти доставки.",
-        "shippingNone": "Варіанти доставки не опубліковано — запитайте продавця.",
+        "shippingNone": "Доставка: уточніть у продавця",
         "shippingTotal": "{{amount}} {{currency}}",
         "shippingSplit": "{{amount}} {{currency}} + {{extra}} {{extraCurrency}}",
         "yourListing": "Це ваше оголошення",
@@ -2491,6 +2492,14 @@
       },
       "conflictTitle": "Змінено деінде",
       "overwrite": "Усе одно зберегти"
+    },
+    "markdown": {
+      "openLinkTitle": "Відкрити посилання?",
+      "openLinkBody": "{{host}} відкриється у вашому браузері.",
+      "open": "Відкрити",
+      "cancel": "Скасувати",
+      "showMore": "Показати більше",
+      "showLess": "Показати менше"
     }
   },
   "nwcShareSheet": {

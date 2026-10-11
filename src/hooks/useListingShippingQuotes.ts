@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import type { Event } from 'nostr-tools';
 import { useNostr } from '../contexts/NostrContext';
@@ -32,6 +32,9 @@ export function useListingShippingQuotes(
     options: ShippingOption[];
   }>({ status: 'none', options: [] });
   const [attempt, setAttempt] = useState(0);
+  // One quiet retry before showing an error (first connections can all fail
+  // right after launch or a network blip).
+  const autoRetried = useRef(false);
   const merchant = event?.pubkey ?? null;
   const readKey = relays
     .filter((r) => r.read)
@@ -46,6 +49,7 @@ export function useListingShippingQuotes(
       }
       const controller = new AbortController();
       let cancelled = false;
+      let retryTimer: ReturnType<typeof setTimeout> | undefined;
       setState((prev) => ({ ...prev, status: 'loading' }));
       fetchShippingOptionsForDisplay({
         merchantPubkey: merchant,
@@ -53,12 +57,21 @@ export function useListingShippingQuotes(
         signal: controller.signal,
       })
         .then((options) => {
-          if (!cancelled) setState({ status: 'ready', options });
+          if (cancelled) return;
+          autoRetried.current = false;
+          setState({ status: 'ready', options });
         })
         .catch(() => {
-          if (!cancelled) setState({ status: 'error', options: [] });
+          if (cancelled) return;
+          if (!autoRetried.current) {
+            autoRetried.current = true;
+            retryTimer = setTimeout(() => setAttempt((a) => a + 1), 1500);
+            return;
+          }
+          setState({ status: 'error', options: [] });
         });
       return () => {
+        if (retryTimer) clearTimeout(retryTimer);
         cancelled = true;
         controller.abort();
       };

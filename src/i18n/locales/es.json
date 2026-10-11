@@ -2314,7 +2314,8 @@
       "deleted": "Solicitud de eliminación enviada",
       "posted": "Reseña publicada",
       "updated": "Reseña actualizada",
-      "deleteFailed": "No se pudo eliminar tu reseña. Inténtalo de nuevo."
+      "deleteFailed": "No se pudo eliminar tu reseña. Inténtalo de nuevo.",
+      "emptyOwn": "Aún no hay reseñas."
     },
     "comments": {
       "placeholder": "Añade un comentario",
@@ -2526,7 +2527,7 @@
         "shipping": "Envío",
         "shippingLoading": "Cargando opciones de envío…",
         "shippingError": "No se pudieron cargar las opciones de envío.",
-        "shippingNone": "No hay opciones de envío publicadas; pregunta al vendedor.",
+        "shippingNone": "Envío: consulta al vendedor",
         "shippingTotal": "{{amount}} {{currency}}",
         "shippingSplit": "{{amount}} {{currency}} + {{extra}} {{extraCurrency}}",
         "yourListing": "Este es tu anuncio",
@@ -2535,6 +2536,14 @@
       },
       "conflictTitle": "Cambiado en otro lugar",
       "overwrite": "Guardar de todos modos"
+    },
+    "markdown": {
+      "openLinkTitle": "¿Abrir enlace?",
+      "openLinkBody": "Se abrirá {{host}} en tu navegador.",
+      "open": "Abrir",
+      "cancel": "Cancelar",
+      "showMore": "Mostrar más",
+      "showLess": "Mostrar menos"
     }
   },
   "dmProtocol": {

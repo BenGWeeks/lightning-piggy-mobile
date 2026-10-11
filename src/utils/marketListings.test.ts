@@ -31,6 +31,12 @@ const event = (fields: Partial<Event> = {}, secret = key) =>
   );
 
 describe('market relay listings', () => {
+  it('labels an unresolved seller with a short npub, never raw hex', () => {
+    const product = parseMarketListing(event())!;
+    expect(product.sellerName).toMatch(/^npub1[0-9a-z]{7}…[0-9a-z]{4}$/);
+    expect(product.sellerName).not.toContain(author.slice(0, 8));
+  });
+
   it('skips Gamma Markets listings marked visibility hidden', () => {
     const withVisibility = (v: string) =>
       event({

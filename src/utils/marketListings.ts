@@ -92,7 +92,9 @@ export function parseMarketListing(event: Event, now = Date.now() / 1000): Marke
   const priceLabel = `${String(amount)} ${currency}${recurrence}`;
   const address = nip19.naddrEncode({ identifier: d, pubkey: event.pubkey, kind: event.kind });
   const url = safeMarketUrl(tag(event, 'r')) ?? `https://njump.me/${address}`;
-  const sellerName = `${event.pubkey.slice(0, 8)}…${event.pubkey.slice(-4)}`;
+  // Placeholder until a profile name resolves: a short npub, never raw hex.
+  const npub = nip19.npubEncode(event.pubkey);
+  const sellerName = `${npub.slice(0, 12)}…${npub.slice(-4)}`;
   const vendor: MarketVendor = {
     name: sellerName,
     country: '',
@@ -101,7 +103,7 @@ export function parseMarketListing(event: Event, now = Date.now() / 1000): Marke
     description: '',
     url,
     logo: '',
-    nostrUrl: `https://njump.me/${nip19.npubEncode(event.pubkey)}`,
+    nostrUrl: `https://njump.me/${npub}`,
     xUrl: '',
     featured: false,
   };

@@ -59,8 +59,6 @@ export const createMarketProductDetailStyles = (colors: Palette) =>
     vendorRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     vendorName: { fontSize: 14, fontWeight: '700', color: colors.textHeader },
 
-    description: { fontSize: 15, color: colors.textBody, lineHeight: 22 },
-
     buyButton: {
       flexDirection: 'row',
       alignItems: 'center',

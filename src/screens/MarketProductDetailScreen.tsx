@@ -20,6 +20,8 @@ import { Toast } from '../components/BrandedToast';
 import { usePullToRefresh, useRegisterRefresher } from '../hooks/usePullToRefresh';
 import { useLatestListing } from '../hooks/useLatestListing';
 import MarketListingDetails from '../components/MarketListingDetails';
+import MarkdownText from '../components/MarkdownText';
+import { usePubkeyProfile } from '../hooks/usePubkeyProfile';
 import type {
   ExploreNavigation,
   MarketProductDetailRoute,
@@ -83,7 +85,21 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const pull = usePullToRefresh(onRefreshError, { enabled: !preview });
   const { register } = pull;
   useRegisterRefresher(register, refreshListing);
-  const vendor = useMemo(() => (product ? sellerOf(product) : undefined), [product]);
+  const listedVendor = useMemo(() => (product ? sellerOf(product) : undefined), [product]);
+  // Relay listings: show the seller's Nostr profile name + avatar (shared
+  // profile cache), not the short-key placeholder the parser starts with.
+  const sellerProfile = usePubkeyProfile(product?.listing?.event.pubkey ?? null);
+  const vendor = useMemo(
+    () =>
+      listedVendor && product?.listing
+        ? {
+            ...listedVendor,
+            name: sellerProfile.name || listedVendor.name,
+            logo: sellerProfile.picture || listedVendor.logo,
+          }
+        : listedVendor,
+    [listedVendor, product?.listing, sellerProfile.name, sellerProfile.picture],
+  );
   // Memoised so the comment-thread root identity stays stable across renders.
   const feedback = useMemo(
     () => (product ? marketFeedbackContext(product, vendor) : null),
@@ -230,7 +246,7 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
             <Text style={styles.vendorName}>{t('market.fromSeller', { seller: sellerName })}</Text>
           </View>
 
-          <Text style={styles.description}>{product.description}</Text>
+          <MarkdownText markdown={product.description} testID="market-product-description" />
           {product.listing && !withdrawn ? (
             <MarketListingDetails
               event={product.listing.event}
