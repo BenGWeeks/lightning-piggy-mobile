@@ -30,6 +30,7 @@ import { AppState } from 'react-native';
 import { listNotifications, removeNotificationsWhere } from './notificationHistory';
 import {
   dismissNotificationsFor,
+  dropMarmotPushAlerts,
   fireMessageNotification,
   lastMarmotNotificationAt,
 } from './notificationService';
@@ -69,8 +70,9 @@ let placeholdersMayExist = true;
 let settleTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
- * The Marmot session received a kind-445 group event (live or backfill).
- * O(1) per event; any history work is one debounced pass.
+ * The Marmot session decrypted an app event (`createdAtSec` = its own time)
+ * or processed a commit (now) — authenticated group traffic, live or from a
+ * backfill. O(1) per event; any history work is one debounced pass.
  */
 export function noteMarmotGroupTraffic(owner: string, createdAtSec: number, now = Date.now()) {
   const at = createdAtSec * 1000;
@@ -115,6 +117,7 @@ export interface WakeDeps {
 /** "New message" with no thread: a tap opens the Messages list. */
 export async function postGenericPushAlert(): Promise<void> {
   const before = lastMarmotNotificationAt();
+  const trafficBefore = lastTrafficAt;
   // One generic alert at a time: a burst of pushes replaces it, not stacks.
   await dismissNotificationsFor({ genericMessages: true });
   await fireMessageNotification({
@@ -127,10 +130,11 @@ export async function postGenericPushAlert(): Promise<void> {
     data: { marmotPush: true },
   });
   placeholdersMayExist = true;
-  // The real message landed while we were posting: it already tried to
-  // clear us before we existed, so clear ourselves.
-  if (lastMarmotNotificationAt() !== before) {
-    await dismissNotificationsFor({ marmotPushAlerts: true });
+  // The real message (or the traffic it stood for) landed while we were
+  // posting: it already tried to clear us before we existed, so clear
+  // ourselves — tray entry and history row.
+  if (lastMarmotNotificationAt() !== before || lastTrafficAt !== trafficBefore) {
+    await dropMarmotPushAlerts();
   }
 }
 

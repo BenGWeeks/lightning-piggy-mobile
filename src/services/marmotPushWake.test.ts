@@ -4,6 +4,7 @@ jest.mock('expo-task-manager', () => ({
 }));
 jest.mock('./notificationService', () => ({
   dismissNotificationsFor: jest.fn(async () => 0),
+  dropMarmotPushAlerts: jest.fn(async () => undefined),
   fireMessageNotification: jest.fn(async () => 'id'),
   lastMarmotNotificationAt: jest.fn(() => 0),
 }));
@@ -127,9 +128,29 @@ describe('handleMarmotPushWake', () => {
   it('a real Marmot alert landing while the generic one is posted clears it', async () => {
     const last = notificationService.lastMarmotNotificationAt as jest.Mock;
     last.mockReturnValueOnce(0).mockReturnValueOnce(12_345);
-    (dismissNotificationsFor as jest.Mock).mockClear();
+    const drop = notificationService.dropMarmotPushAlerts as jest.Mock;
+    drop.mockClear();
     await postGenericPushAlert();
-    expect(dismissNotificationsFor).toHaveBeenLastCalledWith({ marmotPushAlerts: true });
+    // Tray entry AND history row — no nameless row left beside the real one.
+    expect(drop).toHaveBeenCalledTimes(1);
+  });
+
+  it('group traffic landing while the generic one is posted clears it too', async () => {
+    const drop = notificationService.dropMarmotPushAlerts as jest.Mock;
+    drop.mockClear();
+    (fireMessageNotification as jest.Mock).mockImplementationOnce(async () => {
+      noteMarmotGroupTraffic('a'.repeat(64), Date.now() / 1000);
+      return 'id';
+    });
+    await postGenericPushAlert();
+    expect(drop).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves the generic alert alone when nothing landed meanwhile', async () => {
+    const drop = notificationService.dropMarmotPushAlerts as jest.Mock;
+    drop.mockClear();
+    await postGenericPushAlert();
+    expect(drop).not.toHaveBeenCalled();
   });
 });
 

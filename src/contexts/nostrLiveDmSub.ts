@@ -366,6 +366,9 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       } else if (__DEV__) {
         console.log(`[Nostr] live kind-4 ${ev.id.slice(0, 8)} dedup-cache`);
       }
+      // Decrypted: alerting for it (or not) is this sub's call — background
+      // sync in this context won't re-ping it.
+      markWrapHandled(ev.id);
       if (cancelled || !isCurrentOwner() || viewerPubkey !== pubkey || activeSigner !== signerType)
         return;
 
@@ -491,6 +494,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         if (__DEV__) console.log(`[Nostr] live kind-${ev.kind} ${ev.id.slice(0, 8)} not-an-order`);
         return;
       }
+      markWrapHandled(ev.id); // see the kind-4 note above
       const fromMe = ev.pubkey === viewerPubkey;
       const recipientTag = ev.tags.find((t) => t[0] === 'p')?.[1]?.toLowerCase();
       const partnerPubkey = fromMe ? recipientTag : ev.pubkey.toLowerCase();

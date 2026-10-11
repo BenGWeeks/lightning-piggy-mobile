@@ -705,13 +705,17 @@ export async function retractMarmotMessageNotifications(
 ): Promise<number> {
   if (refs.length === 0) return 0;
   const matches = marmotMessageRefMatcher(refs);
-  for (const flight of inFlightNotifications) {
-    if (matches(flight.data)) flight.cancelled = true;
-  }
+  cancelInFlightNotifications(matches);
   if (!tray) return 0;
   return dismissRequestsWhere((request) =>
     matches(request.content.data as NotificationData | null),
   );
+}
+
+/** Cancel notifications still being created whose `data` `matches` — the
+ * tray / history clean-up can't see those yet. Cheap (in memory). */
+export function cancelInFlightNotifications(matches: (data: NotificationData) => boolean): void {
+  for (const flight of inFlightNotifications) if (matches(flight.data)) flight.cancelled = true;
 }
 
 /** Dismiss delivered + cancel pending notifications `matching` selects. Never

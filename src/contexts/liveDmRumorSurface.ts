@@ -149,9 +149,12 @@ export function createLiveRumorSurfacer(
           },
           notify: { title: 'New message', body: deferredText },
         });
-        // The replay (once follows hydrate) replaces the contentless alert.
+        // Still noted, so the replay once follows hydrate can post the real
+        // alert even though the watch holds the claim.
         if (placeholder) noteContentlessWrapAlert(wrapId);
-      } else retractPlaceholder();
+      }
+      // A stranger's (or not-yet-followed) wrap: its contentless alert goes now.
+      retractPlaceholder();
       return;
     }
 

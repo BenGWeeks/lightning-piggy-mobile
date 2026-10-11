@@ -14,7 +14,7 @@
 // alert that still went out is remembered, so the live sub can replace it
 // with the real one — or retract it — once it has decrypted the wrap.
 import { removeNotificationsWhere } from './notificationHistory';
-import { dismissNotificationsFor } from './notificationService';
+import { cancelInFlightNotifications, dismissNotificationsFor } from './notificationService';
 
 const claimed = new Set<string>();
 const handled = new Set<string>();
@@ -47,8 +47,8 @@ export function claimWrapNotification(wrapId: string | null | undefined): boolea
   return true;
 }
 
-/** The live sub decoded this wrap (or already had it stored): whether it
- * deserves an alert is now the live sub's decision. */
+/** The live sub decoded this event — a gift wrap, a kind-4 DM or an order —
+ * or already had it stored: whether it deserves an alert is now its decision. */
 export function markWrapHandled(wrapId: string): void {
   if (wrapId) addBounded(handled, wrapId);
 }
@@ -81,6 +81,8 @@ export function takeContentlessWrapAlert(wrapId: string): boolean {
 /** Remove the contentless alert for a now-decrypted wrap — tray entry and
  * history row. Best-effort. */
 export async function retractContentlessWrapAlert(owner: string, wrapId: string): Promise<void> {
+  // One still being posted (awaiting permission / scheduling) is cancelled too.
+  cancelInFlightNotifications((data) => data.wrapId === wrapId);
   await dismissNotificationsFor({ wrapId });
   await removeNotificationsWhere(owner, (e) => e.data.wrapId === wrapId);
 }

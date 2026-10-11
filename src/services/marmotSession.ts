@@ -744,6 +744,7 @@ export class MarmotSession {
     this.wiredGroups.add(g.idStr);
     // Membership / name changes (ours or another member's commit) move the epoch.
     g.on('stateChanged', () => {
+      noteMarmotGroupTraffic(this.pubkey, Date.now() / 1000); // a commit covers its push wake
       this.emitGroupsChanged();
       // A member left → drop their push records (MIP-05 "Record state").
       void this.push.reconcile(this.pushGroup(g)).catch(() => undefined);
@@ -773,6 +774,7 @@ export class MarmotSession {
     const deliveryKey = `${g.idStr}:${rumor.id}`;
     if (this.deliveredRumors.has(deliveryKey)) return;
     this.deliveredRumors.add(deliveryKey);
+    noteMarmotGroupTraffic(this.pubkey, rumor.created_at); // decrypted: covers a push wake
     if (this.deliveredRumors.size > DELIVERED_CACHE_SIZE) {
       this.deliveredRumors.delete(this.deliveredRumors.values().next().value as string);
     }

@@ -25,6 +25,7 @@ jest.mock('./nostrPlacesPublisher', () => ({
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { runBackgroundSync } from './backgroundSyncService';
 import {
+  markWrapHandled,
   noteLiveDmSubArmed,
   __resetForTests as __resetDedupeForTests,
 } from './dmWrapNotificationDedupe';
@@ -273,7 +274,7 @@ describe('cache-comment detect-and-ping (#740)', () => {
   });
 });
 
-it('leaves message alerts to the live sub when the app is running (no duplicate / phantom ping)', async () => {
+it('leaves what the live sub decrypted to it when the app is running (no duplicate / phantom ping)', async () => {
   await prime([]);
   const now = Math.floor(Date.now() / 1000);
   mockQuerySync.mockResolvedValueOnce([
@@ -281,11 +282,29 @@ it('leaves message alerts to the live sub when the app is running (no duplicate 
     { id: 'own-copy', kind: 1059, pubkey: 'eph', created_at: now, tags: [] },
   ]);
   noteLiveDmSubArmed(true);
+  markWrapHandled('k4'); // alerted by name
+  markWrapHandled('own-copy'); // our own sent copy: rightly silent
   const r = await runBackgroundSync();
   expect(r.pinged).toBe(false);
   expect(mockFireMessageNotification).not.toHaveBeenCalled();
   // Still accounted for, so a later headless run doesn't ping for them either.
   expect(JSON.parse((await AsyncStorage.getItem(SEEN_KEY)) ?? '[]')).toEqual(
     expect.arrayContaining(['k4', 'own-copy']),
+  );
+});
+
+it('still pings for what the running live sub never got to (socket down, signer unavailable)', async () => {
+  await prime([]);
+  const now = Math.floor(Date.now() / 1000);
+  mockQuerySync.mockResolvedValueOnce([
+    { id: 'handled', kind: 1059, pubkey: 'eph', created_at: now, tags: [] },
+    { id: 'missed', kind: 1059, pubkey: 'eph2', created_at: now, tags: [] },
+  ]);
+  noteLiveDmSubArmed(true);
+  markWrapHandled('handled');
+  const r = await runBackgroundSync();
+  expect(r).toMatchObject({ pinged: true, freshCount: 1 });
+  expect(mockFireMessageNotification).toHaveBeenCalledWith(
+    expect.objectContaining({ title: 'New message', data: { wrapId: 'missed' } }),
   );
 });

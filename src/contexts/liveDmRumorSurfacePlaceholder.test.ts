@@ -5,10 +5,12 @@
 const mockFire = jest.fn().mockResolvedValue('id');
 const mockDismiss = jest.fn().mockResolvedValue(0);
 const mockRemove = jest.fn().mockResolvedValue([]);
+const mockCancelInFlight = jest.fn();
 
 jest.mock('../services/notificationService', () => ({
   fireMessageNotification: (...a: unknown[]) => mockFire(...a),
   dismissNotificationsFor: (...a: unknown[]) => mockDismiss(...a),
+  cancelInFlightNotifications: (...a: unknown[]) => mockCancelInFlight(...a),
 }));
 jest.mock('../services/notificationHistory', () => ({
   removeNotificationsWhere: (...a: unknown[]) => mockRemove(...a),
@@ -28,6 +30,7 @@ import { createLiveRumorSurfacer } from './liveDmRumorSurface';
 import {
   claimWrapNotification,
   noteContentlessWrapAlert,
+  takeContentlessWrapAlert,
   wasWrapHandled,
   __resetForTests,
 } from '../services/dmWrapNotificationDedupe';
@@ -80,6 +83,10 @@ it('retracts it when the wrap was the copy of our own message', async () => {
   );
   expect(mockFire).not.toHaveBeenCalled();
   expect(mockDismiss).toHaveBeenCalledWith({ wrapId: 'own' });
+  // One still being posted is cancelled too.
+  const inFlight = mockCancelInFlight.mock.calls[0][0] as (d: { wrapId?: string }) => boolean;
+  expect(inFlight({ wrapId: 'own' })).toBe(true);
+  expect(inFlight({ wrapId: 'x' })).toBe(false);
   const match = mockRemove.mock.calls[0][1] as (e: { data: { wrapId?: string } }) => boolean;
   expect(match({ data: { wrapId: 'own' } })).toBe(true);
   expect(match({ data: { wrapId: 'other' } })).toBe(false);
@@ -93,4 +100,18 @@ it('touches nothing when no contentless alert was posted, and still marks the wr
   expect(mockDismiss).not.toHaveBeenCalled();
   expect(mockRemove).not.toHaveBeenCalled();
   expect(wasWrapHandled('w2')).toBe(true);
+});
+
+it("retracts a stranger's contentless alert at once, but lets a later replay post the real one", async () => {
+  claimWrapNotification('stranger');
+  noteContentlessWrapAlert('stranger');
+  const STRANGER = 'c'.repeat(64);
+  await surfacer()(
+    { pubkey: STRANGER, created_at: now(), kind: 14, tags: [['p', ME]], content: 'hey' },
+    'stranger',
+  );
+  expect(mockFire).not.toHaveBeenCalled();
+  expect(mockDismiss).toHaveBeenCalledWith({ wrapId: 'stranger' });
+  // Still noted for the follow-gate replay (which bypasses the watch's claim).
+  expect(takeContentlessWrapAlert('stranger')).toBe(true);
 });
