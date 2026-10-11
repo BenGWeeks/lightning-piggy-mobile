@@ -535,6 +535,27 @@
     "recentPosts": "Останні дописи",
     "noPostsYet": "Дописів ще немає"
   },
+  "profileTabs": {
+    "posts": "Дописи",
+    "media": "Медіа",
+    "products": "Товари",
+    "noMedia": "Поки що немає фото чи відео",
+    "noProducts": "Поки що нічого не продає на Маркеті",
+    "loadMore": "Завантажити ще"
+  },
+  "nostrContent": {
+    "openProfile": "Відкрити профіль {{name}}",
+    "postUnavailable": "Цей допис не знайдено",
+    "productUnavailable": "Це оголошення більше не доступне",
+    "emptyPost": "(порожній допис)",
+    "embeddedPostA11y": "Цитований допис: {{text}}",
+    "openOnWeb": "Відкрити в браузері",
+    "article": "Стаття",
+    "untitledArticle": "Стаття без назви",
+    "articleA11y": "Стаття: {{title}}",
+    "playVideo": "Відтворити відео",
+    "viewImage": "Переглянути зображення"
+  },
   "friendPickerSheet": {
     "sendToFriend": "Надіслати другу",
     "sendToName": "Надіслати {{name}}",

@@ -1,0 +1,49 @@
+import React from 'react';
+import { Text, TouchableOpacity, View } from 'react-native';
+import { useTranslation } from '../../contexts/LocaleContext';
+import type { ProfileTab } from '../../utils/profileFeedRows';
+import type { ProfileTabsStyles } from '../../styles/ProfileTabs.styles';
+
+const TABS: {
+  tab: ProfileTab;
+  label: 'profileTabs.posts' | 'profileTabs.media' | 'profileTabs.products';
+}[] = [
+  { tab: 'posts', label: 'profileTabs.posts' },
+  { tab: 'media', label: 'profileTabs.media' },
+  { tab: 'products', label: 'profileTabs.products' },
+];
+
+interface Props {
+  active: ProfileTab;
+  onChange: (tab: ProfileTab) => void;
+  styles: ProfileTabsStyles;
+}
+
+/** Posts · Media · Products tabs on a profile (#1332). */
+const ProfileTabBar: React.FC<Props> = ({ active, onChange, styles }) => {
+  const t = useTranslation();
+  return (
+    <View style={styles.tabBar} accessibilityRole="tablist">
+      {TABS.map(({ tab, label }) => {
+        const selected = tab === active;
+        return (
+          <TouchableOpacity
+            key={tab}
+            style={[styles.tab, selected && styles.tabActive]}
+            onPress={() => onChange(tab)}
+            accessibilityRole="tab"
+            accessibilityState={{ selected }}
+            accessibilityLabel={t(label)}
+            testID={`profile-tab-${tab}`}
+          >
+            <Text style={[styles.tabText, selected && styles.tabTextActive]} numberOfLines={1}>
+              {t(label)}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+};
+
+export default React.memo(ProfileTabBar);

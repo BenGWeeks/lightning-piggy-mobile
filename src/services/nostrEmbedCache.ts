@@ -1,0 +1,203 @@
+// Resolves events referenced from note / bio content (NIP-27 `nostr:note…`,
+// `nevent…`, `naddr…`) for the embedded cards in `components/nostr`.
+//
+// - Batched: refs requested within BATCH_MS share one relay query per shape
+//   (one `ids` filter for events, one `#d` filter per kind+author for
+//   addresses), so a feed page full of quotes costs a couple of REQs, not one
+//   per card.
+// - Bounded: every filter carries a `limit`, the batch size is capped, and
+//   each query gives up after TIMEOUT_MS.
+// - Cached: results (including "not found", for a shorter TTL) live in a
+//   small LRU so scrolling back, or the same quote in two places, is free.
+// - Verified: every event's id + signature is checked here, not trusted to
+//   the shared pool (which fast-paths some kinds), and must match the ref.
+//   A product (kind 30402) also has its seller's deletions applied through
+//   the Market's `fetchListingRevision`, so a withdrawn listing never embeds.
+import type { Event } from 'nostr-tools';
+import { pool, trackRelays } from './nostrPool';
+import { querySyncAbortable } from './relayQuery';
+import { fetchListingRevision } from './marketListingsService';
+import { hasValidSignature } from '../utils/eventSignature';
+import { parseMarketListing } from '../utils/marketListings';
+import { embedKey, type NostrContentToken } from '../utils/nip27';
+import type { MarketProduct } from '../data/marketProducts';
+
+export type EmbedRef = Extract<NostrContentToken, { type: 'event' | 'address' }>;
+
+export interface EmbedResult {
+  /** The verified event, or null when no relay returned a valid one. */
+  event: Event | null;
+  /** For a kind-30402 listing: the live product (null when withdrawn / invalid). */
+  product?: MarketProduct | null;
+}
+
+export const PRODUCT_KIND = 30402;
+const BATCH_MS = 60;
+const MAX_BATCH = 20;
+const TIMEOUT_MS = 5000;
+const MAX_CACHE = 300;
+const NEGATIVE_TTL_MS = 2 * 60 * 1000;
+/** Read relays used per batch, plus at most this many relay hints. */
+const MAX_READ_RELAYS = 6;
+const MAX_HINT_RELAYS = 3;
+
+interface Entry {
+  result: EmbedResult;
+  at: number;
+}
+
+const cache = new Map<string, Entry>();
+interface Pending {
+  ref: EmbedRef;
+  resolve: (r: EmbedResult) => void;
+  promise: Promise<EmbedResult>;
+}
+const queue = new Map<string, Pending>();
+const inFlight = new Map<string, Promise<EmbedResult>>();
+let timer: ReturnType<typeof setTimeout> | null = null;
+let batchRelays: string[] = [];
+
+function remember(key: string, result: EmbedResult): void {
+  cache.delete(key);
+  cache.set(key, { result, at: Date.now() });
+  while (cache.size > MAX_CACHE) {
+    const oldest = cache.keys().next().value;
+    if (oldest === undefined) break;
+    cache.delete(oldest);
+  }
+}
+
+/** Cached result for `key`, if fresh. Synchronous, for a first-frame paint. */
+export function peekEmbed(key: string): EmbedResult | undefined {
+  const entry = cache.get(key);
+  if (!entry) return undefined;
+  if (!entry.result.event && Date.now() - entry.at > NEGATIVE_TTL_MS) {
+    cache.delete(key);
+    return undefined;
+  }
+  return entry.result;
+}
+
+/** Resolve one reference; concurrent callers for the same ref share a fetch. */
+export function resolveEmbed(ref: EmbedRef, readRelays: readonly string[]): Promise<EmbedResult> {
+  const key = embedKey(ref);
+  const cached = peekEmbed(key);
+  if (cached) return Promise.resolve(cached);
+  const running = inFlight.get(key) ?? queue.get(key)?.promise;
+  if (running) return running;
+  let resolve!: (r: EmbedResult) => void;
+  const promise = new Promise<EmbedResult>((r) => (resolve = r));
+  queue.set(key, { ref, resolve, promise });
+  if (readRelays.length > 0) batchRelays = [...readRelays];
+  if (!timer) timer = setTimeout(flush, BATCH_MS);
+  return promise;
+}
+
+function relaysFor(refs: EmbedRef[]): string[] {
+  const read = batchRelays.slice(0, MAX_READ_RELAYS);
+  const hints: string[] = [];
+  for (const ref of refs) {
+    for (const r of ref.relays.slice(0, 2)) {
+      if (hints.length >= MAX_HINT_RELAYS) break;
+      if (!read.includes(r) && !hints.includes(r)) hints.push(r);
+    }
+  }
+  return [...read, ...hints];
+}
+
+const dTag = (e: Event) => e.tags.find((t) => t[0] === 'd')?.[1] ?? '';
+/** Newest wins; equal timestamps break to the lower id (NIP-01). */
+const newer = (a: Event, b: Event | undefined) =>
+  !b || a.created_at > b.created_at || (a.created_at === b.created_at && a.id < b.id);
+
+async function withProduct(event: Event | null, relays: string[]): Promise<EmbedResult> {
+  if (!event || event.kind !== PRODUCT_KIND) return { event };
+  if (!parseMarketListing(event)) return { event, product: null };
+  try {
+    const controller = new AbortController();
+    const product = await fetchListingRevision(event, relays, controller.signal, TIMEOUT_MS);
+    return { event: product?.listing?.event ?? event, product };
+  } catch {
+    // Every relay failed the deletion lookup — show what we verified; the
+    // product page re-checks on open.
+    return { event, product: parseMarketListing(event) };
+  }
+}
+
+async function flush(): Promise<void> {
+  timer = null;
+  const batch = [...queue.entries()].slice(0, MAX_BATCH);
+  for (const [key, item] of batch) {
+    queue.delete(key);
+    inFlight.set(key, item.promise);
+  }
+  if (queue.size > 0) timer = setTimeout(flush, BATCH_MS);
+  const refs = batch.map(([, p]) => p.ref);
+  const relays = relaysFor(refs);
+  const found = new Map<string, Event>();
+  if (relays.length > 0) {
+    trackRelays(relays);
+    const query = (filter: Parameters<typeof querySyncAbortable>[2]) =>
+      querySyncAbortable(pool, relays, filter, { maxWait: TIMEOUT_MS }).catch(() => [] as Event[]);
+    const eventRefs = refs.filter(
+      (r): r is Extract<EmbedRef, { type: 'event' }> => r.type === 'event',
+    );
+    const byAuthor = new Map<string, Extract<EmbedRef, { type: 'address' }>[]>();
+    for (const r of refs) {
+      if (r.type !== 'address') continue;
+      const k = `${r.kind}:${r.pubkey}`;
+      byAuthor.set(k, [...(byAuthor.get(k) ?? []), r]);
+    }
+    const jobs: Promise<void>[] = [];
+    if (eventRefs.length > 0) {
+      const ids = [...new Set(eventRefs.map((r) => r.id))];
+      jobs.push(
+        query({ ids, limit: ids.length }).then((events) => {
+          for (const e of events) {
+            if (ids.includes(e.id) && hasValidSignature(e)) found.set(`e:${e.id}`, e);
+          }
+        }),
+      );
+    }
+    for (const group of byAuthor.values()) {
+      const { kind, pubkey } = group[0];
+      const ds = [...new Set(group.map((r) => r.identifier))];
+      jobs.push(
+        query({ kinds: [kind], authors: [pubkey], '#d': ds, limit: ds.length * 3 }).then(
+          (events) => {
+            for (const e of events) {
+              const k = `a:${kind}:${pubkey}:${dTag(e)}`;
+              if (
+                e.kind === kind &&
+                e.pubkey === pubkey &&
+                ds.includes(dTag(e)) &&
+                newer(e, found.get(k)) &&
+                hasValidSignature(e)
+              )
+                found.set(k, e);
+            }
+          },
+        ),
+      );
+    }
+    await Promise.all(jobs);
+  }
+  await Promise.all(
+    batch.map(async ([key, item]) => {
+      const result = await withProduct(found.get(key) ?? null, relays);
+      remember(key, result);
+      inFlight.delete(key);
+      item.resolve(result);
+    }),
+  );
+}
+
+/** Test hook — drop all cached / queued state. */
+export function __resetEmbedCacheForTests(): void {
+  cache.clear();
+  queue.clear();
+  inFlight.clear();
+  if (timer) clearTimeout(timer);
+  timer = null;
+  batchRelays = [];
+}

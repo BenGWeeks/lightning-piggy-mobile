@@ -62,6 +62,11 @@ export type RootStackParamList = {
     contact: ContactProfileBodyData;
     phoneContactId?: string;
   };
+  // A Market product page opened from outside the Explore tab — a seller's
+  // Products tab or an embedded `nostr:naddr` product card (#1332). Same
+  // screen and params as Explore's `MarketProductDetail`, registered on the
+  // root stack so Back returns to the profile / note it was opened from.
+  ProductDetail: { productId: string; product?: MarketProduct };
   // Graceful fallback when a scanned tag / nostr: link resolves to an
   // entity Lightning Piggy can't display. `entity` is a human-readable
   // label for the message + warning log; `detail` carries the raw value.

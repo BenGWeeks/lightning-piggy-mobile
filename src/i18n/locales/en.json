@@ -563,6 +563,27 @@
     "recentPosts": "Recent posts",
     "noPostsYet": "No posts yet"
   },
+  "profileTabs": {
+    "posts": "Posts",
+    "media": "Media",
+    "products": "Products",
+    "noMedia": "No photos or videos yet",
+    "noProducts": "Nothing for sale on the Market yet",
+    "loadMore": "Load more"
+  },
+  "nostrContent": {
+    "openProfile": "Open the profile of {{name}}",
+    "postUnavailable": "This post couldn’t be found",
+    "productUnavailable": "This listing is no longer available",
+    "emptyPost": "(empty post)",
+    "embeddedPostA11y": "Quoted post: {{text}}",
+    "openOnWeb": "Open on the web",
+    "article": "Article",
+    "untitledArticle": "Untitled article",
+    "articleA11y": "Article: {{title}}",
+    "playVideo": "Play video",
+    "viewImage": "View image"
+  },
   "friendPickerSheet": {
     "sendToFriend": "Send to friend",
     "sendToName": "Send to {{name}}",

@@ -1,0 +1,35 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Profile tabs — Posts, Media, Products + bio mention chip (#1332)
+---
+# Read-only: opens RobotechyShop's public profile (a real seller with Market
+# listings and picture posts) through the nostr: deep link and walks the
+# three tabs. No follow, zap or message — nothing is published.
+# Needs a signed-in account (any test Piggy) and network access to relays.
+
+- openLink: 'nostr:npub1yy0nyk6nj6tg4sx8nd7q5qcdw6pqd5e2cc0e8u2rmcgjhpvm63hsk67xe5'
+- extendedWaitUntil:
+    visible: { id: 'profile-tab-posts' }
+    timeout: 60000
+
+# Bio: `@npub1…` renders as a tappable @Name chip, not raw bech32.
+- assertVisible: { id: 'nostr-mention-.*' }
+
+# Posts: kind-1 notes.
+- extendedWaitUntil:
+    visible: { id: 'contact-profile-note-card-.*' }
+    timeout: 30000
+
+# Media: a grid of picture / video posts.
+- tapOn: { id: 'profile-tab-media' }
+- extendedWaitUntil:
+    visible: { id: 'profile-media-tile-.*' }
+    timeout: 30000
+
+# Products: the seller's verified NIP-99 listings, as Market cards.
+- tapOn: { id: 'profile-tab-products' }
+- extendedWaitUntil:
+    visible: { id: 'profile-product-card-.*' }
+    timeout: 45000
+
+- tapOn: { id: 'profile-tab-posts' }
+- tapOn: { id: 'contact-profile-back' }
