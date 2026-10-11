@@ -3,7 +3,6 @@ import {
   View,
   Text,
   TouchableOpacity,
-  StyleSheet,
   ScrollView,
   ActivityIndicator,
   Image,
@@ -25,7 +24,6 @@ import {
 import type { RouteProp } from '@react-navigation/native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useLocale } from '../contexts/LocaleContext';
-import type { Palette } from '../styles/palettes';
 import { ExploreNavigation, ExploreStackParamList } from '../navigation/types';
 import type { ParsedEvent } from '../services/nostrPlacesService';
 import { loadCachedEvents, peekCachedEventsSync } from '../services/nostrPlacesStorage';
@@ -37,6 +35,7 @@ import { usePubkeyProfile } from '../hooks/usePubkeyProfile';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import Toast from '../components/BrandedToast';
 import BrandPatternBackground from '../components/BrandPatternBackground';
+import { createEventDetailScreenStyles } from '../styles/EventDetailScreen.styles';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -91,7 +90,7 @@ const decodeGeohash = (gh: string): { lat: number; lng: number } => {
 const EventDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const { t, formatLocale } = useLocale();
   const colors = useThemeColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createEventDetailScreenStyles(colors), [colors]);
   const { coord } = route.params;
   // Live user position for the dot on the event venue mini-map —
   // map stays centred on the venue, user dot follows the attendee.
@@ -358,113 +357,5 @@ const EventDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     </View>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    container: { flex: 1, backgroundColor: colors.background },
-    header: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-      paddingHorizontal: 16,
-      paddingTop: 48,
-      paddingBottom: 16,
-      backgroundColor: colors.brandPink,
-      overflow: 'hidden',
-    },
-    headerTitle: {
-      flex: 1,
-      textAlign: 'center',
-      fontSize: 18,
-      fontWeight: '700',
-      color: colors.white,
-    },
-    body: { padding: 16, gap: 10 },
-    hero: {
-      width: '100%',
-      aspectRatio: 16 / 9,
-      borderRadius: 12,
-      backgroundColor: colors.surface,
-    },
-    title: {
-      fontSize: 22,
-      fontWeight: '800',
-      color: colors.textHeader,
-      lineHeight: 28,
-    },
-    metaRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-    metaText: { fontSize: 14, color: colors.textHeader },
-    organiserRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
-      marginTop: 8,
-    },
-    organiserAvatar: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      backgroundColor: colors.surface,
-    },
-    organiserAvatarFallback: {
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    organiserLabel: {
-      fontSize: 11,
-      color: colors.textSupplementary,
-      textTransform: 'uppercase',
-      letterSpacing: 0.6,
-    },
-    organiserName: {
-      fontSize: 15,
-      fontWeight: '700',
-      color: colors.textHeader,
-    },
-    mapWrap: { marginHorizontal: -16, marginVertical: 4 },
-    description: {
-      fontSize: 14,
-      color: colors.textBody,
-      lineHeight: 21,
-      marginTop: 4,
-    },
-    hashtagRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      marginTop: 4,
-    },
-    hashtagText: { fontSize: 12, color: colors.textSupplementary },
-    actionsRow: {
-      flexDirection: 'row',
-      gap: 10,
-      marginTop: 16,
-    },
-    actionButton: {
-      flex: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 6,
-      paddingVertical: 12,
-      borderRadius: 100,
-      borderWidth: 1,
-      borderColor: colors.brandPink,
-    },
-    actionButtonPrimary: {
-      backgroundColor: colors.brandPink,
-    },
-    actionText: { color: colors.brandPink, fontSize: 14, fontWeight: '700' },
-    actionTextPrimary: { color: colors.white },
-    errorText: { fontSize: 14, color: colors.textHeader, marginTop: 20 },
-    attribution: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      marginTop: 18,
-      opacity: 0.7,
-    },
-    attributionText: { fontSize: 11, color: colors.textSupplementary },
-  });
 
 export default EventDetailScreen;

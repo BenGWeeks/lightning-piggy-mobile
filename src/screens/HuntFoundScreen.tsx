@@ -1,17 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  ActivityIndicator,
-  TextInput,
-} from 'react-native';
+import { View, Text, TouchableOpacity, ActivityIndicator, TextInput } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { ChevronLeft, Gift, PartyPopper, PiggyBank } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
-import type { Palette } from '../styles/palettes';
 import { ExploreNavigation, ExploreStackParamList } from '../navigation/types';
 import {
   LnurlWithdrawError,
@@ -26,6 +18,7 @@ import { useLocale } from '../contexts/LocaleContext';
 import { t } from '../i18n';
 import type { RouteProp } from '@react-navigation/native';
 import BrandPatternBackground from '../components/BrandPatternBackground';
+import { createHuntFoundScreenStyles } from '../styles/HuntFoundScreen.styles';
 
 // LNbits-style 'Wait 927 seconds.' / 'wait_time: 240' → 'about 15 minutes'.
 // Neutral about who triggered the cooldown — anyone could have just
@@ -92,7 +85,7 @@ type Stage =
 const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
   const { t, formatLocale } = useLocale();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createHuntFoundScreenStyles(colors), [colors]);
   const { lnurl, coord } = route.params;
   const { activeWalletId, makeInvoice, currency } = useWallet();
   const { btcPrice } = useWalletLive();
@@ -389,140 +382,5 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
     </View>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    container: { flex: 1, backgroundColor: colors.background },
-    header: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 16,
-      paddingTop: 48,
-      paddingBottom: 16,
-      backgroundColor: colors.brandPink,
-      overflow: 'hidden',
-    },
-    headerTitle: {
-      flex: 1,
-      textAlign: 'center',
-      fontSize: 18,
-      fontWeight: '700',
-      color: colors.white,
-    },
-    headerRightSpacer: { width: 24 },
-    body: {
-      flex: 1,
-      alignItems: 'center',
-      justifyContent: 'center',
-      paddingHorizontal: 32,
-      gap: 14,
-    },
-    bigPiggy: {
-      width: 140,
-      height: 140,
-      borderRadius: 70,
-      backgroundColor: colors.brandPinkLight,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    title: {
-      fontSize: 22,
-      fontWeight: '800',
-      color: colors.textHeader,
-      textAlign: 'center',
-    },
-    subtitle: {
-      fontSize: 14,
-      color: colors.textSupplementary,
-      textAlign: 'center',
-    },
-    memo: {
-      fontSize: 15,
-      color: colors.textSupplementary,
-      textAlign: 'center',
-      lineHeight: 22,
-      fontStyle: 'italic',
-    },
-    primaryButton: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 8,
-      backgroundColor: colors.brandPink,
-      paddingHorizontal: 28,
-      paddingVertical: 16,
-      borderRadius: 100,
-      marginTop: 6,
-    },
-    primaryButtonDim: { opacity: 0.7 },
-    primaryButtonText: {
-      color: colors.white,
-      fontSize: 16,
-      fontWeight: '700',
-    },
-    secondaryButton: {
-      paddingVertical: 14,
-      paddingHorizontal: 24,
-    },
-    secondaryButtonText: {
-      color: colors.brandPink,
-      fontSize: 14,
-      fontWeight: '700',
-    },
-    fineprint: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      textAlign: 'center',
-      marginTop: 4,
-    },
-    amountValue: {
-      fontSize: 30,
-      fontWeight: '800',
-      color: colors.textHeader,
-      marginTop: 4,
-    },
-    amountFiat: {
-      fontSize: 14,
-      color: colors.textSupplementary,
-    },
-    slider: {
-      width: '100%',
-      height: 40,
-      marginTop: 8,
-    },
-    rangeRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      width: '100%',
-      marginTop: -6,
-    },
-    rangeText: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-    },
-    amountInputRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      marginTop: 4,
-    },
-    amountInput: {
-      minWidth: 120,
-      borderWidth: 1,
-      borderColor: colors.brandPink,
-      borderRadius: 12,
-      paddingHorizontal: 14,
-      paddingVertical: 10,
-      fontSize: 18,
-      fontWeight: '700',
-      color: colors.textHeader,
-      textAlign: 'center',
-    },
-    amountInputUnit: {
-      fontSize: 15,
-      color: colors.textSupplementary,
-      fontWeight: '600',
-    },
-  });
 
 export default HuntFoundScreen;
