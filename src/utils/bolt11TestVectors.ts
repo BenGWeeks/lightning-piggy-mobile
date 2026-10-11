@@ -1,0 +1,8 @@
+// Public signed examples from BOLT #11 (not payable test-wallet invoices).
+// https://github.com/lightning/bolts/blob/master/11-payment-encoding.md#examples
+export const INVOICE_WITH_AMOUNT =
+  'lnbc2500u1pvjluezsp5zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zygspp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdq5xysxxatsyp3k7enxv4jsxqzpu9qrsgquk0rl77nj30yxdy8j9vdx85fkpmdla2087ne0xh8nhedh8w27kyke0lp53ut353s06fv3qfegext0eh0ymjpf39tuven09sam30g4vgpfna3rh';
+export const AMOUNTLESS_INVOICE =
+  'lnbc1pvjluezsp5zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zygspp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdpl2pkx2ctnv5sxxmmwwd5kgetjypeh2ursdae8g6twvus8g6rfwvs8qun0dfjkxaq9qrsgq357wnc5r2ueh7ck6q93dj32dlqnls087fxdwk8qakdyafkq3yap9us6v52vjjsrvywa6rt52cm9r9zqt8r2t7mlcwspyetp5h2tztugp9lfyql';
+export const DROPPED_CHARACTER_INVOICE = INVOICE_WITH_AMOUNT.replace('pp5', 'p5');
+export const WRONG_CHECKSUM_INVOICE = INVOICE_WITH_AMOUNT.slice(0, -1) + 'q';

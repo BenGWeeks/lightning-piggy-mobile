@@ -1,4 +1,4 @@
-import { type Dispatch, type RefObject, type SetStateAction } from 'react';
+import { useRef, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import * as Clipboard from 'expo-clipboard';
 import { Alert } from '../components/BrandedAlert';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -7,7 +7,6 @@ import {
   type DecodedInvoice,
   decodeInvoice,
   isLightningAddress,
-  isValidInvoice,
   isLnurlString,
   stripLightningPrefix,
 } from '../utils/sendSheetInput';
@@ -41,6 +40,7 @@ export function useSendSheetInput(opts: {
   // Programmatic paste-field setter that bumps the uncontrolled input's remount
   // key (see applyPasteText in SendSheet) — used when pasting from the clipboard.
   applyPasteText: (v: string) => void;
+  onInvalidInvoice: () => void;
   setIsOnchainAddress: (v: boolean) => void;
   setIsLnurl: (v: boolean) => void;
   setInvoiceData: (v: string | null) => void;
@@ -52,6 +52,7 @@ export function useSendSheetInput(opts: {
   setOnchainFeeEstimate: (v: string | null) => void;
 }): {
   processInput: (data: string) => void;
+  resetInputForOpen: () => void;
   handleBarCodeScanned: (e: { data: string }) => void;
   handleNfcContent: (content: NfcTagContent) => void;
   handlePaste: () => Promise<void>;
@@ -63,6 +64,7 @@ export function useSendSheetInput(opts: {
     activePubkey,
     recipientName,
     applyPasteText,
+    onInvalidInvoice,
     setIsOnchainAddress,
     setIsLnurl,
     setInvoiceData,
@@ -74,8 +76,41 @@ export function useSendSheetInput(opts: {
     setOnchainFeeEstimate,
   } = opts;
   const t = useTranslation();
+  const invalidInvoiceAlertVisible = useRef(false);
+
+  // A new Send session starts with intake open. The sheet stays mounted, so a
+  // guard left set by an alert that never settled must not carry over.
+  const resetInputForOpen = () => {
+    invalidInvoiceAlertVisible.current = false;
+  };
+
+  const rejectInvoiceInput = (input: string, titleKey: string, bodyKey: string) => {
+    setInvoiceData(null);
+    setDecoded(null);
+    setScanned(false);
+    setSatsValue('');
+    setIsOnchainAddress(false);
+    setIsLnurl(false);
+    // Return to an editable field and stop the camera. Otherwise the same
+    // rejected QR would reopen the alert as soon as the user dismisses it.
+    applyPasteText(input);
+    onInvalidInvoice();
+    // A camera can deliver the same bad QR on every frame. Keep one alert
+    // visible, then allow another attempt when the user dismisses it.
+    invalidInvoiceAlertVisible.current = true;
+    const dismiss = () => {
+      invalidInvoiceAlertVisible.current = false;
+    };
+    Alert.alert(
+      t(titleKey),
+      t(bodyKey),
+      [{ text: t('sendSheet.invalidInvoiceDismiss'), onPress: dismiss }],
+      { onDismiss: dismiss },
+    );
+  };
 
   const processInput = (data: string) => {
+    if (invalidInvoiceAlertVisible.current) return;
     let input = stripLightningPrefix(data);
     let bip21Amount: number | null = null;
     if (input.toLowerCase().startsWith('bitcoin:')) {
@@ -136,11 +171,27 @@ export function useSendSheetInput(opts: {
         .catch((err) => {
           console.warn('Failed to estimate on-chain fee:', err);
         });
-    } else if (isValidInvoice(input)) {
+    } else if (/^ln/i.test(input) && !isLnurlString(input)) {
+      // All invoice entry points share this gate. A missing amount is valid
+      // only after decoding succeeds (including the bech32 checksum/network).
+      if (/^lno1/i.test(input)) {
+        // BOLT12 offer — well-formed, just not payable here yet.
+        rejectInvoiceInput(
+          input,
+          'sendSheet.offerUnsupportedTitle',
+          'sendSheet.offerUnsupportedBody',
+        );
+        return;
+      }
+      const invoice = decodeInvoice(input);
+      if (!invoice) {
+        rejectInvoiceInput(input, 'sendSheet.invalidInvoiceTitle', 'sendSheet.invalidInvoiceBody');
+        return;
+      }
       setIsOnchainAddress(false);
       setIsLnurl(false);
       setInvoiceData(input);
-      setDecoded(decodeInvoice(input));
+      setDecoded(invoice);
       setScanned(true);
     } else if (isLnurlString(input)) {
       // Raw LNURL (bech32 lnurl1… or cleartext lnurlp://). We can't tell
@@ -200,5 +251,12 @@ export function useSendSheetInput(opts: {
     }
   };
 
-  return { processInput, handleBarCodeScanned, handleNfcContent, handlePaste, handlePasteSubmit };
+  return {
+    processInput,
+    resetInputForOpen,
+    handleBarCodeScanned,
+    handleNfcContent,
+    handlePaste,
+    handlePasteSubmit,
+  };
 }
