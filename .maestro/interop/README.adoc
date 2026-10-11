@@ -66,9 +66,15 @@ SKIP_WN=1 bash scripts/interop/run.sh
 Output: `~/lp-interop-runs/<date>-<tag>/` with `matrix.md`, `screenshots/` and
 `logs/` (Maestro output and the sender's JSON lines, nsecs redacted).
 
-Locks: the runner takes `$LOCK_DIR/emulator.lock` (default
-`/tmp/claude-$UID`) only around Maestro steps, with `maestro.lock` inside it
-per flow, so other users of the lane get turns between steps.
+Locks: the runner holds `$LOCK_DIR/emulator.lock` (default
+`/tmp/claude-$UID`) for two windows (sender items + checks, then the
+admin/rename checks) and releases it in between, with `maestro.lock` taken per
+flow inside it. The sender acts *inside* the device lock on purpose: if
+another build of Lightning Piggy is running on the device while it sends (for
+example the lane's default Metro bundle), that build joins the group and
+consumes the MLS messages. They're one-time secrets, so the bundle under test
+could never show them. Each window points the app at the run bundle and stops
+it before the sender acts.
 
 The sender is also useful on its own, e.g. to poke an existing group:
 
@@ -109,6 +115,13 @@ node scripts/interop/marmot-sender.mjs listen --state /tmp/io.json --seconds 60 
   remove member, White Noise-initiated 1:1s and White Noise *sending* (its
   composer and long-press menus aren't in the accessibility tree; the
   scripted sender stands in for a White Noise peer on the wire), Amethyst.
+* The checks swipe back through the thread (finger-down swipes, bounded) and
+  return to the newest message after a miss; `scrollUntilVisible` was
+  unreliable on Lightning Piggy's inverted chat list. `hideKeyboard` isn't
+  used: on an emulator with a hardware keyboard it presses Back and leaves the
+  chat.
+* A flow is retried once if Maestro's on-device driver drops (gRPC
+  `UNAVAILABLE`), which happens on busy lanes.
 * Maestro's `inputText` is ASCII-safe only, so Lightning Piggy's own sends use
   ASCII; the Unicode text set runs in the sender → app direction.
 * The sender's MLS state lives in `~/.cache/lp-interop-sender/<pubkey>`. If
