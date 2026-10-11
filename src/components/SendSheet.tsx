@@ -361,6 +361,7 @@ const SendSheet: React.FC<Props> = ({
       activePubkey,
       recipientName,
       applyPasteText,
+      onInvalidInvoice: () => selectInputMode('paste'),
       setIsOnchainAddress,
       setIsLnurl,
       setInvoiceData,

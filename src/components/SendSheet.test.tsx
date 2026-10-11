@@ -110,6 +110,8 @@ jest.mock('../hooks/useSendSheetLnurl', () => ({ useSendSheetLnurl: () => undefi
 const mockProcessInput = jest.fn();
 // The sheet's own setters, so a test can play out a resolved target + amount.
 type InputArgs = {
+  applyPasteText: (v: string) => void;
+  onInvalidInvoice: () => void;
   setInvoiceData: (v: string | null) => void;
   setScanned: (v: boolean) => void;
   setSatsValue: (v: string) => void;
@@ -312,4 +314,18 @@ it('opens straight on Scan when permission was already granted at mount', () => 
   mockPermission = { granted: true };
   render(<SendSheet visible onClose={onClose} />);
   expect(screen.getByTestId('send-scan-camera')).toBeTruthy();
+});
+
+it('returns a rejected QR to Paste so the camera stops until deliberately selected again', () => {
+  mockPermission = { granted: true };
+  render(<SendSheet visible onClose={onClose} />);
+  expect(selectedTab('send-tab-scan')).toBe(true);
+  act(() => {
+    mockInputArgs?.applyPasteText('lnbc1corrupt');
+    mockInputArgs?.onInvalidInvoice();
+  });
+  expect(selectedTab('send-tab-input')).toBe(true);
+  expect(screen.getByTestId('send-paste-input').props.defaultValue).toBe('lnbc1corrupt');
+  fireEvent.press(screen.getByTestId('send-tab-scan'));
+  expect(selectedTab('send-tab-scan')).toBe(true);
 });
