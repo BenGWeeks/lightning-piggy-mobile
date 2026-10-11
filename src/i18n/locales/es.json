@@ -1818,6 +1818,11 @@
     "qrViewfinder": "Visor de código QR"
   },
   "sendSheet": {
+    "invalidInvoiceDismiss": "Aceptar",
+    "invalidInvoiceTitle": "Factura no válida",
+    "invalidInvoiceBody": "Esta factura no es válida o está incompleta — compruébala e inténtalo de nuevo.",
+    "offerUnsupportedTitle": "Las ofertas Lightning aún no son compatibles",
+    "offerUnsupportedBody": "Esto es una oferta Lightning (BOLT12), que Lightning Piggy todavía no puede pagar. Pide una factura Lightning o una dirección Lightning.",
     "walletFallback": "Cartera",
     "payTo": "Pagar a {{name}}",
     "sendToOnchain": "Enviar a dirección on-chain",

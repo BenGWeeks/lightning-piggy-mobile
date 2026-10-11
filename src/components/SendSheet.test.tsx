@@ -108,8 +108,11 @@ jest.mock('./SendScanPane', () => {
 });
 jest.mock('../hooks/useSendSheetLnurl', () => ({ useSendSheetLnurl: () => undefined }));
 const mockProcessInput = jest.fn();
+const mockResetInputForOpen = jest.fn();
 // The sheet's own setters, so a test can play out a resolved target + amount.
 type InputArgs = {
+  applyPasteText: (v: string) => void;
+  onInvalidInvoice: () => void;
   setInvoiceData: (v: string | null) => void;
   setScanned: (v: boolean) => void;
   setSatsValue: (v: string) => void;
@@ -120,6 +123,7 @@ jest.mock('../hooks/useSendSheetInput', () => ({
     mockInputArgs = args;
     return {
       processInput: mockProcessInput,
+      resetInputForOpen: mockResetInputForOpen,
       handleBarCodeScanned: jest.fn(),
       handleNfcContent: jest.fn(),
       handlePaste: jest.fn(),
@@ -160,6 +164,7 @@ beforeEach(() => {
   mockNativeKeystroke = null;
   mockInputArgs = null;
   mockProcessInput.mockClear();
+  mockResetInputForOpen.mockClear();
 });
 afterEach(() => {
   jest.runOnlyPendingTimers();
@@ -299,6 +304,14 @@ it('a previous open never prefills over a reopen with another address', () => {
   expect(mockProcessInput.mock.calls).toEqual([['b@example.com']]);
 });
 
+it('reopens with invoice intake unblocked (the sheet stays mounted between opens)', () => {
+  const view = render(<SendSheet visible onClose={onClose} />);
+  expect(mockResetInputForOpen).toHaveBeenCalledTimes(1);
+  view.rerender(<SendSheet visible={false} onClose={onClose} />);
+  view.rerender(<SendSheet visible onClose={onClose} />);
+  expect(mockResetInputForOpen).toHaveBeenCalledTimes(2);
+});
+
 it('a previous prefill never processes into a plain reopen', () => {
   const view = render(<SendSheet visible onClose={onClose} initialAddress="a@example.com" />);
   view.rerender(<SendSheet visible={false} onClose={onClose} />);
@@ -312,4 +325,18 @@ it('opens straight on Scan when permission was already granted at mount', () => 
   mockPermission = { granted: true };
   render(<SendSheet visible onClose={onClose} />);
   expect(screen.getByTestId('send-scan-camera')).toBeTruthy();
+});
+
+it('returns a rejected QR to Paste so the camera stops until deliberately selected again', () => {
+  mockPermission = { granted: true };
+  render(<SendSheet visible onClose={onClose} />);
+  expect(selectedTab('send-tab-scan')).toBe(true);
+  act(() => {
+    mockInputArgs?.applyPasteText('lnbc1corrupt');
+    mockInputArgs?.onInvalidInvoice();
+  });
+  expect(selectedTab('send-tab-input')).toBe(true);
+  expect(screen.getByTestId('send-paste-input').props.defaultValue).toBe('lnbc1corrupt');
+  fireEvent.press(screen.getByTestId('send-tab-scan'));
+  expect(selectedTab('send-tab-scan')).toBe(true);
 });

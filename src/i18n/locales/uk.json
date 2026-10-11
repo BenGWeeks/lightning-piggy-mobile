@@ -1790,6 +1790,11 @@
     "qrViewfinder": "Видошукач QR-коду"
   },
   "sendSheet": {
+    "invalidInvoiceDismiss": "Гаразд",
+    "invalidInvoiceTitle": "Недійсний рахунок",
+    "invalidInvoiceBody": "Цей рахунок недійсний або неповний — перевірте його та спробуйте ще раз.",
+    "offerUnsupportedTitle": "Пропозиції Lightning поки що не підтримуються",
+    "offerUnsupportedBody": "Це пропозиція Lightning (BOLT12), яку Lightning Piggy поки що не може оплатити. Попросіть натомість рахунок Lightning або адресу Lightning.",
     "walletFallback": "Гаманець",
     "payTo": "Оплатити {{name}}",
     "sendToOnchain": "Надіслати на on-chain адресу",

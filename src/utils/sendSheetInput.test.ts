@@ -1,8 +1,15 @@
+import { bech32 } from '@scure/base';
 import {
+  INVOICE_WITH_AMOUNT,
+  AMOUNTLESS_INVOICE,
+  DROPPED_CHARACTER_INVOICE,
+  WRONG_CHECKSUM_INVOICE,
+} from './bolt11TestVectors';
+import {
+  decodeInvoice,
   editAddressPrefill,
   isLnurlString,
   isLightningAddress,
-  isValidInvoice,
   lnurlFixedAmountSats,
   stripLightningPrefix,
 } from './sendSheetInput';
@@ -34,14 +41,6 @@ describe('sendSheetInput detectors', () => {
     });
   });
 
-  describe('isValidInvoice', () => {
-    it('matches the bolt11 HRPs', () => {
-      expect(isValidInvoice('lnbc100n1p...')).toBe(true);
-      expect(isValidInvoice('LNTB100n...')).toBe(true);
-      expect(isValidInvoice('alice@example.com')).toBe(false);
-    });
-  });
-
   describe('stripLightningPrefix', () => {
     it('strips a case-insensitive lightning: prefix and surrounding whitespace', () => {
       expect(stripLightningPrefix('lightning:lnbc100n1p')).toBe('lnbc100n1p');
@@ -54,9 +53,11 @@ describe('sendSheetInput detectors', () => {
     });
     it('keeps a prefixed bolt11 invoice payable — the strip yields a valid invoice', () => {
       // The defect users hit: pasting `lightning:lnbc…` (copied with the URI
-      // scheme) must still decode/pay. After stripping, isValidInvoice agrees.
-      expect(isValidInvoice('lightning:lnbc100n1p')).toBe(false); // prefix not stripped → rejected
-      expect(isValidInvoice(stripLightningPrefix('lightning:lnbc100n1p'))).toBe(true);
+      // scheme) must still decode/pay. After stripping, it decodes.
+      expect(decodeInvoice(`lightning:${INVOICE_WITH_AMOUNT}`)).toBeNull(); // prefix not stripped
+      expect(
+        decodeInvoice(stripLightningPrefix(`lightning:${INVOICE_WITH_AMOUNT}`)),
+      ).not.toBeNull();
     });
   });
 
@@ -97,5 +98,36 @@ describe('sendSheetInput detectors', () => {
       expect(lnurlFixedAmountSats(null)).toBe(null);
       expect(lnurlFixedAmountSats({ minSats: 0, maxSats: 0 })).toBe(null);
     });
+  });
+});
+
+describe('decodeInvoice with real BOLT11 vectors', () => {
+  it('decodes an invoice with an amount', () => {
+    expect(decodeInvoice(INVOICE_WITH_AMOUNT)).toEqual({
+      amountSats: 250000,
+      description: '1 cup coffee',
+      expiry: 60,
+    });
+  });
+  it('preserves valid amountless invoices', () => {
+    expect(decodeInvoice(AMOUNTLESS_INVOICE)).toEqual({
+      amountSats: null,
+      description: 'Please consider supporting this project',
+      expiry: null,
+    });
+  });
+  const words = bech32.decode(INVOICE_WITH_AMOUNT, false).words;
+  it.each([
+    ['one character dropped', DROPPED_CHARACTER_INVOICE],
+    ['wrong checksum', WRONG_CHECKSUM_INVOICE],
+    ['wrong network with a valid checksum', bech32.encode('lnzz2500u', words, false)],
+    ['incomplete invoice', 'lnbc1partial'],
+    ['checksum-valid empty payload (no payment hash)', 'lnbc1w4pnfm'],
+    ['valid checksum but no payment hash section', bech32.encode('lnbc', words.slice(0, 7), false)],
+  ])('rejects %s rather than returning amountless fields', (_, invoice) => {
+    expect(decodeInvoice(invoice)).toBeNull();
+  });
+  it('decodes an uppercase invoice (QR alphanumeric mode)', () => {
+    expect(decodeInvoice(INVOICE_WITH_AMOUNT.toUpperCase())?.amountSats).toBe(250000);
   });
 });

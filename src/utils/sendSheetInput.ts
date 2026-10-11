@@ -7,15 +7,20 @@ export interface DecodedInvoice {
   expiry: number | null;
 }
 
-export function decodeInvoice(bolt11: string): DecodedInvoice {
+// A decode failure (bad checksum, unknown network, or no payment hash) is
+// distinct from a valid invoice with no amount.
+export function decodeInvoice(bolt11: string): DecodedInvoice | null {
   try {
     const decoded = bolt11Decode(bolt11);
     let amountSats: number | null = null;
     let description: string | null = null;
     let expiry: number | null = null;
+    let hasPaymentHash = false;
 
     for (const section of decoded.sections) {
-      if (section.name === 'amount') {
+      if (section.name === 'payment_hash') {
+        hasPaymentHash = true;
+      } else if (section.name === 'amount') {
         amountSats = Math.round(Number(section.value) / 1000);
       } else if (section.name === 'description') {
         description = section.value as string;
@@ -23,9 +28,12 @@ export function decodeInvoice(bolt11: string): DecodedInvoice {
         expiry = section.value as number;
       }
     }
+    // A checksum-valid string can still be an empty payload (e.g. `lnbc1w4pnfm`):
+    // without a payment hash there is nothing to pay.
+    if (!hasPaymentHash) return null;
     return { amountSats, description, expiry };
   } catch {
-    return { amountSats: null, description: null, expiry: null };
+    return null;
   }
 }
 
@@ -42,16 +50,6 @@ export function lnurlFixedAmountSats(
 
 export function isLightningAddress(input: string): boolean {
   return input.includes('@') && !input.startsWith('lnbc') && !input.startsWith('lntb');
-}
-
-export function isValidInvoice(data: string): boolean {
-  const lower = data.toLowerCase();
-  return (
-    lower.startsWith('lnbc') ||
-    lower.startsWith('lntb') ||
-    lower.startsWith('lnts') ||
-    lower.startsWith('lnbs')
-  );
 }
 
 // Strip a `lightning:` URI prefix (case-insensitive) that wallets and QR codes

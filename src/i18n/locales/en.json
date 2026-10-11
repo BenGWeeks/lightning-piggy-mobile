@@ -1818,6 +1818,11 @@
     "qrViewfinder": "QR code viewfinder"
   },
   "sendSheet": {
+    "invalidInvoiceDismiss": "OK",
+    "invalidInvoiceTitle": "Invalid invoice",
+    "invalidInvoiceBody": "This invoice is invalid or incomplete — check it and try again.",
+    "offerUnsupportedTitle": "Lightning offers aren't supported yet",
+    "offerUnsupportedBody": "This is a Lightning offer (BOLT12), which Lightning Piggy can't pay yet. Ask for a Lightning invoice or Lightning address instead.",
     "walletFallback": "Wallet",
     "payTo": "Pay to {{name}}",
     "sendToOnchain": "Send to on-chain address",
