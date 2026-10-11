@@ -36,7 +36,7 @@ name: Account Drawer Test
     id: 'drawer-row-wallets'
 - waitForAnimationToEnd:
     timeout: 3000
-- assertVisible: 'Wallets'
+- assertVisible: 'Manage wallets'
 - scrollUntilVisible:
     element:
       id: 'account-back-button'

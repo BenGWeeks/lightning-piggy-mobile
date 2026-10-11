@@ -28,7 +28,7 @@
   },
   "accountDrawerContent": {
     "profile": "Perfil y QR",
-    "wallets": "Carteras",
+    "wallets": "Gestionar carteras",
     "security": "Seguridad y respaldo",
     "about": "Ayuda e información",
     "switchToAccount": "Cambiar a {{name}}",
@@ -2120,7 +2120,7 @@
     "xpubCopied": "Clave pública extendida copiada al portapapeles."
   },
   "walletsScreen": {
-    "title": "Carteras",
+    "title": "Gestionar carteras",
     "noWallets": "No hay carteras conectadas. Añade una para empezar.",
     "walletCount": "{{count}} carteras ({{connected}} conectadas)",
     "onChainSuffix": " (on-chain)",
