@@ -12,8 +12,11 @@ import { perAccountKey } from './perAccountStorage';
  *
  * Set at new-account onboarding; cleared as soon as any kind-3 for the account
  * has been seen or published, after which the normal fetch-and-merge path
- * always has a list to build on.
+ * always has a list to build on. It also expires on its own after
+ * `CREATED_HERE_TTL_MS`, so even if storage refuses every attempt to revoke it,
+ * the licence can't outlive the onboarding window.
  */
+export const CREATED_HERE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const CREATED_HERE_KEY_BASE = 'lp_account_created_here';
 const flagKey = (pubkey: string) => perAccountKey(CREATED_HERE_KEY_BASE, pubkey.toLowerCase());
 
@@ -23,24 +26,30 @@ const revoked = new Set<string>();
 
 export async function markAccountCreatedHere(pubkey: string): Promise<void> {
   revoked.delete(pubkey.toLowerCase());
-  await AsyncStorage.setItem(flagKey(pubkey), '1');
+  await AsyncStorage.setItem(flagKey(pubkey), String(Date.now()));
 }
 
 export async function isAccountCreatedHere(pubkey: string): Promise<boolean> {
   if (revoked.has(pubkey.toLowerCase())) return false;
   try {
-    return (await AsyncStorage.getItem(flagKey(pubkey))) === '1';
+    const createdAt = Number(await AsyncStorage.getItem(flagKey(pubkey)));
+    // Missing, revoked ('0') or garbage → NaN / 0 → false. Expired → false.
+    return createdAt > 0 && Date.now() - createdAt < CREATED_HERE_TTL_MS;
   } catch {
     return false;
   }
 }
 
 /**
- * Revoke for good. Both removing the key and overwriting it are attempted, so
- * either succeeding is enough to survive a restart (only exactly '1' counts).
+ * Revoke for good. Both removing the key and overwriting it with '0' are
+ * attempted, so either succeeding is enough to survive a restart; if storage
+ * refuses both, the in-memory revocation covers this session and the TTL
+ * bounds the rest.
  */
 export async function clearAccountCreatedHere(pubkey: string): Promise<void> {
-  revoked.add(pubkey.toLowerCase());
+  const pk = pubkey.toLowerCase();
+  if (revoked.has(pk)) return; // already revoked (and persisted) this session
+  revoked.add(pk);
   const key = flagKey(pubkey);
   await Promise.allSettled([AsyncStorage.setItem(key, '0'), AsyncStorage.removeItem(key)]);
 }

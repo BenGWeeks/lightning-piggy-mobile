@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
+  CREATED_HERE_TTL_MS,
   __resetForTests,
   clearAccountCreatedHere,
   isAccountCreatedHere,
@@ -66,6 +67,23 @@ describe('newAccountContactList (#1271)', () => {
     await clearAccountCreatedHere(PK);
     expect(await isAccountCreatedHere(PK)).toBe(false);
     __resetForTests(); // app restart: in-memory revocations gone
+    expect(await isAccountCreatedHere(PK)).toBe(false);
+  });
+
+  it('expires on its own after the onboarding window', async () => {
+    const now = Date.now();
+    const spy = jest.spyOn(Date, 'now').mockReturnValue(now);
+    await markAccountCreatedHere(PK);
+    expect(await isAccountCreatedHere(PK)).toBe(true);
+    spy.mockReturnValue(now + CREATED_HERE_TTL_MS + 1);
+    expect(await isAccountCreatedHere(PK)).toBe(false);
+  });
+
+  it('if storage refuses every revocation, the in-memory one holds and the TTL bounds the rest', async () => {
+    await markAccountCreatedHere(PK);
+    jest.spyOn(AsyncStorage, 'removeItem').mockRejectedValue(new Error('disk full'));
+    jest.spyOn(AsyncStorage, 'setItem').mockRejectedValue(new Error('disk full'));
+    await clearAccountCreatedHere(PK);
     expect(await isAccountCreatedHere(PK)).toBe(false);
   });
 });

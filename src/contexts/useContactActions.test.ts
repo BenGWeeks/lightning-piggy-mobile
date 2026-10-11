@@ -201,6 +201,13 @@ describe('useContactActions follow path (#1271)', () => {
     expect(await isAccountCreatedHere(ME)).toBe(false);
   });
 
+  it('a loaded non-empty follow list revokes the created-here flag', async () => {
+    await markAccountCreatedHere(ME);
+    setup([{ pubkey: BIG, relay: null, petname: null, profile: null }]);
+    await act(async () => {});
+    expect(await isAccountCreatedHere(ME)).toBe(false);
+  });
+
   it('unfollow removes only that person from the relay list', async () => {
     mockFetch.mockResolvedValue({
       status: 'found',

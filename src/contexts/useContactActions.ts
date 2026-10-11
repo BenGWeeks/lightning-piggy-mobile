@@ -1,4 +1,11 @@
-import { useCallback, useRef, startTransition, type Dispatch, type SetStateAction } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  startTransition,
+  type Dispatch,
+  type SetStateAction,
+} from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import * as nip19 from 'nostr-tools/nip19';
@@ -135,6 +142,13 @@ export function useContactActions({
     },
     [pubkey, isLoggedIn, signerType, relays],
   );
+
+  // A loaded, non-empty follow list (from any read path, e.g. the provider's
+  // background contacts load) proves the account has a kind-3, so it must
+  // never again be treated as a brand-new, list-less account (#1271).
+  useEffect(() => {
+    if (pubkey && contacts.length > 0) void clearAccountCreatedHere(pubkey);
+  }, [pubkey, contacts.length]);
 
   // Writes are serialised: each one fetches the newest list, so two
   // overlapping follows would otherwise both build on the same base and the
