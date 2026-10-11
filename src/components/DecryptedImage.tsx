@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Image, ActivityIndicator } from 'react-native';
-import { writeAsStringAsync, getInfoAsync, cacheDirectory } from 'expo-file-system/legacy';
 import { AlertCircle } from 'lucide-react-native';
-import { Buffer } from 'buffer';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createDecryptedImageStyles } from '../styles/DecryptedImage.styles';
-import { decryptFile } from '../services/encryptedFile';
-import { decryptMarmotMedia } from '../services/marmotMedia';
+import {
+  DecryptedMediaCancelledError,
+  peekDecryptedMedia,
+  resolveDecryptedMedia,
+} from '../services/decryptedMediaCache';
 import type { MarmotImageParams } from '../utils/messageContent';
 
 /**
@@ -23,12 +24,10 @@ import type { MarmotImageParams } from '../utils/messageContent';
  * cache file (not a base64 `data:` URI) so the decrypted bytes don't live as a
  * multi-MB JS string — base64 adds ~33% and would double again when handed to
  * the fullscreen viewer (Copilot review on #729). **Decrypt-once:** the
- * resolved URI is cached by source URL both in memory and on disk (Blossom URLs
- * are content-addressed — sha256 of the ciphertext — and each send uses a fresh
- * key, so the URL uniquely identifies the bytes), so re-renders, scrolls,
- * remounts and the fullscreen viewer reuse it without re-fetching/re-decrypting
- * (Ben's review note on #729). We deliberately do NOT delete on unmount (so it
- * stays reusable); `cacheDirectory` is OS-evictable, which bounds disk use.
+ * shared `decryptedMediaCache` keeps the resolved URI in memory and on disk,
+ * keyed by URL + key material and scoped to the active account (wiped on
+ * sign-out, #1241), so re-renders, scrolls, remounts and the fullscreen viewer
+ * reuse it without re-fetching/re-decrypting (Ben's review note on #729).
  */
 interface Props {
   url: string;
@@ -45,20 +44,6 @@ interface Props {
    *  encrypted images), so a parent can wire a fullscreen tap to the decrypted
    *  image rather than the ciphertext blob URL. */
   onResolved?: (uri: string) => void;
-}
-
-// Source ciphertext URL → decrypted-file `file://` URI. Module-scoped so a
-// decrypted image is reused across every bubble/mount in the session.
-const decryptedUriCache = new Map<string, string>();
-
-/** Stable cache-file path for a ciphertext URL. `||` not `??`: a trailing-slash
- *  URL makes `.pop()` return '' (not null), which would collide across images. */
-function cacheFileFor(url: string, mime?: string): string | null {
-  if (!cacheDirectory) return null;
-  const base = cacheDirectory.endsWith('/') ? cacheDirectory : `${cacheDirectory}/`;
-  const safe = (url.split('/').pop() || 'img').replace(/[^a-zA-Z0-9._-]/g, '');
-  const ext = (mime || 'image/jpeg').split('/')[1]?.replace(/[^a-z0-9]/gi, '') || 'jpg';
-  return `${base}lp-img-${safe}.${ext}`;
 }
 
 const DecryptedImage: React.FC<Props> = ({
@@ -78,8 +63,8 @@ const DecryptedImage: React.FC<Props> = ({
   // For plain images we feed the URL straight to <Image>. For encrypted ones
   // we resolve a cache `file://` URI after fetch+decrypt; seed from the cache
   // so an already-decrypted image shows instantly with no spinner.
-  const [localUri, setLocalUri] = useState<string | null>(
-    encrypted ? (decryptedUriCache.get(url) ?? null) : null,
+  const [localUri, setLocalUri] = useState<string | null>(() =>
+    encrypted ? peekDecryptedMedia({ url, kind: 'image', mime, keyHex, nonceHex, marmot }) : null,
   );
   const [failed, setFailed] = useState(false);
   // parseImageMessage builds a fresh `marmot` object every render; key the
@@ -95,8 +80,9 @@ const DecryptedImage: React.FC<Props> = ({
       setFailed(true);
       return;
     }
+    const ref = { url, kind: 'image' as const, mime, keyHex, nonceHex, marmot: marmotParams };
     // Already decrypted this session → reuse immediately, no work.
-    const memo = decryptedUriCache.get(url);
+    const memo = peekDecryptedMedia(ref);
     if (memo) {
       setLocalUri(memo);
       onResolved?.(memo);
@@ -105,38 +91,20 @@ const DecryptedImage: React.FC<Props> = ({
     let cancelled = false;
     setFailed(false);
     setLocalUri(null);
-    (async () => {
-      try {
-        const target = cacheFileFor(url, mime);
-        if (!target) throw new Error('no cache directory available');
-        // Reuse a file decrypted on a previous mount if it's still on disk —
-        // decrypt once, even across remounts (Ben's review note on #729).
-        const info = await getInfoAsync(target);
-        if (!info.exists) {
-          const res = await fetch(url);
-          if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
-          const cipher = new Uint8Array(await res.arrayBuffer());
-          const plain = marmotParams
-            ? decryptMarmotMedia(cipher, {
-                mime: mime ?? 'image/jpeg',
-                nonceHex,
-                marmot: marmotParams,
-              })
-            : decryptFile(cipher, keyHex as string, nonceHex);
-          await writeAsStringAsync(target, Buffer.from(plain).toString('base64'), {
-            encoding: 'base64',
-          });
-        }
-        decryptedUriCache.set(url, target);
-        if (!cancelled) {
-          setLocalUri(target);
-          onResolved?.(target);
-        }
-      } catch (e) {
+    resolveDecryptedMedia(ref).then(
+      (uri) => {
+        if (cancelled) return;
+        setLocalUri(uri);
+        onResolved?.(uri);
+      },
+      (e) => {
+        // Cancelled = the account changed or its cache was wiped mid-decrypt;
+        // this bubble is on its way out, so don't flag it as broken.
+        if (cancelled || e instanceof DecryptedMediaCancelledError) return;
         console.warn('[DecryptedImage] decrypt failed:', e);
-        if (!cancelled) setFailed(true);
-      }
-    })();
+        setFailed(true);
+      },
+    );
     return () => {
       cancelled = true;
     };

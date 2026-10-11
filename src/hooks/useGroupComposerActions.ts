@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo } from 'react';
 import { Alert } from '../components/BrandedAlert';
 import { useNostr, notifyGroupMessage } from '../contexts/NostrContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import {
   appendGroupMessage,
   removeGroupMessage,
@@ -58,6 +59,7 @@ export function useGroupComposerActions(params: {
   } = params;
 
   const { sendGroupMessage, pubkey: myPubkey, signEvent } = useNostr();
+  const t = useTranslation();
 
   // Optimistically append a `local_…` row (dup window vs the inbound self-wrap
   // is a known follow-up, PR #227) and scroll to it.
@@ -259,9 +261,13 @@ export function useGroupComposerActions(params: {
       });
       if (!result.success) {
         Alert.alert(
-          'Send failed',
+          t('marmotSend.sendFailedTitle'),
           result.error ??
-            `Could not send ${image.mime.startsWith('audio/') ? 'voice note' : 'image'}.`,
+            t(
+              image.mime.startsWith('audio/')
+                ? 'marmotSend.couldNotSendVoice'
+                : 'marmotSend.couldNotSendPhoto',
+            ),
         );
         if (optimistic.current) {
           await optimistic.current.persisted;
@@ -282,6 +288,7 @@ export function useGroupComposerActions(params: {
       appendOptimisticGroupRow,
       removeOptimisticRow,
       alertSavedOnRelayOnly,
+      t,
     ],
   );
 

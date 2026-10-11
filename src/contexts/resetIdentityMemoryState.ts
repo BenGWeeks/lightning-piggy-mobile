@@ -1,6 +1,7 @@
-import { useCallback } from 'react';
+import { useCallback, useLayoutEffect } from 'react';
 import type { NostrContact, NostrProfile } from '../types/nostr';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
+import { clearDecryptedMediaMemory, setDecryptedMediaOwner } from '../services/decryptedMediaCache';
 import { stopNativeDmEngineGlobal } from './nativeDmEngine';
 import { clearMemoisedSecretKey, nip04PlaintextCache } from './nostrSecretKeyCache';
 
@@ -28,13 +29,16 @@ export function dropIdentityKeyMaterial(): void {
 
 /**
  * Drop the outgoing identity's in-memory state (key material, own profile,
- * follows, relay lists, DM inbox) before another identity becomes active —
+ * follows, relay lists, DM inbox, decrypted-media cache) before another
+ * identity becomes active —
  * on a switch, and when a login adds a second account while one is already
  * active. Persistent caches are per-account namespaced and stay on disk, so
  * switching back is instant.
  */
 export function resetIdentityMemoryState(state: IdentityMemoryState): void {
   dropIdentityKeyMaterial();
+  // Decrypted voice-note / photo URIs are the outgoing account's plaintext (#1241).
+  clearDecryptedMediaMemory();
   state.setAmberNip44Permission('unknown');
   state.setProfile(null);
   state.setContacts([]);
@@ -55,6 +59,10 @@ export function useIdentityMemoryReset(
   state: IdentityMemoryState,
 ): { resetIdentityMemory: () => void; activateLoginPubkey: (pubkey: string | null) => void } {
   const { setProfile, setContacts, setDmInbox, setAmberNip44Permission, resetRelayLists } = state;
+  // Scope the decrypted-media cache to the active account (#1241). A layout
+  // effect so it lands before the new account's bubbles run their (passive)
+  // decrypt effects.
+  useLayoutEffect(() => setDecryptedMediaOwner(pubkey), [pubkey]);
   const resetIdentityMemory = useCallback(
     () =>
       resetIdentityMemoryState({

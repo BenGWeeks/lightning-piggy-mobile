@@ -4,7 +4,8 @@
  * caches (balance / tx history / receipt-dedup, not just txs), the
  * per-account namespaced caches from the #288 storage refactor,
  * per-conversation DM caches, decrypted group-chat plaintext, the encrypted
- * DM store rows (#848), and the device-global nostr places cache.
+ * DM store rows (#848), decrypted voice notes / photos (#1241), and the
+ * device-global nostr places cache.
  *
  * Extracted from NostrContext (#703 file-size effort) — it was a
  * zero-dependency useCallback (empty deps array) closing over no provider
@@ -28,6 +29,7 @@ import { clearNotificationHistory } from '../services/notificationHistory';
 import { PER_ACCOUNT_SETTING_BASES } from '../services/safetySettingsMigration';
 import { forgetAccountSettings } from '../services/accountSettingsCache';
 import { forgetLinkPreviewMirror } from '../services/linkPreviewPreference';
+import { wipeDecryptedMediaForOwner } from '../services/decryptedMediaCache';
 import { WATCHER_PUSH_KEY_BASE } from '../services/watcherPushStore';
 import { KEY_BACKED_UP_KEY_BASE } from '../services/keyBackupStatus';
 import {
@@ -151,6 +153,8 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
   // review / #690): delete the file-backed wrap + skip-set caches and this
   // owner's rows in the encrypted DB (#848) — see dmAccountWipe.
   await wipeDmStoresForAccount(loggedOutPubkey);
+  // Decrypted voice notes and photos (files + memory), same rule (#1241).
+  await wipeDecryptedMediaForOwner(loggedOutPubkey);
   // Nostr places cache is device-global and not pubkey-namespaced, yet holds
   // this identity's own by-author Piglets — wipe it on logout / switch so
   // pins don't leak across accounts (the next live sub repopulates it).

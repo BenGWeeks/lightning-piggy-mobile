@@ -194,7 +194,6 @@ export async function sendMarmotImage(
     const filename =
       image.filename ?? `photo.${image.mime.split('/')[1]?.replace('jpeg', 'jpg') || 'jpg'}`;
     const isVoice = image.mime.startsWith('audio/');
-    const what = isVoice ? 'voice note' : 'photo';
     // The file key is bound to the epoch we encrypt under. If a commit moves
     // the group on during a slow upload, a member added by it never held that
     // epoch and couldn't decrypt — so re-encrypt under the new one.
@@ -216,7 +215,7 @@ export async function sendMarmotImage(
     }
     // Never send media some members provably can't decrypt.
     if (!sealed)
-      throw new Error(`This chat is changing right now — try sending the ${what} again.`);
+      throw new Error(t(isVoice ? 'marmotSend.chatChangingVoice' : 'marmotSend.chatChangingPhoto'));
     const { attachment, keyHex } = sealed;
     const rumor = buildMarmotRumor(pubkey, {
       kind: MARMOT_CHAT_KIND,
@@ -241,7 +240,11 @@ export async function sendMarmotImage(
     hooks?.onDeliveryFinalized?.(delivery);
     return delivery.delivered
       ? { success: true, delivery }
-      : { success: false, delivery, error: `No relay accepted the ${what}` };
+      : {
+          success: false,
+          delivery,
+          error: t(isVoice ? 'marmotSend.noRelayAcceptedVoice' : 'marmotSend.noRelayAcceptedPhoto'),
+        };
   } catch (e) {
     return marmotFailure(e);
   }
