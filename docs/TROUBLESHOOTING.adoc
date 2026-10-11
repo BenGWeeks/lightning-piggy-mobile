@@ -1060,3 +1060,24 @@ once their replacement is confirmed published.
 Account removal waits for pending key publication, requests deletion, and
 publishes an empty replacement for each local slot before wiping local state.
 Relay deletion is best-effort; a warning means old advertisements may remain.
+
+=== White Noise stops receiving a Marmot group after a rename or admin change
+
+Symptom: messages before a Lightning Piggy rename or admin change reach White
+Noise, but nothing after it does, and White Noise keeps the old name (#1309).
+
+Cause: OpenMLS (MDK, so White Noise) applies an `app_data_update` by removing
+the `app_data_dictionary` GroupContext extension and re-appending it, while
+ts-mls (marmot-ts) replaces it in place. marmot-ts creates groups with the
+dictionary first (MDK puts it last), so after the commit the two sides derive
+different GroupContexts. MDK rejects it with `Confirmation tag mismatch` and
+stays on the old epoch. White Noise release builds don't log this. MDK's own
+`wn`/`wnd` CLI built from the White Noise pin (`7692e266`) shows it in the
+`openmls::group::mls_group::staged_commit` trace.
+
+Fix: `MarmotSession.commit` adds a GroupContextExtensions proposal that
+re-sends the same extensions with the dictionary last
+(`proposeAppDataDictionaryLast` in `marmotProposals.ts`) whenever a group isn't
+aligned yet, so the first metadata commit also migrates the group. Groups
+White Noise created are already aligned. A group whose metadata commit was
+already rejected stays split for White Noise. Start a new group with them.
