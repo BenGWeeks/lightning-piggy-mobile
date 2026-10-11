@@ -68,6 +68,16 @@ export const createHomeScreenStyles = (colors: Palette) =>
     transactionsContainer: {
       flex: 1,
     },
+    // Small spinner over the list's top-right while a wallet that already shows
+    // cached transactions refreshes in the background (#1304).
+    refreshingIndicator: {
+      position: 'absolute',
+      top: 10,
+      right: 16,
+      padding: 4,
+      borderRadius: 14,
+      backgroundColor: colors.surface,
+    },
     emptyState: {
       padding: 40,
       alignItems: 'center',

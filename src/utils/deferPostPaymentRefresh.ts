@@ -34,7 +34,7 @@ export interface DeferredRefreshHandle {
 // rejection is swallowed (a failed background refresh must not crash the
 // app — the next organic refresh picks the data up).
 export function deferPostPaymentRefresh(
-  refresh: () => void | Promise<void>,
+  refresh: () => void | Promise<unknown>,
   scheduler: InteractionScheduler = InteractionManager,
 ): DeferredRefreshHandle {
   const handle = scheduler.runAfterInteractions(() => {

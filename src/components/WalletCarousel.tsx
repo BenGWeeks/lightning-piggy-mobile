@@ -1,10 +1,18 @@
 import React, { useRef, useCallback, useState } from 'react';
-import { View, FlatList, StyleSheet, ViewToken } from 'react-native';
+import {
+  View,
+  FlatList,
+  ViewToken,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from 'react-native';
 import { WalletState } from '../types/wallet';
 import WalletCard, { CARD_WIDTH, CARD_MARGIN } from './WalletCard';
 import AddWalletCard from './AddWalletCard';
 import { FiatCurrency } from '../services/fiatService';
 import { perfLog } from '../utils/perfLog';
+import { walletCarouselStyles as styles } from '../styles/WalletCarousel.styles';
+import { markWalletSwipeSettled, markWalletSwitchRequested } from '../utils/walletSwipeTiming';
 
 let __walletCarouselFirstRenderLogged = false;
 
@@ -65,10 +73,20 @@ const WalletCarousel: React.FC<WalletCarouselProps> = ({
       // buttons even though the user's just-added wallet still reports
       // isConnected: true (see #166).
       if (item.type === 'wallet') {
+        markWalletSwitchRequested(item.wallet.id);
         onWalletChange(item.wallet.id);
       }
     },
     [onWalletChange, onAddCardActiveChange],
+  );
+
+  // Swipe-latency probe (#1304): the card the scroll came to rest on.
+  const onMomentumScrollEnd = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const wallet = wallets[Math.round(e.nativeEvent.contentOffset.x / SNAP_INTERVAL)];
+      if (wallet) markWalletSwipeSettled(wallet.id);
+    },
+    [wallets],
   );
 
   const viewabilityConfig = useRef({ viewAreaCoveragePercentThreshold: 50 }).current;
@@ -103,6 +121,7 @@ const WalletCarousel: React.FC<WalletCarouselProps> = ({
         snapToAlignment="start"
         decelerationRate="fast"
         onViewableItemsChanged={onViewableItemsChanged}
+        onMomentumScrollEnd={onMomentumScrollEnd}
         viewabilityConfig={viewabilityConfig}
         contentContainerStyle={styles.listContent}
         getItemLayout={(_, index) => ({
@@ -125,31 +144,5 @@ const WalletCarousel: React.FC<WalletCarouselProps> = ({
     </View>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    paddingTop: 8,
-  },
-  listContent: {},
-  dots: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 8,
-    paddingTop: 12,
-    paddingBottom: 4,
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  dotActive: {
-    backgroundColor: '#FFFFFF',
-  },
-  dotInactive: {
-    backgroundColor: 'rgba(255, 255, 255, 0.4)',
-  },
-});
 
 export default WalletCarousel;
