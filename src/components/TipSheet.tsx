@@ -19,7 +19,7 @@ import QRCode from 'react-native-qrcode-svg';
 import { Check } from 'lucide-react-native';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useTranslation } from '../contexts/LocaleContext';
+import { useLocale } from '../contexts/LocaleContext';
 import { satsToFiatString } from '../services/fiatService';
 import { Course } from '../data/learnContent';
 import { createTipSheetStyles } from '../styles/TipSheet.styles';
@@ -32,7 +32,7 @@ interface Props {
 
 const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
   const colors = useThemeColors();
-  const t = useTranslation();
+  const { t, formatLocale } = useLocale();
   const styles = useMemo(() => createTipSheetStyles(colors), [colors]);
   const { makeInvoice, refreshActiveBalance, balance, currency } = useWallet();
   const { btcPrice } = useWalletLive();
@@ -140,7 +140,7 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
     if (invoice) {
       await Share.share({
         message: t('tipSheet.shareMessage', {
-          amount: tipSats.toLocaleString(),
+          amount: tipSats.toLocaleString(formatLocale),
           title: course.title,
           invoice,
         }),
@@ -150,7 +150,7 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
 
   if (!visible) return null;
 
-  const fiatString = btcPrice ? satsToFiatString(tipSats, btcPrice, currency) : '';
+  const fiatString = btcPrice ? satsToFiatString(tipSats, btcPrice, currency, formatLocale) : '';
 
   return (
     <BottomSheetModal
@@ -187,7 +187,7 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
           {/* Suggested tip amount */}
           <Text style={styles.amountLabel}>{t('tipSheet.suggestedTip')}</Text>
           <Text style={styles.amountSats}>
-            {t('tipSheet.satsAmount', { amount: tipSats.toLocaleString() })}
+            {t('tipSheet.satsAmount', { amount: tipSats.toLocaleString(formatLocale) })}
           </Text>
           {fiatString ? <Text style={styles.amountFiat}>{fiatString}</Text> : null}
 

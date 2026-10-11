@@ -1,3 +1,4 @@
+import { useLocale } from '../contexts/LocaleContext';
 import { useEffect, useState } from 'react';
 import * as boltzService from '../services/boltzService';
 import * as onchainService from '../services/onchainService';
@@ -19,6 +20,7 @@ export function useTransferFeeEstimate(opts: {
   swapFees: boltzService.SwapFees | null;
   sourceId: string | null;
 }): string | null {
+  const { formatLocale } = useLocale();
   const { transferType, currentSats, swapFees, sourceId } = opts;
   const [estimate, setEstimate] = useState<string | null>(null);
 
@@ -33,25 +35,27 @@ export function useTransferFeeEstimate(opts: {
       settle('~0 sats · Instant (Lightning)');
     } else if (transferType === 'ln-to-onchain' && swapFees) {
       const fee = boltzService.calculateSwapFee(currentSats, swapFees);
-      settle(`~${fee.toLocaleString()} sats · ~10-60 min`);
+      settle(`~${fee.toLocaleString(formatLocale)} sats · ~10-60 min`);
     } else if (transferType === 'onchain-to-ln' && swapFees && sourceId) {
       const { lockupSats } = forwardSwapLockup(currentSats, swapFees);
       onchainService
         .estimateSendFee(sourceId, lockupSats)
         .then((networkFee) =>
-          settle(formatForwardSwapFee(quoteForwardSwap(currentSats, swapFees, networkFee))),
+          settle(
+            formatForwardSwapFee(quoteForwardSwap(currentSats, swapFees, networkFee), formatLocale),
+          ),
         )
         .catch(() => settle('Fee estimate unavailable'));
     } else if (transferType === 'onchain-to-onchain') {
       onchainService
         .estimateOnchainFee()
-        .then((fees) => settle(`~${fees.medium.toLocaleString()} sats · ~10-60 min`))
+        .then((fees) => settle(`~${fees.medium.toLocaleString(formatLocale)} sats · ~10-60 min`))
         .catch(() => settle('Fee estimate unavailable'));
     }
     return () => {
       cancelled = true;
     };
-  }, [transferType, currentSats, swapFees, sourceId]);
+  }, [transferType, currentSats, swapFees, sourceId, formatLocale]);
 
   return estimate;
 }

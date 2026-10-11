@@ -1,3 +1,4 @@
+import { useLocale } from '../contexts/LocaleContext';
 import { useMemo } from 'react';
 import type { WalletState } from '../types/wallet';
 import type { DmProtocol } from '../utils/dmProtocol';
@@ -17,6 +18,7 @@ export function useConversationTimeline(
   partner: string,
   protocol: DmProtocol,
 ) {
+  const { formatLocale } = useLocale();
   const zapItems = useMemo(
     () => (protocol === 'nip17' ? buildZapItems(wallets, partner) : []),
     [wallets, partner, protocol],
@@ -26,7 +28,7 @@ export function useConversationTimeline(
   // Targeted history read verifies payment requests for orders outside the loaded slice.
   const olderOrderAmounts = useOutgoingOrderHistory(owner, partner, resolvedMessages);
   return useMemo(
-    () => buildConversationItems(resolvedMessages, zapItems, olderOrderAmounts),
-    [resolvedMessages, zapItems, olderOrderAmounts],
+    () => buildConversationItems(resolvedMessages, zapItems, olderOrderAmounts, formatLocale),
+    [resolvedMessages, zapItems, olderOrderAmounts, formatLocale],
   );
 }

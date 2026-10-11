@@ -1,3 +1,4 @@
+import { useLocale } from '../contexts/LocaleContext';
 import { useLiveMessageIndicator } from '../hooks/useLiveMessageIndicator';
 import NewMessagesPill from '../components/NewMessagesPill';
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
@@ -67,6 +68,7 @@ const NO_CONTACTS: NostrContact[] = [];
 const EMPTY_LIST_INPUTS = { dmInbox: EMPTY_DM_INBOX, contacts: NO_CONTACTS };
 
 const MessagesScreen: React.FC = () => {
+  const { formatLocale } = useLocale();
   const colors = useThemeColors();
   const t = useTranslation();
   // First-render marker: fires once per mount when the first commit lands. Distinct from refreshDmInbox completion (which fires later, after relay round-trip). Used by scripts/perf-startup.sh to measure tap-to-render latency for tab-messages.
@@ -474,7 +476,7 @@ const MessagesScreen: React.FC = () => {
         if (!lower) return true;
         return (
           s.name.toLowerCase().includes(lower) ||
-          conversationPreview(s).toLowerCase().includes(lower)
+          conversationPreview(s, formatLocale).toLowerCase().includes(lower)
         );
       })
       .map((s) => ({ kind: 'dm', summary: s, sortKey: s.lastActivityAt }));
@@ -498,6 +500,7 @@ const MessagesScreen: React.FC = () => {
     followPubkeys,
     enforceFollowingOnly,
     windowDays,
+    formatLocale,
   ]);
 
   const handleRefresh = useCallback(async () => {

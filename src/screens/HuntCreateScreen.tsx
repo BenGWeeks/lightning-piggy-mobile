@@ -47,7 +47,7 @@ import {
   X,
 } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useTranslation } from '../contexts/LocaleContext';
+import { useLocale } from '../contexts/LocaleContext';
 import { useNostr } from '../contexts/NostrContext';
 import { createHuntCreateScreenStyles } from '../styles/HuntCreateScreen.styles';
 import {
@@ -104,7 +104,7 @@ type Stage =
 
 const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
-  const t = useTranslation();
+  const { t, formatLocale } = useLocale();
   const styles = useMemo(() => createHuntCreateScreenStyles(colors), [colors]);
   const { signEvent, relays, pubkey } = useNostr();
   // Live user position for the hide-pin preview map. Map is centred on
@@ -1161,10 +1161,10 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     // older record), not that the prize is zero (#681 review).
     if (max <= 0) return null;
     return min === max
-      ? t('huntCreateScreen.satsPerClaim', { amount: max.toLocaleString() })
+      ? t('huntCreateScreen.satsPerClaim', { amount: max.toLocaleString(formatLocale) })
       : t('huntCreateScreen.satsPerClaimRange', {
-          min: min.toLocaleString(),
-          max: max.toLocaleString(),
+          min: min.toLocaleString(formatLocale),
+          max: max.toLocaleString(formatLocale),
         });
   })();
   // Prize hint for the cross-device card — taken from the editable field
@@ -1173,7 +1173,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
   const crossDevicePrizeLine = (() => {
     const n = parseInt(amountSatsText.trim(), 10);
     return Number.isFinite(n) && n > 0
-      ? t('huntCreateScreen.prizeLine', { amount: n.toLocaleString() })
+      ? t('huntCreateScreen.prizeLine', { amount: n.toLocaleString(formatLocale) })
       : null;
   })();
 

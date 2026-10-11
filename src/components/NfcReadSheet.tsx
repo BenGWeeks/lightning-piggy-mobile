@@ -26,7 +26,7 @@ import { recordClaim } from '../services/claimHistoryService';
 import { friendlyClaimError } from '../utils/claimErrorMessage';
 import { SLEEPING_PATTERN, parseCooldownSeconds, formatCountdown } from '../utils/lnurlCooldown';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useTranslation } from '../contexts/LocaleContext';
+import { useLocale } from '../contexts/LocaleContext';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { createNfcReadSheetStyles } from '../styles/NfcReadSheet.styles';
 import PrizeWalletPicker from './PrizeWalletPicker';
@@ -53,7 +53,7 @@ type SheetStage = 'ready' | 'reading' | 'claiming' | 'claimed' | 'sleeping' | 'e
 
 const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
   const colors = useThemeColors();
-  const t = useTranslation();
+  const { t, formatLocale } = useLocale();
   const styles = useMemo(() => createNfcReadSheetStyles(colors), [colors]);
   const { wallets, makeInvoiceForWallet, expectPayment } = useWallet();
   const { lastIncomingPayment } = useWalletLive();
@@ -413,7 +413,9 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
                 <PartyPopper size={64} color={colors.green} strokeWidth={2} />
               </View>
               <Text style={styles.instruction}>
-                {t('nfcReadSheet.satsInbound', { sats: claimedSats?.toLocaleString() ?? '' })}
+                {t('nfcReadSheet.satsInbound', {
+                  sats: claimedSats?.toLocaleString(formatLocale) ?? '',
+                })}
               </Text>
               <Text style={styles.description}>{t('nfcReadSheet.sentToWallet')}</Text>
               <TouchableOpacity

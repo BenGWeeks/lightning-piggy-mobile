@@ -27,7 +27,7 @@ import { t } from '../i18n';
  * Shared by every store → preview projection (inbox refresh, live sub,
  * wrap ingest, background notification) so they redact identically.
  */
-export function dmRowPreview(content: string, wireKind: number): string {
+export function dmRowPreview(content: string, wireKind: number, locale?: string): string {
   if (wireKind === NWC_SHARE_KIND) return nwcSharePreviewFromContent(content);
   // `#lpe=1` is the encrypted-file fragment marker (see encryptedFileUrl.ts);
   // its `&k=…&n=…` params are the decryption secret, so never let it through.
@@ -40,5 +40,7 @@ export function dmRowPreview(content: string, wireKind: number): string {
   }
   if (isMarmotKind(wireKind))
     return `🔒 ${t(wireKind === MARMOT_WELCOME_KIND ? 'messageBubble.marmotInvitePreview' : 'messageBubble.marmotMessagePreview')}`;
-  return pollPreviewFromContent(content, wireKind) ?? orderPreviewFromContent(content, wireKind);
+  return (
+    pollPreviewFromContent(content, wireKind) ?? orderPreviewFromContent(content, wireKind, locale)
+  );
 }

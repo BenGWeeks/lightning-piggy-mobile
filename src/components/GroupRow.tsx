@@ -1,3 +1,4 @@
+import { useLocale } from '../contexts/LocaleContext';
 import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -46,6 +47,7 @@ function senderName(
 }
 
 const GroupRow: React.FC<Props> = ({ summary, onPress, contactInfoMap }) => {
+  const { formatLocale } = useLocale();
   const colors = useThemeColors();
   const styles = useMemo(() => createGroupRowStyles(colors), [colors]);
   const { pubkey: myPubkey } = useNostr();
@@ -58,7 +60,7 @@ const GroupRow: React.FC<Props> = ({ summary, onPress, contactInfoMap }) => {
     [onPress, summary],
   );
 
-  const timestamp = formatConversationTimestamp(activity.lastActivityAt);
+  const timestamp = formatConversationTimestamp(activity.lastActivityAt, undefined, formatLocale);
 
   const preview = useMemo(() => {
     if (!activity.lastSenderPubkey || !activity.lastText) {

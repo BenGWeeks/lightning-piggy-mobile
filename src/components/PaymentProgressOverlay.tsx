@@ -26,7 +26,7 @@ import Animated, {
 import type { SharedValue } from 'react-native-reanimated';
 import { Check, X, WifiOff } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useTranslation } from '../contexts/LocaleContext';
+import { useLocale } from '../contexts/LocaleContext';
 import { useSendingAnimation } from '../contexts/SendingAnimationContext';
 import LightningOverlay from './LightningOverlay';
 import { lightPalette } from '../styles/palettes';
@@ -334,7 +334,7 @@ export default function PaymentProgressOverlay({
   canContinueInBackground = false,
 }: Props) {
   const colors = useThemeColors();
-  const t = useTranslation();
+  const { t, formatLocale } = useLocale();
   const styles = useMemo(() => createPaymentProgressOverlayStyles(colors), [colors]);
   const { width, height } = useWindowDimensions();
   // Which send animation the user picked in Appearance. Only affects the
@@ -441,7 +441,7 @@ export default function PaymentProgressOverlay({
 
   const formattedAmount =
     typeof amountSats === 'number' && amountSats > 0
-      ? t('paymentProgressOverlay.amountSats', { amount: amountSats.toLocaleString() })
+      ? t('paymentProgressOverlay.amountSats', { amount: amountSats.toLocaleString(formatLocale) })
       : undefined;
 
   const isReceive = direction === 'receive';
@@ -476,8 +476,8 @@ export default function PaymentProgressOverlay({
         : undefined;
     if (!isReceive && inFlightIsSwap && swapReceipt && swapReceipt.paidSats > 0) {
       subtitle = t('paymentProgressOverlay.swapReceipt', {
-        received: swapReceipt.recipientSats.toLocaleString(),
-        paid: swapReceipt.paidSats.toLocaleString(),
+        received: swapReceipt.recipientSats.toLocaleString(formatLocale),
+        paid: swapReceipt.paidSats.toLocaleString(formatLocale),
       });
     }
   } else if (state === 'connection-lost') {

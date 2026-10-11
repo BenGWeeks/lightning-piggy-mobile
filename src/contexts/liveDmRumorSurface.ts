@@ -1,3 +1,4 @@
+import { getAppFormatLocale } from '../utils/appFormatLocale';
 import { dmThreadId, protocolForWireKind } from '../utils/dmProtocol';
 import type React from 'react';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
@@ -114,7 +115,7 @@ export function createLiveRumorSurfacer(
         // never leaks into the conversation list OR the notification body when
         // the sender isn't followed (mirrors the non-deferred path below). Plain
         // DM rumors pass through unchanged.
-        const deferredText = dmRowPreview(textForRumor(rumor), rumor.kind);
+        const deferredText = dmRowPreview(textForRumor(rumor), rumor.kind, getAppFormatLocale());
         followGateBuffer.defer({
           partnerPubkey: partnership.partnerPubkey,
           entry: {
@@ -152,7 +153,7 @@ export function createLiveRumorSurfacer(
       // For a structured rumor (order kind 16/17, or an NWC wallet share)
       // `wrapText` is non-human JSON; surface a readable, secret-free preview.
       // Plain DM rumors pass through unchanged.
-      text: dmRowPreview(wrapText, rumor.kind),
+      text: dmRowPreview(wrapText, rumor.kind, getAppFormatLocale()),
       wireKind: rumor.kind,
       // Inner rumor id (#857) — the delivery-store key for our own sent rows,
       // stable across the optimistic bubble + this live echo.

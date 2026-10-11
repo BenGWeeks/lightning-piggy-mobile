@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { Alert } from '../components/BrandedAlert';
-import { useTranslation } from '../contexts/LocaleContext';
+import { useLocale } from '../contexts/LocaleContext';
 import { useNostr } from '../contexts/NostrContext';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { satsToFiatString } from '../services/fiatService';
@@ -19,7 +19,7 @@ import type { ReverseRecipientQuote } from '../utils/reverseSwapAmounts';
  * that, and the prompt states both sides (#1175).
  */
 export function useLargeSendConfirm() {
-  const t = useTranslation();
+  const { t, formatLocale } = useLocale();
   const { currency } = useWallet();
   const { btcPrice } = useWalletLive();
   // The ACTIVE account's threshold — it is a per-account setting.
@@ -35,17 +35,17 @@ export function useLargeSendConfirm() {
       const authorised = swapQuote?.invoiceSats ?? opts.amountSats;
       if (!shouldConfirmSend(authorised, await getSendThreshold(pubkey))) return true;
       const fiatOf = (sats: number) =>
-        btcPrice !== null ? ` (${satsToFiatString(sats, btcPrice, currency)})` : '';
+        btcPrice !== null ? ` (${satsToFiatString(sats, btcPrice, currency, formatLocale)})` : '';
       const body = swapQuote
         ? t('sendSheet.confirmLargeSwapBody', {
             recipient,
-            amount: swapQuote.recipientSats.toLocaleString(),
+            amount: swapQuote.recipientSats.toLocaleString(formatLocale),
             fiat: fiatOf(swapQuote.recipientSats),
-            total: swapQuote.invoiceSats.toLocaleString(),
-            fee: swapQuote.feeSats.toLocaleString(),
+            total: swapQuote.invoiceSats.toLocaleString(formatLocale),
+            fee: swapQuote.feeSats.toLocaleString(formatLocale),
           })
         : t('sendSheet.confirmLargeSendBody', {
-            amount: authorised.toLocaleString(),
+            amount: authorised.toLocaleString(formatLocale),
             fiat: fiatOf(authorised),
             recipient,
           });
@@ -56,6 +56,6 @@ export function useLargeSendConfirm() {
         ]);
       });
     },
-    [t, currency, btcPrice, pubkey],
+    [t, currency, btcPrice, pubkey, formatLocale],
   );
 }

@@ -6,7 +6,7 @@ import { nip46DecryptNip04 } from './nip46DmDecrypt';
 import { ingestInboxNip17ForSigner } from './inboxNip17Ingest';
 import type { SignerType } from '../types/nostr';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
-import { localSendInboxEntry } from '../utils/localSendInboxEntry';
+import { localSendInboxEntryForApp as localSendInboxEntry } from '../utils/localSendInboxEntry';
 import {
   selectKnownEventIds,
   upsertDmMessages,

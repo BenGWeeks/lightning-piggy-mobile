@@ -24,7 +24,7 @@ import {
 } from 'lucide-react-native';
 import type { RouteProp } from '@react-navigation/native';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useTranslation } from '../contexts/LocaleContext';
+import { useLocale } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation, ExploreStackParamList } from '../navigation/types';
 import type { ParsedEvent } from '../services/nostrPlacesService';
@@ -43,10 +43,14 @@ interface Props {
   route: RouteProp<ExploreStackParamList, 'EventDetail'>;
 }
 
-const formatDate = (ts: number | null, t: ReturnType<typeof useTranslation>): string => {
+const formatDate = (
+  ts: number | null,
+  t: ReturnType<typeof useLocale>['t'],
+  locale: string,
+): string => {
   if (ts === null) return t('eventDetailScreen.dateTbc');
   const d = new Date(ts * 1000);
-  return d.toLocaleString(undefined, {
+  return d.toLocaleString(locale, {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
@@ -85,7 +89,7 @@ const decodeGeohash = (gh: string): { lat: number; lng: number } => {
 };
 
 const EventDetailScreen: React.FC<Props> = ({ navigation, route }) => {
-  const t = useTranslation();
+  const { t, formatLocale } = useLocale();
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { coord } = route.params;
@@ -186,12 +190,12 @@ const EventDetailScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const onShare = useCallback(() => {
     if (!event) return;
-    const when = formatDate(event.startsAt, t);
+    const when = formatDate(event.startsAt, t, formatLocale);
     Share.share({
       message: `${event.title} — ${when}${event.location ? ` · ${event.location}` : ''}`,
       title: event.title,
     }).catch(() => {});
-  }, [event, t]);
+  }, [event, t, formatLocale]);
 
   return (
     <View style={styles.container} testID="event-detail-screen">
@@ -233,7 +237,7 @@ const EventDetailScreen: React.FC<Props> = ({ navigation, route }) => {
 
             <View style={styles.metaRow}>
               <Clock size={14} color={colors.brandPink} strokeWidth={2.5} />
-              <Text style={styles.metaText}>{formatDate(event.startsAt, t)}</Text>
+              <Text style={styles.metaText}>{formatDate(event.startsAt, t, formatLocale)}</Text>
             </View>
             {event.location ? (
               <View style={styles.metaRow}>

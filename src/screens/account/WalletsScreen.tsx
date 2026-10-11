@@ -8,12 +8,12 @@ import AddWalletWizard from '../../components/AddWalletWizard';
 import DefaultOnchainWalletSection from '../../components/DefaultOnchainWalletSection';
 import { useWallet } from '../../contexts/WalletContext';
 import { useThemeColors } from '../../contexts/ThemeContext';
-import { useTranslation } from '../../contexts/LocaleContext';
+import { useLocale } from '../../contexts/LocaleContext';
 import type { Palette } from '../../styles/palettes';
 
 const WalletsScreen: React.FC = () => {
   const colors = useThemeColors();
-  const t = useTranslation();
+  const { t, formatLocale } = useLocale();
   const sharedAccountStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { wallets, removeWallet, updateWalletSettings, reorderWallet } = useWallet();
@@ -58,7 +58,9 @@ const WalletsScreen: React.FC = () => {
               {w.hideBalance
                 ? '***'
                 : w.balance !== null
-                  ? t('walletsScreen.satsAmount', { amount: w.balance.toLocaleString() })
+                  ? t('walletsScreen.satsAmount', {
+                      amount: w.balance.toLocaleString(formatLocale),
+                    })
                   : '---'}
             </Text>
             <View style={styles.walletActions}>

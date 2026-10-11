@@ -303,12 +303,13 @@ export function bolt11FromText(text: string): string | null {
 }
 
 /** One-line inbox preview, e.g. "🛒 Order Placed · 21 sats". */
-export function orderPreviewText(order: ParsedOrderEvent): string {
+export function orderPreviewText(order: ParsedOrderEvent, locale?: string): string {
   const { emoji, label } = orderCardHeader(order.type);
   const parts: string[] = [`${emoji} ${label}`];
   if (order.type === 'status' && order.status) parts.push(order.status);
   else if (order.type === 'shipping' && order.status) parts.push(order.status);
-  else if (order.amountSats !== undefined) parts.push(`${order.amountSats.toLocaleString()} sats`);
+  else if (order.amountSats !== undefined)
+    parts.push(`${order.amountSats.toLocaleString(locale)} sats`);
   return parts.join(' · ');
 }
 
@@ -318,10 +319,14 @@ export function orderPreviewText(order: ParsedOrderEvent): string {
  * through unchanged. Shared by every store→inbox projection so a raw order JSON
  * blob never leaks into a conversation-list preview.
  */
-export function orderPreviewFromContent(content: string, wireKind: number): string {
+export function orderPreviewFromContent(
+  content: string,
+  wireKind: number,
+  locale?: string,
+): string {
   if (wireKind !== 16 && wireKind !== 17) return content;
   const order = parseStoredOrder(content);
-  if (order) return orderPreviewText(order);
+  if (order) return orderPreviewText(order, locale);
   // Unparseable kind-16/17 content — a corrupted/legacy row, or a non-order
   // payload sharing the kind (e.g. a NIP-18 repost JSON). Never surface the
   // raw blob; a neutral marketplace label keeps the list readable.

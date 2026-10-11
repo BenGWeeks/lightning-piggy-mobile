@@ -1,3 +1,5 @@
+import ExploreEventCard from '../components/ExploreEventCard';
+import { useLocale } from '../contexts/LocaleContext';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
@@ -10,14 +12,7 @@ import {
 } from 'react-native';
 import { useExploreRailsPosition } from '../hooks/useExploreRailsPosition';
 import { useFocusEffect } from '@react-navigation/native';
-import {
-  CalendarDays,
-  ChevronRight,
-  Compass,
-  MapPin,
-  PiggyBank,
-  Sparkles,
-} from 'lucide-react-native';
+import { ChevronRight, Compass, MapPin, PiggyBank, Sparkles } from 'lucide-react-native';
 import TabHeader from '../components/TabHeader';
 import BrandPatternBackground from '../components/BrandPatternBackground';
 import { ContentRail } from '../components/ContentRail';
@@ -101,6 +96,7 @@ interface Props {
  * keep navigating.
  */
 const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
+  const { formatLocale } = useLocale();
   const colors = useThemeColors();
   const styles = useMemo(() => createExploreHomeScreenStyles(colors), [colors]);
   const localStyles = useMemo(() => createExploreHomeRailStyles(colors), [colors]);
@@ -1003,7 +999,8 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
             </Text>
           }
           renderItem={({ event, distance }) => (
-            <EventCard
+            <ExploreEventCard
+              locale={formatLocale}
               event={event}
               distance={distance}
               onPress={() => navigation.navigate('EventDetail', { coord: event.coord })}
@@ -1171,45 +1168,6 @@ const CacheCard: React.FC<{
   </TouchableOpacity>
 );
 
-const EventCard: React.FC<{
-  event: ParsedEvent;
-  distance: number;
-  onPress: () => void;
-  colors: Palette;
-  styles: ReturnType<typeof createExploreHomeRailStyles>;
-}> = ({ event, distance, onPress, colors, styles }) => {
-  const day = event.startsAt
-    ? new Date(event.startsAt * 1000).toLocaleString(undefined, {
-        weekday: 'short',
-        month: 'short',
-        day: 'numeric',
-      })
-    : 'Soon';
-  return (
-    <TouchableOpacity style={styles.card} onPress={onPress} testID={`event-card-${event.d}`}>
-      {event.imageUrl ? (
-        <Image source={{ uri: event.imageUrl }} style={styles.cardThumb} resizeMode="cover" />
-      ) : (
-        <View style={[styles.cardThumb, styles.cardThumbPlaceholder, styles.cardIconEvent]}>
-          <CalendarDays size={32} color={colors.white} strokeWidth={2} />
-        </View>
-      )}
-      <Text style={styles.cardTitle} numberOfLines={2}>
-        {event.title}
-      </Text>
-      <Text style={styles.cardSub} numberOfLines={1}>
-        {day}
-        {Number.isFinite(distance) ? ` · ${formatDistance(distance)}` : ''}
-      </Text>
-      {event.location ? (
-        <Text style={styles.cardSubSmall} numberOfLines={1}>
-          {event.location}
-        </Text>
-      ) : null}
-    </TouchableOpacity>
-  );
-};
-
 const LessonCard: React.FC<{
   course: Course;
   progress: LearnProgress;
@@ -1253,7 +1211,6 @@ const ProfiledExploreHomeScreen: React.FC<Props> = (props) => (
     id="ExploreHomeScreen"
     onRender={(id, phase, actualDuration) => {
       if (actualDuration > 100) {
-        // eslint-disable-next-line no-console
         console.log(`[PerfBlock] render:${id} ${phase}=${Math.round(actualDuration)}ms`);
       }
     }}

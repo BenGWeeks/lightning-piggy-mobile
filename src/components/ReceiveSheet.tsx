@@ -26,7 +26,7 @@ import { paymentHashFromBolt11 } from '../utils/bolt11';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useTranslation } from '../contexts/LocaleContext';
+import { useLocale } from '../contexts/LocaleContext';
 import { walletLabel } from '../types/wallet';
 import { createReceiveSheetStyles } from '../styles/ReceiveSheet.styles';
 import { satsToFiat, formatFiat } from '../services/fiatService';
@@ -85,7 +85,7 @@ const ReceiveSheet: React.FC<Props> = ({
   onMarmotUnreachable,
 }) => {
   const colors = useThemeColors();
-  const t = useTranslation();
+  const { t, formatLocale } = useLocale();
   const styles = useMemo(() => createReceiveSheetStyles(colors), [colors]);
   const {
     makeInvoiceForWallet,
@@ -751,7 +751,7 @@ const ReceiveSheet: React.FC<Props> = ({
                     </>
                   ) : isOnchainWallet ? (
                     mode === 'amount' && currentSats > 0 ? (
-                      `${currentSats.toLocaleString()} sats`
+                      `${currentSats.toLocaleString(formatLocale)} sats`
                     ) : (
                       t('receiveSheet.loadingAddress')
                     )
@@ -879,13 +879,19 @@ const ReceiveSheet: React.FC<Props> = ({
                 {currentSats > 0 && (invoice || (isOnchainWallet && onchainAddress)) ? (
                   <View style={styles.amountSummary}>
                     <View style={styles.amountSummaryLine}>
-                      <Text style={styles.amountSummaryValue}>{currentSats.toLocaleString()}</Text>
+                      <Text style={styles.amountSummaryValue}>
+                        {currentSats.toLocaleString(formatLocale)}
+                      </Text>
                       <Text style={styles.amountSummaryUnit}>{t('receiveSheet.satsUnit')}</Text>
                     </View>
                     {btcPrice ? (
                       <Text style={styles.amountSummaryFiat}>
                         {t('receiveSheet.approxFiat', {
-                          value: formatFiat(satsToFiat(currentSats, btcPrice), currency),
+                          value: formatFiat(
+                            satsToFiat(currentSats, btcPrice),
+                            currency,
+                            formatLocale,
+                          ),
                         })}
                       </Text>
                     ) : null}

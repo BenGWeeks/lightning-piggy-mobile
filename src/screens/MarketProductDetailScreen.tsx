@@ -5,7 +5,7 @@ import { ChevronLeft, Zap, ExternalLink } from 'lucide-react-native';
 import type { CompositeNavigationProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useTranslation } from '../contexts/LocaleContext';
+import { useLocale } from '../contexts/LocaleContext';
 import { createMarketProductDetailStyles } from '../styles/MarketProductDetailScreen.styles';
 import { MARKET_PRODUCTS, sellerOf } from '../data/marketProducts';
 import { marketFeedbackContext } from '../utils/marketFeedback';
@@ -44,7 +44,7 @@ interface Props {
  */
 const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
-  const t = useTranslation();
+  const { t, formatLocale } = useLocale();
   const styles = useMemo(() => createMarketProductDetailStyles(colors), [colors]);
   const [imageFailed, setImageFailed] = useState(false);
   // Real aspect ratio of the product image, learned on load, so the hero
@@ -176,7 +176,7 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
             <Zap size={16} color={colors.brandPink} strokeWidth={2.5} fill={colors.brandPink} />
             <Text style={styles.priceSats} testID="market-product-detail-price">
               {product.listing?.priceLabel ??
-                t('market.sats', { amount: product.priceSats.toLocaleString() })}
+                t('market.sats', { amount: product.priceSats.toLocaleString(formatLocale) })}
             </Text>
             {!product.listing ? (
               <Text style={styles.priceFiat}>· {product.priceFiatLabel}</Text>

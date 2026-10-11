@@ -160,7 +160,7 @@ export interface ConversationMessageInput {
 // Local-only formatter — only used for the dayHeader rule between
 // chronological message groups, so it stays here rather than in the
 // shared `messageContent` util (which sticks to bubble-level concerns).
-export function formatDayHeader(epochSeconds: number): string {
+export function formatDayHeader(epochSeconds: number, locale?: string): string {
   const d = new Date(epochSeconds * 1000);
   const today = new Date();
   const yesterday = new Date();
@@ -171,7 +171,7 @@ export function formatDayHeader(epochSeconds: number): string {
     a.getDate() === b.getDate();
   if (sameDay(d, today)) return 'Today';
   if (sameDay(d, yesterday)) return 'Yesterday';
-  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+  return d.toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 // Wallet-derived zap rows for a 1:1 thread: Lightning txs whose zap
@@ -311,6 +311,7 @@ export function buildConversationItems(
   messages: ConversationMessageInput[],
   zapItems: TimedItem[],
   olderOrderAmounts?: ReadonlyMap<string, number | undefined>,
+  locale?: string,
 ): Item[] {
   const expectedAmounts = collectApprovedOrderAmounts(messages, olderOrderAmounts);
   const byId = indexMessagesById(messages);
@@ -434,7 +435,7 @@ export function buildConversationItems(
     const classified = classifyMessageContent(m.text);
     // A Marmot reply quotes its parent whatever the bubble: text, GIF,
     // location or poll.
-    const quoted = m.replyTo ? { quote: resolveQuote(m.replyTo, byId) } : {};
+    const quoted = m.replyTo ? { quote: resolveQuote(m.replyTo, byId, locale) } : {};
     // Vote messages aren't shown as bubbles — they're aggregated into the
     // referenced poll's tally by the screen, so drop them from the row list.
     if (classified.kind === 'pollVote') return [];
@@ -537,7 +538,7 @@ export function buildConversationItems(
       withHeaders.push({
         kind: 'dayHeader',
         id: `day-${prevKey}`,
-        label: formatDayHeader(prevTs),
+        label: formatDayHeader(prevTs, locale),
       });
     }
     withHeaders.push(it);
@@ -548,7 +549,7 @@ export function buildConversationItems(
     withHeaders.push({
       kind: 'dayHeader',
       id: `day-${prevKey}`,
-      label: formatDayHeader(prevTs),
+      label: formatDayHeader(prevTs, locale),
     });
   }
   return withHeaders;

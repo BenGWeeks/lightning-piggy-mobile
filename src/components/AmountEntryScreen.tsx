@@ -5,7 +5,7 @@ import { ChevronLeft, Delete, ArrowUpDown } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useTranslation } from '../contexts/LocaleContext';
+import { useLocale } from '../contexts/LocaleContext';
 import { createAmountEntryStyles } from '../styles/AmountEntryScreen.styles';
 import { satsToFiat, formatFiat } from '../services/fiatService';
 
@@ -61,7 +61,7 @@ const AmountEntryScreen: React.FC<Props> = ({
   onBack,
 }) => {
   const colors = useThemeColors();
-  const t = useTranslation();
+  const { t, formatLocale } = useLocale();
   // Defaults resolved in-body (not in the parameter list) so they can be
   // translated via the `t` hook, which can't be called in the destructure.
   const resolvedTitle = title ?? t('amountEntryScreen.customAmount');
@@ -208,30 +208,32 @@ const AmountEntryScreen: React.FC<Props> = ({
   // when the user had e.g. 3 sats.
   const primaryDisplay = useMemo(() => {
     if (primaryUnit === 'fiat' && pristine && btcPrice && currentSats > 0) {
-      return formatFiat(satsToFiat(currentSats, btcPrice), currency);
+      return formatFiat(satsToFiat(currentSats, btcPrice), currency, formatLocale);
     }
     const raw = primaryUnit === 'sats' ? satsText : fiatText;
     if (!raw) return '0';
     if (primaryUnit === 'sats') {
       const n = parseInt(raw, 10);
-      return Number.isFinite(n) ? n.toLocaleString() : '0';
+      return Number.isFinite(n) ? n.toLocaleString(formatLocale) : '0';
     }
+    // Locale decimal mark from toLocaleString (not formatToParts, which Hermes may lack).
+    const decimal = (1.1).toLocaleString(formatLocale).replace(/\d/g, '') || '.';
     const [intPart, fracPart] = raw.split('.');
-    const intFormatted = (parseInt(intPart || '0', 10) || 0).toLocaleString();
+    const intFormatted = (parseInt(intPart || '0', 10) || 0).toLocaleString(formatLocale);
     if (fracPart === undefined) {
       // No decimal point yet
-      return raw.endsWith('.') ? `${intFormatted}.` : intFormatted;
+      return raw.endsWith('.') ? `${intFormatted}${decimal}` : intFormatted;
     }
-    return `${intFormatted}.${fracPart}`;
-  }, [primaryUnit, pristine, btcPrice, currentSats, currency, satsText, fiatText]);
+    return `${intFormatted}${decimal}${fracPart}`;
+  }, [primaryUnit, pristine, btcPrice, currentSats, currency, satsText, fiatText, formatLocale]);
 
   const secondaryDisplay = useMemo(() => {
     if (primaryUnit === 'sats') {
       if (!btcPrice) return '—';
-      return formatFiat(satsToFiat(currentSats, btcPrice), currency);
+      return formatFiat(satsToFiat(currentSats, btcPrice), currency, formatLocale);
     }
-    return t('amountEntryScreen.satsAmount', { amount: currentSats.toLocaleString() });
-  }, [primaryUnit, currentSats, btcPrice, currency, t]);
+    return t('amountEntryScreen.satsAmount', { amount: currentSats.toLocaleString(formatLocale) });
+  }, [primaryUnit, currentSats, btcPrice, currency, t, formatLocale]);
 
   const primaryUnitLabel = primaryUnit === 'sats' ? 'SATS' : currency.toUpperCase();
   const secondaryUnitLabel = primaryUnit === 'sats' ? currency.toUpperCase() : 'SATS';
@@ -337,19 +339,19 @@ const AmountEntryScreen: React.FC<Props> = ({
         {minSats !== undefined && maxSats !== undefined ? (
           <Text style={styles.rangeText}>
             {t('amountEntryScreen.range', {
-              min: minSats.toLocaleString(),
-              max: maxSats.toLocaleString(),
+              min: minSats.toLocaleString(formatLocale),
+              max: maxSats.toLocaleString(formatLocale),
             })}
           </Text>
         ) : null}
         {belowMin ? (
           <Text style={styles.warningText}>
-            {t('amountEntryScreen.minimumIs', { min: minSats?.toLocaleString() })}
+            {t('amountEntryScreen.minimumIs', { min: minSats?.toLocaleString(formatLocale) })}
           </Text>
         ) : null}
         {aboveMax ? (
           <Text style={styles.warningText}>
-            {t('amountEntryScreen.maximumIs', { max: maxSats?.toLocaleString() })}
+            {t('amountEntryScreen.maximumIs', { max: maxSats?.toLocaleString(formatLocale) })}
           </Text>
         ) : null}
 

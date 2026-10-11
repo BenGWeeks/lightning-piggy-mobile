@@ -29,7 +29,7 @@ import EventsFilterSheet, {
   type EventsSortKey,
 } from '../components/EventsFilterSheet';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useTranslation } from '../contexts/LocaleContext';
+import { useLocale } from '../contexts/LocaleContext';
 import { t as translate } from '../i18n';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
@@ -63,7 +63,7 @@ interface Props {
  * Replaces the M1 "Coming soon" stub. Closes M7 of the Explore plan.
  */
 const EventsScreen: React.FC<Props> = ({ navigation }) => {
-  const t = useTranslation();
+  const { t } = useLocale();
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   // Coalesce per-event setState bursts during the nearby-event relay
@@ -539,10 +539,10 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
   );
 };
 
-const formatDate = (ts: number | null): string => {
+const formatDate = (ts: number | null, locale: string): string => {
   if (!ts) return translate('eventsScreen.timeTba');
   const d = new Date(ts * 1000);
-  return d.toLocaleString(undefined, {
+  return d.toLocaleString(locale, {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
@@ -551,12 +551,12 @@ const formatDate = (ts: number | null): string => {
   });
 };
 
-const dayLabel = (ts: number | null): { day: string; month: string } => {
+const dayLabel = (ts: number | null, locale: string): { day: string; month: string } => {
   if (!ts) return { day: '?', month: '—' };
   const d = new Date(ts * 1000);
   return {
     day: String(d.getDate()),
-    month: d.toLocaleString(undefined, { month: 'short' }).toUpperCase(),
+    month: d.toLocaleString(locale, { month: 'short' }).toUpperCase(),
   };
 };
 
@@ -569,7 +569,7 @@ const EventHero: React.FC<{
   colors: Palette;
   styles: ReturnType<typeof createStyles>;
 }> = ({ event, distance, expanded, onPress, onOpenInMaps, colors, styles }) => {
-  const t = useTranslation();
+  const { t, formatLocale } = useLocale();
   return (
     <TouchableOpacity
       style={styles.heroCard}
@@ -591,7 +591,7 @@ const EventHero: React.FC<{
           {event.title}
         </Text>
         <Text style={styles.heroMeta} numberOfLines={2}>
-          {formatDate(event.startsAt)}
+          {formatDate(event.startsAt, formatLocale)}
           {Number.isFinite(distance) ? ` · ${formatDistance(distance)}` : ''}
           {event.location ? ` · ${event.location}` : ''}
         </Text>
@@ -625,8 +625,8 @@ const EventRow: React.FC<{
   colors: Palette;
   styles: ReturnType<typeof createStyles>;
 }> = ({ event, distance, upNext, expanded, onToggle, onOpenInMaps, colors, styles }) => {
-  const t = useTranslation();
-  const { day, month } = dayLabel(event.startsAt);
+  const { t, formatLocale } = useLocale();
+  const { day, month } = dayLabel(event.startsAt, formatLocale);
   return (
     <TouchableOpacity
       style={[styles.row, upNext ? styles.rowUpNext : null]}
@@ -651,7 +651,7 @@ const EventRow: React.FC<{
           {event.title}
         </Text>
         <Text style={styles.rowMeta} numberOfLines={1}>
-          {formatDate(event.startsAt)}
+          {formatDate(event.startsAt, formatLocale)}
           {event.location ? ` · ${event.location}` : ''}
         </Text>
         {/* Distance gets its own line so it's never truncated by a long

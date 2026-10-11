@@ -4,7 +4,7 @@ import type { RefreshControlProps } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useTranslation } from '../contexts/LocaleContext';
+import { useLocale } from '../contexts/LocaleContext';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useNostrContacts } from '../contexts/NostrContext';
 import ContactProfileSheet from './ContactProfileSheet';
@@ -39,12 +39,12 @@ interface Props {
   refreshControl?: React.ReactElement<RefreshControlProps>;
 }
 
-// Translate function shape as provided by the `useTranslation()` hook. Passed
+// Translate function shape as provided by the `useLocale()` hook. Passed
 // into render-path helpers so they use the hook translator (updates on locale
 // change immediately) rather than the module-level one (which lags the UI).
-type Translate = ReturnType<typeof useTranslation>;
+type Translate = ReturnType<typeof useLocale>['t'];
 
-function formatDayHeader(ts: number, t: Translate): string {
+function formatDayHeader(ts: number, t: Translate, locale: string): string {
   const date = new Date(ts * 1000);
   const today = new Date();
   const yesterday = new Date();
@@ -55,7 +55,7 @@ function formatDayHeader(ts: number, t: Translate): string {
     a.getDate() === b.getDate();
   if (sameDay(date, today)) return t('transactionList.today');
   if (sameDay(date, yesterday)) return t('transactionList.yesterday');
-  return date.toLocaleDateString(undefined, {
+  return date.toLocaleDateString(locale, {
     day: 'numeric',
     month: 'short',
     year: 'numeric',
@@ -73,7 +73,7 @@ const TransactionList: React.FC<Props> = ({ transactions, refreshControl }) => {
     perfLog(`TransactionList first render (${transactions.length} txs)`);
   }
   const colors = useThemeColors();
-  const t = useTranslation();
+  const { t, formatLocale } = useLocale();
   const styles = useMemo(() => createTransactionListStyles(colors), [colors]);
   const { currency, activeWalletId } = useWallet();
   const { btcPrice } = useWalletLive();
@@ -208,8 +208,8 @@ const TransactionList: React.FC<Props> = ({ transactions, refreshControl }) => {
 
   // Flatten the visible window into day-header + tx rows for the FlatList.
   const rows: TxRow[] = useMemo(
-    () => buildTransactionRows(visibleTransactions, (ts) => formatDayHeader(ts, t)),
-    [visibleTransactions, t],
+    () => buildTransactionRows(visibleTransactions, (ts) => formatDayHeader(ts, t, formatLocale)),
+    [visibleTransactions, t, formatLocale],
   );
 
   // Reveal the next slice when the user scrolls near the bottom. `nextPage`

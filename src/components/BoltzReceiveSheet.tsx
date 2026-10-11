@@ -59,7 +59,7 @@ import * as SecureStore from 'expo-secure-store';
 import Toast from './BrandedToast';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useTranslation } from '../contexts/LocaleContext';
+import { useLocale } from '../contexts/LocaleContext';
 import { walletLabel } from '../types/wallet';
 import { createBoltzReceiveSheetStyles } from '../styles/BoltzReceiveSheet.styles';
 import { satsToFiat, formatFiat } from '../services/fiatService';
@@ -83,7 +83,7 @@ type Step = 'amount' | 'qr';
 
 const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
   const colors = useThemeColors();
-  const t = useTranslation();
+  const { t, formatLocale } = useLocale();
   const styles = useMemo(() => createBoltzReceiveSheetStyles(colors), [colors]);
   const {
     wallets,
@@ -287,7 +287,7 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
             type: 'success',
             text1: t('boltzReceive.swapCompleteToastTitle'),
             text2: t('boltzReceive.swapCompleteToastBody', {
-              amount: swap.expectedAmount.toLocaleString(),
+              amount: swap.expectedAmount.toLocaleString(formatLocale),
               wallet: wallet ? walletLabel(wallet) : t('boltzReceive.yourWallet'),
             }),
             position: 'top',
@@ -318,7 +318,7 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
     // re-running this effect on every wallet refresh would tear down + re-
     // open the WS subscription which is expensive.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [swap]);
+  }, [swap, formatLocale]);
 
   /**
    * Find a fresh receive address from any of the user's on-chain wallets,
@@ -494,7 +494,7 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
         type: 'success',
         text1: t('boltzReceive.refundBroadcastTitle'),
         text2: t('boltzReceive.refundBroadcastBody', {
-          amount: lockup.amount.toLocaleString(),
+          amount: lockup.amount.toLocaleString(formatLocale),
           txid: refundTxId.slice(0, 10),
         }),
         position: 'top',
@@ -515,7 +515,7 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
     } finally {
       setRefunding(false);
     }
-  }, [swap, pickRefundDestination, t]);
+  }, [swap, pickRefundDestination, t, formatLocale]);
 
   const bip21Uri = swap ? boltzService.buildBoltzBip21Uri(swap.address, swap.expectedAmount) : '';
   const fee = swap ? swap.expectedAmount - amountSats : 0;
@@ -667,13 +667,19 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
                 </View>
 
                 <View style={styles.amountRow}>
-                  <Text style={styles.amountValue}>{swap.expectedAmount.toLocaleString()}</Text>
+                  <Text style={styles.amountValue}>
+                    {swap.expectedAmount.toLocaleString(formatLocale)}
+                  </Text>
                   <Text style={styles.amountUnit}>SATS</Text>
                 </View>
                 {btcPrice ? (
                   <Text style={styles.amountFiat}>
                     {t('boltzReceive.approx', {
-                      amount: formatFiat(satsToFiat(swap.expectedAmount, btcPrice), currency),
+                      amount: formatFiat(
+                        satsToFiat(swap.expectedAmount, btcPrice),
+                        currency,
+                        formatLocale,
+                      ),
                     })}
                   </Text>
                 ) : null}
@@ -688,19 +694,21 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
                   <View style={styles.feeRow}>
                     <Text style={styles.feeLabel}>{t('boltzReceive.youReceiveLightning')}</Text>
                     <Text style={styles.feeValue}>
-                      {t('boltzReceive.sats', { amount: amountSats.toLocaleString() })}
+                      {t('boltzReceive.sats', { amount: amountSats.toLocaleString(formatLocale) })}
                     </Text>
                   </View>
                   <View style={styles.feeRow}>
                     <Text style={styles.feeLabel}>{t('boltzReceive.senderPaysOnchain')}</Text>
                     <Text style={styles.feeValue}>
-                      {t('boltzReceive.sats', { amount: swap.expectedAmount.toLocaleString() })}
+                      {t('boltzReceive.sats', {
+                        amount: swap.expectedAmount.toLocaleString(formatLocale),
+                      })}
                     </Text>
                   </View>
                   <View style={styles.feeRow}>
                     <Text style={styles.feeLabel}>{t('boltzReceive.boltzFee')}</Text>
                     <Text style={styles.feeValue}>
-                      {t('boltzReceive.sats', { amount: fee.toLocaleString() })}
+                      {t('boltzReceive.sats', { amount: fee.toLocaleString(formatLocale) })}
                     </Text>
                   </View>
                 </View>

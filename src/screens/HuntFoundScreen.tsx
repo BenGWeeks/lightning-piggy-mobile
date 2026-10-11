@@ -22,7 +22,7 @@ import {
 import { recordClaim } from '../services/claimHistoryService';
 import { formatFiatApprox } from '../utils/fiat';
 import { SLEEPING_PATTERN } from '../utils/lnurlCooldown';
-import { useTranslation } from '../contexts/LocaleContext';
+import { useLocale } from '../contexts/LocaleContext';
 import { t } from '../i18n';
 import type { RouteProp } from '@react-navigation/native';
 import BrandPatternBackground from '../components/BrandPatternBackground';
@@ -91,7 +91,7 @@ type Stage =
  */
 const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
-  const t = useTranslation();
+  const { t, formatLocale } = useLocale();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { lnurl, coord } = route.params;
   const { activeWalletId, makeInvoice, currency } = useWallet();
@@ -119,8 +119,8 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
   // Fiat label for the chosen amount in the user's currency. (Hermes Intl
   // currency formatting is patchy, so format manually with a symbol map.)
   const fiatLabel = useMemo(
-    () => formatFiatApprox(amountSats, btcPrice, currency),
-    [amountSats, btcPrice, currency],
+    () => formatFiatApprox(amountSats, btcPrice, currency, formatLocale),
+    [amountSats, btcPrice, currency, formatLocale],
   );
 
   // Shared claim path — used by the fixed-amount auto-claim (mount) and the
@@ -263,7 +263,7 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
               <Text style={styles.memo}>&ldquo;{stage.params.defaultDescription}&rdquo;</Text>
             ) : null}
             <Text style={styles.amountValue} testID="hunt-found-amount-sats">
-              {t('huntFoundScreen.satsAmount', { amount: amountSats.toLocaleString() })}
+              {t('huntFoundScreen.satsAmount', { amount: amountSats.toLocaleString(formatLocale) })}
             </Text>
             {fiatLabel ? <Text style={styles.amountFiat}>{fiatLabel}</Text> : null}
             <Slider
@@ -279,9 +279,9 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
               testID="hunt-found-amount-slider"
             />
             <View style={styles.rangeRow}>
-              <Text style={styles.rangeText}>{minSats.toLocaleString()}</Text>
+              <Text style={styles.rangeText}>{minSats.toLocaleString(formatLocale)}</Text>
               <Text style={styles.rangeText}>
-                {t('huntFoundScreen.maxLabel', { amount: maxSats.toLocaleString() })}
+                {t('huntFoundScreen.maxLabel', { amount: maxSats.toLocaleString(formatLocale) })}
               </Text>
             </View>
             <View style={styles.amountInputRow}>
@@ -308,7 +308,9 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
             >
               <Gift size={20} color={colors.white} strokeWidth={2.5} />
               <Text style={styles.primaryButtonText}>
-                {t('huntFoundScreen.claimSats', { amount: amountSats.toLocaleString() })}
+                {t('huntFoundScreen.claimSats', {
+                  amount: amountSats.toLocaleString(formatLocale),
+                })}
               </Text>
             </TouchableOpacity>
           </>
@@ -320,7 +322,9 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
               <PartyPopper size={88} color={colors.green} strokeWidth={2} />
             </View>
             <Text style={styles.title}>
-              {t('huntFoundScreen.satsInbound', { amount: stage.sats.toLocaleString() })}
+              {t('huntFoundScreen.satsInbound', {
+                amount: stage.sats.toLocaleString(formatLocale),
+              })}
             </Text>
             <Text style={styles.memo}>{t('huntFoundScreen.sentToActiveWallet')}</Text>
             <TouchableOpacity
