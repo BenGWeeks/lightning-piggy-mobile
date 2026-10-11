@@ -2232,7 +2232,7 @@
     "fromSeller": "de {{seller}}",
     "screen": {
       "title": "Mercado",
-      "tagline": "Compra una Lightning Piggy y merch de Bitcoin",
+      "tagline": "Compra y vende con sats",
       "back": "Volver a Explorar",
       "showing": "Mostrando: {{label}}",
       "searchPlaceholder": "Buscar productos o vendedores",
