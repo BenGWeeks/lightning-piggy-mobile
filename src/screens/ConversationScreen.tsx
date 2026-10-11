@@ -381,11 +381,10 @@ const ConversationScreen: React.FC = () => {
     [t],
   );
 
-  // My live position for the location-card mini-maps (#206) — the blue
-  // "me" dot + accuracy halo. Shared GPS subscription, retained for this
-  // screen's lifetime (see UserLocationContext). Tapping a card's mini-map
-  // opens the full-screen Map, mirroring the detail screens' affordance.
-  const { pos: myPos } = useUserLocation();
+  // Mini-maps may show an existing fix, but opening a DM (even one with
+  // location messages) must never request permission or retain a GPS watch.
+  // Sharing location or explicitly opening the full map owns that consent.
+  const { pos: myPos } = useUserLocation({ enabled: false });
   // `Map` lives in the Explore sub-stack, so target it through the
   // Explore tab rather than the root stack (the detail screens reach it
   // via a CompositeNavigationProp; ConversationScreen is root-stack only).
