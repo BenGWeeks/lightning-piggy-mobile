@@ -476,7 +476,9 @@ const MessagesScreen: React.FC = () => {
         if (!lower) return true;
         return (
           s.name.toLowerCase().includes(lower) ||
-          conversationPreview(s, formatLocale).toLowerCase().includes(lower)
+          conversationPreview(s, formatLocale, t('groupConversationScreen.you'))
+            .toLowerCase()
+            .includes(lower)
         );
       })
       .map((s) => ({ kind: 'dm', summary: s, sortKey: s.lastActivityAt }));
@@ -501,6 +503,7 @@ const MessagesScreen: React.FC = () => {
     enforceFollowingOnly,
     windowDays,
     formatLocale,
+    t,
   ]);
 
   const handleRefresh = useCallback(async () => {

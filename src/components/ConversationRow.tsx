@@ -20,7 +20,7 @@ interface Props {
 }
 
 const ConversationRow: React.FC<Props> = ({ summary, onPress }) => {
-  const { formatLocale } = useLocale();
+  const { t, formatLocale } = useLocale();
   const colors = useThemeColors();
   const styles = useMemo(() => createConversationRowStyles(colors), [colors]);
   const [avatarError, setAvatarError] = useState(false);
@@ -31,7 +31,7 @@ const ConversationRow: React.FC<Props> = ({ summary, onPress }) => {
   // Pre-filter unsupported URLs (`.svg`, `.heic`, etc.) — see #189.
   const showImage = !!summary.picture && !avatarError && isSupportedImageUrl(summary.picture);
   const timestamp = formatConversationTimestamp(summary.lastActivityAt, undefined, formatLocale);
-  const preview = conversationPreview(summary, formatLocale);
+  const preview = conversationPreview(summary, formatLocale, t('groupConversationScreen.you'));
   // Bind the row's summary into the parent handler at the leaf so the
   // <TouchableOpacity> sees a stable callback per render, while the
   // parent still hands us a single handler.

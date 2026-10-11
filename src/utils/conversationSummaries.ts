@@ -140,10 +140,15 @@ export function formatConversationTimestamp(
   });
 }
 
-/** Short preview line (last-message column). */
-export function conversationPreview(s: ConversationSummary, locale?: string): string {
+/** Short preview line (last-message column). `youLabel` is the translated
+ *  "You" for outgoing rows (callers pass `t('groupConversationScreen.you')`). */
+export function conversationPreview(
+  s: ConversationSummary,
+  locale?: string,
+  youLabel = 'You',
+): string {
   const amount = s.lastAmountSats.toLocaleString(locale);
-  const prefix = s.lastDirection === 'outgoing' ? 'You: ' : '';
+  const prefix = s.lastDirection === 'outgoing' ? `${youLabel}: ` : '';
   const comment = s.lastComment.trim();
   if (comment) {
     // Don't leak the poll wire-format into the inbox row — show a friendly label.
