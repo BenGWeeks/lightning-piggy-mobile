@@ -217,3 +217,13 @@ Maestro's debug output under `$OUT`.
   flow generates and then cancels.
 * Never tap "Confirm" / "Send" on a payment, contact-share, or DM
   unless the recipient is another Piggy.
+
+== Settings restructure (#1222)
+
+`flow-072-secret-mode.yaml` enables the visible "Show experimental features"
+(Secret Mode) switch in Advanced → Experimental features and accepts its
+confirmation. It intentionally leaves the
+mode enabled for wallet-import flows. `flow-094-account-drawer.yaml` checks
+cancellation and enable/disable while preserving the initial mode. Neither
+flow uses the About version label anymore. Invitation keys will belong in
+Settings → Messages when that screen is available.

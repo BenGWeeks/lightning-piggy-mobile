@@ -10,7 +10,6 @@ import MarmotPushSection from '../../components/MarmotPushSection';
 import SettingsScopeHeader from '../../components/SettingsScopeHeader';
 import NotificationPermissionRow from '../../components/NotificationPermissionRow';
 import ShopAlertsSection from '../../components/ShopAlertsSection';
-import NotificationServerSection from '../../components/NotificationServerSection';
 import DetailsDisclosure from '../../components/DetailsDisclosure';
 import {
   getLockScreenContentEnabled,
@@ -29,7 +28,8 @@ import { startBackgroundDmWatch, stopBackgroundDmWatch } from '../../services/ba
  * the rest is split by where it's stored. "For this account" follows the
  * signed-in account (push registrations are per account); "On this phone"
  * applies to every account on the device (lock-screen content, the Android
- * background watch, the shop geofences and the notification server).
+ * background watch and the shop geofences). The notification server is
+ * phone-wide too, but rarely touched, so it lives under Settings → Advanced.
  */
 const NotificationSettingsScreen: React.FC = () => {
   const colors = useThemeColors();
@@ -136,8 +136,6 @@ const NotificationSettingsScreen: React.FC = () => {
       )}
 
       <ShopAlertsSection />
-
-      <NotificationServerSection />
     </AccountScreenLayout>
   );
 };
