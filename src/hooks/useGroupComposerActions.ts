@@ -80,11 +80,17 @@ export function useGroupComposerActions(params: {
   // `persisted` (never rejects) so callers can await it and judge the outcome
   // once the relay send has resolved.
   const appendOptimisticGroupRow = useCallback(
-    (text: string): { row: GroupMessage; persisted: Promise<boolean> } | null => {
-      if (!group || !myPubkey) return null;
+    (
+      text: string,
+      // sendText passes its send-time snapshot so the row lands in the thread
+      // the message actually went to, not the one this callback closed over.
+      targetGroup = group,
+      targetPubkey = myPubkey,
+    ): { row: GroupMessage; persisted: Promise<boolean> } | null => {
+      if (!targetGroup || !targetPubkey) return null;
       const local: GroupMessage = {
         id: `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        senderPubkey: myPubkey,
+        senderPubkey: targetPubkey,
         text,
         createdAt: Math.floor(Date.now() / 1000),
       };
@@ -97,10 +103,10 @@ export function useGroupComposerActions(params: {
       // actually landed, mirroring the pre-#1033 ordering.
       setMessages((prev) => [...prev, local]);
       setTimeout(scrollToEnd, 0);
-      const persisted = appendGroupMessage(group.id, local)
+      const persisted = appendGroupMessage(targetGroup.id, local)
         .then((next) => {
           setMessages(next);
-          notifyGroupMessage(group.id, local);
+          notifyGroupMessage(targetGroup.id, local);
           return true;
         })
         .catch((err: unknown) => {
@@ -133,11 +139,11 @@ export function useGroupComposerActions(params: {
   // swallow the error since there's no user-facing action to take on a
   // failed cleanup of an already-failed send.
   const removeOptimisticRow = useCallback(
-    async (rowId: string): Promise<void> => {
-      if (!group) return;
+    async (rowId: string, targetGroup = group): Promise<void> => {
+      if (!targetGroup) return;
       setMessages((prev) => prev.filter((m) => m.id !== rowId));
       try {
-        await removeGroupMessage(group.id, rowId);
+        await removeGroupMessage(targetGroup.id, rowId);
       } catch (err) {
         if (__DEV__) console.warn('[GroupConversationScreen] removeGroupMessage failed:', err);
       }
@@ -166,7 +172,7 @@ export function useGroupComposerActions(params: {
         },
         {
           onRumorReady: () => {
-            optimistic.current = appendOptimisticGroupRow(text);
+            optimistic.current = appendOptimisticGroupRow(text, group, myPubkey);
           },
         },
       );
@@ -178,7 +184,7 @@ export function useGroupComposerActions(params: {
         // setMessages can't re-add the row after removal.
         if (optimistic.current) {
           await optimistic.current.persisted;
-          await removeOptimisticRow(optimistic.current.row.id);
+          await removeOptimisticRow(optimistic.current.row.id, group);
         }
         return false;
       }
@@ -302,7 +308,12 @@ export function useGroupComposerActions(params: {
       confirmGroupLocationShare(location, () => {
         const { group, myPubkey } = latestRef.current;
         if (!group || !myPubkey) return null;
-        return { group: group.name, memberPubkeys: group.memberPubkeys, myPubkey };
+        return {
+          group: group.name,
+          groupId: group.id,
+          memberPubkeys: group.memberPubkeys,
+          myPubkey,
+        };
       }),
     [],
   );

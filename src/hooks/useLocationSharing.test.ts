@@ -134,3 +134,36 @@ it('re-asks and sends to the latest roster when members change while the dialog 
   expect(mockSendGroup).toHaveBeenCalledTimes(1);
   expect(mockSendGroup.mock.calls[0][0].memberPubkeys).toEqual(['me', 'big']);
 });
+
+it('after a group switch mid-dialog, re-asks and records the optimistic row in the group it went to', async () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const storage = require('../services/groupMessagesStorageService');
+  const append = jest.spyOn(storage, 'appendGroupMessage').mockResolvedValue([]);
+  const { result, rerender } = renderHook(
+    (props: { group: Group }) => useGroupComposerActions({ ...params, group: props.group }),
+    { initialProps: { group } },
+  );
+  let pending!: Promise<void>;
+  await act(async () => {
+    pending = result.current.handleShareLocation();
+  });
+  const other: Group = { ...group, id: 'other-group', name: 'Cousins' };
+  rerender({ group: other });
+  await act(async () => {
+    alert.mock.calls[0][2]![1].onPress!();
+  });
+  expect(mockSendGroup).not.toHaveBeenCalled();
+  expect(alert.mock.calls[1][0]).toBe('Share your location with the 2 people in Cousins?');
+
+  mockSendGroup.mockImplementation(async (_args, hooks) => {
+    hooks?.onRumorReady?.();
+    return { success: true };
+  });
+  await act(async () => {
+    alert.mock.calls[1][2]![1].onPress!();
+    await pending;
+  });
+  expect(mockSendGroup.mock.calls[0][0].groupId).toBe('other-group');
+  expect(append).toHaveBeenCalledWith('other-group', expect.anything());
+  append.mockRestore();
+});
