@@ -3,6 +3,7 @@ import { pool, trackRelays } from './nostrPool';
 import { querySyncAbortable } from './relayQuery';
 import { collectRelaySnapshot } from './relaySnapshot';
 import { verifyEventCached } from './nostrVerifyCache';
+import { nostrGetEventHash } from './nostrCrypto';
 import { createYieldScheduler } from '../contexts/nostrDecryptPacing';
 import { reduceMarketListings, selectVerifiedListings } from '../utils/marketListings';
 import {
@@ -90,6 +91,13 @@ export async function fetchMarketListings(
   // they arrive. `verifyEventCached` skips the schnorr for ids already
   // checked this session, so a refetch doesn't pay for the snapshot again.
   const verified = verifyEventCached;
+  const idMatches = (event: Event) => {
+    try {
+      return nostrGetEventHash(event) === event.id;
+    } catch {
+      return false;
+    }
+  };
   // A bulk deletion over the tag limit still withdraws listings: keep a
   // trimmed copy with only the e / own-listing a tags.
   const suppressOversizedDeletion = (event: Event) => {
@@ -153,7 +161,11 @@ export async function fetchMarketListings(
       limited = true;
       return;
     }
-    if (event.kind !== 5 || verified(event)) events.set(event.id, event);
+    // Listings are verified later (winners only), but must hash to their id
+    // NOW: `alreadyHave` dedupes by id, so a forged payload carrying a real
+    // listing's id would otherwise squat it and get the genuine copy skipped.
+    const ok = event.kind === 5 ? verified(event) : idMatches(event);
+    if (ok) events.set(event.id, event);
   };
   const alreadyHave = (id: string) => events.has(id);
 

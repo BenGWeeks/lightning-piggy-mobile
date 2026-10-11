@@ -1,4 +1,4 @@
-import { finalizeEvent, getPublicKey, type Filter } from 'nostr-tools';
+import { finalizeEvent, getEventHash, getPublicKey, type Filter } from 'nostr-tools';
 import { fetchMarketListings, listingsCutMattered } from './marketListingsService';
 import { pool } from './nostrPool';
 import { LISTING_LIMIT } from '../utils/marketListingsQuery';
@@ -204,14 +204,10 @@ it('verifies only the winning revision, falling back past a forged newer one', a
     { kind: 30402, created_at: 50, content: 'Book', tags: event.tags },
     key,
   );
+  // Correct id for its payload, but a signature that doesn't verify.
+  const unsigned = { ...event, created_at: 900, content: 'Scam' };
   const forgedNewer = JSON.parse(
-    JSON.stringify({
-      ...event,
-      id: 'f'.repeat(64),
-      created_at: 900,
-      content: 'Scam',
-      sig: '0'.repeat(128),
-    }),
+    JSON.stringify({ ...unsigned, id: getEventHash(unsigned), sig: '0'.repeat(128) }),
   );
   const pending = start();
   await flush();
@@ -223,6 +219,17 @@ it('verifies only the winning revision, falling back past a forged newer one', a
   expect(result.products.map((p) => p.listing?.event.id)).toEqual([event.id]);
   // forged (fails) + real winner (passes); the superseded older one is never checked.
   expect(verify).toHaveBeenCalledTimes(2);
+});
+
+it("doesn't let a forged copy carrying a real listing's id squat it", async () => {
+  const squatter = JSON.parse(JSON.stringify({ ...event, content: 'Scam' })); // real id, wrong payload
+  const pending = start(['wss://a.example', 'wss://b.example']);
+  await flush();
+  deliver(pass('listings', 'wss://a.example')[0], squatter);
+  deliver(pass('listings', 'wss://b.example')[0], JSON.parse(JSON.stringify(event)));
+  await Promise.all([answer('wss://a.example'), answer('wss://b.example')]);
+  const result = await pending;
+  expect(result.products.map((p) => p.listing?.event.content)).toEqual(['Book']);
 });
 
 it('closes subscriptions on abort and ignores late relay events', async () => {
