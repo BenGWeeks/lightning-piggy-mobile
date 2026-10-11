@@ -38,7 +38,7 @@ if [ "${STATS_ONLY:-0}" != "1" ]; then
         echo "    from:"
         echo "      id: 'wallet-card-.*'"
         echo "    direction: $dir"
-        echo "    duration: 250"
+        echo "    duration: 200"
         echo "- waitForAnimationToEnd:"
         echo "    timeout: 3000"
       done
