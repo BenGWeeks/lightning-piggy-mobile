@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import { Alert } from '../components/BrandedAlert';
 import { useNostr, notifyGroupMessage } from '../contexts/NostrContext';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -69,7 +69,7 @@ export function useGroupComposerActions(params: {
   // to the roster the user just approved, not the one captured when the
   // share started (#1253 review).
   const latestRef = useRef({ group, myPubkey });
-  useEffect(() => {
+  useLayoutEffect(() => {
     latestRef.current = { group, myPubkey };
   }, [group, myPubkey]);
 
