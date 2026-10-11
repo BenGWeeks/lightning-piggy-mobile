@@ -44,7 +44,7 @@ function setup() {
     publish: jest.fn(async (relays: string[], event: { kind: number }) => {
       published.push({ relays, kind: event.kind });
     }),
-    inboxRelays: jest.fn(async () => ['wss://server-inbox.example']),
+    inboxRelays: jest.fn<Promise<string[]>, [string]>(async () => ['wss://server-inbox.example']),
   };
   const notifier = new MarmotPushNotifier({
     pubkey: me,
@@ -144,6 +144,30 @@ describe('MarmotPushNotifier', () => {
     expect(spy.mock.calls[0][0]).toBe(OTHER);
     expect(published).toEqual([{ relays: ['wss://server-inbox.example'], kind: 1059 }]);
     spy.mockRestore();
+  });
+
+  it('looks up every server 10050 in parallel, not one after another', async () => {
+    const { notifier, published, group, settle, transport } = setup();
+    const SLOW = getPublicKey(generateSecretKey());
+    let release: (r: string[]) => void = () => undefined;
+    transport.inboxRelays.mockImplementation(async (server: string) =>
+      server === SLOW
+        ? new Promise<string[]>((r) => (release = r))
+        : ['wss://server-inbox.example'],
+    );
+    const g = group([leafKey(bob, 1), leafKey(bob, 2)]);
+    await notifier.ingest(g, 448, tokenPayload({ leaf: 1, server: SLOW }));
+    await notifier.ingest(g, 448, tokenPayload({ leaf: 2 }));
+    notifier.trigger(g);
+    await settle();
+    // Both lookups started while the first is still pending.
+    expect(transport.inboxRelays).toHaveBeenCalledTimes(2);
+    expect(published).toEqual([]);
+    release(['wss://slow-inbox.example']);
+    await settle();
+    expect(published.map((p) => p.relays)).toEqual(
+      expect.arrayContaining([['wss://server-inbox.example'], ['wss://slow-inbox.example']]),
+    );
   });
 
   it('after stop(), a paused ingest writes nothing and queued triggers never publish', async () => {

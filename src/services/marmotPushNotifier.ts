@@ -112,14 +112,19 @@ export class MarmotPushNotifier {
   private async publish(targets: TriggerTarget[]): Promise<void> {
     if (targets.length === 0) return;
     const scheduler = createYieldScheduler({ safetyEvery: 1 });
+    // Every server's 10050 lookup starts now, in parallel: the triggers wait
+    // for the slowest lookup, not the sum of them.
+    const inboxes = targets.map(({ server }) =>
+      this.deps.transport.inboxRelays(server).catch(() => [] as string[]),
+    );
     try {
-      for (const { server, relayHints, tokens } of targets) {
+      for (const [i, { server, relayHints, tokens }] of targets.entries()) {
         if (this.stopped) return;
         // The records' relay hints AND the server's own 10050 inbox — never a
         // default relay. One wrap carries every token for this server, so a
         // stale hint (older builds advertised nos.lol, now down) must not
         // swallow the trigger for the records that carry no hint.
-        const inbox = await this.deps.transport.inboxRelays(server).catch(() => [] as string[]);
+        const inbox = await inboxes[i];
         const relays = [...new Set([...relayHints, ...inbox])];
         if (relays.length === 0) continue;
         // One server's failure (e.g. wrap encryption throwing) must not cost
