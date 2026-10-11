@@ -1,7 +1,7 @@
 import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
 import { getLocalDb } from './localDb';
 import type { MarmotEdit } from './marmotEdits';
-import { protocolForWireKind, type DmProtocol } from '../utils/dmProtocol';
+import { MARMOT_WELCOME_KIND, protocolForWireKind, type DmProtocol } from '../utils/dmProtocol';
 
 // Data-access layer for the `dm_messages` table in the encrypted local DB
 // (#695). One row per decrypted DM, keyed by (owner, event_id) — `owner` is
@@ -390,7 +390,9 @@ export async function getOutgoingOrderRows(
  * the DB does the per-conversation MAX in one indexed query instead of JS
  * walking everything. A conversation is (partner, protocol): NIP-04 rows
  * (wire_kind 4) and NIP-17 rows each get their own latest row, so a partner
- * with both shows two inbox threads (see `protocolForWireKind`).
+ * with both shows two inbox threads (see `protocolForWireKind`). Marmot
+ * invite gift wraps (kind 444) never count as a thread's latest: the joined
+ * chat shows on its own, and failed ones come from the Marmot session (#1269).
  */
 export async function getInboxLatest(owner: string): Promise<DmMessageRow[]> {
   const db = await getLocalDb();
@@ -398,11 +400,12 @@ export async function getInboxLatest(owner: string): Promise<DmMessageRow[]> {
     `SELECT m.* FROM dm_messages m
        JOIN (
          SELECT conversation, ${PROTOCOL_SQL} AS proto, MAX(created_at) AS mx
-         FROM dm_messages WHERE owner = ? GROUP BY conversation, ${PROTOCOL_SQL}
+         FROM dm_messages WHERE owner = ? AND wire_kind != ${MARMOT_WELCOME_KIND}
+         GROUP BY conversation, ${PROTOCOL_SQL}
        ) g ON m.conversation = g.conversation
           AND COALESCE(m.protocol, CASE WHEN m.wire_kind = 4 THEN 'nip04' ELSE 'nip17' END) = g.proto
           AND m.created_at = g.mx
-     WHERE m.owner = ?
+     WHERE m.owner = ? AND m.wire_kind != ${MARMOT_WELCOME_KIND}
      ORDER BY m.created_at DESC;`,
     [owner, owner],
   );
@@ -419,10 +422,15 @@ export async function getInboxLatest(owner: string): Promise<DmMessageRow[]> {
 export async function getConversationForEvent(
   owner: string,
   eventId: string,
-): Promise<{ conversation: string; wireKind: number; protocol?: DmProtocol } | null> {
+): Promise<{
+  conversation: string;
+  wireKind: number;
+  protocol?: DmProtocol;
+  fromMe: boolean;
+} | null> {
   const db = await getLocalDb();
   const res = await db.execute(
-    `SELECT conversation, wire_kind, protocol FROM dm_messages
+    `SELECT conversation, wire_kind, protocol, from_me FROM dm_messages
       WHERE owner = ? AND event_id = ? LIMIT 1;`,
     [owner, eventId],
   );
@@ -431,6 +439,7 @@ export async function getConversationForEvent(
   return {
     conversation: String(row.conversation),
     wireKind: Number(row.wire_kind),
+    fromMe: Number(row.from_me) === 1,
     ...(isDmProtocol(row.protocol) ? { protocol: row.protocol } : {}),
   };
 }

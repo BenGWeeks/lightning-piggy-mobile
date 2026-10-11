@@ -30,11 +30,11 @@ name: Boltz reverse swap — amount below minimum surfaces "Minimum is" warning
     clearState: false
 - extendedWaitUntil:
     visible:
-      id: 'tab-home'
+      id: 'tab-wallets'
     timeout: 30000
 
 - tapOn:
-    id: 'tab-home'
+    id: 'tab-wallets'
 - waitForAnimationToEnd:
     timeout: 2000
 

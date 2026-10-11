@@ -14,6 +14,7 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createMarketFilterBarStyles } from '../styles/MarketFilterBar.styles';
 import { vendorSlug } from '../utils/marketVendors';
+import { perfLog } from '../utils/perfLog';
 
 interface Props {
   /** Whether the filter panel is open. */
@@ -154,6 +155,7 @@ const MarketFilterBar: React.FC<Props> = ({
       statusBarTranslucent
       animationType="none"
       onRequestClose={onClose}
+      onShow={() => perfLog('[PerfBlock] market filter panel shown')}
     >
       <Pressable style={styles.backdrop} onPress={onClose} testID="market-filter-backdrop" />
       <Animated.View

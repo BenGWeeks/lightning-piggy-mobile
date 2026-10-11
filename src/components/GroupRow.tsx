@@ -7,6 +7,7 @@ import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import GroupAvatar, { type ContactInfo } from './GroupAvatar';
 import DmProtocolTag from './DmProtocolTag';
 import { formatConversationTimestamp } from '../utils/conversationSummaries';
+import { groupDmProtocol } from '../utils/groupProtocol';
 
 interface Props {
   summary: GroupSummary;
@@ -116,7 +117,7 @@ const GroupRow: React.FC<Props> = ({ summary, onPress, contactInfoMap }) => {
           </Text>
           {/* Tag groups by transport like 1:1 rows (#1139): NIP-17 or Marmot. */}
           <DmProtocolTag
-            protocol={group.protocol ?? 'nip17'}
+            protocol={groupDmProtocol(group)}
             testID={`group-protocol-tag-${group.id}`}
           />
           <Text style={styles.timestamp} numberOfLines={1}>

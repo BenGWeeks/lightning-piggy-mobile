@@ -29,6 +29,8 @@ import type { PollTally } from '../utils/nip88Poll';
 import { marmotBubbleKey } from '../utils/dmProtocol';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { type DeliveryStatus } from '../utils/dmDeliveryStatus';
+import { resendPayloadFor } from '../utils/messageInfo';
+import type { ShowMessageInfoArgs } from '../hooks/useMessageInfoSheet';
 import { extractUrls } from '../utils/extractUrls';
 import { isBlocklisted } from '../services/linkPreviewBlocklist';
 import type { MessageReactionState } from '../utils/reactions';
@@ -132,13 +134,7 @@ interface Props {
   // Tapping a bubble (sent OR received) opens the message-info sheet. The
   // parent builds the MessageInfo from these fields; `resendText` is the raw
   // payload for the sheet's Re-publish (sent text only). (#856)
-  onShowInfo?: (args: {
-    fromMe: boolean;
-    eventId: string;
-    wireKind?: number;
-    deliveryStatus?: DeliveryStatus;
-    resendText: string;
-  }) => void;
+  onShowInfo?: (args: ShowMessageInfoArgs) => void;
   // Long-press handler (#205) — opens the parent's MessageActionsSheet for
   // per-message reactions + zap. Optional; when omitted the long-press is a
   // no-op rather than falling back to system text-select.
@@ -348,11 +344,9 @@ const MessageBubble: React.FC<Props> = ({
   // (#856 follow-up). Plain text only — NIP-04 never carries gift-wrapped media.
   const isNip04 = wireKind === 4;
 
-  // Raw payload to hand the Re-publish action (#856). For text bubbles it's the
-  // message text; for GIF it's the URL (re-sending re-publishes the same GIF).
-  // Other media (image/voice) ride on the `text` kind too, so this covers them.
-  const resendPayload =
-    content.kind === 'text' ? content.text : content.kind === 'gif' ? content.url : '';
+  // Re-publish payload (#856): text or a GIF's URL; '' for cards, media and
+  // replies (see resendPayloadFor).
+  const resendPayload = resendPayloadFor(content, !!quote);
 
   // Opens the message-info sheet — for sent AND received bubbles (#856). The
   // bubble's `id` is prefixed (`dm-<eventId>`); strip it so the sheet shows the
@@ -364,7 +358,7 @@ const MessageBubble: React.FC<Props> = ({
           eventId: deliveryStatus?.eventId ?? id.replace(/^dm-/, ''),
           wireKind,
           deliveryStatus,
-          resendText: resendPayload,
+          ...resendPayload,
         })
     : undefined;
 

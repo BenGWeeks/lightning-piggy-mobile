@@ -22,10 +22,10 @@ name: First Send after a cold start opens on the Scan tab when camera is granted
       camera: allow
 - extendedWaitUntil:
     visible:
-      id: 'tab-home'
+      id: 'tab-wallets'
     timeout: 40000
 - tapOn:
-    id: 'tab-home'
+    id: 'tab-wallets'
 - extendedWaitUntil:
     visible:
       id: 'btn-send'

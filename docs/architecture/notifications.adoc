@@ -422,7 +422,7 @@ hides it (`isWatcherValidation`).
   for a payment you sent, and the alert is suppressed while the app is open —
   which is when in-app payments are made.
 * *Taps:* Messages → the Messages list; Mentions → Notifications; Zaps and
-  Payments → Home (wallet).
+  Payments → Wallets tab.
 * *Duplicates:* a Marmot welcome is a kind-1059 gift wrap, so the watcher
   announces it as "New message" while Transponder may also wake for it. The
   watcher's "New message" is treated as one of the generic message pings:

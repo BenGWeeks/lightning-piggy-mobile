@@ -24,7 +24,7 @@ name: Appearance Sending-Animation Toggle Test
 
 # --- 1. Open drawer → Appearance, establish baseline at "Bubbles" ---
 - tapOn:
-    id: 'tab-home'
+    id: 'tab-wallets'
     optional: true
 - waitForAnimationToEnd:
     timeout: 3000
@@ -86,7 +86,7 @@ name: Appearance Sending-Animation Toggle Test
 - waitForAnimationToEnd:
     timeout: 2000
 - assertVisible:
-    id: 'tab-home'
+    id: 'tab-wallets'
 
 - tapOn:
     id: 'profile-icon'
@@ -117,7 +117,7 @@ name: Appearance Sending-Animation Toggle Test
 - waitForAnimationToEnd:
     timeout: 15000
 - tapOn:
-    id: 'tab-home'
+    id: 'tab-wallets'
     optional: true
 - waitForAnimationToEnd:
     timeout: 3000

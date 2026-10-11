@@ -18,6 +18,8 @@ import Toast from './BrandedToast';
 import FriendPickerSheet, { type PickedFriend } from './FriendPickerSheet';
 import GroupMemberListRow from './GroupMemberListRow';
 import type { GroupMemberRow } from '../utils/groupMemberRows';
+import { useGroupAdminActions } from '../hooks/useGroupAdminActions';
+import { canManageGroup } from '../utils/groupAdmins';
 
 interface Props {
   visible: boolean;
@@ -43,6 +45,8 @@ interface Props {
  *   Remove button per row). Remove confirms via BrandedAlert before
  *   persisting; Follow publishes through the shared `followContact` path
  *   (so Amber / NIP-46 prompts behave as everywhere else).
+ * - Marmot groups: an Admin badge on admins' rows, and for admins a "⋯"
+ *   menu to make / remove admins (`useGroupAdminActions`).
  * - "Add members" footer button → opens `FriendPickerSheet` filtered to
  *   non-members. Selecting one calls `addMembersToGroup` and closes the
  *   picker; the row appears here without remounting the parent screen.
@@ -80,9 +84,17 @@ const GroupMembersSheet: React.FC<Props> = ({
   const group = groupId ? getGroup(groupId) : undefined;
   // NIP-17 groups are editable by anyone; a Marmot group only by its admins
   // (MLS rejects a non-admin's membership commit).
-  const canManage =
-    !group?.protocol ||
-    (!!selfPubkey && (group.adminPubkeys ?? []).includes(selfPubkey.toLowerCase()));
+  const isMarmot = group?.protocol === 'marmot';
+  const adminSet = useMemo(
+    () => new Set((group?.adminPubkeys ?? []).map((p) => p.toLowerCase())),
+    [group?.adminPubkeys],
+  );
+  // Same rule as the header's rename pencil: anyone in NIP-17, admins in Marmot.
+  const canManage = canManageGroup(group, selfPubkey);
+  // Only Marmot groups have admins; 1:1 DMs never reach this sheet, so any
+  // Marmot group here is multi-member. Non-admins see badges, no actions.
+  const { adminPendingPubkey, openAdminActions } = useGroupAdminActions(group);
+  const onAdminActions = isMarmot && canManage ? openAdminActions : undefined;
   const reportFailure = useCallback(
     (e: unknown) => {
       if (__DEV__) console.warn('[Group] membership change failed:', e);
@@ -226,6 +238,9 @@ const GroupMembersSheet: React.FC<Props> = ({
               styles={styles}
               colors={colors}
               canRemove={canManage}
+              isAdmin={isMarmot && adminSet.has(m.pubkey.toLowerCase())}
+              adminActionsDisabled={adminPendingPubkey !== null}
+              onAdminActions={onAdminActions}
               followPending={followPendingPubkey === m.pubkey}
               followDisabled={followPendingPubkey !== null && followPendingPubkey !== m.pubkey}
               onPress={onMemberTap ? handleMemberPress : undefined}

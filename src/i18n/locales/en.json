@@ -11,7 +11,7 @@
     "electrumSaveError": "Electrum settings could not be loaded or saved. Check the hostname and port, then try again."
   },
   "tabs": {
-    "home": "Home",
+    "wallets": "Wallets",
     "messages": "Messages",
     "explore": "Explore",
     "friends": "Friends"
@@ -416,6 +416,8 @@
     "kind4": "Direct message (kind 4)",
     "kind14": "Direct message (kind 14)",
     "kind15": "File message (kind 15)",
+    "marmotChat": "Chat message (kind {{kind}})",
+    "marmotMedia": "Media message (kind {{kind}})",
     "unknown": "Unknown",
     "kindN": "Kind {{kind}}",
     "sendingToRelays": "Sending to {{total}} relays…",
@@ -435,6 +437,8 @@
     "protocol": "Protocol",
     "kind": "Kind",
     "eventId": "Event ID",
+    "rumorId": "Rumor ID",
+    "wrapId": "Gift wrap ID",
     "copyEventIdAccessibility": "Copy event ID",
     "status": "Status",
     "republish": "Re-publish",
@@ -621,7 +625,7 @@
     "leaveGroupMessage": "Remove \"{{name}}\" from this device? Other members will keep the group; you can be re-added if they message you again.",
     "cancel": "Cancel",
     "leave": "Leave",
-    "renameGroup": "Rename group",
+    "renameGroup": "Rename group {{name}}",
     "manageMembers": "Manage members",
     "memberCountOne": "{{count}} member",
     "memberCountOther": "{{count}} members",
@@ -654,7 +658,25 @@
     "followMember": "Follow {{name}}",
     "followingA11y": "You follow {{name}}",
     "followedToast": "You're now following {{name}}",
-    "followFailed": "Couldn't follow {{name}}. Please try again."
+    "followFailed": "Couldn't follow {{name}}. Please try again.",
+    "admin": "Admin",
+    "adminA11y": "{{name}} is an admin",
+    "adminActions": "Admin options for {{name}}",
+    "makeAdmin": "Make admin",
+    "removeAdmin": "Remove as admin",
+    "makeAdminTitle": "Make {{name}} an admin?",
+    "makeAdminMessage": "They'll be able to rename the group and add or remove members.",
+    "removeAdminTitle": "Remove {{name}} as admin?",
+    "removeAdminMessage": "{{name}} will no longer be able to rename the group or manage members.",
+    "removeSelfAdminTitle": "Remove yourself as admin?",
+    "removeSelfAdminMessage": "You'll no longer be able to rename the group or manage members.",
+    "lastAdminTitle": "You're the only admin",
+    "lastAdminMessage": "A group always needs an admin. Make someone else an admin first.",
+    "madeAdminToast": "{{name}} is now an admin",
+    "removedAdminToast": "{{name}} is no longer an admin",
+    "youRemovedAdminToast": "You're no longer an admin",
+    "adminChangeFailedTitle": "Could not change admins",
+    "adminMenuMessage": "Admins can rename the group and add or remove members."
   },
   "groupsScreen": {
     "back": "Back",
@@ -1214,6 +1236,7 @@
     "marmotMessage": "Marmot group event — open the Marmot chat to read it.",
     "marmotInvitePreview": "Marmot chat invite",
     "marmotMessagePreview": "Marmot message",
+    "marmotInviteFailedPreview": "Secure chat invite couldn't be opened",
     "voiceMessagePreview": "Voice message",
     "unsupportedAttachment": "Unsupported attachment: {{name}} ({{type}})",
     "attachmentUnavailable": "Couldn't open attachment: {{name}}",
@@ -2004,7 +2027,7 @@
     "back": "Back",
     "cantOpenTitle": "Sorry — can't open this",
     "message": "Lightning Piggy doesn't support {{entity}} yet. You can open it in a dedicated Nostr client, or head back to the app.",
-    "backToHome": "Back to Home"
+    "backToWallets": "Back to Wallets"
   },
   "voiceRecordingSheet": {
     "waveformAccessibility": "Voice note waveform",
@@ -2231,7 +2254,8 @@
       "goBack": "Go back",
       "buyFrom": "Buy from {{seller}}",
       "buyAccessibility": "Buy {{title}} from {{seller}}",
-      "noFeedback": "Reviews and comments aren't available for this seller yet — they need a Nostr identity to anchor feedback on."
+      "noFeedback": "Reviews and comments aren't available for this seller yet — they need a Nostr identity to anchor feedback on.",
+      "refreshFailed": "Couldn't refresh this product — check your connection and try again."
     },
     "modes": {
       "soon": "Soon",
@@ -2445,6 +2469,7 @@
     "bell": "Notifications",
     "bellUnread": "Notifications, {{count}} unread",
     "markAllRead": "Mark all read",
+    "newCount": "{{count}} new",
     "emptyTitle": "No notifications yet",
     "emptyText": "Messages, payments and Piglet finds you're notified about will show here for 30 days.",
     "kind": {
@@ -2584,6 +2609,12 @@
     "removingBody": "Approve the requests in your signer to finish signing out. This can take a minute.",
     "notRemovedTitle": "Invitation keys not removed",
     "notRemovedBody": "We couldn't remove this account's Marmot invitation keys from relays, so new Marmot invites may still be sent to this phone. We'll try again automatically the next time this account signs in here."
+  },
+  "marmotInviteFailed": {
+    "notice": "{{name}} invited you to a secure chat, but it couldn't be opened. Ask them to invite you again.",
+    "someone": "Someone",
+    "askAgain": "Ask for a new invite",
+    "askDraft": "Hi! Your secure chat invite couldn't be opened on my phone. Could you invite me again?"
   },
   "marmotInvite": {
     "progressTitle": "Inviting devices… {{done}} of {{total}}",

@@ -15,10 +15,10 @@ name: Alerts near Bitcoin shops — toggle, radius preset, quiet hours
 - waitForAnimationToEnd:
     timeout: 10000
 
-# Open the account drawer via the Home tab's avatar header. The drawer
+# Open the account drawer via the Wallets tab's avatar header. The drawer
 # has a `drawer-row-notifications` row that takes us into the screen.
 - tapOn:
-    id: 'tab-home'
+    id: 'tab-wallets'
 - waitForAnimationToEnd:
     timeout: 1500
 

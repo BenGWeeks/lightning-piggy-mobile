@@ -45,7 +45,7 @@ name: WhatsApp-style Attach Panel Swap Test
 
 # --- Setup: sign out (if signed in) and sign in as Big Piggy ---
 - tapOn:
-    id: 'tab-home'
+    id: 'tab-wallets'
     optional: true
 - waitForAnimationToEnd:
     timeout: 3000
@@ -186,7 +186,7 @@ name: WhatsApp-style Attach Panel Swap Test
 
 # --- Teardown: sign out, sign back in as the default user ---
 - tapOn:
-    id: 'tab-home'
+    id: 'tab-wallets'
     optional: true
 - waitForAnimationToEnd:
     timeout: 3000

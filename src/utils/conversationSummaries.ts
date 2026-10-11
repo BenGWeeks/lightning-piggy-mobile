@@ -1,5 +1,5 @@
 import * as nip19 from 'nostr-tools/nip19';
-import { protocolForWireKind, type DmProtocol } from './dmProtocol';
+import { MARMOT_WELCOME_KIND, protocolForWireKind, type DmProtocol } from './dmProtocol';
 import type { WalletState, WalletTransaction } from '../types/wallet';
 import type { NostrContact, NostrProfile } from '../types/nostr';
 import { parsePoll, isPollVoteMessage } from './pollMessage';
@@ -32,6 +32,8 @@ export interface ConversationSummary {
   lastComment: string;
   anonymous: boolean;
   protocol?: DmProtocol;
+  /** The latest entry is a Marmot invite that couldn't be opened (#1269). */
+  marmotInviteFailed?: boolean;
 }
 
 function displayNameFor(
@@ -188,7 +190,7 @@ export interface DmInboxEntry {
 /** Generates the display name shown when we have no kind-0 profile yet.
  * Prefers an npub prefix (what the rest of the app uses when copying a
  * pubkey for users) over raw hex. Returns the pubkey lowercased. */
-function fallbackName(partnerPubkey: string): string {
+export function fallbackName(partnerPubkey: string): string {
   try {
     return nip19.npubEncode(partnerPubkey).slice(0, 12) + '…';
   } catch {
@@ -273,6 +275,8 @@ export function buildDmSummaries(
       lastComment: entry.text,
       anonymous: false,
       protocol,
+      // Only failed invites reach here as kind 444 (see withMarmotInviteRows).
+      ...(entry.wireKind === MARMOT_WELCOME_KIND ? { marmotInviteFailed: true } : {}),
     });
   }
 

@@ -1,4 +1,4 @@
-import { dmThreadId, protocolForWireKind } from '../utils/dmProtocol';
+import { dmThreadId, MARMOT_WELCOME_KIND, protocolForWireKind } from '../utils/dmProtocol';
 import type React from 'react';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
 import {
@@ -11,8 +11,14 @@ import { upsertDmMessages, type DmMessageRow } from '../services/dmDb';
 import { dmRowPreview } from '../utils/dmRowPreview';
 import { notifyDmMessage } from './nostrEventBus';
 import { tryRouteGroupRumor } from './nostrGroupRouting';
-import { fireMessageNotification } from '../services/notificationService';
-import { claimWrapNotification } from '../services/dmWrapNotificationDedupe';
+import { fireMessageNotification, isThreadActivelyViewed } from '../services/notificationService';
+import {
+  claimWrapNotification,
+  markWrapHandled,
+  noteContentlessWrapAlert,
+  retractContentlessWrapAlert,
+  takeContentlessWrapAlert,
+} from '../services/dmWrapNotificationDedupe';
 import { routeMarmotWelcome } from '../services/marmotWelcomeRouter';
 import type { LiveSubFollowGateBuffer } from './liveSubFollowGate';
 
@@ -59,6 +65,34 @@ export function createLiveRumorSurfacer(
 
   return async (rumor: DecodedRumor, wrapId: string): Promise<void> => {
     if (shouldAbort()) return;
+    // A contentless alert the background watch posted for this wrap (remote
+    // signer, #279) is a placeholder — never deleted in the hope another alert
+    // is written:
+    //  - shows nothing (our own sent copy, a stranger, no partner, a group
+    //    rumor we can't place): retracted;
+    //  - a real message we alert for: the real alert is recorded FIRST, then
+    //    the placeholder goes (the watch holds the claim, so it bypasses it);
+    //  - a real message we don't alert for now (not fresh — this sub opened
+    //    after it arrived): kept; its row resolves to the conversation.
+    // Each decided case is also marked handled, so neither the watch nor the
+    // background sync pings for it; an undecided one is left to them.
+    const placeholder = takeContentlessWrapAlert(wrapId);
+    const nothingToSee = () => {
+      markWrapHandled(wrapId);
+      if (placeholder) void retractContentlessWrapAlert(viewerPubkey, wrapId);
+    };
+    const alertReplacing = (threadId: string, fire: () => Promise<string | null>) => {
+      markWrapHandled(wrapId);
+      void Promise.resolve(fire())
+        .then((id) =>
+          // Replaced only if the real alert was written (or the thread is on
+          // screen) — a failed post keeps the placeholder.
+          placeholder && (id || isThreadActivelyViewed(threadId))
+            ? retractContentlessWrapAlert(viewerPubkey, wrapId)
+            : undefined,
+        )
+        .catch(() => undefined);
+    };
 
     // Group-route first — multi-recipient rumors are owned by the
     // group surface, not the 1:1 inbox. tryRouteGroupRumor handles
@@ -71,20 +105,24 @@ export function createLiveRumorSurfacer(
       // tryRouteGroupRumor (which also runs on batch refresh). Only for
       // genuinely-fresh messages (backlog has old timestamps → silent),
       // skip my own, and suppressed when the user is viewing this group.
-      if (routeResult.kind === 'routed' && isFreshArrival(routeResult.message.createdAt)) {
-        const sender = routeResult.message.senderPubkey;
+      const routed = routeResult.kind === 'routed' ? routeResult : null;
+      if (!routed || routed.message.senderPubkey.toLowerCase() === viewerPubkey.toLowerCase()) {
+        nothingToSee(); // our own message, or a group rumor we can't place
+      } else if (isFreshArrival(routed.message.createdAt)) {
         // claimWrapNotification: dedupe vs the background watch (#279).
-        if (sender.toLowerCase() !== viewerPubkey.toLowerCase() && claimWrapNotification(wrapId)) {
-          void fireMessageNotification({
-            owner: viewerPubkey,
-            kind: 'group',
-            threadId: routeResult.group.id,
-            title: routeResult.group.name || 'New group message',
-            body: routeResult.message.text,
-            data: { groupId: routeResult.group.id },
-          });
-        }
-      }
+        if (claimWrapNotification(wrapId) || placeholder)
+          alertReplacing(routed.group.id, () =>
+            fireMessageNotification({
+              owner: viewerPubkey,
+              kind: 'group',
+              threadId: routed.group.id,
+              title: routed.group.name || 'New group message',
+              body: routed.message.text,
+              data: { groupId: routed.group.id },
+            }),
+          );
+        else markWrapHandled(wrapId); // alerted already
+      } // else: a real group message we don't alert for now — keep any placeholder
       if (__DEV__)
         console.log(`[Nostr] live wrap ${wrapId.slice(0, 8)} group-routed (${routeResult.kind})`);
       return;
@@ -92,6 +130,7 @@ export function createLiveRumorSurfacer(
 
     const partnership = partnerFromRumor(rumor, viewerPubkey);
     if (!partnership) {
+      nothingToSee();
       if (__DEV__) console.log(`[Nostr] live wrap ${wrapId.slice(0, 8)} no-partnership`);
       return;
     }
@@ -125,9 +164,16 @@ export function createLiveRumorSurfacer(
             text: deferredText,
             wireKind: rumor.kind,
           },
-          notify: { title: 'New message', body: deferredText },
+          // A Marmot invite stays silent on replay too (#1269).
+          ...(rumor.kind !== MARMOT_WELCOME_KIND
+            ? { notify: { title: 'New message', body: deferredText } }
+            : {}),
         });
       }
+      // Follows known: a stranger — nothing to see. Still hydrating: may be
+      // a friend, so the placeholder stays for the replay to replace.
+      if (partnership.fromMe || followPubkeysRef.current.size > 0) nothingToSee();
+      else if (placeholder) noteContentlessWrapAlert(wrapId);
       return;
     }
 
@@ -181,23 +227,29 @@ export function createLiveRumorSurfacer(
     // OS notification (#279) — only genuinely-fresh inbound (backlog has
     // old rumor timestamps and stays silent), never my own echo;
     // suppressed when the user is viewing this thread. claimWrapNotification
-    // dedupes vs the background watch running in the same JS context.
-    if (!partnership.fromMe && isFreshArrival(rumor.created_at) && claimWrapNotification(wrapId)) {
-      void fireMessageNotification({
-        owner: viewerPubkey,
-        kind: 'dm',
-        threadId: dmThreadId(partnership.partnerPubkey, protocolForWireKind(rumor.kind)),
-        title: 'New message',
-        // Use the already-redacted preview, not raw `rumor.content`: a
-        // structured rumor (order JSON, or an NWC wallet-share bearer
-        // connection string) must never surface its payload in a push body.
-        body: inboxEntry.text,
-        data: {
-          conversationPubkey: partnership.partnerPubkey,
-          conversationProtocol: protocolForWireKind(rumor.kind),
-        },
-      });
-    }
+    // dedupes vs the background watch running in the same JS context. A
+    // Marmot invite stays silent: its NIP-17 row is hidden (#1269).
+    if (partnership.fromMe || rumor.kind === MARMOT_WELCOME_KIND) nothingToSee();
+    else if (isFreshArrival(rumor.created_at)) {
+      if (claimWrapNotification(wrapId) || placeholder)
+        alertReplacing(dmThreadId(partnership.partnerPubkey, protocolForWireKind(rumor.kind)), () =>
+          fireMessageNotification({
+            owner: viewerPubkey,
+            kind: 'dm',
+            threadId: dmThreadId(partnership.partnerPubkey, protocolForWireKind(rumor.kind)),
+            title: 'New message',
+            // Use the already-redacted preview, not raw `rumor.content`: a
+            // structured rumor (order JSON, or an NWC wallet-share bearer
+            // connection string) must never surface its payload in a push body.
+            body: inboxEntry.text,
+            data: {
+              conversationPubkey: partnership.partnerPubkey,
+              conversationProtocol: protocolForWireKind(rumor.kind),
+            },
+          }),
+        );
+      else markWrapHandled(wrapId); // alerted already
+    } // else: a real message we don't alert for now (not fresh) — keep any placeholder
     if (__DEV__)
       console.log(
         `[Nostr] live wrap ${wrapId.slice(0, 8)} surfaced (partner=${partnership.partnerPubkey.slice(0, 8)})`,

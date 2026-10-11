@@ -53,7 +53,7 @@ name: Internal — sign Little Piggy in through the local NIP-46 test bunker
       WAIT: 10
 - extendedWaitUntil:
     visible:
-      id: 'tab-home'
+      id: 'tab-wallets'
     timeout: 45000
 - runFlow: open-drawer.yaml
 # Identity check by npub (derived from the pubkey), not the display name.

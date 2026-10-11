@@ -56,8 +56,20 @@ export const createGroupMembersSheetStyles = (colors: Palette) =>
       height: 40,
       borderRadius: 20,
     },
-    rowName: {
+    rowProfile: {
       flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+    rowNameWrap: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    rowName: {
+      flexShrink: 1,
       fontSize: 15,
       fontWeight: '600',
       color: colors.textHeader,
@@ -65,6 +77,25 @@ export const createGroupMembersSheetStyles = (colors: Palette) =>
     youTag: {
       fontWeight: '400',
       color: colors.textSupplementary,
+    },
+    adminBadge: {
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      borderRadius: 10,
+      backgroundColor: colors.brandPinkLight,
+    },
+    adminBadgeText: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: colors.brandPink,
+    },
+    actionsButton: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      backgroundColor: colors.background,
+      justifyContent: 'center',
+      alignItems: 'center',
     },
     followingMarker: {
       flexDirection: 'row',

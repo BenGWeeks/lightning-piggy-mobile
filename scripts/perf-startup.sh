@@ -75,9 +75,9 @@ EOF
 for t in messages explore friends; do
   write_tab_flow "$t"
 done
-# tab-home is intentionally not measured per tap: Home is the default tab so it mounts during cold-start, its `[Perf] HomeScreen first render` marker fires once at app launch, and tapping the Home tab afterwards (with `freezeOnBlur: true` keeping it mounted) does not trigger a re-render or re-fire the marker. The cold-start time-to-Home is implicitly captured in `time-to-wallet` / `time-to-responsive` already.
+# tab-wallets is intentionally not measured per tap: Home is the default tab so it mounts during cold-start, its `[Perf] HomeScreen first render` marker fires once at app launch, and tapping the Wallets tab afterwards (with `freezeOnBlur: true` keeping it mounted) does not trigger a re-render or re-fire the marker. The cold-start time-to-Home is implicitly captured in `time-to-wallet` / `time-to-responsive` already.
 
-# Warm Maestro before sample 1 — every `maestro test` invocation pays a fresh JVM cold-start (~5–10 s on Linux). Running a no-op flow once at the start "burns" that cost into the warmup phase rather than into sample 1's tab-home column. Subsequent tests reuse the same daemon-cached JVM via Maestro 2.x's daemon mode.
+# Warm Maestro before sample 1 — every `maestro test` invocation pays a fresh JVM cold-start (~5–10 s on Linux). Running a no-op flow once at the start "burns" that cost into the warmup phase rather than into sample 1's tab-wallets column. Subsequent tests reuse the same daemon-cached JVM via Maestro 2.x's daemon mode.
 if ! maestro --version >/dev/null 2>&1; then
   echo "WARN: maestro not on PATH — tab-nav columns will time out" >&2
 else
@@ -126,7 +126,7 @@ wait_for_log() {
 # right before invoking maestro so wait_for_log only matches markers
 # emitted AFTER tap dispatch. The previous shape used the sample-wide
 # since_ts and matched markers that fired during cold-start (before any
-# tap), which was especially wrong for tab-home because Home is the
+# tap), which was especially wrong for tab-wallets because Home is the
 # initial tab and HomeScreen's first-render marker fires during launch.
 tap_and_time() {
   local tab=$1
@@ -179,7 +179,7 @@ run_sample() {
   local responsive_ms
   responsive_ms=$(wait_for_log 'ReactNativeJS.*\[Perf\] (refreshDmInbox|fetchInboxDmEvents)' "$since_ts" "$launch_start")
 
-  # Tab-nav timing always runs — refreshDmInbox doesn't fire on cold-start (it only fires once Messages is opened), so gating tab-nav on time-to-responsive previously left the columns blank. Tabs are independently useful: tab-messages itself fires refreshDmInbox, tab-friends fires the FriendsList marker, and tab-home/tab-explore measure the Maestro round-trip as an upper bound. We give a small fixed settle for the cold-start UI to render before tapping.
+  # Tab-nav timing always runs — refreshDmInbox doesn't fire on cold-start (it only fires once Messages is opened), so gating tab-nav on time-to-responsive previously left the columns blank. Tabs are independently useful: tab-messages itself fires refreshDmInbox, tab-friends fires the FriendsList marker, and tab-wallets/tab-explore measure the Maestro round-trip as an upper bound. We give a small fixed settle for the cold-start UI to render before tapping.
   sleep 1.5
 
   local msgs_ms explore_ms friends_ms

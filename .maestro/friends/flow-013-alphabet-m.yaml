@@ -30,5 +30,5 @@ name: Alphabet Navigation Test
 - tapOn: 'Jump to A'
 - takeScreenshot: 04_after_tap_A
 
-# Return to Home tab
-- tapOn: 'Home tab'
+# Return to Wallets tab
+- tapOn: 'Wallets tab'

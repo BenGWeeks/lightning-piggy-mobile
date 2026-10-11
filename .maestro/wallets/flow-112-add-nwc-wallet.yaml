@@ -9,12 +9,12 @@ name: Add NWC Wallet Test
 # Wait for app to be ready
 - extendedWaitUntil:
     visible:
-      id: 'tab-home'
+      id: 'tab-wallets'
     timeout: 40000
 
 # Ensure we're on Home
 - tapOn:
-    id: 'tab-home'
+    id: 'tab-wallets'
 - waitForAnimationToEnd:
     timeout: 3000
 

@@ -26,7 +26,7 @@ name: Set Big Piggy's profile image via EditProfileSheet
 
 # Open Profile drawer → Profile sub-screen
 - tapOn:
-    id: 'tab-home'
+    id: 'tab-wallets'
     optional: true
 - waitForAnimationToEnd:
     timeout: 3000

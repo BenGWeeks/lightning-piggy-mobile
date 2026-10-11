@@ -5,7 +5,7 @@ name: Boltz reverse swap — fee summary renders for Lightning → on-chain
 # create a real swap. Asserts the parse → getSwapFees → summary text
 # pipeline works end-to-end:
 #
-#   1. Open SendSheet via tab-home → btn-send
+#   1. Open SendSheet via tab-wallets → btn-send
 #   2. Switch to the Input tab + paste a BIP-21 with embedded amount
 #   3. Tap Go → SendSheet decodes the address, hits Boltz's
 #      getReverseSwapFees, renders "Recipient gets N sats" /
@@ -46,11 +46,11 @@ name: Boltz reverse swap — fee summary renders for Lightning → on-chain
     clearState: false
 - extendedWaitUntil:
     visible:
-      id: 'tab-home'
+      id: 'tab-wallets'
     timeout: 30000
 
 - tapOn:
-    id: 'tab-home'
+    id: 'tab-wallets'
 - waitForAnimationToEnd:
     timeout: 2000
 

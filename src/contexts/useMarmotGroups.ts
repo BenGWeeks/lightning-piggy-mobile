@@ -54,6 +54,7 @@ export interface MarmotGroupsApi {
   rename: (groupId: string, name: string) => Promise<boolean>;
   addMembers: (groupId: string, pubkeys: string[]) => Promise<Group | null>;
   removeMember: (groupId: string, pubkey: string) => Promise<Group | null>;
+  setAdmins: (groupId: string, update: (current: string[]) => string[]) => Promise<void>;
   leave: (groupId: string) => Promise<void>;
 }
 
@@ -232,6 +233,8 @@ export function useMarmotGroups(
           shouldSuppress: async () =>
             disposed || (await deletions.isDeleted(group.id, rumor.id, rumor.pubkey)),
           owner: pubkey,
+          // Which push placeholders this message stands for (marmotPushWake).
+          sentAt: rumor.created_at * 1000,
         });
       }
     };
@@ -315,10 +318,15 @@ export function useMarmotGroups(
     },
     [session, current],
   );
+  const setAdmins = useCallback(
+    (groupId: string, update: (current: string[]) => string[]) =>
+      session().setAdmins(groupId, update),
+    [session],
+  );
   const leave = useCallback((groupId: string) => session().leave(groupId), [session]);
 
   return useMemo(
-    () => ({ groups, create, rename, addMembers, removeMember, leave }),
-    [groups, create, rename, addMembers, removeMember, leave],
+    () => ({ groups, create, rename, addMembers, removeMember, setAdmins, leave }),
+    [groups, create, rename, addMembers, removeMember, setAdmins, leave],
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import type React from 'react';
 
 import {
@@ -22,6 +22,13 @@ import { dmRowPreview } from '../utils/dmRowPreview';
 import { notifyDmMessage } from './nostrEventBus';
 
 const FLUSH_MS = 150;
+
+/** Pure: may a Marmot DM from `peer` alert? Only a followed peer — unless the
+ * follow list isn't known yet (empty / absent), which fails open. */
+export function mayNotifyFrom(peer: string, follows: ReadonlySet<string> | undefined): boolean {
+  if (!follows || follows.size === 0) return true;
+  return follows.has(peer.toLowerCase());
+}
 const NOTIFY_SKEW_SEC = 120;
 
 /**
@@ -34,7 +41,12 @@ const NOTIFY_SKEW_SEC = 120;
 export function useMarmotDmInbound(
   pubkey: string | null,
   setDmInbox: React.Dispatch<React.SetStateAction<DmInboxEntry[]>>,
+  /** The follow list: alerts only for peers the Messages list will show. */
+  followPubkeys?: ReadonlySet<string>,
 ): void {
+  // Read per message via a ref, so a contacts update doesn't re-arm the sub.
+  const followsRef = useRef(followPubkeys);
+  followsRef.current = followPubkeys;
   useEffect(() => {
     if (!pubkey) return;
     // Builds before the filter stored push-token / reaction events as rows.
@@ -261,6 +273,10 @@ export function useMarmotDmInbound(
 
     const notifyMessage = (row: DmMessageRow, groupId: string) => {
       if (!row.fromMe && row.createdAt >= openedAtSec - NOTIFY_SKEW_SEC) {
+        // Same follow gate as the NIP-17 live path: the Messages list hides a
+        // stranger's thread, so an alert for it would show nothing (a phantom).
+        // Follows not loaded yet (empty) → fail open rather than lose alerts.
+        if (!mayNotifyFrom(row.conversation, followsRef.current)) return;
         void fireMessageNotification({
           kind: 'dm',
           threadId: dmThreadId(row.conversation, 'marmot'),
@@ -276,6 +292,8 @@ export function useMarmotDmInbound(
           owner: pubkey,
           shouldSuppress: async () =>
             disposed || (await deletions.isDeleted(groupId, row.eventId, row.sender)),
+          // Which push placeholders this message stands for (marmotPushWake).
+          sentAt: row.createdAt * 1000,
         });
       }
     };

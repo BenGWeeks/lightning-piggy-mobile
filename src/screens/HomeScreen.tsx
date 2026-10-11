@@ -14,7 +14,7 @@ import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navig
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';
-import { Home } from 'lucide-react-native';
+import { Wallet } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import WarmTransactionLists from '../components/WarmTransactionLists';
@@ -42,7 +42,7 @@ const ONCHAIN_SWIPE_FRESH_MS = 5 * 60_000;
 const HomeScreen: React.FC = () => {
   const colors = useThemeColors();
   const t = useTranslation();
-  // First-render marker: fires once per mount when the first commit lands. Used by scripts/perf-startup.sh to measure tap-to-render latency for tab-home.
+  // First-render marker: fires once per mount when the first commit lands. Used by scripts/perf-startup.sh to measure tap-to-render latency for tab-wallets.
   const homeRenderLoggedRef = useRef(false);
   useEffect(() => {
     if (homeRenderLoggedRef.current) return;
@@ -331,7 +331,7 @@ const HomeScreen: React.FC = () => {
           // size; section titles (Messages/Friends/Learn) stay bolder to
           // read as section labels.
           titleStyle={{ fontSize: 22, fontWeight: '400' }}
-          icon={<Home size={20} color={colors.brandPink} />}
+          icon={<Wallet size={20} color={colors.brandPink} />}
           rightAccessory={<NotificationBell />}
         />
 

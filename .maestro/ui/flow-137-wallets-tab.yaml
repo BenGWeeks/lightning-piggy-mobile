@@ -1,0 +1,51 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Wallets tab — label, accessibility label and wallet screen
+---
+# #1306: the first bottom tab is "Wallets" (testID `tab-wallets`,
+# accessibility label "Wallets tab", wallet icon) — it used to be "Home".
+# Taps away to Messages and back, then checks the wallet screen returns.
+#
+# Pre-reqs: signed in as a test Piggy with at least one wallet.
+#
+# Run:
+#   maestro --device emulator-5554 test .maestro/ui/flow-137-wallets-tab.yaml
+
+- launchApp:
+    stopApp: false
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# A cold start restores the last screen, which may be a pushed screen
+# without the tab bar — back out until the tab bar shows. On the root
+# screen Back dismisses any open sheet/alert first; if it ever does leave
+# the app, the `launchApp` (no restart) brings it straight back.
+- repeat:
+    while:
+      notVisible:
+        id: 'tab-wallets'
+    times: 3
+    commands:
+      - back
+      - launchApp:
+          stopApp: false
+      - waitForAnimationToEnd:
+          timeout: 3000
+
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- tapOn:
+    id: 'tab-wallets'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- assertVisible:
+    text: 'Wallets tab'
+- assertNotVisible:
+    text: 'Home tab'
+- extendedWaitUntil:
+    visible:
+      id: 'btn-receive'
+    timeout: 15000

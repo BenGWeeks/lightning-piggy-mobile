@@ -25,6 +25,11 @@ import { publishWrapsTrackingRelays } from './nostrDmPublish';
 import type { DmSendResult, OnDeliveryFinalized } from './nostrDmPublish';
 import { LP_CLIENT_TAG } from './nip89ClientTag';
 import { yieldToEventLoop } from '../contexts/nostrDecryptPacing';
+import {
+  __resetVerifiedEventCache,
+  __verifiedEventCacheSize,
+  verifyEventCached,
+} from './nostrVerifyCache';
 
 export type { DmSendResult };
 // Re-exported for back-compat: the canonical home is ./nip89ClientTag.
@@ -52,51 +57,9 @@ export { pool, trackRelays };
 // `fetchProfile` (single) re-runs full `verifyEvent` itself before its
 // `lud16` can feed a payment. Every other kind keeps full `verifyEvent`.
 //
-// Verified-event-id cache (#605 follow-up). The 2026-05-17 CDP profile
-// of the Explore tab freeze showed 25-30 % of the 16 s tab-switch is
-// Schnorr verification on the Hermes JS thread (`mul` / `sqrtMod` /
-// `pow2` / `Maj`). The relay's filter-EOSE replay on every re-subscribe
-// re-emits the same events we already verified on the previous focus,
-// and each one pays the full ~25 ms cost again. Caching the id of
-// every successfully-verified event lets re-subscribes skip the
-// secp256k1 work — same security posture (we only cache an id once
-// the full schnorr check passed), much faster.
-//
-// Bounded at 10 000 entries with O(1) circular-buffer eviction so a
-// long-running session doesn't drift to unlimited memory. 10 000
-// event-ids at 64 bytes each ≈ 640 KB — negligible. The cache is
-// module-scoped so it survives across screen focus / blur / tab
-// switches.
-//
-// Eviction was previously `Array.prototype.shift()` on a 10k-element
-// array — O(n) memmove per call once the cache filled, measurable on
-// the same hot path this cache is meant to speed up (PR #628 Copilot
-// review). Switching to a fixed-size circular buffer keeps both
-// insert + evict at O(1).
-const VERIFIED_CACHE_CAP = 10_000;
-const verifiedEventIds = new Set<string>();
-const verifiedEventOrder = new Array<string | null>(VERIFIED_CACHE_CAP).fill(null);
-let verifiedHead = 0;
-const rememberVerified = (id: string): void => {
-  if (verifiedEventIds.has(id)) return;
-  // Evict the slot we're about to overwrite (null on first cap-1 calls,
-  // then the oldest live id once the buffer wraps). Set.delete on null
-  // is a no-op so we don't need a separate branch for the cold path.
-  const evicted = verifiedEventOrder[verifiedHead];
-  if (evicted !== null) verifiedEventIds.delete(evicted);
-  verifiedEventOrder[verifiedHead] = id;
-  verifiedEventIds.add(id);
-  verifiedHead = (verifiedHead + 1) % VERIFIED_CACHE_CAP;
-};
-// Exposed for tests and for the rare case a downstream code path
-// explicitly wants to invalidate (e.g. trust-graph change that
-// requires re-checking authorship).
-export const __resetVerifiedEventCache = (): void => {
-  verifiedEventIds.clear();
-  verifiedEventOrder.fill(null);
-  verifiedHead = 0;
-};
-export const __verifiedEventCacheSize = (): number => verifiedEventIds.size;
+// Verified-event-id cache: see `./nostrVerifyCache` (shared with services
+// that verify lazily, e.g. the market listings snapshot).
+export { __resetVerifiedEventCache, __verifiedEventCacheSize };
 
 // Non-financial event kinds where a malicious relay can at worst show
 // stale / fake content — there's no LNURL or wallet-relevant data inside
@@ -115,27 +78,15 @@ export const __verifiedEventCacheSize = (): number => verifiedEventIds.size;
 //   The real integrity comes from the seal/rumor layer inside (unwrapped
 //   with our secret key in `unwrapGiftWrap`). Saving ~1–5 ms × N per
 //   cold-start inbox burst. `validateEvent()` (JSON structure) still runs.
-//
 // Other kinds keep the full schnorr — DMs (4 / 14), reactions, zap
 // requests/receipts, comment kinds (1111), found logs (7516), etc.
 const SKIP_VERIFY_KINDS = new Set<number>([37516, 31923, 1059]);
 
 pool.verifyEvent = ((event: NostrEvent): event is VerifiedEvent => {
-  // Skip the schnorr check if we've seen this exact event id pass it
-  // before (this run of the app). Per-event ids are 32-byte SHA-256
-  // hashes of the canonical event encoding — they include every signed
-  // field, so two events with the same id are byte-identical.
-  if (typeof event.id === 'string' && verifiedEventIds.has(event.id)) {
-    return true;
-  }
-  let ok: boolean;
-  if (event.kind === 0 || SKIP_VERIFY_KINDS.has(event.kind)) {
-    ok = validateEvent(event);
-  } else {
-    ok = nostrVerifyEvent(event);
-  }
-  if (ok && typeof event.id === 'string') rememberVerified(event.id);
-  return ok;
+  // Structural check only for the kinds above. Their ids are NOT added to
+  // the verified cache — only a full schnorr pass may vouch for an id.
+  if (event.kind === 0 || SKIP_VERIFY_KINDS.has(event.kind)) return validateEvent(event);
+  return verifyEventCached(event);
 }) as typeof pool.verifyEvent;
 
 // Shared pubkey + read relays of the currently logged-in Nostr user.

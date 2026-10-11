@@ -5,7 +5,9 @@
 import type { Event as NostrEvent } from 'nostr-tools';
 
 import { MarmotWelcomeDeliveryError } from './marmotInvitees';
+import * as pushWake from './marmotPushWake';
 import { MARMOT_CHAT_KIND, MarmotSession, buildMarmotRumor } from './marmotSession';
+import { loadFailedInvites, parseWelcomeOutcome } from './marmotWelcomeOutcomes';
 import {
   RELAY,
   makeInstall,
@@ -73,6 +75,16 @@ describe('MarmotSession multi-device invites (no WebCrypto)', () => {
       expect(joined).toMatchObject({ id: dm.id, isDm: true, memberPubkeys: [big.pubkey] });
       // The other device's copy is then handled, not retried forever.
       expect(await device.session.acceptWelcome(welcomes[1])).toBeNull();
+      // Neither copy shows as a failed invite (#1269). The other copy names
+      // the other device's key package — which that device may already have
+      // rotated away after joining, so it can't always be told apart from an
+      // old key; the shared commit fingerprint with the joined copy hides it.
+      const outcome = async (i: number) =>
+        parseWelcomeOutcome(await device.backend.get('welcomes', welcomes[i].id));
+      const [first, second] = [await outcome(0), await outcome(1)];
+      expect(first?.result).toBe('joined');
+      expect(second?.commit).toBe(first?.commit);
+      expect(await loadFailedInvites(device.backend)).toEqual([]);
     }
 
     // Both devices reply; Big sees one conversation, both attributed to Little.
@@ -84,8 +96,22 @@ describe('MarmotSession multi-device invites (no WebCrypto)', () => {
       kind: MARMOT_CHAT_KIND,
       content: 'tablet',
     });
+    const traffic = jest.spyOn(pushWake, 'noteMarmotGroupTraffic');
     await phone.session.sendRumor(dm.id, fromPhone);
     await waitFor(() => tablet.inbox.some((m) => m.rumor.id === fromPhone.id));
+    // Sent from another device of the SAME account: it arrives authored by our
+    // own pubkey (so the hooks show it as ours and never alert), and still
+    // counts as authenticated traffic — a push wake it caused is covered.
+    expect(tablet.inbox.find((m) => m.rumor.id === fromPhone.id)?.rumor.pubkey).toBe(
+      littleId.pubkey,
+    );
+    // …noted as OUR OWN message: it can settle (retract) a push placeholder
+    // it caused, never stand in for a peer's message.
+    expect(traffic).toHaveBeenCalledWith(
+      littleId.pubkey,
+      expect.objectContaining({ createdAtSec: fromPhone.created_at, fromMe: true, message: true }),
+    );
+    traffic.mockRestore();
     await tablet.session.sendRumor(dm.id, fromTablet);
     await waitFor(() => big.inbox.filter((m) => m.group.id === dm.id).length >= 2);
     const received = big.inbox.filter((m) => m.group.id === dm.id);

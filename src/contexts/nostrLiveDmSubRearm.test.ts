@@ -49,6 +49,10 @@ jest.mock('./nostrEventBus', () => ({ notifyDmMessage: jest.fn() }));
 jest.mock('../services/notificationService', () => ({ fireMessageNotification: jest.fn() }));
 jest.mock('../services/dmWrapNotificationDedupe', () => ({
   claimWrapNotification: jest.fn(() => true),
+  markWrapHandled: jest.fn(),
+  noteLiveDmSubArmed: jest.fn(),
+  takeContentlessWrapAlert: jest.fn(() => false),
+  retractContentlessWrapAlert: jest.fn(),
 }));
 jest.mock('./nostrGroupRouting', () => ({
   tryRouteGroupRumor: jest.fn(async () => ({ kind: 'not-group' })),

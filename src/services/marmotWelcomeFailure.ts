@@ -13,7 +13,7 @@ import { bytesToHex } from '@noble/hashes/utils.js';
 type WelcomeRumor = Parameters<typeof getWelcome>[0];
 
 /** Structurally invalid Welcome rumors — no key package can ever open them. */
-const MALFORMED_WELCOME = /Invalid welcome event|Expected welcome event kind/i;
+export const MALFORMED_WELCOME = /Invalid welcome event|Expected welcome event kind/i;
 
 /**
  * Permanent when the rumor is malformed, or when no key package we still

@@ -13,7 +13,7 @@ name: AmountEntryScreen — shared component regression guard
 
 - extendedWaitUntil:
     visible:
-      id: 'tab-home'
+      id: 'tab-wallets'
     timeout: 20000
 
 # Receive → Custom amount screen

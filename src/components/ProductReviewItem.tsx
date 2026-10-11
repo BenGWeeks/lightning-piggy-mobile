@@ -50,7 +50,11 @@ const ProductReviewItem: React.FC<Props> = ({
         ) : null}
       </View>
     </View>
-    <StarRating value={review.stars} size={14} />
+    <StarRating
+      value={review.stars}
+      size={14}
+      testID={`product-review-stars-${review.id || review.pubkey}`}
+    />
     {review.text.length > 0 ? <Text style={styles.itemText}>{review.text}</Text> : null}
     {isMine && menuOpen ? (
       <FeedbackActionsRow kind="review" onEdit={onEdit} onDelete={() => onDelete(review)} />

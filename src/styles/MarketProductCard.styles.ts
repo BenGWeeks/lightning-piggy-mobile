@@ -43,7 +43,10 @@ export const createMarketProductCardStyles = (colors: Palette) =>
     gridImageWrap: {
       width: '100%',
       aspectRatio: 1,
-      backgroundColor: colors.background,
+      // A visible placeholder tone while the photo loads. `background` matched
+      // the page behind the grid, so a loading tile's image area looked like
+      // an empty gap between products while scrolling.
+      backgroundColor: colors.divider,
       position: 'relative',
     },
     image: {

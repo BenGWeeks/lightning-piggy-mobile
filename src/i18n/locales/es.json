@@ -11,7 +11,7 @@
     "electrumSaveError": "No se pudieron cargar o guardar los ajustes Electrum. Comprueba el servidor y el puerto e inténtalo de nuevo."
   },
   "tabs": {
-    "home": "Inicio",
+    "wallets": "Carteras",
     "messages": "Mensajes",
     "explore": "Explorar",
     "friends": "Amigos"
@@ -416,6 +416,8 @@
     "kind4": "Mensaje directo (tipo 4)",
     "kind14": "Mensaje directo (tipo 14)",
     "kind15": "Mensaje de archivo (tipo 15)",
+    "marmotChat": "Mensaje de chat (tipo {{kind}})",
+    "marmotMedia": "Mensaje multimedia (tipo {{kind}})",
     "unknown": "Desconocido",
     "kindN": "Tipo {{kind}}",
     "sendingToRelays": "Enviando a {{total}} relays…",
@@ -435,6 +437,8 @@
     "protocol": "Protocolo",
     "kind": "Tipo",
     "eventId": "ID del evento",
+    "rumorId": "ID del rumor",
+    "wrapId": "ID del envoltorio",
     "copyEventIdAccessibility": "Copiar ID del evento",
     "status": "Estado",
     "republish": "Volver a publicar",
@@ -621,7 +625,7 @@
     "leaveGroupMessage": "¿Quitar \"{{name}}\" de este dispositivo? Los demás miembros conservarán el grupo; podrán volver a añadirte si te escriben de nuevo.",
     "cancel": "Cancelar",
     "leave": "Salir",
-    "renameGroup": "Renombrar grupo",
+    "renameGroup": "Renombrar el grupo {{name}}",
     "manageMembers": "Gestionar miembros",
     "memberCountOne": "{{count}} miembro",
     "memberCountOther": "{{count}} miembros",
@@ -654,7 +658,25 @@
     "followMember": "Seguir a {{name}}",
     "followingA11y": "Sigues a {{name}}",
     "followedToast": "Ahora sigues a {{name}}",
-    "followFailed": "No se pudo seguir a {{name}}. Inténtalo de nuevo."
+    "followFailed": "No se pudo seguir a {{name}}. Inténtalo de nuevo.",
+    "admin": "Admin",
+    "adminA11y": "{{name}} es administrador",
+    "adminActions": "Opciones de administrador para {{name}}",
+    "makeAdmin": "Hacer administrador",
+    "removeAdmin": "Quitar como administrador",
+    "makeAdminTitle": "¿Hacer administrador a {{name}}?",
+    "makeAdminMessage": "Podrá cambiar el nombre del grupo y añadir o quitar miembros.",
+    "removeAdminTitle": "¿Quitar a {{name}} como administrador?",
+    "removeAdminMessage": "{{name}} ya no podrá cambiar el nombre del grupo ni gestionar a los miembros.",
+    "removeSelfAdminTitle": "¿Dejar de ser administrador?",
+    "removeSelfAdminMessage": "Ya no podrás cambiar el nombre del grupo ni gestionar a los miembros.",
+    "lastAdminTitle": "Eres el único administrador",
+    "lastAdminMessage": "Un grupo siempre necesita un administrador. Primero haz administrador a otra persona.",
+    "madeAdminToast": "{{name}} ahora es administrador",
+    "removedAdminToast": "{{name}} ya no es administrador",
+    "youRemovedAdminToast": "Ya no eres administrador",
+    "adminChangeFailedTitle": "No se pudieron cambiar los administradores",
+    "adminMenuMessage": "Los administradores pueden cambiar el nombre del grupo y añadir o quitar miembros."
   },
   "groupsScreen": {
     "back": "Atrás",
@@ -1214,6 +1236,7 @@
     "marmotMessage": "Evento de grupo de Marmot: abre el chat de Marmot para leerlo.",
     "marmotInvitePreview": "Invitación a chat de Marmot",
     "marmotMessagePreview": "Mensaje de Marmot",
+    "marmotInviteFailedPreview": "No se pudo abrir la invitación al chat seguro",
     "voiceMessagePreview": "Mensaje de voz",
     "unsupportedAttachment": "Adjunto no compatible: {{name}} ({{type}})",
     "attachmentUnavailable": "No se pudo abrir el adjunto: {{name}}",
@@ -2004,7 +2027,7 @@
     "back": "Atrás",
     "cantOpenTitle": "Lo sentimos, no se puede abrir esto",
     "message": "Lightning Piggy aún no admite {{entity}}. Puedes abrirlo en un cliente Nostr dedicado o volver a la aplicación.",
-    "backToHome": "Volver al inicio"
+    "backToWallets": "Volver a Carteras"
   },
   "voiceRecordingSheet": {
     "waveformAccessibility": "Forma de onda de la nota de voz",
@@ -2231,7 +2254,8 @@
       "goBack": "Volver",
       "buyFrom": "Comprar de {{seller}}",
       "buyAccessibility": "Comprar {{title}} de {{seller}}",
-      "noFeedback": "Las reseñas y los comentarios aún no están disponibles para este vendedor: necesita una identidad de Nostr para anclar las opiniones."
+      "noFeedback": "Las reseñas y los comentarios aún no están disponibles para este vendedor: necesita una identidad de Nostr para anclar las opiniones.",
+      "refreshFailed": "No se pudo actualizar este producto: comprueba tu conexión y vuelve a intentarlo."
     },
     "modes": {
       "soon": "Pronto",
@@ -2445,6 +2469,7 @@
     "bell": "Notificaciones",
     "bellUnread": "Notificaciones, {{count}} sin leer",
     "markAllRead": "Marcar todo como leído",
+    "newCount": "{{count}} nuevos",
     "emptyTitle": "Aún no hay notificaciones",
     "emptyText": "Los mensajes, pagos y hallazgos de Piglets de los que te avisemos aparecerán aquí durante 30 días.",
     "kind": {
@@ -2584,6 +2609,12 @@
     "removingBody": "Aprueba las solicitudes en tu firmador para terminar de cerrar sesión. Puede tardar un minuto.",
     "notRemovedTitle": "No se quitaron las claves de invitación",
     "notRemovedBody": "No pudimos quitar de los relés las claves de invitación de Marmot de esta cuenta, así que es posible que sigan llegando invitaciones de Marmot a este teléfono. Lo volveremos a intentar automáticamente la próxima vez que esta cuenta inicie sesión aquí."
+  },
+  "marmotInviteFailed": {
+    "notice": "{{name}} te invitó a un chat seguro, pero no se pudo abrir. Pídele que te invite de nuevo.",
+    "someone": "Alguien",
+    "askAgain": "Pedir una nueva invitación",
+    "askDraft": "¡Hola! No pude abrir tu invitación al chat seguro en mi teléfono. ¿Puedes invitarme de nuevo?"
   },
   "marmotInvite": {
     "progressTitle": "Invitando dispositivos… {{done}} de {{total}}",

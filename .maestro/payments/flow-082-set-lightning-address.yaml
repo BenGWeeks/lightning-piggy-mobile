@@ -9,7 +9,7 @@ name: Set Lightning Address on Wallet
 
 - waitForAnimationToEnd: { timeout: 10000 }
 
-- tapOn: { id: 'tab-home' }
+- tapOn: { id: 'tab-wallets' }
 - waitForAnimationToEnd: { timeout: 3000 }
 
 # Open the active wallet's Settings sheet from the card header icon.
