@@ -58,6 +58,14 @@ export function useListingShippingQuotes(
       })
         .then((options) => {
           if (cancelled) return;
+          // Relays differ in what they hold: if none of the referenced
+          // options came back, ask once more before "contact the seller".
+          const resolved = options.some((o) => refs.some((r) => r.coordinate === o.coordinate));
+          if (!resolved && !autoRetried.current) {
+            autoRetried.current = true;
+            retryTimer = setTimeout(() => setAttempt((a) => a + 1), 1500);
+            return;
+          }
           autoRetried.current = false;
           setState({ status: 'ready', options });
         })
@@ -75,7 +83,7 @@ export function useListingShippingQuotes(
         cancelled = true;
         controller.abort();
       };
-    }, [merchant, refs.length, readKey, attempt]),
+    }, [merchant, refs, readKey, attempt]),
   );
 
   const quotes = useMemo(
