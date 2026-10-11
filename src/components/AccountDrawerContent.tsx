@@ -57,12 +57,6 @@ const buildSectionRows = (colors: Palette, t: ReturnType<typeof useTranslation>)
     testID: 'drawer-row-wallets',
   },
   {
-    name: 'AccountAdvanced',
-    label: t('advancedScreen.title'),
-    icon: <Settings size={22} color={colors.textBody} />,
-    testID: 'drawer-row-advanced',
-  },
-  {
     name: 'AccountMessages',
     label: t('messageSettingsScreen.title'),
     icon: <MessageCircle size={22} color={colors.textBody} />,
@@ -85,6 +79,12 @@ const buildSectionRows = (colors: Palette, t: ReturnType<typeof useTranslation>)
     label: t('accountDrawerContent.security'),
     icon: <ShieldCheck size={22} color={colors.textBody} />,
     testID: 'drawer-row-security',
+  },
+  {
+    name: 'AccountAdvanced',
+    label: t('advancedScreen.title'),
+    icon: <Settings size={22} color={colors.textBody} />,
+    testID: 'drawer-row-advanced',
   },
   {
     name: 'AccountAbout',
