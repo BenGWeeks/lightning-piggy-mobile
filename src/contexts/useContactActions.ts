@@ -1,4 +1,4 @@
-import { useCallback, startTransition, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useRef, startTransition, type Dispatch, type SetStateAction } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import * as nip19 from 'nostr-tools/nip19';
@@ -8,7 +8,12 @@ import { nip46Sign } from './nip46DmDecrypt';
 import { NSEC_KEY } from './nostrAuthKeys';
 import { perAccountKey } from '../services/perAccountStorage';
 import { CONTACTS_CACHE_KEY_BASE, CONTACTS_TIMESTAMP_KEY_BASE } from './nostrCacheKeys';
-import { prepareContactListUpdate, type ContactChange } from '../services/contactListSync';
+import {
+  contactsFromEvent,
+  prepareContactListUpdate,
+  type ContactChange,
+  type ContactListBase,
+} from '../services/contactListSync';
 import { Toast } from '../components/BrandedToast';
 import { t } from '../i18n';
 import type { NostrContact, RelayConfig, SignerType } from '../types/nostr';
@@ -130,38 +135,63 @@ export function useContactActions({
     [pubkey, isLoggedIn, signerType, relays],
   );
 
+  // Writes are serialised: each one fetches the newest list, so two
+  // overlapping follows would otherwise both build on the same base and the
+  // second publish would drop the first. The last event this session
+  // published is remembered too, in case relays still serve the older copy.
+  const writeQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const lastPublished = useRef<Map<string, ContactListBase>>(new Map());
+
   // Fetch-merge-publish one follow/unfollow, then mirror the result into
-  // state + the per-account cache (#288). Returns the new list, or null when
-  // nothing was published (no kind-3 to build on, or the signer declined).
+  // state + the per-account cache (#288). Resolves to true when the follow
+  // list now reflects the change, false when nothing was published (no
+  // verified kind-3 to build on, or the signer declined).
   const updateContactList = useCallback(
-    async (change: ContactChange): Promise<NostrContact[] | null> => {
-      if (!pubkey || !isLoggedIn) return null;
-      const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
-      const update = await prepareContactListUpdate({
-        pubkey,
-        relays: [...getReadRelays(), ...writeRelays, ...nostrService.DEFAULT_RELAYS],
-        localContacts: contacts,
-        change,
-      });
-      if (!update) {
-        // Couldn't reach a relay copy and the local one is empty: publishing
-        // now could replace the user's real follow list with one entry.
-        Toast.show({ type: 'error', text1: t('followList.unavailable') });
-        return null;
-      }
-      if (update.changed && !(await publishContactList(update.event))) return null;
-      startTransition(() => setContacts(update.contacts));
-      // Bumps the *contacts* timestamp (the freshness clock for kind-3 list
-      // reads), not the profiles one (#442).
-      AsyncStorage.setItem(
-        perAccountKey(CONTACTS_CACHE_KEY_BASE, pubkey),
-        JSON.stringify(update.contacts),
-      ).catch(() => {});
-      AsyncStorage.setItem(
-        perAccountKey(CONTACTS_TIMESTAMP_KEY_BASE, pubkey),
-        Date.now().toString(),
-      ).catch(() => {});
-      return update.contacts;
+    (change: ContactChange): Promise<boolean> => {
+      const run = async (): Promise<boolean> => {
+        if (!pubkey || !isLoggedIn) return false;
+        const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
+        const update = await prepareContactListUpdate({
+          pubkey,
+          relays: [...getReadRelays(), ...writeRelays, ...nostrService.DEFAULT_RELAYS],
+          localContacts: contacts,
+          change,
+          lastPublished: lastPublished.current.get(pubkey),
+        });
+        if (!update) {
+          // No verified relay copy to build on: publishing from the local
+          // list could replace the user's real follow list (#1271).
+          Toast.show({ type: 'error', text1: t('followList.unavailable') });
+          return false;
+        }
+        if (update.changed) {
+          if (!(await publishContactList(update.event))) return false;
+          lastPublished.current.set(pubkey, {
+            tags: update.event.tags,
+            content: update.event.content,
+            createdAt: update.event.created_at,
+          });
+        }
+        const cKey = perAccountKey(CONTACTS_CACHE_KEY_BASE, pubkey);
+        startTransition(() =>
+          setContacts((prev) => {
+            // Rebuild from the published tags, keeping profiles already in state.
+            const next = contactsFromEvent(update.event.tags, prev);
+            AsyncStorage.setItem(cKey, JSON.stringify(next)).catch(() => {});
+            return next;
+          }),
+        );
+        // Bumps the *contacts* timestamp (the freshness clock for kind-3 list
+        // reads), not the profiles one (#442).
+        AsyncStorage.setItem(
+          perAccountKey(CONTACTS_TIMESTAMP_KEY_BASE, pubkey),
+          Date.now().toString(),
+        ).catch(() => {});
+        return true;
+      };
+      const next = writeQueue.current.then(run, run);
+      writeQueue.current = next.catch(() => {});
+      return next;
     },
     [pubkey, isLoggedIn, relays, getReadRelays, contacts, publishContactList, setContacts],
   );
@@ -169,8 +199,7 @@ export function useContactActions({
   const followContact = useCallback(
     async (contactPubkey: string): Promise<boolean> => {
       if (contacts.some((c) => c.pubkey === contactPubkey)) return true; // already following
-      const updated = await updateContactList({ type: 'follow', pubkey: contactPubkey });
-      if (!updated) return false;
+      if (!(await updateContactList({ type: 'follow', pubkey: contactPubkey }))) return false;
       // Fetch the new contact's profile so the row gets a name + avatar.
       const profileData = await nostrService.fetchProfile(contactPubkey, getReadRelays());
       if (profileData) {
@@ -191,8 +220,8 @@ export function useContactActions({
   );
 
   const unfollowContact = useCallback(
-    async (contactPubkey: string): Promise<boolean> =>
-      (await updateContactList({ type: 'unfollow', pubkey: contactPubkey })) !== null,
+    (contactPubkey: string): Promise<boolean> =>
+      updateContactList({ type: 'unfollow', pubkey: contactPubkey }),
     [updateContactList],
   );
 

@@ -104,6 +104,35 @@ describe('useContactActions follow path (#1271)', () => {
     expect(nostrService.signAndPublishEvent).not.toHaveBeenCalled();
   });
 
+  it('does not publish when the fetch fails, even with a non-empty local list', async () => {
+    mockFetch.mockResolvedValue({ status: 'failed' });
+    const local: NostrContact = { pubkey: BIG, relay: null, petname: null, profile: null };
+    const { result } = setup([local]);
+    let ok = true;
+    await act(async () => {
+      ok = await result.current.followContact(NEW);
+    });
+    expect(ok).toBe(false);
+    expect(nostrService.signAndPublishEvent).not.toHaveBeenCalled();
+  });
+
+  it('serialises overlapping follows so the second keeps the first', async () => {
+    const OTHER = 'e'.repeat(64);
+    // Relays keep serving the pre-follow list (lag after our first publish).
+    mockFetch.mockResolvedValue({
+      status: 'found',
+      base: { tags: [['p', BIG]], content: '', createdAt: 10 },
+    });
+    const { result } = setup([]);
+    await act(async () => {
+      await Promise.all([result.current.followContact(NEW), result.current.followContact(OTHER)]);
+    });
+    const calls = (nostrService.signAndPublishEvent as jest.Mock).mock.calls;
+    expect(calls).toHaveLength(2);
+    const last = calls[1][0].tags.filter((t: string[]) => t[0] === 'p').map((t: string[]) => t[1]);
+    expect(last).toEqual([BIG, NEW, OTHER]);
+  });
+
   it('unfollow removes only that person from the relay list', async () => {
     mockFetch.mockResolvedValue({
       status: 'found',

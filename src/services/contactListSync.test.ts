@@ -63,6 +63,17 @@ describe('prepareContactListUpdate (#1271)', () => {
     expect(update).toBeNull();
   });
 
+  it('refuses when the fetch fails even if the local list has entries (it may be stale)', async () => {
+    const update = await prepareContactListUpdate({
+      pubkey: 'a'.repeat(64),
+      relays: ['wss://r'],
+      localContacts: [contact(BIG)],
+      change: { type: 'follow', pubkey: NEW },
+      fetchLatest: async () => ({ status: 'failed' }),
+    });
+    expect(update).toBeNull();
+  });
+
   it('reports no change when the relay list already follows them (no signer prompt)', async () => {
     const update = await prepareContactListUpdate({
       pubkey: 'a'.repeat(64),
@@ -89,24 +100,23 @@ describe('prepareContactListUpdate (#1271)', () => {
 });
 
 describe('resolveContactListBase', () => {
-  it('refuses when relays report no kind-3 and the local list is empty (EOSE is not proof)', () => {
-    expect(resolveContactListBase({ status: 'none' }, [])).toBeNull();
+  it('refuses when relays report no kind-3 (EOSE is not proof there is none)', () => {
+    expect(resolveContactListBase({ status: 'none' })).toBeNull();
   });
 
-  it('builds on a non-empty local list when relays report no kind-3', () => {
-    expect(resolveContactListBase({ status: 'none' }, [contact(BIG)])?.tags).toEqual([
-      ['p', BIG, '', ''],
-    ]);
+  it('refuses when the fetch fails, even with a list published earlier this session', () => {
+    expect(resolveContactListBase({ status: 'failed' }, relayBase)).toBeNull();
   });
 
-  it('falls back to a non-empty local list when relays fail', () => {
-    expect(resolveContactListBase({ status: 'failed' }, [contact(BIG)])?.tags).toEqual([
-      ['p', BIG, '', ''],
-    ]);
+  it('uses the relay list', () => {
+    expect(resolveContactListBase(found())).toBe(relayBase);
   });
 
-  it('prefers the relay list over a stale local list', () => {
-    expect(resolveContactListBase(found(), [contact(NEW)])).toBe(relayBase);
+  it('prefers the list this session just published when relays still serve an older one', () => {
+    const published = { ...relayBase, createdAt: relayBase.createdAt + 5 };
+    expect(resolveContactListBase(found(), published)).toBe(published);
+    const older = { ...relayBase, createdAt: relayBase.createdAt - 5 };
+    expect(resolveContactListBase(found(), older)).toBe(relayBase);
   });
 });
 
@@ -176,13 +186,43 @@ describe('fetchLatestContactList', () => {
     expect(res.status === 'found' && pTags(res.base.tags)).toEqual([BIG, LITTLE]);
   });
 
-  it('uses the first verified kind-3 after a short grace when a relay never answers', async () => {
+  it('does not stop at the first copy: a newer one from a slower relay still wins', async () => {
+    const older = kind3(100, [BIG]);
+    const newer = kind3(200, [BIG, LITTLE]);
+    mockRelays((h) => {
+      h.onevent(older);
+      setTimeout(() => {
+        h.onevent(newer);
+        h.oneose();
+      }, 50);
+    });
+    const res = await fetchLatestContactList(me, ['wss://fast', 'wss://slow'], 2000);
+    expect(res.status === 'found' && pTags(res.base.tags)).toEqual([BIG, LITTLE]);
+  });
+
+  it('breaks created_at ties by the lowest event id, whatever the arrival order', async () => {
+    const a = kind3(300, [BIG]);
+    const b = kind3(300, [LITTLE]);
+    const [low, high] = a.id < b.id ? [a, b] : [b, a];
+    for (const order of [
+      [low, high],
+      [high, low],
+    ]) {
+      mockRelays((h) => {
+        order.forEach((e) => h.onevent(e));
+        h.oneose();
+      });
+      const res = await fetchLatestContactList(me, ['wss://a'], 1000);
+      expect(res.status === 'found' && pTags(res.base.tags)).toEqual(pTags(low.tags));
+      jest.restoreAllMocks();
+    }
+  });
+
+  it('returns the found copy when the overall timeout hits before EOSE', async () => {
     const list = kind3(200, [BIG, LITTLE]);
-    mockRelays((h) => h.onevent(list)); // no EOSE: one relay hangs
-    const started = Date.now();
-    const res = await fetchLatestContactList(me, ['wss://a', 'wss://hung'], 5000, 30);
+    mockRelays((h) => h.onevent(list)); // never EOSEs
+    const res = await fetchLatestContactList(me, ['wss://a'], 40);
     expect(res.status).toBe('found');
-    expect(Date.now() - started).toBeLessThan(1000);
   });
 
   it("reports 'none' when relays answer with no kind-3", async () => {

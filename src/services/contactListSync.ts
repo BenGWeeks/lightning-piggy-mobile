@@ -23,7 +23,7 @@ export interface ContactListBase {
   tags: string[][];
   /** Legacy relay-map JSON some clients keep in kind-3 `content`; preserved verbatim. */
   content: string;
-  /** `created_at` of the event this came from (0 for a local-only base). */
+  /** `created_at` of the event this came from. */
   createdAt: number;
 }
 
@@ -43,19 +43,29 @@ export type ContactChange =
   | { type: 'follow'; pubkey: string; relay?: string | null; petname?: string | null }
   | { type: 'unfollow'; pubkey: string };
 
-// Generous: on a busy device the JS thread can sit on relay replies for
-// seconds (measured: nothing processed within 5 s on a loaded emulator). A
-// timeout with no event refuses the write, so too tight a bound blocks follows.
+// Hard cap on the whole fetch. Generous: on a busy device the JS thread can
+// sit on relay replies for seconds (measured: nothing processed within 5 s on
+// a loaded emulator), and a fetch that finds nothing refuses the write.
 export const CONTACT_LIST_FETCH_TIMEOUT_MS = 10000;
-// After the first verified kind-3, how long to wait for a newer copy from a
-// slower relay before using it, so one hung relay can't hold a follow for the
-// full timeout.
-export const CONTACT_LIST_NEWER_GRACE_MS = 1500;
+// Per-relay window handed to nostr-tools as `maxWait`: a relay that hasn't
+// sent EOSE by then is treated as done (nostr-tools' eoseTimeout), and one
+// that can't connect fails at ~5 s. So a dead relay can't hold every follow
+// for the full cap, while a live relay that's merely slow (< 6 s) still gets
+// heard. We never stop early on the first event: an older copy can arrive
+// before the newest one.
+export const CONTACT_LIST_RELAY_WINDOW_MS = 6000;
+
+/** Replaceable-event order: newer `created_at` wins; on a tie, the lowest id. */
+function isNewerKind3(candidate: NostrEvent, current: NostrEvent | null): boolean {
+  if (!current) return true;
+  if (candidate.created_at !== current.created_at) return candidate.created_at > current.created_at;
+  return candidate.id < current.id;
+}
 
 /**
- * Fetch the user's newest kind-3, bounded by `limit: 1` per relay and a
- * timeout (finishing early on aggregate EOSE, or `graceMs` after the first
- * verified event). Only events that are authored by `pubkey` AND pass a full schnorr
+ * Fetch the user's newest kind-3, bounded by `limit: 1` per relay, the
+ * per-relay window and the overall timeout (finishing early on aggregate
+ * EOSE). Only events that are authored by `pubkey` AND pass a full schnorr
  * check count. A forged list from a hostile relay would otherwise be signed
  * and republished as the user's own.
  */
@@ -63,7 +73,7 @@ export function fetchLatestContactList(
   pubkey: string,
   relays: string[],
   timeoutMs: number = CONTACT_LIST_FETCH_TIMEOUT_MS,
-  graceMs: number = CONTACT_LIST_NEWER_GRACE_MS,
+  relayWindowMs: number = CONTACT_LIST_RELAY_WINDOW_MS,
 ): Promise<ContactListFetchResult> {
   const author = pubkey.toLowerCase();
   const urls = [...new Set(relays)];
@@ -76,12 +86,10 @@ export function fetchLatestContactList(
     const startedAt = Date.now();
     let settled = false;
     let sub: { close: () => void } | null = null;
-    let graceTimer: ReturnType<typeof setTimeout> | null = null;
     const finish = (outcome: 'eose' | 'failed') => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      if (graceTimer) clearTimeout(graceTimer);
       if (__DEV__) {
         console.log(
           `[ContactList] kind-3 fetch ${best ? 'found' : outcome} after ${Date.now() - startedAt}ms ` +
@@ -105,14 +113,13 @@ export function fetchLatestContactList(
     const timer = setTimeout(() => finish('failed'), timeoutMs);
     try {
       sub = pool.subscribeMany(urls, { kinds: [3], authors: [author], limit: 1 } as Filter, {
-        maxWait: timeoutMs + 1000,
+        maxWait: Math.min(relayWindowMs, timeoutMs),
         onevent(event: NostrEvent) {
           seen++;
           if (event.kind !== 3 || event.pubkey.toLowerCase() !== author) return;
-          if (best && event.created_at <= best.created_at) return;
+          if (!isNewerKind3(event, best)) return;
           if (!verifyEvent(event)) return;
           best = event;
-          graceTimer ??= setTimeout(() => finish('eose'), graceMs);
         },
         oneose() {
           // nostr-tools emits aggregate EOSE right before aggregate close when
@@ -138,31 +145,24 @@ export function fetchLatestContactList(
   });
 }
 
-/** A base built from the app's local list, used only when relays hold no kind-3 or can't be reached. */
-export function localContactListBase(contacts: readonly NostrContact[]): ContactListBase {
-  return {
-    tags: contacts.map((c) => ['p', c.pubkey, c.relay || '', c.petname || '']),
-    content: '',
-    createdAt: 0,
-  };
-}
-
 /**
- * Pick what a follow/unfollow is applied to, or `null` to refuse publishing:
- * - relays returned a kind-3 → that (the local copy may be stale or unloaded);
- * - otherwise the local list, but only if it has entries. An empty local
- *   copy with nothing fetched is indistinguishable from "never loaded", and
- *   publishing it would replace the user's real list (#1271). This holds even
- *   for `none`: an aggregate EOSE can come from relays that timed out or
- *   failed, so it can't prove the user has no list. (Cost: a brand-new
- *   account with no kind-3 anywhere can't make its first follow here.)
+ * Pick what a follow/unfollow is applied to, or `null` to refuse publishing.
+ * Only a complete, verified kind-3 qualifies: the relays' newest, or the one
+ * this session last published if that's newer (relays can lag right after a
+ * write). The app's local `contacts` is never a base (#1271): it may never
+ * have loaded, and even a non-empty copy can be up to a day stale (a follow
+ * made in another client would be deleted). `none` doesn't help either: an
+ * aggregate EOSE can come from relays that timed out or failed, so it can't
+ * prove the user has no list. (Cost: an account with no kind-3 anywhere can't
+ * make its first follow here.)
  */
 export function resolveContactListBase(
   fetched: ContactListFetchResult,
-  localContacts: readonly NostrContact[],
+  lastPublished?: ContactListBase | null,
 ): ContactListBase | null {
-  if (fetched.status === 'found') return fetched.base;
-  return localContacts.length > 0 ? localContactListBase(localContacts) : null;
+  if (fetched.status !== 'found') return null;
+  if (lastPublished && lastPublished.createdAt > fetched.base.createdAt) return lastPublished;
+  return fetched.base;
 }
 
 const isClientTag = (tag: string[]) => tag[0] === 'client';
@@ -223,12 +223,16 @@ export async function prepareContactListUpdate({
   relays,
   localContacts,
   change,
+  lastPublished,
   fetchLatest = fetchLatestContactList,
 }: {
   pubkey: string;
   relays: string[];
+  /** Only used to carry already-loaded profiles onto the rebuilt list. */
   localContacts: readonly NostrContact[];
   change: ContactChange;
+  /** The kind-3 this session last published for `pubkey`, if any. */
+  lastPublished?: ContactListBase | null;
   fetchLatest?: typeof fetchLatestContactList;
 }): Promise<{
   event: { kind: 3; created_at: number; tags: string[][]; content: string };
@@ -236,7 +240,7 @@ export async function prepareContactListUpdate({
   changed: boolean;
 } | null> {
   const fetched = await fetchLatest(pubkey, relays);
-  const base = resolveContactListBase(fetched, localContacts);
+  const base = resolveContactListBase(fetched, lastPublished);
   if (!base) return null;
   const event = applyContactChange(base, change);
   const before = followSet(base.tags);
