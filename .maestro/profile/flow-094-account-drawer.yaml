@@ -6,7 +6,7 @@ name: Account Drawer Test
 #   2. The drawer shows the version footer.
 #   3. Each section row navigates to its screen and the back button
 #      returns to the tabs.
-#   4. Triple-tapping the About version toggles secret mode.
+#   4. Secret Mode is visible in Advanced and requires confirmation to enable.
 # Run: maestro test .maestro/profile/flow-094-account-drawer.yaml
 
 - waitForAnimationToEnd:
@@ -37,6 +37,11 @@ name: Account Drawer Test
 - waitForAnimationToEnd:
     timeout: 3000
 - assertVisible: 'Wallets'
+- scrollUntilVisible:
+    element:
+      id: 'account-back-button'
+    direction: UP
+    timeout: 15000
 - tapOn:
     id: 'account-back-button'
 - waitForAnimationToEnd:
@@ -60,6 +65,11 @@ name: Account Drawer Test
     timeout: 3000
 - assertVisible:
     id: 'currency-search'
+- scrollUntilVisible:
+    element:
+      id: 'account-back-button'
+    direction: UP
+    timeout: 15000
 - tapOn:
     id: 'account-back-button'
 - waitForAnimationToEnd:
@@ -79,54 +89,70 @@ name: Account Drawer Test
     timeout: 3000
 - assertVisible:
     id: 'display-language-currency-row'
+- scrollUntilVisible:
+    element:
+      id: 'account-back-button'
+    direction: UP
+    timeout: 15000
 - tapOn:
     id: 'account-back-button'
 - waitForAnimationToEnd:
     timeout: 3000
 
-# --- 4. Navigate to About and toggle dev mode by triple-tapping version ---
+# --- 4. Advanced: verify confirmation, cancellation and state restoration ---
 - tapOn:
     id: 'profile-icon'
-- waitForAnimationToEnd:
-    timeout: 2000
 - tapOn:
-    id: 'drawer-row-about'
-- waitForAnimationToEnd:
-    timeout: 3000
-- assertVisible:
-    id: 'version-text'
-- tapOn:
-    id: 'version-text'
-- tapOn:
-    id: 'version-text'
-- tapOn:
-    id: 'version-text'
-- extendedWaitUntil:
-    visible:
-      text: 'Secret Mode.*'
-    timeout: 3000
-- tapOn:
-    text: 'OK'
-    optional: true
-- waitForAnimationToEnd:
-    timeout: 2000
+    id: 'drawer-row-advanced'
+- scrollUntilVisible:
+    element:
+      id: 'advanced-secret-mode-toggle'
+    direction: DOWN
+    timeout: 15000
+# An initially enabled switch stays enabled. When off, verify cancel first,
+# then enable and disable it so this flow leaves the preference unchanged.
+- runFlow:
+    when:
+      visible:
+        id: 'advanced-secret-mode-toggle'
+        checked: false
+    commands:
+      - tapOn:
+          id: 'advanced-secret-mode-toggle'
+      - tapOn:
+          id: 'branded-alert-button-0'
+      - assertVisible:
+          id: 'advanced-secret-mode-toggle'
+          checked: false
+      - tapOn:
+          id: 'advanced-secret-mode-toggle'
+      - tapOn:
+          id: 'branded-alert-button-1'
+      - assertVisible:
+          id: 'advanced-secret-mode-toggle'
+          checked: true
+      - tapOn:
+          id: 'advanced-secret-mode-toggle'
+      - assertVisible:
+          id: 'advanced-secret-mode-toggle'
+          checked: false
 
-# Toggle dev mode back off so we leave global state unchanged.
-- tapOn:
-    id: 'version-text'
-- tapOn:
-    id: 'version-text'
-- tapOn:
-    id: 'version-text'
-- extendedWaitUntil:
-    visible:
-      text: 'Secret Mode.*'
-    timeout: 3000
-- tapOn:
-    text: 'OK'
-    optional: true
+# The phone-wide settings (Bitcoin network, notification server) sit under
+# "On this phone", below the account half.
+- scrollUntilVisible:
+    element:
+      id: 'notification-server-section'
+    direction: DOWN
+    timeout: 15000
+- assertVisible:
+    id: 'advanced-bitcoin-network'
 
 # --- 5. Back to Home ---
+- scrollUntilVisible:
+    element:
+      id: 'account-back-button'
+    direction: UP
+    timeout: 15000
 - tapOn:
     id: 'account-back-button'
 - waitForAnimationToEnd:

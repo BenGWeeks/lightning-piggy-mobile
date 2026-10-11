@@ -1463,7 +1463,7 @@
     "savedMyKey": "I've Saved My Key"
   },
   "nostrScreen": {
-    "title": "Nostr",
+    "title": "Nostr network",
     "connected": "Connected",
     "disconnected": "Disconnected",
     "removeRelayLabel": "Remove relay {{url}}",
@@ -1476,15 +1476,13 @@
     "amberPermissionTitle": "Amber permission",
     "couldNotGrantPermission": "Could not grant NIP-44 permission.",
     "grantAmberPermissionLabel": "Grant Amber NIP-44 permission",
-    "grantPermissionInAmber": "Grant permission in Amber",
+    "grantPermissionInAmber": "Let Amber unlock your messages",
     "noProfilePubkey": "No profile pubkey — log in first.",
     "amberRoundTripMismatch": "Amber round-trip mismatch — permission may not be set.",
-    "experimental": "Experimental",
-    "nativeCryptoHint": "Runs NIP-44 encryption and signature checks through the native rust-nostr module instead of JavaScript. Tester feature — watch the [PerfBlock] nostrCrypto logs and turn it off if anything misbehaves.",
-    "nativeCryptoLabel": "Native crypto (rust-nostr)",
+    "nativeCryptoHint": "Uses your phone's own built-in code, instead of the app's, to encrypt messages and check signatures. This can be faster. Still being tested: turn it off if messages stop sending or loading.",
+    "nativeCryptoLabel": "Faster encryption (beta)",
     "nativeCryptoRestartCaption": "Restart the app to apply.",
     "nativeCryptoUnavailable": "Unavailable on this device",
-    "nativeCryptoA11y": "Enable native crypto",
     "nativeCryptoActiveYes": "Active this session: yes",
     "nativeCryptoActiveNo": "Active this session: no",
     "notInUse": "Not in use right now",
@@ -1499,16 +1497,16 @@
     "bannerText": "You're offline — some data may be stale"
   },
   "onChainScreen": {
-    "title": "On-chain",
+    "title": "Bitcoin network",
     "electrumServer": "Electrum Server",
     "electrumServerA11y": "Electrum server",
     "useSsl": "Use SSL",
     "hint": "On-chain wallets use this Electrum server to read balances and broadcast transactions. Point this at your own server if you don't want to leak addresses to a public one.",
-    "defaultWalletTitle": "Default on-chain wallet",
-    "defaultWalletEmpty": "No on-chain wallets yet. Add one via Wallets to set a default destination for Boltz refunds and future on-chain receive flows.",
+    "defaultWalletTitle": "Default wallet for refunds",
+    "defaultWalletEmpty": "No on-chain wallets yet. Add one to choose where refunds from failed swaps go.",
     "defaultWalletRowA11y": "Set {{wallet}} as default on-chain wallet",
     "walletFallback": "wallet",
-    "defaultWalletHint": "Used as the refund destination for failed Boltz on-chain → Lightning swaps and as the default destination for any future on-chain receive flows. Tap an active row to clear the choice and fall back to the first wallet."
+    "defaultWalletHint": "If a swap between on-chain and Lightning fails, the refund goes to this wallet. Tap the selected wallet to clear it and use your first on-chain wallet instead."
   },
   "orderPaymentActions": {
     "paymentReceivedA11y": "Payment received",
@@ -1743,7 +1741,6 @@
     "title": "Security",
     "confirmLargeSends": "Confirm large sends",
     "confirmLargeSendsHint": "Show an \"Are you sure?\" prompt before dispatching a Lightning payment or moving funds between wallets at or above this many sats. Smaller sends stay one-tap. Default: 10,000 sats.",
-    "perAccountHint": "For this account only. Other accounts on this phone keep their own setting.",
     "thresholdSaveFailed": "Couldn't save that setting. Please try again.",
     "custom": "Custom",
     "customPlaceholder": "e.g. 25000",
@@ -2518,5 +2515,42 @@
     "title": "Display & language",
     "change": "Change",
     "currencyRowA11y": "Currency: {{code}} {{name}}. Change currency"
+  },
+  "advancedScreen": {
+    "title": "Advanced",
+    "developerOptions": "Developer options",
+    "secretMode": "Show experimental features",
+    "secretHint": "Also called Secret Mode. Unlocks features still being tested, such as importing a wallet seed phrase and wider Web of Trust filters.",
+    "secretConfirmTitle": "Show experimental features?",
+    "secretConfirmBody": "These features are still being tested and may change or break. Only turn this on if you're comfortable with that.",
+    "enableSecret": "Turn on",
+    "nostrNetworkSubtitle": "Your relays and photo & voice-note storage",
+    "bitcoinNetworkSubtitle": "Electrum server and swap server",
+    "experimentalFeatures": "Experimental features",
+    "encryption": "Encryption"
+  },
+  "messageSettingsScreen": {
+    "title": "Messages",
+    "trustTitle": "Whose posts and messages you see",
+    "trustHint": "This Web of Trust filter also decides what you see on the Map, in Events and in Groups.",
+    "trustRowA11y": "Whose posts and messages you see: {{tier}}"
+  },
+  "hermesProfiler": {
+    "title": "Performance profiler (dev)",
+    "hint": "Captures a Hermes JS-thread sampling profile. Start, reproduce the slow scenario, then stop and share the .cpuprofile for Chrome DevTools.",
+    "startA11y": "Start Hermes sampling profiler",
+    "stopA11y": "Stop Hermes profiler and share .cpuprofile",
+    "recording": "Recording…",
+    "start": "Start",
+    "stop": "Stop & share",
+    "unavailableTitle": "Hermes profiler unavailable",
+    "unavailableBody": "This build does not expose the Hermes sampling profiler. Rebuild with Hermes enabled.",
+    "startError": "Could not start profiler",
+    "emptyTitle": "Profile is empty",
+    "emptyBody": "No samples were captured. Check that Hermes is active and reproduce the slow scenario while recording.",
+    "shareTitle": "Save Hermes .cpuprofile",
+    "saved": "Profile saved",
+    "savedBody": "Wrote {{size}} B to {{path}}",
+    "stopError": "Could not stop profiler"
   }
 }

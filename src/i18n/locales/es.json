@@ -1463,7 +1463,7 @@
     "savedMyKey": "He guardado mi clave"
   },
   "nostrScreen": {
-    "title": "Nostr",
+    "title": "Red Nostr",
     "connected": "Conectado",
     "disconnected": "Desconectado",
     "removeRelayLabel": "Eliminar relay {{url}}",
@@ -1476,15 +1476,13 @@
     "amberPermissionTitle": "Permiso de Amber",
     "couldNotGrantPermission": "No se pudo conceder el permiso NIP-44.",
     "grantAmberPermissionLabel": "Conceder permiso NIP-44 de Amber",
-    "grantPermissionInAmber": "Conceder permiso en Amber",
+    "grantPermissionInAmber": "Permitir que Amber desbloquee tus mensajes",
     "noProfilePubkey": "Sin clave pública de perfil — inicia sesión primero.",
     "amberRoundTripMismatch": "Discrepancia en la verificación de Amber — puede que el permiso no esté configurado.",
-    "experimental": "Experimental",
-    "nativeCryptoHint": "Ejecuta el cifrado NIP-44 y la verificación de firmas a través del módulo nativo rust-nostr en lugar de JavaScript. Función para testers: observa los registros [PerfBlock] nostrCrypto y desactívala si algo falla.",
-    "nativeCryptoLabel": "Cripto nativa (rust-nostr)",
+    "nativeCryptoHint": "Usa el código integrado de tu teléfono, en lugar del de la app, para cifrar mensajes y verificar firmas. Puede ser más rápido. Aún está en pruebas: desactívalo si los mensajes dejan de enviarse o cargarse.",
+    "nativeCryptoLabel": "Cifrado más rápido (beta)",
     "nativeCryptoRestartCaption": "Reinicia la app para aplicar.",
     "nativeCryptoUnavailable": "No disponible en este dispositivo",
-    "nativeCryptoA11y": "Activar cripto nativa",
     "nativeCryptoActiveYes": "Activa en esta sesión: sí",
     "nativeCryptoActiveNo": "Activa en esta sesión: no",
     "notInUse": "No se usa ahora",
@@ -1499,16 +1497,16 @@
     "bannerText": "Estás sin conexión — algunos datos pueden estar desactualizados"
   },
   "onChainScreen": {
-    "title": "On-chain",
+    "title": "Red Bitcoin",
     "electrumServer": "Servidor Electrum",
     "electrumServerA11y": "Servidor Electrum",
     "useSsl": "Usar SSL",
     "hint": "Las carteras on-chain usan este servidor Electrum para leer saldos y difundir transacciones. Apúntalo a tu propio servidor si no quieres filtrar direcciones a uno público.",
-    "defaultWalletTitle": "Cartera on-chain predeterminada",
-    "defaultWalletEmpty": "Aún no hay carteras on-chain. Añade una en Carteras para establecer un destino predeterminado para reembolsos de Boltz y futuros flujos de recepción on-chain.",
+    "defaultWalletTitle": "Cartera predeterminada para reembolsos",
+    "defaultWalletEmpty": "Aún no hay carteras on-chain. Añade una para elegir adónde van los reembolsos de swaps fallidos.",
     "defaultWalletRowA11y": "Establecer {{wallet}} como cartera on-chain predeterminada",
     "walletFallback": "cartera",
-    "defaultWalletHint": "Se usa como destino de reembolso para swaps de Boltz on-chain → Lightning fallidos y como destino predeterminado para cualquier futuro flujo de recepción on-chain. Toca una fila activa para borrar la elección y volver a la primera cartera."
+    "defaultWalletHint": "Si falla un swap entre on-chain y Lightning, el reembolso va a esta cartera. Toca la cartera seleccionada para borrarla y usar tu primera cartera on-chain."
   },
   "orderPaymentActions": {
     "paymentReceivedA11y": "Pago recibido",
@@ -1743,7 +1741,6 @@
     "title": "Seguridad",
     "confirmLargeSends": "Confirmar envíos grandes",
     "confirmLargeSendsHint": "Muestra un aviso de \"¿Estás seguro?\" antes de realizar un pago Lightning o mover fondos entre carteras por un importe igual o superior a esta cantidad de sats. Los envíos más pequeños siguen siendo de un solo toque. Predeterminado: 10.000 sats.",
-    "perAccountHint": "Solo para esta cuenta. Las demás cuentas de este teléfono mantienen su propio ajuste.",
     "thresholdSaveFailed": "No se pudo guardar el ajuste. Inténtalo de nuevo.",
     "custom": "Personalizado",
     "customPlaceholder": "p. ej. 25000",
@@ -2518,5 +2515,42 @@
     "title": "Pantalla e idioma",
     "change": "Cambiar",
     "currencyRowA11y": "Moneda: {{code}} {{name}}. Cambiar moneda"
+  },
+  "advancedScreen": {
+    "title": "Avanzado",
+    "developerOptions": "Opciones de desarrollo",
+    "secretMode": "Mostrar funciones experimentales",
+    "secretHint": "También llamado modo secreto. Desbloquea funciones aún en pruebas, como importar la frase semilla de una cartera y filtros de Red de Confianza más amplios.",
+    "secretConfirmTitle": "¿Mostrar funciones experimentales?",
+    "secretConfirmBody": "Estas funciones aún están en pruebas y pueden cambiar o fallar. Actívalas solo si te parece bien.",
+    "enableSecret": "Activar",
+    "nostrNetworkSubtitle": "Tus relays y el almacenamiento de fotos y notas de voz",
+    "bitcoinNetworkSubtitle": "Servidor Electrum y servidor de swaps",
+    "experimentalFeatures": "Funciones experimentales",
+    "encryption": "Cifrado"
+  },
+  "messageSettingsScreen": {
+    "title": "Mensajes",
+    "trustTitle": "De quién ves publicaciones y mensajes",
+    "trustHint": "Este filtro de Red de Confianza también decide lo que ves en el Mapa, en Eventos y en Grupos.",
+    "trustRowA11y": "De quién ves publicaciones y mensajes: {{tier}}"
+  },
+  "hermesProfiler": {
+    "title": "Perfilador de rendimiento (desarrollo)",
+    "hint": "Captura un perfil del hilo JS de Hermes. Inicia, reproduce la lentitud, detén y comparte el archivo .cpuprofile para Chrome DevTools.",
+    "startA11y": "Iniciar el perfilador de Hermes",
+    "stopA11y": "Detener Hermes y compartir .cpuprofile",
+    "recording": "Grabando…",
+    "start": "Iniciar",
+    "stop": "Detener y compartir",
+    "unavailableTitle": "Perfilador de Hermes no disponible",
+    "unavailableBody": "Esta compilación no incluye el perfilador de Hermes. Compila de nuevo con Hermes activado.",
+    "startError": "No se pudo iniciar el perfilador",
+    "emptyTitle": "El perfil está vacío",
+    "emptyBody": "No se capturaron muestras. Comprueba que Hermes esté activo y reproduce la lentitud durante la grabación.",
+    "shareTitle": "Guardar Hermes .cpuprofile",
+    "saved": "Perfil guardado",
+    "savedBody": "Se escribieron {{size}} B en {{path}}",
+    "stopError": "No se pudo detener el perfilador"
   }
 }
