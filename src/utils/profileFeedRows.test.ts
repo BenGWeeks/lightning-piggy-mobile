@@ -67,6 +67,12 @@ describe('buildProfileRows', () => {
     });
   });
 
+  it('says listings could not be loaded rather than "nothing for sale"', () => {
+    expect(
+      buildProfileRows({ ...base, tab: 'products', productsIncomplete: true })[0],
+    ).toMatchObject({ status: 'productsUnavailable' });
+  });
+
   it('chunks media into rows of three and products into rows of two', () => {
     const feed = [
       ev('1', 1, { content: [1, 2, 3, 4].map((n) => `https://x.example/${n}.jpg`).join(' ') }),

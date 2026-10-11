@@ -444,6 +444,7 @@ const ContactProfileScreen: React.FC = () => {
             feedLoading: feed.loading && feed.hasRelays,
             products: seller.products,
             productsLoading: seller.loading,
+            productsIncomplete: seller.incomplete,
           })
         : [],
     [
@@ -454,6 +455,7 @@ const ContactProfileScreen: React.FC = () => {
       feed.hasRelays,
       seller.products,
       seller.loading,
+      seller.incomplete,
     ],
   );
 

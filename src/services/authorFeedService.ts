@@ -71,24 +71,42 @@ export function subscribeAuthorFeed(input: {
   };
 }
 
-/** One older page: events at or before `until`, newest first, bounded. */
+export interface AuthorFeedPage {
+  /** Events at or before `until`, newest first. */
+  events: AuthorFeedEvent[];
+  /**
+   * True when every relay answered (EOSE) before the timeout. An empty page
+   * only means "no older posts" when it's complete — a timeout can't tell.
+   */
+  complete: boolean;
+}
+
+/**
+ * One older page, bounded by `limit` and a timeout. Rejects when every relay
+ * failed to connect, so the caller can keep "Load more" retryable.
+ */
 export async function fetchAuthorFeedPage(input: {
   authorPubkey: string;
   relays: string[];
   until: number;
   limit?: number;
   signal?: AbortSignal;
-}): Promise<AuthorFeedEvent[]> {
-  if (input.relays.length === 0) return [];
+}): Promise<AuthorFeedPage> {
+  if (input.relays.length === 0) return { events: [], complete: false };
   trackRelays(input.relays);
+  const startedAt = Date.now();
   const events = await querySyncAbortable(
     pool,
     input.relays,
     feedFilter(input.authorPubkey, input.limit ?? AUTHOR_FEED_PAGE_SIZE, input.until),
-    { maxWait: PAGE_TIMEOUT_MS, signal: input.signal },
+    { maxWait: PAGE_TIMEOUT_MS, signal: input.signal, rejectOnAllRelaysFailure: true },
   );
-  return events
-    .filter((ev) => ev.pubkey === input.authorPubkey && PROFILE_FEED_KINDS.includes(ev.kind))
-    .map(toFeedEvent)
-    .sort((a, b) => b.created_at - a.created_at);
+  return {
+    events: events
+      .filter((ev) => ev.pubkey === input.authorPubkey && PROFILE_FEED_KINDS.includes(ev.kind))
+      .map(toFeedEvent)
+      .sort((a, b) => b.created_at - a.created_at),
+    // querySyncAbortable resolves early only on EOSE (or abort).
+    complete: !input.signal?.aborted && Date.now() - startedAt < PAGE_TIMEOUT_MS - 50,
+  };
 }

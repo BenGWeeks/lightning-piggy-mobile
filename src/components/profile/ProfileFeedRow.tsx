@@ -28,6 +28,7 @@ const STATUS_KEYS: Record<Exclude<ProfileStatus, 'loading'>, string> = {
   emptyPosts: 'friendNoteFeed.noPostsYet',
   emptyMedia: 'profileTabs.noMedia',
   emptyProducts: 'profileTabs.noProducts',
+  productsUnavailable: 'profileTabs.productsUnavailable',
 };
 
 /**

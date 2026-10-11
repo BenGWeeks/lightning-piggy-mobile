@@ -17,7 +17,12 @@ export interface MediaTile {
   item: NoteMediaItem;
 }
 
-export type ProfileStatus = 'loading' | 'emptyPosts' | 'emptyMedia' | 'emptyProducts';
+export type ProfileStatus =
+  | 'loading'
+  | 'emptyPosts'
+  | 'emptyMedia'
+  | 'emptyProducts'
+  | 'productsUnavailable';
 
 export type ProfileRow =
   | { type: 'post'; key: string; event: AuthorFeedEvent }
@@ -56,6 +61,8 @@ export interface ProfileRowsInput {
   feedLoading: boolean;
   products: readonly MarketProduct[];
   productsLoading: boolean;
+  /** The seller snapshot couldn't be completed (relays failed / timed out). */
+  productsIncomplete?: boolean;
 }
 
 export function buildProfileRows(input: ProfileRowsInput): ProfileRow[] {
@@ -64,7 +71,13 @@ export function buildProfileRows(input: ProfileRowsInput): ProfileRow[] {
   ];
   if (input.tab === 'products') {
     if (input.products.length === 0)
-      return status(input.productsLoading ? 'loading' : 'emptyProducts');
+      return status(
+        input.productsLoading
+          ? 'loading'
+          : input.productsIncomplete
+            ? 'productsUnavailable'
+            : 'emptyProducts',
+      );
     return chunk(input.products, PRODUCT_COLUMNS).map((products) => ({
       type: 'products',
       key: `products-${products[0].id}`,

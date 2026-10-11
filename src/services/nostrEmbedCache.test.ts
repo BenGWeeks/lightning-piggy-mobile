@@ -104,6 +104,16 @@ it('caches misses only briefly', async () => {
   expect(peekEmbed(`e:${id('3')}`)).toBeUndefined();
 });
 
+it('re-fetches addressable events after a while but keeps notes', async () => {
+  mockQuery.mockResolvedValueOnce([ev({ id: id('8') })]);
+  await settle(resolveEmbed(eventRef(id('8')), ['wss://read']));
+  mockQuery.mockResolvedValueOnce([ev({ id: id('9'), kind: 30023, tags: [['d', 'a']] })]);
+  await settle(resolveEmbed(addrRef(30023, 'a'), ['wss://read']));
+  jest.setSystemTime(Date.now() + 11 * 60 * 1000);
+  expect(peekEmbed(`e:${id('8')}`)?.event?.id).toBe(id('8'));
+  expect(peekEmbed(`a:30023:${PK}:a`)).toBeUndefined();
+});
+
 it('picks the newest revision of an addressed article', async () => {
   const d = (v: string) => [['d', v]];
   mockQuery.mockResolvedValue([

@@ -113,22 +113,38 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
     const controller = new AbortController();
     moreAbortRef.current = controller;
     try {
-      // `until` is inclusive: events sharing the oldest second come back
-      // too, and the id-keyed map drops the repeats.
-      const page = await fetchAuthorFeedPage({
+      const known = (e: AuthorFeedEvent) => feed.map.has(e.id);
+      // `until` is inclusive: events sharing the oldest second come back too
+      // and the id-keyed map drops the repeats. If a whole page is repeats
+      // from that one second, step past it rather than stall.
+      let page = await fetchAuthorFeedPage({
         authorPubkey,
         relays: readRelays,
         until: oldest,
         signal: controller.signal,
       });
+      if (
+        !controller.signal.aborted &&
+        page.events.length >= AUTHOR_FEED_PAGE_SIZE &&
+        page.events.every(known)
+      ) {
+        page = await fetchAuthorFeedPage({
+          authorPubkey,
+          relays: readRelays,
+          until: oldest - 1,
+          signal: controller.signal,
+        });
+      }
       if (controller.signal.aborted) return;
       pagesRef.current += 1;
-      const fresh = page.filter((e) => !feed.map.has(e.id));
-      if (fresh.length === 0) setReachedEnd(true);
+      const fresh = page.events.filter((e) => !known(e));
+      // Only a complete answer with nothing new means "no older posts"; a
+      // timeout leaves "Load more" available to retry.
+      if (fresh.length === 0 && page.complete) setReachedEnd(true);
       for (const e of fresh) enqueue(e.id, e);
       flush();
     } catch {
-      // Network failure — leave "Load more" available to retry.
+      // Every relay failed — leave "Load more" available to retry.
     } finally {
       loadingMoreRef.current = false;
       setLoadingMore(false);

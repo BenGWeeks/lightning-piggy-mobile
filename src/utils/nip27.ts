@@ -51,10 +51,47 @@ const TOKEN_RE = new RegExp(`(${URL})|(${ENTITY})`, 'gi');
 // Punctuation that commonly trails a URL in prose but is rarely part of it.
 const TRAILING_PUNCT_RE = /[.,;:!?'"’”)\]}>]+$/;
 
-/** Relay hints are untrusted text from the event — keep only ws(s) URLs. */
+/**
+ * Relay hints are untrusted text from someone else's event, and the embed
+ * cache connects to them automatically — keep only public `wss://` relays.
+ * Plain `ws://`, credentials, localhost, `.local` and private / link-local
+ * IP literals are dropped, so a crafted note can't make the app probe the
+ * viewer's LAN or leak a URL with secrets.
+ */
+export function isPublicRelayUrl(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length > 256) return false;
+  const m = /^wss:\/\/([^/?#\s]+)(?:[/?#][^\s]*)?$/i.exec(value);
+  if (!m) return false;
+  const authority = m[1];
+  if (authority.includes('@')) return false; // credentials
+  const host = authority
+    .replace(/:\d+$/, '')
+    .replace(/^\[|\]$/g, '')
+    .toLowerCase();
+  if (!host || host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) {
+    return false;
+  }
+  if (host.includes(':')) {
+    // IPv6 literal: refuse loopback, unique-local and link-local.
+    return !/^(?:::1?$|f[cd]|fe[89ab])/.test(host);
+  }
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    if (a === 10 || a === 127 || a === 0 || a >= 224) return false;
+    if (a === 169 && b === 254) return false;
+    if (a === 172 && b >= 16 && b <= 31) return false;
+    if (a === 192 && b === 168) return false;
+    if (a === 100 && b >= 64 && b <= 127) return false; // CGNAT
+    return true;
+  }
+  // A hostname needs a dot (no bare intranet names like `wss://router`).
+  return host.includes('.');
+}
+
 function cleanRelays(relays: string[] | undefined): string[] {
   if (!Array.isArray(relays)) return [];
-  return relays.filter((r) => typeof r === 'string' && /^wss?:\/\/\S+$/i.test(r)).slice(0, 5);
+  return relays.filter(isPublicRelayUrl).slice(0, 5);
 }
 
 const HEX64 = /^[0-9a-f]{64}$/;

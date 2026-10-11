@@ -37,6 +37,12 @@ const MAX_BATCH = 20;
 const TIMEOUT_MS = 5000;
 const MAX_CACHE = 300;
 const NEGATIVE_TTL_MS = 2 * 60 * 1000;
+/**
+ * Addressable events (articles, listings) can be edited or withdrawn, so a
+ * cached copy is re-fetched after this long. Plain notes are immutable and
+ * stay cached for the session (LRU-bounded).
+ */
+const MUTABLE_TTL_MS = 10 * 60 * 1000;
 /** Read relays used per batch, plus at most this many relay hints. */
 const MAX_READ_RELAYS = 6;
 const MAX_HINT_RELAYS = 3;
@@ -71,7 +77,13 @@ function remember(key: string, result: EmbedResult): void {
 export function peekEmbed(key: string): EmbedResult | undefined {
   const entry = cache.get(key);
   if (!entry) return undefined;
-  if (!entry.result.event && Date.now() - entry.at > NEGATIVE_TTL_MS) {
+  const { event } = entry.result;
+  const ttl = !event
+    ? NEGATIVE_TTL_MS
+    : key.startsWith('a:') || event.kind >= 30000
+      ? MUTABLE_TTL_MS
+      : Infinity;
+  if (Date.now() - entry.at > ttl) {
     cache.delete(key);
     return undefined;
   }

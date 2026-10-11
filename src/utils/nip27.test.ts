@@ -1,6 +1,7 @@
 import * as nip19 from 'nostr-tools/nip19';
 import {
   decodeNostrEntity,
+  isPublicRelayUrl,
   embedKey,
   parseNostrContent,
   previewText,
@@ -137,6 +138,36 @@ describe('parseNostrContent', () => {
   it('handles adjacent references and non-string input', () => {
     expect(types(parseNostrContent(`nostr:${npub}nostr:${note}`))).toEqual(['profile', 'event']);
     expect(parseNostrContent(undefined as unknown as string)).toEqual([]);
+  });
+});
+
+describe('isPublicRelayUrl', () => {
+  it('accepts public wss relays', () => {
+    expect(isPublicRelayUrl('wss://relay.primal.net')).toBe(true);
+    expect(isPublicRelayUrl('wss://nos.lol/')).toBe(true);
+    expect(isPublicRelayUrl('wss://relay.example:4443/path')).toBe(true);
+    expect(isPublicRelayUrl('wss://8.8.8.8')).toBe(true);
+  });
+
+  it('rejects ws, credentials, local and private hosts', () => {
+    for (const bad of [
+      'ws://relay.example',
+      'wss://user:pass@relay.example',
+      'wss://localhost:7777',
+      'wss://printer.local',
+      'wss://127.0.0.1',
+      'wss://10.0.0.5',
+      'wss://192.168.1.1:8080',
+      'wss://172.16.4.2',
+      'wss://169.254.1.1',
+      'wss://[::1]',
+      'wss://[fd00::1]',
+      'wss://router',
+      'javascript:alert(1)',
+      42,
+    ]) {
+      expect(isPublicRelayUrl(bad)).toBe(false);
+    }
   });
 });
 

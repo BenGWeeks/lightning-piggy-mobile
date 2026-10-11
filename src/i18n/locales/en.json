@@ -569,7 +569,8 @@
     "products": "Products",
     "noMedia": "No photos or videos yet",
     "noProducts": "Nothing for sale on the Market yet",
-    "loadMore": "Load more"
+    "loadMore": "Load more",
+    "productsUnavailable": "Couldn’t load this seller’s listings. Pull down to try again."
   },
   "nostrContent": {
     "openProfile": "Open the profile of {{name}}",

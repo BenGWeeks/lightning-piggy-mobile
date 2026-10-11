@@ -569,7 +569,8 @@
     "products": "Productos",
     "noMedia": "Todavía no hay fotos ni vídeos",
     "noProducts": "Todavía no vende nada en el Mercado",
-    "loadMore": "Cargar más"
+    "loadMore": "Cargar más",
+    "productsUnavailable": "No se han podido cargar los anuncios de este vendedor. Desliza hacia abajo para reintentar."
   },
   "nostrContent": {
     "openProfile": "Abrir el perfil de {{name}}",

@@ -62,7 +62,9 @@ export function useSellerProducts(
         );
       }).then((result) => {
         if (controller.signal.aborted) return;
-        doneKey.current = key;
+        // Only a complete snapshot is final; a partial one refetches on the
+        // next focus (or pull-to-refresh).
+        doneKey.current = result.incomplete ? null : key;
         setState({ key, ...result, loading: false });
       });
       return () => controller.abort();
@@ -80,7 +82,9 @@ export function useSellerProducts(
 
   return {
     products,
-    loading: enabled && !!pubkey && (state.key !== key || state.loading),
+    // No read relays → nothing will ever be fetched: show the empty state,
+    // not a spinner that never ends.
+    loading: enabled && !!pubkey && !!relaysKey && (state.key !== key || state.loading),
     incomplete: state.key === key && state.incomplete,
   };
 }
