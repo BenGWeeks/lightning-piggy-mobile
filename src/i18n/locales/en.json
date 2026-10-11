@@ -730,7 +730,8 @@
     "transfer": "Move",
     "send": "Send",
     "addWallet": "Add a wallet",
-    "addWalletText": "+ Add a Wallet"
+    "addWalletText": "+ Add a Wallet",
+    "updatingTransactions": "Updating transactions"
   },
   "huntCreateScreen": {
     "ok": "OK",

@@ -730,7 +730,8 @@
     "transfer": "Mover",
     "send": "Enviar",
     "addWallet": "Añadir un monedero",
-    "addWalletText": "+ Añadir un monedero"
+    "addWalletText": "+ Añadir un monedero",
+    "updatingTransactions": "Actualizando transacciones"
   },
   "huntCreateScreen": {
     "ok": "OK",

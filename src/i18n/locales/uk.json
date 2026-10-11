@@ -702,7 +702,8 @@
     "transfer": "Переказ",
     "send": "Надіслати",
     "addWallet": "Додати гаманець",
-    "addWalletText": "+ Додати гаманець"
+    "addWalletText": "+ Додати гаманець",
+    "updatingTransactions": "Оновлення транзакцій"
   },
   "huntCreateScreen": {
     "ok": "OK",
