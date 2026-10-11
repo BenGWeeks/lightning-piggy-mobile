@@ -1177,7 +1177,7 @@
     "accuracyOsm": "± {{meters}} m · OpenStreetMap",
     "unsupportedA11y": "Unsupported message type, kind {{kind}}",
     "unsupportedText": "Unsupported message type (kind {{kind}})",
-    "marmotInvite": "Sent you a Marmot chat invite — it opens as a Marmot chat in your Messages.",
+    "marmotInvite": "Sent you a Marmot chat invite — it opens as a Marmot chat in your Messages. If it doesn't open here, the invitation may be for another phone or an old invitation key. Ask them to invite you again.",
     "marmotMessage": "Marmot group event — open the Marmot chat to read it.",
     "marmotInvitePreview": "Marmot chat invite",
     "marmotMessagePreview": "Marmot message",
@@ -2473,5 +2473,11 @@
     "keptInAmberBody": "Lightning Piggy never sees this account's secret key. Back it up from Amber. Wallet recovery phrases stored in Lightning Piggy need a separate backup before signing out.",
     "keptInSigner": "Your key is kept in your signer app",
     "keptInSignerBody": "Lightning Piggy never sees this account's secret key. Back it up from your signer app. Wallet recovery phrases stored in Lightning Piggy need a separate backup before signing out."
+  },
+  "marmotInvitationKeys": {
+    "removingTitle": "Removing invitation keys…",
+    "removingBody": "Approve the requests in your signer to finish signing out. This can take a minute.",
+    "notRemovedTitle": "Invitation keys not removed",
+    "notRemovedBody": "We couldn't remove this account's Marmot invitation keys from relays, so new Marmot invites may still be sent to this phone. We'll try again automatically the next time this account signs in here."
   }
 }
