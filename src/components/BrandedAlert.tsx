@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, View, Text, Pressable, StyleSheet } from 'react-native';
+import { Modal, View, Text, Pressable } from 'react-native';
 import { AlertCircle, Check, Info, X } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
-import type { Palette } from '../styles/palettes';
+import { createBrandedAlertStyles } from '../styles/BrandedAlert.styles';
 
 export type BrandedAlertButtonStyle = 'default' | 'cancel' | 'destructive';
 
@@ -80,14 +80,31 @@ export const alert = alertImpl;
 
 export function BrandedAlertHost(): React.ReactElement | null {
   const colors = useThemeColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
-  const [payload, setPayload] = useState<AlertPayload | null>(null);
+  const styles = useMemo(() => createBrandedAlertStyles(colors), [colors]);
+  const [payload, setPayloadState] = useState<AlertPayload | null>(null);
+  // Mirror of `payload` readable synchronously from the module-level
+  // listener (which outlives any single render's closure).
+  const payloadRef = useRef<AlertPayload | null>(null);
   const mountedRef = useRef(true);
+
+  const setPayload = (next: AlertPayload | null) => {
+    payloadRef.current = next;
+    setPayloadState(next);
+  };
 
   useEffect(() => {
     mountedRef.current = true;
     listener = (p) => {
-      if (mountedRef.current) setPayload(p);
+      if (!mountedRef.current) return;
+      // A new alert replacing an open one counts as dismissing the old
+      // one. Without this, callers that await a confirmation (consent
+      // promises) or keep an "alert visible" guard never settle, and
+      // the feature behind them silently stops working (#1264).
+      const displaced = payloadRef.current;
+      payloadRef.current = p;
+      setPayloadState(p);
+      const onDismiss = displaced?.options?.onDismiss;
+      if (onDismiss) setTimeout(onDismiss, 0);
     };
     return () => {
       mountedRef.current = false;
@@ -221,102 +238,5 @@ export function BrandedAlertHost(): React.ReactElement | null {
     </Modal>
   );
 }
-
-// Styles mirror PaymentProgressOverlay so send/receive confirmations and
-// system alerts feel like siblings from the same family. Factory shape
-// (rather than module-level `StyleSheet.create`) so the dialog reads
-// the live theme palette via `useThemeColors()` — light/dark switch
-// applies without restart.
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    root: {
-      flex: 1,
-      backgroundColor: 'rgba(21, 23, 26, 0.45)',
-      alignItems: 'center',
-      justifyContent: 'center',
-      padding: 24,
-    },
-    card: {
-      backgroundColor: colors.surface,
-      borderRadius: 28,
-      paddingVertical: 32,
-      paddingHorizontal: 28,
-      minWidth: 260,
-      maxWidth: 340,
-      alignItems: 'center',
-      gap: 14,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 8 },
-      shadowOpacity: 0.2,
-      shadowRadius: 24,
-      elevation: 12,
-    },
-    iconSlot: {
-      width: 72,
-      height: 72,
-      borderRadius: 36,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    title: {
-      fontSize: 20,
-      fontWeight: '700',
-      color: colors.textHeader,
-      textAlign: 'center',
-    },
-    subtitle: {
-      fontSize: 14,
-      color: colors.textSupplementary,
-      textAlign: 'center',
-      lineHeight: 20,
-    },
-    buttonRow: {
-      flexDirection: 'row',
-      alignSelf: 'stretch',
-      gap: 10,
-      marginTop: 6,
-    },
-    buttonColumn: {
-      flexDirection: 'column-reverse',
-    },
-    button: {
-      paddingVertical: 12,
-      // 24px horizontal padding clipped 6+ char labels ("Cancel" / "Sign Out")
-      // when two buttons sat side-by-side inside the card's 28px padding.
-      // 12px is enough to keep the touch target tappable without crowding text.
-      paddingHorizontal: 12,
-      borderRadius: 14,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    // Row mode (≤2 buttons) — flex:1 distributes width evenly. Column
-    // mode (3+) instead hugs content height so stacked buttons don't
-    // each grab a third of the screen. See the inline note above.
-    buttonInRow: { flex: 1 },
-    buttonStacked: { alignSelf: 'stretch' },
-    primaryButton: {
-      backgroundColor: colors.brandPink,
-    },
-    destructiveButton: {
-      backgroundColor: colors.red,
-    },
-    cancelButton: {
-      backgroundColor: colors.background,
-    },
-    buttonPressed: {
-      opacity: 0.75,
-    },
-    buttonText: {
-      fontSize: 16,
-      fontWeight: '700',
-      letterSpacing: 0.3,
-    },
-    actionButtonText: {
-      color: colors.white,
-    },
-    cancelButtonText: {
-      color: colors.textBody,
-    },
-  });
 
 export default Alert;
