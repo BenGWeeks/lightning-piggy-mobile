@@ -1,4 +1,11 @@
-import { useCallback, startTransition, type Dispatch, type SetStateAction } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  startTransition,
+  type Dispatch,
+  type SetStateAction,
+} from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import * as nip19 from 'nostr-tools/nip19';
@@ -8,6 +15,15 @@ import { nip46Sign } from './nip46DmDecrypt';
 import { NSEC_KEY } from './nostrAuthKeys';
 import { perAccountKey } from '../services/perAccountStorage';
 import { CONTACTS_CACHE_KEY_BASE, CONTACTS_TIMESTAMP_KEY_BASE } from './nostrCacheKeys';
+import {
+  contactsFromEvent,
+  prepareContactListUpdate,
+  type ContactChange,
+  type ContactListBase,
+} from '../services/contactListSync';
+import { clearAccountCreatedHere, isAccountCreatedHere } from '../services/newAccountContactList';
+import { Toast } from '../components/BrandedToast';
+import { t } from '../i18n';
 import type { NostrContact, RelayConfig, SignerType } from '../types/nostr';
 
 /**
@@ -17,6 +33,9 @@ import type { NostrContact, RelayConfig, SignerType } from '../types/nostr';
  * `NostrContactsContext`: `refreshContacts` / `followContact` /
  * `unfollowContact` / `addContact`, plus the private `publishContactList`
  * they all funnel through to sign + broadcast the updated kind-3.
+ *
+ * Every write is a read-modify-write against the newest kind-3 on the
+ * relays, never the in-memory `contacts` (#1271): see `contactListSync`.
  *
  * The `contacts` STATE itself still lives in the provider (it feeds
  * `followPubkeys` → the DM inbox), so this hook takes `contacts` +
@@ -77,10 +96,14 @@ export function useContactActions({
   }, [pubkey, getReadRelays, loadContacts]);
 
   const publishContactList = useCallback(
-    async (updatedContacts: NostrContact[]): Promise<boolean> => {
+    async (event: {
+      kind: number;
+      created_at: number;
+      tags: string[][];
+      content: string;
+    }): Promise<boolean> => {
       if (!pubkey || !isLoggedIn) return false;
       try {
-        const event = nostrService.createContactListEvent(updatedContacts);
         const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
         const targetRelays = writeRelays.length > 0 ? writeRelays : nostrService.DEFAULT_RELAYS;
 
@@ -120,72 +143,106 @@ export function useContactActions({
     [pubkey, isLoggedIn, signerType, relays],
   );
 
-  const followContact = useCallback(
-    async (contactPubkey: string): Promise<boolean> => {
-      if (contacts.some((c) => c.pubkey === contactPubkey)) return true; // already following
-      const newContact: NostrContact = {
-        pubkey: contactPubkey,
-        relay: null,
-        petname: null,
-        profile: null,
-      };
-      const updatedContacts = [...contacts, newContact];
-      const success = await publishContactList(updatedContacts);
-      if (success) {
-        startTransition(() => setContacts(updatedContacts));
-        // Update cache so restarts reflect the follow immediately.
-        // Per-account namespaced (#288). Bumps the *contacts* timestamp
-        // (the right freshness clock for kind-3 list reads) — pre-#442
-        // code mistakenly wrote to CACHE_TIMESTAMP_KEY_BASE which is
-        // the *profiles* cache freshness, leaving the contacts list's
-        // own freshness clock stale after every follow.
-        const cKey = perAccountKey(CONTACTS_CACHE_KEY_BASE, pubkey);
-        const tKey = perAccountKey(CONTACTS_TIMESTAMP_KEY_BASE, pubkey);
-        AsyncStorage.setItem(cKey, JSON.stringify(updatedContacts)).catch(() => {});
-        AsyncStorage.setItem(tKey, Date.now().toString()).catch(() => {});
-        // Fetch profile for the new contact
-        const readRelays = getReadRelays();
-        const profileData = await nostrService.fetchProfile(contactPubkey, readRelays);
-        if (profileData) {
-          startTransition(() =>
-            setContacts((prev) => {
-              const updated = prev.map((c) =>
-                c.pubkey === contactPubkey ? { ...c, profile: profileData } : c,
-              );
-              // Update cache with profile data
-              AsyncStorage.setItem(cKey, JSON.stringify(updated)).catch(() => {});
-              return updated;
-            }),
-          );
-        }
-      }
-      return success;
-    },
-    [contacts, publishContactList, getReadRelays, pubkey, setContacts],
-  );
+  // A loaded, non-empty follow list (from any read path, e.g. the provider's
+  // background contacts load) proves the account has a kind-3, so it must
+  // never again be treated as a brand-new, list-less account (#1271).
+  useEffect(() => {
+    if (pubkey && contacts.length > 0) void clearAccountCreatedHere(pubkey);
+  }, [pubkey, contacts.length]);
 
-  const unfollowContact = useCallback(
-    async (contactPubkey: string): Promise<boolean> => {
-      const updatedContacts = contacts.filter((c) => c.pubkey !== contactPubkey);
-      const success = await publishContactList(updatedContacts);
-      if (success) {
-        startTransition(() => setContacts(updatedContacts));
-        // Update cache so restarts reflect the unfollow immediately.
-        // Per-account namespaced (#288).
-        AsyncStorage.setItem(
-          perAccountKey(CONTACTS_CACHE_KEY_BASE, pubkey),
-          JSON.stringify(updatedContacts),
-        ).catch(() => {});
-        // Same fix as followContact above — bump the *contacts*
-        // timestamp, not the *profiles* one.
+  // Writes are serialised: each one fetches the newest list, so two
+  // overlapping follows would otherwise both build on the same base and the
+  // second publish would drop the first. The last event this session
+  // published is remembered too, in case relays still serve the older copy.
+  const writeQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const lastPublished = useRef<Map<string, ContactListBase>>(new Map());
+
+  // Fetch-merge-publish one follow/unfollow, then mirror the result into
+  // state + the per-account cache (#288). Resolves to true when the follow
+  // list now reflects the change, false when nothing was published (no
+  // verified kind-3 to build on, or the signer declined).
+  const updateContactList = useCallback(
+    (change: ContactChange): Promise<boolean> => {
+      const run = async (): Promise<boolean> => {
+        if (!pubkey || !isLoggedIn) return false;
+        const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
+        const update = await prepareContactListUpdate({
+          pubkey,
+          relays: [...getReadRelays(), ...writeRelays, ...nostrService.DEFAULT_RELAYS],
+          localContacts: contacts,
+          change,
+          lastPublished: lastPublished.current.get(pubkey),
+          // Only an account created here may start a fresh list when relays
+          // confirm it has none; an imported key's list may be elsewhere.
+          allowEmptyList: await isAccountCreatedHere(pubkey),
+          onListSeen: () => clearAccountCreatedHere(pubkey),
+        });
+        if (!update) {
+          // No verified relay copy to build on: publishing from the local
+          // list could replace the user's real follow list (#1271).
+          Toast.show({ type: 'error', text1: t('followList.unavailable') });
+          return false;
+        }
+        if (update.changed) {
+          if (!(await publishContactList(update.event))) return false;
+          lastPublished.current.set(pubkey, {
+            tags: update.event.tags,
+            content: update.event.content,
+            createdAt: update.event.created_at,
+          });
+          await clearAccountCreatedHere(pubkey);
+        }
+        const cKey = perAccountKey(CONTACTS_CACHE_KEY_BASE, pubkey);
+        startTransition(() =>
+          setContacts((prev) => {
+            // Rebuild from the published tags, keeping profiles already in state.
+            const next = contactsFromEvent(update.event.tags, prev);
+            AsyncStorage.setItem(cKey, JSON.stringify(next)).catch(() => {});
+            return next;
+          }),
+        );
+        // Bumps the *contacts* timestamp (the freshness clock for kind-3 list
+        // reads), not the profiles one (#442).
         AsyncStorage.setItem(
           perAccountKey(CONTACTS_TIMESTAMP_KEY_BASE, pubkey),
           Date.now().toString(),
         ).catch(() => {});
-      }
-      return success;
+        return true;
+      };
+      const next = writeQueue.current.then(run, run);
+      writeQueue.current = next.catch(() => {});
+      return next;
     },
-    [contacts, publishContactList, pubkey, setContacts],
+    [pubkey, isLoggedIn, relays, getReadRelays, contacts, publishContactList, setContacts],
+  );
+
+  const followContact = useCallback(
+    async (contactPubkey: string): Promise<boolean> => {
+      if (contacts.some((c) => c.pubkey === contactPubkey)) return true; // already following
+      if (!(await updateContactList({ type: 'follow', pubkey: contactPubkey }))) return false;
+      // Fetch the new contact's profile so the row gets a name + avatar.
+      const profileData = await nostrService.fetchProfile(contactPubkey, getReadRelays());
+      if (profileData) {
+        const cKey = perAccountKey(CONTACTS_CACHE_KEY_BASE, pubkey);
+        startTransition(() =>
+          setContacts((prev) => {
+            const next = prev.map((c) =>
+              c.pubkey === contactPubkey ? { ...c, profile: profileData } : c,
+            );
+            AsyncStorage.setItem(cKey, JSON.stringify(next)).catch(() => {});
+            return next;
+          }),
+        );
+      }
+      return true;
+    },
+    [contacts, updateContactList, getReadRelays, pubkey, setContacts],
+  );
+
+  const unfollowContact = useCallback(
+    (contactPubkey: string): Promise<boolean> =>
+      updateContactList({ type: 'unfollow', pubkey: contactPubkey }),
+    [updateContactList],
   );
 
   const addContact = useCallback(

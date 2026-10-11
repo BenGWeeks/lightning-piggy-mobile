@@ -2696,5 +2696,8 @@
     "saved": "Profile saved",
     "savedBody": "Wrote {{size}} B to {{path}}",
     "stopError": "Could not stop profiler"
+  },
+  "followList": {
+    "unavailable": "Couldn't load your follow list — try again"
   }
 }

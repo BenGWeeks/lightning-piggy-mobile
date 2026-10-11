@@ -2696,5 +2696,8 @@
     "saved": "Perfil guardado",
     "savedBody": "Se escribieron {{size}} B en {{path}}",
     "stopError": "No se pudo detener el perfilador"
+  },
+  "followList": {
+    "unavailable": "No se pudo cargar tu lista de seguidos — inténtalo de nuevo"
   }
 }
