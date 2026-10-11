@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -7,16 +7,17 @@ import {
   Platform,
   TouchableOpacity,
   Image,
+  BackHandler,
   type ScrollViewProps,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeft } from 'lucide-react-native';
 import BrandGradientBackground from '../../components/BrandGradientBackground';
 import { useTranslation } from '../../contexts/LocaleContext';
 import { useThemeColors } from '../../contexts/ThemeContext';
 import { createAccountScreenLayoutStyles } from '../../styles/AccountScreenLayout.styles';
-import type { AccountDrawerNavigation } from '../../navigation/types';
+import type { AccountDrawerNavigation, AccountDrawerParamList } from '../../navigation/types';
 
 interface Props {
   title: string;
@@ -27,6 +28,11 @@ interface Props {
   // surface (e.g. FlatList) — avoids nesting VirtualizedLists inside a
   // ScrollView, which breaks list windowing and triggers an RN warning.
   scrollable?: boolean;
+  // For a sub-page of another settings screen (e.g. the currency picker under
+  // Display & language): back — the chevron and Android's back gesture —
+  // returns here instead of to the tabs. Drawer routes are siblings, so the
+  // drawer's own back would skip the parent.
+  parent?: Exclude<keyof AccountDrawerParamList, 'MainTabs'>;
 }
 
 /**
@@ -42,6 +48,7 @@ const AccountScreenLayout: React.FC<Props> = ({
   scrollRef,
   scrollViewProps,
   scrollable = true,
+  parent,
 }) => {
   const colors = useThemeColors();
   const t = useTranslation();
@@ -49,12 +56,28 @@ const AccountScreenLayout: React.FC<Props> = ({
   const navigation = useNavigation<AccountDrawerNavigation>();
   const insets = useSafeAreaInsets();
 
+  const goBack = useCallback(() => {
+    if (parent) navigation.navigate(parent);
+    else navigation.goBack();
+  }, [navigation, parent]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!parent) return undefined;
+      const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+        navigation.navigate(parent);
+        return true;
+      });
+      return () => sub.remove();
+    }, [navigation, parent]),
+  );
+
   const titleRow = (
     <View style={styles.titleRow}>
       <TouchableOpacity
         accessibilityRole="button"
         style={styles.backButton}
-        onPress={() => navigation.goBack()}
+        onPress={goBack}
         accessibilityLabel={t('accountScreenLayout.back')}
         testID="account-back-button"
       >
