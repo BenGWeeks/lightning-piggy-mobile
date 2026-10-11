@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import type { DeliveryStatus, MessageInfo } from '../utils/dmDeliveryStatus';
 import type { DmProtocol } from '../utils/dmProtocol';
+import { buildMessageInfo } from '../utils/messageInfo';
 
 // Args MessageBubble hands up when a bubble is tapped (#856). The hook turns
 // these into a `MessageInfo` for the detail sheet and tracks the resend payload.
@@ -13,42 +14,37 @@ export interface ShowMessageInfoArgs {
 }
 
 /**
- * Owns the 1:1 ConversationScreen's message-info sheet (#856): the open/closed
- * state, the handler that builds a `MessageInfo` from a tapped bubble (sent or
- * received), and the Re-publish action. Extracted from the screen to keep it
- * under the 1,000-line cap; the screen just renders `<DeliveryDetailSheet>` from
- * the returned values.
+ * Owns a conversation's message-info sheet (#856) — 1:1 and group: the
+ * open/closed state, the tap handler, and the Re-publish action. What the
+ * sheet shows (protocol, kind, id, whether Re-publish applies) is decided by
+ * the pure `buildMessageInfo` (#1296), so both screens agree.
  *
- * `resendText` is the composer's send function — Re-publish runs the full send
- * path again so it gets its own bubble + fresh tick.
+ * `resendText` is the screen's send function — Re-publish runs that thread's
+ * own send path again (Marmot over Marmot, NIP-04 over NIP-04, NIP-17 over
+ * NIP-17), so it gets its own bubble + fresh tick. `protocol` is the thread's
+ * (a group passes 'marmot' or 'nip17').
  */
 export function useMessageInfoSheet(
   resendText: (text: string) => Promise<boolean>,
-  protocol?: DmProtocol,
+  protocol: DmProtocol,
 ) {
   const [messageInfo, setMessageInfo] = useState<{
     info: MessageInfo;
-    resendText: string;
+    canResend: boolean;
   } | null>(null);
 
   const showInfo = useCallback(
     (args: ShowMessageInfoArgs) => {
-      // The optimistic local- sent row has no `wireKind` yet (it's known once
-      // decrypted/echoed), but the send result's `deliveryStatus.kind` carries
-      // the rumor kind — fall back to it so a just-sent bubble still shows the
-      // right protocol/kind instead of "Unknown" (Copilot #858).
-      const wireKind = args.wireKind ?? args.deliveryStatus?.kind;
-      setMessageInfo({
-        info: {
-          direction: args.fromMe ? 'sent' : 'received',
-          eventId: args.eventId,
-          wireKind,
-          ...(protocol === 'marmot' ? { protocol } : {}),
+      setMessageInfo(
+        buildMessageInfo({
+          protocol,
+          fromMe: args.fromMe,
+          rowId: args.eventId,
+          wireKind: args.wireKind,
           deliveryStatus: args.deliveryStatus,
           resendText: args.resendText,
-        },
-        resendText: args.resendText,
-      });
+        }),
+      );
     },
     [protocol],
   );
@@ -56,26 +52,16 @@ export function useMessageInfoSheet(
   const closeInfo = useCallback(() => setMessageInfo(null), []);
 
   const resendFromInfo = useCallback(() => {
-    const text = messageInfo?.resendText;
+    const text = messageInfo?.canResend ? messageInfo.info.resendText : undefined;
     setMessageInfo(null);
     if (text) void resendText(text);
   }, [messageInfo, resendText]);
-
-  // Re-publish only for a SENT text message (kind 14 NIP-17, or kind 4 NIP-04 —
-  // each thread resends over its own protocol) with a resendable payload.
-  // Received messages never get it; non-text bubbles pass an empty string;
-  // kind-15 file messages would be re-sent as plain kind-14 text and drop the
-  // file tags, so hide it there too (Copilot #858). #857 covers k15.
-  const canResend =
-    messageInfo?.info.direction === 'sent' &&
-    !!messageInfo.resendText &&
-    (messageInfo.info.wireKind === 14 || messageInfo.info.wireKind === 4);
 
   return {
     info: messageInfo?.info ?? null,
     showInfo,
     closeInfo,
     resendFromInfo,
-    canResend,
+    canResend: !!messageInfo?.canResend,
   };
 }

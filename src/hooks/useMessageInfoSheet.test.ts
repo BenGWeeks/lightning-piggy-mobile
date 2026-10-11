@@ -1,6 +1,6 @@
 import { renderHook, act } from '@testing-library/react-native';
 import { useMessageInfoSheet } from './useMessageInfoSheet';
-import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
+import { protocolLabel, type DeliveryStatus } from '../utils/dmDeliveryStatus';
 
 // The message-info sheet (#856): direction mapping + the Re-publish gate.
 // Re-publish is offered ONLY for a sent kind-14 text message with a payload —
@@ -14,7 +14,7 @@ const delivery: DeliveryStatus = {
 describe('useMessageInfoSheet', () => {
   it('maps a tapped sent text bubble to a sent MessageInfo with Re-publish enabled', () => {
     const resend = jest.fn().mockResolvedValue(true);
-    const { result } = renderHook(() => useMessageInfoSheet(resend));
+    const { result } = renderHook(() => useMessageInfoSheet(resend, 'nip17'));
     act(() => {
       result.current.showInfo({
         fromMe: true,
@@ -31,7 +31,7 @@ describe('useMessageInfoSheet', () => {
 
   it('falls back to deliveryStatus.kind when the row has no wireKind yet', () => {
     const resend = jest.fn().mockResolvedValue(true);
-    const { result } = renderHook(() => useMessageInfoSheet(resend));
+    const { result } = renderHook(() => useMessageInfoSheet(resend, 'nip17'));
     act(() => {
       result.current.showInfo({
         fromMe: true,
@@ -48,7 +48,7 @@ describe('useMessageInfoSheet', () => {
 
   it('disables Re-publish for a received message', () => {
     const resend = jest.fn().mockResolvedValue(true);
-    const { result } = renderHook(() => useMessageInfoSheet(resend));
+    const { result } = renderHook(() => useMessageInfoSheet(resend, 'nip17'));
     act(() => {
       result.current.showInfo({
         fromMe: false,
@@ -63,7 +63,7 @@ describe('useMessageInfoSheet', () => {
 
   it('enables Re-publish for a sent NIP-04 (kind 4) text message', () => {
     const resend = jest.fn().mockResolvedValue(true);
-    const { result } = renderHook(() => useMessageInfoSheet(resend));
+    const { result } = renderHook(() => useMessageInfoSheet(resend, 'nip04'));
     act(() => {
       result.current.showInfo({
         fromMe: true,
@@ -78,7 +78,7 @@ describe('useMessageInfoSheet', () => {
 
   it('disables Re-publish for a sent kind-15 file message', () => {
     const resend = jest.fn().mockResolvedValue(true);
-    const { result } = renderHook(() => useMessageInfoSheet(resend));
+    const { result } = renderHook(() => useMessageInfoSheet(resend, 'nip17'));
     act(() => {
       result.current.showInfo({
         fromMe: true,
@@ -93,7 +93,7 @@ describe('useMessageInfoSheet', () => {
 
   it('disables Re-publish when the resend payload is empty (non-text)', () => {
     const resend = jest.fn().mockResolvedValue(true);
-    const { result } = renderHook(() => useMessageInfoSheet(resend));
+    const { result } = renderHook(() => useMessageInfoSheet(resend, 'nip17'));
     act(() => {
       result.current.showInfo({ fromMe: true, eventId: 'abc', wireKind: 14, resendText: '' });
     });
@@ -102,7 +102,7 @@ describe('useMessageInfoSheet', () => {
 
   it('resendFromInfo calls the send fn with the payload and closes the sheet', () => {
     const resend = jest.fn().mockResolvedValue(true);
-    const { result } = renderHook(() => useMessageInfoSheet(resend));
+    const { result } = renderHook(() => useMessageInfoSheet(resend, 'nip17'));
     act(() => {
       result.current.showInfo({
         fromMe: true,
@@ -117,9 +117,36 @@ describe('useMessageInfoSheet', () => {
     expect(result.current.info).toBeNull();
   });
 
+  // #1296: the group screen passes its protocol — a Marmot group's message
+  // reads Marmot (MLS), and Re-publish goes back through the group's
+  // own (Marmot) send fn, never a NIP-17 path.
+  it('a Marmot group message reports Marmot and re-publishes through the group send', () => {
+    const groupResend = jest.fn().mockResolvedValue(true);
+    const { result } = renderHook(() => useMessageInfoSheet(groupResend, 'marmot'));
+    act(() => {
+      result.current.showInfo({ fromMe: true, eventId: 'r1', wireKind: 14, resendText: 'hi' });
+    });
+    const info = result.current.info!;
+    expect(info.protocol).toBe('marmot');
+    expect(protocolLabel(info.wireKind, info.protocol)).toBe('Marmot (MLS)');
+    act(() => result.current.resendFromInfo());
+    expect(groupResend).toHaveBeenCalledWith('hi');
+  });
+
+  it('a NIP-17 group message keeps NIP-17 (gift-wrapped)', () => {
+    const { result } = renderHook(() =>
+      useMessageInfoSheet(jest.fn().mockResolvedValue(true), 'nip17'),
+    );
+    act(() => {
+      result.current.showInfo({ fromMe: false, eventId: 'w1', wireKind: 14, resendText: 'hi' });
+    });
+    const info = result.current.info!;
+    expect(protocolLabel(info.wireKind, info.protocol)).toBe('NIP-17 (gift-wrapped)');
+  });
+
   it('closeInfo clears the sheet', () => {
     const resend = jest.fn().mockResolvedValue(true);
-    const { result } = renderHook(() => useMessageInfoSheet(resend));
+    const { result } = renderHook(() => useMessageInfoSheet(resend, 'nip17'));
     act(() => {
       result.current.showInfo({ fromMe: true, eventId: 'a', wireKind: 14, resendText: 'x' });
     });

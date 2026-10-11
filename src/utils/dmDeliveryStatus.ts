@@ -7,6 +7,8 @@
 // VISIBILITY ONLY — it does NOT change the partial-send = failure semantics
 // in useMessageSend, and adds no retry. The outbox/retry work is #857.
 
+import type { DmProtocol } from './dmProtocol';
+
 // Per-relay publish outcome for one sent message, keyed by relay URL.
 // `ok` = at least one of this send's wraps was accepted by that relay;
 // `failed` = the relay rejected / errored for every wrap we tried.
@@ -101,10 +103,12 @@ export function failedDelivery(meta?: {
 export interface MessageInfo {
   direction: 'sent' | 'received';
   eventId: string;
-  // The on-wire protocol: 4 = NIP-04, 14/15 = NIP-17 rumor kind.
+  // The stored kind: 4 = NIP-04, 14/15 = NIP-17 rumor kind (Marmot rows
+  // reuse 14/15 for their kind-9 rumors — see utils/messageInfo).
   wireKind?: number;
-  // Set for Marmot threads, whose rumors reuse NIP-17's kinds.
-  protocol?: 'marmot';
+  // The message's protocol (set by `buildMessageInfo`). Marmot rumors reuse
+  // NIP-17's kinds, so the kind alone can't tell them apart.
+  protocol?: DmProtocol;
   // Present only for sent messages — drives the relay breakdown + tick.
   deliveryStatus?: DeliveryStatus;
   // Raw text to hand Re-publish (sent kind-14 only); empty otherwise.
@@ -112,10 +116,11 @@ export interface MessageInfo {
 }
 
 /** Human label for the wire protocol shown in the message-info sheet. */
-export function protocolLabel(wireKind: number | undefined, protocol?: 'marmot'): string {
+export function protocolLabel(wireKind: number | undefined, protocol?: DmProtocol): string {
   if (protocol === 'marmot') return 'Marmot (MLS)';
-  if (wireKind === 4) return 'NIP-04 (legacy DM)';
-  if (wireKind === 14 || wireKind === 15) return 'NIP-17 (gift-wrapped)';
+  if (protocol === 'nip04' || wireKind === 4) return 'NIP-04 (legacy DM)';
+  // A known NIP-17 thread: any rumor kind (polls 1068, orders 16/17, …).
+  if (protocol === 'nip17' || wireKind === 14 || wireKind === 15) return 'NIP-17 (gift-wrapped)';
   return 'Unknown';
 }
 
