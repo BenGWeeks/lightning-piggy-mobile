@@ -1,13 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Text, TouchableOpacity, View, BackHandler } from 'react-native';
-import { Image } from 'expo-image';
 import {
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
   BottomSheetScrollView,
 } from '@gorhom/bottom-sheet';
 import { BottomSheetModal } from './AccessibleBottomSheetModal';
-import { UserPlus, UserRound, X } from 'lucide-react-native';
+import { UserPlus } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createGroupMembersSheetStyles } from '../styles/GroupMembersSheet.styles';
@@ -15,23 +14,23 @@ import { marmotSendError } from '../services/marmotSend';
 import { useGroups } from '../contexts/GroupsContext';
 import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import { Alert as BrandedAlert } from './BrandedAlert';
+import Toast from './BrandedToast';
 import FriendPickerSheet, { type PickedFriend } from './FriendPickerSheet';
-import { isSupportedImageUrl } from '../utils/imageUrl';
+import GroupMemberListRow from './GroupMemberListRow';
+import type { GroupMemberRow } from '../utils/groupMemberRows';
 
 interface Props {
   visible: boolean;
   groupId: string | null;
   onClose: () => void;
+  // Resolved rows (self first) from the host screen's single
+  // `useGroupMemberProfiles` + `buildGroupMemberRows` pass, so the sheet,
+  // header count and sender labels share one lookup (#1268).
+  members: GroupMemberRow[];
   // Optional. When provided, tapping a member row (other than self)
   // calls this with their pubkey. The host screen typically opens
   // ContactProfileSheet in response. Without this, rows are display-only.
   onMemberTap?: (pubkey: string) => void;
-}
-
-interface MemberRow {
-  pubkey: string;
-  name: string;
-  picture: string | null;
 }
 
 /**
@@ -40,8 +39,10 @@ interface MemberRow {
  *
  * Composition:
  * - Header with the count and a Done button.
- * - Scrollable list of current members (avatar + name + Remove button
- *   per row). Remove confirms via BrandedAlert before persisting.
+ * - Scrollable list of current members (avatar + name + follow status +
+ *   Remove button per row). Remove confirms via BrandedAlert before
+ *   persisting; Follow publishes through the shared `followContact` path
+ *   (so Amber / NIP-46 prompts behave as everywhere else).
  * - "Add members" footer button → opens `FriendPickerSheet` filtered to
  *   non-members. Selecting one calls `addMembersToGroup` and closes the
  *   picker; the row appears here without remounting the parent screen.
@@ -53,16 +54,28 @@ interface MemberRow {
  * Sheet uses `enableDynamicSizing={false}` + an explicit snap point per
  * the v5 dynamic-sizing collapse fix in `docs/TROUBLESHOOTING.adoc`.
  */
-const GroupMembersSheet: React.FC<Props> = ({ visible, groupId, onClose, onMemberTap }) => {
+const GroupMembersSheet: React.FC<Props> = ({
+  visible,
+  groupId,
+  onClose,
+  members,
+  onMemberTap,
+}) => {
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createGroupMembersSheetStyles(colors), [colors]);
   const { getGroup, addMembersToGroup, removeMemberFromGroup } = useGroups();
-  const { pubkey: selfPubkey, profile: selfProfile } = useNostr();
-  const { contacts } = useNostrContacts();
+  const { pubkey: selfPubkey } = useNostr();
+  const { followContact } = useNostrContacts();
   const sheetRef = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => ['85%'], []);
   const [pickerOpen, setPickerOpen] = useState(false);
+  // Follows are single-flight: `followContact` republishes the whole kind-3
+  // from the `contacts` it closed over, so two concurrent follows would race
+  // and drop one. It resolves after `contacts` updates, flipping the row to
+  // "Following" in place.
+  const [followPendingPubkey, setFollowPendingPubkey] = useState<string | null>(null);
+  const followInFlight = useRef(false);
 
   const group = groupId ? getGroup(groupId) : undefined;
   // NIP-17 groups are editable by anyone; a Marmot group only by its admins
@@ -81,46 +94,6 @@ const GroupMembersSheet: React.FC<Props> = ({ visible, groupId, onClose, onMembe
     },
     [group?.protocol, t],
   );
-
-  // Resolve memberPubkeys → friendly rows. We fall back to a short-pubkey
-  // placeholder when no kind-0 profile is in `contacts` (matches the
-  // membership chip pattern we replaced).
-  // Stored `memberPubkeys` excludes the viewer (LP convention in
-  // GroupsContext); we prepend a self row so the count + list match
-  // every other modern messenger (#473). The self row has no Remove
-  // button and is non-tappable — handled inline in the row render below.
-  const members: MemberRow[] = useMemo(() => {
-    if (!group) return [];
-    const byPubkey = new Map(contacts.map((c) => [c.pubkey, c]));
-    // Dedupe against self (case-insensitive) before mapping so a
-    // legacy memberPubkeys list that already includes the viewer
-    // doesn't produce a double "· you" row + miscount.
-    const selfLower = selfPubkey?.toLowerCase();
-    const others: MemberRow[] = group.memberPubkeys
-      .filter((pk) => !selfLower || pk.toLowerCase() !== selfLower)
-      .map((pk) => {
-        const c = byPubkey.get(pk);
-        return {
-          pubkey: pk,
-          name:
-            c?.profile?.displayName ||
-            c?.profile?.name ||
-            c?.petname ||
-            `${pk.slice(0, 8)}…${pk.slice(-4)}`,
-          picture: c?.profile?.picture ?? null,
-        };
-      });
-    if (!selfPubkey) return others;
-    const selfRow: MemberRow = {
-      pubkey: selfPubkey,
-      name:
-        selfProfile?.displayName ||
-        selfProfile?.name ||
-        `${selfPubkey.slice(0, 8)}…${selfPubkey.slice(-4)}`,
-      picture: selfProfile?.picture ?? null,
-    };
-    return [selfRow, ...others];
-  }, [group, contacts, selfPubkey, selfProfile]);
 
   useEffect(() => {
     if (visible) {
@@ -147,7 +120,7 @@ const GroupMembersSheet: React.FC<Props> = ({ visible, groupId, onClose, onMembe
   );
 
   const handleRemove = useCallback(
-    (m: MemberRow) => {
+    (m: GroupMemberRow) => {
       if (!groupId) return;
       BrandedAlert.alert(
         t('groupMembersSheet.removeTitle'),
@@ -165,6 +138,34 @@ const GroupMembersSheet: React.FC<Props> = ({ visible, groupId, onClose, onMembe
       );
     },
     [groupId, removeMemberFromGroup, t, reportFailure],
+  );
+
+  const handleFollow = useCallback(
+    async (m: GroupMemberRow) => {
+      if (followInFlight.current) return;
+      followInFlight.current = true;
+      setFollowPendingPubkey(m.pubkey);
+      let ok = false;
+      try {
+        ok = await followContact(m.pubkey);
+      } catch (e) {
+        if (__DEV__) console.warn('[Group] follow failed:', e);
+      } finally {
+        followInFlight.current = false;
+        setFollowPendingPubkey(null);
+      }
+      Toast.show(
+        ok
+          ? { type: 'success', text1: t('groupMembersSheet.followedToast', { name: m.name }) }
+          : { type: 'error', text1: t('groupMembersSheet.followFailed', { name: m.name }) },
+      );
+    },
+    [followContact, t],
+  );
+
+  const handleMemberPress = useCallback(
+    (m: GroupMemberRow) => onMemberTap?.(m.pubkey),
+    [onMemberTap],
   );
 
   const handlePickerSelect = useCallback(
@@ -213,47 +214,18 @@ const GroupMembersSheet: React.FC<Props> = ({ visible, groupId, onClose, onMembe
           </View>
 
           {members.map((m) => (
-            <TouchableOpacity
+            <GroupMemberListRow
               key={m.pubkey}
-              style={styles.row}
-              onPress={
-                onMemberTap && m.pubkey !== selfPubkey ? () => onMemberTap(m.pubkey) : undefined
-              }
-              activeOpacity={onMemberTap && m.pubkey !== selfPubkey ? 0.6 : 1}
-              accessibilityLabel={t('groupMembersSheet.viewProfile', { name: m.name })}
-              testID={`group-member-row-${m.pubkey.slice(0, 12)}`}
-            >
-              <View style={styles.avatar}>
-                {m.picture && isSupportedImageUrl(m.picture) ? (
-                  <Image
-                    source={{ uri: m.picture }}
-                    style={styles.avatarImage}
-                    cachePolicy="memory-disk"
-                    recyclingKey={m.picture}
-                    autoplay={false}
-                  />
-                ) : (
-                  <UserRound size={22} color={colors.textBody} strokeWidth={1.75} />
-                )}
-              </View>
-              <Text style={styles.rowName} numberOfLines={1}>
-                {m.name}
-                {m.pubkey === selfPubkey ? (
-                  <Text style={styles.youTag}>{t('groupMembersSheet.youTag')}</Text>
-                ) : null}
-              </Text>
-              {m.pubkey !== selfPubkey && canManage ? (
-                <TouchableOpacity
-                  style={styles.removeButton}
-                  onPress={() => handleRemove(m)}
-                  accessibilityLabel={t('groupMembersSheet.removeMember', { name: m.name })}
-                  testID={`group-member-remove-${m.pubkey.slice(0, 12)}`}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <X size={18} color={colors.brandPink} strokeWidth={2.5} />
-                </TouchableOpacity>
-              ) : null}
-            </TouchableOpacity>
+              member={m}
+              styles={styles}
+              colors={colors}
+              canRemove={canManage}
+              followPending={followPendingPubkey === m.pubkey}
+              followDisabled={followPendingPubkey !== null && followPendingPubkey !== m.pubkey}
+              onPress={onMemberTap ? handleMemberPress : undefined}
+              onRemove={handleRemove}
+              onFollow={handleFollow}
+            />
           ))}
 
           {canManage ? (
