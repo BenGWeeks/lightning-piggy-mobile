@@ -28,7 +28,7 @@
   },
   "accountDrawerContent": {
     "profile": "Профіль і QR",
-    "wallets": "Гаманці",
+    "wallets": "Керувати гаманцями",
     "security": "Безпека й резервування",
     "about": "Допомога й інформація",
     "switchToAccount": "Перейти до {{name}}",
@@ -2093,7 +2093,7 @@
     "xpubCopied": "Розширений публічний ключ скопійовано до буфера обміну."
   },
   "walletsScreen": {
-    "title": "Гаманці",
+    "title": "Керувати гаманцями",
     "noWallets": "Гаманців не підключено. Додайте один, щоб почати.",
     "walletCount": "{{count}} гаманців ({{connected}} підключено)",
     "onChainSuffix": " (on-chain)",
