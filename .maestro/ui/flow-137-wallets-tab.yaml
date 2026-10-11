@@ -16,7 +16,9 @@ name: Wallets tab — label, accessibility label and wallet screen
     timeout: 5000
 
 # A cold start restores the last screen, which may be a pushed screen
-# without the tab bar — back out until the tab bar shows.
+# without the tab bar — back out until the tab bar shows. On the root
+# screen Back dismisses any open sheet/alert first; if it ever does leave
+# the app, the `launchApp` (no restart) brings it straight back.
 - repeat:
     while:
       notVisible:
@@ -24,6 +26,8 @@ name: Wallets tab — label, accessibility label and wallet screen
     times: 3
     commands:
       - back
+      - launchApp:
+          stopApp: false
       - waitForAnimationToEnd:
           timeout: 3000
 
