@@ -1,4 +1,4 @@
-import { dmThreadId, protocolForWireKind } from '../utils/dmProtocol';
+import { dmThreadId, MARMOT_WELCOME_KIND, protocolForWireKind } from '../utils/dmProtocol';
 import type React from 'react';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
 import {
@@ -164,7 +164,10 @@ export function createLiveRumorSurfacer(
             text: deferredText,
             wireKind: rumor.kind,
           },
-          notify: { title: 'New message', body: deferredText },
+          // A Marmot invite stays silent on replay too (#1269).
+          ...(rumor.kind !== MARMOT_WELCOME_KIND
+            ? { notify: { title: 'New message', body: deferredText } }
+            : {}),
         });
       }
       // Follows known: a stranger — nothing to see. Still hydrating: may be
@@ -224,8 +227,9 @@ export function createLiveRumorSurfacer(
     // OS notification (#279) — only genuinely-fresh inbound (backlog has
     // old rumor timestamps and stays silent), never my own echo;
     // suppressed when the user is viewing this thread. claimWrapNotification
-    // dedupes vs the background watch running in the same JS context.
-    if (partnership.fromMe) nothingToSee();
+    // dedupes vs the background watch running in the same JS context. A
+    // Marmot invite stays silent: its NIP-17 row is hidden (#1269).
+    if (partnership.fromMe || rumor.kind === MARMOT_WELCOME_KIND) nothingToSee();
     else if (isFreshArrival(rumor.created_at)) {
       if (claimWrapNotification(wrapId) || placeholder)
         alertReplacing(dmThreadId(partnership.partnerPubkey, protocolForWireKind(rumor.kind)), () =>
