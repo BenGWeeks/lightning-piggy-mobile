@@ -17,6 +17,8 @@
 
 import type { DeliveryStatus, MessageInfo } from './dmDeliveryStatus';
 import { protocolForWireKind, type DmProtocol } from './dmProtocol';
+import { giphyEnvelope } from '../services/giphyService';
+import type { BubbleContent } from './messageContent';
 
 /** Marmot's chat-message rumor kind (`MARMOT_CHAT_KIND` in marmotSession —
  * mirrored so this pure util doesn't pull in the MLS session module). */
@@ -54,6 +56,24 @@ export function messageKindLabel(
   return { key: 'kindN', kind: wireKind };
 }
 
+/**
+ * The bubble's Re-publish payload. The send path takes text, so only bubbles
+ * whose message IS its text re-send faithfully: `text` content (which also
+ * carries text-encoded invoices / contacts / encrypted-file URLs — files are
+ * then gated out by kind in `buildMessageInfo`) and GIFs. Location / poll
+ * bubbles get ''. A reply gets '' too — a resend is bare text, so the copy
+ * would lose its quote and stop being a reply.
+ */
+export function resendPayloadFor(
+  content: BubbleContent,
+  isReply: boolean,
+): { resendText: string; resendIsGif?: true } {
+  if (isReply) return { resendText: '' };
+  if (content.kind === 'text') return { resendText: content.text };
+  if (content.kind === 'gif') return { resendText: content.url, resendIsGif: true };
+  return { resendText: '' };
+}
+
 export interface MessageInfoInput {
   /** The thread's protocol. 1:1 threads are partitioned by protocol; a group
    * is 'marmot' or 'nip17'. A kind-4 row always reads as NIP-04. */
@@ -65,8 +85,9 @@ export interface MessageInfoInput {
   wireKind?: number;
   /** Sent 1:1 messages only — groups don't track per-relay delivery. */
   deliveryStatus?: DeliveryStatus;
-  /** The bubble's Re-publish payload ('' when it can't be re-sent). */
+  /** From `resendPayloadFor`. */
   resendText: string;
+  resendIsGif?: boolean;
 }
 
 /** Optimistic rows carry a local placeholder id (`local-…` 1:1, `local_…`
@@ -107,7 +128,12 @@ export function buildMessageInfo(input: MessageInfoInput): {
         ? 'rumor'
         : 'wrap';
 
-  const { resendText } = input;
+  // A GIF goes out over Marmot in the same "url + via GIPHY" envelope the
+  // composer uses (`gifEnvelope`), so White Noise shows it as a GIF.
+  const resendText =
+    input.resendIsGif && effective === 'marmot' && input.resendText
+      ? giphyEnvelope(input.resendText)
+      : input.resendText;
 
   const resendableKind = effective === 'nip04' ? NIP04_KIND : TEXT_KIND;
   const canResend = fromMe && !!resendText && wireKind === resendableKind;

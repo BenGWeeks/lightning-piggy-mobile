@@ -50,7 +50,7 @@ export default function DeliveryDetailSheet({
   info: MessageInfo | null;
   onClose: () => void;
   // Re-publish over the thread's own protocol. Optional — hidden when omitted
-  // (received, non-text, files — `buildMessageInfo`'s canResend).
+  // (received, non-text, files, replies — `buildMessageInfo`'s canResend).
   onResend?: () => void;
 }): React.ReactElement | null {
   const colors = useThemeColors();

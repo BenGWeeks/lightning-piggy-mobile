@@ -11,6 +11,7 @@ export interface ShowMessageInfoArgs {
   wireKind?: number;
   deliveryStatus?: DeliveryStatus;
   resendText: string;
+  resendIsGif?: boolean;
 }
 
 /**
@@ -43,6 +44,7 @@ export function useMessageInfoSheet(
           wireKind: args.wireKind,
           deliveryStatus: args.deliveryStatus,
           resendText: args.resendText,
+          resendIsGif: args.resendIsGif,
         }),
       );
     },
