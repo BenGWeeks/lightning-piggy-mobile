@@ -257,7 +257,23 @@ and Middle, Maestro on `PATH`, ImageMagick (`convert`, for flow 130) and
 Run flows 127 and 130 after 125 (they reuse its DM). The flows only ever
 message Piggy fixtures.
 
-// TODO(#1333): describe the scripted Marmot interop suite with White Noise once it merges.
+==== Scripted Marmot interop: flows 145–151
+
+A scripted `marmot-ts` sender and Maestro flows 145–151 check Lightning
+Piggy and White Noise: receiving message types, Lightning Piggy sends,
+1:1 replies and reactions, and group admin/rename changes.
+Allow roughly 30–40 minutes of device time. Prerequisites are in
+link:../.maestro/interop/README.adoc[the interop README].
+
+[source,bash]
+----
+bash scripts/interop/run.sh
+----
+
+Each run writes `matrix.md`, screenshots and logs under
+`~/lp-interop-runs/<date>-<tag>/`. The matrix labels harness failures
+separately (`HARNESS: no results`); dependent checks that could not run
+are `N/T`, rather than interop failures.
 
 ==== Signer matrix E2E: flows 131–135 (nsec / Amber / NIP-46)
 
