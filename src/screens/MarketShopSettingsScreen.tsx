@@ -1,5 +1,4 @@
 import MerchantIdentity from '../components/MerchantIdentity';
-import MerchantPaymentPreference from '../components/MerchantPaymentPreference';
 import { isLegacyShopCollection } from '../utils/marketCollections';
 import { SellerSigningError } from '../utils/sellerSigning';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -49,7 +48,8 @@ interface Form {
   zones: ShippingZoneDraft[];
 }
 
-/** Merchant identity comes from kind 0; setup only saves local currency and shipping. */
+/** Merchant identity is read-only here; kind-0 publishing work moved to issue #1389.
+ * Setup only saves local currency and shipping. */
 const MarketShopSettingsScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
   const t = useTranslation();
@@ -282,7 +282,6 @@ const MarketShopSettingsScreen: React.FC<Props> = ({ navigation }) => {
             keyboardDismissMode="on-drag"
           >
             <MerchantIdentity />
-            <MerchantPaymentPreference />
             {isLegacyShopCollection(snapshot.shop) ? (
               <TouchableOpacity
                 style={styles.secondaryButton}

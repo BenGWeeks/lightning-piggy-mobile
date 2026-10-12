@@ -470,8 +470,7 @@
     "lightningAddress": "Dirección Lightning",
     "about": "Acerca de",
     "aboutPlaceholder": "Cuéntale al mundo sobre ti...",
-    "saveProfile": "Guardar perfil",
-    "profileUnavailable": "No se pudo recuperar tu perfil existente. Inténtalo de nuevo cuando tus relays estén disponibles."
+    "saveProfile": "Guardar perfil"
   },
   "eventDetailScreen": {
     "dateTbc": "Fecha por confirmar",
@@ -2584,12 +2583,6 @@
       "collections": "Colecciones",
       "createCollection": "Crear colección",
       "allCollections": "Todas las colecciones",
-      "paymentPreference": "Preferencia de pago",
-      "paymentMethods": {
-        "manual": "Manual",
-        "ecash": "eCash",
-        "lud16": "Dirección Lightning"
-      },
       "removeLegacyCollection": "Eliminar la antigua colección de la tienda",
       "legacyCollectionHint": "Las versiones anteriores guardaban el nombre de tu tienda como una colección de productos. ¿Enviar una solicitud de eliminación de esa colección? Se conservarán tu perfil y tus productos.",
       "collectionFields": {

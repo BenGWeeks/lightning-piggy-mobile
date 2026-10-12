@@ -10,7 +10,17 @@ import type { SellerSnapshot } from '../utils/marketSellerSnapshot';
 import type { ExploreNavigation } from '../navigation/types';
 
 jest.mock('../components/MerchantIdentity', () => () => null);
-jest.mock('../components/MerchantPaymentPreference', () => () => null);
+// Virtual mock catches accidental reintroduction of the deferred selector.
+jest.mock(
+  '../components/MerchantPaymentPreference',
+  () => {
+    const { View } = jest.requireActual('react-native');
+    return function DeferredPaymentPreference() {
+      return <View testID="merchant-payment-preference" />;
+    };
+  },
+  { virtual: true },
+);
 
 jest.mock('../contexts/ThemeContext', () => ({ useThemeColors: () => ({}) }));
 jest.mock('../contexts/LocaleContext', () => ({ useTranslation: () => (key: string) => key }));
@@ -146,6 +156,7 @@ it('preserves the add-item destination through a confirmed revision overwrite', 
 
 it('uses the profile identity and never renders a shop-name field', () => {
   const screen = render(<MarketShopSettingsScreen navigation={navigation} />);
+  expect(screen.queryByTestId('merchant-payment-preference')).toBeNull();
   expect(screen.queryByTestId('shop-name-input')).toBeNull();
   expect(screen.queryByTestId('shop-description-input')).toBeNull();
 });

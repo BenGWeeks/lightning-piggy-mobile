@@ -470,8 +470,7 @@
     "lightningAddress": "Lightning ऐड्रेस",
     "about": "बायो",
     "aboutPlaceholder": "दुनिया को अपने बारे में बताएँ...",
-    "saveProfile": "प्रोफ़ाइल सेव करें",
-    "profileUnavailable": "आपकी मौजूदा प्रोफ़ाइल प्राप्त नहीं हो सकी। आपके रिले उपलब्ध होने पर फिर से प्रयास करें।"
+    "saveProfile": "प्रोफ़ाइल सेव करें"
   },
   "eventDetailScreen": {
     "dateTbc": "तारीख़ तय होनी बाकी है",
@@ -2584,12 +2583,6 @@
       "collections": "संग्रह",
       "createCollection": "संग्रह बनाएँ",
       "allCollections": "सभी संग्रह",
-      "paymentPreference": "पसंदीदा भुगतान विधि",
-      "paymentMethods": {
-        "manual": "मैन्युअल",
-        "ecash": "eCash",
-        "lud16": "Lightning पता"
-      },
       "removeLegacyCollection": "पुराना दुकान संग्रह हटाएँ",
       "legacyCollectionHint": "ऐप के पुराने संस्करणों ने आपकी दुकान का नाम उत्पाद संग्रह के रूप में सहेजा था। क्या उस संग्रह को हटाने का अनुरोध भेजें? आपकी प्रोफ़ाइल और उत्पाद सुरक्षित रहेंगे।",
       "collectionFields": {

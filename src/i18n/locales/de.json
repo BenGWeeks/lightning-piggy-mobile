@@ -470,8 +470,7 @@
     "lightningAddress": "Lightning-Adresse",
     "about": "Über mich",
     "aboutPlaceholder": "Erzähl der Welt von dir…",
-    "saveProfile": "Profil speichern",
-    "profileUnavailable": "Dein bestehendes Profil konnte nicht abgerufen werden. Versuche es erneut, wenn deine Relays verfügbar sind."
+    "saveProfile": "Profil speichern"
   },
   "eventDetailScreen": {
     "dateTbc": "Datum folgt",
@@ -2584,12 +2583,6 @@
       "collections": "Kollektionen",
       "createCollection": "Kollektion erstellen",
       "allCollections": "Alle Kollektionen",
-      "paymentPreference": "Bevorzugte Zahlungsart",
-      "paymentMethods": {
-        "manual": "Manuell",
-        "ecash": "eCash",
-        "lud16": "Lightning-Adresse"
-      },
       "removeLegacyCollection": "Alte Shop-Kollektion entfernen",
       "legacyCollectionHint": "Ältere App-Versionen speicherten deinen Shopnamen als Produktkollektion. Eine Löschanfrage für diese Kollektion senden? Dein Profil und deine Produkte bleiben erhalten.",
       "collectionFields": {

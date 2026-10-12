@@ -470,8 +470,7 @@
     "lightningAddress": "Lightning ॲड्रेस",
     "about": "माझ्याबद्दल",
     "aboutPlaceholder": "जगाला तुमच्याबद्दल सांगा...",
-    "saveProfile": "प्रोफाइल सेव्ह करा",
-    "profileUnavailable": "तुमची विद्यमान प्रोफाइल मिळवता आली नाही. तुमचे रिले उपलब्ध झाल्यावर पुन्हा प्रयत्न करा."
+    "saveProfile": "प्रोफाइल सेव्ह करा"
   },
   "eventDetailScreen": {
     "dateTbc": "तारीख अजून ठरायची आहे",
@@ -2584,12 +2583,6 @@
       "collections": "संग्रह",
       "createCollection": "संग्रह तयार करा",
       "allCollections": "सर्व संग्रह",
-      "paymentPreference": "पसंतीची देयक पद्धत",
-      "paymentMethods": {
-        "manual": "मॅन्युअल",
-        "ecash": "eCash",
-        "lud16": "Lightning पत्ता"
-      },
       "removeLegacyCollection": "जुना दुकान संग्रह काढा",
       "legacyCollectionHint": "ॲपच्या जुन्या आवृत्त्यांनी तुमच्या दुकानाचे नाव उत्पादन संग्रह म्हणून जतन केले होते. त्या संग्रहासाठी हटवण्याची विनंती पाठवायची का? तुमचे प्रोफाइल आणि उत्पादने जतन केली जातील.",
       "collectionFields": {

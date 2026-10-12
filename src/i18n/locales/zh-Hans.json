@@ -470,8 +470,7 @@
     "lightningAddress": "Lightning地址",
     "about": "简介",
     "aboutPlaceholder": "向大家介绍一下你自己……",
-    "saveProfile": "保存个人资料",
-    "profileUnavailable": "无法获取你现有的个人资料。请在你的中继可用时重试。"
+    "saveProfile": "保存个人资料"
   },
   "eventDetailScreen": {
     "dateTbc": "日期待定",
@@ -2584,12 +2583,6 @@
       "collections": "商品合集",
       "createCollection": "创建合集",
       "allCollections": "所有合集",
-      "paymentPreference": "首选付款方式",
-      "paymentMethods": {
-        "manual": "手动",
-        "ecash": "eCash",
-        "lud16": "Lightning 地址"
-      },
       "removeLegacyCollection": "删除旧店铺合集",
       "legacyCollectionHint": "旧版应用将店铺名称保存为商品合集。要发送该合集的删除请求吗？你的个人资料和商品将保留。",
       "collectionFields": {

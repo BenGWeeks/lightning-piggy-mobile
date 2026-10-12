@@ -470,8 +470,7 @@
     "lightningAddress": "Lightning Address",
     "about": "About",
     "aboutPlaceholder": "Tell the world about yourself...",
-    "saveProfile": "Save Profile",
-    "profileUnavailable": "Your existing profile could not be recovered. Try again when your relays are available."
+    "saveProfile": "Save Profile"
   },
   "eventDetailScreen": {
     "dateTbc": "Date TBC",
@@ -2584,12 +2583,6 @@
       "collections": "Collections",
       "createCollection": "Create collection",
       "allCollections": "All collections",
-      "paymentPreference": "Payment preference",
-      "paymentMethods": {
-        "manual": "Manual",
-        "ecash": "eCash",
-        "lud16": "Lightning address"
-      },
       "removeLegacyCollection": "Remove old shop collection",
       "legacyCollectionHint": "Older app versions saved your shop name as a product collection. Send a deletion request for that collection? Your profile and products will be kept.",
       "collectionFields": {

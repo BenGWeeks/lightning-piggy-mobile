@@ -470,8 +470,7 @@
     "lightningAddress": "Adres Lightning",
     "about": "O mnie",
     "aboutPlaceholder": "Opowiedz światu o sobie...",
-    "saveProfile": "Zapisz profil",
-    "profileUnavailable": "Nie udało się odzyskać Twojego istniejącego profilu. Spróbuj ponownie, gdy Twoje przekaźniki będą dostępne."
+    "saveProfile": "Zapisz profil"
   },
   "eventDetailScreen": {
     "dateTbc": "Data do potwierdzenia",
@@ -2590,12 +2589,6 @@
       "collections": "Kolekcje",
       "createCollection": "Utwórz kolekcję",
       "allCollections": "Wszystkie kolekcje",
-      "paymentPreference": "Preferowana metoda płatności",
-      "paymentMethods": {
-        "manual": "Ręcznie",
-        "ecash": "eCash",
-        "lud16": "Adres Lightning"
-      },
       "removeLegacyCollection": "Usuń starą kolekcję sklepu",
       "legacyCollectionHint": "Starsze wersje aplikacji zapisywały nazwę sklepu jako kolekcję produktów. Wysłać prośbę o usunięcie tej kolekcji? Twój profil i produkty zostaną zachowane.",
       "collectionFields": {

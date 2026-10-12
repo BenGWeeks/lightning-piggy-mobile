@@ -1,5 +1,3 @@
-import { useProfilePublisher } from '../hooks/useProfilePublisher';
-import type { ProfilePatch, ProfilePublishOptions } from '../utils/merchantProfile';
 import { signAccountEvent } from '../services/signAccountEvent';
 import React, {
   createContext,
@@ -14,6 +12,7 @@ import React, {
 import { InteractionManager } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
+import * as nip19 from 'nostr-tools/nip19';
 import * as nostrService from '../services/nostrService';
 import {
   rearmBackgroundDmWatchForActiveIdentity,
@@ -48,6 +47,7 @@ import {
 } from './useMessageSend';
 import { useContactActions } from './useContactActions';
 import { useNip46Login, restoreNip46Session } from './useNip46Login';
+import { nip46Sign } from './nip46DmDecrypt';
 import { dropIdentityKeyMaterial, useIdentityMemoryReset } from './resetIdentityMemoryState';
 import { AMBER_NIP17_ENABLED_KEY_LEGACY } from './nostrDmCache';
 import { wipeAccountCaches } from './accountCacheWipe';
@@ -167,7 +167,15 @@ interface NostrContextType extends UseReactionActionsResult {
     // find-log rows). Omit for plain zap-the-author flows.
     zapEventId?: string,
   ) => Promise<string | null>;
-  publishProfile: (profileData: ProfilePatch, options?: ProfilePublishOptions) => Promise<boolean>;
+  publishProfile: (profileData: {
+    name?: string;
+    display_name?: string;
+    picture?: string;
+    banner?: string;
+    about?: string;
+    lud16?: string;
+    nip05?: string;
+  }) => Promise<boolean>;
   sendDirectMessage: (
     recipientPubkey: string,
     plaintext: string,
@@ -1343,16 +1351,88 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     getReadRelays,
     loadContacts,
   });
-  const publishProfile = useProfilePublisher({
-    pubkey,
-    profile,
-    isLoggedIn,
-    signerType,
-    relays,
-    setProfile,
-    cacheKey: OWN_PROFILE_CACHE_KEY_BASE,
-    timestampKey: OWN_PROFILE_TIMESTAMP_KEY_BASE,
-  });
+
+  const publishProfile = useCallback(
+    async (profileData: {
+      name?: string;
+      display_name?: string;
+      picture?: string;
+      banner?: string;
+      about?: string;
+      lud16?: string;
+      nip05?: string;
+    }): Promise<boolean> => {
+      if (!pubkey || !isLoggedIn) return false;
+      try {
+        const event = nostrService.createProfileEvent(profileData);
+        const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
+        const targetRelays = writeRelays.length > 0 ? writeRelays : nostrService.DEFAULT_RELAYS;
+
+        if (signerType === 'nsec') {
+          const nsec = await SecureStore.getItemAsync(NSEC_KEY);
+          if (!nsec) return false;
+          const { secretKey } = nostrService.decodeNsec(nsec);
+          await nostrService.signAndPublishEvent(event, secretKey, targetRelays);
+        } else if (signerType === 'amber') {
+          const eventJson = JSON.stringify(event);
+          const { event: signedEventJson } = await amberService.requestEventSignature(
+            eventJson,
+            '',
+            pubkey,
+          );
+          if (!signedEventJson) return false;
+          const signed = JSON.parse(signedEventJson);
+          await nostrService.publishSignedEvent(signed, targetRelays);
+        } else if (signerType === 'nip46') {
+          const signedEventJson = await nip46Sign(event, pubkey);
+          if (!signedEventJson) return false;
+          await nostrService.publishSignedEvent(JSON.parse(signedEventJson), targetRelays);
+        }
+
+        // We just signed and published this kind-0, so the client already
+        // has the authoritative new profile. Shortcut the relay round-trip
+        // by updating local state + the 24h own-profile cache in-place,
+        // otherwise the top-right profile icon keeps the pre-publish
+        // avatar/name until the next force-refresh (up to 24h — see #148).
+        //
+        // Apply the same "drop falsy values" rule createProfileEvent uses
+        // (service.ts:520-524) so local state matches exactly what was
+        // published — a caller passing `name: ""` otherwise leaves the
+        // cache with an empty string while the kind-0 on the wire omits
+        // the field entirely.
+        const nullIfEmpty = (v: string | undefined): string | null => (v ? v : null);
+        const updatedProfile: NostrProfile = {
+          pubkey,
+          npub: nip19.npubEncode(pubkey),
+          name: nullIfEmpty(profileData.name),
+          displayName: nullIfEmpty(profileData.display_name),
+          picture: nullIfEmpty(profileData.picture),
+          banner: nullIfEmpty(profileData.banner),
+          about: nullIfEmpty(profileData.about),
+          lud16: nullIfEmpty(profileData.lud16),
+          nip05: nullIfEmpty(profileData.nip05),
+        };
+        setProfile(updatedProfile);
+        InteractionManager.runAfterInteractions(() => {
+          AsyncStorage.setItem(
+            perAccountKey(OWN_PROFILE_CACHE_KEY_BASE, pubkey),
+            JSON.stringify(updatedProfile),
+          ).catch(() => {});
+          AsyncStorage.setItem(
+            perAccountKey(OWN_PROFILE_TIMESTAMP_KEY_BASE, pubkey),
+            Date.now().toString(),
+          ).catch(() => {});
+        });
+
+        return true;
+      } catch (error) {
+        console.warn('Failed to publish profile:', error);
+        return false;
+      }
+    },
+    [setProfile, pubkey, isLoggedIn, signerType, relays],
+  );
+
   /**
    * Send a 1:1 direct message via NIP-17 (kind-14 rumor → kind-13 seal →
    * kind-1059 gift wrap). NIP-04 (kind 4) is no longer produced — see

@@ -470,8 +470,7 @@
     "lightningAddress": "Lightning-cím",
     "about": "Bemutatkozás",
     "aboutPlaceholder": "Mesélj magadról a világnak...",
-    "saveProfile": "Profil mentése",
-    "profileUnavailable": "A meglévő profilodat nem sikerült lekérni. Próbáld újra, amikor a reléid elérhetők."
+    "saveProfile": "Profil mentése"
   },
   "eventDetailScreen": {
     "dateTbc": "Dátum később",
@@ -2584,12 +2583,6 @@
       "collections": "Gyűjtemények",
       "createCollection": "Gyűjtemény létrehozása",
       "allCollections": "Minden gyűjtemény",
-      "paymentPreference": "Előnyben részesített fizetési mód",
-      "paymentMethods": {
-        "manual": "Kézi",
-        "ecash": "eCash",
-        "lud16": "Lightning-cím"
-      },
       "removeLegacyCollection": "Régi üzletgyűjtemény eltávolítása",
       "legacyCollectionHint": "Az alkalmazás korábbi verziói termékgyűjteményként mentették az üzleted nevét. Küldesz törlési kérelmet ehhez a gyűjteményhez? A profilod és a termékeid megmaradnak.",
       "collectionFields": {

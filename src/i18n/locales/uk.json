@@ -442,8 +442,7 @@
     "lightningAddress": "Адреса Lightning",
     "about": "Про себе",
     "aboutPlaceholder": "Розкажіть світові про себе...",
-    "saveProfile": "Зберегти профіль",
-    "profileUnavailable": "Не вдалося відновити ваш наявний профіль. Спробуйте ще раз, коли ваші реле будуть доступні."
+    "saveProfile": "Зберегти профіль"
   },
   "eventDetailScreen": {
     "dateTbc": "Дата уточнюється",
@@ -2546,12 +2545,6 @@
       "collections": "Колекції",
       "createCollection": "Створити колекцію",
       "allCollections": "Усі колекції",
-      "paymentPreference": "Бажаний спосіб оплати",
-      "paymentMethods": {
-        "manual": "Вручну",
-        "ecash": "eCash",
-        "lud16": "Адреса Lightning"
-      },
       "removeLegacyCollection": "Видалити стару колекцію крамниці",
       "legacyCollectionHint": "Попередні версії застосунку зберігали назву крамниці як колекцію товарів. Надіслати запит на видалення цієї колекції? Ваш профіль і товари буде збережено.",
       "collectionFields": {
