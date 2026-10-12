@@ -3,7 +3,11 @@ import { NostrConnectError, SignerUnavailableError } from '../services/signerErr
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Kind4RetryStore, KIND4_RETRY_BASE_MS, isTransientKind4Error } from './kind4RetryStore';
 
-beforeEach(() => AsyncStorage.clear());
+beforeEach(async () => {
+  jest.spyOn(Date, 'now').mockReturnValue(1000);
+  await AsyncStorage.clear();
+});
+afterEach(() => jest.restoreAllMocks());
 
 it('persists backoff and the oldest retryable floor until three counted failures', async () => {
   const store = new Kind4RetryStore('owner');

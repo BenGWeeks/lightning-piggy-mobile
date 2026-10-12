@@ -9,7 +9,16 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 export const KIND4_RETRY_BASE_MS = 60_000;
 const MAX_FAILURES = 500;
 const MAX_ATTEMPTS = 3;
-type Failure = { id: string; createdAt: number; attempts: number; lastAttempt: number };
+export const KIND4_MAX_UNCOUNTED_ATTEMPTS = 20;
+export const KIND4_MAX_FAILURE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+type Failure = {
+  id: string;
+  createdAt: number;
+  attempts: number;
+  uncountedAttempts: number;
+  firstFailure: number;
+  lastAttempt: number;
+};
 
 /** Metadata only: ciphertext and plaintext stay out of AsyncStorage. */
 export class Kind4RetryStore {
@@ -35,7 +44,15 @@ export class Kind4RetryStore {
             f.attempts <= MAX_ATTEMPTS &&
             Number.isFinite(f.lastAttempt)
           )
-            this.failures.set(f.id, f);
+            this.failures.set(f.id, {
+              ...f,
+              // Older metadata has no ceiling fields; retain its last known age.
+              firstFailure: Number.isFinite(f.firstFailure) ? f.firstFailure : f.lastAttempt,
+              uncountedAttempts:
+                Number.isInteger(f.uncountedAttempts) && f.uncountedAttempts >= 0
+                  ? Math.min(KIND4_MAX_UNCOUNTED_ATTEMPTS, f.uncountedAttempts)
+                  : 0,
+            });
         }
       } catch {
         /* Ignore malformed metadata. */
@@ -48,18 +65,38 @@ export class Kind4RetryStore {
   private due(f: Failure) {
     return f.lastAttempt + KIND4_RETRY_BASE_MS * 2 ** Math.max(0, f.attempts - 1);
   }
+  private expire(f: Failure, now = Date.now()) {
+    if (f.attempts >= MAX_ATTEMPTS) return;
+    if (
+      f.uncountedAttempts >= KIND4_MAX_UNCOUNTED_ATTEMPTS ||
+      now - f.firstFailure >= KIND4_MAX_FAILURE_AGE_MS
+    ) {
+      f.attempts = MAX_ATTEMPTS;
+      console.warn(
+        `[Perf] kind4 retry ceiling id=${f.id} uncounted=${f.uncountedAttempts} ageMs=${now - f.firstFailure}`,
+      );
+    }
+  }
   shouldSkip(id: string, bypass = false, now = Date.now()) {
     const f = this.failures.get(id);
+    if (f) this.expire(f, now);
     return !bypass && !!f && (f.attempts >= MAX_ATTEMPTS || now < this.due(f));
   }
   failed(id: string, createdAt: number, counted: boolean, now = Date.now()) {
     const previous = this.failures.get(id);
-    this.failures.set(id, {
+    const failure: Failure = {
       id,
       createdAt,
       attempts: Math.min(MAX_ATTEMPTS, (previous?.attempts ?? 0) + Number(counted)),
+      uncountedAttempts: Math.min(
+        KIND4_MAX_UNCOUNTED_ATTEMPTS,
+        (previous?.uncountedAttempts ?? 0) + Number(!counted),
+      ),
+      firstFailure: previous?.firstFailure ?? now,
       lastAttempt: now,
-    });
+    };
+    this.expire(failure, now);
+    this.failures.set(id, failure);
     if (this.failures.size > MAX_FAILURES) {
       // Prefer permanent negatives, then the newest failure; keep the oldest floor.
       const victim =
@@ -74,6 +111,7 @@ export class Kind4RetryStore {
     this.failures.delete(id);
   }
   cursor(newest: number) {
+    for (const f of this.failures.values()) this.expire(f);
     return Math.min(
       newest,
       ...[...this.failures.values()]
@@ -89,24 +127,27 @@ export class Kind4RetryStore {
     return Math.max(KIND4_RETRY_BASE_MS, next - this.lastChecked);
   }
   nextRetryAt() {
+    for (const f of this.failures.values()) this.expire(f);
     const pending = [...this.failures.values()].filter((f) => f.attempts < MAX_ATTEMPTS);
     return pending.length
       ? Math.max(
           this.lastChecked + KIND4_RETRY_BASE_MS,
-          Math.min(...pending.map((f) => this.due(f))),
+          Math.min(
+            ...pending.map((f) => Math.min(this.due(f), f.firstFailure + KIND4_MAX_FAILURE_AGE_MS)),
+          ),
         )
       : undefined;
   }
 }
 
-/** Transport/availability failures do not exhaust a valid event's retry budget. */
+/** Availability failures use the safety ceiling instead of the ciphertext budget. */
 export function isTransientKind4Error(error: unknown): boolean {
   if (error instanceof SignerUnavailableError) return true;
   if (error instanceof NostrConnectError) return error.kind !== 'decrypt-failed';
   const amberKind = amberFailureKind(error);
   if (amberKind && amberKind !== 'failed') return true;
   // Amber's message is translated UI copy; only its native detail can identify
-  // a ciphertext failure. Unknown signer failures must keep the cursor pinned.
+  // a ciphertext failure. Unknown signer failures remain retryable within the safety ceiling.
   if (error instanceof AmberSignerError) return !isCiphertextDecryptError(error.detail);
   return !isCiphertextDecryptError(error);
 }
