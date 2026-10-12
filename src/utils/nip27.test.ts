@@ -2,7 +2,6 @@ import * as nip19 from 'nostr-tools/nip19';
 import {
   decodeNostrEntity,
   isPublicRelayUrl,
-  parseIPv4Literal,
   embedKey,
   parseNostrContent,
   previewText,
@@ -202,13 +201,20 @@ describe('isPublicRelayUrl', () => {
     expect(isPublicRelayUrl('wss://1.1.1.1:443')).toBe(true);
   });
 
-  it('parses IPv4 literals like inet_aton', () => {
-    expect(parseIPv4Literal('127.1')).toEqual([127, 0, 0, 1]);
-    expect(parseIPv4Literal('0x7f.0.0.1')).toEqual([127, 0, 0, 1]);
-    expect(parseIPv4Literal('2130706433')).toEqual([127, 0, 0, 1]);
-    expect(parseIPv4Literal('192.168.257')).toEqual([192, 168, 1, 1]);
-    expect(parseIPv4Literal('256.1.1.1')).toBeNull();
-    expect(parseIPv4Literal('relay.example')).toBeNull();
+  // The shared helper (utils/publicUrl, #1338) refuses every non-canonical
+  // IPv4 form outright rather than decoding it the way inet_aton would, so
+  // even a shorthand that decodes to a PUBLIC address is refused.
+  it('refuses non-canonical IPv4 forms, public or not', () => {
+    for (const bad of [
+      'wss://0x7f.0.0.1',
+      'wss://8.8', // 8.0.0.8 to inet_aton
+      'wss://134744072', // 8.8.8.8 as one number
+      'wss://010.8.8.8', // octal 8.8.8.8 to inet_aton, decimal 10.8.8.8 to others
+      'wss://256.1.1.1',
+    ]) {
+      expect(isPublicRelayUrl(bad)).toBe(false);
+    }
+    expect(isPublicRelayUrl('wss://relay.example')).toBe(true);
   });
 });
 

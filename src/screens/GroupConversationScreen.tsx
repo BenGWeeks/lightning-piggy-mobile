@@ -49,6 +49,8 @@ import FriendPickerSheet from '../components/FriendPickerSheet';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import type { ContactProfileBodyData } from '../components/ContactProfileBody';
 import MessageBubble from '../components/MessageBubble';
+import { useFollowedPubkeys } from '../hooks/useFollowedPubkeys';
+import { canAutoLoadMedia } from '../utils/mediaTrust';
 import MessageActionsSheet from '../components/MessageActionsSheet';
 import { useMessageActionsMenu, type ActionedMessage } from '../hooks/useMessageActionsMenu';
 import { isMarmotGroupId } from '../services/marmotSession';
@@ -115,6 +117,9 @@ const GroupConversationScreen: React.FC = () => {
   const { getGroup, deleteGroup, secretMode, setSecretMode } = useGroups();
   const { pubkey: myPubkey, profile: myProfile, fetchProfilesForPubkeys } = useNostr();
   const { contacts } = useNostrContacts();
+  // Trust gate (#1338), decided per SENDER: a stranger's media in a group
+  // stays tap-to-load even when I follow other members.
+  const followed = useFollowedPubkeys();
   const [renameVisible, setRenameVisible] = useState(false);
   const [membersSheetVisible, setMembersSheetVisible] = useState(false);
   const messageOwner = myPubkey ? `${myPubkey}:${route.params.groupId}` : null;
@@ -531,6 +536,7 @@ const GroupConversationScreen: React.FC = () => {
           onShowInfo={handleShowInfo}
           quote={item.quote}
           edited={item.editedAt !== undefined}
+          autoLoadMedia={canAutoLoadMedia(fromMe, item.senderPubkey, followed)}
           onLongPress={
             fromMe && marmotGroupId
               ? () =>
@@ -551,6 +557,7 @@ const GroupConversationScreen: React.FC = () => {
       );
     },
     [
+      followed,
       marmotGroupId,
       setActioned,
       myPubkey,

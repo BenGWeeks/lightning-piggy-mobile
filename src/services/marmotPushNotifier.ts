@@ -125,8 +125,10 @@ export class MarmotPushNotifier {
         // stale hint (older builds advertised nos.lol, which our self-hosted
         // servers can't reach from their IP) must not swallow the trigger for
         // the records that carry no hint.
+        // The server's inbox goes first so members' hints can't crowd it out
+        // of the transport's relay cap (#1338).
         const inbox = await inboxes[i];
-        const relays = [...new Set([...relayHints, ...inbox])];
+        const relays = [...new Set([...inbox, ...relayHints])];
         if (relays.length === 0) continue;
         // One server's failure (e.g. wrap encryption throwing) must not cost
         // the other servers their triggers.

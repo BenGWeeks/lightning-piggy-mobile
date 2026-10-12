@@ -53,6 +53,14 @@ describe('collectMediaTiles', () => {
       ['3', 'image'],
     ]);
   });
+
+  it("carries each tile's author, which decides auto-load vs tap-to-load (#1338)", () => {
+    const tiles = collectMediaTiles([
+      ev('1', 2, { pubkey: 'alice', content: 'https://x.example/a.png' }),
+      ev('2', 1, { pubkey: 'bob', content: 'https://x.example/b.png' }),
+    ]);
+    expect(tiles.map((t) => t.authorPubkey)).toEqual(['alice', 'bob']);
+  });
 });
 
 describe('buildProfileRows', () => {

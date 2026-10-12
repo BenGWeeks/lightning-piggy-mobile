@@ -18,6 +18,11 @@ import {
   type BlockLimits,
 } from '../../utils/nostrContentBlocks';
 import { isSupportedImageUrl } from '../../utils/imageUrl';
+import { isPublicHttpUrl } from '../../utils/publicUrl';
+import type { NoteMediaItem } from '../../utils/noteMedia';
+import { useIsTrustedAuthor } from '../../hooks/useFollowedPubkeys';
+import { useTapToReveal } from '../../hooks/useTapToReveal';
+import TapToLoadMedia from '../TapToLoadMedia';
 
 interface Props {
   content: string;
@@ -29,6 +34,10 @@ interface Props {
   onImagePress?: (url: string) => void;
   /** Override the per-body caps on embedded cards and thumbnails. */
   limits?: BlockLimits;
+  /** Who wrote `content` (#1338). Images auto-load only when that's me or
+   * someone I follow, and only from public hosts; otherwise each thumbnail
+   * is "tap to load". Omitted = untrusted (fail closed). */
+  authorPubkey?: string | null;
 }
 
 function openUrl(url: string): void {
@@ -46,8 +55,9 @@ function openUrl(url: string): void {
  * and other URLs become links. Built for the profile page first and meant
  * for chat next (#1295 @mentions). Parsing is memoised per `content`.
  */
-const NostrContent: React.FC<Props> = ({ content, testID, onImagePress, limits }) => {
+const NostrContent: React.FC<Props> = ({ content, testID, onImagePress, limits, authorPubkey }) => {
   const colors = useThemeColors();
+  const autoLoad = useIsTrustedAuthor(authorPubkey);
   const styles = useMemo(() => createNostrContentStyles(colors), [colors]);
   const blocks = useMemo(
     () => groupContentBlocks(parseNostrContent(content), limits),
@@ -63,7 +73,13 @@ const NostrContent: React.FC<Props> = ({ content, testID, onImagePress, limits }
   return (
     <View style={styles.container} testID={testID}>
       {blocks.map((block, i) => (
-        <Block key={blockKey(block, i)} block={block} styles={styles} onImagePress={openImage} />
+        <Block
+          key={blockKey(block, i)}
+          block={block}
+          styles={styles}
+          onImagePress={openImage}
+          autoLoad={autoLoad}
+        />
       ))}
       {viewerUrl ? (
         <FullscreenImageModal url={viewerUrl} onClose={() => setViewerUrl(null)} />
@@ -81,47 +97,24 @@ const Block: React.FC<{
   block: ContentBlock;
   styles: NostrContentStyles;
   onImagePress: (url: string) => void;
-}> = ({ block, styles, onImagePress }) => {
-  const t = useTranslation();
-  const colors = useThemeColors();
+  autoLoad: boolean;
+}> = ({ block, styles, onImagePress, autoLoad }) => {
   if (block.type === 'embed') return <EmbeddedEventCard token={block.token} styles={styles} />;
   if (block.type === 'media') {
     const single = block.items.length === 1;
     return (
       <View style={styles.mediaRow}>
-        {block.items.map((item, i) => {
-          const isVideo = item.type === 'video';
-          const showImage = !isVideo && isSupportedImageUrl(item.url);
-          return (
-            <TouchableOpacity
-              key={`${i}-${item.url}`}
-              style={[styles.thumb, single && styles.thumbSingle]}
-              onPress={() => (isVideo || !showImage ? openUrl(item.url) : onImagePress(item.url))}
-              accessibilityRole={isVideo ? 'button' : 'imagebutton'}
-              accessibilityLabel={
-                isVideo ? t('nostrContent.playVideo') : t('nostrContent.viewImage')
-              }
-              testID={`nostr-inline-${item.type}-${i}`}
-              activeOpacity={0.85}
-            >
-              {showImage ? (
-                <Image
-                  source={{ uri: item.url }}
-                  style={styles.thumbImage}
-                  contentFit="cover"
-                  cachePolicy="memory-disk"
-                  recyclingKey={item.url}
-                  autoplay={false}
-                />
-              ) : null}
-              {isVideo ? (
-                <View style={styles.playBadge}>
-                  <Play size={18} color={colors.white} fill={colors.white} />
-                </View>
-              ) : null}
-            </TouchableOpacity>
-          );
-        })}
+        {block.items.map((item, i) => (
+          <MediaThumb
+            key={`${i}-${item.url}`}
+            item={item}
+            index={i}
+            single={single}
+            styles={styles}
+            onImagePress={onImagePress}
+            autoLoad={autoLoad}
+          />
+        ))}
       </View>
     );
   }
@@ -146,6 +139,72 @@ const Block: React.FC<{
         return token.text;
       })}
     </Text>
+  );
+};
+
+/** One inline image / video thumbnail. Its own component so the tap-to-load
+ * state (#1338) can live in a hook per item. */
+const MediaThumb: React.FC<{
+  item: NoteMediaItem;
+  index: number;
+  single: boolean;
+  styles: NostrContentStyles;
+  onImagePress: (url: string) => void;
+  autoLoad: boolean;
+}> = ({ item, index, single, styles, onImagePress, autoLoad }) => {
+  const t = useTranslation();
+  const colors = useThemeColors();
+  const isVideo = item.type === 'video';
+  const isImage = !isVideo && isSupportedImageUrl(item.url);
+  const [loadAllowed, reveal] = useTapToReveal(
+    `nostr-image:${item.url}`,
+    autoLoad && isPublicHttpUrl(item.url),
+  );
+  const gated = isImage && !loadAllowed;
+  const onPress = () => {
+    if (gated) reveal();
+    else if (isVideo || !isImage) openUrl(item.url);
+    else onImagePress(item.url);
+  };
+  return (
+    <TouchableOpacity
+      style={[styles.thumb, single && styles.thumbSingle]}
+      onPress={onPress}
+      accessibilityRole={isVideo ? 'button' : gated ? 'button' : 'imagebutton'}
+      accessibilityLabel={
+        isVideo
+          ? t('nostrContent.playVideo')
+          : gated
+            ? t('messageBubble.tapToLoadImage')
+            : t('nostrContent.viewImage')
+      }
+      testID={`nostr-inline-${item.type}-${index}`}
+      activeOpacity={0.85}
+    >
+      {isImage && loadAllowed ? (
+        <Image
+          source={{ uri: item.url }}
+          style={styles.thumbImage}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          recyclingKey={item.url}
+          autoplay={false}
+        />
+      ) : null}
+      {gated ? (
+        <TapToLoadMedia
+          variant="thumb"
+          url={item.url}
+          fromMe={false}
+          testID={`nostr-inline-image-placeholder-${index}`}
+        />
+      ) : null}
+      {isVideo ? (
+        <View style={styles.playBadge}>
+          <Play size={18} color={colors.white} fill={colors.white} />
+        </View>
+      ) : null}
+    </TouchableOpacity>
   );
 };
 

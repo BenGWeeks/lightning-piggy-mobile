@@ -301,6 +301,7 @@ const ContactProfileHeader: React.FC<Props> = ({
           <NostrContent
             content={contact.about.trim()}
             onImagePress={onOpenImage}
+            authorPubkey={contact.pubkey}
             testID="contact-profile-about"
           />
         </View>

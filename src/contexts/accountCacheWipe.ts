@@ -34,6 +34,7 @@ import { clearNotificationHistory } from '../services/notificationHistory';
 import { PER_ACCOUNT_SETTING_BASES } from '../services/safetySettingsMigration';
 import { forgetAccountSettings } from '../services/accountSettingsCache';
 import { forgetLinkPreviewMirror } from '../services/linkPreviewPreference';
+import { forgetRevealedMedia } from '../services/mediaRevealStore';
 import { wipeDecryptedMediaForOwner } from '../services/decryptedMediaCache';
 import { WATCHER_PUSH_KEY_BASE } from '../services/watcherPushStore';
 import { KEY_BACKED_UP_KEY_BASE } from '../services/keyBackupStatus';
@@ -141,6 +142,7 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
   ];
   forgetSellerAccount(loggedOutPubkey);
   forgetLinkPreviewMirror(loggedOutPubkey);
+  forgetRevealedMedia(loggedOutPubkey);
   forgetAccountSettings(loggedOutPubkey);
   const allKeys = await AsyncStorage.getAllKeys();
   const convPrefix = DM_CONV_CACHE_PREFIX + loggedOutPubkey + '_';

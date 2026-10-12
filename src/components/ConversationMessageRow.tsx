@@ -63,6 +63,9 @@ export interface ConversationMessageRowProps {
   peerName?: string;
   /** A failed Marmot invite's "Ask for a new invite" (#1269). */
   onAskForInvite?: () => void;
+  /** I follow the peer (#1338): their media / link previews load without a
+   *  tap. My own messages always load. */
+  peerMediaTrusted: boolean;
 }
 
 /**
@@ -102,6 +105,7 @@ function ConversationMessageRow({
   onAddNwc,
   peerName,
   onAskForInvite,
+  peerMediaTrusted,
 }: ConversationMessageRowProps): React.ReactElement {
   const { formatLocale } = useLocale();
   if (item.kind === 'dayHeader') {
@@ -290,6 +294,7 @@ function ConversationMessageRow({
       onToggleReaction={onToggleReaction}
       quote={'quote' in item ? withPeerName(item.quote, peerName) : undefined}
       edited={item.kind === 'message' ? item.edited : undefined}
+      autoLoadMedia={item.fromMe || peerMediaTrusted}
       testIdPrefix="conversation"
     />
   );
