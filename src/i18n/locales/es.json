@@ -2485,6 +2485,8 @@
         "shippingHint": "Cada opción es un lugar al que envías y lo que cuesta. Tus artículos eligen entre ellas.",
         "addZone": "Añadir opción de envío",
         "save": "Guardar tienda",
+        "saveAndAddFirstItem": "Guardar y añadir tu primer artículo",
+        "saveForNow": "Guardar por ahora",
         "saving": "Guardando…",
         "saved": "Tienda guardada",
         "saveFailed": "No se pudo guardar tu tienda",

@@ -2485,6 +2485,8 @@
         "shippingHint": "Each option is a place you ship to and what it costs. Your items pick from these.",
         "addZone": "Add shipping option",
         "save": "Save shop",
+        "saveAndAddFirstItem": "Save and add your first item",
+        "saveForNow": "Save for now",
         "saving": "Saving…",
         "saved": "Shop saved",
         "saveFailed": "Couldn't save your shop",

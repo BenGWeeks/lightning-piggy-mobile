@@ -2485,6 +2485,8 @@
         "shippingHint": "Minden lehetőség megadja, hova szállítasz és mennyiért. Ezek közül választhatsz a termékeidhez.",
         "addZone": "Szállítási lehetőség hozzáadása",
         "save": "Üzlet mentése",
+        "saveAndAddFirstItem": "Mentés és az első termék hozzáadása",
+        "saveForNow": "Egyelőre csak mentés",
         "saving": "Mentés…",
         "saved": "Üzlet mentve",
         "saveFailed": "Az üzletedet nem sikerült menteni",

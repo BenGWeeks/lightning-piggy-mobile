@@ -4,7 +4,8 @@ import { finalizeEvent, getPublicKey } from 'nostr-tools';
 import MarketListingEditorScreen from './MarketListingEditorScreen';
 import { Alert } from '../components/BrandedAlert';
 import { StaleRevisionError } from '../utils/marketSellerRevision';
-import { buildListingTemplate } from '../utils/marketSellerEvents';
+import type { SellerSnapshot } from '../utils/marketSellerSnapshot';
+import { buildListingTemplate, buildShopTemplate } from '../utils/marketSellerEvents';
 import type { ExploreNavigation, MarketListingEditorRoute } from '../navigation/types';
 
 jest.mock('../contexts/ThemeContext', () => ({ useThemeColors: () => ({}) }));
@@ -49,7 +50,7 @@ const listing = finalizeEvent(
 );
 const mockShop = {
   pubkey,
-  snapshot: { shop: null, listings: [listing], zones: [], zoneEvents: new Map() },
+  snapshot: { shop: null, listings: [listing], zones: [], zoneEvents: new Map() } as SellerSnapshot,
   status: 'ready',
   refresh: jest.fn(),
 };
@@ -76,4 +77,73 @@ it('retains the deletion conflict after Cancel when the shared snapshot removed 
   expect(mockSave.mock.calls[1][2]).toEqual({ force: false });
   expect(Alert.alert).toHaveBeenCalledTimes(2);
   expect(navigation.goBack).not.toHaveBeenCalled();
+});
+
+describe('listing creation after shop setup', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockSave.mockReset().mockResolvedValue(undefined);
+    mockShop.snapshot = {
+      shop: finalizeEvent(
+        {
+          ...buildShopTemplate({
+            shop: { name: 'My shop', description: '', currency: 'SATS' },
+            pubkey,
+            productCoordinates: [],
+            zoneCoordinates: [],
+          }),
+          created_at: 100,
+        },
+        key,
+      ),
+      listings: [],
+      zones: [],
+      zoneEvents: new Map(),
+    };
+  });
+
+  const navigation = { goBack: jest.fn(), popTo: jest.fn() } as unknown as ExploreNavigation;
+  const renderDraft = (returnToMyShop?: boolean) => {
+    const route = { params: { returnToMyShop } } as MarketListingEditorRoute;
+    const screen = render(<MarketListingEditorScreen navigation={navigation} route={route} />);
+    fireEvent.changeText(screen.getByTestId('listing-title-input'), 'First item');
+    fireEvent.changeText(screen.getByTestId('listing-description-input'), 'An item to sell');
+    fireEvent.changeText(screen.getByTestId('listing-price-input'), '21');
+    return screen;
+  };
+
+  it('returns to My shop only after publishing the first listing succeeds', async () => {
+    let finish!: () => void;
+    mockSave.mockImplementation(() => new Promise<void>((resolve) => (finish = resolve)));
+    const screen = renderDraft(true);
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('listing-publish'));
+    });
+    expect(mockSave).toHaveBeenCalledWith(expect.objectContaining({ title: 'First item' }), null, {
+      force: false,
+    });
+    expect(navigation.popTo).not.toHaveBeenCalled();
+    await act(async () => finish());
+    expect(navigation.popTo).toHaveBeenCalledWith('MarketMyShop');
+    expect(navigation.goBack).not.toHaveBeenCalled();
+  });
+
+  it('stays in the editor if publishing fails', async () => {
+    mockSave.mockRejectedValue(new Error('Offline'));
+    const screen = renderDraft(true);
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('listing-publish'));
+    });
+    expect(navigation.popTo).not.toHaveBeenCalled();
+    expect(navigation.goBack).not.toHaveBeenCalled();
+  });
+
+  it('keeps back navigation for ordinary listing creation', async () => {
+    const screen = renderDraft();
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('listing-publish'));
+    });
+    expect(navigation.goBack).toHaveBeenCalledTimes(1);
+    expect(navigation.popTo).not.toHaveBeenCalled();
+  });
 });

@@ -73,6 +73,8 @@ export const createMarketSellerStyles = (colors: Palette) =>
       borderWidth: 1.5,
       borderColor: colors.brandPink,
     },
+    shopSaveButtonText: { flexShrink: 1, textAlign: 'center', paddingVertical: 12 },
+    textButton: { minHeight: 44, alignItems: 'center', justifyContent: 'center' },
     secondaryButtonText: { fontSize: 15, fontWeight: '700', color: colors.brandPink },
     dangerButton: { borderColor: colors.red },
     dangerButtonText: { color: colors.red },

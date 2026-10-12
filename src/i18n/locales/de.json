@@ -2485,6 +2485,8 @@
         "shippingHint": "Jede Option legt fest, wohin du versendest und was es kostet. Für deine Produkte wählst du aus diesen Optionen.",
         "addZone": "Versandoption hinzufügen",
         "save": "Shop speichern",
+        "saveAndAddFirstItem": "Speichern und deinen ersten Artikel hinzufügen",
+        "saveForNow": "Vorerst speichern",
         "saving": "Wird gespeichert…",
         "saved": "Shop gespeichert",
         "saveFailed": "Dein Shop konnte nicht gespeichert werden",
