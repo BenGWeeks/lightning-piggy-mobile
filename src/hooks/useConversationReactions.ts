@@ -1,3 +1,4 @@
+import { useCoalescedMap } from '../utils/useCoalescedMap';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert } from '../components/BrandedAlert';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -20,10 +21,12 @@ import {
 
 export interface UseConversationReactionsParams {
   messages: ConversationMessageInput[];
+  scopeKey?: string | null;
   // Viewer pubkey (author of our own sent bubbles).
   myPubkey: string | null;
   // This conversation's peer pubkey (author of received bubbles).
   peerPubkey: string;
+  authorForItem?: (item: Item) => string | null;
   fetchReactionsForMessages: (targetEventIds: string[]) => Promise<
     {
       id: string;
@@ -106,8 +109,10 @@ function itemRumorId(item: Item): string | undefined {
 
 export function useConversationReactions({
   messages,
+  scopeKey,
   myPubkey,
   peerPubkey,
+  authorForItem,
   fetchReactionsForMessages,
   publishReaction,
   deleteReaction,
@@ -134,6 +139,12 @@ export function useConversationReactions({
   // events), or a slower history read can return a reaction after its live
   // retraction — either way it must stay gone.
   const retractionsRef = useRef(new Map<string, Set<string>>());
+
+  useEffect(() => {
+    setReactionRecords([]);
+    reactionFetchScheduledRef.current.clear();
+    retractionsRef.current.clear();
+  }, [scopeKey]);
 
   const mergeFreshRecords = useCallback((fresh: ReactionRecord[]) => {
     if (fresh.length === 0) return;
@@ -182,17 +193,33 @@ export function useConversationReactions({
     });
   }, []);
 
+  // Stage live MLS events before applying them: one state update per burst,
+  // including deletions that arrive before their reaction.
+  const {
+    map: liveEvents,
+    enqueue,
+    reset,
+    setMap,
+  } = useCoalescedMap<
+    Parameters<NonNullable<UseConversationReactionsParams['subscribeLiveReactions']>>[0] extends (
+      event: infer E,
+    ) => void
+      ? E
+      : never
+  >();
   useEffect(() => {
+    reset();
+    reactionFetchScheduledRef.current.clear();
     if (!subscribeLiveReactions) return;
-    return subscribeLiveReactions((event) => {
-      if (event.kind === 5) {
-        applyDeletionEvents([event]);
-        return;
-      }
-      const record = parseReactionEvent(event);
-      if (record) mergeFreshRecords([record]);
-    });
-  }, [subscribeLiveReactions, applyDeletionEvents, mergeFreshRecords]);
+    return subscribeLiveReactions((event) => enqueue(event.id, event));
+  }, [subscribeLiveReactions, enqueue, reset]);
+  useEffect(() => {
+    if (liveEvents.size === 0) return;
+    const events = [...liveEvents.values()];
+    setMap(new Map());
+    applyDeletionEvents(events.filter((event) => event.kind === 5));
+    mergeFreshRecords(events.map(parseReactionEvent).filter((r): r is ReactionRecord => !!r));
+  }, [liveEvents, setMap, applyDeletionEvents, mergeFreshRecords]);
 
   // Fetch reactions for any new target ids (the cross-peer-stable rumor id).
   // Optimistic-local / warm-cache rows without a rumorId are skipped — they'll
@@ -247,11 +274,13 @@ export function useConversationReactions({
     mergeFreshRecords,
     fetchReactionDeletions,
     applyDeletionEvents,
+    subscribeLiveReactions,
   ]);
 
   // The currently-actioned message (long-pressed → MessageActionsSheet open).
   const [actionsForMessage, setActionsForMessage] = useState<ActionedMessage | null>(null);
   const closeMessageActions = useCallback(() => setActionsForMessage(null), []);
+  useEffect(() => closeMessageActions(), [scopeKey, closeMessageActions]);
 
   // Optimistic-publish bookkeeping for the removal-before-ack race. When the
   // user un-reacts before `publishReaction` has returned the real kind-7 id,
@@ -376,7 +405,11 @@ export function useConversationReactions({
       if (!targetId || item.kind === 'zap' || item.kind === 'order' || item.kind === 'dayHeader') {
         return null;
       }
-      const authorPubkey = item.fromMe ? myPubkey : peerPubkey;
+      const authorPubkey = authorForItem
+        ? authorForItem(item)
+        : item.fromMe
+          ? myPubkey
+          : peerPubkey;
       if (!authorPubkey) return null;
       const targetKind: 14 | 4 = item.kind === 'message' && item.wireKind === 4 ? 4 : 14;
       const text = item.kind === 'message' ? (item.text ?? '') : '';
@@ -398,7 +431,7 @@ export function useConversationReactions({
           : {}),
       };
     },
-    [myPubkey, peerPubkey],
+    [myPubkey, peerPubkey, authorForItem],
   );
 
   const reactionsForItem = useCallback(

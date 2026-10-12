@@ -298,7 +298,8 @@
     "sendMessage": "Надіслати повідомлення",
     "editingMessage": "Редагування повідомлення",
     "cancelEdit": "Скасувати редагування",
-    "saveEdit": "Зберегти зміни"
+    "saveEdit": "Зберегти зміни",
+    "cancelReply": "Скасувати відповідь"
   },
   "conversationScreen": {
     "couldNotStartLiveShareTitle": "Не вдалося почати трансляцію локації",
@@ -1181,7 +1182,8 @@
     "copied": "Скопійовано",
     "moreEmoji": "Більше емодзі",
     "edit": "Редагувати",
-    "delete": "Видалити для всіх"
+    "delete": "Видалити для всіх",
+    "reply": "Відповісти"
   },
   "messageEdit": {
     "deleteTitle": "Видалити для всіх?",

@@ -82,3 +82,24 @@ describe('marmotReactionSource', () => {
     unsubscribe();
   });
 });
+
+it('scopes group history, sends kind 7 and kind 5 into that group, and filters the live stream', async () => {
+  const session = fakeSession();
+  setMarmotSession(session as unknown as MarmotSession);
+  const source = marmotReactionSource(ME, PEER, 'g-old');
+  expect((await source.fetchReactionsForMessages(['m-new', 'm-old'])).map((r) => r.id)).toEqual([
+    'r-old',
+  ]);
+  await source.publishReaction({ emoji: '❤️', targetEventId: 'm-old' });
+  await source.deleteReaction('r-old');
+  expect(session.sendRumor.mock.calls).toEqual([
+    ['g-old', expect.objectContaining({ kind: 7, content: '❤️', tags: [['e', 'm-old']] })],
+    ['g-old', expect.objectContaining({ kind: 5, content: '', tags: [['e', 'r-old']] })],
+  ]);
+  const onEvent = jest.fn();
+  const unsubscribe = source.subscribe(onEvent);
+  session.emit({ group: { id: 'g-old', isDm: false }, rumor: rumor('r1', 7) });
+  session.emit({ group: { id: 'g-new', isDm: false }, rumor: rumor('r2', 7) });
+  expect(onEvent).toHaveBeenCalledTimes(1);
+  unsubscribe();
+});

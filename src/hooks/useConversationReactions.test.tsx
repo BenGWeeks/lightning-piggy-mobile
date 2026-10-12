@@ -208,6 +208,8 @@ describe('useConversationReactions — copy text', () => {
 });
 
 describe('useConversationReactions — live (Marmot) reactions', () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
   const live = () => {
     let emit: (
       e: Parameters<
@@ -243,6 +245,8 @@ describe('useConversationReactions — live (Marmot) reactions', () => {
       useConversationReactions(makeParams({ subscribeLiveReactions: feed.subscribeLiveReactions })),
     );
     act(() => feed.emit(reaction));
+    expect(result.current.reactionsByTarget.get(TARGET)).toBeUndefined();
+    act(() => jest.advanceTimersByTime(100));
     expect(result.current.reactionsByTarget.get(TARGET)).toBeDefined();
   });
 
@@ -253,6 +257,7 @@ describe('useConversationReactions — live (Marmot) reactions', () => {
     );
     act(() => feed.emit(retraction));
     act(() => feed.emit(reaction));
+    act(() => jest.advanceTimersByTime(100));
     expect(result.current.reactionsByTarget.get(TARGET)).toBeUndefined();
   });
 
@@ -263,6 +268,7 @@ describe('useConversationReactions — live (Marmot) reactions', () => {
     );
     act(() => feed.emit({ ...retraction, pubkey: MY_PK }));
     act(() => feed.emit(reaction));
+    act(() => jest.advanceTimersByTime(100));
     expect(result.current.reactionsByTarget.get(TARGET)).toBeDefined();
   });
 });

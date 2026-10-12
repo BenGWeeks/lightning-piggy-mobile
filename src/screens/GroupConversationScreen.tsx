@@ -54,7 +54,8 @@ import { useGroupLiveLocation } from '../hooks/useGroupLiveLocation';
 import { useFollowedPubkeys } from '../hooks/useFollowedPubkeys';
 import { canAutoLoadMedia } from '../utils/mediaTrust';
 import MessageActionsSheet from '../components/MessageActionsSheet';
-import { useMessageActionsMenu, type ActionedMessage } from '../hooks/useMessageActionsMenu';
+import { useGroupMessageActions } from '../hooks/useGroupMessageActions';
+import { useMessageActionsMenu } from '../hooks/useMessageActionsMenu';
 import { isMarmotGroupId } from '../services/marmotSession';
 import DeliveryDetailSheet from '../components/DeliveryDetailSheet';
 import DeviceNoticeLine from '../components/DeviceNoticeLine';
@@ -68,11 +69,7 @@ import { useMessageInfoSheet } from '../hooks/useMessageInfoSheet';
 import SecretModeCelebration from '../components/SecretModeCelebration';
 import { isConfigured as isGifConfigured } from '../services/giphyService';
 import { buildOsmViewUrl, type SharedLocation } from '../services/locationService';
-import {
-  isEditableGroupText,
-  loadGroupMessages,
-  type GroupMessage,
-} from '../services/groupMessagesStorageService';
+import { loadGroupMessages, type GroupMessage } from '../services/groupMessagesStorageService';
 import { useGroupPolls } from '../hooks/useGroupPolls';
 import { usePaidInvoiceTracker } from '../hooks/usePaidInvoiceTracker';
 import type { NostrProfile } from '../types/nostr';
@@ -84,12 +81,11 @@ type GroupConversationNavigation = NativeStackNavigationProp<
   'GroupConversation'
 >;
 
+const GroupMessageBubble = React.memo(MessageBubble);
 const EMPTY_PUBKEYS: string[] = [];
 const EMPTY_MESSAGES: GroupMessage[] = [];
 const groupMessageId = (m: GroupMessage) => m.id;
 const timelineRowId = (row: GroupTimelineRow) => row.id;
-const noReaction = () => {};
-const NO_ACTION: ActionedMessage | null = null;
 
 const GroupConversationScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
@@ -273,6 +269,17 @@ const GroupConversationScreen: React.FC = () => {
   // @mentions (#1295): the member picker + `@Name` → `nostr:npub…` on send.
   const mention = useMentionComposer({ draft, setDraft, members, selfPubkey: myPubkey });
 
+  const reactions = useGroupMessageActions({
+    messages,
+    myPubkey,
+    groupId: marmotGroupId,
+    memberNameByPubkey,
+    formatLocale,
+  });
+  const actioned = reactions.actionsForMessage;
+  const closeActions = reactions.closeMessageActions;
+  const { replyTo, cancelReply, startReply, replyQuote } = reactions;
+
   // Send / upload / share orchestration + in-flight flags live in the
   // useGroupComposerActions hook (parallel to the 1:1 screen's
   // useConversationComposerActions). Everything funnels through the hook's
@@ -303,6 +310,8 @@ const GroupConversationScreen: React.FC = () => {
     setContactPickerOpen,
     setVoiceSheetOpen,
     encodeMessage: mention.encode,
+    replyTo,
+    onReplySent: cancelReply,
   });
 
   // Tap a group bubble → the same message-info sheet 1:1 chats use (#856).
@@ -318,10 +327,6 @@ const GroupConversationScreen: React.FC = () => {
     canResend: canResendFromInfo,
   } = useMessageInfoSheet(resendText, marmotGroupId ? 'marmot' : 'nip17', senderOf);
 
-  // Long-press your own message in a Marmot group: Copy text, Edit, Delete
-  // for everyone (#1237). Groups have no reactions, so nothing else to offer.
-  const [actioned, setActioned] = useAccountState<ActionedMessage | null>(messageOwner, NO_ACTION);
-  const closeActions = useCallback(() => setActioned(null), [setActioned]);
   const menu = useMessageActionsMenu({
     myPubkey,
     scope: messageOwner,
@@ -485,7 +490,7 @@ const GroupConversationScreen: React.FC = () => {
       // detection up front; image / invoice / lnaddr / contact ride on the
       // text variant and detect at render time.
       const bubble = (
-        <MessageBubble
+        <GroupMessageBubble
           id={item.id}
           fromMe={fromMe}
           createdAt={item.createdAt}
@@ -516,21 +521,7 @@ const GroupConversationScreen: React.FC = () => {
           quote={item.quote}
           edited={item.editedAt !== undefined}
           autoLoadMedia={canAutoLoadMedia(fromMe, item.senderPubkey, followed)}
-          onLongPress={
-            fromMe && marmotGroupId
-              ? () =>
-                  setActioned({
-                    targetId: item.id,
-                    fromMe,
-                    // Same rule the store applies to edits.
-                    ...(item.content.kind === 'text' &&
-                    isEditableGroupText(item.text) &&
-                    item.text.trim() !== ''
-                      ? { copyText: item.text }
-                      : {}),
-                  })
-              : undefined
-          }
+          {...reactions.propsForMessage(item)}
           testIdPrefix="group-conversation"
         />
       );
@@ -547,8 +538,7 @@ const GroupConversationScreen: React.FC = () => {
       colors,
       followed,
       read.dividerId,
-      marmotGroupId,
-      setActioned,
+      reactions,
       myPubkey,
       memberNameByPubkey,
       sharedProfiles,
@@ -728,6 +718,7 @@ const GroupConversationScreen: React.FC = () => {
           value={draft}
           onChangeText={setDraft}
           {...menu.composer}
+          replying={replyQuote ? { quote: replyQuote, onCancel: cancelReply } : undefined}
           accessory={<MentionPicker candidates={mention.candidates} onPick={mention.pick} />}
           onSelectionChange={mention.onSelectionChange}
           selection={mention.selection}
@@ -889,10 +880,28 @@ const GroupConversationScreen: React.FC = () => {
       <MessageActionsSheet
         visible={actioned !== null}
         onClose={closeActions}
-        myReactions={{}}
-        onToggleReaction={noReaction}
-        showReactions={false}
+        myReactions={
+          actioned ? (reactions.reactionsByTarget.get(actioned.targetId)?.myReactions ?? {}) : {}
+        }
+        onToggleReaction={reactions.handleToggleReaction}
+        showReactions={!!marmotGroupId}
+        onReply={
+          actioned
+            ? () => {
+                menu.composer.editing?.onCancel();
+                startReply();
+              }
+            : undefined
+        }
         {...menu.sheet}
+        onEdit={
+          menu.sheet.onEdit
+            ? () => {
+                cancelReply();
+                menu.sheet.onEdit?.();
+              }
+            : undefined
+        }
       />
 
       <ContactProfileSheet

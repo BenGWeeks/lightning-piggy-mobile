@@ -298,7 +298,8 @@
     "sendMessage": "मेसेज पाठवा",
     "editingMessage": "मेसेज एडिट करत आहात",
     "cancelEdit": "एडिट रद्द करा",
-    "saveEdit": "एडिट सेव्ह करा"
+    "saveEdit": "एडिट सेव्ह करा",
+    "cancelReply": "उत्तर रद्द करा"
   },
   "conversationScreen": {
     "couldNotStartLiveShareTitle": "लाइव्ह शेअर सुरू करता आले नाही",
@@ -1209,7 +1210,8 @@
     "copied": "कॉपी केले",
     "moreEmoji": "आणखी इमोजी",
     "edit": "एडिट करा",
-    "delete": "सर्वांसाठी डिलीट करा"
+    "delete": "सर्वांसाठी डिलीट करा",
+    "reply": "उत्तर द्या"
   },
   "messageEdit": {
     "deleteTitle": "सर्वांसाठी डिलीट करायचा?",

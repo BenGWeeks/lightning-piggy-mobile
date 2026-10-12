@@ -54,8 +54,14 @@ const eTargets = (r: MarmotRumor) =>
   r.tags.filter((t) => t[0] === 'e' && typeof t[1] === 'string').map((t) => t[1].toLowerCase());
 
 /** The reaction backend for `myPubkey`'s Marmot DM(s) with `peer`. */
-export function marmotReactionSource(myPubkey: string, peer: string): MarmotReactionSource {
+export function marmotReactionSource(
+  myPubkey: string,
+  peer: string,
+  groupId?: string,
+): MarmotReactionSource {
   const p = peer.toLowerCase();
+  const groupsFor = (session: MarmotSession) =>
+    groupId ? Promise.resolve([groupId]) : session.dmGroupIdsWith(p);
 
   // Every event of `kind` across all DM groups with the peer, filtered to
   // those whose `e` tag names one of `ids` (the history store can't filter
@@ -65,7 +71,7 @@ export function marmotReactionSource(myPubkey: string, peer: string): MarmotReac
     const wanted = new Set(ids.map((id) => id.toLowerCase()));
     const session = await sessionFor(myPubkey);
     const out: MarmotRumor[] = [];
-    for (const groupId of await session.dmGroupIdsWith(p)) {
+    for (const groupId of await groupsFor(session)) {
       for (const r of await session.queryHistory(groupId, [kind])) {
         if (eTargets(r).some((t) => wanted.has(t))) out.push(r);
       }
@@ -78,7 +84,7 @@ export function marmotReactionSource(myPubkey: string, peer: string): MarmotReac
   // match it. Falls back to the newest DM.
   const sendReferencing = async (kind: number, content: string, targetId: string) => {
     const session = await sessionFor(myPubkey);
-    const groups = await session.dmGroupIdsWith(p);
+    const groups = await groupsFor(session);
     let home = groups[0];
     for (const groupId of groups) {
       if ((await session.queryHistory(groupId)).some((r) => r.id === targetId)) {
@@ -110,7 +116,9 @@ export function marmotReactionSource(myPubkey: string, peer: string): MarmotReac
         detach = session.subscribe({
           onMessage: ({ group, rumor }) => {
             if (rumor.kind !== REACTION_KIND && rumor.kind !== DELETION_KIND) return;
-            if (group.isDm && group.memberPubkeys[0] === p) onEvent(rumor);
+            if (groupId ? group.id === groupId : group.isDm && group.memberPubkeys[0] === p) {
+              onEvent(rumor);
+            }
           },
         });
       });

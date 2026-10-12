@@ -50,6 +50,8 @@ export function useGroupComposerActions(params: {
   setVoiceSheetOpen: React.Dispatch<React.SetStateAction<boolean>>;
   /** Rewrites the typed text before a composer send — `@Name` → `nostr:npub…` (#1295). */
   encodeMessage?: (text: string) => string;
+  replyTo?: string;
+  onReplySent?: () => void;
 }) {
   const {
     group,
@@ -62,6 +64,8 @@ export function useGroupComposerActions(params: {
     setContactPickerOpen,
     setVoiceSheetOpen,
     encodeMessage,
+    replyTo,
+    onReplySent,
   } = params;
 
   const { sendGroupMessage, pubkey: myPubkey, signEvent } = useNostr();
@@ -92,11 +96,13 @@ export function useGroupComposerActions(params: {
       // the message actually went to, not the one this callback closed over.
       targetGroup = group,
       targetPubkey = myPubkey,
+      parent?: string,
     ): { row: GroupMessage; persisted: Promise<boolean> } | null => {
       if (!targetGroup || !targetPubkey) return null;
       const local: GroupMessage = {
         id: `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         senderPubkey: targetPubkey,
+        ...(parent ? { replyTo: parent } : {}),
         text,
         createdAt: Math.floor(Date.now() / 1000),
       };
@@ -195,10 +201,11 @@ export function useGroupComposerActions(params: {
           subject: group.name,
           memberPubkeys: group.memberPubkeys,
           text,
+          replyTo,
         },
         {
           onRumorReady: () => {
-            optimistic.current = appendOptimisticGroupRow(text, group, myPubkey);
+            optimistic.current = appendOptimisticGroupRow(text, group, myPubkey, replyTo);
           },
         },
       );
@@ -222,6 +229,7 @@ export function useGroupComposerActions(params: {
       }
       if (optimistic.current)
         await adoptRumorId(optimistic.current.row.id, result.rumorId, group, myPubkey);
+      onReplySent?.();
       return true;
     },
     [
@@ -230,6 +238,8 @@ export function useGroupComposerActions(params: {
       removeOptimisticRow,
       alertSavedOnRelayOnly,
       adoptRumorId,
+      replyTo,
+      onReplySent,
     ],
   );
 

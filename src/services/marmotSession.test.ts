@@ -1,3 +1,4 @@
+import { marmotReactionSource } from './marmotReactions';
 // End-to-end Marmot round trip with WebCrypto REMOVED, approximating Hermes
 // (which has no crypto.subtle). If any marmot-ts / ts-mls code path still
 // reaches SubtleCrypto, this suite fails — that's the whole point of it.
@@ -828,27 +829,24 @@ describe('MarmotSession (no WebCrypto)', () => {
     bob.session.stop();
   }, 60_000);
 
-  it('reactions: White Noise-format kind 7 / kind 5 inside the group, read back from history', async () => {
+  it('group reactions: backend encrypts kind 7 / kind 5 between members, read back from history', async () => {
     const relay = makeRelay();
     const alice = makeSession(relay);
     const bob = makeSession(relay);
     await Promise.all([alice.session.start(), bob.session.start()]);
     await waitFor(() => relay.events.some((e) => e.kind === 30443 && e.pubkey === bob.pubkey));
-    const dm = await alice.session.getOrCreateDm(bob.pubkey);
+    const dm = await alice.session.createGroup('Reactions', [bob.pubkey]);
     await bob.session.acceptWelcome(unwrapWelcomes(relay, bob)[0]);
 
     const hello = buildMarmotRumor(alice.pubkey, { kind: MARMOT_CHAT_KIND, content: 'oink' });
     await alice.session.sendRumor(dm.id, hello);
     await waitFor(() => bob.inbox.some((m) => m.rumor.id === hello.id));
 
-    // MDK's shape: content = the emoji, one `e` tag → the message.
-    const reaction = buildMarmotRumor(bob.pubkey, {
-      kind: 7,
-      content: '🐷',
-      tags: [['e', hello.id]],
-    });
-    await bob.session.sendRumor(dm.id, reaction);
-    await waitFor(() => alice.inbox.some((m) => m.rumor.id === reaction.id));
+    setMarmotSession(bob.session);
+    const source = marmotReactionSource(bob.pubkey, alice.pubkey, dm.id);
+    const reactionId = await source.publishReaction({ emoji: '🐷', targetEventId: hello.id });
+    expect(reactionId).not.toBeNull();
+    await waitFor(() => alice.inbox.some((m) => m.rumor.id === reactionId));
     // Both sides read it back from history (the sender's own copy included).
     for (const who of [alice, bob]) {
       const found = (await who.session.queryHistory(dm.id, [7])).filter((r) =>
@@ -856,15 +854,10 @@ describe('MarmotSession (no WebCrypto)', () => {
       );
       expect(found.map((r) => r.content)).toEqual(['🐷']);
     }
-    const retract = buildMarmotRumor(bob.pubkey, {
-      kind: 5,
-      content: '',
-      tags: [['e', reaction.id]],
-    });
-    await bob.session.sendRumor(dm.id, retract);
-    await waitFor(() => alice.inbox.some((m) => m.rumor.id === retract.id));
+    expect(await source.deleteReaction(reactionId!)).toBe(true);
+    await waitFor(() => alice.inbox.some((m) => m.rumor.kind === 5));
     const deletions = (await alice.session.queryHistory(dm.id, [5])).filter((r) =>
-      r.tags.some((t) => t[0] === 'e' && t[1] === reaction.id),
+      r.tags.some((t) => t[0] === 'e' && t[1] === reactionId),
     );
     expect(deletions.map((d) => d.pubkey)).toEqual([bob.pubkey]);
 

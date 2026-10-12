@@ -298,7 +298,8 @@
     "sendMessage": "Nachricht senden",
     "editingMessage": "Nachricht wird bearbeitet",
     "cancelEdit": "Bearbeitung abbrechen",
-    "saveEdit": "Änderung speichern"
+    "saveEdit": "Änderung speichern",
+    "cancelReply": "Antwort abbrechen"
   },
   "conversationScreen": {
     "couldNotStartLiveShareTitle": "Live-Freigabe konnte nicht gestartet werden",
@@ -1209,7 +1210,8 @@
     "copied": "Kopiert",
     "moreEmoji": "Mehr Emojis",
     "edit": "Bearbeiten",
-    "delete": "Für alle löschen"
+    "delete": "Für alle löschen",
+    "reply": "Antworten"
   },
   "messageEdit": {
     "deleteTitle": "Für alle löschen?",

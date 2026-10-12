@@ -298,7 +298,8 @@
     "sendMessage": "Üzenet küldése",
     "editingMessage": "Üzenet szerkesztése",
     "cancelEdit": "Szerkesztés elvetése",
-    "saveEdit": "Szerkesztés mentése"
+    "saveEdit": "Szerkesztés mentése",
+    "cancelReply": "Válasz elvetése"
   },
   "conversationScreen": {
     "couldNotStartLiveShareTitle": "Az élő megosztást nem sikerült elindítani",
@@ -1209,7 +1210,8 @@
     "copied": "Kimásolva",
     "moreEmoji": "További emojik",
     "edit": "Szerkesztés",
-    "delete": "Törlés mindenkinél"
+    "delete": "Törlés mindenkinél",
+    "reply": "Válasz"
   },
   "messageEdit": {
     "deleteTitle": "Törlöd mindenkinél?",

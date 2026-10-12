@@ -81,12 +81,14 @@ const GROUP = {
 // Test setup
 // ---------------------------------------------------------------------------
 
-function setup() {
+function setup(replyTo?: string, onReplySent?: () => void) {
   const setMessages = jest.fn();
   const scrollToEnd = jest.fn();
   const { result } = renderHook(() =>
     useGroupComposerActions({
       group: GROUP,
+      replyTo,
+      onReplySent,
       draft: 'hello',
       setDraft: jest.fn(),
       setMessages,
@@ -284,4 +286,25 @@ describe("useGroupComposerActions — 'Saved on relay, not on device' path intac
     // No removal — the message reached the relay.
     expect(mockRemoveGroupMessage).not.toHaveBeenCalled();
   });
+});
+
+it('sends the quoted group target, persists it in the optimistic row and clears it only on success', async () => {
+  const parent = 'd'.repeat(64);
+  const clearReply = jest.fn();
+  mockSendGroupMessage.mockImplementation((_input: unknown, hooks?: GroupSendHooks) => {
+    hooks?.onRumorReady?.({ rumorId: 'sent', kind: 14 });
+    return Promise.resolve({ success: true });
+  });
+  const { result } = setup(parent, clearReply);
+  await act(async () => {
+    await result.current.sendText('reply');
+  });
+  expect(mockSendGroupMessage.mock.calls[0][0]).toMatchObject({ replyTo: parent, text: 'reply' });
+  expect(mockAppendGroupMessage.mock.calls[0][2]).toMatchObject({ replyTo: parent });
+  expect(clearReply).toHaveBeenCalledTimes(1);
+  mockSendGroupMessage.mockResolvedValue({ success: false });
+  await act(async () => {
+    await result.current.sendText('retry');
+  });
+  expect(clearReply).toHaveBeenCalledTimes(1);
 });
