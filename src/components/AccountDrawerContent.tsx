@@ -41,7 +41,6 @@ interface SectionRow {
   label: string;
   icon: React.ReactNode;
   testID: string;
-  subtitle: string;
   /** Heading shown above this row (starts a group). */
   section?: string;
   /** Divider above this row: ends the "Your account" group. */
@@ -52,7 +51,6 @@ const buildSectionRows = (colors: Palette, t: ReturnType<typeof useTranslation>)
   {
     name: 'AccountProfile',
     label: t('accountDrawerContent.profile'),
-    subtitle: t('accountDrawerContent.profileHint'),
     section: t('accountDrawerContent.yourAccount'),
     icon: <User size={22} color={colors.textBody} />,
     testID: 'drawer-row-profile',
@@ -60,42 +58,36 @@ const buildSectionRows = (colors: Palette, t: ReturnType<typeof useTranslation>)
   {
     name: 'AccountWallets',
     label: t('accountDrawerContent.wallets'),
-    subtitle: t('accountDrawerContent.walletsHint'),
     icon: <Wallet size={22} color={colors.textBody} />,
     testID: 'drawer-row-wallets',
   },
   {
     name: 'AccountMessages',
     label: t('messageSettingsScreen.title'),
-    subtitle: t('accountDrawerContent.messagesHint'),
     icon: <MessageCircle size={22} color={colors.textBody} />,
     testID: 'drawer-row-messages',
   },
   {
     name: 'AccountNotifications',
     label: t('accountDrawerContent.notifications'),
-    subtitle: t('accountDrawerContent.notificationsHint'),
     icon: <Bell size={22} color={colors.textBody} />,
     testID: 'drawer-row-notifications',
   },
   {
     name: 'AccountSecurity',
     label: t('accountDrawerContent.security'),
-    subtitle: t('accountDrawerContent.securityHint'),
     icon: <ShieldCheck size={22} color={colors.textBody} />,
     testID: 'drawer-row-security',
   },
   {
     name: 'AccountAdvanced',
     label: t('advancedScreen.title'),
-    subtitle: t('accountDrawerContent.advancedHint'),
     icon: <Settings size={22} color={colors.textBody} />,
     testID: 'drawer-row-advanced',
   },
   {
     name: 'AccountDisplayLanguage',
     label: t('accountDrawerContent.displayLanguage'),
-    subtitle: t('accountDrawerContent.displayLanguageHint'),
     dividerBefore: true,
     icon: <PaletteIcon size={22} color={colors.textBody} />,
     testID: 'drawer-row-display-language',
@@ -103,7 +95,6 @@ const buildSectionRows = (colors: Palette, t: ReturnType<typeof useTranslation>)
   {
     name: 'AccountAbout',
     label: t('accountDrawerContent.about'),
-    subtitle: t('accountDrawerContent.aboutHint'),
     icon: <Info size={22} color={colors.textBody} />,
     testID: 'drawer-row-about',
   },
@@ -392,14 +383,10 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
                 props.navigation.navigate(row.name);
               }}
               accessibilityLabel={row.label}
-              accessibilityHint={row.subtitle}
               testID={row.testID}
             >
               <View style={styles.rowIcon}>{row.icon}</View>
-              <View style={styles.rowText}>
-                <Text style={styles.rowLabel}>{row.label}</Text>
-                <Text style={styles.rowSubtitle}>{row.subtitle}</Text>
-              </View>
+              <Text style={styles.rowLabel}>{row.label}</Text>
             </TouchableOpacity>
           </React.Fragment>
         ))}

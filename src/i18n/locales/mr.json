@@ -40,15 +40,7 @@
     "notifications": "नोटिफिकेशन",
     "displayLanguage": "डिस्प्ले आणि भाषा",
     "yourAccount": "तुमचे खाते",
-    "signOutOf": "{{name}} मधून साइन आउट करा",
-    "profileHint": "तुमचे नाव, फोटो आणि QR कोड",
-    "walletsHint": "कनेक्शन आणि रिफंड पर्याय",
-    "messagesHint": "ट्रस्ट फिल्टर आणि लिंक प्रीव्ह्यू",
-    "notificationsHint": "तत्काळ अलर्ट, बॅकग्राउंड तपासणी आणि शॉप अलर्ट",
-    "securityHint": "पेमेंट तपासणी आणि की बॅकअप",
-    "displayLanguageHint": "चलन, भाषा, थीम आणि ॲनिमेशन",
-    "aboutHint": "फीडबॅक, टीम आणि ॲपची माहिती",
-    "advancedHint": "नेटवर्क, नोटिफिकेशन सर्व्हर आणि प्रायोगिक फीचर्स"
+    "signOutOf": "{{name}} मधून साइन आउट करा"
   },
   "accountSwitcherSheet": {
     "accounts": "खाती",

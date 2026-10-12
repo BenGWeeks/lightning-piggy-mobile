@@ -40,15 +40,7 @@
     "notifications": "Benachrichtigungen",
     "displayLanguage": "Anzeige & Sprache",
     "yourAccount": "Dein Konto",
-    "signOutOf": "Von {{name}} abmelden",
-    "profileHint": "Dein Name, Foto und QR-Code",
-    "walletsHint": "Verbindungen und Rückerstattungs-Einstellungen",
-    "messagesHint": "Vertrauensfilter und Link-Vorschauen",
-    "notificationsHint": "Sofortmeldungen, Hintergrundprüfungen und Shop-Hinweise",
-    "securityHint": "Zahlungsprüfungen und Schlüssel-Backup",
-    "displayLanguageHint": "Währung, Sprache, Design und Animation",
-    "aboutHint": "Feedback, Team und App-Informationen",
-    "advancedHint": "Netzwerke, Benachrichtigungsserver und experimentelle Funktionen"
+    "signOutOf": "Von {{name}} abmelden"
   },
   "accountSwitcherSheet": {
     "accounts": "Konten",

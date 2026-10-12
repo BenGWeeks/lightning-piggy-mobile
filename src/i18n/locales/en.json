@@ -40,15 +40,7 @@
     "notifications": "Notifications",
     "displayLanguage": "Display & language",
     "yourAccount": "Your account",
-    "signOutOf": "Sign out of {{name}}",
-    "profileHint": "Your name, photo and QR code",
-    "walletsHint": "Connections and refund preferences",
-    "messagesHint": "Trust filter and link previews",
-    "notificationsHint": "Instant alerts, background checks and shop alerts",
-    "securityHint": "Payment checks and key backup",
-    "displayLanguageHint": "Currency, language, theme and animation",
-    "aboutHint": "Feedback, team and app information",
-    "advancedHint": "Networks, notification server and experimental features"
+    "signOutOf": "Sign out of {{name}}"
   },
   "accountSwitcherSheet": {
     "accounts": "Accounts",

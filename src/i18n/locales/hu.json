@@ -40,15 +40,7 @@
     "notifications": "Értesítések",
     "displayLanguage": "Megjelenés és nyelv",
     "yourAccount": "A fiókod",
-    "signOutOf": "Kijelentkezés innen: {{name}}",
-    "profileHint": "A neved, fotód és QR-kódod",
-    "walletsHint": "Kapcsolatok és visszatérítési beállítások",
-    "messagesHint": "Megbízhatósági szűrő és linkelőnézetek",
-    "notificationsHint": "Azonnali értesítések, háttérellenőrzések és bolti értesítések",
-    "securityHint": "Fizetési ellenőrzések és kulcsmentés",
-    "displayLanguageHint": "Pénznem, nyelv, téma és animáció",
-    "aboutHint": "Visszajelzés, csapat és alkalmazásinformációk",
-    "advancedHint": "Hálózatok, értesítési szerver és kísérleti funkciók"
+    "signOutOf": "Kijelentkezés innen: {{name}}"
   },
   "accountSwitcherSheet": {
     "accounts": "Fiókok",
