@@ -27,6 +27,9 @@ export class Kind4RetryStore {
   private loaded?: Promise<void>;
   private lastChecked = 0;
   private replayCursor = 0;
+  private candidateCursor = 0;
+  private hasSnapshot = false;
+  private pruneBefore = -Infinity;
   constructor(
     private owner: string,
     private capacity = kind4FetchCapacity(),
@@ -53,10 +56,24 @@ export class Kind4RetryStore {
   }
   load(): Promise<void> {
     return (this.loaded ??= (async () => {
-      const [raw, exhaustedRaw] = await Promise.all([
+      const [raw, legacyExhaustedRaw] = await Promise.all([
         AsyncStorage.getItem(this.key),
         AsyncStorage.getItem(this.exhaustedKey),
       ]);
+      let retries = raw;
+      let exhaustedRaw = legacyExhaustedRaw;
+      if (raw) {
+        try {
+          const snapshot = JSON.parse(raw);
+          if (snapshot.version === 1) {
+            this.hasSnapshot = true;
+            retries = JSON.stringify(snapshot.failures);
+            exhaustedRaw = JSON.stringify(snapshot);
+          }
+        } catch {
+          /* Legacy parsing below handles malformed metadata. */
+        }
+      }
       try {
         if (exhaustedRaw) {
           const saved = JSON.parse(exhaustedRaw);
@@ -71,12 +88,12 @@ export class Kind4RetryStore {
       } catch {
         /* Ignore malformed negatives independently of retry metadata. */
       }
-      if (!raw) {
-        this.trimFailures();
+      this.candidateCursor = this.replayCursor;
+      if (!retries) {
         return;
       }
       try {
-        const entries: Failure[] = JSON.parse(raw);
+        const entries: Failure[] = JSON.parse(retries);
         for (const f of entries) {
           if (
             typeof f.id === 'string' &&
@@ -101,16 +118,55 @@ export class Kind4RetryStore {
       } catch {
         /* Ignore malformed metadata. */
       }
-      this.trimFailures();
     })());
   }
+  /** A refresh owns an isolated proposal; dropping it rolls back all metadata. */
+  beginPass() {
+    const pass = new Kind4RetryStore(this.owner, this.capacity, this.exhaustedCapacity);
+    pass.failures = new Map([...this.failures].map(([id, f]) => [id, { ...f }]));
+    pass.exhausted = new Map(this.exhausted);
+    pass.replayCursor = this.replayCursor;
+    pass.candidateCursor = this.replayCursor;
+    pass.hasSnapshot = this.hasSnapshot;
+    return pass;
+  }
+  /** Relay queries never observe a proposal from an unfinished pass. */
+  committedCursor(legacyNewest = 0) {
+    return this.hasSnapshot
+      ? this.replayCursor
+      : Math.max(
+          this.replayCursor,
+          Math.min(legacyNewest, ...[...this.failures.values()].map((f) => f.createdAt)),
+        );
+  }
+  async commitPass(pass: Kind4RetryStore, newest: number) {
+    pass.cursor(newest);
+    await pass.save();
+    this.failures = pass.failures;
+    this.exhausted = pass.exhausted;
+    this.replayCursor = this.candidateCursor = pass.replayCursor;
+    this.hasSnapshot = true;
+  }
   async save() {
-    // Snapshot both before yielding so concurrent failures cannot split the pair.
-    const exhausted = JSON.stringify({ cursor: this.replayCursor, entries: [...this.exhausted] });
-    const failures = JSON.stringify([...this.failures.values()]);
-    // Write negatives first: a failed retry write must not resurrect an evicted id.
-    await AsyncStorage.setItem(this.exhaustedKey, exhausted);
-    await AsyncStorage.setItem(this.key, failures);
+    // One key is the atomic commit record. Legacy keys are read only and are
+    // ignored once this envelope exists, even if they contain stale retries.
+    this.trimFailures();
+    const since = this.pruneBefore;
+    // Compute the pruning set without applying it: inclusive relay `since`
+    // means only timestamps strictly behind this boundary can be forgotten.
+    const exhausted = new Map([...this.exhausted].filter(([, createdAt]) => createdAt >= since));
+    const failures = new Map([...this.failures].filter(([, f]) => f.createdAt >= since));
+    const snapshot = JSON.stringify({
+      version: 1,
+      cursor: this.candidateCursor,
+      entries: [...exhausted],
+      failures: [...failures.values()],
+    });
+    await AsyncStorage.setItem(this.key, snapshot);
+    this.exhausted = exhausted;
+    this.failures = failures;
+    this.replayCursor = this.candidateCursor;
+    this.hasSnapshot = true;
   }
   private due(f: Failure) {
     return f.lastAttempt + KIND4_RETRY_BASE_MS * 2 ** Math.max(0, f.attempts - 1);
@@ -166,38 +222,39 @@ export class Kind4RetryStore {
     this.exhausted.set(id, createdAt);
   }
   private trimFailures() {
-    // Every forgetting path uses this strict boundary (relay `since` is inclusive).
-    const prune = () => {
-      const since = this.replayCursor - KIND4_REPLAY_OVERLAP_SECONDS;
-      for (const [id, createdAt] of this.exhausted)
-        if (createdAt < since) this.exhausted.delete(id);
-      for (const [id, f] of this.failures) if (f.createdAt < since) this.failures.delete(id);
-    };
     if (this.failures.size <= this.capacity && this.exhausted.size <= this.exhaustedCapacity)
       return;
-    prune();
+    this.pruneBefore = Math.max(
+      this.pruneBefore,
+      this.candidateCursor - KIND4_REPLAY_OVERLAP_SECONDS,
+    );
     while (this.failures.size > this.capacity) {
       const entries = [...this.failures.values()];
       const victim =
         entries.find((f) => f.attempts >= MAX_ATTEMPTS) ??
         entries.reduce((a, b) => (a.createdAt <= b.createdAt ? a : b));
-      // Capacity pressure retires work, but retains its negative result.
+      // Capacity pressure retires work in the proposal, retaining its negative.
       this.rememberExhausted(victim.id, victim.createdAt);
       this.failures.delete(victim.id);
     }
-    while (this.exhausted.size > this.exhaustedCapacity) {
-      const oldest = Math.min(...this.exhausted.values());
-      // Only exhausted work can force the replay floor forward. Retire any
-      // pending work the new boundary would exclude before advancing it.
-      for (const [id, f] of this.failures) {
-        if (f.createdAt <= oldest) {
-          this.rememberExhausted(id, f.createdAt);
-          this.failures.delete(id);
-        }
-      }
-      this.replayCursor = Math.max(this.replayCursor, oldest + KIND4_REPLAY_OVERLAP_SECONDS + 1);
-      prune();
+    if (this.exhausted.size <= this.exhaustedCapacity) return;
+    const replayable = [...this.exhausted.values()].filter(
+      (createdAt) => createdAt >= this.candidateCursor - KIND4_REPLAY_OVERLAP_SECONDS,
+    );
+    if (replayable.length > this.exhaustedCapacity) {
+      replayable.sort((a, b) => a - b);
+      const oldest = replayable[replayable.length - this.exhaustedCapacity - 1];
+      this.candidateCursor = Math.max(
+        this.candidateCursor,
+        oldest + KIND4_REPLAY_OVERLAP_SECONDS + 1,
+      );
     }
+    this.pruneBefore = Math.max(
+      this.pruneBefore,
+      this.candidateCursor - KIND4_REPLAY_OVERLAP_SECONDS,
+    );
+    // Keep even proposed pruning victims visible to shouldSkip for the whole
+    // pass. Otherwise later targets in the same relay slice regain attempts.
   }
   succeeded(id: string) {
     this.exhausted.delete(id);
@@ -205,8 +262,8 @@ export class Kind4RetryStore {
   }
   cursor(newest: number) {
     for (const f of this.failures.values()) this.expire(f);
-    this.replayCursor = Math.max(
-      this.replayCursor,
+    this.candidateCursor = Math.max(
+      this.candidateCursor,
       Math.min(
         newest,
         ...[...this.failures.values()]
@@ -215,7 +272,7 @@ export class Kind4RetryStore {
       ),
     );
     this.trimFailures();
-    return this.replayCursor;
+    return this.candidateCursor;
   }
   retryDelay() {
     const next = this.nextRetryAt();
@@ -225,18 +282,28 @@ export class Kind4RetryStore {
     return Math.max(KIND4_RETRY_BASE_MS, next - this.lastChecked);
   }
   nextRetryAt() {
+    return this.beginPass().pendingRetryAt(this.lastChecked);
+  }
+  private pendingRetryAt(lastChecked: number) {
     for (const f of this.failures.values()) this.expire(f);
     this.trimFailures();
     const pending = [...this.failures.values()].filter((f) => f.attempts < MAX_ATTEMPTS);
     return pending.length
       ? Math.max(
-          this.lastChecked + KIND4_RETRY_BASE_MS,
+          lastChecked + KIND4_RETRY_BASE_MS,
           Math.min(
             ...pending.map((f) => Math.min(this.due(f), f.firstFailure + KIND4_MAX_FAILURE_AGE_MS)),
           ),
         )
       : undefined;
   }
+}
+
+/** Other inbox consumers use the same commit record, with legacy fallback. */
+export async function loadKind4ReplayCursor(owner: string, legacyCursor?: number) {
+  const store = new Kind4RetryStore(owner);
+  await store.load();
+  return store.committedCursor(legacyCursor ?? 0) || undefined;
 }
 
 /** Availability failures use the safety ceiling instead of the ciphertext budget. */

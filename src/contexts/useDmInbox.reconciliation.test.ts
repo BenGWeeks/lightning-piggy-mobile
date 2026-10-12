@@ -2,6 +2,7 @@
  * Account-switch scoping for the DM inbox: one account's conversations must
  * never render under another (accounts share a phone in a family app).
  */
+import { DEFAULT_RELAYS } from '../services/nostrRelayDefaults';
 import { AmberSignerError } from '../services/amberErrors';
 import { requestNip04Decrypt } from '../services/amberService';
 import { InteractionManager } from 'react-native';
@@ -13,7 +14,7 @@ import { ensureDmStoreMigrated } from './dmStoreMigrationRunner';
 import { nip46DecryptNip04 } from './nip46DmDecrypt';
 import { ingestInboxNip17ForSigner } from './inboxNip17Ingest';
 import { selectKnownEventIds, upsertDmMessages, type DmMessageRow } from '../services/dmDb';
-import { inboxLastSeenKey } from './nostrDmCache';
+import { Kind4RetryStore } from './kind4RetryStore';
 import { nip04PlaintextCache } from './nostrSecretKeyCache';
 import { DECRYPT_YIELD_EVERY } from './nostrDecryptPacing';
 import type { RawDmEvent, RawGiftWrapEvent } from '../services/nostrService';
@@ -73,6 +74,10 @@ const ingestMock = jest.mocked(ingestInboxNip17ForSigner);
 let rows: DmMessageRow[];
 let relayEvents: RawDmEvent[];
 let now: number;
+const savedCursor = async () => {
+  const saved = await AsyncStorage.getItem(`dm-kind4-retries:${OWNER}`);
+  return saved ? String(JSON.parse(saved).cursor) : null;
+};
 const deferred = <T>() => {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => {
@@ -80,18 +85,19 @@ const deferred = <T>() => {
   });
   return { promise, resolve };
 };
-const renderInbox = (signerType: 'nip46' | 'amber' = 'nip46') =>
+const renderInbox = (signerType: 'nip46' | 'amber' = 'nip46', relays = ['wss://relay.example']) =>
   renderHook((props: UseDmInboxOptions) => useDmInbox(props), {
     initialProps: {
       pubkey: OWNER,
       isLoggedIn: true,
       signerType,
       followPubkeys: new Set([FRIEND]),
-      getReadRelays: () => ['wss://relay.example'],
+      getReadRelays: () => relays,
     },
   });
 beforeEach(async () => {
   jest.clearAllMocks();
+  jest.mocked(scheduleColdStartBackfill).mockImplementation(() => undefined);
   await AsyncStorage.clear();
   nip04PlaintextCache.clear();
   rows = [];
@@ -285,11 +291,11 @@ it('persists a partial decrypt batch but preserves the cursor until all fetched 
   });
   await act(() => result.current.refreshDmInbox({ signal: ctrl.signal }));
   expect(rows.length).toBe(1 + DECRYPT_YIELD_EVERY);
-  expect(await AsyncStorage.getItem(inboxLastSeenKey(OWNER))).toBe(String(BASE + 1));
+  expect(await savedCursor()).toBe(String(BASE + 1));
   decryptMock.mockImplementation(async (ciphertext) => `Meet at the station: ${ciphertext}`);
   await act(() => result.current.refreshDmInbox());
   expect(rows.length).toBe(1 + relayEvents.length);
-  expect(await AsyncStorage.getItem(inboxLastSeenKey(OWNER))).toBe(String(BASE + 10000));
+  expect(await savedCursor()).toBe(String(BASE + 10000));
 });
 
 it('preserves the cursor when persistence of decrypted kind-4 rows fails', async () => {
@@ -299,7 +305,7 @@ it('preserves the cursor when persistence of decrypted kind-4 rows fails', async
   relayEvents.push(event(2, BASE + 500));
   jest.mocked(upsertDmMessages).mockRejectedValueOnce(new Error('database write failed'));
   await act(() => result.current.refreshDmInbox());
-  expect(await AsyncStorage.getItem(inboxLastSeenKey(OWNER))).toBe(String(BASE + 1));
+  expect(await savedCursor()).toBe(String(BASE + 1));
   await act(() => result.current.refreshDmInbox());
   expect(rows.some((r) => r.eventId === event(2).id)).toBe(true);
 });
@@ -429,7 +435,7 @@ it('completes cold and warm refreshes despite a persistent null kind-4 decrypt a
   const { result, unmount } = renderInbox();
   await act(() => result.current.refreshDmInbox());
   expect(rows).toHaveLength(1 + COLD_INITIAL_WRAP_LIMIT);
-  expect(await AsyncStorage.getItem(inboxLastSeenKey(OWNER))).toBe(String(failed.created_at));
+  expect(await savedCursor()).toBe(String(failed.created_at));
   expect(backfill).toEqual(expect.any(Function));
   // Run the real backfill scheduler, then await its active flight through a
   // backfill-strength join so this test doesn't itself request reconciliation.
@@ -456,7 +462,7 @@ it('completes cold and warm refreshes despite a persistent null kind-4 decrypt a
   await act(() => jest.advanceTimersByTimeAsync(120_000));
   expect(decryptMock.mock.calls.filter(([text]) => text === failed.content)).toHaveLength(3);
   expect(jest.getTimerCount()).toBe(0);
-  expect(await AsyncStorage.getItem(inboxLastSeenKey(OWNER))).toBe(String(BASE + 1000));
+  expect(await savedCursor()).toBe(String(BASE + 1000));
   now = 245_000;
   await act(() => result.current.refreshDmInbox());
   expect(decryptMock.mock.calls.filter(([text]) => text === failed.content)).toHaveLength(3);
@@ -477,7 +483,7 @@ it('recovers an old DM after temporary signer failure and a newer arrival withou
   decryptMock.mockRejectedValue(new Error('NIP-46 signer not connected'));
   const first = renderInbox();
   await act(() => first.result.current.refreshDmInbox());
-  expect(await AsyncStorage.getItem(inboxLastSeenKey(OWNER))).toBe(String(old.created_at));
+  expect(await savedCursor()).toBe(String(old.created_at));
   first.unmount();
   nip04PlaintextCache.clear();
   // Restart while disconnected. A message outside the 120s overlap arrives.
@@ -488,19 +494,21 @@ it('recovers an old DM after temporary signer failure and a newer arrival withou
   });
   const { result, unmount } = renderInbox();
   await act(() => result.current.refreshDmInbox());
-  expect(await AsyncStorage.getItem(inboxLastSeenKey(OWNER))).toBe(String(old.created_at));
+  expect(await savedCursor()).toBe(String(old.created_at));
   expect(fetchMock.mock.calls.at(-1)?.[2]?.since).toBe(old.created_at);
   expect(rows.some((r) => r.eventId === event(2).id)).toBe(true);
   expect(rows.some((r) => r.eventId === old.id)).toBe(false);
-  const metadata = JSON.parse((await AsyncStorage.getItem(`dm-kind4-retries:${OWNER}`))!);
+  const metadata = JSON.parse((await AsyncStorage.getItem(`dm-kind4-retries:${OWNER}`))!).failures;
   expect(metadata.every((f: { attempts: number }) => f.attempts === 0)).toBe(true);
   decryptMock.mockResolvedValue('Recovered valid DM');
   now = 61_000;
   await act(() => jest.advanceTimersByTimeAsync(60_000));
   expect(rows.some((r) => r.eventId === old.id)).toBe(true);
   expect(result.current.dmInbox.some((e) => e.id === old.id)).toBe(true);
-  expect(await AsyncStorage.getItem(inboxLastSeenKey(OWNER))).toBe(String(BASE + 600));
-  expect(JSON.parse((await AsyncStorage.getItem(`dm-kind4-retries:${OWNER}`))!)).toEqual([]);
+  expect(await savedCursor()).toBe(String(BASE + 600));
+  expect(JSON.parse((await AsyncStorage.getItem(`dm-kind4-retries:${OWNER}`))!).failures).toEqual(
+    [],
+  );
   expect(jest.getTimerCount()).toBe(0);
   unmount();
 });
@@ -524,11 +532,11 @@ it('recovers after three structured Amber availability failures beyond the overl
   for (let attempt = 2; attempt <= 3; attempt++) {
     now = (attempt - 1) * 60_000 + 1000;
     await act(() => jest.advanceTimersByTimeAsync(60_000));
-    expect(await AsyncStorage.getItem(inboxLastSeenKey(OWNER))).toBe(String(old.created_at));
+    expect(await savedCursor()).toBe(String(old.created_at));
     expect(rows.some((r) => r.eventId === old.id)).toBe(false);
   }
   expect(rows.some((r) => r.eventId === event(2).id)).toBe(true);
-  expect(JSON.parse((await AsyncStorage.getItem(`dm-kind4-retries:${OWNER}`))!)).toEqual([
+  expect(JSON.parse((await AsyncStorage.getItem(`dm-kind4-retries:${OWNER}`))!).failures).toEqual([
     expect.objectContaining({ id: old.id, attempts: 0 }),
   ]);
   now = 181_000;
@@ -537,7 +545,72 @@ it('recovers after three structured Amber availability failures beyond the overl
   expect(fetchMock.mock.calls.at(-1)?.[2]?.since).toBe(old.created_at);
   expect(rows.some((r) => r.eventId === old.id)).toBe(true);
   expect(result.current.dmInbox.some((e) => e.id === old.id)).toBe(true);
-  expect(await AsyncStorage.getItem(inboxLastSeenKey(OWNER))).toBe(String(BASE + 600));
+  expect(await savedCursor()).toBe(String(BASE + 600));
   expect(jest.getTimerCount()).toBe(0);
   unmount();
 });
+
+// Full exhausted capacity plus 16 targets: the last target sits exactly at
+// the old replay timestamp and must survive any unfinished pass.
+it.each(['abort', 'database', 'metadata', 'exception', 'complete'] as const)(
+  'commits overflow cursor and pruning only after the whole pass persists (%s)',
+  async (outcome) => {
+    const negatives = Array.from({ length: 10_000 }, (_, i) => [`exhausted-${i}`, 100]);
+    const failures = Array.from({ length: 14 }, (_, i) => ({
+      id: event(100 + i).id,
+      createdAt: 220,
+      attempts: 2,
+      uncountedAttempts: 0,
+      firstFailure: Date.now() - 300_000,
+      lastAttempt: Date.now() - 300_000,
+    }));
+    // Start with the round-8 two-key format to exercise migration as well.
+    const before = JSON.stringify(failures);
+    const negativesBefore = JSON.stringify({ cursor: 150, entries: negatives });
+    await AsyncStorage.setItem(`dm-kind4-retries:${OWNER}`, before);
+    await AsyncStorage.setItem(`dm-kind4-exhausted:${OWNER}`, negativesBefore);
+    relayEvents = Array.from({ length: 16 }, (_, i) => event(100 + i, i === 15 ? 100 : 220));
+    const ctrl = new AbortController();
+    let attempts = 0;
+    decryptMock.mockImplementation(async () => {
+      attempts++;
+      if (outcome === 'abort' && attempts === 15) ctrl.abort();
+      if (attempts < 15) throw new Error('invalid ciphertext');
+      return 'Target safely persisted';
+    });
+    if (outcome === 'database')
+      jest.mocked(upsertDmMessages).mockImplementationOnce(async (batch) => {
+        rows.push(batch[0]);
+        throw new Error('database write failed mid-batch');
+      });
+    if (outcome === 'metadata')
+      jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('metadata write failed'));
+    if (outcome === 'exception') ingestMock.mockRejectedValueOnce(new Error('ingestion failed'));
+    const first = renderInbox('nip46', DEFAULT_RELAYS);
+    await act(() => first.result.current.refreshDmInbox({ signal: ctrl.signal }));
+    expect(attempts).toBe(outcome === 'abort' ? 15 : 16);
+    const committed = new Kind4RetryStore(OWNER);
+    await committed.load();
+    if (outcome === 'complete') {
+      expect(committed.committedCursor()).toBe(221);
+      const saved = JSON.parse((await AsyncStorage.getItem(`dm-kind4-retries:${OWNER}`))!);
+      expect(saved.entries.every(([, timestamp]: [string, number]) => timestamp >= 101)).toBe(true);
+      expect(rows.some((r) => r.eventId === relayEvents[15].id)).toBe(true);
+    } else {
+      expect(committed.committedCursor()).toBe(150);
+      expect(await AsyncStorage.getItem(`dm-kind4-retries:${OWNER}`)).toBe(before);
+      expect(await AsyncStorage.getItem(`dm-kind4-exhausted:${OWNER}`)).toBe(negativesBefore);
+    }
+    first.unmount();
+    if (outcome !== 'complete') {
+      nip04PlaintextCache.clear();
+      decryptMock.mockResolvedValue('Retried after restart');
+      const second = renderInbox('nip46', DEFAULT_RELAYS);
+      await act(() => second.result.current.refreshDmInbox());
+      expect(fetchMock.mock.calls.at(-1)?.[2]?.since).toBe(150);
+      expect(rows.some((r) => r.eventId === relayEvents[15].id)).toBe(true);
+      expect(second.result.current.dmInbox.some((e) => e.id === relayEvents[15].id)).toBe(true);
+      second.unmount();
+    }
+  },
+);

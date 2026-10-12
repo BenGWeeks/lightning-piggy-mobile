@@ -1235,8 +1235,17 @@ is derived from two kind-4 filters, their fetch limit and the unique relay
 count, rather than the former 500/5,000-entry caps. A negative may be forgotten
 only when its timestamp is strictly older than cursor minus the 120-second
 replay overlap (the relay's `since` is inclusive). If exhausted entries still
-exceed capacity inside that window, the cursor advances beyond the oldest
-exhausted timestamps before their metadata is removed. Regression tests cover
+exceed capacity inside that window, the refresh proposes a cursor beyond the
+oldest exhausted timestamps and stages pruning in an isolated retry store.
+Only after every targeted kind-4 row is accounted for and all row writes
+succeed does the refresh commit cursor, retries and exhausted IDs in one
+versioned AsyncStorage value (`dm-kind4-retries:<owner>`). Abort, ingestion
+exceptions and failed DB or metadata writes discard the proposal, leaving
+the committed cursor and metadata unchanged. Relay queries and retry scheduling
+read committed state; legacy retry, exhausted and inbox cursor keys are
+migrated on the first successful commit. Regression tests cover overflow
+with abort after 15 of 16 targets, partial DB write failure, metadata write
+failure, ingestion exceptions and successful commits, in addition to
 5,501 failures within 50 seconds with a save/restart every pass, as well as
 pressure beyond the new fetch-derived capacity.
 

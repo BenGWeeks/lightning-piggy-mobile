@@ -3,6 +3,7 @@ import { NostrConnectError, SignerUnavailableError } from '../services/signerErr
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   Kind4RetryStore,
+  loadKind4ReplayCursor,
   KIND4_RETRY_BASE_MS,
   KIND4_MAX_UNCOUNTED_ATTEMPTS,
   KIND4_MAX_FAILURE_AGE_MS,
@@ -50,7 +51,7 @@ it('bounds persisted metadata to 500 entries, preferring to evict permanent fail
     }
   }
   await store.save();
-  const metadata = JSON.parse((await AsyncStorage.getItem('dm-kind4-retries:owner'))!);
+  const metadata = JSON.parse((await AsyncStorage.getItem('dm-kind4-retries:owner'))!).failures;
   expect(metadata).toHaveLength(500);
   expect(metadata.some((f: { id: string }) => f.id === '0')).toBe(false);
   expect(store.cursor(1000)).toBe(1);
@@ -73,7 +74,9 @@ it('exhausts the oldest pending failure before evicting it at capacity', async (
   await store.save();
   expect(store.cursor(1000)).toBe(1);
   expect(store.shouldSkip('0')).toBe(true);
-  expect(JSON.parse((await AsyncStorage.getItem('dm-kind4-retries:owner'))!)).toHaveLength(500);
+  expect(JSON.parse((await AsyncStorage.getItem('dm-kind4-retries:owner'))!).failures).toHaveLength(
+    500,
+  );
 });
 
 it.each([
@@ -172,7 +175,7 @@ it('loads legacy exhaustion without forgetting replayable ids at the old cap', a
   await store.load();
   expect(store.cursor(150)).toBe(150);
   await store.save();
-  const saved = JSON.parse((await AsyncStorage.getItem('dm-kind4-exhausted:owner'))!);
+  const saved = JSON.parse((await AsyncStorage.getItem('dm-kind4-retries:owner'))!);
   expect(saved.entries).toHaveLength(5501);
   for (const [id] of negatives) expect(store.shouldSkip(String(id))).toBe(true);
 });
@@ -272,23 +275,67 @@ it('asserts the fetch bound including both directions and default relays', () =>
   expect(() => new Kind4RetryStore('owner', 0)).toThrow('capacity');
 });
 
-it('does not resurrect stale retries if the negative/cursor write succeeds but retry write fails', async () => {
+it('keeps the committed snapshot intact when the atomic metadata write fails', async () => {
   const store = new Kind4RetryStore('owner', 1);
   await store.load();
   store.failed('old', 100, false);
+  store.cursor(150);
   await store.save();
-  // Retire old work at retry capacity, then overflow the exhausted map.
-  store.failed('new', 220, false);
-  for (let i = 0; i < 3; i++) store.failed('new', 220, true);
-  const originalSetItem = jest.mocked(AsyncStorage.setItem).getMockImplementation()!;
-  jest.spyOn(AsyncStorage, 'setItem').mockImplementation(async (key, value) => {
-    if (key === 'dm-kind4-retries:owner') throw new Error('storage unavailable');
-    return originalSetItem(key, value);
-  });
-  await expect(store.save()).rejects.toThrow('storage unavailable');
+  const before = await AsyncStorage.getItem('dm-kind4-retries:owner');
+  const pass = store.beginPass();
+  pass.failed('new', 220, false);
+  for (let i = 0; i < 3; i++) pass.failed('new', 220, true);
+  expect(pass.cursor(220)).toBe(221);
+  jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('storage unavailable'));
+  await expect(store.commitPass(pass, 220)).rejects.toThrow('storage unavailable');
+  expect(store.committedCursor()).toBe(100);
+  expect(await AsyncStorage.getItem('dm-kind4-retries:owner')).toBe(before);
   const restarted = new Kind4RetryStore('owner', 1);
   await restarted.load();
-  expect(restarted.cursor(0)).toBe(221);
-  expect(restarted.nextRetryAt()).toBeUndefined();
+  expect(restarted.committedCursor()).toBe(100);
+  expect(restarted.shouldSkip('new')).toBe(false);
+  expect(restarted.nextRetryAt()).toBeDefined();
+});
+
+it('keeps pruning victims exhausted throughout the proposal and applies pruning at commit', async () => {
+  const store = new Kind4RetryStore('owner', 1);
+  await store.load();
+  for (let i = 0; i < 3; i++) store.failed('old', 100, true);
+  store.cursor(150);
+  await store.save();
+  const before = await AsyncStorage.getItem('dm-kind4-retries:owner');
+  const pass = store.beginPass();
+  for (let i = 0; i < 3; i++) pass.failed('new', 220, true);
+  expect(pass.cursor(220)).toBe(221);
+  expect(pass.shouldSkip('old')).toBe(true);
+  expect(store.committedCursor()).toBe(150);
+  expect(await AsyncStorage.getItem('dm-kind4-retries:owner')).toBe(before);
+  await store.commitPass(pass, 220);
+  expect(store.committedCursor()).toBe(221);
+  expect(store.shouldSkip('old')).toBe(false);
+  expect(store.shouldSkip('new')).toBe(true);
+  const restarted = new Kind4RetryStore('owner', 1);
+  await restarted.load();
+  expect(restarted.committedCursor()).toBe(221);
   expect(restarted.shouldSkip('new')).toBe(true);
+});
+
+it('shares the committed cursor with other readers and uses legacy keys only before migration', async () => {
+  expect(await loadKind4ReplayCursor('owner')).toBeUndefined();
+  expect(await loadKind4ReplayCursor('owner', 150)).toBe(150);
+  await AsyncStorage.setItem(
+    'dm-kind4-exhausted:owner',
+    JSON.stringify({ cursor: 150, entries: [] }),
+  );
+  const store = new Kind4RetryStore('owner');
+  await store.load();
+  const pass = store.beginPass();
+  pass.failed('pending', 100, false);
+  await store.commitPass(pass, 150);
+  expect(await loadKind4ReplayCursor('owner', 999)).toBe(150);
+  await AsyncStorage.setItem(
+    'dm-kind4-exhausted:owner',
+    JSON.stringify({ cursor: 999, entries: [] }),
+  );
+  expect(await loadKind4ReplayCursor('owner', 999)).toBe(150);
 });

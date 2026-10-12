@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Kind4RetryStore } from './kind4RetryStore';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
 import { decryptKind4WithSigner } from './kind4SignerDecrypt';
@@ -411,7 +410,6 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       // Resolve setup before comparing effective cancellation and refresh strength.
       // A refresh in flight for a previous account is ignored here — its
       // writes are dropped by the owner scope, so there's nothing to wait for.
-      kind4Failures?.configureFetch(getReadRelays(), 0);
       await kind4Failures?.load();
       if (activeOwnerRef.current !== pubkey) return;
       const inFlight = dmInboxInFlight.current.get(pubkey);
@@ -517,6 +515,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           }
 
           const readRelays = getReadRelays();
+          const kind4Pass = kind4Failures?.beginPass();
           const refreshStart = performance.now();
           let nip04CacheHits = 0;
           // kind-4 events skipped because their decrypts are already rows in
@@ -566,13 +565,13 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
               // kind-4 `since` floor policy → dmRefreshGate.shouldDropK4Since (#751/#846). Wraps ignore `since` internally regardless (random NIP-59 ts).
               ...(widensView || shouldDropK4Since(opts, isColdStart)
                 ? {}
-                : { since: kind4Failures?.cursor(lastSeen ?? 0) ?? lastSeen }),
+                : { since: kind4Failures?.committedCursor(lastSeen ?? 0) ?? lastSeen }),
               signal: effectiveSignal,
               ...(isColdStart ? { limit: COLD_INITIAL_WRAP_LIMIT } : {}),
             },
           );
           if (effectiveSignal?.aborted) return;
-          kind4Failures?.configureFetch(readRelays, kind4.length);
+          kind4Pass?.configureFetch(readRelays, kind4.length);
           const entries: DmInboxEntry[] = [];
 
           // NIP-04 — partner pubkey is in the envelope, so we can apply
@@ -601,7 +600,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
             const hit = nip04PlaintextCache.get(t.ev.id);
             if (hit !== undefined) {
               nip04CacheHits++;
-              kind4Failures?.succeeded(t.ev.id);
+              kind4Pass?.succeeded(t.ev.id);
               entries.push({
                 id: t.ev.id,
                 partnerPubkey: t.partnerPubkey,
@@ -626,12 +625,12 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
                 ).catch(() => new Set<string>())
               : new Set<string>();
           nip04DbHits = k4Known.size;
-          for (const id of k4Known) kind4Failures?.succeeded(id);
+          for (const id of k4Known) kind4Pass?.succeeded(id);
           const k4ToDecrypt = k4Misses.filter((t) => !k4Known.has(t.ev.id));
           const k4Result = await decryptInboxKind4({
             owner: refreshForPubkey,
             targets: k4ToDecrypt,
-            failures: kind4Failures,
+            failures: kind4Pass,
             bypassFailures: bypassSkipSet,
             decrypt: decryptNip04ForInbox,
             signal: effectiveSignal,
@@ -649,7 +648,6 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           // refetch (user pull-to-refresh drops the `since` floor, #743) is
           // decrypt-once from now on.
           await persistInboxKind4(k4Rows);
-          await kind4Failures?.save();
 
           // NIP-17 — partner pubkey is INSIDE the encrypted rumor, so we
           // have to decrypt to know who sent it. For the nsec signer this
@@ -763,17 +761,11 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           const newest = Math.max(lastSeen ?? 0, ...kind4.map((e) => e.created_at));
           const kind4Complete = k4Result.processed === k4ToDecrypt.length;
           if (!effectiveSignal.aborted && kind4Complete) {
-            const newLastSeen = kind4Failures?.cursor(newest) ?? newest;
-            await kind4Failures?.save();
-            if (newLastSeen !== (lastSeen ?? 0))
-              await AsyncStorage.setItem(
-                inboxLastSeenKey(refreshForPubkey),
-                String(newLastSeen),
-              ).catch(() => {});
+            if (kind4Failures && kind4Pass) await kind4Failures.commitPass(kind4Pass, newest);
           }
           // Completion drives TTL and full wrap backfill independently of the
           // history floor. A productive abort still needs another pass.
-          refreshCompleted = !effectiveSignal.aborted;
+          refreshCompleted = !effectiveSignal.aborted && kind4Complete;
         } catch (error) {
           if (__DEV__) console.warn('[Nostr] refreshDmInbox failed:', error);
         } finally {

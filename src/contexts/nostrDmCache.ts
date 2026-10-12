@@ -135,8 +135,8 @@ export const COLD_INITIAL_WRAP_LIMIT = 200;
  * (dmBlobMigrationRunner) can import + delete an existing install's blobs,
  * and so logout wipes clean up stragglers.
  *
- * The `*_last_seen_*` cursor keys stay LIVE — they hold only a unix
- * timestamp (no plaintext) and still drive the kind-4 `since` delta fetch.
+ * Conversation last-seen keys remain live. The inbox last-seen key is a
+ * migration fallback; kind-4 commits its cursor with retry metadata atomically.
  */
 export const DM_INBOX_CACHE_PREFIX = 'nostr_dm_inbox_v1_';
 export const DM_INBOX_LAST_SEEN_PREFIX = 'nostr_dm_inbox_last_seen_v1_';
