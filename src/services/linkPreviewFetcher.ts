@@ -116,12 +116,19 @@ async function readCapped(res: Response, controller: AbortController): Promise<s
  * final URL (for resolving relative og:image paths), or null.
  */
 async function fetchHtml(url: string): Promise<{ html: string; finalUrl: string } | null> {
-  const controller = new AbortController();
+  // One controller per hop, so a redirect's (unread) body is dropped the
+  // moment we've read its Location instead of buffering natively while the
+  // next hops run. One deadline covers the whole chain.
+  let controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
     let current = url;
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
       if (!isPublicHttpUrl(current)) return null;
+      if (hop > 0) {
+        controller.abort();
+        controller = new AbortController();
+      }
       const res = (await expoFetch(current, {
         signal: controller.signal,
         headers: {

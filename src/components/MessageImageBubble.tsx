@@ -56,7 +56,7 @@ const MessageImageBubble: React.FC<Props> = ({
 }) => {
   const { t } = useLocale();
   const [loadAllowed, reveal] = useTapToReveal(
-    `image:${messageId}`,
+    `image:${messageId}:${image.url}`,
     autoLoad && isPublicHttpUrl(image.url),
   );
   // For plain images the fetchable URL is the display source; for encrypted

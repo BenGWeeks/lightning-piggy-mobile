@@ -24,6 +24,7 @@ import {
 import type { PollTally } from '../utils/nip88Poll';
 import { marmotBubbleKey } from '../utils/dmProtocol';
 import { isSupportedImageUrl } from '../utils/imageUrl';
+import { isPublicHttpUrl } from '../utils/publicUrl';
 import { type DeliveryStatus } from '../utils/dmDeliveryStatus';
 import { resendPayloadFor } from '../utils/messageInfo';
 import type { ShowMessageInfoArgs } from '../hooks/useMessageInfoSheet';
@@ -578,6 +579,9 @@ const MessageBubble: React.FC<Props> = ({
   if (image) {
     return wrapWithReactionRow(
       <MessageImageBubble
+        // Remount on an edited URL so neither consent nor the resolved
+        // display URI carries over to the new image (#1338).
+        key={image.url}
         styles={styles}
         image={image}
         messageId={id}
@@ -811,7 +815,13 @@ const MessageBubble: React.FC<Props> = ({
                 the icon to guarantee contrast against the light avatar BG. */}
             <View style={[styles.contactAvatar, styles.contactAvatarFallback]}>
               <UserRound size={26} color={colors.textBody} strokeWidth={1.75} />
-              {prof?.picture && isSupportedImageUrl(prof.picture) ? (
+              {/* The shared profile's picture URL is chosen by whoever published
+                  it, so it only loads for trusted senders and public hosts
+                  (#1338); otherwise the silhouette stays. */}
+              {prof?.picture &&
+              autoLoadMedia &&
+              isSupportedImageUrl(prof.picture) &&
+              isPublicHttpUrl(prof.picture) ? (
                 <ExpoImage
                   source={{ uri: prof.picture }}
                   style={[StyleSheet.absoluteFillObject, { borderRadius: 22 }]}

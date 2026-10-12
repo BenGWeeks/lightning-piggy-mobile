@@ -101,6 +101,16 @@ describe('fetchLinkPreview — redirects', () => {
     ]);
   });
 
+  it('aborts each redirect response before requesting the next hop', async () => {
+    mockFetch
+      .mockResolvedValueOnce(redirectTo('https://www.example.com/post'))
+      .mockResolvedValueOnce(fakeResponse({}));
+    await fetchLinkPreview('https://example.com/post');
+    const [first, second] = mockFetch.mock.calls.map((c) => c[1].signal as AbortSignal);
+    expect(first).not.toBe(second);
+    expect(first.aborted).toBe(true);
+  });
+
   it('resolves a relative Location against the current hop', async () => {
     mockFetch
       .mockResolvedValueOnce(redirectTo('/new/path', 301))

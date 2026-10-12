@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { View, Text, TouchableOpacity, ActivityIndicator, Pressable } from 'react-native';
 import { Play, Pause, AlertCircle } from 'lucide-react-native';
 import { useAudioPlayer, useAudioPlayerStatus, setAudioModeAsync } from 'expo-audio';
+import { useTapToReveal } from '../hooks/useTapToReveal';
+import { isPublicHttpUrl } from '../utils/publicUrl';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createVoiceNotePlayerStyles } from '../styles/VoiceNotePlayer.styles';
 import { formatTime } from '../utils/messageContent';
@@ -104,9 +106,14 @@ const VoiceNotePlayer: React.FC<Props> = ({
   const marmotRef = useRef(marmot);
   marmotRef.current = marmot;
 
-  // A plain note from an untrusted sender stays unloaded until the first tap.
-  const [armed, setArmed] = useState(autoLoad);
-  const source = encrypted ? localUri : armed || autoLoad ? url : null;
+  // A plain note streams on mount only for a trusted sender AND a public URL;
+  // otherwise it stays unloaded until the first tap. Consent is keyed by the
+  // URL, so an edited message needs a fresh tap.
+  const [plainAllowed, revealPlain] = useTapToReveal(
+    `voice:${url}`,
+    autoLoad && isPublicHttpUrl(url),
+  );
+  const source = encrypted ? localUri : plainAllowed ? url : null;
   const player = useAudioPlayer(source ?? undefined);
   const status = useAudioPlayerStatus(player);
   const isPlaying = status?.playing ?? false;
@@ -173,7 +180,7 @@ const VoiceNotePlayer: React.FC<Props> = ({
       if (!source) {
         // Gated plain note: load it now; playback fires from the effect.
         wantPlayRef.current = true;
-        setArmed(true);
+        revealPlain();
         return;
       }
       if (duration > 0 && current >= duration - 0.05) player.seekTo(0);
@@ -181,7 +188,7 @@ const VoiceNotePlayer: React.FC<Props> = ({
     } catch {
       // Playback is best-effort; a failed load just leaves the button idle.
     }
-  }, [isPlaying, player, current, duration, encrypted, localUri, ensureLocal, source]);
+  }, [isPlaying, player, current, duration, encrypted, localUri, ensureLocal, source, revealPlain]);
 
   // On-bubble colours: white-on-pink for my bubbles, themed for theirs.
   const fg = fromMe ? colors.white : colors.textBody;
