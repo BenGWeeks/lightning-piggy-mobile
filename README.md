@@ -43,11 +43,10 @@ A mobile Bitcoin Lightning wallet for smart savers and their families, built wit
   - edit and delete your own messages, react with emoji, and send photos and voice notes as encrypted media (MIP-04);
   - group admins: see and manage them; only admins can rename a group or change its members;
   - an invite reaches every app a contact uses (all of their fresh devices), and you can manage your own invitation keys under Account → Messages;
-  - if someone can't receive Marmot yet, the app asks before falling back to NIP-17.
+  - if someone can't receive Marmot yet, the app asks before falling back to NIP-17;
+  - see each person's devices: a _Secure chat · N devices_ by-line in 1:1s, per-person device lists (with the app each runs) in the members sheet, and "Sent from" in message info.
     <!-- TODO(#1311): live location over Marmot (WhatsApp-style), once it merges. -->
     <!-- TODO(#1295): @mentions in chats, once it merges. -->
-    <!-- TODO(#1267): chat devices, once it merges. -->
-    <!-- TODO(#1338): link safety (link previews and relay hints), once it merges. -->
 - **Push notifications (opt-in, per account)**: Marmot messages via MIP-05, plus separate switches for messages, zaps, mentions and payments through Lightning Piggy's notification server. Alerts are generic ("New message", "Zap received") and never show content, and a **Notifications** screen (the bell on Wallets) lists the last 30 days
 - **Profiles**: **Posts**, **Media** and **Shop** tabs, a **Posts | Posts & replies** switch that shows what each reply answers, and NIP-27 references rendered as tappable `@name` chips and embedded notes, articles and products
 - Friends tab with Nostr contacts and phone contacts
@@ -56,7 +55,8 @@ A mobile Bitcoin Lightning wallet for smart savers and their families, built wit
 - Contact profile cards with deep linking to Nostr apps
 - QR code sharing for npub and Lightning address
 - Secure credential storage (expo-secure-store)
-- Relay health: unreachable relays are parked and skipped automatically, so one dead relay can't slow the app down
+- **Link safety**: links, images, link previews and voice notes from people you don't follow need a tap to load, and nothing is ever fetched automatically from a private network address
+- Relay health: unreachable relays are parked and skipped automatically, so one dead relay can't slow the app down. A message, listing or invite is only shown as sent once a relay has accepted it
 
 **Market**
 
