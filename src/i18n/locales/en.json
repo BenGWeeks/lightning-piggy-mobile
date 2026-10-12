@@ -3025,5 +3025,13 @@
     "settlingBody": "Funds are safe — Boltz is finishing the Lightning payment.",
     "confirmationTitle": "Still waiting for a confirmation",
     "confirmationBody": "Bitcoin blocks average ~10 min but sometimes take much longer. Funds are safe — the swap finishes automatically."
+  },
+  "notificationMute": {
+    "mute": "Mute notifications from this account",
+    "unmute": "Unmute notifications from this account",
+    "accounts": "Muted accounts",
+    "empty": "No muted accounts",
+    "error": "Could not update notification mute",
+    "menu": "Notification options"
   }
 }

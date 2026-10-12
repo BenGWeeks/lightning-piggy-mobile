@@ -1,3 +1,6 @@
+import { getConversationForEvent } from '../services/dmDb';
+import { recordNotification } from '../services/notificationHistory';
+import { toggleMutedSender } from '../services/mutedSenders';
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 import { AppState, type AppStateStatus } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -8,6 +11,9 @@ import { NOTIFICATION_HISTORY_KEY_BASE } from '../services/notificationHistory';
 const PK = 'a'.repeat(64);
 let mockPubkey = PK;
 jest.mock('../contexts/NostrContext', () => ({ useNostr: () => ({ pubkey: mockPubkey }) }));
+jest.mock('../services/dmDb', () => ({
+  getConversationForEvent: jest.fn().mockResolvedValue(null),
+}));
 jest.mock('../services/notificationService', () => ({ dismissNotificationsFor: jest.fn() }));
 
 it('re-reads history written by another JS context when the app resumes', async () => {
@@ -72,4 +78,75 @@ it('clears notification previews and the unread badge on the first switch render
   unmount();
   spy.mockRestore();
   mockPubkey = PK;
+});
+
+it('hides muted senders and their unread badge while retaining history for unmute', async () => {
+  const spy = jest.spyOn(AppState, 'addEventListener').mockReturnValue({ remove: jest.fn() });
+  await AsyncStorage.clear();
+  mockPubkey = PK;
+  const peer = 'c'.repeat(64);
+  await recordNotification(PK, {
+    id: 'muted-dm',
+    kind: 'dm',
+    title: 'Bot',
+    body: '',
+    data: { conversationPubkey: peer },
+  });
+  await recordNotification(PK, {
+    id: 'payment',
+    kind: 'payment',
+    title: 'Payment',
+    body: '',
+    data: {},
+  });
+  const { result, unmount } = renderHook(() => useNotificationHistory());
+  await waitFor(() => expect(result.current.unreadCount).toBe(2));
+  await act(async () => {
+    await toggleMutedSender(PK, peer);
+  });
+  await waitFor(() => expect(result.current.entries.map((e) => e.id)).toEqual(['payment']));
+  expect(result.current.unreadCount).toBe(1);
+  await act(async () => {
+    await toggleMutedSender(PK, peer);
+  });
+  await waitFor(() => expect(result.current.unreadCount).toBe(2));
+  unmount();
+  spy.mockRestore();
+});
+
+it('filters a contentless wrap after the DM store identifies its muted sender', async () => {
+  const spy = jest.spyOn(AppState, 'addEventListener').mockReturnValue({ remove: jest.fn() });
+  await AsyncStorage.clear();
+  mockPubkey = PK;
+  const peer = 'c'.repeat(64);
+  await toggleMutedSender(PK, peer);
+  (getConversationForEvent as jest.Mock).mockResolvedValue({
+    conversation: peer,
+    wireKind: 14,
+    fromMe: false,
+  });
+  await recordNotification(PK, {
+    id: 'wrap-row',
+    kind: 'dm',
+    title: 'Encrypted message',
+    body: '',
+    data: { wrapId: 'wrap-id' },
+  });
+  const { result, unmount } = renderHook(() => useNotificationHistory());
+  await waitFor(() => expect(getConversationForEvent).toHaveBeenCalledWith(PK, 'wrap-id'));
+  await act(async () => {
+    await toggleMutedSender(PK, peer);
+  });
+  await waitFor(() => expect(result.current.entries).toHaveLength(1));
+  expect(result.current.entries[0].data).toMatchObject({
+    conversationPubkey: peer,
+    conversationProtocol: 'nip17',
+  });
+  await act(async () => {
+    await toggleMutedSender(PK, peer);
+  });
+  await waitFor(() => expect(result.current.entries).toEqual([]));
+  expect(result.current.unreadCount).toBe(0);
+  unmount();
+  spy.mockRestore();
 });

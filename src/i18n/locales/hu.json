@@ -3025,5 +3025,13 @@
     "settlingBody": "A pénzed biztonságban van — a Boltz befejezi a Lightning-fizetést.",
     "confirmationTitle": "Még megerősítésre várunk",
     "confirmationBody": "A Bitcoin-blokkok átlagosan kb. 10 percenként érkeznek, de néha sokkal tovább tart. A pénzed biztonságban van — az átváltás automatikusan befejeződik."
+  },
+  "notificationMute": {
+    "mute": "A fiók értesítéseinek némítása",
+    "unmute": "A fiók értesítéseinek visszakapcsolása",
+    "accounts": "Némított fiókok",
+    "empty": "Nincsenek némított fiókok",
+    "error": "Nem sikerült módosítani az értesítések némítását",
+    "menu": "Értesítési beállítások"
   }
 }

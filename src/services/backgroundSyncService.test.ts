@@ -22,6 +22,7 @@ jest.mock('./nostrPlacesPublisher', () => ({
   fetchCachesByAuthor: (...a: unknown[]) => mockFetchCachesByAuthor(...a),
 }));
 
+import { toggleMutedSender } from './mutedSenders';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { runBackgroundSync } from './backgroundSyncService';
 import {
@@ -307,4 +308,28 @@ it('still pings for what the running live sub never got to (socket down, signer 
   expect(mockFireMessageNotification).toHaveBeenCalledWith(
     expect.objectContaining({ title: 'New message', data: { wrapId: 'missed' } }),
   );
+});
+
+it('does not emit a generic background ping for a batch containing only muted NIP-04 senders', async () => {
+  const peer = 'b'.repeat(64);
+  await prime([]);
+  await toggleMutedSender(ME, peer);
+  mockQuerySync.mockResolvedValue([{ id: 'muted', kind: 4, pubkey: peer }]);
+  expect(await runBackgroundSync()).toMatchObject({ pinged: false, freshCount: 0 });
+  expect(mockFireMessageNotification).not.toHaveBeenCalled();
+});
+it('removes muted senders from mixed background batches and routes to the unmuted sender', async () => {
+  const muted = 'b'.repeat(64);
+  const peer = 'c'.repeat(64);
+  await prime([]);
+  await toggleMutedSender(ME, muted);
+  mockQuerySync.mockResolvedValue([
+    { id: 'muted', kind: 4, pubkey: muted },
+    { id: 'normal', kind: 4, pubkey: peer },
+  ]);
+  expect(await runBackgroundSync()).toMatchObject({ pinged: true, freshCount: 1 });
+  expect(mockFireMessageNotification).toHaveBeenCalledWith(
+    expect.objectContaining({ data: { conversationPubkey: peer, conversationProtocol: 'nip04' } }),
+  );
+  expect(JSON.parse((await AsyncStorage.getItem(SEEN_KEY))!)).toEqual(['muted', 'normal']);
 });

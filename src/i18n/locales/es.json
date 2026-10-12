@@ -3025,5 +3025,13 @@
     "settlingBody": "Los fondos están seguros — Boltz está terminando el pago Lightning.",
     "confirmationTitle": "Seguimos esperando una confirmación",
     "confirmationBody": "Los bloques de Bitcoin tardan unos 10 min de media, pero a veces mucho más. Los fondos están seguros — el intercambio se completa automáticamente."
+  },
+  "notificationMute": {
+    "mute": "Silenciar notificaciones de esta cuenta",
+    "unmute": "Activar notificaciones de esta cuenta",
+    "accounts": "Cuentas silenciadas",
+    "empty": "No hay cuentas silenciadas",
+    "error": "No se pudo actualizar el silencio de notificaciones",
+    "menu": "Opciones de notificaciones"
   }
 }

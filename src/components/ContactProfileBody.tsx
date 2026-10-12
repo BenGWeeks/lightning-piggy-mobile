@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, TouchableOpacity, Share } from 'react-native';
 import { Image } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
+import MuteNotificationsButton from './MuteNotificationsButton';
 import FullscreenImageModal from './FullscreenImageModal';
 import { Zap, UserRound, ChevronRight, Share2 } from 'lucide-react-native';
 import { npubEncode } from '../services/nostrService';
@@ -170,6 +171,9 @@ const ContactProfileBody: React.FC<Props> = ({
           disclose *why* a button is disabled (no Nostr key / no
           Lightning address) so power and screen-reader users get the
           full context instead of a silently inert circle. */}
+      {contact.pubkey && (
+        <MuteNotificationsButton pubkey={contact.pubkey} testID="profile-mute-notifications" />
+      )}
       <View style={styles.actionRowSheet}>
         {/* Compose the same boolean for `disabled` and `accessibilityState`
             so a button that's inert because the host didn't wire a

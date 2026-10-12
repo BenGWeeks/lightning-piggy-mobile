@@ -3025,5 +3025,13 @@
     "settlingBody": "Dein Guthaben ist sicher — Boltz schließt die Lightning-Zahlung ab.",
     "confirmationTitle": "Wir warten noch auf eine Bestätigung",
     "confirmationBody": "Bitcoin-Blöcke brauchen im Schnitt etwa 10 Min., manchmal deutlich länger. Dein Guthaben ist sicher — der Tausch wird automatisch abgeschlossen."
+  },
+  "notificationMute": {
+    "mute": "Benachrichtigungen von diesem Konto stummschalten",
+    "unmute": "Benachrichtigungen von diesem Konto aktivieren",
+    "accounts": "Stummgeschaltete Konten",
+    "empty": "Keine stummgeschalteten Konten",
+    "error": "Benachrichtigungseinstellung konnte nicht aktualisiert werden",
+    "menu": "Benachrichtigungsoptionen"
   }
 }

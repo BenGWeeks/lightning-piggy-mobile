@@ -25,6 +25,7 @@ jest.mock('expo-notifications', () => ({
 }));
 
 import * as Notifications from 'expo-notifications';
+import { toggleMutedSender } from './mutedSenders';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { listNotifications } from './notificationHistory';
 import {
@@ -862,4 +863,75 @@ it('clears every deleted message from the tray in one query', async () => {
   expect(await retractMarmotMessageNotifications(refs, { tray: true })).toBe(2);
   expect(mockGetPresented).toHaveBeenCalledTimes(1);
   expect(mockDismiss.mock.calls).toEqual([['n1'], ['n2']]);
+});
+
+describe('per-sender notification mutes (#1381)', () => {
+  const owner = 'a'.repeat(64);
+  const other = 'b'.repeat(64);
+  const peer = 'c'.repeat(64);
+  const message = {
+    kind: 'dm' as const,
+    threadId: peer,
+    title: 'Bot',
+    body: 'hello',
+    owner,
+    data: { conversationPubkey: peer },
+  };
+  it('suppresses both history and local alerts, then restores them on unmute', async () => {
+    await toggleMutedSender(owner, peer);
+    expect(await fireMessageNotification(message)).toBeNull();
+    expect(mockScheduleNotificationAsync).not.toHaveBeenCalled();
+    expect(await listNotifications(owner)).toEqual([]);
+    await toggleMutedSender(owner, peer);
+    await fireMessageNotification(message);
+    expect(mockScheduleNotificationAsync).toHaveBeenCalledTimes(1);
+    expect(await listNotifications(owner)).toHaveLength(1);
+  });
+  it('does not apply another account’s mute to this account', async () => {
+    await toggleMutedSender(other, peer);
+    await fireMessageNotification(message);
+    expect(mockScheduleNotificationAsync).toHaveBeenCalledTimes(1);
+  });
+  it('hides a received sender-bearing push using the push owner rather than the active account', async () => {
+    await toggleMutedSender(owner, peer);
+    setActivePubkeyForWalletStorage(other);
+    await ensureNotificationsInitialised();
+    const handler = (Notifications.setNotificationHandler as jest.Mock).mock.calls.at(-1)[0];
+    const hidden = await handler.handleNotification({
+      request: {
+        trigger: { type: 'push' },
+        content: { data: { source: 'lp-watcher', category: 'mention', owner, senderPubkey: peer } },
+      },
+    });
+    expect(hidden).toEqual({
+      shouldShowBanner: false,
+      shouldShowList: false,
+      shouldPlaySound: false,
+      shouldSetBadge: false,
+    });
+    const visible = await handler.handleNotification({
+      request: {
+        trigger: { type: 'push' },
+        content: {
+          data: { source: 'lp-watcher', category: 'mention', owner: other, senderPubkey: peer },
+        },
+      },
+    });
+    expect(visible.shouldShowBanner).toBe(true);
+    setActivePubkeyForWalletStorage(null);
+  });
+});
+
+it('suppresses a scheduled local alert if the sender was muted before presentation', async () => {
+  const owner = 'a'.repeat(64);
+  const peer = 'c'.repeat(64);
+  await ensureNotificationsInitialised();
+  await toggleMutedSender(owner, peer);
+  const handler = (Notifications.setNotificationHandler as jest.Mock).mock.calls.at(-1)[0];
+  const result = await handler.handleNotification({
+    request: { trigger: null, content: { data: { kind: 'dm', owner, conversationPubkey: peer } } },
+  });
+  expect(result.shouldShowBanner).toBe(false);
+  expect(result.shouldShowList).toBe(false);
+  expect(result.shouldPlaySound).toBe(false);
 });

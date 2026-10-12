@@ -32,6 +32,7 @@ import { pool } from './nostrService';
 import { loadIdentities } from './identitiesStore';
 import { getUserRelays } from './nostrRelayStorage';
 import { fireMessageNotification, fireCacheNotification } from './notificationService';
+import { loadMutedSenders } from './mutedSenders';
 import { messageNotificationTarget } from '../utils/messageNotificationTarget';
 import { fetchCachesByAuthor } from './nostrPlacesPublisher';
 import { GC_COMMENT_KIND } from './nostrPlacesService';
@@ -154,6 +155,7 @@ async function runDmDetectAndPing(
         kinds: [1059, 4, 16, 17],
         '#p': [activePubkey],
         since,
+        limit: SEEN_CAP,
       },
       { maxWait: QUERY_MAXWAIT_MS },
     );
@@ -165,7 +167,10 @@ async function runDmDetectAndPing(
     // (the app reconciles exactly on open). kind-16 also carries NIP-18
     // reposts, so we only ping for events that actually parse as a market
     // order (and aren't our own authored event).
+    const muted = await loadMutedSenders(activePubkey);
     const fresh = events.filter((e) => {
+      // A gift-wrap author is ephemeral; its sender cannot be learned here.
+      if (e.kind !== 1059 && muted.has(e.pubkey.toLowerCase())) return false;
       if (seen.has(e.id)) return false;
       if (e.kind === 4 && e.pubkey === activePubkey) return false;
       if (e.kind === 16 || e.kind === 17) {

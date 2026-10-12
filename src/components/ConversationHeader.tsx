@@ -3,6 +3,7 @@ import { Text, TouchableOpacity, View } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { Image as ExpoImage } from 'expo-image';
 import { useTranslation } from '../contexts/LocaleContext';
+import ConversationNotificationMenu from './ConversationNotificationMenu';
 import ConversationProtocolControl from './ConversationProtocolControl';
 import type { ConversationStyles } from '../styles/ConversationScreen.styles';
 import type { Palette } from '../styles/palettes';
@@ -10,6 +11,7 @@ import type { DmProtocol } from '../utils/dmProtocol';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 
 interface Props {
+  pubkey: string;
   name: string;
   picture?: string | null;
   protocol: DmProtocol;
@@ -29,6 +31,7 @@ interface Props {
  * group with "2 members".
  */
 const ConversationHeader: React.FC<Props> = ({
+  pubkey,
   name,
   picture,
   protocol,
@@ -118,6 +121,7 @@ const ConversationHeader: React.FC<Props> = ({
         </View>
       </View>
       <ConversationProtocolControl protocol={protocol} />
+      <ConversationNotificationMenu pubkey={pubkey} />
     </View>
   );
 };
