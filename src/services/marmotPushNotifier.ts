@@ -5,9 +5,16 @@
 // marmot_kv store) and publishing. Always best-effort — a failure here never
 // touches message delivery.
 
+import {
+  getGroupMembers,
+  getPubkeyLeafNodeIndexes,
+  type MarmotGroup,
+} from '@internet-privacy/marmot-ts';
+
 import { createYieldScheduler } from '../contexts/nostrDecryptPacing';
 import {
   applyPushPayload,
+  leafKey,
   buildTriggerWraps,
   pruneToLeaves,
   selectTriggerTargets,
@@ -25,6 +32,17 @@ export interface PushGroup {
   id: Uint8Array;
   /** Current leaves as "member|leafIndex" — records of other leaves are dropped. */
   leaves: Set<string>;
+}
+
+/** A group as MIP-05 push state sees it: id + its current member leaves. */
+export function toPushGroup(g: Pick<MarmotGroup, 'idStr' | 'id' | 'state'>): PushGroup {
+  const leaves = new Set<string>();
+  for (const member of getGroupMembers(g.state)) {
+    for (const leaf of getPubkeyLeafNodeIndexes(g.state, member)) {
+      leaves.add(leafKey(member.toLowerCase(), Number(leaf)));
+    }
+  }
+  return { idHex: g.idStr, id: g.id, leaves };
 }
 
 export class MarmotPushNotifier {

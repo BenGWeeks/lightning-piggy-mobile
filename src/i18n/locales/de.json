@@ -2922,5 +2922,43 @@
   },
   "followList": {
     "unavailable": "Deine Folgeliste konnte nicht geladen werden – versuche es erneut"
+  },
+  "chatDevices": {
+    "secureChat": "Sicherer Chat",
+    "secureChatDevices": {
+      "one": "Sicherer Chat · {{count}} Gerät",
+      "other": "Sicherer Chat · {{count}} Geräte"
+    },
+    "bylineA11y": "Zeigen, wer in diesem Chat ist und mit welchen Geräten",
+    "inThisChat": "In diesem Chat",
+    "deviceCount": {
+      "one": "{{count}} Gerät",
+      "other": "{{count}} Geräte"
+    },
+    "showDevicesA11y": "Geräte von {{name}} anzeigen",
+    "hideDevicesA11y": "Geräte von {{name}} ausblenden",
+    "unknownApp": "Unbekannte App",
+    "thisPhone": "Dieses Telefon",
+    "keyFrom": "Einladungsschlüssel vom {{date}}",
+    "joinedAtEpoch": "Beigetreten in Epoche {{epoch}}",
+    "hereWhenYouJoined": "War schon da, als du beigetreten bist (Epoche {{epoch}})",
+    "sentFrom": "Gesendet von",
+    "oneOfDevices": {
+      "one": "Eines von {{count}} Geräten",
+      "other": "Eines von {{count}} Geräten"
+    },
+    "readableOn": "Lesbar auf",
+    "readableOnPerson": "{{name}}: {{count}}",
+    "you": "Du",
+    "noticeJoined": {
+      "one": "{{name}} · beigetreten mit {{count}} Gerät ({{apps}})",
+      "other": "{{name}} · beigetreten mit {{count}} Geräten ({{apps}})"
+    },
+    "noticeAdded": {
+      "one": "{{name}} hat ein Gerät hinzugefügt ({{apps}})",
+      "other": "{{name}} hat {{count}} Geräte hinzugefügt ({{apps}})"
+    },
+    "showChanges": "Geräteänderungen in Chats anzeigen",
+    "showChangesHint": "Alpha: eine graue Zeile in Marmot-Chats, wenn jemand mit einem Gerät beitritt oder eines hinzufügt. Nur auf diesem Telefon; es wird nichts gesendet."
   }
 }

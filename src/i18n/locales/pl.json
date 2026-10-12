@@ -2944,5 +2944,53 @@
   },
   "followList": {
     "unavailable": "Nie udało się wczytać listy obserwowanych — spróbuj ponownie"
+  },
+  "chatDevices": {
+    "secureChat": "Bezpieczny czat",
+    "secureChatDevices": {
+      "one": "Bezpieczny czat · {{count}} urządzenie",
+      "other": "Bezpieczny czat · {{count}} urządzenia",
+      "few": "Bezpieczny czat · {{count}} urządzenia",
+      "many": "Bezpieczny czat · {{count}} urządzeń"
+    },
+    "bylineA11y": "Pokaż, kto jest na tym czacie i na jakich urządzeniach",
+    "inThisChat": "Na tym czacie",
+    "deviceCount": {
+      "one": "{{count}} urządzenie",
+      "other": "{{count}} urządzenia",
+      "few": "{{count}} urządzenia",
+      "many": "{{count}} urządzeń"
+    },
+    "showDevicesA11y": "Pokaż urządzenia: {{name}}",
+    "hideDevicesA11y": "Ukryj urządzenia: {{name}}",
+    "unknownApp": "Nieznana aplikacja",
+    "thisPhone": "Ten telefon",
+    "keyFrom": "Klucz zaproszenia z {{date}}",
+    "joinedAtEpoch": "Dołączono w epoce {{epoch}}",
+    "hereWhenYouJoined": "Obecne przed twoim dołączeniem (epoka {{epoch}})",
+    "sentFrom": "Wysłano z",
+    "oneOfDevices": {
+      "one": "Jedno z {{count}} urządzeń",
+      "other": "Jedno z {{count}} urządzeń",
+      "few": "Jedno z {{count}} urządzeń",
+      "many": "Jedno z {{count}} urządzeń"
+    },
+    "readableOn": "Można odczytać na",
+    "readableOnPerson": "{{name}}: {{count}}",
+    "you": "Ty",
+    "noticeJoined": {
+      "one": "{{name}} · na czacie na {{count}} urządzeniu ({{apps}})",
+      "other": "{{name}} · na czacie na {{count}} urządzeniach ({{apps}})",
+      "few": "{{name}} · na czacie na {{count}} urządzeniach ({{apps}})",
+      "many": "{{name}} · na czacie na {{count}} urządzeniach ({{apps}})"
+    },
+    "noticeAdded": {
+      "one": "{{name}} · nowe urządzenie ({{apps}})",
+      "other": "{{name}} · {{count}} nowych urządzeń ({{apps}})",
+      "few": "{{name}} · {{count}} nowe urządzenia ({{apps}})",
+      "many": "{{name}} · {{count}} nowych urządzeń ({{apps}})"
+    },
+    "showChanges": "Pokazuj zmiany urządzeń na czatach",
+    "showChangesHint": "Alfa: szara linia na czatach Marmot, gdy ktoś dołącza z urządzenia lub dodaje urządzenie. Widoczna tylko na tym telefonie; nic nie jest wysyłane."
   }
 }

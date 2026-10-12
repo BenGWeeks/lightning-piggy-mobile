@@ -1,12 +1,22 @@
 import React from 'react';
 import { ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
-import { Check, Ellipsis, UserPlus, UserRound, X } from 'lucide-react-native';
+import {
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Ellipsis,
+  UserPlus,
+  UserRound,
+  X,
+} from 'lucide-react-native';
 import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 import type { GroupMembersSheetStyles } from '../styles/GroupMembersSheet.styles';
 import type { GroupMemberRow } from '../utils/groupMemberRows';
 import { isSupportedImageUrl } from '../utils/imageUrl';
+import type { DeviceInfo } from '../services/marmotDeviceTracker';
+import MemberDeviceList from './MemberDeviceList';
 
 interface Props {
   member: GroupMemberRow;
@@ -26,14 +36,22 @@ interface Props {
   onFollow: (member: GroupMemberRow) => void;
   /** Present = the viewer may change this member's admin status ("⋯" menu). */
   onAdminActions?: (member: GroupMemberRow) => void;
+  /** Marmot: how many devices they have in this chat (#1267). */
+  deviceCount?: number;
+  /** Their device list is open. */
+  devicesExpanded?: boolean;
+  /** Their devices (null while loading); read only when expanded. */
+  devices?: readonly DeviceInfo[] | null;
+  onToggleDevices?: (member: GroupMemberRow) => void;
 }
 
 /**
  * One member row in `GroupMembersSheet`: avatar, name, follow status
  * (Following marker / Follow button, never on the self row — #1268) and the
  * admin-only Remove button, plus (Marmot) an Admin badge and the admin-only
- * "⋯" admin menu. Memoised; every handler takes the row back so the
- * parent can pass stable callbacks.
+ * "⋯" admin menu. Marmot chats add a "2 devices" toggle under the row that
+ * opens the person's device list (#1267). Memoised; every handler takes the
+ * row back so the parent can pass stable callbacks.
  */
 const GroupMemberListRow: React.FC<Props> = ({
   member,
@@ -48,6 +66,10 @@ const GroupMemberListRow: React.FC<Props> = ({
   onRemove,
   onFollow,
   onAdminActions,
+  deviceCount,
+  devicesExpanded = false,
+  devices = null,
+  onToggleDevices,
 }) => {
   const t = useTranslation();
   const tid = member.pubkey.slice(0, 12);
@@ -55,101 +77,132 @@ const GroupMemberListRow: React.FC<Props> = ({
   const profileLabel = t('groupMembersSheet.viewProfile', { name: member.name });
   // The row is a plain View so screen readers reach each control: the profile
   // button (its label carries admin status) and the action buttons beside it.
+  // The device toggle sits under it, outside the profile button, for the
+  // same reason.
+  const showDevices = deviceCount !== undefined && !!onToggleDevices;
   return (
-    <View style={styles.row}>
-      <TouchableOpacity
-        style={styles.rowProfile}
-        onPress={tappable ? () => onPress(member) : undefined}
-        activeOpacity={tappable ? 0.6 : 1}
-        accessibilityLabel={
-          isAdmin
-            ? `${profileLabel}. ${t('groupMembersSheet.adminA11y', { name: member.name })}`
-            : profileLabel
-        }
-        testID={`group-member-row-${tid}`}
-      >
-        <View style={styles.avatar}>
-          {member.picture && isSupportedImageUrl(member.picture) ? (
-            <Image
-              source={{ uri: member.picture }}
-              style={styles.avatarImage}
-              cachePolicy="memory-disk"
-              recyclingKey={member.picture}
-              autoplay={false}
-            />
-          ) : (
-            <UserRound size={22} color={colors.textBody} strokeWidth={1.75} />
-          )}
-        </View>
-        <View style={styles.rowNameWrap}>
-          <Text style={styles.rowName} numberOfLines={1}>
-            {member.name}
-            {member.isSelf ? (
-              <Text style={styles.youTag}>{t('groupMembersSheet.youTag')}</Text>
-            ) : null}
-          </Text>
-          {isAdmin ? (
-            <View style={styles.adminBadge} testID={`group-member-admin-badge-${tid}`}>
-              <Text style={styles.adminBadgeText}>{t('groupMembersSheet.admin')}</Text>
-            </View>
-          ) : null}
-        </View>
-      </TouchableOpacity>
-      {member.isSelf ? null : member.following ? (
-        <View
-          style={styles.followingMarker}
-          accessible
-          accessibilityLabel={t('groupMembersSheet.followingA11y', { name: member.name })}
-          testID={`group-member-following-${tid}`}
-        >
-          <Check size={14} color={colors.textSupplementary} strokeWidth={2.5} />
-          <Text style={styles.followingText}>{t('groupMembersSheet.following')}</Text>
-        </View>
-      ) : (
+    <View>
+      <View style={styles.row}>
         <TouchableOpacity
-          style={[styles.followButton, followDisabled && styles.followButtonDisabled]}
-          onPress={() => onFollow(member)}
-          disabled={followPending || followDisabled}
+          style={styles.rowProfile}
+          onPress={tappable ? () => onPress(member) : undefined}
+          activeOpacity={tappable ? 0.6 : 1}
+          accessibilityLabel={
+            isAdmin
+              ? `${profileLabel}. ${t('groupMembersSheet.adminA11y', { name: member.name })}`
+              : profileLabel
+          }
+          testID={`group-member-row-${tid}`}
+        >
+          <View style={styles.avatar}>
+            {member.picture && isSupportedImageUrl(member.picture) ? (
+              <Image
+                source={{ uri: member.picture }}
+                style={styles.avatarImage}
+                cachePolicy="memory-disk"
+                recyclingKey={member.picture}
+                autoplay={false}
+              />
+            ) : (
+              <UserRound size={22} color={colors.textBody} strokeWidth={1.75} />
+            )}
+          </View>
+          <View style={styles.rowNameWrap}>
+            <Text style={styles.rowName} numberOfLines={1}>
+              {member.name}
+              {member.isSelf ? (
+                <Text style={styles.youTag}>{t('groupMembersSheet.youTag')}</Text>
+              ) : null}
+            </Text>
+            {isAdmin ? (
+              <View style={styles.adminBadge} testID={`group-member-admin-badge-${tid}`}>
+                <Text style={styles.adminBadgeText}>{t('groupMembersSheet.admin')}</Text>
+              </View>
+            ) : null}
+          </View>
+        </TouchableOpacity>
+        {member.isSelf ? null : member.following ? (
+          <View
+            style={styles.followingMarker}
+            accessible
+            accessibilityLabel={t('groupMembersSheet.followingA11y', { name: member.name })}
+            testID={`group-member-following-${tid}`}
+          >
+            <Check size={14} color={colors.textSupplementary} strokeWidth={2.5} />
+            <Text style={styles.followingText}>{t('groupMembersSheet.following')}</Text>
+          </View>
+        ) : (
+          <TouchableOpacity
+            style={[styles.followButton, followDisabled && styles.followButtonDisabled]}
+            onPress={() => onFollow(member)}
+            disabled={followPending || followDisabled}
+            accessibilityRole="button"
+            accessibilityLabel={t('groupMembersSheet.followMember', { name: member.name })}
+            accessibilityState={{ busy: followPending, disabled: followPending || followDisabled }}
+            testID={`group-member-follow-${tid}`}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+          >
+            {followPending ? (
+              <ActivityIndicator size="small" color={colors.white} />
+            ) : (
+              <>
+                <UserPlus size={14} color={colors.white} strokeWidth={2.5} />
+                <Text style={styles.followButtonText}>{t('groupMembersSheet.follow')}</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        )}
+        {onAdminActions ? (
+          <TouchableOpacity
+            style={[styles.actionsButton, adminActionsDisabled && styles.followButtonDisabled]}
+            onPress={() => onAdminActions(member)}
+            disabled={adminActionsDisabled}
+            accessibilityRole="button"
+            accessibilityLabel={t('groupMembersSheet.adminActions', { name: member.name })}
+            accessibilityState={{ disabled: adminActionsDisabled }}
+            testID={`group-member-actions-${tid}`}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ellipsis size={18} color={colors.textBody} strokeWidth={2.5} />
+          </TouchableOpacity>
+        ) : null}
+        {canRemove && !member.isSelf ? (
+          <TouchableOpacity
+            style={styles.removeButton}
+            onPress={() => onRemove(member)}
+            accessibilityLabel={t('groupMembersSheet.removeMember', { name: member.name })}
+            testID={`group-member-remove-${tid}`}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <X size={18} color={colors.brandPink} strokeWidth={2.5} />
+          </TouchableOpacity>
+        ) : null}
+      </View>
+      {showDevices ? (
+        <TouchableOpacity
+          style={styles.deviceToggle}
+          onPress={() => onToggleDevices(member)}
           accessibilityRole="button"
-          accessibilityLabel={t('groupMembersSheet.followMember', { name: member.name })}
-          accessibilityState={{ busy: followPending, disabled: followPending || followDisabled }}
-          testID={`group-member-follow-${tid}`}
+          accessibilityLabel={t(
+            devicesExpanded ? 'chatDevices.hideDevicesA11y' : 'chatDevices.showDevicesA11y',
+            { name: member.name },
+          )}
+          accessibilityState={{ expanded: devicesExpanded }}
+          testID={`group-member-devices-toggle-${tid}`}
           hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
         >
-          {followPending ? (
-            <ActivityIndicator size="small" color={colors.white} />
+          <Text style={styles.deviceToggleText}>
+            {t('chatDevices.deviceCount', { count: deviceCount })}
+          </Text>
+          {devicesExpanded ? (
+            <ChevronUp size={14} color={colors.textSupplementary} strokeWidth={2} />
           ) : (
-            <>
-              <UserPlus size={14} color={colors.white} strokeWidth={2.5} />
-              <Text style={styles.followButtonText}>{t('groupMembersSheet.follow')}</Text>
-            </>
+            <ChevronDown size={14} color={colors.textSupplementary} strokeWidth={2} />
           )}
         </TouchableOpacity>
-      )}
-      {onAdminActions ? (
-        <TouchableOpacity
-          style={[styles.actionsButton, adminActionsDisabled && styles.followButtonDisabled]}
-          onPress={() => onAdminActions(member)}
-          disabled={adminActionsDisabled}
-          accessibilityRole="button"
-          accessibilityLabel={t('groupMembersSheet.adminActions', { name: member.name })}
-          accessibilityState={{ disabled: adminActionsDisabled }}
-          testID={`group-member-actions-${tid}`}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <Ellipsis size={18} color={colors.textBody} strokeWidth={2.5} />
-        </TouchableOpacity>
       ) : null}
-      {canRemove && !member.isSelf ? (
-        <TouchableOpacity
-          style={styles.removeButton}
-          onPress={() => onRemove(member)}
-          accessibilityLabel={t('groupMembersSheet.removeMember', { name: member.name })}
-          testID={`group-member-remove-${tid}`}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <X size={18} color={colors.brandPink} strokeWidth={2.5} />
-        </TouchableOpacity>
+      {showDevices && devicesExpanded ? (
+        <MemberDeviceList tid={tid} devices={devices} styles={styles} colors={colors} />
       ) : null}
     </View>
   );

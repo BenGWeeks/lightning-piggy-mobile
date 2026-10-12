@@ -6,11 +6,14 @@ import {
   buildConversationItems,
   buildZapItems,
   type ConversationMessageInput,
+  type DeviceNoticeInput,
 } from '../utils/conversationItems';
 import { useResolvedDmDeliveries } from './useDmDeliveryStatuses';
 import { useOutgoingOrderHistory } from './useOutgoingOrderHistory';
 import { useFailedMarmotInvites } from './useFailedMarmotInvites';
 import { failedInvitesFrom } from '../utils/marmotInviteRows';
+
+const NO_NOTICES: readonly DeviceNoticeInput[] = [];
 
 /** Assemble the thread timeline with delivery ticks and verified payment amounts. */
 export function useConversationTimeline(
@@ -19,6 +22,8 @@ export function useConversationTimeline(
   owner: string | null,
   partner: string,
   protocol: DmProtocol,
+  // Alpha-only Marmot device notices (#1267); empty unless the switch is on.
+  deviceNotices: readonly DeviceNoticeInput[] = NO_NOTICES,
 ) {
   const { formatLocale } = useLocale();
   const zapItems = useMemo(
@@ -43,7 +48,8 @@ export function useConversationTimeline(
         olderOrderAmounts,
         partnerInvites,
         formatLocale,
+        deviceNotices,
       ),
-    [resolvedMessages, zapItems, olderOrderAmounts, partnerInvites, formatLocale],
+    [resolvedMessages, zapItems, olderOrderAmounts, partnerInvites, formatLocale, deviceNotices],
   );
 }

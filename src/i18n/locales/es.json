@@ -2922,5 +2922,43 @@
   },
   "followList": {
     "unavailable": "No se pudo cargar tu lista de seguidos — inténtalo de nuevo"
+  },
+  "chatDevices": {
+    "secureChat": "Chat seguro",
+    "secureChatDevices": {
+      "one": "Chat seguro · {{count}} dispositivo",
+      "other": "Chat seguro · {{count}} dispositivos"
+    },
+    "bylineA11y": "Ver quién está en este chat y en qué dispositivos",
+    "inThisChat": "En este chat",
+    "deviceCount": {
+      "one": "{{count}} dispositivo",
+      "other": "{{count}} dispositivos"
+    },
+    "showDevicesA11y": "Mostrar los dispositivos de {{name}}",
+    "hideDevicesA11y": "Ocultar los dispositivos de {{name}}",
+    "unknownApp": "App desconocida",
+    "thisPhone": "Este teléfono",
+    "keyFrom": "Clave de invitación del {{date}}",
+    "joinedAtEpoch": "Se unió en la época {{epoch}}",
+    "hereWhenYouJoined": "Ya estaba cuando te uniste (época {{epoch}})",
+    "sentFrom": "Enviado desde",
+    "oneOfDevices": {
+      "one": "Uno de {{count}} dispositivos",
+      "other": "Uno de {{count}} dispositivos"
+    },
+    "readableOn": "Se puede leer en",
+    "readableOnPerson": "{{name}}: {{count}}",
+    "you": "Tú",
+    "noticeJoined": {
+      "one": "{{name}} · se unió con {{count}} dispositivo ({{apps}})",
+      "other": "{{name}} · se unió con {{count}} dispositivos ({{apps}})"
+    },
+    "noticeAdded": {
+      "one": "{{name}} añadió un dispositivo ({{apps}})",
+      "other": "{{name}} añadió {{count}} dispositivos ({{apps}})"
+    },
+    "showChanges": "Mostrar cambios de dispositivos en los chats",
+    "showChangesHint": "Alfa: una línea gris en los chats de Marmot cuando alguien se une con un dispositivo o añade uno. Solo se dibuja en este teléfono; no se envía nada."
   }
 }

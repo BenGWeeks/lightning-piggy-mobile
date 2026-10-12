@@ -28,16 +28,20 @@ export interface ShowMessageInfoArgs {
 export function useMessageInfoSheet(
   resendText: (text: string) => Promise<boolean>,
   protocol: DmProtocol,
+  // Who sent the tapped bubble — the sheet's Marmot device rows need it
+  // (#1267). 1:1: us or the peer; group: looked up by row id.
+  senderOf?: (rowId: string, fromMe: boolean) => string | null,
 ) {
   const [messageInfo, setMessageInfo] = useState<{
     info: MessageInfo;
     canResend: boolean;
+    sender: string | null;
   } | null>(null);
 
   const showInfo = useCallback(
     (args: ShowMessageInfoArgs) => {
-      setMessageInfo(
-        buildMessageInfo({
+      setMessageInfo({
+        ...buildMessageInfo({
           protocol,
           fromMe: args.fromMe,
           rowId: args.eventId,
@@ -46,9 +50,10 @@ export function useMessageInfoSheet(
           resendText: args.resendText,
           resendIsGif: args.resendIsGif,
         }),
-      );
+        sender: senderOf?.(args.eventId, args.fromMe) ?? null,
+      });
     },
-    [protocol],
+    [protocol, senderOf],
   );
 
   const closeInfo = useCallback(() => setMessageInfo(null), []);
@@ -61,6 +66,7 @@ export function useMessageInfoSheet(
 
   return {
     info: messageInfo?.info ?? null,
+    sender: messageInfo?.sender ?? null,
     showInfo,
     closeInfo,
     resendFromInfo,

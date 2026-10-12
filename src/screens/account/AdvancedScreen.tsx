@@ -9,6 +9,7 @@ import SettingsScopeHeader from '../../components/SettingsScopeHeader';
 import NativeCryptoSection from '../../components/NativeCryptoSection';
 import NotificationServerSection from '../../components/NotificationServerSection';
 import HermesProfilerSection from '../../components/HermesProfilerSection';
+import DeviceNoticesSection from '../../components/DeviceNoticesSection';
 import { useGroups } from '../../contexts/GroupsContext';
 import { useThemeColors } from '../../contexts/ThemeContext';
 import { useTranslation } from '../../contexts/LocaleContext';
@@ -38,8 +39,9 @@ const NETWORK_ROWS: Record<
  * where they're stored. "For this account": the Nostr network (relays and
  * media storage are published per identity) and experimental features
  * (Secret Mode). "On this phone": the Bitcoin network (Electrum, swap
- * server), the notification server, faster encryption and — in dev/perf
- * builds only — developer options.
+ * server), the notification server, faster encryption, the alpha "show
+ * device changes in chats" switch and — in dev/perf builds only — the
+ * profiler.
  */
 const AdvancedScreen: React.FC = () => {
   const colors = useThemeColors();
@@ -108,6 +110,7 @@ const AdvancedScreen: React.FC = () => {
       {networkRow('AccountOnChain')}
       <NotificationServerSection />
       <NativeCryptoSection />
+      <DeviceNoticesSection />
       <HermesProfilerSection />
     </AccountScreenLayout>
   );

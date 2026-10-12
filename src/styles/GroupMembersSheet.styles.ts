@@ -151,6 +151,46 @@ export const createGroupMembersSheetStyles = (colors: Palette) =>
       fontWeight: '600',
       color: colors.brandPink,
     },
+    // Marmot: "2 devices ▾" under the name, its own control (#1267).
+    deviceToggle: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      alignSelf: 'flex-start',
+      gap: 2,
+      marginLeft: 52,
+      marginTop: -8,
+      marginBottom: 8,
+    },
+    deviceToggleText: {
+      fontSize: 13,
+      color: colors.textSupplementary,
+    },
+    // A person's devices, indented under their row (#1267).
+    deviceList: {
+      marginLeft: 52,
+      marginBottom: 6,
+      gap: 8,
+    },
+    deviceRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 10,
+    },
+    deviceIcon: {
+      marginTop: 2,
+    },
+    deviceText: {
+      flex: 1,
+    },
+    deviceName: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.textHeader,
+    },
+    deviceDetail: {
+      fontSize: 12,
+      color: colors.textSupplementary,
+    },
   });
 
 export type GroupMembersSheetStyles = ReturnType<typeof createGroupMembersSheetStyles>;

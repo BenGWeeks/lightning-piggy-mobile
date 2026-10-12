@@ -55,25 +55,25 @@ import MessageActionsSheet from '../components/MessageActionsSheet';
 import { useMessageActionsMenu, type ActionedMessage } from '../hooks/useMessageActionsMenu';
 import { isMarmotGroupId } from '../services/marmotSession';
 import DeliveryDetailSheet from '../components/DeliveryDetailSheet';
+import DeviceNoticeLine from '../components/DeviceNoticeLine';
+import { useGroupDevices } from '../hooks/useGroupDevices';
+import {
+  isDeviceNoticeRow,
+  useGroupTimeline,
+  type GroupTimelineRow,
+} from '../hooks/useGroupTimeline';
 import { useMessageInfoSheet } from '../hooks/useMessageInfoSheet';
 import SecretModeCelebration from '../components/SecretModeCelebration';
 import { isConfigured as isGifConfigured } from '../services/giphyService';
 import { buildOsmViewUrl, type SharedLocation } from '../services/locationService';
 import { fetchProfile, DEFAULT_RELAYS } from '../services/nostrService';
-import { indexMessagesById, resolveQuote, type MessageQuote } from '../utils/messageQuote';
 import {
   isEditableGroupText,
   loadGroupMessages,
   type GroupMessage,
 } from '../services/groupMessagesStorageService';
-import {
-  classifyMessageContent,
-  deriveGroupWireKind,
-  extractSharedContact,
-  type BubbleContent,
-} from '../utils/messageContent';
+import { extractSharedContact } from '../utils/messageContent';
 import { useGroupPolls } from '../hooks/useGroupPolls';
-import { sanitizeDisplayText } from '../utils/sanitizeDisplayText';
 import { usePaidInvoiceTracker } from '../hooks/usePaidInvoiceTracker';
 import type { NostrProfile } from '../types/nostr';
 import type { GroupConversationRoute, RootStackParamList } from '../navigation/types';
@@ -82,14 +82,6 @@ type GroupConversationNavigation = NativeStackNavigationProp<
   RootStackParamList,
   'GroupConversation'
 >;
-
-// Pre-classified variant of GroupMessage — created in a useMemo so
-// classifyMessageContent is NOT called inside the hot renderMessage path.
-type ClassifiedMessage = GroupMessage & {
-  content: BubbleContent;
-  wireKind: 14 | 15;
-  quote?: MessageQuote;
-};
 
 const EMPTY_PUBKEYS: string[] = [];
 const EMPTY_MESSAGES: GroupMessage[] = [];
@@ -164,7 +156,7 @@ const GroupConversationScreen: React.FC = () => {
   // so the effect deps can be [messages] only (not [messages, sharedProfiles]).
   // Prevents a redundant re-run after every fetch batch writes sharedProfiles.
   const scheduledProfilePubkeys = useRef(new Set<string>());
-  const listRef = useRef<FlatList<ClassifiedMessage>>(null);
+  const listRef = useRef<FlatList<GroupTimelineRow>>(null);
 
   const group = getGroup(route.params.groupId);
 
@@ -273,6 +265,18 @@ const GroupConversationScreen: React.FC = () => {
     return map;
   }, [members, myPubkey, t]);
 
+  const marmotGroupId = group && isMarmotGroupId(group.id) ? group.id : null;
+  // A person's devices in a Marmot group (#1267): sheet counts, notices, info rows.
+  const groupDevices = useGroupDevices({ groupId: marmotGroupId, myPubkey, memberNameByPubkey });
+  // Rows classified once per update, with the alpha device notices merged in.
+  const { rows: timelineRows, senderOf } = useGroupTimeline({
+    messages,
+    myPubkey,
+    memberNameByPubkey,
+    formatLocale,
+    deviceNotices: groupDevices.notices,
+  });
+
   // Send / upload / share orchestration + in-flight flags live in the
   // useGroupComposerActions hook (parallel to the 1:1 screen's
   // useConversationComposerActions). Everything funnels through the hook's
@@ -307,14 +311,14 @@ const GroupConversationScreen: React.FC = () => {
   // Tap a group bubble → the same message-info sheet 1:1 chats use (#856).
   // Group sends aren't per-relay tracked (no delivery store), so the sheet
   // shows the protocol/kind/id metadata + a Re-publish for sent text.
-  const marmotGroupId = group && isMarmotGroupId(group.id) ? group.id : null;
   const {
     info: messageSheetInfo,
+    sender: messageSheetSender,
     showInfo: handleShowInfo,
     closeInfo: closeMessageInfo,
     resendFromInfo: handleResendFromInfo,
     canResend: canResendFromInfo,
-  } = useMessageInfoSheet(resendText, marmotGroupId ? 'marmot' : 'nip17');
+  } = useMessageInfoSheet(resendText, marmotGroupId ? 'marmot' : 'nip17', senderOf);
 
   // Long-press your own message in a Marmot group: Copy text, Edit, Delete
   // for everyone (#1237). Groups have no reactions, so nothing else to offer.
@@ -436,51 +440,6 @@ const GroupConversationScreen: React.FC = () => {
     };
   }, [messages]);
 
-  // Pre-classify message content once per messages update so renderMessage
-  // (a FlatList renderItem) doesn't call classifyMessageContent on every
-  // frame for every visible bubble. Mirror of ConversationScreen's items
-  // useMemo which does the same classification.
-  //
-  // Vote messages are dropped from the visible list — they're already
-  // rolled into the referenced poll's tally via pollAggregates below, so
-  // showing them as bubbles would just duplicate the vote in the thread.
-  const classifiedMessages = useMemo<ClassifiedMessage[]>(() => {
-    // Marmot replies: resolve each quoted parent against the loaded history.
-    // One id index (with each parent's sender) — no per-reply scan.
-    const me = myPubkey?.toLowerCase();
-    const byId = indexMessagesById(
-      messages.map((m) => ({
-        id: m.id,
-        senderPubkey: m.senderPubkey,
-        fromMe: m.senderPubkey.toLowerCase() === me,
-        text: m.text,
-        wireKind: deriveGroupWireKind(m.text),
-      })),
-    );
-    const quoteFor = (m: GroupMessage): MessageQuote | undefined => {
-      const quote = resolveQuote(m.replyTo, byId, formatLocale);
-      const parent = m.replyTo ? byId.get(m.replyTo) : undefined;
-      return quote && parent && !parent.fromMe
-        ? { ...quote, authorName: memberNameByPubkey.get(parent.senderPubkey) }
-        : quote;
-    };
-    // Sanitise before classify so a tofu placeholder (#764) never reaches
-    // the bubble's text branch. Vote messages are dropped from the visible
-    // list — they're already rolled into the referenced poll's tally.
-    return messages
-      .map((m) => ({
-        ...m,
-        quote: quoteFor(m),
-        content: classifyMessageContent(sanitizeDisplayText(m.text)),
-        // Derive the real NIP-17 kind (14 chat / 15 encrypted file) from the
-        // stored text rather than hard-coding 14, so the info sheet reports
-        // kind-15 for voice/image file bubbles. Precomputed here (not in the
-        // hot renderMessage path) alongside the content classification.
-        wireKind: deriveGroupWireKind(m.text),
-      }))
-      .filter((m) => m.content.kind !== 'pollVote');
-  }, [messages, myPubkey, memberNameByPubkey, formatLocale]);
-
   // Text-encoded group polls: tallies + send / vote (see useGroupPolls).
   const { pollAggregates, handleSendPoll, handleVotePoll } = useGroupPolls(
     messages,
@@ -500,7 +459,19 @@ const GroupConversationScreen: React.FC = () => {
   const { isInvoicePaid } = usePaidInvoiceTracker(trackedMessages);
 
   const renderMessage = useCallback(
-    ({ item }: { item: ClassifiedMessage }) => {
+    ({ item }: { item: GroupTimelineRow }) => {
+      if (isDeviceNoticeRow(item)) {
+        return (
+          <DeviceNoticeLine
+            id={item.id}
+            createdAt={item.createdAt}
+            name={memberNameByPubkey.get(item.pubkey) ?? shortNpub(item.pubkey)}
+            joined={item.joined}
+            clients={item.clients}
+            colors={colors}
+          />
+        );
+      }
       const fromMe = item.senderPubkey === myPubkey;
       const senderName = fromMe
         ? null
@@ -557,6 +528,7 @@ const GroupConversationScreen: React.FC = () => {
       );
     },
     [
+      colors,
       followed,
       marmotGroupId,
       setActioned,
@@ -693,7 +665,7 @@ const GroupConversationScreen: React.FC = () => {
           ) : (
             <FlatList
               ref={listRef}
-              data={classifiedMessages}
+              data={timelineRows}
               keyExtractor={(item) => item.id}
               renderItem={renderMessage}
               contentContainerStyle={styles.messagesList}
@@ -798,6 +770,8 @@ const GroupConversationScreen: React.FC = () => {
         groupId={group.id}
         onClose={() => setMembersSheetVisible(false)}
         members={members}
+        chatId={groupDevices.chatId}
+        deviceCounts={groupDevices.counts}
         onMemberTap={(pk) => {
           // Close the manage-members sheet first so the preview sheet
           // doesn't stack on top of an open sheet — keeps the back-stack
@@ -927,6 +901,7 @@ const GroupConversationScreen: React.FC = () => {
         info={messageSheetInfo}
         onClose={closeMessageInfo}
         onResend={canResendFromInfo ? handleResendFromInfo : undefined}
+        devices={groupDevices.messageDevices(messageSheetSender)}
       />
     </View>
   );

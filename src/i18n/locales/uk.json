@@ -2944,5 +2944,53 @@
   },
   "followList": {
     "unavailable": "Не вдалося завантажити ваш список стеження — спробуйте ще раз"
+  },
+  "chatDevices": {
+    "secureChat": "Захищений чат",
+    "secureChatDevices": {
+      "one": "Захищений чат · {{count}} пристрій",
+      "other": "Захищений чат · {{count}} пристроїв",
+      "few": "Захищений чат · {{count}} пристрої",
+      "many": "Захищений чат · {{count}} пристроїв"
+    },
+    "bylineA11y": "Показати, хто в цьому чаті і на яких пристроях",
+    "inThisChat": "У цьому чаті",
+    "deviceCount": {
+      "one": "{{count}} пристрій",
+      "other": "{{count}} пристроїв",
+      "few": "{{count}} пристрої",
+      "many": "{{count}} пристроїв"
+    },
+    "showDevicesA11y": "Показати пристрої: {{name}}",
+    "hideDevicesA11y": "Сховати пристрої: {{name}}",
+    "unknownApp": "Невідомий застосунок",
+    "thisPhone": "Цей телефон",
+    "keyFrom": "Ключ запрошення від {{date}}",
+    "joinedAtEpoch": "Додано в епоху {{epoch}}",
+    "hereWhenYouJoined": "Уже був тут, коли ви приєдналися (епоха {{epoch}})",
+    "sentFrom": "Надіслано з",
+    "oneOfDevices": {
+      "one": "Один із {{count}} пристроїв",
+      "other": "Один із {{count}} пристроїв",
+      "few": "Один із {{count}} пристроїв",
+      "many": "Один із {{count}} пристроїв"
+    },
+    "readableOn": "Можна прочитати на",
+    "readableOnPerson": "{{name}}: {{count}}",
+    "you": "Ви",
+    "noticeJoined": {
+      "one": "{{name}} · у чаті на {{count}} пристрої ({{apps}})",
+      "other": "{{name}} · у чаті на {{count}} пристроях ({{apps}})",
+      "few": "{{name}} · у чаті на {{count}} пристроях ({{apps}})",
+      "many": "{{name}} · у чаті на {{count}} пристроях ({{apps}})"
+    },
+    "noticeAdded": {
+      "one": "{{name}} · новий пристрій ({{apps}})",
+      "other": "{{name}} · {{count}} нових пристроїв ({{apps}})",
+      "few": "{{name}} · {{count}} нові пристрої ({{apps}})",
+      "many": "{{name}} · {{count}} нових пристроїв ({{apps}})"
+    },
+    "showChanges": "Показувати зміни пристроїв у чатах",
+    "showChangesHint": "Альфа: сірий рядок у чатах Marmot, коли хтось приєднується з пристрою або додає його. Показується лише на цьому телефоні; нічого не надсилається."
   }
 }

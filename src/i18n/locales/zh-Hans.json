@@ -2922,5 +2922,43 @@
   },
   "followList": {
     "unavailable": "无法加载你的关注列表——请重试"
+  },
+  "chatDevices": {
+    "secureChat": "安全聊天",
+    "secureChatDevices": {
+      "one": "安全聊天 · {{count}}台设备",
+      "other": "安全聊天 · {{count}}台设备"
+    },
+    "bylineA11y": "查看此聊天中有谁以及他们使用的设备",
+    "inThisChat": "此聊天中",
+    "deviceCount": {
+      "one": "{{count}}台设备",
+      "other": "{{count}}台设备"
+    },
+    "showDevicesA11y": "显示{{name}}的设备",
+    "hideDevicesA11y": "隐藏{{name}}的设备",
+    "unknownApp": "未知应用",
+    "thisPhone": "这部手机",
+    "keyFrom": "邀请密钥日期：{{date}}",
+    "joinedAtEpoch": "在第{{epoch}}纪元加入",
+    "hereWhenYouJoined": "你加入时已在此（第{{epoch}}纪元）",
+    "sentFrom": "发送自",
+    "oneOfDevices": {
+      "one": "{{count}}台设备之一",
+      "other": "{{count}}台设备之一"
+    },
+    "readableOn": "可在这些设备上阅读",
+    "readableOnPerson": "{{name}}：{{count}}",
+    "you": "你",
+    "noticeJoined": {
+      "one": "{{name}} · 通过{{count}}台设备加入（{{apps}}）",
+      "other": "{{name}} · 通过{{count}}台设备加入（{{apps}}）"
+    },
+    "noticeAdded": {
+      "one": "{{name}}添加了一台设备（{{apps}}）",
+      "other": "{{name}}添加了{{count}}台设备（{{apps}}）"
+    },
+    "showChanges": "在聊天中显示设备变化",
+    "showChangesHint": "Alpha：当有人通过设备加入或添加设备时，在 Marmot 聊天中显示一行灰色提示。仅在这部手机上显示，不会发送任何内容。"
   }
 }

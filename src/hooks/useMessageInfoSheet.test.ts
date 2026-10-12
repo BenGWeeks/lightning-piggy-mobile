@@ -13,6 +13,28 @@ const delivery: DeliveryStatus = {
 };
 
 describe('useMessageInfoSheet', () => {
+  it('records who sent the tapped bubble for the Marmot device rows (#1267)', () => {
+    const resend = jest.fn().mockResolvedValue(true);
+    const senderOf = jest.fn((rowId: string, fromMe: boolean) => (fromMe ? 'me' : `of-${rowId}`));
+    const { result } = renderHook(() => useMessageInfoSheet(resend, 'marmot', senderOf));
+    expect(result.current.sender).toBeNull();
+    act(() => {
+      result.current.showInfo({ fromMe: false, eventId: 'abc', wireKind: 14, resendText: '' });
+    });
+    expect(senderOf).toHaveBeenCalledWith('abc', false);
+    expect(result.current.sender).toBe('of-abc');
+    act(() => result.current.closeInfo());
+    expect(result.current.sender).toBeNull();
+  });
+
+  it('has no sender when the screen gives no lookup', () => {
+    const { result } = renderHook(() => useMessageInfoSheet(jest.fn(), 'nip17'));
+    act(() => {
+      result.current.showInfo({ fromMe: true, eventId: 'abc', resendText: 'x' });
+    });
+    expect(result.current.sender).toBeNull();
+  });
+
   it('maps a tapped sent text bubble to a sent MessageInfo with Re-publish enabled', () => {
     const resend = jest.fn().mockResolvedValue(true);
     const { result } = renderHook(() => useMessageInfoSheet(resend, 'nip17'));
