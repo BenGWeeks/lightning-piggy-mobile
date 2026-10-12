@@ -25,6 +25,7 @@ import {
   newestFix,
   setLiveLocationFixHandler,
   startTracking,
+  reapOrphanedService,
   stopSharingHeadless,
   stopTracking,
 } from './liveLocationTracker';
@@ -200,4 +201,23 @@ describe('headless runtime (no UI, e.g. after the OS restarted the process)', ()
     await handleTaskLocations([point(at + 3_000)]);
     expect(mockSend).toHaveBeenCalledTimes(1);
   });
+});
+
+it('reaps the location service the OS restarts after a headless stop, once', async () => {
+  loc.startLocationUpdatesAsync.mockResolvedValue(undefined);
+  await startTracking({ owner: ME, relays: [] });
+  await savePersistedSessions(ME, [session({ sessionId: 'm1', protocol: 'marmot' })]);
+  await handleTaskLocations([point(Date.now())]); // headless: ends the share, stops tracking
+  loc.startLocationUpdatesAsync.mockClear();
+  loc.stopLocationUpdatesAsync.mockClear();
+  await reapOrphanedService();
+  expect(loc.startLocationUpdatesAsync).toHaveBeenCalledTimes(1);
+  expect(loc.stopLocationUpdatesAsync).toHaveBeenCalledTimes(1);
+  await reapOrphanedService(); // marker consumed
+  expect(loc.startLocationUpdatesAsync).toHaveBeenCalledTimes(1);
+});
+
+it('never reaps without a headless stop, or while tracking', async () => {
+  await reapOrphanedService();
+  expect(loc.startLocationUpdatesAsync).not.toHaveBeenCalled();
 });

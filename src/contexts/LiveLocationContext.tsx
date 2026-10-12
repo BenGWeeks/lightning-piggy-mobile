@@ -56,6 +56,7 @@ import {
 import {
   getTrackingMode,
   liveUpdateDispatcher,
+  reapOrphanedService,
   setLiveLocationFixHandler,
   startTracking,
   stopTracking,
@@ -375,7 +376,9 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     if (!pubkey) return;
     const active = [...sessionsRef.current.values()].filter((s) => s.status === 'active');
     if (active.length === 0) {
-      void stopTracking();
+      void stopTracking().then(() =>
+        AppState.currentState === 'active' ? reapOrphanedService() : undefined,
+      );
       void dismissLiveShareNotification();
       return;
     }

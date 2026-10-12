@@ -41,6 +41,8 @@ import { t } from '../i18n';
 
 export const LIVE_LOCATION_TASK = 'lp-live-location';
 const TRACKING_KEY = 'live_location_tracking_v1';
+/** Set when the headless path stopped tracking (see reapOrphanedService). */
+const ORPHAN_KEY = 'live_location_service_orphan_v1';
 
 export type TrackingMode = 'background' | 'foreground';
 
@@ -179,6 +181,7 @@ async function runHeadless(fix: TrackedFix): Promise<void> {
     // the provider's drain loop on the next app open.
     await stopTracking();
     await dismissLiveShareNotification();
+    await AsyncStorage.setItem(ORPHAN_KEY, '1').catch(() => undefined);
     return;
   }
   const now = Date.now();
@@ -275,6 +278,35 @@ async function startTrackingNow(ctx: TrackingContext): Promise<TrackingMode> {
     mode = 'foreground';
   }
   return mode;
+}
+
+/**
+ * After the OS killed the app mid-share and the headless path stopped
+ * tracking, Android later redelivers the location service's start intent
+ * (expo uses START_REDELIVER_INTENT) once the app is back in front — leaving
+ * a service with no task to stop it, still showing "Sharing your live
+ * location". With nothing being shared, bind to it briefly and unregister,
+ * which runs expo's own service stop. Foreground only (Android won't start a
+ * location service from the background).
+ */
+export function reapOrphanedService(): Promise<void> {
+  return serial(async () => {
+    if (mode !== null || !(await AsyncStorage.getItem(ORPHAN_KEY).catch(() => null))) return;
+    await AsyncStorage.removeItem(ORPHAN_KEY).catch(() => undefined);
+    try {
+      await Location.startLocationUpdatesAsync(LIVE_LOCATION_TASK, {
+        accuracy: Location.Accuracy.Lowest,
+        foregroundService: {
+          notificationTitle: t('liveLocationTracking.serviceTitle'),
+          notificationBody: t('liveLocationTracking.serviceBody'),
+          killServiceOnDestroy: true,
+        },
+      });
+      await Location.stopLocationUpdatesAsync(LIVE_LOCATION_TASK);
+    } catch {
+      // Nothing to reap / not allowed right now.
+    }
+  });
 }
 
 /** Stop every fix source and forget the tracking context. */
