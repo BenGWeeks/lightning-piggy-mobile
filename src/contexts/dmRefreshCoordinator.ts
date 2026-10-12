@@ -9,6 +9,8 @@ export interface DmRefreshFlight {
   force: boolean;
   backfill: boolean;
   signal: AbortSignal;
+  /** One automatic request retained until this flight has committed and cleared. */
+  reconcile?: () => void;
 }
 
 /** Account-scoped reconciliation lifetime, shared by JS/native reconnects and focus. */

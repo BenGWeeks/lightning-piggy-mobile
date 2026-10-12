@@ -1215,7 +1215,12 @@ new pass. The retry retains the kind-4 cursor and negative wrap cache.
 Refresh callers wait for setup before inspecting the effective abort signal;
 forced/backfill requests await weaker work and then run their own pass.
 Productive aborts still persist/paint partial batches but preserve both cursors.
-Failed kind-4 decrypts or database writes also leave the history cursor intact.
+Reconnects joining an active refresh retain one reconciliation after that flight;
+its completion TTL still applies, including when reconnect happens after fetch.
+Null kind-4 decrypts count as processed and enter a bounded account/session
+negative cache (user refreshes retry them). They cannot keep refreshes cold or
+block full wrap backfill. Unattempted messages and failed database writes still
+preserve the history cursor.
 
 Do not interpret `nostrCrypto schnorrVerify n=1888` as 1,888 checks per
 refresh: `n` is cumulative for the process, while percentiles cover only the

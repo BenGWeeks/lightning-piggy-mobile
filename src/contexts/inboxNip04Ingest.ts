@@ -1,3 +1,4 @@
+import type { LRUCache } from '../utils/lru';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
 import { upsertDmMessages, type DmMessageRow } from '../services/dmDb';
 import type { RawDmEvent } from '../services/nostrService';
@@ -12,10 +13,18 @@ export async function decryptInboxKind4(args: {
   decrypt: (peer: string, ciphertext: string) => Promise<string | null>;
   signal?: AbortSignal;
   isColdStart: boolean;
-}): Promise<{ entries: DmInboxEntry[]; rows: DmMessageRow[]; attempts: number }> {
+  failures?: LRUCache<string, true>;
+  bypassFailures?: boolean;
+}): Promise<{
+  entries: DmInboxEntry[];
+  rows: DmMessageRow[];
+  attempts: number;
+  processed: number;
+}> {
   const entries: DmInboxEntry[] = [];
   const rows: DmMessageRow[] = [];
   let attempts = 0;
+  let processed = 0;
   const scheduler = createYieldScheduler({
     signal: args.signal,
     safetyEvery: DECRYPT_YIELD_EVERY,
@@ -28,9 +37,20 @@ export async function decryptInboxKind4(args: {
       const batch = args.targets.slice(i, i + DECRYPT_YIELD_EVERY);
       const results = await Promise.all(
         batch.map(async (target) => {
+          // Session-scoped negative results avoid repeatedly asking the signer.
+          // A user refresh retries them; aborted decrypts never enter this cache.
+          if (!args.bypassFailures && args.failures?.get(target.ev.id)) {
+            processed++;
+            return null;
+          }
           attempts++;
           const text = await args.decrypt(target.partnerPubkey, target.ev.content);
-          if (text === null) return null;
+          processed++;
+          if (text === null) {
+            if (!args.signal?.aborted) args.failures?.set(target.ev.id, true);
+            return null;
+          }
+          args.failures?.delete(target.ev.id);
           if (!args.signal?.aborted) nip04PlaintextCache.set(target.ev.id, text);
           return { target, text };
         }),
@@ -61,7 +81,7 @@ export async function decryptInboxKind4(args: {
   } finally {
     scheduler.dispose();
   }
-  return { entries, rows, attempts };
+  return { entries, rows, attempts, processed };
 }
 
 /** A failed write must not leave plaintext cache hits masquerading as stored rows. */

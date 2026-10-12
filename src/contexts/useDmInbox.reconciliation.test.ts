@@ -2,6 +2,9 @@
  * Account-switch scoping for the DM inbox: one account's conversations must
  * never render under another (accounts share a phone in a family app).
  */
+import { InteractionManager } from 'react-native';
+import { scheduleColdStartBackfill } from './dmColdStartBackfill';
+import { COLD_INITIAL_WRAP_LIMIT } from './nostrDmCache';
 import { act, renderHook } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ensureDmStoreMigrated } from './dmStoreMigrationRunner';
@@ -297,4 +300,163 @@ it('preserves the cursor when persistence of decrypted kind-4 rows fails', async
   expect(await AsyncStorage.getItem(inboxLastSeenKey(OWNER))).toBe(String(BASE + 1));
   await act(() => result.current.refreshDmInbox());
   expect(rows.some((r) => r.eventId === event(2).id)).toBe(true);
+});
+
+it('retains one TTL-governed reconnect after fetch resolves while wrap ingestion is pending', async () => {
+  jest.useFakeTimers({ doNotFake: ['performance', 'queueMicrotask', 'nextTick', 'setImmediate'] });
+  const { result, unmount } = renderInbox();
+  await act(() => result.current.refreshDmInbox());
+  now = 62_000;
+  const started = deferred<void>();
+  const release = deferred<Awaited<ReturnType<typeof ingestInboxNip17ForSigner>>>();
+  ingestMock.mockImplementationOnce(() => {
+    started.resolve();
+    return release.promise;
+  });
+  let automatic!: Promise<void>;
+  const joined: Promise<void>[] = [];
+  const focus = new AbortController();
+  await act(async () => {
+    automatic = result.current.refreshDmInbox();
+    await started.promise; // The relay snapshot is now fixed; ingestion is unfinished.
+    relayEvents.push(event(2, BASE + 300));
+    const liveSlice = Array.from({ length: COLD_INITIAL_WRAP_LIMIT }, (_, i) => ({
+      ...wrap,
+      id: (1000 + i).toString(16).padStart(64, '0'),
+    }));
+    const missedWrap = { ...wrap, id: 'e'.repeat(64), created_at: BASE - 172_000 };
+    fetchMock.mockImplementation(async (_owner, _relays, opts) => ({
+      kind4: relayEvents.filter(
+        (e) => opts?.since === undefined || e.created_at >= opts.since - 120,
+      ),
+      kind1059: [...liveSlice, missedWrap],
+    }));
+    ingestMock.mockImplementation(async ({ wraps, bypassSkipSet }) => ({
+      entries: wraps
+        .filter((w) => w.id === missedWrap.id)
+        .map(() => ({
+          id: 'f'.repeat(64),
+          partnerPubkey: FRIEND,
+          fromMe: false,
+          createdAt: BASE + 301,
+          text: 'Missed outside the live subscription slice',
+          wireKind: 14,
+        })),
+      alreadyKnown: 0,
+      skipHits: bypassSkipSet ? 0 : liveSlice.length,
+      misses: 1,
+      stored: 1,
+      yields: 0,
+    }));
+    joined.push(result.current.refreshDmInbox({ signal: focus.signal }));
+    joined.push(result.current.refreshDmInbox());
+    joined.push(result.current.refreshDmInbox());
+    focus.abort();
+    release.resolve(null);
+    await Promise.all([automatic, ...joined]);
+  });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(jest.getTimerCount()).toBe(1);
+  expect(result.current.dmInbox.some((e) => e.id === event(2).id)).toBe(false);
+  now = 121_999;
+  await act(() => jest.advanceTimersByTimeAsync(59_999));
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  now = 122_000;
+  await act(() => jest.advanceTimersByTimeAsync(1));
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+  expect(fetchMock.mock.calls[2][2]).toMatchObject({ since: BASE + 1 });
+  expect(fetchMock.mock.calls[2][2]).not.toHaveProperty('limit');
+  expect(ingestMock.mock.calls[2][0].bypassSkipSet).toBe(false);
+  expect(result.current.dmInbox.some((e) => e.id === event(2).id)).toBe(true);
+  expect(
+    result.current.dmInbox.some((e) => e.text === 'Missed outside the live subscription slice'),
+  ).toBe(true);
+  expect(jest.getTimerCount()).toBe(0);
+  unmount();
+});
+
+it('completes cold and warm refreshes despite a persistent null kind-4 decrypt and backfills beyond the wrap cap', async () => {
+  jest.useFakeTimers({ doNotFake: ['performance', 'queueMicrotask', 'nextTick', 'setImmediate'] });
+  const failed = event(2, BASE + 500);
+  relayEvents.push(failed);
+  decryptMock.mockImplementation(async (ciphertext) => {
+    // The signer throws on invalid ciphertext; the hook converts it to null.
+    if (ciphertext === failed.content) throw new Error('Persistently undecryptable fixture');
+    return 'Lunch tomorrow at noon';
+  });
+  const wraps = Array.from({ length: COLD_INITIAL_WRAP_LIMIT + 3 }, (_, i) => ({
+    ...wrap,
+    id: (1000 + i).toString(16).padStart(64, '0'),
+    created_at: BASE - i * 600,
+  }));
+  fetchMock.mockImplementation(async (_owner, _relays, opts) => ({
+    kind4: relayEvents.filter((e) => opts?.since === undefined || e.created_at >= opts.since - 120),
+    kind1059: wraps.slice(0, opts?.limit ?? wraps.length),
+  }));
+  ingestMock.mockImplementation(async ({ wraps: fetched }) => {
+    const fresh = fetched.filter((w) => !rows.some((r) => r.eventId === w.id));
+    await upsertDmMessages(
+      fresh.map((w) => ({
+        owner: OWNER,
+        eventId: w.id,
+        conversation: FRIEND,
+        createdAt: w.created_at,
+        sender: FRIEND,
+        content: 'Wrap history survives failed legacy decrypt',
+        fromMe: false,
+        wireKind: 14,
+      })),
+    );
+    return {
+      entries: [],
+      alreadyKnown: fetched.length - fresh.length,
+      skipHits: 0,
+      misses: fresh.length,
+      stored: fresh.length,
+      yields: 0,
+    };
+  });
+  let backfill!: () => void;
+  jest.spyOn(InteractionManager, 'runAfterInteractions').mockImplementation((task) => {
+    if (typeof task === 'function') backfill = task;
+    return { then: () => Promise.resolve(), done: () => undefined, cancel: () => undefined };
+  });
+  jest
+    .mocked(scheduleColdStartBackfill)
+    .mockImplementation(jest.requireActual('./dmColdStartBackfill').scheduleColdStartBackfill);
+  const { result, unmount } = renderInbox();
+  await act(() => result.current.refreshDmInbox());
+  expect(rows).toHaveLength(1 + COLD_INITIAL_WRAP_LIMIT);
+  expect(await AsyncStorage.getItem(inboxLastSeenKey(OWNER))).toBe(String(failed.created_at));
+  expect(backfill).toEqual(expect.any(Function));
+  // Run the real backfill scheduler, then await its active flight through a
+  // backfill-strength join so this test doesn't itself request reconciliation.
+  now = 4000;
+  await act(async () => {
+    backfill();
+    await result.current.refreshDmInbox({ backfill: true });
+  });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(fetchMock.mock.calls[0][2]?.limit).toBe(COLD_INITIAL_WRAP_LIMIT);
+  expect(fetchMock.mock.calls[1][2]).not.toHaveProperty('limit');
+  expect(fetchMock.mock.calls[1][2]?.since).toBe(failed.created_at);
+  expect(ingestMock.mock.calls[1][0].bypassSkipSet).toBe(false);
+  expect(rows).toHaveLength(1 + wraps.length);
+  expect(result.current.dmInbox.some((e) => e.id === wraps.at(-1)?.id)).toBe(true);
+  expect(decryptMock.mock.calls.filter(([text]) => text === failed.content)).toHaveLength(1);
+  now = 62_000;
+  await act(() => result.current.refreshDmInbox());
+  expect(fetchMock).toHaveBeenCalledTimes(2); // Backfill renewed the TTL at 4000.
+  now = 64_000;
+  await act(() => jest.advanceTimersByTimeAsync(2000));
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+  expect(fetchMock.mock.calls[2][2]).not.toHaveProperty('limit');
+  expect(decryptMock.mock.calls.filter(([text]) => text === failed.content)).toHaveLength(1);
+  now = 65_000;
+  await act(() => result.current.refreshDmInbox());
+  expect(fetchMock).toHaveBeenCalledTimes(3); // Warm null decrypt also renews TTL.
+  await act(() => result.current.refreshDmInbox({ force: true }));
+  expect(decryptMock.mock.calls.filter(([text]) => text === failed.content)).toHaveLength(2);
+  unmount();
+  expect(jest.getTimerCount()).toBe(0);
 });

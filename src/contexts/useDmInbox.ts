@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { LRUCache } from '../utils/lru';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
@@ -405,27 +406,22 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
   // refreshDmInbox without it listing itself as a dependency (declared here,
   // assigned just after the useCallback).
   const refreshDmInboxRef = useRef<((opts?: RefreshDmInboxOptions) => Promise<void>) | null>(null);
+  const kind4Failures = useMemo(
+    () => (pubkey ? new LRUCache<string, true>({ max: 1000 }) : undefined),
+    [pubkey],
+  );
   const refreshDmInbox = useCallback(
     async (opts?: RefreshDmInboxOptions): Promise<void> => {
       if (!pubkey || !isLoggedIn) {
         setDmInbox([]);
         return;
       }
-      // [PerfBlock] timing bracket — surfaces the wall-clock cost of
-      // a full inbox refresh including NIP-17 decrypt loops. Look for
-      // matched `refreshDmInbox: …ms` pairs in logcat to isolate
-      // multi-second freezes that coincide with this call. #554.
+      // [PerfBlock] measures the full relay/decrypt refresh cost (#554).
       const __perfBlockStart = performance.now();
       const signal = opts?.signal;
-      // Dev-only "Following only=off" bypass — read once at the top so
-      // the closure captures a stable value across the async work below.
-      // When true, all six follow-gate `continue`s in the decrypt loops
-      // become no-ops AND the cache hydrate skips its filter so the
-      // already-cached unfollowed entries don't get masked.
+      // Capture the dev follow-gate bypass for decrypt and cache hydration.
       const includeNonFollows = opts?.includeNonFollows === true;
-      // Cold start = first refresh this session (incl. force: the real cold
-      // load is MessagesScreen's on-mount focus refresh; the cold-start wrap
-      // cap + #788 macro-task yield must apply to it). See dmRefreshGate.
+      // First completed refresh ends cold-start pacing, including under force.
       const lastRefreshAt =
         dmInboxLastRefresh.current.pubkey === pubkey ? dmInboxLastRefresh.current.at : 0;
       const isColdStart = isColdStartRefresh(lastRefreshAt);
@@ -442,6 +438,12 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       if (inFlight) {
         await inFlight.setup;
         if (canJoinDmRefresh(inFlight, opts)) {
+          if (!opts?.force && !opts?.backfill) {
+            const account = accountSignalFor(pubkey);
+            inFlight.reconcile ??= () => {
+              if (!account.aborted) void refreshDmInboxRef.current?.({ ...opts, signal: account });
+            };
+          }
           return inFlight.promise;
         }
         await inFlight.promise;
@@ -638,6 +640,8 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           const k4Result = await decryptInboxKind4({
             owner: refreshForPubkey,
             targets: k4ToDecrypt,
+            failures: kind4Failures,
+            bypassFailures: bypassSkipSet,
             decrypt: decryptNip04ViaSigner,
             signal: effectiveSignal,
             isColdStart,
@@ -761,23 +765,20 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
 
           setInboxForRefresh(filteredFinal);
 
-          // Advance only after every kind-4 target was ingested and persisted.
-          // Partial/failed decrypts keep the floor so older unprocessed rows
-          // remain queryable. Randomised wrap timestamps never contribute.
+          // Advance only after all targets were processed and rows persisted.
+          // Null decrypts count as attempted; aborted batches preserve the floor.
+          // Randomised wrap timestamps never contribute.
           const newLastSeen = Math.max(lastSeen ?? 0, ...kind4.map((e) => e.created_at));
-          const kind4Complete = k4Rows.length === k4ToDecrypt.length;
+          const kind4Complete = k4Result.processed === k4ToDecrypt.length;
           if (!effectiveSignal.aborted && kind4Complete && newLastSeen > (lastSeen ?? 0)) {
             await AsyncStorage.setItem(
               inboxLastSeenKey(refreshForPubkey),
               String(newLastSeen),
             ).catch(() => {});
           }
-          // A cold rebuild (caller abort ignored) that reached here
-          // finished its backlog → claim the full cursor stamp. A WARM
-          // productive-but-aborted sweep painted from the DB but did NOT finish
-          // the backlog → leave refreshCompleted false so it gets the short
-          // abort-TTL and the next focus tops up (F1, #849).
-          if (!effectiveSignal.aborted && kind4Complete) refreshCompleted = true;
+          // Completion drives TTL and full wrap backfill independently of the
+          // history floor. A productive abort still needs another pass.
+          refreshCompleted = !effectiveSignal.aborted;
         } catch (error) {
           if (__DEV__) console.warn('[Nostr] refreshDmInbox failed:', error);
         } finally {
@@ -808,8 +809,11 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
         }
       } finally {
         // Only clear our own marker — a newer account's refresh may own it.
-        if (dmInboxInFlight.current.get(refreshForPubkey)?.promise === task)
+        const flight = dmInboxInFlight.current.get(refreshForPubkey);
+        if (flight?.promise === task) {
           dmInboxInFlight.current.delete(refreshForPubkey);
+          flight.reconcile?.();
+        }
         const __perfBlockMs = Math.round(performance.now() - __perfBlockStart);
         // Only surface costly refreshes — sub-200 ms ones aren't
         // contributors to the multi-second freezes we're hunting.
@@ -839,6 +843,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       setDmInbox,
       accountSignalFor,
       dmInboxInFlight,
+      kind4Failures,
       scheduleReconciliation,
       cancelReconciliation,
     ],
