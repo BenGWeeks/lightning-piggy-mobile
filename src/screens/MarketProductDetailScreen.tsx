@@ -1,3 +1,4 @@
+import { marketEditorDestination } from '../utils/marketEditorNavigation';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, Linking, RefreshControl } from 'react-native';
 import { Image } from 'expo-image';
@@ -265,7 +266,7 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                   style={styles.buyButton}
                   testID="market-edit-own-listing"
                   accessibilityLabel={t('market.sell.detail.editListing')}
-                  onPress={() => navigation.navigate('MarketListingEditor', { dTag: listingDTag })}
+                  onPress={() => navigation.navigate('Main', marketEditorDestination(listingDTag))}
                 >
                   <Text style={styles.buyText}>{t('market.sell.detail.editListing')}</Text>
                 </TouchableOpacity>

@@ -2538,7 +2538,9 @@
         "notFound": "Dieses Angebot konnte nicht gefunden werden.",
         "needsShop": "Richte deinen Shop ein, bevor du Produkte zum Verkauf anbietest.",
         "delete": "Angebot löschen",
-        "conflictBody": "Dieses Angebot wurde auf einem anderen Gerät oder in einer anderen App geändert, seit du es geöffnet hast. Deine Version trotzdem speichern?"
+        "conflictBody": "Dieses Angebot wurde auf einem anderen Gerät oder in einer anderen App geändert, seit du es geöffnet hast. Deine Version trotzdem speichern?",
+        "deletedBody": "Dieses Angebot wurde gelöscht. Mit den Werten dieses Formulars erneut erstellen?",
+        "recreate": "Erneut erstellen"
       },
       "errors": {
         "title": "Füge einen Titel hinzu (bis zu 200 Zeichen).",
@@ -2611,7 +2613,22 @@
     "nfc": "Tab „NFC“"
   },
   "liveMessages": {
-    "newMessages": "Neue Nachrichten"
+    "newMessages": "Neue Nachrichten",
+    "unreadDivider": "Ungelesene Nachrichten",
+    "jumpToMention": {
+      "one": "Zu {{count}} ungelesenen Erwähnung springen",
+      "other": "Zu {{count}} ungelesenen Erwähnungen springen"
+    },
+    "jumpToLatest": "Zur neuesten Nachricht springen",
+    "jumpToLatestUnread": {
+      "one": "Zur neuesten Nachricht springen, {{count}} ungelesene Nachricht",
+      "other": "Zur neuesten Nachricht springen, {{count}} ungelesene Nachrichten"
+    }
+  },
+  "chatMentions": {
+    "picker": "Mitglied erwähnen",
+    "pickMember": "{{name}} erwähnen",
+    "rowBadge": "Du wurdest erwähnt"
   },
   "publishedRelays": {
     "intro": "Diese Listen sind öffentlich. Andere Nostr-Apps nutzen sie, um deine Beiträge zu finden und dir DMs zu schicken. Beim Veröffentlichen wird die Liste mit deinem Schlüssel signiert und ersetzt deine bisherige.",
@@ -2920,6 +2937,44 @@
   },
   "followList": {
     "unavailable": "Deine Folgeliste konnte nicht geladen werden – versuche es erneut"
+  },
+  "chatDevices": {
+    "secureChat": "Sicherer Chat",
+    "secureChatDevices": {
+      "one": "Sicherer Chat · {{count}} Gerät",
+      "other": "Sicherer Chat · {{count}} Geräte"
+    },
+    "bylineA11y": "Zeigen, wer in diesem Chat ist und mit welchen Geräten",
+    "inThisChat": "In diesem Chat",
+    "deviceCount": {
+      "one": "{{count}} Gerät",
+      "other": "{{count}} Geräte"
+    },
+    "showDevicesA11y": "Geräte von {{name}} anzeigen",
+    "hideDevicesA11y": "Geräte von {{name}} ausblenden",
+    "unknownApp": "Unbekannte App",
+    "thisPhone": "Dieses Telefon",
+    "keyFrom": "Einladungsschlüssel vom {{date}}",
+    "joinedAtEpoch": "Beigetreten in Epoche {{epoch}}",
+    "hereWhenYouJoined": "War schon da, als du beigetreten bist (Epoche {{epoch}})",
+    "sentFrom": "Gesendet von",
+    "oneOfDevices": {
+      "one": "Eines von {{count}} Geräten",
+      "other": "Eines von {{count}} Geräten"
+    },
+    "readableOn": "Lesbar auf",
+    "readableOnPerson": "{{name}}: {{count}}",
+    "you": "Du",
+    "noticeJoined": {
+      "one": "{{name}} · beigetreten mit {{count}} Gerät ({{apps}})",
+      "other": "{{name}} · beigetreten mit {{count}} Geräten ({{apps}})"
+    },
+    "noticeAdded": {
+      "one": "{{name}} hat ein Gerät hinzugefügt ({{apps}})",
+      "other": "{{name}} hat {{count}} Geräte hinzugefügt ({{apps}})"
+    },
+    "showChanges": "Geräteänderungen in Chats anzeigen",
+    "showChangesHint": "Alpha: eine graue Zeile in Marmot-Chats, wenn jemand mit einem Gerät beitritt oder eines hinzufügt. Nur auf diesem Telefon; es wird nichts gesendet."
   },
   "liveLocationWire": {
     "durationMins": "{{mins}} Min.",

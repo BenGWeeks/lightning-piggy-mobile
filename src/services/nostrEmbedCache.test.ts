@@ -8,14 +8,23 @@ import {
 
 const mockQuery = jest.fn();
 const mockRevision = jest.fn();
+const mockPrune = jest.fn();
 const mockValid = jest.fn((e: Event) => e.sig !== 'bad');
 
-jest.mock('./nostrPool', () => ({ pool: {}, trackRelays: jest.fn() }));
+jest.mock('./nostrPool', () => ({
+  pool: {},
+  trackRelays: jest.fn(),
+  pruneIdleRelays: () => mockPrune(),
+}));
 jest.mock('./relayQuery', () => ({
   querySyncAbortable: (...args: unknown[]) => mockQuery(...args),
 }));
+// Keep the former per-product dependency mocked for the old-code regression run.
 jest.mock('./marketListingsService', () => ({
   fetchListingRevision: (...args: unknown[]) => mockRevision(...args),
+}));
+jest.mock('./nostrEmbedProducts', () => ({
+  reconcileEmbedProducts: (...args: unknown[]) => mockRevision(...args),
 }));
 jest.mock('../utils/eventSignature', () => ({
   hasValidSignature: (e: Event) => mockValid(e),
@@ -55,7 +64,8 @@ beforeEach(() => {
   jest.useFakeTimers();
   __resetEmbedCacheForTests();
   mockQuery.mockReset();
-  mockRevision.mockReset();
+  mockRevision.mockReset().mockResolvedValue(new Map());
+  mockPrune.mockClear();
   mockValid.mockClear();
 });
 afterEach(() => jest.useRealTimers());
@@ -134,8 +144,65 @@ it('picks the newest revision of an addressed article', async () => {
 it('applies the seller deletions to an embedded product', async () => {
   const listing = ev({ id: id('7'), kind: 30402, tags: [['d', 'mug']] });
   mockQuery.mockResolvedValue([listing]);
-  mockRevision.mockResolvedValue(null); // withdrawn
+  mockRevision.mockResolvedValue(new Map([[listing.id, null]])); // withdrawn
   const r = await settle(resolveEmbed(addrRef(30402, 'mug'), ['wss://read']));
-  expect(mockRevision).toHaveBeenCalledWith(listing, ['wss://read'], expect.anything(), 5000);
+  expect(mockRevision).toHaveBeenCalledWith([listing], ['wss://read'], 5000);
   expect(r.product).toBeNull();
+});
+
+it('reconciles twenty products in one batch instead of twenty independent revisions', async () => {
+  const listings = Array.from({ length: 20 }, (_, i) =>
+    ev({ id: `${i}`.padStart(64, '0'), kind: 30402, tags: [['d', `item-${i}`]] }),
+  );
+  mockQuery.mockResolvedValue(listings);
+  await settle(
+    Promise.all(listings.map((e, i) => resolveEmbed(addrRef(30402, `item-${i}`), ['wss://read']))),
+  );
+  expect(mockQuery).toHaveBeenCalledTimes(1);
+  expect(mockRevision).toHaveBeenCalledTimes(1);
+  expect(mockRevision).toHaveBeenCalledWith(listings, ['wss://read'], 5000);
+});
+
+it('prunes idle connections after every hinted batch, including failed queries', async () => {
+  mockQuery.mockRejectedValue(new Error('offline'));
+  await settle(resolveEmbed(eventRef(id('1'), ['wss://hint-1']), ['wss://read']));
+  await settle(resolveEmbed(eventRef(id('2'), ['wss://hint-2']), ['wss://read']));
+  expect(mockPrune).toHaveBeenCalledTimes(2);
+});
+
+it('delivers ordinary embeds while a product query and seller reconciliation are pending', async () => {
+  const note = ev({ id: id('1') });
+  const listing = ev({ id: id('7'), kind: 30402, tags: [['d', 'mug']] });
+  let finishQuery!: (events: Event[]) => void;
+  let finishProducts!: (products: Map<string, null>) => void;
+  mockQuery.mockImplementation((_pool, _relays, filter) =>
+    filter.ids
+      ? Promise.resolve([note])
+      : new Promise((resolve) => {
+          finishQuery = resolve;
+        }),
+  );
+  mockRevision.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finishProducts = resolve;
+      }),
+  );
+  const receiveNote = jest.fn();
+  const receiveProduct = jest.fn();
+  const ordinary = resolveEmbed(eventRef(note.id), ['wss://read']).then(receiveNote);
+  const product = resolveEmbed(addrRef(30402, 'mug'), ['wss://read']).then(receiveProduct);
+  await jest.advanceTimersByTimeAsync(100);
+  expect(receiveNote).toHaveBeenCalledWith({ event: note });
+  expect(peekEmbed(`e:${note.id}`)).toEqual({ event: note });
+  expect(receiveProduct).not.toHaveBeenCalled();
+  finishQuery([listing]);
+  await jest.advanceTimersByTimeAsync(0);
+  expect(receiveProduct).not.toHaveBeenCalled();
+  expect(mockPrune).not.toHaveBeenCalled();
+  finishProducts(new Map([[listing.id, null]]));
+  await jest.advanceTimersByTimeAsync(0);
+  await Promise.all([ordinary, product]);
+  expect(receiveProduct).toHaveBeenCalledWith({ event: listing, product: null });
+  expect(mockPrune).toHaveBeenCalledTimes(1);
 });

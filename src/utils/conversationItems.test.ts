@@ -651,3 +651,38 @@ describe('buildConversationItems — Marmot replies and edits', () => {
     expect(items.find((i) => i.id === 'dm-n')).not.toHaveProperty('edited');
   });
 });
+
+describe('buildConversationItems — Marmot device notices (#1267)', () => {
+  it('interleaves local device notices by time, never as bubbles from anyone', () => {
+    const items = buildConversationItems(
+      [
+        { id: 'm1', text: 'hi', fromMe: false, createdAt: DAY2 } as ConversationMessageInput,
+        { id: 'm2', text: 'yo', fromMe: true, createdAt: DAY2 + 60 } as ConversationMessageInput,
+      ],
+      [],
+      undefined,
+      [],
+      'en-GB',
+      [
+        {
+          id: 'n1',
+          createdAt: DAY2 + 30,
+          isSelf: false,
+          joined: true,
+          clients: ['White Noise', 'Lightning Piggy'],
+        },
+      ],
+    );
+    const timed = items.filter((i) => i.kind !== 'dayHeader');
+    expect(timed.map((i) => i.id)).toEqual(['dm-m2', 'device-n1', 'dm-m1']);
+    expect(timed[1]).toEqual({
+      kind: 'deviceNotice',
+      id: 'device-n1',
+      fromMe: false,
+      createdAt: DAY2 + 30,
+      isSelf: false,
+      joined: true,
+      clients: ['White Noise', 'Lightning Piggy'],
+    });
+  });
+});

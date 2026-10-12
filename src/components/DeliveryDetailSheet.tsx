@@ -15,6 +15,7 @@ import {
 import { messageKindLabel } from '../utils/messageInfo';
 import { protocolForWireKind } from '../utils/dmProtocol';
 import { createDeliveryDetailSheetStyles } from '../styles/DeliveryDetailSheet.styles';
+import MessageDeviceRows, { type MessageDevicesSource } from './MessageDeviceRows';
 
 // Human label for the message kind (decided by `messageKindLabel`: Marmot
 // rows read kind 9, not the stored 14/15). Takes the hook translator so the
@@ -40,18 +41,22 @@ function shortEventId(id: string): string {
  * for a RECEIVED message it shows just the metadata (no relay breakdown, no
  * Re-publish). Both show the protocol (NIP-04 / NIP-17 gift-wrapped / Marmot),
  * Kind, and a copyable id labelled by what it is (event / rumor / gift wrap).
+ * Marmot messages add which device sent it and how many can read it (#1267).
  * The decisions live in `utils/messageInfo`. Modal-based, like BrandedAlert.
  */
 export default function DeliveryDetailSheet({
   info,
   onClose,
   onResend,
+  devices,
 }: {
   info: MessageInfo | null;
   onClose: () => void;
   // Re-publish over the thread's own protocol. Optional — hidden when omitted
   // (received, non-text, files, replies — `buildMessageInfo`'s canResend).
   onResend?: () => void;
+  // Marmot chats: the chat + sender, for the "Sent from" / "Can be read on" rows.
+  devices?: MessageDevicesSource | null;
 }): React.ReactElement | null {
   const colors = useThemeColors();
   const tr = useTranslation();
@@ -205,6 +210,14 @@ export default function DeliveryDetailSheet({
               <Text style={styles.metaLabel}>{tr('deliveryDetailSheet.status')}</Text>
               <Text style={styles.metaValue}>{statusLabel}</Text>
             </View>
+            {devices && info.protocol === 'marmot' ? (
+              <MessageDeviceRows
+                source={devices}
+                fromMe={sent}
+                sentHere={sent && !!status}
+                styles={styles}
+              />
+            ) : null}
           </View>
 
           <View style={styles.buttonRow}>

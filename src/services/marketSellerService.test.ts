@@ -1,3 +1,7 @@
+import { resolveCurrentRevision, StaleRevisionError } from '../utils/marketSellerRevision';
+import { nostrVerifyEvent } from './nostrCrypto';
+import { __resetVerifiedEventCache } from './nostrVerifyCache';
+import { acquireMarketListingsPool } from './marketListingsPool';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { finalizeEvent, getPublicKey, type Event } from 'nostr-tools';
 import {
@@ -23,6 +27,7 @@ import {
 } from './sellerEventStore';
 import { querySyncAbortable } from './relayQuery';
 import { publishSignedEvent } from './nostrService';
+import { pool } from './nostrPool';
 import {
   buildDeletionTemplate,
   buildListingTemplate,
@@ -36,8 +41,24 @@ jest.mock('./nostrService', () => ({
   pool: {},
   trackRelays: jest.fn(),
   DEFAULT_RELAYS: ['wss://default.example'],
-  publishSignedEvent: jest.fn(),
+  publishSignedEvent: jest.fn((...args: unknown[]) =>
+    jest.requireActual('./nostrEventPublish').publishSignedEvent(...args),
+  ),
 }));
+jest.mock('./nostrPool', () => ({ pool: { publish: jest.fn() }, trackRelays: jest.fn() }));
+jest.mock('./marketListingsPool', () => ({
+  acquireMarketListingsPool: jest.fn(() => ({ pool: { structureOnly: true }, release: jest.fn() })),
+}));
+jest.mock('./nostrCrypto', () => {
+  const actual = jest.requireActual('./nostrCrypto');
+  // Exercise real signatures without starting the facade's 60-second perf timer.
+  const pure = jest.requireActual('nostr-tools/pure');
+  return {
+    ...actual,
+    nostrGetEventHash: pure.getEventHash,
+    nostrVerifyEvent: jest.fn(pure.verifyEvent),
+  };
+});
 jest.mock('./relayQuery', () => ({ querySyncAbortable: jest.fn() }));
 
 const key = new Uint8Array(32).fill(9);
@@ -65,6 +86,7 @@ const listing = (d: string, created_at = 100) =>
   );
 
 beforeEach(async () => {
+  __resetVerifiedEventCache();
   resetSellerStore();
   jest.clearAllMocks();
   await AsyncStorage.clear();
@@ -191,7 +213,7 @@ describe('fetchLatestRevision', () => {
     (querySyncAbortable as jest.Mock).mockResolvedValue([v1, forged, v2, other]);
     await expect(
       fetchLatestRevision({ pubkey, kind: 30402, dTag: 'a', relays: ['wss://r.example'] }),
-    ).resolves.toBe(v2);
+    ).resolves.toMatchObject({ event: v2 });
     expect((querySyncAbortable as jest.Mock).mock.calls[0][2]).toEqual({
       kinds: [30402],
       authors: [pubkey],
@@ -229,7 +251,7 @@ describe('fetchLatestRevision', () => {
         dTag: 'lightning-piggy-shop',
         relays: ['wss://r'],
       }),
-    ).resolves.toBeNull();
+    ).resolves.toMatchObject({ event: null });
   });
 
   it('is null only when relays completed with nothing', async () => {
@@ -241,11 +263,43 @@ describe('fetchLatestRevision', () => {
         dTag: 'lightning-piggy-shop',
         relays: ['wss://r'],
       }),
-    ).resolves.toBeNull();
+    ).resolves.toMatchObject({ event: null });
   });
 });
 
 describe('publishSellerEvent', () => {
+  it.each(['listing', 'deletion'])('rejects an unreachable %s publication', async (kind) => {
+    (publishSignedEvent as jest.Mock).mockImplementation((...args: unknown[]) =>
+      jest.requireActual('./nostrEventPublish').publishSignedEvent(...args),
+    );
+    (pool.publish as jest.Mock).mockReturnValue([
+      Promise.resolve('connection failure: offline'),
+      Promise.reject(new Error('blocked: refused')),
+    ]);
+    const event = kind === 'listing' ? listing('a') : sign(buildDeletionTemplate([]));
+    await expect(publishSellerEvent(event, ['wss://a', 'wss://b'])).rejects.toThrow();
+  });
+
+  it('waits for an actual acknowledgement after a fast connection failure', async () => {
+    (publishSignedEvent as jest.Mock).mockImplementation((...args: unknown[]) =>
+      jest.requireActual('./nostrEventPublish').publishSignedEvent(...args),
+    );
+    let accept!: (message: string) => void;
+    (pool.publish as jest.Mock).mockReturnValue([
+      Promise.resolve('connection failure: offline'),
+      new Promise<string>((resolve) => (accept = resolve)),
+    ]);
+    let published = false;
+    const pending = publishSellerEvent(listing('a'), ['wss://a', 'wss://b']).then(() => {
+      published = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(published).toBe(false);
+    accept(''); // An empty OK message is a valid positive acknowledgement.
+    await pending;
+    expect(published).toBe(true);
+  });
+
   it('publishes to at most eight relays', async () => {
     (publishSignedEvent as jest.Mock).mockResolvedValue(undefined);
     const relays = Array.from({ length: 12 }, (_, i) => `wss://r${i}.example`);
@@ -302,6 +356,7 @@ describe('hidden listings and the persisted snapshot', () => {
     const cached = await loadSellerCache(pubkey);
     expect(cached.map((e) => e.id).sort()).toEqual([zone.id, shop.id, v2.id, deletion.id].sort());
 
+    __resetVerifiedEventCache();
     resetSellerStore();
     restoreSellerAccount(pubkey, cached, new Map([[coordinateOf(30402, pubkey, 'c'), 9]]));
     const state = sellerStoreState(pubkey);
@@ -356,4 +411,56 @@ describe('sellerEventStore', () => {
     expect(events.has(revisions[1099].id)).toBe(true);
     expect(events.size).toBeLessThan(1000);
   });
+});
+
+it.each(['a', 'e'])(
+  'rejects saving a stale listing deleted by %s through the real revision lookup',
+  async (target) => {
+    const base = listing('deleted', 100);
+    const deletion = sign(
+      {
+        kind: 5,
+        content: '',
+        tags: [[target, target === 'a' ? coordinateOf(30402, pubkey, 'deleted') : base.id]],
+      },
+      200,
+    );
+    (querySyncAbortable as jest.Mock).mockImplementation((_pool, _relays, filter) =>
+      Promise.resolve(filter.kinds[0] === 5 ? [deletion] : [base]),
+    );
+    const fetchLatest = () =>
+      fetchLatestRevision({
+        pubkey,
+        kind: 30402,
+        dTag: 'deleted',
+        baseId: base.id,
+        relays: ['wss://r'],
+      });
+    await expect(resolveCurrentRevision({ fetchLatest, base })).rejects.toBeInstanceOf(
+      StaleRevisionError,
+    );
+    await expect(resolveCurrentRevision({ fetchLatest, base, force: true })).resolves.toBeNull();
+  },
+);
+
+test('seller snapshots use the structure-only pool and cache one signature pass across refreshes', async () => {
+  const rows: Event[] = JSON.parse(
+    JSON.stringify([listing('paced-a'), listing('paced-b'), listing('paced-c')]),
+  );
+  (querySyncAbortable as jest.Mock)
+    .mockReset()
+    .mockImplementation((_pool, _relays, filter) =>
+      Promise.resolve(filter.kinds[0] === 30402 ? JSON.parse(JSON.stringify(rows)) : []),
+    );
+  const request = { pubkey, relays: ['wss://r.example'] };
+  await expect(fetchSellerEvents(request)).resolves.toEqual(rows);
+  expect(nostrVerifyEvent).toHaveBeenCalledTimes(3);
+  for (const [pool] of (querySyncAbortable as jest.Mock).mock.calls) {
+    expect(pool).toEqual({ structureOnly: true });
+  }
+  await expect(fetchSellerEvents(request)).resolves.toEqual(rows);
+  expect(nostrVerifyEvent).toHaveBeenCalledTimes(3);
+  const leases = (acquireMarketListingsPool as jest.Mock).mock.results;
+  expect(leases).toHaveLength(6);
+  for (const lease of leases) expect(lease.value.release).toHaveBeenCalledTimes(1);
 });

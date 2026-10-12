@@ -1,3 +1,4 @@
+import { SellerSigningError } from '../utils/sellerSigning';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
@@ -90,12 +91,16 @@ const MarketShopSettingsScreen: React.FC<Props> = ({ navigation }) => {
     if (existing && snapshot.shop) {
       if (form && (dirty || base?.shop?.id === snapshot.shop.id)) return;
       setForm({ shop: existing, zones: snapshot.zones.map(zoneDraftFromOption) });
-      setBase({ shop: snapshot.shop, zoneCoordinates: snapshot.zones.map((z) => z.coordinate) });
+      setBase({
+        shop: snapshot.shop,
+        zoneCoordinates: snapshot.zones.map((z) => z.coordinate),
+        zoneEvents: new Map(snapshot.zoneEvents),
+      });
     } else if (!form && status === 'ready') {
       setForm({ shop: { name: '', description: '', currency: 'SATS' }, zones: [newZone('SATS')] });
-      setBase({ shop: null, zoneCoordinates: [] });
+      setBase({ shop: null, zoneCoordinates: [], zoneEvents: new Map() });
     }
-  }, [form, dirty, base, snapshot.shop, snapshot.zones, status, newZone]);
+  }, [form, dirty, base, snapshot.shop, snapshot.zones, snapshot.zoneEvents, status, newZone]);
 
   const errors = useMemo(() => (form ? validateShop(form.shop, form.zones) : []), [form]);
 
@@ -171,9 +176,14 @@ const MarketShopSettingsScreen: React.FC<Props> = ({ navigation }) => {
     };
     const save = async (force: boolean) => {
       try {
-        await saveShop(form.shop, form.zones, base ?? { shop: null, zoneCoordinates: [] }, {
-          force,
-        });
+        await saveShop(
+          form.shop,
+          form.zones,
+          base ?? { shop: null, zoneCoordinates: [], zoneEvents: new Map() },
+          {
+            force,
+          },
+        );
         Toast.show({ type: 'success', text1: t('market.sell.shop.saved') });
         navigation.goBack();
       } catch (e) {
@@ -197,7 +207,7 @@ const MarketShopSettingsScreen: React.FC<Props> = ({ navigation }) => {
         Toast.show({
           type: 'error',
           text1: t('market.sell.shop.saveFailed'),
-          text2: (e as Error).message,
+          text2: e instanceof SellerSigningError ? undefined : (e as Error).message,
         });
       }
     };

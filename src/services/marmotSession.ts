@@ -47,8 +47,10 @@ import {
   trackKeyPackageAcceptance,
 } from './marmotKeyPackageLifecycle';
 import { retryPendingRetirement } from './marmotKeyPackageRetire';
+import { MarmotDeviceTracker } from './marmotDeviceTracker';
 import {
   fetchDevices,
+  fetchKeyPackageEvents,
   inviteDevices,
   MarmotWelcomeDeliveryError,
   resolveInvitees,
@@ -60,14 +62,13 @@ import { boundGroupQueries } from './marmotGroupBackfill';
 import { submitWhenSettled, type GroupSendIntent } from './marmotSendGate';
 import { createMarmotNetwork, createPushTransport } from './marmotNetwork';
 import {
-  leafKey,
   PUSH_TOKEN_LIST_KIND,
   PUSH_TOKEN_REMOVAL_KIND,
   PUSH_TOKEN_UPDATE_KIND,
   PUSH_TRIGGERING_KINDS,
 } from './marmotPush';
 import type { SignedProof } from './marmotPushEntries';
-import { MarmotPushNotifier, type PushGroup } from './marmotPushNotifier';
+import { MarmotPushNotifier, toPushGroup } from './marmotPushNotifier';
 import { MarmotPushRegistrar } from './marmotPushRegistrar';
 import { isMarmotMessageKind } from './marmotKinds';
 import { noteMarmotCommit, noteMarmotGroupTraffic, setMarmotCatchingUp } from './marmotPushWake';
@@ -216,6 +217,8 @@ export class MarmotSession {
   private readonly gate = fence.createStopGate();
   private readonly acceptedKeyPackages = new Set<string>();
   private readonly refreshes = new KeyPackageRefreshRequests();
+  /** Each chat's devices per person (#1267) — read-only over group state. */
+  readonly devices: MarmotDeviceTracker;
   private markReady!: () => void;
   /** Resolves once stored groups are loaded — joins must not race loadAll. */
   private readonly ready = new Promise<void>((resolve) => (this.markReady = resolve));
@@ -255,7 +258,7 @@ export class MarmotSession {
       groups: () =>
         this.client.groups.loaded
           .filter((g) => g.status === 'active')
-          .map((g) => ({ ...this.pushGroup(g), ownLeaf: g.state.privatePath.leafIndex })),
+          .map((g) => ({ ...toPushGroup(g), ownLeaf: g.state.privatePath.leafIndex })),
       sign: (template) => signer.signEvent(template) as Promise<SignedProof>,
       send: async (idHex, event) => {
         const rumor = buildMarmotRumor(this.pubkey, event);
@@ -288,6 +291,12 @@ export class MarmotSession {
       historyFactory: transientFreeHistoryFactory((groupId) =>
         store<Rumor>(historyNamespace(bytesToHex(groupId))),
       ),
+    });
+    this.devices = new MarmotDeviceTracker({
+      backend: this.backend,
+      groups: () => this.client.groups.loaded,
+      fetchKeyPackages: (pk) => fetchKeyPackageEvents(network, opts.getLookupRelays(), pk),
+      ownClient: CLIENT_NAME,
     });
   }
 
@@ -538,6 +547,7 @@ export class MarmotSession {
       get: (id: string) => this.client.groups.get(id),
       send: (id: string, intent: GroupSendIntent) => this.sendIntent(id, intent),
     };
+    void this.devices.rememberKeyPackages([...devices.values()].flat()).catch(() => undefined);
     return inviteDevices(groups, this.outbox, mlsId, this.pubkey, devices, progress);
   }
 
@@ -672,7 +682,7 @@ export class MarmotSession {
       PUSH_TRIGGERING_KINDS.includes(rumor.kind) &&
       Object.values(byRelay).some(Boolean)
     ) {
-      this.push.trigger(this.pushGroup(sent));
+      this.push.trigger(toPushGroup(sent));
       this.pushRegistration.onUserSend(sent.idStr);
     }
     return byRelay;
@@ -791,12 +801,13 @@ export class MarmotSession {
   private wireGroup(g: SessionGroup): void {
     if (this.wiredGroups.has(g.idStr)) return;
     this.wiredGroups.add(g.idStr);
+    this.devices.watch(g);
     // Membership / name changes (ours or another member's commit) move the epoch.
     g.on('stateChanged', () => {
       noteMarmotCommit(); // covers a push wake for it (never settles a placeholder)
       this.emitGroupsChanged();
       // A member left → drop their push records (MIP-05 "Record state").
-      void this.push.reconcile(this.pushGroup(g)).catch(() => undefined);
+      void this.push.reconcile(toPushGroup(g)).catch(() => undefined);
     });
     if (!this.firstSeen.has(g.idStr)) {
       const now = Date.now();
@@ -834,7 +845,7 @@ export class MarmotSession {
       rumor.kind === PUSH_TOKEN_REMOVAL_KIND
     ) {
       // MIP-05 token gossip: kept as local push state, never a chat row.
-      void this.push.ingest(this.pushGroup(g), rumor.kind, rumor.content).catch(() => undefined);
+      void this.push.ingest(toPushGroup(g), rumor.kind, rumor.content).catch(() => undefined);
     }
     if (rumor.kind === MARMOT_CHAT_KIND && renderableAttachments(rumor.tags).length > 0) {
       // Capture the epochs NOW: the photo or voice note's key comes from the epoch it was
@@ -844,17 +855,6 @@ export class MarmotSession {
       return;
     }
     this.emit(g, rumor);
-  }
-
-  /** A group as MIP-05 push state sees it: id + its current member leaves. */
-  private pushGroup(g: SessionGroup): PushGroup {
-    const leaves = new Set<string>();
-    for (const member of getGroupMembers(g.state)) {
-      for (const leaf of getPubkeyLeafNodeIndexes(g.state, member)) {
-        leaves.add(leafKey(member.toLowerCase(), Number(leaf)));
-      }
-    }
-    return { idHex: g.idStr, id: g.id, leaves };
   }
 
   private emit(g: SessionGroup, rumor: MarmotRumor, mediaKeys?: MarmotMediaKeys): void {

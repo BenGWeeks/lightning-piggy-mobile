@@ -97,7 +97,7 @@ A third DM/group transport, wire-compatible with White Noise; full design in `SO
 | 445 | Group event (MLS commits + application messages), `h`-tagged with the Nostr group id; signed by per-message ephemeral keys.
 | 1059 → 446 | MIP-05 push trigger: a kind-446 rumor (concatenated encrypted device tokens, `["v","marmot-push-v1"]`) gift-wrapped to a notification server.
 | 1059 → 8480 | Notification-watcher registration (not Marmot): a kind-8480 rumor whose JSON content either registers this device (`action: "register"` — app, platform, push token, `apns_env` on iOS, categories, relays, NWC proofs, `ts`) or unregisters it (`action: "unregister"` — app, platform, token and `ts` only; removes the device's registration whatever its categories), gift-wrapped to Lightning Piggy's watcher (seal signed by the user). See `docs/architecture/notifications.adoc` → "The notification watcher" and the watcher's `PROTOCOL.md`.
-| 9 (inner) | Chat text. With an `imeta` tag, a MIP-04 photo. A GIF is the GIPHY URL plus a `via GIPHY` line.
+| 9 (inner) | Chat text. With an `imeta` tag, a MIP-04 photo. A GIF is the GIPHY URL plus a `via GIPHY` line. In groups an @mention is a `nostr:npub…` reference in the content plus a `p` tag per mentioned member (#1295); group messages carry no roster `p` tags or `subject` (older builds sent both, so a kind 9 with a `subject` tag has no mention tags).
 | 7 / 5 (inner) | Reaction (`content` = emoji, `e` = message id) and its retraction (`e` = reaction id), in 1:1 Marmot threads.
 | 447 / 448 / 449 (inner) | MIP-05 push-token update / list / removal, gossiped by group members. Kept as push state, never shown. We publish 447 (our own record) and 449 when push is on / turned off; we never send 448 or empty 447 requests.
 | 451 (local-only) | MIP-05 owner proof that each push record's signature covers. Never published.
@@ -170,6 +170,7 @@ Two hard constraints:
 
 What this means for us:
 
+* *@mentions in group chats* (#1295) — the composer shows `@Name` and sends a NIP-27 `nostr:npub…` reference in the content. In a NIP-17 group that's all (no `p` tag, per the rule above); a Marmot group's kind 9 also `p`-tags each mentioned member (see <<marmot-protocol>>). Incoming `nostr:npub` / `nprofile` references inside a sentence render as `@Name` chips; a reference alone on its own line under a label is still a shared-contact card.
 * *Contact* — already done the interoperable way: `Shared contact: <name>\nnostr:<nprofile>` in the kind-14 content, `nprofile` carrying relay hints, recipient as the only `p` tag (`src/screens/ContactProfileScreen.tsx`, `extractSharedContact` in `MessageBubble.tsx`). No change needed.
 * *Calendar event* — if we ever add "share an event to a DM", publish a NIP-52 kind-31923 and embed its `naddr` + a `q` tag; that interops with Amethyst's calendar for free.
 * *Location / polls* — no interoperable card exists; the app-private encoding is the ceiling. A `g` geohash tag is *not* worth adding (encrypted inside the wrap → relays can't index it → no discovery, ~no rendering gain over the `geo:` URI); keep location in the kind-14 `content` and never on the outer wrap.

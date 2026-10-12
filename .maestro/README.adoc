@@ -37,7 +37,8 @@ on their own).
   messaging/           flow-NNN  1:1 DM, conversation, attach panel, secret mode,
                        protocol picker (124), Marmot/MLS (125–130, via scripts/marmot-e2e.sh)
                        signer matrix: 133 Marmot Big (nsec) ⇄ Middle (Amber),
-                       134 NIP-17 via NIP-46 (approve / decline / timeout)
+                       134 NIP-17 via NIP-46 (approve / decline / timeout),
+                       152 group @mentions + read position (Big → Little)
   payments/            flow-NNN  send/receive/pay/transfer/swap/amount entry
   profile/             flow-NNN  edit profile/picture, appearance, account drawer
   ui/                  flow-NNN  alerts, dialogs, events, NFC, explore tour, WoT

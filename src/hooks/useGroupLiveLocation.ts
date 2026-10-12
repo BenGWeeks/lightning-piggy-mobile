@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { Alert } from '../components/BrandedAlert';
 import { useLiveLocation } from '../contexts/LiveLocationContext';
 import { useNostr } from '../contexts/NostrContext';
-import type { BubbleContent } from '../utils/messageContent';
+import { isDeviceNoticeRow, type GroupTimelineRow } from './useGroupTimeline';
 import { t } from '../i18n';
 import {
   useLiveLocationThread,
@@ -22,7 +22,8 @@ export function useGroupLiveLocation(params: {
   groupId: string | null;
   marmotGroupId: string | null;
   groupName: string;
-  messages: { senderPubkey: string; createdAt: number; content: BubbleContent }[];
+  /** The group's timeline rows (device-notice rows are skipped). */
+  messages: GroupTimelineRow[];
   handleShareLocation: () => Promise<void> | void;
   closeAttachPanel: () => void;
 }) {
@@ -63,7 +64,7 @@ export function useGroupLiveLocation(params: {
   const markers = useMemo<ThreadLiveMarker[]>(() => {
     const out: ThreadLiveMarker[] = [];
     for (const m of messages) {
-      if (m.content.kind !== 'liveLocationMarker') continue;
+      if (isDeviceNoticeRow(m) || m.content.kind !== 'liveLocationMarker') continue;
       out.push({
         fromMe: m.senderPubkey === myPubkey,
         sender: m.senderPubkey,

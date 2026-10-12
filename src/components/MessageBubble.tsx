@@ -291,6 +291,7 @@ const MessageBubble: React.FC<Props> = ({
           eventId: deliveryStatus?.eventId ?? id.replace(/^dm-/, ''),
           wireKind,
           deliveryStatus,
+          createdAt,
           ...resendPayload,
         })
     : undefined;

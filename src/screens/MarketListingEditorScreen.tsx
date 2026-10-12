@@ -1,3 +1,4 @@
+import { SellerSigningError } from '../utils/sellerSigning';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
@@ -183,25 +184,33 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
           return;
         }
         if (e instanceof StaleRevisionError) {
-          Alert.alert(t('market.sell.conflictTitle'), t('market.sell.editor.conflictBody'), [
-            {
-              text: t('market.sell.cancel'),
-              style: 'cancel',
-              // Show the newer revision instead of the stale form: clearing
-              // the base too makes the seed effect reload from `existing`.
-              onPress: () => {
-                setDirty(false);
-                setBase(null);
+          Alert.alert(
+            t('market.sell.conflictTitle'),
+            t(e.latest ? 'market.sell.editor.conflictBody' : 'market.sell.editor.deletedBody'),
+            [
+              {
+                text: t('market.sell.cancel'),
+                style: 'cancel',
+                // Keep the deleted base and draft until recreation is confirmed.
+                // For a surviving revision, reload it from the shared store.
+                onPress: () => {
+                  if (!e.latest) return;
+                  setDirty(false);
+                  setBase(null);
+                },
               },
-            },
-            { text: t('market.sell.overwrite'), onPress: () => void publish(true) },
-          ]);
+              {
+                text: t(e.latest ? 'market.sell.overwrite' : 'market.sell.editor.recreate'),
+                onPress: () => void publish(true),
+              },
+            ],
+          );
           return;
         }
         Toast.show({
           type: 'error',
           text1: t('market.sell.editor.publishFailed'),
-          text2: (e as Error).message,
+          text2: e instanceof SellerSigningError ? undefined : (e as Error).message,
         });
       }
     };

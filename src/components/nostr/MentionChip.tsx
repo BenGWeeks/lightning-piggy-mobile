@@ -2,7 +2,7 @@ import React, { useCallback } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { usePubkeyProfile } from '../../hooks/usePubkeyProfile';
+import { useMentionProfile } from '../../hooks/useMentionProfile';
 import { useTranslation } from '../../contexts/LocaleContext';
 import { pubkeyToContactBodyStub } from '../../utils/nostrProfileLink';
 import { shortNpubLabel } from '../../utils/nip27';
@@ -17,8 +17,8 @@ interface Props {
 
 /**
  * Inline `@Name` chip for a NIP-27 `nostr:npub…` / `nprofile…` mention. The
- * name comes from the shared profile cache (`usePubkeyProfile`: memory /
- * disk first, one de-duplicated relay fetch otherwise), with a short npub
+ * name comes from the shared profile cache (`useMentionProfile`: a shared, bounded,
+ * focus-owned cosmetic batch), with a short npub
  * until it resolves. Tapping pushes that person's profile, so Back returns
  * to where the mention was.
  *
@@ -28,7 +28,7 @@ interface Props {
 const MentionChip: React.FC<Props> = ({ pubkey, styles, testID }) => {
   const t = useTranslation();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { name, picture } = usePubkeyProfile(pubkey);
+  const { name, picture } = useMentionProfile(pubkey);
   const label = `@${name?.trim() || shortNpubLabel(pubkey)}`;
 
   const open = useCallback(() => {

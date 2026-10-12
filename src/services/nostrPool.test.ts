@@ -1,138 +1,96 @@
+import { AbstractRelay } from 'nostr-tools/abstract-relay';
 import { SimplePool } from 'nostr-tools/pool';
-import type { Event as NostrEvent } from 'nostr-tools/pure';
+import type { Event, VerifiedEvent } from 'nostr-tools';
+import { connectedRelays, pool, pruneIdleRelays, trackRelays } from './nostrPool';
 
-import { pool } from './nostrPool';
-import {
-  RELAY_CONNECT_TIMEOUT_MS,
-  RELAY_SKIPPED_REASON,
-  __resetRelayHealthForTests,
-  isRelayParked,
-  recordRelayFailure,
-  recordRelaySuccess,
-} from './relayHealth';
+jest.mock('./relayHealth', () => ({
+  hydrateRelayHealth: jest.fn(),
+  selectHealthyRelays: (urls: string[]) => urls,
+  noteNetworkActivity: jest.fn(),
+}));
 
-const DEAD = 'wss://dead.example/';
-const A = 'wss://a.example/';
-const B = 'wss://b.example/';
-const EVENT = { id: 'x' } as NostrEvent;
-
-function park(url: string) {
-  for (let i = 0; i < 2; i++) {
-    recordRelaySuccess('wss://witness.example/');
-    recordRelayFailure(url);
-  }
-  expect(isRelayParked(url)).toBe(true);
+const relays = (pool as unknown as { relays: Map<string, AbstractRelay> }).relays;
+const created: AbstractRelay[] = [];
+function addRelay(url: string): AbstractRelay {
+  const relay = new AbstractRelay(url, { verifyEvent: (event): event is VerifiedEvent => !!event });
+  created.push(relay);
+  jest.spyOn(relay, 'send').mockResolvedValue();
+  relays.set(url, relay);
+  trackRelays([url]);
+  return relay;
 }
-
-let superPublish: jest.SpyInstance;
-let superSubscribeMap: jest.SpyInstance;
-
 beforeEach(() => {
-  __resetRelayHealthForTests();
-  superPublish = jest
-    .spyOn(SimplePool.prototype, 'publish')
-    .mockImplementation((relays: string[]) => relays.map((r) => Promise.resolve(`ok ${r}`)));
-  superSubscribeMap = jest
-    .spyOn(SimplePool.prototype, 'subscribeMap')
-    .mockImplementation(() => ({ close: () => {} }));
+  relays.clear();
+  connectedRelays.clear();
 });
-
 afterEach(() => {
-  jest.restoreAllMocks();
-  __resetRelayHealthForTests(); // cancels the debounced persist timer
+  created.splice(0).forEach((relay) => relay.close());
+  relays.clear();
 });
 
-describe('publish', () => {
-  it('passes everything through when no relay is parked', async () => {
-    const results = await Promise.all(pool.publish([A, B, DEAD], EVENT));
-    expect(superPublish).toHaveBeenCalledWith([A, B, DEAD], EVENT, undefined);
-    expect(results).toEqual([`ok ${A}`, `ok ${B}`, `ok ${DEAD}`]);
-  });
-
-  it('skips a parked relay, keeping results aligned with the input', async () => {
-    park(DEAD);
-    const settled = await Promise.allSettled(pool.publish([A, DEAD, B], EVENT));
-    expect(superPublish).toHaveBeenCalledWith([A, B], EVENT, undefined);
-    expect(settled).toEqual([
-      { status: 'fulfilled', value: `ok ${A}` },
-      { status: 'rejected', reason: new Error(RELAY_SKIPPED_REASON) },
-      { status: 'fulfilled', value: `ok ${B}` },
-    ]);
-  });
-
-  it('still publishes somewhere when every relay is parked', async () => {
-    park(DEAD);
-    park(A);
-    await Promise.allSettled(pool.publish([DEAD, A], EVENT));
-    expect(superPublish).toHaveBeenCalledWith([DEAD, A], EVENT, undefined);
-  });
+it('removes normalized idle URLs while retaining active relay bookkeeping', () => {
+  addRelay('wss://hint/');
+  trackRelays(['wss://HINT:443/']);
+  const active = addRelay('wss://active/');
+  active.prepareSubscription([{ kinds: [1], limit: 1 }], {});
+  active.idleSince = undefined;
+  pruneIdleRelays();
+  expect([...connectedRelays]).toEqual(['wss://active/']);
 });
 
-describe('subscriptions', () => {
-  it('leave parked relays out of the request', () => {
-    park(DEAD);
-    pool.subscribeMany([A, DEAD, B], { kinds: [0] }, {});
-    const requests = superSubscribeMap.mock.calls[0][0] as { url: string }[];
-    expect(requests.map((r) => r.url)).toEqual([A, B]);
-  });
+it('preserves an idle socket until a pending EVENT receives its acknowledgement', async () => {
+  const relay = addRelay('wss://publish/');
+  const publish = relay.publish({ id: 'event' } as Event);
+  const outcome = publish.catch((error: Error) => error.message);
+  expect(relay.idleSince).toBeDefined();
+  pruneIdleRelays();
+  expect(relays.has(relay.url)).toBe(true);
+  expect(connectedRelays.has(relay.url)).toBe(true);
+  relay._onmessage({ data: JSON.stringify(['OK', 'event', true, 'saved']) } as MessageEvent);
+  await expect(outcome).resolves.toBe('saved');
+  pruneIdleRelays();
+  expect(relays.has(relay.url)).toBe(false);
 });
 
-describe('ensureRelay', () => {
-  it('counts one failure for concurrent callers sharing one connect attempt', async () => {
-    let fail: (reason: string) => void = () => {};
-    const shared = new Promise<never>((_, reject) => {
-      fail = reject;
-    });
-    jest.spyOn(SimplePool.prototype, 'ensureRelay').mockReturnValue(shared);
-    recordRelaySuccess('wss://witness.example/');
-    const calls = [pool.ensureRelay(DEAD), pool.ensureRelay(DEAD), pool.ensureRelay(DEAD)];
-    fail('connection timed out');
-    await Promise.allSettled(calls);
-    await Promise.resolve();
-    // Three rejections, one physical attempt: not parked (needs 2 failures).
-    expect(isRelayParked(DEAD)).toBe(false);
-  });
-
-  it('records nothing when the initiating caller aborts, even for other waiters', async () => {
-    let fail: (reason: unknown) => void = () => {};
-    const shared = new Promise<never>((_, reject) => {
-      fail = reject;
-    });
-    jest.spyOn(SimplePool.prototype, 'ensureRelay').mockReturnValue(shared);
-    recordRelaySuccess('wss://witness.example/');
-    const aborted = new AbortController();
-    const calls = [pool.ensureRelay(DEAD, { abort: aborted.signal }), pool.ensureRelay(DEAD)];
-    aborted.abort();
-    fail('aborted');
-    await Promise.allSettled(calls);
-    // A second, independent real failure alone must not park it.
-    jest.spyOn(SimplePool.prototype, 'ensureRelay').mockRejectedValue('connection failed');
-    await expect(pool.ensureRelay(DEAD)).rejects.toBeDefined();
-    expect(isRelayParked(DEAD)).toBe(false);
-  });
-
-  it('caps the connect timeout and records a new connection as healthy', async () => {
-    park(DEAD);
-    const ensure = jest
-      .spyOn(SimplePool.prototype, 'ensureRelay')
-      .mockResolvedValue({} as Awaited<ReturnType<SimplePool['ensureRelay']>>);
-    await pool.ensureRelay(DEAD, { connectionTimeout: 12_000 });
-    expect(ensure).toHaveBeenCalledWith(DEAD, { connectionTimeout: RELAY_CONNECT_TIMEOUT_MS });
-    expect(isRelayParked(DEAD)).toBe(false);
-  });
-
-  it('records a failed connection, but not an aborted one', async () => {
-    jest.spyOn(SimplePool.prototype, 'ensureRelay').mockRejectedValue('connection timed out');
-    recordRelaySuccess('wss://witness.example/');
-    const aborted = new AbortController();
-    aborted.abort();
-    await expect(pool.ensureRelay(DEAD, { abort: aborted.signal })).rejects.toBe(
-      'connection timed out',
-    );
-    await expect(pool.ensureRelay(DEAD, { abort: aborted.signal })).rejects.toBeDefined();
-    expect(isRelayParked(DEAD)).toBe(false);
-    await expect(pool.ensureRelay(DEAD)).rejects.toBeDefined();
-    await expect(pool.ensureRelay(DEAD)).rejects.toBeDefined();
-    expect(isRelayParked(DEAD)).toBe(true);
-  });
+it('preserves outstanding COUNT requests even when the relay is marked idle', async () => {
+  const relay = addRelay('wss://count/');
+  const outcome = relay.count([{ kinds: [1], limit: 1 }], { id: 'count' }).catch(() => -1);
+  pruneIdleRelays();
+  expect(relays.has(relay.url)).toBe(true);
+  relay._onmessage({ data: JSON.stringify(['COUNT', 'count', { count: 3 }]) } as MessageEvent);
+  await expect(outcome).resolves.toBe(3);
+  pruneIdleRelays();
+  expect(relays.has(relay.url)).toBe(false);
 });
+
+it.each([false, true])(
+  'preserves overlapping pool publishes during AUTH signing and releases after settlement (reject: %s)',
+  async (reject) => {
+    const relay = addRelay('wss://auth/');
+    const pending: { resolve: (message: string) => void; reject: (error: Error) => void }[] = [];
+    const publish = jest
+      .spyOn(SimplePool.prototype, 'publish')
+      .mockImplementation((urls) =>
+        urls.map(() => new Promise((resolve, reject) => pending.push({ resolve, reject }))),
+      );
+    try {
+      const first = pool.publish(['wss://AUTH:443'], {} as Event)[0];
+      const second = pool.publish(['wss://auth/'], {} as Event)[0];
+      const outcomes = Promise.allSettled([first, second]);
+      pruneIdleRelays();
+      expect(relays.has(relay.url)).toBe(true);
+      pending[0].resolve('saved');
+      await first;
+      pruneIdleRelays();
+      expect(relays.has(relay.url)).toBe(true);
+      if (reject) pending[1].reject(new Error('AUTH failed'));
+      else pending[1].resolve('saved');
+      await outcomes;
+      pruneIdleRelays();
+      expect(relays.has(relay.url)).toBe(false);
+    } finally {
+      pending.forEach(({ resolve }) => resolve('cleanup'));
+      publish.mockRestore();
+    }
+  },
+);

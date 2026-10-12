@@ -1,0 +1,165 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Marmot 1:1 — a person's devices (header by-line, members sheet, message info) (#1267)
+env:
+  # The other person: Big Piggy by default (a Piggy fixture signed in on
+  # several test devices, so each install has its own invitation key).
+  PEER_PREFIX: ${PEER_PREFIX || 'ccedbff9a6f2'}
+  RUN_TAG: ${RUN_TAG || 'devices'}
+---
+# Open (or start) the Marmot 1:1 with the peer, send one message, then check
+# the device UI added in #1267:
+#   1. the header by-line under the peer's name ("Secure chat · N devices",
+#      or "Secure chat" for one device) opens the read-only members sheet;
+#   2. the peer's row has a "N devices" toggle and their device list is open
+#      (app, invitation key date, epoch per device);
+#   3. the sent message's info sheet shows "Sent from" and "Can be read on".
+#
+# The first send creates the 1:1 and invites EVERY fresh device of the peer
+# (#1239), so the by-line appears once that invite commit lands.
+#
+# Expects the signed-in Piggy to follow the peer and NOT be the peer (Middle
+# messaging Big by default). Only ever messages a Piggy. Works on Android and
+# iOS (no back-key presses).
+#
+# Run: maestro test .maestro/messaging/flow-142-marmot-devices.yaml
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 15000
+# The account drawer (it slides in from the right) left open, e.g. after an
+# account switch, covers the tab bar.
+- runFlow:
+    when:
+      visible:
+        id: 'drawer-version'
+    commands:
+      - swipe:
+          from:
+            id: 'drawer-version'
+          direction: RIGHT
+      - waitForAnimationToEnd:
+          timeout: 2000
+- runFlow:
+    when:
+      visible:
+        id: 'conversation-back'
+    commands:
+      - tapOn:
+          id: 'conversation-back'
+- tapOn:
+    id: 'tab-messages'
+- tapOn:
+    id: 'start-conversation-button'
+# Scroll to the peer rather than typing a search (iOS input drops keys
+# while the app is busy).
+- scrollUntilVisible:
+    element:
+      id: 'friend-picker-${PEER_PREFIX.substring(0, 8)}'
+    direction: DOWN
+    timeout: 15000
+- tapOn:
+    id: 'friend-picker-${PEER_PREFIX.substring(0, 8)}'
+# A new conversation asks which protocol; an existing one may not.
+- runFlow:
+    when:
+      visible:
+        id: 'dm-protocol-option-marmot'
+    commands:
+      - tapOn:
+          id: 'dm-protocol-option-marmot'
+- extendedWaitUntil:
+    visible:
+      id: 'conversation-protocol-tag'
+    timeout: 30000
+
+- tapOn:
+    id: 'conversation-input'
+- inputText: 'devices check ${RUN_TAG}'
+- tapOn:
+    id: 'conversation-send'
+# (iOS reads the bubble as one element: "devices check …, Delivery status".)
+- extendedWaitUntil:
+    visible:
+      text: '.*evices check ${RUN_TAG}.*'
+    timeout: 60000
+
+# 1. The by-line: a 1:1 stays a 1:1 (never "2 members").
+- extendedWaitUntil:
+    visible:
+      id: 'chat-header-devices'
+    timeout: 90000
+- assertVisible:
+    text: 'Secure chat.*'
+- assertNotVisible:
+    text: '.*members'
+- takeScreenshot: flow-142-byline
+
+# 2. Who's in the chat on which devices.
+- tapOn:
+    id: 'chat-header-devices'
+- extendedWaitUntil:
+    visible:
+      id: 'group-member-devices-toggle-${PEER_PREFIX}'
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      id: 'member-devices-${PEER_PREFIX}'
+    timeout: 30000
+- assertVisible:
+    text: 'In this chat'
+# Read-only: no Add / Remove in a 1:1.
+- assertNotVisible:
+    id: 'group-members-add'
+- assertNotVisible:
+    id: 'group-member-remove-${PEER_PREFIX}'
+- takeScreenshot: flow-142-devices
+# Collapse and re-open the peer's list.
+- tapOn:
+    id: 'group-member-devices-toggle-${PEER_PREFIX}'
+- assertNotVisible:
+    id: 'member-devices-${PEER_PREFIX}'
+- tapOn:
+    id: 'group-member-devices-toggle-${PEER_PREFIX}'
+- extendedWaitUntil:
+    visible:
+      id: 'member-devices-${PEER_PREFIX}'
+    timeout: 15000
+- tapOn:
+    id: 'group-members-done'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# 3. Message info: which device sent it, and how many can read it.
+# Tap this message's footer (time + tick). iOS exposes it as a child of the
+# bubble; Android lays it out below the bubble's text.
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - tapOn:
+          id: 'dm-bubble-delivery-footer-.*'
+          childOf:
+            id: 'conversation-text-.*'
+            text: '.*evices check ${RUN_TAG}.*'
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - tapOn:
+          id: 'dm-bubble-delivery-footer-.*'
+          below:
+            text: '.*evices check ${RUN_TAG}.*'
+- extendedWaitUntil:
+    visible:
+      id: 'dm-delivery-detail-sheet'
+    timeout: 10000
+- extendedWaitUntil:
+    visible:
+      id: 'dm-delivery-readable-on'
+    timeout: 15000
+- assertVisible:
+    id: 'dm-delivery-sent-from'
+- takeScreenshot: flow-142-message-info
+- tapOn:
+    id: 'dm-delivery-detail-close'

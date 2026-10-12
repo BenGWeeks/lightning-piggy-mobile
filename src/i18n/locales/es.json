@@ -2538,7 +2538,9 @@
         "notFound": "No se encontró este anuncio.",
         "needsShop": "Crea tu tienda antes de anunciar artículos.",
         "delete": "Eliminar anuncio",
-        "conflictBody": "Este anuncio se cambió en otro dispositivo o app desde que lo abriste. ¿Guardar tu versión de todos modos?"
+        "conflictBody": "Este anuncio se cambió en otro dispositivo o app desde que lo abriste. ¿Guardar tu versión de todos modos?",
+        "deletedBody": "Este anuncio se eliminó. ¿Quieres volver a crearlo con los valores de este formulario?",
+        "recreate": "Volver a crear"
       },
       "errors": {
         "title": "Añade un título (hasta 200 caracteres).",
@@ -2611,7 +2613,22 @@
     "nfc": "Pestaña NFC"
   },
   "liveMessages": {
-    "newMessages": "Mensajes nuevos"
+    "newMessages": "Mensajes nuevos",
+    "unreadDivider": "Mensajes no leídos",
+    "jumpToMention": {
+      "one": "Ir a {{count}} mención sin leer",
+      "other": "Ir a {{count}} menciones sin leer"
+    },
+    "jumpToLatest": "Ir a lo más reciente",
+    "jumpToLatestUnread": {
+      "one": "Ir a lo más reciente, {{count}} mensaje sin leer",
+      "other": "Ir a lo más reciente, {{count}} mensajes sin leer"
+    }
+  },
+  "chatMentions": {
+    "picker": "Mencionar a un miembro",
+    "pickMember": "Mencionar a {{name}}",
+    "rowBadge": "Te han mencionado"
   },
   "publishedRelays": {
     "intro": "Estas listas son públicas. Otras apps de Nostr las usan para encontrar tus publicaciones y enviarte mensajes directos. Al publicar, la lista se firma con tu clave y sustituye a la anterior.",
@@ -2920,6 +2937,44 @@
   },
   "followList": {
     "unavailable": "No se pudo cargar tu lista de seguidos — inténtalo de nuevo"
+  },
+  "chatDevices": {
+    "secureChat": "Chat seguro",
+    "secureChatDevices": {
+      "one": "Chat seguro · {{count}} dispositivo",
+      "other": "Chat seguro · {{count}} dispositivos"
+    },
+    "bylineA11y": "Ver quién está en este chat y en qué dispositivos",
+    "inThisChat": "En este chat",
+    "deviceCount": {
+      "one": "{{count}} dispositivo",
+      "other": "{{count}} dispositivos"
+    },
+    "showDevicesA11y": "Mostrar los dispositivos de {{name}}",
+    "hideDevicesA11y": "Ocultar los dispositivos de {{name}}",
+    "unknownApp": "App desconocida",
+    "thisPhone": "Este teléfono",
+    "keyFrom": "Clave de invitación del {{date}}",
+    "joinedAtEpoch": "Se unió en la época {{epoch}}",
+    "hereWhenYouJoined": "Ya estaba cuando te uniste (época {{epoch}})",
+    "sentFrom": "Enviado desde",
+    "oneOfDevices": {
+      "one": "Uno de {{count}} dispositivos",
+      "other": "Uno de {{count}} dispositivos"
+    },
+    "readableOn": "Se puede leer en",
+    "readableOnPerson": "{{name}}: {{count}}",
+    "you": "Tú",
+    "noticeJoined": {
+      "one": "{{name}} · se unió con {{count}} dispositivo ({{apps}})",
+      "other": "{{name}} · se unió con {{count}} dispositivos ({{apps}})"
+    },
+    "noticeAdded": {
+      "one": "{{name}} añadió un dispositivo ({{apps}})",
+      "other": "{{name}} añadió {{count}} dispositivos ({{apps}})"
+    },
+    "showChanges": "Mostrar cambios de dispositivos en los chats",
+    "showChangesHint": "Alfa: una línea gris en los chats de Marmot cuando alguien se une con un dispositivo o añade uno. Solo se dibuja en este teléfono; no se envía nada."
   },
   "liveLocationWire": {
     "durationMins": "{{mins}} min",
