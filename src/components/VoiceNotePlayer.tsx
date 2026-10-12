@@ -56,6 +56,10 @@ interface Props {
   /** A Marmot (MIP-04) voice note: decrypted with these instead of `keyHex`. */
   marmot?: MarmotImageParams;
   mime?: string;
+  /** Trust gate (#1338): stream a PLAIN note's URL on mount only for my own /
+   *  followed senders. Otherwise nothing is requested until play is tapped.
+   *  (Encrypted notes already fetch only on play.) Defaults to false. */
+  autoLoad?: boolean;
   testID?: string;
   /** Optional time + delivery-tick footer (#856). When supplied it replaces
    *  the bare timestamp so a sent voice note shows its delivery tick. */
@@ -76,6 +80,7 @@ const VoiceNotePlayer: React.FC<Props> = ({
   nonceHex,
   marmot,
   mime,
+  autoLoad = false,
   testID,
   footer,
   header,
@@ -99,7 +104,9 @@ const VoiceNotePlayer: React.FC<Props> = ({
   const marmotRef = useRef(marmot);
   marmotRef.current = marmot;
 
-  const source = encrypted ? localUri : url;
+  // A plain note from an untrusted sender stays unloaded until the first tap.
+  const [armed, setArmed] = useState(autoLoad);
+  const source = encrypted ? localUri : armed || autoLoad ? url : null;
   const player = useAudioPlayer(source ?? undefined);
   const status = useAudioPlayerStatus(player);
   const isPlaying = status?.playing ?? false;
@@ -142,13 +149,14 @@ const VoiceNotePlayer: React.FC<Props> = ({
   }, [encrypted, url, localUri, keyHex, nonceHex, mime]);
 
   // Once the decrypted file lands and the user had asked to play, start it
-  // (the player's source only switches to `localUri` on the next render).
+  // (the player's source only switches on the next render). Covers both a
+  // decrypted note and a gated plain note armed by the first tap.
   useEffect(() => {
-    if (encrypted && localUri && wantPlayRef.current) {
+    if (source && wantPlayRef.current) {
       wantPlayRef.current = false;
       player.play();
     }
-  }, [localUri, encrypted, player]);
+  }, [source, player]);
 
   const onToggle = useCallback(async () => {
     try {
@@ -162,12 +170,18 @@ const VoiceNotePlayer: React.FC<Props> = ({
         await ensureLocal(); // playback fires from the effect once decrypted
         return;
       }
+      if (!source) {
+        // Gated plain note: load it now; playback fires from the effect.
+        wantPlayRef.current = true;
+        setArmed(true);
+        return;
+      }
       if (duration > 0 && current >= duration - 0.05) player.seekTo(0);
       player.play();
     } catch {
       // Playback is best-effort; a failed load just leaves the button idle.
     }
-  }, [isPlaying, player, current, duration, encrypted, localUri, ensureLocal]);
+  }, [isPlaying, player, current, duration, encrypted, localUri, ensureLocal, source]);
 
   // On-bubble colours: white-on-pink for my bubbles, themed for theirs.
   const fg = fromMe ? colors.white : colors.textBody;

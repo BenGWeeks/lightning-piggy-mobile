@@ -1,20 +1,16 @@
-import React, { useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, Pressable, StyleSheet, Linking } from 'react-native';
+import React, { useMemo } from 'react';
+import { View, Text, TouchableOpacity, Pressable, StyleSheet } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { Zap, UserRound, Radio } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useLocale } from '../contexts/LocaleContext';
-import {
-  createMessageBubbleStyles,
-  type MessageBubbleStyles,
-} from '../styles/MessageBubble.styles';
+import { createMessageBubbleStyles } from '../styles/MessageBubble.styles';
 import type { NostrProfile } from '../types/nostr';
 import { formatCoordsForDisplay, type SharedLocation } from '../services/locationService';
 import type { BtcMapPlace } from '../services/btcMapService';
 import type { ParsedCache, ParsedEvent } from '../services/nostrPlacesService';
 import {
   type BubbleContent,
-  type ParsedImageMessage,
   extractBitcoinUri,
   parseImageMessage,
   parseVoiceNote,
@@ -31,8 +27,7 @@ import { isSupportedImageUrl } from '../utils/imageUrl';
 import { type DeliveryStatus } from '../utils/dmDeliveryStatus';
 import { resendPayloadFor } from '../utils/messageInfo';
 import type { ShowMessageInfoArgs } from '../hooks/useMessageInfoSheet';
-import { extractUrls } from '../utils/extractUrls';
-import { isBlocklisted } from '../services/linkPreviewBlocklist';
+import { firstPreviewableUrl } from '../services/linkPreviewBlocklist';
 import type { MessageReactionState } from '../utils/reactions';
 import MessageLinkPreview from './MessageLinkPreview';
 import { MessageQuote } from './MessageQuote';
@@ -40,7 +35,7 @@ import { LinkifiedText } from './LinkifiedText';
 import type { MessageQuote as MessageQuoteData } from '../utils/messageQuote';
 import MessageInvoiceActions from './MessageInvoiceActions';
 import VoiceNotePlayer from './VoiceNotePlayer';
-import DecryptedImage from './DecryptedImage';
+import MessageImageBubble from './MessageImageBubble';
 import LibreMiniMap from './LibreMiniMap';
 import { BubbleFooter } from './MessageBubbleFooter';
 import MessageSatsAmount from './MessageSatsAmount';
@@ -153,82 +148,11 @@ interface Props {
   quote?: MessageQuoteData;
   // Marmot edit: show an "Edited" mark in the footer.
   edited?: boolean;
+  // Trust gate (#1338): true when the sender is me or someone I follow. Only
+  // then do link previews, images and voice notes load without a tap — the
+  // parent decides per SENDER (see utils/mediaTrust), never per chat.
+  autoLoadMedia: boolean;
 }
-
-type Styles = MessageBubbleStyles;
-
-/**
- * Image bubble (#688). Lives in its own component because the encrypted
- * branch needs render state (the resolved displayable URI for the fullscreen
- * tap) — a hook can't be called from inside MessageBubble's body, which has
- * earlier conditional returns. Renders DecryptedImage, which handles both the
- * plain-URL and fetch-ciphertext→decrypt paths.
- */
-const ImageBubble: React.FC<{
-  styles: Styles;
-  image: ParsedImageMessage;
-  fromMe: boolean;
-  senderLabel: React.ReactNode;
-  onOpenImageFullscreen?: (url: string) => void;
-  // Long-press → parent's MessageActionsSheet (#205). Kept firing even when
-  // there's no fullscreen tap handler, so the pressable is only disabled when
-  // BOTH the tap and the long-press are absent.
-  onLongPress?: () => void;
-  testID: string;
-  // Shared time + delivery-tick footer (#856). Passed in so a sent image shows
-  // the tick like every other variant.
-  footer: React.ReactNode;
-}> = ({
-  styles,
-  image,
-  fromMe,
-  senderLabel,
-  onOpenImageFullscreen,
-  onLongPress,
-  testID,
-  footer,
-}) => {
-  const { t } = useLocale();
-  // For plain images the fetchable URL is the display source; for encrypted
-  // ones DecryptedImage resolves a data: URI, which it reports back here so
-  // the fullscreen tap shows the decrypted image, not the ciphertext blob.
-  const [displayUri, setDisplayUri] = useState<string | null>(image.encrypted ? null : image.url);
-  const canOpen = !!onOpenImageFullscreen && !!displayUri;
-  return (
-    <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
-      <TouchableOpacity
-        activeOpacity={0.85}
-        onPress={() => displayUri && onOpenImageFullscreen?.(displayUri)}
-        onLongPress={onLongPress}
-        delayLongPress={350}
-        style={[styles.imageBubble, fromMe ? styles.imageBubbleMe : styles.imageBubbleThem]}
-        accessibilityLabel={
-          fromMe ? t('messageBubble.imageSent') : t('messageBubble.imageReceived')
-        }
-        // Announce as an image-button whenever it's interactive — either it can
-        // open fullscreen (tap) OR it can open the actions sheet (long-press).
-        // Only a purely-static image announces as a plain 'image'.
-        accessibilityRole={canOpen || onLongPress ? 'imagebutton' : 'image'}
-        disabled={!canOpen && !onLongPress}
-        testID={testID}
-      >
-        {senderLabel}
-        <DecryptedImage
-          url={image.url}
-          encrypted={image.encrypted}
-          keyHex={image.keyHex}
-          nonceHex={image.nonceHex}
-          mime={image.mime}
-          marmot={image.marmot}
-          style={styles.imageBubbleImage}
-          accessibilityLabel={t('messageBubble.sharedImage')}
-          onResolved={image.encrypted ? setDisplayUri : undefined}
-        />
-        {footer}
-      </TouchableOpacity>
-    </View>
-  );
-};
 
 const MessageBubble: React.FC<Props> = ({
   id,
@@ -266,6 +190,7 @@ const MessageBubble: React.FC<Props> = ({
   onToggleReaction,
   quote,
   edited,
+  autoLoadMedia,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createMessageBubbleStyles(colors), [colors]);
@@ -652,10 +577,13 @@ const MessageBubble: React.FC<Props> = ({
   const image = parseImageMessage(text);
   if (image) {
     return wrapWithReactionRow(
-      <ImageBubble
+      <MessageImageBubble
         styles={styles}
         image={image}
+        messageId={id}
+        testIdPrefix={testIdPrefix}
         fromMe={fromMe}
+        autoLoad={autoLoadMedia}
         senderLabel={BubbleHeader}
         onOpenImageFullscreen={onOpenImageFullscreen}
         onLongPress={onLongPress}
@@ -679,6 +607,7 @@ const MessageBubble: React.FC<Props> = ({
         marmot={voice.marmot}
         mime={voice.mime}
         fromMe={fromMe}
+        autoLoad={autoLoadMedia}
         createdAt={createdAt}
         senderName={senderName}
         header={QuoteStrip}
@@ -948,15 +877,9 @@ const MessageBubble: React.FC<Props> = ({
   }
 
   // Plain text fallback — no rich content detected. Cap link previews
-  // at 1 per message: first non-blocklisted URL wins. All URLs in the body
-  // are rendered as tappable link spans below (see linkifySegments).
-  const previewUrl = (() => {
-    const urls = extractUrls(text);
-    for (const u of urls) {
-      if (!isBlocklisted(u)) return u;
-    }
-    return null;
-  })();
+  // at 1 per message: first previewable (public, non-blocklisted) URL wins.
+  // All URLs in the body are rendered as tappable link spans below.
+  const previewUrl = firstPreviewableUrl(text);
 
   return wrapWithReactionRow(
     <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
@@ -981,7 +904,14 @@ const MessageBubble: React.FC<Props> = ({
           messageId={id}
           testIdPrefix={testIdPrefix}
         />
-        {previewUrl ? <MessageLinkPreview url={previewUrl} eventId={id} fromMe={fromMe} /> : null}
+        {previewUrl ? (
+          <MessageLinkPreview
+            url={previewUrl}
+            eventId={id}
+            fromMe={fromMe}
+            autoLoad={autoLoadMedia}
+          />
+        ) : null}
         {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
       </Pressable>
     </View>,

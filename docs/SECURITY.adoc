@@ -154,6 +154,15 @@ Cached contact data in AsyncStorage is also cleared.
 * Image uploads to nostr.build use HTTPS
 * LNURL-pay callbacks use HTTPS
 
+==== Automatic requests from chat messages (#1338)
+
+A message author chooses the URLs in it, so anything the app fetches *without a tap* (link previews, preview images, chat images, voice notes) is a way for a stranger to make the phone contact a server of their choosing. That reveals the reader's IP and read time, and, if the URL points at a private address, lets them probe devices on the reader's home network (routers, IoT gear that acts on a plain GET).
+
+* *One check for "safe to contact automatically"*: `src/utils/publicUrl.ts` (`isPublicHttpUrl`, `isPublicRelayUrl`, `parsePublicUrl`). It's a small strict parser, not the platform `URL` class: it rejects loopback, private, link-local, CGNAT, multicast, reserved and documentation ranges (IPv4 and IPv6), IPv4-mapped/-compatible IPv6, every non-canonical IPv4 form (`127.1`, `2130706433`, `0x7f.1`, `0177.0.0.1`), single-label hosts, `localhost` / `.local` / `.lan` / `.internal` / `.arpa` and similar suffixes, and anything ambiguous (userinfo, backslashes, percent-encoding or non-ASCII in the authority, whitespace). New code that fetches a user-supplied URL automatically must use it.
+* *Link previews* (`src/services/linkPreviewFetcher.ts`) use `expo/fetch` with `redirect: 'manual'` and validate every hop before requesting it (max 3 redirects). RN's built-in `fetch` ignores `redirect` (OkHttp / NSURLSession follow 30x natively), so it can't be used here. The og:image is validated too, and cookies are not sent.
+* *Trust gating* (`src/utils/mediaTrust.ts`): previews, images and plain voice notes load automatically only for the reader's own messages and people they follow. Everyone else gets a "Tap to load" placeholder showing the host, and nothing is requested until it's tapped. Group chats decide per sender, never per group. The per-account link-preview switch still turns previews off entirely.
+* *Known limitation, DNS rebinding*: React Native can't resolve DNS before a request, so a public hostname that resolves to a private IP can't be blocked client-side. Trust gating is the mitigation. Image loads (`expo-image`) follow redirects natively and can't be hop-validated either, so they also rely on trust gating.
+
 === Message Content at Rest (Threat Model)
 
 This section documents where decrypted Nostr message content lives on disk and what an adversary with the device can recover. It supersedes the original "document + accept" analysis (#192): the plaintext-in-AsyncStorage design it described was retired in #848/#850 in favour of app-level encryption at rest (the option-4 outcome that analysis recommended, delivered as a SQLCipher store rather than per-blob AES). The design threat model is a **seized device** — e.g. border control taking the phone for forensic imaging.
