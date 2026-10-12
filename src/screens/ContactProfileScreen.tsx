@@ -1,3 +1,5 @@
+import { useCollectionFilter } from '../hooks/useCollectionFilter';
+import MarketCollectionChips from '../components/MarketCollectionChips';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
@@ -450,6 +452,7 @@ const ContactProfileScreen: React.FC = () => {
   // first open of their tab.
   const feed = useProfileFeed(contact.pubkey, notesReloadNonce);
   const seller = useSellerProducts(contact.pubkey, productsOpened, notesReloadNonce, contact.name);
+  const collectionFilter = useCollectionFilter(seller.products, tab === 'shop');
   const selectTab = useCallback((next: ProfileTab) => {
     setTab(next);
     if (next === 'shop') setProductsOpened(true);
@@ -462,7 +465,7 @@ const ContactProfileScreen: React.FC = () => {
             postsMode,
             feed: feed.events,
             feedLoading: feed.loading && feed.hasRelays,
-            products: seller.products,
+            products: collectionFilter.products,
             productsLoading: seller.loading,
             productsIncomplete: seller.incomplete,
           })
@@ -474,7 +477,7 @@ const ContactProfileScreen: React.FC = () => {
       feed.events,
       feed.loading,
       feed.hasRelays,
-      seller.products,
+      collectionFilter.products,
       seller.loading,
       seller.incomplete,
     ],
@@ -591,12 +594,22 @@ const ContactProfileScreen: React.FC = () => {
             <ProfileTabBar active={tab} onChange={selectTab} styles={tabStyles} />
           </View>
         ) : null}
+        {tab === 'shop' ? (
+          <MarketCollectionChips
+            collections={collectionFilter.collections}
+            selected={collectionFilter.selected}
+            onSelect={collectionFilter.select}
+          />
+        ) : null}
         {contact.pubkey && tab === 'posts' ? (
           <PostsFilterSwitch mode={postsMode} onChange={setPostsMode} styles={tabStyles} />
         ) : null}
       </View>
     ),
     [
+      collectionFilter.collections,
+      collectionFilter.selected,
+      collectionFilter.select,
       contact,
       styles,
       npub,

@@ -1,3 +1,5 @@
+import { useCollectionFilter } from '../hooks/useCollectionFilter';
+import MarketCollectionChips from '../components/MarketCollectionChips';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
@@ -134,9 +136,10 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
   const panelFilterCount = countActiveMarketFilters({ query, merchant, country, currency }, mode);
   const activeFilterCount = panelFilterCount + (query.trim().length > 0 ? 1 : 0);
 
+  const collectionFilter = useCollectionFilter(baseProducts, ready);
   const products = useMemo(
-    () => filterMarketProducts(baseProducts, filter, sellerOf),
-    [baseProducts, filter],
+    () => filterMarketProducts(collectionFilter.products, filter, sellerOf),
+    [collectionFilter.products, filter],
   );
 
   const clearFilters = useCallback(() => {
@@ -305,6 +308,11 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
           </TouchableOpacity>
         </View>
       }
+      <MarketCollectionChips
+        collections={collectionFilter.collections}
+        selected={collectionFilter.selected}
+        onSelect={collectionFilter.select}
+      />
       <MarketFilterBar
         mode={mode}
         onSelectMode={selectMode}

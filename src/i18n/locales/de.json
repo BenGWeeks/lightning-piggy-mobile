@@ -2446,7 +2446,7 @@
       "loadError": "Deine Relays konnten nicht erreicht werden. Ziehe nach unten, um es erneut zu versuchen.",
       "retry": "Erneut versuchen",
       "setupTitle": "Richte deinen Shop ein",
-      "setupBody": "Gib deinem Shop einen Namen, wähle eine Währung und gib an, wohin du versendest. Dann kannst du Produkte zum Verkauf anbieten.",
+      "setupBody": "Wähle eine Standardwährung und Versandoptionen. Dein Nostr-Profil ist die Identität deines Shops.",
       "setupButton": "Shop einrichten",
       "editShop": "Shop bearbeiten",
       "shipsZones": {
@@ -2578,7 +2578,21 @@
       },
       "conflictTitle": "Andernorts geändert",
       "overwrite": "Trotzdem speichern",
-      "loadFailedTryAgain": "Dein Shop konnte nicht geladen werden. Versuche es erneut."
+      "loadFailedTryAgain": "Dein Shop konnte nicht geladen werden. Versuche es erneut.",
+      "identityHint": "Dein Shop verwendet dein Nostr-Profil. Erwäge ein separates Konto für dein Unternehmen.",
+      "collections": "Kollektionen",
+      "createCollection": "Kollektion erstellen",
+      "allCollections": "Alle Kollektionen",
+      "removeLegacyCollection": "Alte Shop-Kollektion entfernen",
+      "legacyCollectionHint": "Ältere App-Versionen speicherten deinen Shopnamen als Produktkollektion. Eine Löschanfrage für diese Kollektion senden? Dein Profil und deine Produkte bleiben erhalten.",
+      "collectionFields": {
+        "dTag": "Kennung",
+        "title": "Titel",
+        "summary": "Zusammenfassung",
+        "image": "Bild-URL",
+        "location": "Standort"
+      },
+      "deleteCollectionTitle": "Diese Kollektion löschen?"
     },
     "markdown": {
       "openLinkTitle": "Link öffnen?",

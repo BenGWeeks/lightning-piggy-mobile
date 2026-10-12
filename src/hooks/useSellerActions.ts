@@ -1,3 +1,10 @@
+import {
+  isLegacyShopCollection,
+  buildCollectionTemplate,
+  type CollectionDraft,
+} from '../utils/marketCollections';
+import { saveSellerCurrency } from '../services/sellerPreferences';
+import { SellerSigningError } from '../utils/sellerSigning';
 import { signSellerMutation } from '../utils/sellerSigning';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import type { Event } from 'nostr-tools';
@@ -14,14 +21,11 @@ import {
   COLLECTION_KIND,
   LISTING_KIND,
   SHIPPING_OPTION_KIND,
-  SHOP_COLLECTION_D,
   buildDeletionTemplate,
   buildListingTemplate,
   buildShippingZoneTemplate,
-  buildShopTemplate,
   coordinateOf,
   nextCreatedAt,
-  parseShopDraft,
   type EventTemplate,
   type ListingDraft,
   type ShippingZoneDraft,
@@ -58,7 +62,7 @@ export interface ShopBase {
  * Every edit first fetches the CURRENT revision (fail closed) so a cached or
  * stale form can't silently overwrite newer data published elsewhere.
  */
-export function useSellerActions(snapshot: SellerSnapshot) {
+export function useSellerActions(_snapshot: SellerSnapshot) {
   const { pubkey, relays, signEvent } = useNostr();
   const identity = useRef({ pubkey, signEvent });
   if (identity.current.pubkey !== pubkey || identity.current.signEvent !== signEvent) {
@@ -72,6 +76,7 @@ export function useSellerActions(snapshot: SellerSnapshot) {
     async (
       template: EventTemplate,
       previous?: Pick<Event, 'created_at'> | null,
+      beforePublish?: () => Promise<void>,
     ): Promise<Event> => {
       if (!pubkey) throw new Error('Not signed in');
       const signed = await signSellerMutation({
@@ -80,6 +85,9 @@ export function useSellerActions(snapshot: SellerSnapshot) {
         isCurrent: () => identity.current === initiatingIdentity,
         sign: async (event) => (await signEvent(event)) as Event | null,
       });
+      await beforePublish?.();
+      if (identity.current !== initiatingIdentity)
+        throw new SellerSigningError('Signing account changed');
       await publishSellerEvent(signed, relayList);
       addSellerEvents(pubkey, [signed]);
       void persistSellerSnapshot(pubkey);
@@ -97,11 +105,26 @@ export function useSellerActions(snapshot: SellerSnapshot) {
       base: Event | null,
       options: SaveOptions = {},
       onDeletedAt?: (deletedAt: number) => void,
+      legacyOnly = false,
     ) => {
       if (!pubkey) throw new Error('Not signed in');
       return resolveCurrentRevision({
-        fetchLatest: () =>
-          fetchLatestRevision({ pubkey, kind, dTag, baseId: base?.id, relays: relayList }),
+        fetchLatest: async () => {
+          const result = await fetchLatestRevision({
+            pubkey,
+            kind,
+            dTag,
+            baseId: base?.id,
+            relays: relayList,
+          });
+          const latest = result && 'event' in result ? result.event : (result as Event | null);
+          if (
+            legacyOnly &&
+            (!latest || latest.pubkey !== pubkey || !isLegacyShopCollection(latest))
+          )
+            throw new SellerSigningError('Collection is no longer a legacy shop');
+          return result;
+        },
         base,
         force: options.force,
         onDeletedAt,
@@ -109,72 +132,6 @@ export function useSellerActions(snapshot: SellerSnapshot) {
       });
     },
     [pubkey, relayList],
-  );
-
-  const listingCoordinates = useCallback(
-    () =>
-      pubkey ? snapshot.listings.map((e) => coordinateOf(LISTING_KIND, pubkey, dTagOf(e))) : [],
-    [pubkey, snapshot.listings],
-  );
-
-  /** Products the shop collection should list: everything `shopEvent`
-   * already lists (the loaded snapshot may be a capped cache) plus loaded
-   * listings, minus anything known deleted. */
-  const shopProductCoordinates = useCallback(
-    (shopEvent: Event | null, add: string[] = [], remove?: string) => {
-      if (!pubkey) return [];
-      const state = sellerStoreState(pubkey);
-      const deleted = new Set(state.hidden.keys());
-      for (const event of state.events.values()) {
-        if (event.kind !== 5) continue;
-        for (const t of event.tags) if (t[0] === 'a' && t[1]) deleted.add(t[1]);
-      }
-      const prefix = `${LISTING_KIND}:${pubkey}:`;
-      const listed = (shopEvent?.tags ?? [])
-        .filter((t) => t[0] === 'a' && t[1]?.startsWith(prefix) && !deleted.has(t[1]))
-        .map((t) => t[1]);
-      const all = new Set([...listingCoordinates(), ...listed, ...add]);
-      if (remove) all.delete(remove);
-      return [...all];
-    },
-    [pubkey, listingCoordinates],
-  );
-
-  /** Re-point the shop collection at its products after a listing is
-   * created or deleted. Best effort — the listing change is live either way,
-   * and it never publishes over a shop revision it couldn't fetch. */
-  const republishShop = useCallback(
-    async (add: string[], remove?: string) => {
-      if (!pubkey || !snapshot.shop) return;
-      try {
-        const latest = await currentRevision(COLLECTION_KIND, SHOP_COLLECTION_D, snapshot.shop, {
-          force: true,
-        });
-        const shop = latest ? parseShopDraft(latest, snapshot.zones) : null;
-        if (!latest || !shop) return;
-        const zoneRefs = latest.tags.filter((t) => t[0] === 'shipping_option').map((t) => t[1]);
-        await signAndPublish(
-          buildShopTemplate({
-            shop,
-            pubkey,
-            productCoordinates: shopProductCoordinates(latest, add, remove),
-            zoneCoordinates: zoneRefs,
-            previous: latest,
-          }),
-          latest,
-        );
-      } catch (error) {
-        if (__DEV__) console.warn('[Market] shop collection refresh failed:', error);
-      }
-    },
-    [
-      pubkey,
-      snapshot.shop,
-      snapshot.zones,
-      currentRevision,
-      signAndPublish,
-      shopProductCoordinates,
-    ],
   );
 
   const run = useCallback(async <T>(task: () => Promise<T>): Promise<T> => {
@@ -186,23 +143,12 @@ export function useSellerActions(snapshot: SellerSnapshot) {
     }
   }, []);
 
-  /**
-   * Save shop settings: changed zones, a deletion for the zones the user
-   * removed (only ones the form was loaded with), then the shop collection.
-   * The collection keeps every zone / product reference of the CURRENT shop
-   * that the form didn't explicitly remove (zones that failed to parse, or
-   * were added elsewhere after the form loaded).
-   */
+  /** Save changed shipping options after checking every revision. Currency
+   * is an account/device preference, never a kind-30405 shop event. */
   const saveShop = useCallback(
     (shop: ShopDraft, zones: ShippingZoneDraft[], base: ShopBase, options: SaveOptions = {}) =>
       run(async () => {
         if (!pubkey) throw new Error('Not signed in');
-        const current = await currentRevision(
-          COLLECTION_KIND,
-          SHOP_COLLECTION_D,
-          base.shop,
-          options,
-        );
         const zoneCoordinates = zones.map((z) =>
           coordinateOf(SHIPPING_OPTION_KIND, pubkey, z.dTag),
         );
@@ -239,29 +185,11 @@ export function useSellerActions(snapshot: SellerSnapshot) {
             { created_at: newest - 1 } as Event,
           );
         }
-        const removedSet = new Set(removed);
-        const kept = [
-          ...(current?.tags ?? []).filter((t) => t[0] === 'shipping_option').map((t) => t[1]),
-          ...snapshot.zones.map((z) => z.coordinate),
-        ].filter(
-          (c) =>
-            !!c &&
-            !zoneCoordinates.includes(c) &&
-            !base.zoneCoordinates.includes(c) &&
-            !removedSet.has(c),
-        );
-        await signAndPublish(
-          buildShopTemplate({
-            shop,
-            pubkey,
-            productCoordinates: shopProductCoordinates(current),
-            zoneCoordinates: [...new Set([...zoneCoordinates, ...kept])],
-            previous: current,
-          }),
-          current,
-        );
+        if (identity.current !== initiatingIdentity)
+          throw new SellerSigningError('Signing account changed');
+        await saveSellerCurrency(pubkey, shop.currency);
       }),
-    [pubkey, snapshot, currentRevision, signAndPublish, shopProductCoordinates, run],
+    [pubkey, currentRevision, signAndPublish, run, initiatingIdentity],
   );
 
   /** Create or edit (same `d`) a listing. */
@@ -286,11 +214,9 @@ export function useSellerActions(snapshot: SellerSnapshot) {
           // timestamp, even when the latest surviving revision is null.
           { created_at: Math.max(current?.created_at ?? -1, deletedAt) },
         );
-        const coordinate = coordinateOf(LISTING_KIND, pubkey, draft.dTag);
-        if (!listingCoordinates().includes(coordinate)) await republishShop([coordinate]);
         return signed;
       }),
-    [pubkey, currentRevision, signAndPublish, listingCoordinates, republishShop, run],
+    [pubkey, currentRevision, signAndPublish, run],
   );
 
   /** NIP-09 delete + hide locally until relays catch up. */
@@ -309,10 +235,79 @@ export function useSellerActions(snapshot: SellerSnapshot) {
         setSellerHidden(pubkey, hidden);
         await saveHiddenListings(pubkey, hidden);
         void persistSellerSnapshot(pubkey);
-        await republishShop([], coordinate);
       }),
-    [pubkey, signAndPublish, republishShop, run],
+    [pubkey, signAndPublish, run],
   );
 
-  return { busy, saveShop, saveListing, deleteListing };
+  const saveCollection = useCallback(
+    (draft: CollectionDraft, base: Event | null, options: SaveOptions = {}) =>
+      run(async () => {
+        let deletedAt = -1;
+        const latest = await currentRevision(COLLECTION_KIND, draft.dTag, base, options, (at) => {
+          deletedAt = at;
+        });
+        return signAndPublish(buildCollectionTemplate(draft, latest), {
+          created_at: Math.max(latest?.created_at ?? -1, deletedAt),
+        });
+      }),
+    [currentRevision, signAndPublish, run],
+  );
+  const deleteCollection = useCallback(
+    (event: Event, options: SaveOptions = {}, legacyOnly = false) =>
+      run(async () => {
+        if (!pubkey || event.pubkey !== pubkey || event.kind !== COLLECTION_KIND)
+          throw new SellerSigningError('Unexpected collection author');
+        const latest = await currentRevision(
+          COLLECTION_KIND,
+          dTagOf(event),
+          event,
+          options,
+          undefined,
+          legacyOnly,
+        );
+        if (legacyOnly && (!latest || latest.pubkey !== pubkey || !isLegacyShopCollection(latest)))
+          throw new SellerSigningError('Collection is no longer a legacy shop');
+        const target = latest ?? event;
+        const coordinate = coordinateOf(COLLECTION_KIND, pubkey, dTagOf(event));
+        const deletion = await signAndPublish(
+          buildDeletionTemplate([{ kind: COLLECTION_KIND, coordinate, eventId: target.id }]),
+          target,
+          legacyOnly
+            ? async () => {
+                const current = await currentRevision(
+                  COLLECTION_KIND,
+                  dTagOf(event),
+                  target,
+                  {},
+                  undefined,
+                  true,
+                );
+                if (!current || current.pubkey !== pubkey || !isLegacyShopCollection(current))
+                  throw new SellerSigningError('Collection is no longer a legacy shop');
+              }
+            : undefined,
+        );
+        const hidden = new Map(sellerStoreState(pubkey).hidden);
+        hidden.set(coordinate, deletion.created_at);
+        setSellerHidden(pubkey, hidden);
+        await saveHiddenListings(pubkey, hidden);
+        void persistSellerSnapshot(pubkey);
+      }),
+    [pubkey, currentRevision, signAndPublish, run],
+  );
+
+  const deleteLegacyCollection = useCallback(
+    (event: Event, options: SaveOptions = {}) => deleteCollection(event, options, true),
+    [deleteCollection],
+  );
+
+  return {
+    deleteLegacyCollection,
+    busy,
+    saveShop,
+    saveListing,
+    deleteListing,
+    saveCollection,
+    deleteCollection,
+  };
 }

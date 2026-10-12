@@ -5,6 +5,15 @@ import { act, fireEvent, render } from '@testing-library/react-native';
 import MarketScreen from './MarketScreen';
 import type { ExploreNavigation } from '../navigation/types';
 
+jest.mock('../hooks/useCollectionFilter', () => ({
+  useCollectionFilter: (products: unknown[]) => ({
+    products,
+    collections: [],
+    selected: null,
+    select: jest.fn(),
+  }),
+}));
+
 jest.mock('../hooks/useMarketPreferences', () => ({
   useMarketPreferences: () => mockPreferencesHook(),
 }));

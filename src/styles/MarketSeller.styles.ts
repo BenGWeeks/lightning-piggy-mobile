@@ -6,6 +6,11 @@ import type { Palette } from './palettes';
  * screens read as siblings. */
 export const createMarketSellerStyles = (colors: Palette) =>
   StyleSheet.create({
+    merchantAvatar: { width: 64, height: 64, borderRadius: 32 },
+    referenceList: { gap: 8, paddingVertical: 4 },
+    collectionCard: { width: 240 },
+    referenceChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    selectedReference: { borderWidth: 2, borderColor: colors.brandPink },
     container: { flex: 1, backgroundColor: colors.background },
     header: {
       paddingHorizontal: 16,

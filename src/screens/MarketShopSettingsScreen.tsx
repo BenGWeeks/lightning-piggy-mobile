@@ -1,9 +1,10 @@
+import MerchantIdentity from '../components/MerchantIdentity';
+import { isLegacyShopCollection } from '../utils/marketCollections';
 import { SellerSigningError } from '../utils/sellerSigning';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   ScrollView,
   ActivityIndicator,
@@ -31,7 +32,6 @@ import { deviceCountryCode } from '../data/countries';
 import {
   MAX_SHIPPING_ZONES,
   newIdentifier,
-  parseShopDraft,
   validateShop,
   zoneDraftFromOption,
   type ShippingZoneDraft,
@@ -48,16 +48,15 @@ interface Form {
   zones: ShippingZoneDraft[];
 }
 
-/** Create (first time) or edit the shop: name, description, currency and
- * shipping zones. Saving publishes changed kind-30406 zones, a deletion for
- * removed ones, then the kind-30405 shop collection. */
+/** Merchant identity is read-only here; kind-0 publishing work moved to issue #1389.
+ * Setup only saves local currency and shipping. */
 const MarketShopSettingsScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createMarketSellerStyles(colors), [colors]);
-  const { snapshot, status, refresh } = useSellerShop();
-  const { saveShop, busy } = useSellerActions(snapshot);
-  const offerFirstItem = !snapshot.shop || snapshot.listings.length === 0;
+  const { snapshot, status, refresh, defaultCurrency } = useSellerShop();
+  const { saveShop, deleteLegacyCollection, busy } = useSellerActions(snapshot);
+  const offerFirstItem = snapshot.listings.length === 0;
   const saveLabel = offerFirstItem
     ? 'market.sell.shop.saveAndAddFirstItem'
     : 'market.sell.shop.save';
@@ -91,20 +90,18 @@ const MarketShopSettingsScreen: React.FC<Props> = ({ navigation }) => {
   // setup once a COMPLETED fetch shows there isn't one. A failed fetch must
   // not offer a blank form — saving it would replace an existing shop.
   useEffect(() => {
-    const existing = parseShopDraft(snapshot.shop, snapshot.zones);
-    if (existing && snapshot.shop) {
-      if (form && (dirty || base?.shop?.id === snapshot.shop.id)) return;
-      setForm({ shop: existing, zones: snapshot.zones.map(zoneDraftFromOption) });
-      setBase({
-        shop: snapshot.shop,
-        zoneCoordinates: snapshot.zones.map((z) => z.coordinate),
-        zoneEvents: new Map(snapshot.zoneEvents),
-      });
-    } else if (!form && status === 'ready') {
-      setForm({ shop: { name: '', description: '', currency: 'SATS' }, zones: [newZone('SATS')] });
-      setBase({ shop: null, zoneCoordinates: [], zoneEvents: new Map() });
-    }
-  }, [form, dirty, base, snapshot.shop, snapshot.zones, snapshot.zoneEvents, status, newZone]);
+    if (dirty || status !== 'ready') return;
+    const zones = snapshot.zones.map(zoneDraftFromOption);
+    setForm((previous) => {
+      const next = { shop: { currency: defaultCurrency ?? 'SATS' }, zones };
+      return JSON.stringify(previous) === JSON.stringify(next) ? previous : next;
+    });
+    setBase({
+      shop: snapshot.shop,
+      zoneCoordinates: snapshot.zones.map((z) => z.coordinate),
+      zoneEvents: new Map(snapshot.zoneEvents),
+    });
+  }, [dirty, snapshot.shop, snapshot.zones, snapshot.zoneEvents, status, defaultCurrency]);
 
   const errors = useMemo(() => (form ? validateShop(form.shop, form.zones) : []), [form]);
 
@@ -179,7 +176,7 @@ const MarketShopSettingsScreen: React.FC<Props> = ({ navigation }) => {
         setForm(null);
         refresh();
       };
-      const save = async (force: boolean) => {
+      const save = async (force: boolean, removeLegacy = false) => {
         try {
           await saveShop(
             form.shop,
@@ -189,6 +186,9 @@ const MarketShopSettingsScreen: React.FC<Props> = ({ navigation }) => {
               force,
             },
           );
+          if (removeLegacy && isLegacyShopCollection(snapshot.shop) && snapshot.shop) {
+            await deleteLegacyCollection(snapshot.shop, { force });
+          }
           Toast.show({ type: 'success', text1: t('market.sell.shop.saved') });
           if (addFirstItem) {
             // Both screens belong to Explore. Replace settings so Back cannot
@@ -211,7 +211,7 @@ const MarketShopSettingsScreen: React.FC<Props> = ({ navigation }) => {
             }
             Alert.alert(t('market.sell.conflictTitle'), t('market.sell.shop.conflictBody'), [
               { text: t('market.sell.cancel'), style: 'cancel', onPress: reload },
-              { text: t('market.sell.overwrite'), onPress: () => void save(true) },
+              { text: t('market.sell.overwrite'), onPress: () => void save(true, removeLegacy) },
             ]);
             return;
           }
@@ -222,9 +222,22 @@ const MarketShopSettingsScreen: React.FC<Props> = ({ navigation }) => {
           });
         }
       };
-      await save(false);
+      if (isLegacyShopCollection(snapshot.shop)) {
+        Alert.alert(t('market.sell.deleteCollectionTitle'), t('market.sell.legacyCollectionHint'), [
+          {
+            text: t('market.sell.shop.saveForNow'),
+            style: 'cancel',
+            onPress: () => void save(false),
+          },
+          {
+            text: t('market.sell.delete'),
+            style: 'destructive',
+            onPress: () => void save(false, true),
+          },
+        ]);
+      } else await save(false);
     },
-    [form, errors, base, saveShop, refresh, navigation, t],
+    [form, errors, base, saveShop, deleteLegacyCollection, snapshot.shop, refresh, navigation, t],
   );
 
   return (
@@ -268,36 +281,50 @@ const MarketShopSettingsScreen: React.FC<Props> = ({ navigation }) => {
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
           >
-            <View style={styles.field}>
-              <Text style={styles.label}>{t('market.sell.shop.name')}</Text>
-              <TextInput
-                style={[
-                  styles.input,
-                  showErrors && errors.includes('shopName') && styles.inputError,
-                ]}
-                value={form.shop.name}
-                onChangeText={(name) => setShop({ name })}
-                placeholder={t('market.sell.shop.namePlaceholder')}
-                placeholderTextColor={colors.textSupplementary}
-                maxLength={100}
-                testID="shop-name-input"
-                accessibilityLabel={t('market.sell.shop.name')}
-              />
-            </View>
-            <View style={styles.field}>
-              <Text style={styles.label}>{t('market.sell.shop.description')}</Text>
-              <TextInput
-                style={[styles.input, styles.inputMultiline]}
-                value={form.shop.description}
-                onChangeText={(description) => setShop({ description })}
-                placeholder={t('market.sell.shop.descriptionPlaceholder')}
-                placeholderTextColor={colors.textSupplementary}
-                multiline
-                maxLength={2000}
-                testID="shop-description-input"
-                accessibilityLabel={t('market.sell.shop.description')}
-              />
-            </View>
+            <MerchantIdentity />
+            {isLegacyShopCollection(snapshot.shop) ? (
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                testID="shop-remove-legacy"
+                disabled={busy}
+                onPress={() => {
+                  const legacy = snapshot.shop;
+                  if (!legacy) return;
+                  const remove = async (force = false) => {
+                    try {
+                      await deleteLegacyCollection(legacy, { force });
+                    } catch (error) {
+                      if (error instanceof StaleRevisionError)
+                        Alert.alert(
+                          t('market.sell.conflictTitle'),
+                          t('market.sell.shop.conflictBody'),
+                          [
+                            { text: t('market.sell.cancel'), style: 'cancel' },
+                            { text: t('market.sell.overwrite'), onPress: () => void remove(true) },
+                          ],
+                        );
+                      else Toast.show({ type: 'error', text1: t('market.sell.deleteFailed') });
+                    }
+                  };
+                  Alert.alert(
+                    t('market.sell.deleteCollectionTitle'),
+                    t('market.sell.legacyCollectionHint'),
+                    [
+                      { text: t('market.sell.cancel'), style: 'cancel' },
+                      {
+                        text: t('market.sell.delete'),
+                        style: 'destructive',
+                        onPress: () => void remove(),
+                      },
+                    ],
+                  );
+                }}
+              >
+                <Text style={styles.secondaryButtonText}>
+                  {t('market.sell.removeLegacyCollection')}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
             <View style={styles.field}>
               <Text style={styles.label}>{t('market.sell.shop.currency')}</Text>
               <SellerCurrencyChips

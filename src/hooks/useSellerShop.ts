@@ -1,3 +1,4 @@
+import { loadSellerCurrency } from '../services/sellerPreferences';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { useNostr } from '../contexts/NostrContext';
@@ -25,6 +26,7 @@ const EMPTY: SellerSnapshot = { shop: null, zones: [], zoneEvents: new Map(), li
 
 export interface UseSellerShop {
   pubkey: string | null;
+  defaultCurrency?: string;
   snapshot: SellerSnapshot;
   status: 'idle' | 'loading' | 'ready' | 'error';
   /** Re-query relays now (pull-to-refresh / retry). */
@@ -34,13 +36,14 @@ export interface UseSellerShop {
 }
 
 /**
- * The signed-in user's own shop: shop collection, shipping zones, listings.
+ * The signed-in merchant's collections, shipping zones and listings.
  * Focus-armed one-shot fetch (no live subscription) into the shared
  * per-account store, so the seller screens share one snapshot.
  */
 export function useSellerShop(): UseSellerShop {
   const { pubkey, relays, isLoggedIn, signerType } = useNostr();
   const [version, setVersion] = useState(0);
+  const [currency, setCurrency] = useState({ pubkey: '', shopId: '', value: 'SATS' });
   const [status, setStatus] = useState<UseSellerShop['status']>('idle');
   const [attempt, setAttempt] = useState(0);
   const forceNext = useRef(false);
@@ -89,6 +92,8 @@ export function useSellerShop(): UseSellerShop {
         cancelled = true;
         controller.abort();
       };
+      // attempt explicitly re-arms this focus effect for Retry / refresh.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [pubkey, relayKey, attempt]),
   );
 
@@ -105,9 +110,46 @@ export function useSellerShop(): UseSellerShop {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pubkey, version]);
 
+  const shopId = snapshot.shop?.id ?? '';
+  useEffect(() => {
+    if (!pubkey) return;
+    let cancelled = false;
+    void loadSellerCurrency(pubkey, snapshot.shop)
+      .then((value) => {
+        if (!cancelled) setCurrency({ pubkey, shopId, value });
+      })
+      .catch(() => {
+        if (!cancelled) setCurrency({ pubkey, shopId, value: 'SATS' });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pubkey, snapshot.shop, shopId]);
+
   const canPublish = Boolean(isLoggedIn && ['nsec', 'amber', 'nip46'].includes(signerType ?? ''));
+  const defaultCurrency = currency.pubkey === pubkey ? currency.value : 'SATS';
   return useMemo(
-    () => ({ pubkey, snapshot, status, refresh, canPublish }),
-    [pubkey, snapshot, status, refresh, canPublish],
+    () => ({
+      pubkey,
+      snapshot,
+      status:
+        status === 'ready' && (currency.pubkey !== pubkey || currency.shopId !== shopId)
+          ? ('loading' as const)
+          : status,
+      refresh,
+      canPublish,
+      defaultCurrency,
+    }),
+    [
+      pubkey,
+      snapshot,
+      status,
+      refresh,
+      canPublish,
+      defaultCurrency,
+      currency.pubkey,
+      currency.shopId,
+      shopId,
+    ],
   );
 }

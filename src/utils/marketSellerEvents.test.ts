@@ -1,16 +1,15 @@
+import { buildShopTemplate, parseShopDraft } from './marketSellerTestFixtures';
 import { finalizeEvent, getPublicKey, type Event } from 'nostr-tools';
 import {
   SHOP_COLLECTION_D,
   buildDeletionTemplate,
   buildListingTemplate,
   buildShippingZoneTemplate,
-  buildShopTemplate,
   coordinateOf,
   newIdentifier,
   nextCreatedAt,
   normaliseAmount,
   parseListingDraft,
-  parseShopDraft,
   shopCoordinate,
   splitCategories,
   validateListingDraft,
@@ -38,6 +37,7 @@ const draft = (over: Partial<ListingDraft> = {}): ListingDraft => ({
   currency: 'GBP',
   quantity: '3',
   categories: ['crafts', 'kids-room'],
+  collections: [],
   shipping: [
     { coordinate: zoneCoord('zone-uk'), extraCost: '1.25' },
     { coordinate: zoneCoord('zone-world'), extraCost: '' },
@@ -68,7 +68,6 @@ describe('listing events (kind 30402)', () => {
         ['t', 'crafts'],
         ['shipping_option', zoneCoord('zone-uk'), '1.25'],
         ['shipping_option', zoneCoord('zone-world')],
-        ['a', shopCoordinate(pubkey)],
         ['published_at', '1234'],
       ]),
     );
@@ -122,7 +121,7 @@ describe('listing events (kind 30402)', () => {
       ],
     });
     const { tags } = buildListingTemplate({
-      draft: draft(),
+      draft: draft({ collections: ['30405:' + pubkey + ':other-collection'] }),
       pubkey,
       nowSeconds: 1_900_000_000,
       previous,
@@ -134,7 +133,7 @@ describe('listing events (kind 30402)', () => {
     expect(tags).toContainEqual(['spec', 'colour', 'pink']);
     expect(tags).toContainEqual(['a', '30405:' + pubkey + ':other-collection']);
     // Managed tags are replaced, not duplicated.
-    expect(tags.filter((t) => t[0] === 'a' && t[1] === shopCoordinate(pubkey))).toHaveLength(1);
+    expect(tags.filter((t) => t[0] === 'a' && t[1] === shopCoordinate(pubkey))).toHaveLength(0);
     expect(tags.filter((t) => t[0] === 'title')).toEqual([['title', 'TEST — Knitted piggy']]);
     expect(tags.find((t) => t[1] === 'https://old.example/x.jpg')).toBeUndefined();
     expect(tags).not.toContainEqual(['t', 'old']);
@@ -291,7 +290,7 @@ describe('shipping zones (kind 30406)', () => {
     const draft = zoneDraftFromOption(parseShippingOptionEvent(us)!);
     expect(draft.currency).toBe('USD');
     expect(buildShippingZoneTemplate(draft, us).tags).toContainEqual(['price', '5', 'USD']);
-    expect(validateShop({ name: 'Shop', description: '', currency: 'GBP' }, [draft])).toEqual([]);
+    expect(validateShop({ currency: 'GBP' }, [draft])).toEqual([]);
   });
 
   it('rejects a bad cost', () => {
@@ -346,7 +345,7 @@ describe('shop collection (kind 30405)', () => {
       currency: 'GBP',
     };
     expect(validateShop(shop, [ok])).toEqual([]);
-    expect(validateShop({ ...shop, name: '' }, [])).toContain('shopName');
+    expect(validateShop({ currency: 'GBP' }, [])).toEqual([]);
     expect(validateShop(shop, [{ ...ok, name: '' }])).toContain('zoneName');
     expect(validateShop(shop, [{ ...ok, cost: '' }])).toContain('zoneCost');
     expect(validateShop(shop, [{ ...ok, countries: ['ZZ'] }])).toContain('zoneCountries');
@@ -373,4 +372,28 @@ describe('deletion (kind 5)', () => {
       ],
     });
   });
+});
+
+it('keeps selected collection coordinates when legacy status is unconfirmed', () => {
+  const otherAuthor = 'b'.repeat(64);
+  const references = [
+    shopCoordinate(pubkey),
+    shopCoordinate(otherAuthor),
+    `30405:${pubkey}:art`,
+    `30405:${pubkey}:${SHOP_COLLECTION_D}:prints`,
+  ];
+  const previous = sign({
+    kind: 30402,
+    content: '',
+    tags: [
+      ['d', 'item-abc'],
+      ['price', '12.50', 'GBP'],
+      ...references.map((c) => ['a', c]),
+      ['a', `30402:${pubkey}:parent`],
+    ],
+  });
+  const parsed = parseListingDraft(previous);
+  const { tags } = buildListingTemplate({ draft: parsed, previous, pubkey, nowSeconds: 200 });
+  for (const coordinate of references) expect(tags).toContainEqual(['a', coordinate]);
+  expect(tags).toContainEqual(['a', `30402:${pubkey}:parent`]);
 });

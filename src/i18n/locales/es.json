@@ -2446,7 +2446,7 @@
       "loadError": "No se pudo contactar con tus relés. Desliza para reintentar.",
       "retry": "Reintentar",
       "setupTitle": "Crea tu tienda",
-      "setupBody": "Ponle nombre a tu tienda, elige una moneda e indica a dónde envías. Después podrás empezar a anunciar artículos.",
+      "setupBody": "Elige una moneda predeterminada y opciones de envío. Tu perfil de Nostr es la identidad de tu tienda.",
       "setupButton": "Crear tienda",
       "editShop": "Editar tienda",
       "shipsZones": {
@@ -2578,7 +2578,21 @@
       },
       "conflictTitle": "Cambiado en otro lugar",
       "overwrite": "Guardar de todos modos",
-      "loadFailedTryAgain": "No se pudo cargar tu tienda. Inténtalo de nuevo."
+      "loadFailedTryAgain": "No se pudo cargar tu tienda. Inténtalo de nuevo.",
+      "identityHint": "Tu tienda usa tu perfil de Nostr. Considera una cuenta independiente para tu negocio.",
+      "collections": "Colecciones",
+      "createCollection": "Crear colección",
+      "allCollections": "Todas las colecciones",
+      "removeLegacyCollection": "Eliminar la antigua colección de la tienda",
+      "legacyCollectionHint": "Las versiones anteriores guardaban el nombre de tu tienda como una colección de productos. ¿Enviar una solicitud de eliminación de esa colección? Se conservarán tu perfil y tus productos.",
+      "collectionFields": {
+        "dTag": "Identificador",
+        "title": "Título",
+        "summary": "Resumen",
+        "image": "URL de la imagen",
+        "location": "Ubicación"
+      },
+      "deleteCollectionTitle": "¿Eliminar esta colección?"
     },
     "markdown": {
       "openLinkTitle": "¿Abrir enlace?",

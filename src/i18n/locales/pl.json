@@ -2450,7 +2450,7 @@
       "loadError": "Nie udało się połączyć z twoimi przekaźnikami. Przeciągnij w dół, aby spróbować ponownie.",
       "retry": "Spróbuj ponownie",
       "setupTitle": "Załóż swój sklep",
-      "setupBody": "Nadaj sklepowi nazwę, wybierz walutę i określ, dokąd wysyłasz. Potem możesz zacząć wystawiać produkty.",
+      "setupBody": "Wybierz domyślną walutę i opcje wysyłki. Twój profil Nostr jest tożsamością Twojego sklepu.",
       "setupButton": "Załóż sklep",
       "editShop": "Edytuj sklep",
       "shipsZones": {
@@ -2584,7 +2584,21 @@
       },
       "conflictTitle": "Zmieniono w innym miejscu",
       "overwrite": "Zapisz mimo to",
-      "loadFailedTryAgain": "Nie udało się wczytać twojego sklepu. Spróbuj ponownie."
+      "loadFailedTryAgain": "Nie udało się wczytać twojego sklepu. Spróbuj ponownie.",
+      "identityHint": "Twój sklep korzysta z Twojego profilu Nostr. Rozważ osobne konto dla swojej firmy.",
+      "collections": "Kolekcje",
+      "createCollection": "Utwórz kolekcję",
+      "allCollections": "Wszystkie kolekcje",
+      "removeLegacyCollection": "Usuń starą kolekcję sklepu",
+      "legacyCollectionHint": "Starsze wersje aplikacji zapisywały nazwę sklepu jako kolekcję produktów. Wysłać prośbę o usunięcie tej kolekcji? Twój profil i produkty zostaną zachowane.",
+      "collectionFields": {
+        "dTag": "Identyfikator",
+        "title": "Tytuł",
+        "summary": "Podsumowanie",
+        "image": "URL obrazu",
+        "location": "Lokalizacja"
+      },
+      "deleteCollectionTitle": "Usunąć tę kolekcję?"
     },
     "markdown": {
       "openLinkTitle": "Otworzyć link?",

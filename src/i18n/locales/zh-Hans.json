@@ -2446,7 +2446,7 @@
       "loadError": "无法连接你的中继。下拉重试。",
       "retry": "重试",
       "setupTitle": "创建你的店铺",
-      "setupBody": "给店铺起个名字，选择货币并指定配送范围，然后就可以开始发布商品了。",
+      "setupBody": "选择默认货币和配送选项。你的 Nostr 个人资料就是店铺身份。",
       "setupButton": "创建店铺",
       "editShop": "编辑店铺",
       "shipsZones": {
@@ -2578,7 +2578,21 @@
       },
       "conflictTitle": "已在别处修改",
       "overwrite": "仍然保存",
-      "loadFailedTryAgain": "无法加载你的店铺。请重试。"
+      "loadFailedTryAgain": "无法加载你的店铺。请重试。",
+      "identityHint": "你的店铺使用你的 Nostr 个人资料。建议为业务创建一个独立账号。",
+      "collections": "商品合集",
+      "createCollection": "创建合集",
+      "allCollections": "所有合集",
+      "removeLegacyCollection": "删除旧店铺合集",
+      "legacyCollectionHint": "旧版应用将店铺名称保存为商品合集。要发送该合集的删除请求吗？你的个人资料和商品将保留。",
+      "collectionFields": {
+        "dTag": "标识符",
+        "title": "标题",
+        "summary": "摘要",
+        "image": "图片 URL",
+        "location": "位置"
+      },
+      "deleteCollectionTitle": "删除此合集？"
     },
     "markdown": {
       "openLinkTitle": "打开链接？",

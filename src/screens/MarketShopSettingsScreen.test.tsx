@@ -1,3 +1,4 @@
+import { buildShopTemplate } from '../utils/marketSellerTestFixtures';
 import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import type { Event } from 'nostr-tools';
@@ -5,16 +6,32 @@ import MarketShopSettingsScreen from './MarketShopSettingsScreen';
 import { Alert } from '../components/BrandedAlert';
 import { Toast } from '../components/BrandedToast';
 import { SellerFetchError, StaleRevisionError } from '../utils/marketSellerRevision';
-import { buildShopTemplate } from '../utils/marketSellerEvents';
 import type { SellerSnapshot } from '../utils/marketSellerSnapshot';
 import type { ExploreNavigation } from '../navigation/types';
+
+jest.mock('../components/MerchantIdentity', () => () => null);
+// Virtual mock catches accidental reintroduction of the deferred selector.
+jest.mock(
+  '../components/MerchantPaymentPreference',
+  () => {
+    const { View } = jest.requireActual('react-native');
+    return function DeferredPaymentPreference() {
+      return <View testID="merchant-payment-preference" />;
+    };
+  },
+  { virtual: true },
+);
 
 jest.mock('../contexts/ThemeContext', () => ({ useThemeColors: () => ({}) }));
 jest.mock('../contexts/LocaleContext', () => ({ useTranslation: () => (key: string) => key }));
 jest.mock('../hooks/useSellerShop', () => ({ useSellerShop: () => mockShop }));
 jest.mock('../hooks/useSellerActions', () => ({
   ...jest.requireActual('../utils/marketSellerRevision'),
-  useSellerActions: () => ({ saveShop: mockSave, busy: mockBusy }),
+  useSellerActions: () => ({
+    saveShop: mockSave,
+    deleteLegacyCollection: mockDeleteCollection,
+    busy: mockBusy,
+  }),
 }));
 jest.mock('../components/BrandedAlert', () => ({ Alert: { alert: jest.fn() } }));
 jest.mock('../components/BrandedToast', () => ({ Toast: { show: jest.fn() } }));
@@ -33,6 +50,10 @@ const shop = {
     productCoordinates: [],
     zoneCoordinates: [],
   }),
+  tags: [
+    ['d', 'art'],
+    ['title', 'Art'],
+  ],
   id: 'shop',
   pubkey: 'seller',
   created_at: 100,
@@ -44,6 +65,7 @@ const mockShop = {
   refresh: jest.fn(),
 };
 const mockSave = jest.fn();
+const mockDeleteCollection = jest.fn();
 let mockBusy = false;
 const navigation = {
   goBack: jest.fn(),
@@ -53,6 +75,7 @@ const navigation = {
 beforeEach(() => {
   jest.clearAllMocks();
   mockSave.mockReset().mockResolvedValue(undefined);
+  mockDeleteCollection.mockReset().mockResolvedValue(undefined);
   mockBusy = false;
   mockShop.snapshot = { shop, listings: [], zones: [], zoneEvents: new Map() };
   mockShop.status = 'ready';
@@ -61,7 +84,6 @@ beforeEach(() => {
 it.each([
   ['first-time setup', null, []],
   ['shop without listings', shop, []],
-  ['listings without a shop', null, [shop]],
 ] as const)('offers both setup actions for %s', (_label, existing, listings) => {
   mockShop.snapshot = { ...mockShop.snapshot, shop: existing, listings: [...listings] };
   const screen = render(<MarketShopSettingsScreen navigation={navigation} />);
@@ -89,7 +111,7 @@ it('opens the Explore editor in create mode only after saving succeeds', async (
   const screen = render(<MarketShopSettingsScreen navigation={navigation} />);
   await act(async () => fireEvent.press(screen.getByTestId('shop-save-and-add-item')));
   expect(mockSave).toHaveBeenCalledWith(
-    { name: 'My shop', description: '', currency: 'SATS' },
+    { currency: 'SATS' },
     [],
     { shop, zoneCoordinates: [], zoneEvents: new Map() },
     { force: false },
@@ -132,12 +154,11 @@ it('preserves the add-item destination through a confirmed revision overwrite', 
   expect(navigation.replace).toHaveBeenCalledWith('MarketListingEditor', { returnToMyShop: true });
 });
 
-it('does not save or navigate when validation fails', async () => {
+it('uses the profile identity and never renders a shop-name field', () => {
   const screen = render(<MarketShopSettingsScreen navigation={navigation} />);
-  fireEvent.changeText(screen.getByTestId('shop-name-input'), '');
-  await act(async () => fireEvent.press(screen.getByTestId('shop-save-and-add-item')));
-  expect(mockSave).not.toHaveBeenCalled();
-  expect(navigation.replace).not.toHaveBeenCalled();
+  expect(screen.queryByTestId('merchant-payment-preference')).toBeNull();
+  expect(screen.queryByTestId('shop-name-input')).toBeNull();
+  expect(screen.queryByTestId('shop-description-input')).toBeNull();
 });
 
 it('disables both setup actions while saving', () => {
@@ -145,4 +166,50 @@ it('disables both setup actions while saving', () => {
   const screen = render(<MarketShopSettingsScreen navigation={navigation} />);
   expect(screen.getByTestId('shop-save-and-add-item')).toBeDisabled();
   expect(screen.getByTestId('shop-save-for-now')).toBeDisabled();
+});
+
+it('offers migration on save and deletes only after confirmation', async () => {
+  const legacy = {
+    ...shop,
+    tags: [
+      ['d', 'lightning-piggy-shop'],
+      ['title', 'Shop'],
+      ['currency', 'SATS'],
+    ],
+  };
+  mockShop.snapshot = { ...mockShop.snapshot, shop: legacy };
+  const screen = render(<MarketShopSettingsScreen navigation={navigation} />);
+  expect(screen.getByTestId('shop-remove-legacy')).toBeTruthy();
+  await act(async () => fireEvent.press(screen.getByTestId('shop-save-and-add-item')));
+  expect(mockSave).not.toHaveBeenCalled();
+  expect(mockDeleteCollection).not.toHaveBeenCalled();
+  const buttons = (Alert.alert as jest.Mock).mock.calls[0][2];
+  await act(async () => buttons[1].onPress());
+  expect(mockDeleteCollection).toHaveBeenCalledWith(legacy, { force: false });
+  expect(navigation.replace).toHaveBeenCalledWith('MarketListingEditor', { returnToMyShop: true });
+});
+it('allows saving without deleting the legacy collection', async () => {
+  mockShop.snapshot = {
+    ...mockShop.snapshot,
+    shop: {
+      ...shop,
+      tags: [
+        ['d', 'lightning-piggy-shop'],
+        ['currency', 'SATS'],
+      ],
+    },
+  };
+  const screen = render(<MarketShopSettingsScreen navigation={navigation} />);
+  await act(async () => fireEvent.press(screen.getByTestId('shop-save-for-now')));
+  const buttons = (Alert.alert as jest.Mock).mock.calls[0][2];
+  await act(async () => buttons[0].onPress());
+  expect(mockSave).toHaveBeenCalledTimes(1);
+  expect(mockDeleteCollection).not.toHaveBeenCalled();
+  expect(navigation.goBack).toHaveBeenCalledTimes(1);
+});
+it('does not call an item the first item when listings already exist without a legacy shop event', () => {
+  mockShop.snapshot = { ...mockShop.snapshot, shop: null, listings: [shop] };
+  const screen = render(<MarketShopSettingsScreen navigation={navigation} />);
+  expect(screen.getByTestId('shop-save')).toBeTruthy();
+  expect(screen.queryByTestId('shop-save-and-add-item')).toBeNull();
 });

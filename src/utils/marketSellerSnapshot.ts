@@ -1,5 +1,5 @@
 // Reduce a seller's own Market events (#1273) into what "My shop" shows:
-// the shop collection, its shipping zones and the user's listings. PURE.
+// product collections, shipping zones and the merchant's listings. PURE.
 //
 // Addressable events: newest revision per `<kind>:<pubkey>:<d>` wins (ties →
 // lowest id, the NIP-01 rule the Market reader also uses). NIP-09 deletions
@@ -18,7 +18,9 @@ import {
 } from './marketSellerEvents';
 
 export interface SellerSnapshot {
+  /** Legacy shop-name event, retained only for migration. */
   shop: Event | null;
+  collections?: Event[];
   /** Valid shipping zones, keyed in published order (oldest first). */
   zones: ShippingOption[];
   /** Raw zone events by coordinate — the `previous` for an edit. */
@@ -61,6 +63,7 @@ export function reduceSellerSnapshot(
   }
 
   let shop: Event | null = null;
+  const collections: Event[] = [];
   const zoneEvents = new Map<string, Event>();
   const zones: ShippingOption[] = [];
   const listings: Event[] = [];
@@ -68,6 +71,7 @@ export function reduceSellerSnapshot(
     if (deletedIds.has(event.id) || (deletedAt.get(coordinate) ?? -1) >= event.created_at) continue;
     if (event.kind === COLLECTION_KIND) {
       if (coordinate === coordinateOf(COLLECTION_KIND, pubkey, SHOP_COLLECTION_D)) shop = event;
+      collections.push(event);
     } else if (event.kind === SHIPPING_OPTION_KIND) {
       const option = parseShippingOptionEvent(event);
       if (option) {
@@ -88,5 +92,5 @@ export function reduceSellerSnapshot(
     return a.createdAt - b.createdAt || a.coordinate.localeCompare(b.coordinate);
   });
   listings.sort((a, b) => b.created_at - a.created_at || a.id.localeCompare(b.id));
-  return { shop, zones, zoneEvents, listings };
+  return { shop, collections, zones, zoneEvents, listings };
 }

@@ -2446,7 +2446,7 @@
       "loadError": "A relay-eidet nem sikerült elérni. Húzd le az újrapróbáláshoz.",
       "retry": "Újra",
       "setupTitle": "Hozd létre az üzletedet",
-      "setupBody": "Adj nevet az üzletednek, válassz pénznemet, és add meg, hova szállítasz. Ezután elkezdheted feladni a hirdetéseidet.",
+      "setupBody": "Válassz alapértelmezett pénznemet és szállítási módokat. A Nostr-profilod az üzleted azonosítója.",
       "setupButton": "Üzlet létrehozása",
       "editShop": "Üzlet szerkesztése",
       "shipsZones": {
@@ -2578,7 +2578,21 @@
       },
       "conflictTitle": "Máshol módosítva",
       "overwrite": "Mentés mégis",
-      "loadFailedTryAgain": "Az üzletedet nem sikerült betölteni. Próbáld újra."
+      "loadFailedTryAgain": "Az üzletedet nem sikerült betölteni. Próbáld újra.",
+      "identityHint": "Az üzleted a Nostr-profilodat használja. Érdemes külön fiókot létrehozni a vállalkozásodnak.",
+      "collections": "Gyűjtemények",
+      "createCollection": "Gyűjtemény létrehozása",
+      "allCollections": "Minden gyűjtemény",
+      "removeLegacyCollection": "Régi üzletgyűjtemény eltávolítása",
+      "legacyCollectionHint": "Az alkalmazás korábbi verziói termékgyűjteményként mentették az üzleted nevét. Küldesz törlési kérelmet ehhez a gyűjteményhez? A profilod és a termékeid megmaradnak.",
+      "collectionFields": {
+        "dTag": "Azonosító",
+        "title": "Cím",
+        "summary": "Összefoglaló",
+        "image": "Kép URL-je",
+        "location": "Hely"
+      },
+      "deleteCollectionTitle": "Törlöd ezt a gyűjteményt?"
     },
     "markdown": {
       "openLinkTitle": "Megnyitod a linket?",
