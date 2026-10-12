@@ -1,10 +1,10 @@
+import { buildShopTemplate } from './marketSellerTestFixtures';
 import { finalizeEvent, getPublicKey, type Event } from 'nostr-tools';
 import { reduceSellerSnapshot } from './marketSellerSnapshot';
 import {
   SHOP_COLLECTION_D,
   buildDeletionTemplate,
   buildShippingZoneTemplate,
-  buildShopTemplate,
   coordinateOf,
   type EventTemplate,
 } from './marketSellerEvents';

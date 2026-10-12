@@ -1,3 +1,4 @@
+import { buildShopTemplate } from '../utils/marketSellerTestFixtures';
 import { resolveCurrentRevision, StaleRevisionError } from '../utils/marketSellerRevision';
 import { nostrVerifyEvent } from './nostrCrypto';
 import { __resetVerifiedEventCache } from './nostrVerifyCache';
@@ -32,7 +33,6 @@ import {
   buildDeletionTemplate,
   buildListingTemplate,
   buildShippingZoneTemplate,
-  buildShopTemplate,
   coordinateOf,
   type EventTemplate,
 } from '../utils/marketSellerEvents';

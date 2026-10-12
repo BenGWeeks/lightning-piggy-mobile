@@ -2446,7 +2446,7 @@
       "loadError": "Couldn't reach your relays. Pull to retry.",
       "retry": "Retry",
       "setupTitle": "Set up your shop",
-      "setupBody": "Give your shop a name, choose a currency and say where you ship. Then you can start listing items.",
+      "setupBody": "Choose a default currency and shipping options. Your Nostr profile is your shop identity.",
       "setupButton": "Set up shop",
       "editShop": "Edit shop",
       "shipsZones": {
@@ -2578,7 +2578,27 @@
       },
       "conflictTitle": "Changed elsewhere",
       "overwrite": "Save anyway",
-      "loadFailedTryAgain": "Couldn't load your shop. Try again."
+      "loadFailedTryAgain": "Couldn't load your shop. Try again.",
+      "identityHint": "Your shop uses your Nostr profile. Consider a separate account for your business.",
+      "collections": "Collections",
+      "createCollection": "Create collection",
+      "allCollections": "All collections",
+      "paymentPreference": "Payment preference",
+      "paymentMethods": {
+        "manual": "Manual",
+        "ecash": "eCash",
+        "lud16": "Lightning address"
+      },
+      "removeLegacyCollection": "Remove old shop collection",
+      "legacyCollectionHint": "Older app versions saved your shop name as a product collection. Send a deletion request for that collection? Your profile and products will be kept.",
+      "collectionFields": {
+        "dTag": "Identifier",
+        "title": "Title",
+        "summary": "Summary",
+        "image": "Image URL",
+        "location": "Location"
+      },
+      "deleteCollectionTitle": "Delete this collection?"
     },
     "markdown": {
       "openLinkTitle": "Open link?",

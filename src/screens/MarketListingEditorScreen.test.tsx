@@ -1,3 +1,4 @@
+import { buildShopTemplate } from '../utils/marketSellerTestFixtures';
 import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { finalizeEvent, getPublicKey } from 'nostr-tools';
@@ -5,7 +6,7 @@ import MarketListingEditorScreen from './MarketListingEditorScreen';
 import { Alert } from '../components/BrandedAlert';
 import { StaleRevisionError } from '../utils/marketSellerRevision';
 import type { SellerSnapshot } from '../utils/marketSellerSnapshot';
-import { buildListingTemplate, buildShopTemplate } from '../utils/marketSellerEvents';
+import { buildListingTemplate } from '../utils/marketSellerEvents';
 import type { ExploreNavigation, MarketListingEditorRoute } from '../navigation/types';
 
 jest.mock('../contexts/ThemeContext', () => ({ useThemeColors: () => ({}) }));

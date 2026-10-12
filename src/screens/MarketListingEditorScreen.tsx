@@ -1,3 +1,4 @@
+import CollectionPicker from '../components/CollectionPicker';
 import { SellerSigningError } from '../utils/sellerSigning';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -29,7 +30,6 @@ import {
   buildListingTemplate,
   newIdentifier,
   parseListingDraft,
-  parseShopDraft,
   splitCategories,
   validateListingDraft,
   type ListingDraft,
@@ -51,7 +51,7 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
   const styles = useMemo(() => createMarketSellerStyles(colors), [colors]);
   const editDTag = route.params?.dTag;
   const returnToMyShop = route.params?.returnToMyShop;
-  const { pubkey, snapshot, status, refresh } = useSellerShop();
+  const { pubkey, snapshot, status, refresh, defaultCurrency } = useSellerShop();
   const { saveListing, deleteListing, busy } = useSellerActions(snapshot);
   const { uploading, pickAndUpload } = useListingPhotoUpload();
   const [draft, setDraft] = useState<ListingDraft | null>(null);
@@ -66,10 +66,6 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
     () => (editDTag ? (snapshot.listings.find((e) => dTagOf(e) === editDTag) ?? null) : null),
     [editDTag, snapshot.listings],
   );
-  const shop = useMemo(
-    () => parseShopDraft(snapshot.shop, snapshot.zones),
-    [snapshot.shop, snapshot.zones],
-  );
 
   // Seed: the listing being edited (re-seeded while untouched if a newer
   // revision arrives), or a blank draft in the shop's currency with every
@@ -81,20 +77,21 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
       setDraft(parsed);
       setCategoriesText(parsed.categories.join(', '));
       setBase(existing);
-    } else if (!draft && !editDTag && shop) {
+    } else if (!draft && !editDTag && status === 'ready') {
       setDraft({
         dTag: newIdentifier('item'),
         title: '',
         description: '',
         images: [],
         price: '',
-        currency: shop.currency,
+        currency: defaultCurrency ?? 'SATS',
         quantity: '1',
         categories: [],
+        collections: [],
         shipping: snapshot.zones.map((z) => ({ coordinate: z.coordinate, extraCost: '' })),
       });
     }
-  }, [draft, dirty, base, existing, editDTag, shop, snapshot.zones]);
+  }, [draft, dirty, base, existing, editDTag, status, defaultCurrency, snapshot.zones]);
 
   const fullDraft = useMemo(
     () => (draft ? { ...draft, categories: splitCategories(categoriesText) } : null),
@@ -110,6 +107,10 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
   const update = useCallback(
     (patch: Partial<ListingDraft>) => editDraft((prev) => ({ ...prev, ...patch })),
     [editDraft],
+  );
+  const onCollectionsChange = useCallback(
+    (collections: string[]) => update({ collections }),
+    [update],
   );
   const onCategoriesChange = useCallback((text: string) => {
     setDirty(true);
@@ -377,6 +378,11 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
                 testIDPrefix="listing-currency"
               />
             </View>
+            <CollectionPicker
+              collections={snapshot.collections ?? []}
+              value={draft.collections ?? []}
+              onChange={onCollectionsChange}
+            />
             <Text style={styles.sectionTitle}>{t('market.sell.editor.shipping')}</Text>
             <Text style={styles.hint}>{t('market.sell.editor.shippingHint')}</Text>
             <ListingShippingPicker

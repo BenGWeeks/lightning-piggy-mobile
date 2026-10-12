@@ -9,11 +9,11 @@
 //
 //   kind 30402  product listing   d, title, price, type, visibility, stock,
 //                                 image × n, t × n, shipping_option × n,
-//                                 a → the shop collection, published_at
+//                                 a → selected product collections, published_at
 //   kind 30406  shipping option   one per zone: d, title, price, country,
 //                                 service
-//   kind 30405  collection        "your shop": title, description, a → every
-//                                 product, shipping_option → every zone
+//   kind 30405  collection        product groups: title, summary, image, a →
+//                                 products, optional shipping_option → shared zones
 //   kind 5      NIP-09 deletion   a + e + k
 //
 // Edits republish the addressable event under the SAME `d`, and keep any tag
@@ -29,7 +29,7 @@ export const COLLECTION_KIND = 30405;
 export const DELETION_KIND = 5;
 export { SHIPPING_OPTION_KIND };
 
-/** `d` of the one collection that represents the user's shop. */
+/** Legacy identifier: only used to detect and delete pre-1376 shop events. */
 export const SHOP_COLLECTION_D = 'lightning-piggy-shop';
 /** Currencies a seller may price in: sats first, then the app's fiat list. */
 export const SELLER_CURRENCIES: readonly string[] = ['SATS', ...CURRENCIES, 'BTC'];
@@ -49,11 +49,9 @@ export interface EventTemplate {
   tags: string[][];
 }
 
-/** The shop as the user edits it (the 30405 collection's display fields). */
+/** App-side defaults; the merchant identity lives in kind 0. */
 export interface ShopDraft {
-  name: string;
-  description: string;
-  /** Default currency for listings and the currency every zone cost is in. */
+  /** Default currency for new listings and new shipping options. */
   currency: string;
 }
 
@@ -88,6 +86,7 @@ export interface ListingDraft {
   quantity: string;
   categories: string[];
   shipping: ListingShippingDraft[];
+  collections?: string[];
 }
 
 export type SellerDraftError =
@@ -157,6 +156,11 @@ export function validateListingDraft(draft: ListingDraft): SellerDraftError[] {
     errors.push('images');
   if (draft.categories.length > MAX_LISTING_CATEGORIES) errors.push('categories');
   if (
+    (draft.collections?.length ?? 0) > 100 ||
+    draft.collections?.some((c) => !/^30405:[0-9a-f]{64}:.+$/.test(c))
+  )
+    errors.push('categories');
+  if (
     draft.shipping.some(
       (s) =>
         !/^3040[56]:[0-9a-f]{64}:.+/.test(s.coordinate) ||
@@ -172,8 +176,6 @@ export function validateShop(
   zones: readonly ShippingZoneDraft[],
 ): SellerDraftError[] {
   const errors: SellerDraftError[] = [];
-  const name = shop.name.trim();
-  if (!name || name.length > 100) errors.push('shopName');
   if (!SELLER_CURRENCIES.includes(normaliseCurrency(shop.currency))) errors.push('currency');
   if (zones.length > MAX_SHIPPING_ZONES) errors.push('zones');
   if (zones.some((z) => !z.name.trim() || z.name.trim().length > 100)) errors.push('zoneName');
@@ -239,28 +241,6 @@ export function buildShippingZoneTemplate(
   return { kind: SHIPPING_OPTION_KIND, content: previous?.content ?? '', tags };
 }
 
-/** The shop collection: references every product and every zone. The
- * `currency` tag is a Lightning Piggy extension (the spec has no shop-level
- * currency); other clients ignore unknown tags. */
-export function buildShopTemplate(input: {
-  shop: ShopDraft;
-  pubkey: string;
-  productCoordinates: readonly string[];
-  zoneCoordinates: readonly string[];
-  previous?: Event | null;
-}): EventTemplate {
-  const tags: string[][] = [
-    ['d', SHOP_COLLECTION_D],
-    ['title', input.shop.name.trim()],
-  ];
-  for (const coord of new Set(input.productCoordinates)) tags.push(['a', coord]);
-  for (const coord of new Set(input.zoneCoordinates)) tags.push(['shipping_option', coord]);
-  tags.push(['currency', normaliseCurrency(input.shop.currency)]);
-  const managed = new Set(['d', 'title', 'a', 'shipping_option', 'currency']);
-  tags.push(...preservedTags(input.previous, (t) => managed.has(t[0])));
-  return { kind: COLLECTION_KIND, content: input.shop.description.trim(), tags };
-}
-
 /** kind-30402 product listing. */
 export function buildListingTemplate(input: {
   draft: ListingDraft;
@@ -268,14 +248,14 @@ export function buildListingTemplate(input: {
   nowSeconds: number;
   previous?: Event | null;
 }): EventTemplate {
-  const { draft, pubkey, previous } = input;
+  const { draft, previous } = input;
   const currency = normaliseCurrency(draft.currency);
   const price = normaliseAmount(draft.price, currency);
   if (price === null) throw new Error('Invalid price');
   const prevTags = previous?.tags ?? [];
   const prevType = prevTags.find((t) => t[0] === 'type');
   const prevFrequency = prevTags.find((t) => t[0] === 'price')?.[3];
-  const shop = shopCoordinate(pubkey);
+
   const shipping = draft.shipping.filter(
     (s, i, all) => all.findIndex((o) => o.coordinate === s.coordinate) === i,
   );
@@ -309,7 +289,7 @@ export function buildListingTemplate(input: {
         : ['shipping_option', s.coordinate],
     );
   }
-  tags.push(['a', shop]);
+  for (const collection of new Set(draft.collections ?? [])) tags.push(['a', collection]);
   tags.push(['published_at', tagValue(prevTags, 'published_at') ?? String(input.nowSeconds)]);
   const managed = new Set([
     'd',
@@ -324,7 +304,10 @@ export function buildListingTemplate(input: {
     'published_at',
   ]);
   tags.push(
-    ...preservedTags(previous, (t) => managed.has(t[0]) || (t[0] === 'a' && t[1] === shop)),
+    ...preservedTags(
+      previous,
+      (t) => managed.has(t[0]) || (t[0] === 'a' && t[1]?.startsWith('30405:')),
+    ),
   );
   return { kind: LISTING_KIND, content: draft.description.trim(), tags };
 }
@@ -350,25 +333,12 @@ export function parseListingDraft(event: Pick<Event, 'tags' | 'content'>): Listi
     currency: normaliseCurrency(price?.[2] ?? 'SATS'),
     quantity: tagValue(event.tags, 'stock') ?? '',
     categories: normaliseCategories(event.tags.filter((t) => t[0] === 't').map((t) => t[1] ?? '')),
+    collections: event.tags
+      .filter((t) => t[0] === 'a' && /^30405:[0-9a-f]{64}:.+/.test(t[1] ?? ''))
+      .map((t) => t[1]),
     shipping: event.tags
       .filter((t) => t[0] === 'shipping_option' && typeof t[1] === 'string')
       .map((t) => ({ coordinate: t[1], extraCost: t[2] ?? '' })),
-  };
-}
-
-/** The shop collection back into the settings form. */
-export function parseShopDraft(
-  event: Pick<Event, 'tags' | 'content'> | null,
-  zones: readonly ShippingOption[],
-): ShopDraft | null {
-  if (!event) return null;
-  const tagged = tagValue(event.tags, 'currency')?.toUpperCase();
-  const currency =
-    tagged && SELLER_CURRENCIES.includes(tagged) ? tagged : (zones[0]?.currency ?? 'SATS');
-  return {
-    name: tagValue(event.tags, 'title') ?? '',
-    description: event.content,
-    currency: currency === 'SAT' ? 'SATS' : currency,
   };
 }
 

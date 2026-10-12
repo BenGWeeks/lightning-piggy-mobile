@@ -1,12 +1,7 @@
+import MerchantIdentity from '../components/MerchantIdentity';
+import CollectionManager from '../components/CollectionManager';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  FlatList,
-  RefreshControl,
-  ActivityIndicator,
-} from 'react-native';
+import { View, Text, TouchableOpacity, FlatList, RefreshControl } from 'react-native';
 import { Plus, Settings, Store } from 'lucide-react-native';
 import type { Event } from 'nostr-tools';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -19,7 +14,7 @@ import MarketSellerHeader from '../components/MarketSellerHeader';
 import SellerListingRow from '../components/SellerListingRow';
 import NostrLoginSheet from '../components/NostrLoginSheet';
 import { createMarketSellerStyles } from '../styles/MarketSeller.styles';
-import { parseListingDraft, parseShopDraft, type ListingDraft } from '../utils/marketSellerEvents';
+import { parseListingDraft, type ListingDraft } from '../utils/marketSellerEvents';
 import { parseMarketListing } from '../utils/marketListings';
 import type { ExploreNavigation } from '../navigation/types';
 
@@ -41,10 +36,6 @@ const MarketMyShopScreen: React.FC<Props> = ({ navigation }) => {
   const { deleteListing, busy } = useSellerActions(snapshot);
   const [loginVisible, setLoginVisible] = useState(false);
 
-  const shop = useMemo(
-    () => parseShopDraft(snapshot.shop, snapshot.zones),
-    [snapshot.shop, snapshot.zones],
-  );
   // Re-use a row (and so its parsed draft) while the event is unchanged, so
   // the memoised rows skip re-rendering on unrelated store updates.
   const rowCache = useRef(new Map<string, Row>());
@@ -151,49 +142,19 @@ const MarketMyShopScreen: React.FC<Props> = ({ navigation }) => {
 
   const listHeader = (
     <View style={styles.listHeader}>
-      {shop ? (
-        <View style={styles.card} testID="my-shop-card">
-          <View style={styles.rowBetween}>
-            <Text style={[styles.cardTitle, styles.flex1]} numberOfLines={2}>
-              {shop.name}
-            </Text>
-            <TouchableOpacity
-              onPress={() => navigation.navigate('MarketShopSettings')}
-              accessibilityLabel={t('market.sell.editShop')}
-              testID="my-shop-edit"
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Settings size={22} color={colors.brandPink} strokeWidth={2.25} />
-            </TouchableOpacity>
-          </View>
-          {shop.description ? <Text style={styles.cardBody}>{shop.description}</Text> : null}
-          <Text style={styles.muted}>
-            {shop.currency} ·{' '}
-            {snapshot.zones.length > 0
-              ? t('market.sell.shipsZones', { count: snapshot.zones.length })
-              : t('market.sell.noZones')}
-          </Text>
-        </View>
-      ) : status === 'loading' || status === 'idle' ? (
-        <View style={styles.card}>
-          <ActivityIndicator color={colors.brandPink} />
-          <Text style={[styles.muted, styles.centerText]}>{t('market.sell.loading')}</Text>
-        </View>
-      ) : status === 'error' ? null : (
-        <View style={styles.card} testID="my-shop-setup-card">
-          <Text style={styles.cardTitle}>{t('market.sell.setupTitle')}</Text>
-          <Text style={styles.cardBody}>{t('market.sell.setupBody')}</Text>
-          <TouchableOpacity
-            style={styles.primaryButton}
-            onPress={() => navigation.navigate('MarketShopSettings')}
-            accessibilityLabel={t('market.sell.setupButton')}
-            testID="my-shop-setup"
-          >
-            <Store size={18} color={colors.white} strokeWidth={2.25} />
-            <Text style={styles.primaryButtonText}>{t('market.sell.setupButton')}</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+      <View style={styles.card} testID="my-shop-card">
+        <MerchantIdentity />
+        <TouchableOpacity
+          style={styles.secondaryButton}
+          onPress={() => navigation.navigate('MarketShopSettings')}
+          testID="my-shop-edit"
+          accessibilityLabel={t('market.sell.editShop')}
+        >
+          <Settings size={22} color={colors.brandPink} />
+          <Text style={styles.secondaryButtonText}>{t('market.sell.editShop')}</Text>
+        </TouchableOpacity>
+      </View>
+      <CollectionManager snapshot={snapshot} />
       {status === 'error' ? (
         <TouchableOpacity
           onPress={refresh}
@@ -203,7 +164,7 @@ const MarketMyShopScreen: React.FC<Props> = ({ navigation }) => {
           <Text style={styles.errorText}>{t('market.sell.loadError')}</Text>
         </TouchableOpacity>
       ) : null}
-      {shop ? (
+      {canPublish ? (
         <TouchableOpacity
           style={styles.primaryButton}
           onPress={() => navigation.navigate('MarketListingEditor')}

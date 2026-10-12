@@ -320,7 +320,7 @@ export async function persistSellerSnapshot(pubkey: string): Promise<void> {
     .sort((a, b) => b.created_at - a.created_at)
     .slice(0, MAX_CACHED_DELETIONS);
   const keep = [
-    ...(snapshot.shop ? [snapshot.shop] : []),
+    ...(snapshot.collections ?? []),
     ...snapshot.zoneEvents.values(),
     ...snapshot.listings.slice(0, MAX_CACHED_LISTINGS),
     ...deletions,
