@@ -1,7 +1,13 @@
 import { AmberSignerError } from '../services/amberErrors';
 import { NostrConnectError, SignerUnavailableError } from '../services/signerErrors';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Kind4RetryStore, KIND4_RETRY_BASE_MS, isTransientKind4Error } from './kind4RetryStore';
+import {
+  Kind4RetryStore,
+  KIND4_RETRY_BASE_MS,
+  KIND4_MAX_UNCOUNTED_ATTEMPTS,
+  KIND4_MAX_FAILURE_AGE_MS,
+  isTransientKind4Error,
+} from './kind4RetryStore';
 
 beforeEach(async () => {
   jest.spyOn(Date, 'now').mockReturnValue(1000);
@@ -60,12 +66,13 @@ it.each([
   expect(isTransientKind4Error(new Error('invalid ciphertext'))).toBe(false);
 });
 
-it('keeps the oldest pending failure when the retry store reaches capacity', async () => {
+it('exhausts the oldest pending failure before evicting it at capacity', async () => {
   const store = new Kind4RetryStore('owner');
   await store.load();
   for (let i = 0; i < 501; i++) store.failed(String(i), i, false, 1000);
   await store.save();
-  expect(store.cursor(1000)).toBe(0);
+  expect(store.cursor(1000)).toBe(1);
+  expect(store.shouldSkip('0')).toBe(true);
   expect(JSON.parse((await AsyncStorage.getItem('dm-kind4-retries:owner'))!)).toHaveLength(500);
 });
 
@@ -99,4 +106,94 @@ it.each([
   new AmberSignerError('NO_RESULT', 'no-response', 'invalid MAC'),
 ])('keeps unknown and availability signer errors retryable: %s', (error) => {
   expect(isTransientKind4Error(error)).toBe(true);
+});
+
+it.each(['counted', 'uncounted', 'age'] as const)(
+  'keeps overflow exhaustion across 11,000 overlap replays and restart (%s ceiling)',
+  async (ceiling) => {
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    let now = 1000;
+    jest.spyOn(Date, 'now').mockImplementation(() => now);
+    let store = new Kind4RetryStore('owner');
+    await store.load();
+    // 501 failed events span 50 seconds: all remain inside the 120-second overlap.
+    const events = Array.from({ length: 501 }, (_, i) => ({
+      id: String(i),
+      createdAt: 100 + Math.floor(i / 10),
+    }));
+    let cursor = 0;
+    let attempts = 0;
+    let attemptsAtExhaustion = 0;
+    const ceilingPass =
+      ceiling === 'age'
+        ? KIND4_MAX_FAILURE_AGE_MS / KIND4_RETRY_BASE_MS
+        : ceiling === 'counted'
+          ? 4
+          : KIND4_MAX_UNCOUNTED_ATTEMPTS;
+    for (let pass = 0; pass < 11_000; pass++) {
+      for (const event of events) {
+        if (event.createdAt < cursor - 120) continue;
+        // The age path exercises bounded relay slices omitting pending events.
+        if (ceiling === 'age' && pass > 0 && event.id !== '500') continue;
+        if (!store.shouldSkip(event.id)) {
+          attempts++;
+          store.failed(event.id, event.createdAt, ceiling === 'counted');
+        }
+      }
+      const next = store.cursor(150);
+      expect(next).toBeGreaterThanOrEqual(cursor);
+      cursor = next;
+      if (pass === ceilingPass) attemptsAtExhaustion = attempts;
+      if (pass >= ceilingPass) {
+        expect(cursor).toBe(150);
+        expect(store.nextRetryAt()).toBeUndefined();
+        expect(attempts).toBe(attemptsAtExhaustion);
+      }
+      now += KIND4_RETRY_BASE_MS;
+      if (pass <= Math.min(ceilingPass, 20) || pass === ceilingPass) {
+        await store.save();
+        store = new Kind4RetryStore('owner');
+        await store.load();
+      }
+    }
+    expect(attempts).toBeGreaterThanOrEqual(501);
+    expect(attempts).toBeLessThanOrEqual(501 * (ceiling === 'uncounted' ? 20 : 3));
+    // A replay of the full slice must remain exhausted, including the evicted id.
+    for (const event of events) expect(store.shouldSkip(event.id)).toBe(true);
+    expect(store.retryDelay()).toBeUndefined();
+  },
+  30_000,
+);
+
+it('bounds persisted exhausted ids and discards oldest history regardless of insertion order', async () => {
+  const negatives = Array.from({ length: 5001 }, (_, i) => [String(i), 5000 - i]);
+  await AsyncStorage.setItem('dm-kind4-exhausted:owner', JSON.stringify(negatives));
+  const store = new Kind4RetryStore('owner');
+  await store.load();
+  await store.save();
+  const saved = JSON.parse((await AsyncStorage.getItem('dm-kind4-exhausted:owner'))!);
+  expect(saved).toHaveLength(5000);
+  expect(store.shouldSkip('0')).toBe(true);
+  expect(store.shouldSkip('5000')).toBe(false);
+});
+
+it('retains evicted exhaustion after a failed bypass and clears it only on successful recovery', async () => {
+  const store = new Kind4RetryStore('owner');
+  await store.load();
+  for (let i = 0; i < 501; i++) store.failed(String(i), i, false);
+  expect(store.shouldSkip('0', true)).toBe(false);
+  store.failed('0', 0, false);
+  await store.save();
+  const restarted = new Kind4RetryStore('owner');
+  await restarted.load();
+  expect(restarted.shouldSkip('0')).toBe(true);
+  expect(restarted.cursor(1000)).toBe(1);
+  const other = new Kind4RetryStore('other');
+  await other.load();
+  expect(other.shouldSkip('0')).toBe(false);
+  restarted.succeeded('0');
+  await restarted.save();
+  const recovered = new Kind4RetryStore('owner');
+  await recovered.load();
+  expect(recovered.shouldSkip('0')).toBe(false);
 });

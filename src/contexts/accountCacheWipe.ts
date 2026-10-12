@@ -134,6 +134,8 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
     // Pre-existing per-pubkey caches (already namespaced before #288)
     inboxCacheKey(loggedOutPubkey),
     inboxLastSeenKey(loggedOutPubkey),
+    `dm-kind4-retries:${loggedOutPubkey}`,
+    `dm-kind4-exhausted:${loggedOutPubkey}`,
     `nostr_group_activity_${loggedOutPubkey}`,
     `nostr_groups_${loggedOutPubkey}`,
     `groups_following_only_${loggedOutPubkey}`,

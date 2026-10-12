@@ -8,6 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const KIND4_RETRY_BASE_MS = 60_000;
 const MAX_FAILURES = 500;
+const MAX_EXHAUSTED = 5000;
 const MAX_ATTEMPTS = 3;
 export const KIND4_MAX_UNCOUNTED_ATTEMPTS = 20;
 export const KIND4_MAX_FAILURE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -23,26 +24,45 @@ type Failure = {
 /** Metadata only: ciphertext and plaintext stay out of AsyncStorage. */
 export class Kind4RetryStore {
   private failures = new Map<string, Failure>();
+  private exhausted = new Map<string, number>();
   private loaded?: Promise<void>;
   private lastChecked = 0;
   constructor(private owner: string) {}
   private get key() {
     return `dm-kind4-retries:${this.owner}`;
   }
+  private get exhaustedKey() {
+    return `dm-kind4-exhausted:${this.owner}`;
+  }
   load(): Promise<void> {
     return (this.loaded ??= (async () => {
-      const raw = await AsyncStorage.getItem(this.key);
+      const [raw, exhaustedRaw] = await Promise.all([
+        AsyncStorage.getItem(this.key),
+        AsyncStorage.getItem(this.exhaustedKey),
+      ]);
+      try {
+        if (exhaustedRaw) {
+          const entries: [string, number][] = JSON.parse(exhaustedRaw);
+          for (const [id, createdAt] of entries) {
+            if (typeof id === 'string' && Number.isFinite(createdAt))
+              this.rememberExhausted(id, createdAt);
+          }
+        }
+      } catch {
+        /* Ignore malformed negatives independently of retry metadata. */
+      }
       if (!raw) return;
       try {
         const entries: Failure[] = JSON.parse(raw);
-        for (const f of entries.slice(-MAX_FAILURES)) {
+        for (const f of entries) {
           if (
             typeof f.id === 'string' &&
             Number.isFinite(f.createdAt) &&
             Number.isInteger(f.attempts) &&
             f.attempts >= 0 &&
             f.attempts <= MAX_ATTEMPTS &&
-            Number.isFinite(f.lastAttempt)
+            Number.isFinite(f.lastAttempt) &&
+            !this.exhausted.has(f.id)
           )
             this.failures.set(f.id, {
               ...f,
@@ -53,6 +73,7 @@ export class Kind4RetryStore {
                   ? Math.min(KIND4_MAX_UNCOUNTED_ATTEMPTS, f.uncountedAttempts)
                   : 0,
             });
+          this.trimFailures();
         }
       } catch {
         /* Ignore malformed metadata. */
@@ -60,7 +81,12 @@ export class Kind4RetryStore {
     })());
   }
   async save() {
-    await AsyncStorage.setItem(this.key, JSON.stringify([...this.failures.values()]));
+    // Snapshot both before yielding so concurrent failures cannot split the pair.
+    const exhausted = JSON.stringify([...this.exhausted]);
+    const failures = JSON.stringify([...this.failures.values()]);
+    // Write negatives first: a failed retry write must not resurrect an evicted id.
+    await AsyncStorage.setItem(this.exhaustedKey, exhausted);
+    await AsyncStorage.setItem(this.key, failures);
   }
   private due(f: Failure) {
     return f.lastAttempt + KIND4_RETRY_BASE_MS * 2 ** Math.max(0, f.attempts - 1);
@@ -80,9 +106,14 @@ export class Kind4RetryStore {
   shouldSkip(id: string, bypass = false, now = Date.now()) {
     const f = this.failures.get(id);
     if (f) this.expire(f, now);
-    return !bypass && !!f && (f.attempts >= MAX_ATTEMPTS || now < this.due(f));
+    return (
+      !bypass &&
+      (this.exhausted.has(id) || (!!f && (f.attempts >= MAX_ATTEMPTS || now < this.due(f))))
+    );
   }
   failed(id: string, createdAt: number, counted: boolean, now = Date.now()) {
+    // A failed explicit bypass retains exhaustion; only success clears it.
+    if (this.exhausted.has(id)) return;
     const previous = this.failures.get(id);
     const failure: Failure = {
       id,
@@ -97,17 +128,30 @@ export class Kind4RetryStore {
     };
     this.expire(failure, now);
     this.failures.set(id, failure);
-    if (this.failures.size > MAX_FAILURES) {
-      // Prefer permanent negatives, then the newest failure; keep the oldest floor.
-      const victim =
-        [...this.failures.values()].find((f) => f.attempts >= MAX_ATTEMPTS) ??
-        [...this.failures.values()].reduce((newest, f) =>
-          f.createdAt > newest.createdAt ? f : newest,
-        );
-      if (victim) this.failures.delete(victim.id);
+    this.trimFailures();
+  }
+  private rememberExhausted(id: string, createdAt: number) {
+    this.exhausted.set(id, createdAt);
+    if (this.exhausted.size > MAX_EXHAUSTED) {
+      // Discard the oldest history first, behind the advancing cursor/overlap.
+      const oldest = [...this.exhausted].reduce((a, b) => (a[1] <= b[1] ? a : b));
+      this.exhausted.delete(oldest[0]);
     }
   }
+  private trimFailures() {
+    if (this.failures.size <= MAX_FAILURES) return;
+    // Retire permanent negatives first. If every entry still pins the cursor,
+    // exhaust the oldest floor so capacity pressure advances it rather than
+    // dropping counters on the newest event forever.
+    const entries = [...this.failures.values()];
+    const victim =
+      entries.find((f) => f.attempts >= MAX_ATTEMPTS) ??
+      entries.reduce((oldest, f) => (f.createdAt < oldest.createdAt ? f : oldest));
+    this.rememberExhausted(victim.id, victim.createdAt);
+    this.failures.delete(victim.id);
+  }
   succeeded(id: string) {
+    this.exhausted.delete(id);
     this.failures.delete(id);
   }
   cursor(newest: number) {

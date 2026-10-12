@@ -1218,7 +1218,15 @@ Productive aborts still persist/paint partial batches but preserve both cursors.
 Reconnects joining an active refresh retain one reconciliation after that flight;
 its completion TTL still applies, including when reconnect happens after fetch.
 Null kind-4 decrypts count as processed and enter a bounded account/session
-negative cache (user refreshes retry them). They cannot keep refreshes cold or
+retry store (user refreshes retry them). After three ciphertext failures,
+twenty transient failures or seven days, they stop pinning the cursor.
+Capacity eviction must first move the id to the separately persisted,
+5,000-id exhausted cache; otherwise overlap replays reset its counters and age.
+If all 500 retry entries are pending, retire the oldest floor first so the
+cursor progresses. Exhausted-cache overflow discards the oldest history.
+The regression replays 501 failures spanning 50 seconds over 11,000 one-minute
+passes, including restarts, and checks that the cursor never regresses and
+retries stop for all three ceilings. They cannot keep refreshes cold or
 block full wrap backfill. Unattempted messages and failed database writes still
 preserve the history cursor.
 
