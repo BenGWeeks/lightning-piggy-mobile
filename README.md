@@ -9,11 +9,11 @@
 A mobile Bitcoin Lightning wallet for smart savers and their families, built with Expo/React Native, connecting via Nostr Wallet Connect (NWC) with Nostr social features.
 
 <p align="center">
+  <img alt="Wallets tab: a wallet card and its transactions" src="docs/images/app-wallets-tab.webp" width="19%">
   <img alt="Explore" src="docs/images/app-hero-02-explore.webp" width="19%">
-  <img alt="Map" src="docs/images/app-hero-03-map.webp" width="19%">
-  <img alt="Wallets" src="docs/images/app-hero-01-wallet.webp" width="19%">
+  <img alt="Little Piggy's profile: Posts, Media and Shop tabs with the Posts &amp; replies switch" src="docs/images/app-profile-posts-replies.webp" width="19%">
+  <img alt="A profile's Shop tab with Market listings" src="docs/images/app-profile-shop-tab.webp" width="19%">
   <img alt="Piglet detail" src="docs/images/app-hero-05-piglet.webp" width="19%">
-  <img alt="Geo-caches" src="docs/images/app-hero-04-hunt.webp" width="19%">
 </p>
 
 <p align="center">
@@ -326,7 +326,14 @@ The Explore tab pulls in a small set of Expo modules beyond the wallet + Nostr c
 
 ## Screenshots
 
-The Explore tab surfaces live under [`docs/screenshots/explore/`](docs/screenshots/explore/):
+<p align="center">
+  <img alt="Explore with the Market rail: buy and sell with sats" src="docs/images/app-explore-market-rail.webp" width="19%">
+  <img alt="Map of Bitcoin merchants and Piglets" src="docs/images/app-hero-03-map.webp" width="19%">
+  <img alt="Geo-caches list" src="docs/images/app-hero-04-hunt.webp" width="19%">
+</p>
+<!-- GALLERY: My shop, product page, Marmot group chat and Big Piggy's profile go here when captured. -->
+
+More Explore screens live under [`docs/screenshots/explore/`](docs/screenshots/explore/):
 
 - `01-tab-bar-home.png` — bottom tab bar with the new Explore tab
 - `02-explore-hub.png` / `02b-explore-hub-scrolled.png` — Lessons / Map / Hunt / Events rails
