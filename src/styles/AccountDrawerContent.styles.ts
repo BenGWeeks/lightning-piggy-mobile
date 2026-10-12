@@ -124,7 +124,8 @@ export const createAccountDrawerContentStyles = (colors: Palette) =>
       alignItems: 'center',
       gap: 16,
       paddingHorizontal: 20,
-      paddingVertical: 14,
+      paddingVertical: 10,
+      minHeight: 48,
     },
     rowDisabled: {
       opacity: 0.4,
@@ -142,9 +143,8 @@ export const createAccountDrawerContentStyles = (colors: Palette) =>
       paddingTop: 16,
       paddingBottom: 6,
     },
-    rowText: { flex: 1 },
-    rowSubtitle: { color: colors.textSupplementary, fontSize: 12, marginTop: 3 },
     rowLabel: {
+      flex: 1,
       color: colors.textBody,
       fontSize: 16,
       fontWeight: '600',

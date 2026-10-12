@@ -40,15 +40,7 @@
     "notifications": "通知",
     "displayLanguage": "显示与语言",
     "yourAccount": "你的账户",
-    "signOutOf": "退出{{name}}账户",
-    "profileHint": "你的名字、头像和二维码",
-    "walletsHint": "连接和退款偏好",
-    "messagesHint": "信任过滤和链接预览",
-    "notificationsHint": "即时提醒、后台检查和商店提醒",
-    "securityHint": "付款检查和私钥备份",
-    "displayLanguageHint": "货币、语言、主题和动画",
-    "aboutHint": "反馈、团队和应用信息",
-    "advancedHint": "网络、通知服务器和实验性功能"
+    "signOutOf": "退出{{name}}账户"
   },
   "accountSwitcherSheet": {
     "accounts": "账户",

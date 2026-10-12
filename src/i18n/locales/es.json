@@ -40,15 +40,7 @@
     "notifications": "Notificaciones",
     "displayLanguage": "Pantalla e idioma",
     "yourAccount": "Tu cuenta",
-    "signOutOf": "Cerrar sesión de {{name}}",
-    "profileHint": "Tu nombre, foto y código QR",
-    "walletsHint": "Conexiones y preferencias de reembolso",
-    "messagesHint": "Filtro de confianza y vistas previas de enlaces",
-    "notificationsHint": "Alertas instantáneas, comprobaciones en segundo plano y alertas de tiendas",
-    "securityHint": "Confirmaciones de pago y respaldo de clave",
-    "displayLanguageHint": "Moneda, idioma, tema y animación",
-    "aboutHint": "Comentarios, equipo e información de la app",
-    "advancedHint": "Redes, servidor de notificaciones y funciones experimentales"
+    "signOutOf": "Cerrar sesión de {{name}}"
   },
   "accountSwitcherSheet": {
     "accounts": "Cuentas",

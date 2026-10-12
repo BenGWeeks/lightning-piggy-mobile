@@ -40,15 +40,7 @@
     "notifications": "Powiadomienia",
     "displayLanguage": "Wygląd i język",
     "yourAccount": "Twoje konto",
-    "signOutOf": "Wyloguj z konta: {{name}}",
-    "profileHint": "Twoje imię, zdjęcie i kod QR",
-    "walletsHint": "Połączenia i ustawienia zwrotów",
-    "messagesHint": "Filtr zaufania i podglądy linków",
-    "notificationsHint": "Natychmiastowe alerty, sprawdzanie w tle i alerty sklepu",
-    "securityHint": "Kontrole płatności i kopia zapasowa klucza",
-    "displayLanguageHint": "Waluta, język, motyw i animacja",
-    "aboutHint": "Opinie, zespół i informacje o aplikacji",
-    "advancedHint": "Sieci, serwer powiadomień i funkcje eksperymentalne"
+    "signOutOf": "Wyloguj z konta: {{name}}"
   },
   "accountSwitcherSheet": {
     "accounts": "Konta",

@@ -163,3 +163,22 @@ describe('uk catalogue (#948 spot checks)', () => {
     expect(uk.get('orderPaymentActions.scanHint')).toBe('Відскануйте будь-яким гаманцем Lightning');
   });
 });
+
+// #1375: removed drawer subtitles must not linger in any catalogue, including en.
+describe.each(SUPPORTED_LOCALES)('%s compact account drawer', (locale) => {
+  it('removes all obsolete row subtitle keys', () => {
+    const drawer = translations[locale].accountDrawerContent;
+    for (const key of [
+      'profileHint',
+      'walletsHint',
+      'messagesHint',
+      'notificationsHint',
+      'securityHint',
+      'displayLanguageHint',
+      'aboutHint',
+      'advancedHint',
+    ]) {
+      expect(drawer).not.toHaveProperty(key);
+    }
+  });
+});

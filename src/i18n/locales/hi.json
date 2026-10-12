@@ -40,15 +40,7 @@
     "notifications": "नोटिफ़िकेशन",
     "displayLanguage": "डिस्प्ले और भाषा",
     "yourAccount": "आपका अकाउंट",
-    "signOutOf": "{{name}} से लॉग आउट करें",
-    "profileHint": "आपका नाम, फ़ोटो और QR कोड",
-    "walletsHint": "कनेक्शन और रिफ़ंड की पसंद",
-    "messagesHint": "भरोसे का फ़िल्टर और लिंक प्रीव्यू",
-    "notificationsHint": "तुरंत अलर्ट, बैकग्राउंड में जाँच और दुकान के अलर्ट",
-    "securityHint": "पेमेंट की जाँच और प्राइवेट की का बैकअप",
-    "displayLanguageHint": "करेंसी, भाषा, थीम और ऐनिमेशन",
-    "aboutHint": "फ़ीडबैक, टीम और ऐप की जानकारी",
-    "advancedHint": "नेटवर्क, नोटिफ़िकेशन सर्वर और प्रयोग के तौर पर उपलब्ध फ़ीचर"
+    "signOutOf": "{{name}} से लॉग आउट करें"
   },
   "accountSwitcherSheet": {
     "accounts": "अकाउंट",
