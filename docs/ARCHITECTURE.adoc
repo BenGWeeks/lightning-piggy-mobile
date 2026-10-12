@@ -22,10 +22,11 @@ custom native modules, so Expo Go is not used).
 |===
 | Layer | Responsibility
 
-| **Native / config** | Expo config plugins (`plugins/`) + one local native module (`modules/amber-signer`) — Android manifest edits and the Amber signer IPC bridge. Background DM delivery is handled by `expo-background-task`, not a native service.
+| **Native / config** | Expo config plugins (`plugins/`) + four local native modules (`modules/`): the Amber signer bridge, the opt-in Android background service, a rust-nostr wrapper and a secure clipboard. See <<native>>.
 | **Contexts** | Long-lived React state providers (`src/contexts/`) — identity, wallets, DMs, groups, live-location. Composed once near the app root.
+| **i18n** | `src/i18n/` — 9 locale catalogues (`en` is the source of truth), per-locale CLDR plural rules (`plurals.ts`) and a per-account app language. See `i18n/GLOSSARY.md`.
 | **Hooks / services** | Per-responsibility logic. UI-facing hooks (`src/hooks/`) and a large stateless service layer (`src/services/`) split by domain (Nostr, wallet, location, media, NFC, notifications).
-| **Navigation** | `src/navigation/AppNavigator.tsx` — a four-tab bottom bar plus an Explore stack, an account drawer, and a root stack for conversation screens.
+| **Navigation** | `src/navigation/AppNavigator.tsx` — a four-tab bottom bar (Wallets, Messages, Explore, Friends) plus an Explore stack, an account drawer, and a root stack for conversation, profile and product screens.
 | **Screens / components** | `src/screens/` and `src/components/` — presentation. Styles live in `src/styles/<Name>.styles.ts` per the file-size convention in `CLAUDE.md`.
 |===
 
@@ -48,7 +49,7 @@ custom native modules, so Expo Go is not used).
 | NFC | `react-native-nfc-manager` | Read/write Lightning + Nostr tags; Hunt "Piglet" claim tags.
 | UI | `@gorhom/bottom-sheet`, `react-native-reanimated`, `@shopify/react-native-skia`, `lucide-react-native` | Bottom sheets, animation, canvas, icons.
 | Media | `expo-image-picker`, `expo-camera`, `expo-audio`, `expo-calendar`, `expo-contacts` | Attachments, QR scanning, voice notes, Add-to-Calendar, phone contacts.
-| Background | `expo-notifications`, `expo-background-task`, `expo-task-manager`, `expo-location` | Notifications + geofence + periodic background DM detect-and-ping (WorkManager / BGTaskScheduler). A realtime foreground service is a future upgrade — see <<native>> and `architecture/notifications.adoc`.
+| Background | `expo-notifications`, `expo-background-task`, `expo-task-manager`, `expo-location` | Notifications + geofence + periodic background DM detect-and-ping (WorkManager / BGTaskScheduler). On Android the opt-in `background-dm-service` foreground service adds a near-realtime message watch and NWC payment checks — see <<native>> and `architecture/notifications.adoc`.
 |===
 
 Marketing version lives in `package.json` / `app.config.ts` (single source of
@@ -87,7 +88,9 @@ changes are hand-edited into `android/` / `ios/`.
 | `withAmberQueries.js` | Android `<queries>` for the `nostrsigner:` / `nostr:` schemes so the app can discover and launch the Amber signer and other Nostr apps.
 | `withLargeHeap.js` | Android `largeHeap="true"` — a memory workaround retained from the Leaflet-WebView era.
 | `withNfc.js` | Android NFC permission + feature + NDEF intent filters for the app's deep-link schemes; iOS NFC usage string + TAG entitlement.
-| `withForegroundService.js` | Scaffolds Android manifest permissions (`FOREGROUND_SERVICE(_DATA_SYNC)`, `POST_NOTIFICATIONS`, `RECEIVE_BOOT_COMPLETED`, `WAKE_LOCK`) for a *future* realtime relay foreground service (#279). It only declares the permissions — the Kotlin `Service` itself is not implemented; background DM delivery currently ships via `expo-background-task` (see `architecture/notifications.adoc`).
+| `withForegroundService.js` | Android manifest entries for the opt-in `background-dm-service` foreground service (relay watch for messages and NWC incoming payments while the app is closed).
+| `withFcmAutoInitDisabled.js` | Keeps Firebase Cloud Messaging dormant until the user opts in to push (MIP-05 / watcher alerts), and turns Firebase Analytics and advertising-id collection off.
+| `withTransparentSplashIcon.js` | Android 12+ launch screen: plain brand pink, no launcher icon.
 |===
 
 `app.config.ts` also registers the MapLibre, secure-store, notifications,
@@ -115,15 +118,19 @@ copy preview on Android 13+, kept out of Gboard's history); iOS writes it
 Wrapped by `src/services/sensitiveClipboard.ts`, which adds a best-effort
 JS clear on Android and hides Copy entirely on a binary without the module.
 
-NOTE: There is no `background-dm-service` native module. Background DM delivery
-ships as a periodic `expo-background-task` detect-and-ping (Android WorkManager /
-iOS BGTaskScheduler): when the UI is not mounted the OS runs `runBackgroundSync`
-(`src/services/backgroundSyncService.ts`), which notices new encrypted inbound
-traffic and fires a generic notification *without decrypting*. A persistent
-realtime relay Kotlin foreground `Service` is only *scaffolded* — its manifest
-permissions are declared by `withForegroundService.js` but the `Service` class is
-not implemented, and is documented as a future upgrade. See
-`architecture/notifications.adoc` for the full background/notification model.
+*`background-dm-service`* (Android only) — the opt-in persistent foreground
+service (Settings → Notifications) that keeps a relay watch alive while the app
+is closed, for near-realtime message alerts and NWC incoming-payment checks (see
+`BACKGROUND_PAYMENTS.adoc`). Separately, a periodic `expo-background-task`
+detect-and-ping (Android WorkManager / iOS BGTaskScheduler) is registered on
+every launch: `runBackgroundSync` (`src/services/backgroundSyncService.ts`)
+notices new encrypted inbound traffic and fires a generic notification *without
+decrypting*. See `architecture/notifications.adoc`.
+
+*`nostr-native`* (Android + iOS) — a Kotlin / Swift wrapper over rust-nostr. Its
+NIP-44 and Schnorr primitives are an experimental, off-by-default setting and
+are synchronous, so they still run on the JS thread; only the async relay-engine
+functions move work off it. Falls back to pure JS where it is not linked.
 
 == State: contexts
 
@@ -154,7 +161,7 @@ wallets: balances, transaction history, send/receive, transfers. Composes
 `fiatService`, and `walletStorageService`, plus a `WalletLiveContext` for live
 payment events.
 
-*`NostrContext.tsx`* — Nostr identity, the active signer (nsec or Amber), relay
+*`NostrContext.tsx`* — Nostr identity, the active signer (nsec, Amber or NIP-46), relay
 set, contact list, and profiles. Rather than being one monolith, it composes
 per-responsibility hooks/services: `useDmInbox` (inbox hydration +
 subscriptions), `useGroupMessaging`, `useCacheNotifications`, plus the
@@ -173,17 +180,20 @@ A large, mostly-stateless service layer grouped by domain. Selected modules:
 |===
 | Domain | Key modules
 
-| Nostr core | `nostrService.ts` (relay queries, event building, NIP-59/17/04/44 ops), `amberService.ts`, `nostrRelayStorage.ts`, `trustGraphService.ts`
+| Nostr core | `nostrService.ts` (relay queries, event building, NIP-59/17/04/44 ops), `nostrEventPublish.ts` (publishes count as sent only when a relay acknowledges them), `amberService.ts`, `nostrConnectService.ts` (NIP-46), `nostrRelayStorage.ts`, `nostrRelayDefaults.ts` (default / profile / NIP-46 pairing / push-server relay lists), `trustGraphService.ts`
+| Relay health | `relayHealth.ts` + the `withRelayHealth` pool mixin in `healthAwarePool.ts`: a relay that fails to connect twice (corroborated by another relay succeeding) is parked for 15 min, doubling up to 6 h, and skipped by queries and publishes. At least the two healthiest relays of a request are always tried. Users' kind-10002 lists are never rewritten. See `SOLUTION_DESIGN.adoc` → "Relay health".
 | Direct messages | `dmInbox.ts`, `dmIngest.ts`, `dmDb.ts`, `dmLiveSubscription.ts`, `nostrLiveDmSub.ts` (lives in `src/contexts/`, not `src/services/`), `nostrDmPublish.ts`, `nostrFileMessage.ts`, `dmStoreMigration.ts`
-| Marmot (MLS) messaging | `marmotSession.ts` (one client per account), `marmotSend.ts`, `marmotInbox.ts`, `marmotWelcomeRouter.ts`, `marmotMedia.ts` (MIP-04 photos), `marmotReactions.ts`, `marmotPush.ts` / `marmotPushNotifier.ts` (MIP-05, send side), adapters `marmotSigner.ts` / `marmotNetwork.ts` / `marmotStore.ts` / `marmotCryptoProvider.ts`. React glue: `MarmotBridge.tsx`, `useMarmotDmInbound.ts`, `useMarmotGroups.ts` (in `src/contexts/`).
+| Marmot (MLS) messaging | `marmotSession.ts` (one client per account), `marmotSend.ts`, `marmotInbox.ts`, `marmotWelcomeRouter.ts`, `marmotMedia.ts` (MIP-04 photos and voice notes), `marmotReactions.ts`, `marmotEdits.ts` / `marmotDeletions.ts` (edit and delete for everyone), `marmotInvitees.ts` (invite all of a contact's fresh devices), `marmotDevices.ts` / `marmotDeviceTracker.ts` (a person's devices read from MLS leaves for the by-line, members sheet and message info; read-only over group state), `marmotKeyPackageLifecycle.ts` (weekly refresh, retire on sign-out), `marmotProposals.ts` (keeps the extension order White Noise expects), `marmotPush.ts` / `marmotPushNotifier.ts` / `marmotPushRegistrar.ts` (MIP-05: send triggers, opt-in receive), adapters `marmotSigner.ts` / `marmotNetwork.ts` / `marmotStore.ts` / `marmotCryptoProvider.ts`. React glue: `MarmotBridge.tsx`, `useMarmotDmInbound.ts`, `useMarmotGroups.ts` (in `src/contexts/`).
 | Background sync / DM ping | `backgroundTask.ts` (registers the periodic `expo-background-task` — WorkManager on Android / BGTaskScheduler on iOS — that runs while the UI isn't mounted), `backgroundSyncService.ts` (the headless detect-and-ping worker: notices new encrypted inbound traffic and fires a generic notification without decrypting — works for both nsec and Amber users). See `architecture/notifications.adoc`.
-| Nostr places (NIP-52 / NIP-GC) | `nostrPlacesService.ts`, `nostrPlacesPublisher.ts`, `nostrPlacesStorage.ts`, `nostrPlacesNip52.ts`, `republishPiggyService.ts`
+| Nostr places (NIP-52 / NIP-GC) | `nostrPlacesService.ts`, `nostrPlacesPublisher.ts`, `nostrPlacesStorage.ts`, `republishPiggyService.ts`
 | Wallet — Lightning | `nwcService.ts`, `nwcEncryption.ts`, `nwcRelayHealth.ts`, `nwcErrors.ts`, `lnurlService.ts`, `lnurlWithdrawService.ts`
 | Wallet — on-chain | `onchainService.ts` (BDK), `boltzService.ts`, `swapRecoveryService.ts`, `walletStorageService.ts`
 | Zaps / caching | `bolt11SettlementCache.ts`, `zapCounterpartyStorage.ts`, `zapSenderProfileStorage.ts`, `findLogZapsService.ts`, `fiatService.ts`
 | Location / geofence | `locationService.ts`, `geofenceService.ts`, `btcMapService.ts`, `liveLocationService.ts`, `nearbyRadiusService.ts`
-| Notifications | `notificationService.ts`, `cacheNotifySubscription.ts`
-| Media | `imageUploadService.ts`, `blossomService.ts`, `giphyService.ts`, `linkPreviewFetcher.ts`
+| Notifications | `notificationService.ts`, `cacheNotifySubscription.ts`, `watcherPush*.ts` (opt-in alerts from Lightning Piggy's notification watcher). See `architecture/notifications.adoc`.
+| Market | `marketListingsService.ts` (bounded, signature-checked listing snapshot by source: preferred sellers or friends), `marketSellerService.ts` + `sellerEventStore.ts` (My shop: quorum reads of your own shop, zones and listings; publishes Gamma Markets events and NIP-09 deletes), `marketShippingService.ts`, `productFeedbackQueries.ts` (reviews and NIP-22 comments). Pure logic in `src/utils/market*.ts` (event build/parse, shipping quotes, the Markdown subset). See `SOLUTION_DESIGN.adoc` → "Market".
+| Profiles & embeds | `authorFeedService.ts` (a person's kind 1 / 20 / 21 / 22 feed, paged with bounded `until` queries), `nostrEmbedCache.ts` (batched, cached, signature-checked NIP-27 embeds), with pure helpers `src/utils/nip27.ts`, `nip10.ts`, `noteMedia.ts`. Rendered by `components/nostr/NostrContent`.
+| Media | `imageUploadService.ts`, `blossomService.ts`, `giphyService.ts`, `linkPreviewFetcher.ts` (hop-validated redirects); `src/utils/publicUrl.ts` (the one "safe to contact automatically" check) and `mediaTrust.ts` (tap-to-load for people you don't follow). See `SECURITY.adoc`.
 | NFC | `nfcService.ts`, `nfcReaderMode.ts`, `nfcNostrWrite.ts`, `ntagLock.ts`
 | Groups | `groupMessagesStorageService.ts`, `groupRoutingRegistry.ts`, `groupsStorageService.ts`
 | Persistence plumbing | `localDb.ts`, `localDbKey.ts`, `perAccountStorage.ts`, `migrateToPerAccountStorage.ts`, `identitiesStore.ts`
@@ -195,18 +205,24 @@ A large, mostly-stateless service layer grouped by domain. Selected modules:
 `src/navigation/AppNavigator.tsx` nests:
 
 * A **root stack** (`Main`, `Conversation`, `Groups`, `GroupConversation`,
-  `ContactProfile`, `UnsupportedEntity`).
-* An **account drawer** wrapping the tabs, holding the settings screens
-  (`Profile`, `Wallets`, `Nostr`, `On-Chain`, `Display`, `Appearance`,
-  `Nearby`, `Security`, `About`).
+  `ContactProfile`, `ProductDetail`, `UnsupportedEntity`, `Notifications`).
+  `ProductDetail` reuses the Market product page so Back returns to the
+  profile it was opened from.
+* An **account drawer** wrapping the tabs, holding the settings screens:
+  Profile, Manage wallets, Nostr, Messages (with Invitation keys), On-chain,
+  Display & language (with Currency), Notifications, Security (with Back up
+  your key), Advanced and About.
 * A **four-tab bottom bar** (test IDs in parentheses):
   ** *Wallets* (`tab-wallets`) — wallet: balance, send, receive, transfer.
   ** *Messages* (`tab-messages`) — DM conversation list.
   ** *Explore* (`tab-explore`) — its own stack (below).
   ** *Friends* (`tab-friends`) — Nostr contacts + phone contacts.
 * The **Explore stack**: `ExploreHome`, `Lessons` / `CourseDetail` /
-  `MissionDetail`, `Map`, `Places` / `PlaceDetail`, `Hunt` / `HuntCreate` /
-  `HuntFound` / `HuntPiggyDetail` / `MyPiglets`, `Events` / `EventDetail`.
+  `MissionDetail`, `Map`, `Places` / `PlaceDetail`, `Market` /
+  `MarketProductDetail` / `MarketMyShop` / `MarketShopSettings` /
+  `MarketListingEditor`, `Hunt` / `HuntCreate` / `HuntFound` /
+  `HuntPiggyDetail` / `MyPiglets` / `HuntLeaderboard`, `Events` /
+  `EventDetail`.
 
 Interactive elements carry `accessibilityLabel` / `testID` props so Maestro
 flows never rely on coordinates (see `CLAUDE.md` → Testing).
@@ -223,21 +239,34 @@ full wire formats.
 | Kind | Meaning | Where
 
 | 0 | Profile metadata | `nostrService.ts` (fast-path fetch, per-account cache)
+| 1 | Text note (read) | profile Posts tab (`authorFeedService.ts`); NIP-10 reply detection in `utils/nip10.ts`
 | 3 | Contact list (follows) | `nostrService.ts`, `NostrContext.tsx`
 | 4 | NIP-04 legacy encrypted DM | inbox fetch stores `wire_kind=4`
+| 5 | NIP-09 deletion | your own listings, shipping options, comments, reviews and reaction retractions; others' deletions are honoured when reading (`utils/nip09.ts`)
+| 7 | NIP-25 reaction | DM reactions (`utils/reactions.ts`, `nostrReactions.ts`)
 | 13 | NIP-59 seal (inner layer of a gift wrap) | `nostrService.ts` wrap builders
 | 14 | NIP-17 chat rumor (1:1 + group) | `nostrService.ts` (`buildChatRumor` / `buildGroupMessageRumor`)
+| 16 / 17 | Gamma Markets order messages (order, payment request, status, shipping) / payment receipt | `utils/marketOrder.ts`, `utils/orderEvents.ts`
+| 20 / 21 / 22 | NIP-68 picture, NIP-71 video (read) | profile Media tab (`utils/noteMedia.ts`)
 | 444 | Marmot Welcome (group invite), gift-wrapped | `marmotWelcomeRouter.ts`, `marmotSession.ts`
 | 445 | Marmot group event (MLS commits + messages) | `marmotSession.ts` (via `marmot-ts`)
 | 446 | Marmot MIP-05 push trigger, gift-wrapped to a notification server | `marmotPushNotifier.ts`
 | 1059 | NIP-59 gift wrap (outer envelope) | inbox fetch, wrap builders, decrypt-once gate
-| 1111 | NIP-22 comment | Hunt "Piglet" comments
+| 1068 / 1018 | NIP-88 poll / vote | chat polls (`utils/nip88Poll.ts`)
+| 1111 | NIP-22 comment | Market product comments (`utils/productComments.ts`), Hunt "Piglet" comments
 | 7516 | NIP-GC found-log | recorded when a Piglet is claimed
 | 9734 | NIP-57 zap request | `nostrService.ts` (`buildZapRequest`)
 | 9735 | NIP-57 zap receipt | `nostrService.ts` (`fetchZapReceipts`, `parseZapReceipt`)
 | 10002 | NIP-65 relay list | `nostrService.ts` (`fetchRelayList`)
+| 10050 | NIP-17 DM inbox relays; also how senders find a push server's relays | `nostrRelayLists.ts`; push-server lookup in `marmotNetwork.ts` (`createPushTransport`)
+| 10063 | Blossom server list (BUD-03) | `useBlossomServerList.ts`
+| 30018 | NIP-15 product (legacy, read) | `utils/marketListings.ts`
+| 30023 | NIP-23 article (read) | embedded article card (`components/nostr/EmbeddedEventCard.tsx`)
+| 30402 | NIP-99 / Gamma Markets product | Market reader, My shop (`utils/marketSellerEvents.ts`)
+| 30405 / 30406 | Gamma Markets shop collection / shipping option | My shop, product-page shipping (`marketSellerService.ts`, `marketShippingService.ts`)
 | 30443 | Marmot key package | `marmotSession.ts` (`ensureKeyPackage`)
 | 20069 | Ephemeral live-location coordinate (in-DM sharing) | live-location feature
+| 31555 | Gamma Markets product review | `utils/productReviews.ts`
 | 31923 | NIP-52 calendar event (meetups, read-only) | Explore → Events
 | 37516 | NIP-GC geo-cache listing ("Piglet") | `nostrPlacesService.ts`
 |===
@@ -246,8 +275,6 @@ Inside Marmot groups the app events are unsigned rumors: kind 9 (text, and
 MIP-04 photos), 7 / 5 (reactions), 447–449 (MIP-05 push-token gossip), and
 otherwise the same kinds NIP-17 carries. See `PROTOCOLS.adoc` → "Marmot".
 
-The Gamma Markets marketplace kinds (30402 / 16 / 17) are on the roadmap but are
-not wired into the shipped code as of this writing — treat them as planned.
 
 === Signers
 
@@ -257,7 +284,7 @@ not wired into the shipped code as of this writing — treat them as planned.
 
 | **nsec (local key)** | Shipped. Sign/encrypt in-process via `nostr-tools` + `@noble/*`. Key held in `expo-secure-store`.
 | **Amber (NIP-55, Android)** | Shipped. IPC to the Amber app via the `amber-signer` native module — the key never enters this app's process.
-| **NIP-46 remote signer / Nostr Connect (e.g. Clave)** | Planned, not implemented.
+| **NIP-46 remote signer / Nostr Connect** | Shipped. Clave (iOS), Aegis, nsec.app over relays (`nostrConnectService.ts`); see `nip46-clave.adoc`.
 |===
 
 == Wallets
@@ -336,9 +363,9 @@ location-picker sheet, which renders through `LibreMiniMap` — and no
 . When the app is closed on Android, a periodic `expo-background-task`
   (WorkManager, ~15-min floor) runs `runBackgroundSync`, which detects new
   inbound wraps and raises a generic notification *without decrypting them*
-  (detect-and-ping). A persistent foreground service for realtime delivery is
-  scaffolded (permissions only) but not yet implemented — see
-  `architecture/notifications.adoc`.
+  (detect-and-ping). With the opt-in Android foreground service
+  (`background-dm-service`, Settings → Notifications) a relay watch stays alive
+  for near-realtime alerts — see `architecture/notifications.adoc`.
 . *Marmot thread (Alpha):* the same rumor goes to `marmotSend.ts` instead and
   is sent inside the peer's MLS DM group (kind 445; text becomes kind 9),
   creating the group and gift-wrapping a kind-444 Welcome on first use.

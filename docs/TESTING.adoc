@@ -60,6 +60,21 @@ The first PR after this infrastructure merges may show a 0% main baseline if `co
 
 To tighten or loosen the gate, edit `NOISE_FLOOR` in the workflow file.
 
+==== Translations
+
+`src/i18n/locales/catalogues.test.ts` runs in the normal Jest suite (so the CI and Coverage workflows gate every PR) and checks **every** locale in `SUPPORTED_LOCALES`, so a language added later is covered automatically. Failures list the offending key paths. It fails on:
+
+. keys missing compared with `en.json`;
+. extra or stale keys (which `tsc` doesn't catch); only extra CLDR forms inside plural objects are allowed;
+. empty strings;
+. `{{x}}` / `%{x}` placeholders that don't exactly match English;
+. plural forms the locale's CLDR rule needs but the catalogue lacks (e.g. `few` / `many` for pl and uk), from `requiredPluralCategories` in `src/i18n/plurals.ts`;
+. copied English: more than 5 % of non-trivial strings identical to English (brands, units, URLs, placeholder-only strings and a short loanword allowlist don't count).
+
+Key parity can't catch an English string that was reworded under the same key. Run `npm run i18n:sync -- --check` before pushing: it exits 1 while any locale has missing, stale or reworded-but-untranslated strings. `src/i18n/plurals.test.ts` cross-checks the plural rules against Node's `Intl.PluralRules` for counts 0–300.
+
+For layout, switch to **Pseudo (testing)** (`en-XA`, Settings → Display & language, dev and preview builds only): every string is accented, about 40 % longer and bracketed, so a missing `]` means clipped text and plain English means a string that never went through `t()`. `.maestro/profile/flow-141-display-language-screens.yaml` switches the active account to any locale (`LOCALE=de|…|zh-Hans|system`) and captures the language picker, Wallets and Messages for overflow and glyph checks.
+
 ==== iOS Native Build Gate (CI)
 
 `modules/nostr-native` has two macOS jobs in `.github/workflows/ci.yml`:
@@ -175,6 +190,15 @@ folder deep by feature area — lives in `.maestro/README.adoc`):
 | `authentication/flow-005-login-perf.yaml`
 | Login to Friends tab responsiveness timing
 
+| `ui/flow-137-wallets-tab.yaml`
+| The first tab is labelled Wallets (`tab-wallets`, "Wallets tab") and opens the wallet screen
+
+| `profile/flow-138-profile-tabs.yaml`
+| Read-only: a seller's public profile through a `nostr:` link — Posts with the Posts / Posts & replies switch, Media, Shop, and a bio mention chip
+
+| `profile/flow-141-display-language-screens.yaml`
+| Switch the account language and capture the picker, Wallets and Messages (see "Translations")
+
 |===
 
 ==== Marmot (MLS) E2E: flows 124–130 + the peer bot
@@ -232,6 +256,8 @@ and Middle, Maestro on `PATH`, ImageMagick (`convert`, for flow 130) and
 
 Run flows 127 and 130 after 125 (they reuse its DM). The flows only ever
 message Piggy fixtures.
+
+// TODO(#1333): describe the scripted Marmot interop suite with White Noise once it merges.
 
 ==== Signer matrix E2E: flows 131–135 (nsec / Amber / NIP-46)
 

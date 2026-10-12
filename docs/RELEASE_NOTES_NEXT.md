@@ -14,27 +14,33 @@ See docs/DEPLOYMENT.adoc → "TestFlight 'What to Test' automation".
 
 ### New
 
-- **Devices that can get new chats.** Account → Messages → Devices that can get new chats lists each device people can start a private chat with (this phone, other Lightning Piggy devices, White Noise), with when each last updated. Refresh this phone, stop invites to a device you no longer use, or remove every device that hasn't updated for 30 days.
-- **Notifications screen.** A bell on Home shows unread alerts; tap it to see the last 30 days of messages, payments, zaps and Piglet finds, open any of them, or mark all as read.
-- **Clearer relay settings.** Account → Nostr now leads with Your relays and DM inbox relays, each showing a live connection dot; app defaults and geo-cache relays sit under Advanced.
-- **Backup image servers.** Account → Nostr → Image servers (Blossom): add backup servers and pick a primary. Uploads switch to a backup if the primary is down and are copied to the others. Publish shares the list with other Nostr apps.
-- **Marmot messaging (Alpha)** — end-to-end encrypted MLS chats that work with White Noise. Pick _Marmot_ when starting a chat or creating a group; every message type works between Lightning Piggy users, including photos, voice notes, polls and invoices. With White Noise, photos, GIFs, polls and emoji reactions show up on both sides (photos in chats started from this version on); voice notes don't play there yet, and invoices and locations appear as plain text. If someone can't receive Marmot yet — for example on the classic White Noise app — your message is sent with NIP-17 instead and the chat switches over. Invites from people you follow (e.g. on White Noise) are accepted automatically and open as Marmot chats. Friends on White Noise get a notification on their phone when you message them over Marmot. Still being tested, so use NIP-17 for anything important.
-- **See someone's devices in Marmot chats.** A Marmot one-to-one shows _Secure chat · 2 devices_ under the name when the other person is on several devices; tap it to see each device, which app it is, when its invitation key was made and when it joined. In groups, tap _N members_ and then _N devices_ under a person. Tapping a message's time shows which device sent it (where that can be told) and how many devices can read it. Dev and preview builds also draw a grey "joined on N devices" line in the chat (Advanced → Developer options → _Show device changes in chats_).
-- **Marmot push notifications (opt-in).** Account → Security → Push notifications → _Marmot messages_ lets Lightning Piggy and White Noise users wake your phone when they message you in a Marmot chat, even with the app closed. Off by default, and set per account: other accounts on the same phone never inherit it, and you're warned if one already uses push, because people who chat with both could tell they share a phone. Every push just says "New message" — Apple/Google never see what it says, and tapping it opens Messages. Needs Google Play services on Android. With Amber or a remote signer, approve one signature per chat.
-- **More push notifications (opt-in).** With push on, Account → Security → _More push notifications_ adds separate switches for Messages, Zaps, Mentions and Payments, so Lightning Piggy can tell you about them even when the app is closed. Each is off by default. Alerts are generic ("New message", "Zap received"…). Lightning Piggy's notification server learns your public key (and, for Payments, your wallet connections' keys) and when something arrives; it can't read your messages or wallet activity. It can't tell a payment you received from one you sent. Your relays can see our server watching your key. With Amber or a remote signer, approve one signature when you change these, and about once a week to keep them active.
+- **Sell your own items.** Market → **My shop** (store icon): set up shipping options, then list items with photos, price, stock, categories and a Markdown description. Edit, preview or delete them any time.
+- **Profile tabs.** Profiles have **Posts**, **Media** and **Shop** tabs and a _Posts | Posts & replies_ switch. Mentions and shared notes show as tappable names and cards.
+- **Six new languages:** Deutsch, Magyar, Polski, हिन्दी, मराठी and 中文（简体）. Pick one per account in Account → Display & language.
+- **Marmot messaging (Alpha)** — end-to-end encrypted chats. Pick _Marmot_ when starting a chat or group. Lightning Piggy supports photos, voice notes, GIFs and polls in its Marmot chats, reactions in 1:1s, and editing or deleting your own messages. Group invites select eligible devices (up to 10 per person); a new 1:1 selects one White Noise device when present. White Noise support depends on its version and protocol profile; GIF and poll payloads do not establish cross-client support. If someone can't receive Marmot yet, you're asked before it goes over NIP-17. Still being tested, so use NIP-17 for anything important.
+- **Marmot group admins.** See who the admins are and make others admins; only admins can rename a group or change its members.
+- **See someone's devices in Marmot chats.** A Marmot one-to-one shows _Secure chat · 2 devices_ under the name when the other person is on several devices; tap it to see each device and its app. Message info shows which device sent it.
+- **Devices that can get new chats.** Account → Messages lists each device people can start a private chat with. Refresh this phone, or remove devices you no longer use.
+- **Marmot push notifications (opt-in).** Account → Security → Push notifications → _Marmot messages_ wakes your phone for Marmot chats, even with the app closed. Off by default and per account; every push just says "New message". Needs Google Play services on Android.
+- **More push notifications (opt-in).** With push on, separate switches for Messages, Zaps, Mentions and Payments. Alerts are generic and never show what was sent.
+- **@mentions in group chats.** Type _@_ to mention a member. Mentions of you get an @ badge and a button that jumps to them. Chats reopen where you left off, at an _Unread messages_ divider.
+- **Back up your key before signing out.** Signing out of a local-key account now warns you and offers a backup.
 
 ### Improved
 
-- **Message alerts open that conversation**, even ones that arrived while the app couldn't read them yet, instead of just the Messages list.
-- **Opening a chat clears its alerts**, so the dot on the app icon goes away.
-- **Group chats show their NIP-17 tag**, like one-to-one chats.
-- **Copy a message's text and react with more emoji.** Long-press a text message in a one-to-one chat for _Copy text_, or tap _+_ beside the quick reactions for more emoji.
+- **Wallets tab.** The Home tab is now **Wallets**, and the drawer's wallet settings are **Manage wallets**. Swiping between wallets shows the right transactions instantly.
+- **Tidier settings.** Display and language are combined; Messages, Notifications and Advanced have their own screens. Language, currency and safety settings are per account.
+- **Market:** edit or delete your own comments and reviews, pull to refresh product pages, and friends' listings load faster.
+- **Safer links in chats and profiles.** Previews, images and voice notes from people you don't follow wait for a tap.
+- **Unreachable relays are skipped**, so a dead relay no longer slows the app down.
+- **Copy a message's text and react with more emoji.** Long-press a text message in a one-to-one chat.
 
 ### Fixed
 
-- **No default swap server any more.** Boltz's public server has shut down, so sending to or receiving from a Bitcoin address through a Lightning wallet now needs your own swap server: Account → On-chain → _Swap server URL_ → _Check and save_. Until one is set, Send and Receive say so. Sends straight from an on-chain wallet don't need one.
-- **On-chain Send explains why it's disabled.** It stays off until fees are known, says when your balance can't cover the amount plus fees (and turns back on once the wallet syncs new funds), and offers _Retry fees_ if loading them failed. Swap Receive tries the fees again when you tap _Generate QR_.
-- **Wallet is visible but disabled in group chat attachments.** Wallet connections can only be shared in one-to-one chats.
-
-- **Relay dots show the real connection status** instead of always red.
-- **Signer declines stop the inbox refresh.** When a Nostr Connect signer refuses a request, the app now stops checking messages once instead of asking the signer again for every message.
+- **No default swap server any more.** Swaps through a Lightning wallet need your own: Account → On-chain → _Swap server URL_.
+- **On-chain Send explains why it's disabled** (fees not loaded, or balance too low) and offers _Retry fees_.
+- **White Noise stays in Marmot groups** after a rename or admin change.
+- **No more phantom or nameless "New message" alerts.**
+- **A message, listing or invite that no relay accepted is no longer shown as sent.**
+- **Corrupted invoices are rejected** before paying, and sharing your location asks first.
+- **Signer declines stop the inbox refresh** instead of asking again for every message.

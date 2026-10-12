@@ -9,11 +9,11 @@
 A mobile Bitcoin Lightning wallet for smart savers and their families, built with Expo/React Native, connecting via Nostr Wallet Connect (NWC) with Nostr social features.
 
 <p align="center">
+  <img alt="Wallets tab: a wallet card and its transactions" src="docs/images/app-wallets-tab.webp" width="19%">
   <img alt="Explore" src="docs/images/app-hero-02-explore.webp" width="19%">
-  <img alt="Map" src="docs/images/app-hero-03-map.webp" width="19%">
-  <img alt="Wallets" src="docs/images/app-hero-01-wallet.webp" width="19%">
-  <img alt="Piglet detail" src="docs/images/app-hero-05-piglet.webp" width="19%">
-  <img alt="Geo-caches" src="docs/images/app-hero-04-hunt.webp" width="19%">
+  <img alt="Little Piggy's profile: Posts, Media and Shop tabs with the Posts &amp; replies switch" src="docs/images/app-profile-posts-replies.webp" width="19%">
+  <img alt="A profile's Shop tab with Market listings" src="docs/images/app-profile-shop-tab.webp" width="19%">
+  <img alt="A Marmot group chat between the Piggies" src="docs/images/app-marmot-group-chat.webp" width="19%">
 </p>
 
 <p align="center">
@@ -22,8 +22,11 @@ A mobile Bitcoin Lightning wallet for smart savers and their families, built wit
 
 ## Features
 
+**Wallets**
+
 - Connect any Lightning wallet via NWC (Nostr Wallet Connect)
 - On-chain Bitcoin wallets (watch-only via xpub, or hot wallets via mnemonic)
+- **Wallets tab**: swipe between wallet cards, and each wallet's transactions appear instantly while fresh data loads in the background. Add, reorder, hide or remove wallets under Account → **Manage wallets**
 - Transfer funds between wallets (LN-to-LN, LN-to-on-chain, on-chain-to-LN, on-chain-to-on-chain)
 - Send payments by scanning QR codes or pasting invoices
 - Send to lightning addresses (user@domain) via LNURL-pay
@@ -31,15 +34,39 @@ A mobile Bitcoin Lightning wallet for smart savers and their families, built wit
 - NIP-57 zaps to Nostr contacts
 - Receive payments with QR code generation (optional amount for BIP-21)
 - Real-time balance display with fiat conversion
-- Transaction history
-- Nostr identity login: local `nsec`, Amber (NIP-55, Android), or a remote signer over NIP-46 / Nostr Connect (Clave on iOS, Aegis, nsec.app)
-- Private messaging: NIP-17 1:1 and group chats (photos, voice notes, polls, invoices, zaps, live location), plus **Marmot (MLS over Nostr, Alpha)** end-to-end encrypted 1:1 and group chats that interoperate with [White Noise](https://www.whitenoise.chat)
+
+**Nostr identity and messaging**
+
+- Nostr identity login: local `nsec`, Amber (NIP-55, Android), or a remote signer over NIP-46 / Nostr Connect (Clave on iOS, Aegis, nsec.app). Several accounts on one phone, each with its own language, currency and safety settings
+- Signing out of a local-key account warns first and offers a key backup
+- Private messaging: NIP-17 1:1 and group chats (photos, voice notes, polls, invoices, zaps, live location), plus **Marmot (MLS over Nostr, Alpha)** end-to-end encrypted 1:1 and group chats:
+  - edit and delete your own messages, react with emoji in 1:1s, and send photos and voice notes as encrypted media (MIP-04);
+  - group admins: see and manage them; only admins can rename a group or change its members;
+  - group invites select fresh compatible devices (up to 10 per person); a new 1:1 uses the newest selected White Noise package when present, and you can manage your own invitation keys under Account → Messages;
+  - if someone can't receive Marmot yet, the app asks before falling back to NIP-17;
+  - see each person's devices: a _Secure chat · N devices_ by-line in 1:1s, per-person device lists (with the app each runs) in the members sheet, and "Sent from" in message info.
+    <!-- TODO(#1311): live location over Marmot (WhatsApp-style), once it merges. -->
+- **@mentions in group chats** (NIP-17 and Marmot): type `@` to pick a member (sent as a `nostr:npub` reference, plus a `p` tag in Marmot); mentions of you show as tappable `@Name` chips (White Noise's `@npub` form too), with an @ badge on the chat row and an @ button that jumps to the oldest unread mention
+- **Remembered read position**: 1:1 and group chats reopen at an "Unread messages" divider, for every protocol
+- **Push notifications (opt-in, per account)**: Marmot messages via MIP-05, plus separate switches for messages, zaps, mentions and payments through Lightning Piggy's notification server. Alerts are generic ("New message", "Zap received") and never show content, and a **Notifications** screen (the bell on Wallets) lists the last 30 days
+- **Profiles**: **Posts**, **Media** and **Shop** tabs, a **Posts | Posts & replies** switch that shows what each reply answers, and NIP-27 references rendered as tappable `@name` chips and embedded notes, articles and products
 - Friends tab with Nostr contacts and phone contacts
 - Follow/unfollow Nostr contacts (kind 3 event publishing)
 - Add friends by pasting npub or scanning QR code
 - Contact profile cards with deep linking to Nostr apps
 - QR code sharing for npub and Lightning address
 - Secure credential storage (expo-secure-store)
+- **Link safety**: chat link previews, images and plain voice notes auto-load only for your own messages or people you follow, after URL address checks; other senders need a tap. Encrypted voice notes load on play. These checks reject private, local and reserved address forms, but cannot prevent DNS rebinding; preview-page redirects are checked at each hop, while media redirects are followed natively.
+- Relay health: unreachable relays are parked and skipped automatically, so one dead relay can't slow the app down. A message, listing or invite is only shown as sent once a relay has accepted it
+
+**Market**
+
+- **Buy and sell with sats** (Explore → Market): browse Lightning Piggy's preferred sellers or your friends' listings, filter by country, currency or merchant, read and write reviews and comments (and edit or delete your own), and check out in-app.
+- **My shop**: set up a shop with shipping options (name, cost and the countries each ships to), then list items with photos, price, stock, categories, per-item shipping costs and a Markdown description. Edit, preview or delete each listing. Listings are standard Gamma Markets events (NIP-99), so other Nostr shops can read them, and product pages render any seller's Markdown and shipping prices.
+<!-- TODO(#1337): NIP-22 comment replies on product pages, once it merges. -->
+
+**Explore**
+
 - **Explore tab**: discover Bitcoin merchants nearby (BTC Map / OpenStreetMap),
   opt-in geofence alerts when you walk past one (#467), hunt for hidden
   LNURL-withdraw "Piggies" stashed on NFC tags or QR codes (#468), and find
@@ -60,6 +87,12 @@ A mobile Bitcoin Lightning wallet for smart savers and their families, built wit
   for the BTC Map + Nostr cache architecture, bbox-driven list filtering,
   and offline cold-start guarantees.
 
+## Languages
+
+Lightning Piggy speaks 9 languages: English, Deutsch (German), Español (Spanish), Magyar (Hungarian), Polski (Polish), Українська (Ukrainian), हिन्दी (Hindi), मराठी (Marathi) and 中文（简体）(Chinese, Simplified). Pick one per account under Account → Display & language, or follow the phone's language. Plurals follow each language's CLDR rules, and numbers and dates use the app language rather than the phone's.
+
+Translators and contributors: English (`src/i18n/locales/en.json`) is the source of truth, and every new or changed string is translated into all locales in the same PR. `npm run i18n:sync` lists what's missing or out of date and can draft translations; [docs/i18n/GLOSSARY.md](docs/i18n/GLOSSARY.md) has the terminology and tone rules. Dev and preview builds also offer a **Pseudo (testing)** language (`en-XA`) for spotting clipped or untranslated text.
+
 ## Standards
 
 Lightning Piggy Mobile implements the following open standards. See [docs/STANDARDS.adoc](docs/STANDARDS.adoc) for usage details and source references.
@@ -78,36 +111,64 @@ Lightning Piggy Mobile implements the following open standards. See [docs/STANDA
 
 ### Nostr Implementation Possibilities (NIPs)
 
-| Standard                                                                                                                                                    | Name                                                                                                                                                              |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [NIP-01](https://github.com/nostr-protocol/nips/blob/master/01.md)                                                                                          | Basic Protocol (relays, events, subscriptions)                                                                                                                    |
-| [NIP-04](https://github.com/nostr-protocol/nips/blob/master/04.md)                                                                                          | Encrypted Direct Messages (legacy — inbound read only; outbound migrated to NIP-17 in #334)                                                                       |
-| [NIP-05](https://github.com/nostr-protocol/nips/blob/master/05.md)                                                                                          | DNS Identity Verification                                                                                                                                         |
-| [NIP-14](https://github.com/nostr-protocol/nips/blob/master/14.md)                                                                                          | Subject Tag (used as group-chat name)                                                                                                                             |
-| [NIP-17](https://github.com/nostr-protocol/nips/blob/master/17.md)                                                                                          | Private Direct Messages — canonical 1:1 and multi-recipient group chat (sealed via NIP-44 + gift-wrapped per recipient)                                           |
-| [NIP-19](https://github.com/nostr-protocol/nips/blob/master/19.md)                                                                                          | Bech32-encoded Entities (`npub`, `nsec`)                                                                                                                          |
-| [NIP-20](https://github.com/nostr-protocol/nips/blob/master/20.md)                                                                                          | Command Results (OK messages)                                                                                                                                     |
-| [NIP-21](https://github.com/nostr-protocol/nips/blob/master/21.md)                                                                                          | `nostr:` URI Scheme                                                                                                                                               |
-| [NIP-22](https://github.com/nostr-protocol/nips/blob/master/22.md)                                                                                          | Comments (kind 1111 — used by NIP-GC for DNF / maintenance / archived cache statuses)                                                                             |
-| [NIP-32](https://github.com/nostr-protocol/nips/blob/master/32.md)                                                                                          | Labels (`L` namespace + `l` value tags — used to mark Hunt caches as Lightning-payout via the `com.lightningpiggy.app / payout-lnurl-w` label)                    |
-| [NIP-40](https://github.com/nostr-protocol/nips/blob/master/40.md)                                                                                          | Expiration Timestamp (auto-retire Hunt cache listings)                                                                                                            |
-| [NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md)                                                                                          | Encrypted Payloads v2 (used by NIP-17 sealing)                                                                                                                    |
-| [NIP-46](https://github.com/nostr-protocol/nips/blob/master/46.md)                                                                                          | Nostr Connect — remote signer over relays (Clave, Aegis, nsec.app); see docs/nip46-clave.adoc                                                                     |
-| [NIP-47](https://github.com/nostr-protocol/nips/blob/master/47.md)                                                                                          | Nostr Wallet Connect (NWC)                                                                                                                                        |
-| [NIP-52](https://github.com/nostr-protocol/nips/blob/master/52.md)                                                                                          | Calendar Events (kind 31923 time-based — read-only consumer for the Events sub-screen)                                                                            |
-| [NIP-55](https://github.com/nostr-protocol/nips/blob/master/55.md)                                                                                          | Android Signer (Amber)                                                                                                                                            |
-| [NIP-57](https://github.com/nostr-protocol/nips/blob/master/57.md)                                                                                          | Lightning Zaps                                                                                                                                                    |
-| [NIP-59](https://github.com/nostr-protocol/nips/blob/master/59.md)                                                                                          | Gift Wrap (used by NIP-17 to mask sender + metadata)                                                                                                              |
-| [NIP-65](https://github.com/nostr-protocol/nips/blob/master/65.md)                                                                                          | Relay List Metadata                                                                                                                                               |
-| [NIP-94](https://github.com/nostr-protocol/nips/blob/master/94.md)                                                                                          | File Metadata                                                                                                                                                     |
-| [NIP-99](https://github.com/nostr-protocol/nips/blob/master/99.md)                                                                                          | Classified Listings via the Gamma Markets spec: Market reader + sell your own (30402 products, 30405 shop, 30406 shipping options)                                |
-| NIP-GC ([draft, on Nostr](https://nostrhub.io/naddr1qvzqqqrcvypzppscgyy746fhmrt0nq955z6xmf80pkvrat0yq0hpknqtd00z8z68qqgkwet0vdskx6rfdenj6etkv4h8guc6gs5y5)) | Geocaching Events (kinds 37516 / 7516 / 1111 / 7517 — used by the Hunt feature, with an `com.lightningpiggy.app` NIP-32 label marker for Lightning-payout caches) |
+| Standard                                                                                                                                                    | Name                                                                                                                                                                                                                                             |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [NIP-01](https://github.com/nostr-protocol/nips/blob/master/01.md)                                                                                          | Basic Protocol (relays, events, subscriptions)                                                                                                                                                                                                   |
+| [NIP-04](https://github.com/nostr-protocol/nips/blob/master/04.md)                                                                                          | Encrypted Direct Messages (legacy — inbound read only; outbound migrated to NIP-17 in #334)                                                                                                                                                      |
+| [NIP-05](https://github.com/nostr-protocol/nips/blob/master/05.md)                                                                                          | DNS Identity Verification                                                                                                                                                                                                                        |
+| [NIP-09](https://github.com/nostr-protocol/nips/blob/master/09.md)                                                                                          | Event Deletion (kind 5) — deleting your own Market listings, shipping options, comments and reviews, retracting DM reactions; honours sellers' deletions when reading                                                                            |
+| [NIP-10](https://github.com/nostr-protocol/nips/blob/master/10.md)                                                                                          | Replies (`e` tag markers) — tells posts from replies on the profile Posts tab                                                                                                                                                                    |
+| [NIP-14](https://github.com/nostr-protocol/nips/blob/master/14.md)                                                                                          | Subject Tag (used as group-chat name)                                                                                                                                                                                                            |
+| [NIP-15](https://github.com/nostr-protocol/nips/blob/master/15.md)                                                                                          | Nostr Marketplace — legacy kind-30018 products are still read by the Market                                                                                                                                                                      |
+| [NIP-17](https://github.com/nostr-protocol/nips/blob/master/17.md)                                                                                          | Private Direct Messages — canonical 1:1 and multi-recipient group chat (sealed via NIP-44 + gift-wrapped per recipient)                                                                                                                          |
+| [NIP-19](https://github.com/nostr-protocol/nips/blob/master/19.md)                                                                                          | Bech32-encoded Entities (`npub`, `nsec`, `nprofile`, `note`, `nevent`, `naddr`)                                                                                                                                                                  |
+| [NIP-20](https://github.com/nostr-protocol/nips/blob/master/20.md)                                                                                          | Command Results (OK messages)                                                                                                                                                                                                                    |
+| [NIP-21](https://github.com/nostr-protocol/nips/blob/master/21.md)                                                                                          | `nostr:` URI Scheme                                                                                                                                                                                                                              |
+| [NIP-22](https://github.com/nostr-protocol/nips/blob/master/22.md)                                                                                          | Comments (kind 1111) — Market product comments, and NIP-GC DNF / maintenance / archived cache statuses                                                                                                                                           |
+| [NIP-23](https://github.com/nostr-protocol/nips/blob/master/23.md)                                                                                          | Long-form Content (kind 30023) — read only, shown as an article card when a post references one                                                                                                                                                  |
+| [NIP-25](https://github.com/nostr-protocol/nips/blob/master/25.md)                                                                                          | Reactions (kind 7) — emoji reactions in chats                                                                                                                                                                                                    |
+| [NIP-27](https://github.com/nostr-protocol/nips/blob/master/27.md)                                                                                          | Text Note References — `nostr:` mentions render as tappable `@name` chips, and referenced notes, articles and products as embedded cards (profiles)                                                                                              |
+| [NIP-32](https://github.com/nostr-protocol/nips/blob/master/32.md)                                                                                          | Labels (`L` namespace + `l` value tags — used to mark Hunt caches as Lightning-payout via the `com.lightningpiggy.app / payout-lnurl-w` label)                                                                                                   |
+| [NIP-40](https://github.com/nostr-protocol/nips/blob/master/40.md)                                                                                          | Expiration Timestamp (auto-retire Hunt cache listings)                                                                                                                                                                                           |
+| [NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md)                                                                                          | Encrypted Payloads v2 (used by NIP-17 sealing)                                                                                                                                                                                                   |
+| [NIP-46](https://github.com/nostr-protocol/nips/blob/master/46.md)                                                                                          | Nostr Connect — remote signer over relays (Clave, Aegis, nsec.app); see docs/nip46-clave.adoc                                                                                                                                                    |
+| [NIP-47](https://github.com/nostr-protocol/nips/blob/master/47.md)                                                                                          | Nostr Wallet Connect (NWC)                                                                                                                                                                                                                       |
+| [NIP-52](https://github.com/nostr-protocol/nips/blob/master/52.md)                                                                                          | Calendar Events (kind 31923 time-based — read-only consumer for the Events sub-screen)                                                                                                                                                           |
+| [NIP-55](https://github.com/nostr-protocol/nips/blob/master/55.md)                                                                                          | Android Signer (Amber)                                                                                                                                                                                                                           |
+| [NIP-57](https://github.com/nostr-protocol/nips/blob/master/57.md)                                                                                          | Lightning Zaps                                                                                                                                                                                                                                   |
+| [NIP-59](https://github.com/nostr-protocol/nips/blob/master/59.md)                                                                                          | Gift Wrap (used by NIP-17 to mask sender + metadata)                                                                                                                                                                                             |
+| [NIP-65](https://github.com/nostr-protocol/nips/blob/master/65.md)                                                                                          | Relay List Metadata                                                                                                                                                                                                                              |
+| [NIP-68](https://github.com/nostr-protocol/nips/blob/master/68.md) / [NIP-71](https://github.com/nostr-protocol/nips/blob/master/71.md)                     | Picture (kind 20) and video (kinds 21 / 22) events — read for the profile Media tab                                                                                                                                                              |
+| [NIP-88](https://github.com/nostr-protocol/nips/blob/master/88.md)                                                                                          | Polls (kind 1068 polls, kind 1018 votes) in chats                                                                                                                                                                                                |
+| [NIP-89](https://github.com/nostr-protocol/nips/blob/master/89.md)                                                                                          | `client` tag (`Lightning Piggy`) on the public profile, follow-list, zap-request and Piglet events it publishes; never inside encrypted messages                                                                                                 |
+| [NIP-92](https://github.com/nostr-protocol/nips/blob/master/92.md)                                                                                          | Media Attachments (`imeta`) — profile Media tab, and MIP-04 encrypted photos                                                                                                                                                                     |
+| [NIP-94](https://github.com/nostr-protocol/nips/blob/master/94.md)                                                                                          | File Metadata                                                                                                                                                                                                                                    |
+| [NIP-99](https://github.com/nostr-protocol/nips/blob/master/99.md)                                                                                          | Classified Listings, via the [Gamma Markets spec](https://github.com/GammaMarkets/market-spec): Market reader and **My shop** seller — products (30402), shop collection (30405), shipping options (30406), reviews (31555) and orders (16 / 17) |
+| NIP-GC ([draft, on Nostr](https://nostrhub.io/naddr1qvzqqqrcvypzppscgyy746fhmrt0nq955z6xmf80pkvrat0yq0hpknqtd00z8z68qqgkwet0vdskx6rfdenj6etkv4h8guc6gs5y5)) | Geocaching Events (kinds 37516 / 7516 / 1111 / 7517 — used by the Hunt feature, with an `com.lightningpiggy.app` NIP-32 label marker for Lightning-payout caches)                                                                                |
 
 Group state for client-side group chat is propagated via a parameterised-replaceable
 `kind:30200` event (custom to this client; receivers reconcile by `groupId` + `created_at`).
 Not a NIP — see `src/services/nostrService.ts` (`GROUP_STATE_KIND`) for the schema.
 
-**Marmot** (MLS over Nostr, Alpha) — 1:1 and group chats via the vendored [`@internet-privacy/marmot-ts`](https://github.com/marmot-protocol/marmot-ts) (`vendor/`), interoperating with White Noise. Includes MIP-04 encrypted media and the send side of MIP-05 push notifications (opt-in receive side too). Media uploads go to [Blossom](https://github.com/hzrd149/blossom) servers (BUD-01 / BUD-02, configurable under Account → Nostr). Known interop gaps are tracked in GitHub issues. See [docs/PROTOCOLS.adoc](docs/PROTOCOLS.adoc) → "Marmot".
+Media uploads go to [Blossom](https://github.com/hzrd149/blossom) servers (BUD-01 / BUD-02), with backup servers and a BUD-03 server list (kind 10063) you can publish under Account → Nostr → Image servers.
+
+### Marmot (MLS over Nostr, Alpha)
+
+1:1 and group chats via the vendored [`@internet-privacy/marmot-ts`](https://github.com/marmot-protocol/marmot-ts) (`vendor/`). The vendored package describes itself as tracking Marmot v2 and wire-compatible with [darkmatter](https://github.com/parres-hq/darkmatter); this is a library claim, not an app interoperability test. The table is a historical [MIP cross-reference](https://github.com/marmot-protocol/marmot/blob/master/mip-coverage.md), not a conformance claim against the [adopted protocol](https://github.com/marmot-protocol/marmot). White Noise interoperability depends on the client version and protocol profile; no tested version/profile is specified here.
+
+GIFs and polls are app-level payloads: Lightning Piggy sends GIFs as a GIPHY URL plus `via GIPHY`, structured NIP-88 polls in 1:1 Marmot chats, and legacy text polls in Marmot groups. These formats do not establish White Noise poll support.
+
+| MIP    | Name                                     | Status in Lightning Piggy                                                                                                                                                                                     |
+| ------ | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| MIP-00 | Credentials & Key Packages               | Implemented. One kind-30443 key package per install, refreshed weekly and retired on sign-out; see and manage them under Account → Messages → Invitation keys                                                 |
+| MIP-01 | Group Construction & Group Data          | Implemented: group name, admins (shown and managed; only admins rename or change members). Commits realign the extension order for MDK; cross-client behavior depends on the client version and profile |
+| MIP-02 | Welcome Events                           | Implemented. Kind-444 Welcomes, gift-wrapped; invites from people you follow are accepted automatically                                                                                                       |
+| MIP-03 | Group Messages                           | Implemented. Kind-445 group events: text, reactions, edits, "delete for everyone" and member removal; quoted replies from White Noise are shown                                                               |
+| MIP-04 | Encrypted Media                          | Implemented. Photos and voice notes as `encrypted-media-v2` on Blossom (v1 still read)                                                                                                                        |
+| MIP-05 | Push Notifications (draft)               | Implemented. Sends push triggers to other members' notification servers (Lightning Piggy's own are reached via their kind-10050 relay lists, not a fixed relay hint); receiving is opt-in per account         |
+| MIP-06 | Multi-device (being redesigned upstream) | Partial: groups invite selected eligible devices, capped at 10 per person; a new 1:1 uses the newest selected White Noise package when present. No device linking or pairing of your own installs yet                                                                                 |
+
+If a contact can't receive Marmot yet, the app asks before falling back to NIP-17. Known interop gaps are tracked in GitHub issues. See [docs/PROTOCOLS.adoc](docs/PROTOCOLS.adoc) → "Marmot".
 
 ### LUDs (LNURL specifications)
 
@@ -145,7 +206,7 @@ Lightning Piggy is an [Expo](https://expo.dev) / React Native app (SDK 55, RN 0.
 │  Services  (src/services) — by domain                        │
 │  Nostr (nostrService, dm*, places) · Wallet (nwcService,     │
 │  onchainService/BDK, lnurl, boltz) · location/geofence ·     │
-│  media upload · NFC · notifications                          │
+│  media upload · NFC · notifications · Market · relay health  │
 ├─────────────────────────────────────────────────────────────┤
 │  Persistence                                                 │
 │  SQLCipher DM store (op-sqlite) · expo-secure-store (keys) · │
@@ -161,11 +222,12 @@ Lightning Piggy is an [Expo](https://expo.dev) / React Native app (SDK 55, RN 0.
     contacts, caches)   get_balance)          LN↔on-chain swaps)
 ```
 
-**Layers.** Presentation (screens/components) sits over React Navigation; long-lived state lives in **contexts** (`WalletContext` for wallets/balances/transactions, `NostrContext` for identity/signer/relays/DMs), which compose per-responsibility hooks and a large, mostly-stateless **service** layer grouped by domain. Persistence is split three ways by sensitivity: an encrypted **SQLCipher** DM store, **expo-secure-store** for keys/secrets, and per-account-namespaced **AsyncStorage** caches. Native code is limited to three local Expo modules in `modules/`, plus BDK and a set of config plugins:
+**Layers.** Presentation (screens/components) sits over React Navigation; long-lived state lives in **contexts** (`WalletContext` for wallets/balances/transactions, `NostrContext` for identity/signer/relays/DMs), which compose per-responsibility hooks and a large, mostly-stateless **service** layer grouped by domain. Persistence is split three ways by sensitivity: an encrypted **SQLCipher** DM store, **expo-secure-store** for keys/secrets, and per-account-namespaced **AsyncStorage** caches. Native code is limited to four local Expo modules in `modules/`, plus BDK and a set of config plugins:
 
 - `amber-signer` — Android-only NIP-55 (Amber) intent bridge for signing.
 - `background-dm-service` — Android-only persistent foreground service that hosts the opt-in background message watch (and NWC incoming-payment checks).
 - `nostr-native` — Kotlin / Swift wrapper over rust-nostr. Its NIP-44 and Schnorr primitives are an experimental, off-by-default setting and are synchronous, so they still run on the JS thread; only the async relay-engine functions move work off it. Falls back to pure JS where it is not linked.
+- `secure-clipboard` — copies a secret (the key on the Back up your key screen) with the platform's protections: marked sensitive on Android, local-only with an expiry on iOS.
 - `bdk-rn` — Bitcoin Dev Kit (Rust, via UniFFI) for on-chain wallets, a fork pinned in `package.json`.
 - `plugins/` — Expo config plugins: `withAdjustResize`, `withAmberQueries`, `withFcmAutoInitDisabled`, `withForegroundService`, `withLargeHeap`, `withNfc`, `withTransparentSplashIcon`.
 
@@ -232,14 +294,15 @@ src/
   components/       # Reusable UI components (SendSheet, ContactProfileSheet, etc.)
   contexts/         # React contexts (WalletContext, NostrContext, ...)
   hooks/            # Per-feature hooks
+  i18n/             # Translations: 9 locale catalogues, CLDR plural rules
   navigation/       # React Navigation: Wallets · Messages · Explore · Friends tabs + account drawer
   screens/          # Tab and feature screens (Home, Messages, Explore/Hunt/Map, Friends, account/)
-  services/         # Business logic (NWC, LNURL, Nostr, Marmot, Boltz, BDK)
+  services/         # Business logic (NWC, LNURL, Nostr, Marmot, Market, Boltz, BDK)
   styles/           # Theme and per-component style files
   types/            # TypeScript type definitions
   utils/            # Pure helpers
 assets/             # Images and icons
-modules/            # Local native Expo modules (amber-signer, background-dm-service, nostr-native)
+modules/            # Local native Expo modules (amber-signer, background-dm-service, nostr-native, secure-clipboard)
 plugins/            # Expo config plugins
 vendor/             # Vendored packages (marmot-ts tarball)
 .maestro/           # Maestro E2E flows, by feature area
@@ -250,6 +313,7 @@ docs/               # Architecture, protocols, deployment, troubleshooting
 ## Testing
 
 - **Unit tests** — Jest (`jest-expo`), co-located as `src/**/*.test.ts`; coverage covers `src/services`, `src/utils` and `src/contexts`. Run `npm test`. A CI workflow fails PRs that drop line coverage by more than 0.5pp.
+- **Translations** — a Jest guard (`src/i18n/locales/catalogues.test.ts`) fails CI if any locale is missing keys, has stale keys, empty strings, mismatched placeholders or missing plural forms, or has too many strings left in English. `npm run i18n:sync -- --check` does the same staleness check locally, including reworded English.
 - **E2E** — [Maestro](https://maestro.mobile.dev) flows in `.maestro/`, grouped by feature area: `maestro test .maestro/<area>/flow-NNN-<name>.yaml`. See [.maestro/README.adoc](.maestro/README.adoc).
 
 ## Notable Native Dependencies
@@ -265,7 +329,16 @@ The Explore tab pulls in a small set of Expo modules beyond the wallet + Nostr c
 
 ## Screenshots
 
-The Explore tab surfaces live under [`docs/screenshots/explore/`](docs/screenshots/explore/):
+<p align="center">
+  <img alt="Explore with the Market rail: buy and sell with sats" src="docs/images/app-explore-market-rail.webp" width="19%">
+  <img alt="Map of Bitcoin merchants and Piglets" src="docs/images/app-hero-03-map.webp" width="19%">
+  <img alt="Geo-caches list" src="docs/images/app-hero-04-hunt.webp" width="19%">
+  <img alt="Piglet detail" src="docs/images/app-hero-05-piglet.webp" width="19%">
+  <img alt="Big Piggy's profile" src="docs/images/app-profile-big-piggy.webp" width="19%">
+</p>
+<!-- GALLERY: My shop and a product page (shipping + Markdown) go here when captured. -->
+
+More Explore screens live under [`docs/screenshots/explore/`](docs/screenshots/explore/):
 
 - `01-tab-bar-home.png` — bottom tab bar with the new Explore tab
 - `02-explore-hub.png` / `02b-explore-hub-scrolled.png` — Lessons / Map / Hunt / Events rails

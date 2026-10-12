@@ -85,7 +85,7 @@ There is no scheduled removal date. Removal will be announced one release ahead 
 [[marmot-protocol]]
 === Marmot (MLS over Nostr) — Alpha
 
-A third DM/group transport, wire-compatible with White Noise; full design in `SOLUTION_DESIGN.adoc` → "Marmot (MLS) messaging — Alpha". The library is `@internet-privacy/marmot-ts`, pinned to a build of upstream PR #83 (encrypted media v2).
+A third DM/group transport using the vendored Marmot v2 library; White Noise interoperability depends on the client version and protocol profile; no tested version/profile is specified here. Full design in `SOLUTION_DESIGN.adoc` → "Marmot (MLS) messaging — Alpha". The library is `@internet-privacy/marmot-ts`, pinned to a build of upstream PR #83 (encrypted media v2).
 
 [cols="1,3",options="header"]
 |===
@@ -97,11 +97,13 @@ A third DM/group transport, wire-compatible with White Noise; full design in `SO
 | 445 | Group event (MLS commits + application messages), `h`-tagged with the Nostr group id; signed by per-message ephemeral keys.
 | 1059 → 446 | MIP-05 push trigger: a kind-446 rumor (concatenated encrypted device tokens, `["v","marmot-push-v1"]`) gift-wrapped to a notification server.
 | 1059 → 8480 | Notification-watcher registration (not Marmot): a kind-8480 rumor whose JSON content either registers this device (`action: "register"` — app, platform, push token, `apns_env` on iOS, categories, relays, NWC proofs, `ts`) or unregisters it (`action: "unregister"` — app, platform, token and `ts` only; removes the device's registration whatever its categories), gift-wrapped to Lightning Piggy's watcher (seal signed by the user). See `docs/architecture/notifications.adoc` → "The notification watcher" and the watcher's `PROTOCOL.md`.
-| 9 (inner) | Chat text. With an `imeta` tag, a MIP-04 photo. A GIF is the GIPHY URL plus a `via GIPHY` line. In groups an @mention is a `nostr:npub…` reference in the content plus a `p` tag per mentioned member (#1295); group messages carry no roster `p` tags or `subject` (older builds sent both, so a kind 9 with a `subject` tag has no mention tags).
-| 7 / 5 (inner) | Reaction (`content` = emoji, `e` = message id) and its retraction (`e` = reaction id), in 1:1 Marmot threads.
+| 9 (inner) | Chat text. With an `imeta` tag, a MIP-04 photo or voice note (`audio/mp4`). A GIF is the GIPHY URL plus a `via GIPHY` line. A quoted reply carries `e` + `q` tags naming the parent. In groups an @mention is a `nostr:npub…` reference in the content plus a `p` tag per mentioned member (#1295); group messages carry no roster `p` tags or `subject` (older builds sent both, so a kind 9 with a `subject` tag has no mention tags).
+| 7 / 5 (inner) | Reaction (`content` = emoji, `e` = message id) and its retraction (`e` = reaction id), in 1:1 Marmot threads. A kind 5 naming a message is "delete for everyone" (sent for your own messages, applied from the author).
+| 1009 (inner) | Edit: one `e` tag naming the original, `content` = the new text. Honoured only from the original's author; latest wins.
+| 4891 (inner) | Admin removal of a message in a group (`{"v":1,"action":"remove"}`), applied.
 | 447 / 448 / 449 (inner) | MIP-05 push-token update / list / removal, gossiped by group members. Kept as push state, never shown. We publish 447 (our own record) and 449 when push is on / turned off; we never send 448 or empty 447 requests.
 | 451 (local-only) | MIP-05 owner proof that each push record's signature covers. Never published.
-| Other inner kinds | 15 (voice notes / files), 1068 (polls), 16/17 (orders), NWC shares: the same rumor NIP-17 carries, unchanged.
+| Other inner kinds | 15 (files), 1068 (polls), 16/17 (orders), NWC shares: the same rumor NIP-17 carries, unchanged.
 |===
 
 Inner events are unsigned rumors (MLS authenticates the sender). Inner kinds that aren't messages — 5, 7, 447–449, 1009 (edit), 1200–1202, 1210, 1984, 1985, 4891 — are never stored as chat rows.
@@ -116,8 +118,9 @@ Members publish encrypted native push tokens inside the group (447/448, removals
 
 ==== Fallback and interop
 
-* A 1:1 send to someone with no usable key package (none, expired, or a legacy MDK 0.8 one from the classic White Noise app) is re-sent over NIP-17 and the thread switches to NIP-17.
-* Key packages are read from the peer's NIP-65 write relays plus the lookup relays; the newest per `d` slot that passes the library's invite checks is used.
+* A 1:1 send to someone with no usable key package (none, expired, or a legacy MDK 0.8 one from the classic White Noise app) is offered over NIP-17 instead: the app asks first, and only if the user agrees does the thread switch to NIP-17 before the send is attempted. Cancel or dismiss sends nothing and keeps the draft; after a successful send, the app attempts a one-time note to the peer that Marmot was tried (`marmotFallback.ts`, `useConversationComposerActions.ts`).
+* Key packages are read from the peer's NIP-65 write relays plus the lookup relays. Selection keeps the newest event per `d` slot, skips retired slots and validates signature, tags, lifetime and credential. Fresh packages must advertise `0x800b`: the window is 35 days for White Noise-tagged packages, 14 otherwise. If none is fresh, the single newest compatible package is selected, or the newest valid package if none is compatible. A new 1:1 with a selected White Noise package uses only the newest such package; other invites use the selection in one commit, skipping packages that fail group eligibility or invite checks and capping accepted devices at 10 per person. Linking your own installs (historical MIP-06 device linking) isn't implemented; see `SOLUTION_DESIGN.adoc` → "Key packages" for the exact checks.
+* Every commit Lightning Piggy sends, including the founding invite, carries a GroupContextExtensions proposal that puts `app_data_dictionary` last, as MDK expects, so a rename or admin change doesn't fork White Noise off the group (#1309).
 * Typing indicators (ephemeral, content-free) and live-location pings (kind 20069) are not carried over MLS.
 
 === Live location: kind-20069 pings + NIP-17 markers (#206)
@@ -194,7 +197,7 @@ the cache without ever physically visiting it (see
 `buildCacheListing` security test in `nostrPlacesService.test.ts`).
 A Hunt Piggy is therefore just a NIP-GC `traditional` cache flagged
 by our label; generic geocaching clients (treasures.to et al.)
-ignore the label and render it as a normal cache, while LP routes
+ignore the label and render it as a normal cache, while Lightning Piggy routes
 the finder through HuntFoundScreen for claim. The `wait` / `uses`
 fields exist on the local `HiddenPiggy` record for the cooldown UX
 but are NOT published as event tags — that was an early design
@@ -239,19 +242,19 @@ NIP-GC optional tags (we emit when present):
 | Tag | Meaning
 
 | `["t", "traditional\|multi\|mystery"]` | Cache type. Default `traditional` per NIP-GC. **All Lightning Piggies are traditional caches with a Lightning bonus.**
-| `["hint", rot13(str)]` | Plaintext clue, ROT13-encoded per NIP-GC client guidance (prevents inline spoilers in scrolling clients). LP decodes for display; users with non-NIP-GC-aware clients see the rotated text and need to ROT13 themselves.
+| `["hint", rot13(str)]` | Plaintext clue, ROT13-encoded per NIP-GC client guidance (prevents inline spoilers in scrolling clients). Lightning Piggy decodes for display; users with non-NIP-GC-aware clients see the rotated text and need to ROT13 themselves.
 | `["image", url]` | EXIF-stripped Blossom / nostr.build URL of the hider's hint photo. Routed through `src/services/imageUploadService.ts`.
 | `["expiration", unix_ts]` | NIP-40. Clients hide the listing past this time without needing a separate delete event.
 |===
 
-LP marker tags (NIP-32 label, **not** a bearer token — the LNURL deliberately does NOT go on the public event):
+Lightning Piggy marker tags (NIP-32 label, **not** a bearer token — the LNURL deliberately does NOT go on the public event):
 
 [cols="1,3", options="header"]
 |===
 | Tag | Meaning
 
 | `["L", "com.lightningpiggy.app"]` | NIP-32 label namespace declaring "this cache is in the Lightning Piggy taxonomy".
-| `["l", "payout-lnurl-w", "com.lightningpiggy.app"]` | NIP-32 label value within the namespace — declares the cache pays out via LNURL-withdraw on the physical artifact (the NFC tag / printed QR carries the actual LNURL string). Generic NIP-GC clients (treasures.to) ignore the label entirely and render the cache as a standard listing; LP recognises it and renders the 🐷 pin + "tap the physical tag to claim" UX.
+| `["l", "payout-lnurl-w", "com.lightningpiggy.app"]` | NIP-32 label value within the namespace — declares the cache pays out via LNURL-withdraw on the physical artifact (the NFC tag / printed QR carries the actual LNURL string). Generic NIP-GC clients (treasures.to) ignore the label entirely and render the cache as a standard listing; Lightning Piggy recognises it and renders the 🐷 pin + "tap the physical tag to claim" UX.
 |===
 
 **The LNURL never goes in the public event** — that would broadcast a bearer token to every relay subscriber, letting anyone in the world drain the cache without ever physically visiting it (defeating the entire physical-cache premise). The LNURL lives on:
@@ -259,7 +262,7 @@ LP marker tags (NIP-32 label, **not** a bearer token — the LNURL deliberately 
 * The **physical artifact** (NFC tag / printed QR) — this is the real access control. Possession = consent to claim.
 * The **hider's local `SecureStore`** (`piggyStorageService.HiddenPiggy.lnurlw`) — for tag-write, re-print, and any future "show me the QR for this Piggy" affordance. Never leaves the device.
 
-This is how TapTheSatsMap (the most prolific NIP-GC publisher, 31 sticker caches) operates — see project memory `treasures.to interop` for the analysis. Wait_time / uses / per-claim caps remain the hider's responsibility to set in their own wallet's LNURL-w configuration; LP doesn't try to mirror them on the event because doing so contributes to side-channel discoverability of the cache's economics without adding any safety.
+This is how TapTheSatsMap (the most prolific NIP-GC publisher, 31 sticker caches) operates — see project memory `treasures.to interop` for the analysis. Wait_time / uses / per-claim caps remain the hider's responsibility to set in their own wallet's LNURL-w configuration; Lightning Piggy doesn't try to mirror them on the event because doing so contributes to side-channel discoverability of the cache's economics without adding any safety.
 
 `content` carries the longer cache description ("🐷 Geo-Cache 1 — 21 sats per claim, 3h cooldown, 100 uses.").
 
@@ -269,12 +272,12 @@ Each successful claim produces:
 
 * `["a", "37516:<hider_pubkey>:<piggy_id>"]` — required NIP-GC reference to the cache.
 * `["image", url]` (optional) — finder's photo of the find spot. Same EXIF-strip pipeline as the listing's hint photo.
-* `["amount", "21"]` (LP extension) — sats claimed via the LNURL-w. Drives the `⚡ claimed` badge and "you got 21 sats here 47m ago" copy on the detail screen. Treasures.to et al. ignore this; for them it's a regular found-log.
-* `["verification", <kind-7517-json>]` (optional) — embedded NIP-GC verification event signed by the cache's verification key, if the listing carries one. **For LP Piggies we don't need this** — successful claim of the LNURL-w is its own physical-presence proof (you had the bearer token, the issuer paid you).
+* `["amount", "21"]` (Lightning Piggy extension) — sats claimed via the LNURL-w. Drives the `⚡ claimed` badge and "you got 21 sats here 47m ago" copy on the detail screen. Treasures.to et al. ignore this; for them it's a regular found-log.
+* `["verification", <kind-7517-json>]` (optional) — embedded NIP-GC verification event signed by the cache's verification key, if the listing carries one. **For Lightning Piggy Piggies we don't need this** — successful claim of the LNURL-w is its own physical-presence proof (you had the bearer token, the issuer paid you).
 
 ==== Subscribe filter shape
 
-* **Discovery feed** — `{ kinds: [37516], "#g": [<geohash prefixes for current viewport>] }`. Single round-trip catches both LP Piggies AND treasures.to caches in the same area (we filter for the `["l", "payout-lnurl-w", "com.lightningpiggy.app"]` label client-side to render the 🐷 vs 📍 pin distinction). Prefix list comes from `geohashPrefixes(currentGh, 5)` so one subscribe covers a ~5 km city neighbourhood.
+* **Discovery feed** — `{ kinds: [37516], "#g": [<geohash prefixes for current viewport>] }`. Single round-trip catches both Lightning Piggy Piggies AND treasures.to caches in the same area (we filter for the `["l", "payout-lnurl-w", "com.lightningpiggy.app"]` label client-side to render the 🐷 vs 📍 pin distinction). Prefix list comes from `geohashPrefixes(currentGh, 5)` so one subscribe covers a ~5 km city neighbourhood.
 * **Single cache detail (replaceable + thread)** — three filters:
   ** `{ kinds: [37516], authors: [hider], "#d": [piggy_id] }` — latest revision of the listing.
   ** `{ kinds: [7516], "#a": ["37516:<hider>:<piggy_id>"] }` — append-only found-log thread.
@@ -299,10 +302,10 @@ Reasons it's the right call:
 |===
 | Path | What it does
 
-| `scripts/publish-test-piggy.mjs` | One-shot dev script that publishes a real NIP-GC kind 37516 event with the LP `com.lightningpiggy.app` label marker (no LNURL — by design, see schema notes above). Default values target Big Piggy's Geo-Cache 1 in Longstanton, Cambridge; override via env vars (LAT / LON / NAME / MEMO / HINT / DIFFICULTY / TERRAIN / SIZE / CACHE_TYPE / BIG_PIGGY_NSEC). The LNURL stays on the physical artifact only.
+| `scripts/publish-test-piggy.mjs` | One-shot dev script that publishes a real NIP-GC kind 37516 event with the Lightning Piggy `com.lightningpiggy.app` label marker (no LNURL — by design, see schema notes above). Default values target Big Piggy's Geo-Cache 1 in Longstanton, Cambridge; override via env vars (LAT / LON / NAME / MEMO / HINT / DIFFICULTY / TERRAIN / SIZE / CACHE_TYPE / BIG_PIGGY_NSEC). The LNURL stays on the physical artifact only.
 | `src/services/lnurlWithdrawService.ts` | Decode + LUD-03 resolve + LUD-03 claim (`claimLnurlWithdraw`). Wallet-agnostic: takes a `getInvoice(sats, memo)` callback so no NWC import dependency.
 | `src/services/claimHistoryService.ts` | AsyncStorage-backed log of "I claimed this Piggy" history. Drives the `⚡ claimed N min ago` badge. Persists SHA-256 hashes of the LNURL (`lnurlHash`), never the bearer string itself — AsyncStorage is unencrypted, so a stolen / rooted device must not be able to replay un-exhausted Piggies.
-| `src/services/piggyStorageService.ts` | Local SecureStore registry of the hider's own Piggies. Carries every NIP-GC field (`name, difficulty, terrain, size, cacheType, hint`) plus LP extension fields (`hintPhotoUrl, waitSecondsHint, usesHint, lat, lon, geohash`).
+| `src/services/piggyStorageService.ts` | Local SecureStore registry of the hider's own Piggies. Carries every NIP-GC field (`name, difficulty, terrain, size, cacheType, hint`) plus Lightning Piggy extension fields (`hintPhotoUrl, waitSecondsHint, usesHint, lat, lon, geohash`).
 | `src/utils/geohash.ts` | Tiny geohash encoder + `geohashPrefixes` helper.
 | `src/utils/rot13.ts` | Tiny ROT13 helper for NIP-GC hint encoding.
 | `src/services/nfcService.ts` :: `writeLnurlToTag` | Writes `lightning:LNURL…` to an NDEF URI record (case-preserving for LUD-17 paths) so any LNURL-aware wallet on tap opens. Tag-family inference (NTAG21x / Mifare Ultralight C / Mifare Classic) and `makeReadOnly()` locking are **Android-only** — `tag.techTypes` is Android-specific and CoreNFC has no equivalent permanent-lock primitive. iOS writes the NDEF record and returns `{ family: 'unknown', locked: false }` so the hider knows the tag is still re-writeable.
@@ -402,30 +405,35 @@ Prefix list comes from `geohashPrefixes(currentGh, 5)` so one subscribe covers a
 
 This is purely a consumer of the published kind 31923 — nothing is written back to relays.
 
-=== NIP-99: classified-listing consumer (Bag Charm purchase link)
+=== Market: NIP-99 via Gamma Markets
 
 ==== Summary
 
-Lightning Piggy uses NIP-99 (`kind 30402`, parameterised-replaceable classified listing) in **consumer-only** mode for the Robotechy Piggy Bag Charm purchase link on `HuntCreateScreen` (the "Hide a Piglet" flow).
+The Market (Explore → Market) reads and publishes the https://github.com/GammaMarkets/market-spec[Gamma Markets] profile of NIP-99, the format the reference Nostr shops publish. Design, the quorum rule for editing your own shop, and the screens: `SOLUTION_DESIGN.adoc` → "Market".
 
-==== What's published vs what we render
+[cols="1,2,3",options="header"]
+|===
+| Kind | Event | Read / written
 
-Robotechy publishes a `kind 30402` listing for the Bag Charm — a physical product the hider can buy to attach an NFC tag to. We don't decode the event ourselves; we link out to a `naddr1…`-encoded reference that resolves on https://www.robotechy.com[robotechy.com]:
+| 30402 | Product (NIP-99 classified listing) | Read from preferred sellers or people you follow, signature-checked, `visibility: hidden` skipped. Written by *My shop*: `d`, `title`, `price`, `type`, `visibility`, `stock`, `image`, `t`, `shipping_option [coord, extra-cost?]`, `a` → shop, `published_at`; Markdown in `content`.
+| 30018 | Legacy NIP-15 product | Read only.
+| 30405 | Shop collection | Written by *My shop* (`d = lightning-piggy-shop`, `a` → every product, `shipping_option` → every zone, a `currency` extension tag).
+| 30406 | Shipping option | Read (any seller's, to price shipping on the product page) and written (one per zone; worldwide omits `country`).
+| 31555 | Product review | Read and written; `d` = `a:30402:<seller>:<d>`, ratings stored 0–1.
+| 1111 | NIP-22 comment | Read and written, rooted on the product (`A` / `K` / `P` root tags, lowercase parent tags).
+| 5 | NIP-09 deletion | Written for your own listings, zones, comments and reviews (`a` + `e` + `k`); read so a seller's or author's deletions hide what they deleted. Only the original author's deletion counts.
+| 16 / 17 | Order messages / payment receipt | The buyer gift-wraps (NIP-17) a kind-16 `type 1` order; payment requests (`type 2`), status (`3`) and shipping (`4`) updates and the kind-17 receipt render in the conversation. A kind 16 without the `order` + `type` pair is a NIP-18 repost, not an order.
+|===
 
-[source]
-----
-'https://www.robotechy.com/naddr1qvzqqqrkcgpzqgglxfd4895k3tqv0xmupgps6a5zqmfj43slj0c58hs39wzeh4r0qqdhqun0v36kxazlxymnvwpnxscnyvp3xgcrjhmzd5urxmcxaljpu'
-----
+Edits republish under the same `d` with a strictly newer `created_at` and keep tags we don't manage. Not implemented yet: order handling for your own listings (#1290), checkout for every live Gamma listing (#1291), drafts and variants (#1293).
 
-This is the only NIP-99 surface in the app. There is no "marketplace" feature, no in-app price display, no Lightning Piggy-published classified listings. The `naddr` is hard-coded into the source for v1 because there's only one product and re-resolving it on every Hide-a-Piglet open would be wasted relay traffic for zero UX benefit.
+*Bag Charm link.* `HuntCreateScreen` (the "Hide a Piglet" flow) still links out to Robotechy's Bag Charm listing as a hard-coded `naddr1…` URL on robotechy.com, rather than opening it in the Market.
 
-==== Why NIP-99 at all
+=== Profile content: NIP-27 references, NIP-10 replies, media kinds
 
-The hider could buy a Bag Charm anywhere — what makes NIP-99 useful here is that the seller (Robotechy) is a Nostr-native business and the canonical product page lives on their Nostr classified listing rather than a Web2 product database. Linking via `naddr` lets the URL stay valid even if Robotechy migrates hosting providers, and signals to other Nostr-aware clients that "this is a real Nostr-addressable product".
-
-==== Code reference
-
-* `src/screens/HuntCreateScreen.tsx` (around line 377) — the `Linking.openURL` call to the `naddr1…` resolver. Logos: `assets/images/robotechy-logo.png`.
+* *NIP-27* — `nostr:npub` / `nprofile` (and bare or `@`-prefixed `npub1…`) render as `@Name` chips; `nostr:note` / `nevent` as embedded post cards; `nostr:naddr` as an article (kind 30023) or Market product (30402) card. Parsing in `src/utils/nip27.ts` and `nostrContentBlocks.ts`; fetching in `src/services/nostrEmbedCache.ts` (batched `ids` / `#d` filters, every filter limited, signature- and reference-checked). Relay hints in references are used only for public `wss://` hosts, at most 2 per reference and 3 per batch.
+* *NIP-10* — a note is a reply if it has a marked `reply` / `root` `e` tag or any unmarked (positional) `e` tag; `mention` `e` tags, `q` tags and `nostr:` references in the content don't make it one (`src/utils/nip10.ts`).
+* *Media* — the profile Media tab reads image / video URLs and NIP-92 `imeta` in kind-1 notes, plus NIP-68 pictures (kind 20) and NIP-71 videos (kinds 21 / 22) (`src/utils/noteMedia.ts`).
 
 === Deep-link & NFC tag-tap routing
 
@@ -433,7 +441,7 @@ The hider could buy a Bag Charm anywhere — what makes NIP-99 useful here is th
 
 A scanned NFC tag (Android system NDEF dispatch) and a tapped deep link both arrive at the same place: the `Linking` handler in `App.tsx` (`getInitialURL()` for cold launch + `addEventListener('url')` for warm). The handler inspects the URI scheme / bech32 prefix and routes to the matching in-app surface. Every branch retries against `navigationRef.isReady()` so a cold-start tap that races the nav tree's mount still lands. Unknown payloads get a friendly toast or the `UnsupportedEntity` screen — never a crash or a blank screen.
 
-Android registration is twofold: the `VIEW` intent filters in `app.config.ts` (`android.intentFilters`) wake the app on a deep link / cold launch, and the `NDEF_DISCOVERED` filters in `plugins/withNfc.js` route a foreground/background tag tap. Both are scoped to LP's own + opt-in schemes (`lightningpiggy`, `lightning`, `lnurlw`, `lnurl`, `nostr`) so they don't hijack the user's preferred Lightning / Nostr wallet — Android shows its standard chooser when another handler is installed.
+Android registration is twofold: the `VIEW` intent filters in `app.config.ts` (`android.intentFilters`) wake the app on a deep link / cold launch, and the `NDEF_DISCOVERED` filters in `plugins/withNfc.js` route a foreground/background tag tap. Both are scoped to Lightning Piggy's own + opt-in schemes (`lightningpiggy`, `lightning`, `lnurlw`, `lnurl`, `nostr`) so they don't hijack the user's preferred Lightning / Nostr wallet — Android shows its standard chooser when another handler is installed.
 
 ==== Routing table
 
