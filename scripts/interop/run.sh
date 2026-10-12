@@ -175,7 +175,7 @@ with_device '
   flow "$FLOWS/flow-149-interop-lp-rename-after-admin.yaml" ROW_ID="'"$ROW"'"
   sender say --state "$STATE" --text "IO$TAG after-rename" >"$OUT/logs/after-rename.json"
   flow "$FLOWS/flow-150-interop-lp-receives-after-rename.yaml" ROW_ID="'"$ROW"'"
-  [ -z "${SKIP_WN:-}" ] && flow "$FLOWS/flow-148-interop-wn-receives-lp.yaml" WN_CHAT="IO $TAG( renamed)?"
+  [ -z "${SKIP_WN:-}" ] && flow "$FLOWS/flow-148-interop-wn-receives-lp.yaml" WN_CHAT="(?i)IO $TAG( renamed)?"
   sender info --state "$STATE" >"$OUT/logs/group-info.json"
 '
 

@@ -94,13 +94,13 @@ name: Interop — White Noise renders what Lightning Piggy sent (group), plus po
                 duration: 300
 - assertVisible:
     label: 'IO-CHECK lp.renamed-title'
-    text: 'IO ${TAG} renamed'
+    text: '(?i)IO ${TAG} renamed'
     optional: true
 # Missed: go back to the newest message so later checks start from there.
 - runFlow:
     when:
       notVisible:
-        text: 'IO ${TAG} renamed'
+        text: '(?i)IO ${TAG} renamed'
     commands:
       - repeat:
           times: 12

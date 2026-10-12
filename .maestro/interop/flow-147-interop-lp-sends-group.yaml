@@ -50,6 +50,16 @@ name: Interop — Lightning Piggy sends the item set into the run's Marmot group
     timeout: 5000
 # Edit: the composer is prefilled with the old text; append to it (Maestro's
 # eraseText doesn't clear a prefilled RN TextInput reliably).
+# Find it first (finger-down swipes reach older messages), then long-press.
+- repeat:
+    times: 6
+    while:
+      notVisible:
+        text: 'IO${TAG}L editme v1'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
 - longPressOn:
     text: 'IO${TAG}L editme v1'
 - tapOn:
@@ -59,6 +69,16 @@ name: Interop — Lightning Piggy sends the item set into the run's Marmot group
     id: 'group-send-button'
 - waitForAnimationToEnd:
     timeout: 5000
+# Find it first (finger-down swipes reach older messages), then long-press.
+- repeat:
+    times: 6
+    while:
+      notVisible:
+        text: 'IO${TAG}L deleteme should disappear'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
 - longPressOn:
     text: 'IO${TAG}L deleteme should disappear'
 - tapOn:

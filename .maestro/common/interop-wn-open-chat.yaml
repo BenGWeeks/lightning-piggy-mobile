@@ -7,8 +7,11 @@ appId: dev.ipf.whitenoise.android
 # can't match a real chat. White Noise must be on the Little Piggy account.
 - launchApp:
     clearState: false
-- waitForAnimationToEnd:
-    timeout: 10000
+# White Noise can take a while to come to the front after a cold start.
+- extendedWaitUntil:
+    visible:
+      text: '(Chats|Message|Accept|Search)'
+    timeout: 60000
 # Back out of any open chat to the chat list.
 - repeat:
     times: 3

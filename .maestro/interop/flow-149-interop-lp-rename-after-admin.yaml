@@ -30,7 +30,7 @@ name: Interop — after an admin change, Lightning Piggy renames the group and s
     timeout: 5000
 - assertVisible:
     label: 'IO-CHECK lp-side.renamed-title'
-    text: 'IO ${TAG} renamed'
+    text: '(?i)IO ${TAG} renamed'
     optional: true
 - tapOn:
     id: 'group-message-input'

@@ -109,6 +109,17 @@ const lpSendsMissing =
   Boolean(sendFlow.firstFailure) ||
   (sendFlow.length === 0 && !read('flow-147-interop-lp-sends-group.log').includes('COMPLETED'));
 const DEPENDS_ON_147 = /^lp\.(plain|md|long|edit|image|delete)$/;
+// The wire check proves which of Lightning Piggy's sends went out even if
+// flow-147 stopped later (e.g. at the delete or photo step).
+const wire = jsonLines('listen-lp.jsonl').find((l) => l.done);
+const WIRE_KEY = {
+  'lp.plain': 'L plain',
+  'lp.md': 'L md',
+  'lp.long': 'L long',
+  'lp.edit': 'L editme v1 EDITED',
+};
+const sentOnWire = (label) =>
+  Boolean(WIRE_KEY[label] && wire?.matched?.some((m) => m.endsWith(WIRE_KEY[label])));
 // …and the rename-path checks need flow-149's rename to have happened.
 const renameFlow = checksFor('flow-149-interop-lp-rename-after-admin');
 const lpRenameMissing = !renameFlow || Boolean(renameFlow.firstFailure);
@@ -135,7 +146,7 @@ for (const [file, title, shotPrefix] of FLOWS) {
     const want = `${shotPrefix}${key.replace(/\./g, '-')}.png`;
     const shot = shots.find((s) => s === want);
     const result =
-      lpSendsMissing && DEPENDS_ON_147.test(label)
+      lpSendsMissing && DEPENDS_ON_147.test(label) && !sentOnWire(label)
         ? 'N/T (flow-147 failed)'
         : lpRenameMissing && DEPENDS_ON_149.test(label)
           ? 'N/T (flow-149 failed)'
@@ -146,11 +157,14 @@ for (const [file, title, shotPrefix] of FLOWS) {
 }
 
 // Wire check: did the scripted member receive Lightning Piggy's sends?
-const done = jsonLines('listen-lp.jsonl').find((l) => l.done);
+const done = wire;
 if (done) {
   out.push('## Lightning Piggy → group, on the wire (scripted member)', '');
   if (lpSendsMissing)
-    out.push(`N/T: flow-147 (Lightning Piggy's sends) didn't run to completion.`, '');
+    out.push(
+      `Note: flow-147 (Lightning Piggy's sends) stopped early${sendFlow?.firstFailure ? ` at \`${sendFlow.firstFailure}\`` : ''}; the lines below show which sends still went out.`,
+      '',
+    );
   for (const re of done.matched ?? []) out.push(`- PASS \`${re}\``);
   for (const re of done.missing ?? []) out.push(`- FAIL \`${re}\` not received in 90 s`);
   out.push('');
