@@ -1,4 +1,5 @@
 import { SimplePool } from 'nostr-tools/pool';
+import { normalizeURL } from 'nostr-tools/utils';
 import { withRelayHealth } from './healthAwarePool';
 import { hydrateRelayHealth } from './relayHealth';
 
@@ -31,4 +32,17 @@ export const connectedRelays = new Set<string>();
 // Track all relays we connect to for proper cleanup.
 export function trackRelays(relays: string[]): void {
   relays.forEach((r) => connectedRelays.add(r));
+}
+
+/** Release idle sockets after transient batches, preserving active subscriptions. */
+export function pruneIdleRelays(): void {
+  const pruned = new Set(pool.pruneIdleRelays(0));
+  for (const url of connectedRelays) {
+    try {
+      if (pruned.has(normalizeURL(url))) connectedRelays.delete(url);
+    } catch {
+      // Invalid URLs never opened a connection.
+      connectedRelays.delete(url);
+    }
+  }
 }
