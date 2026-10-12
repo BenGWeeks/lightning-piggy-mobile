@@ -18,7 +18,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 // eslint-plugin-import parses imports with the JS parser and can't read TypeScript.
 /* eslint-disable import/namespace */
 import {
@@ -30,6 +30,7 @@ import {
   parseSupportedLocales,
   requiredPluralCategories,
   planApply,
+  pluralGuide,
   proposalsFrom,
   validateCatalogue,
   validateEntry,
@@ -40,6 +41,8 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const LOCALES_DIR = 'src/i18n/locales';
 const TODO_DIR = join(ROOT, '.i18n-todo');
 const GLOSSARY = join(ROOT, 'docs/i18n/GLOSSARY.md');
+/** The app's per-locale plural rules, once runtime CLDR support exists. */
+const RUNTIME_PLURALS = join(ROOT, 'src/i18n/plurals.ts');
 /** Strings per CLI call — keeps replies well inside output limits. */
 const DRAFT_CHUNK = 120;
 
@@ -100,7 +103,19 @@ function resolveBase(explicit) {
   return null;
 }
 
-function loadState(opts) {
+/**
+ * The plural rule table the APP uses (`CARDINAL_RULES`), so the tool demands
+ * exactly the forms the runtime will pick — or null while the runtime still
+ * uses i18n-js's English default for every locale.
+ */
+async function loadRuntimePluralRules() {
+  if (!existsSync(RUNTIME_PLURALS)) return null;
+  const mod = await import(pathToFileURL(RUNTIME_PLURALS).href);
+  if (!mod.CARDINAL_RULES) fail('src/i18n/plurals.ts no longer exports CARDINAL_RULES');
+  return mod.CARDINAL_RULES;
+}
+
+function loadState(opts, rules) {
   const en = readJson(join(ROOT, LOCALES_DIR, 'en.json'));
   const supported = parseSupportedLocales(readFileSync(join(ROOT, 'src/i18n/index.ts'), 'utf8'));
   const unknown = opts.locales.filter((l) => !supported.includes(l));
@@ -116,10 +131,10 @@ function loadState(opts) {
       baseEn,
       localeTree: existsSync(file) ? readJson(file) : {},
       baseLocaleTree: jsonAt(base, `${LOCALES_DIR}/${locale}.json`),
-      categories: requiredPluralCategories(locale),
+      categories: requiredPluralCategories(locale, rules),
     });
   });
-  return { en, base, diffs };
+  return { en, base, diffs, rules };
 }
 
 function printSummary(diffs, base) {
@@ -171,7 +186,7 @@ function languageName(locale) {
   }
 }
 
-function draftPrompt(locale, glossary, entries) {
+function draftPrompt(locale, glossary, entries, rules) {
   const items = {};
   for (const [path, entry] of Object.entries(entries)) {
     const category = path.match(/\.(zero|one|two|few|many|other)$/)?.[1];
@@ -185,7 +200,7 @@ function draftPrompt(locale, glossary, entries) {
   return [
     `Translate these Lightning Piggy app UI strings from English into ${languageName(locale)} (locale "${locale}").`,
     'Follow the translation rules below exactly.',
-    '- Keys ending in a CLDR plural category (one/few/many/other…) are plural forms of a count-based string: write the form that category needs in this language.',
+    `- Keys ending in a plural category (zero/one/few/many/other) are forms of a count-based string. The app picks them by count like this: ${pluralGuide(locale, rules)}. Write each form to read correctly for exactly those counts.`,
     '- If "previousEn" is present, the English was reworded: translate the NEW "en" text, reusing wording from "previousTranslation" where it still fits.',
     '- Keep every {{placeholder}} and %{placeholder} exactly as written.',
     'Reply with ONLY a JSON object mapping each key to its translated string — no prose, no code fence.',
@@ -241,7 +256,7 @@ function draft(state, opts) {
     const paths = Object.keys(task.entries).filter((p) => !task.entries[p].translation.trim());
     if (!paths.length) continue;
     const rejected = [];
-    let drafted = 0;
+    const drafts = {};
     for (let i = 0; i < paths.length; i += DRAFT_CHUNK) {
       const chunk = Object.fromEntries(
         paths.slice(i, i + DRAFT_CHUNK).map((p) => [p, task.entries[p]]),
@@ -249,7 +264,11 @@ function draft(state, opts) {
       process.stdout.write(
         `${diff.locale}: drafting ${i + 1}-${i + Object.keys(chunk).length} of ${paths.length} with ${engine}… `,
       );
-      const res = runEngine(engine, opts.model, draftPrompt(diff.locale, glossary, chunk));
+      const res = runEngine(
+        engine,
+        opts.model,
+        draftPrompt(diff.locale, glossary, chunk, state.rules),
+      );
       let reply;
       try {
         if (res.status !== 0)
@@ -266,16 +285,17 @@ function draft(state, opts) {
           typeof value === 'string' ? validateEntry(path, value, entry.en) : `no draft for ${path}`;
         if (problem) rejected.push(problem);
         else {
-          entry.translation = value;
+          drafts[path] = { ...entry, translation: value };
           ok++;
         }
       }
-      drafted += ok;
       console.log(`${ok} ok`);
     }
-    // Same shape as the task file, so --apply can check each draft was
-    // written against today's English.
-    writeJson(join(TODO_DIR, `${diff.locale}.draft.json`), task);
+    // Only the newly drafted entries, in the task file's shape (each stamped
+    // with the English it was drafted from). Edit either file to review: a
+    // translation in the task file always wins over the draft.
+    writeJson(join(TODO_DIR, `${diff.locale}.draft.json`), { ...task, entries: drafts });
+    const drafted = Object.keys(drafts).length;
     console.log(`→ .i18n-todo/${diff.locale}.draft.json (${drafted}/${paths.length} drafted)`);
     for (const problem of rejected) console.log(`  ⚠ ${problem}`);
   }
@@ -288,14 +308,19 @@ function apply(state) {
   let failed = false;
   for (const diff of state.diffs) {
     const { locale } = diff;
-    const categories = requiredPluralCategories(locale);
+    const categories = requiredPluralCategories(locale, state.rules);
     const taskPath = join(TODO_DIR, `${locale}.json`);
     const draftPath = join(TODO_DIR, `${locale}.draft.json`);
-    // A draft wins over the same key filled in by hand in the task file.
-    const plan = planApply(diff, {
-      ...(existsSync(taskPath) ? proposalsFrom(readJson(taskPath)) : {}),
-      ...(existsSync(draftPath) ? proposalsFrom(readJson(draftPath)) : {}),
-    });
+    const fromTask = existsSync(taskPath) ? proposalsFrom(readJson(taskPath)) : {};
+    const fromDraft = existsSync(draftPath) ? proposalsFrom(readJson(draftPath)) : {};
+    // A reviewer's translation in the task file always beats the draft.
+    for (const [path, { translation }] of Object.entries(fromTask)) {
+      const drafted = fromDraft[path]?.translation;
+      if (drafted !== undefined && drafted !== translation) {
+        console.log(`  · ${locale} ${path}: using the task file's translation over the draft`);
+      }
+    }
+    const plan = planApply(diff, { ...fromDraft, ...fromTask });
 
     const file = join(ROOT, LOCALES_DIR, `${locale}.json`);
     const before = existsSync(file) ? readFileSync(file, 'utf8') : '';
@@ -317,9 +342,12 @@ function apply(state) {
       if (problems.length > 40) console.log(`  … and ${problems.length - 40} more`);
       continue;
     }
-    if (after !== before) writeFileSync(file, after);
+    // Nothing to merge or drop: leave the file alone rather than produce a
+    // key-reorder-only diff.
+    const touched = Object.keys(plan.accepted).length > 0 || diff.stale.length > 0;
+    if (touched && after !== before) writeFileSync(file, after);
     console.log(
-      `${locale}: ${after !== before ? 'updated' : 'unchanged'} — ` +
+      `${locale}: ${touched && after !== before ? 'updated' : 'unchanged'} — ` +
         `${Object.keys(plan.accepted).length} applied, ${diff.stale.length} stale removed`,
     );
     // The to-do files are spent; re-applying them later could only confuse.
@@ -333,7 +361,7 @@ function apply(state) {
 // ---- main ----------------------------------------------------------------
 
 const opts = parseArgs(process.argv.slice(2));
-const state = loadState(opts);
+const state = loadState(opts, await loadRuntimePluralRules());
 
 if (opts.mode === 'apply') {
   apply(state);

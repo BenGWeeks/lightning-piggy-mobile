@@ -6,8 +6,7 @@
 // of imports: the script loads it straight from Node with type stripping
 // (`node --experimental-strip-types`), which can't resolve app modules.
 //
-// Not used by the app at runtime. `requiredPluralCategories` relies on
-// `Intl.PluralRules`, which Node and Jest have but Hermes doesn't.
+// Not used by the app at runtime.
 
 export type Catalogue = { [key: string]: string | Catalogue };
 
@@ -42,16 +41,54 @@ export function placeholders(s: string): string {
   return (s.match(/\{\{[^{}]*\}\}|%\{[^{}]*\}/g) ?? []).sort().join(',');
 }
 
+/** CLDR cardinal rule: count → plural category. */
+export type CardinalRule = (n: number) => string;
+
+/**
+ * i18n-js's built-in pluralizer, which applies ENGLISH rules to every locale
+ * (`one` for 1, `other` for everything else; `zero` is an optional extra).
+ * It's what the app uses until per-locale rules are registered.
+ */
+export const I18N_JS_DEFAULT_RULE: CardinalRule = (n) => (n === 1 ? 'one' : 'other');
+
 /**
  * Plural categories a locale's plural objects must define: every category a
- * whole count 0-200 can hit, plus `other` (same bar as the catalogue guard).
- * Edge categories such as Spanish `many` (exact millions) are optional.
+ * whole count 0-200 can hit under the rule the APP uses at runtime, plus
+ * `other` (same bar as the catalogue guard). `runtimeRules` is the app's
+ * per-locale rule table (`CARDINAL_RULES` in src/i18n/plurals.ts) or `null`
+ * when the runtime has none, in which case i18n-js's English default applies
+ * — demanding `few` / `many` then would mean writing strings never shown.
  */
-export function requiredPluralCategories(locale: string): string[] {
-  const rules = new Intl.PluralRules(locale);
+export function requiredPluralCategories(
+  locale: string,
+  runtimeRules: Record<string, CardinalRule> | null,
+): string[] {
+  const rule = runtimeRules?.[locale] ?? I18N_JS_DEFAULT_RULE;
   const needed = new Set<string>(['other']);
-  for (let n = 0; n <= 200; n++) needed.add(rules.select(n));
+  for (let n = 0; n <= 200; n++) needed.add(rule(n));
   return CLDR_CATEGORIES.filter((c) => needed.has(c));
+}
+
+/**
+ * Which counts each category covers under the runtime rule, for the drafting
+ * prompt — e.g. `one: 1, 21, 31…; few: 2, 3, 4, 22…; other: every other count`
+ * — so `other` is translated with the meaning the app gives it.
+ */
+export function pluralGuide(
+  locale: string,
+  runtimeRules: Record<string, CardinalRule> | null,
+): string {
+  const rule = runtimeRules?.[locale] ?? I18N_JS_DEFAULT_RULE;
+  const samples = new Map<string, number[]>();
+  for (let n = 0; n <= 30; n++) {
+    const category = rule(n);
+    samples.set(category, [...(samples.get(category) ?? []), n]);
+  }
+  const parts = requiredPluralCategories(locale, runtimeRules).map((category) => {
+    const counts = samples.get(category) ?? [];
+    return `${category}: ${counts.length ? `${counts.slice(0, 6).join(', ')}${counts.length > 6 ? '…' : ''}` : 'fractions only'}`;
+  });
+  return `${parts.join('; ')} (a "zero" form, where en has one, is used for 0)`;
 }
 
 /** One string a locale must have, and the English it's translated from. */

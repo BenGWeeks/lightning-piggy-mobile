@@ -18,6 +18,7 @@ import {
 } from '../services/accountDisplayPrefs';
 import {
   PSEUDO_LOCALE,
+  applyPseudoLocale,
   createPseudoI18nInstance,
   isPseudoLocaleAvailable,
   type PseudoLocale,
@@ -114,8 +115,9 @@ export const LocaleProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // read `i18n.locale` directly (see `t()` in src/i18n/index.ts, for a
   // future GIPHY lang hint). Nothing in the render phase depends on this.
   useEffect(() => {
-    i18n.locale = locale;
-  }, [locale]);
+    if (pseudo) applyPseudoLocale(i18n);
+    else i18n.locale = locale;
+  }, [locale, pseudo]);
 
   const t = useCallback<LocaleContextValue['t']>(
     (scope, options) => instance.t(scope, options),

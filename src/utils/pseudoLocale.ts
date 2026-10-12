@@ -78,11 +78,19 @@ export function isPseudoLocaleAvailable(): boolean {
 
 let cached: Tree | null = null;
 
-/** I18n instance rendering `en-XA`; the catalogue is built once, on first use. */
-export function createPseudoI18nInstance(): I18n {
+/**
+ * Switch an I18n instance to `en-XA` (the catalogue is built once, on first
+ * use). Also used on the shared singleton so non-hook `t()` call sites render
+ * pseudo text too, instead of looking untranslated.
+ */
+export function applyPseudoLocale(instance: I18n): I18n {
   cached ??= pseudoCatalogue(enJson as Tree);
-  const instance = createI18nInstance('en');
   instance.store({ [PSEUDO_LOCALE]: cached });
   instance.locale = PSEUDO_LOCALE;
   return instance;
+}
+
+/** A fresh I18n instance rendering `en-XA`. */
+export function createPseudoI18nInstance(): I18n {
+  return applyPseudoLocale(createI18nInstance('en'));
 }
