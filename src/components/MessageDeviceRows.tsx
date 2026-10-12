@@ -14,6 +14,8 @@ export interface MessageDevicesSource {
   selfPubkey: string;
   /** Display name for a member (others; "You" is added here). */
   nameOf: (pubkey: string) => string;
+  /** When the message was sent (unix seconds), if known. */
+  sentAt?: number;
 }
 
 interface Props {
@@ -36,14 +38,18 @@ const MessageDeviceRows: React.FC<Props> = ({ source, fromMe, sentHere, styles }
   const t = useTranslation();
   const view = useMarmotDeviceDetails(source.chatId, true);
   if (!view) return null;
-  const from = sentFrom(view.people.get(source.sender.toLowerCase()), fromMe, sentHere);
+  const sender = source.sender.toLowerCase();
+  const from = sentFrom(view.people.get(sender), fromMe, sentHere, {
+    sentAt: source.sentAt,
+    removedAt: view.removedAt.get(sender),
+  });
   const label = (f: SentFrom) =>
     f.kind === 'thisDevice'
       ? t('chatDevices.thisPhone')
       : f.kind === 'app'
         ? (f.name ?? t('chatDevices.unknownApp'))
         : t('chatDevices.oneOfDevices', { count: f.count });
-  const readable = fromMe ? readableOn(view.people, source.selfPubkey) : null;
+  const readable = fromMe ? readableOn(view.people, source.selfPubkey, source.sentAt) : null;
   const breakdown = readable?.people
     .map((p) =>
       t('chatDevices.readableOnPerson', {

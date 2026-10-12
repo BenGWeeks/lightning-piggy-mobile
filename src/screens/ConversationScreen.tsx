@@ -334,6 +334,7 @@ const ConversationScreen: React.FC = () => {
   const {
     info: messageSheetInfo,
     sender: messageSheetSender,
+    sentAt: messageSheetSentAt,
     showInfo: handleShowInfo,
     closeInfo: closeMessageInfo,
     resendFromInfo: handleResendFromInfo,
@@ -951,7 +952,7 @@ const ConversationScreen: React.FC = () => {
         info={messageSheetInfo}
         onClose={closeMessageInfo}
         onResend={canResendFromInfo ? handleResendFromInfo : undefined}
-        devices={dmDevices.messageDevices(messageSheetSender)}
+        devices={dmDevices.messageDevices(messageSheetSender, messageSheetSentAt)}
       />
       <DmMembersSheet
         visible={dmDevices.sheetOpen}

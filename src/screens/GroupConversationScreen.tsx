@@ -314,6 +314,7 @@ const GroupConversationScreen: React.FC = () => {
   const {
     info: messageSheetInfo,
     sender: messageSheetSender,
+    sentAt: messageSheetSentAt,
     showInfo: handleShowInfo,
     closeInfo: closeMessageInfo,
     resendFromInfo: handleResendFromInfo,
@@ -901,7 +902,7 @@ const GroupConversationScreen: React.FC = () => {
         info={messageSheetInfo}
         onClose={closeMessageInfo}
         onResend={canResendFromInfo ? handleResendFromInfo : undefined}
-        devices={groupDevices.messageDevices(messageSheetSender)}
+        devices={groupDevices.messageDevices(messageSheetSender, messageSheetSentAt)}
       />
     </View>
   );

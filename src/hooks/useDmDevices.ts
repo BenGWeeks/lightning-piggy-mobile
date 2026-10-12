@@ -60,9 +60,9 @@ export function useDmDevices({
     [self, peer],
   );
   const messageDevices = useCallback(
-    (sender: string | null): MessageDevicesSource | null =>
+    (sender: string | null, sentAt?: number): MessageDevicesSource | null =>
       chatId && self && sender
-        ? { chatId, sender, selfPubkey: self, nameOf: () => peerName }
+        ? { chatId, sender, selfPubkey: self, nameOf: () => peerName, sentAt }
         : null,
     [chatId, self, peerName],
   );

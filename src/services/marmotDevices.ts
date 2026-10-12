@@ -139,12 +139,17 @@ export interface LeafRecord {
   /** It was already there the first time we looked at the group (when we
    * created or joined it), so `firstEpoch` is when WE arrived, not it. */
   baseline: boolean;
+  /** When this phone processed the commit that added it (unix seconds);
+   * absent for baseline leaves. */
+  seenAt?: number;
 }
 
 /** The leaves of a group as of one epoch, keyed by leaf signature key. */
 export interface LeafSnapshot {
   epoch: number;
   leaves: Record<string, LeafRecord>;
+  /** Person → when this phone last saw one of their devices leave (unix s). */
+  removedAt?: Record<string, number>;
 }
 
 /** One person's devices that appeared in a commit. */
@@ -160,20 +165,30 @@ export interface DeviceAddition {
  * Compare the tree after a commit with the last snapshot. The first look at a
  * group is a baseline (nothing is "added" — that's the state we created or
  * joined). A snapshot from a later-or-equal epoch (a fork rewind) re-baselines
- * silently rather than inventing changes. Removed leaves just drop out.
+ * silently rather than inventing changes. A removed leaf drops out, and when
+ * its person is noted (`removedAt`), so a later "Sent from" for an older
+ * message doesn't guess from the smaller set.
  */
 export function diffLeaves(
   prev: LeafSnapshot | null,
   leaves: readonly GroupLeaf[],
   epoch: number,
+  nowSecs: number,
 ): { snapshot: LeafSnapshot; added: DeviceAddition[] } {
   const next: LeafSnapshot = { epoch, leaves: {} };
+  const current = new Set(leaves.map((l) => l.key));
+  const removedAt = { ...prev?.removedAt };
+  for (const [key, record] of Object.entries(prev?.leaves ?? {})) {
+    if (!current.has(key)) removedAt[record.pubkey] = nowSecs;
+  }
+  if (Object.keys(removedAt).length > 0) next.removedAt = removedAt;
   if (!prev || epoch <= prev.epoch) {
     for (const l of leaves) {
       next.leaves[l.key] = prev?.leaves[l.key] ?? {
         pubkey: l.pubkey,
         firstEpoch: epoch,
         baseline: !prev,
+        ...(prev ? { seenAt: nowSecs } : {}),
       };
     }
     return { snapshot: next, added: [] };
@@ -186,7 +201,7 @@ export function diffLeaves(
       next.leaves[l.key] = seen;
       continue;
     }
-    next.leaves[l.key] = { pubkey: l.pubkey, firstEpoch: epoch, baseline: false };
+    next.leaves[l.key] = { pubkey: l.pubkey, firstEpoch: epoch, baseline: false, seenAt: nowSecs };
     const entry = added.get(l.pubkey) ?? {
       pubkey: l.pubkey,
       joined: !before.has(l.pubkey),

@@ -44,7 +44,7 @@ function setup(fetchKeyPackages = jest.fn(async (_pk: string): Promise<NostrEven
   const make = () =>
     new MarmotDeviceTracker({
       backend,
-      group: (h) => groups.get(h),
+      groups: () => [...groups.values()],
       fetchKeyPackages,
       ownClient: 'Lightning Piggy',
       now: () => now,
@@ -104,6 +104,64 @@ describe('MarmotDeviceTracker', () => {
     expect(notices).toEqual([
       expect.objectContaining({ pubkey: peer, joined: true, keys: [keyHex(2)], clients: [null] }),
     ]);
+  });
+
+  it('captures each commit when it happens, even while an earlier one is being stored', async () => {
+    const t = setup();
+    const tracker = t.make();
+    // One live group object whose state moves on (as marmot-ts's does).
+    const live = group('g1', [{ pubkey: me, key: 1 }], 0);
+    const advanceTo = (slots: { pubkey: string; key: number }[], epoch: number) => {
+      live.state = group('g1', slots, epoch).state;
+    };
+    void tracker.observe(live);
+    advanceTo(
+      [
+        { pubkey: me, key: 1 },
+        { pubkey: peer, key: 2 },
+      ],
+      1,
+    );
+    void tracker.observe(live);
+    advanceTo([{ pubkey: me, key: 1 }], 2); // …and gone again before storage caught up
+    await tracker.observe(live);
+    expect(await tracker.notices('g1')).toEqual([
+      expect.objectContaining({ pubkey: peer, joined: true, epoch: 1 }),
+    ]);
+  });
+
+  it('does nothing for a state change that keeps the epoch (an ordinary message)', async () => {
+    const t = setup();
+    const get = jest.spyOn(t.backend, 'get');
+    const tracker = t.make();
+    const g = group('g1', [{ pubkey: me, key: 1 }], 4);
+    await tracker.observe(g);
+    const calls = get.mock.calls.length + t.set.mock.calls.length;
+    for (let i = 0; i < 20; i++) await tracker.observe(g);
+    expect(get.mock.calls.length + t.set.mock.calls.length).toBe(calls);
+  });
+
+  it('counts are cached per epoch (same Map until a commit)', () => {
+    const t = setup();
+    t.groups.set('g1', group('g1', [{ pubkey: me, key: 1 }], 1));
+    const tracker = t.make();
+    const first = tracker.counts('g1');
+    expect(tracker.counts('g1')).toBe(first);
+    t.groups.set(
+      'g1',
+      group(
+        'g1',
+        [
+          { pubkey: me, key: 1 },
+          { pubkey: peer, key: 2 },
+        ],
+        2,
+      ),
+    );
+    expect(tracker.counts('g1')).not.toBe(first);
+    expect(tracker.counts('g1')?.get(peer)).toBe(1);
+    expect(tracker.epochOf('g1')).toBe(2);
+    expect(tracker.groupCount()).toBe(1);
   });
 
   it(`keeps at most ${MAX_DEVICE_NOTICES} notices per chat`, async () => {
@@ -184,7 +242,9 @@ describe('MarmotDeviceTracker', () => {
   });
 
   it('a failed lookup is just "unknown"', async () => {
-    const t = setup(jest.fn(async () => Promise.reject(new Error('offline'))));
+    const t = setup(
+      jest.fn(async (_pk: string): Promise<NostrEvent[]> => Promise.reject(new Error('offline'))),
+    );
     t.groups.set(
       'g1',
       group(

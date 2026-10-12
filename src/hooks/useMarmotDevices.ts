@@ -1,14 +1,16 @@
 // React side of a person's devices in a Marmot chat (#1267). Three hooks, each
 // as lazy as its surface allows (CLAUDE.md performance rules):
 //   - useMarmotChatDevices: the chat's id + per-person device COUNTS for the
-//     header by-line and the members sheet subtitles. Recomputed only when
-//     the session reports a membership change (a commit), never per message,
-//     and only while the screen is focused.
+//     header by-line and the members sheet subtitles. Only while the screen
+//     is focused, and only re-read when the chat's epoch moves (a commit) or
+//     a chat appears — never per message.
 //   - useMarmotDeviceDetails: the full device list (apps, times, epochs), read
 //     only while a sheet that shows it is open; opening it also runs the
 //     bounded relay lookup that names unknown apps.
 //   - useMarmotDeviceNotices: the alpha-only "joined on N devices" lines,
 //     behind the developer switch.
+// All three follow the active session (account switch, sign-in) and ignore a
+// slower, older read that finishes after a newer one.
 
 import { useCallback, useEffect, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
@@ -19,7 +21,6 @@ import {
 } from '../services/deviceNoticesPreference';
 import type { DeviceNoticeView, GroupDevices } from '../services/marmotDeviceTracker';
 import {
-  getMarmotSession,
   MARMOT_GROUP_ID_PREFIX,
   subscribeMarmotSession,
   type MarmotSession,
@@ -38,7 +39,7 @@ export interface MarmotChatDevices {
   counts: ReadonlyMap<string, number> | null;
 }
 
-const NO_CHAT: MarmotChatDevices & { sig: string } = { chatId: null, counts: null, sig: '' };
+const NO_CHAT: MarmotChatDevices = { chatId: null, counts: null };
 const NO_NOTICES: DeviceNoticeView[] = [];
 
 function chatIdFor(session: MarmotSession, ref: MarmotChatRef): string | null {
@@ -46,6 +47,29 @@ function chatIdFor(session: MarmotSession, ref: MarmotChatRef): string | null {
   return appId?.startsWith(MARMOT_GROUP_ID_PREFIX)
     ? appId.slice(MARMOT_GROUP_ID_PREFIX.length)
     : null;
+}
+
+/**
+ * Run `bind(session)` for the active session while mounted, re-binding when
+ * the session changes (its cleanup runs first). No session → nothing bound.
+ */
+function useActiveSession(
+  bind: (session: MarmotSession) => (() => void) | void,
+  onNoSession: () => void,
+): void {
+  useEffect(() => {
+    let cleanup: (() => void) | void;
+    const unsubscribe = subscribeMarmotSession((session) => {
+      cleanup?.();
+      cleanup = undefined;
+      if (session) cleanup = bind(session);
+      else onNoSession();
+    });
+    return () => {
+      unsubscribe();
+      cleanup?.();
+    };
+  }, [bind, onNoSession]);
 }
 
 /** The chat's id and device counts, kept current while the screen is focused. */
@@ -62,13 +86,6 @@ export function useMarmotChatDevices(
         return;
       }
       let unsubscribeGroups: (() => void) | null = null;
-      const update = (session: MarmotSession) => {
-        const chatId = chatIdFor(session, { groupId, peer });
-        const counts = chatId ? session.devices.counts(chatId) : null;
-        const sig = `${chatId}|${counts ? [...counts].join(';') : ''}`;
-        // Same counts → same object: no re-render for an unrelated commit.
-        setState((prev) => (prev.sig === sig ? prev : { chatId, counts, sig }));
-      };
       const unsubscribeSession = subscribeMarmotSession((session) => {
         unsubscribeGroups?.();
         unsubscribeGroups = null;
@@ -76,8 +93,28 @@ export function useMarmotChatDevices(
           setState(NO_CHAT);
           return;
         }
-        update(session);
-        unsubscribeGroups = session.subscribe({ onGroupsChanged: () => update(session) });
+        // Re-read only when a chat appears (a 1:1's newest group can change)
+        // or this chat's epoch moves. Every message also fires "groups
+        // changed" (the secret tree moves); those cost two cheap reads.
+        let last: { groups: number; chatId: string | null; epoch: number | null } | null = null;
+        const update = () => {
+          const groups = session.devices.groupCount();
+          if (
+            last?.groups === groups &&
+            (last.chatId === null || session.devices.epochOf(last.chatId) === last.epoch)
+          ) {
+            return;
+          }
+          const chatId = chatIdFor(session, { groupId, peer });
+          last = { groups, chatId, epoch: chatId ? session.devices.epochOf(chatId) : null };
+          // Same epoch → the tracker hands back the same Map: no re-render.
+          const counts = chatId ? session.devices.counts(chatId) : null;
+          setState((prev) =>
+            prev.chatId === chatId && prev.counts === counts ? prev : { chatId, counts },
+          );
+        };
+        update();
+        unsubscribeGroups = session.subscribe({ onGroupsChanged: update });
       });
       return () => {
         unsubscribeSession();
@@ -92,37 +129,50 @@ export function useMarmotChatDevices(
  * Every device in the chat with its app, key time and epoch — loaded only
  * while `enabled` (the sheet showing it is open). Opening also starts the
  * bounded relay lookup for apps we don't know yet; the list refreshes when
- * it finds any, and on membership changes.
+ * it finds any, and when a commit changes the chat.
  */
 export function useMarmotDeviceDetails(
   chatId: string | null,
   enabled: boolean,
 ): GroupDevices | null {
   const [devices, setDevices] = useState<{ chatId: string; view: GroupDevices } | null>(null);
-  useEffect(() => {
-    const session = getMarmotSession();
-    if (!enabled || !chatId || !session) return;
-    let live = true;
-    const load = () => {
-      session.devices
-        .devices(chatId)
-        .then((view) => {
-          if (live && view) setDevices({ chatId, view });
-        })
-        .catch(() => undefined);
-    };
-    load();
-    void session.devices.resolveClients(chatId).catch(() => false);
-    const unsubscribeTracker = session.devices.subscribe((id) => {
-      if (id === chatId) load();
-    });
-    const unsubscribeGroups = session.subscribe({ onGroupsChanged: load });
-    return () => {
-      live = false;
-      unsubscribeTracker();
-      unsubscribeGroups();
-    };
-  }, [chatId, enabled]);
+  const bind = useCallback(
+    (session: MarmotSession) => {
+      if (!enabled || !chatId) return;
+      let live = true;
+      let latest = 0;
+      let loadedEpoch: number | null = null;
+      const load = () => {
+        const request = ++latest;
+        loadedEpoch = session.devices.epochOf(chatId);
+        session.devices
+          .devices(chatId)
+          .then((view) => {
+            // Only the newest read counts: an older, slower one is stale.
+            if (live && request === latest && view) setDevices({ chatId, view });
+          })
+          .catch(() => undefined);
+      };
+      load();
+      void session.devices.resolveClients(chatId).catch(() => false);
+      const unsubscribeTracker = session.devices.subscribe((id) => {
+        if (id === chatId) load();
+      });
+      const unsubscribeGroups = session.subscribe({
+        onGroupsChanged: () => {
+          if (session.devices.epochOf(chatId) !== loadedEpoch) load();
+        },
+      });
+      return () => {
+        live = false;
+        unsubscribeTracker();
+        unsubscribeGroups();
+      };
+    },
+    [chatId, enabled],
+  );
+  const clear = useCallback(() => setDevices(null), []);
+  useActiveSession(bind, clear);
   return devices && devices.chatId === chatId ? devices.view : null;
 }
 
@@ -149,25 +199,39 @@ export function useMarmotDeviceNotices(chatId: string | null): DeviceNoticeView[
   const [notices, setNotices] = useState<{ chatId: string; list: DeviceNoticeView[] } | null>(null);
   useFocusEffect(
     useCallback(() => {
-      const session = getMarmotSession();
-      if (!enabled || !chatId || !session) return;
-      let live = true;
-      const load = () => {
-        session.devices
-          .notices(chatId)
-          .then((list) => {
-            if (live) setNotices({ chatId, list });
-          })
-          .catch(() => undefined);
-      };
-      load();
-      // Fires only when a commit adds devices or an app name is learnt.
-      const unsubscribe = session.devices.subscribe((id) => {
-        if (id === chatId) load();
+      if (!enabled || !chatId) return;
+      let cleanup: (() => void) | undefined;
+      const unsubscribeSession = subscribeMarmotSession((session) => {
+        cleanup?.();
+        cleanup = undefined;
+        if (!session) {
+          setNotices(null);
+          return;
+        }
+        let live = true;
+        let latest = 0;
+        const load = () => {
+          const request = ++latest;
+          session.devices
+            .notices(chatId)
+            .then((list) => {
+              if (live && request === latest) setNotices({ chatId, list });
+            })
+            .catch(() => undefined);
+        };
+        load();
+        // Fires only when a commit adds devices or an app name is learnt.
+        const unsubscribe = session.devices.subscribe((id) => {
+          if (id === chatId) load();
+        });
+        cleanup = () => {
+          live = false;
+          unsubscribe();
+        };
       });
       return () => {
-        live = false;
-        unsubscribe();
+        unsubscribeSession();
+        cleanup?.();
       };
     }, [chatId, enabled]),
   );

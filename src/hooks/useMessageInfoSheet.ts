@@ -12,6 +12,9 @@ export interface ShowMessageInfoArgs {
   deliveryStatus?: DeliveryStatus;
   resendText: string;
   resendIsGif?: boolean;
+  /** When the message was sent (unix seconds) — the Marmot device rows
+   * count only devices that were in the chat then (#1267). */
+  createdAt?: number;
 }
 
 /**
@@ -36,6 +39,7 @@ export function useMessageInfoSheet(
     info: MessageInfo;
     canResend: boolean;
     sender: string | null;
+    sentAt?: number;
   } | null>(null);
 
   const showInfo = useCallback(
@@ -51,6 +55,7 @@ export function useMessageInfoSheet(
           resendIsGif: args.resendIsGif,
         }),
         sender: senderOf?.(args.eventId, args.fromMe) ?? null,
+        sentAt: args.createdAt,
       });
     },
     [protocol, senderOf],
@@ -67,6 +72,7 @@ export function useMessageInfoSheet(
   return {
     info: messageInfo?.info ?? null,
     sender: messageInfo?.sender ?? null,
+    sentAt: messageInfo?.sentAt,
     showInfo,
     closeInfo,
     resendFromInfo,

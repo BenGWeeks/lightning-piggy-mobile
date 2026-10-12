@@ -22,13 +22,14 @@ export function useGroupDevices({
   const notices = useMarmotDeviceNotices(chatId);
   const self = myPubkey?.toLowerCase() ?? null;
   const messageDevices = useCallback(
-    (sender: string | null): MessageDevicesSource | null =>
+    (sender: string | null, sentAt?: number): MessageDevicesSource | null =>
       chatId && self && sender
         ? {
             chatId,
             sender,
             selfPubkey: self,
             nameOf: (pk) => memberNameByPubkey.get(pk) ?? shortNpub(pk),
+            sentAt,
           }
         : null,
     [chatId, self, memberNameByPubkey],

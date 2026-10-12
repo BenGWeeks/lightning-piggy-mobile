@@ -162,6 +162,8 @@ describe('keyPackageClient', () => {
 
 describe('diffLeaves', () => {
   const [me, peer, third] = [person(), person(), person()];
+  // When this phone processed each epoch's commit (unix seconds).
+  const at = (epoch: number) => 1_800_000_000 + epoch * 60;
   const leaf = (pubkey: string, key: string): GroupLeaf => ({
     pubkey,
     key,
@@ -171,7 +173,7 @@ describe('diffLeaves', () => {
   });
 
   it('baselines the first look: nothing added, every leaf marked as already there', () => {
-    const { snapshot, added } = diffLeaves(null, [leaf(me, 'a'), leaf(peer, 'b')], 1);
+    const { snapshot, added } = diffLeaves(null, [leaf(me, 'a'), leaf(peer, 'b')], 1, at(1));
     expect(added).toEqual([]);
     expect(snapshot).toEqual({
       epoch: 1,
@@ -182,43 +184,64 @@ describe('diffLeaves', () => {
     });
   });
 
-  it('reports a person joining on several devices as one addition', () => {
-    const base = diffLeaves(null, [leaf(me, 'a')], 0).snapshot;
+  it('reports a person joining on several devices as one addition, with when it was seen', () => {
+    const base = diffLeaves(null, [leaf(me, 'a')], 0, at(0)).snapshot;
     const { snapshot, added } = diffLeaves(
       base,
       [leaf(me, 'a'), leaf(peer, 'b'), leaf(peer, 'c')],
       1,
+      at(1),
     );
     expect(added).toEqual([{ pubkey: peer, joined: true, keys: ['b', 'c'] }]);
-    expect(snapshot.leaves.b).toEqual({ pubkey: peer, firstEpoch: 1, baseline: false });
+    expect(snapshot.leaves.b).toEqual({
+      pubkey: peer,
+      firstEpoch: 1,
+      baseline: false,
+      seenAt: at(1),
+    });
     expect(snapshot.leaves.a).toEqual(base.leaves.a);
   });
 
   it('reports a new device of someone already here as "added", not "joined"', () => {
-    const base = diffLeaves(null, [leaf(me, 'a'), leaf(peer, 'b')], 3).snapshot;
-    const { added } = diffLeaves(base, [leaf(me, 'a'), leaf(peer, 'b'), leaf(peer, 'c')], 4);
+    const base = diffLeaves(null, [leaf(me, 'a'), leaf(peer, 'b')], 3, at(3)).snapshot;
+    const { added } = diffLeaves(base, [leaf(me, 'a'), leaf(peer, 'b'), leaf(peer, 'c')], 4, at(4));
     expect(added).toEqual([{ pubkey: peer, joined: false, keys: ['c'] }]);
   });
 
-  it('drops removed devices silently and reports nothing for them', () => {
-    const base = diffLeaves(null, [leaf(me, 'a'), leaf(peer, 'b'), leaf(peer, 'c')], 3).snapshot;
-    const { snapshot, added } = diffLeaves(base, [leaf(me, 'a'), leaf(peer, 'b')], 4);
+  it('drops a removed device, reports nothing for it, and notes when its person lost it', () => {
+    const base = diffLeaves(
+      null,
+      [leaf(me, 'a'), leaf(peer, 'b'), leaf(peer, 'c')],
+      3,
+      at(3),
+    ).snapshot;
+    const { snapshot, added } = diffLeaves(base, [leaf(me, 'a'), leaf(peer, 'b')], 4, at(4));
     expect(added).toEqual([]);
     expect(Object.keys(snapshot.leaves)).toEqual(['a', 'b']);
+    expect(snapshot.removedAt).toEqual({ [peer]: at(4) });
+    // Kept across later commits.
+    expect(
+      diffLeaves(snapshot, [leaf(me, 'a'), leaf(peer, 'b')], 5, at(5)).snapshot.removedAt,
+    ).toEqual({ [peer]: at(4) });
   });
 
   it('a removed person who comes back later "joins" again', () => {
-    const base = diffLeaves(null, [leaf(me, 'a'), leaf(peer, 'b')], 3).snapshot;
-    const gone = diffLeaves(base, [leaf(me, 'a')], 4).snapshot;
-    expect(diffLeaves(gone, [leaf(me, 'a'), leaf(peer, 'z')], 5).added).toEqual([
+    const base = diffLeaves(null, [leaf(me, 'a'), leaf(peer, 'b')], 3, at(3)).snapshot;
+    const gone = diffLeaves(base, [leaf(me, 'a')], 4, at(4)).snapshot;
+    expect(diffLeaves(gone, [leaf(me, 'a'), leaf(peer, 'z')], 5, at(5)).added).toEqual([
       { pubkey: peer, joined: true, keys: ['z'] },
     ]);
   });
 
   it('re-baselines silently on an older-or-equal epoch (a fork rewind)', () => {
-    const base = diffLeaves(null, [leaf(me, 'a')], 5).snapshot;
-    const { snapshot, added } = diffLeaves(base, [leaf(me, 'a'), leaf(third, 't')], 5);
+    const base = diffLeaves(null, [leaf(me, 'a')], 5, at(5)).snapshot;
+    const { snapshot, added } = diffLeaves(base, [leaf(me, 'a'), leaf(third, 't')], 5, at(6));
     expect(added).toEqual([]);
-    expect(snapshot.leaves.t).toEqual({ pubkey: third, firstEpoch: 5, baseline: false });
+    expect(snapshot.leaves.t).toEqual({
+      pubkey: third,
+      firstEpoch: 5,
+      baseline: false,
+      seenAt: at(6),
+    });
   });
 });

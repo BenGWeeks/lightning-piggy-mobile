@@ -293,7 +293,7 @@ export class MarmotSession {
     });
     this.devices = new MarmotDeviceTracker({
       backend: this.backend,
-      group: (h) => this.client.groups.loaded.find((g) => g.idStr === h),
+      groups: () => this.client.groups.loaded,
       fetchKeyPackages: (pk) => fetchKeyPackageEvents(network, opts.getLookupRelays(), pk),
       ownClient: CLIENT_NAME,
     });

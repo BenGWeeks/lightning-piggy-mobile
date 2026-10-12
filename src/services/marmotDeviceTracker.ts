@@ -9,9 +9,13 @@
 //     when WE invite a device (we hold its invitation key then) or found by
 //     a bounded relay lookup when the members sheet opens.
 //   - `deviceLeaves`: per group, the leaves as of the last commit we
-//     processed, with the epoch each was first seen in.
+//     processed, with the epoch (and time) each was first seen.
 //   - `deviceNotices`: per group, the "X joined on 2 devices" lines drawn
 //     from those commits. Local only — never sent to anyone.
+//
+// marmot-ts reports a state change for EVERY message (the secret tree moves
+// on), but leaves only change with a commit, which always moves the epoch —
+// so all work here is gated on the epoch and costs nothing per message.
 
 import type { ClientState } from '@internet-privacy/marmot-ts/mls';
 import type { Event as NostrEvent } from 'nostr-tools';
@@ -22,6 +26,7 @@ import {
   keyPackageClient,
   keyPackageSignatureKey,
   readGroupLeaves,
+  type GroupLeaf,
   type LeafSnapshot,
 } from './marmotDevices';
 import type { MarmotKvBackend } from './marmotStore';
@@ -57,6 +62,9 @@ export interface DeviceInfo {
   firstEpoch: number | null;
   /** It was already here when we created / joined the chat. */
   baseline: boolean;
+  /** When this phone processed the commit that added it (unix seconds);
+   * null if it was here when we arrived. */
+  seenAt: number | null;
   /** This device (the one we're running on). */
   isOwn: boolean;
 }
@@ -65,6 +73,8 @@ export interface GroupDevices {
   epoch: number;
   /** Person (lower-case pubkey) → their devices, in leaf order. */
   people: Map<string, DeviceInfo[]>;
+  /** Person → when this phone last saw one of their devices leave (unix s). */
+  removedAt: ReadonlyMap<string, number>;
 }
 
 /** A device change, drawn locally from a commit. */
@@ -90,10 +100,18 @@ interface KeyRecord {
   publishedAt: number;
 }
 
+/** What one state change looked like, captured when it happened. */
+interface Observation {
+  idStr: string;
+  leaves: GroupLeaf[];
+  epoch: number;
+  atSecs: number;
+}
+
 export interface MarmotDeviceTrackerOptions {
   backend: Pick<MarmotKvBackend, 'get' | 'set'>;
-  /** A loaded group by MLS id hex. */
-  group: (idStr: string) => TrackedGroup | undefined;
+  /** The loaded groups. */
+  groups: () => readonly TrackedGroup[];
   /** A person's kind-30443 events (bounded relay query). */
   fetchKeyPackages: (pubkey: string) => Promise<NostrEvent[]>;
   /** Our own `client` name — this device always knows what it is. */
@@ -114,9 +132,11 @@ export class MarmotDeviceTracker {
   private readonly opts: MarmotDeviceTrackerOptions;
   private readonly snapshots = new Map<string, LeafSnapshot | null>();
   private readonly chains = new Map<string, Promise<void>>();
+  private readonly observedEpoch = new Map<string, number>();
   private readonly watched = new Set<string>();
   private readonly lookedUp = new Map<string, number>();
   private readonly listeners = new Set<(idStr: string) => void>();
+  private readonly countsCache = new Map<string, { epoch: number; counts: Map<string, number> }>();
 
   constructor(opts: MarmotDeviceTrackerOptions) {
     this.opts = opts;
@@ -124,6 +144,21 @@ export class MarmotDeviceTracker {
 
   private now(): number {
     return this.opts.now?.() ?? Date.now();
+  }
+
+  private group(idStr: string): TrackedGroup | undefined {
+    return this.opts.groups().find((g) => g.idStr === idStr);
+  }
+
+  /** How many groups are loaded — lets a screen notice a new chat cheaply. */
+  groupCount(): number {
+    return this.opts.groups().length;
+  }
+
+  /** The chat's current epoch; null if it isn't loaded. */
+  epochOf(idStr: string): number | null {
+    const g = this.group(idStr);
+    return g ? Number(g.state.groupContext.epoch) : null;
   }
 
   /** Called with a group's MLS id hex when its notices or device names change. */
@@ -147,10 +182,26 @@ export class MarmotDeviceTracker {
     g.on('stateChanged', () => this.observe(g));
   }
 
-  /** Compare the group's leaves with the last snapshot (serialised per group). */
+  /**
+   * Note the group's state. Skipped unless the epoch moved (a commit). The
+   * leaves are read NOW, synchronously — the group object keeps changing, and
+   * a queued read could miss a state (an add then a remove would show neither).
+   * Comparison + storage then run serialised per group.
+   */
   observe(g: TrackedGroup): Promise<void> {
+    const epoch = Number(g.state.groupContext.epoch);
+    if (this.observedEpoch.get(g.idStr) === epoch) {
+      return this.chains.get(g.idStr) ?? Promise.resolve();
+    }
+    this.observedEpoch.set(g.idStr, epoch);
+    const seen: Observation = {
+      idStr: g.idStr,
+      leaves: readGroupLeaves(g.state),
+      epoch,
+      atSecs: Math.floor(this.now() / 1000),
+    };
     const run = (this.chains.get(g.idStr) ?? Promise.resolve())
-      .then(() => this.compare(g))
+      .then(() => this.compare(seen))
       .catch((e) => {
         if (__DEV__) console.warn('[Marmot] device tracking failed:', e);
       });
@@ -158,34 +209,31 @@ export class MarmotDeviceTracker {
     return run;
   }
 
-  private async compare(g: TrackedGroup): Promise<void> {
-    const leaves = readGroupLeaves(g.state);
-    const epoch = Number(g.state.groupContext.epoch);
-    const prev = await this.snapshot(g.idStr);
-    const { snapshot, added } = diffLeaves(prev, leaves, epoch);
-    this.snapshots.set(g.idStr, snapshot);
+  private async compare({ idStr, leaves, epoch, atSecs }: Observation): Promise<void> {
+    const prev = await this.snapshot(idStr);
+    const { snapshot, added } = diffLeaves(prev, leaves, epoch, atSecs);
+    this.snapshots.set(idStr, snapshot);
     // Persist only when the set of leaves changed (not on every epoch).
     const keys = (s: LeafSnapshot | null) => (s ? Object.keys(s.leaves).sort().join() : null);
     if (keys(prev) !== keys(snapshot)) {
-      await this.opts.backend.set(LEAVES_NS, g.idStr, JSON.stringify(snapshot));
+      await this.opts.backend.set(LEAVES_NS, idStr, JSON.stringify(snapshot));
     }
     if (added.length === 0) return;
-    const at = Math.floor(this.now() / 1000);
-    const notices = await this.storedNotices(g.idStr);
+    const notices = await this.storedNotices(idStr);
     for (const a of added) {
       notices.push({
-        id: `${g.idStr.slice(0, 8)}-${epoch}-${a.pubkey.slice(0, 8)}`,
-        at,
+        id: `${idStr.slice(0, 8)}-${epoch}-${a.pubkey.slice(0, 8)}`,
+        at: atSecs,
         epoch,
         ...a,
       });
     }
     await this.opts.backend.set(
       NOTICES_NS,
-      g.idStr,
+      idStr,
       JSON.stringify(notices.slice(-MAX_DEVICE_NOTICES)),
     );
-    this.emit(g.idStr);
+    this.emit(idStr);
   }
 
   private async snapshot(idStr: string): Promise<LeafSnapshot | null> {
@@ -205,10 +253,16 @@ export class MarmotDeviceTracker {
     }
   }
 
-  /** Each person's device count right now — a cheap tree walk, no storage. */
+  /** Each person's device count — a tree walk once per epoch, cached. */
   counts(idStr: string): Map<string, number> | null {
-    const g = this.opts.group(idStr);
-    return g ? deviceCounts(readGroupLeaves(g.state)) : null;
+    const g = this.group(idStr);
+    if (!g) return null;
+    const epoch = Number(g.state.groupContext.epoch);
+    const cached = this.countsCache.get(idStr);
+    if (cached?.epoch === epoch) return cached.counts;
+    const counts = deviceCounts(readGroupLeaves(g.state));
+    this.countsCache.set(idStr, { epoch, counts });
+    return counts;
   }
 
   private async storedNotices(idStr: string): Promise<DeviceNotice[]> {
@@ -217,10 +271,9 @@ export class MarmotDeviceTracker {
 
   /** The chat's notices, oldest first, each with its devices' apps. */
   async notices(idStr: string): Promise<DeviceNoticeView[]> {
-    const stored = await this.storedNotices(idStr);
-    if (stored.length === 0) return [];
-    const g = this.opts.group(idStr);
+    const g = this.group(idStr);
     const own = g ? readGroupLeaves(g.state).find((l) => l.isOwn)?.key : undefined;
+    const stored = await this.storedNotices(idStr);
     const out: DeviceNoticeView[] = [];
     for (const n of stored) {
       const clients: (string | null)[] = [];
@@ -238,9 +291,13 @@ export class MarmotDeviceTracker {
 
   /** Every device in the chat with what we know about it; null if not loaded. */
   async devices(idStr: string): Promise<GroupDevices | null> {
-    const g = this.opts.group(idStr);
+    const g = this.group(idStr);
     if (!g) return null;
+    // Tree and epoch read together, before any await.
     const leaves = readGroupLeaves(g.state);
+    const epoch = Number(g.state.groupContext.epoch);
+    // Let the comparison for this state land first, so its epochs are known.
+    await this.chains.get(idStr);
     const snapshot = await this.snapshot(idStr);
     const people = new Map<string, DeviceInfo[]>();
     for (const leaf of leaves) {
@@ -255,13 +312,14 @@ export class MarmotDeviceTracker {
         keyCreatedAt: leaf.keyCreatedAt ?? record?.publishedAt ?? null,
         firstEpoch: seen?.firstEpoch ?? null,
         baseline: seen?.baseline ?? false,
+        seenAt: seen?.seenAt ?? null,
         isOwn: leaf.isOwn,
       };
       const list = people.get(leaf.pubkey);
       if (list) list.push(info);
       else people.set(leaf.pubkey, [info]);
     }
-    return { epoch: Number(g.state.groupContext.epoch), people };
+    return { epoch, people, removedAt: new Map(Object.entries(snapshot?.removedAt ?? {})) };
   }
 
   /**
