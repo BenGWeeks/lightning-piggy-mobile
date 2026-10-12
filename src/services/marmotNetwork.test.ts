@@ -132,8 +132,9 @@ describe('push relay destination policy', () => {
   });
 
   it('never publishes a trigger to a private or plaintext relay', async () => {
-    const publish = pool.publish as unknown as jest.Mock;
-    publish.mockClear();
+    const publish = mockPublish;
+    publish.mockReset();
+    publish.mockReturnValue([]);
     const transport = createPushTransport(() => []);
     await transport.publish(['ws://192.168.1.1/', 'wss://127.0.0.1'], {} as never);
     expect(publish).not.toHaveBeenCalled();
