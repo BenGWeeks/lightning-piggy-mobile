@@ -8,7 +8,9 @@
 //   - never held in the delivered-dedupe cache (a duplicate update is
 //     harmless — the update store drops anything not newer).
 
+import { makeKeyValueRumorHistoryFactory } from '@internet-privacy/marmot-ts/extra';
 import type { GenericKeyValueStore } from '@internet-privacy/marmot-ts/utils';
+import type { Rumor } from 'applesauce-common/helpers/gift-wrap';
 import { isTransientMarmotKind } from './marmotKinds';
 
 export { isTransientMarmotKind };
@@ -23,3 +25,8 @@ export function skipTransientRumors<T extends { kind: number }>(
       isTransientMarmotKind(value.kind) ? Promise.resolve(value) : store.setItem(key, value),
   };
 }
+
+/** marmot-ts's key-value rumor history, minus transient rumors. */
+export const transientFreeHistoryFactory = (
+  storeFor: (groupId: Uint8Array) => GenericKeyValueStore<Rumor>,
+) => makeKeyValueRumorHistoryFactory((groupId) => skipTransientRumors(storeFor(groupId)));

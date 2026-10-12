@@ -91,8 +91,7 @@ import {
   createSqliteMarmotBackend,
   type MarmotKvBackend,
 } from './marmotStore';
-import { makeKeyValueRumorHistoryFactory } from '@internet-privacy/marmot-ts/extra';
-import { isTransientMarmotKind, skipTransientRumors } from './marmotTransientRumors';
+import { isTransientMarmotKind, transientFreeHistoryFactory } from './marmotTransientRumors';
 import type { Rumor } from 'applesauce-common/helpers/gift-wrap';
 
 /** Marmot's default chat-message kind (foundation/application-messages.md). */
@@ -285,10 +284,9 @@ export class MarmotSession {
       removedMarkerStore: store('removed'),
       // Durable per-group message history: the safety net that makes delivery
       // survive the app dying between MLS processing and our own store write.
-      // Transient live-state events (live-location updates, #1300) are kept
-      // out of it so they can't evict real messages from the window.
-      historyFactory: makeKeyValueRumorHistoryFactory((groupId) =>
-        skipTransientRumors(store<Rumor>(historyNamespace(bytesToHex(groupId)))),
+      // Live-location updates (#1300) are kept out of it (see marmotTransientRumors).
+      historyFactory: transientFreeHistoryFactory((groupId) =>
+        store<Rumor>(historyNamespace(bytesToHex(groupId))),
       ),
     });
   }
@@ -822,8 +820,7 @@ export class MarmotSession {
     // or the startup history replay); deliver it once so listeners never
     // double-notify. Keyed per group: an identical rumor sent into two
     // groups shares an id.
-    // Transient live state (#1300) skips the cache: a duplicate is harmless
-    // and ~1k location updates must not evict real messages' keys.
+    // Live state (#1300) skips the cache: duplicates are harmless, keys aren't.
     if (isTransientMarmotKind(rumor.kind)) return this.emit(g, rumor);
     const deliveryKey = `${g.idStr}:${rumor.id}`;
     if (this.deliveredRumors.has(deliveryKey)) return;
