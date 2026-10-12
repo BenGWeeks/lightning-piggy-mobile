@@ -85,6 +85,9 @@ export const PER_ACCOUNT_STORAGE_BASES: readonly string[] = [
 //     ALREADY namespaced inline (key embeds pubkey via inboxCacheKey
 //     / convCacheKey in NostrContext.tsx)
 //   - nostr_group_activity_${pubkey}   -> ALREADY namespaced
+//   - chat_read_positions_v1_${pubkey}  -> ALREADY namespaced (#1295,
+//                                         written via perAccountKey; new
+//                                         key, nothing to migrate)
 //   - group_history_${pubkey}:${groupId} -> ALREADY namespaced (#1240;
 //                                         legacy group_messages_${groupId}
 //                                         migrated by groupMessagesMigration)

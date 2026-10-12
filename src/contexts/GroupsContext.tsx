@@ -46,7 +46,7 @@ import {
   SECRET_MODE_KEY_BASE,
 } from '../services/safetySettingsMigration';
 import { deriveInitialWotTier } from '../utils/wotMigration';
-import { dmRowPreview } from '../utils/dmRowPreview';
+import { activityFromMessages } from '../utils/groupActivity';
 import { isMarmotGroupId } from '../services/marmotSession';
 import { useMarmotGroups } from './useMarmotGroups';
 
@@ -135,52 +135,6 @@ interface GroupsContextType {
    * renders so groups appear inline with 1:1 DMs.
    */
   groupSummaries: GroupSummary[];
-}
-
-const RECENT_SENDERS_CAP = 3;
-
-function computeRecentSenders(messages: { senderPubkey: string; createdAt: number }[]): string[] {
-  // Walk newest-first, dedup by pubkey, take up to N. Storage already
-  // sorts by createdAt asc, so iterate from the tail.
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (let i = messages.length - 1; i >= 0 && out.length < RECENT_SENDERS_CAP; i--) {
-    const pk = messages[i].senderPubkey.toLowerCase();
-    if (seen.has(pk)) continue;
-    seen.add(pk);
-    out.push(pk);
-  }
-  return out;
-}
-
-function activityFromMessages(
-  group: Group,
-  messages: { id?: string; senderPubkey: string; text: string; createdAt: number }[],
-): GroupActivity {
-  const groupCreatedAtSec = Math.floor(group.createdAt / 1000);
-  if (messages.length === 0) {
-    return {
-      lastActivityAt: groupCreatedAtSec,
-      lastText: '',
-      lastSenderPubkey: null,
-      recentSenderPubkeys: [],
-    };
-  }
-  const last = messages[messages.length - 1];
-  // Math.max guards against the (rare) case where a relay returns a
-  // message with `createdAt` earlier than the local group's
-  // `createdAt` — clock skew or an event back-dated via NIP-59 wrap
-  // randomisation. Honours the docstring invariant in
-  // `types/groups.ts:GroupActivity.lastActivityAt`.
-  return {
-    lastActivityAt: Math.max(last.createdAt, groupCreatedAtSec),
-    // An encrypted file's stored text (`#lpe=1…`, NIP-17 or Marmot) embeds its
-    // decryption key — redact it to the attachment label like DM previews.
-    lastText: dmRowPreview(last.text, last.text.includes('#lpe=1') ? 15 : 14),
-    lastMessageId: last.id,
-    lastSenderPubkey: last.senderPubkey.toLowerCase(),
-    recentSenderPubkeys: computeRecentSenders(messages),
-  };
 }
 
 const GroupsContext = createContext<GroupsContextType | undefined>(undefined);
@@ -450,7 +404,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const updates: Record<string, GroupActivity> = {};
       for (const g of missing) {
         const msgs = await loadGroupMessages(pubkey, g.id);
-        updates[g.id] = activityFromMessages(g, msgs);
+        updates[g.id] = activityFromMessages(g, msgs, pubkey);
       }
       if (!cancelled && Object.keys(updates).length > 0) {
         setActivityByGroup((prev) => ({ ...prev, ...updates }));
@@ -474,7 +428,10 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (!g) return;
       loadGroupMessages(pubkey, groupId).then((msgs) => {
         if (!active) return;
-        setActivityByGroup((prev) => ({ ...prev, [groupId]: activityFromMessages(g, msgs) }));
+        setActivityByGroup((prev) => ({
+          ...prev,
+          [groupId]: activityFromMessages(g, msgs, pubkey),
+        }));
       });
     });
     return () => {

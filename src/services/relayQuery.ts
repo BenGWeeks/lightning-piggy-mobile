@@ -18,7 +18,7 @@ import type { Event as NostrEvent } from 'nostr-tools/pure';
  * imported) to keep this a leaf module with no dependency back on nostrService.
  */
 export function querySyncAbortable(
-  pool: SimplePool,
+  pool: Pick<SimplePool, 'subscribeMany'>,
   relays: string[],
   filter: Filter,
   params: {

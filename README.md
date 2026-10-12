@@ -46,7 +46,8 @@ A mobile Bitcoin Lightning wallet for smart savers and their families, built wit
   - if someone can't receive Marmot yet, the app asks before falling back to NIP-17;
   - see each person's devices: a _Secure chat · N devices_ by-line in 1:1s, per-person device lists (with the app each runs) in the members sheet, and "Sent from" in message info.
     <!-- TODO(#1311): live location over Marmot (WhatsApp-style), once it merges. -->
-    <!-- TODO(#1295): @mentions in chats, once it merges. -->
+- **@mentions in group chats** (NIP-17 and Marmot): type `@` to pick a member (sent as a `nostr:npub` reference, plus a `p` tag in Marmot); mentions of you show as tappable `@Name` chips (White Noise's `@npub` form too), with an @ badge on the chat row and an @ button that jumps to the oldest unread mention
+- **Remembered read position**: 1:1 and group chats reopen at an "Unread messages" divider, for every protocol
 - **Push notifications (opt-in, per account)**: Marmot messages via MIP-05, plus separate switches for messages, zaps, mentions and payments through Lightning Piggy's notification server. Alerts are generic ("New message", "Zap received") and never show content, and a **Notifications** screen (the bell on Wallets) lists the last 30 days
 - **Profiles**: **Posts**, **Media** and **Shop** tabs, a **Posts | Posts & replies** switch that shows what each reply answers, and NIP-27 references rendered as tappable `@name` chips and embedded notes, articles and products
 - Friends tab with Nostr contacts and phone contacts

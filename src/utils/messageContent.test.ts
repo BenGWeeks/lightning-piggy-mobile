@@ -38,7 +38,9 @@ import {
   parseImageMessage,
   encodeEncryptedFileUrl,
   deriveGroupWireKind,
+  extractSharedContact,
 } from './messageContent';
+import * as nip19ForContacts from 'nostr-tools/nip19';
 import { encodeMarmotMediaUrl } from './encryptedFileUrl';
 
 // A syntactically-shaped bolt11 (the BOLT11 spec's 2500u example). Long enough
@@ -449,5 +451,24 @@ describe('parseImageMessage — Marmot photos (MIP-04)', () => {
     expect(parseImageMessage(encoded.replace(/&ps=[0-9a-f]+/, ''))).toBeNull();
     expect(parseImageMessage(encoded.replace(/&k=[0-9a-f,]+/, '&k='))).toBeNull();
     expect(parseImageMessage(encodeMarmotMediaUrl({ ...base, mime: 'video/mp4' }))).toBeNull();
+  });
+});
+
+describe('extractSharedContact vs inline mentions (#1295)', () => {
+  const PK = 'a'.repeat(64);
+  const npub = nip19ForContacts.npubEncode(PK);
+  const nprofile = nip19ForContacts.nprofileEncode({ pubkey: PK, relays: [] });
+
+  it('treats the share formats (URI on its own line) as a contact card', () => {
+    expect(extractSharedContact(`Shared contact: Alice\nnostr:${nprofile}`)?.pubkey).toBe(PK);
+    expect(extractSharedContact(`Alice\nnostr:${npub}\nhttps://njump.me/${npub}`)?.pubkey).toBe(PK);
+    expect(extractSharedContact(`nostr:${nprofile}`)?.pubkey).toBe(PK);
+  });
+
+  it('leaves a mention inside a sentence, or a lone npub mention, to the text', () => {
+    expect(extractSharedContact(`hey nostr:${npub} look`)).toBeNull();
+    expect(extractSharedContact(`nostr:${npub}`)).toBeNull();
+    expect(extractSharedContact(`  nostr:${npub}  `)).toBeNull();
+    expect(extractSharedContact('no reference here')).toBeNull();
   });
 });

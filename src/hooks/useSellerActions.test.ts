@@ -167,3 +167,69 @@ it.each([0, 60])(
     }
   },
 );
+
+it.each(['deleted', 'older', 'newer', 'tie'])(
+  'removing a zone never fetches or republishes listings when the relay revision is %s',
+  async (revision) => {
+    const draft = {
+      dTag: 'book',
+      title: 'Book',
+      description: 'Updated description',
+      images: [],
+      price: '20',
+      currency: 'GBP',
+      quantity: '1',
+      categories: [],
+      shipping: [],
+    };
+    const cached = finalizeEvent(
+      {
+        ...buildListingTemplate({ draft, pubkey, nowSeconds: 200 }),
+        created_at: 200,
+        tags: [
+          ['d', 'book'],
+          ['price', '20', 'GBP'],
+          ['shipping_option', coordinate],
+        ],
+      },
+      key,
+    );
+    const returned =
+      revision === 'deleted'
+        ? null
+        : finalizeEvent(
+            {
+              kind: cached.kind,
+              content: 'Relay description',
+              created_at: revision === 'older' ? 100 : revision === 'tie' ? 200 : 300,
+              tags: [
+                ['d', 'book'],
+                ['price', '10', 'GBP'],
+                ['shipping_option', coordinate],
+              ],
+            },
+            key,
+          );
+    (fetchLatestRevision as jest.Mock).mockImplementation(async ({ kind }) =>
+      kind === 30402
+        ? { event: returned, deletedAt: -1, deletedIds: [] }
+        : kind === 30406
+          ? oldZone
+          : null,
+    );
+    const { result } = renderHook(() => useSellerActions({ ...snapshot, listings: [cached] }));
+    await act(async () => {
+      await result.current.saveShop(shop, [], base);
+    });
+    const published = (publishSellerEvent as jest.Mock).mock.calls.map(([event]) => event as Event);
+    expect(published.map((event) => event.kind)).toEqual([5, 30405]);
+    expect(published[0].tags).toEqual([
+      ['a', coordinate],
+      ['e', oldZone.id],
+      ['k', '30406'],
+    ]);
+    expect(published[0].created_at).toBeGreaterThanOrEqual(oldZone.created_at);
+    expect(published[1].tags).not.toContainEqual(['shipping_option', coordinate]);
+    expect(fetchLatestRevision).not.toHaveBeenCalledWith(expect.objectContaining({ kind: 30402 }));
+  },
+);

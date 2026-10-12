@@ -92,39 +92,6 @@ export const createConversationScreenStyles = (colors: Palette) =>
       paddingHorizontal: 16,
       gap: 12,
     },
-    // Wrapper is a centered lane hovering above the composer; the FAB
-    // sits inside it so we can horizontally centre it without needing
-    // to know the FAB's width. `pointerEvents="box-none"` lets taps
-    // outside the button pass through to the message list below.
-    scrollToBottomWrap: {
-      position: 'absolute',
-      left: 0,
-      right: 0,
-      // The composer is a SIBLING below this wrapper's Animated.View (moved out
-      // in #251), so this container already ends at the composer's top edge —
-      // the FAB only needs a small gap above it, not a full composer's height.
-      // (Was 92 px, a stale value from when the composer lived inside here,
-      // which floated the arrow far too high up the message list.)
-      bottom: 16,
-      alignItems: 'center',
-    },
-    scrollToBottomFab: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      backgroundColor: colors.brandPink,
-      // White ring keeps the FAB visible when it overlaps a pink bubble
-      // — otherwise the pink-on-pink blends into an invisible blob.
-      borderWidth: 2,
-      borderColor: colors.white,
-      alignItems: 'center',
-      justifyContent: 'center',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.2,
-      shadowRadius: 4,
-      elevation: 4,
-    },
     dayHeaderRule: {
       flex: 1,
       height: StyleSheet.hairlineWidth,
@@ -305,16 +272,6 @@ export const createConversationScreenStyles = (colors: Palette) =>
     // imageBubble + bg / time variants moved to MessageBubble. The
     // fullscreen-modal styles below are still used by the Modal that
     // expands a tapped GIF, which lives at the screen level.
-    fullscreenBackdrop: {
-      flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.92)',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    fullscreenImage: {
-      width: '100%',
-      height: '100%',
-    },
     loading: {
       flex: 1,
       alignItems: 'center',

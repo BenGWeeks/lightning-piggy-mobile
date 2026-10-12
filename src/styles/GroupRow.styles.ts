@@ -30,8 +30,29 @@ export const createGroupRowStyles = (colors: Palette) =>
       color: colors.textSupplementary,
     },
     preview: {
+      flex: 1,
       fontSize: 13,
       color: colors.textSupplementary,
+    },
+    previewRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
       marginTop: 2,
+    },
+    // Unread @mention marker (#1295) — Telegram's pink "@" circle.
+    mentionBadge: {
+      width: 20,
+      height: 20,
+      borderRadius: 10,
+      backgroundColor: colors.brandPink,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    mentionBadgeText: {
+      color: colors.white,
+      fontSize: 12,
+      fontWeight: '800',
+      marginTop: -1,
     },
   });

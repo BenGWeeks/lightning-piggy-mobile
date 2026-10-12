@@ -6,7 +6,7 @@ import { withRelayHealth } from './healthAwarePool';
 class HealthAwareMarketPool extends withRelayHealth(AbstractSimplePool) {}
 
 /**
- * Relay pool for the WoT: Friends market snapshot ONLY, with structure-only
+ * Relay pool for the market feed and seller snapshots, with structure-only
  * checks at the relay layer.
  *
  * Why a second pool: nostr-tools binds `verifyEvent` per relay connection, so
@@ -14,10 +14,10 @@ class HealthAwareMarketPool extends withRelayHealth(AbstractSimplePool) {}
  * listings run to ~1,200 events and a schnorr check costs ~25 ms on a phone,
  * so the shared pool's eager check pinned the JS thread for tens of seconds
  * (#1274). The shared pool keeps verifying every kind for everyone else (the
- * product page and seller editor read listings through it).
+ * product page reads listings through it).
  *
- * Contract: nothing from this pool is trusted. `marketListingsService`
- * verifies every event before use — deletions before they can hide anything,
+ * Contract: nothing from this pool is trusted. snapshot services
+ * verify every event before use — deletions before they can hide anything,
  * listings lazily (winning revisions only, up to the render cap).
  *
  * Connections are opened per snapshot and closed when the last running

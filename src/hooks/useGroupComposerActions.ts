@@ -48,6 +48,8 @@ export function useGroupComposerActions(params: {
   setGifPickerOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setContactPickerOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setVoiceSheetOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  /** Rewrites the typed text before a composer send — `@Name` → `nostr:npub…` (#1295). */
+  encodeMessage?: (text: string) => string;
 }) {
   const {
     group,
@@ -59,6 +61,7 @@ export function useGroupComposerActions(params: {
     setGifPickerOpen,
     setContactPickerOpen,
     setVoiceSheetOpen,
+    encodeMessage,
   } = params;
 
   const { sendGroupMessage, pubkey: myPubkey, signEvent } = useNostr();
@@ -360,15 +363,22 @@ export function useGroupComposerActions(params: {
     [],
   );
 
+  // Composer sends only: polls, shares and re-publishes go out as built.
+  const sendMessage = useMemo(
+    () => (encodeMessage ? (text: string) => sendText(encodeMessage(text)) : undefined),
+    [encodeMessage, sendText],
+  );
+
   const strategy = useMemo(
     () => ({
       sendText,
+      ...(sendMessage ? { sendMessage } : {}),
       sendFile,
       ...(isMarmot ? { sendImage, gifEnvelope: true } : {}),
       canSend,
       confirmLocation,
     }),
-    [sendText, sendFile, sendImage, isMarmot, canSend, confirmLocation],
+    [sendText, sendMessage, sendFile, sendImage, isMarmot, canSend, confirmLocation],
   );
 
   const actions = useComposerActions({

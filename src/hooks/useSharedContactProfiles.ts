@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { fetchProfile, DEFAULT_RELAYS } from '../services/nostrService';
 import { extractSharedContact } from '../utils/messageContent';
-import type { ConversationMessageInput } from '../utils/conversationItems';
 import type { NostrProfile } from '../types/nostr';
 
 /**
@@ -9,7 +8,7 @@ import type { NostrProfile } from '../types/nostr';
  * party has shared in a conversation, so shared-contact cards can render a
  * name/avatar instead of a bare pubkey. Extracted from ConversationScreen
  * (#431) to keep that screen under the file-size cap and give the fetch its own
- * testable seam.
+ * testable seam; the group screen shares it (#1295).
  *
  * Behaviour preserved verbatim from the inline effect:
  *  - Batches all newly-seen shared pubkeys per `messages` update and fetches
@@ -21,7 +20,7 @@ import type { NostrProfile } from '../types/nostr';
  *  - A `null` value means the lookup ran and came back empty.
  */
 export function useSharedContactProfiles(
-  messages: ConversationMessageInput[],
+  messages: readonly { text: string }[],
 ): Record<string, NostrProfile | null> {
   const [sharedProfiles, setSharedProfiles] = useState<Record<string, NostrProfile | null>>({});
   const scheduledProfilePubkeys = useRef(new Set<string>());

@@ -738,6 +738,11 @@ NIP-29 (relay-enforced groups) and NIP-104 (MLS) were both considered. NIP-29 wa
 1:1 conversations are split by partner pubkey + protocol, with separate inbox rows and timelines. Zaps live in the NIP-17 thread. Dual-published NIP-04/NIP-17 copies appear in both threads. Marmot has its own thread per partner (its 1:1 MLS group). The header protocol picker navigates to the selected thread: NIP-17 is the default, NIP-04 is the legacy option, and Marmot is selectable with an *Alpha* badge (it rides the pre-1.0 `marmot-ts`, which still self-describes as alpha — see <<marmot-messaging>>). The NIP methods are expected to be retired once Marmot is stable.
 
 [[marmot-messaging]]
+=== Mentions and read position (#1295)
+
+* *@mentions* (NIP-17 and Marmot groups) — typing `@` in the composer opens a member picker; the composer shows `@Name` while typing and sends a NIP-27 `nostr:npub1…` reference in the text (`utils/chatMentions.ts`). Marmot messages also carry a `p` tag per mentioned member. Incoming mentions render as tappable `@Name` chips; both the NIP-27 form and White Noise's `@npub1…` form are read, while a bare pasted `npub1…` stays text. A mention of you puts an @ badge on the chat row, and an @ button in the thread jumps to the oldest unread mention.
+* *Read position* — each 1:1 and group thread, on every protocol, remembers the newest message you've seen (`createdAt` plus id, so same-second messages are placed exactly; `utils/chatUnread.ts`). The thread reopens at an "Unread messages" divider, and the Messages-list badge uses the same rules.
+
 === Marmot (MLS) messaging — Alpha
 
 Marmot is MLS (RFC 9420) carried over Nostr, wire-compatible with White Noise. A user picks *Marmot* in the 1:1 protocol picker or on the group naming step; a 1:1 thread can switch protocol in place. The app uses `@internet-privacy/marmot-ts` behind a small set of adapters (in `src/services/` unless a path is given):
