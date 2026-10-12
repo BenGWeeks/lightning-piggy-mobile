@@ -9,6 +9,8 @@ import GroupAvatar, { type ContactInfo } from './GroupAvatar';
 import DmProtocolTag from './DmProtocolTag';
 import { formatConversationTimestamp } from '../utils/conversationSummaries';
 import { groupDmProtocol } from '../utils/groupProtocol';
+import { previewMentions } from '../utils/chatMentions';
+import { shortNpub } from '../utils/shortNpub';
 
 interface Props {
   summary: GroupSummary;
@@ -24,6 +26,8 @@ interface Props {
    * so neither path iterates the contacts list per row. See issue #245.
    */
   contactInfoMap?: Map<string, ContactInfo>;
+  /** An unread message mentions the viewer (#1295): show the `@` badge. */
+  mentioned?: boolean;
 }
 
 /** Resolve a friendly display name for a sender pubkey (kind-0 displayName
@@ -47,7 +51,7 @@ function senderName(
   );
 }
 
-const GroupRow: React.FC<Props> = ({ summary, onPress, contactInfoMap }) => {
+const GroupRow: React.FC<Props> = ({ summary, onPress, contactInfoMap, mentioned = false }) => {
   const { t, formatLocale } = useLocale();
   const colors = useThemeColors();
   const styles = useMemo(() => createGroupRowStyles(colors), [colors]);
@@ -74,7 +78,15 @@ const GroupRow: React.FC<Props> = ({ summary, onPress, contactInfoMap }) => {
     const who = isMe
       ? t('groupConversationScreen.you')
       : senderName(activity.lastSenderPubkey, contactInfoMap, contacts);
-    return `${who}: ${activity.lastText}`;
+    // Mentions read as `@Name`, not the raw `nostr:npub…` (#1295).
+    const text = previewMentions(
+      activity.lastText,
+      (pk) =>
+        (pk === myPubkey?.toLowerCase() ? t('groupConversationScreen.you') : null) ??
+        senderName(pk, contactInfoMap, contacts),
+      shortNpub,
+    );
+    return `${who}: ${text}`;
   }, [activity, contacts, contactInfoMap, myPubkey, group.memberPubkeys.length, t]);
 
   // Avatar pubkeys: lead with recent senders so the people who've been
@@ -131,9 +143,20 @@ const GroupRow: React.FC<Props> = ({ summary, onPress, contactInfoMap }) => {
             {timestamp}
           </Text>
         </View>
-        <Text style={styles.preview} numberOfLines={1}>
-          {preview}
-        </Text>
+        <View style={styles.previewRow}>
+          <Text style={styles.preview} numberOfLines={1}>
+            {preview}
+          </Text>
+          {mentioned ? (
+            <View
+              style={styles.mentionBadge}
+              testID={`group-mention-badge-${group.id}`}
+              accessibilityLabel={t('chatMentions.rowBadge')}
+            >
+              <Text style={styles.mentionBadgeText}>@</Text>
+            </View>
+          ) : null}
+        </View>
       </View>
     </TouchableOpacity>
   );

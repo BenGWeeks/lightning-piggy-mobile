@@ -1,24 +1,23 @@
 import { useAccountState } from '../contexts/useAccountState';
 import { useLiveMessageIndicator } from '../hooks/useLiveMessageIndicator';
 import NewMessagesPill from '../components/NewMessagesPill';
+import ChatJumpButtons from '../components/ChatJumpButtons';
+import UnreadDivider from '../components/UnreadDivider';
+import MentionPicker from '../components/MentionPicker';
+import { useChatReadPosition } from '../hooks/useChatReadPosition';
+import { useListScrollToId } from '../hooks/useListScrollToId';
+import { useMentionComposer } from '../hooks/useMentionComposer';
+import { useSharedContactProfiles } from '../hooks/useSharedContactProfiles';
+import { groupReadKey } from '../services/chatReadPositions';
+import { messageMentions } from '../utils/chatMentions';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  FlatList,
-  ActivityIndicator,
-  Linking,
-  Modal,
-  Pressable,
-} from 'react-native';
+import { View, Text, TouchableOpacity, FlatList, ActivityIndicator, Linking } from 'react-native';
 import { Alert } from '../components/BrandedAlert';
 import {
   KeyboardController,
   useReanimatedKeyboardAnimation,
 } from 'react-native-keyboard-controller';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
-import { Image as ExpoImage } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -40,6 +39,7 @@ import { canManageGroup } from '../utils/groupAdmins';
 import AttachPanel from '../components/AttachPanel';
 import ConversationComposer from '../components/ConversationComposer';
 import BrandPatternBackground from '../components/BrandPatternBackground';
+import FullscreenGifModal from '../components/FullscreenGifModal';
 import GifPickerSheet from '../components/GifPickerSheet';
 import PollComposerSheet from '../components/PollComposerSheet';
 import ReceiveSheet from '../components/ReceiveSheet';
@@ -66,16 +66,15 @@ import { useMessageInfoSheet } from '../hooks/useMessageInfoSheet';
 import SecretModeCelebration from '../components/SecretModeCelebration';
 import { isConfigured as isGifConfigured } from '../services/giphyService';
 import { buildOsmViewUrl, type SharedLocation } from '../services/locationService';
-import { fetchProfile, DEFAULT_RELAYS } from '../services/nostrService';
 import {
   isEditableGroupText,
   loadGroupMessages,
   type GroupMessage,
 } from '../services/groupMessagesStorageService';
-import { extractSharedContact } from '../utils/messageContent';
 import { useGroupPolls } from '../hooks/useGroupPolls';
 import { usePaidInvoiceTracker } from '../hooks/usePaidInvoiceTracker';
 import type { NostrProfile } from '../types/nostr';
+import type { UnreadEntry } from '../utils/chatUnread';
 import type { GroupConversationRoute, RootStackParamList } from '../navigation/types';
 
 type GroupConversationNavigation = NativeStackNavigationProp<
@@ -86,6 +85,7 @@ type GroupConversationNavigation = NativeStackNavigationProp<
 const EMPTY_PUBKEYS: string[] = [];
 const EMPTY_MESSAGES: GroupMessage[] = [];
 const groupMessageId = (m: GroupMessage) => m.id;
+const timelineRowId = (row: GroupTimelineRow) => row.id;
 const noReaction = () => {};
 const NO_ACTION: ActionedMessage | null = null;
 
@@ -147,15 +147,6 @@ const GroupConversationScreen: React.FC = () => {
   // link drills into ContactProfile when the user wants the deep view.
   const [sheetContact, setSheetContact] = useState<ContactProfileBodyData | null>(null);
   const [profileSheetVisible, setProfileSheetVisible] = useState(false);
-  // Cache of kind-0 profiles for shared-contact cards. Populated by the
-  // batch-fetch effect below, keyed by pubkey. `null` value = fetch
-  // attempted and resolved with no profile (so MessageBubble can drop
-  // the "Loading…" placeholder).
-  const [sharedProfiles, setSharedProfiles] = useState<Record<string, NostrProfile | null>>({});
-  // Tracks which pubkeys have already been scheduled for a kind-0 fetch
-  // so the effect deps can be [messages] only (not [messages, sharedProfiles]).
-  // Prevents a redundant re-run after every fetch batch writes sharedProfiles.
-  const scheduledProfilePubkeys = useRef(new Set<string>());
   const listRef = useRef<FlatList<GroupTimelineRow>>(null);
 
   const group = getGroup(route.params.groupId);
@@ -241,7 +232,8 @@ const GroupConversationScreen: React.FC = () => {
     memberPubkeys,
     selfPubkey: myPubkey,
     contacts,
-    enabled: membersSheetVisible,
+    // Also while an @mention may be typed: the picker shows names + avatars.
+    enabled: membersSheetVisible || draft.includes('@'),
     fetchProfilesForPubkeys,
   });
   const members = useMemo(
@@ -276,6 +268,8 @@ const GroupConversationScreen: React.FC = () => {
     formatLocale,
     deviceNotices: groupDevices.notices,
   });
+  // @mentions (#1295): the member picker + `@Name` → `nostr:npub…` on send.
+  const mention = useMentionComposer({ draft, setDraft, members, selfPubkey: myPubkey });
 
   // Send / upload / share orchestration + in-flight flags live in the
   // useGroupComposerActions hook (parallel to the 1:1 screen's
@@ -306,6 +300,7 @@ const GroupConversationScreen: React.FC = () => {
     setGifPickerOpen,
     setContactPickerOpen,
     setVoiceSheetOpen,
+    encodeMessage: mention.encode,
   });
 
   // Tap a group bubble → the same message-info sheet 1:1 chats use (#856).
@@ -400,46 +395,41 @@ const GroupConversationScreen: React.FC = () => {
     [t],
   );
 
-  // Batch-fetch kind-0 profiles for every shared-contact reference in the
-  // group thread. Mirrors the 1:1 path so contact cards render with avatar
-  // + display name. Relay hints from the nprofile (when present) are
-  // merged with DEFAULT_RELAYS so we still find the person if they
-  // publish on niche relays.
-  useEffect(() => {
-    const byPubkey = new Map<string, Set<string>>();
-    for (const m of messages) {
-      const ref = extractSharedContact(m.text);
-      if (!ref) continue;
-      if (scheduledProfilePubkeys.current.has(ref.pubkey)) continue;
-      const set = byPubkey.get(ref.pubkey) ?? new Set<string>();
-      for (const r of ref.relays) set.add(r);
-      byPubkey.set(ref.pubkey, set);
+  // Kind-0 profiles for shared-contact cards, keyed by pubkey (`null` = looked
+  // up, none found) — the same batched fetch the 1:1 thread uses.
+  const sharedProfiles = useSharedContactProfiles(messages);
+
+  // Read position (#1295): jump to the first unread with a divider, the `@`
+  // button for unread mentions, and the unread count on jump-to-latest.
+  const readEntries = useMemo<UnreadEntry[]>(() => {
+    const me = myPubkey?.toLowerCase();
+    const out: UnreadEntry[] = [];
+    for (const row of timelineRows) {
+      if (isDeviceNoticeRow(row)) continue; // local notices aren't messages
+      const fromMe = row.senderPubkey.toLowerCase() === me;
+      out.push({
+        id: row.id,
+        createdAt: row.createdAt,
+        fromMe,
+        mentionsMe: !fromMe && messageMentions(row, myPubkey),
+      });
     }
-    if (byPubkey.size === 0) return;
-    // Mark all found pubkeys as scheduled before the async work starts so
-    // a second messages-update doesn't re-queue the same fetches.
-    for (const pk of byPubkey.keys()) scheduledProfilePubkeys.current.add(pk);
-    let cancelled = false;
-    (async () => {
-      const updates: Record<string, NostrProfile | null> = {};
-      await Promise.all(
-        [...byPubkey.entries()].map(async ([pk, relaySet]) => {
-          const mergedRelays = [...new Set([...DEFAULT_RELAYS, ...relaySet])];
-          try {
-            updates[pk] = await fetchProfile(pk, mergedRelays);
-          } catch {
-            updates[pk] = null;
-          }
-        }),
-      );
-      if (!cancelled) {
-        setSharedProfiles((prev) => ({ ...prev, ...updates }));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [messages]);
+    return out;
+  }, [timelineRows, myPubkey]);
+  const { scrollToId, onScrollToIndexFailed } = useListScrollToId(
+    listRef,
+    timelineRows,
+    timelineRowId,
+    0.1,
+  );
+  const read = useChatReadPosition({
+    owner: myPubkey,
+    conversationKey: loadedGroupId ? groupReadKey(loadedGroupId) : null,
+    entries: readEntries,
+    loading: loadingMessages,
+    scrollToId,
+    leaveEdge: live.leaveEdge,
+  });
 
   // Text-encoded group polls: tallies + send / vote (see useGroupPolls).
   const { pollAggregates, handleSendPoll, handleVotePoll } = useGroupPolls(
@@ -482,7 +472,7 @@ const GroupConversationScreen: React.FC = () => {
       // across chat types (#239). The classifier handles geo: + GIF + poll
       // detection up front; image / invoice / lnaddr / contact ride on the
       // text variant and detect at render time.
-      return (
+      const bubble = (
         <MessageBubble
           id={item.id}
           fromMe={fromMe}
@@ -527,10 +517,19 @@ const GroupConversationScreen: React.FC = () => {
           testIdPrefix="group-conversation"
         />
       );
+      return item.id === read.dividerId ? (
+        <>
+          <UnreadDivider testID="group-unread-divider" />
+          {bubble}
+        </>
+      ) : (
+        bubble
+      );
     },
     [
       colors,
       followed,
+      read.dividerId,
       marmotGroupId,
       setActioned,
       myPubkey,
@@ -667,13 +666,15 @@ const GroupConversationScreen: React.FC = () => {
             <FlatList
               ref={listRef}
               data={timelineRows}
-              keyExtractor={(item) => item.id}
+              keyExtractor={timelineRowId}
               renderItem={renderMessage}
               contentContainerStyle={styles.messagesList}
               testID="group-messages-list"
               onScroll={live.onScroll}
               scrollEventThrottle={100}
               onContentSizeChange={live.onContentSizeChange}
+              viewabilityConfigCallbackPairs={read.viewabilityConfigCallbackPairs}
+              onScrollToIndexFailed={onScrollToIndexFailed}
               ListEmptyComponent={
                 <View style={styles.emptyState}>
                   <Text style={styles.emptySubtitle}>
@@ -686,6 +687,16 @@ const GroupConversationScreen: React.FC = () => {
           {live.hasNewMessages && !loadingMessages && (
             <NewMessagesPill onPress={live.jumpToLatest} testID="group-new-messages" />
           )}
+          {!loadingMessages && (
+            <ChatJumpButtons
+              mentionCount={read.pendingMentions.length}
+              onJumpToMention={read.jumpToNextMention}
+              showLatest={!live.atEdge && !live.hasNewMessages}
+              unreadCount={read.unread}
+              onJumpToLatest={live.jumpToLatest}
+              testIDs={{ mention: 'group-jump-to-mention', latest: 'group-jump-to-latest' }}
+            />
+          )}
         </Animated.View>
 
         {/* Composer + attach panel + IME-aware safe area now live in the
@@ -696,6 +707,9 @@ const GroupConversationScreen: React.FC = () => {
           value={draft}
           onChangeText={setDraft}
           {...menu.composer}
+          accessory={<MentionPicker candidates={mention.candidates} onPick={mention.pick} />}
+          onSelectionChange={mention.onSelectionChange}
+          selection={mention.selection}
           onStartVoiceNote={() => setVoiceSheetOpen(true)}
           sending={sending}
           onAttachToggle={() => (attachPanelOpen ? closeAttachPanel() : openAttachPanel())}
@@ -837,31 +851,12 @@ const GroupConversationScreen: React.FC = () => {
         initialAddress={invoiceToPay ?? undefined}
       />
 
-      <Modal
-        visible={fullscreenGifUrl !== null}
-        transparent
-        statusBarTranslucent
-        navigationBarTranslucent
-        animationType="fade"
-        onRequestClose={() => setFullscreenGifUrl(null)}
-      >
-        <Pressable
-          style={styles.fullscreenBackdrop}
-          onPress={() => setFullscreenGifUrl(null)}
-          accessibilityLabel={t('groupConversationScreen.closeFullscreenGif')}
-          testID="group-conversation-gif-fullscreen"
-        >
-          {fullscreenGifUrl ? (
-            <ExpoImage
-              source={{ uri: fullscreenGifUrl }}
-              style={styles.fullscreenImage}
-              contentFit="contain"
-              cachePolicy="memory-disk"
-              accessibilityIgnoresInvertColors
-            />
-          ) : null}
-        </Pressable>
-      </Modal>
+      <FullscreenGifModal
+        url={fullscreenGifUrl}
+        onClose={() => setFullscreenGifUrl(null)}
+        closeLabel={t('groupConversationScreen.closeFullscreenGif')}
+        testID="group-conversation-gif-fullscreen"
+      />
 
       <MessageActionsSheet
         visible={actioned !== null}

@@ -38,6 +38,7 @@ import { forgetRevealedMedia } from '../services/mediaRevealStore';
 import { wipeDecryptedMediaForOwner } from '../services/decryptedMediaCache';
 import { WATCHER_PUSH_KEY_BASE } from '../services/watcherPushStore';
 import { KEY_BACKED_UP_KEY_BASE } from '../services/keyBackupStatus';
+import { CHAT_READ_POSITIONS_KEY_BASE, forgetReadPositions } from '../services/chatReadPositions';
 import {
   AMBER_NIP17_CACHE_KEY_BASE,
   NSEC_NIP17_CACHE_KEY_BASE,
@@ -116,6 +117,8 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
     perAccountKey(WATCHER_PUSH_KEY_BASE, loggedOutPubkey),
     // The key it vouched for is gone with the account (#1223).
     perAccountKey(KEY_BACKED_UP_KEY_BASE, loggedOutPubkey),
+    // Where this account had read each chat up to (#1295).
+    perAccountKey(CHAT_READ_POSITIONS_KEY_BASE, loggedOutPubkey),
     // DM-store migration flags (#848 wrap cache, #850 blobs) — a future
     // re-login re-runs the (then no-op) migration checks instead of
     // trusting a stale flag.
@@ -144,6 +147,7 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
   forgetLinkPreviewMirror(loggedOutPubkey);
   forgetRevealedMedia(loggedOutPubkey);
   forgetAccountSettings(loggedOutPubkey);
+  forgetReadPositions(loggedOutPubkey);
   const allKeys = await AsyncStorage.getAllKeys();
   const convPrefix = DM_CONV_CACHE_PREFIX + loggedOutPubkey + '_';
   const lastSeenPrefix = DM_CONV_LAST_SEEN_PREFIX + loggedOutPubkey + '_';

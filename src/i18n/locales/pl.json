@@ -2619,7 +2619,26 @@
     "nfc": "Karta NFC"
   },
   "liveMessages": {
-    "newMessages": "Nowe wiadomości"
+    "newMessages": "Nowe wiadomości",
+    "unreadDivider": "Nieprzeczytane wiadomości",
+    "jumpToMention": {
+      "one": "{{count}} nieprzeczytana wzmianka, przejdź",
+      "few": "{{count}} nieprzeczytane wzmianki, przejdź",
+      "many": "{{count}} nieprzeczytanych wzmianek, przejdź",
+      "other": "{{count}} nieprzeczytanej wzmianki, przejdź"
+    },
+    "jumpToLatest": "Przejdź do najnowszych",
+    "jumpToLatestUnread": {
+      "one": "Przejdź do najnowszych, {{count}} nieprzeczytana wiadomość",
+      "few": "Przejdź do najnowszych, {{count}} nieprzeczytane wiadomości",
+      "many": "Przejdź do najnowszych, {{count}} nieprzeczytanych wiadomości",
+      "other": "Przejdź do najnowszych, {{count}} nieprzeczytanej wiadomości"
+    }
+  },
+  "chatMentions": {
+    "picker": "Wspomnij członka grupy",
+    "pickMember": "Wspomnij: {{name}}",
+    "rowBadge": "Wspomniano o Tobie"
   },
   "publishedRelays": {
     "intro": "Te listy są publiczne. Inne aplikacje Nostr używają ich, aby znaleźć twoje wpisy i wysyłać ci wiadomości prywatne. Publikacja podpisuje listę twoim kluczem i zastępuje poprzednią.",

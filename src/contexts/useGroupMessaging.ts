@@ -9,6 +9,7 @@ import type { EncryptedUpload } from '../services/imageUploadService';
 import type { RelayConfig, SignerType } from '../types/nostr';
 import { isMarmotGroupId } from '../services/marmotSession';
 import { sendMarmotGroupRumor } from '../services/marmotSend';
+import { mentionedPubkeys } from '../utils/chatMentions';
 
 /**
  * Provider-owned slices the group-messaging callbacks close over: the
@@ -75,6 +76,20 @@ export interface UseGroupMessagingResult {
     name: string;
     memberPubkeys: string[];
   }) => Promise<{ success: boolean; error?: string }>;
+}
+
+/**
+ * The Marmot shape of a group rumor (#1295). MLS membership already names the
+ * audience, so the NIP-17 roster `p` tags and `subject` are dropped; a `p`
+ * tag goes on each member the text mentions (`nostr:npub…`), which Marmot
+ * clients such as White Noise read as the mention list.
+ */
+export function marmotGroupDraft<R extends { kind: number; content: string; tags: string[][] }>(
+  rumor: R,
+): R {
+  const kept = rumor.tags.filter((t) => t[0] !== 'p' && t[0] !== 'subject');
+  const mentionTags = mentionedPubkeys(rumor.content).map((pk) => ['p', pk]);
+  return { ...rumor, tags: [...kept, ...mentionTags] };
 }
 
 export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMessagingResult {
@@ -144,7 +159,7 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
         // Marmot group: the same rumor rides the group's MLS session instead
         // of a per-member gift-wrap fan-out (no per-recipient signer prompts).
         if (isMarmotGroupId(input.groupId)) {
-          return sendMarmotGroupRumor(pubkey, input.groupId, rumor);
+          return sendMarmotGroupRumor(pubkey, input.groupId, marmotGroupDraft(rumor));
         }
 
         if (signerType === 'nsec') {

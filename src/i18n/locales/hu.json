@@ -2613,7 +2613,22 @@
     "nfc": "NFC fül"
   },
   "liveMessages": {
-    "newMessages": "Új üzenetek"
+    "newMessages": "Új üzenetek",
+    "unreadDivider": "Olvasatlan üzenetek",
+    "jumpToMention": {
+      "one": "Ugrás {{count}} olvasatlan említésre",
+      "other": "Ugrás {{count}} olvasatlan említésre"
+    },
+    "jumpToLatest": "Ugrás a legújabb üzenetre",
+    "jumpToLatestUnread": {
+      "one": "Ugrás a legújabb üzenetre, {{count}} olvasatlan üzenet",
+      "other": "Ugrás a legújabb üzenetre, {{count}} olvasatlan üzenet"
+    }
+  },
+  "chatMentions": {
+    "picker": "Tag megemlítése",
+    "pickMember": "{{name}} megemlítése",
+    "rowBadge": "Megemlítettek"
   },
   "publishedRelays": {
     "intro": "Ezek a listák nyilvánosak. Más Nostr-alkalmazások ezek alapján találják meg a bejegyzéseidet, és küldenek neked közvetlen üzeneteket. A közzététel aláírja a listát a kulcsoddal, és lecseréli az előzőt.",

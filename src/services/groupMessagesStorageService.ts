@@ -32,6 +32,9 @@ export interface GroupMessage {
   editedAt?: number;
   /** Marmot edit: id of that edit event (breaks `editedAt` ties). */
   editId?: string;
+  /** Marmot: pubkeys the message `p`-tags as mentions (#1295). Text mentions
+   * (`nostr:npub…`) are read from `text` and not duplicated here. */
+  mentions?: string[];
 }
 
 // Account scoping (#1240): history is keyed per owner —
