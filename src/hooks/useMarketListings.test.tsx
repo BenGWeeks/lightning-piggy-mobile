@@ -1,3 +1,9 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  clearMarketSnapshotMemory,
+  writeMarketSnapshot,
+  MARKET_CACHE_KEY,
+} from '../services/marketStorage';
 import { act, renderHook } from '@testing-library/react-native';
 import { MARKET_SNAPSHOT_FRESH_MS, useMarketListings } from './useMarketListings';
 import { fetchMarketListings } from '../services/marketListingsService';
@@ -15,6 +21,8 @@ jest.mock('@react-navigation/native', () => ({ useIsFocused: () => mockFocused }
 const fetch = fetchMarketListings as jest.Mock;
 let finish: (result: MarketListingsResult) => void;
 beforeEach(() => {
+  clearMarketSnapshotMemory();
+  (AsyncStorage.getItem as jest.Mock).mockResolvedValue(null);
   mockViewer = 'mockViewer-a';
   mockFocused = true;
   fetch.mockReset();
@@ -149,4 +157,58 @@ describe('first page', () => {
     act(() => fetch.mock.calls[1][3]([item('p1')]));
     expect(h.result.current.products).toHaveLength(2);
   });
+});
+
+const cachedProduct = {
+  id: 'cached',
+  sellerName: 'Seller',
+} as MarketListingsResult['products'][number];
+it('shows memory cache on remount immediately and refresh replaces deleted listings', async () => {
+  const first = renderHook(() => useMarketListings(true));
+  await act(async () => finish({ products: [cachedProduct], incomplete: false }));
+  first.unmount();
+  const second = renderHook(() => useMarketListings(true));
+  expect(second.result.current.products).toEqual([cachedProduct]);
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(second.result.current.loading).toBe(true);
+  await act(async () => finish({ products: [], incomplete: false }));
+  expect(second.result.current.products).toEqual([]);
+});
+it('hydrates disk products while relay refresh is pending, without verification', async () => {
+  const key = `${mockViewer}|${mockContacts[0].pubkey}|${mockRelays[0].url}`;
+  await writeMarketSnapshot(key, { products: [cachedProduct], incomplete: false });
+  const raw = (AsyncStorage.setItem as jest.Mock).mock.calls
+    .filter(([k]) => k === MARKET_CACHE_KEY)
+    .pop()[1];
+  clearMarketSnapshotMemory();
+  (AsyncStorage.getItem as jest.Mock).mockResolvedValue(raw);
+  const h = renderHook(() => useMarketListings(true));
+  await act(async () => {});
+  expect(h.result.current.products).toEqual([cachedProduct]);
+  await act(async () => finish({ products: [], incomplete: false }));
+  expect(h.result.current.products).toEqual([]);
+});
+it('never lets a late disk read overwrite a completed refresh', async () => {
+  let resolveDisk!: (value: string) => void;
+  (AsyncStorage.getItem as jest.Mock).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        resolveDisk = resolve;
+      }),
+  );
+  const h = renderHook(() => useMarketListings(true));
+  await act(async () => {});
+  await act(async () => finish({ products: [], incomplete: false }));
+  await act(async () =>
+    resolveDisk(
+      JSON.stringify([
+        {
+          key: `${mockViewer}|${mockContacts[0].pubkey}|${mockRelays[0].url}`,
+          at: Date.now(),
+          result: { products: [cachedProduct], incomplete: false },
+        },
+      ]),
+    ),
+  );
+  expect(h.result.current.products).toEqual([]);
 });

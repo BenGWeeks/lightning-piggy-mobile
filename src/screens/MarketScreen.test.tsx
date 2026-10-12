@@ -1,15 +1,34 @@
 import React from 'react';
+import { MARKET_PRODUCTS } from '../data/marketProducts';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import MarketScreen from './MarketScreen';
 import type { ExploreNavigation } from '../navigation/types';
 
+jest.mock('../hooks/useMarketPreferences', () => ({
+  useMarketPreferences: () => mockPreferencesHook(),
+}));
+let mockReady = true;
+let mockLiveProducts: typeof import('../data/marketProducts').MARKET_PRODUCTS = [];
+const mockPreferencesHook = function useMockPreferences() {
+  const [preferences, setPreferences] = React.useState({
+    mode: 'preferred',
+    merchant: null,
+    country: null,
+    currency: null,
+  });
+  return {
+    ready: mockReady,
+    preferences,
+    update: (patch: object) => setPreferences((previous) => ({ ...previous, ...patch })),
+  };
+};
 jest.mock('../contexts/ThemeContext', () => ({ useThemeColors: () => ({}) }));
 jest.mock('../contexts/LocaleContext', () => ({ useTranslation: () => (key: string) => key }));
 jest.mock('../components/MarketProductCard', () => () => null);
 jest.mock('../hooks/useMarketListings', () => ({
   useMarketListings: (enabled: boolean) => {
     mockLiveEnabled(enabled);
-    return { products: [], loading: enabled, incomplete: false, refresh: jest.fn() };
+    return { products: mockLiveProducts, loading: enabled, incomplete: false, refresh: jest.fn() };
   },
 }));
 jest.mock('lucide-react-native', () => ({
@@ -27,6 +46,8 @@ const navigation = { goBack: jest.fn(), navigate: jest.fn() } as unknown as Expl
 beforeEach(() => {
   jest.useFakeTimers();
   mockLiveEnabled.mockClear();
+  mockReady = true;
+  mockLiveProducts = [];
 });
 afterEach(() => {
   act(() => jest.runOnlyPendingTimers());
@@ -78,4 +99,31 @@ it('clears seller scope with the sheet filters and badges a non-empty search', (
   expect(screen.getByTestId('market-filter-badge')).toBeTruthy();
   fireEvent.press(screen.getByTestId('market-search-clear'));
   expect(screen.queryByTestId('market-filter-badge')).toBeNull();
+});
+
+it('gates listings and the first query until account filters finish restoring', () => {
+  mockReady = false;
+  const screen = render(<MarketScreen navigation={navigation} />);
+  expect(mockLiveEnabled).toHaveBeenLastCalledWith(false);
+  expect(screen.queryByTestId('market-search-input')).toBeNull();
+  expect(screen.queryByText('market.screen.emptyNone')).toBeNull();
+});
+it('removes full loading copy once a cached or first-page result exists', () => {
+  mockLiveProducts = MARKET_PRODUCTS.slice(0, 1);
+  const screen = render(<MarketScreen navigation={navigation} />);
+  fireEvent.press(screen.getByTestId('market-filter-button'));
+  fireEvent.press(screen.getByTestId('market-filter-sellers-friends'));
+  expect(screen.getByTestId('market-live-status')).toHaveTextContent('market.live.loaded');
+  expect(screen.queryByText('market.live.loading')).toBeNull();
+});
+
+it('shows no-match copy instead of full loading when filters hide an existing snapshot', () => {
+  mockLiveProducts = MARKET_PRODUCTS.slice(0, 1);
+  const screen = render(<MarketScreen navigation={navigation} />);
+  fireEvent.press(screen.getByTestId('market-filter-button'));
+  fireEvent.press(screen.getByTestId('market-filter-sellers-friends'));
+  fireEvent.changeText(screen.getByTestId('market-search-input'), 'no such product');
+  act(() => jest.advanceTimersByTime(300));
+  expect(screen.queryByText('market.live.loading')).toBeNull();
+  expect(screen.getByText('market.screen.emptyNoMatch')).toBeTruthy();
 });
