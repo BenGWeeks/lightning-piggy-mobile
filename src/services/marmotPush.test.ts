@@ -7,6 +7,7 @@ import {
   applyPushPayload,
   buildTriggerWraps,
   leafKey,
+  MAX_HINTS_PER_SERVER,
   ownerProofEventId,
   pruneToLeaves,
   selectTriggerTargets,
@@ -201,6 +202,52 @@ describe('MIP-05 record state', () => {
     expect(selectTriggerTargets(state, alice.pk, leaves)).toEqual([
       { server: 'ee'.repeat(32), relayHints: [], tokens: [expect.any(String)] },
     ]);
+  });
+
+  // #1338: a hint is signed by its member but otherwise untrusted — a hostile
+  // member could point everyone's triggers at a LAN host or a plaintext relay.
+  it.each([
+    'ws://192.168.1.1/',
+    'ws://attacker.example',
+    'wss://127.1',
+    'wss://localhost:7777',
+    'wss://[::ffff:10.0.0.1]',
+    'wss://user:pw@relay.example.com',
+    'https://relay.example.com',
+  ])('drops a non-public / non-wss relay hint %s but keeps the record', async (hint) => {
+    const state = await applyPushPayload(
+      {},
+      448,
+      payload('tokens', [signedRecord(bob, { relayHint: hint })]),
+      { ...GROUP, leaves },
+      NOW,
+    );
+    // Still a valid signed record (its token is used)…
+    expect(Object.values(state)[0].record?.relayHint).toBe(hint);
+    // …but the hint is never a destination: the trigger falls back to the server's 10050.
+    expect(selectTriggerTargets(state, alice.pk, leaves)).toEqual([
+      { server: 'ee'.repeat(32), relayHints: [], tokens: [expect.any(String)] },
+    ]);
+  });
+
+  it('caps distinct relay hints per server', async () => {
+    const members = Array.from({ length: MAX_HINTS_PER_SERVER + 3 }, () => member());
+    const many = new Set(members.map((m) => leafKey(m.pk, 1)));
+    const state = await applyPushPayload(
+      {},
+      448,
+      payload(
+        'tokens',
+        members.map((m, i) =>
+          signedRecord(m, { relayHint: `wss://relay${i}.example.com`, ownerTs: 1_000 + i }),
+        ),
+      ),
+      { ...GROUP, leaves: many },
+      NOW,
+    );
+    const [target] = selectTriggerTargets(state, alice.pk, many);
+    expect(target.relayHints).toHaveLength(MAX_HINTS_PER_SERVER);
+    expect(target.tokens).toHaveLength(members.length);
   });
 });
 

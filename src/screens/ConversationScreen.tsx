@@ -40,6 +40,8 @@ import PollComposerSheet from '../components/PollComposerSheet';
 import ReceiveSheet from '../components/ReceiveSheet';
 import VoiceRecordingSheet from '../components/VoiceRecordingSheet';
 import ConversationMessageRow from '../components/ConversationMessageRow';
+import { useFollowedPubkeys } from '../hooks/useFollowedPubkeys';
+import { canAutoLoadMedia } from '../utils/mediaTrust';
 import NwcWalletShareSheet from '../components/NwcWalletShareSheet';
 import MessageActionsSheet from '../components/MessageActionsSheet';
 import SecretModeCelebration from '../components/SecretModeCelebration';
@@ -125,6 +127,9 @@ const ConversationScreen: React.FC = () => {
   } = useNostr();
   const { armLiveDmSub } = useNostrDmInbox();
   const { contacts } = useNostrContacts();
+  // Trust gate (#1338): the peer's media auto-loads only if I follow them.
+  const followed = useFollowedPubkeys();
+  const peerMediaTrusted = canAutoLoadMedia(false, pubkey, followed);
   // Cover the deep-link path (notification → straight to ConversationScreen
   // without passing the Messages tab). Idempotent — no-op if already armed.
   useEffect(() => {
@@ -528,9 +533,11 @@ const ConversationScreen: React.FC = () => {
         onAddNwc={addSharedWallet}
         peerName={name}
         onAskForInvite={askForInvite}
+        peerMediaTrusted={peerMediaTrusted}
       />
     ),
     [
+      peerMediaTrusted,
       openLocation,
       isInvoicePaid,
       sharedProfiles,

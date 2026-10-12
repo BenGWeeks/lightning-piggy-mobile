@@ -1,6 +1,7 @@
 import { nip19, type Event } from 'nostr-tools';
 import type { MarketProduct } from '../data/marketProducts';
 import type { MarketVendor } from '../data/marketVendors';
+import { isPublicHttpUrl } from './publicUrl';
 
 export interface MarketListing {
   event: Event;
@@ -15,7 +16,11 @@ export function safeMarketUrl(value: unknown): string | null {
   if (typeof value !== 'string' || value.length > 2048) return null;
   try {
     const url = new URL(value);
-    return url.protocol === 'https:' && !url.username && !url.password ? url.href : null;
+    // Listing URLs are other people's data that the app loads automatically
+    // (product images), so they must also be public addresses (#1338).
+    return url.protocol === 'https:' && !url.username && !url.password && isPublicHttpUrl(url.href)
+      ? url.href
+      : null;
   } catch {
     return null;
   }

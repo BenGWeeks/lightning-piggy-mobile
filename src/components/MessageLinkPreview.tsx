@@ -12,6 +12,8 @@ import {
 } from '../services/linkPreviewPreference';
 import type { LinkPreview } from '../services/linkPreviewStorage';
 import { isBlocklisted } from '../services/linkPreviewBlocklist';
+import { useTapToReveal } from '../hooks/useTapToReveal';
+import TapToLoadMedia from './TapToLoadMedia';
 
 interface Props {
   url: string;
@@ -21,6 +23,10 @@ interface Props {
   // Render-side variant — pink bubble (`fromMe`) gets a different
   // border/background. Defaults to "them" (incoming) styling.
   fromMe?: boolean;
+  // Trust gate (#1338): sender is me or someone I follow. Otherwise a
+  // "Tap to load preview" placeholder shows and nothing is fetched until the
+  // reader taps it. Defaults to false (fail closed).
+  autoLoad?: boolean;
 }
 
 function deriveDomain(url: string): string {
@@ -31,7 +37,12 @@ function deriveDomain(url: string): string {
   }
 }
 
-const MessageLinkPreview: React.FC<Props> = ({ url, eventId, fromMe = false }) => {
+const MessageLinkPreview: React.FC<Props> = ({
+  url,
+  eventId,
+  fromMe = false,
+  autoLoad = false,
+}) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createMessageLinkPreviewStyles(colors, fromMe), [colors, fromMe]);
   const { pubkey } = useNostr();
@@ -39,6 +50,7 @@ const MessageLinkPreview: React.FC<Props> = ({ url, eventId, fromMe = false }) =
   const [enabled, setEnabled] = useAccountState<boolean | null>(pubkey, null);
   const [preview, setPreview] = useState<LinkPreview | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
+  const [loadAllowed, reveal] = useTapToReveal(`preview:${eventId}:${url}`, autoLoad);
 
   // Hydrate the user preference at mount, then subscribe so toggling
   // the Security-screen switch flips this card live.
@@ -62,6 +74,7 @@ const MessageLinkPreview: React.FC<Props> = ({ url, eventId, fromMe = false }) =
   // while the new fetch is in-flight.
   useEffect(() => {
     if (!enabled) return;
+    if (!loadAllowed) return;
     if (isBlocklisted(url)) return;
     setPreview(null);
     let cancelled = false;
@@ -78,13 +91,25 @@ const MessageLinkPreview: React.FC<Props> = ({ url, eventId, fromMe = false }) =
     return () => {
       cancelled = true;
     };
-  }, [enabled, url]);
+  }, [enabled, loadAllowed, url]);
 
   // Preference disabled, blocklisted, or fetch yielded no metadata —
   // render nothing extra. The bare URL stays clickable in the
   // surrounding bubble text.
   if (enabled !== true) return null;
   if (isBlocklisted(url)) return null;
+  // Untrusted sender: no request until the reader opts in.
+  if (!loadAllowed) {
+    return (
+      <TapToLoadMedia
+        variant="preview"
+        url={url}
+        fromMe={fromMe}
+        onPress={reveal}
+        testID={`message-link-preview-placeholder-${eventId}`}
+      />
+    );
+  }
   if (!loading && !preview) return null;
 
   const domain = preview?.domain ?? deriveDomain(url);

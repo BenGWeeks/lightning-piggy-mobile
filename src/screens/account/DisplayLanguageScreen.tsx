@@ -1,7 +1,16 @@
 import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { ChevronRight, Droplets, Globe, Moon, Smartphone, Sun, Zap } from 'lucide-react-native';
+import {
+  ChevronRight,
+  Droplets,
+  FlaskConical,
+  Globe,
+  Moon,
+  Smartphone,
+  Sun,
+  Zap,
+} from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
 import { createSharedAccountStyles } from './sharedStyles';
 import SettingsScopeHeader from '../../components/SettingsScopeHeader';
@@ -19,6 +28,11 @@ import {
   type SendingAnimationPreference,
 } from '../../contexts/SendingAnimationContext';
 import { CURRENCY_LIST } from '../../services/fiatService';
+import {
+  PSEUDO_LOCALE,
+  PSEUDO_LOCALE_LABEL,
+  isPseudoLocaleAvailable,
+} from '../../utils/pseudoLocale';
 import { createDisplayLanguageScreenStyles } from '../../styles/DisplayLanguageScreen.styles';
 import type { ThemePreference } from '../../styles/palettes';
 import type { AccountDrawerNavigation } from '../../navigation/types';
@@ -79,6 +93,16 @@ const DisplayLanguageScreen: React.FC = () => {
         description: t('languageScreen.alwaysLanguage', { language: LOCALE_LABELS[code] }),
         icon: <Globe size={20} color={colors.white} />,
         a11yLabel: t('languageScreen.a11y', { label: LOCALE_LABELS[code] }),
+      });
+    }
+    // Dev/preview-only pseudo-language for spotting clipped or hard-coded text.
+    if (isPseudoLocaleAvailable()) {
+      options.push({
+        value: PSEUDO_LOCALE,
+        label: PSEUDO_LOCALE_LABEL,
+        description: t('languageScreen.alwaysLanguage', { language: PSEUDO_LOCALE_LABEL }),
+        icon: <FlaskConical size={20} color={colors.white} />,
+        a11yLabel: t('languageScreen.a11y', { label: PSEUDO_LOCALE_LABEL }),
       });
     }
     return options;
@@ -159,7 +183,12 @@ const DisplayLanguageScreen: React.FC = () => {
         testIDPrefix="locale"
       />
       <Text style={shared.fieldHint}>
-        {t('languageScreen.hint', { language: LOCALE_LABELS[resolvedLocale] })}
+        {t('languageScreen.hint', {
+          language:
+            localePreference === PSEUDO_LOCALE
+              ? PSEUDO_LOCALE_LABEL
+              : LOCALE_LABELS[resolvedLocale],
+        })}
       </Text>
 
       <SettingsScopeHeader scope="phone" spaced testID="display-language-phone" />
