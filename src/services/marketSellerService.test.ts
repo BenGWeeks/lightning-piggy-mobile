@@ -1,4 +1,7 @@
 import { resolveCurrentRevision, StaleRevisionError } from '../utils/marketSellerRevision';
+import { nostrVerifyEvent } from './nostrCrypto';
+import { __resetVerifiedEventCache } from './nostrVerifyCache';
+import { acquireMarketListingsPool } from './marketListingsPool';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { finalizeEvent, getPublicKey, type Event } from 'nostr-tools';
 import {
@@ -43,6 +46,19 @@ jest.mock('./nostrService', () => ({
   ),
 }));
 jest.mock('./nostrPool', () => ({ pool: { publish: jest.fn() }, trackRelays: jest.fn() }));
+jest.mock('./marketListingsPool', () => ({
+  acquireMarketListingsPool: jest.fn(() => ({ pool: { structureOnly: true }, release: jest.fn() })),
+}));
+jest.mock('./nostrCrypto', () => {
+  const actual = jest.requireActual('./nostrCrypto');
+  // Exercise real signatures without starting the facade's 60-second perf timer.
+  const pure = jest.requireActual('nostr-tools/pure');
+  return {
+    ...actual,
+    nostrGetEventHash: pure.getEventHash,
+    nostrVerifyEvent: jest.fn(pure.verifyEvent),
+  };
+});
 jest.mock('./relayQuery', () => ({ querySyncAbortable: jest.fn() }));
 
 const key = new Uint8Array(32).fill(9);
@@ -70,6 +86,7 @@ const listing = (d: string, created_at = 100) =>
   );
 
 beforeEach(async () => {
+  __resetVerifiedEventCache();
   resetSellerStore();
   jest.clearAllMocks();
   await AsyncStorage.clear();
@@ -339,6 +356,7 @@ describe('hidden listings and the persisted snapshot', () => {
     const cached = await loadSellerCache(pubkey);
     expect(cached.map((e) => e.id).sort()).toEqual([zone.id, shop.id, v2.id, deletion.id].sort());
 
+    __resetVerifiedEventCache();
     resetSellerStore();
     restoreSellerAccount(pubkey, cached, new Map([[coordinateOf(30402, pubkey, 'c'), 9]]));
     const state = sellerStoreState(pubkey);
@@ -424,3 +442,25 @@ it.each(['a', 'e'])(
     await expect(resolveCurrentRevision({ fetchLatest, base, force: true })).resolves.toBeNull();
   },
 );
+
+test('seller snapshots use the structure-only pool and cache one signature pass across refreshes', async () => {
+  const rows: Event[] = JSON.parse(
+    JSON.stringify([listing('paced-a'), listing('paced-b'), listing('paced-c')]),
+  );
+  (querySyncAbortable as jest.Mock)
+    .mockReset()
+    .mockImplementation((_pool, _relays, filter) =>
+      Promise.resolve(filter.kinds[0] === 30402 ? JSON.parse(JSON.stringify(rows)) : []),
+    );
+  const request = { pubkey, relays: ['wss://r.example'] };
+  await expect(fetchSellerEvents(request)).resolves.toEqual(rows);
+  expect(nostrVerifyEvent).toHaveBeenCalledTimes(3);
+  for (const [pool] of (querySyncAbortable as jest.Mock).mock.calls) {
+    expect(pool).toEqual({ structureOnly: true });
+  }
+  await expect(fetchSellerEvents(request)).resolves.toEqual(rows);
+  expect(nostrVerifyEvent).toHaveBeenCalledTimes(3);
+  const leases = (acquireMarketListingsPool as jest.Mock).mock.results;
+  expect(leases).toHaveLength(6);
+  for (const lease of leases) expect(lease.value.release).toHaveBeenCalledTimes(1);
+});

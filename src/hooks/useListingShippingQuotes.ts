@@ -52,7 +52,7 @@ export function useListingShippingQuotes(
       let retryTimer: ReturnType<typeof setTimeout> | undefined;
       setState((prev) => ({ ...prev, status: 'loading' }));
       fetchShippingOptionsForDisplay({
-        merchantPubkey: merchant,
+        coordinates: refs.map((ref) => ref.coordinate),
         relays: readKey ? readKey.split(',') : [],
         signal: controller.signal,
       })
