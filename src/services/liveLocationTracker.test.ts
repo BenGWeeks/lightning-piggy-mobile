@@ -86,6 +86,7 @@ it('headlessLiveSessions keeps only started, unexpired, unstopped shares', () =>
 });
 
 it('prefers background updates with an Android foreground service and the iOS indicator', async () => {
+  loc.hasStartedLocationUpdatesAsync.mockResolvedValueOnce(false);
   loc.startLocationUpdatesAsync.mockResolvedValue(undefined);
   expect(await startTracking({ owner: ME, relays: ['wss://r'] })).toBe('background');
   const [, options] = loc.startLocationUpdatesAsync.mock.calls[0];
@@ -104,7 +105,16 @@ it('prefers background updates with an Android foreground service and the iOS in
   expect(loc.startLocationUpdatesAsync).toHaveBeenCalledTimes(1);
 });
 
+it('adopts an already-running background service instead of re-starting it', async () => {
+  // Android refuses to START a location service from the background (e.g.
+  // after the JS restarted while a share ran on); the running one keeps going.
+  loc.hasStartedLocationUpdatesAsync.mockResolvedValueOnce(true);
+  expect(await startTracking({ owner: ME, relays: [] })).toBe('background');
+  expect(loc.startLocationUpdatesAsync).not.toHaveBeenCalled();
+});
+
 it('falls back to the foreground watcher when background updates are unavailable', async () => {
+  loc.hasStartedLocationUpdatesAsync.mockResolvedValueOnce(false);
   loc.startLocationUpdatesAsync.mockRejectedValue(new Error('LocationUpdatesUnavailable'));
   loc.watchPositionAsync.mockResolvedValue({ remove: jest.fn() } as never);
   expect(await startTracking({ owner: ME, relays: [] })).toBe('foreground');
@@ -179,6 +189,23 @@ describe('headless Marmot shares (no UI after a process restart)', () => {
     const stored = await loadPersistedSessions(ME);
     expect(stored.find((s) => s.sessionId === 'm1')?.stopRequested).toBe(true);
     expect(getTrackingMode()).toBe('background');
+  });
+
+  it('restore MLS only when an update is due (a fresh runtime per fix must stay cheap)', async () => {
+    loc.startLocationUpdatesAsync.mockResolvedValue(undefined);
+    await startTracking({ owner: ME, relays: [] });
+    await savePersistedSessions(ME, [marmot()]);
+    mockRestore.mockResolvedValue({});
+    mockSend.mockResolvedValue(true);
+    const at = Date.now();
+    await handleTaskLocations([point(at)]);
+    expect(mockRestore).toHaveBeenCalledTimes(1);
+    // A new runtime (fresh dispatcher) a few seconds later, same spot: the
+    // persisted cadence says nothing is due, so no MLS start at all.
+    liveUpdateDispatcher.reset();
+    await handleTaskLocations([point(at + 3_000)]);
+    expect(mockRestore).toHaveBeenCalledTimes(1);
+    expect(mockSend).toHaveBeenCalledTimes(1);
   });
 
   it('stop tracking when the only share was an unrestorable Marmot one', async () => {

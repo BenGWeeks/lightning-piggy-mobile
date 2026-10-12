@@ -16,6 +16,10 @@ jest.mock('./marmotSession', () => ({
   }),
 }));
 jest.mock('./nostrService', () => ({ DEFAULT_RELAYS: ['wss://default'] }));
+let mockRegistryActive: string | null = null;
+jest.mock('./identitiesStore', () => ({
+  loadIdentities: async () => ({ identities: [], activePubkey: mockRegistryActive }),
+}));
 
 import { restoreMarmotSessionHeadless } from './marmotHeadlessSession';
 
@@ -23,6 +27,7 @@ const ME = 'a'.repeat(64);
 beforeEach(() => {
   mockStore.clear();
   mockActive = null;
+  mockRegistryActive = null;
   jest.clearAllMocks();
 });
 
@@ -53,4 +58,24 @@ it('refuses when the share owner is no longer the active account', async () => {
   mockStore.set('nostr_signer_type', 'bogus');
   expect(await restoreMarmotSessionHeadless(ME, [])).toBeNull();
   expect(mockCtor).not.toHaveBeenCalled();
+});
+
+it('resolves an nsec account from the identity registry (no legacy pubkey slot)', async () => {
+  mockRegistryActive = ME;
+  mockStore.set('nostr_signer_type', 'nsec');
+  expect((await restoreMarmotSessionHeadless(ME, []))?.pubkey).toBe(ME);
+});
+
+it('refuses when the registry says another account is active', async () => {
+  mockRegistryActive = 'c'.repeat(64);
+  mockStore.set('nostr_pubkey', ME); // stale legacy slot
+  mockStore.set('nostr_signer_type', 'amber');
+  expect(await restoreMarmotSessionHeadless(ME, [])).toBeNull();
+});
+
+it('uses the legacy pubkey slot for a NIP-46 account', async () => {
+  mockRegistryActive = 'c'.repeat(64);
+  mockStore.set('nostr_pubkey', ME);
+  mockStore.set('nostr_signer_type', 'nip46');
+  expect((await restoreMarmotSessionHeadless(ME, []))?.pubkey).toBe(ME);
 });

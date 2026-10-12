@@ -25,7 +25,9 @@ import * as Location from 'expo-location';
 import { expiryFor } from './liveLocationService';
 import {
   createLiveUpdateDispatcher,
+  shouldSendUpdate,
   transportFor,
+  type LastSent,
   LIVE_UPDATE_MIN_INTERVAL_MS,
   type TrackedFix,
 } from './liveLocationPolicy';
@@ -132,26 +134,33 @@ export function headlessLiveSessions(persisted: OutgoingSession[], now: number):
     .map((s) => ({ ...s, status: 'active' as const }));
 }
 
+// Cadence state for the headless path. Expo tears the headless JS runtime
+// down after each task and builds a fresh one for the next location event, so
+// in-memory state doesn't survive between fixes: keep when + where each share
+// last sent, so the 30 s / 25 m / heartbeat rules still hold.
+const HEADLESS_LAST_KEY = 'live_location_headless_last_v1';
+
+async function loadHeadlessLast(): Promise<Record<string, LastSent>> {
+  try {
+    const raw = await AsyncStorage.getItem(HEADLESS_LAST_KEY);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : null;
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, LastSent>) : {};
+  } catch {
+    return {};
+  }
+}
+
+async function endShares(owner: string, persisted: OutgoingSession[], ids: Set<string>) {
+  await savePersistedSessions(
+    owner,
+    persisted.map((s) => (ids.has(s.sessionId) ? { ...s, stopRequested: true } : s)),
+  );
+}
+
 async function runHeadless(fix: TrackedFix): Promise<void> {
   const ctx = await loadTrackingContext();
   const persisted = ctx ? await loadPersistedSessions(ctx.owner) : [];
-  let live = ctx ? headlessLiveSessions(persisted, Date.now()) : [];
-  if (ctx && live.some((s) => transportFor(s) === 'marmot')) {
-    // Marmot updates need the MLS session: restore it (no UI is mounted).
-    // If that's impossible (the account was switched away), end those shares
-    // cleanly — the end marker goes out on the next app open — instead of
-    // streaming into nowhere while the notification says we're sharing.
-    if (!(await restoreMarmotSessionHeadless(ctx.owner, ctx.relays))) {
-      const ended = new Set(
-        live.filter((s) => transportFor(s) === 'marmot').map((s) => s.sessionId),
-      );
-      await savePersistedSessions(
-        ctx.owner,
-        persisted.map((s) => (ended.has(s.sessionId) ? { ...s, stopRequested: true } : s)),
-      );
-      live = live.filter((s) => !ended.has(s.sessionId));
-    }
-  }
+  const live = ctx ? headlessLiveSessions(persisted, Date.now()) : [];
   if (!ctx || live.length === 0) {
     // Nothing left to share: stop the service. The end markers go out from
     // the provider's drain loop on the next app open.
@@ -159,10 +168,52 @@ async function runHeadless(fix: TrackedFix): Promise<void> {
     await dismissLiveShareNotification();
     return;
   }
-  const owner = ctx.owner;
-  await liveUpdateDispatcher.handleFix(fix, live, (s, p) =>
-    sendLiveUpdate(owner, s, p, ctx.relays),
+  const now = Date.now();
+  const stored = await loadHeadlessLast();
+  for (const s of live) {
+    const l = stored[s.sessionId];
+    if (l && !liveUpdateDispatcher.lastFor(s.sessionId)) {
+      liveUpdateDispatcher.seed(s.sessionId, l.location, l.at);
+    }
+  }
+  // Only shares with an update due: restoring MLS for every fix would be a
+  // full Marmot start per location event.
+  let due = live.filter((s) =>
+    shouldSendUpdate({
+      now,
+      last: liveUpdateDispatcher.lastFor(s.sessionId) ?? null,
+      location: fix.location,
+      transport: transportFor(s),
+    }),
   );
+  if (due.length === 0) return;
+  const marmot = due.filter((s) => transportFor(s) === 'marmot');
+  // Marmot updates need the MLS session: restore it (no UI is mounted). If
+  // that's impossible (the account was switched away), end those shares
+  // cleanly — the end marker goes out on the next app open — instead of
+  // streaming into nowhere while the notification says we're sharing.
+  if (marmot.length > 0 && !(await restoreMarmotSessionHeadless(ctx.owner, ctx.relays))) {
+    const ended = new Set(live.filter((s) => transportFor(s) === 'marmot').map((s) => s.sessionId));
+    await endShares(ctx.owner, persisted, ended);
+    due = due.filter((s) => !ended.has(s.sessionId));
+    if (live.every((s) => ended.has(s.sessionId))) {
+      await stopTracking();
+      await dismissLiveShareNotification();
+      return;
+    }
+  }
+  const owner = ctx.owner;
+  const sent = await liveUpdateDispatcher.handleFix(
+    fix,
+    due,
+    (s, p) => sendLiveUpdate(owner, s, p, ctx.relays),
+    now,
+  );
+  if (sent.length === 0) return;
+  const next: Record<string, LastSent> = {};
+  for (const s of live) if (stored[s.sessionId]) next[s.sessionId] = stored[s.sessionId];
+  for (const id of sent) next[id] = { at: now, location: fix.location };
+  await AsyncStorage.setItem(HEADLESS_LAST_KEY, JSON.stringify(next)).catch(() => undefined);
 }
 
 /** Entry point for the TaskManager task (see liveLocationTask.ts). */
@@ -194,6 +245,14 @@ function serial<T>(op: () => Promise<T>): Promise<T> {
 async function startTrackingNow(ctx: TrackingContext): Promise<TrackingMode> {
   await AsyncStorage.setItem(TRACKING_KEY, JSON.stringify(ctx)).catch(() => undefined);
   if (mode === 'background') return mode;
+  // Already running (e.g. the JS restarted while the share ran on): Android
+  // refuses to START a location foreground service from the background, but
+  // the running one keeps delivering — adopt it.
+  if (await Location.hasStartedLocationUpdatesAsync(LIVE_LOCATION_TASK).catch(() => false)) {
+    watcher?.remove();
+    watcher = null;
+    return (mode = 'background');
+  }
   try {
     await Location.startLocationUpdatesAsync(LIVE_LOCATION_TASK, {
       accuracy: Location.Accuracy.High,
@@ -247,5 +306,5 @@ async function stopTrackingNow(): Promise<void> {
   } catch {
     // Task never registered on this run — nothing to stop.
   }
-  await AsyncStorage.removeItem(TRACKING_KEY).catch(() => undefined);
+  await AsyncStorage.multiRemove([TRACKING_KEY, HEADLESS_LAST_KEY]).catch(() => undefined);
 }

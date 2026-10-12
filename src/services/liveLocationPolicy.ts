@@ -73,6 +73,10 @@ export function createLiveUpdateDispatcher() {
     seed(sessionId: string, location: SharedLocation, at: number): void {
       last.set(sessionId, { at, location });
     },
+    /** When + where `sessionId`'s last update went, if this runtime knows. */
+    lastFor(sessionId: string): LastSent | undefined {
+      return last.get(sessionId);
+    },
     forget(sessionId: string): void {
       last.delete(sessionId);
       inFlight.delete(sessionId);
