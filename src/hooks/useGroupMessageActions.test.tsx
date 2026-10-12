@@ -164,3 +164,29 @@ it('offers Reply and reactions for a location without treating it as editable te
   act(() => result.current.startReply());
   expect(result.current.replyTo).toBe(target);
 });
+
+it.each([target, undefined])(
+  'preserves a newer reply when a send for %s completes, then clears the matching reply',
+  async (sentTarget) => {
+    const newer = { ...message, id: 'e'.repeat(64) };
+    const messages = [message, newer];
+    const { result } = renderHook(() =>
+      useGroupMessageActions({ messages, myPubkey: me, groupId: 'group' }),
+    );
+    await act(async () => {});
+    if (sentTarget) {
+      act(() => result.current.propsForMessage(message).onLongPress?.());
+      act(() => result.current.startReply());
+    }
+    const completeSend = result.current.onReplySent;
+    act(() => result.current.propsForMessage(newer).onLongPress?.());
+    // Queue selection and completion together: the completion must read current state.
+    act(() => {
+      result.current.startReply();
+      completeSend(sentTarget);
+    });
+    expect(result.current.replyTo).toBe(newer.id);
+    act(() => result.current.onReplySent(newer.id));
+    expect(result.current.replyTo).toBeUndefined();
+  },
+);

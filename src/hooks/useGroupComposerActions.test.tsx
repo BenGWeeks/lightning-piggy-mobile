@@ -92,28 +92,30 @@ const GROUP = {
 
 function setup(
   replyTo?: string,
-  onReplySent?: () => void,
+  onReplySent?: (target: string | undefined) => void,
   encodeMessage?: (text: string) => string,
 ) {
   const setMessages = jest.fn();
   const scrollToEnd = jest.fn();
-  const { result } = renderHook(() =>
-    useGroupComposerActions({
-      group: GROUP,
-      replyTo,
-      onReplySent,
-      encodeMessage,
-      draft: 'hello',
-      setDraft: jest.fn(),
-      setMessages,
-      scrollToEnd,
-      setAttachPanelOpen: jest.fn(),
-      setGifPickerOpen: jest.fn(),
-      setContactPickerOpen: jest.fn(),
-      setVoiceSheetOpen: jest.fn(),
-    }),
+  const { result, rerender } = renderHook(
+    ({ target }: { target: string | undefined }) =>
+      useGroupComposerActions({
+        group: GROUP,
+        replyTo: target,
+        onReplySent,
+        encodeMessage,
+        draft: 'hello',
+        setDraft: jest.fn(),
+        setMessages,
+        scrollToEnd,
+        setAttachPanelOpen: jest.fn(),
+        setGifPickerOpen: jest.fn(),
+        setContactPickerOpen: jest.fn(),
+        setVoiceSheetOpen: jest.fn(),
+      }),
+    { initialProps: { target: replyTo } },
   );
-  return { result, setMessages, scrollToEnd };
+  return { result, rerender, setMessages, scrollToEnd };
 }
 
 beforeEach(() => {
@@ -347,5 +349,32 @@ it.each(['resendText', 'sendText'] as const)(
       replyTo: 'parent',
     });
     expect(clearReply).toHaveBeenCalledTimes(1);
+  },
+);
+
+it.each(['reply-a', undefined])(
+  'reports the send-time reply target %s when a new reply is selected during sending',
+  async (target) => {
+    let finishSend!: (value: { success: boolean }) => void;
+    mockSendGroupMessage.mockImplementation(
+      () =>
+        new Promise<{ success: boolean }>((resolve) => {
+          finishSend = resolve;
+        }),
+    );
+    const onReplySent = jest.fn();
+    const { result, rerender } = setup(target, onReplySent);
+    let pending!: Promise<void>;
+    act(() => {
+      pending = result.current.handleSend();
+    });
+    rerender({ target: 'reply-b' });
+    expect(onReplySent).not.toHaveBeenCalled();
+    await act(async () => {
+      finishSend({ success: true });
+      await pending;
+    });
+    expect(mockSendGroupMessage.mock.calls[0][0].replyTo).toBe(target);
+    expect(onReplySent).toHaveBeenCalledWith(target);
   },
 );

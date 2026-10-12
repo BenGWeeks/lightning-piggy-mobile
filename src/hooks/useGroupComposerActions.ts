@@ -51,7 +51,7 @@ export function useGroupComposerActions(params: {
   /** Rewrites the typed text before a composer send — `@Name` → `nostr:npub…` (#1295). */
   encodeMessage?: (text: string) => string;
   replyTo?: string;
-  onReplySent?: () => void;
+  onReplySent?: (target: string | undefined) => void;
 }) {
   const {
     group,
@@ -373,8 +373,9 @@ export function useGroupComposerActions(params: {
   // Composer sends only: polls, shares and re-publishes go out as built.
   const sendMessage = useMemo(
     () => async (text: string) => {
-      const sent = await sendText(encodeMessage ? encodeMessage(text) : text, replyTo);
-      if (sent) onReplySent?.();
+      const target = replyTo;
+      const sent = await sendText(encodeMessage ? encodeMessage(text) : text, target);
+      if (sent) onReplySent?.(target);
       return sent;
     },
     [encodeMessage, sendText, replyTo, onReplySent],

@@ -102,6 +102,12 @@ export function useGroupMessageActions({
     undefined,
   );
   const cancelReply = useCallback(() => setReplyTo(undefined), [setReplyTo]);
+  const onReplySent = useCallback(
+    (target: string | undefined) => {
+      setReplyTo((current) => (current === target ? undefined : current));
+    },
+    [setReplyTo],
+  );
   const { actionsForMessage: actioned, closeMessageActions: closeActions } = reactions;
   const startReply = useCallback(() => {
     if (!groupId || !actioned) return;
@@ -125,5 +131,13 @@ export function useGroupMessageActions({
       ? { ...quote, authorName: memberNameByPubkey.get(parent.senderPubkey) }
       : quote;
   }, [replyTo, messages, myPubkey, memberNameByPubkey, formatLocale]);
-  return { ...reactions, propsForMessage, replyTo, cancelReply, startReply, replyQuote };
+  return {
+    ...reactions,
+    propsForMessage,
+    replyTo,
+    cancelReply,
+    onReplySent,
+    startReply,
+    replyQuote,
+  };
 }

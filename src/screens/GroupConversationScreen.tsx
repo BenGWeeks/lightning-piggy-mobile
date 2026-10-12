@@ -311,7 +311,7 @@ const GroupConversationScreen: React.FC = () => {
     setVoiceSheetOpen,
     encodeMessage: mention.encode,
     replyTo,
-    onReplySent: cancelReply,
+    onReplySent: reactions.onReplySent,
   });
 
   // Tap a group bubble → the same message-info sheet 1:1 chats use (#856).
