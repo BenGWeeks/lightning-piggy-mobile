@@ -25,7 +25,7 @@ import type { RefreshDmInboxOptions } from './nostrContextTypes';
 // How long after the engine's reconnect signal we wait before firing
 // refreshDmInbox — gives the re-subscribed relay time to push its first
 // backlog burst so the refresh doesn't race it. Matches #1039's settle.
-const ENGINE_RECONNECT_REFRESH_SETTLE_MS = 1_500;
+const ENGINE_RECONNECT_REFRESH_SETTLE_MS = 3_000;
 // Pacing for engine-delivered rumor batches: the per-rumor JS work is small
 // (no decrypt — that happened natively), so yield every N rumors instead of
 // the JS path's per-wrap yield (#496).
@@ -65,6 +65,7 @@ export function createLiveDmEngineBridge(deps: LiveDmEngineBridgeDeps): LiveDmEn
   const mode = getNativeEngineMode(deps.activeSigner);
   const xcheck: EngineXcheck | null = mode === 'xcheck' ? createEngineXcheck() : null;
   let handle: NativeDmEngineHandle | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Rumors delivered by the native engine (already verified + unwrapped +
   // sender-bound natively). The JS-side knownWrapIds claim stays
@@ -104,11 +105,13 @@ export function createLiveDmEngineBridge(deps: LiveDmEngineBridgeDeps): LiveDmEn
   const onEngineReconnect = (): void => {
     const { onReconnect } = deps;
     if (deps.isCancelled() || !onReconnect || xcheck) return;
-    setTimeout(() => {
+    if (reconnectTimer !== null) return;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
       if (deps.isCancelled()) return;
       if (__DEV__)
         console.log('[Nostr] engine reconnect — triggering refreshDmInbox to close blind window');
-      onReconnect({ force: true }).catch((e) => {
+      onReconnect({}).catch((e) => {
         if (__DEV__) console.warn('[Nostr] engine reconnect refresh failed:', e);
       });
     }, ENGINE_RECONNECT_REFRESH_SETTLE_MS);
@@ -153,6 +156,8 @@ export function createLiveDmEngineBridge(deps: LiveDmEngineBridgeDeps): LiveDmEn
     recordJsUnwrap: (wrapId) => xcheck?.recordJs(wrapId),
     start,
     stop: () => {
+      if (reconnectTimer !== null) clearTimeout(reconnectTimer);
+      reconnectTimer = null;
       // Stops the rust-nostr pool AND clears the module's single-entry key
       // cache (Stage 2 M2 key lifecycle) — fire-and-forget, idempotent; the
       // logout path's stopNativeDmEngineGlobal covers a racing slow stop.

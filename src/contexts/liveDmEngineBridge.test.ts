@@ -120,8 +120,27 @@ describe('createLiveDmEngineBridge', () => {
       const { deps, opts } = await startCapturing();
       opts.onReconnect();
       expect(deps.onReconnect).not.toHaveBeenCalled(); // settle window
-      jest.advanceTimersByTime(1_500);
-      expect(deps.onReconnect).toHaveBeenCalledWith({ force: true });
+      jest.advanceTimersByTime(3_000);
+      expect(deps.onReconnect).toHaveBeenCalledWith({});
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('coalesces per-relay reconnect bursts and cancels a pending flush on stop', async () => {
+    mockMode.mockReturnValue('engine');
+    jest.useFakeTimers();
+    try {
+      const { deps, bridge, opts } = await startCapturing();
+      opts.onReconnect();
+      opts.onReconnect();
+      opts.onReconnect();
+      jest.advanceTimersByTime(3_000);
+      expect(deps.onReconnect).toHaveBeenCalledTimes(1);
+      opts.onReconnect();
+      bridge.stop();
+      jest.advanceTimersByTime(3_000);
+      expect(deps.onReconnect).toHaveBeenCalledTimes(1);
     } finally {
       jest.useRealTimers();
     }

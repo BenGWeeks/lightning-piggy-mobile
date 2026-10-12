@@ -1196,3 +1196,41 @@ For the existing `.dev` installation, use the terminate → `RCT_jsLocation` →
 launch sequence above to load the worktree while retaining its test accounts.
 Do not add an identity merely because the other installation is signed out.
 Restore the shared Metro host to 8090 for every installation you repointed.
+
+=== Messages refreshes repeatedly while a Marmot thread shows a spinner
+
+The 2026-10-12 Pixel log showed four 11.6–16.0 s inbox refreshes, each
+replaying 1,354 kind-4 events and 225 wraps. The store skipped 1,219 kind-4
+rows and 200 wraps, but each pass still attempted 25 un-stored wraps.
+Automatic JS/native reconnect callbacks used `force: true`, bypassing both
+the freshness throttle and the negative wrap cache and dropping the kind-4
+cursor. Groups focus and map location catch-up also forced full refreshes.
+Automatic reconciliation now keeps the cursor and shares a 60 s completion
+TTL; explicit pull-to-refresh/filter changes and the one cold backfill retain
+their bypasses. Native reconnect bursts share one cancellable 3 s settle timer. A newly
+widened non-follow view backfills kind-4 history without `since`, including
+messages older than the 120 s overlap. Suppressed reconciliation schedules one
+account-scoped retry at TTL expiry, cancelled on account switch/unmount or a
+new pass. The retry retains the kind-4 cursor and negative wrap cache.
+Refresh callers wait for setup before inspecting the effective abort signal;
+forced/backfill requests await weaker work and then run their own pass.
+Productive aborts still persist/paint partial batches but preserve both cursors.
+Failed kind-4 decrypts or database writes also leave the history cursor intact.
+
+Do not interpret `nostrCrypto schnorrVerify n=1888` as 1,888 checks per
+refresh: `n` is cumulative for the process, while percentiles cover only the
+last 200 samples. It increased by just one between 21:07:09 and 21:08:09.
+The verifier is synchronous, so other JS callbacks cannot interleave inside
+its timing bracket; CPU scheduling/GC can still inflate wall time. Memoised
+nostr-tools checks no longer add samples. The bounded verified-id cache is
+now LRU so replayed inbox ids survive unrelated feed churn; cache hits still
+check the canonical content hash. Plaintext DB rows are not signature proofs
+and must not seed that cache.
+
+Marmot thread navigation does not await the global refresh or MLS readiness:
+`useConversationLoader` reads encrypted cached rows, paints them, and receives
+coalesced store notifications as session hydration finishes. It now performs
+one store read per load instead of two. A JS-thread stall can still delay the
+first store continuation/paint. With no device capture, the originating
+trigger and the cost of those 25 retrying wraps cannot be conclusively
+attributed from these markers alone.

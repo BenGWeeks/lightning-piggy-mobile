@@ -12,12 +12,7 @@ import { pool, connectedRelays, trackRelays } from './nostrPool';
 import { DEFAULT_RELAYS, PROFILE_RELAYS } from './nostrRelayDefaults';
 import * as nip19 from 'nostr-tools/nip19';
 import * as nip04 from 'nostr-tools/nip04';
-import {
-  nip44EncryptForRecipient,
-  nostrFinalizeEvent,
-  nostrGetEventHash,
-  nostrVerifyEvent,
-} from './nostrCrypto';
+import { nip44EncryptForRecipient, nostrFinalizeEvent, nostrGetEventHash } from './nostrCrypto';
 import * as nip59 from 'nostr-tools/nip59';
 import type { NostrProfile, NostrContact, RelayConfig } from '../types/nostr';
 import { slimDisplayProfile } from '../utils/profileSanitize';
@@ -237,7 +232,7 @@ export async function fetchProfile(pubkey: string, relays: string[]): Promise<No
     if (!event) return null;
     // `pool.verifyEvent` fast-paths kind-0 (skips schnorr) — but this single
     // fetch feeds payment destinations (`lud16`), so verify it for real here.
-    if (!nostrVerifyEvent(event)) {
+    if (!verifyEventCached(event)) {
       console.warn('Nostr profile failed signature verification, ignoring:', pubkey);
       return null;
     }

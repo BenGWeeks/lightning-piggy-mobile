@@ -17,9 +17,10 @@ import {
 } from '../services/dmDb';
 import { loadInboxEntries } from '../services/dmInbox';
 import { nip04PlaintextCache, getMemoisedSecretKey } from './nostrSecretKeyCache';
-import { yieldToEventLoop, DECRYPT_YIELD_EVERY } from './nostrDecryptPacing';
+import { decryptInboxKind4, persistInboxKind4 } from './inboxNip04Ingest';
 import {
   COLD_INITIAL_WRAP_LIMIT,
+  DM_INBOX_REFRESH_TTL_MS,
   DM_INBOX_CAP,
   DM_CONV_CAP,
   inboxLastSeenKey,
@@ -52,6 +53,8 @@ import {
   selectScopedDmInbox,
   type ScopedDmInbox,
 } from './dmInboxScope';
+
+import { useDmRefreshCoordinator, canJoinDmRefresh } from './dmRefreshCoordinator';
 
 type DmInboxSetter = React.Dispatch<React.SetStateAction<DmInboxEntry[]>>;
 
@@ -200,21 +203,23 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
     };
   }, [pubkey]);
 
-  // Single-flight guard: coalesce overlapping refreshDmInbox calls (e.g.
-  // useFocusEffect firing while a pull-to-refresh is still in-flight) so
-  // they don't race on the skip-set file + encrypted-store writes.
-  // Keyed by account: a refresh still running for the previous account must
-  // not be piggy-backed on (or awaited) by the new account's refresh.
-  const dmInboxInFlight = useRef(
-    new Map<string, { promise: Promise<void>; includeNonFollows: boolean; signal: AbortSignal }>(),
-  );
+  const {
+    flights: dmInboxInFlight,
+    schedule: scheduleReconciliation,
+    cancel: cancelReconciliation,
+  } = useDmRefreshCoordinator(pubkey);
   /** `performance.now()` of the last COMPLETED `refreshDmInbox` (`0` before
    * any) and the account it ran for. Drives the cold-start + freshness-TTL
    * gates — see dmRefreshGate. A different account reads as `0`, so its first
    * refresh after a switch is a cold start and isn't TTL-skipped. */
-  const dmInboxLastRefresh = useRef<{ pubkey: string | null; at: number }>({
+  const dmInboxLastRefresh = useRef<{
+    pubkey: string | null;
+    at: number;
+    includeNonFollows: boolean;
+  }>({
     pubkey: null,
     at: 0,
+    includeNonFollows: false,
   });
 
   /** Eagerly hydrate `dmInbox` so the Messages tab paints conversations on
@@ -430,21 +435,41 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       // bypasses (includeNonFollows still bypasses, see shouldBypassSkipSet)
       // (that was the every-cold-start decrypt sweep, #846).
       const bypassSkipSet = shouldBypassSkipSet(opts);
-      if (shouldSkipForFreshness(lastRefreshAt, bypassesFreshnessTtl(opts), performance.now())) {
-        return;
-      }
-      // Single-flight: piggy-back on in-flight task ONLY when its includeNonFollows matches; otherwise wait then re-run with the wider option.
+      // Resolve setup before comparing effective cancellation and refresh strength.
       // A refresh in flight for a previous account is ignored here — its
       // writes are dropped by the owner scope, so there's nothing to wait for.
       const inFlight = dmInboxInFlight.current.get(pubkey);
       if (inFlight) {
-        if (inFlight.includeNonFollows === includeNonFollows && !inFlight.signal.aborted) {
+        await inFlight.setup;
+        if (canJoinDmRefresh(inFlight, opts)) {
           return inFlight.promise;
         }
         await inFlight.promise;
         if (activeOwnerRef.current !== pubkey) return;
         return refreshDmInboxRef.current?.(opts);
       }
+
+      // Widening backfills kind-4 messages previously excluded by the follow gate.
+      const widensView = includeNonFollows && !dmInboxLastRefresh.current.includeNonFollows;
+      if (
+        shouldSkipForFreshness(
+          lastRefreshAt,
+          bypassesFreshnessTtl(opts) || widensView,
+          performance.now(),
+        )
+      ) {
+        // A bounded live subscription can miss older wraps. Reconcile once
+        // at expiry without dropping the cursor or negative-result cache.
+        scheduleReconciliation(
+          lastRefreshAt + DM_INBOX_REFRESH_TTL_MS - performance.now(),
+          accountSignalFor(pubkey),
+          () => {
+            void refreshDmInboxRef.current?.({ ...opts, signal: accountSignalFor(pubkey) });
+          },
+        );
+        return;
+      }
+      cancelReconciliation();
 
       // Capture local references once so the closure isn't affected by
       // mid-flight signer / identity changes. If we detect pubkey/signerType
@@ -467,6 +492,10 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       let refreshCompleted = false; // set after commit; gates the stamp (#788 — see helper)
       let disposeSignal: () => void = () => {};
 
+      let resolveSetup!: () => void;
+      const setup = new Promise<void>((resolve) => {
+        resolveSetup = resolve;
+      });
       const task = (async () => {
         setDmInboxLoading(true);
         try {
@@ -491,6 +520,10 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           const linked = linkAbortSignals(mustCompleteRebuild ? undefined : signal, accountSignal);
           disposeSignal = linked.dispose;
           const effectiveSignal = linked.signal;
+          const flight = dmInboxInFlight.current.get(refreshForPubkey);
+          if (flight) flight.signal = effectiveSignal;
+          resolveSetup();
+          if (effectiveSignal.aborted) return;
           if (__DEV__ && mustCompleteRebuild) {
             console.log('[Perf] refreshDmInbox: cold rebuild — running to completion (F1)');
           }
@@ -536,21 +569,14 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
             setInboxForRefresh(filteredCache);
           }
 
-          // For pull-to-refresh / force refresh, skip the `since` filter
-          // entirely. NIP-59 wraps have a randomised `created_at` (up to
-          // 2 days back), so a `since` cutoff is unreliable for catching
-          // freshly-published wraps — the relay will drop wraps whose
-          // randomised stamp falls behind the cutoff. The wrap-id cache
-          // dedupes the re-fetched bytes, so the cost of dropping the
-          // floor is just the relay round-trip, not re-decrypt. Group
-          // messages especially benefit since GroupsScreen / GroupConv
-          // open with `force: true` to chase newly-arrived rumors.
+          // Widening and explicit warm user refreshes backfill kind-4.
+          // Wraps remain bounded without since (randomised NIP-59 timestamps).
           const { kind4, kind1059 } = await nostrService.fetchInboxDmEvents(
             refreshForPubkey,
             readRelays,
             {
               // kind-4 `since` floor policy → dmRefreshGate.shouldDropK4Since (#751/#846). Wraps ignore `since` internally regardless (random NIP-59 ts).
-              ...(shouldDropK4Since(opts, isColdStart) ? {} : { since: lastSeen }),
+              ...(widensView || shouldDropK4Since(opts, isColdStart) ? {} : { since: lastSeen }),
               signal: effectiveSignal,
               ...(isColdStart ? { limit: COLD_INITIAL_WRAP_LIMIT } : {}),
             },
@@ -609,47 +635,16 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
               : new Set<string>();
           nip04DbHits = k4Known.size;
           const k4ToDecrypt = k4Misses.filter((t) => !k4Known.has(t.ev.id));
-          const k4Rows: DmMessageRow[] = [];
-          // Slow pass — parallel decrypt of misses in yield-able chunks.
-          for (let i = 0; i < k4ToDecrypt.length; i += DECRYPT_YIELD_EVERY) {
-            // Stop decrypting on abort (releases the JS thread, #412) but BREAK
-            // rather than return: the k4Rows decrypted so far are idempotent
-            // and persist below, then the productive-abort commit paints them
-            // (F1, #849). A cold rebuild only aborts on an account switch.
-            if (effectiveSignal?.aborted) break;
-            const batch = k4ToDecrypt.slice(i, i + DECRYPT_YIELD_EVERY);
-            const batchResults = await Promise.all(
-              batch.map(async (t) => {
-                nip04FreshDecrypts++;
-                const plaintext = await decryptNip04ViaSigner(t.partnerPubkey, t.ev.content);
-                if (plaintext === null) return null;
-                if (!effectiveSignal?.aborted) nip04PlaintextCache.set(t.ev.id, plaintext);
-                return { t, plaintext };
-              }),
-            );
-            for (const r of batchResults) {
-              if (!r) continue;
-              entries.push({
-                id: r.t.ev.id,
-                partnerPubkey: r.t.partnerPubkey,
-                fromMe: r.t.fromMe,
-                createdAt: r.t.ev.created_at,
-                text: r.plaintext,
-                wireKind: 4,
-              });
-              k4Rows.push({
-                owner: refreshForPubkey,
-                eventId: r.t.ev.id,
-                conversation: r.t.partnerPubkey,
-                createdAt: r.t.ev.created_at,
-                sender: r.t.fromMe ? refreshForPubkey : r.t.partnerPubkey,
-                content: r.plaintext,
-                fromMe: r.t.fromMe,
-                wireKind: 4,
-              });
-            }
-            if (i + DECRYPT_YIELD_EVERY < k4ToDecrypt.length) await yieldToEventLoop();
-          }
+          const k4Result = await decryptInboxKind4({
+            owner: refreshForPubkey,
+            targets: k4ToDecrypt,
+            decrypt: decryptNip04ViaSigner,
+            signal: effectiveSignal,
+            isColdStart,
+          });
+          entries.push(...k4Result.entries);
+          const k4Rows = k4Result.rows;
+          nip04FreshDecrypts = k4Result.attempts;
           // Persist fresh NIP-04 decrypts BEFORE honoring any abort (F1, #849):
           // a decrypted kind-4 row is idempotent + `(owner, event_id)`-keyed,
           // so a sweep cut short by a tab blur must not throw away the decrypts
@@ -658,11 +653,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           // is the only durable decrypt-once memo. Even a genuine backlog
           // refetch (user pull-to-refresh drops the `since` floor, #743) is
           // decrypt-once from now on.
-          if (k4Rows.length > 0) {
-            await upsertDmMessages(k4Rows).catch((e) => {
-              if (__DEV__) console.warn('[DmStore] kind-4 upsert failed:', e);
-            });
-          }
+          await persistInboxKind4(k4Rows);
 
           // NIP-17 — partner pubkey is INSIDE the encrypted rumor, so we
           // have to decrypt to know who sent it. For the nsec signer this
@@ -770,20 +761,12 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
 
           setInboxForRefresh(filteredFinal);
 
-          // Advance the kind-4 last-seen cursor (a bare unix timestamp — no
-          // plaintext; the decrypted content itself persists ONLY in the
-          // encrypted store now, #850). Only kind-4 contributes
-          // here — NIP-59 wraps have randomized timestamps (~2 days in
-          // either direction of the real publish time) for plausible
-          // deniability, so wrap.created_at can't be used as a
-          // monotonic publish-time cursor. Including them here would
-          // ratchet lastSeen into the future on the first wrap with a
-          // forward-dated ts, then cause subsequent kind-4 since-filters
-          // to drop legitimate recent NIP-04 messages. fetchInboxDmEvents
-          // already drops the `since` filter for kind-1059 entirely (see
-          // the matching comment there); the store dedupes wraps by id.
+          // Advance only after every kind-4 target was ingested and persisted.
+          // Partial/failed decrypts keep the floor so older unprocessed rows
+          // remain queryable. Randomised wrap timestamps never contribute.
           const newLastSeen = Math.max(lastSeen ?? 0, ...kind4.map((e) => e.created_at));
-          if (newLastSeen > (lastSeen ?? 0)) {
+          const kind4Complete = k4Rows.length === k4ToDecrypt.length;
+          if (!effectiveSignal.aborted && kind4Complete && newLastSeen > (lastSeen ?? 0)) {
             await AsyncStorage.setItem(
               inboxLastSeenKey(refreshForPubkey),
               String(newLastSeen),
@@ -794,10 +777,11 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           // productive-but-aborted sweep painted from the DB but did NOT finish
           // the backlog → leave refreshCompleted false so it gets the short
           // abort-TTL and the next focus tops up (F1, #849).
-          if (!effectiveSignal?.aborted) refreshCompleted = true;
+          if (!effectiveSignal.aborted && kind4Complete) refreshCompleted = true;
         } catch (error) {
           if (__DEV__) console.warn('[Nostr] refreshDmInbox failed:', error);
         } finally {
+          resolveSetup();
           disposeSignal();
           if (isStillActive()) setDmInboxLoading(false);
         }
@@ -805,6 +789,9 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
 
       dmInboxInFlight.current.set(refreshForPubkey, {
         promise: task,
+        setup,
+        force: opts?.force === true,
+        backfill: opts?.backfill === true,
         includeNonFollows,
         signal: accountSignal,
       });
@@ -813,7 +800,11 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
         // Stamp only for a refresh that COMPLETED its work — gate on
         // `refreshCompleted`, not `signal.aborted` (see the helper). #788.
         if (shouldStampCursor(!refreshCompleted)) {
-          dmInboxLastRefresh.current = { pubkey: refreshForPubkey, at: performance.now() };
+          dmInboxLastRefresh.current = {
+            pubkey: refreshForPubkey,
+            at: performance.now(),
+            includeNonFollows,
+          };
         }
       } finally {
         // Only clear our own marker — a newer account's refresh may own it.
@@ -830,7 +821,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       // Cold-start backfill (#751) — recent slice painted fast above; top up to
       // the full backlog in the background (deferred + abortable). See module.
       scheduleColdStartBackfill({
-        isColdStart,
+        isColdStart: isColdStart && refreshCompleted,
         signal,
         includeNonFollows,
         refreshRef: refreshDmInboxRef,
@@ -847,6 +838,9 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       inboxSetterFor,
       setDmInbox,
       accountSignalFor,
+      dmInboxInFlight,
+      scheduleReconciliation,
+      cancelReconciliation,
     ],
   );
   // Keep the self-ref pointed at the latest refreshDmInbox closure.

@@ -1,0 +1,300 @@
+/**
+ * Account-switch scoping for the DM inbox: one account's conversations must
+ * never render under another (accounts share a phone in a family app).
+ */
+import { act, renderHook } from '@testing-library/react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { ensureDmStoreMigrated } from './dmStoreMigrationRunner';
+import { nip46DecryptNip04 } from './nip46DmDecrypt';
+import { ingestInboxNip17ForSigner } from './inboxNip17Ingest';
+import { selectKnownEventIds, upsertDmMessages, type DmMessageRow } from '../services/dmDb';
+import { inboxLastSeenKey } from './nostrDmCache';
+import { nip04PlaintextCache } from './nostrSecretKeyCache';
+import { DECRYPT_YIELD_EVERY } from './nostrDecryptPacing';
+import type { RawDmEvent, RawGiftWrapEvent } from '../services/nostrService';
+import type { DmInboxEntry } from '../utils/conversationSummaries';
+import { loadInboxEntries } from '../services/dmInbox';
+import { fetchInboxDmEvents } from '../services/nostrService';
+import { useDmInbox, type UseDmInboxOptions } from './useDmInbox';
+
+jest.mock('../services/nostrService', () => ({ fetchInboxDmEvents: jest.fn() }));
+jest.mock('../services/amberService', () => ({}));
+jest.mock('./nip46DmDecrypt', () => ({ nip46DecryptNip04: jest.fn() }));
+jest.mock('./nostrSecretKeyCache', () => ({
+  nip04PlaintextCache: new (jest.requireActual('../utils/lru').LRUCache)({ max: 1000 }),
+  getMemoisedSecretKey: jest.fn(),
+}));
+jest.mock('./inboxNip17Ingest', () => ({ ingestInboxNip17ForSigner: jest.fn(async () => null) }));
+jest.mock('../services/dmInbox', () => ({ loadInboxEntries: jest.fn() }));
+jest.mock('../services/dmDb', () => ({
+  ...jest.requireActual('../services/dmDb'),
+  selectKnownEventIds: jest.fn(async () => new Set()),
+  upsertDmMessages: jest.fn(async () => undefined),
+  updateDmDeliveryStatuses: jest.fn(async () => undefined),
+  hasStoredWraps: jest.fn(async () => true),
+  getConversationMessages: jest.fn(async () => []),
+}));
+jest.mock('./dmStoreMigrationRunner', () => ({ ensureDmStoreMigrated: jest.fn(async () => {}) }));
+jest.mock('./nostrLiveDmSub', () => ({ startLiveDmSubscription: jest.fn(() => () => {}) }));
+jest.mock('./nostrFetchConversation', () => ({ fetchConversationFor: jest.fn() }));
+jest.mock('./conversationReadThrough', () => ({ loadInitialConversation: jest.fn() }));
+jest.mock('./dmColdStartBackfill', () => ({ scheduleColdStartBackfill: jest.fn() }));
+jest.mock('./dmDeliveryStorePersistence', () => ({
+  bindDmDeliveryStorePersistence: jest.fn(async () => () => {}),
+}));
+jest.mock('./useMarmotDmInbound', () => ({ useMarmotDmInbound: jest.fn() }));
+
+const OWNER = 'a'.repeat(64);
+const FRIEND = 'b'.repeat(64);
+const STRANGER = 'c'.repeat(64);
+const BASE = 1_760_000_000;
+const event = (
+  n: number,
+  createdAt = BASE + n,
+  sender = FRIEND,
+): RawDmEvent & { kind: 4; sig: string } => ({
+  id: n.toString(16).padStart(64, '0'),
+  pubkey: sender,
+  created_at: createdAt,
+  kind: 4,
+  tags: [['p', OWNER]],
+  content: `encrypted-message-${n}?iv=fixture`,
+  sig: 'd'.repeat(128),
+});
+const wrap: RawGiftWrapEvent = { ...event(900, BASE - 86_400), kind: 1059 };
+const fetchMock = jest.mocked(fetchInboxDmEvents);
+const decryptMock = jest.mocked(nip46DecryptNip04);
+const ingestMock = jest.mocked(ingestInboxNip17ForSigner);
+let rows: DmMessageRow[];
+let relayEvents: RawDmEvent[];
+let now: number;
+const deferred = <T>() => {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+};
+const renderInbox = () =>
+  renderHook((props: UseDmInboxOptions) => useDmInbox(props), {
+    initialProps: {
+      pubkey: OWNER,
+      isLoggedIn: true,
+      signerType: 'nip46',
+      followPubkeys: new Set([FRIEND]),
+      getReadRelays: () => ['wss://relay.example'],
+    },
+  });
+beforeEach(async () => {
+  jest.clearAllMocks();
+  await AsyncStorage.clear();
+  nip04PlaintextCache.clear();
+  rows = [];
+  relayEvents = [event(1)];
+  now = 1000;
+  jest.spyOn(performance, 'now').mockImplementation(() => now);
+  jest.mocked(ensureDmStoreMigrated).mockResolvedValue(undefined);
+  decryptMock.mockImplementation(async (ciphertext) => `Lunch tomorrow: ${ciphertext}`);
+  jest
+    .mocked(selectKnownEventIds)
+    .mockImplementation(
+      async (_owner, ids) =>
+        new Set(rows.filter((r) => ids.includes(r.eventId)).map((r) => r.eventId)),
+    );
+  jest.mocked(upsertDmMessages).mockImplementation(async (batch) => {
+    for (const row of batch) if (!rows.some((r) => r.eventId === row.eventId)) rows.push(row);
+  });
+  jest.mocked(loadInboxEntries).mockImplementation(async () =>
+    rows.map(
+      (r): DmInboxEntry => ({
+        id: r.eventId,
+        partnerPubkey: r.conversation,
+        fromMe: r.fromMe,
+        createdAt: r.createdAt,
+        text: r.content,
+        wireKind: 4,
+      }),
+    ),
+  );
+  fetchMock.mockImplementation(async (_owner, _relays, opts) => ({
+    kind4: relayEvents.filter((e) => opts?.since === undefined || e.created_at >= opts.since - 120),
+    kind1059: [wrap],
+  }));
+  ingestMock.mockResolvedValue(null);
+});
+afterEach(() => {
+  jest.restoreAllMocks();
+  jest.useRealTimers();
+});
+
+it('reconciles a suppressed reconnect at expiry with cursor and negative cache intact', async () => {
+  jest.useFakeTimers({ doNotFake: ['performance', 'queueMicrotask', 'nextTick', 'setImmediate'] });
+  const { result, unmount } = renderInbox();
+  await act(() => result.current.refreshDmInbox());
+  relayEvents.push(event(2, BASE + 300));
+  const missedWrap = { ...wrap, id: 'e'.repeat(64), created_at: BASE - 172_000 };
+  fetchMock.mockImplementation(async (_owner, _relays, opts) => ({
+    kind4: relayEvents.filter((e) => opts?.since === undefined || e.created_at >= opts.since - 120),
+    kind1059: [wrap, missedWrap],
+  }));
+  ingestMock.mockImplementation(async ({ wraps, bypassSkipSet }) => ({
+    entries: wraps
+      .filter((w) => w.id === missedWrap.id)
+      .map(() => ({
+        id: 'f'.repeat(64),
+        partnerPubkey: FRIEND,
+        fromMe: false,
+        createdAt: BASE + 301,
+        text: 'Train is delayed; meet at 18:30',
+        wireKind: 14,
+      })),
+    alreadyKnown: 0,
+    skipHits: bypassSkipSet ? 0 : 1,
+    misses: 1,
+    stored: 1,
+    yields: 0,
+  }));
+  now = 4000;
+  const focus = new AbortController();
+  await act(() => result.current.refreshDmInbox({ signal: focus.signal }));
+  focus.abort();
+  // A reconnect shares the pending timer, which must outlive the tab's abort.
+  await act(() => result.current.refreshDmInbox());
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  now = 60_999;
+  await act(async () => {
+    await jest.advanceTimersByTimeAsync(56_999);
+  });
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  now = 61_000;
+  await act(async () => {
+    await jest.advanceTimersByTimeAsync(1);
+  });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(fetchMock.mock.calls[1][2]?.since).toBe(BASE + 1);
+  expect(ingestMock.mock.calls[1][0]).toMatchObject({
+    wraps: [wrap, missedWrap],
+    bypassSkipSet: false,
+  });
+  expect(result.current.dmInbox.some((e) => e.id === event(2).id)).toBe(true);
+  expect(result.current.dmInbox.some((e) => e.text === 'Train is delayed; meet at 18:30')).toBe(
+    true,
+  );
+  unmount();
+  expect(jest.getTimerCount()).toBe(0);
+});
+
+it('cancels suppressed reconciliation on account switch and unmount', async () => {
+  jest.useFakeTimers({ doNotFake: ['performance', 'queueMicrotask', 'nextTick', 'setImmediate'] });
+  const { result, rerender, unmount } = renderInbox();
+  await act(() => result.current.refreshDmInbox());
+  await act(() => result.current.refreshDmInbox());
+  expect(jest.getTimerCount()).toBe(1);
+  rerender({
+    pubkey: STRANGER,
+    isLoggedIn: true,
+    signerType: 'nip46',
+    followPubkeys: new Set([FRIEND]),
+    getReadRelays: () => ['wss://relay.example'],
+  });
+  expect(jest.getTimerCount()).toBe(0);
+  await act(() => result.current.refreshDmInbox());
+  await act(() => result.current.refreshDmInbox());
+  expect(jest.getTimerCount()).toBe(1);
+  unmount();
+  expect(jest.getTimerCount()).toBe(0);
+});
+
+it('waits for an automatic pass then performs the stronger pull-to-refresh', async () => {
+  const { result } = renderInbox();
+  await act(() => result.current.refreshDmInbox());
+  const old = event(2, BASE - 600);
+  relayEvents.push(old);
+  now = 62_000;
+  const started = deferred<void>();
+  const release = deferred<Awaited<ReturnType<typeof fetchInboxDmEvents>>>();
+  fetchMock.mockImplementationOnce(() => {
+    started.resolve();
+    return release.promise;
+  });
+  let automatic!: Promise<void>;
+  let forced!: Promise<void>;
+  await act(async () => {
+    automatic = result.current.refreshDmInbox();
+    await started.promise;
+    forced = result.current.refreshDmInbox({ force: true });
+  });
+  await act(async () => {
+    release.resolve({ kind4: [event(1)], kind1059: [wrap] });
+    await Promise.all([automatic, forced]);
+  });
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+  expect(fetchMock.mock.calls[2][2]).not.toHaveProperty('since');
+  expect(ingestMock.mock.calls[2][0].bypassSkipSet).toBe(true);
+  expect(rows.some((r) => r.eventId === old.id)).toBe(true);
+});
+
+it('replaces warm work aborted before migration/setup resolves without microtask sleeps', async () => {
+  const { result } = renderInbox();
+  await act(() => result.current.refreshDmInbox());
+  relayEvents.push(event(2, BASE + 300));
+  const setup = deferred<void>();
+  jest.mocked(ensureDmStoreMigrated).mockImplementationOnce(() => setup.promise);
+  const ctrl = new AbortController();
+  let first!: Promise<void>;
+  let replacement!: Promise<void>;
+  await act(async () => {
+    first = result.current.refreshDmInbox({ force: true, signal: ctrl.signal });
+    ctrl.abort();
+    replacement = result.current.refreshDmInbox({ force: true });
+    setup.resolve();
+    await Promise.all([first, replacement]);
+  });
+  expect(rows.some((r) => r.eventId === event(2).id)).toBe(true);
+  expect(fetchMock.mock.calls.at(-1)?.[2]?.signal?.aborted).toBe(false);
+});
+
+it('backfills non-follow kind-4 history older than the 120 second overlap when widening', async () => {
+  const old = event(2, BASE - 600, STRANGER);
+  relayEvents.push(old);
+  const { result } = renderInbox();
+  await act(() => result.current.refreshDmInbox());
+  expect(rows.some((r) => r.eventId === old.id)).toBe(false);
+  await act(() => result.current.refreshDmInbox({ includeNonFollows: true }));
+  expect(fetchMock.mock.calls[1][2]).not.toHaveProperty('since');
+  expect(result.current.dmInbox.some((e) => e.id === old.id)).toBe(true);
+});
+
+it('persists a partial decrypt batch but preserves the cursor until all fetched messages are ingested', async () => {
+  const { result } = renderInbox();
+  await act(() => result.current.refreshDmInbox());
+  now = 62_000;
+  // Newest first: advancing to the first batch loses the remaining older rows.
+  relayEvents = Array.from({ length: DECRYPT_YIELD_EVERY + 3 }, (_, i) =>
+    event(100 + i, BASE + 10000 - i * 200),
+  );
+  const ctrl = new AbortController();
+  decryptMock.mockImplementation(async (ciphertext) => {
+    ctrl.abort();
+    return `Meet at the station: ${ciphertext}`;
+  });
+  await act(() => result.current.refreshDmInbox({ signal: ctrl.signal }));
+  expect(rows.length).toBe(1 + DECRYPT_YIELD_EVERY);
+  expect(await AsyncStorage.getItem(inboxLastSeenKey(OWNER))).toBe(String(BASE + 1));
+  decryptMock.mockImplementation(async (ciphertext) => `Meet at the station: ${ciphertext}`);
+  await act(() => result.current.refreshDmInbox());
+  expect(rows.length).toBe(1 + relayEvents.length);
+  expect(await AsyncStorage.getItem(inboxLastSeenKey(OWNER))).toBe(String(BASE + 10000));
+});
+
+it('preserves the cursor when persistence of decrypted kind-4 rows fails', async () => {
+  const { result } = renderInbox();
+  await act(() => result.current.refreshDmInbox());
+  now = 62_000;
+  relayEvents.push(event(2, BASE + 500));
+  jest.mocked(upsertDmMessages).mockRejectedValueOnce(new Error('database write failed'));
+  await act(() => result.current.refreshDmInbox());
+  expect(await AsyncStorage.getItem(inboxLastSeenKey(OWNER))).toBe(String(BASE + 1));
+  await act(() => result.current.refreshDmInbox());
+  expect(rows.some((r) => r.eventId === event(2).id)).toBe(true);
+});

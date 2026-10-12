@@ -40,9 +40,9 @@ const LIVE_SUB_RESUME_DEBOUNCE_MS = 2_000;
 // How long after a RECONNECT re-arm we wait before firing onReconnect to
 // flush the blind window. Gives the relay time to deliver the first batch of
 // backlogged wraps over the newly-opened WebSocket before the refresh runs;
-// chosen to cover one relay round-trip on a slow connection while staying
-// short enough that the user sees missed messages within a second of resume.
-const RECONNECT_REFRESH_SETTLE_MS = 1_500;
+// stagger non-latency-sensitive reconciliation after immediate DM re-arm
+// so resume doesn't pile cache/crypto work onto the same JS-thread turn.
+const RECONNECT_REFRESH_SETTLE_MS = 3_000;
 
 export interface LiveDmReconnectDeps {
   viewerPubkey: string;
@@ -243,7 +243,7 @@ export function createLiveDmReconnectController(
           console.log(
             '[Nostr] live DM reconnect — triggering refreshDmInbox to close blind window (#1035)',
           );
-        onReconnect({ force: true }).catch((e) => {
+        onReconnect({}).catch((e) => {
           if (__DEV__) console.warn('[Nostr] live DM reconnect refresh failed:', e);
         });
       }, RECONNECT_REFRESH_SETTLE_MS);
