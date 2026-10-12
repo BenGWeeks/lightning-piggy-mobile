@@ -91,7 +91,7 @@ A third DM/group transport using the vendored Marmot v2 library; White Noise int
 |===
 | Kind | Use
 
-| 30443 | Key package (addressable; `d` = a random 32-byte hex slot per account per device, `client` = `Lightning Piggy`), published to the NIP-65 write relays. Advertises the `0x800b` encrypted-media-v2 component, which White Noise requires.
+| 30443 | Key package (addressable; `d` = a random 32-byte hex slot kept for the installation lifetime, `client` = `Lightning Piggy`), published to the NIP-65 write relays. Advertises the `0x800b` encrypted-media-v2 component, which White Noise requires.
 | 450 (local-only) | Account-identity proof embedded in each MLS leaf, binding the leaf's signature key to the Nostr account. Signed by the account key alongside every key package; never published.
 | 444 | Welcome (group invite), NIP-59 gift-wrapped to the invitee's kind-10050 inbox — unwrapped by the NIP-17 inbox path (follow gate applies) and routed by `marmotWelcomeRouter`.
 | 445 | Group event (MLS commits + application messages), `h`-tagged with the Nostr group id; signed by per-message ephemeral keys.

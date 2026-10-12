@@ -5,50 +5,26 @@
 //    it, so relays replace the old event instead of piling up stale ones.
 //  - The key package is refreshed weekly (#1210) — or sooner, once half its
 //    lifetime has passed — so it never silently expires on relays.
-//  - Retention of a replaced key package's private material (spec:
-//    foundation/key-packages.md, "last-resort" rules) — see
-//    `shouldDeleteReplacedKeyPackage` for the policy and its spec deviation.
+//  - Replaced secrets are deleted after confirmed publication, without a
+//    drain window (foundation/key-packages.md).
 
 import {
   getKeyPackageLifetime,
   GROUP_ENCRYPTED_MEDIA_V2_COMPONENT_ID,
   type KeyPackageManager,
 } from '@internet-privacy/marmot-ts';
-import { bytesToHex, randomBytes } from '@noble/hashes/utils.js';
 import type { EventSigner } from 'applesauce-core';
 import type { Event as NostrEvent } from 'nostr-tools';
 
-import type { MarmotKvBackend } from './marmotStore';
+import { keyPackageSlotTimestamp, rememberKeyPackageTimestamp } from './marmotInstallationSlot';
+
+export { ensureKeyPackageSlot } from './marmotInstallationSlot';
 
 type ListedKeyPackage = Awaited<ReturnType<KeyPackageManager['list']>>[number];
 
 const DAY_SECS = 24 * 60 * 60;
 /** Refresh our published key package at least this often (#1210). */
 export const KEY_PACKAGE_REFRESH_SECS = 7 * DAY_SECS;
-/** Clock-skew grace before an expired key package's secret is dropped. */
-const EXPIRY_GRACE_SECS = 60 * 60;
-
-/**
- * RETENTION POLICY (decided by Ben on #1230): how long an UNUSED key package's
- * private material is kept after a newer one replaced it in our slot.
- *
- * The spec (foundation/key-packages.md) says a last-resort key package's
- * private material MUST be deleted once its replacement is confirmed
- * published. We deliberately deviate for UNUSED replaced keys: relays and
- * peers can briefly keep serving the previous key package after our weekly
- * refresh, and an invite made with it would otherwise fail with "No matching
- * secret". MDK / White Noise make the same trade-off (they keep unused
- * replaced keys until `not_after`, up to 84 days); we are stricter — 30 days,
- * matching the inviter-side freshness window of "invite all fresh devices"
- * (only key packages published in the last 30 days are invited), so an older
- * key is effectively never invited any more.
- *
- * USED (consumed) key packages follow the spec exactly: deleted as soon as
- * their replacement is confirmed published. Set this to 0 for strict spec
- * behaviour.
- */
-export const UNUSED_REPLACED_KEY_RETENTION_SECS = 30 * DAY_SECS;
-
 /** A valid `d` slot: 32 random bytes, hex (transports/nostr.md). */
 export const SLOT_ID_HEX = /^[0-9a-f]{64}$/;
 
@@ -102,7 +78,11 @@ export function currentKeyPackage(
 ): ListedKeyPackage | undefined {
   const newest = list
     .filter((kp) => publishedAt(kp) !== undefined)
-    .filter((kp) => slot === undefined || kp.identifier === undefined || kp.identifier === slot)
+    .filter(
+      (kp) =>
+        slot === undefined ||
+        (kp.identifier ?? latestPublished(kp)?.tags.find((t) => t[0] === 'd')?.[1]) === slot,
+    )
     .sort((a, b) => (publishedAt(b) ?? 0) - (publishedAt(a) ?? 0))[0];
   return newest && !newest.used && !newest.nonCurrent ? newest : undefined;
 }
@@ -120,44 +100,16 @@ export function needsRefresh(kp: ListedKeyPackage, nowSecs: number): boolean {
 const sameKeyPackage = (a: ListedKeyPackage, b: ListedKeyPackage) =>
   a.keyPackageRef.join() === b.keyPackageRef.join();
 
-/**
- * When `kp` was replaced: the publication time of the next key package this
- * install published after it (if that one has since been retired too, the
- * next surviving one — at most a refresh period later).
- */
-export function replacedAt(kp: ListedKeyPackage, list: ListedKeyPackage[]): number | undefined {
-  const at = publishedAt(kp);
-  if (at === undefined) return undefined;
-  const later = list.map(publishedAt).filter((t): t is number => t !== undefined && t > at);
-  return later.length > 0 ? Math.min(...later) : undefined;
-}
-
-/**
- * The retention policy for a key package that `current` (our newest
- * confirmed-published one) has superseded. Used → delete now (spec). Never
- * published → nobody can hold it, delete now. Unused → kept for
- * UNUSED_REPLACED_KEY_RETENTION_SECS after it was replaced.
- */
+/** No retention window after an authenticated slot replacement is published. */
 export function shouldDeleteReplacedKeyPackage(
   kp: ListedKeyPackage,
   current: ListedKeyPackage,
-  list: ListedKeyPackage[],
-  nowSecs: number,
 ): boolean {
-  const currentAt = publishedAt(current);
-  const at = publishedAt(kp);
-  if (sameKeyPackage(kp, current) || currentAt === undefined) return false; // no confirmed replacement
-  // Newer than "current" (e.g. its publish failed): not replaced. Same-second
-  // ties count as replaced — `current` is the one we chose to keep.
-  if (at !== undefined && at > currentAt) return false;
-  if (kp.used || at === undefined) return true;
-  const replaced = replacedAt(kp, list) ?? currentAt;
-  return nowSecs - replaced >= UNUSED_REPLACED_KEY_RETENTION_SECS;
+  return !sameKeyPackage(kp, current) && publishedAt(current) !== undefined;
 }
 
 /**
- * Key packages whose private material can go: past their lifetime (plus
- * grace), or replaced by `current` per the retention policy. `current` is
+ * Key packages whose private material can go: past their lifetime, or replaced by `current` per the retention policy. `current` is
  * never returned; without one only expiry applies.
  */
 export function retiredKeyPackages(
@@ -168,8 +120,8 @@ export function retiredKeyPackages(
   return list.filter((kp) => {
     if (current && sameKeyPackage(kp, current)) return false;
     const lifetime = keyPackageLifetime(kp);
-    if (lifetime !== undefined && nowSecs > lifetime.notAfter + EXPIRY_GRACE_SECS) return true;
-    return current !== undefined && shouldDeleteReplacedKeyPackage(kp, current, list, nowSecs);
+    if (lifetime !== undefined && nowSecs > lifetime.notAfter) return true;
+    return current !== undefined && shouldDeleteReplacedKeyPackage(kp, current);
   });
 }
 
@@ -216,13 +168,11 @@ export async function maintainKeyPackage(
     return value;
   };
   if (opts.cancelled?.()) throw new KeyPackageMaintenanceCancelled();
-  // Pre-fix builds used a fixed, non-hex `d` slot, which spec-conformant
-  // clients (White Noise) reject — retire those (publishes a NIP-09 delete).
-  const malformed = (await step(keyPackages.list())).filter(
-    (kp) => kp.identifier !== undefined && !SLOT_ID_HEX.test(kp.identifier),
-  );
-  if (malformed.length > 0) await step(keyPackages.purge(malformed.map((kp) => kp.keyPackageRef)));
   const list = await step(keyPackages.list());
+  // Upgrade from builds whose monotonic signer only remembered this session.
+  for (const kp of list) {
+    for (const event of kp.published ?? []) await step(rememberKeyPackageTimestamp(event));
+  }
   let current = currentKeyPackage(list, opts.slot);
   const stale =
     !current ||
@@ -246,9 +196,22 @@ export async function maintainKeyPackage(
     current = fresh;
     outcome = 'published';
   }
-  for (const kp of retiredKeyPackages(await step(keyPackages.list()), now, current)) {
+  // Only locally stored publication records establish ownership. Never
+  // retire siblings discovered from public packages or a matching client tag.
+  const all = await step(keyPackages.list());
+  const legacy = all.filter(
+    (kp) =>
+      !sameKeyPackage(kp, current!) &&
+      kp.published?.some((e) => e.tags.find((t) => t[0] === 'd')?.[1] !== opts.slot),
+  );
+  for (const kp of retiredKeyPackages(all, now, current)) {
+    if (legacy.some((old) => sameKeyPackage(old, kp))) continue;
+    // Same slot: replacement already retires the publication. A slot-wide
+    // NIP-09 here would also delete the fresh key we just confirmed. Erase
+    // these secrets before a legacy retirement can fail or await a signer.
     await step(keyPackages.remove(kp.keyPackageRef));
   }
+  if (legacy.length > 0) await step(keyPackages.purge(legacy.map((kp) => kp.keyPackageRef)));
   return outcome;
 }
 
@@ -265,23 +228,14 @@ export function trackKeyPackageAcceptance<N extends PublishingNetwork>(
     ...network,
     async publish(relays: string[], event: NostrEvent) {
       const result = await network.publish(relays, event);
-      if (event.kind === 30443 && Object.values(result).some((r) => r.ok)) accepted.add(event.id);
+      const ok = Object.values(result).some((r) => r.ok);
+      if (event.kind === 30443 && ok) accepted.add(event.id);
+      // purge() otherwise ignores relay rejection and drops the only local
+      // ownership records. Keep legacy rows so the next maintenance retries.
+      if (event.kind === 5 && !ok) throw new Error('marmot: key retirement not accepted');
       return result;
     },
   };
-}
-
-/**
- * The kind-30443 `d` slot: 32 random bytes, hex, generated once per account
- * per device and reused for every replacement (transports/nostr.md — it MUST
- * NOT be derived from identity material).
- */
-export async function ensureKeyPackageSlot(backend: MarmotKvBackend): Promise<string> {
-  const stored = await backend.get('meta', 'keyPackageSlot');
-  if (stored && SLOT_ID_HEX.test(stored)) return stored;
-  const slot = bytesToHex(randomBytes(32));
-  await backend.set('meta', 'keyPackageSlot', slot);
-  return slot;
 }
 
 /**
@@ -325,12 +279,16 @@ export function monotonicKeyPackageSigner(signer: EventSigner): EventSigner {
   const lastBySlot = new Map<string, number>();
   return {
     ...signer,
-    signEvent: (draft) => {
+    signEvent: async (draft) => {
       const slot = draft.tags.find((t) => t[0] === 'd')?.[1];
       if (draft.kind !== 30443 || slot === undefined) return signer.signEvent(draft);
-      const createdAt = Math.max(draft.created_at, (lastBySlot.get(slot) ?? 0) + 1);
+      const owner = await signer.getPublicKey();
+      const persisted = await keyPackageSlotTimestamp(owner, slot);
+      const createdAt = Math.max(draft.created_at, persisted + 1, (lastBySlot.get(slot) ?? 0) + 1);
       lastBySlot.set(slot, createdAt);
-      return signer.signEvent({ ...draft, created_at: createdAt });
+      const signed = await signer.signEvent({ ...draft, created_at: createdAt });
+      await rememberKeyPackageTimestamp(signed);
+      return signed;
     },
   };
 }
