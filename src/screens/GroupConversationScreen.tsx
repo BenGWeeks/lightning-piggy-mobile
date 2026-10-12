@@ -738,6 +738,7 @@ const GroupConversationScreen: React.FC = () => {
               mentionCount={read.pendingMentions.length}
               onJumpToMention={read.jumpToNextMention}
               showLatest={!live.atEdge && !live.hasNewMessages}
+              hasNewMessages={live.hasNewMessages}
               unreadCount={read.unread}
               onJumpToLatest={live.jumpToLatest}
               testIDs={{ mention: 'group-jump-to-mention', latest: 'group-jump-to-latest' }}

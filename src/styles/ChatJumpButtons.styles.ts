@@ -3,14 +3,18 @@ import type { Palette } from './palettes';
 
 export const createChatJumpButtonsStyles = (colors: Palette) =>
   StyleSheet.create({
-    // Bottom-right column above the composer (Telegram's placement): the `@`
-    // button sits above the jump-to-latest arrow.
+    // Centred lane above the composer; mentions stack above the latest arrow.
     column: {
       position: 'absolute',
-      right: 16,
+      left: 0,
+      right: 0,
       bottom: 16,
       alignItems: 'center',
       gap: 12,
+    },
+    // The latest arrow is hidden for the pill; keep pending mentions above it.
+    aboveNewMessages: {
+      bottom: 80,
     },
     fab: {
       width: 40,

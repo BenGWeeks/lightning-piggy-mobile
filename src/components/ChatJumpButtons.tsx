@@ -9,7 +9,7 @@ import { createChatJumpButtonsStyles } from '../styles/ChatJumpButtons.styles';
 const badge = (n: number) => (n > 99 ? '99+' : String(n));
 
 /**
- * Floating chat buttons, bottom-right (#1295): `@` jumps to the next unread
+ * Floating chat buttons, horizontally centred (#1295): `@` jumps to the next unread
  * mention (shown while there are any), and the arrow jumps to the newest
  * message (shown while the reader is up in history), each with a count.
  */
@@ -17,16 +17,28 @@ const ChatJumpButtons: React.FC<{
   mentionCount: number;
   onJumpToMention: () => void;
   showLatest: boolean;
+  hasNewMessages?: boolean;
   unreadCount: number;
   onJumpToLatest: () => void;
   testIDs: { mention: string; latest: string };
-}> = ({ mentionCount, onJumpToMention, showLatest, unreadCount, onJumpToLatest, testIDs }) => {
+}> = ({
+  mentionCount,
+  onJumpToMention,
+  showLatest,
+  hasNewMessages = false,
+  unreadCount,
+  onJumpToLatest,
+  testIDs,
+}) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createChatJumpButtonsStyles(colors), [colors]);
   const t = useTranslation();
   if (mentionCount === 0 && !showLatest) return null;
   return (
-    <View style={styles.column} pointerEvents="box-none">
+    <View
+      style={[styles.column, hasNewMessages && styles.aboveNewMessages]}
+      pointerEvents="box-none"
+    >
       {mentionCount > 0 ? (
         <TouchableOpacity
           style={styles.fab}
