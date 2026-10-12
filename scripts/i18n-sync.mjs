@@ -27,6 +27,9 @@ import {
   detectLocale,
   extractJsonObject,
   hasWork,
+  mergeDraftFile,
+  needsTranslation,
+  pathsToDraft,
   mergeCatalogue,
   parseSupportedLocales,
   planApply,
@@ -40,7 +43,11 @@ import {
 import { CARDINAL_RULES, requiredPluralCategories } from '../src/i18n/plurals.ts';
 /* eslint-enable import/namespace */
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+// I18N_SYNC_ROOT points the data paths (locales, index.ts, glossary,
+// .i18n-todo) at another checkout — used by the script's own tests.
+const ROOT = process.env.I18N_SYNC_ROOT
+  ? resolve(process.env.I18N_SYNC_ROOT)
+  : resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const LOCALES_DIR = 'src/i18n/locales';
 const TODO_DIR = join(ROOT, '.i18n-todo');
 const GLOSSARY = join(ROOT, 'docs/i18n/GLOSSARY.md');
@@ -238,12 +245,18 @@ function draft(state, opts) {
     return;
   }
   const glossary = readFileSync(GLOSSARY, 'utf8');
-  for (const diff of state.diffs) {
+  // Clean locales have no task file (writeTodos removes it).
+  for (const diff of state.diffs.filter(needsTranslation)) {
     const taskPath = join(TODO_DIR, `${diff.locale}.json`);
+    const draftPath = join(TODO_DIR, `${diff.locale}.draft.json`);
     const task = readJson(taskPath);
-    // Only draft what nobody has translated by hand yet.
-    const paths = Object.keys(task.entries).filter((p) => !task.entries[p].translation.trim());
-    if (!paths.length) continue;
+    const existingDraft = existsSync(draftPath) ? readJson(draftPath) : undefined;
+    // Skip what's translated by hand or already drafted for today's English.
+    const paths = pathsToDraft(task, existingDraft);
+    if (!paths.length) {
+      console.log(`${diff.locale}: nothing left to draft`);
+      continue;
+    }
     const rejected = [];
     const drafts = {};
     for (let i = 0; i < paths.length; i += DRAFT_CHUNK) {
@@ -270,16 +283,16 @@ function draft(state, opts) {
           typeof value === 'string' ? validateEntry(path, value, entry.en) : `no draft for ${path}`;
         if (problem) rejected.push(problem);
         else {
-          drafts[path] = { ...entry, translation: value };
+          drafts[path] = value;
           ok++;
         }
       }
       console.log(`${ok} ok`);
     }
-    // Only the newly drafted entries, in the task file's shape (each stamped
-    // with the English it was drafted from). Edit either file to review: a
-    // translation in the task file always wins over the draft.
-    writeJson(join(TODO_DIR, `${diff.locale}.draft.json`), { ...task, entries: drafts });
+    // Earlier drafts (and reviewers' corrections to them) are kept; each
+    // entry is stamped with the English it was drafted from. A translation in
+    // the task file still wins over the draft at --apply.
+    writeJson(draftPath, mergeDraftFile(task, existingDraft, drafts));
     const drafted = Object.keys(drafts).length;
     console.log(`→ .i18n-todo/${diff.locale}.draft.json (${drafted}/${paths.length} drafted)`);
     for (const problem of rejected) console.log(`  ⚠ ${problem}`);

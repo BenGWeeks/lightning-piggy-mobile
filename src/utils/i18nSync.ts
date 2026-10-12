@@ -283,6 +283,47 @@ export function combineProposals(
   return { proposals: { ...fromDraft, ...fromTask }, overridden };
 }
 
+/** True when a locale has strings to translate (not just stale keys). */
+export function needsTranslation(diff: LocaleDiff): boolean {
+  return diff.missing.length + diff.changed.length > 0;
+}
+
+/** An earlier draft entry still applies if it was drafted for today's English. */
+const draftStillValid = (old: Proposal | undefined, en: string): old is Proposal =>
+  !!old && (old.en === undefined || old.en === en);
+
+/**
+ * Keys `--draft` should send to the CLI: empty in the task file, with no
+ * earlier draft (possibly reviewer-corrected) for today's English — so a
+ * re-run only retries what's still missing.
+ */
+export function pathsToDraft(task: TaskFile, existingDraft: unknown): string[] {
+  const kept = proposalsFrom(existingDraft);
+  return Object.entries(task.entries)
+    .filter(([path, entry]) => !entry.translation.trim() && !draftStillValid(kept[path], entry.en))
+    .map(([path]) => path);
+}
+
+/**
+ * The draft file after a `--draft` run: earlier drafts (including reviewer
+ * corrections) that still match today's English, plus the fresh ones. A
+ * failed CLI call therefore never wipes an earlier draft.
+ */
+export function mergeDraftFile(
+  task: TaskFile,
+  existingDraft: unknown,
+  fresh: Record<string, string>,
+): TaskFile {
+  const kept = proposalsFrom(existingDraft);
+  const entries: TaskFile['entries'] = {};
+  for (const [path, entry] of Object.entries(task.entries)) {
+    const old = kept[path];
+    if (draftStillValid(old, entry.en)) entries[path] = { ...entry, translation: old.translation };
+    else if (path in fresh) entries[path] = { ...entry, translation: fresh[path] };
+  }
+  return { ...task, entries };
+}
+
 /** Problems with one translation of `source` (empty, placeholder drift). */
 export function validateEntry(path: string, translation: string, source: string): string | null {
   if (!translation.trim()) return `empty ${path}`;

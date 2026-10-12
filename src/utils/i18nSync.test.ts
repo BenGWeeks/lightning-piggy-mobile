@@ -6,6 +6,9 @@ import {
   extractJsonObject,
   flatten,
   hasWork,
+  mergeDraftFile,
+  needsTranslation,
+  pathsToDraft,
   mergeCatalogue,
   parseSupportedLocales,
   placeholders,
@@ -226,6 +229,53 @@ describe('validateEntry', () => {
   it('rejects empty strings and placeholder drift', () => {
     expect(validateEntry('greet', ' ', 'Hello, {{name}}!')).toBe('empty greet');
     expect(validateEntry('greet', '¡Hola!', 'Hello, {{name}}!')).toMatch(/^placeholders greet/);
+  });
+});
+
+describe('needsTranslation / pathsToDraft / mergeDraftFile', () => {
+  const diff = detect({ localeTree: { ...es, greet: '', tabs: {} } });
+  const task = buildTaskFile(diff, null);
+
+  it('only locales with missing or changed strings need drafting', () => {
+    expect(needsTranslation(diff)).toBe(true);
+    expect(needsTranslation(detect({}))).toBe(false);
+    expect(needsTranslation(detect({ localeTree: { ...es, gone: 'x' } }))).toBe(false);
+  });
+
+  it('skips keys filled in by hand or already drafted for today’s English', () => {
+    const handFilled = buildTaskFile(diff, null);
+    handFilled.entries.greet.translation = '¡Hola, {{name}}!';
+    const draft = { entries: { 'tabs.home': { translation: 'Inicio', en: 'Home' } } };
+    expect(pathsToDraft(handFilled, draft)).toEqual(['tabs.friends']);
+    // A draft written for different English is redrafted.
+    const outdated = { entries: { 'tabs.home': { translation: 'Casa', en: 'House' } } };
+    expect(pathsToDraft(task, outdated)).toEqual(['tabs.home', 'tabs.friends', 'greet']);
+  });
+
+  it('keeps a reviewer-corrected draft and adds fresh ones', () => {
+    const reviewed = { entries: { 'tabs.home': { translation: 'Inicio (revisado)', en: 'Home' } } };
+    const merged = mergeDraftFile(task, reviewed, { 'tabs.friends': 'Amigos' });
+    expect(proposalsFrom(merged)).toEqual({
+      'tabs.home': { translation: 'Inicio (revisado)', en: 'Home' },
+      'tabs.friends': { translation: 'Amigos', en: 'Friends' },
+    });
+  });
+
+  it('keeps earlier drafts when a retry drafts nothing (failed CLI call)', () => {
+    const earlier = { entries: { 'tabs.home': { translation: 'Inicio', en: 'Home' } } };
+    expect(proposalsFrom(mergeDraftFile(task, earlier, {}))).toEqual({
+      'tabs.home': { translation: 'Inicio', en: 'Home' },
+    });
+  });
+
+  it('drops drafts for English that has since changed, or keys no longer in the task', () => {
+    const stale = {
+      entries: {
+        'tabs.home': { translation: 'Casa', en: 'House' },
+        gone: { translation: 'x', en: 'x' },
+      },
+    };
+    expect(mergeDraftFile(task, stale, {}).entries).toEqual({});
   });
 });
 
