@@ -131,7 +131,8 @@ export async function signAndPublish(
   } finally {
     clearTimeout(timer);
     try {
-      await signer.close();
+      // close() can wait on a relay that never answers; don't let it hold the job open.
+      await Promise.race([signer.close(), new Promise((resolve) => setTimeout(resolve, 3000))]);
     } catch {
       // Cleanup must continue even if the signer is already closed.
     } finally {
@@ -172,21 +173,24 @@ async function main() {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url))
-  main().catch((error) => {
-    // Only our fixed messages are safe; library errors can include secrets.
-    const safe = [
-      'Publishing is allowed only on a GitHub Actions runner.',
-      'Use a separate client key.',
-      'Expected an Amber bunker URI.',
-      'Invalid Amber bunker URI.',
-      'Invalid client key.',
-      'Amber is connected to the wrong account.',
-      'Amber approval timed out after 10 minutes. Open Amber and re-run.',
-      'Amber returned a different or invalid release event; publishing refused.',
-      'Fewer than 2 relays accepted the release note.',
-    ];
-    console.error(
-      `::error::${safe.includes(error.message) ? error.message : 'Nostr signing/publishing failed. Check the Amber connection and approvals, then re-run.'}`,
-    );
-    process.exit(1);
-  });
+  main()
+    // Open relay sockets can keep Node alive after publishing; exit explicitly.
+    .then(() => process.exit(0))
+    .catch((error) => {
+      // Only our fixed messages are safe; library errors can include secrets.
+      const safe = [
+        'Publishing is allowed only on a GitHub Actions runner.',
+        'Use a separate client key.',
+        'Expected an Amber bunker URI.',
+        'Invalid Amber bunker URI.',
+        'Invalid client key.',
+        'Amber is connected to the wrong account.',
+        'Amber approval timed out after 10 minutes. Open Amber and re-run.',
+        'Amber returned a different or invalid release event; publishing refused.',
+        'Fewer than 2 relays accepted the release note.',
+      ];
+      console.error(
+        `::error::${safe.includes(error.message) ? error.message : 'Nostr signing/publishing failed. Check the Amber connection and approvals, then re-run.'}`,
+      );
+      process.exit(1);
+    });
