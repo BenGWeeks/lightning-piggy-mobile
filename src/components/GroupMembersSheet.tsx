@@ -20,9 +20,14 @@ import GroupMemberListRow from './GroupMemberListRow';
 import type { GroupMemberRow } from '../utils/groupMemberRows';
 import { useGroupAdminActions } from '../hooks/useGroupAdminActions';
 import { canManageGroup } from '../utils/groupAdmins';
+import { useMarmotDeviceDetails } from '../hooks/useMarmotDevices';
+import type { DeviceInfo } from '../services/marmotDeviceTracker';
+
+const NO_DEVICES: DeviceInfo[] = [];
 
 interface Props {
   visible: boolean;
+  /** The app group; null for a Marmot 1:1 (which isn't an app group). */
   groupId: string | null;
   onClose: () => void;
   // Resolved rows (self first) from the host screen's single
@@ -33,11 +38,21 @@ interface Props {
   // calls this with their pubkey. The host screen typically opens
   // ContactProfileSheet in response. Without this, rows are display-only.
   onMemberTap?: (pubkey: string) => void;
+  /** A 1:1: no Add / Remove / admin controls, no admin badges, and a neutral
+   * "In this chat" title — a 1:1 must never look like a group (#1267). */
+  readOnly?: boolean;
+  /** Marmot: the chat's MLS group id, for the per-person device lists. */
+  chatId?: string | null;
+  /** Marmot: person (lower-case pubkey) → device count; rows show a toggle. */
+  deviceCounts?: ReadonlyMap<string, number> | null;
+  /** Open every person's device list when the sheet opens (the 1:1 by-line). */
+  expandDevices?: boolean;
 }
 
 /**
  * Manage-members bottom sheet for a group conversation. Tapping the
- * "N members" header line in `GroupConversationScreen` opens this.
+ * "N members" header line in `GroupConversationScreen` opens this; in a
+ * Marmot 1:1 the header by-line opens it read-only (`readOnly`).
  *
  * Composition:
  * - Header with the count and a Done button.
@@ -47,6 +62,9 @@ interface Props {
  *   (so Amber / NIP-46 prompts behave as everywhere else).
  * - Marmot groups: an Admin badge on admins' rows, and for admins a "⋯"
  *   menu to make / remove admins (`useGroupAdminActions`).
+ * - Marmot chats: a "N devices" toggle under each person opens their device
+ *   list (#1267). Counts come from the host's cheap tree walk; the details
+ *   (apps, key dates, epochs) are read only while a list is open.
  * - "Add members" footer button → opens `FriendPickerSheet` filtered to
  *   non-members. Selecting one calls `addMembersToGroup` and closes the
  *   picker; the row appears here without remounting the parent screen.
@@ -64,6 +82,10 @@ const GroupMembersSheet: React.FC<Props> = ({
   onClose,
   members,
   onMemberTap,
+  readOnly = false,
+  chatId = null,
+  deviceCounts = null,
+  expandDevices = false,
 }) => {
   const colors = useThemeColors();
   const t = useTranslation();
@@ -90,11 +112,26 @@ const GroupMembersSheet: React.FC<Props> = ({
     [group?.adminPubkeys],
   );
   // Same rule as the header's rename pencil: anyone in NIP-17, admins in Marmot.
-  const canManage = canManageGroup(group, selfPubkey);
+  const canManage = !readOnly && canManageGroup(group, selfPubkey);
   // Only Marmot groups have admins; 1:1 DMs never reach this sheet, so any
   // Marmot group here is multi-member. Non-admins see badges, no actions.
   const { adminPendingPubkey, openAdminActions } = useGroupAdminActions(group);
   const onAdminActions = isMarmot && canManage ? openAdminActions : undefined;
+  // Whose device lists are open. The 1:1 by-line opens them all.
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => {
+    if (visible && expandDevices) setExpanded(new Set(members.map((m) => m.pubkey)));
+    // Only on open: a later member change shouldn't re-expand what was closed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, expandDevices]);
+  const toggleDevices = useCallback((m: GroupMemberRow) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(m.pubkey)) next.add(m.pubkey);
+      return next;
+    });
+  }, []);
+  const deviceDetails = useMarmotDeviceDetails(chatId, visible && expanded.size > 0);
   const reportFailure = useCallback(
     (e: unknown) => {
       if (__DEV__) console.warn('[Group] membership change failed:', e);
@@ -195,7 +232,7 @@ const GroupMembersSheet: React.FC<Props> = ({
     [groupId, addMembersToGroup, reportFailure],
   );
 
-  if (!group) return null;
+  if (!group && !readOnly) return null;
 
   return (
     <>
@@ -215,12 +252,14 @@ const GroupMembersSheet: React.FC<Props> = ({
         >
           <View style={styles.headerRow}>
             <Text style={styles.title}>
-              {t(
-                members.length === 1
-                  ? 'groupMembersSheet.memberCountOne'
-                  : 'groupMembersSheet.memberCountOther',
-                { count: members.length },
-              )}
+              {readOnly
+                ? t('chatDevices.inThisChat')
+                : t(
+                    members.length === 1
+                      ? 'groupMembersSheet.memberCountOne'
+                      : 'groupMembersSheet.memberCountOther',
+                    { count: members.length },
+                  )}
             </Text>
             <TouchableOpacity
               onPress={onClose}
@@ -238,7 +277,15 @@ const GroupMembersSheet: React.FC<Props> = ({
               styles={styles}
               colors={colors}
               canRemove={canManage}
-              isAdmin={isMarmot && adminSet.has(m.pubkey.toLowerCase())}
+              isAdmin={!readOnly && isMarmot && adminSet.has(m.pubkey.toLowerCase())}
+              deviceCount={deviceCounts?.get(m.pubkey.toLowerCase())}
+              devicesExpanded={expanded.has(m.pubkey)}
+              devices={
+                expanded.has(m.pubkey) && deviceDetails
+                  ? (deviceDetails.people.get(m.pubkey.toLowerCase()) ?? NO_DEVICES)
+                  : null
+              }
+              onToggleDevices={deviceCounts ? toggleDevices : undefined}
               adminActionsDisabled={adminPendingPubkey !== null}
               onAdminActions={onAdminActions}
               followPending={followPendingPubkey === m.pubkey}
@@ -263,14 +310,16 @@ const GroupMembersSheet: React.FC<Props> = ({
         </BottomSheetScrollView>
       </BottomSheetModal>
 
-      <FriendPickerSheet
-        visible={pickerOpen}
-        onClose={() => setPickerOpen(false)}
-        onSelect={handlePickerSelect}
-        title={t('groupMembersSheet.addMembers')}
-        subtitle={t('groupMembersSheet.pickFriendSubtitle')}
-        excludePubkeys={group.memberPubkeys}
-      />
+      {group && canManage ? (
+        <FriendPickerSheet
+          visible={pickerOpen}
+          onClose={() => setPickerOpen(false)}
+          onSelect={handlePickerSelect}
+          title={t('groupMembersSheet.addMembers')}
+          subtitle={t('groupMembersSheet.pickFriendSubtitle')}
+          excludePubkeys={group.memberPubkeys}
+        />
+      ) : null}
     </>
   );
 };

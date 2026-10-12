@@ -2922,5 +2922,43 @@
   },
   "followList": {
     "unavailable": "A követési listádat nem sikerült betölteni – próbáld újra"
+  },
+  "chatDevices": {
+    "secureChat": "Biztonságos csevegés",
+    "secureChatDevices": {
+      "one": "Biztonságos csevegés · {{count}} eszköz",
+      "other": "Biztonságos csevegés · {{count}} eszköz"
+    },
+    "bylineA11y": "Mutasd, ki van ebben a csevegésben, és milyen eszközökön",
+    "inThisChat": "Ebben a csevegésben",
+    "deviceCount": {
+      "one": "{{count}} eszköz",
+      "other": "{{count}} eszköz"
+    },
+    "showDevicesA11y": "{{name}} eszközeinek megjelenítése",
+    "hideDevicesA11y": "{{name}} eszközeinek elrejtése",
+    "unknownApp": "Ismeretlen alkalmazás",
+    "thisPhone": "Ez a telefon",
+    "keyFrom": "Meghívókulcs dátuma: {{date}}",
+    "joinedAtEpoch": "Csatlakozás: {{epoch}}. epoch",
+    "hereWhenYouJoined": "Már itt volt, amikor csatlakoztál ({{epoch}}. epoch)",
+    "sentFrom": "Küldve innen",
+    "oneOfDevices": {
+      "one": "{{count}} eszköz egyike",
+      "other": "{{count}} eszköz egyike"
+    },
+    "readableOn": "Olvasható ennyi eszközön",
+    "readableOnPerson": "{{name}}: {{count}}",
+    "you": "Te",
+    "noticeJoined": {
+      "one": "{{name}} · csatlakozott {{count}} eszközön ({{apps}})",
+      "other": "{{name}} · csatlakozott {{count}} eszközön ({{apps}})"
+    },
+    "noticeAdded": {
+      "one": "{{name}} hozzáadott egy eszközt ({{apps}})",
+      "other": "{{name}} hozzáadott {{count}} eszközt ({{apps}})"
+    },
+    "showChanges": "Eszközváltozások mutatása a csevegésekben",
+    "showChangesHint": "Alfa: szürke sor a Marmot-csevegésekben, ha valaki egy eszközzel csatlakozik vagy eszközt ad hozzá. Csak ezen a telefonon jelenik meg; semmit nem küldünk el."
   }
 }

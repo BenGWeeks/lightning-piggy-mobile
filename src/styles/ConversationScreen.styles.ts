@@ -50,10 +50,17 @@ export const createConversationScreenStyles = (colors: Palette) =>
       justifyContent: 'center',
     },
     headerName: {
-      flex: 1,
       fontSize: 16,
       fontWeight: '700',
       color: colors.textHeader,
+    },
+    headerNameBlock: {
+      flex: 1,
+    },
+    // Marmot 1:1 by-line under the name: "Secure chat · 2 devices" (#1267).
+    headerByline: {
+      fontSize: 12,
+      color: colors.textSupplementary,
     },
     listContent: {
       paddingHorizontal: 12,

@@ -6,6 +6,7 @@ import MessageBubble from './MessageBubble';
 import OrderPaymentActions from './OrderPaymentActions';
 import NwcShareCard from './NwcShareCard';
 import MarmotInviteFailedNotice from './MarmotInviteFailedNotice';
+import DeviceNoticeLine from './DeviceNoticeLine';
 import type { TransactionDetailData } from './TransactionDetailSheet';
 import type { Palette } from '../styles/palettes';
 import type { ConversationStyles } from '../styles/ConversationScreen.styles';
@@ -107,7 +108,7 @@ function ConversationMessageRow({
   onAskForInvite,
   peerMediaTrusted,
 }: ConversationMessageRowProps): React.ReactElement {
-  const { formatLocale } = useLocale();
+  const { formatLocale, t } = useLocale();
   if (item.kind === 'dayHeader') {
     return (
       <View style={styles.dayHeaderRow}>
@@ -230,6 +231,20 @@ function ConversationMessageRow({
         createdAt={item.createdAt}
         colors={colors}
         onAdd={onAddNwc}
+      />
+    );
+  }
+  if (item.kind === 'deviceNotice') {
+    return (
+      <DeviceNoticeLine
+        id={item.id}
+        createdAt={item.createdAt}
+        name={
+          item.isSelf ? t('chatDevices.you') : peerName?.trim() || t('marmotInviteFailed.someone')
+        }
+        joined={item.joined}
+        clients={item.clients}
+        colors={colors}
       />
     );
   }

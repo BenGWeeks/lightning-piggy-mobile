@@ -2922,5 +2922,43 @@
   },
   "followList": {
     "unavailable": "तुमची फॉलो यादी लोड करता आली नाही — पुन्हा प्रयत्न करा"
+  },
+  "chatDevices": {
+    "secureChat": "सुरक्षित चॅट",
+    "secureChatDevices": {
+      "one": "सुरक्षित चॅट · {{count}} डिव्हाइस",
+      "other": "सुरक्षित चॅट · {{count}} डिव्हाइस"
+    },
+    "bylineA11y": "या चॅटमध्ये कोण आहे आणि कोणत्या डिव्हाइसवर ते पहा",
+    "inThisChat": "या चॅटमध्ये",
+    "deviceCount": {
+      "one": "{{count}} डिव्हाइस",
+      "other": "{{count}} डिव्हाइस"
+    },
+    "showDevicesA11y": "{{name}} यांची डिव्हाइस दाखवा",
+    "hideDevicesA11y": "{{name}} यांची डिव्हाइस लपवा",
+    "unknownApp": "अज्ञात ॲप",
+    "thisPhone": "हा फोन",
+    "keyFrom": "आमंत्रण कीची तारीख: {{date}}",
+    "joinedAtEpoch": "एपॉक {{epoch}} मध्ये सामील",
+    "hereWhenYouJoined": "तुम्ही सामील झालात तेव्हा आधीच होते (एपॉक {{epoch}})",
+    "sentFrom": "येथून पाठवले",
+    "oneOfDevices": {
+      "one": "{{count}} डिव्हाइसपैकी एक",
+      "other": "{{count}} डिव्हाइसपैकी एक"
+    },
+    "readableOn": "इतक्या डिव्हाइसवर वाचता येईल",
+    "readableOnPerson": "{{name}}: {{count}}",
+    "you": "तुम्ही",
+    "noticeJoined": {
+      "one": "{{name}} · {{count}} डिव्हाइसवर सामील ({{apps}})",
+      "other": "{{name}} · {{count}} डिव्हाइसवर सामील ({{apps}})"
+    },
+    "noticeAdded": {
+      "one": "{{name}} यांनी एक डिव्हाइस जोडले ({{apps}})",
+      "other": "{{name}} यांनी {{count}} डिव्हाइस जोडली ({{apps}})"
+    },
+    "showChanges": "चॅटमध्ये डिव्हाइस बदल दाखवा",
+    "showChangesHint": "अल्फा: कोणी डिव्हाइसवरून सामील झाले किंवा डिव्हाइस जोडले की Marmot चॅटमध्ये एक राखाडी ओळ. फक्त याच फोनवर दिसते; काहीही पाठवले जात नाही."
   }
 }

@@ -93,12 +93,12 @@ const HermesProfilerSection: React.FC = () => {
     }
   };
 
-  // Developer options only exist in dev / perf builds, header included.
+  // The profiler only exists in dev / perf builds. It sits under the
+  // "Developer options" heading DeviceNoticesSection draws just above it.
   if (!profilerAvailable) return null;
 
   return (
-    <View style={advanced.sectionGap} testID="advanced-developer-options">
-      <Text style={sharedAccountStyles.sectionLabel}>{t('advancedScreen.developerOptions')}</Text>
+    <View style={advanced.sectionGap} testID="hermes-profiler-section">
       <View style={[sharedAccountStyles.card, advanced.devCard]} testID="hermes-profiler-card">
         <Text style={styles.aboutTitle}>{t('hermesProfiler.title')}</Text>
         <Text style={styles.aboutBody}>{t('hermesProfiler.hint')}</Text>
