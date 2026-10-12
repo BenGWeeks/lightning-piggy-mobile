@@ -1,4 +1,8 @@
-import { buildCollectionTemplate, type CollectionDraft } from '../utils/marketCollections';
+import {
+  isLegacyShopCollection,
+  buildCollectionTemplate,
+  type CollectionDraft,
+} from '../utils/marketCollections';
 import { saveSellerCurrency } from '../services/sellerPreferences';
 import { SellerSigningError } from '../utils/sellerSigning';
 import { signSellerMutation } from '../utils/sellerSigning';
@@ -72,6 +76,7 @@ export function useSellerActions(_snapshot: SellerSnapshot) {
     async (
       template: EventTemplate,
       previous?: Pick<Event, 'created_at'> | null,
+      beforePublish?: () => Promise<void>,
     ): Promise<Event> => {
       if (!pubkey) throw new Error('Not signed in');
       const signed = await signSellerMutation({
@@ -80,6 +85,9 @@ export function useSellerActions(_snapshot: SellerSnapshot) {
         isCurrent: () => identity.current === initiatingIdentity,
         sign: async (event) => (await signEvent(event)) as Event | null,
       });
+      await beforePublish?.();
+      if (identity.current !== initiatingIdentity)
+        throw new SellerSigningError('Signing account changed');
       await publishSellerEvent(signed, relayList);
       addSellerEvents(pubkey, [signed]);
       void persistSellerSnapshot(pubkey);
@@ -97,11 +105,26 @@ export function useSellerActions(_snapshot: SellerSnapshot) {
       base: Event | null,
       options: SaveOptions = {},
       onDeletedAt?: (deletedAt: number) => void,
+      legacyOnly = false,
     ) => {
       if (!pubkey) throw new Error('Not signed in');
       return resolveCurrentRevision({
-        fetchLatest: () =>
-          fetchLatestRevision({ pubkey, kind, dTag, baseId: base?.id, relays: relayList }),
+        fetchLatest: async () => {
+          const result = await fetchLatestRevision({
+            pubkey,
+            kind,
+            dTag,
+            baseId: base?.id,
+            relays: relayList,
+          });
+          const latest = result && 'event' in result ? result.event : (result as Event | null);
+          if (
+            legacyOnly &&
+            (!latest || latest.pubkey !== pubkey || !isLegacyShopCollection(latest))
+          )
+            throw new SellerSigningError('Collection is no longer a legacy shop');
+          return result;
+        },
         base,
         force: options.force,
         onDeletedAt,
@@ -230,16 +253,39 @@ export function useSellerActions(_snapshot: SellerSnapshot) {
     [currentRevision, signAndPublish, run],
   );
   const deleteCollection = useCallback(
-    (event: Event, options: SaveOptions = {}) =>
+    (event: Event, options: SaveOptions = {}, legacyOnly = false) =>
       run(async () => {
         if (!pubkey || event.pubkey !== pubkey || event.kind !== COLLECTION_KIND)
           throw new SellerSigningError('Unexpected collection author');
-        const latest = await currentRevision(COLLECTION_KIND, dTagOf(event), event, options);
+        const latest = await currentRevision(
+          COLLECTION_KIND,
+          dTagOf(event),
+          event,
+          options,
+          undefined,
+          legacyOnly,
+        );
+        if (legacyOnly && (!latest || latest.pubkey !== pubkey || !isLegacyShopCollection(latest)))
+          throw new SellerSigningError('Collection is no longer a legacy shop');
         const target = latest ?? event;
         const coordinate = coordinateOf(COLLECTION_KIND, pubkey, dTagOf(event));
         const deletion = await signAndPublish(
           buildDeletionTemplate([{ kind: COLLECTION_KIND, coordinate, eventId: target.id }]),
           target,
+          legacyOnly
+            ? async () => {
+                const current = await currentRevision(
+                  COLLECTION_KIND,
+                  dTagOf(event),
+                  target,
+                  {},
+                  undefined,
+                  true,
+                );
+                if (!current || current.pubkey !== pubkey || !isLegacyShopCollection(current))
+                  throw new SellerSigningError('Collection is no longer a legacy shop');
+              }
+            : undefined,
         );
         const hidden = new Map(sellerStoreState(pubkey).hidden);
         hidden.set(coordinate, deletion.created_at);
@@ -250,5 +296,18 @@ export function useSellerActions(_snapshot: SellerSnapshot) {
     [pubkey, currentRevision, signAndPublish, run],
   );
 
-  return { busy, saveShop, saveListing, deleteListing, saveCollection, deleteCollection };
+  const deleteLegacyCollection = useCallback(
+    (event: Event, options: SaveOptions = {}) => deleteCollection(event, options, true),
+    [deleteCollection],
+  );
+
+  return {
+    deleteLegacyCollection,
+    busy,
+    saveShop,
+    saveListing,
+    deleteListing,
+    saveCollection,
+    deleteCollection,
+  };
 }

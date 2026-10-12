@@ -470,7 +470,8 @@
     "lightningAddress": "Lightning ऐड्रेस",
     "about": "बायो",
     "aboutPlaceholder": "दुनिया को अपने बारे में बताएँ...",
-    "saveProfile": "प्रोफ़ाइल सेव करें"
+    "saveProfile": "प्रोफ़ाइल सेव करें",
+    "profileUnavailable": "आपकी मौजूदा प्रोफ़ाइल प्राप्त नहीं हो सकी। आपके रिले उपलब्ध होने पर फिर से प्रयास करें।"
   },
   "eventDetailScreen": {
     "dateTbc": "तारीख़ तय होनी बाकी है",

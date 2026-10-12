@@ -1,5 +1,5 @@
 import type { Event } from 'nostr-tools';
-import { mergeMerchantProfile, paymentPreferenceOf } from './merchantProfile';
+import { mergeMerchantProfile, profileEditorPatch, paymentPreferenceOf } from './merchantProfile';
 const event = {
   kind: 0,
   created_at: 10,
@@ -45,4 +45,31 @@ it('defaults absent or invalid preferences to manual and fails closed on malform
   );
   expect(() => mergeMerchantProfile({ ...event, content: '[]' }, {}, 'manual')).toThrow();
   expect(() => mergeMerchantProfile({ ...event, content: 'bad' }, {}, 'manual')).toThrow();
+});
+
+it('editor clearing removes existing fields while preserving unrelated data', () => {
+  const existing = {
+    ...event,
+    content: JSON.stringify({ ...JSON.parse(event.content), about: 'Bio', banner: 'banner' }),
+  };
+  const patch = profileEditorPatch({
+    displayName: ' Merchant ',
+    pictureUrl: ' ',
+    bannerUrl: '',
+    about: '',
+    lud16: '',
+  });
+  expect(patch).toEqual({
+    name: 'Merchant',
+    display_name: 'Merchant',
+    picture: '',
+    banner: '',
+    about: '',
+    lud16: '',
+  });
+  const content = JSON.parse(mergeMerchantProfile(existing, patch).content);
+  for (const field of ['about', 'picture', 'banner', 'lud16'])
+    expect(content).not.toHaveProperty(field);
+  expect(content.custom).toEqual({ nested: true });
+  expect(mergeMerchantProfile(existing, patch).tags).toEqual(event.tags);
 });

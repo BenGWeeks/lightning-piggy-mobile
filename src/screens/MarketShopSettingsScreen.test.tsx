@@ -19,7 +19,7 @@ jest.mock('../hooks/useSellerActions', () => ({
   ...jest.requireActual('../utils/marketSellerRevision'),
   useSellerActions: () => ({
     saveShop: mockSave,
-    deleteCollection: mockDeleteCollection,
+    deleteLegacyCollection: mockDeleteCollection,
     busy: mockBusy,
   }),
 }));

@@ -5,8 +5,7 @@ import type { Event } from 'nostr-tools';
 import { useNostr } from '../contexts/NostrContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { fetchMerchantProfile } from '../services/merchantProfileService';
-import { sellerRelays } from '../services/marketSellerService';
+import { ProfileUnavailableError, fetchMerchantProfile } from '../services/merchantProfileService';
 import { paymentPreferenceOf, type PaymentPreference } from '../utils/merchantProfile';
 import { StaleRevisionError } from '../utils/marketSellerRevision';
 import { createMarketSellerStyles } from '../styles/MarketSeller.styles';
@@ -18,7 +17,10 @@ const MerchantPaymentPreference: React.FC = () => {
   const t = useTranslation();
   const colors = useThemeColors();
   const styles = useMemo(() => createMarketSellerStyles(colors), [colors]);
-  const relayKey = sellerRelays(relays).join(',');
+  const relayKey = relays
+    .filter((r) => r.read || r.write)
+    .map((r) => r.url)
+    .join(',');
   const [state, setState] = useState<{
     pubkey: string;
     event: Event | null;
@@ -59,7 +61,15 @@ const MerchantPaymentPreference: React.FC = () => {
           { text: t('market.sell.cancel'), style: 'cancel', onPress: () => setRetry((v) => v + 1) },
           { text: t('market.sell.overwrite'), onPress: () => void save(preference, true) },
         ]);
-      else Toast.show({ type: 'error', text1: t('market.sell.shop.saveFailed') });
+      else
+        Toast.show({
+          type: 'error',
+          text1: t(
+            error instanceof ProfileUnavailableError
+              ? 'editProfileSheet.profileUnavailable'
+              : 'market.sell.shop.saveFailed',
+          ),
+        });
     } finally {
       setBusy(false);
     }

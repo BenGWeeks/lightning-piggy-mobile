@@ -1,3 +1,6 @@
+import { ProfileUnavailableError } from '../services/merchantProfileService';
+import { StaleRevisionError } from '../utils/marketSellerRevision';
+import { profileEditorPatch } from '../utils/merchantProfile';
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
@@ -140,23 +143,31 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
 
   const handleSave = async () => {
     setSaving(true);
-    const success = await publishProfile({
-      display_name: displayName.trim() || undefined,
-      name: displayName.trim() || undefined,
-      picture: pictureUrl.trim() || undefined,
-      banner: bannerUrl.trim() || undefined,
-      lud16: lud16.trim() || undefined,
-      about: about.trim() || undefined,
-    });
-    setSaving(false);
-    if (success) {
+    try {
+      const success = await publishProfile(
+        profileEditorPatch({ displayName, pictureUrl, bannerUrl, lud16, about }),
+        {},
+      );
+      if (!success) throw new Error('Publish failed');
       Alert.alert(
         t('editProfileSheet.profileUpdatedTitle'),
         t('editProfileSheet.profileUpdatedMessage'),
       );
       onClose();
-    } else {
-      Alert.alert(t('editProfileSheet.errorTitle'), t('editProfileSheet.publishFailed'));
+    } catch (error) {
+      if (error instanceof StaleRevisionError)
+        Alert.alert(t('market.sell.conflictTitle'), t('market.sell.shop.conflictBody'));
+      else
+        Alert.alert(
+          t('editProfileSheet.errorTitle'),
+          t(
+            error instanceof ProfileUnavailableError
+              ? 'editProfileSheet.profileUnavailable'
+              : 'editProfileSheet.publishFailed',
+          ),
+        );
+    } finally {
+      setSaving(false);
     }
   };
 

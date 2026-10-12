@@ -5,7 +5,11 @@ import * as nip19 from 'nostr-tools/nip19';
 import type { Event } from 'nostr-tools';
 import type { NostrProfile, RelayConfig, SignerType } from '../types/nostr';
 import { signAccountEvent } from '../services/signAccountEvent';
-import { publishMergedProfile } from '../services/merchantProfileService';
+import { ProfileUnavailableError, publishMergedProfile } from '../services/merchantProfileService';
+import { useTranslation } from '../contexts/LocaleContext';
+import { StaleRevisionError } from '../utils/marketSellerRevision';
+import { Alert } from '../components/BrandedAlert';
+import { Toast } from '../components/BrandedToast';
 import { sellerRelays } from '../services/marketSellerService';
 import { perAccountKey } from '../services/perAccountStorage';
 import type { ProfilePatch, ProfilePublishOptions } from '../utils/merchantProfile';
@@ -15,11 +19,13 @@ export function useProfilePublisher(input: {
   isLoggedIn: boolean;
   signerType: SignerType | null;
   relays: RelayConfig[];
+  profile: NostrProfile | null;
   setProfile: (profile: NostrProfile) => void;
   cacheKey: string;
   timestampKey: string;
 }) {
   const { pubkey, isLoggedIn, signerType, relays, setProfile, cacheKey, timestampKey } = input;
+  const t = useTranslation();
   const identity = useRef({ pubkey, isLoggedIn, signerType });
   if (
     identity.current.pubkey !== pubkey ||
@@ -35,7 +41,10 @@ export function useProfilePublisher(input: {
       try {
         const event = await publishMergedProfile({
           pubkey,
-          relays: sellerRelays(relays),
+          relays: relays.filter((r) => r.read || r.write).map((r) => r.url),
+          writeRelays: sellerRelays(relays),
+          hasExistingProfile:
+            !!input.profile || !!(await AsyncStorage.getItem(perAccountKey(cacheKey, pubkey))),
           patch,
           options,
           isCurrent,
@@ -67,12 +76,22 @@ export function useProfilePublisher(input: {
         return true;
       } catch (error) {
         if (options) throw error;
+        if (error instanceof ProfileUnavailableError) {
+          Toast.show({ type: 'error', text1: t('editProfileSheet.profileUnavailable') });
+          return false;
+        }
+        if (error instanceof StaleRevisionError) {
+          Alert.alert(t('market.sell.conflictTitle'), t('market.sell.shop.conflictBody'));
+          return false;
+        }
         console.warn('Failed to publish profile:', error);
         return false;
       }
     },
     [
       pubkey,
+      input.profile,
+      t,
       isLoggedIn,
       signerType,
       relays,

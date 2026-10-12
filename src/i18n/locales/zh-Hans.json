@@ -470,7 +470,8 @@
     "lightningAddress": "Lightning地址",
     "about": "简介",
     "aboutPlaceholder": "向大家介绍一下你自己……",
-    "saveProfile": "保存个人资料"
+    "saveProfile": "保存个人资料",
+    "profileUnavailable": "无法获取你现有的个人资料。请在你的中继可用时重试。"
   },
   "eventDetailScreen": {
     "dateTbc": "日期待定",

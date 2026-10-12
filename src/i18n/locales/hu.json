@@ -470,7 +470,8 @@
     "lightningAddress": "Lightning-cím",
     "about": "Bemutatkozás",
     "aboutPlaceholder": "Mesélj magadról a világnak...",
-    "saveProfile": "Profil mentése"
+    "saveProfile": "Profil mentése",
+    "profileUnavailable": "A meglévő profilodat nem sikerült lekérni. Próbáld újra, amikor a reléid elérhetők."
   },
   "eventDetailScreen": {
     "dateTbc": "Dátum később",

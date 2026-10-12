@@ -470,7 +470,8 @@
     "lightningAddress": "Adres Lightning",
     "about": "O mnie",
     "aboutPlaceholder": "Opowiedz światu o sobie...",
-    "saveProfile": "Zapisz profil"
+    "saveProfile": "Zapisz profil",
+    "profileUnavailable": "Nie udało się odzyskać Twojego istniejącego profilu. Spróbuj ponownie, gdy Twoje przekaźniki będą dostępne."
   },
   "eventDetailScreen": {
     "dateTbc": "Data do potwierdzenia",

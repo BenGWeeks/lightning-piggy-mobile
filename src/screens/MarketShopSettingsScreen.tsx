@@ -55,7 +55,7 @@ const MarketShopSettingsScreen: React.FC<Props> = ({ navigation }) => {
   const t = useTranslation();
   const styles = useMemo(() => createMarketSellerStyles(colors), [colors]);
   const { snapshot, status, refresh, defaultCurrency } = useSellerShop();
-  const { saveShop, deleteCollection, busy } = useSellerActions(snapshot);
+  const { saveShop, deleteLegacyCollection, busy } = useSellerActions(snapshot);
   const offerFirstItem = snapshot.listings.length === 0;
   const saveLabel = offerFirstItem
     ? 'market.sell.shop.saveAndAddFirstItem'
@@ -187,7 +187,7 @@ const MarketShopSettingsScreen: React.FC<Props> = ({ navigation }) => {
             },
           );
           if (removeLegacy && isLegacyShopCollection(snapshot.shop) && snapshot.shop) {
-            await deleteCollection(snapshot.shop, { force });
+            await deleteLegacyCollection(snapshot.shop, { force });
           }
           Toast.show({ type: 'success', text1: t('market.sell.shop.saved') });
           if (addFirstItem) {
@@ -237,7 +237,7 @@ const MarketShopSettingsScreen: React.FC<Props> = ({ navigation }) => {
         ]);
       } else await save(false);
     },
-    [form, errors, base, saveShop, deleteCollection, snapshot.shop, refresh, navigation, t],
+    [form, errors, base, saveShop, deleteLegacyCollection, snapshot.shop, refresh, navigation, t],
   );
 
   return (
@@ -293,7 +293,7 @@ const MarketShopSettingsScreen: React.FC<Props> = ({ navigation }) => {
                   if (!legacy) return;
                   const remove = async (force = false) => {
                     try {
-                      await deleteCollection(legacy, { force });
+                      await deleteLegacyCollection(legacy, { force });
                     } catch (error) {
                       if (error instanceof StaleRevisionError)
                         Alert.alert(

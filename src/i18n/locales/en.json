@@ -470,7 +470,8 @@
     "lightningAddress": "Lightning Address",
     "about": "About",
     "aboutPlaceholder": "Tell the world about yourself...",
-    "saveProfile": "Save Profile"
+    "saveProfile": "Save Profile",
+    "profileUnavailable": "Your existing profile could not be recovered. Try again when your relays are available."
   },
   "eventDetailScreen": {
     "dateTbc": "Date TBC",

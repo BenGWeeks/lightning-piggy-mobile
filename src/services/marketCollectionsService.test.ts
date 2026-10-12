@@ -63,3 +63,59 @@ it('does not query when there are no signed listings or the request is aborted',
   await fetchMarketCollections([product()], [], controller.signal);
   expect(queryQuorum).not.toHaveBeenCalled();
 });
+
+it.each(['a', 'e'])(
+  'checks %s deletions beyond the first 100 relay-union collections',
+  async (tag) => {
+    const events = Array.from({ length: 101 }, (_, i) => ({
+      ...collection,
+      id: `event${i}`,
+      tags: [
+        ['d', `c${i}`],
+        ['title', `Collection ${i}`],
+      ],
+    }));
+    const target = tag === 'a' ? `30405:${pubkey}:c100` : 'event100';
+    (queryQuorum as jest.Mock).mockImplementation(async (_relays, filter) =>
+      filter.kinds[0] === 30405
+        ? events
+        : filter[`#${tag}`]?.includes(target)
+          ? [{ kind: 5, pubkey, created_at: 101, tags: [[tag, target]] }]
+          : [],
+    );
+    const result = await fetchMarketCollections([product()], []);
+    expect(result).toHaveLength(100);
+    expect(result.some((e) => e.id === 'event100')).toBe(false);
+    for (const [, filter] of (queryQuorum as jest.Mock).mock.calls) {
+      expect(filter['#a']?.length ?? 0).toBeLessThanOrEqual(100);
+      expect(filter['#e']?.length ?? 0).toBeLessThanOrEqual(100);
+    }
+  },
+);
+it('discovers exact collection references created by another author', async () => {
+  const foreign = 'b'.repeat(64);
+  const referenced = {
+    ...collection,
+    pubkey: foreign,
+    tags: [
+      ['d', 'art:prints'],
+      ['title', 'Prints'],
+    ],
+  };
+  const listing = {
+    listing: { event: { pubkey, tags: [['a', `30405:${foreign}:art:prints`]] } },
+  } as MarketProduct;
+  (queryQuorum as jest.Mock).mockImplementation(async (_relays, filter) =>
+    filter.kinds[0] === 30405 &&
+    filter.authors.includes(foreign) &&
+    filter['#d']?.includes('art:prints')
+      ? [referenced]
+      : [],
+  );
+  expect(await fetchMarketCollections([listing], [])).toEqual([referenced]);
+  expect(queryQuorum).toHaveBeenCalledWith(
+    expect.any(Array),
+    { kinds: [30405], authors: [foreign], '#d': ['art:prints'], limit: 5 },
+    undefined,
+  );
+});

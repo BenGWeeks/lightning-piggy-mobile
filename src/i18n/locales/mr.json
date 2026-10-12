@@ -470,7 +470,8 @@
     "lightningAddress": "Lightning ॲड्रेस",
     "about": "माझ्याबद्दल",
     "aboutPlaceholder": "जगाला तुमच्याबद्दल सांगा...",
-    "saveProfile": "प्रोफाइल सेव्ह करा"
+    "saveProfile": "प्रोफाइल सेव्ह करा",
+    "profileUnavailable": "तुमची विद्यमान प्रोफाइल मिळवता आली नाही. तुमचे रिले उपलब्ध झाल्यावर पुन्हा प्रयत्न करा."
   },
   "eventDetailScreen": {
     "dateTbc": "तारीख अजून ठरायची आहे",

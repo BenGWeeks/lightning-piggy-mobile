@@ -470,7 +470,8 @@
     "lightningAddress": "Dirección Lightning",
     "about": "Acerca de",
     "aboutPlaceholder": "Cuéntale al mundo sobre ti...",
-    "saveProfile": "Guardar perfil"
+    "saveProfile": "Guardar perfil",
+    "profileUnavailable": "No se pudo recuperar tu perfil existente. Inténtalo de nuevo cuando tus relays estén disponibles."
   },
   "eventDetailScreen": {
     "dateTbc": "Fecha por confirmar",

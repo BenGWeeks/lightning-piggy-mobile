@@ -3,6 +3,7 @@ import { finalizeEvent, getPublicKey, type Event } from 'nostr-tools';
 import { useSellerActions, StaleRevisionError } from './useSellerActions';
 import { fetchLatestRevision, publishSellerEvent } from '../services/marketSellerService';
 import {
+  SHOP_COLLECTION_D,
   buildShippingZoneTemplate,
   buildListingTemplate,
   coordinateOf,
@@ -237,20 +238,63 @@ it.each(['deleted', 'older', 'newer', 'tie'])(
 it('saving shop settings never creates or updates a shop-name collection', async () => {
   const { result } = renderHook(() => useSellerActions(snapshot));
   (fetchLatestRevision as jest.Mock).mockResolvedValue(null);
-  await act(async () => { await result.current.saveShop({ currency: 'GBP' }, [{ ...zone, dTag: 'new' }], { shop: null, zoneCoordinates: [], zoneEvents: new Map() }); });
+  await act(async () => {
+    await result.current.saveShop({ currency: 'GBP' }, [{ ...zone, dTag: 'new' }], {
+      shop: null,
+      zoneCoordinates: [],
+      zoneEvents: new Map(),
+    });
+  });
   expect((publishSellerEvent as jest.Mock).mock.calls.map(([e]) => e.kind)).toEqual([30406]);
   expect(fetchLatestRevision).not.toHaveBeenCalledWith(expect.objectContaining({ kind: 30405 }));
 });
 
 it('collection edits reject conflicts and merge the confirmed current collection extensions', async () => {
-  const old = finalizeEvent({ kind: 30405, content: 'Notes', tags: [['d', 'art'], ['title', 'Old']], created_at: 100 }, key);
-  const latest = finalizeEvent({ kind: 30405, content: 'Latest notes', tags: [['d', 'art'], ['title', 'New'], ['custom', 'keep']], created_at: 200 }, key);
+  const old = finalizeEvent(
+    {
+      kind: 30405,
+      content: 'Notes',
+      tags: [
+        ['d', 'art'],
+        ['title', 'Old'],
+      ],
+      created_at: 100,
+    },
+    key,
+  );
+  const latest = finalizeEvent(
+    {
+      kind: 30405,
+      content: 'Latest notes',
+      tags: [
+        ['d', 'art'],
+        ['title', 'New'],
+        ['custom', 'keep'],
+      ],
+      created_at: 200,
+    },
+    key,
+  );
   (fetchLatestRevision as jest.Mock).mockResolvedValue(latest);
   const { result } = renderHook(() => useSellerActions(snapshot));
-  const draft = { dTag: 'art', title: 'Prints', summary: 'Art prints', image: '', location: '', shipping: [], products: [`30402:${pubkey}:print`] };
-  await act(async () => { await expect(result.current.saveCollection(draft, old)).rejects.toBeInstanceOf(StaleRevisionError); });
+  const draft = {
+    dTag: 'art',
+    title: 'Prints',
+    summary: 'Art prints',
+    image: '',
+    location: '',
+    shipping: [],
+    products: [`30402:${pubkey}:print`],
+  };
+  await act(async () => {
+    await expect(result.current.saveCollection(draft, old)).rejects.toBeInstanceOf(
+      StaleRevisionError,
+    );
+  });
   expect(mockSign).not.toHaveBeenCalled();
-  await act(async () => { await result.current.saveCollection(draft, old, { force: true }); });
+  await act(async () => {
+    await result.current.saveCollection(draft, old, { force: true });
+  });
   const signed = (publishSellerEvent as jest.Mock).mock.calls[0][0];
   expect(signed.kind).toBe(30405);
   expect(signed.content).toBe('Latest notes');
@@ -259,14 +303,134 @@ it('collection edits reject conflicts and merge the confirmed current collection
 });
 
 it('collection deletion checks revisions then publishes NIP-09 for the confirmed revision', async () => {
-  const old = finalizeEvent({ kind: 30405, content: '', tags: [['d', 'art'], ['title', 'Art']], created_at: 100 }, key);
+  const old = finalizeEvent(
+    {
+      kind: 30405,
+      content: '',
+      tags: [
+        ['d', 'art'],
+        ['title', 'Art'],
+      ],
+      created_at: 100,
+    },
+    key,
+  );
   const latest = finalizeEvent({ ...old, created_at: 200 }, key);
   (fetchLatestRevision as jest.Mock).mockResolvedValue(latest);
   const { result } = renderHook(() => useSellerActions(snapshot));
-  await act(async () => { await expect(result.current.deleteCollection(old)).rejects.toBeInstanceOf(StaleRevisionError); });
+  await act(async () => {
+    await expect(result.current.deleteCollection(old)).rejects.toBeInstanceOf(StaleRevisionError);
+  });
   expect(mockSign).not.toHaveBeenCalled();
-  await act(async () => { await result.current.deleteCollection(old, { force: true }); });
+  await act(async () => {
+    await result.current.deleteCollection(old, { force: true });
+  });
   expect((publishSellerEvent as jest.Mock).mock.calls[0][0].tags).toEqual([
-    ['a', `30405:${pubkey}:art`], ['e', latest.id], ['k', '30405'],
+    ['a', `30405:${pubkey}:art`],
+    ['e', latest.id],
+    ['k', '30405'],
   ]);
+});
+
+it.each(['repurposed', 'missing', 'empty', 'foreign'])(
+  'legacy migration refuses the current %s collection even after confirmation',
+  async (revision) => {
+    const legacy = finalizeEvent(
+      {
+        kind: 30405,
+        content: '',
+        tags: [
+          ['d', 'lightning-piggy-shop'],
+          ['currency', 'GBP'],
+        ],
+        created_at: 100,
+      },
+      key,
+    );
+    const latest =
+      revision === 'empty'
+        ? null
+        : revision === 'missing'
+          ? { event: null, deletedAt: 200, deletedIds: [legacy.id] }
+          : finalizeEvent(
+              {
+                ...legacy,
+                tags:
+                  revision === 'repurposed'
+                    ? [
+                        ['d', 'lightning-piggy-shop'],
+                        ['title', 'Repurposed'],
+                      ]
+                    : legacy.tags,
+                created_at: 200,
+              },
+              revision === 'foreign' ? new Uint8Array(32).fill(8) : key,
+            );
+    (fetchLatestRevision as jest.Mock).mockResolvedValue(latest);
+    const { result } = renderHook(() => useSellerActions(snapshot));
+    await act(async () => {
+      await expect(
+        result.current.deleteLegacyCollection(legacy, { force: true }),
+      ).rejects.toThrow();
+    });
+    expect(mockSign).not.toHaveBeenCalled();
+    expect(publishSellerEvent).not.toHaveBeenCalled();
+  },
+);
+it('legacy migration discards a deletion if the collection is repurposed during signing', async () => {
+  const legacy = finalizeEvent(
+    {
+      kind: 30405,
+      content: '',
+      tags: [
+        ['d', SHOP_COLLECTION_D],
+        ['currency', 'GBP'],
+      ],
+      created_at: 100,
+    },
+    key,
+  );
+  const repurposed = finalizeEvent(
+    {
+      ...legacy,
+      tags: [
+        ['d', SHOP_COLLECTION_D],
+        ['title', 'Repurposed'],
+      ],
+      created_at: 200,
+    },
+    key,
+  );
+  (fetchLatestRevision as jest.Mock)
+    .mockResolvedValueOnce(legacy)
+    .mockResolvedValueOnce(repurposed);
+  const { result } = renderHook(() => useSellerActions(snapshot));
+  await act(async () => {
+    await expect(result.current.deleteLegacyCollection(legacy, { force: true })).rejects.toThrow();
+  });
+  expect(mockSign).toHaveBeenCalledTimes(1);
+  expect(publishSellerEvent).not.toHaveBeenCalled();
+});
+
+it('legacy migration deletes a current owned legacy revision after both checks', async () => {
+  const legacy = finalizeEvent(
+    {
+      kind: 30405,
+      content: '',
+      tags: [
+        ['d', 'lightning-piggy-shop'],
+        ['currency', 'GBP'],
+      ],
+      created_at: 100,
+    },
+    key,
+  );
+  (fetchLatestRevision as jest.Mock).mockResolvedValue(legacy);
+  const { result } = renderHook(() => useSellerActions(snapshot));
+  await act(async () => {
+    await result.current.deleteLegacyCollection(legacy);
+  });
+  expect(fetchLatestRevision).toHaveBeenCalledTimes(2);
+  expect(publishSellerEvent).toHaveBeenCalledTimes(1);
+  expect((publishSellerEvent as jest.Mock).mock.calls[0][0].tags).toContainEqual(['e', legacy.id]);
 });

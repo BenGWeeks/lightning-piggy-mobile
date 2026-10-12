@@ -442,7 +442,8 @@
     "lightningAddress": "Адреса Lightning",
     "about": "Про себе",
     "aboutPlaceholder": "Розкажіть світові про себе...",
-    "saveProfile": "Зберегти профіль"
+    "saveProfile": "Зберегти профіль",
+    "profileUnavailable": "Не вдалося відновити ваш наявний профіль. Спробуйте ще раз, коли ваші реле будуть доступні."
   },
   "eventDetailScreen": {
     "dateTbc": "Дата уточнюється",

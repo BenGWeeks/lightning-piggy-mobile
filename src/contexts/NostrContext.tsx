@@ -1343,9 +1343,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     getReadRelays,
     loadContacts,
   });
-
   const publishProfile = useProfilePublisher({
     pubkey,
+    profile,
     isLoggedIn,
     signerType,
     relays,
@@ -1353,7 +1353,6 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     cacheKey: OWN_PROFILE_CACHE_KEY_BASE,
     timestampKey: OWN_PROFILE_TIMESTAMP_KEY_BASE,
   });
-
   /**
    * Send a 1:1 direct message via NIP-17 (kind-14 rumor → kind-13 seal →
    * kind-1059 gift wrap). NIP-04 (kind 4) is no longer produced — see

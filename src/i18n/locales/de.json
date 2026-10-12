@@ -470,7 +470,8 @@
     "lightningAddress": "Lightning-Adresse",
     "about": "Über mich",
     "aboutPlaceholder": "Erzähl der Welt von dir…",
-    "saveProfile": "Profil speichern"
+    "saveProfile": "Profil speichern",
+    "profileUnavailable": "Dein bestehendes Profil konnte nicht abgerufen werden. Versuche es erneut, wenn deine Relays verfügbar sind."
   },
   "eventDetailScreen": {
     "dateTbc": "Datum folgt",

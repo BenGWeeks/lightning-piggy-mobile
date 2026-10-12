@@ -47,3 +47,21 @@ export function mergeMerchantProfile(
     created_at: nextCreatedAt(Date.now() / 1000, latest),
   };
 }
+
+/** Empty editor inputs explicitly remove fields; omitted patches preserve them. */
+export function profileEditorPatch(fields: {
+  displayName: string;
+  pictureUrl: string;
+  bannerUrl: string;
+  lud16: string;
+  about: string;
+}): ProfilePatch {
+  return {
+    display_name: fields.displayName.trim(),
+    name: fields.displayName.trim(),
+    picture: fields.pictureUrl.trim(),
+    banner: fields.bannerUrl.trim(),
+    lud16: fields.lud16.trim(),
+    about: fields.about.trim(),
+  };
+}
