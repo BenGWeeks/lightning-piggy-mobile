@@ -1,12 +1,7 @@
 import { StyleSheet } from 'react-native';
 import type { Palette } from './palettes';
 
-/** Styles for {@link MarketFilterBar} — the right-anchored, slide-in filter
- * panel housing the merchant / country / currency chip sections. Selected
- * chips fill brand-pink to match {@link createMarketModeSelectorStyles}, so the
- * filter controls read as siblings of the marketplace-mode selector. The search
- * box no longer lives here — it stays inline in the Market header (see
- * {@link createMarketScreenStyles}). */
+/** Styles for the Market's seller scope and category filter drawer. */
 export const createMarketFilterBarStyles = (colors: Palette) =>
   StyleSheet.create({
     // ----- panel shell -----------------------------------------------------
@@ -65,6 +60,20 @@ export const createMarketFilterBarStyles = (colors: Palette) =>
       flexWrap: 'wrap',
       gap: 8,
     },
+    sellerOption: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      padding: 12,
+      marginBottom: 8,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.divider,
+      backgroundColor: colors.surface,
+    },
+    sellerCopy: { flex: 1, gap: 4 },
+    sellerOptionDisabled: { opacity: 0.5 },
+    sellerHint: { fontSize: 12, color: colors.textSupplementary },
     // ----- chips -----------------------------------------------------------
     chip: {
       paddingHorizontal: 12,

@@ -10,7 +10,6 @@ import {
 import { Image } from 'expo-image';
 import { ChevronLeft, Search, SlidersHorizontal, Store, X } from 'lucide-react-native';
 import MarketProductCard from '../components/MarketProductCard';
-import MarketModeSelector from '../components/MarketModeSelector';
 import MarketFilterBar from '../components/MarketFilterBar';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -19,7 +18,7 @@ import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { createMarketScreenStyles } from '../styles/MarketScreen.styles';
 import { MARKET_PRODUCTS, sellerOf, type MarketProduct } from '../data/marketProducts';
 import { featuredFirst } from '../utils/marketVendors';
-import { DEFAULT_MARKET_MODE, marketModeOption, type MarketMode } from '../utils/marketMode';
+import { DEFAULT_MARKET_MODE, type MarketMode } from '../utils/marketMode';
 import {
   countActiveMarketFilters,
   distinctCountries,
@@ -101,33 +100,22 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
   // `active` tracks the live (un-debounced) query so the empty-state copy flips
   // as soon as the user types.
   const filterActive = isMarketFilterActive({ query, merchant, country, currency });
-  // Count of active CATEGORY axes (merchant / country / currency) — the ones
-  // housed in the panel. Drives the badge on the header's filter icon and the
-  // panel's own "Clear filters" affordance (the inline search has its own
-  // clear button, so it is excluded here).
-  const categoryFilterCount = countActiveMarketFilters({
-    query,
-    merchant,
-    country,
-    currency,
-  });
+  // Seller scope shares the panel's badge and Clear action. Search also
+  // contributes to the button badge, but retains its own clear control.
+  const panelFilterCount = countActiveMarketFilters({ query, merchant, country, currency }, mode);
+  const activeFilterCount = panelFilterCount + (query.trim().length > 0 ? 1 : 0);
 
   const products = useMemo(
     () => filterMarketProducts(baseProducts, filter, sellerOf),
     [baseProducts, filter],
   );
 
-  // Reset the CATEGORY filter axes (merchant + country + currency) from inside
-  // the panel. The inline search keeps its own clear button, so it is left
-  // untouched here. The marketplace MODE (Preferred Sellers / WoT: Friends) is
-  // a separate top-level selector, not a filter, so it is also left unchanged by
-  // design — "Clear filters" shouldn't yank the user out of the WoT view they
-  // deliberately chose (Copilot review on #948).
   const clearFilters = useCallback(() => {
     setMerchant(null);
     setCountry(null);
     setCurrency(null);
-  }, []);
+    selectMode(DEFAULT_MARKET_MODE);
+  }, [selectMode]);
 
   const openProduct = useCallback(
     (product: MarketProduct) => {
@@ -203,38 +191,6 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
         <Text style={styles.headerTagline}>{t('market.screen.tagline')}</Text>
       </View>
 
-      <View style={styles.modeBar}>
-        <MarketModeSelector value={mode} onChange={selectMode} />
-        <Text style={styles.modeCaption}>
-          {t('market.screen.showing', { label: t(marketModeOption(mode).labelKey) })}
-        </Text>
-      </View>
-
-      {/* Inline search + a compact filter icon that opens the slide-in panel.
-          Keeping only this single row (instead of three chip rows) reclaims the
-          vertical space so the product grid starts higher. */}
-      {mode === 'wotFriends' ? (
-        <View style={styles.liveStatus}>
-          <Text style={styles.liveStatusText} testID="market-live-status">
-            {t(
-              live.loading
-                ? 'market.live.loading'
-                : live.incomplete
-                  ? 'market.live.incomplete'
-                  : 'market.live.loaded',
-            )}
-          </Text>
-          <TouchableOpacity
-            onPress={live.refresh}
-            disabled={live.loading}
-            accessibilityState={{ disabled: live.loading }}
-            accessibilityLabel={t('market.live.refresh')}
-            testID="market-live-refresh"
-          >
-            <Text style={styles.liveStatusText}>{t('market.live.refresh')}</Text>
-          </TouchableOpacity>
-        </View>
-      ) : null}
       <View style={styles.searchBar}>
         <View style={styles.searchRow}>
           <Search size={16} color={colors.textSupplementary} strokeWidth={2.25} />
@@ -261,14 +217,14 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
           ) : null}
         </View>
         <TouchableOpacity
-          style={[styles.filterButton, categoryFilterCount > 0 && styles.filterButtonActive]}
+          style={[styles.filterButton, activeFilterCount > 0 && styles.filterButtonActive]}
           onPress={() => {
             perfLog('[PerfBlock] market filter tap');
             setFiltersOpen(true);
           }}
           accessibilityLabel={
-            categoryFilterCount > 0
-              ? t('market.screen.filtersApplied', { count: categoryFilterCount })
+            activeFilterCount > 0
+              ? t('market.screen.filtersApplied', { count: activeFilterCount })
               : t('market.screen.filters')
           }
           testID="market-filter-button"
@@ -276,18 +232,57 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
         >
           <SlidersHorizontal
             size={18}
-            color={categoryFilterCount > 0 ? colors.white : colors.textBody}
+            color={activeFilterCount > 0 ? colors.white : colors.textBody}
             strokeWidth={2.25}
           />
-          {categoryFilterCount > 0 ? (
+          {activeFilterCount > 0 ? (
             <View style={styles.filterBadge} testID="market-filter-badge">
-              <Text style={styles.filterBadgeText}>{categoryFilterCount}</Text>
+              <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
             </View>
           ) : null}
         </TouchableOpacity>
       </View>
 
+      {mode !== DEFAULT_MARKET_MODE ? (
+        <View style={styles.scopeRow}>
+          <TouchableOpacity
+            style={styles.scopeChip}
+            onPress={() => selectMode(DEFAULT_MARKET_MODE)}
+            accessibilityLabel={t('market.filters.clearScope')}
+            testID="market-scope-chip-clear"
+            activeOpacity={0.7}
+          >
+            <Text style={styles.scopeChipText}>{t('market.filters.friendsChip')}</Text>
+            <X size={14} color={colors.brandPink} strokeWidth={2.25} />
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
+      {mode === 'wotFriends' ? (
+        <View style={styles.liveStatus}>
+          <Text style={styles.liveStatusText} testID="market-live-status">
+            {t(
+              live.loading
+                ? 'market.live.loading'
+                : live.incomplete
+                  ? 'market.live.incomplete'
+                  : 'market.live.loaded',
+            )}
+          </Text>
+          <TouchableOpacity
+            onPress={live.refresh}
+            disabled={live.loading}
+            accessibilityState={{ disabled: live.loading }}
+            accessibilityLabel={t('market.live.refresh')}
+            testID="market-live-refresh"
+          >
+            <Text style={styles.liveStatusText}>{t('market.live.refresh')}</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
       <MarketFilterBar
+        mode={mode}
+        onSelectMode={selectMode}
         visible={filtersOpen}
         onClose={() => setFiltersOpen(false)}
         merchants={merchants}
@@ -299,7 +294,7 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
         currencies={currencies}
         selectedCurrency={currency}
         onSelectCurrency={setCurrency}
-        active={categoryFilterCount > 0}
+        active={panelFilterCount > 0}
         onClear={clearFilters}
       />
 

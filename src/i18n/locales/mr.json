@@ -2308,7 +2308,13 @@
       "merchant": "व्यापारी",
       "country": "देश",
       "currency": "चलन",
-      "chipSelected": "{{label}}, निवडले"
+      "chipSelected": "{{label}}, निवडले",
+      "sellers": "विक्रेते",
+      "friends": "मित्र (तुम्ही फॉलो करत असलेले लोक)",
+      "friendsOfFriends": "मित्रांचे मित्र",
+      "friendsChip": "मित्र",
+      "comingSoon": "लवकरच येत आहे",
+      "clearScope": "विक्रेते पुन्हा Lightning Piggy च्या पसंतीच्या विक्रेत्यांवर सेट करा"
     },
     "feedbackTabs": {
       "reviews": "रिव्ह्यू",

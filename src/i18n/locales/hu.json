@@ -2308,7 +2308,13 @@
       "merchant": "Kereskedő",
       "country": "Ország",
       "currency": "Pénznem",
-      "chipSelected": "{{label}}, kiválasztva"
+      "chipSelected": "{{label}}, kiválasztva",
+      "sellers": "Eladók",
+      "friends": "Barátok (akiket követsz)",
+      "friendsOfFriends": "Barátok barátai",
+      "friendsChip": "Barátok",
+      "comingSoon": "Hamarosan",
+      "clearScope": "Eladók visszaállítása a Lightning Piggy ajánlott eladóira"
     },
     "feedbackTabs": {
       "reviews": "Értékelések",

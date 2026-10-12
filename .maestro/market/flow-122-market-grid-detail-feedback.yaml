@@ -50,6 +50,30 @@ name: Market — grid → product detail → reviews/comments tabs (#948)
 - assertVisible:
     id: 'market-product-card-robotechy-lightning-piggy'
 
+# Seller scope is selected in Filters; the compact chip resets it (#1362).
+- tapOn:
+    id: 'market-filter-button'
+- waitForAnimationToEnd
+- assertVisible:
+    id: 'market-filter-sellers-preferred'
+- assertVisible:
+    id: 'market-filter-sellers-friends-of-friends'
+- tapOn:
+    id: 'market-filter-sellers-friends'
+- tapOn:
+    id: 'market-filter-done'
+- waitForAnimationToEnd
+- assertVisible:
+    id: 'market-filter-badge'
+- tapOn:
+    id: 'market-scope-chip-clear'
+- assertNotVisible:
+    id: 'market-scope-chip-clear'
+- assertNotVisible:
+    id: 'market-filter-badge'
+- assertVisible:
+    id: 'market-product-card-robotechy-lightning-piggy'
+
 # Open the product → its detail page.
 - tapOn:
     id: 'market-product-card-robotechy-lightning-piggy'

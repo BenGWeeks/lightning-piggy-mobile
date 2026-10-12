@@ -2308,7 +2308,13 @@
       "merchant": "मर्चेंट",
       "country": "देश",
       "currency": "करेंसी",
-      "chipSelected": "{{label}}, चुना गया"
+      "chipSelected": "{{label}}, चुना गया",
+      "sellers": "विक्रेता",
+      "friends": "दोस्त (जिन लोगों को आप फ़ॉलो करते हैं)",
+      "friendsOfFriends": "दोस्तों के दोस्त",
+      "friendsChip": "दोस्त",
+      "comingSoon": "जल्द आ रहा है",
+      "clearScope": "विक्रेताओं को Lightning Piggy के पसंदीदा विक्रेताओं पर रीसेट करें"
     },
     "feedbackTabs": {
       "reviews": "रिव्यू",

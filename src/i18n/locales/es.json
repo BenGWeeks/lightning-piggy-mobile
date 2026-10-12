@@ -2308,7 +2308,13 @@
       "merchant": "Comercio",
       "country": "País",
       "currency": "Moneda",
-      "chipSelected": "Filtro seleccionado: {{label}}"
+      "chipSelected": "Filtro seleccionado: {{label}}",
+      "sellers": "Vendedores",
+      "friends": "Amigos (personas a las que sigues)",
+      "friendsOfFriends": "Amigos de amigos",
+      "friendsChip": "Amigos",
+      "comingSoon": "Próximamente",
+      "clearScope": "Restablecer vendedores a los vendedores preferidos de Lightning Piggy"
     },
     "feedbackTabs": {
       "reviews": "Reseñas",
