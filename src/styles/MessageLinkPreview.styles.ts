@@ -15,8 +15,9 @@ export const createMessageLinkPreviewStyles = (colors: Palette, fromMe: boolean)
     tapTarget: {},
     image: {
       width: '100%',
-      height: 140,
-      backgroundColor: colors.background,
+      // Reserve identical space before/after load and when virtualized rows remount.
+      aspectRatio: 1.91,
+      backgroundColor: fromMe ? 'rgba(0,0,0,0.08)' : colors.surface,
     },
     body: {
       paddingHorizontal: 12,

@@ -37,6 +37,30 @@ function deriveDomain(url: string): string {
   }
 }
 
+const LinkPreviewImage = React.memo(function LinkPreviewImage({
+  url,
+  eventId,
+  styles,
+}: {
+  url: string;
+  eventId: string;
+  styles: ReturnType<typeof createMessageLinkPreviewStyles>;
+}) {
+  const source = useMemo(() => ({ uri: url }), [url]);
+
+  return (
+    <ExpoImage
+      source={source}
+      style={styles.image}
+      contentFit="contain"
+      cachePolicy="memory-disk"
+      transition={150}
+      accessibilityIgnoresInvertColors
+      testID={`message-link-preview-image-${eventId}`}
+    />
+  );
+});
+
 const MessageLinkPreview: React.FC<Props> = ({
   url,
   eventId,
@@ -130,14 +154,11 @@ const MessageLinkPreview: React.FC<Props> = ({
     >
       <View testID={`message-link-preview-tap-${eventId}`} style={styles.tapTarget}>
         {preview?.image ? (
-          <ExpoImage
-            source={{ uri: preview.image }}
-            style={styles.image}
-            contentFit="cover"
-            cachePolicy="memory-disk"
-            transition={150}
-            accessibilityIgnoresInvertColors
-            testID={`message-link-preview-image-${eventId}`}
+          <LinkPreviewImage
+            key={preview.image}
+            url={preview.image}
+            eventId={eventId}
+            styles={styles}
           />
         ) : null}
         <View style={styles.body}>
@@ -164,4 +185,4 @@ const MessageLinkPreview: React.FC<Props> = ({
   );
 };
 
-export default MessageLinkPreview;
+export default React.memo(MessageLinkPreview);

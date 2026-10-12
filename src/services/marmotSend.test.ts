@@ -6,7 +6,10 @@ import {
   setMarmotSession,
   type MarmotSession,
 } from './marmotSession';
-import { marmotDelivery, sendMarmotDm } from './marmotSend';
+import { marmotDelivery, sendMarmotDm, sendMarmotGroupRumor } from './marmotSend';
+import { marmotReplyTags } from './marmotEdits';
+import { marmotRumorToGroupMessage, marmotRumorToDmRow } from './marmotInbox';
+import { buildMarmotRumor } from './marmotSession';
 
 const ME = 'a'.repeat(64);
 const PEER = 'b'.repeat(64);
@@ -28,6 +31,35 @@ function fakeSession(overrides: Partial<MarmotSession> = {}) {
 }
 
 afterEach(() => setMarmotSession(null));
+
+it('round-trips the same White Noise reply tags through group and 1:1 Marmot sends', async () => {
+  const sent = fakeSession();
+  const parent = 'c'.repeat(64);
+  const draft = {
+    kind: 14,
+    content: 'reply',
+    tags: marmotReplyTags(parent),
+    created_at: 1700000000,
+  };
+  const result = await sendMarmotGroupRumor(ME, 'marmot:group', draft);
+  await sendMarmotDm(ME, PEER, draft);
+  const expected = buildMarmotRumor(ME, { ...draft, kind: 9 });
+  expect(result).toMatchObject({ success: true, rumorId: expected.id });
+  expect(sent.map(({ rumor }) => rumor)).toEqual([expected, expected]);
+  expect(expected.tags).toEqual([
+    ['e', parent],
+    ['q', parent],
+  ]);
+  expect(marmotRumorToGroupMessage(expected)).toMatchObject({ replyTo: parent });
+  expect(
+    marmotRumorToDmRow(ME, {
+      group: { id: 'marmot:dm', isDm: true, memberPubkeys: [PEER] } as Parameters<
+        typeof marmotRumorToDmRow
+      >[1]['group'],
+      rumor: expected,
+    }),
+  ).toMatchObject({ replyTo: parent });
+});
 
 describe('sendMarmotDm', () => {
   it('keeps a structured rumor byte-identical so content-addressed ids (polls) match', async () => {

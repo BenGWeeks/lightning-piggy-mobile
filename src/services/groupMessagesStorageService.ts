@@ -120,7 +120,9 @@ export async function appendGroupMessage(
     // senderPubkey is lowercased on both sides because inbound rumors are
     // lowercased upstream while optimistic locals may use the viewer pubkey
     // as-is.
-    if (!message.id.startsWith('local_')) {
+    // Repeated delivery must not consume another pending send. Continue to
+    // ID dedup below so replays can still repair stored metadata.
+    if (!message.id.startsWith('local_') && !map.has(message.id)) {
       const targetSender = message.senderPubkey.toLowerCase();
       let bestKey: string | null = null;
       let bestDelta = Infinity;
@@ -128,6 +130,9 @@ export async function appendGroupMessage(
         if (!k.startsWith('local_')) continue;
         if (m.senderPubkey.toLowerCase() !== targetSender) continue;
         if (m.text !== message.text) continue;
+        // Identical replies can quote different parents. An echo must consume
+        // the matching send, not whichever same-text row is closest in time.
+        if (m.replyTo?.toLowerCase() !== message.replyTo?.toLowerCase()) continue;
         const delta = Math.abs(m.createdAt - message.createdAt);
         if (delta > LOCAL_ECHO_MATCH_WINDOW_SECS) continue;
         if (delta < bestDelta) {
@@ -139,8 +144,8 @@ export async function appendGroupMessage(
     }
 
     // Dedup on id; keep the newer copy when ids collide (createdAt wins). At the
-    // same timestamp a replay may only repair a row stored blank or as the
-    // attachment fallback label (e.g. pre-#1225 Marmot voice notes, #1241).
+    // same timestamp a replay can repair an attachment placeholder or restore
+    // a missing reply reference, without rolling back an overlaid text edit.
     const prior = map.get(message.id);
     const repairs =
       prior?.createdAt === message.createdAt &&
@@ -149,6 +154,16 @@ export async function appendGroupMessage(
       isAttachmentPlaceholderText(prior.text);
     if (!prior || prior.createdAt < message.createdAt || repairs) {
       map.set(message.id, message);
+    } else if (
+      prior.createdAt === message.createdAt &&
+      prior.senderPubkey.toLowerCase() === message.senderPubkey.toLowerCase() &&
+      !prior.replyTo &&
+      message.replyTo &&
+      /^[0-9a-f]{64}$/i.test(message.replyTo)
+    ) {
+      // Replayed history may restore reply metadata missing from an older
+      // stored row. Merge only the reference: keep any overlaid edit intact.
+      map.set(message.id, { ...prior, replyTo: message.replyTo.toLowerCase() });
     }
     const all = Array.from(map.values()).sort((a, b) => a.createdAt - b.createdAt);
     const capped = all.length <= CAP ? all : all.slice(all.length - CAP);
