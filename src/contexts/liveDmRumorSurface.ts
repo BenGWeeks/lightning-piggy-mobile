@@ -1,4 +1,5 @@
-import { dmThreadId, protocolForWireKind } from '../utils/dmProtocol';
+import { getAppFormatLocale } from '../utils/appFormatLocale';
+import { dmThreadId, MARMOT_WELCOME_KIND, protocolForWireKind } from '../utils/dmProtocol';
 import type React from 'react';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
 import {
@@ -153,7 +154,7 @@ export function createLiveRumorSurfacer(
         // never leaks into the conversation list OR the notification body when
         // the sender isn't followed (mirrors the non-deferred path below). Plain
         // DM rumors pass through unchanged.
-        const deferredText = dmRowPreview(textForRumor(rumor), rumor.kind);
+        const deferredText = dmRowPreview(textForRumor(rumor), rumor.kind, getAppFormatLocale());
         followGateBuffer.defer({
           partnerPubkey: partnership.partnerPubkey,
           entry: {
@@ -164,7 +165,10 @@ export function createLiveRumorSurfacer(
             text: deferredText,
             wireKind: rumor.kind,
           },
-          notify: { title: 'New message', body: deferredText },
+          // A Marmot invite stays silent on replay too (#1269).
+          ...(rumor.kind !== MARMOT_WELCOME_KIND
+            ? { notify: { title: 'New message', body: deferredText } }
+            : {}),
         });
       }
       // Follows known: a stranger — nothing to see. Still hydrating: may be
@@ -195,7 +199,7 @@ export function createLiveRumorSurfacer(
       // For a structured rumor (order kind 16/17, or an NWC wallet share)
       // `wrapText` is non-human JSON; surface a readable, secret-free preview.
       // Plain DM rumors pass through unchanged.
-      text: dmRowPreview(wrapText, rumor.kind),
+      text: dmRowPreview(wrapText, rumor.kind, getAppFormatLocale()),
       wireKind: rumor.kind,
       // Inner rumor id (#857) — the delivery-store key for our own sent rows,
       // stable across the optimistic bubble + this live echo.
@@ -224,8 +228,9 @@ export function createLiveRumorSurfacer(
     // OS notification (#279) — only genuinely-fresh inbound (backlog has
     // old rumor timestamps and stays silent), never my own echo;
     // suppressed when the user is viewing this thread. claimWrapNotification
-    // dedupes vs the background watch running in the same JS context.
-    if (partnership.fromMe) nothingToSee();
+    // dedupes vs the background watch running in the same JS context. A
+    // Marmot invite stays silent: its NIP-17 row is hidden (#1269).
+    if (partnership.fromMe || rumor.kind === MARMOT_WELCOME_KIND) nothingToSee();
     else if (isFreshArrival(rumor.created_at)) {
       if (claimWrapNotification(wrapId) || placeholder)
         alertReplacing(dmThreadId(partnership.partnerPubkey, protocolForWireKind(rumor.kind)), () =>

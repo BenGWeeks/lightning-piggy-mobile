@@ -1,3 +1,4 @@
+import { useLocale } from '../contexts/LocaleContext';
 import { useMemo } from 'react';
 import type { WalletState } from '../types/wallet';
 import type { DmProtocol } from '../utils/dmProtocol';
@@ -8,6 +9,8 @@ import {
 } from '../utils/conversationItems';
 import { useResolvedDmDeliveries } from './useDmDeliveryStatuses';
 import { useOutgoingOrderHistory } from './useOutgoingOrderHistory';
+import { useFailedMarmotInvites } from './useFailedMarmotInvites';
+import { failedInvitesFrom } from '../utils/marmotInviteRows';
 
 /** Assemble the thread timeline with delivery ticks and verified payment amounts. */
 export function useConversationTimeline(
@@ -17,6 +20,7 @@ export function useConversationTimeline(
   partner: string,
   protocol: DmProtocol,
 ) {
+  const { formatLocale } = useLocale();
   const zapItems = useMemo(
     () => (protocol === 'nip17' ? buildZapItems(wallets, partner) : []),
     [wallets, partner, protocol],
@@ -25,8 +29,21 @@ export function useConversationTimeline(
   const resolvedMessages = useResolvedDmDeliveries(messages);
   // Targeted history read verifies payment requests for orders outside the loaded slice.
   const olderOrderAmounts = useOutgoingOrderHistory(owner, partner, resolvedMessages);
+  // Marmot invites from this partner that couldn't be opened (#1269).
+  const failedInvites = useFailedMarmotInvites(protocol === 'nip17' ? owner : null);
+  const partnerInvites = useMemo(
+    () => failedInvitesFrom(failedInvites, partner),
+    [failedInvites, partner],
+  );
   return useMemo(
-    () => buildConversationItems(resolvedMessages, zapItems, olderOrderAmounts),
-    [resolvedMessages, zapItems, olderOrderAmounts],
+    () =>
+      buildConversationItems(
+        resolvedMessages,
+        zapItems,
+        olderOrderAmounts,
+        partnerInvites,
+        formatLocale,
+      ),
+    [resolvedMessages, zapItems, olderOrderAmounts, partnerInvites, formatLocale],
   );
 }

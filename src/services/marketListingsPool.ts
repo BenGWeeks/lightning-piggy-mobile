@@ -1,5 +1,9 @@
 import { AbstractSimplePool } from 'nostr-tools/abstract-pool';
 import { validateEvent, type Event, type VerifiedEvent } from 'nostr-tools/pure';
+import { withRelayHealth } from './healthAwarePool';
+
+/** Feeds and honours the shared relay-health state (#1326). */
+class HealthAwareMarketPool extends withRelayHealth(AbstractSimplePool) {}
 
 /**
  * Relay pool for the WoT: Friends market snapshot ONLY, with structure-only
@@ -19,7 +23,7 @@ import { validateEvent, type Event, type VerifiedEvent } from 'nostr-tools/pure'
  * Connections are opened per snapshot and closed when the last running
  * snapshot finishes, so this never keeps duplicate sockets open.
  */
-const pool = new AbstractSimplePool({
+const pool: AbstractSimplePool = new HealthAwareMarketPool({
   verifyEvent: (event: Event): event is VerifiedEvent => validateEvent(event),
   // Same transport as the shared SimplePool (the global WebSocket).
   websocketImplementation: WebSocket,

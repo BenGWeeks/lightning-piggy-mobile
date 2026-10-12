@@ -129,11 +129,11 @@ export function satsToFiat(sats: number, btcPrice: number): number {
   return (sats / 100_000_000) * btcPrice;
 }
 
-export function formatFiat(amount: number, currency: FiatCurrency): string {
+export function formatFiat(amount: number, currency: FiatCurrency, locale?: string): string {
   if (amount > 0 && amount < 0.01) {
-    return `< ${currencySymbol(currency)}0.01`;
+    return `< ${formatFiat(0.01, currency, locale)}`;
   }
-  return amount.toLocaleString(undefined, {
+  return amount.toLocaleString(locale, {
     style: 'currency',
     currency,
     minimumFractionDigits: 2,
@@ -158,6 +158,7 @@ export function satsToFiatString(
   sats: number,
   btcPrice: number | null,
   currency: FiatCurrency,
+  locale?: string,
 ): string {
   // When the BTC price isn't known (cold-start offline, mid-fetch,
   // upstream API hiccup) we used to return an empty string and let
@@ -168,5 +169,5 @@ export function satsToFiatString(
   // glyph for a "blank value" placeholder (a full em-dash would feel
   // visually too wide next to a one-character currency symbol).
   if (btcPrice === null) return `${currencySymbol(currency)}–`;
-  return formatFiat(satsToFiat(sats, btcPrice), currency);
+  return formatFiat(satsToFiat(sats, btcPrice), currency, locale);
 }

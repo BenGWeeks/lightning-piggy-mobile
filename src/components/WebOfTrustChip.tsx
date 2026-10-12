@@ -9,11 +9,12 @@
 //   'all'     → ShieldOff (filter disabled — secret mode only)
 
 import React, { useMemo } from 'react';
-import { StyleSheet, Text, TouchableOpacity } from 'react-native';
+import { Text, TouchableOpacity } from 'react-native';
 import { ShieldCheck, ShieldOff, ShieldQuestion } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { WotTier } from '../services/wotSettingsService';
-import type { Palette } from '../styles/palettes';
+import { createWebOfTrustChipStyles } from '../styles/WebOfTrustChip.styles';
 
 interface Props {
   currentTier: WotTier;
@@ -21,20 +22,24 @@ interface Props {
   testID?: string;
 }
 
-const labelFor = (tier: WotTier): string => {
+// "WoT" stays as the short technical prefix; the tier name is translated
+// (same strings as the tier picker in WebOfTrustBottomSheet).
+const labelFor = (tier: WotTier, t: ReturnType<typeof useTranslation>): string => {
   switch (tier) {
     case 'friends':
-      return 'WoT: Friends';
+      return `WoT: ${t('webOfTrustBottomSheet.friendsTitle')}`;
     case 'fof':
-      return 'WoT: Friends+';
+      return `WoT: ${t('webOfTrustBottomSheet.friendsTitle')}+`;
     case 'all':
-      return 'WoT: All';
+      return `WoT: ${t('webOfTrustBottomSheet.allTitle')}`;
   }
 };
 
 const WebOfTrustChip: React.FC<Props> = ({ currentTier, onPress, testID }) => {
   const colors = useThemeColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const t = useTranslation();
+  const styles = useMemo(() => createWebOfTrustChipStyles(colors), [colors]);
+  const label = labelFor(currentTier, t);
   const Icon =
     currentTier === 'friends' ? ShieldCheck : currentTier === 'fof' ? ShieldQuestion : ShieldOff;
   return (
@@ -42,40 +47,13 @@ const WebOfTrustChip: React.FC<Props> = ({ currentTier, onPress, testID }) => {
       style={styles.chip}
       onPress={onPress}
       testID={testID ?? 'wot-chip'}
-      accessibilityLabel={`Web of Trust filter: ${labelFor(currentTier)}. Tap to change.`}
+      accessibilityLabel={`${t('webOfTrustBottomSheet.title')}: ${label}`}
       accessibilityRole="button"
     >
       <Icon size={14} color={colors.textHeader} strokeWidth={2.5} />
-      <Text style={styles.chipText}>{labelFor(currentTier)}</Text>
+      <Text style={styles.chipText}>{label}</Text>
     </TouchableOpacity>
   );
 };
-
-// Exported helper so the host screens can render the same label in
-// section-headers or banners without duplicating the casing.
-export const wotTierLabel = labelFor;
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    chip: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      paddingHorizontal: 12,
-      paddingVertical: 6,
-      borderRadius: 14,
-      // Yellow background distinguishes the safety chip from the pink
-      // filter chips. zapYellow is the warmest yellow in the palette
-      // (used for zap accents) — repurposed here as the WoT accent.
-      backgroundColor: 'rgba(255, 193, 7, 0.18)',
-      borderWidth: 1,
-      borderColor: colors.zapYellow,
-    },
-    chipText: {
-      fontSize: 13,
-      fontWeight: '600',
-      color: colors.textHeader,
-    },
-  });
 
 export default WebOfTrustChip;

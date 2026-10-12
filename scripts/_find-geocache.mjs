@@ -7,7 +7,6 @@ useWebSocketImplementation(WebSocket);
 
 const relays = [
   'wss://relay.damus.io',
-  'wss://relay.nostr.band',
   'wss://nos.lol',
   'wss://relay.primal.net',
   'wss://purplepag.es',

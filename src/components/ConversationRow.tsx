@@ -1,3 +1,4 @@
+import { useLocale } from '../contexts/LocaleContext';
 import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { Image } from 'expo-image';
@@ -19,6 +20,7 @@ interface Props {
 }
 
 const ConversationRow: React.FC<Props> = ({ summary, onPress }) => {
+  const { t, formatLocale } = useLocale();
   const colors = useThemeColors();
   const styles = useMemo(() => createConversationRowStyles(colors), [colors]);
   const [avatarError, setAvatarError] = useState(false);
@@ -28,8 +30,8 @@ const ConversationRow: React.FC<Props> = ({ summary, onPress }) => {
 
   // Pre-filter unsupported URLs (`.svg`, `.heic`, etc.) — see #189.
   const showImage = !!summary.picture && !avatarError && isSupportedImageUrl(summary.picture);
-  const timestamp = formatConversationTimestamp(summary.lastActivityAt);
-  const preview = conversationPreview(summary);
+  const timestamp = formatConversationTimestamp(summary.lastActivityAt, undefined, formatLocale);
+  const preview = conversationPreview(summary, formatLocale, t('groupConversationScreen.you'));
   // Bind the row's summary into the parent handler at the leaf so the
   // <TouchableOpacity> sees a stable callback per render, while the
   // parent still hands us a single handler.
@@ -89,7 +91,13 @@ const ConversationRow: React.FC<Props> = ({ summary, onPress }) => {
             {timestamp}
           </Text>
         </View>
-        <Text style={styles.preview} numberOfLines={1}>
+        <Text
+          style={styles.preview}
+          numberOfLines={1}
+          testID={
+            summary.marmotInviteFailed ? `conversation-invite-failed-${summary.id}` : undefined
+          }
+        >
           {preview}
         </Text>
       </View>

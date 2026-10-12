@@ -1,3 +1,4 @@
+import { getAppFormatLocale } from '../utils/appFormatLocale';
 import { useEffect, useRef } from 'react';
 import type React from 'react';
 
@@ -98,7 +99,7 @@ export function useMarmotDmInbound(
           touched = true;
           return {
             ...e,
-            text: dmRowPreview(c.edit.content, e.wireKind ?? 14),
+            text: dmRowPreview(c.edit.content, e.wireKind ?? 14, getAppFormatLocale()),
             renderText: c.edit.content,
           };
         });
@@ -281,7 +282,7 @@ export function useMarmotDmInbound(
           kind: 'dm',
           threadId: dmThreadId(row.conversation, 'marmot'),
           title: 'New message',
-          body: dmRowPreview(row.content, row.wireKind),
+          body: dmRowPreview(row.content, row.wireKind, getAppFormatLocale()),
           data: {
             conversationPubkey: row.conversation,
             conversationProtocol: 'marmot',

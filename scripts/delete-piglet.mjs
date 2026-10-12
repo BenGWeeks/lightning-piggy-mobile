@@ -43,12 +43,7 @@ const ROLE = pickRole({ defaultRole: 'BIG' });
 const { sk, pk } = resolvePiggy(ROLE);
 console.log(`Deleting as ${ROLE} Piggy.`);
 
-const RELAYS = [
-  'wss://relay.damus.io',
-  'wss://relay.nostr.band',
-  'wss://nos.lol',
-  'wss://relay.primal.net',
-];
+const RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net'];
 
 const now = Math.floor(Date.now() / 1000);
 

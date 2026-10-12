@@ -21,23 +21,27 @@ export function isReverseSwapNotPaid(error: unknown): boolean {
 // on-chain credit is stated as Boltz's locked amount LESS that fee rather than
 // the Lightning amount the user typed.
 
-export function reverseSwapClaimingMessage(onchainAmount: number): string {
+export function reverseSwapClaimingMessage(onchainAmount: number, locale?: string): string {
   return (
-    `Boltz locked ${onchainAmount.toLocaleString()} sats on-chain — claiming them to your wallet now.\n\n` +
+    `Boltz locked ${onchainAmount.toLocaleString(locale)} sats on-chain — claiming them to your wallet now.\n\n` +
     "Safe to close — you'll get a notification when the swap completes."
   );
 }
 
-export function reverseSwapCompleteMessage(onchainAmount: number, claimTxId: string): string {
+export function reverseSwapCompleteMessage(
+  onchainAmount: number,
+  claimTxId: string,
+  locale?: string,
+): string {
   return (
-    `Swap complete — ${onchainAmount.toLocaleString()} sats locked by Boltz, less the on-chain claim fee, ` +
+    `Swap complete — ${onchainAmount.toLocaleString(locale)} sats locked by Boltz, less the on-chain claim fee, ` +
     `claimed to your on-chain wallet.\n\nClaim tx ${claimTxId.slice(0, 10)}… is broadcast and ` +
     'will confirm on-chain (~10-60 min).'
   );
 }
 
-export function submarineSwapCompleteMessage(invoiceSats: number): string {
-  return `Swap complete — ${invoiceSats.toLocaleString()} sats delivered via Lightning.`;
+export function submarineSwapCompleteMessage(invoiceSats: number, locale?: string): string {
+  return `Swap complete — ${invoiceSats.toLocaleString(locale)} sats delivered via Lightning.`;
 }
 
 // Forward swap (on-chain → Lightning) status lines (#1179). Boltz pays the

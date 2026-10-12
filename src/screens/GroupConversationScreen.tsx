@@ -24,7 +24,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useTranslation } from '../contexts/LocaleContext';
+import { useLocale } from '../contexts/LocaleContext';
 import { createGroupConversationScreenStyles } from '../styles/GroupConversationScreen.styles';
 import { useGroups } from '../contexts/GroupsContext';
 import { useNostr, useNostrContacts, subscribeGroupMessages } from '../contexts/NostrContext';
@@ -110,7 +110,7 @@ const GroupConversationScreen: React.FC = () => {
   const navigation = useNavigation<GroupConversationNavigation>();
   const route = useRoute<GroupConversationRoute>();
   const colors = useThemeColors();
-  const t = useTranslation();
+  const { t, formatLocale } = useLocale();
   const styles = useMemo(() => createGroupConversationScreenStyles(colors), [colors]);
   const { getGroup, deleteGroup, secretMode, setSecretMode } = useGroups();
   const { pubkey: myPubkey, profile: myProfile, fetchProfilesForPubkeys } = useNostr();
@@ -453,7 +453,7 @@ const GroupConversationScreen: React.FC = () => {
       })),
     );
     const quoteFor = (m: GroupMessage): MessageQuote | undefined => {
-      const quote = resolveQuote(m.replyTo, byId);
+      const quote = resolveQuote(m.replyTo, byId, formatLocale);
       const parent = m.replyTo ? byId.get(m.replyTo) : undefined;
       return quote && parent && !parent.fromMe
         ? { ...quote, authorName: memberNameByPubkey.get(parent.senderPubkey) }
@@ -474,7 +474,7 @@ const GroupConversationScreen: React.FC = () => {
         wireKind: deriveGroupWireKind(m.text),
       }))
       .filter((m) => m.content.kind !== 'pollVote');
-  }, [messages, myPubkey, memberNameByPubkey]);
+  }, [messages, myPubkey, memberNameByPubkey, formatLocale]);
 
   // Text-encoded group polls: tallies + send / vote (see useGroupPolls).
   const { pollAggregates, handleSendPoll, handleVotePoll } = useGroupPolls(

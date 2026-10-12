@@ -26,12 +26,7 @@ import { getPublicKey, finalizeEvent } from 'nostr-tools/pure';
 
 // Mirror src/services/nostrService.ts → DEFAULT_RELAYS so we publish to
 // the same relays the app reads from.
-const RELAYS = [
-  'wss://relay.damus.io',
-  'wss://relay.nostr.band',
-  'wss://nos.lol',
-  'wss://relay.primal.net',
-];
+const RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net'];
 
 const BRANCH = env.BRANCH || 'main';
 const RAW_BASE = `https://raw.githubusercontent.com/BenGWeeks/lightning-piggy-mobile/${BRANCH}/.maestro/fixtures`;

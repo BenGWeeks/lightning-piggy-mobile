@@ -21,12 +21,7 @@ import { generateSecretKey, getPublicKey, finalizeEvent } from 'nostr-tools/pure
 
 // Must also be reachable from the emulator when it fetches. Matches the
 // DEFAULT_RELAYS list in src/services/nostrService.ts.
-const RELAYS = [
-  'wss://relay.damus.io',
-  'wss://relay.nostr.band',
-  'wss://nos.lol',
-  'wss://relay.primal.net',
-];
+const RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net'];
 
 const ENV_PATH = '.env';
 const ENV_KEY = 'TEST_ACCOUNT_B_NSEC';

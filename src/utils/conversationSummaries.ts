@@ -1,5 +1,5 @@
 import * as nip19 from 'nostr-tools/nip19';
-import { protocolForWireKind, type DmProtocol } from './dmProtocol';
+import { MARMOT_WELCOME_KIND, protocolForWireKind, type DmProtocol } from './dmProtocol';
 import type { WalletState, WalletTransaction } from '../types/wallet';
 import type { NostrContact, NostrProfile } from '../types/nostr';
 import { parsePoll, isPollVoteMessage } from './pollMessage';
@@ -32,6 +32,8 @@ export interface ConversationSummary {
   lastComment: string;
   anonymous: boolean;
   protocol?: DmProtocol;
+  /** The latest entry is a Marmot invite that couldn't be opened (#1269). */
+  marmotInviteFailed?: boolean;
 }
 
 function displayNameFor(
@@ -108,7 +110,11 @@ export function buildConversationSummaries(
  * Relative timestamp suited to a chat row ("2m", "1h", "Yesterday", "3 Apr").
  * `now` is injected for deterministic tests.
  */
-export function formatConversationTimestamp(tsSeconds: number, now: Date = new Date()): string {
+export function formatConversationTimestamp(
+  tsSeconds: number,
+  now: Date = new Date(),
+  locale?: string,
+): string {
   const ts = new Date(tsSeconds * 1000);
   const diffMs = now.getTime() - ts.getTime();
   const diffMin = Math.floor(diffMs / 60_000);
@@ -129,17 +135,22 @@ export function formatConversationTimestamp(tsSeconds: number, now: Date = new D
     ts.getDate() === yesterday.getDate();
   if (isYesterday) return 'Yesterday';
   const sameYear = ts.getFullYear() === now.getFullYear();
-  return ts.toLocaleDateString(undefined, {
+  return ts.toLocaleDateString(locale, {
     day: 'numeric',
     month: 'short',
     ...(sameYear ? {} : { year: 'numeric' }),
   });
 }
 
-/** Short preview line (last-message column). */
-export function conversationPreview(s: ConversationSummary): string {
-  const amount = s.lastAmountSats.toLocaleString();
-  const prefix = s.lastDirection === 'outgoing' ? 'You: ' : '';
+/** Short preview line (last-message column). `youLabel` is the translated
+ *  "You" for outgoing rows (callers pass `t('groupConversationScreen.you')`). */
+export function conversationPreview(
+  s: ConversationSummary,
+  locale?: string,
+  youLabel = 'You',
+): string {
+  const amount = s.lastAmountSats.toLocaleString(locale);
+  const prefix = s.lastDirection === 'outgoing' ? `${youLabel}: ` : '';
   const comment = s.lastComment.trim();
   if (comment) {
     // Don't leak the poll wire-format into the inbox row — show a friendly label.
@@ -273,6 +284,8 @@ export function buildDmSummaries(
       lastComment: entry.text,
       anonymous: false,
       protocol,
+      // Only failed invites reach here as kind 444 (see withMarmotInviteRows).
+      ...(entry.wireKind === MARMOT_WELCOME_KIND ? { marmotInviteFailed: true } : {}),
     });
   }
 

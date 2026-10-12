@@ -1002,10 +1002,11 @@ The watcher (`lightning-piggy-watcher` on black-panther) can only see gift
 wraps on relays that serve them to it. `relay.damus.io` requires NIP-42 AUTH to
 read kind 1059 and the watcher can only authenticate as itself, so DMs that
 land *only* on damus are invisible to it (its logs show `"reason":"auth-required"`
-for damus). DMs on nos.lol, relay.primal.net and the user's other public inbox
+for damus). DMs on the watcher's own relays (relay.primal.net, relay.ditto.pub,
+relay.coinos.io, relay.eu.whitenoise.chat) and the user's other public inbox
 relays (kind 10050, included in the registration) are seen. Damus also
-rate-limits, so the app publishes registrations to the watcher's other inbox
-relays and only falls back to damus when nothing else is listed.
+rate-limits, so it is no longer one of the watcher's relays and the app only
+publishes a registration there if the watcher's 10050 lists nothing else.
 
 To check a registration end to end:
 `ssh benweeks@black-panther.local 'docker logs lightning-piggy-watcher --since 10m'`
@@ -1060,3 +1061,82 @@ once their replacement is confirmed published.
 Account removal waits for pending key publication, requests deletion, and
 publishes an empty replacement for each local slot before wiping local state.
 Relay deletion is best-effort; a warning means old advertisements may remain.
+
+=== White Noise stops receiving a Marmot group after a rename or admin change
+
+Symptom: messages before a Lightning Piggy rename or admin change reach White
+Noise, but nothing after it does, and White Noise keeps the old name (#1309).
+
+Cause: OpenMLS (MDK, so White Noise) applies an `app_data_update` by removing
+the `app_data_dictionary` GroupContext extension and re-appending it, while
+ts-mls (marmot-ts) replaces it in place. marmot-ts creates groups with the
+dictionary first (MDK puts it last), so after the commit the two sides derive
+different GroupContexts. MDK rejects it with `Confirmation tag mismatch` and
+stays on the old epoch. White Noise release builds don't log this. MDK's own
+`wn`/`wnd` CLI built from the White Noise pin (`7692e266`) shows it in the
+`openmls::group::mls_group::staged_commit` trace.
+
+The reverse direction breaks the same way. When a White Noise admin renames
+an unaligned Lightning Piggy group, OpenMLS moves the dictionary to the end,
+and Lightning Piggy rejects White Noise's commit and stops receiving the group.
+
+Fix: every commit Lightning Piggy sends goes through `MarmotSession.sendIntent`,
+including the invite that founds a group. While a group isn't aligned, that
+commit also carries a GroupContextExtensions proposal that re-sends the same
+extensions with the dictionary last (`alignCommitForMdk` /
+`proposeAppDataDictionaryLast` in `marmotProposals.ts`). The decision is made
+on the group's state at the moment of submitting. So:
+
+* New groups are aligned by their first invite, before a White Noise admin can
+  commit, which covers both directions.
+* Existing groups are aligned by Lightning Piggy's next rename, admin change,
+  member removal or invite. Until then a White Noise admin's rename still splits
+  the Lightning Piggy members off.
+* A commit that would bundle a staged GroupContextExtensions or `app_data_update`
+  proposal skips the realign, which a later commit does instead.
+
+Groups White Noise created are already aligned. A group whose metadata commit
+was already rejected by either side stays split: start a new group.
+
+=== iOS simulator keeps loading the main Metro instead of a worktree's
+
+The iOS dev client reads its bundle host from React Native's `RCT_jsLocation`
+user default. Writing it with `xcrun simctl spawn booted defaults write
+<bundle-id> RCT_jsLocation …` while the app is running does not stick: the app
+flushes its in-memory value when it terminates and overwrites yours. Terminate
+the app first, then write the key into the app container's preferences by path,
+then launch:
+
+[source,bash]
+----
+# Target one simulator explicitly: with several booted, `booted` can pick any.
+UDID=<simulator UDID from `xcrun simctl list devices booted`>
+xcrun simctl terminate "$UDID" com.lightningpiggy.app.dev
+C="$(xcrun simctl get_app_container "$UDID" com.lightningpiggy.app.dev data)"
+xcrun simctl spawn "$UDID" defaults write "$C/Library/Preferences/com.lightningpiggy.app.dev" RCT_jsLocation 192.168.1.35:<port>
+xcrun simctl launch "$UDID" com.lightningpiggy.app.dev
+----
+
+Confirm with `ss -tn state established '( sport = :<port> )'` on the Metro host.
+Restore the shared port (8090) the same way when you finish.
+
+If screens then fail with "Could not load bundle" or "Cannot read property
+'reload' of undefined" (`hmr.ts`), the dev client's hot-reload socket dropped and
+lazy screen chunks can no longer load. A flaky link between the simulator host
+and Metro triggers this. Relaunch the app for a fresh socket, and use a
+dependency directory local to the worktree (see "Dynamic imports fail in an
+emulator worktree with shared dependencies").
+
+=== Maestro taps land on the tab bar or the Explore map
+
+The tab bar draws over the bottom of scrolling screens. `scrollUntilVisible` can
+report an input as visible while the tab bar covers it, and the following
+`tapOn` then hits the tab (the Explore tab pops its stack to the top). Add
+`centerElement: true` to `scrollUntilVisible` before tapping fields low on a
+form.
+
+On Explore, the map in the middle of the screen swallows Maestro's default
+centre swipe. Anchor the swipe on a section header instead, for example
+`swipe: { from: { text: "Places near you.*" }, direction: UP }`. Section
+headers expose a combined label ("Places near you — see all"), so match with a
+regex.

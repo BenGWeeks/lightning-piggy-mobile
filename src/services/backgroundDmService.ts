@@ -1,4 +1,5 @@
-import { dmThreadId, protocolForWireKind } from '../utils/dmProtocol';
+import { getAppFormatLocale } from '../utils/appFormatLocale';
+import { dmThreadId, MARMOT_WELCOME_KIND, protocolForWireKind } from '../utils/dmProtocol';
 /**
  * backgroundDmService — Amethyst-style realtime background DM notifications
  * for Android (#279 realtime upgrade).
@@ -325,8 +326,9 @@ async function handleWrap(input: {
 
   const partnership = partnerFromRumor(rumor, viewerPubkey);
   if (!partnership) return;
-  // Never notify for our own echoes (self-wraps / outgoing copies).
-  if (partnership.fromMe) return;
+  // Never notify for our own echoes (self-wraps / outgoing copies), nor for a
+  // Marmot invite: it's joined as its own chat, the NIP-17 row is hidden (#1269).
+  if (partnership.fromMe || rumor.kind === MARMOT_WELCOME_KIND) return;
   // Follow gate (mirrors the live sub's): a stranger must not be able to
   // spam OS notifications by gift-wrapping to our pubkey. Deliberately does
   // NOT claim the wrap id — the live sub's follow-gate defer buffer may
@@ -350,7 +352,7 @@ async function handleWrap(input: {
   // string) to a secret-free summary — a plain chat message passes through
   // unchanged. The notificationService additionally swaps in generic copy when
   // the user has lock-screen content disabled.
-  const preview = dmRowPreview(textForRumor(rumor), rumor.kind);
+  const preview = dmRowPreview(textForRumor(rumor), rumor.kind, getAppFormatLocale());
   const notifId = await fireMessageNotification({
     kind: 'dm',
     owner: viewerPubkey,

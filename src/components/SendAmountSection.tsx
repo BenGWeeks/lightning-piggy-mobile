@@ -4,7 +4,7 @@ import { satsToFiatString } from '../services/fiatService';
 import type { LnurlPayParams } from '../services/lnurlService';
 import { lnurlFixedAmountSats } from '../utils/sendSheetInput';
 import type { SendSheetStyles } from '../styles/SendSheet.styles';
-import { useTranslation } from '../contexts/LocaleContext';
+import { useLocale } from '../contexts/LocaleContext';
 
 interface Props {
   needsAmount: boolean;
@@ -40,7 +40,7 @@ const SendAmountSection: React.FC<Props> = ({
   styles,
   spinnerColor,
 }) => {
-  const t = useTranslation();
+  const { t, formatLocale } = useLocale();
   const lnurlFixedSats = lnurlFixedAmountSats(lnurlParams);
 
   if (needsAmount && lnurlFixedSats !== null) {
@@ -49,10 +49,10 @@ const SendAmountSection: React.FC<Props> = ({
     return (
       <View style={styles.amountSection}>
         <View style={styles.amountDisplay} testID="send-amount-fixed">
-          <Text style={styles.amountValue}>{lnurlFixedSats.toLocaleString()} sats</Text>
+          <Text style={styles.amountValue}>{lnurlFixedSats.toLocaleString(formatLocale)} sats</Text>
           {btcPrice ? (
             <Text style={styles.amountFiat}>
-              {satsToFiatString(lnurlFixedSats, btcPrice, currency)}
+              {satsToFiatString(lnurlFixedSats, btcPrice, currency, formatLocale)}
             </Text>
           ) : null}
         </View>
@@ -76,10 +76,12 @@ const SendAmountSection: React.FC<Props> = ({
           >
             {currentSats > 0 ? (
               <>
-                <Text style={styles.amountPickerValue}>{currentSats.toLocaleString()} sats</Text>
+                <Text style={styles.amountPickerValue}>
+                  {currentSats.toLocaleString(formatLocale)} sats
+                </Text>
                 {btcPrice ? (
                   <Text style={styles.amountPickerFiat}>
-                    {satsToFiatString(currentSats, btcPrice, currency)}
+                    {satsToFiatString(currentSats, btcPrice, currency, formatLocale)}
                   </Text>
                 ) : null}
               </>
@@ -92,7 +94,8 @@ const SendAmountSection: React.FC<Props> = ({
         ) : null}
         {lnurlParams ? (
           <Text style={styles.rangeText}>
-            {lnurlParams.minSats.toLocaleString()} – {lnurlParams.maxSats.toLocaleString()} sats
+            {lnurlParams.minSats.toLocaleString(formatLocale)} –{' '}
+            {lnurlParams.maxSats.toLocaleString(formatLocale)} sats
           </Text>
         ) : null}
       </View>
@@ -102,10 +105,12 @@ const SendAmountSection: React.FC<Props> = ({
   if (decodedAmountSats !== null && decodedAmountSats !== undefined) {
     return (
       <View style={styles.amountDisplay}>
-        <Text style={styles.amountValue}>{decodedAmountSats.toLocaleString()} sats</Text>
+        <Text style={styles.amountValue}>
+          {decodedAmountSats.toLocaleString(formatLocale)} sats
+        </Text>
         {btcPrice ? (
           <Text style={styles.amountFiat}>
-            {satsToFiatString(decodedAmountSats, btcPrice, currency)}
+            {satsToFiatString(decodedAmountSats, btcPrice, currency, formatLocale)}
           </Text>
         ) : null}
       </View>

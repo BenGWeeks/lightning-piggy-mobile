@@ -1,3 +1,4 @@
+import { useLocale } from '../contexts/LocaleContext';
 import React, { useCallback, useMemo, useState } from 'react';
 import { FlatList, Text, TouchableOpacity, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -27,6 +28,7 @@ import { createNotificationsScreenStyles } from '../styles/NotificationsScreen.s
  * when, never message text.
  */
 export default function NotificationsScreen() {
+  const { formatLocale } = useLocale();
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createNotificationsScreenStyles(colors), [colors]);
@@ -160,14 +162,18 @@ export default function NotificationsScreen() {
           title={title}
           picture={picture}
           subtitle={item.body ? `${label} · ${item.body}` : label}
-          time={formatConversationTimestamp(Math.floor(item.createdAt / 1000))}
+          time={formatConversationTimestamp(
+            Math.floor(item.createdAt / 1000),
+            undefined,
+            formatLocale,
+          )}
           iconColor={colors.brandPink}
           styles={styles}
           onPress={handlePress}
         />
       );
     },
-    [profileFor, groupFor, wrapTargets, t, colors.brandPink, styles, handlePress],
+    [profileFor, groupFor, wrapTargets, t, colors.brandPink, styles, handlePress, formatLocale],
   );
 
   return (

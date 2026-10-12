@@ -23,6 +23,8 @@ import {
   type MarmotMessageEvent,
 } from './marmotSession';
 import { createMemoryMarmotBackend, decodeMarmotValue, encodeMarmotValue } from './marmotStore';
+import { loadFailedInvites, parseWelcomeOutcome } from './marmotWelcomeOutcomes';
+import { getFailedMarmotInvitesSnapshot } from './marmotFailedInvitesStore';
 import { storedMarmotContent } from './marmotInbox';
 import { decryptMarmotMedia, marmotImetaTag } from './marmotMedia';
 import { parseImageMessage, parseVoiceNote } from '../utils/messageContent';
@@ -326,7 +328,58 @@ describe('MarmotSession (no WebCrypto)', () => {
     expect(await tablet.session.acceptWelcome(welcome)).toBeNull();
     expect(await tablet.backend.get('welcomes', welcome.id)).not.toBeNull(); // handled for good
     expect(await tablet.backend.keys('pendingWelcomes')).toEqual([]);
+    // It named the phone's key package (another slot): not a failure to show
+    // on the tablet (#1269).
+    expect(parseWelcomeOutcome(await tablet.backend.get('welcomes', welcome.id))).toMatchObject({
+      result: 'otherDevice',
+    });
+    expect(await loadFailedInvites(tablet.backend)).toEqual([]);
     for (const s of [alice.session, phone.session, tablet.session]) s.stop();
+  }, 60_000);
+
+  it('records an invite no key here opens, and not another device’s, as failed (#1269)', async () => {
+    const relay = makeRelay();
+    const alice = makeSession(relay);
+    const bob = makeSession(relay);
+    await Promise.all([alice.session.start(), bob.session.start()]);
+    await waitFor(() => relay.events.some((e) => e.kind === 30443 && e.pubkey === bob.pubkey));
+    await alice.session.getOrCreateDm(bob.pubkey);
+    const [welcome] = unwrapWelcomes(relay, bob);
+    // Bob's key is gone (reinstall / old invitation key) and so is its event.
+    const stale = makeSession(relay);
+    const lost = new MarmotSession({
+      pubkey: bob.pubkey,
+      signerType: 'nsec',
+      signer: bob.signer,
+      network: relay.network,
+      backend: stale.backend,
+      getWriteRelays: () => [RELAY],
+      getLookupRelays: () => [RELAY],
+    });
+    relay.events.splice(
+      0,
+      relay.events.length,
+      ...relay.events.filter((e) => !(e.kind === 30443 && e.pubkey === bob.pubkey)),
+    );
+    await lost.start();
+    // The relays answer (with this install's new key), just not the old key.
+    await waitFor(() => relay.events.some((e) => e.kind === 30443 && e.pubkey === bob.pubkey));
+    expect(await lost.acceptWelcome(welcome)).toBeNull();
+    expect(parseWelcomeOutcome(await stale.backend.get('welcomes', welcome.id))).toMatchObject({
+      result: 'failed',
+      reason: 'noKey',
+      sender: alice.pubkey,
+    });
+    const failed = [
+      { id: welcome.id, sender: alice.pubkey, createdAt: welcome.created_at, reason: 'noKey' },
+    ];
+    expect(await loadFailedInvites(stale.backend)).toEqual(failed);
+    // …and handed to the Messages UI for this account.
+    await waitFor(() => getFailedMarmotInvitesSnapshot().invites.length === 1);
+    expect(getFailedMarmotInvitesSnapshot()).toEqual({ owner: bob.pubkey, invites: failed });
+    lost.stop();
+    expect(getFailedMarmotInvitesSnapshot().owner).toBeNull(); // cleared with the session
+    for (const s of [alice.session, bob.session, stale.session]) s.stop();
   }, 60_000);
 
   it('round-trips the KV codec (bytes + bigint nested in objects)', () => {

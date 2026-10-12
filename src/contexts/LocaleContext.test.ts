@@ -1,5 +1,10 @@
 import { resolveLocale } from './LocaleContext';
-import { isSupportedLocale, SUPPORTED_LOCALES } from '../i18n';
+import {
+  intlLocaleFor,
+  isSupportedLocale,
+  SUPPORTED_LOCALES,
+  supportedLocaleForDevice,
+} from '../i18n';
 
 describe('isSupportedLocale (#137)', () => {
   it('accepts every code in SUPPORTED_LOCALES', () => {
@@ -10,7 +15,7 @@ describe('isSupportedLocale (#137)', () => {
 
   it('rejects a language the app has no catalogue for', () => {
     expect(isSupportedLocale('fr')).toBe(false);
-    expect(isSupportedLocale('de')).toBe(false);
+    expect(isSupportedLocale('it')).toBe(false);
     expect(isSupportedLocale('')).toBe(false);
   });
 });
@@ -31,5 +36,55 @@ describe('resolveLocale (#137)', () => {
   it('honours an explicit override regardless of the device language', () => {
     expect(resolveLocale('es', 'en')).toBe('es');
     expect(resolveLocale('en', 'es')).toBe('en');
+  });
+});
+
+describe('supportedLocaleForDevice', () => {
+  it('reduces a full device tag to its catalogue', () => {
+    expect(supportedLocaleForDevice('es-MX')).toBe('es');
+    expect(supportedLocaleForDevice('uk_UA')).toBe('uk');
+    expect(supportedLocaleForDevice('EN-gb')).toBe('en');
+  });
+
+  it('maps every Chinese tag to Simplified (Traditional falls back to it for now)', () => {
+    for (const tag of [
+      'zh',
+      'zh-CN',
+      'zh-Hans',
+      'zh-Hans-CN',
+      'zh_CN',
+      'zh-SG',
+      'zh-Hant-TW',
+      'zh-TW',
+    ]) {
+      expect(supportedLocaleForDevice(tag)).toBe('zh-Hans');
+    }
+    expect(resolveLocale('system', 'zh-Hans-CN')).toBe('zh-Hans');
+  });
+
+  it('returns null for a language without a catalogue, or no tag at all', () => {
+    expect(supportedLocaleForDevice('fr-FR')).toBeNull();
+    expect(supportedLocaleForDevice('')).toBeNull();
+    expect(supportedLocaleForDevice(null)).toBeNull();
+  });
+
+  it('lets resolveLocale follow a full device tag', () => {
+    expect(resolveLocale('system', 'es-419')).toBe('es');
+  });
+});
+
+describe('intlLocaleFor', () => {
+  it('formats Marathi amounts with Western digits and Indian grouping', () => {
+    // CLDR's default for mr is Devanagari digits (१२,३४,५६७).
+    expect((1234567).toLocaleString(intlLocaleFor('mr'))).toBe('12,34,567');
+  });
+
+  it('keeps Hindi on Western digits with Indian grouping too', () => {
+    expect((1234567).toLocaleString(intlLocaleFor('hi'))).toBe('12,34,567');
+  });
+
+  it('passes other catalogue codes straight through to Intl', () => {
+    expect(intlLocaleFor('de')).toBe('de');
+    expect((1234567).toLocaleString(intlLocaleFor('de'))).toBe('1.234.567');
   });
 });

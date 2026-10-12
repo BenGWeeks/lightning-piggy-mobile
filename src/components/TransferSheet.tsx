@@ -1,3 +1,4 @@
+import { formatTransferWalletLabel, formatTransferProfileLabel } from '../utils/transferLabels';
 import TransferSwapQuoteStatus from './TransferSwapQuoteStatus';
 import { useTransferSwapFees } from '../utils/useTransferSwapFees';
 import { useTransferFeeEstimate } from '../hooks/useTransferFeeEstimate';
@@ -31,7 +32,7 @@ import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useNostr, OWN_PROFILE_CACHE_KEY_BASE } from '../contexts/NostrContext';
 import { perAccountKey } from '../services/perAccountStorage';
 import type { NostrProfile } from '../types/nostr';
-import { useTranslation } from '../contexts/LocaleContext';
+import { useLocale } from '../contexts/LocaleContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createTransferSheetStyles } from '../styles/TransferSheet.styles';
 import { satsToFiatString } from '../services/fiatService';
@@ -53,7 +54,6 @@ import {
 } from '../utils/swapHandoff';
 import * as lnurlService from '../services/lnurlService';
 import { getWalletListForPubkey } from '../services/crossProfileWalletService';
-import * as nip19 from 'nostr-tools/nip19';
 import AmountEntryScreen from './AmountEntryScreen';
 import TransferProgress from './TransferProgress';
 import {
@@ -74,7 +74,7 @@ type Step = 'main' | 'amount';
 
 const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   const colors = useThemeColors();
-  const t = useTranslation();
+  const { t, formatLocale } = useLocale();
   const styles = useMemo(() => createTransferSheetStyles(colors), [colors]);
   const {
     wallets,
@@ -445,7 +445,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         const confirmed = await new Promise<boolean | null>((resolve) =>
           Alert.alert(
             'Use Lightning wallet instead?',
-            `"${altLnWallet.alias}" has ${altLnWallet.balance?.toLocaleString()} sats. Sending from a Lightning wallet avoids Boltz swap fees.`,
+            `"${altLnWallet.alias}" has ${altLnWallet.balance?.toLocaleString(formatLocale)} sats. Sending from a Lightning wallet avoids Boltz swap fees.`,
             [
               { text: 'Cancel', style: 'cancel', onPress: () => resolve(null) },
               { text: 'Use Lightning', onPress: () => resolve(true) },
@@ -474,7 +474,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         const confirmed = await new Promise<boolean | null>((resolve) =>
           Alert.alert(
             'Use on-chain wallet instead?',
-            `"${altOnchainWallet.alias}" has ${altOnchainWallet.balance?.toLocaleString()} sats. Sending from an on-chain wallet avoids Boltz swap fees.`,
+            `"${altOnchainWallet.alias}" has ${altOnchainWallet.balance?.toLocaleString(formatLocale)} sats. Sending from an on-chain wallet avoids Boltz swap fees.`,
             [
               { text: 'Cancel', style: 'cancel', onPress: () => resolve(null) },
               { text: 'Use on-chain', onPress: () => resolve(true) },
@@ -495,14 +495,14 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       if (currentSats < cachedBoltzFees.minAmount) {
         Alert.alert(
           'Amount Too Low',
-          `Boltz swap minimum is ${cachedBoltzFees.minAmount.toLocaleString()} sats.`,
+          `Boltz swap minimum is ${cachedBoltzFees.minAmount.toLocaleString(formatLocale)} sats.`,
         );
         return;
       }
       if (currentSats > cachedBoltzFees.maxAmount) {
         Alert.alert(
           'Amount Too High',
-          `Boltz swap maximum is ${cachedBoltzFees.maxAmount.toLocaleString()} sats.`,
+          `Boltz swap maximum is ${cachedBoltzFees.maxAmount.toLocaleString(formatLocale)} sats.`,
         );
         return;
       }
@@ -515,11 +515,13 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     // an amount that would have been rejected anyway.
     if (shouldConfirmSend(currentSats, await getSendThreshold(activePubkey))) {
       const fiat =
-        btcPrice !== null ? ` (${satsToFiatString(currentSats, btcPrice, currency)})` : '';
+        btcPrice !== null
+          ? ` (${satsToFiatString(currentSats, btcPrice, currency, formatLocale)})`
+          : '';
       const confirmed = await new Promise<boolean>((resolve) => {
         Alert.alert(
           'Confirm large move',
-          `You're about to move ${currentSats.toLocaleString()} sats${fiat} from ${source.alias} to ${dest.alias}. Tap Confirm to proceed.`,
+          `You're about to move ${currentSats.toLocaleString(formatLocale)} sats${fiat} from ${source.alias} to ${dest.alias}. Tap Confirm to proceed.`,
           [
             { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
             { text: 'Confirm', onPress: () => resolve(true) },
@@ -595,7 +597,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         const params = await lnurlService.resolveLightningAddress(destWallet.lightningAddress);
         if (currentSats < params.minSats || currentSats > params.maxSats) {
           throw new Error(
-            `Destination accepts ${params.minSats.toLocaleString()}-${params.maxSats.toLocaleString()} sats.`,
+            `Destination accepts ${params.minSats.toLocaleString(formatLocale)}-${params.maxSats.toLocaleString(formatLocale)} sats.`,
           );
         }
         // Respect the destination LNURL's commentAllowed budget — some
@@ -661,12 +663,12 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                 stage = next;
                 if (next !== 'claimSwap') return;
                 if (sessionRef.current === iifeSession) {
-                  setProgressMsg(reverseSwapClaimingMessage(onchainAmount));
+                  setProgressMsg(reverseSwapClaimingMessage(onchainAmount, formatLocale));
                 }
                 Toast.show({
                   type: 'info',
                   text1: 'Boltz locked funds on-chain',
-                  text2: `Claiming ${onchainAmount.toLocaleString()} sats…`,
+                  text2: `Claiming ${onchainAmount.toLocaleString(formatLocale)} sats…`,
                   position: 'top',
                   visibilityTime: 5000,
                 });
@@ -675,12 +677,12 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
             // Final status: replace the "underway" copy in THIS sheet session
             // only — a reopened sheet belongs to a different transfer.
             if (sessionRef.current === iifeSession) {
-              setProgressMsg(reverseSwapCompleteMessage(onchainAmount, claimed.txId));
+              setProgressMsg(reverseSwapCompleteMessage(onchainAmount, claimed.txId, formatLocale));
             }
             Toast.show({
               type: 'success',
               text1: 'Swap complete',
-              text2: `${onchainAmount.toLocaleString()} sats (less claim fee) claimed on-chain. Claim tx ${claimed.txId.slice(0, 10)}…`,
+              text2: `${onchainAmount.toLocaleString(formatLocale)} sats (less claim fee) claimed on-chain. Claim tx ${claimed.txId.slice(0, 10)}…`,
               position: 'top',
               visibilityTime: 10000,
             });
@@ -782,15 +784,18 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         // `expectedAmount`, which includes Boltz's fees (#1179).
         const submarineSession = sessionRef.current;
         const submarineWallets = isCrossProfile ? [sourceId] : [sourceId, destId];
-        void watchForwardSwap({
-          swapId: swap.id,
-          invoiceSats: currentSats,
-          onMessage: (msg) => {
-            if (sessionRef.current === submarineSession) setProgressMsg(msg);
+        void watchForwardSwap(
+          {
+            swapId: swap.id,
+            invoiceSats: currentSats,
+            onMessage: (msg) => {
+              if (sessionRef.current === submarineSession) setProgressMsg(msg);
+            },
+            refreshWallets: () => refreshWallets(submarineWallets),
+            onFailed: (msg) => promptSubmarineRefund(swap, sourceId, msg, undefined, formatLocale),
           },
-          refreshWallets: () => refreshWallets(submarineWallets),
-          onFailed: (msg) => promptSubmarineRefund(swap, sourceId, msg),
-        });
+          formatLocale,
+        );
 
         // Terminal "underway" state — user closes when ready. Background
         // task will toast on completion/failure.
@@ -824,8 +829,8 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       // early after handing off to the background task.
       const settleMsg =
         transferType === 'onchain-to-onchain'
-          ? `${currentSats.toLocaleString()} sats sent. On-chain funds will arrive after confirmation (~10-60 min).`
-          : `${currentSats.toLocaleString()} sats moved.`;
+          ? `${currentSats.toLocaleString(formatLocale)} sats sent. On-chain funds will arrive after confirmation (~10-60 min).`
+          : `${currentSats.toLocaleString(formatLocale)} sats moved.`;
 
       Alert.alert('Move Complete', settleMsg, [{ text: 'OK', onPress: onClose }]);
     } catch (error) {
@@ -839,7 +844,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         const fee = boltzService.calculateSwapFee(currentSats, error.quote);
         Alert.alert(
           t('sendSheet.quoteChangedTitle'),
-          t('sendSheet.moveQuoteChanged', { fee: fee.toLocaleString() }),
+          t('sendSheet.moveQuoteChanged', { fee: fee.toLocaleString(formatLocale) }),
         );
         return;
       }
@@ -944,16 +949,6 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     !belowBoltzMin &&
     !crossProfileLnNoAddress;
 
-  // Renders a label for either a live WalletState (current profile —
-  // includes balance) or a bare WalletMetadata (other profile — no
-  // live balance available without loading another NWC client).
-  const renderWalletLabel = (w: WalletState | WalletMetadata) => {
-    const balance = 'balance' in w ? w.balance : null;
-    const balanceStr = balance !== null ? ` · ${balance.toLocaleString()} sats` : '';
-    const typeStr = w.walletType === 'onchain' ? 'on-chain' : 'lightning';
-    return `${w.alias} (${typeStr})${balanceStr}`;
-  };
-
   // Sorted profile list for the Profile dropdown — active profile
   // first (so its row sits at the top, matching AccountSwitcherSheet),
   // then most-recently-used. Profile dropdown only renders when there
@@ -966,25 +961,6 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   });
 
   const showProfileDropdown = profileOptions.length > 1;
-
-  const renderProfileLabel = (pk: string): string => {
-    const cachedName = profileNameById[pk];
-    if (pk === activePubkey) {
-      // Mark the active profile so the user knows which row signs
-      // the transfer; surface its actual name when we have it
-      // cached so the dropdown reads e.g. "Big Piggy · default"
-      // instead of an opaque "This profile (default)" that hides
-      // who that is.
-      return cachedName ? `${cachedName} · default` : 'This profile (default)';
-    }
-    if (cachedName) return cachedName;
-    try {
-      const npub = nip19.npubEncode(pk);
-      return `${npub.slice(0, 14)}…${npub.slice(-6)}`;
-    } catch {
-      return `${pk.slice(0, 8)}…${pk.slice(-4)}`;
-    }
-  };
 
   return (
     <BottomSheetModal
@@ -1061,7 +1037,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                     accessibilityLabel="Source wallet"
                   >
                     <Text style={styles.dropdownText}>
-                      {source ? renderWalletLabel(source) : 'Select wallet'}
+                      {source ? formatTransferWalletLabel(source, formatLocale) : 'Select wallet'}
                     </Text>
                     <Text style={styles.dropdownArrow}>
                       {sourceDropdownOpen ? '\u25B2' : '\u25BC'}
@@ -1093,7 +1069,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                               sourceId === w.id && styles.dropdownItemTextActive,
                             ]}
                           >
-                            {renderWalletLabel(w)}
+                            {formatTransferWalletLabel(w, formatLocale)}
                           </Text>
                         </TouchableOpacity>
                       ))}
@@ -1125,7 +1101,11 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                       accessibilityLabel="Destination profile"
                     >
                       <Text style={styles.dropdownText}>
-                        {renderProfileLabel(selectedProfilePubkey ?? activePubkey ?? '')}
+                        {formatTransferProfileLabel(
+                          selectedProfilePubkey ?? activePubkey ?? '',
+                          activePubkey,
+                          profileNameById,
+                        )}
                       </Text>
                       <Text style={styles.dropdownArrow}>
                         {profileDropdownOpen ? '\u25B2' : '\u25BC'}
@@ -1161,7 +1141,11 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                                   isSelected && styles.dropdownItemTextActive,
                                 ]}
                               >
-                                {renderProfileLabel(id.pubkey)}
+                                {formatTransferProfileLabel(
+                                  id.pubkey,
+                                  activePubkey,
+                                  profileNameById,
+                                )}
                               </Text>
                             </TouchableOpacity>
                           );
@@ -1186,7 +1170,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                     accessibilityLabel="Destination wallet"
                   >
                     <Text style={styles.dropdownText}>
-                      {dest ? renderWalletLabel(dest) : 'Select wallet'}
+                      {dest ? formatTransferWalletLabel(dest, formatLocale) : 'Select wallet'}
                     </Text>
                     <Text style={styles.dropdownArrow}>
                       {destDropdownOpen ? '\u25B2' : '\u25BC'}
@@ -1213,7 +1197,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                               destId === w.id && styles.dropdownItemTextActive,
                             ]}
                           >
-                            {renderWalletLabel(w)}
+                            {formatTransferWalletLabel(w, formatLocale)}
                           </Text>
                         </TouchableOpacity>
                       ))}
@@ -1232,11 +1216,11 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                   {currentSats > 0 ? (
                     <>
                       <Text style={styles.amountPickerValue}>
-                        {currentSats.toLocaleString()} sats
+                        {currentSats.toLocaleString(formatLocale)} sats
                       </Text>
                       {btcPrice ? (
                         <Text style={styles.amountPickerFiat}>
-                          {satsToFiatString(currentSats, btcPrice, currency)}
+                          {satsToFiatString(currentSats, btcPrice, currency, formatLocale)}
                         </Text>
                       ) : null}
                     </>
@@ -1278,7 +1262,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                 {/* Boltz minimum amount warning */}
                 {belowBoltzMin && (
                   <Text style={styles.warningText}>
-                    Boltz swaps require a minimum of {boltzMin?.toLocaleString()} sats.
+                    Boltz swaps require a minimum of {boltzMin?.toLocaleString(formatLocale)} sats.
                   </Text>
                 )}
 

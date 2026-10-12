@@ -1,3 +1,4 @@
+import { getAppFormatLocale } from '../utils/appFormatLocale';
 import { useAccountState } from './useAccountState';
 import { useCallback, useEffect, useMemo } from 'react';
 
@@ -218,7 +219,7 @@ export function useMarmotGroups(
       if (!fromMe && rumor.created_at >= openedAtSec - NOTIFY_SKEW_SEC) {
         // Redacted like the DM inbox: a photo's stored text embeds its keys.
         const stored = storedMarmotContent(rumor, event.mediaKeys);
-        const text = dmRowPreview(stored.text, stored.kind);
+        const text = dmRowPreview(stored.text, stored.kind, getAppFormatLocale());
         void fireMessageNotification({
           kind: 'group',
           threadId: group.id,

@@ -7,6 +7,7 @@ import type { Event as NostrEvent } from 'nostr-tools';
 import { MarmotWelcomeDeliveryError } from './marmotInvitees';
 import * as pushWake from './marmotPushWake';
 import { MARMOT_CHAT_KIND, MarmotSession, buildMarmotRumor } from './marmotSession';
+import { loadFailedInvites, parseWelcomeOutcome } from './marmotWelcomeOutcomes';
 import {
   RELAY,
   makeInstall,
@@ -74,6 +75,16 @@ describe('MarmotSession multi-device invites (no WebCrypto)', () => {
       expect(joined).toMatchObject({ id: dm.id, isDm: true, memberPubkeys: [big.pubkey] });
       // The other device's copy is then handled, not retried forever.
       expect(await device.session.acceptWelcome(welcomes[1])).toBeNull();
+      // Neither copy shows as a failed invite (#1269). The other copy names
+      // the other device's key package — which that device may already have
+      // rotated away after joining, so it can't always be told apart from an
+      // old key; the shared commit fingerprint with the joined copy hides it.
+      const outcome = async (i: number) =>
+        parseWelcomeOutcome(await device.backend.get('welcomes', welcomes[i].id));
+      const [first, second] = [await outcome(0), await outcome(1)];
+      expect(first?.result).toBe('joined');
+      expect(second?.commit).toBe(first?.commit);
+      expect(await loadFailedInvites(device.backend)).toEqual([]);
     }
 
     // Both devices reply; Big sees one conversation, both attributed to Little.

@@ -342,6 +342,9 @@ describe('dmDb', () => {
         "GROUP BY conversation, COALESCE(protocol, CASE WHEN wire_kind = 4 THEN 'nip04' ELSE 'nip17' END)",
       );
       expect(sql).toContain('WHERE m.owner = ?');
+      // Marmot invite gift wraps never become a thread's latest (#1269).
+      expect(sql).toContain('WHERE owner = ? AND wire_kind != 444');
+      expect(sql).toContain('WHERE m.owner = ? AND m.wire_kind != 444');
       expect(params).toEqual([OWNER, OWNER]);
     });
   });
