@@ -1,0 +1,10 @@
+10-12 23:42:47.311 10331 10416 I ReactNativeJS: [PerfBlock] chat messages rendered: 425ms
+10-12 23:42:47.312 10331 10416 I ReactNativeJS: [PerfBlock] chat reactions rendered: 426ms
+10-12 23:42:55.907 10331 10416 I ReactNativeJS: [PerfBlock] chat messages rendered: 442ms
+10-12 23:42:55.909 10331 10416 I ReactNativeJS: [PerfBlock] chat reactions rendered: 444ms
+10-12 23:43:03.661 10331 10416 I ReactNativeJS: [PerfBlock] chat messages rendered: 439ms
+10-12 23:43:03.664 10331 10416 I ReactNativeJS: [PerfBlock] chat reactions rendered: 443ms
+10-12 23:43:10.561 10331 10416 I ReactNativeJS: [PerfBlock] chat messages rendered: 477ms
+10-12 23:43:10.563 10331 10416 I ReactNativeJS: [PerfBlock] chat reactions rendered: 479ms
+10-12 23:43:17.755 10331 10416 I ReactNativeJS: [PerfBlock] chat messages rendered: 535ms
+10-12 23:43:17.757 10331 10416 I ReactNativeJS: [PerfBlock] chat reactions rendered: 538ms

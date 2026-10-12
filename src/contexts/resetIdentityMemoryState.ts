@@ -1,3 +1,4 @@
+import { clearConversationReactions } from '../utils/conversationReactionCache';
 import { useCallback, useLayoutEffect } from 'react';
 import type { NostrContact, NostrProfile } from '../types/nostr';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
@@ -22,6 +23,7 @@ export interface IdentityMemoryState {
  * account), and the NIP-04 plaintext cache.
  */
 export function dropIdentityKeyMaterial(): void {
+  clearConversationReactions();
   clearMemoisedSecretKey();
   void stopNativeDmEngineGlobal();
   nip04PlaintextCache.clear();

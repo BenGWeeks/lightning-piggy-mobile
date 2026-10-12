@@ -1,8 +1,17 @@
+import {
+  cacheConversationReactions,
+  readConversationReactions,
+  reactionCacheGeneration,
+} from '../utils/conversationReactionCache';
 import { renderHook } from '@testing-library/react-native';
 import { clearDecryptedMediaMemory, setDecryptedMediaOwner } from '../services/decryptedMediaCache';
 import { stopNativeDmEngineGlobal } from './nativeDmEngine';
 import { clearMemoisedSecretKey, nip04PlaintextCache } from './nostrSecretKeyCache';
-import { useIdentityMemoryReset, type IdentityMemoryState } from './resetIdentityMemoryState';
+import {
+  dropIdentityKeyMaterial,
+  useIdentityMemoryReset,
+  type IdentityMemoryState,
+} from './resetIdentityMemoryState';
 
 jest.mock('../services/decryptedMediaCache', () => ({
   clearDecryptedMediaMemory: jest.fn(),
@@ -84,3 +93,27 @@ describe('decrypted-media owner (#1241)', () => {
     expect(setDecryptedMediaOwner).toHaveBeenCalledWith(A);
   });
 });
+
+it.each(['switch', 'logout'])(
+  'clears reaction snapshots and invalidates old writers on %s',
+  (action) => {
+    const { result } = setup(A);
+    const token = reactionCacheGeneration();
+    const key = `${A}:nip17:peer`;
+    const snapshot = {
+      records: [
+        { id: 'reaction', reactorPubkey: B, targetEventId: 'message', emoji: '👍', createdAt: 1 },
+      ],
+      retractions: new Map(),
+    };
+    cacheConversationReactions(key, snapshot, token);
+    if (action === 'switch') result.current.activateLoginPubkey(B);
+    else {
+      // The provider logout calls this same key-material teardown.
+      dropIdentityKeyMaterial();
+    }
+    expect(readConversationReactions(key).records).toEqual([]);
+    cacheConversationReactions(key, snapshot, token);
+    expect(readConversationReactions(key).records).toEqual([]);
+  },
+);

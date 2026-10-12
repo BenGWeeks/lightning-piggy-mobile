@@ -1,9 +1,19 @@
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 import { useGroupMessageActions } from './useGroupMessageActions';
 import { messageEditDelete } from '../utils/messageEditDelete';
+import {
+  cacheConversationReactions,
+  reactionCacheGeneration,
+} from '../utils/conversationReactionCache';
 
 let mockFocused = true;
-jest.mock('@react-navigation/native', () => ({ useIsFocused: () => mockFocused }));
+jest.mock('@react-navigation/native', () => ({
+  useIsFocused: () => mockFocused,
+  useFocusEffect: (effect: () => void) =>
+    jest
+      .requireActual<typeof import('react')>('react')
+      .useEffect(() => (mockFocused ? effect() : undefined), [effect, mockFocused]),
+}));
 const mockT = (key: string) => key;
 jest.mock('../contexts/LocaleContext', () => ({ useTranslation: () => mockT }));
 jest.mock('../components/BrandedAlert', () => ({ Alert: { alert: jest.fn() } }));
@@ -38,6 +48,11 @@ const reaction = (id: string, pubkey: string) => ({
   tags: [['e', target]],
 });
 beforeEach(() => {
+  cacheConversationReactions(
+    `${me}:${me}:group`,
+    { records: [], retractions: new Map() },
+    reactionCacheGeneration(),
+  );
   jest.clearAllMocks();
   mockFocused = true;
   mockFetch.mockResolvedValue([]);
