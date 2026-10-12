@@ -1,5 +1,6 @@
 import {
   completeReverseSwap,
+  deferSwapRefresh,
   SWAP_REFRESH_DELAY_MS,
   SWAP_COMPLETE_TOAST_MS,
 } from './swapCompletion';
@@ -30,6 +31,7 @@ it('completes the claim and follows settlement without awaiting or starting a bl
       t: (key, options) => i18n.t(key, options),
       refresh,
       followSettle,
+      deferRefresh: deferSwapRefresh,
     }),
   ).toBeUndefined();
   expect(markSwapPlaceholdersResolved).toHaveBeenCalledWith('swap');
@@ -59,7 +61,27 @@ it.each(['throw', 'reject'])('contains a deferred refresh failure (%s)', async (
     t: String,
     refresh,
     followSettle: jest.fn(),
+    deferRefresh: deferSwapRefresh,
   });
   await jest.advanceTimersByTimeAsync(SWAP_REFRESH_DELAY_MS);
   expect(refresh).toHaveBeenCalledTimes(1);
+});
+
+it('cancels even after the timer fires but before the refresh microtask starts', async () => {
+  const refresh = jest.fn(async () => {});
+  const cancel = deferSwapRefresh(refresh);
+  jest.advanceTimersByTime(SWAP_REFRESH_DELAY_MS);
+  cancel();
+  await Promise.resolve();
+  expect(refresh).not.toHaveBeenCalled();
+});
+
+it('checks identity when the deferred refresh actually starts', async () => {
+  const refresh = jest.fn(async () => {});
+  let current = true;
+  deferSwapRefresh(refresh, () => current);
+  jest.advanceTimersByTime(SWAP_REFRESH_DELAY_MS);
+  current = false;
+  await Promise.resolve();
+  expect(refresh).not.toHaveBeenCalled();
 });

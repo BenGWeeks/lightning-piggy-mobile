@@ -27,7 +27,8 @@ import { FiatCurrency } from '../services/fiatService';
 import { WalletLiveContext } from './WalletLiveContext';
 import { useOnchainIncomingPoll } from './useOnchainIncomingPoll';
 import { useWalletIdentityHydration } from './useWalletIdentityHydration';
-import { hydrateWalletReceipts } from './hydrateWalletReceipts';
+import { useDeferredSwapRefresh } from './useDeferredSwapRefresh';
+import { hydrateWalletReceipts, persistSeenReceipts } from './hydrateWalletReceipts';
 import { useIncomingReceiveAnnouncer } from './useIncomingReceiveAnnouncer';
 import { useWalletTransactionsFetch } from './useWalletTransactionsFetch';
 import type { IncomingPayment } from './incomingPayment';
@@ -136,6 +137,7 @@ interface WalletContextType {
     signalOrOptions?: AbortSignal | nwcService.PayInvoiceOptions,
   ) => Promise<{ preimage: string }>;
   refreshBalanceForWallet: (walletId: string) => Promise<void>;
+  deferSwapRefresh: (refresh: () => Promise<unknown>) => void;
   /** Resolves `true` when a fresh list was committed, `false` on failure (never rejects). */
   fetchTransactionsForWallet: (walletId: string, opts?: { force?: boolean }) => Promise<boolean>;
 
@@ -201,14 +203,6 @@ const WalletContext = createContext<WalletContextType | undefined>(undefined);
 // consumer hook so the public surface stays at one path, like `useWallet`.
 export { useWalletLive } from './WalletLiveContext';
 
-// Persist a wallet's announced-receipt hashes so a payment is announced once,
-// EVER — not once per JS session. The in-memory set resets on every cold start
-// / Metro re-eval, and the tx cache it seeds from can be stale (missing a
-// just-arrived receive), so without this a payment re-announced on reload (#653).
-function persistSeenReceipts(walletId: string, seen: ReadonlySet<string>): void {
-  AsyncStorage.setItem(`seenReceipts_${walletId}`, JSON.stringify([...seen])).catch(() => {});
-}
-
 export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   if (!__walletProviderFirstRenderLogged) {
     __walletProviderFirstRenderLogged = true;
@@ -220,6 +214,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [isLoading, setIsLoading] = useState(true);
   const [walletsHydrated, setWalletsHydrated] = useState(false);
   const { currency, setCurrency, btcPrice } = useAccountCurrency();
+  const deferSwapRefresh = useDeferredSwapRefresh();
   const [lastIncomingPayment, setLastIncomingPayment] = useState<IncomingPayment | null>(null);
   // Per-wallet last-seen balance. NOT used to detect/attribute receives any
   // more (that's done by transaction hash — see seenReceiptsRef); it's only a
@@ -1759,6 +1754,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       makeInvoiceForWallet,
       payInvoiceForWallet,
       refreshBalanceForWallet,
+      deferSwapRefresh,
       fetchTransactionsForWallet,
       addPendingTransaction,
       getReceiveAddress,
@@ -1795,6 +1791,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       makeInvoiceForWallet,
       payInvoiceForWallet,
       refreshBalanceForWallet,
+      deferSwapRefresh,
       fetchTransactionsForWallet,
       addPendingTransaction,
       getReceiveAddress,

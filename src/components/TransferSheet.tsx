@@ -23,7 +23,7 @@ import {
 import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Toast from './BrandedToast';
-import { completeReverseSwap } from '../utils/swapCompletion';
+import { completeReverseSwap, createSwapWalletRefresher } from '../utils/swapCompletion';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import { promptSubmarineRefund } from '../utils/submarineRefund';
 import { watchForwardSwap } from '../utils/forwardSwapWatch';
@@ -77,22 +77,19 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   const colors = useThemeColors();
   const { t, formatLocale } = useLocale();
   const styles = useMemo(() => createTransferSheetStyles(colors), [colors]);
+  const wallet = useWallet();
   const {
     wallets,
     activeWalletId,
     currency,
     makeInvoiceForWallet,
     payInvoiceForWallet,
-    refreshBalanceForWallet,
+    deferSwapRefresh,
     fetchTransactionsForWallet,
     addPendingTransaction,
-  } = useWallet();
+  } = wallet;
   const followSwapSettle = useSwapSettleFollowUp();
-  // Balance + history for each wallet a move touched. Cross-profile
-  // destinations belong to another profile's wallet list (the refreshers
-  // would no-op or error), so callers pass only the source for those.
-  const refreshWallets = (ids: string[]) =>
-    Promise.all(ids.flatMap((id) => [refreshBalanceForWallet(id), fetchTransactionsForWallet(id)]));
+  const refreshWallets = createSwapWalletRefresher(wallet);
   const { btcPrice } = useWalletLive();
   const { identities, pubkey: activePubkey } = useNostr();
 
@@ -687,6 +684,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
               amount: onchainAmount.toLocaleString(formatLocale),
               txId: claimed.txId,
               t,
+              deferRefresh: deferSwapRefresh,
               refresh: () => refreshWallets(destIsCrossProfile ? [sourceId] : [sourceId, destId]),
               followSettle: () => followSwapSettle(sourceId, paymentHashFromBolt11(swap.invoice)),
             });
