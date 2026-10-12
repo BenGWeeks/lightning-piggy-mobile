@@ -8,18 +8,25 @@ jest.mock('../hooks/useMarketPreferences', () => ({
   useMarketPreferences: () => mockPreferencesHook(),
 }));
 let mockReady = true;
+let mockCompleted = false;
+let mockLoading = true;
+let mockInitialPreferences = {
+  mode: 'preferred',
+  merchant: null as string | null,
+  country: null as string | null,
+  currency: null as string | null,
+};
+const mockUpdate = jest.fn();
 let mockLiveProducts: typeof import('../data/marketProducts').MARKET_PRODUCTS = [];
 const mockPreferencesHook = function useMockPreferences() {
-  const [preferences, setPreferences] = React.useState({
-    mode: 'preferred',
-    merchant: null,
-    country: null,
-    currency: null,
-  });
+  const [preferences, setPreferences] = React.useState(mockInitialPreferences);
   return {
     ready: mockReady,
     preferences,
-    update: (patch: object) => setPreferences((previous) => ({ ...previous, ...patch })),
+    update: (patch: object) => {
+      mockUpdate(patch);
+      setPreferences((previous) => ({ ...previous, ...patch }));
+    },
   };
 };
 jest.mock('../contexts/ThemeContext', () => ({ useThemeColors: () => ({}) }));
@@ -28,7 +35,13 @@ jest.mock('../components/MarketProductCard', () => () => null);
 jest.mock('../hooks/useMarketListings', () => ({
   useMarketListings: (enabled: boolean) => {
     mockLiveEnabled(enabled);
-    return { products: mockLiveProducts, loading: enabled, incomplete: false, refresh: jest.fn() };
+    return {
+      products: mockLiveProducts,
+      loading: enabled && mockLoading,
+      completed: mockCompleted,
+      incomplete: false,
+      refresh: jest.fn(),
+    };
   },
 }));
 jest.mock('lucide-react-native', () => ({
@@ -47,6 +60,10 @@ beforeEach(() => {
   jest.useFakeTimers();
   mockLiveEnabled.mockClear();
   mockReady = true;
+  mockCompleted = false;
+  mockLoading = true;
+  mockUpdate.mockClear();
+  mockInitialPreferences = { mode: 'preferred', merchant: null, country: null, currency: null };
   mockLiveProducts = [];
 });
 afterEach(() => {
@@ -113,7 +130,7 @@ it('removes full loading copy once a cached or first-page result exists', () => 
   const screen = render(<MarketScreen navigation={navigation} />);
   fireEvent.press(screen.getByTestId('market-filter-button'));
   fireEvent.press(screen.getByTestId('market-filter-sellers-friends'));
-  expect(screen.getByTestId('market-live-status')).toHaveTextContent('market.live.loaded');
+  expect(screen.getByTestId('market-live-status')).toHaveTextContent('market.live.updating');
   expect(screen.queryByText('market.live.loading')).toBeNull();
 });
 
@@ -126,4 +143,25 @@ it('shows no-match copy instead of full loading when filters hide an existing sn
   act(() => jest.advanceTimersByTime(300));
   expect(screen.queryByText('market.live.loading')).toBeNull();
   expect(screen.getByText('market.screen.emptyNoMatch')).toBeTruthy();
+});
+
+it('preserves all restored WoT filters before the first completed current-scope snapshot', () => {
+  mockLoading = false; // Hydration render before the fetch effect sets loading.
+  mockInitialPreferences = {
+    mode: 'wotFriends',
+    merchant: 'Saved merchant',
+    country: 'DE',
+    currency: 'EUR',
+  };
+  const screen = render(<MarketScreen navigation={navigation} />);
+  expect(mockUpdate).not.toHaveBeenCalled();
+  mockLoading = true;
+  screen.rerender(<MarketScreen navigation={navigation} />);
+  expect(mockUpdate).not.toHaveBeenCalled();
+  mockLoading = false;
+  mockCompleted = true;
+  screen.rerender(<MarketScreen navigation={navigation} />);
+  expect(mockUpdate).toHaveBeenCalledWith(
+    expect.objectContaining({ merchant: null, country: null, currency: null }),
+  );
 });

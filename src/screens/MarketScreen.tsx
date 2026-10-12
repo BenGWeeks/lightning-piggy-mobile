@@ -95,7 +95,8 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
   // one mode may not exist under the next, and a chip that no longer renders
   // can't be un-selected from its axis — the grid would just sit empty.
   useEffect(() => {
-    if (!ready || (mode === 'wotFriends' && (live.loading || live.incomplete))) return;
+    if (!ready || (mode === 'wotFriends' && (!live.completed || live.loading || live.incomplete)))
+      return;
     const validated = validateMarketPreferences(preferences, { merchants, countries, currencies });
     if (
       validated.merchant !== merchant ||
@@ -106,6 +107,7 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
   }, [
     ready,
     mode,
+    live.completed,
     live.loading,
     live.incomplete,
     merchants,

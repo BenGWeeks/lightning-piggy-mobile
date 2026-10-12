@@ -12,6 +12,7 @@
  * state, so it's a pure module function. Called by logout and
  * signOutIdentity.
  */
+import { wipeMarketAccount } from '../services/marketStorage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { perAccountKey } from '../services/perAccountStorage';
 import {
@@ -66,6 +67,7 @@ import {
 
 export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise<void> {
   if (!loggedOutPubkey) return;
+  await wipeMarketAccount(loggedOutPubkey);
   // In-app notification history (#1143): names, amounts and routing ids.
   await clearNotificationHistory(loggedOutPubkey);
   // Read the per-account wallet list FIRST so we can delete the

@@ -2430,6 +2430,7 @@
     },
     "live": {
       "loading": "Cargando anuncios de tus amigos…",
+      "updating": "Actualizando…",
       "incomplete": "No se pudieron cargar todos los anuncios. Intenta actualizar.",
       "loaded": "Anuncios actuales de tus amigos",
       "refresh": "Actualizar",

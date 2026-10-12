@@ -2430,6 +2430,7 @@
     },
     "live": {
       "loading": "Loading listings from your friends…",
+      "updating": "Updating…",
       "incomplete": "Some listings could not be loaded. Try refreshing.",
       "loaded": "Live listings from your friends",
       "refresh": "Refresh",

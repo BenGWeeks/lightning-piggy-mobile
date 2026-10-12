@@ -212,3 +212,44 @@ it('never lets a late disk read overwrite a completed refresh', async () => {
   );
   expect(h.result.current.products).toEqual([]);
 });
+
+it('marks completion only for a fetched snapshot in the current scope', async () => {
+  const h = renderHook(({ on }: { on: boolean }) => useMarketListings(on), {
+    initialProps: { on: false },
+  });
+  expect(h.result.current.completed).toBe(false);
+  h.rerender({ on: true });
+  act(() => fetch.mock.calls[0][3]([cachedProduct]));
+  expect(h.result.current.completed).toBe(false);
+  await act(async () => finish({ products: [cachedProduct], incomplete: false }));
+  expect(h.result.current.completed).toBe(true);
+  mockViewer = 'different-account';
+  h.rerender({ on: false });
+  expect(h.result.current.completed).toBe(false);
+});
+
+it('does not resurrect an expired listing from the fresh hook-local snapshot', async () => {
+  const now = Date.now();
+  const product = {
+    id: 'short-lived',
+    sellerName: 'Seller',
+    listing: {
+      event: { pubkey: 'seller', tags: [['expiration', String(now / 1000 + 1)]] },
+      vendor: { name: 'Seller' },
+    },
+  } as unknown as MarketListingsResult['products'][number];
+  const h = renderHook(({ on }: { on: boolean }) => useMarketListings(on), {
+    initialProps: { on: true },
+  });
+  await act(async () => finish({ products: [product], incomplete: false }));
+  expect(h.result.current.products).toHaveLength(1);
+  h.rerender({ on: false });
+  const clock = jest.spyOn(Date, 'now').mockReturnValue(now + 2000);
+  try {
+    h.rerender({ on: true });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(h.result.current.products).toEqual([]);
+  } finally {
+    clock.mockRestore();
+  }
+});

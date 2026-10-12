@@ -2430,6 +2430,7 @@
     },
     "live": {
       "loading": "Angebote deiner Freunde werden geladen…",
+      "updating": "Wird aktualisiert…",
       "incomplete": "Manche Angebote konnten nicht geladen werden. Versuche zu aktualisieren.",
       "loaded": "Live-Angebote deiner Freunde",
       "refresh": "Aktualisieren",

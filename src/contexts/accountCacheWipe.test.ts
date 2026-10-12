@@ -1,3 +1,11 @@
+import {
+  readMarketPreferences,
+  writeMarketPreferences,
+  writeMarketSnapshot,
+  getMarketSnapshot,
+  readMarketSnapshot,
+  MARKET_CACHE_KEY,
+} from '../services/marketStorage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { wipeAccountCaches } from './accountCacheWipe';
 import { perAccountKey } from '../services/perAccountStorage';
@@ -79,4 +87,27 @@ it("wipes only the signed-out account's group history, migrating legacy blobs fi
   await wipeAccountCaches(PK);
   expect(await loadGroupMessages(PK, 'g_kids')).toEqual([]);
   expect((await loadGroupMessages(OTHER_PK, 'g_kids')).map((m) => m.text)).toEqual(['parent']);
+});
+
+it('wipes market filters and every follow scope only for the signed-out account', async () => {
+  await readMarketPreferences(PK); // Account signs back in after earlier wipe tests.
+  const preferences = {
+    mode: 'wotFriends' as const,
+    merchant: 'Seller',
+    country: 'DE',
+    currency: 'EUR',
+  };
+  await writeMarketPreferences(PK, preferences);
+  await writeMarketPreferences(OTHER_PK, preferences);
+  await writeMarketSnapshot(`${PK}|follows-one`, { products: [], incomplete: false });
+  await writeMarketSnapshot(`${PK}|follows-two`, { products: [], incomplete: false });
+  await writeMarketSnapshot(`${OTHER_PK}|follows`, { products: [], incomplete: false });
+  await wipeAccountCaches(PK);
+  expect(await AsyncStorage.getItem(perAccountKey('market_filters_v1', PK))).toBeNull();
+  expect(await AsyncStorage.getItem(perAccountKey('market_filters_v1', OTHER_PK))).not.toBeNull();
+  expect(getMarketSnapshot(`${PK}|follows-one`)).toBeUndefined();
+  expect(getMarketSnapshot(`${PK}|follows-two`)).toBeUndefined();
+  expect(await readMarketSnapshot(`${PK}|follows-one`)).toBeUndefined();
+  expect(getMarketSnapshot(`${OTHER_PK}|follows`)).toBeDefined();
+  expect(JSON.parse((await AsyncStorage.getItem(MARKET_CACHE_KEY))!)).toHaveLength(1);
 });
