@@ -79,10 +79,15 @@ function checksFor(flow) {
   };
   walk(root);
   const results = [];
+  let firstFailure = null;
   for (const f of files) {
     for (const entry of JSON.parse(readFileSync(f, 'utf8'))) {
       const cmd = Object.values(entry.command ?? {})[0];
       const label = typeof cmd === 'object' && cmd ? cmd.label : undefined;
+      if (!firstFailure && entry.metadata?.status === 'FAILED') {
+        const step = Object.keys(entry.command ?? {})[0] ?? 'step';
+        firstFailure = `${step}: ${entry.metadata?.error?.message ?? 'failed'}`.slice(0, 200);
+      }
       if (label?.startsWith('IO-CHECK ')) {
         results.push({
           key: label.slice(9),
@@ -92,8 +97,19 @@ function checksFor(flow) {
       }
     }
   }
-  return results.sort((a, b) => a.at - b.at);
+  results.sort((a, b) => a.at - b.at);
+  return Object.assign(results, { firstFailure });
 }
+
+// Checks that need Lightning Piggy's own sends (flow-147) can't be judged if
+// that flow never got going.
+const sendFlow = checksFor('flow-147-interop-lp-sends-group');
+const lpSendsMissing = Boolean(sendFlow?.firstFailure);
+const DEPENDS_ON_147 = /^lp\.(plain|md|long|edit|image|delete)$/;
+// …and the rename-path checks need flow-149's rename to have happened.
+const renameFlow = checksFor('flow-149-interop-lp-rename-after-admin');
+const lpRenameMissing = Boolean(renameFlow?.firstFailure);
+const DEPENDS_ON_149 = /^lp\.(after-lp-rename|renamed-title)$/;
 
 for (const [file, title, shotPrefix] of FLOWS) {
   const checks = checksFor(file);
@@ -101,14 +117,25 @@ for (const [file, title, shotPrefix] of FLOWS) {
   if (!checks && !text) continue;
   out.push(`## ${title}`, '');
   if (!checks?.length) {
-    out.push(`No check results — the flow stopped early; see \`logs/${file}.log\`.`, '');
+    const why = checks?.firstFailure
+      ? `it failed before its first check at \`${checks.firstFailure}\``
+      : /UNAVAILABLE|127\.0\.0\.1:7001/.test(text)
+        ? "Maestro's on-device driver dropped (harness, not the app)"
+        : 'it stopped before its first check';
+    out.push(`**HARNESS: no results** — ${why}. See \`logs/${file}.log\`.`, '');
     continue;
   }
   const rows = checks.map(({ key: label, status }) => {
     const key = label.replace(/^(dm|lp|lp-side)\./, '');
     const want = `${shotPrefix}${key.replace(/\./g, '-')}.png`;
     const shot = shots.find((s) => s === want);
-    return `| ${STATUS[status] ?? status} | \`${label}\` | ${expectFor[key] ?? ''} | ${shot ? `screenshots/${shot}` : ''} |`;
+    const result =
+      lpSendsMissing && DEPENDS_ON_147.test(label)
+        ? 'N/T (flow-147 failed)'
+        : lpRenameMissing && DEPENDS_ON_149.test(label)
+          ? 'N/T (flow-149 failed)'
+          : (STATUS[status] ?? status);
+    return `| ${result} | \`${label}\` | ${expectFor[key] ?? ''} | ${shot ? `screenshots/${shot}` : ''} |`;
   });
   out.push('| Result | Check | Expected | Screenshot |', '|---|---|---|---|', ...rows, '');
 }
@@ -117,6 +144,8 @@ for (const [file, title, shotPrefix] of FLOWS) {
 const done = jsonLines('listen-lp.jsonl').find((l) => l.done);
 if (done) {
   out.push('## Lightning Piggy → group, on the wire (scripted member)', '');
+  if (lpSendsMissing)
+    out.push(`N/T: flow-147 (Lightning Piggy's sends) failed at \`${sendFlow.firstFailure}\`.`, '');
   for (const re of done.matched ?? []) out.push(`- PASS \`${re}\``);
   for (const re of done.missing ?? []) out.push(`- FAIL \`${re}\` not received in 90 s`);
   out.push('');
