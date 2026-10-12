@@ -1,0 +1,97 @@
+name: Release Nostr note
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish (e.g. v1.4.2)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-nostr-${{ inputs.tag || github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write # Only used to append the public note link to the Release.
+    env:
+      TAG: ${{ inputs.tag || github.event.release.tag_name }}
+    steps:
+      - name: Check secrets
+        id: secrets
+        env:
+          NOSTR_RELEASE_BUNKER_URI: ${{ secrets.NOSTR_RELEASE_BUNKER_URI }}
+          NOSTR_RELEASE_CLIENT_KEY: ${{ secrets.NOSTR_RELEASE_CLIENT_KEY }}
+        run: |
+          if [ -z "$NOSTR_RELEASE_BUNKER_URI" ] || [ -z "$NOSTR_RELEASE_CLIENT_KEY" ]; then
+            echo '::notice::Nostr release note skipped: configure both NOSTR_RELEASE secrets.'
+            echo 'enabled=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'enabled=true' >> "$GITHUB_OUTPUT"
+          fi
+
+      # Release tags can contain hostile scripts. Execute automation from trusted main;
+      # release-source is data only, including when reading its Git history for fallback notes.
+      - name: Checkout automation
+        if: steps.secrets.outputs.enabled == 'true'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Checkout release notes at tag (before the archive/reset)
+        if: steps.secrets.outputs.enabled == 'true'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          path: release-source
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node
+        if: steps.secrets.outputs.enabled == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install dependencies (no native builds)
+        if: steps.secrets.outputs.enabled == 'true'
+        # Lockfile-verified; --ignore-scripts skips native/postinstall work this job doesn't need.
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Build unsigned event
+        if: steps.secrets.outputs.enabled == 'true'
+        run: |
+          node scripts/build-release-note.mjs --tag "$TAG" \
+            --notes-file release-source/docs/RELEASE_NOTES_NEXT.md \
+            --repo-dir release-source --event > "$RUNNER_TEMP/release-note.json"
+
+      - name: Sign in Amber and publish to write relays
+        if: steps.secrets.outputs.enabled == 'true'
+        timeout-minutes: 12
+        env:
+          NOSTR_RELEASE_BUNKER_URI: ${{ secrets.NOSTR_RELEASE_BUNKER_URI }}
+          NOSTR_RELEASE_CLIENT_KEY: ${{ secrets.NOSTR_RELEASE_CLIENT_KEY }}
+        run: node scripts/publish-release-note.mjs "$RUNNER_TEMP/release-note.json" "$RUNNER_TEMP/nostr-link.txt"
+
+      - name: Append note link to GitHub Release
+        if: steps.secrets.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$TAG" --json body --jq '.body' > "$RUNNER_TEMP/release-body.md"
+          LINK="$(cat "$RUNNER_TEMP/nostr-link.txt")"
+          if ! grep -Fq "$LINK" "$RUNNER_TEMP/release-body.md"; then
+            printf '\n\nNostr release note: %s\n' "$LINK" >> "$RUNNER_TEMP/release-body.md"
+            gh release edit "$TAG" --notes-file "$RUNNER_TEMP/release-body.md"
+          fi
