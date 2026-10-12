@@ -23,6 +23,7 @@ import { bytesToHex, hexToBytes, utf8ToBytes } from '@noble/hashes/utils.js';
 import { generateSecretKey, getEventHash, nip59, type Event as NostrEvent } from 'nostr-tools';
 
 import { ENCRYPTED_TOKEN_LEN, PLATFORM_BYTE, type PushPlatform } from './marmotPushToken';
+import { isPublicRelayUrl } from '../utils/publicUrl';
 
 export const PUSH_TRIGGER_KIND = 446;
 export const PUSH_TOKEN_UPDATE_KIND = 447;
@@ -289,6 +290,9 @@ export function pruneToLeaves(state: PushRecordState, leaves: Set<string>): Push
 
 // --- triggering --------------------------------------------------------------
 
+/** Distinct record relay hints used per push server. */
+export const MAX_HINTS_PER_SERVER = 3;
+
 export interface TriggerTarget {
   server: string;
   relayHints: string[];
@@ -317,7 +321,15 @@ export function selectTriggerTargets(
   for (const { record } of newest.values()) {
     const t = byServer.get(record.server) ?? { server: record.server, relayHints: [], tokens: [] };
     if (!t.tokens.includes(record.encryptedToken)) t.tokens.push(record.encryptedToken);
-    if (record.relayHint && !t.relayHints.includes(record.relayHint)) {
+    // A hint is another member's signed but untrusted text (#1338): keep only
+    // public wss:// relays, a few per server. An invalid hint is just dropped;
+    // the trigger still goes to the server's own 10050 inbox.
+    if (
+      record.relayHint &&
+      isPublicRelayUrl(record.relayHint) &&
+      !t.relayHints.includes(record.relayHint) &&
+      t.relayHints.length < MAX_HINTS_PER_SERVER
+    ) {
       t.relayHints.push(record.relayHint);
     }
     byServer.set(record.server, t);

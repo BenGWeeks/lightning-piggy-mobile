@@ -31,6 +31,21 @@ export const createTapToLoadMediaStyles = (colors: Palette, fromMe: boolean) =>
       paddingHorizontal: 16,
       gap: 6,
     },
+    // Thumb variant: fills a profile thumbnail / media tile.
+    thumbBox: {
+      width: '100%',
+      height: '100%',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 6,
+      gap: 4,
+    },
+    thumbLabel: {
+      fontSize: 11,
+      fontWeight: '600',
+      textAlign: 'center',
+      color: colors.textHeader,
+    },
     textCol: {
       flexShrink: 1,
       gap: 2,

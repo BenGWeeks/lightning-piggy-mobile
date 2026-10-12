@@ -187,6 +187,31 @@ describe('fetchLinkPreview — preview image', () => {
     expect(p).toMatchObject({ title: 'T', image: null });
   });
 
+  it('resolves og:image against the final URL after a redirect, then validates it', async () => {
+    mockFetch
+      .mockResolvedValueOnce(redirectTo('https://cdn.example.org/post'))
+      .mockResolvedValueOnce(
+        fakeResponse({
+          body: `<meta property="og:title" content="T" /><meta property="og:image" content="/img/cover.png" />`,
+        }),
+      );
+    expect((await fetchLinkPreview('https://example.com/p'))?.image).toBe(
+      'https://cdn.example.org/img/cover.png',
+    );
+  });
+
+  it('drops a private og:image served after a redirect', async () => {
+    mockFetch
+      .mockResolvedValueOnce(redirectTo('https://cdn.example.org/post'))
+      .mockResolvedValueOnce(
+        fakeResponse({
+          body: `<meta property="og:title" content="T" /><meta property="og:image" content="http://[::ffff:192.168.1.1]/x.png" />`,
+        }),
+      );
+    const p = await fetchLinkPreview('https://example.com/p2');
+    expect(p).toMatchObject({ title: 'T', image: null });
+  });
+
   it('drops a private image from a cached (pre-#1338) entry', async () => {
     mockReadCache.mockResolvedValueOnce({
       url: 'https://example.com/',

@@ -17,6 +17,8 @@ export const PRODUCT_COLUMNS = 2;
 export interface MediaTile {
   key: string;
   eventId: string;
+  /** The tile's event author — decides auto-load vs tap-to-load (#1338). */
+  authorPubkey: string;
   item: NoteMediaItem;
 }
 
@@ -53,7 +55,12 @@ export function collectMediaTiles(events: readonly AuthorFeedEvent[]): MediaTile
     for (const item of extractNoteMedia(event)) {
       if (seen.has(item.url)) continue;
       seen.add(item.url);
-      tiles.push({ key: `${event.id}:${item.url}`, eventId: event.id, item });
+      tiles.push({
+        key: `${event.id}:${item.url}`,
+        eventId: event.id,
+        authorPubkey: event.pubkey,
+        item,
+      });
     }
   }
   return tiles;

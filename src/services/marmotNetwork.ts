@@ -7,6 +7,7 @@ import type { NostrNetworkInterface } from '@internet-privacy/marmot-ts';
 import type { Event as NostrEvent, Filter } from 'nostr-tools';
 
 import { dmInboxRelaysFromTags, isRelayUrl } from '../utils/relayListEvents';
+import { isPublicRelayUrl } from '../utils/publicUrl';
 import { pool, trackRelays } from './nostrPool';
 import { DEFAULT_RELAYS, MARMOT_PUSH_SERVER_RELAYS } from './nostrRelayDefaults';
 
@@ -16,6 +17,28 @@ const INBOX_CACHE_TTL_MS = 10 * 60_000;
 /** A server whose 10050 wasn't found is asked again sooner — but not on
  * every message we send. */
 const INBOX_MISS_TTL_MS = 60_000;
+
+/** Most relays one push trigger is published to, and most taken from a push
+ * server's 10050 inbox list. Bounded so a hostile record or list can't fan a
+ * trigger out to arbitrarily many relays. */
+export const MAX_PUSH_RELAYS = 8;
+export const MAX_PUSH_INBOX_RELAYS = 5;
+
+/**
+ * Push-trigger destinations (#1338): relay hints come from other group
+ * members' signed records and the inbox list from the push server's 10050,
+ * and we connect to them automatically on every send. Only credential-free
+ * public `wss://` relays survive (no `ws://`, no LAN / loopback / reserved
+ * hosts — see utils/publicUrl), deduped and capped.
+ */
+export function cleanPushRelays(relays: readonly unknown[], max = MAX_PUSH_RELAYS): string[] {
+  const out: string[] = [];
+  for (const r of relays) {
+    if (out.length >= max) break;
+    if (isPublicRelayUrl(r) && !out.includes(r)) out.push(r);
+  }
+  return out;
+}
 
 const asArray = (f: Filter | Filter[]) => (Array.isArray(f) ? f : [f]);
 const cleanRelays = (relays: string[]) => [...new Set(relays.filter(isRelayUrl))];
@@ -128,11 +151,11 @@ export function createPushTransport(getLookupRelays: () => string[]): PushTransp
       { maxWait: REQUEST_MAX_WAIT_MS },
     );
     const latest = events.sort((a, b) => b.created_at - a.created_at)[0];
-    return latest ? cleanRelays(dmInboxRelaysFromTags(latest.tags)) : [];
+    return latest ? cleanPushRelays(dmInboxRelaysFromTags(latest.tags), MAX_PUSH_INBOX_RELAYS) : [];
   };
   return {
     async publish(relays, event) {
-      const targets = cleanRelays(relays);
+      const targets = cleanPushRelays(relays);
       if (targets.length === 0) return;
       trackRelays(targets);
       await Promise.allSettled(

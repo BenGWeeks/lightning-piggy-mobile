@@ -15,7 +15,9 @@ export function displayHost(url: string): string {
 }
 
 interface Props {
-  variant: 'image' | 'preview';
+  /** `thumb` fills its parent (profile thumbnails / media tiles) and drops
+   *  the host line to fit. */
+  variant: 'image' | 'preview' | 'thumb';
   url: string;
   fromMe: boolean;
   testID: string;
@@ -34,6 +36,17 @@ const TapToLoadMedia: React.FC<Props> = ({ variant, url, fromMe, testID, onPress
   const styles = useMemo(() => createTapToLoadMediaStyles(colors, fromMe), [colors, fromMe]);
   const host = displayHost(url);
   const iconColor = fromMe ? colors.white : colors.brandPink;
+
+  if (variant === 'thumb') {
+    return (
+      <View style={styles.thumbBox} testID={testID}>
+        <ImageIcon size={20} color={colors.brandPink} />
+        <Text style={styles.thumbLabel} numberOfLines={2}>
+          {t('messageBubble.tapToLoadImage')}
+        </Text>
+      </View>
+    );
+  }
 
   if (variant === 'image') {
     return (

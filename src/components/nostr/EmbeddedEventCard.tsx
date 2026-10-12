@@ -17,6 +17,8 @@ import { safeMarketUrl } from '../../utils/marketListings';
 import type { MarketProduct } from '../../data/marketProducts';
 import type { RootStackParamList } from '../../navigation/types';
 import type { NostrContentStyles } from '../../styles/NostrContent.styles';
+import { isPublicHttpUrl } from '../../utils/publicUrl';
+import { useIsTrustedAuthor } from '../../hooks/useFollowedPubkeys';
 
 export const ARTICLE_KIND = 30023;
 
@@ -132,7 +134,11 @@ const ArticleEmbed: React.FC<{ event: Event; raw: string; styles: NostrContentSt
   const t = useTranslation();
   const title = tagValue(event, 'title')?.trim() || t('nostrContent.untitledArticle');
   const summary = tagValue(event, 'summary')?.trim() || previewText(event.content).slice(0, 280);
-  const image = safeMarketUrl(tagValue(event, 'image'));
+  const tagged = safeMarketUrl(tagValue(event, 'image'));
+  // An embedded article is someone else's event: its cover only loads
+  // automatically for me / people I follow, from a public host (#1338).
+  const trusted = useIsTrustedAuthor(event.pubkey);
+  const image = tagged && trusted && isPublicHttpUrl(tagged) ? tagged : null;
   return (
     <TouchableOpacity
       style={styles.card}

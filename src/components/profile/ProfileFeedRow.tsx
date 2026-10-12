@@ -9,6 +9,10 @@ import { useThemeColors } from '../../contexts/ThemeContext';
 import { useTranslation } from '../../contexts/LocaleContext';
 import { relativeTime } from '../../utils/relativeTime';
 import { isSupportedImageUrl } from '../../utils/imageUrl';
+import { isPublicHttpUrl } from '../../utils/publicUrl';
+import { useIsTrustedAuthor } from '../../hooks/useFollowedPubkeys';
+import { useTapToReveal } from '../../hooks/useTapToReveal';
+import TapToLoadMedia from '../TapToLoadMedia';
 import {
   MEDIA_COLUMNS,
   type MediaTile,
@@ -55,7 +59,11 @@ const ProfileFeedRow: React.FC<Props> = ({ row, styles, onOpenImage, onOpenProdu
               testID={`profile-reply-context-${row.event.id.slice(0, 12)}`}
             />
           ) : null}
-          <NostrContent content={row.event.content} onImagePress={onOpenImage} />
+          <NostrContent
+            content={row.event.content}
+            onImagePress={onOpenImage}
+            authorPubkey={row.event.pubkey}
+          />
         </View>
       );
     case 'media':
@@ -116,9 +124,20 @@ const MediaTileView: React.FC<{
   const isVideo = item.type === 'video';
   // A video shows its poster (imeta `image`) when the author gave one.
   const preview = isVideo ? item.thumb : item.url;
-  const showImage = !!preview && isSupportedImageUrl(preview);
+  const hasImage = !!preview && isSupportedImageUrl(preview);
+  // Tiles are the profile owner's media: auto-load only for me / people I
+  // follow, from public hosts; otherwise tap to load (#1338).
+  const trusted = useIsTrustedAuthor(tile.authorPubkey);
+  const [loadAllowed, reveal] = useTapToReveal(
+    `nostr-image:${preview ?? ''}`,
+    trusted && !!preview && isPublicHttpUrl(preview),
+  );
+  const showImage = hasImage && loadAllowed;
+  const gated = hasImage && !loadAllowed;
   const open = () => {
-    if (isVideo || !showImage) {
+    if (gated) {
+      reveal();
+    } else if (isVideo || !showImage) {
       Linking.openURL(item.url).catch(() => {
         // No player / browser — nothing to surface.
       });
@@ -146,6 +165,14 @@ const MediaTileView: React.FC<{
           cachePolicy="memory-disk"
           recyclingKey={preview}
           autoplay={false}
+        />
+      ) : null}
+      {gated ? (
+        <TapToLoadMedia
+          variant="thumb"
+          url={preview ?? item.url}
+          fromMe={false}
+          testID={`profile-media-placeholder-${tile.eventId.slice(0, 12)}`}
         />
       ) : null}
       {isVideo ? (

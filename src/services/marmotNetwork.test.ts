@@ -6,8 +6,13 @@ jest.mock('./nostrPool', () => ({
   trackRelays: jest.fn(),
 }));
 
-import { createPushTransport } from './marmotNetwork';
-import { trackRelays } from './nostrPool';
+import {
+  cleanPushRelays,
+  createPushTransport,
+  MAX_PUSH_INBOX_RELAYS,
+  MAX_PUSH_RELAYS,
+} from './marmotNetwork';
+import { pool, trackRelays } from './nostrPool';
 import { MARMOT_PUSH_SERVER_RELAYS } from './nostrRelayDefaults';
 
 const SERVER = 'ee'.repeat(32);
@@ -80,5 +85,51 @@ describe('createPushTransport().inboxRelays', () => {
     await expect(transport.inboxRelays(SERVER)).rejects.toThrow('offline');
     mockQuerySync.mockResolvedValueOnce([inboxEvent(['wss://relay.primal.net'])]);
     expect(await transport.inboxRelays(SERVER)).toEqual(['wss://relay.primal.net']);
+  });
+});
+
+// #1338: push-trigger destinations come from other members' records and the
+// push server's 10050 — connected to automatically, so only public wss://.
+describe('push relay destination policy', () => {
+  it('cleanPushRelays keeps public wss only, deduped and capped', () => {
+    expect(
+      cleanPushRelays([
+        'wss://relay.ditto.pub',
+        'ws://relay.ditto.pub',
+        'ws://192.168.1.1/',
+        'wss://10.0.0.1',
+        'wss://127.1',
+        'wss://user:pw@relay.example.com',
+        'wss://printer.local',
+        42,
+        'wss://relay.ditto.pub',
+        'wss://relay.primal.net',
+      ]),
+    ).toEqual(['wss://relay.ditto.pub', 'wss://relay.primal.net']);
+    const many = Array.from({ length: MAX_PUSH_RELAYS + 4 }, (_, i) => `wss://r${i}.example.com`);
+    expect(cleanPushRelays(many)).toHaveLength(MAX_PUSH_RELAYS);
+  });
+
+  it("drops private / plaintext relays from a push server's 10050, capped", async () => {
+    const listed = [
+      'ws://192.168.1.1/',
+      'ws://plain.example.com',
+      'wss://[::1]',
+      ...Array.from({ length: MAX_PUSH_INBOX_RELAYS + 2 }, (_, i) => `wss://in${i}.example.com`),
+    ];
+    mockQuerySync.mockResolvedValue([inboxEvent(listed)]);
+    const relays = await createPushTransport(() => []).inboxRelays(SERVER);
+    expect(relays).toHaveLength(MAX_PUSH_INBOX_RELAYS);
+    expect(relays.every((r) => r.startsWith('wss://in'))).toBe(true);
+  });
+
+  it('never publishes a trigger to a private or plaintext relay', async () => {
+    const publish = pool.publish as unknown as jest.Mock;
+    publish.mockClear();
+    const transport = createPushTransport(() => []);
+    await transport.publish(['ws://192.168.1.1/', 'wss://127.0.0.1'], {} as never);
+    expect(publish).not.toHaveBeenCalled();
+    await transport.publish(['ws://192.168.1.1/', 'wss://relay.ditto.pub'], {} as never);
+    expect(publish).toHaveBeenCalledWith(['wss://relay.ditto.pub'], {});
   });
 });
