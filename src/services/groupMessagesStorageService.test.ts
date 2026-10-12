@@ -209,6 +209,29 @@ describe('group reply reconciliation', () => {
     expect(await loadGroupMessages(OWNER, GROUP)).toEqual([{ ...edited, replyTo: parent }]);
   });
 
+  it('keeps the other pending reply when the same echo arrives twice', async () => {
+    const first = { ...local('local_first', 'yes', time), replyTo: parent };
+    const second = { ...local('local_second', 'yes', time + 1), replyTo: parent };
+    const echoed = { ...wrap(id, 'yes', time), replyTo: parent };
+    await appendGroupMessage(OWNER, GROUP, first);
+    await appendGroupMessage(OWNER, GROUP, second);
+    expect(await appendGroupMessage(OWNER, GROUP, echoed)).toEqual([echoed, second]);
+    expect(await appendGroupMessage(OWNER, GROUP, echoed)).toEqual([echoed, second]);
+    expect(await loadGroupMessages(OWNER, GROUP)).toEqual([echoed, second]);
+    const secondEcho = { ...echoed, id: 'e'.repeat(64), createdAt: time + 1 };
+    expect(await appendGroupMessage(OWNER, GROUP, secondEcho)).toEqual([echoed, secondEcho]);
+  });
+
+  it('repairs replay metadata without consuming another pending reply', async () => {
+    const stored = wrap(id, 'yes', time);
+    const pending = { ...local('local_pending', 'yes', time + 1), replyTo: parent };
+    await appendGroupMessage(OWNER, GROUP, stored);
+    await appendGroupMessage(OWNER, GROUP, pending);
+    const repaired = { ...stored, replyTo: parent };
+    expect(await appendGroupMessage(OWNER, GROUP, repaired)).toEqual([repaired, pending]);
+    expect(await loadGroupMessages(OWNER, GROUP)).toEqual([repaired, pending]);
+  });
+
   it('matches the reply parent as well as text when absorbing an optimistic echo', async () => {
     const otherParent = 'f'.repeat(64);
     await appendGroupMessage(OWNER, GROUP, {

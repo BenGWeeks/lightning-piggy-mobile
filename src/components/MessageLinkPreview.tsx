@@ -1,18 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Linking, Text, TouchableOpacity, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
-import type { ImageLoadEventData } from 'expo-image';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useNostr } from '../contexts/NostrContext';
 import { useAccountState } from '../contexts/useAccountState';
-import {
-  createLinkPreviewImageSizeStyles,
-  createMessageLinkPreviewStyles,
-} from '../styles/MessageLinkPreview.styles';
-import {
-  cacheLinkPreviewImageSizing,
-  getLinkPreviewImageSizing,
-} from '../utils/linkPreviewImageAspectRatio';
+import { createMessageLinkPreviewStyles } from '../styles/MessageLinkPreview.styles';
 import { fetchLinkPreview } from '../services/linkPreviewFetcher';
 import {
   getLinkPreviewEnabled,
@@ -54,31 +46,13 @@ const LinkPreviewImage = React.memo(function LinkPreviewImage({
   eventId: string;
   styles: ReturnType<typeof createMessageLinkPreviewStyles>;
 }) {
-  const [sizing, setSizing] = useState(() => getLinkPreviewImageSizing(url));
-  const sizeStyles = useMemo(
-    () => createLinkPreviewImageSizeStyles(sizing.aspectRatio),
-    [sizing.aspectRatio],
-  );
-  const imageStyle = useMemo(() => [styles.image, sizeStyles.image], [styles, sizeStyles]);
   const source = useMemo(() => ({ uri: url }), [url]);
-  const onLoad = useCallback(
-    ({ source: { width, height } }: ImageLoadEventData) => {
-      const measured = cacheLinkPreviewImageSizing(url, width, height);
-      setSizing((previous) =>
-        previous.aspectRatio === measured.aspectRatio && previous.contentFit === measured.contentFit
-          ? previous
-          : measured,
-      );
-    },
-    [url],
-  );
 
   return (
     <ExpoImage
       source={source}
-      style={imageStyle}
-      contentFit={sizing.contentFit}
-      onLoad={onLoad}
+      style={styles.image}
+      contentFit="contain"
       cachePolicy="memory-disk"
       transition={150}
       accessibilityIgnoresInvertColors

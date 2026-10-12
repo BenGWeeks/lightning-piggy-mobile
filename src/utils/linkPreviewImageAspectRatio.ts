@@ -4,10 +4,16 @@ export interface LinkPreviewImageSizing {
 }
 
 const defaultSizing: LinkPreviewImageSizing = { aspectRatio: 1.91, contentFit: 'contain' };
+const MAX_CACHED_SIZINGS = 200;
 const sizingByUrl = new Map<string, LinkPreviewImageSizing>();
 
 export function getLinkPreviewImageSizing(url: string): LinkPreviewImageSizing {
-  return sizingByUrl.get(url) ?? defaultSizing;
+  const sizing = sizingByUrl.get(url);
+  if (!sizing) return defaultSizing;
+  // Map insertion order tracks recency; a cache hit moves to the newest end.
+  sizingByUrl.delete(url);
+  sizingByUrl.set(url, sizing);
+  return sizing;
 }
 
 export function cacheLinkPreviewImageSizing(
@@ -30,10 +36,17 @@ export function cacheLinkPreviewImageSizing(
   const contentFit = aspectRatio === ratio ? 'cover' : 'contain';
   const previous = getLinkPreviewImageSizing(url);
   if (previous.aspectRatio === aspectRatio && previous.contentFit === contentFit) {
-    sizingByUrl.set(url, previous);
-    return previous;
+    return storeSizing(url, previous);
   }
-  const sizing: LinkPreviewImageSizing = { aspectRatio, contentFit };
+  return storeSizing(url, { aspectRatio, contentFit });
+}
+
+function storeSizing(url: string, sizing: LinkPreviewImageSizing): LinkPreviewImageSizing {
+  sizingByUrl.delete(url);
   sizingByUrl.set(url, sizing);
+  if (sizingByUrl.size > MAX_CACHED_SIZINGS) {
+    const oldestUrl = sizingByUrl.keys().next().value;
+    if (oldestUrl !== undefined) sizingByUrl.delete(oldestUrl);
+  }
   return sizing;
 }

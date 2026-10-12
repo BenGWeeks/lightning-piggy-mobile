@@ -15,6 +15,8 @@ export const createMessageLinkPreviewStyles = (colors: Palette, fromMe: boolean)
     tapTarget: {},
     image: {
       width: '100%',
+      // Reserve identical space before/after load and when virtualized rows remount.
+      aspectRatio: 1.91,
       backgroundColor: fromMe ? 'rgba(0,0,0,0.08)' : colors.surface,
     },
     body: {
@@ -45,6 +47,3 @@ export const createMessageLinkPreviewStyles = (colors: Palette, fromMe: boolean)
       marginTop: 2,
     },
   });
-
-export const createLinkPreviewImageSizeStyles = (aspectRatio: number) =>
-  StyleSheet.create({ image: { aspectRatio } });

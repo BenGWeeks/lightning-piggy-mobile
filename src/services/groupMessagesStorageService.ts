@@ -120,7 +120,9 @@ export async function appendGroupMessage(
     // senderPubkey is lowercased on both sides because inbound rumors are
     // lowercased upstream while optimistic locals may use the viewer pubkey
     // as-is.
-    if (!message.id.startsWith('local_')) {
+    // Repeated delivery must not consume another pending send. Continue to
+    // ID dedup below so replays can still repair stored metadata.
+    if (!message.id.startsWith('local_') && !map.has(message.id)) {
       const targetSender = message.senderPubkey.toLowerCase();
       let bestKey: string | null = null;
       let bestDelta = Infinity;
