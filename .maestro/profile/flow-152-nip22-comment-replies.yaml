@@ -12,6 +12,14 @@ name: NIP-22 comments show as replies on a profile's Posts & replies (#1337)
 # Start fresh, so the profile opens at the top of its list.
 - stopApp
 - openLink: 'nostr:npub18ams6ewn5aj2n3wt2qawzglx9mr4nzksxhvrdc4gzrecw7n5tvjqctp424'
+# Devices with several Lightning Piggy builds show Android's "Open with"
+# chooser (an OS surface, so text selectors): pick the dev build, once.
+- tapOn:
+    text: 'Lightning Piggy \(Dev\)'
+    optional: true
+- tapOn:
+    text: 'Just once'
+    optional: true
 - extendedWaitUntil:
     visible: { id: 'profile-tab-posts' }
     timeout: 60000
