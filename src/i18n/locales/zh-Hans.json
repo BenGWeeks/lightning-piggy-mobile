@@ -2920,7 +2920,11 @@
     "nostrNetworkSubtitle": "你的中继以及照片和语音消息存储",
     "bitcoinNetworkSubtitle": "Electrum服务器和兑换服务器",
     "experimentalFeatures": "实验性功能",
-    "encryption": "加密"
+    "encryption": "加密",
+    "bubbleStyle": "发出消息的气泡样式",
+    "bubbleStyleA": "A · 粉色渐变紫色",
+    "bubbleStyleB": "B · 柔和浅粉",
+    "bubbleStyleC": "C · 紫色为主"
   },
   "messageSettingsScreen": {
     "title": "消息",

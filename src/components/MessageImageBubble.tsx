@@ -1,3 +1,4 @@
+import OutgoingBubbleBackground from './OutgoingBubbleBackground';
 import React, { useState } from 'react';
 import { View, TouchableOpacity } from 'react-native';
 import { useLocale } from '../contexts/LocaleContext';
@@ -90,6 +91,7 @@ const MessageImageBubble: React.FC<Props> = ({
         disabled={loadAllowed && !canOpen && !onLongPress}
         testID={testID}
       >
+        <OutgoingBubbleBackground fromMe={fromMe} />
         {senderLabel}
         {loadAllowed ? (
           <DecryptedImage

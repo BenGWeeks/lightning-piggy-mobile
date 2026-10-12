@@ -1,3 +1,4 @@
+import OutgoingBubbleStyleSection from '../../components/OutgoingBubbleStyleSection';
 import React, { useMemo } from 'react';
 import { Text, TouchableOpacity, View, Switch } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
@@ -111,6 +112,7 @@ const AdvancedScreen: React.FC = () => {
       <NotificationServerSection />
       <NativeCryptoSection />
       <DeviceNoticesSection />
+      <OutgoingBubbleStyleSection />
       <HermesProfilerSection />
     </AccountScreenLayout>
   );

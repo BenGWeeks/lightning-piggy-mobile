@@ -20,7 +20,7 @@ import {
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import Svg, { Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute, useIsFocused } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useLocale } from '../contexts/LocaleContext';
@@ -48,7 +48,8 @@ import SendSheet from '../components/SendSheet';
 import FriendPickerSheet from '../components/FriendPickerSheet';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import type { ContactProfileBodyData } from '../components/ContactProfileBody';
-import MessageBubble from '../components/MessageBubble';
+import GroupMessageRow from '../components/GroupMessageRow';
+import { groupSenderRunStarts } from '../utils/groupSenderRuns';
 import LiveLocationDurationPicker from '../components/LiveLocationDurationPicker';
 import { useGroupLiveLocation } from '../hooks/useGroupLiveLocation';
 import { useFollowedPubkeys } from '../hooks/useFollowedPubkeys';
@@ -81,7 +82,6 @@ type GroupConversationNavigation = NativeStackNavigationProp<
   'GroupConversation'
 >;
 
-const GroupMessageBubble = React.memo(MessageBubble);
 const EMPTY_PUBKEYS: string[] = [];
 const EMPTY_MESSAGES: GroupMessage[] = [];
 const groupMessageId = (m: GroupMessage) => m.id;
@@ -101,6 +101,7 @@ const GroupConversationScreen: React.FC = () => {
   }));
   const navigation = useNavigation<GroupConversationNavigation>();
   const route = useRoute<GroupConversationRoute>();
+  const focused = useIsFocused();
   const colors = useThemeColors();
   const { t, formatLocale } = useLocale();
   const styles = useMemo(() => createGroupConversationScreenStyles(colors), [colors]);
@@ -230,8 +231,8 @@ const GroupConversationScreen: React.FC = () => {
     memberPubkeys,
     selfPubkey: myPubkey,
     contacts,
-    // Also while an @mention may be typed: the picker shows names + avatars.
-    enabled: membersSheetVisible || draft.includes('@'),
+    // One bounded batch supplies sender avatars while the thread is focused.
+    enabled: focused,
     fetchProfilesForPubkeys,
   });
   const members = useMemo(
@@ -466,6 +467,32 @@ const GroupConversationScreen: React.FC = () => {
   );
   const { isInvoicePaid } = usePaidInvoiceTracker(trackedMessages);
 
+  const senderRuns = useMemo(
+    () => groupSenderRunStarts(timelineRows, myPubkey),
+    [timelineRows, myPubkey],
+  );
+  const memberByPubkey = useMemo(
+    () => new Map(members.map((m) => [m.pubkey.toLowerCase(), m])),
+    [members],
+  );
+  const openSender = useCallback(
+    (pk: string) => {
+      const member = memberByPubkey.get(pk.toLowerCase());
+      const contact = contacts.find((c) => c.pubkey.toLowerCase() === pk.toLowerCase());
+      setMembersSheetVisible(false);
+      presentContactSheet({
+        pubkey: pk,
+        name: member?.name ?? shortNpub(pk),
+        picture: member?.picture ?? null,
+        banner: contact?.profile?.banner ?? null,
+        nip05: contact?.profile?.nip05 ?? null,
+        lightningAddress: contact?.profile?.lud16 ?? null,
+        source: 'nostr',
+      });
+    },
+    [memberByPubkey, contacts, presentContactSheet],
+  );
+
   const renderMessage = useCallback(
     ({ item }: { item: GroupTimelineRow }) => {
       if (isDeviceNoticeRow(item)) {
@@ -480,17 +507,22 @@ const GroupConversationScreen: React.FC = () => {
           />
         );
       }
-      const fromMe = item.senderPubkey === myPubkey;
+      const fromMe = item.senderPubkey.toLowerCase() === myPubkey?.toLowerCase();
       const senderName = fromMe
         ? null
-        : (memberNameByPubkey.get(item.senderPubkey) ?? shortNpub(item.senderPubkey));
+        : (memberByPubkey.get(item.senderPubkey.toLowerCase())?.name ??
+          shortNpub(item.senderPubkey));
       // Reuse the shared bubble — same renderer 1:1 chats use, so contact /
       // invoice / location / image / GIF / poll cards all render identically
       // across chat types (#239). The classifier handles geo: + GIF + poll
       // detection up front; image / invoice / lnaddr / contact ride on the
       // text variant and detect at render time.
       const bubble = (
-        <GroupMessageBubble
+        <GroupMessageRow
+          senderPubkey={item.senderPubkey}
+          senderPicture={memberByPubkey.get(item.senderPubkey.toLowerCase())?.picture ?? null}
+          showSender={senderRuns.has(item.id)}
+          onOpenSender={openSender}
           id={item.id}
           fromMe={fromMe}
           createdAt={item.createdAt}
@@ -536,6 +568,9 @@ const GroupConversationScreen: React.FC = () => {
     },
     [
       colors,
+      senderRuns,
+      memberByPubkey,
+      openSender,
       followed,
       read.dividerId,
       reactions,
@@ -806,23 +841,7 @@ const GroupConversationScreen: React.FC = () => {
         members={members}
         chatId={groupDevices.chatId}
         deviceCounts={groupDevices.counts}
-        onMemberTap={(pk) => {
-          // Close the manage-members sheet first so the preview sheet
-          // doesn't stack on top of an open sheet — keeps the back-stack
-          // predictable and matches the FriendPickerSheet handoff.
-          const c = contacts.find((x) => x.pubkey === pk);
-          const m = members.find((x) => x.pubkey === pk);
-          setMembersSheetVisible(false);
-          presentContactSheet({
-            pubkey: pk,
-            name: m?.name ?? shortNpub(pk),
-            picture: m?.picture ?? null,
-            banner: c?.profile?.banner ?? null,
-            nip05: c?.profile?.nip05 ?? null,
-            lightningAddress: c?.profile?.lud16 ?? null,
-            source: 'nostr',
-          });
-        }}
+        onMemberTap={openSender}
       />
 
       <GifPickerSheet

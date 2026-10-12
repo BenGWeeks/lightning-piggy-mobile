@@ -19,8 +19,8 @@ export const createChatMentionChipStyles = (colors: Palette) =>
       maxWidth: 220,
     },
     chipMe: {
-      backgroundColor: 'rgba(255,255,255,0.22)',
-      borderColor: 'rgba(255,255,255,0.6)',
+      backgroundColor: 'rgba(0,0,0,0.08)',
+      borderColor: colors.outgoingBubble.foreground,
     },
     text: {
       fontSize: 15,
@@ -29,7 +29,7 @@ export const createChatMentionChipStyles = (colors: Palette) =>
       color: colors.brandPink,
     },
     textMe: {
-      color: colors.white,
+      color: colors.outgoingBubble.foreground,
     },
   });
 

@@ -1,3 +1,4 @@
+import OutgoingBubbleBackground from './OutgoingBubbleBackground';
 import React from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { MapPin } from 'lucide-react-native';
@@ -85,6 +86,7 @@ export function LocationBubble({
         }
         testID={`${testIdPrefix}-location-${id}`}
       >
+        <OutgoingBubbleBackground fromMe={fromMe} />
         {senderLabel}
         <View style={styles.locationMap}>
           <LibreMiniMap
@@ -107,7 +109,7 @@ export function LocationBubble({
           <View style={styles.locationLabelRow}>
             <MapPin
               size={14}
-              color={fromMe ? 'rgba(255,255,255,0.85)' : colors.textSupplementary}
+              color={fromMe ? colors.outgoingBubble.foreground : colors.textSupplementary}
             />
             <Text style={[styles.locationLabel, fromMe && styles.locationLabelMe]}>
               {fromMe ? t('messageBubble.locationSent') : t('messageBubble.locationLabel')}

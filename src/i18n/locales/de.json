@@ -2920,7 +2920,11 @@
     "nostrNetworkSubtitle": "Deine Relays und Speicher für Fotos & Sprachnachrichten",
     "bitcoinNetworkSubtitle": "Electrum-Server und Swap-Server",
     "experimentalFeatures": "Experimentelle Funktionen",
-    "encryption": "Verschlüsselung"
+    "encryption": "Verschlüsselung",
+    "bubbleStyle": "Stil gesendeter Nachrichtenblasen",
+    "bubbleStyleA": "A · Rosa zu Lila",
+    "bubbleStyleB": "B · Zartes Rosa",
+    "bubbleStyleC": "C · Überwiegend Lila"
   },
   "messageSettingsScreen": {
     "title": "Nachrichten",

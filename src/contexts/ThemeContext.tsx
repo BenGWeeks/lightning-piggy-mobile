@@ -9,9 +9,18 @@ import {
   type ThemePreference,
 } from '../styles/palettes';
 
+import {
+  outgoingBubblePalettes,
+  resolveOutgoingBubbleStyle,
+  type OutgoingBubbleStyle,
+} from '../styles/outgoingBubblePalettes';
+
+const BUBBLE_STORAGE_KEY = 'app_outgoing_bubble_style';
 const STORAGE_KEY = 'app_theme_preference';
 
 interface ThemeContextValue {
+  outgoingBubbleStyle: OutgoingBubbleStyle;
+  setOutgoingBubbleStyle: (style: OutgoingBubbleStyle) => void;
   preference: ThemePreference;
   scheme: ResolvedScheme;
   colors: Palette;
@@ -25,6 +34,7 @@ function resolveScheme(pref: ThemePreference, systemScheme: ResolvedScheme): Res
 }
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [outgoingBubbleStyle, setBubbleStyle] = useState<OutgoingBubbleStyle>('A');
   const [preference, setPreferenceState] = useState<ThemePreference>('system');
   const [systemScheme, setSystemScheme] = useState<ResolvedScheme>(
     Appearance.getColorScheme() === 'dark' ? 'dark' : 'light',
@@ -34,6 +44,11 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // 'system' so the app follows the device setting out of the box.
   useEffect(() => {
     let mounted = true;
+    AsyncStorage.getItem(BUBBLE_STORAGE_KEY)
+      .then((stored) => {
+        if (mounted) setBubbleStyle(resolveOutgoingBubbleStyle(stored));
+      })
+      .catch(() => {});
     AsyncStorage.getItem(STORAGE_KEY)
       .then((stored) => {
         if (!mounted) return;
@@ -65,12 +80,30 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     });
   }, []);
 
+  const setOutgoingBubbleStyle = useCallback((style: OutgoingBubbleStyle) => {
+    setBubbleStyle(style);
+    AsyncStorage.setItem(BUBBLE_STORAGE_KEY, style).catch(() => {});
+  }, []);
+
   const scheme = resolveScheme(preference, systemScheme);
-  const colors = scheme === 'dark' ? darkPalette : lightPalette;
+  const colors = useMemo(
+    () => ({
+      ...(scheme === 'dark' ? darkPalette : lightPalette),
+      outgoingBubble: outgoingBubblePalettes[outgoingBubbleStyle],
+    }),
+    [scheme, outgoingBubbleStyle],
+  );
 
   const value = useMemo<ThemeContextValue>(
-    () => ({ preference, scheme, colors, setPreference }),
-    [preference, scheme, colors, setPreference],
+    () => ({
+      preference,
+      scheme,
+      colors,
+      setPreference,
+      outgoingBubbleStyle,
+      setOutgoingBubbleStyle,
+    }),
+    [preference, scheme, colors, setPreference, outgoingBubbleStyle, setOutgoingBubbleStyle],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;

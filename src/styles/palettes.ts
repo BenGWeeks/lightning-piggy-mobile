@@ -1,8 +1,11 @@
+import { outgoingBubblePalettes } from './outgoingBubblePalettes';
+
 // Light and dark colour palettes. The key set must stay identical between the
 // two objects so every `colors.X` lookup resolves in either theme. Add new
 // entries to both palettes.
 
 export const lightPalette = {
+  outgoingBubble: outgoingBubblePalettes.A,
   brandPink: '#EC008C',
   brandPinkLight: '#FFF0F5',
   white: '#FFFFFF',
@@ -66,6 +69,7 @@ export const lightPalette = {
 // text). `white` keeps its literal name since many components use it as
 // an explicit foreground colour on pink/orange backgrounds.
 export const darkPalette: typeof lightPalette = {
+  outgoingBubble: outgoingBubblePalettes.A,
   brandPink: '#EC008C',
   brandPinkLight: '#3A1028',
   white: '#FFFFFF',

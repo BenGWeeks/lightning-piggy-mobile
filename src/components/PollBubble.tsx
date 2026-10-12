@@ -1,3 +1,4 @@
+import OutgoingBubbleBackground from './OutgoingBubbleBackground';
 import React from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { BarChart3, Check } from 'lucide-react-native';
@@ -53,11 +54,12 @@ export function PollBubble({
   return (
     <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
       <View style={[styles.pollCard, fromMe ? styles.pollCardMe : styles.pollCardThem]}>
+        <OutgoingBubbleBackground fromMe={fromMe} />
         {senderLabel}
         <View style={styles.pollHeaderRow}>
           <BarChart3
             size={14}
-            color={fromMe ? 'rgba(255,255,255,0.85)' : colors.textSupplementary}
+            color={fromMe ? colors.outgoingBubble.foreground : colors.textSupplementary}
           />
           <Text style={[styles.pollLabel, fromMe && styles.pollLabelMe]}>
             {multi ? 'Poll · pick any' : 'Poll'}
@@ -108,7 +110,7 @@ export function PollBubble({
                   {isMine ? (
                     <Check
                       size={14}
-                      color={fromMe ? colors.white : colors.brandPink}
+                      color={fromMe ? colors.outgoingBubble.foreground : colors.brandPink}
                       strokeWidth={3}
                     />
                   ) : null}

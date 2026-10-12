@@ -15,7 +15,11 @@ export const createVoiceNotePlayerStyles = (colors: Palette) =>
       paddingHorizontal: 14,
       paddingVertical: 10,
     },
-    bubbleMe: { backgroundColor: colors.brandPink, borderBottomRightRadius: 4 },
+    bubbleMe: {
+      overflow: 'hidden',
+      backgroundColor: colors.outgoingBubble.gradient[0],
+      borderBottomRightRadius: 4,
+    },
     bubbleThem: { backgroundColor: colors.surface, borderBottomLeftRadius: 4 },
     senderLabel: {
       fontSize: 12,
@@ -53,6 +57,6 @@ export const createVoiceNotePlayerStyles = (colors: Palette) =>
       textAlign: 'right',
     },
     time: { fontSize: 11, marginTop: 4, alignSelf: 'flex-end' },
-    timeMe: { color: 'rgba(255,255,255,0.8)' },
+    timeMe: { color: colors.outgoingBubble.foreground },
     timeThem: { color: colors.textSupplementary },
   });
