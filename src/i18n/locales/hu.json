@@ -2427,6 +2427,7 @@
       "loading": "A barátaid hirdetéseinek betöltése…",
       "updating": "Frissítés…",
       "incomplete": "Néhány hirdetést nem sikerült betölteni. Próbáld frissíteni.",
+      "partialToast": "Néhány eladó nem válaszolt. Húzd lefelé a frissítéshez.",
       "loaded": "Élő hirdetések a barátaidtól",
       "refresh": "Frissítés",
       "openListing": "Hirdetés megnyitása",

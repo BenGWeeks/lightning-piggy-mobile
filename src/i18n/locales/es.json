@@ -2427,6 +2427,7 @@
       "loading": "Cargando anuncios de tus amigos…",
       "updating": "Actualizando…",
       "incomplete": "No se pudieron cargar todos los anuncios. Intenta actualizar.",
+      "partialToast": "Algunos vendedores no respondieron. Desliza hacia abajo para actualizar.",
       "loaded": "Anuncios actuales de tus amigos",
       "refresh": "Actualizar",
       "openListing": "Abrir anuncio",

@@ -114,7 +114,7 @@ async function prepare(snapshot: MarketSnapshot): Promise<string | undefined> {
       products.push(raw);
       await scheduler.maybeYield();
     }
-    const raw = `{"key":${JSON.stringify(snapshot.key)},"at":${snapshot.at},"result":{"incomplete":${snapshot.result.incomplete},"products":[${products.join(',')}]}}`;
+    const raw = `{"key":${JSON.stringify(snapshot.key)},"at":${snapshot.at},"result":{"incomplete":${snapshot.result.incomplete},"budgetLimited":${!!snapshot.result.budgetLimited},"transportFailed":${!!snapshot.result.transportFailed},"products":[${products.join(',')}]}}`;
     if (raw.length + 2 > MARKET_CACHE_MAX_CHARS) return;
     serialized.set(snapshot, raw);
     return raw;

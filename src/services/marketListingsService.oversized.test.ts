@@ -97,5 +97,52 @@ it('charges an oversized event delivered by three relays only once against the b
   );
   expect(result.products.map((product) => product.listing?.event.id)).toEqual([safe.id]);
   expect(verify.mock.calls.filter(([event]) => event.content.length > 32768)).toHaveLength(16);
-  expect(result.incomplete).toBe(true);
+  expect(result.incomplete).toBe(false);
+});
+
+it('does not flag a verified oversized revision as a failed load', async () => {
+  relayListings([listing('book'), listing('book', true), listing('other')]);
+  const result = await fetchMarketListings(
+    [seller],
+    ['wss://example.com'],
+    new AbortController().signal,
+  );
+  expect(
+    result.products.map(
+      (product) => product.listing?.event.tags.find((tag) => tag[0] === 'd')?.[1],
+    ),
+  ).toEqual(['other']);
+  expect(result.incomplete).toBe(false);
+  expect(result.budgetLimited).toBeUndefined();
+  expect(result.transportFailed).toBeUndefined();
+});
+it('distinguishes an unanswered transport from verification budget exhaustion', async () => {
+  snapshot.mockResolvedValue({
+    answered: [],
+    responded: [],
+    truncated: false,
+    truncatedSince: null,
+  });
+  const failed = await fetchMarketListings(
+    [seller],
+    ['wss://example.com'],
+    new AbortController().signal,
+  );
+  expect(failed).toMatchObject({ incomplete: true, transportFailed: true });
+  relayListings(Array.from({ length: 17 }, (_, i) => listing(`big-${i}`, true)));
+  const capped = await fetchMarketListings(
+    [seller],
+    ['wss://example.com'],
+    new AbortController().signal,
+  );
+  expect(capped).toMatchObject({ incomplete: true, budgetLimited: true });
+  expect(capped.transportFailed).toBeUndefined();
+});
+
+it('does not call a bounded relay plan incomplete when the selected relays answer', async () => {
+  relayListings([]);
+  const relays = Array.from({ length: 12 }, (_, i) => `wss://relay-${i}.example`);
+  const result = await fetchMarketListings([seller], relays, new AbortController().signal);
+  expect(result).toMatchObject({ products: [], incomplete: false, budgetLimited: true });
+  expect(result.transportFailed).toBeUndefined();
 });

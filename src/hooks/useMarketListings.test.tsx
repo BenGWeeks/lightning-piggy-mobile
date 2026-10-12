@@ -1,3 +1,4 @@
+import { Toast } from '../components/BrandedToast';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   clearMarketSnapshotMemory,
@@ -17,7 +18,16 @@ jest.mock('../contexts/NostrContext', () => ({
   useNostr: () => ({ pubkey: mockViewer, relays: mockRelays }),
   useNostrContacts: () => ({ contacts: mockContacts }),
 }));
-jest.mock('@react-navigation/native', () => ({ useIsFocused: () => mockFocused }));
+jest.mock('@react-navigation/native', () => ({
+  useIsFocused: () => mockFocused,
+  useFocusEffect: (callback: () => void) => {
+    const React = jest.requireActual('react');
+    React.useEffect(callback, [callback]);
+  },
+}));
+const mockTranslate = (key: string) => key;
+jest.mock('../contexts/LocaleContext', () => ({ useTranslation: () => mockTranslate }));
+jest.mock('../components/BrandedToast', () => ({ Toast: { show: jest.fn() } }));
 const fetch = fetchMarketListings as jest.Mock;
 let finish: (result: MarketListingsResult) => void;
 beforeEach(() => {
@@ -252,4 +262,72 @@ it('does not resurrect an expired listing from the fresh hook-local snapshot', a
   } finally {
     clock.mockRestore();
   }
+});
+
+describe('partial snapshot recovery', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    (Toast.show as jest.Mock).mockClear();
+  });
+  afterEach(() => jest.useRealTimers());
+  it('retries once with backoff and only toasts if the retry still fails', async () => {
+    const h = renderHook(() => useMarketListings(true));
+    await act(async () => finish({ products: [], incomplete: true }));
+    expect(Toast.show).not.toHaveBeenCalled();
+    act(() => jest.advanceTimersByTime(1499));
+    expect(fetch).toHaveBeenCalledTimes(1);
+    act(() => jest.advanceTimersByTime(1));
+    expect(fetch).toHaveBeenCalledTimes(2);
+    await act(async () => finish({ products: [], incomplete: true }));
+    expect(Toast.show).toHaveBeenCalledWith(
+      expect.objectContaining({
+        autoHide: true,
+        visibilityTime: 3500,
+        text1: 'market.live.partialToast',
+      }),
+    );
+    act(() => jest.advanceTimersByTime(10000));
+    expect(fetch).toHaveBeenCalledTimes(2);
+    act(() => h.result.current.refresh());
+    await act(async () => finish({ products: [], incomplete: false }));
+    expect(h.result.current.incomplete).toBe(false);
+  });
+  it('clears failure silently when the automatic retry succeeds', async () => {
+    const h = renderHook(() => useMarketListings(true));
+    await act(async () => finish({ products: [], incomplete: true }));
+    act(() => jest.advanceTimersByTime(1500));
+    await act(async () => finish({ products: [], incomplete: false }));
+    expect(h.result.current.incomplete).toBe(false);
+    expect(Toast.show).not.toHaveBeenCalled();
+  });
+  it('cancels a pending retry on blur', async () => {
+    const h = renderHook(() => useMarketListings(true));
+    await act(async () => finish({ products: [], incomplete: true }));
+    mockFocused = false;
+    h.rerender({});
+    act(() => jest.advanceTimersByTime(1500));
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(Toast.show).not.toHaveBeenCalled();
+  });
+});
+
+it('uses the preferred follow scope instead of the viewer contacts, including signed-out viewers', async () => {
+  mockViewer = '';
+  renderHook(() => useMarketListings(true, { account: 'preferred', authors: ['b'.repeat(64)] }));
+  expect(fetch.mock.calls[0][0]).toEqual(['b'.repeat(64)]);
+  await act(async () => finish({ products: [], incomplete: false }));
+});
+
+it('keeps the cached snapshot through an unanswered refresh and retry', async () => {
+  jest.useFakeTimers();
+  const h = renderHook(() => useMarketListings(true));
+  await act(async () => finish({ products: [cachedProduct], incomplete: false }));
+  act(() => h.result.current.refresh());
+  await act(async () => finish({ products: [], incomplete: true, transportFailed: true }));
+  expect(h.result.current.products).toEqual([cachedProduct]);
+  act(() => jest.advanceTimersByTime(1500));
+  await act(async () => finish({ products: [], incomplete: true, transportFailed: true }));
+  expect(h.result.current.products).toEqual([cachedProduct]);
+  h.unmount();
+  jest.useRealTimers();
 });

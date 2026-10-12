@@ -2427,6 +2427,7 @@
       "loading": "正在加载好友的商品……",
       "updating": "正在更新…",
       "incomplete": "部分商品无法加载，请尝试刷新。",
+      "partialToast": "部分卖家未响应。下拉刷新。",
       "loaded": "好友的实时商品",
       "refresh": "刷新",
       "openListing": "打开商品",

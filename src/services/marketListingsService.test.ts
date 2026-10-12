@@ -210,7 +210,7 @@ it('treats an unreachable relay as harmless when another relay answered', async 
 
 it('reports incomplete when no relay answers at all', async () => {
   up.clear();
-  expect(await start()).toEqual({ products: [], incomplete: true });
+  expect(await start()).toMatchObject({ products: [], incomplete: true });
 });
 
 it('verifies each unique event once, and not again on a refetch', async () => {
@@ -439,7 +439,7 @@ it('an unverifiable deletion makes the snapshot unavailable without applying cla
   );
   deliver(pass('deletions')[0], huge);
   pass('deletions').forEach((s) => s.c.oneose());
-  expect(await pending).toEqual({ products: [], incomplete: true });
+  expect(await pending).toMatchObject({ products: [], incomplete: true });
   expect((selectVerifiedListings as jest.Mock).mock.calls[0][0]).toEqual([]);
 }, 30000);
 
@@ -606,7 +606,7 @@ it('lets an oversized newer revision hide the older one instead of resurrecting 
   deliver(pass('listings')[0], older);
   deliver(pass('listings')[0], newer);
   await answer();
-  expect(await pending).toEqual({ products: [], incomplete: true });
+  expect(await pending).toMatchObject({ products: [], incomplete: false });
 });
 
 it('bounds oversized-revision markers by the shared event budget', async () => {
@@ -660,7 +660,7 @@ it('bounds oversized-revision markers by the shared event budget', async () => {
   );
   deliver(listings, other);
   await answer();
-  expect(await pending).toEqual({ products: [], incomplete: true });
+  expect(await pending).toMatchObject({ products: [], incomplete: true });
 }, 60000);
 
 it('honours a bulk deletion with more tags than the per-event limit', async () => {
@@ -676,7 +676,7 @@ it('honours a bulk deletion with more tags than the per-event limit', async () =
   );
   deliver(pass('deletions')[1], bulkDelete);
   pass('deletions').forEach((s) => s.c.oneose());
-  expect(await pending).toMatchObject({ products: [], incomplete: true });
+  expect(await pending).toMatchObject({ products: [], incomplete: false });
 });
 
 it('hides an older listing behind a verified revision larger than 256 KB', async () => {
@@ -693,7 +693,7 @@ it('hides an older listing behind a verified revision larger than 256 KB', async
   deliver(pass('listings')[0], older);
   deliver(pass('listings')[0], huge);
   await answer();
-  expect(await pending).toEqual({ products: [], incomplete: true });
+  expect(await pending).toMatchObject({ products: [], incomplete: false });
 });
 
 it('keeps revision tie-breaking: a renderable revision with the lower id still wins', async () => {
@@ -810,7 +810,7 @@ it('ignores an oversized forged deletion even after the oversized failure budget
     deliver(pass('deletions')[0], { ...unsigned, id: getEventHash(unsigned) });
   }
   pass('deletions').forEach((s) => s.c.oneose());
-  expect(await pending).toEqual({ incomplete: true, products: [] });
+  expect(await pending).toMatchObject({ incomplete: true, products: [] });
   expect((selectVerifiedListings as jest.Mock).mock.calls[0][0]).toEqual([]);
 });
 
@@ -851,7 +851,7 @@ it('withholds the snapshot when a sold oversized revision arrives after 16 forge
     ),
   );
   await answer();
-  expect(await pending).toEqual({ products: [], incomplete: true });
+  expect(await pending).toMatchObject({ products: [], incomplete: true });
   expect(firstPage).not.toHaveBeenCalled();
   expect(verify).toHaveBeenCalledTimes(16);
 });
@@ -874,7 +874,7 @@ it('withholds an older listing when an oversized revision exceeds the verificati
     ),
   );
   await answer();
-  expect(await pending).toEqual({ products: [], incomplete: true });
+  expect(await pending).toMatchObject({ products: [], incomplete: true });
   expect(verify).not.toHaveBeenCalled();
 });
 
@@ -941,7 +941,7 @@ it('waits for the yield scheduler before checking queued oversized signatures', 
     expect(verify.mock.calls).toHaveLength(0);
     resume();
     await answer();
-    expect(await pending).toEqual({ products: [], incomplete: true });
+    expect(await pending).toMatchObject({ products: [], incomplete: false });
     expect(verify).toHaveBeenCalledTimes(1);
     expect(dispose).toHaveBeenCalledTimes(1);
   } finally {

@@ -2431,6 +2431,7 @@
       "loading": "Wczytywanie ofert od twoich znajomych…",
       "updating": "Aktualizowanie…",
       "incomplete": "Nie udało się wczytać niektórych ofert. Spróbuj odświeżyć.",
+      "partialToast": "Niektórzy sprzedawcy nie odpowiedzieli. Pociągnij w dół, aby odświeżyć.",
       "loaded": "Oferty na żywo od twoich znajomych",
       "refresh": "Odśwież",
       "openListing": "Otwórz ofertę",

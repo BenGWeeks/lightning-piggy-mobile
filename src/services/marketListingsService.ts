@@ -23,6 +23,9 @@ import type { MarketProduct } from '../data/marketProducts';
 export interface MarketListingsResult {
   products: MarketProduct[];
   incomplete: boolean;
+  /** Deliberate query/work limits, separately from an unanswered relay pass. */
+  budgetLimited?: boolean;
+  transportFailed?: boolean;
 }
 
 const MAX_AUTHORS = 1024;
@@ -122,7 +125,8 @@ async function runSnapshot(
   const startedAt = Date.now();
   const probe = PERF_LOGS_ENABLED ? startJsStallProbe() : null;
   const deadline = startedAt + TIMEOUT_MS;
-  let limited = initiallyLimited;
+  // Planning caps are deliberate, unlike dropping an unchecked candidate.
+  let limited = false;
   let received = 0;
   // Keyed by id AND signature: the id doesn't cover the signature, so a
   // bad-signature copy of a genuine payload must not displace the good copy.
@@ -188,7 +192,6 @@ async function runSnapshot(
     deletionCount++;
   };
   const suppressOversized = (event: Event) => {
-    limited = true;
     if (event.content.length > MAX_VERIFY_CHARS) {
       if (event.kind === 5) deletionUnavailable = true;
       else withheldAuthors.add(event.pubkey);
@@ -253,12 +256,12 @@ async function runSnapshot(
     if (!scope.has(event.pubkey) || event.created_at > Date.now() / 1000 + 300) return;
     if (event.content.length > 32768 || event.tags.length > 256) {
       if (oversizedIds.has(event.id)) return;
-      limited = true;
       if (
         event.content.length > MAX_VERIFY_CHARS ||
         budgetFull(event.kind === 5) ||
         oversizedChecks + oversizedQueue.length >= MAX_OVERSIZED_CHECKS
       ) {
+        limited = true;
         // Never trust an unchecked revision or deletion. Withhold every listing
         // of an affected author so an older revision cannot resurface.
         // Unchecked deletions still make the whole snapshot unavailable.
@@ -368,9 +371,9 @@ async function runSnapshot(
       },
     );
     const products = signal.aborted ? [] : reduceMarketListings(selection.events, scope);
-    const result = {
+    const result: MarketListingsResult = {
       products: products.slice(0, MAX_PRODUCTS),
-      // Transport problems only. Reaching MAX_PRODUCTS is a deliberate display
+      // Unanswered passes or unchecked data. Reaching MAX_PRODUCTS is a deliberate display
       // cap (newest first), not a failed load — "could not be loaded, try
       // refreshing" would be untrue, and refreshing can't change it.
       incomplete:
@@ -385,6 +388,18 @@ async function runSnapshot(
         listings.answered.length === 0 ||
         deletions.answered.length === 0,
     };
+    // Diagnostics are optional so old cached envelopes remain valid.
+    if (
+      initiallyLimited ||
+      limited ||
+      deletionChecksGaveUp ||
+      selection.gaveUp ||
+      deletions.truncated ||
+      listingsCutMattered(listings.truncatedSince, products, selection.overflow)
+    )
+      result.budgetLimited = true;
+    if (listings.answered.length === 0 || deletions.answered.length === 0)
+      result.transportFailed = true;
     if (probe) {
       const stall = probe.stop();
       console.log(

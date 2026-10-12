@@ -5,6 +5,7 @@ import { Zap } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useLocale } from '../contexts/LocaleContext';
 import { createMarketProductCardStyles } from '../styles/MarketProductCard.styles';
+import { usePubkeyProfile } from '../hooks/usePubkeyProfile';
 import VendorAvatar from './VendorAvatar';
 import type { MarketProduct } from '../data/marketProducts';
 import type { MarketVendor } from '../data/marketVendors';
@@ -47,6 +48,9 @@ const MarketProductCard: React.FC<Props> = ({
   variant,
   testID,
 }) => {
+  // Shares the avatar's in-flight lookup and kind-0 cache; no extra relay query.
+  const sellerProfile = usePubkeyProfile(product.listing?.event.pubkey ?? null);
+  const displaySellerName = sellerProfile.name || sellerName;
   const colors = useThemeColors();
   const { t, formatLocale } = useLocale();
   const styles = useMemo(() => createMarketProductCardStyles(colors), [colors]);
@@ -92,11 +96,11 @@ const MarketProductCard: React.FC<Props> = ({
       accessibilityRole="button"
       accessibilityLabel={
         product.listing
-          ? `${product.title}, ${product.listing.priceLabel}, ${sellerName}`
+          ? `${product.title}, ${product.listing.priceLabel}, ${displaySellerName}`
           : t('market.card.accessibility', {
               title: product.title,
               amount: product.priceSats.toLocaleString(formatLocale),
-              seller: sellerName,
+              seller: displaySellerName,
             })
       }
       testID={testID}
@@ -123,7 +127,7 @@ const MarketProductCard: React.FC<Props> = ({
             />
           ) : null}
           <Text style={styles.seller} numberOfLines={1}>
-            {t('market.fromSeller', { seller: sellerName })}
+            {t('market.fromSeller', { seller: displaySellerName })}
           </Text>
         </View>
         {variant === 'list' ? (
