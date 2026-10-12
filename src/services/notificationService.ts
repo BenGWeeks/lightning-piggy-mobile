@@ -1,3 +1,4 @@
+import { getAppFormatLocale } from '../utils/appFormatLocale';
 /**
  * notificationService — single integration point for OS-level
  * notifications surfaced from anywhere in the app (DM rumors, group
@@ -868,21 +869,24 @@ export async function fireCacheNotification(opts: {
 }
 
 /** Fire an incoming-payment / zap notification. Never suppressed. */
-export async function firePaymentNotification(opts: {
-  kind: 'payment' | 'zap';
-  amountSats: number;
-  walletId?: string;
-  /** Zap comment / invoice memo, appended to the body when present. */
-  comment?: string;
-  owner?: string;
-  /** Stable id of the payment (its hash, or a fallback for on-chain), so a
-   * retried notification doesn't add a second history row. */
-  sourceId?: string;
-  /** Catch-up payment (settled well before we noticed it): drawer only. */
-  quiet?: boolean;
-}): Promise<string | null> {
+export async function firePaymentNotification(
+  opts: {
+    kind: 'payment' | 'zap';
+    amountSats: number;
+    walletId?: string;
+    /** Zap comment / invoice memo, appended to the body when present. */
+    comment?: string;
+    owner?: string;
+    /** Stable id of the payment (its hash, or a fallback for on-chain), so a
+     * retried notification doesn't add a second history row. */
+    sourceId?: string;
+    /** Catch-up payment (settled well before we noticed it): drawer only. */
+    quiet?: boolean;
+  },
+  locale?: string,
+): Promise<string | null> {
   const noun = opts.kind === 'zap' ? 'Zap' : 'Payment';
-  const sats = opts.amountSats.toLocaleString();
+  const sats = opts.amountSats.toLocaleString(locale ?? getAppFormatLocale());
   const trimmed = opts.comment?.trim();
   const body = trimmed ? `+${sats} sats · ${trimmed}` : `+${sats} sats received`;
   return fireNotification({

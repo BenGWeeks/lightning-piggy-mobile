@@ -28,7 +28,7 @@ import { isSupportedImageUrl } from '../utils/imageUrl';
 import TransactionTypeIcon, { TransactionIconState } from './TransactionTypeIcon';
 import type { ZapCounterpartyInfo } from '../types/wallet';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useTranslation } from '../contexts/LocaleContext';
+import { useLocale } from '../contexts/LocaleContext';
 import { t as translate } from '../i18n';
 import { BOLTZ_SUPPORT_NPUB, dmRecipient } from '../constants/npubs';
 import {
@@ -115,7 +115,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
   onMessageCounterparty,
   iconState,
 }) => {
-  const t = useTranslation();
+  const { t, formatLocale } = useLocale();
   const colors = useThemeColors();
   const styles = useMemo(() => createTransactionDetailSheetStyles(colors), [colors]);
   const CopyRow: React.FC<{
@@ -461,7 +461,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
     const isIncoming = tx.type === 'incoming';
     const amount = Math.abs(tx.amount);
     const dateTs = tx.settled_at || tx.created_at;
-    const dateStr = dateTs ? formatFriendlyDateTime(dateTs) : null;
+    const dateStr = dateTs ? formatFriendlyDateTime(dateTs, undefined, formatLocale) : null;
     const lines: string[] = [t('transactionDetailSheet.supportGreeting'), ''];
     lines.push(t('transactionDetailSheet.supportIntro'));
     if (effectiveSwapId)
@@ -481,20 +481,22 @@ const TransactionDetailSheet: React.FC<Props> = ({
           : t('transactionDetailSheet.directionSent'),
       }),
     );
-    lines.push(t('transactionDetailSheet.supportAmount', { amount: amount.toLocaleString() }));
+    lines.push(
+      t('transactionDetailSheet.supportAmount', { amount: amount.toLocaleString(formatLocale) }),
+    );
     if (dateStr) lines.push(t('transactionDetailSheet.supportTime', { value: dateStr }));
     lines.push('', t('transactionDetailSheet.supportDetails'));
     lines.push(t('transactionDetailSheet.supportDescribeIssue'));
     return lines.join('\n');
-  }, [tx, effectiveSwapId, swap, claimTxId, t]);
+  }, [tx, effectiveSwapId, swap, claimTxId, t, formatLocale]);
 
   if (!tx) return null;
 
   const isIncoming = tx.type === 'incoming';
   const amount = Math.abs(tx.amount);
-  const fiat = satsToFiatString(amount, btcPrice, currency);
+  const fiat = satsToFiatString(amount, btcPrice, currency, formatLocale);
   const dateTs = tx.settled_at || tx.created_at;
-  const dateStr = dateTs ? formatFriendlyDateTime(dateTs) : null;
+  const dateStr = dateTs ? formatFriendlyDateTime(dateTs, undefined, formatLocale) : null;
   const preimage = tx.preimage || enrichment.preimage;
   const invoice = tx.invoice || enrichment.invoice;
 
@@ -545,7 +547,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
               ]}
             >
               {isIncoming ? '+' : '-'}
-              {amount.toLocaleString()} sats
+              {amount.toLocaleString(formatLocale)} sats
             </Text>
             {fiat ? <Text style={styles.headerFiat}>{fiat}</Text> : null}
             {tx.description ? <Text style={styles.headerLabel}>{tx.description}</Text> : null}
@@ -696,7 +698,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
           {tx.blockHeight ? (
             <View style={styles.row}>
               <Text style={styles.rowLabel}>{t('transactionDetailSheet.blockLabel')}</Text>
-              <Text style={styles.rowValue}>{tx.blockHeight.toLocaleString()}</Text>
+              <Text style={styles.rowValue}>{tx.blockHeight.toLocaleString(formatLocale)}</Text>
             </View>
           ) : null}
 
@@ -710,7 +712,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
             >
               <Text style={styles.rowLabel}>{t('transactionDetailSheet.feeLabel')}</Text>
               <View style={styles.rowValueWrap}>
-                <Text style={styles.rowValue}>{tx.feesSats.toLocaleString()} sats</Text>
+                <Text style={styles.rowValue}>{tx.feesSats.toLocaleString(formatLocale)} sats</Text>
                 <Copy size={14} color={colors.textSupplementary} />
               </View>
             </TouchableOpacity>

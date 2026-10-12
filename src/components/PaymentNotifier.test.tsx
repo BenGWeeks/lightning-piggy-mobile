@@ -14,6 +14,9 @@ type MockTx = {
 let mockWallets: { id: string; transactions: MockTx[] }[] = [
   { id: 'w', transactions: [{ paymentHash: mockHash, description: 'test' }] },
 ];
+jest.mock('../contexts/LocaleContext', () => ({
+  useLocale: () => ({ t: (key: string) => key, locale: 'en', formatLocale: 'en' }),
+}));
 jest.mock('../contexts/WalletContext', () => ({
   useWallet: () => ({ wallets: mockWallets }),
   useWalletLive: () => ({

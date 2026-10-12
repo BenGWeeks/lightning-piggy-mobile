@@ -161,3 +161,12 @@ export function planReverseClaim(input: {
   }
   return { outputSats: lockupSats - requiredFeeSats, feeSats: requiredFeeSats, exact: false };
 }
+
+/** The additional fee displayed when an exact-recipient swap quote changes. */
+export function formatRecipientFee(
+  recipientSats: number,
+  fees: ReverseFees,
+  locale?: string,
+): string {
+  return quoteExactRecipient(recipientSats, fees).feeSats.toLocaleString(locale);
+}

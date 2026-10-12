@@ -5,7 +5,6 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  StyleSheet,
   FlatList,
   ActivityIndicator,
   Image,
@@ -29,7 +28,7 @@ import EventsFilterSheet, {
   type EventsSortKey,
 } from '../components/EventsFilterSheet';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useTranslation } from '../contexts/LocaleContext';
+import { useLocale } from '../contexts/LocaleContext';
 import { t as translate } from '../i18n';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
@@ -47,6 +46,7 @@ import { loadCachedEvents, peekCachedEventsSync, saveEvents } from '../services/
 import { useCoalescedMap } from '../utils/useCoalescedMap';
 import { isFutureEvent } from '../utils/futureEvent';
 import { isHiddenInProd, stripHiddenForPersist } from '../utils/exploreContentFilter';
+import { createEventsScreenStyles, type EventsScreenStyles } from '../styles/EventsScreen.styles';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -63,9 +63,9 @@ interface Props {
  * Replaces the M1 "Coming soon" stub. Closes M7 of the Explore plan.
  */
 const EventsScreen: React.FC<Props> = ({ navigation }) => {
-  const t = useTranslation();
+  const { t } = useLocale();
   const colors = useThemeColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createEventsScreenStyles(colors), [colors]);
   // Coalesce per-event setState bursts during the nearby-event relay
   // backfill into one commit per ~100 ms window (audit MED 4) — the
   // naive `new Map(prev)` clone per event was O(N²) over a cold-start
@@ -539,10 +539,10 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
   );
 };
 
-const formatDate = (ts: number | null): string => {
+const formatDate = (ts: number | null, locale: string): string => {
   if (!ts) return translate('eventsScreen.timeTba');
   const d = new Date(ts * 1000);
-  return d.toLocaleString(undefined, {
+  return d.toLocaleString(locale, {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
@@ -551,12 +551,12 @@ const formatDate = (ts: number | null): string => {
   });
 };
 
-const dayLabel = (ts: number | null): { day: string; month: string } => {
+const dayLabel = (ts: number | null, locale: string): { day: string; month: string } => {
   if (!ts) return { day: '?', month: '—' };
   const d = new Date(ts * 1000);
   return {
     day: String(d.getDate()),
-    month: d.toLocaleString(undefined, { month: 'short' }).toUpperCase(),
+    month: d.toLocaleString(locale, { month: 'short' }).toUpperCase(),
   };
 };
 
@@ -567,9 +567,9 @@ const EventHero: React.FC<{
   onPress: () => void;
   onOpenInMaps: () => void;
   colors: Palette;
-  styles: ReturnType<typeof createStyles>;
+  styles: EventsScreenStyles;
 }> = ({ event, distance, expanded, onPress, onOpenInMaps, colors, styles }) => {
-  const t = useTranslation();
+  const { t, formatLocale } = useLocale();
   return (
     <TouchableOpacity
       style={styles.heroCard}
@@ -591,7 +591,7 @@ const EventHero: React.FC<{
           {event.title}
         </Text>
         <Text style={styles.heroMeta} numberOfLines={2}>
-          {formatDate(event.startsAt)}
+          {formatDate(event.startsAt, formatLocale)}
           {Number.isFinite(distance) ? ` · ${formatDistance(distance)}` : ''}
           {event.location ? ` · ${event.location}` : ''}
         </Text>
@@ -623,10 +623,10 @@ const EventRow: React.FC<{
   onToggle: () => void;
   onOpenInMaps: () => void;
   colors: Palette;
-  styles: ReturnType<typeof createStyles>;
+  styles: EventsScreenStyles;
 }> = ({ event, distance, upNext, expanded, onToggle, onOpenInMaps, colors, styles }) => {
-  const t = useTranslation();
-  const { day, month } = dayLabel(event.startsAt);
+  const { t, formatLocale } = useLocale();
+  const { day, month } = dayLabel(event.startsAt, formatLocale);
   return (
     <TouchableOpacity
       style={[styles.row, upNext ? styles.rowUpNext : null]}
@@ -651,7 +651,7 @@ const EventRow: React.FC<{
           {event.title}
         </Text>
         <Text style={styles.rowMeta} numberOfLines={1}>
-          {formatDate(event.startsAt)}
+          {formatDate(event.startsAt, formatLocale)}
           {event.location ? ` · ${event.location}` : ''}
         </Text>
         {/* Distance gets its own line so it's never truncated by a long
@@ -665,216 +665,5 @@ const EventRow: React.FC<{
     </TouchableOpacity>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    container: { flex: 1, backgroundColor: colors.background },
-    header: {
-      paddingHorizontal: 16,
-      paddingTop: 48,
-      paddingBottom: 14,
-      backgroundColor: colors.brandPink,
-      minHeight: 140,
-      overflow: 'hidden',
-    },
-    headerRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-    },
-    headerTitle: {
-      flex: 1,
-      textAlign: 'center',
-      fontSize: 18,
-      fontWeight: '700',
-      color: colors.white,
-    },
-    headerTagline: {
-      marginTop: 10,
-      paddingHorizontal: 4,
-      color: 'rgba(255,255,255,0.85)',
-      fontSize: 13,
-      fontWeight: '500',
-    },
-    center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 },
-    subtle: { fontSize: 14, color: colors.textSupplementary, textAlign: 'center', lineHeight: 20 },
-    emptyTitle: {
-      fontSize: 17,
-      fontWeight: '700',
-      color: colors.textHeader,
-      marginTop: 6,
-      textAlign: 'center',
-    },
-    errorText: { fontSize: 14, color: colors.brandPink, textAlign: 'center', lineHeight: 20 },
-    retryButton: {
-      backgroundColor: colors.brandPink,
-      paddingHorizontal: 20,
-      paddingVertical: 12,
-      borderRadius: 100,
-      marginTop: 8,
-    },
-    retryButtonText: { color: colors.white, fontWeight: '700', fontSize: 14 },
-    listContent: { padding: 16 },
-    row: {
-      flexDirection: 'row',
-      gap: 14,
-      backgroundColor: colors.surface,
-      borderRadius: 12,
-      padding: 12,
-      marginBottom: 10,
-    },
-    dateBlock: {
-      width: 56,
-      paddingVertical: 6,
-      backgroundColor: colors.brandPinkLight,
-      borderRadius: 10,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    dateMonth: { color: colors.brandPink, fontSize: 11, fontWeight: '800', letterSpacing: 1 },
-    dateDay: { color: colors.brandPink, fontSize: 22, fontWeight: '800', marginTop: 2 },
-    thumb: {
-      width: 56,
-      height: 56,
-      borderRadius: 10,
-      backgroundColor: colors.divider,
-    },
-    rowUpNext: {
-      borderLeftWidth: 3,
-      borderLeftColor: colors.brandPink,
-      paddingLeft: 9, // 12 - 3 to keep contents aligned with non-UpNext rows
-    },
-    upNextChip: {
-      position: 'absolute',
-      top: 8,
-      right: 10,
-      fontSize: 9,
-      fontWeight: '800',
-      letterSpacing: 1,
-      color: colors.brandPink,
-    },
-    searchRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      backgroundColor: colors.surface,
-      paddingHorizontal: 12,
-      paddingVertical: 8,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: colors.divider,
-    },
-    filterIconButton: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      backgroundColor: colors.background,
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginLeft: 8,
-    },
-    filterIconBadge: {
-      position: 'absolute',
-      top: -2,
-      right: -2,
-      minWidth: 16,
-      height: 16,
-      paddingHorizontal: 4,
-      borderRadius: 8,
-      backgroundColor: colors.brandPink,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    filterIconBadgeText: {
-      color: colors.white,
-      fontSize: 10,
-      fontWeight: '800',
-    },
-    searchInput: {
-      flex: 1,
-      fontSize: 14,
-      color: colors.textHeader,
-      paddingVertical: 4,
-    },
-    emptySearchText: {
-      fontSize: 13,
-      color: colors.textSupplementary,
-      textAlign: 'center',
-      padding: 24,
-    },
-    rowMain: { flex: 1 },
-    rowTitle: { fontSize: 15, fontWeight: '700', color: colors.textHeader },
-    rowMeta: { fontSize: 12, color: colors.textSupplementary, marginTop: 2 },
-    rowDistance: {
-      fontSize: 12,
-      color: colors.brandPink,
-      marginTop: 2,
-      fontWeight: '600',
-    },
-    expanded: { marginTop: 10, gap: 10 },
-    expandedImage: {
-      width: '100%',
-      aspectRatio: 16 / 9,
-      borderRadius: 10,
-      backgroundColor: colors.divider,
-    },
-    expandedDescription: { fontSize: 13, color: colors.textHeader, lineHeight: 19 },
-    expandedHashtags: { fontSize: 12, color: colors.textSupplementary },
-    locationButton: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      backgroundColor: colors.brandPinkLight,
-      paddingHorizontal: 12,
-      paddingVertical: 8,
-      borderRadius: 100,
-      alignSelf: 'flex-start',
-    },
-    locationButtonText: { color: colors.brandPink, fontSize: 13, fontWeight: '700' },
-    heroCard: {
-      // No marginHorizontal — listContent already applies padding: 16,
-      // so the hero aligns flush with the rows below it.
-      marginTop: 8,
-      marginBottom: 12,
-      borderRadius: 14,
-      backgroundColor: colors.surface,
-      overflow: 'hidden',
-    },
-    heroImage: {
-      width: '100%',
-      height: 180,
-      backgroundColor: colors.background,
-    },
-    heroImageFallback: {
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    heroBody: {
-      padding: 14,
-      gap: 6,
-    },
-    heroUpNext: {
-      fontSize: 11,
-      fontWeight: '800',
-      letterSpacing: 1,
-      color: colors.brandPink,
-    },
-    heroTitle: {
-      fontSize: 18,
-      fontWeight: '800',
-      color: colors.textHeader,
-      lineHeight: 22,
-    },
-    heroMeta: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      lineHeight: 17,
-    },
-    heroDescription: {
-      fontSize: 13,
-      color: colors.textBody,
-      lineHeight: 19,
-      marginTop: 4,
-    },
-  });
 
 export default EventsScreen;

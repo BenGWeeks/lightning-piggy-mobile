@@ -69,7 +69,7 @@ export interface ForwardSwapWatch {
  * Watch a broadcast forward swap (on-chain → Lightning) until Boltz pays the
  * invoice, narrating the confirmation wait on the Move sheet. Never throws.
  */
-export async function watchForwardSwap(watch: ForwardSwapWatch): Promise<void> {
+export async function watchForwardSwap(watch: ForwardSwapWatch, locale?: string): Promise<void> {
   const { swapId, invoiceSats } = watch;
   let lastStatus: string | null = null;
   try {
@@ -109,11 +109,11 @@ export async function watchForwardSwap(watch: ForwardSwapWatch): Promise<void> {
     }
     return;
   }
-  watch.onMessage(submarineSwapCompleteMessage(invoiceSats));
+  watch.onMessage(submarineSwapCompleteMessage(invoiceSats, locale));
   Toast.show({
     type: 'success',
     text1: 'Swap complete',
-    text2: `${invoiceSats.toLocaleString()} sats delivered via Lightning.`,
+    text2: `${invoiceSats.toLocaleString(locale)} sats delivered via Lightning.`,
     position: 'top',
     visibilityTime: 10000,
   });

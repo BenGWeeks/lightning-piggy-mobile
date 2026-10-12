@@ -1,3 +1,4 @@
+import { useLocale } from '../contexts/LocaleContext';
 import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -57,12 +58,13 @@ const TransferProgress: React.FC<Props> = ({
   onRetry,
   onClose,
 }) => {
+  const { formatLocale } = useLocale();
   const colors = useThemeColors();
   const styles = useMemo(() => createTransferProgressStyles(colors), [colors]);
 
   return (
     <View style={styles.progressView}>
-      <Text style={styles.progressSummary}>{amountSats.toLocaleString()} sats</Text>
+      <Text style={styles.progressSummary}>{amountSats.toLocaleString(formatLocale)} sats</Text>
       <Text style={styles.progressRoute}>
         {sourceAlias} → {destAlias}
       </Text>

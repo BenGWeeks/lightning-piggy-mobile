@@ -1,3 +1,4 @@
+import { getAppFormatLocale } from '../utils/appFormatLocale';
 import { dmThreadId, protocolForWireKind } from '../utils/dmProtocol';
 import React from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -514,7 +515,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         return;
       }
       const serialized = serializeOrder(order);
-      const preview = orderPreviewText(order);
+      const preview = orderPreviewText(order, getAppFormatLocale());
       const orderRow: DmMessageRow = {
         owner: viewerPubkey,
         eventId: ev.id,
