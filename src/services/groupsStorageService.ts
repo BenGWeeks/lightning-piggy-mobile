@@ -53,7 +53,9 @@ function isValidGroupActivity(v: unknown): v is GroupActivity {
     Number.isFinite(a.lastActivityAt) &&
     typeof a.lastText === 'string' &&
     (a.lastSenderPubkey === null || typeof a.lastSenderPubkey === 'string') &&
-    Array.isArray(a.recentSenderPubkeys)
+    Array.isArray(a.recentSenderPubkeys) &&
+    (a.lastMentionAt === undefined ||
+      (typeof a.lastMentionAt === 'number' && Number.isFinite(a.lastMentionAt)))
   );
 }
 

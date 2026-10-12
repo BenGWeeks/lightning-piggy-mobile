@@ -2613,7 +2613,22 @@
     "nfc": "NFC tab"
   },
   "liveMessages": {
-    "newMessages": "New messages"
+    "newMessages": "New messages",
+    "unreadDivider": "Unread messages",
+    "jumpToMention": {
+      "one": "Jump to {{count}} unread mention",
+      "other": "Jump to {{count}} unread mentions"
+    },
+    "jumpToLatest": "Jump to latest",
+    "jumpToLatestUnread": {
+      "one": "Jump to latest, {{count}} unread message",
+      "other": "Jump to latest, {{count}} unread messages"
+    }
+  },
+  "chatMentions": {
+    "picker": "Mention a member",
+    "pickMember": "Mention {{name}}",
+    "rowBadge": "You were mentioned"
   },
   "publishedRelays": {
     "intro": "These lists are public. Other Nostr apps use them to find your posts and to send you DMs. Publishing signs the list with your key and replaces your previous one.",

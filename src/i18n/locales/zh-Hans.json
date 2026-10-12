@@ -2613,7 +2613,22 @@
     "nfc": "NFC标签页"
   },
   "liveMessages": {
-    "newMessages": "新消息"
+    "newMessages": "新消息",
+    "unreadDivider": "未读消息",
+    "jumpToMention": {
+      "one": "跳转到未读提及（{{count}} 条）",
+      "other": "跳转到未读提及（{{count}} 条）"
+    },
+    "jumpToLatest": "跳转到最新消息",
+    "jumpToLatestUnread": {
+      "one": "跳转到最新消息，{{count}} 条未读",
+      "other": "跳转到最新消息，{{count}} 条未读"
+    }
+  },
+  "chatMentions": {
+    "picker": "提及成员",
+    "pickMember": "提及{{name}}",
+    "rowBadge": "有人提及了你"
   },
   "publishedRelays": {
     "intro": "这些列表是公开的。其他Nostr应用会用它们来查找你的帖子并给你发私信。发布时会用你的密钥为列表签名，并替换你之前的列表。",

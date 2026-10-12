@@ -24,6 +24,9 @@ export function useLiveMessageIndicator({
   const activeScope = useRef(scope);
   const pendingScroll = useRef<ReturnType<typeof setTimeout> | null>(null);
   const nearEdge = useRef(true);
+  // Until this time (ms) the list doesn't snap back to the live edge — set
+  // while a jump into history is landing (see leaveEdge).
+  const heldUntil = useRef(0);
   const scrollRef = useRef(scrollToLatest);
   scrollRef.current = scrollToLatest;
   const [atEdge, setAtEdge] = useState(true);
@@ -85,7 +88,9 @@ export function useLiveMessageIndicator({
         edge === 'start'
           ? contentOffset.y
           : contentSize.height - layoutMeasurement.height - contentOffset.y;
-      const near = distance < 200;
+      // A jump into history may pass near the edge on its way (an estimated
+      // offset for a row not rendered yet): don't let that re-arm following.
+      const near = distance < 200 && Date.now() >= heldUntil.current;
       nearEdge.current = near;
       setAtEdge((old) => (old === near ? old : near));
       if (near) setHasNewMessages(false);
@@ -94,13 +99,26 @@ export function useLiveMessageIndicator({
   );
 
   const jumpToLatest = useCallback(() => {
+    heldUntil.current = 0;
     nearEdge.current = true;
     setAtEdge(true);
     setHasNewMessages(false);
     scrollRef.current(true);
   }, []);
   const onContentSizeChange = useCallback(() => {
-    if (nearEdge.current) scrollRef.current(false);
+    if (nearEdge.current && Date.now() >= heldUntil.current) scrollRef.current(false);
   }, []);
-  return { atEdge, hasNewMessages, onScroll, jumpToLatest, onContentSizeChange };
+  // The reader is being taken into history (the first unread, a mention):
+  // stop following the live edge until they scroll back to it (#1295). For
+  // `holdMs`, scrolling near the edge doesn't count — the jump is landing.
+  const leaveEdge = useCallback((holdMs = 0) => {
+    heldUntil.current = holdMs > 0 ? Date.now() + holdMs : 0;
+    if (pendingScroll.current !== null) {
+      clearTimeout(pendingScroll.current);
+      pendingScroll.current = null;
+    }
+    nearEdge.current = false;
+    setAtEdge(false);
+  }, []);
+  return { atEdge, hasNewMessages, onScroll, jumpToLatest, onContentSizeChange, leaveEdge };
 }

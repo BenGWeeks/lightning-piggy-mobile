@@ -2613,7 +2613,22 @@
     "nfc": "Tab „NFC“"
   },
   "liveMessages": {
-    "newMessages": "Neue Nachrichten"
+    "newMessages": "Neue Nachrichten",
+    "unreadDivider": "Ungelesene Nachrichten",
+    "jumpToMention": {
+      "one": "Zu {{count}} ungelesenen Erwähnung springen",
+      "other": "Zu {{count}} ungelesenen Erwähnungen springen"
+    },
+    "jumpToLatest": "Zur neuesten Nachricht springen",
+    "jumpToLatestUnread": {
+      "one": "Zur neuesten Nachricht springen, {{count}} ungelesene Nachricht",
+      "other": "Zur neuesten Nachricht springen, {{count}} ungelesene Nachrichten"
+    }
+  },
+  "chatMentions": {
+    "picker": "Mitglied erwähnen",
+    "pickMember": "{{name}} erwähnen",
+    "rowBadge": "Du wurdest erwähnt"
   },
   "publishedRelays": {
     "intro": "Diese Listen sind öffentlich. Andere Nostr-Apps nutzen sie, um deine Beiträge zu finden und dir DMs zu schicken. Beim Veröffentlichen wird die Liste mit deinem Schlüssel signiert und ersetzt deine bisherige.",

@@ -84,16 +84,40 @@ export function marmotRumorToDmRow(owner: string, event: MarmotMessageEvent): Dm
   };
 }
 
+/** At most this many `p`-tag mentions are kept per message. */
+const MAX_TAG_MENTIONS = 20;
+
+/**
+ * Pubkeys a Marmot chat message `p`-tags as mentions (#1295). Older Lightning
+ * Piggy builds sent group messages as NIP-17-shaped rumors that `p`-tag the
+ * whole roster and carry a `subject` — those tags name the audience, not
+ * mentions, so a rumor with a `subject` tag yields none.
+ */
+export function marmotTagMentions(rumor: MarmotRumor): string[] {
+  if (rumor.kind !== MARMOT_CHAT_KIND) return [];
+  if (rumor.tags.some((t) => t[0] === 'subject')) return [];
+  const out = new Set<string>();
+  for (const t of rumor.tags) {
+    if (t[0] === 'p' && typeof t[1] === 'string' && /^[0-9a-f]{64}$/i.test(t[1])) {
+      out.add(t[1].toLowerCase());
+      if (out.size >= MAX_TAG_MENTIONS) break;
+    }
+  }
+  return [...out];
+}
+
 export function marmotRumorToGroupMessage(
   rumor: MarmotRumor,
   mediaKeys?: MarmotMediaKeys,
 ): GroupMessage {
   const replyTo = marmotReplyParent(rumor);
+  const mentions = marmotTagMentions(rumor);
   return {
     id: rumor.id,
     senderPubkey: rumor.pubkey.toLowerCase(),
     text: storedMarmotContent(rumor, mediaKeys).text,
     createdAt: rumor.created_at,
     ...(replyTo ? { replyTo } : {}),
+    ...(mentions.length > 0 ? { mentions } : {}),
   };
 }

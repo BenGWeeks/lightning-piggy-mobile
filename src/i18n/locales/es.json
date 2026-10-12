@@ -2613,7 +2613,22 @@
     "nfc": "Pestaña NFC"
   },
   "liveMessages": {
-    "newMessages": "Mensajes nuevos"
+    "newMessages": "Mensajes nuevos",
+    "unreadDivider": "Mensajes no leídos",
+    "jumpToMention": {
+      "one": "Ir a {{count}} mención sin leer",
+      "other": "Ir a {{count}} menciones sin leer"
+    },
+    "jumpToLatest": "Ir a lo más reciente",
+    "jumpToLatestUnread": {
+      "one": "Ir a lo más reciente, {{count}} mensaje sin leer",
+      "other": "Ir a lo más reciente, {{count}} mensajes sin leer"
+    }
+  },
+  "chatMentions": {
+    "picker": "Mencionar a un miembro",
+    "pickMember": "Mencionar a {{name}}",
+    "rowBadge": "Te han mencionado"
   },
   "publishedRelays": {
     "intro": "Estas listas son públicas. Otras apps de Nostr las usan para encontrar tus publicaciones y enviarte mensajes directos. Al publicar, la lista se firma con tu clave y sustituye a la anterior.",

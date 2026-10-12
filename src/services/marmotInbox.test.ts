@@ -1,6 +1,11 @@
 import { marmotImetaTag } from './marmotMedia';
 import { parseVoiceNote } from '../utils/messageContent';
-import { marmotRumorToDmRow, marmotRumorToGroupMessage, storedKindForMarmot } from './marmotInbox';
+import {
+  marmotRumorToDmRow,
+  marmotRumorToGroupMessage,
+  marmotTagMentions,
+  storedKindForMarmot,
+} from './marmotInbox';
 import type { MarmotGroupSummary } from './marmotSession';
 
 const ME = 'a'.repeat(64);
@@ -126,5 +131,53 @@ describe('marmotInbox replies', () => {
   it('leaves replyTo off a plain message', () => {
     expect(marmotRumorToDmRow(ME, { group: dm, rumor: rumor() })).not.toHaveProperty('replyTo');
     expect(marmotRumorToGroupMessage(rumor())).not.toHaveProperty('replyTo');
+  });
+});
+
+describe('marmotTagMentions (#1295)', () => {
+  const ALICE = 'c'.repeat(64);
+  const tagged = (tags: string[][]) => ({ ...rumor(), tags });
+
+  it('reads p tags on a Marmot chat message as mentions', () => {
+    expect(
+      marmotTagMentions(
+        tagged([
+          ['p', ALICE.toUpperCase()],
+          ['p', ALICE],
+        ]),
+      ),
+    ).toEqual([ALICE]);
+    expect(marmotRumorToGroupMessage(tagged([['p', ALICE]]))).toMatchObject({ mentions: [ALICE] });
+  });
+
+  it('ignores the roster p tags of an older NIP-17-shaped rumor (has a subject)', () => {
+    expect(
+      marmotTagMentions(
+        tagged([
+          ['subject', 'Pigs'],
+          ['p', ALICE],
+        ]),
+      ),
+    ).toEqual([]);
+    expect(
+      marmotRumorToGroupMessage(
+        tagged([
+          ['subject', 'Pigs'],
+          ['p', ALICE],
+        ]),
+      ),
+    ).not.toHaveProperty('mentions');
+  });
+
+  it('ignores malformed p tags and non-chat kinds', () => {
+    expect(
+      marmotTagMentions(
+        tagged([
+          ['p', 'nope'],
+          ['e', ALICE],
+        ]),
+      ),
+    ).toEqual([]);
+    expect(marmotTagMentions({ ...tagged([['p', ALICE]]), kind: 7 })).toEqual([]);
   });
 });

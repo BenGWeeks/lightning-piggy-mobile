@@ -1,5 +1,12 @@
 import { useLiveMessageIndicator } from '../hooks/useLiveMessageIndicator';
 import NewMessagesPill from '../components/NewMessagesPill';
+import FullscreenGifModal from '../components/FullscreenGifModal';
+import ChatJumpButtons from '../components/ChatJumpButtons';
+import UnreadDivider from '../components/UnreadDivider';
+import {
+  conversationItemKey,
+  useConversationReadPosition,
+} from '../hooks/useConversationReadPosition';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useConversationProtocol } from '../hooks/useConversationProtocol';
 import ConversationHeader from '../components/ConversationHeader';
@@ -8,9 +15,7 @@ import { useDmDevices } from '../hooks/useDmDevices';
 import {
   View,
   Text,
-  TouchableOpacity,
   Pressable,
-  Modal,
   FlatList,
   ActivityIndicator,
   RefreshControl,
@@ -24,8 +29,6 @@ import {
   useReanimatedKeyboardAnimation,
 } from 'react-native-keyboard-controller';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
-import { ArrowDown } from 'lucide-react-native';
-import { Image as ExpoImage } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -251,6 +254,17 @@ const ConversationScreen: React.FC = () => {
     entries: liveEntries,
     loading,
     scrollToLatest: (animated) => listRef.current?.scrollToOffset({ offset: 0, animated }),
+  });
+
+  // Read position (#1295): open at the first unread under an "Unread
+  // messages" divider; the jump-to-latest arrow carries the unread count.
+  const read = useConversationReadPosition({
+    listRef,
+    items,
+    owner: myPubkey,
+    peer: pubkey,
+    loading,
+    leaveEdge: live.leaveEdge,
   });
 
   const { isInvoicePaid } = usePaidInvoiceTracker(messages);
@@ -502,42 +516,55 @@ const ConversationScreen: React.FC = () => {
   // Failed Marmot invite → draft a "please invite me again" for them (#1269).
   const askForInvite = useCallback(() => setDraft(t('marmotInviteFailed.askDraft')), [t]);
   const renderItem = useCallback(
-    ({ item }: { item: Item }) => (
-      <ConversationMessageRow
-        item={item}
-        styles={styles}
-        colors={colors}
-        sharedProfiles={sharedProfiles}
-        isInvoicePaid={isInvoicePaid}
-        onPayInvoice={handlePayInvoice}
-        onOpenContact={openSharedContact}
-        onOpenLocation={openLocation}
-        onOpenGifFullscreen={setFullscreenGifUrl}
-        onToggleSecretMode={handleToggleSecretMode}
-        pollAggregates={pollAggregates}
-        onVotePoll={handleVotePoll}
-        onShowTxDetail={setDetailTx}
-        liveLocationLatest={liveLocationLatest}
-        liveLocationStatus={liveLocationBubbleStatus}
-        liveLocationRemainingMs={liveLocationBubbleRemaining}
-        onStopLiveLocation={handleStopLive}
-        myLat={myPos?.lat ?? null}
-        myLon={myPos?.lon ?? null}
-        myAccuracyMetres={myPos?.accuracy ?? null}
-        myAvatarUri={profile?.picture ?? null}
-        peerAvatarUri={picture ?? null}
-        onOpenMap={onOpenMap}
-        onShowInfo={handleShowInfo}
-        onLongPress={buildOnLongPress(item)}
-        reactions={reactionsForItem(item)}
-        onToggleReaction={buildOnToggleReaction(item)}
-        onAddNwc={addSharedWallet}
-        peerName={name}
-        onAskForInvite={askForInvite}
-        peerMediaTrusted={peerMediaTrusted}
-      />
-    ),
+    ({ item }: { item: Item }) => {
+      const row = (
+        <ConversationMessageRow
+          item={item}
+          styles={styles}
+          colors={colors}
+          sharedProfiles={sharedProfiles}
+          isInvoicePaid={isInvoicePaid}
+          onPayInvoice={handlePayInvoice}
+          onOpenContact={openSharedContact}
+          onOpenLocation={openLocation}
+          onOpenGifFullscreen={setFullscreenGifUrl}
+          onToggleSecretMode={handleToggleSecretMode}
+          pollAggregates={pollAggregates}
+          onVotePoll={handleVotePoll}
+          onShowTxDetail={setDetailTx}
+          liveLocationLatest={liveLocationLatest}
+          liveLocationStatus={liveLocationBubbleStatus}
+          liveLocationRemainingMs={liveLocationBubbleRemaining}
+          onStopLiveLocation={handleStopLive}
+          myLat={myPos?.lat ?? null}
+          myLon={myPos?.lon ?? null}
+          myAccuracyMetres={myPos?.accuracy ?? null}
+          myAvatarUri={profile?.picture ?? null}
+          peerAvatarUri={picture ?? null}
+          onOpenMap={onOpenMap}
+          onShowInfo={handleShowInfo}
+          onLongPress={buildOnLongPress(item)}
+          reactions={reactionsForItem(item)}
+          onToggleReaction={buildOnToggleReaction(item)}
+          onAddNwc={addSharedWallet}
+          peerName={name}
+          onAskForInvite={askForInvite}
+          peerMediaTrusted={peerMediaTrusted}
+        />
+      );
+      // Each inverted-list cell is flipped whole, so the divider still draws
+      // above the row.
+      return item.id === read.dividerId ? (
+        <>
+          <UnreadDivider testID="conversation-unread-divider" />
+          {row}
+        </>
+      ) : (
+        row
+      );
+    },
     [
+      read.dividerId,
       peerMediaTrusted,
       openLocation,
       isInvoicePaid,
@@ -627,7 +654,7 @@ const ConversationScreen: React.FC = () => {
               ref={listRef}
               style={styles.flex}
               data={items}
-              keyExtractor={(it) => it.id}
+              keyExtractor={conversationItemKey}
               renderItem={renderItem}
               contentContainerStyle={listContentStyle}
               inverted
@@ -663,6 +690,8 @@ const ConversationScreen: React.FC = () => {
               onScroll={live.onScroll}
               onContentSizeChange={live.onContentSizeChange}
               scrollEventThrottle={100}
+              viewabilityConfigCallbackPairs={read.viewabilityConfigCallbackPairs}
+              onScrollToIndexFailed={read.onScrollToIndexFailed}
             />
           )}
 
@@ -682,17 +711,19 @@ const ConversationScreen: React.FC = () => {
 
           {live.hasNewMessages && !loading ? (
             <NewMessagesPill onPress={live.jumpToLatest} testID="conversation-new-messages" />
-          ) : !live.atEdge && !loading ? (
-            <View style={styles.scrollToBottomWrap} pointerEvents="box-none">
-              <TouchableOpacity
-                style={styles.scrollToBottomFab}
-                onPress={live.jumpToLatest}
-                accessibilityLabel={t('conversationScreen.scrollToRecent')}
-                testID="conversation-scroll-to-bottom"
-              >
-                <ArrowDown size={20} color={colors.white} />
-              </TouchableOpacity>
-            </View>
+          ) : null}
+          {!loading ? (
+            <ChatJumpButtons
+              mentionCount={0}
+              onJumpToMention={read.jumpToNextMention}
+              showLatest={!live.atEdge && !live.hasNewMessages}
+              unreadCount={read.unread}
+              onJumpToLatest={live.jumpToLatest}
+              testIDs={{
+                mention: 'conversation-jump-to-mention',
+                latest: 'conversation-scroll-to-bottom',
+              }}
+            />
           ) : null}
         </Animated.View>
 
@@ -809,31 +840,12 @@ const ConversationScreen: React.FC = () => {
         onClose={() => setPollComposerOpen(false)}
         onSend={handleSendPoll}
       />
-      <Modal
-        visible={fullscreenGifUrl !== null}
-        transparent
-        statusBarTranslucent
-        navigationBarTranslucent
-        animationType="fade"
-        onRequestClose={() => setFullscreenGifUrl(null)}
-      >
-        <Pressable
-          style={styles.fullscreenBackdrop}
-          onPress={() => setFullscreenGifUrl(null)}
-          accessibilityLabel={t('conversationScreen.closeFullscreenGif')}
-          testID="conversation-gif-fullscreen"
-        >
-          {fullscreenGifUrl ? (
-            <ExpoImage
-              source={{ uri: fullscreenGifUrl }}
-              style={styles.fullscreenImage}
-              contentFit="contain"
-              cachePolicy="memory-disk"
-              accessibilityIgnoresInvertColors
-            />
-          ) : null}
-        </Pressable>
-      </Modal>
+      <FullscreenGifModal
+        url={fullscreenGifUrl}
+        onClose={() => setFullscreenGifUrl(null)}
+        closeLabel={t('conversationScreen.closeFullscreenGif')}
+        testID="conversation-gif-fullscreen"
+      />
       <FriendPickerSheet
         visible={contactPickerOpen}
         onClose={() => {

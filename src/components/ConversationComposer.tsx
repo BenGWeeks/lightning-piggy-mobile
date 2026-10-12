@@ -1,5 +1,12 @@
 import React, { useMemo } from 'react';
-import { ActivityIndicator, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+  type TextInputProps,
+} from 'react-native';
 import { Plus, Send, Mic, Pencil, X } from 'lucide-react-native';
 import Svg, { Path } from 'react-native-svg';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
@@ -87,6 +94,15 @@ export interface ConversationComposerProps {
    * Attachments and voice notes are off meanwhile.
    */
   editing?: { onCancel: () => void };
+  /**
+   * Rendered directly above the input row, inside the keyboard-sticky area —
+   * the group chat's @mention picker (#1295).
+   */
+  accessory?: React.ReactNode;
+  /** Cursor tracking for the @mention picker. */
+  onSelectionChange?: TextInputProps['onSelectionChange'];
+  /** Set briefly to place the cursor (after inserting a mention). */
+  selection?: TextInputProps['selection'];
   testIDs?: {
     input?: string;
     attach?: string;
@@ -120,6 +136,9 @@ const ConversationComposer: React.FC<ConversationComposerProps> = ({
   attachButtonHasBackground = false,
   composerPaddingHorizontal = 10,
   editing,
+  accessory,
+  onSelectionChange,
+  selection,
   testIDs,
   accessibilityLabels,
 }) => {
@@ -173,6 +192,7 @@ const ConversationComposer: React.FC<ConversationComposerProps> = ({
           </TouchableOpacity>
         </View>
       ) : null}
+      {accessory}
       <Animated.View style={[styles.composer, composerSafeAreaStyle]}>
         <TouchableOpacity
           style={[
@@ -200,6 +220,8 @@ const ConversationComposer: React.FC<ConversationComposerProps> = ({
           placeholderTextColor={colors.textSupplementary}
           value={value}
           onChangeText={onChangeText}
+          onSelectionChange={onSelectionChange}
+          selection={selection}
           onFocus={onInputFocus}
           multiline
           editable={!inputDisabled}

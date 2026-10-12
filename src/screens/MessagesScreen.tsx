@@ -30,6 +30,7 @@ import WebOfTrustChip from '../components/WebOfTrustChip';
 import WebOfTrustBottomSheet from '../components/WebOfTrustBottomSheet';
 import ConversationRow from '../components/ConversationRow';
 import GroupRow from '../components/GroupRow';
+import { useMentionedGroupIds } from '../hooks/useMentionedGroupIds';
 import FriendPickerSheet, { type PickedFriend } from '../components/FriendPickerSheet';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import type { ContactProfileBodyData } from '../components/ContactProfileBody';
@@ -625,6 +626,9 @@ const MessagesScreen: React.FC = () => {
     [navigation, pickedFriend],
   );
 
+  // Groups with an unread @mention of the viewer get an `@` badge (#1295).
+  const mentionedGroupIds = useMentionedGroupIds(groupSummaries, pubkey);
+
   const handleGroupPress = useCallback(
     (g: GroupSummary) => {
       navigation.navigate('GroupConversation', { groupId: g.group.id });
@@ -647,10 +651,11 @@ const MessagesScreen: React.FC = () => {
           summary={item.summary}
           onPress={handleGroupPress}
           contactInfoMap={contactInfoMap}
+          mentioned={mentionedGroupIds.has(item.summary.group.id)}
         />
       );
     },
-    [handleConversationPress, handleGroupPress, contactInfoMap],
+    [handleConversationPress, handleGroupPress, contactInfoMap, mentionedGroupIds],
   );
 
   // Follow live arrivals near the top; otherwise offer a jump without moving history.
@@ -817,6 +822,7 @@ const MessagesScreen: React.FC = () => {
               item.kind === 'dm' ? `dm:${item.summary.id}` : `group:${item.summary.group.id}`
             }
             renderItem={renderItem}
+            extraData={mentionedGroupIds}
             onScroll={live.onScroll}
             scrollEventThrottle={16}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
