@@ -1,4 +1,5 @@
 import { selectVerifiedListings } from '../utils/marketListings';
+import * as pacing from '../contexts/nostrDecryptPacing';
 import { finalizeEvent, getEventHash, getPublicKey, type Filter } from 'nostr-tools';
 import { fetchMarketListings, listingsCutMattered } from './marketListingsService';
 import { LISTING_LIMIT } from '../utils/marketListingsQuery';
@@ -24,7 +25,13 @@ const poolMocks = (
 ).__mocks;
 jest.mock('./nostrCrypto', () => {
   const actual = jest.requireActual('./nostrCrypto');
-  return { ...actual, nostrVerifyEvent: jest.fn(actual.nostrVerifyEvent) };
+  // Exercise real crypto without starting the facade's diagnostic timers.
+  const pure = jest.requireActual('nostr-tools/pure');
+  return {
+    ...actual,
+    nostrGetEventHash: pure.getEventHash,
+    nostrVerifyEvent: jest.fn(pure.verifyEvent),
+  };
 });
 const key = new Uint8Array(32).fill(7);
 const author = getPublicKey(key);
@@ -61,9 +68,11 @@ let subs: Sub[];
 let close: jest.Mock;
 /** Relays that accept connections; market relays are offline unless listed. */
 let up: Set<string>;
+let deletionReady: Promise<void>;
+let signalDeletionReady: () => void;
 /** Let mocked connections settle and subscriptions open. */
 const flush = async () => {
-  for (let i = 0; i < 6; i++) await Promise.resolve();
+  for (let i = 0; i < 50; i++) await Promise.resolve();
 };
 /** Deliver like the relay layer: count, skip known ids, then hand over. */
 const deliver = (s: Sub, e: Ev) => {
@@ -84,6 +93,9 @@ const answer = async (url = 'wss://example.com') => {
 beforeEach(() => {
   jest.useFakeTimers();
   subs = [];
+  deletionReady = new Promise((resolve) => {
+    signalDeletionReady = resolve;
+  });
   close = jest.fn();
   up = new Set(['wss://example.com', 'wss://a.example', 'wss://b.example']);
   verify.mockClear();
@@ -96,6 +108,7 @@ beforeEach(() => {
       ? Promise.resolve({
           subscribe: (filters: Filter[], c: Callbacks) => {
             subs.push({ url, filters, c });
+            if (filters[0].kinds?.[0] === 5) signalDeletionReady();
             return { close };
           },
         })
@@ -443,7 +456,7 @@ it('ignores a few forged deletions: the listing stays and the snapshot is comple
   expect(await pending).toMatchObject({ products: [expect.anything()], incomplete: false });
 });
 
-it('caps synchronous checks of forged oversized events and fails closed', async () => {
+it('caps paced checks of forged oversized events and fails closed', async () => {
   const pending = start();
   await flush();
   const [listings] = pass('listings');
@@ -863,4 +876,78 @@ it('withholds an older listing when an oversized revision exceeds the verificati
   await answer();
   expect(await pending).toEqual({ products: [], incomplete: true });
   expect(verify).not.toHaveBeenCalled();
+});
+
+it.each([false, true])(
+  'queues and caps successful oversized checks, repeated address: %s',
+  async (sameAddress) => {
+    jest.useRealTimers();
+    const pending = start();
+    await flush();
+    const [listings] = pass('listings');
+    deliver(listings, event);
+    for (let i = 0; i < 40; i++) {
+      deliver(
+        listings,
+        finalizeEvent(
+          {
+            kind: 30402,
+            created_at: 200 + i,
+            content: 'x'.repeat(33000),
+            tags: [['d', sameAddress ? 'book' : `big-${i}`]],
+          },
+          key,
+        ),
+      );
+      // The callback only queues/retains a stand-in; no signature work on delivery.
+      expect(verify.mock.calls).toHaveLength(0);
+    }
+    listings.c.oneose();
+    await deletionReady;
+    await answer();
+    const result = await pending;
+    const oversizedChecks = verify.mock.calls.filter(([e]) => e.content.length > 32768);
+    expect(oversizedChecks.length).toBe(16);
+    expect(result.incomplete).toBe(true);
+    expect(result.products).toHaveLength(0);
+  },
+  30000,
+);
+
+it('waits for the yield scheduler before checking queued oversized signatures', async () => {
+  let resume!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    resume = resolve;
+  });
+  const maybeYield = jest.fn(() => gate);
+  const dispose = jest.fn();
+  const scheduler = jest.spyOn(pacing, 'createYieldScheduler').mockReturnValueOnce({
+    maybeYield,
+    dispose,
+    yieldCount: 0,
+  });
+  const controller = new AbortController();
+  const pending = fetchMarketListings([author], ['wss://example.com'], controller.signal);
+  try {
+    await flush();
+    const [listings] = pass('listings');
+    deliver(
+      listings,
+      finalizeEvent({ ...event, created_at: 200, content: 'x'.repeat(33000) }, key),
+    );
+    listings.c.oneose();
+    await flush();
+    expect(maybeYield).toHaveBeenCalledTimes(1);
+    expect(verify.mock.calls).toHaveLength(0);
+    resume();
+    await answer();
+    expect(await pending).toEqual({ products: [], incomplete: true });
+    expect(verify).toHaveBeenCalledTimes(1);
+    expect(dispose).toHaveBeenCalledTimes(1);
+  } finally {
+    controller.abort();
+    resume();
+    scheduler.mockRestore();
+    await pending;
+  }
 });

@@ -167,3 +167,76 @@ it.each([0, 60])(
     }
   },
 );
+
+it.each(['deleted', 'older', 'newer', 'tie'])(
+  'zone cleanup preserves the newest listing data when the relay revision is %s',
+  async (revision) => {
+    const draft = {
+      dTag: 'book',
+      title: 'Book',
+      description: 'Updated description',
+      images: [],
+      price: '20',
+      currency: 'GBP',
+      quantity: '1',
+      categories: [],
+      shipping: [],
+    };
+    const cached = finalizeEvent(
+      {
+        ...buildListingTemplate({ draft, pubkey, nowSeconds: 200 }),
+        created_at: 200,
+        tags: [
+          ['d', 'book'],
+          ['price', '20', 'GBP'],
+          ['shipping_option', coordinate],
+        ],
+      },
+      key,
+    );
+    const returned =
+      revision === 'deleted'
+        ? null
+        : finalizeEvent(
+            {
+              kind: cached.kind,
+              content: 'Relay description',
+              created_at: revision === 'older' ? 100 : revision === 'tie' ? 200 : 300,
+              tags: [
+                ['d', 'book'],
+                ['price', '10', 'GBP'],
+                ['shipping_option', coordinate],
+              ],
+            },
+            key,
+          );
+    (fetchLatestRevision as jest.Mock).mockImplementation(async ({ kind }) =>
+      kind === 30402
+        ? { event: returned, deletedAt: -1, deletedIds: [] }
+        : kind === 30406
+          ? oldZone
+          : null,
+    );
+    const { result } = renderHook(() => useSellerActions({ ...snapshot, listings: [cached] }));
+    await act(async () => {
+      await result.current.saveShop(shop, [], base);
+    });
+    const published = (publishSellerEvent as jest.Mock).mock.calls.map(([event]) => event as Event);
+    if (!returned) {
+      expect(published.map((event) => event.kind)).toEqual([5, 30405]);
+    } else {
+      const expected =
+        cached.created_at > returned.created_at ||
+        (cached.created_at === returned.created_at && cached.id < returned.id)
+          ? cached
+          : returned;
+      expect(published.map((event) => event.kind)).toEqual([30402, 5, 30405]);
+      expect(published[0].content).toBe(expected.content);
+      expect(published[0].tags).toEqual(expected.tags.filter(([tag]) => tag !== 'shipping_option'));
+      expect(published[0].created_at).toBeGreaterThan(expected.created_at);
+    }
+    expect(fetchLatestRevision).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 30402, dTag: 'book' }),
+    );
+  },
+);

@@ -38,11 +38,9 @@ const MAX_DELETIONS = 600;
 const MAX_FAILED_CHECKS = 64;
 /** Stop and mark the snapshot unavailable after too many forged deletions. */
 const MAX_FAILED_DELETION_CHECKS = 32;
-/**
- * Forged oversized events tolerated before their (synchronous, in-callback)
- * checks stop. Skipped revisions or deletions make the snapshot unavailable.
- */
-const MAX_FAILED_OVERSIZED_CHECKS = 16;
+/** Total oversized checks, including successful signatures and replacements.
+ * Beyond this budget, small stand-ins fail closed without further crypto. */
+const MAX_OVERSIZED_CHECKS = 16;
 const MAX_PRODUCTS = 250;
 /** Listings painted before the rest are verified — about two screens of grid. */
 const FIRST_PAGE = 12;
@@ -135,7 +133,7 @@ async function runSnapshot(
   let listingUnavailable = false;
   const budgetFull = (deletion: boolean) =>
     deletion ? deletionCount >= MAX_DELETIONS : listingCount >= MAX_EVENTS;
-  // Oversized stand-ins were verified before their payload was stripped.
+  // Oversized stand-ins are verified or fail closed after the work cap.
   const trusted = new WeakSet<Event>();
   // Verified-but-oversized events are never rendered, yet still take part in
   // revision ordering and deletion. Keep small, non-renderable stand-ins
@@ -144,24 +142,14 @@ async function runSnapshot(
   // Trust contract: this snapshot reads through its OWN structure-only pool
   // (marketListingsPool), so no event here has had its signature checked.
   // Listings are verified lazily below (winning revisions only); deletions in
-  // a yielded loop before any can hide a listing; oversized events as they
-  // arrive (rare, capped). The SHARED pool still fully verifies listing kinds
+  // a yielded loop before any can hide a listing; oversized events in a
+  // bounded yielded queue. The SHARED pool still fully verifies listing kinds
   // for every other reader — don't add them to its SKIP_VERIFY_KINDS.
   // `verifyEventCached` skips the schnorr for ids already checked this
   // session, so a refetch doesn't pay for the snapshot again.
   const verified = verifyEventCached;
-  let oversizedFailures = 0;
-  // Checks an oversized event inside the relay callback, but at most
-  // MAX_FAILED_OVERSIZED_CHECKS forgeries' worth; then drops unchecked events.
-  const checkOversized = (event: Event) => {
-    if (oversizedFailures >= MAX_FAILED_OVERSIZED_CHECKS) {
-      if (event.kind !== 5) listingUnavailable = true;
-      return false;
-    }
-    if (verified(event)) return true;
-    oversizedFailures++;
-    return false;
-  };
+  const oversizedQueue: Event[] = [];
+  let oversizedChecks = 0;
   const idMatches = (event: Event) => {
     try {
       return nostrGetEventHash(event) === event.id;
@@ -192,10 +180,6 @@ async function runSnapshot(
     }
     const tags = relevantTargets(event);
     if (tags.length === 0) return;
-    if (!checkOversized(event)) {
-      if (oversizedFailures >= MAX_FAILED_OVERSIZED_CHECKS) deletionUnavailable = true;
-      return;
-    }
     const standIn = { ...event, content: '', tags };
     trusted.add(standIn);
     suppressions.set(event.id, standIn);
@@ -231,7 +215,6 @@ async function runSnapshot(
       listingUnavailable = true;
       return;
     }
-    if (!checkOversized(event)) return;
     // Same id/kind/created_at as the real revision so it competes normally;
     // empty content + a non-active status make it non-renderable.
     const standIn = {
@@ -246,11 +229,43 @@ async function runSnapshot(
     suppressions.set(address, standIn);
     if (!existing) listingCount++;
   };
+  const drainOversized = async () => {
+    const scheduler = createYieldScheduler({ signal, safetyEvery: 32 });
+    try {
+      for (const event of oversizedQueue) {
+        await scheduler.maybeYield();
+        if (signal.aborted) break;
+        // Release the queued candidate's reserved slot before retaining its marker.
+        if (event.kind === 5) deletionCount--;
+        else listingCount--;
+        oversizedChecks++;
+        if (verified(event)) suppressOversized(event);
+      }
+      oversizedQueue.length = 0;
+    } finally {
+      scheduler.dispose();
+    }
+  };
   const ingest = (event: Event) => {
     received++;
     if (!scope.has(event.pubkey) || event.created_at > Date.now() / 1000 + 300) return;
     if (event.content.length > 32768 || event.tags.length > 256) {
-      suppressOversized(event);
+      limited = true;
+      if (
+        event.content.length > MAX_VERIFY_CHARS ||
+        budgetFull(event.kind === 5) ||
+        oversizedChecks + oversizedQueue.length >= MAX_OVERSIZED_CHECKS
+      ) {
+        // Never trust an unchecked revision or deletion. Withhold the snapshot
+        // when the verification or retention budget prevents authentication.
+        if (event.kind === 5) deletionUnavailable = true;
+        else listingUnavailable = true;
+      } else {
+        // Queued payloads share the event budget with ordinary candidates.
+        if (event.kind === 5) deletionCount++;
+        else listingCount++;
+        oversizedQueue.push(event);
+      }
       return;
     }
     const key = `${event.id}:${event.sig}`;
@@ -279,6 +294,7 @@ async function runSnapshot(
     onEvent: ingest,
     relayPool,
   });
+  await drainOversized();
   const listingsDoneAt = Date.now();
   const candidates = [...events.values(), ...suppressions.values()].filter((e) => e.kind !== 5);
   knownTargets = new Set(
@@ -303,81 +319,80 @@ async function runSnapshot(
           relayPool,
         });
 
-  let firstPageAt = 0;
-  // Budget-gated yields keep taps responsive while winners are verified.
+  await drainOversized();
   const scheduler = createYieldScheduler({ signal, safetyEvery: 32 });
-  // Authenticate every deletion before it can withdraw a listing.
-  let failedDeletionChecks = 0;
-  for (const [key, event] of events) {
-    if (event.kind !== 5) continue;
-    if (signal.aborted) {
-      events.delete(key);
-      continue;
+  try {
+    let firstPageAt = 0;
+    // Authenticate deletions before they can hide listings. Exhausting the
+    // failure budget withholds the snapshot rather than trusting unchecked targets.
+    let failedDeletionChecks = 0;
+    for (const [key, event] of events) {
+      if (event.kind !== 5) continue;
+      if (signal.aborted || failedDeletionChecks >= MAX_FAILED_DELETION_CHECKS) {
+        events.delete(key);
+        continue;
+      }
+      await scheduler.maybeYield();
+      if (!verified(event)) {
+        failedDeletionChecks++;
+        events.delete(key);
+      }
     }
-    if (failedDeletionChecks >= MAX_FAILED_DELETION_CHECKS) {
-      events.delete(key);
-      continue;
-    }
-    await scheduler.maybeYield();
-    if (!verified(event)) {
-      failedDeletionChecks++;
-      events.delete(key);
-    }
-  }
-  const deletionChecksGaveUp = failedDeletionChecks >= MAX_FAILED_DELETION_CHECKS;
-  const selection = await selectVerifiedListings(
-    signal.aborted || deletionChecksGaveUp || deletionUnavailable || listingUnavailable
-      ? []
-      : [...events.values(), ...suppressions.values()],
-    scope,
-    {
-      // Once aborted, fail fast instead of verifying the rest for nothing.
-      verify: (event) => !signal.aborted && (trusted.has(event) || verified(event)),
-      maybeYield: scheduler.maybeYield,
-      cap: MAX_PRODUCTS,
-      maxFailures: MAX_FAILED_CHECKS,
-      firstPage: onFirstPage && {
-        size: FIRST_PAGE,
-        ready: (picked) => {
-          if (signal.aborted) return;
-          firstPageAt = Date.now();
-          onFirstPage(reduceMarketListings(picked, scope));
+    const deletionChecksGaveUp = failedDeletionChecks >= MAX_FAILED_DELETION_CHECKS;
+    const selection = await selectVerifiedListings(
+      signal.aborted || deletionChecksGaveUp || deletionUnavailable || listingUnavailable
+        ? []
+        : [...events.values(), ...suppressions.values()],
+      scope,
+      {
+        // Once aborted, fail fast instead of verifying the rest for nothing.
+        verify: (event) => !signal.aborted && (trusted.has(event) || verified(event)),
+        maybeYield: scheduler.maybeYield,
+        cap: MAX_PRODUCTS,
+        maxFailures: MAX_FAILED_CHECKS,
+        firstPage: onFirstPage && {
+          size: FIRST_PAGE,
+          ready: (picked) => {
+            if (signal.aborted) return;
+            firstPageAt = Date.now();
+            onFirstPage(reduceMarketListings(picked, scope));
+          },
         },
       },
-    },
-  );
-  scheduler.dispose();
-  const products = signal.aborted ? [] : reduceMarketListings(selection.events, scope);
-  const result = {
-    products: products.slice(0, MAX_PRODUCTS),
-    // Transport problems only. Reaching MAX_PRODUCTS is a deliberate display
-    // cap (newest first), not a failed load — "could not be loaded, try
-    // refreshing" would be untrue, and refreshing can't change it.
-    incomplete:
-      signal.aborted ||
-      limited ||
-      deletionChecksGaveUp ||
-      deletionUnavailable ||
-      listingUnavailable ||
-      oversizedFailures >= MAX_FAILED_OVERSIZED_CHECKS ||
-      selection.gaveUp ||
-      listingsCutMattered(listings.truncatedSince, products, selection.overflow) ||
-      deletions.truncated ||
-      listings.answered.length === 0 ||
-      deletions.answered.length === 0,
-  };
-  if (probe) {
-    const stall = probe.stop();
-    console.log(
-      `[PerfBlock] marketListings total=${Date.now() - startedAt}ms listings=${listingsDoneAt - startedAt}ms ` +
-        `firstPage=${firstPageAt ? `${firstPageAt - startedAt}ms` : '-'} capped=${selection.overflow} ` +
-        `truncated=${listings.truncated || deletions.truncated} cutMattered=${listingsCutMattered(listings.truncatedSince, products, selection.overflow)} limited=${limited} ` +
-        `received=${received} kept=${events.size} verified=${selection.checked} products=${result.products.length} incomplete=${result.incomplete} ` +
-        `authors=${scope.size} relays=${listings.answered.length}/${urls.length} ` +
-        `jsMaxStall=${stall.maxMs}ms jsBlocked=${stall.blockedMs}ms`,
     );
+    const products = signal.aborted ? [] : reduceMarketListings(selection.events, scope);
+    const result = {
+      products: products.slice(0, MAX_PRODUCTS),
+      // Transport problems only. Reaching MAX_PRODUCTS is a deliberate display
+      // cap (newest first), not a failed load — "could not be loaded, try
+      // refreshing" would be untrue, and refreshing can't change it.
+      incomplete:
+        signal.aborted ||
+        limited ||
+        deletionChecksGaveUp ||
+        deletionUnavailable ||
+        listingUnavailable ||
+        selection.gaveUp ||
+        listingsCutMattered(listings.truncatedSince, products, selection.overflow) ||
+        deletions.truncated ||
+        listings.answered.length === 0 ||
+        deletions.answered.length === 0,
+    };
+    if (probe) {
+      const stall = probe.stop();
+      console.log(
+        `[PerfBlock] marketListings total=${Date.now() - startedAt}ms listings=${listingsDoneAt - startedAt}ms ` +
+          `firstPage=${firstPageAt ? `${firstPageAt - startedAt}ms` : '-'} capped=${selection.overflow} ` +
+          `truncated=${listings.truncated || deletions.truncated} cutMattered=${listingsCutMattered(listings.truncatedSince, products, selection.overflow)} limited=${limited} ` +
+          `received=${received} kept=${events.size} verified=${selection.checked} products=${result.products.length} incomplete=${result.incomplete} ` +
+          `authors=${scope.size} relays=${listings.answered.length}/${urls.length} ` +
+          `jsMaxStall=${stall.maxMs}ms jsBlocked=${stall.blockedMs}ms`,
+      );
+    }
+    return result;
+  } finally {
+    scheduler.dispose();
   }
-  return result;
 }
 
 /**
