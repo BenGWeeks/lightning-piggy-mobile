@@ -34,7 +34,9 @@ export const DEFAULT_RELAYS = [
  * Read-only lookups of profile metadata (kind 0), unioned with the user's
  * read relays. purplepag.es / user.kindpag.es index kind 0 / 3 / 10002 from
  * across the network. nostr.land is paid for writes, so it's used here for
- * reads only.
+ * reads only. White Noise publishes its users' profiles to its own relays,
+ * which the indexers don't always pick up, so Marmot group members who use
+ * White Noise otherwise show as bare npubs.
  */
 export const PROFILE_RELAYS = [
   'wss://purplepag.es',
@@ -42,6 +44,8 @@ export const PROFILE_RELAYS = [
   'wss://relay.primal.net',
   'wss://relay.damus.io',
   'wss://nostr.land',
+  'wss://relay.eu.whitenoise.chat',
+  'wss://relay.us.whitenoise.chat',
 ];
 
 /**
