@@ -89,4 +89,3 @@ it('keeps paging retryable after an incomplete empty page', async () => {
   });
   expect(h.result.current.reachedEnd).toBe(true);
 });
-
