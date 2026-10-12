@@ -298,7 +298,8 @@
     "sendMessage": "Wyślij wiadomość",
     "editingMessage": "Edycja wiadomości",
     "cancelEdit": "Anuluj edycję",
-    "saveEdit": "Zapisz zmiany"
+    "saveEdit": "Zapisz zmiany",
+    "cancelReply": "Anuluj odpowiedź"
   },
   "conversationScreen": {
     "couldNotStartLiveShareTitle": "Nie udało się rozpocząć udostępniania na żywo",
@@ -1209,7 +1210,8 @@
     "copied": "Skopiowano",
     "moreEmoji": "Więcej emoji",
     "edit": "Edytuj",
-    "delete": "Usuń dla wszystkich"
+    "delete": "Usuń dla wszystkich",
+    "reply": "Odpowiedz"
   },
   "messageEdit": {
     "deleteTitle": "Usunąć dla wszystkich?",

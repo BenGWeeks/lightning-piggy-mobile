@@ -1,3 +1,4 @@
+import { marmotReplyTags } from '../services/marmotEdits';
 import { useCallback } from 'react';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
@@ -65,6 +66,7 @@ export interface UseGroupMessagingResult {
       memberPubkeys: string[];
       /** Text body. Optional when sending a `file` (kind-15) message. */
       text?: string;
+      replyTo?: string;
       /** When set, sends an encrypted NIP-17 kind-15 group file message
        *  (e.g. a voice note, #235) instead of a kind-14 chat message. */
       file?: EncryptedUpload;
@@ -118,6 +120,7 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
         subject: string;
         memberPubkeys: string[];
         text?: string;
+        replyTo?: string;
         file?: EncryptedUpload;
       },
       hooks?: GroupSendHooks,
@@ -148,6 +151,10 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
               memberPubkeys: input.memberPubkeys,
               content: text,
             });
+
+        if (isMarmotGroupId(input.groupId) && !input.file) {
+          rumor.tags.push(...marmotReplyTags(input.replyTo));
+        }
 
         // Compute the stable rumor eventId before any signing (the rumor is
         // never signed — hence "rumor" — so the hash is deterministic from

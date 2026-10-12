@@ -48,7 +48,6 @@ import {
 import { useContactActions } from './useContactActions';
 import { useNip46Login, restoreNip46Session } from './useNip46Login';
 import { nip46Sign } from './nip46DmDecrypt';
-import type { EncryptedUpload } from '../services/imageUploadService';
 import { dropIdentityKeyMaterial, useIdentityMemoryReset } from './resetIdentityMemoryState';
 import { AMBER_NIP17_ENABLED_KEY_LEGACY } from './nostrDmCache';
 import { wipeAccountCaches } from './accountCacheWipe';
@@ -56,7 +55,7 @@ import * as invitationKeys from '../services/marmotInvitationKeySignOut';
 import { wipeLocalDmStore } from '../services/localDb';
 import { useDmInbox } from './useDmInbox';
 import { DmInboxContext } from './DmInboxContext';
-import { useGroupMessaging, type GroupSendHooks, type GroupSendResult } from './useGroupMessaging';
+import { useGroupMessaging, type UseGroupMessagingResult } from './useGroupMessaging';
 import { useCacheNotifications } from './useCacheNotifications';
 import { useNip65Relays, type AdoptResult } from './useNip65Relays';
 import {
@@ -225,17 +224,7 @@ interface NostrContextType extends UseReactionActionsResult {
    * seal+wraps it once per recipient (including the sender for cross-device
    * visibility). NSEC-only — Amber group send is a follow-up. See PR #227.
    */
-  sendGroupMessage: (
-    input: {
-      groupId: string;
-      subject: string;
-      memberPubkeys: string[];
-      text?: string;
-      /** Encrypted NIP-17 kind-15 file message (voice note) sent to the group. */
-      file?: EncryptedUpload;
-    },
-    hooks?: GroupSendHooks,
-  ) => Promise<GroupSendResult>;
+  sendGroupMessage: UseGroupMessagingResult['sendGroupMessage'];
   /**
    * Publish a parameterised-replaceable kind-30200 group-state event for
    * client-side group consensus. Idempotent on (creator, d-tag) — relays

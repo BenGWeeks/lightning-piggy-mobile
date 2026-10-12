@@ -298,7 +298,8 @@
     "sendMessage": "Enviar mensaje",
     "editingMessage": "Editando mensaje",
     "cancelEdit": "Cancelar edición",
-    "saveEdit": "Guardar cambios"
+    "saveEdit": "Guardar cambios",
+    "cancelReply": "Cancelar respuesta"
   },
   "conversationScreen": {
     "couldNotStartLiveShareTitle": "No se pudo iniciar la ubicación en directo",
@@ -1209,7 +1210,8 @@
     "copied": "Copiado",
     "moreEmoji": "Más emojis",
     "edit": "Editar",
-    "delete": "Eliminar para todos"
+    "delete": "Eliminar para todos",
+    "reply": "Responder"
   },
   "messageEdit": {
     "deleteTitle": "¿Eliminar para todos?",

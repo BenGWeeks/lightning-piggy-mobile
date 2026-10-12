@@ -1,3 +1,4 @@
+import type { MessageQuote } from '../utils/messageQuote';
 import React, { useMemo } from 'react';
 import {
   ActivityIndicator,
@@ -94,6 +95,7 @@ export interface ConversationComposerProps {
    * Attachments and voice notes are off meanwhile.
    */
   editing?: { onCancel: () => void };
+  replying?: { quote: MessageQuote; onCancel: () => void };
   /**
    * Rendered directly above the input row, inside the keyboard-sticky area —
    * the group chat's @mention picker (#1295).
@@ -136,6 +138,7 @@ const ConversationComposer: React.FC<ConversationComposerProps> = ({
   attachButtonHasBackground = false,
   composerPaddingHorizontal = 10,
   editing,
+  replying,
   accessory,
   onSelectionChange,
   selection,
@@ -186,6 +189,25 @@ const ConversationComposer: React.FC<ConversationComposerProps> = ({
             onPress={editing.onCancel}
             accessibilityLabel={t('conversationComposer.cancelEdit')}
             testID="composer-edit-cancel"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <X size={18} color={colors.textSupplementary} />
+          </TouchableOpacity>
+        </View>
+      ) : null}
+      {replying && !editing ? (
+        <View style={styles.editBanner} testID="composer-reply-banner">
+          <Text style={styles.editBannerText} numberOfLines={2}>
+            {replying.quote.fromMe
+              ? t('messageBubble.quoteYou')
+              : (replying.quote.authorName ?? t('messageBubble.quoteSomeone'))}
+            {'\n'}
+            {replying.quote.text ?? t('messageBubble.quoteUnavailable')}
+          </Text>
+          <TouchableOpacity
+            onPress={replying.onCancel}
+            accessibilityLabel={t('conversationComposer.cancelReply')}
+            testID="composer-reply-cancel"
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <X size={18} color={colors.textSupplementary} />

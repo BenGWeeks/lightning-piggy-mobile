@@ -6,7 +6,7 @@ import {
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
 import { BottomSheetModal } from './AccessibleBottomSheetModal';
-import { Copy, Pencil, Plus, Trash2, Zap } from 'lucide-react-native';
+import { Copy, Pencil, Plus, Reply, Trash2, Zap } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createMessageActionsSheetStyles } from '../styles/MessageActionsSheet.styles';
@@ -65,6 +65,7 @@ interface Props {
   onCopyText?: () => void;
   /** Edit your own text message (Marmot chats only, #1237). Undefined = hidden. */
   onEdit?: () => void;
+  onReply?: () => void;
   /** Delete your own message for everyone (Marmot chats only). Undefined = hidden. */
   onDelete?: () => void;
   /** Show the emoji reaction row. Off where reactions aren't supported (groups). */
@@ -79,6 +80,7 @@ const MessageActionsSheet: React.FC<Props> = ({
   onZap,
   onCopyText,
   onEdit,
+  onReply,
   onDelete,
   showReactions = true,
 }) => {
@@ -177,6 +179,17 @@ const MessageActionsSheet: React.FC<Props> = ({
           >
             <Copy size={18} color={colors.textHeader} />
             <Text style={styles.copyButtonText}>{t('messageActionsSheet.copyText')}</Text>
+          </TouchableOpacity>
+        ) : null}
+        {onReply ? (
+          <TouchableOpacity
+            style={styles.copyButton}
+            onPress={onReply}
+            accessibilityLabel={t('messageActionsSheet.reply')}
+            testID="message-actions-reply"
+          >
+            <Reply size={18} color={colors.textHeader} />
+            <Text style={styles.copyButtonText}>{t('messageActionsSheet.reply')}</Text>
           </TouchableOpacity>
         ) : null}
         {onEdit ? (

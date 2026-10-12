@@ -1,3 +1,5 @@
+import { marmotReplyTags, marmotReplyParent } from '../services/marmotEdits';
+import { buildMarmotRumor } from '../services/marmotSession';
 import * as nip19 from 'nostr-tools/nip19';
 import { marmotGroupDraft } from './useGroupMessaging';
 
@@ -31,4 +33,21 @@ describe('marmotGroupDraft (#1295)', () => {
     ]);
     expect(draft.content).toBe(text);
   });
+});
+
+it('encodes a group reply with both MDK tags and parses it after kind conversion', () => {
+  const parent = 'D'.repeat(64);
+  const draft = marmotGroupDraft({
+    kind: 14,
+    content: 'reply',
+    tags: [['subject', 'Pigs'], ['p', BOB], ...marmotReplyTags(parent)],
+  });
+  expect(draft.tags).toEqual([
+    ['e', parent.toLowerCase()],
+    ['q', parent.toLowerCase()],
+  ]);
+  expect(marmotReplyParent(buildMarmotRumor(ALICE, { ...draft, kind: 9 }))).toBe(
+    parent.toLowerCase(),
+  );
+  expect(marmotReplyTags('local_pending')).toEqual([]);
 });

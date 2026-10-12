@@ -82,3 +82,55 @@ describe('marmotReactionSource', () => {
     unsubscribe();
   });
 });
+
+it('scopes group history, sends kind 7 and kind 5 into that group, and filters the live stream', async () => {
+  const session = fakeSession();
+  setMarmotSession(session as unknown as MarmotSession);
+  const source = marmotReactionSource(ME, PEER, 'g-old');
+  expect((await source.fetchReactionsForMessages(['m-new', 'm-old'])).map((r) => r.id)).toEqual([
+    'r-old',
+  ]);
+  await source.publishReaction({ emoji: '❤️', targetEventId: 'm-old' });
+  await source.deleteReaction('r-old');
+  expect(session.sendRumor.mock.calls).toEqual([
+    ['g-old', expect.objectContaining({ kind: 7, content: '❤️', tags: [['e', 'm-old']] })],
+    ['g-old', expect.objectContaining({ kind: 5, content: '', tags: [['e', 'r-old']] })],
+  ]);
+  const onEvent = jest.fn();
+  const unsubscribe = source.subscribe(onEvent);
+  session.emit({ group: { id: 'g-old', isDm: false }, rumor: rumor('r1', 7) });
+  session.emit({ group: { id: 'g-new', isDm: false }, rumor: rumor('r2', 7) });
+  expect(onEvent).toHaveBeenCalledTimes(1);
+  unsubscribe();
+});
+
+it.each(['publish', 'delete'])(
+  'sends %s directly to an explicit group without reading history',
+  async (action) => {
+    const session = fakeSession();
+    session.queryHistory.mockRejectedValue(new Error('history must not be read'));
+    setMarmotSession(session as unknown as MarmotSession);
+    const source = marmotReactionSource(ME, PEER, 'g-old');
+    const result =
+      action === 'publish'
+        ? await source.publishReaction({ emoji: '👍', targetEventId: 'm-old' })
+        : await source.deleteReaction('r-old');
+    expect(result).toBeTruthy();
+    expect(session.queryHistory).not.toHaveBeenCalled();
+    expect(session.dmGroupIdsWith).not.toHaveBeenCalled();
+    expect(session.sendRumor).toHaveBeenCalledWith(
+      'g-old',
+      expect.objectContaining({ kind: action === 'publish' ? 7 : 5 }),
+    );
+  },
+);
+
+it('retracts a reaction in its older DM group', async () => {
+  const session = fakeSession();
+  setMarmotSession(session as unknown as MarmotSession);
+  expect(await marmotReactionSource(ME, PEER).deleteReaction('r-old')).toBe(true);
+  expect(session.sendRumor).toHaveBeenCalledWith(
+    'g-old',
+    expect.objectContaining({ kind: 5, tags: [['e', 'r-old']] }),
+  );
+});

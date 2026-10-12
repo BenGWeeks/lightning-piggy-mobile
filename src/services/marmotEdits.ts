@@ -66,6 +66,15 @@ export function marmotReplyParent(rumor: MarmotRumor): string | undefined {
   return parent?.toLowerCase();
 }
 
+/** White Noise/MDK Reply intent: both tags point at the quoted message. */
+export function marmotReplyTags(parent: string | undefined): string[][] {
+  if (!parent || !HEX64.test(parent.toLowerCase())) return [];
+  return [
+    ['e', parent.toLowerCase()],
+    ['q', parent.toLowerCase()],
+  ];
+}
+
 /** Remembers the latest edit per (message, editor) so one arriving before (or
  * replayed after) its target still applies. Keyed by editor too, so a forged
  * edit from someone else can never displace the author's own. Scoped by group

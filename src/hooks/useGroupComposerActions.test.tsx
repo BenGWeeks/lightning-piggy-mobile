@@ -57,7 +57,16 @@ jest.mock('../contexts/LocaleContext', () => ({ useTranslation: () => mockT }));
 
 // useComposerActions has its own side-effects we don't need for these tests.
 jest.mock('./useComposerActions', () => ({
-  useComposerActions: () => ({ handleSend: jest.fn() }),
+  useComposerActions: ({
+    strategy,
+    draft,
+  }: {
+    strategy: {
+      sendText: (text: string) => Promise<boolean>;
+      sendMessage?: (text: string) => Promise<boolean>;
+    };
+    draft: string;
+  }) => ({ handleSend: () => (strategy.sendMessage ?? strategy.sendText)(draft) }),
 }));
 
 // ---------------------------------------------------------------------------
@@ -81,23 +90,32 @@ const GROUP = {
 // Test setup
 // ---------------------------------------------------------------------------
 
-function setup() {
+function setup(
+  replyTo?: string,
+  onReplySent?: (target: string | undefined) => void,
+  encodeMessage?: (text: string) => string,
+) {
   const setMessages = jest.fn();
   const scrollToEnd = jest.fn();
-  const { result } = renderHook(() =>
-    useGroupComposerActions({
-      group: GROUP,
-      draft: 'hello',
-      setDraft: jest.fn(),
-      setMessages,
-      scrollToEnd,
-      setAttachPanelOpen: jest.fn(),
-      setGifPickerOpen: jest.fn(),
-      setContactPickerOpen: jest.fn(),
-      setVoiceSheetOpen: jest.fn(),
-    }),
+  const { result, rerender } = renderHook(
+    ({ target }: { target: string | undefined }) =>
+      useGroupComposerActions({
+        group: GROUP,
+        replyTo: target,
+        onReplySent,
+        encodeMessage,
+        draft: 'hello',
+        setDraft: jest.fn(),
+        setMessages,
+        scrollToEnd,
+        setAttachPanelOpen: jest.fn(),
+        setGifPickerOpen: jest.fn(),
+        setContactPickerOpen: jest.fn(),
+        setVoiceSheetOpen: jest.fn(),
+      }),
+    { initialProps: { target: replyTo } },
   );
-  return { result, setMessages, scrollToEnd };
+  return { result, rerender, setMessages, scrollToEnd };
 }
 
 beforeEach(() => {
@@ -285,3 +303,78 @@ describe("useGroupComposerActions — 'Saved on relay, not on device' path intac
     expect(mockRemoveGroupMessage).not.toHaveBeenCalled();
   });
 });
+
+it('sends the quoted group target, persists it in the optimistic row and clears it only on success', async () => {
+  const parent = 'd'.repeat(64);
+  const clearReply = jest.fn();
+  mockSendGroupMessage.mockImplementation((_input: unknown, hooks?: GroupSendHooks) => {
+    hooks?.onRumorReady?.({ rumorId: 'sent', kind: 14 });
+    return Promise.resolve({ success: true });
+  });
+  const { result } = setup(parent, clearReply);
+  await act(async () => {
+    await result.current.handleSend();
+  });
+  expect(mockSendGroupMessage.mock.calls[0][0]).toMatchObject({ replyTo: parent, text: 'hello' });
+  expect(mockAppendGroupMessage.mock.calls[0][2]).toMatchObject({ replyTo: parent });
+  expect(clearReply).toHaveBeenCalledTimes(1);
+  mockSendGroupMessage.mockResolvedValue({ success: false });
+  await act(async () => {
+    await result.current.handleSend();
+  });
+  expect(clearReply).toHaveBeenCalledTimes(1);
+});
+
+it.each(['resendText', 'sendText'] as const)(
+  'keeps the active reply out of %s sends and preserves selection',
+  async (method) => {
+    const clearReply = jest.fn();
+    mockSendGroupMessage.mockImplementation(async (_input: unknown, hooks?: GroupSendHooks) => {
+      hooks?.onRumorReady?.({ rumorId: 'sent', kind: 14 });
+      return { success: true };
+    });
+    const { result } = setup('parent', clearReply, (text) => `encoded:${text}`);
+    await act(async () => {
+      await result.current[method]('original payload');
+    });
+    expect(mockSendGroupMessage.mock.calls[0][0]).toMatchObject({ text: 'original payload' });
+    expect(mockSendGroupMessage.mock.calls[0][0].replyTo).toBeUndefined();
+    expect(mockAppendGroupMessage.mock.calls[0][2].replyTo).toBeUndefined();
+    expect(clearReply).not.toHaveBeenCalled();
+    await act(async () => {
+      await result.current.handleSend();
+    });
+    expect(mockSendGroupMessage.mock.calls[1][0]).toMatchObject({
+      text: 'encoded:hello',
+      replyTo: 'parent',
+    });
+    expect(clearReply).toHaveBeenCalledTimes(1);
+  },
+);
+
+it.each(['reply-a', undefined])(
+  'reports the send-time reply target %s when a new reply is selected during sending',
+  async (target) => {
+    let finishSend!: (value: { success: boolean }) => void;
+    mockSendGroupMessage.mockImplementation(
+      () =>
+        new Promise<{ success: boolean }>((resolve) => {
+          finishSend = resolve;
+        }),
+    );
+    const onReplySent = jest.fn();
+    const { result, rerender } = setup(target, onReplySent);
+    let pending!: Promise<void>;
+    act(() => {
+      pending = result.current.handleSend();
+    });
+    rerender({ target: 'reply-b' });
+    expect(onReplySent).not.toHaveBeenCalled();
+    await act(async () => {
+      finishSend({ success: true });
+      await pending;
+    });
+    expect(mockSendGroupMessage.mock.calls[0][0].replyTo).toBe(target);
+    expect(onReplySent).toHaveBeenCalledWith(target);
+  },
+);

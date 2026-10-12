@@ -298,7 +298,8 @@
     "sendMessage": "Send message",
     "editingMessage": "Editing message",
     "cancelEdit": "Cancel editing",
-    "saveEdit": "Save edit"
+    "saveEdit": "Save edit",
+    "cancelReply": "Cancel reply"
   },
   "conversationScreen": {
     "couldNotStartLiveShareTitle": "Could not start live share",
@@ -1209,7 +1210,8 @@
     "copied": "Copied",
     "moreEmoji": "More emoji",
     "edit": "Edit",
-    "delete": "Delete for everyone"
+    "delete": "Delete for everyone",
+    "reply": "Reply"
   },
   "messageEdit": {
     "deleteTitle": "Delete for everyone?",

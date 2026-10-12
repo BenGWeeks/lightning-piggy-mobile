@@ -208,6 +208,8 @@ describe('useConversationReactions — copy text', () => {
 });
 
 describe('useConversationReactions — live (Marmot) reactions', () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
   const live = () => {
     let emit: (
       e: Parameters<
@@ -243,6 +245,8 @@ describe('useConversationReactions — live (Marmot) reactions', () => {
       useConversationReactions(makeParams({ subscribeLiveReactions: feed.subscribeLiveReactions })),
     );
     act(() => feed.emit(reaction));
+    expect(result.current.reactionsByTarget.get(TARGET)).toBeUndefined();
+    act(() => jest.advanceTimersByTime(100));
     expect(result.current.reactionsByTarget.get(TARGET)).toBeDefined();
   });
 
@@ -253,6 +257,7 @@ describe('useConversationReactions — live (Marmot) reactions', () => {
     );
     act(() => feed.emit(retraction));
     act(() => feed.emit(reaction));
+    act(() => jest.advanceTimersByTime(100));
     expect(result.current.reactionsByTarget.get(TARGET)).toBeUndefined();
   });
 
@@ -263,6 +268,61 @@ describe('useConversationReactions — live (Marmot) reactions', () => {
     );
     act(() => feed.emit({ ...retraction, pubkey: MY_PK }));
     act(() => feed.emit(reaction));
+    act(() => jest.advanceTimersByTime(100));
     expect(result.current.reactionsByTarget.get(TARGET)).toBeDefined();
   });
+});
+
+describe('useConversationReactions — duplicate own votes', () => {
+  const event = (id: string, pubkey = MY_PK, content = '👍', target = TARGET) => ({
+    id,
+    pubkey,
+    kind: 7,
+    content,
+    created_at: id === 'new' ? 2 : 1,
+    tags: [['e', target]],
+  });
+
+  it.each([true, false])(
+    'retracts all matching own IDs and reconciles failures (%s)',
+    async (success) => {
+      const own = [event('old'), event('new')];
+      const other = [
+        event('peer', PEER_PK),
+        event('other-emoji', MY_PK, '❤️'),
+        event('other-target', MY_PK, '👍', '2'.repeat(64)),
+      ];
+      const deleteReaction = jest.fn(async (id: string) => {
+        if (id === 'old' || success) {
+          return true;
+        }
+        return false;
+      });
+      // A reconciliation can still read stale successful deletions from history.
+      const fetchReactionsForMessages = jest.fn(async () => [...own, ...other]);
+      const params = makeParams({
+        messages: [{ id: 'message', fromMe: true, text: 'hi', createdAt: 1, rumorId: TARGET }],
+        fetchReactionsForMessages,
+        deleteReaction,
+      });
+      const { result } = renderHook(() => useConversationReactions(params));
+      await waitFor(() =>
+        expect(result.current.reactionsByTarget.get(TARGET)?.myReactions['👍']).toBe('new'),
+      );
+      await act(async () => {
+        result.current.buildOnToggleReaction(sentItem)!('👍', 'new');
+      });
+      expect(deleteReaction.mock.calls.map((c) => c[0]).sort()).toEqual(['new', 'old']);
+      await waitFor(() =>
+        expect(result.current.reactionsByTarget.get(TARGET)?.myReactions['👍']).toBe(
+          success ? undefined : 'new',
+        ),
+      );
+      expect(result.current.reactionsByTarget.get(TARGET)?.byEmoji['👍']).toContain(PEER_PK);
+      expect(result.current.reactionsByTarget.get(TARGET)?.myReactions['❤️']).toBe('other-emoji');
+      expect(result.current.reactionsByTarget.get('2'.repeat(64))?.myReactions['👍']).toBe(
+        'other-target',
+      );
+    },
+  );
 });
