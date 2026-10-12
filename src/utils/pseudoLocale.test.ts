@@ -1,5 +1,8 @@
 import * as Application from 'expo-application';
 import enJson from '../i18n/locales/en.json';
+import { SUPPORTED_LOCALES, translations } from '../i18n';
+import { requiredPluralCategories } from '../i18n/plurals';
+import { validateCatalogue, type Catalogue } from './i18nSync';
 import {
   PSEUDO_LOCALE,
   createPseudoI18nInstance,
@@ -73,13 +76,28 @@ describe('pseudoCatalogue', () => {
   });
 });
 
+describe('en-XA vs the catalogue guard', () => {
+  it('is not a registered catalogue, so the guard never treats it as a partial locale', () => {
+    expect(SUPPORTED_LOCALES).not.toContain(PSEUDO_LOCALE);
+    expect(Object.keys(translations)).not.toContain(PSEUDO_LOCALE);
+  });
+
+  it('would pass the same validation as a real locale (en plural rules)', () => {
+    const pseudo = pseudoCatalogue(enJson as Tree) as Catalogue;
+    expect(validateCatalogue(enJson as Catalogue, pseudo, requiredPluralCategories('en'))).toEqual(
+      [],
+    );
+  });
+});
+
 describe('createPseudoI18nInstance', () => {
   it('renders en-XA with interpolation and plurals working', () => {
     const i18n = createPseudoI18nInstance();
     expect(i18n.locale).toBe(PSEUDO_LOCALE);
-    expect(i18n.t('tabs.home')).toBe('[Ĥöɱé··]');
+    expect(i18n.t('tabs.wallets')).toBe('[Ŵåļļéţš···]');
     expect(i18n.t('market.reviews.count', { count: 3 })).toBe('[3 ŕéṽîéŵš····]');
     expect(i18n.t('market.reviews.count', { count: 1 })).toBe('[1 ŕéṽîéŵ···]');
+    expect(i18n.t('market.reviews.count', { count: 21 })).toBe('[21 ŕéṽîéŵš····]');
   });
 });
 

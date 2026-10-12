@@ -9,6 +9,7 @@
 
 import type { I18n } from 'i18n-js';
 import { createI18nInstance } from '../i18n';
+import { pluralKeys } from '../i18n/plurals';
 import enJson from '../i18n/locales/en.json';
 import { isProductionBuild } from './appEnvironment';
 
@@ -86,6 +87,9 @@ let cached: Tree | null = null;
 export function applyPseudoLocale(instance: I18n): I18n {
   cached ??= pseudoCatalogue(enJson as Tree);
   instance.store({ [PSEUDO_LOCALE]: cached });
+  // Pluralise exactly like en (the catalogue it's generated from), via the
+  // same CLDR rule table the real locales use.
+  instance.pluralization.register(PSEUDO_LOCALE, (_i18n, count) => pluralKeys('en', count));
   instance.locale = PSEUDO_LOCALE;
   return instance;
 }

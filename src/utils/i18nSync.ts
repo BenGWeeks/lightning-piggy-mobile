@@ -41,52 +41,28 @@ export function placeholders(s: string): string {
   return (s.match(/\{\{[^{}]*\}\}|%\{[^{}]*\}/g) ?? []).sort().join(',');
 }
 
-/** CLDR cardinal rule: count → plural category. */
+/** CLDR cardinal rule: count → plural category (`CARDINAL_RULES[locale]`). */
 export type CardinalRule = (n: number) => string;
 
 /**
- * i18n-js's built-in pluralizer, which applies ENGLISH rules to every locale
- * (`one` for 1, `other` for everything else; `zero` is an optional extra).
- * It's what the app uses until per-locale rules are registered.
+ * Which counts each required category covers under the app's runtime rule,
+ * for the drafting prompt — e.g. `one: 1, 21, 31…; few: 2, 3, 4, 22…` — so
+ * every form (notably `other`) is written with the meaning the app gives it.
+ * `rule` and `categories` come from src/i18n/plurals.ts, the single source
+ * of truth shared with the runtime and the catalogue guard.
  */
-export const I18N_JS_DEFAULT_RULE: CardinalRule = (n) => (n === 1 ? 'one' : 'other');
-
-/**
- * Plural categories a locale's plural objects must define: every category a
- * whole count 0-200 can hit under the rule the APP uses at runtime, plus
- * `other` (same bar as the catalogue guard). `runtimeRules` is the app's
- * per-locale rule table (`CARDINAL_RULES` in src/i18n/plurals.ts) or `null`
- * when the runtime has none, in which case i18n-js's English default applies
- * — demanding `few` / `many` then would mean writing strings never shown.
- */
-export function requiredPluralCategories(
-  locale: string,
-  runtimeRules: Record<string, CardinalRule> | null,
-): string[] {
-  const rule = runtimeRules?.[locale] ?? I18N_JS_DEFAULT_RULE;
-  const needed = new Set<string>(['other']);
-  for (let n = 0; n <= 200; n++) needed.add(rule(n));
-  return CLDR_CATEGORIES.filter((c) => needed.has(c));
-}
-
-/**
- * Which counts each category covers under the runtime rule, for the drafting
- * prompt — e.g. `one: 1, 21, 31…; few: 2, 3, 4, 22…; other: every other count`
- * — so `other` is translated with the meaning the app gives it.
- */
-export function pluralGuide(
-  locale: string,
-  runtimeRules: Record<string, CardinalRule> | null,
-): string {
-  const rule = runtimeRules?.[locale] ?? I18N_JS_DEFAULT_RULE;
+export function pluralGuide(rule: CardinalRule, categories: readonly string[]): string {
   const samples = new Map<string, number[]>();
   for (let n = 0; n <= 30; n++) {
     const category = rule(n);
     samples.set(category, [...(samples.get(category) ?? []), n]);
   }
-  const parts = requiredPluralCategories(locale, runtimeRules).map((category) => {
+  const parts = categories.map((category) => {
     const counts = samples.get(category) ?? [];
-    return `${category}: ${counts.length ? `${counts.slice(0, 6).join(', ')}${counts.length > 6 ? '…' : ''}` : 'fractions only'}`;
+    const list = counts.length
+      ? `${counts.slice(0, 6).join(', ')}${counts.length > 6 ? '…' : ''}`
+      : 'fractions only';
+    return `${category}: ${list}`;
   });
   return `${parts.join('; ')} (a "zero" form, where en has one, is used for 0)`;
 }
@@ -103,7 +79,10 @@ export interface ExpectedLeaf {
  * the extra CLDR categories the locale's plural rules need (e.g. `few` and
  * `many` for Polish and Ukrainian), sourced from en's `other` form.
  */
-export function expectedLeaves(en: Catalogue, categories: string[]): Map<string, ExpectedLeaf> {
+export function expectedLeaves(
+  en: Catalogue,
+  categories: readonly string[],
+): Map<string, ExpectedLeaf> {
   const out = new Map<string, ExpectedLeaf>();
   const walk = (node: Catalogue, prefix: string) => {
     for (const [key, value] of Object.entries(node)) {
@@ -174,7 +153,7 @@ export interface DetectInput {
   localeTree: Catalogue;
   /** The locale file at the merge base; `null` if it didn't exist there. */
   baseLocaleTree: Catalogue | null;
-  categories: string[];
+  categories: readonly string[];
 }
 
 /**
@@ -289,6 +268,21 @@ export function proposalsFrom(file: unknown): Record<string, Proposal> {
   return out;
 }
 
+/**
+ * Combine task-file and draft proposals. A non-empty translation in the task
+ * file — where reviewers correct drafts — always wins over the draft;
+ * `overridden` lists keys where the two disagree, so the script can say so.
+ */
+export function combineProposals(
+  fromTask: Record<string, Proposal>,
+  fromDraft: Record<string, Proposal>,
+): { proposals: Record<string, Proposal>; overridden: string[] } {
+  const overridden = Object.keys(fromTask).filter(
+    (path) => path in fromDraft && fromDraft[path].translation !== fromTask[path].translation,
+  );
+  return { proposals: { ...fromDraft, ...fromTask }, overridden };
+}
+
 /** Problems with one translation of `source` (empty, placeholder drift). */
 export function validateEntry(path: string, translation: string, source: string): string | null {
   if (!translation.trim()) return `empty ${path}`;
@@ -378,7 +372,11 @@ export function mergeCatalogue(
  * shapes, empty strings, placeholder drift and missing plural categories.
  * Mirrors the catalogue guard so `--apply` fails before CI does.
  */
-export function validateCatalogue(en: Catalogue, tree: Catalogue, categories: string[]): string[] {
+export function validateCatalogue(
+  en: Catalogue,
+  tree: Catalogue,
+  categories: readonly string[],
+): string[] {
   const errors: string[] = [];
   const walk = (ref: Catalogue, node: Catalogue, prefix: string) => {
     for (const [key, value] of Object.entries(ref)) {

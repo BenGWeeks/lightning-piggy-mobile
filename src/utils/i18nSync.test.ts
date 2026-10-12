@@ -1,5 +1,6 @@
 import {
   buildTaskFile,
+  combineProposals,
   detectLocale,
   expectedLeaves,
   extractJsonObject,
@@ -8,13 +9,15 @@ import {
   mergeCatalogue,
   parseSupportedLocales,
   placeholders,
-  requiredPluralCategories,
+  pluralGuide,
   planApply,
   proposalsFrom,
   validateCatalogue,
   validateEntry,
   type Catalogue,
 } from './i18nSync';
+import { SUPPORTED_LOCALES, translations } from '../i18n';
+import { CARDINAL_RULES, requiredPluralCategories } from '../i18n/plurals';
 
 const en: Catalogue = {
   tabs: { home: 'Home', friends: 'Friends' },
@@ -50,13 +53,38 @@ describe('placeholders', () => {
   });
 });
 
-describe('requiredPluralCategories', () => {
-  it('matches the forms whole counts need per CLDR', () => {
-    expect(requiredPluralCategories('en')).toEqual(['one', 'other']);
-    expect(requiredPluralCategories('es')).toEqual(['one', 'other']);
-    expect(requiredPluralCategories('uk')).toEqual(['one', 'few', 'many', 'other']);
-    expect(requiredPluralCategories('pl')).toEqual(['one', 'few', 'many', 'other']);
-    expect(requiredPluralCategories('zh-Hans')).toEqual(['other']);
+describe('agreement with the runtime and the catalogue guard', () => {
+  const enTree = translations.en as unknown as Catalogue;
+
+  // The guard (catalogues.test.ts) passes on every shipped catalogue, and
+  // both use requiredPluralCategories from src/i18n/plurals.ts — so the sync
+  // tool must find nothing to do and nothing invalid in any of them.
+  it.each(SUPPORTED_LOCALES.filter((l) => l !== 'en'))(
+    '%s: no missing, stale or invalid strings',
+    (locale) => {
+      const tree = translations[locale] as unknown as Catalogue;
+      const categories = requiredPluralCategories(locale);
+      const diff = detectLocale({
+        locale,
+        en: enTree,
+        baseEn: null,
+        localeTree: tree,
+        baseLocaleTree: null,
+        categories,
+      });
+      expect({ missing: diff.missing, stale: diff.stale }).toEqual({ missing: [], stale: [] });
+      expect(validateCatalogue(enTree, tree, categories)).toEqual([]);
+    },
+  );
+
+  it('describes plural forms by the counts the app picks them for', () => {
+    expect(pluralGuide(CARDINAL_RULES.uk, requiredPluralCategories('uk'))).toBe(
+      'one: 1, 21; few: 2, 3, 4, 22, 23, 24; many: 0, 5, 6, 7, 8, 9…; other: fractions only ' +
+        '(a "zero" form, where en has one, is used for 0)',
+    );
+    expect(pluralGuide(CARDINAL_RULES.en, requiredPluralCategories('en'))).toMatch(
+      /^one: 1; other: 0, 2, 3, 4, 5, 6…/,
+    );
   });
 });
 
@@ -198,6 +226,28 @@ describe('validateEntry', () => {
   it('rejects empty strings and placeholder drift', () => {
     expect(validateEntry('greet', ' ', 'Hello, {{name}}!')).toBe('empty greet');
     expect(validateEntry('greet', '¡Hola!', 'Hello, {{name}}!')).toMatch(/^placeholders greet/);
+  });
+});
+
+describe('combineProposals', () => {
+  it("lets the reviewer's task-file translation win over the draft, and reports it", () => {
+    const { proposals, overridden } = combineProposals(
+      { greet: { translation: '¡Hola, {{name}}!', en: 'Hello, {{name}}!' } },
+      {
+        greet: { translation: 'Hola {{name}}', en: 'Hello, {{name}}!' },
+        'tabs.home': { translation: 'Inicio', en: 'Home' },
+      },
+    );
+    expect(proposals).toEqual({
+      greet: { translation: '¡Hola, {{name}}!', en: 'Hello, {{name}}!' },
+      'tabs.home': { translation: 'Inicio', en: 'Home' },
+    });
+    expect(overridden).toEqual(['greet']);
+  });
+
+  it('reports nothing when task file and draft agree', () => {
+    const same = { greet: { translation: 'x {{name}}' } };
+    expect(combineProposals(same, same).overridden).toEqual([]);
   });
 });
 

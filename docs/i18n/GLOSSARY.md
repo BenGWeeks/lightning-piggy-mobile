@@ -25,7 +25,7 @@ Keep these brand and protocol names exactly as written: Lightning Piggy, Bitcoin
 
 ## Plurals (CLDR)
 
-Plural objects like `{ "one": "…", "other": "…" }` use CLDR cardinal categories, picked per locale at runtime.
+Plural objects like `{ "one": "…", "other": "…" }` use CLDR cardinal categories, picked per locale at runtime by the rules in `src/i18n/plurals.ts`. That file's `requiredPluralCategories` is the single source of truth for which forms a catalogue needs: the app, the catalogue guard (`catalogues.test.ts`) and `i18n:sync` all use it.
 
 | Locale                 | Categories to write           | Notes                                                                                                                                                                                       |
 | ---------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -34,7 +34,7 @@ Plural objects like `{ "one": "…", "other": "…" }` use CLDR cardinal categor
 | zh-Hans                | `other`                       | Keep `one` too, with the same text as `other`, so key parity holds.                                                                                                                         |
 
 - Keep any `zero` form en.json has (e.g. "Remove old devices"). It's used when the count is 0.
-- `i18n:sync` lists any missing `few` / `many` forms as missing strings, sourced from en's `other` text.
+- `i18n:sync` lists any missing `few` / `many` forms as missing strings, sourced from en's `other` text. `--draft` tells the drafting CLI which counts each form covers (e.g. uk `many`: 0, 5–20, 25…), so `other` gets the meaning the app gives it.
 
 ## Length and precision
 
@@ -65,5 +65,5 @@ npm run i18n:sync -- --check     # exit 1 if any locale is out of date (pre-push
 
 - "Changed" means the English text of an existing key changed since `git merge-base HEAD origin/main`, while the translation didn't. Re-translate it, even though the key already exists.
 - To translate by hand, fill in `"translation"` in `.i18n-todo/<locale>.json` and run `--apply`.
-- Always review drafts before applying. A draft is a starting point, not a final translation.
+- Always review drafts before applying. A draft is a starting point, not a final translation. Correct drafts in either `.i18n-todo/<locale>.draft.json` or the task file: a translation in the task file always wins over the draft, and `--apply` says when it overrides one.
 - Options: `--locale <code>` (repeatable), `--engine claude|codex`, `--model <name>`, `--base <ref>`.
