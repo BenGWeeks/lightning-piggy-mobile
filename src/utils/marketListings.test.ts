@@ -186,6 +186,12 @@ describe('market relay listings', () => {
     expect(safeMarketUrl('javascript:alert(1)')).toBeNull();
     expect(safeMarketUrl('https://user:pass@example.com')).toBeNull();
     expect(safeMarketUrl('http://example.com')).toBeNull();
+    // #1338: listing URLs load automatically, so private hosts are refused.
+    expect(safeMarketUrl('https://192.168.1.1/x.png')).toBeNull();
+    expect(safeMarketUrl('https://127.1/x.png')).toBeNull();
+    expect(safeMarketUrl('https://[::1]/x.png')).toBeNull();
+    expect(safeMarketUrl('https://shop.local/x.png')).toBeNull();
+    expect(safeMarketUrl('https://cdn.example.com/x.png')).toBe('https://cdn.example.com/x.png');
     expect(
       parseMarketListing(
         event({

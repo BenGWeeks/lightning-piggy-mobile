@@ -31,6 +31,7 @@ import {
   __verifiedEventCacheSize,
   verifyEventCached,
 } from './nostrVerifyCache';
+import { parseProfileContent } from '../utils/profileContent';
 
 export type { DmSendResult };
 // Re-exported for back-compat: the canonical home is ./nip89ClientTag.
@@ -221,38 +222,8 @@ export function decodeProfileReference(input: string): DecodedProfileReference |
   return null;
 }
 
-export function parseProfileContent(content: string): {
-  name: string | null;
-  displayName: string | null;
-  picture: string | null;
-  banner: string | null;
-  about: string | null;
-  lud16: string | null;
-  nip05: string | null;
-} {
-  try {
-    const data = JSON.parse(content);
-    return {
-      name: data.name || null,
-      displayName: data.display_name || null,
-      picture: data.picture || null,
-      banner: data.banner || null,
-      about: data.about || null,
-      lud16: data.lud16 || null,
-      nip05: data.nip05 || null,
-    };
-  } catch {
-    return {
-      name: null,
-      displayName: null,
-      picture: null,
-      banner: null,
-      about: null,
-      lud16: null,
-      nip05: null,
-    };
-  }
-}
+// Kind-0 parsing lives in utils/profileContent (pure); re-exported for importers.
+export { parseProfileContent };
 
 export async function fetchProfile(pubkey: string, relays: string[]): Promise<NostrProfile | null> {
   const allRelays = [...new Set([...relays, ...PROFILE_RELAYS])];
