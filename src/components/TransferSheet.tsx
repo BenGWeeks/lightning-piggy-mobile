@@ -23,6 +23,7 @@ import {
 import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Toast from './BrandedToast';
+import { completeReverseSwap } from '../utils/swapCompletion';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import { promptSubmarineRefund } from '../utils/submarineRefund';
 import { watchForwardSwap } from '../utils/forwardSwapWatch';
@@ -652,7 +653,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         // diagnosing field reports like "swap failed with 'unknown
         // Error'" without having to read the user's screenshot for
         // which sheet stage they got stuck at.
-        let stage: ReverseSwapStage | 'refresh' = 'payAndLockup';
+        let stage: ReverseSwapStage = 'payAndLockup';
         (async () => {
           try {
             const claimed = await payAndClaimReverseSwap({
@@ -667,8 +668,10 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                 }
                 Toast.show({
                   type: 'info',
-                  text1: 'Boltz locked funds on-chain',
-                  text2: `Claiming ${onchainAmount.toLocaleString(formatLocale)} sats…`,
+                  text1: t('swapToast.lockedTitle'),
+                  text2: t('swapToast.claimingBody', {
+                    amount: onchainAmount.toLocaleString(formatLocale),
+                  }),
                   position: 'top',
                   visibilityTime: 5000,
                 });
@@ -679,23 +682,14 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
             if (sessionRef.current === iifeSession) {
               setProgressMsg(reverseSwapCompleteMessage(onchainAmount, claimed.txId, formatLocale));
             }
-            Toast.show({
-              type: 'success',
-              text1: 'Swap complete',
-              text2: `${onchainAmount.toLocaleString(formatLocale)} sats (less claim fee) claimed on-chain. Claim tx ${claimed.txId.slice(0, 10)}…`,
-              position: 'top',
-              visibilityTime: 10000,
+            completeReverseSwap({
+              swapId: swap.id,
+              amount: onchainAmount.toLocaleString(formatLocale),
+              txId: claimed.txId,
+              t,
+              refresh: () => refreshWallets(destIsCrossProfile ? [sourceId] : [sourceId, destId]),
+              followSettle: () => followSwapSettle(sourceId, paymentHashFromBolt11(swap.invoice)),
             });
-            // The refresh below then drops this swap's placeholders even if a
-            // real leg is not yet synced or tagged.
-            markSwapPlaceholdersResolved(swap.id);
-            stage = 'refresh';
-            await refreshWallets(destIsCrossProfile ? [sourceId] : [sourceId, destId]).catch(
-              () => {},
-            );
-            // The source wallet can hold the hold-invoice payment (and a fee
-            // reserve) pending for minutes after the claim (#1179).
-            followSwapSettle(sourceId, paymentHashFromBolt11(swap.invoice));
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             console.warn(
@@ -731,9 +725,8 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
             }
             Toast.show({
               type: 'error',
-              text1: 'Swap in progress',
-              text2:
-                'Background step hit an error — tap "Retry now" in the sheet or relaunch the app. Funds are safe.',
+              text1: t('swapToast.progressTitle'),
+              text2: t('swapToast.progressBody'),
               position: 'top',
               visibilityTime: 10000,
             });
@@ -899,8 +892,8 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       await swapRecoveryService.recoverPendingSwaps();
       Toast.show({
         type: 'info',
-        text1: 'Retry kicked off',
-        text2: 'Any claimable swaps are being re-broadcast.',
+        text1: t('swapToast.retryTitle'),
+        text2: t('swapToast.retryBody'),
         position: 'top',
         visibilityTime: 6000,
       });
@@ -914,7 +907,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       const m = err instanceof Error ? err.message : String(err);
       Toast.show({
         type: 'error',
-        text1: 'Retry failed',
+        text1: t('swapToast.retryFailedTitle'),
         text2: m,
         position: 'top',
         visibilityTime: 8000,
@@ -925,7 +918,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         setRetryingRecovery(false);
       }
     }
-  }, []);
+  }, [t]);
 
   const renderBackdrop = useCallback(
     (props: BottomSheetBackdropProps) => (

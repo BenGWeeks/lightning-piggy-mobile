@@ -1,3 +1,13 @@
+import i18n from '../i18n';
+
+import * as boltzService from '../services/boltzService';
+import { markSwapPlaceholdersResolved } from './swapPendingMerge';
+import {
+  FORWARD_SWAP_WATCH_TIMEOUT_MS,
+  forwardSwapStatusMessage,
+  forwardSwapStillWaitingToast,
+  watchForwardSwap,
+} from './forwardSwapWatch';
 const mockToastShow = jest.fn();
 jest.mock('../components/BrandedToast', () => ({
   __esModule: true,
@@ -10,15 +20,6 @@ jest.mock('../services/boltzService', () => ({
   isExplicitSwapFailure: (e: unknown) =>
     e instanceof Error && e.message.startsWith('Swap failed with status: '),
 }));
-
-import * as boltzService from '../services/boltzService';
-import { markSwapPlaceholdersResolved } from './swapPendingMerge';
-import {
-  FORWARD_SWAP_WATCH_TIMEOUT_MS,
-  forwardSwapStatusMessage,
-  forwardSwapStillWaitingToast,
-  watchForwardSwap,
-} from './forwardSwapWatch';
 
 const wait = boltzService.waitForSubmarineSwapComplete as jest.Mock;
 
@@ -102,4 +103,22 @@ describe('watchForwardSwap', () => {
     expect(markSwapPlaceholdersResolved).toHaveBeenCalledWith('swap1');
     expect(args.onFailed).toHaveBeenCalledWith('Swap failed with status: transaction.lockupFailed');
   });
+});
+
+it('translates background swap toasts using the active app locale', async () => {
+  const previousLocale = i18n.locale;
+  i18n.locale = 'es';
+  try {
+    expect(forwardSwapStillWaitingToast(null).text1).toBe('Seguimos esperando una confirmación');
+    wait.mockResolvedValue(undefined);
+    await watchForwardSwap(watchArgs(), 'es');
+    expect(mockToastShow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text1: 'Intercambio completado',
+        text2: '20.000 sats entregados mediante Lightning.',
+      }),
+    );
+  } finally {
+    i18n.locale = previousLocale;
+  }
 });

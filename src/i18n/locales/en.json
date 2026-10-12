@@ -3005,5 +3005,21 @@
     "stoppedTitle": "Live location stopped",
     "stoppedBody": "Lightning Piggy was closed in the background, so your live location stopped. Open the app to share again.",
     "stoppedBodyOne": "Lightning Piggy was closed in the background, so your live location with {{name}} stopped. Open the app to share again."
+  },
+  "swapToast": {
+    "lockedTitle": "Boltz locked funds on-chain",
+    "claimingBody": "Claiming {{amount}} sats…",
+    "completeTitle": "Swap complete",
+    "claimedBody": "{{amount}} sats (less claim fee) claimed on-chain. Claim tx {{txid}}…",
+    "progressTitle": "Swap in progress",
+    "progressBody": "Background step hit an error — tap \"Retry now\" in the sheet or relaunch the app. Funds are safe.",
+    "retryTitle": "Retry kicked off",
+    "retryBody": "Any claimable swaps are being re-broadcast.",
+    "retryFailedTitle": "Retry failed",
+    "deliveredBody": "{{amount}} sats delivered via Lightning.",
+    "settlingTitle": "Swap still settling",
+    "settlingBody": "Funds are safe — Boltz is finishing the Lightning payment.",
+    "confirmationTitle": "Still waiting for a confirmation",
+    "confirmationBody": "Bitcoin blocks average ~10 min but sometimes take much longer. Funds are safe — the swap finishes automatically."
   }
 }

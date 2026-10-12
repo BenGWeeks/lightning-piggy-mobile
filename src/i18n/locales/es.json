@@ -3005,5 +3005,21 @@
     "stoppedTitle": "Ubicación en tiempo real detenida",
     "stoppedBody": "Lightning Piggy se cerró en segundo plano y tu ubicación en tiempo real se detuvo. Abre la app para volver a compartirla.",
     "stoppedBodyOne": "Lightning Piggy se cerró en segundo plano y tu ubicación en tiempo real con {{name}} se detuvo. Abre la app para volver a compartirla."
+  },
+  "swapToast": {
+    "lockedTitle": "Boltz bloqueó los fondos en la cadena",
+    "claimingBody": "Reclamando {{amount}} sats…",
+    "completeTitle": "Intercambio completado",
+    "claimedBody": "{{amount}} sats (menos la comisión de reclamación) reclamados en la cadena. Transacción {{txid}}…",
+    "progressTitle": "Intercambio en curso",
+    "progressBody": "Ocurrió un error en segundo plano — pulsa «Reintentar ahora» en el panel o reinicia la aplicación. Los fondos están seguros.",
+    "retryTitle": "Reintento iniciado",
+    "retryBody": "Se están retransmitiendo los intercambios que se pueden reclamar.",
+    "retryFailedTitle": "El reintento falló",
+    "deliveredBody": "{{amount}} sats entregados mediante Lightning.",
+    "settlingTitle": "El intercambio sigue liquidándose",
+    "settlingBody": "Los fondos están seguros — Boltz está terminando el pago Lightning.",
+    "confirmationTitle": "Seguimos esperando una confirmación",
+    "confirmationBody": "Los bloques de Bitcoin tardan unos 10 min de media, pero a veces mucho más. Los fondos están seguros — el intercambio se completa automáticamente."
   }
 }

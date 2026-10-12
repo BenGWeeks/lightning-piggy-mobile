@@ -20,7 +20,7 @@
 //     that App.tsx previously configured (e.g. Electrum script-verify
 //     error messages don't get truncated).
 import React, { useMemo } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Text, TouchableOpacity } from 'react-native';
 import RNToast, {
   BaseToast,
   ErrorToast,
@@ -29,6 +29,7 @@ import RNToast, {
 } from 'react-native-toast-message';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
+import { createBrandedToastStyles, sharedToastStyle } from '../styles/BrandedToast.styles';
 
 // Re-export the lib's `Toast` default so call sites just swap their import
 // path and keep using `Toast.show(...)` / `Toast.hide()` exactly as before.
@@ -39,19 +40,6 @@ export default Toast;
 // consistent with BrandedAlert's card (28px radius, soft shadow).
 // 14px radius is a softer match to the toast slot's smaller footprint
 // than the alert card's 28px.
-const sharedToastStyle = {
-  height: undefined as number | undefined,
-  minHeight: 60,
-  paddingVertical: 10,
-  borderRadius: 14,
-  borderLeftWidth: 6,
-  shadowColor: '#000',
-  shadowOffset: { width: 0, height: 4 },
-  shadowOpacity: 0.18,
-  shadowRadius: 12,
-  elevation: 6,
-};
-
 // Factory so each variant can stamp in its accent colour without
 // duplicating layout / typography overrides.
 function makeToastConfig(colors: Palette) {
@@ -121,7 +109,7 @@ function makeToastConfig(colors: Palette) {
 export function BrandedToast(): React.ReactElement {
   const colors = useThemeColors();
   const config = useMemo(() => makeToastConfig(colors), [colors]);
-  return <RNToast topOffset={60} config={config} />;
+  return <RNToast topOffset={60} config={config} onPress={RNToast.hide} swipeable />;
 }
 
 // Fallback BaseToast renderer for callers that pass an unrecognised
@@ -137,40 +125,16 @@ export function GenericBrandedToast({
   accent?: string;
 }): React.ReactElement {
   const colors = useThemeColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createBrandedToastStyles(colors), [colors]);
   return (
-    <View style={[styles.card, { borderLeftColor: accent ?? colors.brandPink }]}>
+    <TouchableOpacity
+      accessibilityRole="button"
+      accessibilityLabel={text1}
+      onPress={() => RNToast.hide()}
+      style={[styles.card, { borderLeftColor: accent ?? colors.brandPink }]}
+    >
       <Text style={styles.text1}>{text1}</Text>
       {text2 ? <Text style={styles.text2}>{text2}</Text> : null}
-    </View>
+    </TouchableOpacity>
   );
 }
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    card: {
-      backgroundColor: colors.surface,
-      borderRadius: 14,
-      borderLeftWidth: 6,
-      paddingVertical: 12,
-      paddingHorizontal: 16,
-      width: 340,
-      minHeight: 60,
-      justifyContent: 'center',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.18,
-      shadowRadius: 12,
-      elevation: 6,
-    },
-    text1: {
-      fontSize: 15,
-      fontWeight: '700',
-      color: colors.textHeader,
-    },
-    text2: {
-      fontSize: 13,
-      color: colors.textBody,
-      marginTop: 2,
-    },
-  });
