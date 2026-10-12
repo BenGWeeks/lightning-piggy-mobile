@@ -113,8 +113,9 @@ export function extractNoteMedia(event: MediaSourceEvent): NoteMediaItem[] {
     if (!type) continue;
     add({ url: meta.url, type, thumb: meta.thumb, blurhash: meta.blurhash, alt: meta.alt });
   }
-  // kind-20/21/22 content is a caption, not media; only notes carry bare URLs.
-  if (event.kind === 1 && typeof event.content === 'string') {
+  // kind-20/21/22 content is a caption, not media; only notes (and NIP-22
+  // comments, which some clients post as note replies — #1337) carry bare URLs.
+  if ((event.kind === 1 || event.kind === 1111) && typeof event.content === 'string') {
     const urls = event.content.match(/https?:\/\/[^\s<>"']+/gi) ?? [];
     for (const raw of urls) {
       const url = raw.replace(/[.,;:!?)\]}>]+$/, '');

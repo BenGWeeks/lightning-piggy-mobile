@@ -36,6 +36,8 @@ it('sends a bounded until filter and keeps only this author, newest first', asyn
   });
   const [, , filter, opts] = mockQuery.mock.calls[0];
   expect(filter).toMatchObject({ authors: [PK], until: 100, limit: 30 });
+  // Notes, NIP-22 comments (#1337) and picture / video events in one filter.
+  expect([...filter.kinds].sort((a: number, b: number) => a - b)).toEqual([1, 20, 21, 22, 1111]);
   expect(opts).toMatchObject({ rejectOnAllRelaysFailure: true });
   expect(page.events.map((e) => e.id)).toEqual(['new', 'old']);
   expect(page.complete).toBe(true);

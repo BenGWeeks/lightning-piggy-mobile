@@ -91,6 +91,12 @@ describe('extractNoteMedia', () => {
     ).toMatchObject([{ type: 'video' }]);
   });
 
+  it('reads bare media URLs from NIP-22 comments like notes (#1337)', () => {
+    expect(
+      extractNoteMedia({ kind: 1111, content: 'look https://x.example/a.jpg', tags: [] }),
+    ).toMatchObject([{ type: 'image', url: 'https://x.example/a.jpg' }]);
+  });
+
   it('ignores caption URLs on picture events and plain links on notes', () => {
     expect(
       extractNoteMedia({ kind: 20, content: 'https://x.example/other.png', tags: [] }),
