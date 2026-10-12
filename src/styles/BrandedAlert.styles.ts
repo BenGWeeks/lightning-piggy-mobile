@@ -86,6 +86,7 @@ export const createBrandedAlertStyles = (colors: Palette) =>
       opacity: 0.75,
     },
     buttonText: {
+      textAlign: 'center',
       fontSize: 16,
       fontWeight: '700',
       letterSpacing: 0.3,

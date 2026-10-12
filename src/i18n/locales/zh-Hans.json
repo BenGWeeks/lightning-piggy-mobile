@@ -3025,5 +3025,15 @@
     "settlingBody": "资金安全 — Boltz 正在完成 Lightning 付款。",
     "confirmationTitle": "仍在等待确认",
     "confirmationBody": "Bitcoin 出块平均约需 10 分钟，但有时会更久。资金安全 — 兑换会自动完成。"
+  },
+  "notificationMute": {
+    "muteAction": "静音",
+    "unmuteAction": "取消静音",
+    "mute": "静音此账号的通知",
+    "unmute": "取消静音此账号的通知",
+    "accounts": "已静音的账号",
+    "empty": "没有已静音的账号",
+    "error": "无法更新通知静音设置",
+    "menu": "通知选项"
   }
 }

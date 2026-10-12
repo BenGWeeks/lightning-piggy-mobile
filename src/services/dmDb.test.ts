@@ -2,19 +2,8 @@
 // op-sqlite DB (execute + transaction) so these cover the SQL/params/mapping
 // without the native module — the encrypted open itself is verified on-device
 // (localDb / #700).
-const mockExecute = jest.fn();
-const mockTransaction = jest.fn(
-  async (fn: (tx: { execute: typeof mockExecute }) => Promise<void>) => {
-    await fn({ execute: mockExecute });
-  },
-);
-jest.mock('./localDb', () => ({
-  getLocalDb: jest.fn(() =>
-    Promise.resolve({ execute: mockExecute, transaction: mockTransaction }),
-  ),
-}));
-
 import {
+  subscribeDmStorage,
   selectKnownEventIds,
   upsertDmMessages,
   importDmMessages,
@@ -30,6 +19,18 @@ import {
   type DmMessageRow,
   getConversationForEvent,
 } from './dmDb';
+
+const mockExecute = jest.fn();
+const mockTransaction = jest.fn(
+  async (fn: (tx: { execute: typeof mockExecute }) => Promise<void>) => {
+    await fn({ execute: mockExecute });
+  },
+);
+jest.mock('./localDb', () => ({
+  getLocalDb: jest.fn(() =>
+    Promise.resolve({ execute: mockExecute, transaction: mockTransaction }),
+  ),
+}));
 
 const OWNER = 'owner1';
 
@@ -446,4 +447,42 @@ describe('getConversationForEvent (#1154)', () => {
     mockExecute.mockResolvedValueOnce(rowsResult([]));
     await expect(getConversationForEvent('a'.repeat(64), 'wrap')).resolves.toBeNull();
   });
+});
+
+it('signals each owner once after a committed upsert and unsubscribes', async () => {
+  const listener = jest.fn();
+  const unsubscribe = subscribeDmStorage(listener);
+  mockExecute.mockImplementationOnce(async () => {
+    expect(listener).not.toHaveBeenCalled();
+    return rowsResult([]);
+  });
+  await upsertDmMessages([row(), row({ eventId: 'e2' }), row({ owner: 'owner2' })]);
+  expect(listener.mock.calls).toEqual([[OWNER], ['owner2']]);
+  unsubscribe();
+  await upsertDmMessages([row()]);
+  expect(listener).toHaveBeenCalledTimes(2);
+});
+
+it('does not signal storage changes for empty or failed transactions', async () => {
+  const listener = jest.fn();
+  const unsubscribe = subscribeDmStorage(listener);
+  try {
+    await upsertDmMessages([]);
+    mockTransaction.mockRejectedValueOnce(new Error('rollback'));
+    await expect(upsertDmMessages([row()])).rejects.toThrow('rollback');
+    expect(listener).not.toHaveBeenCalled();
+  } finally {
+    unsubscribe();
+  }
+});
+
+it('signals imported rows after commit so placeholders can resolve', async () => {
+  const listener = jest.fn();
+  const unsubscribe = subscribeDmStorage(listener);
+  try {
+    await importDmMessages([row()]);
+    expect(listener).toHaveBeenCalledWith(OWNER);
+  } finally {
+    unsubscribe();
+  }
 });

@@ -48,6 +48,27 @@ export interface DmMessageRow {
   editId?: string;
 }
 
+/** Post-commit updates: consumers must not resolve wraps before their rows exist. */
+const dmStorageListeners = new Set<(owner: string) => void>();
+export function subscribeDmStorage(listener: (owner: string) => void): () => void {
+  dmStorageListeners.add(listener);
+  return () => {
+    dmStorageListeners.delete(listener);
+  };
+}
+
+function notifyDmStorage(rows: readonly DmMessageRow[]): void {
+  for (const owner of new Set(rows.map((row) => row.owner))) {
+    for (const listener of dmStorageListeners) {
+      try {
+        listener(owner);
+      } catch {
+        // A consumer failure must not turn a committed write into a failed one.
+      }
+    }
+  }
+}
+
 /** SQL for a row's effective protocol — mirrors `protocolForWireKind`. */
 const PROTOCOL_SQL = `COALESCE(protocol, CASE WHEN wire_kind = 4 THEN 'nip04' ELSE 'nip17' END)`;
 const isDmProtocol = (v: unknown): v is DmProtocol =>
@@ -253,6 +274,7 @@ export async function upsertDmMessages(rows: readonly DmMessageRow[]): Promise<v
   await db.transaction(async (tx) => {
     for (const m of rows) await upsertOne(tx as Executor, m);
   });
+  notifyDmStorage(rows);
 }
 
 /**
@@ -291,6 +313,7 @@ export async function importDmMessages(rows: readonly DmMessageRow[]): Promise<v
       );
     }
   });
+  notifyDmStorage(rows);
 }
 
 /**

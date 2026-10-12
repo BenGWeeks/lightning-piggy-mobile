@@ -625,6 +625,7 @@ const ConversationScreen: React.FC = () => {
           app background. */}
       <View style={{ height: insets.top, backgroundColor: colors.brandPink }} />
       <ConversationHeader
+        pubkey={pubkey}
         name={name}
         picture={picture}
         protocol={protocol}

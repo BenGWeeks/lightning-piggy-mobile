@@ -446,6 +446,24 @@ hides it (`isWatcherValidation`).
   The Marmot wake task (which sees every push, and taps on Android) ignores
   watcher pushes.
 
+*Per-sender mutes (#1381).* `mutedSenders` persists hex pubkeys per account.
+The Notifications list and badge hide muted senders; the shared local-alert
+service suppresses their history and OS alerts before scheduling. Message
+storage and the Messages inbox keep receiving their DMs. The background
+batch detector excludes known muted authors before forming a generic ping.
+A received push with `owner` and `senderPubkey` (or a DM's
+`conversationPubkey`) is filtered by the presentation handler too.
+
+*Server follow-up:* current watcher alerts contain only a category, and the OS
+may display background alert pushes before JavaScript runs. Selective muting
+there requires the watcher to honour per-account muted senders server-side,
+or provide authenticated owner/sender metadata through a data-only push and
+an iOS notification service extension. Do not infer a sender from a category
+or a NIP-59 ephemeral wrap author. Undecrypted remote-signer gift wraps and
+content-free Marmot wakes have the same limitation until the sender is known;
+resolved wrap history rows are filtered once the encrypted DM store identifies
+that conversation.
+
 *Privacy.* Apple/Google learn that a notification arrived, when, and — from
 the alert itself — which kind (message, zap, mention or payment). For these
 categories the watcher additionally learns the user's public key, linked to

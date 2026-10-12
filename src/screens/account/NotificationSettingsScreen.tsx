@@ -6,6 +6,7 @@ import { createSharedAccountStyles } from './sharedStyles';
 import { useThemeColors } from '../../contexts/ThemeContext';
 import { useTranslation } from '../../contexts/LocaleContext';
 import { createSecurityScreenStyles } from '../../styles/SecurityScreen.styles';
+import MutedAccountsList from '../../components/MutedAccountsList';
 import MarmotPushSection from '../../components/MarmotPushSection';
 import SettingsScopeHeader from '../../components/SettingsScopeHeader';
 import NotificationPermissionRow from '../../components/NotificationPermissionRow';
@@ -72,70 +73,78 @@ const NotificationSettingsScreen: React.FC = () => {
   };
 
   return (
-    <AccountScreenLayout title={t('notificationSettingsScreen.title')}>
-      <NotificationPermissionRow />
+    <AccountScreenLayout title={t('notificationSettingsScreen.title')} scrollable={false}>
+      <MutedAccountsList
+        header={
+          <>
+            <NotificationPermissionRow />
 
-      <SettingsScopeHeader scope="account" testID="notifications-account" />
-      <MarmotPushSection />
+            <SettingsScopeHeader scope="account" testID="notifications-account" />
+            <MarmotPushSection />
 
-      <SettingsScopeHeader scope="phone" spaced testID="notifications-phone" />
+            <SettingsScopeHeader scope="phone" spaced testID="notifications-phone" />
 
-      <View style={screen.headerRow}>
-        <BellRing size={22} color={colors.white} />
-        <Text style={[shared.sectionLabel, screen.headerLabel]}>
-          {t('securityScreen.notificationContent')}
-        </Text>
-      </View>
-      <Text style={shared.fieldHint}>{t('securityScreen.notificationContentHint')}</Text>
-      <View style={screen.toggleRow}>
-        <Text style={[screen.optionLabel, screen.toggleLabel]}>
-          {t('securityScreen.showMessagePaymentDetails')}
-        </Text>
-        <Switch
-          value={lockScreenContentOn}
-          onValueChange={handleToggleLockScreenContent}
-          accessibilityLabel={t('securityScreen.showMessagePaymentDetailsA11y')}
-          testID="security-lockscreen-content-toggle"
-          trackColor={{ false: colors.divider, true: colors.brandPink }}
-          thumbColor={lockScreenContentOn ? colors.white : undefined}
-        />
-      </View>
+            <View style={screen.headerRow}>
+              <BellRing size={22} color={colors.white} />
+              <Text style={[shared.sectionLabel, screen.headerLabel]}>
+                {t('securityScreen.notificationContent')}
+              </Text>
+            </View>
+            <Text style={shared.fieldHint}>{t('securityScreen.notificationContentHint')}</Text>
+            <View style={screen.toggleRow}>
+              <Text style={[screen.optionLabel, screen.toggleLabel]}>
+                {t('securityScreen.showMessagePaymentDetails')}
+              </Text>
+              <Switch
+                value={lockScreenContentOn}
+                onValueChange={handleToggleLockScreenContent}
+                accessibilityLabel={t('securityScreen.showMessagePaymentDetailsA11y')}
+                testID="security-lockscreen-content-toggle"
+                trackColor={{ false: colors.divider, true: colors.brandPink }}
+                thumbColor={lockScreenContentOn ? colors.white : undefined}
+              />
+            </View>
 
-      {isAndroid && (
-        <>
-          <View style={[screen.headerRow, screen.sectionGap]}>
-            <Radio size={22} color={colors.white} />
-            <Text style={[shared.sectionLabel, screen.headerLabel]}>
-              {t('securityScreen.backgroundNotifications')}
-            </Text>
-          </View>
-          <Text style={shared.fieldHint}>{t('securityScreen.backgroundNotificationsHint')}</Text>
-          <DetailsDisclosure
-            label={t('securityScreen.details')}
-            testID="security-background-dm-details"
-            paragraphs={[
-              t('securityScreen.backgroundDetailsNoGoogle'),
-              t('securityScreen.backgroundDetailsBattery'),
-              t('securityScreen.backgroundDetailsPayments'),
-            ]}
-          />
-          <View style={screen.toggleRow}>
-            <Text style={[screen.optionLabel, screen.toggleLabel]}>
-              {t('securityScreen.watchForMessages')}
-            </Text>
-            <Switch
-              value={backgroundDmOn}
-              onValueChange={handleToggleBackgroundDm}
-              accessibilityLabel={t('securityScreen.watchForMessages')}
-              testID="security-background-dm-toggle"
-              trackColor={{ false: colors.divider, true: colors.brandPink }}
-              thumbColor={backgroundDmOn ? colors.white : undefined}
-            />
-          </View>
-        </>
-      )}
+            {isAndroid && (
+              <>
+                <View style={[screen.headerRow, screen.sectionGap]}>
+                  <Radio size={22} color={colors.white} />
+                  <Text style={[shared.sectionLabel, screen.headerLabel]}>
+                    {t('securityScreen.backgroundNotifications')}
+                  </Text>
+                </View>
+                <Text style={shared.fieldHint}>
+                  {t('securityScreen.backgroundNotificationsHint')}
+                </Text>
+                <DetailsDisclosure
+                  label={t('securityScreen.details')}
+                  testID="security-background-dm-details"
+                  paragraphs={[
+                    t('securityScreen.backgroundDetailsNoGoogle'),
+                    t('securityScreen.backgroundDetailsBattery'),
+                    t('securityScreen.backgroundDetailsPayments'),
+                  ]}
+                />
+                <View style={screen.toggleRow}>
+                  <Text style={[screen.optionLabel, screen.toggleLabel]}>
+                    {t('securityScreen.watchForMessages')}
+                  </Text>
+                  <Switch
+                    value={backgroundDmOn}
+                    onValueChange={handleToggleBackgroundDm}
+                    accessibilityLabel={t('securityScreen.watchForMessages')}
+                    testID="security-background-dm-toggle"
+                    trackColor={{ false: colors.divider, true: colors.brandPink }}
+                    thumbColor={backgroundDmOn ? colors.white : undefined}
+                  />
+                </View>
+              </>
+            )}
 
-      <ShopAlertsSection />
+            <ShopAlertsSection />
+          </>
+        }
+      />
     </AccountScreenLayout>
   );
 };

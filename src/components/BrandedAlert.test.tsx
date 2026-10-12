@@ -11,6 +11,16 @@ describe('BrandedAlertHost', () => {
   beforeEach(() => jest.useFakeTimers());
   afterEach(() => jest.useRealTimers());
 
+  it('lets long button labels wrap at the normal font size', () => {
+    render(<BrandedAlertHost />);
+    const label = 'A long translated action label that needs to wrap';
+    act(() => Alert.alert('Confirm', undefined, [{ text: label }]));
+    const text = screen.getByText(label);
+    expect(text.props.adjustsFontSizeToFit).not.toBe(true);
+    expect(text.props.numberOfLines ?? 0).toBe(0);
+    expect(text).toHaveStyle({ fontSize: 16 });
+  });
+
   it('dismisses a displaced alert when a new one replaces it', () => {
     const firstDismiss = jest.fn();
     const secondDismiss = jest.fn();

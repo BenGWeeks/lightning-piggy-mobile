@@ -3063,5 +3063,15 @@
     "settlingBody": "Środki są bezpieczne — Boltz kończy płatność Lightning.",
     "confirmationTitle": "Nadal czekamy na potwierdzenie",
     "confirmationBody": "Bloki Bitcoin pojawiają się średnio co około 10 min, ale czasem trwa to znacznie dłużej. Środki są bezpieczne — wymiana zakończy się automatycznie."
+  },
+  "notificationMute": {
+    "muteAction": "Wycisz",
+    "unmuteAction": "Włącz powiadomienia",
+    "mute": "Wycisz powiadomienia z tego konta",
+    "unmute": "Włącz powiadomienia z tego konta",
+    "accounts": "Wyciszone konta",
+    "empty": "Brak wyciszonych kont",
+    "error": "Nie udało się zmienić wyciszenia powiadomień",
+    "menu": "Opcje powiadomień"
   }
 }

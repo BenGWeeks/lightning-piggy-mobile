@@ -35,6 +35,7 @@ interface Props {
   styles: NotificationsScreenStyles;
   // Receives the entry so the parent can pass one stable handler to every row.
   onPress: (entry: NotificationHistoryEntry) => void;
+  onLongPress: (entry: NotificationHistoryEntry) => void;
 }
 
 function NotificationRow({
@@ -46,12 +47,14 @@ function NotificationRow({
   iconColor,
   styles,
   onPress,
+  onLongPress,
 }: Props) {
   const Icon = ICONS[entry.kind] ?? MessageCircle;
   return (
     <TouchableOpacity
       style={[styles.row, !entry.read && styles.rowUnread]}
       onPress={() => onPress(entry)}
+      onLongPress={() => onLongPress(entry)}
       accessibilityRole="button"
       accessibilityLabel={`${title}, ${subtitle}, ${time}`}
       accessibilityState={{ selected: !entry.read }}

@@ -1,5 +1,6 @@
+import { useAccountState } from '../contexts/useAccountState';
 import { useLocale } from '../contexts/LocaleContext';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { FlatList, Text, TouchableOpacity, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -15,6 +16,9 @@ import { useNonFollowProfiles } from '../hooks/useNonFollowProfiles';
 import { notificationDisplay, type DisplayIdentity } from '../utils/notificationDisplay';
 import { protocolForWireKind, type DmProtocol } from '../utils/dmProtocol';
 import BrandGradientBackground from '../components/BrandGradientBackground';
+import { useMuteNotificationAction } from '../hooks/useMuteNotificationAction';
+import { useMutedSenders } from '../hooks/useMutedSenders';
+import { isMutedNotification, notificationSender } from '../services/mutedSenders';
 import NotificationRow from '../components/NotificationRow';
 import { useNotificationHistory } from '../hooks/useNotificationHistory';
 import { navigateFromNotification } from '../navigation/AppNavigator';
@@ -27,6 +31,8 @@ import { createNotificationsScreenStyles } from '../styles/NotificationsScreen.s
  * after it was swiped away, and open its source. Rows show who / what and
  * when, never message text.
  */
+const EMPTY_WRAP_TARGETS = new Map<string, { pubkey: string; protocol: DmProtocol }>();
+
 export default function NotificationsScreen() {
   const { formatLocale } = useLocale();
   const colors = useThemeColors();
@@ -73,9 +79,7 @@ export default function NotificationsScreen() {
 
   // Rows from alerts the background couldn't decrypt carry only a NIP-17 wrap
   // id; once the app has stored that message, learn its conversation (#1154).
-  const [wrapTargets, setWrapTargets] = useState<
-    Map<string, { pubkey: string; protocol: DmProtocol }>
-  >(new Map());
+  const [wrapTargets, setWrapTargets] = useAccountState(pubkey, EMPTY_WRAP_TARGETS);
   useFocusEffect(
     useCallback(() => {
       if (!pubkey) return;
@@ -121,7 +125,7 @@ export default function NotificationsScreen() {
         cancelled = true;
         clearInterval(retry);
       };
-    }, [entries, pubkey, wrapTargets]),
+    }, [entries, pubkey, wrapTargets, setWrapTargets]),
   );
 
   const handlePress = useCallback(
@@ -140,6 +144,32 @@ export default function NotificationsScreen() {
       });
     },
     [markRead, people, wrapTargets],
+  );
+
+  const openMuteMenu = useMuteNotificationAction();
+  const { mutedSenders } = useMutedSenders();
+  const visibleEntries = useMemo(
+    () =>
+      entries.filter((entry) => {
+        const resolved = entry.data.wrapId ? wrapTargets.get(entry.data.wrapId) : undefined;
+        return !isMutedNotification(
+          { ...entry.data, conversationPubkey: entry.data.conversationPubkey ?? resolved?.pubkey },
+          entry.kind,
+          mutedSenders,
+        );
+      }),
+    [entries, wrapTargets, mutedSenders],
+  );
+  const handleLongPress = useCallback(
+    (entry: NotificationHistoryEntry) => {
+      const resolved = entry.data.wrapId ? wrapTargets.get(entry.data.wrapId) : undefined;
+      const sender = notificationSender(
+        { ...entry.data, conversationPubkey: entry.data.conversationPubkey ?? resolved?.pubkey },
+        entry.kind,
+      );
+      if (sender) openMuteMenu(sender, `notif-mute-${entry.id}`);
+    },
+    [wrapTargets, openMuteMenu],
   );
 
   const renderItem = useCallback(
@@ -170,10 +200,21 @@ export default function NotificationsScreen() {
           iconColor={colors.brandPink}
           styles={styles}
           onPress={handlePress}
+          onLongPress={handleLongPress}
         />
       );
     },
-    [profileFor, groupFor, wrapTargets, t, colors.brandPink, styles, handlePress, formatLocale],
+    [
+      profileFor,
+      groupFor,
+      wrapTargets,
+      t,
+      colors.brandPink,
+      styles,
+      handlePress,
+      handleLongPress,
+      formatLocale,
+    ],
   );
 
   return (
@@ -206,7 +247,7 @@ export default function NotificationsScreen() {
       </View>
       <View style={styles.content}>
         <FlatList
-          data={entries}
+          data={visibleEntries}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
           contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 16 }]}

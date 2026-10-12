@@ -1,3 +1,5 @@
+import { shouldMuteNotification } from './mutedSenders';
+import { mutedNotificationPresentation } from './mutedNotificationPresentation';
 import { getAppFormatLocale } from '../utils/appFormatLocale';
 /**
  * notificationService — single integration point for OS-level
@@ -195,6 +197,8 @@ async function initialiseInternal(): Promise<void> {
     // A remote (Marmot) push while the app is open is redundant: the live
     // session shows the real message itself, so the generic one stays quiet.
     handleNotification: async (notification) => {
+      const muted = await mutedNotificationPresentation(notification);
+      if (muted) return muted;
       // The notification watcher's generic alert: the open app already shows
       // what it announces (see showWatcherPushInForeground).
       const watcher = watcherCategoryOf(notification.request);
@@ -417,12 +421,9 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
   };
   inFlightNotifications.add(flight);
   try {
-    // In-app history (#1143) — recorded even without OS permission, so the
-    // Notifications screen still lists what happened.
-    // One id for the history row and the tray notification, so opening either
-    // can mark / clear the other. A retry of the same source reuses it, and so
-    // does the next message in a thread whose row is still unread.
+    // Record history even without OS permission; muted senders never alert.
     const owner = payload.owner ?? getActivePubkey() ?? undefined;
+    if (await shouldMuteNotification(owner, payload.data, payload.kind)) return null;
     const collapseKey = threadCollapseKey(payload.kind, payload.data);
     // Awaited (best-effort, never throws): a headless background task can be
     // torn down as soon as delivery resolves, losing a detached write.
@@ -445,7 +446,12 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
     const presented = lockScreenContent ? payload : { ...payload, ...genericFor(payload.kind) };
     const quiet = payload.data?.quiet === true;
 
-    if ((await payload.shouldSuppress?.()) || flight.cancelled) return null;
+    if (
+      (await payload.shouldSuppress?.()) ||
+      flight.cancelled ||
+      (await shouldMuteNotification(owner, payload.data, payload.kind))
+    )
+      return null;
     const id = await Notifications.scheduleNotificationAsync({
       // A thread's alert reuses its row's id, so the next message replaces the
       // tray entry rather than stacking another beside it.

@@ -224,8 +224,6 @@ export function BrandedAlertHost(): React.ReactElement | null {
                       styles.buttonText,
                       isCancel ? styles.cancelButtonText : styles.actionButtonText,
                     ]}
-                    numberOfLines={1}
-                    adjustsFontSizeToFit
                   >
                     {btn.text}
                   </Text>
