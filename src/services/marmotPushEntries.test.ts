@@ -94,6 +94,20 @@ describe('our 447 / 449 entries', () => {
     const content = JSON.parse(tokenUpdateEvent(record).content);
     expect(content.tokens[0]).not.toHaveProperty('relay_hint');
     const { records } = parsePushPayload(447, tokenUpdateEvent(record).content, Date.now());
+    expect(records[0]).toEqual(record);
+    expect(records[0]).not.toHaveProperty('relayHint');
+    expect(verifyOwnerSig(records[0], GROUP_HEX)).toBe(true);
+  });
+
+  it('treats an empty relay_hint string as no hint (same owner proof either way)', async () => {
+    const blankHint: DeviceRegistration = { ...REG, relayHint: '  ' };
+    const record = await signEntry(buildOwnRecord(blankHint, me, 2, 5), GROUP_HEX, nsecSigner(sk));
+    expect(record).not.toHaveProperty('relayHint');
+    // A sender that writes `relay_hint: ""` instead of omitting it.
+    const content = JSON.parse(tokenUpdateEvent(record).content);
+    content.tokens[0].relay_hint = '';
+    const { records } = parsePushPayload(447, JSON.stringify(content), Date.now());
+    expect(records[0]).toEqual(record);
     expect(verifyOwnerSig(records[0], GROUP_HEX)).toBe(true);
   });
 

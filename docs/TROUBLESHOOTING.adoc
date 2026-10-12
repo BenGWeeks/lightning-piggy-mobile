@@ -1002,10 +1002,11 @@ The watcher (`lightning-piggy-watcher` on black-panther) can only see gift
 wraps on relays that serve them to it. `relay.damus.io` requires NIP-42 AUTH to
 read kind 1059 and the watcher can only authenticate as itself, so DMs that
 land *only* on damus are invisible to it (its logs show `"reason":"auth-required"`
-for damus). DMs on nos.lol, relay.primal.net and the user's other public inbox
+for damus). DMs on the watcher's own relays (relay.primal.net, relay.ditto.pub,
+relay.coinos.io, relay.eu.whitenoise.chat) and the user's other public inbox
 relays (kind 10050, included in the registration) are seen. Damus also
-rate-limits, so the app publishes registrations to the watcher's other inbox
-relays and only falls back to damus when nothing else is listed.
+rate-limits, so it is no longer one of the watcher's relays and the app only
+publishes a registration there if the watcher's 10050 lists nothing else.
 
 To check a registration end to end:
 `ssh benweeks@black-panther.local 'docker logs lightning-piggy-watcher --since 10m'`

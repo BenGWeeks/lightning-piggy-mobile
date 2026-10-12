@@ -356,6 +356,11 @@ export class MarmotPushRegistrar {
     live(); // the write was an await: still current?
     if (!(await this.deps.send(group.idHex, tokenUpdateEvent(record)))) return false;
     await this.save(group.idHex, { record, leaves });
+    if (__DEV__) {
+      console.log(
+        `[MarmotPush] 447 → group ${group.idHex.slice(0, 8)} (server ${record.server.slice(0, 8)}, hint ${record.relayHint ?? 'none'})`,
+      );
+    }
     return true;
   }
 
