@@ -64,12 +64,27 @@ set_metro() {
   adb -s "$DEVICE" shell "run-as com.lightningpiggy.app.dev sh -c 'printf \"%s\\n\" \"<?xml version=\\\"1.0\\\" encoding=\\\"utf-8\\\" standalone=\\\"yes\\\" ?>\" \"<map>\" \"    <string name=\\\"debug_http_host\\\">$(metro_host "$1")</string>\" \"</map>\" > shared_prefs/com.lightningpiggy.app.dev_preferences.xml'"
   adb -s "$DEVICE" shell am force-stop com.lightningpiggy.app.dev
 }
-FIXTURE_ON_DEVICE=/sdcard/Pictures/interop-image.png
+FIXTURE_ON_DEVICE="/sdcard/Pictures/interop-$TAG.png" # unique per run
 device_setup() {
   [ -n "${METRO_PORT:-}" ] && set_metro "$METRO_PORT"
   adb -s "$DEVICE" push "$FLOWS/fixtures/interop-image.png" "$FIXTURE_ON_DEVICE" >/dev/null 2>&1
   adb -s "$DEVICE" shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE \
     -d "file://$FIXTURE_ON_DEVICE" >/dev/null
+  # flow-147 picks the newest photo in the system picker, so only send one if
+  # the newest image on the device is provably this run's fixture — never a
+  # personal photo.
+  export PHOTO_READY=false
+  local _
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    if adb -s "$DEVICE" shell content query --uri content://media/external/images/media \
+      --projection _display_name --sort "date_added DESC" 2>/dev/null | head -1 |
+      grep -q "_display_name=interop-$TAG.png"; then
+      PHOTO_READY=true
+      break
+    fi
+    sleep 1
+  done
+  [ "$PHOTO_READY" = true ] || say "fixture photo isn't the newest image on the device — skipping Lightning Piggy's photo send"
 }
 device_restore() {
   [ -n "${METRO_PORT:-}" ] && set_metro 8090
@@ -79,7 +94,7 @@ device_restore() {
 }
 flow() { # file [KEY=VALUE ...] — one Maestro run under maestro.lock
   local f=$1; shift
-  local args=(-e TAG="$TAG")
+  local args=(-e TAG="$TAG" -e PHOTO_READY="${PHOTO_READY:-false}")
   for kv in "$@"; do args+=(-e "$kv"); done
   say "maestro $(basename "$f")"
   local name; name="$(basename "$f" .yaml)"
@@ -155,7 +170,7 @@ with_device '
   flow "$FLOWS/flow-149-interop-lp-rename-after-admin.yaml" ROW_ID="'"$ROW"'"
   sender say --state "$STATE" --text "IO$TAG after-rename" >"$OUT/logs/after-rename.json"
   flow "$FLOWS/flow-150-interop-lp-receives-after-rename.yaml" ROW_ID="'"$ROW"'"
-  [ -z "${SKIP_WN:-}" ] && flow "$FLOWS/flow-148-interop-wn-receives-lp.yaml" WN_CHAT="IO $TAG"
+  [ -z "${SKIP_WN:-}" ] && flow "$FLOWS/flow-148-interop-wn-receives-lp.yaml" WN_CHAT="IO $TAG( renamed)?"
   sender info --state "$STATE" >"$OUT/logs/group-info.json"
 '
 

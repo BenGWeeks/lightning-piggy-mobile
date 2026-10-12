@@ -12,8 +12,8 @@ name: Interop — Lightning Piggy sends the item set into the run's Marmot group
 #
 # The photo comes from the system photo picker (an OS surface — no testIDs);
 # the runner pushes .maestro/interop/fixtures/interop-image.png to the device
-# first, and the picker's own accessibility label "Photo taken on …" selects
-# the newest photo.
+# first under a per-run name and checks it is the newest image (PHOTO_READY);
+# the picker's own accessibility label "Photo taken on …" then selects it.
 #
 # No hideKeyboard: on the emulator lane (hardware keyboard, no soft keyboard)
 # Maestro's hideKeyboard presses Back and leaves the chat.
@@ -72,18 +72,24 @@ name: Interop — Lightning Piggy sends the item set into the run's Marmot group
           id: 'branded-alert-button-1'
 - waitForAnimationToEnd:
     timeout: 3000
-# Photo via the attachment panel + system picker.
-- tapOn:
-    id: 'group-attach-button'
-- tapOn:
-    id: 'attach-send-image'
-- extendedWaitUntil:
-    visible:
-      text: 'Photo taken on .*'
-    timeout: 15000
-- tapOn:
-    text: 'Photo taken on .*'
-    index: 0
-- waitForAnimationToEnd:
-    timeout: 15000
+# Photo via the attachment panel + system picker — only when the runner has
+# proved the newest image on the device is this run's fixture (PHOTO_READY),
+# so a personal photo can never be sent.
+- runFlow:
+    when:
+      true: ${PHOTO_READY == 'true'}
+    commands:
+      - tapOn:
+          id: 'group-attach-button'
+      - tapOn:
+          id: 'attach-send-image'
+      - extendedWaitUntil:
+          visible:
+            text: 'Photo taken on .*'
+          timeout: 15000
+      - tapOn:
+          text: 'Photo taken on .*'
+          index: 0
+      - waitForAnimationToEnd:
+          timeout: 15000
 - takeScreenshot: lp-sent-group

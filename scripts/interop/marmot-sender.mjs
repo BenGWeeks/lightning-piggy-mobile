@@ -392,6 +392,16 @@ async function cmdCommit(proposals, label) {
 async function cmdListen() {
   const group = await openGroup();
   const expects = (flags.expect ?? []).map((x) => ({ re: new RegExp(x), hit: false }));
+  // Declared before the listener: history drains during connect(), so the
+  // last expected message can arrive before connect() resolves.
+  const finish = () => {
+    out({
+      done: true,
+      matched: expects.filter((e) => e.hit).map((e) => e.re.source),
+      missing: expects.filter((e) => !e.hit).map((e) => e.re.source),
+    });
+    process.exit(expects.every((e) => e.hit) ? 0 : 1);
+  };
   group.on('applicationMessage', (data) => {
     const r = deserializeApplicationData(data);
     if (r.pubkey === pk) return;
@@ -404,16 +414,8 @@ async function cmdListen() {
     });
     if (expects.length && expects.every((e) => e.hit)) finish();
   });
-  await client.groups.connect(group.id, { fallbackRelays: RELAYS });
-  const finish = () => {
-    out({
-      done: true,
-      matched: expects.filter((e) => e.hit).map((e) => e.re.source),
-      missing: expects.filter((e) => !e.hit).map((e) => e.re.source),
-    });
-    process.exit(expects.every((e) => e.hit) ? 0 : 1);
-  };
   setTimeout(finish, Number(flags.seconds ?? 60) * 1000);
+  await client.groups.connect(group.id, { fallbackRelays: RELAYS });
   await new Promise(() => {});
 }
 

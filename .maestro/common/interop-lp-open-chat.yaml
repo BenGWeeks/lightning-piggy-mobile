@@ -9,13 +9,14 @@ appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
     clearState: false
 # Wait for the bundle to load (a dev client can take a while). A cold start
 # restores whatever screen was open last — a chat, Settings, a sheet — so walk
-# back with the app's own back buttons (testIDs ending in "back", or the
+# back with the app's own back buttons (testIDs ending in "back" or
+# "back-button", or the
 # Settings screens' tab-header-icon-button) until the
 # tab bar shows. A system Back is the last resort, and only after the app has
 # loaded (on the loading screen it would exit the app).
 - extendedWaitUntil:
     visible:
-      id: '(tab-messages|.*back|tab-header-icon-button)'
+      id: '(tab-messages|.*back(-button)?|tab-header-icon-button)'
     timeout: 120000
 - repeat:
     times: 6
@@ -26,14 +27,14 @@ appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
       - runFlow:
           when:
             visible:
-              id: '(.*back|tab-header-icon-button)'
+              id: '(.*back(-button)?|tab-header-icon-button)'
           commands:
             - tapOn:
-                id: '(.*back|tab-header-icon-button)'
+                id: '(.*back(-button)?|tab-header-icon-button)'
       - runFlow:
           when:
             notVisible:
-              id: '(tab-messages|.*back|tab-header-icon-button)'
+              id: '(tab-messages|.*back(-button)?|tab-header-icon-button)'
           commands:
             - pressKey: back
       - waitForAnimationToEnd:

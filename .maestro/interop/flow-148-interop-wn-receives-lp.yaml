@@ -7,8 +7,11 @@ name: Interop — White Noise renders what Lightning Piggy sent (group), plus po
 # the new name. A miss there is #1309 ("White Noise stops receiving after a
 # Lightning Piggy rename or admin change").
 #
-# Env: WN_CHAT="IO <tag>" (the original name — White Noise keeps its row even
-# if it never learns the rename), TAG=<run tag>.
+# Env: WN_CHAT="IO <tag>( renamed)?" — either name, so the row is found whether
+# or not White Noise learned the rename. TAG=<run tag>.
+#
+# lp.image matches the attachment name Lightning Piggy gives a photo
+# (photo.<ext>); the scripted sender's image is interop-image.png.
 - runFlow:
     file: ../common/interop-wn-open-chat.yaml
 # Swipe back (finger down = older messages) until it shows, then assert.
@@ -111,20 +114,20 @@ name: Interop — White Noise renders what Lightning Piggy sent (group), plus po
     times: 12
     while:
       notVisible:
-        text: '.*(photo|image|interop).*'
+        text: '.*photo\.(png|jpe?g).*'
     commands:
       - swipe:
           direction: DOWN
           duration: 500
 - assertVisible:
     label: 'IO-CHECK lp.image'
-    text: '.*(photo|image|interop).*'
+    text: '.*photo\.(png|jpe?g).*'
     optional: true
 # Missed: go back to the newest message so later checks start from there.
 - runFlow:
     when:
       notVisible:
-        text: '.*(photo|image|interop).*'
+        text: '.*photo\.(png|jpe?g).*'
     commands:
       - repeat:
           times: 12
