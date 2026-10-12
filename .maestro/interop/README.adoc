@@ -116,6 +116,11 @@ node scripts/interop/marmot-sender.mjs listen --state /tmp/io.json --seconds 60 
 * *Groups have no reactions or Reply in Lightning Piggy* (#1328), so the
   reaction checks in flow-145 are expected to fail until that ships; the 1:1
   flow (flow-151) covers reactions.
+* *#1356*: when Lightning Piggy catches up on a group it keeps only the newest
+  ~11 messages per sender (newest-first backfill + ts-mls's 10 retained
+  generations). Because the sender sends 23 items before Lightning Piggy
+  opens, flow-145's older checks (the text set, reply, reaction) fail until
+  that's fixed; the 1:1 (11 items) passes.
 * *#1309*: after a Lightning Piggy rename or admin change, White Noise stops
   receiving. flow-148's `lp.after-lp-rename` / `lp.renamed-title` checks
   fail until it's fixed.
