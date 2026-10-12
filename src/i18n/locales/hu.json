@@ -305,7 +305,6 @@
     "sayHiZap": "Köszönj, vagy küldj egy zapet.",
     "sayHi": "Köszönj neki.",
     "closeAttachPanel": "Csatolási panel bezárása",
-    "scrollToRecent": "Ugrás a legutóbbi üzenethez",
     "messagePlaceholder": "Üzenet",
     "zapUnavailable": "Zap küldése (nem elérhető – a másik félnek nincs Lightning-címe)",
     "closeFullscreenGif": "Teljes képernyős GIF bezárása",
@@ -553,7 +552,6 @@
     "sendFeedbackA11y": "Visszajelzés küldése"
   },
   "friendNoteFeed": {
-    "recentPosts": "Legutóbbi bejegyzések",
     "noPostsYet": "Még nincs bejegyzés"
   },
   "profileTabs": {
@@ -986,7 +984,6 @@
     "filterAll": "Mind",
     "filterFriends": "Barátok",
     "aGeoCache": "egy geoláda",
-    "foundCache": "Megtalálta: {{cache}}",
     "cachesHidden": "{{count}} geoláda elrejtve",
     "cacheHiddenOne": "1 geoláda elrejtve",
     "cachesFound": "{{count}} geoláda megtalálva",
@@ -2287,9 +2284,7 @@
       "refreshFailed": "Nem sikerült frissíteni a terméket – ellenőrizd a kapcsolatot, és próbáld újra."
     },
     "modes": {
-      "soon": "Hamarosan",
       "comingSoon": "{{label}} – hamarosan",
-      "selected": "{{label}}, kiválasztva",
       "preferred": "A Lightning Piggy ajánlott eladói",
       "friends": "WoT: Barátok",
       "friendsOfFriends": "WoT: Barátok barátai",
@@ -2426,7 +2421,6 @@
     "live": {
       "loading": "A barátaid hirdetéseinek betöltése…",
       "updating": "Frissítés…",
-      "incomplete": "Néhány hirdetést nem sikerült betölteni. Próbáld frissíteni.",
       "partialToast": "Néhány eladó nem válaszolt. Húzd lefelé a frissítéshez.",
       "loaded": "Élő hirdetések a barátaidtól",
       "loadedPreferred": "Élő hirdetések a Lightning Piggy ajánlott eladóitól",
@@ -2445,15 +2439,8 @@
       "loading": "Az üzleted betöltése…",
       "loadError": "A relay-eidet nem sikerült elérni. Húzd le az újrapróbáláshoz.",
       "retry": "Újra",
-      "setupTitle": "Hozd létre az üzletedet",
-      "setupBody": "Válassz alapértelmezett pénznemet és szállítási módokat. A Nostr-profilod az üzleted azonosítója.",
       "setupButton": "Üzlet létrehozása",
       "editShop": "Üzlet szerkesztése",
-      "shipsZones": {
-        "one": "{{count}} szállítási lehetőség",
-        "other": "{{count}} szállítási lehetőség"
-      },
-      "noZones": "Még nincs szállítási lehetőség",
       "sellItem": "Termék eladása",
       "yourListings": "Hirdetéseid",
       "noListings": "Még nem adtál fel hirdetést. Az első hirdetésed létrehozásához koppints a „Termék eladása” gombra.",
@@ -2472,10 +2459,7 @@
       "deleteFailed": "A hirdetést nem sikerült törölni",
       "shop": {
         "title": "Üzlet beállításai",
-        "name": "Üzlet neve",
-        "namePlaceholder": "pl. Piggy kézművesbolt",
         "description": "Leírás",
-        "descriptionPlaceholder": "Mit árulsz?",
         "currency": "Pénznem",
         "currencyHint": "A szállítási díjak pénzneme és a termékárak alapértelmezett pénzneme.",
         "shipping": "Szállítási lehetőségek",
@@ -2567,12 +2551,10 @@
       "detail": {
         "inStock": "Készleten: {{count}}",
         "shipping": "Szállítás",
-        "shippingLoading": "Szállítási lehetőségek betöltése…",
         "shippingError": "A szállítási lehetőségeket nem sikerült betölteni.",
         "shippingNone": "Szállítás: írj az eladónak",
         "shippingTotal": "{{amount}} {{currency}}",
         "shippingSplit": "{{amount}} {{currency}} + {{extra}} {{extraCurrency}}",
-        "yourListing": "Ez a te hirdetésed",
         "editListing": "Hirdetés szerkesztése",
         "previewBanner": "Előnézet — így látják majd a vásárlók a hirdetésedet. Még nincs közzétéve."
       },

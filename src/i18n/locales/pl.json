@@ -305,7 +305,6 @@
     "sayHiZap": "Przywitaj się — albo wyślij zap.",
     "sayHi": "Przywitaj się.",
     "closeAttachPanel": "Zamknij panel załączników",
-    "scrollToRecent": "Przewiń do najnowszej wiadomości",
     "messagePlaceholder": "Wiadomość",
     "zapUnavailable": "Wyślij zap (niedostępne — rozmówca nie ma adresu Lightning)",
     "closeFullscreenGif": "Zamknij GIF na pełnym ekranie",
@@ -553,7 +552,6 @@
     "sendFeedbackA11y": "Wyślij opinię"
   },
   "friendNoteFeed": {
-    "recentPosts": "Najnowsze wpisy",
     "noPostsYet": "Brak wpisów"
   },
   "profileTabs": {
@@ -986,7 +984,6 @@
     "filterAll": "Wszyscy",
     "filterFriends": "Znajomi",
     "aGeoCache": "skrytka geocache",
-    "foundCache": "Znaleziono: {{cache}}",
     "cachesHidden": "Ukryte skrytki: {{count}}",
     "cacheHiddenOne": "1 ukryta skrytka",
     "cachesFound": "Znalezione skrytki: {{count}}",
@@ -2289,9 +2286,7 @@
       "refreshFailed": "Nie udało się odświeżyć produktu — sprawdź połączenie i spróbuj ponownie."
     },
     "modes": {
-      "soon": "Wkrótce",
       "comingSoon": "{{label}} — wkrótce",
-      "selected": "{{label}}, wybrano",
       "preferred": "Wybrani sprzedawcy Lightning Piggy",
       "friends": "WoT: Znajomi",
       "friendsOfFriends": "WoT: Znajomi znajomych",
@@ -2430,7 +2425,6 @@
     "live": {
       "loading": "Wczytywanie ofert od twoich znajomych…",
       "updating": "Aktualizowanie…",
-      "incomplete": "Nie udało się wczytać niektórych ofert. Spróbuj odświeżyć.",
       "partialToast": "Niektórzy sprzedawcy nie odpowiedzieli. Pociągnij w dół, aby odświeżyć.",
       "loaded": "Oferty na żywo od twoich znajomych",
       "loadedPreferred": "Oferty na żywo od preferowanych sprzedawców Lightning Piggy",
@@ -2449,17 +2443,8 @@
       "loading": "Wczytywanie twojego sklepu…",
       "loadError": "Nie udało się połączyć z twoimi przekaźnikami. Przeciągnij w dół, aby spróbować ponownie.",
       "retry": "Spróbuj ponownie",
-      "setupTitle": "Załóż swój sklep",
-      "setupBody": "Wybierz domyślną walutę i opcje wysyłki. Twój profil Nostr jest tożsamością Twojego sklepu.",
       "setupButton": "Załóż sklep",
       "editShop": "Edytuj sklep",
-      "shipsZones": {
-        "one": "{{count}} opcja dostawy",
-        "few": "{{count}} opcje dostawy",
-        "many": "{{count}} opcji dostawy",
-        "other": "{{count}} opcji dostawy"
-      },
-      "noZones": "Brak opcji dostawy",
       "sellItem": "Sprzedaj produkt",
       "yourListings": "Twoje oferty",
       "noListings": "Nie masz jeszcze żadnych ofert. Dotknij „Sprzedaj produkt”, aby utworzyć pierwszą ofertę.",
@@ -2478,10 +2463,7 @@
       "deleteFailed": "Nie udało się usunąć oferty",
       "shop": {
         "title": "Ustawienia sklepu",
-        "name": "Nazwa sklepu",
-        "namePlaceholder": "np. Rękodzieło Piggy",
         "description": "Opis",
-        "descriptionPlaceholder": "Co sprzedajesz?",
         "currency": "Waluta",
         "currencyHint": "Używana do kosztów dostawy i jako domyślna waluta cen.",
         "shipping": "Opcje dostawy",
@@ -2573,12 +2555,10 @@
       "detail": {
         "inStock": "W magazynie: {{count}}",
         "shipping": "Dostawa",
-        "shippingLoading": "Wczytywanie opcji dostawy…",
         "shippingError": "Nie udało się wczytać opcji dostawy.",
         "shippingNone": "Dostawa: napisz do sprzedawcy",
         "shippingTotal": "{{amount}} {{currency}}",
         "shippingSplit": "{{amount}} {{currency}} + {{extra}} {{extraCurrency}}",
-        "yourListing": "To twoja oferta",
         "editListing": "Edytuj ofertę",
         "previewBanner": "Podgląd — tak kupujący zobaczą twoją ofertę. Nie została jeszcze opublikowana."
       },

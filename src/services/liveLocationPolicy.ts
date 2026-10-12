@@ -132,5 +132,3 @@ export function createLiveUpdateDispatcher() {
     },
   };
 }
-
-export type LiveUpdateDispatcher = ReturnType<typeof createLiveUpdateDispatcher>;

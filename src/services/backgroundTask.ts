@@ -63,14 +63,3 @@ export async function registerBackgroundSync(): Promise<void> {
     if (__DEV__) console.warn('[backgroundTask] register failed:', e);
   }
 }
-
-/** Unregister the task (e.g. on full sign-out). Idempotent. */
-export async function unregisterBackgroundSync(): Promise<void> {
-  try {
-    if (await TaskManager.isTaskRegisteredAsync(BACKGROUND_SYNC_TASK)) {
-      await BackgroundTask.unregisterTaskAsync(BACKGROUND_SYNC_TASK);
-    }
-  } catch (e) {
-    if (__DEV__) console.warn('[backgroundTask] unregister failed:', e);
-  }
-}

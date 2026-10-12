@@ -147,18 +147,6 @@ export const createPlaceDetailScreenStyles = (colors: Palette) =>
       borderRadius: 100,
     },
     primaryActionText: { color: colors.white, fontSize: 14, fontWeight: '700' },
-    secondaryAction: {
-      flex: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 8,
-      backgroundColor: colors.surface,
-      paddingVertical: 12,
-      borderRadius: 100,
-      borderWidth: 1,
-      borderColor: colors.brandPink,
-    },
     secondaryActionText: { color: colors.brandPink, fontSize: 14, fontWeight: '700' },
     contactSection: { gap: 8, marginTop: 8 },
     sectionLabel: {
@@ -174,12 +162,6 @@ export const createPlaceDetailScreenStyles = (colors: Palette) =>
       paddingVertical: 6,
     },
     contactText: { fontSize: 14, color: colors.textHeader, flex: 1 },
-    verifyText: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      marginTop: 12,
-      fontStyle: 'italic',
-    },
     lifecycleBlock: {
       marginTop: 12,
       gap: 2,

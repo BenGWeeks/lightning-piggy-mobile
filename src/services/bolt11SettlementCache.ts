@@ -124,10 +124,3 @@ export async function getMany(paymentHashes: string[]): Promise<Map<string, Sett
 export function __resetForTests(): void {
   memoryCache = null;
 }
-
-// Test-only: explicit constants exported so tests can assert TTL.
-export const __testing = {
-  UNSETTLED_TTL_MS,
-  MAX_ENTRIES,
-  STORAGE_KEY,
-};

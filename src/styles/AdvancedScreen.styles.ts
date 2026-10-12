@@ -17,10 +17,6 @@ export const createAdvancedScreenStyles = (colors: Palette) =>
       paddingHorizontal: 14,
       marginTop: 8,
     },
-    navIcon: {
-      width: 24,
-      alignItems: 'center',
-    },
     navText: {
       flex: 1,
     },

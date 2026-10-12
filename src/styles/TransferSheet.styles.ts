@@ -133,30 +133,6 @@ export const createTransferSheetStyles = (colors: Palette) =>
       color: colors.brandPink,
       textAlign: 'center',
     },
-    unitButton: {
-      paddingHorizontal: 14,
-      paddingVertical: 8,
-      borderRadius: 8,
-      backgroundColor: colors.divider,
-    },
-    unitButtonActive: {
-      backgroundColor: colors.brandPink,
-    },
-    unitButtonText: {
-      fontSize: 14,
-      fontWeight: '700',
-      color: colors.textSupplementary,
-    },
-    unitButtonTextActive: {
-      color: colors.white,
-    },
-    convertedAmount: {
-      fontSize: 13,
-      color: colors.textSupplementary,
-      fontWeight: '500',
-      textAlign: 'center',
-      minHeight: 18,
-    },
     feeRow: {
       flexDirection: 'row',
       alignItems: 'center',

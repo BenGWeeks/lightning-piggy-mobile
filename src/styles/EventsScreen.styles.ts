@@ -146,14 +146,6 @@ export const createEventsScreenStyles = (colors: Palette) =>
       fontWeight: '600',
     },
     expanded: { marginTop: 10, gap: 10 },
-    expandedImage: {
-      width: '100%',
-      aspectRatio: 16 / 9,
-      borderRadius: 10,
-      backgroundColor: colors.divider,
-    },
-    expandedDescription: { fontSize: 13, color: colors.textHeader, lineHeight: 19 },
-    expandedHashtags: { fontSize: 12, color: colors.textSupplementary },
     locationButton: {
       flexDirection: 'row',
       alignItems: 'center',

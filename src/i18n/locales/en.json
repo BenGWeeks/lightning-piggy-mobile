@@ -305,7 +305,6 @@
     "sayHiZap": "Say hi — or send a zap.",
     "sayHi": "Say hi.",
     "closeAttachPanel": "Close attachment panel",
-    "scrollToRecent": "Scroll to most recent message",
     "messagePlaceholder": "Message",
     "zapUnavailable": "Send a zap (unavailable — peer has no Lightning Address)",
     "closeFullscreenGif": "Close full-screen GIF",
@@ -553,7 +552,6 @@
     "sendFeedbackA11y": "Send feedback"
   },
   "friendNoteFeed": {
-    "recentPosts": "Recent posts",
     "noPostsYet": "No posts yet"
   },
   "profileTabs": {
@@ -986,7 +984,6 @@
     "filterAll": "All",
     "filterFriends": "Friends",
     "aGeoCache": "a geo-cache",
-    "foundCache": "Found {{cache}}",
     "cachesHidden": "{{count}} caches hidden",
     "cacheHiddenOne": "1 cache hidden",
     "cachesFound": "{{count}} caches found",
@@ -2287,9 +2284,7 @@
       "refreshFailed": "Couldn't refresh this product — check your connection and try again."
     },
     "modes": {
-      "soon": "Soon",
       "comingSoon": "{{label}} — coming soon",
-      "selected": "{{label}}, selected",
       "preferred": "Lightning Piggy Preferred Sellers",
       "friends": "WoT: Friends",
       "friendsOfFriends": "WoT: Friends of Friends",
@@ -2426,7 +2421,6 @@
     "live": {
       "loading": "Loading listings from your friends…",
       "updating": "Updating…",
-      "incomplete": "Some listings could not be loaded. Try refreshing.",
       "partialToast": "Some sellers didn’t respond. Pull to refresh.",
       "loaded": "Live listings from your friends",
       "loadedPreferred": "Live listings from Lightning Piggy's preferred sellers",
@@ -2445,15 +2439,8 @@
       "loading": "Loading your shop…",
       "loadError": "Couldn't reach your relays. Pull to retry.",
       "retry": "Retry",
-      "setupTitle": "Set up your shop",
-      "setupBody": "Choose a default currency and shipping options. Your Nostr profile is your shop identity.",
       "setupButton": "Set up shop",
       "editShop": "Edit shop",
-      "shipsZones": {
-        "one": "{{count}} shipping option",
-        "other": "{{count}} shipping options"
-      },
-      "noZones": "No shipping options yet",
       "sellItem": "Sell an item",
       "yourListings": "Your listings",
       "noListings": "You haven't listed anything yet. Tap \"Sell an item\" to create your first listing.",
@@ -2472,10 +2459,7 @@
       "deleteFailed": "Couldn't delete the listing",
       "shop": {
         "title": "Shop settings",
-        "name": "Shop name",
-        "namePlaceholder": "e.g. Piggy Crafts",
         "description": "Description",
-        "descriptionPlaceholder": "What do you sell?",
         "currency": "Currency",
         "currencyHint": "Used for your shipping costs and as the default price currency.",
         "shipping": "Shipping options",
@@ -2567,12 +2551,10 @@
       "detail": {
         "inStock": "{{count}} in stock",
         "shipping": "Shipping",
-        "shippingLoading": "Loading shipping options…",
         "shippingError": "Couldn't load shipping options.",
         "shippingNone": "Shipping: contact the seller",
         "shippingTotal": "{{amount}} {{currency}}",
         "shippingSplit": "{{amount}} {{currency}} + {{extra}} {{extraCurrency}}",
-        "yourListing": "This is your listing",
         "editListing": "Edit listing",
         "previewBanner": "Preview — this is how shoppers will see your listing. It isn't published yet."
       },

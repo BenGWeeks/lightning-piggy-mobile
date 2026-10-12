@@ -65,7 +65,6 @@ export const createHuntFoundScreenStyles = (colors: Palette) =>
       borderRadius: 100,
       marginTop: 6,
     },
-    primaryButtonDim: { opacity: 0.7 },
     primaryButtonText: {
       color: colors.white,
       fontSize: 16,

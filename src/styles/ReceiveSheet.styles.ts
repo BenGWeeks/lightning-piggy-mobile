@@ -67,29 +67,6 @@ export const createReceiveSheetStyles = (colors: Palette) =>
       fontWeight: '700',
       textAlign: 'center',
     },
-    unitButton: {
-      paddingHorizontal: 14,
-      paddingVertical: 8,
-      borderRadius: 8,
-      backgroundColor: colors.divider,
-    },
-    unitButtonActive: {
-      backgroundColor: colors.brandPink,
-    },
-    unitButtonText: {
-      fontSize: 14,
-      fontWeight: '700',
-      color: colors.textSupplementary,
-    },
-    unitButtonTextActive: {
-      color: colors.white,
-    },
-    convertedAmount: {
-      fontSize: 13,
-      color: colors.textSupplementary,
-      fontWeight: '500',
-      minHeight: 18,
-    },
     qrContainer: {
       width: 220,
       height: 220,
@@ -213,10 +190,6 @@ export const createReceiveSheetStyles = (colors: Palette) =>
       fontSize: 14,
       fontWeight: '600',
       color: colors.textBody,
-    },
-    walletDropdownArrow: {
-      fontSize: 10,
-      color: colors.textSupplementary,
     },
     walletDropdownMenu: {
       position: 'absolute',

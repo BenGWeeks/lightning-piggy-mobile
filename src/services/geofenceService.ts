@@ -27,7 +27,6 @@ import { haversineMetres } from '../utils/geohash';
 export const GEOFENCE_TASK = 'lp-merchant-geofence';
 const NEARBY_LIMIT = 20;
 const FETCH_HALF_DEGREES = 0.02; // ≈ 2 km city block
-export const RECOMPUTE_DISTANCE_M = 500;
 
 interface GeofenceTaskEvent {
   eventType?: Location.GeofencingEventType;

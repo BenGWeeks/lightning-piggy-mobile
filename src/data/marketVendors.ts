@@ -72,16 +72,6 @@ export interface MarketVendor {
   featured: boolean;
 }
 
-/**
- * Pluggable source of Market vendors. The hardcoded list satisfies this
- * synchronously today; a future live Nostr loader (NIP-15 stalls 30017 +
- * products 30018, plus NIP-99 classifieds 30402 — see file header) would
- * implement the async variant and merge with the hardcoded curated set.
- */
-export interface MarketVendorSource {
-  getVendors(): MarketVendor[] | Promise<MarketVendor[]>;
-}
-
 /** Canonical website origin used to resolve site-relative asset/link paths. */
 export const LIGHTNING_PIGGY_SITE_ORIGIN = 'https://lightningpiggy.com';
 

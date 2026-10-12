@@ -305,7 +305,6 @@
     "sayHiZap": "नमस्कार म्हणा — किंवा झॅप पाठवा.",
     "sayHi": "नमस्कार म्हणा.",
     "closeAttachPanel": "अटॅचमेंट पॅनेल बंद करा",
-    "scrollToRecent": "सर्वात नवीन मेसेजवर जा",
     "messagePlaceholder": "मेसेज",
     "zapUnavailable": "झॅप पाठवा (शक्य नाही — समोरच्याकडे Lightning ॲड्रेस नाही)",
     "closeFullscreenGif": "फुल-स्क्रीन GIF बंद करा",
@@ -553,7 +552,6 @@
     "sendFeedbackA11y": "फीडबॅक पाठवा"
   },
   "friendNoteFeed": {
-    "recentPosts": "अलीकडील पोस्ट",
     "noPostsYet": "अजून पोस्ट नाहीत"
   },
   "profileTabs": {
@@ -986,7 +984,6 @@
     "filterAll": "सर्व",
     "filterFriends": "मित्र",
     "aGeoCache": "एक जिओ-कॅशे",
-    "foundCache": "{{cache}} सापडले",
     "cachesHidden": "{{count}} कॅशे लपवले",
     "cacheHiddenOne": "1 कॅशे लपवली",
     "cachesFound": "{{count}} कॅशे सापडले",
@@ -2287,9 +2284,7 @@
       "refreshFailed": "हे प्रॉडक्ट रिफ्रेश करता आले नाही — तुमचे कनेक्शन तपासा आणि पुन्हा प्रयत्न करा."
     },
     "modes": {
-      "soon": "लवकरच",
       "comingSoon": "{{label}} — लवकरच येत आहे",
-      "selected": "{{label}}, निवडले",
       "preferred": "Lightning Piggy चे शिफारस केलेले विक्रेते",
       "friends": "WoT: मित्र",
       "friendsOfFriends": "WoT: मित्रांचे मित्र",
@@ -2426,7 +2421,6 @@
     "live": {
       "loading": "तुमच्या मित्रांच्या लिस्टिंग लोड होत आहेत…",
       "updating": "अपडेट होत आहे…",
-      "incomplete": "काही लिस्टिंग लोड करता आल्या नाहीत. रिफ्रेश करून पहा.",
       "partialToast": "काही विक्रेत्यांनी प्रतिसाद दिला नाही. रिफ्रेश करण्यासाठी खाली ओढा.",
       "loaded": "तुमच्या मित्रांच्या लाइव्ह लिस्टिंग",
       "loadedPreferred": "Lightning Piggy च्या पसंतीच्या विक्रेत्यांच्या लाइव्ह लिस्टिंग",
@@ -2445,15 +2439,8 @@
       "loading": "तुमचे दुकान लोड होत आहे…",
       "loadError": "तुमच्या रिलेंशी संपर्क होऊ शकला नाही. पुन्हा प्रयत्न करण्यासाठी खाली ओढा.",
       "retry": "पुन्हा प्रयत्न करा",
-      "setupTitle": "तुमचे दुकान तयार करा",
-      "setupBody": "मूलभूत चलन आणि शिपिंग पर्याय निवडा. तुमचे Nostr प्रोफाइल ही तुमच्या दुकानाची ओळख आहे.",
       "setupButton": "दुकान तयार करा",
       "editShop": "दुकान एडिट करा",
-      "shipsZones": {
-        "one": "{{count}} शिपिंग पर्याय",
-        "other": "{{count}} शिपिंग पर्याय"
-      },
-      "noZones": "अजून शिपिंग पर्याय नाहीत",
       "sellItem": "वस्तू विका",
       "yourListings": "तुमच्या लिस्टिंग",
       "noListings": "तुम्ही अजून कोणतीही वस्तू विकायला ठेवलेली नाही. तुमची पहिली लिस्टिंग तयार करण्यासाठी \"वस्तू विका\" वर टॅप करा.",
@@ -2472,10 +2459,7 @@
       "deleteFailed": "लिस्टिंग डिलीट करता आली नाही",
       "shop": {
         "title": "दुकानाच्या सेटिंग्ज",
-        "name": "दुकानाचे नाव",
-        "namePlaceholder": "उदा. Piggy हस्तकला",
         "description": "वर्णन",
-        "descriptionPlaceholder": "तुम्ही काय विकता?",
         "currency": "चलन",
         "currencyHint": "शिपिंग खर्चासाठी आणि किंमतीचे डीफॉल्ट चलन म्हणून वापरले जाते.",
         "shipping": "शिपिंग पर्याय",
@@ -2567,12 +2551,10 @@
       "detail": {
         "inStock": "{{count}} उपलब्ध",
         "shipping": "शिपिंग",
-        "shippingLoading": "शिपिंग पर्याय लोड होत आहेत…",
         "shippingError": "शिपिंग पर्याय लोड करता आले नाहीत.",
         "shippingNone": "शिपिंग: विक्रेत्याशी संपर्क करा",
         "shippingTotal": "{{amount}} {{currency}}",
         "shippingSplit": "{{amount}} {{currency}} + {{extra}} {{extraCurrency}}",
-        "yourListing": "ही तुमची लिस्टिंग आहे",
         "editListing": "लिस्टिंग एडिट करा",
         "previewBanner": "प्रीव्ह्यू — खरेदी करणाऱ्यांना तुमची लिस्टिंग अशी दिसेल. ती अजून प्रकाशित केलेली नाही."
       },

@@ -248,20 +248,6 @@ export async function resolveLnurlDirection(
 }
 
 /**
- * Resolve an LNURL string to either pay or withdraw parameters.
- * Returns an object with a `tag` field indicating the type.
- */
-export async function resolveLnurl(
-  lnurl: string,
-): Promise<
-  | { tag: 'payRequest'; params: LnurlPayParams }
-  | { tag: 'withdrawRequest'; params: LnurlWithdrawParams }
-> {
-  const url = decodeLnurl(lnurl); // decodeLnurl validates HTTPS
-  return resolveLnurlFromUrl(url);
-}
-
-/**
  * Fetch an already-resolved LNURL endpoint URL and shape its JSON into the
  * pay / withdraw param objects. Shared by {@link resolveLnurl} (bech32-only
  * entry) and {@link resolveLnurlDirection} (all URI forms).

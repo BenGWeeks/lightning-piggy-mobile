@@ -30,11 +30,6 @@ export function isAmberSupported(): boolean {
   return Platform.OS === 'android';
 }
 
-export async function isAmberInstalled(): Promise<boolean> {
-  if (!isAmberSupported()) return false;
-  return AmberSigner.isInstalled();
-}
-
 export async function requestPublicKey(): Promise<string> {
   if (!isAmberSupported()) {
     throw new Error('Amber is only supported on Android');

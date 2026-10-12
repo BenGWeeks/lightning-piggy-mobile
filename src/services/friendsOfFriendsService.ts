@@ -202,11 +202,3 @@ export const persistFofCache = async (
     // Best-effort.
   }
 };
-
-export const clearFofCache = async (): Promise<void> => {
-  try {
-    await AsyncStorage.removeItem(FOF_CACHE_KEY);
-  } catch {
-    // Best-effort.
-  }
-};

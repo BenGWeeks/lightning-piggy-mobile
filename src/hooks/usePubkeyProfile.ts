@@ -207,9 +207,3 @@ export const usePubkeyProfile = (pubkey: string | null | undefined): PubkeyProfi
 
   return slice;
 };
-
-// Test hook: clear the in-flight map between tests so cross-test state
-// can't leak. Not exported as part of the public API.
-export const __resetInFlightForTests = (): void => {
-  inFlight.clear();
-};

@@ -25,7 +25,6 @@ import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 
 export const KEY_BYTES = 32;
 export const NONCE_BYTES = 12;
-export const ENCRYPTION_ALGORITHM = 'aes-gcm' as const;
 
 export interface EncryptedFile {
   /** Encrypted bytes (plaintext + appended 16-byte GCM tag) to upload. */

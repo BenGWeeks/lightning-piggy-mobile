@@ -80,17 +80,6 @@ export interface MarketProductCheckout {
   fulfilment: 'physical' | 'none';
 }
 
-/**
- * Pluggable source of Market products. The hardcoded list satisfies this
- * synchronously today; a future live Nostr loader (NIP-15 products 30018 +
- * NIP-99 classifieds 30402 — see file header) would implement the async
- * variant, scoped to a given author set (preferred sellers' pubkeys, or the
- * user's web-of-trust follows), and merge with the curated set.
- */
-export interface MarketProductSource {
-  getProducts(): MarketProduct[] | Promise<MarketProduct[]>;
-}
-
 // PRICE_SNAPSHOT — the sats figures below were derived from the website's
 // GBP reference prices at ~£0.0006/sat (≈ £60k/BTC), the rate at authoring
 // time (2026-06). A live feed would quote sats directly (or re-derive from
