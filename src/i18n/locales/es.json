@@ -1636,6 +1636,9 @@
     "swapNotPaid": "No se envió nada: el pago Lightning a Boltz no se completó, así que ningún sat salió de tu cartera. Puedes intentarlo de nuevo."
   },
   "placeDetailScreen": {
+    "viewOnBtcMap": "Ver en BTC Map",
+    "phone": "Teléfono",
+    "website": "Sitio web",
     "notInCache": "Este lugar ya no está en nuestra lista en caché — intenta abrirlo desde el mapa.",
     "bitcoinPlaceFallback": "Lugar Bitcoin",
     "backToPlaces": "Volver a Lugares",

@@ -4,6 +4,7 @@ import {
   acceptsOnchain,
   daysSinceVerified,
   fetchPlacesInBbox,
+  fetchPlaceRich,
   fetchPlacesInBboxResult,
   formatAddress,
   lightningAddressOf,
@@ -353,4 +354,43 @@ it.each([
   expect(Number(url.searchParams.get('radius_km'))).toBeLessThanOrEqual(maxRadius);
   expect(Number(url.searchParams.get('lon'))).toBe(longitude);
   global.fetch = originalFetch;
+});
+
+describe('merchant rich contact fields', () => {
+  it('requests plain and contact OSM tags and preserves phone-only OSM data', async () => {
+    const previousFetch = global.fetch;
+    const fetchMock = jest.fn(async (url: string) => {
+      const fields = new URL(url).searchParams.get('fields')!.split(',');
+      // Emulate the field-filtered API, so a dropped field fails the regression.
+      const data: Record<string, unknown> = {
+        id: 42,
+        lat: 1,
+        lon: 2,
+        'osm:phone': '+44 123',
+        'osm:website': 'https://example.com',
+        'osm:contact:phone': '+44 456',
+        'osm:contact:website': 'https://contact.example.com',
+      };
+      return {
+        ok: true,
+        json: async () =>
+          Object.fromEntries(Object.entries(data).filter(([key]) => fields.includes(key))),
+      };
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    try {
+      const result = await fetchPlaceRich(42);
+      expect(result?.tags.phone).toBe('+44 123');
+      expect(result?.tags.website).toBe('https://example.com');
+      expect(result?.tags['contact:phone']).toBe('+44 456');
+      expect(result?.tags['contact:website']).toBe('https://contact.example.com');
+      fetchMock.mockImplementation(async () => ({
+        ok: true,
+        json: async () => ({ id: 42, lat: 1, lon: 2, 'osm:phone': '+44 123' }),
+      }));
+      expect((await fetchPlaceRich(42))?.phone).toBe('+44 123');
+    } finally {
+      global.fetch = previousFetch;
+    }
+  });
 });

@@ -25,7 +25,6 @@ import LegendSheet from '../components/LegendSheet';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import { orderFeaturedFirst } from '../utils/featuredPlaces';
 import { perfPageReady } from '../utils/perfLog';
-import { joinExploreByAuthorFetch } from '../utils/exploreFetchGuard';
 import { courses, type Course } from '../data/learnContent';
 import MarketProductCard from '../components/MarketProductCard';
 import { MARKET_PRODUCTS, sellerOf, type MarketProduct } from '../data/marketProducts';
@@ -49,30 +48,12 @@ import {
 import { useNearbyRadius } from '../hooks/useNearbyRadius';
 import { BOOSTED_RADIUS_METRES } from '../services/nearbyRadiusService';
 import { type ParsedCache, type ParsedEvent } from '../services/nostrPlacesService';
-import {
-  fetchCachesByAuthor,
-  subscribeNearbyCaches,
-  subscribeNearbyEvents,
-} from '../services/nostrPlacesPublisher';
-import { useNostr } from '../contexts/NostrContext';
-import {
-  loadCachedCaches,
-  loadCachedEvents,
-  peekCachedCachesSync,
-  peekCachedEventsSync,
-} from '../services/nostrPlacesStorage';
-import {
-  decodeGeohash,
-  encodeGeohash,
-  formatDistance,
-  geohashNeighbours,
-  haversineMetres,
-} from '../utils/geohash';
+
+import { decodeGeohash, formatDistance, haversineMetres } from '../utils/geohash';
 import { isFutureEvent } from '../utils/futureEvent';
-import { isHiddenInProd, visibleCaches, visibleEvents } from '../utils/exploreContentFilter';
-import { usePersistCaches, usePersistEvents } from '../hooks/useExplorePlacesPersist';
+import { isHiddenInProd } from '../utils/exploreContentFilter';
+import { useExploreRelayContent } from '../hooks/useExploreRelayContent';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { createExploreHomeScreenStyles } from '../styles/ExploreHomeScreen.styles';
 import { createExploreHomeRailStyles } from '../styles/ExploreHomeRail.styles';
 import type { Palette } from '../styles/palettes';
@@ -147,6 +128,8 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // root re-committed this whole tree (measured 240–280 ms) on every
   // watch fix, one JS-thread stall per 15 s at walking pace.
   const { pos, locationDenied } = useExploreRailsPosition();
+  const posLat = pos?.lat;
+  const posLon = pos?.lon;
 
   // ----- BTC Map merchants ------------------------------------------------
 
@@ -167,6 +150,17 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // down/re-open NIP-GC + NIP-52 subscriptions in one gesture.
   const [refreshKey, setRefreshKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const {
+    caches,
+    events,
+    cachesArr,
+    eventsArr,
+    signedInPubkey,
+    untrustedCacheCount,
+    untrustedEventCount,
+    setUntrustedCacheCount,
+    setUntrustedEventCount,
+  } = useExploreRelayContent(pos, refreshKey);
   // Mini-map pin-tap selections — open `MerchantDetailSheet` /
   // `CacheDetailSheet` (same components MapScreen uses) so the
   // interaction shape matches the full map. Events have no dedicated
@@ -310,386 +304,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     // continuously, so there's no clean "done" signal. Long enough to
     // feel like work happened, short enough not to feel stuck.
     setTimeout(() => setRefreshing(false), 2000);
-  }, []);
-
-  // ----- NIP-GC caches + NIP-52 events (live subs) ------------------------
-
-  // Web-of-trust filter — kept in a ref so the subscription callbacks
-  // always see the current `isTrusted` predicate without resubscribing
-  // every time the trust set churns (L2 backfill, contact-list updates).
-  // Post-#535: `isTrusted` is tier-aware; consumers no longer branch on a
-  // separate `filterEnabled` flag (returns true unconditionally for 'all').
-  const { isTrusted } = useTrustGraph();
-  const isTrustedRef = useRef(isTrusted);
-  useEffect(() => {
-    isTrustedRef.current = isTrusted;
-  }, [isTrusted]);
-
-  // Pre-seed from the in-memory mirror — `nostrPlacesStorage` kicks
-  // hydrate() at module import, so by first render the cache is
-  // typically ready. The async useEffect below handles the cold-start
-  // path where hydrate hasn't yet resolved.
-  const [caches, setCaches] = useState<Map<string, ParsedCache>>(
-    () => new Map(peekCachedCachesSync().map((c) => [c.coord, c])),
-  );
-  const [events, setEvents] = useState<Map<string, ParsedEvent>>(
-    () => new Map(peekCachedEventsSync().map((e) => [e.coord, e])),
-  );
-
-  // Coalesce per-event setState bursts during relay backfill (#31, audit
-  // P1, #605). The relay subscription `onevent` callback can fire 50+
-  // times in <200 ms on cold-start; pre-fix every event ran a Map clone
-  // + setState + render, blocking the JS thread for the entire backfill.
-  // Mirrors the DM inbox pattern in NostrContext.tsx (~3550).
-  //
-  // Per-event work stays cheap: trust filter + createdAt-staleness check
-  // run inline (no React state). Only the merge into the React Map is
-  // batched, so the rails still update incrementally as the queue
-  // flushes — just every ~100 ms instead of every event.
-  const pendingCachesRef = useRef<Map<string, ParsedCache>>(new Map());
-  const pendingEventsRef = useRef<Map<string, ParsedEvent>>(new Map());
-  const pendingCachesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingEventsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Tracks whether the screen has unmounted entirely (logout / navigator
-  // reset). Distinct from focus blur, which only pauses the screen — the
-  // tab-blur cleanup still wants to flush so the next focus shows the
-  // tail of the queue. Full unmount means React will throw on any
-  // setState here, so flushers early-return.
-  const isUnmountedRef = useRef(false);
-  useEffect(
-    () => () => {
-      isUnmountedRef.current = true;
-    },
-    [],
-  );
-  // 100 ms flush window: feels instant to the user (the eye perceives
-  // ≤120 ms as same-frame), short enough that the rail doesn't sit
-  // empty during a slow backfill, long enough to coalesce a typical
-  // relay event burst (~50 events in 200 ms) into 2–3 commits.
-  const PENDING_FLUSH_MS = 100;
-  // 25-event threshold flushes early when a fast relay dumps a big
-  // backlog. Without it, a 200-event burst would sit in the buffer for
-  // the full 100 ms even if it landed in 20 ms.
-  const PENDING_FLUSH_THRESHOLD = 25;
-  const flushPendingCaches = useCallback(() => {
-    if (pendingCachesTimerRef.current) {
-      clearTimeout(pendingCachesTimerRef.current);
-      pendingCachesTimerRef.current = null;
-    }
-    // Clear buffer + skip setState on unmount so a stale subscription
-    // tear-down post-logout / navigator-reset doesn't trigger the
-    // "setState on unmounted component" warning (Copilot review on #612).
-    if (isUnmountedRef.current) {
-      pendingCachesRef.current = new Map();
-      return;
-    }
-    const batch = pendingCachesRef.current;
-    if (batch.size === 0) return;
-    pendingCachesRef.current = new Map();
-    setCaches((prev) => {
-      const __t0 = performance.now();
-      const next = new Map(prev);
-      for (const [coord, c] of batch) {
-        const existing = next.get(coord);
-        if (!existing || existing.createdAt < c.createdAt) next.set(coord, c);
-      }
-      const __dt = performance.now() - __t0;
-      if (__dt > 30) {
-        console.log(
-          `[PerfBlock] Explore setCaches flush: ${Math.round(__dt)}ms batch=${batch.size} size=${prev.size}→${next.size}`,
-        );
-      }
-      return next;
-    });
-  }, []);
-  const flushPendingEvents = useCallback(() => {
-    if (pendingEventsTimerRef.current) {
-      clearTimeout(pendingEventsTimerRef.current);
-      pendingEventsTimerRef.current = null;
-    }
-    // See flushPendingCaches above for the unmount guard rationale.
-    if (isUnmountedRef.current) {
-      pendingEventsRef.current = new Map();
-      return;
-    }
-    const batch = pendingEventsRef.current;
-    if (batch.size === 0) return;
-    pendingEventsRef.current = new Map();
-    setEvents((prev) => {
-      const __t0 = performance.now();
-      const next = new Map(prev);
-      for (const [coord, e] of batch) {
-        const existing = next.get(coord);
-        if (!existing || existing.startsAt !== e.startsAt) next.set(coord, e);
-      }
-      const __dt = performance.now() - __t0;
-      if (__dt > 30) {
-        console.log(
-          `[PerfBlock] Explore setEvents flush: ${Math.round(__dt)}ms batch=${batch.size} size=${prev.size}→${next.size}`,
-        );
-      }
-      return next;
-    });
-  }, []);
-
-  // Stable array projections of the caches/events Maps so React.memo on the
-  // consuming LibreMiniMap can short-circuit re-renders (a fresh
-  // `[...caches.values()]` literal each render would defeat the memo). These
-  // feed the Explore hub mini-map, so they apply the SAME prod test-account
-  // hide (+ future-only for events) as the rails — cold-start items hydrated
-  // from AsyncStorage bypass the ingestion callback, so a hidden Piggy cache
-  // or past event would otherwise paint as a map marker (#917).
-  const cachesArr = useMemo(
-    () => visibleCaches([...caches.values()], (c) => c.hiderPubkey),
-    [caches],
-  );
-  const eventsArr = useMemo(
-    () =>
-      visibleEvents([...events.values()], (e) => e.organiserPubkey, Math.floor(Date.now() / 1000)),
-    [events],
-  );
-
-  // Hydrate last-known caches + events from AsyncStorage so the rails
-  // render instantly on cold start while the live relay subs backfill.
-  useEffect(() => {
-    let cancelled = false;
-    const __t0 = performance.now();
-    Promise.all([loadCachedCaches(), loadCachedEvents()]).then(([cs, es]) => {
-      if (cancelled) return;
-      const __ms = Math.round(performance.now() - __t0);
-      if (__ms > 200) {
-        console.log(
-          `[PerfBlock] ExploreHome loadCachedCaches+Events: ${__ms}ms caches=${cs.length} events=${es.length}`,
-        );
-      }
-      if (cs.length > 0) {
-        setCaches((prev) => {
-          if (prev.size > 0) return prev; // live sub already filled in
-          const m = new Map<string, ParsedCache>();
-          for (const c of cs) m.set(c.coord, c);
-          return m;
-        });
-      }
-      if (es.length > 0) {
-        setEvents((prev) => {
-          if (prev.size > 0) return prev;
-          const m = new Map<string, ParsedEvent>();
-          for (const e of es) m.set(e.coord, e);
-          return m;
-        });
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // Surface the signed-in user's own published Piggies in the rail
-  // even when no nearby `#g` subscription has echoed them back. The
-  // nearby sub filters by geohash prefix, which excludes the user's
-  // own listing if they hid it outside their current viewport OR if
-  // the sub was paused (#557) at the moment the relay echoed back.
-  // One-shot per (pubkey, refreshKey) via the module-scoped
-  // `claimExploreByAuthorFetch` guard — re-runs on pull-to-refresh and
-  // pubkey change but never on unrelated re-renders, and is immune to the
-  // concurrent parallel-fire a component useRef suffered (#751 audit #4).
-  const { pubkey: signedInPubkey, relays: userRelays } = useNostr();
-  // The user's read-relay URLs, plus a content key that only changes when the
-  // URL *set* changes (sorted so a mere reorder doesn't) — not when useNostr()
-  // hands back a new array with the same URLs (cold-start cache→network churn),
-  // which used to double-fire the by-author fetch below (#798).
-  const readRelays = userRelays.filter((r) => r.read).map((r) => r.url);
-  const readRelayKey = [...readRelays].sort().join(',');
-  useEffect(() => {
-    if (!signedInPubkey) return;
-    const fetchKey = `${signedInPubkey}:${refreshKey}`;
-    let cancelled = false;
-    // Join an in-flight fetch so concurrent effect re-runs don't fire parallel
-    // requests, and the current run still merges on cancel (#752 Copilot).
-    joinExploreByAuthorFetch(fetchKey, () =>
-      fetchCachesByAuthor(signedInPubkey, readRelays.length > 0 ? readRelays : undefined),
-    )
-      .then((mine) => {
-        if (cancelled) return;
-        console.log(
-          `[PerfBlock] ExploreHome by-author merge: fetched=${mine.length} ` +
-            mine.map((c) => `${c.name ?? c.d}@${c.geohash?.slice(0, 5) ?? '??'}`).join(', '),
-        );
-        if (mine.length === 0) return;
-        setCaches((prev) => {
-          const next = new Map(prev);
-          let added = 0;
-          for (const c of mine) {
-            const existing = next.get(c.coord);
-            if (!existing || c.createdAt > existing.createdAt) {
-              next.set(c.coord, c);
-              added++;
-            }
-          }
-          console.log(
-            `[PerfBlock] ExploreHome by-author merge: ${added} new/updated in caches Map`,
-          );
-          return next;
-        });
-      })
-      .catch((e) => {
-        console.warn(`[PerfBlock] ExploreHome by-author fetch threw: ${(e as Error).message}`);
-      });
-    return () => {
-      cancelled = true;
-    };
-    // Depend on readRelayKey (the relay-URL *content*), not the userRelays array
-    // identity: a genuine relay-set change still re-fires the fetch (parity with
-    // MapScreen's by-author fetch), but the cold-start new-array-same-URLs churn
-    // no longer does — that double-fired a redundant ~20s query (#798).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signedInPubkey, refreshKey, readRelayKey]);
-
-  // Write-through to AsyncStorage (debounced) so the next cold start hydrates
-  // fresh content; both hooks self-heal prod caches (drop stale test items).
-  usePersistCaches(caches);
-  usePersistEvents(events);
-  // Counts of events arriving from pubkeys outside the trust set.
-  // Surfaced as "N hidden — from outside your trust graph" so users
-  // know the filter is doing something.
-  const [untrustedCacheCount, setUntrustedCacheCount] = useState(0);
-  const [untrustedEventCount, setUntrustedEventCount] = useState(0);
-  const subsCloserRef = useRef<(() => void)[]>([]);
-  // Gate re-subscription on coarse movement (~500 m via 0.005° quantisation)
-  // via the posBucketKey in the effect's deps below — NOT a body-level skip:
-  // React runs cleanup BEFORE the new body, so a body-level skip closes the
-  // existing subs first then bails, leaving zero subs across cold-start GPS
-  // jitter (peekCachedAnchor → getLastKnown → getCurrent settle within a few
-  // hundred metres). #741 Copilot review on #739 Fix 3.
-  // NIP-GC + NIP-52 subscriptions live on the *mount* lifecycle, not
-  // the focus lifecycle. Open once when ExploreHomeScreen first
-  // mounts (which is lazy on the tab navigator via `lazy: true`, so
-  // nothing fires before the user actually visits the tab); stay open
-  // across tab blur / focus; close only on full unmount (logout /
-  // navigator reset / pull-to-refresh).
-  //
-  // This is the standard pattern across production Nostr clients
-  // (Damus, Snort, Amethyst). The pre-existing `useFocusEffect` here
-  // tore down on every blur and re-opened on every focus. The
-  // rationale was "reconnect on re-focus is ~100 ms; saves JS-thread
-  // load while user is on Home" — but the actual measured cost of
-  // re-focus is **15-16 s** (#31 freeze), not 100 ms, because the
-  // relay re-emits its full geohash-prefix backlog every time we
-  // re-subscribe. The math was upside-down: we were paying a
-  // 15-second freeze on every tab return to save the user from
-  // <2 ms/min of background event processing.
-  //
-  // Subscriptions stay closed by the WebSocket reuse semantics of
-  // `nostr-tools`' `SimplePool` — closing a subscription just sends
-  // a CLOSE frame; the underlying WebSocket persists for future REQs.
-  // So even the "first visit" backfill happens once per app launch,
-  // not once per focus.
-  //
-  // Destructure pos into primitives so the effect's deps don't
-  // re-trigger every time `setPos` writes a fresh `{lat, lon, accuracy}`
-  // object (which happens 2–3 times on cold start: last-known fix →
-  // current fix → high-accuracy refinement). Pre-fix that thrashed
-  // the relay subscription open/close 2–3 times per cold-start.
-  // Stev.ie's #612 review surfaced this.
-  const posLat = pos?.lat;
-  const posLon = pos?.lon;
-  const POS_BUCKET_DEG = 0.005;
-  const posBucketKey =
-    typeof posLat !== 'number' || typeof posLon !== 'number'
-      ? null
-      : `${Math.round(posLat / POS_BUCKET_DEG)}:${Math.round(posLon / POS_BUCKET_DEG)}`;
-  useEffect(() => {
-    // refreshKey in deps: pull-to-refresh bumps it → tear down + re-run.
-    // posLat / posLon are used here for the geohash filters but deliberately
-    // NOT in deps (they'd thrash the gate on every GPS tick) — see the
-    // bucket-key comment above the declaration. eslint suppression below.
-    if (posBucketKey === null || typeof posLat !== 'number' || typeof posLon !== 'number') return;
-    // `cancelled` covers the window between effect cleanup firing
-    // (subsCloserRef.current.forEach(c => c())) and the underlying
-    // relay socket actually closing — a stray event in that gap
-    // would otherwise mutate pendingCachesRef and arm a fresh flush
-    // timer that fires after the cleanup. Mirrors NostrContext.tsx's
-    // DM inbox precedent.
-    let cancelled = false;
-    // Caches sit at precision 5 (~5 km) — geocaching is inherently
-    // hyper-local. Events broaden to precision 3 (~150 km) so a rural
-    // user catches the nearest city's Bitcoin meetup; most NIP-52
-    // publishers emit g tags at every precision 3..9.
-    //
-    // `geohashNeighbours` returns the user's own cell plus the 8
-    // surrounding tiles at that precision (9 prefixes for caches,
-    // 9 for events). Pre-#631 we used `geohashPrefixes(myGh, 5)`
-    // which returned only the user's own truncation chain — caches
-    // hidden in an adjacent precision-5 tile (e.g. 500 m across a
-    // tile boundary) never matched the `#g` filter.
-    const cachePrefixes = geohashNeighbours(encodeGeohash(posLat, posLon, 5));
-    const eventPrefixes = geohashNeighbours(encodeGeohash(posLat, posLon, 3));
-
-    subsCloserRef.current.push(
-      subscribeNearbyCaches(cachePrefixes, (c) => {
-        if (cancelled) return;
-        // Hide test-account ("Piggy") Piglets in prod (kept in dev/preview).
-        if (isHiddenInProd(c.hiderPubkey)) return;
-        // WoT filter: silently drop caches from pubkeys outside the
-        // trust graph (an unverified cache could be a phishing LNURL
-        // or, worse, a physical lure). Surfaced as a count instead so
-        // users know they exist without being lured into inspecting them.
-        if (!isTrustedRef.current(c.hiderPubkey)) {
-          setUntrustedCacheCount((n) => n + 1);
-          return;
-        }
-        // Stale-event drop happens here too so a stale wrap doesn't
-        // even enter the pending queue. The flush re-checks against
-        // the committed state in case the queue itself raced.
-        const existing = pendingCachesRef.current.get(c.coord);
-        if (existing && existing.createdAt >= c.createdAt) return;
-        pendingCachesRef.current.set(c.coord, c);
-        if (pendingCachesRef.current.size >= PENDING_FLUSH_THRESHOLD) {
-          flushPendingCaches();
-          return;
-        }
-        if (pendingCachesTimerRef.current === null) {
-          pendingCachesTimerRef.current = setTimeout(flushPendingCaches, PENDING_FLUSH_MS);
-        }
-      }),
-    );
-    subsCloserRef.current.push(
-      subscribeNearbyEvents(eventPrefixes, (e) => {
-        if (cancelled) return;
-        // Hide test-account ("Piggy") events in prod; skip finished events.
-        if (isHiddenInProd(e.organiserPubkey)) return;
-        if (!isFutureEvent(e, Math.floor(Date.now() / 1000))) return;
-        if (!isTrustedRef.current(e.organiserPubkey)) {
-          setUntrustedEventCount((n) => n + 1);
-          return;
-        }
-        const existing = pendingEventsRef.current.get(e.coord);
-        if (existing && existing.startsAt === e.startsAt) return;
-        pendingEventsRef.current.set(e.coord, e);
-        if (pendingEventsRef.current.size >= PENDING_FLUSH_THRESHOLD) {
-          flushPendingEvents();
-          return;
-        }
-        if (pendingEventsTimerRef.current === null) {
-          pendingEventsTimerRef.current = setTimeout(flushPendingEvents, PENDING_FLUSH_MS);
-        }
-      }),
-    );
-    return () => {
-      cancelled = true;
-      subsCloserRef.current.forEach((c) => c());
-      subsCloserRef.current = [];
-      // Drain whatever's queued so the last few events from a
-      // refresh-triggered tear-down (or full unmount) aren't lost.
-      // Both flushers are null-safe + no-op when the buffer is
-      // already empty.
-      flushPendingCaches();
-      flushPendingEvents();
-    };
-    // posLat / posLon are intentionally NOT in this deps array — see the
-    // comment at the top of the effect. The bucket key gates re-runs.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [posBucketKey, refreshKey, flushPendingCaches, flushPendingEvents]);
+  }, [setUntrustedCacheCount, setUntrustedEventCount]);
 
   // ----- lessons progress (local) -----------------------------------------
 

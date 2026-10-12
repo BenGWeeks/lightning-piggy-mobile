@@ -6,6 +6,7 @@ import { NavigationContext } from '@react-navigation/native';
 // `Map<K,V>` global for the coord → source lookups below.
 import {
   Camera,
+  OfflineManager,
   GeoJSONSource,
   Layer,
   Map as MapLibreMap,
@@ -25,6 +26,7 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createLibreMiniMapStyles } from '../styles/LibreMiniMap.styles';
 import MiniMapMarkers from './MiniMapMarkers';
+import { configureExploreTileCache, type ExploreCamera } from '../services/exploreMapState';
 
 // `useIsFocused()` throws "Couldn't find a navigation object" when the
 // component renders OUTSIDE a navigator — e.g. inside a Gorhom
@@ -71,6 +73,8 @@ interface Props {
   caches: ParsedCache[];
   events: ParsedEvent[];
   defaultZoom?: number;
+  onCameraChange?: (camera: ExploreCamera) => void;
+  onMapReady?: () => void;
   // GPS horizontal accuracy in metres. When provided, draws a translucent
   // blue accuracy halo around the user dot — the Google-Maps idiom that
   // signals "your position is somewhere inside this circle". Suppressed
@@ -206,6 +210,8 @@ const LibreMiniMapInner: React.FC<Props> = ({
   caches,
   events,
   defaultZoom = 13,
+  onCameraChange,
+  onMapReady,
   userAccuracyMetres,
   userLat,
   userLon,
@@ -225,6 +231,9 @@ const LibreMiniMapInner: React.FC<Props> = ({
   onSelectEvent,
   testID,
 }) => {
+  useEffect(() => {
+    if (onCameraChange) void configureExploreTileCache(OfflineManager);
+  }, [onCameraChange]);
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createLibreMiniMapStyles(colors), [colors]);
@@ -513,6 +522,7 @@ const LibreMiniMapInner: React.FC<Props> = ({
         // clustering zoom (one native getZoom() per settle), then — only
         // when an onBoundsChange prop is provided — emits the bbox so
         // host screens can filter their list to what's visible.
+        onDidFinishRenderingMapFully={onMapReady}
         onRegionDidChange={async () => {
           // Refresh the clustering zoom (#1071) — pinch-zoom on the
           // interactive map only surfaces here. Rounded to integer
@@ -522,6 +532,10 @@ const LibreMiniMapInner: React.FC<Props> = ({
             if (typeof z === 'number') {
               currentZoomRef.current = z;
               setClusterZoom(Math.round(z));
+              if (onCameraChange) {
+                const center = await mapRef.current?.getCenter();
+                if (center) onCameraChange({ lon: center[0], lat: center[1], zoom: z });
+              }
             }
           } catch {
             // Zoom query can race the camera tear-down on unmount — swallow.
@@ -751,6 +765,8 @@ const arePropsEqual = (prev: Props, next: Props): boolean => {
   if (prev.userAvatarUri !== next.userAvatarUri) return false;
   if (prev.uniformMarkerSize !== next.uniformMarkerSize) return false;
   if (prev.defaultZoom !== next.defaultZoom) return false;
+  if (prev.onCameraChange !== next.onCameraChange) return false;
+  if (prev.onMapReady !== next.onMapReady) return false;
   if (prev.interactive !== next.interactive) return false;
   if (prev.fill !== next.fill) return false;
   if (prev.crosshair !== next.crosshair) return false;

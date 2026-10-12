@@ -3,10 +3,7 @@ import type { Palette } from './palettes';
 
 export const createExploreMiniMapStyles = (colors: Palette) =>
   StyleSheet.create({
-    // Unfocused placeholder. Mirrors LibreMiniMap's `container` (height 200,
-    // 16dp side margins, 18dp bottom gap, 14dp radius) so the rail layout
-    // below doesn't shift when the GL map mounts / unmounts on focus changes
-    // (#778). Brand-pink surface so the empty slot still reads as our UI.
+    // First-paint placeholder matches the map geometry.
     placeholder: {
       height: 200,
       marginHorizontal: 16,
@@ -25,6 +22,7 @@ export const createExploreMiniMapStyles = (colors: Palette) =>
       borderRadius: 12,
       alignItems: 'flex-start',
     },
+    deniedCopy: { flex: 1 },
     deniedTitle: {
       fontSize: 14,
       fontWeight: '700',

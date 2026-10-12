@@ -83,6 +83,8 @@ export const subscribeNearbyCaches = (
   const filter: Filter = {
     kinds: [GC_LISTING_KIND],
     '#g': prefixes,
+    // Listings may be years old and still active; bound count rather than age.
+    limit: 200,
     ...filterExtras,
   };
   // [PerfBlock] event-burst accounting — relay onevent fires
@@ -275,7 +277,9 @@ export const subscribeNearbyEvents = (
 
   // (1) Geohash-prefix filter — nearby events (the original behaviour).
   if (prefixes.length > 0) {
-    const geoFilter: Filter = { kinds: [NIP52_TIME_BASED_KIND], '#g': prefixes };
+    // A future meetup can have been announced months ago. Keep those while
+    // bounding each initial backfill, just like the topical filter below.
+    const geoFilter: Filter = { kinds: [NIP52_TIME_BASED_KIND], '#g': prefixes, limit: 200 };
     const geoSub = pool.subscribeMany(relays, geoFilter, {
       onevent: (e: NostrEvent) => {
         if (isDevLeftover(e.pubkey)) return;

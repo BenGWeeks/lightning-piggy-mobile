@@ -1608,6 +1608,9 @@
     "swapNotPaid": "Нічого не надіслано: платіж Lightning до Boltz не пройшов, тож жоден sat не покинув ваш гаманець. Можна спробувати ще раз."
   },
   "placeDetailScreen": {
+    "viewOnBtcMap": "Переглянути на BTC Map",
+    "phone": "Телефон",
+    "website": "Вебсайт",
     "notInCache": "Цього місця більше немає в нашому кешованому списку — спробуйте відкрити його з мапи.",
     "bitcoinPlaceFallback": "Bitcoin-місце",
     "backToPlaces": "Назад до Місць",

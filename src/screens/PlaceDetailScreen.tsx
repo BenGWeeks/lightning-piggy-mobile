@@ -32,7 +32,8 @@ import type { RouteProp } from '@react-navigation/native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { useNostr } from '../contexts/NostrContext';
-import type { Palette } from '../styles/palettes';
+import { createPlaceDetailScreenStyles } from '../styles/PlaceDetailScreen.styles';
+import { placeContactLinks } from '../utils/placeContactLinks';
 import { ExploreNavigation, ExploreStackParamList } from '../navigation/types';
 import {
   type BtcMapPlace,
@@ -122,7 +123,7 @@ const SocialRow: React.FC<{
 const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
   const t = useTranslation();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createPlaceDetailScreenStyles(colors), [colors]);
   const { placeId } = route.params;
   const [place, setPlace] = useState<BtcMapPlace | null>(null);
   const [pos, setPos] = useState<{ lat: number; lon: number } | null>(null);
@@ -207,6 +208,8 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     const uri = scheme === 'https' ? value : `${scheme}:${value}`;
     Linking.openURL(uri).catch(() => {});
   }, []);
+
+  const contacts = place ? placeContactLinks(place) : null;
 
   return (
     <View style={styles.container} testID="place-detail-screen">
@@ -406,8 +409,8 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
               </View>
             ) : null}
 
-            {place.phone ||
-            place.tags['contact:website'] ||
+            {contacts?.phone ||
+            contacts?.website ||
             place.email ||
             place.facebookUrl ||
             place.twitterUrl ||
@@ -416,23 +419,27 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
             place.whatsappUrl ? (
               <View style={styles.contactSection}>
                 <Text style={styles.sectionLabel}>{t('placeDetailScreen.contact')}</Text>
-                {place.phone ? (
+                {contacts?.phone ? (
                   <TouchableOpacity
                     style={styles.contactRow}
-                    onPress={() => openContact('tel', place.phone!)}
+                    testID="place-phone"
+                    accessibilityLabel={t('placeDetailScreen.phone')}
+                    onPress={() => openContact('tel', contacts.phone!.value)}
                   >
                     <Phone size={14} color={colors.brandPink} strokeWidth={2.5} />
-                    <Text style={styles.contactText}>{place.phone}</Text>
+                    <Text style={styles.contactText}>{contacts.phone.value}</Text>
                   </TouchableOpacity>
                 ) : null}
-                {place.tags['contact:website'] ? (
+                {contacts?.website ? (
                   <TouchableOpacity
                     style={styles.contactRow}
-                    onPress={() => openContact('https', place.tags['contact:website']!)}
+                    testID="place-website"
+                    accessibilityLabel={t('placeDetailScreen.website')}
+                    onPress={() => openContact('https', contacts.website!.href)}
                   >
                     <Globe size={14} color={colors.brandPink} strokeWidth={2.5} />
                     <Text style={styles.contactText} numberOfLines={1}>
-                      {place.tags['contact:website']}
+                      {contacts.website.value}
                     </Text>
                     <ExternalLink size={12} color={colors.textSupplementary} />
                   </TouchableOpacity>
@@ -530,6 +537,17 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                   {t('placeDetailScreen.directions')}
                 </Text>
               </TouchableOpacity>
+              {btcMapMerchantUrl(place) ? (
+                <TouchableOpacity
+                  style={styles.btcMapActionButton}
+                  onPress={() => Linking.openURL(btcMapMerchantUrl(place)!).catch(() => {})}
+                  testID="place-view-on-btcmap"
+                  accessibilityLabel={t('placeDetailScreen.viewOnBtcMap')}
+                >
+                  <ExternalLink size={14} color={colors.brandPink} strokeWidth={2.5} />
+                  <Text style={styles.btcMapActionText}>{t('placeDetailScreen.viewOnBtcMap')}</Text>
+                </TouchableOpacity>
+              ) : null}
               {btcMapVerifyUrl(place) ? (
                 <TouchableOpacity
                   style={styles.btcMapActionButton}
@@ -561,196 +579,5 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     </View>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    container: { flex: 1, backgroundColor: colors.background },
-    header: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 16,
-      paddingTop: 48,
-      paddingBottom: 16,
-      backgroundColor: colors.brandPink,
-      overflow: 'hidden',
-      gap: 12,
-    },
-    headerTitle: {
-      flex: 1,
-      textAlign: 'center',
-      fontSize: 18,
-      fontWeight: '700',
-      color: colors.white,
-    },
-    headerRightSpacer: { width: 24 },
-    body: { padding: 16, gap: 14, paddingBottom: 40 },
-    title: { flex: 1, fontSize: 22, fontWeight: '800', color: colors.textHeader, lineHeight: 28 },
-    titleRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
-    },
-    categoryIconWrap: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      backgroundColor: colors.surface,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    btcMapActionsRow: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 8,
-      marginTop: 12,
-    },
-    btcMapActionButton: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      paddingHorizontal: 12,
-      paddingVertical: 8,
-      borderRadius: 999,
-      borderWidth: 1,
-      borderColor: colors.brandPink,
-    },
-    btcMapActionText: {
-      fontSize: 13,
-      fontWeight: '700',
-      color: colors.brandPink,
-    },
-    btcMapActionButtonPrimary: {
-      backgroundColor: colors.brandPink,
-      borderColor: colors.brandPink,
-    },
-    btcMapActionTextPrimary: {
-      color: colors.white,
-    },
-    chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-    chipPink: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      backgroundColor: colors.brandPink,
-      paddingHorizontal: 10,
-      paddingVertical: 4,
-      borderRadius: 100,
-    },
-    chipFeatured: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      // Bitcoin yellow so the Featured pill reads instantly even on
-      // a busy chip row (Lightning pink + on-chain orange already
-      // crowd the warm end of the palette).
-      backgroundColor: colors.zapYellow,
-      paddingHorizontal: 10,
-      paddingVertical: 4,
-      borderRadius: 100,
-    },
-    chipFeature: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      backgroundColor: colors.surface,
-      borderWidth: 1,
-      borderColor: colors.divider,
-      paddingHorizontal: 10,
-      paddingVertical: 4,
-      borderRadius: 100,
-    },
-    chipFeatureText: { color: colors.textHeader, fontSize: 11, fontWeight: '700' },
-    metaLine: {
-      fontSize: 13,
-      color: colors.textSupplementary,
-      marginTop: 2,
-    },
-    commentsLink: {
-      color: colors.brandPink,
-      fontStyle: 'normal',
-      fontWeight: '700',
-      marginTop: 4,
-    },
-    chipOrange: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      backgroundColor: '#F7931A',
-      paddingHorizontal: 10,
-      paddingVertical: 4,
-      borderRadius: 100,
-    },
-    chipPinkText: { color: colors.white, fontSize: 11, fontWeight: '700' },
-    chipGrey: {
-      backgroundColor: colors.divider,
-      paddingHorizontal: 10,
-      paddingVertical: 4,
-      borderRadius: 100,
-    },
-    chipGreyText: { color: colors.textSupplementary, fontSize: 11, fontWeight: '700' },
-    address: { fontSize: 14, color: colors.textSupplementary, lineHeight: 20 },
-    description: {
-      fontSize: 14,
-      color: colors.textBody,
-      lineHeight: 21,
-      marginTop: 4,
-    },
-    mapWrap: { marginHorizontal: -16, marginVertical: 4 },
-    actionRow: { flexDirection: 'row', gap: 10 },
-    primaryAction: {
-      flex: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 8,
-      backgroundColor: colors.brandPink,
-      paddingVertical: 12,
-      borderRadius: 100,
-    },
-    primaryActionText: { color: colors.white, fontSize: 14, fontWeight: '700' },
-    secondaryAction: {
-      flex: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 8,
-      backgroundColor: colors.surface,
-      paddingVertical: 12,
-      borderRadius: 100,
-      borderWidth: 1,
-      borderColor: colors.brandPink,
-    },
-    secondaryActionText: { color: colors.brandPink, fontSize: 14, fontWeight: '700' },
-    contactSection: { gap: 8, marginTop: 8 },
-    sectionLabel: {
-      fontSize: 13,
-      fontWeight: '700',
-      color: colors.textSupplementary,
-      letterSpacing: 0.5,
-    },
-    contactRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      paddingVertical: 6,
-    },
-    contactText: { fontSize: 14, color: colors.textHeader, flex: 1 },
-    verifyText: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      marginTop: 12,
-      fontStyle: 'italic',
-    },
-    lifecycleBlock: {
-      marginTop: 12,
-      gap: 2,
-    },
-    lifecycleText: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      fontStyle: 'italic',
-    },
-    errorText: { fontSize: 14, color: colors.brandPink, textAlign: 'center', marginTop: 40 },
-  });
 
 export default PlaceDetailScreen;

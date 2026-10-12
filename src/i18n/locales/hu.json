@@ -1636,6 +1636,9 @@
     "swapNotPaid": "Semmi sem ment el – a Boltznak szánt Lightning-fizetés nem sikerült, így egy sats sem hagyta el a pénztárcádat. Próbáld újra."
   },
   "placeDetailScreen": {
+    "viewOnBtcMap": "Megtekintés a BTC Mapen",
+    "phone": "Telefon",
+    "website": "Weboldal",
     "notInCache": "Ez a hely már nincs a gyorsítótárazott listánkban – próbáld megnyitni a térképről.",
     "bitcoinPlaceFallback": "Bitcoin-hely",
     "backToPlaces": "Vissza a Helyekhez",
