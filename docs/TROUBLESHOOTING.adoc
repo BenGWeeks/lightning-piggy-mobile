@@ -1266,3 +1266,13 @@ one store read per load instead of two. A JS-thread stall can still delay the
 first store continuation/paint. With no device capture, the originating
 trigger and the cost of those 25 retrying wraps cannot be conclusively
 attributed from these markers alone.
+
+=== Failed reaction deletion hides a reaction or raises an unhandled rejection
+
+Both conversation reaction UI callers discard the toggle promise. A failed
+NIP-09 publish followed by a relay read failure or timeout used to reject that
+promise and leave the reaction hidden locally. The toggle now restores
+records whose deletion failed before attempting reconciliation, catches failed
+reads and publishes, and shows the branded reaction error toast. Confirmed
+retractions still suppress stale history and live events. Regression coverage is
+in `src/hooks/useConversationReactions.test.tsx` (#1422).

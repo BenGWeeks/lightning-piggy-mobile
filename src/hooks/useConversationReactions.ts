@@ -10,6 +10,7 @@ import {
 } from '../utils/conversationReactionCache';
 import { createYieldScheduler } from '../contexts/nostrDecryptPacing';
 import { Alert } from '../components/BrandedAlert';
+import { Toast } from '../components/BrandedToast';
 import { useTranslation } from '../contexts/LocaleContext';
 import type { ConversationMessageInput, Item } from '../utils/conversationItems';
 import {
@@ -388,8 +389,12 @@ export function useConversationReactions({
           for (const id of ids) {
             if (isOptimisticReactionId(id)) continue;
             await scheduler.maybeYield();
-            if (await deleteReaction(id)) deleted.push(id);
-            else failed = true;
+            try {
+              if (await deleteReaction(id)) deleted.push(id);
+              else failed = true;
+            } catch {
+              failed = true;
+            }
           }
         } finally {
           scheduler.dispose();
@@ -398,9 +403,30 @@ export function useConversationReactions({
         // event arrives later; reconcile only the failed deletions.
         applyDeletionEvents([{ pubkey: myPubkey, tags: deleted.map((id) => ['e', id]) }]);
         if (failed) {
+          // A failed read cannot prove removal. Restore unpublished deletions
+          // immediately; mergeFreshRecords still honors confirmed retractions.
+          mergeFreshRecords(
+            reactionRecords.filter(
+              (r) => ids.has(r.id) && !isOptimisticReactionId(r.id) && !deleted.includes(r.id),
+            ),
+          );
+          if (writerIsCurrent()) {
+            Toast.show({
+              type: 'error',
+              text1: t('messageActionsSheet.reactionFailedTitle'),
+              text2: t('messageActionsSheet.reactionFailedBody'),
+            });
+          }
           scheduled.delete(target.targetId);
-          const events = await fetchReactionsForMessages([target.targetId]);
-          mergeFreshRecords(events.map(parseReactionEvent).filter((r): r is ReactionRecord => !!r));
+          try {
+            const events = await fetchReactionsForMessages([target.targetId]);
+            mergeFreshRecords(
+              events.map(parseReactionEvent).filter((r): r is ReactionRecord => !!r),
+            );
+          } catch {
+            // The UI discards this promise. Keep restored records on relay
+            // failure/timeout rather than rejecting the toggle.
+          }
         }
         return;
       }
@@ -415,12 +441,17 @@ export function useConversationReactions({
         targetEventId: target.targetId,
       };
       setReactionRecords((prev) => [...prev, optimistic]);
-      const realId = await publishReaction({
-        emoji,
-        targetEventId: target.targetId,
-        targetAuthorPubkey: target.authorPubkey,
-        targetEventKind: target.targetKind,
-      });
+      let realId: string | null;
+      try {
+        realId = await publishReaction({
+          emoji,
+          targetEventId: target.targetId,
+          targetAuthorPubkey: target.authorPubkey,
+          targetEventKind: target.targetKind,
+        });
+      } catch {
+        realId = null;
+      }
       if (!writerIsCurrent()) return;
       // Did the user un-react while the publish was in flight? (`delete` both
       // reads and clears the flag in one shot.)
@@ -431,7 +462,24 @@ export function useConversationReactions({
           // since removed it — retract the REAL kind-7 so it doesn't reappear
           // on the next load. The optimistic record was already filtered out
           // by the removal path above.
-          void deleteReaction(realId);
+          let deleted = false;
+          try {
+            deleted = await deleteReaction(realId);
+          } catch {
+            // A signing or relay failure leaves the published reaction intact.
+          }
+          if (deleted) {
+            applyDeletionEvents([{ pubkey: myPubkey, tags: [['e', realId]] }]);
+          } else {
+            mergeFreshRecords([{ ...optimistic, id: realId }]);
+            if (writerIsCurrent()) {
+              Toast.show({
+                type: 'error',
+                text1: t('messageActionsSheet.reactionFailedTitle'),
+                text2: t('messageActionsSheet.reactionFailedBody'),
+              });
+            }
+          }
           return;
         }
         setReactionRecords((prev) =>

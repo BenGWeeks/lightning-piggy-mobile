@@ -16,6 +16,7 @@ import { renderHook, act, waitFor } from '@testing-library/react-native';
 import { useConversationReactions } from './useConversationReactions';
 import type { ConversationMessageInput, Item } from '../utils/conversationItems';
 import { isOptimisticReactionId } from '../utils/reactions';
+import { Toast } from '../components/BrandedToast';
 
 import {
   cacheConversationReactions,
@@ -33,12 +34,19 @@ jest.mock('../services/nostrService', () => ({
   pool: { ensureRelay: jest.fn() },
   trackRelays: jest.fn(),
 }));
-beforeEach(clearConversationReactions);
+beforeEach(() => {
+  clearConversationReactions();
+  jest.clearAllMocks();
+});
 afterEach(() => setMarmotSession(null));
 
 jest.mock('@react-navigation/native', () => ({
   useFocusEffect: (effect: () => void) =>
     jest.requireActual<typeof import('react')>('react').useEffect(effect, [effect]),
+}));
+
+jest.mock('../components/BrandedToast', () => ({
+  Toast: { show: jest.fn() },
 }));
 
 jest.mock('../components/BrandedAlert', () => ({
@@ -349,6 +357,109 @@ describe('useConversationReactions — duplicate own votes', () => {
       );
     },
   );
+});
+
+describe('failed reaction deletions', () => {
+  it.each([
+    ['pill', false],
+    ['sheet', false],
+    ['pill', true],
+    ['sheet', true],
+  ])(
+    'restores the failed deletion with no unhandled rejection (%s, throws: %s)',
+    async (caller, throws) => {
+      const events = ['old', 'new'].map((id, index) => ({
+        id,
+        pubkey: MY_PK,
+        kind: 7,
+        content: '👍',
+        created_at: index + 1,
+        tags: [['e', TARGET]],
+      }));
+      const fetchReactionsForMessages = jest
+        .fn()
+        .mockResolvedValueOnce(events)
+        .mockRejectedValueOnce(new Error('relay read timed out'));
+      const deleteReaction = jest.fn(async (id: string) => {
+        if (id === 'old') return true;
+        if (throws) throw new Error('relay publish failed');
+        return false;
+      });
+      const params = makeParams({
+        messages: [{ id: 'message', fromMe: true, text: 'hi', createdAt: 1, rumorId: TARGET }],
+        fetchReactionsForMessages,
+        deleteReaction,
+      });
+      const unhandled = jest.fn();
+      process.on('unhandledRejection', unhandled);
+      try {
+        const { result } = renderHook(() => useConversationReactions(params));
+        await waitFor(() =>
+          expect(result.current.reactionsByTarget.get(TARGET)?.myReactions['👍']).toBe('new'),
+        );
+        if (caller === 'sheet') {
+          act(() => result.current.buildOnLongPress(sentItem)!());
+        }
+        // Match both UI callers: deliberately discard the toggle promise.
+        act(() => {
+          if (caller === 'sheet') result.current.handleToggleReaction('👍', 'new');
+          else result.current.buildOnToggleReaction(sentItem)!('👍', 'new');
+        });
+        expect(result.current.reactionsByTarget.get(TARGET)).toBeUndefined();
+        await waitFor(() => expect(fetchReactionsForMessages).toHaveBeenCalledTimes(2));
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        });
+        expect(result.current.reactionsByTarget.get(TARGET)?.myReactions['👍']).toBe('new');
+        expect(Toast.show).toHaveBeenCalledWith({
+          type: 'error',
+          text1: 'messageActionsSheet.reactionFailedTitle',
+          text2: 'messageActionsSheet.reactionFailedBody',
+        });
+        expect(unhandled).not.toHaveBeenCalled();
+        // Attempt both IDs even when one deletion fails.
+        expect(deleteReaction.mock.calls.map(([id]) => id).sort()).toEqual(['new', 'old']);
+      } finally {
+        process.off('unhandledRejection', unhandled);
+      }
+    },
+  );
+});
+
+it('restores a cancelled pending reaction when deleting its acknowledged ID rejects', async () => {
+  let resolvePublish!: (id: string) => void;
+  const publishReaction = jest.fn(
+    () =>
+      new Promise<string>((resolve) => {
+        resolvePublish = resolve;
+      }),
+  );
+  const deleteReaction = jest.fn().mockRejectedValue(new Error('relay publish failed'));
+  const params = makeParams({ publishReaction, deleteReaction });
+  const { result } = renderHook(() => useConversationReactions(params));
+  act(() => result.current.buildOnToggleReaction(sentItem)!('👍', null));
+  const optimisticId = result.current.reactionsByTarget.get(TARGET)!.myReactions['👍'];
+  act(() => result.current.buildOnToggleReaction(sentItem)!('👍', optimisticId));
+  expect(result.current.reactionsByTarget.get(TARGET)).toBeUndefined();
+  await act(async () => {
+    resolvePublish('real-id');
+  });
+  await waitFor(() =>
+    expect(result.current.reactionsByTarget.get(TARGET)?.myReactions['👍']).toBe('real-id'),
+  );
+  expect(deleteReaction).toHaveBeenCalledWith('real-id');
+  expect(Toast.show).toHaveBeenCalledWith(expect.objectContaining({ type: 'error' }));
+});
+
+it('handles a rejected publish without leaving an optimistic reaction or rejecting the UI toggle', async () => {
+  const params = makeParams({
+    publishReaction: jest.fn().mockRejectedValue(new Error('signing failed')),
+  });
+  const { result } = renderHook(() => useConversationReactions(params));
+  await act(async () => {
+    result.current.buildOnToggleReaction(sentItem)!('👍', null);
+  });
+  expect(result.current.reactionsByTarget.get(TARGET)).toBeUndefined();
 });
 
 describe('cached reactions on initial message render', () => {
