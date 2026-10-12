@@ -65,7 +65,9 @@ export async function sendLiveUpdate(
       const marmot = getMarmotSession();
       // Never spin up MLS just for an update (e.g. a headless relaunch).
       if (!marmot || marmot.pubkey !== myPubkey) return false;
-      const groupId = session.groupId ?? (await marmot.getOrCreateDm(session.recipientPubkey)).id;
+      // An update never creates a DM (the start marker did); no DM → drop it.
+      const groupId = session.groupId ?? marmot.findDm(session.recipientPubkey)?.id;
+      if (!groupId) return false;
       const rumor = buildMarmotRumor(myPubkey, marmotLiveUpdateDraft(payload));
       const byRelay = await marmot.sendRumor(groupId, rumor);
       return Object.values(byRelay).some(Boolean);

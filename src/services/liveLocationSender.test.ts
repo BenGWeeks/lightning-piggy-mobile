@@ -22,6 +22,7 @@ jest.mock('./nostrService', () => ({
 const mockSession = {
   pubkey: 'f'.repeat(64),
   getOrCreateDm: jest.fn(async (_peer: string) => ({ id: 'marmot:dm1', relays: [] })),
+  findDm: jest.fn((_peer: string): { id: string } | undefined => ({ id: 'marmot:dm1' })),
   sendRumor: jest.fn(
     async (_groupId: string, _rumor: unknown): Promise<Record<string, boolean>> => ({
       'wss://r': true,
@@ -88,7 +89,8 @@ describe('Marmot updates', () => {
     expect(await sendLiveUpdate(ME, session({ protocol: 'marmot' }), payload, ['wss://x'])).toBe(
       true,
     );
-    expect(mockSession.getOrCreateDm).toHaveBeenCalledWith(PEER);
+    expect(mockSession.findDm).toHaveBeenCalledWith(PEER);
+    expect(mockSession.getOrCreateDm).not.toHaveBeenCalled();
     const [groupId, rumor] = mockSession.sendRumor.mock.calls[0] as unknown as [
       string,
       { kind: number; pubkey: string; content: string; tags: string[][] },
@@ -97,6 +99,13 @@ describe('Marmot updates', () => {
     expect(rumor).toMatchObject({ kind: LIVE_LOCATION_PING_KIND, pubkey: ME, tags: [] });
     expect(decodeLivePingPayload(rumor.content)).toEqual(payload);
     expect(mockPublish).not.toHaveBeenCalled();
+  });
+
+  it('never create a DM: with no existing DM the update is dropped', async () => {
+    mockSession.findDm.mockReturnValueOnce(undefined);
+    expect(await sendLiveUpdate(ME, session({ protocol: 'marmot' }), payload, [])).toBe(false);
+    expect(mockSession.getOrCreateDm).not.toHaveBeenCalled();
+    expect(mockSession.sendRumor).not.toHaveBeenCalled();
   });
 
   it('go to the whole group for a group share', async () => {
