@@ -7,31 +7,36 @@ appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 # the id of a group it just created, so this can never open a real chat.
 - launchApp:
     clearState: false
-# Wait for the bundle to load (a dev client can take a while), then leave any
-# restored chat with the app's own back button — never a blind system Back,
-# which exits the app if it's still on the loading screen.
+# Wait for the bundle to load (a dev client can take a while). A cold start
+# restores whatever screen was open last — a chat, Settings, a sheet — so walk
+# back with the app's own back buttons (testIDs ending in "back") until the
+# tab bar shows. A system Back is the last resort, and only after the app has
+# loaded (on the loading screen it would exit the app).
 - extendedWaitUntil:
     visible:
-      id: '(tab-messages|conversation-back|group-back)'
+      id: '(tab-messages|.*back)'
     timeout: 120000
-- runFlow:
-    when:
-      visible:
-        id: 'group-back'
+- repeat:
+    times: 6
+    while:
+      notVisible:
+        id: 'tab-messages'
     commands:
-      - tapOn:
-          id: 'group-back'
-- runFlow:
-    when:
-      visible:
-        id: 'conversation-back'
-    commands:
-      - tapOn:
-          id: 'conversation-back'
-- extendedWaitUntil:
-    visible:
-      id: 'tab-messages'
-    timeout: 15000
+      - runFlow:
+          when:
+            visible:
+              id: '.*back'
+          commands:
+            - tapOn:
+                id: '.*back'
+      - runFlow:
+          when:
+            notVisible:
+              id: '(tab-messages|.*back)'
+          commands:
+            - pressKey: back
+      - waitForAnimationToEnd:
+          timeout: 2000
 - tapOn:
     id: 'tab-messages'
 # The Messages list keeps its scroll position and new chats sort to the top:
