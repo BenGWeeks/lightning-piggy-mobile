@@ -33,10 +33,17 @@ jest.mock('../components/TransferSheet', () => ({
   __esModule: true,
   default: mockSheet('transfer'),
 }));
-jest.mock('../components/AddWalletWizard', () => ({
-  __esModule: true,
-  default: mockSheet('wizard'),
-}));
+// Jest's Expo transform leaves import() native; supply the async loader at
+// the boundary while exercising Suspense and host retention.
+jest.mock('../components/LazyAddWalletWizard', () => {
+  const React = jest.requireActual('react');
+  const Wizard = React.lazy(() => Promise.resolve({ default: mockSheet('wizard') }));
+  return {
+    __esModule: true,
+    default: (props: Record<string, unknown>) =>
+      React.createElement(React.Suspense, { fallback: null }, React.createElement(Wizard, props)),
+  };
+});
 jest.mock('../components/WalletSettingsSheet', () => ({
   __esModule: true,
   default: mockSheet('settings'),
@@ -102,19 +109,22 @@ it('retains sheet state on close so pending work survives, then reopens it', () 
   });
 });
 
-it('keeps unopened flows dormant and preserves Transfer state after closing', () => {
+it('keeps unopened flows dormant and preserves Transfer and Wizard state after closing', async () => {
   const ref = createRef<HomeSheetActions>();
   const { unmount } = render(<HomeSheets ref={ref} />);
   act(() => ref.current!.openTransfer());
   const token = mockTokens.transfer;
   act(() => (mockProps.transfer.onClose as () => void)());
-  act(() => ref.current!.openWizard());
+  await act(async () => ref.current!.openWizard());
+  const wizardToken = mockTokens.wizard;
   act(() => (mockProps.wizard.onClose as () => void)());
   act(() => ref.current!.openSettings('wallet-1'));
   expect(mockProps.settings.walletId).toBe('wallet-1');
   act(() => (mockProps.settings.onClose as () => void)());
   expect(mockProps.settings.walletId).toBeNull();
   act(() => ref.current!.openTransfer());
+  act(() => ref.current!.openWizard());
+  expect(mockTokens.wizard).toBe(wizardToken);
   expect(mockTokens.transfer).toBe(token);
   expect(mockRenders.receive).toBeUndefined();
   expect(mockRenders.send).toBeUndefined();

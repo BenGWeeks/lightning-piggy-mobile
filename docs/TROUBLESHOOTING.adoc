@@ -1266,3 +1266,15 @@ one store read per load instead of two. A JS-thread stall can still delay the
 first store continuation/paint. With no device capture, the originating
 trigger and the cost of those 25 retrying wraps cannot be conclusively
 attributed from these markers alone.
+
+=== Jest host tests encounter a native dynamic import
+
+The Expo Jest transform can leave `import()` native, producing
+`A dynamic import callback was invoked without --experimental-vm-modules`
+when a host first renders a `React.lazy` child. For host retention tests,
+mock the lazy module boundary with a `React.lazy` loader returning a resolved
+mock component, inside `Suspense`. This exercises asynchronous host mounting
+without loading the camera/native graph or changing production Babel config.
+Use a source import-graph test separately to guard the production boundary.
+See `src/hooks/useHomeSheetState.test.tsx` and
+`src/utils/startupImportGraph.test.ts`.

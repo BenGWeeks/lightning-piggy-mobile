@@ -63,8 +63,32 @@ jest.mock('../services/claimHistoryService', () => ({ recordClaim: jest.fn() }))
 jest.mock('../utils/bolt11', () => ({ paymentHashFromBolt11: () => 'fixture-hash' }));
 jest.mock('../utils/fiat', () => ({ formatFiatApprox: () => '' }));
 jest.mock('./AmountSlider', () => ({ AmountSlider: () => null }));
-jest.mock('./PrizeWalletPicker', () => () => null);
-jest.mock('./AddWalletWizard', () => () => null);
+jest.mock('./PrizeWalletPicker', () => {
+  const React = jest.requireActual('react');
+  const { Button } = jest.requireActual('react-native');
+  return function PrizeWalletPicker({ onAddWallet }: { onAddWallet: () => void }) {
+    return React.createElement(Button, {
+      title: 'Add wallet',
+      testID: 'test-add-wallet',
+      onPress: onAddWallet,
+    });
+  };
+});
+const mockWizardProps = jest.fn();
+const mockWizardUnmount = jest.fn();
+jest.mock('./LazyAddWalletWizard', () => {
+  const React = jest.requireActual('react');
+  return {
+    __esModule: true,
+    usePrefetchAddWalletWizard: jest.fn(),
+    default: function Wizard(props: { visible: boolean; onClose: () => void }) {
+      const [token] = React.useState({});
+      mockWizardProps(props, token);
+      React.useEffect(() => () => mockWizardUnmount(), []);
+      return null;
+    },
+  };
+});
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -125,4 +149,30 @@ it('resolves the same voucher again after dismissing and reopening, with confirm
   expect(mockClaim).not.toHaveBeenCalled();
   await act(async () => fireEvent.press(screen.getByTestId('lnurl-withdraw-claim-button')));
   expect(mockMakeInvoice).toHaveBeenCalledWith('active', 21, 'Voucher');
+});
+
+it('does not mount a wizard on startup or when dismissing an unused claim sheet', async () => {
+  render(<LnurlWithdrawHost />);
+  expect(mockWizardProps).not.toHaveBeenCalled();
+  await act(async () => openLnurlWithdrawSheet('lnurlw://example.com/voucher', 'first', true));
+  act(() => mockDismiss!());
+  expect(mockWizardProps).not.toHaveBeenCalled();
+});
+
+it('retains the first-use wizard instance across close, dismiss and reopen', async () => {
+  render(<LnurlWithdrawHost />);
+  await act(async () => openLnurlWithdrawSheet('lnurlw://example.com/voucher', 'first', true));
+  act(() => fireEvent.press(screen.getByTestId('test-add-wallet')));
+  const [props, token] = mockWizardProps.mock.calls.at(-1)!;
+  expect(props.visible).toBe(true);
+  act(() => props.onClose());
+  expect(mockWizardProps.mock.calls.at(-1)![0].visible).toBe(false);
+  act(() => mockDismiss!());
+  await act(async () => openLnurlWithdrawSheet('lnurlw://example.com/voucher', 'first', true));
+  act(() => fireEvent.press(screen.getByTestId('test-add-wallet')));
+  expect(mockWizardProps.mock.calls.at(-1)).toEqual([
+    expect.objectContaining({ visible: true }),
+    token,
+  ]);
+  expect(mockWizardUnmount).not.toHaveBeenCalled();
 });

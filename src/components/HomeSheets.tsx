@@ -2,14 +2,14 @@ import React, { forwardRef, memo, useImperativeHandle } from 'react';
 import ReceiveSheet from './ReceiveSheet';
 import SendSheet from './SendSheet';
 import TransferSheet from './TransferSheet';
-import AddWalletWizard from './AddWalletWizard';
+import LazyAddWalletWizard from './LazyAddWalletWizard';
 import WalletSettingsSheet from './WalletSettingsSheet';
 import { useHomeSheetState, type HomeSheetActions } from '../hooks/useHomeSheetState';
 
 const Receive = memo(ReceiveSheet);
 const Send = memo(SendSheet);
 const Transfer = memo(TransferSheet);
-const Wizard = memo(AddWalletWizard);
+const Wizard = LazyAddWalletWizard;
 const Settings = memo(WalletSettingsSheet);
 
 // Own modal state BELOW Home. Opening a sheet must not rerender the wallet

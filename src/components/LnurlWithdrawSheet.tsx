@@ -42,7 +42,7 @@ import { friendlyClaimError } from '../utils/claimErrorMessage';
 import { SLEEPING_PATTERN, parseCooldownSeconds, formatCountdown } from '../utils/lnurlCooldown';
 import { AmountSlider } from './AmountSlider';
 import PrizeWalletPicker from './PrizeWalletPicker';
-import AddWalletWizard from './AddWalletWizard';
+import LazyAddWalletWizard, { usePrefetchAddWalletWizard } from './LazyAddWalletWizard';
 import { createLnurlWithdrawSheetStyles } from '../styles/LnurlWithdrawSheet.styles';
 import { useLocale } from '../contexts/LocaleContext';
 
@@ -129,7 +129,8 @@ export function LnurlWithdrawHost(): React.ReactElement {
   // Lightning (NWC) wallets can mint a bolt11 to receive the withdrawal.
   const lightningWallets = useMemo(() => wallets.filter((w) => w.walletType === 'nwc'), [wallets]);
   const [selectedWalletId, setSelectedWalletId] = useState<string | null>(null);
-  const [wizardOpen, setWizardOpen] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState<boolean | null>(null);
+  usePrefetchAddWalletWizard();
   // Default to the first Lightning wallet; keep a manual pick while it's valid.
   useEffect(() => {
     const stillValid =
@@ -370,7 +371,7 @@ export function LnurlWithdrawHost(): React.ReactElement {
           setSheetOpen(false);
           // Close the Add-wallet wizard too, so it can't linger orphaned after
           // the claim sheet that launched it is gone (Copilot).
-          setWizardOpen(false);
+          setWizardOpen((open) => (open === null ? null : false));
         }}
       >
         <BottomSheetScrollView
@@ -548,7 +549,9 @@ export function LnurlWithdrawHost(): React.ReactElement {
           )}
         </BottomSheetScrollView>
       </BottomSheetModal>
-      <AddWalletWizard visible={wizardOpen} onClose={() => setWizardOpen(false)} />
+      {wizardOpen !== null && (
+        <LazyAddWalletWizard visible={wizardOpen} onClose={() => setWizardOpen(false)} />
+      )}
     </>
   );
 }
