@@ -1,11 +1,13 @@
 // Relay reads for one author's public feed on their profile page: kind-1
-// notes plus NIP-68 / NIP-71 picture and video events. The live
+// notes, NIP-22 comments (kind 1111 — some clients reply to notes with them,
+// #1337) and NIP-68 / NIP-71 picture and video events. The live
 // subscription fetches the newest page; older pages come from a bounded,
 // abortable `until` query. Every filter carries a `limit`.
 import type { Event, Filter } from 'nostr-tools';
 import { pool, trackRelays } from './nostrPool';
 import { querySyncAbortable } from './relayQuery';
 import { PROFILE_FEED_KINDS } from '../utils/noteMedia';
+import { COMMENT_KIND } from '../utils/nip22';
 
 export type AuthorFeedEvent = Pick<
   Event,
@@ -32,8 +34,15 @@ function allConnected(relays: readonly string[]): boolean {
   return relays.every((r) => connected.has(norm(r)));
 }
 
+/**
+ * One filter for every kind, so a page's `until` cursor covers them all
+ * alike. Comments that aren't note replies (product / Piglet comments) come
+ * back too; the hook keeps them for paging and hides them from the feed.
+ */
+export const AUTHOR_FEED_KINDS = [...PROFILE_FEED_KINDS, COMMENT_KIND];
+
 const feedFilter = (authorPubkey: string, limit: number, until?: number): Filter => ({
-  kinds: PROFILE_FEED_KINDS,
+  kinds: AUTHOR_FEED_KINDS,
   authors: [authorPubkey],
   limit,
   ...(until !== undefined ? { until } : {}),
@@ -60,7 +69,7 @@ export function subscribeAuthorFeed(input: {
     feedFilter(input.authorPubkey, input.limit ?? AUTHOR_FEED_PAGE_SIZE),
     {
       onevent: (ev: Event) => {
-        if (ev.pubkey !== input.authorPubkey || !PROFILE_FEED_KINDS.includes(ev.kind)) return;
+        if (ev.pubkey !== input.authorPubkey || !AUTHOR_FEED_KINDS.includes(ev.kind)) return;
         input.onEvent(toFeedEvent(ev));
       },
       oneose: () => {
@@ -111,7 +120,7 @@ export async function fetchAuthorFeedPage(input: {
   );
   return {
     events: events
-      .filter((ev) => ev.pubkey === input.authorPubkey && PROFILE_FEED_KINDS.includes(ev.kind))
+      .filter((ev) => ev.pubkey === input.authorPubkey && AUTHOR_FEED_KINDS.includes(ev.kind))
       .map(toFeedEvent)
       .sort((a, b) => b.created_at - a.created_at),
     // Resolved before the timeout (aggregate EOSE) AND every relay is still

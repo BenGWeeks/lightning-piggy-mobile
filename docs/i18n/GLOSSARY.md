@@ -2,6 +2,24 @@
 
 These rules apply to every locale in `src/i18n/locales/`. `en.json` is the source of truth; every other catalogue mirrors its keys. `npm run i18n:sync -- --draft` passes this file to the drafting CLI, so keep it accurate. Workflow: [Translation workflow](#translation-workflow) below.
 
+## Supported languages
+
+`SUPPORTED_LOCALES` in `src/i18n/index.ts` is the list. The picker (Settings → Display & language) shows each under its native name; its test IDs are `locale-<code>`.
+
+| Code      | Language             | Shown as     |
+| --------- | -------------------- | ------------ |
+| `en`      | English (source)     | English      |
+| `de`      | German               | Deutsch      |
+| `es`      | Spanish              | Español      |
+| `hu`      | Hungarian            | Magyar       |
+| `pl`      | Polish               | Polski       |
+| `uk`      | Ukrainian            | Українська   |
+| `hi`      | Hindi                | हिन्दी       |
+| `mr`      | Marathi              | मराठी        |
+| `zh-Hans` | Chinese (Simplified) | 中文（简体） |
+
+Dev and preview builds add `en-XA`, **Pseudo (testing)**, generated at runtime from en.json; it has no catalogue file.
+
 ## Product and tone
 
 - Lightning Piggy is a **family app for smart savers**: a Bitcoin and Lightning wallet, plus secure messaging (Nostr / Marmot), a Market, and Explore (events and geo-caches).

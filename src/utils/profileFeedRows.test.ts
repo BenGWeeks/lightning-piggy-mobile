@@ -91,6 +91,59 @@ describe('buildProfileRows', () => {
     expect(countTopLevelPosts(feed)).toBe(2);
   });
 
+  it('shows NIP-22 note comments only in Posts & replies, with the parent (#1337)', () => {
+    const note = '7'.repeat(64);
+    const ben = '9'.repeat(64);
+    const comment = ev('ditto', 2, {
+      kind: 1111,
+      content: 'a Ditto reply',
+      tags: [
+        ['E', note, '', ben],
+        ['K', '1'],
+        ['e', note, '', ben],
+        ['k', '1'],
+        ['p', ben],
+      ],
+    });
+    const feed = [ev('top', 3), comment];
+    expect(buildProfileRows({ ...base, tab: 'posts', feed }).map((r) => r.key)).toEqual(['top']);
+    const all = buildProfileRows({ ...base, tab: 'posts', postsMode: 'all', feed });
+    expect(all.map((r) => r.key)).toEqual(['top', 'ditto']);
+    const row = all[1];
+    expect(row.type === 'post' && row.reply?.ref.id).toBe(note);
+    expect(row.type === 'post' && row.reply?.authorPubkey).toBe(ben);
+    expect(countTopLevelPosts(feed)).toBe(1);
+    // Only comments loaded: Posts points at the other mode.
+    expect(buildProfileRows({ ...base, tab: 'posts', feed: [comment] })[0]).toMatchObject({
+      status: 'onlyReplies',
+    });
+  });
+
+  it('drops a comment that echoes a kind-1 reply, and ignores product comments', () => {
+    const note = '7'.repeat(64);
+    const feed = [
+      ev('k1', 3, { content: 'same', tags: [['e', note, '', 'root']] }),
+      ev('echo', 2, {
+        kind: 1111,
+        content: 'same',
+        tags: [
+          ['E', note],
+          ['K', '1'],
+        ],
+      }),
+      ev('product', 1, {
+        kind: 1111,
+        content: 'nice socks',
+        tags: [
+          ['A', `30402:${'9'.repeat(64)}:socks`],
+          ['K', '30402'],
+        ],
+      }),
+    ];
+    const all = buildProfileRows({ ...base, tab: 'posts', postsMode: 'all', feed });
+    expect(all.map((r) => r.key)).toEqual(['k1']);
+  });
+
   it('says when only replies are loaded in Posts mode', () => {
     const feed = [ev('re', 2, { tags: [['e', '2'.repeat(64)]] })];
     expect(buildProfileRows({ ...base, tab: 'posts', feed })[0]).toMatchObject({
