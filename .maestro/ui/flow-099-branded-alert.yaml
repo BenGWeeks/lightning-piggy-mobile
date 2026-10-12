@@ -23,7 +23,7 @@ name: BrandedAlert renders for invalid Send-sheet input
 - runFlow: ../common/login-as.yaml
 
 - tapOn:
-    id: 'tab-home'
+    id: 'tab-wallets'
 - waitForAnimationToEnd:
     timeout: 3000
 

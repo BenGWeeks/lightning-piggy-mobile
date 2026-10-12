@@ -36,6 +36,7 @@ import { messageNotificationTarget } from '../utils/messageNotificationTarget';
 import { fetchCachesByAuthor } from './nostrPlacesPublisher';
 import { GC_COMMENT_KIND } from './nostrPlacesService';
 import { isOrderEvent } from '../utils/orderEvents';
+import { isLiveDmSubArmed, wasWrapHandled } from './dmWrapNotificationDedupe';
 
 // Persisted ids we've already accounted for, so repeated wakes never
 // re-ping the same arrival. Bounded (insertion-ordered; oldest dropped
@@ -182,8 +183,15 @@ async function runDmDetectAndPing(
     // in-app, so pinging for it would be a cold-start flood. Stay silent;
     // only arrivals AFTER this baseline ping on later wakes.
     if (!primed) return { pinged: false, freshCount: 0 };
+    // The app is alive with its live DM sub in this JS context (WorkManager
+    // runs the task in the existing React instance): what that sub decrypted
+    // it has already alerted for — by name — or rightly skipped (our own sent
+    // copy, a stranger, a reaction). Pinging for those would repeat the alert
+    // up to 15 min later, or announce nothing new. Only what it never got to
+    // (socket down, remote signer unavailable) still pings.
+    const unhandled = isLiveDmSubArmed() ? fresh.filter((e) => !wasWrapHandled(e.id)) : fresh;
 
-    const freshCount = fresh.length;
+    const freshCount = unhandled.length;
     if (freshCount > 0) {
       await fireMessageNotification({
         kind: 'dm',
@@ -197,7 +205,7 @@ async function runDmDetectAndPing(
         // Where a tap should go, without decrypting (#1154): a NIP-04 sender
         // is public, and a lone NIP-17 wrap can be resolved after the app
         // decrypts it. Anything else (mixed senders) opens the Messages list.
-        data: messageNotificationTarget(fresh),
+        data: messageNotificationTarget(unhandled),
       });
     }
     return { pinged: freshCount > 0, freshCount };

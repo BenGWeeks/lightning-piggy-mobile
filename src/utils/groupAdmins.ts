@@ -1,3 +1,5 @@
+import type { Group } from '../types/groups';
+
 /**
  * Pure helpers for a Marmot group's admin set (MIP-01 `admin_pubkeys`, the
  * `marmot.group.admin-policy.v1` component). The spec requires the list to be
@@ -25,6 +27,18 @@ export function isGroupAdmin(admins: readonly string[] | undefined, pubkey: stri
   if (!admins) return false;
   const pk = norm(pubkey);
   return admins.some((a) => norm(a) === pk);
+}
+
+/** Whether the viewer may rename the group or change its members. NIP-17
+ * groups are editable by anyone; a Marmot group only by its admins, because
+ * MLS rejects a non-admin's commit. A group that hasn't loaded yet is treated
+ * as editable (nothing to act on). */
+export function canManageGroup(
+  group: Pick<Group, 'protocol' | 'adminPubkeys'> | undefined,
+  selfPubkey: string | null | undefined,
+): boolean {
+  if (!group?.protocol) return true;
+  return !!selfPubkey && isGroupAdmin(group.adminPubkeys, selfPubkey);
 }
 
 /**

@@ -44,7 +44,7 @@ appId: $APP_ID
     stopApp: false
 - extendedWaitUntil:
     visible:
-      id: "tab-home"
+      id: "tab-wallets"
     timeout: 30000
 - tapOn:
     id: "tab-explore"
@@ -53,10 +53,10 @@ appId: $APP_ID
       text: "Bee Happy Farm"
     timeout: 60000
 - tapOn:
-    id: "tab-home"
+    id: "tab-wallets"
 - extendedWaitUntil:
     visible:
-      id: "tab-home"
+      id: "tab-wallets"
     timeout: 5000
 YAML
 
@@ -80,10 +80,10 @@ cat > "$RESET_FLOW" <<YAML
 appId: $APP_ID
 ---
 - tapOn:
-    id: "tab-home"
+    id: "tab-wallets"
 - extendedWaitUntil:
     visible:
-      id: "tab-home"
+      id: "tab-wallets"
     timeout: 5000
 YAML
 

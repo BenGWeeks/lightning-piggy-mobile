@@ -1,5 +1,10 @@
 import { finalizeEvent, getPublicKey, nip19, type Event } from 'nostr-tools';
-import { parseMarketListing, reduceMarketListings, safeMarketUrl } from './marketListings';
+import {
+  parseMarketListing,
+  reduceMarketListings,
+  safeMarketUrl,
+  selectVerifiedListings,
+} from './marketListings';
 import { marketFeedbackContext } from './marketFeedback';
 import { marketCheckoutTarget } from './marketCheckout';
 import { sellerOf } from '../data/marketProducts';
@@ -26,6 +31,27 @@ const event = (fields: Partial<Event> = {}, secret = key) =>
   );
 
 describe('market relay listings', () => {
+  it('labels an unresolved seller with a short npub, never raw hex', () => {
+    const product = parseMarketListing(event())!;
+    expect(product.sellerName).toMatch(/^npub1[0-9a-z]{7}…[0-9a-z]{4}$/);
+    expect(product.sellerName).not.toContain(author.slice(0, 8));
+  });
+
+  it('skips Gamma Markets listings marked visibility hidden', () => {
+    const withVisibility = (v: string) =>
+      event({
+        tags: [
+          ['d', 'product-1'],
+          ['title', 'Test listing'],
+          ['price', '50', 'USD'],
+          ['visibility', v],
+        ],
+      });
+    expect(parseMarketListing(withVisibility('hidden'))).toBeNull();
+    expect(parseMarketListing(withVisibility('on-sale'))).not.toBeNull();
+    expect(parseMarketListing(withVisibility('pre-order'))).not.toBeNull();
+  });
+
   it('rejects identifiers too long for a NIP-19 naddr (255 UTF-8 bytes)', () => {
     const withD = (d: string) =>
       event({
@@ -173,4 +199,161 @@ describe('market relay listings', () => {
       )?.image,
     ).toBe('');
   });
+});
+
+describe('selectVerifiedListings', () => {
+  const sk = new Uint8Array(32).fill(9);
+  const seller = getPublicKey(sk);
+  const sellers = new Set([seller]);
+  const make = (d: string, created_at: number, extra: string[][] = []) =>
+    finalizeEvent(
+      {
+        kind: 30402,
+        created_at,
+        content: d,
+        tags: [['d', d], ['title', d], ['price', '21', 'SAT'], ...extra],
+      },
+      sk,
+    );
+  const noYield = async () => {};
+
+  it('checks only each address winner and stops at the cap', async () => {
+    const a1 = make('a', 10);
+    const a2 = make('a', 20);
+    const b = make('b', 30);
+    const c = make('c', 5);
+    const checked: string[] = [];
+    const result = await selectVerifiedListings([a1, a2, b, c], sellers, {
+      verify: (e) => {
+        checked.push(e.id);
+        return true;
+      },
+      maybeYield: noYield,
+      cap: 2,
+    });
+    // Newest first: b, then a's winner a2; c is past the cap.
+    expect(checked).toEqual([b.id, a2.id, c.id]);
+    expect(result.overflow).toBe(true);
+    expect(reduceMarketListings(result.events, sellers).map((p) => p.listing?.event.id)).toEqual([
+      b.id,
+      a2.id,
+    ]);
+  });
+
+  it('falls back to an older revision when the newest fails verification', async () => {
+    const old = make('a', 10);
+    const forged = make('a', 20);
+    const result = await selectVerifiedListings([old, forged], sellers, {
+      verify: (e) => e.id !== forged.id,
+      maybeYield: noYield,
+      cap: 5,
+    });
+    expect(result).toMatchObject({ overflow: false, checked: 2 });
+    expect(reduceMarketListings(result.events, sellers).map((p) => p.listing?.event.id)).toEqual([
+      old.id,
+    ]);
+  });
+
+  it("doesn't count deleted or unrenderable winners toward the cap", async () => {
+    const gone = make('gone', 30);
+    const sold = make('sold', 20, [['status', 'sold']]);
+    const live = make('live', 10);
+    const deletion = finalizeEvent(
+      { kind: 5, created_at: 40, content: '', tags: [['a', `30402:${seller}:gone`]] },
+      sk,
+    );
+    const result = await selectVerifiedListings([gone, sold, live, deletion], sellers, {
+      verify: () => true,
+      maybeYield: noYield,
+      cap: 1,
+    });
+    expect(result.overflow).toBe(false);
+    expect(reduceMarketListings(result.events, sellers).map((p) => p.listing?.event.id)).toEqual([
+      live.id,
+    ]);
+  });
+
+  it('ignores events from authors outside the scope', async () => {
+    const stranger = finalizeEvent(
+      { kind: 30402, created_at: 1, content: 'x', tags: [['d', 'x']] },
+      new Uint8Array(32).fill(4),
+    );
+    const verify = jest.fn(() => true);
+    const result = await selectVerifiedListings([stranger], sellers, {
+      verify,
+      maybeYield: noYield,
+      cap: 5,
+    });
+    expect(verify).not.toHaveBeenCalled();
+    expect(result.events).toEqual([]);
+  });
+});
+
+it('selectVerifiedListings reports a first page once, as soon as it is verified', async () => {
+  const sk = new Uint8Array(32).fill(11);
+  const seller = getPublicKey(sk);
+  const events = [3, 2, 1].map((n) =>
+    finalizeEvent(
+      {
+        kind: 30402,
+        created_at: n,
+        content: `${n}`,
+        tags: [
+          ['d', `d${n}`],
+          ['title', `${n}`],
+          ['price', '1', 'SAT'],
+        ],
+      },
+      sk,
+    ),
+  );
+  const ready = jest.fn();
+  let checks = 0;
+  await selectVerifiedListings(events, new Set([seller]), {
+    verify: () => {
+      checks++;
+      // The first page must arrive before the third listing is checked.
+      if (checks === 3) expect(ready).toHaveBeenCalledTimes(1);
+      return true;
+    },
+    maybeYield: async () => {},
+    cap: 10,
+    firstPage: { size: 2, ready },
+  });
+  expect(ready).toHaveBeenCalledTimes(1);
+  expect(ready.mock.calls[0][0].map((e: { id: string }) => e.id)).toEqual([
+    events[0].id,
+    events[1].id,
+  ]);
+});
+
+it('selectVerifiedListings: a forged newest copy cannot give an old fallback a cap slot', async () => {
+  const sk = new Uint8Array(32).fill(12);
+  const seller = getPublicKey(sk);
+  const make = (d: string, created_at: number) =>
+    finalizeEvent(
+      {
+        kind: 30402,
+        created_at,
+        content: d,
+        tags: [
+          ['d', d],
+          ['title', d],
+          ['price', '1', 'SAT'],
+        ],
+      },
+      sk,
+    );
+  const oldA = make('a', 1);
+  const forgedA = { ...make('a', 100), sig: '0'.repeat(128) };
+  const b = make('b', 50);
+  const result = await selectVerifiedListings([oldA, forgedA, b], new Set([seller]), {
+    verify: (e) => e.sig !== '0'.repeat(128),
+    maybeYield: async () => {},
+    cap: 1,
+  });
+  expect(
+    reduceMarketListings(result.events, new Set([seller])).map((p) => p.listing?.event.created_at),
+  ).toEqual([50]);
+  expect(result.overflow).toBe(true);
 });

@@ -8,7 +8,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { ChevronLeft, Search, SlidersHorizontal, X } from 'lucide-react-native';
+import { ChevronLeft, Search, SlidersHorizontal, Store, X } from 'lucide-react-native';
 import MarketProductCard from '../components/MarketProductCard';
 import MarketModeSelector from '../components/MarketModeSelector';
 import MarketFilterBar from '../components/MarketFilterBar';
@@ -31,6 +31,7 @@ import {
 } from '../utils/marketFilters';
 import { MARKET_GRID_COLUMNS, marketGridTileWidth } from '../utils/marketGrid';
 import { ExploreNavigation } from '../navigation/types';
+import { perfLog } from '../utils/perfLog';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -50,6 +51,14 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
 
   const [mode, setMode] = useState<MarketMode>(DEFAULT_MARKET_MODE);
   const live = useMarketListings(mode === 'wotFriends');
+  const selectMode = useCallback((next: MarketMode) => {
+    perfLog(`[PerfBlock] market mode tap ${next}`);
+    setMode(next);
+  }, []);
+  // Pairs with the tap marker above: the delta is tap-to-commit latency.
+  useEffect(() => {
+    perfLog(`[PerfBlock] market mode committed ${mode}`);
+  }, [mode]);
 
   // The category filters (merchant / country / currency) live in a right-anchored
   // slide-in panel to keep the main view compact; the search box stays inline.
@@ -122,6 +131,7 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
 
   const openProduct = useCallback(
     (product: MarketProduct) => {
+      perfLog('[PerfBlock] market product tap');
       navigation.navigate('MarketProductDetail', { productId: product.id, product });
     },
     [navigation],
@@ -180,13 +190,21 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
             <ChevronLeft size={24} color={colors.white} strokeWidth={2.5} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>{t('market.screen.title')}</Text>
-          <View style={styles.headerSpacer} />
+          {/* Seller side (#1273): set up a shop and list your own items. */}
+          <TouchableOpacity
+            onPress={() => navigation.navigate('MarketMyShop')}
+            accessibilityLabel={t('market.sell.myShopAccessibility')}
+            testID="market-my-shop-button"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Store size={24} color={colors.white} strokeWidth={2.25} />
+          </TouchableOpacity>
         </View>
         <Text style={styles.headerTagline}>{t('market.screen.tagline')}</Text>
       </View>
 
       <View style={styles.modeBar}>
-        <MarketModeSelector value={mode} onChange={setMode} />
+        <MarketModeSelector value={mode} onChange={selectMode} />
         <Text style={styles.modeCaption}>
           {t('market.screen.showing', { label: t(marketModeOption(mode).labelKey) })}
         </Text>
@@ -244,7 +262,10 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
         </View>
         <TouchableOpacity
           style={[styles.filterButton, categoryFilterCount > 0 && styles.filterButtonActive]}
-          onPress={() => setFiltersOpen(true)}
+          onPress={() => {
+            perfLog('[PerfBlock] market filter tap');
+            setFiltersOpen(true);
+          }}
           accessibilityLabel={
             categoryFilterCount > 0
               ? t('market.screen.filtersApplied', { count: categoryFilterCount })

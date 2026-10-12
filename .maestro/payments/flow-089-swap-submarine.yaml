@@ -28,11 +28,11 @@ name: Boltz submarine swap — full happy path, on-chain → Lightning
     clearState: false
 - extendedWaitUntil:
     visible:
-      id: 'tab-home'
+      id: 'tab-wallets'
     timeout: 30000
 
 - tapOn:
-    id: 'tab-home'
+    id: 'tab-wallets'
 - waitForAnimationToEnd:
     timeout: 2000
 

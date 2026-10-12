@@ -112,7 +112,7 @@ A photo is a kind-9 event with an `imeta` tag (`encrypted-media-v2`; v1 is still
 
 ==== MIP-05 push notifications
 
-Members publish encrypted native push tokens inside the group (447/448, removals 449; ≤32 entries, `v` = `marmot-push-v1`). Each entry is checked against its owner's kind-451 signature and ordered per (member, leaf, platform, server) by `(owner_ts, SHA-256(SignedRecord))`, with removal tombstones. After sending a kind 9 or 1068, the app gift-wraps the other members' tokens (≤19 per wrap) as kind-446 triggers to each token's notification server, published only to the records' relay hints or the server's own kind-10050 inbox. The server decrypts the token and sends a content-free push. With the opt-in receive side on, the app seals its own native FCM/APNs token to Lightning Piggy's notification server (per-app-id Transponder) and publishes it as a kind-447 self-update in each group, with a kind-451 owner proof signed by the user; turning it off publishes 449 removals. Details — token encryption, owner-proof checks, when a remote signer is asked — in `SOLUTION_DESIGN.adoc` → "Marmot (MLS) messaging".
+Members publish encrypted native push tokens inside the group (447/448, removals 449; ≤32 entries, `v` = `marmot-push-v1`). Each entry is checked against its owner's kind-451 signature and ordered per (member, leaf, platform, server) by `(owner_ts, SHA-256(SignedRecord))`, with removal tombstones. After sending a kind 9 or 1068, the app gift-wraps the other members' tokens (≤19 per wrap) as kind-446 triggers to each token's notification server, published only to the records' relay hints and the server's own kind-10050 inbox. The server decrypts the token and sends a content-free push. With the opt-in receive side on, the app seals its own native FCM/APNs token to Lightning Piggy's notification server (per-app-id Transponder) and publishes it as a kind-447 self-update in each group, with a kind-451 owner proof signed by the user; turning it off publishes 449 removals. Details — token encryption, owner-proof checks, when a remote signer is asked — in `SOLUTION_DESIGN.adoc` → "Marmot (MLS) messaging".
 
 ==== Fallback and interop
 
@@ -323,7 +323,7 @@ of money flow and routes to the matching surface. There are two directions:
 * **Claim FROM** (money *in*): an LNURL-withdraw voucher → the withdraw
   claim flow (`HuntFoundScreen`). Introduced in #341 / #468.
 * **Pay TO** (money *out*): an invoice, Lightning Address, or LNURL-pay
-  endpoint → the `SendSheet` on the Home tab. Introduced in #756.
+  endpoint → the `SendSheet` on the Wallets tab. Introduced in #756.
 
 The critical rule: for LNURL forms the direction is keyed off the
 **resolved `tag`** (`payRequest` vs `withdrawRequest`), *never* the bech32

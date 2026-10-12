@@ -18,7 +18,7 @@ name: Share Location sheet opens from conversation composer
 
 - extendedWaitUntil:
     visible:
-      id: 'tab-home'
+      id: 'tab-wallets'
     timeout: 40000
 
 # Jump to Friends tab and open a conversation

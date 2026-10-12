@@ -10,7 +10,7 @@ name: Login to Friends Performance Test
 
 # Go to Home first
 - tapOn:
-    text: 'Home tab'
+    text: 'Wallets tab'
     optional: true
 - waitForAnimationToEnd:
     timeout: 3000
@@ -78,12 +78,12 @@ name: Login to Friends Performance Test
 - waitForAnimationToEnd:
     timeout: 2000
 
-# Navigate to Home tab first (dismiss any sheets)
+# Navigate to Wallets tab first (dismiss any sheets)
 - pressKey: back
 - waitForAnimationToEnd:
     timeout: 2000
 - tapOn:
-    text: 'Home tab'
+    text: 'Wallets tab'
     optional: true
 - waitForAnimationToEnd:
     timeout: 3000

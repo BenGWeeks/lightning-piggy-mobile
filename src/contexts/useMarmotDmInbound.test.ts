@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useMarmotDmInbound } from './useMarmotDmInbound';
+import { mayNotifyFrom, useMarmotDmInbound } from './useMarmotDmInbound';
 import {
   applyMarmotEdits,
   deleteMarmotMessages,
@@ -9,7 +9,10 @@ import {
   type DmMessageRow,
 } from '../services/dmDb';
 import { getLocalDb } from '../services/localDb';
-import { retractMarmotMessageNotifications } from '../services/notificationService';
+import {
+  fireMessageNotification,
+  retractMarmotMessageNotifications,
+} from '../services/notificationService';
 import { rowsToInboxEntries } from '../services/dmInbox';
 import type { MarmotMessageEvent } from '../services/marmotSession';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
@@ -282,4 +285,59 @@ it('applies a burst of edits with one inbox update and one thread reload per pee
   expect((applyMarmotEdits as jest.Mock).mock.calls[0][1]).toHaveLength(3);
   expect(setter).toHaveBeenCalledTimes(1);
   expect(notifyDmMessage).toHaveBeenCalledTimes(1);
+});
+
+describe('mayNotifyFrom (WoT phantoms)', () => {
+  const PEER = 'b'.repeat(64);
+  it('alerts only for a followed peer once the follow list is known', () => {
+    expect(mayNotifyFrom(PEER, new Set([PEER]))).toBe(true);
+    expect(mayNotifyFrom(PEER.toUpperCase(), new Set([PEER]))).toBe(true);
+    expect(mayNotifyFrom(PEER, new Set(['c'.repeat(64)]))).toBe(false);
+  });
+
+  it('fails open while the follow list is still loading', () => {
+    expect(mayNotifyFrom(PEER, new Set())).toBe(true);
+    expect(mayNotifyFrom(PEER, undefined)).toBe(true);
+  });
+});
+
+describe('our own Marmot messages never alert (any device)', () => {
+  const chat = (pubkey: string, rumorId: string) =>
+    ({
+      group: deletion.group,
+      rumor: {
+        id: rumorId,
+        kind: 9,
+        pubkey,
+        tags: [],
+        content: 'hello',
+        created_at: Math.floor(Date.now() / 1000),
+      },
+    }) as MarmotMessageEvent;
+
+  it.each([
+    ['the echo of a send from this device', 'alice'],
+    // Another leaf of our account (e.g. White Noise on the phone) signs with
+    // the same pubkey, whatever its casing on the wire.
+    ['a message sent from another of our devices', 'ALICE'],
+  ])('%s: shown as ours in the thread, no alert or history row', async (_label, author) => {
+    renderHook(() => useMarmotDmInbound('alice', jest.fn()));
+    await act(async () => {
+      mockOnMessage(chat(author, 'b'.repeat(64)));
+      await jest.advanceTimersByTimeAsync(150);
+    });
+    expect(upsertDmMessages).toHaveBeenCalledWith([
+      expect.objectContaining({ eventId: 'b'.repeat(64), fromMe: true, sender: 'alice' }),
+    ]);
+    expect(fireMessageNotification).not.toHaveBeenCalled();
+  });
+
+  it("still alerts for the peer's message (control)", async () => {
+    renderHook(() => useMarmotDmInbound('alice', jest.fn()));
+    await act(async () => {
+      mockOnMessage(chat('bob', 'c'.repeat(64)));
+      await jest.advanceTimersByTimeAsync(150);
+    });
+    expect(fireMessageNotification).toHaveBeenCalledTimes(1);
+  });
 });

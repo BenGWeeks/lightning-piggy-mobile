@@ -33,11 +33,6 @@ export const createMarketScreenStyles = (colors: Palette) =>
       fontWeight: '700',
       color: colors.white,
     },
-    // Spacer keeps the title centred against the lone back button on the
-    // left (no right-hand action on this screen).
-    headerSpacer: {
-      width: 24,
-    },
     headerTagline: {
       marginTop: 10,
       paddingHorizontal: 4,

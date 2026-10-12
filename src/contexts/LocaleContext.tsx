@@ -4,7 +4,9 @@ import type { Scope, TranslateOptions } from 'i18n-js';
 import i18n, {
   SUPPORTED_LOCALES,
   isSupportedLocale,
+  supportedLocaleForDevice,
   createI18nInstance,
+  intlLocaleFor,
   type SupportedLocale,
 } from '../i18n';
 
@@ -36,6 +38,8 @@ interface LocaleContextValue {
   preference: LocalePreference;
   /** Resolved, always one of SUPPORTED_LOCALES — 'system' already folded in. */
   locale: SupportedLocale;
+  /** BCP-47 tag for `Intl` / `toLocale*String` in `locale` (see `intlLocaleFor`). */
+  formatLocale: string;
   setPreference: (pref: LocalePreference) => void;
   t: (scope: Scope, options?: TranslateOptions) => string;
 }
@@ -44,12 +48,12 @@ const LocaleContext = createContext<LocaleContextValue | null>(null);
 
 export function resolveLocale(
   pref: LocalePreference,
-  deviceLanguageCode: string | null,
+  deviceLocale: string | null,
 ): SupportedLocale {
   // The pseudo-language is generated from en, and formats numbers/dates as en.
   if (pref === PSEUDO_LOCALE) return 'en';
   if (pref !== 'system') return pref;
-  return deviceLanguageCode && isSupportedLocale(deviceLanguageCode) ? deviceLanguageCode : 'en';
+  return supportedLocaleForDevice(deviceLocale) ?? 'en';
 }
 
 export const LocaleProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -91,8 +95,10 @@ export const LocaleProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     [activePubkey, setPreferenceState],
   );
 
-  const deviceLanguageCode = deviceLocales[0]?.languageCode ?? null;
-  const locale = resolveLocale(preference, deviceLanguageCode);
+  // Full tag (e.g. `zh-Hans-CN`), not just `languageCode`, so the script is
+  // visible to `supportedLocaleForDevice`.
+  const deviceLocale = deviceLocales[0]?.languageTag ?? deviceLocales[0]?.languageCode ?? null;
+  const locale = resolveLocale(preference, deviceLocale);
 
   // Rendered translations go through a per-locale I18n instance that's
   // local to this render (memoized, not the shared/exported `i18n`
@@ -125,7 +131,7 @@ export const LocaleProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   );
 
   const value = useMemo<LocaleContextValue>(
-    () => ({ preference, locale, setPreference, t }),
+    () => ({ preference, locale, formatLocale: intlLocaleFor(locale), setPreference, t }),
     [preference, locale, setPreference, t],
   );
 

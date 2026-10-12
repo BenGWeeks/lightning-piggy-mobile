@@ -2,12 +2,12 @@ import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { ChevronRight, Globe, MessageCircle } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useTranslation } from '../contexts/LocaleContext';
+import { useLocale } from '../contexts/LocaleContext';
 import { createMarketShippingSectionStyles } from '../styles/MarketShippingSection.styles';
 import { countryName } from '../data/countries';
 import type { ShippingOption } from '../utils/marketShipping';
 
-type TranslateFn = ReturnType<typeof useTranslation>;
+type TranslateFn = ReturnType<typeof useLocale>['t'];
 
 interface Props {
   /** Fetch state from useShippingOptions. */
@@ -58,7 +58,7 @@ const MarketShippingSection: React.FC<Props> = ({
   onMessageShop,
 }) => {
   const colors = useThemeColors();
-  const t = useTranslation();
+  const { t, formatLocale } = useLocale();
   const styles = useMemo(() => createMarketShippingSectionStyles(colors), [colors]);
 
   if (status === 'loading') {
@@ -175,7 +175,7 @@ const MarketShippingSection: React.FC<Props> = ({
                       })
                     : costSats === 0
                       ? t('market.free')
-                      : t('market.sats', { amount: costSats.toLocaleString() })}
+                      : t('market.sats', { amount: costSats.toLocaleString(formatLocale) })}
                 </Text>
               </TouchableOpacity>
             );

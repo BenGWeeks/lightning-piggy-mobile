@@ -23,9 +23,9 @@ name: All cached surfaces render on cold start without internet
 - waitForAnimationToEnd:
     timeout: 12000
 
-# ─── Home tab — wallet + transactions cached ────────────────────────────
+# ─── Wallets tab — wallet + transactions cached ────────────────────────────
 - tapOn:
-    id: 'tab-home'
+    id: 'tab-wallets'
 - waitForAnimationToEnd:
     timeout: 4000
 - assertVisible:

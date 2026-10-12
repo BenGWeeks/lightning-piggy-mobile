@@ -15,7 +15,7 @@ import {
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createDrawerNavigator } from '@react-navigation/drawer';
-import { Home, MessageCircle, Compass, Users } from 'lucide-react-native';
+import { Wallet, MessageCircle, Compass, Users } from 'lucide-react-native';
 import { useWallet } from '../contexts/WalletContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -23,6 +23,7 @@ import {
   setActiveThread,
   setActiveCache,
   dismissNotificationsFor,
+  dropMarmotPushAlerts,
   markHistoryReadFor,
   type NotificationTarget,
 } from '../services/notificationService';
@@ -68,6 +69,9 @@ const PlacesScreen = lazyScreen(() => import('../screens/PlacesScreen'));
 const PlaceDetailScreen = lazyScreen(() => import('../screens/PlaceDetailScreen'));
 const MarketScreen = lazyScreen(() => import('../screens/MarketScreen'));
 const MarketProductDetailScreen = lazyScreen(() => import('../screens/MarketProductDetailScreen'));
+const MarketMyShopScreen = lazyScreen(() => import('../screens/MarketMyShopScreen'));
+const MarketShopSettingsScreen = lazyScreen(() => import('../screens/MarketShopSettingsScreen'));
+const MarketListingEditorScreen = lazyScreen(() => import('../screens/MarketListingEditorScreen'));
 const HuntScreen = lazyScreen(() => import('../screens/HuntScreen'));
 const HuntCreateScreen = lazyScreen(() => import('../screens/HuntCreateScreen'));
 const HuntFoundScreen = lazyScreen(() => import('../screens/HuntFoundScreen'));
@@ -362,6 +366,9 @@ export function dismissNotificationsForFocusedRoute(): void {
     target = { cacheCoord: params.coord };
   } else if (route?.name === 'Messages') {
     target = { genericMessages: true };
+    // What a Marmot push placeholder announced is on this list now: its
+    // nameless "New message" history row goes, not just its tray entry.
+    void dropMarmotPushAlerts();
   }
   if (target) {
     void dismissNotificationsFor(target);
@@ -386,6 +393,9 @@ function ExploreStackNavigator() {
       <ExploreStack.Screen name="PlaceDetail" component={PlaceDetailScreen} />
       <ExploreStack.Screen name="Market" component={MarketScreen} />
       <ExploreStack.Screen name="MarketProductDetail" component={MarketProductDetailScreen} />
+      <ExploreStack.Screen name="MarketMyShop" component={MarketMyShopScreen} />
+      <ExploreStack.Screen name="MarketShopSettings" component={MarketShopSettingsScreen} />
+      <ExploreStack.Screen name="MarketListingEditor" component={MarketListingEditorScreen} />
       <ExploreStack.Screen name="Hunt" component={HuntScreen} />
       <ExploreStack.Screen name="HuntCreate" component={HuntCreateScreen} />
       <ExploreStack.Screen name="HuntFound" component={HuntFoundScreen} />
@@ -435,11 +445,11 @@ function HomeTabs() {
         name="Home"
         component={HomeScreen}
         options={{
-          tabBarLabel: t('tabs.home'),
-          tabBarButtonTestID: 'tab-home',
-          tabBarAccessibilityLabel: 'Home tab',
+          tabBarLabel: t('tabs.wallets'),
+          tabBarButtonTestID: 'tab-wallets',
+          tabBarAccessibilityLabel: 'Wallets tab',
           tabBarIcon: ({ focused, color, size }) => (
-            <Home size={size} color={color} strokeWidth={focused ? 2.5 : 2} />
+            <Wallet size={size} color={color} strokeWidth={focused ? 2.5 : 2} />
           ),
         }}
         listeners={{

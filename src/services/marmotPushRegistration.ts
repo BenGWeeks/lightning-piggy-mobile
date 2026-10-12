@@ -58,8 +58,18 @@ export interface PushServer {
 /**
  * Lightning Piggy's Transponder instances. Apple/Google only deliver with
  * the app's own credentials, so each app id has its own server (APNs topic =
- * that bundle id). Relay hints are fixed (each server lists nos.lol in its
- * kind-10050) so a hint lookup can never churn the signed records.
+ * that bundle id).
+ *
+ * No relay hint: White Noise (MDK) delivers a trigger ONLY to the record's
+ * hint when it has one, and looks up the server's kind-10050 inbox only when
+ * it doesn't (our MarmotPushNotifier sends to both). A hint baked into the
+ * signed records pins those senders to that relay until each member re-signs
+ * (our servers can't reach nos.lol from their self-hosted IP, so every
+ * trigger sent there was lost). Without one, the server's relays are a
+ * server-side change (its subscriptions + its 10050) with nothing to
+ * re-sign — e.g. moving to a relay Lightning Piggy hosts.
+ * Dropping the old hint makes each group's record re-sign once
+ * (MarmotPushRegistrar compares the hint).
  *
  * The dev build has its own server: APNs SANDBOX environment, topic
  * `com.lightningpiggy.app.dev`, plus FCM. The APNs environment follows the
@@ -70,18 +80,9 @@ export interface PushServer {
  * `EXPO_PUBLIC_MARMOT_PUSH_DEV_SERVER` (npub or hex; dev builds only).
  */
 export const BUILT_IN_SERVERS: Record<'production' | 'preview' | 'development', PushServer> = {
-  production: {
-    pubkey: '653e35d79e65d33d99d6d623cc87101b2159008488a321a774b3bd1205ee6297',
-    relayHint: 'wss://nos.lol',
-  },
-  preview: {
-    pubkey: '1888abbc7706e75aac190b095b962f3a8fe3e3b8b32d96d3e18b917159d988f7',
-    relayHint: 'wss://nos.lol',
-  },
-  development: {
-    pubkey: 'a3270a0af61c5802d0688c5e8daf3dd6c4a34155e6df7c9225d4dafd04f64fcb',
-    relayHint: 'wss://nos.lol',
-  },
+  production: { pubkey: '653e35d79e65d33d99d6d623cc87101b2159008488a321a774b3bd1205ee6297' },
+  preview: { pubkey: '1888abbc7706e75aac190b095b962f3a8fe3e3b8b32d96d3e18b917159d988f7' },
+  development: { pubkey: 'a3270a0af61c5802d0688c5e8daf3dd6c4a34155e6df7c9225d4dafd04f64fcb' },
 };
 
 const DEV_SERVER_OVERRIDE = process.env.EXPO_PUBLIC_MARMOT_PUSH_DEV_SERVER ?? '';

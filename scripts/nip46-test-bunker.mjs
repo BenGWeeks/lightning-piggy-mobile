@@ -1,7 +1,7 @@
 // Local NIP-46 ("Nostr Connect") test bunker for Lightning Piggy's signer-matrix
 // E2E flows. Holds ONE Piggy fixture key (Little Piggy by default) and answers
-// LP's kind-24133 requests on the same relay LP pairs over
-// (NostrLoginSheet's NIP46_DEFAULT_RELAY = wss://relay.nsec.app).
+// the app's kind-24133 requests on the same relays the app pairs over
+// (the app's NIP46_PAIRING_RELAYS in src/services/nostrRelayDefaults.ts).
 //
 // Don't run this directly — use the wrapper, which reads the nsec from .env
 // and pipes it in on stdin (never argv, never the environment, never a log):
@@ -58,7 +58,9 @@ const KIND = 24133;
 const STATE_DIR = process.env.NIP46_STATE_DIR;
 const PORT = Number(process.env.NIP46_PORT || 8746);
 const DEVICE = process.env.NIP46_DEVICE || 'emulator-5554';
-const RELAYS = (process.env.NIP46_RELAYS || 'wss://relay.nsec.app')
+const RELAYS = (
+  process.env.NIP46_RELAYS || 'wss://relay.primal.net,wss://relay.ditto.pub,wss://nos.lol'
+)
   .split(',')
   .map((r) => r.trim())
   .filter(Boolean);
@@ -66,9 +68,9 @@ const RELAYS = (process.env.NIP46_RELAYS || 'wss://relay.nsec.app')
 // caller can't make the bunker connect to arbitrary hosts.
 const RELAY_ALLOWLIST = new Set([
   ...RELAYS,
-  'wss://relay.nsec.app',
-  'wss://nos.lol',
   'wss://relay.primal.net',
+  'wss://relay.ditto.pub',
+  'wss://nos.lol',
   'wss://relay.damus.io',
   'wss://nostr.mom',
   'wss://relay.snort.social',

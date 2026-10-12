@@ -1,3 +1,4 @@
+import { useLocale } from '../contexts/LocaleContext';
 import { useLiveMessageIndicator } from '../hooks/useLiveMessageIndicator';
 import NewMessagesPill from '../components/NewMessagesPill';
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
@@ -50,6 +51,8 @@ import { useStableRowIdentity } from '../utils/stableRowIdentity';
 import { useNonFollowProfiles } from '../hooks/useNonFollowProfiles';
 import { useAccountDeferredValue } from '../contexts/useAccountState';
 import { EMPTY_DM_INBOX } from '../contexts/dmInboxScope';
+import { useFailedMarmotInvites } from '../hooks/useFailedMarmotInvites';
+import { withMarmotInviteRows } from '../utils/marmotInviteRows';
 import type { NostrContact } from '../types/nostr';
 // __DEV__-only marketplace-order fixture seeding. The helper is a no-op outside
 // __DEV__ and is only invoked behind a __DEV__-gated button, so it never runs at
@@ -67,6 +70,7 @@ const NO_CONTACTS: NostrContact[] = [];
 const EMPTY_LIST_INPUTS = { dmInbox: EMPTY_DM_INBOX, contacts: NO_CONTACTS };
 
 const MessagesScreen: React.FC = () => {
+  const { formatLocale } = useLocale();
   const colors = useThemeColors();
   const t = useTranslation();
   // First-render marker: fires once per mount when the first commit lands. Distinct from refreshDmInbox completion (which fires later, after relay round-trip). Used by scripts/perf-startup.sh to measure tap-to-render latency for tab-messages.
@@ -418,14 +422,26 @@ const MessagesScreen: React.FC = () => {
   // is load-bearing — keep it enforced everywhere a summary is built.
   // Skip the gate only when effectiveWotTier === 'all' (which itself is
   // already secret-mode-gated by GroupsContext's hard-lock).
+  // Marmot invites (#1269): joined / pending ones are hidden (the chat shows
+  // on its own); ones that couldn't be opened get an explanatory row.
+  const failedInvites = useFailedMarmotInvites(pubkey);
+  const failedInvitePreview = `🔒 ${t('messageBubble.marmotInviteFailedPreview')}`;
   const dmSummaries = useMemo(() => {
     return buildDmSummaries(
-      deferredDmInbox,
+      withMarmotInviteRows(deferredDmInbox, failedInvites, failedInvitePreview),
       deferredContacts,
       enforceFollowingOnly ? followPubkeys : undefined,
       nonFollowProfiles,
     );
-  }, [deferredDmInbox, deferredContacts, enforceFollowingOnly, followPubkeys, nonFollowProfiles]);
+  }, [
+    deferredDmInbox,
+    failedInvites,
+    failedInvitePreview,
+    deferredContacts,
+    enforceFollowingOnly,
+    followPubkeys,
+    nonFollowProfiles,
+  ]);
   // Build the zap-counterparties memo separately so that toggling
   // `showZapCounterparties` off doesn't make every wallet update churn
   // the merged summary list — when the toggle is off this memo is built
@@ -474,7 +490,9 @@ const MessagesScreen: React.FC = () => {
         if (!lower) return true;
         return (
           s.name.toLowerCase().includes(lower) ||
-          conversationPreview(s).toLowerCase().includes(lower)
+          conversationPreview(s, formatLocale, t('groupConversationScreen.you'))
+            .toLowerCase()
+            .includes(lower)
         );
       })
       .map((s) => ({ kind: 'dm', summary: s, sortKey: s.lastActivityAt }));
@@ -498,6 +516,8 @@ const MessagesScreen: React.FC = () => {
     followPubkeys,
     enforceFollowingOnly,
     windowDays,
+    formatLocale,
+    t,
   ]);
 
   const handleRefresh = useCallback(async () => {

@@ -13,7 +13,7 @@ name: Send Lightning Address to Friend (dev)
 
 - waitForAnimationToEnd: { timeout: 10000 }
 
-- tapOn: { id: 'tab-home' }
+- tapOn: { id: 'tab-wallets' }
 - waitForAnimationToEnd: { timeout: 3000 }
 
 - tapOn: { id: 'btn-receive' }

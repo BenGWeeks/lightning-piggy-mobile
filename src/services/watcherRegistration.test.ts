@@ -15,6 +15,7 @@ import {
   parseNwcConnection,
   registrationFingerprint,
   selectRegistrationRelays,
+  WATCHER_DEFAULT_RELAYS,
   WATCHER_PUBKEY,
   type RegisterContent,
   type SealSigner,
@@ -122,25 +123,27 @@ describe('selectRegistrationRelays', () => {
     const read = Array.from({ length: 12 }, (_, i) => `wss://r${i}.example.com`);
     const out = selectRegistrationRelays(ALL, {
       nwc: [],
-      inbox: ['wss://relay.primal.net', 'wss://nos.lol/', 'wss://r0.example.com'],
-      read: ['wss://relay.damus.io', ...read],
+      inbox: ['wss://relay.primal.net', 'wss://relay.ditto.pub/', 'wss://r0.example.com'],
+      read: ['wss://relay.eu.whitenoise.chat', 'wss://relay.coinos.io', ...read],
     });
     expect(out).toHaveLength(8);
     expect(out[0]).toBe('wss://r0.example.com');
-    expect(out).not.toContain('wss://nos.lol');
-    expect(out).not.toContain('wss://relay.primal.net');
-    expect(out).not.toContain('wss://relay.damus.io');
+    for (const r of WATCHER_DEFAULT_RELAYS) expect(out).not.toContain(r);
     expect(new Set(out).size).toBe(out.length);
   });
 
   it('always lists an NWC wallet relay — even a watcher default (it sends NWC filters only to listed relays)', () => {
     // e.g. a Primal wallet on relay.primal.net: dropping it would mean no payment pushes.
     const out = selectRegistrationRelays(ALL, {
-      nwc: ['wss://relay.primal.net', 'wss://nos.lol/'],
+      nwc: ['wss://relay.primal.net', 'wss://relay.coinos.io/'],
       inbox: ['wss://relay.primal.net', 'wss://inbox.example.com'],
-      read: ['wss://relay.damus.io'],
+      read: ['wss://relay.ditto.pub'],
     });
-    expect(out).toEqual(['wss://relay.primal.net', 'wss://nos.lol', 'wss://inbox.example.com']);
+    expect(out).toEqual([
+      'wss://relay.primal.net',
+      'wss://relay.coinos.io',
+      'wss://inbox.example.com',
+    ]);
     // Payment off: the wallet relay isn't needed, and a default inbox relay stays out.
     expect(
       selectRegistrationRelays(

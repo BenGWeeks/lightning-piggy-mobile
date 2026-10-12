@@ -20,12 +20,11 @@ import {
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import { Image as ExpoImage } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
-import { LogOut } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useTranslation } from '../contexts/LocaleContext';
+import { useLocale } from '../contexts/LocaleContext';
 import { createGroupConversationScreenStyles } from '../styles/GroupConversationScreen.styles';
 import { useGroups } from '../contexts/GroupsContext';
 import { useNostr, useNostrContacts, subscribeGroupMessages } from '../contexts/NostrContext';
@@ -35,9 +34,12 @@ import { buildGroupMemberRows } from '../utils/groupMemberRows';
 import { shortNpub } from '../utils/shortNpub';
 import RenameGroupSheet from '../components/RenameGroupSheet';
 import GroupMembersSheet from '../components/GroupMembersSheet';
+import GroupHeaderActions from '../components/GroupHeaderActions';
+import GroupHeaderTitle from '../components/GroupHeaderTitle';
+import { canManageGroup } from '../utils/groupAdmins';
 import AttachPanel from '../components/AttachPanel';
 import ConversationComposer from '../components/ConversationComposer';
-import BrandGradientBackground from '../components/BrandGradientBackground';
+import BrandPatternBackground from '../components/BrandPatternBackground';
 import GifPickerSheet from '../components/GifPickerSheet';
 import PollComposerSheet from '../components/PollComposerSheet';
 import ReceiveSheet from '../components/ReceiveSheet';
@@ -108,7 +110,7 @@ const GroupConversationScreen: React.FC = () => {
   const navigation = useNavigation<GroupConversationNavigation>();
   const route = useRoute<GroupConversationRoute>();
   const colors = useThemeColors();
-  const t = useTranslation();
+  const { t, formatLocale } = useLocale();
   const styles = useMemo(() => createGroupConversationScreenStyles(colors), [colors]);
   const { getGroup, deleteGroup, secretMode, setSecretMode } = useGroups();
   const { pubkey: myPubkey, profile: myProfile, fetchProfilesForPubkeys } = useNostr();
@@ -451,7 +453,7 @@ const GroupConversationScreen: React.FC = () => {
       })),
     );
     const quoteFor = (m: GroupMessage): MessageQuote | undefined => {
-      const quote = resolveQuote(m.replyTo, byId);
+      const quote = resolveQuote(m.replyTo, byId, formatLocale);
       const parent = m.replyTo ? byId.get(m.replyTo) : undefined;
       return quote && parent && !parent.fromMe
         ? { ...quote, authorName: memberNameByPubkey.get(parent.senderPubkey) }
@@ -472,7 +474,7 @@ const GroupConversationScreen: React.FC = () => {
         wireKind: deriveGroupWireKind(m.text),
       }))
       .filter((m) => m.content.kind !== 'pollVote');
-  }, [messages, myPubkey, memberNameByPubkey]);
+  }, [messages, myPubkey, memberNameByPubkey, formatLocale]);
 
   // Text-encoded group polls: tallies + send / vote (see useGroupPolls).
   const { pollAggregates, handleSendPoll, handleVotePoll } = useGroupPolls(
@@ -568,7 +570,7 @@ const GroupConversationScreen: React.FC = () => {
   if (!group) {
     return (
       <View style={styles.container}>
-        <BrandGradientBackground />
+        <BrandPatternBackground variant="messages-weave" />
         <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
           <View style={styles.titleRow}>
             <TouchableOpacity
@@ -629,7 +631,7 @@ const GroupConversationScreen: React.FC = () => {
     // the keyboard-handling via KeyboardStickyView, so the screen's own
     // wrapper is just a plain View that stacks header + content + composer.
     <View style={styles.container}>
-      <BrandGradientBackground />
+      <BrandPatternBackground variant="messages-weave" />
       <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
         <View style={styles.titleRow}>
           <TouchableOpacity
@@ -648,34 +650,12 @@ const GroupConversationScreen: React.FC = () => {
               />
             </Svg>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.titleTouch}
-            onPress={() => setRenameVisible(true)}
-            accessibilityLabel={t('groupConversationScreen.renameGroup')}
-            testID="group-title"
-          >
-            <Text style={styles.title} numberOfLines={1}>
-              {group.name}
-            </Text>
-            <Svg width={14} height={14} viewBox="0 0 24 24" fill="none">
-              <Path
-                d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"
-                stroke={colors.white}
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </Svg>
-          </TouchableOpacity>
-          <View style={{ flex: 1 }} />
-          <TouchableOpacity
-            style={[styles.actionButton, styles.deleteIconButton]}
-            onPress={handleLeave}
-            accessibilityLabel={t('groupConversationScreen.leaveGroupTitle')}
-            testID="leave-group-button"
-          >
-            <LogOut size={18} color={colors.white} strokeWidth={2} />
-          </TouchableOpacity>
+          <GroupHeaderTitle
+            name={group.name}
+            canRename={canManageGroup(group, myPubkey)}
+            onRename={() => setRenameVisible(true)}
+          />
+          <GroupHeaderActions group={group} onLeave={handleLeave} />
         </View>
         {/* Tappable member-count line — opens GroupMembersSheet for
             add/remove. Replaces the inert text + horizontal chip strip

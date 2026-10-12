@@ -14,10 +14,10 @@ import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navig
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';
-import { Home } from 'lucide-react-native';
+import { Wallet } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import TransactionList from '../components/TransactionList';
+import WarmTransactionLists from '../components/WarmTransactionLists';
 import HomeSheets from '../components/HomeSheets';
 import type { HomeSheetActions } from '../hooks/useHomeSheetState';
 import WalletCarousel from '../components/WalletCarousel';
@@ -29,13 +29,20 @@ import { ArrowDownIcon, ArrowUpIcon, ArrowLeftRightIcon } from '../components/ic
 import { createHomeScreenStyles } from '../styles/HomeScreen.styles';
 import { isSendableWallet } from '../utils/walletCapabilities';
 import { perfLog } from '../utils/perfLog';
+import { noteWalletListCommitted } from '../utils/walletSwipeTiming';
+import { useActiveWalletRefresh } from '../hooks/useActiveWalletRefresh';
+import { WALLET_FRESH_MS } from '../utils/walletRefreshScheduler';
+import type { WalletState } from '../types/wallet';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import type { MainTabParamList } from '../navigation/types';
+
+// How often swiping to an on-chain card may trigger its (heavy) BDK sync.
+const ONCHAIN_SWIPE_FRESH_MS = 5 * 60_000;
 
 const HomeScreen: React.FC = () => {
   const colors = useThemeColors();
   const t = useTranslation();
-  // First-render marker: fires once per mount when the first commit lands. Used by scripts/perf-startup.sh to measure tap-to-render latency for tab-home.
+  // First-render marker: fires once per mount when the first commit lands. Used by scripts/perf-startup.sh to measure tap-to-render latency for tab-wallets.
   const homeRenderLoggedRef = useRef(false);
   useEffect(() => {
     if (homeRenderLoggedRef.current) return;
@@ -49,7 +56,7 @@ const HomeScreen: React.FC = () => {
     activeWallet,
     hasWallets,
     walletsHydrated,
-    refreshActiveBalance,
+    refreshBalanceForWallet,
     fetchTransactionsForWallet,
     setActiveWallet,
     currency,
@@ -126,82 +133,86 @@ const HomeScreen: React.FC = () => {
     navigation,
   ]);
 
-  // Hold the latest wallets + context callbacks in refs so fetchTransactions
-  // and fetchData can read up-to-date values without taking `wallets` or the
-  // callbacks as dependencies. Without refs we'd either re-run the fetch
-  // callback on every wallet state change (triggering fetch loops via the
-  // effect below) or capture stale values (and mis-route NWC vs on-chain).
+  // Hold the latest wallets + balance refresher in refs so `fetchWallet` stays
+  // stable without taking the constantly-churning `wallets` as a dependency.
   const walletsRef = useRef(wallets);
-  const refreshActiveBalanceRef = useRef(refreshActiveBalance);
-  const fetchTransactionsForWalletRef = useRef(fetchTransactionsForWallet);
+  const refreshBalanceForWalletRef = useRef(refreshBalanceForWallet);
   useEffect(() => {
     walletsRef.current = wallets;
-    refreshActiveBalanceRef.current = refreshActiveBalance;
-    fetchTransactionsForWalletRef.current = fetchTransactionsForWallet;
-  }, [wallets, refreshActiveBalance, fetchTransactionsForWallet]);
+    refreshBalanceForWalletRef.current = refreshBalanceForWallet;
+  }, [wallets, refreshBalanceForWallet]);
 
-  const fetchTransactions = useCallback(
-    async (opts?: { force?: boolean }) => {
-      if (!activeWalletId) return;
-      await fetchTransactionsForWalletRef.current(activeWalletId, opts);
-    },
-    [activeWalletId],
-  );
-
-  // `force` is set by an explicit pull-to-refresh — it bypasses the
-  // zap-resolver's fingerprint skip so a manual refresh always does a
-  // full attribution pass even when nothing looks changed (#526).
-  const fetchData = useCallback(
-    async (opts?: { force?: boolean }) => {
-      // For on-chain wallets, fetchTransactions already does syncAndRefresh
-      // which updates both balance and transactions in a single sync.
-      // Only call refreshActiveBalance separately for NWC wallets.
-      const wallet = walletsRef.current.find((w) => w.id === activeWalletId);
+  // Refresh one wallet; resolves whether its transaction list loaded. On-chain
+  // `fetchTransactionsForWallet` already syncs the balance in the same pass, so
+  // only NWC wallets need the separate balance read (which also re-probes a
+  // dropped NWC connection). `force` (pull-to-refresh) bypasses the
+  // zap-resolver's fingerprint skip for a full attribution pass (#526).
+  const fetchWallet = useCallback(
+    async (walletId: string, opts: { force: boolean }): Promise<boolean> => {
+      const wallet = walletsRef.current.find((w) => w.id === walletId);
       if (wallet?.walletType === 'onchain') {
-        await fetchTransactions(opts);
-      } else {
-        await Promise.all([refreshActiveBalanceRef.current(), fetchTransactions(opts)]);
+        return fetchTransactionsForWallet(walletId, opts);
       }
+      const [, loaded] = await Promise.all([
+        refreshBalanceForWalletRef.current(walletId).catch(() => {}),
+        fetchTransactionsForWallet(walletId, opts),
+      ]);
+      return loaded;
     },
-    [activeWalletId, fetchTransactions],
+    [fetchTransactionsForWallet],
   );
 
   const isWalletAvailable =
     activeWallet?.walletType === 'onchain' ? true : (activeWallet?.isConnected ?? false);
 
-  // Transactions from the active wallet (owned by WalletContext)
+  // Transactions from the active wallet (owned by WalletContext). Every
+  // wallet's list is hydrated from its per-wallet cache at launch and kept in
+  // memory, so a newly active card renders its own rows in the same commit.
+  // `useActiveWalletRefresh` refreshes it in the background (~300 ms after the
+  // card settles, skipped if it loaded recently, retried after a failure) and
+  // then warms the neighbouring cards so the next swipe is current too (#1304).
   const transactions = activeWallet?.transactions ?? [];
-  const fetchedWallets = useRef<Set<string>>(new Set());
+  const getNeighbours = useCallback((walletId: string) => {
+    const list = walletsRef.current;
+    const i = list.findIndex((w) => w.id === walletId);
+    if (i < 0) return [];
+    // Right first (the likelier next swipe), then left. NWC only: an on-chain
+    // refresh is a BDK sync that holds the JS thread for seconds, which would
+    // stall the very swipe it's meant to speed up.
+    return [list[i + 1], list[i - 1]]
+      .filter((w): w is WalletState => w?.walletType === 'nwc')
+      .map((w) => w.id);
+  }, []);
+  // On-chain refreshes are that same heavy sync: refresh them on swipe at most
+  // every 5 min (pull-to-refresh still forces one).
+  const freshMsFor = useCallback(
+    (walletId: string) =>
+      walletsRef.current.find((w) => w.id === walletId)?.walletType === 'onchain'
+        ? ONCHAIN_SWIPE_FRESH_MS
+        : WALLET_FRESH_MS,
+    [],
+  );
+  const { isLoading, isFetching, refreshNow } = useActiveWalletRefresh({
+    activeWalletId,
+    available: isWalletAvailable,
+    fetchWallet,
+    getNeighbours,
+    freshMsFor,
+  });
 
-  // Show spinner only while first fetch is in progress (not for zero-tx wallets)
-  const loadingTransactions =
-    isWalletAvailable &&
-    transactions.length === 0 &&
-    activeWalletId != null &&
-    !fetchedWallets.current.has(activeWalletId);
+  // Full spinner only while an empty wallet's first load is due or running —
+  // never an empty state while fetching. A wallet with cached rows keeps showing
+  // them, with a small indicator only while fresh data is actually fetching.
+  const loadingTransactions = isLoading && transactions.length === 0;
 
-  // When swiping to a disconnected NWC wallet, trigger reconnection
-  useEffect(() => {
-    if (activeWallet?.walletType === 'nwc' && !activeWallet?.isConnected && activeWalletId) {
-      refreshActiveBalance();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeWalletId]);
-
-  // Fetch fresh data once per wallet (not on every swipe back)
-  useEffect(() => {
-    setRefreshing(false);
-    if (isWalletAvailable && activeWalletId && !fetchedWallets.current.has(activeWalletId)) {
-      fetchedWallets.current.add(activeWalletId);
-      fetchData();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeWalletId, isWalletAvailable]);
-
+  // Read the active wallet through a ref so `handleRefresh` (and with it the
+  // RefreshControl element every warm list shares) keeps its identity across
+  // swipes; a new element per swipe would re-render every warm list (#1304).
+  const activeWalletIdRef = useRef(activeWalletId);
+  activeWalletIdRef.current = activeWalletId;
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      if (activeWalletId) fetchedWallets.current.delete(activeWalletId);
       // Also retry any pending Boltz swap claims — recovery otherwise only runs
       // at app startup, so a swap parked mid-session (e.g. an ambiguous pay that
       // resolved later) would stay unclaimed until a full restart. Fire-and-
@@ -209,13 +220,14 @@ const HomeScreen: React.FC = () => {
       swapRecoveryService.recoverPendingSwaps().catch((e) => {
         console.warn('[Home] pull-to-refresh swap recovery failed:', e);
       });
-      // Explicit pull-to-refresh — force a full zap-resolver pass.
-      await fetchData({ force: true });
+      // Explicit pull-to-refresh: force a fetch, ignoring the 30 s freshness.
+      const walletId = activeWalletIdRef.current;
+      if (walletId) await refreshNow(walletId);
     } finally {
       // A rejected refresh must never strand the pull-to-refresh spinner.
       setRefreshing(false);
     }
-  }, [activeWalletId, fetchData]);
+  }, [refreshNow]);
 
   // Stable RefreshControl ELEMENT. Passing a fresh element on every render
   // made the (Pure) FlatList inside TransactionList re-render on every Home
@@ -294,6 +306,11 @@ const HomeScreen: React.FC = () => {
     activeWalletId !== null &&
     !(loadingTransactions && transactions.length === 0);
 
+  // Swipe-latency probe (#1304): which wallet's list this commit shows.
+  useEffect(() => {
+    noteWalletListCommitted(showTransactionList ? activeWalletId : null);
+  }, [showTransactionList, activeWalletId]);
+
   return (
     <View style={styles.container}>
       {/* Header area with brand background + faded pig behind carousel */}
@@ -314,7 +331,7 @@ const HomeScreen: React.FC = () => {
           // size; section titles (Messages/Friends/Learn) stay bolder to
           // read as section labels.
           titleStyle={{ fontSize: 22, fontWeight: '400' }}
-          icon={<Home size={20} color={colors.brandPink} />}
+          icon={<Wallet size={20} color={colors.brandPink} />}
           rightAccessory={<NotificationBell />}
         />
 
@@ -382,15 +399,23 @@ const HomeScreen: React.FC = () => {
         </View>
       </View>
 
-      {/* Transaction list. The list branch renders TransactionList's FlatList
+      {/* Transaction lists. Each warm list renders TransactionList's FlatList
           directly as the scroller (passing the RefreshControl through), so the
           list virtualizes properly. The non-list branches (welcome / add-wallet
           / first-load spinner) stay in a ScrollView so pull-to-refresh keeps
           working on them too. */}
       <View style={styles.transactionsWrapper}>
-        {showTransactionList ? (
-          <TransactionList transactions={transactions} refreshControl={homeRefreshControl} />
-        ) : (
+        {/* One list per warm wallet (active + neighbours), kept mounted so a
+            swipe reveals already-rendered rows (#1304). Hidden, not unmounted,
+            while an empty / add-wallet / first-load state shows instead. */}
+        <WarmTransactionLists
+          wallets={wallets}
+          activeWalletId={hasWallets ? activeWalletId : null}
+          visible={showTransactionList}
+          currency={currency}
+          refreshControl={homeRefreshControl}
+        />
+        {showTransactionList ? null : (
           <ScrollView style={styles.transactionsContainer} refreshControl={homeRefreshControl}>
             {!hasWallets ? (
               <WelcomeWalletPrompt onGetStarted={() => sheetsRef.current?.openWizard()} />
@@ -414,6 +439,17 @@ const HomeScreen: React.FC = () => {
             )}
           </ScrollView>
         )}
+        {showTransactionList && isFetching && !refreshing && transactions.length > 0 ? (
+          // Background refresh of a wallet that already shows cached rows (#1304).
+          <View
+            style={styles.refreshingIndicator}
+            pointerEvents="none"
+            accessibilityLabel={t('homeScreen.updatingTransactions')}
+            testID="home-tx-refreshing"
+          >
+            <ActivityIndicator size="small" color={colors.brandPink} />
+          </View>
+        ) : null}
       </View>
 
       <HomeSheets ref={sheetsRef} />

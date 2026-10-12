@@ -41,13 +41,14 @@ export function indexMessagesById<T extends QuotableMessage>(
 export function resolveQuote(
   replyTo: string | undefined,
   byId: ReadonlyMap<string, QuotableMessage>,
+  locale?: string,
 ): MessageQuote | undefined {
   if (!replyTo) return undefined;
   const parent = byId.get(replyTo);
   if (!parent) return { text: null, fromMe: false };
   // Sanitised like the bubble itself, so a U+FFFC placeholder (#764) never
   // shows as a box in the quote.
-  const text = dmRowPreview(sanitizeDisplayText(parent.text), parent.wireKind ?? 14);
+  const text = dmRowPreview(sanitizeDisplayText(parent.text), parent.wireKind ?? 14, locale);
   return { text, fromMe: parent.fromMe };
 }
 

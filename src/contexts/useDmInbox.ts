@@ -6,7 +6,7 @@ import { nip46DecryptNip04 } from './nip46DmDecrypt';
 import { ingestInboxNip17ForSigner } from './inboxNip17Ingest';
 import type { SignerType } from '../types/nostr';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
-import { localSendInboxEntry } from '../utils/localSendInboxEntry';
+import { localSendInboxEntryForApp as localSendInboxEntry } from '../utils/localSendInboxEntry';
 import {
   selectKnownEventIds,
   upsertDmMessages,
@@ -161,7 +161,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
   );
   const setDmInboxForPubkey = useMemo(() => inboxSetterFor(pubkey), [inboxSetterFor, pubkey]);
   // Marmot 1:1 chats land in the same store + list (protocol 'marmot').
-  useMarmotDmInbound(isLoggedIn ? pubkey : null, setDmInboxForPubkey);
+  useMarmotDmInbound(isLoggedIn ? pubkey : null, setDmInboxForPubkey, followPubkeys);
   const [dmInboxLoading, setDmInboxLoading] = useState(false);
   // Gates the live NIP-17 DM sub useEffect below. False on cold boot
   // so we don't burn JS-thread cycles unwrapping wraps the user can't

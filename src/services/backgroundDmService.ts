@@ -1,4 +1,5 @@
-import { dmThreadId, protocolForWireKind } from '../utils/dmProtocol';
+import { getAppFormatLocale } from '../utils/appFormatLocale';
+import { dmThreadId, MARMOT_WELCOME_KIND, protocolForWireKind } from '../utils/dmProtocol';
 /**
  * backgroundDmService — Amethyst-style realtime background DM notifications
  * for Android (#279 realtime upgrade).
@@ -65,7 +66,12 @@ import { loadIdentities, type StoredIdentity } from './identitiesStore';
 import { perAccountKey } from './perAccountStorage';
 import { CONTACTS_CACHE_KEY_BASE } from '../contexts/nostrCacheKeys';
 import { resolveReadRelays } from './backgroundDmReadRelays';
-import { claimWrapNotification } from './dmWrapNotificationDedupe';
+import {
+  claimWrapNotification,
+  isLiveDmSubArmed,
+  noteContentlessWrapAlert,
+  wasWrapHandled,
+} from './dmWrapNotificationDedupe';
 import * as nostrService from './nostrService';
 import { subscribeInboxDmsForViewer } from './dmLiveSubscription';
 import {
@@ -248,6 +254,12 @@ async function resolveSenderName(pubkey: string, readRelays: string[]): Promise<
  * (Signal sealed-sender style) — we still know a wrap addressed to us
  * arrived, we just can't read it off-screen.
  */
+/** How long the contentless path waits for a live sub to decrypt a wrap. A
+ * remote signer answers in a second or two; a slower one still gets the
+ * contentless alert, which the live sub replaces once it decrypts. */
+export const LIVE_SUB_DECRYPT_GRACE_MS = 8_000;
+const waitMs = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 async function handleWrap(input: {
   ev: nostrService.RawInboxDmEvent;
   viewerPubkey: string;
@@ -277,7 +289,19 @@ async function handleWrap(input: {
   // from posting a second notification — see dmWrapNotificationDedupe.
   if (!decryptWrap) {
     if (!input.backlogSettled()) return;
+    // The app's live sub runs in this JS context and CAN decrypt (it asks the
+    // remote signer): give it a moment. A wrap it decoded is its call — the
+    // self-copy of a message we sent, a stranger's wrap or a reaction must
+    // not raise a contentless "New encrypted message" with nothing behind it.
+    if (isLiveDmSubArmed()) {
+      await waitMs(LIVE_SUB_DECRYPT_GRACE_MS);
+      if (wasWrapHandled(ev.id)) return;
+      // Signed out / switched account meanwhile: not this watch's to alert.
+      if (activeWatch?.viewerPubkey !== viewerPubkey) return;
+    }
     if (!claimWrapNotification(ev.id)) return;
+    // Remembered so the live sub can replace it once it decrypts the wrap.
+    noteContentlessWrapAlert(ev.id);
     await fireMessageNotification({
       kind: 'dm',
       owner: viewerPubkey,
@@ -302,8 +326,9 @@ async function handleWrap(input: {
 
   const partnership = partnerFromRumor(rumor, viewerPubkey);
   if (!partnership) return;
-  // Never notify for our own echoes (self-wraps / outgoing copies).
-  if (partnership.fromMe) return;
+  // Never notify for our own echoes (self-wraps / outgoing copies), nor for a
+  // Marmot invite: it's joined as its own chat, the NIP-17 row is hidden (#1269).
+  if (partnership.fromMe || rumor.kind === MARMOT_WELCOME_KIND) return;
   // Follow gate (mirrors the live sub's): a stranger must not be able to
   // spam OS notifications by gift-wrapping to our pubkey. Deliberately does
   // NOT claim the wrap id — the live sub's follow-gate defer buffer may
@@ -327,7 +352,7 @@ async function handleWrap(input: {
   // string) to a secret-free summary — a plain chat message passes through
   // unchanged. The notificationService additionally swaps in generic copy when
   // the user has lock-screen content disabled.
-  const preview = dmRowPreview(textForRumor(rumor), rumor.kind);
+  const preview = dmRowPreview(textForRumor(rumor), rumor.kind, getAppFormatLocale());
   const notifId = await fireMessageNotification({
     kind: 'dm',
     owner: viewerPubkey,

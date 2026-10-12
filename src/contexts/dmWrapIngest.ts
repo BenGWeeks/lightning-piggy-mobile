@@ -1,3 +1,4 @@
+import { getAppFormatLocale } from '../utils/appFormatLocale';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
 import {
   partnerFromRumor,
@@ -182,7 +183,7 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
         // content is a bearer connection string). The stored row keeps the raw
         // JSON below so the thread renderer + dmInbox projection re-derive from
         // it. Plain DM rumors pass through unchanged.
-        const preview = dmRowPreview(text, rumor.kind);
+        const preview = dmRowPreview(text, rumor.kind, getAppFormatLocale());
         // Inner rumor id — the cross-peer-stable id BOTH sides see for the
         // same logical message. For our own sent rows (fromMe) it's the
         // delivery-store key (#857); for received rows it's the NIP-25

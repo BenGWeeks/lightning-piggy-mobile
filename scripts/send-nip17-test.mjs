@@ -23,12 +23,7 @@ import { SimplePool, getPublicKey } from 'nostr-tools';
 import * as nip17 from 'nostr-tools/nip17';
 import * as nip19 from 'nostr-tools/nip19';
 
-const RELAYS = [
-  'wss://relay.damus.io',
-  'wss://relay.nostr.band',
-  'wss://nos.lol',
-  'wss://relay.primal.net',
-];
+const RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net'];
 
 function decodeNsec(nsec) {
   const decoded = nip19.decode(nsec);

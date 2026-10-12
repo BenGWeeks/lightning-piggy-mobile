@@ -16,8 +16,8 @@
 #                 from .env the bunker holds. Only Piggy fixtures are accepted.
 #   NIP46_DEVICE  adb serial for pair-from-screen (default emulator-5554)
 #   NIP46_PORT    control port on 127.0.0.1 (default 8746)
-#   NIP46_RELAYS  comma-separated relays (default wss://relay.nsec.app — the
-#                 relay LP's NostrLoginSheet pairs over)
+#   NIP46_RELAYS  comma-separated relays (default primal, ditto.pub, nos.lol — the
+#                 relays the app pairs over, NIP46_PAIRING_RELAYS)
 #
 # Secret handling: the nsec is read from .env by grep (the rest of .env is not
 # sourced) and handed to node on stdin — node runs with an allowlisted
@@ -75,7 +75,7 @@ case "${1:-}" in
     rm -f "$STATE_DIR/token"
     env -i PATH="$PATH" HOME="$HOME" \
       NIP46_STATE_DIR="$STATE_DIR" NIP46_PORT="$PORT" NIP46_DEVICE="$DEVICE" \
-      NIP46_RELAYS="${NIP46_RELAYS:-wss://relay.nsec.app}" \
+      NIP46_RELAYS="${NIP46_RELAYS:-wss://relay.primal.net,wss://relay.ditto.pub,wss://nos.lol}" \
       setsid nohup node scripts/nip46-test-bunker.mjs >>"$LOG_FILE" 2>&1 < <(printf '%s\n' "$nsec") &
     echo $! >"$PID_FILE"
     unset nsec

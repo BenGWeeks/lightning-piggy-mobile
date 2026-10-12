@@ -1,5 +1,6 @@
 import { getInboxLatest, getConversationMessages, type DmMessageRow } from './dmDb';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
+import { getAppFormatLocale } from '../utils/appFormatLocale';
 import { dmRowPreview } from '../utils/dmRowPreview';
 
 // The read seam between the encrypted DM store (dmDb) and the Messages UI
@@ -14,7 +15,7 @@ import { dmRowPreview } from '../utils/dmRowPreview';
 // as a future read filter, so the "include non-follows" toggle can work
 // without re-fetching. Keep this layer a pure projection.
 
-const rowToInboxEntry = (r: DmMessageRow): DmInboxEntry => ({
+const rowToInboxEntry = (r: DmMessageRow, locale?: string): DmInboxEntry => ({
   id: r.eventId,
   partnerPubkey: r.conversation,
   fromMe: r.fromMe,
@@ -24,19 +25,19 @@ const rowToInboxEntry = (r: DmMessageRow): DmInboxEntry => ({
   // summary instead of the raw blob. Other rows pass their plaintext through
   // unchanged (#203 / #market / NWC share). All four preview paths route through
   // dmRowPreview so they redact identically.
-  text: dmRowPreview(r.content, r.wireKind),
+  text: dmRowPreview(r.content, r.wireKind, locale),
   wireKind: r.wireKind,
   ...(r.protocol !== undefined ? { protocol: r.protocol } : {}),
 });
 
 /** Pure projection of stored rows → inbox entries. */
-export function rowsToInboxEntries(rows: readonly DmMessageRow[]): DmInboxEntry[] {
-  return rows.map(rowToInboxEntry);
+export function rowsToInboxEntries(rows: readonly DmMessageRow[], locale?: string): DmInboxEntry[] {
+  return rows.map((row) => rowToInboxEntry(row, locale));
 }
 
 /** The inbox list: latest message per conversation for `owner`, newest-first. */
 export async function loadInboxEntries(owner: string): Promise<DmInboxEntry[]> {
-  return rowsToInboxEntries(await getInboxLatest(owner));
+  return rowsToInboxEntries(await getInboxLatest(owner), getAppFormatLocale());
 }
 
 /** One conversation's messages, newest-first, paginated (load-older via opts). */
@@ -45,5 +46,8 @@ export async function loadConversationEntries(
   partnerPubkey: string,
   opts?: { limit?: number; beforeCreatedAt?: number },
 ): Promise<DmInboxEntry[]> {
-  return rowsToInboxEntries(await getConversationMessages(owner, partnerPubkey, opts));
+  return rowsToInboxEntries(
+    await getConversationMessages(owner, partnerPubkey, opts),
+    getAppFormatLocale(),
+  );
 }

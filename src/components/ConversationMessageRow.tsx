@@ -1,9 +1,11 @@
+import { useLocale } from '../contexts/LocaleContext';
 import React from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { Zap } from 'lucide-react-native';
 import MessageBubble from './MessageBubble';
 import OrderPaymentActions from './OrderPaymentActions';
 import NwcShareCard from './NwcShareCard';
+import MarmotInviteFailedNotice from './MarmotInviteFailedNotice';
 import type { TransactionDetailData } from './TransactionDetailSheet';
 import type { Palette } from '../styles/palettes';
 import type { ConversationStyles } from '../styles/ConversationScreen.styles';
@@ -59,6 +61,8 @@ export interface ConversationMessageRowProps {
   onAddNwc: (card: NwcShareCardData) => void;
   /** The contact's display name — who a 1:1 reply's quoted parent is from. */
   peerName?: string;
+  /** A failed Marmot invite's "Ask for a new invite" (#1269). */
+  onAskForInvite?: () => void;
 }
 
 /**
@@ -97,7 +101,9 @@ function ConversationMessageRow({
   onToggleReaction,
   onAddNwc,
   peerName,
+  onAskForInvite,
 }: ConversationMessageRowProps): React.ReactElement {
+  const { formatLocale } = useLocale();
   if (item.kind === 'dayHeader') {
     return (
       <View style={styles.dayHeaderRow}>
@@ -138,7 +144,7 @@ function ConversationMessageRow({
               {item.fromMe ? 'Zap sent' : 'Zap received'}
             </Text>
             <Text style={[styles.zapCardAmount, item.fromMe && styles.zapCardAmountMe]}>
-              {item.amountSats.toLocaleString()} sats
+              {item.amountSats.toLocaleString(formatLocale)} sats
             </Text>
             {item.comment ? (
               <Text style={[styles.zapCardComment, item.fromMe && styles.zapCardCommentMe]}>
@@ -174,7 +180,7 @@ function ConversationMessageRow({
           <Text style={styles.orderCardId}>Order #{shortOrderId(item.order.orderId)}</Text>
           {item.order.amountSats !== undefined ? (
             <Text style={styles.orderCardAmount}>
-              {item.order.amountSats.toLocaleString()} sats
+              {item.order.amountSats.toLocaleString(formatLocale)} sats
             </Text>
           ) : null}
           {item.order.status ? (
@@ -220,6 +226,17 @@ function ConversationMessageRow({
         createdAt={item.createdAt}
         colors={colors}
         onAdd={onAddNwc}
+      />
+    );
+  }
+  if (item.kind === 'marmotInviteFailed') {
+    return (
+      <MarmotInviteFailedNotice
+        id={item.id}
+        createdAt={item.createdAt}
+        peerName={peerName}
+        colors={colors}
+        onAskAgain={onAskForInvite}
       />
     );
   }

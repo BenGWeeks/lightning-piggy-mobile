@@ -37,6 +37,7 @@ export async function promptSubmarineRefund(
   reason: string,
   /** Shown in the prompt so the user can see — and decline — where it goes. */
   destinationLabel?: string,
+  locale?: string,
 ): Promise<void> {
   // Look up the on-chain lockup + a refund destination. Guarded because this
   // runs inside TransferSheet's detached background task — an unhandled reject
@@ -60,7 +61,7 @@ export async function promptSubmarineRefund(
         const blocks = swap.timeoutBlockHeight - height;
         Alert.alert(
           'Refund not available yet',
-          `Your ${swap.expectedAmount.toLocaleString()} sats are safe. The refund unlocks at block ${swap.timeoutBlockHeight} (${blockEtaText(blocks)} from now), and Lightning Piggy will offer it then. Keep the app installed until it's done.`,
+          `Your ${swap.expectedAmount.toLocaleString(locale)} sats are safe. The refund unlocks at block ${swap.timeoutBlockHeight} (${blockEtaText(blocks)} from now), and Lightning Piggy will offer it then. Keep the app installed until it's done.`,
           [{ text: 'OK' }],
         );
       }
@@ -119,7 +120,10 @@ export async function promptSubmarineRefund(
  * Rebuilds the SubmarineSwapResult shape `promptSubmarineRefund` needs from the
  * persisted record and delegates. Registered once at app start.
  */
-export async function recoverSubmarineRefund(swap: PersistedSubmarineSwap): Promise<void> {
+export async function recoverSubmarineRefund(
+  swap: PersistedSubmarineSwap,
+  locale?: string,
+): Promise<void> {
   if (!swap.swapTree) {
     // Older records (pre-recovery) lack the script tree — nothing we can
     // reconstruct, so point the user at whoever runs the swap server.
@@ -138,7 +142,7 @@ export async function recoverSubmarineRefund(swap: PersistedSubmarineSwap): Prom
       shownNoWallet.add(swap.id);
       notifySwapAttention(
         'Add an on-chain wallet for your refund',
-        `A failed swap's ${swap.expectedAmount.toLocaleString()} sats can be refunded, but you have no on-chain wallet to receive them. Add one in Lightning Piggy and the refund will be offered.`,
+        `A failed swap's ${swap.expectedAmount.toLocaleString(locale)} sats can be refunded, but you have no on-chain wallet to receive them. Add one in Lightning Piggy and the refund will be offered.`,
       );
     }
     return;
@@ -156,5 +160,6 @@ export async function recoverSubmarineRefund(swap: PersistedSubmarineSwap): Prom
     destination.walletId,
     'recovered after app restart',
     destination.alias,
+    locale,
   );
 }

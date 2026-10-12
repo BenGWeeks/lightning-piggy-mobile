@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { Image } from 'expo-image';
-import { useTranslation } from '../contexts/LocaleContext';
+import { useLocale } from '../contexts/LocaleContext';
 import { satsToFiatString } from '../services/fiatService';
 import TransactionTypeIcon, { type TransactionIconState } from './TransactionTypeIcon';
 import type { TransactionDetailData } from './TransactionDetailSheet';
@@ -25,7 +25,7 @@ import type { TxRow } from '../utils/transactionPagination';
  * ~nothing regardless of what invalidated the list around it.
  */
 
-type Translate = ReturnType<typeof useTranslation>;
+type Translate = ReturnType<typeof useLocale>['t'];
 
 function zapCounterpartyLabel(cp: ZapCounterpartyInfo, t: Translate): string {
   if (cp.anonymous) return t('transactionList.anonymous');
@@ -49,8 +49,8 @@ function splitDescription(desc: string): { primary: string; subtitle: string | n
   return { primary: trimmed, subtitle: null };
 }
 
-function formatTime(ts: number): string {
-  return new Date(ts * 1000).toLocaleTimeString(undefined, {
+function formatTime(ts: number, locale: string): string {
+  return new Date(ts * 1000).toLocaleTimeString(locale, {
     hour: '2-digit',
     minute: '2-digit',
   });
@@ -98,7 +98,7 @@ const TransactionRow: React.FC<TransactionRowProps> = ({
   iconState,
   onPressTx,
 }) => {
-  const t = useTranslation();
+  const { t, formatLocale } = useLocale();
   // Avatar error state — declared before the early `header` return to satisfy
   // the Rules of Hooks (hooks must not be called after a conditional return).
   // Reset when either avatar URL changes so a refreshed/corrected URL gets a
@@ -175,10 +175,10 @@ const TransactionRow: React.FC<TransactionRowProps> = ({
 
   // Explicit null check so a `0` (epoch) timestamp still formats instead of
   // rendering an empty string.
-  const timeStr = ts != null ? formatTime(ts) : '';
+  const timeStr = ts != null ? formatTime(ts, formatLocale) : '';
   const counterpartyAvatar =
     zapCp?.profile?.picture ?? descriptionContact?.profile?.picture ?? null;
-  const fiatStr = satsToFiatString(amountSats, btcPrice, currency);
+  const fiatStr = satsToFiatString(amountSats, btcPrice, currency, formatLocale);
 
   return (
     <TouchableOpacity
@@ -230,7 +230,7 @@ const TransactionRow: React.FC<TransactionRowProps> = ({
               isPending ? styles.pendingText : isIncoming ? styles.incoming : styles.outgoing,
             ]}
           >
-            {amountSats.toLocaleString()} sats
+            {amountSats.toLocaleString(formatLocale)} sats
           </Text>
           {fiatStr ? (
             <Text style={[styles.fiat, isPending && styles.pendingText]}>{fiatStr}</Text>

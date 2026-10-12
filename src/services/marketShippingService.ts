@@ -6,6 +6,7 @@ import { pool, trackRelays, DEFAULT_RELAYS } from './nostrService';
 import { querySyncAbortable } from './relayQuery';
 import {
   SHIPPING_OPTION_KIND,
+  dedupeNewestPerCoordinate,
   parseShippingOptionEvent,
   type ShippingOption,
 } from '../utils/marketShipping';
@@ -75,4 +76,32 @@ export async function fetchShippingOptions(input: {
     throw new Error('Merchant returned invalid shipping options');
   }
   return parsed as ShippingOption[];
+}
+
+/**
+ * Display-only variant for the product page (#1273): shows whatever valid
+ * options the merchant's relays return within the deadline. Unlike
+ * {@link fetchShippingOptions} (which gates a checkout and so fails closed on
+ * any timeout or malformed option), a slow relay or one bad option here just
+ * drops out; only a relay set that entirely fails is an error.
+ */
+export async function fetchShippingOptionsForDisplay(input: {
+  merchantPubkey: string;
+  relays: string[];
+  signal?: AbortSignal;
+}): Promise<ShippingOption[]> {
+  const relays = Array.from(new Set([...input.relays, ...DEFAULT_RELAYS]));
+  trackRelays(relays);
+  const merchantPubkey = input.merchantPubkey.trim().toLowerCase();
+  const events = await querySyncAbortable(
+    pool,
+    relays,
+    { kinds: [SHIPPING_OPTION_KIND], authors: [merchantPubkey], limit: 100 },
+    { maxWait: FETCH_MAX_WAIT_MS, signal: input.signal, rejectOnAllRelaysFailure: true },
+  );
+  const options = events
+    .filter((ev) => ev.kind === SHIPPING_OPTION_KIND && ev.pubkey.toLowerCase() === merchantPubkey)
+    .map(parseShippingOptionEvent)
+    .filter((o): o is ShippingOption => o !== null);
+  return dedupeNewestPerCoordinate(options);
 }

@@ -1,3 +1,4 @@
+import { useLocale } from '../contexts/LocaleContext';
 import { useEffect, useRef } from 'react';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { notifyPaymentOnce } from '../services/paymentNotificationDedupe';
@@ -29,6 +30,7 @@ import { isStaleReceipt } from '../utils/incomingReceipts';
 const TX_SETTLE_GRACE_MS = 5000;
 
 export default function PaymentNotifier(): null {
+  const { formatLocale } = useLocale();
   const { wallets } = useWallet();
   const { lastIncomingPayment } = useWalletLive();
   // Hashes we've already fired for — guarantees once-per-payment across both
@@ -55,13 +57,16 @@ export default function PaymentNotifier(): null {
       let attempted = false;
       const send = () => {
         attempted = true;
-        return firePaymentNotification({
-          ...payload,
-          owner: owner ?? undefined,
-          // Same identity as the background service uses, so a payment it
-          // already recorded isn't listed twice in the history (#1143).
-          sourceId: paymentHash ?? `${amountSats}:${at}`,
-        });
+        return firePaymentNotification(
+          {
+            ...payload,
+            owner: owner ?? undefined,
+            // Same identity as the background service uses, so a payment it
+            // already recorded isn't listed twice in the history (#1143).
+            sourceId: paymentHash ?? `${amountSats}:${at}`,
+          },
+          formatLocale,
+        );
       };
       const outcome =
         !owner || !paymentHash
@@ -117,7 +122,7 @@ export default function PaymentNotifier(): null {
       }, TX_SETTLE_GRACE_MS);
       fallbackTimers.current.set(dedupeKey, timer);
     }
-  }, [lastIncomingPayment, wallets]);
+  }, [lastIncomingPayment, wallets, formatLocale]);
 
   // Clear any outstanding fallback timers on unmount.
   useEffect(() => {

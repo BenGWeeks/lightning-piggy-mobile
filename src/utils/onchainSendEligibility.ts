@@ -8,26 +8,29 @@ export interface SendBlocker {
 }
 
 /** One gate for the button and handler: a known total must fit a known balance. */
-export function onchainSendEligibility({
-  amountSats,
-  balanceSats,
-  viaSwap,
-  loading,
-  fees,
-  directFeeSats,
-  directShortfall = null,
-  errorKey,
-}: {
-  amountSats: number;
-  balanceSats: number | null;
-  viaSwap: boolean;
-  loading: boolean;
-  fees: SwapFees | null;
-  directFeeSats: number | null;
-  /** BDK couldn't fund the direct send — a balance problem, not a fee one. */
-  directShortfall?: DirectShortfall | null;
-  errorKey: string | null;
-}): { canSend: boolean; reason: SendBlocker | null } {
+export function onchainSendEligibility(
+  {
+    amountSats,
+    balanceSats,
+    viaSwap,
+    loading,
+    fees,
+    directFeeSats,
+    directShortfall = null,
+    errorKey,
+  }: {
+    amountSats: number;
+    balanceSats: number | null;
+    viaSwap: boolean;
+    loading: boolean;
+    fees: SwapFees | null;
+    directFeeSats: number | null;
+    /** BDK couldn't fund the direct send — a balance problem, not a fee one. */
+    directShortfall?: DirectShortfall | null;
+    errorKey: string | null;
+  },
+  locale?: string,
+): { canSend: boolean; reason: SendBlocker | null } {
   let reason: SendBlocker | null = null;
   if (errorKey) {
     reason = { key: errorKey };
@@ -36,7 +39,7 @@ export function onchainSendEligibility({
   } else if (loading) {
     reason = { key: 'sendSheet.loadingFees' };
   } else if (!viaSwap && directShortfall) {
-    reason = shortfallBlocker(amountSats, directShortfall, balanceSats);
+    reason = shortfallBlocker(amountSats, directShortfall, balanceSats, locale);
   } else if (
     viaSwap
       ? !fees
@@ -46,21 +49,26 @@ export function onchainSendEligibility({
   } else if (balanceSats === null || !Number.isSafeInteger(balanceSats) || balanceSats < 0) {
     reason = { key: 'sendSheet.balanceUnavailable' };
   } else if (viaSwap && fees) {
-    reason = reverseSwapSendBlocker(amountSats, fees, balanceSats);
+    reason = reverseSwapSendBlocker(amountSats, fees, balanceSats, locale);
   } else if (directFeeSats !== null && amountSats + directFeeSats > balanceSats) {
-    reason = costsMoreThanBalance(amountSats, directFeeSats, balanceSats);
+    reason = costsMoreThanBalance(amountSats, directFeeSats, balanceSats, locale);
   }
   return { canSend: reason === null, reason };
 }
 
-function costsMoreThanBalance(amount: number, fee: number, balance: number): SendBlocker {
+function costsMoreThanBalance(
+  amount: number,
+  fee: number,
+  balance: number,
+  locale?: string,
+): SendBlocker {
   return {
     key: 'sendSheet.swapInsufficientBalance',
     params: {
-      total: (amount + fee).toLocaleString(),
-      amount: amount.toLocaleString(),
-      fee: fee.toLocaleString(),
-      balance: balance.toLocaleString(),
+      total: (amount + fee).toLocaleString(locale),
+      amount: amount.toLocaleString(locale),
+      fee: fee.toLocaleString(locale),
+      balance: balance.toLocaleString(locale),
     },
   };
 }
@@ -70,11 +78,12 @@ function shortfallBlocker(
   amountSats: number,
   { neededSats, availableSats }: DirectShortfall,
   balanceSats: number | null,
+  locale?: string,
 ): SendBlocker {
   // BDK's spendable total is what this transaction could actually use.
   const balance = availableSats ?? balanceSats;
   if (neededSats !== null && neededSats >= amountSats && balance !== null) {
-    return costsMoreThanBalance(amountSats, neededSats - amountSats, balance);
+    return costsMoreThanBalance(amountSats, neededSats - amountSats, balance, locale);
   }
   return { key: 'sendSheet.onchainInsufficientFunds' };
 }

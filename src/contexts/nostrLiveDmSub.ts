@@ -1,3 +1,4 @@
+import { getAppFormatLocale } from '../utils/appFormatLocale';
 import { dmThreadId, protocolForWireKind } from '../utils/dmProtocol';
 import React from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -17,10 +18,16 @@ import {
 import { parseOrderEvent, serializeOrder, orderPreviewText } from '../utils/orderEvents';
 import { nip04PlaintextCache, getMemoisedSecretKey } from './nostrSecretKeyCache';
 import { notifyDmMessage } from './nostrEventBus';
-import { fireMessageNotification } from '../services/notificationService';
+import { fireMessageNotification, isThreadActivelyViewed } from '../services/notificationService';
 import { createLiveRumorSurfacer } from './liveDmRumorSurface';
 import { createLiveDmEngineBridge } from './liveDmEngineBridge';
-import { claimWrapNotification } from '../services/dmWrapNotificationDedupe';
+import {
+  claimWrapNotification,
+  markWrapHandled,
+  noteLiveDmSubArmed,
+  retractContentlessWrapAlert,
+  takeContentlessWrapAlert,
+} from '../services/dmWrapNotificationDedupe';
 import { createYieldScheduler, NIP17_LOOP_YIELD_EVERY } from './nostrDecryptPacing';
 import { capKnownWrapIds } from './knownWrapIdsCap';
 import type { LiveSubFollowGateBuffer, DeferredFollowGateEntry } from './liveSubFollowGate';
@@ -111,6 +118,9 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
   } = params;
   const seen = new Set<string>();
   const SEEN_CAP = 4096;
+  // Tells the background watch in this context that a decrypting sub owns
+  // wrap alerts (see dmWrapNotificationDedupe). Undone in the teardown.
+  noteLiveDmSubArmed(true);
   // In-memory mirror of the encrypted DM store's wrap-id index
   // (#848). Backed by `knownWrapIdsRef` so the Set survives this
   // effect's re-runs (relay-list change → fresh effect instance).
@@ -197,18 +207,31 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     notifyDmMessage(item.partnerPubkey);
     // claimWrapNotification: the background watch (same JS context, no follow
     // gate) may have already notified for this wrap — never post twice (#279).
-    if (item.notify && claimWrapNotification(item.entry.id)) {
-      void fireMessageNotification({
-        owner: viewerPubkey,
-        kind: 'dm',
-        threadId: dmThreadId(item.partnerPubkey, protocolForWireKind(item.entry.wireKind)),
-        title: item.notify.title,
-        body: item.notify.body,
-        data: {
-          conversationPubkey: item.partnerPubkey,
-          conversationProtocol: protocolForWireKind(item.entry.wireKind),
-        },
-      });
+    // Its contentless alert, though, is replaced by this real one — recorded
+    // first, then the placeholder goes.
+    const placeholder = takeContentlessWrapAlert(item.entry.id);
+    const threadId = dmThreadId(item.partnerPubkey, protocolForWireKind(item.entry.wireKind));
+    // Only once the real alert was written (or the thread is on screen).
+    const dropPlaceholder = (id: string | null) =>
+      placeholder && (id || isThreadActivelyViewed(threadId))
+        ? retractContentlessWrapAlert(viewerPubkey, item.entry.id)
+        : undefined;
+    if (item.notify && (claimWrapNotification(item.entry.id) || placeholder)) {
+      void Promise.resolve(
+        fireMessageNotification({
+          owner: viewerPubkey,
+          kind: 'dm',
+          threadId,
+          title: item.notify.title,
+          body: item.notify.body,
+          data: {
+            conversationPubkey: item.partnerPubkey,
+            conversationProtocol: protocolForWireKind(item.entry.wireKind),
+          },
+        }),
+      )
+        .then(dropPlaceholder)
+        .catch(() => undefined);
     }
   };
   setDeferredReplay(replayDeferredFollowGate);
@@ -272,7 +295,11 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     // fixture with 100+ wraps in the backlog this compressed the
     // cold-start JS-thread occupation window from ~12 s to <1 s.
     // Per issue #505.
-    if (ev.kind === 1059 && knownWrapIds.has(ev.id)) return;
+    if (ev.kind === 1059 && knownWrapIds.has(ev.id)) {
+      // Already stored (and shown): nothing for the background watch to alert.
+      markWrapHandled(ev.id);
+      return;
+    }
     // Eagerly claim this wrap.id in the in-memory dedup Set before
     // doing any async work. The deferred writeChain at the bottom of
     // this handler also does this, but only after AsyncStorage I/O
@@ -350,6 +377,10 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       } else if (__DEV__) {
         console.log(`[Nostr] live kind-4 ${ev.id.slice(0, 8)} dedup-cache`);
       }
+      // Handled (background sync in this context won't re-ping it) only once
+      // decided: ours, a known stranger, or alerted below. A message we don't
+      // alert for (not fresh) stays the sync's to ping.
+      if (fromMe || isFreshArrival(ev.created_at)) markWrapHandled(ev.id);
       if (cancelled || !isCurrentOwner() || viewerPubkey !== pubkey || activeSigner !== signerType)
         return;
 
@@ -478,12 +509,13 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       const fromMe = ev.pubkey === viewerPubkey;
       const recipientTag = ev.tags.find((t) => t[0] === 'p')?.[1]?.toLowerCase();
       const partnerPubkey = fromMe ? recipientTag : ev.pubkey.toLowerCase();
+      if (fromMe || isFreshArrival(ev.created_at)) markWrapHandled(ev.id); // see kind-4
       if (!partnerPubkey || !/^[0-9a-f]{64}$/.test(partnerPubkey)) {
         if (__DEV__) console.log(`[Nostr] live kind-${ev.kind} ${ev.id.slice(0, 8)} no-partner`);
         return;
       }
       const serialized = serializeOrder(order);
-      const preview = orderPreviewText(order);
+      const preview = orderPreviewText(order, getAppFormatLocale());
       const orderRow: DmMessageRow = {
         owner: viewerPubkey,
         eventId: ev.id,
@@ -754,6 +786,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
 
   return () => {
     cancelled = true;
+    noteLiveDmSubArmed(false);
     // Invalidate any in-flight close signal + pending reconnect FIRST (#934):
     // stopReconnecting() bumps the generation and stops the AppState-resume
     // re-arm BEFORE closeSubscription() below fires `onWrapsClose`

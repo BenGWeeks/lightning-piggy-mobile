@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, Linking } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
-import { useTranslation } from '../contexts/LocaleContext';
+import { useLocale } from '../contexts/LocaleContext';
 import type { SendSheetStyles } from '../styles/SendSheet.styles';
 import type { ReverseRecipientQuote } from '../utils/reverseSwapAmounts';
 import type { SendBlocker } from '../utils/onchainSendEligibility';
@@ -36,7 +36,7 @@ export default function SendOnchainFeeRow({
   onRetry,
   styles,
 }: Props) {
-  const t = useTranslation();
+  const { t, formatLocale } = useLocale();
   const reason = blocker ? t(blocker.key, blocker.params) : null;
   // A real blocker stands out from the grey fee lines; "loading" is just status.
   const reasonStyle =
@@ -82,12 +82,14 @@ export default function SendOnchainFeeRow({
       ) : quote ? (
         <View style={styles.feeLines}>
           <Text style={[styles.feeText, styles.feeTextStart]} testID="send-swap-recipient-gets">
-            {t('sendSheet.swapRecipientGets', { amount: quote.recipientSats.toLocaleString() })}
+            {t('sendSheet.swapRecipientGets', {
+              amount: quote.recipientSats.toLocaleString(formatLocale),
+            })}
           </Text>
           <Text style={[styles.feeText, styles.feeTextStart]} testID="send-swap-you-pay">
             {t('sendSheet.swapYouPay', {
-              total: quote.invoiceSats.toLocaleString(),
-              fee: quote.feeSats.toLocaleString(),
+              total: quote.invoiceSats.toLocaleString(formatLocale),
+              fee: quote.feeSats.toLocaleString(formatLocale),
             })}
           </Text>
           {reason && (

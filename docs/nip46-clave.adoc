@@ -75,7 +75,7 @@ Bunker-side batching is filed as a follow-up. See `src/services/nostrConnectServ
 The `nostrconnect://` URI we generate matches the format defined in the NIP-46 spec, section "Nostr Connect URIs":
 
 ----
-nostrconnect://<client-pub>?relay=wss://relay.nsec.app&secret=<32hex>&perms=sign_event,nip04_encrypt,nip04_decrypt,nip44_encrypt,nip44_decrypt&name=Lightning%20Piggy
+nostrconnect://<client-pub>?relay=wss://relay.primal.net&relay=wss://relay.ditto.pub&relay=wss://nos.lol&secret=<32hex>&perms=sign_event,nip04_encrypt,nip04_decrypt,nip44_encrypt,nip44_decrypt&name=Lightning%20Piggy
 ----
 
 Bunkers known to consume this format (no app-side testing, just spec compliance):
@@ -86,7 +86,7 @@ Bunkers known to consume this format (no app-side testing, just spec compliance)
 * **Nowser** (Android, https://github.com/haorendashu/nowser[GitHub])
 * **Nostrum**
 
-The relay default is `wss://relay.nsec.app`. Bunkers that subscribe to other relays will need URI customisation — that's a follow-up. Most bunkers either default to the same relay or watch a wide set including this one.
+The URI names every relay in `NIP46_PAIRING_RELAYS` (`src/services/nostrRelayDefaults.ts`: relay.primal.net, relay.ditto.pub, nos.lol), and the app listens for the bunker's reply on all of them, so one dead relay can't break pairing. It used to name only `wss://relay.nsec.app`, which is dead (#1198, #1326). Bunkers connect to whichever relays the URI names.
 
 == Storage
 

@@ -18,7 +18,7 @@ name: Create Nostr Account Test
     id: 'account-back-button'
     optional: true
 - tapOn:
-    text: 'Home tab'
+    text: 'Wallets tab'
     optional: true
 - waitForAnimationToEnd:
     timeout: 3000
