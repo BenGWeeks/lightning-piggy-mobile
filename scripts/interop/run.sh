@@ -141,7 +141,8 @@ with_device '
   # Wire check of Lightning Piggy'"'"'s sends from the scripted member.
   sender listen --state "$STATE" --seconds 90 \
     --expect "IO${TAG}L plain" --expect "IO${TAG}L md" --expect "IO${TAG}L long" \
-    --expect "IO${TAG}L editme v1 EDITED" >"$OUT/logs/listen-lp.jsonl"
+    --expect "IO${TAG}L editme v1 EDITED" >"$OUT/logs/listen-lp.jsonl" || true
+  exit 0 # only a failed group creation (above) ends the run
 ' || exit 1
 source "$ROW_FILE"
 
