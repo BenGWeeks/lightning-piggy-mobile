@@ -50,6 +50,12 @@ describe('general-purpose lists', () => {
     expect(new Set(healthy.map(host)).size).toBeGreaterThanOrEqual(3);
   });
 
+  it('PROFILE_RELAYS includes the White Noise relays, where its users publish kind 0', () => {
+    expect(PROFILE_RELAYS).toEqual(
+      expect.arrayContaining(['wss://relay.eu.whitenoise.chat', 'wss://relay.us.whitenoise.chat']),
+    );
+  });
+
   it('DEFAULT_RELAYS leads with healthy relays (nprofile hints use the first 3)', () => {
     expect(DEFAULT_RELAYS.slice(0, 3).some((r) => UNRELIABLE_RELAYS.includes(host(r)))).toBe(false);
   });
