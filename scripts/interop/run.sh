@@ -23,6 +23,8 @@
 #   METRO_PORT=<port>           point the dev client at this Metro for the run
 #                               (restored to 8090 afterwards). Unset = leave as is.
 #   LOCK_DIR=/tmp/claude-$UID   where the lane locks live (emulator.lock, maestro.lock).
+#   DEVICE_LOCK=<file>          the device's lane lock (default $LOCK_DIR/emulator.lock).
+#   LOCK_WAIT=3600              seconds to wait for the device lock per window.
 #   OUT=~/lp-interop-runs/<date>-<tag>
 #   SKIP_WN=1                   Lightning Piggy only (no White Noise flows).
 #
@@ -37,6 +39,8 @@ export PATH="$PATH:$HOME/.maestro/bin"
 DEVICE="${DEVICE:-emulator-5554}"
 SENDER="${SENDER:-MIDDLE}"
 LOCK_DIR="${LOCK_DIR:-/tmp/claude-$(id -u)}"
+# The lane lock for $DEVICE (e.g. hulk-emu.lock for 127.0.0.1:5565).
+DEVICE_LOCK="${DEVICE_LOCK:-$LOCK_DIR/emulator.lock}"
 TAG="$(LC_ALL=C tr -dc 'a-z0-9' </dev/urandom | head -c 4)"
 OUT="${OUT:-$HOME/lp-interop-runs/$(date +%Y-%m-%d-%H%M)-$TAG}"
 mkdir -p "$OUT/screenshots" "$OUT/logs"
@@ -117,7 +121,7 @@ export DEVICE OUT TAG LOCK_DIR FIXTURE_ON_DEVICE FLOWS METRO_PORT
 
 # Run a bash snippet under the device lock, with setup + restore inside it.
 with_device() {
-  flock -w 3600 "$LOCK_DIR/emulator.lock" bash -o pipefail -c "trap device_restore EXIT; device_setup; $1"
+  flock -w "${LOCK_WAIT:-3600}" "$DEVICE_LOCK" bash -o pipefail -c "trap device_restore EXIT; device_setup; $1"
 }
 
 # Why the sender runs inside the device lock: if another build of Lightning
