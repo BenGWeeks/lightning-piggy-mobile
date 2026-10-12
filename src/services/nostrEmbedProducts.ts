@@ -7,6 +7,8 @@ import { parseMarketListing, reduceMarketListings } from '../utils/marketListing
 import { addressOf, addressRefs, deletionFilters, idRefs } from '../utils/nip09';
 import type { MarketProduct } from '../data/marketProducts';
 
+const MAX_CONCURRENT_SELLERS = 4;
+
 /** Reconcile a bounded embed batch by seller and kind, using the structure-only
  * market pool so signature checks run under a frame budget, outside callbacks. */
 export async function reconcileEmbedProducts(
@@ -26,7 +28,7 @@ export async function reconcileEmbedProducts(
       group.push(event);
       groups.set(key, group);
     }
-    for (const group of groups.values()) {
+    const reconcileGroup = async (group: Event[]): Promise<void> => {
       try {
         const { pubkey, kind } = group[0];
         const addresses = new Set(group.map(addressOf));
@@ -67,7 +69,17 @@ export async function reconcileEmbedProducts(
         // seller's successfully reconciled withdrawals.
         for (const event of group) result.set(event.id, parseMarketListing(event));
       }
-    }
+    };
+    const remaining = [...groups.values()];
+    let next = 0;
+    await Promise.all(
+      Array.from({ length: Math.min(MAX_CONCURRENT_SELLERS, remaining.length) }, async () => {
+        while (next < remaining.length) {
+          const group = remaining[next++];
+          await reconcileGroup(group);
+        }
+      }),
+    );
     return result;
   } finally {
     scheduler.dispose();

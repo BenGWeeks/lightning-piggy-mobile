@@ -4,7 +4,69 @@ import { withRelayHealth } from './healthAwarePool';
 import { hydrateRelayHealth } from './relayHealth';
 
 /** `SimplePool` that skips relays known to be dead (#1326, see ./healthAwarePool). */
-class HealthAwarePool extends withRelayHealth(SimplePool) {}
+class HealthAwarePool extends withRelayHealth(SimplePool) {
+  private readonly pendingPublishes = new Map<string, number>();
+
+  publish(...args: Parameters<SimplePool['publish']>): Promise<string>[] {
+    const urls = args[0].map((url) => {
+      try {
+        return normalizeURL(url);
+      } catch {
+        // Leave malformed URLs to the underlying publish error handling.
+        return url;
+      }
+    });
+    for (const url of urls) {
+      this.pendingPublishes.set(url, (this.pendingPublishes.get(url) ?? 0) + 1);
+    }
+    const finish = (url: string): void => {
+      const remaining = this.pendingPublishes.get(url)! - 1;
+      if (remaining) this.pendingPublishes.set(url, remaining);
+      else this.pendingPublishes.delete(url);
+    };
+    try {
+      const results = super.publish(...args);
+      results.forEach((result, i) => {
+        // Covers connection and AUTH signing/retry as well as waiting for OK.
+        void result.then(
+          () => finish(urls[i]),
+          () => finish(urls[i]),
+        );
+      });
+      return results;
+    } catch (error) {
+      urls.forEach(finish);
+      throw error;
+    }
+  }
+
+  pruneIdleRelays(idleThresholdMs = 10000): string[] {
+    const pruned: string[] = [];
+    for (const [url, relay] of this.relays) {
+      // nostr-tools marks EVENT sends idle before OK and does not count COUNT
+      // requests. These private maps are runtime fields in the installed SDK;
+      // fail closed if a future version stops exposing them.
+      const operations = relay as unknown as {
+        openEventPublishes?: Map<string, unknown>;
+        openCountRequests?: Map<string, unknown>;
+      };
+      if (
+        this.pendingPublishes.has(url) ||
+        operations.openEventPublishes?.size !== 0 ||
+        operations.openCountRequests?.size !== 0 ||
+        relay.openSubs.size > 0 ||
+        relay.ongoingOperations > 0 ||
+        relay.idleSince === undefined ||
+        Date.now() - relay.idleSince < idleThresholdMs
+      )
+        continue;
+      this.relays.delete(url);
+      pruned.push(url);
+      relay.close();
+    }
+    return pruned;
+  }
+}
 
 /**
  * Shared connection-pool singleton, kept in its own dependency-free module.

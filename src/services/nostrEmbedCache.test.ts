@@ -169,3 +169,40 @@ it('prunes idle connections after every hinted batch, including failed queries',
   await settle(resolveEmbed(eventRef(id('2'), ['wss://hint-2']), ['wss://read']));
   expect(mockPrune).toHaveBeenCalledTimes(2);
 });
+
+it('delivers ordinary embeds while a product query and seller reconciliation are pending', async () => {
+  const note = ev({ id: id('1') });
+  const listing = ev({ id: id('7'), kind: 30402, tags: [['d', 'mug']] });
+  let finishQuery!: (events: Event[]) => void;
+  let finishProducts!: (products: Map<string, null>) => void;
+  mockQuery.mockImplementation((_pool, _relays, filter) =>
+    filter.ids
+      ? Promise.resolve([note])
+      : new Promise((resolve) => {
+          finishQuery = resolve;
+        }),
+  );
+  mockRevision.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finishProducts = resolve;
+      }),
+  );
+  const receiveNote = jest.fn();
+  const receiveProduct = jest.fn();
+  const ordinary = resolveEmbed(eventRef(note.id), ['wss://read']).then(receiveNote);
+  const product = resolveEmbed(addrRef(30402, 'mug'), ['wss://read']).then(receiveProduct);
+  await jest.advanceTimersByTimeAsync(100);
+  expect(receiveNote).toHaveBeenCalledWith({ event: note });
+  expect(peekEmbed(`e:${note.id}`)).toEqual({ event: note });
+  expect(receiveProduct).not.toHaveBeenCalled();
+  finishQuery([listing]);
+  await jest.advanceTimersByTimeAsync(0);
+  expect(receiveProduct).not.toHaveBeenCalled();
+  expect(mockPrune).not.toHaveBeenCalled();
+  finishProducts(new Map([[listing.id, null]]));
+  await jest.advanceTimersByTimeAsync(0);
+  await Promise.all([ordinary, product]);
+  expect(receiveProduct).toHaveBeenCalledWith({ event: listing, product: null });
+  expect(mockPrune).toHaveBeenCalledTimes(1);
+});

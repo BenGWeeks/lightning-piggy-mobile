@@ -135,6 +135,21 @@ async function flush(): Promise<void> {
   const relays = relaysFor(refs);
   const found = new Map<string, Event>();
   const scheduler = createYieldScheduler({ safetyEvery: 32 });
+  const delivered = new Set<string>();
+  const deliver = (key: string, item: Pending, result: EmbedResult): void => {
+    if (delivered.has(key)) return;
+    delivered.add(key);
+    remember(key, result);
+    inFlight.delete(key);
+    item.resolve(result);
+  };
+  const deliverOrdinary = (matches: (ref: EmbedRef) => boolean): void => {
+    for (const [key, item] of batch) {
+      if (!matches(item.ref)) continue;
+      const event = found.get(key) ?? null;
+      if (event?.kind !== PRODUCT_KIND) deliver(key, item, { event });
+    }
+  };
   try {
     if (relays.length > 0) {
       trackRelays(relays);
@@ -160,6 +175,7 @@ async function flush(): Promise<void> {
               await scheduler.maybeYield();
               if (ids.includes(e.id) && hasValidSignature(e)) found.set(`e:${e.id}`, e);
             }
+            deliverOrdinary((ref) => ref.type === 'event');
           }),
         );
       }
@@ -181,6 +197,9 @@ async function flush(): Promise<void> {
                 )
                   found.set(k, e);
               }
+              deliverOrdinary(
+                (ref) => ref.type === 'address' && ref.kind === kind && ref.pubkey === pubkey,
+              );
             },
           ),
         );
@@ -206,9 +225,7 @@ async function flush(): Promise<void> {
         event?.kind === PRODUCT_KIND
           ? { event: product?.listing?.event ?? event, product }
           : { event };
-      remember(key, result);
-      inFlight.delete(key);
-      item.resolve(result);
+      deliver(key, item, result);
     }
   } finally {
     scheduler.dispose();

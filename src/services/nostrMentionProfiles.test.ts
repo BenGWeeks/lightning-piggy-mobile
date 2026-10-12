@@ -83,3 +83,41 @@ it('uses only matching cosmetic metadata and never persists unverified payment f
   await jest.advanceTimersByTimeAsync(60);
   expect(query).toHaveBeenCalledTimes(1);
 });
+
+it('requeues a returning owner skipped during disk lookup without delivering or caching a miss', async () => {
+  let finishDisk!: (profiles: Map<string, never>) => void;
+  let finishQuery!: (events: never[]) => void;
+  jest.mocked(storage.getMany).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finishDisk = resolve;
+      }),
+  );
+  query.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finishQuery = resolve;
+      }),
+  );
+  const receiveA = jest.fn();
+  const receiveB = jest.fn();
+  subscribeMentionProfile('a', relays, receiveA);
+  const blurB = subscribeMentionProfile('b', relays, receiveB);
+  await jest.advanceTimersByTimeAsync(60);
+  blurB();
+  finishDisk(new Map<string, never>());
+  await jest.advanceTimersByTimeAsync(0);
+  expect(query.mock.calls[0][2].authors).toEqual(['a']);
+  subscribeMentionProfile('b', relays, receiveB);
+  finishQuery([]);
+  await jest.advanceTimersByTimeAsync(0);
+  expect(receiveA).toHaveBeenCalledTimes(1);
+  expect(receiveB).not.toHaveBeenCalled();
+  query.mockResolvedValue([
+    { kind: 0, pubkey: 'b', created_at: 1, content: '{"name":"Bob"}' },
+  ] as never);
+  await jest.advanceTimersByTimeAsync(60);
+  expect(query.mock.calls[1][2].authors).toEqual(['b']);
+  expect(receiveB).toHaveBeenCalledTimes(1);
+  expect(receiveB).toHaveBeenCalledWith({ name: 'Bob', picture: null });
+});

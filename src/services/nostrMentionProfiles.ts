@@ -66,6 +66,7 @@ async function flush(): Promise<void> {
   active = batch;
   const signal = batch.controller.signal;
   const resolved = new Map<string, MentionProfile>();
+  const queried = new Set<string>();
   try {
     const stored = await storage.getMany(keys);
     if (signal.aborted) return;
@@ -77,6 +78,7 @@ async function flush(): Promise<void> {
     }
     const missing = keys.filter((key) => !resolved.has(key) && owners.has(key));
     if (missing.length && readRelays.length) {
+      missing.forEach((key) => queried.add(key));
       const relays = readRelays;
       trackRelays(relays);
       // kind-0 is structure-only in the shared pool. Display fields don't
@@ -113,6 +115,12 @@ async function flush(): Promise<void> {
     }
     if (signal.aborted) return;
     for (const key of keys) {
+      if (!resolved.has(key) && !queried.has(key)) {
+        // A consumer can return after the relay filter was built. Its key
+        // has not been queried, so a negative cache entry would be fabricated.
+        if (owners.has(key) && readRelays.length) pending.add(key);
+        continue;
+      }
       const profile = resolved.get(key) ?? { ...EMPTY };
       cache.delete(key);
       cache.set(key, { profile, at: Date.now() });

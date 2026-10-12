@@ -1,17 +1,96 @@
+import { AbstractRelay } from 'nostr-tools/abstract-relay';
+import { SimplePool } from 'nostr-tools/pool';
+import type { Event, VerifiedEvent } from 'nostr-tools';
 import { connectedRelays, pool, pruneIdleRelays, trackRelays } from './nostrPool';
 
-jest.mock('nostr-tools/pool', () => ({
-  SimplePool: class {
-    pruneIdleRelays = jest.fn();
-  },
+jest.mock('./relayHealth', () => ({
+  hydrateRelayHealth: jest.fn(),
+  selectHealthyRelays: (urls: string[]) => urls,
+  noteNetworkActivity: jest.fn(),
 }));
-jest.mock('./relayHealth', () => ({ hydrateRelayHealth: jest.fn() }));
 
-it('prunes immediately and removes normalized idle URLs while retaining active relay bookkeeping', () => {
+const relays = (pool as unknown as { relays: Map<string, AbstractRelay> }).relays;
+const created: AbstractRelay[] = [];
+function addRelay(url: string): AbstractRelay {
+  const relay = new AbstractRelay(url, { verifyEvent: (event): event is VerifiedEvent => !!event });
+  created.push(relay);
+  jest.spyOn(relay, 'send').mockResolvedValue();
+  relays.set(url, relay);
+  trackRelays([url]);
+  return relay;
+}
+beforeEach(() => {
+  relays.clear();
   connectedRelays.clear();
-  trackRelays(['wss://hint', 'wss://HINT:443/', 'wss://active']);
-  jest.mocked(pool.pruneIdleRelays).mockReturnValue(['wss://hint/']);
-  pruneIdleRelays();
-  expect(pool.pruneIdleRelays).toHaveBeenCalledWith(0);
-  expect([...connectedRelays]).toEqual(['wss://active']);
 });
+afterEach(() => {
+  created.splice(0).forEach((relay) => relay.close());
+  relays.clear();
+});
+
+it('removes normalized idle URLs while retaining active relay bookkeeping', () => {
+  addRelay('wss://hint/');
+  trackRelays(['wss://HINT:443/']);
+  const active = addRelay('wss://active/');
+  active.prepareSubscription([{ kinds: [1], limit: 1 }], {});
+  active.idleSince = undefined;
+  pruneIdleRelays();
+  expect([...connectedRelays]).toEqual(['wss://active/']);
+});
+
+it('preserves an idle socket until a pending EVENT receives its acknowledgement', async () => {
+  const relay = addRelay('wss://publish/');
+  const publish = relay.publish({ id: 'event' } as Event);
+  const outcome = publish.catch((error: Error) => error.message);
+  expect(relay.idleSince).toBeDefined();
+  pruneIdleRelays();
+  expect(relays.has(relay.url)).toBe(true);
+  expect(connectedRelays.has(relay.url)).toBe(true);
+  relay._onmessage({ data: JSON.stringify(['OK', 'event', true, 'saved']) } as MessageEvent);
+  await expect(outcome).resolves.toBe('saved');
+  pruneIdleRelays();
+  expect(relays.has(relay.url)).toBe(false);
+});
+
+it('preserves outstanding COUNT requests even when the relay is marked idle', async () => {
+  const relay = addRelay('wss://count/');
+  const outcome = relay.count([{ kinds: [1], limit: 1 }], { id: 'count' }).catch(() => -1);
+  pruneIdleRelays();
+  expect(relays.has(relay.url)).toBe(true);
+  relay._onmessage({ data: JSON.stringify(['COUNT', 'count', { count: 3 }]) } as MessageEvent);
+  await expect(outcome).resolves.toBe(3);
+  pruneIdleRelays();
+  expect(relays.has(relay.url)).toBe(false);
+});
+
+it.each([false, true])(
+  'preserves overlapping pool publishes during AUTH signing and releases after settlement (reject: %s)',
+  async (reject) => {
+    const relay = addRelay('wss://auth/');
+    const pending: { resolve: (message: string) => void; reject: (error: Error) => void }[] = [];
+    const publish = jest
+      .spyOn(SimplePool.prototype, 'publish')
+      .mockImplementation((urls) =>
+        urls.map(() => new Promise((resolve, reject) => pending.push({ resolve, reject }))),
+      );
+    try {
+      const first = pool.publish(['wss://AUTH:443'], {} as Event)[0];
+      const second = pool.publish(['wss://auth/'], {} as Event)[0];
+      const outcomes = Promise.allSettled([first, second]);
+      pruneIdleRelays();
+      expect(relays.has(relay.url)).toBe(true);
+      pending[0].resolve('saved');
+      await first;
+      pruneIdleRelays();
+      expect(relays.has(relay.url)).toBe(true);
+      if (reject) pending[1].reject(new Error('AUTH failed'));
+      else pending[1].resolve('saved');
+      await outcomes;
+      pruneIdleRelays();
+      expect(relays.has(relay.url)).toBe(false);
+    } finally {
+      pending.forEach(({ resolve }) => resolve('cleanup'));
+      publish.mockRestore();
+    }
+  },
+);
