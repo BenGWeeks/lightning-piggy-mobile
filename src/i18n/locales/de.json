@@ -3027,6 +3027,8 @@
     "confirmationBody": "Bitcoin-Blöcke brauchen im Schnitt etwa 10 Min., manchmal deutlich länger. Dein Guthaben ist sicher — der Tausch wird automatisch abgeschlossen."
   },
   "notificationMute": {
+    "muteAction": "Stummschalten",
+    "unmuteAction": "Ton einschalten",
     "mute": "Benachrichtigungen von diesem Konto stummschalten",
     "unmute": "Benachrichtigungen von diesem Konto aktivieren",
     "accounts": "Stummgeschaltete Konten",

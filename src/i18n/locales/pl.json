@@ -3065,6 +3065,8 @@
     "confirmationBody": "Bloki Bitcoin pojawiają się średnio co około 10 min, ale czasem trwa to znacznie dłużej. Środki są bezpieczne — wymiana zakończy się automatycznie."
   },
   "notificationMute": {
+    "muteAction": "Wycisz",
+    "unmuteAction": "Włącz powiadomienia",
     "mute": "Wycisz powiadomienia z tego konta",
     "unmute": "Włącz powiadomienia z tego konta",
     "accounts": "Wyciszone konta",

@@ -3027,6 +3027,8 @@
     "confirmationBody": "A Bitcoin-blokkok átlagosan kb. 10 percenként érkeznek, de néha sokkal tovább tart. A pénzed biztonságban van — az átváltás automatikusan befejeződik."
   },
   "notificationMute": {
+    "muteAction": "Némítás",
+    "unmuteAction": "Némítás feloldása",
     "mute": "A fiók értesítéseinek némítása",
     "unmute": "A fiók értesítéseinek visszakapcsolása",
     "accounts": "Némított fiókok",

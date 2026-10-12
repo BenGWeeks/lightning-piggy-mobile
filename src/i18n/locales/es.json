@@ -3027,6 +3027,8 @@
     "confirmationBody": "Los bloques de Bitcoin tardan unos 10 min de media, pero a veces mucho más. Los fondos están seguros — el intercambio se completa automáticamente."
   },
   "notificationMute": {
+    "muteAction": "Silenciar",
+    "unmuteAction": "Activar avisos",
     "mute": "Silenciar notificaciones de esta cuenta",
     "unmute": "Activar notificaciones de esta cuenta",
     "accounts": "Cuentas silenciadas",

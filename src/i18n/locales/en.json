@@ -3027,6 +3027,8 @@
     "confirmationBody": "Bitcoin blocks average ~10 min but sometimes take much longer. Funds are safe — the swap finishes automatically."
   },
   "notificationMute": {
+    "muteAction": "Mute",
+    "unmuteAction": "Unmute",
     "mute": "Mute notifications from this account",
     "unmute": "Unmute notifications from this account",
     "accounts": "Muted accounts",
