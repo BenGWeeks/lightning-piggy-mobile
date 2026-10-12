@@ -24,6 +24,14 @@ const toFeedEvent = (ev: Event): AuthorFeedEvent => ({
   tags: ev.tags,
 });
 
+/** Whether the shared pool reports every relay as connected. */
+function allConnected(relays: readonly string[]): boolean {
+  const status = pool.listConnectionStatus();
+  const norm = (u: string) => u.replace(/\/+$/, '').toLowerCase();
+  const connected = new Set([...status.entries()].filter(([, ok]) => ok).map(([url]) => norm(url)));
+  return relays.every((r) => connected.has(norm(r)));
+}
+
 const feedFilter = (authorPubkey: string, limit: number, until?: number): Filter => ({
   kinds: PROFILE_FEED_KINDS,
   authors: [authorPubkey],
@@ -106,7 +114,12 @@ export async function fetchAuthorFeedPage(input: {
       .filter((ev) => ev.pubkey === input.authorPubkey && PROFILE_FEED_KINDS.includes(ev.kind))
       .map(toFeedEvent)
       .sort((a, b) => b.created_at - a.created_at),
-    // querySyncAbortable resolves early only on EOSE (or abort).
-    complete: !input.signal?.aborted && Date.now() - startedAt < PAGE_TIMEOUT_MS - 50,
+    // Resolved before the timeout (aggregate EOSE) AND every relay is still
+    // connected — the pool counts a failed connection towards EOSE, so a fast
+    // failure on the one relay holding older posts must not read as "end".
+    complete:
+      !input.signal?.aborted &&
+      Date.now() - startedAt < PAGE_TIMEOUT_MS - 50 &&
+      allConnected(input.relays),
   };
 }

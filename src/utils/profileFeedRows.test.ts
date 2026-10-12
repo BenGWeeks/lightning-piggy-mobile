@@ -3,6 +3,8 @@ import {
   chunk,
   collectMediaTiles,
   countTopLevelPosts,
+  MAX_AUTO_PAGES,
+  shouldAutoPage,
   sortFeed,
 } from './profileFeedRows';
 import type { AuthorFeedEvent } from '../services/authorFeedService';
@@ -116,5 +118,36 @@ describe('buildProfileRows', () => {
       products: [product('a'), product('b'), product('c')],
     });
     expect(products.map((r) => r.key)).toEqual(['products-a', 'products-c']);
+  });
+});
+
+describe('shouldAutoPage', () => {
+  const idle = {
+    focused: true,
+    tab: 'posts' as const,
+    postsMode: 'posts' as const,
+    loading: false,
+    loadingMore: false,
+    reachedEnd: false,
+    feedSize: 30,
+    topLevelCount: 3,
+    autoPages: 0,
+  };
+
+  it('pages past replies while the Posts view is short of posts', () => {
+    expect(shouldAutoPage(idle)).toBe(true);
+  });
+
+  it('never pages while blurred, even after an aborted request settles', () => {
+    expect(shouldAutoPage({ ...idle, focused: false })).toBe(false);
+  });
+
+  it('stops at the budget, the end, enough posts, or outside Posts mode', () => {
+    expect(shouldAutoPage({ ...idle, autoPages: MAX_AUTO_PAGES })).toBe(false);
+    expect(shouldAutoPage({ ...idle, reachedEnd: true })).toBe(false);
+    expect(shouldAutoPage({ ...idle, topLevelCount: 10 })).toBe(false);
+    expect(shouldAutoPage({ ...idle, postsMode: 'all' })).toBe(false);
+    expect(shouldAutoPage({ ...idle, tab: 'shop' })).toBe(false);
+    expect(shouldAutoPage({ ...idle, loadingMore: true })).toBe(false);
   });
 });

@@ -2,6 +2,7 @@ import * as nip19 from 'nostr-tools/nip19';
 import {
   decodeNostrEntity,
   isPublicRelayUrl,
+  parseIPv4Literal,
   embedKey,
   parseNostrContent,
   previewText,
@@ -168,6 +169,46 @@ describe('isPublicRelayUrl', () => {
     ]) {
       expect(isPublicRelayUrl(bad)).toBe(false);
     }
+  });
+
+  it('canonicalises look-alike hosts before judging them (review #1334)', () => {
+    for (const bad of [
+      'wss://127.1', // numeric shorthand
+      'wss://0x7f.1',
+      'wss://2130706433', // 127.0.0.1 as one number
+      'wss://0177.0.0.1', // octal
+      'wss://10.1',
+      'wss://192.168.257', // last part fills two bytes → 192.168.1.1
+      'wss://localhost.', // trailing dot
+      'wss://LOCALHOST..',
+      'wss://relay.localhost',
+      'wss://nas.lan',
+      'wss://router.home.arpa',
+      'wss://[::ffff:127.0.0.1]', // IPv4-mapped IPv6
+      'wss://[::ffff:7f00:1]',
+      'wss://[::127.0.0.1]',
+      'wss://[::]',
+      'wss://[fe80::1]:443',
+      'wss://[fc00::1]',
+      'wss://[ff02::1]',
+      'wss://100.64.0.1',
+      'wss://relay%2eexample.com',
+      'wss://999.1.1.1',
+    ]) {
+      expect(isPublicRelayUrl(bad)).toBe(false);
+    }
+    expect(isPublicRelayUrl('wss://relay.example.com.')).toBe(true); // FQDN dot
+    expect(isPublicRelayUrl('wss://[2606:4700::1111]')).toBe(true);
+    expect(isPublicRelayUrl('wss://1.1.1.1:443')).toBe(true);
+  });
+
+  it('parses IPv4 literals like inet_aton', () => {
+    expect(parseIPv4Literal('127.1')).toEqual([127, 0, 0, 1]);
+    expect(parseIPv4Literal('0x7f.0.0.1')).toEqual([127, 0, 0, 1]);
+    expect(parseIPv4Literal('2130706433')).toEqual([127, 0, 0, 1]);
+    expect(parseIPv4Literal('192.168.257')).toEqual([192, 168, 1, 1]);
+    expect(parseIPv4Literal('256.1.1.1')).toBeNull();
+    expect(parseIPv4Literal('relay.example')).toBeNull();
   });
 });
 

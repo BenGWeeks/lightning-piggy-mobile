@@ -48,6 +48,11 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
   const pagesRef = useRef(0);
   const loadingMoreRef = useRef(false);
   const moreAbortRef = useRef<AbortController | null>(null);
+  // True only while the screen is focused. A blur aborts any page request
+  // and keeps `loadMore` a no-op until the next focus, so nothing (e.g. the
+  // screen's auto-paging re-arming after the aborted request settles) can
+  // query relays behind another screen.
+  const focusedRef = useRef(false);
 
   // A different person starts from scratch. Refocusing, or a pull-to-refresh,
   // keeps what's loaded (and the scroll position) and merges new events in.
@@ -58,8 +63,16 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
     setLoading(true);
   }, [authorPubkey, reset]);
 
+  // Pull-to-refresh re-opens paging, so an end reached during a relay outage
+  // can be retried once the relay is back.
+  useEffect(() => {
+    pagesRef.current = 0;
+    setReachedEnd(false);
+  }, [reloadNonce]);
+
   useFocusEffect(
     useCallback(() => {
+      focusedRef.current = true;
       if (!authorPubkey || readRelays.length === 0) {
         setLoading(false);
         return;
@@ -84,6 +97,7 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
       const grace = setTimeout(() => setLoading(false), FIRST_EVENT_GRACE_MS);
       return () => {
         live = false;
+        focusedRef.current = false;
         clearTimeout(grace);
         unsubscribe();
         flush();
@@ -103,6 +117,7 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
   const oldest = events.length > 0 ? events[events.length - 1].created_at : null;
 
   const loadMore = useCallback(async () => {
+    if (!focusedRef.current) return;
     if (!authorPubkey || oldest === null || loadingMoreRef.current || reachedEnd) return;
     if (pagesRef.current >= MAX_PAGES) {
       setReachedEnd(true);
@@ -135,7 +150,7 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
           signal: controller.signal,
         });
       }
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted || !focusedRef.current) return;
       pagesRef.current += 1;
       const fresh = page.events.filter((e) => !known(e));
       // Only a complete answer with nothing new means "no older posts"; a

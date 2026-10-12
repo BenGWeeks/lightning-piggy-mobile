@@ -16,7 +16,7 @@ import ContactActionsSheet from '../components/ContactActionsSheet';
 import * as Clipboard from 'expo-clipboard';
 import { ChevronLeft, MoreHorizontal } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import { useIsFocused, useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Alert } from '../components/BrandedAlert';
 import Toast from '../components/BrandedToast';
@@ -45,6 +45,7 @@ import {
 import {
   buildProfileRows,
   countTopLevelPosts,
+  shouldAutoPage,
   type PostsMode,
   type ProfileRow,
   type ProfileTab,
@@ -64,11 +65,6 @@ import type { RootStackParamList } from '../navigation/types';
 
 type ContactProfileNavigation = NativeStackNavigationProp<RootStackParamList, 'ContactProfile'>;
 type ContactProfileRoute = RouteProp<RootStackParamList, 'ContactProfile'>;
-
-/** "Posts" mode auto-pages (past replies) until it has this many posts… */
-const MIN_TOP_LEVEL_POSTS = 10;
-/** …or has fetched this many extra pages for this person + filter. */
-const MAX_AUTO_PAGES = 4;
 
 // Full-page friends profile route. Layout follows Primal/Damus
 // convention: back chevron pinned top-left, the identity header
@@ -494,13 +490,35 @@ const ContactProfileScreen: React.FC = () => {
   const topLevelCount = useMemo(() => countTopLevelPosts(feed.events), [feed.events]);
   const { loadMore, loading: feedLoading, loadingMore, reachedEnd } = feed;
   const feedSize = feed.events.length;
+  // Never while blurred: an abort on blur settles `loadingMore`, which must
+  // not re-arm paging behind the next screen (review #1334).
+  const focused = useIsFocused();
   useEffect(() => {
-    if (tab !== 'posts' || postsMode !== 'posts') return;
-    if (feedLoading || loadingMore || reachedEnd || feedSize === 0) return;
-    if (topLevelCount >= MIN_TOP_LEVEL_POSTS || autoPagesRef.current >= MAX_AUTO_PAGES) return;
+    const go = shouldAutoPage({
+      focused,
+      tab,
+      postsMode,
+      loading: feedLoading,
+      loadingMore,
+      reachedEnd,
+      feedSize,
+      topLevelCount,
+      autoPages: autoPagesRef.current,
+    });
+    if (!go) return;
     autoPagesRef.current += 1;
     void loadMore();
-  }, [tab, postsMode, feedLoading, loadingMore, reachedEnd, feedSize, topLevelCount, loadMore]);
+  }, [
+    focused,
+    tab,
+    postsMode,
+    feedLoading,
+    loadingMore,
+    reachedEnd,
+    feedSize,
+    topLevelCount,
+    loadMore,
+  ]);
 
   const openProduct = useCallback(
     (product: MarketProduct) =>

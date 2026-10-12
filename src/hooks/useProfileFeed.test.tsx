@@ -1,0 +1,92 @@
+import { act, renderHook } from '@testing-library/react-native';
+import { useProfileFeed } from './useProfileFeed';
+import { fetchAuthorFeedPage, subscribeAuthorFeed } from '../services/authorFeedService';
+
+jest.mock('../services/authorFeedService', () => ({
+  AUTHOR_FEED_PAGE_SIZE: 30,
+  subscribeAuthorFeed: jest.fn(),
+  fetchAuthorFeedPage: jest.fn(),
+}));
+const mockRelays = [{ url: 'wss://example.com', read: true, write: true }];
+jest.mock('../contexts/NostrContext', () => ({ useNostr: () => ({ relays: mockRelays }) }));
+let mockFocused = true;
+jest.mock('@react-navigation/native', () => {
+  const R = jest.requireActual('react');
+  return {
+    // Runs the focus callback while "focused", and its cleanup on blur.
+    useFocusEffect: (cb: () => void | (() => void)) =>
+      R.useEffect(() => (mockFocused ? cb() : undefined), [cb, mockFocused]),
+  };
+});
+
+const PK = 'a'.repeat(64);
+const subscribe = subscribeAuthorFeed as jest.Mock;
+const fetchPage = fetchAuthorFeedPage as jest.Mock;
+
+beforeEach(() => {
+  jest.useFakeTimers();
+  mockFocused = true;
+  subscribe.mockReset();
+  fetchPage.mockReset();
+  subscribe.mockImplementation(({ onEvent, onEose }) => {
+    onEvent({ id: 'e1', pubkey: PK, kind: 1, created_at: 100, content: '', tags: [] });
+    onEose();
+    return jest.fn();
+  });
+});
+afterEach(() => jest.useRealTimers());
+
+it('aborts a page request on blur and stays idle until the next focus', async () => {
+  let settle!: (v: unknown) => void;
+  fetchPage.mockImplementation(() => new Promise((r) => (settle = r)));
+  const h = renderHook(() => useProfileFeed(PK, 0));
+  await act(async () => {
+    jest.advanceTimersByTime(200); // coalesced flush
+  });
+  expect(h.result.current.events).toHaveLength(1);
+
+  act(() => {
+    void h.result.current.loadMore();
+  });
+  expect(fetchPage).toHaveBeenCalledTimes(1);
+  const { signal } = fetchPage.mock.calls[0][0];
+
+  // Blur mid-request: the request is aborted…
+  mockFocused = false;
+  h.rerender({});
+  expect(signal.aborted).toBe(true);
+  // …and once it settles (clearing `loadingMore`), nothing re-arms it.
+  await act(async () => settle({ events: [], complete: true }));
+  await act(async () => {
+    await h.result.current.loadMore();
+  });
+  expect(fetchPage).toHaveBeenCalledTimes(1);
+  expect(h.result.current.reachedEnd).toBe(false);
+
+  // A new focus session may page again.
+  fetchPage.mockResolvedValue({ events: [], complete: false });
+  mockFocused = true;
+  h.rerender({});
+  await act(async () => {
+    await h.result.current.loadMore();
+  });
+  expect(fetchPage).toHaveBeenCalledTimes(2);
+});
+
+it('keeps paging retryable after an incomplete empty page', async () => {
+  fetchPage.mockResolvedValue({ events: [], complete: false });
+  const h = renderHook(() => useProfileFeed(PK, 0));
+  await act(async () => {
+    jest.advanceTimersByTime(200);
+  });
+  await act(async () => {
+    await h.result.current.loadMore();
+  });
+  expect(h.result.current.reachedEnd).toBe(false);
+  fetchPage.mockResolvedValue({ events: [], complete: true });
+  await act(async () => {
+    await h.result.current.loadMore();
+  });
+  expect(h.result.current.reachedEnd).toBe(true);
+});
+

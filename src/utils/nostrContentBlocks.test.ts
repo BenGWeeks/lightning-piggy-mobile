@@ -5,7 +5,7 @@ import { parseNostrContent } from './nip27';
 const PK = 'a'.repeat(64);
 const note = (c: string) => nip19.noteEncode(c.repeat(64));
 const npub = nip19.npubEncode(PK);
-const blocks = (s: string, limits?: { maxEmbeds: number; maxMedia: number }) =>
+const blocks = (s: string, limits?: { maxEmbeds: number; maxMedia: number; maxMentions: number }) =>
   groupContentBlocks(parseNostrContent(s), limits);
 
 describe('groupContentBlocks', () => {
@@ -40,7 +40,7 @@ describe('groupContentBlocks', () => {
   it('degrades references past the embed / media caps to links', () => {
     const out = blocks(
       `nostr:${note('1')} nostr:${note('2')} https://x.example/1.jpg https://x.example/2.jpg`,
-      { maxEmbeds: 1, maxMedia: 1 },
+      { maxEmbeds: 1, maxMedia: 1, maxMentions: 20 },
     );
     expect(out.map((b) => b.type)).toEqual(['embed', 'inline', 'media', 'inline']);
     const links = out
@@ -50,6 +50,16 @@ describe('groupContentBlocks', () => {
       `https://njump.me/${note('2')}`,
       'https://x.example/2.jpg',
     ]);
+  });
+
+  it('caps @Name chips per body and renders the rest as plain text', () => {
+    const many = Array.from({ length: 500 }, (_, i) =>
+      nip19.npubEncode(i.toString(16).padStart(64, '0')),
+    );
+    const out = groupContentBlocks(parseNostrContent(many.map((n) => `nostr:${n}`).join(' ')));
+    const tokens = out.flatMap((b) => (b.type === 'inline' ? b.tokens : []));
+    expect(tokens.filter((t) => t.type === 'profile')).toHaveLength(20);
+    expect(tokens.some((t) => t.type === 'text' && t.text.includes('@npub1'))).toBe(true);
   });
 
   it('returns nothing for whitespace-only content', () => {

@@ -2,7 +2,7 @@
 // inline content (text, @mentions, links) flow as one paragraph; runs of
 // images / videos become one thumbnail row; each embedded note / address is
 // its own card. Pure, so the layout rules are unit-tested.
-import type { NostrContentToken } from './nip27';
+import { shortNpubLabel, type NostrContentToken } from './nip27';
 
 type Inline = Extract<NostrContentToken, { type: 'text' | 'profile' | 'link' }>;
 type Media = Extract<NostrContentToken, { type: 'image' | 'video' }>;
@@ -18,9 +18,15 @@ export interface BlockLimits {
   maxEmbeds: number;
   /** Thumbnails per body; extra media render as inline links. */
   maxMedia: number;
+  /**
+   * @Name chips per body. Each chip resolves a profile, so a note stuffed
+   * with hundreds of npubs must not fan out hundreds of lookups; extra
+   * mentions render as plain `@npub1…` text.
+   */
+  maxMentions: number;
 }
 
-export const DEFAULT_BLOCK_LIMITS: BlockLimits = { maxEmbeds: 3, maxMedia: 6 };
+export const DEFAULT_BLOCK_LIMITS: BlockLimits = { maxEmbeds: 3, maxMedia: 6, maxMentions: 20 };
 
 /** Trim blank lines at a paragraph's edges — the block gap replaces them. */
 function trimEdges(tokens: Inline[]): Inline[] {
@@ -40,6 +46,7 @@ export function groupContentBlocks(
   let inline: Inline[] = [];
   let embeds = 0;
   let media = 0;
+  let mentions = 0;
   const flushInline = () => {
     const trimmed = trimEdges(inline);
     if (trimmed.length > 0) blocks.push({ type: 'inline', tokens: trimmed });
@@ -74,6 +81,13 @@ export function groupContentBlocks(
       flushInline();
       blocks.push({ type: 'embed', token });
       continue;
+    }
+    if (token.type === 'profile') {
+      if (mentions >= limits.maxMentions) {
+        inline.push({ type: 'text', text: `@${shortNpubLabel(token.pubkey)}` });
+        continue;
+      }
+      mentions++;
     }
     inline.push(token);
   }

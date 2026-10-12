@@ -121,6 +121,43 @@ export function buildProfileRows(input: ProfileRowsInput): ProfileRow[] {
   }));
 }
 
+export interface AutoPageInput {
+  focused: boolean;
+  tab: ProfileTab;
+  postsMode: PostsMode;
+  loading: boolean;
+  loadingMore: boolean;
+  reachedEnd: boolean;
+  feedSize: number;
+  topLevelCount: number;
+  /** Auto pages already fetched for this person + filter. */
+  autoPages: number;
+}
+
+/** "Posts" auto-pages past replies until it has this many posts… */
+export const MIN_TOP_LEVEL_POSTS = 10;
+/** …or has fetched this many extra pages for this person + filter. */
+export const MAX_AUTO_PAGES = 4;
+
+/**
+ * Whether the Posts tab should fetch another page on its own: only while
+ * focused, in "Posts" mode, idle, not at the end, short of top-level posts,
+ * and within the per-person budget.
+ */
+export function shouldAutoPage(i: AutoPageInput): boolean {
+  return (
+    i.focused &&
+    i.tab === 'posts' &&
+    i.postsMode === 'posts' &&
+    !i.loading &&
+    !i.loadingMore &&
+    !i.reachedEnd &&
+    i.feedSize > 0 &&
+    i.topLevelCount < MIN_TOP_LEVEL_POSTS &&
+    i.autoPages < MAX_AUTO_PAGES
+  );
+}
+
 /** Top-level posts in a (sorted) feed — what "Posts" mode can show. */
 export function countTopLevelPosts(feed: readonly AuthorFeedEvent[]): number {
   let n = 0;
