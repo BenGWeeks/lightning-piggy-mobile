@@ -69,3 +69,16 @@ describe('resolveCurrentRevision', () => {
     expect(isNewerRevision(rev('a', 1), null)).toBe(true);
   });
 });
+
+it.each(['address', 'id'])('requires explicit recreation after an %s deletion', async (target) => {
+  const base = rev('old', 10);
+  const fetchLatest = async () => ({
+    event: null,
+    deletedAt: target === 'address' ? 20 : -1,
+    deletedIds: target === 'id' ? ['old'] : [],
+  });
+  await expect(resolveCurrentRevision({ fetchLatest, base })).rejects.toBeInstanceOf(
+    StaleRevisionError,
+  );
+  await expect(resolveCurrentRevision({ fetchLatest, base, force: true })).resolves.toBeNull();
+});

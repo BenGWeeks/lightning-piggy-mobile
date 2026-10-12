@@ -2538,7 +2538,9 @@
         "notFound": "No se encontró este anuncio.",
         "needsShop": "Crea tu tienda antes de anunciar artículos.",
         "delete": "Eliminar anuncio",
-        "conflictBody": "Este anuncio se cambió en otro dispositivo o app desde que lo abriste. ¿Guardar tu versión de todos modos?"
+        "conflictBody": "Este anuncio se cambió en otro dispositivo o app desde que lo abriste. ¿Guardar tu versión de todos modos?",
+        "deletedBody": "Este anuncio se eliminó. ¿Quieres volver a crearlo con los valores de este formulario?",
+        "recreate": "Volver a crear"
       },
       "errors": {
         "title": "Añade un título (hasta 200 caracteres).",

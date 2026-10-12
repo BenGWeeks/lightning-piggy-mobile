@@ -10,6 +10,7 @@ import {
   isSellerAccountForgotten,
   sellerStoreState,
 } from './sellerEventStore';
+import type { RevisionResult } from '../utils/marketSellerRevision';
 import { reduceSellerSnapshot } from '../utils/marketSellerSnapshot';
 import { querySyncAbortable } from './relayQuery';
 import { selectHealthyRelays } from './relayHealth';
@@ -167,8 +168,9 @@ export async function fetchLatestRevision(input: {
   pubkey: string;
   kind: number;
   dTag: string;
+  baseId?: string;
   relays: string[];
-}): Promise<Event | null> {
+}): Promise<RevisionResult> {
   const pubkey = input.pubkey.toLowerCase();
   trackRelays(input.relays);
   const coordinate = `${input.kind}:${pubkey}:${input.dTag}`;
@@ -188,9 +190,18 @@ export async function fetchLatestRevision(input: {
       limit: 20,
     }),
   ]);
+  const ids = [...new Set([...events.map((e) => e.id), ...(input.baseId ? [input.baseId] : [])])];
+  const idDeletions = ids.length
+    ? await queryQuorum(input.relays, {
+        kinds: [DELETION_KIND],
+        authors: [pubkey],
+        '#e': ids,
+        limit: 20,
+      })
+    : [];
   const [own, ownDeletions] = await Promise.all([
     verifiedOwnEvents(events, pubkey, [input.kind]),
-    verifiedOwnEvents(deletions, pubkey, [DELETION_KIND]),
+    verifiedOwnEvents([...deletions, ...idDeletions], pubkey, [DELETION_KIND]),
   ]);
   let deletedAt = -1;
   const deletedIds = new Set<string>();
@@ -211,7 +222,7 @@ export async function fetchLatestRevision(input: {
     )
       newest = e;
   }
-  return newest;
+  return { event: newest, deletedAt, deletedIds: [...deletedIds] };
 }
 
 /** Publish to the seller's relays; resolves once ONE relay accepts, rejects

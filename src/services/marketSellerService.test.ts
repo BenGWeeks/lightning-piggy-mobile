@@ -1,3 +1,4 @@
+import { resolveCurrentRevision, StaleRevisionError } from '../utils/marketSellerRevision';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { finalizeEvent, getPublicKey, type Event } from 'nostr-tools';
 import {
@@ -195,7 +196,7 @@ describe('fetchLatestRevision', () => {
     (querySyncAbortable as jest.Mock).mockResolvedValue([v1, forged, v2, other]);
     await expect(
       fetchLatestRevision({ pubkey, kind: 30402, dTag: 'a', relays: ['wss://r.example'] }),
-    ).resolves.toBe(v2);
+    ).resolves.toMatchObject({ event: v2 });
     expect((querySyncAbortable as jest.Mock).mock.calls[0][2]).toEqual({
       kinds: [30402],
       authors: [pubkey],
@@ -233,7 +234,7 @@ describe('fetchLatestRevision', () => {
         dTag: 'lightning-piggy-shop',
         relays: ['wss://r'],
       }),
-    ).resolves.toBeNull();
+    ).resolves.toMatchObject({ event: null });
   });
 
   it('is null only when relays completed with nothing', async () => {
@@ -245,7 +246,7 @@ describe('fetchLatestRevision', () => {
         dTag: 'lightning-piggy-shop',
         relays: ['wss://r'],
       }),
-    ).resolves.toBeNull();
+    ).resolves.toMatchObject({ event: null });
   });
 });
 
@@ -393,3 +394,33 @@ describe('sellerEventStore', () => {
     expect(events.size).toBeLessThan(1000);
   });
 });
+
+it.each(['a', 'e'])(
+  'rejects saving a stale listing deleted by %s through the real revision lookup',
+  async (target) => {
+    const base = listing('deleted', 100);
+    const deletion = sign(
+      {
+        kind: 5,
+        content: '',
+        tags: [[target, target === 'a' ? coordinateOf(30402, pubkey, 'deleted') : base.id]],
+      },
+      200,
+    );
+    (querySyncAbortable as jest.Mock).mockImplementation((_pool, _relays, filter) =>
+      Promise.resolve(filter.kinds[0] === 5 ? [deletion] : [base]),
+    );
+    const fetchLatest = () =>
+      fetchLatestRevision({
+        pubkey,
+        kind: 30402,
+        dTag: 'deleted',
+        baseId: base.id,
+        relays: ['wss://r'],
+      });
+    await expect(resolveCurrentRevision({ fetchLatest, base })).rejects.toBeInstanceOf(
+      StaleRevisionError,
+    );
+    await expect(resolveCurrentRevision({ fetchLatest, base, force: true })).resolves.toBeNull();
+  },
+);

@@ -2544,7 +2544,9 @@
         "notFound": "Nie udało się znaleźć tej oferty.",
         "needsShop": "Załóż sklep, zanim wystawisz produkty.",
         "delete": "Usuń ofertę",
-        "conflictBody": "Od otwarcia oferty jej dane zostały zmienione na innym urządzeniu lub w innej aplikacji. Mimo to zapisać twoją wersję?"
+        "conflictBody": "Od otwarcia oferty jej dane zostały zmienione na innym urządzeniu lub w innej aplikacji. Mimo to zapisać twoją wersję?",
+        "deletedBody": "To ogłoszenie zostało usunięte. Utworzyć je ponownie z wartościami z tego formularza?",
+        "recreate": "Utwórz ponownie"
       },
       "errors": {
         "title": "Dodaj tytuł (do 200 znaków).",

@@ -28,7 +28,7 @@ export class SellerFetchError extends Error {
 /** A newer revision than the form's base exists. `latest` is the newest. */
 export class StaleRevisionError extends Error {
   constructor(
-    readonly latest: Event,
+    readonly latest: Event | null,
     readonly base: Event | null,
   ) {
     super('A newer revision exists');
@@ -40,16 +40,33 @@ export class StaleRevisionError extends Error {
 export const isNewerRevision = (a: Event, b: Event | null): boolean =>
   !b || a.created_at > b.created_at || (a.created_at === b.created_at && a.id < b.id);
 
+export interface RevisionResult {
+  event: Event | null;
+  deletedAt: number;
+  deletedIds: string[];
+}
+
 export async function resolveCurrentRevision(input: {
-  fetchLatest: () => Promise<Event | null>;
+  fetchLatest: () => Promise<Event | null | RevisionResult>;
   base: Event | null;
   force?: boolean;
   onLatest?: (latest: Event) => void;
 }): Promise<Event | null> {
   let latest: Event | null;
   try {
-    latest = await input.fetchLatest();
+    const result = await input.fetchLatest();
+    if (result && 'event' in result) {
+      latest = result.event;
+      if (
+        input.base &&
+        (input.base.created_at <= result.deletedAt || result.deletedIds.includes(input.base.id))
+      ) {
+        if (!input.force) throw new StaleRevisionError(latest, input.base);
+        return latest;
+      }
+    } else latest = result;
   } catch (error) {
+    if (error instanceof StaleRevisionError) throw error;
     throw new SellerFetchError(error);
   }
   if (latest) input.onLatest?.(latest);
