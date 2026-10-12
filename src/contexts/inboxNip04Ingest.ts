@@ -1,4 +1,4 @@
-import type { LRUCache } from '../utils/lru';
+import { Kind4RetryStore, isTransientKind4Error } from './kind4RetryStore';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
 import { upsertDmMessages, type DmMessageRow } from '../services/dmDb';
 import type { RawDmEvent } from '../services/nostrService';
@@ -13,7 +13,7 @@ export async function decryptInboxKind4(args: {
   decrypt: (peer: string, ciphertext: string) => Promise<string | null>;
   signal?: AbortSignal;
   isColdStart: boolean;
-  failures?: LRUCache<string, true>;
+  failures?: Kind4RetryStore;
   bypassFailures?: boolean;
 }): Promise<{
   entries: DmInboxEntry[];
@@ -37,20 +37,27 @@ export async function decryptInboxKind4(args: {
       const batch = args.targets.slice(i, i + DECRYPT_YIELD_EVERY);
       const results = await Promise.all(
         batch.map(async (target) => {
-          // Session-scoped negative results avoid repeatedly asking the signer.
+          // Persisted backoff and permanent negatives avoid signer storms.
           // A user refresh retries them; aborted decrypts never enter this cache.
-          if (!args.bypassFailures && args.failures?.get(target.ev.id)) {
+          if (args.failures?.shouldSkip(target.ev.id, args.bypassFailures)) {
             processed++;
             return null;
           }
           attempts++;
-          const text = await args.decrypt(target.partnerPubkey, target.ev.content);
+          let text: string | null = null;
+          let counted = true;
+          try {
+            text = await args.decrypt(target.partnerPubkey, target.ev.content);
+          } catch (error) {
+            counted = !isTransientKind4Error(error);
+          }
           processed++;
           if (text === null) {
-            if (!args.signal?.aborted) args.failures?.set(target.ev.id, true);
+            if (!args.signal?.aborted)
+              args.failures?.failed(target.ev.id, target.ev.created_at, counted);
             return null;
           }
-          args.failures?.delete(target.ev.id);
+          args.failures?.succeeded(target.ev.id);
           if (!args.signal?.aborted) nip04PlaintextCache.set(target.ev.id, text);
           return { target, text };
         }),

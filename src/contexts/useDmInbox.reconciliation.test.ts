@@ -444,19 +444,61 @@ it('completes cold and warm refreshes despite a persistent null kind-4 decrypt a
   expect(rows).toHaveLength(1 + wraps.length);
   expect(result.current.dmInbox.some((e) => e.id === wraps.at(-1)?.id)).toBe(true);
   expect(decryptMock.mock.calls.filter(([text]) => text === failed.content)).toHaveLength(1);
-  now = 62_000;
-  await act(() => result.current.refreshDmInbox());
-  expect(fetchMock).toHaveBeenCalledTimes(2); // Backfill renewed the TTL at 4000.
+  relayEvents.push(event(3, BASE + 1000));
+  // Two ordinary, timer-driven retries exhaust the counted budget. Backfill
+  // completion renews TTL independently while the old failure pins history.
   now = 64_000;
-  await act(() => jest.advanceTimersByTimeAsync(2000));
-  expect(fetchMock).toHaveBeenCalledTimes(3);
-  expect(fetchMock.mock.calls[2][2]).not.toHaveProperty('limit');
-  expect(decryptMock.mock.calls.filter(([text]) => text === failed.content)).toHaveLength(1);
-  now = 65_000;
-  await act(() => result.current.refreshDmInbox());
-  expect(fetchMock).toHaveBeenCalledTimes(3); // Warm null decrypt also renews TTL.
-  await act(() => result.current.refreshDmInbox({ force: true }));
+  await act(() => jest.advanceTimersByTimeAsync(60_000));
   expect(decryptMock.mock.calls.filter(([text]) => text === failed.content)).toHaveLength(2);
+  now = 184_000;
+  await act(() => jest.advanceTimersByTimeAsync(120_000));
+  expect(decryptMock.mock.calls.filter(([text]) => text === failed.content)).toHaveLength(3);
+  expect(jest.getTimerCount()).toBe(0);
+  expect(await AsyncStorage.getItem(inboxLastSeenKey(OWNER))).toBe(String(BASE + 1000));
+  now = 245_000;
+  await act(() => result.current.refreshDmInbox());
+  expect(decryptMock.mock.calls.filter(([text]) => text === failed.content)).toHaveLength(3);
+  now = 246_000;
+  await act(() => result.current.refreshDmInbox());
+  const fetches = fetchMock.mock.calls.length;
+  await act(() => result.current.refreshDmInbox());
+  expect(fetchMock).toHaveBeenCalledTimes(fetches); // Permanent failure renews TTL.
+  await act(() => result.current.refreshDmInbox({ force: true }));
+  expect(decryptMock.mock.calls.filter(([text]) => text === failed.content)).toHaveLength(4);
   unmount();
   expect(jest.getTimerCount()).toBe(0);
+});
+
+it('recovers an old DM after temporary signer failure and a newer arrival without force, across restart', async () => {
+  jest.useFakeTimers({ doNotFake: ['performance', 'queueMicrotask', 'nextTick', 'setImmediate'] });
+  const old = event(1);
+  decryptMock.mockRejectedValue(new Error('NIP-46 signer not connected'));
+  const first = renderInbox();
+  await act(() => first.result.current.refreshDmInbox());
+  expect(await AsyncStorage.getItem(inboxLastSeenKey(OWNER))).toBe(String(old.created_at));
+  first.unmount();
+  nip04PlaintextCache.clear();
+  // Restart while disconnected. A message outside the 120s overlap arrives.
+  relayEvents.push(event(2, BASE + 600));
+  decryptMock.mockImplementation(async (ciphertext) => {
+    if (ciphertext === old.content) throw new Error('Signer temporarily unavailable');
+    return 'Newer DM delivered';
+  });
+  const { result, unmount } = renderInbox();
+  await act(() => result.current.refreshDmInbox());
+  expect(await AsyncStorage.getItem(inboxLastSeenKey(OWNER))).toBe(String(old.created_at));
+  expect(fetchMock.mock.calls.at(-1)?.[2]?.since).toBe(old.created_at);
+  expect(rows.some((r) => r.eventId === event(2).id)).toBe(true);
+  expect(rows.some((r) => r.eventId === old.id)).toBe(false);
+  const metadata = JSON.parse((await AsyncStorage.getItem(`dm-kind4-retries:${OWNER}`))!);
+  expect(metadata.every((f: { attempts: number }) => f.attempts === 0)).toBe(true);
+  decryptMock.mockResolvedValue('Recovered valid DM');
+  now = 61_000;
+  await act(() => jest.advanceTimersByTimeAsync(60_000));
+  expect(rows.some((r) => r.eventId === old.id)).toBe(true);
+  expect(result.current.dmInbox.some((e) => e.id === old.id)).toBe(true);
+  expect(await AsyncStorage.getItem(inboxLastSeenKey(OWNER))).toBe(String(BASE + 600));
+  expect(JSON.parse((await AsyncStorage.getItem(`dm-kind4-retries:${OWNER}`))!)).toEqual([]);
+  expect(jest.getTimerCount()).toBe(0);
+  unmount();
 });

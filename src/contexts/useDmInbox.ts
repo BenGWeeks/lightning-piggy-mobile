@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { LRUCache } from '../utils/lru';
+import { Kind4RetryStore } from './kind4RetryStore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
-import { nip46DecryptNip04 } from './nip46DmDecrypt';
+import { decryptKind4WithSigner } from './kind4SignerDecrypt';
 import { ingestInboxNip17ForSigner } from './inboxNip17Ingest';
 import type { SignerType } from '../types/nostr';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
@@ -17,7 +17,7 @@ import {
   type DmMessageRow,
 } from '../services/dmDb';
 import { loadInboxEntries } from '../services/dmInbox';
-import { nip04PlaintextCache, getMemoisedSecretKey } from './nostrSecretKeyCache';
+import { nip04PlaintextCache } from './nostrSecretKeyCache';
 import { decryptInboxKind4, persistInboxKind4 } from './inboxNip04Ingest';
 import {
   COLD_INITIAL_WRAP_LIMIT,
@@ -251,37 +251,22 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
     if (pubkey && pending?.owner === pubkey) inboxSetterFor(pubkey)(pending.entries);
   }, [pubkey, inboxSetterFor]);
 
-  /**
-   * Decrypt one NIP-04 payload with whichever signer is active. Returns
-   * null (not throw) on failure so batch callers don't abort the whole
-   * loop on one bad event.
-   */
+  // Inbox decrypt preserves errors for retry classification; conversation
+  // callers retain the null-on-failure contract below.
+  const decryptNip04ForInbox = useCallback(
+    (peer: string, ciphertext: string) =>
+      decryptKind4WithSigner(pubkey, signerType, peer, ciphertext),
+    [pubkey, signerType],
+  );
   const decryptNip04ViaSigner = useCallback(
-    async (counterpartyPubkey: string, ciphertext: string): Promise<string | null> => {
-      if (!pubkey) return null;
+    async (peer: string, ciphertext: string) => {
       try {
-        if (signerType === 'nsec') {
-          const secretKey = await getMemoisedSecretKey(pubkey);
-          if (!secretKey) return null;
-          return await nostrService.decryptNip04WithSecret(
-            secretKey,
-            counterpartyPubkey,
-            ciphertext,
-          );
-        }
-        if (signerType === 'amber') {
-          return await amberService.requestNip04Decrypt(ciphertext, counterpartyPubkey, pubkey);
-        }
-        if (signerType === 'nip46') {
-          return await nip46DecryptNip04(ciphertext, counterpartyPubkey, pubkey);
-        }
-        return null;
-      } catch (error) {
-        if (__DEV__) console.warn('[Nostr] NIP-04 decrypt failed:', error);
+        return await decryptNip04ForInbox(peer, ciphertext);
+      } catch {
         return null;
       }
     },
-    [pubkey, signerType],
+    [decryptNip04ForInbox],
   );
 
   /**
@@ -402,14 +387,9 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
     [pubkey],
   );
 
-  // Stable self-reference so the cold-start backfill can re-invoke
-  // refreshDmInbox without it listing itself as a dependency (declared here,
-  // assigned just after the useCallback).
+  // Self-reference for backfill and retry scheduling.
   const refreshDmInboxRef = useRef<((opts?: RefreshDmInboxOptions) => Promise<void>) | null>(null);
-  const kind4Failures = useMemo(
-    () => (pubkey ? new LRUCache<string, true>({ max: 1000 }) : undefined),
-    [pubkey],
-  );
+  const kind4Failures = useMemo(() => (pubkey ? new Kind4RetryStore(pubkey) : undefined), [pubkey]);
   const refreshDmInbox = useCallback(
     async (opts?: RefreshDmInboxOptions): Promise<void> => {
       if (!pubkey || !isLoggedIn) {
@@ -434,6 +414,8 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       // Resolve setup before comparing effective cancellation and refresh strength.
       // A refresh in flight for a previous account is ignored here — its
       // writes are dropped by the owner scope, so there's nothing to wait for.
+      await kind4Failures?.load();
+      if (activeOwnerRef.current !== pubkey) return;
       const inFlight = dmInboxInFlight.current.get(pubkey);
       if (inFlight) {
         await inFlight.setup;
@@ -451,19 +433,25 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
         return refreshDmInboxRef.current?.(opts);
       }
 
+      const retryAt = kind4Failures?.nextRetryAt();
       // Widening backfills kind-4 messages previously excluded by the follow gate.
       const widensView = includeNonFollows && !dmInboxLastRefresh.current.includeNonFollows;
       if (
         shouldSkipForFreshness(
           lastRefreshAt,
-          bypassesFreshnessTtl(opts) || widensView,
+          bypassesFreshnessTtl(opts) ||
+            widensView ||
+            (retryAt !== undefined && retryAt <= Date.now()),
           performance.now(),
         )
       ) {
         // A bounded live subscription can miss older wraps. Reconcile once
         // at expiry without dropping the cursor or negative-result cache.
         scheduleReconciliation(
-          lastRefreshAt + DM_INBOX_REFRESH_TTL_MS - performance.now(),
+          Math.min(
+            lastRefreshAt + DM_INBOX_REFRESH_TTL_MS - performance.now(),
+            retryAt === undefined ? Infinity : retryAt - Date.now(),
+          ),
           accountSignalFor(pubkey),
           () => {
             void refreshDmInboxRef.current?.({ ...opts, signal: accountSignalFor(pubkey) });
@@ -578,7 +566,9 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
             readRelays,
             {
               // kind-4 `since` floor policy → dmRefreshGate.shouldDropK4Since (#751/#846). Wraps ignore `since` internally regardless (random NIP-59 ts).
-              ...(widensView || shouldDropK4Since(opts, isColdStart) ? {} : { since: lastSeen }),
+              ...(widensView || shouldDropK4Since(opts, isColdStart)
+                ? {}
+                : { since: kind4Failures?.cursor(lastSeen ?? 0) ?? lastSeen }),
               signal: effectiveSignal,
               ...(isColdStart ? { limit: COLD_INITIAL_WRAP_LIMIT } : {}),
             },
@@ -612,6 +602,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
             const hit = nip04PlaintextCache.get(t.ev.id);
             if (hit !== undefined) {
               nip04CacheHits++;
+              kind4Failures?.succeeded(t.ev.id);
               entries.push({
                 id: t.ev.id,
                 partnerPubkey: t.partnerPubkey,
@@ -636,13 +627,14 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
                 ).catch(() => new Set<string>())
               : new Set<string>();
           nip04DbHits = k4Known.size;
+          for (const id of k4Known) kind4Failures?.succeeded(id);
           const k4ToDecrypt = k4Misses.filter((t) => !k4Known.has(t.ev.id));
           const k4Result = await decryptInboxKind4({
             owner: refreshForPubkey,
             targets: k4ToDecrypt,
             failures: kind4Failures,
             bypassFailures: bypassSkipSet,
-            decrypt: decryptNip04ViaSigner,
+            decrypt: decryptNip04ForInbox,
             signal: effectiveSignal,
             isColdStart,
           });
@@ -658,6 +650,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           // refetch (user pull-to-refresh drops the `since` floor, #743) is
           // decrypt-once from now on.
           await persistInboxKind4(k4Rows);
+          await kind4Failures?.save();
 
           // NIP-17 — partner pubkey is INSIDE the encrypted rumor, so we
           // have to decrypt to know who sent it. For the nsec signer this
@@ -766,11 +759,12 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           setInboxForRefresh(filteredFinal);
 
           // Advance only after all targets were processed and rows persisted.
-          // Null decrypts count as attempted; aborted batches preserve the floor.
+          // Pending failures protect the floor independently of refresh completion.
           // Randomised wrap timestamps never contribute.
-          const newLastSeen = Math.max(lastSeen ?? 0, ...kind4.map((e) => e.created_at));
+          const newest = Math.max(lastSeen ?? 0, ...kind4.map((e) => e.created_at));
+          const newLastSeen = kind4Failures?.cursor(newest) ?? newest;
           const kind4Complete = k4Result.processed === k4ToDecrypt.length;
-          if (!effectiveSignal.aborted && kind4Complete && newLastSeen > (lastSeen ?? 0)) {
+          if (!effectiveSignal.aborted && kind4Complete && newLastSeen !== (lastSeen ?? 0)) {
             await AsyncStorage.setItem(
               inboxLastSeenKey(refreshForPubkey),
               String(newLastSeen),
@@ -822,6 +816,12 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
         }
       }
 
+      const nextRetry = kind4Failures?.retryDelay();
+      if (nextRetry !== undefined && activeOwnerRef.current === pubkey) {
+        scheduleReconciliation(nextRetry, accountSignalFor(pubkey), () => {
+          void refreshDmInboxRef.current?.({ includeNonFollows, signal: accountSignalFor(pubkey) });
+        });
+      }
       // Cold-start backfill (#751) — recent slice painted fast above; top up to
       // the full backlog in the background (deferred + abortable). See module.
       scheduleColdStartBackfill({
@@ -837,7 +837,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       signerType,
       getReadRelays,
       followPubkeys,
-      decryptNip04ViaSigner,
+      decryptNip04ForInbox,
       amberNip44DecryptSilent,
       inboxSetterFor,
       setDmInbox,
