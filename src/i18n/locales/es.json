@@ -563,6 +563,33 @@
     "recentPosts": "Publicaciones recientes",
     "noPostsYet": "Aún no hay publicaciones"
   },
+  "profileTabs": {
+    "posts": "Publicaciones",
+    "media": "Multimedia",
+    "shop": "Tienda",
+    "noMedia": "Todavía no hay fotos ni vídeos",
+    "noShopItems": "Todavía no hay artículos en la tienda",
+    "loadMore": "Cargar más",
+    "shopUnavailable": "No se ha podido cargar la tienda. Desliza hacia abajo para reintentar.",
+    "filterPosts": "Publicaciones",
+    "filterPostsAndReplies": "Publicaciones y respuestas",
+    "replyingTo": "Respondiendo a",
+    "replyingToPost": "Respondiendo a una publicación",
+    "onlyReplies": "Solo hay respuestas por ahora: cambia a Publicaciones y respuestas para verlas"
+  },
+  "nostrContent": {
+    "openProfile": "Abrir el perfil de {{name}}",
+    "postUnavailable": "No se ha encontrado esta publicación",
+    "productUnavailable": "Este anuncio ya no está disponible",
+    "emptyPost": "(publicación vacía)",
+    "embeddedPostA11y": "Publicación citada: {{text}}",
+    "openOnWeb": "Abrir en la web",
+    "article": "Artículo",
+    "untitledArticle": "Artículo sin título",
+    "articleA11y": "Artículo: {{title}}",
+    "playVideo": "Reproducir vídeo",
+    "viewImage": "Ver imagen"
+  },
   "friendPickerSheet": {
     "sendToFriend": "Enviar a un amigo",
     "sendToName": "Enviar a {{name}}",

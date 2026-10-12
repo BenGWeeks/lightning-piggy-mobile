@@ -563,6 +563,33 @@
     "recentPosts": "हाल की पोस्ट",
     "noPostsYet": "अभी कोई पोस्ट नहीं है"
   },
+  "profileTabs": {
+    "posts": "पोस्ट",
+    "media": "मीडिया",
+    "shop": "दुकान",
+    "noMedia": "अभी कोई फ़ोटो या वीडियो नहीं है",
+    "noShopItems": "दुकान में अभी कोई सामान नहीं है",
+    "loadMore": "और लोड करें",
+    "shopUnavailable": "यह दुकान लोड नहीं हो सकी। फिर से कोशिश करने के लिए नीचे खींचें।",
+    "filterPosts": "पोस्ट",
+    "filterPostsAndReplies": "पोस्ट और जवाब",
+    "replyingTo": "इन्हें जवाब",
+    "replyingToPost": "एक पोस्ट का जवाब",
+    "onlyReplies": "अभी तक सिर्फ़ जवाब हैं — उन्हें देखने के लिए \"पोस्ट और जवाब\" चुनें"
+  },
+  "nostrContent": {
+    "openProfile": "{{name}} की प्रोफ़ाइल खोलें",
+    "postUnavailable": "यह पोस्ट नहीं मिली",
+    "productUnavailable": "यह लिस्टिंग अब उपलब्ध नहीं है",
+    "emptyPost": "(खाली पोस्ट)",
+    "embeddedPostA11y": "उद्धृत पोस्ट: {{text}}",
+    "openOnWeb": "वेब पर खोलें",
+    "article": "लेख",
+    "untitledArticle": "बिना शीर्षक का लेख",
+    "articleA11y": "लेख: {{title}}",
+    "playVideo": "वीडियो चलाएँ",
+    "viewImage": "इमेज देखें"
+  },
   "friendPickerSheet": {
     "sendToFriend": "दोस्त को भेजें",
     "sendToName": "{{name}} को भेजें",

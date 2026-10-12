@@ -563,6 +563,33 @@
     "recentPosts": "Legutóbbi bejegyzések",
     "noPostsYet": "Még nincs bejegyzés"
   },
+  "profileTabs": {
+    "posts": "Bejegyzések",
+    "media": "Média",
+    "shop": "Bolt",
+    "noMedia": "Még nincs fotó vagy videó",
+    "noShopItems": "A boltban még nincs termék",
+    "loadMore": "Továbbiak betöltése",
+    "shopUnavailable": "Nem sikerült betölteni a boltot. Húzd le az újrapróbáláshoz.",
+    "filterPosts": "Bejegyzések",
+    "filterPostsAndReplies": "Bejegyzések és válaszok",
+    "replyingTo": "Válasz neki:",
+    "replyingToPost": "Válasz egy bejegyzésre",
+    "onlyReplies": "Eddig csak válaszok – válts a „Bejegyzések és válaszok” nézetre, hogy lásd őket"
+  },
+  "nostrContent": {
+    "openProfile": "{{name}} profiljának megnyitása",
+    "postUnavailable": "Ez a bejegyzés nem található",
+    "productUnavailable": "Ez a hirdetés már nem elérhető",
+    "emptyPost": "(üres bejegyzés)",
+    "embeddedPostA11y": "Idézett bejegyzés: {{text}}",
+    "openOnWeb": "Megnyitás a weben",
+    "article": "Cikk",
+    "untitledArticle": "Cím nélküli cikk",
+    "articleA11y": "Cikk: {{title}}",
+    "playVideo": "Videó lejátszása",
+    "viewImage": "Kép megtekintése"
+  },
   "friendPickerSheet": {
     "sendToFriend": "Küldés barátnak",
     "sendToName": "Küldés neki: {{name}}",
