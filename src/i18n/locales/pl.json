@@ -563,6 +563,33 @@
     "recentPosts": "Najnowsze wpisy",
     "noPostsYet": "Brak wpisów"
   },
+  "profileTabs": {
+    "posts": "Wpisy",
+    "media": "Multimedia",
+    "shop": "Sklep",
+    "noMedia": "Brak zdjęć i filmów",
+    "noShopItems": "W sklepie nie ma jeszcze produktów",
+    "loadMore": "Wczytaj więcej",
+    "shopUnavailable": "Nie udało się wczytać sklepu. Przeciągnij w dół, aby spróbować ponownie.",
+    "filterPosts": "Wpisy",
+    "filterPostsAndReplies": "Wpisy i odpowiedzi",
+    "replyingTo": "W odpowiedzi do",
+    "replyingToPost": "W odpowiedzi na wpis",
+    "onlyReplies": "Na razie są tylko odpowiedzi — przełącz na „Wpisy i odpowiedzi”, aby je zobaczyć"
+  },
+  "nostrContent": {
+    "openProfile": "Otwórz profil: {{name}}",
+    "postUnavailable": "Nie znaleziono tego wpisu",
+    "productUnavailable": "To ogłoszenie nie jest już dostępne",
+    "emptyPost": "(pusty wpis)",
+    "embeddedPostA11y": "Cytowany wpis: {{text}}",
+    "openOnWeb": "Otwórz w przeglądarce",
+    "article": "Artykuł",
+    "untitledArticle": "Artykuł bez tytułu",
+    "articleA11y": "Artykuł: {{title}}",
+    "playVideo": "Odtwórz film",
+    "viewImage": "Pokaż obraz"
+  },
   "friendPickerSheet": {
     "sendToFriend": "Wyślij do znajomego",
     "sendToName": "Wyślij — odbiorca: {{name}}",
