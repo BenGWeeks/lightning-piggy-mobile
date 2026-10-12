@@ -33,6 +33,10 @@ describe('resolveLocale (#137)', () => {
     expect(resolveLocale('system', null)).toBe('en');
   });
 
+  it('renders the en-XA pseudo-language from (and formats as) English (#1313)', () => {
+    expect(resolveLocale('en-XA', 'es')).toBe('en');
+  });
+
   it('honours an explicit override regardless of the device language', () => {
     expect(resolveLocale('es', 'en')).toBe('es');
     expect(resolveLocale('en', 'es')).toBe('en');

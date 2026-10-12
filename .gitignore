@@ -89,3 +89,6 @@ scripts/wait-compare.mjs
 # (postinstall), checksum-pinned; 39 MB of prebuilt binaries stays out of git
 modules/nostr-native/ios/nostr_sdkFFI.xcframework/
 modules/nostr-native/ios/Generated/
+
+# i18n:sync task files and drafts (scripts/i18n-sync.mjs)
+.i18n-todo/
