@@ -374,7 +374,7 @@ describe('deletion (kind 5)', () => {
   });
 });
 
-it('drops only the own legacy shop coordinate when an existing listing is edited', () => {
+it('keeps selected collection coordinates when legacy status is unconfirmed', () => {
   const otherAuthor = 'b'.repeat(64);
   const references = [
     shopCoordinate(pubkey),
@@ -394,7 +394,6 @@ it('drops only the own legacy shop coordinate when an existing listing is edited
   });
   const parsed = parseListingDraft(previous);
   const { tags } = buildListingTemplate({ draft: parsed, previous, pubkey, nowSeconds: 200 });
-  expect(tags).not.toContainEqual(['a', shopCoordinate(pubkey)]);
-  for (const coordinate of references.slice(1)) expect(tags).toContainEqual(['a', coordinate]);
+  for (const coordinate of references) expect(tags).toContainEqual(['a', coordinate]);
   expect(tags).toContainEqual(['a', `30402:${pubkey}:parent`]);
 });
