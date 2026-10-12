@@ -252,6 +252,10 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       if (channel) await saveUpdateChannel(sessionId, channel);
       // Install optimistically so the bubble renders while the marker publishes.
       dispatch({ type: 'start', ...installed, now });
+      // Start tracking NOW, while the app is certainly in front: Android won't
+      // start the location service from the background, and the user may leave
+      // the app before the marker has published (the effect below adopts it).
+      void startTracking({ owner: pubkey, relays: writeRelaysRef.current }).catch(() => undefined);
       startLocationRef.current.set(sessionId, fix.location);
       const wire: LiveMarkerWire = {
         phase: 'start',
@@ -449,6 +453,13 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
           if (session.status === 'paused') {
             dispatch({ type: 'resume', sessionId: session.sessionId, now });
           }
+        }
+        // A share stuck on the foreground-only watcher (the service couldn't
+        // start — e.g. the app was left mid-start): retry now we're in front.
+        const owner = lastIdentityRef.current;
+        const live = [...sessionsRef.current.values()].some((s) => s.status === 'active');
+        if (owner && live && getTrackingMode() === 'foreground') {
+          void startTracking({ owner, relays: writeRelaysRef.current }).catch(() => undefined);
         }
       } else if (getTrackingMode() !== 'background') {
         for (const session of sessionsRef.current.values()) {
