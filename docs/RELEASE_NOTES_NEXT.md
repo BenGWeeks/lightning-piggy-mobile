@@ -14,29 +14,29 @@ See docs/DEPLOYMENT.adoc → "TestFlight 'What to Test' automation".
 
 ### New
 
-- **Sell your own items.** Market → **My shop** (store icon): set up shipping options, then list items with photos, price, stock, categories and a Markdown description. Edit, preview or delete them any time.
-- **Profile tabs.** Profiles have **Posts**, **Media** and **Shop** tabs and a _Posts | Posts & replies_ switch. Mentions and shared notes show as tappable names and cards.
+- **Sell your own items.** Market → **My shop**: set up shipping and listings with photos, prices and stock. Edit, preview or delete them.
+- **Profile tabs.** **Posts**, **Media**, **Shop** and a _Posts | Posts & replies_ switch. Mentions and shared notes are tappable.
 - **Six new languages:** Deutsch, Magyar, Polski, हिन्दी, मराठी and 中文（简体）. Pick one per account in Account → Display & language.
-- **Marmot messaging (Alpha)** — end-to-end encrypted chats. Pick _Marmot_ when starting a chat or group. Lightning Piggy supports photos, voice notes, GIFs and polls in its Marmot chats, reactions in 1:1s, and editing or deleting your own messages. Group invites select eligible devices (up to 10 per person); a new 1:1 selects one White Noise device when present. White Noise support depends on its version and protocol profile; GIF and poll payloads do not establish cross-client support. If someone can't receive Marmot yet, you're asked before it goes over NIP-17. Still being tested, so use NIP-17 for anything important.
-- **Marmot group admins.** See who the admins are and make others admins; only admins can rename a group or change its members.
-- **See someone's devices in Marmot chats.** A Marmot one-to-one shows _Secure chat · 2 devices_ under the name when the other person is on several devices; tap it to see each device and its app. Message info shows which device sent it.
-- **Devices that can get new chats.** Account → Messages lists each device people can start a private chat with. Refresh this phone, or remove devices you no longer use.
-- **Marmot push notifications (opt-in).** Account → Security → Push notifications → _Marmot messages_ wakes your phone for Marmot chats, even with the app closed. Off by default and per account; every push just says "New message". Needs Google Play services on Android.
-- **More push notifications (opt-in).** With push on, separate switches for Messages, Zaps, Mentions and Payments. Alerts are generic and never show what was sent.
-- **@mentions in group chats.** Type _@_ to mention a member. Mentions of you get an @ badge and a button that jumps to them. Chats reopen where you left off, at an _Unread messages_ divider.
-- **Back up your key before signing out.** Signing out of a local-key account now warns you and offers a backup.
+- **Marmot messaging (Alpha).** Encrypted chats with photos, voice notes, GIFs, polls, 1:1 reactions, edits and deletes. Group invites select up to 10 devices per person; new 1:1s prefer one White Noise device. White Noise support varies by version and protocol profile; GIF/poll interop is unconfirmed. NIP-17 fallback asks first. Use NIP-17 for anything important.
+- **Marmot group admins.** View or appoint admins; only admins can rename groups or change members.
+- **Marmot devices.** Tap _Secure chat · N devices_ in a 1:1 to see devices and apps. Message info identifies the sending device. Account → Messages lets you refresh this phone or remove old devices.
+- **Push notifications (opt-in, per account).** Account → Security → Push notifications: Marmot messages can wake a closed app (Google Play services required on Android). Separate switches for Messages, Zaps, Mentions and Payments; alerts never show content.
+- **Group @mentions.** Type _@_ to pick a member; an @ badge and jump button mark mentions of you. Chats reopen at an _Unread messages_ divider.
+- **Local-key sign-out** warns first and offers a key backup.
+- **Live location.** Android sharing continues while minimised, with an ongoing notification and **Stop sharing**. Marmot chats carry start, updates and end over Marmot only, without signer prompts for updates. iOS background sharing needs a newer build.
 
 ### Improved
 
-- **Wallets tab.** The Home tab is now **Wallets**, and the drawer's wallet settings are **Manage wallets**. Swiping between wallets shows the right transactions instantly.
-- **Tidier settings.** Display and language are combined; Messages, Notifications and Advanced have their own screens. Language, currency and safety settings are per account.
+- **Wallets tab.** Renamed from Home; wallet settings are **Manage wallets**. Swiping wallets shows the right transactions instantly.
+- **Tidier settings.** Combined Display & language; separate Messages, Notifications and Advanced screens. Language, currency and safety settings stay per account.
 - **Market:** edit or delete your own comments and reviews, pull to refresh product pages, and friends' listings load faster.
 - **Safer links in chats and profiles.** Previews, images and voice notes from people you don't follow wait for a tap.
-- **Unreachable relays are skipped**, so a dead relay no longer slows the app down.
+- **Unreachable relays are skipped** to avoid delays.
 - **Copy a message's text and react with more emoji.** Long-press a text message in a one-to-one chat.
 
 ### Fixed
 
+- **Catching up on a Marmot group no longer loses older messages** (#1356).
 - **No default swap server any more.** Swaps through a Lightning wallet need your own: Account → On-chain → _Swap server URL_.
 - **On-chain Send explains why it's disabled** (fees not loaded, or balance too low) and offers _Retry fees_.
 - **White Noise stays in Marmot groups** after a rename or admin change.
