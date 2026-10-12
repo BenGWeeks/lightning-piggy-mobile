@@ -9,7 +9,7 @@ import {
 import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import { Zap, Plus, Minus, Check, ExternalLink, LogIn } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useTranslation } from '../contexts/LocaleContext';
+import { useLocale } from '../contexts/LocaleContext';
 import { createMarketCheckoutSheetStyles } from '../styles/MarketCheckoutSheet.styles';
 import { useMarketCheckout } from '../hooks/useMarketCheckout';
 import type { OrderShippingInput } from '../utils/marketOrder';
@@ -73,7 +73,7 @@ const MarketCheckoutSheet: React.FC<Props> = ({
 }) => {
   const { vendorPubkey, listingDTag, fulfilment } = checkout;
   const colors = useThemeColors();
-  const t = useTranslation();
+  const { t, formatLocale } = useLocale();
   const styles = useMemo(() => createMarketCheckoutSheetStyles(colors), [colors]);
   const sheetRef = useRef<BottomSheetModal>(null);
   const { status, error, isPlacing, canOrder, placeOrder, reset } = useMarketCheckout();
@@ -442,7 +442,7 @@ const MarketCheckoutSheet: React.FC<Props> = ({
                 </Text>
                 <Text style={styles.unitPrice}>
                   {t('market.checkout.unitPrice', {
-                    amount: product.priceSats.toLocaleString(),
+                    amount: product.priceSats.toLocaleString(formatLocale),
                     fiat: product.priceFiatLabel,
                   })}
                 </Text>
@@ -510,7 +510,9 @@ const MarketCheckoutSheet: React.FC<Props> = ({
                 <View style={styles.summaryRow}>
                   <Text style={styles.summaryLabel}>{t('market.checkout.subtotal')}</Text>
                   <Text style={styles.summaryValue} testID="market-checkout-subtotal">
-                    {t('market.sats', { amount: subtotalSats?.toLocaleString() ?? '—' })}
+                    {t('market.sats', {
+                      amount: subtotalSats?.toLocaleString(formatLocale) ?? '—',
+                    })}
                   </Text>
                 </View>
                 <View style={styles.summaryRow}>
@@ -519,7 +521,9 @@ const MarketCheckoutSheet: React.FC<Props> = ({
                     {selectedShippingSats !== null
                       ? selectedShippingSats === 0
                         ? t('market.free')
-                        : t('market.sats', { amount: selectedShippingSats.toLocaleString() })
+                        : t('market.sats', {
+                            amount: selectedShippingSats.toLocaleString(formatLocale),
+                          })
                       : '—'}
                   </Text>
                 </View>
@@ -531,7 +535,7 @@ const MarketCheckoutSheet: React.FC<Props> = ({
               <View style={styles.totalValue}>
                 <Zap size={16} color={colors.brandPink} strokeWidth={2.5} fill={colors.brandPink} />
                 <Text style={styles.totalSats} testID="market-checkout-total">
-                  {t('market.sats', { amount: totalSats?.toLocaleString() ?? '—' })}
+                  {t('market.sats', { amount: totalSats?.toLocaleString(formatLocale) ?? '—' })}
                 </Text>
               </View>
             </View>

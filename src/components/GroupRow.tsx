@@ -1,3 +1,4 @@
+import { useLocale } from '../contexts/LocaleContext';
 import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -47,6 +48,7 @@ function senderName(
 }
 
 const GroupRow: React.FC<Props> = ({ summary, onPress, contactInfoMap }) => {
+  const { t, formatLocale } = useLocale();
   const colors = useThemeColors();
   const styles = useMemo(() => createGroupRowStyles(colors), [colors]);
   const { pubkey: myPubkey } = useNostr();
@@ -59,16 +61,21 @@ const GroupRow: React.FC<Props> = ({ summary, onPress, contactInfoMap }) => {
     [onPress, summary],
   );
 
-  const timestamp = formatConversationTimestamp(activity.lastActivityAt);
+  const timestamp = formatConversationTimestamp(activity.lastActivityAt, undefined, formatLocale);
 
   const preview = useMemo(() => {
     if (!activity.lastSenderPubkey || !activity.lastText) {
-      return `${group.memberPubkeys.length + 1} member${group.memberPubkeys.length === 0 ? '' : 's'}`;
+      const count = group.memberPubkeys.length + 1;
+      return t(count === 1 ? 'groupsScreen.memberCountOne' : 'groupsScreen.memberCountOther', {
+        count,
+      });
     }
     const isMe = myPubkey && activity.lastSenderPubkey === myPubkey.toLowerCase();
-    const who = isMe ? 'You' : senderName(activity.lastSenderPubkey, contactInfoMap, contacts);
+    const who = isMe
+      ? t('groupConversationScreen.you')
+      : senderName(activity.lastSenderPubkey, contactInfoMap, contacts);
     return `${who}: ${activity.lastText}`;
-  }, [activity, contacts, contactInfoMap, myPubkey, group.memberPubkeys.length]);
+  }, [activity, contacts, contactInfoMap, myPubkey, group.memberPubkeys.length, t]);
 
   // Avatar pubkeys: lead with recent senders so the people who've been
   // talking show up first. Top up from [viewer, ...members] so the cluster

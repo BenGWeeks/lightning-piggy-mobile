@@ -88,7 +88,15 @@ jest.mock('../contexts/NostrContext', () => ({
 jest.mock('../contexts/ThemeContext', () => ({
   useThemeColors: () => new Proxy({}, { get: () => '#000' }),
 }));
-jest.mock('../contexts/LocaleContext', () => ({ useTranslation: () => (k: string) => k }));
+jest.mock('../contexts/LocaleContext', () =>
+  (() => {
+    const context = { useTranslation: () => (k: string) => k };
+    return {
+      ...context,
+      useLocale: () => ({ t: context.useTranslation(), locale: 'en', formatLocale: 'en' }),
+    };
+  })(),
+);
 jest.mock('./BrandedAlert', () => ({ Alert: { alert: jest.fn() } }));
 jest.mock('./BrandedToast', () => ({ Toast: { show: jest.fn() } }));
 jest.mock('./PaymentProgressOverlay', () => () => null);

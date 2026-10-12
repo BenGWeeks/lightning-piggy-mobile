@@ -42,8 +42,8 @@ export function quoteForwardSwap(
 
 /** "fee · time" string for the Move sheet's fee row / progress list. An
  *  unpriced network fee is named, never guessed. */
-export function formatForwardSwapFee(quote: ForwardSwapQuote): string {
-  const n = (v: number) => v.toLocaleString();
+export function formatForwardSwapFee(quote: ForwardSwapQuote, locale?: string): string {
+  const n = (v: number) => v.toLocaleString(locale);
   const fee =
     quote.networkFeeSats === null
       ? `~${n(quote.boltzFeeSats)} sats Boltz + network fee`

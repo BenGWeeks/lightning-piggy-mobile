@@ -4,9 +4,13 @@ export function truncateMiddle(value: string, head = 6, tail = 6): string {
   return `${value.slice(0, head)}…${value.slice(-tail)}`;
 }
 
-export function formatFriendlyDateTime(unixSeconds: number, now: Date = new Date()): string {
+export function formatFriendlyDateTime(
+  unixSeconds: number,
+  now: Date = new Date(),
+  locale?: string,
+): string {
   const d = new Date(unixSeconds * 1000);
-  const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  const time = d.toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' });
   const sameYMD = (a: Date, b: Date) =>
     a.getFullYear() === b.getFullYear() &&
     a.getMonth() === b.getMonth() &&
@@ -15,7 +19,7 @@ export function formatFriendlyDateTime(unixSeconds: number, now: Date = new Date
   yesterday.setDate(now.getDate() - 1);
   if (sameYMD(d, now)) return `Today · ${time}`;
   if (sameYMD(d, yesterday)) return `Yesterday · ${time}`;
-  const dateStr = d.toLocaleDateString(undefined, {
+  const dateStr = d.toLocaleDateString(locale, {
     day: 'numeric',
     month: 'short',
     year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric',

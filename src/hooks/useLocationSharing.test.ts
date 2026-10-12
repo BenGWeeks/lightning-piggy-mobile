@@ -24,7 +24,15 @@ jest.mock('../contexts/NostrContext', () => ({
 jest.mock('../components/BrandedAlert', () => ({ Alert: { alert: jest.fn() } }));
 // The group composer reads `t` from LocaleContext; a stable identity translator.
 const mockT = (key: string) => key;
-jest.mock('../contexts/LocaleContext', () => ({ useTranslation: () => mockT }));
+jest.mock('../contexts/LocaleContext', () =>
+  (() => {
+    const context = { useTranslation: () => mockT };
+    return {
+      ...context,
+      useLocale: () => ({ t: context.useTranslation(), locale: 'en', formatLocale: 'en' }),
+    };
+  })(),
+);
 jest.mock('../services/locationService', () => ({
   ...jest.requireActual('../services/locationService'),
   getCurrentLocation: jest.fn(),

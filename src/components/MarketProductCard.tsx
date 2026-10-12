@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity } from 'react-native';
 import { Image } from 'expo-image';
 import { Zap } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useTranslation } from '../contexts/LocaleContext';
+import { useLocale } from '../contexts/LocaleContext';
 import { createMarketProductCardStyles } from '../styles/MarketProductCard.styles';
 import VendorAvatar from './VendorAvatar';
 import type { MarketProduct } from '../data/marketProducts';
@@ -48,7 +48,7 @@ const MarketProductCard: React.FC<Props> = ({
   testID,
 }) => {
   const colors = useThemeColors();
-  const t = useTranslation();
+  const { t, formatLocale } = useLocale();
   const styles = useMemo(() => createMarketProductCardStyles(colors), [colors]);
   // Fall back to a branded placeholder tile if the image 404s / dead host.
   const [imageFailed, setImageFailed] = useState(false);
@@ -95,7 +95,7 @@ const MarketProductCard: React.FC<Props> = ({
           ? `${product.title}, ${product.listing.priceLabel}, ${sellerName}`
           : t('market.card.accessibility', {
               title: product.title,
-              amount: product.priceSats.toLocaleString(),
+              amount: product.priceSats.toLocaleString(formatLocale),
               seller: sellerName,
             })
       }
@@ -111,7 +111,7 @@ const MarketProductCard: React.FC<Props> = ({
           <Zap size={12} color={colors.brandPink} strokeWidth={2.5} fill={colors.brandPink} />
           <Text style={styles.price} testID={testID ? `${testID}-price` : undefined}>
             {product.listing?.priceLabel ??
-              t('market.sats', { amount: product.priceSats.toLocaleString() })}
+              t('market.sats', { amount: product.priceSats.toLocaleString(formatLocale) })}
           </Text>
         </View>
         <View style={styles.sellerRow}>

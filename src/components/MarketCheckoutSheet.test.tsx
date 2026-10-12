@@ -25,7 +25,15 @@ jest.mock('@gorhom/bottom-sheet', () => {
   };
 });
 jest.mock('../contexts/ThemeContext', () => ({ useThemeColors: () => ({}) }));
-jest.mock('../contexts/LocaleContext', () => ({ useTranslation: () => (key: string) => key }));
+jest.mock('../contexts/LocaleContext', () =>
+  (() => {
+    const context = { useTranslation: () => (key: string) => key };
+    return {
+      ...context,
+      useLocale: () => ({ t: context.useTranslation(), locale: 'en', formatLocale: 'en' }),
+    };
+  })(),
+);
 jest.mock('../styles/MarketCheckoutSheet.styles', () => ({
   createMarketCheckoutSheetStyles: () => ({}),
 }));

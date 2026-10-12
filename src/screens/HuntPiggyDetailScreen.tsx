@@ -1,9 +1,10 @@
+import { createHuntPiggyDetailScreenStyles as createStyles } from '../styles/HuntPiggyDetailScreen.styles';
+import { useLocale } from '../contexts/LocaleContext';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
-  StyleSheet,
   ScrollView,
   ActivityIndicator,
   Image,
@@ -849,6 +850,7 @@ const LogRow: React.FC<{
   // with subscribeFindLogZaps).
   onZap: (log: FoundLog, lud16: string, name: string | null) => void;
 }> = ({ log, colors, styles, onPressProfile, zapsReceivedSats, onZap }) => {
+  const { formatLocale } = useLocale();
   const { name, picture, lud16 } = usePubkeyProfile(log.pubkey);
   const display = name ?? shortNpub(log.pubkey);
   const ageMins = Math.floor((Date.now() / 1000 - log.createdAt) / 60);
@@ -890,7 +892,9 @@ const LogRow: React.FC<{
           // verifiable, so the copy says "reported", not "claimed".
           <View style={styles.logBadge}>
             <Zap size={12} color={colors.zapYellow} fill={colors.zapYellow} strokeWidth={2.5} />
-            <Text style={styles.logBadgeText}>Reported {log.amountSats.toLocaleString()} sats</Text>
+            <Text style={styles.logBadgeText}>
+              Reported {log.amountSats.toLocaleString(formatLocale)} sats
+            </Text>
           </View>
         ) : (
           <View />
@@ -910,7 +914,7 @@ const LogRow: React.FC<{
           testID={`hunt-log-${log.id.slice(0, 8)}-zap`}
           accessibilityLabel={
             zapsReceivedSats > 0
-              ? `Zap ${display} — ${zapsReceivedSats.toLocaleString()} sats zapped so far`
+              ? `Zap ${display} — ${zapsReceivedSats.toLocaleString(formatLocale)} sats zapped so far`
               : `Zap ${display}`
           }
         >
@@ -922,7 +926,7 @@ const LogRow: React.FC<{
           />
           {zapsReceivedSats > 0 ? (
             <Text style={styles.logZapText} testID={`hunt-log-${log.id.slice(0, 8)}-zaps-received`}>
-              {zapsReceivedSats.toLocaleString()}
+              {zapsReceivedSats.toLocaleString(formatLocale)}
             </Text>
           ) : null}
         </TouchableOpacity>
@@ -1035,6 +1039,7 @@ const CacheSpecPanel: React.FC<{
   colors: Palette;
   styles: ReturnType<typeof createStyles>;
 }> = ({ cache, colors, styles }) => {
+  const { formatLocale } = useLocale();
   const [openKey, setOpenKey] = useState<string | null>(null);
 
   const typeKey = (cache.cacheType ?? 'traditional').toLowerCase();
@@ -1070,7 +1075,7 @@ const CacheSpecPanel: React.FC<{
   if (cache.payoutSats != null) {
     chips.push({
       key: 'prize',
-      label: `${cache.payoutSats.toLocaleString()} sats`,
+      label: `${cache.payoutSats.toLocaleString(formatLocale)} sats`,
       title: 'Prize',
       body: "The Lightning payout this Piggy was stocked with. Claim it by tapping the Piggy's NFC tag at the cache — the balance isn't guaranteed once other finders have claimed.",
       Icon: Zap,
@@ -1093,7 +1098,7 @@ const CacheSpecPanel: React.FC<{
   if (cache.uses != null) {
     chips.push({
       key: 'uses',
-      label: `${cache.uses.toLocaleString()} claims`,
+      label: `${cache.uses.toLocaleString(formatLocale)} claims`,
       title: 'Total claims',
       body: 'How many times the prize can be claimed in all, across every finder.',
       Icon: Repeat,
@@ -1164,7 +1169,7 @@ const CacheSpecPanel: React.FC<{
   if (cache.expiresAt != null) {
     const nowSec = Math.floor(Date.now() / 1000);
     const daysLeft = Math.round((cache.expiresAt - nowSec) / 86400);
-    const dateStr = new Date(cache.expiresAt * 1000).toLocaleDateString(undefined, {
+    const dateStr = new Date(cache.expiresAt * 1000).toLocaleDateString(formatLocale, {
       day: 'numeric',
       month: 'short',
       year: 'numeric',
@@ -1247,331 +1252,5 @@ const CacheSpecPanel: React.FC<{
     </View>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    container: { flex: 1, backgroundColor: colors.background },
-    header: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 16,
-      paddingTop: 48,
-      paddingBottom: 16,
-      backgroundColor: colors.brandPink,
-      gap: 12,
-    },
-    headerTitle: {
-      flex: 1,
-      textAlign: 'center',
-      fontSize: 18,
-      fontWeight: '700',
-      color: colors.white,
-    },
-    body: { padding: 16, gap: 12 },
-    errorText: { fontSize: 14, color: colors.brandPink, textAlign: 'center' },
-    subtle: { fontSize: 13, color: colors.textSupplementary, lineHeight: 20 },
-    heroWrap: { position: 'relative' },
-    // Photo and map share one fixed-size hero slot so toggling between
-    // them never shifts the layout.
-    hero: {
-      width: '100%',
-      height: 200,
-      borderRadius: 12,
-      overflow: 'hidden',
-      backgroundColor: colors.divider,
-    },
-    heroToggle: {
-      position: 'absolute',
-      top: 8,
-      right: 8,
-      flexDirection: 'row',
-      gap: 4,
-      padding: 4,
-      borderRadius: 100,
-      backgroundColor: 'rgba(0,0,0,0.55)',
-    },
-    heroToggleBtn: {
-      width: 42,
-      height: 42,
-      borderRadius: 100,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    heroToggleBtnActive: { backgroundColor: colors.brandPink },
-    chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-    chip: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      backgroundColor: colors.surface,
-      borderWidth: 1,
-      borderColor: colors.divider,
-      paddingHorizontal: 10,
-      paddingVertical: 5,
-      borderRadius: 100,
-    },
-    chipAccent: { backgroundColor: colors.brandPink, borderColor: colors.brandPink },
-    chipActive: { backgroundColor: colors.brandPinkLight, borderColor: colors.brandPink },
-    chipText: { fontSize: 12, fontWeight: '700', color: colors.textHeader },
-    chipTextAccent: { color: colors.white },
-    // Full-bleed band — escapes the body's 16dp padding so the subtle
-    // surface tint runs edge to edge, setting the D/T/S row apart from
-    // the chips above and the action buttons below.
-    meterRow: {
-      flexDirection: 'row',
-      gap: 22,
-      marginHorizontal: -16,
-      // No marginBottom — the body's 12dp gap already sits below, so a
-      // marginBottom here would make the band float lower than its top.
-      marginTop: 12,
-      paddingHorizontal: 28,
-      paddingVertical: 16,
-      backgroundColor: colors.surface,
-    },
-    meter: { flex: 1, gap: 6 },
-    meterName: { fontSize: 11, fontWeight: '700', color: colors.textSupplementary },
-    meterNameActive: { color: colors.brandPink },
-    metaPill: {
-      backgroundColor: colors.surface,
-      color: colors.textSupplementary,
-      paddingHorizontal: 8,
-      paddingVertical: 3,
-      borderRadius: 100,
-      fontSize: 11,
-      fontWeight: '600',
-    },
-    description: { fontSize: 14, color: colors.textHeader, lineHeight: 20 },
-    attribution: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      fontStyle: 'italic',
-      marginTop: 2,
-      lineHeight: 17,
-    },
-    hiderRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
-      marginTop: 8,
-      marginBottom: 4,
-    },
-    hiderAvatar: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      backgroundColor: colors.surface,
-    },
-    hiderAvatarFallback: {
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    hiderAvatarInitial: {
-      color: colors.brandPink,
-      fontSize: 14,
-      fontWeight: '800',
-    },
-    hiderName: {
-      fontSize: 14,
-      fontWeight: '700',
-      color: colors.textHeader,
-    },
-    hiderHint: {
-      fontSize: 11,
-      color: colors.textSupplementary,
-      fontStyle: 'italic',
-      marginTop: 1,
-    },
-    logAvatar: {
-      width: 28,
-      height: 28,
-      borderRadius: 14,
-      backgroundColor: colors.surface,
-      marginRight: 8,
-    },
-    logZapButton: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      backgroundColor: 'transparent',
-      borderWidth: 1,
-      borderColor: colors.brandPink,
-      paddingHorizontal: 12,
-      paddingVertical: 5,
-      borderRadius: 999,
-    },
-    logZapButtonDisabled: { opacity: 0.4 },
-    logZapText: {
-      color: colors.brandPink,
-      fontSize: 12,
-      fontWeight: '700',
-    },
-    hintCard: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      backgroundColor: colors.brandPinkLight,
-      padding: 12,
-      borderRadius: 10,
-    },
-    hintText: { color: colors.brandPink, fontSize: 13, fontWeight: '600', flex: 1 },
-    claimSection: { gap: 8 },
-    actionRow: { flexDirection: 'row', gap: 10 },
-    actionButtonPrimary: {
-      flex: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 8,
-      backgroundColor: colors.brandPink,
-      paddingVertical: 14,
-      borderRadius: 100,
-    },
-    actionButtonPrimaryText: { color: colors.white, fontSize: 15, fontWeight: '700' },
-    actionButtonSecondary: {
-      flex: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 8,
-      backgroundColor: colors.surface,
-      borderWidth: 1,
-      borderColor: colors.brandPink,
-      paddingVertical: 14,
-      borderRadius: 100,
-    },
-    actionButtonSecondaryText: { color: colors.brandPink, fontSize: 15, fontWeight: '700' },
-    claimButtonDisabled: { opacity: 0.45 },
-    claimNote: {
-      color: colors.textSupplementary,
-      fontSize: 12,
-      lineHeight: 16,
-      textAlign: 'center',
-    },
-    sectionLabel: {
-      fontSize: 13,
-      fontWeight: '700',
-      color: colors.textSupplementary,
-      letterSpacing: 0.5,
-      marginTop: 12,
-    },
-    composer: {
-      backgroundColor: colors.surface,
-      borderRadius: 12,
-      padding: 12,
-      gap: 10,
-      marginTop: 8,
-    },
-    composerInput: {
-      minHeight: 64,
-      fontSize: 14,
-      color: colors.textBody,
-      backgroundColor: colors.background,
-      borderRadius: 10,
-      padding: 10,
-    },
-    composerPhotoPreviewWrap: { position: 'relative' },
-    composerPhotoPreview: {
-      width: '100%',
-      aspectRatio: 16 / 9,
-      borderRadius: 10,
-      backgroundColor: colors.divider,
-    },
-    composerPhotoRemove: {
-      position: 'absolute',
-      top: 6,
-      right: 6,
-      width: 24,
-      height: 24,
-      borderRadius: 12,
-      backgroundColor: 'rgba(0,0,0,0.55)',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    composerPhotoButtons: { flexDirection: 'row', gap: 8 },
-    composerPhotoButton: {
-      flex: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 6,
-      paddingVertical: 10,
-      borderRadius: 10,
-      backgroundColor: colors.brandPinkLight,
-    },
-    composerPhotoButtonText: { color: colors.brandPink, fontSize: 13, fontWeight: '700' },
-    composerHeader: {
-      fontSize: 13,
-      fontWeight: '700',
-      color: colors.textSupplementary,
-      marginBottom: 6,
-    },
-    composerActions: { flexDirection: 'row', gap: 8 },
-    composerPost: {
-      flex: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 6,
-      backgroundColor: colors.brandPink,
-      paddingVertical: 12,
-      borderRadius: 100,
-    },
-    // Always-on composer no longer has a Cancel button alongside Post,
-    // so Post takes the full width of the actions row.
-    composerPostFull: { flex: 1 },
-    composerPostDim: { opacity: 0.6 },
-    composerPostText: { color: colors.white, fontSize: 14, fontWeight: '700' },
-    logRow: {
-      backgroundColor: colors.surface,
-      borderRadius: 10,
-      padding: 12,
-      gap: 6,
-      marginTop: 6,
-    },
-    logHeader: { flexDirection: 'row', alignItems: 'center' },
-    logAuthor: { color: colors.textSupplementary, fontSize: 12, fontFamily: 'monospace' },
-    logAge: { color: colors.textSupplementary, fontSize: 12 },
-    logImage: {
-      width: '100%',
-      aspectRatio: 16 / 9,
-      borderRadius: 8,
-      backgroundColor: colors.divider,
-    },
-    logContent: { fontSize: 14, color: colors.textHeader, lineHeight: 20 },
-    logFooter: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      marginTop: 2,
-    },
-    logBadgesRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      flexShrink: 1,
-    },
-    logBadge: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      backgroundColor: colors.brandPinkLight,
-      alignSelf: 'flex-start',
-      paddingHorizontal: 8,
-      paddingVertical: 4,
-      borderRadius: 100,
-    },
-    logBadgeText: { color: colors.brandPink, fontSize: 11, fontWeight: '700' },
-    logBadgeZapped: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      backgroundColor: colors.brandPink,
-      alignSelf: 'flex-start',
-      paddingHorizontal: 8,
-      paddingVertical: 4,
-      borderRadius: 100,
-    },
-    logBadgeZappedText: { color: colors.white, fontSize: 11, fontWeight: '700' },
-  });
 
 export default HuntPiggyDetailScreen;

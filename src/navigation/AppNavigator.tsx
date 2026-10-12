@@ -69,6 +69,9 @@ const PlacesScreen = lazyScreen(() => import('../screens/PlacesScreen'));
 const PlaceDetailScreen = lazyScreen(() => import('../screens/PlaceDetailScreen'));
 const MarketScreen = lazyScreen(() => import('../screens/MarketScreen'));
 const MarketProductDetailScreen = lazyScreen(() => import('../screens/MarketProductDetailScreen'));
+const MarketMyShopScreen = lazyScreen(() => import('../screens/MarketMyShopScreen'));
+const MarketShopSettingsScreen = lazyScreen(() => import('../screens/MarketShopSettingsScreen'));
+const MarketListingEditorScreen = lazyScreen(() => import('../screens/MarketListingEditorScreen'));
 const HuntScreen = lazyScreen(() => import('../screens/HuntScreen'));
 const HuntCreateScreen = lazyScreen(() => import('../screens/HuntCreateScreen'));
 const HuntFoundScreen = lazyScreen(() => import('../screens/HuntFoundScreen'));
@@ -390,6 +393,9 @@ function ExploreStackNavigator() {
       <ExploreStack.Screen name="PlaceDetail" component={PlaceDetailScreen} />
       <ExploreStack.Screen name="Market" component={MarketScreen} />
       <ExploreStack.Screen name="MarketProductDetail" component={MarketProductDetailScreen} />
+      <ExploreStack.Screen name="MarketMyShop" component={MarketMyShopScreen} />
+      <ExploreStack.Screen name="MarketShopSettings" component={MarketShopSettingsScreen} />
+      <ExploreStack.Screen name="MarketListingEditor" component={MarketListingEditorScreen} />
       <ExploreStack.Screen name="Hunt" component={HuntScreen} />
       <ExploreStack.Screen name="HuntCreate" component={HuntCreateScreen} />
       <ExploreStack.Screen name="HuntFound" component={HuntFoundScreen} />

@@ -20,10 +20,11 @@ export function formatFiatApprox(
   sats: number,
   btcPrice: number | null | undefined,
   currency: string,
+  locale?: string,
 ): string | null {
   if (!btcPrice || sats <= 0) return null;
   const value = (sats / 1e8) * btcPrice;
-  const num = value.toLocaleString(undefined, {
+  const num = value.toLocaleString(locale, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });

@@ -1,3 +1,4 @@
+import { getAppFormatLocale } from '../utils/appFormatLocale';
 import { reverseRefundHeight, verifyReverseLockup } from '../utils/reverseSwapVerify';
 /**
  * Swap recovery service.
@@ -510,15 +511,15 @@ const SUBMARINE_FAIL_STATUSES = new Set([
 ]);
 const SUBMARINE_SUCCESS_STATUSES = new Set(['invoice.settled', 'transaction.claimed']);
 
-export function recoverPendingSwaps(): Promise<void> {
+export function recoverPendingSwaps(locale?: string): Promise<void> {
   if (recoveryInFlight) return recoveryInFlight;
-  recoveryInFlight = runRecoveryPass().finally(() => {
+  recoveryInFlight = runRecoveryPass(locale ?? getAppFormatLocale()).finally(() => {
     recoveryInFlight = null;
   });
   return recoveryInFlight;
 }
 
-async function runRecoveryPass(): Promise<void> {
+async function runRecoveryPass(locale?: string): Promise<void> {
   // Wipe the attention set at the start of every pass so it always reflects
   // the current persisted swap state and not stale entries from prior runs.
   // Without this, payment hashes for swaps that have since been removed
@@ -545,7 +546,7 @@ async function runRecoveryPass(): Promise<void> {
 
       for (const swapId of ids) {
         try {
-          await recoverSwap(swapId);
+          await recoverSwap(swapId, locale);
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
           console.warn(`[SwapRecovery] Failed to recover swap ${swapId}:`, e);
@@ -574,7 +575,7 @@ async function runRecoveryPass(): Promise<void> {
   }
 }
 
-async function recoverSwap(swapId: string): Promise<void> {
+async function recoverSwap(swapId: string, locale?: string): Promise<void> {
   const raw = await SecureStore.getItemAsync(`boltz_swap_${swapId}`);
   if (!raw) {
     // Stale index entry
@@ -709,7 +710,7 @@ async function recoverSwap(swapId: string): Promise<void> {
     Toast.show({
       type: 'info',
       text1: 'Claiming swap',
-      text2: `Broadcasting claim for ${amount.toLocaleString()} sats…`,
+      text2: `Broadcasting claim for ${amount.toLocaleString(locale)} sats…`,
       position: 'top',
       visibilityTime: 8000,
     });
@@ -739,7 +740,7 @@ async function recoverSwap(swapId: string): Promise<void> {
     Toast.show({
       type: 'success',
       text1: 'Swap recovered',
-      text2: `${claimedSats.toLocaleString()} sats claimed to your on-chain wallet`,
+      text2: `${claimedSats.toLocaleString(locale)} sats claimed to your on-chain wallet`,
       position: 'top',
       visibilityTime: 10000,
     });

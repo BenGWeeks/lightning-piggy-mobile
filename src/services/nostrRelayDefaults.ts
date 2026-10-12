@@ -7,8 +7,9 @@
  * external fetcher): connect + EOSE time, NIP-11, whether an unknown key may
  * write, and how far back the relay serves events. Rules:
  *  - every list has at least 3 healthy relays run by different operators;
- *  - nos.lol / nostr.mom (one server, down at the time of writing) only appear
- *    as an extra alongside enough healthy relays, never as a list's backbone;
+ *  - nos.lol / nostr.mom (one server, intermittently unreachable /
+ *    rate-limited for some IPs) only appear as an extra alongside enough
+ *    healthy relays, never as a list's backbone;
  *  - relay.nostr.band, relay.nostr.net and relay.nsec.app are gone (dead);
  *  - relay.snort.social isn't used: it's an in-memory relay (memlay) that
  *    serves nothing older than about an hour.
@@ -52,4 +53,19 @@ export const NIP46_PAIRING_RELAYS = [
   'wss://relay.primal.net',
   'wss://relay.ditto.pub',
   'wss://nos.lol',
+];
+
+/**
+ * Where Lightning Piggy's Marmot push servers (Transponder) listen and publish
+ * their kind-10050 inbox list. Push records carry no relay hint, so a sender
+ * finds a server's relays from that 10050 — these are queried first so the
+ * lookup lands where the list lives. Server-side setting: keep in step with
+ * the servers' config (no app release needed to move them; this list only
+ * helps the lookup).
+ */
+export const MARMOT_PUSH_SERVER_RELAYS = [
+  'wss://relay.eu.whitenoise.chat',
+  'wss://relay.ditto.pub',
+  'wss://relay.coinos.io',
+  'wss://relay.primal.net',
 ];
