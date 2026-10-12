@@ -31,6 +31,9 @@ export const createHomeScreenStyles = (colors: Palette) =>
       alignItems: 'center',
       gap: 6,
     },
+    actionButtonPressed: {
+      transform: [{ scale: 0.96 }],
+    },
     actionButtonDisabled: {
       opacity: 0.4,
     },

@@ -8,6 +8,8 @@ import * as zapResolverFingerprintStorage from '../services/zapResolverFingerpri
 import * as walletStorage from '../services/walletStorageService';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import { WalletProvider, useWallet, useWalletLive } from './WalletContext';
+import { selectHomeWalletState } from '../utils/homeWalletState';
+import type { WalletMetadata } from '../types/wallet';
 
 jest.mock('expo-secure-store', () => {
   const store = new Map<string, string>();
@@ -316,4 +318,72 @@ it('ignores a pending expected-payment result after B → C → B', async () => 
     view.unmount();
     jest.useRealTimers();
   }
+});
+
+function homeState() {
+  const { wallets, activeWalletId, walletsHydrated } = latest!;
+  return selectHomeWalletState(wallets, activeWalletId, walletsHydrated);
+}
+
+it('keeps Home neutral during delayed startup, then enables actions from the hydrated cards', async () => {
+  walletStorage.setActivePubkeyForWalletStorage('home-startup');
+  const pending = deferred<WalletMetadata[]>();
+  jest.spyOn(walletStorage, 'getWalletList').mockImplementation(() => pending.promise);
+  const cards: WalletMetadata[] = ['home-a', 'home-b', 'home-c'].map((id, order) => ({
+    id,
+    order,
+    alias: id,
+    theme: 'lightning-piggy',
+    walletType: 'nwc',
+    lightningAddress: null,
+  }));
+  const view = renderProvider();
+  await waitFor(() => expect(walletStorage.getWalletList).toHaveBeenCalled());
+  expect(latest?.walletsHydrated).toBe(false);
+  expect(homeState()).toMatchObject({ showWelcome: false, dimActions: false });
+  await act(async () => pending.resolve(cards));
+  await waitFor(() => expect(latest?.walletsHydrated).toBe(true));
+  expect(latest?.wallets.map((w) => w.id)).toEqual(cards.map((w) => w.id));
+  expect(homeState()).toMatchObject({
+    activeWallet: latest?.wallets[0],
+    showWelcome: false,
+    isReceiveDisabled: false,
+    isSendDisabled: false,
+    isTransferDisabled: false,
+    dimActions: false,
+  });
+  view.unmount();
+});
+
+it('clears old cards during a delayed identity reload without flashing the new-user prompt', async () => {
+  walletStorage.setActivePubkeyForWalletStorage('home-old');
+  const oldCard: WalletMetadata = {
+    id: 'home-old-card',
+    order: 0,
+    alias: 'old',
+    theme: 'lightning-piggy',
+    walletType: 'nwc',
+    lightningAddress: null,
+  };
+  const read = jest.spyOn(walletStorage, 'getWalletList').mockResolvedValue([oldCard]);
+  const view = renderProvider();
+  await waitFor(() => expect(latest?.walletsHydrated).toBe(true));
+  expect(homeState().activeWallet?.id).toBe(oldCard.id);
+  const pending = deferred<WalletMetadata[]>();
+  read.mockImplementation(() => pending.promise);
+  await act(async () => walletStorage.setActivePubkeyForWalletStorage('home-new'));
+  expect(latest?.wallets).toEqual([]);
+  expect(latest?.activeWallet).toBeNull();
+  expect(latest?.walletsHydrated).toBe(false);
+  expect(homeState()).toMatchObject({ showWelcome: false, dimActions: false });
+  await act(async () => pending.resolve([{ ...oldCard, id: 'home-new-card' }]));
+  await waitFor(() => expect(latest?.walletsHydrated).toBe(true));
+  expect(homeState()).toMatchObject({
+    activeWallet: { id: 'home-new-card' },
+    showWelcome: false,
+    isReceiveDisabled: false,
+    isSendDisabled: false,
+    dimActions: false,
+  });
+  view.unmount();
 });
