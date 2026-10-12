@@ -9,7 +9,6 @@ import {
   saveHiddenListings,
   sellerRelays,
 } from '../services/marketSellerService';
-import { removeWithdrawnShippingReferences } from '../services/marketShippingWithdrawal';
 import { addSellerEvents, sellerStoreState, setSellerHidden } from '../services/sellerEventStore';
 import {
   COLLECTION_KIND,
@@ -28,11 +27,7 @@ import {
   type ShippingZoneDraft,
   type ShopDraft,
 } from '../utils/marketSellerEvents';
-import {
-  isNewerRevision,
-  resolveCurrentRevision,
-  type SaveOptions,
-} from '../utils/marketSellerRevision';
+import { resolveCurrentRevision, type SaveOptions } from '../utils/marketSellerRevision';
 import type { SellerSnapshot } from '../utils/marketSellerSnapshot';
 
 export {
@@ -232,20 +227,6 @@ export function useSellerActions(snapshot: SellerSnapshot) {
           if (!sameEvent(template, previous ?? undefined)) await signAndPublish(template, previous);
         }
         if (removed.length > 0) {
-          await removeWithdrawnShippingReferences({
-            coordinates: new Set(removed),
-            listings: snapshot.listings,
-            latest: async (listing) => {
-              // A null lookup must not recreate a deleted cached listing.
-              const latest = await currentRevision(LISTING_KIND, dTagOf(listing), null, {
-                force: true,
-              });
-              // Relays may lag our cache; preserve the newest known listing data.
-              return latest && isNewerRevision(listing, latest) ? listing : latest;
-            },
-            publish: signAndPublish,
-          });
-
           const newest = Math.max(0, ...removed.map((c) => revisions.get(c)?.created_at ?? 0));
           await signAndPublish(
             buildDeletionTemplate(

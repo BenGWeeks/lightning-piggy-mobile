@@ -169,7 +169,7 @@ it.each([0, 60])(
 );
 
 it.each(['deleted', 'older', 'newer', 'tie'])(
-  'zone cleanup preserves the newest listing data when the relay revision is %s',
+  'removing a zone never fetches or republishes listings when the relay revision is %s',
   async (revision) => {
     const draft = {
       dTag: 'book',
@@ -222,21 +222,14 @@ it.each(['deleted', 'older', 'newer', 'tie'])(
       await result.current.saveShop(shop, [], base);
     });
     const published = (publishSellerEvent as jest.Mock).mock.calls.map(([event]) => event as Event);
-    if (!returned) {
-      expect(published.map((event) => event.kind)).toEqual([5, 30405]);
-    } else {
-      const expected =
-        cached.created_at > returned.created_at ||
-        (cached.created_at === returned.created_at && cached.id < returned.id)
-          ? cached
-          : returned;
-      expect(published.map((event) => event.kind)).toEqual([30402, 5, 30405]);
-      expect(published[0].content).toBe(expected.content);
-      expect(published[0].tags).toEqual(expected.tags.filter(([tag]) => tag !== 'shipping_option'));
-      expect(published[0].created_at).toBeGreaterThan(expected.created_at);
-    }
-    expect(fetchLatestRevision).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: 30402, dTag: 'book' }),
-    );
+    expect(published.map((event) => event.kind)).toEqual([5, 30405]);
+    expect(published[0].tags).toEqual([
+      ['a', coordinate],
+      ['e', oldZone.id],
+      ['k', '30406'],
+    ]);
+    expect(published[0].created_at).toBeGreaterThanOrEqual(oldZone.created_at);
+    expect(published[1].tags).not.toContainEqual(['shipping_option', coordinate]);
+    expect(fetchLatestRevision).not.toHaveBeenCalledWith(expect.objectContaining({ kind: 30402 }));
   },
 );
