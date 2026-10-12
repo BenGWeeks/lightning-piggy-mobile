@@ -25,11 +25,13 @@ import * as Location from 'expo-location';
 import { expiryFor } from './liveLocationService';
 import {
   createLiveUpdateDispatcher,
+  transportFor,
   LIVE_UPDATE_MIN_INTERVAL_MS,
   type TrackedFix,
 } from './liveLocationPolicy';
 import { loadPersistedSessions, savePersistedSessions } from './liveLocationStorage';
 import { sendLiveUpdate } from './liveLocationSender';
+import { restoreMarmotSessionHeadless } from './marmotHeadlessSession';
 import { dismissLiveShareNotification } from './liveLocationNotification';
 import type { OutgoingSession } from './liveLocationStateMachine';
 import { t } from '../i18n';
@@ -132,7 +134,24 @@ export function headlessLiveSessions(persisted: OutgoingSession[], now: number):
 
 async function runHeadless(fix: TrackedFix): Promise<void> {
   const ctx = await loadTrackingContext();
-  const live = ctx ? headlessLiveSessions(await loadPersistedSessions(ctx.owner), Date.now()) : [];
+  const persisted = ctx ? await loadPersistedSessions(ctx.owner) : [];
+  let live = ctx ? headlessLiveSessions(persisted, Date.now()) : [];
+  if (ctx && live.some((s) => transportFor(s) === 'marmot')) {
+    // Marmot updates need the MLS session: restore it (no UI is mounted).
+    // If that's impossible (the account was switched away), end those shares
+    // cleanly — the end marker goes out on the next app open — instead of
+    // streaming into nowhere while the notification says we're sharing.
+    if (!(await restoreMarmotSessionHeadless(ctx.owner, ctx.relays))) {
+      const ended = new Set(
+        live.filter((s) => transportFor(s) === 'marmot').map((s) => s.sessionId),
+      );
+      await savePersistedSessions(
+        ctx.owner,
+        persisted.map((s) => (ended.has(s.sessionId) ? { ...s, stopRequested: true } : s)),
+      );
+      live = live.filter((s) => !ended.has(s.sessionId));
+    }
+  }
   if (!ctx || live.length === 0) {
     // Nothing left to share: stop the service. The end markers go out from
     // the provider's drain loop on the next app open.
@@ -140,8 +159,9 @@ async function runHeadless(fix: TrackedFix): Promise<void> {
     await dismissLiveShareNotification();
     return;
   }
+  const owner = ctx.owner;
   await liveUpdateDispatcher.handleFix(fix, live, (s, p) =>
-    sendLiveUpdate(ctx.owner, s, p, ctx.relays),
+    sendLiveUpdate(owner, s, p, ctx.relays),
   );
 }
 

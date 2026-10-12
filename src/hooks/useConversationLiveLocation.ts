@@ -118,7 +118,22 @@ export function useLiveLocationThread(params: {
     signerType,
     relays,
   });
-  const updates = useLiveUpdates(watched);
+  // Read retained fixes for EVERY inbound start shown — not just running ones —
+  // so a share that expires (or ends with a coordless end marker) keeps its
+  // last position instead of snapping back to the start. Only the relay
+  // subscriptions above are limited to active shares.
+  const displayed = useMemo<WatchedShare[]>(
+    () =>
+      markers
+        .filter((m) => !m.fromMe && m.marker.phase === 'start')
+        .map((m) => ({
+          sender: m.sender,
+          sessionId: m.marker.sessionId,
+          startedAt: m.marker.startedAt,
+        })),
+    [markers],
+  );
+  const updates = useLiveUpdates(displayed);
 
   /** Copy each owner's `sender:id` value onto the plain `id` key. */
   const aliasOwners = <T>(out: Record<string, T>) => {
