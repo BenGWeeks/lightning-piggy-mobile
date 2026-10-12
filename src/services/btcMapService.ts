@@ -108,6 +108,9 @@ const V4_FIELDS_RICH = [
   'osm:payment:lightning',
   'osm:payment:lightning_contactless',
   'osm:payment:onchain',
+  'osm:phone',
+  'osm:website',
+  'website',
   'osm:contact:phone',
   'osm:contact:website',
   'osm:contact:email',
@@ -406,7 +409,7 @@ const reshape = (raw: Record<string, unknown>): BtcMapPlace | null => {
     if (typeof v === 'string' && v.trim().length > 0) return v.trim();
     return null;
   };
-  const phone = pickStr('phone') ?? tags['contact:phone'] ?? null;
+  const phone = pickStr('phone') ?? tags['contact:phone'] ?? tags['phone'] ?? null;
   const email = pickStr('email') ?? tags['contact:email'] ?? null;
   const opening_hours = pickStr('opening_hours') ?? tags['opening_hours'] ?? null;
   const facebookUrl = tags['contact:facebook'] ?? null;

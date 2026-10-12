@@ -1628,6 +1628,9 @@
     "swapNotPaid": "कुछ भी नहीं भेजा गया — Boltz को Lightning पेमेंट नहीं हो सका, इसलिए आपके वॉलेट से कोई sats नहीं निकले। आप फिर से कोशिश कर सकते हैं।"
   },
   "placeDetailScreen": {
+    "viewOnBtcMap": "BTC Map पर देखें",
+    "phone": "फ़ोन",
+    "website": "वेबसाइट",
     "notInCache": "यह जगह अब हमारी कैश की गई सूची में नहीं है — इसे मैप से खोलकर देखें।",
     "bitcoinPlaceFallback": "Bitcoin स्वीकार करने वाली जगह",
     "backToPlaces": "जगहों पर वापस जाएँ",

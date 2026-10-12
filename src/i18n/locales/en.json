@@ -1628,6 +1628,9 @@
     "swapNotPaid": "Nothing was sent — the Lightning payment to Boltz didn't go through, so no sats left your wallet. You can try again."
   },
   "placeDetailScreen": {
+    "viewOnBtcMap": "View on BTC Map",
+    "phone": "Phone",
+    "website": "Website",
     "notInCache": "This place isn't in our cached list anymore — try opening it from the map.",
     "bitcoinPlaceFallback": "Bitcoin place",
     "backToPlaces": "Back to Places",

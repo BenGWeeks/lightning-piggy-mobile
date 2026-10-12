@@ -1628,6 +1628,9 @@
     "swapNotPaid": "未发送任何款项——发给Boltz的Lightning付款没有成功，所以没有sats离开你的钱包。你可以重试。"
   },
   "placeDetailScreen": {
+    "viewOnBtcMap": "在 BTC Map 上查看",
+    "phone": "电话",
+    "website": "网站",
     "notInCache": "这个地点已不在我们的缓存列表中——请尝试从地图上打开。",
     "bitcoinPlaceFallback": "Bitcoin地点",
     "backToPlaces": "返回地点",

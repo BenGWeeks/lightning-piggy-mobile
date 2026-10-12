@@ -1628,6 +1628,9 @@
     "swapNotPaid": "Es wurde nichts gesendet – die Lightning-Zahlung an Boltz ist nicht durchgegangen, daher haben keine sats deine Wallet verlassen. Du kannst es erneut versuchen."
   },
   "placeDetailScreen": {
+    "viewOnBtcMap": "Auf BTC Map ansehen",
+    "phone": "Telefon",
+    "website": "Website",
     "notInCache": "Dieser Ort ist nicht mehr in unserer zwischengespeicherten Liste – versuche, ihn über die Karte zu öffnen.",
     "bitcoinPlaceFallback": "Bitcoin-Ort",
     "backToPlaces": "Zurück zu den Orten",

@@ -29,7 +29,12 @@ jest.mock('./geocacheRelays', () => ({
 }));
 
 // eslint-disable-next-line import/first
-import { subscribeRecentCaches, subscribeRecentFoundLogs } from './nostrPlacesPublisher';
+import {
+  subscribeNearbyCaches,
+  subscribeNearbyEvents,
+  subscribeRecentCaches,
+  subscribeRecentFoundLogs,
+} from './nostrPlacesPublisher';
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -144,5 +149,25 @@ describe('subscribeRecentFoundLogs', () => {
     // Each is independently computed via RECENT_SINCE_SECS() at call time.
     // ±10 s is generous enough to be stable under CI load.
     expect(Math.abs(cachesSince - logsSince)).toBeLessThan(10);
+  });
+});
+
+describe('Explore nearby backfill budgets', () => {
+  it('bounds merchant-map cache listings without excluding old active listings', () => {
+    const close = subscribeNearbyCaches(['gcpvj'], jest.fn());
+    expect(mockSubscribeMany.mock.calls[0][1]).toMatchObject({ limit: 200, '#g': ['gcpvj'] });
+    expect(mockSubscribeMany.mock.calls[0][1].since).toBeUndefined();
+    close();
+  });
+  it('bounds both geographic and topical event backfills', () => {
+    const close = subscribeNearbyEvents(['gcp'], jest.fn());
+    expect(mockSubscribeMany).toHaveBeenCalledTimes(2);
+    for (const [, filter] of mockSubscribeMany.mock.calls) {
+      expect(filter.limit).toBe(200);
+      // An upcoming event can have been announced long ago.
+      expect(filter.since).toBeUndefined();
+    }
+    close();
+    expect(mockClose).toHaveBeenCalledTimes(2);
   });
 });
