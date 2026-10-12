@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, BackHandler, Platform } from 'react-nativ
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useOnchainSendQuote } from '../utils/useOnchainSendQuote';
 import { useSheetKeyboardRestore } from '../utils/useSheetKeyboardRestore';
-import { onchainSendEligibility } from '../utils/onchainSendEligibility';
+import { useSendEligibility } from '../hooks/useSendEligibility';
 import { Image as ExpoImage } from 'expo-image';
 import { Alert } from './BrandedAlert';
 import { Toast } from './BrandedToast';
@@ -21,7 +21,7 @@ import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { walletLabel } from '../types/wallet';
 import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useTranslation } from '../contexts/LocaleContext';
+import { useLocale } from '../contexts/LocaleContext';
 import { createSendSheetStyles } from '../styles/SendSheet.styles';
 import { satsToFiatString } from '../services/fiatService';
 import { useLargeSendConfirm } from '../hooks/useLargeSendConfirm';
@@ -46,7 +46,7 @@ import {
   isSwapSettlingError,
   type ReverseSwapReceipt,
 } from '../utils/reverseSwapSend';
-import { quoteExactRecipient } from '../utils/reverseSwapAmounts';
+import { quoteExactRecipient, formatRecipientFee } from '../utils/reverseSwapAmounts';
 import { reverseSwapAmountBounds, shortOnchainAddress } from '../utils/onchainSwapSend';
 import SendOnchainFeeRow from './SendOnchainFeeRow';
 import { npubEncode } from '../services/nostrService';
@@ -95,7 +95,7 @@ const SendSheet: React.FC<Props> = ({
   }
   const colors = useThemeColors();
   const insets = useSafeAreaInsets();
-  const t = useTranslation();
+  const { t, formatLocale } = useLocale();
   const styles = useMemo(() => createSendSheetStyles(colors), [colors]);
   const { payInvoiceForWallet, addPendingTransaction, activeWalletId, wallets, currency } =
     useWallet();
@@ -227,12 +227,12 @@ const SendSheet: React.FC<Props> = ({
     walletSyncKey: `${walletBalance}:${selectedWallet?.transactions?.length ?? 0}`,
   });
   const boltzFees = onchainQuote.fees;
-  const onchainEligibility = onchainSendEligibility({
-    amountSats: currentSats,
-    balanceSats: walletBalance,
-    viaSwap: onchainViaBoltz,
-    ...onchainQuote,
-  });
+  const onchainEligibility = useSendEligibility(
+    currentSats,
+    walletBalance,
+    onchainViaBoltz,
+    onchainQuote,
+  );
   const swapQuote =
     onchainViaBoltz && boltzFees && currentSats > 0
       ? quoteExactRecipient(currentSats, boltzFees)
@@ -469,7 +469,7 @@ const SendSheet: React.FC<Props> = ({
         if (currentSats < lnurlParams.minSats) {
           Alert.alert(
             t('sendSheet.error'),
-            t('sendSheet.minAmount', { min: lnurlParams.minSats.toLocaleString() }),
+            t('sendSheet.minAmount', { min: lnurlParams.minSats.toLocaleString(formatLocale) }),
           );
           setSending(false);
           return;
@@ -477,7 +477,7 @@ const SendSheet: React.FC<Props> = ({
         if (currentSats > lnurlParams.maxSats) {
           Alert.alert(
             t('sendSheet.error'),
-            t('sendSheet.maxAmount', { max: lnurlParams.maxSats.toLocaleString() }),
+            t('sendSheet.maxAmount', { max: lnurlParams.maxSats.toLocaleString(formatLocale) }),
           );
           setSending(false);
           return;
@@ -654,7 +654,7 @@ const SendSheet: React.FC<Props> = ({
       }
       const message = quoteChanged
         ? t('sendSheet.quoteChanged', {
-            fee: quoteExactRecipient(currentSats, quoteChanged).feeSats.toLocaleString(),
+            fee: formatRecipientFee(currentSats, quoteChanged, formatLocale),
           })
         : swapNotPaid
           ? t('paymentProgressOverlay.swapNotPaid')
@@ -871,7 +871,7 @@ const SendSheet: React.FC<Props> = ({
                         onchainQuote.directFeeSats === null
                           ? null
                           : t('sendSheet.minerFee', {
-                              fee: onchainQuote.directFeeSats.toLocaleString(),
+                              fee: onchainQuote.directFeeSats.toLocaleString(formatLocale),
                             })
                       }
                       blocker={onchainEligibility.reason}
@@ -937,8 +937,8 @@ const SendSheet: React.FC<Props> = ({
               {walletBalance !== null && btcPrice !== null && (
                 <Text style={styles.balanceText}>
                   {t('sendSheet.balance', {
-                    balance: walletBalance.toLocaleString(),
-                    fiat: satsToFiatString(walletBalance, btcPrice, currency),
+                    balance: walletBalance.toLocaleString(formatLocale),
+                    fiat: satsToFiatString(walletBalance, btcPrice, currency, formatLocale),
                   })}
                 </Text>
               )}

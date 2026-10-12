@@ -1,3 +1,4 @@
+import { useLocale } from '../contexts/LocaleContext';
 import { useMemo } from 'react';
 import type { WalletState } from '../types/wallet';
 import type { DmProtocol } from '../utils/dmProtocol';
@@ -19,6 +20,7 @@ export function useConversationTimeline(
   partner: string,
   protocol: DmProtocol,
 ) {
+  const { formatLocale } = useLocale();
   const zapItems = useMemo(
     () => (protocol === 'nip17' ? buildZapItems(wallets, partner) : []),
     [wallets, partner, protocol],
@@ -34,7 +36,14 @@ export function useConversationTimeline(
     [failedInvites, partner],
   );
   return useMemo(
-    () => buildConversationItems(resolvedMessages, zapItems, olderOrderAmounts, partnerInvites),
-    [resolvedMessages, zapItems, olderOrderAmounts, partnerInvites],
+    () =>
+      buildConversationItems(
+        resolvedMessages,
+        zapItems,
+        olderOrderAmounts,
+        partnerInvites,
+        formatLocale,
+      ),
+    [resolvedMessages, zapItems, olderOrderAmounts, partnerInvites, formatLocale],
   );
 }

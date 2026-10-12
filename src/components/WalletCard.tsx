@@ -9,7 +9,7 @@ import { getCardBgStyle } from '../themes/cards';
 import { satsToFiatString, FiatCurrency } from '../services/fiatService';
 import { ChainIcon, SettingsIcon } from './icons/ArrowIcons';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useTranslation } from '../contexts/LocaleContext';
+import { useLocale } from '../contexts/LocaleContext';
 
 import { CARD_WIDTH, CARD_HEIGHT, walletCardStyles as styles } from '../styles/WalletCard.styles';
 export { CARD_MARGIN, CARD_WIDTH, CARD_HEIGHT, CARD_ASPECT } from '../styles/WalletCard.styles';
@@ -68,7 +68,7 @@ const CardContent: React.FC<{
   isWatchOnly = false,
 }) => {
   const colors = useThemeColors();
-  const t = useTranslation();
+  const { t, formatLocale } = useLocale();
 
   // Tri-state relay status for the dot + label (#786). On-chain wallets have no
   // relay, so they stay binary (balance present → Connected). For NWC we prefer
@@ -175,7 +175,7 @@ const CardContent: React.FC<{
               {hideBalance
                 ? '***'
                 : balance !== null
-                  ? t('walletCard.satsBalance', { amount: balance!.toLocaleString() })
+                  ? t('walletCard.satsBalance', { amount: balance!.toLocaleString(formatLocale) })
                   : '---'}
             </Text>
             {/* Render the fiat row whenever we know the user's selected
@@ -187,7 +187,7 @@ const CardContent: React.FC<{
                 made users wonder if the wallet was broken. */}
             {!hideBalance && balance !== null && currency && (
               <Text style={[styles.fiatBalance, { color: theme.textColor }]}>
-                {satsToFiatString(balance!, btcPrice ?? null, currency)}
+                {satsToFiatString(balance!, btcPrice ?? null, currency, formatLocale)}
               </Text>
             )}
           </View>
@@ -216,7 +216,7 @@ export const MiniWalletCard: React.FC<MiniCardProps> = ({
   onPress,
   width = MINI_CONTAINER_WIDTH,
 }) => {
-  const t = useTranslation();
+  const { t } = useLocale();
   const scale = width / CARD_WIDTH;
   const height = CARD_HEIGHT * scale;
   return (
@@ -255,7 +255,7 @@ const WalletCard: React.FC<WalletCardProps> = ({ wallet, btcPrice, currency, onS
   // see the group-messaging branch test runs. Fall back per wallet type:
   // on-chain → Bitcoin (orange), Lightning/NWC → Lightning Piggy.
   const theme = cardThemes[wallet.theme] ?? cardThemes[defaultCardThemeFor(wallet.walletType)];
-  const t = useTranslation();
+  const { t } = useLocale();
 
   return (
     <View

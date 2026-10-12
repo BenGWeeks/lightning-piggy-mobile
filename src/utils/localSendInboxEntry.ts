@@ -1,3 +1,4 @@
+import { getAppFormatLocale } from './appFormatLocale';
 import type { ConversationMessage } from '../contexts/nostrContextTypes';
 import type { DmInboxEntry } from './conversationSummaries';
 import { dmRowPreview } from './dmRowPreview';
@@ -15,6 +16,7 @@ export function localSendInboxEntry(
     ConversationMessage,
     'id' | 'fromMe' | 'createdAt' | 'text' | 'wireKind' | 'protocol' | 'rumorId'
   >,
+  locale?: string,
 ): DmInboxEntry | null {
   if (!msg.fromMe) return null;
   if (msg.protocol === 'marmot') {
@@ -23,7 +25,7 @@ export function localSendInboxEntry(
       partnerPubkey,
       fromMe: true,
       createdAt: msg.createdAt,
-      text: dmRowPreview(msg.text, msg.wireKind ?? 14),
+      text: dmRowPreview(msg.text, msg.wireKind ?? 14, locale),
       wireKind: msg.wireKind ?? 14,
       rumorId: msg.rumorId,
       protocol: 'marmot',
@@ -38,4 +40,11 @@ export function localSendInboxEntry(
     text: msg.text,
     wireKind: 4,
   };
+}
+
+/** Imperative optimistic-inbox boundary using the committed app locale. */
+export function localSendInboxEntryForApp(
+  ...args: Parameters<typeof localSendInboxEntry>
+): ReturnType<typeof localSendInboxEntry> {
+  return localSendInboxEntry(args[0], args[1], args[2] ?? getAppFormatLocale());
 }

@@ -17,12 +17,12 @@ LIMIT=1000
 declare -A BASELINE=(
   ["src/contexts/NostrContext.tsx"]=1676
   ["src/screens/HuntCreateScreen.tsx"]=2386
-  ["src/contexts/WalletContext.tsx"]=2033
-  ["src/screens/HuntPiggyDetailScreen.tsx"]=1710
+  ["src/contexts/WalletContext.tsx"]=1827
+  ["src/screens/HuntPiggyDetailScreen.tsx"]=1256
   ["src/screens/MapScreen.tsx"]=1142
   ["src/services/nostrService.ts"]=1433
-  ["src/components/TransferSheet.tsx"]=1418
-  ["src/screens/ExploreHomeScreen.tsx"]=1306
+  ["src/components/TransferSheet.tsx"]=1321
+  ["src/screens/ExploreHomeScreen.tsx"]=1222
   ["src/services/nfcService.ts"]=1242
   ["src/components/SendSheet.tsx"]=1010
 )

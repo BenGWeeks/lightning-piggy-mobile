@@ -44,7 +44,7 @@ import { AmountSlider } from './AmountSlider';
 import PrizeWalletPicker from './PrizeWalletPicker';
 import AddWalletWizard from './AddWalletWizard';
 import { createLnurlWithdrawSheetStyles } from '../styles/LnurlWithdrawSheet.styles';
-import { useTranslation } from '../contexts/LocaleContext';
+import { useLocale } from '../contexts/LocaleContext';
 
 // Imperative open — mirrors the BrandedAlert host pattern so the global
 // deep-link handler can pop the sheet without a screen in scope.
@@ -76,7 +76,7 @@ type Stage =
 
 export function LnurlWithdrawHost(): React.ReactElement {
   const colors = useThemeColors();
-  const t = useTranslation();
+  const { t, formatLocale } = useLocale();
   const styles = useMemo(() => createLnurlWithdrawSheetStyles(colors), [colors]);
   const { wallets, activeWalletId, makeInvoiceForWallet, currency, expectPayment } = useWallet();
   const { btcPrice, lastIncomingPayment } = useWalletLive();
@@ -147,8 +147,8 @@ export function LnurlWithdrawHost(): React.ReactElement {
   const maxSats = stage.kind === 'ready' ? Math.floor(stage.params.maxWithdrawable / 1000) : 0;
 
   const fiatLabel = useMemo(
-    () => formatFiatApprox(amountSats, btcPrice, currency),
-    [amountSats, btcPrice, currency],
+    () => formatFiatApprox(amountSats, btcPrice, currency, formatLocale),
+    [amountSats, btcPrice, currency, formatLocale],
   );
 
   const handleClaim = useCallback(
@@ -441,9 +441,11 @@ export function LnurlWithdrawHost(): React.ReactElement {
                 accessibilityLabel={t('lnurlWithdrawSheet.claimAmountInSats')}
               />
               <View style={styles.rangeRow}>
-                <Text style={styles.rangeText}>{minSats.toLocaleString()}</Text>
+                <Text style={styles.rangeText}>{minSats.toLocaleString(formatLocale)}</Text>
                 <Text style={styles.rangeText}>
-                  {t('lnurlWithdrawSheet.maxLabel', { amount: maxSats.toLocaleString() })}
+                  {t('lnurlWithdrawSheet.maxLabel', {
+                    amount: maxSats.toLocaleString(formatLocale),
+                  })}
                 </Text>
               </View>
               {/* Destination-wallet chooser (reused from the geo-cache prize flow). */}
@@ -471,7 +473,9 @@ export function LnurlWithdrawHost(): React.ReactElement {
               >
                 <Gift size={20} color={colors.white} strokeWidth={2.5} />
                 <Text style={styles.primaryButtonText}>
-                  {t('lnurlWithdrawSheet.redeemSats', { amount: amountSats.toLocaleString() })}
+                  {t('lnurlWithdrawSheet.redeemSats', {
+                    amount: amountSats.toLocaleString(formatLocale),
+                  })}
                 </Text>
               </TouchableOpacity>
             </>
@@ -483,7 +487,9 @@ export function LnurlWithdrawHost(): React.ReactElement {
                 <PartyPopper size={56} color={colors.green} strokeWidth={2} />
               </View>
               <Text style={styles.title}>
-                {t('lnurlWithdrawSheet.satsInbound', { amount: stage.sats.toLocaleString() })}
+                {t('lnurlWithdrawSheet.satsInbound', {
+                  amount: stage.sats.toLocaleString(formatLocale),
+                })}
               </Text>
               <Text style={styles.memo}>{t('lnurlWithdrawSheet.sentToWallet')}</Text>
               <TouchableOpacity

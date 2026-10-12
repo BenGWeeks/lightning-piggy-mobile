@@ -18,9 +18,6 @@ import * as zapSenderProfileStorage from '../services/zapSenderProfileStorage';
 import * as zapResolverFingerprintStorage from '../services/zapResolverFingerprintStorage';
 import { computePendingHash, shouldSkipResolve } from '../utils/zapResolverGuard';
 import { singleFlight } from '../utils/singleFlight';
-import { settledIncomingHashes, shouldSeedBaseline } from '../utils/incomingReceipts';
-import { mapNwcTransactions, type NwcRawTransaction } from '../utils/nwcTransactions';
-import { mapOnchainTransactions } from '../utils/onchainTransactions';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as onchainService from '../services/onchainService';
 import * as walletStorage from '../services/walletStorageService';
@@ -32,6 +29,7 @@ import { useOnchainIncomingPoll } from './useOnchainIncomingPoll';
 import { useWalletIdentityHydration } from './useWalletIdentityHydration';
 import { hydrateWalletReceipts } from './hydrateWalletReceipts';
 import { useIncomingReceiveAnnouncer } from './useIncomingReceiveAnnouncer';
+import { useWalletTransactionsFetch } from './useWalletTransactionsFetch';
 import type { IncomingPayment } from './incomingPayment';
 import {
   CardTheme,
@@ -138,7 +136,8 @@ interface WalletContextType {
     signalOrOptions?: AbortSignal | nwcService.PayInvoiceOptions,
   ) => Promise<{ preimage: string }>;
   refreshBalanceForWallet: (walletId: string) => Promise<void>;
-  fetchTransactionsForWallet: (walletId: string, opts?: { force?: boolean }) => Promise<void>;
+  /** Resolves `true` when a fresh list was committed, `false` on failure (never rejects). */
+  fetchTransactionsForWallet: (walletId: string, opts?: { force?: boolean }) => Promise<boolean>;
 
   // Transaction helpers
   addPendingTransaction: (walletId: string, tx: WalletTransaction) => void;
@@ -802,92 +801,16 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     if (activeWalletId) await refreshBalanceForWallet(activeWalletId);
   }, [activeWalletId, refreshBalanceForWallet]);
 
-  const fetchTransactionsForWallet = useCallback(
-    async (walletId: string, opts?: { force?: boolean }) => {
-      // Read from walletsRef, not the closure's captured `wallets`: this
-      // callback is fired-and-forgotten by SendSheet after pay-success,
-      // so by the time the awaited setTimeout resolves, the closure's
-      // `wallets` snapshot is already stale and `find()` returns the old
-      // wallet — or undefined after a removal — and we silently bail.
-      // See #123.
-      const wallet = walletsRef.current.find((w) => w.id === walletId);
-      if (!wallet) return;
-      const isCurrent = captureWalletIdentity(); // as in refreshBalanceForWallet
-
-      try {
-        // Load swap-meta before mapping so swap legs tag on the first fetch
-        // after launch (getSwapMeta is sync), not a refresh later (#895/#898).
-        await swapRecoveryService.ensureSwapMetaLoaded();
-        let txs: WalletTransaction[];
-        if (wallet.walletType === 'onchain') {
-          // Single sync for both balance + transactions (avoids double Electrum sync)
-          const result = await onchainService.syncAndRefresh(walletId);
-          if (!isCurrent()) return;
-          if (result.balance !== null) {
-            updateWalletInState(walletId, { balance: result.balance });
-          }
-          // mapOnchainTransactions tags Boltz swap legs by txid (#895) and
-          // preserves optimistic swap placeholder rows across the refresh (#896).
-          const existingOnchain =
-            walletsRef.current.find((w) => w.id === walletId)?.transactions ?? [];
-          txs = mapOnchainTransactions(result.transactions, existingOnchain);
-        } else {
-          const raw = await nwcService.listTransactions(walletId, isCurrent);
-          if (!isCurrent()) return;
-          // Carries forward resolved zap-counterparties + optimistic rows the
-          // server doesn't round-trip (see mapNwcTransactions).
-          const existing = walletsRef.current.find((w) => w.id === walletId)?.transactions ?? [];
-          txs = mapNwcTransactions(raw as NwcRawTransaction[], existing, walletId);
-        }
-        // Unchanged-poll skip (#1014): JSON reused as content fingerprint.
-        // Identical serialisation keeps old `wallet.transactions` identity,
-        // avoiding a re-render of every visible row on each 30 s poll.
-        const txsJson = JSON.stringify(txs);
-        const txsUnchanged = lastTxsJsonRef.current.get(walletId) === txsJson;
-        if (!txsUnchanged) {
-          updateWalletInState(walletId, { transactions: txs });
-        }
-
-        // First fetch for this wallet (e.g. a freshly-added NWC wallet, whose
-        // history isn't loaded on connect): seed the announced-receipts baseline
-        // from the *fetched* history so the detector can't announce it as new
-        // (the empty-baseline race, #725 — see shouldSeedBaseline).
-        if (shouldSeedBaseline(seenReceiptsRef.current.get(walletId))) {
-          seedSeenReceipts(walletId, settledIncomingHashes(txs));
-        }
-
-        // Persist to AsyncStorage; ref updated after write so a failed
-        // setItem lets the next poll retry rather than skip the persist.
-        if (!txsUnchanged) {
-          await AsyncStorage.setItem(`txs_${walletId}`, txsJson);
-          if (!isCurrent()) return;
-          lastTxsJsonRef.current.set(walletId, txsJson);
-        }
-
-        // Kick off background zap sender resolution for any incoming
-        // transactions that haven't been resolved yet. `force` (set by
-        // an explicit pull-to-refresh) bypasses the fingerprint skip so
-        // the resolver always does a full pass — see resolveZapSenders.
-        // Deferred one macrotask so the resolver's `mergeResolverResults`
-        // re-render burst can't land in the same event-loop tick as the
-        // `updateWalletInState` commit above — that tick is where the
-        // incoming-payment overlay's dismiss tap was getting queued (#828).
-        // Pinned to this fetch's identity so a B → C → B hop cancels it.
-        setTimeout(() => {
-          if (!isCurrent()) return;
-          resolveZapSendersRef
-            .current?.(walletId, { force: opts?.force, isCurrent })
-            ?.catch((e) => console.warn(`resolveZapSenders failed for ${walletId}:`, e));
-        }, 0);
-      } catch (error) {
-        console.warn(`fetchTransactions failed for ${walletId}:`, error);
-      }
-    },
-    // `walletsRef` is stable, so we don't need `wallets` in the deps. Keeping
-    // the list short means callers that capture this function (e.g. SendSheet's
-    // post-pay refresh IIFE) hold onto a stable reference across renders.
-    [updateWalletInState, seedSeenReceipts, captureWalletIdentity],
-  );
+  // Fetch + commit + persist one wallet's tx list; resolves whether it succeeded.
+  const fetchTransactionsForWallet = useWalletTransactionsFetch({
+    walletsRef,
+    lastTxsJsonRef,
+    seenReceiptsRef,
+    resolveZapSendersRef,
+    updateWalletInState,
+    seedSeenReceipts,
+    captureWalletIdentity,
+  });
 
   /**
    * Walk the current transactions for `walletId` and, for each incoming tx

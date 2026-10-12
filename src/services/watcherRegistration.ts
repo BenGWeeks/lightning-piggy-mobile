@@ -21,12 +21,17 @@ import type { PushPlatform } from './marmotPushToken';
 /** npub17hcchazg4akxq4ccuskxmxegl2euyz8je7h6xjthekeyz8pux78qfzgph2 */
 export const WATCHER_PUBKEY = 'f5f18bf448af6c605718e42c6d9b28fab3c208f2cfafa34977cdb2411c3c378e';
 export const REGISTRATION_KIND = 8480;
-/** The watcher's own relays (its kind-10050 fallback). It always watches
- * these, so listing them in a registration would only waste a slot. */
+/** The watcher's own relays (its kind-10050 fallback, and where the app
+ * looks its 10050 up). It always watches these, so listing them in a
+ * registration would only waste a slot. Mirrors the watcher's
+ * WATCHER_RELAYS (a set — order doesn't matter). nos.lol is left out because
+ * it's unreachable from the watcher's self-hosted IP (rate-limited), and
+ * relay.damus.io because it demands NIP-42 AUTH, which the watcher can't do. */
 export const WATCHER_DEFAULT_RELAYS = [
-  'wss://nos.lol',
   'wss://relay.primal.net',
-  'wss://relay.damus.io',
+  'wss://relay.ditto.pub',
+  'wss://relay.coinos.io',
+  'wss://relay.eu.whitenoise.chat',
 ];
 export const MAX_REGISTRATION_RELAYS = 8;
 export const MAX_NWC_CONNECTIONS = 3;

@@ -1,3 +1,4 @@
+import { getAppFormatLocale } from '../utils/appFormatLocale';
 import { dmThreadId, MARMOT_WELCOME_KIND, protocolForWireKind } from '../utils/dmProtocol';
 /**
  * backgroundDmService — Amethyst-style realtime background DM notifications
@@ -351,7 +352,7 @@ async function handleWrap(input: {
   // string) to a secret-free summary — a plain chat message passes through
   // unchanged. The notificationService additionally swaps in generic copy when
   // the user has lock-screen content disabled.
-  const preview = dmRowPreview(textForRumor(rumor), rumor.kind);
+  const preview = dmRowPreview(textForRumor(rumor), rumor.kind, getAppFormatLocale());
   const notifId = await fireMessageNotification({
     kind: 'dm',
     owner: viewerPubkey,

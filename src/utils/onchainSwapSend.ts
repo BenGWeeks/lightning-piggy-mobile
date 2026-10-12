@@ -14,7 +14,7 @@ export interface SwapSendBlocker {
   params?: Record<string, string>;
 }
 
-const n = (v: number) => v.toLocaleString();
+const n = (v: number, locale?: string) => v.toLocaleString(locale);
 
 /**
  * Validate a swap send against Boltz's limits (translated to the recipient
@@ -25,23 +25,27 @@ export function reverseSwapSendBlocker(
   recipientSats: number,
   fees: SwapFees,
   balanceSats: number | null,
+  locale?: string,
 ): SwapSendBlocker | null {
   if (!Number.isSafeInteger(recipientSats) || recipientSats <= 0)
     return { key: 'sendSheet.enterAmount' };
   const range = reverseRecipientRange(fees);
   if (!range || recipientSats < range.minSats)
-    return { key: 'sendSheet.minAmount', params: { min: n(range?.minSats ?? fees.minAmount) } };
+    return {
+      key: 'sendSheet.minAmount',
+      params: { min: n(range?.minSats ?? fees.minAmount, locale) },
+    };
   if (recipientSats > range.maxSats)
-    return { key: 'sendSheet.maxAmount', params: { max: n(range.maxSats) } };
+    return { key: 'sendSheet.maxAmount', params: { max: n(range.maxSats, locale) } };
   const quote = quoteExactRecipient(recipientSats, fees);
   if (balanceSats !== null && quote.invoiceSats > balanceSats)
     return {
       key: 'sendSheet.swapInsufficientBalance',
       params: {
-        total: n(quote.invoiceSats),
-        amount: n(recipientSats),
-        fee: n(quote.feeSats),
-        balance: n(balanceSats),
+        total: n(quote.invoiceSats, locale),
+        amount: n(recipientSats, locale),
+        fee: n(quote.feeSats, locale),
+        balance: n(balanceSats, locale),
       },
     };
   return null;

@@ -1,5 +1,6 @@
 import { getInboxLatest, getConversationMessages, type DmMessageRow } from './dmDb';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
+import { getAppFormatLocale } from '../utils/appFormatLocale';
 import { dmRowPreview } from '../utils/dmRowPreview';
 import { liveMarkerPhaseOf } from './liveLocationService';
 
@@ -15,7 +16,7 @@ import { liveMarkerPhaseOf } from './liveLocationService';
 // as a future read filter, so the "include non-follows" toggle can work
 // without re-fetching. Keep this layer a pure projection.
 
-const rowToInboxEntry = (r: DmMessageRow): DmInboxEntry => ({
+const rowToInboxEntry = (r: DmMessageRow, locale?: string): DmInboxEntry => ({
   id: r.eventId,
   partnerPubkey: r.conversation,
   fromMe: r.fromMe,
@@ -25,7 +26,7 @@ const rowToInboxEntry = (r: DmMessageRow): DmInboxEntry => ({
   // summary instead of the raw blob. Other rows pass their plaintext through
   // unchanged (#203 / #market / NWC share). All four preview paths route through
   // dmRowPreview so they redact identically.
-  text: dmRowPreview(r.content, r.wireKind),
+  text: dmRowPreview(r.content, r.wireKind, locale),
   // A live-location marker's preview is a label; keep the marker itself for
   // the consumers that render or scan it (thread, Full Map) — #1300.
   ...(liveMarkerPhaseOf(r.content) ? { renderText: r.content } : {}),
@@ -34,13 +35,13 @@ const rowToInboxEntry = (r: DmMessageRow): DmInboxEntry => ({
 });
 
 /** Pure projection of stored rows → inbox entries. */
-export function rowsToInboxEntries(rows: readonly DmMessageRow[]): DmInboxEntry[] {
-  return rows.map(rowToInboxEntry);
+export function rowsToInboxEntries(rows: readonly DmMessageRow[], locale?: string): DmInboxEntry[] {
+  return rows.map((row) => rowToInboxEntry(row, locale));
 }
 
 /** The inbox list: latest message per conversation for `owner`, newest-first. */
 export async function loadInboxEntries(owner: string): Promise<DmInboxEntry[]> {
-  return rowsToInboxEntries(await getInboxLatest(owner));
+  return rowsToInboxEntries(await getInboxLatest(owner), getAppFormatLocale());
 }
 
 /** One conversation's messages, newest-first, paginated (load-older via opts). */
@@ -49,5 +50,8 @@ export async function loadConversationEntries(
   partnerPubkey: string,
   opts?: { limit?: number; beforeCreatedAt?: number },
 ): Promise<DmInboxEntry[]> {
-  return rowsToInboxEntries(await getConversationMessages(owner, partnerPubkey, opts));
+  return rowsToInboxEntries(
+    await getConversationMessages(owner, partnerPubkey, opts),
+    getAppFormatLocale(),
+  );
 }

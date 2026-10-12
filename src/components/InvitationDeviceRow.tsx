@@ -51,14 +51,14 @@ export default memo(function InvitationDeviceRow({
   onRefresh,
   onStop,
 }: Props) {
-  const { t, locale } = useLocale();
+  const { t, formatLocale } = useLocale();
   const colors = useThemeColors();
   const [open, setOpen] = useState(false);
   const label = deviceLabel(device, t);
   const age = deviceAgeText(device, t);
   const id = deviceTestId(device);
   const thisPhone = device.kind === 'thisPhone';
-  const date = (secs: number) => new Date(secs * 1000).toLocaleDateString(locale);
+  const date = (secs: number) => new Date(secs * 1000).toLocaleDateString(formatLocale);
   return (
     <View style={styles.card} testID={`invitation-device-${id}`}>
       <View style={styles.titleRow}>

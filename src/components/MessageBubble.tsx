@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, Pressable, StyleSheet, Linking } from 're
 import { Image as ExpoImage } from 'expo-image';
 import { Zap, UserRound, Radio } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useTranslation } from '../contexts/LocaleContext';
+import { useLocale } from '../contexts/LocaleContext';
 import {
   createMessageBubbleStyles,
   type MessageBubbleStyles,
@@ -42,6 +42,7 @@ import VoiceNotePlayer from './VoiceNotePlayer';
 import DecryptedImage from './DecryptedImage';
 import LibreMiniMap from './LibreMiniMap';
 import { BubbleFooter } from './MessageBubbleFooter';
+import MessageSatsAmount from './MessageSatsAmount';
 import { PollBubble } from './PollBubble';
 import { LocationBubble } from './LocationBubble';
 import { liveKey } from '../services/liveLocationUpdateStore';
@@ -192,7 +193,7 @@ const ImageBubble: React.FC<{
   testID,
   footer,
 }) => {
-  const t = useTranslation();
+  const { t } = useLocale();
   // For plain images the fetchable URL is the display source; for encrypted
   // ones DecryptedImage resolves a data: URI, which it reports back here so
   // the fullscreen tap shows the decrypted image, not the ciphertext blob.
@@ -274,7 +275,7 @@ const MessageBubble: React.FC<Props> = ({
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createMessageBubbleStyles(colors), [colors]);
-  const t = useTranslation();
+  const { t } = useLocale();
 
   // Sender label (group bubbles, incoming) + a Marmot reply's quote: one header
   // slot every variant renders, so photo / GIF / invoice replies show it too.
@@ -736,7 +737,7 @@ const MessageBubble: React.FC<Props> = ({
           </Text>
           {bitcoinUri.amountSats !== null ? (
             <Text style={[styles.invoiceAmount, fromMe && styles.invoiceAmountMe]}>
-              {t('messageBubble.satsAmount', { amount: bitcoinUri.amountSats.toLocaleString() })}
+              <MessageSatsAmount amountSats={bitcoinUri.amountSats} />
             </Text>
           ) : null}
           <Text style={[styles.invoiceMemo, fromMe && styles.invoiceMemoMe]} numberOfLines={1}>
@@ -780,9 +781,7 @@ const MessageBubble: React.FC<Props> = ({
             {fromMe ? t('messageBubble.invoiceSent') : t('messageBubble.invoiceReceived')}
           </Text>
           <Text style={[styles.invoiceAmount, fromMe && styles.invoiceAmountMe]}>
-            {invoice.amountSats !== null
-              ? t('messageBubble.satsAmount', { amount: invoice.amountSats.toLocaleString() })
-              : t('messageBubble.anyAmount')}
+            <MessageSatsAmount amountSats={invoice.amountSats} />
           </Text>
           {invoice.description ? (
             <Text style={[styles.invoiceMemo, fromMe && styles.invoiceMemoMe]} numberOfLines={2}>

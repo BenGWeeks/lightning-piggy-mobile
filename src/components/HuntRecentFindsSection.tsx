@@ -4,7 +4,7 @@ import { Image } from 'expo-image';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { PartyPopper, PiggyBank, User, Users, Zap } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useTranslation } from '../contexts/LocaleContext';
+import { useLocale } from '../contexts/LocaleContext';
 import { useNostr } from '../contexts/NostrContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { usePubkeyProfile } from '../hooks/usePubkeyProfile';
@@ -41,7 +41,7 @@ const HuntRecentFindsSection: React.FC<Props> = ({
   onPressCache,
 }) => {
   const colors = useThemeColors();
-  const t = useTranslation();
+  const { t } = useLocale();
   const styles = useMemo(() => createHuntCommunityStyles(colors), [colors]);
   const { pubkey } = useNostr();
   const { trustSet } = useTrustGraph();
@@ -165,7 +165,7 @@ const FindCard: React.FC<{
   onPress: () => void;
 }> = ({ find, cache, index, styles, onPress }) => {
   const colors = useThemeColors();
-  const t = useTranslation();
+  const { t, formatLocale } = useLocale();
   const { name, picture } = usePubkeyProfile(find.finderPubkey);
   const display = name ?? shortNpub(find.finderPubkey);
   const cacheName = cache?.name ?? t('huntCommunity.aGeoCache');
@@ -221,7 +221,9 @@ const FindCard: React.FC<{
         {find.amountSats != null ? (
           <View style={styles.findCardAmountPill}>
             <Zap size={10} color={colors.brandPink} fill={colors.brandPink} strokeWidth={2.5} />
-            <Text style={styles.findCardAmountText}>{find.amountSats.toLocaleString()}</Text>
+            <Text style={styles.findCardAmountText}>
+              {find.amountSats.toLocaleString(formatLocale)}
+            </Text>
           </View>
         ) : null}
         <Text style={styles.findCardAge} numberOfLines={1}>

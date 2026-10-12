@@ -271,15 +271,24 @@ export const COUNTRIES: readonly Country[] = [
 
 const NAME_BY_CODE = new Map(COUNTRIES.map((c) => [c.code, c.name]));
 const ALPHA2_BY_ALPHA3 = new Map(COUNTRIES.map((c) => [c.alpha3, c.code]));
+// Some merchants publish English names instead of codes (VoltVault's live
+// 30406 carries ["country","United States"]), plus a few common aliases.
+const ALPHA2_BY_NAME = new Map<string, string>([
+  ...COUNTRIES.map((c): [string, string] => [c.name.toUpperCase(), c.code]),
+  ['UNITED STATES OF AMERICA', 'US'],
+  ['UK', 'GB'],
+  ['GREAT BRITAIN', 'GB'],
+]);
 
 /**
  * Normalise a country token to the canonical alpha-2 code: alpha-2 passes
- * through, alpha-3 maps down (GBR → GB), anything else is returned upper-cased
- * unchanged (an unknown token then simply never matches a picker selection).
+ * through, alpha-3 maps down (GBR → GB), an English name maps to its code
+ * (United States → US), anything else is returned upper-cased unchanged (an
+ * unknown token then simply never matches a picker selection).
  */
 export function toAlpha2(code: string): string {
   const upper = code.trim().toUpperCase();
-  return ALPHA2_BY_ALPHA3.get(upper) ?? upper;
+  return ALPHA2_BY_ALPHA3.get(upper) ?? ALPHA2_BY_NAME.get(upper) ?? upper;
 }
 
 /** Display name for a code, or the code itself for one we don't know. */
