@@ -2429,6 +2429,7 @@
       "incomplete": "Some listings could not be loaded. Try refreshing.",
       "partialToast": "Some sellers didn’t respond. Pull to refresh.",
       "loaded": "Live listings from your friends",
+      "loadedPreferred": "Live listings from Lightning Piggy's preferred sellers",
       "refresh": "Refresh",
       "openListing": "Open listing",
       "contactSeller": "Message seller"

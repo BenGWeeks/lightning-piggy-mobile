@@ -186,3 +186,16 @@ it('shows live preferred listings rather than the bundled catalogue', () => {
   const list = screen.UNSAFE_getByType(FlatList);
   expect(list.props.data.map((product: { id: string }) => product.id)).toEqual(['live-preferred']);
 });
+
+it('updates the loaded label when switching between preferred sellers and friends', () => {
+  mockLoading = false;
+  const screen = render(<MarketScreen navigation={navigation} />);
+  expect(screen.getByTestId('market-live-status')).toHaveTextContent('market.live.loadedPreferred');
+  fireEvent.press(screen.getByTestId('market-filter-button'));
+  fireEvent.press(screen.getByTestId('market-filter-sellers-friends'));
+  expect(screen.getByTestId('market-live-status')).toHaveTextContent(/^market\.live\.loaded$/);
+  fireEvent.press(screen.getByTestId('market-filter-done'));
+  act(() => jest.runOnlyPendingTimers());
+  fireEvent.press(screen.getByTestId('market-scope-chip-clear'));
+  expect(screen.getByTestId('market-live-status')).toHaveTextContent('market.live.loadedPreferred');
+});

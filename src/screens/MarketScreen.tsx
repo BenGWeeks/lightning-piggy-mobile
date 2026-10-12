@@ -292,7 +292,7 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
       {
         <View style={styles.liveStatus}>
           <Text style={styles.liveStatusText} testID="market-live-status">
-            {t(marketLoadingStatus(live.loading, live.incomplete, baseProducts.length))}
+            {t(marketLoadingStatus(live.loading, live.incomplete, baseProducts.length, mode))}
           </Text>
           <TouchableOpacity
             onPress={live.refresh}

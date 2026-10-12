@@ -2429,6 +2429,7 @@
       "incomplete": "No se pudieron cargar todos los anuncios. Intenta actualizar.",
       "partialToast": "Algunos vendedores no respondieron. Desliza hacia abajo para actualizar.",
       "loaded": "Anuncios actuales de tus amigos",
+      "loadedPreferred": "Anuncios actuales de los vendedores preferidos de Lightning Piggy",
       "refresh": "Actualizar",
       "openListing": "Abrir anuncio",
       "contactSeller": "Enviar mensaje al vendedor"
