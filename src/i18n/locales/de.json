@@ -3007,5 +3007,21 @@
     "stoppedTitle": "Live-Standort beendet",
     "stoppedBody": "Lightning Piggy wurde im Hintergrund geschlossen, daher wurde dein Live-Standort beendet. Öffne die App, um ihn erneut zu teilen.",
     "stoppedBodyOne": "Lightning Piggy wurde im Hintergrund geschlossen, daher wurde dein Live-Standort mit {{name}} beendet. Öffne die App, um ihn erneut zu teilen."
+  },
+  "swapToast": {
+    "lockedTitle": "Boltz hat Guthaben auf der Blockchain gesperrt",
+    "claimingBody": "{{amount}} sats werden beansprucht…",
+    "completeTitle": "Tausch abgeschlossen",
+    "claimedBody": "{{amount}} sats (abzüglich der Beanspruchungsgebühr) auf der Blockchain beansprucht. Transaktion {{txid}}…",
+    "progressTitle": "Tausch läuft",
+    "progressBody": "Im Hintergrund ist ein Fehler aufgetreten — tippe im Fenster auf „Jetzt erneut versuchen“ oder starte die App neu. Dein Guthaben ist sicher.",
+    "retryTitle": "Erneuter Versuch gestartet",
+    "retryBody": "Beanspruchbare Tausche werden erneut übertragen.",
+    "retryFailedTitle": "Erneuter Versuch fehlgeschlagen",
+    "deliveredBody": "{{amount}} sats über Lightning zugestellt.",
+    "settlingTitle": "Tausch wird noch abgewickelt",
+    "settlingBody": "Dein Guthaben ist sicher — Boltz schließt die Lightning-Zahlung ab.",
+    "confirmationTitle": "Wir warten noch auf eine Bestätigung",
+    "confirmationBody": "Bitcoin-Blöcke brauchen im Schnitt etwa 10 Min., manchmal deutlich länger. Dein Guthaben ist sicher — der Tausch wird automatisch abgeschlossen."
   }
 }

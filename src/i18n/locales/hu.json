@@ -3007,5 +3007,21 @@
     "stoppedTitle": "Az élő helymegosztás leállt",
     "stoppedBody": "A Lightning Piggy bezárult a háttérben, ezért az élő helymegosztás leállt. Nyisd meg az alkalmazást az újbóli megosztáshoz.",
     "stoppedBodyOne": "A Lightning Piggy bezárult a háttérben, ezért az élő helymegosztás vele: {{name}} leállt. Nyisd meg az alkalmazást az újbóli megosztáshoz."
+  },
+  "swapToast": {
+    "lockedTitle": "A Boltz zárolta az összeget a blokkláncon",
+    "claimingBody": "{{amount}} sats lehívása…",
+    "completeTitle": "Átváltás kész",
+    "claimedBody": "{{amount}} sats (a lehívási díj levonásával) lehívva a blokkláncon. Tranzakció: {{txid}}…",
+    "progressTitle": "Átváltás folyamatban",
+    "progressBody": "Hiba történt a háttérben — koppints az „Újrapróbálás most” gombra a panelen, vagy indítsd újra az alkalmazást. A pénzed biztonságban van.",
+    "retryTitle": "Újrapróbálás elindítva",
+    "retryBody": "A lehívható átváltások tranzakcióinak újraküldése folyamatban van.",
+    "retryFailedTitle": "Az újrapróbálás sikertelen",
+    "deliveredBody": "{{amount}} sats megérkezett a Lightning hálózaton.",
+    "settlingTitle": "Az átváltás elszámolása még folyamatban van",
+    "settlingBody": "A pénzed biztonságban van — a Boltz befejezi a Lightning-fizetést.",
+    "confirmationTitle": "Még megerősítésre várunk",
+    "confirmationBody": "A Bitcoin-blokkok átlagosan kb. 10 percenként érkeznek, de néha sokkal tovább tart. A pénzed biztonságban van — az átváltás automatikusan befejeződik."
   }
 }

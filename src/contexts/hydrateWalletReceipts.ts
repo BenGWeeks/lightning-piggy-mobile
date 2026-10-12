@@ -18,3 +18,11 @@ export async function hydrateWalletReceipts(
     if (isCurrent()) seed(walletId, settledIncomingHashes(cachedTxs));
   }
 }
+
+// Persist a wallet's announced-receipt hashes so a payment is announced once,
+// EVER — not once per JS session. The in-memory set resets on every cold start
+// / Metro re-eval, and the tx cache it seeds from can be stale (missing a
+// just-arrived receive), so without this a payment re-announced on reload (#653).
+export function persistSeenReceipts(walletId: string, seen: ReadonlySet<string>): void {
+  AsyncStorage.setItem(`seenReceipts_${walletId}`, JSON.stringify([...seen])).catch(() => {});
+}

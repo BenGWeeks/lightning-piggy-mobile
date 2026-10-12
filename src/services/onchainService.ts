@@ -24,6 +24,9 @@ import bs58check from 'bs58check';
 import { getXpub, getMnemonic, getElectrumServer } from './walletStorageService';
 import { classifySendFeeError, type SendFeeEstimate } from '../utils/sendFeeEstimate';
 
+import { createYieldScheduler } from '../contexts/nostrDecryptPacing';
+import { yieldMacrotask } from '../utils/yieldingBatch';
+
 const ADDRESS_INDEX_PREFIX = 'onchain_addr_index_';
 
 const ESPLORA_TIMEOUT_MS = 8000;
@@ -101,25 +104,43 @@ export interface OnchainTransaction {
 }
 
 /** Map a BDK transaction to our OnchainTransaction type and sort: pending (no timestamp) first, then confirmed in newest-first order. */
-function mapAndSortTransactions(txList: any[]): OnchainTransaction[] {
-  return txList
-    .map((tx) => {
+async function mapAndSortTransactions(txList: any[]): Promise<OnchainTransaction[]> {
+  const pacing = createYieldScheduler({ safetyEvery: 32 });
+  const transactions: OnchainTransaction[] = [];
+  try {
+    for (const tx of txList) {
       const net = tx.received - tx.sent;
-      return {
+      transactions.push({
         txid: tx.txid,
-        type: net >= 0 ? ('incoming' as const) : ('outgoing' as const),
+        type: net >= 0 ? 'incoming' : 'outgoing',
         amount: Math.abs(net),
         confirmed: tx.confirmationTime != null,
         blockHeight: tx.confirmationTime?.height ?? null,
         timestamp: tx.confirmationTime?.timestamp ?? null,
-      };
-    })
-    .sort((a, b) => {
-      if (a.timestamp === null && b.timestamp === null) return 0;
-      if (a.timestamp === null) return -1;
-      if (b.timestamp === null) return 1;
-      return b.timestamp - a.timestamp;
-    });
+      });
+      await pacing.maybeYield();
+    }
+    return sortTransactions(transactions);
+  } finally {
+    pacing.dispose();
+  }
+}
+
+function sortTransactions(transactions: OnchainTransaction[]): OnchainTransaction[] {
+  return transactions.sort((a, b) => {
+    if (a.timestamp === null && b.timestamp === null) return 0;
+    if (a.timestamp === null) return -1;
+    if (b.timestamp === null) return 1;
+    return b.timestamp - a.timestamp;
+  });
+}
+
+/** BDK's Electrum/script scan runs on a native worker. Return control to
+ * the UI before dispatch and after completion, before processing its result. */
+async function syncWallet(wallet: Wallet, chain: Blockchain): Promise<void> {
+  await yieldMacrotask();
+  await wallet.sync(chain);
+  await yieldMacrotask();
 }
 
 // ─── Internal state ───────────────────────────────────────────────────────────
@@ -426,30 +447,35 @@ async function syncSingleAddressViaEsplora(address: string): Promise<{
   } catch (error) {
     console.warn(`Esplora /txs fetch failed for ${address}`, error);
   }
-  const transactions: OnchainTransaction[] = txsData
-    .map((tx) => {
-      const sent = tx.vin
-        .filter((v) => v.prevout?.scriptpubkey_address === address)
-        .reduce((s, v) => s + (v.prevout?.value ?? 0), 0);
-      const received = tx.vout
-        .filter((v) => v.scriptpubkey_address === address)
-        .reduce((s, v) => s + v.value, 0);
+  const transactions: OnchainTransaction[] = [];
+  const pacing = createYieldScheduler({ safetyEvery: 32 });
+  try {
+    for (const tx of txsData) {
+      let sent = 0;
+      let received = 0;
+      for (const input of tx.vin) {
+        if (input.prevout?.scriptpubkey_address === address) sent += input.prevout.value ?? 0;
+        await pacing.maybeYield();
+      }
+      for (const output of tx.vout) {
+        if (output.scriptpubkey_address === address) received += output.value;
+        await pacing.maybeYield();
+      }
       const net = received - sent;
-      return {
+      transactions.push({
         txid: tx.txid,
-        type: (net >= 0 ? 'incoming' : 'outgoing') as 'incoming' | 'outgoing',
+        type: net >= 0 ? 'incoming' : 'outgoing',
         amount: Math.abs(net),
         confirmed: tx.status.confirmed,
         blockHeight: tx.status.block_height ?? null,
         timestamp: tx.status.block_time ?? null,
-      };
-    })
-    .sort((a, b) => {
-      if (a.timestamp === null && b.timestamp === null) return 0;
-      if (a.timestamp === null) return -1;
-      if (b.timestamp === null) return 1;
-      return b.timestamp - a.timestamp;
-    });
+      });
+      await pacing.maybeYield();
+    }
+    sortTransactions(transactions);
+  } finally {
+    pacing.dispose();
+  }
 
   return { balance, transactions };
 }
@@ -492,12 +518,12 @@ export async function syncAndRefresh(walletId: string): Promise<{
 
     const wallet = await getBdkWallet(walletId);
     const chain = await getBlockchain();
-    await wallet.sync(chain);
+    await syncWallet(wallet, chain);
 
     const bal = await wallet.getBalance();
     const txList = await wallet.listTransactions(false);
 
-    return { balance: bal.total, transactions: mapAndSortTransactions(txList), ok: true };
+    return { balance: bal.total, transactions: await mapAndSortTransactions(txList), ok: true };
   } catch (e) {
     // Return ok: false so callers can choose to keep their cached state
     // rather than overwriting it with empty values on transient Electrum
@@ -523,11 +549,11 @@ export async function getTransactions(walletId: string): Promise<OnchainTransact
 
     const wallet = await getBdkWallet(walletId);
     const chain = await getBlockchain();
-    await wallet.sync(chain);
+    await syncWallet(wallet, chain);
 
     const txList = await wallet.listTransactions(false);
 
-    return mapAndSortTransactions(txList);
+    return await mapAndSortTransactions(txList);
   } catch (e) {
     console.warn('onchainService.getTransactions failed:', e);
     disconnectElectrum();
@@ -627,7 +653,7 @@ export async function sendTransaction(
   disconnectElectrum();
   const chain = await getBlockchain();
   console.log('[BDK] sendTransaction: syncing wallet');
-  await wallet.sync(chain);
+  await syncWallet(wallet, chain);
   console.log('[BDK] sendTransaction: sync complete');
 
   console.log('[BDK] sendTransaction parsing address');

@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import * as SecureStore from 'expo-secure-store';
 import Toast from '../components/BrandedToast';
 import * as boltzService from '../services/boltzService';
@@ -42,13 +43,12 @@ export function forwardSwapStillWaitingToast(lastStatus: string | null): {
   const confirmed = lastStatus === 'transaction.confirmed' || lastStatus === 'invoice.pending';
   return confirmed
     ? {
-        text1: 'Swap still settling',
-        text2: 'Funds are safe — Boltz is finishing the Lightning payment.',
+        text1: t('swapToast.settlingTitle'),
+        text2: t('swapToast.settlingBody'),
       }
     : {
-        text1: 'Still waiting for a confirmation',
-        text2:
-          'Bitcoin blocks average ~10 min but sometimes take much longer. Funds are safe — the swap finishes automatically.',
+        text1: t('swapToast.confirmationTitle'),
+        text2: t('swapToast.confirmationBody'),
       };
 }
 
@@ -112,8 +112,8 @@ export async function watchForwardSwap(watch: ForwardSwapWatch, locale?: string)
   watch.onMessage(submarineSwapCompleteMessage(invoiceSats, locale));
   Toast.show({
     type: 'success',
-    text1: 'Swap complete',
-    text2: `${invoiceSats.toLocaleString(locale)} sats delivered via Lightning.`,
+    text1: t('swapToast.completeTitle'),
+    text2: t('swapToast.deliveredBody', { amount: invoiceSats.toLocaleString(locale) }),
     position: 'top',
     visibilityTime: 10000,
   });

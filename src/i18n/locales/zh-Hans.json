@@ -3007,5 +3007,21 @@
     "stoppedTitle": "实时位置共享已停止",
     "stoppedBody": "Lightning Piggy 在后台被关闭，你的实时位置共享已停止。打开应用即可再次共享。",
     "stoppedBodyOne": "Lightning Piggy 在后台被关闭，你与 {{name}} 的实时位置共享已停止。打开应用即可再次共享。"
+  },
+  "swapToast": {
+    "lockedTitle": "Boltz 已在链上锁定资金",
+    "claimingBody": "正在领取 {{amount}} sats…",
+    "completeTitle": "兑换完成",
+    "claimedBody": "已在链上领取 {{amount}} sats（扣除领取手续费）。领取交易 {{txid}}…",
+    "progressTitle": "兑换进行中",
+    "progressBody": "后台步骤出错 — 请在面板中点击“立即重试”或重新启动应用。资金安全。",
+    "retryTitle": "已开始重试",
+    "retryBody": "正在重新广播可领取的兑换交易。",
+    "retryFailedTitle": "重试失败",
+    "deliveredBody": "已通过 Lightning 送达 {{amount}} sats。",
+    "settlingTitle": "兑换仍在结算中",
+    "settlingBody": "资金安全 — Boltz 正在完成 Lightning 付款。",
+    "confirmationTitle": "仍在等待确认",
+    "confirmationBody": "Bitcoin 出块平均约需 10 分钟，但有时会更久。资金安全 — 兑换会自动完成。"
   }
 }
