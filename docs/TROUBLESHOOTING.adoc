@@ -1463,3 +1463,13 @@ disappears before checking the card. When reusing the reporting xpub fixture,
 `flow-114` handles the specific already-imported response by closing the
 wizard and selecting that existing wallet. Other import errors still fail
 the dismissal assertion.
+
+== Navigation hooks inside payment sheets (#1394)
+
+A component rendered through the bottom-sheet portal can sit outside the
+NavigationContainer even when its launching screen is inside it. Calling
+`useNavigation` or `useFocusEffect` there throws “Couldn't find a navigation
+object” when the sheet opens. Use the app's `navigationRef` for a settings
+link and tie sheet-only status subscriptions to mount/unmount. App-level
+swap settlement tracking remains independent of the sheet. Verify by opening
+the sheet on-device; a TypeScript check cannot detect the missing context.

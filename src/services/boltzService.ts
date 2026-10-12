@@ -940,21 +940,7 @@ export async function waitForSubmarineSwapComplete(
  * and trailing-zero stripped (per the spec; some wallets get confused by
  * trailing zeros even though the spec allows them).
  */
-export function buildBoltzBip21Uri(lockupAddress: string, expectedAmountSats: number): string {
-  if (!lockupAddress) throw new Error('lockupAddress required for BIP-21');
-  if (!Number.isFinite(expectedAmountSats) || expectedAmountSats <= 0) {
-    throw new Error('expectedAmountSats must be a positive number');
-  }
-  // Format BTC from integer sats with integer math — never floating-point.
-  // A `sats / 1e8` + `toFixed(8)` round-trip can land a sat off due to IEEE-754
-  // representation, and an off-by-one amount baked into the QR is exactly the
-  // under-/over-payment footgun this helper exists to prevent (#92).
-  const sats = Math.round(expectedAmountSats);
-  const whole = Math.floor(sats / 100_000_000);
-  const frac = (sats % 100_000_000).toString().padStart(8, '0');
-  const btc = `${whole}.${frac}`.replace(/0+$/, '').replace(/\.$/, '');
-  return `bitcoin:${lockupAddress}?amount=${btc}`;
-}
+export { buildBoltzBip21Uri } from '../utils/externalSwapPayment';
 
 // ─── Legacy alias for backward compatibility ──────────────────────────────────
 

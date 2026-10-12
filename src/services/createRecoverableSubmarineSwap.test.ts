@@ -1,7 +1,22 @@
+import { saveExternalSwap } from './externalSwapState';
 import * as SecureStore from 'expo-secure-store';
 import { createSubmarineSwapForward } from './boltzService';
 import { registerPendingSubmarineSwap } from './swapRecoveryService';
 import { createRecoverableSubmarineSwap } from './createRecoverableSubmarineSwap';
+
+jest.mock('./externalSwapTracking', () => ({ trackExternalSwap: jest.fn() }));
+jest.mock('./externalSwapState', () => ({
+  saveExternalSwap: jest.fn(),
+  externalSwapState: jest.fn((swap, source, dest, amount, invoice, owner) => ({
+    id: swap.id,
+    sourceWalletId: source,
+    destinationWalletId: dest,
+    invoiceSats: amount,
+    invoice,
+    ownerPubkey: owner,
+    expectedAmount: swap.expectedAmount,
+  })),
+}));
 
 jest.mock('expo-secure-store', () => ({
   setItemAsync: jest.fn(),
@@ -78,4 +93,24 @@ it('records the identity that started the swap, even if it switches mid-create (
   await createRecoverableSubmarineSwap('invoice', 100, 'source', quote);
   const [, raw] = jest.mocked(SecureStore.setItemAsync).mock.calls[0];
   expect(JSON.parse(raw).ownerPubkey).toBe(initiator);
+});
+
+it('persists external funding metadata and public instructions before returning', async () => {
+  mockActivePubkey = 'alice';
+  await createRecoverableSubmarineSwap('invoice', 100, 'watch', quote, 'lightning');
+  expect(JSON.parse(jest.mocked(SecureStore.setItemAsync).mock.calls[0][1])).toMatchObject({
+    externalFunding: true,
+    destinationWalletId: 'lightning',
+    invoice: 'invoice',
+    ownerPubkey: 'alice',
+  });
+  expect(saveExternalSwap).toHaveBeenCalledWith(
+    expect.objectContaining({ expectedAmount: 101, destinationWalletId: 'lightning' }),
+  );
+});
+it('does not expose external payment instructions if public state cannot be saved', async () => {
+  jest.mocked(saveExternalSwap).mockRejectedValueOnce(new Error('Disk full'));
+  await expect(
+    createRecoverableSubmarineSwap('invoice', 100, 'watch', quote, 'lightning'),
+  ).rejects.toThrow('Disk full');
 });

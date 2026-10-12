@@ -1,3 +1,16 @@
+import Toast from '../components/BrandedToast';
+import { extractLockupFromTxHex } from '../utils/lockupTx';
+import {
+  recoverPendingSwaps,
+  registerPendingSubmarineSwap,
+  unregisterPendingSubmarineSwap,
+  setSubmarineRefundHandler,
+  type PersistedSubmarineSwap,
+} from './swapRecoveryService';
+import { buildSwapPlaceholders, preserveOptimisticSwapRows } from '../utils/swapPendingMerge';
+
+import { loadExternalSwaps } from './externalSwapState';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 // Submarine (on-chain → LN) recovery: previously these records were persisted
 // but never indexed OR read, so a crash mid-swap stranded the on-chain funds
 // with no UI. These tests cover the index + recovery branch, and the funding
@@ -7,6 +20,7 @@
 const mockStore = new Map<string, string>();
 const mockFetchWithTimeout = jest.fn();
 
+jest.mock('./externalSwapTracking', () => ({ trackExternalSwap: jest.fn() }));
 jest.mock('expo-secure-store', () => ({
   getItemAsync: jest.fn((k: string) => Promise.resolve(mockStore.get(k) ?? null)),
   setItemAsync: jest.fn((k: string, v: string) => {
@@ -27,17 +41,6 @@ jest.mock('../components/BrandedToast', () => ({
   default: { show: jest.fn() },
 }));
 jest.mock('../utils/lockupTx', () => ({ extractLockupFromTxHex: jest.fn() }));
-
-import Toast from '../components/BrandedToast';
-import { extractLockupFromTxHex } from '../utils/lockupTx';
-import {
-  recoverPendingSwaps,
-  registerPendingSubmarineSwap,
-  unregisterPendingSubmarineSwap,
-  setSubmarineRefundHandler,
-  type PersistedSubmarineSwap,
-} from './swapRecoveryService';
-import { buildSwapPlaceholders, preserveOptimisticSwapRows } from '../utils/swapPendingMerge';
 
 const mockToastShow = Toast.show as jest.Mock;
 const mockExtractLockup = extractLockupFromTxHex as jest.Mock;
@@ -363,4 +366,44 @@ it('does not report a completed refund as failed when index cleanup fails', asyn
   const store = jest.requireMock('expo-secure-store');
   store.setItemAsync.mockRejectedValueOnce(new Error('Index unavailable'));
   await expect(unregisterPendingSubmarineSwap(SWAP_ID)).resolves.toBeUndefined();
+});
+
+it('reconstructs external payment instructions and completion after a restart', async () => {
+  await AsyncStorage.clear();
+  seed({
+    externalFunding: true,
+    destinationWalletId: 'ln-wallet',
+    invoiceSats: 49000,
+    invoice: 'invoice',
+    createdAt: 123,
+  });
+  route('transaction.mempool');
+  await recoverPendingSwaps();
+  expect((await loadExternalSwaps('wallet-1', 'ln-wallet'))[0]).toMatchObject({
+    expectedAmount: 50000,
+    timeoutBlockHeight: 800000,
+    invoiceSats: 49000,
+    status: 'transaction.mempool',
+  });
+  route('transaction.claimed');
+  await recoverPendingSwaps();
+  expect((await loadExternalSwaps('wallet-1', 'ln-wallet'))[0].status).toBe('transaction.claimed');
+  expect(mockStore.has(KEY)).toBe(false);
+});
+it('preserves external refund keys and failed status for a funded expired swap', async () => {
+  await AsyncStorage.clear();
+  seed({
+    externalFunding: true,
+    destinationWalletId: 'ln-wallet',
+    invoiceSats: 49000,
+    invoice: 'invoice',
+    createdAt: 123,
+  });
+  const handler = jest.fn().mockResolvedValue(undefined);
+  setSubmarineRefundHandler(handler);
+  route('swap.expired');
+  await recoverPendingSwaps();
+  expect(mockStore.has(KEY)).toBe(true);
+  expect(handler).toHaveBeenCalledWith(expect.objectContaining({ externalFunding: true }));
+  expect((await loadExternalSwaps('wallet-1', 'ln-wallet'))[0].status).toBe('swap.expired');
 });

@@ -22,6 +22,43 @@ rejected. HTTPS requires a certificate trusted by the phone; TLS verification is
 not disabled for private servers. There is no automatic fallback to another
 provider when the chosen backend is unavailable.
 
+== Move from a watch-only wallet to Lightning
+
+In Move, a watch-only on-chain source is labelled *Pay from your other wallet*.
+Choose a Lightning destination and enter the amount that it should receive.
+The quote includes Boltz's fee; your external wallet adds its own network fee.
+*Create payment request* creates an unpaid submarine swap and destination invoice.
+Lightning Piggy never signs or broadcasts a payment from the watch-only wallet.
+
+Pay the exact on-chain amount shown, from the wallet that holds the keys (for
+example a hardware wallet or Sparrow). The QR and copied payment URI contain
+that exact amount, including Boltz's fee. Copy address and copy sats amount are
+also available. Do not pay an expired request or pay the same request twice.
+The timeout is a Bitcoin block height, not a guaranteed wall-clock deadline.
+
+Closing Move leaves app-level settlement tracking running. Reopen Move with the
+same source/destination to resume the funding instructions, including after a
+restart. The Lightning wallet's existing swap transaction row and completion
+notification show settlement. Earlier requests remain available in the swap
+history inside Move. A failed funded swap keeps its private recovery material;
+claim a refund into your own wallet using those details with compatible swap
+refund tooling after the timeout block. The *Copy private refund details* action
+exports those keys deliberately; keep the details private. A normal wallet
+payment cannot reverse the lockup transaction. Unfunded expired requests have
+nothing to refund. Existing hot-wallet swaps retain their normal refund flow.
+
+== Verification for #1394
+
+Run `.maestro/payments/flow-154-watch-only-swap-to-lightning.yaml` on the test
+Piggy emulator with the flow-114 Watch Wallet 1 fixture and a connected Lightning
+wallet. It stops at provider setup when no server is configured; otherwise it
+creates only an unpaid request for 26,000 sats (subject to the server's limits).
+Never fund it. Screenshots live in `screenshots/swap-to-lightning-1394/`.
+The recorded emulator run requested 26,000 sats and displayed an exact lockup
+amount of 26,463 sats. Force-stopping and reopening the app restored the same
+address, QR, and amount. Payment, settlement, and refund broadcasting were not
+exercised.
+
 == Private family server
 
 Connect each phone to your existing WireGuard VPN before checking or using a

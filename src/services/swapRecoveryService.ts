@@ -1,3 +1,5 @@
+import { trackExternalSwap } from './externalSwapTracking';
+import { saveExternalSwap, type ExternalSwapState } from './externalSwapState';
 import { getAppFormatLocale } from '../utils/appFormatLocale';
 import { reverseRefundHeight, verifyReverseLockup } from '../utils/reverseSwapVerify';
 /**
@@ -470,6 +472,10 @@ let recoveryInFlight: Promise<void> | null = null;
 
 /** A persisted submarine (on-chain → LN) swap awaiting refund recovery. */
 export interface PersistedSubmarineSwap {
+  externalFunding?: boolean;
+  destinationWalletId?: string;
+  invoiceSats?: number;
+  invoice?: string;
   id: string;
   address: string;
   expectedAmount: number;
@@ -861,6 +867,11 @@ async function recoverSubmarineSwaps(): Promise<void> {
       }
       const data = await res.json();
       const status: string = data.status ?? 'unknown';
+      if (swap.externalFunding) {
+        await saveExternalSwap({ ...swap, status } as ExternalSwapState);
+        if (typeof data.transaction?.id === 'string')
+          await recordSubmarineSwapLegs(data.transaction.id, swap.invoice, swap.id);
+      }
       if (swap.notFoundCount) {
         await SecureStore.setItemAsync(
           `submarine_swap_${swapId}`,
@@ -956,6 +967,8 @@ async function recoverSubmarineSwaps(): Promise<void> {
         }
         continue;
       }
+      if (swap.externalFunding)
+        trackExternalSwap({ ...swap, status } as ExternalSwapState, recoverPendingSwaps);
       // Still pending — leave for the next pass.
     } catch (e) {
       console.warn(`[SwapRecovery] Failed to check submarine swap ${swapId}:`, e);

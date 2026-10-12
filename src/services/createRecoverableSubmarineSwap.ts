@@ -1,6 +1,8 @@
+import { trackExternalSwap } from './externalSwapTracking';
+import { externalSwapState, saveExternalSwap } from './externalSwapState';
 import * as SecureStore from 'expo-secure-store';
 import { createSubmarineSwapForward, type SwapFees } from './boltzService';
-import { registerPendingSubmarineSwap } from './swapRecoveryService';
+import { registerPendingSubmarineSwap, recoverPendingSwaps } from './swapRecoveryService';
 import { getActivePubkey } from './walletStorageService';
 
 /** Prepare a transfer's swap and durably save refund material before funding. */
@@ -9,6 +11,7 @@ export async function createRecoverableSubmarineSwap(
   amountSats: number,
   sourceWalletId: string,
   approvedQuote: SwapFees,
+  externalDestinationId?: string,
 ) {
   if (!approvedQuote) throw new Error('Wait for the swap fee quote before sending');
   // Capture the initiating identity BEFORE any async work: an identity switch
@@ -22,11 +25,27 @@ export async function createRecoverableSubmarineSwap(
     JSON.stringify({
       ...swap,
       sourceWalletId,
+      externalFunding: !!externalDestinationId,
+      destinationWalletId: externalDestinationId,
+      invoiceSats: amountSats,
+      invoice,
       ownerPubkey,
       createdAt: Date.now(),
     }),
     { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY },
   );
   await registerPendingSubmarineSwap(swap.id);
+  if (externalDestinationId) {
+    const state = externalSwapState(
+      swap,
+      sourceWalletId,
+      externalDestinationId,
+      amountSats,
+      invoice,
+      ownerPubkey,
+    );
+    await saveExternalSwap(state);
+    trackExternalSwap(state, recoverPendingSwaps);
+  }
   return swap;
 }
