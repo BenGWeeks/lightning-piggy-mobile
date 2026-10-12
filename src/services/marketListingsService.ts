@@ -39,7 +39,7 @@ const MAX_FAILED_CHECKS = 64;
 /** Stop and mark the snapshot unavailable after too many forged deletions. */
 const MAX_FAILED_DELETION_CHECKS = 32;
 /** Total oversized checks, including successful signatures and replacements.
- * Beyond this budget, small stand-ins fail closed without further crypto. */
+ * Beyond this budget, affected authors are withheld without further crypto. */
 const MAX_OVERSIZED_CHECKS = 16;
 const MAX_PRODUCTS = 250;
 /** Listings painted before the rest are verified — about two screens of grid. */
@@ -49,7 +49,7 @@ const TIMEOUT_MS = 10000;
 /** Time other relays get once the first one has answered in full. */
 const GRACE_MS = 2000;
 // Signature checks hash the whole payload; beyond this we can't afford to
-// verify, so the snapshot must be unavailable if a revision could be skipped.
+// verify, so the author must be withheld if a listing revision could be skipped.
 const MAX_VERIFY_CHARS = 1048576;
 
 /**
@@ -130,7 +130,7 @@ async function runSnapshot(
   let listingCount = 0;
   let deletionCount = 0;
   let deletionUnavailable = false;
-  let listingUnavailable = false;
+  const withheldAuthors = new Set<string>();
   const budgetFull = (deletion: boolean) =>
     deletion ? deletionCount >= MAX_DELETIONS : listingCount >= MAX_EVENTS;
   // Oversized stand-ins are verified or fail closed after the work cap.
@@ -149,6 +149,8 @@ async function runSnapshot(
   // session, so a refetch doesn't pay for the snapshot again.
   const verified = verifyEventCached;
   const oversizedQueue: Event[] = [];
+  // Retain queued ids across both passes; at most MAX_OVERSIZED_CHECKS entries.
+  const oversizedIds = new Set<string>();
   let oversizedChecks = 0;
   const idMatches = (event: Event) => {
     try {
@@ -189,7 +191,7 @@ async function runSnapshot(
     limited = true;
     if (event.content.length > MAX_VERIFY_CHARS) {
       if (event.kind === 5) deletionUnavailable = true;
-      else listingUnavailable = true;
+      else withheldAuthors.add(event.pubkey);
       // Never apply targets from a payload we cannot authenticate.
       return;
     }
@@ -212,7 +214,7 @@ async function runSnapshot(
     )
       return;
     if (!existing && budgetFull(false)) {
-      listingUnavailable = true;
+      withheldAuthors.add(event.pubkey);
       return;
     }
     // Same id/kind/created_at as the real revision so it competes normally;
@@ -250,20 +252,23 @@ async function runSnapshot(
     received++;
     if (!scope.has(event.pubkey) || event.created_at > Date.now() / 1000 + 300) return;
     if (event.content.length > 32768 || event.tags.length > 256) {
+      if (oversizedIds.has(event.id)) return;
       limited = true;
       if (
         event.content.length > MAX_VERIFY_CHARS ||
         budgetFull(event.kind === 5) ||
         oversizedChecks + oversizedQueue.length >= MAX_OVERSIZED_CHECKS
       ) {
-        // Never trust an unchecked revision or deletion. Withhold the snapshot
-        // when the verification or retention budget prevents authentication.
+        // Never trust an unchecked revision or deletion. Withhold every listing
+        // of an affected author so an older revision cannot resurface.
+        // Unchecked deletions still make the whole snapshot unavailable.
         if (event.kind === 5) deletionUnavailable = true;
-        else listingUnavailable = true;
+        else withheldAuthors.add(event.pubkey);
       } else {
         // Queued payloads share the event budget with ordinary candidates.
         if (event.kind === 5) deletionCount++;
         else listingCount++;
+        oversizedIds.add(event.id);
         oversizedQueue.push(event);
       }
       return;
@@ -340,9 +345,11 @@ async function runSnapshot(
     }
     const deletionChecksGaveUp = failedDeletionChecks >= MAX_FAILED_DELETION_CHECKS;
     const selection = await selectVerifiedListings(
-      signal.aborted || deletionChecksGaveUp || deletionUnavailable || listingUnavailable
+      signal.aborted || deletionChecksGaveUp || deletionUnavailable
         ? []
-        : [...events.values(), ...suppressions.values()],
+        : [...events.values(), ...suppressions.values()].filter(
+            (event) => !withheldAuthors.has(event.pubkey),
+          ),
       scope,
       {
         // Once aborted, fail fast instead of verifying the rest for nothing.
@@ -371,7 +378,7 @@ async function runSnapshot(
         limited ||
         deletionChecksGaveUp ||
         deletionUnavailable ||
-        listingUnavailable ||
+        withheldAuthors.size > 0 ||
         selection.gaveUp ||
         listingsCutMattered(listings.truncatedSince, products, selection.overflow) ||
         deletions.truncated ||
