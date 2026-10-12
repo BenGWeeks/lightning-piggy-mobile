@@ -3,6 +3,11 @@
 // location batches even after a relaunch with no React tree mounted (#1300).
 // The logic lives in liveLocationTracker.ts.
 
+// FIRST: index.ts loads this module before App.tsx installs the polyfills, and
+// the tracker pulls in the Nostr / Marmot crypto stack, which captures
+// `crypto.getRandomValues` at import time (else Marmot sends fail with
+// "crypto.getRandomValues must be defined").
+import '../polyfills';
 import type * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
 import * as TaskManager from 'expo-task-manager';
