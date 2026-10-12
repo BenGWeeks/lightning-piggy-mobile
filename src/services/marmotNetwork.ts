@@ -6,6 +6,7 @@
 import type { NostrNetworkInterface } from '@internet-privacy/marmot-ts';
 import type { Event as NostrEvent, Filter } from 'nostr-tools';
 
+import { requireRelayAcknowledgement } from '../utils/relayPublishResult';
 import { dmInboxRelaysFromTags, isRelayUrl } from '../utils/relayListEvents';
 import { isPublicRelayUrl } from '../utils/publicUrl';
 import { pool, trackRelays } from './nostrPool';
@@ -60,7 +61,9 @@ export function createMarmotNetwork(getFallbackRelays: () => string[]): NostrNet
       const targets = relaysOr(relays);
       trackRelays(targets);
       const settled = await Promise.allSettled(
-        pool.publish(targets, event as NostrEvent).map((p) => withTimeout(p, PUBLISH_TIMEOUT_MS)),
+        pool
+          .publish(targets, event as NostrEvent)
+          .map((p) => withTimeout(p.then(requireRelayAcknowledgement), PUBLISH_TIMEOUT_MS)),
       );
       return Object.fromEntries(
         targets.map((url, i) => {

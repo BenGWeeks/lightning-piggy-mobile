@@ -1,13 +1,21 @@
 // The strict push transport's server-inbox (kind 10050) lookup. The pool is
 // mocked: these tests never touch a real relay.
 const mockQuerySync = jest.fn();
+const mockPublish = jest.fn();
 jest.mock('./nostrPool', () => ({
-  pool: { querySync: (...args: unknown[]) => mockQuerySync(...args), publish: jest.fn(() => []) },
+  pool: {
+    querySync: (...args: unknown[]) => mockQuerySync(...args),
+    publish: (...args: unknown[]) => mockPublish(...args),
+  },
   trackRelays: jest.fn(),
 }));
 
+import type { Event } from 'nostr-tools';
+import { MarmotWelcomeOutbox } from './marmotWelcomeOutbox';
+import { createMemoryMarmotBackend } from './marmotStore';
 import {
   cleanPushRelays,
+  createMarmotNetwork,
   createPushTransport,
   MAX_PUSH_INBOX_RELAYS,
   MAX_PUSH_RELAYS,
@@ -124,12 +132,68 @@ describe('push relay destination policy', () => {
   });
 
   it('never publishes a trigger to a private or plaintext relay', async () => {
-    const publish = pool.publish as unknown as jest.Mock;
-    publish.mockClear();
+    const publish = mockPublish;
+    publish.mockReset();
+    publish.mockReturnValue([]);
     const transport = createPushTransport(() => []);
     await transport.publish(['ws://192.168.1.1/', 'wss://127.0.0.1'], {} as never);
     expect(publish).not.toHaveBeenCalled();
     await transport.publish(['ws://192.168.1.1/', 'wss://relay.ditto.pub'], {} as never);
     expect(publish).toHaveBeenCalledWith(['wss://relay.ditto.pub'], {});
+  });
+});
+
+describe('createMarmotNetwork().publish', () => {
+  const relays = ['wss://a.example', 'wss://b.example'];
+  const event: Event = {
+    id: 'a'.repeat(64),
+    pubkey: 'b'.repeat(64),
+    sig: 'c'.repeat(128),
+    created_at: 1,
+    kind: 1059,
+    tags: [['p', 'd'.repeat(64)]],
+    content: '',
+  };
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    mockPublish.mockReset();
+  });
+  afterEach(() => {
+    jest.clearAllTimers();
+    jest.useRealTimers();
+  });
+
+  it('reports connection failures as refused alongside real acknowledgements', async () => {
+    mockPublish.mockReturnValue([
+      Promise.resolve('connection failure: offline'),
+      Promise.resolve(''),
+    ]);
+    const result = await createMarmotNetwork(() => []).publish(relays, event);
+    expect(result[relays[0]]).toMatchObject({
+      ok: false,
+      message: expect.stringContaining('offline'),
+    });
+    expect(result[relays[1]]).toEqual({ from: relays[1], ok: true, message: '' });
+  });
+
+  it('keeps unreachable invitations queued through retries until a relay acknowledges', async () => {
+    mockPublish.mockImplementation(() =>
+      relays.map(() => Promise.resolve('connection failure: offline')),
+    );
+    const outbox = new MarmotWelcomeOutbox(createMemoryMarmotBackend());
+    const network = outbox.wrapNetwork(createMarmotNetwork(() => []));
+    const { failed } = await outbox.capture(() => network.publish(relays, event));
+    expect(failed).toHaveLength(1);
+    expect(await outbox.resend(failed)).toEqual(failed);
+    await outbox.enqueue('group', failed);
+    await outbox.flush();
+    expect(await outbox.pending()).toHaveLength(1);
+    mockPublish.mockReturnValue([
+      Promise.resolve('connection failure: offline'),
+      Promise.resolve('saved'),
+    ]);
+    await outbox.flush();
+    expect(await outbox.pending()).toHaveLength(0);
   });
 });
