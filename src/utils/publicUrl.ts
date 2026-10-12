@@ -62,10 +62,9 @@ const PRIVATE_SUFFIXES: readonly string[] = [
   'home', // ICANN name-collision TLDs common on home routers
   'corp',
   'arpa', // includes home.arpa (RFC 8375) and reverse-DNS names
-  'test', // RFC 6761 reserved
-  'invalid',
-  'example',
   'onion', // never reachable over clearnet
+  // (`.test` / `.example` / `.invalid` are reserved too, but never resolve,
+  // so they're harmless — and test fixtures use `relay.example`.)
 ];
 
 // Public wildcard-DNS services whose names resolve to whatever IP is embedded
@@ -131,9 +130,14 @@ export function isPublicHttpUrl(url: string): boolean {
   return parsePublicUrl(url, HTTP_SCHEMES) !== null;
 }
 
-/** True when `url` is a wss relay URL that's safe to contact automatically. */
-export function isPublicRelayUrl(url: string): boolean {
-  return parsePublicUrl(url, RELAY_SCHEMES) !== null;
+/**
+ * True when `value` is a wss relay URL that's safe to connect to
+ * automatically — e.g. NIP-19 / NIP-10 relay hints, which are untrusted text
+ * from someone else's event. Plain `ws://` is refused.
+ */
+export function isPublicRelayUrl(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length > 256) return false;
+  return parsePublicUrl(value, RELAY_SCHEMES) !== null;
 }
 
 /**

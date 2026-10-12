@@ -10,7 +10,7 @@
 import { parsePublicUrl } from '../utils/publicUrl';
 import { extractUrls } from '../utils/extractUrls';
 
-const BLOCKED_HOSTS: ReadonlyArray<string> = [
+const BLOCKED_HOSTS: readonly string[] = [
   // Slack workspaces — invite URLs (`/T0123/B0123/x/y`) leak workspace +
   // channel IDs in the path; OG fetch logs the IP at Slack as well.
   'slack.com',

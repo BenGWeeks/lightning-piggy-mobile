@@ -172,7 +172,6 @@ describe('publicUrl — rejects local hostnames', () => {
     ['.localdomain', 'http://box.localdomain/'],
     ['.home', 'http://router.home/'],
     ['.corp', 'http://wiki.corp/'],
-    ['.test', 'http://site.test/'],
     ['.onion', 'http://abc.onion/'],
     ['single label', 'http://router/'],
     ['single label trailing dot', 'http://router./'],

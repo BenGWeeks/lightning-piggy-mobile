@@ -6,6 +6,7 @@
 // share one tested tokenizer.
 import * as nip19 from 'nostr-tools/nip19';
 import { classifyMediaUrl } from './noteMedia';
+import { isPublicRelayUrl } from './publicUrl';
 
 export type NostrContentToken =
   | { type: 'text'; text: string }
@@ -51,90 +52,11 @@ const TOKEN_RE = new RegExp(`(${URL})|(${ENTITY})`, 'gi');
 // Punctuation that commonly trails a URL in prose but is rarely part of it.
 const TRAILING_PUNCT_RE = /[.,;:!?'"’”)\]}>]+$/;
 
-/**
- * Parse an IPv4 literal the way URL parsers and `inet_aton` do: 1–4 parts,
- * each decimal, octal (`0…`) or hex (`0x…`), so `127.1`, `0x7f.1` and
- * `2130706433` are all 127.0.0.1. Returns the four octets, or null when the
- * text isn't an IPv4 literal at all.
- */
-export function parseIPv4Literal(host: string): number[] | null {
-  const parts = host.split('.');
-  if (parts.length === 0 || parts.length > 4) return null;
-  const nums: number[] = [];
-  for (const part of parts) {
-    if (part === '') return null;
-    let n: number;
-    if (/^0x[0-9a-f]*$/i.test(part)) n = part.length === 2 ? 0 : parseInt(part.slice(2), 16);
-    else if (/^0[0-7]+$/.test(part)) n = parseInt(part.slice(1), 8);
-    else if (/^\d+$/.test(part)) n = Number(part);
-    else return null;
-    if (!Number.isFinite(n)) return null;
-    nums.push(n);
-  }
-  // The last part fills the remaining bytes (a.b.c.d / a.b.cd / a.bcd / abcd).
-  const last = nums.pop()!;
-  if (nums.some((x) => x > 255) || last >= 256 ** (4 - nums.length)) return null;
-  const out = [...nums];
-  for (let i = 3 - nums.length; i >= 0; i--) out.push(Math.floor(last / 256 ** i) % 256);
-  return out;
-}
-
-/** Public-internet IPv4 (not loopback / private / link-local / CGNAT / reserved). */
-function isPublicIPv4([a, b, c]: number[]): boolean {
-  if (a === 0 || a === 10 || a === 127 || a >= 224) return false;
-  if (a === 169 && b === 254) return false;
-  if (a === 172 && b >= 16 && b <= 31) return false;
-  if (a === 192 && b === 168) return false;
-  if (a === 192 && b === 0 && (c === 0 || c === 2)) return false;
-  if (a === 100 && b >= 64 && b <= 127) return false; // CGNAT
-  if (a === 198 && (b === 18 || b === 19)) return false; // benchmarking
-  if (a === 198 && b === 51 && c === 100) return false; // TEST-NET-2
-  if (a === 203 && b === 0 && c === 113) return false; // TEST-NET-3
-  return true;
-}
-
-/**
- * Relay hints are untrusted text from someone else's event, and the embed
- * cache connects to them automatically, so keep only public `wss://` relays.
- * The host is canonicalised first (case, trailing dots, numeric IPv4
- * shorthand) so look-alikes can't slip through. Rejected: plain `ws://`,
- * credentials, percent-encoding, localhost (incl. `localhost.` and
- * `*.localhost`), `.local` / `.internal` / `.home.arpa`, single-label names,
- * IPv4 that isn't public, and every IPv6 literal outside global unicast
- * `2000::/3` (so loopback, unique-local, link-local, IPv4-mapped
- * `::ffff:…` and other embedded-IPv4 forms are all refused).
- */
-export function isPublicRelayUrl(value: unknown): value is string {
-  if (typeof value !== 'string' || value.length > 256) return false;
-  const m = /^wss:\/\/([^/?#\s]+)(?:[/?#][^\s]*)?$/i.exec(value);
-  if (!m) return false;
-  const authority = m[1];
-  if (authority.includes('@') || authority.includes('%')) return false;
-  if (authority.startsWith('[')) {
-    const v6 = /^\[([0-9a-f:.]+)\](?::(\d{1,5}))?$/i.exec(authority);
-    if (!v6) return false;
-    // Global unicast only: the first hextet must be 2000–3fff. A literal
-    // starting with `::` (loopback, unspecified, mapped, compatible) fails.
-    const first = v6[1].split(':')[0];
-    if (!/^[0-9a-f]{1,4}$/i.test(first)) return false;
-    const n = parseInt(first, 16);
-    return n >= 0x2000 && n <= 0x3fff;
-  }
-  const hm = /^([^:]+)(?::(\d{1,5}))?$/.exec(authority);
-  if (!hm) return false;
-  const host = hm[1].toLowerCase().replace(/\.+$/, '');
-  if (!/^[a-z0-9.-]+$/.test(host) || host.includes('..')) return false;
-  // Anything a URL parser would read as an IPv4 address (the last label is
-  // numeric / hex) is judged as one.
-  const lastLabel = host.split('.').pop() ?? '';
-  if (/^(?:0x[0-9a-f]*|\d+)$/.test(lastLabel)) {
-    const v4 = parseIPv4Literal(host);
-    return v4 !== null && isPublicIPv4(v4);
-  }
-  if (!host.includes('.')) return false; // single label: `router`, `localhost`
-  if (/(?:^|\.)(?:localhost|local|internal|lan|home\.arpa)$/.test(host)) return false;
-  return true;
-}
+// Relay hints are untrusted text from someone else's event, and the embed
+// cache connects to them automatically, so only public `wss://` relays are
+// kept. The check is the app-wide "safe to contact automatically" helper
+// (#1338), re-exported here for existing importers (nip10).
+export { isPublicRelayUrl };
 
 function cleanRelays(relays: string[] | undefined): string[] {
   if (!Array.isArray(relays)) return [];
