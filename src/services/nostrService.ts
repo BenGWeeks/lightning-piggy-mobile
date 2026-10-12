@@ -44,6 +44,7 @@ export { LP_CLIENT_TAG };
 // './nostrService'` call sites. This module owns the custom `verifyEvent`
 // fast-path applied to that same instance below.
 export { pool, trackRelays };
+export { signAndPublishEvent, publishSignedEvent } from './nostrEventPublish';
 
 // Fast-path verification for kind-0 (profile / metadata) events.
 // `SimplePool` runs `verifyEvent` synchronously for every event before
@@ -540,37 +541,6 @@ export async function fetchProfiles(
   }
 
   return profiles;
-}
-
-export async function signAndPublishEvent(
-  event: {
-    kind: number;
-    created_at: number;
-    tags: string[][];
-    content: string;
-  },
-  secretKey: Uint8Array,
-  relays: string[],
-): Promise<void> {
-  trackRelays(relays);
-  const signed = nostrFinalizeEvent(event, secretKey);
-  await Promise.any(pool.publish(relays, signed));
-}
-
-export async function publishSignedEvent(
-  signedEvent: {
-    id: string;
-    pubkey: string;
-    sig: string;
-    kind: number;
-    created_at: number;
-    tags: string[][];
-    content: string;
-  },
-  relays: string[],
-): Promise<void> {
-  trackRelays(relays);
-  await Promise.any(pool.publish(relays, signedEvent as VerifiedEvent));
 }
 
 /**

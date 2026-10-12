@@ -23,6 +23,7 @@ import {
 } from './sellerEventStore';
 import { querySyncAbortable } from './relayQuery';
 import { publishSignedEvent } from './nostrService';
+import { pool } from './nostrPool';
 import {
   buildDeletionTemplate,
   buildListingTemplate,
@@ -36,8 +37,11 @@ jest.mock('./nostrService', () => ({
   pool: {},
   trackRelays: jest.fn(),
   DEFAULT_RELAYS: ['wss://default.example'],
-  publishSignedEvent: jest.fn(),
+  publishSignedEvent: jest.fn((...args: unknown[]) =>
+    jest.requireActual('./nostrEventPublish').publishSignedEvent(...args),
+  ),
 }));
+jest.mock('./nostrPool', () => ({ pool: { publish: jest.fn() }, trackRelays: jest.fn() }));
 jest.mock('./relayQuery', () => ({ querySyncAbortable: jest.fn() }));
 
 const key = new Uint8Array(32).fill(9);
@@ -246,6 +250,38 @@ describe('fetchLatestRevision', () => {
 });
 
 describe('publishSellerEvent', () => {
+  it.each(['listing', 'deletion'])('rejects an unreachable %s publication', async (kind) => {
+    (publishSignedEvent as jest.Mock).mockImplementation((...args: unknown[]) =>
+      jest.requireActual('./nostrEventPublish').publishSignedEvent(...args),
+    );
+    (pool.publish as jest.Mock).mockReturnValue([
+      Promise.resolve('connection failure: offline'),
+      Promise.reject(new Error('blocked: refused')),
+    ]);
+    const event = kind === 'listing' ? listing('a') : sign(buildDeletionTemplate([]));
+    await expect(publishSellerEvent(event, ['wss://a', 'wss://b'])).rejects.toThrow();
+  });
+
+  it('waits for an actual acknowledgement after a fast connection failure', async () => {
+    (publishSignedEvent as jest.Mock).mockImplementation((...args: unknown[]) =>
+      jest.requireActual('./nostrEventPublish').publishSignedEvent(...args),
+    );
+    let accept!: (message: string) => void;
+    (pool.publish as jest.Mock).mockReturnValue([
+      Promise.resolve('connection failure: offline'),
+      new Promise<string>((resolve) => (accept = resolve)),
+    ]);
+    let published = false;
+    const pending = publishSellerEvent(listing('a'), ['wss://a', 'wss://b']).then(() => {
+      published = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(published).toBe(false);
+    accept(''); // An empty OK message is a valid positive acknowledgement.
+    await pending;
+    expect(published).toBe(true);
+  });
+
   it('publishes to at most eight relays', async () => {
     (publishSignedEvent as jest.Mock).mockResolvedValue(undefined);
     const relays = Array.from({ length: 12 }, (_, i) => `wss://r${i}.example`);
