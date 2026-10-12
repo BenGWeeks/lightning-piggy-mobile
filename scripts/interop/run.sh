@@ -46,10 +46,12 @@ FLOWS="$REPO/.maestro/interop"
 NSEC_VAR="MAESTRO_NSEC_$SENDER"
 export INTEROP_NSEC="${!NSEC_VAR:?set $NSEC_VAR in .env}"
 
-hexpub() { node --input-type=module -e "import {nip19,getPublicKey} from 'nostr-tools'; console.log(getPublicKey(nip19.decode(process.env.K).data))"; }
+# Never let a decoder error echo a (mistyped) nsec.
+hexpub() { node --input-type=module -e "import {nip19,getPublicKey} from 'nostr-tools'; try { console.log(getPublicKey(nip19.decode(process.env.K).data)) } catch { console.error('invalid nsec in .env'); process.exit(1) }"; }
 BIG_HEX="$(K="$MAESTRO_NSEC_BIG" hexpub)"
 LITTLE_HEX="$(K="$MAESTRO_NSEC_LITTLE" hexpub)"
 SENDER_HEX="$(K="$INTEROP_NSEC" hexpub)"
+[ -n "$BIG_HEX" ] && [ -n "$LITTLE_HEX" ] && [ -n "$SENDER_HEX" ] || { echo "check the Piggy nsecs in .env"; exit 1; }
 redact() { sed -E 's/nsec1[0-9a-z]+/[redacted]/g'; }
 say() { echo "[$(date +%H:%M:%S)] $*" | tee -a "$OUT/logs/run.log"; }
 sender() { node scripts/interop/marmot-sender.mjs "$@" 2>>"$OUT/logs/sender.err" | redact; }
@@ -100,7 +102,7 @@ export DEVICE OUT TAG LOCK_DIR FIXTURE_ON_DEVICE FLOWS METRO_PORT
 
 # Run a bash snippet under the device lock, with setup + restore inside it.
 with_device() {
-  flock -w 3600 "$LOCK_DIR/emulator.lock" bash -c "trap device_restore EXIT; device_setup; $1"
+  flock -w 3600 "$LOCK_DIR/emulator.lock" bash -o pipefail -c "trap device_restore EXIT; device_setup; $1"
 }
 
 # Why the sender runs inside the device lock: if another build of Lightning
@@ -110,21 +112,24 @@ with_device() {
 # window therefore points the app at the run bundle, stops it, and only then
 # has the sender act.
 export -f sender
-export STATE DM_STATE BIG_HEX LITTLE_HEX SENDER_HEX SKIP_WN INTEROP_NSEC REPO
 ROW_FILE="$OUT/logs/row-ids.env"
+export STATE DM_STATE BIG_HEX LITTLE_HEX SENDER_HEX SKIP_WN INTEROP_NSEC REPO ROW_FILE
 
 # --- window 1: sender items → checks on both apps; Lightning Piggy sends ----
 say "window 1: sender $SENDER (${SENDER_HEX:0:8}) → group 'IO $TAG' (Big on Lightning Piggy + Little on White Noise) and a 1:1 with Big"
 with_device '
   adb -s "$DEVICE" shell am force-stop com.lightningpiggy.app.dev
   invite="$BIG_HEX@Lightning Piggy"; [ -z "${SKIP_WN:-}" ] && invite="$invite,$LITTLE_HEX@White Noise"
-  sender create --state "$STATE" --name "IO $TAG" --invite "$invite" >"$OUT/logs/create.json"
+  rm -f "$STATE" "$DM_STATE" # never reuse an earlier run'"'"'s group
+  sender create --state "$STATE" --name "IO $TAG" --invite "$invite" >"$OUT/logs/create.json" ||
+    { say "group creation or Welcome delivery failed — see logs/create.json"; exit 1; }
   GROUP_ID="$(jq -r ".groupId // empty" "$STATE" 2>/dev/null)"
   [ -n "$GROUP_ID" ] || { say "group creation failed — see logs/sender.err"; exit 1; }
-  echo "ROW=group-row-marmot:$GROUP_ID" >"'"$ROW_FILE"'"
+  echo "ROW=group-row-marmot:$GROUP_ID" >"$ROW_FILE"
   sender send --state "$STATE" --tag "$TAG" >"$OUT/logs/send-group.jsonl"
   say "sent $(grep -c "\"ok\":true" "$OUT/logs/send-group.jsonl") / $(wc -l <"$OUT/logs/send-group.jsonl") items into the group"
-  sender create --state "$DM_STATE" --dm --invite "$BIG_HEX@Lightning Piggy" >"$OUT/logs/create-dm.json"
+  sender create --state "$DM_STATE" --dm --invite "$BIG_HEX@Lightning Piggy" >"$OUT/logs/create-dm.json" ||
+    say "1:1 creation failed — flow-151 will report it"
   sender send --state "$DM_STATE" --tag "$TAG" \
     --only text.plain,text.zh,text.emoji,reply,react,react2,unreact,edit.target,edit,delete.target,delete \
     >"$OUT/logs/send-dm.jsonl"

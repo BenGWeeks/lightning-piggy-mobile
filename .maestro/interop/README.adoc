@@ -93,9 +93,10 @@ node scripts/interop/marmot-sender.mjs listen --state /tmp/io.json --seconds 60 
 * Only the three Piggy test accounts are ever involved; groups are created
   fresh per run and opened by their exact id / name.
 * Nothing is paid: the invoice is expired, and no zap or wallet action runs.
-* The sender never uses relay.damus.io (it rate-limit-bans the dev machine's
-  IP). It uses nos.lol, relay.primal.net and nostr.mom, and Welcomes go to
-  each invitee's kind-10050 inbox.
+* The sender never contacts relay.damus.io, nos.lol or nostr.mom (they
+  rate-limit-ban the dev machine's IP). It uses relay.primal.net,
+  relay.snort.social and relay.ditto.pub, and Welcomes go to each invitee's
+  kind-10050 inbox (minus those relays).
 * Each run adds one group to every invited install of Big Piggy and to Little
   Piggy's White Noise. They're labelled `IO <tag>`.
 

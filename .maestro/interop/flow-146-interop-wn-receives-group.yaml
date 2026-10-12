@@ -7,8 +7,9 @@ name: Interop — White Noise renders what the scripted Marmot sender sent (grou
 #
 # Fragility: these selectors depend on White Noise's English copy and
 # rendering (2026.10.3). It renders Markdown and decodes HTML entities, so
-# those items match on the marker only; media match on the filename White
-# Noise exposes as the bubble's accessibility label.
+# those items match on the marker only. The image matches on the filename
+# White Noise exposes as its label; the voice note on its duration (the
+# fixture is 2 s).
 #
 # Env: WN_CHAT="IO <tag>", TAG=<run tag>.
 - runFlow:
@@ -99,20 +100,20 @@ name: Interop — White Noise renders what the scripted Marmot sender sent (grou
     times: 12
     while:
       notVisible:
-        text: '.*interop-voice.*'
+        text: '0:02'
     commands:
       - swipe:
           direction: DOWN
           duration: 500
 - assertVisible:
     label: 'IO-CHECK voice'
-    text: '.*interop-voice.*'
+    text: '0:02'
     optional: true
 # Missed: go back to the newest message so later checks start from there.
 - runFlow:
     when:
       notVisible:
-        text: '.*interop-voice.*'
+        text: '0:02'
     commands:
       - repeat:
           times: 12

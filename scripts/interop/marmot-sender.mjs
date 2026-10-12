@@ -21,8 +21,8 @@
 //   info                                 Name, epoch, members, admins.
 //
 // Never pays anything: the invoice item is an expired 21-sat test invoice.
-// Relays: nos.lol, relay.primal.net, nostr.mom (never relay.damus.io — it
-// bans the dev machine's IP for rate limits).
+// Relays: relay.primal.net, relay.snort.social, relay.ditto.pub. Never
+// relay.damus.io, nos.lol or nostr.mom — they ban the dev machine's IP.
 import {
   MarmotClient,
   Proposals,
@@ -42,7 +42,10 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { itemPlan, contactText } from './items.mjs';
 
-const RELAYS = ['wss://nos.lol', 'wss://relay.primal.net', 'wss://nostr.mom'];
+const RELAYS = ['wss://relay.primal.net', 'wss://relay.snort.social', 'wss://relay.ditto.pub'];
+// Relays that rate-limit-ban the dev machine's IP: never contacted, even when an
+// invitee's inbox list names them.
+const BANNED = ['damus.io', 'nos.lol', 'nostr.mom'];
 // Blossom servers White Noise uses for opaque encrypted blobs.
 const MEDIA_SERVERS = [
   'https://blossom.divine.video',
@@ -84,8 +87,10 @@ const log = (...a) => console.error(new Date().toISOString().slice(11, 19), ...a
 // ---- network / signer / storage (same shape as scripts/marmot-peer-bot.mjs) --
 const pool = new SimplePool();
 const arr = (f) => (Array.isArray(f) ? f : [f]);
-const relaysOrDefault = (relays) =>
-  relays?.length ? relays.filter((r) => !r.includes('damus')) : RELAYS;
+const relaysOrDefault = (relays) => {
+  const allowed = (relays ?? []).filter((r) => !BANNED.some((b) => r.includes(b)));
+  return allowed.length ? allowed : RELAYS;
+};
 const network = {
   async publish(relays, ev) {
     const urls = relaysOrDefault(relays);
