@@ -489,7 +489,9 @@ const ContactProfileScreen: React.FC = () => {
   }, [contact.pubkey, postsMode]);
   const topLevelCount = useMemo(() => countTopLevelPosts(feed.events), [feed.events]);
   const { loadMore, loading: feedLoading, loadingMore, reachedEnd } = feed;
-  const feedSize = feed.events.length;
+  // Fetched events, hidden comments included (#1337): a page of only those
+  // must still let paging reach older posts.
+  const feedSize = feed.fetchedCount;
   // Never while blurred: an abort on blur settles `loadingMore`, which must
   // not re-arm paging behind the next screen (review #1334).
   const focused = useIsFocused();
@@ -620,7 +622,7 @@ const ContactProfileScreen: React.FC = () => {
 
   // Posts / Media page backwards on demand; nothing to page on Shop (the
   // seller's listings come in one bounded snapshot).
-  const canPage = tab !== 'shop' && feed.events.length > 0 && !feed.reachedEnd;
+  const canPage = tab !== 'shop' && feed.fetchedCount > 0 && !feed.reachedEnd;
   const listFooter = canPage ? (
     <View style={tabStyles.footer}>
       {feed.loadingMore ? (

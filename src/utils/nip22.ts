@@ -28,7 +28,10 @@ export type CommentPointer =
 
 export interface CommentScopeSide {
   pointer: CommentPointer | null;
-  /** `K` / `k` as a number, or null when absent or not an integer. */
+  /**
+   * `K` / `k` as a number; null when the tag is absent, NaN when it's there
+   * but not a kind number (e.g. `web` for an external root).
+   */
   kind: number | null;
   /** `P` / `p` (lowercase hex), or null. */
   author: string | null;
@@ -72,7 +75,7 @@ function side(tags: readonly string[][], upper: boolean): CommentScopeSide {
     pointer = { type: 'external', value: i[1] };
   }
   const k = firstTag(tags, n('k'))?.[1];
-  const kind = k !== undefined && /^\d+$/.test(k) ? Number(k) : null;
+  const kind = k === undefined ? null : /^\d+$/.test(k) ? Number(k) : NaN;
   const author = hex(firstTag(tags, n('p'))?.[1]);
   return { pointer, kind, author };
 }
@@ -91,21 +94,26 @@ const isEventSide = (s: CommentScopeSide): s is EventSide => s.pointer?.type ===
  *
  * Conservative about the root kind, so product / Piglet comments never leak
  * into note views:
- *   - `K` present: it must be `1` and the root an `E` event pointer.
- *   - `K` missing: accepted only when the parent is an `e` event pointer
- *     with `k` = `1` (the comment answers a kind-1 note directly), with the
- *     `E` root (or, if `E` is missing too, that parent) as the root.
+ *   - `K` other than `1` (or not a kind number), or an `A` / `I` root:
+ *     never a note reply.
+ *   - `K` = `1` with an `E` root: a note reply.
+ *   - `K` missing (or `K` = `1` without `E`): accepted only for a top-level
+ *     comment on a note — an `e` parent with `k` = `1` that IS the root (no
+ *     `E`, or the same id). A different `E` root's kind can't be inferred.
  *   - neither `K` nor `k`: not a note reply.
  */
 function noteThread(scope: CommentScope): { root: EventSide; parent: EventSide } | null {
   const { root, parent } = scope;
-  if (root.kind !== null) {
-    if (root.kind !== NOTE_KIND || !isEventSide(root)) return null;
+  if (root.kind !== null && root.kind !== NOTE_KIND) return null;
+  // An `A` / `I` root is never a note.
+  if (root.pointer && root.pointer.type !== 'event') return null;
+  if (root.kind === NOTE_KIND && isEventSide(root)) {
     return { root, parent: isEventSide(parent) ? parent : root };
   }
-  // No `K`. An `A` / `I` root is never a note; otherwise lean on the parent.
-  if (root.pointer && root.pointer.type !== 'event') return null;
+  // No `K`, or `K` = 1 without an `E`: only a kind-1 `e` parent that is
+  // itself the root.
   if (parent.kind !== NOTE_KIND || !isEventSide(parent)) return null;
+  if (isEventSide(root) && root.pointer.id !== parent.pointer.id) return null;
   return { root: isEventSide(root) ? root : parent, parent };
 }
 
@@ -137,7 +145,12 @@ export function noteCommentTarget(event: ReplySource): ReplyTarget | null {
   const authorPubkey =
     parent.pointer.pubkey ?? parent.author ?? (sameAsRoot ? root.author : null) ?? null;
   const id = parent.pointer.id;
-  const kind = parent.kind ?? (sameAsRoot ? NOTE_KIND : undefined);
+  const kind =
+    parent.kind !== null && Number.isFinite(parent.kind)
+      ? parent.kind
+      : sameAsRoot
+        ? NOTE_KIND
+        : undefined;
   const relays = parent.pointer.relay ? [parent.pointer.relay] : [];
   let raw: string;
   try {

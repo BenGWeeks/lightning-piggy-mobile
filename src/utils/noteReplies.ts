@@ -9,7 +9,11 @@ import { COMMENT_KIND, isNoteComment, noteCommentRootId, noteCommentTarget } fro
 export interface ReplyEvent extends ReplySource {
   id: string;
   content: string;
+  created_at: number;
 }
+
+/** How far apart a kind-1 reply and its kind-1111 echo may be published. */
+export const ECHO_WINDOW_SEC = 10 * 60;
 
 /** What a note reply answers — kind 1 via NIP-10, kind 1111 via NIP-22. */
 export function noteReplyTarget(event: ReplySource): ReplyTarget | null {
@@ -26,27 +30,39 @@ export function isNoteOrNoteComment(event: ReplySource): boolean {
 const echoKey = (event: ReplyEvent): string | null => {
   const parent = noteReplyTarget(event)?.ref.id;
   if (!parent) return null;
-  return `${event.pubkey.toLowerCase()}|${parent}|${event.content.trim().replace(/\s+/g, ' ')}`;
+  return `${event.pubkey.toLowerCase()}|${parent}|${event.content.trim()}`;
 };
 
 /**
- * Drops a kind-1111 comment when the same author also posted the same reply
- * (same parent, same text) as kind 1 — some clients / bridges publish both.
- * The kind-1 copy wins; everything else, including order, is untouched.
+ * Drops a kind-1111 comment that echoes a kind-1 reply — same author, same
+ * parent, same text, published within `ECHO_WINDOW_SEC` — as some clients /
+ * bridges publish both. Matching is one-to-one (each kind-1 reply absorbs at
+ * most one comment), so a repeated "Thanks!" days later stays. The kind-1
+ * copy wins; everything else, including order, is untouched.
  */
 export function dedupeReplyEchoes<T extends ReplyEvent>(events: readonly T[]): T[] {
-  const kind1 = new Set<string>();
+  const kind1 = new Map<string, number[]>();
   for (const e of events) {
     if (e.kind !== 1) continue;
     const key = echoKey(e);
-    if (key) kind1.add(key);
+    if (!key) continue;
+    const times = kind1.get(key);
+    if (times) times.push(e.created_at);
+    else kind1.set(key, [e.created_at]);
   }
   if (kind1.size === 0) return [...events];
-  return events.filter((e) => {
-    if (e.kind !== COMMENT_KIND) return true;
+  const dropped = new Set<string>();
+  for (const e of events) {
+    if (e.kind !== COMMENT_KIND) continue;
     const key = echoKey(e);
-    return !key || !kind1.has(key);
-  });
+    const times = key ? kind1.get(key) : undefined;
+    if (!times) continue;
+    const i = times.findIndex((t) => Math.abs(t - e.created_at) <= ECHO_WINDOW_SEC);
+    if (i < 0) continue;
+    times.splice(i, 1);
+    dropped.add(e.id);
+  }
+  return events.filter((e) => !dropped.has(e.id));
 }
 
 /**

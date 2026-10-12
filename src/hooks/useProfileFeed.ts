@@ -175,5 +175,14 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
     }
   }, [authorPubkey, oldest, reachedEnd, readRelays, feed.map, enqueue, flush]);
 
-  return { events, loading, loadingMore, reachedEnd, loadMore, hasRelays: readRelays.length > 0 };
+  return {
+    events,
+    /** Every fetched event, hidden ones included — what paging depends on. */
+    fetchedCount: fetched.length,
+    loading,
+    loadingMore,
+    reachedEnd,
+    loadMore,
+    hasRelays: readRelays.length > 0,
+  };
 }

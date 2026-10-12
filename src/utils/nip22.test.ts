@@ -64,7 +64,7 @@ describe('parseCommentScope', () => {
       tags: [['I', 'https://example.com/a'], ['K', 'web'], ['e', 'not-hex'], 'x' as never],
     });
     expect(scope.root.pointer).toEqual({ type: 'external', value: 'https://example.com/a' });
-    expect(scope.root.kind).toBeNull();
+    expect(scope.root.kind).toBeNaN();
     expect(scope.parent.pointer).toBeNull();
   });
 
@@ -122,7 +122,7 @@ describe('isNoteComment', () => {
     ).toBe(false);
   });
 
-  it('missing K: accepts only an e parent with k = 1', () => {
+  it('missing K: accepts only a top-level comment on a kind-1 (e parent, k = 1)', () => {
     expect(
       isNoteComment(
         comment([
@@ -158,6 +158,27 @@ describe('isNoteComment', () => {
         ]),
       ),
     ).toBe(false);
+    // A different E root's kind can't be inferred from the parent's.
+    expect(
+      isNoteComment(
+        comment([
+          ['E', NOTE],
+          ['e', THREAD_REPLY],
+          ['k', '1'],
+        ]),
+      ),
+    ).toBe(false);
+    // K = 1 without an E root: the kind-1 parent is the root.
+    expect(
+      noteCommentRootId(
+        comment([
+          ['K', '1'],
+          ['e', NOTE],
+          ['k', '1'],
+        ]),
+      ),
+    ).toBe(NOTE);
+    expect(isNoteComment(comment([['K', '1']]))).toBe(false);
     // An A root without K is never a note.
     expect(
       isNoteComment(
@@ -168,6 +189,34 @@ describe('isNoteComment', () => {
         ]),
       ),
     ).toBe(false);
+  });
+
+  it('rejects a K that is present but not a kind number', () => {
+    const scope = parseCommentScope({ tags: [['K', 'web']] });
+    expect(scope.root.kind).toBeNaN();
+    expect(
+      isNoteComment(
+        comment([
+          ['E', NOTE],
+          ['K', 'web'],
+          ['e', NOTE],
+          ['k', '1'],
+        ]),
+      ),
+    ).toBe(false);
+  });
+
+  it('never puts a malformed k on the parent ref', () => {
+    const target = noteCommentTarget(
+      comment([
+        ['E', NOTE],
+        ['K', '1'],
+        ['e', THREAD_REPLY],
+        ['k', 'x'],
+      ]),
+    );
+    expect(target?.ref.id).toBe(THREAD_REPLY);
+    expect(target?.ref.kind).toBeUndefined();
   });
 
   it('rejects a K = 1 root that is not an event pointer, and non-1111 kinds', () => {

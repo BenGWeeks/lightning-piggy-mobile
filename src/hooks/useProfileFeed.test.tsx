@@ -125,6 +125,8 @@ it('hides non-note comments but still pages past them (#1337)', async () => {
     jest.advanceTimersByTime(200);
   });
   expect(h.result.current.events.map((e) => e.id)).toEqual(['e1', 'c1']);
+  // Paging eligibility counts hidden events too.
+  expect(h.result.current.fetchedCount).toBe(3);
   await act(async () => {
     await h.result.current.loadMore();
   });

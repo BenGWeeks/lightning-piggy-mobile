@@ -1,4 +1,5 @@
 import {
+  ECHO_WINDOW_SEC,
   dedupeReplyEchoes,
   isNoteOrNoteComment,
   isReplyInNoteThread,
@@ -11,8 +12,9 @@ const DEREK = '3'.repeat(64);
 const NOTE = '7'.repeat(64);
 const OTHER = '8'.repeat(64);
 
-const kind1Reply = (id: string, content: string, parent = NOTE, pubkey = DEREK) => ({
+const kind1Reply = (id: string, content: string, parent = NOTE, pubkey = DEREK, at = 1000) => ({
   id,
+  created_at: at,
   kind: 1,
   pubkey,
   content,
@@ -21,8 +23,9 @@ const kind1Reply = (id: string, content: string, parent = NOTE, pubkey = DEREK) 
     ['p', BEN],
   ],
 });
-const comment = (id: string, content: string, parent = NOTE, pubkey = DEREK) => ({
+const comment = (id: string, content: string, parent = NOTE, pubkey = DEREK, at = 1000) => ({
   id,
+  created_at: at,
   kind: 1111,
   pubkey,
   content,
@@ -53,9 +56,9 @@ describe('noteReplyTarget / isNoteOrNoteComment', () => {
 
 describe('dedupeReplyEchoes', () => {
   it('drops a comment that echoes the same kind-1 reply, keeping order', () => {
-    const top = { id: 't', kind: 1, pubkey: DEREK, content: 'gm', tags: [] };
+    const top = { id: 't', created_at: 1000, kind: 1, pubkey: DEREK, content: 'gm', tags: [] };
     const events = [
-      comment('c1', '  same   text '),
+      comment('c1', '  same text \n'),
       top,
       kind1Reply('k1', 'same text'),
       comment('c2', 'different'),
@@ -70,6 +73,21 @@ describe('dedupeReplyEchoes', () => {
       comment('c2', 'same', NOTE, BEN),
     ];
     expect(dedupeReplyEchoes(events).map((e) => e.id)).toEqual(['k1', 'c1', 'c2']);
+  });
+
+  it('only matches within the echo window, one comment per kind-1 reply', () => {
+    const events = [
+      kind1Reply('k1', 'Thanks!', NOTE, DEREK, 1000),
+      comment('soon', 'Thanks!', NOTE, DEREK, 1000 + ECHO_WINDOW_SEC),
+      comment('again', 'Thanks!', NOTE, DEREK, 1010),
+      comment('later', 'Thanks!', NOTE, DEREK, 1000 + 86400),
+    ];
+    expect(dedupeReplyEchoes(events).map((e) => e.id)).toEqual(['k1', 'again', 'later']);
+  });
+
+  it('keeps meaningful text differences', () => {
+    const events = [kind1Reply('k1', 'same text'), comment('c1', 'same  text')];
+    expect(dedupeReplyEchoes(events).map((e) => e.id)).toEqual(['k1', 'c1']);
   });
 
   it('is a copy when nothing to dedupe', () => {
