@@ -49,7 +49,7 @@ custom native modules, so Expo Go is not used).
 | NFC | `react-native-nfc-manager` | Read/write Lightning + Nostr tags; Hunt "Piglet" claim tags.
 | UI | `@gorhom/bottom-sheet`, `react-native-reanimated`, `@shopify/react-native-skia`, `lucide-react-native` | Bottom sheets, animation, canvas, icons.
 | Media | `expo-image-picker`, `expo-camera`, `expo-audio`, `expo-calendar`, `expo-contacts` | Attachments, QR scanning, voice notes, Add-to-Calendar, phone contacts.
-| Background | `expo-notifications`, `expo-background-task`, `expo-task-manager`, `expo-location` | Notifications + geofence + periodic background DM detect-and-ping (WorkManager / BGTaskScheduler). A realtime foreground service is a future upgrade — see <<native>> and `architecture/notifications.adoc`.
+| Background | `expo-notifications`, `expo-background-task`, `expo-task-manager`, `expo-location` | Notifications + geofence + periodic background DM detect-and-ping (WorkManager / BGTaskScheduler). On Android the opt-in `background-dm-service` foreground service adds a near-realtime message watch and NWC payment checks — see <<native>> and `architecture/notifications.adoc`.
 |===
 
 Marketing version lives in `package.json` / `app.config.ts` (single source of
@@ -363,9 +363,9 @@ location-picker sheet, which renders through `LibreMiniMap` — and no
 . When the app is closed on Android, a periodic `expo-background-task`
   (WorkManager, ~15-min floor) runs `runBackgroundSync`, which detects new
   inbound wraps and raises a generic notification *without decrypting them*
-  (detect-and-ping). A persistent foreground service for realtime delivery is
-  scaffolded (permissions only) but not yet implemented — see
-  `architecture/notifications.adoc`.
+  (detect-and-ping). With the opt-in Android foreground service
+  (`background-dm-service`, Settings → Notifications) a relay watch stays alive
+  for near-realtime alerts — see `architecture/notifications.adoc`.
 . *Marmot thread (Alpha):* the same rumor goes to `marmotSend.ts` instead and
   is sent inside the peer's MLS DM group (kind 445; text becomes kind 9),
   creating the group and gift-wrapping a kind-444 Welcome on first use.

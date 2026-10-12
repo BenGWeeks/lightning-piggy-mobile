@@ -79,11 +79,15 @@ which does DETECT-AND-PING: it notices new encrypted inbound traffic
 and fires a generic "new message" notification *without decrypting*.
 No custom native code; the config plugin wires the platform bits.
 
-| Android foreground service (future upgrade)
-| A persistent relay WebSocket for *realtime* (vs ~15-min) delivery.
-Manifest permissions are scaffolded in
-`plugins/withForegroundService.js`, but the Kotlin `Service` class is
-not implemented — the `expo-background-task` path above is what ships.
+| Android foreground service (opt-in, #958)
+| `modules/background-dm-service`: a Kotlin `Service` that starts the JS
+runtime and runs the headless message watch (plus NWC incoming-payment
+checks) for near-realtime delivery, with a `BootReceiver`. The module
+manifest declares the service and receiver; `plugins/withForegroundService.js`
+adds permissions. Off by default (Settings → Notifications); periodic
+`expo-background-task` registration is independent and subject to OS scheduling
+and background-execution restrictions. The service holds no permanent wake
+lock, so deep Doze can delay delivery until maintenance windows.
 |===
 
 == Android background story
@@ -114,10 +118,10 @@ not implemented — the `expo-background-task` path above is what ships.
   headless task can't present the OS dialog. See
   `notificationService.requestNotificationPermission()`; fire paths
   only ever call `hasNotificationPermission()`.
-* A persistent foreground service (realtime relay socket) is a possible
-  future upgrade — `FOREGROUND_SERVICE` / `FOREGROUND_SERVICE_DATA_SYNC`
-  / `RECEIVE_BOOT_COMPLETED` permissions are scaffolded in
-  `withForegroundService.js`, but the Kotlin `Service` is not built.
+* The opt-in foreground service (`background-dm-service`, #958) keeps a
+  relay socket alive for near-realtime delivery; its manifest permissions
+  (`FOREGROUND_SERVICE`, `RECEIVE_BOOT_COMPLETED`, …) come from
+  `withForegroundService.js`. See `BACKGROUND_PAYMENTS.adoc`.
 
 This path works on stock Android, GrapheneOS, microG, and any other
 AOSP derivative. It does not work in scenarios where the user has
@@ -480,15 +484,13 @@ Landed:
   currently viewing (`setActiveThread` / `isThreadActivelyViewed`)
 * Lock-screen-content opt-in toggle in Settings (SecurityScreen)
 * Notification-tap routing in `App.tsx` (`navigateFromNotification`)
-* Android manifest permissions scaffolded for a future foreground
-  service via `plugins/withForegroundService.js`
+* Android foreground service and `BootReceiver` in
+  `modules/background-dm-service` (#958), with manifest permissions from
+  `plugins/withForegroundService.js`
 * iOS Info.plist `UIBackgroundModes`
 * This document
 
 Deferred to follow-up PRs:
 
-* Kotlin `NostrRelayService` foreground service + manifest `<service>`
-  entry + `BootReceiver` — only needed for *realtime* (vs ~15-min)
-  Android delivery; the background-task path ships without it
 * In-app per-channel mute UI (system Settings is the mute path for now)
 * Notification grouping (multiple from same sender → one stack)

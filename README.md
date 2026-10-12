@@ -39,10 +39,10 @@ A mobile Bitcoin Lightning wallet for smart savers and their families, built wit
 
 - Nostr identity login: local `nsec`, Amber (NIP-55, Android), or a remote signer over NIP-46 / Nostr Connect (Clave on iOS, Aegis, nsec.app). Several accounts on one phone, each with its own language, currency and safety settings
 - Signing out of a local-key account warns first and offers a key backup
-- Private messaging: NIP-17 1:1 and group chats (photos, voice notes, polls, invoices, zaps, live location), plus **Marmot (MLS over Nostr, Alpha)** end-to-end encrypted 1:1 and group chats that interoperate with [White Noise](https://www.whitenoise.chat):
-  - edit and delete your own messages, react with emoji, and send photos and voice notes as encrypted media (MIP-04);
+- Private messaging: NIP-17 1:1 and group chats (photos, voice notes, polls, invoices, zaps, live location), plus **Marmot (MLS over Nostr, Alpha)** end-to-end encrypted 1:1 and group chats:
+  - edit and delete your own messages, react with emoji in 1:1s, and send photos and voice notes as encrypted media (MIP-04);
   - group admins: see and manage them; only admins can rename a group or change its members;
-  - an invite reaches every app a contact uses (all of their fresh devices), and you can manage your own invitation keys under Account → Messages;
+  - group invites select fresh compatible devices (up to 10 per person); a new 1:1 uses the newest selected White Noise package when present, and you can manage your own invitation keys under Account → Messages;
   - if someone can't receive Marmot yet, the app asks before falling back to NIP-17;
   - see each person's devices: a _Secure chat · N devices_ by-line in 1:1s, per-person device lists (with the app each runs) in the members sheet, and "Sent from" in message info.
     <!-- TODO(#1311): live location over Marmot (WhatsApp-style), once it merges. -->
@@ -56,7 +56,7 @@ A mobile Bitcoin Lightning wallet for smart savers and their families, built wit
 - Contact profile cards with deep linking to Nostr apps
 - QR code sharing for npub and Lightning address
 - Secure credential storage (expo-secure-store)
-- **Link safety**: links, images, link previews and voice notes from people you don't follow need a tap to load, and nothing is ever fetched automatically from a private network address
+- **Link safety**: chat link previews, images and plain voice notes auto-load only for your own messages or people you follow, after URL address checks; other senders need a tap. Encrypted voice notes load on play. These checks reject private, local and reserved address forms, but cannot prevent DNS rebinding; preview-page redirects are checked at each hop, while media redirects are followed natively.
 - Relay health: unreachable relays are parked and skipped automatically, so one dead relay can't slow the app down. A message, listing or invite is only shown as sent once a relay has accepted it
 
 **Market**
@@ -154,17 +154,19 @@ Media uploads go to [Blossom](https://github.com/hzrd149/blossom) servers (BUD-0
 
 ### Marmot (MLS over Nostr, Alpha)
 
-1:1 and group chats via the vendored [`@internet-privacy/marmot-ts`](https://github.com/marmot-protocol/marmot-ts) (`vendor/`), wire-compatible with [White Noise](https://www.whitenoise.chat). Status against the [Marmot MIPs](https://github.com/marmot-protocol/marmot/blob/master/mip-coverage.md):
+1:1 and group chats via the vendored [`@internet-privacy/marmot-ts`](https://github.com/marmot-protocol/marmot-ts) (`vendor/`). The vendored package describes itself as tracking Marmot v2 and wire-compatible with [darkmatter](https://github.com/parres-hq/darkmatter); this is a library claim, not an app interoperability test. The table is a historical [MIP cross-reference](https://github.com/marmot-protocol/marmot/blob/master/mip-coverage.md), not a conformance claim against the [adopted protocol](https://github.com/marmot-protocol/marmot). White Noise interoperability depends on the client version and protocol profile; no tested version/profile is specified here.
+
+GIFs and polls are app-level payloads: Lightning Piggy sends GIFs as a GIPHY URL plus `via GIPHY`, structured NIP-88 polls in 1:1 Marmot chats, and legacy text polls in Marmot groups. These formats do not establish White Noise poll support.
 
 | MIP    | Name                                     | Status in Lightning Piggy                                                                                                                                                                                     |
 | ------ | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | MIP-00 | Credentials & Key Packages               | Implemented. One kind-30443 key package per install, refreshed weekly and retired on sign-out; see and manage them under Account → Messages → Invitation keys                                                 |
-| MIP-01 | Group Construction & Group Data          | Implemented: group name, admins (shown and managed; only admins rename or change members). Commits keep the extension order White Noise expects, so a rename or admin change doesn't drop White Noise members |
+| MIP-01 | Group Construction & Group Data          | Implemented: group name, admins (shown and managed; only admins rename or change members). Commits realign the extension order for MDK; cross-client behavior depends on the client version and profile |
 | MIP-02 | Welcome Events                           | Implemented. Kind-444 Welcomes, gift-wrapped; invites from people you follow are accepted automatically                                                                                                       |
 | MIP-03 | Group Messages                           | Implemented. Kind-445 group events: text, reactions, edits, "delete for everyone" and member removal; quoted replies from White Noise are shown                                                               |
 | MIP-04 | Encrypted Media                          | Implemented. Photos and voice notes as `encrypted-media-v2` on Blossom (v1 still read)                                                                                                                        |
 | MIP-05 | Push Notifications (draft)               | Implemented. Sends push triggers to other members' notification servers (Lightning Piggy's own are reached via their kind-10050 relay lists, not a fixed relay hint); receiving is opt-in per account         |
-| MIP-06 | Multi-device (being redesigned upstream) | Partial: an invite adds all of a contact's fresh devices in one commit. No device linking or pairing of your own installs yet                                                                                 |
+| MIP-06 | Multi-device (being redesigned upstream) | Partial: groups invite selected eligible devices, capped at 10 per person; a new 1:1 uses the newest selected White Noise package when present. No device linking or pairing of your own installs yet                                                                                 |
 
 If a contact can't receive Marmot yet, the app asks before falling back to NIP-17. Known interop gaps are tracked in GitHub issues. See [docs/PROTOCOLS.adoc](docs/PROTOCOLS.adoc) → "Marmot".
 
