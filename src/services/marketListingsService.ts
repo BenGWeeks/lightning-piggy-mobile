@@ -40,7 +40,7 @@ const MAX_FAILED_CHECKS = 64;
 const MAX_FAILED_DELETION_CHECKS = 32;
 /**
  * Forged oversized events tolerated before their (synchronous, in-callback)
- * checks stop. Unchecked events are dropped; deletion snapshots become unavailable.
+ * checks stop. Skipped revisions or deletions make the snapshot unavailable.
  */
 const MAX_FAILED_OVERSIZED_CHECKS = 16;
 const MAX_PRODUCTS = 250;
@@ -51,7 +51,7 @@ const TIMEOUT_MS = 10000;
 /** Time other relays get once the first one has answered in full. */
 const GRACE_MS = 2000;
 // Signature checks hash the whole payload; beyond this we can't afford to
-// verify, so the snapshot is only flagged incomplete.
+// verify, so the snapshot must be unavailable if a revision could be skipped.
 const MAX_VERIFY_CHARS = 1048576;
 
 /**
@@ -132,6 +132,7 @@ async function runSnapshot(
   let listingCount = 0;
   let deletionCount = 0;
   let deletionUnavailable = false;
+  let listingUnavailable = false;
   const budgetFull = (deletion: boolean) =>
     deletion ? deletionCount >= MAX_DELETIONS : listingCount >= MAX_EVENTS;
   // Oversized stand-ins were verified before their payload was stripped.
@@ -153,7 +154,10 @@ async function runSnapshot(
   // Checks an oversized event inside the relay callback, but at most
   // MAX_FAILED_OVERSIZED_CHECKS forgeries' worth; then drops unchecked events.
   const checkOversized = (event: Event) => {
-    if (oversizedFailures >= MAX_FAILED_OVERSIZED_CHECKS) return false;
+    if (oversizedFailures >= MAX_FAILED_OVERSIZED_CHECKS) {
+      if (event.kind !== 5) listingUnavailable = true;
+      return false;
+    }
     if (verified(event)) return true;
     oversizedFailures++;
     return false;
@@ -201,6 +205,7 @@ async function runSnapshot(
     limited = true;
     if (event.content.length > MAX_VERIFY_CHARS) {
       if (event.kind === 5) deletionUnavailable = true;
+      else listingUnavailable = true;
       // Never apply targets from a payload we cannot authenticate.
       return;
     }
@@ -222,7 +227,10 @@ async function runSnapshot(
         (existing.created_at === event.created_at && existing.id <= event.id))
     )
       return;
-    if (!existing && budgetFull(false)) return;
+    if (!existing && budgetFull(false)) {
+      listingUnavailable = true;
+      return;
+    }
     if (!checkOversized(event)) return;
     // Same id/kind/created_at as the real revision so it competes normally;
     // empty content + a non-active status make it non-renderable.
@@ -318,7 +326,7 @@ async function runSnapshot(
   }
   const deletionChecksGaveUp = failedDeletionChecks >= MAX_FAILED_DELETION_CHECKS;
   const selection = await selectVerifiedListings(
-    signal.aborted || deletionChecksGaveUp || deletionUnavailable
+    signal.aborted || deletionChecksGaveUp || deletionUnavailable || listingUnavailable
       ? []
       : [...events.values(), ...suppressions.values()],
     scope,
@@ -350,6 +358,7 @@ async function runSnapshot(
       limited ||
       deletionChecksGaveUp ||
       deletionUnavailable ||
+      listingUnavailable ||
       oversizedFailures >= MAX_FAILED_OVERSIZED_CHECKS ||
       selection.gaveUp ||
       listingsCutMattered(listings.truncatedSince, products, selection.overflow) ||

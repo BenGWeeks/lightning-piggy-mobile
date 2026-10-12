@@ -2,8 +2,12 @@ import { act, renderHook } from '@testing-library/react-native';
 import { finalizeEvent, getPublicKey, type Event } from 'nostr-tools';
 import { useSellerActions, StaleRevisionError } from './useSellerActions';
 import { fetchLatestRevision, publishSellerEvent } from '../services/marketSellerService';
-import { buildShippingZoneTemplate, coordinateOf } from '../utils/marketSellerEvents';
-import type { SellerSnapshot } from '../utils/marketSellerSnapshot';
+import {
+  buildShippingZoneTemplate,
+  buildListingTemplate,
+  coordinateOf,
+} from '../utils/marketSellerEvents';
+import { reduceSellerSnapshot, type SellerSnapshot } from '../utils/marketSellerSnapshot';
 
 jest.mock('../contexts/NostrContext', () => ({ useNostr: () => mockAccount }));
 jest.mock('../services/marketSellerService', () => ({
@@ -107,3 +111,59 @@ it('uses the confirmed latest zone revision when the user overwrites', async () 
   expect(publishSellerEvent).toHaveBeenCalledTimes(2);
   expect(mockSign.mock.calls[0][0].created_at).toBeGreaterThan(newZone.created_at);
 });
+
+it.each([0, 60])(
+  'recreates strictly after an address deletion %s seconds ahead of the clock',
+  async (ahead) => {
+    const now = Math.floor(Date.now() / 1000);
+    const deletedAt = now + ahead;
+    jest.spyOn(Date, 'now').mockReturnValue(now * 1000);
+    try {
+      const draft = {
+        dTag: 'book',
+        title: 'Book',
+        description: 'Book',
+        images: [],
+        price: '21',
+        currency: 'SAT',
+        quantity: '1',
+        categories: [],
+        shipping: [],
+      };
+      const old = finalizeEvent(
+        { ...buildListingTemplate({ draft, pubkey, nowSeconds: 100 }), created_at: 100 },
+        key,
+      );
+      const deletion = finalizeEvent(
+        {
+          kind: 5,
+          created_at: deletedAt,
+          content: '',
+          tags: [['a', coordinateOf(30402, pubkey, draft.dTag)]],
+        },
+        key,
+      );
+      (fetchLatestRevision as jest.Mock).mockResolvedValue({
+        event: null,
+        deletedAt,
+        deletedIds: [],
+      });
+      const { result } = renderHook(() => useSellerActions(snapshot));
+      await act(async () => {
+        await expect(result.current.saveListing(draft, old)).rejects.toBeInstanceOf(
+          StaleRevisionError,
+        );
+      });
+      expect(mockSign).not.toHaveBeenCalled();
+      await act(async () => {
+        const recreated = await result.current.saveListing(draft, old, { force: true });
+        expect(recreated.created_at).toBe(deletedAt + 1);
+        expect(reduceSellerSnapshot([old, deletion, recreated], pubkey).listings).toEqual([
+          recreated,
+        ]);
+      });
+    } finally {
+      jest.restoreAllMocks();
+    }
+  },
+);

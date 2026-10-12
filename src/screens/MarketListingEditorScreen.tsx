@@ -191,9 +191,10 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
               {
                 text: t('market.sell.cancel'),
                 style: 'cancel',
-                // Show the newer revision instead of the stale form: clearing
-                // the base too makes the seed effect reload from `existing`.
+                // Keep the deleted base and draft until recreation is confirmed.
+                // For a surviving revision, reload it from the shared store.
                 onPress: () => {
+                  if (!e.latest) return;
                   setDirty(false);
                   setBase(null);
                 },

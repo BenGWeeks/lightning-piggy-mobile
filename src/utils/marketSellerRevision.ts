@@ -51,25 +51,31 @@ export async function resolveCurrentRevision(input: {
   base: Event | null;
   force?: boolean;
   onLatest?: (latest: Event) => void;
+  /** Timestamp a recreated event must strictly exceed. */
+  onDeletedAt?: (deletedAt: number) => void;
 }): Promise<Event | null> {
   let latest: Event | null;
+  let result: Event | null | RevisionResult;
   try {
-    const result = await input.fetchLatest();
-    if (result && 'event' in result) {
-      latest = result.event;
-      if (
-        input.base &&
-        (input.base.created_at <= result.deletedAt || result.deletedIds.includes(input.base.id))
-      ) {
-        if (!input.force) throw new StaleRevisionError(latest, input.base);
-        return latest;
-      }
-    } else latest = result;
+    result = await input.fetchLatest();
   } catch (error) {
-    if (error instanceof StaleRevisionError) throw error;
     throw new SellerFetchError(error);
   }
+  if (result && 'event' in result) {
+    latest = result.event;
+    input.onDeletedAt?.(result.deletedAt);
+  } else latest = result;
+  // Refresh the shared store even when the form's base has been deleted.
   if (latest) input.onLatest?.(latest);
+  if (
+    result &&
+    'event' in result &&
+    input.base &&
+    (input.base.created_at <= result.deletedAt || result.deletedIds.includes(input.base.id))
+  ) {
+    if (!input.force) throw new StaleRevisionError(latest, input.base);
+    return latest;
+  }
   const { base } = input;
   if (latest && latest.id !== base?.id && isNewerRevision(latest, base)) {
     if (!input.force) throw new StaleRevisionError(latest, base);

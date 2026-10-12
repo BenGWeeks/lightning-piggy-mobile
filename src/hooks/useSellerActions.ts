@@ -69,7 +69,10 @@ export function useSellerActions(snapshot: SellerSnapshot) {
   const [busy, setBusy] = useState(false);
 
   const signAndPublish = useCallback(
-    async (template: EventTemplate, previous?: Event | null): Promise<Event> => {
+    async (
+      template: EventTemplate,
+      previous?: Pick<Event, 'created_at'> | null,
+    ): Promise<Event> => {
       if (!pubkey) throw new Error('Not signed in');
       const signed = await signSellerMutation({
         pubkey,
@@ -88,13 +91,20 @@ export function useSellerActions(snapshot: SellerSnapshot) {
   /** The current revision to build on, or throw (fetch failure / newer
    * revision than `base` without `force`). */
   const currentRevision = useCallback(
-    (kind: number, dTag: string, base: Event | null, options: SaveOptions = {}) => {
+    (
+      kind: number,
+      dTag: string,
+      base: Event | null,
+      options: SaveOptions = {},
+      onDeletedAt?: (deletedAt: number) => void,
+    ) => {
       if (!pubkey) throw new Error('Not signed in');
       return resolveCurrentRevision({
         fetchLatest: () =>
           fetchLatestRevision({ pubkey, kind, dTag, baseId: base?.id, relays: relayList }),
         base,
         force: options.force,
+        onDeletedAt,
         onLatest: (latest) => addSellerEvents(pubkey, [latest]),
       });
     },
@@ -259,8 +269,11 @@ export function useSellerActions(snapshot: SellerSnapshot) {
     (draft: ListingDraft, base: Event | null, options: SaveOptions = {}) =>
       run(async () => {
         if (!pubkey) throw new Error('Not signed in');
+        let deletedAt = -1;
         const current = base
-          ? await currentRevision(LISTING_KIND, draft.dTag, base, options)
+          ? await currentRevision(LISTING_KIND, draft.dTag, base, options, (timestamp) => {
+              deletedAt = timestamp;
+            })
           : null;
         const signed = await signAndPublish(
           buildListingTemplate({
@@ -269,7 +282,9 @@ export function useSellerActions(snapshot: SellerSnapshot) {
             nowSeconds: Math.floor(Date.now() / 1000),
             previous: current,
           }),
-          current,
+          // Address deletions suppress every revision at or before their
+          // timestamp, even when the latest surviving revision is null.
+          { created_at: Math.max(current?.created_at ?? -1, deletedAt) },
         );
         const coordinate = coordinateOf(LISTING_KIND, pubkey, draft.dTag);
         if (!listingCoordinates().includes(coordinate)) await republishShop([coordinate]);
