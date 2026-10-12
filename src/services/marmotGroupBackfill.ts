@@ -84,7 +84,14 @@ export function boundGroupQueries(
       if (events.length < limit || byId.size === before) break;
       until = Math.min(...events.map((e) => e.created_at));
     }
-    return [...byId.values()];
+    // Collect EVERY page before ingestion: processing the newest page first
+    // discards older sender ratchet keys (ts-mls retains only 10 generations).
+    // MLS epochs are encrypted, so the adapter cannot sort on them. Marmot's
+    // engine peels the current epoch, processes its applications before commits,
+    // then retries later epochs. Preserve timestamp/id order within each epoch.
+    return [...byId.values()].sort(
+      (a, b) => a.created_at - b.created_at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+    );
   };
 
   return {
