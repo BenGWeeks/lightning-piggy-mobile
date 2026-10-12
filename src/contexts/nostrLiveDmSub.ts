@@ -1,3 +1,4 @@
+import { loadKind4ReplayCursor } from './kind4RetryStore';
 import { getAppFormatLocale } from '../utils/appFormatLocale';
 import { dmThreadId, protocolForWireKind } from '../utils/dmProtocol';
 import React from 'react';
@@ -729,8 +730,11 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
   });
 
   (async () => {
-    // Reuse loadLastSeen so parsing/validation matches refreshDmInbox's existing reads of the same key (#409 review). loadLastSeen returns undefined for missing/invalid values, which subscribeInboxDmsForViewer then falls back to its 7-day floor for.
-    const sinceK4Cursor = await loadLastSeen(inboxLastSeenKey(viewerPubkey)).catch(() => undefined);
+    // Use the atomic refresh cursor; missing metadata retains the legacy / 7-day fallback.
+    const sinceK4Cursor = await loadKind4ReplayCursor(
+      viewerPubkey,
+      await loadLastSeen(inboxLastSeenKey(viewerPubkey)).catch(() => undefined),
+    ).catch(() => undefined);
     if (cancelled || !isCurrentOwner()) return;
     // Pre-seed `knownWrapIds` from the encrypted store's wrap-id index
     // (#848 — one indexed id-only query, no plaintext leaves the DB). The

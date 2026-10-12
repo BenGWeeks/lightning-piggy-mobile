@@ -113,7 +113,6 @@ const GroupsScreen: React.FC = () => {
         const startedAt = Date.now();
         const signal = newRefreshSignal();
         refreshDmInbox({
-          force: true,
           includeNonFollows: !enforceFollowingOnly,
           signal,
         })

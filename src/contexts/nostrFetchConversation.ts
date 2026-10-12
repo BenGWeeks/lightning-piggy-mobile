@@ -1,3 +1,4 @@
+import { loadKind4ReplayCursor } from './kind4RetryStore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
@@ -258,7 +259,7 @@ export async function fetchConversationFor(
   const skipWrapFetch = skippedInboxFetch || (signal?.aborted ?? false);
   const inboxLastSeenForWraps = skipWrapFetch
     ? undefined
-    : await loadLastSeen(inboxLastSeenKey(pubkey));
+    : await loadKind4ReplayCursor(pubkey, await loadLastSeen(inboxLastSeenKey(pubkey)));
   const { kind1059 } = skipWrapFetch
     ? {
         kind1059: [] as Awaited<ReturnType<typeof nostrService.fetchInboxDmEvents>>['kind1059'],

@@ -441,10 +441,10 @@ export function nostrFinalizeEvent(
  * canonical-serialisation sha256 stays in JS (getEventHash, ~µs).
  */
 export function nostrVerifyEvent(event: NostrEvent): event is VerifiedEvent {
+  const memoised = event[verifiedSymbol];
+  if (typeof memoised === 'boolean') return memoised;
   const native = nativeIfActive();
   if (native) {
-    const memoised = event[verifiedSymbol];
-    if (typeof memoised === 'boolean') return memoised;
     const t0 = PERF_ENABLED ? performance.now() : 0;
     let valid = false;
     try {

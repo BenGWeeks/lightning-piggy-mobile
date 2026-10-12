@@ -28,12 +28,13 @@
  *   currentUser) => { signature, event }` signature we wrap and
  *   serialise on the way in/out.
  * - Permission errors from the bunker are normalised to
- *   `Error('NIP-46 signer denied <method>')` so callers can detect them
+ *   `NostrConnectError('permission', 'NIP-46 signer denied <method>')` so callers can detect them
  *   and prompt the user to re-pair with broader perms.
  */
 import { BunkerSigner, createNostrConnectURI, type BunkerPointer } from 'nostr-tools/nip46';
 import { hexToBytes, bytesToHex } from '@noble/hashes/utils.js';
 import type { Nip46Connection } from '../types/nostr';
+import { NostrConnectError, isCiphertextDecryptError } from './signerErrors';
 
 /** Lazily-constructed BunkerSigner. Re-created when the active
  *  connection changes (login / logout / re-pair). */
@@ -70,9 +71,13 @@ function isPermissionError(err: unknown): boolean {
 
 function wrapPermissionError(method: string, err: unknown): Error {
   if (isPermissionError(err)) {
-    return new Error(`NIP-46 signer denied ${method}`);
+    return new NostrConnectError('permission', `NIP-46 signer denied ${method}`, err);
   }
-  return err instanceof Error ? err : new Error(String(err));
+  return new NostrConnectError(
+    method.endsWith('_decrypt') && isCiphertextDecryptError(err) ? 'decrypt-failed' : 'failed',
+    err instanceof Error ? err.message : String(err),
+    err,
+  );
 }
 
 /**
@@ -129,7 +134,7 @@ async function getSigner(): Promise<BunkerSigner> {
   // Coalesce concurrent first-callers onto one connect (see _signerPromise).
   if (_signerPromise) return _signerPromise;
   if (!_activeConnection) {
-    throw new Error('NIP-46 signer not connected');
+    throw new NostrConnectError('unavailable', 'NIP-46 signer not connected');
   }
   const connection = _activeConnection;
   const promise = (async () => {
@@ -150,8 +155,10 @@ async function getSigner(): Promise<BunkerSigner> {
       // If the bunker can't be reached (relay down, bunker app closed,
       // user revoked the connection) surface a clear error rather than
       // letting per-method calls each fail with their own opaque message.
-      throw new Error(
+      throw new NostrConnectError(
+        'unavailable',
         `NIP-46 signer could not connect: ${e instanceof Error ? e.message : String(e)}`,
+        e,
       );
     }
     // Guard against a mid-flight `setActiveConnection` (logout / re-pair):
@@ -165,7 +172,7 @@ async function getSigner(): Promise<BunkerSigner> {
       } catch {
         // Best-effort — we're discarding this signer regardless.
       }
-      throw new Error('NIP-46 connection changed during connect');
+      throw new NostrConnectError('unavailable', 'NIP-46 connection changed during connect');
     }
     _activeSigner = signer;
     return signer;

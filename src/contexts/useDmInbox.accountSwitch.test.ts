@@ -9,6 +9,7 @@ import { loadInboxEntries } from '../services/dmInbox';
 import { fetchInboxDmEvents } from '../services/nostrService';
 import { startLiveDmSubscription } from './nostrLiveDmSub';
 import { useMarmotDmInbound } from './useMarmotDmInbound';
+import { scheduleColdStartBackfill } from './dmColdStartBackfill';
 import { useDmInbox, type UseDmInboxOptions } from './useDmInbox';
 
 jest.mock('../services/nostrService', () => ({ fetchInboxDmEvents: jest.fn() }));
@@ -219,4 +220,104 @@ it('invalidates the live subscription owner before old events can surface', () =
   expect(oldSubscription.isCurrentOwner?.()).toBe(true);
   rerender(optionsFor(B));
   expect(oldSubscription.isCurrentOwner?.()).toBe(false);
+});
+
+it('throttles automatic focus/reconnect refreshes for a minute, while user force still works', async () => {
+  const clock = jest.spyOn(performance, 'now');
+  clock.mockReturnValue(1000);
+  try {
+    const { result } = renderInbox(A);
+    await act(() => result.current.refreshDmInbox());
+    clock.mockReturnValue(46_000);
+    await act(() => result.current.refreshDmInbox());
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    clock.mockReturnValue(61_000);
+    await act(() => result.current.refreshDmInbox());
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await act(() => result.current.refreshDmInbox({ force: true }));
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  } finally {
+    clock.mockRestore();
+  }
+});
+
+it('joins an in-flight user refresh even when the prior completion is still fresh', async () => {
+  const clock = jest.spyOn(performance, 'now').mockReturnValue(1000);
+  const { result } = renderInbox(A);
+  await act(() => result.current.refreshDmInbox());
+  let release!: () => void;
+  fetchMock.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        release = () => resolve({ kind4: [], kind1059: [] } as never);
+      }),
+  );
+  let forced!: Promise<void>;
+  let joined!: Promise<void>;
+  let joinedResolved = false;
+  await act(async () => {
+    forced = result.current.refreshDmInbox({ force: true });
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    joined = result.current.refreshDmInbox().then(() => {
+      joinedResolved = true;
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  expect(joinedResolved).toBe(false);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  await act(async () => {
+    release();
+    await Promise.all([forced, joined]);
+  });
+  expect(joinedResolved).toBe(true);
+  clock.mockRestore();
+});
+
+afterEach(() => jest.restoreAllMocks());
+
+it('does one incremental catch-up when an automatic view widens to non-follows', async () => {
+  jest.spyOn(performance, 'now').mockReturnValue(1000);
+  const { result } = renderInbox(A);
+  await act(() => result.current.refreshDmInbox());
+  await act(() => result.current.refreshDmInbox({ includeNonFollows: true }));
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  await act(() => result.current.refreshDmInbox({ includeNonFollows: true }));
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+it('does not schedule another cold backfill when the refresh fails', async () => {
+  fetchMock.mockRejectedValueOnce(new Error('offline'));
+  const { result } = renderInbox(A);
+  await act(() => result.current.refreshDmInbox());
+  expect(scheduleColdStartBackfill).toHaveBeenCalledWith(
+    expect.objectContaining({ isColdStart: false }),
+  );
+});
+
+it('waits for a tab-aborted warm refresh and starts the requested replacement', async () => {
+  const { result } = renderInbox(A);
+  await act(() => result.current.refreshDmInbox());
+  let release!: () => void;
+  fetchMock.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        release = () => resolve({ kind4: [], kind1059: [] } as never);
+      }),
+  );
+  const controller = new AbortController();
+  let first!: Promise<void>;
+  let replacement!: Promise<void>;
+  await act(async () => {
+    first = result.current.refreshDmInbox({ force: true, signal: controller.signal });
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    controller.abort();
+    replacement = result.current.refreshDmInbox({ force: true });
+  });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  await act(async () => {
+    release();
+    await Promise.all([first, replacement]);
+  });
+  expect(fetchMock).toHaveBeenCalledTimes(3);
 });

@@ -107,12 +107,12 @@ export function safeParseRecord<T>(raw: string | null): Record<string, T> {
  * `useFocusEffect` on the Messages tab. Without a TTL, every tab return
  * triggered a fresh 3-query relay round-trip + full NIP-04 decrypt
  * sweep — locking the app up for seconds on the 2nd/3rd/Nth visit.
- * 30 s is long enough that quick tab-bouncing stays responsive, short
+ * 60 s is long enough that quick tab-bouncing stays responsive, short
  * enough that a user who genuinely wants fresh state (open app after
  * a break) still pays normal refresh cost. Pull-to-refresh bypasses
  * the TTL via `{ force: true }`.
  */
-export const DM_INBOX_REFRESH_TTL_MS = 30_000;
+export const DM_INBOX_REFRESH_TTL_MS = 60_000;
 
 /**
  * Cold-start initial wrap fetch size (#751). The first inbox refresh of a
@@ -135,8 +135,8 @@ export const COLD_INITIAL_WRAP_LIMIT = 200;
  * (dmBlobMigrationRunner) can import + delete an existing install's blobs,
  * and so logout wipes clean up stragglers.
  *
- * The `*_last_seen_*` cursor keys stay LIVE — they hold only a unix
- * timestamp (no plaintext) and still drive the kind-4 `since` delta fetch.
+ * Conversation last-seen keys remain live. The inbox last-seen key is a
+ * migration fallback; kind-4 commits its cursor with retry metadata atomically.
  */
 export const DM_INBOX_CACHE_PREFIX = 'nostr_dm_inbox_v1_';
 export const DM_INBOX_LAST_SEEN_PREFIX = 'nostr_dm_inbox_last_seen_v1_';

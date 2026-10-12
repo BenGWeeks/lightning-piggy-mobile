@@ -41,6 +41,8 @@ jest.mock('@noble/hashes/utils.js', () => ({
 }));
 
 import * as svc from './nostrConnectService';
+import { NostrConnectError } from './signerErrors';
+import { isTransientKind4Error } from '../contexts/kind4RetryStore';
 
 const conn = (over: Partial<Nip46Connection> = {}): Nip46Connection => ({
   remoteSignerPubkey: 'bunkerpubkeyhex',
@@ -277,4 +279,17 @@ describe('awaitBunkerPair', () => {
     svc.adoptPairedSigner(result.connection, result.signer);
     expect(svc.getActiveConnection()).toEqual(result.connection);
   });
+});
+
+it.each([
+  ['opaque bunker failure', 'failed', true],
+  ['permission denied', 'permission', true],
+  ['invalid MAC', 'decrypt-failed', false],
+])('preserves structured NIP-46 decrypt classification: %s', async (message, kind, transient) => {
+  await svc.setActiveConnection(conn());
+  mockSigner.nip04Decrypt.mockRejectedValueOnce(message);
+  const error = await svc.requestNip04Decrypt('cipher', 'peer', 'owner').catch((e) => e);
+  expect(error).toBeInstanceOf(NostrConnectError);
+  expect(error.kind).toBe(kind);
+  expect(isTransientKind4Error(error)).toBe(transient);
 });

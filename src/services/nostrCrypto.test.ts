@@ -260,7 +260,9 @@ describe('benchmark harness — stat accumulation', () => {
       { kind: 1, created_at: Math.floor(Date.now() / 1000), tags: [], content: 'verify me' },
       sk,
     );
-    nostrVerifyEvent(signed);
+    const event = JSON.parse(JSON.stringify(signed));
+    nostrVerifyEvent(event);
+    nostrVerifyEvent(event); // nostr-tools symbol memo: no second schnorr
 
     const s = __getStats();
     expect(s.schnorrVerify.count).toBe(1);

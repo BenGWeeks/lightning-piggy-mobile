@@ -111,3 +111,12 @@ it('wipes market filters and every follow scope only for the signed-out account'
   expect(getMarketSnapshot(`${OTHER_PK}|follows`)).toBeDefined();
   expect(JSON.parse((await AsyncStorage.getItem(MARKET_CACHE_KEY))!)).toHaveLength(1);
 });
+
+it('wipes retry and exhausted kind-4 metadata only for the signed-out account', async () => {
+  const keys = [`dm-kind4-retries:${PK}`, `dm-kind4-exhausted:${PK}`];
+  const otherKeys = [`dm-kind4-retries:${OTHER_PK}`, `dm-kind4-exhausted:${OTHER_PK}`];
+  await AsyncStorage.multiSet([...keys, ...otherKeys].map((key) => [key, '[]']));
+  await wipeAccountCaches(PK);
+  expect(await AsyncStorage.multiGet(keys)).toEqual(keys.map((key) => [key, null]));
+  expect(await AsyncStorage.multiGet(otherKeys)).toEqual(otherKeys.map((key) => [key, '[]']));
+});

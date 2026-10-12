@@ -7,17 +7,13 @@ import {
 } from 'nostr-tools/pure';
 import type { Filter } from 'nostr-tools/filter';
 import { querySyncAbortable } from './relayQuery';
+import { DM_INBOX_LIMIT, KIND4_REPLAY_OVERLAP_SECONDS } from './dmInboxFetchPolicy';
 import { fetchProfilesBatch } from './nostrProfileBatch';
 import { pool, connectedRelays, trackRelays } from './nostrPool';
 import { DEFAULT_RELAYS, PROFILE_RELAYS } from './nostrRelayDefaults';
 import * as nip19 from 'nostr-tools/nip19';
 import * as nip04 from 'nostr-tools/nip04';
-import {
-  nip44EncryptForRecipient,
-  nostrFinalizeEvent,
-  nostrGetEventHash,
-  nostrVerifyEvent,
-} from './nostrCrypto';
+import { nip44EncryptForRecipient, nostrFinalizeEvent, nostrGetEventHash } from './nostrCrypto';
 import * as nip59 from 'nostr-tools/nip59';
 import type { NostrProfile, NostrContact, RelayConfig } from '../types/nostr';
 import { slimDisplayProfile } from '../utils/profileSanitize';
@@ -237,7 +233,7 @@ export async function fetchProfile(pubkey: string, relays: string[]): Promise<No
     if (!event) return null;
     // `pool.verifyEvent` fast-paths kind-0 (skips schnorr) — but this single
     // fetch feeds payment destinations (`lud16`), so verify it for real here.
-    if (!nostrVerifyEvent(event)) {
+    if (!verifyEventCached(event)) {
       console.warn('Nostr profile failed signature verification, ignoring:', pubkey);
       return null;
     }
@@ -777,7 +773,10 @@ export async function fetchDirectMessageEvents(
   // last few events we might have missed on the previous fetch. On
   // first fetch (no cached last-seen) the caller passes undefined, so
   // the filter has no `since` and the relay returns full history.
-  const since = options.since !== undefined ? Math.max(0, options.since - 120) : undefined;
+  const since =
+    options.since !== undefined
+      ? Math.max(0, options.since - KIND4_REPLAY_OVERLAP_SECONDS)
+      : undefined;
   const fromMeFilter: Filter = {
     kinds: [4],
     authors: [myPubkey],
@@ -844,12 +843,13 @@ export async function fetchInboxDmEvents(
 ): Promise<FetchedInboxEvents> {
   const allRelays = [...new Set([...relays, ...DEFAULT_RELAYS])];
   trackRelays(allRelays);
-  // Default to the same cap the live sub uses, so the two paths can't
-  // drift. Callers can lower with `options.limit` if they want to be
-  // explicit. (#383)
+  // Share the live-sub limit and retry-store capacity policy (#383).
   const limit = options.limit ?? DM_INBOX_LIMIT;
   // `since` shifted back 2 min (Damus clock-drift pad). Applied only to kind-4 filters below; wraps deliberately skip it (see next comment).
-  const since = options.since !== undefined ? Math.max(0, options.since - 120) : undefined;
+  const since =
+    options.since !== undefined
+      ? Math.max(0, options.since - KIND4_REPLAY_OVERLAP_SECONDS)
+      : undefined;
   const sentK4Filter: Filter = { kinds: [4], authors: [myPubkey], limit };
   const recvK4Filter: Filter = { kinds: [4], '#p': [myPubkey], limit };
   // NIP-59 (gift-wrap) wraps have RANDOMIZED timestamps within ~2 days
@@ -1287,7 +1287,7 @@ export type RawInboxDmEvent = RawGiftWrapEvent;
 // Shared between the live sub (subscribeInboxDmsForViewer) and the bulk
 // fetch (fetchInboxDmEvents) so the two paths can't drift in cap on a
 // future tweak. (#383, Copilot review on PR #384)
-export const DM_INBOX_LIMIT = 1000;
+export { DM_INBOX_LIMIT } from './dmInboxFetchPolicy';
 
 // The live inbox subscription (subscribeInboxDmsForViewer) was extracted to
 // ./dmLiveSubscription to keep this file under the size cap (#703).

@@ -15,34 +15,29 @@ import { nostrGetEventHash, nostrVerifyEvent } from './nostrCrypto';
 // Without that, a relay could replay a known id on a forged payload, or an
 // id that only passed a structural check would be trusted as signed.
 //
-// Bounded at 10 000 entries with O(1) circular-buffer eviction so a
-// long-running session doesn't drift to unlimited memory. 10 000
-// event-ids at 64 bytes each ≈ 640 KB — negligible. The cache is
-// module-scoped so it survives across screen focus / blur / tab
-// switches. (Eviction was once `Array.prototype.shift()` — O(n) per call
-// once full; PR #628 Copilot review.)
+// Module-scoped, bounded LRU: replaying an inbox keeps its verified ids hot
+// even when unrelated feeds insert thousands of newer events. Set insertion
+// order gives O(1) refresh/eviction without shifting a large array.
 const VERIFIED_CACHE_CAP = 10_000;
 const verifiedEventIds = new Set<string>();
-const verifiedEventOrder = new Array<string | null>(VERIFIED_CACHE_CAP).fill(null);
-let verifiedHead = 0;
 
 function rememberVerified(id: string): void {
-  if (verifiedEventIds.has(id)) return;
-  // Evict the slot we're about to overwrite (null on first cap-1 calls,
-  // then the oldest live id once the buffer wraps). Set.delete on null
-  // is a no-op so we don't need a separate branch for the cold path.
-  const evicted = verifiedEventOrder[verifiedHead];
-  if (evicted !== null) verifiedEventIds.delete(evicted);
-  verifiedEventOrder[verifiedHead] = id;
+  verifiedEventIds.delete(id);
   verifiedEventIds.add(id);
-  verifiedHead = (verifiedHead + 1) % VERIFIED_CACHE_CAP;
+  if (verifiedEventIds.size > VERIFIED_CACHE_CAP) {
+    verifiedEventIds.delete(verifiedEventIds.values().next().value!);
+  }
 }
 
 /** Full signature check, skipping the schnorr for ids that already passed it. */
 export function verifyEventCached(event: NostrEvent): boolean {
   if (typeof event.id !== 'string') return false;
   try {
-    if (verifiedEventIds.has(event.id)) return nostrGetEventHash(event) === event.id;
+    if (verifiedEventIds.has(event.id)) {
+      if (nostrGetEventHash(event) !== event.id) return false;
+      rememberVerified(event.id);
+      return true;
+    }
     const ok = nostrVerifyEvent(event);
     if (ok) rememberVerified(event.id);
     return ok;
@@ -56,7 +51,5 @@ export function verifyEventCached(event: NostrEvent): boolean {
 // requires re-checking authorship).
 export const __resetVerifiedEventCache = (): void => {
   verifiedEventIds.clear();
-  verifiedEventOrder.fill(null);
-  verifiedHead = 0;
 };
 export const __verifiedEventCacheSize = (): number => verifiedEventIds.size;

@@ -52,24 +52,17 @@ export function useFriendsLiveLocations(opts: { enabled: boolean }): FriendLiveL
   // they ever reach `dmInbox` (useDmInbox `passesFollowGate`), so they'd never
   // plot — which is exactly what the on-device debug showed (inboundLoc=0).
   //
-  // Throttled to the same 30 s TTL the Messages tab uses: a `force` refresh is a
-  // full NIP-17 re-decrypt (~14.8 s / 500+ wraps on a busy inbox) AND
-  // `includeNonFollows` bypasses the #743 skip-set, so firing it on every focus
-  // transition (tab tap, pop back from a conversation, dismiss a sheet) would
-  // pin the JS thread repeatedly. Once per 30 s is plenty — the live DM
-  // subscription surfaces anything newer in real time.
-  const lastForceRefreshRef = useRef(0);
+  // Automatic catch-up shares the inbox TTL and keeps the kind-4 cursor.
+  // Live delivery supplies newer markers without a full history sweep.
+  const lastCatchupAtRef = useRef(0);
   useEffect(() => {
     if (!enabled || !isLoggedIn) return;
     const now = performance.now();
-    if (
-      lastForceRefreshRef.current > 0 &&
-      now - lastForceRefreshRef.current < DM_INBOX_REFRESH_TTL_MS
-    ) {
+    if (lastCatchupAtRef.current > 0 && now - lastCatchupAtRef.current < DM_INBOX_REFRESH_TTL_MS) {
       return;
     }
-    lastForceRefreshRef.current = now;
-    void refreshDmInbox({ force: true, includeNonFollows: true }).catch(() => {});
+    lastCatchupAtRef.current = now;
+    void refreshDmInbox({ includeNonFollows: true }).catch(() => {});
   }, [enabled, isLoggedIn, refreshDmInbox]);
 
   // 1 Hz tick so expiry filtering drops sessions as their window closes.

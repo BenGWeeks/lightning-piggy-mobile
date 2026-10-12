@@ -115,3 +115,46 @@ it('does not carry pending rows into a different protocol on route reuse', async
   expect(result.current.messages).not.toContainEqual(local);
   await waitFor(() => expect(result.current.messages).toEqual([modern, unknown]));
 });
+
+it('renders cached Marmot messages with one store read and no global or relay refresh', async () => {
+  const message = { ...modern, protocol: 'marmot' as const };
+  const loadInitialConversation = jest.fn().mockResolvedValue([message]);
+  const fetchConversation = jest.fn(() => new Promise<never>(() => {}));
+  const persistDeliveryStatuses = jest.fn().mockResolvedValue(undefined);
+  const { result } = renderHook(() =>
+    useConversationLoader({
+      pubkey: 'peer',
+      protocol: 'marmot',
+      isLoggedIn: true,
+      loadInitialConversation,
+      fetchConversation,
+      persistDeliveryStatuses,
+    }),
+  );
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  expect(result.current.messages).toEqual([message]);
+  expect(loadInitialConversation).toHaveBeenCalledTimes(1);
+  expect(fetchConversation).not.toHaveBeenCalled();
+});
+
+it('clears deleted cached Marmot messages on a coalesced live reload', async () => {
+  const message = { ...modern, protocol: 'marmot' as const };
+  const read = jest.fn().mockResolvedValue([message]);
+  const fetch = jest.fn();
+  const persist = jest.fn().mockResolvedValue(undefined);
+  const { result } = renderHook(() =>
+    useConversationLoader({
+      pubkey: 'peer',
+      protocol: 'marmot',
+      isLoggedIn: true,
+      loadInitialConversation: read,
+      fetchConversation: fetch,
+      persistDeliveryStatuses: persist,
+    }),
+  );
+  await waitFor(() => expect(result.current.messages).toEqual([message]));
+  read.mockResolvedValue([]);
+  act(() => notifyDmMessage('peer'));
+  await waitFor(() => expect(result.current.messages).toEqual([]));
+  expect(result.current.loading).toBe(false);
+});

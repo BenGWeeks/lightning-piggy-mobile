@@ -113,7 +113,7 @@ export function useConversationLoader({
         protocol,
       );
       if (signal.aborted || !isMountedRef.current) return;
-      if (initial.length > 0) {
+      if (initial.length > 0 || protocol === 'marmot') {
         setMessages((prev) =>
           keepPendingLocalRows(filterMessagesByProtocol(prev, protocol), initial),
         );
@@ -121,13 +121,16 @@ export function useConversationLoader({
       } else if (showSpinner) {
         setLoading(true);
       }
+      // Marmot's first read is already authoritative. Session hydration runs
+      // independently and notifies this focused screen after committing rows.
+      // An empty cached thread can render immediately too; don't read it twice.
+      if (protocol === 'marmot') {
+        setLoading(false);
+        return;
+      }
       try {
         const conv = filterMessagesByProtocol(
-          protocol === 'marmot'
-            ? // Marmot rows land in the store from the MLS session (marmotInbox),
-              // never from a relay gift-wrap fetch — re-read the store instead.
-              await loadInitialConversation(pubkey, protocol)
-            : await fetchConversation(pubkey, { signal, protocol }),
+          await fetchConversation(pubkey, { signal, protocol }),
           protocol,
         );
         // A superseding load (or unmount) aborted this fetch — drop the result
