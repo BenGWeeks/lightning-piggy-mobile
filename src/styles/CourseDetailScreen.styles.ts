@@ -24,12 +24,6 @@ export const createCourseDetailScreenStyles = (colors: Palette) =>
       alignItems: 'center',
       zIndex: 10,
     },
-    backArrow: {
-      color: colors.brandPink,
-      fontSize: 24,
-      fontWeight: '700',
-      marginTop: -2,
-    },
     headerContainer: {
       minHeight: 420,
       position: 'relative',
@@ -109,11 +103,6 @@ export const createCourseDetailScreenStyles = (colors: Palette) =>
       backgroundColor: colors.green,
       justifyContent: 'center',
       alignItems: 'center',
-    },
-    checkMark: {
-      color: colors.white,
-      fontSize: 14,
-      fontWeight: '700',
     },
     chipStart: {
       backgroundColor: colors.brandPink,

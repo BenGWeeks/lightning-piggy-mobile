@@ -26,10 +26,6 @@ export function setKnownGroups(groups: Group[], owner: string | null = null): vo
   knownOwner = owner;
 }
 
-export function getKnownGroups(): readonly Group[] {
-  return known;
-}
-
 /**
  * Reconcile a synthetic NIP-17 room (kind-14 from a foreign client with
  * no matching kind-30200) into local state. GroupsContext registers a

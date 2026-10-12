@@ -3,7 +3,6 @@ import {
   View,
   Text,
   TouchableOpacity,
-  ActivityIndicator,
   Linking,
   ScrollView,
   Animated,
@@ -15,12 +14,9 @@ import * as Location from 'expo-location';
 import {
   ChevronLeft,
   Clock,
-  ExternalLink,
   Globe,
   Mail,
   MapPin,
-  Info,
-  LocateFixed,
   Phone,
   PiggyBank,
   ShieldCheck,
@@ -1103,13 +1099,6 @@ const FilterSheet: React.FC<{
 // -----------------------------------------------------------------------------
 // helpers
 // -----------------------------------------------------------------------------
-
-const bboxAround = (lat: number, lng: number, halfDegrees: number): Bbox => ({
-  minLon: lng - halfDegrees,
-  minLat: lat - halfDegrees,
-  maxLon: lng + halfDegrees,
-  maxLat: lat + halfDegrees,
-});
 
 // -----------------------------------------------------------------------------
 // styles

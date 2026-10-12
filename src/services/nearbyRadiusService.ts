@@ -30,21 +30,6 @@ export interface RadiusOption {
   value: number | null; // metres; null = All
 }
 
-/**
- * Shared chip-row options. Sized for "walking → drive → road-trip"
- * brackets so most users pick a sensible default. "All" lifts the cap
- * entirely (useful when the area is sparse or when the user wants to
- * see what's published worldwide).
- */
-export const RADIUS_OPTIONS: ReadonlyArray<RadiusOption> = [
-  { label: '5 km', value: 5_000 },
-  { label: '25 km', value: 25_000 },
-  { label: '50 km', value: 50_000 },
-  { label: '100 km', value: 100_000 },
-  { label: '150 km', value: 150_000 },
-  { label: 'All', value: null },
-];
-
 export const loadNearbyRadius = async (): Promise<number | null> => {
   try {
     const raw = await AsyncStorage.getItem(STORAGE_KEY);

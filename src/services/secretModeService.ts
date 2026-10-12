@@ -5,8 +5,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { perAccountKey } from './perAccountStorage';
 import { ensureSafetySettingsMigrated, SECRET_MODE_KEY_BASE } from './safetySettingsMigration';
 
-export const SECRET_MODE_STORAGE_KEY_BASE = SECRET_MODE_KEY_BASE;
-
 export async function loadSecretMode(pubkey: string | null): Promise<boolean> {
   if (!pubkey) return false;
   try {

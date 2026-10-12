@@ -51,10 +51,6 @@ export const createTransactionListStyles = (colors: Palette) =>
       alignItems: 'center',
       justifyContent: 'center',
     },
-    avatarPlaceholderIcon: {
-      fontSize: 20,
-      color: colors.brandPink,
-    },
     centerCol: {
       flex: 1,
       minWidth: 0,

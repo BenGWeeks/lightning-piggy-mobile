@@ -115,11 +115,6 @@ export const createTipSheetStyles = (colors: Palette) =>
       alignItems: 'center',
       gap: 12,
     },
-    successCheck: {
-      fontSize: 48,
-      color: colors.green,
-      fontWeight: '700',
-    },
     successText: {
       fontSize: 18,
       fontWeight: '700',

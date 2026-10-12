@@ -305,7 +305,6 @@
     "sayHiZap": "नमस्ते कहें — या ज़ैप भेजें।",
     "sayHi": "नमस्ते कहें।",
     "closeAttachPanel": "अटैचमेंट पैनल बंद करें",
-    "scrollToRecent": "सबसे नए मैसेज तक स्क्रॉल करें",
     "messagePlaceholder": "मैसेज",
     "zapUnavailable": "ज़ैप भेजें (उपलब्ध नहीं — सामने वाले का Lightning ऐड्रेस नहीं है)",
     "closeFullscreenGif": "पूरी स्क्रीन वाला GIF बंद करें",
@@ -553,7 +552,6 @@
     "sendFeedbackA11y": "फ़ीडबैक भेजें"
   },
   "friendNoteFeed": {
-    "recentPosts": "हाल की पोस्ट",
     "noPostsYet": "अभी कोई पोस्ट नहीं है"
   },
   "profileTabs": {
@@ -986,7 +984,6 @@
     "filterAll": "सभी",
     "filterFriends": "दोस्त",
     "aGeoCache": "एक जियो-कैश",
-    "foundCache": "{{cache}} मिला",
     "cachesHidden": "{{count}} कैश छिपाए",
     "cacheHiddenOne": "1 कैश छिपाया",
     "cachesFound": "{{count}} कैश मिले",
@@ -2287,9 +2284,7 @@
       "refreshFailed": "यह प्रोडक्ट रिफ़्रेश नहीं हो सका — अपना कनेक्शन जाँचें और फिर से कोशिश करें।"
     },
     "modes": {
-      "soon": "जल्द",
       "comingSoon": "{{label}} — जल्द आ रहा है",
-      "selected": "{{label}}, चुना गया",
       "preferred": "Lightning Piggy के पसंदीदा विक्रेता",
       "friends": "ट्रस्ट: दोस्त",
       "friendsOfFriends": "ट्रस्ट: दोस्तों के दोस्त",
@@ -2426,7 +2421,6 @@
     "live": {
       "loading": "आपके दोस्तों की लिस्टिंग लोड हो रही हैं…",
       "updating": "अपडेट हो रहा है…",
-      "incomplete": "कुछ लिस्टिंग लोड नहीं हो सकीं। रिफ़्रेश करके देखें।",
       "partialToast": "कुछ विक्रेताओं ने जवाब नहीं दिया। रीफ़्रेश करने के लिए नीचे खींचें।",
       "loaded": "आपके दोस्तों की लाइव लिस्टिंग",
       "loadedPreferred": "Lightning Piggy के पसंदीदा विक्रेताओं की लाइव लिस्टिंग",
@@ -2445,15 +2439,8 @@
       "loading": "आपकी दुकान लोड हो रही है…",
       "loadError": "आपके रिले से संपर्क नहीं हो सका। फिर कोशिश करने के लिए खींचें।",
       "retry": "फिर कोशिश करें",
-      "setupTitle": "अपनी दुकान बनाएँ",
-      "setupBody": "डिफ़ॉल्ट मुद्रा और शिपिंग विकल्प चुनें। आपकी Nostr प्रोफ़ाइल आपकी दुकान की पहचान है।",
       "setupButton": "दुकान बनाएँ",
       "editShop": "दुकान एडिट करें",
-      "shipsZones": {
-        "one": "शिपिंग का {{count}} विकल्प",
-        "other": "शिपिंग के {{count}} विकल्प"
-      },
-      "noZones": "अभी शिपिंग के विकल्प नहीं हैं",
       "sellItem": "सामान बेचें",
       "yourListings": "आपकी लिस्टिंग",
       "noListings": "आपने अभी कोई लिस्टिंग नहीं बनाई है। अपनी पहली लिस्टिंग बनाने के लिए \"सामान बेचें\" पर टैप करें।",
@@ -2472,10 +2459,7 @@
       "deleteFailed": "लिस्टिंग हटाई नहीं जा सकी",
       "shop": {
         "title": "दुकान की सेटिंग्स",
-        "name": "दुकान का नाम",
-        "namePlaceholder": "जैसे Piggy क्राफ़्ट्स",
         "description": "विवरण",
-        "descriptionPlaceholder": "आप क्या बेचते हैं?",
         "currency": "करेंसी",
         "currencyHint": "शिपिंग की कीमत और सामान की कीमत की डिफ़ॉल्ट करेंसी के लिए इस्तेमाल होती है।",
         "shipping": "शिपिंग के विकल्प",
@@ -2567,12 +2551,10 @@
       "detail": {
         "inStock": "स्टॉक में {{count}}",
         "shipping": "शिपिंग",
-        "shippingLoading": "शिपिंग के विकल्प लोड हो रहे हैं…",
         "shippingError": "शिपिंग के विकल्प लोड नहीं हो सके।",
         "shippingNone": "शिपिंग: विक्रेता से संपर्क करें",
         "shippingTotal": "{{amount}} {{currency}}",
         "shippingSplit": "{{amount}} {{currency}} + {{extra}} {{extraCurrency}}",
-        "yourListing": "यह आपकी लिस्टिंग है",
         "editListing": "लिस्टिंग एडिट करें",
         "previewBanner": "प्रीव्यू — खरीदारों को आपकी लिस्टिंग ऐसे दिखेगी। यह अभी पब्लिश नहीं हुई है।"
       },

@@ -120,7 +120,6 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
   }, [events]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [expandedCoord, setExpandedCoord] = useState<string | null>(null);
   const [untrustedHidden, setUntrustedHidden] = useState(0);
   // User position is captured so each row can compute "X away" via
   // haversine + the list sort prefers proximity (with start-time as

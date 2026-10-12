@@ -305,7 +305,6 @@
     "sayHiZap": "Saluda — o envía un zap.",
     "sayHi": "Saluda.",
     "closeAttachPanel": "Cerrar el panel de adjuntos",
-    "scrollToRecent": "Ir al mensaje más reciente",
     "messagePlaceholder": "Mensaje",
     "zapUnavailable": "Enviar un zap (no disponible — el contacto no tiene dirección Lightning)",
     "closeFullscreenGif": "Cerrar el GIF a pantalla completa",
@@ -553,7 +552,6 @@
     "sendFeedbackA11y": "Enviar comentarios"
   },
   "friendNoteFeed": {
-    "recentPosts": "Publicaciones recientes",
     "noPostsYet": "Aún no hay publicaciones"
   },
   "profileTabs": {
@@ -986,7 +984,6 @@
     "filterAll": "Todos",
     "filterFriends": "Amigos",
     "aGeoCache": "un geocaché",
-    "foundCache": "Encontró {{cache}}",
     "cachesHidden": "{{count}} cachés escondidos",
     "cacheHiddenOne": "1 caché escondido",
     "cachesFound": "{{count}} cachés encontrados",
@@ -2287,9 +2284,7 @@
       "refreshFailed": "No se pudo actualizar este producto: comprueba tu conexión y vuelve a intentarlo."
     },
     "modes": {
-      "soon": "Pronto",
       "comingSoon": "{{label}} — próximamente",
-      "selected": "{{label}}, seleccionado",
       "preferred": "Vendedores preferidos de Lightning Piggy",
       "friends": "Red de confianza: amigos",
       "friendsOfFriends": "Red de confianza: amigos de amigos",
@@ -2426,7 +2421,6 @@
     "live": {
       "loading": "Cargando anuncios de tus amigos…",
       "updating": "Actualizando…",
-      "incomplete": "No se pudieron cargar todos los anuncios. Intenta actualizar.",
       "partialToast": "Algunos vendedores no respondieron. Desliza hacia abajo para actualizar.",
       "loaded": "Anuncios actuales de tus amigos",
       "loadedPreferred": "Anuncios actuales de los vendedores preferidos de Lightning Piggy",
@@ -2445,15 +2439,8 @@
       "loading": "Cargando tu tienda…",
       "loadError": "No se pudo contactar con tus relés. Desliza para reintentar.",
       "retry": "Reintentar",
-      "setupTitle": "Crea tu tienda",
-      "setupBody": "Elige una moneda predeterminada y opciones de envío. Tu perfil de Nostr es la identidad de tu tienda.",
       "setupButton": "Crear tienda",
       "editShop": "Editar tienda",
-      "shipsZones": {
-        "one": "{{count}} opción de envío",
-        "other": "{{count}} opciones de envío"
-      },
-      "noZones": "Aún no hay opciones de envío",
       "sellItem": "Vender un artículo",
       "yourListings": "Tus anuncios",
       "noListings": "Aún no has anunciado nada. Toca \"Vender un artículo\" para crear tu primer anuncio.",
@@ -2472,10 +2459,7 @@
       "deleteFailed": "No se pudo eliminar el anuncio",
       "shop": {
         "title": "Ajustes de la tienda",
-        "name": "Nombre de la tienda",
-        "namePlaceholder": "p. ej. Manualidades Piggy",
         "description": "Descripción",
-        "descriptionPlaceholder": "¿Qué vendes?",
         "currency": "Moneda",
         "currencyHint": "Se usa para los gastos de envío y como moneda de precio predeterminada.",
         "shipping": "Opciones de envío",
@@ -2567,12 +2551,10 @@
       "detail": {
         "inStock": "{{count}} en existencias",
         "shipping": "Envío",
-        "shippingLoading": "Cargando opciones de envío…",
         "shippingError": "No se pudieron cargar las opciones de envío.",
         "shippingNone": "Envío: consulta al vendedor",
         "shippingTotal": "{{amount}} {{currency}}",
         "shippingSplit": "{{amount}} {{currency}} + {{extra}} {{extraCurrency}}",
-        "yourListing": "Este es tu anuncio",
         "editListing": "Editar anuncio",
         "previewBanner": "Vista previa: así verán tu anuncio los compradores. Aún no está publicado."
       },

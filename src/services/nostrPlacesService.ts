@@ -21,7 +21,6 @@ import { LP_CLIENT_TAG } from './nip89ClientTag';
 export const GC_LISTING_KIND = 37516;
 export const GC_FOUND_LOG_KIND = 7516;
 export const GC_COMMENT_KIND = 1111;
-export const GC_VERIFICATION_KIND = 7517;
 
 // NIP-52 calendar event kinds — used by the Events sub-screen (M7) to
 // surface nearby Bitcoin meetups. We only consume kind 31923

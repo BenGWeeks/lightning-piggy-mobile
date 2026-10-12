@@ -26,11 +26,6 @@ export const createHuntCommunityStyles = (colors: Palette) =>
       fontWeight: '800',
       color: colors.textHeader,
     },
-    sectionCount: {
-      fontSize: 12,
-      fontWeight: '700',
-      color: colors.textSupplementary,
-    },
     emptyText: {
       fontSize: 13,
       color: colors.textSupplementary,
@@ -138,16 +133,6 @@ export const createHuntCommunityStyles = (colors: Palette) =>
     rowMain: { flex: 1 },
     rowName: { fontSize: 14, fontWeight: '700', color: colors.textHeader },
     rowMeta: { fontSize: 12, color: colors.textSupplementary, marginTop: 2 },
-    amountPill: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 3,
-      paddingHorizontal: 8,
-      paddingVertical: 3,
-      borderRadius: 8,
-      backgroundColor: colors.brandPinkLight,
-    },
-    amountPillText: { fontSize: 12, fontWeight: '800', color: colors.brandPink },
 
     // Friends filter toggle -------------------------------------------------
     toggleRow: { flexDirection: 'row', gap: 8, marginHorizontal: 16, marginBottom: 10 },

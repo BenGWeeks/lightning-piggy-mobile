@@ -21,12 +21,6 @@ export const createMissionDetailScreenStyles = (colors: Palette) =>
       alignItems: 'center',
       zIndex: 10,
     },
-    backArrow: {
-      color: colors.white,
-      fontSize: 24,
-      fontWeight: '700',
-      marginTop: -2,
-    },
     videoContainer: {
       backgroundColor: '#000',
       aspectRatio: 16 / 9,
@@ -100,11 +94,6 @@ export const createMissionDetailScreenStyles = (colors: Palette) =>
       fontSize: 13,
       fontWeight: '700',
     },
-    producerArrow: {
-      color: colors.brandPink,
-      fontSize: 16,
-      fontWeight: '700',
-    },
     fullEpisodeLink: {
       color: colors.brandPink,
       fontSize: 13,
@@ -151,11 +140,6 @@ export const createMissionDetailScreenStyles = (colors: Palette) =>
     outcomeDotComplete: {
       backgroundColor: colors.brandPink,
       borderColor: colors.brandPink,
-    },
-    outcomeDotCheck: {
-      color: colors.white,
-      fontSize: 12,
-      fontWeight: '700',
     },
     outcomeText: {
       fontSize: 14,

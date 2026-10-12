@@ -137,29 +137,6 @@ export const createSendSheetStyles = (colors: Palette) =>
       textAlign: 'center',
       color: colors.textBody,
     },
-    unitButton: {
-      paddingHorizontal: 14,
-      paddingVertical: 8,
-      borderRadius: 8,
-      backgroundColor: colors.divider,
-    },
-    unitButtonActive: {
-      backgroundColor: colors.brandPink,
-    },
-    unitButtonText: {
-      fontSize: 14,
-      fontWeight: '700',
-      color: colors.textSupplementary,
-    },
-    unitButtonTextActive: {
-      color: colors.white,
-    },
-    convertedAmount: {
-      fontSize: 13,
-      color: colors.textSupplementary,
-      fontWeight: '500',
-      minHeight: 18,
-    },
     rangeText: {
       fontSize: 12,
       color: colors.textSupplementary,
@@ -314,10 +291,6 @@ export const createSendSheetStyles = (colors: Palette) =>
       fontSize: 14,
       fontWeight: '600',
       color: colors.textBody,
-    },
-    walletDropdownArrow: {
-      fontSize: 10,
-      color: colors.textSupplementary,
     },
     walletDropdownMenu: {
       position: 'absolute',

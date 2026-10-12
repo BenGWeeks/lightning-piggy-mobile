@@ -139,10 +139,6 @@ export const createMarketCheckoutSheetStyles = (colors: Palette) =>
       fontWeight: '800',
       color: colors.textHeader,
     },
-    totalFiat: {
-      fontSize: 13,
-      color: colors.textSupplementary,
-    },
     primaryButton: {
       // `alignSelf: 'stretch'` so the button fills its column even inside the
       // centered success view (`sentWrap` uses alignItems:'center', which would

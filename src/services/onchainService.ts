@@ -491,15 +491,6 @@ export async function getNextReceiveAddress(walletId: string): Promise<string> {
   return await info.address.asString();
 }
 
-export async function getCurrentReceiveAddress(walletId: string): Promise<string> {
-  const single = await getSingleAddress(walletId);
-  if (single) return single;
-
-  const wallet = await getBdkWallet(walletId);
-  const info = await wallet.getAddress(AddressIndex.LastUnused);
-  return await info.address.asString();
-}
-
 /**
  * Sync once and return both balance and transactions.
  * Avoids double Electrum sync when fetching both.
@@ -694,16 +685,6 @@ export async function removeWallet(walletId: string): Promise<void> {
 export function disconnectElectrum(): void {
   blockchainGeneration += 1;
   blockchain = null;
-}
-
-/**
- * Drop the in-memory BDK wallet for `walletId` without touching storage.
- * Call this when the backing descriptor changes (e.g. mnemonic re-import)
- * so the next on-chain call rebuilds the wallet from the new secret
- * rather than signing with a stale cached key.
- */
-export function invalidateWalletCache(walletId: string): void {
-  bdkWallets.delete(walletId);
 }
 
 /**

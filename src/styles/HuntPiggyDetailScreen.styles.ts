@@ -84,15 +84,6 @@ export const createHuntPiggyDetailScreenStyles = (colors: Palette) =>
     meter: { flex: 1, gap: 6 },
     meterName: { fontSize: 11, fontWeight: '700', color: colors.textSupplementary },
     meterNameActive: { color: colors.brandPink },
-    metaPill: {
-      backgroundColor: colors.surface,
-      color: colors.textSupplementary,
-      paddingHorizontal: 8,
-      paddingVertical: 3,
-      borderRadius: 100,
-      fontSize: 11,
-      fontWeight: '600',
-    },
     description: { fontSize: 14, color: colors.textHeader, lineHeight: 20 },
     attribution: {
       fontSize: 12,
@@ -117,11 +108,6 @@ export const createHuntPiggyDetailScreenStyles = (colors: Palette) =>
     hiderAvatarFallback: {
       alignItems: 'center',
       justifyContent: 'center',
-    },
-    hiderAvatarInitial: {
-      color: colors.brandPink,
-      fontSize: 14,
-      fontWeight: '800',
     },
     hiderName: {
       fontSize: 14,
@@ -193,7 +179,6 @@ export const createHuntPiggyDetailScreenStyles = (colors: Palette) =>
       borderRadius: 100,
     },
     actionButtonSecondaryText: { color: colors.brandPink, fontSize: 15, fontWeight: '700' },
-    claimButtonDisabled: { opacity: 0.45 },
     claimNote: {
       color: colors.textSupplementary,
       fontSize: 12,
@@ -297,12 +282,6 @@ export const createHuntPiggyDetailScreenStyles = (colors: Palette) =>
       justifyContent: 'space-between',
       marginTop: 2,
     },
-    logBadgesRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      flexShrink: 1,
-    },
     logBadge: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -314,15 +293,4 @@ export const createHuntPiggyDetailScreenStyles = (colors: Palette) =>
       borderRadius: 100,
     },
     logBadgeText: { color: colors.brandPink, fontSize: 11, fontWeight: '700' },
-    logBadgeZapped: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      backgroundColor: colors.brandPink,
-      alignSelf: 'flex-start',
-      paddingHorizontal: 8,
-      paddingVertical: 4,
-      borderRadius: 100,
-    },
-    logBadgeZappedText: { color: colors.white, fontSize: 11, fontWeight: '700' },
   });

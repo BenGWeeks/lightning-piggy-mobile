@@ -6,7 +6,7 @@
  * npub identities to NFC tags.
  */
 import NfcManager, { NfcTech, Ndef, TagEvent } from 'react-native-nfc-manager';
-import { Platform, Linking } from 'react-native';
+import { Platform } from 'react-native';
 import {
   buildDisableAuthFrame,
   buildGetVersionFrame,
@@ -67,19 +67,6 @@ export async function isNfcEnabled(): Promise<boolean> {
   }
 }
 
-/**
- * Open the device NFC settings screen.
- * On Android, opens NFC settings directly.
- * On iOS, opens general Settings (iOS doesn't allow deep-linking to NFC settings).
- */
-export function openNfcSettings(): void {
-  if (Platform.OS === 'android') {
-    NfcManager.goToNfcSetting();
-  } else {
-    Linking.openSettings();
-  }
-}
-
 // Track whether NfcManager.start() has resolved this session. Each
 // public NFC operation lazily ensures init via `ensureNfcStarted()` so
 // callers don't have to remember to bootstrap (and an early-fail
@@ -111,13 +98,6 @@ export async function ensureNfcStarted(): Promise<boolean> {
  */
 export async function initNfc(): Promise<boolean> {
   return ensureNfcStarted();
-}
-
-/**
- * Clean up NFC manager resources.
- */
-export function cleanupNfc(): void {
-  NfcManager.unregisterTagEvent().catch(() => {});
 }
 
 /**
@@ -460,7 +440,6 @@ export async function writeLnurlToTag(
 // for more room" prompt rather than a cryptic NfcManager rejection.
 // Larger chips (NTAG215 = 504B usable, NTAG216 = 888B) accept the same
 // payload with headroom.
-const NTAG_213_USABLE_BYTES = 140;
 const NTAG_424_USABLE_BYTES = 416;
 
 // Map a detected tag family to its usable-NDEF capacity (Android only;

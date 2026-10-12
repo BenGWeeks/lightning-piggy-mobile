@@ -163,12 +163,6 @@ export const createConversationScreenStyles = (colors: Palette) =>
     zapCardBody: {
       flex: 1,
     },
-    zapCardHeaderRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: 8,
-    },
     zapCardLabel: {
       fontSize: 12,
       fontWeight: '600',
@@ -177,13 +171,6 @@ export const createConversationScreenStyles = (colors: Palette) =>
       letterSpacing: 0.6,
     },
     zapCardLabelMe: {
-      color: 'rgba(255,255,255,0.85)',
-    },
-    zapCardTime: {
-      fontSize: 10,
-      color: colors.textSupplementary,
-    },
-    zapCardTimeMe: {
       color: 'rgba(255,255,255,0.85)',
     },
     zapCardAmount: {

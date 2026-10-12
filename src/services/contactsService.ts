@@ -47,9 +47,3 @@ export async function setLightningAddress(contactId: string, address: string): P
   map[contactId] = address;
   await AsyncStorage.setItem(LN_MAP_KEY, JSON.stringify(map));
 }
-
-export async function removeLightningAddress(contactId: string): Promise<void> {
-  const map = await getLightningAddressMap();
-  delete map[contactId];
-  await AsyncStorage.setItem(LN_MAP_KEY, JSON.stringify(map));
-}

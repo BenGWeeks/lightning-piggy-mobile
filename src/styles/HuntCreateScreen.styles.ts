@@ -592,7 +592,6 @@ export const createHuntCreateScreenStyles = (colors: Palette) =>
       fontSize: 12,
       lineHeight: 17,
     },
-    savedActions: { gap: 12 },
     tagsCard: {
       backgroundColor: colors.surface,
       borderRadius: 12,
@@ -610,22 +609,6 @@ export const createHuntCreateScreenStyles = (colors: Palette) =>
       fontSize: 13,
       fontWeight: '700',
       color: colors.textHeader,
-    },
-    tagsCardIntro: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      lineHeight: 17,
-    },
-    tagsCardRow: {
-      flexDirection: 'row',
-      alignItems: 'flex-start',
-      gap: 10,
-    },
-    tagsCardDot: {
-      width: 10,
-      height: 10,
-      borderRadius: 5,
-      marginTop: 4,
     },
     tagsCardName: {
       fontSize: 13,
@@ -654,18 +637,6 @@ export const createHuntCreateScreenStyles = (colors: Palette) =>
       fontSize: 12,
       lineHeight: 17,
       color: colors.textBody,
-    },
-    tagsCardBlurb: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      lineHeight: 16,
-      marginTop: 2,
-    },
-    tagsCardCapacity: {
-      fontSize: 11,
-      color: colors.textSupplementary,
-      fontStyle: 'italic',
-      marginTop: 1,
     },
     hintPreviewWrapper: {
       position: 'relative',

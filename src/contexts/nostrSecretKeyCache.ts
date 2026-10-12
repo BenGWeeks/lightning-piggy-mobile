@@ -21,9 +21,6 @@ export const nip04PlaintextCache = new LRUCache<string, string>({ max: 1000 });
 // guarded moved from a read-modify-write AsyncStorage blob to atomic
 // (owner, event_id)-keyed upserts in the encrypted store, where two rapid
 // sends can't clobber each other.
-export function __clearNip04PlaintextCacheForTests() {
-  nip04PlaintextCache.clear();
-}
 
 // Module-scope memo for the current user's secret key. Five paths in this
 // file need access to the nsec (sign, publishProfile, publishContactList,

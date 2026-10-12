@@ -204,22 +204,6 @@ export const LegendSheet: React.FC<Props> = ({
   );
 };
 
-const Item: React.FC<{
-  label: string;
-  color: string;
-  dot?: boolean;
-  diamond?: boolean;
-}> = ({ label, color, dot, diamond }) => {
-  const colors = useThemeColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
-  return (
-    <View style={styles.row}>
-      <View style={[dot ? styles.swatchDot : styles.swatchDiamond, { backgroundColor: color }]} />
-      <Text style={styles.rowLabel}>{label}</Text>
-    </View>
-  );
-};
-
 const createStyles = (colors: Palette) =>
   StyleSheet.create({
     backdrop: {

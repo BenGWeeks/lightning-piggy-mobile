@@ -305,7 +305,6 @@
     "sayHiZap": "打个招呼吧，或者打个闪。",
     "sayHi": "打个招呼吧。",
     "closeAttachPanel": "关闭附件面板",
-    "scrollToRecent": "滚动到最新消息",
     "messagePlaceholder": "消息",
     "zapUnavailable": "发送打闪（不可用——对方没有Lightning地址）",
     "closeFullscreenGif": "关闭全屏GIF",
@@ -553,7 +552,6 @@
     "sendFeedbackA11y": "发送反馈"
   },
   "friendNoteFeed": {
-    "recentPosts": "最近的帖子",
     "noPostsYet": "还没有帖子"
   },
   "profileTabs": {
@@ -986,7 +984,6 @@
     "filterAll": "全部",
     "filterFriends": "好友",
     "aGeoCache": "一个地理藏宝点",
-    "foundCache": "找到了{{cache}}",
     "cachesHidden": "藏了{{count}}个藏宝点",
     "cacheHiddenOne": "藏了1个藏宝点",
     "cachesFound": "找到{{count}}个藏宝点",
@@ -2287,9 +2284,7 @@
       "refreshFailed": "无法刷新此商品，请检查网络连接后重试。"
     },
     "modes": {
-      "soon": "即将推出",
       "comingSoon": "{{label}}——即将推出",
-      "selected": "{{label}}，已选择",
       "preferred": "Lightning Piggy优选卖家",
       "friends": "信任网络：好友",
       "friendsOfFriends": "信任网络：好友的好友",
@@ -2426,7 +2421,6 @@
     "live": {
       "loading": "正在加载好友的商品……",
       "updating": "正在更新…",
-      "incomplete": "部分商品无法加载，请尝试刷新。",
       "partialToast": "部分卖家未响应。下拉刷新。",
       "loaded": "好友的实时商品",
       "loadedPreferred": "Lightning Piggy优选卖家的实时商品",
@@ -2445,15 +2439,8 @@
       "loading": "正在加载你的店铺…",
       "loadError": "无法连接你的中继。下拉重试。",
       "retry": "重试",
-      "setupTitle": "创建你的店铺",
-      "setupBody": "选择默认货币和配送选项。你的 Nostr 个人资料就是店铺身份。",
       "setupButton": "创建店铺",
       "editShop": "编辑店铺",
-      "shipsZones": {
-        "one": "{{count}}个配送选项",
-        "other": "{{count}}个配送选项"
-      },
-      "noZones": "还没有配送选项",
       "sellItem": "出售商品",
       "yourListings": "你的商品",
       "noListings": "你还没有发布商品。点按“出售商品”发布你的第一件商品。",
@@ -2472,10 +2459,7 @@
       "deleteFailed": "无法删除商品",
       "shop": {
         "title": "店铺设置",
-        "name": "店铺名称",
-        "namePlaceholder": "例如：Piggy手工坊",
         "description": "描述",
-        "descriptionPlaceholder": "你卖什么？",
         "currency": "货币",
         "currencyHint": "用于运费，并作为商品价格的默认货币。",
         "shipping": "配送选项",
@@ -2567,12 +2551,10 @@
       "detail": {
         "inStock": "库存{{count}}件",
         "shipping": "运费",
-        "shippingLoading": "正在加载配送选项…",
         "shippingError": "无法加载配送选项。",
         "shippingNone": "运费：请联系卖家",
         "shippingTotal": "{{amount}} {{currency}}",
         "shippingSplit": "{{amount}} {{currency}} + {{extra}} {{extraCurrency}}",
-        "yourListing": "这是你的商品",
         "editListing": "编辑商品",
         "previewBanner": "预览——买家将看到这样的商品页面。商品尚未发布。"
       },

@@ -166,7 +166,7 @@ const FriendsScreen: React.FC = () => {
   const t = useTranslation();
   const styles = useMemo(() => createFriendsScreenStyles(colors), [colors]);
   const navigation = useNavigation<FriendsNavigation>();
-  const { isLoggedIn, profile, refreshProfile, relays } = useNostr();
+  const { isLoggedIn, refreshProfile, relays } = useNostr();
   const { contacts, refreshContacts, addContact } = useNostrContacts();
   // Wallet-attached flag drives the per-row zap gate alongside the
   // contact's Lightning address. Without a wallet there's nothing to

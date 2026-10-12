@@ -87,11 +87,6 @@ export const createContactProfileBodyStyles = (colors: Palette) =>
       marginTop: 10,
       paddingHorizontal: 28,
     },
-    qrToggleWrapper: {
-      alignSelf: 'stretch',
-      paddingHorizontal: 4,
-      marginTop: 8,
-    },
     actionRowSheet: {
       flexDirection: 'row',
       justifyContent: 'center',

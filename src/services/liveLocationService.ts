@@ -28,7 +28,7 @@
  *      a kind in this range we can migrate.
  */
 
-import { buildOsmViewUrl, formatGeoMessage, type SharedLocation } from '../utils/geoMessage';
+import { formatGeoMessage, type SharedLocation } from '../utils/geoMessage';
 
 /**
  * Ephemeral kind for live-location coordinate pings. NIP-01 reserves
@@ -36,9 +36,6 @@ import { buildOsmViewUrl, formatGeoMessage, type SharedLocation } from '../utils
  * App-specific allocation — no conflicting NIP at time of writing.
  */
 export const LIVE_LOCATION_PING_KIND = 20069;
-
-/** Default cadence between coordinate pings while moving (ms). */
-export const DEFAULT_PING_INTERVAL_MS = 30_000;
 
 /** Cap on a single live-share session. Prevents runaway shares if the
  *  app is left running unattended; the user can stop earlier at any
@@ -403,9 +400,4 @@ export function newSessionId(): string {
 export function expiryFor(startedAt: number, durationMs: number): number {
   const capped = Math.max(0, Math.min(MAX_DURATION_MS, durationMs));
   return startedAt + capped;
-}
-
-/** Convenience: build the OSM URL for the current ping. */
-export function pingOsmUrl(payload: LivePingPayload): string {
-  return buildOsmViewUrl({ lat: payload.lat, lon: payload.lon, accuracyMeters: payload.accuracy });
 }

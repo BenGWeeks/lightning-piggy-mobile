@@ -92,11 +92,6 @@ export const createLearnScreenStyles = (colors: Palette) =>
       justifyContent: 'center',
       alignItems: 'center',
     },
-    completeBadgeText: {
-      color: colors.white,
-      fontSize: 16,
-      fontWeight: '700',
-    },
     courseTitle: {
       fontSize: 14,
       fontWeight: '700',

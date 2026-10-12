@@ -198,6 +198,5 @@ export type CourseDetailRoute = RouteProp<ExploreStackParamList, 'CourseDetail'>
 export type MarketProductDetailRoute = RouteProp<ExploreStackParamList, 'MarketProductDetail'>;
 export type MarketListingEditorRoute = RouteProp<ExploreStackParamList, 'MarketListingEditor'>;
 export type MissionDetailRoute = RouteProp<ExploreStackParamList, 'MissionDetail'>;
-export type HomeRoute = RouteProp<MainTabParamList, 'Home'>;
 export type GroupConversationRoute = RouteProp<RootStackParamList, 'GroupConversation'>;
 export type HuntLeaderboardRoute = RouteProp<ExploreStackParamList, 'HuntLeaderboard'>;
