@@ -10,6 +10,7 @@ import {
   PREFERRED_SELLERS_ACCOUNT,
 } from '../services/marketPreferredSellers';
 import { samplePreferredProducts } from '../utils/marketSample';
+import { preferredMarketScope } from '../utils/preferredMarketScope';
 import { useMarketListings } from './useMarketListings';
 
 export function usePreferredMarketListings(enabled = true) {
@@ -68,10 +69,10 @@ export function usePreferredMarketListings(enabled = true) {
     }, [enabled, relaysKey, revision, t]),
   );
   const scope = useMemo(
-    () => ({ account: PREFERRED_SELLERS_ACCOUNT, authors: authors ?? [] }),
+    () => ({ account: PREFERRED_SELLERS_ACCOUNT, authors: preferredMarketScope(authors ?? []) }),
     [authors],
   );
-  const live = useMarketListings(enabled && authors !== undefined, scope);
+  const live = useMarketListings(enabled && (authors !== undefined || failed), scope);
   const refreshListings = live.refresh;
   const refresh = useCallback(() => {
     setRevision((value) => value + 1);

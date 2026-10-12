@@ -297,6 +297,7 @@ async function runSnapshot(
   const listings = await collectRelaySnapshot({
     urls,
     filters: listingFilters([...scope]),
+    maxConcurrentFilters: 2,
     signal,
     deadline,
     graceMs: GRACE_MS,
@@ -321,6 +322,7 @@ async function runSnapshot(
       : await collectRelaySnapshot({
           urls: listings.responded.length > 0 ? listings.responded : urls,
           filters: listingDeletionFilters(candidates),
+          maxConcurrentFilters: 2,
           signal,
           deadline,
           graceMs: GRACE_MS,

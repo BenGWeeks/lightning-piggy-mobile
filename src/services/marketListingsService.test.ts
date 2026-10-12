@@ -85,10 +85,20 @@ const start = (relays = ['wss://example.com']) =>
   fetchMarketListings([author], relays, new AbortController().signal);
 /** EOSE every open listing sub on `url`, then every deletion sub it triggers. */
 const answer = async (url = 'wss://example.com') => {
-  pass('listings', url).forEach((s) => s.c.oneose());
-  await flush();
-  pass('deletions', url).forEach((s) => s.c.oneose());
-  await flush();
+  const answered = new Set<Sub>();
+  for (const kind of ['listings', 'deletions'] as const) {
+    let open = pass(kind, url);
+    while (open.some((s) => !answered.has(s))) {
+      open
+        .filter((s) => !answered.has(s))
+        .forEach((s) => {
+          answered.add(s);
+          s.c.oneose();
+        });
+      await flush();
+      open = pass(kind, url);
+    }
+  }
 };
 beforeEach(() => {
   jest.useFakeTimers();
@@ -950,4 +960,15 @@ it('waits for the yield scheduler before checking queued oversized signatures', 
     scheduler.mockRestore();
     await pending;
   }
+});
+
+it('paces the 216-author preferred scope in bounded concurrent chunks', async () => {
+  const authors = Array.from({ length: 216 }, (_, i) => i.toString(16).padStart(64, '0'));
+  const pending = fetchMarketListings(authors, ['wss://example.com'], new AbortController().signal);
+  await flush();
+  expect(pass('listings')).toHaveLength(2);
+  await answer();
+  expect(pass('listings')).toHaveLength(4);
+  expect(pass('listings').flatMap((sub) => sub.filters[0].authors)).toEqual(authors);
+  expect(await pending).toMatchObject({ products: [], incomplete: false });
 });

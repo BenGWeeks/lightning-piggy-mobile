@@ -1,12 +1,14 @@
 import { Toast } from '../components/BrandedToast';
 import { act, renderHook } from '@testing-library/react-native';
-import { usePreferredMarketListings } from './usePreferredMarketListings';
+import { usePreferredMarketListings, usePreferredMarketSample } from './usePreferredMarketListings';
 import {
   fetchPreferredSellers,
   PREFERRED_SELLERS_ACCOUNT,
 } from '../services/marketPreferredSellers';
 import { useMarketListings } from './useMarketListings';
 import { MARKET_PRODUCTS } from '../data/marketProducts';
+import { preferredMarketScope } from '../utils/preferredMarketScope';
+import { ROBOTECHY_PUBKEY } from '../utils/marketSample';
 jest.mock('@react-navigation/native', () => ({
   useFocusEffect: (callback: () => void) => {
     const React = jest.requireActual('react');
@@ -39,12 +41,15 @@ beforeEach(() => {
     refresh,
   });
 });
-it('scopes the shared verified pipeline to the Lightning Piggy follows', async () => {
+it('scopes the shared verified pipeline to follows and curated sellers', async () => {
   const authors = ['b'.repeat(64)];
   follows.mockResolvedValue(authors);
   renderHook(() => usePreferredMarketListings());
   await act(async () => {});
-  expect(live).toHaveBeenLastCalledWith(true, { account: PREFERRED_SELLERS_ACCOUNT, authors });
+  expect(live).toHaveBeenLastCalledWith(true, {
+    account: PREFERRED_SELLERS_ACCOUNT,
+    authors: preferredMarketScope(authors),
+  });
 });
 it('falls back to the catalogue when relays fail without a snapshot', async () => {
   follows.mockRejectedValue(new Error('offline'));
@@ -52,6 +57,10 @@ it('falls back to the catalogue when relays fail without a snapshot', async () =
   await act(async () => {});
   expect(h.result.current.products).toBe(MARKET_PRODUCTS);
   expect(h.result.current.loading).toBe(false);
+  expect(live).toHaveBeenLastCalledWith(true, {
+    account: PREFERRED_SELLERS_ACCOUNT,
+    authors: preferredMarketScope([]),
+  });
 });
 it('preserves cached listings on failure and respects a successful empty snapshot', async () => {
   follows.mockResolvedValue([]);
@@ -106,7 +115,7 @@ describe('follow recovery', () => {
       if (cached)
         expect(live).toHaveBeenLastCalledWith(true, {
           account: PREFERRED_SELLERS_ACCOUNT,
-          authors,
+          authors: preferredMarketScope(authors),
         });
       follows.mockResolvedValue(authors);
       act(() => h.result.current.refresh());
@@ -133,4 +142,28 @@ describe('follow recovery', () => {
     await act(async () => jest.advanceTimersByTime(1500));
     expect(follows).toHaveBeenCalledTimes(3);
   });
+});
+
+it('puts a live Robotechy listing in the Explore rail when absent from team follows', async () => {
+  const authors = Array.from({ length: 216 }, (_, i) => i.toString(16).padStart(64, '0'));
+  follows.mockResolvedValue(authors);
+  const robot = {
+    ...MARKET_PRODUCTS[0],
+    id: 'live-robotechy',
+    listing: { event: { pubkey: ROBOTECHY_PUBKEY } },
+  } as (typeof MARKET_PRODUCTS)[number];
+  const other = Array.from({ length: 30 }, (_, i) => ({
+    ...MARKET_PRODUCTS[0],
+    id: `live-${i}`,
+  }));
+  live.mockImplementation((enabled, scope) => ({
+    products: enabled && scope.authors.includes(ROBOTECHY_PUBKEY) ? [...other, robot] : other,
+    hasSnapshot: enabled,
+    refresh,
+  }));
+  const h = renderHook(() => usePreferredMarketSample());
+  await act(async () => {});
+  expect(h.result.current).toHaveLength(8);
+  expect(h.result.current).toContain(robot);
+  expect(h.result.current.every((product) => product.id.startsWith('live-'))).toBe(true);
 });
