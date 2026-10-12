@@ -265,7 +265,7 @@ full wire formats.
 | 30402 | NIP-99 / Gamma Markets product | Market reader, My shop (`utils/marketSellerEvents.ts`)
 | 30405 / 30406 | Gamma Markets shop collection / shipping option | My shop, product-page shipping (`marketSellerService.ts`, `marketShippingService.ts`)
 | 30443 | Marmot key package | `marmotSession.ts` (`ensureKeyPackage`)
-| 20069 | Ephemeral live-location coordinate (in-DM sharing) | live-location feature
+| 20069 | Live-location coordinate update — ephemeral NIP-17 event signed by a session key, or an inner Marmot app event | `liveLocationSender.ts`
 | 31555 | Gamma Markets product review | `utils/productReviews.ts`
 | 31923 | NIP-52 calendar event (meetups, read-only) | Explore → Events
 | 37516 | NIP-GC geo-cache listing ("Piglet") | `nostrPlacesService.ts`

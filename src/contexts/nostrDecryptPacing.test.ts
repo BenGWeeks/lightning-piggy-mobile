@@ -274,3 +274,25 @@ describe('createYieldScheduler', () => {
     nowSpy.mockRestore();
   });
 });
+
+describe('in the background (#1300)', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- the same instance the module under test imports
+  const { AppState } = require('react-native') as typeof import('react-native');
+  let state: PropertyDescriptor | undefined;
+  beforeEach(() => {
+    state = Object.getOwnPropertyDescriptor(AppState, 'currentState');
+    Object.defineProperty(AppState, 'currentState', { value: 'background', configurable: true });
+  });
+  afterEach(() => {
+    if (state) Object.defineProperty(AppState, 'currentState', state);
+  });
+
+  it('yieldToEventLoop resolves without a frame (RAF never fires in the background)', async () => {
+    const raf = jest.spyOn(global, 'requestAnimationFrame');
+    const pending = yieldToEventLoop();
+    jest.advanceTimersByTime(1);
+    await expect(pending).resolves.toBeUndefined();
+    expect(raf).not.toHaveBeenCalled();
+    raf.mockRestore();
+  });
+});

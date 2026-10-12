@@ -59,6 +59,7 @@ import BootSplash from './src/components/BootSplash';
 import { BrandedAlertHost } from './src/components/BrandedAlert';
 import { BrandedToast, Toast } from './src/components/BrandedToast';
 import OfflineBanner from './src/components/OfflineBanner';
+import { isLiveShareStopResponse } from './src/services/liveLocationNotification';
 
 // Renders the global incoming-payment celebration on top of the nav
 // stack. Lives inside the WalletProvider so it can subscribe to the
@@ -177,6 +178,9 @@ export default function App() {
     // identity to hydrate), so an older tap can't override a newer one.
     let latestTap = 0;
     const routeFromResponse = (response: Notifications.NotificationResponse | null) => {
+      // "Stop sharing" on the live-location notification is handled by the
+      // LiveLocationProvider and must not navigate (#1300).
+      if (isLiveShareStopResponse(response)) return;
       const raw = response?.notification?.request?.content?.data as
         | { kind?: string; conversationPubkey?: string; groupId?: string; walletId?: string }
         | undefined;

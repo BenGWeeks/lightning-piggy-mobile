@@ -2975,5 +2975,29 @@
     },
     "showChanges": "Show device changes in chats",
     "showChangesHint": "Alpha: a grey line in Marmot chats when someone joins on, or adds, a device. Drawn on this phone only; nothing is sent."
+  },
+  "liveLocationWire": {
+    "durationMins": "{{mins}} min",
+    "durationHours": "{{hours}} h",
+    "durationHoursMins": "{{hours}} h {{mins}} min",
+    "startText": "Sharing my live location for {{duration}}",
+    "endText": "Live location ended"
+  },
+  "liveLocationTracking": {
+    "serviceTitle": "Sharing your live location",
+    "serviceBody": "Lightning Piggy keeps sending your location while the app is in the background.",
+    "channelName": "Live location",
+    "titleOne": "Sharing your location with {{name}}",
+    "titleMany": {
+      "one": "Sharing your location with {{count}} chat",
+      "other": "Sharing your location with {{count}} chats"
+    },
+    "body": "Until {{time}}",
+    "stopAction": "Stop sharing",
+    "aGroup": "a group",
+    "aFriend": "a friend",
+    "stoppedTitle": "Live location stopped",
+    "stoppedBody": "Lightning Piggy was closed in the background, so your live location stopped. Open the app to share again.",
+    "stoppedBodyOne": "Lightning Piggy was closed in the background, so your live location with {{name}} stopped. Open the app to share again."
   }
 }

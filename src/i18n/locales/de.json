@@ -2975,5 +2975,29 @@
     },
     "showChanges": "Geräteänderungen in Chats anzeigen",
     "showChangesHint": "Alpha: eine graue Zeile in Marmot-Chats, wenn jemand mit einem Gerät beitritt oder eines hinzufügt. Nur auf diesem Telefon; es wird nichts gesendet."
+  },
+  "liveLocationWire": {
+    "durationMins": "{{mins}} Min.",
+    "durationHours": "{{hours}} Std.",
+    "durationHoursMins": "{{hours}} Std. {{mins}} Min.",
+    "startText": "Ich teile meinen Live-Standort für {{duration}}",
+    "endText": "Live-Standort beendet"
+  },
+  "liveLocationTracking": {
+    "serviceTitle": "Du teilst deinen Live-Standort",
+    "serviceBody": "Lightning Piggy sendet deinen Standort weiter, während die App im Hintergrund läuft.",
+    "channelName": "Live-Standort",
+    "titleOne": "Du teilst deinen Standort mit {{name}}",
+    "titleMany": {
+      "one": "Du teilst deinen Standort in {{count}} Chat",
+      "other": "Du teilst deinen Standort in {{count}} Chats"
+    },
+    "body": "Bis {{time}}",
+    "stopAction": "Teilen beenden",
+    "aGroup": "einer Gruppe",
+    "aFriend": "einem Freund",
+    "stoppedTitle": "Live-Standort beendet",
+    "stoppedBody": "Lightning Piggy wurde im Hintergrund geschlossen, daher wurde dein Live-Standort beendet. Öffne die App, um ihn erneut zu teilen.",
+    "stoppedBodyOne": "Lightning Piggy wurde im Hintergrund geschlossen, daher wurde dein Live-Standort mit {{name}} beendet. Öffne die App, um ihn erneut zu teilen."
   }
 }

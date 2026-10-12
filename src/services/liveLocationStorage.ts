@@ -32,6 +32,10 @@ interface PersistedSession {
   startMarkerSent: boolean;
   endMarkerSent: boolean;
   protocol?: 'marmot';
+  groupId?: string;
+  label?: string;
+  stopRequested?: boolean;
+  wire?: 2;
 }
 
 /**
@@ -80,6 +84,14 @@ export async function loadPersistedSessions(pubkey: string): Promise<OutgoingSes
         startMarkerSent,
         endMarkerSent,
         ...(e.protocol === 'marmot' ? { protocol: 'marmot' as const } : {}),
+        ...(typeof e.groupId === 'string' && e.groupId.startsWith('marmot:')
+          ? { groupId: e.groupId }
+          : {}),
+        ...(typeof e.label === 'string' ? { label: e.label.slice(0, 80) } : {}),
+        // A share an older build started (no wire version) can't continue:
+        // its receivers expect the old pings. End it instead of resuming.
+        ...(e.stopRequested === true || e.wire !== 2 ? { stopRequested: true } : {}),
+        ...(e.wire === 2 ? { wire: 2 as const } : {}),
       });
     }
     return out;
@@ -111,6 +123,10 @@ export async function savePersistedSessions(
       startMarkerSent: session.startMarkerSent,
       endMarkerSent: session.endMarkerSent,
       ...(session.protocol ? { protocol: session.protocol } : {}),
+      ...(session.groupId ? { groupId: session.groupId } : {}),
+      ...(session.label ? { label: session.label } : {}),
+      ...(session.stopRequested ? { stopRequested: true } : {}),
+      ...(session.wire ? { wire: session.wire } : {}),
     });
   }
   try {

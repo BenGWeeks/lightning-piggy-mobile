@@ -2975,5 +2975,29 @@
     },
     "showChanges": "在聊天中显示设备变化",
     "showChangesHint": "Alpha：当有人通过设备加入或添加设备时，在 Marmot 聊天中显示一行灰色提示。仅在这部手机上显示，不会发送任何内容。"
+  },
+  "liveLocationWire": {
+    "durationMins": "{{mins}} 分钟",
+    "durationHours": "{{hours}} 小时",
+    "durationHoursMins": "{{hours}} 小时 {{mins}} 分钟",
+    "startText": "正在共享我的实时位置，时长 {{duration}}",
+    "endText": "实时位置共享已结束"
+  },
+  "liveLocationTracking": {
+    "serviceTitle": "正在共享你的实时位置",
+    "serviceBody": "应用在后台运行时，Lightning Piggy 会继续发送你的位置。",
+    "channelName": "实时位置",
+    "titleOne": "正在与 {{name}} 共享你的位置",
+    "titleMany": {
+      "one": "正在 {{count}} 个聊天中共享你的位置",
+      "other": "正在 {{count}} 个聊天中共享你的位置"
+    },
+    "body": "直到 {{time}}",
+    "stopAction": "停止共享",
+    "aGroup": "一个群组",
+    "aFriend": "一位好友",
+    "stoppedTitle": "实时位置共享已停止",
+    "stoppedBody": "Lightning Piggy 在后台被关闭，你的实时位置共享已停止。打开应用即可再次共享。",
+    "stoppedBodyOne": "Lightning Piggy 在后台被关闭，你与 {{name}} 的实时位置共享已停止。打开应用即可再次共享。"
   }
 }

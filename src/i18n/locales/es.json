@@ -2975,5 +2975,29 @@
     },
     "showChanges": "Mostrar cambios de dispositivos en los chats",
     "showChangesHint": "Alfa: una línea gris en los chats de Marmot cuando alguien se une con un dispositivo o añade uno. Solo se dibuja en este teléfono; no se envía nada."
+  },
+  "liveLocationWire": {
+    "durationMins": "{{mins}} min",
+    "durationHours": "{{hours}} h",
+    "durationHoursMins": "{{hours}} h {{mins}} min",
+    "startText": "Compartiendo mi ubicación en tiempo real durante {{duration}}",
+    "endText": "Ubicación en tiempo real finalizada"
+  },
+  "liveLocationTracking": {
+    "serviceTitle": "Compartiendo tu ubicación en tiempo real",
+    "serviceBody": "Lightning Piggy sigue enviando tu ubicación mientras la app está en segundo plano.",
+    "channelName": "Ubicación en tiempo real",
+    "titleOne": "Compartiendo tu ubicación con {{name}}",
+    "titleMany": {
+      "one": "Compartiendo tu ubicación con {{count}} chat",
+      "other": "Compartiendo tu ubicación con {{count}} chats"
+    },
+    "body": "Hasta las {{time}}",
+    "stopAction": "Dejar de compartir",
+    "aGroup": "un grupo",
+    "aFriend": "un amigo",
+    "stoppedTitle": "Ubicación en tiempo real detenida",
+    "stoppedBody": "Lightning Piggy se cerró en segundo plano y tu ubicación en tiempo real se detuvo. Abre la app para volver a compartirla.",
+    "stoppedBodyOne": "Lightning Piggy se cerró en segundo plano y tu ubicación en tiempo real con {{name}} se detuvo. Abre la app para volver a compartirla."
   }
 }

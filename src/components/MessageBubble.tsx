@@ -18,7 +18,6 @@ import {
   extractLightningAddress,
   extractSharedContact,
   isSecretModeTrigger,
-  formatTime,
   formatRelativeFuture,
 } from '../utils/messageContent';
 import type { PollTally } from '../utils/nip88Poll';
@@ -42,6 +41,8 @@ import { BubbleFooter } from './MessageBubbleFooter';
 import MessageSatsAmount from './MessageSatsAmount';
 import { PollBubble } from './PollBubble';
 import { LocationBubble } from './LocationBubble';
+import { liveKey } from '../services/liveLocationUpdateStore';
+import { liveLocationBubbleText } from '../utils/liveLocationBubbleText';
 
 // Stable empty arrays for the location-card mini-maps — LibreMiniMap
 // requires merchants/caches/events, but DM cards never plot any. Module
@@ -94,6 +95,10 @@ interface Props {
   liveLocationStatus?: Record<string, 'active' | 'paused' | 'ended' | 'expired' | undefined>;
   liveLocationRemainingMs?: Record<string, number | undefined>;
   onStopLiveLocation?: (sessionId: string) => void;
+  /** Group bubbles: the marker's sender — the live records are keyed
+   *  `sender:sessionId` so one member can't drive another's share (#1300).
+   *  1:1 bubbles omit it and read the owner-resolved `sessionId` key. */
+  liveLocationSender?: string;
   // Location-card mini-map plumbing (#206). All optional — group bubbles
   // pass none, so their cards just centre on the shared point with no
   // me-dot / peer marker.
@@ -171,6 +176,7 @@ const MessageBubble: React.FC<Props> = ({
   liveLocationStatus,
   liveLocationRemainingMs,
   onStopLiveLocation,
+  liveLocationSender,
   myLat,
   myLon,
   myAccuracyMetres,
@@ -347,7 +353,10 @@ const MessageBubble: React.FC<Props> = ({
     // ConversationScreen feeds this from its kind-20069 subscription.
     // Falls back to the marker's own coordinates so the bubble always
     // renders a map even before the first ping has landed.
-    const latest = liveLocationLatest?.[marker.sessionId];
+    const liveRecordKey = liveLocationSender
+      ? liveKey(liveLocationSender, marker.sessionId)
+      : marker.sessionId;
+    const latest = liveLocationLatest?.[liveRecordKey];
     // May be null on a coordless `end` marker (sender stopped with no fix).
     const displayLocation: SharedLocation | null = latest?.location ?? marker.location;
     // Map centre: my own live position on my outgoing share, the peer's
@@ -368,48 +377,16 @@ const MessageBubble: React.FC<Props> = ({
         ? { lat: displayLocation.lat, lon: displayLocation.lon, avatarUri: peerAvatarUri ?? null }
         : null;
     // Only `start` markers reach here (end markers return null above), so the wall-clock default is 'active' unless the context says otherwise.
-    const status = liveLocationStatus?.[marker.sessionId] ?? 'active';
-    const remaining = liveLocationRemainingMs?.[marker.sessionId] ?? null;
+    const status = liveLocationStatus?.[liveRecordKey] ?? 'active';
+    const remaining = liveLocationRemainingMs?.[liveRecordKey] ?? null;
     // Sender bubble while the share is still active gets a Stop button.
     // Receiver bubbles never see one (no `onStopLiveLocation` plumbed).
     const showStop = fromMe && status === 'active' && !!onStopLiveLocation;
-    const titleText =
-      status === 'ended' || status === 'expired'
-        ? t('messageBubble.liveLocationEnded')
-        : status === 'paused'
-          ? fromMe
-            ? t('messageBubble.liveLocationPaused')
-            : t('messageBubble.liveLocationPausedThem')
-          : fromMe
-            ? t('messageBubble.sharingLiveLocation')
-            : t('messageBubble.liveLocation');
-    const subtitleText: string | null = (() => {
-      if (status === 'ended' || status === 'expired') {
-        return latest
-          ? t('messageBubble.lastUpdate', { time: formatTime(Math.floor(latest.ts / 1000)) })
-          : null;
-      }
-      if (latest) {
-        const ageMs = Math.max(0, Date.now() - latest.ts);
-        const mins = Math.floor(ageMs / 60_000);
-        const secs = Math.floor((ageMs % 60_000) / 1000);
-        if (mins >= 1) return t('messageBubble.updatedMinsAgo', { mins });
-        return t('messageBubble.updatedSecsAgo', { secs });
-      }
-      return t('messageBubble.waitingForFirstUpdate');
-    })();
-    const remainingLabel: string | null = (() => {
-      if (status === 'ended' || status === 'expired') return null;
-      if (remaining === null) return null;
-      if (remaining <= 0) return t('messageBubble.ending');
-      const mins = Math.ceil(remaining / 60_000);
-      if (mins < 60) return t('messageBubble.minsLeft', { mins });
-      const hours = Math.floor(mins / 60);
-      const remMin = mins % 60;
-      return remMin === 0
-        ? t('messageBubble.hoursLeft', { hours })
-        : t('messageBubble.hoursMinsLeft', { hours, mins: remMin });
-    })();
+    const {
+      title: titleText,
+      subtitle: subtitleText,
+      remaining: remainingLabel,
+    } = liveLocationBubbleText({ status, fromMe, latest, remainingMs: remaining, now: Date.now() });
     return wrapWithReactionRow(
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
         <TouchableOpacity

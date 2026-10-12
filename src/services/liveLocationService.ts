@@ -28,8 +28,7 @@
  *      a kind in this range we can migrate.
  */
 
-import type { SharedLocation } from './locationService';
-import { buildOsmViewUrl, formatGeoMessage } from './locationService';
+import { buildOsmViewUrl, formatGeoMessage, type SharedLocation } from '../utils/geoMessage';
 
 /**
  * Ephemeral kind for live-location coordinate pings. NIP-01 reserves
@@ -67,6 +66,13 @@ export const LIVE_END_HEADER = '[live-location:end]';
 
 export type LiveLocationPhase = 'start' | 'end';
 
+/** Cheap check: is this stored text a live-location marker (its first line is
+ *  a sentinel)? Lets previews redact it without a full parse. */
+export function liveMarkerPhaseOf(text: string): LiveLocationPhase | null {
+  const first = text.trimStart().split('\n', 1)[0].trim();
+  return first === LIVE_START_HEADER ? 'start' : first === LIVE_END_HEADER ? 'end' : null;
+}
+
 export interface LiveLocationMarker {
   phase: LiveLocationPhase;
   sessionId: string;
@@ -79,6 +85,51 @@ export interface LiveLocationMarker {
   /** Initial (start) or final (end) coordinates the sender published.
    *  `null` on an `end` marker sent with no fix available. */
   location: SharedLocation | null;
+  /** NIP-17 shares only (#1300): the per-session key the coordinate updates
+   *  are signed with, and the shared secret they're NIP-44 encrypted under.
+   *  Announced inside the (end-to-end encrypted) start marker so updates
+   *  need no signer on either side. Absent on Marmot shares (updates ride
+   *  MLS) and on legacy shares (author-signed NIP-04 pings). */
+  updateKey?: LiveUpdateKey;
+  /** True for markers that arrived in the tagged v2 wire format (#1300):
+   *  their updates are session-key (NIP-17) or MLS (Marmot) — never the
+   *  legacy author-signed NIP-04 pings older builds send. */
+  v2?: boolean;
+}
+
+/** A NIP-17 share's update channel: the session pubkey (hex) that signs
+ *  every update and the 32-byte secret (hex) used as the NIP-44 key. */
+export interface LiveUpdateKey {
+  pubkey: string;
+  secret: string;
+}
+
+const HEX64_RE = /^[0-9a-f]{64}$/;
+
+/** Validate an update key from untrusted input (a received marker). */
+export function parseLiveUpdateKey(pubkey: unknown, secret: unknown): LiveUpdateKey | undefined {
+  if (typeof pubkey !== 'string' || typeof secret !== 'string') return undefined;
+  const pk = pubkey.toLowerCase();
+  const sk = secret.toLowerCase();
+  return HEX64_RE.test(pk) && HEX64_RE.test(sk) ? { pubkey: pk, secret: sk } : undefined;
+}
+
+function markerMeta(input: {
+  sessionId: string;
+  durationMs: number;
+  startedAt: number;
+  updateKey?: LiveUpdateKey;
+  v2?: boolean;
+}): string {
+  return JSON.stringify({
+    sessionId: input.sessionId,
+    durationMs: input.durationMs,
+    startedAt: input.startedAt,
+    ...(input.v2 ? { v: 2 } : {}),
+    ...(input.updateKey
+      ? { updatePubkey: input.updateKey.pubkey, updateSecret: input.updateKey.secret }
+      : {}),
+  });
 }
 
 /**
@@ -92,12 +143,10 @@ export function formatLiveStartMessage(input: {
   durationMs: number;
   startedAt: number;
   location: SharedLocation;
+  updateKey?: LiveUpdateKey;
+  v2?: boolean;
 }): string {
-  const meta = JSON.stringify({
-    sessionId: input.sessionId,
-    durationMs: input.durationMs,
-    startedAt: input.startedAt,
-  });
+  const meta = markerMeta(input);
   // The `geo:` URI lives inside `formatGeoMessage`'s fenced block so
   // existing clients render the start coordinates as a static map.
   return [LIVE_START_HEADER, meta, formatGeoMessage(input.location)].join('\n');
@@ -115,12 +164,9 @@ export function formatLiveEndMessage(input: {
   /** Final known coordinates, or `null` when no fix is available — we
    *  omit the geo URI rather than fabricate a 0,0 (Gulf of Guinea) pin. */
   location: SharedLocation | null;
+  v2?: boolean;
 }): string {
-  const meta = JSON.stringify({
-    sessionId: input.sessionId,
-    durationMs: input.durationMs,
-    startedAt: input.startedAt,
-  });
+  const meta = markerMeta(input);
   const lines = [LIVE_END_HEADER, meta];
   if (input.location) lines.push(formatGeoMessage(input.location));
   return lines.join('\n');
@@ -178,6 +224,8 @@ export function parseLiveLocationMarker(text: string): LiveLocationMarker | null
   let sessionId = '';
   let durationMs = 0;
   let startedAt = 0;
+  let updateKey: LiveUpdateKey | undefined;
+  let v2 = false;
   for (const line of text.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed.startsWith('{')) continue;
@@ -186,6 +234,9 @@ export function parseLiveLocationMarker(text: string): LiveLocationMarker | null
         sessionId?: unknown;
         durationMs?: unknown;
         startedAt?: unknown;
+        updatePubkey?: unknown;
+        updateSecret?: unknown;
+        v?: unknown;
       };
       if (typeof parsed.sessionId === 'string') sessionId = parsed.sessionId;
       if (typeof parsed.durationMs === 'number' && isFinite(parsed.durationMs)) {
@@ -194,6 +245,8 @@ export function parseLiveLocationMarker(text: string): LiveLocationMarker | null
       if (typeof parsed.startedAt === 'number' && isFinite(parsed.startedAt)) {
         startedAt = Math.round(parsed.startedAt);
       }
+      updateKey = parseLiveUpdateKey(parsed.updatePubkey, parsed.updateSecret);
+      v2 = parsed.v === 2;
       break;
     } catch {
       // Ignore — try next line / fall through to defaults.
@@ -205,6 +258,8 @@ export function parseLiveLocationMarker(text: string): LiveLocationMarker | null
     durationMs,
     startedAt,
     location,
+    ...(updateKey ? { updateKey } : {}),
+    ...(v2 ? { v2 } : {}),
   };
 }
 
@@ -221,6 +276,10 @@ export interface InboundLiveSession {
    *  first live ping arrives. */
   startLocation: SharedLocation;
   hasEnd: boolean;
+  /** NIP-17 session-key channel (#1300), when the start marker announced one. */
+  updateKey?: LiveUpdateKey;
+  /** Streams over Marmot (MLS) rather than relay pings. */
+  marmot?: boolean;
 }
 
 /**
@@ -235,7 +294,7 @@ export interface InboundLiveSession {
  * "friend" pin. Expiry is intentionally left to the caller.
  */
 export function collectInboundLiveSessions(
-  entries: { partnerPubkey: string; fromMe: boolean; text: string }[],
+  entries: { partnerPubkey: string; fromMe: boolean; text: string; protocol?: string }[],
 ): InboundLiveSession[] {
   const sentinel = LIVE_START_HEADER.slice(0, LIVE_START_HEADER.indexOf(':') + 1);
   const byKey = new Map<string, InboundLiveSession>();
@@ -257,6 +316,9 @@ export function collectInboundLiveSessions(
       durationMs: marker.durationMs,
       startLocation: marker.location,
       hasEnd: false,
+      ...(marker.updateKey ? { updateKey: marker.updateKey } : {}),
+      // A legacy marker in a Marmot thread (older build) still pings NIP-04.
+      ...(entry.protocol === 'marmot' && marker.v2 ? { marmot: true } : {}),
     });
   }
   const out: InboundLiveSession[] = [];

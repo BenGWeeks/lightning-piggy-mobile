@@ -1,23 +1,23 @@
 /**
- * Sender-side live-location share orchestrator. Owns:
+ * Sender-side live-location share orchestrator (#206, #1300). Owns:
  *
- *   - the `expo-location` watcher (one shared watcher across all
- *     active sessions — coordinates feed every recipient)
- *   - the state machine (active / paused / expired / ended)
- *   - the publishing loop for kind-20069 ephemeral pings
- *   - the start / end NIP-17 marker DMs
- *   - per-app-restart resume + cleanup of orphaned sessions
+ *   - the state machine (active / paused / expired / ended) + persistence
+ *   - the start / end markers — tagged chat messages every client renders
+ *     (see liveLocationWire.ts), sent over the chat's own transport: NIP-17,
+ *     a Marmot 1:1, or a Marmot group
+ *   - wiring the GPS tracker (background updates, foreground fallback) to the
+ *     per-session update dispatcher
+ *   - the Android "Stop sharing" notification, and stop on expiry / account
+ *     switch / sign-out
  *
- * The receiver side is owned by ConversationScreen — each conversation
- * subscribes to its peer's pings independently, so there's no value in
- * lifting it into a global context. The provider exposes:
+ * Coordinate updates never touch the user's signer: Marmot updates are MLS
+ * application messages, NIP-17 updates are signed by a per-session key
+ * (liveLocationSender.ts) — so shares keep running in the background for
+ * nsec, Amber and NIP-46 users alike.
  *
- *   - `startShare(recipientPubkey, durationMs)` — picks a fix, fires
- *     the start marker, and adds a session to the watcher set.
- *   - `stopShare(sessionId)` — flips the session to `ended` and fires
- *     the end marker.
- *   - `sessionsByRecipient` — read model for the in-thread bubble (so
- *     the bubble can show countdown + Stop without callbacks).
+ * The receiver side lives in the thread hooks (useLiveLocationThread) and
+ * the coalesced update store; the Marmot update listener is armed here, once
+ * per signed-in account.
  */
 
 import React, {
@@ -30,57 +30,67 @@ import React, {
   useState,
 } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
-import * as Location from 'expo-location';
-import * as SecureStore from 'expo-secure-store';
+import * as Notifications from 'expo-notifications';
 import * as nostrService from '../services/nostrService';
-import { createLiveLocationPingEvent } from '../services/nostrLiveLocation';
-import * as amberService from '../services/amberService';
-import * as nostrConnectService from '../services/nostrConnectService';
 import { useNostr } from './NostrContext';
 import type { DmProtocol } from '../utils/dmProtocol';
+import { formatTime } from '../utils/messageContent';
+import { MAX_DURATION_MS, expiryFor, newSessionId } from '../services/liveLocationService';
 import {
-  DEFAULT_PING_INTERVAL_MS,
-  LIVE_LOCATION_PING_KIND,
-  MAX_DURATION_MS,
-  LiveLocationPhase,
-  encodeLivePingPayload,
-  expiryFor,
-  formatLiveEndMessage,
-  formatLiveStartMessage,
-  newSessionId,
-  type LivePingPayload,
-} from '../services/liveLocationService';
+  liveMarkerDraft,
+  liveMarkerTags,
+  liveMarkerTextForRumor,
+  type LiveMarkerWire,
+} from '../services/liveLocationWire';
 import { getCurrentLocation, type SharedLocation } from '../services/locationService';
 import { loadPersistedSessions, savePersistedSessions } from '../services/liveLocationStorage';
 import { reduce, remainingMs, type OutgoingSession } from '../services/liveLocationStateMachine';
+import { transportFor } from '../services/liveLocationPolicy';
+import { newLiveUpdateChannel } from '../services/nostrLiveLocation';
+import {
+  deleteUpdateChannel,
+  saveUpdateChannel,
+  sendLiveUpdate,
+  sendMarmotGroupMarker,
+} from '../services/liveLocationSender';
+import {
+  getTrackingMode,
+  liveUpdateDispatcher,
+  reapOrphanedService,
+  setLiveLocationFixHandler,
+  startTracking,
+  stopTracking,
+} from '../services/liveLocationTracker';
+import {
+  dismissLiveShareNotification,
+  isLiveShareStopResponse,
+  liveShareNotificationText,
+  showLiveShareNotification,
+} from '../services/liveLocationNotification';
+import { clearLiveUpdates } from '../services/liveLocationUpdateStore';
+import { startMarmotLiveLocationReceiver } from '../services/marmotLiveLocationReceiver';
 
-// Mirrors the SecureStore key used by NostrContext for the user's nsec.
-// We re-read on every publish rather than caching so a logout / key
-// rotation can never leak a stale key into a still-running session.
-const NSEC_KEY = 'nostr_nsec';
+/** Where a share goes: a 1:1 chat (NIP-17 or Marmot) or a Marmot group. */
+export type LiveShareTarget =
+  | { kind: 'dm'; recipientPubkey: string; protocol?: DmProtocol; label?: string }
+  | { kind: 'group'; groupId: string; label?: string };
 
 export type LiveShareStartResult =
-  // `markerText` is the exact published DM body, so the screen's optimistic bubble dedupes byte-for-byte against the relay echo.
+  // `markerText` is the stored form of the published marker, so the screen's optimistic bubble dedupes byte-for-byte against the echo.
   | { ok: true; sessionId: string; location: SharedLocation; markerText: string }
   | { ok: false; error: string };
 
 export type LiveShareStopResult = { ok: true } | { ok: false; error: string };
 
 export interface LiveLocationContextValue {
-  /** Map of recipient pubkey → list of sessions (typically 0 or 1). */
+  /** Thread key (peer pubkey, or group id) → sessions (typically 0 or 1). */
   sessionsByRecipient: Map<string, OutgoingSession[]>;
-  /** Start a new live share. Picks a single GPS fix synchronously,
-   *  publishes the start marker DM, then begins the watcher. */
-  startShare: (
-    recipientPubkey: string,
-    durationMs: number,
-    protocol?: DmProtocol,
-  ) => Promise<LiveShareStartResult>;
-  /** Stop an in-progress share. Publishes the end marker DM and
-   *  flips the session to `ended` so storage can drop it. */
+  /** Start a new live share: one GPS fix, the start marker, then tracking. */
+  startShare: (target: LiveShareTarget, durationMs: number) => Promise<LiveShareStartResult>;
+  /** Stop an in-progress share: publishes the end marker, ends the session. */
   stopShare: (sessionId: string) => Promise<LiveShareStopResult>;
   /** Cheap convenience for the conversation header / bubble. */
-  hasActiveShareWith: (recipientPubkey: string) => boolean;
+  hasActiveShareWith: (threadKey: string) => boolean;
   /** Best-effort remaining lifetime — `null` when no session matches. */
   remainingMsForSession: (sessionId: string) => number | null;
 }
@@ -95,36 +105,76 @@ export function useLiveLocation(): LiveLocationContextValue {
   return ctx;
 }
 
+/** A fix younger than this stands in for a fresh one on stop (no GPS request). */
+const FRESH_FIX_MS = 60_000;
+
 export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { pubkey, isLoggedIn, signerType, relays, sendDirectMessage } = useNostr();
+  const { pubkey, isLoggedIn, signerType, relays, sendDirectRumor } = useNostr();
   const [sessions, setSessions] = useState<Map<string, OutgoingSession>>(() => new Map());
 
-  // Mirror state into a ref so the watcher / interval can read the
-  // current map without re-binding callbacks every render.
+  // Mirror state into a ref so the fix handler / ticks read the current map
+  // without re-binding every render.
   const sessionsRef = useRef(sessions);
+  // The account whose stored shares have been read into `sessions`. Persisting
+  // before that would overwrite them — on an account switch the first render
+  // still holds the previous account's map.
+  const hydratedForRef = useRef<string | null>(null);
   useEffect(() => {
     sessionsRef.current = sessions;
-    // Best-effort persist on every transition, scoped to the active
-    // identity so an account switch can't resume these under another key.
-    if (pubkey) void savePersistedSessions(pubkey, sessions.values());
+    // Best-effort persist on every transition, scoped to the active identity
+    // so an account switch can't resume these under another key.
+    if (pubkey && hydratedForRef.current === pubkey) {
+      void savePersistedSessions(
+        pubkey,
+        [...sessions.values()].filter((s) => s.senderPubkey === pubkey),
+      );
+    }
   }, [sessions, pubkey]);
-
-  // Reset the in-memory session set whenever the logged-in identity
-  // changes (or the user logs out), so a share started under account A
-  // can never publish pings / markers under account B's key.
-  const lastIdentityRef = useRef<string | null>(pubkey ?? null);
-  useEffect(() => {
-    const current = isLoggedIn ? (pubkey ?? null) : null;
-    if (lastIdentityRef.current === current) return;
-    lastIdentityRef.current = current;
-    setSessions(new Map());
-  }, [pubkey, isLoggedIn]);
 
   const dispatch = useCallback((action: Parameters<typeof reduce>[1]) => {
     setSessions((prev) => reduce(prev, action));
   }, []);
 
-  // ---- Helpers that need the current signer / relay set --------------------
+  // Freshest fix the tracker delivered (end-marker fallback) + start fixes.
+  const lastFixRef = useRef<{ location: SharedLocation; at: number } | null>(null);
+  // Shares being stopped: excluded from updates before their state commits.
+  const stoppingRef = useRef<Set<string>>(new Set());
+  const stopInFlightRef = useRef<Set<string>>(new Set());
+  const startLocationRef = useRef<Map<string, SharedLocation>>(new Map());
+
+  // Account switch / sign-out: stop sharing now. The departing account's
+  // unfinished shares are persisted with `stopRequested`, so its next hydrate
+  // sends their end markers instead of resuming them.
+  const lastIdentityRef = useRef<string | null>(pubkey ?? null);
+  useEffect(() => {
+    const current = isLoggedIn ? (pubkey ?? null) : null;
+    const previous = lastIdentityRef.current;
+    if (previous === current) return;
+    lastIdentityRef.current = current;
+    hydratedForRef.current = null;
+    // First identity on a cold start: nothing to stop (a background share may
+    // be running and is picked up by the hydrate below).
+    if (!previous) return;
+    const leftover = [...sessionsRef.current.values()].filter((s) => s.status !== 'ended');
+    if (leftover.length > 0) {
+      void savePersistedSessions(
+        previous,
+        leftover.map((s) => ({ ...s, stopRequested: true })),
+      );
+      for (const s of leftover) void deleteUpdateChannel(s.sessionId);
+    }
+    liveUpdateDispatcher.reset();
+    clearLiveUpdates();
+    void stopTracking();
+    void dismissLiveShareNotification();
+    setSessions(new Map());
+  }, [pubkey, isLoggedIn]);
+
+  // Marmot coordinate updates from peers → the coalesced update store.
+  useEffect(() => {
+    if (!pubkey || !isLoggedIn) return;
+    return startMarmotLiveLocationReceiver(pubkey);
+  }, [pubkey, isLoggedIn]);
 
   const writeRelays = useMemo(
     () =>
@@ -136,194 +186,105 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       ),
     [relays],
   );
+  const writeRelaysRef = useRef(writeRelays);
+  useEffect(() => {
+    writeRelaysRef.current = writeRelays;
+  }, [writeRelays]);
 
-  // Publish a single ephemeral ping. Returns a boolean rather than
-  // throwing — the watcher loop is best-effort and a transient relay
-  // failure should not kill the entire share.
-  const publishPing = useCallback(
-    async (session: OutgoingSession, payload: LivePingPayload): Promise<boolean> => {
-      if (!pubkey) return false;
-      const json = encodeLivePingPayload(payload);
-      try {
-        if (signerType === 'nsec') {
-          const nsec = await SecureStore.getItemAsync(NSEC_KEY);
-          if (!nsec) return false;
-          const { secretKey } = nostrService.decodeNsec(nsec);
-          const event = await createLiveLocationPingEvent(
-            secretKey,
-            session.recipientPubkey,
-            session.sessionId,
-            json,
-            LIVE_LOCATION_PING_KIND,
-          );
-          await nostrService.signAndPublishEvent(event, secretKey, writeRelays);
-          return true;
-        }
-        if (signerType === 'amber') {
-          const ciphertext = await amberService.requestNip04Encrypt(
-            json,
-            session.recipientPubkey,
-            pubkey,
-          );
-          if (!ciphertext) return false;
-          const event = {
-            kind: LIVE_LOCATION_PING_KIND,
-            created_at: Math.floor(Date.now() / 1000),
-            tags: [
-              ['p', session.recipientPubkey],
-              ['d', session.sessionId],
-            ],
-            content: ciphertext,
-          };
-          const { event: signedJson } = await amberService.requestEventSignature(
-            JSON.stringify(event),
-            '',
-            pubkey,
-          );
-          if (!signedJson) return false;
-          const signed = JSON.parse(signedJson);
-          await nostrService.publishSignedEvent(signed, writeRelays);
-          return true;
-        }
-        if (signerType === 'nip46') {
-          // Same Encrypt → SignEvent → Publish shape as the Amber path,
-          // over the bunker relay round-trip.
-          const ciphertext = await nostrConnectService.requestNip04Encrypt(
-            json,
-            session.recipientPubkey,
-            pubkey,
-          );
-          if (!ciphertext) return false;
-          const event = {
-            kind: LIVE_LOCATION_PING_KIND,
-            created_at: Math.floor(Date.now() / 1000),
-            tags: [
-              ['p', session.recipientPubkey],
-              ['d', session.sessionId],
-            ],
-            content: ciphertext,
-          };
-          const { event: signedJson } = await nostrConnectService.requestEventSignature(
-            JSON.stringify(event),
-            '',
-            pubkey,
-          );
-          if (!signedJson) return false;
-          const signed = JSON.parse(signedJson);
-          await nostrService.publishSignedEvent(signed, writeRelays);
-          return true;
-        }
-      } catch {
-        // Silent — single ping failures are normal on flaky networks.
-      }
-      return false;
-    },
-    [pubkey, signerType, writeRelays],
-  );
+  // ---- Markers -------------------------------------------------------------
 
-  // Send the start / end marker as a regular DM via `sendDirectMessage`
-  // (NIP-17 gift-wrapped in this codebase) so the receiver's threaded view —
-  // which already merges DM events into the conversation — picks it up
-  // without any new transport plumbing.
+  // Start / end markers: a tagged chat message on the chat's own transport.
+  // 1:1 (NIP-17 or Marmot) goes through the signer-aware DM seam; a Marmot
+  // group through the group's MLS session.
   const sendMarker = useCallback(
-    async (
-      session: OutgoingSession,
-      phase: LiveLocationPhase,
-      location: SharedLocation | null,
-    ): Promise<{ ok: boolean; text: string }> => {
-      const text =
-        phase === 'start'
-          ? formatLiveStartMessage({
-              sessionId: session.sessionId,
-              durationMs: session.durationMs,
-              startedAt: session.startedAt,
-              // The start path always supplies a fresh fix.
-              location: location ?? { lat: 0, lon: 0, accuracyMeters: null },
-            })
-          : formatLiveEndMessage({
-              sessionId: session.sessionId,
-              durationMs: session.durationMs,
-              startedAt: session.startedAt,
-              location,
-            });
-      const result = await sendDirectMessage(
-        session.recipientPubkey,
-        text,
+    async (session: OutgoingSession, wire: LiveMarkerWire): Promise<boolean> => {
+      if (!pubkey) return false;
+      const draft = liveMarkerDraft(wire);
+      if (session.groupId) return sendMarmotGroupMarker(pubkey, session.groupId, draft);
+      const result = await sendDirectRumor(
+        [session.recipientPubkey],
+        {
+          kind: draft.kind,
+          created_at: Math.floor(Date.now() / 1000),
+          // The p tag also makes the rumor id recipient-specific.
+          tags: [...draft.tags, ['p', session.recipientPubkey]],
+          content: draft.content,
+          pubkey,
+        },
         session.protocol ? { protocol: session.protocol } : undefined,
       );
-      return { ok: result.success, text };
+      return result.success;
     },
-    [sendDirectMessage],
+    [pubkey, sendDirectRumor],
   );
 
   // ---- Lifecycle: start / stop ------------------------------------------
 
   const startShare = useCallback(
-    async (
-      recipientPubkey: string,
-      durationMs: number,
-      protocol?: DmProtocol,
-    ): Promise<LiveShareStartResult> => {
-      const markerProtocol = protocol === 'marmot' ? ('marmot' as const) : undefined;
+    async (target: LiveShareTarget, durationMs: number): Promise<LiveShareStartResult> => {
       if (!pubkey || !isLoggedIn) return { ok: false, error: 'Not logged in' };
       const fix = await getCurrentLocation();
       if (!fix.ok) return { ok: false, error: fix.message };
       const sessionId = newSessionId();
       const now = Date.now();
-      // Cap the duration once, up-front, so the start marker payload and
-      // the `installed` mirror match the value the reducer stores.
       const cappedDurationMs = Math.max(0, Math.min(MAX_DURATION_MS, durationMs));
-      // Optimistically install the session so the bubble renders even
-      // if the start marker DM is slow to publish.
-      dispatch({
-        type: 'start',
-        sessionId,
-        senderPubkey: pubkey,
-        recipientPubkey,
-        durationMs: cappedDurationMs,
-        now,
-        protocol: markerProtocol,
-      });
+      const groupId = target.kind === 'group' ? target.groupId : undefined;
+      const protocol =
+        groupId || (target.kind === 'dm' && target.protocol === 'marmot')
+          ? ('marmot' as const)
+          : undefined;
       const installed: OutgoingSession = {
         sessionId,
         senderPubkey: pubkey,
-        recipientPubkey,
+        recipientPubkey: target.kind === 'group' ? target.groupId : target.recipientPubkey,
         startedAt: now,
         durationMs: cappedDurationMs,
         lastPingAt: null,
         status: 'active',
         startMarkerSent: false,
         endMarkerSent: false,
-        ...(markerProtocol ? { protocol: markerProtocol } : {}),
+        ...(protocol ? { protocol } : {}),
+        ...(groupId ? { groupId } : {}),
+        ...(target.label ? { label: target.label } : {}),
+        wire: 2,
       };
-      // Remember the start fix as the last-ditch end-marker fallback.
+      // NIP-17 only: a per-session update channel, announced in the marker.
+      const channel = protocol ? null : newLiveUpdateChannel();
+      if (channel) await saveUpdateChannel(sessionId, channel);
+      // Install optimistically so the bubble renders while the marker publishes.
+      dispatch({ type: 'start', ...installed, now });
+      // Start tracking NOW, while the app is certainly in front: Android won't
+      // start the location service from the background, and the user may leave
+      // the app before the marker has published (the effect below adopts it).
+      void startTracking({ owner: pubkey, relays: writeRelaysRef.current }).catch(() => undefined);
       startLocationRef.current.set(sessionId, fix.location);
-      lastWatcherLocationRef.current = fix.location;
-      const startSent = await sendMarker(installed, 'start', fix.location);
-      if (!startSent.ok) {
-        // Roll back — publish failed, no point keeping the watcher. Drop the
-        // start-fix ref too (mirrors the stop path) so repeated offline retries
-        // don't grow the map unbounded for the provider's lifetime.
+      const wire: LiveMarkerWire = {
+        phase: 'start',
+        sessionId,
+        startedAt: now,
+        durationMs: cappedDurationMs,
+        location: fix.location,
+        ...(channel ? { updateKey: { pubkey: channel.pubkey, secret: channel.secret } } : {}),
+      };
+      if (!(await sendMarker(installed, wire))) {
+        // Roll back — nobody was told, so nothing to stream to.
         dispatch({ type: 'stop', sessionId });
         startLocationRef.current.delete(sessionId);
+        if (channel) void deleteUpdateChannel(sessionId);
         return { ok: false, error: 'Failed to send live-location start marker.' };
       }
       dispatch({ type: 'startMarkerSent', sessionId });
-      // First ping fires immediately so the receiver has a coordinate
-      // before the 30 s cadence kicks in.
-      void publishPing(installed, {
-        lat: fix.location.lat,
-        lon: fix.location.lon,
-        accuracy: fix.location.accuracyMeters,
-        heading: null,
-        ts: now,
+      // The start marker carried this fix: measure the cadence from it.
+      liveUpdateDispatcher.seed(sessionId, fix.location, now);
+      return {
+        ok: true,
         sessionId,
-      }).then((ok) => {
-        if (ok) dispatch({ type: 'ping', sessionId, now: Date.now() });
-      });
-      return { ok: true, sessionId, location: fix.location, markerText: startSent.text };
+        location: fix.location,
+        // Stored text exactly as the echo will produce it (via the wire tags).
+        markerText: liveMarkerTextForRumor({ kind: 14, tags: liveMarkerTags(wire) }) ?? '',
+      };
     },
-    [pubkey, isLoggedIn, dispatch, sendMarker, publishPing],
+    [pubkey, isLoggedIn, dispatch, sendMarker],
   );
 
   const stopShare = useCallback(
@@ -331,150 +292,162 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       const session = sessionsRef.current.get(sessionId);
       if (!session) return { ok: false, error: 'Session not found' };
       if (session.status === 'ended') return { ok: true };
-      // Best-effort final fix so the end marker carries the most recent
-      // coordinates; fall back to the last watcher fix, then the start
-      // location, and finally omit coords rather than send a 0,0 pin.
-      const fix = await getCurrentLocation();
-      const finalLocation: SharedLocation | null = fix.ok
-        ? fix.location
-        : (lastWatcherLocationRef.current ?? startLocationRef.current.get(sessionId) ?? null);
-      const sent = await sendMarker(session, 'end', finalLocation);
-      if (sent.ok) {
+      // One end marker at a time per share (the drain loop retries too).
+      if (stopInFlightRef.current.has(sessionId)) return { ok: true };
+      stopInFlightRef.current.add(sessionId);
+      // Stop streaming NOW, and persist that (stopRequested) before the slow
+      // part — the final fix and the end marker — so neither a fix arriving
+      // meanwhile nor a restart / the headless tracker resumes it. A failed
+      // end marker stays retryable: the drain loop below re-sends it.
+      stoppingRef.current.add(sessionId);
+      dispatch({ type: 'stopPending', sessionId });
+      try {
+        // Final position for the end marker: a fresh tracker fix if we have
+        // one (no extra GPS request — this may run in the background), else a
+        // new fix, else the start location; never a fabricated 0,0 pin.
+        const recent = lastFixRef.current;
+        let finalLocation: SharedLocation | null =
+          recent && Date.now() - recent.at < FRESH_FIX_MS ? recent.location : null;
+        if (!finalLocation) {
+          const fix = await getCurrentLocation();
+          finalLocation = fix.ok
+            ? fix.location
+            : (recent?.location ?? startLocationRef.current.get(sessionId) ?? null);
+        }
+        const sent = await sendMarker(session, {
+          phase: 'end',
+          sessionId,
+          startedAt: session.startedAt,
+          durationMs: session.durationMs,
+          location: finalLocation,
+        });
+        if (!sent) return { ok: false, error: 'Failed to send live-location end marker.' };
         dispatch({ type: 'endMarkerSent', sessionId });
         dispatch({ type: 'stop', sessionId });
         startLocationRef.current.delete(sessionId);
+        stoppingRef.current.delete(sessionId);
+        liveUpdateDispatcher.forget(sessionId);
+        void deleteUpdateChannel(sessionId);
         return { ok: true };
+      } finally {
+        stopInFlightRef.current.delete(sessionId);
       }
-      // End marker failed — keep the session in a retryable, non-active
-      // state (watcher stops, but it isn't ended) so the 5 s tick-drain
-      // loop retries the end marker until the peer is told we stopped.
-      dispatch({ type: 'stopPending', sessionId });
-      return { ok: false, error: 'Failed to send live-location end marker.' };
     },
     [dispatch, sendMarker],
   );
-
-  // ---- Watcher loop ------------------------------------------------------
-
-  const watcherSubRef = useRef<Location.LocationSubscription | null>(null);
-  const lastPublishedAtRef = useRef<Map<string, number>>(new Map());
-  // Most-recent coordinate the watcher delivered. Used as the end-marker
-  // fallback when a fresh fix isn't available on stop, so we never send
-  // a fabricated 0,0 pin.
-  const lastWatcherLocationRef = useRef<SharedLocation | null>(null);
-  // Per-session start coordinates — last-ditch end-marker fallback if the
-  // watcher never produced a fix (e.g. stopped before the first sample).
-  const startLocationRef = useRef<Map<string, SharedLocation>>(new Map());
-
-  // Derived: does ANY session still need the GPS watch? The effect below keys
-  // off this boolean rather than the whole `sessions` Map, so a 30s ping
-  // dispatch — or the burst of hydrate dispatches on cold-start resume —
-  // doesn't re-run the effect and race a second `watchPositionAsync` into a
-  // leaked watcher (battery drain on the GrapheneOS target). See #759.
-  const anyActiveSession = Array.from(sessions.values()).some((s) => s.status === 'active');
-
-  // Start / stop a single shared GPS watcher whenever the active-session
-  // count crosses 0. One coordinate stream feeds every active recipient
-  // — no point opening N watchers. Live session data is read inside the
-  // callback via `sessionsRef.current`, so dropping `sessions` from the deps
-  // doesn't stale it.
+  const stopShareRef = useRef(stopShare);
   useEffect(() => {
-    let cancelled = false;
-    if (!anyActiveSession) {
-      watcherSubRef.current?.remove();
-      watcherSubRef.current = null;
-      lastPublishedAtRef.current.clear();
+    stopShareRef.current = stopShare;
+  }, [stopShare]);
+
+  // ---- Fixes → updates -------------------------------------------------
+
+  // The tracker hands every fix here while mounted; the shared dispatcher
+  // applies the cadence + in-flight rules and sends per transport. No React
+  // state changes per fix.
+  useEffect(() => {
+    if (!pubkey) return;
+    const owner = pubkey;
+    setLiveLocationFixHandler((fix) => {
+      lastFixRef.current = { location: fix.location, at: Date.now() };
+      const live = [...sessionsRef.current.values()].filter(
+        (s) => !stoppingRef.current.has(s.sessionId),
+      );
+      // Returned so the background task waits for the sends to finish.
+      return liveUpdateDispatcher.handleFix(fix, live, (s, p) =>
+        sendLiveUpdate(owner, s, p, writeRelaysRef.current),
+      );
+    });
+    // Unmounting (e.g. the UI was destroyed) leaves tracking running: the
+    // tracker's headless path takes over until the share ends.
+    return () => setLiveLocationFixHandler(null);
+  }, [pubkey]);
+
+  // Derived: does ANY session still stream? The tracking effect keys off this
+  // (and the notification text), not the whole Map, so state churn can't race
+  // a second tracker start (#759).
+  const activeSessions = useMemo(
+    () => [...sessions.values()].filter((s) => s.status === 'active'),
+    [sessions],
+  );
+  const activeKey = activeSessions.map((s) => `${s.sessionId}:${s.label ?? ''}`).join('|');
+
+  useEffect(() => {
+    if (!pubkey) return;
+    const active = [...sessionsRef.current.values()].filter((s) => s.status === 'active');
+    if (active.length === 0) {
+      void stopTracking().then(() =>
+        AppState.currentState === 'active' ? reapOrphanedService() : undefined,
+      );
+      void dismissLiveShareNotification();
       return;
     }
-    if (watcherSubRef.current) return; // already running
+    let cancelled = false;
     void (async () => {
-      try {
-        // Permission check — `getCurrentLocation` already ran at start
-        // time so this is normally a no-op, but a user can revoke
-        // mid-session via the OS settings shade.
-        const perm = await Location.getForegroundPermissionsAsync();
-        if (!perm.granted) return;
-        const sub = await Location.watchPositionAsync(
-          {
-            accuracy: Location.Accuracy.High,
-            timeInterval: DEFAULT_PING_INTERVAL_MS,
-            distanceInterval: 0,
-          },
-          (pos) => {
-            if (cancelled) return;
-            const now = Date.now();
-            // Cache the freshest fix for the end-marker fallback.
-            lastWatcherLocationRef.current = {
-              lat: pos.coords.latitude,
-              lon: pos.coords.longitude,
-              accuracyMeters:
-                typeof pos.coords.accuracy === 'number' && isFinite(pos.coords.accuracy)
-                  ? Math.round(pos.coords.accuracy)
-                  : null,
-            };
-            for (const session of sessionsRef.current.values()) {
-              if (session.status !== 'active') continue;
-              // Per-session debounce: keep one publish per session per
-              // `DEFAULT_PING_INTERVAL_MS` even if the OS hands us a
-              // burst of fixes (Android's fused provider is bursty).
-              const last = lastPublishedAtRef.current.get(session.sessionId) ?? 0;
-              if (now - last < DEFAULT_PING_INTERVAL_MS - 1000) continue;
-              lastPublishedAtRef.current.set(session.sessionId, now);
-              const payload: LivePingPayload = {
-                lat: pos.coords.latitude,
-                lon: pos.coords.longitude,
-                accuracy:
-                  typeof pos.coords.accuracy === 'number' && isFinite(pos.coords.accuracy)
-                    ? Math.round(pos.coords.accuracy)
-                    : null,
-                heading:
-                  typeof pos.coords.heading === 'number' && isFinite(pos.coords.heading)
-                    ? Math.round(pos.coords.heading)
-                    : null,
-                ts: now,
-                sessionId: session.sessionId,
-              };
-              void publishPing(session, payload).then((ok) => {
-                if (ok) dispatch({ type: 'ping', sessionId: session.sessionId, now: Date.now() });
-              });
+      const mode = await startTracking({ owner: pubkey, relays: writeRelaysRef.current });
+      // The Stop notification only makes sense while sharing survives the
+      // background (a foreground-only share pauses there).
+      if (cancelled || mode !== 'background') return;
+      const { title, body } = liveShareNotificationText(
+        active.map((s) => ({
+          label: s.label,
+          groupId: s.groupId,
+          expiresAt: expiryFor(s.startedAt, s.durationMs),
+        })),
+        (ms) => formatTime(Math.floor(ms / 1000)),
+      );
+      const [only] = active;
+      await showLiveShareNotification({
+        title,
+        body,
+        ...(active.length === 1
+          ? {
+              route: only.groupId
+                ? { kind: 'group' as const, groupId: only.groupId }
+                : { kind: 'dm' as const, conversationPubkey: only.recipientPubkey },
             }
-          },
-        );
-        if (cancelled) {
-          sub.remove();
-          return;
-        }
-        watcherSubRef.current = sub;
-      } catch {
-        // Best-effort; we don't surface an error UI here because the
-        // bubble already shows "Last update: …" which will stop ticking.
-      }
+          : {}),
+      });
     })();
     return () => {
       cancelled = true;
     };
-  }, [anyActiveSession, publishPing, dispatch]);
+  }, [activeKey, pubkey]);
 
-  // ---- Expiry tick + end-marker publish ---------------------------------
+  // "Stop sharing" pressed on the notification (the app stays in the background).
+  useEffect(() => {
+    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      if (!isLiveShareStopResponse(response)) return;
+      for (const s of sessionsRef.current.values()) {
+        if (s.status === 'active' || s.status === 'paused') void stopShareRef.current(s.sessionId);
+      }
+      void dismissLiveShareNotification();
+    });
+    return () => sub.remove();
+  }, []);
+
+  // ---- Expiry tick + end-marker drain ----------------------------------
 
   useEffect(() => {
     const id = setInterval(() => {
-      const now = Date.now();
-      dispatch({ type: 'tickExpiryCheck', now });
-      // Drain any expired sessions whose end marker hasn't fired yet.
+      dispatch({ type: 'tickExpiryCheck', now: Date.now() });
+      const foreground = AppState.currentState === 'active';
       for (const session of sessionsRef.current.values()) {
-        if (session.status === 'expired' && !session.endMarkerSent) {
-          // Synthesise a "no last fix" marker if we never saw one —
-          // stopShare's getCurrentLocation will retry one more time.
-          void stopShare(session.sessionId);
-        }
+        if (session.status !== 'expired' || session.endMarkerSent) continue;
+        // A NIP-17 end marker is a real DM: with a remote signer it needs the
+        // app in front (Amber / a bunker can't prompt from the background), so
+        // it waits; Marmot and nsec markers go now.
+        if (!foreground && transportFor(session) === 'nip17' && signerType !== 'nsec') continue;
+        void stopShareRef.current(session.sessionId);
       }
     }, 5000);
     return () => clearInterval(id);
-  }, [dispatch, stopShare]);
+  }, [dispatch, signerType]);
 
-  // ---- Pause / resume on background -------------------------------------
+  // ---- Background ------------------------------------------------------
 
+  // With background updates a share keeps streaming when the app leaves the
+  // foreground. Only the foreground-only fallback pauses (and resumes).
   useEffect(() => {
     const onChange = (next: AppStateStatus) => {
       const now = Date.now();
@@ -484,10 +457,14 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
             dispatch({ type: 'resume', sessionId: session.sessionId, now });
           }
         }
-      } else {
-        // Pause active sessions when backgrounded — the OS will
-        // throttle / suspend our watcher anyway, and pausing keeps the
-        // remaining-time UI honest.
+        // A share stuck on the foreground-only watcher (the service couldn't
+        // start — e.g. the app was left mid-start): retry now we're in front.
+        const owner = lastIdentityRef.current;
+        const live = [...sessionsRef.current.values()].some((s) => s.status === 'active');
+        if (owner && live && getTrackingMode() === 'foreground') {
+          void startTracking({ owner, relays: writeRelaysRef.current }).catch(() => undefined);
+        }
+      } else if (getTrackingMode() !== 'background') {
         for (const session of sessionsRef.current.values()) {
           if (session.status === 'active') {
             dispatch({ type: 'pause', sessionId: session.sessionId });
@@ -506,14 +483,19 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     let cancelled = false;
     void (async () => {
       const persisted = await loadPersistedSessions(pubkey);
-      if (cancelled || persisted.length === 0) return;
+      if (cancelled) return;
+      hydratedForRef.current = pubkey;
+      if (persisted.length === 0) return;
       setSessions((prev) => {
         const next = new Map(prev);
         const now = Date.now();
         for (const session of persisted) {
           if (next.has(session.sessionId)) continue;
-          // Past expiry → `expired` (next tick publishes the end marker); else resume now if already foregrounded — cold start fires no AppState transition, so a `paused` hydrate would never resume — falling back to `paused` only when hydrating in the background.
-          const expired = now >= expiryFor(session.startedAt, session.durationMs);
+          // Past expiry, or the account was switched away mid-share → `expired`
+          // (the drain sends the end marker). Else resume if foregrounded — a
+          // cold start fires no AppState transition — or `paused` in background.
+          const expired =
+            session.stopRequested || now >= expiryFor(session.startedAt, session.durationMs);
           const resumeNow = AppState.currentState === 'active';
           next.set(session.sessionId, {
             ...session,
@@ -541,8 +523,8 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   }, [sessions]);
 
   const hasActiveShareWith = useCallback(
-    (recipientPubkey: string): boolean => {
-      const arr = sessionsByRecipient.get(recipientPubkey) ?? [];
+    (threadKey: string): boolean => {
+      const arr = sessionsByRecipient.get(threadKey) ?? [];
       return arr.some((s) => s.status === 'active' || s.status === 'paused');
     },
     [sessionsByRecipient],

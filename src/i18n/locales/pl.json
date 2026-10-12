@@ -3011,5 +3011,31 @@
     },
     "showChanges": "Pokazuj zmiany urządzeń na czatach",
     "showChangesHint": "Alfa: szara linia na czatach Marmot, gdy ktoś dołącza z urządzenia lub dodaje urządzenie. Widoczna tylko na tym telefonie; nic nie jest wysyłane."
+  },
+  "liveLocationWire": {
+    "durationMins": "{{mins}} min",
+    "durationHours": "{{hours}} godz.",
+    "durationHoursMins": "{{hours}} godz. {{mins}} min",
+    "startText": "Udostępniam swoją lokalizację na żywo przez {{duration}}",
+    "endText": "Udostępnianie lokalizacji na żywo zakończone"
+  },
+  "liveLocationTracking": {
+    "serviceTitle": "Udostępniasz swoją lokalizację na żywo",
+    "serviceBody": "Lightning Piggy wysyła Twoją lokalizację, gdy aplikacja działa w tle.",
+    "channelName": "Lokalizacja na żywo",
+    "titleOne": "Udostępniasz lokalizację: {{name}}",
+    "titleMany": {
+      "one": "Udostępniasz lokalizację w {{count}} czacie",
+      "few": "Udostępniasz lokalizację w {{count}} czatach",
+      "many": "Udostępniasz lokalizację w {{count}} czatach",
+      "other": "Udostępniasz lokalizację w {{count}} czatu"
+    },
+    "body": "Do {{time}}",
+    "stopAction": "Przestań udostępniać",
+    "aGroup": "grupa",
+    "aFriend": "znajomy",
+    "stoppedTitle": "Udostępnianie lokalizacji zatrzymane",
+    "stoppedBody": "Lightning Piggy została zamknięta w tle, więc udostępnianie lokalizacji na żywo zatrzymało się. Otwórz aplikację, aby udostępnić ponownie.",
+    "stoppedBodyOne": "Lightning Piggy została zamknięta w tle, więc udostępnianie lokalizacji na żywo ({{name}}) zatrzymało się. Otwórz aplikację, aby udostępnić ponownie."
   }
 }

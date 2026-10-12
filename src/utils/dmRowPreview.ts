@@ -3,6 +3,7 @@ import { pollPreviewFromContent } from './nip88Poll';
 import { NWC_SHARE_KIND, nwcSharePreviewFromContent } from './nwcShareMessage';
 import { isMarmotKind, MARMOT_WELCOME_KIND } from './dmProtocol';
 import { t } from '../i18n';
+import { liveMarkerPhaseOf } from '../services/liveLocationService';
 
 /**
  * Secret-free inbox / notification preview for a stored DM row, dispatched by
@@ -37,6 +38,13 @@ export function dmRowPreview(content: string, wireKind: number, locale?: string)
     return mime.startsWith('audio/')
       ? `🎤 ${t('messageBubble.voiceMessagePreview')}`
       : '📎 Attachment';
+  }
+  // Live-location markers: the stored text carries session metadata (and a
+  // NIP-17 share's update secret) — show a label, never the raw marker. The
+  // raw marker travels in the entry's `renderText` (dmInbox / dmWrapIngest).
+  const livePhase = liveMarkerPhaseOf(content);
+  if (livePhase) {
+    return `\u{1F4CD} ${t(livePhase === 'start' ? 'messageBubble.liveLocation' : 'messageBubble.liveLocationEnded')}`;
   }
   if (isMarmotKind(wireKind))
     return `🔒 ${t(wireKind === MARMOT_WELCOME_KIND ? 'messageBubble.marmotInvitePreview' : 'messageBubble.marmotMessagePreview')}`;

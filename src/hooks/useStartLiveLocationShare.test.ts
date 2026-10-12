@@ -15,15 +15,15 @@ jest.mock('../services/locationService', () => ({
 const alert = jest.mocked(Alert.alert);
 const getLocation = jest.mocked(getCurrentLocation);
 const location = { lat: 51.5074, lon: -0.1278, accuracyMeters: 5 };
+const target = { kind: 'dm' as const, recipientPubkey: 'big', protocol: 'nip17' as const };
 
 function setup() {
   const closePicker = jest.fn();
   const appendOptimisticLocal = jest.fn();
   const { result } = renderHook(() =>
     useStartLiveLocationShare({
+      target,
       name: 'Big Piggy',
-      pubkey: 'big',
-      protocol: 'nip17',
       closePicker,
       appendOptimisticLocal,
     }),
@@ -53,7 +53,7 @@ it.each(['cancel', 'dismiss', 'share'])('%s gates live session startup', async (
     await pending;
   });
   if (action === 'share') {
-    expect(mockStartShare).toHaveBeenCalledWith('big', 900000, 'nip17');
+    expect(mockStartShare).toHaveBeenCalledWith({ ...target, label: 'Big Piggy' }, 900000);
     expect(appendOptimisticLocal).toHaveBeenCalledWith('published marker');
   } else {
     expect(mockStartShare).not.toHaveBeenCalled();
@@ -106,4 +106,21 @@ it('reports provider failure without appending a live marker', async () => {
   });
   expect(alert).toHaveBeenLastCalledWith(expect.any(String), 'Send failed');
   expect(appendOptimisticLocal).not.toHaveBeenCalled();
+});
+
+it('starts a group share without an optimistic append (the inbound path stores it)', async () => {
+  const closePicker = jest.fn();
+  const groupTarget = { kind: 'group' as const, groupId: 'marmot:abc' };
+  const { result } = renderHook(() =>
+    useStartLiveLocationShare({ target: groupTarget, name: 'Piggy Pals', closePicker }),
+  );
+  let pending!: Promise<void>;
+  await act(async () => {
+    pending = result.current(3600000);
+  });
+  await act(async () => {
+    alert.mock.calls[0][2]![1].onPress!();
+    await pending;
+  });
+  expect(mockStartShare).toHaveBeenCalledWith({ ...groupTarget, label: 'Piggy Pals' }, 3600000);
 });

@@ -2975,5 +2975,29 @@
     },
     "showChanges": "Eszközváltozások mutatása a csevegésekben",
     "showChangesHint": "Alfa: szürke sor a Marmot-csevegésekben, ha valaki egy eszközzel csatlakozik vagy eszközt ad hozzá. Csak ezen a telefonon jelenik meg; semmit nem küldünk el."
+  },
+  "liveLocationWire": {
+    "durationMins": "{{mins}} perc",
+    "durationHours": "{{hours}} óra",
+    "durationHoursMins": "{{hours}} óra {{mins}} perc",
+    "startText": "Megosztom az élő helyzetemet ennyi ideig: {{duration}}",
+    "endText": "Az élő helymegosztás véget ért"
+  },
+  "liveLocationTracking": {
+    "serviceTitle": "Megosztod az élő helyzetedet",
+    "serviceBody": "A Lightning Piggy akkor is küldi a helyzetedet, amikor az alkalmazás a háttérben fut.",
+    "channelName": "Élő helyzet",
+    "titleOne": "Megosztod a helyzetedet vele: {{name}}",
+    "titleMany": {
+      "one": "Megosztod a helyzetedet {{count}} csevegésben",
+      "other": "Megosztod a helyzetedet {{count}} csevegésben"
+    },
+    "body": "Eddig: {{time}}",
+    "stopAction": "Megosztás leállítása",
+    "aGroup": "egy csoport",
+    "aFriend": "egy barát",
+    "stoppedTitle": "Az élő helymegosztás leállt",
+    "stoppedBody": "A Lightning Piggy bezárult a háttérben, ezért az élő helymegosztás leállt. Nyisd meg az alkalmazást az újbóli megosztáshoz.",
+    "stoppedBodyOne": "A Lightning Piggy bezárult a háttérben, ezért az élő helymegosztás vele: {{name}} leállt. Nyisd meg az alkalmazást az újbóli megosztáshoz."
   }
 }

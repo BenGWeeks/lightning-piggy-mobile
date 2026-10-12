@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { LIVE_LOCATION_PING_KIND } from '../services/liveLocationService';
-import { subscribeLiveLocationPings } from '../services/nostrLiveLocation';
-import { decryptIncomingLivePing } from '../services/liveLocationPingReceive';
-import { DEFAULT_RELAYS as DEFAULT_NOSTR_RELAYS } from '../services/nostrService';
+import { useIsFocused } from '@react-navigation/native';
 import { useLiveLocation } from '../contexts/LiveLocationContext';
+import type { LiveLocationMarker } from '../services/liveLocationService';
 import type { SharedLocation } from '../services/locationService';
 import type { Item } from '../utils/conversationItems';
 import type { RelayConfig } from '../types/nostr';
+import { liveKey } from '../services/liveLocationUpdateStore';
+import {
+  useLiveUpdateRelaySubscriptions,
+  useLiveUpdates,
+  type WatchedShare,
+} from './useLiveUpdates';
 
 type LiveStatus = 'active' | 'paused' | 'ended' | 'expired' | undefined;
 
@@ -26,12 +30,193 @@ export function useStableRecord<T extends object>(next: T): T {
   return next;
 }
 
-// Receive-side live-location plumbing for the 1:1 ConversationScreen (#206).
-// Extracted from the screen (#703 size cap): owns the kind-20069 coordinate
-// subscription, the per-session status/remaining-ms read models the bubble
-// renders, and a 1 Hz tick so the "Updated 30 s ago" labels animate without
-// re-rendering on every ping. Sending a share stays in the screen — it drives
-// the chooser sheet + LiveLocationProvider.
+/** One live-location marker in a thread, from whichever transport. */
+export interface ThreadLiveMarker {
+  fromMe: boolean;
+  /** Hex pubkey of whoever sent the marker. */
+  sender: string;
+  marker: LiveLocationMarker;
+  /** Message timestamp (unix seconds). */
+  createdAt: number;
+}
+
+/**
+ * Receive-side live-location plumbing for one thread — a 1:1 chat or a group
+ * (#206, #1300). Transport-agnostic: coordinate updates come out of the
+ * coalesced update store, fed by the Marmot listener (Marmot threads) or by
+ * the relay subscriptions opened here (NIP-17 threads). Owns the per-session
+ * status / remaining-ms read models the bubble renders, and a 1 Hz tick so
+ * "Updated 30 s ago" labels animate without re-rendering on every update.
+ */
+export function useLiveLocationThread(params: {
+  markers: ThreadLiveMarker[];
+  /** Peer pubkey (1:1) or group id — where my own sessions are filed. */
+  threadKey: string;
+  marmot: boolean;
+  isLoggedIn: boolean;
+  myPubkey: string | null;
+  signerType: string | null;
+  relays: RelayConfig[];
+}) {
+  const { markers, threadKey, marmot, isLoggedIn, myPubkey, signerType, relays } = params;
+  const { sessionsByRecipient, remainingMsForSession } = useLiveLocation();
+
+  // Subscriptions + the 1 Hz tick only run while this thread is on screen.
+  const focused = useIsFocused();
+
+  // 1 Hz tick — included in the Date.now()-dependent memos below so countdown / "x ago" labels stay live and expired sessions actually drop between updates.
+  const [secondTick, setSecondTick] = useState(0);
+
+  // A session is (sender, sessionId): another group member re-using a session
+  // id can't move or end someone else's share. Records are keyed `sender:id`;
+  // the plain `id` key aliases the session's owner (for the 1:1 bubble, which
+  // has no sender to hand) — my own start if I minted it, else the earliest.
+  const { endedKeys, ownerOf } = useMemo(() => {
+    const ended = new Set<string>();
+    const owner = new Map<string, { sender: string; createdAt: number; mine: boolean }>();
+    for (const m of markers) {
+      const id = m.marker.sessionId;
+      if (m.marker.phase === 'end') {
+        ended.add(liveKey(m.sender, id));
+        continue;
+      }
+      const cur = owner.get(id);
+      if (!cur || (!cur.mine && (m.fromMe || m.createdAt < cur.createdAt))) {
+        owner.set(id, { sender: m.sender, createdAt: m.createdAt, mine: m.fromMe });
+      }
+    }
+    return { endedKeys: ended, ownerOf: owner };
+  }, [markers]);
+
+  // Inbound shares still running: a start from someone else, no end from its
+  // sender yet, and inside its wall-clock window.
+  const watched = useMemo<WatchedShare[]>(() => {
+    const now = Date.now();
+    const out: WatchedShare[] = [];
+    for (const m of markers) {
+      if (m.fromMe || m.marker.phase !== 'start') continue;
+      if (endedKeys.has(liveKey(m.sender, m.marker.sessionId))) continue;
+      if (now >= m.marker.startedAt + m.marker.durationMs) continue;
+      out.push({
+        sender: m.sender,
+        sessionId: m.marker.sessionId,
+        startedAt: m.marker.startedAt,
+        ...(m.marker.updateKey ? { updateKey: m.marker.updateKey } : {}),
+        // A v2 marker in a Marmot thread streams over MLS; a legacy one (an
+        // older build) still sends NIP-04 pings, so keep the relay REQ for it.
+        ...(marmot && m.marker.v2 ? { marmot: true } : {}),
+      });
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- secondTick re-runs the Date.now() expiry filter each second so expired shares drop
+  }, [markers, endedKeys, marmot, secondTick]);
+
+  useLiveUpdateRelaySubscriptions({
+    shares: watched,
+    enabled: isLoggedIn && focused,
+    myPubkey,
+    signerType,
+    relays,
+  });
+  // Read retained fixes for EVERY inbound start shown — not just running ones —
+  // so a share that expires (or ends with a coordless end marker) keeps its
+  // last position instead of snapping back to the start. Only the relay
+  // subscriptions above are limited to active shares.
+  const displayed = useMemo<WatchedShare[]>(
+    () =>
+      markers
+        .filter((m) => !m.fromMe && m.marker.phase === 'start')
+        .map((m) => ({
+          sender: m.sender,
+          sessionId: m.marker.sessionId,
+          startedAt: m.marker.startedAt,
+        })),
+    [markers],
+  );
+  const updates = useLiveUpdates(displayed);
+
+  /** Copy each owner's `sender:id` value onto the plain `id` key. */
+  const aliasOwners = <T>(out: Record<string, T>) => {
+    for (const [id, o] of ownerOf) {
+      const v = out[liveKey(o.sender, id)];
+      if (v !== undefined) out[id] = v;
+    }
+    return out;
+  };
+
+  // Per-session status the bubble renders: `ended` once its sender's end
+  // marker arrives, otherwise the context's authoritative status for our own
+  // shares, otherwise active/ended by wall-clock for inbound shares.
+  const liveLocationBubbleStatusRaw = useMemo<Record<string, LiveStatus>>(() => {
+    const out: Record<string, LiveStatus> = {};
+    const mine = sessionsByRecipient.get(threadKey);
+    for (const m of markers) {
+      if (m.marker.phase !== 'start') continue;
+      const key = liveKey(m.sender, m.marker.sessionId);
+      if (endedKeys.has(key)) {
+        out[key] = 'ended';
+        continue;
+      }
+      const own = m.fromMe ? mine?.find((s) => s.sessionId === m.marker.sessionId) : undefined;
+      if (own) {
+        out[key] = own.status;
+        continue;
+      }
+      const expiresAt = m.marker.startedAt + m.marker.durationMs;
+      out[key] = Date.now() >= expiresAt ? 'ended' : 'active';
+    }
+    return aliasOwners(out);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- secondTick re-runs the Date.now() wall-clock status each second
+  }, [markers, endedKeys, ownerOf, sessionsByRecipient, threadKey, secondTick]);
+  const liveLocationBubbleStatus = useStableRecord(liveLocationBubbleStatusRaw);
+
+  const liveLocationBubbleRemainingRaw = useMemo<Record<string, number | undefined>>(() => {
+    const out: Record<string, number | undefined> = {};
+    const now = Date.now();
+    for (const m of markers) {
+      if (m.marker.phase !== 'start') continue;
+      // Sender path: the context's remaining-ms matches the tracker's clock.
+      const fromCtx = m.fromMe ? remainingMsForSession(m.marker.sessionId) : null;
+      out[liveKey(m.sender, m.marker.sessionId)] =
+        fromCtx !== null ? fromCtx : Math.max(0, m.marker.startedAt + m.marker.durationMs - now);
+    }
+    return aliasOwners(out);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- secondTick re-runs the Date.now() remaining-time countdown each second
+  }, [markers, ownerOf, remainingMsForSession, secondTick]);
+  // NOTE: remaining-ms DOES change each second for an active share, so the
+  // countdown bubble's own row still re-renders every tick (#778).
+  const liveLocationBubbleRemaining = useStableRecord(liveLocationBubbleRemainingRaw);
+
+  // Drive the 1 Hz tick only while focused with a live-location bubble.
+  const tick = markers.length > 0 && focused;
+  useEffect(() => {
+    if (!tick) return;
+    const id = setInterval(() => setSecondTick((n) => (n + 1) % 1000), 1000);
+    return () => clearInterval(id);
+  }, [tick]);
+
+  // What the bubble plots: live updates while a share streams; once it ends,
+  // its sender's end-marker coords (the final spot) win.
+  const liveLocationLatest = useMemo(() => {
+    const merged: Record<string, { location: SharedLocation; ts: number } | undefined> = {
+      ...updates,
+    };
+    for (const m of markers) {
+      if (m.marker.phase !== 'end' || !m.marker.location) continue;
+      merged[liveKey(m.sender, m.marker.sessionId)] = {
+        location: m.marker.location,
+        ts: m.createdAt * 1000,
+      };
+    }
+    return aliasOwners(merged);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- aliasOwners only reads ownerOf
+  }, [markers, ownerOf, updates]);
+
+  return { liveLocationLatest, liveLocationBubbleStatus, liveLocationBubbleRemaining };
+}
+
+// 1:1 ConversationScreen adapter (#206): pulls the classified live-location
+// markers out of the thread's items. Extracted from the screen (#703 size cap).
 export function useConversationLiveLocation(params: {
   items: Item[];
   isLoggedIn: boolean;
@@ -39,207 +224,29 @@ export function useConversationLiveLocation(params: {
   pubkey: string;
   signerType: string | null;
   relays: RelayConfig[];
+  marmot?: boolean;
 }) {
-  const { items, isLoggedIn, myPubkey, pubkey, signerType, relays } = params;
-  const { sessionsByRecipient, remainingMsForSession } = useLiveLocation();
-
-  // Latest known coordinate per inbound live-share session, keyed by
-  // sessionId. Fed by the kind-20069 subscription below; consumed by
-  // MessageBubble's `liveLocationMarker` branch so the receiver's bubble
-  // updates as new pings arrive.
-  // Live coordinate pings (inbound shares only) keyed by sessionId. Merged
-  // with end-marker locations below into the `liveLocationLatest` the bubble reads.
-  const [pingLatest, setPingLatest] = useState<
-    Record<string, { location: SharedLocation; ts: number } | undefined>
-  >({});
-
-  // 1 Hz tick — included in the Date.now()-dependent memos below so countdown / "x ago" labels stay live and expired sessions actually drop between pings.
-  const [secondTick, setSecondTick] = useState(0);
-
-  // Find inbound (fromMe=false) start markers whose paired end marker
-  // (same sessionId) hasn't arrived AND whose wall-clock window is still
-  // open. The classifier already split markers out into a dedicated kind,
-  // so we walk `items` directly. Memoised so a new `items` array on every
-  // render doesn't tear down + recreate the relay subscriptions below.
-  const liveStarts = useMemo(() => {
-    const seenEnds = new Set<string>();
+  const { items, pubkey, myPubkey } = params;
+  const markers = useMemo<ThreadLiveMarker[]>(() => {
+    const out: ThreadLiveMarker[] = [];
     for (const it of items) {
       if (it.kind !== 'liveLocationMarker') continue;
-      if (it.marker.phase === 'end') seenEnds.add(it.marker.sessionId);
-    }
-    const starts: { sessionId: string; startedAt: number; durationMs: number }[] = [];
-    for (const it of items) {
-      if (it.kind !== 'liveLocationMarker') continue;
-      if (it.fromMe) continue;
-      if (it.marker.phase !== 'start') continue;
-      if (seenEnds.has(it.marker.sessionId)) continue;
-      const expiresAt = it.marker.startedAt + it.marker.durationMs;
-      if (Date.now() >= expiresAt) continue;
-      starts.push({
-        sessionId: it.marker.sessionId,
-        startedAt: it.marker.startedAt,
-        durationMs: it.marker.durationMs,
+      out.push({
+        fromMe: it.fromMe,
+        sender: it.fromMe ? (myPubkey ?? '') : pubkey,
+        marker: it.marker,
+        createdAt: it.createdAt,
       });
     }
-    return starts;
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- secondTick forces the Date.now() expiry filter to re-run each second so expired sessions drop
-  }, [items, secondTick]);
-
-  // Stable key over the live-share set — the subscription effect depends
-  // on this instead of `liveStarts`, so it only re-subscribes when a
-  // session actually appears / expires, not on every keystroke render.
-  const liveStartsKey = useMemo(
-    () => liveStarts.map((s) => `${s.sessionId}:${s.startedAt}:${s.durationMs}`).join('|'),
-    [liveStarts],
-  );
-
-  // Subscribe to live-location coordinate pings (kind-20069) for any
-  // *inbound* live-share start marker we've seen in this thread that hasn't
-  // yet been ended. The subscription stays open until either an end marker
-  // arrives or the share's wall-clock window expires — we close it then so we
-  // don't leak relay subs on long chats with many historical live shares.
-  useEffect(() => {
-    if (!isLoggedIn || !myPubkey) return;
-    const readRelays = relays.filter((r) => r.read).map((r) => r.url);
-    const targetRelays = Array.from(new Set([...readRelays, ...DEFAULT_NOSTR_RELAYS]));
-    if (liveStarts.length === 0) return;
-    const unsubs: (() => void)[] = [];
-    for (const start of liveStarts) {
-      const unsub = subscribeLiveLocationPings({
-        viewerPubkey: myPubkey,
-        senderPubkey: pubkey,
-        sessionId: start.sessionId,
-        kind: LIVE_LOCATION_PING_KIND,
-        // Spec-conformant ephemeral relays drop pings on disconnect so we get
-        // a tiny `since` window; non-conformant relays might still hold one in
-        // memory, so accept anything from this session's start time onward.
-        since: Math.floor(start.startedAt / 1000),
-        relays: targetRelays,
-        onEvent: async (ev) => {
-          const payload = await decryptIncomingLivePing({
-            signerType,
-            content: ev.content,
-            senderPubkey: ev.pubkey,
-            viewerPubkey: myPubkey,
-          });
-          if (!payload || payload.sessionId !== start.sessionId) return;
-          setPingLatest((prev) => {
-            const existing = prev[start.sessionId];
-            // Reject out-of-order pings — relay fan-out can briefly re-order
-            // events, and the receiver's bubble shouldn't jump backwards.
-            if (existing && existing.ts >= payload.ts) return prev;
-            return {
-              ...prev,
-              [start.sessionId]: {
-                location: {
-                  lat: payload.lat,
-                  lon: payload.lon,
-                  accuracyMeters: payload.accuracy,
-                },
-                ts: payload.ts,
-              },
-            };
-          });
-        },
-      });
-      unsubs.push(unsub);
-    }
-    return () => {
-      for (const unsub of unsubs) {
-        try {
-          unsub();
-        } catch {
-          // best-effort
-        }
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- liveStartsKey is the stable surrogate for liveStarts
-  }, [liveStartsKey, isLoggedIn, myPubkey, pubkey, signerType, relays]);
-
-  // Per-session status the bubble renders: `ended` once an end marker arrives,
-  // otherwise the context's authoritative status for our own shares, otherwise
-  // active/ended by wall-clock for inbound shares.
-  const liveLocationBubbleStatusRaw = useMemo<Record<string, LiveStatus>>(() => {
-    const out: Record<string, LiveStatus> = {};
-    const seenEndIds = new Set<string>();
-    for (const it of items) {
-      if (it.kind !== 'liveLocationMarker') continue;
-      if (it.marker.phase === 'end') seenEndIds.add(it.marker.sessionId);
-    }
-    for (const it of items) {
-      if (it.kind !== 'liveLocationMarker') continue;
-      const id = it.marker.sessionId;
-      if (seenEndIds.has(id)) {
-        out[id] = 'ended';
-        continue;
-      }
-      // Outgoing session: defer to the live-location context for the
-      // authoritative status (active / paused / expired).
-      const own = sessionsByRecipient.get(pubkey)?.find((s) => s.sessionId === id);
-      if (own) {
-        out[id] = own.status;
-        continue;
-      }
-      // Incoming, no end marker, expiry not reached → active.
-      const expiresAt = it.marker.startedAt + it.marker.durationMs;
-      out[id] = Date.now() >= expiresAt ? 'ended' : 'active';
-    }
     return out;
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- secondTick re-runs the Date.now() wall-clock status each second
-  }, [items, sessionsByRecipient, pubkey, secondTick]);
-  // Keep a stable reference while content is unchanged so the 1 Hz tick doesn't
-  // churn ConversationScreen's renderItem (#778).
-  const liveLocationBubbleStatus = useStableRecord(liveLocationBubbleStatusRaw);
-
-  const liveLocationBubbleRemainingRaw = useMemo<Record<string, number | undefined>>(() => {
-    const out: Record<string, number | undefined> = {};
-    const now = Date.now();
-    for (const it of items) {
-      if (it.kind !== 'liveLocationMarker') continue;
-      if (it.marker.phase !== 'start') continue;
-      const id = it.marker.sessionId;
-      // Sender path: prefer the canonical remaining-ms from the context, since
-      // its `startedAt` matches the wall clock the watcher uses.
-      const fromCtx = remainingMsForSession(id);
-      if (fromCtx !== null) {
-        out[id] = fromCtx;
-        continue;
-      }
-      const expiresAt = it.marker.startedAt + it.marker.durationMs;
-      out[id] = Math.max(0, expiresAt - now);
-    }
-    return out;
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- secondTick re-runs the Date.now() remaining-time countdown each second
-  }, [items, remainingMsForSession, secondTick]);
-  // Stable reference while content is unchanged (#778). NOTE: the remaining-ms
-  // values DO change each second for an active share, so the countdown bubble's
-  // own row still re-renders every tick — only unrelated rows are spared.
-  const liveLocationBubbleRemaining = useStableRecord(liveLocationBubbleRemainingRaw);
-
-  // Drive the 1 Hz tick declared above — but only when the thread actually has a live-location bubble, so chats with none don't re-render once a second for nothing.
-  const hasLiveMarkers = useMemo(
-    () => items.some((it) => it.kind === 'liveLocationMarker'),
-    [items],
-  );
-  useEffect(() => {
-    if (!hasLiveMarkers) return;
-    const id = setInterval(() => setSecondTick((n) => (n + 1) % 1000), 1000);
-    return () => clearInterval(id);
-  }, [hasLiveMarkers]);
-
-  // What the bubble plots: live pings are the base for shares still streaming;
-  // once a share ends, its end-marker coords (the sender's final spot, not a
-  // stale start/ping coordinate) take precedence — so end markers are spread
-  // LAST, overriding any lingering ping for the same session.
-  const liveLocationLatest = useMemo(() => {
-    const merged: Record<string, { location: SharedLocation; ts: number } | undefined> = {};
-    for (const it of items) {
-      if (it.kind !== 'liveLocationMarker') continue;
-      if (it.marker.phase !== 'end' || !it.marker.location) continue;
-      merged[it.marker.sessionId] = { location: it.marker.location, ts: it.createdAt * 1000 };
-    }
-    return { ...pingLatest, ...merged };
-  }, [items, pingLatest]);
-
-  return { liveLocationLatest, liveLocationBubbleStatus, liveLocationBubbleRemaining };
+  }, [items, myPubkey, pubkey]);
+  // Same items array → same markers; keep the reference stable across renders
+  // that rebuild `items` without touching a live marker.
+  const stableMarkers = useStableRecord(markers);
+  return useLiveLocationThread({
+    ...params,
+    markers: stableMarkers,
+    threadKey: pubkey,
+    marmot: params.marmot ?? false,
+  });
 }

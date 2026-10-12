@@ -372,10 +372,13 @@ const ConversationScreen: React.FC = () => {
   }, [handleShareLocation]);
 
   const closeLiveLocationPicker = useCallback(() => setLiveLocationPickerOpen(false), []);
+  const liveTarget = useMemo(
+    () => ({ kind: 'dm' as const, recipientPubkey: pubkey, protocol }),
+    [pubkey, protocol],
+  );
   const handleShareLive = useStartLiveLocationShare({
-    pubkey,
+    target: liveTarget,
     name,
-    protocol,
     closePicker: closeLiveLocationPicker,
     appendOptimisticLocal,
   });
@@ -451,12 +454,18 @@ const ConversationScreen: React.FC = () => {
     onCloseAttachPanel: closeAttachPanel,
   });
 
-  // Receive-side live-location plumbing (#206): the kind-20069 coordinate
-  // subscription + per-session status/remaining read models the bubble
-  // renders + a 1 Hz tick for the relative-time labels. Extracted to a hook
-  // so this screen stays under the #703 size cap.
+  // Receive-side live-location plumbing (#206, #1300): coordinate updates
+  // (MLS in a Marmot chat, relays otherwise) + the bubble's read models.
   const { liveLocationLatest, liveLocationBubbleStatus, liveLocationBubbleRemaining } =
-    useConversationLiveLocation({ items, isLoggedIn, myPubkey, pubkey, signerType, relays });
+    useConversationLiveLocation({
+      items,
+      isLoggedIn,
+      myPubkey,
+      pubkey,
+      signerType,
+      relays,
+      marmot: protocol === 'marmot',
+    });
 
   const relayReactionBackend = useMemo(
     () => ({

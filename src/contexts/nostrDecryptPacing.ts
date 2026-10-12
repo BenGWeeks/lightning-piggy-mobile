@@ -1,3 +1,4 @@
+import { AppState } from 'react-native';
 import { yieldMacrotask } from '../utils/yieldingBatch';
 
 /** Yield to the native event loop so UI interactions and paint can tick
@@ -23,8 +24,16 @@ import { yieldMacrotask } from '../utils/yieldingBatch';
  * is cancelable via `cancelAnimationFrame`, matching the
  * `clearTimeout` pattern used there. */
 export function yieldToEventLoop(): Promise<void> {
+  if (inBackground()) return yieldMacrotask();
   return new Promise((resolve) => requestAnimationFrame(() => resolve()));
 }
+
+/** No frames are drawn while the app is backgrounded, so a RAF never fires
+ * there: a loop yielding on it parks until the user reopens the app. Seen with
+ * a live-location end marker sent from the background (#1300) — the NIP-17
+ * send stalled between its recipient and self-copy wraps. Background loops
+ * yield on a macro-task instead (nothing to paint, so #731 doesn't apply). */
+const inBackground = () => AppState.currentState === 'background';
 
 /** ~4 ms — under a quarter of a 60 fps frame (16.6 ms). The NIP-17 inbox
  * loops aim to stay under this many ms of unbroken JS work per yield. With the
@@ -125,7 +134,7 @@ export function createYieldScheduler(opts: {
     const safetyHit = iteration % safetyEvery === 0;
     if (!overBudget && !safetyHit) return;
     yields++;
-    if (coldStart) {
+    if (coldStart || inBackground()) {
       // Cold start (#788): macro-task yield. `yieldMacrotask` owns its own
       // timer + abort-cancel, so the RAF pending-handle bookkeeping is
       // bypassed entirely on this path.

@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  LIVE_LOCATION_PING_KIND,
   collectInboundLiveSessions,
   type InboundLiveSession,
 } from '../services/liveLocationService';
-import { subscribeLiveLocationPingsMulti } from '../services/nostrLiveLocation';
-import { decryptIncomingLivePing } from '../services/liveLocationPingReceive';
-import { DEFAULT_RELAYS as DEFAULT_NOSTR_RELAYS } from '../services/nostrService';
 import { DM_INBOX_REFRESH_TTL_MS } from '../contexts/nostrDmCache';
+import { liveKey } from '../services/liveLocationUpdateStore';
 import { useNostr, useNostrContacts, useNostrDmInbox } from '../contexts/NostrContext';
-import type { SharedLocation } from '../services/locationService';
 import type { NostrProfile } from '../types/nostr';
+import {
+  useLiveUpdateRelaySubscriptions,
+  useLiveUpdates,
+  type WatchedShare,
+} from './useLiveUpdates';
 
 /** A friend currently sharing their live location with me, resolved to a
  *  single map marker. One per peer (latest active session wins). */
@@ -26,7 +27,7 @@ export interface FriendLiveLocation {
 // Full-Map "friends sharing with me" layer (#206 follow-up). Globalises the
 // per-conversation `useConversationLiveLocation` logic: instead of one open
 // thread's items, it scans the whole decrypted DM inbox for inbound live
-// shares, subscribes to their kind-20069 coordinate pings, and resolves each
+// shares, watches their coordinate updates, and resolves each
 // sharer's avatar — so MapScreen can plot every friend currently sharing.
 //
 // Performance: gated on `enabled` (MapScreen focus) so it costs nothing while
@@ -71,10 +72,6 @@ export function useFriendsLiveLocations(opts: { enabled: boolean }): FriendLiveL
     void refreshDmInbox({ force: true, includeNonFollows: true }).catch(() => {});
   }, [enabled, isLoggedIn, refreshDmInbox]);
 
-  // Latest coordinate ping per inbound session, keyed by sessionId.
-  const [pingLatest, setPingLatest] = useState<
-    Record<string, { location: SharedLocation; ts: number } | undefined>
-  >({});
   // 1 Hz tick so expiry filtering drops sessions as their window closes.
   const [secondTick, setSecondTick] = useState(0);
   // Avatars for sharers who aren't in the contact list (fetched on demand).
@@ -85,7 +82,8 @@ export function useFriendsLiveLocations(opts: { enabled: boolean }): FriendLiveL
   // Pass 1 — walk the inbox ONCE per change (pure, substring-pre-filtered
   // scan in the service). Yields every inbound share with its end flag.
   const inboundSessions = useMemo<InboundLiveSession[]>(
-    () => collectInboundLiveSessions(dmInbox),
+    // `renderText` holds the marker itself; `text` is the list preview (#1300).
+    () => collectInboundLiveSessions(dmInbox.map((e) => ({ ...e, text: e.renderText ?? e.text }))),
     [dmInbox],
   );
 
@@ -110,77 +108,28 @@ export function useFriendsLiveLocations(opts: { enabled: boolean }): FriendLiveL
     // eslint-disable-next-line react-hooks/exhaustive-deps -- secondTick re-runs the Date.now() expiry filter each second so closed shares drop
   }, [inboundSessions, enabled, secondTick]);
 
-  // Stable surrogate so the subscription effect only tears down / re-opens
-  // when the active session SET changes, not on every ping or tick.
-  const activeKey = useMemo(
-    () => activeSessions.map((s) => `${s.pubkey}:${s.sessionId}`).join('|'),
+  // Coordinate updates: Marmot ones arrive over MLS; NIP-17 (session-key) and
+  // legacy ones through ONE bounded relay REQ each — all into the coalesced
+  // update store (#1300), so the map re-renders at most once per flush.
+  const watched = useMemo<WatchedShare[]>(
+    () =>
+      activeSessions.map((s) => ({
+        sender: s.pubkey,
+        sessionId: s.sessionId,
+        startedAt: s.startedAt,
+        ...(s.updateKey ? { updateKey: s.updateKey } : {}),
+        ...(s.marmot ? { marmot: true } : {}),
+      })),
     [activeSessions],
   );
-
-  // Same trick for the read-relay set: `relays` is a fresh array on every
-  // NostrContext render, which would otherwise tear down + reopen the ping
-  // subscription on unrelated context updates (login/profile state, etc.).
-  const relayKey = useMemo(
-    () =>
-      relays
-        .filter((r) => r.read)
-        .map((r) => r.url)
-        .sort()
-        .join('|'),
-    [relays],
-  );
-
-  // Subscribe to kind-20069 pings for each active inbound session. Mirrors the
-  // per-conversation viewer; closes when the set changes or the map blurs so
-  // we never leak relay subscriptions in the background. ONE combined REQ for
-  // all active sessions — one-REQ-per-session floods relays ("too many
-  // concurrent REQs") once a handful of friends are sharing.
-  useEffect(() => {
-    if (!enabled || !isLoggedIn || !myPubkey || activeSessions.length === 0) return;
-    const readRelays = relays.filter((r) => r.read).map((r) => r.url);
-    const targetRelays = Array.from(new Set([...readRelays, ...DEFAULT_NOSTR_RELAYS]));
-    const sessionById = new Map(activeSessions.map((s) => [s.sessionId, s]));
-    const since = Math.floor(Math.min(...activeSessions.map((s) => s.startedAt)) / 1000);
-    const unsub = subscribeLiveLocationPingsMulti({
-      viewerPubkey: myPubkey,
-      senderPubkeys: Array.from(new Set(activeSessions.map((s) => s.pubkey))),
-      sessionIds: activeSessions.map((s) => s.sessionId),
-      kind: LIVE_LOCATION_PING_KIND,
-      since,
-      relays: targetRelays,
-      onEvent: async (ev) => {
-        const payload = await decryptIncomingLivePing({
-          signerType,
-          content: ev.content,
-          senderPubkey: ev.pubkey,
-          viewerPubkey: myPubkey,
-        });
-        // Route by sessionId — one REQ carries pings for every watched session.
-        if (!payload || !sessionById.has(payload.sessionId)) return;
-        setPingLatest((prev) => {
-          const existing = prev[payload.sessionId];
-          // Drop out-of-order pings — relay fan-out can re-order events and
-          // the marker shouldn't jump backwards.
-          if (existing && existing.ts >= payload.ts) return prev;
-          return {
-            ...prev,
-            [payload.sessionId]: {
-              location: { lat: payload.lat, lon: payload.lon, accuracyMeters: payload.accuracy },
-              ts: payload.ts,
-            },
-          };
-        });
-      },
-    });
-    return () => {
-      try {
-        unsub();
-      } catch {
-        // best-effort
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- activeKey/relayKey are stable surrogates for activeSessions/relays
-  }, [activeKey, enabled, isLoggedIn, myPubkey, signerType, relayKey]);
+  useLiveUpdateRelaySubscriptions({
+    shares: watched,
+    enabled: enabled && isLoggedIn,
+    myPubkey,
+    signerType,
+    relays,
+  });
+  const updates = useLiveUpdates(watched);
 
   // Drive the 1 Hz tick only while the map is up AND something is being shared
   // — an idle map (or a map with no inbound shares) never re-renders for this.
@@ -241,7 +190,7 @@ export function useFriendsLiveLocations(opts: { enabled: boolean }): FriendLiveL
     }
     const out: FriendLiveLocation[] = [];
     for (const s of byPeer.values()) {
-      const loc = pingLatest[s.sessionId]?.location ?? s.startLocation;
+      const loc = updates[liveKey(s.pubkey, s.sessionId)]?.location ?? s.startLocation;
       const avatarUri =
         contactPicByPubkey.get(s.pubkey) ?? fetchedProfiles[s.pubkey]?.picture ?? null;
       out.push({
@@ -254,7 +203,7 @@ export function useFriendsLiveLocations(opts: { enabled: boolean }): FriendLiveL
       });
     }
     return out;
-  }, [activeSessions, pingLatest, contactPicByPubkey, fetchedProfiles]);
+  }, [activeSessions, updates, contactPicByPubkey, fetchedProfiles]);
 
   return friends;
 }
