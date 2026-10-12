@@ -100,3 +100,28 @@ Small locally-authored modules where a third-party dep would be overkill or RN-i
 | `src/utils/parseOgMeta.ts`
 | ~90-line OpenGraph meta-tag extractor for in-DM link previews (#441). Replaces `link-preview-js` (~1.6 MB transitively, mostly `cheerio`). OG tags are flat `<meta property="og:*" content="...">` elements in `<head>` — a regex sweep covers >99% of real pages without a DOM. Trade-off: less robust on pathologically-malformed HTML and JS-rendered pages without prerender. Failure mode is "no card", not a crash. Falls back to `<title>` and the first reasonable `<img src>` when og:* are absent. Decodes the top entity references (`&amp;`, `&#39;`, numeric/hex char refs); full HTML-entity decoding would need a 2 KB table for marginal gain. The accompanying `src/services/linkPreviewFetcher.ts` does the network fetch (timeout 8 s, 256 KB cap, content-type guard) and feeds raw HTML into `parseOgMeta`.
 |===
+
+== Security overrides (#1378)
+
+Parent-scoped npm overrides pin `bdk-rn > adm-zip` to `0.6.1` (the installer
+uses the retained constructor and `extractAllTo(path, true)` API) and
+`xcode > uuid` to `11.1.1` (`require('uuid').v4()` only; no default/deep imports).
+These cross the parents' declared ranges (`^0.5.9` and `^7.0.3` respectively);
+the used APIs were inspected and smoke checked. Neither dependency enters the
+mobile JS bundle: ZIP extraction runs in the BDK install script, and xcode is
+used by Expo config plugins. The current npm advisory also excludes adm-zip
+0.6.1 from the symlink extraction alert, despite the original alert list
+reporting no patched release.
+
+Unfixed alerts: `image-size` has two parser DoS alerts. Its patched `2.0.3`
+cannot override Metro `0.83.7`'s `^1.0.2`: Metro's `getAssetData` passes a file
+path to the default export, but v2 accepts only image bytes. Android export
+failed with that override, so it was removed. `braces` (stack exhaustion,
+via micromatch in Metro/Jest), `node-forge` (RSA signature verification,
+via Expo CLI/code-signing certificates), and `sprintf-js` (unbounded precision,
+via Istanbul's js-yaml 3 / argparse 1) have no patched releases. All five
+remaining alerts affect install/build/test tooling, not shipped app code.
+Latest micromatch and Expo CLI/certificate parents still retain the affected
+packages. Newer argparse (2/3) and js-yaml (4/5) drop sprintf-js, but the latest
+`@istanbuljs/load-nyc-config` still requires js-yaml 3; forcing that major
+upgrade is outside these compatible overrides.
