@@ -1,5 +1,34 @@
+import { renderHook } from '@testing-library/react-native';
 import type { DeviceNoticeView } from '../services/marmotDeviceTracker';
-import { isDeviceNoticeRow, mergeDeviceNotices, type ClassifiedMessage } from './useGroupTimeline';
+import {
+  isDeviceNoticeRow,
+  mergeDeviceNotices,
+  useGroupTimeline,
+  type ClassifiedMessage,
+} from './useGroupTimeline';
+
+it.each(['local_pending', 'c'.repeat(64)])(
+  'resolves the quoted parent of an own group reply before and after echo (%s)',
+  (id) => {
+    const me = 'a'.repeat(64);
+    const peer = 'b'.repeat(64);
+    const parent = { id: 'd'.repeat(64), createdAt: 1, senderPubkey: peer, text: 'original' };
+    const reply = { id, createdAt: 2, senderPubkey: me, text: 'reply', replyTo: parent.id };
+    const { result } = renderHook(() =>
+      useGroupTimeline({
+        messages: [parent, reply],
+        myPubkey: me,
+        memberNameByPubkey: new Map([[peer, 'Little Piggy']]),
+        formatLocale: 'en',
+        deviceNotices: [],
+      }),
+    );
+    expect(result.current.rows[1]).toMatchObject({
+      id,
+      quote: { text: 'original', fromMe: false, authorName: 'Little Piggy' },
+    });
+  },
+);
 
 const msg = (id: string, createdAt: number) =>
   ({ id, createdAt, senderPubkey: 'a', text: id }) as unknown as ClassifiedMessage;

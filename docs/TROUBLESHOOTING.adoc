@@ -1164,3 +1164,35 @@ carousel. It permits faded actions only after hydrated emptiness; single-wallet
 Move and watch-only Send still enforce their capability restrictions through
 the disabled prop and accessibility state. While storage hydration is pending,
 Home shows a spinner instead of the new-user welcome prompt (#1396).
+
+=== An outgoing Marmot group reply has no quoted parent
+
+Check the inner kind-9 application event, not its outer MLS transport event.
+White Noise-compatible text replies carry both `["e", parentId]` and
+`["q", parentId]`, where `parentId` is the parent's Marmot app-event id.
+The group composer must carry the same `replyTo` into its optimistic row.
+Group quote rendering supports both own and received messages.
+
+Group sending gained these tags in #1361. A message sent without them cannot
+recover its intended parent from history; there is no reply reference to read.
+If a replay *does* contain a reference but an older stored row with the same id
+and timestamp lacks it, `appendGroupMessage` now merges that reference without
+replacing locally edited text. Echo matching also includes the parent id so
+identical text replies to different messages cannot consume each other's
+optimistic rows. Regression coverage lives in
+`groupMessagesStorageService.test.ts` and `marmotSend.test.ts`.
+
+=== iOS deep link opens a different Lightning Piggy installation than Maestro
+
+A simulator can contain both `com.lightningpiggy.app.dev` and
+`com.lightningpiggy.app.devclient`. Both can claim the `lightningpiggy` scheme.
+The development-client link may open the latter while a Maestro flow targets
+`com.lightningpiggy.app.dev`; successful tap steps then do not drive the app
+visible in the screenshot. The two installations also have separate accounts.
+
+Check `xcrun simctl listapps <UDID>` and the foreground app's name in
+`maestro hierarchy`. Target the same bundle in the flow and simulator launch.
+For the existing `.dev` installation, use the terminate → `RCT_jsLocation` →
+launch sequence above to load the worktree while retaining its test accounts.
+Do not add an identity merely because the other installation is signed out.
+Restore the shared Metro host to 8090 for every installation you repointed.

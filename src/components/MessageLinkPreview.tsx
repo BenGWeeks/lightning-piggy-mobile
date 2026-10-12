@@ -1,10 +1,18 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Linking, Text, TouchableOpacity, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
+import type { ImageLoadEventData } from 'expo-image';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useNostr } from '../contexts/NostrContext';
 import { useAccountState } from '../contexts/useAccountState';
-import { createMessageLinkPreviewStyles } from '../styles/MessageLinkPreview.styles';
+import {
+  createLinkPreviewImageSizeStyles,
+  createMessageLinkPreviewStyles,
+} from '../styles/MessageLinkPreview.styles';
+import {
+  cacheLinkPreviewImageSizing,
+  getLinkPreviewImageSizing,
+} from '../utils/linkPreviewImageAspectRatio';
 import { fetchLinkPreview } from '../services/linkPreviewFetcher';
 import {
   getLinkPreviewEnabled,
@@ -36,6 +44,48 @@ function deriveDomain(url: string): string {
     return url;
   }
 }
+
+const LinkPreviewImage = React.memo(function LinkPreviewImage({
+  url,
+  eventId,
+  styles,
+}: {
+  url: string;
+  eventId: string;
+  styles: ReturnType<typeof createMessageLinkPreviewStyles>;
+}) {
+  const [sizing, setSizing] = useState(() => getLinkPreviewImageSizing(url));
+  const sizeStyles = useMemo(
+    () => createLinkPreviewImageSizeStyles(sizing.aspectRatio),
+    [sizing.aspectRatio],
+  );
+  const imageStyle = useMemo(() => [styles.image, sizeStyles.image], [styles, sizeStyles]);
+  const source = useMemo(() => ({ uri: url }), [url]);
+  const onLoad = useCallback(
+    ({ source: { width, height } }: ImageLoadEventData) => {
+      const measured = cacheLinkPreviewImageSizing(url, width, height);
+      setSizing((previous) =>
+        previous.aspectRatio === measured.aspectRatio && previous.contentFit === measured.contentFit
+          ? previous
+          : measured,
+      );
+    },
+    [url],
+  );
+
+  return (
+    <ExpoImage
+      source={source}
+      style={imageStyle}
+      contentFit={sizing.contentFit}
+      onLoad={onLoad}
+      cachePolicy="memory-disk"
+      transition={150}
+      accessibilityIgnoresInvertColors
+      testID={`message-link-preview-image-${eventId}`}
+    />
+  );
+});
 
 const MessageLinkPreview: React.FC<Props> = ({
   url,
@@ -130,14 +180,11 @@ const MessageLinkPreview: React.FC<Props> = ({
     >
       <View testID={`message-link-preview-tap-${eventId}`} style={styles.tapTarget}>
         {preview?.image ? (
-          <ExpoImage
-            source={{ uri: preview.image }}
-            style={styles.image}
-            contentFit="cover"
-            cachePolicy="memory-disk"
-            transition={150}
-            accessibilityIgnoresInvertColors
-            testID={`message-link-preview-image-${eventId}`}
+          <LinkPreviewImage
+            key={preview.image}
+            url={preview.image}
+            eventId={eventId}
+            styles={styles}
           />
         ) : null}
         <View style={styles.body}>
@@ -164,4 +211,4 @@ const MessageLinkPreview: React.FC<Props> = ({
   );
 };
 
-export default MessageLinkPreview;
+export default React.memo(MessageLinkPreview);

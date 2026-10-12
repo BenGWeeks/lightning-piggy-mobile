@@ -15,8 +15,7 @@ export const createMessageLinkPreviewStyles = (colors: Palette, fromMe: boolean)
     tapTarget: {},
     image: {
       width: '100%',
-      height: 140,
-      backgroundColor: colors.background,
+      backgroundColor: fromMe ? 'rgba(0,0,0,0.08)' : colors.surface,
     },
     body: {
       paddingHorizontal: 12,
@@ -46,3 +45,6 @@ export const createMessageLinkPreviewStyles = (colors: Palette, fromMe: boolean)
       marginTop: 2,
     },
   });
+
+export const createLinkPreviewImageSizeStyles = (aspectRatio: number) =>
+  StyleSheet.create({ image: { aspectRatio } });

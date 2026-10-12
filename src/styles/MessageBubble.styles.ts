@@ -20,7 +20,9 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       gap: 4,
       marginTop: -4,
       marginBottom: 4,
-      paddingHorizontal: 4,
+      // Match the bubble's inner padding. In groups this row lives inside
+      // GroupMessageRow's body, so the avatar gutter stays outside the inset.
+      paddingHorizontal: 12,
     },
     reactionRowLeft: { justifyContent: 'flex-start' },
     reactionRowRight: { justifyContent: 'flex-end' },
@@ -37,7 +39,6 @@ export const createMessageBubbleStyles = (colors: Palette) =>
     },
     reactionPillMine: {
       borderColor: colors.brandPink,
-      backgroundColor: colors.brandPink + '22',
     },
     reactionPillEmoji: {
       fontSize: 13,

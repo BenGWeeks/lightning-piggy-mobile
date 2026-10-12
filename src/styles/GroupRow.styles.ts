@@ -50,9 +50,13 @@ export const createGroupRowStyles = (colors: Palette) =>
       justifyContent: 'center',
     },
     mentionBadgeText: {
+      width: '100%',
+      textAlign: 'center',
+      textAlignVertical: 'center',
+      includeFontPadding: false,
+      lineHeight: 20,
       color: colors.white,
       fontSize: 12,
       fontWeight: '800',
-      marginTop: -1,
     },
   });
