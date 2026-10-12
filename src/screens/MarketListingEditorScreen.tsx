@@ -50,6 +50,7 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
   const t = useTranslation();
   const styles = useMemo(() => createMarketSellerStyles(colors), [colors]);
   const editDTag = route.params?.dTag;
+  const returnToMyShop = route.params?.returnToMyShop;
   const { pubkey, snapshot, status, refresh } = useSellerShop();
   const { saveListing, deleteListing, busy } = useSellerActions(snapshot);
   const { uploading, pickAndUpload } = useListingPhotoUpload();
@@ -177,7 +178,11 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
           type: 'success',
           text1: editBase ? t('market.sell.editor.updated') : t('market.sell.editor.published'),
         });
-        navigation.goBack();
+        if (returnToMyShop) {
+          navigation.popTo('MarketMyShop');
+        } else {
+          navigation.goBack();
+        }
       } catch (e) {
         if (e instanceof SellerFetchError) {
           Toast.show({ type: 'error', text1: t('market.sell.loadFailedTryAgain') });
@@ -215,7 +220,7 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
       }
     };
     await publish(false);
-  }, [fullDraft, editDTag, base, existing, checkValid, saveListing, navigation, t]);
+  }, [fullDraft, editDTag, base, existing, checkValid, saveListing, navigation, returnToMyShop, t]);
 
   const onDelete = useCallback(() => {
     if (!existing) return;

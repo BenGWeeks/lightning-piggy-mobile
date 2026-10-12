@@ -2485,6 +2485,8 @@
         "shippingHint": "每个选项包含配送目的地和运费。发布商品时可以从中选择。",
         "addZone": "添加配送选项",
         "save": "保存店铺",
+        "saveAndAddFirstItem": "保存并添加你的第一件商品",
+        "saveForNow": "暂时只保存",
         "saving": "正在保存…",
         "saved": "店铺已保存",
         "saveFailed": "无法保存你的店铺",

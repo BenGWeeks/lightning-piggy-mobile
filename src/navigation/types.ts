@@ -140,7 +140,7 @@ export type ExploreStackParamList = {
   // shipping zones) and the listing editor (`dTag` = edit that listing).
   MarketMyShop: undefined;
   MarketShopSettings: undefined;
-  MarketListingEditor: { dTag?: string } | undefined;
+  MarketListingEditor: { dTag?: string; returnToMyShop?: boolean } | undefined;
   Hunt: undefined;
   // `piggyId` opens the wizard in edit mode for an existing HiddenPiggy —
   // reuses the same screen, pre-fills every field, and on save replaces

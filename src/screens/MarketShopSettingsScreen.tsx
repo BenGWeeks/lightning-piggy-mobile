@@ -57,6 +57,10 @@ const MarketShopSettingsScreen: React.FC<Props> = ({ navigation }) => {
   const styles = useMemo(() => createMarketSellerStyles(colors), [colors]);
   const { snapshot, status, refresh } = useSellerShop();
   const { saveShop, busy } = useSellerActions(snapshot);
+  const offerFirstItem = !snapshot.shop || snapshot.listings.length === 0;
+  const saveLabel = offerFirstItem
+    ? 'market.sell.shop.saveAndAddFirstItem'
+    : 'market.sell.shop.save';
   const [form, setForm] = useState<Form | null>(null);
   const [showErrors, setShowErrors] = useState(false);
   const [pickingZone, setPickingZone] = useState<number | null>(null);
@@ -160,59 +164,68 @@ const MarketShopSettingsScreen: React.FC<Props> = ({ navigation }) => {
     [pickingZone, editForm],
   );
 
-  const onSave = useCallback(async () => {
-    if (!form) return;
-    if (errors.length > 0) {
-      setShowErrors(true);
-      Toast.show({ type: 'error', text1: t('market.sell.shop.fixErrors') });
-      return;
-    }
-    const reload = () => {
-      // Show the newer shop the relays just returned (and its zones).
-      setDirty(false);
-      setBase(null);
-      setForm(null);
-      refresh();
-    };
-    const save = async (force: boolean) => {
-      try {
-        await saveShop(
-          form.shop,
-          form.zones,
-          base ?? { shop: null, zoneCoordinates: [], zoneEvents: new Map() },
-          {
-            force,
-          },
-        );
-        Toast.show({ type: 'success', text1: t('market.sell.shop.saved') });
-        navigation.goBack();
-      } catch (e) {
-        if (e instanceof SellerFetchError) {
-          // Unknown is not "no shop": never publish blind.
-          Toast.show({ type: 'error', text1: t('market.sell.loadFailedTryAgain') });
-          return;
-        }
-        if (e instanceof StaleRevisionError) {
-          if (!e.base) {
-            Toast.show({ type: 'info', text1: t('market.sell.shop.existingFound') });
-            reload();
+  const onSave = useCallback(
+    async (addFirstItem: boolean) => {
+      if (!form) return;
+      if (errors.length > 0) {
+        setShowErrors(true);
+        Toast.show({ type: 'error', text1: t('market.sell.shop.fixErrors') });
+        return;
+      }
+      const reload = () => {
+        // Show the newer shop the relays just returned (and its zones).
+        setDirty(false);
+        setBase(null);
+        setForm(null);
+        refresh();
+      };
+      const save = async (force: boolean) => {
+        try {
+          await saveShop(
+            form.shop,
+            form.zones,
+            base ?? { shop: null, zoneCoordinates: [], zoneEvents: new Map() },
+            {
+              force,
+            },
+          );
+          Toast.show({ type: 'success', text1: t('market.sell.shop.saved') });
+          if (addFirstItem) {
+            // Both screens belong to Explore. Replace settings so Back cannot
+            // return to the already-saved form.
+            navigation.replace('MarketListingEditor', { returnToMyShop: true });
+          } else {
+            navigation.goBack();
+          }
+        } catch (e) {
+          if (e instanceof SellerFetchError) {
+            // Unknown is not "no shop": never publish blind.
+            Toast.show({ type: 'error', text1: t('market.sell.loadFailedTryAgain') });
             return;
           }
-          Alert.alert(t('market.sell.conflictTitle'), t('market.sell.shop.conflictBody'), [
-            { text: t('market.sell.cancel'), style: 'cancel', onPress: reload },
-            { text: t('market.sell.overwrite'), onPress: () => void save(true) },
-          ]);
-          return;
+          if (e instanceof StaleRevisionError) {
+            if (!e.base) {
+              Toast.show({ type: 'info', text1: t('market.sell.shop.existingFound') });
+              reload();
+              return;
+            }
+            Alert.alert(t('market.sell.conflictTitle'), t('market.sell.shop.conflictBody'), [
+              { text: t('market.sell.cancel'), style: 'cancel', onPress: reload },
+              { text: t('market.sell.overwrite'), onPress: () => void save(true) },
+            ]);
+            return;
+          }
+          Toast.show({
+            type: 'error',
+            text1: t('market.sell.shop.saveFailed'),
+            text2: e instanceof SellerSigningError ? undefined : (e as Error).message,
+          });
         }
-        Toast.show({
-          type: 'error',
-          text1: t('market.sell.shop.saveFailed'),
-          text2: e instanceof SellerSigningError ? undefined : (e as Error).message,
-        });
-      }
-    };
-    await save(false);
-  }, [form, errors, base, saveShop, refresh, navigation, t]);
+      };
+      await save(false);
+    },
+    [form, errors, base, saveShop, refresh, navigation, t],
+  );
 
   return (
     <KeyboardAvoidingView
@@ -332,17 +345,29 @@ const MarketShopSettingsScreen: React.FC<Props> = ({ navigation }) => {
                 : null}
               <TouchableOpacity
                 style={[styles.primaryButton, busy && styles.primaryButtonDisabled]}
-                onPress={onSave}
+                onPress={() => void onSave(offerFirstItem)}
                 disabled={busy}
                 accessibilityState={{ disabled: busy, busy }}
-                accessibilityLabel={t('market.sell.shop.save')}
-                testID="shop-save"
+                accessibilityLabel={t(saveLabel)}
+                testID={offerFirstItem ? 'shop-save-and-add-item' : 'shop-save'}
               >
                 {busy ? <ActivityIndicator color={colors.white} /> : null}
-                <Text style={styles.primaryButtonText}>
-                  {busy ? t('market.sell.shop.saving') : t('market.sell.shop.save')}
+                <Text style={[styles.primaryButtonText, styles.shopSaveButtonText]}>
+                  {busy ? t('market.sell.shop.saving') : t(saveLabel)}
                 </Text>
               </TouchableOpacity>
+              {offerFirstItem ? (
+                <TouchableOpacity
+                  style={[styles.textButton, busy && styles.primaryButtonDisabled]}
+                  onPress={() => void onSave(false)}
+                  disabled={busy}
+                  accessibilityState={{ disabled: busy, busy }}
+                  accessibilityLabel={t('market.sell.shop.saveForNow')}
+                  testID="shop-save-for-now"
+                >
+                  <Text style={styles.secondaryButtonText}>{t('market.sell.shop.saveForNow')}</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           </ScrollView>
         </>

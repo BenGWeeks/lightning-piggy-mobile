@@ -2491,6 +2491,8 @@
         "shippingHint": "Każda opcja określa, dokąd wysyłasz i ile to kosztuje. Przy wystawianiu produktów wybierasz spośród tych opcji.",
         "addZone": "Dodaj opcję dostawy",
         "save": "Zapisz sklep",
+        "saveAndAddFirstItem": "Zapisz i dodaj swój pierwszy przedmiot",
+        "saveForNow": "Na razie zapisz",
         "saving": "Zapisywanie…",
         "saved": "Sklep zapisany",
         "saveFailed": "Nie udało się zapisać twojego sklepu",
