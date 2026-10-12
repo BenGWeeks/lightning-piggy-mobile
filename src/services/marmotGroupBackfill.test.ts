@@ -58,9 +58,21 @@ describe('boundGroupQueries — bounded, paged kind-445 group backfill', () => {
       pageSize: 3,
     });
     const got = await bounded.request(['wss://r'], { kinds: [445], '#h': [H] });
-    expect(got).toHaveLength(7);
+    expect(got).toEqual(events);
     expect(net.requests.every((f) => f.limit === 3)).toBe(true);
     expect(net.requests.length).toBeGreaterThan(1);
+  });
+
+  it('orders equal timestamps by event id, independently of relay order', async () => {
+    const t = now() - 100;
+    const events = [groupEvent(3, t), groupEvent(1, t), groupEvent(2, t)];
+    const net = fakeNetwork(events);
+    const bounded = boundGroupQueries(net.network, { watermarks: new Map(), persist: jest.fn() });
+    expect(await bounded.request(['wss://r'], { kinds: [445], '#h': [H] })).toEqual([
+      events[1],
+      events[2],
+      events[0],
+    ]);
   });
 
   it('starts from the stored watermark minus slack, and leaves other filters alone', async () => {
