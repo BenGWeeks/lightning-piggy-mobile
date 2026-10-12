@@ -42,7 +42,10 @@ const products = [
 ] as MarketProduct[];
 beforeEach(() => {
   jest.clearAllMocks();
-  (fetchMarketCollections as jest.Mock).mockResolvedValue([collection]);
+  (fetchMarketCollections as jest.Mock).mockResolvedValue({
+    events: [collection],
+    incomplete: false,
+  });
 });
 it('loads collection filters only when enabled and filters the signed product snapshot', async () => {
   const { result, rerender } = renderHook(
@@ -60,9 +63,9 @@ it('loads collection filters only when enabled and filters the signed product sn
   expect(result.current.products).toEqual(products);
 });
 it('aborts a blurred snapshot and ignores late collection results', async () => {
-  let resolve!: (events: Event[]) => void;
+  let resolve!: (result: { events: Event[]; incomplete: boolean }) => void;
   (fetchMarketCollections as jest.Mock).mockReturnValue(
-    new Promise<Event[]>((r) => {
+    new Promise<{ events: Event[]; incomplete: boolean }>((r) => {
       resolve = r;
     }),
   );
@@ -75,7 +78,7 @@ it('aborts a blurred snapshot and ignores late collection results', async () => 
   const signal = (fetchMarketCollections as jest.Mock).mock.calls[0][2] as AbortSignal;
   rerender({ enabled: false });
   expect(signal.aborted).toBe(true);
-  await act(async () => resolve([collection]));
+  await act(async () => resolve({ events: [collection], incomplete: true }));
   expect(result.current.collections).toEqual([]);
 });
 it('does not retain a collection selection across seller/catalogue changes', async () => {
@@ -97,4 +100,15 @@ it('does not retain a collection selection across seller/catalogue changes', asy
   await act(async () => rerender({ items: other }));
   expect(result.current.selected).toBeNull();
   expect(result.current.products).toEqual(other);
+});
+
+it('retains usable filters and reports incomplete discovery', async () => {
+  (fetchMarketCollections as jest.Mock).mockResolvedValue({
+    events: [collection],
+    incomplete: true,
+  });
+  const { result } = renderHook(() => useCollectionFilter(products, true));
+  await act(async () => {});
+  expect(result.current.collections).toEqual([collection]);
+  expect(result.current.incomplete).toBe(true);
 });

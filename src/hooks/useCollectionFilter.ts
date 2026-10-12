@@ -16,7 +16,11 @@ export function useCollectionFilter(products: MarketProduct[], enabled: boolean)
     .map((r) => r.url)
     .join(',');
   const key = useMemo(() => products.map((p) => p.listing?.event.id ?? p.id).join(','), [products]);
-  const [state, setState] = useState<{ key: string; events: Event[] }>({ key: '', events: [] });
+  const [state, setState] = useState<{ key: string; events: Event[]; incomplete: boolean }>({
+    key: '',
+    events: [],
+    incomplete: false,
+  });
   const [selection, setSelection] = useState<{ key: string; coordinate: string | null }>({
     key: '',
     coordinate: null,
@@ -26,11 +30,17 @@ export function useCollectionFilter(products: MarketProduct[], enabled: boolean)
       if (!enabled || !products.some((p) => p.listing)) return;
       const controller = new AbortController();
       void fetchMarketCollections(products, relayKey.split(','), controller.signal)
-        .then((events) => {
-          if (!controller.signal.aborted) setState({ key, events: visibleCollections(events) });
+        .then(({ events, incomplete }) => {
+          if (!controller.signal.aborted)
+            setState({ key, events: visibleCollections(events), incomplete });
         })
         .catch(() => {
-          if (!controller.signal.aborted) setState({ key, events: [] });
+          if (!controller.signal.aborted)
+            setState((previous) => ({
+              key,
+              events: previous.key === key ? previous.events : [],
+              incomplete: true,
+            }));
         });
       return () => controller.abort();
     }, [enabled, key, relayKey, products]),
@@ -46,5 +56,11 @@ export function useCollectionFilter(products: MarketProduct[], enabled: boolean)
     (coordinate: string | null) => setSelection({ key, coordinate }),
     [key],
   );
-  return { products: filtered, collections, selected: collection ? selected : null, select };
+  return {
+    products: filtered,
+    collections,
+    selected: collection ? selected : null,
+    select,
+    incomplete: state.key === key && state.incomplete,
+  };
 }

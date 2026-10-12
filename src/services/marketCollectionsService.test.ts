@@ -33,7 +33,10 @@ it('queries bounded collection batches and targeted NIP-09 deletes and suppresse
       ? [collection]
       : [{ kind: 5, pubkey, created_at: 101, tags: [['a', `30405:${pubkey}:art`]] }],
   );
-  expect(await fetchMarketCollections([product()], ['wss://example.com'])).toEqual([]);
+  expect(await fetchMarketCollections([product()], ['wss://example.com'])).toEqual({
+    events: [],
+    incomplete: false,
+  });
   const filters = (queryQuorum as jest.Mock).mock.calls.map((c) => c[1]);
   expect(filters).toEqual([
     { kinds: [30405], authors: [pubkey], limit: 100 },
@@ -89,8 +92,8 @@ it.each(['a', 'e'])(
           : [],
     );
     const result = await fetchMarketCollections([product()], []);
-    expect(result).toHaveLength(100);
-    expect(result.some((e) => e.id === 'event100')).toBe(false);
+    expect(result.events).toHaveLength(100);
+    expect(result.events.some((e) => e.id === 'event100')).toBe(false);
     for (const [, filter] of (queryQuorum as jest.Mock).mock.calls) {
       expect(filter['#a']?.length ?? 0).toBeLessThanOrEqual(100);
       expect(filter['#e']?.length ?? 0).toBeLessThanOrEqual(100);
@@ -117,7 +120,10 @@ it('discovers exact collection references created by another author', async () =
       ? [referenced]
       : [],
   );
-  expect(await fetchMarketCollections([listing], [])).toEqual([referenced]);
+  expect(await fetchMarketCollections([listing], [])).toEqual({
+    events: [referenced],
+    incomplete: false,
+  });
   expect(queryQuorum).toHaveBeenCalledWith(
     expect.any(Array),
     { kinds: [30405], authors: [foreign], '#d': ['art:prints'], limit: 5 },
@@ -130,61 +136,119 @@ const referencedProducts = (count: number): MarketProduct[] =>
     listing: { event: { pubkey, tags: [['a', `30405:${pubkey}:c${i}`]] } },
   })) as MarketProduct[];
 
-it('runs discovery concurrently with at most four active queries and validates exact coordinates', async () => {
+it('does not re-query author-covered references on 7.5-second relays', async () => {
   jest.useFakeTimers();
-  let active = 0;
-  let peak = 0;
-  (queryQuorum as jest.Mock).mockImplementation((_relays, filter) => {
-    active++;
-    peak = Math.max(peak, active);
-    return new Promise<Event[]>((resolve) => {
-      setTimeout(() => {
-        active--;
-        resolve(filter['#d'] ? [collection] : []);
-      }, 100);
-    });
-  });
+  const events = Array.from({ length: 5 }, (_, i) => ({
+    ...collection,
+    id: `c${i}`,
+    tags: [
+      ['d', `c${i}`],
+      ['title', `C${i}`],
+    ],
+  }));
+  (queryQuorum as jest.Mock).mockImplementation(
+    (_relays, filter) =>
+      new Promise((resolve) =>
+        setTimeout(() => resolve(filter.kinds[0] === 30405 ? events : []), 7500),
+      ),
+  );
   try {
-    const result = fetchMarketCollections(referencedProducts(12), []);
-    await jest.advanceTimersByTimeAsync(400);
-    expect(await result).toEqual([]); // Relay returned "art", never the requested c0…c11.
-    expect(peak).toBe(4);
-    expect(queryQuorum).toHaveBeenCalledTimes(13);
+    const result = fetchMarketCollections(referencedProducts(5), []).catch(
+      (error: unknown) => error,
+    );
+    await jest.advanceTimersByTimeAsync(20_000);
+    expect(queryQuorum).toHaveBeenCalledTimes(3);
+    expect(await result).toEqual({ events, incomplete: false });
     expect(jest.getTimerCount()).toBe(0);
   } finally {
     jest.useRealTimers();
   }
 });
 
-it('bounds the whole discovery, cancels active queries and never starts queued queries after timeout', async () => {
+it('groups foreign references by author and validates exact identifiers', async () => {
+  const foreign = 'b'.repeat(64);
+  const listing = {
+    listing: {
+      event: {
+        pubkey,
+        tags: [
+          ['a', `30405:${foreign}:c0`],
+          ['a', `30405:${foreign}:c1`],
+        ],
+      },
+    },
+  } as MarketProduct;
+  (queryQuorum as jest.Mock).mockImplementation(async (_relays, filter) =>
+    filter['#d'] ? [collection, { ...collection, pubkey: foreign, tags: [['d', 'wrong']] }] : [],
+  );
+  const result = await fetchMarketCollections([listing], []);
+  expect(queryQuorum).toHaveBeenCalledTimes(2);
+  expect(result).toEqual({ events: [], incomplete: false });
+  expect(queryQuorum).toHaveBeenCalledWith(
+    expect.any(Array),
+    {
+      kinds: [30405],
+      authors: [foreign],
+      '#d': ['c0', 'c1'],
+      limit: 10,
+    },
+    expect.any(AbortSignal),
+  );
+});
+
+it('retains deletion-checked batches when another batch hits the deadline', async () => {
   jest.useFakeTimers();
+  const foreign = 'b'.repeat(64);
+  const listing = {
+    listing: { event: { pubkey, tags: [['a', `30405:${foreign}:slow`]] } },
+  } as MarketProduct;
+  (queryQuorum as jest.Mock).mockImplementation(async (_relays, filter) => {
+    if (filter.authors.includes(foreign)) return new Promise(() => {});
+    return filter.kinds[0] === 30405 ? [collection] : [];
+  });
+  try {
+    const result = fetchMarketCollections([listing], []).catch((error: unknown) => error);
+    await jest.advanceTimersByTimeAsync(20_000);
+    expect(await result).toEqual({ events: [collection], incomplete: true });
+    for (const [, , signal] of (queryQuorum as jest.Mock).mock.calls)
+      expect(signal.aborted).toBe(true);
+    expect(jest.getTimerCount()).toBe(0);
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+it('bounds the whole discovery and never starts queued queries after timeout', async () => {
+  jest.useFakeTimers();
+  const listings = Array.from({ length: 128 }, (_, i) => ({
+    listing: {
+      event: {
+        pubkey,
+        tags: [['a', `30405:${(i + 1).toString(16).padStart(64, '0')}:c`]],
+      },
+    },
+  })) as MarketProduct[];
   (queryQuorum as jest.Mock).mockImplementation(() => new Promise(() => {}));
   try {
-    const result = fetchMarketCollections(referencedProducts(128), []);
-    const rejection = expect(result).rejects.toThrow('Collection discovery timed out');
+    const result = fetchMarketCollections(listings, []);
     await jest.advanceTimersByTimeAsync(20_000);
-    await rejection;
+    expect(await result).toEqual({ events: [], incomplete: true });
     expect(queryQuorum).toHaveBeenCalledTimes(4);
-    for (const [, , signal] of (queryQuorum as jest.Mock).mock.calls) {
-      expect(signal.aborted).toBe(true);
-    }
     expect(jest.getTimerCount()).toBe(0);
   } finally {
     jest.useRealTimers();
   }
 });
 
-it('includes deletion checks in the overall deadline and discards unverified deletion state', async () => {
+it('does not expose collections whose deletion checks miss the deadline', async () => {
   jest.useFakeTimers();
-  (queryQuorum as jest.Mock).mockImplementation(async (_relays, filter) => {
-    if (filter.kinds[0] === 30405) return [collection];
-    return new Promise(() => {});
-  });
+  (queryQuorum as jest.Mock).mockImplementation(async (_relays, filter) =>
+    filter.kinds[0] === 30405 ? [collection] : new Promise(() => {}),
+  );
   try {
     const result = fetchMarketCollections([product()], []);
-    const rejection = expect(result).rejects.toThrow('Collection discovery timed out');
     await jest.advanceTimersByTimeAsync(20_000);
-    await rejection;
+    expect(await result).toEqual({ events: [], incomplete: true });
     expect(queryQuorum).toHaveBeenCalledTimes(3);
     expect(jest.getTimerCount()).toBe(0);
   } finally {
@@ -197,8 +261,8 @@ it('cancels active discovery promptly on caller abort without starting queued wo
   (queryQuorum as jest.Mock).mockImplementation(() => new Promise(() => {}));
   const result = fetchMarketCollections(referencedProducts(12), [], controller.signal);
   controller.abort();
-  expect(await result).toEqual([]);
-  expect(queryQuorum).toHaveBeenCalledTimes(4);
+  expect(await result).toEqual({ events: [], incomplete: true });
+  expect(queryQuorum).toHaveBeenCalledTimes(1);
   for (const [, , signal] of (queryQuorum as jest.Mock).mock.calls) {
     expect(signal.aborted).toBe(true);
   }

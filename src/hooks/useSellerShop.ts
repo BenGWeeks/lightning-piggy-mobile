@@ -43,7 +43,7 @@ export interface UseSellerShop {
 export function useSellerShop(): UseSellerShop {
   const { pubkey, relays, isLoggedIn, signerType } = useNostr();
   const [version, setVersion] = useState(0);
-  const [currency, setCurrency] = useState({ pubkey: '', value: 'SATS' });
+  const [currency, setCurrency] = useState({ pubkey: '', shopId: '', value: 'SATS' });
   const [status, setStatus] = useState<UseSellerShop['status']>('idle');
   const [attempt, setAttempt] = useState(0);
   const forceNext = useRef(false);
@@ -59,13 +59,6 @@ export function useSellerShop(): UseSellerShop {
         return;
       }
       let cancelled = false;
-      void loadSellerCurrency(pubkey)
-        .then((value) => {
-          if (!cancelled) setCurrency({ pubkey, value });
-        })
-        .catch(() => {
-          if (!cancelled) setCurrency({ pubkey, value: 'SATS' });
-        });
       // This screen only runs for the signed-in account.
       reviveSellerAccount(pubkey);
       const state = sellerStoreState(pubkey);
@@ -117,17 +110,46 @@ export function useSellerShop(): UseSellerShop {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pubkey, version]);
 
+  const shopId = snapshot.shop?.id ?? '';
+  useEffect(() => {
+    if (!pubkey) return;
+    let cancelled = false;
+    void loadSellerCurrency(pubkey, snapshot.shop)
+      .then((value) => {
+        if (!cancelled) setCurrency({ pubkey, shopId, value });
+      })
+      .catch(() => {
+        if (!cancelled) setCurrency({ pubkey, shopId, value: 'SATS' });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pubkey, snapshot.shop, shopId]);
+
   const canPublish = Boolean(isLoggedIn && ['nsec', 'amber', 'nip46'].includes(signerType ?? ''));
   const defaultCurrency = currency.pubkey === pubkey ? currency.value : 'SATS';
   return useMemo(
     () => ({
       pubkey,
       snapshot,
-      status: status === 'ready' && currency.pubkey !== pubkey ? ('loading' as const) : status,
+      status:
+        status === 'ready' && (currency.pubkey !== pubkey || currency.shopId !== shopId)
+          ? ('loading' as const)
+          : status,
       refresh,
       canPublish,
       defaultCurrency,
     }),
-    [pubkey, snapshot, status, refresh, canPublish, defaultCurrency, currency.pubkey],
+    [
+      pubkey,
+      snapshot,
+      status,
+      refresh,
+      canPublish,
+      defaultCurrency,
+      currency.pubkey,
+      currency.shopId,
+      shopId,
+    ],
   );
 }

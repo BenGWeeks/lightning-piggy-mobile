@@ -373,3 +373,28 @@ describe('deletion (kind 5)', () => {
     });
   });
 });
+
+it('drops only the own legacy shop coordinate when an existing listing is edited', () => {
+  const otherAuthor = 'b'.repeat(64);
+  const references = [
+    shopCoordinate(pubkey),
+    shopCoordinate(otherAuthor),
+    `30405:${pubkey}:art`,
+    `30405:${pubkey}:${SHOP_COLLECTION_D}:prints`,
+  ];
+  const previous = sign({
+    kind: 30402,
+    content: '',
+    tags: [
+      ['d', 'item-abc'],
+      ['price', '12.50', 'GBP'],
+      ...references.map((c) => ['a', c]),
+      ['a', `30402:${pubkey}:parent`],
+    ],
+  });
+  const parsed = parseListingDraft(previous);
+  const { tags } = buildListingTemplate({ draft: parsed, previous, pubkey, nowSeconds: 200 });
+  expect(tags).not.toContainEqual(['a', shopCoordinate(pubkey)]);
+  for (const coordinate of references.slice(1)) expect(tags).toContainEqual(['a', coordinate]);
+  expect(tags).toContainEqual(['a', `30402:${pubkey}:parent`]);
+});

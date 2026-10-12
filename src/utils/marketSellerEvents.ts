@@ -289,7 +289,9 @@ export function buildListingTemplate(input: {
         : ['shipping_option', s.coordinate],
     );
   }
-  for (const collection of new Set(draft.collections ?? [])) tags.push(['a', collection]);
+  for (const collection of new Set(draft.collections ?? [])) {
+    if (collection !== shopCoordinate(input.pubkey)) tags.push(['a', collection]);
+  }
   tags.push(['published_at', tagValue(prevTags, 'published_at') ?? String(input.nowSeconds)]);
   const managed = new Set([
     'd',
