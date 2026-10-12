@@ -182,6 +182,10 @@ with_device '
   sender admins --state "$STATE" --set "$SENDER_HEX,$BIG_HEX" >"$OUT/logs/admins.json"
   sender say --state "$STATE" --text "IO$TAG after-admins" >>"$OUT/logs/admins.json"
   flow "$FLOWS/flow-149-interop-lp-rename-after-admin.yaml" ROW_ID="'"$ROW"'"
+  # Wire check: does Lightning Piggy'"'"'s text sent right after its rename reach
+  # the scripted member? (White Noise is checked on screen in flow-148.)
+  sender listen --state "$STATE" --seconds 60 --expect "IO${TAG}L after-lp-rename" \
+    >"$OUT/logs/listen-after-rename.jsonl" || true
   sender say --state "$STATE" --text "IO$TAG after-rename" >"$OUT/logs/after-rename.json"
   flow "$FLOWS/flow-150-interop-lp-receives-after-rename.yaml" ROW_ID="'"$ROW"'"
   [ -z "${SKIP_WN:-}" ] && flow "$FLOWS/flow-148-interop-wn-receives-lp.yaml" WN_CHAT="(?i)IO $TAG( renamed)?"

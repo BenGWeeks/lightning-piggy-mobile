@@ -169,6 +169,13 @@ if (done) {
   for (const re of done.missing ?? []) out.push(`- FAIL \`${re}\` not received in 90 s`);
   out.push('');
 }
+const afterRename = jsonLines('listen-after-rename.jsonl').find((l) => l.done);
+if (afterRename) {
+  out.push('## Lightning Piggy → group after its rename, on the wire (scripted member)', '');
+  for (const re of afterRename.matched ?? []) out.push(`- PASS \`${re}\``);
+  for (const re of afterRename.missing ?? []) out.push(`- FAIL \`${re}\` not received in 60 s`);
+  out.push('');
+}
 const info = jsonLines('group-info.json')[0];
 if (info)
   out.push(

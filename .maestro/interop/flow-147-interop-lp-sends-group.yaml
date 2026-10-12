@@ -24,26 +24,51 @@ name: Interop — Lightning Piggy sends the item set into the run's Marmot group
 - tapOn:
     id: 'group-message-input'
 - inputText: 'IO${TAG}L plain: TEST please ignore, sent from Lightning Piggy'
+# The send button only appears once the composer has text.
+- extendedWaitUntil:
+    visible:
+      id: 'group-send-button'
+    timeout: 10000
 - tapOn:
     id: 'group-send-button'
 - tapOn:
     id: 'group-message-input'
-- inputText: 'IO${TAG}L md: **bold** _italic_ `code`'
+- inputText: 'IO${TAG}L md: **bold** _italic_ ~~strike~~'
+# The send button only appears once the composer has text.
+- extendedWaitUntil:
+    visible:
+      id: 'group-send-button'
+    timeout: 10000
 - tapOn:
     id: 'group-send-button'
 - tapOn:
     id: 'group-message-input'
 - inputText: 'IO${TAG}L long: Piggy saving sentence one. Piggy saving sentence two. Piggy saving sentence three. Piggy saving sentence four. Piggy saving sentence five. Piggy saving sentence six.'
+# The send button only appears once the composer has text.
+- extendedWaitUntil:
+    visible:
+      id: 'group-send-button'
+    timeout: 10000
 - tapOn:
     id: 'group-send-button'
 - tapOn:
     id: 'group-message-input'
 - inputText: 'IO${TAG}L editme v1'
+# The send button only appears once the composer has text.
+- extendedWaitUntil:
+    visible:
+      id: 'group-send-button'
+    timeout: 10000
 - tapOn:
     id: 'group-send-button'
 - tapOn:
     id: 'group-message-input'
 - inputText: 'IO${TAG}L deleteme should disappear'
+# The send button only appears once the composer has text.
+- extendedWaitUntil:
+    visible:
+      id: 'group-send-button'
+    timeout: 10000
 - tapOn:
     id: 'group-send-button'
 - waitForAnimationToEnd:
@@ -65,6 +90,11 @@ name: Interop — Lightning Piggy sends the item set into the run's Marmot group
 - tapOn:
     id: 'message-action-edit'
 - inputText: ' EDITED'
+# The send button only appears once the composer has text.
+- extendedWaitUntil:
+    visible:
+      id: 'group-send-button'
+    timeout: 10000
 - tapOn:
     id: 'group-send-button'
 - waitForAnimationToEnd:
