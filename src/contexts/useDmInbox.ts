@@ -405,15 +405,13 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       const lastRefreshAt =
         dmInboxLastRefresh.current.pubkey === pubkey ? dmInboxLastRefresh.current.at : 0;
       const isColdStart = isColdStartRefresh(lastRefreshAt);
-      // Skip-set / TTL / kind-4 `since` policies are pure functions in
-      // dmRefreshGate — the cold-start backfill (#751) bypasses only the
-      // TTL; backfill itself must NOT inherit the #743 force-refresh cache
-      // bypasses (includeNonFollows still bypasses, see shouldBypassSkipSet)
-      // (that was the every-cold-start decrypt sweep, #846).
+      // dmRefreshGate keeps the cold backfill's TTL bypass independent of
+      // user-intent cache bypasses, avoiding decrypt sweeps on restart (#846).
       const bypassSkipSet = shouldBypassSkipSet(opts);
       // Resolve setup before comparing effective cancellation and refresh strength.
       // A refresh in flight for a previous account is ignored here — its
       // writes are dropped by the owner scope, so there's nothing to wait for.
+      kind4Failures?.configureFetch(getReadRelays(), 0);
       await kind4Failures?.load();
       if (activeOwnerRef.current !== pubkey) return;
       const inFlight = dmInboxInFlight.current.get(pubkey);
@@ -574,6 +572,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
             },
           );
           if (effectiveSignal?.aborted) return;
+          kind4Failures?.configureFetch(readRelays, kind4.length);
           const entries: DmInboxEntry[] = [];
 
           // NIP-04 — partner pubkey is in the envelope, so we can apply
@@ -762,13 +761,15 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           // Pending failures protect the floor independently of refresh completion.
           // Randomised wrap timestamps never contribute.
           const newest = Math.max(lastSeen ?? 0, ...kind4.map((e) => e.created_at));
-          const newLastSeen = kind4Failures?.cursor(newest) ?? newest;
           const kind4Complete = k4Result.processed === k4ToDecrypt.length;
-          if (!effectiveSignal.aborted && kind4Complete && newLastSeen !== (lastSeen ?? 0)) {
-            await AsyncStorage.setItem(
-              inboxLastSeenKey(refreshForPubkey),
-              String(newLastSeen),
-            ).catch(() => {});
+          if (!effectiveSignal.aborted && kind4Complete) {
+            const newLastSeen = kind4Failures?.cursor(newest) ?? newest;
+            await kind4Failures?.save();
+            if (newLastSeen !== (lastSeen ?? 0))
+              await AsyncStorage.setItem(
+                inboxLastSeenKey(refreshForPubkey),
+                String(newLastSeen),
+              ).catch(() => {});
           }
           // Completion drives TTL and full wrap backfill independently of the
           // history floor. A productive abort still needs another pass.

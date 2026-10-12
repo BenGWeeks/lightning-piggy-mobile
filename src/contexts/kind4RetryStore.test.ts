@@ -16,12 +16,12 @@ beforeEach(async () => {
 afterEach(() => jest.restoreAllMocks());
 
 it('persists backoff and the oldest retryable floor until three counted failures', async () => {
-  const store = new Kind4RetryStore('owner');
+  const store = new Kind4RetryStore('owner', 500, 5000);
   await store.load();
   store.failed('old', 100, false, 1000);
   store.failed('new', 800, true, 1000);
   await store.save();
-  const restarted = new Kind4RetryStore('owner');
+  const restarted = new Kind4RetryStore('owner', 500, 5000);
   await restarted.load();
   expect(restarted.cursor(1000)).toBe(100);
   expect(restarted.shouldSkip('old', false, 1001)).toBe(true);
@@ -33,14 +33,14 @@ it('persists backoff and the oldest retryable floor until three counted failures
   expect(restarted.cursor(1000)).toBe(1000);
   expect(restarted.nextRetryAt()).toBeUndefined();
   await restarted.save();
-  const permanent = new Kind4RetryStore('owner');
+  const permanent = new Kind4RetryStore('owner', 500, 5000);
   await permanent.load();
   expect(permanent.shouldSkip('new', false, 10_000_000)).toBe(true);
   expect(permanent.shouldSkip('new', true)).toBe(false);
 });
 
 it('bounds persisted metadata to 500 entries, preferring to evict permanent failures', async () => {
-  const store = new Kind4RetryStore('owner');
+  const store = new Kind4RetryStore('owner', 500, 5000);
   await store.load();
   for (let i = 0; i < 501; i++) {
     store.failed(String(i), i, true, 1000);
@@ -67,7 +67,7 @@ it.each([
 });
 
 it('exhausts the oldest pending failure before evicting it at capacity', async () => {
-  const store = new Kind4RetryStore('owner');
+  const store = new Kind4RetryStore('owner', 500, 5000);
   await store.load();
   for (let i = 0; i < 501; i++) store.failed(String(i), i, false, 1000);
   await store.save();
@@ -114,7 +114,7 @@ it.each(['counted', 'uncounted', 'age'] as const)(
     jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     let now = 1000;
     jest.spyOn(Date, 'now').mockImplementation(() => now);
-    let store = new Kind4RetryStore('owner');
+    let store = new Kind4RetryStore('owner', 500, 5000);
     await store.load();
     // 501 failed events span 50 seconds: all remain inside the 120-second overlap.
     const events = Array.from({ length: 501 }, (_, i) => ({
@@ -152,7 +152,7 @@ it.each(['counted', 'uncounted', 'age'] as const)(
       now += KIND4_RETRY_BASE_MS;
       if (pass <= Math.min(ceilingPass, 20) || pass === ceilingPass) {
         await store.save();
-        store = new Kind4RetryStore('owner');
+        store = new Kind4RetryStore('owner', 500, 5000);
         await store.load();
       }
     }
@@ -165,26 +165,26 @@ it.each(['counted', 'uncounted', 'age'] as const)(
   30_000,
 );
 
-it('bounds persisted exhausted ids and discards oldest history regardless of insertion order', async () => {
-  const negatives = Array.from({ length: 5001 }, (_, i) => [String(i), 5000 - i]);
+it('loads legacy exhaustion without forgetting replayable ids at the old cap', async () => {
+  const negatives = Array.from({ length: 5501 }, (_, i) => [String(i), 100 + Math.floor(i / 110)]);
   await AsyncStorage.setItem('dm-kind4-exhausted:owner', JSON.stringify(negatives));
   const store = new Kind4RetryStore('owner');
   await store.load();
+  expect(store.cursor(150)).toBe(150);
   await store.save();
   const saved = JSON.parse((await AsyncStorage.getItem('dm-kind4-exhausted:owner'))!);
-  expect(saved).toHaveLength(5000);
-  expect(store.shouldSkip('0')).toBe(true);
-  expect(store.shouldSkip('5000')).toBe(false);
+  expect(saved.entries).toHaveLength(5501);
+  for (const [id] of negatives) expect(store.shouldSkip(String(id))).toBe(true);
 });
 
 it('retains evicted exhaustion after a failed bypass and clears it only on successful recovery', async () => {
-  const store = new Kind4RetryStore('owner');
+  const store = new Kind4RetryStore('owner', 500, 5000);
   await store.load();
   for (let i = 0; i < 501; i++) store.failed(String(i), i, false);
   expect(store.shouldSkip('0', true)).toBe(false);
   store.failed('0', 0, false);
   await store.save();
-  const restarted = new Kind4RetryStore('owner');
+  const restarted = new Kind4RetryStore('owner', 500, 5000);
   await restarted.load();
   expect(restarted.shouldSkip('0')).toBe(true);
   expect(restarted.cursor(1000)).toBe(1);
@@ -193,7 +193,102 @@ it('retains evicted exhaustion after a failed bypass and clears it only on succe
   expect(other.shouldSkip('0')).toBe(false);
   restarted.succeeded('0');
   await restarted.save();
-  const recovered = new Kind4RetryStore('owner');
+  const recovered = new Kind4RetryStore('owner', 500, 5000);
   await recovered.load();
   expect(recovered.shouldSkip('0')).toBe(false);
+});
+
+it.each([
+  [5501, undefined, true],
+  [5501, 500, true],
+  [10001, undefined, true],
+  [5501, undefined, false],
+] as const)(
+  'bounds %i failures within 50 seconds across every saved/restarted pass (capacity %s, counted %s)',
+  async (count, capacity, counted) => {
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    let now = 1000;
+    jest.spyOn(Date, 'now').mockImplementation(() => now);
+    const events = Array.from({ length: count }, (_, i) => ({
+      id: String(i),
+      createdAt: 100 + Math.floor((i * 50) / (count - 1)),
+    }));
+    let store = new Kind4RetryStore('owner', capacity);
+    await store.load();
+    let cursor = 0;
+    let attempts = 0;
+    let exhaustedAttempts = 0;
+    for (let pass = 0; pass < 100; pass++) {
+      for (const event of events) {
+        if (event.createdAt < cursor - 120 || store.shouldSkip(event.id)) continue;
+        attempts++;
+        store.failed(event.id, event.createdAt, counted);
+      }
+      const next = store.cursor(150);
+      expect(next).toBeGreaterThanOrEqual(cursor);
+      cursor = next;
+      if (pass === 20) exhaustedAttempts = attempts;
+      if (pass >= 20) {
+        expect(attempts).toBe(exhaustedAttempts);
+        expect(store.nextRetryAt()).toBeUndefined();
+      }
+      await store.save();
+      store = new Kind4RetryStore('owner', capacity);
+      await store.load();
+      expect(store.cursor(0)).toBe(cursor);
+      now += KIND4_RETRY_BASE_MS;
+    }
+    expect(attempts).toBeGreaterThanOrEqual(count);
+    expect(attempts).toBeLessThanOrEqual(count * (counted ? 3 : KIND4_MAX_UNCOUNTED_ATTEMPTS));
+    expect(store.retryDelay()).toBeUndefined();
+    for (const event of events)
+      if (event.createdAt >= cursor - 120) expect(store.shouldSkip(event.id)).toBe(true);
+  },
+  30_000,
+);
+
+it('retains exhaustion at the inclusive replay boundary and prunes only behind it', async () => {
+  const store = new Kind4RetryStore('owner', 1);
+  await store.load();
+  for (let i = 0; i < 3; i++) store.failed('boundary', 100, true);
+  expect(store.cursor(220)).toBe(220);
+  await store.save();
+  expect(store.shouldSkip('boundary')).toBe(true);
+  for (let i = 0; i < 3; i++) store.failed('new', 220, true);
+  // At capacity with both entries replayable, moving the cursor makes the
+  // oldest entry strictly older than the inclusive `since` before pruning.
+  expect(store.cursor(220)).toBe(221);
+  await store.save();
+  const restarted = new Kind4RetryStore('owner');
+  await restarted.load();
+  expect(restarted.cursor(0)).toBe(221);
+  expect(restarted.shouldSkip('boundary')).toBe(false);
+});
+
+it('asserts the fetch bound including both directions and default relays', () => {
+  const store = new Kind4RetryStore('owner');
+  expect(() => store.configureFetch([], 10000)).not.toThrow();
+  expect(() => store.configureFetch([], 10001)).toThrow('per-filter relay limit');
+  expect(() => new Kind4RetryStore('owner', 0)).toThrow('capacity');
+});
+
+it('does not resurrect stale retries if the negative/cursor write succeeds but retry write fails', async () => {
+  const store = new Kind4RetryStore('owner', 1);
+  await store.load();
+  store.failed('old', 100, false);
+  await store.save();
+  // Retire old work at retry capacity, then overflow the exhausted map.
+  store.failed('new', 220, false);
+  for (let i = 0; i < 3; i++) store.failed('new', 220, true);
+  const originalSetItem = jest.mocked(AsyncStorage.setItem).getMockImplementation()!;
+  jest.spyOn(AsyncStorage, 'setItem').mockImplementation(async (key, value) => {
+    if (key === 'dm-kind4-retries:owner') throw new Error('storage unavailable');
+    return originalSetItem(key, value);
+  });
+  await expect(store.save()).rejects.toThrow('storage unavailable');
+  const restarted = new Kind4RetryStore('owner', 1);
+  await restarted.load();
+  expect(restarted.cursor(0)).toBe(221);
+  expect(restarted.nextRetryAt()).toBeUndefined();
+  expect(restarted.shouldSkip('new')).toBe(true);
 });

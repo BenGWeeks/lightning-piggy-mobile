@@ -1230,6 +1230,16 @@ retries stop for all three ceilings. They cannot keep refreshes cold or
 block full wrap backfill. Unattempted messages and failed database writes still
 preserve the history cursor.
 
+Kind-4 retry exhaustion is persisted with a monotonic replay cursor. Capacity
+is derived from two kind-4 filters, their fetch limit and the unique relay
+count, rather than the former 500/5,000-entry caps. A negative may be forgotten
+only when its timestamp is strictly older than cursor minus the 120-second
+replay overlap (the relay's `since` is inclusive). If exhausted entries still
+exceed capacity inside that window, the cursor advances beyond the oldest
+exhausted timestamps before their metadata is removed. Regression tests cover
+5,501 failures within 50 seconds with a save/restart every pass, as well as
+pressure beyond the new fetch-derived capacity.
+
 Do not interpret `nostrCrypto schnorrVerify n=1888` as 1,888 checks per
 refresh: `n` is cumulative for the process, while percentiles cover only the
 last 200 samples. It increased by just one between 21:07:09 and 21:08:09.
