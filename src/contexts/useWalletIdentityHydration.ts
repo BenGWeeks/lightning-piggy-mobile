@@ -1,3 +1,5 @@
+import { readCachedWalletBalance } from '../services/walletBalanceCache';
+import { perfLog } from '../utils/perfLog';
 import {
   useCallback,
   useEffect,
@@ -89,6 +91,7 @@ export function useWalletIdentityHydration({
             if (!isCurrent()) return;
             setIsOnboarded?.(onboarded);
           }
+          perfLog('wallet identity storage hydration start');
           const walletList = await walletStorage.getWalletList();
           if (!isCurrent()) return;
           const walletStates: WalletState[] = await Promise.all(
@@ -109,16 +112,7 @@ export function useWalletIdentityHydration({
               // hydration path). Identity-switch is treated identically:
               // never run BDK init eagerly. Fresh balance comes lazily on
               // refresh / wallet-detail open.
-              let cachedBalance: number | null = null;
-              try {
-                const bRaw = await AsyncStorage.getItem(`balance_${w.id}`);
-                if (bRaw) {
-                  const n = Number(bRaw);
-                  if (Number.isFinite(n)) cachedBalance = n;
-                }
-              } catch {
-                // Ignore corrupted cache.
-              }
+              const cachedBalance = await readCachedWalletBalance(w.id);
               // Seed the announced-receipts set before the detector runs (see
               // the startup-hydration path for the rationale).
               if (isCurrent()) await hydrateSeenReceipts(w.id, cachedTxs, isCurrent);
@@ -192,6 +186,8 @@ export function useWalletIdentityHydration({
             setWalletsHydrated?.(true);
             setIsLoading?.(false);
           }
+        } finally {
+          perfLog('wallet identity storage hydration end');
         }
       })();
     });

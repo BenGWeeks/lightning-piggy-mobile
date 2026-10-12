@@ -1,3 +1,4 @@
+import { perfBalanceReceived } from '../utils/perfBalance';
 import { listTransactionsWithRetry } from './nwcTransactionRetry';
 import { hydratePaymentProofs, recordPaymentProof } from './paymentProofs';
 import { NostrWebLNProvider } from '@getalby/sdk';
@@ -222,6 +223,7 @@ export async function connect(
     }
 
     if (!isCurrent()) return discard();
+    if (balance !== undefined) perfBalanceReceived(walletId, balance, 'fresh');
     return { success: true, balance };
   } catch (error) {
     if (!isCurrent()) return discard();
@@ -347,6 +349,7 @@ export async function getBalance(
         );
       }
       recordRelayOutcome(walletId);
+      perfBalanceReceived(walletId, b.balance, 'fresh');
       return b.balance;
     } catch (error) {
       const __dt = performance.now() - __t0;

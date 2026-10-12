@@ -18,25 +18,16 @@
 // `process.env.EXPO_PUBLIC_*` at bundle time, so the literal-string
 // comparison dead-code-eliminates the rest of this file in normal
 // release builds where the flag is unset.
+import { bootT0 } from './perfBoot';
 export const PERF_LOGS_ENABLED = __DEV__ || process.env.EXPO_PUBLIC_KEEP_PERF_LOGS === '1';
-let T0: number | null = null;
 
 export function perfT0(): number {
-  if (T0 === null) T0 = Date.now();
-  return T0;
+  return bootT0;
 }
 
 export function perfLog(tag: string): void {
   if (!PERF_LOGS_ENABLED) return;
-  const t = perfT0();
-  console.log(`[Perf] ${tag} +${Date.now() - t}ms`);
-}
-
-// Mark T0 explicitly. Call this from index.ts so T0 is anchored at
-// the FIRST module-eval moment, not whenever this file happens to
-// be imported.
-export function perfAnchor(): void {
-  if (T0 === null) T0 = Date.now();
+  console.log(`[Perf] ${tag} +${Date.now() - bootT0}ms since boot`);
 }
 
 // Tab-navigation tap-to-paint timing. Records the wall-clock at the

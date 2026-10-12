@@ -1,3 +1,4 @@
+import { PERF_LOGS_ENABLED } from '../utils/perfLog';
 import React, { useRef, useCallback, useState } from 'react';
 import {
   View,
@@ -91,6 +92,7 @@ const WalletCarousel: React.FC<WalletCarouselProps> = ({
 
   const viewabilityConfig = useRef({ viewAreaCoveragePercentThreshold: 50 }).current;
 
+  const perfActiveWalletId = PERF_LOGS_ENABLED ? activeWalletId : null;
   const renderItem = useCallback(
     ({ item }: { item: CarouselItem }) => {
       if (item.type === 'add') {
@@ -98,6 +100,7 @@ const WalletCarousel: React.FC<WalletCarouselProps> = ({
       }
       return (
         <WalletCard
+          perfVisible={PERF_LOGS_ENABLED && item.wallet.id === perfActiveWalletId}
           wallet={item.wallet}
           btcPrice={btcPrice}
           currency={currency}
@@ -105,7 +108,7 @@ const WalletCarousel: React.FC<WalletCarouselProps> = ({
         />
       );
     },
-    [btcPrice, currency, onAddWallet, onSettingsPress],
+    [perfActiveWalletId, btcPrice, currency, onAddWallet, onSettingsPress],
   );
 
   return (

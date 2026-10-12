@@ -1,3 +1,4 @@
+import { perfBalanceReceived } from '../utils/perfBalance';
 /**
  * On-chain Bitcoin wallet service using BDK (Bitcoin Development Kit).
  *
@@ -504,6 +505,7 @@ export async function syncAndRefresh(walletId: string): Promise<{
     const single = await getSingleAddress(walletId);
     if (single) {
       const result = await syncSingleAddressViaEsplora(single);
+      perfBalanceReceived(walletId, result.balance, 'fresh');
       return { balance: result.balance, transactions: result.transactions, ok: true };
     }
 
@@ -514,6 +516,7 @@ export async function syncAndRefresh(walletId: string): Promise<{
     const bal = await wallet.getBalance();
     const txList = await wallet.listTransactions(false);
 
+    perfBalanceReceived(walletId, bal.total, 'fresh');
     return { balance: bal.total, transactions: await mapAndSortTransactions(txList), ok: true };
   } catch (e) {
     // Return ok: false so callers can choose to keep their cached state

@@ -1,6 +1,7 @@
+import './src/utils/perfBoot';
 import { registerRootComponent } from 'expo';
 import { LogBox } from 'react-native';
-import { perfAnchor, perfLog, perfHeartbeatStart } from './src/utils/perfLog';
+import { perfLog, perfHeartbeatStart } from './src/utils/perfLog';
 // Side-effect import: defines the background-sync task in the global scope
 // so expo-background-task can invoke it after an OS-driven relaunch (#279).
 import './src/services/backgroundTask';
@@ -15,11 +16,6 @@ import './src/services/marmotPushWake';
 // the OS can deliver location updates while a share runs in the background.
 import './src/services/liveLocationTask';
 
-// Anchor T0 at the FIRST line of JS execution (this module is the
-// app's entry point per registerRootComponent below). Every later
-// `perfLog(tag)` call reports `+Nms` relative to here, so a single
-// `adb logcat | grep "[Perf]"` gives the entire cold-start timeline.
-perfAnchor();
 perfLog('index.ts module-eval');
 // Start the JS-thread heartbeat so cold-start freezes show up as
 // large `gap=Xms` values in the perf log, even when no user taps.

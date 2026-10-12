@@ -1,3 +1,4 @@
+import { hydrateMarmotSession } from './marmotSessionHydration';
 // One Marmot (MLS-over-Nostr) client per signed-in account.
 //
 // Owns the marmot-ts `MarmotClient`: loads + connects every group, keeps an
@@ -324,14 +325,12 @@ export class MarmotSession {
     try {
       // Inside the try: a store failure must still open the `ready` gate, or
       // every send/join awaiting it would hang instead of erroring.
-      await this.loadWatermarks();
-      const loaded = await groups.loadAll();
-      loaded.forEach((g) => this.wireGroup(g));
-      for (const g of loaded) {
-        await this.replayHistory(g).catch((e) => {
-          if (__DEV__) console.warn('[Marmot] history replay failed:', e);
-        });
-      }
+      await hydrateMarmotSession(
+        () => this.loadWatermarks(),
+        () => groups.loadAll(),
+        (g) => this.wireGroup(g),
+        (g) => this.replayHistory(g),
+      );
     } finally {
       this.markReady();
     }

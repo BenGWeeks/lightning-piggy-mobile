@@ -1,3 +1,4 @@
+import { perfLog } from '../utils/perfLog';
 import { useCallback, type Dispatch, type SetStateAction } from 'react';
 import { InteractionManager } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -76,6 +77,7 @@ export function useOwnProfile(
   const loadProfileFromCache = useCallback(
     async (pk: string) => {
       const setProfile = profileSetterFor(pk);
+      perfLog('profile storage hydration start');
       try {
         const raw = await AsyncStorage.getItem(perAccountKey(OWN_PROFILE_CACHE_KEY_BASE, pk));
         if (!raw) return false;
@@ -85,6 +87,8 @@ export function useOwnProfile(
       } catch (error) {
         console.warn('Failed to load profile cache:', error);
         return false;
+      } finally {
+        perfLog('profile storage hydration end');
       }
     },
     [profileSetterFor],

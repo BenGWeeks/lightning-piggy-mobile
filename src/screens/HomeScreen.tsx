@@ -28,7 +28,7 @@ import NotificationBell from '../components/NotificationBell';
 import { ArrowDownIcon, ArrowUpIcon, ArrowLeftRightIcon } from '../components/icons/ArrowIcons';
 import { createHomeScreenStyles } from '../styles/HomeScreen.styles';
 import { selectHomeWalletState } from '../utils/homeWalletState';
-import { perfLog } from '../utils/perfLog';
+import { PERF_LOGS_ENABLED, perfLog } from '../utils/perfLog';
 import { noteWalletListCommitted } from '../utils/walletSwipeTiming';
 import { useActiveWalletRefresh } from '../hooks/useActiveWalletRefresh';
 import { WALLET_FRESH_MS } from '../utils/walletRefreshScheduler';
@@ -43,11 +43,12 @@ const HomeScreen: React.FC = () => {
   const colors = useThemeColors();
   const t = useTranslation();
   // First-render marker: fires once per mount when the first commit lands. Used by scripts/perf-startup.sh to measure tap-to-render latency for tab-wallets.
+  const homeVisibleLoggedRef = useRef(false);
   const homeRenderLoggedRef = useRef(false);
   useEffect(() => {
     if (homeRenderLoggedRef.current) return;
     homeRenderLoggedRef.current = true;
-    console.log(`[Perf] HomeScreen first render`);
+    perfLog('HomeScreen first render');
   }, []);
   const styles = useMemo(() => createHomeScreenStyles(colors), [colors]);
   const {
@@ -282,7 +283,18 @@ const HomeScreen: React.FC = () => {
   }, [showTransactionList, activeWalletId]);
 
   return (
-    <View style={styles.container}>
+    <View
+      style={styles.container}
+      onLayout={
+        PERF_LOGS_ENABLED && walletsHydrated
+          ? () => {
+              if (homeVisibleLoggedRef.current) return;
+              homeVisibleLoggedRef.current = true;
+              perfLog('Home visible');
+            }
+          : undefined
+      }
+    >
       {/* Header area with brand background + faded pig behind carousel */}
       <View style={styles.headerBackground}>
         {/* Pink→purple brand fade behind the wallet card, matching the

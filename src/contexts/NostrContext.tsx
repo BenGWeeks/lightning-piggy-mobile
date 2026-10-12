@@ -1,3 +1,4 @@
+import { loadStartupIdentity } from './loadStartupIdentity';
 import { signAccountEvent } from '../services/signAccountEvent';
 import React, {
   createContext,
@@ -46,7 +47,7 @@ import {
   type SendHooks,
 } from './useMessageSend';
 import { useContactActions } from './useContactActions';
-import { useNip46Login, restoreNip46Session } from './useNip46Login';
+import { useNip46Login } from './useNip46Login';
 import { nip46Sign } from './nip46DmDecrypt';
 import { dropIdentityKeyMaterial, useIdentityMemoryReset } from './resetIdentityMemoryState';
 import { AMBER_NIP17_ENABLED_KEY_LEGACY } from './nostrDmCache';
@@ -544,6 +545,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
       } catch (error) {
         console.warn('Failed to load contacts cache:', error);
+      } finally {
+        perfLog('loadContactsFromCache: end');
       }
       return false;
     },
@@ -767,32 +770,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     perfLog('NostrProvider auto-login effect fires');
     (async () => {
       try {
-        // Hydrate the multi-account registry first so the switcher has
-        // something to render even before the active identity finishes
-        // loading. Empty array on a fresh install — the auto-login below
-        // populates it when the legacy single-account keys are migrated.
-        const blob = await loadIdentities();
-        setIdentities(blob.identities);
-
-        const storedSignerType = await SecureStore.getItemAsync(SIGNER_TYPE_KEY);
-        let pk: string | null = null;
-
-        let pendingNsec: string | null = null;
-        if (storedSignerType === 'nsec') {
-          const storedNsec = await SecureStore.getItemAsync(NSEC_KEY);
-          if (storedNsec) {
-            pk = nostrService.decodeNsec(storedNsec).pubkey;
-            pendingNsec = storedNsec;
-          }
-        } else if (storedSignerType === 'amber') {
-          const storedPubkey = await SecureStore.getItemAsync(PUBKEY_KEY);
-          if (storedPubkey) {
-            pk = storedPubkey;
-          }
-        } else if (storedSignerType === 'nip46') {
-          // Restore the persisted bunker connection (see useNip46Login).
-          pk = await restoreNip46Session();
-        }
+        const { blob, storedSignerType, pk, pendingNsec } =
+          await loadStartupIdentity(setIdentities);
 
         if (!pk) return;
 

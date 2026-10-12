@@ -94,6 +94,63 @@ Drop the `.pftrace` on https://ui.perfetto.dev. You can then:
 This is the canonical way to diagnose a freeze — wall-clock alone never
 names the culprit.
 
+== Reading a cold-start timeline
+
+`index.ts` first imports the dependency-free `src/utils/perfBoot.ts`.
+Its first executable statement captures `bootT0` before Expo, React Native,
+App and their dependency graphs evaluate. This is JS entry execution, not
+Android process start or native/Hermes initialization. All `perfLog` lines
+now share `+Nms since boot`; the old entry-body anchor ran after hoisted imports.
+Dev builds enable these probes; preview builds require
+`EXPO_PUBLIC_KEEP_PERF_LOGS=1`. Store builds leave probes disabled and strip
+console logs, with no clocks, timers, balance tracking or layout listeners
+from the new instrumentation.
+
+[cols="1,2", options="header"]
+|===
+|Marker |Meaning
+|`boot T0` |First entry dependency executes, at +0ms.
+|`identity/SecureStore load start/end` |Registry, signer and key/session restore, including decode for nsec. No key material is logged.
+|`decodeNsec start/end` |Synchronous nsec decoding and pubkey derivation, nested in identity restoration; absent for other signers.
+|`WalletProvider startup: getWalletList begin` → `WalletProvider hydrated N wallets` |Existing startup wallet-storage bracket, including cached balances/transactions. Empty wallets still complete this span.
+|`wallet identity storage hydration start/end` |Storage reload if identity publication supersedes the initial startup read. End also fires on failure/stale-owner cancellation.
+|`loadContactsFromCache: start/end` |Existing contact-cache start plus an unconditional end, including empty caches and errors. Existing parse/merge/dispatched lines remain intermediate checkpoints.
+|`profile storage hydration start/end` |Own profile cache read, parse and state dispatch, including cache misses/errors. Distinct from deferred relay `loadProfile` timings.
+|`MLS/Marmot session hydration start/end` |Watermarks, stored groups and history replay; end closes the ready gate even on failure. Ongoing relay catch-up is outside this span.
+|`Home visible` |First Home content-root layout after wallet hydration, including an honest empty state. Independent of the slow-render Profiler threshold.
+|`JS splash fade end` |Native-driver JS splash fade completion callback. Home may already have laid out behind this overlay.
+|`Balance visible cached/fresh` |First laid-out/committed balance text on the active carousel card for each source per JS boot. Hidden balances, mini cards and placeholders do not qualify. The source is recorded by cache reads or successful NWC/on-chain responses, and checked against the rendered amount; no identifiers or amounts are logged.
+|===
+
+Capture one force-stop/relaunch without clearing account data:
+
+[source,bash]
+----
+adb -s "$PIGGY_DEVICE" logcat -c
+# Force-stop and launch the appropriate package / dev-client URL here.
+adb -s "$PIGGY_DEVICE" logcat -d -v time '*:S' ReactNativeJS:V \
+  | grep -E '\[Perf\]|\[PerfBlock\]'
+----
+
+Read lines in emission order. Subtract an end's `+Nms` from its matching
+start to obtain wall duration. Async spans overlap, so do not sum them as
+CPU time. Identity decode is nested; heartbeat gaps expose contention but
+do not name its cause. Home layout establishes content layout, while the
+splash completion establishes overlay removal; neither proves native pixel
+presentation or input dispatch latency. A fresh response with an unchanged
+balance does not force a render solely for measurement: its marker waits
+for the next actual card commit. Missing balances on a walletless/offline
+fixture are unavailable measurements, not zero milliseconds.
+
+`scripts/perf-cold-start-tap.sh` now taps `tab-explore` and waits for
+`explore-card-map`. Set `PIGGY_DEVICE` and `PIGGY_APP_ID` to override its
+emulator-5554 / dev-package defaults. Its shared `perf-stats.sh` report
+includes p50/p95 and successful sample count. Cache-clear failure is
+reported (for example a non-debuggable preview package); those runs retain
+cache and must not be compared as fresh-cache trials. Its launch-to-visible
+wall time includes Maestro startup, selector/settling and confirmation
+overhead, so it is an upper bound, not a JS-blocking or native-input metric.
+
 == Per-screen markers via `[PerfTab]`
 
 `src/utils/perfLog.ts` exposes four bracketing markers around a tab

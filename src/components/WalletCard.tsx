@@ -1,4 +1,6 @@
 import React from 'react';
+import { PERF_LOGS_ENABLED } from '../utils/perfLog';
+import { PerfBalanceVisible } from './PerfBalanceVisible';
 import { View, Text, Image, TouchableOpacity, Dimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Grayscale } from 'react-native-color-matrix-image-filters';
@@ -22,6 +24,7 @@ const MINI_CONTAINER_WIDTH = (SCREEN_WIDTH - 48 - 12) / 2; // ~47% of sheet widt
 
 interface WalletCardProps {
   wallet: WalletState;
+  perfVisible?: boolean;
   btcPrice: number | null;
   currency: FiatCurrency;
   onSettingsPress: () => void;
@@ -40,6 +43,7 @@ interface MiniCardProps {
 /** Full card visual — used both directly and scaled for mini previews */
 const CardContent: React.FC<{
   theme: CardThemeConfig;
+  perfWalletId?: string;
   alias?: string;
   balance?: number | null;
   btcPrice?: number | null;
@@ -54,6 +58,7 @@ const CardContent: React.FC<{
   isWatchOnly?: boolean;
 }> = ({
   theme,
+  perfWalletId,
   alias,
   balance,
   btcPrice,
@@ -67,6 +72,7 @@ const CardContent: React.FC<{
   showDetails = true,
   isWatchOnly = false,
 }) => {
+  const BalanceText = PERF_LOGS_ENABLED && perfWalletId && !hideBalance ? PerfBalanceVisible : Text;
   const colors = useThemeColors();
   const { t, formatLocale } = useLocale();
 
@@ -171,13 +177,16 @@ const CardContent: React.FC<{
             <Text style={[styles.alias, { color: theme.textColor }]} numberOfLines={1}>
               {alias}
             </Text>
-            <Text style={[styles.balance, { color: theme.textColor }]}>
+            <BalanceText
+              style={[styles.balance, { color: theme.textColor }]}
+              {...(PERF_LOGS_ENABLED ? { id: perfWalletId, balance } : undefined)}
+            >
               {hideBalance
                 ? '***'
                 : balance !== null
                   ? t('walletCard.satsBalance', { amount: balance!.toLocaleString(formatLocale) })
                   : '---'}
-            </Text>
+            </BalanceText>
             {/* Render the fiat row whenever we know the user's selected
                 currency, even if the BTC price hasn't arrived yet.
                 `satsToFiatString` now returns a `£–` (or `$–`, `€–`)
@@ -248,7 +257,13 @@ export const MiniWalletCard: React.FC<MiniCardProps> = ({
   );
 };
 
-const WalletCard: React.FC<WalletCardProps> = ({ wallet, btcPrice, currency, onSettingsPress }) => {
+const WalletCard: React.FC<WalletCardProps> = ({
+  wallet,
+  btcPrice,
+  currency,
+  onSettingsPress,
+  perfVisible,
+}) => {
   // Defensive fallback: persisted wallets may carry a theme key that has
   // been renamed/removed in subsequent releases (or none at all). Without a
   // fallback the app crashes on `theme.gradientColors` of undefined on boot —
@@ -272,6 +287,7 @@ const WalletCard: React.FC<WalletCardProps> = ({ wallet, btcPrice, currency, onS
       <CardContent
         theme={theme}
         alias={wallet.alias}
+        perfWalletId={PERF_LOGS_ENABLED && perfVisible ? wallet.id : undefined}
         balance={wallet.balance}
         btcPrice={btcPrice}
         currency={currency}
