@@ -13,7 +13,7 @@ A mobile Bitcoin Lightning wallet for smart savers and their families, built wit
   <img alt="Explore" src="docs/images/app-hero-02-explore.webp" width="19%">
   <img alt="Little Piggy's profile: Posts, Media and Shop tabs with the Posts &amp; replies switch" src="docs/images/app-profile-posts-replies.webp" width="19%">
   <img alt="A profile's Shop tab with Market listings" src="docs/images/app-profile-shop-tab.webp" width="19%">
-  <img alt="Piglet detail" src="docs/images/app-hero-05-piglet.webp" width="19%">
+  <img alt="A Marmot group chat between the Piggies" src="docs/images/app-marmot-group-chat.webp" width="19%">
 </p>
 
 <p align="center">
@@ -330,8 +330,10 @@ The Explore tab pulls in a small set of Expo modules beyond the wallet + Nostr c
   <img alt="Explore with the Market rail: buy and sell with sats" src="docs/images/app-explore-market-rail.webp" width="19%">
   <img alt="Map of Bitcoin merchants and Piglets" src="docs/images/app-hero-03-map.webp" width="19%">
   <img alt="Geo-caches list" src="docs/images/app-hero-04-hunt.webp" width="19%">
+  <img alt="Piglet detail" src="docs/images/app-hero-05-piglet.webp" width="19%">
+  <img alt="Big Piggy's profile" src="docs/images/app-profile-big-piggy.webp" width="19%">
 </p>
-<!-- GALLERY: My shop, product page, Marmot group chat and Big Piggy's profile go here when captured. -->
+<!-- GALLERY: My shop and a product page (shipping + Markdown) go here when captured. -->
 
 More Explore screens live under [`docs/screenshots/explore/`](docs/screenshots/explore/):
 
