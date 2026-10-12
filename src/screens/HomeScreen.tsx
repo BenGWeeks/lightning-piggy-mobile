@@ -4,12 +4,12 @@ import {
   Text,
   Image,
   TouchableOpacity,
+  Pressable,
   ScrollView,
   RefreshControl,
   ActivityIndicator,
   InteractionManager,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
@@ -27,7 +27,7 @@ import TabHeader from '../components/TabHeader';
 import NotificationBell from '../components/NotificationBell';
 import { ArrowDownIcon, ArrowUpIcon, ArrowLeftRightIcon } from '../components/icons/ArrowIcons';
 import { createHomeScreenStyles } from '../styles/HomeScreen.styles';
-import { isSendableWallet } from '../utils/walletCapabilities';
+import { selectHomeWalletState } from '../utils/homeWalletState';
 import { perfLog } from '../utils/perfLog';
 import { noteWalletListCommitted } from '../utils/walletSwipeTiming';
 import { useActiveWalletRefresh } from '../hooks/useActiveWalletRefresh';
@@ -53,8 +53,6 @@ const HomeScreen: React.FC = () => {
   const {
     wallets,
     activeWalletId,
-    activeWallet,
-    hasWallets,
     walletsHydrated,
     refreshBalanceForWallet,
     fetchTransactionsForWallet,
@@ -62,11 +60,19 @@ const HomeScreen: React.FC = () => {
     currency,
     requestBalancePoll,
   } = useWallet();
+  const {
+    activeWallet,
+    hasWallets,
+    showWelcome,
+    isReceiveDisabled,
+    isSendDisabled,
+    isTransferDisabled,
+    dimActions,
+  } = selectHomeWalletState(wallets, activeWalletId, walletsHydrated);
   const { btcPrice } = useWalletLive();
   const { isLoggedIn, profile, refreshProfile } = useNostr();
   const navigation = useNavigation<BottomTabNavigationProp<MainTabParamList, 'Home'>>();
   const route = useRoute<RouteProp<MainTabParamList, 'Home'>>();
-  const insets = useSafeAreaInsets();
 
   const sheetsRef = useRef<HomeSheetActions>(null);
   // True while the carousel's trailing "Add wallet" card is the active page, so
@@ -254,47 +260,11 @@ const HomeScreen: React.FC = () => {
 
   const greetingName = profile?.displayName?.trim() || profile?.name?.trim() || 'Satoshi';
 
-  const isOnchainWallet = activeWallet?.walletType === 'onchain';
-  const isWatchOnly = isOnchainWallet && activeWallet?.onchainImportMethod !== 'mnemonic';
-  // Don't gate Send/Receive on the transient `isConnected` flag: post-PR-D
-  // The previous `hasActiveConnection`, `canSend`, `canTransfer`
-  // gates were inlined into the `is*Disabled` constants below — see
-  // #474. They required an in-state activeWallet (i.e. a populated
-  // wallet list, not necessarily a completed NWC handshake) and a
-  // sendable wallet for transfer. We now gate on wallet count alone
-  // since the bottom sheets handle their own connection-loading
-  // states; blocking the BUTTON tap during the NWC handshake left
-  // the app feeling locked.
-
-  // Cold-start gating: until the WalletContext finishes its initial
-  // AsyncStorage read, `wallets` is `[]` and `activeWallet` is `null` —
-  // not because the user has no wallets, but because we haven't loaded
-  // them yet. Rendering the buttons in the faded `actionButtonDisabled`
-  // style during that window looks broken; suppress it until hydration
-  // completes. If it turns out there really are no wallets, the empty
-  // state below replaces this UI anyway. See #201.
-  //
-  // Single source of truth per button — `isXDisabled` drives BOTH the
-  // disabled style AND the `disabled` prop so visual state always
-  // matches interactivity. During hydration both come out `false` so
-  // the buttons render neutral AND remain tappable; the receive sheet
-  // / transfer flow handles "wallets not loaded yet" gracefully.
-  // Disable each button only when the user has no wallet to act on —
-  // not while NWC connections are still handshaking. The bottom
-  // sheets handle their own loading states; gating the BUTTON on
-  // `hasActiveConnection` left taps un-feedback-able for the 1-3 s
-  // cold-start window while NWC handshakes complete (#474).
-  const isReceiveDisabled = walletsHydrated && wallets.length === 0;
-  // Send is also disabled when the active wallet itself can't sign —
-  // watch-only on-chain (xpub) and bare-receive-address imports
-  // (Xapo deposit addresses, etc.) have no signing material so the
-  // Send sheet can't complete from them. Per #493. The "no wallets
-  // at all" case still kicks in first.
-  const isSendDisabled =
-    (walletsHydrated && wallets.length === 0) ||
-    (activeWallet !== null && !isSendableWallet(activeWallet));
-  // Transfer needs at least two wallets (a source + destination).
-  const isTransferDisabled = walletsHydrated && wallets.length < 2;
+  // Actions, carousel and warm transaction lists all read `wallets` from this
+  // commit. Never retain a previous identity's cards to mask a hydration gap.
+  // Use Pressable below: TouchableOpacity owns a native animated opacity that
+  // can stay faded independently of `disabled` after an interrupted press or
+  // style transition. Press feedback here changes scale, never opacity.
 
   // Render the (virtualized) TransactionList only on the real-wallet branch:
   // a wallet is selected, we're not on the carousel's "Add wallet" card, and
@@ -348,10 +318,14 @@ const HomeScreen: React.FC = () => {
 
         {/* Send/Receive/Transfer buttons */}
         <View style={styles.buttonRow}>
-          <TouchableOpacity
+          <Pressable
             accessibilityRole="button"
             accessibilityState={{ disabled: isReceiveDisabled }}
-            style={[styles.actionButton, isReceiveDisabled && styles.actionButtonDisabled]}
+            style={({ pressed }) => [
+              styles.actionButton,
+              dimActions && styles.actionButtonDisabled,
+              pressed && styles.actionButtonPressed,
+            ]}
             onPress={() => {
               perfLog('btn-receive onPress');
               sheetsRef.current?.openReceive();
@@ -364,11 +338,15 @@ const HomeScreen: React.FC = () => {
               <ArrowDownIcon size={24} strokeWidth={3} />
             </View>
             <Text style={styles.actionText}>{t('homeScreen.receive')}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
+          </Pressable>
+          <Pressable
             accessibilityRole="button"
             accessibilityState={{ disabled: isTransferDisabled }}
-            style={[styles.actionButton, isTransferDisabled && styles.actionButtonDisabled]}
+            style={({ pressed }) => [
+              styles.actionButton,
+              dimActions && styles.actionButtonDisabled,
+              pressed && styles.actionButtonPressed,
+            ]}
             onPress={() => sheetsRef.current?.openTransfer()}
             disabled={isTransferDisabled}
             accessibilityLabel={t('homeScreen.transfer')}
@@ -378,11 +356,15 @@ const HomeScreen: React.FC = () => {
               <ArrowLeftRightIcon size={24} strokeWidth={3} />
             </View>
             <Text style={styles.actionText}>{t('homeScreen.transfer')}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
+          </Pressable>
+          <Pressable
             accessibilityRole="button"
             accessibilityState={{ disabled: isSendDisabled }}
-            style={[styles.actionButton, isSendDisabled && styles.actionButtonDisabled]}
+            style={({ pressed }) => [
+              styles.actionButton,
+              dimActions && styles.actionButtonDisabled,
+              pressed && styles.actionButtonPressed,
+            ]}
             onPress={() => {
               perfLog('btn-send onPress');
               sheetsRef.current?.openSend();
@@ -395,7 +377,7 @@ const HomeScreen: React.FC = () => {
               <ArrowUpIcon size={24} strokeWidth={3} />
             </View>
             <Text style={styles.actionText}>{t('homeScreen.send')}</Text>
-          </TouchableOpacity>
+          </Pressable>
         </View>
       </View>
 
@@ -417,9 +399,9 @@ const HomeScreen: React.FC = () => {
         />
         {showTransactionList ? null : (
           <ScrollView style={styles.transactionsContainer} refreshControl={homeRefreshControl}>
-            {!hasWallets ? (
+            {showWelcome ? (
               <WelcomeWalletPrompt onGetStarted={() => sheetsRef.current?.openWizard()} />
-            ) : addCardActive || activeWalletId === null ? (
+            ) : hasWallets && (addCardActive || activeWalletId === null) ? (
               // On the "Add wallet" card (or no active wallet) show an add-wallet
               // prompt rather than the previous wallet's transactions (#666).
               <View style={styles.emptyState}>
@@ -469,7 +451,6 @@ const ProfiledHomeScreen: React.FC = () => (
     id="HomeScreen"
     onRender={(id, phase, actualDuration) => {
       if (actualDuration > 100) {
-        // eslint-disable-next-line no-console
         console.log(`[PerfBlock] render:${id} ${phase}=${Math.round(actualDuration)}ms`);
       }
     }}

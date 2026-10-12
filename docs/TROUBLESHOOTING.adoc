@@ -1140,3 +1140,27 @@ centre swipe. Anchor the swipe on a section header instead, for example
 `swipe: { from: { text: "Places near you.*" }, direction: UP }`. Section
 headers expose a combined label ("Places near you — see all"), so match with a
 regex.
+
+
+=== Home wallet actions stay faded while connected cards and transactions are visible
+
+Home, WalletCarousel and WarmTransactionLists all consume the same
+WalletContext wallet array. Carousel dots include the trailing Add card, so
+four dots represent three wallets. There is no separate cached card list.
+Identity switches clear wallets and the active ID and reset hydration; do not
+retain another identity's wallets as a workaround.
+
+All three action disabled flags cannot be true in the same committed render
+as real wallet cards and transactions. Check touch feedback as well as the
+flags: React Native's TouchableOpacity overrides style opacity with a native
+Animated.Value. An interrupted press or opacity restoration can leave a
+control looking disabled independently of its current props. Screenshots and
+balance-only logs do not establish which animation/event was interrupted.
+
+Home actions use Pressable with scale feedback, eliminating that independent
+animated opacity. The homeWalletState selector derives selection, action
+availability and empty-state presentation from the exact array passed to the
+carousel. It permits faded actions only after hydrated emptiness; single-wallet
+Move and watch-only Send still enforce their capability restrictions through
+the disabled prop and accessibility state. While storage hydration is pending,
+Home shows a spinner instead of the new-user welcome prompt (#1396).
