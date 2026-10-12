@@ -3,6 +3,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useNostr } from '../contexts/NostrContext';
 import { useCoalescedMap } from '../utils/useCoalescedMap';
 import { sortFeed } from '../utils/profileFeedRows';
+import { COMMENT_KIND, isNoteComment } from '../utils/nip22';
 import {
   AUTHOR_FEED_PAGE_SIZE,
   fetchAuthorFeedPage,
@@ -16,8 +17,9 @@ const FIRST_EVENT_GRACE_MS = 6000;
 const MAX_PAGES = 10;
 
 /**
- * One author's profile feed (notes + picture / video events) for the profile
- * page's Posts and Media tabs. One subscription serves both tabs, armed only
+ * One author's profile feed (notes, note comments, picture / video events)
+ * for the profile page's Posts and Media tabs. One subscription serves both
+ * tabs, armed only
  * while the screen is focused. Events land through `useCoalescedMap`, so a
  * relay backfill commits a few batched updates instead of a setState per
  * event. `loadMore` pages backwards with a bounded `until` query.
@@ -110,11 +112,18 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
   );
 
   // Belt and braces for the same guarantee: only this author's events.
-  const events = useMemo(
+  const fetched = useMemo(
     () => sortFeed([...feed.map.values()].filter((e) => e.pubkey === authorPubkey)),
     [feed.map, authorPubkey],
   );
-  const oldest = events.length > 0 ? events[events.length - 1].created_at : null;
+  // Kind-1111 comments only show when they reply inside a kind-1 note's
+  // thread (#1337); product / Piglet comments stay hidden. They still count
+  // for the paging cursor below, so a page of them can't stall `loadMore`.
+  const events = useMemo(
+    () => fetched.filter((e) => e.kind !== COMMENT_KIND || isNoteComment(e)),
+    [fetched],
+  );
+  const oldest = fetched.length > 0 ? fetched[fetched.length - 1].created_at : null;
 
   const loadMore = useCallback(async () => {
     if (!focusedRef.current) return;

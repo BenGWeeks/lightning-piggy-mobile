@@ -3,7 +3,8 @@
 // two products per grid row, or one status row (loading / empty). Kept out
 // of the screen so the tab → rows logic is unit-testable.
 import { extractNoteMedia, type NoteMediaItem } from './noteMedia';
-import { isReply, replyTarget, type ReplyTarget } from './nip10';
+import { isReply, type ReplyTarget } from './nip10';
+import { dedupeReplyEchoes, isNoteOrNoteComment, noteReplyTarget } from './noteReplies';
 import type { AuthorFeedEvent } from '../services/authorFeedService';
 import type { MarketProduct } from '../data/marketProducts';
 
@@ -106,8 +107,10 @@ export function buildProfileRows(input: ProfileRowsInput): ProfileRow[] {
     }));
   }
   const all = input.postsMode === 'all';
-  const notes = input.feed.filter((e) => e.kind === 1);
-  const posts = all ? notes : notes.filter((e) => !isReply(e));
+  // Notes, plus NIP-22 comments replying inside a note's thread (#1337) —
+  // always replies, so only under "Posts & replies".
+  const notes = input.feed.filter(isNoteOrNoteComment);
+  const posts = all ? dedupeReplyEchoes(notes) : notes.filter((e) => e.kind === 1 && !isReply(e));
   if (posts.length === 0) {
     if (input.feedLoading) return status('loading');
     // Only replies loaded so far — point at the other mode.
@@ -117,7 +120,7 @@ export function buildProfileRows(input: ProfileRowsInput): ProfileRow[] {
     type: 'post',
     key: event.id,
     event,
-    reply: all ? replyTarget(event) : null,
+    reply: all ? noteReplyTarget(event) : null,
   }));
 }
 

@@ -89,3 +89,45 @@ it('keeps paging retryable after an incomplete empty page', async () => {
   });
   expect(h.result.current.reachedEnd).toBe(true);
 });
+
+it('hides non-note comments but still pages past them (#1337)', async () => {
+  const note = '7'.repeat(64);
+  subscribe.mockImplementation(({ onEvent, onEose }) => {
+    onEvent({ id: 'e1', pubkey: PK, kind: 1, created_at: 100, content: '', tags: [] });
+    onEvent({
+      id: 'c1',
+      pubkey: PK,
+      kind: 1111,
+      created_at: 90,
+      content: 'reply',
+      tags: [
+        ['E', note],
+        ['K', '1'],
+      ],
+    });
+    onEvent({
+      id: 'p1',
+      pubkey: PK,
+      kind: 1111,
+      created_at: 80,
+      content: 'nice socks',
+      tags: [
+        ['A', `30402:${PK}:socks`],
+        ['K', '30402'],
+      ],
+    });
+    onEose();
+    return jest.fn();
+  });
+  fetchPage.mockResolvedValue({ events: [], complete: false });
+  const h = renderHook(() => useProfileFeed(PK, 0));
+  await act(async () => {
+    jest.advanceTimersByTime(200);
+  });
+  expect(h.result.current.events.map((e) => e.id)).toEqual(['e1', 'c1']);
+  await act(async () => {
+    await h.result.current.loadMore();
+  });
+  // The hidden product comment is the oldest fetched event: the cursor.
+  expect(fetchPage.mock.calls[0][0].until).toBe(80);
+});
