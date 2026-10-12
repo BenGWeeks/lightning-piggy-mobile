@@ -42,18 +42,19 @@ export const createMarketScreenStyles = (colors: Palette) =>
     },
     // Mode-selector bar sitting just under the header — the chip row plus a
     // small caption naming the active mode.
-    modeBar: {
-      paddingTop: 10,
-      paddingBottom: 4,
-      gap: 2,
-      backgroundColor: colors.background,
+    scopeRow: { paddingHorizontal: 16, paddingTop: 4, alignItems: 'flex-start' },
+    scopeChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: colors.brandPink,
+      backgroundColor: colors.surface,
     },
-    modeCaption: {
-      paddingHorizontal: 16,
-      fontSize: 11,
-      fontWeight: '600',
-      color: colors.textSupplementary,
-    },
+    scopeChipText: { fontSize: 12, fontWeight: '600', color: colors.brandPink },
     // ----- inline search + filter button -----------------------------------
     // A single compact row: the search pill (flex) plus a square filter icon
     // button. Replaces the old three always-visible chip rows so the grid

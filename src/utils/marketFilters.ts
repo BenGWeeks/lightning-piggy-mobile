@@ -14,6 +14,7 @@
 // Nostr feed) changes.
 import type { MarketProduct } from '../data/marketProducts';
 import type { MarketVendor } from '../data/marketVendors';
+import { DEFAULT_MARKET_MODE, type MarketMode } from './marketMode';
 
 /** Resolve the vendor a product is sold by. Injected (rather than importing
  * `sellerOf` directly) so these helpers stay free of the data module and are
@@ -49,15 +50,18 @@ export function isMarketFilterActive(filter: MarketFilter): boolean {
 }
 
 /**
- * Count of active CATEGORY filter axes (merchant / country / currency) — the
+ * Count of active panel filter axes (seller scope / merchant / country / currency) — the
  * axes housed in the slide-in filter panel. Drives the count badge on the
  * Market header's filter icon so the user can see how many hidden filters are
  * applied without opening the panel. The search query is intentionally
  * EXCLUDED: it has its own always-visible inline field, so it never
  * contributes to the panel badge.
  */
-export function countActiveMarketFilters(filter: MarketFilter): number {
-  let n = 0;
+export function countActiveMarketFilters(
+  filter: MarketFilter,
+  mode: MarketMode = DEFAULT_MARKET_MODE,
+): number {
+  let n = mode === DEFAULT_MARKET_MODE ? 0 : 1;
   if (filter.merchant !== null) n += 1;
   if (filter.country !== null) n += 1;
   if (filter.currency !== null) n += 1;

@@ -383,3 +383,14 @@ describe('filterMarketProducts', () => {
     expect(products).toEqual(copy);
   });
 });
+
+it('counts seller scope alongside category filters without counting default scope', () => {
+  expect(countActiveMarketFilters(EMPTY_MARKET_FILTER, 'preferred')).toBe(0);
+  expect(countActiveMarketFilters(EMPTY_MARKET_FILTER, 'wotFriends')).toBe(1);
+  expect(
+    countActiveMarketFilters(
+      { query: '', merchant: 'Robotechy', country: 'United Kingdom', currency: 'GBP' },
+      'wotFriends',
+    ),
+  ).toBe(4);
+});

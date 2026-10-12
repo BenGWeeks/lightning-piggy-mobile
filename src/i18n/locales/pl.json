@@ -2310,7 +2310,13 @@
       "merchant": "Sprzedawca",
       "country": "Kraj",
       "currency": "Waluta",
-      "chipSelected": "{{label}}, wybrano"
+      "chipSelected": "{{label}}, wybrano",
+      "sellers": "Sprzedawcy",
+      "friends": "Znajomi (osoby, które obserwujesz)",
+      "friendsOfFriends": "Znajomi znajomych",
+      "friendsChip": "Znajomi",
+      "comingSoon": "Wkrótce",
+      "clearScope": "Przywróć preferowanych sprzedawców Lightning Piggy"
     },
     "feedbackTabs": {
       "reviews": "Opinie",

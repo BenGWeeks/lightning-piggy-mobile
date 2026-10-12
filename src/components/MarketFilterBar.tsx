@@ -9,14 +9,17 @@ import {
   Animated,
   useWindowDimensions,
 } from 'react-native';
-import { X } from 'lucide-react-native';
+import { Check, X } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createMarketFilterBarStyles } from '../styles/MarketFilterBar.styles';
 import { vendorSlug } from '../utils/marketVendors';
 import { perfLog } from '../utils/perfLog';
+import { MARKET_MODE_OPTIONS, type MarketMode } from '../utils/marketMode';
 
 interface Props {
+  mode: MarketMode;
+  onSelectMode: (mode: MarketMode) => void;
   /** Whether the filter panel is open. */
   visible: boolean;
   /** Close the panel (backdrop tap, Done, or Android back). */
@@ -33,7 +36,7 @@ interface Props {
   currencies: string[];
   selectedCurrency: string | null;
   onSelectCurrency: (currency: string | null) => void;
-  /** Whether any category axis is active — shows the Clear affordance. */
+  /** Whether any panel axis is active — shows the Clear affordance. */
   active: boolean;
   onClear: () => void;
 }
@@ -66,14 +69,14 @@ const Chip: React.FC<{
 /**
  * Right-anchored, slide-in **filter panel** for the Market screen.
  *
- * Houses the merchant / country / currency filter controls so the main view
+ * Houses the seller scope / merchant / country / currency filter controls so the main view
  * stays compact — the header keeps only the inline search box plus a filter
  * icon that opens this panel. The chip axes are sourced from the DISTINCT
  * values present in the loaded products (passed in by the screen) rather than
  * hardcoded, so they stay correct as the catalogue changes; each section leads
  * with an "All" chip that clears that axis. Selections apply LIVE to the grid
  * behind the panel (no Apply step), so "Done" simply closes it. A "Clear
- * filters" row resets every category axis at once and only shows while one is
+ * filters" row resets every panel axis at once and only shows while one is
  * active.
  *
  * Presentational only — no filtering logic lives here (that's the pure
@@ -82,6 +85,8 @@ const Chip: React.FC<{
  * backdrop.
  */
 const MarketFilterBar: React.FC<Props> = ({
+  mode,
+  onSelectMode,
   visible,
   onClose,
   merchants,
@@ -190,6 +195,56 @@ const MarketFilterBar: React.FC<Props> = ({
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
+          <View style={styles.section} testID="market-filter-sellers">
+            <Text style={styles.sectionLabel}>{t('market.filters.sellers')}</Text>
+            {MARKET_MODE_OPTIONS.filter((option) => option.mode !== 'wotAll').map((option) => {
+              const selected = mode === option.mode;
+              const label = t(
+                option.mode === 'preferred'
+                  ? option.labelKey
+                  : option.mode === 'wotFriends'
+                    ? 'market.filters.friends'
+                    : 'market.filters.friendsOfFriends',
+              );
+              const id =
+                option.mode === 'preferred'
+                  ? 'preferred'
+                  : option.mode === 'wotFriends'
+                    ? 'friends'
+                    : 'friends-of-friends';
+              return (
+                <TouchableOpacity
+                  key={option.mode}
+                  style={[
+                    styles.sellerOption,
+                    selected && styles.chipSelected,
+                    !option.enabled && styles.sellerOptionDisabled,
+                  ]}
+                  onPress={() => {
+                    if (option.enabled) onSelectMode(option.mode);
+                  }}
+                  disabled={!option.enabled}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected, disabled: !option.enabled }}
+                  accessibilityLabel={
+                    option.enabled ? label : t('market.modes.comingSoon', { label })
+                  }
+                  testID={`market-filter-sellers-${id}`}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.sellerCopy}>
+                    <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
+                      {label}
+                    </Text>
+                    {!option.enabled ? (
+                      <Text style={styles.sellerHint}>{t('market.filters.comingSoon')}</Text>
+                    ) : null}
+                  </View>
+                  {selected ? <Check size={18} color={colors.white} strokeWidth={2.5} /> : null}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
           {/* Merchant */}
           {merchants.length > 0 ? (
             <View style={styles.section} testID="market-filter-merchants">

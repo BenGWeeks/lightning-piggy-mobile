@@ -2308,7 +2308,13 @@
       "merchant": "Merchant",
       "country": "Country",
       "currency": "Currency",
-      "chipSelected": "{{label}}, selected"
+      "chipSelected": "{{label}}, selected",
+      "sellers": "Sellers",
+      "friends": "Friends (people you follow)",
+      "friendsOfFriends": "Friends of friends",
+      "friendsChip": "Friends",
+      "comingSoon": "Coming soon",
+      "clearScope": "Reset sellers to Lightning Piggy Preferred Sellers"
     },
     "feedbackTabs": {
       "reviews": "Reviews",
