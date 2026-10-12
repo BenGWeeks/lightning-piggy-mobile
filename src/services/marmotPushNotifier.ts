@@ -5,9 +5,16 @@
 // marmot_kv store) and publishing. Always best-effort — a failure here never
 // touches message delivery.
 
+import {
+  getGroupMembers,
+  getPubkeyLeafNodeIndexes,
+  type MarmotGroup,
+} from '@internet-privacy/marmot-ts';
+
 import { createYieldScheduler } from '../contexts/nostrDecryptPacing';
 import {
   applyPushPayload,
+  leafKey,
   buildTriggerWraps,
   pruneToLeaves,
   selectTriggerTargets,
@@ -25,6 +32,17 @@ export interface PushGroup {
   id: Uint8Array;
   /** Current leaves as "member|leafIndex" — records of other leaves are dropped. */
   leaves: Set<string>;
+}
+
+/** A group as MIP-05 push state sees it: id + its current member leaves. */
+export function toPushGroup(g: Pick<MarmotGroup, 'idStr' | 'id' | 'state'>): PushGroup {
+  const leaves = new Set<string>();
+  for (const member of getGroupMembers(g.state)) {
+    for (const leaf of getPubkeyLeafNodeIndexes(g.state, member)) {
+      leaves.add(leafKey(member.toLowerCase(), Number(leaf)));
+    }
+  }
+  return { idHex: g.idStr, id: g.id, leaves };
 }
 
 export class MarmotPushNotifier {
@@ -125,8 +143,10 @@ export class MarmotPushNotifier {
         // stale hint (older builds advertised nos.lol, which our self-hosted
         // servers can't reach from their IP) must not swallow the trigger for
         // the records that carry no hint.
+        // The server's inbox goes first so members' hints can't crowd it out
+        // of the transport's relay cap (#1338).
         const inbox = await inboxes[i];
-        const relays = [...new Set([...relayHints, ...inbox])];
+        const relays = [...new Set([...inbox, ...relayHints])];
         if (relays.length === 0) continue;
         // One server's failure (e.g. wrap encryption throwing) must not cost
         // the other servers their triggers.

@@ -39,7 +39,9 @@ changing how anything is stored.
   (Android: SQLite `RKStorage` in the app sandbox)
 | App settings, WoT tier, geo-cache blob (`@lp:nostr-caches-v2`), NIP-52
   events blob (`@lp:nostr-events-v1`), per-wallet tx caches, last-seen cursors
-  (bare timestamps). The plaintext DM inbox summaries (`nostr_dm_inbox_v1_*`)
+  (bare timestamps), per-account chat read positions
+  (`chat_read_positions_v1_<pubkey>`: conversation key → newest-seen message
+  id + timestamp, written at most every 1.5 s; wiped on sign-out — #1295). The plaintext DM inbox summaries (`nostr_dm_inbox_v1_*`)
   and per-conversation caches (`nostr_dm_conv_v1_*`) are *retired* — #850
   migrates them into the encrypted DB and deletes them (verified).
   Remaining known plaintext: decrypted *group-chat* logs
@@ -104,6 +106,9 @@ row for that owner (`deleteMarmotStateForOwner`, from `wipeDmStoresForAccount`).
 | `firstSeen` | When this device first saw each group (ms) — MLS carries no creation time; it orders DMs (newest wins) and groups.
 | `watermark` | Per group: `created_at` of the newest *ingested* kind-445, the `since` for the bounded backfill.
 | `meta` | `keyPackageSlot` — the random 32-byte `d` slot reused for every key package this account publishes from this device.
+| `deviceKeys` | Per MLS leaf signature key: the app that published the invitation key (key package) it came from (`client` tag) and when — recorded when we invite a device, or found by the members sheet's bounded relay lookup. Drives the per-device app names (#1267).
+| `deviceLeaves` | Per group: the leaves (devices) as of the last commit this device processed, with the epoch and time each was first seen and when a person last lost a device. Read-only bookkeeping over group state for the devices UI.
+| `deviceNotices` | Per group: the alpha-only "X joined on 2 devices" lines drawn locally from commits (newest 50). Never sent; shown only with the developer switch on.
 |===
 
 `dm_messages.protocol` is `'marmot'` on Marmot 1:1 rows and NULL otherwise.

@@ -137,10 +137,31 @@ export type Item =
       wireKind?: number;
     }
   | {
+      // Alpha-only device notice (#1267): "Little Piggy · joined on 2
+      // devices". Drawn locally from a Marmot commit; never sent.
+      kind: 'deviceNotice';
+      id: string;
+      fromMe: false;
+      createdAt: number;
+      /** About the viewer ("You") rather than the peer. */
+      isSelf: boolean;
+      joined: boolean;
+      clients: (string | null)[];
+    }
+  | {
       kind: 'dayHeader';
       id: string;
       label: string;
     };
+
+/** A device notice as the 1:1 timeline takes it (see useDmDevices). */
+export interface DeviceNoticeInput {
+  id: string;
+  createdAt: number;
+  isSelf: boolean;
+  joined: boolean;
+  clients: (string | null)[];
+}
 
 // Every Item variant except the dayHeader synthetic row — these are the
 // ones that have a real `createdAt` and participate in chronological sort.
@@ -323,6 +344,7 @@ export function buildConversationItems(
   olderOrderAmounts?: ReadonlyMap<string, number | undefined>,
   failedInvites: readonly { id: string; createdAt: number }[] = [],
   locale?: string,
+  deviceNotices: readonly DeviceNoticeInput[] = [],
 ): Item[] {
   const expectedAmounts = collectApprovedOrderAmounts(messages, olderOrderAmounts);
   const byId = indexMessagesById(messages);
@@ -536,6 +558,9 @@ export function buildConversationItems(
       fromMe: false,
       createdAt: f.createdAt,
     });
+  }
+  for (const n of deviceNotices) {
+    deduped.push({ kind: 'deviceNotice', ...n, id: `device-${n.id}`, fromMe: false });
   }
 
   // Descending order — index 0 is newest. The FlatList is `inverted`, so

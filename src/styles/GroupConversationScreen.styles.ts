@@ -55,16 +55,6 @@ export const createGroupConversationScreenStyles = (colors: Palette) =>
     },
     // Bubble + per-message-type styles moved to src/components/MessageBubble
     // — both 1:1 and group screens render the same bubble component now.
-    fullscreenBackdrop: {
-      flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.92)',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    fullscreenImage: {
-      width: '100%',
-      height: '100%',
-    },
     // composer + input + attachButton + sendButton + sendButtonDisabled
     // moved to ConversationComposer (#251) — kept in sync with the 1:1
     // screen via that shared component.

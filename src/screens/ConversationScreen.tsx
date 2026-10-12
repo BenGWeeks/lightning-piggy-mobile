@@ -1,14 +1,21 @@
 import { useLiveMessageIndicator } from '../hooks/useLiveMessageIndicator';
 import NewMessagesPill from '../components/NewMessagesPill';
+import FullscreenGifModal from '../components/FullscreenGifModal';
+import ChatJumpButtons from '../components/ChatJumpButtons';
+import UnreadDivider from '../components/UnreadDivider';
+import {
+  conversationItemKey,
+  useConversationReadPosition,
+} from '../hooks/useConversationReadPosition';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useConversationProtocol } from '../hooks/useConversationProtocol';
-import ConversationProtocolControl from '../components/ConversationProtocolControl';
+import ConversationHeader from '../components/ConversationHeader';
+import DmMembersSheet from '../components/DmMembersSheet';
+import { useDmDevices } from '../hooks/useDmDevices';
 import {
   View,
   Text,
-  TouchableOpacity,
   Pressable,
-  Modal,
   FlatList,
   ActivityIndicator,
   RefreshControl,
@@ -22,9 +29,6 @@ import {
   useReanimatedKeyboardAnimation,
 } from 'react-native-keyboard-controller';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
-import Svg, { Circle, Path } from 'react-native-svg';
-import { ArrowDown } from 'lucide-react-native';
-import { Image as ExpoImage } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -40,6 +44,8 @@ import PollComposerSheet from '../components/PollComposerSheet';
 import ReceiveSheet from '../components/ReceiveSheet';
 import VoiceRecordingSheet from '../components/VoiceRecordingSheet';
 import ConversationMessageRow from '../components/ConversationMessageRow';
+import { useFollowedPubkeys } from '../hooks/useFollowedPubkeys';
+import { canAutoLoadMedia } from '../utils/mediaTrust';
 import NwcWalletShareSheet from '../components/NwcWalletShareSheet';
 import MessageActionsSheet from '../components/MessageActionsSheet';
 import SecretModeCelebration from '../components/SecretModeCelebration';
@@ -60,7 +66,6 @@ import type { RootStackParamList } from '../navigation/types';
 import { useNwcShareActions } from '../hooks/useNwcShareActions';
 import { useSharedContactProfiles } from '../hooks/useSharedContactProfiles';
 import { useConversationPolls } from '../hooks/useConversationPolls';
-import { isSupportedImageUrl } from '../utils/imageUrl';
 import { usePaidInvoiceTracker } from '../hooks/usePaidInvoiceTracker';
 import { useConversationComposerActions } from '../hooks/useConversationComposerActions';
 import { useMessageInfoSheet } from '../hooks/useMessageInfoSheet';
@@ -125,6 +130,9 @@ const ConversationScreen: React.FC = () => {
   } = useNostr();
   const { armLiveDmSub } = useNostrDmInbox();
   const { contacts } = useNostrContacts();
+  // Trust gate (#1338): the peer's media auto-loads only if I follow them.
+  const followed = useFollowedPubkeys();
+  const peerMediaTrusted = canAutoLoadMedia(false, pubkey, followed);
   // Cover the deep-link path (notification → straight to ConversationScreen
   // without passing the Messages tab). Idempotent — no-op if already armed.
   useEffect(() => {
@@ -146,7 +154,6 @@ const ConversationScreen: React.FC = () => {
   const [draft, setDraft] = useState('');
   const [sendSheetOpen, setSendSheetOpen] = useState(false);
   const [invoiceToPay, setInvoiceToPay] = useState<string | null>(null);
-  const [avatarError, setAvatarError] = useState(false);
   const [detailTx, setDetailTx] = useState<TransactionDetailData | null>(null);
   // Profiles resolved from `nostr:` contact references the other party has
   // shared in this conversation — see useSharedContactProfiles. Keyed by hex
@@ -211,7 +218,16 @@ const ConversationScreen: React.FC = () => {
   const [voiceSheetOpen, setVoiceSheetOpen] = useState(false);
   const listRef = useRef<FlatList<Item>>(null);
 
-  const items = useConversationTimeline(messages, wallets, myPubkey, pubkey, protocol);
+  // A person's devices in a Marmot 1:1 (#1267): by-line, sheet, notices, info rows.
+  const dmDevices = useDmDevices({ peer: pubkey, peerName: name, protocol, myPubkey });
+  const items = useConversationTimeline(
+    messages,
+    wallets,
+    myPubkey,
+    pubkey,
+    protocol,
+    dmDevices.noticeItems,
+  );
 
   // Poll aggregation + send/vote for this 1:1 thread (#203). Extracted to a
   // hook so the screen stays under the #703 size cap — see useConversationPolls.
@@ -238,6 +254,17 @@ const ConversationScreen: React.FC = () => {
     entries: liveEntries,
     loading,
     scrollToLatest: (animated) => listRef.current?.scrollToOffset({ offset: 0, animated }),
+  });
+
+  // Read position (#1295): open at the first unread under an "Unread
+  // messages" divider; the jump-to-latest arrow carries the unread count.
+  const read = useConversationReadPosition({
+    listRef,
+    items,
+    owner: myPubkey,
+    peer: pubkey,
+    loading,
+    leaveEdge: live.leaveEdge,
   });
 
   const { isInvoicePaid } = usePaidInvoiceTracker(messages);
@@ -320,11 +347,13 @@ const ConversationScreen: React.FC = () => {
   // after the composer hook because it needs its `resendText` for Re-publish.
   const {
     info: messageSheetInfo,
+    sender: messageSheetSender,
+    sentAt: messageSheetSentAt,
     showInfo: handleShowInfo,
     closeInfo: closeMessageInfo,
     resendFromInfo: handleResendFromInfo,
     canResend: canResendFromInfo,
-  } = useMessageInfoSheet(resendText, protocol);
+  } = useMessageInfoSheet(resendText, protocol, dmDevices.senderOf);
 
   // Live-location entry point (#206). The Attach → Location tile opens a
   // chooser sheet — snapshot or live for N — instead of going straight
@@ -487,41 +516,56 @@ const ConversationScreen: React.FC = () => {
   // Failed Marmot invite → draft a "please invite me again" for them (#1269).
   const askForInvite = useCallback(() => setDraft(t('marmotInviteFailed.askDraft')), [t]);
   const renderItem = useCallback(
-    ({ item }: { item: Item }) => (
-      <ConversationMessageRow
-        item={item}
-        styles={styles}
-        colors={colors}
-        sharedProfiles={sharedProfiles}
-        isInvoicePaid={isInvoicePaid}
-        onPayInvoice={handlePayInvoice}
-        onOpenContact={openSharedContact}
-        onOpenLocation={openLocation}
-        onOpenGifFullscreen={setFullscreenGifUrl}
-        onToggleSecretMode={handleToggleSecretMode}
-        pollAggregates={pollAggregates}
-        onVotePoll={handleVotePoll}
-        onShowTxDetail={setDetailTx}
-        liveLocationLatest={liveLocationLatest}
-        liveLocationStatus={liveLocationBubbleStatus}
-        liveLocationRemainingMs={liveLocationBubbleRemaining}
-        onStopLiveLocation={handleStopLive}
-        myLat={myPos?.lat ?? null}
-        myLon={myPos?.lon ?? null}
-        myAccuracyMetres={myPos?.accuracy ?? null}
-        myAvatarUri={profile?.picture ?? null}
-        peerAvatarUri={picture ?? null}
-        onOpenMap={onOpenMap}
-        onShowInfo={handleShowInfo}
-        onLongPress={buildOnLongPress(item)}
-        reactions={reactionsForItem(item)}
-        onToggleReaction={buildOnToggleReaction(item)}
-        onAddNwc={addSharedWallet}
-        peerName={name}
-        onAskForInvite={askForInvite}
-      />
-    ),
+    ({ item }: { item: Item }) => {
+      const row = (
+        <ConversationMessageRow
+          item={item}
+          styles={styles}
+          colors={colors}
+          sharedProfiles={sharedProfiles}
+          isInvoicePaid={isInvoicePaid}
+          onPayInvoice={handlePayInvoice}
+          onOpenContact={openSharedContact}
+          onOpenLocation={openLocation}
+          onOpenGifFullscreen={setFullscreenGifUrl}
+          onToggleSecretMode={handleToggleSecretMode}
+          pollAggregates={pollAggregates}
+          onVotePoll={handleVotePoll}
+          onShowTxDetail={setDetailTx}
+          liveLocationLatest={liveLocationLatest}
+          liveLocationStatus={liveLocationBubbleStatus}
+          liveLocationRemainingMs={liveLocationBubbleRemaining}
+          onStopLiveLocation={handleStopLive}
+          myLat={myPos?.lat ?? null}
+          myLon={myPos?.lon ?? null}
+          myAccuracyMetres={myPos?.accuracy ?? null}
+          myAvatarUri={profile?.picture ?? null}
+          peerAvatarUri={picture ?? null}
+          onOpenMap={onOpenMap}
+          onShowInfo={handleShowInfo}
+          onLongPress={buildOnLongPress(item)}
+          reactions={reactionsForItem(item)}
+          onToggleReaction={buildOnToggleReaction(item)}
+          onAddNwc={addSharedWallet}
+          peerName={name}
+          onAskForInvite={askForInvite}
+          peerMediaTrusted={peerMediaTrusted}
+        />
+      );
+      // Each inverted-list cell is flipped whole, so the divider still draws
+      // above the row.
+      return item.id === read.dividerId ? (
+        <>
+          <UnreadDivider testID="conversation-unread-divider" />
+          {row}
+        </>
+      ) : (
+        row
+      );
+    },
     [
+      read.dividerId,
+      peerMediaTrusted,
       openLocation,
       isInvoicePaid,
       sharedProfiles,
@@ -550,29 +594,19 @@ const ConversationScreen: React.FC = () => {
     ],
   );
 
-  const avatarNode =
-    picture && !avatarError && isSupportedImageUrl(picture) ? (
-      <ExpoImage
-        source={{ uri: picture }}
-        style={styles.headerAvatar}
-        cachePolicy="memory-disk"
-        recyclingKey={picture}
-        autoplay={false}
-        onError={() => setAvatarError(true)}
-      />
-    ) : (
-      <View style={[styles.headerAvatar, styles.headerAvatarFallback]}>
-        <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-          <Circle cx="12" cy="8" r="4" fill={colors.textSupplementary} />
-          <Path
-            d="M4 20c0-3.314 3.582-6 8-6s8 2.686 8 6"
-            stroke={colors.textSupplementary}
-            strokeWidth={2}
-            strokeLinecap="round"
-          />
-        </Svg>
-      </View>
-    );
+  const openPeerProfile = useCallback(() => {
+    const known = contacts.find((c) => c.pubkey === pubkey)?.profile ?? null;
+    presentContactSheet({
+      pubkey,
+      name,
+      picture: known?.picture ?? picture ?? null,
+      banner: known?.banner ?? null,
+      nip05: known?.nip05 ?? null,
+      lightningAddress: known?.lud16 ?? lightningAddress ?? null,
+      source: 'nostr',
+    });
+  }, [contacts, pubkey, name, picture, lightningAddress, presentContactSheet]);
+  const goBack = useCallback(() => navigation.goBack(), [navigation]);
 
   return (
     <View style={styles.container}>
@@ -581,48 +615,17 @@ const ConversationScreen: React.FC = () => {
           the brand colour instead of disappearing into our near-white
           app background. */}
       <View style={{ height: insets.top, backgroundColor: colors.brandPink }} />
-      <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          style={styles.backButton}
-          accessibilityLabel={t('conversationScreen.goBack')}
-          testID="conversation-back"
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-            <Path
-              d="M15 18l-6-6 6-6"
-              stroke={colors.textHeader}
-              strokeWidth={2.4}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </Svg>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.headerPeer}
-          onPress={() => {
-            const known = contacts.find((c) => c.pubkey === pubkey)?.profile ?? null;
-            presentContactSheet({
-              pubkey,
-              name,
-              picture: known?.picture ?? picture ?? null,
-              banner: known?.banner ?? null,
-              nip05: known?.nip05 ?? null,
-              lightningAddress: known?.lud16 ?? lightningAddress ?? null,
-              source: 'nostr',
-            });
-          }}
-          accessibilityLabel={t('conversationScreen.openProfile', { name })}
-          testID="chat-header-open-profile"
-        >
-          {avatarNode}
-          <Text style={styles.headerName} numberOfLines={1}>
-            {name}
-          </Text>
-        </TouchableOpacity>
-        <ConversationProtocolControl protocol={protocol} />
-      </View>
+      <ConversationHeader
+        name={name}
+        picture={picture}
+        protocol={protocol}
+        styles={styles}
+        colors={colors}
+        onBack={goBack}
+        onOpenProfile={openPeerProfile}
+        byline={dmDevices.byline}
+        onBylinePress={dmDevices.openSheet}
+      />
 
       {/* KeyboardStickyView (below) floats the composer above the IME
           on Android 15+ edge-to-edge. `react-native-edge-to-edge` (in
@@ -651,7 +654,7 @@ const ConversationScreen: React.FC = () => {
               ref={listRef}
               style={styles.flex}
               data={items}
-              keyExtractor={(it) => it.id}
+              keyExtractor={conversationItemKey}
               renderItem={renderItem}
               contentContainerStyle={listContentStyle}
               inverted
@@ -687,6 +690,8 @@ const ConversationScreen: React.FC = () => {
               onScroll={live.onScroll}
               onContentSizeChange={live.onContentSizeChange}
               scrollEventThrottle={100}
+              viewabilityConfigCallbackPairs={read.viewabilityConfigCallbackPairs}
+              onScrollToIndexFailed={read.onScrollToIndexFailed}
             />
           )}
 
@@ -706,17 +711,19 @@ const ConversationScreen: React.FC = () => {
 
           {live.hasNewMessages && !loading ? (
             <NewMessagesPill onPress={live.jumpToLatest} testID="conversation-new-messages" />
-          ) : !live.atEdge && !loading ? (
-            <View style={styles.scrollToBottomWrap} pointerEvents="box-none">
-              <TouchableOpacity
-                style={styles.scrollToBottomFab}
-                onPress={live.jumpToLatest}
-                accessibilityLabel={t('conversationScreen.scrollToRecent')}
-                testID="conversation-scroll-to-bottom"
-              >
-                <ArrowDown size={20} color={colors.white} />
-              </TouchableOpacity>
-            </View>
+          ) : null}
+          {!loading ? (
+            <ChatJumpButtons
+              mentionCount={0}
+              onJumpToMention={read.jumpToNextMention}
+              showLatest={!live.atEdge && !live.hasNewMessages}
+              unreadCount={read.unread}
+              onJumpToLatest={live.jumpToLatest}
+              testIDs={{
+                mention: 'conversation-jump-to-mention',
+                latest: 'conversation-scroll-to-bottom',
+              }}
+            />
           ) : null}
         </Animated.View>
 
@@ -833,31 +840,12 @@ const ConversationScreen: React.FC = () => {
         onClose={() => setPollComposerOpen(false)}
         onSend={handleSendPoll}
       />
-      <Modal
-        visible={fullscreenGifUrl !== null}
-        transparent
-        statusBarTranslucent
-        navigationBarTranslucent
-        animationType="fade"
-        onRequestClose={() => setFullscreenGifUrl(null)}
-      >
-        <Pressable
-          style={styles.fullscreenBackdrop}
-          onPress={() => setFullscreenGifUrl(null)}
-          accessibilityLabel={t('conversationScreen.closeFullscreenGif')}
-          testID="conversation-gif-fullscreen"
-        >
-          {fullscreenGifUrl ? (
-            <ExpoImage
-              source={{ uri: fullscreenGifUrl }}
-              style={styles.fullscreenImage}
-              contentFit="contain"
-              cachePolicy="memory-disk"
-              accessibilityIgnoresInvertColors
-            />
-          ) : null}
-        </Pressable>
-      </Modal>
+      <FullscreenGifModal
+        url={fullscreenGifUrl}
+        onClose={() => setFullscreenGifUrl(null)}
+        closeLabel={t('conversationScreen.closeFullscreenGif')}
+        testID="conversation-gif-fullscreen"
+      />
       <FriendPickerSheet
         visible={contactPickerOpen}
         onClose={() => {
@@ -976,6 +964,18 @@ const ConversationScreen: React.FC = () => {
         info={messageSheetInfo}
         onClose={closeMessageInfo}
         onResend={canResendFromInfo ? handleResendFromInfo : undefined}
+        devices={dmDevices.messageDevices(messageSheetSender, messageSheetSentAt)}
+      />
+      <DmMembersSheet
+        visible={dmDevices.sheetOpen}
+        onClose={dmDevices.closeSheet}
+        peer={{ pubkey, name, picture: picture ?? null }}
+        chatId={dmDevices.chatId}
+        deviceCounts={dmDevices.counts}
+        onMemberTap={() => {
+          dmDevices.closeSheet();
+          openPeerProfile();
+        }}
       />
     </View>
   );

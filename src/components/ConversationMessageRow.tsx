@@ -6,6 +6,7 @@ import MessageBubble from './MessageBubble';
 import OrderPaymentActions from './OrderPaymentActions';
 import NwcShareCard from './NwcShareCard';
 import MarmotInviteFailedNotice from './MarmotInviteFailedNotice';
+import DeviceNoticeLine from './DeviceNoticeLine';
 import type { TransactionDetailData } from './TransactionDetailSheet';
 import type { Palette } from '../styles/palettes';
 import type { ConversationStyles } from '../styles/ConversationScreen.styles';
@@ -63,6 +64,9 @@ export interface ConversationMessageRowProps {
   peerName?: string;
   /** A failed Marmot invite's "Ask for a new invite" (#1269). */
   onAskForInvite?: () => void;
+  /** I follow the peer (#1338): their media / link previews load without a
+   *  tap. My own messages always load. */
+  peerMediaTrusted: boolean;
 }
 
 /**
@@ -102,8 +106,9 @@ function ConversationMessageRow({
   onAddNwc,
   peerName,
   onAskForInvite,
+  peerMediaTrusted,
 }: ConversationMessageRowProps): React.ReactElement {
-  const { formatLocale } = useLocale();
+  const { formatLocale, t } = useLocale();
   if (item.kind === 'dayHeader') {
     return (
       <View style={styles.dayHeaderRow}>
@@ -229,6 +234,20 @@ function ConversationMessageRow({
       />
     );
   }
+  if (item.kind === 'deviceNotice') {
+    return (
+      <DeviceNoticeLine
+        id={item.id}
+        createdAt={item.createdAt}
+        name={
+          item.isSelf ? t('chatDevices.you') : peerName?.trim() || t('marmotInviteFailed.someone')
+        }
+        joined={item.joined}
+        clients={item.clients}
+        colors={colors}
+      />
+    );
+  }
   if (item.kind === 'marmotInviteFailed') {
     return (
       <MarmotInviteFailedNotice
@@ -290,6 +309,7 @@ function ConversationMessageRow({
       onToggleReaction={onToggleReaction}
       quote={'quote' in item ? withPeerName(item.quote, peerName) : undefined}
       edited={item.kind === 'message' ? item.edited : undefined}
+      autoLoadMedia={item.fromMe || peerMediaTrusted}
       testIdPrefix="conversation"
     />
   );

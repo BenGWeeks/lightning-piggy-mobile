@@ -283,11 +283,29 @@ export function extractBitcoinUri(text: string): BitcoinUri | null {
   return parsed;
 }
 
+/**
+ * A shared contact card — not an inline @mention (#1295). Every share format
+ * (the composer's "Shared contact", ContactProfile's "Share with friend", the
+ * OS share text) puts the profile URI on a line of its own, under a label. So:
+ * a line that is only a `nostr:nprofile…` URI, or only a `nostr:npub…` URI
+ * when the message has another line. A reference inside a sentence — or a
+ * message that is just one `nostr:npub…` (a lone mention) — renders as an
+ * `@Name` chip in the text instead.
+ */
 export function extractSharedContact(text: string): SharedContactRef | null {
-  if (!text) return null;
-  const match = text.match(NOSTR_PROFILE_URI_REGEX);
-  if (!match) return null;
-  return decodeProfileReference(match[0]);
+  if (!text || !NOSTR_PROFILE_URI_REGEX.test(text)) return null;
+  const lines = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  for (const line of lines) {
+    const match = line.match(NOSTR_PROFILE_URI_REGEX);
+    if (!match || match[0].length !== line.length) continue;
+    const isNprofile = /^nostr:nprofile1/i.test(line);
+    if (!isNprofile && lines.length < 2) continue;
+    return decodeProfileReference(match[0]);
+  }
+  return null;
 }
 
 export function formatTime(epochSeconds: number): string {

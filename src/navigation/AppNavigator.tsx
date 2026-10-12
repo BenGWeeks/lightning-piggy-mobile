@@ -694,6 +694,12 @@ export default function AppNavigator() {
         <Stack.Screen name="Groups" component={GroupsScreen} />
         <Stack.Screen name="GroupConversation" component={GroupConversationScreen} />
         <Stack.Screen name="ContactProfile" component={ContactProfileScreen} />
+        <Stack.Screen
+          name="ProductDetail"
+          // Same screen as Explore's MarketProductDetail; its navigation calls
+          // (goBack, navigate('Conversation')) resolve on the root stack too.
+          component={MarketProductDetailScreen as unknown as React.ComponentType<object>}
+        />
         <Stack.Screen name="UnsupportedEntity" component={UnsupportedEntityScreen} />
         <Stack.Screen name="Notifications" component={NotificationsScreen} />
       </Stack.Navigator>

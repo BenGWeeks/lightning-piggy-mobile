@@ -563,6 +563,33 @@
     "recentPosts": "Recent posts",
     "noPostsYet": "No posts yet"
   },
+  "profileTabs": {
+    "posts": "Posts",
+    "media": "Media",
+    "shop": "Shop",
+    "noMedia": "No photos or videos yet",
+    "noShopItems": "No shop items yet",
+    "loadMore": "Load more",
+    "shopUnavailable": "Couldn’t load this shop. Pull down to try again.",
+    "filterPosts": "Posts",
+    "filterPostsAndReplies": "Posts & replies",
+    "replyingTo": "Replying to",
+    "replyingToPost": "Replying to a post",
+    "onlyReplies": "Only replies so far — switch to Posts & replies to see them"
+  },
+  "nostrContent": {
+    "openProfile": "Open the profile of {{name}}",
+    "postUnavailable": "This post couldn’t be found",
+    "productUnavailable": "This listing is no longer available",
+    "emptyPost": "(empty post)",
+    "embeddedPostA11y": "Quoted post: {{text}}",
+    "openOnWeb": "Open on the web",
+    "article": "Article",
+    "untitledArticle": "Untitled article",
+    "articleA11y": "Article: {{title}}",
+    "playVideo": "Play video",
+    "viewImage": "View image"
+  },
   "friendPickerSheet": {
     "sendToFriend": "Send to friend",
     "sendToName": "Send to {{name}}",
@@ -1205,6 +1232,11 @@
     "imageSent": "Image sent",
     "imageReceived": "Image received",
     "sharedImage": "Shared image",
+    "tapToLoadImage": "Tap to load image",
+    "tapToLoadPreview": "Tap to load preview",
+    "loadsFrom": "From {{host}}",
+    "loadImageA11y": "Load image from {{host}}",
+    "loadPreviewA11y": "Load link preview from {{host}}",
     "gifSent": "GIF sent, tap to expand",
     "gifReceived": "GIF received, tap to expand",
     "liveLocationEnded": "Live location ended",
@@ -2506,7 +2538,9 @@
         "notFound": "This listing couldn't be found.",
         "needsShop": "Set up your shop before listing items.",
         "delete": "Delete listing",
-        "conflictBody": "This listing was changed on another device or app since you opened it. Save your version anyway?"
+        "conflictBody": "This listing was changed on another device or app since you opened it. Save your version anyway?",
+        "deletedBody": "This listing was deleted. Recreate it with the values in this form?",
+        "recreate": "Recreate"
       },
       "errors": {
         "title": "Add a title (up to 200 characters).",
@@ -2579,7 +2613,22 @@
     "nfc": "NFC tab"
   },
   "liveMessages": {
-    "newMessages": "New messages"
+    "newMessages": "New messages",
+    "unreadDivider": "Unread messages",
+    "jumpToMention": {
+      "one": "Jump to {{count}} unread mention",
+      "other": "Jump to {{count}} unread mentions"
+    },
+    "jumpToLatest": "Jump to latest",
+    "jumpToLatestUnread": {
+      "one": "Jump to latest, {{count}} unread message",
+      "other": "Jump to latest, {{count}} unread messages"
+    }
+  },
+  "chatMentions": {
+    "picker": "Mention a member",
+    "pickMember": "Mention {{name}}",
+    "rowBadge": "You were mentioned"
   },
   "publishedRelays": {
     "intro": "These lists are public. Other Nostr apps use them to find your posts and to send you DMs. Publishing signs the list with your key and replaces your previous one.",
@@ -2888,5 +2937,43 @@
   },
   "followList": {
     "unavailable": "Couldn't load your follow list — try again"
+  },
+  "chatDevices": {
+    "secureChat": "Secure chat",
+    "secureChatDevices": {
+      "one": "Secure chat · {{count}} device",
+      "other": "Secure chat · {{count}} devices"
+    },
+    "bylineA11y": "Show who is in this chat and on which devices",
+    "inThisChat": "In this chat",
+    "deviceCount": {
+      "one": "{{count}} device",
+      "other": "{{count}} devices"
+    },
+    "showDevicesA11y": "Show {{name}}'s devices",
+    "hideDevicesA11y": "Hide {{name}}'s devices",
+    "unknownApp": "Unknown app",
+    "thisPhone": "This phone",
+    "keyFrom": "Invitation key from {{date}}",
+    "joinedAtEpoch": "Joined at epoch {{epoch}}",
+    "hereWhenYouJoined": "Here when you joined (epoch {{epoch}})",
+    "sentFrom": "Sent from",
+    "oneOfDevices": {
+      "one": "One of {{count}} devices",
+      "other": "One of {{count}} devices"
+    },
+    "readableOn": "Can be read on",
+    "readableOnPerson": "{{name}}: {{count}}",
+    "you": "You",
+    "noticeJoined": {
+      "one": "{{name}} · joined on {{count}} device ({{apps}})",
+      "other": "{{name}} · joined on {{count}} devices ({{apps}})"
+    },
+    "noticeAdded": {
+      "one": "{{name}} added a device ({{apps}})",
+      "other": "{{name}} added {{count}} devices ({{apps}})"
+    },
+    "showChanges": "Show device changes in chats",
+    "showChangesHint": "Alpha: a grey line in Marmot chats when someone joins on, or adds, a device. Drawn on this phone only; nothing is sent."
   }
 }

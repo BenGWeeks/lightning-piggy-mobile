@@ -563,6 +563,33 @@
     "recentPosts": "Legutóbbi bejegyzések",
     "noPostsYet": "Még nincs bejegyzés"
   },
+  "profileTabs": {
+    "posts": "Bejegyzések",
+    "media": "Média",
+    "shop": "Bolt",
+    "noMedia": "Még nincs fotó vagy videó",
+    "noShopItems": "A boltban még nincs termék",
+    "loadMore": "Továbbiak betöltése",
+    "shopUnavailable": "Nem sikerült betölteni a boltot. Húzd le az újrapróbáláshoz.",
+    "filterPosts": "Bejegyzések",
+    "filterPostsAndReplies": "Bejegyzések és válaszok",
+    "replyingTo": "Válasz neki:",
+    "replyingToPost": "Válasz egy bejegyzésre",
+    "onlyReplies": "Eddig csak válaszok – válts a „Bejegyzések és válaszok” nézetre, hogy lásd őket"
+  },
+  "nostrContent": {
+    "openProfile": "{{name}} profiljának megnyitása",
+    "postUnavailable": "Ez a bejegyzés nem található",
+    "productUnavailable": "Ez a hirdetés már nem elérhető",
+    "emptyPost": "(üres bejegyzés)",
+    "embeddedPostA11y": "Idézett bejegyzés: {{text}}",
+    "openOnWeb": "Megnyitás a weben",
+    "article": "Cikk",
+    "untitledArticle": "Cím nélküli cikk",
+    "articleA11y": "Cikk: {{title}}",
+    "playVideo": "Videó lejátszása",
+    "viewImage": "Kép megtekintése"
+  },
   "friendPickerSheet": {
     "sendToFriend": "Küldés barátnak",
     "sendToName": "Küldés neki: {{name}}",
@@ -1205,6 +1232,11 @@
     "imageSent": "Kép elküldve",
     "imageReceived": "Kép megérkezett",
     "sharedImage": "Megosztott kép",
+    "tapToLoadImage": "Koppints a kép betöltéséhez",
+    "tapToLoadPreview": "Koppints az előnézet betöltéséhez",
+    "loadsFrom": "Forrás: {{host}}",
+    "loadImageA11y": "Kép betöltése innen: {{host}}",
+    "loadPreviewA11y": "Linkelőnézet betöltése innen: {{host}}",
     "gifSent": "GIF elküldve, koppints a kinagyításhoz",
     "gifReceived": "GIF megérkezett, koppints a kinagyításhoz",
     "liveLocationEnded": "Az élő hely megosztása véget ért",
@@ -2506,7 +2538,9 @@
         "notFound": "Ez a hirdetés nem található.",
         "needsShop": "Hozd létre az üzletedet, mielőtt hirdetéseket adsz fel.",
         "delete": "Hirdetés törlése",
-        "conflictBody": "Ezt a hirdetést egy másik eszközön vagy alkalmazásban módosították, mióta megnyitottad. Mégis mented a saját változatodat?"
+        "conflictBody": "Ezt a hirdetést egy másik eszközön vagy alkalmazásban módosították, mióta megnyitottad. Mégis mented a saját változatodat?",
+        "deletedBody": "Ezt a hirdetést törölték. Újra létrehozod az űrlap értékeivel?",
+        "recreate": "Újra létrehozás"
       },
       "errors": {
         "title": "Adj meg egy címet (legfeljebb 200 karakter).",
@@ -2579,7 +2613,22 @@
     "nfc": "NFC fül"
   },
   "liveMessages": {
-    "newMessages": "Új üzenetek"
+    "newMessages": "Új üzenetek",
+    "unreadDivider": "Olvasatlan üzenetek",
+    "jumpToMention": {
+      "one": "Ugrás {{count}} olvasatlan említésre",
+      "other": "Ugrás {{count}} olvasatlan említésre"
+    },
+    "jumpToLatest": "Ugrás a legújabb üzenetre",
+    "jumpToLatestUnread": {
+      "one": "Ugrás a legújabb üzenetre, {{count}} olvasatlan üzenet",
+      "other": "Ugrás a legújabb üzenetre, {{count}} olvasatlan üzenet"
+    }
+  },
+  "chatMentions": {
+    "picker": "Tag megemlítése",
+    "pickMember": "{{name}} megemlítése",
+    "rowBadge": "Megemlítettek"
   },
   "publishedRelays": {
     "intro": "Ezek a listák nyilvánosak. Más Nostr-alkalmazások ezek alapján találják meg a bejegyzéseidet, és küldenek neked közvetlen üzeneteket. A közzététel aláírja a listát a kulcsoddal, és lecseréli az előzőt.",
@@ -2888,5 +2937,43 @@
   },
   "followList": {
     "unavailable": "A követési listádat nem sikerült betölteni – próbáld újra"
+  },
+  "chatDevices": {
+    "secureChat": "Biztonságos csevegés",
+    "secureChatDevices": {
+      "one": "Biztonságos csevegés · {{count}} eszköz",
+      "other": "Biztonságos csevegés · {{count}} eszköz"
+    },
+    "bylineA11y": "Mutasd, ki van ebben a csevegésben, és milyen eszközökön",
+    "inThisChat": "Ebben a csevegésben",
+    "deviceCount": {
+      "one": "{{count}} eszköz",
+      "other": "{{count}} eszköz"
+    },
+    "showDevicesA11y": "{{name}} eszközeinek megjelenítése",
+    "hideDevicesA11y": "{{name}} eszközeinek elrejtése",
+    "unknownApp": "Ismeretlen alkalmazás",
+    "thisPhone": "Ez a telefon",
+    "keyFrom": "Meghívókulcs dátuma: {{date}}",
+    "joinedAtEpoch": "Csatlakozás: {{epoch}}. epoch",
+    "hereWhenYouJoined": "Már itt volt, amikor csatlakoztál ({{epoch}}. epoch)",
+    "sentFrom": "Küldve innen",
+    "oneOfDevices": {
+      "one": "{{count}} eszköz egyike",
+      "other": "{{count}} eszköz egyike"
+    },
+    "readableOn": "Olvasható ennyi eszközön",
+    "readableOnPerson": "{{name}}: {{count}}",
+    "you": "Te",
+    "noticeJoined": {
+      "one": "{{name}} · csatlakozott {{count}} eszközön ({{apps}})",
+      "other": "{{name}} · csatlakozott {{count}} eszközön ({{apps}})"
+    },
+    "noticeAdded": {
+      "one": "{{name}} hozzáadott egy eszközt ({{apps}})",
+      "other": "{{name}} hozzáadott {{count}} eszközt ({{apps}})"
+    },
+    "showChanges": "Eszközváltozások mutatása a csevegésekben",
+    "showChangesHint": "Alfa: szürke sor a Marmot-csevegésekben, ha valaki egy eszközzel csatlakozik vagy eszközt ad hozzá. Csak ezen a telefonon jelenik meg; semmit nem küldünk el."
   }
 }

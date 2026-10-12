@@ -1,0 +1,143 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Group @mentions, the @ badge and remembered read position (#1295)
+---
+# Big Piggy creates a NIP-17 group with Little Piggy, posts a few messages and
+# then @mentions Little through the composer's member picker. Little (same
+# device, switched to) sees the `@` badge on the group's row, opens the chat
+# at the first unread message under an "Unread messages" divider, with the
+# `@` jump button and the unread count on the jump-to-latest arrow; tapping
+# `@` scrolls to the mention chip. Leaving the chat clears the badge.
+#
+# Prereqs: Big and Little Piggy registered on this device (nsec, from
+# MAESTRO_NSEC_BIG / MAESTRO_NSEC_LITTLE); Big follows Little and Little
+# follows Big (so the group passes the trust filter).
+# Run: flock … maestro test .maestro/messaging/flow-152-group-mentions-read-position.yaml
+- runScript: ../common/run-tag.js
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# --- A0. Little opens Messages once, so its read positions start (their
+# baseline) before Big's messages are sent — older ones count as read.
+- runFlow: ../common/login-nsec-little.yaml
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# --- A. Big: create the group ------------------------------------------------
+- runFlow: ../common/login-nsec-big.yaml
+- tapOn:
+    id: 'tab-messages'
+- tapOn:
+    id: 'start-conversation-button'
+- tapOn:
+    id: 'friend-picker-new-group'
+- waitForAnimationToEnd:
+    timeout: 2000
+- scrollUntilVisible:
+    element:
+      id: 'member-row-d9b33280ba73'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 50
+- tapOn:
+    id: 'member-row-d9b33280ba73'
+- tapOn:
+    id: 'create-group-next'
+- waitForAnimationToEnd:
+    timeout: 1500
+- tapOn:
+    text: 'e.g. Family'
+- inputText: 'Mentions ${output.tag}'
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1500
+- tapOn:
+    id: 'create-group-submit'
+- extendedWaitUntil:
+    visible:
+      id: 'group-message-input'
+    timeout: 60000
+
+# --- B. Big: filler messages, so Little's first unread isn't the mention -----
+- repeat:
+    times: 8
+    commands:
+      - tapOn:
+          id: 'group-message-input'
+      - inputText: 'filler ${output.tag}'
+      - hideKeyboard
+      - tapOn:
+          id: 'group-send-button'
+      - waitForAnimationToEnd:
+          timeout: 1500
+
+# --- C. Big: @mention Little through the picker ------------------------------
+- tapOn:
+    id: 'group-message-input'
+- inputText: 'hey @Lit'
+- extendedWaitUntil:
+    visible:
+      id: 'mention-picker'
+    timeout: 10000
+- takeScreenshot: mentions-152-picker
+- tapOn:
+    id: 'mention-option-d9b33280ba73'
+- inputText: 'look ${output.tag}'
+- hideKeyboard
+- tapOn:
+    id: 'group-send-button'
+# The sent bubble renders the mention as a chip, not the raw nostr:npub.
+- extendedWaitUntil:
+    visible:
+      id: 'nostr-mention-d9b33280ba73'
+    timeout: 30000
+- assertNotVisible:
+    text: '.*nostr:npub1.*'
+- takeScreenshot: mentions-152-chip-sent
+- tapOn:
+    id: 'group-back'
+
+# --- D. Little: badge, unread divider, jump to the mention -------------------
+- runFlow: ../common/login-nsec-little.yaml
+- tapOn:
+    id: 'tab-messages'
+- extendedWaitUntil:
+    visible:
+      id: 'group-mention-badge-.*'
+    timeout: 120000
+- takeScreenshot: mentions-152-row-badge
+- tapOn:
+    text: 'Mentions ${output.tag}'
+- extendedWaitUntil:
+    visible:
+      id: 'group-unread-divider'
+    timeout: 20000
+- extendedWaitUntil:
+    visible:
+      id: 'group-jump-to-mention'
+    timeout: 10000
+- takeScreenshot: mentions-152-divider-and-jump
+- tapOn:
+    id: 'group-jump-to-mention'
+- extendedWaitUntil:
+    visible:
+      id: 'nostr-mention-d9b33280ba73'
+    timeout: 10000
+# Seen: the @ button goes once the mention has been on screen.
+- extendedWaitUntil:
+    notVisible:
+      id: 'group-jump-to-mention'
+    timeout: 10000
+- takeScreenshot: mentions-152-jumped
+- tapOn:
+    id: 'group-back'
+- extendedWaitUntil:
+    notVisible:
+      id: 'group-mention-badge-.*'
+    timeout: 10000
+
+# --- E. Restore Big as the active account ------------------------------------
+- runFlow: ../common/login-nsec-big.yaml

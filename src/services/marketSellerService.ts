@@ -2,14 +2,17 @@
 // Gamma Markets events and publish newly signed ones. Thin shell over the
 // pure builders/reducer in utils/marketSeller*.
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { verifyEvent, type Event, type Filter } from 'nostr-tools';
-import { pool, trackRelays, DEFAULT_RELAYS, publishSignedEvent } from './nostrService';
+import type { Event, Filter } from 'nostr-tools';
+import { trackRelays, DEFAULT_RELAYS, publishSignedEvent } from './nostrService';
+import { acquireMarketListingsPool } from './marketListingsPool';
+import { verifyEventCached } from './nostrVerifyCache';
 import {
   sellerCacheStorageKey as cacheKey,
   sellerHiddenStorageKey as hiddenKey,
   isSellerAccountForgotten,
   sellerStoreState,
 } from './sellerEventStore';
+import type { RevisionResult } from '../utils/marketSellerRevision';
 import { reduceSellerSnapshot } from '../utils/marketSellerSnapshot';
 import { querySyncAbortable } from './relayQuery';
 import { selectHealthyRelays } from './relayHealth';
@@ -58,7 +61,7 @@ export async function verifiedOwnEvents(
       try {
         // Verify a clean copy: nostr-tools trusts a cached `verified` symbol
         // on the object, which a copied / forged event can carry along.
-        ok = verifyEvent({
+        ok = verifyEventCached({
           id: event.id,
           pubkey: event.pubkey,
           created_at: event.created_at,
@@ -97,24 +100,29 @@ export async function queryQuorum(
   // Relays parked as dead (#1326) neither burn a timeout nor count against
   // the quorum; selectHealthyRelays always keeps the healthiest two.
   const unique = selectHealthyRelays([...new Set(relays)]);
-  const results = await Promise.allSettled(
-    unique.map((relay) =>
-      querySyncAbortable(pool, [relay], filter, {
-        maxWait: FETCH_MAX_WAIT_MS,
-        signal,
-        rejectOnAllRelaysFailure: true,
-        rejectOnTimeout: true,
-      }),
-    ),
-  );
-  const answered = results.filter(
-    (r): r is PromiseFulfilledResult<Event[]> => r.status === 'fulfilled',
-  );
-  const quorum = Math.max(1, Math.ceil(unique.length / 2));
-  if (signal?.aborted || answered.length < quorum) {
-    throw new Error(`Only ${answered.length} of ${unique.length} relays answered`);
+  const lease = acquireMarketListingsPool(unique);
+  try {
+    const results = await Promise.allSettled(
+      unique.map((relay) =>
+        querySyncAbortable(lease.pool, [relay], filter, {
+          maxWait: FETCH_MAX_WAIT_MS,
+          signal,
+          rejectOnAllRelaysFailure: true,
+          rejectOnTimeout: true,
+        }),
+      ),
+    );
+    const answered = results.filter(
+      (r): r is PromiseFulfilledResult<Event[]> => r.status === 'fulfilled',
+    );
+    const quorum = Math.max(1, Math.ceil(unique.length / 2));
+    if (signal?.aborted || answered.length < quorum) {
+      throw new Error(`Only ${answered.length} of ${unique.length} relays answered`);
+    }
+    return answered.flatMap((r) => r.value);
+  } finally {
+    lease.release();
   }
-  return answered.flatMap((r) => r.value);
 }
 
 /**
@@ -167,8 +175,9 @@ export async function fetchLatestRevision(input: {
   pubkey: string;
   kind: number;
   dTag: string;
+  baseId?: string;
   relays: string[];
-}): Promise<Event | null> {
+}): Promise<RevisionResult> {
   const pubkey = input.pubkey.toLowerCase();
   trackRelays(input.relays);
   const coordinate = `${input.kind}:${pubkey}:${input.dTag}`;
@@ -188,9 +197,18 @@ export async function fetchLatestRevision(input: {
       limit: 20,
     }),
   ]);
+  const ids = [...new Set([...events.map((e) => e.id), ...(input.baseId ? [input.baseId] : [])])];
+  const idDeletions = ids.length
+    ? await queryQuorum(input.relays, {
+        kinds: [DELETION_KIND],
+        authors: [pubkey],
+        '#e': ids,
+        limit: 20,
+      })
+    : [];
   const [own, ownDeletions] = await Promise.all([
     verifiedOwnEvents(events, pubkey, [input.kind]),
-    verifiedOwnEvents(deletions, pubkey, [DELETION_KIND]),
+    verifiedOwnEvents([...deletions, ...idDeletions], pubkey, [DELETION_KIND]),
   ]);
   let deletedAt = -1;
   const deletedIds = new Set<string>();
@@ -211,7 +229,7 @@ export async function fetchLatestRevision(input: {
     )
       newest = e;
   }
-  return newest;
+  return { event: newest, deletedAt, deletedIds: [...deletedIds] };
 }
 
 /** Publish to the seller's relays; resolves once ONE relay accepts, rejects

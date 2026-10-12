@@ -563,6 +563,33 @@
     "recentPosts": "Najnowsze wpisy",
     "noPostsYet": "Brak wpisów"
   },
+  "profileTabs": {
+    "posts": "Wpisy",
+    "media": "Multimedia",
+    "shop": "Sklep",
+    "noMedia": "Brak zdjęć i filmów",
+    "noShopItems": "W sklepie nie ma jeszcze produktów",
+    "loadMore": "Wczytaj więcej",
+    "shopUnavailable": "Nie udało się wczytać sklepu. Przeciągnij w dół, aby spróbować ponownie.",
+    "filterPosts": "Wpisy",
+    "filterPostsAndReplies": "Wpisy i odpowiedzi",
+    "replyingTo": "W odpowiedzi do",
+    "replyingToPost": "W odpowiedzi na wpis",
+    "onlyReplies": "Na razie są tylko odpowiedzi — przełącz na „Wpisy i odpowiedzi”, aby je zobaczyć"
+  },
+  "nostrContent": {
+    "openProfile": "Otwórz profil: {{name}}",
+    "postUnavailable": "Nie znaleziono tego wpisu",
+    "productUnavailable": "To ogłoszenie nie jest już dostępne",
+    "emptyPost": "(pusty wpis)",
+    "embeddedPostA11y": "Cytowany wpis: {{text}}",
+    "openOnWeb": "Otwórz w przeglądarce",
+    "article": "Artykuł",
+    "untitledArticle": "Artykuł bez tytułu",
+    "articleA11y": "Artykuł: {{title}}",
+    "playVideo": "Odtwórz film",
+    "viewImage": "Pokaż obraz"
+  },
   "friendPickerSheet": {
     "sendToFriend": "Wyślij do znajomego",
     "sendToName": "Wyślij — odbiorca: {{name}}",
@@ -1205,6 +1232,11 @@
     "imageSent": "Wysłano obraz",
     "imageReceived": "Odebrano obraz",
     "sharedImage": "Udostępniony obraz",
+    "tapToLoadImage": "Dotknij, aby wczytać obraz",
+    "tapToLoadPreview": "Dotknij, aby wczytać podgląd",
+    "loadsFrom": "Z {{host}}",
+    "loadImageA11y": "Wczytaj obraz z {{host}}",
+    "loadPreviewA11y": "Wczytaj podgląd linku z {{host}}",
     "gifSent": "Wysłano GIF, dotknij, aby powiększyć",
     "gifReceived": "Odebrano GIF, dotknij, aby powiększyć",
     "liveLocationEnded": "Lokalizacja na żywo zakończona",
@@ -2512,7 +2544,9 @@
         "notFound": "Nie udało się znaleźć tej oferty.",
         "needsShop": "Załóż sklep, zanim wystawisz produkty.",
         "delete": "Usuń ofertę",
-        "conflictBody": "Od otwarcia oferty jej dane zostały zmienione na innym urządzeniu lub w innej aplikacji. Mimo to zapisać twoją wersję?"
+        "conflictBody": "Od otwarcia oferty jej dane zostały zmienione na innym urządzeniu lub w innej aplikacji. Mimo to zapisać twoją wersję?",
+        "deletedBody": "To ogłoszenie zostało usunięte. Utworzyć je ponownie z wartościami z tego formularza?",
+        "recreate": "Utwórz ponownie"
       },
       "errors": {
         "title": "Dodaj tytuł (do 200 znaków).",
@@ -2585,7 +2619,26 @@
     "nfc": "Karta NFC"
   },
   "liveMessages": {
-    "newMessages": "Nowe wiadomości"
+    "newMessages": "Nowe wiadomości",
+    "unreadDivider": "Nieprzeczytane wiadomości",
+    "jumpToMention": {
+      "one": "{{count}} nieprzeczytana wzmianka, przejdź",
+      "few": "{{count}} nieprzeczytane wzmianki, przejdź",
+      "many": "{{count}} nieprzeczytanych wzmianek, przejdź",
+      "other": "{{count}} nieprzeczytanej wzmianki, przejdź"
+    },
+    "jumpToLatest": "Przejdź do najnowszych",
+    "jumpToLatestUnread": {
+      "one": "Przejdź do najnowszych, {{count}} nieprzeczytana wiadomość",
+      "few": "Przejdź do najnowszych, {{count}} nieprzeczytane wiadomości",
+      "many": "Przejdź do najnowszych, {{count}} nieprzeczytanych wiadomości",
+      "other": "Przejdź do najnowszych, {{count}} nieprzeczytanej wiadomości"
+    }
+  },
+  "chatMentions": {
+    "picker": "Wspomnij członka grupy",
+    "pickMember": "Wspomnij: {{name}}",
+    "rowBadge": "Wspomniano o Tobie"
   },
   "publishedRelays": {
     "intro": "Te listy są publiczne. Inne aplikacje Nostr używają ich, aby znaleźć twoje wpisy i wysyłać ci wiadomości prywatne. Publikacja podpisuje listę twoim kluczem i zastępuje poprzednią.",
@@ -2910,5 +2963,53 @@
   },
   "followList": {
     "unavailable": "Nie udało się wczytać listy obserwowanych — spróbuj ponownie"
+  },
+  "chatDevices": {
+    "secureChat": "Bezpieczny czat",
+    "secureChatDevices": {
+      "one": "Bezpieczny czat · {{count}} urządzenie",
+      "other": "Bezpieczny czat · {{count}} urządzenia",
+      "few": "Bezpieczny czat · {{count}} urządzenia",
+      "many": "Bezpieczny czat · {{count}} urządzeń"
+    },
+    "bylineA11y": "Pokaż, kto jest na tym czacie i na jakich urządzeniach",
+    "inThisChat": "Na tym czacie",
+    "deviceCount": {
+      "one": "{{count}} urządzenie",
+      "other": "{{count}} urządzenia",
+      "few": "{{count}} urządzenia",
+      "many": "{{count}} urządzeń"
+    },
+    "showDevicesA11y": "Pokaż urządzenia: {{name}}",
+    "hideDevicesA11y": "Ukryj urządzenia: {{name}}",
+    "unknownApp": "Nieznana aplikacja",
+    "thisPhone": "Ten telefon",
+    "keyFrom": "Klucz zaproszenia z {{date}}",
+    "joinedAtEpoch": "Dołączono w epoce {{epoch}}",
+    "hereWhenYouJoined": "Obecne przed twoim dołączeniem (epoka {{epoch}})",
+    "sentFrom": "Wysłano z",
+    "oneOfDevices": {
+      "one": "Jedno z {{count}} urządzeń",
+      "other": "Jedno z {{count}} urządzeń",
+      "few": "Jedno z {{count}} urządzeń",
+      "many": "Jedno z {{count}} urządzeń"
+    },
+    "readableOn": "Można odczytać na",
+    "readableOnPerson": "{{name}}: {{count}}",
+    "you": "Ty",
+    "noticeJoined": {
+      "one": "{{name}} · na czacie na {{count}} urządzeniu ({{apps}})",
+      "other": "{{name}} · na czacie na {{count}} urządzeniach ({{apps}})",
+      "few": "{{name}} · na czacie na {{count}} urządzeniach ({{apps}})",
+      "many": "{{name}} · na czacie na {{count}} urządzeniach ({{apps}})"
+    },
+    "noticeAdded": {
+      "one": "{{name}} · nowe urządzenie ({{apps}})",
+      "other": "{{name}} · {{count}} nowych urządzeń ({{apps}})",
+      "few": "{{name}} · {{count}} nowe urządzenia ({{apps}})",
+      "many": "{{name}} · {{count}} nowych urządzeń ({{apps}})"
+    },
+    "showChanges": "Pokazuj zmiany urządzeń na czatach",
+    "showChangesHint": "Alfa: szara linia na czatach Marmot, gdy ktoś dołącza z urządzenia lub dodaje urządzenie. Widoczna tylko na tym telefonie; nic nie jest wysyłane."
   }
 }

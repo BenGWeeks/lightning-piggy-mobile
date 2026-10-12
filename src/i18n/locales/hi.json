@@ -563,6 +563,33 @@
     "recentPosts": "हाल की पोस्ट",
     "noPostsYet": "अभी कोई पोस्ट नहीं है"
   },
+  "profileTabs": {
+    "posts": "पोस्ट",
+    "media": "मीडिया",
+    "shop": "दुकान",
+    "noMedia": "अभी कोई फ़ोटो या वीडियो नहीं है",
+    "noShopItems": "दुकान में अभी कोई सामान नहीं है",
+    "loadMore": "और लोड करें",
+    "shopUnavailable": "यह दुकान लोड नहीं हो सकी। फिर से कोशिश करने के लिए नीचे खींचें।",
+    "filterPosts": "पोस्ट",
+    "filterPostsAndReplies": "पोस्ट और जवाब",
+    "replyingTo": "इन्हें जवाब",
+    "replyingToPost": "एक पोस्ट का जवाब",
+    "onlyReplies": "अभी तक सिर्फ़ जवाब हैं — उन्हें देखने के लिए \"पोस्ट और जवाब\" चुनें"
+  },
+  "nostrContent": {
+    "openProfile": "{{name}} की प्रोफ़ाइल खोलें",
+    "postUnavailable": "यह पोस्ट नहीं मिली",
+    "productUnavailable": "यह लिस्टिंग अब उपलब्ध नहीं है",
+    "emptyPost": "(खाली पोस्ट)",
+    "embeddedPostA11y": "उद्धृत पोस्ट: {{text}}",
+    "openOnWeb": "वेब पर खोलें",
+    "article": "लेख",
+    "untitledArticle": "बिना शीर्षक का लेख",
+    "articleA11y": "लेख: {{title}}",
+    "playVideo": "वीडियो चलाएँ",
+    "viewImage": "इमेज देखें"
+  },
   "friendPickerSheet": {
     "sendToFriend": "दोस्त को भेजें",
     "sendToName": "{{name}} को भेजें",
@@ -1205,6 +1232,11 @@
     "imageSent": "इमेज भेजी गई",
     "imageReceived": "इमेज मिली",
     "sharedImage": "शेयर की गई इमेज",
+    "tapToLoadImage": "इमेज लोड करने के लिए टैप करें",
+    "tapToLoadPreview": "प्रीव्यू लोड करने के लिए टैप करें",
+    "loadsFrom": "{{host}} से",
+    "loadImageA11y": "{{host}} से इमेज लोड करें",
+    "loadPreviewA11y": "{{host}} से लिंक प्रीव्यू लोड करें",
     "gifSent": "GIF भेजा गया, बड़ा करने के लिए टैप करें",
     "gifReceived": "GIF मिला, बड़ा करने के लिए टैप करें",
     "liveLocationEnded": "लाइव लोकेशन बंद हो गई",
@@ -2506,7 +2538,9 @@
         "notFound": "यह लिस्टिंग नहीं मिली।",
         "needsShop": "सामान की लिस्टिंग बनाने से पहले अपनी दुकान बनाएँ।",
         "delete": "लिस्टिंग हटाएँ",
-        "conflictBody": "आपके खोलने के बाद इस लिस्टिंग में किसी दूसरे डिवाइस या ऐप पर बदलाव हुआ है। फिर भी अपना वर्ज़न सेव करें?"
+        "conflictBody": "आपके खोलने के बाद इस लिस्टिंग में किसी दूसरे डिवाइस या ऐप पर बदलाव हुआ है। फिर भी अपना वर्ज़न सेव करें?",
+        "deletedBody": "यह लिस्टिंग हटा दी गई थी। क्या इस फ़ॉर्म के मानों से इसे फिर से बनाना है?",
+        "recreate": "फिर से बनाएँ"
       },
       "errors": {
         "title": "शीर्षक जोड़ें (अधिकतम 200 अक्षर)।",
@@ -2579,7 +2613,22 @@
     "nfc": "NFC टैब"
   },
   "liveMessages": {
-    "newMessages": "नए मैसेज"
+    "newMessages": "नए मैसेज",
+    "unreadDivider": "न पढ़े गए मैसेज",
+    "jumpToMention": {
+      "one": "{{count}} न पढ़े गए मेंशन पर जाएँ",
+      "other": "{{count}} न पढ़े गए मेंशन पर जाएँ"
+    },
+    "jumpToLatest": "सबसे नए मैसेज पर जाएँ",
+    "jumpToLatestUnread": {
+      "one": "सबसे नए मैसेज पर जाएँ, {{count}} न पढ़ा गया मैसेज",
+      "other": "सबसे नए मैसेज पर जाएँ, {{count}} न पढ़े गए मैसेज"
+    }
+  },
+  "chatMentions": {
+    "picker": "किसी सदस्य को मेंशन करें",
+    "pickMember": "{{name}} को मेंशन करें",
+    "rowBadge": "आपको मेंशन किया गया"
   },
   "publishedRelays": {
     "intro": "ये सूचियाँ सार्वजनिक हैं। दूसरे Nostr ऐप इनसे आपकी पोस्ट ढूँढते हैं और आपको DM भेजते हैं। पब्लिश करने पर सूची आपकी प्राइवेट की से साइन होती है और पिछली सूची की जगह लेती है।",
@@ -2888,5 +2937,43 @@
   },
   "followList": {
     "unavailable": "आपकी फ़ॉलो सूची लोड नहीं हो सकी — फिर से कोशिश करें"
+  },
+  "chatDevices": {
+    "secureChat": "सुरक्षित चैट",
+    "secureChatDevices": {
+      "one": "सुरक्षित चैट · {{count}} डिवाइस",
+      "other": "सुरक्षित चैट · {{count}} डिवाइस"
+    },
+    "bylineA11y": "देखें कि इस चैट में कौन है और किन डिवाइस पर",
+    "inThisChat": "इस चैट में",
+    "deviceCount": {
+      "one": "{{count}} डिवाइस",
+      "other": "{{count}} डिवाइस"
+    },
+    "showDevicesA11y": "{{name}} के डिवाइस दिखाएँ",
+    "hideDevicesA11y": "{{name}} के डिवाइस छिपाएँ",
+    "unknownApp": "अज्ञात ऐप",
+    "thisPhone": "यह फ़ोन",
+    "keyFrom": "इनवाइट कुंजी की तारीख़: {{date}}",
+    "joinedAtEpoch": "एपॉक {{epoch}} में जुड़ा",
+    "hereWhenYouJoined": "आपके जुड़ने के समय पहले से मौजूद (एपॉक {{epoch}})",
+    "sentFrom": "यहाँ से भेजा गया",
+    "oneOfDevices": {
+      "one": "{{count}} डिवाइस में से एक",
+      "other": "{{count}} डिवाइस में से एक"
+    },
+    "readableOn": "इतने डिवाइस पर पढ़ा जा सकता है",
+    "readableOnPerson": "{{name}}: {{count}}",
+    "you": "आप",
+    "noticeJoined": {
+      "one": "{{name}} · {{count}} डिवाइस पर जुड़े ({{apps}})",
+      "other": "{{name}} · {{count}} डिवाइस पर जुड़े ({{apps}})"
+    },
+    "noticeAdded": {
+      "one": "{{name}} ने एक डिवाइस जोड़ा ({{apps}})",
+      "other": "{{name}} ने {{count}} डिवाइस जोड़े ({{apps}})"
+    },
+    "showChanges": "चैट में डिवाइस बदलाव दिखाएँ",
+    "showChangesHint": "अल्फ़ा: जब कोई किसी डिवाइस से जुड़ता है या डिवाइस जोड़ता है, तो Marmot चैट में एक धूसर पंक्ति। सिर्फ़ इसी फ़ोन पर दिखती है; कुछ भी भेजा नहीं जाता।"
   }
 }

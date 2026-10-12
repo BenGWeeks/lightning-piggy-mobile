@@ -31,6 +31,7 @@ import {
   __verifiedEventCacheSize,
   verifyEventCached,
 } from './nostrVerifyCache';
+import { parseProfileContent } from '../utils/profileContent';
 
 export type { DmSendResult };
 // Re-exported for back-compat: the canonical home is ./nip89ClientTag.
@@ -43,6 +44,7 @@ export { LP_CLIENT_TAG };
 // './nostrService'` call sites. This module owns the custom `verifyEvent`
 // fast-path applied to that same instance below.
 export { pool, trackRelays };
+export { signAndPublishEvent, publishSignedEvent } from './nostrEventPublish';
 
 // Fast-path verification for kind-0 (profile / metadata) events.
 // `SimplePool` runs `verifyEvent` synchronously for every event before
@@ -221,38 +223,8 @@ export function decodeProfileReference(input: string): DecodedProfileReference |
   return null;
 }
 
-export function parseProfileContent(content: string): {
-  name: string | null;
-  displayName: string | null;
-  picture: string | null;
-  banner: string | null;
-  about: string | null;
-  lud16: string | null;
-  nip05: string | null;
-} {
-  try {
-    const data = JSON.parse(content);
-    return {
-      name: data.name || null,
-      displayName: data.display_name || null,
-      picture: data.picture || null,
-      banner: data.banner || null,
-      about: data.about || null,
-      lud16: data.lud16 || null,
-      nip05: data.nip05 || null,
-    };
-  } catch {
-    return {
-      name: null,
-      displayName: null,
-      picture: null,
-      banner: null,
-      about: null,
-      lud16: null,
-      nip05: null,
-    };
-  }
-}
+// Kind-0 parsing lives in utils/profileContent (pure); re-exported for importers.
+export { parseProfileContent };
 
 export async function fetchProfile(pubkey: string, relays: string[]): Promise<NostrProfile | null> {
   const allRelays = [...new Set([...relays, ...PROFILE_RELAYS])];
@@ -569,37 +541,6 @@ export async function fetchProfiles(
   }
 
   return profiles;
-}
-
-export async function signAndPublishEvent(
-  event: {
-    kind: number;
-    created_at: number;
-    tags: string[][];
-    content: string;
-  },
-  secretKey: Uint8Array,
-  relays: string[],
-): Promise<void> {
-  trackRelays(relays);
-  const signed = nostrFinalizeEvent(event, secretKey);
-  await Promise.any(pool.publish(relays, signed));
-}
-
-export async function publishSignedEvent(
-  signedEvent: {
-    id: string;
-    pubkey: string;
-    sig: string;
-    kind: number;
-    created_at: number;
-    tags: string[][];
-    content: string;
-  },
-  relays: string[],
-): Promise<void> {
-  trackRelays(relays);
-  await Promise.any(pool.publish(relays, signedEvent as VerifiedEvent));
 }
 
 /**
@@ -1351,65 +1292,5 @@ export const DM_INBOX_LIMIT = 1000;
 // The live inbox subscription (subscribeInboxDmsForViewer) was extracted to
 // ./dmLiveSubscription to keep this file under the size cap (#703).
 
-// Raw kind-1 note for the friend-feed embed on ContactProfileScreen.
-// Lean shape: just the fields the preview cards actually render.
-export interface RawAuthorNote {
-  id: string;
-  pubkey: string;
-  created_at: number;
-  content: string;
-}
-
-// Subscribe to an author's recent kind-1 notes. Mirrors the
-// subscribeInboxDmsForViewer pattern: returns a cleanup function the
-// caller invokes on unmount. Events stream in via `onEvent` ordered by
-// relay arrival (NOT created_at) — caller is responsible for sorting.
-export function subscribeAuthorNotes(input: {
-  authorPubkey: string;
-  relays: string[];
-  limit?: number;
-  onEvent: (note: RawAuthorNote) => void;
-  // Fires once after every read relay has signalled end-of-stored-events
-  // (EOSE). Callers use this to drop the "loading" spinner so quiet
-  // authors don't keep spinning forever — the grace timer downstream
-  // is just a backstop. Wired-up callers don't need to do anything
-  // beyond `setLoading(false)` here; the subscription remains active
-  // for live events.
-  onEose?: () => void;
-}): () => void {
-  trackRelays(input.relays);
-  const limit = input.limit ?? 30;
-  let eoseFired = false;
-  const sub = pool.subscribeMany(
-    input.relays,
-    {
-      kinds: [1],
-      authors: [input.authorPubkey],
-      limit,
-    } as Filter,
-    {
-      onevent: (ev: { id: string; pubkey: string; created_at: number; content: string }) => {
-        input.onEvent({
-          id: ev.id,
-          pubkey: ev.pubkey,
-          created_at: ev.created_at,
-          content: ev.content,
-        });
-      },
-      oneose: () => {
-        // pool.subscribeMany aggregates EOSE (fires once after EVERY relay
-        // has EOSE'd); keep this guard so a re-armed sub can't double-fire.
-        if (eoseFired) return;
-        eoseFired = true;
-        input.onEose?.();
-      },
-    },
-  );
-  return () => {
-    try {
-      sub.close();
-    } catch {
-      // best-effort — sub may already be closed
-    }
-  };
-}
+// The profile page's author feed (notes + picture / video events) lives in
+// ./authorFeedService (#1332).

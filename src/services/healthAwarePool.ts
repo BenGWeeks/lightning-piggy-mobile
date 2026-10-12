@@ -94,17 +94,18 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
     ): Promise<string>[] {
       const keep = new Set(selectHealthyRelays(relays));
       const kept = relays.filter((r) => keep.has(r));
-      const results = super.publish(kept, event, params).map((p) => {
-        // An OK from a relay proves the network works (corroborates failures).
+      const results = super.publish(kept, event, params).map((p) =>
         // nostr-tools RESOLVES a failed connect with "connection failure: …".
-        p.then(
-          (reason) => {
-            if (!String(reason).startsWith('connection failure')) noteNetworkActivity();
-          },
-          () => {},
-        );
-        return p;
-      });
+        // Turn that into a rejection here, once, so no caller can mistake an
+        // unreachable relay for an accepted publish (Promise.any /
+        // allSettled callers would otherwise report success). An OK from a
+        // relay proves the network works (corroborates failures).
+        p.then((reason) => {
+          if (String(reason).startsWith('connection failure')) throw new Error(String(reason));
+          noteNetworkActivity();
+          return reason;
+        }),
+      );
       if (kept.length === relays.length) return results;
       let next = 0;
       return relays.map((r) =>

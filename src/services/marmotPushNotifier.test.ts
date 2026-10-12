@@ -68,7 +68,7 @@ describe('MarmotPushNotifier', () => {
     notifier.trigger(g);
     await settle();
     expect(published).toEqual([
-      { relays: ['wss://relay.eu.whitenoise.chat', 'wss://server-inbox.example'], kind: 1059 },
+      { relays: ['wss://server-inbox.example', 'wss://relay.eu.whitenoise.chat'], kind: 1059 },
     ]);
   });
 
@@ -91,7 +91,7 @@ describe('MarmotPushNotifier', () => {
     notifier.trigger(g);
     await settle();
     expect(published).toEqual([
-      { relays: ['wss://nos.lol', 'wss://server-inbox.example'], kind: 1059 },
+      { relays: ['wss://server-inbox.example', 'wss://nos.lol'], kind: 1059 },
     ]);
   });
 

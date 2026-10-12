@@ -69,3 +69,34 @@ describe('resolveCurrentRevision', () => {
     expect(isNewerRevision(rev('a', 1), null)).toBe(true);
   });
 });
+
+it.each(['address', 'id'])('requires explicit recreation after an %s deletion', async (target) => {
+  const base = rev('old', 10);
+  const fetchLatest = async () => ({
+    event: null,
+    deletedAt: target === 'address' ? 20 : -1,
+    deletedIds: target === 'id' ? ['old'] : [],
+  });
+  await expect(resolveCurrentRevision({ fetchLatest, base })).rejects.toBeInstanceOf(
+    StaleRevisionError,
+  );
+  await expect(resolveCurrentRevision({ fetchLatest, base, force: true })).resolves.toBeNull();
+});
+
+it.each([false, true])(
+  'updates the store before handling a deleted base (force=%s)',
+  async (force) => {
+    const base = rev('a', 10);
+    const latest = rev('b', 20);
+    const onLatest = jest.fn();
+    const pending = resolveCurrentRevision({
+      fetchLatest: async () => ({ event: latest, deletedAt: -1, deletedIds: [base.id] }),
+      base,
+      force,
+      onLatest,
+    });
+    if (force) await expect(pending).resolves.toBe(latest);
+    else await expect(pending).rejects.toBeInstanceOf(StaleRevisionError);
+    expect(onLatest).toHaveBeenCalledWith(latest);
+  },
+);

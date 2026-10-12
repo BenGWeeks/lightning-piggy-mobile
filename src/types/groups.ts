@@ -35,6 +35,12 @@ export interface GroupActivity {
    * member-derived avatars in that case.
    */
   recentSenderPubkeys: string[];
+  /**
+   * `createdAt` of the newest message from someone else that mentions the
+   * viewer (#1295). The Messages list shows an `@` badge while it's newer
+   * than the group's read position. Absent = no mention in the stored history.
+   */
+  lastMentionAt?: number;
 }
 
 /** Combined Group + GroupActivity, shaped for the Messages-tab list. */

@@ -2,34 +2,32 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
-  ScrollView,
-  RefreshControl,
+  ActivityIndicator,
+  type LayoutChangeEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   Linking,
   Share,
+  useWindowDimensions,
 } from 'react-native';
-import { Image } from 'expo-image';
+import { FlashList } from '@shopify/flash-list';
 import ContactActionsSheet from '../components/ContactActionsSheet';
 import * as Clipboard from 'expo-clipboard';
-import {
-  ChevronLeft,
-  QrCode,
-  Zap,
-  MessageCircle,
-  MoreHorizontal,
-  UserRound,
-  Copy,
-} from 'lucide-react-native';
+import { ChevronLeft, MoreHorizontal } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import { useIsFocused, useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Alert } from '../components/BrandedAlert';
 import Toast from '../components/BrandedToast';
 import NfcWriteSheet from '../components/NfcWriteSheet';
 import QrSheet from '../components/QrSheet';
 import SendSheet from '../components/SendSheet';
-import FriendNoteFeed from '../components/FriendNoteFeed';
+import ContactProfileHeader from '../components/profile/ContactProfileHeader';
+import ProfileTabBar from '../components/profile/ProfileTabBar';
+import ProfileFeedRow from '../components/profile/ProfileFeedRow';
+import ProfileStickyBar from '../components/profile/ProfileStickyBar';
+import PostsFilterSwitch from '../components/profile/PostsFilterSwitch';
 import FriendPickerSheet, { PickedFriend } from '../components/FriendPickerSheet';
 import { type ContactProfileBodyData } from '../components/ContactProfileBody';
 import FullscreenImageModal from '../components/FullscreenImageModal';
@@ -38,6 +36,23 @@ import { useWallet } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createContactProfileScreenStyles } from '../styles/ContactProfileScreen.styles';
+import { createProfileTabsStyles } from '../styles/ProfileTabs.styles';
+import {
+  profileHeaderLayout,
+  profileStickyPhase,
+  type ProfileStickyPhase,
+} from '../utils/profileHeaderLayout';
+import {
+  buildProfileRows,
+  countTopLevelPosts,
+  shouldAutoPage,
+  type PostsMode,
+  type ProfileRow,
+  type ProfileTab,
+} from '../utils/profileFeedRows';
+import { useProfileFeed } from '../hooks/useProfileFeed';
+import { useSellerProducts } from '../hooks/useSellerProducts';
+import type { MarketProduct } from '../data/marketProducts';
 import { isNfcSupported } from '../services/nfcService';
 import {
   npubEncode,
@@ -52,17 +67,16 @@ type ContactProfileNavigation = NativeStackNavigationProp<RootStackParamList, 'C
 type ContactProfileRoute = RouteProp<RootStackParamList, 'ContactProfile'>;
 
 // Full-page friends profile route. Layout follows Primal/Damus
-// convention: back chevron pinned top-left, identity card (banner +
-// avatar + name + nip05 + lud16), an action row (QR + Zap + Message
-// icons left, Follow/Unfollow pill right), description, embedded
-// kind-1 feed, and a smaller secondary affordance row for share / open
-// externally / NFC. The legacy sheet (ContactProfileSheet +
-// ContactProfileBody) is preserved untouched for callers that still
-// want a quick-glance presentation — see issue #435.
+// convention: back chevron pinned top-left, the identity header
+// (ContactProfileHeader: banner, avatar, action row, name, nip05, npub,
+// lud16, NIP-27-aware bio), then Posts / Media / Products tabs (#1332).
+// Header, tab bar and the active tab's rows are ONE virtualised FlashList
+// so long feeds stay cheap. Share / open externally / NFC live behind the
+// "…" button. The quick-glance sheet (ContactProfileSheet +
+// ContactProfileBody) is separate — see issue #435.
 const ContactProfileScreen: React.FC = () => {
   const t = useTranslation();
   const colors = useThemeColors();
-  const styles = useMemo(() => createContactProfileScreenStyles(colors), [colors]);
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<ContactProfileNavigation>();
   const route = useRoute<ContactProfileRoute>();
@@ -73,12 +87,8 @@ const ContactProfileScreen: React.FC = () => {
   const [contact, setContact] = useState<ContactProfileBodyData>(route.params.contact);
   const [following, setFollowing] = useState(false);
   const [loadingFollow, setLoadingFollow] = useState(false);
-  const [savingLnAddress, setSavingLnAddress] = useState(false);
-  const [avatarError, setAvatarError] = useState(false);
-  // Tap the avatar → view the picture full screen (#661 — same as the sheet).
+  // Tap the avatar / a picture → view it full screen (#661 — same as the sheet).
   const [fullscreenUrl, setFullscreenUrl] = useState<string | null>(null);
-  const [editingLnAddress, setEditingLnAddress] = useState(false);
-  const [lnAddressDraft, setLnAddressDraft] = useState(contact.lightningAddress ?? '');
   const [sendSheetOpen, setSendSheetOpen] = useState(false);
   const [qrSheetOpen, setQrSheetOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -87,8 +97,14 @@ const ContactProfileScreen: React.FC = () => {
   const [nfcWriteVisible, setNfcWriteVisible] = useState(false);
   const [nfcSupported, setNfcSupported] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  // Bumped on pull-to-refresh to make FriendNoteFeed re-query for new posts.
+  // Bumped on pull-to-refresh so the feed re-subscribes and the Shop tab
+  // refetches.
   const [notesReloadNonce, setNotesReloadNonce] = useState(0);
+  const [tab, setTab] = useState<ProfileTab>('posts');
+  // Posts tab filter: top-level posts by default, or posts and replies.
+  const [postsMode, setPostsMode] = useState<PostsMode>('posts');
+  // The Shop tab's listings are fetched only once it has been opened.
+  const [productsOpened, setProductsOpened] = useState(false);
 
   // React Navigation may reuse this screen instance and only update params
   // when navigating to ContactProfile while it's already in the stack.
@@ -107,13 +123,16 @@ const ContactProfileScreen: React.FC = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     setContact(paramContact);
+    // A different person starts on Posts, with their Shop not yet fetched.
+    setTab('posts');
+    setPostsMode('posts');
+    setProductsOpened(false);
   }, [paramIdentityKey]);
 
   const npub = useMemo(
     () => (contact.pubkey ? npubEncode(contact.pubkey) : null),
     [contact.pubkey],
   );
-  const npubDisplay = npub ? `${npub.slice(0, 12)}...${npub.slice(-6)}` : null;
 
   // `nostr:nprofile1…` (pubkey + relay hints) to write to an NFC tag —
   // strictly more useful than a bare npub for a cold-contact scanner, who
@@ -167,6 +186,16 @@ const ContactProfileScreen: React.FC = () => {
         if (cancelled || !profile) return;
         setContact((prev) => ({
           ...prev,
+          // A profile opened from a bare reference (an @mention chip, a
+          // deep link) arrives as a stub named after its npub — fill the
+          // identity in too, never overwriting what the caller passed.
+          name:
+            prev.name.startsWith('npub1') && prev.name.endsWith('…')
+              ? (profile.displayName ?? profile.name ?? prev.name)
+              : prev.name,
+          picture: prev.picture ?? profile.picture ?? null,
+          banner: prev.banner ?? profile.banner ?? null,
+          nip05: prev.nip05 ?? profile.nip05 ?? null,
           about: prev.about ?? profile.about ?? null,
           lightningAddress: prev.lightningAddress ?? profile.lud16 ?? null,
         }));
@@ -216,18 +245,6 @@ const ContactProfileScreen: React.FC = () => {
       setFollowing(contacts.some((c) => c.pubkey === contact.pubkey));
     }
   }, [contact.pubkey, contacts]);
-
-  // Reset the avatar error when the picture changes (no load timeout — rely on
-  // onError, like ContactListItem; the old 8s timeout flipped a loaded cached
-  // avatar to the default icon when expo-image's onLoad didn't fire).
-  useEffect(() => {
-    setAvatarError(false);
-  }, [contact.picture]);
-
-  useEffect(() => {
-    setEditingLnAddress(false);
-    setLnAddressDraft(contact.lightningAddress ?? '');
-  }, [contact.name, contact.lightningAddress]);
 
   const handleMessage = useCallback(() => {
     if (!contact.pubkey) return;
@@ -418,6 +435,210 @@ const ContactProfileScreen: React.FC = () => {
   const showFollowButton = !!contact.pubkey && contact.source === 'nostr';
   const canEditLnAddress = contact.source === 'contacts' && !!route.params.phoneContactId;
 
+  // Identity-row sizing (#1332): regular or compact so the buttons + Follow
+  // always fit on one row beside the avatar.
+  const { width: windowWidth, fontScale } = useWindowDimensions();
+  const iconCount = (npub ? 1 : 0) + 1 + (contact.pubkey ? 1 : 0);
+  const layout = useMemo(
+    () => profileHeaderLayout(windowWidth, fontScale, iconCount, showFollowButton),
+    [windowWidth, fontScale, iconCount, showFollowButton],
+  );
+  const styles = useMemo(() => createContactProfileScreenStyles(colors, layout), [colors, layout]);
+  const tabStyles = useMemo(() => createProfileTabsStyles(colors), [colors]);
+
+  // Posts + Media share one focus-gated feed subscription; the Shop loads on
+  // first open of their tab.
+  const feed = useProfileFeed(contact.pubkey, notesReloadNonce);
+  const seller = useSellerProducts(contact.pubkey, productsOpened, notesReloadNonce, contact.name);
+  const selectTab = useCallback((next: ProfileTab) => {
+    setTab(next);
+    if (next === 'shop') setProductsOpened(true);
+  }, []);
+  const rows = useMemo(
+    () =>
+      contact.pubkey
+        ? buildProfileRows({
+            tab,
+            postsMode,
+            feed: feed.events,
+            feedLoading: feed.loading && feed.hasRelays,
+            products: seller.products,
+            productsLoading: seller.loading,
+            productsIncomplete: seller.incomplete,
+          })
+        : [],
+    [
+      contact.pubkey,
+      tab,
+      postsMode,
+      feed.events,
+      feed.loading,
+      feed.hasRelays,
+      seller.products,
+      seller.loading,
+      seller.incomplete,
+    ],
+  );
+
+  // "Posts" hides replies, so a page can be mostly invisible. Keep paging
+  // until there are enough top-level posts or the feed ends — bounded per
+  // person + filter, after which "Load more" stays available.
+  const autoPagesRef = useRef(0);
+  useEffect(() => {
+    autoPagesRef.current = 0;
+  }, [contact.pubkey, postsMode]);
+  const topLevelCount = useMemo(() => countTopLevelPosts(feed.events), [feed.events]);
+  const { loadMore, loading: feedLoading, loadingMore, reachedEnd } = feed;
+  const feedSize = feed.events.length;
+  // Never while blurred: an abort on blur settles `loadingMore`, which must
+  // not re-arm paging behind the next screen (review #1334).
+  const focused = useIsFocused();
+  useEffect(() => {
+    const go = shouldAutoPage({
+      focused,
+      tab,
+      postsMode,
+      loading: feedLoading,
+      loadingMore,
+      reachedEnd,
+      feedSize,
+      topLevelCount,
+      autoPages: autoPagesRef.current,
+    });
+    if (!go) return;
+    autoPagesRef.current += 1;
+    void loadMore();
+  }, [
+    focused,
+    tab,
+    postsMode,
+    feedLoading,
+    loadingMore,
+    reachedEnd,
+    feedSize,
+    topLevelCount,
+    loadMore,
+  ]);
+
+  const openProduct = useCallback(
+    (product: MarketProduct) =>
+      navigation.push('ProductDetail', { productId: product.id, product }),
+    [navigation],
+  );
+  const renderRow = useCallback(
+    ({ item }: { item: ProfileRow }) => (
+      <ProfileFeedRow
+        row={item}
+        styles={tabStyles}
+        onOpenImage={setFullscreenUrl}
+        onOpenProduct={openProduct}
+      />
+    ),
+    [tabStyles, openProduct],
+  );
+  const openQr = useCallback(() => setQrSheetOpen(true), []);
+
+  // Pinned app bar (#1332 review): the tab bar's offset in the list is
+  // measured once laid out; the scroll handler only commits state when the
+  // phase actually changes (three values), never per scroll event.
+  const tabBarYRef = useRef<number | null>(null);
+  const scrollYRef = useRef(0);
+  const [stickyPhase, setStickyPhase] = useState<ProfileStickyPhase>(0);
+  const updateStickyPhase = useCallback(() => {
+    const next = profileStickyPhase(scrollYRef.current, insets.top, tabBarYRef.current);
+    setStickyPhase((prev) => (prev === next ? prev : next));
+  }, [insets.top]);
+  const handleScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      scrollYRef.current = e.nativeEvent.contentOffset.y;
+      updateStickyPhase();
+    },
+    [updateStickyPhase],
+  );
+  const handleTabBarLayout = useCallback(
+    (e: LayoutChangeEvent) => {
+      tabBarYRef.current = e.nativeEvent.layout.y;
+      updateStickyPhase();
+    },
+    [updateStickyPhase],
+  );
+
+  const listHeader = useMemo(
+    () => (
+      <View>
+        <ContactProfileHeader
+          contact={contact}
+          styles={styles}
+          npub={npub}
+          hasWallets={hasWallets}
+          following={following}
+          loadingFollow={loadingFollow}
+          showFollowButton={showFollowButton}
+          canEditLnAddress={canEditLnAddress}
+          onOpenImage={setFullscreenUrl}
+          onQr={openQr}
+          onZap={handleZap}
+          onMessage={handleMessage}
+          onFollowToggle={handleFollowToggle}
+          onCopyNpub={handleCopyNpub}
+          onCopyLnAddress={handleCopyLnAddress}
+          onSaveLightningAddress={handleSetLightningAddress}
+        />
+        {contact.pubkey ? (
+          <View onLayout={handleTabBarLayout}>
+            <ProfileTabBar active={tab} onChange={selectTab} styles={tabStyles} />
+          </View>
+        ) : null}
+        {contact.pubkey && tab === 'posts' ? (
+          <PostsFilterSwitch mode={postsMode} onChange={setPostsMode} styles={tabStyles} />
+        ) : null}
+      </View>
+    ),
+    [
+      contact,
+      styles,
+      npub,
+      hasWallets,
+      following,
+      loadingFollow,
+      showFollowButton,
+      canEditLnAddress,
+      openQr,
+      handleZap,
+      handleMessage,
+      handleFollowToggle,
+      handleCopyNpub,
+      handleCopyLnAddress,
+      handleSetLightningAddress,
+      tab,
+      selectTab,
+      tabStyles,
+      handleTabBarLayout,
+      postsMode,
+    ],
+  );
+
+  // Posts / Media page backwards on demand; nothing to page on Shop (the
+  // seller's listings come in one bounded snapshot).
+  const canPage = tab !== 'shop' && feed.events.length > 0 && !feed.reachedEnd;
+  const listFooter = canPage ? (
+    <View style={tabStyles.footer}>
+      {feed.loadingMore ? (
+        <ActivityIndicator size="small" color={colors.brandPink} />
+      ) : (
+        <TouchableOpacity
+          style={tabStyles.loadMoreButton}
+          onPress={feed.loadMore}
+          accessibilityRole="button"
+          accessibilityLabel={t('profileTabs.loadMore')}
+          testID="profile-load-more"
+        >
+          <Text style={tabStyles.loadMoreText}>{t('profileTabs.loadMore')}</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  ) : null;
+
   return (
     <View style={styles.container}>
       {/* Header strip pinned over the banner. The banner extends up behind
@@ -453,248 +674,35 @@ const ContactProfileScreen: React.FC = () => {
         )}
       </View>
 
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
+      <FlashList
+        data={rows}
+        renderItem={renderRow}
+        keyExtractor={(row) => row.key}
+        getItemType={(row) => row.type}
+        ListHeaderComponent={listHeader}
+        ListFooterComponent={listFooter}
+        // Posts page in as you scroll; the Media grid pages from its footer
+        // button, since a text-heavy author can need several pages per row.
+        onEndReached={tab === 'posts' && canPage ? feed.loadMore : undefined}
+        onEndReachedThreshold={0.5}
+        contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
-      >
-        {/* Banner — contact's own if set, else the brand pink-ostrich texture. */}
-        <View style={styles.bannerContainer}>
-          {contact.banner ? (
-            <Image
-              source={{ uri: contact.banner }}
-              style={styles.bannerImage}
-              contentFit="cover"
-              cachePolicy="memory-disk"
-              recyclingKey={contact.banner}
-              autoplay={false}
-            />
-          ) : (
-            <Image
-              source={require('../../assets/images/friends-bg.png')}
-              style={styles.bannerImage}
-              contentFit="cover"
-              cachePolicy="memory-disk"
-            />
-          )}
-        </View>
+        refreshing={refreshing}
+        onRefresh={handleRefresh}
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
+        testID="contact-profile-list"
+      />
 
-        {/* Identity row — avatar left, action buttons + Follow pill right. */}
-        <View style={styles.identityRow}>
-          <View style={styles.avatarContainer}>
-            {contact.picture && !avatarError ? (
-              <TouchableOpacity
-                activeOpacity={0.85}
-                onPress={() => setFullscreenUrl(contact.picture)}
-                accessibilityRole="imagebutton"
-                accessibilityLabel={t('contactProfileScreen.viewProfilePictureFullScreen')}
-                testID="profile-screen-avatar-fullscreen"
-              >
-                <Image
-                  source={{ uri: contact.picture }}
-                  style={styles.avatar}
-                  cachePolicy="memory-disk"
-                  transition={200}
-                  recyclingKey={contact.picture}
-                  autoplay={false}
-                  onError={() => setAvatarError(true)}
-                />
-              </TouchableOpacity>
-            ) : (
-              <View style={styles.avatarDefault}>
-                <UserRound size={48} color={colors.textBody} strokeWidth={1.5} />
-              </View>
-            )}
-          </View>
-
-          <View style={styles.identityActionsBlock}>
-            <View style={styles.actionIconGroup}>
-              {npub && (
-                <TouchableOpacity
-                  accessibilityRole="button"
-                  style={styles.actionIconButton}
-                  onPress={() => setQrSheetOpen(true)}
-                  accessibilityLabel={t('contactProfileScreen.showQrCode')}
-                  testID="contact-profile-qr-button"
-                >
-                  <QrCode size={20} color={colors.white} />
-                </TouchableOpacity>
-              )}
-              {/* Always shown; greyed when a zap can't go out (no wallet or
-                  no Lightning address). Tapping the greyed state explains
-                  which prerequisite is missing via handleZap. */}
-              <TouchableOpacity
-                style={[
-                  styles.actionIconButton,
-                  (!hasWallets || !contact.lightningAddress) && styles.actionIconButtonDisabled,
-                ]}
-                onPress={handleZap}
-                accessibilityRole="button"
-                accessibilityLabel={
-                  !hasWallets
-                    ? t('contactProfileScreen.zapNoWallet')
-                    : contact.lightningAddress
-                      ? t('contactProfileScreen.zap')
-                      : t('contactProfileScreen.zapNoLightningAddress')
-                }
-                testID="contact-profile-zap-button"
-              >
-                <Zap size={20} color={colors.white} />
-              </TouchableOpacity>
-              {contact.pubkey && (
-                <TouchableOpacity
-                  accessibilityRole="button"
-                  style={styles.actionIconButton}
-                  onPress={handleMessage}
-                  accessibilityLabel={t('contactProfileScreen.message')}
-                  testID="contact-profile-message-button"
-                >
-                  <MessageCircle size={20} color={colors.white} />
-                </TouchableOpacity>
-              )}
-            </View>
-
-            {showFollowButton && (
-              <TouchableOpacity
-                accessibilityRole="button"
-                accessibilityState={{ disabled: loadingFollow, busy: loadingFollow }}
-                style={[styles.followButton, following && styles.followingButton]}
-                onPress={handleFollowToggle}
-                disabled={loadingFollow}
-                accessibilityLabel={
-                  following ? t('contactProfileScreen.unfollow') : t('contactProfileScreen.follow')
-                }
-                testID="contact-profile-follow-button"
-              >
-                <Text
-                  style={[styles.followButtonText, following && styles.followingButtonText]}
-                  numberOfLines={1}
-                >
-                  {loadingFollow
-                    ? '...'
-                    : following
-                      ? t('contactProfileScreen.following')
-                      : t('contactProfileScreen.follow')}
-                </Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        </View>
-
-        <Text style={styles.name} numberOfLines={1}>
-          {contact.name}
-        </Text>
-
-        {contact.nip05 && (
-          <Text style={styles.nip05} numberOfLines={1}>
-            {contact.nip05}
-          </Text>
-        )}
-
-        {npubDisplay && (
-          <TouchableOpacity
-            accessibilityRole="button"
-            style={styles.npubRow}
-            onPress={handleCopyNpub}
-            accessibilityLabel={t('contactProfileScreen.copyNpub')}
-            testID="contact-copy-npub-button"
-          >
-            <Text style={styles.npubText}>{npubDisplay}</Text>
-            <Copy size={16} color={colors.brandPink} />
-          </TouchableOpacity>
-        )}
-
-        {/* Editable / copyable lud16 row. */}
-        {canEditLnAddress ? (
-          editingLnAddress ? (
-            <View style={styles.lnAddressEditRow}>
-              <TextInput
-                style={styles.lnAddressInput}
-                placeholder={t('contactProfileScreen.lnAddressPlaceholder')}
-                placeholderTextColor={colors.textSupplementary}
-                value={lnAddressDraft}
-                onChangeText={setLnAddressDraft}
-                autoCapitalize="none"
-                autoCorrect={false}
-                keyboardType="email-address"
-              />
-              <TouchableOpacity
-                accessibilityRole="button"
-                accessibilityState={{ disabled: savingLnAddress }}
-                style={styles.lnAddressSaveButton}
-                disabled={savingLnAddress}
-                onPress={async () => {
-                  const trimmed = lnAddressDraft.trim();
-                  if (!trimmed) {
-                    setEditingLnAddress(false);
-                    return;
-                  }
-                  setSavingLnAddress(true);
-                  try {
-                    await handleSetLightningAddress(trimmed);
-                    // Only exit edit mode after a successful save so the
-                    // user can retry without retyping if persistence fails.
-                    setEditingLnAddress(false);
-                  } catch {
-                    Toast.show({
-                      type: 'error',
-                      text1: t('contactProfileScreen.failedToSaveLightningAddress'),
-                      position: 'top',
-                      visibilityTime: 3000,
-                    });
-                  } finally {
-                    setSavingLnAddress(false);
-                  }
-                }}
-              >
-                <Text style={styles.lnAddressSaveText}>
-                  {lnAddressDraft.trim()
-                    ? t('contactProfileScreen.save')
-                    : t('contactProfileScreen.cancel')}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <TouchableOpacity
-              accessibilityRole="button"
-              style={styles.lnAddressRow}
-              onPress={() => {
-                setLnAddressDraft(contact.lightningAddress ?? '');
-                setEditingLnAddress(true);
-              }}
-            >
-              <Text style={styles.lightningAddress} numberOfLines={1}>
-                {contact.lightningAddress || t('contactProfileScreen.addLightningAddress')}
-              </Text>
-            </TouchableOpacity>
-          )
-        ) : contact.lightningAddress ? (
-          <TouchableOpacity
-            accessibilityRole="button"
-            style={styles.lnAddressRow}
-            onPress={handleCopyLnAddress}
-            accessibilityLabel={t('contactProfileScreen.copyLightningAddress')}
-            testID="contact-copy-lud16-button"
-          >
-            <Text style={styles.lightningAddress} numberOfLines={1}>
-              {contact.lightningAddress}
-            </Text>
-            <Copy size={14} color={colors.brandPink} />
-          </TouchableOpacity>
-        ) : null}
-
-        {/* Description / about. */}
-        {contact.about && contact.about.trim().length > 0 && (
-          <View style={styles.aboutContainer}>
-            <Text style={styles.aboutText}>{contact.about.trim()}</Text>
-          </View>
-        )}
-
-        {/* Friend's recent kind-1 notes. Hidden for phone-only contacts. */}
-        {contact.pubkey && (
-          <FriendNoteFeed authorPubkey={contact.pubkey} reloadNonce={notesReloadNonce} />
-        )}
-      </ScrollView>
+      <ProfileStickyBar
+        phase={stickyPhase}
+        topInset={insets.top}
+        title={contact.name}
+        showTabs={!!contact.pubkey}
+        tab={tab}
+        onChangeTab={selectTab}
+        styles={tabStyles}
+      />
 
       {npub && (
         <QrSheet
