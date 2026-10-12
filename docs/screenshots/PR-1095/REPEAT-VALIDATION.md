@@ -2,10 +2,10 @@
 
 Real mainnet tests on Warmachine's `lightningpiggy_api34` Android API34 emulator (`emulator-5554`), using the configured private Boltz v2 backend. No public fallback. No simulator mocks or constructed screenshots. The private endpoint and credentials are omitted.
 
-| Run | Direction | Invoice | Outcome |
-| --- | --- | ---: | --- |
-| 20 September | Bitcoin → Lightning | 10,000 sats | `transaction.claimed`, wallet credited 10,000 |
-| 24 September, first | Lightning → Bitcoin | 11,000 sats | `invoice.settled`, Bitcoin output 10,307 sats |
+| Run                  | Direction           |     Invoice | Outcome                                       |
+| -------------------- | ------------------- | ----------: | --------------------------------------------- |
+| 20 September         | Bitcoin → Lightning | 10,000 sats | `transaction.claimed`, wallet credited 10,000 |
+| 24 September, first  | Lightning → Bitcoin | 11,000 sats | `invoice.settled`, Bitcoin output 10,307 sats |
 | 24 September, second | Bitcoin → Lightning | 10,000 sats | `transaction.claimed`, wallet credited 10,000 |
 | 24 September, repeat | Lightning → Bitcoin | 11,000 sats | `invoice.settled`, Bitcoin output 10,066 sats |
 
@@ -18,6 +18,7 @@ The second submarine waited for Bitcoin confirmation because zero-confirmation a
 Total gross test movement including initial funding and fees: **58,382 sats**, below the authorized 60,000. Claim fees are inside reverse invoice debits, not counted twice. No new channel or extra funding was used. The bounded test approval window was closed and its worker stopped after the final repeat; this does not enable unrestricted family use.
 
 Screenshots are original captures:
+
 - `06-submarine-repeat-received.png`: 10,000-sat receipt and Coinos 23,967-sat balance.
 - `07-reverse-repeat-complete.png`: current completion message, Coinos 12,912-sat balance.
 - `08-repeat-history.png`: two Lightning debits and two incoming swap payments.
