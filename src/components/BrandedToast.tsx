@@ -19,6 +19,7 @@
 //     with grow-to-fit min-height — preserves the long-error rendering
 //     that App.tsx previously configured (e.g. Electrum script-verify
 //     error messages don't get truncated).
+import { createToastOwnership } from '../utils/toastOwnership';
 import React, { useMemo } from 'react';
 import { Text, TouchableOpacity } from 'react-native';
 import RNToast, {
@@ -33,7 +34,13 @@ import { createBrandedToastStyles, sharedToastStyle } from '../styles/BrandedToa
 
 // Re-export the lib's `Toast` default so call sites just swap their import
 // path and keep using `Toast.show(...)` / `Toast.hide()` exactly as before.
-export const Toast = RNToast;
+export const Toast = Object.assign(
+  (props: React.ComponentProps<typeof RNToast>) => <RNToast {...props} />,
+  createToastOwnership({
+    show: (options: Parameters<typeof RNToast.show>[0]) => RNToast.show(options),
+    hide: () => RNToast.hide(),
+  }),
+);
 export default Toast;
 
 // Style overrides applied to every toast variant — keeps proportions

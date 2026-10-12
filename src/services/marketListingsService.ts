@@ -18,6 +18,7 @@ import { addressRefs, deletionFilters, idRefs } from '../utils/nip09';
 import { hasValidSignature } from '../utils/eventSignature';
 import { startJsStallProbe } from '../utils/jsStallProbe';
 import { PERF_LOGS_ENABLED } from '../utils/perfLog';
+import { ROBOTECHY_PUBKEY } from '../utils/marketSample';
 import type { MarketProduct } from '../data/marketProducts';
 
 export interface MarketListingsResult {
@@ -347,6 +348,13 @@ async function runSnapshot(
       }
     }
     const deletionChecksGaveUp = failedDeletionChecks >= MAX_FAILED_DELETION_CHECKS;
+    let failedListingChecks = 0;
+    const verifyListing = (event: Event) => {
+      if (signal.aborted) return false;
+      const valid = trusted.has(event) || verified(event);
+      if (!valid) failedListingChecks++;
+      return valid;
+    };
     const selection = await selectVerifiedListings(
       signal.aborted || deletionChecksGaveUp || deletionUnavailable
         ? []
@@ -356,7 +364,7 @@ async function runSnapshot(
       scope,
       {
         // Once aborted, fail fast instead of verifying the rest for nothing.
-        verify: (event) => !signal.aborted && (trusted.has(event) || verified(event)),
+        verify: verifyListing,
         maybeYield: scheduler.maybeYield,
         cap: MAX_PRODUCTS,
         maxFailures: MAX_FAILED_CHECKS,
@@ -370,9 +378,33 @@ async function runSnapshot(
         },
       },
     );
+    // Reserve a candidate beyond the newest-250 cut through the SAME verifier,
+    // revision reducer and authenticated deletions, without expanding the rail.
+    const safeEvents =
+      signal.aborted ||
+      deletionChecksGaveUp ||
+      selection.gaveUp ||
+      deletionUnavailable ||
+      withheldAuthors.has(ROBOTECHY_PUBKEY)
+        ? []
+        : [...events.values(), ...suppressions.values()].filter(
+            (event) => event.pubkey === ROBOTECHY_PUBKEY,
+          );
+    const reserved = await selectVerifiedListings(safeEvents, scope, {
+      verify: verifyListing,
+      maybeYield: scheduler.maybeYield,
+      cap: 1,
+      maxFailures: Math.max(0, MAX_FAILED_CHECKS - failedListingChecks),
+    });
     const products = signal.aborted ? [] : reduceMarketListings(selection.events, scope);
+    const [robot] = signal.aborted ? [] : reduceMarketListings(reserved.events, scope);
+    const cappedProducts = products.slice(0, MAX_PRODUCTS);
+    if (robot && !cappedProducts.some((product) => product.id === robot.id)) {
+      if (cappedProducts.length === MAX_PRODUCTS) cappedProducts.pop();
+      cappedProducts.push(robot);
+    }
     const result: MarketListingsResult = {
-      products: products.slice(0, MAX_PRODUCTS),
+      products: cappedProducts,
       // Unanswered passes or unchecked data. Reaching MAX_PRODUCTS is a deliberate display
       // cap (newest first), not a failed load — "could not be loaded, try
       // refreshing" would be untrue, and refreshing can't change it.
@@ -383,6 +415,7 @@ async function runSnapshot(
         deletionUnavailable ||
         withheldAuthors.size > 0 ||
         selection.gaveUp ||
+        reserved.gaveUp ||
         listingsCutMattered(listings.truncatedSince, products, selection.overflow) ||
         deletions.truncated ||
         listings.answered.length === 0 ||

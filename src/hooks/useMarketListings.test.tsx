@@ -27,7 +27,9 @@ jest.mock('@react-navigation/native', () => ({
 }));
 const mockTranslate = (key: string) => key;
 jest.mock('../contexts/LocaleContext', () => ({ useTranslation: () => mockTranslate }));
-jest.mock('../components/BrandedToast', () => ({ Toast: { show: jest.fn() } }));
+jest.mock('../components/BrandedToast', () => ({
+  Toast: { show: jest.fn(), showOwned: jest.fn(() => jest.fn()) },
+}));
 const fetch = fetchMarketListings as jest.Mock;
 let finish: (result: MarketListingsResult) => void;
 beforeEach(() => {
@@ -267,19 +269,19 @@ it('does not resurrect an expired listing from the fresh hook-local snapshot', a
 describe('partial snapshot recovery', () => {
   beforeEach(() => {
     jest.useFakeTimers();
-    (Toast.show as jest.Mock).mockClear();
+    (Toast.showOwned as jest.Mock).mockClear();
   });
   afterEach(() => jest.useRealTimers());
   it('retries once with backoff and only toasts if the retry still fails', async () => {
     const h = renderHook(() => useMarketListings(true));
     await act(async () => finish({ products: [], incomplete: true }));
-    expect(Toast.show).not.toHaveBeenCalled();
+    expect(Toast.showOwned).not.toHaveBeenCalled();
     act(() => jest.advanceTimersByTime(1499));
     expect(fetch).toHaveBeenCalledTimes(1);
     act(() => jest.advanceTimersByTime(1));
     expect(fetch).toHaveBeenCalledTimes(2);
     await act(async () => finish({ products: [], incomplete: true }));
-    expect(Toast.show).toHaveBeenCalledWith(
+    expect(Toast.showOwned).toHaveBeenCalledWith(
       expect.objectContaining({
         autoHide: true,
         visibilityTime: 3500,
@@ -298,7 +300,7 @@ describe('partial snapshot recovery', () => {
     act(() => jest.advanceTimersByTime(1500));
     await act(async () => finish({ products: [], incomplete: false }));
     expect(h.result.current.incomplete).toBe(false);
-    expect(Toast.show).not.toHaveBeenCalled();
+    expect(Toast.showOwned).not.toHaveBeenCalled();
   });
   it('cancels a pending retry on blur', async () => {
     const h = renderHook(() => useMarketListings(true));
@@ -307,7 +309,7 @@ describe('partial snapshot recovery', () => {
     h.rerender({});
     act(() => jest.advanceTimersByTime(1500));
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(Toast.show).not.toHaveBeenCalled();
+    expect(Toast.showOwned).not.toHaveBeenCalled();
   });
 });
 
@@ -331,3 +333,29 @@ it('keeps the cached snapshot through an unanswered refresh and retry', async ()
   h.unmount();
   jest.useRealTimers();
 });
+
+it.each(['blur', 'mode', 'account', 'unmount'])(
+  'dismisses its shown partial toast on %s cleanup',
+  async (cleanup) => {
+    jest.useFakeTimers();
+    const dismiss = jest.fn();
+    (Toast.showOwned as jest.Mock).mockReturnValue(dismiss);
+    const h = renderHook(({ enabled }: { enabled: boolean }) => useMarketListings(enabled), {
+      initialProps: { enabled: true },
+    });
+    await act(async () => finish({ products: [], incomplete: true }));
+    act(() => jest.advanceTimersByTime(1500));
+    await act(async () => finish({ products: [], incomplete: true }));
+    if (cleanup === 'blur') {
+      mockFocused = false;
+      h.rerender({ enabled: true });
+    } else if (cleanup === 'mode') h.rerender({ enabled: false });
+    else if (cleanup === 'account') {
+      mockViewer = 'new-account';
+      h.rerender({ enabled: true });
+    } else h.unmount();
+    expect(dismiss).toHaveBeenCalledTimes(1);
+    h.unmount();
+    jest.useRealTimers();
+  },
+);

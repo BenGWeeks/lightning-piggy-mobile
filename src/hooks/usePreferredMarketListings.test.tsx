@@ -1,3 +1,4 @@
+import { Toast } from '../components/BrandedToast';
 import { act, renderHook } from '@testing-library/react-native';
 import { usePreferredMarketListings } from './usePreferredMarketListings';
 import {
@@ -20,6 +21,9 @@ jest.mock('../services/marketPreferredSellers', () => ({
   getPreferredSellers: () => undefined,
   PREFERRED_SELLERS_ACCOUNT: 'preferred',
 }));
+const mockTranslate = (key: string) => key;
+jest.mock('../contexts/LocaleContext', () => ({ useTranslation: () => mockTranslate }));
+jest.mock('../components/BrandedToast', () => ({ Toast: { showOwned: jest.fn(() => jest.fn()) } }));
 jest.mock('./useMarketListings', () => ({ useMarketListings: jest.fn() }));
 const live = useMarketListings as jest.Mock;
 const follows = fetchPreferredSellers as jest.Mock;
@@ -71,4 +75,62 @@ it('preserves cached listings on failure and respects a successful empty snapsho
   });
   h.rerender({});
   expect(h.result.current.products).toEqual([]);
+});
+
+describe('follow recovery', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.clearAllMocks();
+  });
+  afterEach(() => jest.useRealTimers());
+  it.each([false, true])(
+    'retries failed follows, preserves fallback, and toasts only after retry (cache: %s)',
+    async (cached) => {
+      const authors = ['b'.repeat(64)];
+      follows.mockImplementation((_relays, _signal, onCache) => {
+        if (cached) onCache(authors);
+        return Promise.reject(new Error('offline'));
+      });
+      const h = renderHook(() => usePreferredMarketListings());
+      await act(async () => {});
+      expect(h.result.current.incomplete).toBe(true);
+      expect(h.result.current.products).toBe(MARKET_PRODUCTS);
+      expect(Toast.showOwned).not.toHaveBeenCalled();
+      await act(async () => jest.advanceTimersByTime(1500));
+      expect(follows).toHaveBeenCalledTimes(2);
+      expect(h.result.current.incomplete).toBe(true);
+      expect(h.result.current.loading).toBe(false);
+      expect(Toast.showOwned).toHaveBeenCalledWith(
+        expect.objectContaining({ text1: 'market.live.partialToast' }),
+      );
+      if (cached)
+        expect(live).toHaveBeenLastCalledWith(true, {
+          account: PREFERRED_SELLERS_ACCOUNT,
+          authors,
+        });
+      follows.mockResolvedValue(authors);
+      act(() => h.result.current.refresh());
+      await act(async () => {});
+      expect(h.result.current.incomplete).toBe(false);
+    },
+  );
+  it('recovers silently and cancels retries when disabled', async () => {
+    follows.mockRejectedValueOnce(new Error('offline')).mockResolvedValue(['b'.repeat(64)]);
+    const h = renderHook(
+      ({ enabled }: { enabled: boolean }) => usePreferredMarketListings(enabled),
+      {
+        initialProps: { enabled: true },
+      },
+    );
+    await act(async () => {});
+    await act(async () => jest.advanceTimersByTime(1500));
+    expect(h.result.current.incomplete).toBe(false);
+    expect(Toast.showOwned).not.toHaveBeenCalled();
+    follows.mockRejectedValue(new Error('offline'));
+    act(() => h.result.current.refresh());
+    await act(async () => {});
+    h.rerender({ enabled: false });
+    await act(async () => jest.advanceTimersByTime(1500));
+    expect(follows).toHaveBeenCalledTimes(3);
+  });
 });

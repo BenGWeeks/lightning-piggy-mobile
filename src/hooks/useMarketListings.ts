@@ -114,6 +114,7 @@ export function useMarketListings(
             : { key, products, incomplete: false, loading: true, completed: false },
         );
       };
+      let dismissToast: (() => void) | undefined;
       let retryTimer: ReturnType<typeof setTimeout> | undefined;
       const load = () =>
         fetchMarketListings(
@@ -156,7 +157,7 @@ export function useMarketListings(
             if (controller.signal.aborted) return;
             publish(retried);
             if (retried.incomplete)
-              Toast.show({
+              dismissToast = Toast.showOwned({
                 type: 'info',
                 text1: t('market.live.partialToast'),
                 autoHide: true,
@@ -168,6 +169,7 @@ export function useMarketListings(
       return () => {
         controller.abort();
         if (retryTimer) clearTimeout(retryTimer);
+        dismissToast?.();
       };
     }, [enabled, focused, key, account, authorsKey, relaysKey, revision, t]),
   );

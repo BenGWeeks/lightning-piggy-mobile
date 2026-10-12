@@ -67,3 +67,31 @@ it('rejects forged follow lists instead of turning them into a successful empty 
     fetchPreferredSellers(['wss://example.com'], new AbortController().signal),
   ).rejects.toThrow('No verified');
 });
+
+it('reports an unanswered stale refresh while publishing fallback authors', async () => {
+  (AsyncStorage.getItem as jest.Mock).mockResolvedValue(
+    JSON.stringify({ authors, at: Date.now() - 180000 }),
+  );
+  snapshot.mockResolvedValue({ answered: [] });
+  const cached = jest.fn();
+  await expect(
+    fetchPreferredSellers(['wss://example.com'], new AbortController().signal, cached),
+  ).rejects.toThrow('Preferred relays unavailable');
+  expect(cached).toHaveBeenCalledWith(authors);
+});
+it.each(
+  [
+    [['p', authors[0], 'x'.repeat(1000000)]],
+    Array.from({ length: 1000 }, () => ['p', authors[0], 'x'.repeat(512)]),
+    [Array.from({ length: 100000 }, () => '')],
+  ].map((tags) => [tags]),
+)('rejects excessive tag payloads before verification (%#)', async (tags) => {
+  snapshot.mockImplementation(async (opts) => {
+    opts.onEvent({ ...follow(), tags });
+    return { answered: opts.urls };
+  });
+  await expect(
+    fetchPreferredSellers(['wss://example.com'], new AbortController().signal),
+  ).rejects.toThrow('No verified');
+  expect(verifyEventCached).not.toHaveBeenCalled();
+});

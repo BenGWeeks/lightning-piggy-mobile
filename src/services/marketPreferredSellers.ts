@@ -10,6 +10,21 @@ import { marketSnapshotRelays } from '../utils/marketListingsQuery';
 export const PREFERRED_SELLERS_ACCOUNT = nip19.decode(LIGHTNING_PIGGY_TEAM_NPUB).data as string;
 export const PREFERRED_FOLLOWS_CACHE_KEY = 'market_preferred_follows_v1';
 const MAX_AGE = 24 * 60 * 60 * 1000;
+// Bound work before the structure-only pool's candidates reach hashing.
+const MAX_PAYLOAD_CHARS = 262144;
+function boundedPayload(event: import('nostr-tools').Event): boolean {
+  let size = event.content.length;
+  for (const tag of event.tags) {
+    if (tag.length > 16) return false;
+    size += 2;
+    for (const value of tag) {
+      if (value.length > 4096) return false;
+      size += value.length + 3;
+      if (size > MAX_PAYLOAD_CHARS) return false;
+    }
+  }
+  return size <= MAX_PAYLOAD_CHARS;
+}
 const FRESH_MS = 2 * 60 * 1000;
 interface Follows {
   authors: string[];
@@ -74,6 +89,7 @@ export async function fetchPreferredSellers(
           event.pubkey === PREFERRED_SELLERS_ACCOUNT &&
           event.content.length <= 32768 &&
           event.tags.length <= 2048 &&
+          boundedPayload(event) &&
           event.created_at <= Date.now() / 1000 + 300
         )
           events.set(event.id + event.sig, event);
@@ -102,7 +118,7 @@ export async function fetchPreferredSellers(
       }
       return authors;
     }
-    if (cached) return cached.authors;
+    if (signal.aborted) return cached?.authors ?? [];
     throw new Error(
       result.answered.length ? 'No verified preferred follow list' : 'Preferred relays unavailable',
     );
