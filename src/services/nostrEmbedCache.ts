@@ -12,11 +12,12 @@
 // - Verified: every event's id + signature is checked here, not trusted to
 //   the shared pool (which fast-paths some kinds), and must match the ref.
 //   A product (kind 30402) also has its seller's deletions applied through
-//   the Market's `fetchListingRevision`, so a withdrawn listing never embeds.
+//   a seller/kind batch reconciliation, so a withdrawn listing never embeds.
 import type { Event } from 'nostr-tools';
-import { pool, trackRelays } from './nostrPool';
+import { pool, trackRelays, pruneIdleRelays } from './nostrPool';
 import { querySyncAbortable } from './relayQuery';
-import { fetchListingRevision } from './marketListingsService';
+import { reconcileEmbedProducts } from './nostrEmbedProducts';
+import { createYieldScheduler } from '../contexts/nostrDecryptPacing';
 import { hasValidSignature } from '../utils/eventSignature';
 import { parseMarketListing } from '../utils/marketListings';
 import { embedKey, type NostrContentToken } from '../utils/nip27';
@@ -122,20 +123,6 @@ const dTag = (e: Event) => e.tags.find((t) => t[0] === 'd')?.[1] ?? '';
 const newer = (a: Event, b: Event | undefined) =>
   !b || a.created_at > b.created_at || (a.created_at === b.created_at && a.id < b.id);
 
-async function withProduct(event: Event | null, relays: string[]): Promise<EmbedResult> {
-  if (!event || event.kind !== PRODUCT_KIND) return { event };
-  if (!parseMarketListing(event)) return { event, product: null };
-  try {
-    const controller = new AbortController();
-    const product = await fetchListingRevision(event, relays, controller.signal, TIMEOUT_MS);
-    return { event: product?.listing?.event ?? event, product };
-  } catch {
-    // Every relay failed the deletion lookup — show what we verified; the
-    // product page re-checks on open.
-    return { event, product: parseMarketListing(event) };
-  }
-}
-
 async function flush(): Promise<void> {
   timer = null;
   const batch = [...queue.entries()].slice(0, MAX_BATCH);
@@ -147,61 +134,105 @@ async function flush(): Promise<void> {
   const refs = batch.map(([, p]) => p.ref);
   const relays = relaysFor(refs);
   const found = new Map<string, Event>();
-  if (relays.length > 0) {
-    trackRelays(relays);
-    const query = (filter: Parameters<typeof querySyncAbortable>[2]) =>
-      querySyncAbortable(pool, relays, filter, { maxWait: TIMEOUT_MS }).catch(() => [] as Event[]);
-    const eventRefs = refs.filter(
-      (r): r is Extract<EmbedRef, { type: 'event' }> => r.type === 'event',
-    );
-    const byAuthor = new Map<string, Extract<EmbedRef, { type: 'address' }>[]>();
-    for (const r of refs) {
-      if (r.type !== 'address') continue;
-      const k = `${r.kind}:${r.pubkey}`;
-      byAuthor.set(k, [...(byAuthor.get(k) ?? []), r]);
+  const scheduler = createYieldScheduler({ safetyEvery: 32 });
+  const delivered = new Set<string>();
+  const deliver = (key: string, item: Pending, result: EmbedResult): void => {
+    if (delivered.has(key)) return;
+    delivered.add(key);
+    remember(key, result);
+    inFlight.delete(key);
+    item.resolve(result);
+  };
+  const deliverOrdinary = (matches: (ref: EmbedRef) => boolean): void => {
+    for (const [key, item] of batch) {
+      if (!matches(item.ref)) continue;
+      const event = found.get(key) ?? null;
+      if (event?.kind !== PRODUCT_KIND) deliver(key, item, { event });
     }
-    const jobs: Promise<void>[] = [];
-    if (eventRefs.length > 0) {
-      const ids = [...new Set(eventRefs.map((r) => r.id))];
-      jobs.push(
-        query({ ids, limit: ids.length }).then((events) => {
-          for (const e of events) {
-            if (ids.includes(e.id) && hasValidSignature(e)) found.set(`e:${e.id}`, e);
-          }
-        }),
+  };
+  try {
+    if (relays.length > 0) {
+      trackRelays(relays);
+      const query = (filter: Parameters<typeof querySyncAbortable>[2]) =>
+        querySyncAbortable(pool, relays, filter, { maxWait: TIMEOUT_MS }).catch(
+          () => [] as Event[],
+        );
+      const eventRefs = refs.filter(
+        (r): r is Extract<EmbedRef, { type: 'event' }> => r.type === 'event',
       );
-    }
-    for (const group of byAuthor.values()) {
-      const { kind, pubkey } = group[0];
-      const ds = [...new Set(group.map((r) => r.identifier))];
-      jobs.push(
-        query({ kinds: [kind], authors: [pubkey], '#d': ds, limit: ds.length * 3 }).then(
-          (events) => {
+      const byAuthor = new Map<string, Extract<EmbedRef, { type: 'address' }>[]>();
+      for (const r of refs) {
+        if (r.type !== 'address') continue;
+        const k = `${r.kind}:${r.pubkey}`;
+        byAuthor.set(k, [...(byAuthor.get(k) ?? []), r]);
+      }
+      const jobs: Promise<void>[] = [];
+      if (eventRefs.length > 0) {
+        const ids = [...new Set(eventRefs.map((r) => r.id))];
+        jobs.push(
+          query({ ids, limit: ids.length }).then(async (events) => {
             for (const e of events) {
-              const k = `a:${kind}:${pubkey}:${dTag(e)}`;
-              if (
-                e.kind === kind &&
-                e.pubkey === pubkey &&
-                ds.includes(dTag(e)) &&
-                newer(e, found.get(k)) &&
-                hasValidSignature(e)
-              )
-                found.set(k, e);
+              await scheduler.maybeYield();
+              if (ids.includes(e.id) && hasValidSignature(e)) found.set(`e:${e.id}`, e);
             }
-          },
-        ),
-      );
+            deliverOrdinary((ref) => ref.type === 'event');
+          }),
+        );
+      }
+      for (const group of byAuthor.values()) {
+        const { kind, pubkey } = group[0];
+        const ds = [...new Set(group.map((r) => r.identifier))];
+        jobs.push(
+          query({ kinds: [kind], authors: [pubkey], '#d': ds, limit: ds.length * 3 }).then(
+            async (events) => {
+              for (const e of events) {
+                await scheduler.maybeYield();
+                const k = `a:${kind}:${pubkey}:${dTag(e)}`;
+                if (
+                  e.kind === kind &&
+                  e.pubkey === pubkey &&
+                  ds.includes(dTag(e)) &&
+                  newer(e, found.get(k)) &&
+                  hasValidSignature(e)
+                )
+                  found.set(k, e);
+              }
+              deliverOrdinary(
+                (ref) => ref.type === 'address' && ref.kind === kind && ref.pubkey === pubkey,
+              );
+            },
+          ),
+        );
+      }
+      await Promise.all(jobs);
     }
-    await Promise.all(jobs);
+    const listings = [
+      ...new Map(
+        [...found.values()].filter((e) => e.kind === PRODUCT_KIND).map((e) => [e.id, e]),
+      ).values(),
+    ];
+    let products: Awaited<ReturnType<typeof reconcileEmbedProducts>>;
+    try {
+      products = await reconcileEmbedProducts(listings, relays, TIMEOUT_MS);
+    } catch {
+      // Keep the previous best-effort fallback on transport failure.
+      products = new Map(listings.map((event) => [event.id, parseMarketListing(event)]));
+    }
+    for (const [key, item] of batch) {
+      const event = found.get(key) ?? null;
+      const product = event?.kind === PRODUCT_KIND ? (products.get(event.id) ?? null) : undefined;
+      const result: EmbedResult =
+        event?.kind === PRODUCT_KIND
+          ? { event: product?.listing?.event ?? event, product }
+          : { event };
+      deliver(key, item, result);
+    }
+  } finally {
+    scheduler.dispose();
+    // Completed subscriptions mark their sockets idle. Preserve any relay
+    // still serving another reader; remove idle hint sockets and bookkeeping.
+    pruneIdleRelays();
   }
-  await Promise.all(
-    batch.map(async ([key, item]) => {
-      const result = await withProduct(found.get(key) ?? null, relays);
-      remember(key, result);
-      inFlight.delete(key);
-      item.resolve(result);
-    }),
-  );
 }
 
 /** Test hook — drop all cached / queued state. */
