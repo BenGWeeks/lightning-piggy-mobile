@@ -110,9 +110,18 @@ flow() { # file [KEY=VALUE ...] — one Maestro run under maestro.lock
     (cd "$OUT/screenshots" && flock -w 3600 "$LOCK_DIR/maestro.lock" \
       maestro --device "$DEVICE" test --debug-output "$OUT/logs/maestro-$name" "${args[@]}" "$f") \
       2>&1 | redact >"$OUT/logs/$name.log"
-    # Retry once when Maestro's on-device driver dropped (not a test result).
-    grep -qE 'StatusRuntimeException: UNAVAILABLE|127\.0\.0\.1:7001' "$OUT/logs/$name.log" || break
-    say "maestro driver unavailable — retrying $name"
+    # Retry once when Maestro's driver dropped, or when it couldn't see the
+    # device: an *offline* adb transport on another lane (e.g. a dropped hulk
+    # tunnel) breaks Maestro's device discovery; `adb reconnect offline` clears
+    # it without touching live devices. Neither is a test result.
+    if grep -q 'was requested, but it is not connected' "$OUT/logs/$name.log"; then
+      say "maestro couldn't see $DEVICE (offline adb transport?) — reconnecting and retrying $name"
+      adb reconnect offline >/dev/null 2>&1
+    elif grep -qE 'StatusRuntimeException: UNAVAILABLE|127\.0\.0\.1:7001' "$OUT/logs/$name.log"; then
+      say "maestro driver unavailable — retrying $name"
+    else
+      break
+    fi
     rm -rf "$OUT/logs/maestro-$name"
     sleep 5
   done
