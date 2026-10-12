@@ -155,6 +155,15 @@ export class MarmotDeviceTracker {
     return this.opts.groups().length;
   }
 
+  /** Every loaded group's id and epoch: changes only on a commit somewhere
+   * (or a group appearing / going), never for an ordinary message. */
+  epochsKey(): string {
+    return this.opts
+      .groups()
+      .map((g) => `${g.idStr}:${g.state.groupContext.epoch}`)
+      .join();
+  }
+
   /** The chat's current epoch; null if it isn't loaded. */
   epochOf(idStr: string): number | null {
     const g = this.group(idStr);

@@ -96,17 +96,20 @@ export function useMarmotChatDevices(
         // Re-read only when a chat appears (a 1:1's newest group can change)
         // or this chat's epoch moves. Every message also fires "groups
         // changed" (the secret tree moves); those cost two cheap reads.
-        let last: { groups: number; chatId: string | null; epoch: number | null } | null = null;
+        // Re-read only when it could have changed: this chat's epoch moved
+        // (a commit) or a chat appeared — and, while there's no chat yet,
+        // when any group's epoch moved (a new 1:1 becomes findable once its
+        // invite commit lands). Every message also fires "groups changed"
+        // (the secret tree moves); those cost a couple of cheap reads.
+        let last: { chatId: string | null; key: string } | null = null;
+        const keyFor = (chatId: string | null) =>
+          chatId
+            ? `${session.devices.groupCount()}|${session.devices.epochOf(chatId)}`
+            : session.devices.epochsKey();
         const update = () => {
-          const groups = session.devices.groupCount();
-          if (
-            last?.groups === groups &&
-            (last.chatId === null || session.devices.epochOf(last.chatId) === last.epoch)
-          ) {
-            return;
-          }
+          if (last && keyFor(last.chatId) === last.key) return;
           const chatId = chatIdFor(session, { groupId, peer });
-          last = { groups, chatId, epoch: chatId ? session.devices.epochOf(chatId) : null };
+          last = { chatId, key: keyFor(chatId) };
           // Same epoch → the tracker hands back the same Map: no re-render.
           const counts = chatId ? session.devices.counts(chatId) : null;
           setState((prev) =>

@@ -164,6 +164,19 @@ describe('MarmotDeviceTracker', () => {
     expect(tracker.groupCount()).toBe(1);
   });
 
+  it('epochsKey moves only when some group commits or a group appears', () => {
+    const t = setup();
+    t.groups.set('g1', group('g1', [{ pubkey: me, key: 1 }], 1));
+    const tracker = t.make();
+    const k1 = tracker.epochsKey();
+    expect(tracker.epochsKey()).toBe(k1);
+    t.groups.set('g2', group('g2', [{ pubkey: me, key: 3 }], 0));
+    const k2 = tracker.epochsKey();
+    expect(k2).not.toBe(k1);
+    t.groups.set('g1', group('g1', [{ pubkey: me, key: 1 }], 2));
+    expect(tracker.epochsKey()).not.toBe(k2);
+  });
+
   it(`keeps at most ${MAX_DEVICE_NOTICES} notices per chat`, async () => {
     const t = setup();
     const tracker = t.make();
