@@ -55,7 +55,17 @@ export class Kind4RetryStore {
     return `dm-kind4-exhausted:${this.owner}`;
   }
   load(): Promise<void> {
-    return (this.loaded ??= (async () => {
+    // Don't cache a rejected load: a transient AsyncStorage failure must not
+    // poison every later load(), so the next call retries the read.
+    this.loaded ??= this.readSnapshot().catch((error: unknown) => {
+      this.loaded = undefined;
+      throw error;
+    });
+    return this.loaded;
+  }
+
+  private readSnapshot(): Promise<void> {
+    return (async () => {
       const [raw, legacyExhaustedRaw] = await Promise.all([
         AsyncStorage.getItem(this.key),
         AsyncStorage.getItem(this.exhaustedKey),
@@ -118,7 +128,7 @@ export class Kind4RetryStore {
       } catch {
         /* Ignore malformed metadata. */
       }
-    })());
+    })();
   }
   /** A refresh owns an isolated proposal; dropping it rolls back all metadata. */
   beginPass() {

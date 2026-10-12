@@ -339,3 +339,11 @@ it('shares the committed cursor with other readers and uses legacy keys only bef
   );
   expect(await loadKind4ReplayCursor('owner', 999)).toBe(150);
 });
+
+test('a failed storage read is not cached; the next load retries', async () => {
+  const getItem = jest.spyOn(AsyncStorage, 'getItem').mockRejectedValueOnce(new Error('io'));
+  const store = new Kind4RetryStore('owner');
+  await expect(store.load()).rejects.toThrow('io');
+  await expect(store.load()).resolves.toBeUndefined();
+  getItem.mockRestore();
+});
