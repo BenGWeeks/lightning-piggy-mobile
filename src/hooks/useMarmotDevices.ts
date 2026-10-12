@@ -102,8 +102,11 @@ export function useMarmotChatDevices(
         // invite commit lands). Every message also fires "groups changed"
         // (the secret tree moves); those cost a couple of cheap reads.
         let last: { chatId: string | null; key: string } | null = null;
+        // A 1:1 can be replaced by a newer DM group, which becomes findable
+        // only after its invite commit — so a peer chat watches every group's
+        // epoch; an app group just its own.
         const keyFor = (chatId: string | null) =>
-          chatId
+          chatId && !peer
             ? `${session.devices.groupCount()}|${session.devices.epochOf(chatId)}`
             : session.devices.epochsKey();
         const update = () => {
@@ -141,6 +144,8 @@ export function useMarmotDeviceDetails(
   const [devices, setDevices] = useState<{ chatId: string; view: GroupDevices } | null>(null);
   const bind = useCallback(
     (session: MarmotSession) => {
+      // A new session / chat / opening never shows the previous one's list.
+      setDevices(null);
       if (!enabled || !chatId) return;
       let live = true;
       let latest = 0;
@@ -152,7 +157,8 @@ export function useMarmotDeviceDetails(
           .devices(chatId)
           .then((view) => {
             // Only the newest read counts: an older, slower one is stale.
-            if (live && request === latest && view) setDevices({ chatId, view });
+            // Null = the chat is gone (left, unloaded): stop showing it.
+            if (live && request === latest) setDevices(view ? { chatId, view } : null);
           })
           .catch(() => undefined);
       };

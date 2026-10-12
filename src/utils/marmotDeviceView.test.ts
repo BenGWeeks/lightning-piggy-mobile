@@ -85,7 +85,7 @@ describe('readableOn', () => {
       ['me', [device({ isOwn: true }), device()]],
       ['little', [device(), device(), device()]],
     ]);
-    expect(readableOn(people, 'ME')).toEqual({
+    expect(readableOn(people, 'ME', 1_000)).toEqual({
       total: 5,
       people: [
         { pubkey: 'little', count: 3, isSelf: false },
@@ -107,8 +107,16 @@ describe('readableOn', () => {
         { pubkey: 'me', count: 1, isSelf: true },
       ],
     });
-    // Unknown time: everyone in the chat now.
-    expect(readableOn(people, 'me').total).toBe(4);
+  });
+
+  it('says nothing without a time, or if someone lost a device since', () => {
+    const people = new Map([['me', [device({ isOwn: true })]]]);
+    expect(readableOn(people, 'me', undefined)).toBeNull();
+    // A removed device isn't in today's tree, so it can't be counted.
+    expect(readableOn(people, 'me', 1_000, new Map([['little', 1_500]]))).toBeNull();
+    expect(readableOn(people, 'me', 1_000, new Map([['little', 950]]))).toBeNull();
+    // Long before the message: today's devices are the ones it was sent to.
+    expect(readableOn(people, 'me', 1_000, new Map([['little', 100]]))?.total).toBe(1);
   });
 
   it('drops a person none of whose devices could read it', () => {
@@ -116,11 +124,11 @@ describe('readableOn', () => {
       ['me', [device({ isOwn: true })]],
       ['late', [device({ seenAt: 9_999 })]],
     ]);
-    expect(readableOn(people, 'me', 1_000).people.map((p) => p.pubkey)).toEqual(['me']);
+    expect(readableOn(people, 'me', 1_000)?.people.map((p) => p.pubkey)).toEqual(['me']);
   });
 
   it('handles a single-device chat', () => {
-    expect(readableOn(new Map([['me', [device({ isOwn: true })]]]), 'me').total).toBe(1);
+    expect(readableOn(new Map([['me', [device({ isOwn: true })]]]), 'me', 1_000)?.total).toBe(1);
   });
 });
 

@@ -69,18 +69,28 @@ export interface ReadableOn {
 }
 
 /**
- * The devices that can read a message: everyone's devices in the chat now,
- * minus those added (clearly) after it was sent — MLS gives a new device no
- * access to earlier epochs.
+ * The devices that can read one of OUR messages sent from this phone:
+ * everyone's devices in the chat now, minus those added after it was sent
+ * (MLS gives a new device no access to earlier epochs). Both times come from
+ * this phone's clock and its own processing order, so they compare reliably
+ * — callers must not use this for messages from elsewhere.
+ *
+ * Returns null when it can't be told: no time, or someone lost a device
+ * since (a removed device isn't in today's tree, so it can't be counted).
  */
 export function readableOn(
   people: ReadonlyMap<string, readonly DeviceInfo[]>,
   selfPubkey: string | null | undefined,
-  sentAt?: number,
-): ReadableOn {
+  sentAt: number | undefined,
+  removedAt: ReadonlyMap<string, number> = new Map(),
+): ReadableOn | null {
+  if (sentAt === undefined) return null;
+  for (const at of removedAt.values()) {
+    if (at + DEVICE_TIME_SLACK_SECS >= sentAt) return null;
+  }
   const self = selfPubkey?.toLowerCase();
   const couldRead = (d: DeviceInfo) =>
-    sentAt === undefined || d.seenAt === null || d.seenAt <= sentAt + DEVICE_TIME_SLACK_SECS;
+    d.seenAt === null || d.seenAt <= sentAt + DEVICE_TIME_SLACK_SECS;
   const rows: ReadableOn['people'] = [];
   let mine: ReadableOn['people'][number] | null = null;
   let total = 0;

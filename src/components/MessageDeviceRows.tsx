@@ -49,7 +49,13 @@ const MessageDeviceRows: React.FC<Props> = ({ source, fromMe, sentHere, styles }
       : f.kind === 'app'
         ? (f.name ?? t('chatDevices.unknownApp'))
         : t('chatDevices.oneOfDevices', { count: f.count });
-  const readable = fromMe ? readableOn(view.people, source.selfPubkey, source.sentAt) : null;
+  // Our message sent from THIS phone (a tracked send, or we have only this
+  // device here): its time and the device changes are on one clock.
+  const mine = view.people.get(source.selfPubkey.toLowerCase()) ?? [];
+  const fromThisPhone = fromMe && (sentHere || (mine.length === 1 && mine[0].isOwn));
+  const readable = fromThisPhone
+    ? readableOn(view.people, source.selfPubkey, source.sentAt, view.removedAt)
+    : null;
   const breakdown = readable?.people
     .map((p) =>
       t('chatDevices.readableOnPerson', {
