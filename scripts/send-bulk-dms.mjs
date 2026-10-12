@@ -33,7 +33,9 @@ let ok = 0;
 let fail = 0;
 const startedAt = Date.now();
 
-console.log(`Seeding ${COUNT} NIP-17 wraps  LITTLE → BIG(${recipientPk.slice(0, 10)}…)  on ${relays.length} relays, conc=${CONC}`);
+console.log(
+  `Seeding ${COUNT} NIP-17 wraps  LITTLE → BIG(${recipientPk.slice(0, 10)}…)  on ${relays.length} relays, conc=${CONC}`,
+);
 
 for (let base = 0; base < COUNT; base += CONC) {
   const batch = [];
@@ -51,11 +53,15 @@ for (let base = 0; base < COUNT; base += CONC) {
   }
   await Promise.all(batch);
   if ((base + CONC) % 50 === 0 || base + CONC >= COUNT) {
-    console.log(`  ${Math.min(base + CONC, COUNT)}/${COUNT}  (ok=${ok} fail=${fail}, ${((Date.now() - startedAt) / 1000).toFixed(0)}s)`);
+    console.log(
+      `  ${Math.min(base + CONC, COUNT)}/${COUNT}  (ok=${ok} fail=${fail}, ${((Date.now() - startedAt) / 1000).toFixed(0)}s)`,
+    );
   }
   await new Promise((r) => setTimeout(r, DELAY_MS));
 }
 
-console.log(`done: ${ok} wraps accepted by ≥1 relay, ${fail} failed, in ${((Date.now() - startedAt) / 1000).toFixed(0)}s`);
+console.log(
+  `done: ${ok} wraps accepted by ≥1 relay, ${fail} failed, in ${((Date.now() - startedAt) / 1000).toFixed(0)}s`,
+);
 pool.close(relays);
 process.exit(0);

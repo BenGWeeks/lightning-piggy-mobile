@@ -17,6 +17,7 @@ The KMP artifact is **not** built from the `rust-nostr/nostr` repo directly. It 
 KMP build pipeline (`.github/workflows/publish-kmp.yml`): builds `libnostr_sdk_ffi.so` per-target, runs `gobley-uniffi-bindgen` to emit Kotlin, assembles the AAR, publishes to Maven Central with GPG signing. The published AAR (`nostr-sdk-kmp-android-0.44.3.aar`, 17 MB) contains `classes.jar` + `jni/{arm64-v8a,armeabi-v7a,x86,x86_64}/libnostr_sdk_ffi.so` — i.e. the Rust is compiled to native `.so` and JNA-bridged, exactly as expected.
 
 FFI wrappers are thin pass-throughs (no re-implementation):
+
 - `src/protocol/nips/nip44.rs` → calls `nostr::nips::nip44::{encrypt,decrypt}` directly.
 - `src/protocol/nips/nip59.rs` → `UnwrappedGift::from_gift_wrap` delegates to `nip59::UnwrappedGift::from_gift_wrap`.
 - `src/protocol/event/mod.rs:77` `verify()` → `self.inner.verify()`.
@@ -27,21 +28,22 @@ FFI wrappers are thin pass-throughs (no re-implementation):
 
 From `nostr-sdk-ffi` `Cargo.lock`, the crates on the NIP-44 / schnorr / NIP-59 path:
 
-| Crate | Version | Source | Role |
-|---|---|---|---|
-| `secp256k1` | 0.29.1 | crates.io | ECDH + BIP-340 schnorr (bitcoin-core C bindings) |
-| `secp256k1-sys` | 0.10.1 | crates.io | libsecp256k1 C bindings |
-| `chacha20` | 0.9.1 | crates.io (RustCrypto) | NIP-44 v2 stream cipher |
-| `chacha20poly1305` | 0.10.1 | crates.io (RustCrypto) | (pulled by `nostr`; not on the NIP-44 v2 path — v2 uses raw `chacha20` + manual HMAC) |
-| `hmac` | 0.12.1 | crates.io (RustCrypto) | (transitive; nip44 actually uses `bitcoin_hashes::hmac`) |
-| `sha2` | 0.10.8 | crates.io (RustCrypto) | SHA-256 |
-| `bitcoin_hashes` | 0.14.0 | crates.io | SHA-256 + HMAC engine used directly by nip44/hkdf |
-| `aes` | 0.8.4 | crates.io | NIP-04 (AES-CBC) |
-| `cbc` | 0.1.2 | crates.io | NIP-04 |
-| `base64` | 0.22.1 | crates.io | NIP-44 payload encoding |
-| `subtle` | 2.6.1 | crates.io | present but **NOT used** by nip44 (pulled by dalek/rustls/tor only) |
+| Crate              | Version | Source                 | Role                                                                                  |
+| ------------------ | ------- | ---------------------- | ------------------------------------------------------------------------------------- |
+| `secp256k1`        | 0.29.1  | crates.io              | ECDH + BIP-340 schnorr (bitcoin-core C bindings)                                      |
+| `secp256k1-sys`    | 0.10.1  | crates.io              | libsecp256k1 C bindings                                                               |
+| `chacha20`         | 0.9.1   | crates.io (RustCrypto) | NIP-44 v2 stream cipher                                                               |
+| `chacha20poly1305` | 0.10.1  | crates.io (RustCrypto) | (pulled by `nostr`; not on the NIP-44 v2 path — v2 uses raw `chacha20` + manual HMAC) |
+| `hmac`             | 0.12.1  | crates.io (RustCrypto) | (transitive; nip44 actually uses `bitcoin_hashes::hmac`)                              |
+| `sha2`             | 0.10.8  | crates.io (RustCrypto) | SHA-256                                                                               |
+| `bitcoin_hashes`   | 0.14.0  | crates.io              | SHA-256 + HMAC engine used directly by nip44/hkdf                                     |
+| `aes`              | 0.8.4   | crates.io              | NIP-04 (AES-CBC)                                                                      |
+| `cbc`              | 0.1.2   | crates.io              | NIP-04                                                                                |
+| `base64`           | 0.22.1  | crates.io              | NIP-44 payload encoding                                                               |
+| `subtle`           | 2.6.1   | crates.io              | present but **NOT used** by nip44 (pulled by dalek/rustls/tor only)                   |
 
 **Unusual sources — one git dependency:**
+
 - `bip39` 2.1.0 — `git+https://github.com/yukibtc/rust-bip39?branch=v2.1.0+hashes-v0.14`. This is a maintainer fork of `rust-bip39`, forked only to bump its `bitcoin_hashes` to 0.14 for version alignment. It is **not** on the encrypt/sign/unwrap path (BIP-39 = seed-phrase mnemonics). Low concern, but it is a non-crates.io dependency owned by the same maintainer — worth noting.
 
 All other crypto crates are crates.io releases, no yanked versions on the path, no forks of the cipher/curve crates.
@@ -79,6 +81,7 @@ No red flags.
 ## 4. NIP-59 gift-wrap unwrap (M2 path) — `src/nips/nip59.rs`
 
 `UnwrappedGift::from_gift_wrap_with_ctx` (`nip59.rs:89`):
+
 1. Kind must be `GiftWrap` else `NotGiftWrap` (`:99`).
 2. NIP-44-decrypt the wrap content → parse **seal**, then **`seal.verify_with_ctx(secp)?`** — verifies the seal's schnorr signature against the seal's own pubkey (`:108`). (The outer wrap is signed by a throwaway ephemeral key and is intentionally not authenticated against any sender — correct expectation.)
 3. NIP-44-decrypt the seal content → parse **rumor** (`UnsignedEvent`).
