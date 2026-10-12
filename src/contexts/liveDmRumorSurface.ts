@@ -119,7 +119,7 @@ export function createLiveRumorSurfacer(
               threadId: routed.group.id,
               title: routed.group.name || 'New group message',
               body: routed.message.text,
-              data: { groupId: routed.group.id },
+              data: { groupId: routed.group.id, senderPubkey: routed.message.senderPubkey },
             }),
           );
         else markWrapHandled(wrapId); // alerted already

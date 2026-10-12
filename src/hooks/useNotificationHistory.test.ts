@@ -10,9 +10,14 @@ import { NOTIFICATION_HISTORY_KEY_BASE } from '../services/notificationHistory';
 
 const PK = 'a'.repeat(64);
 let mockPubkey = PK;
+let mockOnStored: (owner: string) => void = () => {};
 jest.mock('../contexts/NostrContext', () => ({ useNostr: () => ({ pubkey: mockPubkey }) }));
 jest.mock('../services/dmDb', () => ({
   getConversationForEvent: jest.fn().mockResolvedValue(null),
+  subscribeDmStorage: jest.fn((listener: (owner: string) => void) => {
+    mockOnStored = listener;
+    return jest.fn();
+  }),
 }));
 jest.mock('../services/notificationService', () => ({ dismissNotificationsFor: jest.fn() }));
 
@@ -148,5 +153,55 @@ it('filters a contentless wrap after the DM store identifies its muted sender', 
   await waitFor(() => expect(result.current.entries).toEqual([]));
   expect(result.current.unreadCount).toBe(0);
   unmount();
+  spy.mockRestore();
+});
+
+it('re-resolves late-decrypted wraps after coalesced account-scoped storage updates', async () => {
+  const spy = jest.spyOn(AppState, 'addEventListener').mockReturnValue({ remove: jest.fn() });
+  await AsyncStorage.clear();
+  mockPubkey = PK;
+  const peer = 'd'.repeat(64);
+  await toggleMutedSender(PK, peer);
+  (getConversationForEvent as jest.Mock).mockResolvedValue(null);
+  await recordNotification(PK, {
+    id: 'late-wrap',
+    kind: 'dm',
+    title: 'Encrypted message',
+    body: '',
+    data: { wrapId: 'late-wrap-id' },
+  });
+  const { result, unmount } = renderHook(() => useNotificationHistory());
+  await waitFor(() => expect(result.current.unreadCount).toBe(1));
+  const onStored = mockOnStored;
+  (getConversationForEvent as jest.Mock).mockClear().mockResolvedValue({
+    conversation: peer,
+    wireKind: 14,
+    fromMe: false,
+  });
+  jest.useFakeTimers();
+  act(() => {
+    onStored('another-account');
+    jest.advanceTimersByTime(100);
+  });
+  expect(getConversationForEvent).not.toHaveBeenCalled();
+  act(() => {
+    for (let i = 0; i < 20; i++) onStored(PK);
+    jest.advanceTimersByTime(100);
+  });
+  jest.useRealTimers();
+  await waitFor(() => expect(result.current.unreadCount).toBe(0));
+  expect(result.current.entries).toEqual([]);
+  expect(getConversationForEvent).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    await toggleMutedSender(PK, peer);
+  });
+  await waitFor(() => expect(result.current.unreadCount).toBe(1));
+  expect(result.current.entries[0].data.conversationPubkey).toBe(peer);
+  jest.useFakeTimers();
+  act(() => onStored(PK));
+  unmount();
+  act(() => jest.advanceTimersByTime(100));
+  jest.useRealTimers();
+  expect(getConversationForEvent).toHaveBeenCalledTimes(1);
   spy.mockRestore();
 });
