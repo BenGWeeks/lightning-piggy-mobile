@@ -2427,7 +2427,9 @@
       "loading": "Angebote deiner Freunde werden geladen…",
       "updating": "Wird aktualisiert…",
       "incomplete": "Manche Angebote konnten nicht geladen werden. Versuche zu aktualisieren.",
+      "partialToast": "Einige Verkäufer haben nicht geantwortet. Zum Aktualisieren nach unten ziehen.",
       "loaded": "Live-Angebote deiner Freunde",
+      "loadedPreferred": "Live-Angebote der bevorzugten Verkäufer von Lightning Piggy",
       "refresh": "Aktualisieren",
       "openListing": "Angebot öffnen",
       "contactSeller": "Dem Verkäufer schreiben"

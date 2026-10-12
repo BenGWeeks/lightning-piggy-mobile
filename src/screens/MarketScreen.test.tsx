@@ -1,4 +1,5 @@
 import React from 'react';
+import { FlatList } from 'react-native';
 import { MARKET_PRODUCTS } from '../data/marketProducts';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import MarketScreen from './MarketScreen';
@@ -32,6 +33,17 @@ const mockPreferencesHook = function useMockPreferences() {
 jest.mock('../contexts/ThemeContext', () => ({ useThemeColors: () => ({}) }));
 jest.mock('../contexts/LocaleContext', () => ({ useTranslation: () => (key: string) => key }));
 jest.mock('../components/MarketProductCard', () => () => null);
+jest.mock('../hooks/usePreferredMarketListings', () => ({
+  usePreferredMarketListings: () => ({
+    products: mockLiveProducts.length
+      ? mockLiveProducts
+      : jest.requireActual('../data/marketProducts').MARKET_PRODUCTS,
+    loading: false,
+    completed: true,
+    incomplete: false,
+    refresh: jest.fn(),
+  }),
+}));
 jest.mock('../hooks/useMarketListings', () => ({
   useMarketListings: (enabled: boolean) => {
     mockLiveEnabled(enabled);
@@ -164,4 +176,26 @@ it('preserves all restored WoT filters before the first completed current-scope 
   expect(mockUpdate).toHaveBeenCalledWith(
     expect.objectContaining({ merchant: null, country: null, currency: null }),
   );
+});
+
+it('shows live preferred listings rather than the bundled catalogue', () => {
+  mockLiveProducts = [
+    { ...MARKET_PRODUCTS[0], id: 'live-preferred', title: 'Live preferred item' },
+  ];
+  const screen = render(<MarketScreen navigation={navigation} />);
+  const list = screen.UNSAFE_getByType(FlatList);
+  expect(list.props.data.map((product: { id: string }) => product.id)).toEqual(['live-preferred']);
+});
+
+it('updates the loaded label when switching between preferred sellers and friends', () => {
+  mockLoading = false;
+  const screen = render(<MarketScreen navigation={navigation} />);
+  expect(screen.getByTestId('market-live-status')).toHaveTextContent('market.live.loadedPreferred');
+  fireEvent.press(screen.getByTestId('market-filter-button'));
+  fireEvent.press(screen.getByTestId('market-filter-sellers-friends'));
+  expect(screen.getByTestId('market-live-status')).toHaveTextContent(/^market\.live\.loaded$/);
+  fireEvent.press(screen.getByTestId('market-filter-done'));
+  act(() => jest.runOnlyPendingTimers());
+  fireEvent.press(screen.getByTestId('market-scope-chip-clear'));
+  expect(screen.getByTestId('market-live-status')).toHaveTextContent('market.live.loadedPreferred');
 });

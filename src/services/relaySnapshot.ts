@@ -20,6 +20,8 @@ import { pool as sharedPool } from './nostrPool';
 export interface RelaySnapshotOptions {
   urls: readonly string[];
   filters: readonly Filter[];
+  /** Maximum active filter subscriptions per relay. */
+  maxConcurrentFilters?: number;
   signal: AbortSignal;
   /** Absolute epoch-ms deadline shared across chained snapshots. */
   deadline: number;
@@ -49,6 +51,7 @@ export interface RelaySnapshotResult {
 
 export function collectRelaySnapshot(opts: RelaySnapshotOptions): Promise<RelaySnapshotResult> {
   const { urls, filters, signal, deadline, graceMs, onEvent, relayPool = sharedPool } = opts;
+  const concurrency = Math.max(1, Math.floor(opts.maxConcurrentFilters ?? filters.length));
   const remaining = deadline - Date.now();
   if (signal.aborted || remaining <= 0 || urls.length === 0) {
     return Promise.resolve({ answered: [], responded: [], truncated: false, truncatedSince: null });
@@ -71,7 +74,7 @@ export function collectRelaySnapshot(opts: RelaySnapshotOptions): Promise<RelayS
     let graceTimer: ReturnType<typeof setTimeout> | null = null;
     const answered: string[] = [];
     const heard = new Set<string>();
-    const subscriptions: { close: () => void }[] = [];
+    const subscriptions = new Set<{ close: () => void }>();
 
     const finish = () => {
       if (finished) return;
@@ -109,44 +112,61 @@ export function collectRelaySnapshot(opts: RelaySnapshotOptions): Promise<RelayS
           if (finished) return;
           let pendingFilters = filters.length;
           let failed = false;
-          for (const filter of filters) {
-            let received = 0;
-            let oldest = Infinity;
-            let flagged = false;
-            let done = false;
-            const filterDone = (ok: boolean) => {
-              if (done) return;
-              done = true;
-              if (!ok) failed = true;
-              if (--pendingFilters === 0) relaySettled(url, !failed);
-            };
-            const sub = relay.subscribe([filter], {
-              // Keep the relay's own EOSE timeout past our deadline so a
-              // timeout can never masquerade as a real EOSE.
-              eoseTimeout: remaining * 2,
-              receivedEvent: () => {
-                heard.add(url);
-                // Count everything the relay sends, duplicates included: the
-                // relay's `limit` counts them too, so counting after dedup
-                // would make a cut-off reply look complete.
-                if (filter.limit !== undefined && ++received >= filter.limit && !flagged) {
-                  flagged = true;
-                  truncated = true;
-                  truncatedOldest.push(() => (Number.isFinite(oldest) ? oldest : Infinity));
-                }
-              },
-              onevent: (event) => {
-                if (event.created_at < oldest) oldest = event.created_at;
-                if (!finished) onEvent(event);
-              },
-              oneose: () => {
-                heard.add(url);
-                filterDone(true);
-              },
-              onclose: () => filterDone(false),
-            });
-            subscriptions.push(sub);
-          }
+          let nextFilter = 0;
+          let active = 0;
+          const pump = () => {
+            while (!finished && active < concurrency && nextFilter < filters.length) {
+              const filter = filters[nextFilter++];
+              active++;
+              let received = 0;
+              let oldest = Infinity;
+              let flagged = false;
+              let done = false;
+              const filterDone = (ok: boolean) => {
+                if (done) return;
+                done = true;
+                if (!ok) failed = true;
+                // Close answered subscriptions before opening the next chunk.
+                // Defer so even synchronous callbacks have an assigned sub.
+                void Promise.resolve().then(() => {
+                  if (finished) return;
+                  subscriptions.delete(sub);
+                  sub.close();
+                  active--;
+                  if (--pendingFilters === 0) relaySettled(url, !failed);
+                  else pump();
+                });
+              };
+              const sub = relay.subscribe([filter], {
+                // Keep the relay's own EOSE timeout past our deadline so a
+                // timeout can never masquerade as a real EOSE.
+                eoseTimeout: remaining * 2,
+                receivedEvent: () => {
+                  if (finished || done) return;
+                  heard.add(url);
+                  // Count everything the relay sends, duplicates included: the
+                  // relay's `limit` counts them too, so counting after dedup
+                  // would make a cut-off reply look complete.
+                  if (filter.limit !== undefined && ++received >= filter.limit && !flagged) {
+                    flagged = true;
+                    truncated = true;
+                    truncatedOldest.push(() => (Number.isFinite(oldest) ? oldest : Infinity));
+                  }
+                },
+                onevent: (event) => {
+                  if (event.created_at < oldest) oldest = event.created_at;
+                  if (!finished && !done) onEvent(event);
+                },
+                oneose: () => {
+                  heard.add(url);
+                  filterDone(true);
+                },
+                onclose: () => filterDone(false),
+              });
+              subscriptions.add(sub);
+            }
+          };
+          pump();
         })
         .catch(() => relaySettled(url, false));
     }

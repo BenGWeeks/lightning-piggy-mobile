@@ -2427,7 +2427,9 @@
       "loading": "A barátaid hirdetéseinek betöltése…",
       "updating": "Frissítés…",
       "incomplete": "Néhány hirdetést nem sikerült betölteni. Próbáld frissíteni.",
+      "partialToast": "Néhány eladó nem válaszolt. Húzd lefelé a frissítéshez.",
       "loaded": "Élő hirdetések a barátaidtól",
+      "loadedPreferred": "Élő hirdetések a Lightning Piggy ajánlott eladóitól",
       "refresh": "Frissítés",
       "openListing": "Hirdetés megnyitása",
       "contactSeller": "Üzenet az eladónak"

@@ -27,8 +27,8 @@ import { orderFeaturedFirst } from '../utils/featuredPlaces';
 import { perfPageReady } from '../utils/perfLog';
 import { courses, type Course } from '../data/learnContent';
 import MarketProductCard from '../components/MarketProductCard';
-import { MARKET_PRODUCTS, sellerOf, type MarketProduct } from '../data/marketProducts';
-import { featuredFirst } from '../utils/marketVendors';
+import { sellerOf, type MarketProduct } from '../data/marketProducts';
+import { usePreferredMarketSample } from '../hooks/usePreferredMarketListings';
 import {
   getProgress,
   LearnProgress,
@@ -448,9 +448,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     return items.slice(0, 50);
   }, [events, posLat, posLon, maxDistanceMetres]);
 
-  // Static, curated catalogue from preferred sellers (src/data/marketProducts.ts):
-  // a featured-first teaser; the full list + mode selector live behind "See all".
-  const marketProducts = useMemo(() => featuredFirst(MARKET_PRODUCTS).slice(0, 8), []);
+  const marketProducts = usePreferredMarketSample();
 
   return (
     <View style={styles.container}>

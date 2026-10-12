@@ -13,10 +13,11 @@ import MarketProductCard from '../components/MarketProductCard';
 import MarketFilterBar from '../components/MarketFilterBar';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
+import { usePreferredMarketListings } from '../hooks/usePreferredMarketListings';
 import { useMarketListings } from '../hooks/useMarketListings';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { createMarketScreenStyles } from '../styles/MarketScreen.styles';
-import { MARKET_PRODUCTS, sellerOf, type MarketProduct } from '../data/marketProducts';
+import { sellerOf, type MarketProduct } from '../data/marketProducts';
 import { featuredFirst } from '../utils/marketVendors';
 import { useMarketPreferences } from '../hooks/useMarketPreferences';
 import { validateMarketPreferences } from '../utils/marketPreferences';
@@ -53,7 +54,9 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
 
   const { ready, preferences, update } = useMarketPreferences();
   const { mode, merchant, country, currency } = preferences;
-  const live = useMarketListings(ready && mode === 'wotFriends');
+  const friends = useMarketListings(ready && mode === 'wotFriends');
+  const preferred = usePreferredMarketListings(ready && mode === 'preferred');
+  const live = mode === 'wotFriends' ? friends : preferred;
   const setMerchant = useCallback((merchant: string | null) => update({ merchant }), [update]);
   const setCountry = useCallback((country: string | null) => update({ country }), [update]);
   const setCurrency = useCallback((currency: string | null) => update({ currency }), [update]);
@@ -82,8 +85,8 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
   // Mode-scoped catalogue (preferred sellers / WoT friends), featured-first.
   // This is the set the filter options and the filtered list both derive from.
   const baseProducts = useMemo(() => {
-    return ready ? featuredFirst(mode === 'wotFriends' ? live.products : MARKET_PRODUCTS) : [];
-  }, [ready, mode, live.products]);
+    return ready ? featuredFirst(live.products) : [];
+  }, [ready, live.products]);
 
   // Filter option lists sourced from the data actually loaded (not hardcoded).
   const merchants = useMemo(() => distinctMerchants(baseProducts, sellerOf), [baseProducts]);
@@ -95,8 +98,7 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
   // one mode may not exist under the next, and a chip that no longer renders
   // can't be un-selected from its axis — the grid would just sit empty.
   useEffect(() => {
-    if (!ready || (mode === 'wotFriends' && (!live.completed || live.loading || live.incomplete)))
-      return;
+    if (!ready || !live.completed || live.loading || live.incomplete) return;
     const validated = validateMarketPreferences(preferences, { merchants, countries, currencies });
     if (
       validated.merchant !== merchant ||
@@ -177,8 +179,8 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
   );
 
   const emptyCopy =
-    mode === 'wotFriends' && ((live.loading && baseProducts.length === 0) || live.incomplete)
-      ? t(live.loading ? 'market.live.loading' : 'market.live.incomplete')
+    live.loading && baseProducts.length === 0
+      ? t('market.live.loading')
       : filterActive
         ? t('market.screen.emptyNoMatch')
         : mode === 'wotFriends'
@@ -287,10 +289,10 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
         </View>
       ) : null}
 
-      {mode === 'wotFriends' ? (
+      {
         <View style={styles.liveStatus}>
           <Text style={styles.liveStatusText} testID="market-live-status">
-            {t(marketLoadingStatus(live.loading, live.incomplete, baseProducts.length))}
+            {t(marketLoadingStatus(live.loading, live.incomplete, baseProducts.length, mode))}
           </Text>
           <TouchableOpacity
             onPress={live.refresh}
@@ -302,7 +304,7 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
             <Text style={styles.liveStatusText}>{t('market.live.refresh')}</Text>
           </TouchableOpacity>
         </View>
-      ) : null}
+      }
       <MarketFilterBar
         mode={mode}
         onSelectMode={selectMode}
@@ -323,6 +325,8 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
 
       <FlatList
         data={products}
+        refreshing={live.loading}
+        onRefresh={live.refresh}
         keyExtractor={(p) => p.id}
         numColumns={MARKET_GRID_COLUMNS}
         columnWrapperStyle={styles.gridRow}
