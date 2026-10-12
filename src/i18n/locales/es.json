@@ -2915,7 +2915,11 @@
     "nostrNetworkSubtitle": "Tus relays y el almacenamiento de fotos y notas de voz",
     "bitcoinNetworkSubtitle": "Servidor Electrum y servidor de swaps",
     "experimentalFeatures": "Funciones experimentales",
-    "encryption": "Cifrado"
+    "encryption": "Cifrado",
+    "bubbleStyle": "Estilo de las burbujas enviadas",
+    "bubbleStyleA": "A · Rosa a morado",
+    "bubbleStyleB": "B · Rosa suave",
+    "bubbleStyleC": "C · Predominio morado"
   },
   "messageSettingsScreen": {
     "title": "Mensajes",

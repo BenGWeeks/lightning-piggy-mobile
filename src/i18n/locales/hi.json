@@ -2915,7 +2915,11 @@
     "nostrNetworkSubtitle": "आपके रिले और फ़ोटो व वॉइस मैसेज स्टोरेज",
     "bitcoinNetworkSubtitle": "Electrum सर्वर और स्वैप सर्वर",
     "experimentalFeatures": "टेस्ट वाले फ़ीचर",
-    "encryption": "एन्क्रिप्शन"
+    "encryption": "एन्क्रिप्शन",
+    "bubbleStyle": "भेजे गए संदेशों के बबल की शैली",
+    "bubbleStyleA": "A · गुलाबी से बैंगनी",
+    "bubbleStyleB": "B · हल्का गुलाबी",
+    "bubbleStyleC": "C · मुख्यतः बैंगनी"
   },
   "messageSettingsScreen": {
     "title": "मैसेज",

@@ -45,10 +45,10 @@ export const createMessageBubbleStyles = (colors: Palette) =>
     reactionPillCount: {
       fontSize: 11,
       fontWeight: '600',
-      color: colors.textSupplementary,
+      color: colors.textBody,
     },
     reactionPillCountMine: {
-      color: colors.brandPink,
+      color: colors.textBody,
     },
     senderLabel: {
       fontSize: 11,
@@ -70,13 +70,9 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       borderBottomLeftRadius: 4,
     },
     bubbleMe: {
-      backgroundColor: colors.brandPink,
+      overflow: 'hidden',
+      backgroundColor: colors.outgoingBubble.gradient[0],
       borderBottomRightRadius: 4,
-    },
-    // Legacy NIP-04 (kind 4) SENT bubble — brand violet instead of the NIP-17
-    // pink so the user can tell legacy DMs apart at a glance (#856 follow-up).
-    bubbleMeNip04: {
-      backgroundColor: colors.brandPurple,
     },
     // Legacy NIP-04 RECEIVED bubble — surface bg kept (matches NIP-17), but a
     // violet left edge marks it as legacy on the incoming side too.
@@ -90,16 +86,16 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       lineHeight: 20,
     },
     bubbleTextMe: {
-      color: colors.white,
+      color: colors.outgoingBubble.foreground,
     },
     // Tappable URL span inside a received bubble (surface bg) — brand accent.
     bubbleLink: {
       color: colors.brandPink,
       textDecorationLine: 'underline',
     },
-    // …and inside a sent bubble (pink bg) — white so it stays legible.
+    // Sent links use the selected palette foreground for contrast.
     bubbleLinkMe: {
-      color: colors.white,
+      color: colors.outgoingBubble.foreground,
       textDecorationLine: 'underline',
       fontWeight: '600',
     },
@@ -115,20 +111,20 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       marginBottom: 6,
     },
     quoteBlockMe: {
-      borderLeftColor: colors.white,
-      backgroundColor: 'rgba(255,255,255,0.22)',
+      borderLeftColor: colors.outgoingBubble.foreground,
+      backgroundColor: 'rgba(0,0,0,0.08)',
     },
     quoteAuthor: {
       fontSize: 12,
       fontWeight: '700',
       color: colors.brandPink,
     },
-    quoteAuthorMe: { color: colors.white },
+    quoteAuthorMe: { color: colors.outgoingBubble.foreground },
     quoteText: {
       fontSize: 13,
       color: colors.textSupplementary,
     },
-    quoteTextMe: { color: 'rgba(255,255,255,0.9)' },
+    quoteTextMe: { color: colors.outgoingBubble.foreground },
     quoteTextMissing: { fontStyle: 'italic' },
     bubbleTime: {
       fontSize: 10,
@@ -137,7 +133,7 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       alignSelf: 'flex-end',
     },
     bubbleTimeMe: {
-      color: 'rgba(255,255,255,0.85)',
+      color: colors.outgoingBubble.foreground,
     },
     // Footer row holds the timestamp + the delivery tick (sent bubbles, #856).
     // Right-aligned to sit under the bubble tail, same edge as the bare time.
@@ -150,7 +146,7 @@ export const createMessageBubbleStyles = (colors: Palette) =>
     },
     // The time inside the footer row drops its own marginTop (the row owns it)
     // and gains a small gap before the tick. It carries no colour of its own so
-    // the composed timeStyle wins — bubbleTimeMe (white) on a sent pink bubble,
+    // the composed timeStyle wins — bubbleTimeMe on a sent gradient,
     // bubbleTime (supplementary grey) on a received surface bubble. (#864)
     bubbleFooterTime: {
       fontSize: 10,
@@ -159,18 +155,17 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       // the timestamp in the footer row (the row owns vertical spacing). (#858)
       marginTop: 0,
     },
-    // Delivery tick (#856). Ticks only ever render on a sent (pink) bubble, so
-    // they use white for contrast — green read poorly on the brand pink (#864).
+    // Delivery ticks use the same AA foreground as outgoing timestamps.
     // Glyph alone carries the meaning: single Check = delivered to ≥1 relay,
     // double CheckCheck = all relays, Clock = pending, AlertCircle = failed.
     deliveryTickDelivered: {
-      color: colors.white,
+      color: colors.outgoingBubble.foreground,
     },
     deliveryTickPending: {
-      color: 'rgba(255,255,255,0.7)',
+      color: colors.outgoingBubble.foreground,
     },
     deliveryTickFailed: {
-      color: colors.red,
+      color: colors.outgoingBubble.foreground,
     },
     invoiceCard: {
       width: 240,
@@ -181,7 +176,8 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       gap: 6,
     },
     invoiceCardMe: {
-      backgroundColor: colors.brandPink,
+      overflow: 'hidden',
+      backgroundColor: colors.outgoingBubble.gradient[0],
     },
     invoiceCardThem: {
       backgroundColor: colors.surface,
@@ -194,7 +190,7 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       letterSpacing: 0.6,
     },
     invoiceLabelMe: {
-      color: 'rgba(255,255,255,0.85)',
+      color: colors.outgoingBubble.foreground,
     },
     invoiceAmount: {
       fontSize: 20,
@@ -203,7 +199,7 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       marginTop: 2,
     },
     invoiceAmountMe: {
-      color: colors.white,
+      color: colors.outgoingBubble.foreground,
     },
     invoiceMemo: {
       fontSize: 14,
@@ -211,7 +207,7 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       marginTop: 2,
     },
     invoiceMemoMe: {
-      color: 'rgba(255,255,255,0.9)',
+      color: colors.outgoingBubble.foreground,
     },
     invoiceExpiry: {
       fontSize: 12,
@@ -219,7 +215,7 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       marginTop: 4,
     },
     invoiceExpiryMe: {
-      color: 'rgba(255,255,255,0.75)',
+      color: colors.outgoingBubble.foreground,
     },
     invoiceTagRow: {
       flexDirection: 'row',
@@ -244,7 +240,7 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       letterSpacing: 0.3,
     },
     invoiceTagUnpaid: {
-      backgroundColor: 'rgba(255,255,255,0.22)',
+      backgroundColor: 'rgba(0,0,0,0.65)',
     },
     invoiceTagUnpaidText: {
       fontSize: 11,
@@ -253,7 +249,7 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       letterSpacing: 0.3,
     },
     invoiceTagExpired: {
-      backgroundColor: 'rgba(0,0,0,0.32)',
+      backgroundColor: 'rgba(0,0,0,0.65)',
     },
     invoiceTagExpiredText: {
       fontSize: 11,
@@ -276,7 +272,7 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       fontWeight: '700',
       color: colors.white,
     },
-    // Stop-share button sits on the pink (outgoing) live-location card — it can't reuse the brand-pink invoice button (pink-on-pink), so it gets a white border + subtle translucent fill to read as a button.
+    // Stop-share controls use a foreground border over the outgoing gradient.
     liveStopButton: {
       marginTop: 8,
       flexDirection: 'row',
@@ -286,8 +282,8 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       paddingVertical: 10,
       borderRadius: 10,
       borderWidth: 1,
-      borderColor: 'rgba(255,255,255,0.7)',
-      backgroundColor: 'rgba(255,255,255,0.15)',
+      borderColor: colors.outgoingBubble.foreground,
+      backgroundColor: 'rgba(0,0,0,0.08)',
     },
     contactCard: {
       maxWidth: '85%',
@@ -305,8 +301,9 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       elevation: 1,
     },
     contactCardMe: {
-      backgroundColor: colors.brandPink,
-      borderColor: colors.brandPink,
+      overflow: 'hidden',
+      backgroundColor: colors.outgoingBubble.gradient[0],
+      borderColor: colors.outgoingBubble.gradient[0],
     },
     contactCardThem: {
       backgroundColor: colors.surface,
@@ -320,7 +317,7 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       letterSpacing: 0.6,
     },
     contactLabelMe: {
-      color: 'rgba(255,255,255,0.85)',
+      color: colors.outgoingBubble.foreground,
     },
     contactBodyRow: {
       flexDirection: 'row',
@@ -347,7 +344,7 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       color: colors.textHeader,
     },
     contactNameMe: {
-      color: colors.white,
+      color: colors.outgoingBubble.foreground,
     },
     contactLn: {
       fontSize: 13,
@@ -355,7 +352,7 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       marginTop: 2,
     },
     contactLnMe: {
-      color: 'rgba(255,255,255,0.9)',
+      color: colors.outgoingBubble.foreground,
     },
     gifCard: {
       maxWidth: '85%',
@@ -369,7 +366,8 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       elevation: 1,
     },
     gifCardMe: {
-      backgroundColor: colors.brandPink,
+      overflow: 'hidden',
+      backgroundColor: colors.outgoingBubble.gradient[0],
     },
     gifCardThem: {
       backgroundColor: colors.surface,
@@ -387,7 +385,7 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       paddingVertical: 4,
     },
     gifTimeMe: {
-      color: 'rgba(255,255,255,0.85)',
+      color: colors.outgoingBubble.foreground,
     },
     locationCard: {
       maxWidth: '85%',
@@ -402,8 +400,9 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       elevation: 1,
     },
     locationCardMe: {
-      backgroundColor: colors.brandPink,
-      borderColor: colors.brandPink,
+      overflow: 'hidden',
+      backgroundColor: colors.outgoingBubble.gradient[0],
+      borderColor: colors.outgoingBubble.gradient[0],
     },
     locationCardThem: {
       backgroundColor: colors.surface,
@@ -433,7 +432,7 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       letterSpacing: 0.6,
     },
     locationLabelMe: {
-      color: 'rgba(255,255,255,0.85)',
+      color: colors.outgoingBubble.foreground,
     },
     locationCoords: {
       fontSize: 15,
@@ -442,14 +441,14 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       marginTop: 2,
     },
     locationCoordsMe: {
-      color: colors.white,
+      color: colors.outgoingBubble.foreground,
     },
     locationAccuracy: {
       fontSize: 12,
       color: colors.textSupplementary,
     },
     locationAccuracyMe: {
-      color: 'rgba(255,255,255,0.85)',
+      color: colors.outgoingBubble.foreground,
     },
     imageBubble: {
       maxWidth: '85%',
@@ -463,7 +462,8 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       elevation: 1,
     },
     imageBubbleMe: {
-      backgroundColor: colors.brandPink,
+      overflow: 'hidden',
+      backgroundColor: colors.outgoingBubble.gradient[0],
     },
     imageBubbleThem: {
       backgroundColor: colors.surface,
@@ -481,7 +481,7 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       paddingVertical: 4,
     },
     imageBubbleTimeMe: {
-      color: 'rgba(255,255,255,0.85)',
+      color: colors.outgoingBubble.foreground,
     },
     pollCard: {
       maxWidth: '85%',
@@ -499,8 +499,9 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       elevation: 1,
     },
     pollCardMe: {
-      backgroundColor: colors.brandPink,
-      borderColor: colors.brandPink,
+      overflow: 'hidden',
+      backgroundColor: colors.outgoingBubble.gradient[0],
+      borderColor: colors.outgoingBubble.gradient[0],
     },
     pollCardThem: {
       backgroundColor: colors.surface,
@@ -519,7 +520,7 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       letterSpacing: 0.6,
     },
     pollLabelMe: {
-      color: 'rgba(255,255,255,0.85)',
+      color: colors.outgoingBubble.foreground,
     },
     pollQuestion: {
       fontSize: 16,
@@ -528,7 +529,7 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       marginTop: 2,
     },
     pollQuestionMe: {
-      color: colors.white,
+      color: colors.outgoingBubble.foreground,
     },
     pollOptionRow: {
       borderRadius: 10,
@@ -540,7 +541,7 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       minHeight: 40,
       justifyContent: 'center',
     },
-    // Outgoing (pink) card: transparent rows so brand-pink shows through and white option text stays legible (the light row background made white-on-white unreadable).
+    // Outgoing options let the gradient show through; their text uses its foreground.
     pollOptionRowMe: {
       backgroundColor: 'transparent',
       borderColor: 'rgba(255,255,255,0.45)',
@@ -549,7 +550,7 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       borderColor: colors.brandPink,
     },
     pollOptionRowMineMe: {
-      borderColor: colors.white,
+      borderColor: colors.outgoingBubble.foreground,
     },
     pollOptionFill: {
       position: 'absolute',
@@ -563,7 +564,7 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       backgroundColor: 'rgba(232, 62, 140, 0.12)',
     },
     pollOptionFillMe: {
-      backgroundColor: 'rgba(255,255,255,0.22)',
+      backgroundColor: 'rgba(0,0,0,0.08)',
     },
     pollOptionContent: {
       flexDirection: 'row',
@@ -580,7 +581,7 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       color: colors.textBody,
     },
     pollOptionTextMe: {
-      color: colors.white,
+      color: colors.outgoingBubble.foreground,
     },
     pollOptionMeta: {
       flexDirection: 'row',
@@ -595,7 +596,7 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       textAlign: 'right',
     },
     pollOptionCountMe: {
-      color: 'rgba(255,255,255,0.9)',
+      color: colors.outgoingBubble.foreground,
     },
     pollFooter: {
       fontSize: 12,
@@ -603,7 +604,7 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       marginTop: 4,
     },
     pollFooterMe: {
-      color: 'rgba(255,255,255,0.85)',
+      color: colors.outgoingBubble.foreground,
     },
     // Muted placeholder bubble for an unrenderable inner event kind. Subdued
     // surface + dashed border + italic supplementary text so it reads as a

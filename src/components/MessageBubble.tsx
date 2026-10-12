@@ -1,3 +1,5 @@
+import MessageReactionRow from './MessageReactionRow';
+import OutgoingBubbleBackground from './OutgoingBubbleBackground';
 import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, Pressable, StyleSheet } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
@@ -215,47 +217,9 @@ const MessageBubble: React.FC<Props> = ({
       </>
     ) : null;
 
-  // Reaction pill row (#205) — rendered beneath every variant by wrapping the
-  // bubble row in a column so the pills sit on the same axis as the bubble
-  // (left for incoming, right for outgoing). Null when there are no reactions,
-  // so the no-op render path stays identical to before #205.
-  const reactionEmojis = reactions ? Object.keys(reactions.byEmoji) : [];
   const ReactionRow =
-    reactionEmojis.length > 0 ? (
-      <View
-        style={[styles.reactionRow, fromMe ? styles.reactionRowRight : styles.reactionRowLeft]}
-        testID={`${testIdPrefix}-reactions-${id}`}
-      >
-        {reactionEmojis.map((emoji) => {
-          const reactors = reactions!.byEmoji[emoji];
-          const myReactionId = reactions!.myReactions[emoji] ?? null;
-          const mine = myReactionId !== null;
-          return (
-            <TouchableOpacity
-              key={emoji}
-              activeOpacity={0.7}
-              disabled={!onToggleReaction}
-              onPress={() => onToggleReaction?.(emoji, myReactionId)}
-              style={[styles.reactionPill, mine && styles.reactionPillMine]}
-              accessibilityRole="button"
-              accessibilityState={{ disabled: !onToggleReaction }}
-              accessibilityLabel={
-                mine
-                  ? t('messageBubble.reactionRemove', { emoji, count: reactors.length })
-                  : t('messageBubble.reactionAdd', { emoji, count: reactors.length })
-              }
-              testID={`${testIdPrefix}-reaction-${id}-${emoji}`}
-            >
-              <Text style={styles.reactionPillEmoji}>{emoji}</Text>
-              {reactors.length > 1 ? (
-                <Text style={[styles.reactionPillCount, mine && styles.reactionPillCountMine]}>
-                  {reactors.length}
-                </Text>
-              ) : null}
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+    reactions && Object.keys(reactions.byEmoji).length ? (
+      <MessageReactionRow {...{ reactions, fromMe, styles, testIdPrefix, id, onToggleReaction }} />
     ) : null;
 
   // Wrap a variant's bubble row in a small column so the reaction row can sit
@@ -272,9 +236,8 @@ const MessageBubble: React.FC<Props> = ({
       bubble
     );
 
-  // Legacy NIP-04 (kind 4) messages are coloured purple so the user can tell
-  // them apart from the encrypted NIP-17 (kind 14/15) pink ones at a glance
-  // (#856 follow-up). Plain text only — NIP-04 never carries gift-wrapped media.
+  // Legacy NIP-04 (kind 4) received text retains its purple edge marker.
+  // Outgoing messages share the selected bubble palette across protocols.
   const isNip04 = wireKind === 4;
 
   // Re-publish payload (#856): text or a GIF's URL; '' for cards, media and
@@ -296,9 +259,9 @@ const MessageBubble: React.FC<Props> = ({
         })
     : undefined;
 
-  // Shield-affordance tint: white on a coloured (sent) bubble, supplementary
+  // Shield-affordance tint: palette foreground on sent bubbles, supplementary
   // grey on a surface (received) one — readable on either background (#856).
-  const infoTint = fromMe ? colors.white : colors.textSupplementary;
+  const infoTint = fromMe ? colors.outgoingBubble.foreground : colors.textSupplementary;
 
   // Reusable footer (time + delivery tick) shared by every bubble variant so a
   // sent GIF / image / voice note / location / invoice all show the tick, not
@@ -330,6 +293,7 @@ const MessageBubble: React.FC<Props> = ({
           accessibilityRole="imagebutton"
           testID={`${testIdPrefix}-gif-${id}`}
         >
+          <OutgoingBubbleBackground fromMe={fromMe} />
           {BubbleHeader}
           <ExpoImage
             source={{ uri: content.url }}
@@ -406,6 +370,7 @@ const MessageBubble: React.FC<Props> = ({
           }
           testID={`${testIdPrefix}-live-location-${id}`}
         >
+          <OutgoingBubbleBackground fromMe={fromMe} />
           {BubbleHeader}
           {centreLat !== null && centreLon !== null ? (
             <View style={styles.locationMap}>
@@ -430,7 +395,7 @@ const MessageBubble: React.FC<Props> = ({
             <View style={styles.locationLabelRow}>
               <Radio
                 size={14}
-                color={fromMe ? 'rgba(255,255,255,0.85)' : colors.textSupplementary}
+                color={fromMe ? colors.outgoingBubble.foreground : colors.textSupplementary}
               />
               <Text style={[styles.locationLabel, fromMe && styles.locationLabelMe]}>
                 {titleText}
@@ -458,7 +423,9 @@ const MessageBubble: React.FC<Props> = ({
                 accessibilityLabel={t('messageBubble.stopSharingLiveLocation')}
                 testID={`${testIdPrefix}-live-location-stop-${id}`}
               >
-                <Text style={styles.invoicePayText}>{t('messageBubble.stopSharing')}</Text>
+                <Text style={[styles.invoicePayText, styles.bubbleTextMe]}>
+                  {t('messageBubble.stopSharing')}
+                </Text>
               </TouchableOpacity>
             ) : null}
             {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
@@ -620,6 +587,7 @@ const MessageBubble: React.FC<Props> = ({
           style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}
           testID={`${testIdPrefix}-secret-${id}`}
         >
+          <OutgoingBubbleBackground fromMe={fromMe} />
           {BubbleHeader}
           <Text style={[styles.invoiceLabel, fromMe && styles.invoiceLabelMe]}>
             {t('messageBubble.secretMode')}
@@ -665,6 +633,7 @@ const MessageBubble: React.FC<Props> = ({
           style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}
           testID={`${testIdPrefix}-bitcoin-${id}`}
         >
+          <OutgoingBubbleBackground fromMe={fromMe} />
           {BubbleHeader}
           <Text style={[styles.invoiceLabel, fromMe && styles.invoiceLabelMe]}>
             {fromMe ? t('messageBubble.onchainAddressSent') : t('messageBubble.onchainAddress')}
@@ -710,6 +679,7 @@ const MessageBubble: React.FC<Props> = ({
           style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}
           testID={`${testIdPrefix}-invoice-${id}`}
         >
+          <OutgoingBubbleBackground fromMe={fromMe} />
           {BubbleHeader}
           <Text style={[styles.invoiceLabel, fromMe && styles.invoiceLabelMe]}>
             {fromMe ? t('messageBubble.invoiceSent') : t('messageBubble.invoiceReceived')}
@@ -780,6 +750,7 @@ const MessageBubble: React.FC<Props> = ({
           accessibilityLabel={t('messageBubble.sharedContactA11y', { name: displayName })}
           testID={`${testIdPrefix}-contact-${id}`}
         >
+          <OutgoingBubbleBackground fromMe={fromMe} />
           {BubbleHeader}
           <Text style={[styles.contactLabel, fromMe && styles.contactLabelMe]}>
             {fromMe ? t('messageBubble.contactShared') : t('messageBubble.contact')}
@@ -840,6 +811,7 @@ const MessageBubble: React.FC<Props> = ({
           style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}
           testID={`${testIdPrefix}-lnaddr-${id}`}
         >
+          <OutgoingBubbleBackground fromMe={fromMe} />
           {BubbleHeader}
           <Text style={[styles.invoiceLabel, fromMe && styles.invoiceLabelMe]}>
             {fromMe ? t('messageBubble.addressSent') : t('messageBubble.lightningAddress')}
@@ -877,13 +849,12 @@ const MessageBubble: React.FC<Props> = ({
         style={[
           styles.bubble,
           fromMe ? styles.bubbleMe : styles.bubbleThem,
-          // NIP-04 (kind 4): purple sent bubble (vs pink NIP-17); a purple
-          // left-edge on the received surface bubble so legacy DMs are
-          // distinguishable on both sides (#856 follow-up).
-          isNip04 && (fromMe ? styles.bubbleMeNip04 : styles.bubbleThemNip04),
+          // Legacy received DMs retain their purple protocol marker.
+          !fromMe && isNip04 && styles.bubbleThemNip04,
         ]}
         testID={isNip04 ? `${testIdPrefix}-nip04-bubble-${id}` : `${testIdPrefix}-text-${id}`}
       >
+        <OutgoingBubbleBackground fromMe={fromMe} />
         {BubbleHeader}
         <LinkifiedText
           text={text}

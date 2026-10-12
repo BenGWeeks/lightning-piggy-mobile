@@ -2941,7 +2941,11 @@
     "nostrNetworkSubtitle": "Twoje przekaźniki oraz przechowywanie zdjęć i wiadomości głosowych",
     "bitcoinNetworkSubtitle": "Serwer Electrum i serwer wymiany",
     "experimentalFeatures": "Funkcje eksperymentalne",
-    "encryption": "Szyfrowanie"
+    "encryption": "Szyfrowanie",
+    "bubbleStyle": "Styl wysyłanych dymków",
+    "bubbleStyleA": "A · Od różu do fioletu",
+    "bubbleStyleB": "B · Delikatny róż",
+    "bubbleStyleC": "C · Przewaga fioletu"
   },
   "messageSettingsScreen": {
     "title": "Wiadomości",

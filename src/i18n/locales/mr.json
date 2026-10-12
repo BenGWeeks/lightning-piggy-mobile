@@ -2915,7 +2915,11 @@
     "nostrNetworkSubtitle": "तुमचे रिले आणि फोटो व व्हॉइस नोट स्टोरेज",
     "bitcoinNetworkSubtitle": "Electrum सर्व्हर आणि स्वॅप सर्व्हर",
     "experimentalFeatures": "प्रायोगिक फीचर्स",
-    "encryption": "एन्क्रिप्शन"
+    "encryption": "एन्क्रिप्शन",
+    "bubbleStyle": "पाठवलेल्या संदेशांच्या बबलची शैली",
+    "bubbleStyleA": "A · गुलाबी ते जांभळा",
+    "bubbleStyleB": "B · फिकट गुलाबी",
+    "bubbleStyleC": "C · प्रामुख्याने जांभळा"
   },
   "messageSettingsScreen": {
     "title": "मेसेज",

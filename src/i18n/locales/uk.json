@@ -2941,7 +2941,11 @@
     "nostrNetworkSubtitle": "Ваші реле та сховище фото й голосових повідомлень",
     "bitcoinNetworkSubtitle": "Сервер Electrum і сервер обміну",
     "experimentalFeatures": "Експериментальні функції",
-    "encryption": "Шифрування"
+    "encryption": "Шифрування",
+    "bubbleStyle": "Стиль вихідних повідомлень",
+    "bubbleStyleA": "A · Від рожевого до фіолетового",
+    "bubbleStyleB": "B · Ніжний рожевий",
+    "bubbleStyleC": "C · Переважно фіолетовий"
   },
   "messageSettingsScreen": {
     "title": "Повідомлення",

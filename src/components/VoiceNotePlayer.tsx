@@ -1,3 +1,4 @@
+import OutgoingBubbleBackground from './OutgoingBubbleBackground';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator, Pressable } from 'react-native';
 import { Play, Pause, AlertCircle } from 'lucide-react-native';
@@ -191,11 +192,11 @@ const VoiceNotePlayer: React.FC<Props> = ({
   }, [isPlaying, player, current, duration, encrypted, localUri, ensureLocal, source, revealPlain]);
 
   // On-bubble colours: white-on-pink for my bubbles, themed for theirs.
-  const fg = fromMe ? colors.white : colors.textBody;
-  const playBg = fromMe ? colors.white : colors.brandPink;
-  const playFg = fromMe ? colors.brandPink : colors.white;
-  const playedColor = fromMe ? colors.white : colors.brandPink;
-  const unplayedColor = fromMe ? 'rgba(255,255,255,0.45)' : colors.divider;
+  const fg = fromMe ? colors.outgoingBubble.foreground : colors.textBody;
+  const playBg = fromMe ? colors.outgoingBubble.foreground : colors.brandPink;
+  const playFg = fromMe ? colors.outgoingBubble.gradient[0] : colors.white;
+  const playedColor = fromMe ? colors.outgoingBubble.foreground : colors.brandPink;
+  const unplayedColor = fromMe ? colors.outgoingBubble.foreground + '73' : colors.divider;
 
   const timeLabel = fmtDuration(isPlaying ? current : duration);
 
@@ -206,12 +207,13 @@ const VoiceNotePlayer: React.FC<Props> = ({
         onLongPress={onLongPress}
         disabled={!onLongPress}
       >
+        <OutgoingBubbleBackground fromMe={fromMe} />
         {senderName ? <Text style={styles.senderLabel}>{senderName}</Text> : null}
         {header}
         <Text
           style={[
             styles.title,
-            { color: fromMe ? 'rgba(255,255,255,0.9)' : colors.textSupplementary },
+            { color: fromMe ? colors.outgoingBubble.foreground : colors.textSupplementary },
           ]}
         >
           {encrypted ? 'Encrypted voice note' : 'Voice note'}

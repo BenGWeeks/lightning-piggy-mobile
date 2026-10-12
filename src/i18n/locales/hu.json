@@ -2915,7 +2915,11 @@
     "nostrNetworkSubtitle": "A relay-eid és a fotó- és hangüzenet-tárhely",
     "bitcoinNetworkSubtitle": "Electrum-szerver és swap-szerver",
     "experimentalFeatures": "Kísérleti funkciók",
-    "encryption": "Titkosítás"
+    "encryption": "Titkosítás",
+    "bubbleStyle": "Elküldött üzenetbuborékok stílusa",
+    "bubbleStyleA": "A · Rózsaszínből lilába",
+    "bubbleStyleB": "B · Halvány rózsaszín",
+    "bubbleStyleC": "C · Lila hangsúly"
   },
   "messageSettingsScreen": {
     "title": "Üzenetek",
