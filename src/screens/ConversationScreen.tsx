@@ -496,6 +496,7 @@ const ConversationScreen: React.FC = () => {
     buildOnLongPress,
     buildOnToggleReaction,
   } = useConversationReactions({
+    scopeKey: `${protocol}:${pubkey}`,
     messages,
     myPubkey,
     peerPubkey: pubkey,

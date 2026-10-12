@@ -17,6 +17,11 @@ import { useConversationReactions } from './useConversationReactions';
 import type { ConversationMessageInput, Item } from '../utils/conversationItems';
 import { isOptimisticReactionId } from '../utils/reactions';
 
+jest.mock('@react-navigation/native', () => ({
+  useFocusEffect: (effect: () => void) =>
+    jest.requireActual<typeof import('react')>('react').useEffect(effect, [effect]),
+}));
+
 jest.mock('../components/BrandedAlert', () => ({
   __esModule: true,
   Alert: { alert: jest.fn() },
@@ -325,4 +330,75 @@ describe('useConversationReactions — duplicate own votes', () => {
       );
     },
   );
+});
+
+describe('cached reactions on initial message render', () => {
+  it.each(['nip17', 'marmot', 'group'])(
+    '%s reopens with reactions on its first commit',
+    async (protocol) => {
+      const params = makeParams({
+        scopeKey: `first-frame:${protocol}`,
+        messages: [{ id: TARGET, rumorId: TARGET, text: 'cached', createdAt: 1, fromMe: true }],
+        fetchReactionsForMessages: jest.fn().mockResolvedValue([
+          {
+            id: `cached-${protocol}`,
+            pubkey: PEER_PK,
+            kind: 7,
+            content: '👍',
+            created_at: 1,
+            tags: [['e', TARGET]],
+          },
+        ]),
+      });
+      const first = renderHook(() => useConversationReactions(params));
+      await waitFor(() => expect(first.result.current.reactionsByTarget.get(TARGET)).toBeDefined());
+      // Allow deletion reconciliation to settle before leaving the conversation.
+      await waitFor(() => expect(params.fetchReactionDeletions).toHaveBeenCalled());
+      first.unmount();
+      const commits: boolean[] = [];
+      const reopen = makeParams({
+        ...params,
+        fetchReactionsForMessages: jest.fn(() => new Promise(() => {})),
+      });
+      const second = renderHook(() => {
+        const value = useConversationReactions(reopen);
+        commits.push(value.reactionsByTarget.has(TARGET));
+        return value;
+      });
+      expect(commits[0]).toBe(true);
+      expect(second.result.current.reactionsByTarget.get(TARGET)?.byEmoji['👍']).toEqual([PEER_PK]);
+      second.unmount();
+    },
+  );
+});
+
+it('hides the previous scope during render and ignores a late fetch from it', async () => {
+  let resolveOld!: (
+    events: Awaited<ReturnType<ReturnType<typeof makeParams>['fetchReactionsForMessages']>>,
+  ) => void;
+  const old = makeParams({
+    scopeKey: 'old-thread',
+    messages: [{ id: TARGET, rumorId: TARGET, text: 'old', createdAt: 1, fromMe: true }],
+    fetchReactionsForMessages: jest.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveOld = resolve;
+        }),
+    ),
+  });
+  const next = makeParams({ scopeKey: 'next-thread' });
+  const { result, rerender, unmount } = renderHook(
+    (params: Parameters<typeof useConversationReactions>[0]) => useConversationReactions(params),
+    {
+      initialProps: old,
+    },
+  );
+  rerender(next);
+  await act(async () =>
+    resolveOld([
+      { id: 'late', pubkey: PEER_PK, kind: 7, content: '👍', created_at: 1, tags: [['e', TARGET]] },
+    ]),
+  );
+  expect(result.current.reactionsByTarget.size).toBe(0);
+  unmount();
 });

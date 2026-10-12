@@ -1,5 +1,11 @@
 import { useCoalescedMap } from '../utils/useCoalescedMap';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
+import { useAccountState } from '../contexts/useAccountState';
+import {
+  cacheConversationReactions,
+  readConversationReactions,
+} from '../utils/conversationReactionCache';
 import { createYieldScheduler } from '../contexts/nostrDecryptPacing';
 import { Alert } from '../components/BrandedAlert';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -125,44 +131,64 @@ export function useConversationReactions({
   // `reactionRecords` is the flat list of every kind-7 seen for any message in
   // this thread; `reactionsByTarget` is the reduced view. Separate slots so an
   // optimistic local append folds in cleanly without a re-fetch.
-  const [reactionRecords, setReactionRecords] = useState<ReactionRecord[]>([]);
+  const owner = myPubkey && scopeKey ? `${myPubkey.toLowerCase()}:${scopeKey}` : null;
+  const initial = useMemo(() => readConversationReactions(owner), [owner]);
+  const [reactionRecords, setReactionRecords] = useAccountState(owner, initial.records);
   const reactionsByTarget = useMemo<Map<string, MessageReactionState>>(
     () => reduceReactions(reactionRecords, myPubkey ?? null),
     [reactionRecords, myPubkey],
   );
 
-  // Target ids we've already issued a fetch for — guards a back-pressure loop
-  // when a slow relay + optimistic-append churn re-run the effect.
-  const reactionFetchScheduledRef = useRef(new Set<string>());
-
-  // Retractions seen so far (reaction id → who retracted it). Enforced on
-  // every merge: a retraction can arrive before its reaction (live Marmot
-  // events), or a slower history read can return a reaction after its live
-  // retraction — either way it must stay gone.
-  const retractionsRef = useRef(new Map<string, Set<string>>());
-
+  // Commit markers contain no account, message, or event identifiers.
+  const renderTiming = useMemo(
+    () => ({ owner, started: Date.now(), messages: false, reactions: false }),
+    [owner],
+  );
   useEffect(() => {
-    setReactionRecords([]);
-    reactionFetchScheduledRef.current.clear();
-    retractionsRef.current.clear();
-  }, [scopeKey]);
+    if (!__DEV__) return;
+    const timing = renderTiming;
+    const elapsed = Date.now() - timing.started;
+    if (messages.length > 0 && !timing.messages) {
+      timing.messages = true;
+      console.log(`[PerfBlock] chat messages rendered: ${elapsed}ms`);
+    }
+    if (messages.some((m) => m.rumorId && reactionsByTarget.has(m.rumorId)) && !timing.reactions) {
+      timing.reactions = true;
+      console.log(`[PerfBlock] chat reactions rendered: ${elapsed}ms`);
+    }
+  }, [messages, reactionsByTarget, renderTiming]);
 
-  const mergeFreshRecords = useCallback((fresh: ReactionRecord[]) => {
-    if (fresh.length === 0) return;
-    setReactionRecords((prev) => {
-      const seen = new Set(prev.map((r) => r.id));
-      const merged = [...prev];
-      for (const r of fresh) {
-        // NIP-09: only the reactor's own retraction counts.
-        if (retractionsRef.current.get(r.id.toLowerCase())?.has(r.reactorPubkey)) continue;
-        if (!seen.has(r.id)) {
-          merged.push(r);
-          seen.add(r.id);
+  // New scope gets its own bookkeeping during render, so a reused screen
+  // cannot expose the previous thread or let a late writer mutate its cache.
+  const fetchScope = useMemo(() => ({ owner, ids: new Set<string>() }), [owner]);
+  const scheduled = fetchScope.ids;
+  const retractions = useMemo(
+    () => new Map([...initial.retractions].map(([id, authors]) => [id, new Set(authors)])),
+    [initial],
+  );
+  useLayoutEffect(() => {
+    cacheConversationReactions(owner, { records: reactionRecords, retractions });
+  }, [owner, reactionRecords, retractions]);
+
+  const mergeFreshRecords = useCallback(
+    (fresh: ReactionRecord[]) => {
+      if (fresh.length === 0) return;
+      setReactionRecords((prev) => {
+        const seen = new Set(prev.map((r) => r.id));
+        const merged = [...prev];
+        for (const r of fresh) {
+          // NIP-09: only the reactor's own retraction counts.
+          if (retractions.get(r.id.toLowerCase())?.has(r.reactorPubkey)) continue;
+          if (!seen.has(r.id)) {
+            merged.push(r);
+            seen.add(r.id);
+          }
         }
-      }
-      return merged;
-    });
-  }, []);
+        return merged;
+      });
+    },
+    [setReactionRecords, retractions],
+  );
 
   // Apply a batch of NIP-09 (kind-5) deletion events to the local record list.
   // Each deletion's `e` tags name the reaction ids it retracts; NIP-09 only
@@ -170,29 +196,36 @@ export function useConversationReactions({
   // record only when the deleter pubkey matches the reactor's — a third party
   // can't retract someone else's reaction. No-op (returns `prev`) when nothing
   // actually matched, so an unrelated deletion batch doesn't force a re-render.
-  const applyDeletionEvents = useCallback((deletions: { pubkey: string; tags: string[][] }[]) => {
-    if (deletions.length === 0) return;
-    for (const d of deletions) {
-      for (const t of d.tags) {
-        if (t[0] !== 'e' || typeof t[1] !== 'string' || t[1].length === 0) continue;
-        const id = t[1].toLowerCase();
-        const by = retractionsRef.current.get(id) ?? new Set<string>();
-        by.add(d.pubkey.toLowerCase());
-        retractionsRef.current.set(id, by);
-      }
-    }
-    setReactionRecords((prev) => {
-      let next = prev;
+  const applyDeletionEvents = useCallback(
+    (deletions: { pubkey: string; tags: string[][] }[]) => {
+      if (deletions.length === 0) return;
       for (const d of deletions) {
         for (const t of d.tags) {
-          if (t[0] === 'e' && typeof t[1] === 'string' && t[1].length > 0) {
-            next = applyReactionDeletion(next, t[1].toLowerCase(), d.pubkey);
-          }
+          if (t[0] !== 'e' || typeof t[1] !== 'string' || t[1].length === 0) continue;
+          const id = t[1].toLowerCase();
+          const by = retractions.get(id) ?? new Set<string>();
+          by.add(d.pubkey.toLowerCase());
+          retractions.set(id, by);
         }
       }
-      return next.length === prev.length ? prev : next;
-    });
-  }, []);
+      cacheConversationReactions(owner, {
+        records: readConversationReactions(owner).records,
+        retractions,
+      });
+      setReactionRecords((prev) => {
+        let next = prev;
+        for (const d of deletions) {
+          for (const t of d.tags) {
+            if (t[0] === 'e' && typeof t[1] === 'string' && t[1].length > 0) {
+              next = applyReactionDeletion(next, t[1].toLowerCase(), d.pubkey);
+            }
+          }
+        }
+        return next.length === prev.length ? prev : next;
+      });
+    },
+    [setReactionRecords, retractions, owner],
+  );
 
   // Stage live MLS events before applying them: one state update per burst,
   // including deletions that arrive before their reaction.
@@ -208,12 +241,14 @@ export function useConversationReactions({
       ? E
       : never
   >();
-  useEffect(() => {
-    reset();
-    reactionFetchScheduledRef.current.clear();
-    if (!subscribeLiveReactions) return;
-    return subscribeLiveReactions((event) => enqueue(event.id, event));
-  }, [subscribeLiveReactions, enqueue, reset]);
+  useFocusEffect(
+    useCallback(() => {
+      reset();
+      scheduled.clear();
+      if (!subscribeLiveReactions) return;
+      return subscribeLiveReactions((event) => enqueue(event.id, event));
+    }, [scheduled, subscribeLiveReactions, enqueue, reset]),
+  );
   useEffect(() => {
     if (liveEvents.size === 0) return;
     const events = [...liveEvents.values()];
@@ -226,9 +261,8 @@ export function useConversationReactions({
   // Optimistic-local / warm-cache rows without a rumorId are skipped — they'll
   // get fetched once a decrypt supplies the id.
   useEffect(() => {
-    // Capture the (stable) scheduled-ids Set once so the cleanup closes over
-    // the same instance the effect body used — the ref is never reassigned.
-    const scheduled = reactionFetchScheduledRef.current;
+    // Each scope owns its scheduled ids; cancelled reads can retry on the
+    // next message update without modifying another conversation's set.
     const targets: string[] = [];
     for (const m of messages) {
       const targetId = m.rumorId;
@@ -271,6 +305,7 @@ export function useConversationReactions({
     };
   }, [
     messages,
+    scheduled,
     fetchReactionsForMessages,
     mergeFreshRecords,
     fetchReactionDeletions,
@@ -340,7 +375,7 @@ export function useConversationReactions({
         // event arrives later; reconcile only the failed deletions.
         applyDeletionEvents([{ pubkey: myPubkey, tags: deleted.map((id) => ['e', id]) }]);
         if (failed) {
-          reactionFetchScheduledRef.current.delete(target.targetId);
+          scheduled.delete(target.targetId);
           const events = await fetchReactionsForMessages([target.targetId]);
           mergeFreshRecords(events.map(parseReactionEvent).filter((r): r is ReactionRecord => !!r));
         }
@@ -392,6 +427,8 @@ export function useConversationReactions({
     },
     [
       closeMessageActions,
+      setReactionRecords,
+      scheduled,
       reactionRecords,
       applyDeletionEvents,
       myPubkey,
