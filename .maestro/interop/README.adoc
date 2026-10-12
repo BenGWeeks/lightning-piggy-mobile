@@ -61,10 +61,17 @@ bash scripts/interop/run.sh
 METRO_PORT=8271 bash scripts/interop/run.sh
 # Lightning Piggy only:
 SKIP_WN=1 bash scripts/interop/run.sh
+# another lane (its own lock), waiting up to 2 h for a busy lane:
+DEVICE=127.0.0.1:5565 DEVICE_LOCK=/tmp/claude-$UID/hulk-emu.lock LOCK_WAIT=7200 \
+  bash scripts/interop/run.sh
 ----
 
 Output: `~/lp-interop-runs/<date>-<tag>/` with `matrix.md`, `screenshots/` and
-`logs/` (Maestro output and the sender's JSON lines, nsecs redacted).
+`logs/` (Maestro output and the sender's JSON lines, nsecs redacted). The
+matrix separates harness problems from interop results: a flow that fails
+before its first check is reported as `HARNESS: no results` with the failing
+step, and checks that depend on a flow that didn't run (Lightning Piggy's
+sends, its rename) are `N/T`, not FAIL.
 
 Locks: the runner holds `$LOCK_DIR/emulator.lock` (default
 `/tmp/claude-$UID`) for two windows (sender items + checks, then the
