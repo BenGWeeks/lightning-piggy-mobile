@@ -2940,6 +2940,9 @@
     "body": "直到 {{time}}",
     "stopAction": "停止共享",
     "aGroup": "一个群组",
-    "aFriend": "一位好友"
+    "aFriend": "一位好友",
+    "stoppedTitle": "实时位置共享已停止",
+    "stoppedBody": "Lightning Piggy 在后台被关闭，你的实时位置共享已停止。打开应用即可再次共享。",
+    "stoppedBodyOne": "Lightning Piggy 在后台被关闭，你与 {{name}} 的实时位置共享已停止。打开应用即可再次共享。"
   }
 }

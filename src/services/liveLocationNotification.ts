@@ -22,6 +22,7 @@ export const LIVE_LOCATION_STOP_TASK = 'lp-live-location-stop';
 const CATEGORY = 'live-location';
 const CHANNEL = 'live-location';
 const NOTIFICATION_ID = 'live-location-share';
+const STOPPED_NOTIFICATION_ID = 'live-location-stopped';
 
 let prepared: Promise<void> | null = null;
 
@@ -93,6 +94,33 @@ export async function showLiveShareNotification(input: {
     });
   } catch {
     // Best-effort: the share works without it (Stop stays in the chat).
+  }
+}
+
+/**
+ * Tell the user a share stopped because the app was closed in the background
+ * (a Marmot share can't continue without the app — see the tracker). A normal
+ * notification on the same quiet channel; tapping it opens the app, which
+ * sends the end markers.
+ */
+export async function showLiveShareStoppedNotification(labels: (string | undefined)[]) {
+  try {
+    if (Platform.OS === 'android') await prepare();
+    const names = labels.filter((l): l is string => !!l);
+    await Notifications.scheduleNotificationAsync({
+      identifier: STOPPED_NOTIFICATION_ID,
+      content: {
+        title: t('liveLocationTracking.stoppedTitle'),
+        body:
+          names.length === 1
+            ? t('liveLocationTracking.stoppedBodyOne', { name: names[0] })
+            : t('liveLocationTracking.stoppedBody'),
+        data: { quiet: true, liveLocationStopped: true },
+      },
+      trigger: Platform.OS === 'android' ? { channelId: CHANNEL } : null,
+    });
+  } catch {
+    // Best-effort.
   }
 }
 

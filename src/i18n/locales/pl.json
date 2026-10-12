@@ -2964,6 +2964,9 @@
     "body": "Do {{time}}",
     "stopAction": "Przestań udostępniać",
     "aGroup": "grupa",
-    "aFriend": "znajomy"
+    "aFriend": "znajomy",
+    "stoppedTitle": "Udostępnianie lokalizacji zatrzymane",
+    "stoppedBody": "Lightning Piggy została zamknięta w tle, więc udostępnianie lokalizacji na żywo zatrzymało się. Otwórz aplikację, aby udostępnić ponownie.",
+    "stoppedBodyOne": "Lightning Piggy została zamknięta w tle, więc udostępnianie lokalizacji na żywo ({{name}}) zatrzymało się. Otwórz aplikację, aby udostępnić ponownie."
   }
 }

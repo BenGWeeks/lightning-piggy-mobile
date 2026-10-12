@@ -2940,6 +2940,9 @@
     "body": "Hasta las {{time}}",
     "stopAction": "Dejar de compartir",
     "aGroup": "un grupo",
-    "aFriend": "un amigo"
+    "aFriend": "un amigo",
+    "stoppedTitle": "Ubicación en tiempo real detenida",
+    "stoppedBody": "Lightning Piggy se cerró en segundo plano y tu ubicación en tiempo real se detuvo. Abre la app para volver a compartirla.",
+    "stoppedBodyOne": "Lightning Piggy se cerró en segundo plano y tu ubicación en tiempo real con {{name}} se detuvo. Abre la app para volver a compartirla."
   }
 }

@@ -2940,6 +2940,9 @@
     "body": "Until {{time}}",
     "stopAction": "Stop sharing",
     "aGroup": "a group",
-    "aFriend": "a friend"
+    "aFriend": "a friend",
+    "stoppedTitle": "Live location stopped",
+    "stoppedBody": "Lightning Piggy was closed in the background, so your live location stopped. Open the app to share again.",
+    "stoppedBodyOne": "Lightning Piggy was closed in the background, so your live location with {{name}} stopped. Open the app to share again."
   }
 }

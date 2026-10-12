@@ -14,9 +14,9 @@
  * Fixes go to the mounted LiveLocationProvider (the normal case: the process
  * and JS runtime stay alive in the background). If the OS runs the task with
  * no provider mounted (the UI was destroyed, or a headless relaunch), the
- * headless path sends updates itself from the persisted sessions — NIP-17 via
- * the session key, Marmot only if a Marmot session is already running — and
- * stops tracking once nothing is left to share. One dispatcher serves both,
+ * headless path sends NIP-17 updates itself from the persisted sessions (the
+ * session key needs no app state), ends Marmot shares cleanly with a visible
+ * notice (see runHeadless), and stops tracking once nothing is left to share. One dispatcher serves both,
  * so the cadence carries over between them.
  */
 
@@ -25,7 +25,6 @@ import * as Location from 'expo-location';
 import { expiryFor } from './liveLocationService';
 import {
   createLiveUpdateDispatcher,
-  shouldSendUpdate,
   transportFor,
   type LastSent,
   LIVE_UPDATE_MIN_INTERVAL_MS,
@@ -33,8 +32,10 @@ import {
 } from './liveLocationPolicy';
 import { loadPersistedSessions, savePersistedSessions } from './liveLocationStorage';
 import { sendLiveUpdate } from './liveLocationSender';
-import { restoreMarmotSessionHeadless } from './marmotHeadlessSession';
-import { dismissLiveShareNotification } from './liveLocationNotification';
+import {
+  dismissLiveShareNotification,
+  showLiveShareStoppedNotification,
+} from './liveLocationNotification';
 import type { OutgoingSession } from './liveLocationStateMachine';
 import { t } from '../i18n';
 
@@ -160,7 +161,19 @@ async function endShares(owner: string, persisted: OutgoingSession[], ids: Set<s
 async function runHeadless(fix: TrackedFix): Promise<void> {
   const ctx = await loadTrackingContext();
   const persisted = ctx ? await loadPersistedSessions(ctx.owner) : [];
-  const live = ctx ? headlessLiveSessions(persisted, Date.now()) : [];
+  let live = ctx ? headlessLiveSessions(persisted, Date.now()) : [];
+  // Marmot shares can't continue here. Their updates need the MLS session,
+  // and running one outside the app would put a second session over the same
+  // MLS store as soon as the UI starts its own. So end them cleanly — the end
+  // marker goes out on the next app open — and tell the user, rather than
+  // streaming into nowhere under a "sharing" notification. NIP-17 shares
+  // carry on: their session key needs no app state.
+  const marmot = live.filter((s) => transportFor(s) === 'marmot');
+  if (ctx && marmot.length > 0) {
+    await endShares(ctx.owner, persisted, new Set(marmot.map((s) => s.sessionId)));
+    await showLiveShareStoppedNotification(marmot.map((s) => s.label));
+    live = live.filter((s) => transportFor(s) !== 'marmot');
+  }
   if (!ctx || live.length === 0) {
     // Nothing left to share: stop the service. The end markers go out from
     // the provider's drain loop on the next app open.
@@ -176,36 +189,10 @@ async function runHeadless(fix: TrackedFix): Promise<void> {
       liveUpdateDispatcher.seed(s.sessionId, l.location, l.at);
     }
   }
-  // Only shares with an update due: restoring MLS for every fix would be a
-  // full Marmot start per location event.
-  let due = live.filter((s) =>
-    shouldSendUpdate({
-      now,
-      last: liveUpdateDispatcher.lastFor(s.sessionId) ?? null,
-      location: fix.location,
-      transport: transportFor(s),
-    }),
-  );
-  if (due.length === 0) return;
-  const marmot = due.filter((s) => transportFor(s) === 'marmot');
-  // Marmot updates need the MLS session: restore it (no UI is mounted). If
-  // that's impossible (the account was switched away), end those shares
-  // cleanly — the end marker goes out on the next app open — instead of
-  // streaming into nowhere while the notification says we're sharing.
-  if (marmot.length > 0 && !(await restoreMarmotSessionHeadless(ctx.owner, ctx.relays))) {
-    const ended = new Set(live.filter((s) => transportFor(s) === 'marmot').map((s) => s.sessionId));
-    await endShares(ctx.owner, persisted, ended);
-    due = due.filter((s) => !ended.has(s.sessionId));
-    if (live.every((s) => ended.has(s.sessionId))) {
-      await stopTracking();
-      await dismissLiveShareNotification();
-      return;
-    }
-  }
   const owner = ctx.owner;
   const sent = await liveUpdateDispatcher.handleFix(
     fix,
-    due,
+    live,
     (s, p) => sendLiveUpdate(owner, s, p, ctx.relays),
     now,
   );

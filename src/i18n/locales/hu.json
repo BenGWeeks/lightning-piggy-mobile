@@ -2940,6 +2940,9 @@
     "body": "Eddig: {{time}}",
     "stopAction": "Megosztás leállítása",
     "aGroup": "egy csoport",
-    "aFriend": "egy barát"
+    "aFriend": "egy barát",
+    "stoppedTitle": "Az élő helymegosztás leállt",
+    "stoppedBody": "A Lightning Piggy bezárult a háttérben, ezért az élő helymegosztás leállt. Nyisd meg az alkalmazást az újbóli megosztáshoz.",
+    "stoppedBodyOne": "A Lightning Piggy bezárult a háttérben, ezért az élő helymegosztás vele: {{name}} leállt. Nyisd meg az alkalmazást az újbóli megosztáshoz."
   }
 }

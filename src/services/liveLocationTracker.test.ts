@@ -11,10 +11,10 @@ jest.mock('expo-location', () => ({
 }));
 const mockSend = jest.fn();
 jest.mock('./liveLocationSender', () => ({ sendLiveUpdate: (...a: unknown[]) => mockSend(...a) }));
-jest.mock('./liveLocationNotification', () => ({ dismissLiveShareNotification: jest.fn() }));
-const mockRestore = jest.fn();
-jest.mock('./marmotHeadlessSession', () => ({
-  restoreMarmotSessionHeadless: (...a: unknown[]) => mockRestore(...a),
+const mockStopped = jest.fn();
+jest.mock('./liveLocationNotification', () => ({
+  dismissLiveShareNotification: jest.fn(),
+  showLiveShareStoppedNotification: (...a: unknown[]) => mockStopped(...a),
 }));
 
 import {
@@ -163,58 +163,41 @@ it('Stop with no provider mounted stops tracking and marks the shares to end on 
   expect(stored.stopRequested).toBe(true);
 });
 
-describe('headless Marmot shares (no UI after a process restart)', () => {
-  const marmot = () => session({ sessionId: 'm1', protocol: 'marmot' });
+describe('headless runtime (no UI, e.g. after the OS restarted the process)', () => {
+  const marmot = () => session({ sessionId: 'm1', protocol: 'marmot', label: 'Big Piggy' });
 
-  it('restore the MLS session and keep sending', async () => {
-    loc.startLocationUpdatesAsync.mockResolvedValue(undefined);
-    await startTracking({ owner: ME, relays: ['wss://r'] });
-    await savePersistedSessions(ME, [marmot()]);
-    mockRestore.mockResolvedValue({});
-    mockSend.mockResolvedValue(true);
-    await handleTaskLocations([point(Date.now())]);
-    expect(mockRestore).toHaveBeenCalledWith(ME, ['wss://r']);
-    expect(mockSend.mock.calls[0][1].sessionId).toBe('m1');
-  });
-
-  it('end cleanly — never stream into nowhere — when the session cannot be restored', async () => {
+  it('ends a Marmot share cleanly and visibly, and keeps a NIP-17 share streaming', async () => {
     loc.startLocationUpdatesAsync.mockResolvedValue(undefined);
     await startTracking({ owner: ME, relays: [] });
     await savePersistedSessions(ME, [marmot(), session({ sessionId: 'n1' })]);
-    mockRestore.mockResolvedValue(null);
     mockSend.mockResolvedValue(true);
     await handleTaskLocations([point(Date.now())]);
-    // The NIP-17 share keeps going; the Marmot one is marked to end on next open.
     expect(mockSend.mock.calls.map((c) => c[1].sessionId)).toEqual(['n1']);
     const stored = await loadPersistedSessions(ME);
     expect(stored.find((s) => s.sessionId === 'm1')?.stopRequested).toBe(true);
+    expect(mockStopped).toHaveBeenCalledWith(['Big Piggy']);
     expect(getTrackingMode()).toBe('background');
   });
 
-  it('restore MLS only when an update is due (a fresh runtime per fix must stay cheap)', async () => {
+  it('stops tracking when only Marmot shares were running', async () => {
     loc.startLocationUpdatesAsync.mockResolvedValue(undefined);
     await startTracking({ owner: ME, relays: [] });
     await savePersistedSessions(ME, [marmot()]);
-    mockRestore.mockResolvedValue({});
+    await handleTaskLocations([point(Date.now())]);
+    expect(mockSend).not.toHaveBeenCalled();
+    expect(mockStopped).toHaveBeenCalledTimes(1);
+    expect(getTrackingMode()).toBeNull();
+  });
+
+  it('keeps the cadence across runtimes (expo rebuilds the headless JS per event)', async () => {
+    loc.startLocationUpdatesAsync.mockResolvedValue(undefined);
+    await startTracking({ owner: ME, relays: [] });
+    await savePersistedSessions(ME, [session({ sessionId: 'n1' })]);
     mockSend.mockResolvedValue(true);
     const at = Date.now();
     await handleTaskLocations([point(at)]);
-    expect(mockRestore).toHaveBeenCalledTimes(1);
-    // A new runtime (fresh dispatcher) a few seconds later, same spot: the
-    // persisted cadence says nothing is due, so no MLS start at all.
-    liveUpdateDispatcher.reset();
+    liveUpdateDispatcher.reset(); // a fresh runtime
     await handleTaskLocations([point(at + 3_000)]);
-    expect(mockRestore).toHaveBeenCalledTimes(1);
     expect(mockSend).toHaveBeenCalledTimes(1);
-  });
-
-  it('stop tracking when the only share was an unrestorable Marmot one', async () => {
-    loc.startLocationUpdatesAsync.mockResolvedValue(undefined);
-    await startTracking({ owner: ME, relays: [] });
-    await savePersistedSessions(ME, [marmot()]);
-    mockRestore.mockResolvedValue(null);
-    await handleTaskLocations([point(Date.now())]);
-    expect(mockSend).not.toHaveBeenCalled();
-    expect(getTrackingMode()).toBeNull();
   });
 });

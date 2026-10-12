@@ -2940,6 +2940,9 @@
     "body": "Bis {{time}}",
     "stopAction": "Teilen beenden",
     "aGroup": "einer Gruppe",
-    "aFriend": "einem Freund"
+    "aFriend": "einem Freund",
+    "stoppedTitle": "Live-Standort beendet",
+    "stoppedBody": "Lightning Piggy wurde im Hintergrund geschlossen, daher wurde dein Live-Standort beendet. Öffne die App, um ihn erneut zu teilen.",
+    "stoppedBodyOne": "Lightning Piggy wurde im Hintergrund geschlossen, daher wurde dein Live-Standort mit {{name}} beendet. Öffne die App, um ihn erneut zu teilen."
   }
 }
