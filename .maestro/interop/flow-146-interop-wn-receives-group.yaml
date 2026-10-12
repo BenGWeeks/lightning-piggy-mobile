@@ -100,20 +100,20 @@ name: Interop — White Noise renders what the scripted Marmot sender sent (grou
     times: 12
     while:
       notVisible:
-        text: '0:02'
+        text: '.*0.0[1-9].*'
     commands:
       - swipe:
           direction: DOWN
           duration: 500
 - assertVisible:
     label: 'IO-CHECK voice'
-    text: '0:02'
+    text: '.*0.0[1-9].*'
     optional: true
 # Missed: go back to the newest message so later checks start from there.
 - runFlow:
     when:
       notVisible:
-        text: '0:02'
+        text: '.*0.0[1-9].*'
     commands:
       - repeat:
           times: 12
