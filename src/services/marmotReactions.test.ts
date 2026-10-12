@@ -103,3 +103,34 @@ it('scopes group history, sends kind 7 and kind 5 into that group, and filters t
   expect(onEvent).toHaveBeenCalledTimes(1);
   unsubscribe();
 });
+
+it.each(['publish', 'delete'])(
+  'sends %s directly to an explicit group without reading history',
+  async (action) => {
+    const session = fakeSession();
+    session.queryHistory.mockRejectedValue(new Error('history must not be read'));
+    setMarmotSession(session as unknown as MarmotSession);
+    const source = marmotReactionSource(ME, PEER, 'g-old');
+    const result =
+      action === 'publish'
+        ? await source.publishReaction({ emoji: '👍', targetEventId: 'm-old' })
+        : await source.deleteReaction('r-old');
+    expect(result).toBeTruthy();
+    expect(session.queryHistory).not.toHaveBeenCalled();
+    expect(session.dmGroupIdsWith).not.toHaveBeenCalled();
+    expect(session.sendRumor).toHaveBeenCalledWith(
+      'g-old',
+      expect.objectContaining({ kind: action === 'publish' ? 7 : 5 }),
+    );
+  },
+);
+
+it('retracts a reaction in its older DM group', async () => {
+  const session = fakeSession();
+  setMarmotSession(session as unknown as MarmotSession);
+  expect(await marmotReactionSource(ME, PEER).deleteReaction('r-old')).toBe(true);
+  expect(session.sendRumor).toHaveBeenCalledWith(
+    'g-old',
+    expect.objectContaining({ kind: 5, tags: [['e', 'r-old']] }),
+  );
+});

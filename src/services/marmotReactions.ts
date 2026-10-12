@@ -84,12 +84,15 @@ export function marmotReactionSource(
   // match it. Falls back to the newest DM.
   const sendReferencing = async (kind: number, content: string, targetId: string) => {
     const session = await sessionFor(myPubkey);
-    const groups = await groupsFor(session);
-    let home = groups[0];
-    for (const groupId of groups) {
-      if ((await session.queryHistory(groupId)).some((r) => r.id === targetId)) {
-        home = groupId;
-        break;
+    let home = groupId;
+    if (!home) {
+      const groups = await groupsFor(session);
+      home = groups[0];
+      for (const dmGroupId of groups) {
+        if ((await session.queryHistory(dmGroupId)).some((r) => r.id === targetId)) {
+          home = dmGroupId;
+          break;
+        }
       }
     }
     if (!home) throw new Error('No Marmot chat with this person yet');

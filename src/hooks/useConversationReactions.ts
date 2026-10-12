@@ -1,5 +1,6 @@
 import { useCoalescedMap } from '../utils/useCoalescedMap';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createYieldScheduler } from '../contexts/nostrDecryptPacing';
 import { Alert } from '../components/BrandedAlert';
 import { useTranslation } from '../contexts/LocaleContext';
 import type { ConversationMessageInput, Item } from '../utils/conversationItems';
@@ -304,21 +305,41 @@ export function useConversationReactions({
       }
       closeMessageActions();
       if (existingReactionId) {
-        setReactionRecords((prev) => prev.filter((r) => r.id !== existingReactionId));
-        // Removal-before-ack race: if the reaction is still an un-acked
-        // optimistic add, its real kind-7 id isn't known yet — a NIP-09 delete
-        // against the `local-react-*` placeholder is a no-op on relays, so the
-        // real event would later publish and resurface on the next load. Flag
-        // the pending publish as cancelled instead; the add path below retracts
-        // the REAL id once `publishReaction` resolves.
-        if (isOptimisticReactionId(existingReactionId)) {
-          cancelledOptimisticRef.current.add(existingReactionId);
-          return;
+        // Aggregation collapses duplicate votes, so retract every matching
+        // own event rather than exposing an older vote after deleting the newest.
+        const ids = new Set([
+          existingReactionId,
+          ...reactionRecords
+            .filter(
+              (r) =>
+                r.targetEventId === target.targetId &&
+                r.reactorPubkey === myPubkey.toLowerCase() &&
+                r.emoji === emoji,
+            )
+            .map((r) => r.id),
+        ]);
+        setReactionRecords((prev) => prev.filter((r) => !ids.has(r.id)));
+        // Pending publishes must retract their real IDs once acknowledged.
+        for (const id of ids) {
+          if (isOptimisticReactionId(id)) cancelledOptimisticRef.current.add(id);
         }
-        const ok = await deleteReaction(existingReactionId);
-        if (!ok) {
-          // Reconcile via re-fetch if the deletion failed (optimistic remove
-          // was wrong) — cheaper than threading rollback state.
+        const deleted: string[] = [];
+        let failed = false;
+        const scheduler = createYieldScheduler({ safetyEvery: 8 });
+        try {
+          for (const id of ids) {
+            if (isOptimisticReactionId(id)) continue;
+            await scheduler.maybeYield();
+            if (await deleteReaction(id)) deleted.push(id);
+            else failed = true;
+          }
+        } finally {
+          scheduler.dispose();
+        }
+        // Keep successful retractions hidden even if a stale history/live
+        // event arrives later; reconcile only the failed deletions.
+        applyDeletionEvents([{ pubkey: myPubkey, tags: deleted.map((id) => ['e', id]) }]);
+        if (failed) {
           reactionFetchScheduledRef.current.delete(target.targetId);
           const events = await fetchReactionsForMessages([target.targetId]);
           mergeFreshRecords(events.map(parseReactionEvent).filter((r): r is ReactionRecord => !!r));
@@ -371,6 +392,8 @@ export function useConversationReactions({
     },
     [
       closeMessageActions,
+      reactionRecords,
+      applyDeletionEvents,
       myPubkey,
       publishReaction,
       deleteReaction,

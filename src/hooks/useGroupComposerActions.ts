@@ -184,7 +184,7 @@ export function useGroupComposerActions(params: {
   );
 
   const sendText = useCallback(
-    async (text: string): Promise<boolean> => {
+    async (text: string, parent?: string): Promise<boolean> => {
       const { group, myPubkey } = latestRef.current;
       if (!group || !myPubkey) return false;
 
@@ -201,11 +201,11 @@ export function useGroupComposerActions(params: {
           subject: group.name,
           memberPubkeys: group.memberPubkeys,
           text,
-          replyTo,
+          replyTo: parent,
         },
         {
           onRumorReady: () => {
-            optimistic.current = appendOptimisticGroupRow(text, group, myPubkey, replyTo);
+            optimistic.current = appendOptimisticGroupRow(text, group, myPubkey, parent);
           },
         },
       );
@@ -229,7 +229,6 @@ export function useGroupComposerActions(params: {
       }
       if (optimistic.current)
         await adoptRumorId(optimistic.current.row.id, result.rumorId, group, myPubkey);
-      onReplySent?.();
       return true;
     },
     [
@@ -238,8 +237,6 @@ export function useGroupComposerActions(params: {
       removeOptimisticRow,
       alertSavedOnRelayOnly,
       adoptRumorId,
-      replyTo,
-      onReplySent,
     ],
   );
 
@@ -375,14 +372,18 @@ export function useGroupComposerActions(params: {
 
   // Composer sends only: polls, shares and re-publishes go out as built.
   const sendMessage = useMemo(
-    () => (encodeMessage ? (text: string) => sendText(encodeMessage(text)) : undefined),
-    [encodeMessage, sendText],
+    () => async (text: string) => {
+      const sent = await sendText(encodeMessage ? encodeMessage(text) : text, replyTo);
+      if (sent) onReplySent?.();
+      return sent;
+    },
+    [encodeMessage, sendText, replyTo, onReplySent],
   );
 
   const strategy = useMemo(
     () => ({
       sendText,
-      ...(sendMessage ? { sendMessage } : {}),
+      sendMessage,
       sendFile,
       ...(isMarmot ? { sendImage, gifEnvelope: true } : {}),
       canSend,
