@@ -2538,7 +2538,9 @@
         "notFound": "Dieses Angebot konnte nicht gefunden werden.",
         "needsShop": "Richte deinen Shop ein, bevor du Produkte zum Verkauf anbietest.",
         "delete": "Angebot löschen",
-        "conflictBody": "Dieses Angebot wurde auf einem anderen Gerät oder in einer anderen App geändert, seit du es geöffnet hast. Deine Version trotzdem speichern?"
+        "conflictBody": "Dieses Angebot wurde auf einem anderen Gerät oder in einer anderen App geändert, seit du es geöffnet hast. Deine Version trotzdem speichern?",
+        "deletedBody": "Dieses Angebot wurde gelöscht. Mit den Werten dieses Formulars erneut erstellen?",
+        "recreate": "Erneut erstellen"
       },
       "errors": {
         "title": "Füge einen Titel hinzu (bis zu 200 Zeichen).",

@@ -2538,7 +2538,9 @@
         "notFound": "Ez a hirdetés nem található.",
         "needsShop": "Hozd létre az üzletedet, mielőtt hirdetéseket adsz fel.",
         "delete": "Hirdetés törlése",
-        "conflictBody": "Ezt a hirdetést egy másik eszközön vagy alkalmazásban módosították, mióta megnyitottad. Mégis mented a saját változatodat?"
+        "conflictBody": "Ezt a hirdetést egy másik eszközön vagy alkalmazásban módosították, mióta megnyitottad. Mégis mented a saját változatodat?",
+        "deletedBody": "Ezt a hirdetést törölték. Újra létrehozod az űrlap értékeivel?",
+        "recreate": "Újra létrehozás"
       },
       "errors": {
         "title": "Adj meg egy címet (legfeljebb 200 karakter).",

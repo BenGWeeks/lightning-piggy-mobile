@@ -36,17 +36,11 @@ const MAX_DELETIONS = 600;
  * verification apiece.
  */
 const MAX_FAILED_CHECKS = 64;
-/**
- * Forged DELETION signatures tolerated before deletion checks stop. Past this
- * the remaining deletions are kept UNCHECKED and still applied (fail closed):
- * a hostile relay flooding fakes must not get a genuine withdrawal dropped
- * and a deleted listing shown as live. The snapshot is flagged incomplete.
- */
+/** Stop and mark the snapshot unavailable after too many forged deletions. */
 const MAX_FAILED_DELETION_CHECKS = 32;
 /**
  * Forged oversized events tolerated before their (synchronous, in-callback)
- * checks stop. Oversized stand-ins can only HIDE a listing, never render one,
- * so past this they fail closed too, at no further cost.
+ * checks stop. Skipped revisions or deletions make the snapshot unavailable.
  */
 const MAX_FAILED_OVERSIZED_CHECKS = 16;
 const MAX_PRODUCTS = 250;
@@ -57,7 +51,7 @@ const TIMEOUT_MS = 10000;
 /** Time other relays get once the first one has answered in full. */
 const GRACE_MS = 2000;
 // Signature checks hash the whole payload; beyond this we can't afford to
-// verify, so the snapshot is only flagged incomplete.
+// verify, so the snapshot must be unavailable if a revision could be skipped.
 const MAX_VERIFY_CHARS = 1048576;
 
 /**
@@ -137,6 +131,8 @@ async function runSnapshot(
   const events = new Map<string, Event>();
   let listingCount = 0;
   let deletionCount = 0;
+  let deletionUnavailable = false;
+  let listingUnavailable = false;
   const budgetFull = (deletion: boolean) =>
     deletion ? deletionCount >= MAX_DELETIONS : listingCount >= MAX_EVENTS;
   // Oversized stand-ins were verified before their payload was stripped.
@@ -156,9 +152,12 @@ async function runSnapshot(
   const verified = verifyEventCached;
   let oversizedFailures = 0;
   // Checks an oversized event inside the relay callback, but at most
-  // MAX_FAILED_OVERSIZED_CHECKS forgeries' worth; then fails closed (see above).
+  // MAX_FAILED_OVERSIZED_CHECKS forgeries' worth; then drops unchecked events.
   const checkOversized = (event: Event) => {
-    if (oversizedFailures >= MAX_FAILED_OVERSIZED_CHECKS) return true;
+    if (oversizedFailures >= MAX_FAILED_OVERSIZED_CHECKS) {
+      if (event.kind !== 5) listingUnavailable = true;
+      return false;
+    }
     if (verified(event)) return true;
     oversizedFailures++;
     return false;
@@ -183,33 +182,20 @@ async function runSnapshot(
           (t[0] === 'e' || (t[0] === 'a' && t[1]?.split(':')[1] === event.pubkey)),
       )
       .map((t) => [t[0], t[1]] as [string, string]);
-  // Fail closed for deletions we can't keep whole (budget full, or too large
-  // to verify): remember just their targets among the listings found, newest
-  // deletion time per target, and apply them unverified. Bounded by
-  // `knownTargets`; author-scoped like any deletion. Flags the snapshot.
-  const failClosedTargets = new Map<
-    string,
-    { pubkey: string; tag: [string, string]; at: number }
-  >();
-  const keepFailClosed = (event: Event) => {
-    for (const tag of relevantTargets(event)) {
-      const k = `${event.pubkey}|${tag[0]}|${tag[1]}`;
-      const prev = failClosedTargets.get(k);
-      if (!prev || prev.at < event.created_at) {
-        failClosedTargets.set(k, { pubkey: event.pubkey, tag, at: event.created_at });
-      }
-    }
-  };
   // A bulk deletion over the tag limit still withdraws listings: keep a
   // trimmed copy with only its targets among the listings found.
   const suppressOversizedDeletion = (event: Event) => {
     if (suppressions.has(event.id)) return;
     if (budgetFull(true)) {
-      keepFailClosed(event);
+      deletionUnavailable = true;
       return;
     }
     const tags = relevantTargets(event);
-    if (tags.length === 0 || !checkOversized(event)) return;
+    if (tags.length === 0) return;
+    if (!checkOversized(event)) {
+      if (oversizedFailures >= MAX_FAILED_OVERSIZED_CHECKS) deletionUnavailable = true;
+      return;
+    }
     const standIn = { ...event, content: '', tags };
     trusted.add(standIn);
     suppressions.set(event.id, standIn);
@@ -218,8 +204,9 @@ async function runSnapshot(
   const suppressOversized = (event: Event) => {
     limited = true;
     if (event.content.length > MAX_VERIFY_CHARS) {
-      // Too large to verify: a deletion still fails closed on its targets.
-      if (event.kind === 5) keepFailClosed(event);
+      if (event.kind === 5) deletionUnavailable = true;
+      else listingUnavailable = true;
+      // Never apply targets from a payload we cannot authenticate.
       return;
     }
     if (event.kind === 5) {
@@ -240,7 +227,10 @@ async function runSnapshot(
         (existing.created_at === event.created_at && existing.id <= event.id))
     )
       return;
-    if (!existing && budgetFull(false)) return;
+    if (!existing && budgetFull(false)) {
+      listingUnavailable = true;
+      return;
+    }
     if (!checkOversized(event)) return;
     // Same id/kind/created_at as the real revision so it competes normally;
     // empty content + a non-active status make it non-renderable.
@@ -268,8 +258,8 @@ async function runSnapshot(
     const deletion = event.kind === 5;
     if (budgetFull(deletion)) {
       limited = true;
-      // A deletion that doesn't fit still withdraws what it targets.
-      if (deletion) keepFailClosed(event);
+      if (deletion) deletionUnavailable = true;
+      // Dropping a possible withdrawal makes the snapshot unavailable.
       return;
     }
     // Listings are verified later (winners only); a payload that doesn't even
@@ -316,12 +306,7 @@ async function runSnapshot(
   let firstPageAt = 0;
   // Budget-gated yields keep taps responsive while winners are verified.
   const scheduler = createYieldScheduler({ signal, safetyEvery: 32 });
-  // Deletions arrive unverified (structure-only pool); check them here, with
-  // yields, before any of them can hide a listing. A deletion that FAILS is
-  // dropped; once too many have failed, the rest stay UNCHECKED and still
-  // apply (fail closed) — dropping them would let a relay flooding forgeries
-  // resurrect a listing its seller withdrew. A deletion can only hide its own
-  // author's listings (the reducer checks), so this can't reach other sellers.
+  // Authenticate every deletion before it can withdraw a listing.
   let failedDeletionChecks = 0;
   for (const [key, event] of events) {
     if (event.kind !== 5) continue;
@@ -329,7 +314,10 @@ async function runSnapshot(
       events.delete(key);
       continue;
     }
-    if (failedDeletionChecks >= MAX_FAILED_DELETION_CHECKS) continue;
+    if (failedDeletionChecks >= MAX_FAILED_DELETION_CHECKS) {
+      events.delete(key);
+      continue;
+    }
     await scheduler.maybeYield();
     if (!verified(event)) {
       failedDeletionChecks++;
@@ -337,18 +325,10 @@ async function runSnapshot(
     }
   }
   const deletionChecksGaveUp = failedDeletionChecks >= MAX_FAILED_DELETION_CHECKS;
-  // Fail-closed targets become unverified, trusted stand-in deletions.
-  const failClosedDeletions: Event[] = [...failClosedTargets.values()].map((t, i) => ({
-    kind: 5,
-    pubkey: t.pubkey,
-    created_at: t.at,
-    content: '',
-    tags: [t.tag],
-    id: `fail-closed-${i}`,
-    sig: '',
-  }));
   const selection = await selectVerifiedListings(
-    signal.aborted ? [] : [...events.values(), ...suppressions.values(), ...failClosedDeletions],
+    signal.aborted || deletionChecksGaveUp || deletionUnavailable || listingUnavailable
+      ? []
+      : [...events.values(), ...suppressions.values()],
     scope,
     {
       // Once aborted, fail fast instead of verifying the rest for nothing.
@@ -377,7 +357,8 @@ async function runSnapshot(
       signal.aborted ||
       limited ||
       deletionChecksGaveUp ||
-      failClosedDeletions.length > 0 ||
+      deletionUnavailable ||
+      listingUnavailable ||
       oversizedFailures >= MAX_FAILED_OVERSIZED_CHECKS ||
       selection.gaveUp ||
       listingsCutMattered(listings.truncatedSince, products, selection.overflow) ||

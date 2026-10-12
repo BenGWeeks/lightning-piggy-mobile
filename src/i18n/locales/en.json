@@ -2538,7 +2538,9 @@
         "notFound": "This listing couldn't be found.",
         "needsShop": "Set up your shop before listing items.",
         "delete": "Delete listing",
-        "conflictBody": "This listing was changed on another device or app since you opened it. Save your version anyway?"
+        "conflictBody": "This listing was changed on another device or app since you opened it. Save your version anyway?",
+        "deletedBody": "This listing was deleted. Recreate it with the values in this form?",
+        "recreate": "Recreate"
       },
       "errors": {
         "title": "Add a title (up to 200 characters).",

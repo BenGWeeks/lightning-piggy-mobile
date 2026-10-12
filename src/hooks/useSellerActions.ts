@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useState } from 'react';
+import { signSellerMutation } from '../utils/sellerSigning';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import type { Event } from 'nostr-tools';
 import { useNostr } from '../contexts/NostrContext';
 import {
@@ -46,6 +47,7 @@ const dTagOf = (event: Event) => event.tags.find((t) => t[0] === 'd')?.[1] ?? ''
 export interface ShopBase {
   shop: Event | null;
   zoneCoordinates: string[];
+  zoneEvents: Map<string, Event>;
 }
 
 /**
@@ -58,34 +60,51 @@ export interface ShopBase {
  */
 export function useSellerActions(snapshot: SellerSnapshot) {
   const { pubkey, relays, signEvent } = useNostr();
+  const identity = useRef({ pubkey, signEvent });
+  if (identity.current.pubkey !== pubkey || identity.current.signEvent !== signEvent) {
+    identity.current = { pubkey, signEvent };
+  }
+  const initiatingIdentity = identity.current;
   const relayList = useMemo(() => sellerRelays(relays), [relays]);
   const [busy, setBusy] = useState(false);
 
   const signAndPublish = useCallback(
-    async (template: EventTemplate, previous?: Event | null): Promise<Event> => {
+    async (
+      template: EventTemplate,
+      previous?: Pick<Event, 'created_at'> | null,
+    ): Promise<Event> => {
       if (!pubkey) throw new Error('Not signed in');
-      const signed = (await signEvent({
-        ...template,
-        created_at: nextCreatedAt(Date.now() / 1000, previous),
-      })) as Event | null;
-      if (!signed) throw new Error('Not signed in');
+      const signed = await signSellerMutation({
+        pubkey,
+        template: { ...template, created_at: nextCreatedAt(Date.now() / 1000, previous) },
+        isCurrent: () => identity.current === initiatingIdentity,
+        sign: async (event) => (await signEvent(event)) as Event | null,
+      });
       await publishSellerEvent(signed, relayList);
       addSellerEvents(pubkey, [signed]);
       void persistSellerSnapshot(pubkey);
       return signed;
     },
-    [pubkey, signEvent, relayList],
+    [pubkey, signEvent, relayList, initiatingIdentity],
   );
 
   /** The current revision to build on, or throw (fetch failure / newer
    * revision than `base` without `force`). */
   const currentRevision = useCallback(
-    (kind: number, dTag: string, base: Event | null, options: SaveOptions = {}) => {
+    (
+      kind: number,
+      dTag: string,
+      base: Event | null,
+      options: SaveOptions = {},
+      onDeletedAt?: (deletedAt: number) => void,
+    ) => {
       if (!pubkey) throw new Error('Not signed in');
       return resolveCurrentRevision({
-        fetchLatest: () => fetchLatestRevision({ pubkey, kind, dTag, relays: relayList }),
+        fetchLatest: () =>
+          fetchLatestRevision({ pubkey, kind, dTag, baseId: base?.id, relays: relayList }),
         base,
         force: options.force,
+        onDeletedAt,
         onLatest: (latest) => addSellerEvents(pubkey, [latest]),
       });
     },
@@ -184,33 +203,43 @@ export function useSellerActions(snapshot: SellerSnapshot) {
           base.shop,
           options,
         );
-        const zoneCoordinates: string[] = [];
+        const zoneCoordinates = zones.map((z) =>
+          coordinateOf(SHIPPING_OPTION_KIND, pubkey, z.dTag),
+        );
+        const removed = base.zoneCoordinates.filter((c) => !zoneCoordinates.includes(c));
+        // Complete every conflict check before publishing the first mutation.
+        const revisions = new Map<string, Event | null>();
+        for (const coordinate of new Set([...zoneCoordinates, ...removed])) {
+          revisions.set(
+            coordinate,
+            await currentRevision(
+              SHIPPING_OPTION_KIND,
+              coordinate.split(':').slice(2).join(':'),
+              base.zoneEvents.get(coordinate) ?? null,
+              options,
+            ),
+          );
+        }
         for (const zone of zones) {
           const coordinate = coordinateOf(SHIPPING_OPTION_KIND, pubkey, zone.dTag);
-          zoneCoordinates.push(coordinate);
-          const previous = snapshot.zoneEvents.get(coordinate);
-          const template = buildShippingZoneTemplate(zone, previous);
-          if (!sameEvent(template, previous)) await signAndPublish(template, previous);
+          const previous = revisions.get(coordinate) ?? null;
+          const template = buildShippingZoneTemplate(zone, previous ?? undefined);
+          if (!sameEvent(template, previous ?? undefined)) await signAndPublish(template, previous);
         }
-        const removed = snapshot.zones.filter(
-          (z) =>
-            base.zoneCoordinates.includes(z.coordinate) && !zoneCoordinates.includes(z.coordinate),
-        );
         if (removed.length > 0) {
-          // Dated no earlier than the newest revision it deletes (NIP-09).
-          const newest = Math.max(...removed.map((z) => z.createdAt));
+          const newest = Math.max(0, ...removed.map((c) => revisions.get(c)?.created_at ?? 0));
           await signAndPublish(
             buildDeletionTemplate(
-              removed.map((z) => ({
+              removed.map((coordinate) => ({
                 kind: SHIPPING_OPTION_KIND,
-                coordinate: z.coordinate,
-                eventId: snapshot.zoneEvents.get(z.coordinate)?.id,
+                coordinate,
+                eventId: revisions.get(coordinate)?.id,
               })),
             ),
             { created_at: newest - 1 } as Event,
           );
         }
-        const removedSet = new Set(removed.map((z) => z.coordinate));
+        const removedSet = new Set(removed);
         const kept = [
           ...(current?.tags ?? []).filter((t) => t[0] === 'shipping_option').map((t) => t[1]),
           ...snapshot.zones.map((z) => z.coordinate),
@@ -240,8 +269,11 @@ export function useSellerActions(snapshot: SellerSnapshot) {
     (draft: ListingDraft, base: Event | null, options: SaveOptions = {}) =>
       run(async () => {
         if (!pubkey) throw new Error('Not signed in');
+        let deletedAt = -1;
         const current = base
-          ? await currentRevision(LISTING_KIND, draft.dTag, base, options)
+          ? await currentRevision(LISTING_KIND, draft.dTag, base, options, (timestamp) => {
+              deletedAt = timestamp;
+            })
           : null;
         const signed = await signAndPublish(
           buildListingTemplate({
@@ -250,7 +282,9 @@ export function useSellerActions(snapshot: SellerSnapshot) {
             nowSeconds: Math.floor(Date.now() / 1000),
             previous: current,
           }),
-          current,
+          // Address deletions suppress every revision at or before their
+          // timestamp, even when the latest surviving revision is null.
+          { created_at: Math.max(current?.created_at ?? -1, deletedAt) },
         );
         const coordinate = coordinateOf(LISTING_KIND, pubkey, draft.dTag);
         if (!listingCoordinates().includes(coordinate)) await republishShop([coordinate]);

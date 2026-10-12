@@ -1,8 +1,13 @@
+import { selectVerifiedListings } from '../utils/marketListings';
 import { finalizeEvent, getEventHash, getPublicKey, type Filter } from 'nostr-tools';
 import { fetchMarketListings, listingsCutMattered } from './marketListingsService';
 import { LISTING_LIMIT } from '../utils/marketListingsQuery';
 import { nostrVerifyEvent } from './nostrCrypto';
 import { __resetVerifiedEventCache } from './nostrVerifyCache';
+jest.mock('../utils/marketListings', () => {
+  const actual = jest.requireActual('../utils/marketListings');
+  return { ...actual, selectVerifiedListings: jest.fn(actual.selectVerifiedListings) };
+});
 jest.mock('./nostrPool', () => ({ pool: { ensureRelay: jest.fn() }, trackRelays: jest.fn() }));
 jest.mock('./marketListingsPool', () => {
   const ensureRelay = jest.fn();
@@ -82,6 +87,7 @@ beforeEach(() => {
   close = jest.fn();
   up = new Set(['wss://example.com', 'wss://a.example', 'wss://b.example']);
   verify.mockClear();
+  (selectVerifiedListings as jest.Mock).mockClear();
   poolMocks.release.mockClear();
   __resetVerifiedEventCache();
   ensureRelay.mockReset();
@@ -370,7 +376,7 @@ it('fails closed when forged deletions fill the deletion budget first', async ()
   expect(result.incomplete).toBe(true);
 }, 60000);
 
-it('fails closed on a genuine withdrawal too large to verify', async () => {
+it('marks a withdrawal too large to verify unavailable without applying its targets', async () => {
   const pending = start();
   await flush();
   deliver(pass('listings')[0], event);
@@ -389,10 +395,11 @@ it('fails closed on a genuine withdrawal too large to verify', async () => {
   pass('deletions').forEach((s) => s.c.oneose());
   const result = await pending;
   expect(result.products).toEqual([]);
+  expect((selectVerifiedListings as jest.Mock).mock.calls[0][0]).toEqual([]);
   expect(result.incomplete).toBe(true);
 }, 30000);
 
-it("a fail-closed deletion can't hide another seller's listing", async () => {
+it('an unverifiable deletion makes the snapshot unavailable without applying claimed targets', async () => {
   const otherKey = new Uint8Array(32).fill(8);
   // Both sellers are followed, so the other one's deletion is in scope.
   const pending = fetchMarketListings(
@@ -419,7 +426,8 @@ it("a fail-closed deletion can't hide another seller's listing", async () => {
   );
   deliver(pass('deletions')[0], huge);
   pass('deletions').forEach((s) => s.c.oneose());
-  expect((await pending).products).toHaveLength(1);
+  expect(await pending).toEqual({ products: [], incomplete: true });
+  expect((selectVerifiedListings as jest.Mock).mock.calls[0][0]).toEqual([]);
 }, 30000);
 
 it('ignores a few forged deletions: the listing stays and the snapshot is complete', async () => {
@@ -457,9 +465,9 @@ it('caps synchronous checks of forged oversized events and fails closed', async 
   }
   await answer();
   const result = await pending;
-  // Oversized checks stopped at the cap (the listing winner adds one more).
+  // Oversized checks stopped at the cap; skipped revisions make the snapshot unavailable.
   expect(verify.mock.calls.length).toBeLessThanOrEqual(16 + 1);
-  expect(result).toMatchObject({ incomplete: true, products: [expect.anything()] });
+  expect(result).toMatchObject({ incomplete: true, products: [] });
 });
 
 it('gives up on a flood of forged signatures and flags the snapshot incomplete', async () => {
@@ -754,4 +762,105 @@ describe('listingsCutMattered', () => {
   it('matters when the cut-off listings would have made the display', () => {
     expect(listingsCutMattered(100, shown(250, 99), true)).toBe(true);
   });
+});
+
+it('never applies a forged 33rd deletion claiming the genuine seller', async () => {
+  jest.useRealTimers();
+  const pending = start();
+  await flush();
+  deliver(pass('listings')[0], event);
+  pass('listings')[0].c.oneose();
+  await flush();
+  for (let i = 0; i < 33; i++)
+    deliver(pass('deletions')[0], forgedDeletion(i, ['a', `30402:${author}:book`]));
+  pass('deletions').forEach((s) => s.c.oneose());
+  const result = await pending;
+  expect(result.incomplete).toBe(true);
+  expect((selectVerifiedListings as jest.Mock).mock.calls[0][0]).toEqual([]);
+  // The entire snapshot is unavailable; no unverified deletion is passed to selection.
+  expect(verify.mock.calls.filter(([e]) => e.kind === 5)).toHaveLength(32);
+  expect(result.products).toEqual([]);
+});
+
+it('ignores an oversized forged deletion even after the oversized failure budget', async () => {
+  jest.useRealTimers();
+  const pending = start();
+  await flush();
+  deliver(pass('listings')[0], event);
+  pass('listings')[0].c.oneose();
+  await flush();
+  for (let i = 0; i < 17; i++) {
+    const unsigned = {
+      ...forgedDeletion(i, ['a', `30402:${author}:book`]),
+      content: 'x'.repeat(40000),
+    };
+    deliver(pass('deletions')[0], { ...unsigned, id: getEventHash(unsigned) });
+  }
+  pass('deletions').forEach((s) => s.c.oneose());
+  expect(await pending).toEqual({ incomplete: true, products: [] });
+  expect((selectVerifiedListings as jest.Mock).mock.calls[0][0]).toEqual([]);
+});
+
+it('withholds the snapshot when a sold oversized revision arrives after 16 forgeries', async () => {
+  const firstPage = jest.fn();
+  const pending = fetchMarketListings(
+    [author],
+    ['wss://example.com'],
+    new AbortController().signal,
+    firstPage,
+  );
+  await flush();
+  const [listings] = pass('listings');
+  deliver(listings, event);
+  for (let i = 0; i < 16; i++) {
+    const unsigned = { ...event, created_at: 200 + i, content: 'x'.repeat(40000) };
+    deliver(
+      listings,
+      JSON.parse(
+        JSON.stringify({
+          ...unsigned,
+          id: getEventHash(unsigned),
+          sig: '0'.repeat(128),
+        }),
+      ),
+    );
+  }
+  deliver(
+    listings,
+    finalizeEvent(
+      {
+        kind: event.kind,
+        created_at: 300,
+        content: 'x'.repeat(40000),
+        tags: [...event.tags, ['status', 'sold']],
+      },
+      key,
+    ),
+  );
+  await answer();
+  expect(await pending).toEqual({ products: [], incomplete: true });
+  expect(firstPage).not.toHaveBeenCalled();
+  expect(verify).toHaveBeenCalledTimes(16);
+});
+
+it('withholds an older listing when an oversized revision exceeds the verification ceiling', async () => {
+  const pending = start();
+  await flush();
+  const [listings] = pass('listings');
+  deliver(listings, event);
+  deliver(
+    listings,
+    finalizeEvent(
+      {
+        kind: event.kind,
+        created_at: 300,
+        content: 'x'.repeat(1048577),
+        tags: [...event.tags, ['status', 'sold']],
+      },
+      key,
+    ),
+  );
+  await answer();
+  expect(await pending).toEqual({ products: [], incomplete: true });
+  expect(verify).not.toHaveBeenCalled();
 });

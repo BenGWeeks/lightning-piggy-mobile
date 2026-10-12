@@ -1,3 +1,4 @@
+import { signAccountEvent } from '../services/signAccountEvent';
 import React, {
   createContext,
   useContext,
@@ -1469,38 +1470,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   });
 
   const signEvent = useCallback(
-    async (event: {
-      kind: number;
-      created_at: number;
-      tags: string[][];
-      content: string;
-    }): Promise<SignedEvent | null> => {
-      if (!pubkey || !isLoggedIn) return null;
-      try {
-        if (signerType === 'nsec') {
-          const nsec = await SecureStore.getItemAsync(NSEC_KEY);
-          if (!nsec) return null;
-          const { secretKey } = nostrService.decodeNsec(nsec);
-          return nostrService.signEvent(event, secretKey) as SignedEvent;
-        } else if (signerType === 'amber') {
-          const { event: signedEventJson } = await amberService.requestEventSignature(
-            JSON.stringify(event),
-            '',
-            pubkey,
-          );
-          if (!signedEventJson) return null;
-          return JSON.parse(signedEventJson) as SignedEvent;
-        } else if (signerType === 'nip46') {
-          const signedEventJson = await nip46Sign(event, pubkey);
-          if (!signedEventJson) return null;
-          return JSON.parse(signedEventJson) as SignedEvent;
-        }
-        return null;
-      } catch (error) {
-        if (__DEV__) console.warn('[Nostr] signEvent failed:', error);
-        return null;
-      }
-    },
+    (event: Parameters<typeof signAccountEvent>[0]) =>
+      signAccountEvent(event, { pubkey, isLoggedIn, signerType }),
     [pubkey, isLoggedIn, signerType],
   );
 
