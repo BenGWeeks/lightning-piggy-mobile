@@ -4,6 +4,8 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useAccountState } from '../contexts/useAccountState';
 import {
   cacheConversationReactions,
+  reactionCacheGeneration,
+  isReactionCacheGenerationCurrent,
   readConversationReactions,
 } from '../utils/conversationReactionCache';
 import { createYieldScheduler } from '../contexts/nostrDecryptPacing';
@@ -34,6 +36,7 @@ export interface UseConversationReactionsParams {
   // This conversation's peer pubkey (author of received bubbles).
   peerPubkey: string;
   authorForItem?: (item: Item) => string | null;
+  // Resolves only on an authoritative completed read; failures/timeouts reject.
   fetchReactionsForMessages: (targetEventIds: string[]) => Promise<
     {
       id: string;
@@ -132,6 +135,12 @@ export function useConversationReactions({
   // this thread; `reactionsByTarget` is the reduced view. Separate slots so an
   // optimistic local append folds in cleanly without a re-fetch.
   const owner = myPubkey && scopeKey ? `${myPubkey.toLowerCase()}:${scopeKey}` : null;
+  const cacheScope = useMemo(() => ({ owner, token: reactionCacheGeneration() }), [owner]);
+  const cacheToken = cacheScope.token;
+  const writerIsCurrent = useCallback(
+    () => isReactionCacheGenerationCurrent(cacheToken),
+    [cacheToken],
+  );
   const initial = useMemo(() => readConversationReactions(owner), [owner]);
   const [reactionRecords, setReactionRecords] = useAccountState(owner, initial.records);
   const reactionsByTarget = useMemo<Map<string, MessageReactionState>>(
@@ -167,12 +176,12 @@ export function useConversationReactions({
     [initial],
   );
   useLayoutEffect(() => {
-    cacheConversationReactions(owner, { records: reactionRecords, retractions });
-  }, [owner, reactionRecords, retractions]);
+    cacheConversationReactions(owner, { records: reactionRecords, retractions }, cacheToken);
+  }, [owner, reactionRecords, retractions, cacheToken]);
 
   const mergeFreshRecords = useCallback(
     (fresh: ReactionRecord[]) => {
-      if (fresh.length === 0) return;
+      if (!writerIsCurrent() || fresh.length === 0) return;
       setReactionRecords((prev) => {
         const seen = new Set(prev.map((r) => r.id));
         const merged = [...prev];
@@ -187,7 +196,7 @@ export function useConversationReactions({
         return merged;
       });
     },
-    [setReactionRecords, retractions],
+    [setReactionRecords, retractions, writerIsCurrent],
   );
 
   // Apply a batch of NIP-09 (kind-5) deletion events to the local record list.
@@ -198,7 +207,7 @@ export function useConversationReactions({
   // actually matched, so an unrelated deletion batch doesn't force a re-render.
   const applyDeletionEvents = useCallback(
     (deletions: { pubkey: string; tags: string[][] }[]) => {
-      if (deletions.length === 0) return;
+      if (!writerIsCurrent() || deletions.length === 0) return;
       for (const d of deletions) {
         for (const t of d.tags) {
           if (t[0] !== 'e' || typeof t[1] !== 'string' || t[1].length === 0) continue;
@@ -208,10 +217,14 @@ export function useConversationReactions({
           retractions.set(id, by);
         }
       }
-      cacheConversationReactions(owner, {
-        records: readConversationReactions(owner).records,
-        retractions,
-      });
+      cacheConversationReactions(
+        owner,
+        {
+          records: readConversationReactions(owner).records,
+          retractions,
+        },
+        cacheToken,
+      );
       setReactionRecords((prev) => {
         let next = prev;
         for (const d of deletions) {
@@ -224,7 +237,7 @@ export function useConversationReactions({
         return next.length === prev.length ? prev : next;
       });
     },
-    [setReactionRecords, retractions, owner],
+    [setReactionRecords, retractions, owner, cacheToken, writerIsCurrent],
   );
 
   // Stage live MLS events before applying them: one state update per burst,
@@ -278,16 +291,24 @@ export function useConversationReactions({
       try {
         const events = await fetchReactionsForMessages(targets);
         settled = true;
-        if (cancelled || events.length === 0) return;
+        if (cancelled || !writerIsCurrent()) return;
         const fresh = events.map(parseReactionEvent).filter((r): r is ReactionRecord => !!r);
         mergeFreshRecords(fresh);
         // Now that we know the reaction ids for these targets, pull any NIP-09
         // retractions of them and apply them — so a peer who un-reacted before
         // we loaded doesn't leave a stale pill rendered.
-        const reactionIds = fresh.map((r) => r.id);
+        const targetSet = new Set(targets);
+        const reactionIds = [
+          ...new Set([
+            ...fresh.map((r) => r.id),
+            ...readConversationReactions(owner)
+              .records.filter((r) => targetSet.has(r.targetEventId))
+              .map((r) => r.id),
+          ]),
+        ];
         if (reactionIds.length === 0) return;
         const deletions = await fetchReactionDeletions(reactionIds);
-        if (cancelled) return;
+        if (cancelled || !writerIsCurrent()) return;
         applyDeletionEvents(deletions);
       } catch {
         settled = true;
@@ -311,6 +332,8 @@ export function useConversationReactions({
     fetchReactionDeletions,
     applyDeletionEvents,
     subscribeLiveReactions,
+    owner,
+    writerIsCurrent,
   ]);
 
   // The currently-actioned message (long-pressed → MessageActionsSheet open).
@@ -334,7 +357,7 @@ export function useConversationReactions({
   // directly instead of seeding state and hoping it commits first.
   const toggleReactionForTarget = useCallback(
     async (target: ActionedMessage | null, emoji: string, existingReactionId: string | null) => {
-      if (!target || !myPubkey) {
+      if (!writerIsCurrent() || !target || !myPubkey) {
         closeMessageActions();
         return;
       }
@@ -398,6 +421,7 @@ export function useConversationReactions({
         targetAuthorPubkey: target.authorPubkey,
         targetEventKind: target.targetKind,
       });
+      if (!writerIsCurrent()) return;
       // Did the user un-react while the publish was in flight? (`delete` both
       // reads and clears the flag in one shot.)
       const cancelled = cancelledOptimisticRef.current.delete(optimisticId);
@@ -427,6 +451,7 @@ export function useConversationReactions({
     },
     [
       closeMessageActions,
+      writerIsCurrent,
       setReactionRecords,
       scheduled,
       reactionRecords,

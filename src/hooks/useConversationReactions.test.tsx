@@ -17,6 +17,25 @@ import { useConversationReactions } from './useConversationReactions';
 import type { ConversationMessageInput, Item } from '../utils/conversationItems';
 import { isOptimisticReactionId } from '../utils/reactions';
 
+import {
+  cacheConversationReactions,
+  clearConversationReactions,
+  readConversationReactions,
+  reactionCacheGeneration,
+} from '../utils/conversationReactionCache';
+import { useReactionBackend } from './useReactionBackend';
+import { marmotReactionSource } from '../services/marmotReactions';
+import { setMarmotSession, type MarmotSession } from '../services/marmotSession';
+import { fetchReactions, fetchReactionDeletions } from '../services/nostrReactions';
+import { pool } from '../services/nostrService';
+
+jest.mock('../services/nostrService', () => ({
+  pool: { ensureRelay: jest.fn() },
+  trackRelays: jest.fn(),
+}));
+beforeEach(clearConversationReactions);
+afterEach(() => setMarmotSession(null));
+
 jest.mock('@react-navigation/native', () => ({
   useFocusEffect: (effect: () => void) =>
     jest.requireActual<typeof import('react')>('react').useEffect(effect, [effect]),
@@ -336,32 +355,77 @@ describe('cached reactions on initial message render', () => {
   it.each(['nip17', 'marmot', 'group'])(
     '%s reopens with reactions on its first commit',
     async (protocol) => {
+      const event = {
+        id: `cached-${protocol}`,
+        pubkey: PEER_PK,
+        kind: 7,
+        content: '👍',
+        created_at: 1,
+        tags: [['e', TARGET]],
+      };
+      const queryHistory = jest.fn(async (_group: string, kinds: number[]) =>
+        kinds.includes(7) ? [event] : [],
+      );
+      const dmGroupIdsWith = jest.fn(async () => ['dm-group']);
+      setMarmotSession({
+        pubkey: MY_PK,
+        queryHistory,
+        dmGroupIdsWith,
+        subscribe: jest.fn(() => () => {}),
+        stop: jest.fn(),
+      } as unknown as MarmotSession);
+      const subscribe = jest.fn((_filters, callbacks) => {
+        queueMicrotask(() => {
+          if (_filters[0].kinds.includes(7)) callbacks.onevent(event);
+          callbacks.oneose();
+        });
+        return { close: jest.fn() };
+      });
+      (pool.ensureRelay as jest.Mock).mockResolvedValue({ subscribe });
+      const relay = {
+        fetchReactionsForMessages: (ids: string[]) => fetchReactions(ids, ['wss://relay']),
+        fetchReactionDeletions: (ids: string[]) => fetchReactionDeletions(ids, ['wss://relay']),
+        publishReaction: jest.fn(),
+        deleteReaction: jest.fn(),
+      };
+      const group = marmotReactionSource(MY_PK, PEER_PK, 'explicit-group');
       const params = makeParams({
         scopeKey: `first-frame:${protocol}`,
         messages: [{ id: TARGET, rumorId: TARGET, text: 'cached', createdAt: 1, fromMe: true }],
-        fetchReactionsForMessages: jest.fn().mockResolvedValue([
-          {
-            id: `cached-${protocol}`,
-            pubkey: PEER_PK,
-            kind: 7,
-            content: '👍',
-            created_at: 1,
-            tags: [['e', TARGET]],
-          },
-        ]),
       });
-      const first = renderHook(() => useConversationReactions(params));
+      const useAdaptedReactions = () => {
+        const backend = useReactionBackend(
+          protocol === 'nip17' ? 'nip17' : 'marmot',
+          MY_PK,
+          PEER_PK,
+          relay,
+        );
+        return useConversationReactions({
+          ...params,
+          ...(protocol === 'group'
+            ? { ...group, subscribeLiveReactions: group.subscribe }
+            : backend),
+        });
+      };
+      const first = renderHook(useAdaptedReactions);
       await waitFor(() => expect(first.result.current.reactionsByTarget.get(TARGET)).toBeDefined());
       // Allow deletion reconciliation to settle before leaving the conversation.
-      await waitFor(() => expect(params.fetchReactionDeletions).toHaveBeenCalled());
+      await waitFor(() => {
+        if (protocol === 'nip17') expect(subscribe).toHaveBeenCalledTimes(2);
+        else
+          expect(queryHistory).toHaveBeenCalledWith(
+            protocol === 'group' ? 'explicit-group' : 'dm-group',
+            [5],
+          );
+      });
+      if (protocol === 'group') expect(dmGroupIdsWith).not.toHaveBeenCalled();
+      else if (protocol === 'marmot') expect(dmGroupIdsWith).toHaveBeenCalledWith(PEER_PK);
       first.unmount();
       const commits: boolean[] = [];
-      const reopen = makeParams({
-        ...params,
-        fetchReactionsForMessages: jest.fn(() => new Promise(() => {})),
-      });
+      queryHistory.mockImplementation(() => new Promise(() => {}));
+      (pool.ensureRelay as jest.Mock).mockImplementation(() => new Promise(() => {}));
       const second = renderHook(() => {
-        const value = useConversationReactions(reopen);
+        const value = useAdaptedReactions();
         commits.push(value.reactionsByTarget.has(TARGET));
         return value;
       });
@@ -401,4 +465,143 @@ it('hides the previous scope during render and ignores a late fetch from it', as
   );
   expect(result.current.reactionsByTarget.size).toBe(0);
   unmount();
+});
+
+const cachedEvent = {
+  id: 'cached-deleted',
+  pubkey: PEER_PK,
+  kind: 7,
+  content: '👍',
+  created_at: 1,
+  tags: [['e', TARGET]],
+};
+const cachedMessages = [{ id: TARGET, rumorId: TARGET, text: 'hi', createdAt: 1, fromMe: true }];
+function seedReaction(scopeKey: string) {
+  cacheConversationReactions(
+    `${MY_PK}:${scopeKey}`,
+    {
+      records: [
+        {
+          id: cachedEvent.id,
+          reactorPubkey: PEER_PK,
+          targetEventId: TARGET,
+          emoji: '👍',
+          createdAt: 1,
+        },
+        {
+          id: 'unfetched',
+          reactorPubkey: PEER_PK,
+          targetEventId: 'other-target',
+          emoji: '❤️',
+          createdAt: 1,
+        },
+      ],
+      retractions: new Map(),
+    },
+    reactionCacheGeneration(),
+  );
+}
+
+it('queries cached IDs on an authoritative empty read and prunes only author-verified deletions', async () => {
+  seedReaction('deleted-closed');
+  const fetchReactionDeletions = jest
+    .fn()
+    .mockResolvedValue([
+      { id: 'delete', pubkey: PEER_PK, created_at: 2, tags: [['e', cachedEvent.id]] },
+    ]);
+  const params = makeParams({
+    scopeKey: 'deleted-closed',
+    messages: cachedMessages,
+    fetchReactionDeletions,
+  });
+  const { result } = renderHook(() => useConversationReactions(params));
+  await waitFor(() => expect(fetchReactionDeletions).toHaveBeenCalledWith([cachedEvent.id]));
+  await waitFor(() => expect(result.current.reactionsByTarget.has(TARGET)).toBe(false));
+  expect(result.current.reactionsByTarget.has('other-target')).toBe(true);
+});
+
+it.each(['failure', 'timeout'])(
+  'retains cached reactions when a fresh read ends in %s',
+  async (reason) => {
+    seedReaction(reason);
+    const params = makeParams({
+      scopeKey: reason,
+      messages: cachedMessages,
+      fetchReactionsForMessages: jest.fn().mockRejectedValue(new Error(reason)),
+    });
+    const { result } = renderHook(() => useConversationReactions(params));
+    await act(async () => {});
+    expect(result.current.reactionsByTarget.has(TARGET)).toBe(true);
+    expect(params.fetchReactionDeletions).not.toHaveBeenCalled();
+  },
+);
+
+it('rejects late deletion and publish writers after account caches are cleared', async () => {
+  seedReaction('late-writers');
+  let resolveDeletion!: (
+    events: Awaited<
+      ReturnType<Parameters<typeof useConversationReactions>[0]['fetchReactionDeletions']>
+    >,
+  ) => void;
+  let resolvePublish!: (id: string) => void;
+  const params = makeParams({
+    scopeKey: 'late-writers',
+    messages: cachedMessages,
+    fetchReactionDeletions: jest.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveDeletion = resolve;
+        }),
+    ),
+    publishReaction: jest.fn(
+      () =>
+        new Promise((resolve) => {
+          resolvePublish = resolve;
+        }),
+    ),
+  });
+  const { result } = renderHook(() => useConversationReactions(params));
+  await waitFor(() => expect(params.fetchReactionDeletions).toHaveBeenCalled());
+  act(() => result.current.buildOnToggleReaction(sentItem)!('❤️', null));
+  clearConversationReactions();
+  await act(async () => {
+    resolveDeletion([
+      { id: 'delete', pubkey: PEER_PK, created_at: 2, tags: [['e', cachedEvent.id]] },
+    ]);
+    resolvePublish('late-publish');
+  });
+  expect(readConversationReactions(`${MY_PK}:late-writers`).records).toEqual([]);
+  expect(readConversationReactions(`${MY_PK}:late-writers`).retractions.size).toBe(0);
+});
+
+it('does not prune a cached reaction when the deletion read fails', async () => {
+  seedReaction('deletion-failure');
+  const params = makeParams({
+    scopeKey: 'deletion-failure',
+    messages: cachedMessages,
+    fetchReactionDeletions: jest.fn().mockRejectedValue(new Error('timed out')),
+  });
+  const { result } = renderHook(() => useConversationReactions(params));
+  await act(async () => {});
+  expect(params.fetchReactionDeletions).toHaveBeenCalledWith([cachedEvent.id]);
+  expect(result.current.reactionsByTarget.has(TARGET)).toBe(true);
+});
+
+it('rejects a late history result after teardown even before the old screen unmounts', async () => {
+  let resolveHistory!: (events: (typeof cachedEvent)[]) => void;
+  const params = makeParams({
+    scopeKey: 'late-history',
+    messages: cachedMessages,
+    fetchReactionsForMessages: jest.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveHistory = resolve;
+        }),
+    ),
+  });
+  const { result } = renderHook(() => useConversationReactions(params));
+  clearConversationReactions();
+  await act(async () => resolveHistory([cachedEvent]));
+  expect(result.current.reactionsByTarget.size).toBe(0);
+  expect(readConversationReactions(`${MY_PK}:late-history`).records).toEqual([]);
 });

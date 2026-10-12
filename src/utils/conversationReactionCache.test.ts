@@ -1,5 +1,14 @@
-import { cacheConversationReactions, readConversationReactions } from './conversationReactionCache';
+import {
+  cacheConversationReactions as writeCache,
+  readConversationReactions,
+  reactionCacheGeneration,
+  clearConversationReactions,
+} from './conversationReactionCache';
 import { makeOptimisticReactionId, type ReactionRecord } from './reactions';
+
+const cacheConversationReactions = (key: string, snapshot: Parameters<typeof writeCache>[1]) =>
+  writeCache(key, snapshot, reactionCacheGeneration());
+beforeEach(clearConversationReactions);
 
 const record: ReactionRecord = {
   id: 'reaction',
@@ -45,4 +54,43 @@ it('bounds retained conversations and events', () => {
   expect(cached.records).toHaveLength(2000);
   expect(cached.records[0].id).toBe('r1');
   expect(cached.retractions.size).toBe(2000);
+});
+
+it('bounds total deletion-author pairs and retains known legitimate deletions amid forged authors', () => {
+  const attackers = new Set(Array.from({ length: 5000 }, (_, i) => `attacker-${i}`));
+  attackers.add(record.reactorPubkey);
+  cacheConversationReactions('oversized', {
+    records: [record],
+    retractions: new Map([
+      ['reaction', attackers],
+      ['other', attackers],
+    ]),
+  });
+  const cached = readConversationReactions('oversized');
+  expect([...cached.retractions.values()].reduce((n, authors) => n + authors.size, 0)).toBe(2000);
+  expect(cached.retractions.get('reaction')?.has(record.reactorPubkey)).toBe(true);
+  expect(cached.records).toEqual([]);
+  cacheConversationReactions('oversized', {
+    ...cached,
+    retractions: new Map([
+      ['reaction', attackers],
+      ['other', attackers],
+    ]),
+  });
+  expect(
+    readConversationReactions('oversized').retractions.get('reaction')?.has(record.reactorPubkey),
+  ).toBe(true);
+  cacheConversationReactions('oversized', {
+    records: [record],
+    retractions: readConversationReactions('oversized').retractions,
+  });
+  expect(readConversationReactions('oversized').records).toEqual([]);
+});
+
+it('rejects late writers after clearing, including a return to the same account', () => {
+  const token = reactionCacheGeneration();
+  cacheConversationReactions('viewer:thread', { records: [record], retractions: new Map() });
+  clearConversationReactions();
+  writeCache('viewer:thread', { records: [record], retractions: new Map() }, token);
+  expect(readConversationReactions('viewer:thread').records).toEqual([]);
 });

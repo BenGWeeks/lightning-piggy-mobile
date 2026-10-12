@@ -124,7 +124,7 @@ export function useReactionActions({
         return await fetchReactions(targetEventIds, getReadRelays());
       } catch (error) {
         if (__DEV__) console.warn('[Nostr] fetchReactionsForMessages failed:', error);
-        return [];
+        throw error;
       }
     },
     [getReadRelays],
@@ -137,7 +137,7 @@ export function useReactionActions({
         return await fetchReactionDeletions(reactionEventIds, getReadRelays());
       } catch (error) {
         if (__DEV__) console.warn('[Nostr] fetchReactionDeletionsForReactions failed:', error);
-        return [];
+        throw error;
       }
     },
     [getReadRelays],

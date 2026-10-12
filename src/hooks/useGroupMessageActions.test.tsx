@@ -1,7 +1,10 @@
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 import { useGroupMessageActions } from './useGroupMessageActions';
 import { messageEditDelete } from '../utils/messageEditDelete';
-import { cacheConversationReactions } from '../utils/conversationReactionCache';
+import {
+  cacheConversationReactions,
+  reactionCacheGeneration,
+} from '../utils/conversationReactionCache';
 
 let mockFocused = true;
 jest.mock('@react-navigation/native', () => ({
@@ -45,7 +48,11 @@ const reaction = (id: string, pubkey: string) => ({
   tags: [['e', target]],
 });
 beforeEach(() => {
-  cacheConversationReactions(`${me}:${me}:group`, { records: [], retractions: new Map() });
+  cacheConversationReactions(
+    `${me}:${me}:group`,
+    { records: [], retractions: new Map() },
+    reactionCacheGeneration(),
+  );
   jest.clearAllMocks();
   mockFocused = true;
   mockFetch.mockResolvedValue([]);
