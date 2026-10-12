@@ -1,0 +1,67 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: NIP-22 comments show as replies on a profile's Posts & replies (#1337)
+---
+# Read-only: opens Derek Ross's public profile through the nostr: deep link.
+# His Ditto reply bd7579856f17… to one of Ben's notes is a NIP-22 comment
+# (kind 1111, E / K = 1), not a kind-1 reply. It must show under
+# "Posts & replies" with a "Replying to @Name" line and the parent preview,
+# and never under "Posts". Nothing is published.
+# Needs a signed-in account (any test Piggy) and network access to relays
+# that carry the comment (relay.primal.net / relay.ditto.pub).
+
+# Start fresh, so the profile opens at the top of its list.
+- stopApp
+- openLink: 'nostr:npub18ams6ewn5aj2n3wt2qawzglx9mr4nzksxhvrdc4gzrecw7n5tvjqctp424'
+- extendedWaitUntil:
+    visible: { id: 'profile-tab-posts' }
+    timeout: 60000
+- extendedWaitUntil:
+    visible: { id: 'contact-profile-note-card-.*' }
+    timeout: 60000
+
+# "Posts & replies": the comment, with its reply context.
+- tapOn: { id: 'profile-posts-filter-replies' }
+# Derek posts a lot, so the comment can be several pages down; the list
+# pages on its own as it nears the end.
+- scrollUntilVisible:
+    element: { id: 'contact-profile-note-card-bd7579856f17' }
+    direction: DOWN
+    timeout: 240000
+    speed: 70
+    waitToSettleTimeoutMs: 500
+    visibilityPercentage: 50
+    centerElement: true
+# A fast scroll can coast past; settle on the card's parent preview (Ben's
+# note 77f88939b4c8…, fetched through the embed cache) with slow swipes.
+- scrollUntilVisible:
+    element: { id: 'nostr-embed-parent-77f88939b4c8' }
+    direction: UP
+    timeout: 60000
+    speed: 15
+    visibilityPercentage: 100
+    centerElement: true
+- assertVisible: { id: 'profile-reply-context-bd7579856f17' }
+- assertVisible: { id: 'profile-reply-context-bd7579856f17-author' }
+- assertVisible: { id: 'contact-profile-note-card-bd7579856f17' }
+- takeScreenshot: nip22-posts-and-replies
+
+# "Posts": top-level posts only, so the comment is gone.
+# Back to the top (the in-list tab bar), and let the list stop coasting
+# before tapping the switch.
+- scrollUntilVisible:
+    element: { id: 'profile-tab-posts' }
+    direction: UP
+    timeout: 120000
+    speed: 80
+    waitToSettleTimeoutMs: 1000
+- tapOn:
+    id: 'profile-posts-filter-posts'
+    waitToSettleTimeoutMs: 1000
+- extendedWaitUntil:
+    visible: { id: 'contact-profile-note-card-.*' }
+    timeout: 30000
+- assertNotVisible: { id: 'contact-profile-note-card-bd7579856f17' }
+- assertNotVisible: { id: 'profile-reply-context-.*' }
+- takeScreenshot: nip22-posts-only
+
+- tapOn: { id: 'contact-profile-back' }
