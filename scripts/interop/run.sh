@@ -80,8 +80,9 @@ device_setup() {
   export PHOTO_READY=false
   local _
   for _ in 1 2 3 4 5 6 7 8 9 10; do
-    if adb -s "$DEVICE" shell content query --uri content://media/external/images/media \
-      --projection _display_name --sort "date_added DESC" 2>/dev/null | head -1 |
+    # (The sort clause is quoted for the device shell, or it splits on the space.)
+    if adb -s "$DEVICE" shell "content query --uri content://media/external/images/media \
+      --projection _display_name --sort 'date_added DESC'" 2>/dev/null | head -1 |
       grep -q "_display_name=interop-$TAG.png"; then
       PHOTO_READY=true
       break

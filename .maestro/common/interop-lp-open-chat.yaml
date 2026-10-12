@@ -50,6 +50,13 @@ appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
     timeout: 20000
     visibilityPercentage: 50
     optional: true
+# Right after a cold start the app may still be joining the run's group from
+# its Welcome; the row appears live at the top once it has.
+- extendedWaitUntil:
+    visible:
+      id: '${ROW_ID}'
+    timeout: 120000
+    optional: true
 - scrollUntilVisible:
     element:
       id: '${ROW_ID}'

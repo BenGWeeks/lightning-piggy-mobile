@@ -104,11 +104,14 @@ function checksFor(flow) {
 // Checks that need Lightning Piggy's own sends (flow-147) can't be judged if
 // that flow never got going.
 const sendFlow = checksFor('flow-147-interop-lp-sends-group');
-const lpSendsMissing = Boolean(sendFlow?.firstFailure);
+const lpSendsMissing =
+  !sendFlow ||
+  Boolean(sendFlow.firstFailure) ||
+  (sendFlow.length === 0 && !read('flow-147-interop-lp-sends-group.log').includes('COMPLETED'));
 const DEPENDS_ON_147 = /^lp\.(plain|md|long|edit|image|delete)$/;
 // …and the rename-path checks need flow-149's rename to have happened.
 const renameFlow = checksFor('flow-149-interop-lp-rename-after-admin');
-const lpRenameMissing = Boolean(renameFlow?.firstFailure);
+const lpRenameMissing = !renameFlow || Boolean(renameFlow.firstFailure);
 const DEPENDS_ON_149 = /^lp\.(after-lp-rename|renamed-title)$/;
 
 for (const [file, title, shotPrefix] of FLOWS) {
@@ -119,9 +122,11 @@ for (const [file, title, shotPrefix] of FLOWS) {
   if (!checks?.length) {
     const why = checks?.firstFailure
       ? `it failed before its first check at \`${checks.firstFailure}\``
-      : /UNAVAILABLE|127\.0\.0\.1:7001/.test(text)
-        ? "Maestro's on-device driver dropped (harness, not the app)"
-        : 'it stopped before its first check';
+      : /not connected/.test(text)
+        ? 'the device was disconnected (harness, not the app)'
+        : /UNAVAILABLE|127\.0\.0\.1:7001/.test(text)
+          ? "Maestro's on-device driver dropped (harness, not the app)"
+          : 'it stopped before its first check';
     out.push(`**HARNESS: no results** — ${why}. See \`logs/${file}.log\`.`, '');
     continue;
   }
@@ -145,7 +150,7 @@ const done = jsonLines('listen-lp.jsonl').find((l) => l.done);
 if (done) {
   out.push('## Lightning Piggy → group, on the wire (scripted member)', '');
   if (lpSendsMissing)
-    out.push(`N/T: flow-147 (Lightning Piggy's sends) failed at \`${sendFlow.firstFailure}\`.`, '');
+    out.push(`N/T: flow-147 (Lightning Piggy's sends) didn't run to completion.`, '');
   for (const re of done.matched ?? []) out.push(`- PASS \`${re}\``);
   for (const re of done.missing ?? []) out.push(`- FAIL \`${re}\` not received in 90 s`);
   out.push('');
