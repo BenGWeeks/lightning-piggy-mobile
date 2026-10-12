@@ -1,0 +1,145 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Interop — Lightning Piggy sends the item set into the run's Marmot group
+---
+# Lightning Piggy → others. Big Piggy sends ASCII text items, an image, an
+# edit and a delete through the real UI into the run's fresh group. The
+# runner then verifies them twice: on the wire (marmot-sender.mjs `listen`,
+# the scripted member) and on screen (flow-148, White Noise).
+#
+# Markers are `IO<tag>L <key>` (L = sent by Lightning Piggy). Maestro's
+# inputText is ASCII-safe; the Unicode text set is covered by the
+# scripted-sender direction (flow-145 / flow-146).
+#
+# The photo comes from the system photo picker (an OS surface — no testIDs);
+# the runner pushes .maestro/interop/fixtures/interop-image.png to the device
+# first under a per-run name and checks it is the newest image (PHOTO_READY);
+# the picker's own accessibility label "Photo taken on …" then selects it.
+#
+# No hideKeyboard: on the emulator lane (hardware keyboard, no soft keyboard)
+# Maestro's hideKeyboard presses Back and leaves the chat.
+#
+# Env: ROW_ID=group-row-marmot:<group id>, TAG=<run tag>.
+- runFlow:
+    file: ../common/interop-lp-open-chat.yaml
+- tapOn:
+    id: 'group-message-input'
+- inputText: 'IO${TAG}L plain: TEST please ignore, sent from Lightning Piggy'
+# The send button only appears once the composer has text.
+- extendedWaitUntil:
+    visible:
+      id: 'group-send-button'
+    timeout: 10000
+- tapOn:
+    id: 'group-send-button'
+- tapOn:
+    id: 'group-message-input'
+- inputText: 'IO${TAG}L md: **bold** _italic_ ~~strike~~'
+# The send button only appears once the composer has text.
+- extendedWaitUntil:
+    visible:
+      id: 'group-send-button'
+    timeout: 10000
+- tapOn:
+    id: 'group-send-button'
+- tapOn:
+    id: 'group-message-input'
+- inputText: 'IO${TAG}L long: Piggy saving sentence one. Piggy saving sentence two. Piggy saving sentence three. Piggy saving sentence four. Piggy saving sentence five. Piggy saving sentence six.'
+# The send button only appears once the composer has text.
+- extendedWaitUntil:
+    visible:
+      id: 'group-send-button'
+    timeout: 10000
+- tapOn:
+    id: 'group-send-button'
+- tapOn:
+    id: 'group-message-input'
+- inputText: 'IO${TAG}L editme v1'
+# The send button only appears once the composer has text.
+- extendedWaitUntil:
+    visible:
+      id: 'group-send-button'
+    timeout: 10000
+- tapOn:
+    id: 'group-send-button'
+- tapOn:
+    id: 'group-message-input'
+- inputText: 'IO${TAG}L deleteme should disappear'
+# The send button only appears once the composer has text.
+- extendedWaitUntil:
+    visible:
+      id: 'group-send-button'
+    timeout: 10000
+- tapOn:
+    id: 'group-send-button'
+- waitForAnimationToEnd:
+    timeout: 5000
+# Edit: the composer is prefilled with the old text; append to it (Maestro's
+# eraseText doesn't clear a prefilled RN TextInput reliably).
+# Find it first (finger-down swipes reach older messages), then long-press.
+- repeat:
+    times: 6
+    while:
+      notVisible:
+        text: 'IO${TAG}L editme v1'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- longPressOn:
+    text: 'IO${TAG}L editme v1'
+- tapOn:
+    id: 'message-action-edit'
+- inputText: ' EDITED'
+# The send button only appears once the composer has text.
+- extendedWaitUntil:
+    visible:
+      id: 'group-send-button'
+    timeout: 10000
+- tapOn:
+    id: 'group-send-button'
+- waitForAnimationToEnd:
+    timeout: 5000
+# Find it first (finger-down swipes reach older messages), then long-press.
+- repeat:
+    times: 6
+    while:
+      notVisible:
+        text: 'IO${TAG}L deleteme should disappear'
+    commands:
+      - swipe:
+          direction: DOWN
+          duration: 500
+- longPressOn:
+    text: 'IO${TAG}L deleteme should disappear'
+- tapOn:
+    id: 'message-action-delete'
+- runFlow:
+    when:
+      visible:
+        id: 'branded-alert-button-1'
+    commands:
+      - tapOn:
+          id: 'branded-alert-button-1'
+- waitForAnimationToEnd:
+    timeout: 3000
+# Photo via the attachment panel + system picker — only when the runner has
+# proved the newest image on the device is this run's fixture (PHOTO_READY),
+# so a personal photo can never be sent.
+- runFlow:
+    when:
+      true: ${PHOTO_READY == 'true'}
+    commands:
+      - tapOn:
+          id: 'group-attach-button'
+      - tapOn:
+          id: 'attach-send-image'
+      - extendedWaitUntil:
+          visible:
+            text: 'Photo taken on .*'
+          timeout: 15000
+      - tapOn:
+          text: 'Photo taken on .*'
+          index: 0
+      - waitForAnimationToEnd:
+          timeout: 15000
+- takeScreenshot: lp-sent-group

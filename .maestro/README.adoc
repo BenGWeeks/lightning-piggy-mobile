@@ -32,6 +32,8 @@ on their own).
   friends/             flow-NNN  follow/unfollow, contacts, alphabet, search
   groups/              flow-NNN  create/leave/rename/manage, 3-way Triad, amber
   hunt/                flow-NNN  geo-cache discover/detail/publish/found + captures
+  interop/             flow-NNN  Marmot interop with White Noise (145–151), run by
+                       scripts/interop/run.sh with a scripted sender — see interop/README.adoc
   map/                 flow-NNN  render, permission-denied, nearby merchants
   market/              flow-NNN  grid, product detail, reviews/comments tabs
   messaging/           flow-NNN  1:1 DM, conversation, attach panel, secret mode,

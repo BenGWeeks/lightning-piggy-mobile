@@ -1,0 +1,73 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+---
+# Building block (never run alone) for .maestro/interop/: open one Lightning
+# Piggy chat by its exact Messages-row testID, ${ROW_ID} — e.g.
+# `group-row-marmot:<group id>` for the run's fresh group, or
+# `conversation-row-<middle hex>:marmot` for the Marmot 1:1. The runner passes
+# the id of a group it just created, so this can never open a real chat.
+- launchApp:
+    clearState: false
+# Wait for the bundle to load (a dev client can take a while). A cold start
+# restores whatever screen was open last — a chat, Settings, a sheet — so walk
+# back with the app's own back buttons (testIDs ending in "back" or
+# "back-button", or the
+# Settings screens' tab-header-icon-button) until the
+# tab bar shows. A system Back is the last resort, and only after the app has
+# loaded (on the loading screen it would exit the app).
+- extendedWaitUntil:
+    visible:
+      id: '(tab-messages|.*back(-button)?|tab-header-icon-button)'
+    timeout: 120000
+- repeat:
+    times: 6
+    while:
+      notVisible:
+        id: 'tab-messages'
+    commands:
+      - runFlow:
+          when:
+            visible:
+              id: '(.*back(-button)?|tab-header-icon-button)'
+          commands:
+            - tapOn:
+                id: '(.*back(-button)?|tab-header-icon-button)'
+      - runFlow:
+          when:
+            notVisible:
+              id: '(tab-messages|.*back(-button)?|tab-header-icon-button)'
+          commands:
+            - pressKey: back
+      - waitForAnimationToEnd:
+          timeout: 2000
+- tapOn:
+    id: 'tab-messages'
+# The Messages list keeps its scroll position and new chats sort to the top:
+# look upwards first, then downwards.
+- scrollUntilVisible:
+    element:
+      id: '${ROW_ID}'
+    direction: UP
+    timeout: 20000
+    visibilityPercentage: 50
+    optional: true
+# Right after a cold start the app may still be joining the run's group from
+# its Welcome; the row appears live at the top once it has.
+- extendedWaitUntil:
+    visible:
+      id: '${ROW_ID}'
+    timeout: 120000
+    optional: true
+- scrollUntilVisible:
+    element:
+      id: '${ROW_ID}'
+    direction: DOWN
+    timeout: 60000
+    visibilityPercentage: 50
+- tapOn:
+    id: '${ROW_ID}'
+- extendedWaitUntil:
+    visible:
+      id: '(group-message-input|conversation-input)'
+    timeout: 90000
+- waitForAnimationToEnd:
+    timeout: 5000

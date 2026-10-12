@@ -1,0 +1,42 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Interop — after an admin change, Lightning Piggy renames the group and sends
+---
+# Membership/metadata changes. Before this flow the scripted sender made Big
+# Piggy an admin (admin-policy commit) and sent "IO<tag> after-admins".
+# Lightning Piggy must show that message, then (now an admin) renames the
+# group to "IO <tag> renamed" and immediately sends "IO<tag>L after-lp-rename"
+# — the #1309 path. flow-148 checks White Noise saw both.
+#
+# Env: ROW_ID=group-row-marmot:<group id>, TAG=<run tag>.
+- runFlow:
+    file: ../common/interop-lp-open-chat.yaml
+- scrollUntilVisible:
+    label: 'IO-CHECK lp-side.after-admins'
+    element:
+      text: 'IO${TAG} after-admins'
+    direction: DOWN
+    timeout: 60000
+    optional: true
+- takeScreenshot: lp-after-admins
+- tapOn:
+    id: 'group-title'
+- tapOn:
+    id: 'rename-group-input'
+- eraseText: 40
+- inputText: 'IO ${TAG} renamed'
+- tapOn:
+    id: 'rename-group-save'
+- waitForAnimationToEnd:
+    timeout: 5000
+- assertVisible:
+    label: 'IO-CHECK lp-side.renamed-title'
+    text: '(?i)IO ${TAG} renamed'
+    optional: true
+- tapOn:
+    id: 'group-message-input'
+- inputText: 'IO${TAG}L after-lp-rename'
+- tapOn:
+    id: 'group-send-button'
+- waitForAnimationToEnd:
+    timeout: 5000
+- takeScreenshot: lp-after-lp-rename
