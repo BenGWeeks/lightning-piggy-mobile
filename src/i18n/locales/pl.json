@@ -2434,6 +2434,7 @@
     },
     "live": {
       "loading": "Wczytywanie ofert od twoich znajomych…",
+      "updating": "Aktualizowanie…",
       "incomplete": "Nie udało się wczytać niektórych ofert. Spróbuj odświeżyć.",
       "loaded": "Oferty na żywo od twoich znajomych",
       "refresh": "Odśwież",

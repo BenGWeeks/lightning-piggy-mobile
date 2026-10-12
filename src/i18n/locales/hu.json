@@ -2430,6 +2430,7 @@
     },
     "live": {
       "loading": "A barátaid hirdetéseinek betöltése…",
+      "updating": "Frissítés…",
       "incomplete": "Néhány hirdetést nem sikerült betölteni. Próbáld frissíteni.",
       "loaded": "Élő hirdetések a barátaidtól",
       "refresh": "Frissítés",

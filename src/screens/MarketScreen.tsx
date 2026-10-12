@@ -18,6 +18,9 @@ import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { createMarketScreenStyles } from '../styles/MarketScreen.styles';
 import { MARKET_PRODUCTS, sellerOf, type MarketProduct } from '../data/marketProducts';
 import { featuredFirst } from '../utils/marketVendors';
+import { useMarketPreferences } from '../hooks/useMarketPreferences';
+import { validateMarketPreferences } from '../utils/marketPreferences';
+import { marketLoadingStatus } from '../utils/marketLoadingStatus';
 import { DEFAULT_MARKET_MODE, type MarketMode } from '../utils/marketMode';
 import {
   countActiveMarketFilters,
@@ -48,12 +51,19 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
   const { width: windowWidth } = useWindowDimensions();
   const tileWidth = useMemo(() => marketGridTileWidth(windowWidth), [windowWidth]);
 
-  const [mode, setMode] = useState<MarketMode>(DEFAULT_MARKET_MODE);
-  const live = useMarketListings(mode === 'wotFriends');
-  const selectMode = useCallback((next: MarketMode) => {
-    perfLog(`[PerfBlock] market mode tap ${next}`);
-    setMode(next);
-  }, []);
+  const { ready, preferences, update } = useMarketPreferences();
+  const { mode, merchant, country, currency } = preferences;
+  const live = useMarketListings(ready && mode === 'wotFriends');
+  const setMerchant = useCallback((merchant: string | null) => update({ merchant }), [update]);
+  const setCountry = useCallback((country: string | null) => update({ country }), [update]);
+  const setCurrency = useCallback((currency: string | null) => update({ currency }), [update]);
+  const selectMode = useCallback(
+    (next: MarketMode) => {
+      perfLog(`[PerfBlock] market mode tap ${next}`);
+      update({ mode: next });
+    },
+    [update],
+  );
   // Pairs with the tap marker above: the delta is tap-to-commit latency.
   useEffect(() => {
     perfLog(`[PerfBlock] market mode committed ${mode}`);
@@ -67,16 +77,13 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
   // re-filtering stays off the per-keystroke path; the chip axes apply
   // immediately.
   const [query, setQuery] = useState('');
-  const [merchant, setMerchant] = useState<string | null>(null);
-  const [country, setCountry] = useState<string | null>(null);
-  const [currency, setCurrency] = useState<string | null>(null);
   const debouncedQuery = useDebouncedValue(query, 250);
 
   // Mode-scoped catalogue (preferred sellers / WoT friends), featured-first.
   // This is the set the filter options and the filtered list both derive from.
   const baseProducts = useMemo(() => {
-    return featuredFirst(mode === 'wotFriends' ? live.products : MARKET_PRODUCTS);
-  }, [mode, live.products]);
+    return ready ? featuredFirst(mode === 'wotFriends' ? live.products : MARKET_PRODUCTS) : [];
+  }, [ready, mode, live.products]);
 
   // Filter option lists sourced from the data actually loaded (not hardcoded).
   const merchants = useMemo(() => distinctMerchants(baseProducts, sellerOf), [baseProducts]);
@@ -88,10 +95,30 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
   // one mode may not exist under the next, and a chip that no longer renders
   // can't be un-selected from its axis — the grid would just sit empty.
   useEffect(() => {
-    if (merchant !== null && !merchants.includes(merchant)) setMerchant(null);
-    if (country !== null && !countries.includes(country)) setCountry(null);
-    if (currency !== null && !currencies.includes(currency)) setCurrency(null);
-  }, [merchants, countries, currencies, merchant, country, currency]);
+    if (!ready || (mode === 'wotFriends' && (!live.completed || live.loading || live.incomplete)))
+      return;
+    const validated = validateMarketPreferences(preferences, { merchants, countries, currencies });
+    if (
+      validated.merchant !== merchant ||
+      validated.country !== country ||
+      validated.currency !== currency
+    )
+      update(validated);
+  }, [
+    ready,
+    mode,
+    live.completed,
+    live.loading,
+    live.incomplete,
+    merchants,
+    countries,
+    currencies,
+    merchant,
+    country,
+    currency,
+    preferences,
+    update,
+  ]);
 
   const filter = useMemo<MarketFilter>(
     () => ({ query: debouncedQuery, merchant, country, currency }),
@@ -115,7 +142,7 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
     setCountry(null);
     setCurrency(null);
     selectMode(DEFAULT_MARKET_MODE);
-  }, [selectMode]);
+  }, [selectMode, setMerchant, setCountry, setCurrency]);
 
   const openProduct = useCallback(
     (product: MarketProduct) => {
@@ -150,13 +177,15 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
   );
 
   const emptyCopy =
-    mode === 'wotFriends' && (live.loading || live.incomplete)
+    mode === 'wotFriends' && ((live.loading && baseProducts.length === 0) || live.incomplete)
       ? t(live.loading ? 'market.live.loading' : 'market.live.incomplete')
       : filterActive
         ? t('market.screen.emptyNoMatch')
         : mode === 'wotFriends'
           ? t('market.screen.emptyNoFriends')
           : t('market.screen.emptyNone');
+
+  if (!ready) return <View style={styles.container} testID="market-screen" />;
 
   return (
     <View style={styles.container} testID="market-screen">
@@ -261,13 +290,7 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
       {mode === 'wotFriends' ? (
         <View style={styles.liveStatus}>
           <Text style={styles.liveStatusText} testID="market-live-status">
-            {t(
-              live.loading
-                ? 'market.live.loading'
-                : live.incomplete
-                  ? 'market.live.incomplete'
-                  : 'market.live.loaded',
-            )}
+            {t(marketLoadingStatus(live.loading, live.incomplete, baseProducts.length))}
           </Text>
           <TouchableOpacity
             onPress={live.refresh}

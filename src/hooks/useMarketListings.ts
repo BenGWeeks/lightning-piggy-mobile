@@ -2,6 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useIsFocused } from '@react-navigation/native';
 import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import { fetchMarketListings, type MarketListingsResult } from '../services/marketListingsService';
+import {
+  getMarketSnapshot,
+  unexpiredMarketProducts,
+  readMarketSnapshot,
+  writeMarketSnapshot,
+} from '../services/marketStorage';
 
 /**
  * A snapshot younger than this is reused when the user flips back to WoT:
@@ -29,12 +35,14 @@ export function useMarketListings(enabled: boolean) {
   );
   const key = `${pubkey ?? ''}|${authorsKey}|${relaysKey}`;
   const [revision, setRevision] = useState(0);
-  const [state, setState] = useState<MarketListingsResult & { key: string; loading: boolean }>({
-    key: '',
-    products: [],
-    incomplete: false,
+  const [state, setState] = useState<
+    MarketListingsResult & { key: string; loading: boolean; completed: boolean }
+  >(() => ({
+    ...(getMarketSnapshot(key)?.result ?? { products: [], incomplete: false }),
+    key,
     loading: false,
-  });
+    completed: false,
+  }));
   // The last complete snapshot, with its scope, landing time and the refresh
   // revision it answered — a ref, so recording it never re-runs the effect.
   const lastFetch = useRef<{
@@ -58,26 +66,41 @@ export function useMarketListings(enabled: boolean) {
       // brief detour through another scope leaves that scope's key.
       const cached = last.result;
       setState((prev) =>
-        prev.key === key && !prev.loading ? prev : { ...cached, key, loading: false },
+        prev.key === key && !prev.loading
+          ? prev
+          : { ...cached, key, loading: false, completed: true },
       );
       return;
     }
     const controller = new AbortController();
+    const cached = getMarketSnapshot(key);
+    let received = false;
+    if (!cached)
+      void readMarketSnapshot(key).then((snapshot) => {
+        if (!snapshot || received || controller.signal.aborted) return;
+        setState({ ...snapshot.result, key, loading: true, completed: false });
+      });
     // Refreshing the same account/follow scope keeps the current snapshot on
     // screen (and so the user's filters); only a new scope starts empty.
     setState((prev) =>
       prev.key === key
         ? { ...prev, loading: true }
-        : { key, products: [], incomplete: false, loading: true },
+        : {
+            ...(cached?.result ?? { products: [], incomplete: false }),
+            key,
+            loading: true,
+            completed: false,
+          },
     );
     // Paint the newest verified listings early on a first load. A refresh
     // keeps showing its previous (longer) snapshot until the full result.
     const onFirstPage = (products: MarketListingsResult['products']) => {
       if (controller.signal.aborted) return;
+      received = true;
       setState((prev) =>
         prev.key === key && prev.products.length >= products.length
           ? prev
-          : { key, products, incomplete: false, loading: true },
+          : { key, products, incomplete: false, loading: true, completed: false },
       );
     };
     void fetchMarketListings(
@@ -87,7 +110,9 @@ export function useMarketListings(enabled: boolean) {
       onFirstPage,
     ).then((result) => {
       if (controller.signal.aborted) return;
-      setState({ ...result, key, loading: false });
+      received = true;
+      setState({ ...result, key, loading: false, completed: true });
+      void writeMarketSnapshot(key, result);
       // Only a complete snapshot is worth reusing; a partial one refetches.
       lastFetch.current = result.incomplete ? null : { key, at: Date.now(), revision, result };
     });
@@ -103,7 +128,7 @@ export function useMarketListings(enabled: boolean) {
     () => ({
       products:
         state.key === key
-          ? state.products.map((product) => {
+          ? unexpiredMarketProducts(state.products).map((product) => {
               const contact = product.listing
                 ? contactsByPubkey.get(product.listing.event.pubkey)
                 : undefined;
@@ -121,6 +146,7 @@ export function useMarketListings(enabled: boolean) {
             })
           : [],
       loading: enabled && !!pubkey && (state.key !== key || state.loading),
+      completed: state.key === key && state.completed,
       incomplete: state.key === key && state.incomplete,
       refresh,
     }),
