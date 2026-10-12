@@ -1,3 +1,5 @@
+import { AmberSignerError } from '../services/amberErrors';
+import { NostrConnectError, SignerUnavailableError } from '../services/signerErrors';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Kind4RetryStore, KIND4_RETRY_BASE_MS, isTransientKind4Error } from './kind4RetryStore';
 
@@ -61,4 +63,36 @@ it('keeps the oldest pending failure when the retry store reaches capacity', asy
   await store.save();
   expect(store.cursor(1000)).toBe(0);
   expect(JSON.parse((await AsyncStorage.getItem('dm-kind4-retries:owner'))!)).toHaveLength(500);
+});
+
+it.each([
+  [
+    'Amber',
+    new AmberSignerError('BUSY', 'busy', 'invalid MAC'),
+    new AmberSignerError('DECRYPT_FAILED', 'failed', 'invalid MAC'),
+  ],
+  [
+    'NIP-46',
+    new NostrConnectError('unavailable', 'invalid MAC'),
+    new NostrConnectError('decrypt-failed', 'opaque remote failure'),
+  ],
+  ['nsec', new SignerUnavailableError('invalid MAC'), new Error('bad padding')],
+])(
+  'splits transient and ciphertext failures for %s using structure first',
+  (_signer, transient, permanent) => {
+    expect(isTransientKind4Error(transient)).toBe(true);
+    expect(isTransientKind4Error(permanent)).toBe(false);
+  },
+);
+
+it.each([
+  new AmberSignerError('UNKNOWN', 'failed', 'opaque native failure'),
+  new NostrConnectError('failed', 'opaque bunker failure'),
+  new Error('opaque local failure'),
+  { code: 'NO_RESULT', message: 'invalid MAC' },
+  new AmberSignerError('CANCELLED', 'declined', 'invalid MAC'),
+  new AmberSignerError('NO_ACTIVITY', 'unavailable', 'invalid MAC'),
+  new AmberSignerError('NO_RESULT', 'no-response', 'invalid MAC'),
+])('keeps unknown and availability signer errors retryable: %s', (error) => {
+  expect(isTransientKind4Error(error)).toBe(true);
 });

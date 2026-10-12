@@ -1,3 +1,9 @@
+import { AmberSignerError, amberFailureKind } from '../services/amberErrors';
+import {
+  NostrConnectError,
+  SignerUnavailableError,
+  isCiphertextDecryptError,
+} from '../services/signerErrors';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const KIND4_RETRY_BASE_MS = 60_000;
@@ -95,8 +101,12 @@ export class Kind4RetryStore {
 
 /** Transport/availability failures do not exhaust a valid event's retry budget. */
 export function isTransientKind4Error(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /disconnect|not connected|unavailable|not logged in|timeout|timed out|network|offline|ECONN|EAGAIN|transport|connection|temporar|cancel|reject|denied|permission|abort/i.test(
-    message,
-  );
+  if (error instanceof SignerUnavailableError) return true;
+  if (error instanceof NostrConnectError) return error.kind !== 'decrypt-failed';
+  const amberKind = amberFailureKind(error);
+  if (amberKind && amberKind !== 'failed') return true;
+  // Amber's message is translated UI copy; only its native detail can identify
+  // a ciphertext failure. Unknown signer failures must keep the cursor pinned.
+  if (error instanceof AmberSignerError) return !isCiphertextDecryptError(error.detail);
+  return !isCiphertextDecryptError(error);
 }

@@ -45,7 +45,7 @@ export async function decryptInboxKind4(args: {
           }
           attempts++;
           let text: string | null = null;
-          let counted = true;
+          let counted = false;
           try {
             text = await args.decrypt(target.partnerPubkey, target.ev.content);
           } catch (error) {

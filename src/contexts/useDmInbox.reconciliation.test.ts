@@ -2,6 +2,8 @@
  * Account-switch scoping for the DM inbox: one account's conversations must
  * never render under another (accounts share a phone in a family app).
  */
+import { AmberSignerError } from '../services/amberErrors';
+import { requestNip04Decrypt } from '../services/amberService';
 import { InteractionManager } from 'react-native';
 import { scheduleColdStartBackfill } from './dmColdStartBackfill';
 import { COLD_INITIAL_WRAP_LIMIT } from './nostrDmCache';
@@ -21,7 +23,7 @@ import { fetchInboxDmEvents } from '../services/nostrService';
 import { useDmInbox, type UseDmInboxOptions } from './useDmInbox';
 
 jest.mock('../services/nostrService', () => ({ fetchInboxDmEvents: jest.fn() }));
-jest.mock('../services/amberService', () => ({}));
+jest.mock('../services/amberService', () => ({ requestNip04Decrypt: jest.fn() }));
 jest.mock('./nip46DmDecrypt', () => ({ nip46DecryptNip04: jest.fn() }));
 jest.mock('./nostrSecretKeyCache', () => ({
   nip04PlaintextCache: new (jest.requireActual('../utils/lru').LRUCache)({ max: 1000 }),
@@ -78,12 +80,12 @@ const deferred = <T>() => {
   });
   return { promise, resolve };
 };
-const renderInbox = () =>
+const renderInbox = (signerType: 'nip46' | 'amber' = 'nip46') =>
   renderHook((props: UseDmInboxOptions) => useDmInbox(props), {
     initialProps: {
       pubkey: OWNER,
       isLoggedIn: true,
-      signerType: 'nip46',
+      signerType,
       followPubkeys: new Set([FRIEND]),
       getReadRelays: () => ['wss://relay.example'],
     },
@@ -381,7 +383,7 @@ it('completes cold and warm refreshes despite a persistent null kind-4 decrypt a
   relayEvents.push(failed);
   decryptMock.mockImplementation(async (ciphertext) => {
     // The signer throws on invalid ciphertext; the hook converts it to null.
-    if (ciphertext === failed.content) throw new Error('Persistently undecryptable fixture');
+    if (ciphertext === failed.content) throw new Error('invalid ciphertext');
     return 'Lunch tomorrow at noon';
   });
   const wraps = Array.from({ length: COLD_INITIAL_WRAP_LIMIT + 3 }, (_, i) => ({
@@ -499,6 +501,43 @@ it('recovers an old DM after temporary signer failure and a newer arrival withou
   expect(result.current.dmInbox.some((e) => e.id === old.id)).toBe(true);
   expect(await AsyncStorage.getItem(inboxLastSeenKey(OWNER))).toBe(String(BASE + 600));
   expect(JSON.parse((await AsyncStorage.getItem(`dm-kind4-retries:${OWNER}`))!)).toEqual([]);
+  expect(jest.getTimerCount()).toBe(0);
+  unmount();
+});
+
+it('recovers after three structured Amber availability failures beyond the overlap', async () => {
+  jest.useFakeTimers({ doNotFake: ['performance', 'queueMicrotask', 'nextTick', 'setImmediate'] });
+  const old = event(1);
+  const amber = jest.mocked(requestNip04Decrypt);
+  const failures = [
+    new AmberSignerError('BUSY', 'busy', 'native busy'),
+    new AmberSignerError('NO_RESULT', 'no-response', 'native no result'),
+    new AmberSignerError('NO_ACTIVITY', 'unavailable', 'native no activity'),
+  ];
+  amber.mockImplementation(async (ciphertext) => {
+    if (ciphertext === old.content && failures.length) throw failures.shift();
+    return 'Delivered after Amber recovered';
+  });
+  const { result, unmount } = renderInbox('amber');
+  await act(() => result.current.refreshDmInbox());
+  relayEvents.push(event(2, BASE + 600));
+  for (let attempt = 2; attempt <= 3; attempt++) {
+    now = (attempt - 1) * 60_000 + 1000;
+    await act(() => jest.advanceTimersByTimeAsync(60_000));
+    expect(await AsyncStorage.getItem(inboxLastSeenKey(OWNER))).toBe(String(old.created_at));
+    expect(rows.some((r) => r.eventId === old.id)).toBe(false);
+  }
+  expect(rows.some((r) => r.eventId === event(2).id)).toBe(true);
+  expect(JSON.parse((await AsyncStorage.getItem(`dm-kind4-retries:${OWNER}`))!)).toEqual([
+    expect.objectContaining({ id: old.id, attempts: 0 }),
+  ]);
+  now = 181_000;
+  await act(() => jest.advanceTimersByTimeAsync(60_000));
+  expect(amber.mock.calls.filter(([ct]) => ct === old.content)).toHaveLength(4);
+  expect(fetchMock.mock.calls.at(-1)?.[2]?.since).toBe(old.created_at);
+  expect(rows.some((r) => r.eventId === old.id)).toBe(true);
+  expect(result.current.dmInbox.some((e) => e.id === old.id)).toBe(true);
+  expect(await AsyncStorage.getItem(inboxLastSeenKey(OWNER))).toBe(String(BASE + 600));
   expect(jest.getTimerCount()).toBe(0);
   unmount();
 });
