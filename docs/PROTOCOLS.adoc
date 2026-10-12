@@ -97,11 +97,13 @@ A third DM/group transport, wire-compatible with White Noise; full design in `SO
 | 445 | Group event (MLS commits + application messages), `h`-tagged with the Nostr group id; signed by per-message ephemeral keys.
 | 1059 → 446 | MIP-05 push trigger: a kind-446 rumor (concatenated encrypted device tokens, `["v","marmot-push-v1"]`) gift-wrapped to a notification server.
 | 1059 → 8480 | Notification-watcher registration (not Marmot): a kind-8480 rumor whose JSON content either registers this device (`action: "register"` — app, platform, push token, `apns_env` on iOS, categories, relays, NWC proofs, `ts`) or unregisters it (`action: "unregister"` — app, platform, token and `ts` only; removes the device's registration whatever its categories), gift-wrapped to Lightning Piggy's watcher (seal signed by the user). See `docs/architecture/notifications.adoc` → "The notification watcher" and the watcher's `PROTOCOL.md`.
-| 9 (inner) | Chat text. With an `imeta` tag, a MIP-04 photo. A GIF is the GIPHY URL plus a `via GIPHY` line.
-| 7 / 5 (inner) | Reaction (`content` = emoji, `e` = message id) and its retraction (`e` = reaction id), in 1:1 Marmot threads.
+| 9 (inner) | Chat text. With an `imeta` tag, a MIP-04 photo or voice note (`audio/mp4`). A GIF is the GIPHY URL plus a `via GIPHY` line. A quoted reply carries `e` + `q` tags naming the parent.
+| 7 / 5 (inner) | Reaction (`content` = emoji, `e` = message id) and its retraction (`e` = reaction id), in 1:1 Marmot threads. A kind 5 naming a message is "delete for everyone" (sent for your own messages, applied from the author).
+| 1009 (inner) | Edit: one `e` tag naming the original, `content` = the new text. Honoured only from the original's author; latest wins.
+| 4891 (inner) | Admin removal of a message in a group (`{"v":1,"action":"remove"}`), applied.
 | 447 / 448 / 449 (inner) | MIP-05 push-token update / list / removal, gossiped by group members. Kept as push state, never shown. We publish 447 (our own record) and 449 when push is on / turned off; we never send 448 or empty 447 requests.
 | 451 (local-only) | MIP-05 owner proof that each push record's signature covers. Never published.
-| Other inner kinds | 15 (voice notes / files), 1068 (polls), 16/17 (orders), NWC shares: the same rumor NIP-17 carries, unchanged.
+| Other inner kinds | 15 (files), 1068 (polls), 16/17 (orders), NWC shares: the same rumor NIP-17 carries, unchanged.
 |===
 
 Inner events are unsigned rumors (MLS authenticates the sender). Inner kinds that aren't messages — 5, 7, 447–449, 1009 (edit), 1200–1202, 1210, 1984, 1985, 4891 — are never stored as chat rows.
@@ -117,7 +119,8 @@ Members publish encrypted native push tokens inside the group (447/448, removals
 ==== Fallback and interop
 
 * A 1:1 send to someone with no usable key package (none, expired, or a legacy MDK 0.8 one from the classic White Noise app) is re-sent over NIP-17 and the thread switches to NIP-17.
-* Key packages are read from the peer's NIP-65 write relays plus the lookup relays; the newest per `d` slot that passes the library's invite checks is used.
+* Key packages are read from the peer's NIP-65 write relays plus the lookup relays. An invite adds every fresh key package of the peer (newest per `d` slot), so all of their apps join in one commit; linking your own installs (MIP-06 device linking) isn't implemented.
+* Every commit Lightning Piggy sends, including the founding invite, carries a GroupContextExtensions proposal that puts `app_data_dictionary` last, as MDK expects, so a rename or admin change doesn't fork White Noise off the group (#1309).
 * Typing indicators (ephemeral, content-free) and live-location pings (kind 20069) are not carried over MLS.
 
 === Live location: kind-20069 pings + NIP-17 markers (#206)
@@ -401,30 +404,35 @@ Prefix list comes from `geohashPrefixes(currentGh, 5)` so one subscribe covers a
 
 This is purely a consumer of the published kind 31923 — nothing is written back to relays.
 
-=== NIP-99: classified-listing consumer (Bag Charm purchase link)
+=== Market: NIP-99 via Gamma Markets
 
 ==== Summary
 
-Lightning Piggy uses NIP-99 (`kind 30402`, parameterised-replaceable classified listing) in **consumer-only** mode for the Robotechy Piggy Bag Charm purchase link on `HuntCreateScreen` (the "Hide a Piglet" flow).
+The Market (Explore → Market) reads and publishes the https://github.com/GammaMarkets/market-spec[Gamma Markets] profile of NIP-99, the format the reference Nostr shops publish. Design, the quorum rule for editing your own shop, and the screens: `SOLUTION_DESIGN.adoc` → "Market".
 
-==== What's published vs what we render
+[cols="1,2,3",options="header"]
+|===
+| Kind | Event | Read / written
 
-Robotechy publishes a `kind 30402` listing for the Bag Charm — a physical product the hider can buy to attach an NFC tag to. We don't decode the event ourselves; we link out to a `naddr1…`-encoded reference that resolves on https://www.robotechy.com[robotechy.com]:
+| 30402 | Product (NIP-99 classified listing) | Read from preferred sellers or people you follow, signature-checked, `visibility: hidden` skipped. Written by *My shop*: `d`, `title`, `price`, `type`, `visibility`, `stock`, `image`, `t`, `shipping_option [coord, extra-cost?]`, `a` → shop, `published_at`; Markdown in `content`.
+| 30018 | Legacy NIP-15 product | Read only.
+| 30405 | Shop collection | Written by *My shop* (`d = lightning-piggy-shop`, `a` → every product, `shipping_option` → every zone, a `currency` extension tag).
+| 30406 | Shipping option | Read (any seller's, to price shipping on the product page) and written (one per zone; worldwide omits `country`).
+| 31555 | Product review | Read and written; `d` = `a:30402:<seller>:<d>`, ratings stored 0–1.
+| 1111 | NIP-22 comment | Read and written, rooted on the product (`A` / `K` / `P` root tags, lowercase parent tags).
+| 5 | NIP-09 deletion | Written for your own listings, zones, comments and reviews (`a` + `e` + `k`); read so a seller's or author's deletions hide what they deleted. Only the original author's deletion counts.
+| 16 / 17 | Order messages / payment receipt | The buyer gift-wraps (NIP-17) a kind-16 `type 1` order; payment requests (`type 2`), status (`3`) and shipping (`4`) updates and the kind-17 receipt render in the conversation. A kind 16 without the `order` + `type` pair is a NIP-18 repost, not an order.
+|===
 
-[source]
-----
-'https://www.robotechy.com/naddr1qvzqqqrkcgpzqgglxfd4895k3tqv0xmupgps6a5zqmfj43slj0c58hs39wzeh4r0qqdhqun0v36kxazlxymnvwpnxscnyvp3xgcrjhmzd5urxmcxaljpu'
-----
+Edits republish under the same `d` with a strictly newer `created_at` and keep tags we don't manage. Not implemented yet: order handling for your own listings (#1290), checkout for every live Gamma listing (#1291), drafts and variants (#1293).
 
-This is the only NIP-99 surface in the app. There is no "marketplace" feature, no in-app price display, no Lightning Piggy-published classified listings. The `naddr` is hard-coded into the source for v1 because there's only one product and re-resolving it on every Hide-a-Piglet open would be wasted relay traffic for zero UX benefit.
+*Bag Charm link.* `HuntCreateScreen` (the "Hide a Piglet" flow) still links out to Robotechy's Bag Charm listing as a hard-coded `naddr1…` URL on robotechy.com, rather than opening it in the Market.
 
-==== Why NIP-99 at all
+=== Profile content: NIP-27 references, NIP-10 replies, media kinds
 
-The hider could buy a Bag Charm anywhere — what makes NIP-99 useful here is that the seller (Robotechy) is a Nostr-native business and the canonical product page lives on their Nostr classified listing rather than a Web2 product database. Linking via `naddr` lets the URL stay valid even if Robotechy migrates hosting providers, and signals to other Nostr-aware clients that "this is a real Nostr-addressable product".
-
-==== Code reference
-
-* `src/screens/HuntCreateScreen.tsx` (around line 377) — the `Linking.openURL` call to the `naddr1…` resolver. Logos: `assets/images/robotechy-logo.png`.
+* *NIP-27* — `nostr:npub` / `nprofile` (and bare or `@`-prefixed `npub1…`) render as `@Name` chips; `nostr:note` / `nevent` as embedded post cards; `nostr:naddr` as an article (kind 30023) or Market product (30402) card. Parsing in `src/utils/nip27.ts` and `nostrContentBlocks.ts`; fetching in `src/services/nostrEmbedCache.ts` (batched `ids` / `#d` filters, every filter limited, signature- and reference-checked). Relay hints in references are used only for public `wss://` hosts, at most 2 per reference and 3 per batch.
+* *NIP-10* — a note is a reply if it has a marked `reply` / `root` `e` tag or any unmarked (positional) `e` tag; `mention` `e` tags, `q` tags and `nostr:` references in the content don't make it one (`src/utils/nip10.ts`).
+* *Media* — the profile Media tab reads image / video URLs and NIP-92 `imeta` in kind-1 notes, plus NIP-68 pictures (kind 20) and NIP-71 videos (kinds 21 / 22) (`src/utils/noteMedia.ts`).
 
 === Deep-link & NFC tag-tap routing
 

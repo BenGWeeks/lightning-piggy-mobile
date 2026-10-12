@@ -46,48 +46,134 @@ This document lists the Bitcoin, Lightning, and Nostr standards implemented by L
 
 | https://github.com/nostr-protocol/nips/blob/master/01.md[NIP-01]
 | Basic Protocol
-| Nostr relay connections, event publishing (kind 0 metadata, kind 3 contacts, kind 10002 relay lists), subscriptions (`nostrService`)
+| Relay connections, event publishing (kind 0 metadata, kind 3 contacts, kind 10002 relay lists), subscriptions (`nostrService`)
 
 | https://github.com/nostr-protocol/nips/blob/master/04.md[NIP-04]
 | Encrypted Direct Messages
-| Encrypted communication between app and NWC relay for wallet commands (via `@getalby/sdk`)
+| NWC wallet commands with relays that need it (via `@getalby/sdk`); legacy DMs are read, and sent only when the user picks NIP-04 for a thread (`nostrNip04Send`)
 
 | https://github.com/nostr-protocol/nips/blob/master/05.md[NIP-05]
 | DNS Identity Verification
-| Display of NIP-05 identifiers on contact profiles (`ContactProfileSheet`)
+| Display of NIP-05 identifiers on contact profiles
+
+| https://github.com/nostr-protocol/nips/blob/master/09.md[NIP-09]
+| Event Deletion
+| Kind-5 deletes of your own listings, shipping options, comments, reviews and reaction retractions; others' deletions honoured only from the original author (`utils/nip09`, `marketSellerService`)
+
+| https://github.com/nostr-protocol/nips/blob/master/10.md[NIP-10]
+| Text Notes and Threads
+| Reply detection for the profile Posts / Posts & replies switch (`utils/nip10`)
+
+| https://github.com/nostr-protocol/nips/blob/master/15.md[NIP-15]
+| Nostr Marketplace
+| Legacy kind-30018 products, read by the Market (`utils/marketListings`)
+
+| https://github.com/nostr-protocol/nips/blob/master/17.md[NIP-17]
+| Private Direct Messages
+| Default 1:1 and group chat: kind-14 rumors, sealed and gift-wrapped per recipient (`nostrService`, `nip17Unwrap`)
 
 | https://github.com/nostr-protocol/nips/blob/master/19.md[NIP-19]
 | Bech32-encoded Entities
-| Encoding/decoding `nsec` (private key) and `npub` (public key) via `nostr-tools/nip19` (`nostrService`, `NostrContext`)
+| `npub` / `nsec` / `nprofile` / `note` / `nevent` / `naddr` via `nostr-tools/nip19` (`nostrService`, `utils/nip27`)
 
 | https://github.com/nostr-protocol/nips/blob/master/20.md[NIP-20]
 | Command Results (OK messages)
-| Relay OK response handling; includes workaround for LNbits Nostrclient missing OK responses (`nwcService`)
+| Relay OK handling; includes a workaround for LNbits Nostrclient missing OK responses (`nwcService`)
 
 | https://github.com/nostr-protocol/nips/blob/master/21.md[NIP-21]
 | `nostr:` URI Scheme
-| Deep linking to Nostr contacts via `nostr:` URIs (`ContactProfileSheet`)
+| Deep links to profiles and events (`nostr:` routing)
+
+| https://github.com/nostr-protocol/nips/blob/master/22.md[NIP-22]
+| Comments
+| Kind 1111: Market product comments (`utils/productComments`) and NIP-GC cache statuses (`nostrPlacesService`)
+
+| https://github.com/nostr-protocol/nips/blob/master/23.md[NIP-23]
+| Long-form Content
+| Kind 30023, read only: article cards for referenced articles (`components/nostr/EmbeddedEventCard`)
+
+| https://github.com/nostr-protocol/nips/blob/master/25.md[NIP-25]
+| Reactions
+| Kind-7 emoji reactions in chats (`utils/reactions`, `nostrReactions`)
+
+| https://github.com/nostr-protocol/nips/blob/master/27.md[NIP-27]
+| Text Note References
+| `nostr:` mentions as `@name` chips and embedded note / article / product cards (`components/nostr/NostrContent`, `nostrEmbedCache`)
+
+| https://github.com/nostr-protocol/nips/blob/master/32.md[NIP-32]
+| Labels
+| `com.lightningpiggy.app / payout-lnurl-w` label on Lightning-payout Piglets (`nostrPlacesService`)
+
+| https://github.com/nostr-protocol/nips/blob/master/40.md[NIP-40]
+| Expiration Timestamp
+| Auto-retire Piglet listings
+
+| https://github.com/nostr-protocol/nips/blob/master/44.md[NIP-44]
+| Encrypted Payloads (v2)
+| NIP-17 sealing and gift wraps
+
+| https://github.com/nostr-protocol/nips/blob/master/46.md[NIP-46]
+| Nostr Connect
+| Remote signer over relays: Clave, Aegis, nsec.app (`nostrConnectService`; see `nip46-clave.adoc`)
 
 | https://github.com/nostr-protocol/nips/blob/master/47.md[NIP-47]
 | Nostr Wallet Connect (NWC)
 | Remote Lightning wallet control: `pay_invoice`, `make_invoice`, `get_balance`, `list_transactions` (`nwcService`)
 
+| https://github.com/nostr-protocol/nips/blob/master/52.md[NIP-52]
+| Calendar Events
+| Kind 31923, read only: Explore → Events (`nostrPlacesService`)
+
 | https://github.com/nostr-protocol/nips/blob/master/55.md[NIP-55]
 | Android Signer
-| Amber signer integration for secure Nostr key management via Android intents (`amberService`)
+| Amber signer integration via Android intents (`amberService`)
 
 | https://github.com/nostr-protocol/nips/blob/master/57.md[NIP-57]
 | Lightning Zaps
-| Zap request events (kind 9734) for Lightning donations to Nostr contacts (`lnurlService`, `SendSheet`)
+| Zap requests (kind 9734) and receipts (9735) (`lnurlService`, `nostrService`)
+
+| https://github.com/nostr-protocol/nips/blob/master/59.md[NIP-59]
+| Gift Wrap
+| Outer envelope for NIP-17 messages, Marmot Welcomes and push triggers
 
 | https://github.com/nostr-protocol/nips/blob/master/65.md[NIP-65]
 | Relay List Metadata
-| Fetching kind 10002 events for user read/write relay preferences (`nostrService`)
+| Kind 10002 read/write relays (`nostrService`, `nostrRelayLists`)
+
+| https://github.com/nostr-protocol/nips/blob/master/68.md[NIP-68]
+| Picture-first Feeds
+| Kind-20 picture events, read for the profile Media tab (`utils/noteMedia`)
+
+| https://github.com/nostr-protocol/nips/blob/master/71.md[NIP-71]
+| Video Events
+| Kinds 21 / 22, read for the profile Media tab (`utils/noteMedia`)
+
+| https://github.com/nostr-protocol/nips/blob/master/88.md[NIP-88]
+| Polls
+| Kind-1068 polls and kind-1018 votes in chats (`utils/nip88Poll`)
+
+| https://github.com/nostr-protocol/nips/blob/master/89.md[NIP-89]
+| Recommended Application Handlers
+| `client` tag on the public profile, follow-list, zap-request and Piglet events the app publishes, never inside encrypted messages (`nip89ClientTag`)
+
+| https://github.com/nostr-protocol/nips/blob/master/92.md[NIP-92]
+| Media Attachments
+| `imeta` tags: profile Media tab and MIP-04 encrypted media (`utils/noteMedia`, `marmotMedia`)
 
 | https://github.com/nostr-protocol/nips/blob/master/94.md[NIP-94]
 | File Metadata
-| NIP-94 events with `url` tag for profile picture uploads (`imageUploadService`)
+| `url` tag on profile-picture uploads (`imageUploadService`)
+
+| https://github.com/nostr-protocol/nips/blob/master/99.md[NIP-99]
+| Classified Listings
+| Market reader and *My shop* seller via the https://github.com/GammaMarkets/market-spec[Gamma Markets] spec: products (30402), shop (30405), shipping options (30406), reviews (31555), orders (16 / 17) (`marketListingsService`, `marketSellerService`)
+
+| NIP-GC (draft)
+| Geocaching
+| Kinds 37516 / 7516 / 1111 / 7517 for Piglets (`nostrPlacesService`); see `PROTOCOLS.adoc` → "Hunt"
 |===
+
+Blossom media servers: BUD-01 / BUD-02 uploads and the BUD-03 server list (kind 10063) (`blossomService`, `useBlossomServerList`).
 
 == Lightning Standards
 
@@ -108,21 +194,39 @@ This document lists the Bitcoin, Lightning, and Nostr standards implemented by L
 
 https://github.com/marmot-protocol/marmot[Marmot] carries MLS (https://www.rfc-editor.org/rfc/rfc9420[RFC 9420]) group messaging over Nostr. Lightning Piggy implements it with `@internet-privacy/marmot-ts` and is wire-compatible with White Noise.
 
-[cols="1,3,4"]
-|===
-| Part | Name | Usage
+Status against the https://github.com/marmot-protocol/marmot/blob/master/mip-coverage.md[Marmot MIPs]:
 
-| Core
-| Key packages, Welcomes, group events
-| Kind-30443 key packages, kind-444 Welcomes (NIP-59 gift-wrapped), kind-445 group events; 1:1 chats and groups (`marmotSession`)
+[cols="1,2,4"]
+|===
+| MIP | Name | Status in Lightning Piggy
+
+| MIP-00
+| Credentials & Key Packages
+| Implemented. Kind-30443 key packages, one `d` slot per install, refreshed weekly, retired on sign-out (`marmotSession`, `marmotKeyPackageLifecycle`); managed under Account → Messages → Invitation keys
+
+| MIP-01
+| Group Construction & Group Data
+| Implemented: name and `admin_pubkeys` (shown and managed; only admins rename or change members). Commits realign the extension order for White Noise (`marmotProposals`)
+
+| MIP-02
+| Welcome Events
+| Implemented. Kind 444, NIP-59 gift-wrapped; joined only from people you follow (`marmotWelcomeRouter`)
+
+| MIP-03
+| Group Messages
+| Implemented. Kind-445 group events; text, reactions (1:1), edits, "delete for everyone", member removal (`marmotSession`, `marmotEdits`, `marmotDeletions`)
 
 | MIP-04
-| Encrypted media (`encrypted-media-v2`)
-| Photos: ChaCha20-Poly1305 blobs on Blossom, key derived from the MLS epoch secret (`marmotMedia`)
+| Encrypted Media (`encrypted-media-v2`)
+| Implemented. Photos and voice notes: ChaCha20-Poly1305 blobs on Blossom, key derived from the MLS epoch secret; v1 still read (`marmotMedia`)
 
 | MIP-05
-| Push notifications (`marmot-push-v1`)
-| Send side only: kind-446 triggers that wake other members' devices (`marmotPush`, `marmotPushNotifier`)
+| Push Notifications (`marmot-push-v1`, draft)
+| Implemented. Kind-446 triggers to other members' notification servers (found via each server's kind-10050), and an opt-in receive side per account (`marmotPush`, `marmotPushNotifier`, `marmotPushRegistrar`)
+
+| MIP-06
+| Multi-device (being redesigned upstream)
+| Partial: an invite adds all of a contact's fresh devices in one commit (`marmotInvitees`). No device linking of your own installs
 |===
 
 See `PROTOCOLS.adoc` → "Marmot (MLS over Nostr)" for the event kinds.

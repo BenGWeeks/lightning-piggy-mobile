@@ -151,7 +151,7 @@ Cached contact data in AsyncStorage is also cleared.
 === Network Security
 
 * All relay connections use `wss://` (WebSocket Secure)
-* Image uploads to nostr.build use HTTPS
+* Image uploads go to Blossom servers over HTTPS
 * LNURL-pay callbacks use HTTPS
 
 ==== Automatic requests from chat messages (#1338)
@@ -165,6 +165,16 @@ A message author chooses the URLs in it, so anything the app fetches *without a 
 * *Avatars, banners and listings*: kind-0 `picture` / `banner` URLs are dropped at parse time (`parseProfileContent`) unless they're public http(s), and market listing URLs (`safeMarketUrl`) must be public https. So every avatar, banner and product image in the app is address-checked at the data layer. These are *not* trust-gated: profile pictures of people you don't follow still load (search, members, requests), which is a product decision tracked as a follow-up.
 * *Relay destinations from other people's data*: NIP-19/NIP-10 relay hints (`nip27.ts` re-exports `isPublicRelayUrl`), and MIP-05 push-trigger relays (a member's signed `relay_hint`, and a push server's kind-10050 inbox), only accept credential-free public `wss://` relays. Push relays are also capped (`cleanPushRelays`). An invalid hint is dropped and the trigger still goes to the server's own inbox, which is listed first so hints can't crowd it out.
 * *Known limitation, DNS rebinding*: React Native can't resolve DNS before a request, so a public hostname that resolves to a private IP can't be blocked client-side. Trust gating is the mitigation. Media loads (`expo-image` for chat images and preview og:images, the encrypted-media download, `expo-audio`) follow redirects natively, so a public URL from a *followed* sender could still redirect onto a private address. Their first URL is checked, and trust gating limits this to people you follow. A hop-validated media downloader would close it fully (follow-up).
+
+=== Untrusted content from relays
+
+Anything read from a relay is attacker-controllable. Beyond the automatic-request rules above, the profile and Market surfaces follow these:
+
+* **Relay hints inside `nostr:` references** (NIP-27 `nprofile` / `nevent` / `naddr`) go through the same `isPublicRelayUrl` check as above, and at most 2 per reference and 3 per batch are added to the user's read relays (`src/services/nostrEmbedCache.ts`).
+* **Embedded events** are signature-checked and must match the reference that pointed at them; an embedded product also gets the seller's NIP-09 deletions applied. Mention chips are capped at 20 per post.
+* **Market descriptions** render a whitelisted Markdown subset (`src/utils/marketMarkdown.ts`): raw HTML is dropped, images are skipped, only `https` links are live, and tapping one asks "Open link? This opens <host> in your browser." before leaving the app.
+* **Deletions** (NIP-09) only count when signed by the original event's author, so nobody can hide someone else's listing, comment or review.
+* **Your own shop** — a fetched event is signature- and author-checked on a clean copy before it can become the base of an edit you re-sign, and saves need a relay quorum, so a hostile or flaky relay can neither feed you a forged "previous version" nor make an existing shop look empty (`src/services/marketSellerService.ts`).
 
 === Message Content at Rest (Threat Model)
 
