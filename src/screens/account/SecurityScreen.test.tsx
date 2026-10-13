@@ -1,5 +1,6 @@
 import React from 'react';
-import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor, within } from '@testing-library/react-native';
+import { DeviceEventEmitter, Platform, StyleSheet } from 'react-native';
 import SecurityScreen from './SecurityScreen';
 import { getSendThreshold, setSendThreshold } from '../../services/sendThresholdService';
 import { Toast } from '../../components/BrandedToast';
@@ -26,11 +27,9 @@ jest.mock('../../contexts/LocaleContext', () => ({
 }));
 jest.mock('../../contexts/NostrContext', () => ({ useNostr: () => ({ pubkey: 'a'.repeat(64) }) }));
 jest.mock('../../components/MarmotPushSection', () => () => null);
-jest.mock('../../components/SettingsInfoSheet', () => {
-  const Sheet = ({ visible, children }: { visible: boolean; children: React.ReactNode }) =>
-    visible ? <>{children}</> : null;
-  return Sheet;
-});
+jest.mock('react-native-safe-area-context', () => ({
+  useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
+}));
 jest.mock('../../components/KeyBackupEntry', () => () => null);
 jest.mock('../../components/BrandedToast', () => ({ Toast: { show: jest.fn() } }));
 jest.mock('lucide-react-native', () => new Proxy({}, { get: () => () => null }));
@@ -101,4 +100,37 @@ it('a failed threshold save is caught: toast, and the stored value is shown agai
 it('says once, in the scope header, that these settings follow the account', () => {
   const ui = render(<SecurityScreen />);
   expect(ui.getAllByText('settingsScope.forThisAccount')).toHaveLength(1);
+});
+
+it('moves the modal input and close button above the iOS keyboard and saves on blur', async () => {
+  const platform = jest.replaceProperty(Platform, 'OS', 'ios');
+  try {
+    const ui = render(<SecurityScreen />);
+    await act(async () => {});
+    act(() => mockSelect('custom'));
+    const layout = ui.getByTestId('security-custom-sheet-keyboard-layout');
+    await act(async () => {
+      fireEvent(layout, 'layout', {
+        persist: () => {},
+        nativeEvent: { layout: { x: 0, y: 0, width: 390, height: 844 } },
+      });
+    });
+    await act(async () => {
+      DeviceEventEmitter.emit('keyboardWillShow', {
+        endCoordinates: { screenX: 0, screenY: 544, width: 390, height: 300 },
+        duration: 0,
+      });
+    });
+    await waitFor(() => expect(StyleSheet.flatten(layout.props.style).paddingBottom).toBe(300));
+    const input = within(layout).getByTestId('security-threshold-custom-input');
+    expect(within(layout).getByTestId('security-custom-sheet-close')).toBeTruthy();
+    fireEvent.changeText(input, '25000');
+    expect(setSendThreshold).not.toHaveBeenCalled();
+    await act(async () => fireEvent(input, 'blur'));
+    expect(setSendThreshold).toHaveBeenCalledWith(25000, 'a'.repeat(64));
+    fireEvent.press(ui.getByTestId('security-custom-sheet-close'));
+    expect(ui.queryByTestId('security-threshold-custom-input')).toBeNull();
+  } finally {
+    platform.restore();
+  }
 });

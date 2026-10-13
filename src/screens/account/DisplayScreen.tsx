@@ -1,4 +1,4 @@
-import React, { useDeferredValue, useMemo, useState } from 'react';
+import React, { useCallback, useDeferredValue, useMemo, useState } from 'react';
 import { View, Text, TextInput, FlatList } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Search } from 'lucide-react-native';
@@ -9,16 +9,22 @@ import { useThemeColors } from '../../contexts/ThemeContext';
 import { useTranslation } from '../../contexts/LocaleContext';
 import { createDisplayScreenStyles } from '../../styles/DisplayScreen.styles';
 import { CURRENCY_LIST, type CurrencyInfo } from '../../services/fiatService';
+import type { SettingsPickerOption } from '../../utils/settingsPicker';
 import type { AccountDrawerNavigation } from '../../navigation/types';
 
 // Substring match against code OR name (case-insensitive). Mirrors the
 // Wallet of Satoshi picker pattern — typing "kr" matches both "KRW" and
 // "Danish Krone".
-const filterCurrencies = (query: string): readonly CurrencyInfo[] => {
+type CurrencyOption = SettingsPickerOption & { name: string };
+
+const filterCurrencies = (
+  options: readonly CurrencyOption[],
+  query: string,
+): readonly CurrencyOption[] => {
   const q = query.trim().toLowerCase();
-  if (!q) return CURRENCY_LIST;
-  return CURRENCY_LIST.filter(
-    (c) => c.code.toLowerCase().includes(q) || c.name.toLowerCase().includes(q),
+  if (!q) return options;
+  return options.filter(
+    (c) => c.value.toLowerCase().includes(q) || c.name.toLowerCase().includes(q),
   );
 };
 
@@ -30,29 +36,44 @@ const DisplayScreen: React.FC = () => {
   const navigation = useNavigation<AccountDrawerNavigation>();
   const [search, setSearch] = useState('');
   // Defer the filter pass off the keystroke so the input stays responsive
-  // even with 38 rows re-rendering. Same pattern as FriendPickerSheet.
+  // even with 38 currencies to search. Same pattern as FriendPickerSheet.
   const deferredSearch = useDeferredValue(search);
-  const filtered = useMemo(() => filterCurrencies(deferredSearch), [deferredSearch]);
+  const options = useMemo(
+    () =>
+      CURRENCY_LIST.map((item) => ({
+        value: item.code,
+        name: item.name,
+        label: t('settingsScreens.currencyValue', { code: item.code, name: item.name }),
+      })),
+    [t],
+  );
+  const filtered = useMemo(
+    () => filterCurrencies(options, deferredSearch),
+    [options, deferredSearch],
+  );
 
   // Picking a currency finishes the job: go straight back to Display &
   // language (where the row shows the new choice) rather than leaving the
   // user on a 38-row list with no "Done".
-  const handlePick = (code: CurrencyInfo['code']) => {
-    void setCurrency(code);
-    setSearch('');
-    navigation.navigate('AccountDisplayLanguage');
-  };
+  const handlePick = useCallback(
+    (value: string) => {
+      void setCurrency(value as CurrencyInfo['code']);
+      setSearch('');
+      navigation.navigate('AccountDisplayLanguage');
+    },
+    [setCurrency, navigation],
+  );
 
-  const renderItem = ({ item }: { item: CurrencyInfo }) => (
-    <SettingsPickerOptionRow
-      option={{
-        value: item.code,
-        label: t('settingsScreens.currencyValue', { code: item.code, name: item.name }),
-      }}
-      selected={item.code === currency}
-      onSelect={(value) => handlePick(value as CurrencyInfo['code'])}
-      testID={`currency-${item.code}`}
-    />
+  const renderItem = useCallback(
+    ({ item }: { item: CurrencyOption }) => (
+      <SettingsPickerOptionRow
+        option={item}
+        selected={item.value === currency}
+        onSelect={handlePick}
+        testID={`currency-${item.value}`}
+      />
+    ),
+    [currency, handlePick],
   );
 
   // Render the section label + search input inside the FlatList header
@@ -86,7 +107,7 @@ const DisplayScreen: React.FC = () => {
       <View style={styles.listCard}>
         <FlatList
           data={filtered}
-          keyExtractor={(c) => c.code}
+          keyExtractor={(c) => c.value}
           renderItem={renderItem}
           ListHeaderComponent={listHeader}
           ItemSeparatorComponent={() => <View style={styles.separator} />}
