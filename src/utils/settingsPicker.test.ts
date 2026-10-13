@@ -32,6 +32,18 @@ describe('segmented fallback', () => {
   });
 });
 describe('picker option registry', () => {
+  it('keeps a newer registration when the key and options array are reused', () => {
+    const releaseOld = registerPickerOptions('shared-theme', options);
+    const releaseNew = registerPickerOptions('shared-theme', options);
+    releaseOld();
+    expect(getPickerOptions('shared-theme')).toBe(options);
+    releaseNew();
+    expect(getPickerOptions('shared-theme')).toEqual([]);
+    releaseOld();
+    releaseNew();
+    expect(getPickerOptions('shared-theme')).toEqual([]);
+  });
+
   it('releases owned data without removing a newer registration', () => {
     const releaseOld = registerPickerOptions('theme', options);
     const replacement = [options[0]];

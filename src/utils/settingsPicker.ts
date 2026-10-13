@@ -31,18 +31,19 @@ export function shouldUseSegmentedPicker(
 
 /** Data only: no callbacks, hooks, or domain saving logic in the registry. */
 const EMPTY_OPTIONS: readonly SettingsPickerOption[] = [];
-const registry = new Map<string, readonly SettingsPickerOption[]>();
+const registry = new Map<string, { token: symbol; options: readonly SettingsPickerOption[] }>();
 export function registerPickerOptions(
   key: string,
   options: readonly SettingsPickerOption[],
 ): () => void {
-  registry.set(key, options);
+  const token = Symbol(key);
+  registry.set(key, { token, options });
   return () => {
-    if (registry.get(key) === options) registry.delete(key);
+    if (registry.get(key)?.token === token) registry.delete(key);
   };
 }
 export function getPickerOptions(key: string): readonly SettingsPickerOption[] {
-  return registry.get(key) ?? EMPTY_OPTIONS;
+  return registry.get(key)?.options ?? EMPTY_OPTIONS;
 }
 
 export type SettingsPickerParams = {
