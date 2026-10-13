@@ -3177,5 +3177,19 @@
     "kindSkipped": "no acepta este tipo",
     "unreachable": "no accesible desde esta red",
     "failed": "falló"
+  },
+  "relayReachability": {
+    "reachable": "Accesible",
+    "unreachable": "Inaccesible",
+    "checking": "Comprobando",
+    "inUse": "En uso",
+    "probeChecked": "Comprobación realizada a las",
+    "poolChecked": "Pool comprobado a las",
+    "probeError": "Error de comprobación",
+    "timeout": "Tiempo de espera agotado",
+    "refused": "Conexión rechazada",
+    "tls": "Error de TLS",
+    "closed": "Conexión cerrada",
+    "explanation": "Verde significa que el relay acaba de responder. «En uso» significa que la app está conectada a él para tu cuenta; los relays se incorporan cuando publicas."
   }
 }

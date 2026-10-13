@@ -11,6 +11,8 @@ import NetworkSectionHeading from './NetworkSectionHeading';
 import PublishResult from './PublishResult';
 import { useNostr } from '../contexts/NostrContext';
 import type { RelayPublishResult } from '../services/nostrRelayLists';
+import RelayStatusDot from './RelayStatusDot';
+import { useRelayReachability } from '../hooks/useRelayReachability';
 import { useBlossomServerList } from '../hooks/useBlossomServerList';
 
 /**
@@ -25,6 +27,7 @@ export default function BlossomServersSection() {
   const styles = useMemo(() => createBlossomServersSectionStyles(colors), [colors]);
   const { servers, dirty, publishing, editable, addServer, removeServer, makePrimary, publish } =
     useBlossomServerList();
+  const reachability = useRelayReachability(servers);
   const { pubkey, nip65Relays, userRelays } = useNostr();
   const [reportState, setReportState] = useState<{
     results: RelayPublishResult[];
@@ -69,6 +72,11 @@ export default function BlossomServersSection() {
       <View style={list.list} testID="blossom-server-list">
         {servers.map((url, i) => (
           <View key={url} style={list.row}>
+            <RelayStatusDot
+              probe
+              status={reachability.get(url)?.reachable}
+              testID={`blossom-dot-${i}`}
+            />
             <View style={list.urlColumn}>
               <Text
                 style={list.url}

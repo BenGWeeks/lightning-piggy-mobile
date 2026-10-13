@@ -3177,5 +3177,19 @@
     "kindSkipped": "不接受此类型",
     "unreachable": "无法从此网络访问",
     "failed": "失败"
+  },
+  "relayReachability": {
+    "reachable": "可连接",
+    "unreachable": "无法连接",
+    "checking": "检查中",
+    "inUse": "使用中",
+    "probeChecked": "连接检查时间",
+    "poolChecked": "连接池检查时间",
+    "probeError": "检查错误",
+    "timeout": "超时",
+    "refused": "连接被拒绝",
+    "tls": "TLS 错误",
+    "closed": "连接已关闭",
+    "explanation": "绿色表示中继刚刚响应。‘使用中’表示应用正为你的账户连接到该中继；发布后中继才会加入。"
   }
 }

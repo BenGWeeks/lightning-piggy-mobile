@@ -19,6 +19,7 @@ import { fetchRelayInformation, type RelayInformation } from '../../services/rel
 import { getRelayHealthObservation, relayKey } from '../../services/relayHealth';
 import { pool } from '../../services/nostrPool';
 import { relayWriteAcceptance } from '../../utils/relayDetails';
+import { useRelayReachability } from '../../hooks/useRelayReachability';
 import RelayStatusDot from '../../components/RelayStatusDot';
 
 export default function RelayDetailsScreen({
@@ -27,6 +28,7 @@ export default function RelayDetailsScreen({
 }: NativeStackScreenProps<RelaySettingsParamList, 'RelayDetails'>) {
   const { url, kind } = route.params;
   const editor = useRelayListDraft();
+  const reachability = useRelayReachability([url]).get(url);
   const { pubkey } = useNostr();
   const t = useTranslation();
   const colors = useThemeColors();
@@ -38,6 +40,7 @@ export default function RelayDetailsScreen({
   const snapshot = useCallback(
     () => ({
       ...getRelayHealthObservation(url, pubkey),
+      observedAt: Date.now(),
       connected: pool.listConnectionStatus().get(relayKey(url)) === true,
     }),
     [url, pubkey],
@@ -177,11 +180,28 @@ export default function RelayDetailsScreen({
       <View style={styles.card} testID="relay-details-health">
         <Text style={styles.heading}>{t('relayDetails.health')}</Text>
         <View style={styles.about}>
-          <RelayStatusDot status={health.connected} />
+          <RelayStatusDot probe status={reachability?.reachable} testID="relay-details-dot" />
           <Text style={styles.value}>
-            {t(health.connected ? 'relayDetails.connected' : 'relayDetails.disconnected')}
+            {t(
+              reachability?.reachable === undefined
+                ? 'relayReachability.checking'
+                : reachability.reachable
+                  ? 'relayReachability.reachable'
+                  : 'relayReachability.unreachable',
+            )}
           </Text>
         </View>
+        {field(
+          t('relayReachability.probeChecked'),
+          reachability && new Date(reachability.checkedAt).toLocaleTimeString(),
+        )}
+        {reachability?.error &&
+          field(t('relayReachability.probeError'), t(`relayReachability.${reachability.error}`))}
+        {field(t('relayReachability.inUse'), booleanValue(health.connected))}
+        {field(
+          t('relayReachability.poolChecked'),
+          new Date(health.observedAt).toLocaleTimeString(),
+        )}
         {field(
           t('relayDetails.latency'),
           health.latencyMs === undefined

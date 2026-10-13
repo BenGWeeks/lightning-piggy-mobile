@@ -3213,5 +3213,19 @@
     "kindSkipped": "ten rodzaj nie jest akceptowany",
     "unreachable": "nieosiągalny z tej sieci",
     "failed": "niepowodzenie"
+  },
+  "relayReachability": {
+    "reachable": "Osiągalny",
+    "unreachable": "Nieosiągalny",
+    "checking": "Sprawdzanie",
+    "inUse": "W użyciu",
+    "probeChecked": "Osiągalność sprawdzona o",
+    "poolChecked": "Pula sprawdzona o",
+    "probeError": "Błąd sprawdzania",
+    "timeout": "Przekroczono czas oczekiwania",
+    "refused": "Połączenie odrzucone",
+    "tls": "Błąd TLS",
+    "closed": "Połączenie zamknięte",
+    "explanation": "Zielony oznacza, że relay właśnie odpowiedział. „W użyciu” oznacza, że aplikacja jest z nim połączona dla Twojego konta; relaye dołączają po opublikowaniu."
   }
 }

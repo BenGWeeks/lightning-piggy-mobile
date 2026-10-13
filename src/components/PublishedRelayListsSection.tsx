@@ -10,6 +10,7 @@ import {
 } from '../styles/PublishedRelayListsSection.styles';
 import type { RelayListPublishOutcome } from '../hooks/useRelayListEditor';
 import { useRelayListDraft } from '../contexts/RelayListEditorContext';
+import { useRelayReachability } from '../hooks/useRelayReachability';
 import RelaySettingsRow from './RelaySettingsRow';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -133,13 +134,17 @@ function PublishButton({
 export default function PublishedRelayListsSection({
   connection,
 }: {
-  /** Live status by relay URL, for the per-row dots. */
+  /** Live pool membership by relay URL, for the In use chips. */
   connection?: Map<string, boolean>;
 }) {
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createPublishedRelayListsSectionStyles(colors), [colors]);
   const editor = useRelayListDraft();
+  const reachability = useRelayReachability([
+    ...editor.nip65Draft.map((r) => r.url),
+    ...editor.inboxDraft,
+  ]);
   const { pubkey, nip65Relays, userRelays, dmInboxRelays } = useNostr();
   const [reportState, setReportState] = useState<{
     results: RelayPublishResult[];
@@ -211,7 +216,7 @@ export default function PublishedRelayListsSection({
     <View testID="published-relay-lists">
       <NetworkSectionHeading
         title={t('publishedRelays.nip65Title')}
-        explanation={t('networkInfo.nip65Hint')}
+        explanation={`${t('networkInfo.nip65Hint')}\n\n${t('relayReachability.explanation')}`}
         testID="nip65"
         spec="https://github.com/nostr-protocol/nips/blob/master/65.md"
       />
@@ -224,13 +229,15 @@ export default function PublishedRelayListsSection({
             <Text style={styles.empty}>{t('publishedRelays.nip65Empty')}</Text>
           )
         )}
-        {editor.nip65Draft.map((r) => (
+        {editor.nip65Draft.map((r, index) => (
           <RelaySettingsRow
             key={r.url}
             url={r.url}
             read={r.read}
             write={r.write}
-            status={connection?.get(r.url)}
+            status={reachability.get(r.url)?.reachable}
+            inUse={connection?.get(r.url) === true}
+            probeIndex={index}
             onOpen={openRelay}
           />
         ))}
@@ -254,7 +261,7 @@ export default function PublishedRelayListsSection({
 
       <NetworkSectionHeading
         title={t('publishedRelays.inboxTitle')}
-        explanation={t('networkInfo.inboxHint')}
+        explanation={`${t('networkInfo.inboxHint')}\n\n${t('relayReachability.explanation')}`}
         testID="inbox"
         spec="https://github.com/nostr-protocol/nips/blob/master/17.md"
       />
@@ -266,12 +273,14 @@ export default function PublishedRelayListsSection({
             <Text style={styles.empty}>{t('publishedRelays.inboxEmpty')}</Text>
           )
         )}
-        {editor.inboxDraft.map((url) => (
+        {editor.inboxDraft.map((url, index) => (
           <RelaySettingsRow
             key={url}
             url={url}
             inbox
-            status={connection?.get(url)}
+            status={reachability.get(url)?.reachable}
+            inUse={connection?.get(url) === true}
+            probeIndex={editor.nip65Draft.length + index}
             onOpen={openRelay}
           />
         ))}

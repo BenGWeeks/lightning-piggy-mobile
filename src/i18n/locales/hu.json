@@ -3177,5 +3177,19 @@
     "kindSkipped": "ez a típus nem elfogadott",
     "unreachable": "erről a hálózatról nem érhető el",
     "failed": "sikertelen"
+  },
+  "relayReachability": {
+    "reachable": "Elérhető",
+    "unreachable": "Nem elérhető",
+    "checking": "Ellenőrzés",
+    "inUse": "Használatban",
+    "probeChecked": "Elérhetőség ellenőrizve",
+    "poolChecked": "Pool ellenőrizve",
+    "probeError": "Ellenőrzési hiba",
+    "timeout": "Időtúllépés",
+    "refused": "Kapcsolat elutasítva",
+    "tls": "TLS-hiba",
+    "closed": "Kapcsolat lezárva",
+    "explanation": "A zöld azt jelenti, hogy a relay éppen válaszolt. A „Használatban” azt jelenti, hogy az app a fiókodhoz kapcsolódik hozzá; a relayek közzététel után csatlakoznak."
   }
 }

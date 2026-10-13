@@ -3177,5 +3177,19 @@
     "kindSkipped": "diese Art wird nicht akzeptiert",
     "unreachable": "aus diesem Netzwerk nicht erreichbar",
     "failed": "fehlgeschlagen"
+  },
+  "relayReachability": {
+    "reachable": "Erreichbar",
+    "unreachable": "Nicht erreichbar",
+    "checking": "Wird geprüft",
+    "inUse": "In Verwendung",
+    "probeChecked": "Erreichbarkeit geprüft um",
+    "poolChecked": "Pool geprüft um",
+    "probeError": "Fehler bei der Prüfung",
+    "timeout": "Zeitüberschreitung",
+    "refused": "Verbindung abgelehnt",
+    "tls": "TLS-Fehler",
+    "closed": "Verbindung geschlossen",
+    "explanation": "Grün bedeutet, dass das Relay gerade geantwortet hat. „In Verwendung“ bedeutet, dass die App für dein Konto damit verbunden ist; Relays werden nach dem Veröffentlichen eingebunden."
   }
 }

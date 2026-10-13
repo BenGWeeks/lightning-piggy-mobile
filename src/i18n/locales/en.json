@@ -3177,5 +3177,19 @@
     "kindSkipped": "this kind is not accepted",
     "unreachable": "not reachable from this network",
     "failed": "failed"
+  },
+  "relayReachability": {
+    "reachable": "Reachable",
+    "unreachable": "Unreachable",
+    "checking": "Checking",
+    "inUse": "In use",
+    "probeChecked": "Probe checked at",
+    "poolChecked": "Pool checked at",
+    "probeError": "Probe error",
+    "timeout": "Timeout",
+    "refused": "Connection refused",
+    "tls": "TLS error",
+    "closed": "Connection closed",
+    "explanation": "Green means the relay answered just now. 'In use' means the app is connected to it for your account; relays join once you publish."
   }
 }
