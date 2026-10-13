@@ -24,6 +24,7 @@ import { bgStyle as basketballStyle } from './basketball';
 import { bgStyle as f1Style } from './f1';
 import { bgStyle as spaceshipStyle } from './spaceship';
 import { bgStyle as aiRobotStyle } from './ai-robot';
+import { bgStyle as invadersStyle } from '../../styles/InvadersCard.styles';
 import { bgStyle as wiseOwlStyle } from '../../styles/WiseOwlCard.styles';
 
 // CardBackgroundStyle includes every CardTheme plus named artwork styles,
@@ -40,6 +41,7 @@ const cardBgStyles: Record<CardBackgroundStyle | 'default', ImageStyle> = {
   nostrich: nostrichStyle.full,
   'lightning-piggy': lightningPiggyStyle.full,
   'wise-owl': wiseOwlStyle.full,
+  invaders: invadersStyle.full,
   zaplie: zaplieStyle.full,
   'zaplie-bolt': zaplieStyle.full,
   'lightning-whale': lightningWhaleStyle.full,

@@ -2124,7 +2124,8 @@
     "walletAccessibility": "Portfel {{type}}: {{alias}}",
     "typeLightning": "Lightning",
     "typeOnchain": "On-chain",
-    "owl": "Sowa"
+    "owl": "Sowa",
+    "invaders": "Najeźdźcy"
   },
   "walletCardPicker": {
     "selectedTheme": "Wybrany motyw karty: {{name}}"

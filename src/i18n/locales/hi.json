@@ -2122,7 +2122,8 @@
     "walletAccessibility": "{{alias}} {{type}} वॉलेट",
     "typeLightning": "Lightning",
     "typeOnchain": "ऑन-चेन",
-    "owl": "उल्लू"
+    "owl": "उल्लू",
+    "invaders": "आक्रमणकारी"
   },
   "walletCardPicker": {
     "selectedTheme": "चुनी गई कार्ड थीम: {{name}}"

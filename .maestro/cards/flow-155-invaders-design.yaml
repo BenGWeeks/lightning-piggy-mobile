@@ -1,0 +1,78 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Select Invaders wallet card design
+---
+# Requires an existing test wallet with Owl (the stacked prerequisite) selected.
+# Swiping the named centre card avoids tapping an overlapping side-card hitbox.
+# Also accepts Invaders already selected, and verifies persistence on reopening.
+- extendedWaitUntil:
+    visible:
+      id: 'tab-wallets'
+    timeout: 60000
+- tapOn:
+    id: 'tab-wallets'
+- extendedWaitUntil:
+    visible:
+      id: 'wallet-settings'
+    timeout: 15000
+- tapOn:
+    id: 'wallet-settings'
+- extendedWaitUntil:
+    visible:
+      id: 'wallet-settings-tab-design'
+    timeout: 15000
+- tapOn:
+    id: 'wallet-settings-tab-design'
+- extendedWaitUntil:
+    visible:
+      id: 'wallet-card-picker-coverflow'
+    timeout: 15000
+- runFlow:
+    when:
+      visible:
+        id: 'wallet-card-picker-name'
+        text: 'Selected card theme: Owl'
+    commands:
+      - swipe:
+          from:
+            id: 'theme-wise-owl'
+          direction: LEFT
+          duration: 1000
+      - waitForAnimationToEnd:
+          timeout: 3000
+- extendedWaitUntil:
+    visible:
+      id: 'wallet-card-picker-name'
+      text: 'Selected card theme: Invaders'
+    timeout: 15000
+- assertVisible:
+    id: 'wallet-card-design-invaders'
+- tapOn:
+    id: 'wallet-settings-save'
+- extendedWaitUntil:
+    notVisible:
+      id: 'wallet-settings-tab-design'
+    timeout: 15000
+- assertVisible:
+    id: 'wallet-card-design-invaders'
+# Reopening proves the persisted design centres Invaders without another swipe.
+- tapOn:
+    id: 'wallet-settings'
+- extendedWaitUntil:
+    visible:
+      id: 'wallet-settings-tab-design'
+    timeout: 15000
+- tapOn:
+    id: 'wallet-settings-tab-design'
+- extendedWaitUntil:
+    visible:
+      id: 'wallet-card-picker-name'
+      text: 'Selected card theme: Invaders'
+    timeout: 15000
+- tapOn:
+    id: 'wallet-settings-save'
+- extendedWaitUntil:
+    notVisible:
+      id: 'wallet-settings-tab-design'
+    timeout: 15000
+- assertVisible:
+    id: 'wallet-card-design-invaders'
