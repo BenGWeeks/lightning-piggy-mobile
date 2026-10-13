@@ -32,10 +32,11 @@
  * through every bubble.
  */
 import { downloadFile, sniffFileMime, FileVerificationError, MAX_FILE_BYTES } from './fileDownload';
-import { isSafeFileUrl } from '../utils/fileAttachment';
+import { isSafeFileUrl, sanitizeAttachmentText } from '../utils/fileAttachment';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   cacheDirectory,
+  copyAsync,
   deleteAsync,
   getInfoAsync,
   makeDirectoryAsync,
@@ -124,13 +125,38 @@ export async function deleteDecryptedFile(uri: string): Promise<void> {
   retainedFiles.delete(uri);
   verifiedFiles.delete(uri);
   for (const [key, value] of memory) if (value === uri) memory.delete(key);
+  await deleteAsync(`${uri}.share/`, { idempotent: true });
   await deleteAsync(uri, { idempotent: true });
+}
+
+/** Named exports share the source lease, account directory, and wipe generation. */
+export async function namedFileExport(uri: string, name: string): Promise<string> {
+  const owner = await requestOwner();
+  const dir = ownerDirUri(owner);
+  if (!dir || !uri.startsWith(dir) || !retainedFiles.has(uri))
+    throw new DecryptedMediaCancelledError();
+  const ownerDir = ownerDirName(owner);
+  const gen = generationOf(ownerDir);
+  const safeName = sanitizeAttachmentText(name).replace(/^[. ]+|[. ]+$/g, '') || 'attachment.bin';
+  const shareDir = `${uri}.share/`;
+  const target = `${shareDir}${encodeURIComponent(safeName)}`;
+  await trackPublish(
+    ownerDir,
+    (async () => {
+      await makeDirectoryAsync(shareDir, { intermediates: true });
+      if (generationOf(ownerDir) !== gen) throw new DecryptedMediaCancelledError();
+      await copyAsync({ from: uri, to: target });
+    })(),
+  );
+  if (generationOf(ownerDir) !== gen) throw new DecryptedMediaCancelledError();
+  return target;
 }
 
 /** Sweep abandoned shares from prior runs; keep at most 16 recent files. */
 async function evictDiskFiles(dir: string): Promise<void> {
   const names = (await readDirectoryAsync(dir)).filter(
-    (name) => name.startsWith('file-') && !retainedFiles.has(`${dir}${name}`),
+    (name) =>
+      name.startsWith('file-') && !name.endsWith('.share') && !retainedFiles.has(`${dir}${name}`),
   );
   const entries = await Promise.all(
     names.map(async (name) => ({

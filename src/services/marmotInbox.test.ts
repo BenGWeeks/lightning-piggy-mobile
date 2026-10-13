@@ -134,7 +134,7 @@ describe('marmotInbox — attachments', () => {
     const r = rumor({ content: '', tags } as never);
     const row = marmotRumorToDmRow(ME, { group: dm, rumor: r })!;
     expect(parseFileAttachment(row.content)).toMatchObject({
-      name: 'Invoice.pdf',
+      name: 'invoice.pdf',
       size: 2048,
       encrypted: false,
       plaintextSha256: 'ab'.repeat(32),
@@ -145,6 +145,41 @@ describe('marmotInbox — attachments', () => {
     expect(parseFileAttachment(marmotRumorToGroupMessage(bad).text)).toMatchObject({
       available: false,
     });
+  });
+
+  it('preserves dangerous authenticated filenames behind benign blob URLs in DM and group rows', () => {
+    const url = 'https://blossom.example/hash.bin';
+    const r = rumor({
+      content: '',
+      tags: [
+        [
+          'imeta',
+          `url ${url}`,
+          'filename invoice.apk',
+          'm application/octet-stream',
+          'x ' + 'ab'.repeat(32),
+        ],
+      ],
+    } as never);
+    const row = marmotRumorToDmRow(ME, { group: dm, rumor: r })!;
+    expect(parseFileAttachment(row.content)).toMatchObject({
+      name: 'invoice.apk',
+      dangerous: true,
+    });
+    expect(parseFileAttachment(marmotRumorToGroupMessage(r).text)).toMatchObject({
+      name: 'invoice.apk',
+      dangerous: true,
+    });
+    const encrypted = withTag('application/octet-stream', 'invoice.apk');
+    const mediaKeys = { [CT]: { url, keysHex: ['11'.repeat(32)] } };
+    expect(
+      parseFileAttachment(
+        marmotRumorToDmRow(ME, { group: dm, rumor: encrypted, mediaKeys })!.content,
+      ),
+    ).toMatchObject({ name: 'invoice.apk', dangerous: true });
+    expect(parseFileAttachment(marmotRumorToGroupMessage(encrypted, mediaKeys).text)).toMatchObject(
+      { name: 'invoice.apk', dangerous: true },
+    );
   });
 
   it('keeps a real caption over the fallback', () => {

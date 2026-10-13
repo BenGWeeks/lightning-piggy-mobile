@@ -37,7 +37,7 @@ describe('attachment classification', () => {
   });
   it('keeps authenticated filename and display metadata separate', () => {
     expect(parseFileAttachment(encoded('application/pdf'))).toMatchObject({
-      name: 'Invoice.pdf',
+      name: 'invoice.pdf',
       size: 2048,
       available: true,
       marmot: { filename: 'invoice.pdf' },
@@ -71,7 +71,9 @@ describe('imeta display metadata', () => {
     ).toEqual({ name: '%ZZ.pdf' });
   });
   it('uses filename when no URL/name exists and removes controls', () => {
-    expect(attachmentMetadata([['imeta', 'alt a\nb.pdf']], 'fallback.pdf').name).toBe('a b.pdf');
+    expect(attachmentMetadata([['imeta', 'alt a\nb.pdf']], 'fallback.pdf').name).toBe(
+      'fallback.pdf',
+    );
     expect(attachmentMetadata([], 'fallback.pdf').name).toBe('fallback.pdf');
   });
 });
@@ -270,4 +272,49 @@ it('strips caption controls and caps length in both stored formats', () => {
     parseFileAttachment(encoded('application/pdf') + `&caption=${encodeURIComponent(caption)}`)
       ?.caption,
   ).toBe('a'.repeat(2000));
+});
+
+it('prefers authenticated imeta filenames over harmless URL basenames and display aliases', () => {
+  const tags = [
+    ['imeta', 'filename invoice.apk', 'name invoice.pdf', 'url https://example.com/hash.bin'],
+  ];
+  const metadata = attachmentMetadata(tags);
+  expect(metadata.name).toBe('invoice.apk');
+  expect(
+    parseFileAttachment(
+      '[FILE]' +
+        JSON.stringify({
+          ...metadata,
+          mime: 'application/octet-stream',
+          url: 'https://example.com/hash.bin',
+        }),
+    ),
+  ).toMatchObject({ name: 'invoice.apk', dangerous: true });
+  expect(attachmentMetadata(tags, 'invoice.apk').name).toBe('invoice.apk');
+});
+it.each([
+  ['invoice.apk', 'hash.bin', true],
+  ['invoice.pdf', 'hash.apk', true],
+  ['invoice.pdf', 'hash.bin', false],
+])('checks declared %s and URL basename %s in both stored formats', (name, basename, dangerous) => {
+  const url = `https://example.com/${basename}`;
+  expect(
+    parseFileAttachment('[FILE]' + JSON.stringify({ name, mime: 'application/pdf', url })),
+  ).toMatchObject({ name, dangerous });
+  const encrypted = encoded('application/pdf')
+    .replace('https://blossom.example/invoice.pdf', url)
+    .replace('f=invoice.pdf', `f=${name}`);
+  expect(parseFileAttachment(encrypted)).toMatchObject({ name, dangerous });
+});
+it('checks percent-decoded dangerous URL extensions with a safe declared filename', () => {
+  expect(
+    parseFileAttachment(
+      '[FILE]' +
+        JSON.stringify({
+          name: 'invoice.pdf',
+          mime: 'application/pdf',
+          url: 'https://example.com/hash%2Eapk?token=x',
+        }),
+    ),
+  ).toMatchObject({ name: 'invoice.pdf', dangerous: true });
 });

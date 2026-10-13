@@ -12,6 +12,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { deleteAsync, moveAsync, writeAsStringAsync } from 'expo-file-system/legacy';
 import { encryptFile } from './encryptedFile';
 import {
+  namedFileExport,
   deleteDecryptedFile,
   retainDecryptedFile,
   FILE_SHARE_RETENTION_MS,
@@ -80,6 +81,11 @@ jest.mock('expo-file-system/legacy', () => ({
   }),
   deleteAsync: jest.fn(async (uri: string) => {
     for (const k of [...mockFiles.keys()]) if (k === uri || k.startsWith(uri)) mockFiles.delete(k);
+  }),
+  copyAsync: jest.fn(async ({ from, to }: { from: string; to: string }) => {
+    const data = mockFiles.get(from);
+    if (data === undefined) throw new Error('copy source missing');
+    mockFiles.set(to, data);
   }),
   moveAsync: jest.fn(async ({ from, to }: { from: string; to: string }) => {
     const data = mockFiles.get(from);
@@ -604,3 +610,32 @@ it.each(['ciphertext hash', 'plaintext hash', 'authentication'] as const)(
     expect(peekDecryptedMedia({ ...file, kind: 'file' })).toBeNull();
   },
 );
+
+it('exports identical bytes under the sanitized name and retains them for delayed recipient reads', async () => {
+  jest.useFakeTimers();
+  setDecryptedMediaOwner(A);
+  const uri = `file:///cache/decrypted/${ownerDirName(A)}/file-export.bin`;
+  const bytes = Buffer.from('invoice content').toString('base64');
+  mockFiles.set(uri, bytes);
+  const release = retainDecryptedFile(uri);
+  const target = await namedFileExport(uri, '../invoice.pdf');
+  expect(target).toBe(`${uri}.share/invoice.pdf`);
+  expect(mockFiles.get(target)).toBe(bytes);
+  release();
+  await jest.advanceTimersByTimeAsync(5000);
+  expect(mockFiles.get(target)).toBe(bytes);
+  await jest.advanceTimersByTimeAsync(FILE_SHARE_RETENTION_MS);
+  expect(mockFiles.has(target)).toBe(false);
+  expect(mockFiles.has(uri)).toBe(false);
+  jest.useRealTimers();
+});
+it('removes named exports on account wipe', async () => {
+  setDecryptedMediaOwner(A);
+  const uri = `file:///cache/decrypted/${ownerDirName(A)}/file-export.bin`;
+  mockFiles.set(uri, 'YQ==');
+  const release = retainDecryptedFile(uri);
+  const target = await namedFileExport(uri, 'report.csv');
+  await wipeDecryptedMediaForOwner(A);
+  expect(mockFiles.has(target)).toBe(false);
+  release();
+});

@@ -137,7 +137,16 @@ function displayMetadata(name: string, mime: string) {
   };
 }
 
-/** Display metadata is separate from the authenticated MIP-04 filename. */
+function urlBasename(url: string): string {
+  const segment = url.split(/[?#]/)[0].split('/').pop() ?? '';
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
+/** Prefer the authenticated filename; URL names are only a fallback. */
 export function attachmentMetadata(tags: string[][], filename?: string) {
   const tag =
     tags.find((tag) => tag[0] === 'imeta' && (!filename || tag.includes(`filename ${filename}`))) ??
@@ -145,13 +154,8 @@ export function attachmentMetadata(tags: string[][], filename?: string) {
   const field = (key: string) =>
     tag?.find((value) => value.startsWith(`${key} `))?.slice(key.length + 1);
   const url = field('url') ?? '';
-  let segment = url.split(/[?#]/)[0].split('/').pop() ?? '';
-  try {
-    segment = decodeURIComponent(segment);
-  } catch {
-    /* Keep malformed percent escapes literal. */
-  }
-  const name = sanitizeAttachmentText(field('name') || field('alt') || segment || filename || '');
+  const name =
+    filename || field('filename') || urlBasename(url) || field('name') || field('alt') || '';
   const rawSize = field('size');
   const size = rawSize && /^\d+$/.test(rawSize) ? Number(rawSize) : undefined;
   return {
@@ -170,6 +174,10 @@ export function parseFileAttachment(text: string): FileAttachment | null {
         url: typeof value.url === 'string' ? value.url : '',
         encrypted: value.encrypted !== false,
         ...displayMetadata(value.name, value.mime),
+        dangerous:
+          attachmentSafety(value.name, value.mime).dangerous ||
+          attachmentSafety(urlBasename(typeof value.url === 'string' ? value.url : ''), '')
+            .dangerous,
         ...(typeof value.plaintextSha256 === 'string'
           ? { plaintextSha256: value.plaintextSha256 }
           : {}),
@@ -208,10 +216,10 @@ export function parseFileAttachment(text: string): FileAttachment | null {
   const size = p.get('size');
   return {
     url,
-    ...displayMetadata(
-      p.get('name') || filename || attachmentMetadata([['imeta', `url ${url}`]]).name,
-      mime,
-    ),
+    ...displayMetadata(filename || p.get('name') || urlBasename(url), mime),
+    dangerous:
+      attachmentSafety(filename || p.get('name') || urlBasename(url), mime).dangerous ||
+      attachmentSafety(urlBasename(url), '').dangerous,
     encrypted: true,
     keyHex,
     nonceHex,

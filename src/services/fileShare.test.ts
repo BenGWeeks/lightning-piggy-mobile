@@ -2,6 +2,7 @@ import { shareFileAttachment } from './fileShare';
 import { parseFileAttachment } from '../utils/fileAttachment';
 import * as Sharing from 'expo-sharing';
 import {
+  namedFileExport,
   retainDecryptedFile,
   resolveDecryptedMedia,
   verifiedFileMetadata,
@@ -12,6 +13,9 @@ jest.mock('expo-sharing', () => ({
 }));
 const mockRelease = jest.fn();
 jest.mock('./decryptedMediaCache', () => ({
+  namedFileExport: jest.fn(
+    async (_uri: string, name: string) => `file:///safe.bin.share/${encodeURIComponent(name)}`,
+  ),
   resolveDecryptedMedia: jest.fn(async () => 'file:///safe.bin'),
   retainDecryptedFile: jest.fn(() => mockRelease),
   verifiedFileMetadata: jest.fn(() => ({ mime: 'application/pdf', size: 9 })),
@@ -32,11 +36,12 @@ it('requires warning approval before downloading dangerous files and shares gene
   const confirm = jest.fn(async () => true);
   await shareFileAttachment(file('invoice.pdf.apk', 'application/pdf'), confirm, jest.fn());
   expect(confirm).toHaveBeenCalled();
+  expect(namedFileExport).toHaveBeenCalledWith('file:///safe.bin', 'attachment.bin');
   expect(confirm.mock.invocationCallOrder[0]).toBeLessThan(
     (resolveDecryptedMedia as jest.Mock).mock.invocationCallOrder[0],
   );
   expect(Sharing.shareAsync).toHaveBeenCalledWith(
-    'file:///safe.bin',
+    'file:///safe.bin.share/attachment.bin',
     expect.objectContaining({ mimeType: 'application/octet-stream' }),
   );
   expect(retainDecryptedFile).toHaveBeenCalledWith('file:///safe.bin');
@@ -52,7 +57,7 @@ it('uses verified MIME and actual size, not sender metadata', async () => {
   await shareFileAttachment(file('invoice.pdf', 'application/attacker'), jest.fn(), verified);
   expect(verified).toHaveBeenCalledWith({ mime: 'application/pdf', size: 9 });
   expect(Sharing.shareAsync).toHaveBeenCalledWith(
-    'file:///safe.bin',
+    'file:///safe.bin.share/invoice.pdf',
     expect.objectContaining({ mimeType: 'application/pdf' }),
   );
 });
@@ -68,7 +73,7 @@ it('falls back to generic bytes when no verified type exists', async () => {
   (verifiedFileMetadata as jest.Mock).mockReturnValueOnce(undefined);
   await shareFileAttachment(file('x.pdf', 'application/pdf'), jest.fn(), jest.fn());
   expect(Sharing.shareAsync).toHaveBeenCalledWith(
-    'file:///safe.bin',
+    'file:///safe.bin.share/x.pdf',
     expect.objectContaining({ mimeType: 'application/octet-stream' }),
   );
 });
@@ -100,3 +105,15 @@ it('rejects unavailable hashless files before downloading or opening the chooser
   expect(resolveDecryptedMedia).not.toHaveBeenCalled();
   expect(Sharing.shareAsync).not.toHaveBeenCalled();
 });
+
+it.each(['invoice.pdf', 'report.csv', 'budget.xlsx'])(
+  'passes the sanitized recipient filename %s in the URI',
+  async (name) => {
+    await shareFileAttachment(file(`../${name}`, 'application/octet-stream'), jest.fn(), jest.fn());
+    expect(namedFileExport).toHaveBeenCalledWith('file:///safe.bin', name);
+    expect(Sharing.shareAsync).toHaveBeenCalledWith(
+      `file:///safe.bin.share/${name}`,
+      expect.any(Object),
+    );
+  },
+);

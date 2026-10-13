@@ -1,6 +1,7 @@
 import * as Sharing from 'expo-sharing';
 import type { FileAttachment } from '../utils/fileAttachment';
 import {
+  namedFileExport,
   retainDecryptedFile,
   resolveDecryptedMedia,
   verifiedFileMetadata,
@@ -20,7 +21,8 @@ export async function shareFileAttachment(
   try {
     const metadata = verifiedFileMetadata(uri);
     if (metadata) onVerified(metadata);
-    await Sharing.shareAsync(uri, {
+    const exportUri = await namedFileExport(uri, file.dangerous ? 'attachment.bin' : file.name);
+    await Sharing.shareAsync(exportUri, {
       mimeType: file.dangerous
         ? 'application/octet-stream'
         : (metadata?.mime ?? 'application/octet-stream'),
