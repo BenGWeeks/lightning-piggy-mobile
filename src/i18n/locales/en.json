@@ -1815,7 +1815,7 @@
     "sats": "sats",
     "linkPreviews": "Link previews in messages",
     "linkPreviewsHint": "When ON, your phone fetches a preview card (title, image, summary) for any URL shared in a message — automatically, as the message renders, even if you never tap it. The fetch tells the URL's host that someone is previewing the page. Turn OFF if you'd rather keep that traffic private. Default: ON.",
-    "showLinkPreviews": "Show link previews",
+    "showLinkPreviews": "Link previews",
     "showLinkPreviewsA11y": "Show link previews in messages",
     "notificationContent": "Notification content",
     "notificationContentHint": "When OFF, notifications tell you a message or payment arrived but never include the details — you'll see \"New message\" rather than the text, and \"Payment received\" rather than the amount, both on the lock screen and in the notification shade. Turn ON to include the full content. Default: OFF.",
@@ -2863,7 +2863,7 @@
     "notReachedBody": "We couldn't deliver the invitation to {{names}} yet. Lightning Piggy will keep trying automatically."
   },
   "invitationKeys": {
-    "title": "Devices that can get new chats",
+    "title": "Devices for new chats",
     "entrySubtitle": "See which devices people can start new private chats with",
     "description": "To start a private chat with you, people's apps use an invitation key that each of your devices shares on your relays. Remove devices you no longer use, so new chats don't go somewhere you'll never see them. Your existing chats aren't affected.",
     "thisPhone": "This phone",
@@ -2957,9 +2957,9 @@
   },
   "messageSettingsScreen": {
     "title": "Messages",
-    "trustTitle": "Whose posts and messages you see",
+    "trustTitle": "Who you see",
     "trustHint": "This Web of Trust filter also decides what you see on the Map, in Events and in Groups.",
-    "trustRowA11y": "Whose posts and messages you see: {{tier}}"
+    "trustRowA11y": "Who you see: {{tier}}"
   },
   "hermesProfiler": {
     "title": "Performance profiler (dev)",
@@ -3256,5 +3256,25 @@
     "retry": "Invitation accepted. Joining will retry when the app restarts.",
     "error": "Could not update the invitation. Please try again.",
     "unavailable": "This invitation can no longer be accepted."
+  },
+  "settingsScreens": {
+    "on": "On",
+    "off": "Off",
+    "thresholdValue": "{{amount}} sats",
+    "linkPrivacy": "Previewing a link contacts its website.",
+    "languages": {
+      "en": "English",
+      "de": "Deutsch",
+      "es": "Español",
+      "hu": "Magyar",
+      "pl": "Polski",
+      "uk": "Українська",
+      "hi": "हिन्दी",
+      "mr": "मराठी",
+      "zh-Hans": "中文（简体）"
+    },
+    "systemLanguage": "{{system}} · {{language}}",
+    "currencyValue": "{{code}} · {{name}}",
+    "pseudoLanguage": "Pseudo (testing)"
   }
 }

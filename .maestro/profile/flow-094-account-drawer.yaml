@@ -1,7 +1,7 @@
 appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Account Drawer Test
 ---
-# View only; allow cold development bundles to finish loading.
+# View only: normalize a previously opened settings page; allow cold bundles to load.
 - runFlow: ../common/open-drawer.yaml
 - extendedWaitUntil:
     visible:
@@ -49,6 +49,12 @@ name: Account Drawer Test
     id: display-language-currency-row
 - waitForAnimationToEnd:
     timeout: 3000
+# The drawer keeps this list mounted, including its previous scroll position.
+- scrollUntilVisible:
+    element:
+      id: currency-search
+    direction: UP
+    timeout: 15000
 - extendedWaitUntil:
     visible:
       id: currency-search
@@ -84,6 +90,10 @@ name: Account Drawer Test
     timeout: 10000
 - tapOn:
     id: drawer-row-advanced
+- extendedWaitUntil:
+    visible:
+      id: advanced-experimental-features
+    timeout: 30000
 - scrollUntilVisible:
     element:
       id: advanced-experimental-features

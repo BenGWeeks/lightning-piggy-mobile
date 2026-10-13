@@ -1,38 +1,66 @@
 appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
-name: Language options — view only
+name: Language picker — searchable options and optional locale selection
 ---
-# The shared device lane is view-only. Preserve the original mutation and
-# persistence checks for a dedicated test device with -e EXERCISE_SETTINGS=true.
+# The shared device lane is view-only. Locale selection requires
+# -e EXERCISE_SETTINGS=true; VIEW_ONLY=true stays view-only.
 - runFlow:
     when:
-      true: ${typeof EXERCISE_SETTINGS === 'undefined' || EXERCISE_SETTINGS !== 'true'}
+      true: ${typeof EXERCISE_SETTINGS === 'undefined' || EXERCISE_SETTINGS !== 'true' || (typeof VIEW_ONLY !== 'undefined' && VIEW_ONLY === 'true')}
     commands:
-      # Presentation checks: never change the device preferences.
-      - tapOn: { id: tab-wallets }
-      - tapOn: { id: profile-icon }
+      # Inspect the current preferences without changing them.
+      - runFlow: ../common/open-drawer.yaml
       - scrollUntilVisible:
-          element: { id: drawer-row-display-language }
+          element:
+            id: drawer-row-display-language
           direction: DOWN
-      - tapOn: { id: drawer-row-display-language }
+          timeout: 15000
+      - tapOn:
+          id: drawer-row-display-language
       - extendedWaitUntil:
-          visible: { id: display-language-currency-row }
+          visible:
+            id: display-language-currency-row
           timeout: 30000
+      - tapOn:
+          id: display-language-locale-row
+      - extendedWaitUntil:
+          visible:
+            id: language-picker-search
+          timeout: 15000
+      - assertVisible:
+          id: locale-system
+      - assertVisible:
+          id: locale-en
+      - tapOn:
+          id: language-picker-search
+      - inputText: de
+      - extendedWaitUntil:
+          visible:
+            id: locale-de
+          timeout: 15000
+      - assertNotVisible:
+          id: locale-en
+      - eraseText: 2
+      - hideKeyboard
+      - extendedWaitUntil:
+          visible:
+            id: locale-system
+          timeout: 15000
+      - tapOn:
+          id: account-back-button
+      - extendedWaitUntil:
+          visible:
+            id: display-language-locale-row
+          timeout: 15000
       - scrollUntilVisible:
-          element: { id: locale-en }
-          direction: DOWN
-      - assertVisible: { id: locale-en }
-      - scrollUntilVisible:
-          element: { id: locale-de }
-          direction: DOWN
-      - assertVisible: { id: locale-de }
-      - scrollUntilVisible:
-          element: { id: account-back-button }
+          element:
+            id: account-back-button
           direction: UP
-      - tapOn: { id: account-back-button }
-      - assertVisible: { id: tab-wallets }
+          timeout: 15000
+      - tapOn:
+          id: account-back-button
 - runFlow:
     when:
-      true: ${typeof EXERCISE_SETTINGS !== 'undefined' && EXERCISE_SETTINGS === 'true'}
+      true: ${typeof EXERCISE_SETTINGS !== 'undefined' && EXERCISE_SETTINGS === 'true' && (typeof VIEW_ONLY === 'undefined' || VIEW_ONLY !== 'true')}
     commands:
       # Switches the active account's language in Settings › Display & language,
       # then captures the language picker, Wallets and Messages in that language (the
@@ -60,6 +88,12 @@ name: Language options — view only
           id: 'drawer-row-display-language'
       - waitForAnimationToEnd:
           timeout: 3000
+      - tapOn:
+          id: display-language-locale-row
+      - extendedWaitUntil:
+          visible:
+            id: language-picker-search
+          timeout: 15000
       - scrollUntilVisible:
           element:
             id: 'locale-${LOCALE}'
@@ -67,6 +101,17 @@ name: Language options — view only
           timeout: 15000
       - tapOn:
           id: 'locale-${LOCALE}'
+      - extendedWaitUntil:
+          visible:
+            id: display-language-locale-row
+          timeout: 15000
+      - tapOn:
+          id: display-language-locale-row
+      - scrollUntilVisible:
+          element:
+            id: 'locale-${LOCALE}-check'
+          direction: DOWN
+          timeout: 15000
       # Switching language re-renders the whole screen; give the tick time to land.
       - extendedWaitUntil:
           visible:
@@ -94,6 +139,8 @@ name: Language options — view only
                 id: 'account-back-button'
             - waitForAnimationToEnd:
                 timeout: 2000
+            - tapOn:
+                id: account-back-button
             - runFlow: ../common/close-sheets.yaml
             - tapOn:
                 id: 'tab-wallets'

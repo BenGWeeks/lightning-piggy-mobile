@@ -1815,7 +1815,7 @@
     "sats": "sats",
     "linkPreviews": "Linkelőnézetek az üzenetekben",
     "linkPreviewsHint": "BE kapcsolva a telefonod előnézeti kártyát (cím, kép, összefoglaló) tölt le minden üzenetben megosztott URL-hez – automatikusan, ahogy az üzenet megjelenik, akkor is, ha soha nem koppintasz rá. A letöltés jelzi az URL gazdagépének, hogy valaki előnézi az oldalt. Kapcsold KI, ha ezt a forgalmat privátban tartanád. Alapértelmezés: BE.",
-    "showLinkPreviews": "Linkelőnézetek megjelenítése",
+    "showLinkPreviews": "Hivatkozások előnézete",
     "showLinkPreviewsA11y": "Linkelőnézetek megjelenítése az üzenetekben",
     "notificationContent": "Értesítések tartalma",
     "notificationContentHint": "KI kapcsolva az értesítések jelzik, hogy üzenet vagy fizetés érkezett, de a részleteket sosem tartalmazzák – az üzenet szövege helyett „Új üzenet”, az összeg helyett „Fizetés érkezett” látszik, a lezárt képernyőn és az értesítési sávban is. Kapcsold BE a teljes tartalom megjelenítéséhez. Alapértelmezés: KI.",
@@ -2863,7 +2863,7 @@
     "notReachedBody": "A meghívót még nem tudtuk kézbesíteni ide: {{names}}. A Lightning Piggy automatikusan próbálkozik tovább."
   },
   "invitationKeys": {
-    "title": "Új csevegéseket fogadni képes eszközök",
+    "title": "Eszközök új csevegésekhez",
     "entrySubtitle": "Nézd meg, mely eszközökkel indíthatnak az emberek új privát csevegést",
     "description": "Hogy privát csevegést indíthassanak veled, mások alkalmazásai egy meghívókulcsot használnak, amelyet minden eszközöd megoszt a relay-eiden. Távolítsd el a már nem használt eszközöket, hogy az új csevegések ne olyan helyre menjenek, amit sosem látsz. A meglévő csevegéseid nem érintettek.",
     "thisPhone": "Ez a telefon",
@@ -2957,9 +2957,9 @@
   },
   "messageSettingsScreen": {
     "title": "Üzenetek",
-    "trustTitle": "Kinek a bejegyzéseit és üzeneteit látod",
+    "trustTitle": "Kiket látsz",
     "trustHint": "Ez a Bizalmi háló szűrő azt is meghatározza, mit látsz a Térképen, az Eseményekben és a Csoportokban.",
-    "trustRowA11y": "Kinek a bejegyzéseit és üzeneteit látod: {{tier}}"
+    "trustRowA11y": "Kiket látsz: {{tier}}"
   },
   "hermesProfiler": {
     "title": "Teljesítményprofilozó (fejlesztői)",
@@ -3256,5 +3256,25 @@
     "retry": "Meghívás elfogadva. Az alkalmazás újraindításakor újra megpróbálunk csatlakozni.",
     "error": "Nem sikerült frissíteni a meghívást. Próbáld újra.",
     "unavailable": "Ez a meghívás már nem fogadható el."
+  },
+  "settingsScreens": {
+    "on": "Be",
+    "off": "Ki",
+    "thresholdValue": "{{amount}} sats",
+    "linkPrivacy": "A hivatkozás előnézete kapcsolatba lép a webhellyel.",
+    "languages": {
+      "en": "English",
+      "de": "Deutsch",
+      "es": "Español",
+      "hu": "Magyar",
+      "pl": "Polski",
+      "uk": "Українська",
+      "hi": "हिन्दी",
+      "mr": "मराठी",
+      "zh-Hans": "中文（简体）"
+    },
+    "systemLanguage": "{{system}} · {{language}}",
+    "currencyValue": "{{code}} · {{name}}",
+    "pseudoLanguage": "Pszeudo (tesztelés)"
   }
 }

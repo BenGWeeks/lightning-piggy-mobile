@@ -1815,7 +1815,7 @@
     "sats": "sats",
     "linkPreviews": "Link-Vorschauen in Nachrichten",
     "linkPreviewsHint": "Wenn AN, lädt dein Handy für jede in einer Nachricht geteilte URL eine Vorschaukarte (Titel, Bild, Zusammenfassung) – automatisch, sobald die Nachricht angezeigt wird, auch wenn du nie darauf tippst. Dabei erfährt der Host der URL, dass jemand die Seite in der Vorschau ansieht. Schalte AUS, wenn du diesen Datenverkehr lieber privat halten willst. Standard: AN.",
-    "showLinkPreviews": "Link-Vorschauen anzeigen",
+    "showLinkPreviews": "Link-Vorschauen",
     "showLinkPreviewsA11y": "Link-Vorschauen in Nachrichten anzeigen",
     "notificationContent": "Inhalt von Benachrichtigungen",
     "notificationContentHint": "Wenn AUS, sagen Benachrichtigungen nur, dass eine Nachricht oder Zahlung eingetroffen ist, nennen aber nie Details – du siehst „Neue Nachricht“ statt des Textes und „Zahlung empfangen“ statt des Betrags, auf dem Sperrbildschirm und im Benachrichtigungsbereich. Schalte AN, um den vollen Inhalt anzuzeigen. Standard: AUS.",
@@ -2863,7 +2863,7 @@
     "notReachedBody": "Wir konnten die Einladung an {{names}} noch nicht zustellen. Lightning Piggy versucht es automatisch weiter."
   },
   "invitationKeys": {
-    "title": "Geräte, die neue Chats erhalten können",
+    "title": "Geräte für neue Chats",
     "entrySubtitle": "Sieh, mit welchen Geräten andere neue private Chats beginnen können",
     "description": "Um einen privaten Chat mit dir zu beginnen, nutzen die Apps anderer Personen einen Einladungsschlüssel, den jedes deiner Geräte auf deinen Relays teilt. Entferne Geräte, die du nicht mehr nutzt, damit neue Chats nicht dorthin gehen, wo du sie nie siehst. Deine bestehenden Chats sind davon nicht betroffen.",
     "thisPhone": "Dieses Handy",
@@ -2957,9 +2957,9 @@
   },
   "messageSettingsScreen": {
     "title": "Nachrichten",
-    "trustTitle": "Wessen Beiträge und Nachrichten du siehst",
+    "trustTitle": "Wen du siehst",
     "trustHint": "Dieser Filter für das Vertrauensnetz bestimmt auch, was du auf der Karte, bei Events und in Gruppen siehst.",
-    "trustRowA11y": "Wessen Beiträge und Nachrichten du siehst: {{tier}}"
+    "trustRowA11y": "Wen du siehst: {{tier}}"
   },
   "hermesProfiler": {
     "title": "Performance-Profiler (Dev)",
@@ -3256,5 +3256,25 @@
     "retry": "Einladung angenommen. Der Beitritt wird beim nächsten App-Start erneut versucht.",
     "error": "Die Einladung konnte nicht aktualisiert werden. Bitte versuche es erneut.",
     "unavailable": "Diese Einladung kann nicht mehr angenommen werden."
+  },
+  "settingsScreens": {
+    "on": "An",
+    "off": "Aus",
+    "thresholdValue": "{{amount}} sats",
+    "linkPrivacy": "Eine Link-Vorschau kontaktiert die Website.",
+    "languages": {
+      "en": "English",
+      "de": "Deutsch",
+      "es": "Español",
+      "hu": "Magyar",
+      "pl": "Polski",
+      "uk": "Українська",
+      "hi": "हिन्दी",
+      "mr": "मराठी",
+      "zh-Hans": "中文（简体）"
+    },
+    "systemLanguage": "{{system}} · {{language}}",
+    "currencyValue": "{{code}} · {{name}}",
+    "pseudoLanguage": "Pseudo (Test)"
   }
 }

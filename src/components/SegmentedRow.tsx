@@ -1,6 +1,6 @@
 import React, { useContext, useMemo, useState } from 'react';
 import { Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import type { LucideIcon } from 'lucide-react-native';
+import { Info, type LucideIcon } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { SettingsSectionCardContext } from '../contexts/SettingsSectionCardContext';
@@ -13,6 +13,7 @@ import SettingsPickerOptionRow from './SettingsPickerOptionRow';
 interface Props {
   icon: LucideIcon;
   title: string;
+  details?: string;
   options:
     | readonly [SettingsPickerOption]
     | readonly [SettingsPickerOption, SettingsPickerOption]
@@ -29,6 +30,7 @@ interface Props {
 export default function SegmentedRow({
   icon: Icon,
   title,
+  details,
   options,
   value,
   onValueChange,
@@ -48,6 +50,7 @@ export default function SegmentedRow({
     overflow: Record<string, boolean>;
   }>({ key: '', overflow: {} });
   const [open, setOpen] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
   const measureKey = JSON.stringify([width, fontScale, options.map((option) => option.label)]);
   const overflow =
     measurements.key === measureKey && Object.values(measurements.overflow).some(Boolean);
@@ -98,6 +101,7 @@ export default function SegmentedRow({
         <SettingsRow
           icon={Icon}
           title={title}
+          details={details}
           value={selected?.label ?? t('settingsKit.status.unknown')}
           testID={testID}
           accessibilityLabel={accessibilityLabel}
@@ -113,6 +117,17 @@ export default function SegmentedRow({
           <View style={styles.heading}>
             <Icon size={22} color={colors.white} />
             <Text style={styles.title}>{title}</Text>
+            {details && (
+              <TouchableOpacity
+                style={styles.info}
+                onPress={() => setInfoOpen(true)}
+                accessibilityRole="button"
+                accessibilityLabel={`${title}: ${t('securityScreen.details')}`}
+                testID={`${testID}-info`}
+              >
+                <Info size={20} color={colors.white} />
+              </TouchableOpacity>
+            )}
           </View>
           <View
             style={styles.segments}
@@ -139,13 +154,29 @@ export default function SegmentedRow({
                   disabled: disabled || !!option.disabled,
                 }}
               >
-                <Text style={styles.label}>{option.label}</Text>
+                <Text
+                  style={styles.label}
+                  testID={
+                    option.value === value
+                      ? `${option.testID ?? `${testID}-option-${option.value}`}-check`
+                      : undefined
+                  }
+                >
+                  {option.label}
+                </Text>
               </TouchableOpacity>
             ))}
           </View>
           {!!disabledHint && <Text style={styles.subtitle}>{disabledHint}</Text>}
         </View>
       )}
+      <SettingsInfoSheet
+        visible={infoOpen}
+        onClose={() => setInfoOpen(false)}
+        title={title}
+        testID={`${testID}-info-sheet`}
+        paragraphs={details ? [details] : []}
+      />
       <SettingsInfoSheet
         visible={open && !disabled}
         onClose={() => setOpen(false)}

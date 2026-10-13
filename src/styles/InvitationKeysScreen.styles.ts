@@ -6,7 +6,13 @@ export const createInvitationKeysScreenStyles = (colors: Palette) =>
     list: { flex: 1 },
     content: { paddingBottom: 32 },
     header: { gap: 10, marginBottom: 16 },
-    intro: { color: colors.white, fontSize: 14, lineHeight: 20 },
+    info: {
+      alignSelf: 'flex-end',
+      minWidth: 48,
+      minHeight: 48,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
     note: { color: 'rgba(255,255,255,0.8)', fontSize: 13, lineHeight: 19 },
     card: {
       backgroundColor: 'rgba(255,255,255,0.12)',

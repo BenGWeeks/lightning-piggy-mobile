@@ -30,7 +30,11 @@ export default React.memo(function SettingsPickerOptionRow({
       accessibilityLabel={option.subtitle ? `${option.label}: ${option.subtitle}` : option.label}
       accessibilityState={{ checked: selected, disabled: !!option.disabled }}
     >
-      <Icon size={22} color={colors.accentSecondary} />
+      <Icon
+        testID={selected ? `${option.testID ?? testID}-check` : undefined}
+        size={22}
+        color={colors.accentSecondary}
+      />
       <View style={styles.text}>
         <Text style={styles.label}>{option.label}</Text>
         {option.subtitle && <Text style={styles.subtitle}>{option.subtitle}</Text>}

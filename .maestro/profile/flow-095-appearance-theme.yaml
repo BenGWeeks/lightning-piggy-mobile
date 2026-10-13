@@ -1,42 +1,56 @@
 appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
-name: Theme options — view only
+name: Appearance theme segments
 ---
-# The shared device lane is view-only. Preserve the original mutation and
-# persistence checks for a dedicated test device with -e EXERCISE_SETTINGS=true.
+# The shared device lane is view-only. Run persistence checks on a dedicated
+# test device with -e EXERCISE_SETTINGS=true; VIEW_ONLY=true stays view-only.
 - runFlow:
     when:
-      true: ${typeof EXERCISE_SETTINGS === 'undefined' || EXERCISE_SETTINGS !== 'true'}
+      true: ${typeof EXERCISE_SETTINGS === 'undefined' || EXERCISE_SETTINGS !== 'true' || (typeof VIEW_ONLY !== 'undefined' && VIEW_ONLY === 'true')}
     commands:
-      # Presentation checks: never change the device preferences.
-      - tapOn: { id: tab-wallets }
-      - tapOn: { id: profile-icon }
+      # Inspect the current preferences without changing them.
+      - runFlow: ../common/open-drawer.yaml
       - scrollUntilVisible:
-          element: { id: drawer-row-display-language }
+          element:
+            id: drawer-row-display-language
           direction: DOWN
-      - tapOn: { id: drawer-row-display-language }
+          timeout: 15000
+      - tapOn:
+          id: drawer-row-display-language
       - extendedWaitUntil:
-          visible: { id: display-language-currency-row }
+          visible:
+            id: display-language-currency-row
           timeout: 30000
       - scrollUntilVisible:
-          element: { id: appearance-system }
+          element:
+            id: appearance-dark
           direction: DOWN
-      - assertVisible: { id: appearance-system }
+          timeout: 15000
+      - assertVisible:
+          id: appearance-system
+      - assertVisible:
+          id: appearance-light
+      - assertVisible:
+          id: appearance-dark
+      - assertVisible:
+          id: 'appearance-(system|light|dark)-check'
+      - tapOn:
+          id: appearance-theme-info
+      - extendedWaitUntil:
+          visible:
+            id: appearance-theme-info-sheet
+          timeout: 15000
+      - tapOn:
+          id: appearance-theme-info-sheet-close
       - scrollUntilVisible:
-          element: { id: appearance-light }
-          direction: DOWN
-      - assertVisible: { id: appearance-light }
-      - scrollUntilVisible:
-          element: { id: appearance-dark }
-          direction: DOWN
-      - assertVisible: { id: appearance-dark }
-      - scrollUntilVisible:
-          element: { id: account-back-button }
+          element:
+            id: account-back-button
           direction: UP
-      - tapOn: { id: account-back-button }
-      - assertVisible: { id: tab-wallets }
+          timeout: 15000
+      - tapOn:
+          id: account-back-button
 - runFlow:
     when:
-      true: ${typeof EXERCISE_SETTINGS !== 'undefined' && EXERCISE_SETTINGS === 'true'}
+      true: ${typeof EXERCISE_SETTINGS !== 'undefined' && EXERCISE_SETTINGS === 'true' && (typeof VIEW_ONLY === 'undefined' || VIEW_ONLY !== 'true')}
     commands:
       # Exercises the light/dark/system theme toggle:
       #   1. Establishes a known baseline by tapping "System" first (this test
