@@ -52,7 +52,7 @@ export async function fetchProfilesBatch(
       }
       resolve();
     };
-    sub = pool.subscribeMany(relays, { kinds: [0], authors } as Filter, {
+    sub = pool.subscribeMany(relays, { kinds: [0], authors, limit: authors.length } as Filter, {
       onevent: (ev: { pubkey: string; content: string; created_at: number }) => {
         // Ignore unsolicited pubkeys. A misbehaving relay could send a kind-0
         // for an author outside our `authors` filter; counting it toward

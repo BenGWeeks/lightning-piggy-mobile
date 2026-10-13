@@ -1,65 +1,62 @@
-import { useEffect, useRef, useState } from 'react';
-import { fetchProfile, DEFAULT_RELAYS } from '../services/nostrService';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  resolveSharedContactProfiles,
+  SHARED_PROFILE_BATCH_SIZE,
+} from '../services/sharedContactProfiles';
 import { extractSharedContact } from '../utils/messageContent';
-import type { NostrProfile } from '../types/nostr';
+import type { NostrContact, NostrProfile } from '../types/nostr';
 
-/**
- * Resolves the Nostr kind-0 profiles for `nostr:` contact references the other
- * party has shared in a conversation, so shared-contact cards can render a
- * name/avatar instead of a bare pubkey. Extracted from ConversationScreen
- * (#431) to keep that screen under the file-size cap and give the fetch its own
- * testable seam; the group screen shares it (#1295).
- *
- * Behaviour preserved verbatim from the inline effect:
- *  - Batches all newly-seen shared pubkeys per `messages` update and fetches
- *    their kind-0 in parallel.
- *  - Merges any relay hints carried in the nprofile with {@link DEFAULT_RELAYS}
- *    so a person publishing on niche relays is still found.
- *  - Tracks already-scheduled pubkeys in a ref so the effect can depend on
- *    `[messages]` alone — writing `sharedProfiles` never re-triggers the fetch.
- *  - A `null` value means the lookup ran and came back empty.
- */
+const EMPTY_CONTACTS: readonly NostrContact[] = [];
+
+/** Shared by NIP-17 and Marmot, including our optimistic sent messages.
+ * Pending requests belong to the mount, not a messages-array revision: send
+ * reconciliation must not discard a result whose pubkey is already scheduled.
+ * One state update per bounded batch; known friends need no relay round trip. */
 export function useSharedContactProfiles(
   messages: readonly { text: string }[],
+  contacts: readonly NostrContact[] = EMPTY_CONTACTS,
 ): Record<string, NostrProfile | null> {
   const [sharedProfiles, setSharedProfiles] = useState<Record<string, NostrProfile | null>>({});
-  const scheduledProfilePubkeys = useRef(new Set<string>());
+  const scheduled = useRef(new Set<string>());
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    const scheduledPubkeys = scheduled.current;
+    return () => {
+      mounted.current = false;
+      scheduledPubkeys.clear();
+    };
+  }, []);
+
+  const known = useMemo(() => {
+    const profiles: Record<string, NostrProfile> = {};
+    for (const contact of contacts) {
+      if (contact.profile) profiles[contact.pubkey] = contact.profile;
+    }
+    return profiles;
+  }, [contacts]);
 
   useEffect(() => {
     const byPubkey = new Map<string, Set<string>>();
-    for (const m of messages) {
-      const ref = extractSharedContact(m.text);
-      if (!ref) continue;
-      if (scheduledProfilePubkeys.current.has(ref.pubkey)) continue;
-      const set = byPubkey.get(ref.pubkey) ?? new Set<string>();
-      for (const r of ref.relays) set.add(r);
-      byPubkey.set(ref.pubkey, set);
+    for (const message of messages) {
+      const ref = extractSharedContact(message.text);
+      if (!ref || known[ref.pubkey] || scheduled.current.has(ref.pubkey)) continue;
+      const relays = byPubkey.get(ref.pubkey) ?? new Set<string>();
+      for (const relay of ref.relays) relays.add(relay);
+      byPubkey.set(ref.pubkey, relays);
     }
-    if (byPubkey.size === 0) return;
-    // Mark all found pubkeys as scheduled before the async work starts so
-    // a second messages-update doesn't re-queue the same fetches.
-    for (const pk of byPubkey.keys()) scheduledProfilePubkeys.current.add(pk);
-    let cancelled = false;
-    (async () => {
-      const updates: Record<string, NostrProfile | null> = {};
-      await Promise.all(
-        [...byPubkey.entries()].map(async ([pk, relaySet]) => {
-          const mergedRelays = [...new Set([...DEFAULT_RELAYS, ...relaySet])];
-          try {
-            updates[pk] = await fetchProfile(pk, mergedRelays);
-          } catch {
-            updates[pk] = null;
-          }
-        }),
-      );
-      if (!cancelled) {
-        setSharedProfiles((prev) => ({ ...prev, ...updates }));
+    const refs = [...byPubkey].map(([pubkey, relays]) => ({ pubkey, relays: [...relays] }));
+    for (const ref of refs) scheduled.current.add(ref.pubkey);
+    void (async () => {
+      for (let i = 0; i < refs.length; i += SHARED_PROFILE_BATCH_SIZE) {
+        if (!mounted.current) return;
+        const updates = await resolveSharedContactProfiles(
+          refs.slice(i, i + SHARED_PROFILE_BATCH_SIZE),
+        );
+        if (mounted.current) setSharedProfiles((prev) => ({ ...prev, ...updates }));
       }
     })();
-    return () => {
-      cancelled = true;
-    };
-  }, [messages]);
+  }, [messages, known]);
 
-  return sharedProfiles;
+  return useMemo(() => ({ ...sharedProfiles, ...known }), [sharedProfiles, known]);
 }
