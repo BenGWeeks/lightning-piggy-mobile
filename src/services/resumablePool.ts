@@ -7,6 +7,8 @@ type PoolClass = abstract new (...args: any[]) => AbstractSimplePool;
 /** Replace stale transports without losing other features sharing their sockets. */
 export function withResumableSubscriptions<TBase extends PoolClass>(Base: TBase) {
   abstract class ResumablePool extends Base {
+    private resetsInFlight = 0;
+    private readonly pendingOpens = new Set<() => void>();
     private readonly subscriptions = new Set<{
       urls: string[];
       pause(): Promise<void>;
@@ -19,15 +21,19 @@ export function withResumableSubscriptions<TBase extends PoolClass>(Base: TBase)
     ): SubCloser {
       let generation = 0;
       let stopped = false;
-      let sub: SubCloser;
+      let sub: SubCloser | undefined;
       const entry = {
         urls: requests.map(({ url }) => normalizeURL(url)),
         pause: async () => {
           generation++;
-          await sub.close();
+          await sub?.close();
         },
         open: () => {
           if (stopped) return;
+          if (this.resetsInFlight > 0) {
+            this.pendingOpens.add(entry.open);
+            return;
+          }
           const currentGeneration = ++generation;
           const current = () => generation === currentGeneration;
           sub = super.subscribeMap(requests, {
@@ -53,7 +59,8 @@ export function withResumableSubscriptions<TBase extends PoolClass>(Base: TBase)
         close: (reason) => {
           stopped = true;
           this.subscriptions.delete(entry);
-          return sub.close(reason);
+          this.pendingOpens.delete(entry.open);
+          return sub?.close(reason) ?? Promise.resolve();
         },
       };
     }
@@ -63,11 +70,22 @@ export function withResumableSubscriptions<TBase extends PoolClass>(Base: TBase)
       const affected = [...this.subscriptions].filter((entry) =>
         entry.urls.some((url) => targets.has(url)),
       );
+      this.resetsInFlight++;
       // Wait for in-flight subscription opens before replacing sockets. Keep
       // caller close handles stable, and suppress intentional close callbacks.
-      await Promise.all(affected.map((entry) => entry.pause()));
-      super.close(relays);
-      affected.forEach((entry) => entry.open());
+      try {
+        await Promise.all(affected.map((entry) => entry.pause()));
+        super.close(relays);
+      } finally {
+        // New subscriptions must not open on sockets about to be replaced.
+        // Drain only after every concurrent reset has finished closing them.
+        affected.forEach((entry) => entry.open());
+        if (--this.resetsInFlight === 0) {
+          const pending = [...this.pendingOpens];
+          this.pendingOpens.clear();
+          pending.forEach((open) => open());
+        }
+      }
     }
   }
   return ResumablePool;
