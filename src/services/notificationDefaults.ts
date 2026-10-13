@@ -46,9 +46,6 @@ export function initialiseNotificationDefaults(
       if (outcome.status !== 'enabled') return;
     }
     if (!stillActive()) return;
-    // '0' marks an automatic decision, '1' marks a user choice. Both prevent
-    // a default being reconsidered after an account switch or restart.
-    await AsyncStorage.setItem(`${EXPLICIT_PREFIX}${me}`, ownPush !== null ? '1' : '0');
     if (ownWatcher === null) {
       await saveWatcherState(me, {
         ...watcher,
@@ -65,6 +62,9 @@ export function initialiseNotificationDefaults(
     if (ownPush === null && !desired.instant) {
       await AsyncStorage.setItem(`${PUSH_PREFIX}${me}`, '0');
     }
+    // Commit the decision last: partial writes must retry the missing preferences.
+    // '0' marks an automatic decision, '1' marks an existing user choice.
+    await AsyncStorage.setItem(`${EXPLICIT_PREFIX}${me}`, ownPush !== null ? '1' : '0');
   });
   chain = run.catch(() => undefined);
   return run;

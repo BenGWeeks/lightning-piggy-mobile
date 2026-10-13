@@ -6,8 +6,12 @@ import { useNotificationDefaults } from './useNotificationDefaults';
 import { enableMarmotPush } from '../services/marmotPushRegistration';
 
 let mockAccount = { isLoggedIn: true, pubkey: 'first' as string | null };
+let mockLivePubkey: string | null = 'first';
 let mockBlur: (() => void) | undefined;
 jest.mock('../contexts/NostrContext', () => ({ useNostr: () => mockAccount }));
+jest.mock('../services/nostrService', () => ({
+  getCurrentUserPubkey: () => mockLivePubkey,
+}));
 jest.mock('@react-navigation/native', () => {
   const { useEffect } = jest.requireActual('react');
   return {
@@ -39,6 +43,7 @@ beforeEach(async () => {
   jest.clearAllMocks();
   jest.useFakeTimers();
   mockAccount = { isLoggedIn: true, pubkey: 'first' };
+  mockLivePubkey = 'first';
   AppState.currentState = 'active';
 });
 afterEach(() => jest.useRealTimers());
@@ -94,6 +99,7 @@ it.each(['switch', 'sign-out'])(
       action === 'switch'
         ? { isLoggedIn: true, pubkey: 'second' }
         : { isLoggedIn: false, pubkey: null };
+    mockLivePubkey = mockAccount.pubkey;
     rerender({});
     await act(async () => release());
     expect(await AsyncStorage.getItem(pushKey)).toBeNull();
@@ -109,3 +115,18 @@ it('cancels setup that has not started when Wallets loses focus', async () => {
   expect(enableMarmotPush).not.toHaveBeenCalled();
   expect(await AsyncStorage.getItem(decisionKey)).toBeNull();
 });
+
+it.each(['switch', 'sign-out'])(
+  'cancels pending defaults on %s while Wallets is frozen without another render',
+  async (action) => {
+    const { release } = await startPendingToken();
+    act(() => mockBlur?.());
+    // NostrProvider updates its live identity while freezeOnBlur prevents this
+    // hook from rendering again: its useNostr snapshot still says 'first'.
+    mockLivePubkey = action === 'switch' ? 'second' : null;
+    await act(async () => release());
+    expect(await AsyncStorage.getItem(pushKey)).toBeNull();
+    expect(await AsyncStorage.getItem(decisionKey)).toBeNull();
+    expect(await AsyncStorage.getItem(watcherKey)).toBeNull();
+  },
+);

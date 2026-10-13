@@ -166,3 +166,47 @@ it.each(['no-permission', 'unavailable'])('does not commit defaults after %s', a
   await initialiseNotificationDefaults(me, () => true);
   expect(await AsyncStorage.getItem(pushKey)).toBe('1');
 });
+
+it.each(['watcher', 'push-off'])(
+  'retries incomplete defaults after a failed %s preference write',
+  async (failedPreference) => {
+    if (failedPreference === 'push-off') {
+      await AsyncStorage.setItem('marmot_push_enabled_v1_other', '0');
+    }
+    const failedKey = failedPreference === 'watcher' ? watcherKey : pushKey;
+    const setItem = AsyncStorage.setItem as jest.Mock;
+    const original = setItem.getMockImplementation()!;
+    let failNext = true;
+    setItem.mockImplementation(async (key: string, value: string) => {
+      if (key === failedKey && failNext) {
+        failNext = false;
+        throw new Error('disk full');
+      }
+      return original(key, value);
+    });
+    try {
+      await expect(initialiseNotificationDefaults(me, () => true)).rejects.toThrow('disk full');
+      expect(await AsyncStorage.getItem(`notification_preference_explicit_v1_${me}`)).toBeNull();
+      expect(await AsyncStorage.getItem(failedKey)).toBeNull();
+      // Other writes already landed; a later launch must fill the missing preference.
+      expect(
+        await AsyncStorage.getItem(failedPreference === 'watcher' ? pushKey : watcherKey),
+      ).not.toBeNull();
+      await initialiseNotificationDefaults(me, () => true);
+      const enabled = failedPreference === 'watcher';
+      expect(await AsyncStorage.getItem(pushKey)).toBe(enabled ? '1' : '0');
+      expect((await loadWatcherState(me)).categories).toEqual({
+        dm: enabled,
+        zap: enabled,
+        mention: enabled,
+        payment: enabled,
+      });
+      expect(
+        await AsyncStorage.getItem(`notification_preference_explicit_v1_${me}`),
+      ).not.toBeNull();
+      expect(enableMarmotPush).toHaveBeenCalledTimes(enabled ? 1 : 0);
+    } finally {
+      setItem.mockImplementation(original);
+    }
+  },
+);

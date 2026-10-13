@@ -547,10 +547,13 @@ async function enableNow(
   // the fresh opt-in back off at the next start) — only after the opt-in is
   // written, so a failure never leaves a stale '1' unprotected.
   try {
-    await AsyncStorage.setItem(
-      `notification_preference_explicit_v1_${pubkey.toLowerCase()}`,
-      interactive ? '1' : '0',
-    );
+    // Automatic setup commits its decision only after watcher preferences save.
+    if (interactive) {
+      await AsyncStorage.setItem(
+        `notification_preference_explicit_v1_${pubkey.toLowerCase()}`,
+        '1',
+      );
+    }
     await AsyncStorage.setItem(accountKey(pubkey), '1');
   } catch {
     return { status: 'unavailable' };

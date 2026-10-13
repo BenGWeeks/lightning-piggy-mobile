@@ -790,3 +790,19 @@ it.each(['switch', 'sign-out'])(
     expect(mockSession.pushRegistration.setRegistration).not.toHaveBeenCalled();
   },
 );
+
+it('leaves the automatic decision to the caller after successful push enablement', async () => {
+  expect((await enableMarmotPush(ME, { interactive: false })).status).toBe('enabled');
+  expect(await AsyncStorage.getItem(enabledKey(ME))).toBe('1');
+  expect(await AsyncStorage.getItem(`notification_preference_explicit_v1_${ME}`)).toBeNull();
+});
+
+it('leaves automatic setup retryable after a failed push preference write', async () => {
+  (AsyncStorage.setItem as jest.Mock).mockRejectedValueOnce(new Error('disk full'));
+  expect((await enableMarmotPush(ME, { interactive: false })).status).toBe('unavailable');
+  expect(await AsyncStorage.getItem(enabledKey(ME))).toBeNull();
+  expect(await AsyncStorage.getItem(`notification_preference_explicit_v1_${ME}`)).toBeNull();
+  expect((await enableMarmotPush(ME, { interactive: false })).status).toBe('enabled');
+  expect(await AsyncStorage.getItem(enabledKey(ME))).toBe('1');
+  expect(await AsyncStorage.getItem(`notification_preference_explicit_v1_${ME}`)).toBeNull();
+});

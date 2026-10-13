@@ -1,15 +1,14 @@
-import { useCallback, useRef } from 'react';
+import { useCallback } from 'react';
 import { AppState } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 
 import { useNostr } from '../contexts/NostrContext';
 import { initialiseNotificationDefaults } from '../services/notificationDefaults';
+import { getCurrentUserPubkey } from '../services/nostrService';
 
 /** Wallets is the first safe foreground surface for the OS permission prompt. */
 export function useNotificationDefaults(): void {
   const { isLoggedIn, pubkey } = useNostr();
-  const active = useRef(pubkey);
-  active.current = isLoggedIn ? pubkey : null;
   useFocusEffect(
     useCallback(() => {
       if (!isLoggedIn || !pubkey) return;
@@ -21,11 +20,12 @@ export function useNotificationDefaults(): void {
           // the phone is locked. Wait for a foreground resume to ask the OS.
           if (AppState.currentState !== 'active') return;
           // Focus gates starting setup; once started, only account changes cancel it.
-          void initialiseNotificationDefaults(pubkey, () => active.current === pubkey).catch(
-            (error) => {
-              if (__DEV__) console.warn('[Notifications] default setup failed:', error);
-            },
-          );
+          void initialiseNotificationDefaults(
+            pubkey,
+            () => getCurrentUserPubkey() === pubkey,
+          ).catch((error) => {
+            if (__DEV__) console.warn('[Notifications] default setup failed:', error);
+          });
         }, 3000);
       };
       schedule();

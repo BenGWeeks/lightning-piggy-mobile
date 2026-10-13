@@ -241,10 +241,11 @@ Legacy stored `0` / `1` preferences are respected, including the old device-wide
 switch migrated to the active account. Existing enabled installs keep their
 Instant alerts preference; an explicitly disabled switch stays off.
 
-The default decision is persisted before asking permission. Denial shows both
-Instant alerts and More alerts off alongside the existing phone-settings banner;
-launches do not retry permission or registration in a loop. Permission can be
-restored through the existing settings surface.
+The default decision is persisted only after permission and token acquisition
+and all notification preferences have saved successfully. Denial leaves both
+Instant alerts and More alerts off alongside the existing phone-settings banner
+and setup retryable. Permission can be restored through the existing settings
+surface.
 
 . `marmotPushRegistration.ts` asks Apple/Google for this device's *native*
   token (`getDevicePushTokenAsync` — FCM on Android, APNs on iOS; never Expo's
