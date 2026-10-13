@@ -325,11 +325,19 @@ function ensureSettings(): Promise<void> {
   return hydrating;
 }
 
-const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T> =>
-  Promise.race([
-    p,
-    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('push: timed out')), ms)),
-  ]);
+const withTimeout = async <T>(p: Promise<T>, ms: number): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      p,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('push: timed out')), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
 
 // expo-notifications' getDevicePushTokenAsync() keeps a REJECTED promise
 // cached until the JS runtime restarts, so one transient failure (offline,
@@ -605,10 +613,12 @@ export function disableMarmotPush(
 /** Use `server` (or the built-in one, for null) — re-registers if on. */
 export async function setMarmotPushServer(pubkey: string | null): Promise<EnableOutcome | null> {
   let custom: PushServer | null = null;
-  if (pubkey) {
+  if (pubkey !== null) {
     const hex = parseServerKey(pubkey);
     if (!hex) throw new Error('push: invalid server key');
-    custom = { pubkey: hex, ...(await lookupRelayHint(hex)) };
+    const hint = await lookupRelayHint(hex);
+    if (!hint.relayHint) throw new NotificationServerUnavailableError();
+    custom = { pubkey: hex, ...hint };
   }
   return serial(async () => {
     await ensureSettings();
@@ -780,11 +790,26 @@ async function registerWakeTask(): Promise<void> {
   await Notifications.registerTaskAsync(MARMOT_PUSH_WAKE_TASK).catch(() => undefined);
 }
 
-/** The first inbox relay a custom server lists (kind 10050), as its hint. */
+/** Shared bounded lookups reuse the transport's cache and in-flight query. */
+const serverLookupTransport = createPushTransport(() => []);
+
+export class NotificationServerUnavailableError extends Error {
+  constructor() {
+    super('push: no usable kind-10050 inbox relays found');
+    this.name = 'NotificationServerUnavailableError';
+  }
+}
+
+/** Metadata discovery only; this does not prove push delivery is working. */
+export async function notificationServerInboxFound(pubkey: string): Promise<boolean> {
+  return !!(await lookupRelayHint(pubkey)).relayHint;
+}
+
+/** The first usable relay from the server's kind-10050, with no fallback. */
 async function lookupRelayHint(server: string): Promise<{ relayHint?: string }> {
   try {
     const relays = await withTimeout(
-      createPushTransport(() => []).inboxRelays(server),
+      serverLookupTransport.inboxRelays(server),
       RELAY_LOOKUP_TIMEOUT_MS,
     );
     return relays[0] ? { relayHint: relays[0] } : {};

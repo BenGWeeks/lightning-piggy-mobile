@@ -1,7 +1,14 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { ChevronDown, ChevronRight, Server } from 'lucide-react-native';
-import { nip19 } from 'nostr-tools';
+import React, { useCallback, useMemo, useState } from 'react';
+import { ActivityIndicator, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ChevronDown, ChevronRight, Copy, Server } from 'lucide-react-native';
+import * as Clipboard from 'expo-clipboard';
+import { Image } from 'expo-image';
+import { useFocusEffect } from '@react-navigation/native';
+
+import { Alert } from './BrandedAlert';
+import { usePubkeyProfile } from '../hooks/usePubkeyProfile';
+import { isSupportedImageUrl } from '../utils/imageUrl';
+import { notificationServerDisplay } from '../utils/notificationServerDisplay';
 
 import Toast from './BrandedToast';
 import { createSharedAccountStyles } from '../screens/account/sharedStyles';
@@ -9,18 +16,16 @@ import { useNostr } from '../contexts/NostrContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import {
+  builtInServer,
   loadMarmotPushSettings,
+  notificationServerInboxFound,
+  NotificationServerUnavailableError,
   parseServerKey,
   setMarmotPushServer,
   type PushServer,
 } from '../services/marmotPushRegistration';
 import { createNotificationServerSectionStyles } from '../styles/NotificationServerSection.styles';
 import { createSecurityScreenStyles } from '../styles/SecurityScreen.styles';
-
-const shortNpub = (hex: string) => {
-  const npub = nip19.npubEncode(hex);
-  return `${npub.slice(0, 12)}…${npub.slice(-6)}`;
-};
 
 /**
  * Which server delivers instant alerts (MIP-05 push). One choice for the
@@ -37,28 +42,71 @@ const NotificationServerSection: React.FC = () => {
   const shared = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const screen = useMemo(() => createSecurityScreenStyles(colors), [colors]);
   const styles = useMemo(() => createNotificationServerSectionStyles(colors), [colors]);
-  const [customServer, setCustomServer] = useState<PushServer | null>(null);
+  const [customServer, setCustomServer] = useState<PushServer | null | undefined>(undefined);
+  const [settingsUnavailable, setSettingsUnavailable] = useState(false);
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    let alive = true;
-    if (!pubkey) return;
-    void loadMarmotPushSettings(pubkey)
-      .catch(() => null)
-      .then((s) => {
-        if (alive && s) setCustomServer(s.customServer);
+  const activeServer = customServer ?? builtInServer();
+  const profile = usePubkeyProfile(customServer === undefined ? null : activeServer.pubkey);
+  const current = notificationServerDisplay(
+    customServer ?? null,
+    builtInServer(),
+    profile.name,
+    t('securityScreen.marmotPushServerName'),
+  );
+  const [health, setHealth] = useState<{ pubkey: string; found: boolean } | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      let alive = true;
+      if (!pubkey) return;
+      void loadMarmotPushSettings(pubkey)
+        .then((s) => {
+          if (alive) {
+            setCustomServer(s.customServer);
+            setSettingsUnavailable(false);
+          }
+        })
+        .catch(() => {
+          if (alive) setSettingsUnavailable(true);
+        });
+      return () => {
+        alive = false;
+      };
+    }, [pubkey]),
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      let alive = true;
+      if (customServer === undefined) return;
+      void notificationServerInboxFound(activeServer.pubkey).then((found) => {
+        if (alive) setHealth({ pubkey: activeServer.pubkey, found });
       });
-    return () => {
-      alive = false;
-    };
-  }, [pubkey]);
+      return () => {
+        alive = false;
+      };
+    }, [activeServer.pubkey, customServer]),
+  );
+
+  const copyServer = useCallback(async () => {
+    try {
+      await Clipboard.setStringAsync(current.npub);
+      Toast.show({ type: 'success', text1: t('contactProfileScreen.publicKeyCopied') });
+    } catch {
+      Toast.show({ type: 'error', text1: t('securityScreen.marmotPushUnavailable') });
+    }
+  }, [current.npub, t]);
 
   const applyServer = useCallback(
     async (server: string | null) => {
       if (server !== null && !parseServerKey(server)) {
-        Toast.show({ type: 'error', text1: t('securityScreen.marmotPushServerInvalid') });
+        Alert.alert(
+          t('securityScreen.marmotPushServerTitle'),
+          t('securityScreen.marmotPushServerInvalid'),
+        );
         return;
       }
       setBusy(true);
@@ -68,14 +116,22 @@ const NotificationServerSection: React.FC = () => {
         const outcome = await setMarmotPushServer(server);
         if (pubkey) setCustomServer((await loadMarmotPushSettings(pubkey)).customServer);
         setDraft('');
+        setOpen(false);
         if (outcome?.status === 'no-permission')
           Toast.show({ type: 'error', text1: t('securityScreen.marmotPushNoPermission') });
         else if (outcome?.status === 'unavailable')
           Toast.show({ type: 'error', text1: t('securityScreen.marmotPushUnavailable') });
         else if (outcome?.status === 'enabled' && outcome.sync?.declined)
           Toast.show({ type: 'info', text1: t('securityScreen.marmotPushDeclined') });
-      } catch {
-        Toast.show({ type: 'error', text1: t('securityScreen.marmotPushUnavailable') });
+      } catch (error) {
+        Alert.alert(
+          t('securityScreen.marmotPushServerTitle'),
+          t(
+            error instanceof NotificationServerUnavailableError
+              ? 'securityScreen.marmotPushServerNotFound'
+              : 'securityScreen.marmotPushUnavailable',
+          ),
+        );
       } finally {
         setBusy(false);
       }
@@ -91,17 +147,83 @@ const NotificationServerSection: React.FC = () => {
           {t('securityScreen.marmotPushServerTitle')}
         </Text>
       </View>
-      <Text style={shared.fieldHint} testID="security-marmot-push-server-current">
-        {customServer
-          ? t('securityScreen.marmotPushServerCustom', { npub: shortNpub(customServer.pubkey) })
-          : t('securityScreen.marmotPushServerDefault')}
-      </Text>
+      {settingsUnavailable ? (
+        <Text style={shared.fieldHint}>{t('securityScreen.marmotPushUnavailable')}</Text>
+      ) : customServer === undefined ? (
+        <ActivityIndicator color={colors.white} />
+      ) : (
+        <View style={styles.card} testID="security-marmot-push-server-card">
+          <View style={styles.identity}>
+            {profile.picture && isSupportedImageUrl(profile.picture) ? (
+              <Image
+                source={{ uri: profile.picture }}
+                style={styles.avatar}
+                cachePolicy="memory-disk"
+                recyclingKey={activeServer.pubkey}
+                autoplay={false}
+              />
+            ) : (
+              <View style={styles.avatarFallback}>
+                <Server size={24} color={colors.brandPink} />
+              </View>
+            )}
+            <View style={styles.details}>
+              <Text style={styles.serverName} testID="security-marmot-push-server-current">
+                {t('securityScreen.marmotPushServerUsing', { name: current.name })}
+                {current.isDefault && (
+                  <Text style={styles.defaultBadge} testID="security-marmot-push-server-default">
+                    {' '}
+                    {t('securityScreen.marmotPushServerBadge')}
+                  </Text>
+                )}
+              </Text>
+              <TouchableOpacity
+                onPress={copyServer}
+                style={styles.copyRow}
+                accessibilityRole="button"
+                accessibilityLabel={t('contactProfileScreen.copyNpub')}
+                testID="security-marmot-push-server-copy"
+              >
+                <Text style={styles.npub} numberOfLines={1}>
+                  {current.shortNpub}
+                </Text>
+                <Copy size={14} color={colors.brandPink} />
+              </TouchableOpacity>
+            </View>
+          </View>
+          {health?.pubkey === activeServer.pubkey && (
+            <View style={styles.healthRow} testID="security-marmot-push-server-health">
+              <View style={health.found ? styles.healthFound : styles.healthUnknown} />
+              <Text style={styles.text}>
+                {t(
+                  health.found
+                    ? 'securityScreen.marmotPushServerInboxFound'
+                    : 'securityScreen.marmotPushServerInboxUnknown',
+                )}
+              </Text>
+            </View>
+          )}
+        </View>
+      )}
+      {customServer !== undefined && current.canReset && (
+        <TouchableOpacity
+          style={styles.resetButton}
+          onPress={() => applyServer(null)}
+          disabled={busy}
+          accessibilityRole="button"
+          accessibilityLabel={t('securityScreen.marmotPushServerReset')}
+          testID="security-marmot-push-server-reset"
+        >
+          <Text style={styles.resetText}>{t('securityScreen.marmotPushServerReset')}</Text>
+        </TouchableOpacity>
+      )}
 
       <TouchableOpacity
         style={styles.toggle}
         onPress={() => setOpen((v) => !v)}
         accessibilityRole="button"
         accessibilityState={{ expanded: open }}
+        disabled={busy || customServer === undefined || settingsUnavailable}
         accessibilityLabel={t('securityScreen.marmotPushAdvanced')}
         testID="security-marmot-push-advanced"
       >
@@ -120,6 +242,7 @@ const NotificationServerSection: React.FC = () => {
             style={styles.serverInput}
             value={draft}
             onChangeText={setDraft}
+            editable={!busy}
             placeholder={t('securityScreen.marmotPushServerPlaceholder')}
             placeholderTextColor={colors.textSupplementary}
             autoCapitalize="none"
@@ -140,20 +263,6 @@ const NotificationServerSection: React.FC = () => {
                 {t('securityScreen.marmotPushServerSave')}
               </Text>
             </TouchableOpacity>
-            {customServer && (
-              <TouchableOpacity
-                style={styles.secondaryButton}
-                onPress={() => applyServer(null)}
-                disabled={busy}
-                accessibilityRole="button"
-                accessibilityLabel={t('securityScreen.marmotPushServerReset')}
-                testID="security-marmot-push-server-reset"
-              >
-                <Text style={styles.secondaryButtonText}>
-                  {t('securityScreen.marmotPushServerReset')}
-                </Text>
-              </TouchableOpacity>
-            )}
           </View>
         </View>
       )}

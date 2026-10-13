@@ -4,6 +4,26 @@ import { Platform } from 'react-native';
 
 import type { DeviceRegistration } from './marmotPushEntries';
 
+import {
+  BUILT_IN_SERVERS,
+  builtInServer,
+  disableMarmotPush,
+  enableMarmotPush,
+  loadMarmotPushSettings,
+  parseServerKey,
+  notificationServerInboxFound,
+  NotificationServerUnavailableError,
+  retireMarmotPushForAccount,
+  setMarmotPushServer,
+  startMarmotPushRegistration,
+  pendingMarmotPushGroups,
+  syncMarmotPushNow,
+  currentPushDevice,
+  subscribePushDevice,
+  __resetMarmotPushForTests,
+} from './marmotPushRegistration';
+import { requestNotificationPermission } from './notificationService';
+
 const mockSession = {
   pubkey: 'active-account',
   pushRegistration: {
@@ -37,8 +57,9 @@ jest.mock('./walletStorageService', () => ({ getActivePubkey: () => mockActivePu
 jest.mock('./notificationService', () => ({
   requestNotificationPermission: jest.fn(async () => true),
 }));
+const mockInboxRelays = jest.fn(async (_pubkey: string) => ['wss://inbox.example']);
 jest.mock('./marmotNetwork', () => ({
-  createPushTransport: () => ({ inboxRelays: async () => ['wss://inbox.example'] }),
+  createPushTransport: () => ({ inboxRelays: (pubkey: string) => mockInboxRelays(pubkey) }),
 }));
 jest.mock('expo-application', () => ({ applicationId: 'com.lightningpiggy.app' }));
 jest.mock('expo-notifications', () => ({
@@ -63,25 +84,6 @@ jest.mock('expo-task-manager', () => ({
   isTaskDefined: () => true,
   defineTask: jest.fn(),
 }));
-
-// Loaded after the mocks.
-import {
-  BUILT_IN_SERVERS,
-  builtInServer,
-  disableMarmotPush,
-  enableMarmotPush,
-  loadMarmotPushSettings,
-  parseServerKey,
-  retireMarmotPushForAccount,
-  setMarmotPushServer,
-  startMarmotPushRegistration,
-  pendingMarmotPushGroups,
-  syncMarmotPushNow,
-  currentPushDevice,
-  subscribePushDevice,
-  __resetMarmotPushForTests,
-} from './marmotPushRegistration';
-import { requestNotificationPermission } from './notificationService';
 
 const ME = 'active-account';
 const enabledKey = (pubkey: string) => `marmot_push_enabled_v1_${pubkey}`;
@@ -114,6 +116,7 @@ beforeAll(() => {
 beforeEach(async () => {
   await AsyncStorage.clear();
   jest.clearAllMocks();
+  mockInboxRelays.mockReset().mockResolvedValue(['wss://inbox.example']);
   __resetMarmotPushForTests();
   mockActive = mockSession;
   mockActivePubkey = ME;
@@ -219,6 +222,53 @@ describe('enable / disable', () => {
     expect((await loadMarmotPushSettings(ME)).customServer).toBeNull();
     expect(lastRegistration()?.server).toBe(BUILT_IN_SERVERS.production.pubkey);
     await expect(setMarmotPushServer('npub1nope')).rejects.toThrow();
+  });
+
+  it('rejects a server without usable inbox relays before changing the setting or registration', async () => {
+    await enableMarmotPush(ME);
+    await setMarmotPushServer(BUILT_IN_SERVERS.preview.pubkey);
+    mockInboxRelays.mockResolvedValueOnce([]);
+    await expect(setMarmotPushServer(BUILT_IN_SERVERS.development.pubkey)).rejects.toBeInstanceOf(
+      NotificationServerUnavailableError,
+    );
+    expect((await loadMarmotPushSettings(ME)).customServer?.pubkey).toBe(
+      BUILT_IN_SERVERS.preview.pubkey,
+    );
+    expect(lastRegistration()?.server).toBe(BUILT_IN_SERVERS.preview.pubkey);
+    expect(JSON.parse((await AsyncStorage.getItem('marmot_push_server_v1'))!)).toMatchObject({
+      pubkey: BUILT_IN_SERVERS.preview.pubkey,
+    });
+    mockInboxRelays.mockRejectedValueOnce(new Error('offline'));
+    await expect(setMarmotPushServer(BUILT_IN_SERVERS.development.pubkey)).rejects.toBeInstanceOf(
+      NotificationServerUnavailableError,
+    );
+    await setMarmotPushServer(null);
+    expect((await loadMarmotPushSettings(ME)).customServer).toBeNull();
+    expect(lastRegistration()?.server).toBe(BUILT_IN_SERVERS.production.pubkey);
+  });
+
+  it('reports inbox discovery separately from delivery health', async () => {
+    expect(await notificationServerInboxFound(BUILT_IN_SERVERS.production.pubkey)).toBe(true);
+    mockInboxRelays.mockResolvedValueOnce([]);
+    expect(await notificationServerInboxFound(BUILT_IN_SERVERS.production.pubkey)).toBe(false);
+    mockInboxRelays.mockRejectedValueOnce(new Error('offline'));
+    expect(await notificationServerInboxFound(BUILT_IN_SERVERS.production.pubkey)).toBe(false);
+  });
+
+  it('bounds an unresponsive server lookup and keeps the default setting', async () => {
+    jest.useFakeTimers();
+    try {
+      mockInboxRelays.mockImplementationOnce(() => new Promise(() => {}));
+      const outcome = expect(
+        setMarmotPushServer(BUILT_IN_SERVERS.preview.pubkey),
+      ).rejects.toBeInstanceOf(NotificationServerUnavailableError);
+      await jest.advanceTimersByTimeAsync(8_000);
+      await outcome;
+      expect((await loadMarmotPushSettings(ME)).customServer).toBeNull();
+      expect(await AsyncStorage.getItem('marmot_push_server_v1')).toBeNull();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('a failed token deletion is reported and retried at the next start', async () => {
