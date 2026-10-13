@@ -31,6 +31,12 @@
       "android": {
         "buildType": "apk"
       }
+    },
+    "production-adhoc": {
+      "extends": "production",
+      "environment": "production",
+      "distribution": "internal",
+      "autoIncrement": false
     }
   },
   "submit": {
