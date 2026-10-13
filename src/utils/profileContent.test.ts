@@ -1,5 +1,52 @@
 import { parseProfileContent } from './profileContent';
 
+describe('parseProfileContent — text field types (#1448)', () => {
+  it.each([{}, 42, true, ['Seller'], null, ''])(
+    'drops malformed or empty text fields (%j)',
+    (value) => {
+      expect(
+        parseProfileContent(
+          JSON.stringify({
+            name: value,
+            display_name: value,
+            nip05: value,
+            about: value,
+            lud16: value,
+          }),
+        ),
+      ).toEqual({
+        name: null,
+        displayName: null,
+        nip05: null,
+        about: null,
+        lud16: null,
+        picture: null,
+        banner: null,
+      });
+    },
+  );
+
+  it('preserves valid text fields without coercion', () => {
+    expect(
+      parseProfileContent(
+        JSON.stringify({
+          name: 'Seller',
+          display_name: 'Shop',
+          nip05: 'seller@example.com',
+          about: 'Shop biography',
+          lud16: 'pay@example.com',
+        }),
+      ),
+    ).toMatchObject({
+      name: 'Seller',
+      displayName: 'Shop',
+      nip05: 'seller@example.com',
+      about: 'Shop biography',
+      lud16: 'pay@example.com',
+    });
+  });
+});
+
 describe('parseProfileContent — automatic image destinations (#1338)', () => {
   const parse = (picture: unknown, banner: unknown) =>
     parseProfileContent(JSON.stringify({ name: 'n', picture, banner }));

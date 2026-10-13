@@ -7,6 +7,11 @@ function publicImageUrl(value: unknown): string | null {
   return typeof value === 'string' && isPublicHttpUrl(value) ? value : null;
 }
 
+/** Signatures authenticate the author, not the types inside kind-0 JSON. */
+function profileText(value: unknown): string | null {
+  return typeof value === 'string' && value ? value : null;
+}
+
 export function parseProfileContent(content: string): {
   name: string | null;
   displayName: string | null;
@@ -19,15 +24,15 @@ export function parseProfileContent(content: string): {
   try {
     const data = JSON.parse(content);
     return {
-      name: data.name || null,
-      displayName: data.display_name || null,
+      name: profileText(data.name),
+      displayName: profileText(data.display_name),
       // Avatars and banners load automatically all over the app, so a kind-0
       // can't point them at a private / local address (#1338).
       picture: publicImageUrl(data.picture),
       banner: publicImageUrl(data.banner),
-      about: data.about || null,
-      lud16: data.lud16 || null,
-      nip05: data.nip05 || null,
+      about: profileText(data.about),
+      lud16: profileText(data.lud16),
+      nip05: profileText(data.nip05),
     };
   } catch {
     return {
