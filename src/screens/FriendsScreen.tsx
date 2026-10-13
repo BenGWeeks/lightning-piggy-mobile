@@ -1,3 +1,4 @@
+import { preferredDmProtocol } from '../services/preferredDmProtocol';
 import React, {
   useState,
   useMemo,
@@ -86,7 +87,7 @@ interface ContactRowProps {
   zapDisabledReason: string;
   onContactPress: (item: ListItem) => void;
   onZapPress: (item: ListItem) => void;
-  navigation: FriendsNavigation;
+  onMessagePress: (item: ListItem) => void;
 }
 
 const ContactRow = React.memo(
@@ -96,24 +97,14 @@ const ContactRow = React.memo(
     zapDisabledReason,
     onContactPress,
     onZapPress,
-    navigation,
+    onMessagePress,
   }: ContactRowProps) => {
     const handlePress = React.useCallback(() => onContactPress(item), [onContactPress, item]);
     const handleZap = React.useCallback(() => onZapPress(item), [onZapPress, item]);
-    const handleMessage = React.useMemo(() => {
-      // Capture pubkey in a non-null const so TS narrows it inside the
-      // closure — referencing item.pubkey directly widens it back to
-      // `string | null`.
-      const pubkey = item.pubkey;
-      if (!pubkey) return undefined;
-      return () =>
-        navigation.navigate('Conversation', {
-          pubkey,
-          name: item.name,
-          picture: item.picture,
-          lightningAddress: item.lightningAddress,
-        });
-    }, [navigation, item.pubkey, item.name, item.picture, item.lightningAddress]);
+    const handleMessage = React.useMemo(
+      () => (item.pubkey ? () => onMessagePress(item) : undefined),
+      [onMessagePress, item],
+    );
 
     return (
       <ContactListItem
@@ -157,7 +148,7 @@ const ContactRow = React.memo(
     prev.zapDisabledReason === next.zapDisabledReason &&
     prev.onContactPress === next.onContactPress &&
     prev.onZapPress === next.onZapPress &&
-    prev.navigation === next.navigation,
+    prev.onMessagePress === next.onMessagePress,
 );
 ContactRow.displayName = 'ContactRow';
 
@@ -166,7 +157,7 @@ const FriendsScreen: React.FC = () => {
   const t = useTranslation();
   const styles = useMemo(() => createFriendsScreenStyles(colors), [colors]);
   const navigation = useNavigation<FriendsNavigation>();
-  const { isLoggedIn, refreshProfile, relays } = useNostr();
+  const { isLoggedIn, refreshProfile, relays, pubkey: viewerPubkey } = useNostr();
   const { contacts, refreshContacts, addContact } = useNostrContacts();
   // Wallet-attached flag drives the per-row zap gate alongside the
   // contact's Lightning address. Without a wallet there's nothing to
@@ -606,6 +597,21 @@ const FriendsScreen: React.FC = () => {
   // to screen readers. Resolved once here (not per row) so ContactRow can
   // treat it as a stable prop.
   const zapDisabledReason = t('friendsScreen.noWalletAttachedReason');
+  const handleMessage = useCallback(
+    async (item: ListItem) => {
+      if (!item.pubkey) return;
+      const protocol = await preferredDmProtocol(viewerPubkey, item.pubkey);
+      navigation.navigate('Conversation', {
+        protocol,
+        pubkey: item.pubkey,
+        name: item.name,
+        picture: item.picture,
+        lightningAddress: item.lightningAddress,
+      });
+    },
+    [navigation, viewerPubkey],
+  );
+
   const renderItem = useCallback(
     ({ item }: { item: ListItem }) => (
       <ContactRow
@@ -614,10 +620,10 @@ const FriendsScreen: React.FC = () => {
         zapDisabledReason={zapDisabledReason}
         onContactPress={handleContactPress}
         onZapPress={handleZap}
-        navigation={navigation}
+        onMessagePress={handleMessage}
       />
     ),
-    [handleZap, handleContactPress, hasWallets, navigation, zapDisabledReason],
+    [handleZap, handleContactPress, hasWallets, handleMessage, zapDisabledReason],
   );
 
   const filters: { key: Filter; label: string }[] = [
@@ -840,12 +846,7 @@ const FriendsScreen: React.FC = () => {
                 if (!item || !item.pubkey) return;
                 setProfileSheetVisible(false);
                 setSelectedContact(null);
-                navigation.navigate('Conversation', {
-                  pubkey: item.pubkey,
-                  name: item.name,
-                  picture: item.picture,
-                  lightningAddress: item.lightningAddress,
-                });
+                void handleMessage(item);
               }
             : undefined
         }

@@ -1,3 +1,4 @@
+import { preferredConversationParams } from '../services/preferredDmProtocol';
 import { useGroupConversationLoader } from '../hooks/useGroupConversationLoader';
 import { useGroupChatTools } from '../hooks/useGroupChatTools';
 import { useChatLocalHistory } from '../hooks/useChatLocalHistory';
@@ -886,16 +887,14 @@ const GroupConversationScreen: React.FC = () => {
           onViewFullProfile={handleViewFullProfile}
           onMessage={
             sheetContact?.pubkey
-              ? () => {
+              ? async () => {
                   const c = sheetContact;
                   if (!c?.pubkey) return;
                   setProfileSheetVisible(false);
-                  navigation.navigate('Conversation', {
-                    pubkey: c.pubkey,
-                    name: c.name,
-                    picture: c.picture,
-                    lightningAddress: c.lightningAddress,
-                  });
+                  navigation.navigate(
+                    'Conversation',
+                    await preferredConversationParams(myPubkey, { ...c, pubkey: c.pubkey }),
+                  );
                 }
               : undefined
           }

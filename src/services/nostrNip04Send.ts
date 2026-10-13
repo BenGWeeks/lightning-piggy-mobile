@@ -16,7 +16,7 @@ export async function sendNip04Message(input: {
   signerType: SignerType | null;
   relays: string[];
   hooks?: SendHooks;
-}): Promise<DmSendResult> {
+}): Promise<DmSendResult & { rumorCreatedAt: number }> {
   const { senderPubkey, recipientPubkey, plaintext, signerType, relays, hooks } = input;
   let signed: VerifiedEvent;
   if (signerType === 'nsec') {
@@ -66,11 +66,12 @@ export async function sendNip04Message(input: {
   }
   hooks?.onRumorReady?.({ eventId: signed.id, kind: 4, relays });
   trackRelays(relays);
-  return publishWrapsTrackingRelays(
+  const result = await publishWrapsTrackingRelays(
     [signed],
     relays,
     pool,
     { eventId: signed.id, kind: 4 },
     hooks?.onDeliveryFinalized,
   );
+  return { ...result, rumorCreatedAt: signed.created_at };
 }

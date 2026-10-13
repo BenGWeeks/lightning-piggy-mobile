@@ -1,10 +1,19 @@
+import { sendSharedDm } from '../services/sendSharedDm';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { RootStackParamList } from '../navigation/types';
+import { preferredDmProtocol } from '../services/preferredDmProtocol';
 import { useCallback, useState } from 'react';
 import { Alert } from '../components/BrandedAlert';
 import Toast from '../components/BrandedToast';
 import { useNostr } from '../contexts/NostrContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { getNwcUrl } from '../services/walletStorageService';
-import { nwcShareCardFromWallet } from '../utils/nwcShareMessage';
+import {
+  nwcShareCardFromWallet,
+  serializeNwcShare,
+  NWC_SHARE_KIND,
+} from '../utils/nwcShareMessage';
 import type { PickedFriend } from '../components/FriendPickerSheet';
 import type { WalletState } from '../types/wallet';
 
@@ -29,7 +38,8 @@ import type { WalletState } from '../types/wallet';
  */
 export function useWalletShareFromSettings(wallet: WalletState | undefined) {
   const t = useTranslation();
-  const { sendNwcShare } = useNostr();
+  const { sendNwcShare, pubkey, appendLocalDmMessage } = useNostr();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const isNwc = wallet?.walletType === 'nwc';
@@ -71,8 +81,17 @@ export function useWalletShareFromSettings(wallet: WalletState | undefined) {
           return;
         }
         const card = nwcShareCardFromWallet(nwcUrl, wallet.alias, wallet.walletAlias ?? undefined);
-        const result = await sendNwcShare(friend.pubkey, card);
+        const protocol = await preferredDmProtocol(pubkey, friend.pubkey);
+        const result = await sendSharedDm({
+          peer: friend.pubkey,
+          text: serializeNwcShare(card),
+          protocol,
+          kind: NWC_SHARE_KIND,
+          send: () => sendNwcShare(friend.pubkey, card, protocol),
+          append: appendLocalDmMessage,
+        });
         if (result.success) {
+          navigation.navigate('Conversation', { ...friend, protocol });
           Toast.show({ type: 'success', text1: t('nwcShareSheet.sentToast') });
         } else {
           Alert.alert(
@@ -82,7 +101,7 @@ export function useWalletShareFromSettings(wallet: WalletState | undefined) {
         }
       })();
     },
-    [wallet, sendNwcShare, t],
+    [wallet, sendNwcShare, t, pubkey, navigation, appendLocalDmMessage],
   );
 
   return { isNwc, pickerOpen, startShare, closePicker, shareToFriend };

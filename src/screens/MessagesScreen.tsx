@@ -1,4 +1,5 @@
 import { MarmotInvitations } from '../components/MarmotInvitations';
+import { preferredDmProtocol } from '../services/preferredDmProtocol';
 import { useLocale } from '../contexts/LocaleContext';
 import { useLiveMessageIndicator } from '../hooks/useLiveMessageIndicator';
 import NewMessagesPill from '../components/NewMessagesPill';
@@ -613,10 +614,15 @@ const MessagesScreen: React.FC = () => {
     });
   }, [navigation, pubkey]);
 
-  const handlePickerSelect = useCallback((friend: PickedFriend) => {
-    setPickerVisible(false);
-    setPickedFriend(friend);
-  }, []);
+  const [preferredProtocol, setPreferredProtocol] = useState<DmProtocol>(DEFAULT_DM_PROTOCOL);
+  const handlePickerSelect = useCallback(
+    async (friend: PickedFriend) => {
+      setPickerVisible(false);
+      setPreferredProtocol(await preferredDmProtocol(pubkey, friend.pubkey));
+      setPickedFriend(friend);
+    },
+    [pubkey],
+  );
   const closeProtocolPicker = useCallback(() => setPickedFriend(null), []);
   const selectProtocol = useCallback(
     (protocol: DmProtocol) => {
@@ -864,7 +870,7 @@ const MessagesScreen: React.FC = () => {
 
       <DmProtocolPickerSheet
         visible={pickedFriend !== null}
-        selected={DEFAULT_DM_PROTOCOL}
+        selected={preferredProtocol}
         onSelect={selectProtocol}
         onClose={closeProtocolPicker}
       />

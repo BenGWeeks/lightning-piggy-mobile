@@ -1,3 +1,4 @@
+import { preferredDmProtocol } from '../services/preferredDmProtocol';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CompositeNavigationProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -81,7 +82,7 @@ export function useContactProfileSheet(
   navigation: HuntProfileNavigation,
   onRequestZap: (target: { pubkey: string; name: string; lud16: string }) => void,
 ): UseContactProfileSheet {
-  const { relays } = useNostr();
+  const { relays, pubkey: viewerPubkey } = useNostr();
   // A zap needs a wallet to actually pay — gate `canZap`/`onZap` on it so the
   // sheet never opens the in-app SendSheet (which assumes a non-null walletId)
   // with no wallet configured (#770 [blocking]).
@@ -172,10 +173,11 @@ export function useContactProfileSheet(
   const onMessage = useMemo(
     () =>
       profileSheet
-        ? () => {
+        ? async () => {
             const target = profileSheet;
             setProfileSheet(null);
             navigation.navigate('Conversation', {
+              protocol: await preferredDmProtocol(viewerPubkey, target.pubkey),
               pubkey: target.pubkey,
               name: target.name,
               picture: target.picture,
@@ -183,7 +185,7 @@ export function useContactProfileSheet(
             });
           }
         : undefined,
-    [profileSheet, navigation],
+    [profileSheet, navigation, viewerPubkey],
   );
 
   const onZap = useMemo(
