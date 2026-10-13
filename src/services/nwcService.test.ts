@@ -27,6 +27,10 @@ import {
 import { clearPaymentProofsForTests, getPaymentProof } from './paymentProofs';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
+let mockPaymentHash: string;
+jest.mock('light-bolt11-decoder', () => ({
+  decode: () => ({ sections: [{ name: 'payment_hash', value: mockPaymentHash }] }),
+}));
 
 let mockGetBalanceImpl: () => Promise<{ balance: number }> = async () => ({ balance: 0 });
 const mockGetInfo = jest.fn();
@@ -69,6 +73,7 @@ beforeEach(async () => {
   // Async timer advancement lets Promise continuations schedule retry timers
   // before the fake clock advances; synchronous runAllTimers would miss them.
   jest.useFakeTimers();
+  mockPaymentHash = bytesToHex(sha256(hexToBytes('c'.repeat(64))));
   // Cheap successful balance for the connect()'s initial getBalance.
   mockGetBalanceImpl = async () => ({ balance: 0 });
   mockSendPaymentImpl = async () => ({ preimage: 'p'.repeat(64) });
@@ -308,6 +313,7 @@ describe('nwcService.payInvoice — ambiguous "unknown Error" outcome (#891)', (
   // so the "unknown Error" wrap never reaches the user.
   it('returns the preimage when the lookup confirms the payment settled', async () => {
     const preimage = 'a'.repeat(64);
+    mockPaymentHash = bytesToHex(sha256(hexToBytes(preimage)));
     mockSendPaymentImpl = async () => {
       throw Object.assign(new Error('unknown Error'), { code: 'INTERNAL' });
     };
@@ -344,9 +350,10 @@ describe('nwcService.payInvoice — proof of payment is recorded only when confi
     // (e.g. one this same backend issued).
     mockLookupInvoiceImpl = async () => ({ paid: false, preimage });
     const p = payInvoice(WALLET_ID, BOLT11);
+    const assertion = expect(p).rejects.toThrow('failed to publish');
     await jest.runAllTimersAsync();
-    await expect(p).resolves.toEqual({ preimage }); // pre-existing return contract
-    expect(calls).toBe(1);
+    await assertion;
+    expect(calls).toBe(2);
     expect(getPaymentProof(WALLET_ID, hash)).toBeUndefined();
   });
 
@@ -367,8 +374,9 @@ describe('nwcService.payInvoice — proof of payment is recorded only when confi
     };
     mockLookupInvoiceImpl = async () => ({ paid: false, preimage });
     const p = payInvoice(WALLET_ID, BOLT11);
+    const assertion = expect(p).rejects.toMatchObject({ name: 'ReplyTimeoutError' });
     await jest.runAllTimersAsync();
-    await expect(p).resolves.toEqual({ preimage });
+    await assertion;
     expect(getPaymentProof(WALLET_ID, hash)).toBeUndefined();
   });
 });
@@ -382,3 +390,5 @@ it.each([
   mockGetInfo.mockResolvedValueOnce({ alias });
   expect(await getInfo(WALLET_ID)).toEqual({ alias: expected, lud16: undefined });
 });
+// Expo fetch requires a native module; these SDK tests never use HTTPS verification.
+jest.mock('expo/fetch', () => ({ fetch: jest.fn() }));

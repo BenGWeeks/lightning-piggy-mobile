@@ -46,6 +46,7 @@ import { applyResolverResults, mergeWalletUpdate } from '../utils/walletStateMer
 import { addNwcWalletForIdentity } from '../services/addNwcWalletForIdentity';
 import { parseNwcLud16 } from '../utils/nwcLud16';
 import { collectZapRecipientPubkeys } from '../utils/zapRecipients';
+import { upsertPendingWalletTransaction } from '../utils/pendingWalletTransaction';
 
 // Captured at module-evaluation time, which is the closest proxy we have to "JS bundle started executing after app launch". Used by the [Perf] wallet-connect marker so perf scripts can report time-from-launch-to-first-NWC-connect without needing a separate launch timestamp source.
 const WALLET_MODULE_LOAD_T0 = Date.now();
@@ -324,12 +325,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const lastTxsJsonRef = useRef(new Map<string, string>());
 
   const addPendingTransaction = useCallback((walletId: string, tx: WalletTransaction) => {
-    // The optimistic row diverges state from the last persisted JSON — drop
-    // the fingerprint so the next poll can't be wrongly skipped.
+    // Invalidate the persisted fingerprint for an insert or attribution update.
     lastTxsJsonRef.current.delete(walletId);
-    setWallets((prev) =>
-      prev.map((w) => (w.id === walletId ? { ...w, transactions: [tx, ...w.transactions] } : w)),
-    );
+    setWallets((prev) => upsertPendingWalletTransaction(prev, walletId, tx));
   }, []);
 
   // Startup: load prefs, migrate, reconnect all wallets

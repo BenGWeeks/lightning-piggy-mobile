@@ -1,6 +1,7 @@
 import { bech32 } from 'bech32';
 import {
   fetchInvoice,
+  fetchInvoiceWithVerification,
   normalizeLnurlToUrl,
   resolveLightningAddress,
   resolveLnurlDirection,
@@ -224,6 +225,21 @@ describe('fetchInvoice amount authorization', () => {
       fetchInvoice('https://example.com/cb', 100, { comment: '中'.repeat(2000) }),
     ).rejects.toThrow('Blocked');
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('preserves the LUD-21 verify endpoint alongside the amount-checked invoice', async () => {
+    const invoice = invoiceWithAmount('lnbc1u');
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        pr: invoice,
+        verify: 'https://example.com/verify/123',
+      }),
+    });
+    await expect(fetchInvoiceWithVerification('https://example.com/cb', 100)).resolves.toEqual({
+      invoice,
+      verifyUrl: 'https://example.com/verify/123',
+    });
   });
 
   it.each([

@@ -1,3 +1,5 @@
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import { NostrWebLNProvider } from '@getalby/sdk';
 import {
   connect,
@@ -9,13 +11,17 @@ import {
 } from './nwcService';
 import { isConnectionError } from './nwcErrors';
 
+const mockPaymentHash = bytesToHex(sha256(hexToBytes('d'.repeat(64))));
+
 jest.mock('@getalby/sdk', () => ({ NostrWebLNProvider: jest.fn() }));
 jest.mock('./nwcEncryption', () => ({
   pinNip04IfNoInfoEvent: jest.fn(async () => {}),
   clearEncryptionDecision: jest.fn(),
 }));
 jest.mock('light-bolt11-decoder', () => ({
-  decode: () => ({ sections: [{ name: 'payment_hash', value: 'c'.repeat(64) }] }),
+  decode: () => ({
+    sections: [{ name: 'payment_hash', value: mockPaymentHash }],
+  }),
 }));
 const URL =
   'nostr+walletconnect://' + 'a'.repeat(64) + '?relay=wss://example.com&secret=' + 'b'.repeat(64);
@@ -31,7 +37,7 @@ function provider(balance: number) {
     enable: jest.fn(async () => {}),
     getBalance: jest.fn(async () => ({ balance })),
     listTransactions: jest.fn(async () => ({ transactions: [] })),
-    lookupInvoice: jest.fn(async (): Promise<{ preimage?: string }> => ({})),
+    lookupInvoice: jest.fn(async (): Promise<{ preimage?: string; paid?: boolean }> => ({})),
     close: jest.fn(),
     client: {
       connected: true,
@@ -147,7 +153,7 @@ describe('payInvoice publish-failure reconnect races', () => {
 
   it('adopts a connect() that supersedes its reconnect and still looks up before retrying', async () => {
     const newest = provider(333);
-    newest.lookupInvoice.mockResolvedValueOnce({ preimage: PREIMAGE });
+    newest.lookupInvoice.mockResolvedValueOnce({ preimage: PREIMAGE, paid: true });
     jest
       .mocked(NostrWebLNProvider)
       .mockImplementationOnce(() => newest as unknown as NostrWebLNProvider);
@@ -156,14 +162,16 @@ describe('payInvoice publish-failure reconnect races', () => {
     await expect(connect('lifecycle', URL)).resolves.toMatchObject({ success: true });
     enabling.resolve();
     await expect(paying).resolves.toEqual({ preimage: PREIMAGE });
-    expect(newest.lookupInvoice).toHaveBeenCalledWith({ paymentHash: 'c'.repeat(64) });
+    expect(newest.lookupInvoice).toHaveBeenCalledWith({
+      paymentHash: bytesToHex(sha256(hexToBytes(PREIMAGE))),
+    });
     expect(newest.client.executeNip47Request).not.toHaveBeenCalled();
     expect(fresh.close).toHaveBeenCalled();
     expect(newest.close).not.toHaveBeenCalled();
   });
 
   it('shares its reconnect with a concurrent getBalance instead of being superseded', async () => {
-    fresh.lookupInvoice.mockResolvedValueOnce({ preimage: PREIMAGE });
+    fresh.lookupInvoice.mockResolvedValueOnce({ preimage: PREIMAGE, paid: true });
     const { paying, enabling } = await startAmbiguousPayment();
     old.client.connected = false; // closed by the payment's reconnect
     const balance = getBalance('lifecycle');
@@ -260,3 +268,6 @@ it('shares a retry reconnect across concurrent transaction requests', async () =
     jest.useRealTimers();
   }
 });
+
+// Expo fetch requires a native module; these SDK tests never use HTTPS verification.
+jest.mock('expo/fetch', () => ({ fetch: jest.fn() }));
