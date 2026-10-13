@@ -16,10 +16,16 @@ export function LinkActionSheetHost(): React.ReactElement {
   const styles = useMemo(() => createLinkActionSheetStyles(colors), [colors]);
   const sheetRef = useRef<BottomSheetModal>(null);
   const pendingRef = useRef<LinkActionPrompt | null>(null);
+  const dismissingRef = useRef(false);
+  const queuedRef = useRef<LinkActionPrompt[]>([]);
   const actionRef = useRef<(() => void) | null>(null);
   const [prompt, setPrompt] = useState<LinkActionPrompt | null>(null);
   useEffect(() => {
     const unregister = registerLinkActionSheet((next) => {
+      if (dismissingRef.current || queuedRef.current.length > 0) {
+        queuedRef.current.push(next);
+        return;
+      }
       pendingRef.current?.options.onDismiss?.();
       actionRef.current = null;
       pendingRef.current = next;
@@ -28,6 +34,8 @@ export function LinkActionSheetHost(): React.ReactElement {
     });
     return () => {
       unregister();
+      queuedRef.current.forEach((queued) => queued.options.onDismiss?.());
+      queuedRef.current = [];
       actionRef.current = null;
       pendingRef.current?.options.onDismiss?.();
     };
@@ -50,13 +58,26 @@ export function LinkActionSheetHost(): React.ReactElement {
       backdropComponent={backdrop}
       backgroundStyle={styles.background}
       handleIndicatorStyle={styles.handle}
+      onAnimate={(_from, to) => {
+        if (to === -1) dismissingRef.current = true;
+      }}
       onDismiss={() => {
+        dismissingRef.current = true;
         pendingRef.current?.options.onDismiss?.();
         pendingRef.current = null;
         setPrompt(null);
         const action = actionRef.current;
         actionRef.current = null;
+        // Keep arrivals queued while the accepted callback runs too.
+        dismissingRef.current = true;
         action?.();
+        dismissingRef.current = false;
+        const next = queuedRef.current.shift();
+        if (next) {
+          pendingRef.current = next;
+          setPrompt(next);
+          sheetRef.current?.present();
+        }
       }}
     >
       <BottomSheetView style={styles.content} testID="link-action-sheet">
@@ -72,6 +93,7 @@ export function LinkActionSheetHost(): React.ReactElement {
                 accessibilityLabel={button.text}
                 onPress={() => {
                   if (pendingRef.current !== prompt) return;
+                  dismissingRef.current = true;
                   pendingRef.current = null;
                   actionRef.current = button.onPress ?? null;
                   sheetRef.current?.dismiss();

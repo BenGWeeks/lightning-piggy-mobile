@@ -17,6 +17,8 @@ jest.mock('../services/onchainService', () => ({}));
 function setup() {
   const opts = {
     scanned: false,
+    visible: true,
+    targetKey: 'alice',
     pasteTextRef: { current: DROPPED_CHARACTER_INVOICE },
     applyPasteText: jest.fn(),
     onInvalidInvoice: jest.fn(),
@@ -30,7 +32,10 @@ function setup() {
     setBoltzFees: jest.fn(),
     setOnchainFeeEstimate: jest.fn(),
   };
-  return { opts, ...renderHook(() => useSendSheetInput(opts)) };
+  return {
+    opts,
+    ...renderHook((props: typeof opts) => useSendSheetInput(props), { initialProps: opts }),
+  };
 }
 
 beforeEach(() => jest.clearAllMocks());
@@ -173,5 +178,35 @@ it.each(['cancel', 'dismiss'])(
     act(() => result.current.handleBarCodeScanned({ data: 'alice@example.com' }));
     act(() => jest.mocked(Alert.alert).mock.calls.at(-1)?.[2]?.[1].onPress?.());
     expect(opts.setInvoiceData).toHaveBeenCalledWith('alice@example.com');
+  },
+);
+
+it.each(['close', 'reopen', 'target change', 'reset', 'unmount'])(
+  'invalidates an earlier confirmation on %s without releasing the new guard',
+  (change) => {
+    const { result, opts, rerender, unmount } = setup();
+    act(() => result.current.processInput('alice@example.com'));
+    const old = jest.mocked(Alert.alert).mock.calls.at(-1)!;
+    if (change === 'close' || change === 'reopen') rerender({ ...opts, visible: false });
+    if (change === 'reopen') rerender({ ...opts, visible: true });
+    if (change === 'target change') rerender({ ...opts, targetKey: 'bob' });
+    if (change === 'reset') act(() => result.current.resetInputForOpen());
+    if (change === 'unmount') unmount();
+    if (change !== 'close' && change !== 'unmount') {
+      act(() => result.current.processInput('bob@example.com'));
+    }
+    const current = jest.mocked(Alert.alert).mock.calls.at(-1)!;
+    act(() => {
+      old[2]?.[1].onPress?.();
+      old[3]?.onDismiss?.();
+    });
+    expect(opts.setInvoiceData).not.toHaveBeenCalled();
+    if (change === 'close' || change === 'unmount') return;
+    const count = jest.mocked(Alert.alert).mock.calls.length;
+    act(() => result.current.processInput('carol@example.com'));
+    expect(Alert.alert).toHaveBeenCalledTimes(count);
+    act(() => current[2]?.[1].onPress?.());
+    expect(opts.setInvoiceData).toHaveBeenCalledTimes(1);
+    expect(opts.setInvoiceData).toHaveBeenCalledWith('bob@example.com');
   },
 );

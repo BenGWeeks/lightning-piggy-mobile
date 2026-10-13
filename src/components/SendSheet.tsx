@@ -243,6 +243,36 @@ const SendSheet: React.FC<Props> = ({
     [onchainViaBoltz, boltzFees, walletBalance],
   );
 
+  const {
+    processInput,
+    resetInputForOpen,
+    handleBarCodeScanned,
+    handleNfcContent,
+    handlePaste,
+    handlePasteSubmit,
+  } = useSendSheetInput({
+    visible,
+    targetKey: JSON.stringify([
+      initialAddress,
+      initialPicture,
+      recipientPubkey,
+      recipientName,
+      zapEventId,
+    ]),
+    scanned,
+    pasteTextRef,
+    activePubkey,
+    recipientName,
+    applyPasteText,
+    onInvalidInvoice: () => selectInputMode('paste'),
+    setIsOnchainAddress,
+    setIsLnurl,
+    setInvoiceData,
+    setDecoded,
+    setScanned,
+    setSatsValue,
+  });
+
   useEffect(() => {
     openSessionRef.current += 1;
     if (visible) {
@@ -294,11 +324,12 @@ const SendSheet: React.FC<Props> = ({
   useEffect(() => {
     if (!visible) return;
     const handler = BackHandler.addEventListener('hardwareBackPress', () => {
+      resetInputForOpen();
       onClose();
       return true;
     });
     return () => handler.remove();
-  }, [visible, onClose]);
+  }, [visible, onClose, resetInputForOpen]);
 
   // Mirror latest pasteText / invoiceData into refs so handleEditAddress reads the submitted value without closing over it — keeping the callback (and onResolveError) reference-stable so useSendSheetLnurl's effects can depend on it without re-firing on keystrokes (Copilot #872). invoiceDataRef is synced in render so it is current before any failure callback.
   // (pasteTextRef is declared above, before useSendInputMode, and written only by its setters.)
@@ -364,31 +395,6 @@ const SendSheet: React.FC<Props> = ({
     setIsLnurl,
     setSatsValue,
     onResolveError: handleResolveError,
-  });
-
-  // Input-intake: classify a scanned/pasted/typed target and drive decoded-send
-  // state. Extracted to keep SendSheet under the file-size cap — see
-  // useSendSheetInput (mirrors useSendSheetLnurl above).
-  const {
-    processInput,
-    resetInputForOpen,
-    handleBarCodeScanned,
-    handleNfcContent,
-    handlePaste,
-    handlePasteSubmit,
-  } = useSendSheetInput({
-    scanned,
-    pasteTextRef,
-    activePubkey,
-    recipientName,
-    applyPasteText,
-    onInvalidInvoice: () => selectInputMode('paste'),
-    setIsOnchainAddress,
-    setIsLnurl,
-    setInvoiceData,
-    setDecoded,
-    setScanned,
-    setSatsValue,
   });
 
   const handleSend = async () => {
@@ -696,9 +702,12 @@ const SendSheet: React.FC<Props> = ({
 
   const handleSheetChange = useCallback(
     (index: number) => {
-      if (index === -1) onClose();
+      if (index === -1) {
+        resetInputForOpen();
+        onClose();
+      }
     },
-    [onClose],
+    [onClose, resetInputForOpen],
   );
 
   const renderBackdrop = useCallback(
@@ -955,6 +964,7 @@ const SendSheet: React.FC<Props> = ({
                 sending={sending}
                 handleSend={handleSend}
                 onCancel={() => {
+                  resetInputForOpen();
                   handleReset();
                   onClose();
                 }}

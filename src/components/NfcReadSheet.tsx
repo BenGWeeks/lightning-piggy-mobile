@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -19,6 +19,8 @@ import { readHuntTagPayload, cancelNfcOperation } from '../services/nfcService';
 import { paymentHashFromBolt11 } from '../utils/bolt11';
 import {
   LnurlWithdrawError,
+  decodeLnurlWithdraw,
+  type LnurlWithdrawParams,
   claimLnurlWithdraw,
   resolveLnurlWithdraw,
 } from '../services/lnurlWithdrawService';
@@ -49,7 +51,16 @@ interface Props {
 // navigation churn for a one-tap action. The full flow now stays
 // in-sheet so the user lands back on the cache detail (with the find-
 // log composer already in view) the moment they dismiss.
-type SheetStage = 'ready' | 'reading' | 'claiming' | 'claimed' | 'sleeping' | 'error';
+type SheetStage =
+  | 'ready'
+  | 'reading'
+  | 'confirm'
+  | 'resolving'
+  | 'withdraw'
+  | 'claiming'
+  | 'claimed'
+  | 'sleeping'
+  | 'error';
 
 const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
   const colors = useThemeColors();
@@ -58,11 +69,28 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
   const { wallets, makeInvoiceForWallet, expectPayment } = useWallet();
   const { lastIncomingPayment } = useWalletLive();
   const [stage, setStage] = useState<SheetStage>('ready');
+  const [withdrawal, setWithdrawal] = useState<{
+    lnurl: string;
+    host: string;
+    params?: LnurlWithdrawParams;
+  } | null>(null);
+  const sessionRef = useRef(0);
+  const busyRef = useRef(false);
+  useLayoutEffect(() => {
+    sessionRef.current += 1;
+    busyRef.current = false;
+    setWithdrawal(null);
+    return () => {
+      sessionRef.current += 1;
+    };
+  }, [visible, expectedCoord]);
   const [errorMessage, setErrorMessage] = useState('');
   const [claimedSats, setClaimedSats] = useState<number | null>(null);
   // Only Lightning (NWC) wallets can mint a bolt11 invoice for the prize.
   const lightningWallets = useMemo(() => wallets.filter((w) => w.walletType === 'nwc'), [wallets]);
-  const [selectedWalletId, setSelectedWalletId] = useState<string | null>(null);
+  const [selectedWalletId, setSelectedWalletId] = useState<string | null>(
+    lightningWallets[0]?.id ?? null,
+  );
   const [wizardOpen, setWizardOpen] = useState(false);
   // Default to the first Lightning wallet (Home-screen order); keep a manual pick while it's valid.
   useEffect(() => {
@@ -143,6 +171,9 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
   }, [lastIncomingPayment, stage, onClose, selectedWalletId]);
 
   const startRead = useCallback(async () => {
+    const session = ++sessionRef.current;
+    busyRef.current = false;
+    setWithdrawal(null);
     setErrorMessage('');
     setClaimedSats(null);
     // Skip the synchronous `isNfcEnabled()` pre-flight here so we
@@ -159,9 +190,10 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
     try {
       const result = await readHuntTagPayload({
         onTagDetected: () => {
-          if (mountedRef.current) setStage('reading');
+          if (mountedRef.current && session === sessionRef.current) setStage('reading');
         },
       });
+      if (!mountedRef.current || session !== sessionRef.current) return;
       if (result.coord && expectedCoord && result.coord !== expectedCoord) {
         throw new Error(t('nfcReadSheet.wrongPiglet'));
       }
@@ -172,72 +204,11 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
         throw new Error(t('nfcReadSheet.noWalletConnected'));
       }
       if (!mountedRef.current) return;
-      setStage('claiming');
-      // Resolve + claim in one go. The user already opted in by holding
-      // the tag to the phone; a separate 'tap to confirm' would just
-      // add friction.
-      try {
-        const params = await resolveLnurlWithdraw(result.lnurl);
-        if (!mountedRef.current) return;
-        if (params.maxWithdrawable <= 0) {
-          setStage('sleeping');
-          setErrorMessage('');
-          setCooldownRemaining(null);
-          return;
-        }
-        const claim = await claimLnurlWithdraw(params, async (sats, memo) =>
-          makeInvoiceForWallet(selectedWalletId, sats, memo),
-        );
-        if (!mountedRef.current) return;
-        await recordClaim({
-          lnurl: result.lnurl,
-          sats: claim.sats,
-          piggyId: expectedCoord,
-        });
-        setClaimedSats(claim.sats);
-        // Stamp the claim moment so the auto-dismiss effect above
-        // only reacts to bolt11 settlements that land AFTER this
-        // point — unrelated wallet activity that happened before
-        // the user tapped Try prize must not close the sheet.
-        claimedAtRef.current = Date.now();
-        setStage('claimed');
-        // Kick off 1 s aggressive polling for THIS bolt11 in the
-        // wallet context, so `lastIncomingPayment` fires within ~1 s
-        // of LNbits actually paying our invoice. Without it, the
-        // baseline 30 s balance poll is the only signal, which means
-        // the sheet sits on "X sats inbound!" for up to half a
-        // minute and the user manually taps Done before the auto-
-        // dismiss + confetti can fire (#579 follow-up).
-        if (selectedWalletId) {
-          const paymentHash = paymentHashFromBolt11(claim.bolt11);
-          if (paymentHash) {
-            // Stash so the auto-dismiss effect can match against
-            // `lastIncomingPayment.paymentHash` — defends against
-            // unrelated incoming payments triggering close.
-            expectedPaymentHashRef.current = paymentHash;
-            expectPayment(selectedWalletId, paymentHash, claim.sats);
-          }
-        }
-      } catch (e) {
-        if (!mountedRef.current) return;
-        const reason =
-          e instanceof LnurlWithdrawError ? e.message : ((e as Error).message ?? 'Unknown error');
-        if (SLEEPING_PATTERN.test(reason)) {
-          setStage('sleeping');
-          setErrorMessage(reason);
-          setCooldownRemaining(parseCooldownSeconds(reason));
-        } else {
-          setStage('error');
-          // LNURL-withdraw issuer errors (cache empty, cooldown, already
-          // claimed) are meaningful — show as-is. Wallet-side NWC/relay
-          // failures surface a cryptic SDK string, so map those to friendly
-          // copy (#734).
-          const friendly = e instanceof LnurlWithdrawError ? null : friendlyClaimError(reason);
-          setErrorMessage(friendly ?? reason);
-        }
-      }
+      const host = new URL(decodeLnurlWithdraw(result.lnurl)).host;
+      setWithdrawal({ lnurl: result.lnurl, host });
+      setStage('confirm');
     } catch (err) {
-      if (mountedRef.current) {
+      if (mountedRef.current && session === sessionRef.current) {
         setStage('error');
         const raw = err instanceof Error ? err.message : t('nfcReadSheet.failedToReadTag');
         // Map nfcService's `NFC unavailable on this device` (raised by
@@ -251,7 +222,101 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
         setErrorMessage(isDisabled ? t('nfcReadSheet.nfcTurnedOff') : raw);
       }
     }
-  }, [expectedCoord, selectedWalletId, makeInvoiceForWallet, expectPayment, t]);
+  }, [expectedCoord, selectedWalletId, t]);
+
+  const handleResolve = async () => {
+    if (!withdrawal || stage !== 'confirm' || busyRef.current || !visible) return;
+    busyRef.current = true;
+    const session = sessionRef.current;
+    setStage('resolving');
+    try {
+      const params = await resolveLnurlWithdraw(withdrawal.lnurl);
+      if (!mountedRef.current || session !== sessionRef.current) return;
+      if (params.maxWithdrawable <= 0) {
+        setStage('sleeping');
+        setCooldownRemaining(null);
+      } else {
+        setWithdrawal({ ...withdrawal, params });
+        setStage('withdraw');
+      }
+    } catch (e) {
+      if (!mountedRef.current || session !== sessionRef.current) return;
+      const reason = e instanceof Error ? e.message : t('nfcReadSheet.couldntClaim');
+      setStage(SLEEPING_PATTERN.test(reason) ? 'sleeping' : 'error');
+      setErrorMessage(reason);
+      setCooldownRemaining(parseCooldownSeconds(reason));
+    } finally {
+      if (session === sessionRef.current) busyRef.current = false;
+    }
+  };
+
+  const handleClaim = async () => {
+    if (
+      !withdrawal?.params ||
+      !selectedWalletId ||
+      stage !== 'withdraw' ||
+      busyRef.current ||
+      !visible
+    )
+      return;
+    busyRef.current = true;
+    const session = sessionRef.current;
+    const params = withdrawal.params;
+    setStage('claiming');
+    try {
+      const claim = await claimLnurlWithdraw(params, async (sats, memo) =>
+        makeInvoiceForWallet(selectedWalletId, sats, memo),
+      );
+      if (!mountedRef.current || session !== sessionRef.current) return;
+      await recordClaim({
+        lnurl: withdrawal.lnurl,
+        sats: claim.sats,
+        piggyId: expectedCoord,
+      });
+      if (!mountedRef.current || session !== sessionRef.current) return;
+      setClaimedSats(claim.sats);
+      // Stamp the claim moment so the auto-dismiss effect above
+      // only reacts to bolt11 settlements that land AFTER this
+      // point — unrelated wallet activity that happened before
+      // the user tapped Try prize must not close the sheet.
+      claimedAtRef.current = Date.now();
+      setStage('claimed');
+      // Kick off 1 s aggressive polling for THIS bolt11 in the
+      // wallet context, so `lastIncomingPayment` fires within ~1 s
+      // of LNbits actually paying our invoice. Without it, the
+      // baseline 30 s balance poll is the only signal, which means
+      // the sheet sits on "X sats inbound!" for up to half a
+      // minute and the user manually taps Done before the auto-
+      // dismiss + confetti can fire (#579 follow-up).
+      if (selectedWalletId) {
+        const paymentHash = paymentHashFromBolt11(claim.bolt11);
+        if (paymentHash) {
+          // Stash so the auto-dismiss effect can match against
+          // `lastIncomingPayment.paymentHash` — defends against
+          // unrelated incoming payments triggering close.
+          expectedPaymentHashRef.current = paymentHash;
+          expectPayment(selectedWalletId, paymentHash, claim.sats);
+        }
+      }
+    } catch (e) {
+      if (!mountedRef.current || session !== sessionRef.current) return;
+      const reason =
+        e instanceof LnurlWithdrawError ? e.message : ((e as Error).message ?? 'Unknown error');
+      if (SLEEPING_PATTERN.test(reason)) {
+        setStage('sleeping');
+        setErrorMessage(reason);
+        setCooldownRemaining(parseCooldownSeconds(reason));
+      } else {
+        setStage('error');
+        // LNURL-withdraw issuer errors (cache empty, cooldown, already
+        // claimed) are meaningful — show as-is. Wallet-side NWC/relay
+        // failures surface a cryptic SDK string, so map those to friendly
+        // copy (#734).
+        const friendly = e instanceof LnurlWithdrawError ? null : friendlyClaimError(reason);
+        setErrorMessage(friendly ?? reason);
+      }
+    }
+  };
 
   useEffect(() => {
     if (visible) {
@@ -276,7 +341,7 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
       expectedPaymentHashRef.current = null;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible]);
+  }, [visible, expectedCoord]);
 
   useEffect(() => {
     if (!visible) return;
@@ -362,6 +427,8 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
   };
 
   const handleClose = () => {
+    sessionRef.current += 1;
+    busyRef.current = true;
     cancelNfcOperation();
     onClose();
   };
@@ -398,7 +465,46 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
             </View>
           )}
 
-          {(stage === 'reading' || stage === 'claiming') && (
+          {(stage === 'confirm' || stage === 'withdraw') && withdrawal && (
+            <View style={styles.stateContainer}>
+              <Text style={styles.instruction}>
+                {t('linkAction.withdraw', { target: withdrawal.host })}
+              </Text>
+              {stage === 'withdraw' && withdrawal.params && (
+                <Text style={styles.description} testID="nfc-read-amount">
+                  {t('linkAction.withdrawSats', {
+                    amount: Math.floor(withdrawal.params.maxWithdrawable / 1000).toLocaleString(
+                      formatLocale,
+                    ),
+                  })}
+                </Text>
+              )}
+              {stage === 'withdraw' && (
+                <PrizeWalletPicker
+                  lightningWallets={lightningWallets}
+                  selectedWalletId={selectedWalletId}
+                  onSelect={setSelectedWalletId}
+                  onAddWallet={() => setWizardOpen(true)}
+                  colors={colors}
+                />
+              )}
+              <TouchableOpacity
+                style={styles.primaryButton}
+                disabled={stage === 'withdraw' && !selectedWalletId}
+                testID={stage === 'confirm' ? 'nfc-read-resolve' : 'nfc-read-withdraw'}
+                accessibilityLabel={t(
+                  stage === 'confirm' ? 'linkAction.continue' : 'linkAction.withdrawButton',
+                )}
+                onPress={stage === 'confirm' ? handleResolve : handleClaim}
+              >
+                <Text style={styles.primaryButtonText}>
+                  {t(stage === 'confirm' ? 'linkAction.continue' : 'linkAction.withdrawButton')}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {(stage === 'reading' || stage === 'resolving' || stage === 'claiming') && (
             <View style={styles.stateContainer}>
               <ActivityIndicator size="large" color={colors.brandPink} />
               <Text style={styles.instruction}>

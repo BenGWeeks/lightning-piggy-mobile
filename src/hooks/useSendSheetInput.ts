@@ -1,5 +1,12 @@
 import { confirmLinkAction } from '../utils/confirmLinkAction';
-import { useRef, type Dispatch, type RefObject, type SetStateAction } from 'react';
+import {
+  useCallback,
+  useLayoutEffect,
+  useRef,
+  type Dispatch,
+  type RefObject,
+  type SetStateAction,
+} from 'react';
 import * as Clipboard from 'expo-clipboard';
 import { Alert } from '../components/BrandedAlert';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -30,6 +37,8 @@ import type { NfcTagContent } from '../services/nfcService';
  */
 export function useSendSheetInput(opts: {
   scanned: boolean;
+  visible?: boolean;
+  targetKey?: string;
   // Ref (not a plain value) holding the freshest paste-field string. The field is
   // uncontrolled, so its onChangeText writes the native text into this ref
   // synchronously; reading `.current` at submit time avoids the one-render lag a
@@ -70,13 +79,23 @@ export function useSendSheetInput(opts: {
   const t = useTranslation();
   const invalidInvoiceAlertVisible = useRef(false);
   const linkConfirmationVisible = useRef(false);
+  const sessionRef = useRef(0);
+  useLayoutEffect(() => {
+    sessionRef.current += 1;
+    invalidInvoiceAlertVisible.current = false;
+    linkConfirmationVisible.current = false;
+    return () => {
+      sessionRef.current += 1;
+    };
+  }, [opts.visible, opts.targetKey]);
 
   // A new Send session starts with intake open. The sheet stays mounted, so a
   // guard left set by an alert that never settled must not carry over.
-  const resetInputForOpen = () => {
+  const resetInputForOpen = useCallback(() => {
+    sessionRef.current += 1;
     invalidInvoiceAlertVisible.current = false;
     linkConfirmationVisible.current = false;
-  };
+  }, []);
 
   const rejectInvoiceInput = (input: string, titleKey: string, bodyKey: string) => {
     setInvoiceData(null);
@@ -92,7 +111,9 @@ export function useSendSheetInput(opts: {
     // A camera can deliver the same bad QR on every frame. Keep one alert
     // visible, then allow another attempt when the user dismisses it.
     invalidInvoiceAlertVisible.current = true;
+    const session = sessionRef.current;
     const dismiss = () => {
+      if (session !== sessionRef.current) return;
       invalidInvoiceAlertVisible.current = false;
     };
     Alert.alert(
@@ -169,21 +190,29 @@ export function useSendSheetInput(opts: {
   };
 
   const processInput = (data: string) => {
-    if (linkConfirmationVisible.current || invalidInvoiceAlertVisible.current) return;
+    if (
+      opts.visible === false ||
+      linkConfirmationVisible.current ||
+      invalidInvoiceAlertVisible.current
+    )
+      return;
     // Reject malformed invoices locally without presenting an action confirmation.
     const input = stripLightningPrefix(data);
     if (/^ln/i.test(input) && !isLnurlString(input) && !decodeInvoice(input)) {
       acceptInput(data);
       return;
     }
+    const session = sessionRef.current;
     linkConfirmationVisible.current = true;
     confirmLinkAction(
       data,
       () => {
+        if (session !== sessionRef.current) return;
         linkConfirmationVisible.current = false;
         acceptInput(data);
       },
       () => {
+        if (session !== sessionRef.current) return;
         linkConfirmationVisible.current = false;
       },
     );
@@ -216,7 +245,9 @@ export function useSendSheetInput(opts: {
 
   const handlePaste = async () => {
     try {
+      const session = sessionRef.current;
       const clip = await Clipboard.getStringAsync();
+      if (session !== sessionRef.current || opts.visible === false) return;
       if (clip) {
         applyPasteText(clip);
         processInput(clip);
