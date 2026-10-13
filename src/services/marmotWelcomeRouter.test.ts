@@ -1,7 +1,8 @@
 import type { MarmotKvBackend } from './marmotStore';
 import type { DecodedRumor } from '../utils/nip17Unwrap';
-import { routeMarmotWelcome } from './marmotWelcomeRouter';
+import { getPendingMarmotInvitations, routeMarmotWelcome } from './marmotWelcomeRouter';
 import { fireMessageNotification } from './notificationService';
+import { MarmotPendingInvitations } from './marmotPendingInvitations';
 
 const mockBackends = new Map<string, MarmotKvBackend>();
 const mockAccept = jest.fn().mockResolvedValue({ id: 'joined-group' });
@@ -47,7 +48,7 @@ const rumor: DecodedRumor = {
   content: 'secret MLS payload',
   tags: [],
 };
-const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+const settle = () => new Promise((resolve) => setTimeout(resolve, 200));
 beforeEach(() => {
   jest.clearAllMocks();
   mockSession = null;
@@ -145,3 +146,70 @@ it.each([null, 'f'.repeat(64)])(
     }
   },
 );
+
+it('coalesces a burst during blocked MLS work into one follow-up pass with bounded reads', async () => {
+  jest.useFakeTimers();
+  const owner = '1'.repeat(64);
+  let unblock!: () => void;
+  let entered!: () => void;
+  const blocked = new Promise<void>((resolve) => (unblock = resolve));
+  const started = new Promise<void>((resolve) => (entered = resolve));
+  const processing = jest.spyOn(MarmotPendingInvitations.prototype, 'resume');
+  mockPreview.mockImplementationOnce(async () => {
+    entered();
+    await blocked;
+    return { forThisDevice: true, groupId: 'mls-group', group: { name: 'Family' } };
+  });
+  try {
+    await routeMarmotWelcome(rumor, owner, 'burst-first', false, true);
+    const backend = mockBackends.get(owner)!;
+    for (let i = 0; i < 30; i++)
+      await backend.set(
+        'welcomeInvitations',
+        `old-${i}`,
+        JSON.stringify({ id: `old-${i}`, status: 'declined' }),
+      );
+    const keys = jest.spyOn(backend, 'keys');
+    const get = jest.spyOn(backend, 'get');
+    mockSession = { pubkey: owner, acceptWelcome: mockAccept, previewWelcome: mockPreview };
+    mockSessionChanged(mockSession);
+    await jest.advanceTimersByTimeAsync(150);
+    await started;
+    await Promise.all(
+      Array.from({ length: 20 }, (_, i) =>
+        routeMarmotWelcome(
+          { ...rumor, content: `distinct-${i}` },
+          owner,
+          `burst-${i}`,
+          false,
+          true,
+        ),
+      ),
+    );
+    expect(mockPreview).toHaveBeenCalledTimes(1);
+    // Durable ingestion finishes even though preview is blocked.
+    expect(await backend.get('welcomeInvitations', 'burst-19')).toContain('distinct-19');
+    unblock();
+    await jest.advanceTimersByTimeAsync(600);
+    expect(mockPreview).toHaveBeenCalledTimes(21);
+    expect(processing).toHaveBeenCalledTimes(2);
+    expect(mockAccept).not.toHaveBeenCalled();
+    expect(getPendingMarmotInvitations(owner)).toHaveLength(1);
+    // Two processing passes scan twice each; at most three snapshot scans.
+    expect(
+      keys.mock.calls.filter(([ns]) => ns === 'welcomeInvitations').length,
+    ).toBeLessThanOrEqual(7);
+    expect(get.mock.calls.filter(([ns]) => ns === 'welcomeInvitations').length).toBeLessThanOrEqual(
+      380,
+    );
+    expect(fireMessageNotification).toHaveBeenCalledTimes(1);
+    keys.mockRestore();
+    get.mockRestore();
+  } finally {
+    processing.mockRestore();
+    unblock();
+    mockSession = null;
+    mockSessionChanged(null);
+    jest.useRealTimers();
+  }
+});

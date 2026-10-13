@@ -17,6 +17,8 @@ const gates = new Map<string, ReturnType<typeof createStopGate>>();
 const listeners = new Set<() => void>();
 const snapshots = new Map<string, readonly PendingMarmotInvitation[]>();
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
+type ResumeWork = { timer?: ReturnType<typeof setTimeout>; running: boolean; dirty: boolean };
+const resumeWork = new Map<string, ResumeWork>();
 export const EMPTY_INVITATIONS: readonly PendingMarmotInvitation[] = [];
 
 function changed(owner: string) {
@@ -73,9 +75,37 @@ function sessionFor(owner: string) {
   const activeOwner = getActivePubkey();
   return session?.pubkey === owner && (!activeOwner || activeOwner === owner) ? session : null;
 }
-async function resume(owner: string) {
-  const session = sessionFor(owner);
-  if (session) await controller(owner).resume(session, () => sessionFor(owner) === session);
+function resume(owner: string) {
+  if (!sessionFor(owner)) return;
+  let work = resumeWork.get(owner);
+  if (!work) {
+    work = { running: false, dirty: false };
+    resumeWork.set(owner, work);
+  }
+  work.dirty = true;
+  if (work.running || work.timer) return;
+  const currentWork = work;
+  currentWork.timer = setTimeout(() => {
+    currentWork.timer = undefined;
+    currentWork.dirty = false;
+    const session = sessionFor(owner);
+    if (!session) return;
+    const current = controller(owner);
+    currentWork.running = true;
+    void current
+      .resume(session, () => controllers.get(owner) === current && sessionFor(owner) === session)
+      .catch(reportFailure)
+      .finally(() => {
+        currentWork.running = false;
+        // Deliveries during MLS work request one follow-up pass, never one
+        // queued namespace scan per wrap. Retired owners cannot re-arm work.
+        if (resumeWork.get(owner) === currentWork && currentWork.dirty) resume(owner);
+      });
+  }, 150);
+}
+function cancelResume(owner: string) {
+  clearTimeout(resumeWork.get(owner)?.timer);
+  resumeWork.delete(owner);
 }
 
 /** True for any Welcome (including own/malformed ones): never send it to DM storage. */
@@ -98,7 +128,7 @@ export async function routeMarmotWelcome(
   await controller(owner).receive(wrapId, full, followed, isFresh);
   if (shouldAbort()) return true;
   // Do not hold the relay decrypt queue while MLS starts or joins.
-  void resume(owner).catch(reportFailure);
+  resume(owner);
   return true;
 }
 export function getPendingMarmotInvitations(owner: string | null) {
@@ -131,6 +161,7 @@ subscribeMarmotSession((session) => {
   if (previousOwner && previousOwner !== session?.pubkey) {
     snapshots.delete(previousOwner);
     controllers.delete(previousOwner);
+    cancelResume(previousOwner);
     gates.get(previousOwner)?.fence();
     gates.delete(previousOwner);
     const timer = timers.get(previousOwner);
@@ -141,7 +172,7 @@ subscribeMarmotSession((session) => {
   previousOwner = session?.pubkey ?? null;
   if (!session) return;
   changed(session.pubkey);
-  void resume(session.pubkey).catch(reportFailure);
+  resume(session.pubkey);
 });
 
 // Account changes can precede the delayed Marmot session (including logout
@@ -153,6 +184,7 @@ subscribeActivePubkey?.((owner) => {
     gates.get(oldOwner)?.fence();
     gates.delete(oldOwner);
     controllers.delete(oldOwner);
+    cancelResume(oldOwner);
     snapshots.delete(oldOwner);
     const timer = timers.get(oldOwner);
     if (timer) clearTimeout(timer);

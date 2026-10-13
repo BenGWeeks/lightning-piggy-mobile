@@ -132,6 +132,44 @@ it('does not re-prompt a declined Welcome rewrapped under a different outer id',
   expect(session.acceptWelcome).not.toHaveBeenCalled();
 });
 
+it.each([false, true])(
+  'suppresses distinct late Welcomes for a declined group after restart (followed: %s)',
+  async (followed) => {
+    const { backend, invitations, session } = setup();
+    await invitations.receive('first-wrap', rumor, false, true);
+    await invitations.resume(session, () => true);
+    // This candidate arrives before decline but has not been previewed yet.
+    await invitations.receive('unpreviewed-wrap', { ...rumor, id: 'unpreviewed' }, followed);
+    await invitations.decline('first-wrap');
+    const notify = jest.fn();
+    const restarted = new MarmotPendingInvitations(backend, jest.fn(), notify);
+    const late = { ...rumor, id: 'distinct-late-welcome', created_at: 2 };
+    await backend.set('pendingWelcomes', late.id, JSON.stringify(late));
+    await restarted.receive('late-wrap', late, followed, true);
+    await restarted.resume(session, () => true);
+    expect(await restarted.list()).toEqual([]);
+    expect(JSON.parse((await backend.get('welcomeInvitations', 'first-wrap'))!)).toEqual({
+      id: 'first-wrap',
+      status: 'declined',
+      groupId: 'mls-group',
+    });
+    expect(notify).not.toHaveBeenCalled();
+    expect(session.acceptWelcome).not.toHaveBeenCalled();
+    expect(await backend.get('pendingWelcomes', late.id)).toBeNull();
+    expect(await restarted.receive('rewrapped-late', late, followed, true)).toBe(false);
+    // Decline is specific to the group, not to the inviter.
+    session.previewWelcome.mockResolvedValueOnce({
+      forThisDevice: true,
+      groupId: 'another-group',
+      group: { name: 'Another family' },
+    });
+    await restarted.receive('another-wrap', { ...rumor, id: 'another' }, false, true);
+    await restarted.resume(session, () => true);
+    expect(await restarted.list()).toEqual([expect.objectContaining({ groupId: 'another-group' })]);
+    expect(notify).toHaveBeenCalledTimes(1);
+  },
+);
+
 it('silently skips other-device Welcomes without exposing or notifying a row', async () => {
   const { backend, session } = setup();
   const notify = jest.fn();

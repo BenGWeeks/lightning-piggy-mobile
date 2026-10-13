@@ -7,6 +7,7 @@ import { WELCOME_OUTCOMES_NS, type WelcomeOutcome } from './marmotWelcomeOutcome
 
 const NS = 'welcomeInvitations';
 const RUMOR_WRAPS_NS = 'welcomeInvitationRumorWraps';
+const DECLINED_GROUPS_NS = 'welcomeInvitationDeclinedGroups';
 export interface PendingMarmotInvitation {
   id: string;
   rumor: MarmotRumor;
@@ -18,7 +19,9 @@ type InvitationRecord = PendingMarmotInvitation & {
   status: 'pending' | 'approved';
   fresh?: boolean;
 };
-type Record = InvitationRecord | { id: string; status: 'joined' | 'declined' | 'skipped' };
+type Record =
+  | InvitationRecord
+  | { id: string; status: 'joined' | 'declined' | 'skipped'; groupId?: string };
 export interface InvitationSession {
   acceptWelcome(rumor: MarmotRumor): Promise<MarmotGroupSummary | null>;
   previewWelcome(rumor: MarmotRumor): Promise<{
@@ -91,9 +94,17 @@ export class MarmotPendingInvitations {
     return run;
   }
   private async clearGroup(record: InvitationRecord, status: 'joined' | 'declined') {
+    // Persist consent by group before removing plaintext candidates. A distinct,
+    // delayed Welcome can only be associated with this group after preview.
+    if (status === 'declined' && record.groupId)
+      await this.backend.set(DECLINED_GROUPS_NS, record.groupId, 'declined');
     for (const candidate of await this.records()) {
       if (candidate.id === record.id || (record.groupId && candidate.groupId === record.groupId)) {
-        await this.write({ id: candidate.id, status });
+        await this.write({
+          id: candidate.id,
+          status,
+          ...(status === 'declined' ? { groupId: candidate.groupId } : {}),
+        });
         await this.backend.remove('pendingWelcomes', candidate.rumor.id);
       }
     }
@@ -134,6 +145,11 @@ export class MarmotPendingInvitations {
         continue;
       }
       if (!preview.groupId) continue; // Incomplete preview remains hidden and retryable.
+      if (await this.backend.get(DECLINED_GROUPS_NS, preview.groupId)) {
+        await this.write({ id: record.id, status: 'declined', groupId: preview.groupId });
+        await this.backend.remove('pendingWelcomes', record.rumor.id);
+        continue;
+      }
       const alreadyVisible = visibleGroups.has(preview.groupId);
       visibleGroups.add(preview.groupId);
       const validated = { ...record, groupId: preview.groupId, groupName: preview.group?.name };
