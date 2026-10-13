@@ -1,4 +1,5 @@
 import { File, Paths } from 'expo-file-system';
+import { deleteInstallationSignatureKey } from '../services/marmotSignatureKey';
 import { deleteDmMessagesForOwner } from '../services/dmDb';
 import { perAccountKey } from '../services/perAccountStorage';
 import {
@@ -73,6 +74,7 @@ export async function wipeDmStoresForAccount(pubkey: string): Promise<void> {
   } catch (e) {
     if (__DEV__) console.warn('[Marmot] per-owner state wipe failed:', e);
   }
+  await deleteInstallationSignatureKey(pubkey);
   // Independent of the wipe above: its groups still hold this device's push
   // token (the signer is gone, so no signed removals) — delete the token at
   // Apple/Google instead (retried at next start if that fails).
