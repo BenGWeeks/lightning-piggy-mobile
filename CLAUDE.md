@@ -54,6 +54,7 @@ Terminology follows the Lightning Piggy website (`LightningPiggy/website`), whic
 - **Lightning Piggy is a family app** (parents and children use it together) — never a "kids' app". Prefer "family", "the whole family" and "parent or guardian".
 - "Child" is only acceptable as a precise account-role / legal term (e.g. a parent-managed account for an under-13), and neutral phrasing is preferred even there if it keeps the meaning.
 - Geo-caches published by this app are called **Piglets** in UI copy (the wallet is the "Piggy", a cache stash is its "Piglet"). Vanilla NIP-GC caches stay "NIP-GC cache".
+- **Spec labels stay in settings titles for now**: "Your relays (NIP-65)", "Message inbox relays (NIP-17)", "Photo & voice-note storage (Blossom · BUD-03)". Move explanatory paragraphs behind ⓘ, but don't strip the "(NIP-xx)" suffix. This is temporary while Nostr users are mostly technical. Once the protocol reaches everyday users, drop the labels from titles (spec name moves into the ⓘ sheet).
 - Keep "sats" in Latin script in every translation. The website isn't localised; "smart savers" is "ahorradores inteligentes" in `es` and "розумні заощаджувачі" in `uk`.
 
 ## Code Style
