@@ -161,17 +161,19 @@ const MarmotPushSection: React.FC<{ permissionGranted: boolean }> = ({ permissio
         icon={Smartphone}
         title={t('securityScreen.marmotPushToggle')}
         subtitle={
-          !enabled || !permissionGranted
-            ? t('notificationSettingsScreen.off')
-            : pending === null
-              ? t('notificationSettingsScreen.pushNoToken')
-              : pending > 0
-                ? t('notificationSettingsScreen.pushPending', { count: pending })
-                : watcherPending
-                  ? t('securityScreen.watcherPending')
-                  : t('notificationSettingsScreen.pushReady')
+          !permissionGranted
+            ? undefined
+            : !enabled
+              ? t('notificationSettingsScreen.off')
+              : pending === null
+                ? t('notificationSettingsScreen.pushNoToken')
+                : pending > 0
+                  ? t('notificationSettingsScreen.pushPending', { count: pending })
+                  : watcherPending
+                    ? t('securityScreen.watcherPending')
+                    : t('notificationSettingsScreen.pushReady')
         }
-        subtitleTestID="security-marmot-push-status"
+        subtitleTestID={permissionGranted ? 'security-marmot-push-status' : undefined}
         testID="notifications-instant-alerts"
         infoTestID="security-marmot-push-details"
         details={[
@@ -187,7 +189,8 @@ const MarmotPushSection: React.FC<{ permissionGranted: boolean }> = ({ permissio
           .filter(Boolean)
           .join('\n\n')}
         toggle={{
-          value: enabled && permissionGranted,
+          // Keep the saved choice reachable for opt-out when OS permission is revoked.
+          value: enabled,
           onValueChange: handleToggle,
           disabled: !pubkey,
           pending: busy,

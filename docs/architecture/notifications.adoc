@@ -262,7 +262,10 @@ and the decision marker LAST — so a crash, a cancelled token fetch or a failed
 write leaves the missing preferences absent and the next launch retries them.
 Denial leaves both Instant alerts and More alerts off alongside the existing
 phone-settings banner and setup retryable. Permission can be restored through
-the existing settings surface.
+the existing settings surface. A saved ON preference keeps showing on while the
+OS blocks alerts (the banner says why none arrive), so the user can still turn
+it off and retract the registrations; only the status row and the category
+switches wait for permission.
 
 . `marmotPushRegistration.ts` asks Apple/Google for this device's *native*
   token (`getDevicePushTokenAsync` — FCM on Android, APNs on iOS; never Expo's

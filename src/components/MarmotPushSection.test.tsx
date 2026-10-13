@@ -23,8 +23,9 @@ jest.mock('../services/marmotPushRegistration', () => ({
   loadMarmotPushSettings: jest.fn(async () => ({ enabled: true, otherAccounts: false })),
   pendingMarmotPushGroups: jest.fn(async () => 0),
   subscribeMarmotPushStatus: jest.fn(() => jest.fn()),
-  disableMarmotPush: jest.fn(),
   syncMarmotPushNow: jest.fn(),
+  enableMarmotPush: jest.fn(async () => ({ status: 'no-permission' })),
+  disableMarmotPush: jest.fn(async () => ({ saved: true, tokenDeleted: true, sync: null })),
 }));
 jest.mock('../services/watcherPush', () => ({
   getWatcherStatus: () => ({ last: 'pending' }),
@@ -116,3 +117,19 @@ it.each(['second', null, 'account'])(
     expect(ui.getByTestId('security-marmot-push-toggle').props.pending).toBe(false);
   },
 );
+
+it('keeps a saved ON reachable to turn off while the OS blocks alerts', async () => {
+  // Push is on for this account but the user revoked the OS permission: the
+  // switch must show the saved choice (not OFF) so the opt-out still works.
+  const ui = render(<MarmotPushSection permissionGranted={false} />);
+  const toggle = await ui.findByTestId('security-marmot-push-toggle');
+  await act(async () => undefined); // settings hydrate
+  expect(ui.getByTestId('security-marmot-push-toggle').props.value).toBe(true);
+  // Nothing can arrive, so the setup status and Finish setup stay hidden.
+  expect(ui.queryByTestId('security-marmot-push-status')).toBeNull();
+
+  await act(async () => fireEvent(toggle, 'valueChange', false));
+  expect(unregisterWatcherPush).toHaveBeenCalledTimes(1);
+  expect(disableMarmotPush).toHaveBeenCalledWith('account', { stillRegistered: false });
+  expect(ui.getByTestId('security-marmot-push-toggle').props.value).toBe(false);
+});

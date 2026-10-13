@@ -20,14 +20,28 @@ name: Notifications — defaults, stored choices and OS permission
     visible:
       id: 'notifications-permission-status'
     timeout: 15000
+# OS permission blocked: the switch still shows the saved choice (a stored ON
+# stays reachable to turn off). A fresh account denied permission stores
+# nothing, so it shows off unless EXPECTED_PUSH=true says a choice was saved.
 - runFlow:
     when:
       visible:
         id: 'notifications-permission-turn-on'
     commands:
-      - assertVisible:
-          id: 'security-marmot-push-toggle'
-          checked: false
+      - runFlow:
+          when:
+            true: ${EXPECTED_PUSH === 'true'}
+          commands:
+            - assertVisible:
+                id: 'security-marmot-push-toggle'
+                checked: true
+      - runFlow:
+          when:
+            true: ${EXPECTED_PUSH !== 'true'}
+          commands:
+            - assertVisible:
+                id: 'security-marmot-push-toggle'
+                checked: false
 - runFlow:
     when:
       notVisible:
