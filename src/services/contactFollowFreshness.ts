@@ -42,6 +42,25 @@ export async function readFollowSnapshot(pubkey: string): Promise<FollowSnapshot
 // Serialize selection + disk writes, including local follow/unfollow publishes.
 // A slower refresh must not clobber a newer list adopted in another request.
 let writes: Promise<unknown> = Promise.resolve();
+function serializeFollowWrite<T>(run: () => Promise<T>): Promise<T> {
+  const next = writes.then(run, run);
+  writes = next.catch(() => {});
+  return next;
+}
+
+/** Failed reads repaint the latest cache without declaring relay hydration. */
+export function resolveCachedFollowContacts(
+  pubkey: string,
+  cached: NostrContact[],
+  paint: (contacts: NostrContact[]) => void,
+): Promise<NostrContact[]> {
+  return serializeFollowWrite(async () => {
+    const contacts = (await readFollowSnapshot(pubkey))?.contacts ?? cached;
+    paint(contacts);
+    return contacts;
+  });
+}
+
 export function adoptFollowSnapshot(
   pubkey: string,
   candidate: FollowSnapshot,
@@ -54,9 +73,7 @@ export function adoptFollowSnapshot(
     onAdopt?.(best.contacts);
     return best;
   };
-  const next = writes.then(run, run);
-  writes = next.catch(() => {});
-  return next;
+  return serializeFollowWrite(run);
 }
 
 /** Bounded per-relay reads; wait for all EOSEs (or the cap), including indexers. */
@@ -67,7 +84,8 @@ export async function fetchFollowSnapshot(
   const result = await fetchLatestContactList(pubkey, [...readRelays, ...PROFILE_RELAYS], {
     includeParked: true,
   });
-  if (result.status !== 'found') return null;
+  if (result.status === 'failed') return null;
+  if (result.status === 'empty') return { contacts: [], createdAt: 0 };
   return {
     contacts: tagsToContacts(result.base.tags),
     createdAt: result.base.createdAt,

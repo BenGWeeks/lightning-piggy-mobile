@@ -348,6 +348,49 @@ describe('startLiveDmSubscription — follow-gate race + teardown (#851 F2)', ()
     second.unmount();
   });
 
+  it('replays on reopening after hydration completed while the subscription was closed', async () => {
+    const hook = renderHook(() => useLiveFollowGate(new Set<string>(), false, VIEWER));
+    const gate = hook.result.current;
+    const params = makeParams({
+      followPubkeysRef: gate.followPubkeysRef,
+      followHydratedRef: gate.followHydratedRef,
+      followGateBuffer: gate.followGateBufferRef.current,
+      setDeferredReplay: gate.setDeferredReplay,
+    });
+    const stop = startLiveDmSubscription(params);
+    await flush();
+    jest.mocked(nip04PlaintextCache.get).mockReturnValue('Alice plaintext');
+    capturedOnEvent!({
+      id: 'closed-hydration',
+      kind: 4,
+      pubkey: ALICE,
+      created_at: Math.floor(Date.now() / 1000) - 600,
+      tags: [['p', VIEWER]],
+      content: 'ciphertext',
+    });
+    await flush();
+    expect(gate.followGateBufferRef.current.size).toBe(1);
+    stop();
+    await act(async () => {
+      await adoptFollowSnapshot(VIEWER, {
+        createdAt: 200,
+        contacts: [{ pubkey: ALICE, relay: null, petname: null, profile: null }],
+      });
+    });
+    expect(gate.followHydratedRef.current).toBe(true);
+    expect(gate.followGateBufferRef.current.size).toBe(1);
+    const stopSecond = startLiveDmSubscription(params);
+    await flush();
+    expect(upsertDmMessages).toHaveBeenCalledWith([
+      expect.objectContaining({ eventId: 'closed-hydration', content: 'Alice plaintext' }),
+    ]);
+    expect(mockNotifyDm).toHaveBeenCalledTimes(1);
+    expect(params.setDmInbox).toHaveBeenCalledTimes(1);
+    expect(gate.followGateBufferRef.current.size).toBe(0);
+    stopSecond();
+    hook.unmount();
+  });
+
   it('registers a replay hook on open and clears it on teardown', async () => {
     const setDeferredReplay = jest.fn();
     const buffer = createLiveSubFollowGateBuffer();

@@ -199,6 +199,13 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
   const queueInboxEntry = inboxFlushQueue.push;
   const flushPendingInbox = inboxFlushQueue.flush;
 
+  // Initialize before replay registration: a hydrated store drains synchronously.
+  // Catch failures so one rejected write cannot prevent subsequent persistence.
+  const chainWrite = (task: () => Promise<void>): void => {
+    writeChain = writeChain.then(task).catch((e) => {
+      if (__DEV__) console.warn('[Nostr] live wrap persist failed:', e);
+    });
+  };
   // Replay the surface + notify side-effects of a fresh inbound that was
   // deferred by the follow-gate during the post-switch hydration window
   // (#851 F2). Called by the hook (via the registered ref) once follows
@@ -275,17 +282,6 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     replayDeferredFollowGate,
   );
 
-  // Shared post-unwrap surface path (group-route → follow-gate → persist →
-  // surface → notify), extracted verbatim to liveDmRumorSurface.ts so the
-  // engine path — which delivers already-unwrapped rumors — runs the exact
-  // same policy as the JS unwrap path below. The trailing `.catch` in
-  // chainWrite is load-bearing: without it a single throw leaves `writeChain`
-  // rejected and every later `.then(...)` skips its onFulfilled.
-  const chainWrite = (task: () => Promise<void>): void => {
-    writeChain = writeChain.then(task).catch((e) => {
-      if (__DEV__) console.warn('[Nostr] live wrap persist failed:', e);
-    });
-  };
   const surfaceRumor = createLiveRumorSurfacer({
     viewerPubkey,
     isCancelled: () => cancelled || !isCurrentOwner(),

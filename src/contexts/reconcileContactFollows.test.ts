@@ -1,38 +1,145 @@
-import { fetchFollowSnapshot, adoptFollowSnapshot } from '../services/contactFollowFreshness';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { fetchLatestContactList } from '../services/contactListSync';
+import { adoptFollowSnapshot } from '../services/contactFollowFreshness';
+import {
+  clearFollowGateStores,
+  getFollowGateStore,
+  replayFollowGateStore,
+  subscribeFollowSet,
+} from '../services/followSetEvents';
+import { startFollowGateFallback, FOLLOW_GATE_TIMEOUT_MS } from './liveDmFollowGateDecision';
 import { reconcileContactFollows } from './reconcileContactFollows';
-jest.mock('../services/contactFollowFreshness', () => ({
-  readFollowSnapshot: jest.fn(async () => ({ contacts: [], createdAt: 100 })),
-  fetchFollowSnapshot: jest.fn(),
-  adoptFollowSnapshot: jest.fn(async (_owner, snapshot) => snapshot),
-}));
-jest.mock('../services/nostrRelayStorage', () => ({ getUserRelays: jest.fn(async () => []) }));
 
-it('publishes readiness after the round-1 adoption completes, never after the cache read', async () => {
-  let resolve!: (value: null) => void;
-  jest.mocked(fetchFollowSnapshot).mockReturnValueOnce(
+jest.mock('../services/contactListSync', () => ({ fetchLatestContactList: jest.fn() }));
+jest.mock('../services/nostrRelayStorage', () => ({ getUserRelays: jest.fn(async () => []) }));
+const OWNER = 'f'.repeat(64);
+const ALICE = 'a'.repeat(64);
+const BOB = 'b'.repeat(64);
+const contacts = (pubkeys: string[]) =>
+  pubkeys.map((pubkey) => ({ pubkey, relay: null, petname: null, profile: null }));
+const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+beforeEach(async () => {
+  jest.clearAllMocks();
+  clearFollowGateStores();
+  await AsyncStorage.clear();
+});
+
+it('publishes readiness only after relay reconciliation, never after painting cache', async () => {
+  let resolve!: (value: Awaited<ReturnType<typeof fetchLatestContactList>>) => void;
+  jest.mocked(fetchLatestContactList).mockReturnValueOnce(
     new Promise((r) => {
       resolve = r;
     }),
   );
   const paint = jest.fn();
   const finish = jest.fn();
-  const pending = reconcileContactFollows('owner', [], null, paint, finish);
-  await new Promise((r) => setImmediate(r));
-  expect(paint).toHaveBeenCalledWith([]);
+  const pending = reconcileContactFollows(OWNER, [], contacts([ALICE]), paint, finish);
+  await flush();
+  expect(paint).toHaveBeenCalledWith(contacts([ALICE]));
   expect(finish).not.toHaveBeenCalled();
-  resolve(null);
+  expect(getFollowGateStore(OWNER).followHydratedRef.current).toBe(false);
+  resolve({ status: 'found', base: { tags: [['p', BOB]], content: '', createdAt: 200 } });
   await pending;
-  expect(finish).toHaveBeenCalledWith([]);
+  expect(finish).toHaveBeenCalledWith(contacts([BOB]));
+  expect(getFollowGateStore(OWNER).followHydratedRef.current).toBe(true);
 });
 
-it('finishes with the adopted reconciled follows', async () => {
-  const fresh = {
-    createdAt: 200,
-    contacts: [{ pubkey: 'a'.repeat(64), relay: null, petname: null, profile: null }],
-  };
-  jest.mocked(fetchFollowSnapshot).mockResolvedValueOnce(fresh);
+it.each(['follow', 'unfollow'])(
+  'failed refresh preserves a concurrent %s in gate and UI',
+  async (change) => {
+    const initial = contacts(change === 'follow' ? [ALICE] : [ALICE, BOB]);
+    const updated = contacts(change === 'follow' ? [ALICE, BOB] : [ALICE]);
+    await adoptFollowSnapshot(OWNER, { contacts: initial, createdAt: 100 });
+    let fail!: () => void;
+    jest.mocked(fetchLatestContactList).mockReturnValueOnce(
+      new Promise((resolve) => {
+        fail = () => resolve({ status: 'failed' });
+      }),
+    );
+    const paint = jest.fn();
+    const finish = jest.fn();
+    const pending = reconcileContactFollows(OWNER, [], initial, paint, finish);
+    await flush();
+    expect(paint).toHaveBeenLastCalledWith(initial);
+    // Keep the write pending when the failed refresh resolves: its fallback must
+    // join the same queue, rather than racing the latest snapshot's disk write.
+    const localWrite = adoptFollowSnapshot(OWNER, { contacts: updated, createdAt: 200 });
+    fail();
+    await localWrite;
+    expect(await pending).toEqual(updated);
+    expect(paint).toHaveBeenLastCalledWith(updated);
+    expect(finish).not.toHaveBeenCalled();
+    expect([...getFollowGateStore(OWNER).followPubkeysRef.current]).toEqual(
+      updated.map((c) => c.pubkey),
+    );
+  },
+);
+
+it('failed fetch retains deferrals through offline timeout and later authoritative recovery', async () => {
+  jest.useFakeTimers();
+  const store = getFollowGateStore(OWNER);
+  store.followPubkeysRef.current = new Set([ALICE]);
+  for (const partner of [ALICE, BOB])
+    store.followGateBufferRef.current.defer({
+      partnerPubkey: partner,
+      entry: {
+        id: partner,
+        partnerPubkey: partner,
+        fromMe: false,
+        createdAt: 100,
+        text: 'hello',
+        wireKind: 4,
+      },
+    });
+  const replay = jest.fn();
+  store.deferredReplayRef.current = replay;
+  const unsubscribe = subscribeFollowSet(OWNER, () => replayFollowGateStore(store));
+  const fallback = startFollowGateFallback(
+    store.followPubkeysRef,
+    store.followHydratedRef,
+    store.followGateBufferRef.current,
+    replay,
+  );
+  try {
+    jest.mocked(fetchLatestContactList).mockResolvedValueOnce({ status: 'failed' });
+    const finish = jest.fn();
+    await reconcileContactFollows(OWNER, [], contacts([ALICE]), jest.fn(), finish);
+    expect(finish).not.toHaveBeenCalled();
+    expect(store.followHydratedRef.current).toBe(false);
+    expect(store.followGateBufferRef.current.size).toBe(2);
+    await jest.advanceTimersByTimeAsync(FOLLOW_GATE_TIMEOUT_MS - 1);
+    expect(replay).not.toHaveBeenCalled();
+    await jest.advanceTimersByTimeAsync(1);
+    expect(replay).toHaveBeenCalledTimes(1);
+    expect(store.followGateBufferRef.current.size).toBe(1);
+    jest.mocked(fetchLatestContactList).mockResolvedValueOnce({
+      status: 'found',
+      base: {
+        tags: [
+          ['p', ALICE],
+          ['p', BOB],
+        ],
+        content: '',
+        createdAt: 200,
+      },
+    });
+    await reconcileContactFollows(OWNER, [], contacts([ALICE]), jest.fn(), finish);
+    expect(store.followHydratedRef.current).toBe(true);
+    expect(store.followGateBufferRef.current.size).toBe(0);
+    expect(replay).toHaveBeenCalledTimes(2);
+    expect(finish).toHaveBeenCalledWith(contacts([ALICE, BOB]));
+  } finally {
+    fallback.dispose();
+    unsubscribe();
+    jest.useRealTimers();
+  }
+});
+
+it('confirmed empty relay results complete hydration', async () => {
+  jest.mocked(fetchLatestContactList).mockResolvedValueOnce({ status: 'empty', confirmedBy: 2 });
   const finish = jest.fn();
-  await reconcileContactFollows('owner', [], null, jest.fn(), finish);
-  expect(adoptFollowSnapshot).toHaveBeenCalledWith('owner', fresh);
-  expect(finish).toHaveBeenCalledWith(fresh.contacts);
+  await reconcileContactFollows(OWNER, [], null, jest.fn(), finish);
+  expect(finish).toHaveBeenCalledWith([]);
+  expect(getFollowGateStore(OWNER).followHydratedRef.current).toBe(true);
 });

@@ -1,8 +1,8 @@
-import { publishFollowSet } from '../services/followSetEvents';
 import {
   adoptFollowSnapshot,
   fetchFollowSnapshot,
   readFollowSnapshot,
+  resolveCachedFollowContacts,
 } from '../services/contactFollowFreshness';
 import { getUserRelays } from '../services/nostrRelayStorage';
 import type { NostrContact } from '../types/nostr';
@@ -16,15 +16,13 @@ export async function reconcileContactFollows(
   finish: (contacts: NostrContact[]) => void,
 ): Promise<NostrContact[]> {
   const snapshot = await readFollowSnapshot(pubkey);
-  let contacts = snapshot?.contacts ?? cached ?? [];
+  const contacts = snapshot?.contacts ?? cached ?? [];
   paint(contacts);
   const configured = await getUserRelays();
   const fresh = await fetchFollowSnapshot(pubkey, [
     ...relayUrls,
     ...configured.filter((r) => r.read).map((r) => r.url),
   ]);
-  if (fresh) contacts = (await adoptFollowSnapshot(pubkey, fresh)).contacts;
-  else publishFollowSet(pubkey, contacts, snapshot?.createdAt);
-  finish(contacts);
-  return contacts;
+  if (fresh) return (await adoptFollowSnapshot(pubkey, fresh, finish)).contacts;
+  return resolveCachedFollowContacts(pubkey, contacts, paint);
 }
