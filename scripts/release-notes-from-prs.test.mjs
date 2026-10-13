@@ -32,6 +32,7 @@ test('group PR titles and enforce annotated tag boundaries using merge ancestry'
     ['chore(ci): update tooling', current],
     ['feat: old feature', old],
     ['fix: future fix', future],
+    ['fix: removed historical commit', 'f'.repeat(40)],
   ];
   const prs = titles.map(([title, oid], index) => ({
     number: index + 100,
