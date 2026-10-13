@@ -2822,7 +2822,10 @@
     "mutedCount": {
       "one": "{{count}} cuenta silenciada",
       "other": "{{count}} cuentas silenciadas"
-    }
+    },
+    "updating": "Actualizando…",
+    "updateFailed": "No se pudo actualizar este ajuste. Inténtalo de nuevo.",
+    "locationUnavailable": "Activa los servicios de ubicación para recibir avisos de comercios."
   },
   "settingsScope": {
     "forThisAccount": "Esta cuenta",

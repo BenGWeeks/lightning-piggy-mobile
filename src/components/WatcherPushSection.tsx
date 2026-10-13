@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
 import { MessageCircle, Zap, AtSign, CreditCard } from 'lucide-react-native';
 
@@ -45,12 +45,14 @@ const WatcherPushSection: React.FC<{ pushEnabled: boolean }> = ({ pushEnabled })
   const push = useMemo(() => createMarmotPushSectionStyles(colors), [colors]);
   const [categories, setCategories] = useState<WatcherCategories>(NO_CATEGORIES);
   const [status, setStatus] = useState<WatcherStatus>(getWatcherStatus);
+  const savingRef = useRef(false);
+  const [saving, setSaving] = useState<WatcherCategory | null>(null);
   const [retrying, setRetrying] = useState(false);
   const remoteSigner = signerType === 'amber' || signerType === 'nip46';
 
   const reload = useCallback(async () => {
     const stored = await getWatcherCategories().catch(() => null);
-    if (stored) setCategories(stored);
+    if (stored && !savingRef.current) setCategories(stored);
   }, []);
 
   useEffect(() => {
@@ -63,14 +65,20 @@ const WatcherPushSection: React.FC<{ pushEnabled: boolean }> = ({ pushEnabled })
   }, [reload]);
 
   const toggle = async (category: WatcherCategory, on: boolean) => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    const previous = categories;
+    setSaving(category);
     setCategories((c) => ({ ...c, [category]: on }));
     const saved = await setWatcherCategory(category, on).catch(() => null);
     if (saved) {
       setCategories(saved);
     } else {
       Toast.show({ type: 'error', text1: t('securityScreen.watcherSaveFailed') });
-      void reload();
+      setCategories(previous);
     }
+    savingRef.current = false;
+    setSaving(null);
   };
 
   const retry = async () => {
@@ -129,6 +137,8 @@ const WatcherPushSection: React.FC<{ pushEnabled: boolean }> = ({ pushEnabled })
             }
             toggle={{
               value: pushEnabled && categories[category],
+              pending: saving !== null,
+              pendingTestID: `security-watcher-pending-${category}`,
               disabled: !pushEnabled,
               onValueChange: (on) => void toggle(category, on),
               testID: `security-watcher-toggle-${category}`,

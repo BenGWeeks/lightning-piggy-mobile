@@ -1,0 +1,164 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Notifications — async switch feedback
+env:
+  DENY_LOCATION: ${DENY_LOCATION || 'false'}
+  STAY_ON_SETTINGS: ${STAY_ON_SETTINGS || 'false'}
+---
+# London GPS fixture has nearby BTC Map merchants. Does not sign in,
+# clear data, or send payments. Permissions are granted before the success run.
+- setLocation:
+    latitude: 51.5074
+    longitude: -0.1278
+
+# Start on Wallets.
+- extendedWaitUntil:
+    visible:
+      id: tab-wallets
+    timeout: 60000
+- tapOn:
+    id: tab-wallets
+- tapOn:
+    id: profile-icon
+- scrollUntilVisible:
+    element:
+      id: drawer-row-notifications
+    direction: DOWN
+    timeout: 15000
+- tapOn:
+    id: drawer-row-notifications
+- scrollUntilVisible:
+    element:
+      id: notifications-permission-row
+    direction: UP
+    timeout: 30000
+
+# Exercise both directions of the async content preference, restoring it.
+- scrollUntilVisible:
+    element:
+      id: security-lockscreen-content-toggle
+    direction: DOWN
+- runFlow:
+    when:
+      visible:
+        id: security-lockscreen-content-toggle
+        checked: false
+    commands:
+      - tapOn:
+          id: security-lockscreen-content-toggle
+      - extendedWaitUntil:
+          visible:
+            id: security-lockscreen-content-toggle
+            checked: true
+          timeout: 10000
+      - tapOn:
+          id: security-lockscreen-content-toggle
+      - extendedWaitUntil:
+          visible:
+            id: security-lockscreen-content-toggle
+            checked: false
+          timeout: 10000
+
+# Background checks use the same feedback and remain phone-wide.
+- scrollUntilVisible:
+    element:
+      id: security-background-dm-toggle
+    direction: DOWN
+- runFlow:
+    when:
+      visible:
+        id: security-background-dm-toggle
+        checked: false
+    commands:
+      - tapOn:
+          id: security-background-dm-toggle
+          waitToSettleTimeoutMs: 100
+      - extendedWaitUntil:
+          notVisible:
+            id: security-background-dm-toggle-pending
+          timeout: 30000
+      - assertVisible:
+          id: security-background-dm-toggle
+          checked: true
+      - tapOn:
+          id: security-background-dm-toggle
+      - extendedWaitUntil:
+          visible:
+            id: security-background-dm-toggle
+            checked: false
+          timeout: 10000
+
+# Registration can take seconds. The switch remains mounted and checked,
+# and the pending ring disappears only when the operation finishes.
+# Permission is pre-granted for the success run; deny it for the denial run.
+- scrollUntilVisible:
+    element:
+      id: settings-quiet-hours-toggle
+    direction: DOWN
+    timeout: 15000
+- runFlow:
+    when:
+      visible:
+        id: settings-nearby-merchants-toggle
+        checked: true
+    commands:
+      - tapOn:
+          id: settings-nearby-merchants-toggle
+      - extendedWaitUntil:
+          notVisible:
+            id: settings-nearby-merchants-toggle-pending
+          timeout: 15000
+- tapOn:
+    id: settings-nearby-merchants-toggle
+    waitToSettleTimeoutMs: 100
+- runFlow:
+    when:
+      true: ${DENY_LOCATION === 'true'}
+    commands:
+      - tapOn:
+          text: 'Don.t allow'
+- runFlow:
+    when:
+      true: ${DENY_LOCATION !== 'true'}
+    commands:
+      # Fast registration can finish before Maestro returns from tapOn.
+      # If still pending, verify the optimistic value while the ring is shown.
+      # Device screenshot capture separately verifies the transient ring.
+      - runFlow:
+          when:
+            visible:
+              id: settings-nearby-merchants-toggle-pending
+          commands:
+            - assertVisible:
+                id: settings-nearby-merchants-toggle
+                checked: true
+- extendedWaitUntil:
+    notVisible:
+      id: settings-nearby-merchants-toggle-pending
+    timeout: 120000
+- runFlow:
+    when:
+      true: ${DENY_LOCATION !== 'true'}
+    commands:
+      - assertVisible:
+          id: settings-nearby-merchants-toggle
+          checked: true
+- runFlow:
+    when:
+      true: ${DENY_LOCATION === 'true'}
+    commands:
+      - assertVisible:
+          id: settings-nearby-merchants-toggle
+          checked: false
+- runFlow:
+    when:
+      true: ${STAY_ON_SETTINGS !== 'true'}
+    commands:
+      - scrollUntilVisible:
+          element:
+            id: account-back-button
+          direction: UP
+          timeout: 15000
+      - tapOn:
+          id: account-back-button
+      - tapOn:
+          id: tab-wallets

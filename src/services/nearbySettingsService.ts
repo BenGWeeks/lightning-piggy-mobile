@@ -56,15 +56,19 @@ export const loadNearbySettings = async (): Promise<NearbySettings> => {
   }
 };
 
-export const saveNearbySettings = async (next: NearbySettings): Promise<void> => {
+export const saveNearbySettings = async (
+  next: NearbySettings,
+  reportFailure = false,
+): Promise<void> => {
   // Best-effort persist — a transient AsyncStorage failure (quota / IO)
   // shouldn't bubble up to the toggle handler and freeze the UI.
   // Other services in this repo swallow storage errors for the same
   // reason (Copilot review #488).
   try {
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-  } catch {
-    // intentional: keep in-memory state; user can retry next interaction
+  } catch (error) {
+    if (reportFailure) throw error;
+    // Existing non-interactive callers keep their best-effort behavior.
   }
 };
 

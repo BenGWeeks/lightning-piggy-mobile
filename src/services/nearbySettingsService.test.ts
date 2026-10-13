@@ -60,3 +60,13 @@ describe('isWithinQuietHours', () => {
     expect(isWithinQuietHours(date)).toBe(expected);
   });
 });
+
+it('lets an interactive switch report a failed save', async () => {
+  const write = jest
+    .spyOn(AsyncStorage, 'setItem')
+    .mockRejectedValueOnce(new Error('Storage unavailable'));
+  await expect(saveNearbySettings(DEFAULT_NEARBY_SETTINGS, true)).rejects.toThrow(
+    'Storage unavailable',
+  );
+  write.mockRestore();
+});

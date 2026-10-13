@@ -1,3 +1,7 @@
+import {
+  getLockScreenContentEnabled,
+  resetLockScreenContentPreference,
+} from './notificationContentPreference';
 import { shouldMuteNotification } from './mutedSenders';
 import { mutedNotificationPresentation } from './mutedNotificationPresentation';
 import { getAppFormatLocale } from '../utils/appFormatLocale';
@@ -66,6 +70,11 @@ import {
 } from './watcherPushReceive';
 import type { DmProtocol } from '../utils/dmProtocol';
 
+export {
+  getLockScreenContentEnabled,
+  setLockScreenContentEnabled,
+} from './notificationContentPreference';
+
 // Android notification channel ids. Stable strings — changing them
 // orphans the user's per-channel mute state in system Settings.
 const CHANNEL_MESSAGES = 'messages';
@@ -89,7 +98,6 @@ export const FOREGROUND_SERVICE_NOTIFICATION_ID = 'lp-bg-dm-foreground';
 // Persisted user preferences for notification behaviour. Defaults are
 // privacy-preserving (lock-screen body content OFF) per constraint #4
 // from issue #279.
-const LOCK_SCREEN_CONTENT_KEY = 'notif_pref_lockscreen_content_v1';
 const PERMISSION_REQUESTED_KEY = 'notif_pref_permission_asked_v1';
 
 /** Discriminator for the notification's source. Drives:
@@ -162,7 +170,6 @@ export interface NotificationPayload {
 }
 
 let initialisingPromise: Promise<void> | null = null;
-let cachedLockScreenContent: boolean | null = null;
 
 /**
  * Idempotent. Sets the foreground-presentation behaviour and creates
@@ -328,31 +335,6 @@ export async function requestNotificationPermission(): Promise<boolean> {
   await AsyncStorage.setItem(PERMISSION_REQUESTED_KEY, 'true').catch(() => {});
   const requested = await Notifications.requestPermissionsAsync();
   return requested.granted;
-}
-
-/**
- * Privacy preference: should the real (decrypted) title/body be included in
- * notifications at all? Default OFF. When OFF, `fireNotification` substitutes
- * generic copy ("New message" / "Payment received") at SCHEDULE time, so the
- * plaintext never enters the OS notification store — it's hidden everywhere
- * (lock screen, shade, history), not just on the lock screen. This is the
- * cross-platform enforcement; the Android channels are `PRIVATE` (not
- * `SECRET`) so that, once the user opts in, the entry still shows and honours
- * their system "hide sensitive content" setting.
- *
- * Surfaced as the "notification content" toggle in
- * `src/screens/account/SecurityScreen.tsx`.
- */
-export async function getLockScreenContentEnabled(): Promise<boolean> {
-  if (cachedLockScreenContent !== null) return cachedLockScreenContent;
-  const raw = await AsyncStorage.getItem(LOCK_SCREEN_CONTENT_KEY).catch(() => null);
-  cachedLockScreenContent = raw === 'true';
-  return cachedLockScreenContent;
-}
-
-export async function setLockScreenContentEnabled(enabled: boolean): Promise<void> {
-  cachedLockScreenContent = enabled;
-  await AsyncStorage.setItem(LOCK_SCREEN_CONTENT_KEY, enabled ? 'true' : 'false').catch(() => {});
 }
 
 /** Map a `NotificationKind` to the Android channel id it should fire on.
@@ -993,7 +975,7 @@ export async function dismissForegroundServiceNotification(): Promise<void> {
  */
 export function __resetForTests(): void {
   initialisingPromise = null;
-  cachedLockScreenContent = null;
+  resetLockScreenContentPreference();
   __resetNotificationFocusForTests();
   lastMarmotNotifiedAt = 0;
   shownMarmotMessages.clear();

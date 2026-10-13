@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity } from 'react-native';
+import { AppState, View, Text, TouchableOpacity } from 'react-native';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
 import { MapPin, Moon, Radius } from 'lucide-react-native';
-import { Alert } from './BrandedAlert';
+import { useFocusEffect } from '@react-navigation/native';
+import Toast from './BrandedToast';
+import { useOptimisticSwitch } from '../hooks/useOptimisticSwitch';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import SettingsRow from './SettingsRow';
@@ -34,7 +36,19 @@ const ShopAlertsSection: React.FC = () => {
 
   const [settings, setSettings] = useState<NearbySettings>(DEFAULT_NEARBY_SETTINGS);
   const [active, setActive] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [locationAvailable, setLocationAvailable] = useState(true);
+  const reportFailure = () =>
+    Toast.show({ type: 'error', text1: t('notificationSettingsScreen.updateFailed') });
+  const master = useOptimisticSwitch(
+    settings.enabled,
+    (enabled) => setSettings((current) => ({ ...current, enabled })),
+    reportFailure,
+  );
+  const quietHours = useOptimisticSwitch(
+    settings.quietHoursEnabled,
+    (quietHoursEnabled) => setSettings((current) => ({ ...current, quietHoursEnabled })),
+    reportFailure,
+  );
 
   // Load + reflect current state on mount.
   useEffect(() => {
@@ -42,9 +56,11 @@ const ShopAlertsSection: React.FC = () => {
     (async () => {
       const s = await loadNearbySettings();
       const a = await isGeofencingActive();
+      const available = await Location.hasServicesEnabledAsync().catch(() => true);
       if (!cancelled) {
         setSettings(s);
         setActive(a);
+        setLocationAvailable(available);
       }
     })();
     return () => {
@@ -52,75 +68,63 @@ const ShopAlertsSection: React.FC = () => {
     };
   }, []);
 
+  useFocusEffect(
+    useCallback(() => {
+      let alive = true;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const refresh = () => {
+        void Location.hasServicesEnabledAsync()
+          .then((available) => {
+            if (alive) setLocationAvailable(available);
+          })
+          .catch(() => undefined);
+      };
+      refresh();
+      const subscription = AppState.addEventListener('change', (state) => {
+        if (timer) clearTimeout(timer);
+        if (state === 'active') timer = setTimeout(refresh, 3000);
+      });
+      return () => {
+        alive = false;
+        if (timer) clearTimeout(timer);
+        subscription.remove();
+      };
+    }, []),
+  );
+
   const persist = useCallback(async (next: NearbySettings) => {
     setSettings(next);
     await saveNearbySettings(next);
   }, []);
 
-  const handleToggle = useCallback(async () => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      if (settings.enabled) {
+  const handleToggle = (next: boolean) =>
+    master.run(next, async () => {
+      const fail = (key: string) => {
+        Toast.show({ type: 'error', text1: t(key) });
+        return false;
+      };
+      if (!next) {
         await disableGeofencing();
         await persist({ ...settings, enabled: false });
         setActive(false);
         return;
       }
-
-      // Enabling — request both permissions, then start the task.
+      // Permissions and merchant registration stay in the original order.
+      const available = await Location.hasServicesEnabledAsync();
+      setLocationAvailable(available);
+      if (!available) return fail('notificationSettingsScreen.locationUnavailable');
       const fg = await Location.requestForegroundPermissionsAsync();
-      if (fg.status !== 'granted') {
-        Alert.alert(
-          t('shopAlerts.locationPermissionTitle'),
-          t('shopAlerts.locationPermissionMessage'),
-          [{ text: t('shopAlerts.ok') }],
-        );
-        return;
-      }
+      if (fg.status !== 'granted') return fail('shopAlerts.locationPermissionTitle');
       const bg = await Location.requestBackgroundPermissionsAsync();
-      if (bg.status !== 'granted') {
-        Alert.alert(
-          t('shopAlerts.backgroundLocationTitle'),
-          t('shopAlerts.backgroundLocationMessage'),
-          [{ text: t('shopAlerts.ok') }],
-        );
-        return;
-      }
+      if (bg.status !== 'granted') return fail('shopAlerts.backgroundLocationTitle');
       const notif = await Notifications.requestPermissionsAsync();
-      if (notif.status !== 'granted') {
-        Alert.alert(t('shopAlerts.notificationsTitle'), t('shopAlerts.notificationsMessage'), [
-          { text: t('shopAlerts.ok') },
-        ]);
-        return;
-      }
+      if (notif.status !== 'granted') return fail('shopAlerts.notificationsTitle');
 
       const count = await enableGeofencing();
-      if (count === null) {
-        // No merchants around right now — don't claim the feature is "on" when
-        // no geofence task is actually running (Copilot review #488). The user
-        // can re-toggle once they move into an area with merchants. Keep the
-        // persisted preference at OFF so isGeofencingActive() / the toggle
-        // visual stay honest.
-        Alert.alert(
-          t('shopAlerts.noNearbyMerchantsTitle'),
-          t('shopAlerts.noNearbyMerchantsMessage'),
-          [{ text: t('shopAlerts.ok') }],
-        );
-        await persist({ ...settings, enabled: false });
-        setActive(false);
-        return;
-      }
+      if (count === null) return fail('shopAlerts.noNearbyMerchantsTitle');
       await persist({ ...settings, enabled: true });
       setActive(true);
-    } catch (e) {
-      Alert.alert(t('shopAlerts.couldNotEnableTitle'), (e as Error).message, [
-        { text: t('shopAlerts.ok') },
-      ]);
-    } finally {
-      setBusy(false);
-    }
-  }, [busy, settings, persist, t]);
+    });
 
   const handleRadius = useCallback(
     async (m: NearbySettings['alertRadiusMeters']) => {
@@ -139,10 +143,12 @@ const ShopAlertsSection: React.FC = () => {
     [settings, persist],
   );
 
-  const handleQuietHours = useCallback(
-    async () => persist({ ...settings, quietHoursEnabled: !settings.quietHoursEnabled }),
-    [settings, persist],
-  );
+  const handleQuietHours = (next: boolean) =>
+    master.pending
+      ? Promise.resolve()
+      : quietHours.run(next, () =>
+          saveNearbySettings({ ...settings, quietHoursEnabled: next }, true),
+        );
 
   return (
     <View style={styles.card} testID="notifications-shop-alerts">
@@ -157,7 +163,8 @@ const ShopAlertsSection: React.FC = () => {
         toggle={{
           value: settings.enabled,
           onValueChange: handleToggle,
-          disabled: busy,
+          pending: master.pending || quietHours.pending,
+          disabled: !locationAvailable && !settings.enabled,
           accessibilityLabel: t('shopAlerts.enableAlertsLabel'),
           testID: 'settings-nearby-merchants-toggle',
         }}
@@ -176,6 +183,7 @@ const ShopAlertsSection: React.FC = () => {
             <TouchableOpacity
               key={m}
               style={[styles.chip, selected && styles.chipSelected]}
+              disabled={master.pending || quietHours.pending}
               onPress={() => handleRadius(m)}
               accessibilityRole="radio"
               accessibilityState={{ selected }}
@@ -203,6 +211,8 @@ const ShopAlertsSection: React.FC = () => {
         details={t('shopAlerts.quietHoursSub')}
         toggle={{
           value: settings.quietHoursEnabled,
+          pending: quietHours.pending,
+          accessibilityLabel: t('shopAlerts.quietHours'),
           onValueChange: handleQuietHours,
           testID: 'settings-quiet-hours-toggle',
         }}

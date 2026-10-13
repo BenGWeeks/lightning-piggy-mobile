@@ -2834,7 +2834,10 @@
       "few": "{{count}} wyciszone konta",
       "many": "{{count}} wyciszonych kont",
       "other": "{{count}} wyciszonego konta"
-    }
+    },
+    "updating": "Aktualizowanie…",
+    "updateFailed": "Nie udało się zaktualizować tego ustawienia. Spróbuj ponownie.",
+    "locationUnavailable": "Włącz usługi lokalizacji, aby otrzymywać powiadomienia o sklepach."
   },
   "settingsScope": {
     "forThisAccount": "To konto",

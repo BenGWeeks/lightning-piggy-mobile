@@ -2822,7 +2822,10 @@
     "mutedCount": {
       "one": "{{count}} némított fiók",
       "other": "{{count}} némított fiók"
-    }
+    },
+    "updating": "Frissítés…",
+    "updateFailed": "Nem sikerült frissíteni ezt a beállítást. Próbáld újra.",
+    "locationUnavailable": "Kapcsold be a helymeghatározást a bolti értesítésekhez."
   },
   "settingsScope": {
     "forThisAccount": "Ez a fiók",
