@@ -29,7 +29,7 @@ For a card, the splatter should reach well beyond the character (towards the mid
 1. Generate the character square first, 3 variations, with the prompt below plus one line describing the character. Review on the card gradient; pick one.
 2. Extend the pick to a **landscape 3:2 canvas** (1536 × 1024) in image-edit mode with the square as the reference: character in the right 55 %, splatter extended left as above. Make two extents; pick one.
 3. Downscale to **1200 × 800**, keep transparency, compress (target ≤ 400 KB), save as `assets/images/<id>.png`.
-4. Add the theme entry (`id`, `name`, `gradientColors`, `textColor`, `accentColor`, `backgroundImage`, `backgroundImageStyle`, `backgroundImageResizeMode: 'contain'`) and a `bgStyle` that fills the card height anchored right. Watch-only wallets grey the artwork automatically.
+4. Add the theme entry in `src/themes/cardThemes.ts` (`id`, `name`, `gradientColors`, `textColor`, `accentColor`, `backgroundImage`, `backgroundImageStyle`, `backgroundImageResizeMode: 'contain'`), add the id to the `CardTheme` union in `src/types/wallet.ts`, and **register the layout separately**: `backgroundImageStyle` is a key into `cardBgStyles` in `src/themes/cards/index.ts`, so add a matching `bgStyle` there (for these landscape images: fill the card height, width = height × 1.5, anchored right). A theme entry without its `bgStyle` registration renders nothing. Watch-only wallets grey the artwork automatically.
 5. PR with device screenshots: Wallets tab with the card active, the Design picker, dark theme, and the watch-only grey variant. Designs are approved on screenshots before merging.
 
 Prompt (shared part):
