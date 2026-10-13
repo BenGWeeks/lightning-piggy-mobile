@@ -1,3 +1,4 @@
+import { Alert } from './BrandedAlert';
 import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import AddFriendSheet from './AddFriendSheet';
@@ -22,7 +23,11 @@ jest.mock('@gorhom/bottom-sheet', () => {
 });
 jest.mock('expo-camera', () => ({
   useCameraPermissions: () => [{ granted: true }, jest.fn()],
-  CameraView: () => null,
+  CameraView: (props: object) =>
+    jest.requireActual('react').createElement(jest.requireActual('react-native').View, {
+      ...props,
+      testID: 'profile-scanner',
+    }),
 }));
 jest.mock('expo-clipboard', () => ({ getStringAsync: jest.fn().mockResolvedValue('npub1public') }));
 jest.mock('./BrandedAlert', () => ({ Alert: { alert: jest.fn() } }));
@@ -71,4 +76,19 @@ it('labels the paste button and fills the public-key input', async () => {
   render(<AddFriendSheet visible onClose={jest.fn()} onAdd={jest.fn()} />);
   await act(async () => fireEvent.press(screen.getByRole('button', { name: 'Paste npub' })));
   expect(screen.getByTestId('npub-input').props.value).toBe('npub1public');
+});
+
+it.each(['confirm', 'cancel'])('requires %s for scanned profile intake', async (action) => {
+  jest.mocked(Alert.alert).mockClear();
+  const onAdd = jest.fn(async () => true);
+  render(<AddFriendSheet visible onClose={jest.fn()} onAdd={onAdd} />);
+  await act(async () => fireEvent.press(screen.getByRole('tab', { name: 'Scan QR' })));
+  act(() =>
+    fireEvent(screen.getByTestId('profile-scanner'), 'barcodeScanned', { data: 'npub1public' }),
+  );
+  expect(onAdd).not.toHaveBeenCalled();
+  await act(async () =>
+    jest.mocked(Alert.alert).mock.calls.at(-1)?.[2]?.[action === 'confirm' ? 1 : 0].onPress?.(),
+  );
+  expect(onAdd).toHaveBeenCalledTimes(action === 'confirm' ? 1 : 0);
 });

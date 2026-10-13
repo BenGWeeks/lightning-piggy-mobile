@@ -76,7 +76,8 @@ it.each([
   (invoice, amountSats) => {
     const { result, opts } = setup();
     act(() => result.current.processInput(`LIGHTNING:${invoice}`));
-    expect(Alert.alert).not.toHaveBeenCalled();
+    expect(opts.setInvoiceData).not.toHaveBeenCalled();
+    act(() => jest.mocked(Alert.alert).mock.calls.at(-1)?.[2]?.[1].onPress?.());
     expect(opts.setInvoiceData).toHaveBeenCalledWith(invoice);
     expect(opts.setDecoded).toHaveBeenCalledWith(expect.objectContaining({ amountSats }));
     expect(opts.setScanned).toHaveBeenCalledWith(true);
@@ -95,6 +96,7 @@ it('does not reopen the error on every camera frame, and allows retry after dism
   expect(opts.setScanned).not.toHaveBeenCalledWith(true);
   act(() => jest.mocked(Alert.alert).mock.calls[0][2]?.[0].onPress?.());
   act(() => result.current.handleBarCodeScanned({ data: AMOUNTLESS_INVOICE }));
+  act(() => jest.mocked(Alert.alert).mock.calls.at(-1)?.[2]?.[1].onPress?.());
   expect(opts.setScanned).toHaveBeenLastCalledWith(true);
 });
 
@@ -103,7 +105,9 @@ it('allows a fresh attempt after native dismissal of the error', () => {
   act(() => result.current.processInput(DROPPED_CHARACTER_INVOICE));
   act(() => jest.mocked(Alert.alert).mock.calls[0][3]?.onDismiss?.());
   act(() => result.current.processInput(INVOICE_WITH_AMOUNT));
+  act(() => jest.mocked(Alert.alert).mock.calls.at(-1)?.[2]?.[1].onPress?.());
   expect(opts.setInvoiceData).toHaveBeenLastCalledWith(INVOICE_WITH_AMOUNT);
+  act(() => jest.mocked(Alert.alert).mock.calls.at(-1)?.[2]?.[1].onPress?.());
   expect(opts.setScanned).toHaveBeenLastCalledWith(true);
 });
 
@@ -115,7 +119,9 @@ it('reopening the sheet clears a guard left by an alert that never settled', () 
   expect(opts.setInvoiceData).not.toHaveBeenCalledWith(INVOICE_WITH_AMOUNT);
   act(() => result.current.resetInputForOpen());
   act(() => result.current.processInput(INVOICE_WITH_AMOUNT));
+  act(() => jest.mocked(Alert.alert).mock.calls.at(-1)?.[2]?.[1].onPress?.());
   expect(opts.setInvoiceData).toHaveBeenLastCalledWith(INVOICE_WITH_AMOUNT);
+  act(() => jest.mocked(Alert.alert).mock.calls.at(-1)?.[2]?.[1].onPress?.());
   expect(opts.setScanned).toHaveBeenLastCalledWith(true);
 });
 
@@ -132,5 +138,40 @@ it.each(['lno1qcp4256ypq', 'lightning:LNO1QCP4256YPQ'])(
     );
     expect(opts.setScanned).not.toHaveBeenCalledWith(true);
     expect(opts.onInvalidInvoice).toHaveBeenCalledTimes(1);
+  },
+);
+
+it.each(['QR', 'NFC'])('waits for consent before accepting an LNURL from %s', (entry) => {
+  const { result, opts } = setup();
+  act(() => {
+    if (entry === 'QR') result.current.handleBarCodeScanned({ data: 'lnurlp://example.com/pay' });
+    else
+      result.current.handleNfcContent({
+        type: 'lightning-invoice',
+        data: 'lnurlp://example.com/pay',
+      });
+  });
+  expect(opts.setInvoiceData).not.toHaveBeenCalled();
+  expect(opts.setScanned).not.toHaveBeenCalled();
+  act(() => jest.mocked(Alert.alert).mock.calls.at(-1)?.[2]?.[1].onPress?.());
+  expect(opts.setInvoiceData).toHaveBeenCalledWith('lnurlp://example.com/pay');
+  expect(opts.setIsLnurl).toHaveBeenCalledWith(true);
+});
+
+it.each(['cancel', 'dismiss'])(
+  'keeps scanner intake inactive after %s and allows retry',
+  (action) => {
+    const { result, opts } = setup();
+    act(() => result.current.handleBarCodeScanned({ data: 'alice@example.com' }));
+    const call = jest.mocked(Alert.alert).mock.calls.at(-1)!;
+    act(() => {
+      if (action === 'cancel') call[2]?.[0].onPress?.();
+      else call[3]?.onDismiss?.();
+      call[2]?.[1].onPress?.();
+    });
+    expect(opts.setInvoiceData).not.toHaveBeenCalled();
+    act(() => result.current.handleBarCodeScanned({ data: 'alice@example.com' }));
+    act(() => jest.mocked(Alert.alert).mock.calls.at(-1)?.[2]?.[1].onPress?.());
+    expect(opts.setInvoiceData).toHaveBeenCalledWith('alice@example.com');
   },
 );

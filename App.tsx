@@ -36,6 +36,7 @@ import {
   profileToContactBody,
   pubkeyToContactBodyStub,
 } from './src/utils/nostrProfileLink';
+import { confirmLinkAction } from './src/utils/confirmLinkAction';
 import { resolveLnurlDirection } from './src/services/lnurlService';
 import {
   ensureNotificationsInitialised,
@@ -56,6 +57,7 @@ import { wasRecentlyRead, initNfc } from './src/services/nfcService';
 import PaymentProgressOverlay from './src/components/PaymentProgressOverlay';
 import { isStaleReceipt } from './src/utils/incomingReceipts';
 import BootSplash from './src/components/BootSplash';
+import { LinkActionSheetHost } from './src/components/LinkActionSheet';
 import { BrandedAlertHost } from './src/components/BrandedAlert';
 import { BrandedToast, Toast } from './src/components/BrandedToast';
 import OfflineBanner from './src/components/OfflineBanner';
@@ -272,7 +274,13 @@ export default function App() {
         return;
       }
       lastRouted = { url: trimmed, at: Date.now() };
-      routeFresh(trimmed);
+      if (/^(lightning:|lnurl|bitcoin:|nostr:)/i.test(trimmed) || isProfileReferenceUri(trimmed)) {
+        confirmLinkAction(trimmed, () => {
+          if (!cancelled) routeFresh(trimmed);
+        });
+      } else {
+        routeFresh(trimmed);
+      }
     };
     const routeFresh = (trimmed: string) => {
       // Truncate noisy URIs so the log doesn't blow past logcat's
@@ -417,7 +425,7 @@ export default function App() {
       // mounts on a cold launch.
       if (/^lnurlw:\/\//i.test(trimmed) || /^lnurl:\/\//i.test(trimmed)) {
         const tryOpen = (attempt: number) => {
-          if (openLnurlWithdrawSheet(trimmed)) return;
+          if (openLnurlWithdrawSheet(trimmed, undefined, true)) return;
           if (attempt >= 20 || cancelled) return;
           setTimeout(() => tryOpen(attempt + 1), 100);
         };
@@ -425,11 +433,16 @@ export default function App() {
         return;
       }
 
-      if (!/^lightning:/i.test(trimmed)) {
+      if (/^(lnurl1|lnurlp:\/\/)/i.test(trimmed)) {
+        trimmed = 'lightning:' + trimmed;
+      }
+      if (!/^(lightning:|bitcoin:)/i.test(trimmed)) {
         console.log(`[Link] ignored: no handler for scheme`);
         return;
       }
-      const lnurl = trimmed.slice('lightning:'.length).trim();
+      const lnurl = /^bitcoin:/i.test(trimmed)
+        ? trimmed
+        : trimmed.slice('lightning:'.length).trim();
       if (!lnurl) return;
 
       // Retry helper for the cold-start race — the nav tree may not be
@@ -443,6 +456,11 @@ export default function App() {
         };
         attempt(0);
       };
+
+      if (/^bitcoin:/i.test(trimmed)) {
+        tryNav(() => navigateToSend(trimmed));
+        return;
+      }
 
       // --- Unambiguous PAY payloads → SendSheet (#756) ---------------
       // bolt11 invoices (mainnet/testnet/signet/regtest prefixes) and
@@ -493,7 +511,7 @@ export default function App() {
           if (cancelled) return;
           if (resolved.kind === 'withdraw') {
             console.log(`[Link] → LnurlWithdrawSheet (LNURL withdrawRequest)`);
-            tryNav(() => openLnurlWithdrawSheet(lnurl));
+            tryNav(() => openLnurlWithdrawSheet(lnurl, undefined, true));
           } else {
             // payRequest → SendSheet. Hand it the resolved endpoint URL so
             // SendSheet doesn't have to re-decode the bech32 (and so
@@ -617,6 +635,7 @@ export default function App() {
                       drop-in re-export, NOT the system Alert) renders
                       above the rest of the UI without z-index gymnastics. */}
                         <BrandedAlertHost />
+                        <LinkActionSheetHost />
                       </GroupsProvider>
                     </TrustGraphProvider>
                   </NostrProvider>

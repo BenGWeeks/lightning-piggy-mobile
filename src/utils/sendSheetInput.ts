@@ -5,6 +5,7 @@ export interface DecodedInvoice {
   amountSats: number | null;
   description: string | null;
   expiry: number | null;
+  nodePubkey?: string | null;
 }
 
 // A decode failure (bad checksum, unknown network, or no payment hash) is
@@ -15,6 +16,7 @@ export function decodeInvoice(bolt11: string): DecodedInvoice | null {
     let amountSats: number | null = null;
     let description: string | null = null;
     let expiry: number | null = null;
+    let nodePubkey: string | null = null;
     let hasPaymentHash = false;
 
     for (const section of decoded.sections) {
@@ -24,6 +26,9 @@ export function decodeInvoice(bolt11: string): DecodedInvoice | null {
         amountSats = Math.round(Number(section.value) / 1000);
       } else if (section.name === 'description') {
         description = section.value as string;
+      } else if ((section.name as string) === 'payee') {
+        // The decoder supports the BOLT11 n tag; its bundled type omits it.
+        nodePubkey = (section as unknown as { value: string }).value;
       } else if (section.name === 'expiry') {
         expiry = section.value as number;
       }
@@ -31,7 +36,7 @@ export function decodeInvoice(bolt11: string): DecodedInvoice | null {
     // A checksum-valid string can still be an empty payload (e.g. `lnbc1w4pnfm`):
     // without a payment hash there is nothing to pay.
     if (!hasPaymentHash) return null;
-    return { amountSats, description, expiry };
+    return { amountSats, description, expiry, ...(nodePubkey ? { nodePubkey } : {}) };
   } catch {
     return null;
   }
@@ -93,5 +98,5 @@ export function isLnurlString(input: string): boolean {
   if (/^lightning:/i.test(s)) {
     s = s.slice('lightning:'.length).trim();
   }
-  return /^lnurl1/i.test(s) || /^(?:lnurlp|lnurlw|lnurl):\/\//i.test(s);
+  return /^https:\/\//i.test(s) || /^lnurl1/i.test(s) || /^(?:lnurlp|lnurlw|lnurl):\/\//i.test(s);
 }

@@ -1,3 +1,4 @@
+import { confirmLinkAction } from '../utils/confirmLinkAction';
 import { useRef, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import * as Clipboard from 'expo-clipboard';
 import { Alert } from '../components/BrandedAlert';
@@ -57,8 +58,6 @@ export function useSendSheetInput(opts: {
   const {
     scanned,
     pasteTextRef,
-    activePubkey,
-    recipientName,
     applyPasteText,
     onInvalidInvoice,
     setIsOnchainAddress,
@@ -70,11 +69,13 @@ export function useSendSheetInput(opts: {
   } = opts;
   const t = useTranslation();
   const invalidInvoiceAlertVisible = useRef(false);
+  const linkConfirmationVisible = useRef(false);
 
   // A new Send session starts with intake open. The sheet stays mounted, so a
   // guard left set by an alert that never settled must not carry over.
   const resetInputForOpen = () => {
     invalidInvoiceAlertVisible.current = false;
+    linkConfirmationVisible.current = false;
   };
 
   const rejectInvoiceInput = (input: string, titleKey: string, bodyKey: string) => {
@@ -102,7 +103,7 @@ export function useSendSheetInput(opts: {
     );
   };
 
-  const processInput = (data: string) => {
+  const acceptInput = (data: string) => {
     if (invalidInvoiceAlertVisible.current) return;
     let input = stripLightningPrefix(data);
     let bip21Amount: number | null = null;
@@ -118,23 +119,13 @@ export function useSendSheetInput(opts: {
       setIsOnchainAddress(false);
       setIsLnurl(false);
       setInvoiceData(input);
-      // Only use the caller-supplied friend name while we're still
-      // pointed at that friend (activePubkey set). After "Scan / paste
-      // different invoice" clears activePubkey, the next scanned address
-      // may be a stranger — fall back to the raw input string.
-      setDecoded({
-        amountSats: null,
-        description: t('sendSheet.payTo', {
-          name: activePubkey && recipientName ? recipientName : input,
-        }),
-        expiry: null,
-      });
+      setDecoded({ amountSats: null, description: null, expiry: null });
       setScanned(true);
     } else if (boltzService.isBitcoinAddress(input)) {
       setIsOnchainAddress(true);
       setIsLnurl(false);
       setInvoiceData(input);
-      setDecoded({ amountSats: null, description: t('sendSheet.sendToOnchain'), expiry: null });
+      setDecoded({ amountSats: null, description: null, expiry: null });
       setScanned(true);
       // Pre-fill amount from BIP-21 URI if present (fiat view is derived
       // inside AmountEntryScreen from satsValue when the user opens it).
@@ -175,6 +166,27 @@ export function useSendSheetInput(opts: {
       setDecoded({ amountSats: null, description: null, expiry: null });
       setScanned(true);
     }
+  };
+
+  const processInput = (data: string) => {
+    if (linkConfirmationVisible.current || invalidInvoiceAlertVisible.current) return;
+    // Reject malformed invoices locally without presenting an action confirmation.
+    const input = stripLightningPrefix(data);
+    if (/^ln/i.test(input) && !isLnurlString(input) && !decodeInvoice(input)) {
+      acceptInput(data);
+      return;
+    }
+    linkConfirmationVisible.current = true;
+    confirmLinkAction(
+      data,
+      () => {
+        linkConfirmationVisible.current = false;
+        acceptInput(data);
+      },
+      () => {
+        linkConfirmationVisible.current = false;
+      },
+    );
   };
 
   const handleBarCodeScanned = ({ data }: { data: string }) => {

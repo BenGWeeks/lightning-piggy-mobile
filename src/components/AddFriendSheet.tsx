@@ -1,3 +1,4 @@
+import { confirmLinkAction } from '../utils/confirmLinkAction';
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
@@ -96,18 +97,23 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
     if (success) onClose();
   };
 
-  const handleBarCodeScanned = async ({ data }: { data: string }) => {
+  const handleBarCodeScanned = ({ data }: { data: string }) => {
     if (scanned || loading) return;
     setScanned(true);
     setScanError(null);
-    setLoading(true);
-    const success = await onAdd(data.trim());
-    setLoading(false);
-    if (success) {
-      onClose();
-    } else {
-      setScanError(t('addFriendSheet.invalidNpub'));
-    }
+    confirmLinkAction(
+      data,
+      () => {
+        void (async () => {
+          setLoading(true);
+          const success = await onAdd(data.trim());
+          setLoading(false);
+          if (success) onClose();
+          else setScanError(t('addFriendSheet.invalidNpub'));
+        })();
+      },
+      () => setScanned(false),
+    );
   };
 
   const handleScanMode = async () => {

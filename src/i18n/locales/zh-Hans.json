@@ -3309,5 +3309,17 @@
     "trackingError": "暂时无法获取状态，请重新打开“转移”查询；不要重复创建付款。",
     "refundDetails": "复制私密退款资料",
     "newSwap": "新兑换"
+  },
+  "linkAction": {
+    "title": "确认链接操作",
+    "cancel": "取消",
+    "continue": "继续",
+    "withdrawButton": "提取",
+    "withdrawSats": "提取 %{amount} sats",
+    "withdraw": "从 %{target} 提取",
+    "pay": "向 %{target} 付款",
+    "profile": "打开个人资料 %{target}",
+    "open": "打开来自 %{target} 的 Lightning 链接",
+    "memo": "备注（来自发票）"
   }
 }

@@ -3309,5 +3309,17 @@
     "trackingError": "स्थिती सध्या उपलब्ध नाही. तपासण्यासाठी मूव्ह पुन्हा उघडा; पुन्हा पेमेंट तयार करू नका.",
     "refundDetails": "खाजगी रिफंड तपशील कॉपी करा",
     "newSwap": "नवीन स्वॅप"
+  },
+  "linkAction": {
+    "title": "लिंकच्या कृतीची पुष्टी करा",
+    "cancel": "रद्द करा",
+    "continue": "पुढे जा",
+    "withdrawButton": "काढा",
+    "withdrawSats": "%{amount} sats काढा",
+    "withdraw": "%{target} मधून काढा",
+    "pay": "%{target} ला पैसे द्या",
+    "profile": "प्रोफाइल %{target} उघडा",
+    "open": "%{target} ची Lightning लिंक उघडा",
+    "memo": "नोंद (इनव्हॉइसमधून)"
   }
 }

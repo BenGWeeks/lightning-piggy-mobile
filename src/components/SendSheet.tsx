@@ -1,3 +1,4 @@
+import { paymentRecipientLabel, sanitizeInvoiceMemo } from '../utils/paymentIdentity';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { View, Text, TouchableOpacity, BackHandler, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -408,10 +409,13 @@ const SendSheet: React.FC<Props> = ({
       // Name the destination itself — never the "Send to on-chain address" label.
       recipient: isOnchainAddress
         ? shortOnchainAddress(invoiceData)
-        : recipientName ||
-          (isLightningAddress(invoiceData) ? invoiceData : null) ||
-          decoded?.description ||
-          t('sendSheet.thisRecipient'),
+        : paymentRecipientLabel({
+            address: isLightningAddress(invoiceData) ? invoiceData : null,
+            pubkey: activePubkey,
+            contacts,
+            nodePubkey: decoded?.nodePubkey,
+            unknownLabel: t('sendSheet.thisRecipient'),
+          }),
       swapQuote,
     });
     if (!confirmed) return;
@@ -832,7 +836,9 @@ const SendSheet: React.FC<Props> = ({
                     />
                   )}
                   {decoded?.description ? (
-                    <Text style={styles.detailDescription}>{decoded.description}</Text>
+                    <Text style={styles.detailDescription} numberOfLines={3}>
+                      {t('linkAction.memo')}: {sanitizeInvoiceMemo(decoded.description)}
+                    </Text>
                   ) : null}
 
                   <SendAmountSection

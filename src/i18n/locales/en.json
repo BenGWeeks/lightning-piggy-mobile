@@ -3309,5 +3309,17 @@
     "trackingError": "Status is temporarily unavailable. Reopen Move to check again; do not create a duplicate payment.",
     "refundDetails": "Copy private refund details",
     "newSwap": "New swap"
+  },
+  "linkAction": {
+    "title": "Confirm link action",
+    "cancel": "Cancel",
+    "continue": "Continue",
+    "withdrawButton": "Withdraw",
+    "withdrawSats": "Withdraw %{amount} sats",
+    "withdraw": "Withdraw from %{target}",
+    "pay": "Pay %{target}",
+    "profile": "Open profile %{target}",
+    "open": "Open Lightning link from %{target}",
+    "memo": "Memo (from invoice)"
   }
 }
