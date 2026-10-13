@@ -1,4 +1,8 @@
 {
+  "cardThemes": {
+    "sallie": "Sallie",
+    "poppie": "Poppie"
+  },
   "serverConnection": {
     "electrumLoadError": "Electrum सेटिंग्ज लोड करता आल्या नाहीत. टेस्ट किंवा सेव्ह करण्यापूर्वी तुम्हाला हवा असलेला सर्व्हर ॲड्रेस टाका.",
     "test": "कनेक्शन तपासा",

@@ -112,6 +112,10 @@ const WalletCardPicker: React.FC<Props> = ({ selectedTheme, onSelect }) => {
   // card rather than the stale `selectedTheme` (the effect above also syncs it
   // to parent).
   const centredTheme = themeList[initialIndex]?.id ?? selectedTheme;
+  const centredConfig = cardThemes[centredTheme];
+  const centredName = centredConfig?.nameKey
+    ? t(centredConfig.nameKey)
+    : (centredConfig?.name ?? '');
 
   // Cover-flow transform per card, driven by `value` = signed distance from the
   // focused card (0 = centre, ±1 = immediate neighbour, fractional mid-swipe).
@@ -176,10 +180,10 @@ const WalletCardPicker: React.FC<Props> = ({ selectedTheme, onSelect }) => {
         style={styles.name}
         testID="wallet-card-picker-name"
         accessibilityLabel={t('walletCardPicker.selectedTheme', {
-          name: cardThemes[centredTheme]?.name ?? '',
+          name: centredName,
         })}
       >
-        {cardThemes[centredTheme]?.name ?? ''}
+        {centredName}
       </Text>
     </View>
   );

@@ -4,6 +4,7 @@ import { ImageSourcePropType, ImageResizeMode } from 'react-native';
 export interface CardThemeConfig {
   id: CardTheme;
   name: string;
+  nameKey?: string;
   gradientColors: [string, string];
   textColor: string;
   accentColor: string;
@@ -91,6 +92,28 @@ export const cardThemes: Record<CardTheme, CardThemeConfig> = {
     accentColor: '#4FC3F7',
     backgroundImage: require('../../assets/images/lightning-whale.png'),
     backgroundImageStyle: 'lightning-whale',
+  },
+  sallie: {
+    id: 'sallie',
+    name: 'Sallie',
+    nameKey: 'cardThemes.sallie',
+    gradientColors: ['#1E293B', '#0B1220'],
+    textColor: '#FFFFFF',
+    accentColor: '#39FF14',
+    backgroundImage: require('../../assets/images/sallie.png'),
+    backgroundImageStyle: 'sallie',
+    backgroundImageResizeMode: 'contain',
+  },
+  poppie: {
+    id: 'poppie',
+    name: 'Poppie',
+    nameKey: 'cardThemes.poppie',
+    gradientColors: ['#3A2410', '#160D04'],
+    textColor: '#FFFFFF',
+    accentColor: '#FFB347',
+    backgroundImage: require('../../assets/images/poppie.png'),
+    backgroundImageStyle: 'poppie',
+    backgroundImageResizeMode: 'contain',
   },
   bitcoin: {
     id: 'bitcoin',

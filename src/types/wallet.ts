@@ -7,6 +7,8 @@ export type CardTheme =
   | 'lightning-goat'
   | 'nostrich'
   | 'lightning-whale'
+  | 'sallie'
+  | 'poppie'
   | 'bitcoin'
   | 'alby'
   | 'lnbits'
