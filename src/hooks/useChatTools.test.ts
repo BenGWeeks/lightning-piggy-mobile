@@ -286,3 +286,58 @@ it('opens a target arriving during the wait and cancels its fallback when params
   expect(jump).toHaveBeenCalledTimes(arrivalJumps);
   expect(hook.result.current.highlightedId).toBeNull();
 });
+
+it.each(['missing', 'old'])('handles rows arriving after the deadline for target %s', (pending) => {
+  mockParams = { jumpToMessage: pending };
+  const jump = jest.fn(() => true);
+  const leave = jest.fn();
+  const hook = renderHook(
+    ({ entries }: { entries: typeof messages }) =>
+      useChatTools(
+        entries,
+        info,
+        target,
+        jump,
+        clear,
+        leave,
+        entries.map((m) => m.id),
+      ),
+    { initialProps: { entries: [] } },
+  );
+  act(() => jest.advanceTimersByTime(6000));
+  expect(jump).not.toHaveBeenCalled();
+  expect(mockNavigation.setParams).not.toHaveBeenCalled();
+  hook.rerender({ entries: [...messages, { id: 'newest', text: 'latest', createdAt: 2 }] });
+  if (pending === 'missing') expect(jump).toHaveBeenCalledTimes(1);
+  expect(jump).toHaveBeenCalledWith(pending === 'old' ? 'old' : 'newest');
+  if (pending === 'old') expect(jump).not.toHaveBeenCalledWith('newest');
+  expect(leave).toHaveBeenCalledWith(1500);
+  expect(mockNavigation.setParams).toHaveBeenCalledWith({ jumpToMessage: undefined });
+  expect(hook.result.current.highlightedId).toBe(pending === 'old' ? 'old' : null);
+});
+
+it('waits for the replacement target deadline after the empty-chat deadline expires', () => {
+  mockParams = { jumpToMessage: 'first-missing' };
+  const jump = jest.fn(() => true);
+  const hook = renderHook(
+    ({ entries }: { entries: typeof messages }) =>
+      useChatTools(
+        entries,
+        info,
+        target,
+        jump,
+        clear,
+        jest.fn(),
+        entries.map((m) => m.id),
+      ),
+    { initialProps: { entries: [] } },
+  );
+  act(() => jest.advanceTimersByTime(6000));
+  mockParams = { jumpToMessage: 'second-missing' };
+  hook.rerender({ entries: messages });
+  act(() => jest.advanceTimersByTime(4999));
+  expect(jump).not.toHaveBeenCalled();
+  act(() => jest.advanceTimersByTime(1));
+  expect(jump).toHaveBeenCalledTimes(1);
+  expect(jump).toHaveBeenCalledWith('old');
+});

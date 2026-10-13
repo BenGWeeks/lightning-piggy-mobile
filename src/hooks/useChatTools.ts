@@ -48,21 +48,22 @@ export function useChatTools(
       if (jumpToHistory(pending)) navigation.setParams({ jumpToMessage: undefined });
     }
   }, [pending, renderedMessages, jumpToHistory, navigation]);
-  const fallbackState = useRef({ renderedMessages, leaveEdge, jump, navigation });
-  fallbackState.current = { renderedMessages, leaveEdge, jump, navigation };
+  const [expiredTarget, setExpiredTarget] = useState<string | null>(null);
   useEffect(() => {
+    setExpiredTarget(null);
     if (!pending) return;
-    const timer = setTimeout(() => {
-      // Keep one deadline per target, but use the rows and callbacks at expiry.
-      const { renderedMessages: current, leaveEdge, jump, navigation } = fallbackState.current;
-      if (!current.length || current.some((m) => m.id === pending)) return;
-      // The target may be deleted, hidden by local history, or unavailable.
-      const newest = current.reduce((a, b) => (a.createdAt > b.createdAt ? a : b));
-      leaveEdge(1500);
-      if (jump(newest.id)) navigation.setParams({ jumpToMessage: undefined });
-    }, 5000);
+    const timer = setTimeout(() => setExpiredTarget(pending), 5000);
     return () => clearTimeout(timer);
   }, [pending]);
+  useEffect(() => {
+    // Keep the expired deadline while a cold start is still loading its rows.
+    if (!pending || expiredTarget !== pending || !renderedMessages.length) return;
+    if (renderedMessages.some((m) => m.id === pending)) return;
+    // The target may be deleted, hidden by local history, or unavailable.
+    const newest = renderedMessages.reduce((a, b) => (a.createdAt > b.createdAt ? a : b));
+    leaveEdge(1500);
+    if (jump(newest.id)) navigation.setParams({ jumpToMessage: undefined });
+  }, [pending, expiredTarget, renderedMessages, leaveEdge, jump, navigation]);
   const onInfo = useCallback(() => navigation.navigate('ChatInfo', info), [navigation, info]);
   const onAttachments = useCallback(
     () => navigation.navigate('ChatMedia', { messages: renderedMessages, target }),

@@ -19,8 +19,12 @@ export function useNotificationMessageWindow(
     messages: ConversationMessageInput[];
   } | null>(null);
   const targetId = messageId ?? (window?.scope === scope ? window.messageId : undefined);
+  const targetLoaded =
+    window?.scope === scope &&
+    window.messageId === targetId &&
+    window.messages.some((m) => m.id === targetId);
   useEffect(() => {
-    if (!owner || !targetId) return;
+    if (!owner || !targetId || targetLoaded) return;
     let cancelled = false;
     void getConversationMessageWindow(owner, peer, protocol, targetId)
       .then((rows) => {
@@ -31,7 +35,7 @@ export function useNotificationMessageWindow(
     return () => {
       cancelled = true;
     };
-  }, [owner, peer, protocol, targetId, scope, messages]);
+  }, [owner, peer, protocol, targetId, scope, messages, targetLoaded]);
   return useMemo(() => {
     if (window?.scope !== scope || !window.messages.length) return messages;
     const merged = new Map(window.messages.map((m) => [m.id, m]));

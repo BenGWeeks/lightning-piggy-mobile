@@ -54,3 +54,38 @@ it('does not display a late history result after an account switch', async () =>
   await act(async () => resolve([older]));
   expect(result.current).toEqual(newest);
 });
+
+it('retains loaded history without rereading it as live rows update, but loads a new target', async () => {
+  lookup.mockResolvedValue([older]);
+  const { result, rerender } = renderHook(
+    ({ messageId, messages }: { messageId?: string; messages: typeof newest }) =>
+      useNotificationMessageWindow('big', 'peer', 'marmot', messageId, messages),
+    { initialProps: { messageId: 'old' as string | undefined, messages: newest } },
+  );
+  await waitFor(() => expect(result.current.map((m) => m.id)).toEqual(['old', 'new']));
+  const updated = [...newest, { ...newest[0], id: 'newer', createdAt: 101 }];
+  rerender({ messageId: 'old', messages: updated });
+  rerender({ messageId: undefined, messages: [...updated] });
+  await act(async () => {});
+  expect(lookup).toHaveBeenCalledTimes(1);
+  expect(result.current.map((m) => m.id)).toEqual(['old', 'new', 'newer']);
+  lookup.mockResolvedValue([{ ...older, eventId: 'another' }]);
+  rerender({ messageId: 'another', messages: updated });
+  await waitFor(() => expect(result.current.map((m) => m.id)).toEqual(['another', 'new', 'newer']));
+  expect(lookup).toHaveBeenCalledTimes(2);
+});
+
+it('retries a missing history target when live messages update', async () => {
+  lookup.mockResolvedValue([]);
+  const { result, rerender } = renderHook(
+    ({ messages }: { messages: typeof newest }) =>
+      useNotificationMessageWindow('big', 'peer', 'marmot', 'old', messages),
+    { initialProps: { messages: newest } },
+  );
+  await act(async () => {});
+  expect(lookup).toHaveBeenCalledTimes(1);
+  lookup.mockResolvedValue([older]);
+  rerender({ messages: [...newest] });
+  await waitFor(() => expect(result.current.map((m) => m.id)).toEqual(['old', 'new']));
+  expect(lookup).toHaveBeenCalledTimes(2);
+});
