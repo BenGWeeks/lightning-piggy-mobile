@@ -22,6 +22,7 @@ export const createSegmentedRowStyles = (colors: Palette) =>
     },
     selected: { backgroundColor: colors.accentSecondary },
     label: { color: colors.white, fontSize: 14, textAlign: 'center' },
+    subtitle: { color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: 8 },
     disabled: { opacity: 0.5 },
     measure: { position: 'absolute', opacity: 0, pointerEvents: 'none' },
   });

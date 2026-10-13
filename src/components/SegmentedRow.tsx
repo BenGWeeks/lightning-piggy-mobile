@@ -53,6 +53,7 @@ export default function SegmentedRow({
     measurements.key === measureKey && Object.values(measurements.overflow).some(Boolean);
   const fallback = shouldUseSegmentedPicker(options.length, fontScale, overflow);
   const selected = options.find((option) => option.value === value);
+  const disabledHint = disabled ? disabledSubtitle : undefined;
   const select = (next: string) => {
     setOpen(false);
     onValueChange(next);
@@ -117,6 +118,7 @@ export default function SegmentedRow({
             style={styles.segments}
             accessibilityRole="radiogroup"
             accessibilityLabel={accessibilityLabel ?? title}
+            accessibilityHint={disabledHint}
           >
             {options.map((option) => (
               <TouchableOpacity
@@ -131,6 +133,7 @@ export default function SegmentedRow({
                 testID={option.testID ?? `${testID}-option-${option.value}`}
                 accessibilityRole="radio"
                 accessibilityLabel={`${title}: ${option.label}`}
+                accessibilityHint={disabledHint}
                 accessibilityState={{
                   checked: value === option.value,
                   disabled: disabled || !!option.disabled,
@@ -140,6 +143,7 @@ export default function SegmentedRow({
               </TouchableOpacity>
             ))}
           </View>
+          {!!disabledHint && <Text style={styles.subtitle}>{disabledHint}</Text>}
         </View>
       )}
       <SettingsInfoSheet
