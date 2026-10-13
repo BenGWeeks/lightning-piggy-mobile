@@ -1,3 +1,4 @@
+import { setRemoteMediaOwner } from '../services/remoteMediaCache';
 import React from 'react';
 import { act, render } from '@testing-library/react-native';
 import { fetch as expoFetch } from 'expo/fetch';
@@ -20,11 +21,18 @@ jest.mock('../hooks/useTapToReveal', () => ({ useTapToReveal: () => [true, jest.
 jest.mock('../utils/messageContent', () => ({ formatTime: () => '00:00' }));
 jest.mock('expo-file-system/legacy', () => ({
   cacheDirectory: 'file:///cache/',
+  makeDirectoryAsync: jest.fn(async () => {}),
+  moveAsync: jest.fn(async () => {}),
+  deleteAsync: jest.fn(async () => {}),
+  readDirectoryAsync: jest.fn(async () => []),
   getInfoAsync: jest.fn(async () => ({ exists: false })),
   writeAsStringAsync: jest.fn(async () => {}),
 }));
 const mockFetch = expoFetch as unknown as jest.Mock;
-beforeEach(() => jest.clearAllMocks());
+beforeEach(() => {
+  jest.clearAllMocks();
+  setRemoteMediaOwner('reader');
+});
 
 it.each([false, true])(
   'blocked image renders a placeholder without fetching (encrypted=%s)',
@@ -88,5 +96,7 @@ it('accepted plain images are fetched with the shared policy and render a local 
   );
   await act(async () => {});
   expect(mockFetch).toHaveBeenCalledTimes(1);
-  expect(onResolved).toHaveBeenCalledWith(expect.stringMatching(/^file:\/\/\/cache\/remote-/));
+  expect(onResolved).toHaveBeenCalledWith(
+    expect.stringMatching(/^file:\/\/\/cache\/remote-media-/),
+  );
 });

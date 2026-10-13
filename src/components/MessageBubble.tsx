@@ -27,8 +27,7 @@ import {
 } from '../utils/messageContent';
 import type { PollTally } from '../utils/nip88Poll';
 import MessageFileBubble from './MessageFileBubble';
-import { isSupportedImageUrl } from '../utils/imageUrl';
-import { isPublicHttpUrl } from '../utils/publicUrl';
+import { useSharedContactAvatar } from '../hooks/useSharedContactAvatar';
 import { type DeliveryStatus } from '../utils/dmDeliveryStatus';
 import { resendPayloadFor } from '../utils/messageInfo';
 import type { ShowMessageInfoArgs } from '../hooks/useMessageInfoSheet';
@@ -204,6 +203,11 @@ const MessageBubble: React.FC<Props> = ({
   edited,
   autoLoadMedia,
 }) => {
+  const contact = content.kind === 'text' ? extractSharedContact(content.text) : null;
+  const contactAvatarUri = useSharedContactAvatar(
+    contact ? sharedProfiles?.[contact.pubkey]?.picture : undefined,
+    autoLoadMedia,
+  );
   const colors = useThemeColors();
   const styles = useMemo(() => createMessageBubbleStyles(colors), [colors]);
   const { t } = useLocale();
@@ -812,15 +816,12 @@ const MessageBubble: React.FC<Props> = ({
               {/* The shared profile's picture URL is chosen by whoever published
                   it, so it only loads for trusted senders and public hosts
                   (#1338); otherwise the silhouette stays. */}
-              {prof?.picture &&
-              autoLoadMedia &&
-              isSupportedImageUrl(prof.picture) &&
-              isPublicHttpUrl(prof.picture) ? (
+              {contactAvatarUri ? (
                 <ExpoImage
-                  source={{ uri: prof.picture }}
+                  source={{ uri: contactAvatarUri }}
                   style={[StyleSheet.absoluteFillObject, { borderRadius: 22 }]}
                   cachePolicy="memory-disk"
-                  recyclingKey={prof.picture}
+                  recyclingKey={contactAvatarUri}
                   autoplay={false}
                 />
               ) : null}

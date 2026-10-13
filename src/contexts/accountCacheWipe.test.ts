@@ -2,6 +2,7 @@ import { initialiseNotificationDefaults } from '../services/notificationDefaults
 import * as marmotPush from '../services/marmotPushRegistration';
 import { setActivePubkeyForWalletStorage } from '../services/walletStorageService';
 import { loadWatcherState } from '../services/watcherPushStore';
+import { wipeRemoteMediaForOwner } from '../services/remoteMediaCache';
 import {
   readMarketPreferences,
   writeMarketPreferences,
@@ -36,6 +37,10 @@ jest.mock('../services/notificationService', () => ({
 
 jest.mock('../services/watcherPush', () => ({ scheduleWatcherReconciliation: jest.fn() }));
 
+jest.mock('../services/remoteMediaCache', () => ({
+  wipeRemoteMediaForOwner: jest.fn(async () => {}),
+}));
+
 jest.mock('../services/decryptedMediaCache', () => ({
   wipeDecryptedMediaForOwner: jest.fn(async () => {}),
 }));
@@ -68,6 +73,7 @@ it("drops the signed-out account's key-backup flag but keeps other accounts' (#1
 it("deletes the signed-out account's decrypted voice notes and photos (#1241)", async () => {
   await wipeAccountCaches(PK);
   expect(wipeDecryptedMediaForOwner).toHaveBeenCalledWith(PK);
+  expect(wipeRemoteMediaForOwner).toHaveBeenCalledWith(PK);
 });
 
 // #1240: a family shares one phone — signing out the child's account must

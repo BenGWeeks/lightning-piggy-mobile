@@ -1,3 +1,4 @@
+import { setRemoteMediaOwner } from '../services/remoteMediaCache';
 import { clearFollowGateStores } from '../services/followSetEvents';
 import { clearConversationReactions } from '../utils/conversationReactionCache';
 import { useCallback, useLayoutEffect } from 'react';
@@ -43,6 +44,7 @@ export function resetIdentityMemoryState(state: IdentityMemoryState): void {
   dropIdentityKeyMaterial();
   // Decrypted voice-note / photo URIs are the outgoing account's plaintext (#1241).
   clearDecryptedMediaMemory();
+  setRemoteMediaOwner(null);
   state.setAmberNip44Permission('unknown');
   state.setProfile(null);
   state.setContacts([]);
@@ -66,7 +68,10 @@ export function useIdentityMemoryReset(
   // Scope the decrypted-media cache to the active account (#1241). A layout
   // effect so it lands before the new account's bubbles run their (passive)
   // decrypt effects.
-  useLayoutEffect(() => setDecryptedMediaOwner(pubkey), [pubkey]);
+  useLayoutEffect(() => {
+    setDecryptedMediaOwner(pubkey);
+    setRemoteMediaOwner(pubkey);
+  }, [pubkey]);
   const resetIdentityMemory = useCallback(
     () =>
       resetIdentityMemoryState({

@@ -266,6 +266,7 @@ async function resolveLnurlFromUrl(
 /** All LNURL endpoints and callbacks share the same transport budget and URL policy. */
 async function fetchLnurlJson(url: string) {
   const { bytes } = await fetchBounded(url, {
+    kind: 'payment',
     maxBytes: PREVIEW_MAX_BYTES,
     timeoutMs: LNURL_FETCH_TIMEOUT_MS,
     redirects: 'https-only',

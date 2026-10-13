@@ -1,3 +1,4 @@
+import { wipeRemoteMediaForOwner } from '../services/remoteMediaCache';
 import { FOLLOW_SNAPSHOT_KEY } from '../services/contactFollowFreshness';
 /**
  * wipeAccountCaches — delete every per-account persisted artifact for a
@@ -70,6 +71,7 @@ import {
 export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise<void> {
   if (!loggedOutPubkey) return;
   await cancelNotificationDefaults(loggedOutPubkey);
+  await wipeRemoteMediaForOwner(loggedOutPubkey);
   await wipeMarketAccount(loggedOutPubkey);
   // In-app notification history (#1143): names, amounts and routing ids.
   await clearNotificationHistory(loggedOutPubkey);

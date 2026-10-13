@@ -1,3 +1,4 @@
+import { setRemoteMediaOwner } from '../services/remoteMediaCache';
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 import { fetch as expoFetch } from 'expo/fetch';
 import { __resetForTests } from '../services/mediaRevealStore';
@@ -7,6 +8,10 @@ jest.mock('./useActivePubkey', () => ({ useActivePubkey: () => 'reader' }));
 jest.mock('expo/fetch', () => ({ fetch: jest.fn() }));
 jest.mock('expo-file-system/legacy', () => ({
   cacheDirectory: 'file:///cache/',
+  makeDirectoryAsync: jest.fn(async () => {}),
+  moveAsync: jest.fn(async () => {}),
+  deleteAsync: jest.fn(async () => {}),
+  readDirectoryAsync: jest.fn(async () => []),
   getInfoAsync: jest.fn(async () => ({ exists: false })),
   writeAsStringAsync: jest.fn(async () => {}),
 }));
@@ -15,6 +20,8 @@ const mockFetch = expoFetch as unknown as jest.Mock;
 const url = 'https://example.com/animation.gif';
 beforeEach(() => {
   jest.clearAllMocks();
+  setRemoteMediaOwner(null);
+  setRemoteMediaOwner('reader');
   __resetForTests();
   mockFetch.mockImplementation(async () => {
     let sent = false;
@@ -45,7 +52,7 @@ it('makes no request for an unfollowed sender until tap-to-reveal consent', asyn
   expect(result.current.uri).toBeNull();
 
   act(() => result.current.reveal());
-  await waitFor(() => expect(result.current.uri).toMatch(/^file:\/\/\/cache\/remote-/));
+  await waitFor(() => expect(result.current.uri).toMatch(/^file:\/\/\/cache\/remote-media-/));
   expect(mockFetch).toHaveBeenCalledTimes(1);
 });
 

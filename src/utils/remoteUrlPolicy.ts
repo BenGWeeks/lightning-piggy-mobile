@@ -4,7 +4,7 @@ export const MEDIA_MAX_BYTES = 50 * 1024 * 1024;
 export const PREVIEW_MAX_BYTES = 1024 * 1024;
 export const PREVIEW_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 
-type RemoteKind = 'media' | 'preview' | 'relay' | 'blossom';
+type RemoteKind = 'media' | 'preview' | 'relay' | 'blossom' | 'payment';
 type UrlCheck = { ok: true; url: string } | { ok: false; reason: string };
 
 /** Validate before contacting a URL supplied by remote content. DNS resolution
@@ -13,7 +13,11 @@ export function checkRemoteUrl(
   value: string,
   { kind, allowPort }: { kind: RemoteKind; allowPort?: number },
 ): UrlCheck {
-  if (typeof value !== 'string' || value.length > 2048 || /[\s\x00-\x1f\x7f]/u.test(value))
+  if (
+    typeof value !== 'string' ||
+    value.length > (kind === 'payment' ? 16384 : 2048) ||
+    /[\s\x00-\x1f\x7f]/u.test(value)
+  )
     return { ok: false, reason: 'invalid-url' };
   try {
     const url = new URL(value);
@@ -23,10 +27,12 @@ export function checkRemoteUrl(
     const authority = value.match(/^[a-z]+:\/\/([^/?#]*)/i)?.[1];
     if (!authority || /[@\\%]/.test(authority) || url.username || url.password)
       return { ok: false, reason: 'authority' };
-    if (!parsePublicUrl(value, [kind === 'relay' ? 'wss' : 'https']))
+    if (!parsePublicUrl(`${url.protocol}//${authority}`, [kind === 'relay' ? 'wss' : 'https']))
       return { ok: false, reason: 'host' };
     if (url.port && Number(url.port) !== allowPort) return { ok: false, reason: 'port' };
     url.hash = '';
+    if (url.href.length > (kind === 'payment' ? 16384 : 2048))
+      return { ok: false, reason: 'invalid-url' };
     return { ok: true, url: url.href };
   } catch {
     return { ok: false, reason: 'invalid-url' };
@@ -43,6 +49,7 @@ interface BoundedOptions {
   redirects: 'https-only';
   maxRedirects: 3;
   headers?: Record<string, string>;
+  kind?: 'media' | 'payment';
 }
 
 /** Expo's native fetch honours manual redirects and exposes streaming bytes.
@@ -73,7 +80,7 @@ export async function fetchBounded(url: string, options: BoundedOptions) {
     let current = url;
     for (let hop = 0; hop <= options.maxRedirects; hop++) {
       if (expired) throw new Error('Remote fetch timed out');
-      const checked = checkRemoteUrl(current, { kind: 'media' });
+      const checked = checkRemoteUrl(current, { kind: options.kind ?? 'media' });
       if (!checked.ok) throw new Error('Blocked remote URL');
       current = checked.url;
       const res = await expoFetch(current, {
@@ -85,7 +92,7 @@ export async function fetchBounded(url: string, options: BoundedOptions) {
       const redirect = res.status >= 300 && res.status < 400;
       if (
         (!redirect && res.redirected) ||
-        (res.url && !checkRemoteUrl(res.url, { kind: 'media' }).ok)
+        (res.url && !checkRemoteUrl(res.url, { kind: options.kind ?? 'media' }).ok)
       )
         throw new Error('Unvalidated remote redirect');
       if (redirect) {

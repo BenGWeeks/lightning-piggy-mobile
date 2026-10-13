@@ -205,6 +205,27 @@ describe('fetchInvoice amount authorization', () => {
     expect(url.searchParams.get('comment')).toBe('hello');
   });
 
+  it('accepts encoded Chinese comments and zap JSON beyond the content URL limit', async () => {
+    const invoice = invoiceWithAmount('lnbc1u');
+    returnInvoice(invoice);
+    const comment = '中'.repeat(230);
+    const nostr = JSON.stringify({ kind: 9734, content: comment, tags: [['p', 'a'.repeat(64)]] });
+    await expect(fetchInvoice('https://example.com/cb', 100, { comment, nostr })).resolves.toBe(
+      invoice,
+    );
+    const url = new URL(fetchMock.mock.calls[0][0]);
+    expect(url.href.length).toBeGreaterThan(4096);
+    expect(url.searchParams.get('comment')).toBe(comment);
+    expect(url.searchParams.get('nostr')).toBe(nostr);
+  });
+
+  it('rejects callback queries beyond the bounded payment URL budget', async () => {
+    await expect(
+      fetchInvoice('https://example.com/cb', 100, { comment: '中'.repeat(2000) }),
+    ).rejects.toThrow('Blocked');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['higher amount', 'lnbc2u'],
     ['lower amount', 'lnbc500n'],
