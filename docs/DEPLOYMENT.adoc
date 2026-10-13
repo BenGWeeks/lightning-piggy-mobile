@@ -249,10 +249,23 @@ NOTE: The pre-`npm version` flow had `app.config.ts` hardcoded to `'1.0.0'` and 
 TestFlight requires an Apple ID aged 13+, so younger family members get the production app as a *device-signed* (ad-hoc) build instead. The `production-adhoc` profile in `eas.json` is the production app (same bundle id, same notification server) signed for the registered devices only.
 
 . Register the phone once: `eas device:create` (interactive: choose *Website*, open the link on the phone, install the profile). Plugging the phone into a Mac and running an Xcode build with `-allowProvisioningDeviceRegistration` also registers it.
-. Build the release tag: `git worktree add --detach ../lp-adhoc vX.Y.Z && cd ../lp-adhoc && eas build -p ios -e production-adhoc`. The first run must be *interactive* (it creates the ad-hoc provisioning profile and asks which devices to include; pick all). Later runs work with `--non-interactive`. Apple authentication can use the App Store Connect API key via `EXPO_ASC_API_KEY_PATH`, `EXPO_ASC_KEY_ID`, `EXPO_ASC_ISSUER_ID` instead of an Apple ID login.
+. Check out the release tag: `git worktree add --detach ../lp-adhoc vX.Y.Z && cd ../lp-adhoc`. Before building, check that the tag's `eas.json` contains `production-adhoc` with `"environment": "production"`. Older tags such as `v1.5.0` lack this profile: add the following entry under `build` in that detached worktree's `eas.json`, preserving the tag's other profiles and app source. This is a local build-configuration change; do not move the release tag.
++
+[source,json]
+----
+"production-adhoc": {
+  "extends": "production",
+  "environment": "production",
+  "distribution": "internal",
+  "autoIncrement": false
+}
+----
++
+The explicit environment selects the same EAS variables as the store production build; internal distribution otherwise defaults to the preview environment.
+. Build: `eas build -p ios -e production-adhoc`. The first run must be *interactive* (it creates the ad-hoc provisioning profile and asks which devices to include; pick all). Later runs work with `--non-interactive`. Apple authentication can use the App Store Connect API key via `EXPO_ASC_API_KEY_PATH`, `EXPO_ASC_KEY_ID`, `EXPO_ASC_ISSUER_ID` instead of an Apple ID login.
 . Install: open the build page's install link on the phone (Safari), or over a cable from a Mac: `curl -L -o app.ipa <artifact url>` then `xcrun devicectl device install app --device <id> app.ipa` (`xcrun devicectl list devices` shows the id). The phone needs *Developer Mode* on (Settings → Privacy & Security) and must trust the Mac.
 
-The build doesn't auto-update: repeat step 2–3 for each release the phone should get. `autoIncrement` is off so the build number doesn't advance the release counter.
+The build doesn't auto-update: repeat steps 2–4 for each release the phone should get. `autoIncrement` is off so the build number doesn't advance the release counter.
 
 == Local production builds (fallback)
 

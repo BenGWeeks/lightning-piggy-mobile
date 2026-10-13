@@ -34,6 +34,7 @@
     },
     "production-adhoc": {
       "extends": "production",
+      "environment": "production",
       "distribution": "internal",
       "autoIncrement": false
     }
