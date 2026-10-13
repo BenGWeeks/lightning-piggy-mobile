@@ -49,7 +49,7 @@ beforeEach(() => {
 });
 it('loads collection filters only when enabled and filters the signed product snapshot', async () => {
   const { result, rerender } = renderHook(
-    ({ enabled }: { enabled: boolean }) => useCollectionFilter(products, enabled),
+    ({ enabled }: { enabled: boolean }) => useCollectionFilter(products, enabled, pubkey),
     {
       initialProps: { enabled: false },
     },
@@ -70,7 +70,7 @@ it('aborts a blurred snapshot and ignores late collection results', async () => 
     }),
   );
   const { result, rerender } = renderHook(
-    ({ enabled }: { enabled: boolean }) => useCollectionFilter(products, enabled),
+    ({ enabled }: { enabled: boolean }) => useCollectionFilter(products, enabled, pubkey),
     {
       initialProps: { enabled: true },
     },
@@ -83,7 +83,7 @@ it('aborts a blurred snapshot and ignores late collection results', async () => 
 });
 it('does not retain a collection selection across seller/catalogue changes', async () => {
   const { result, rerender } = renderHook(
-    ({ items }: { items: MarketProduct[] }) => useCollectionFilter(items, true),
+    ({ items }: { items: MarketProduct[] }) => useCollectionFilter(items, true, pubkey),
     {
       initialProps: { items: products },
     },
@@ -107,8 +107,54 @@ it('retains usable filters and reports incomplete discovery', async () => {
     events: [collection],
     incomplete: true,
   });
-  const { result } = renderHook(() => useCollectionFilter(products, true));
+  const { result } = renderHook(() => useCollectionFilter(products, true, pubkey));
   await act(async () => {});
   expect(result.current.collections).toEqual([collection]);
   expect(result.current.incomplete).toBe(true);
+});
+
+it('discovers only the selected merchant and clears selection when changing or clearing them', async () => {
+  const otherMerchant = 'b'.repeat(64);
+  const otherCollection = { ...collection, pubkey: otherMerchant, id: 'other' };
+  const allProducts = [
+    ...products,
+    {
+      ...products[1],
+      id: 'other',
+      listing: {
+        ...products[1].listing!,
+        event: { ...products[1].listing!.event, pubkey: otherMerchant },
+      },
+    },
+  ];
+  (fetchMarketCollections as jest.Mock).mockResolvedValue({
+    events: [collection, otherCollection],
+    incomplete: false,
+  });
+  const { result, rerender } = renderHook(
+    ({ merchant }: { merchant: string | null }) => useCollectionFilter(allProducts, true, merchant),
+    { initialProps: { merchant: null as string | null } },
+  );
+  expect(result.current.collections).toEqual([]);
+  expect(fetchMarketCollections).not.toHaveBeenCalled();
+  await act(async () => rerender({ merchant: pubkey }));
+  expect(fetchMarketCollections).toHaveBeenLastCalledWith(
+    products,
+    ['wss://read.example'],
+    expect.any(AbortSignal),
+  );
+  expect(result.current.collections).toEqual([collection]);
+  act(() => result.current.select(`30405:${pubkey}:art`));
+  expect(result.current.selected).not.toBeNull();
+  await act(async () => rerender({ merchant: otherMerchant }));
+  expect(result.current.selected).toBeNull();
+  expect(result.current.collections).toEqual([otherCollection]);
+  await act(async () => rerender({ merchant: pubkey }));
+  expect(result.current.selected).toBeNull();
+  act(() => result.current.select(`30405:${pubkey}:art`));
+  await act(async () => rerender({ merchant: null }));
+  expect(result.current.collections).toEqual([]);
+  expect(result.current.products).toEqual(allProducts);
+  await act(async () => rerender({ merchant: pubkey }));
+  expect(result.current.selected).toBeNull();
 });

@@ -6,17 +6,22 @@ import MarketScreen from './MarketScreen';
 import type { ExploreNavigation } from '../navigation/types';
 
 jest.mock('../hooks/useCollectionFilter', () => ({
-  useCollectionFilter: (products: unknown[]) => ({
-    products,
-    collections: [],
-    selected: null,
-    select: jest.fn(),
-  }),
+  useCollectionFilter: (products: unknown[], enabled: boolean, merchant: string | null) => {
+    mockCollectionScope(enabled, merchant);
+    return {
+      products,
+      collections: mockCollections,
+      selected: null,
+      select: jest.fn(),
+    };
+  },
 }));
 
 jest.mock('../hooks/useMarketPreferences', () => ({
   useMarketPreferences: () => mockPreferencesHook(),
 }));
+const mockCollectionScope = jest.fn();
+let mockCollections: import('nostr-tools').Event[] = [];
 let mockReady = true;
 let mockCompleted = false;
 let mockLoading = true;
@@ -80,6 +85,8 @@ const navigation = { goBack: jest.fn(), navigate: jest.fn() } as unknown as Expl
 beforeEach(() => {
   jest.useFakeTimers();
   mockLiveEnabled.mockClear();
+  mockCollectionScope.mockClear();
+  mockCollections = [];
   mockReady = true;
   mockCompleted = false;
   mockLoading = true;
@@ -207,4 +214,38 @@ it('updates the loaded label when switching between preferred sellers and friend
   act(() => jest.runOnlyPendingTimers());
   fireEvent.press(screen.getByTestId('market-scope-chip-clear'));
   expect(screen.getByTestId('market-live-status')).toHaveTextContent('market.live.loadedPreferred');
+});
+
+it('hides collections without a merchant even when collection results exist', () => {
+  mockCollections = [
+    {
+      pubkey: 'a'.repeat(64),
+      tags: [
+        ['d', 'art'],
+        ['title', 'Art'],
+      ],
+    } as import('nostr-tools').Event,
+  ];
+  const screen = render(<MarketScreen navigation={navigation} />);
+  expect(screen.queryByTestId('market-collection-filters')).toBeNull();
+  expect(mockCollectionScope).toHaveBeenLastCalledWith(false, null);
+});
+
+it('enables merchant-scoped collections for a remembered single merchant', () => {
+  const merchant = jest
+    .requireActual('../utils/marketMerchants')
+    .marketMerchants(MARKET_PRODUCTS)[0].id;
+  mockInitialPreferences.merchant = merchant;
+  mockCollections = [
+    {
+      pubkey: 'a'.repeat(64),
+      tags: [
+        ['d', 'art'],
+        ['title', 'Art'],
+      ],
+    } as import('nostr-tools').Event,
+  ];
+  const screen = render(<MarketScreen navigation={navigation} />);
+  expect(mockCollectionScope).toHaveBeenLastCalledWith(true, merchant);
+  expect(screen.getByTestId('market-collection-filters')).toBeTruthy();
 });

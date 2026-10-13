@@ -150,7 +150,7 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
   const panelFilterCount = countActiveMarketFilters({ query, merchant, country, currency }, mode);
   const activeFilterCount = panelFilterCount + (query.trim().length > 0 ? 1 : 0);
 
-  const collectionFilter = useCollectionFilter(baseProducts, ready);
+  const collectionFilter = useCollectionFilter(baseProducts, ready && merchant !== null, merchant);
   const products = useMemo(
     () => filterMarketProducts(collectionFilter.products, filter, sellerOf),
     [collectionFilter.products, filter],
@@ -322,11 +322,13 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
           </TouchableOpacity>
         </View>
       }
-      <MarketCollectionChips
-        collections={collectionFilter.collections}
-        selected={collectionFilter.selected}
-        onSelect={collectionFilter.select}
-      />
+      {merchant !== null ? (
+        <MarketCollectionChips
+          collections={collectionFilter.collections}
+          selected={collectionFilter.selected}
+          onSelect={collectionFilter.select}
+        />
+      ) : null}
       <MarketFilterBar
         mode={mode}
         onSelectMode={selectMode}
