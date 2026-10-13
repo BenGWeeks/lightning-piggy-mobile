@@ -2095,6 +2095,7 @@
   },
   "walletCard": {
     "zaplie": "Zaplie",
+    "zaplieBolt": "Zaplie Bolt",
     "connected": "Połączono",
     "notResponding": "Nie odpowiada",
     "disconnected": "Rozłączono",

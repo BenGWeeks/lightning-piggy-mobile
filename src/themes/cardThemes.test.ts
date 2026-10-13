@@ -39,16 +39,21 @@ describe('cardThemes registry', () => {
     const ids = themeList.map((theme) => theme.id);
     expect(ids[ids.indexOf('lightning-piggy') + 1]).toBe('wise-owl');
     const names = themeList
-      .filter((theme) => theme.id !== 'wise-owl' && theme.id !== 'zaplie')
+      .filter(
+        (theme) => theme.id !== 'wise-owl' && theme.id !== 'zaplie' && theme.id !== 'zaplie-bolt',
+      )
       .map((theme) => theme.name);
     expect(names).toEqual([...names].sort((a, b) => a.localeCompare(b)));
   });
 
-  it('places Zaplie after Owl and keeps the other themes alphabetical', () => {
+  it('places Zaplie and Zaplie Bolt after Owl and keeps the other themes alphabetical', () => {
     const owlIndex = themeList.findIndex((theme) => theme.id === 'wise-owl');
     expect(themeList[owlIndex + 1].id).toBe('zaplie');
+    expect(themeList[owlIndex + 2].id).toBe('zaplie-bolt');
     const names = themeList
-      .filter((theme) => theme.id !== 'wise-owl' && theme.id !== 'zaplie')
+      .filter(
+        (theme) => theme.id !== 'wise-owl' && theme.id !== 'zaplie' && theme.id !== 'zaplie-bolt',
+      )
       .map((theme) => theme.name);
     const sorted = [...names].sort((a, b) => a.localeCompare(b));
     expect(names).toEqual(sorted);

@@ -41,6 +41,7 @@ const cardBgStyles: Record<CardBackgroundStyle | 'default', ImageStyle> = {
   'lightning-piggy': lightningPiggyStyle.full,
   'wise-owl': wiseOwlStyle.full,
   zaplie: zaplieStyle.full,
+  'zaplie-bolt': zaplieStyle.full,
   'lightning-whale': lightningWhaleStyle.full,
   sallie: knowAllCardStyles.background,
   poppie: knowAllCardStyles.background,

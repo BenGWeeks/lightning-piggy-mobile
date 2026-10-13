@@ -2093,6 +2093,7 @@
   },
   "walletCard": {
     "zaplie": "Zaplie",
+    "zaplieBolt": "Zaplie Bolt",
     "connected": "Csatlakozva",
     "notResponding": "Nem válaszol",
     "disconnected": "Nincs kapcsolat",
