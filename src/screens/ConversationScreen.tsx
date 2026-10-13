@@ -35,7 +35,7 @@ import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useNostr, useNostrDmInbox } from '../contexts/NostrContext';
+import { useNostr, useNostrContacts, useNostrDmInbox } from '../contexts/NostrContext';
 import { useWallet } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -117,6 +117,7 @@ const ConversationScreen: React.FC = () => {
     fetchReactionsForMessages,
     fetchReactionDeletionsForReactions,
   } = useNostr();
+  const { contacts } = useNostrContacts();
   const { armLiveDmSub } = useNostrDmInbox();
   // Trust gate (#1338): the peer's media auto-loads only if I follow them.
   const followed = useFollowedPubkeys();
