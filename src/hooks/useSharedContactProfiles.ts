@@ -56,12 +56,16 @@ export function useSharedContactProfiles(
     if (refs.length === 0) return;
     // The deadline belongs to scheduling, including cards waiting for a batch.
     let expired = false;
+    // Buffer partial results without rendering once per relay event. The
+    // scheduling deadline flushes these even if the current batch is waiting
+    // for a missing author and has not returned yet.
+    const received: Record<string, NostrProfile> = {};
     const timer = setTimeout(() => {
       expired = true;
       timers.current.delete(timer);
       if (mounted.current) {
         setSharedProfiles((prev) => {
-          const next = { ...prev };
+          const next = { ...prev, ...received };
           for (const ref of refs) {
             if (next[ref.pubkey] === undefined) next[ref.pubkey] = null;
           }
@@ -75,6 +79,9 @@ export function useSharedContactProfiles(
         if (!mounted.current || expired) return;
         const updates = await resolveSharedContactProfiles(
           refs.slice(i, i + SHARED_PROFILE_BATCH_SIZE),
+          (pubkey, profile) => {
+            if (mounted.current && !expired) received[pubkey] = profile;
+          },
         );
         if (mounted.current && !expired) setSharedProfiles((prev) => ({ ...prev, ...updates }));
       }

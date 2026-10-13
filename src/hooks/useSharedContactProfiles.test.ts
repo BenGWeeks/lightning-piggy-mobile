@@ -50,7 +50,10 @@ it.each(['nip17', 'marmot'])(
     await act(async () => finish({ [PK]: profile }));
     expect(result.current[PK]).toEqual(profile);
     expect(resolveProfiles).toHaveBeenCalledTimes(1);
-    expect(resolveProfiles).toHaveBeenCalledWith([{ pubkey: PK, relays: ['wss://hint.example'] }]);
+    expect(resolveProfiles).toHaveBeenCalledWith(
+      [{ pubkey: PK, relays: ['wss://hint.example'] }],
+      expect.any(Function),
+    );
   },
 );
 
@@ -67,7 +70,10 @@ it('shows a display-only friend immediately and refreshes its verified Lightning
   const contacts = [{ pubkey: PK, profile: displayOnly }] as NostrContact[];
   const { result } = renderHook(() => useSharedContactProfiles([message], contacts));
   expect(result.current[PK]).toEqual(displayOnly);
-  expect(resolveProfiles).toHaveBeenCalledWith([{ pubkey: PK, relays: ['wss://hint.example'] }]);
+  expect(resolveProfiles).toHaveBeenCalledWith(
+    [{ pubkey: PK, relays: ['wss://hint.example'] }],
+    expect.any(Function),
+  );
   await act(async () => finish({ [PK]: verified }));
   expect(result.current[PK]).toEqual(verified);
 });

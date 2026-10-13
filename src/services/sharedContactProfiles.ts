@@ -12,9 +12,12 @@ export const SHARED_PROFILE_BATCH_SIZE = 50;
 export const SHARED_PROFILE_TIMEOUT_MS = 10000;
 
 /** Verified resolution with display-cache fallback. Each bounded batch finishes
- * even if storage or a relay stalls; null is a completed miss, never pending. */
+ * even if storage or a relay stalls; null is a completed miss, never pending.
+ * onProfile exposes partial results for a caller's earlier scheduling deadline;
+ * callers should buffer them rather than update React state per relay event. */
 export async function resolveSharedContactProfiles(
   refs: readonly SharedContactRef[],
+  onProfile?: (pubkey: string, profile: NostrProfile) => void,
 ): Promise<Record<string, NostrProfile | null>> {
   const batch = refs.slice(0, SHARED_PROFILE_BATCH_SIZE);
   const updates: Record<string, NostrProfile | null> = {};
@@ -27,12 +30,14 @@ export async function resolveSharedContactProfiles(
       .catch(() => new Map<string, profileCache.CachedZapSenderProfile>());
     if (finished) return;
     for (const [pk, profile] of cached) {
-      updates[pk] = slimDisplayProfile({
+      const displayProfile = slimDisplayProfile({
         ...parseProfileContent('{}'),
         ...profile,
         pubkey: pk,
         npub: npubEncode(pk),
       });
+      updates[pk] = displayProfile;
+      onProfile?.(pk, displayProfile);
     }
     // The display cache has no verified payment address. Refresh even cache
     // hits so shared-card taps retain Zap eligibility without trusting storage.
@@ -47,11 +52,13 @@ export async function resolveSharedContactProfiles(
       8000,
       (event) => {
         if (finished) return;
-        updates[event.pubkey] = {
+        const profile: NostrProfile = {
           ...parseProfileContent(event.content),
           pubkey: event.pubkey,
           npub: npubEncode(event.pubkey),
         };
+        updates[event.pubkey] = profile;
+        onProfile?.(event.pubkey, profile);
       },
       true,
     );
