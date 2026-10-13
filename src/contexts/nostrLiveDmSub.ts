@@ -199,15 +199,21 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
   // deferred by the follow-gate during the post-switch hydration window
   // (#851 F2). Called by the hook (via the registered ref) once follows
   // hydrate and the buffered partner is confirmed followed — so we re-run
-  // group routing for deferred group-shaped chats. DM preview persistence
-  // remains deferred to refreshDmInbox; group replay uses the shared live
-  // path to store and notify the correct room.
+  // group routing for deferred two-party chats using the shared live path
+  // to store and notify the correct room or DM. Other deferred previews
+  // leave persistence to refreshDmInbox.
+  // Preserve buffer order across async room creation: a later subjectless
+  // chat must see the room registered by the preceding subject-tagged chat.
+  let deferredRumorReplayChain = Promise.resolve();
   const replayDeferredFollowGate = (item: DeferredFollowGateEntry): void => {
     if (cancelled || !isCurrentOwner()) return;
     if (item.groupRumor) {
-      void surfaceRumor(item.groupRumor, item.entry.id).catch((e) => {
-        if (__DEV__) console.warn('[Nostr] deferred group replay failed:', e);
-      });
+      const rumor = item.groupRumor;
+      deferredRumorReplayChain = deferredRumorReplayChain
+        .then(() => surfaceRumor(rumor, item.entry.id))
+        .catch((e) => {
+          if (__DEV__) console.warn('[Nostr] deferred group replay failed:', e);
+        });
       return;
     }
     queueInboxEntry(item.entry);

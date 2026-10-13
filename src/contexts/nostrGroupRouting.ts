@@ -57,12 +57,12 @@ export async function tryRouteGroupRumor(
   // Before promoting a two-party DM, preserve the receive caller's follow
   // policy. Known rooms retain membership as their trust signal. Returning
   // not-group lets the caller apply its usual drop/defer/skip-set behavior.
-  // Preserve group-shaped chat rumors so live follow hydration can retry
-  // routing with their subject and participant tags instead of a DM preview.
+  // Preserve every two-party chat rumor so follow hydration can retry routing.
+  // A preceding deferred subject may establish a room for a subjectless follow-up.
   if (!group && isTwoParty && !passesFollowGate(Array.from(otherParticipants)[0])) {
     return {
       kind: 'not-group',
-      ...(cls.type === 'group' ? { deferredGroupRumor: rumor } : {}),
+      deferredGroupRumor: rumor,
     };
   }
   if (cls.type === 'dm' && !group) return { kind: 'not-group' };

@@ -69,7 +69,10 @@ it.each([false, true])('routes a subject-tagged two-member group (fromMe=%s)', a
 
 it('keeps an unknown two-party message without a subject on the 1:1 path', async () => {
   expect(classifyRumor(rumor(), ME)).toEqual({ type: 'dm', partnerPubkey: PEER, fromMe: false });
-  expect(await tryRouteGroupRumor(rumor(), ME, 'dm')).toEqual({ kind: 'not-group' });
+  expect(await tryRouteGroupRumor(rumor(), ME, 'dm')).toEqual({
+    kind: 'not-group',
+    deferredGroupRumor: rumor(),
+  });
   expect(appendGroupMessage).not.toHaveBeenCalled();
   expect(notifyGroupMessage).not.toHaveBeenCalled();
 });
@@ -87,7 +90,10 @@ it('does not divert a 1:1 to a Marmot room or a different participant set', asyn
     ],
     ME,
   );
-  expect(await tryRouteGroupRumor(rumor(), ME, 'dm')).toEqual({ kind: 'not-group' });
+  expect(await tryRouteGroupRumor(rumor(), ME, 'dm')).toEqual({
+    kind: 'not-group',
+    deferredGroupRumor: rumor(),
+  });
   expect(appendGroupMessage).not.toHaveBeenCalled();
 });
 

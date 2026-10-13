@@ -26,3 +26,40 @@ it('never routes an old account rumor through the active account registry', asyn
   setKnownGroups([]);
   setSyntheticGroupReconciler(null);
 });
+
+it.each([false, true])(
+  'publishes a reconciled room before returning only while its owner is current (switched=%s)',
+  async (switched) => {
+    const group: Group = {
+      id: 'new-room',
+      name: 'Family',
+      memberPubkeys: ['partner'],
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    let finish!: (group: Group) => void;
+    setKnownGroups([], 'a');
+    setSyntheticGroupReconciler(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+      'a',
+    );
+    const pending = reconcileSyntheticGroup(
+      { groupId: group.id, name: group.name, memberPubkeys: ['partner'], createdAtSec: 1 },
+      'a',
+    );
+    if (switched) {
+      setKnownGroups([], 'b');
+      setSyntheticGroupReconciler(async () => null, 'b');
+    }
+    finish(group);
+    await pending;
+    expect(findGroupForParticipants(new Set(['partner']), switched ? 'b' : 'a')).toEqual(
+      switched ? null : group,
+    );
+    setKnownGroups([]);
+    setSyntheticGroupReconciler(null);
+  },
+);

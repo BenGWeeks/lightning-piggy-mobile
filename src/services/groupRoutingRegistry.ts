@@ -68,7 +68,19 @@ export async function reconcileSyntheticGroup(
   owner: string | null = null,
 ): Promise<Group | null> {
   if (owner !== reconcilerOwner || !syntheticReconciler) return null;
-  return syntheticReconciler(input);
+  const reconcile = syntheticReconciler;
+  const group = await reconcile(input);
+  // Publish before returning: React's state-mirroring effect may not have run
+  // when the next deferred subjectless rumor starts routing.
+  if (
+    group &&
+    owner === knownOwner &&
+    owner === reconcilerOwner &&
+    reconcile === syntheticReconciler
+  ) {
+    known = [group, ...known.filter((existing) => existing.id !== group.id)];
+  }
+  return group;
 }
 
 /**

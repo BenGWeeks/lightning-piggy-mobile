@@ -216,3 +216,123 @@ it.each([false, true])(
     }
   },
 );
+
+it('replays a subject-tagged message before its subjectless follow-up after follows hydrate', async () => {
+  let finishReconcile!: () => void;
+  const pendingReconcile = new Promise<void>((resolve) => {
+    finishReconcile = resolve;
+  });
+  const reconcile = jest.fn(async (input) => {
+    await pendingReconcile;
+    return {
+      id: input.groupId,
+      name: input.name,
+      memberPubkeys: input.memberPubkeys,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+  });
+  setSyntheticGroupReconciler(reconcile, VIEWER);
+  const params = makeParams();
+  let replay!: (item: DeferredFollowGateEntry) => void;
+  params.setDeferredReplay = (fn) => {
+    if (fn) replay = fn;
+  };
+  const stop = startLiveDmSubscription(params);
+  await flush();
+  const now = Math.floor(Date.now() / 1000);
+  const messages = [
+    { id: 'room-start', text: 'hello while hydrating', tags: [['subject', 'Family']] },
+    { id: 'room-follow-up', text: 'subjectless follow-up', tags: [] },
+  ];
+  for (const message of messages) {
+    capturedOnEvent!({
+      id: message.id,
+      kind: 1059,
+      pubkey: ALICE,
+      created_at: now,
+      tags: [],
+      content: 'wrapped',
+      rumor: {
+        pubkey: ALICE,
+        kind: 14,
+        created_at: now,
+        tags: [['p', VIEWER], ...message.tags],
+        content: message.text,
+      },
+    });
+    await flush();
+  }
+  expect(params.followGateBuffer.size).toBe(2);
+  expect(reconcile).not.toHaveBeenCalled();
+  expect(appendGroupMessage).not.toHaveBeenCalled();
+  params.followPubkeysRef.current = new Set([ALICE]);
+  params.followGateBuffer.reevaluate(params.followPubkeysRef.current, replay);
+  await flush();
+  // The second rumor must wait for the first to register the new room.
+  expect(reconcile).toHaveBeenCalledTimes(1);
+  expect(params.setDmInbox).not.toHaveBeenCalled();
+  expect(mockNotifyDm).not.toHaveBeenCalled();
+  expect(mockFireNotification).not.toHaveBeenCalled();
+  finishReconcile();
+  await flush();
+  const groupId = syntheticGroupIdForParticipants([VIEWER, ALICE]);
+  expect(appendGroupMessage).toHaveBeenCalledTimes(2);
+  expect(notifyGroupMessage).toHaveBeenCalledTimes(2);
+  expect(mockFireNotification).toHaveBeenCalledTimes(2);
+  messages.forEach((message, index) => {
+    const stored = { id: message.id, senderPubkey: ALICE, text: message.text, createdAt: now };
+    expect(appendGroupMessage).toHaveBeenNthCalledWith(index + 1, VIEWER, groupId, stored);
+    expect(notifyGroupMessage).toHaveBeenNthCalledWith(index + 1, groupId, stored);
+    expect(mockFireNotification).toHaveBeenNthCalledWith(
+      index + 1,
+      expect.objectContaining({ kind: 'group', threadId: groupId, body: message.text }),
+    );
+  });
+  expect(params.setDmInbox).not.toHaveBeenCalled();
+  expect(upsertDmMessages).not.toHaveBeenCalled();
+  expect(mockNotifyDm).not.toHaveBeenCalled();
+  params.followGateBuffer.reevaluate(params.followPubkeysRef.current, replay);
+  await flush();
+  expect(mockFireNotification).toHaveBeenCalledTimes(2);
+  stop();
+});
+
+it('keeps a deferred subjectless chat as a DM when hydration establishes no room', async () => {
+  const params = makeParams();
+  let replay!: (item: DeferredFollowGateEntry) => void;
+  params.setDeferredReplay = (fn) => {
+    if (fn) replay = fn;
+  };
+  const stop = startLiveDmSubscription(params);
+  await flush();
+  const now = Math.floor(Date.now() / 1000);
+  capturedOnEvent!({
+    id: 'ordinary-dm',
+    kind: 1059,
+    pubkey: ALICE,
+    created_at: now,
+    tags: [],
+    content: 'wrapped',
+    rumor: {
+      pubkey: ALICE,
+      kind: 14,
+      created_at: now,
+      tags: [['p', VIEWER]],
+      content: 'ordinary chat',
+    },
+  });
+  await flush();
+  expect(params.followGateBuffer.size).toBe(1);
+  params.followPubkeysRef.current = new Set([ALICE]);
+  params.followGateBuffer.reevaluate(params.followPubkeysRef.current, replay);
+  await flush();
+  expect(params.setDmInbox).toHaveBeenCalledTimes(1);
+  expect(mockNotifyDm).toHaveBeenCalledWith(ALICE);
+  expect(mockFireNotification).toHaveBeenCalledWith(
+    expect.objectContaining({ kind: 'dm', body: 'ordinary chat' }),
+  );
+  expect(appendGroupMessage).not.toHaveBeenCalled();
+  expect(notifyGroupMessage).not.toHaveBeenCalled();
+  stop();
+});
