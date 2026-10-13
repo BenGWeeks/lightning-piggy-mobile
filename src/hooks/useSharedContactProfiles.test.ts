@@ -3,6 +3,7 @@ import { useSharedContactProfiles } from './useSharedContactProfiles';
 import { resolveSharedContactProfiles } from '../services/sharedContactProfiles';
 import { extractSharedContact } from '../utils/messageContent';
 import type { NostrContact, NostrProfile } from '../types/nostr';
+import { slimDisplayProfile } from '../utils/profileSanitize';
 
 jest.mock('../services/sharedContactProfiles', () => ({
   SHARED_PROFILE_BATCH_SIZE: 50,
@@ -53,11 +54,35 @@ it.each(['nip17', 'marmot'])(
   },
 );
 
-it('uses a known friend profile immediately without fetching', () => {
-  const contacts = [{ pubkey: PK, profile }] as NostrContact[];
+it('shows a display-only friend immediately and refreshes its verified Lightning address', async () => {
+  const verified = { ...profile, lud16: 'piggy@example.com' };
+  const displayOnly = slimDisplayProfile(verified);
+  let finish!: (profiles: Record<string, NostrProfile | null>) => void;
+  resolveProfiles.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const contacts = [{ pubkey: PK, profile: displayOnly }] as NostrContact[];
   const { result } = renderHook(() => useSharedContactProfiles([message], contacts));
-  expect(result.current[PK]).toEqual(profile);
-  expect(resolveProfiles).not.toHaveBeenCalled();
+  expect(result.current[PK]).toEqual(displayOnly);
+  expect(resolveProfiles).toHaveBeenCalledWith([{ pubkey: PK, relays: ['wss://hint.example'] }]);
+  await act(async () => finish({ [PK]: verified }));
+  expect(result.current[PK]).toEqual(verified);
+});
+
+it('preserves a verified profile when display-only friends hydrate later', async () => {
+  const verified = { ...profile, lud16: 'piggy@example.com' };
+  resolveProfiles.mockResolvedValue({ [PK]: verified });
+  const { result, rerender } = renderHook(
+    (contacts: NostrContact[]) => useSharedContactProfiles([message], contacts),
+    { initialProps: [] },
+  );
+  await waitFor(() => expect(result.current[PK]).toEqual(verified));
+  rerender([{ pubkey: PK, profile: slimDisplayProfile(verified) }] as NostrContact[]);
+  expect(result.current[PK]).toEqual(verified);
+  expect(resolveProfiles).toHaveBeenCalledTimes(1);
 });
 
 it('a completed miss is null rather than indefinitely pending', async () => {

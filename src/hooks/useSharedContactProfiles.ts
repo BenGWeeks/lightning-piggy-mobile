@@ -12,7 +12,8 @@ const EMPTY_CONTACTS: readonly NostrContact[] = [];
 /** Shared by NIP-17 and Marmot, including our optimistic sent messages.
  * Pending requests belong to the mount, not a messages-array revision: send
  * reconciliation must not discard a result whose pubkey is already scheduled.
- * One state update per bounded batch; known friends need no relay round trip. */
+ * One state update per bounded batch; friends supply immediate display data
+ * while the resolver refreshes their signature-verified payment fields. */
 export function useSharedContactProfiles(
   messages: readonly { text: string }[],
   contacts: readonly NostrContact[] = EMPTY_CONTACTS,
@@ -45,7 +46,7 @@ export function useSharedContactProfiles(
     const byPubkey = new Map<string, Set<string>>();
     for (const message of messages) {
       const ref = extractSharedContact(message.text);
-      if (!ref || known[ref.pubkey] || scheduled.current.has(ref.pubkey)) continue;
+      if (!ref || scheduled.current.has(ref.pubkey)) continue;
       const relays = byPubkey.get(ref.pubkey) ?? new Set<string>();
       for (const relay of ref.relays) relays.add(relay);
       byPubkey.set(ref.pubkey, relays);
@@ -81,7 +82,15 @@ export function useSharedContactProfiles(
       clearTimeout(timer);
       timers.current.delete(timer);
     });
-  }, [messages, known]);
+  }, [messages]);
 
-  return useMemo(() => ({ ...sharedProfiles, ...known }), [sharedProfiles, known]);
+  return useMemo(() => {
+    const profiles: Record<string, NostrProfile | null> = { ...known };
+    for (const [pubkey, resolved] of Object.entries(sharedProfiles)) {
+      // A resolver result takes precedence over display-only contact hydration;
+      // a miss still allows the cached name/avatar to serve as a fallback.
+      if (resolved || !profiles[pubkey]) profiles[pubkey] = resolved;
+    }
+    return profiles;
+  }, [sharedProfiles, known]);
 }
