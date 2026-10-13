@@ -207,6 +207,13 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       if (__DEV__) console.warn('[Nostr] live wrap persist failed:', e);
     });
   };
+  const pendingReplays = new Set<DeferredFollowGateEntry>();
+  const releaseReplayClaim = (item: DeferredFollowGateEntry): void => {
+    if (!pendingReplays.delete(item)) return;
+    knownWrapIds.delete(item.entry.id);
+    seen.delete(item.entry.id);
+    item.onEvict?.();
+  };
   // Replay the surface + notify side-effects of a fresh inbound that was
   // deferred by the follow-gate during the post-switch hydration window
   // (#851 F2). Called by the hook (via the registered ref) once follows
@@ -229,21 +236,31 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       return;
     }
     if (item.rumor) routeMarmotWelcome(item.rumor, viewerPubkey);
+    pendingReplays.add(item);
     chainWrite(async () => {
-      if (cancelled || !isCurrentOwner()) return;
-      await upsertDmMessages([
-        {
-          owner: viewerPubkey,
-          eventId: item.entry.id,
-          conversation: item.partnerPubkey,
-          createdAt: item.entry.createdAt,
-          sender: item.entry.fromMe ? viewerPubkey : item.partnerPubkey,
-          content: item.content ?? item.entry.text,
-          fromMe: item.entry.fromMe,
-          wireKind: item.entry.wireKind,
-        },
-      ]);
-      knownWrapIds.add(item.entry.id);
+      if (cancelled || !isCurrentOwner()) {
+        releaseReplayClaim(item);
+        return;
+      }
+      try {
+        await upsertDmMessages([
+          {
+            owner: viewerPubkey,
+            eventId: item.entry.id,
+            conversation: item.partnerPubkey,
+            createdAt: item.entry.createdAt,
+            sender: item.entry.fromMe ? viewerPubkey : item.partnerPubkey,
+            content: item.content ?? item.entry.text,
+            fromMe: item.entry.fromMe,
+            wireKind: item.entry.wireKind,
+          },
+        ]);
+        knownWrapIds.add(item.entry.id);
+        pendingReplays.delete(item);
+      } catch (error) {
+        releaseReplayClaim(item);
+        throw error;
+      }
     });
     queueInboxEntry(item.entry);
     notifyDmMessage(item.partnerPubkey);
@@ -445,6 +462,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
           buffer: followGateBuffer,
           fresh: isFreshArrival(ev.created_at),
           bypassOwn: true,
+          onEvict: () => seen.delete(ev.id),
         }) !== 'pass'
       )
         return;
@@ -810,7 +828,12 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         console.warn('[Nostr] live DM sub: knownWrapIds seed failed, dedup degraded:', e);
     }
     if (cancelled || !isCurrentOwner()) return;
-    reconnectController.start(sinceK4Cursor);
+    const recoverySince = followGateBuffer.kind4RecoverySince;
+    reconnectController.start(
+      recoverySince === undefined
+        ? sinceK4Cursor
+        : Math.min(sinceK4Cursor ?? recoverySince, recoverySince),
+    );
     // Native engine (Stage 2 M2, #1036) — started AFTER the knownWrapIds
     // seed so the engine's native dedupe set is seeded with the same ids.
     // No-op in 'off' mode; falls back to a JS re-arm on failure.
@@ -819,6 +842,9 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
 
   return () => {
     cancelled = true;
+    // Release synchronously before a new subscription can claim these ids.
+    // Old queued cancellations must not remove claims owned by the new sub.
+    for (const item of pendingReplays) releaseReplayClaim(item);
     noteLiveDmSubArmed(false);
     // Invalidate any in-flight close signal + pending reconnect FIRST (#934):
     // stopReconnecting() bumps the generation and stops the AppState-resume

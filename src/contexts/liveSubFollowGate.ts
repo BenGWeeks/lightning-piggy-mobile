@@ -37,6 +37,8 @@ export interface LiveSubFollowGateBuffer {
   reevaluate: (follows: Set<string>, onPass: (item: DeferredFollowGateEntry) => void) => void;
   // Drop strangers after reconciliation, or everything on account switch/sign-out.
   clear: () => void;
+  /** Earliest deferred kind-4 timestamp, retained across drains and re-opens. */
+  readonly kind4RecoverySince?: number;
   // Test/observability hook.
   readonly size: number;
 }
@@ -50,8 +52,15 @@ export function createLiveSubFollowGateBuffer(
   // Keyed by inbox-entry id so a wrap delivered twice (multi-relay) only
   // buffers once and a later real ingest can't double-replay it.
   const deferred = new Map<string, DeferredFollowGateEntry>();
+  // One timestamp bounds recovery metadata even after overflow. Keep it for
+  // this account store lifetime: a newer persisted cursor cannot prove that
+  // all older evicted or cancelled messages were recovered.
+  let kind4RecoverySince: number | undefined;
   return {
     defer(item) {
+      if (item.entry.wireKind === 4) {
+        kind4RecoverySince = Math.min(kind4RecoverySince ?? Infinity, item.entry.createdAt);
+      }
       if (deferred.has(item.entry.id)) return;
       // Evict oldest (insertion-order) when at cap so the buffer stays bounded.
       if (deferred.size >= cap) {
@@ -75,6 +84,9 @@ export function createLiveSubFollowGateBuffer(
     },
     clear() {
       deferred.clear();
+    },
+    get kind4RecoverySince() {
+      return kind4RecoverySince;
     },
     get size() {
       return deferred.size;

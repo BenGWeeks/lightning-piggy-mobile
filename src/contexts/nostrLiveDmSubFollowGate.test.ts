@@ -25,6 +25,7 @@ import { createYieldScheduler } from './nostrDecryptPacing';
 import { nip04PlaintextCache } from './nostrSecretKeyCache';
 import { routeMarmotWelcome } from '../services/marmotWelcomeRouter';
 import { upsertDmMessages } from '../services/dmDb';
+import { loadLastSeen } from './nostrDmCache';
 
 jest.mock('../services/marmotWelcomeRouter', () => ({ routeMarmotWelcome: jest.fn() }));
 
@@ -816,4 +817,121 @@ describe('review replay delivery regressions', () => {
     expect(buffer.size).toBe(0);
     expect(mockFireNotification).not.toHaveBeenCalled();
   });
+});
+
+describe('review deferred persistence recovery', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.mocked(upsertDmMessages).mockReset().mockResolvedValue(undefined);
+  });
+
+  it.each(['queued teardown', 'blocked teardown', 'write failure'])(
+    'releases unpersisted replay claims after %s and recovers on reopen',
+    async (scenario) => {
+      const params = makeParams({
+        setDeferredReplay: jest.fn(),
+        followHydratedRef: { current: false },
+      });
+      const stop = startLiveDmSubscription(params);
+      await flush();
+      const wraps = [0, 1].map((i) => ({
+        id: `replay-cancel-${i}`,
+        kind: 1059,
+        pubkey: ALICE,
+        created_at: 100,
+        tags: [],
+        content: 'sealed',
+        rumor: {
+          kind: 14,
+          created_at: 100,
+          content: `message ${i}`,
+          partnership: { partnerPubkey: ALICE, fromMe: false },
+        },
+      }));
+      for (const wrap of wraps) {
+        capturedOnEvent!(wrap);
+        await flush();
+      }
+      expect(params.followGateBuffer.size).toBe(2);
+      let finish: (() => void) | undefined;
+      if (scenario === 'blocked teardown') {
+        jest
+          .mocked(upsertDmMessages)
+          .mockImplementationOnce(() => new Promise<void>((resolve) => (finish = resolve)));
+      } else if (scenario === 'write failure') {
+        jest.mocked(upsertDmMessages).mockRejectedValue(new Error('disk unavailable'));
+      }
+      params.followPubkeysRef.current.add(ALICE);
+      params.followHydratedRef!.current = true;
+      const replay = jest.mocked(params.setDeferredReplay).mock.calls[0][0]!;
+      params.followGateBuffer.reevaluate(params.followPubkeysRef.current, replay);
+      expect(params.followGateBuffer.size).toBe(0);
+      if (scenario !== 'queued teardown') await flush();
+      stop();
+      // Teardown must release queued claims before a new sub can receive them.
+      expect(params.knownWrapIdsRef.current.set.has(wraps[1].id)).toBe(false);
+      finish?.();
+      await flush();
+      jest.mocked(upsertDmMessages).mockReset().mockResolvedValue(undefined);
+      startLiveDmSubscription(params);
+      await flush();
+      capturedOnEvent!(wraps[1]);
+      await flush();
+      expect(upsertDmMessages).toHaveBeenCalledWith([
+        expect.objectContaining({ eventId: wraps[1].id, content: 'message 1' }),
+      ]);
+    },
+  );
+
+  it.each([false, true])(
+    'recovers evicted kind-4 backlog after hydration (reopen with advanced cursor=%s)',
+    async (reopen) => {
+      const params = makeParams({
+        setDeferredReplay: jest.fn(),
+        followHydratedRef: { current: false },
+      });
+      const stop = startLiveDmSubscription(params);
+      await flush();
+      jest.mocked(nip04PlaintextCache.get).mockReturnValue('legacy plaintext');
+      const messages = Array.from({ length: 51 }, (_, i) => ({
+        id: `kind4-overflow-${i}`,
+        kind: 4,
+        pubkey: ALICE,
+        created_at: 100 + i,
+        tags: [['p', VIEWER]],
+        content: 'ciphertext',
+      }));
+      for (const message of messages) {
+        capturedOnEvent!(message);
+        await flush();
+      }
+      expect(params.followGateBuffer.size).toBe(50);
+      params.followPubkeysRef.current.add(ALICE);
+      params.followHydratedRef!.current = true;
+      params.followGateBuffer.reevaluate(
+        params.followPubkeysRef.current,
+        jest.mocked(params.setDeferredReplay).mock.calls[0][0]!,
+      );
+      await flush();
+      expect(upsertDmMessages).toHaveBeenCalledTimes(50);
+      // Canonical follow adoption clears the drained buffer.
+      params.followGateBuffer.clear();
+      if (reopen) {
+        stop();
+        jest.mocked(loadLastSeen).mockResolvedValueOnce(10_000);
+        startLiveDmSubscription(params);
+        await flush();
+        expect(mockSubscribe).toHaveBeenLastCalledWith(expect.objectContaining({ sinceK4: 100 }));
+      }
+      // Same-sub relay retry and reopened-sub recovery both accept the victim.
+      capturedOnEvent!(messages[0]);
+      await flush();
+      const ids = jest
+        .mocked(upsertDmMessages)
+        .mock.calls.flatMap(([rows]) => rows.map((row) => row.eventId));
+      expect(ids).toHaveLength(51);
+      expect(new Set(ids).size).toBe(51);
+      expect(mockFireNotification).not.toHaveBeenCalled();
+    },
+  );
 });
