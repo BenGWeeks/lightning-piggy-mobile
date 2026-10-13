@@ -25,9 +25,9 @@ See docs/DEPLOYMENT.adoc → "TestFlight 'What to Test' automation".
 
 ### Improved
 
-- **Faster:** chats open quicker (no more inbox refresh storms), reactions show straight away, the Explore map loads fast and the Market remembers your filters.
+- **Faster:** chats open quicker (no more repeated inbox refreshes), reactions show straight away, the Explore map loads fast and the Market remembers your filters.
 - **Group chats** show sender pictures (tap one for their profile) and softer pink-to-purple bubbles.
-- **Wallets tab** (renamed from Home): the right transactions show instantly when you swipe, and wallet buttons never stay faded.
+- **Wallets tab** (renamed from Home): each wallet's transactions show instantly when you swipe between wallets, and wallet buttons never stay faded.
 - **Tidier settings and drawer:** Display & language combined; Messages, Notifications and Advanced split out; no scrolling in the drawer.
 - **Safer links:** previews, images and voice notes from people you don't follow wait for a tap.
 
