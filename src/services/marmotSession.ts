@@ -60,6 +60,7 @@ import { KeyPackageRefreshRequests } from './marmotKeyRefresh';
 import { alignCommitForMdk, spreadProposals } from './marmotProposals';
 import { MarmotWelcomeOutbox } from './marmotWelcomeOutbox';
 import { boundGroupQueries } from './marmotGroupBackfill';
+import { createMarmotGroupConnections } from './marmotGroupConnections';
 import { submitWhenSettled, type GroupSendIntent } from './marmotSendGate';
 import { createMarmotNetwork, createPushTransport } from './marmotNetwork';
 import {
@@ -206,7 +207,9 @@ export class MarmotSession {
   /** MIP-05: announcing THIS device's push token in our groups. */
   readonly pushRegistration: MarmotPushRegistrar;
   private stopWelcomeRetries: (() => void) | null = null;
-  private connection: { unsubscribe(): void } | null = null;
+  private readonly connection = createMarmotGroupConnections(() =>
+    this.client.groups.connectAll({ fallbackRelays: this.opts.getWriteRelays() }),
+  );
   // Single-flight: start-up, resume, a new chat and a join can all ask at
   // once; one asking mid-run (e.g. a join just spent our key) gets a rerun.
   private readonly keyPackageRuns = new SingleFlight(() => this.maintainKeyPackages());
@@ -234,7 +237,7 @@ export class MarmotSession {
     const store = <T>(ns: string) => createMarmotKvStore<T>(this.backend, ns);
     this.outbox = new MarmotWelcomeOutbox(this.backend, () => this.gate.stopped);
     const network = this.outbox.wrapNetwork(
-      opts.network ?? createMarmotNetwork(opts.getLookupRelays),
+      opts.network ?? createMarmotNetwork(opts.getLookupRelays, this.connection.reconnect),
     );
     this.push = new MarmotPushNotifier({
       pubkey: opts.pubkey,
@@ -341,7 +344,7 @@ export class MarmotSession {
     // Push placeholders wait until every loaded group's backfill has drained.
     this.groupsToCatchUp = groups.loaded.length;
     setMarmotCatchingUp(this.pubkey, groups.loaded.length > 0);
-    this.connection = groups.connectAll({ fallbackRelays: this.opts.getWriteRelays() });
+    this.connection.start();
     this.emitGroupsChanged();
     // Publishing a key package needs a signature. Local keys sign silently;
     // Amber / NIP-46 would prompt on every app start for an Alpha feature the
@@ -378,8 +381,7 @@ export class MarmotSession {
         pushStopped,
       ]).then(() => undefined),
     );
-    this.connection?.unsubscribe();
-    this.connection = null;
+    this.connection.unsubscribe();
     for (const g of this.client.groups.loaded) {
       g.removeAllListeners('applicationMessage');
       g.removeAllListeners('stateChanged');

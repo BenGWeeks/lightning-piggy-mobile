@@ -10,21 +10,34 @@ const RETRY_BASE_MS = 5_000;
 const RETRY_MAX_MS = 5 * 60_000;
 const MAX_SEEN_EVENTS = 2_000;
 
+export interface MarmotRelayRecovery {
+  reconnect(): void;
+  resetTransport(): void;
+  notifyInitial: boolean;
+  attempts: Map<string, number>;
+}
+
 export function subscribeMarmotRelays(
   relays: string[],
   filters: Filter[],
   onEvent: (event: Event) => void,
+  recovery?: MarmotRelayRecovery,
 ): { unsubscribe(): void } {
   let stopped = false;
   let foreground = AppState.currentState !== 'background';
   let resumeTimer: ReturnType<typeof setTimeout> | null = null;
   const seen = new Set<string>();
+  // A full group reconnect replaces route instances. Retain backoff across
+  // those instances; watermark/since changes do not make a new logical route.
+  const attempts = recovery?.attempts ?? new Map<string, number>();
+  const keyOf = (relay: string, filter: Filter) =>
+    JSON.stringify([relay, { ...filter, since: undefined, limit: undefined }]);
   const routes = relays.flatMap((relay) =>
     filters.map((filter) => ({
       relay,
       filter,
       generation: 0,
-      attempt: 0,
+      key: keyOf(relay, filter),
       close: null as (() => void) | null,
       timer: null as ReturnType<typeof setTimeout> | null,
     })),
@@ -42,14 +55,15 @@ export function subscribeMarmotRelays(
     const current = () => !stopped && generation === route.generation;
     let notified = false;
     const recovered = () => {
-      if (!current() || !foreground || generation === 1 || notified) return;
+      if (!current() || !foreground || (generation === 1 && !recovery?.notifyInitial) || notified)
+        return;
       notified = true;
       noteMarmotRelayReconnect();
     };
     const sub = pool.subscribeMany([route.relay], route.filter, {
       onevent: (event) => {
         if (!current()) return;
-        route.attempt = 0;
+        attempts.delete(route.key);
         recovered();
         // subscribeMany previously deduped the relay fan-out. Preserve that
         // boundary now that each relay has its own reconnect lifecycle.
@@ -61,10 +75,13 @@ export function subscribeMarmotRelays(
       oneose: recovered,
       onclose: () => {
         if (!current() || !foreground || route.timer !== null) return;
-        const delay = Math.min(RETRY_BASE_MS * 2 ** route.attempt++, RETRY_MAX_MS);
+        const attempt = attempts.get(route.key) ?? 0;
+        attempts.set(route.key, Math.min(attempt + 1, 6));
+        const delay = Math.min(RETRY_BASE_MS * 2 ** attempt, RETRY_MAX_MS);
         route.timer = setTimeout(() => {
           route.timer = null;
-          open(route);
+          if (recovery) recovery.reconnect();
+          else open(route);
         }, delay);
       },
     });
@@ -86,9 +103,19 @@ export function subscribeMarmotRelays(
       if (stopped || !foreground) return;
       if (__DEV__) console.log('[Marmot] resume — re-arming relay subscriptions');
       routes.forEach((route) => {
-        route.attempt = 0;
-        open(route);
+        route.generation++;
+        route.close?.();
+        route.close = null;
+        attempts.delete(route.key);
       });
+      // Closing a subscription does not evict SimplePool's cached WebSocket.
+      // Replace the transport too: Doze can leave it OPEN but silently dead.
+      if (recovery) recovery.resetTransport();
+      else pool.close([...new Set(relays)]);
+      // The session reconnects via GroupsManager: collect every backfill page,
+      // drain one MLS batch, then subscribe live. No newest-page-only recovery.
+      if (recovery) recovery.reconnect();
+      else routes.forEach(open);
     }, RESUME_DELAY_MS);
   });
   routes.forEach(open);

@@ -50,7 +50,20 @@ const withTimeout = <T>(p: Promise<T>, ms: number) =>
     new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
   ]);
 
-export function createMarmotNetwork(getFallbackRelays: () => string[]): NostrNetworkInterface {
+export function createMarmotNetwork(
+  getFallbackRelays: () => string[],
+  onReconnect?: () => void,
+): NostrNetworkInterface {
+  let recovering = false;
+  const attempts = new Map<string, number>();
+  const liveSubscriptions = new Map<object, string[]>();
+  const resetTransport = () => pool.close([...new Set([...liveSubscriptions.values()].flat())]);
+  const reconnect = onReconnect
+    ? () => {
+        recovering = true;
+        onReconnect();
+      }
+    : undefined;
   const relaysOr = (relays: string[]) => {
     const cleaned = cleanRelays(relays);
     return cleaned.length > 0 ? cleaned : cleanRelays([...getFallbackRelays(), ...DEFAULT_RELAYS]);
@@ -97,9 +110,22 @@ export function createMarmotNetwork(getFallbackRelays: () => string[]): NostrNet
         subscribe(observer) {
           const targets = relaysOr(relays);
           trackRelays(targets);
-          return subscribeMarmotRelays(targets, asArray(filters as Filter | Filter[]), (e) =>
-            observer.next?.(e),
+          const token = {};
+          liveSubscriptions.set(token, targets);
+          const sub = subscribeMarmotRelays(
+            targets,
+            asArray(filters as Filter | Filter[]),
+            (e) => observer.next?.(e),
+            reconnect
+              ? { reconnect, resetTransport, notifyInitial: recovering, attempts }
+              : undefined,
           );
+          return {
+            unsubscribe: () => {
+              liveSubscriptions.delete(token);
+              sub.unsubscribe();
+            },
+          };
         },
       };
     },

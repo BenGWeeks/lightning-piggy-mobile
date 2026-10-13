@@ -1326,11 +1326,16 @@ as that would hide leaked network work.
 Marmot's kind-445 group subscriptions use the shared JS SimplePool, whose
 `enableReconnect` is false. A socket drop used to leave the MLS connection
 record alive with a dead transport; the MarmotBridge resume handler only
-checked key-package freshness. `marmotSubscription.ts` now reopens each relay
-route after a drop with capped backoff, and proactively rearms group routes
-three seconds after resume. Backgrounding cancels pending timers; account
-teardown invalidates callbacks and closes routes. Group filters retain their
-bounded watermark window and relay fan-out remains deduplicated.
+checked key-package freshness. `marmotSubscription.ts` now retries relay
+failures with capped backoff and replaces the cached SimplePool transport
+three seconds after resume: closing a subscription alone leaves a silently
+dead WebSocket cached. Both paths reconnect the session through
+`GroupsManager.connectAll`, which collects every bounded backfill page and
+ingests the complete ordered MLS batch before opening live delivery. This
+recovers offline gaps beyond 500 events, including older epoch commits.
+Backoff survives replacement of the group connections. Backgrounding cancels
+pending timers; account teardown invalidates callbacks and closes routes.
+Group filters retain their watermark window and relay fan-out dedupe.
 
 Welcomes (kind 444 inside kind 1059) arrive through the ordinary DM inbox,
 not a separate key-package inbox. The JS DM controller already rearms on

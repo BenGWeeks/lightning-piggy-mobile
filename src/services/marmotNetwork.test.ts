@@ -11,7 +11,8 @@ import {
   MAX_PUSH_INBOX_RELAYS,
   MAX_PUSH_RELAYS,
 } from './marmotNetwork';
-import { trackRelays } from './nostrPool';
+import { pool, trackRelays } from './nostrPool';
+import { createMarmotGroupConnections } from './marmotGroupConnections';
 import { onMarmotRelayReconnect } from './marmotRelayReconnect';
 import { MARMOT_PUSH_SERVER_RELAYS } from './nostrRelayDefaults';
 
@@ -23,6 +24,7 @@ jest.mock('./nostrPool', () => ({
     querySync: (...args: unknown[]) => mockQuerySync(...args),
     publish: (...args: unknown[]) => mockPublish(...args),
     subscribeMany: (...args: unknown[]) => mockSubscribeMany(...args),
+    close: jest.fn(),
   },
   trackRelays: jest.fn(),
 }));
@@ -267,6 +269,77 @@ describe('Marmot subscription lifecycle', () => {
     jest.advanceTimersByTime(5_000);
     expect(mockSubscribeMany).toHaveBeenCalledTimes(before + 1);
     expect(mockSubscribeMany.mock.calls.at(-1)[0]).toEqual(['wss://one.example']);
+  });
+  it('replaces transports for every group before reconnect cancels sibling resume timers', () => {
+    stop();
+    jest.mocked(pool.close).mockClear();
+    const network = createMarmotNetwork(
+      () => [],
+      () => connections.reconnect(),
+    );
+    const connections = createMarmotGroupConnections(() => {
+      const subs = ['one', 'two'].map((group) =>
+        network
+          .subscription([`wss://${group}.example`], {
+            kinds: [445],
+            '#h': [group],
+            limit: 500,
+          })
+          .subscribe({ next }),
+      );
+      return { unsubscribe: () => subs.forEach((sub) => sub.unsubscribe()) };
+    });
+    connections.start();
+    stop = connections.unsubscribe;
+    onState('active');
+    jest.advanceTimersByTime(3_000);
+    expect(pool.close).toHaveBeenCalledTimes(1);
+    expect(pool.close).toHaveBeenCalledWith(['wss://one.example', 'wss://two.example']);
+    expect(mockSubscribeMany.mock.calls.slice(-2).map(([relays]) => relays[0])).toEqual([
+      'wss://one.example',
+      'wss://two.example',
+    ]);
+  });
+  it('hands relay retries to group catch-up, retaining backoff and recovery notifications across new routes', () => {
+    stop();
+    mockSubscribeMany.mockClear();
+    let since = 100;
+    const reconnect = jest.fn(() => {
+      stop();
+      since++;
+      stop = arm();
+    });
+    const network = createMarmotNetwork(() => [], reconnect);
+    const arm = () =>
+      network
+        .subscription(['wss://one.example'], {
+          kinds: [445],
+          '#h': ['group'],
+          limit: 500,
+          since,
+        })
+        .subscribe({ next }).unsubscribe;
+    stop = arm();
+    const recovered = jest.fn();
+    const removeListener = onMarmotRelayReconnect(recovered);
+    try {
+      mockSubscribeMany.mock.calls[0][2].oneose();
+      expect(recovered).not.toHaveBeenCalled();
+      mockSubscribeMany.mock.calls[0][2].onclose(['offline']);
+      jest.advanceTimersByTime(5_000);
+      expect(reconnect).toHaveBeenCalledTimes(1);
+      const reopened = mockSubscribeMany.mock.calls[1][2];
+      reopened.oneose();
+      reopened.oneose();
+      expect(recovered).toHaveBeenCalledTimes(1);
+      reopened.onclose(['still offline']);
+      jest.advanceTimersByTime(9_999);
+      expect(reconnect).toHaveBeenCalledTimes(1);
+      jest.advanceTimersByTime(1);
+      expect(reconnect).toHaveBeenCalledTimes(2);
+    } finally {
+      removeListener();
+    }
   });
   it('notifies recovery once on replay or EOSE, ignoring initial and stale routes', () => {
     const recovered = jest.fn();
