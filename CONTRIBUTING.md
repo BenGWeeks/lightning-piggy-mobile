@@ -103,6 +103,8 @@ bash scripts/check-file-size.sh          # file-size cap (see below)
 
 ## Pull requests
 
+Release notes are generated from merged PR titles. Use Conventional Commits and imperative, user-facing wording for `feat` and `fix`; no shared notes file needs updating.
+
 1. Open or find an issue first, and branch from `main`.
 2. Keep the PR **small and targeted**: fix the reported defect or build the requested feature, nothing
    speculative.

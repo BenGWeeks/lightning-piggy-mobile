@@ -1,8 +1,10 @@
 name: Release Nostr note
 
 on:
-  release:
-    types: [published]
+  # Wait until Release has finished writing generated notes and attaching assets.
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
   workflow_dispatch:
     inputs:
       tag:
@@ -14,20 +16,52 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-nostr-${{ inputs.tag || github.event.release.tag_name }}
+  group: release-nostr-${{ inputs.tag || github.event.workflow_run.head_branch }}
   cancel-in-progress: false
 
 jobs:
   publish:
-    if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'release')
+    concurrency:
+      group: release-body-${{ github.repository }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
+      pull-requests: read # List merged PR titles for the release.
       contents: write # Only used to append the public note link to the Release.
-    env:
-      TAG: ${{ inputs.tag || github.event.release.tag_name }}
     steps:
+      - name: Resolve release tag
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MANUAL_TAG: ${{ inputs.tag }}
+          RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          tag="$MANUAL_TAG"
+          if [ -z "$tag" ]; then
+            tag="$RUN_BRANCH"
+            # Release runs normally name the tag; some payloads name the branch.
+            if [ -z "$tag" ] || ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName >/dev/null 2>&1; then
+              tag=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 1 --json tagName --jq '.[0].tagName // empty')
+            fi
+          fi
+          if [ -z "$tag" ]; then
+            echo '::error::No published Release found for the completed run.'
+            exit 1
+          fi
+          prerelease=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)
+          echo "TAG=$tag" >> "$GITHUB_ENV"
+          # Automatic announcements still exclude prereleases; manual retries allow them.
+          if [ -z "$MANUAL_TAG" ] && [ "$prerelease" = true ]; then
+            echo 'enabled=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'enabled=true' >> "$GITHUB_OUTPUT"
+          fi
       - name: Check secrets
+        if: steps.release.outputs.enabled == 'true'
         id: secrets
         env:
           NOSTR_RELEASE_BUNKER_URI: ${{ secrets.NOSTR_RELEASE_BUNKER_URI }}
@@ -49,7 +83,7 @@ jobs:
           ref: main
           persist-credentials: false
 
-      - name: Checkout release notes at tag (before the archive/reset)
+      - name: Checkout release history at tag
         if: steps.secrets.outputs.enabled == 'true'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -69,11 +103,20 @@ jobs:
         # Lockfile-verified; --ignore-scripts skips native/postinstall work this job doesn't need.
         run: npm ci --ignore-scripts --no-audit --no-fund
 
+      - name: Generate release notes from merged PR titles
+        if: steps.secrets.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          previous=$(git -C release-source describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
+          generator="$GITHUB_WORKSPACE/scripts/release-notes-from-prs.sh"
+          (cd release-source && "$generator" "$previous" "$TAG") > "$RUNNER_TEMP/release-notes.md"
+
       - name: Build unsigned event
         if: steps.secrets.outputs.enabled == 'true'
         run: |
           node scripts/build-release-note.mjs --tag "$TAG" \
-            --notes-file release-source/docs/RELEASE_NOTES_NEXT.md \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
             --repo-dir release-source --event > "$RUNNER_TEMP/release-note.json"
 
       - name: Sign in Amber and publish to write relays
@@ -89,9 +132,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view "$TAG" --json body --jq '.body' > "$RUNNER_TEMP/release-body.md"
-          LINK="$(cat "$RUNNER_TEMP/nostr-link.txt")"
-          if ! grep -Fq "$LINK" "$RUNNER_TEMP/release-body.md"; then
-            printf '\n\nNostr release note: %s\n' "$LINK" >> "$RUNNER_TEMP/release-body.md"
-            gh release edit "$TAG" --notes-file "$RUNNER_TEMP/release-body.md"
-          fi
+          # Content is prepared before the helper re-reads the current body.
+          printf 'Nostr release note: %s\n' "$(cat "$RUNNER_TEMP/nostr-link.txt")" > "$RUNNER_TEMP/nostr-section.md"
+          node scripts/update-release-body.mjs --tag "$TAG" \
+            --section nostr-link --content-file "$RUNNER_TEMP/nostr-section.md"

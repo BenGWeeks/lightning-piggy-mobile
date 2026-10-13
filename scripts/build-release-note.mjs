@@ -124,11 +124,11 @@ function main() {
     },
   });
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-  const notesFile = path.resolve(
-    values['notes-file'] || path.join(root, 'docs/RELEASE_NOTES_NEXT.md'),
-  );
-  let notes = fs.existsSync(notesFile) ? fs.readFileSync(notesFile, 'utf8') : '';
-  if (!/^[ \t]*[-*+][ \t]+\S/m.test(notes.replace(/<!--[\s\S]*?-->/g, ''))) {
+  const notesFile = values['notes-file'] && path.resolve(values['notes-file']);
+  let notes = notesFile && fs.existsSync(notesFile) ? fs.readFileSync(notesFile, 'utf8') : '';
+  // Generated notes may be prose (including the default summary), not bullets.
+  // Only absent, empty, or comment-only input needs the Git-history fallback.
+  if (!plainText(notes)) {
     notes = gitHistoryNotes(path.resolve(values['repo-dir'] || root), values.tag);
   }
   const input = { tag: values.tag, notes };

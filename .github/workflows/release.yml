@@ -36,6 +36,69 @@ env:
   EAS_CLI_VERSION: '18.6.0'
 
 jobs:
+  release-notes:
+    name: Generate release notes
+    # Also locks out manual Nostr retries while either job updates a body.
+    concurrency:
+      group: release-body-${{ github.repository }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    outputs:
+      text: ${{ steps.notes.outputs.text }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_REF: ${{ github.event.release.tag_name || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_REF }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Generate notes from merged PR titles
+        id: notes
+        run: |
+          previous=$(git describe --tags --abbrev=0 "${RELEASE_REF}^" 2>/dev/null || true)
+          scripts/release-notes-from-prs.sh "$previous" "$RELEASE_REF" > "$RUNNER_TEMP/release-notes.md"
+          delimiter="NOTES_$(cat /proc/sys/kernel/random/uuid)"
+          {
+            echo "text<<$delimiter"
+            cat "$RUNNER_TEMP/release-notes.md"
+            echo "$delimiter"
+          } >> "$GITHUB_OUTPUT"
+          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+      - name: Append generated notes to GitHub Release
+        if: github.event_name == 'release'
+        run: |
+          node scripts/update-release-body.mjs --tag "$RELEASE_REF" \
+            --section generated-notes --content-file "$RUNNER_TEMP/release-notes.md"
+      - name: Append generated section to changelog archive
+        if: github.event_name == 'release'
+        env:
+          PREVIOUS_TAG: ${{ steps.notes.outputs.previous }}
+        run: |
+          archive=docs/CHANGELOG.md
+          [ -f "$archive" ] || archive=CHANGELOG.md
+          if [ -f "$archive" ]; then
+            # Carry forward prior generated sections without writing to protected main.
+            # A Git tag need not have a GitHub Release or an archive attachment.
+            if [ -n "$PREVIOUS_TAG" ] &&
+              gh release view "$PREVIOUS_TAG" --json assets --jq '.assets[].name' > "$RUNNER_TEMP/previous-assets.txt"; then
+              if grep -Fxq CHANGELOG.md "$RUNNER_TEMP/previous-assets.txt"; then
+                gh release download "$PREVIOUS_TAG" --pattern CHANGELOG.md --dir "$RUNNER_TEMP/previous"
+                cp "$RUNNER_TEMP/previous/CHANGELOG.md" "$archive"
+              fi
+            fi
+            if ! grep -Fxq "## $RELEASE_REF" "$archive"; then
+              printf '\n## %s\n\n' "$RELEASE_REF" >> "$archive"
+              cat "$RUNNER_TEMP/release-notes.md" >> "$archive"
+            fi
+            cp "$archive" "$RUNNER_TEMP/CHANGELOG.md"
+            gh release upload "$RELEASE_REF" "$RUNNER_TEMP/CHANGELOG.md" --clobber
+          fi
+
   build-and-submit:
     name: EAS build & submit
     runs-on: ubuntu-latest
@@ -152,22 +215,19 @@ jobs:
     # eas submit handles natively once Android auto-submit is wired up).
     # Skip when the build job didn't include iOS.
     if: contains(fromJSON('["ios","all"]'), needs.build-and-submit.outputs.platform) || github.event.inputs.whats_new_build != ''
-    needs: build-and-submit
+    needs: [build-and-submit, release-notes]
     runs-on: ubuntu-latest
     env:
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
       NODE_NO_WARNINGS: '1'
       GH_TOKEN: ${{ github.token }}
     permissions:
-      contents: write # to push the reset branch
-      pull-requests: write # to open the reset PR (main blocks direct pushes)
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # Need the full ref so we can commit RELEASE_NOTES_NEXT.md back to main.
-          fetch-depth: 0
-          token: ${{ github.token }}
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -246,20 +306,24 @@ jobs:
             echo "version=$version" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build changelog
+      - name: Prepare TestFlight notes
         if: steps.gate.outputs.skip != 'true' && steps.iosbuild.outputs.version != ''
         id: changelog
+        env:
+          RELEASE_NOTES: ${{ needs.release-notes.outputs.text }}
         run: |
-          # Capture stdout (the assembled notes) into a file; preserve newlines
-          # for the GH Actions output via a heredoc-delimited multi-line value.
-          node scripts/build-testflight-changelog.mjs > /tmp/whatsnew.txt
-          echo "Assembled changelog:"
-          cat /tmp/whatsnew.txt
-          {
-            echo 'whatsnew<<EOF_WHATSNEW'
-            cat /tmp/whatsnew.txt
-            echo 'EOF_WHATSNEW'
-          } >> "$GITHUB_OUTPUT"
+          # Apple caps What to Test at 4000 characters. Preserve whole lines.
+          node --input-type=module <<'JS' >> "$GITHUB_OUTPUT"
+          import { randomUUID } from 'node:crypto';
+          const text = process.env.RELEASE_NOTES;
+          let notes = text;
+          if (notes.length > 3900) {
+            notes = notes.slice(0, 3850);
+            notes = notes.slice(0, notes.lastIndexOf('\n')) + '\n- ...and more';
+          }
+          const delimiter = `NOTES_${randomUUID()}`;
+          console.log(`whatsnew<<${delimiter}\n${notes}\n${delimiter}`);
+          JS
 
       - name: PATCH whatsNew via App Store Connect API
         if: steps.gate.outputs.skip != 'true' && steps.iosbuild.outputs.version != ''
@@ -271,47 +335,6 @@ jobs:
           ASC_BUILD_VERSION: ${{ steps.iosbuild.outputs.version }}
           WHATS_NEW: ${{ steps.changelog.outputs.whatsnew }}
         run: node scripts/asc-set-whats-new.mjs
-
-      - name: Archive notes + reset RELEASE_NOTES_NEXT.md
-        # Only on a real Release (not a workflow_dispatch re-run) — we don't
-        # want to re-archive the same notes twice.
-        if: github.event_name == 'release' && steps.gate.outputs.skip != 'true' && steps.iosbuild.outputs.version != ''
-        run: |
-          tag="${{ github.event.release.tag_name }}"
-          notes_file="docs/RELEASE_NOTES_NEXT.md"
-          archive_file="docs/CHANGELOG.md"
-          # Skip if the file is empty / placeholder (no bullets shipped).
-          if ! grep -qE '^\s*[-*]\s+\S' "$notes_file"; then
-            echo "No bullets to archive; skipping reset."
-            exit 0
-          fi
-          # Prepend a new section to CHANGELOG.md.
-          {
-            echo "## $tag"
-            echo
-            cat /tmp/whatsnew.txt
-            echo
-            if [ -f "$archive_file" ]; then
-              cat "$archive_file"
-            fi
-          } > "$archive_file.new"
-          mv "$archive_file.new" "$archive_file"
-          # Reset the next-release file to its placeholder state. Using
-          # `cp` from a checked-in template avoids YAML/heredoc indentation
-          # gymnastics that would otherwise prepend spaces to every line.
-          cp docs/RELEASE_NOTES_NEXT.template.md "$notes_file"
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add "$notes_file" "$archive_file"
-          git commit -m "chore(release): archive notes for $tag, reset RELEASE_NOTES_NEXT [skip ci]"
-          # main is a protected branch (direct pushes rejected with GH006 —
-          # bit the v1.3.3 run), so land the reset via a PR instead.
-          branch="chore/reset-release-notes-${tag}"
-          git push origin "HEAD:refs/heads/$branch"
-          gh pr create --base main --head "$branch" \
-            --title "chore(release): archive notes for $tag, reset What to Test" \
-            --body "Automated post-release reset: archives the shipped bullets to CHANGELOG.md and resets RELEASE_NOTES_NEXT.md to its placeholder. Generated by the $tag release run." \
-            || echo "::warning title=Reset PR not created::Branch $branch was pushed; open the PR manually."
 
   attach-android-apk:
     name: Attach Android APK to Release
