@@ -101,9 +101,9 @@ const SecurityScreen: React.FC = () => {
 
   return (
     <AccountScreenLayout title={t('securityScreen.title')}>
-      <KeyBackupEntry />
       <SettingsScopeHeader scope="account" testID="security-account" />
-      <View style={styles.headerRow}>
+      <KeyBackupEntry />
+      <View style={[styles.headerRow, styles.sectionGap]}>
         <ShieldCheck size={22} color={colors.white} />
         <Text style={[sharedAccountStyles.sectionLabel, styles.headerLabel]}>
           {t('securityScreen.confirmLargeSends')}

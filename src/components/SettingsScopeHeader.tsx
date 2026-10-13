@@ -1,5 +1,7 @@
-import React, { useMemo } from 'react';
-import { Text, View } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { Text, TouchableOpacity, View } from 'react-native';
+import { Info } from 'lucide-react-native';
+import SettingsInfoSheet from './SettingsInfoSheet';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createSettingsScopeHeaderStyles } from '../styles/SettingsScopeHeader.styles';
@@ -12,24 +14,38 @@ interface Props {
   testID: string;
 }
 
-/**
- * "For this account" / "On this phone" header that splits a settings screen
- * by where its settings are stored, so it's clear which ones change when
- * you switch accounts.
- */
 const SettingsScopeHeader: React.FC<Props> = ({ scope, spaced, testID }) => {
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createSettingsScopeHeaderStyles(colors), [colors]);
   const account = scope === 'account';
+  const [infoOpen, setInfoOpen] = useState(false);
+  const title = t(account ? 'settingsScope.forThisAccount' : 'settingsScope.onThisPhone');
   return (
     <View style={[styles.container, spaced && styles.gap]} testID={testID}>
-      <Text style={styles.header} accessibilityRole="header">
-        {t(account ? 'settingsScope.forThisAccount' : 'settingsScope.onThisPhone')}
-      </Text>
-      <Text style={styles.hint}>
-        {t(account ? 'settingsScope.forThisAccountHint' : 'settingsScope.onThisPhoneHint')}
-      </Text>
+      <View style={styles.labelRow}>
+        <Text style={styles.header} accessibilityRole="header">
+          {title}
+        </Text>
+        <TouchableOpacity
+          style={styles.info}
+          onPress={() => setInfoOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel={`${title}: ${t('securityScreen.details')}`}
+          testID={`${testID}-info`}
+        >
+          <Info size={18} color={colors.white} />
+        </TouchableOpacity>
+      </View>
+      <SettingsInfoSheet
+        visible={infoOpen}
+        onClose={() => setInfoOpen(false)}
+        title={title}
+        testID={`${testID}-info-sheet`}
+        paragraphs={[
+          t(account ? 'settingsScope.forThisAccountHint' : 'settingsScope.onThisPhoneHint'),
+        ]}
+      />
     </View>
   );
 };

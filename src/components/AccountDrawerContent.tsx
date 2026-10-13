@@ -41,8 +41,6 @@ interface SectionRow {
   label: string;
   icon: React.ReactNode;
   testID: string;
-  /** Heading shown above this row (starts a group). */
-  section?: string;
   /** Divider above this row: ends the "Your account" group. */
   dividerBefore?: boolean;
 }
@@ -51,7 +49,6 @@ const buildSectionRows = (colors: Palette, t: ReturnType<typeof useTranslation>)
   {
     name: 'AccountProfile',
     label: t('accountDrawerContent.profile'),
-    section: t('accountDrawerContent.yourAccount'),
     icon: <User size={22} color={colors.textBody} />,
     testID: 'drawer-row-profile',
   },
@@ -370,11 +367,6 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
         {sectionRows.map((row) => (
           <React.Fragment key={row.name}>
             {row.dividerBefore && <View style={styles.divider} />}
-            {row.section && (
-              <Text style={styles.sectionHeading} accessibilityRole="header">
-                {row.section}
-              </Text>
-            )}
             <TouchableOpacity
               accessibilityRole="button"
               style={styles.row}

@@ -43,7 +43,6 @@
     "signInButton": "Belépés / Új fiók",
     "notifications": "Értesítések",
     "displayLanguage": "Megjelenés és nyelv",
-    "yourAccount": "A fiókod",
     "signOutOf": "Kijelentkezés innen: {{name}}"
   },
   "accountSwitcherSheet": {
@@ -2802,9 +2801,9 @@
     "permissionTurnOn": "Bekapcsolás"
   },
   "settingsScope": {
-    "forThisAccount": "Ehhez a fiókhoz",
+    "forThisAccount": "Ez a fiók",
     "forThisAccountHint": "A telefonon lévő minden fiókhoz külön beállítható.",
-    "onThisPhone": "Ezen a telefonon",
+    "onThisPhone": "Ez a telefon",
     "onThisPhoneHint": "A telefonon lévő minden fiókra ugyanaz a beállítás vonatkozik."
   },
   "locationSharing": {
@@ -3083,5 +3082,14 @@
     "voice": "Hangüzenet",
     "openMedia": "Média megnyitása",
     "loadMedia": "Koppints a média betöltéséhez"
+  },
+  "settingsRows": {
+    "experimentalSubtitle": "Még tesztelés alatt álló funkciók",
+    "notificationServerSubtitle": "Lightning Piggy értesítések",
+    "deviceChangesSubtitle": "Eszközaktivitás a Marmot-csevegésekben",
+    "profilerSubtitle": "Az app teljesítményének rögzítése",
+    "linkPreviewsSubtitle": "Megosztott linkek előnézete",
+    "notificationContentSubtitle": "Üzenetszöveg és fizetési összegek",
+    "backgroundSubtitle": "Üzenetek keresése bezárt app mellett"
   }
 }

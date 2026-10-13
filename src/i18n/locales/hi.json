@@ -43,7 +43,6 @@
     "signInButton": "लॉग इन / अकाउंट बनाएँ",
     "notifications": "नोटिफ़िकेशन",
     "displayLanguage": "डिस्प्ले और भाषा",
-    "yourAccount": "आपका अकाउंट",
     "signOutOf": "{{name}} से लॉग आउट करें"
   },
   "accountSwitcherSheet": {
@@ -2802,9 +2801,9 @@
     "permissionTurnOn": "चालू करें"
   },
   "settingsScope": {
-    "forThisAccount": "इस अकाउंट के लिए",
+    "forThisAccount": "यह अकाउंट",
     "forThisAccountHint": "इस फ़ोन पर हर अकाउंट की अपनी सेटिंग्स हैं।",
-    "onThisPhone": "इस फ़ोन पर",
+    "onThisPhone": "यह फ़ोन",
     "onThisPhoneHint": "इस फ़ोन के सभी अकाउंट के लिए एक जैसी।"
   },
   "locationSharing": {
@@ -3083,5 +3082,14 @@
     "voice": "वॉइस नोट",
     "openMedia": "मीडिया खोलें",
     "loadMedia": "मीडिया लोड करने के लिए टैप करें"
+  },
+  "settingsRows": {
+    "experimentalSubtitle": "अभी टेस्ट की जा रही सुविधाएँ",
+    "notificationServerSubtitle": "Lightning Piggy नोटिफिकेशन",
+    "deviceChangesSubtitle": "Marmot चैट में डिवाइस की गतिविधि",
+    "profilerSubtitle": "ऐप की परफ़ॉर्मेंस रिकॉर्ड करें",
+    "linkPreviewsSubtitle": "शेयर किए गए लिंक के प्रीव्यू",
+    "notificationContentSubtitle": "मैसेज का टेक्स्ट और भुगतान की रकम",
+    "backgroundSubtitle": "ऐप बंद होने पर मैसेज देखें"
   }
 }

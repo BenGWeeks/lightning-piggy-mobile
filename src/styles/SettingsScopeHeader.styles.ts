@@ -16,11 +16,8 @@ export const createSettingsScopeHeaderStyles = (colors: Palette) =>
       letterSpacing: 1,
       textTransform: 'uppercase',
     },
-    hint: {
-      color: 'rgba(255,255,255,0.75)',
-      fontSize: 13,
-      marginTop: 2,
-    },
+    labelRow: { flexDirection: 'row', alignItems: 'center' },
+    info: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
     gap: {
       marginTop: 36,
     },

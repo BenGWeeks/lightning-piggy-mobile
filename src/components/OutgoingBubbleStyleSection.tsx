@@ -12,13 +12,13 @@ export default function OutgoingBubbleStyleSection() {
   const styles = useMemo(() => createAdvancedScreenStyles(colors), [colors]);
   if (!__DEV__) return null;
   return (
-    <View style={styles.sectionGap} testID="advanced-bubble-style">
-      <Text style={styles.experimentalLabel}>{t('advancedScreen.bubbleStyle')}</Text>
+    <View testID="advanced-bubble-style">
       {OPTIONS.map((option) => (
         <TouchableOpacity
           key={option}
           style={styles.navRow}
           onPress={() => setOutgoingBubbleStyle(option)}
+          accessibilityLabel={t(`advancedScreen.bubbleStyle${option}`)}
           accessibilityRole="radio"
           accessibilityState={{ selected: outgoingBubbleStyle === option }}
           testID={`advanced-bubble-style-${option}`}
