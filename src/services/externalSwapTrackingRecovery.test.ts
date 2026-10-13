@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
-import { subscribeExternalSwap } from './externalSwapTracking';
+import { trackExternalSwap, subscribeExternalSwap } from './externalSwapTracking';
 import { watchSubmarineSwapStatus, fetchSwapStatus } from './boltzSwapStatus';
 import { saveExternalSwap, loadExternalSwaps, type ExternalSwapState } from './externalSwapState';
 import { recoverPendingSwaps, registerPendingSubmarineSwap } from './swapRecoveryService';
@@ -122,5 +122,79 @@ test('offline startup then reopening initializes durable tracking through paymen
   } finally {
     close();
     closeSibling();
+  }
+});
+
+test.each([
+  ['offline startup', 'transaction.claimed'],
+  ['offline startup', 'swap.expired'],
+  ['watcher failure', 'transaction.claimed'],
+  ['watcher failure', 'swap.expired'],
+])('reopening after %s persists terminal %s and runs recovery', async (startup, status) => {
+  jest.clearAllMocks();
+  mockStore.clear();
+  await AsyncStorage.clear();
+  const swap: ExternalSwapState = {
+    id: `${startup.replace(/ /g, '-')}-${status.replace(/\./g, '-')}`,
+    address: 'bc1qlockup',
+    expectedAmount: 50000,
+    timeoutBlockHeight: 800000,
+    sourceWalletId: 'watch',
+    destinationWalletId: 'lightning',
+    ownerPubkey: 'alice',
+    invoiceSats: 49000,
+    invoice: 'invoice',
+    createdAt: 123,
+    status: 'swap.created',
+  };
+  const key = `submarine_swap_${swap.id}`;
+  await SecureStore.setItemAsync(
+    key,
+    JSON.stringify({ ...swap, externalFunding: true, refundPrivateKey: 'PRIVATE' }),
+  );
+  await registerPendingSubmarineSwap(swap.id);
+  await saveExternalSwap(swap);
+  if (startup === 'offline startup') {
+    mockFetchWithTimeout.mockRejectedValueOnce(new Error('Offline'));
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await recoverPendingSwaps();
+    } finally {
+      warn.mockRestore();
+    }
+  } else {
+    jest.mocked(watchSubmarineSwapStatus).mockRejectedValueOnce(new Error('Offline'));
+    trackExternalSwap(swap, recoverPendingSwaps);
+    await flush();
+  }
+  const priorWatchers = jest.mocked(watchSubmarineSwapStatus).mock.calls.length;
+  jest.mocked(fetchSwapStatus).mockResolvedValueOnce(status);
+  mockFetchWithTimeout.mockImplementation(async (url: string) =>
+    url.endsWith('/transaction')
+      ? { ok: false, status: 404 }
+      : { ok: true, json: async () => ({ status }) },
+  );
+  const listener = jest.fn();
+  const close = subscribeExternalSwap(swap.id, listener);
+  try {
+    await flush();
+    expect(listener).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: swap.id, status, trackingFailed: false }),
+    );
+    expect(watchSubmarineSwapStatus).toHaveBeenCalledTimes(priorWatchers);
+    expect((await loadExternalSwaps('watch', 'lightning'))[0].status).toBe(status);
+    expect(Toast.show).toHaveBeenCalledTimes(status === 'transaction.claimed' ? 1 : 0);
+    expect(fireNotification).toHaveBeenCalledTimes(status === 'transaction.claimed' ? 1 : 0);
+    expect(mockStore.has(key)).toBe(false);
+    expect(JSON.parse(mockStore.get('boltz_submarine_index')!)).toEqual([]);
+    // Reopening a persisted terminal request must not notify twice.
+    close();
+    jest.mocked(fetchSwapStatus).mockResolvedValueOnce(status);
+    const closeAgain = subscribeExternalSwap(swap.id, jest.fn());
+    await flush();
+    closeAgain();
+    expect(fireNotification).toHaveBeenCalledTimes(status === 'transaction.claimed' ? 1 : 0);
+  } finally {
+    close();
   }
 });

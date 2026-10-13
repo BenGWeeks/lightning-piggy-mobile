@@ -55,7 +55,10 @@ test('network failure keeps pending instructions and allows a later recovery ret
   expect(watchSubmarineSwapStatus).toHaveBeenCalledTimes(2);
 });
 test('does not arm another watcher for a completed swap', () => {
-  trackExternalSwap({ ...state, status: 'transaction.claimed' }, jest.fn());
+  trackExternalSwap(
+    { ...state, id: 'already-complete', status: 'transaction.claimed' },
+    jest.fn(async () => {}),
+  );
   expect(watchSubmarineSwapStatus).not.toHaveBeenCalled();
 });
 
@@ -320,5 +323,43 @@ test('an older pending read cannot overwrite a newer funded watcher update', asy
   );
   finish({ phase: 'complete', rawStatus: 'transaction.claimed', raw: {} });
   await flush();
+  close();
+});
+
+test.each(['transaction.claimed', 'invoice.failedToPay'])(
+  'terminal read %s runs recovery even if its save fails',
+  async (status) => {
+    const swap = { ...state, id: `terminal-write-failure-${status}`, status };
+    jest.mocked(saveExternalSwap).mockRejectedValueOnce(new Error('Disk full'));
+    const recover = jest.fn(async () => {});
+    trackExternalSwap(swap, recover);
+    await flush();
+    expect(saveExternalSwap).toHaveBeenCalledWith(swap);
+    expect(recover).toHaveBeenCalledTimes(1);
+    expect(watchSubmarineSwapStatus).not.toHaveBeenCalled();
+  },
+);
+
+test('terminal read while a watcher is active persists and recovers only once', async () => {
+  let update!: Parameters<typeof watchSubmarineSwapStatus>[1];
+  let finish!: (value: Awaited<ReturnType<typeof watchSubmarineSwapStatus>>) => void;
+  jest.mocked(watchSubmarineSwapStatus).mockImplementationOnce(async (_id, onPhase) => {
+    update = onPhase;
+    return new Promise((resolve) => {
+      finish = resolve;
+    });
+  });
+  const swap = { ...state, id: 'terminal-while-active' };
+  const recover = jest.fn(async () => {});
+  trackExternalSwap(swap, recover);
+  jest.mocked(fetchSwapStatus).mockResolvedValueOnce('transaction.claimed');
+  const close = subscribeExternalSwap(swap.id, jest.fn());
+  await flush();
+  update('complete', 'transaction.claimed', {});
+  finish({ phase: 'complete', rawStatus: 'transaction.claimed', raw: {} });
+  await flush();
+  expect(saveExternalSwap).toHaveBeenCalledTimes(1);
+  expect(saveExternalSwap).toHaveBeenCalledWith({ ...swap, status: 'transaction.claimed' });
+  expect(recover).toHaveBeenCalledTimes(1);
   close();
 });

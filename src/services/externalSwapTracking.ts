@@ -79,35 +79,60 @@ interface Tracker {
   state: ExternalSwapState;
   recover: () => Promise<void>;
   active: boolean;
+  writes: Promise<void>;
+  finishing: boolean;
 }
 // Failed transports retain the app-owned recovery context for a later reopen.
 const trackers = new Map<string, Tracker>();
+/** Both a terminal read and watcher settlement drain writes before recovery. */
+async function finishTracking(tracker: Tracker): Promise<void> {
+  tracker.finishing = true;
+  await tracker.writes.catch(() => {});
+  if (trackers.get(tracker.state.id) === tracker) trackers.delete(tracker.state.id);
+  await tracker.recover();
+}
+
 export function trackExternalSwap(state: ExternalSwapState, recover: () => Promise<void>): void {
-  if (
-    trackers.get(state.id)?.active ||
-    ['complete', 'failed'].includes(classifySubmarineSwapStatus(state.status))
-  )
-    return;
-  const tracker: Tracker = { state, recover, active: true };
+  const existing = trackers.get(state.id);
+  if (existing?.finishing) return;
+  const terminal = ['complete', 'failed'].includes(classifySubmarineSwapStatus(state.status));
+  if (existing?.active && !terminal) return;
+  const tracker: Tracker = existing ?? {
+    state,
+    recover,
+    active: true,
+    writes: Promise.resolve(),
+    finishing: false,
+  };
+  tracker.state = state;
+  tracker.active = true;
   trackers.set(state.id, tracker);
-  let writes = Promise.resolve();
-  void watchSubmarineSwapStatus(state.id, (_phase, status, raw) => {
+  const update = (status: string, raw?: ExternalSwapUpdate['raw']) => {
     tracker.state = { ...state, status };
     publish({ id: state.id, status, raw, trackingFailed: false });
-    writes = writes.catch(() => {}).then(() => saveExternalSwap({ ...state, status }));
+    tracker.writes = tracker.writes
+      .catch(() => {})
+      .then(() => saveExternalSwap({ ...state, status }));
     // Observe failures immediately, even if the watcher remains pending.
-    void writes.catch(() => {});
+    void tracker.writes.catch(() => {});
+  };
+  if (terminal) {
+    update(state.status);
+    void finishTracking(tracker).catch(() => {});
+    return;
+  }
+  void watchSubmarineSwapStatus(state.id, (_phase, status, raw) => {
+    if (!tracker.finishing) update(status, raw);
   })
     .then(async () => {
-      await writes.catch(() => {});
-      trackers.delete(state.id);
-      await recover();
+      if (!tracker.finishing) await finishTracking(tracker);
     })
     .catch(() => {
+      if (tracker.finishing) return;
       tracker.active = false;
       publish({ id: state.id, status: null, trackingFailed: true });
       // Transport failure is ambiguous. Keep the recovery record for retry on
       // launch or pull-to-refresh; never label it expired or delete refund keys.
-      void writes.catch(() => {});
+      void tracker.writes.catch(() => {});
     });
 }

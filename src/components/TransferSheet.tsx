@@ -1,4 +1,8 @@
 import ExternalFundingSwap from './ExternalFundingSwap';
+import {
+  getTransferDestinationWallets,
+  selectTransferDestination,
+} from '../utils/transferDestinationWallets';
 import { useTransferProfileNames } from '../hooks/useTransferProfileNames';
 import { isMoveSource, isExternalFundingSource } from '../utils/moveSources';
 import { formatTransferWalletLabel, formatTransferProfileLabel } from '../utils/transferLabels';
@@ -204,22 +208,15 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   //    xpub blob is keyed by walletId, not pubkey, so onchainService
   //    can read it for any local profile). The two SendSheet-style
   //    routes (BIP-21 paste, lud16 string) work identically here.
-  const destWallets = useMemo<(WalletState | WalletMetadata)[]>(() => {
-    if (isCrossProfile) {
-      return otherProfileWallets.filter((w) =>
-        externalFunding
-          ? w.walletType === 'nwc'
-          : w.walletType === 'onchain' || w.walletType === 'nwc',
-      );
-    }
-    return wallets.filter(
-      (w) =>
-        w.id !== sourceId &&
-        (externalFunding
-          ? w.walletType === 'nwc' && w.isConnected
-          : w.walletType === 'onchain' || w.isConnected),
-    );
-  }, [isCrossProfile, otherProfileWallets, wallets, sourceId, externalFunding]);
+  const destWallets = useMemo(
+    () =>
+      getTransferDestinationWallets(
+        source,
+        isCrossProfile ? otherProfileWallets : wallets,
+        isCrossProfile,
+      ),
+    [source, isCrossProfile, otherProfileWallets, wallets],
+  );
 
   // Determine transfer type
   const transferType = useMemo(() => {
@@ -1005,16 +1002,14 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                           onPress={() => {
                             setSourceId(w.id);
                             setSourceDropdownOpen(false);
-                            // Adjust dest if same
-                            if (destId === w.id || isExternalFundingSource(w)) {
-                              const alt = wallets.find(
-                                (ww) =>
-                                  ww.id !== w.id &&
-                                  (!isExternalFundingSource(w) ||
-                                    (ww.walletType === 'nwc' && ww.isConnected)),
-                              );
-                              setDestId(alt?.id ?? null);
-                            }
+                            setDestId(
+                              selectTransferDestination(
+                                w,
+                                destId,
+                                isCrossProfile ? otherProfileWallets : wallets,
+                                isCrossProfile,
+                              ),
+                            );
                           }}
                         >
                           <Text
