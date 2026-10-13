@@ -165,6 +165,76 @@ test('tracking failure revokes previously live pending instructions', async () =
   close();
 });
 
+test('reopening after watcher failure resumes shared payment and settlement tracking', async () => {
+  let reject!: (error: Error) => void;
+  let update!: Parameters<typeof watchSubmarineSwapStatus>[1];
+  let finish!: (value: Awaited<ReturnType<typeof watchSubmarineSwapStatus>>) => void;
+  jest
+    .mocked(watchSubmarineSwapStatus)
+    .mockImplementationOnce(
+      async () =>
+        new Promise((_resolve, rejectWatch) => {
+          reject = rejectWatch;
+        }),
+    )
+    .mockImplementationOnce(async (_id, onPhase) => {
+      update = onPhase;
+      return new Promise((resolve) => {
+        finish = resolve;
+      });
+    });
+  const swap = { ...state, id: 'retry-on-reopen' };
+  const recover = jest.fn(async () => {});
+  trackExternalSwap(swap, recover);
+  const initial = jest.fn();
+  const closeInitial = subscribeExternalSwap(swap.id, initial);
+  await flush();
+  reject(new Error('Offline'));
+  await flush();
+  expect(initial).toHaveBeenLastCalledWith({
+    id: swap.id,
+    status: null,
+    trackingFailed: true,
+  });
+  closeInitial();
+
+  const reopened = jest.fn();
+  const closeReopened = subscribeExternalSwap(swap.id, reopened);
+  const sibling = jest.fn();
+  const closeSibling = subscribeExternalSwap(swap.id, sibling);
+  await flush();
+  expect(watchSubmarineSwapStatus).toHaveBeenCalledTimes(2);
+  expect(reopened).toHaveBeenLastCalledWith({
+    id: swap.id,
+    status: 'swap.created',
+    trackingFailed: false,
+  });
+  const payment = { transaction: { id: 'funding-tx' } };
+  update('detected', 'transaction.mempool', payment);
+  expect(reopened).toHaveBeenLastCalledWith({
+    id: swap.id,
+    status: 'transaction.mempool',
+    raw: payment,
+    trackingFailed: false,
+  });
+  expect(sibling).toHaveBeenLastCalledWith(reopened.mock.calls.at(-1)?.[0]);
+  await flush();
+  expect(saveExternalSwap).toHaveBeenLastCalledWith({ ...swap, status: 'transaction.mempool' });
+  update('complete', 'transaction.claimed', {});
+  finish({ phase: 'complete', rawStatus: 'transaction.claimed', raw: {} });
+  await flush();
+  expect(reopened).toHaveBeenLastCalledWith({
+    id: swap.id,
+    status: 'transaction.claimed',
+    raw: {},
+    trackingFailed: false,
+  });
+  expect(saveExternalSwap).toHaveBeenLastCalledWith({ ...swap, status: 'transaction.claimed' });
+  expect(recover).toHaveBeenCalledTimes(1);
+  closeReopened();
+  closeSibling();
+});
+
 test('failed live validation hides instructions', async () => {
   jest.mocked(fetchSwapStatus).mockRejectedValueOnce(new Error('Offline'));
   const listener = jest.fn();
