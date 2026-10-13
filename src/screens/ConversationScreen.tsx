@@ -1,3 +1,9 @@
+import { usePeerContact } from '../hooks/usePeerContact';
+import { useDmChatTools } from '../hooks/useDmChatTools';
+import { useChatLocalHistory } from '../hooks/useChatLocalHistory';
+import { useChatKeyboardLift } from '../hooks/useChatKeyboardLift';
+import { ChatSearchContext } from '../contexts/ChatSearchContext';
+import ChatSearchHeader from '../components/ChatSearchHeader';
 import { useLiveMessageIndicator } from '../hooks/useLiveMessageIndicator';
 import NewMessagesPill from '../components/NewMessagesPill';
 import FullscreenGifModal from '../components/FullscreenGifModal';
@@ -24,15 +30,12 @@ import {
   StyleSheet,
 } from 'react-native';
 import { Alert } from '../components/BrandedAlert';
-import {
-  KeyboardController,
-  useReanimatedKeyboardAnimation,
-} from 'react-native-keyboard-controller';
-import Animated, { useAnimatedStyle } from 'react-native-reanimated';
+import { KeyboardController } from 'react-native-keyboard-controller';
+import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useNostr, useNostrContacts, useNostrDmInbox } from '../contexts/NostrContext';
+import { useNostr, useNostrDmInbox } from '../contexts/NostrContext';
 import { useWallet } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -93,21 +96,7 @@ const ConversationScreen: React.FC = () => {
   const navigation = useNavigation<ConversationNavigation>();
   const route = useRoute<ConversationRoute>();
   const insets = useSafeAreaInsets();
-  // The composer owns its own keyboard wiring (KeyboardStickyView +
-  // useReanimatedKeyboardAnimation) — see ConversationComposer.tsx.
-  // ConversationScreen ALSO listens to the keyboard so the FlatList
-  // shrinks by the keyboard height when the IME opens — without this
-  // the bottom-most bubbles render under the keyboard because
-  // KeyboardStickyView only translates the composer visually, it
-  // doesn't reduce the FlatList's layout footprint (#470).
-  const keyboard = useReanimatedKeyboardAnimation();
-  const animatedListLiftStyle = useAnimatedStyle(() => ({
-    // RNKC convention: keyboard.height.value is negative when the IME
-    // is up, 0 when down. Negating it gives a positive marginBottom
-    // equal to the keyboard height — pulls the FlatList's bottom edge
-    // up flush with the (now-floating) composer's top.
-    marginBottom: -keyboard.height.value,
-  }));
+  const animatedListLiftStyle = useChatKeyboardLift();
   const { pubkey, name, picture, lightningAddress } = route.params;
   const protocol = useConversationProtocol(route.params.protocol);
 
@@ -129,7 +118,6 @@ const ConversationScreen: React.FC = () => {
     fetchReactionDeletionsForReactions,
   } = useNostr();
   const { armLiveDmSub } = useNostrDmInbox();
-  const { contacts } = useNostrContacts();
   // Trust gate (#1338): the peer's media auto-loads only if I follow them.
   const followed = useFollowedPubkeys();
   const peerMediaTrusted = canAutoLoadMedia(false, pubkey, followed);
@@ -143,7 +131,13 @@ const ConversationScreen: React.FC = () => {
 
   // Thread data lifecycle — read-through paint, background relay top-up,
   // abort-on-unmount, single-flight refresh (#868) — lives in this hook.
-  const { messages, setMessages, loading, refreshing, handleRefresh } = useConversationLoader({
+  const {
+    messages: rawMessages,
+    setMessages,
+    loading,
+    refreshing,
+    handleRefresh,
+  } = useConversationLoader({
     protocol,
     pubkey,
     isLoggedIn,
@@ -151,6 +145,11 @@ const ConversationScreen: React.FC = () => {
     loadInitialConversation,
     persistDeliveryStatuses,
   });
+  const { messages, clear, clearBoundary } = useChatLocalHistory(
+    myPubkey,
+    `${protocol}:${pubkey}`,
+    rawMessages,
+  );
   const [draft, setDraft] = useState('');
   const [sendSheetOpen, setSendSheetOpen] = useState(false);
   const [invoiceToPay, setInvoiceToPay] = useState<string | null>(null);
@@ -227,6 +226,7 @@ const ConversationScreen: React.FC = () => {
     pubkey,
     protocol,
     dmDevices.noticeItems,
+    clearBoundary,
   );
 
   // Poll aggregation + send/vote for this 1:1 thread (#203). Extracted to a
@@ -604,41 +604,44 @@ const ConversationScreen: React.FC = () => {
     ],
   );
 
-  const openPeerProfile = useCallback(() => {
-    const known = contacts.find((c) => c.pubkey === pubkey)?.profile ?? null;
-    presentContactSheet({
-      pubkey,
-      name,
-      picture: known?.picture ?? picture ?? null,
-      banner: known?.banner ?? null,
-      nip05: known?.nip05 ?? null,
-      lightningAddress: known?.lud16 ?? lightningAddress ?? null,
-      source: 'nostr',
-    });
-  }, [contacts, pubkey, name, picture, lightningAddress, presentContactSheet]);
+  const { contact, openPeerProfile } = usePeerContact(route.params, presentContactSheet);
+  const tools = useDmChatTools(
+    messages,
+    contact,
+    route.params,
+    protocol,
+    dmDevices,
+    read.scrollToId,
+    clear,
+  );
   const goBack = useCallback(() => navigation.goBack(), [navigation]);
 
   return (
-    <View style={styles.container}>
-      {/* Paint the safe-area / status-bar strip pink so the white
+    <ChatSearchContext.Provider value={tools.search.query}>
+      <View style={styles.container}>
+        {/* Paint the safe-area / status-bar strip pink so the white
           system icons (time, signal, battery) stay visible against
           the brand colour instead of disappearing into our near-white
           app background. */}
-      <View style={{ height: insets.top, backgroundColor: colors.brandPink }} />
-      <ConversationHeader
-        pubkey={pubkey}
-        name={name}
-        picture={picture}
-        protocol={protocol}
-        styles={styles}
-        colors={colors}
-        onBack={goBack}
-        onOpenProfile={openPeerProfile}
-        byline={dmDevices.byline}
-        onBylinePress={dmDevices.openSheet}
-      />
+        <View style={{ height: insets.top, backgroundColor: colors.brandPink }} />
+        {tools.search.active ? (
+          <ChatSearchHeader search={tools.search} />
+        ) : (
+          <ConversationHeader
+            menu={tools.menu}
+            name={name}
+            picture={picture}
+            protocol={protocol}
+            styles={styles}
+            colors={colors}
+            onBack={goBack}
+            onOpenProfile={openPeerProfile}
+            byline={dmDevices.byline}
+            onBylinePress={dmDevices.openSheet}
+          />
+        )}
 
-      {/* KeyboardStickyView (below) floats the composer above the IME
+        {/* KeyboardStickyView (below) floats the composer above the IME
           on Android 15+ edge-to-edge. `react-native-edge-to-edge` (in
           app.config.ts) installs the `WindowInsetsCompat` root listener
           that makes the IME inset visible to RNKC in the first place —
@@ -646,349 +649,349 @@ const ConversationScreen: React.FC = () => {
           Android 16 (#194 diagnosis). `offset.opened: -insets.bottom`
           pulls the composer flush against the keyboard's top edge
           (RNKC's canonical chat pattern). */}
-      <View style={styles.flex}>
-        {/* Wrapping the list (and scroll-to-bottom FAB) in an
+        <View style={styles.flex}>
+          {/* Wrapping the list (and scroll-to-bottom FAB) in an
             Animated.View whose marginBottom tracks the keyboard
             height — shrinks the list's layout footprint so the
             bottom-most bubbles aren't hidden under the IME. The
             composer below this wrapper sits OUTSIDE the lifted
             block; KeyboardStickyView handles the composer's own
             keyboard avoidance independently. */}
-        <Animated.View style={[styles.flex, animatedListLiftStyle]}>
-          {loading ? (
-            <View style={styles.loading}>
-              <ActivityIndicator color={colors.brandPink} />
-              <Text style={styles.loadingText}>{t('conversationScreen.loadingMessages')}</Text>
-            </View>
-          ) : (
-            <FlatList
-              ref={listRef}
-              style={styles.flex}
-              data={items}
-              keyExtractor={conversationItemKey}
-              renderItem={renderItem}
-              contentContainerStyle={listContentStyle}
-              inverted
-              // Keep the visible history row anchored when live messages prepend.
-              maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
-              // Window the list so a thread with hundreds of messages
-              // doesn't mount every row up front — first-frame work goes
-              // from "render all N bubbles + avatars" to "render the
-              // 20 newest then lazy-mount as the user scrolls". These
-              // defaults are chosen for chat-style threads: one screen
-              // fits ~8-10 bubbles, so 20 covers the visible viewport
-              // plus one screen of pre-roll for smooth momentum scrolls.
-              //
-              // NOTE: `removeClippedSubviews` is deliberately OFF. It's
-              // broken with `inverted` on Android — breaks the contentOffset
-              // reporting so onScroll's `y < 200` check flips when the user
-              // is visually at the bottom, making the scroll-to-bottom FAB
-              // show spuriously. See facebook/react-native#30521 / #26061.
-              initialNumToRender={20}
-              maxToRenderPerBatch={10}
-              windowSize={10}
-              ListEmptyComponent={
-                <View style={styles.empty}>
-                  <Text style={styles.emptyTitle}>{t('conversationScreen.noMessages')}</Text>
-                  <Text style={styles.emptySubtitle}>
-                    {lightningAddress
-                      ? t('conversationScreen.sayHiZap')
-                      : t('conversationScreen.sayHi')}
-                  </Text>
-                </View>
-              }
-              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
-              onScroll={live.onScroll}
-              onContentSizeChange={live.onContentSizeChange}
-              scrollEventThrottle={100}
-              viewabilityConfigCallbackPairs={read.viewabilityConfigCallbackPairs}
-              onScrollToIndexFailed={read.onScrollToIndexFailed}
-            />
-          )}
+          <Animated.View style={[styles.flex, animatedListLiftStyle]}>
+            {loading ? (
+              <View style={styles.loading}>
+                <ActivityIndicator color={colors.brandPink} />
+                <Text style={styles.loadingText}>{t('conversationScreen.loadingMessages')}</Text>
+              </View>
+            ) : (
+              <FlatList
+                ref={listRef}
+                style={styles.flex}
+                data={items}
+                keyExtractor={conversationItemKey}
+                renderItem={renderItem}
+                contentContainerStyle={listContentStyle}
+                inverted
+                // Keep the visible history row anchored when live messages prepend.
+                maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+                // Window the list so a thread with hundreds of messages
+                // doesn't mount every row up front — first-frame work goes
+                // from "render all N bubbles + avatars" to "render the
+                // 20 newest then lazy-mount as the user scrolls". These
+                // defaults are chosen for chat-style threads: one screen
+                // fits ~8-10 bubbles, so 20 covers the visible viewport
+                // plus one screen of pre-roll for smooth momentum scrolls.
+                //
+                // NOTE: `removeClippedSubviews` is deliberately OFF. It's
+                // broken with `inverted` on Android — breaks the contentOffset
+                // reporting so onScroll's `y < 200` check flips when the user
+                // is visually at the bottom, making the scroll-to-bottom FAB
+                // show spuriously. See facebook/react-native#30521 / #26061.
+                initialNumToRender={20}
+                maxToRenderPerBatch={10}
+                windowSize={10}
+                ListEmptyComponent={
+                  <View style={styles.empty}>
+                    <Text style={styles.emptyTitle}>{t('conversationScreen.noMessages')}</Text>
+                    <Text style={styles.emptySubtitle}>
+                      {lightningAddress
+                        ? t('conversationScreen.sayHiZap')
+                        : t('conversationScreen.sayHi')}
+                    </Text>
+                  </View>
+                }
+                refreshControl={
+                  <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+                }
+                onScroll={live.onScroll}
+                onContentSizeChange={live.onContentSizeChange}
+                scrollEventThrottle={100}
+                viewabilityConfigCallbackPairs={read.viewabilityConfigCallbackPairs}
+                onScrollToIndexFailed={read.onScrollToIndexFailed}
+              />
+            )}
 
-          {/* Backdrop tap-to-close: when the attach panel is open, an
+            {/* Backdrop tap-to-close: when the attach panel is open, an
             absolute transparent Pressable sits above the FlatList area.
             Tapping anywhere on the messages closes the panel (matches
             WhatsApp behaviour). Trade-off: you can't tap a message bubble
             while the panel is open — close the panel first. */}
-          {attachPanelOpen ? (
-            <Pressable
-              style={StyleSheet.absoluteFill}
-              onPress={closeAttachPanel}
-              accessibilityLabel={t('conversationScreen.closeAttachPanel')}
-              testID="conversation-attach-backdrop"
-            />
-          ) : null}
+            {attachPanelOpen ? (
+              <Pressable
+                style={StyleSheet.absoluteFill}
+                onPress={closeAttachPanel}
+                accessibilityLabel={t('conversationScreen.closeAttachPanel')}
+                testID="conversation-attach-backdrop"
+              />
+            ) : null}
 
-          {live.hasNewMessages && !loading ? (
-            <NewMessagesPill onPress={live.jumpToLatest} testID="conversation-new-messages" />
-          ) : null}
-          {!loading ? (
-            <ChatJumpButtons
-              mentionCount={0}
-              onJumpToMention={read.jumpToNextMention}
-              showLatest={!live.atEdge && !live.hasNewMessages}
-              unreadCount={read.unread}
-              onJumpToLatest={live.jumpToLatest}
-              testIDs={{
-                mention: 'conversation-jump-to-mention',
-                latest: 'conversation-scroll-to-bottom',
-              }}
-            />
-          ) : null}
-        </Animated.View>
+            {live.hasNewMessages && !loading ? (
+              <NewMessagesPill onPress={live.jumpToLatest} testID="conversation-new-messages" />
+            ) : null}
+            {!loading ? (
+              <ChatJumpButtons
+                mentionCount={0}
+                onJumpToMention={read.jumpToNextMention}
+                showLatest={!live.atEdge && !live.hasNewMessages}
+                unreadCount={read.unread}
+                onJumpToLatest={live.jumpToLatest}
+                testIDs={{
+                  mention: 'conversation-jump-to-mention',
+                  latest: 'conversation-scroll-to-bottom',
+                }}
+              />
+            ) : null}
+          </Animated.View>
 
-        {/* Composer + attach panel + IME-aware safe area now live in the
+          {/* Composer + attach panel + IME-aware safe area now live in the
             shared ConversationComposer (#251). Both the 1:1 and group
             screens render through the same component so the keyboard
             wrapper, animated paddingBottom, and attach-panel placement
             can't drift again the way they did between v22 and v26. */}
-        {isPeerTyping && (
-          <Text
-            style={styles.typingIndicator}
-            testID="peer-typing-indicator"
-            accessibilityLiveRegion="polite"
-            accessibilityLabel={t('conversationScreen.typing')}
-          >
-            {t('conversationScreen.typing')}
-          </Text>
-        )}
-        <ConversationComposer
-          attachmentsEnabled={protocol !== 'nip04'}
-          value={draft}
-          onChangeText={(text) => {
-            setDraft(text);
-            notifyTyping();
+          {isPeerTyping && (
+            <Text
+              style={styles.typingIndicator}
+              testID="peer-typing-indicator"
+              accessibilityLiveRegion="polite"
+              accessibilityLabel={t('conversationScreen.typing')}
+            >
+              {t('conversationScreen.typing')}
+            </Text>
+          )}
+          <ConversationComposer
+            attachmentsEnabled={protocol !== 'nip04'}
+            value={draft}
+            onChangeText={(text) => {
+              setDraft(text);
+              notifyTyping();
+            }}
+            {...menu.composer}
+            onStartVoiceNote={() => setVoiceSheetOpen(true)}
+            sending={sending}
+            disabled={!isLoggedIn}
+            onAttachToggle={() => (attachPanelOpen ? closeAttachPanel() : openAttachPanel())}
+            attachOpen={attachPanelOpen}
+            attachDisabled={sharingLocation || uploadingImage}
+            attachLoading={sharingLocation || uploadingImage}
+            onInputFocus={closeAttachPanel}
+            placeholder={t('conversationScreen.messagePlaceholder')}
+            // 1:1 ships the compact lucide Send icon (40x40) + a light-grey
+            // attach button background. Defaults match this so we keep the
+            // shipped 1:1 visuals byte-for-byte.
+            sendButtonVariant="icon"
+            attachButtonHasBackground
+            composerPaddingHorizontal={10}
+            testIDs={{
+              input: 'conversation-input',
+              attach: 'conversation-attach',
+              send: 'conversation-send',
+            }}
+            attachPanel={
+              <AttachPanel
+                onShareLocation={openLocationChooser}
+                onSendImage={handlePickAndSendImage}
+                onTakePhoto={handleTakeAndSendPhoto}
+                onSendZap={() => {
+                  closeAttachPanel();
+                  setSendSheetOpen(true);
+                }}
+                zapDisabled={!lightningAddress}
+                zapAccessibilityLabel={t('conversationScreen.zapUnavailable')}
+                onSendInvoice={() => {
+                  closeAttachPanel();
+                  setInvoiceSheetOpen(true);
+                }}
+                onShareContact={() => {
+                  // Picker opens over the conversation; don't close the
+                  // panel until the user actually picks (or cancels).
+                  setContactPickerOpen(true);
+                }}
+                onShareWallet={openNwcSharePicker}
+                onSendGif={
+                  isGifConfigured()
+                    ? () => {
+                        // GifPickerSheet opens over the panel.
+                        setGifPickerOpen(true);
+                      }
+                    : undefined
+                }
+                onSharePoll={() => {
+                  // Composer opens over the AttachPanel — close the panel
+                  // first so the BottomSheet snaps without competing for
+                  // touch focus with the visible attach grid behind it.
+                  closeAttachPanel();
+                  setPollComposerOpen(true);
+                }}
+                onSendVoiceNote={() => {
+                  // VoiceRecordingSheet opens over the panel; leave the panel
+                  // mounted so dismissing the sheet returns the user to it.
+                  setVoiceSheetOpen(true);
+                }}
+              />
+            }
+          />
+        </View>
+        <LiveLocationDurationPicker
+          visible={liveLocationPickerOpen}
+          onClose={() => setLiveLocationPickerOpen(false)}
+          onChooseSnapshot={handleShareSnapshot}
+          onChooseLive={handleShareLive}
+        />
+        <VoiceRecordingSheet
+          visible={voiceSheetOpen}
+          onClose={() => setVoiceSheetOpen(false)}
+          onSend={handleSendVoiceNote}
+          sending={uploadingVoice}
+        />
+        <GifPickerSheet
+          visible={gifPickerOpen}
+          onClose={() => {
+            setGifPickerOpen(false);
+            setAttachPanelOpen(false);
           }}
-          {...menu.composer}
-          onStartVoiceNote={() => setVoiceSheetOpen(true)}
-          sending={sending}
-          disabled={!isLoggedIn}
-          onAttachToggle={() => (attachPanelOpen ? closeAttachPanel() : openAttachPanel())}
-          attachOpen={attachPanelOpen}
-          attachDisabled={sharingLocation || uploadingImage}
-          attachLoading={sharingLocation || uploadingImage}
-          onInputFocus={closeAttachPanel}
-          placeholder={t('conversationScreen.messagePlaceholder')}
-          // 1:1 ships the compact lucide Send icon (40x40) + a light-grey
-          // attach button background. Defaults match this so we keep the
-          // shipped 1:1 visuals byte-for-byte.
-          sendButtonVariant="icon"
-          attachButtonHasBackground
-          composerPaddingHorizontal={10}
-          testIDs={{
-            input: 'conversation-input',
-            attach: 'conversation-attach',
-            send: 'conversation-send',
+          onSelect={handleSendGif}
+        />
+        <PollComposerSheet
+          visible={pollComposerOpen}
+          onClose={() => setPollComposerOpen(false)}
+          onSend={handleSendPoll}
+        />
+        <FullscreenGifModal
+          url={fullscreenGifUrl}
+          onClose={() => setFullscreenGifUrl(null)}
+          closeLabel={t('conversationScreen.closeFullscreenGif')}
+          testID="conversation-gif-fullscreen"
+        />
+        <FriendPickerSheet
+          visible={contactPickerOpen}
+          onClose={() => {
+            // Closing the picker with no selection also closes the
+            // AttachPanel underneath — the user has navigated away from
+            // the attach flow, the parent is no longer relevant.
+            setContactPickerOpen(false);
+            setAttachPanelOpen(false);
           }}
-          attachPanel={
-            <AttachPanel
-              onShareLocation={openLocationChooser}
-              onSendImage={handlePickAndSendImage}
-              onTakePhoto={handleTakeAndSendPhoto}
-              onSendZap={() => {
-                closeAttachPanel();
-                setSendSheetOpen(true);
-              }}
-              zapDisabled={!lightningAddress}
-              zapAccessibilityLabel={t('conversationScreen.zapUnavailable')}
-              onSendInvoice={() => {
-                closeAttachPanel();
-                setInvoiceSheetOpen(true);
-              }}
-              onShareContact={() => {
-                // Picker opens over the conversation; don't close the
-                // panel until the user actually picks (or cancels).
-                setContactPickerOpen(true);
-              }}
-              onShareWallet={openNwcSharePicker}
-              onSendGif={
-                isGifConfigured()
-                  ? () => {
-                      // GifPickerSheet opens over the panel.
-                      setGifPickerOpen(true);
-                    }
-                  : undefined
-              }
-              onSharePoll={() => {
-                // Composer opens over the AttachPanel — close the panel
-                // first so the BottomSheet snaps without competing for
-                // touch focus with the visible attach grid behind it.
-                closeAttachPanel();
-                setPollComposerOpen(true);
-              }}
-              onSendVoiceNote={() => {
-                // VoiceRecordingSheet opens over the panel; leave the panel
-                // mounted so dismissing the sheet returns the user to it.
-                setVoiceSheetOpen(true);
-              }}
-            />
+          onSelect={handleShareContactPicked}
+          title={t('conversationScreen.shareContactTitle', { name })}
+          subtitle={t('conversationScreen.shareContactSubtitle')}
+        />
+        <NwcWalletShareSheet
+          visible={nwcPickerOpen}
+          onClose={closeNwcPicker}
+          wallets={nwcWallets}
+          onSelect={shareToWallet}
+        />
+        <ReceiveSheet
+          visible={invoiceSheetOpen}
+          onClose={() => setInvoiceSheetOpen(false)}
+          presetFriend={{
+            pubkey,
+            name,
+            picture: picture ?? null,
+            lightningAddress: lightningAddress ?? null,
+          }}
+          presetProtocol={protocol}
+          onSent={(payload) => {
+            appendOptimisticLocal(payload);
+          }}
+          onMarmotUnreachable={offerNip17ForText}
+        />
+        <SendSheet
+          visible={sendSheetOpen}
+          onClose={() => {
+            setSendSheetOpen(false);
+            setInvoiceToPay(null);
+            handleRefresh();
+          }}
+          initialAddress={invoiceToPay ?? lightningAddress ?? undefined}
+          // Paying a bolt11 invoice encodes the recipient in the invoice
+          // itself, so clear the per-conversation recipient hints. Paying a
+          // lightning address (contains `@`, not `ln…`) keeps the hints so
+          // SendSheet's label reads `Pay to <name>`.
+          initialPicture={
+            invoiceToPay && !invoiceToPay.includes('@') ? undefined : (picture ?? undefined)
+          }
+          recipientPubkey={invoiceToPay && !invoiceToPay.includes('@') ? undefined : pubkey}
+          recipientName={invoiceToPay && !invoiceToPay.includes('@') ? undefined : name}
+        />
+        <TransactionDetailSheet
+          visible={detailTx !== null}
+          tx={detailTx}
+          onClose={() => setDetailTx(null)}
+          onCounterpartyPress={(contact) => {
+            setDetailTx(null);
+            presentContactSheet(contact);
+          }}
+        />
+        <MessageActionsSheet
+          visible={actionsForMessage !== null}
+          onClose={closeMessageActions}
+          myReactions={
+            actionsForMessage
+              ? (reactionsByTarget.get(actionsForMessage.targetId)?.myReactions ?? {})
+              : {}
+          }
+          onToggleReaction={handleToggleReaction}
+          // Zap is only meaningful for an incoming bubble whose author has a
+          // lightning route. Hidden for our own outgoing bubbles (zapping
+          // yourself is a no-op) and when the peer has no lud16.
+          onZap={
+            actionsForMessage && !actionsForMessage.fromMe && lightningAddress
+              ? handleZapMessage
+              : undefined
+          }
+          {...menu.sheet}
+        />
+        <ContactProfileSheet
+          visible={profileSheetVisible}
+          onClose={() => setProfileSheetVisible(false)}
+          contact={sheetContact}
+          onViewFullProfile={handleViewFullProfile}
+          onMessage={
+            sheetContact?.pubkey && sheetContact.pubkey !== pubkey
+              ? () => {
+                  const c = sheetContact;
+                  if (!c?.pubkey) return;
+                  setProfileSheetVisible(false);
+                  navigation.replace('Conversation', {
+                    pubkey: c.pubkey,
+                    name: c.name,
+                    picture: c.picture,
+                    lightningAddress: c.lightningAddress,
+                  });
+                }
+              : undefined
+          }
+          onZap={
+            sheetContact?.lightningAddress
+              ? () => {
+                  setProfileSheetVisible(false);
+                  setSendSheetOpen(true);
+                }
+              : undefined
           }
         />
+        <SecretModeCelebration
+          visible={secretCelebrationVisible}
+          enabled={secretPendingEnabled}
+          onDismiss={() => setSecretCelebrationVisible(false)}
+        />
+        <DeliveryDetailSheet
+          info={messageSheetInfo}
+          onClose={closeMessageInfo}
+          onResend={canResendFromInfo ? handleResendFromInfo : undefined}
+          devices={dmDevices.messageDevices(messageSheetSender, messageSheetSentAt)}
+        />
+        <DmMembersSheet
+          visible={dmDevices.sheetOpen}
+          onClose={dmDevices.closeSheet}
+          peer={{ pubkey, name, picture: picture ?? null }}
+          chatId={dmDevices.chatId}
+          deviceCounts={dmDevices.counts}
+          onMemberTap={openPeerProfile}
+        />
       </View>
-      <LiveLocationDurationPicker
-        visible={liveLocationPickerOpen}
-        onClose={() => setLiveLocationPickerOpen(false)}
-        onChooseSnapshot={handleShareSnapshot}
-        onChooseLive={handleShareLive}
-      />
-      <VoiceRecordingSheet
-        visible={voiceSheetOpen}
-        onClose={() => setVoiceSheetOpen(false)}
-        onSend={handleSendVoiceNote}
-        sending={uploadingVoice}
-      />
-      <GifPickerSheet
-        visible={gifPickerOpen}
-        onClose={() => {
-          setGifPickerOpen(false);
-          setAttachPanelOpen(false);
-        }}
-        onSelect={handleSendGif}
-      />
-      <PollComposerSheet
-        visible={pollComposerOpen}
-        onClose={() => setPollComposerOpen(false)}
-        onSend={handleSendPoll}
-      />
-      <FullscreenGifModal
-        url={fullscreenGifUrl}
-        onClose={() => setFullscreenGifUrl(null)}
-        closeLabel={t('conversationScreen.closeFullscreenGif')}
-        testID="conversation-gif-fullscreen"
-      />
-      <FriendPickerSheet
-        visible={contactPickerOpen}
-        onClose={() => {
-          // Closing the picker with no selection also closes the
-          // AttachPanel underneath — the user has navigated away from
-          // the attach flow, the parent is no longer relevant.
-          setContactPickerOpen(false);
-          setAttachPanelOpen(false);
-        }}
-        onSelect={handleShareContactPicked}
-        title={t('conversationScreen.shareContactTitle', { name })}
-        subtitle={t('conversationScreen.shareContactSubtitle')}
-      />
-      <NwcWalletShareSheet
-        visible={nwcPickerOpen}
-        onClose={closeNwcPicker}
-        wallets={nwcWallets}
-        onSelect={shareToWallet}
-      />
-      <ReceiveSheet
-        visible={invoiceSheetOpen}
-        onClose={() => setInvoiceSheetOpen(false)}
-        presetFriend={{
-          pubkey,
-          name,
-          picture: picture ?? null,
-          lightningAddress: lightningAddress ?? null,
-        }}
-        presetProtocol={protocol}
-        onSent={(payload) => {
-          appendOptimisticLocal(payload);
-        }}
-        onMarmotUnreachable={offerNip17ForText}
-      />
-      <SendSheet
-        visible={sendSheetOpen}
-        onClose={() => {
-          setSendSheetOpen(false);
-          setInvoiceToPay(null);
-          handleRefresh();
-        }}
-        initialAddress={invoiceToPay ?? lightningAddress ?? undefined}
-        // Paying a bolt11 invoice encodes the recipient in the invoice
-        // itself, so clear the per-conversation recipient hints. Paying a
-        // lightning address (contains `@`, not `ln…`) keeps the hints so
-        // SendSheet's label reads `Pay to <name>`.
-        initialPicture={
-          invoiceToPay && !invoiceToPay.includes('@') ? undefined : (picture ?? undefined)
-        }
-        recipientPubkey={invoiceToPay && !invoiceToPay.includes('@') ? undefined : pubkey}
-        recipientName={invoiceToPay && !invoiceToPay.includes('@') ? undefined : name}
-      />
-      <TransactionDetailSheet
-        visible={detailTx !== null}
-        tx={detailTx}
-        onClose={() => setDetailTx(null)}
-        onCounterpartyPress={(contact) => {
-          setDetailTx(null);
-          presentContactSheet(contact);
-        }}
-      />
-      <MessageActionsSheet
-        visible={actionsForMessage !== null}
-        onClose={closeMessageActions}
-        myReactions={
-          actionsForMessage
-            ? (reactionsByTarget.get(actionsForMessage.targetId)?.myReactions ?? {})
-            : {}
-        }
-        onToggleReaction={handleToggleReaction}
-        // Zap is only meaningful for an incoming bubble whose author has a
-        // lightning route. Hidden for our own outgoing bubbles (zapping
-        // yourself is a no-op) and when the peer has no lud16.
-        onZap={
-          actionsForMessage && !actionsForMessage.fromMe && lightningAddress
-            ? handleZapMessage
-            : undefined
-        }
-        {...menu.sheet}
-      />
-      <ContactProfileSheet
-        visible={profileSheetVisible}
-        onClose={() => setProfileSheetVisible(false)}
-        contact={sheetContact}
-        onViewFullProfile={handleViewFullProfile}
-        onMessage={
-          sheetContact?.pubkey && sheetContact.pubkey !== pubkey
-            ? () => {
-                const c = sheetContact;
-                if (!c?.pubkey) return;
-                setProfileSheetVisible(false);
-                navigation.replace('Conversation', {
-                  pubkey: c.pubkey,
-                  name: c.name,
-                  picture: c.picture,
-                  lightningAddress: c.lightningAddress,
-                });
-              }
-            : undefined
-        }
-        onZap={
-          sheetContact?.lightningAddress
-            ? () => {
-                setProfileSheetVisible(false);
-                setSendSheetOpen(true);
-              }
-            : undefined
-        }
-      />
-      <SecretModeCelebration
-        visible={secretCelebrationVisible}
-        enabled={secretPendingEnabled}
-        onDismiss={() => setSecretCelebrationVisible(false)}
-      />
-      <DeliveryDetailSheet
-        info={messageSheetInfo}
-        onClose={closeMessageInfo}
-        onResend={canResendFromInfo ? handleResendFromInfo : undefined}
-        devices={dmDevices.messageDevices(messageSheetSender, messageSheetSentAt)}
-      />
-      <DmMembersSheet
-        visible={dmDevices.sheetOpen}
-        onClose={dmDevices.closeSheet}
-        peer={{ pubkey, name, picture: picture ?? null }}
-        chatId={dmDevices.chatId}
-        deviceCounts={dmDevices.counts}
-        onMemberTap={() => {
-          dmDevices.closeSheet();
-          openPeerProfile();
-        }}
-      />
-    </View>
+    </ChatSearchContext.Provider>
   );
 };
 

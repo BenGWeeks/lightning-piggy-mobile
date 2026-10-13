@@ -1,3 +1,4 @@
+import ChatHighlightedText from './ChatHighlightedText';
 import React, { useMemo } from 'react';
 import { Linking, Text } from 'react-native';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -21,28 +22,30 @@ export const LinkifiedText: React.FC<{
   const segments = useMemo(() => splitMentions(text), [text]);
 
   const renderLinks = (chunk: string, keyBase: string) =>
-    hasLink(chunk)
-      ? linkifySegments(chunk).map((seg, i) =>
-          seg.url ? (
-            <Text
-              key={`${keyBase}-${i}`}
-              style={[styles.bubbleLink, fromMe && styles.bubbleLinkMe]}
-              onPress={() => {
-                // openURL rejects on a malformed URL / missing handler —
-                // swallow so a bad link can't raise an unhandled rejection.
-                void Linking.openURL(seg.url as string).catch(() => {});
-              }}
-              accessibilityRole="link"
-              accessibilityLabel={t('messageBubble.openLink', { url: seg.url })}
-              testID={`${testIdPrefix}-link-${messageId}-${keyBase === '0' ? i : `${keyBase}-${i}`}`}
-            >
-              {seg.text}
-            </Text>
-          ) : (
-            seg.text
-          ),
-        )
-      : chunk;
+    hasLink(chunk) ? (
+      linkifySegments(chunk).map((seg, i) =>
+        seg.url ? (
+          <Text
+            key={`${keyBase}-${i}`}
+            style={[styles.bubbleLink, fromMe && styles.bubbleLinkMe]}
+            onPress={() => {
+              // openURL rejects on a malformed URL / missing handler —
+              // swallow so a bad link can't raise an unhandled rejection.
+              void Linking.openURL(seg.url as string).catch(() => {});
+            }}
+            accessibilityRole="link"
+            accessibilityLabel={t('messageBubble.openLink', { url: seg.url })}
+            testID={`${testIdPrefix}-link-${messageId}-${keyBase === '0' ? i : `${keyBase}-${i}`}`}
+          >
+            <ChatHighlightedText text={seg.text} />
+          </Text>
+        ) : (
+          <ChatHighlightedText key={`${keyBase}-${i}`} text={seg.text} />
+        ),
+      )
+    ) : (
+      <ChatHighlightedText text={chunk} />
+    );
 
   return (
     <Text style={[styles.bubbleText, fromMe && styles.bubbleTextMe]}>

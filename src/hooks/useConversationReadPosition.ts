@@ -52,5 +52,5 @@ export function useConversationReadPosition({
     scrollToId,
     leaveEdge,
   });
-  return { ...read, onScrollToIndexFailed };
+  return { ...read, scrollToId, onScrollToIndexFailed };
 }

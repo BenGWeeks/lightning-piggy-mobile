@@ -1,0 +1,277 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Chat menu — contact, search, media, mute and group info
+---
+# Active Piggy only: uses existing Middle Piggy and a Piggy-only group.
+# Never signs in/out, sends messages, clears history or changes membership.
+# Override GROUP_ID with an existing test group; defaults to War Machine's
+# IO i6zq fixture. Mute is toggled twice, preserving its initial setting.
+# Capture evidence with ADB under the emulator lock (see docs/screenshots/chat-menu/README.adoc).
+- launchApp:
+    clearState: false
+    stopApp: false
+- extendedWaitUntil:
+    visible:
+      id: '(tab-messages|chat-info-back|conversation-back|group-back|contact-profile-back)'
+    timeout: 60000
+- runFlow:
+    when:
+      visible:
+        id: contact-profile-back
+    commands:
+      - tapOn:
+          id: contact-profile-back
+- runFlow:
+    when:
+      visible:
+        id: chat-info-back
+    commands:
+      - tapOn:
+          id: chat-info-back
+- runFlow:
+    when:
+      visible:
+        id: group-back
+    commands:
+      - tapOn:
+          id: group-back
+- runFlow:
+    when:
+      visible:
+        id: conversation-back
+    commands:
+      - tapOn:
+          id: conversation-back
+- tapOn:
+    id: tab-messages
+- extendedWaitUntil:
+    visible:
+      id: 'conversation-row-4b2fcb4e3c30c1363c4af5e3a6adebfe93cd572c3d57c31aaa4479d908612036:${PEER_PROTOCOL || "marmot"}'
+    timeout: 60000
+- tapOn:
+    id: 'conversation-row-4b2fcb4e3c30c1363c4af5e3a6adebfe93cd572c3d57c31aaa4479d908612036:${PEER_PROTOCOL || "marmot"}'
+- extendedWaitUntil:
+    visible:
+      id: conversation-notification-menu
+    timeout: 60000
+- tapOn:
+    id: conversation-notification-menu
+- extendedWaitUntil:
+    visible:
+      id: chat-menu-contact
+    timeout: 15000
+- assertVisible:
+    id: chat-menu-search
+- assertVisible:
+    id: chat-menu-attachments
+- tapOn:
+    id: chat-menu-contact
+- extendedWaitUntil:
+    visible:
+      id: chat-info-screen
+    timeout: 60000
+- tapOn:
+    id: chat-info-copy-npub
+- tapOn:
+    id: chat-info-profile
+- extendedWaitUntil:
+    visible:
+      id: contact-profile-back
+    timeout: 120000
+- tapOn:
+    id: contact-profile-back
+- runFlow:
+    when:
+      visible:
+        id: chat-info-devices
+    commands:
+      - tapOn:
+          id: chat-info-devices
+      - extendedWaitUntil:
+          visible:
+            id: group-members-done
+          timeout: 15000
+      - tapOn:
+          id: group-members-done
+- tapOn:
+    id: chat-info-back
+- tapOn:
+    id: conversation-notification-menu
+- tapOn:
+    id: chat-menu-search
+- extendedWaitUntil:
+    visible:
+      id: chat-search-input
+    timeout: 15000
+- tapOn:
+    id: chat-search-input
+- inputText: '${(SEARCH_QUERY || "plain").substring(0, 4)}'
+- inputText: '${(SEARCH_QUERY || "plain").substring(4)}'
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      text: '1 / [1-9][0-9]*'
+    timeout: 15000
+- tapOn:
+    id: chat-search-up
+- extendedWaitUntil:
+    visible:
+      text: '2 / [1-9][0-9]*'
+    timeout: 15000
+- tapOn:
+    id: chat-search-down
+- assertVisible:
+    text: '1 / [1-9][0-9]*'
+- tapOn:
+    id: chat-search-close
+- tapOn:
+    id: conversation-notification-menu
+- tapOn:
+    id: chat-menu-attachments
+- extendedWaitUntil:
+    visible:
+      id: chat-media-screen
+    timeout: 60000
+- runFlow:
+    when:
+      visible:
+        id: 'chat-attachment-.*'
+    commands:
+      - tapOn:
+          id: 'chat-attachment-.*'
+          index: 0
+      - extendedWaitUntil:
+          visible:
+            id: chat-media-viewer-close
+          timeout: 15000
+      - tapOn:
+          id: chat-media-viewer-close
+- tapOn:
+    id: chat-media-tab-docs
+- tapOn:
+    id: chat-media-tab-links
+- tapOn:
+    id: chat-media-back
+- tapOn:
+    id: conversation-notification-menu
+# The initial mute state determines the first action; a second toggle restores it.
+- runFlow:
+    when:
+      visible:
+        id: chat-menu-mute
+    commands:
+      - tapOn:
+          id: chat-menu-mute
+- runFlow:
+    when:
+      visible:
+        id: chat-menu-unmute
+    commands:
+      - tapOn:
+          id: chat-menu-unmute
+- extendedWaitUntil:
+    visible:
+      id: conversation-mute-notifications
+    timeout: 15000
+- tapOn:
+    id: conversation-mute-notifications
+- tapOn:
+    id: conversation-notification-menu
+- runFlow:
+    when:
+      visible:
+        id: chat-menu-mute
+    commands:
+      - tapOn:
+          id: chat-menu-mute
+- runFlow:
+    when:
+      visible:
+        id: chat-menu-unmute
+    commands:
+      - tapOn:
+          id: chat-menu-unmute
+- tapOn:
+    id: conversation-mute-notifications
+- tapOn:
+    id: conversation-notification-menu
+- tapOn:
+    id: chat-menu-more
+- tapOn:
+    id: chat-menu-clear
+- extendedWaitUntil:
+    visible:
+      id: chat-clear-confirm
+    timeout: 15000
+# Cancel: never destroy the shared Piggy's history during validation.
+- tapOn:
+    id: branded-alert-button-0
+- tapOn:
+    id: conversation-back
+- scrollUntilVisible:
+    element:
+      id: 'group-row-${GROUP_ID || "marmot:8c8e40f1ac50949bfb03be6c939c19513f415fe3bb1f2ccf560c1108db6e8f76"}'
+    direction: DOWN
+    timeout: 30000
+- tapOn:
+    id: 'group-row-${GROUP_ID || "marmot:8c8e40f1ac50949bfb03be6c939c19513f415fe3bb1f2ccf560c1108db6e8f76"}'
+- extendedWaitUntil:
+    visible:
+      id: group-back
+    timeout: 60000
+- tapOn:
+    id: conversation-notification-menu
+- assertVisible:
+    id: chat-menu-group
+- assertNotVisible:
+    id: chat-menu-contact
+- tapOn:
+    id: chat-menu-group
+- extendedWaitUntil:
+    visible:
+      id: chat-info-screen
+    timeout: 60000
+- scrollUntilVisible:
+    element:
+      id: chat-info-members
+    direction: DOWN
+- tapOn:
+    id: chat-info-members
+- extendedWaitUntil:
+    visible:
+      id: group-members-done
+    timeout: 15000
+- tapOn:
+    id: group-members-done
+- tapOn:
+    id: chat-info-back
+- tapOn:
+    id: conversation-notification-menu
+- tapOn:
+    id: chat-menu-search
+- tapOn:
+    id: chat-search-input
+- inputText: '${(SEARCH_QUERY || "plain").substring(0, 4)}'
+- inputText: '${(SEARCH_QUERY || "plain").substring(4)}'
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      text: '1 / [1-9][0-9]*'
+    timeout: 15000
+- tapOn:
+    id: chat-search-close
+- tapOn:
+    id: conversation-notification-menu
+- tapOn:
+    id: chat-menu-attachments
+- extendedWaitUntil:
+    visible:
+      id: chat-media-screen
+    timeout: 60000
+- tapOn:
+    id: chat-media-tab-docs
+- tapOn:
+    id: chat-media-tab-links
+- tapOn:
+    id: chat-media-back
+- tapOn:
+    id: group-back

@@ -24,6 +24,7 @@ export function useConversationTimeline(
   protocol: DmProtocol,
   // Alpha-only Marmot device notices (#1267); empty unless the switch is on.
   deviceNotices: readonly DeviceNoticeInput[] = NO_NOTICES,
+  clearBoundary = 0,
 ) {
   const { formatLocale } = useLocale();
   const zapItems = useMemo(
@@ -49,7 +50,16 @@ export function useConversationTimeline(
         partnerInvites,
         formatLocale,
         deviceNotices,
+        clearBoundary,
       ),
-    [resolvedMessages, zapItems, olderOrderAmounts, partnerInvites, formatLocale, deviceNotices],
+    [
+      resolvedMessages,
+      zapItems,
+      olderOrderAmounts,
+      partnerInvites,
+      formatLocale,
+      deviceNotices,
+      clearBoundary,
+    ],
   );
 }

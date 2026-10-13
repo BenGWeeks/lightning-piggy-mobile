@@ -85,7 +85,19 @@ name: Create a group, then leave it (assert it's gone)
 
 # === Leave the group ===
 - tapOn:
-    id: 'leave-group-button'
+    id: 'conversation-notification-menu'
+- tapOn:
+    id: 'chat-menu-group'
+- extendedWaitUntil:
+    visible:
+      id: 'chat-info-screen'
+    timeout: 60000
+- scrollUntilVisible:
+    element:
+      id: 'chat-info-leave'
+    direction: DOWN
+- tapOn:
+    id: 'chat-info-leave'
 - waitForAnimationToEnd:
     timeout: 1500
 # Confirmation dialog — destructive style. Tap the "Leave" action.

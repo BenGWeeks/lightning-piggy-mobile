@@ -1,8 +1,7 @@
 import React, { useMemo } from 'react';
-import { TouchableOpacity, View } from 'react-native';
-import { LogOut } from 'lucide-react-native';
+import { View } from 'react-native';
+import ChatMenu, { type ChatMenuProps } from './ChatMenu';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useTranslation } from '../contexts/LocaleContext';
 import DmProtocolTag from './DmProtocolTag';
 import { groupDmProtocol } from '../utils/groupProtocol';
 import type { Group } from '../types/groups';
@@ -10,27 +9,19 @@ import { createGroupHeaderActionsStyles } from '../styles/GroupHeaderActions.sty
 
 interface Props {
   group: Pick<Group, 'protocol'>;
-  onLeave: () => void;
+  menu: ChatMenuProps;
 }
 
 /** Right-hand side of the group chat header: the group's protocol tag
  * (read-only — a group's transport is fixed, unlike a 1:1 thread's) and the
- * leave button. */
-function GroupHeaderActions({ group, onLeave }: Props) {
+ * chat menu. */
+function GroupHeaderActions({ group, menu }: Props) {
   const colors = useThemeColors();
-  const t = useTranslation();
   const styles = useMemo(() => createGroupHeaderActionsStyles(colors), [colors]);
   return (
     <View style={styles.container}>
       <DmProtocolTag protocol={groupDmProtocol(group)} testID="group-protocol-tag" />
-      <TouchableOpacity
-        style={styles.leaveButton}
-        onPress={onLeave}
-        accessibilityLabel={t('groupConversationScreen.leaveGroupTitle')}
-        testID="leave-group-button"
-      >
-        <LogOut size={18} color={colors.white} strokeWidth={2} />
-      </TouchableOpacity>
+      <ChatMenu {...menu} />
     </View>
   );
 }

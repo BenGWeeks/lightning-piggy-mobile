@@ -74,12 +74,14 @@ export function useGroupTimeline({
   memberNameByPubkey,
   formatLocale,
   deviceNotices,
+  clearBoundary = 0,
 }: {
   messages: GroupMessage[];
   myPubkey: string | null | undefined;
   memberNameByPubkey: ReadonlyMap<string, string>;
   formatLocale: string;
   deviceNotices: readonly DeviceNoticeView[];
+  clearBoundary?: number;
 }) {
   const classified = useMemo<ClassifiedMessage[]>(() => {
     // One id index (with each parent's sender) — no per-reply scan.
@@ -115,8 +117,9 @@ export function useGroupTimeline({
   }, [messages, myPubkey, memberNameByPubkey, formatLocale]);
 
   const rows = useMemo(
-    () => mergeDeviceNotices(classified, deviceNotices),
-    [classified, deviceNotices],
+    () =>
+      mergeDeviceNotices(classified, deviceNotices).filter((row) => row.createdAt > clearBoundary),
+    [classified, deviceNotices, clearBoundary],
   );
 
   const senderById = useMemo(

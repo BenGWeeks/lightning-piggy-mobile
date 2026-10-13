@@ -30,6 +30,9 @@ const TRANSIENT_PARAM_KEYS = [
   'sendToPubkey',
   'sendToName',
   'openComposer',
+  // Private chat snapshots and one-shot scroll requests never belong on disk.
+  'messages',
+  'jumpToMessage',
 ];
 
 // One-shot destination routes reached via a deep link / NFC tap / share — a
@@ -37,7 +40,7 @@ const TRANSIENT_PARAM_KEYS = [
 // straight back into one on launch replays a stale action (the app reopens
 // the last cache every time). Popped on restore so we land on the parent
 // stack (ExploreHome / Hunt) instead of the transient leaf.
-const TRANSIENT_ROUTE_NAMES = ['HuntPiggyDetail', 'HuntFound'];
+const TRANSIENT_ROUTE_NAMES = ['HuntPiggyDetail', 'HuntFound', 'ChatMedia'];
 
 // Structural view of a NavigationState used by the sanitizer — React
 // Navigation's own type is deeply generic; we only touch these fields.

@@ -6,6 +6,7 @@ export const MUTED_SENDERS_KEY = 'muted_notification_senders_v1';
 const listeners = new Set<() => void>();
 let queue: Promise<unknown> = Promise.resolve();
 const hex = /^[a-f0-9]{64}$/i;
+const validTarget = (value: string) => hex.test(value) || /^group:[a-z0-9:_-]{1,256}$/i.test(value);
 
 /** Read storage rather than caching: background workers have a separate JS context. */
 export async function loadMutedSenders(owner: string): Promise<ReadonlySet<string>> {
@@ -15,7 +16,7 @@ export async function loadMutedSenders(owner: string): Promise<ReadonlySet<strin
     return new Set(
       Array.isArray(parsed)
         ? parsed
-            .filter((p): p is string => typeof p === 'string' && hex.test(p))
+            .filter((p): p is string => typeof p === 'string' && validTarget(p))
             .map((p) => p.toLowerCase())
         : [],
     );
@@ -27,7 +28,7 @@ export async function loadMutedSenders(owner: string): Promise<ReadonlySet<strin
 /** Serialize toggles so rapid taps and different senders cannot overwrite one another. */
 export function toggleMutedSender(owner: string, sender: string): Promise<void> {
   const pubkey = sender.toLowerCase();
-  if (!hex.test(pubkey)) return Promise.reject(new Error('Invalid sender pubkey'));
+  if (!validTarget(pubkey)) return Promise.reject(new Error('Invalid notification target'));
   const run = queue.then(async () => {
     const next = new Set(await loadMutedSenders(owner));
     if (next.has(pubkey)) next.delete(pubkey);
@@ -62,7 +63,10 @@ export function isMutedNotification(
   muted: ReadonlySet<string>,
 ): boolean {
   const sender = notificationSender(data, kind);
-  return !!sender && muted.has(sender);
+  return (
+    (!!sender && muted.has(sender)) ||
+    (!!data.groupId && muted.has(`group:${data.groupId.toLowerCase()}`))
+  );
 }
 
 export async function shouldMuteNotification(
@@ -70,6 +74,6 @@ export async function shouldMuteNotification(
   data: NotificationData | undefined,
   kind?: string,
 ): Promise<boolean> {
-  if (!owner || !data || !notificationSender(data, kind)) return false;
+  if (!owner || !data || (!notificationSender(data, kind) && !data.groupId)) return false;
   return isMutedNotification(data, kind, await loadMutedSenders(owner));
 }

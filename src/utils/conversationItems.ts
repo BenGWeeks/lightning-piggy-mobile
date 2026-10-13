@@ -345,6 +345,7 @@ export function buildConversationItems(
   failedInvites: readonly { id: string; createdAt: number }[] = [],
   locale?: string,
   deviceNotices: readonly DeviceNoticeInput[] = [],
+  clearBoundary = 0,
 ): Item[] {
   const expectedAmounts = collectApprovedOrderAmounts(messages, olderOrderAmounts);
   const byId = indexMessagesById(messages);
@@ -567,7 +568,9 @@ export function buildConversationItems(
   // index 0 renders at the visual bottom (chat default) and the
   // RefreshControl attaches to the visual bottom too, which is what
   // drives the pull-up-to-refresh gesture.
-  const sorted = [...deduped, ...zapItems].sort((a, b) => b.createdAt - a.createdAt);
+  const sorted = [...deduped, ...zapItems]
+    .filter((item) => item.createdAt > clearBoundary)
+    .sort((a, b) => b.createdAt - a.createdAt);
 
   // Interleave "Today / Yesterday / <date>" dividers between day groups.
   // With an inverted FlatList the array runs newest → oldest, so each

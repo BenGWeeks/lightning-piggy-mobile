@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useCallback } from 'react';
 import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import GroupMembersSheet from './GroupMembersSheet';
 import { buildGroupMemberRows, type MemberProfile } from '../utils/groupMemberRows';
@@ -46,6 +46,13 @@ const DmMembersSheet: React.FC<Props> = ({
       ),
     [pubkey, name, picture, selfPubkey, profile, contacts],
   );
+  const openMember = useCallback(
+    (pubkey: string) => {
+      onClose();
+      onMemberTap?.(pubkey);
+    },
+    [onClose, onMemberTap],
+  );
   return (
     <GroupMembersSheet
       visible={visible}
@@ -53,7 +60,7 @@ const DmMembersSheet: React.FC<Props> = ({
       readOnly
       onClose={onClose}
       members={members}
-      onMemberTap={onMemberTap}
+      onMemberTap={onMemberTap ? openMember : undefined}
       chatId={chatId}
       deviceCounts={deviceCounts}
       expandDevices

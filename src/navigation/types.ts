@@ -1,3 +1,5 @@
+import type { SearchableMessage } from '../utils/chatSearch';
+import type { GroupMemberRow } from '../utils/groupMemberRows';
 import type { DmProtocol } from '../utils/dmProtocol';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { DrawerNavigationProp } from '@react-navigation/drawer';
@@ -48,6 +50,7 @@ export type AccountDrawerParamList = {
 export type RootStackParamList = {
   Main: NavigatorScreenParams<AccountDrawerParamList>;
   Conversation: {
+    jumpToMessage?: string;
     protocol?: DmProtocol;
     pubkey: string;
     name: string;
@@ -55,7 +58,24 @@ export type RootStackParamList = {
     lightningAddress?: string | null;
   };
   Groups: undefined;
-  GroupConversation: { groupId: string };
+  GroupConversation: { groupId: string; jumpToMessage?: string };
+  ChatInfo: {
+    name: string;
+    picture?: string | null;
+    protocol: DmProtocol;
+    contact?: ContactProfileBodyData;
+    groupId?: string;
+    members?: GroupMemberRow[];
+    chatId: string | null;
+    deviceCounts: [string, number][];
+    relays: string[];
+  };
+  ChatMedia: {
+    messages?: SearchableMessage[];
+    target:
+      | { screen: 'Conversation'; params: RootStackParamList['Conversation'] }
+      | { screen: 'GroupConversation'; params: RootStackParamList['GroupConversation'] };
+  };
   // Full-page friends profile (#435). `phoneContactId` is set when the
   // contact came from the device address book and can be edited inline.
   ContactProfile: {

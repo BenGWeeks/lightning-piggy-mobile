@@ -1,0 +1,38 @@
+import { useCallback, useMemo } from 'react';
+import { getMarmotSession, toAppGroupId } from '../services/marmotSession';
+import type { ContactProfileBodyData } from '../components/ContactProfileBody';
+import type { RootStackParamList } from '../navigation/types';
+import type { DmProtocol } from '../utils/dmProtocol';
+import type { SearchableMessage } from '../utils/chatSearch';
+import type { useDmDevices } from './useDmDevices';
+import { useChatTools } from './useChatTools';
+export function useDmChatTools(
+  messages: SearchableMessage[],
+  contact: ContactProfileBodyData,
+  params: RootStackParamList['Conversation'],
+  protocol: DmProtocol,
+  devices: ReturnType<typeof useDmDevices>,
+  jump: (id: string) => unknown,
+  clear: () => Promise<void>,
+) {
+  const info = useMemo<RootStackParamList['ChatInfo']>(
+    () => ({
+      name: contact.name,
+      picture: contact.picture,
+      contact,
+      protocol,
+      chatId: devices.chatId,
+      deviceCounts: [...(devices.counts ?? [])],
+      relays: devices.chatId
+        ? (getMarmotSession()?.getGroup(toAppGroupId(devices.chatId))?.relays ?? [])
+        : [],
+    }),
+    [contact, protocol, devices.chatId, devices.counts],
+  );
+  const target = useMemo(
+    () => ({ screen: 'Conversation' as const, params: { ...params, protocol } }),
+    [params, protocol],
+  );
+  const jumpToMessage = useCallback((id: string) => jump(`dm-${id}`), [jump]);
+  return useChatTools(messages, info, target, jumpToMessage, clear);
+}
