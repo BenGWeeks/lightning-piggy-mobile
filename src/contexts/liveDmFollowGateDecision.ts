@@ -36,7 +36,7 @@ export function gateLiveDm({
   const label = kind === 4 ? 'kind-4' : 'wrap';
   if (bypassOwn && entry.fromMe) return 'pass';
   if ((hydrated || cacheReady) && isFollowed(follows, entry.partnerPubkey)) return 'pass';
-  if (!hydrated && !entry.fromMe) {
+  if (!hydrated) {
     const text = dmRowPreview(entry.text, entry.wireKind, getAppFormatLocale());
     buffer.defer({
       partnerPubkey: entry.partnerPubkey,
@@ -45,7 +45,7 @@ export function gateLiveDm({
       content: entry.text,
       ...(rumor?.kind === MARMOT_WELCOME_KIND ? { rumor } : {}),
       onEvict,
-      ...(fresh && entry.wireKind !== MARMOT_WELCOME_KIND
+      ...(fresh && !entry.fromMe && entry.wireKind !== MARMOT_WELCOME_KIND
         ? { notify: { title: 'New message', body: text } }
         : {}),
     });

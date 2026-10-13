@@ -236,6 +236,11 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       return;
     }
     if (item.rumor) routeMarmotWelcome(item.rumor, viewerPubkey);
+    // A reopened subscription has a fresh seen set: claim before queuing I/O
+    // so relay redelivery cannot race this replay. Cleanup releases both sets.
+    seen.add(item.entry.id);
+    knownWrapIds.add(item.entry.id);
+    capKnownWrapIds(knownWrapIds);
     pendingReplays.add(item);
     chainWrite(async () => {
       if (cancelled || !isCurrentOwner()) {
