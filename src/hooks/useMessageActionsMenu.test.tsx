@@ -4,6 +4,7 @@
  * instance (GroupConversation is reused across groups), and a submit must
  * never send an edit for a message the current thread doesn't hold.
  */
+import * as Clipboard from 'expo-clipboard';
 import { act, renderHook } from '@testing-library/react-native';
 import { useMessageActionsMenu } from './useMessageActionsMenu';
 
@@ -106,4 +107,25 @@ it('sends the edit for a message still in the thread', async () => {
     text: 'hello there',
     previousEditedAt: undefined,
   });
+});
+
+it('copies a file name without offering Edit', async () => {
+  const { result } = renderHook(() =>
+    useMessageActionsMenu<Row>({
+      myPubkey: ME,
+      scope: groupA.scope,
+      marmotGroupId: groupA.groupId,
+      messages: groupA.messages,
+      setMessages: jest.fn(),
+      idOf,
+      draft: '',
+      setDraft: jest.fn(),
+      actioned: { targetId: MSG_A, fromMe: true, copyText: 'invoice.pdf', isPlainText: false },
+      closeActions: jest.fn(),
+      onSend: jest.fn(),
+    }),
+  );
+  expect(result.current.sheet.onEdit).toBeUndefined();
+  await act(async () => result.current.sheet.onCopyText?.());
+  expect(Clipboard.setStringAsync).toHaveBeenCalledWith('invoice.pdf');
 });

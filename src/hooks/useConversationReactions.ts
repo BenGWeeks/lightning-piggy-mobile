@@ -87,10 +87,11 @@ interface ActionedMessage {
   fromMe: boolean;
   // kind-14 (NIP-17 chat) or kind-4 (NIP-04 DM); goes in the kind-7 `k` tag.
   targetKind: 14 | 4;
-  // The message's text when it's plain chat text (incl. links / invoices) —
-  // offered as "Copy text". Never set for encrypted files (their stored text
-  // embeds the decryption key) or structured payloads (polls, wallet shares).
+  // Plain chat text or a sanitized attachment filename, offered as "Copy text".
+  // Never expose stored encryption keys or structured payloads.
   copyText?: string;
+  /** A filename can be copied without making the attachment editable. */
+  isPlainText?: boolean;
   // Our send hasn't been accepted by any relay yet (or failed).
   pending?: boolean;
 }
@@ -546,19 +547,22 @@ export function useConversationReactions({
       if (!authorPubkey) return null;
       const targetKind: 14 | 4 = item.kind === 'message' && item.wireKind === 4 ? 4 : 14;
       const text = item.kind === 'message' ? (item.text ?? '') : '';
+      const file = item.kind === 'message' ? item.file : undefined;
       const copyText =
-        item.kind === 'message' &&
+        file?.name ??
+        (item.kind === 'message' &&
         (item.wireKind === undefined || item.wireKind === 4 || item.wireKind === 14) &&
         !text.includes('#lpe=1') &&
         text.trim() !== ''
           ? text
-          : undefined;
+          : undefined);
       return {
         targetId,
         authorPubkey,
         fromMe: item.fromMe,
         targetKind,
         ...(copyText ? { copyText } : {}),
+        ...(file ? { isPlainText: false } : {}),
         ...('deliveryStatus' in item && item.deliveryStatus?.delivered === false
           ? { pending: true }
           : {}),

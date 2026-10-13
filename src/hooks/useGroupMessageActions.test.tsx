@@ -205,3 +205,35 @@ it.each([target, undefined])(
     expect(result.current.replyTo).toBeUndefined();
   },
 );
+
+it('copies only a sanitized file name, disables Edit, and redacts the reply quote', async () => {
+  const row = {
+    ...message,
+    senderPubkey: me,
+    wireKind: 15,
+    text:
+      '[FILE]' +
+      JSON.stringify({
+        name: '../invoice\u202e.pdf',
+        mime: 'application/pdf',
+        url: 'https://example.com/?token=secret',
+      }),
+  };
+  const { result } = renderHook(() =>
+    useGroupMessageActions({ messages: [row], myPubkey: me, groupId: 'group' }),
+  );
+  await act(async () => {});
+  act(() => result.current.propsForMessage(row).onLongPress?.());
+  const action = result.current.actionsForMessage!;
+  expect(action).toMatchObject({ copyText: 'invoice.pdf', isPlainText: false });
+  expect(
+    messageEditDelete({
+      isMarmot: true,
+      ...action,
+      isPlainText: action.isPlainText ?? !!action.copyText,
+    }),
+  ).toEqual({ canEdit: false, canDelete: true });
+  act(() => result.current.startReply());
+  expect(result.current.replyQuote?.text).not.toContain('token=secret');
+  expect(result.current.replyQuote?.text).not.toContain('[FILE]');
+});

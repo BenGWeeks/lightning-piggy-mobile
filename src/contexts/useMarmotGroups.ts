@@ -131,7 +131,7 @@ export function useMarmotGroups(
         // An edit may have arrived first (or the history replays).
         const overlay =
           storedMarmotContent(rumor, mediaKeys).kind === storedKindForMarmot(MARMOT_CHAT_KIND) &&
-          isEditableGroupText(message.text)
+          isEditableGroupText(message.text, message.wireKind)
             ? edits.latestFor(message.id, message.senderPubkey, group.id)
             : undefined;
         if (overlay) {
