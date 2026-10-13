@@ -39,9 +39,14 @@ export async function tryRouteGroupRumor(
   shouldAbort: () => boolean = () => false,
 ): Promise<GroupRouteResult> {
   const cls = classifyRumor(rumor, viewerPubkey);
-  if (!cls || cls.type !== 'group') return { kind: 'not-group' };
+  if (!cls || cls.type === 'order') return { kind: 'not-group' };
+  // NIP-17 does not require a subject on every message. A two-party
+  // rumor can therefore belong to an already-known named room.
+  const otherParticipants =
+    cls.type === 'group' ? cls.otherParticipants : new Set([cls.partnerPubkey]);
+  let group = findGroupForParticipants(otherParticipants, viewerPubkey);
+  if (cls.type === 'dm' && !group) return { kind: 'not-group' };
   if (shouldAbort()) return { kind: 'group-no-match' };
-  let group = findGroupForParticipants(cls.otherParticipants, viewerPubkey);
   // Always run the synthetic-reconcile path when the matched group is
   // synthetic (no kind-30200 backing it) — that's the only way later
   // `subject`-tag renames from foreign clients propagate to the local
@@ -70,7 +75,7 @@ export async function tryRouteGroupRumor(
       // (viewer included). `participantsFromRumor` returns exactly
       // that set; it's what `classifyRumor` derived `otherParticipants`
       // from minus the viewer, so re-include the viewer here.
-      const fullRoom = new Set<string>(cls.otherParticipants);
+      const fullRoom = new Set<string>(otherParticipants);
       fullRoom.add(viewerPubkey.toLowerCase());
       const synthId = syntheticGroupIdForParticipants(fullRoom);
       // memberPubkeys excludes the viewer by LP convention (see Group
@@ -79,7 +84,7 @@ export async function tryRouteGroupRumor(
         {
           groupId: synthId,
           name: subject,
-          memberPubkeys: Array.from(cls.otherParticipants),
+          memberPubkeys: Array.from(otherParticipants),
           createdAtSec: rumor.created_at,
         },
         viewerPubkey,
@@ -100,7 +105,7 @@ export async function tryRouteGroupRumor(
     // `since:` filter) may miss them. Buffering pending-group-wraps
     // for replay after a 30200 lands is tracked as a follow-up.
     if (__DEV__) {
-      const all = Array.from(cls.otherParticipants);
+      const all = Array.from(otherParticipants);
       const fp = all
         .slice(0, 3)
         .map((p) => p.slice(0, 8))

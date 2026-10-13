@@ -90,6 +90,7 @@ export function findGroupForParticipants(
 ): Group | null {
   if (owner !== knownOwner) return null;
   for (const group of known) {
+    if (group.protocol === 'marmot') continue;
     if (group.memberPubkeys.length !== otherParticipants.size) continue;
     let mismatch = false;
     for (const pk of group.memberPubkeys) {
