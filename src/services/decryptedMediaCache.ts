@@ -89,8 +89,39 @@ const memory = new Map<string, string>();
 const verifiedFiles = new Map<string, { size: number; mime: string }>();
 export const verifiedFileMetadata = (uri: string) => verifiedFiles.get(uri);
 
+// Android's chooser may settle before the recipient opens its content URI.
+// Keep a bounded number of shares through the chooser and for ten minutes after.
+export const FILE_SHARE_RETENTION_MS = 10 * 60 * 1000;
+const MAX_RETAINED_FILES = 16;
+const retainedFiles = new Map<string, { users: number; timer?: ReturnType<typeof setTimeout> }>();
+
+/** Release schedules cleanup; repeated/concurrent shares extend the same lease. */
+export function retainDecryptedFile(uri: string): () => void {
+  let lease = retainedFiles.get(uri);
+  if (!lease) {
+    if (retainedFiles.size >= MAX_RETAINED_FILES) throw new Error('Too many retained file shares');
+    lease = { users: 0 };
+    retainedFiles.set(uri, lease);
+  }
+  if (lease.timer) clearTimeout(lease.timer);
+  lease.users++;
+  const current = lease;
+  let released = false;
+  return () => {
+    if (released || retainedFiles.get(uri) !== current) return;
+    released = true;
+    if (--current.users > 0) return;
+    current.timer = setTimeout(() => {
+      void deleteDecryptedFile(uri).catch(() => {});
+    }, FILE_SHARE_RETENTION_MS);
+  };
+}
+
 /** File shares are transient plaintext, including memory entries. */
 export async function deleteDecryptedFile(uri: string): Promise<void> {
+  const lease = retainedFiles.get(uri);
+  if (lease?.timer) clearTimeout(lease.timer);
+  retainedFiles.delete(uri);
   verifiedFiles.delete(uri);
   for (const [key, value] of memory) if (value === uri) memory.delete(key);
   await deleteAsync(uri, { idempotent: true });
@@ -98,7 +129,9 @@ export async function deleteDecryptedFile(uri: string): Promise<void> {
 
 /** Sweep abandoned shares from prior runs; keep at most 16 recent files. */
 async function evictDiskFiles(dir: string): Promise<void> {
-  const names = (await readDirectoryAsync(dir)).filter((name) => name.startsWith('file-'));
+  const names = (await readDirectoryAsync(dir)).filter(
+    (name) => name.startsWith('file-') && !retainedFiles.has(`${dir}${name}`),
+  );
   const entries = await Promise.all(
     names.map(async (name) => ({
       uri: `${dir}${name}`,
@@ -114,8 +147,12 @@ async function evictDiskFiles(dir: string): Promise<void> {
     entries
       .filter(
         ({ info }, i) =>
-          i >= 15 || (info.exists && (info.modificationTime ?? 0) < Date.now() / 1000 - 600),
+          i >= 15 ||
+          (info.exists &&
+            (info.modificationTime ?? 0) < (Date.now() - FILE_SHARE_RETENTION_MS) / 1000),
       )
+      // A share can acquire a lease while the asynchronous directory scan runs.
+      .filter(({ uri }) => !retainedFiles.has(uri))
       .map(({ uri }) => deleteDecryptedFile(uri)),
   );
 }
@@ -455,6 +492,13 @@ export async function wipeDecryptedMediaForOwner(pubkey: string): Promise<void> 
   // place; let it settle so the folder delete below catches it.
   await Promise.allSettled([...(publishing.get(ownerDir) ?? [])]);
   const dir = ownerDirUri(pubkey);
+  if (dir) {
+    for (const [uri, lease] of retainedFiles) {
+      if (!uri.startsWith(dir)) continue;
+      if (lease.timer) clearTimeout(lease.timer);
+      retainedFiles.delete(uri);
+    }
+  }
   if (dir) await deleteAsync(dir, { idempotent: true }).catch(() => {});
   // Legacy files aren't attributable to an owner — any sign-out removes them.
   await cleanupLegacyDecryptedMedia().catch(() => {});
@@ -479,6 +523,8 @@ export async function cleanupLegacyDecryptedMedia(): Promise<void> {
 
 /** Test-only: reset module state between cases. */
 export function __resetDecryptedMediaCacheForTests(): void {
+  for (const lease of retainedFiles.values()) if (lease.timer) clearTimeout(lease.timer);
+  retainedFiles.clear();
   memory.clear();
   verifiedFiles.clear();
   inflight.clear();

@@ -6,6 +6,8 @@ import { deleteAsync, moveAsync, writeAsStringAsync } from 'expo-file-system/leg
 import { encryptFile } from './encryptedFile';
 import {
   deleteDecryptedFile,
+  retainDecryptedFile,
+  FILE_SHARE_RETENTION_MS,
   verifiedFileMetadata,
   DecryptedMediaCancelledError,
   LEGACY_CLEANUP_FLAG_KEY,
@@ -469,4 +471,70 @@ it('re-verifies bounded disk plaintext before sharing and rejects a substituted 
   mockFiles.set(uri, Buffer.from('substituted').toString('base64'));
   await expect(resolveDecryptedMedia(plainRef)).rejects.toThrow('File failed verification');
   expect(mockFiles.has(uri)).toBe(false);
+});
+
+it('retains plaintext for a recipient read after chooser completion, then deletes it', async () => {
+  jest.useFakeTimers();
+  setDecryptedMediaOwner(A);
+  fetchMock.mockResolvedValue({ ok: true, arrayBuffer: async () => PLAIN.slice().buffer });
+  const fileRef: EncryptedMediaRef = {
+    url: URL_,
+    kind: 'file',
+    encrypted: false,
+    plaintextSha256: bytesToHex(sha256(PLAIN)),
+  };
+  const uri = await resolveDecryptedMedia(fileRef);
+  const release = retainDecryptedFile(uri);
+  release(); // Android chooser returns before the recipient reads its URI.
+  await jest.advanceTimersByTimeAsync(FILE_SHARE_RETENTION_MS - 1);
+  expect([...plaintextOf(uri)]).toEqual([...PLAIN]);
+  expect(peekDecryptedMedia(fileRef)).toBe(uri);
+  await jest.advanceTimersByTimeAsync(1);
+  expect(mockFiles.has(uri)).toBe(false);
+  expect(peekDecryptedMedia(fileRef)).toBeNull();
+  expect(verifiedFileMetadata(uri)).toBeUndefined();
+});
+it('extends retention on repeated/concurrent shares and excludes them from sweeps', async () => {
+  jest.useFakeTimers();
+  setDecryptedMediaOwner(A);
+  const uri = `file:///cache/decrypted/${ownerDirName(A)}/file-old.bin`;
+  mockFiles.set(uri, Buffer.from(PLAIN).toString('base64'));
+  const first = retainDecryptedFile(uri);
+  const second = retainDecryptedFile(uri);
+  first();
+  first(); // Releasing is idempotent.
+  await jest.advanceTimersByTimeAsync(FILE_SHARE_RETENTION_MS);
+  expect(mockFiles.has(uri)).toBe(true); // Includes the cold-start sweep at 5s.
+  second();
+  await jest.advanceTimersByTimeAsync(FILE_SHARE_RETENTION_MS - 1);
+  const again = retainDecryptedFile(uri);
+  await jest.advanceTimersByTimeAsync(1);
+  expect(mockFiles.has(uri)).toBe(true);
+  again();
+  await jest.advanceTimersByTimeAsync(FILE_SHARE_RETENTION_MS);
+  expect(mockFiles.has(uri)).toBe(false);
+});
+it('cleans expired abandoned shares on the next launch without a new download', async () => {
+  jest.useFakeTimers();
+  const dir = `file:///cache/decrypted/${ownerDirName(A)}/`;
+  mockFiles.set(dir, '');
+  mockFiles.set(`${dir}file-old.bin`, 'plaintext');
+  setDecryptedMediaOwner(A);
+  await jest.advanceTimersByTimeAsync(5000);
+  expect(mockFiles.has(`${dir}file-old.bin`)).toBe(false);
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+it('bounds retained shares and cancels deferred cleanup when the account is wiped', async () => {
+  jest.useFakeTimers();
+  setDecryptedMediaOwner(A);
+  const dir = `file:///cache/decrypted/${ownerDirName(A)}/`;
+  for (let i = 0; i < 16; i++) {
+    const uri = `${dir}file-${i}.bin`;
+    mockFiles.set(uri, 'plaintext');
+    retainDecryptedFile(uri)();
+  }
+  expect(() => retainDecryptedFile(`${dir}file-extra.bin`)).toThrow('Too many');
+  await wipeDecryptedMediaForOwner(A);
+  expect(filesUnder(A)).toEqual([]);
+  expect(() => retainDecryptedFile(`${dir}file-new.bin`)()).not.toThrow();
 });

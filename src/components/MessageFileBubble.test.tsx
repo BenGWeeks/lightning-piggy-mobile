@@ -15,7 +15,14 @@ jest.mock('../services/fileShare', () => ({ shareFileAttachment: jest.fn(async (
 const file = (name = 'invoice.pdf', mime = 'application/pdf') =>
   parseFileAttachment(
     '[FILE]' +
-      JSON.stringify({ name, mime, encrypted: false, url: 'https://example.com/f', size: 999 }),
+      JSON.stringify({
+        name,
+        mime,
+        encrypted: false,
+        url: 'https://example.com/f',
+        size: 999,
+        plaintextSha256: 'aa'.repeat(32),
+      }),
   )!;
 const bubble = (attachment = file()) =>
   render(<MessageFileBubble id="file" file={attachment} fromMe={false} footer={null} />);
@@ -52,4 +59,20 @@ it('shows type mismatch and replaces declared MIME with the verified type', asyn
   fireEvent.press(ui.getByTestId('chat-file-share-file'));
   await waitFor(() => expect(ui.getByText('application/octet-stream')).toBeTruthy());
   expect(ui.queryByText('application/pdf')).toBeNull();
+});
+
+it('explains unavailable hashless files and offers no share action', () => {
+  const attachment = parseFileAttachment(
+    '[FILE]' +
+      JSON.stringify({
+        name: 'invoice.pdf',
+        mime: 'application/pdf',
+        encrypted: false,
+        url: 'https://example.com/f',
+      }),
+  )!;
+  const ui = bubble(attachment);
+  expect(ui.getByText('messageBubble.fileUnavailable')).toBeTruthy();
+  expect(ui.queryByTestId('chat-file-share-file')).toBeNull();
+  expect(shareFileAttachment).not.toHaveBeenCalled();
 });

@@ -1,7 +1,7 @@
 import * as Sharing from 'expo-sharing';
 import type { FileAttachment } from '../utils/fileAttachment';
 import {
-  deleteDecryptedFile,
+  retainDecryptedFile,
   resolveDecryptedMedia,
   verifiedFileMetadata,
 } from './decryptedMediaCache';
@@ -12,9 +12,11 @@ export async function shareFileAttachment(
   confirmSave: () => Promise<boolean>,
   onVerified: (metadata: { size: number; mime: string }) => void,
 ): Promise<void> {
+  if (!file.available) throw new Error('File unavailable');
   if (file.dangerous && !(await confirmSave())) return;
   if (!(await Sharing.isAvailableAsync())) throw new Error('Sharing unavailable');
   const uri = await resolveDecryptedMedia({ ...file, kind: 'file' });
+  const release = retainDecryptedFile(uri);
   try {
     const metadata = verifiedFileMetadata(uri);
     if (metadata) onVerified(metadata);
@@ -25,6 +27,6 @@ export async function shareFileAttachment(
       dialogTitle: file.name,
     });
   } finally {
-    await deleteDecryptedFile(uri);
+    release();
   }
 }

@@ -170,3 +170,77 @@ it('sanitizes malformed MIME tokens to generic bytes without trusting object pro
     parseFileAttachment('[FILE]' + JSON.stringify({ name: 'invoice.pdf', mime: 'constructor' })),
   ).toMatchObject({ mime: 'application/octet-stream' });
 });
+
+it.each(['invoice.apk.', 'invoice.apk...  ', 'invoice..apk', 'invoice...apk.', 'invoice.APK. \t'])(
+  'blocks trailing-dot and multi-dot extension bypass %s',
+  (name) => {
+    expect(attachmentSafety(name, 'application/pdf').dangerous).toBe(true);
+    expect(
+      parseFileAttachment('[FILE]' + JSON.stringify({ name, mime: 'application/pdf' }))?.dangerous,
+    ).toBe(true);
+  },
+);
+it.each([
+  '\u00ad',
+  '\u200e',
+  '\u200f',
+  '\u061c',
+  '\u2061',
+  '\u2062',
+  '\u2063',
+  '\u2064',
+  '\ufff9',
+  '\ufffa',
+  '\ufffb',
+])('removes format character %s from display and extension checks', (control) => {
+  expect(sanitizeAttachmentText(`invoice.a${control}pk`)).toBe('invoice.apk');
+  expect(attachmentSafety(`invoice.a${control}pk`, 'application/pdf').dangerous).toBe(true);
+});
+it('sanitizes captions in both stored file formats', () => {
+  const caption = 'Invoice\u202e\u00ad\u200e\u061c\u2061\ufff9';
+  expect(
+    parseFileAttachment(
+      '[FILE]' + JSON.stringify({ name: 'a.pdf', mime: 'application/pdf', caption }),
+    )?.caption,
+  ).toBe('Invoice');
+  expect(
+    parseFileAttachment(encoded('application/pdf') + `&caption=${encodeURIComponent(caption)}`)
+      ?.caption,
+  ).toBe('Invoice');
+});
+it.each([undefined, null, 123, '', 'invalid'])(
+  'marks unencrypted attachments with missing/invalid hash %s unavailable',
+  (plaintextSha256) => {
+    expect(
+      parseFileAttachment(
+        '[FILE]' +
+          JSON.stringify({
+            name: 'a.pdf',
+            mime: 'application/pdf',
+            url: 'https://example.com/f',
+            encrypted: false,
+            plaintextSha256,
+          }),
+      )?.available,
+    ).toBe(false);
+  },
+);
+it('enables unencrypted attachments only with a valid plaintext hash', () => {
+  expect(
+    parseFileAttachment(
+      '[FILE]' +
+        JSON.stringify({
+          name: 'a.pdf',
+          mime: 'application/pdf',
+          url: 'https://example.com/f',
+          encrypted: false,
+          plaintextSha256: 'AA'.repeat(32),
+        }),
+    )?.available,
+  ).toBe(true);
+});
+
+it('preserves the dangerous extension when imeta metadata is sanitized before storage', () => {
+  const metadata = attachmentMetadata([['imeta', 'name invoice..apk..']]);
+  expect(attachmentSafety(metadata.name, 'application/pdf').dangerous).toBe(true);
+});

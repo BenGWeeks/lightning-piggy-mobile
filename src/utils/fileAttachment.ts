@@ -16,9 +16,10 @@ export interface FileAttachment extends ParsedImageMessage {
 export function sanitizeAttachmentText(value: string): string {
   return value
     .replace(/[\r\n\x00-\x1f]/g, ' ')
-    .replace(/[\x7f\u200b-\u200d\u2028-\u202e\u2060\u2066-\u2069\ufeff]/g, '')
+    .replace(/[\x7f\p{Cf}\u2028\u2029]/gu, '')
+    .replace(/\.\.(?=[/\\])/g, '')
     .replace(/[/\\]/g, '')
-    .replace(/\.\./g, '')
+    .replace(/\.{2,}/g, '.')
     .trim();
 }
 export function isSafeFileUrl(url: string): boolean {
@@ -92,7 +93,7 @@ const MIME_EXTENSIONS: Record<string, string[]> = {
   'text/csv': ['csv'],
 };
 export function attachmentSafety(name: string, mime: string) {
-  const clean = sanitizeAttachmentText(name);
+  const clean = sanitizeAttachmentText(name).replace(/[.\s]+$/u, '');
   const extension = clean.split('.').pop()?.toLowerCase() ?? '';
   const type = mime
     .split('/')
@@ -168,8 +169,14 @@ export function parseFileAttachment(text: string): FileAttachment | null {
           ? { plaintextSha256: value.plaintextSha256 }
           : {}),
         available:
-          value.encrypted === false && typeof value.url === 'string' && isSafeFileUrl(value.url),
-        ...(typeof value.caption === 'string' ? { caption: value.caption } : {}),
+          value.encrypted === false &&
+          typeof value.plaintextSha256 === 'string' &&
+          /^[a-f0-9]{64}$/i.test(value.plaintextSha256) &&
+          typeof value.url === 'string' &&
+          isSafeFileUrl(value.url),
+        ...(typeof value.caption === 'string'
+          ? { caption: sanitizeAttachmentText(value.caption) }
+          : {}),
         ...(Number.isSafeInteger(value.size) && value.size >= 0 ? { size: value.size } : {}),
       };
     } catch {
@@ -204,7 +211,7 @@ export function parseFileAttachment(text: string): FileAttachment | null {
     keyHex,
     nonceHex,
     marmot,
-    ...(p.get('caption') ? { caption: p.get('caption')! } : {}),
+    ...(p.get('caption') ? { caption: sanitizeAttachmentText(p.get('caption')!) } : {}),
     ...(size && /^\d+$/.test(size) && Number.isSafeInteger(Number(size))
       ? { size: Number(size) }
       : {}),
