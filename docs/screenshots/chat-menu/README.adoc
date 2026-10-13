@@ -6,6 +6,7 @@ group. No sign-in/out, messages, membership edits or history clearing.
 PNG originals: `/tmp/claude-1000/chat-menu/shots/`. WebP copies here are
 resized to a maximum of 1200 pixels.
 
+* `before-mute-popup.webp`: user-supplied original mute-only menu screenshot.
 * `menu.webp`: shared conversation menu.
 * `view-contact.webp`: identity, copyable npub, profile, security, devices and relays.
 * `group-info.webp`: group identity, security, relays and management actions.
