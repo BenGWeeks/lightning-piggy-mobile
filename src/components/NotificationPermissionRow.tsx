@@ -4,6 +4,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import * as Notifications from 'expo-notifications';
 import { BellOff } from 'lucide-react-native';
 import { useTranslation } from '../contexts/LocaleContext';
+import { subscribeMarmotPushStatus } from '../services/marmotPushRegistration';
 import { requestNotificationPermission } from '../services/notificationService';
 import SettingsBanner from './SettingsBanner';
 
@@ -14,7 +15,9 @@ import SettingsBanner from './SettingsBanner';
  * Re-reads the status whenever the screen regains focus or the app comes
  * back from the system settings page.
  */
-const NotificationPermissionRow: React.FC = () => {
+const NotificationPermissionRow: React.FC<{ onPermissionChange?: (granted: boolean) => void }> = ({
+  onPermissionChange,
+}) => {
   const t = useTranslation();
   // null = not read yet.
   const [granted, setGranted] = useState<boolean | null>(null);
@@ -22,13 +25,15 @@ const NotificationPermissionRow: React.FC = () => {
   const refresh = useCallback(async () => {
     const status = await Notifications.getPermissionsAsync().catch(() => null);
     setGranted(status?.granted ?? false);
-  }, []);
+    onPermissionChange?.(status?.granted ?? false);
+  }, [onPermissionChange]);
 
   // Only while this screen is focused: a cheap permission read when the user
   // returns from the system settings page — not an app-wide resume handler.
   useFocusEffect(
     useCallback(() => {
       void refresh();
+      const unsubscribe = subscribeMarmotPushStatus(() => void refresh());
       let timer: ReturnType<typeof setTimeout> | undefined;
       const sub = AppState.addEventListener('change', (state) => {
         if (timer) clearTimeout(timer);
@@ -37,6 +42,7 @@ const NotificationPermissionRow: React.FC = () => {
       return () => {
         if (timer) clearTimeout(timer);
         sub.remove();
+        unsubscribe();
       };
     }, [refresh]),
   );

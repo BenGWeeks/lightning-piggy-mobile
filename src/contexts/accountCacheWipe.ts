@@ -38,6 +38,7 @@ import { forgetAccountSettings } from '../services/accountSettingsCache';
 import { forgetLinkPreviewMirror } from '../services/linkPreviewPreference';
 import { forgetRevealedMedia } from '../services/mediaRevealStore';
 import { wipeDecryptedMediaForOwner } from '../services/decryptedMediaCache';
+import { cancelNotificationDefaults } from '../services/notificationDefaults';
 import { WATCHER_PUSH_KEY_BASE } from '../services/watcherPushStore';
 import { KEY_BACKED_UP_KEY_BASE } from '../services/keyBackupStatus';
 import { CHAT_READ_POSITIONS_KEY_BASE, forgetReadPositions } from '../services/chatReadPositions';
@@ -68,6 +69,7 @@ import {
 
 export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise<void> {
   if (!loggedOutPubkey) return;
+  await cancelNotificationDefaults(loggedOutPubkey);
   await wipeMarketAccount(loggedOutPubkey);
   // In-app notification history (#1143): names, amounts and routing ids.
   await clearNotificationHistory(loggedOutPubkey);
@@ -119,6 +121,11 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
     // so no signed unregister: the registration dies with the push token,
     // which wipeDmStoresForAccount (Marmot push teardown) deletes below.
     perAccountKey(WATCHER_PUSH_KEY_BASE, loggedOutPubkey),
+    // Automatic OFF can be persisted after Marmot's settings hydration; remove
+    // it even when its runtime ever-enabled set hasn't seen this account.
+    `marmot_push_enabled_v1_${loggedOutPubkey.toLowerCase()}`,
+    // A future re-login must reconsider notification defaults after preferences are wiped.
+    `notification_preference_explicit_v1_${loggedOutPubkey.toLowerCase()}`,
     // The key it vouched for is gone with the account (#1223).
     perAccountKey(KEY_BACKED_UP_KEY_BASE, loggedOutPubkey),
     // Where this account had read each chat up to (#1295).

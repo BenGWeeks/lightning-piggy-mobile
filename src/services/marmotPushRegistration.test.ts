@@ -3,7 +3,6 @@ import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
 import type { DeviceRegistration } from './marmotPushEntries';
-
 import {
   BUILT_IN_SERVERS,
   builtInServer,
@@ -53,7 +52,10 @@ jest.mock('expo-secure-store', () => ({
   deleteItemAsync: jest.fn(async (k: string) => void mockSecure.delete(k)),
 }));
 let mockActivePubkey: string | null = 'active-account';
-jest.mock('./walletStorageService', () => ({ getActivePubkey: () => mockActivePubkey }));
+jest.mock('./walletStorageService', () => ({
+  getActivePubkey: () => mockActivePubkey,
+  subscribeActivePubkey: () => () => undefined,
+}));
 jest.mock('./notificationService', () => ({
   requestNotificationPermission: jest.fn(async () => true),
 }));

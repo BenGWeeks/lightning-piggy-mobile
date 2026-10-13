@@ -33,8 +33,8 @@ const LABEL: Record<WatcherCategory, string> = {
 
 /**
  * Settings → Notifications, below instant alerts: what Lightning Piggy's
- * notification watcher should tell this phone about. Every category is off
- * by default and only switchable while push is on (it needs the device token
+ * notification watcher should tell this phone about. Categories default on
+ * for the first account and are only switchable while push is on (it needs the device token
  * the Marmot push switch obtains). Toggles save at once; the registration
  * follows a moment later, so a burst of changes is one signer approval.
  */

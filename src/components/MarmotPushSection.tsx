@@ -19,12 +19,18 @@ import {
   type EnableOutcome,
 } from '../services/marmotPushRegistration';
 import type { SyncResult } from '../services/marmotPushRegistrar';
-import { unregisterWatcherPush } from '../services/watcherPush';
+import { getActivePubkey } from '../services/walletStorageService';
+import {
+  getWatcherStatus,
+  subscribeWatcherStatus,
+  syncWatcherNow,
+  unregisterWatcherPush,
+} from '../services/watcherPush';
 import WatcherPushSection from './WatcherPushSection';
 import { createMarmotPushSectionStyles } from '../styles/MarmotPushSection.styles';
 
-/** Account push controls; service handlers and signer setup remain unchanged. */
-const MarmotPushSection: React.FC = () => {
+/** Account push controls; defaults on for the first account, with permission gating. */
+const MarmotPushSection: React.FC<{ permissionGranted: boolean }> = ({ permissionGranted }) => {
   const colors = useThemeColors();
   const t = useTranslation();
   const { signerType, pubkey } = useNostr();
@@ -39,6 +45,7 @@ const MarmotPushSection: React.FC = () => {
   const busy = finishing || toggle.pending;
   // null = on, but no push token yet.
   const [pending, setPending] = useState<number | null>(0);
+  const [watcherPending, setWatcherPending] = useState(false);
   const remoteSigner = signerType === 'amber' || signerType === 'nip46';
 
   const refreshPending = useCallback(async () => {
@@ -60,11 +67,23 @@ const MarmotPushSection: React.FC = () => {
           setOtherAccounts(s.otherAccounts);
           if (s.enabled) void refreshPending();
         });
+      setWatcherPending(getWatcherStatus().last === 'pending');
+      const unsubscribeWatcher = subscribeWatcherStatus(() => {
+        if (alive) setWatcherPending(getWatcherStatus().last === 'pending');
+      });
       // The token read and group passes finish in the background.
-      const unsubscribe = subscribeMarmotPushStatus(() => void refreshPending());
+      const unsubscribe = subscribeMarmotPushStatus(() => {
+        void refreshPending();
+        void loadMarmotPushSettings(pubkey)
+          .then((s) => {
+            if (alive) setEnabled(s.enabled);
+          })
+          .catch(() => undefined);
+      });
       return () => {
         alive = false;
         unsubscribe();
+        unsubscribeWatcher();
       };
     }, [pubkey, refreshPending]),
   );
@@ -128,6 +147,9 @@ const MarmotPushSection: React.FC = () => {
     setFinishing(true);
     try {
       reportSync(await syncMarmotPushNow(pubkey));
+      // Signer approval can outlive this account; the watcher uses the live identity.
+      if (getActivePubkey() !== pubkey) return;
+      await syncWatcherNow();
     } finally {
       setFinishing(false);
     }
@@ -139,15 +161,19 @@ const MarmotPushSection: React.FC = () => {
         icon={Smartphone}
         title={t('securityScreen.marmotPushToggle')}
         subtitle={
-          !enabled
-            ? t('notificationSettingsScreen.off')
-            : pending === null
-              ? t('notificationSettingsScreen.pushNoToken')
-              : pending > 0
-                ? t('notificationSettingsScreen.pushPending', { count: pending })
-                : t('notificationSettingsScreen.pushReady')
+          !permissionGranted
+            ? undefined
+            : !enabled
+              ? t('notificationSettingsScreen.off')
+              : pending === null
+                ? t('notificationSettingsScreen.pushNoToken')
+                : pending > 0
+                  ? t('notificationSettingsScreen.pushPending', { count: pending })
+                  : watcherPending
+                    ? t('securityScreen.watcherPending')
+                    : t('notificationSettingsScreen.pushReady')
         }
-        subtitleTestID="security-marmot-push-status"
+        subtitleTestID={permissionGranted ? 'security-marmot-push-status' : undefined}
         testID="notifications-instant-alerts"
         infoTestID="security-marmot-push-details"
         details={[
@@ -163,6 +189,7 @@ const MarmotPushSection: React.FC = () => {
           .filter(Boolean)
           .join('\n\n')}
         toggle={{
+          // Keep the saved choice reachable for opt-out when OS permission is revoked.
           value: enabled,
           onValueChange: handleToggle,
           disabled: !pubkey,
@@ -178,21 +205,24 @@ const MarmotPushSection: React.FC = () => {
         </Text>
       )}
 
-      {enabled && (pending === null || pending > 0) && !busy && (
-        <View style={styles.statusRow}>
-          <TouchableOpacity
-            style={styles.pillButton}
-            onPress={handleFinish}
-            accessibilityRole="button"
-            accessibilityLabel={t('securityScreen.marmotPushFinish')}
-            testID="security-marmot-push-finish"
-          >
-            <Text style={styles.pillButtonText}>{t('securityScreen.marmotPushFinish')}</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+      {enabled &&
+        permissionGranted &&
+        (pending === null || pending > 0 || watcherPending) &&
+        !busy && (
+          <View style={styles.statusRow}>
+            <TouchableOpacity
+              style={styles.pillButton}
+              onPress={handleFinish}
+              accessibilityRole="button"
+              accessibilityLabel={t('securityScreen.marmotPushFinish')}
+              testID="security-marmot-push-finish"
+            >
+              <Text style={styles.pillButtonText}>{t('securityScreen.marmotPushFinish')}</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       <Text style={styles.noticeText}>{t('notificationSettingsScreen.pushConsequence')}</Text>
-      <WatcherPushSection pushEnabled={enabled && !busy} />
+      <WatcherPushSection pushEnabled={enabled && permissionGranted && !busy} />
     </>
   );
 };

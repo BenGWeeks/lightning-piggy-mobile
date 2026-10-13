@@ -33,6 +33,7 @@ import { perAccountKey } from './perAccountStorage';
 import { getActivePubkey } from './walletStorageService';
 import { getMarmotSession, subscribeMarmotSession, type MarmotSession } from './marmotSession';
 import { requestNotificationPermission } from './notificationService';
+import { noteManualNotificationChange } from './notificationDefaultsTask';
 import { MARMOT_PUSH_WAKE_TASK, setLiveMarmotSession } from './marmotPushWake';
 
 /** Per account (`perAccountKey`): '1' = this account opted in. */
@@ -171,11 +172,11 @@ async function readStoredSettings(): Promise<StoredSettings> {
   // belongs to the account that was active then — never to the others, and
   // never over any per-account choice already recorded (e.g. a later "off").
   if (legacy !== null) {
-    if (legacy === '1' && keys.length === 0) {
+    if ((legacy === '1' || legacy === '0') && keys.length === 0) {
       // Owner not known yet: "unreadable" for now — touch nothing, retry.
       if (!legacyOwner) throw new Error('push: legacy opt-in owner not known yet');
-      await AsyncStorage.setItem(accountKey(legacyOwner), '1');
-      enabledAccounts.add(legacyOwner);
+      await AsyncStorage.setItem(accountKey(legacyOwner), legacy);
+      if (legacy === '1') enabledAccounts.add(legacyOwner);
       everEnabled.add(legacyOwner);
     }
     await AsyncStorage.removeItem(ENABLED_KEY);
@@ -503,14 +504,32 @@ export type EnableOutcome =
   /** No token from Apple/Google — e.g. no Google Play services. */
   | { status: 'unavailable' };
 
-/** Turn push on for `pubkey` (user action): permission, token, then that
- * account's groups. Other accounts on the phone are left as they are. */
-export async function enableMarmotPush(pubkey: string): Promise<EnableOutcome> {
+/** Turn push on for `pubkey`: permission, token, then that account's
+ * groups. Other accounts on the phone are left as they are. A user action
+ * (the default) is recorded as a manual change before anything is awaited,
+ * so an automatic default-setup run in flight stops rather than write over
+ * it. Automatic setup passes `interactive: false` and its task guard as
+ * `stillActive`: checked before the token is fetched, after it arrives, and
+ * after each storage and wake-task await — a stale run discards the token,
+ * rolls the opt-in back and commits nothing at runtime. */
+export async function enableMarmotPush(
+  pubkey: string,
+  opts: { interactive?: boolean; stillActive?: () => boolean } = {},
+): Promise<EnableOutcome> {
+  if (opts.interactive !== false) noteManualNotificationChange();
   if (!(await requestNotificationPermission())) return { status: 'no-permission' };
-  return serial(() => enableNow(pubkey));
+  return serial(() =>
+    opts.stillActive?.() === false
+      ? Promise.resolve({ status: 'unavailable' } as EnableOutcome)
+      : enableNow(pubkey, opts.interactive ?? true, opts.stillActive),
+  );
 }
 
-async function enableNow(pubkey: string): Promise<EnableOutcome> {
+async function enableNow(
+  pubkey: string,
+  interactive: boolean = true,
+  stillActive?: () => boolean,
+): Promise<EnableOutcome> {
   try {
     await ensureSettings();
   } catch {
@@ -519,9 +538,16 @@ async function enableNow(pubkey: string): Promise<EnableOutcome> {
   // An old token still waiting to be deleted (e.g. a removed account's,
   // whose groups may still hold it): it must really be gone before this
   // account publishes a token — else the two would be linkable. Retryable.
-  if ((await retirementPending()) && !(await retireDeviceToken())) {
-    return { status: 'unavailable' };
+  if (stillActive?.() === false) return { status: 'unavailable' };
+  const pendingRetirement = await retirementPending();
+  if (stillActive?.() === false) return { status: 'unavailable' };
+  if (pendingRetirement) {
+    const retired = await retireDeviceToken();
+    if (stillActive?.() === false || !retired) return { status: 'unavailable' };
   }
+  // The token is fetched for THIS account only: a stale automatic run
+  // (account switched, signed out, or the user chose meanwhile) gets none.
+  if (stillActive?.() === false) return { status: 'unavailable' };
   let next: DeviceRegistration;
   try {
     next = await readRegistration(currentServer());
@@ -529,27 +555,61 @@ async function enableNow(pubkey: string): Promise<EnableOutcome> {
     if (__DEV__) console.warn('[MarmotPush] no device token:', e);
     return { status: 'unavailable' };
   }
+  // Token acquisition can outlive the account: never recreate wiped preferences.
+  if (stillActive?.() === false) return { status: 'unavailable' };
   // Persist first, then commit: a failed write must leave push off. Then
   // lift a tombstone from an earlier removal of this account (it would turn
   // the fresh opt-in back off at the next start) — only after the opt-in is
   // written, so a failure never leaves a stale '1' unprotected.
   try {
+    // Automatic setup commits its decision only after watcher preferences save.
+    if (interactive) {
+      await AsyncStorage.setItem(
+        `notification_preference_explicit_v1_${pubkey.toLowerCase()}`,
+        '1',
+      );
+    }
     await AsyncStorage.setItem(accountKey(pubkey), '1');
   } catch {
     return { status: 'unavailable' };
   }
+  const rollback = async (wakeTaskRegistered = false): Promise<EnableOutcome> => {
+    await AsyncStorage.removeItem(accountKey(pubkey)).catch(() => undefined);
+    // Keep a shared task needed by an already opted-in account.
+    if (wakeTaskRegistered && Platform.OS === 'android' && !anyEnabled()) {
+      await Notifications.unregisterTaskAsync(MARMOT_PUSH_WAKE_TASK).catch(() => undefined);
+    }
+    return { status: 'unavailable' };
+  };
+  // The write itself can outlive the account. An automatic opt-in that is
+  // stale now is taken back (it was absent before), and nothing is committed
+  // at runtime: no token for the departed account, no wake task.
+  if (stillActive?.() === false) return rollback();
   try {
     const forgotten = await readForgotten();
+    if (stillActive?.() === false) return rollback();
     const me = pubkey.toLowerCase();
-    if (forgotten.includes(me)) await writeForgotten(forgotten.filter((a) => a !== me));
+    if (forgotten.includes(me)) {
+      await writeForgotten(forgotten.filter((a) => a !== me));
+      if (stillActive?.() === false) return rollback();
+    }
   } catch {
+    // Automatic setup has not made a user choice: keep the preference
+    // absent so a transient storage failure can retry on the next run.
+    if (!interactive) return rollback();
     await AsyncStorage.setItem(accountKey(pubkey), '0').catch(() => undefined);
     return { status: 'unavailable' };
   }
+  await registerWakeTask();
+  if (stillActive?.() === false) return rollback(true);
+  // Runtime publication is synchronous and only follows the final guard.
   explicit.set(pubkey.toLowerCase(), true);
   // This account's token appeared, even if the phone's didn't change.
   if (!setDeviceRegistration(next)) notifyDevice();
-  await registerWakeTask();
+  if (!interactive) {
+    applyTo(getMarmotSession());
+    return { status: 'enabled', sync: null };
+  }
   return { status: 'enabled', sync: await syncAccountSession(pubkey) };
 }
 
@@ -571,6 +631,7 @@ export function disableMarmotPush(
    * this account: never keep it for the other accounts. */
   opts: { stillRegistered?: boolean } = {},
 ): Promise<DisableOutcome> {
+  noteManualNotificationChange(); // before anything is awaited — see enableMarmotPush
   return serial(async () => {
     // Explicitly off — an unreadable store doesn't change that.
     const known = await ensureSettings().then(
@@ -585,10 +646,14 @@ export function disableMarmotPush(
     if (othersUsePush) notifyDevice();
     else setDeviceRegistration(null);
     // Retract + revoke regardless of whether the setting could be saved.
-    const saved = await AsyncStorage.setItem(accountKey(pubkey), '0').then(
-      () => true,
-      () => false,
-    );
+    const saved = await AsyncStorage.setItem(accountKey(pubkey), '0')
+      .then(() =>
+        AsyncStorage.setItem(`notification_preference_explicit_v1_${pubkey.toLowerCase()}`, '1'),
+      )
+      .then(
+        () => true,
+        () => false,
+      );
     const session = getMarmotSession();
     const sync = await syncAccountSession(pubkey).catch(() => null);
     // Another account still uses the token. If every one of this account's

@@ -39,7 +39,6 @@ import {
 import { resolveLnurlDirection } from './src/services/lnurlService';
 import {
   ensureNotificationsInitialised,
-  requestNotificationPermission,
   setNotificationsForeground,
   markHistoryEntryRead,
   isRemotePush,
@@ -141,10 +140,7 @@ export default function App() {
   // route notification taps to the right screen.
   useEffect(() => {
     void ensureNotificationsInitialised();
-    // Ask for permission HERE, from the foreground, not lazily from a fire
-    // path — the background sync task can't present the OS dialog. Safe to
-    // call every launch; it short-circuits once the user has answered.
-    void requestNotificationPermission();
+    // Wallets requests permission after sign-in when resolving notification defaults.
     // Register the periodic background detect-and-ping (#279). Idempotent;
     // OS schedules it (~15 min floor on Android, usage-based on iOS).
     void registerBackgroundSync();
