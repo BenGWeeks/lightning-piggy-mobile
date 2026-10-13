@@ -1,8 +1,11 @@
 import React from 'react';
-import { View, Text, TouchableOpacity } from 'react-native';
+import { View } from 'react-native';
 import type { useTranslation } from '../contexts/LocaleContext';
 import type { CardTheme } from '../types/wallet';
 import type { WalletSettingsSheetStyles } from '../styles/WalletSettingsSheet.styles';
+import { cardThemes } from '../themes/cardThemes';
+import SettingsRow from './SettingsRow';
+import { Palette, Save } from 'lucide-react-native';
 import WalletCardPicker from './WalletCardPicker';
 
 interface Props {
@@ -20,24 +23,37 @@ interface Props {
  * tab — it persists theme, alias and address together), so the sheet reads
  * as pure composition.
  */
-const WalletDesignTab: React.FC<Props> = ({ styles, t, selectedTheme, onSelectTheme, onSave }) => (
-  <View style={{ gap: 8 }}>
-    <Text style={styles.label}>{t('walletSettingsSheet.cardDesign')}</Text>
-    {/* Small top gap between the label and the picker — preserves the
-        spacing the removed `themeGrid` (marginTop: 4) used to provide. */}
-    <View style={{ marginTop: 4 }}>
-      <WalletCardPicker selectedTheme={selectedTheme} onSelect={onSelectTheme} />
-    </View>
+const WalletDesignTab: React.FC<Props> = ({ styles, t, selectedTheme, onSelectTheme, onSave }) => {
+  const config = cardThemes[selectedTheme] ?? cardThemes['lightning-piggy'];
+  const name = config.nameKey ? t(config.nameKey) : config.name;
 
-    <TouchableOpacity
-      style={styles.saveButton}
-      onPress={onSave}
-      testID="wallet-settings-save"
-      accessibilityLabel={t('walletSettingsSheet.saveWalletSettings')}
-    >
-      <Text style={styles.saveButtonText}>{t('walletSettingsSheet.save')}</Text>
-    </TouchableOpacity>
-  </View>
-);
+  return (
+    <View style={styles.tabContent}>
+      <SettingsRow
+        appearance="surface"
+        icon={Palette}
+        title={t('walletSettingsSheet.cardDesign')}
+        value={t('walletCardPicker.selectedTheme', {
+          name,
+        })}
+        testID="wallet-design-row"
+      />
+      {/* Small top gap between the label and the picker — preserves the
+        spacing the removed `themeGrid` (marginTop: 4) used to provide. */}
+      <View style={styles.pickerGap}>
+        <WalletCardPicker selectedTheme={selectedTheme} onSelect={onSelectTheme} />
+      </View>
+
+      <SettingsRow
+        appearance="surface"
+        icon={Save}
+        title={t('walletSettingsSheet.save')}
+        onPress={onSave}
+        testID="wallet-settings-save"
+        accessibilityLabel={t('walletSettingsSheet.saveWalletSettings')}
+      />
+    </View>
+  );
+};
 
 export default WalletDesignTab;

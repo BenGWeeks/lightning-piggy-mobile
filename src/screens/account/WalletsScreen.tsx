@@ -1,22 +1,19 @@
-import React, { useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity } from 'react-native';
-import { Alert } from '../../components/BrandedAlert';
-import { Trash2, Eye, EyeOff, ChevronUp, ChevronDown, Plus } from 'lucide-react-native';
+import React, { useState } from 'react';
+import { Plus, Wallet } from 'lucide-react-native';
+import ManagedWalletRow from '../../components/ManagedWalletRow';
 import AccountScreenLayout from './AccountScreenLayout';
-import { createSharedAccountStyles } from './sharedStyles';
+import SettingsRow from '../../components/SettingsRow';
+import SettingsSection from '../../components/SettingsSection';
+import WalletSettingsSheet from '../../components/WalletSettingsSheet';
 import AddWalletWizard from '../../components/AddWalletWizard';
 import DefaultOnchainWalletSection from '../../components/DefaultOnchainWalletSection';
 import { useWallet } from '../../contexts/WalletContext';
-import { useThemeColors } from '../../contexts/ThemeContext';
 import { useLocale } from '../../contexts/LocaleContext';
-import { createWalletsScreenStyles } from '../../styles/WalletsScreen.styles';
 
 const WalletsScreen: React.FC = () => {
-  const colors = useThemeColors();
-  const { t, formatLocale } = useLocale();
-  const sharedAccountStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
-  const styles = useMemo(() => createWalletsScreenStyles(colors), [colors]);
+  const { t } = useLocale();
   const { wallets, removeWallet, updateWalletSettings, reorderWallet } = useWallet();
+  const [settingsWalletId, setSettingsWalletId] = useState<string | null>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
   const connectedCount = wallets.filter((w) =>
     w.walletType === 'onchain' ? w.balance !== null : w.isConnected,
@@ -24,115 +21,39 @@ const WalletsScreen: React.FC = () => {
 
   return (
     <AccountScreenLayout title={t('walletsScreen.title')}>
-      <View style={sharedAccountStyles.card}>
-        <Text style={styles.walletSummary}>
-          {wallets.length === 0
-            ? t('walletsScreen.noWallets')
-            : t('walletsScreen.walletCount', {
-                count: wallets.length,
-                connected: connectedCount,
-              })}
-        </Text>
-        {wallets.map((w, index) => (
-          <View key={w.id} style={styles.walletRow}>
-            <View
-              style={[
-                styles.statusDot,
-                {
-                  backgroundColor:
-                    w.walletType === 'onchain'
-                      ? w.balance !== null
-                        ? colors.green
-                        : colors.red
-                      : w.isConnected
-                        ? colors.green
-                        : colors.red,
-                },
-              ]}
-            />
-            <Text style={styles.walletName} numberOfLines={1}>
-              {w.alias}
-              {w.walletType === 'onchain' ? t('walletsScreen.onChainSuffix') : ''}
-            </Text>
-            <Text style={styles.walletBalance}>
-              {w.hideBalance
-                ? '***'
-                : w.balance !== null
-                  ? t('walletsScreen.satsAmount', {
-                      amount: w.balance.toLocaleString(formatLocale),
-                    })
-                  : '---'}
-            </Text>
-            <View style={styles.walletActions}>
-              <TouchableOpacity
-                onPress={() => reorderWallet(w.id, 'up')}
-                disabled={index === 0}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                accessibilityLabel={t('walletsScreen.moveUp', { alias: w.alias })}
-              >
-                <ChevronUp size={18} color={colors.white} opacity={index === 0 ? 0.3 : 0.8} />
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => reorderWallet(w.id, 'down')}
-                disabled={index === wallets.length - 1}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                accessibilityLabel={t('walletsScreen.moveDown', { alias: w.alias })}
-              >
-                <ChevronDown
-                  size={18}
-                  color={colors.white}
-                  opacity={index === wallets.length - 1 ? 0.3 : 0.8}
-                />
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => updateWalletSettings(w.id, { hideBalance: !w.hideBalance })}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                accessibilityLabel={
-                  w.hideBalance
-                    ? t('walletsScreen.showBalance', { alias: w.alias })
-                    : t('walletsScreen.hideBalance', { alias: w.alias })
-                }
-              >
-                {w.hideBalance ? (
-                  <EyeOff size={18} color={colors.white} opacity={0.8} />
-                ) : (
-                  <Eye size={18} color={colors.white} opacity={0.8} />
-                )}
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() =>
-                  Alert.alert(
-                    t('walletsScreen.removeWalletTitle'),
-                    t('walletsScreen.removeWalletMessage', { alias: w.alias }),
-                    [
-                      { text: t('walletsScreen.cancel'), style: 'cancel' },
-                      {
-                        text: t('walletsScreen.remove'),
-                        style: 'destructive',
-                        onPress: () => removeWallet(w.id),
-                      },
-                    ],
-                  )
-                }
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                accessibilityLabel={t('walletsScreen.removeWalletA11y', { alias: w.alias })}
-              >
-                <Trash2 size={18} color={colors.white} opacity={0.8} />
-              </TouchableOpacity>
-            </View>
-          </View>
+      <SettingsSection scope="account" showHeading={false} testID="wallets-section">
+        <SettingsRow
+          icon={Wallet}
+          title={t('walletsScreen.title')}
+          value={
+            wallets.length === 0
+              ? t('walletsScreen.noWallets')
+              : t('walletsScreen.walletCount', { count: wallets.length, connected: connectedCount })
+          }
+          testID="wallets-summary-row"
+        />
+        {wallets.map((wallet, index) => (
+          <ManagedWalletRow
+            key={wallet.id}
+            wallet={wallet}
+            index={index}
+            walletCount={wallets.length}
+            onOpenSettings={setSettingsWalletId}
+            onRemove={removeWallet}
+            onReorder={reorderWallet}
+            onUpdateSettings={updateWalletSettings}
+          />
         ))}
-        <TouchableOpacity
-          style={styles.addWalletButton}
+        <SettingsRow
+          icon={Plus}
+          title={t('walletsScreen.addWallet')}
           onPress={() => setWizardOpen(true)}
           accessibilityLabel={t('walletsScreen.addWalletA11y')}
           testID="add-wallet-button"
-        >
-          <Plus size={18} color={colors.accentSecondary} />
-          <Text style={styles.addWalletText}>{t('walletsScreen.addWallet')}</Text>
-        </TouchableOpacity>
-      </View>
-      <DefaultOnchainWalletSection />
+        />
+        <DefaultOnchainWalletSection />
+      </SettingsSection>
+      <WalletSettingsSheet walletId={settingsWalletId} onClose={() => setSettingsWalletId(null)} />
       <AddWalletWizard visible={wizardOpen} onClose={() => setWizardOpen(false)} />
     </AccountScreenLayout>
   );

@@ -1,5 +1,7 @@
 import React from 'react';
-import { View, Text, TouchableOpacity } from 'react-native';
+import { View } from 'react-native';
+import SettingsRow from './SettingsRow';
+import { UserRound, Zap, Save } from 'lucide-react-native';
 import { BottomSheetTextInput } from '@gorhom/bottom-sheet';
 import type { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
@@ -35,8 +37,13 @@ const WalletDetailsTab: React.FC<Props> = ({
   onChangeLnAddress,
   onSave,
 }) => (
-  <View style={{ gap: 8 }}>
-    <Text style={styles.label}>{t('walletSettingsSheet.alias')}</Text>
+  <View style={styles.tabContent}>
+    <SettingsRow
+      appearance="surface"
+      icon={UserRound}
+      title={t('walletSettingsSheet.alias')}
+      testID="wallet-alias-row"
+    />
     <BottomSheetTextInput
       style={styles.input}
       value={alias}
@@ -51,9 +58,13 @@ const WalletDetailsTab: React.FC<Props> = ({
     {/* NWC wallet: lightning address (LUD-16) */}
     {walletType === 'nwc' && (
       <>
-        <Text style={[styles.label, { marginTop: 20 }]}>
-          {t('walletSettingsSheet.lightningAddress')}
-        </Text>
+        <SettingsRow
+          appearance="surface"
+          icon={Zap}
+          title={t('settingsPages.lightningAddress')}
+          testID="wallet-lightning-address-row"
+          details={t('walletSettingsSheet.lightningAddressHint')}
+        />
         <BottomSheetTextInput
           style={styles.input}
           value={lnAddress}
@@ -66,18 +77,17 @@ const WalletDetailsTab: React.FC<Props> = ({
           testID="wallet-lightning-address-input"
           accessibilityLabel={t('walletSettingsSheet.lightningAddress')}
         />
-        <Text style={styles.hintText}>{t('walletSettingsSheet.lightningAddressHint')}</Text>
       </>
     )}
 
-    <TouchableOpacity
-      style={styles.saveButton}
+    <SettingsRow
+      appearance="surface"
+      icon={Save}
+      title={t('walletSettingsSheet.save')}
       onPress={onSave}
       testID="wallet-settings-save"
       accessibilityLabel={t('walletSettingsSheet.saveWalletSettings')}
-    >
-      <Text style={styles.saveButtonText}>{t('walletSettingsSheet.save')}</Text>
-    </TouchableOpacity>
+    />
   </View>
 );
 

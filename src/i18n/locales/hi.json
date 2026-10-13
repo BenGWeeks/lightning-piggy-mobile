@@ -3224,5 +3224,25 @@
       "error": "त्रुटि",
       "unknown": "अज्ञात"
     }
+  },
+  "settingsPages": {
+    "notSet": "सेट नहीं है",
+    "pictureSet": "तस्वीर जोड़ी गई",
+    "account": "खाता",
+    "localKey": "इस फ़ोन पर कुंजी (nsec)",
+    "watchOnly": "ऑन-चेन · केवल देखने के लिए",
+    "version": "संस्करण",
+    "website": "वेबसाइट",
+    "support": "सहायता",
+    "releaseNotes": "रिलीज़ नोट्स",
+    "licences": "लाइसेंस",
+    "brand": "Lightning Piggy",
+    "nwc": "NWC (NIP-47)",
+    "connectionWarning": "इस कनेक्शन वाला कोई भी व्यक्ति आपके वॉलेट तक पहुँच सकता है।",
+    "amberSigner": "Amber (NIP-55)",
+    "remoteSigner": "Nostr Connect (NIP-46)",
+    "websiteHost": "lightningpiggy.com",
+    "licenceType": "MIT",
+    "lightningAddress": "Lightning ऐड्रेस (LUD-16)"
   }
 }

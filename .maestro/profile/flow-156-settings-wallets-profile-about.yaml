@@ -1,0 +1,131 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Settings wallets, profile and about — shared rows (view only)
+---
+# Uses the already signed-in test Piggy. No edits, saves, shares or payments.
+- runFlow: ../common/open-drawer.yaml
+- tapOn:
+    id: drawer-row-wallets
+- extendedWaitUntil:
+    visible:
+      id: wallets-summary-row
+    timeout: 60000
+- runFlow:
+    when:
+      visible:
+        id: wallet-row-.*
+    commands:
+      - tapOn:
+          id: wallet-row-.*
+          index: 0
+      - extendedWaitUntil:
+          visible:
+            id: wallet-design-row
+          timeout: 30000
+      - tapOn:
+          id: wallet-settings-tab-details
+      - extendedWaitUntil:
+          visible:
+            id: wallet-alias-input
+          timeout: 10000
+      - tapOn:
+          id: wallet-settings-tab-connection
+      - extendedWaitUntil:
+          visible:
+            id: wallet-settings-remove
+          timeout: 10000
+      - tapOn:
+          id: wallet-settings-tab-design
+      - swipe:
+          from:
+            id: wallet-settings-title
+          direction: DOWN
+      - extendedWaitUntil:
+          notVisible:
+            id: wallet-settings-tab-design
+          timeout: 10000
+- scrollUntilVisible:
+    element:
+      id: add-wallet-button
+    direction: DOWN
+    timeout: 15000
+- assertVisible:
+    id: default-onchain-picker
+- scrollUntilVisible:
+    element:
+      id: account-back-button
+    direction: UP
+    timeout: 15000
+- tapOn:
+    id: account-back-button
+- runFlow: ../common/open-drawer.yaml
+- tapOn:
+    id: drawer-row-profile
+- extendedWaitUntil:
+    visible:
+      id: profile-name-row
+    timeout: 60000
+- assertVisible:
+    id: profile-about-row
+- assertVisible:
+    id: profile-picture-row
+- assertVisible:
+    id: profile-banner-row
+- assertVisible:
+    id: profile-lightning-row
+- scrollUntilVisible:
+    element:
+      id: profile-account-row
+    direction: DOWN
+    timeout: 15000
+- assertVisible:
+    id: profile-signer-value
+- tapOn:
+    id: profile-account-row-info
+- extendedWaitUntil:
+    visible:
+      id: profile-account-row-info-sheet
+    timeout: 10000
+- tapOn:
+    id: profile-account-row-info-sheet-close
+- scrollUntilVisible:
+    element:
+      id: profile-qr-card
+    direction: DOWN
+    timeout: 15000
+- scrollUntilVisible:
+    element:
+      id: account-back-button
+    direction: UP
+    timeout: 15000
+- tapOn:
+    id: account-back-button
+- runFlow: ../common/open-drawer.yaml
+- scrollUntilVisible:
+    element:
+      id: drawer-row-about
+    direction: DOWN
+    timeout: 15000
+- tapOn:
+    id: drawer-row-about
+- extendedWaitUntil:
+    visible:
+      id: about-version-row
+    timeout: 60000
+- assertVisible:
+    id: about-website-link
+- scrollUntilVisible:
+    element:
+      id: about-licences-link
+    direction: DOWN
+    timeout: 15000
+- assertVisible:
+    id: about-release-notes-link
+- assertVisible:
+    id: about-support-link
+- scrollUntilVisible:
+    element:
+      id: account-back-button
+    direction: UP
+    timeout: 15000
+- tapOn:
+    id: account-back-button

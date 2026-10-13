@@ -3224,5 +3224,25 @@
       "error": "错误",
       "unknown": "未知"
     }
+  },
+  "settingsPages": {
+    "notSet": "未设置",
+    "pictureSet": "已添加图片",
+    "account": "账户",
+    "localKey": "此手机上的密钥 (nsec)",
+    "watchOnly": "链上 · 仅观察",
+    "version": "版本",
+    "website": "网站",
+    "support": "支持",
+    "releaseNotes": "更新说明",
+    "licences": "许可证",
+    "brand": "Lightning Piggy",
+    "nwc": "NWC (NIP-47)",
+    "connectionWarning": "拥有此连接的任何人都可以访问你的钱包。",
+    "amberSigner": "Amber (NIP-55)",
+    "remoteSigner": "Nostr Connect (NIP-46)",
+    "websiteHost": "lightningpiggy.com",
+    "licenceType": "MIT",
+    "lightningAddress": "Lightning地址 (LUD-16)"
   }
 }

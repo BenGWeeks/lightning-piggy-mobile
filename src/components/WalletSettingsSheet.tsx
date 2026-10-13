@@ -8,7 +8,11 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { Alert } from './BrandedAlert';
-import { BottomSheetBackdrop, BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import {
+  BottomSheetBackdrop,
+  BottomSheetScrollView,
+  type BottomSheetBackdropProps,
+} from '@gorhom/bottom-sheet';
 import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import * as Clipboard from 'expo-clipboard';
 import { useWallet } from '../contexts/WalletContext';
@@ -23,6 +27,8 @@ import {
   type CoinosRecoveryInfo,
 } from '../services/walletStorageService';
 import { createWalletSettingsSheetStyles } from '../styles/WalletSettingsSheet.styles';
+import SettingsRow from './SettingsRow';
+import { Trash2 } from 'lucide-react-native';
 import WalletDesignTab from './WalletDesignTab';
 import WalletDetailsTab from './WalletDetailsTab';
 import WalletConnectionTab from './WalletConnectionTab';
@@ -233,7 +239,9 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   );
 
   const renderBackdrop = useCallback(
-    (props: any) => <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} />,
+    (props: BottomSheetBackdropProps) => (
+      <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} />
+    ),
     [],
   );
 
@@ -330,7 +338,9 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
         {/* Fixed header: title + segmented control. Kept outside the scroll
           view so the tab switcher stays put while the active tab scrolls. */}
         <View style={styles.header} onLayout={(e) => setHeaderHeight(e.nativeEvent.layout.height)}>
-          <Text style={styles.title}>{t('walletSettingsSheet.title')}</Text>
+          <Text style={styles.title} testID="wallet-settings-title">
+            {t('walletSettingsSheet.title')}
+          </Text>
           <View style={styles.segmentedControl} accessibilityRole="tablist">
             {tabs.map(({ key, label }) => {
               const active = activeTab === key;
@@ -410,16 +420,14 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
 
         {/* Fixed footer: Remove stays outside the tabs, always visible. */}
         <View style={styles.footer} onLayout={(e) => setFooterHeight(e.nativeEvent.layout.height)}>
-          <TouchableOpacity
-            style={styles.disconnectButton}
-            onPress={handleDisconnect}
+          <SettingsRow
+            appearance="surface"
+            icon={Trash2}
+            title={t('walletSettingsSheet.removeWalletTitle')}
             testID="wallet-settings-remove"
-            accessibilityLabel={t('walletSettingsSheet.removeWalletTitle')}
-          >
-            <Text style={styles.disconnectButtonText}>
-              {t('walletSettingsSheet.removeWalletTitle')}
-            </Text>
-          </TouchableOpacity>
+            onPress={handleDisconnect}
+            destructive
+          />
         </View>
       </BottomSheetModal>
 

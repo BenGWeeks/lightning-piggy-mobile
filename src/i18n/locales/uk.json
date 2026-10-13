@@ -3264,5 +3264,25 @@
       "error": "Помилка",
       "unknown": "Невідомо"
     }
+  },
+  "settingsPages": {
+    "notSet": "Не налаштовано",
+    "pictureSet": "Зображення додано",
+    "account": "Обліковий запис",
+    "localKey": "Ключ на цьому телефоні (nsec)",
+    "watchOnly": "Ончейн · лише перегляд",
+    "version": "Версія",
+    "website": "Вебсайт",
+    "support": "Підтримка",
+    "releaseNotes": "Примітки до випуску",
+    "licences": "Ліцензія",
+    "brand": "Lightning Piggy",
+    "nwc": "NWC (NIP-47)",
+    "connectionWarning": "Кожен, хто має це підключення, може отримати доступ до вашого гаманця.",
+    "amberSigner": "Amber (NIP-55)",
+    "remoteSigner": "Nostr Connect (NIP-46)",
+    "websiteHost": "lightningpiggy.com",
+    "licenceType": "MIT",
+    "lightningAddress": "Адреса Lightning (LUD-16)"
   }
 }

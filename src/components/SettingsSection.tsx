@@ -16,9 +16,17 @@ interface Props {
   /** Omit children for the unchanged PR 0 header; migrations opt into the card. */
   children?: React.ReactNode;
   showInfo?: boolean;
+  showHeading?: boolean;
 }
 
-const SettingsSection: React.FC<Props> = ({ scope, spaced, testID, children, showInfo = true }) => {
+const SettingsSection: React.FC<Props> = ({
+  scope,
+  spaced,
+  testID,
+  children,
+  showInfo = true,
+  showHeading = true,
+}) => {
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createSettingsSectionStyles(colors), [colors]);
@@ -27,22 +35,24 @@ const SettingsSection: React.FC<Props> = ({ scope, spaced, testID, children, sho
   const title = t(account ? 'settingsScope.forThisAccount' : 'settingsScope.onThisPhone');
   return (
     <View style={[styles.container, spaced && styles.gap]} testID={testID}>
-      <View style={styles.labelRow}>
-        <Text style={styles.header} accessibilityRole="header">
-          {title}
-        </Text>
-        {showInfo && (
-          <TouchableOpacity
-            style={styles.info}
-            onPress={() => setInfoOpen(true)}
-            accessibilityRole="button"
-            accessibilityLabel={`${title}: ${t('securityScreen.details')}`}
-            testID={`${testID}-info`}
-          >
-            <Info size={18} color={colors.white} />
-          </TouchableOpacity>
-        )}
-      </View>
+      {showHeading && (
+        <View style={styles.labelRow}>
+          <Text style={styles.header} accessibilityRole="header">
+            {title}
+          </Text>
+          {showInfo && (
+            <TouchableOpacity
+              style={styles.info}
+              onPress={() => setInfoOpen(true)}
+              accessibilityRole="button"
+              accessibilityLabel={`${title}: ${t('securityScreen.details')}`}
+              testID={`${testID}-info`}
+            >
+              <Info size={18} color={colors.white} />
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
       {children != null && (
         <SettingsSectionCardContext.Provider value={true}>
           <View style={styles.card}>

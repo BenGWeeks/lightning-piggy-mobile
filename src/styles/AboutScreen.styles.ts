@@ -3,7 +3,9 @@ import type { Palette } from './palettes';
 
 export const createAboutScreenStyles = (colors: Palette) =>
   StyleSheet.create({
+    loading: { padding: 20 },
     teamCard: {
+      marginBottom: 20,
       backgroundColor: colors.surface,
       borderRadius: 16,
       overflow: 'hidden',
@@ -41,44 +43,7 @@ export const createAboutScreenStyles = (colors: Palette) =>
       fontSize: 16,
       fontWeight: '700',
     },
-    teamAbout: {
-      color: colors.textSupplementary,
-      fontSize: 12,
-      marginTop: 2,
-    },
-    teamButtonRow: {
-      paddingHorizontal: 16,
-      paddingBottom: 16,
-      gap: 8,
-    },
-    zapButton: {
-      height: 44,
-      borderRadius: 10,
-      backgroundColor: colors.brandPink,
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    zapButtonText: {
-      color: colors.white,
-      fontSize: 14,
-      fontWeight: '600',
-    },
-    feedbackButton: {
-      height: 44,
-      borderRadius: 10,
-      backgroundColor: colors.surface,
-      justifyContent: 'center',
-      alignItems: 'center',
-      borderWidth: 2,
-      // Secondary action — purple accent so it reads as the lighter-weight
-      // sibling of the filled pink "Zap the Team" primary CTA above it.
-      borderColor: colors.accentSecondary,
-    },
-    feedbackButtonText: {
-      color: colors.accentSecondary,
-      fontSize: 14,
-      fontWeight: '600',
-    },
+
     teamFallbackText: {
       color: colors.textSupplementary,
       fontSize: 14,
@@ -96,20 +61,7 @@ export const createAboutScreenStyles = (colors: Palette) =>
       opacity: 0.9,
       lineHeight: 20,
     },
-    websiteLink: {
-      color: colors.white,
-      fontSize: 14,
-      fontWeight: '600',
-      textDecorationLine: 'underline',
-      marginTop: 12,
-    },
-    versionText: {
-      color: colors.white,
-      fontSize: 16,
-      fontWeight: '600',
-      textAlign: 'center',
-      paddingTop: 32,
-    },
+
     profilerRow: {
       flexDirection: 'row',
       gap: 12,
