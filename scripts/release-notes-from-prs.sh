@@ -10,16 +10,13 @@ fi
 from=$1
 to=$2
 git rev-parse --verify "${to}^{commit}" >/dev/null
-until=$(TZ=UTC git show -s --date=format-local:%Y-%m-%dT%H:%M:%SZ --format=%cd "${to}^{commit}")
 if [ -n "$from" ]; then
   git rev-parse --verify "${from}^{commit}" >/dev/null
-  since=$(TZ=UTC git show -s --date=format-local:%Y-%m-%dT%H:%M:%SZ --format=%cd "${from}^{commit}")
-else
-  since=1970-01-01T00:00:00Z
 fi
-# Search dates bound the API query; ancestry below enforces the actual tag range
-# and excludes PRs merged to main after the release's source commit.
-prs=$(gh pr list --state merged --base main --search "merged:${since}..${until}" \
+# Commit timestamps do not bound GitHub's mergedAt (a tagged commit can
+# predate its recorded merge). Query all merged PRs; ancestry alone enforces
+# both tag boundaries, including old and future PRs. Refuse truncated results.
+prs=$(gh pr list --state merged --base main \
   --limit 10000 --json number,title,mergedAt,mergeCommit)
 if [ "$(jq 'length' <<<"$prs")" -ge 10000 ]; then
   echo 'Release range exceeds the PR query limit; refusing incomplete notes.' >&2

@@ -40,12 +40,8 @@ test('group PR titles and enforce annotated tag boundaries using merge ancestry'
     mergeCommit: { oid },
   }));
   fs.writeFileSync(path.join(repo, 'prs.json'), JSON.stringify(prs));
-  // The fake CLI also rejects malformed searches (e.g. git show printing tag metadata).
-  fs.writeFileSync(
-    path.join(repo, 'gh'),
-    '#!/bin/bash\n[[ "$*" == *"merged:"*"Z.."*"Z"* ]] || exit 2\ncat prs.json\n',
-    { mode: 0o755 },
-  );
+  // Exact date bounds would omit these PRs; candidate selection uses ancestry.
+  fs.writeFileSync(path.join(repo, 'gh'), '#!/bin/bash\ncat prs.json\n', { mode: 0o755 });
   const run = (from, to) =>
     execFileSync(generator, [from, to], {
       cwd: repo,
