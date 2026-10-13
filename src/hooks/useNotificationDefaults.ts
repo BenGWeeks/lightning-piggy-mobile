@@ -13,7 +13,6 @@ export function useNotificationDefaults(): void {
   useFocusEffect(
     useCallback(() => {
       if (!isLoggedIn || !pubkey) return;
-      let focused = true;
       let timer: ReturnType<typeof setTimeout> | undefined;
       const schedule = () => {
         if (timer) clearTimeout(timer);
@@ -21,12 +20,12 @@ export function useNotificationDefaults(): void {
           // Wallets can remain focused behind an external signer or while
           // the phone is locked. Wait for a foreground resume to ask the OS.
           if (AppState.currentState !== 'active') return;
-          void initialiseNotificationDefaults(
-            pubkey,
-            () => focused && active.current === pubkey,
-          ).catch((error) => {
-            if (__DEV__) console.warn('[Notifications] default setup failed:', error);
-          });
+          // Focus gates starting setup; once started, only account changes cancel it.
+          void initialiseNotificationDefaults(pubkey, () => active.current === pubkey).catch(
+            (error) => {
+              if (__DEV__) console.warn('[Notifications] default setup failed:', error);
+            },
+          );
         }, 3000);
       };
       schedule();
@@ -35,7 +34,6 @@ export function useNotificationDefaults(): void {
         if (state === 'active') schedule();
       });
       return () => {
-        focused = false;
         if (timer) clearTimeout(timer);
         subscription.remove();
       };

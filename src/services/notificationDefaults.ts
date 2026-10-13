@@ -11,8 +11,8 @@ const EXPLICIT_PREFIX = 'notification_preference_explicit_v1_';
 const WATCHER_PREFIX = `${WATCHER_PUSH_KEY_BASE}_`;
 let chain: Promise<unknown> = Promise.resolve();
 
-/** Called only after Wallets is visible. Write the decision before the OS
- * prompt, so denial, token failure or another launch never prompts in a loop.
+/** Called only after Wallets is visible. Commit defaults after enablement
+ * succeeds, so cancellation or token failure leaves setup retryable.
  * Existing enable machinery handles the token and schedules group records;
  * remote signers wait for Finish setup rather than launch-time approvals. */
 export function initialiseNotificationDefaults(
@@ -41,6 +41,11 @@ export function initialiseNotificationDefaults(
       otherAccountHasPreference,
     });
     if (!stillActive()) return;
+    if (ownPush === null && desired.instant) {
+      const outcome = await enableMarmotPush(me, { interactive: false, stillActive });
+      if (outcome.status !== 'enabled') return;
+    }
+    if (!stillActive()) return;
     // '0' marks an automatic decision, '1' marks a user choice. Both prevent
     // a default being reconsidered after an account switch or restart.
     await AsyncStorage.setItem(`${EXPLICIT_PREFIX}${me}`, ownPush !== null ? '1' : '0');
@@ -57,11 +62,8 @@ export function initialiseNotificationDefaults(
       });
       scheduleWatcherReconciliation(me);
     }
-    if (ownPush === null) {
+    if (ownPush === null && !desired.instant) {
       await AsyncStorage.setItem(`${PUSH_PREFIX}${me}`, '0');
-      if (desired.instant && stillActive()) {
-        await enableMarmotPush(me, { interactive: false, stillActive });
-      }
     }
   });
   chain = run.catch(() => undefined);

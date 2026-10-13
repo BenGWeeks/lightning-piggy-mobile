@@ -142,7 +142,7 @@ it.each([PK, 'c'.repeat(64)])(
     await wipeAccountCaches(OTHER_PK);
     const enable = jest
       .spyOn(marmotPush, 'enableMarmotPush')
-      .mockResolvedValue({ status: 'no-permission' });
+      .mockResolvedValue({ status: 'enabled', sync: null });
     try {
       // Cover both re-login and a new identity after all earlier accounts were removed.
       await initialiseNotificationDefaults(nextAccount, () => true);
