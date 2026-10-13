@@ -14,27 +14,49 @@ export function withResumableSubscriptions<TBase extends PoolClass>(Base: TBase)
     private readonly retiredRelays = new Set<AbstractRelay>();
     private readonly publishes = new Map<string, Set<Promise<string>>>();
 
-    ensureRelay(...args: Parameters<AbstractSimplePool['ensureRelay']>): Promise<AbstractRelay> {
-      const result = super.ensureRelay(...args);
-      // ensureRelay creates the relay synchronously, before awaiting connect().
-      // Instrument before the socket can receive an automatic AUTH challenge.
-      let url: string;
-      try {
-        url = normalizeURL(args[0]);
-      } catch {
-        return result;
-      }
-      const relay = this.relays.get(url);
+    private teardownGeneration = 0;
+    private readonly relayGenerations = new Map<string, number>();
+
+    async ensureRelay(
+      ...args: Parameters<AbstractSimplePool['ensureRelay']>
+    ): Promise<AbstractRelay> {
+      const url = normalizeURL(args[0]);
+      const teardownGeneration = this.teardownGeneration;
+      const relayGeneration = this.relayGenerations.get(url);
+      // The SDK deletes the URL unconditionally when connect() rejects. Give
+      // each attempt its own registry so an old failure cannot evict a replacement.
+      // Inherit pool configuration and callbacks while retaining SDK AUTH setup.
+      const attempt = Object.create(this) as this;
+      const existing = this.relays.get(url);
+      attempt.relays = new Map(existing ? [[url, existing]] : []);
+      const result = super.ensureRelay.call(attempt, ...args);
+      const relay = attempt.relays.get(url);
       if (relay && !this.operationDrains.has(relay)) {
+        this.relays.set(url, relay);
         this.operationDrains.set(relay, new RelayOperationDrain(relay));
         const onclose = relay.onclose;
         relay.onclose = () => {
           this.retiredRelays.delete(relay);
-          // Closing a drained socket must not evict its live replacement.
-          if (this.relays.get(url) === relay) onclose?.();
+          if (this.relays.get(url) === relay) {
+            onclose?.();
+            this.relays.delete(url);
+          }
         };
       }
-      return result;
+      try {
+        const connected = await result;
+        if (
+          this.teardownGeneration !== teardownGeneration ||
+          this.relayGenerations.get(url) !== relayGeneration
+        ) {
+          connected.close();
+          throw new Error('relay connection closed by us');
+        }
+        return connected;
+      } catch (error) {
+        if (this.relays.get(url) === relay) this.relays.delete(url);
+        throw error;
+      }
     }
 
     publish(...args: Parameters<AbstractSimplePool['publish']>): Promise<string>[] {
@@ -54,14 +76,23 @@ export function withResumableSubscriptions<TBase extends PoolClass>(Base: TBase)
     }
 
     close(urls: string[]): void {
-      super.close(urls);
       const targets = new Set(urls.map(normalizeURL));
+      for (const url of targets) {
+        this.relayGenerations.set(url, (this.relayGenerations.get(url) ?? 0) + 1);
+      }
+      for (const entry of [...this.subscriptions]) {
+        if (entry.urls.some((url) => targets.has(url))) entry.stop();
+      }
+      super.close(urls);
       for (const relay of this.retiredRelays) {
         if (targets.has(relay.url)) relay.close();
       }
     }
 
     destroy(): void {
+      this.teardownGeneration++;
+      for (const entry of [...this.subscriptions]) entry.stop();
+      this.pendingOpens.clear();
       super.destroy();
       // COUNT has no SDK timeout; explicit pool teardown still releases it.
       for (const relay of this.retiredRelays) relay.close();
@@ -73,6 +104,7 @@ export function withResumableSubscriptions<TBase extends PoolClass>(Base: TBase)
       urls: string[];
       pause(): Promise<void>;
       open(): void;
+      stop(): void;
     }>();
 
     subscribeMap(
@@ -84,6 +116,15 @@ export function withResumableSubscriptions<TBase extends PoolClass>(Base: TBase)
       let sub: SubCloser | undefined;
       const entry = {
         urls: requests.map(({ url }) => normalizeURL(url)),
+        stop: () => {
+          if (stopped) return;
+          stopped = true;
+          generation++;
+          this.subscriptions.delete(entry);
+          this.pendingOpens.delete(entry.open);
+          void sub?.close('relay connection closed by us');
+          params.onclose?.(entry.urls.map(() => 'relay connection closed by us'));
+        },
         pause: async () => {
           generation++;
           await sub?.close();
@@ -127,6 +168,10 @@ export function withResumableSubscriptions<TBase extends PoolClass>(Base: TBase)
 
     async resetTransports(relays: string[]): Promise<void> {
       const targets = new Set(relays.map(normalizeURL));
+      const teardownGeneration = this.teardownGeneration;
+      const relayGenerations = new Map(
+        [...targets].map((url) => [url, this.relayGenerations.get(url)]),
+      );
       const affected = [...this.subscriptions].filter((entry) =>
         entry.urls.some((url) => targets.has(url)),
       );
@@ -136,6 +181,11 @@ export function withResumableSubscriptions<TBase extends PoolClass>(Base: TBase)
       try {
         await Promise.all(affected.map((entry) => entry.pause()));
         for (const url of targets) {
+          if (
+            this.teardownGeneration !== teardownGeneration ||
+            this.relayGenerations.get(url) !== relayGenerations.get(url)
+          )
+            continue;
           const relay = this.relays.get(url);
           const drain = relay && this.operationDrains.get(relay);
           if (!relay || !drain) {

@@ -245,6 +245,117 @@ it.each([
   }
 });
 
+it('keeps the replacement cached when a retired connecting publish times out', async () => {
+  jest.useFakeTimers();
+  PendingSocket.sockets = [];
+  setWebSocketImplementation(PendingSocket);
+  const pool = new TestPool();
+  const url = 'wss://relay.test';
+  const event = finalizeEvent(
+    { kind: 1, content: 'pending', tags: [], created_at: 100 },
+    generateSecretKey(),
+  );
+  const publish = pool.publish([url], event)[0];
+  const old = PendingSocket.sockets[0];
+  try {
+    await pool.resetTransports([url]);
+    const connecting = pool.ensureRelay(url);
+    const fresh = PendingSocket.sockets[1];
+    fresh.open();
+    const replacement = await connecting;
+    await jest.advanceTimersByTimeAsync(pool.maxWaitForConnection);
+    expect(await publish).toContain('connection failure:');
+    expect(old.readyState).toBe(0);
+    expect(fresh.readyState).toBe(PendingSocket.OPEN);
+    expect(pool.listConnectionStatus().get('wss://relay.test/')).toBe(true);
+    expect(await pool.ensureRelay(url)).toBe(replacement);
+    expect(PendingSocket.sockets).toHaveLength(2);
+  } finally {
+    pool.destroy();
+    setWebSocketImplementation(global.WebSocket);
+    jest.useRealTimers();
+  }
+});
+
+it.each(['close', 'destroy'] as const)(
+  'does not restore active or queued subscriptions after %s races a reset',
+  async (teardown) => {
+    jest.useFakeTimers();
+    PendingSocket.sockets = [];
+    setWebSocketImplementation(PendingSocket);
+    const pool = new TestPool();
+    const url = 'wss://relay.test';
+    const callbacks = { onevent: jest.fn(), oneose: jest.fn(), onclose: jest.fn() };
+    const original = pool.subscribeMany([url], { kinds: [445], limit: 500 }, callbacks);
+    const reset = pool.resetTransports([url]);
+    const queued = pool.subscribeMany([url], { kinds: [20001], limit: 100 }, callbacks);
+    const old = PendingSocket.sockets[0];
+    try {
+      if (teardown === 'close') pool.close(['wss://RELAY.test:443']);
+      else pool.destroy();
+      // The SDK cannot close a CONNECTING socket; let its pending open settle.
+      old.open();
+      await reset;
+      await jest.advanceTimersByTimeAsync(0);
+      expect(PendingSocket.sockets).toHaveLength(1);
+      expect(old.readyState).toBe(3);
+      expect(pool.listConnectionStatus().size).toBe(0);
+      expect(callbacks.onevent).not.toHaveBeenCalled();
+      expect(callbacks.oneose).not.toHaveBeenCalled();
+      expect(callbacks.onclose).toHaveBeenCalledTimes(2);
+      await Promise.all([original.close(), queued.close()]);
+      // Later resets must not revive records invalidated by explicit teardown.
+      await pool.resetTransports([url]);
+      expect(PendingSocket.sockets).toHaveLength(1);
+    } finally {
+      pool.destroy();
+      setWebSocketImplementation(global.WebSocket);
+      jest.useRealTimers();
+    }
+  },
+);
+
+it('keeps unrelated queued reads and new connections when close invalidates a pending reset', async () => {
+  jest.useFakeTimers();
+  PendingSocket.sockets = [];
+  setWebSocketImplementation(PendingSocket);
+  const pool = new TestPool();
+  const url = 'wss://relay.test';
+  const original = pool.subscribeMany([url], { kinds: [445], limit: 500 }, {});
+  const old = PendingSocket.sockets[0];
+  const reset = pool.resetTransports([url]);
+  const unrelated = pool.subscribeMany(
+    ['wss://healthy.test'],
+    { kinds: [20001], limit: 100 },
+    { id: 'unrelated' },
+  );
+  try {
+    pool.close([url]);
+    // A deliberate new request after close is allowed. The earlier reset must
+    // neither retire its replacement nor restore the invalidated subscription.
+    const connecting = pool.ensureRelay(url);
+    const replacement = PendingSocket.sockets[1];
+    replacement.open();
+    const relay = await connecting;
+    old.open();
+    await reset;
+    const healthy = PendingSocket.sockets[2];
+    healthy.open();
+    await jest.advanceTimersByTimeAsync(0);
+    expect(PendingSocket.sockets).toHaveLength(3);
+    expect(old.readyState).toBe(3);
+    expect(replacement.readyState).toBe(PendingSocket.OPEN);
+    expect(replacement.subscriptions.size).toBe(0);
+    expect(healthy.subscriptions.has('unrelated')).toBe(true);
+    expect(await pool.ensureRelay(url)).toBe(relay);
+    await Promise.all([original.close(), unrelated.close()]);
+  } finally {
+    pool.destroy();
+    setWebSocketImplementation(global.WebSocket);
+    jest.useRealTimers();
+  }
+});
+
 it.each([1, 10, 50])('measures restoring %i groups across shared transports', async (groups) => {
   if (!process.env.MARMOT_POOL_PERF_SAMPLES) return;
   const samples: number[] = [];

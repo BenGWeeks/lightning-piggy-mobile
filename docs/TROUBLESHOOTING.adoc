@@ -1337,6 +1337,13 @@ Backoff survives replacement of the group connections. Backgrounding cancels
 pending timers; account teardown invalidates callbacks and closes routes.
 Group filters retain their watermark window and relay fan-out dedupe.
 
+Transport replacement isolates each SDK connection attempt's relay registry:
+a retired connecting publish timing out must not delete the fresh relay at
+the same URL. Explicit pool `close` and `destroy` invalidate affected active
+and queued subscriptions before closing sockets. Teardown generations also
+prevent pending connections or resets from reviving those routes; unrelated
+subscriptions and deliberate requests made after teardown remain usable.
+
 Welcomes (kind 444 inside kind 1059) arrive through the ordinary DM inbox,
 not a separate key-package inbox. The JS DM controller already rearms on
 resume. The native adapter now replaces its pool immediately on resume and
