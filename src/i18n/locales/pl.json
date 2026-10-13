@@ -2104,7 +2104,8 @@
     "cardDesign": "Projekt karty: {{name}}",
     "walletAccessibility": "Portfel {{type}}: {{alias}}",
     "typeLightning": "Lightning",
-    "typeOnchain": "On-chain"
+    "typeOnchain": "On-chain",
+    "owl": "Sowa"
   },
   "walletCardPicker": {
     "selectedTheme": "Wybrany motyw karty: {{name}}"

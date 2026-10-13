@@ -2102,7 +2102,8 @@
     "cardDesign": "{{name}}卡片样式",
     "walletAccessibility": "{{alias}} {{type}}钱包",
     "typeLightning": "Lightning",
-    "typeOnchain": "链上"
+    "typeOnchain": "链上",
+    "owl": "猫头鹰"
   },
   "walletCardPicker": {
     "selectedTheme": "已选卡片主题：{{name}}"

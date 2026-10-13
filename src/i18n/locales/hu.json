@@ -2102,7 +2102,8 @@
     "cardDesign": "{{name}} kártyakinézet",
     "walletAccessibility": "{{alias}} {{type}} pénztárca",
     "typeLightning": "Lightning",
-    "typeOnchain": "On-chain"
+    "typeOnchain": "On-chain",
+    "owl": "Bagoly"
   },
   "walletCardPicker": {
     "selectedTheme": "Kiválasztott kártyakinézet: {{name}}"

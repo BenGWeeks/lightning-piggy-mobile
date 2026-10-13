@@ -2076,7 +2076,8 @@
     "cardDesign": "Дизайн картки {{name}}",
     "walletAccessibility": "Гаманець {{alias}} {{type}}",
     "typeLightning": "Lightning",
-    "typeOnchain": "Ончейн"
+    "typeOnchain": "Ончейн",
+    "owl": "Сова"
   },
   "walletCardPicker": {
     "selectedTheme": "Вибрана тема картки: {{name}}"

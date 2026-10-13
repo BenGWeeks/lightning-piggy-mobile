@@ -1,5 +1,6 @@
 export type CardTheme =
   | 'lightning-piggy'
+  | 'wise-owl'
   | 'lightning-bee'
   | 'lightning-cat'
   | 'bitpopart'
