@@ -132,19 +132,25 @@ jest.mock('./PaymentProgressOverlay', () => () => null);
 jest.mock('./AmountEntryScreen', () => () => null);
 jest.mock('./SendAmountSection', () => {
   const { Text } = jest.requireActual('react-native');
-  return ({ currentSats }: { currentSats: number }) => (
-    <Text testID="mock-send-amount">{currentSats}</Text>
-  );
+  return function MockSendAmountSection({ currentSats }: { currentSats: number }) {
+    return <Text testID="mock-send-amount">{currentSats}</Text>;
+  };
 });
 jest.mock('./SendNfcPane', () => {
   const { Text } = jest.requireActual('react-native');
-  return () => <Text testID="mock-nfc-pane">nfc</Text>;
+  return function MockSendNfcPane() {
+    return <Text testID="mock-nfc-pane">nfc</Text>;
+  };
 });
 jest.mock('./SendScanPane', () => {
   const { Text } = jest.requireActual('react-native');
-  return ({ permissionGranted }: { permissionGranted: boolean }) => (
-    <Text testID={permissionGranted ? 'send-scan-camera' : 'send-scan-grant-permission'}>scan</Text>
-  );
+  return function MockSendScanPane({ permissionGranted }: { permissionGranted: boolean }) {
+    return (
+      <Text testID={permissionGranted ? 'send-scan-camera' : 'send-scan-grant-permission'}>
+        scan
+      </Text>
+    );
+  };
 });
 jest.mock('../hooks/useSendSheetLnurl', () => ({ useSendSheetLnurl: () => undefined }));
 const mockProcessInput = jest.fn();
@@ -166,6 +172,9 @@ jest.mock('../hooks/useSendSheetInput', () => ({
     mockInputArgs = args;
     return {
       processInput: mockProcessInput,
+      // The prefill path is caller-vetted; the legacy assertions below still
+      // observe it through mockProcessInput.
+      acceptVettedInput: mockProcessInput,
       resetInputForOpen: mockResetInputForOpen,
       handleBarCodeScanned: jest.fn(),
       handleNfcContent: jest.fn(),
@@ -439,7 +448,10 @@ it('clears a friend identity after Edit address replaces the destination with an
     </>,
   );
   act(() => jest.runOnlyPendingTimers());
-  fireEvent.press(screen.getByTestId('link-action-confirm'));
+  // An in-app recipient (Friends / zap / conversation) is vetted by the caller:
+  // no consent sheet, straight to the amount step.
+  expect(screen.queryByTestId('link-action-confirm')).toBeNull();
+  expect(screen.getByTestId('mock-send-amount')).toBeTruthy();
   fireEvent.press(screen.getByTestId('sendsheet-edit-address'));
   fireEvent.changeText(screen.getByTestId('send-paste-input'), INVOICE_WITH_AMOUNT);
   fireEvent.press(screen.getByTestId('send-paste-go'));

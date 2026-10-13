@@ -1,4 +1,3 @@
-import { confirmLinkAction } from '../utils/confirmLinkAction';
 import {
   useCallback,
   useLayoutEffect,
@@ -10,6 +9,7 @@ import {
 import * as Clipboard from 'expo-clipboard';
 import { Alert } from '../components/BrandedAlert';
 import { useTranslation } from '../contexts/LocaleContext';
+import { confirmLinkAction } from '../utils/confirmLinkAction';
 import { parseBip21 } from '../utils/bip21';
 import {
   type DecodedInvoice,
@@ -58,6 +58,7 @@ export function useSendSheetInput(opts: {
   setSatsValue: (v: string) => void;
 }): {
   processInput: (data: string) => void;
+  acceptVettedInput: (data: string) => void;
   resetInputForOpen: () => void;
   handleBarCodeScanned: (e: { data: string }) => void;
   handleNfcContent: (content: NfcTagContent) => void;
@@ -189,6 +190,16 @@ export function useSendSheetInput(opts: {
     }
   };
 
+  // Caller-vetted targets skip the consent sheet: an in-app contact's address
+  // (Friends / zap / conversation send) or a deep link that App.tsx has ALREADY
+  // confirmed with the user. Prompting again would be pure friction and would
+  // make the consent sheet feel like noise. Scan / NFC / paste never use this —
+  // they go through `processInput`, which confirms first (#1500).
+  const acceptVettedInput = (data: string) => {
+    if (opts.visible === false) return;
+    acceptInput(data);
+  };
+
   const processInput = (data: string) => {
     if (
       opts.visible === false ||
@@ -266,6 +277,7 @@ export function useSendSheetInput(opts: {
 
   return {
     processInput,
+    acceptVettedInput,
     resetInputForOpen,
     handleBarCodeScanned,
     handleNfcContent,

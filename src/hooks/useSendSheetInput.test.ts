@@ -210,3 +210,18 @@ it.each(['close', 'reopen', 'target change', 'reset', 'unmount'])(
     expect(opts.setInvoiceData).toHaveBeenCalledWith('bob@example.com');
   },
 );
+
+it('accepts a caller-vetted target (in-app contact / confirmed deep link) without a consent prompt', () => {
+  const { result, opts } = setup();
+  act(() => result.current.acceptVettedInput('alice@example.com'));
+  expect(Alert.alert).not.toHaveBeenCalled();
+  expect(opts.setInvoiceData).toHaveBeenCalledWith('alice@example.com');
+  expect(opts.setScanned).toHaveBeenCalledWith(true);
+});
+
+it('ignores a vetted target once the sheet is hidden', () => {
+  const { result, opts, rerender } = setup();
+  rerender({ ...opts, visible: false });
+  act(() => result.current.acceptVettedInput('alice@example.com'));
+  expect(opts.setInvoiceData).not.toHaveBeenCalled();
+});

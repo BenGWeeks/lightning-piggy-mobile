@@ -141,7 +141,7 @@ it('resolves the same voucher again after dismissing and reopening, with confirm
 
 it('dismisses an unopened voucher without any resolution or invoice creation', async () => {
   render(<LnurlWithdrawHost />);
-  act(() => openLnurlWithdrawSheet('lnurlw://example.com/voucher', 'first', false));
+  act(() => openLnurlWithdrawSheet('lnurlw://example.com/voucher', 'first'));
   expect(mockResolve).not.toHaveBeenCalled();
   act(() => mockDismiss!());
   expect(mockResolve).not.toHaveBeenCalled();
@@ -149,11 +149,19 @@ it('dismisses an unopened voucher without any resolution or invoice creation', a
   expect(mockMakeInvoice).not.toHaveBeenCalled();
 });
 
-it('still requires the claim tap even when a caller passes false', async () => {
+it('skips only the host step for an already-consented caller; the claim tap stays mandatory', async () => {
   render(<LnurlWithdrawHost />);
-  act(() => openLnurlWithdrawSheet('lnurlw://example.com/voucher', 'first', false));
-  await act(async () => fireEvent.press(screen.getByTestId('lnurl-withdraw-resolve-button')));
+  await act(async () => {
+    openLnurlWithdrawSheet('lnurlw://example.com/voucher', 'first', false);
+  });
+  // No duplicate consent prompt — the caller (App deep-link router) already
+  // showed the host — but the endpoint is only resolved, never claimed.
+  expect(screen.queryByTestId('lnurl-withdraw-resolve-button')).toBeNull();
+  expect(mockResolve).toHaveBeenCalledTimes(1);
+  expect(screen.getByText('linkAction.withdraw')).toBeTruthy();
   expect(screen.getByTestId('lnurl-withdraw-amount-input').props.value).toBe('21');
   expect(mockClaim).not.toHaveBeenCalled();
   expect(mockMakeInvoice).not.toHaveBeenCalled();
+  await act(async () => fireEvent.press(screen.getByTestId('lnurl-withdraw-claim-button')));
+  expect(mockClaim).toHaveBeenCalledTimes(1);
 });

@@ -1,4 +1,5 @@
 import { npubEncode } from 'nostr-tools/nip19';
+import { normalizeLnurlToUrl } from '../services/lnurlService';
 import type { NostrContact } from '../types/nostr';
 
 /** Invoice metadata is untrusted display copy, never an identity. */
@@ -8,14 +9,30 @@ export function sanitizeInvoiceMemo(value: string | null | undefined): string {
   return chars.length > 140 ? chars.slice(0, 139).join('') + '…' : clean;
 }
 
+/** Host an LNURL (bech32 / lnurlp:// / https) will be fetched from — local
+ *  decode only, never a network call. Null when the string isn't an LNURL. */
+export function lnurlEndpointHost(input: string | null | undefined): string | null {
+  if (!input) return null;
+  try {
+    return new URL(normalizeLnurlToUrl(input)).host || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Precedence: Lightning address → LNURL host → own contact → verified node → unknown.
+ *  Every label is something the app can vouch for; invoice copy never appears here. */
 export function paymentRecipientLabel(opts: {
   address?: string | null;
+  lnurl?: string | null;
   pubkey?: string;
   contacts: readonly NostrContact[];
   nodePubkey?: string | null;
   unknownLabel: string;
 }): string {
   if (opts.address) return opts.address;
+  const host = lnurlEndpointHost(opts.lnurl);
+  if (host) return host;
   const contact = opts.contacts.find((c) => c.pubkey === opts.pubkey);
   if (contact) {
     return (

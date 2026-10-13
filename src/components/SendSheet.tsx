@@ -1,4 +1,3 @@
-import { paymentRecipientLabel } from '../utils/paymentIdentity';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { View, Text, TouchableOpacity, BackHandler, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -49,6 +48,7 @@ import {
 } from '../utils/reverseSwapSend';
 import { quoteExactRecipient, formatRecipientFee } from '../utils/reverseSwapAmounts';
 import { reverseSwapAmountBounds, shortOnchainAddress } from '../utils/onchainSwapSend';
+import { paymentRecipientLabel } from '../utils/paymentIdentity';
 import SendOnchainFeeRow from './SendOnchainFeeRow';
 import { npubEncode } from '../services/nostrService';
 import { recordOutgoing as recordOutgoingCounterparty } from '../services/zapCounterpartyStorage';
@@ -207,6 +207,7 @@ const SendSheet: React.FC<Props> = ({
     ? shortOnchainAddress(invoiceData || '')
     : paymentRecipientLabel({
         address: isLightningAddress(invoiceData || '') ? invoiceData : null,
+        lnurl: isLnurl ? invoiceData : null,
         pubkey: activePubkey,
         contacts,
         nodePubkey: decoded?.nodePubkey,
@@ -254,7 +255,7 @@ const SendSheet: React.FC<Props> = ({
   );
 
   const {
-    processInput,
+    acceptVettedInput,
     resetInputForOpen,
     handleBarCodeScanned,
     handleNfcContent,
@@ -311,13 +312,12 @@ const SendSheet: React.FC<Props> = ({
       setActivePicture(initialPicture);
       bottomSheetRef.current?.present();
       if (initialAddress) {
-        // Use setTimeout to process after state reset. The sheet stays mounted
-        // across opens, so the cleanup cancels it on close/unmount and the
-        // session check drops it if it still fires after a reopen — a stale
-        // prefill must never overwrite the next open's target.
+        // Deferred past the state reset; cleanup + session check drop a stale
+        // prefill on close/reopen. Vetted: the target is an in-app contact or a
+        // deep link App.tsx already confirmed, so no consent sheet here (#1500).
         const session = openSessionRef.current;
         const prefill = setTimeout(() => {
-          if (openSessionRef.current === session) processInput(initialAddress);
+          if (openSessionRef.current === session) acceptVettedInput(initialAddress);
         }, 0);
         return () => clearTimeout(prefill);
       }
@@ -358,11 +358,10 @@ const SendSheet: React.FC<Props> = ({
   const memoRef = useRef(memo);
   memoRef.current = memo;
 
-  // Fix-in-place recovery (#871): return to the paste/input step with the bad
-  // value RETAINED (unlike handleReset, which blanks it) so a one-char typo
-  // can be corrected without retyping the whole address. Unwinds the
-  // resolved/scanned state and retains the editable text. Reads the live
-  // submitted value via refs so the callback identity stays stable (see above).
+  // Fix-in-place recovery (#871): back to the paste/input step with the bad
+  // value RETAINED (handleReset blanks it) so a one-char typo can be fixed
+  // without retyping. Unwinds resolved/scanned state, keeps the editable text,
+  // and reads the submitted value via refs so the callback identity stays stable.
   const handleEditAddress = useCallback(() => {
     const prefill = editAddressPrefill(pasteTextRef.current, invoiceDataRef.current);
     setActivePubkey(undefined);

@@ -274,7 +274,15 @@ export default function App() {
         return;
       }
       lastRouted = { url: trimmed, at: Date.now() };
-      if (/^(lightning:|lnurl|bitcoin:|nostr:)/i.test(trimmed) || isProfileReferenceUri(trimmed)) {
+      // Consent before any network work (#1500). Bare `lnurlw://` / `lnurl://`
+      // are exempt here only because they route straight to LnurlWithdrawSheet,
+      // whose first stage IS the "Withdraw from <host>" consent — nothing is
+      // fetched until that tap, and a second identical prompt would just be
+      // friction. Every other external payload confirms first.
+      const needsConsent =
+        (/^(lightning:|lnurl|bitcoin:|nostr:)/i.test(trimmed) || isProfileReferenceUri(trimmed)) &&
+        !/^lnurlw?:\/\//i.test(trimmed);
+      if (needsConsent) {
         confirmLinkAction(trimmed, () => {
           if (!cancelled) routeFresh(trimmed);
         });
@@ -511,7 +519,10 @@ export default function App() {
           if (cancelled) return;
           if (resolved.kind === 'withdraw') {
             console.log(`[Link] → LnurlWithdrawSheet (LNURL withdrawRequest)`);
-            tryNav(() => openLnurlWithdrawSheet(lnurl, undefined, true));
+            // Consent for this exact link was given above (host shown) and the
+            // endpoint is already resolved, so skip the sheet's own host step;
+            // it still shows host + amount and requires the Withdraw tap.
+            tryNav(() => openLnurlWithdrawSheet(lnurl, undefined, false));
           } else {
             // payRequest → SendSheet. Hand it the resolved endpoint URL so
             // SendSheet doesn't have to re-decode the bech32 (and so
@@ -614,6 +625,13 @@ export default function App() {
                             makeInvoice). Replaced the broken passive foreground
                             NFC listener (#341). */}
                               <LnurlWithdrawHost />
+                              {/* Consent sheet for deep links / scans / NFC
+                            payloads (#1500). Also a BottomSheetModal, so it
+                            MUST sit inside BottomSheetModalProvider — outside
+                            it Gorhom throws on mount and the app never boots.
+                            `LinkActionSheetProvider.test.tsx` pins both the
+                            provider requirement and this nesting. */}
+                              <LinkActionSheetHost />
                             </BottomSheetModalProvider>
                           </UserLocationProvider>
                         </LiveLocationProvider>
@@ -635,7 +653,6 @@ export default function App() {
                       drop-in re-export, NOT the system Alert) renders
                       above the rest of the UI without z-index gymnastics. */}
                         <BrandedAlertHost />
-                        <LinkActionSheetHost />
                       </GroupsProvider>
                     </TrustGraphProvider>
                   </NostrProvider>

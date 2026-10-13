@@ -6,12 +6,22 @@ import { decodeInvoice, stripLightningPrefix } from './sendSheetInput';
 import { paymentRecipientLabel, sanitizeInvoiceMemo } from './paymentIdentity';
 import { decode, npubEncode } from 'nostr-tools/nip19';
 
+/** npub / nprofile (optionally `nostr:`-prefixed) or a bare 64-hex pubkey —
+ *  the payload shapes the Friends scanner can turn into a profile. */
+export function looksLikeProfileReference(raw: string): boolean {
+  const s = raw.trim();
+  return /^(nostr:)?(npub1|nprofile1)/i.test(s) || /^[0-9a-f]{64}$/i.test(s);
+}
+
 /** Local parsing only: describing a link must never contact its endpoint. */
 export function linkActionDescription(raw: string): string {
   const input = stripLightningPrefix(raw);
-  if (/^(nostr:)?(npub1|nprofile1)/i.test(input)) {
+  if (looksLikeProfileReference(input)) {
     try {
-      const entity = decode(input.replace(/^nostr:/i, ''));
+      const bare = input.replace(/^nostr:/i, '');
+      const entity = /^[0-9a-f]{64}$/i.test(bare)
+        ? ({ type: 'npub', data: bare.toLowerCase() } as const)
+        : decode(bare);
       const pubkey =
         entity.type === 'npub'
           ? entity.data

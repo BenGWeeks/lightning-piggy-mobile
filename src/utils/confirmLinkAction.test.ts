@@ -1,7 +1,11 @@
 import { bech32 } from '@scure/base';
 import { npubEncode, nprofileEncode } from 'nostr-tools/nip19';
 import { Alert } from '../components/BrandedAlert';
-import { confirmLinkAction, linkActionDescription } from './confirmLinkAction';
+import {
+  confirmLinkAction,
+  linkActionDescription,
+  looksLikeProfileReference,
+} from './confirmLinkAction';
 import { resolveLnurlDirection } from '../services/lnurlService';
 import { INVOICE_WITH_AMOUNT } from './bolt11TestVectors';
 
@@ -100,4 +104,19 @@ it.each([
     expect.any(Object),
   );
   expect(mockFetch).not.toHaveBeenCalled();
+});
+
+it('names a bare hex pubkey (Friends scanner input) as a profile, never a payment', () => {
+  expect(linkActionDescription('A'.repeat(64))).toBe(`Open profile ${npub.slice(0, 20)}…`);
+});
+it.each([
+  [`nostr:${npub}`, true],
+  [npub, true],
+  ['a'.repeat(64), true],
+  ['alice@example.com', false],
+  ['lnurlp://example.com/pay', false],
+  [INVOICE_WITH_AMOUNT, false],
+  ['not-a-key', false],
+])('looksLikeProfileReference(%s) → %s', (input, expected) => {
+  expect(looksLikeProfileReference(input)).toBe(expected);
 });

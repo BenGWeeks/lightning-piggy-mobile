@@ -50,7 +50,14 @@ import { useLocale } from '../contexts/LocaleContext';
 let listener: ((lnurl: string, walletId?: string, requireConfirmation?: boolean) => void) | null =
   null;
 /** Open the global withdraw sheet for `lnurl`. Returns false if the host
- *  isn't mounted yet (cold launch race) so the caller can retry. */
+ *  isn't mounted yet (cold launch race) so the caller can retry.
+ *
+ *  `requireConfirmation` (default true) shows the "Withdraw from <host>"
+ *  consent step BEFORE the endpoint is fetched. Pass false ONLY when the
+ *  caller has already obtained consent for this exact link and resolved it
+ *  (the App deep-link router after `resolveLnurlDirection`) — the sheet then
+ *  starts resolving straight away. Either way the amount + Withdraw tap are
+ *  always required: nothing can auto-claim (#1500). */
 export function openLnurlWithdrawSheet(
   lnurl: string,
   walletId?: string,
@@ -215,14 +222,16 @@ export function LnurlWithdrawHost(): React.ReactElement {
 
   // Open + resolve when a deep-link fires.
   useEffect(() => {
-    listener = (url: string, walletId?: string) => {
+    listener = (url: string, walletId?: string, requireConfirmation = true) => {
       if (!mountedRef.current) return;
       const preferredId = walletId ?? activeWalletId;
       setSelectedWalletId(
         lightningWallets.find((w) => w.id === preferredId)?.id ?? lightningWallets[0]?.id ?? null,
       );
       setLnurl(url);
-      setStage({ kind: 'confirm' });
+      // 'confirm' = host consent before any fetch; 'resolving' only when the
+      // caller already got consent for this link. The claim tap stays mandatory.
+      setStage({ kind: requireConfirmation ? 'confirm' : 'resolving' });
       sheetRef.current?.present();
     };
     return () => {
@@ -389,10 +398,10 @@ export function LnurlWithdrawHost(): React.ReactElement {
             <TouchableOpacity
               style={styles.primaryButton}
               testID="lnurl-withdraw-resolve-button"
-              accessibilityLabel={t('linkAction.withdrawButton')}
+              accessibilityLabel={t('linkAction.continue')}
               onPress={() => setStage({ kind: 'resolving' })}
             >
-              <Text style={styles.primaryButtonText}>{t('linkAction.withdrawButton')}</Text>
+              <Text style={styles.primaryButtonText}>{t('linkAction.continue')}</Text>
             </TouchableOpacity>
           )}
           {(stage.kind === 'resolving' || stage.kind === 'claiming') && (

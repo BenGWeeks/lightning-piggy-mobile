@@ -1,5 +1,5 @@
 import { npubEncode } from 'nostr-tools/nip19';
-import { paymentRecipientLabel, sanitizeInvoiceMemo } from './paymentIdentity';
+import { lnurlEndpointHost, paymentRecipientLabel, sanitizeInvoiceMemo } from './paymentIdentity';
 import type { NostrContact } from '../types/nostr';
 
 it.each([
@@ -46,3 +46,24 @@ it.each([null, '', 'invalid'])(
     ).toBe('Unknown recipient');
   },
 );
+
+describe('LNURL destinations are labelled by their endpoint host', () => {
+  it.each([
+    ['lnurlp://example.com/pay?x=1', 'example.com'],
+    ['LIGHTNING:lnurlp://Example.com:8443/pay', 'example.com:8443'],
+    ['https://pay.example.com/.well-known/lnurlp/alice', 'pay.example.com'],
+    ['alice@example.com', null],
+    ['lnbc1notanlnurl', null],
+    [null, null],
+  ])('%s → %s', (input, expected) => {
+    expect(lnurlEndpointHost(input)).toBe(expected);
+  });
+  it('ranks the LNURL host below a Lightning address and above a contact name', () => {
+    expect(paymentRecipientLabel({ ...base, lnurl: 'lnurlp://example.com/pay' })).toBe(
+      'example.com',
+    );
+    expect(
+      paymentRecipientLabel({ ...base, address: 'alice@example.com', lnurl: 'lnurlp://x.com/p' }),
+    ).toBe('alice@example.com');
+  });
+});

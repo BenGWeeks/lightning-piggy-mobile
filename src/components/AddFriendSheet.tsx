@@ -1,4 +1,3 @@
-import { confirmLinkAction } from '../utils/confirmLinkAction';
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import {
   View,
@@ -10,6 +9,7 @@ import {
   Platform,
 } from 'react-native';
 import { Alert } from './BrandedAlert';
+import { confirmLinkAction, looksLikeProfileReference } from '../utils/confirmLinkAction';
 import {
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
@@ -121,26 +121,31 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
     scanPending.current = true;
     setScanned(true);
     setScanError(null);
-    confirmLinkAction(
-      data,
-      () => {
-        if (!isCurrent()) return;
-        void (async () => {
-          setLoading(true);
-          const success = await onAdd(data.trim());
-          if (!isCurrent()) return;
-          scanPending.current = false;
-          setLoading(false);
-          if (success) handleClose();
-          else setScanError(t('addFriendSheet.invalidNpub'));
-        })();
-      },
-      () => {
+    const add = () => {
+      if (!isCurrent()) return;
+      void (async () => {
+        setLoading(true);
+        const success = await onAdd(data.trim());
         if (!isCurrent()) return;
         scanPending.current = false;
-        setScanned(false);
-      },
-    );
+        setLoading(false);
+        if (success) handleClose();
+        else setScanError(t('addFriendSheet.invalidNpub'));
+      })();
+    };
+    // Only a profile-shaped payload leads anywhere (follow + kind-0 fetch), so
+    // only that gets the "Open profile npub…" consent. Anything else is rejected
+    // locally by `onAdd` (addContact decodes npub/hex, no network) — showing a
+    // "Pay …" consent for a payment QR here would mis-describe the action.
+    if (!looksLikeProfileReference(data)) {
+      add();
+      return;
+    }
+    confirmLinkAction(data, add, () => {
+      if (!isCurrent()) return;
+      scanPending.current = false;
+      setScanned(false);
+    });
   };
 
   const handleScanMode = async () => {
