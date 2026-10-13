@@ -8,6 +8,7 @@ import {
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
   BottomSheetScrollView,
+  type BottomSheetScrollViewMethods,
   BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
 import { BottomSheetModal } from './AccessibleBottomSheetModal';
@@ -39,7 +40,7 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
   const [uploadingBanner, setUploadingBanner] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const sheetRef = useRef<BottomSheetModal>(null);
-  const scrollRef = useRef<any>(null);
+  const scrollRef = useRef<BottomSheetScrollViewMethods>(null);
   // No explicit snapPoints — content-height only, not user-draggable.
 
   // Populate fields ONCE per open. Keying on `visible` alone: if `profile`

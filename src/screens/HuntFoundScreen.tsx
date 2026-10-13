@@ -155,7 +155,7 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
         );
       }
     },
-    [activeWalletId, makeInvoice, lnurl, coord],
+    [activeWalletId, makeInvoice, lnurl, coord, t],
   );
 
   // Resolve on mount. Fixed-amount tags (min === max) auto-claim — the user
@@ -206,7 +206,7 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
     return () => {
       cancelled = true;
     };
-  }, [lnurl, activeWalletId, handleClaim]);
+  }, [lnurl, activeWalletId, handleClaim, t]);
 
   // ----- render -----------------------------------------------------------
 

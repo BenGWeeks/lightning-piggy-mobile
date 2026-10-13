@@ -495,7 +495,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     return () => {
       cancelled = true;
     };
-  }, [editingId, fallbackCache, navigation, pubkey]);
+  }, [editingId, fallbackCache, navigation, pubkey, t]);
 
   // Recover the live prize amount when editing (#626). The edit-load above
   // seeds the prize from the local record's `maxWithdrawableMsat`, which can
@@ -615,7 +615,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
         { text: t('huntCreateScreen.ok') },
       ]);
     }
-  }, [lnurl]);
+  }, [lnurl, t]);
 
   const handleSave = useCallback(async () => {
     console.log(
@@ -852,6 +852,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     pubkey,
     signEvent,
     relays,
+    t,
   ]);
 
   const handlePinHere = useCallback(async () => {
@@ -878,7 +879,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     } finally {
       setPinning(false);
     }
-  }, [pinning]);
+  }, [pinning, t]);
 
   const handleClearPin = useCallback(() => setPin(null), []);
 
@@ -917,14 +918,12 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
         UTI: 'public.standard-tesselated-geometry-format',
       });
     }
-  }, [stageStlInCache]);
+  }, [stageStlInCache, t]);
 
   const saveStlToFiles = useCallback(async () => {
-    // SAF flow: prompt the user to pick a directory, create the STL inside
-    // it, then base64-copy the bytes across. Two SAF round-trips because
-    // there's no "copy a file:// into a SAF URI" primitive — we have to
-    // read+write through JS. The STL is small (a few hundred KB) so the
-    // base64 round-trip is fine; for larger files we'd chunk it.
+    // SAF has no file:// copy primitive: pick a directory, create the STL,
+    // then copy its bytes through JS. Base64 is fine for this small file;
+    // larger files would need chunking.
     const target = await stageStlInCache();
     const perm = await SAF.requestDirectoryPermissionsAsync();
     if (!perm.granted) return;
@@ -938,7 +937,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     const base64 = await readAsStringAsync(target.uri, { encoding: 'base64' });
     await SAF.writeAsStringAsync(destUri, base64, { encoding: 'base64' });
     Toast.show({ type: 'success', text1: t('huntCreateScreen.savedStl') });
-  }, [stageStlInCache]);
+  }, [stageStlInCache, t]);
 
   const handleSaveStl = useCallback(async () => {
     try {
@@ -961,7 +960,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
         text2: (e as Error).message,
       });
     }
-  }, [saveStlToFiles, shareStl]);
+  }, [saveStlToFiles, shareStl, t]);
 
   // ----- hint photo capture / library --------------------------------------
 
@@ -981,7 +980,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
         setUploadingHint(false);
       }
     },
-    [signEvent],
+    [signEvent, t],
   );
 
   const handlePickHintFromLibrary = useCallback(async () => {
@@ -1001,7 +1000,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     });
     if (result.canceled || !result.assets?.[0]) return;
     await uploadHintPhoto(result.assets[0].uri, result.assets[0].base64);
-  }, [uploadHintPhoto]);
+  }, [uploadHintPhoto, t]);
 
   const handleTakeHintPhoto = useCallback(async () => {
     const permission = await ImagePicker.requestCameraPermissionsAsync();
@@ -1020,7 +1019,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     });
     if (result.canceled || !result.assets?.[0]) return;
     await uploadHintPhoto(result.assets[0].uri, result.assets[0].base64);
-  }, [uploadHintPhoto]);
+  }, [uploadHintPhoto, t]);
 
   const handleRemoveHintPhoto = useCallback(() => setHintPhotoUrl(null), []);
 
@@ -1065,7 +1064,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
       Toast.show({ type: 'success', text1: t('huntCreateScreen.tagUnlocked') });
     }
     unlockSucceededRef.current = false;
-  }, []);
+  }, [t]);
 
   const handleUnlocked = useCallback(async () => {
     unlockSucceededRef.current = true;
@@ -1149,7 +1148,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
       }
       setStage({ kind: 'wrote-nfc' });
     },
-    [ensurePiggyId],
+    [ensurePiggyId, t],
   );
 
   const handleDone = useCallback(() => navigation.goBack(), [navigation]);

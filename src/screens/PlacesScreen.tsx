@@ -153,7 +153,7 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
       // Harmless on the background/mount path (it was never set there).
       setRefreshing(false);
     }
-  }, [applyFetched, places.length, seedFromCacheAsync, setLoading]);
+  }, [applyFetched, places.length, seedFromCacheAsync, setLoading, t]);
 
   // User-initiated pull-to-refresh: show the RefreshControl spinner while
   // the cached list stays on-screen, then revalidate. Distinct from the

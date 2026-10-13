@@ -237,7 +237,7 @@ const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
         </TouchableOpacity>
       );
     },
-    [onSelect, tileWidth, visibleIds, t],
+    [onSelect, tileWidth, visibleIds, t, styles.tile, styles.tileImage],
   );
 
   return (

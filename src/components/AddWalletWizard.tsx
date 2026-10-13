@@ -5,6 +5,7 @@ import { Alert } from './BrandedAlert';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import {
   BottomSheetBackdrop,
+  type BottomSheetBackdropProps,
   BottomSheetScrollView,
   BottomSheetTextInput,
   type BottomSheetScrollViewMethods,
@@ -212,7 +213,9 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
   );
 
   const renderBackdrop = useCallback(
-    (props: any) => <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} />,
+    (props: BottomSheetBackdropProps) => (
+      <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} />
+    ),
     [],
   );
 

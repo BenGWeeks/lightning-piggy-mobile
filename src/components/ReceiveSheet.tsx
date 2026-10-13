@@ -215,7 +215,7 @@ const ReceiveSheet: React.FC<Props> = ({
         if (sessionTokenRef.current === token) setLoading(false);
       }
     },
-    [makeInvoiceForWallet, refreshBalanceForWallet, capturedWalletId, expectPayment],
+    [makeInvoiceForWallet, refreshBalanceForWallet, capturedWalletId, expectPayment, t],
   );
 
   const isOnchainWallet = selectedWallet?.walletType === 'onchain';
@@ -465,7 +465,7 @@ const ReceiveSheet: React.FC<Props> = ({
     } finally {
       setSendingToFriend(false);
     }
-  }, [friendShareValue, presetGroup, onSendToGroup, sendingToFriend, mode, onSent, onClose]);
+  }, [friendShareValue, presetGroup, onSendToGroup, sendingToFriend, mode, onSent, onClose, t]);
 
   const handleSendToFriend = useCallback(() => {
     if (!friendShareValue) return;

@@ -305,7 +305,7 @@ const ContactProfileScreen: React.FC = () => {
       return;
     }
     setSendSheetOpen(true);
-  }, [hasWallets, contact.lightningAddress, contact.pubkey, contact.name, relays]);
+  }, [hasWallets, contact.lightningAddress, contact.pubkey, contact.name, relays, t]);
 
   const handleSetLightningAddress = useCallback(
     async (address: string) => {
@@ -353,7 +353,7 @@ const ContactProfileScreen: React.FC = () => {
     } finally {
       setLoadingFollow(false);
     }
-  }, [contact.pubkey, contact.name, loadingFollow, following, followContact, unfollowContact]);
+  }, [contact.pubkey, contact.name, loadingFollow, following, followContact, unfollowContact, t]);
 
   const handleCopyNpub = useCallback(async () => {
     if (!npub) return;
@@ -364,7 +364,7 @@ const ContactProfileScreen: React.FC = () => {
       position: 'top',
       visibilityTime: 1800,
     });
-  }, [npub]);
+  }, [npub, t]);
 
   const handleCopyLnAddress = useCallback(async () => {
     if (!contact.lightningAddress) return;
@@ -375,7 +375,7 @@ const ContactProfileScreen: React.FC = () => {
       position: 'top',
       visibilityTime: 1800,
     });
-  }, [contact.lightningAddress]);
+  }, [contact.lightningAddress, t]);
 
   // "Share to friend" — opens FriendPickerSheet for NIP-17 DM share.
   const handleShareToFriendOpen = useCallback(() => {
@@ -400,7 +400,7 @@ const ContactProfileScreen: React.FC = () => {
     } catch {
       // User dismissed or platform rejected — nothing to surface.
     }
-  }, [contact.pubkey, contact.name, npub, contacts, relays]);
+  }, [contact.pubkey, contact.name, npub, contacts, relays, t]);
 
   const handleShareToFriend = useCallback(
     async (friend: PickedFriend) => {
@@ -452,6 +452,7 @@ const ContactProfileScreen: React.FC = () => {
       relays,
       viewerPubkey,
       navigation,
+      t,
     ],
   );
 

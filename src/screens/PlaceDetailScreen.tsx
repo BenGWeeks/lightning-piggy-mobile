@@ -181,7 +181,7 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     return () => {
       cancelled = true;
     };
-  }, [placeId]);
+  }, [placeId, t]);
 
   const openDirections = useCallback(() => {
     if (!place) return;
@@ -194,7 +194,7 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         `https://www.openstreetmap.org/?mlat=${place.lat}&mlon=${place.lon}#map=18/${place.lat}/${place.lon}`,
       ).catch(() => {});
     });
-  }, [place]);
+  }, [place, t]);
 
   const openContact = useCallback((scheme: 'tel' | 'mailto' | 'https', value: string) => {
     const uri = scheme === 'https' ? value : `${scheme}:${value}`;

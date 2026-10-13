@@ -613,7 +613,7 @@ const EventRow: React.FC<{
   onOpenInMaps: () => void;
   colors: Palette;
   styles: EventsScreenStyles;
-}> = ({ event, distance, upNext, expanded, onToggle, onOpenInMaps, colors, styles }) => {
+}> = ({ event, distance, upNext, expanded, onToggle, colors, styles }) => {
   const { t, formatLocale } = useLocale();
   const { day, month } = dayLabel(event.startsAt, formatLocale);
   return (

@@ -212,9 +212,6 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   // a −45° offset; Navigation2 is cleaner for compass use.)
   const arrowRotation = bearing !== null && heading !== null ? bearing - heading : null;
 
-  // ----- load listing -----------------------------------------------------
-  // (found-log + zap-receipt subscriptions live in useFoundLogIngest above)
-
   useEffect(() => {
     let cancelled = false;
     const parts = parseCacheCoord(coord);
@@ -256,6 +253,8 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     return () => {
       cancelled = true;
     };
+    // Capture the listing snapshot for this coordinate; setCache must not restart the fetch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [coord]);
 
   // Refetch on return from HuntCreate (edit) or on pull-to-refresh so

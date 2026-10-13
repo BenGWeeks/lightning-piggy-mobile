@@ -418,7 +418,7 @@ const FriendsScreen: React.FC = () => {
         }
       }
     },
-    [combinedList],
+    [combinedList, ITEM_HEIGHT],
   );
 
   const scrollToLetter = useCallback(
@@ -447,7 +447,7 @@ const FriendsScreen: React.FC = () => {
         }
       }
     },
-    [combinedList],
+    [combinedList, ITEM_HEIGHT],
   );
 
   const handleRefresh = useCallback(async () => {

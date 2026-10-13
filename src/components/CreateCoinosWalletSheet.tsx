@@ -4,6 +4,7 @@ import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { View, Text, TouchableOpacity, Platform, Keyboard } from 'react-native';
 import {
   BottomSheetBackdrop,
+  type BottomSheetBackdropProps,
   BottomSheetScrollView,
   BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
@@ -111,7 +112,7 @@ const CreateCoinosWalletSheet: React.FC<Props> = ({ visible, onClose, onComplete
   );
 
   const renderBackdrop = useCallback(
-    (props: any) => (
+    (props: BottomSheetBackdropProps) => (
       <BottomSheetBackdrop
         {...props}
         // While we're mid-create, lock the backdrop so the user can't

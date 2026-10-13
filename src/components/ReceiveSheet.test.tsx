@@ -39,7 +39,7 @@ jest.mock('@gorhom/bottom-sheet', () => {
 const mockQrRenders: string[] = [];
 jest.mock('react-native-qrcode-svg', () => {
   const { Text } = jest.requireActual('react-native');
-  return ({ value }: { value: string }) => {
+  return function MockQrCode({ value }: { value: string }) {
     mockQrRenders.push(value);
     return <Text testID="receive-qr">{value}</Text>;
   };

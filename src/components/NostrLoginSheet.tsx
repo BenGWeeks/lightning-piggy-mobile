@@ -17,6 +17,7 @@ import {
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
   BottomSheetScrollView,
+  type BottomSheetScrollViewMethods,
   BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
 import { BottomSheetModal } from './AccessibleBottomSheetModal';
@@ -79,7 +80,7 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
    *  promise instead of leaving a relay subscription hanging. */
   const nip46AbortRef = useRef<AbortController | null>(null);
   const sheetRef = useRef<BottomSheetModal>(null);
-  const scrollRef = useRef<any>(null);
+  const scrollRef = useRef<BottomSheetScrollViewMethods>(null);
   // No explicit snapPoints — content-height only, not user-draggable.
 
   useEffect(() => {
