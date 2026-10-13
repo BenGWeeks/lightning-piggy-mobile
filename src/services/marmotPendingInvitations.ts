@@ -1,28 +1,39 @@
-// User consent for Welcomes is separate from pendingWelcomes (approved joins
-// retrying after a transient failure). Nothing here consumes an MLS key.
+// Consent records retain all candidate Welcomes; snapshots expose one validated row per MLS group.
 import type { MarmotGroupSummary, MarmotRumor } from './marmotSession';
 import type { MarmotKvBackend } from './marmotStore';
+import { WELCOME_OUTCOMES_NS, type WelcomeOutcome } from './marmotWelcomeOutcomes';
 
 const NS = 'welcomeInvitations';
 const RUMOR_WRAPS_NS = 'welcomeInvitationRumorWraps';
 export interface PendingMarmotInvitation {
-  id: string; // outer wrap id — stable across live/backfill delivery
+  id: string;
   rumor: MarmotRumor;
   groupName?: string;
+  groupId?: string;
+  error?: boolean;
 }
-type Record =
-  | (PendingMarmotInvitation & { status: 'pending' | 'approved' })
-  | { id: string; status: 'joined' | 'declined' };
+type InvitationRecord = PendingMarmotInvitation & {
+  status: 'pending' | 'approved';
+  fresh?: boolean;
+};
+type Record = InvitationRecord | { id: string; status: 'joined' | 'declined' | 'skipped' };
 export interface InvitationSession {
   acceptWelcome(rumor: MarmotRumor): Promise<MarmotGroupSummary | null>;
-  previewWelcome(rumor: MarmotRumor): Promise<{ group: { name: string } | null }>;
+  previewWelcome(rumor: MarmotRumor): Promise<{
+    forThisDevice: boolean;
+    groupId?: string;
+    group: { name: string } | null;
+  }>;
 }
+const newestFirst = (a: PendingMarmotInvitation, b: PendingMarmotInvitation) =>
+  b.rumor.created_at - a.rumor.created_at || b.id.localeCompare(a.id);
 
 export class MarmotPendingInvitations {
   private chain: Promise<unknown> = Promise.resolve();
   constructor(
     private readonly backend: MarmotKvBackend,
     private readonly changed: () => void,
+    private readonly pending: (record: PendingMarmotInvitation) => void = () => {},
   ) {}
   private serial<T>(task: () => Promise<T>): Promise<T> {
     const run = this.chain.then(task);
@@ -37,74 +48,110 @@ export class MarmotPendingInvitations {
     await this.backend.set(NS, record.id, JSON.stringify(record));
     this.changed();
   }
-  async list(): Promise<PendingMarmotInvitation[]> {
-    await this.chain;
+  private async records(): Promise<InvitationRecord[]> {
     const records = await Promise.all((await this.backend.keys(NS)).map((id) => this.read(id)));
     return records.filter(
-      (r): r is PendingMarmotInvitation & { status: 'pending' } => r?.status === 'pending',
+      (r): r is InvitationRecord => r?.status === 'pending' || r?.status === 'approved',
     );
   }
-  receive(id: string, rumor: MarmotRumor, followed: boolean): Promise<boolean> {
+  async list(): Promise<PendingMarmotInvitation[]> {
+    await this.chain;
+    const groups = new Map<string, PendingMarmotInvitation>();
+    for (const record of (await this.records()).sort(newestFirst)) {
+      if (record.status === 'pending' && record.groupId && !groups.has(record.groupId))
+        groups.set(record.groupId, record);
+    }
+    return [...groups.values()];
+  }
+  receive(id: string, rumor: MarmotRumor, followed: boolean, fresh = false): Promise<boolean> {
     return this.serial(async () => {
       if (await this.read(id)) return false;
-      // The same inner Welcome can be gift-wrapped again. Keep its original
-      // consent/tombstone too, so declining it cannot prompt again under a
-      // different outer id. The wrap id remains the primary record key.
       const original = await this.backend.get(RUMOR_WRAPS_NS, rumor.id);
       if (original && (await this.read(original))) return false;
       await this.backend.set(RUMOR_WRAPS_NS, rumor.id, id);
-      await this.write({ id, rumor, status: followed ? 'approved' : 'pending' });
-      if (!followed) this.log(id, rumor, 'pending (not followed)');
+      await this.write({ id, rumor, fresh, status: followed ? 'approved' : 'pending' });
       return !followed;
     });
   }
-  // A pending record NEVER upgrades just because contacts later hydrate.
-  // Only explicit acceptance changes it to approved.
+  private async clearGroup(record: InvitationRecord, status: 'joined' | 'declined') {
+    for (const candidate of await this.records()) {
+      if (candidate.id === record.id || (record.groupId && candidate.groupId === record.groupId)) {
+        await this.write({ id: candidate.id, status });
+        await this.backend.remove('pendingWelcomes', candidate.rumor.id);
+      }
+    }
+  }
+  private async validate(session: InvitationSession, isCurrent: () => boolean) {
+    for (const record of await this.records()) {
+      if (!isCurrent()) return;
+      if (record.groupId) continue;
+      const preview = await session.previewWelcome(record.rumor);
+      if (!isCurrent()) return;
+      if (!preview.forThisDevice) {
+        await this.write({ id: record.id, status: 'skipped' });
+        if (__DEV__)
+          console.log(`[Marmot] welcome ${record.id.slice(0, 8)} for another device, skipped`);
+        continue;
+      }
+      if (!preview.groupId) continue; // Incomplete preview remains hidden and retryable.
+      const alreadyVisible = (await this.records()).some((r) => r.groupId === preview.groupId);
+      const validated = { ...record, groupId: preview.groupId, groupName: preview.group?.name };
+      await this.write(validated);
+      if (!alreadyVisible && record.status === 'pending' && record.fresh) this.pending(validated);
+    }
+  }
   resume(session: InvitationSession, isCurrent: () => boolean): Promise<void> {
     return this.serial(async () => {
-      for (const id of await this.backend.keys(NS)) {
+      await this.validate(session, isCurrent);
+      for (const record of await this.records()) {
         if (!isCurrent()) return;
-        const record = await this.read(id);
-        if (record?.status === 'approved') {
-          const group = await session.acceptWelcome(record.rumor);
-          if (group && isCurrent()) {
-            await this.write({ id, status: 'joined' });
-            this.log(id, record.rumor, 'joined');
-          }
-        } else if (record?.status === 'pending' && record.groupName === undefined) {
-          const preview = await session.previewWelcome(record.rumor);
-          if (!isCurrent()) return;
-          if (preview.group) await this.write({ ...record, groupName: preview.group.name });
-        }
+        if (record.status === 'approved' && (await this.read(record.id))?.status === 'approved')
+          await this.join(record, session, isCurrent);
       }
     });
   }
+  private async join(
+    record: InvitationRecord,
+    session: InvitationSession,
+    isCurrent: () => boolean,
+  ) {
+    const candidates = (await this.records())
+      .filter((r) => r.id === record.id || (record.groupId && r.groupId === record.groupId))
+      .sort(newestFirst);
+    for (const candidate of candidates) {
+      if (!isCurrent()) return null;
+      await this.write({ ...candidate, status: 'approved' });
+      const group = await session.acceptWelcome(candidate.rumor);
+      if (!isCurrent()) return null;
+      if (group) {
+        await this.clearGroup(record, 'joined');
+        return group;
+      }
+      const raw = await this.backend.get(WELCOME_OUTCOMES_NS, candidate.rumor.id);
+      if (!raw) return null; // Transient failure: retain durable approval for restart.
+      const outcome = JSON.parse(raw) as WelcomeOutcome;
+      if (outcome.result === 'joined') {
+        await this.clearGroup(record, 'joined');
+        return null;
+      }
+    }
+    // All candidates are permanently unusable. Keep a dismissible error row.
+    for (const candidate of candidates)
+      await this.write({ ...candidate, status: 'pending', error: true });
+    return null;
+  }
   accept(id: string, session: InvitationSession, isCurrent: () => boolean) {
     return this.serial(async () => {
+      await this.validate(session, isCurrent);
       const record = await this.read(id);
-      if (record?.status !== 'pending' || !isCurrent()) return null;
-      // Durable consent before handing off to the existing join/consumption
-      // logic. Its pendingWelcomes namespace retains transient failures.
-      await this.write({ ...record, status: 'approved' });
-      this.log(id, record.rumor, 'accepted');
-      const group = await session.acceptWelcome(record.rumor);
-      if (group && isCurrent()) await this.write({ id, status: 'joined' });
-      return isCurrent() ? group : null;
+      if (record?.status !== 'pending' || record.error || !isCurrent()) return null;
+      return this.join(record, session, isCurrent);
     });
   }
   decline(id: string): Promise<void> {
     return this.serial(async () => {
       const record = await this.read(id);
-      if (record?.status !== 'pending') return;
-      // Keep only the tombstone, discarding all invitation plaintext.
-      await this.write({ id, status: 'declined' });
-      this.log(id, record.rumor, 'declined');
+      if (record?.status === 'pending') await this.clearGroup(record, 'declined');
     });
-  }
-  private log(id: string, rumor: MarmotRumor, outcome: string) {
-    if (__DEV__)
-      console.log(
-        `[Marmot] welcome ${id.slice(0, 8)} from ${rumor.pubkey.slice(0, 8)} → ${outcome}`,
-      );
   }
 }

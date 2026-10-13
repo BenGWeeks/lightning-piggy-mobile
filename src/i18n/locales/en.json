@@ -3254,6 +3254,7 @@
     "group": "Group invitation",
     "notification": "New group invitation",
     "retry": "Invitation accepted. Joining will retry when the app restarts.",
-    "error": "Could not update the invitation. Please try again."
+    "error": "Could not update the invitation. Please try again.",
+    "unavailable": "This invitation can no longer be accepted."
   }
 }

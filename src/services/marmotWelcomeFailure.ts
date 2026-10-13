@@ -36,8 +36,7 @@ export async function isPermanentWelcomeFailure(
     return true; // undecodable — can never be joined
   }
   try {
-    const candidates = await keyPackages.selectForWelcome(welcome);
-    return !candidates.some((c) => c.hasMatchingSecret);
+    return !(await hasWelcomeKeyPackage(keyPackages, welcome));
   } catch {
     return false;
   }
@@ -57,4 +56,13 @@ export async function isWelcomeForJoinedGroup(
   const info = await client.readInviteGroupInfo(rumor).catch(() => null);
   const idHex = info ? bytesToHex(info.groupContext.groupId) : null;
   return !!idHex && client.groups.loaded.some((g) => g.idStr === idHex);
+}
+
+/** The RFC 9420 KeyPackageRef/private-material check shared with auto-join. */
+export async function hasWelcomeKeyPackage(
+  keyPackages: Pick<KeyPackageManager, 'selectForWelcome'>,
+  welcome: ReturnType<typeof getWelcome>,
+): Promise<boolean> {
+  const candidates = await keyPackages.selectForWelcome(welcome);
+  return candidates.some((c) => c.hasMatchingSecret);
 }

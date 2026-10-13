@@ -25,7 +25,9 @@ function setup() {
   const invitations = new MarmotPendingInvitations(backend, changed);
   const session = {
     acceptWelcome: jest.fn().mockResolvedValue(group),
-    previewWelcome: jest.fn().mockResolvedValue({ group: { name: 'Family' } }),
+    previewWelcome: jest
+      .fn()
+      .mockResolvedValue({ forThisDevice: true, groupId: 'mls-group', group: { name: 'Family' } }),
   };
   return { backend, invitations, session };
 }
@@ -87,6 +89,11 @@ it('durable acceptance retries after restart but never retries unapproved invita
   session.acceptWelcome.mockResolvedValueOnce(null);
   await invitations.receive('approved', rumor, false);
   await invitations.receive('stranger', { ...rumor, id: 'other-rumor' }, false);
+  session.previewWelcome.mockImplementation(async (r) => ({
+    forThisDevice: true,
+    groupId: r.id,
+    group: { name: 'Family' },
+  }));
   await invitations.accept('approved', session, () => true);
   const restarted = new MarmotPendingInvitations(backend, jest.fn());
   await restarted.resume(session, () => true);
@@ -98,7 +105,7 @@ it('does not accept into a different account session', async () => {
   await invitations.receive('wrap', rumor, false);
   expect(await invitations.accept('wrap', session, () => false)).toBeNull();
   expect(session.acceptWelcome).not.toHaveBeenCalled();
-  expect(await invitations.list()).toHaveLength(1);
+  expect(await invitations.list()).toHaveLength(0); // Unvalidated cold-start records stay hidden.
 });
 
 it('does not re-prompt a declined Welcome rewrapped under a different outer id', async () => {
@@ -110,4 +117,73 @@ it('does not re-prompt a declined Welcome rewrapped under a different outer id',
   await restarted.resume(session, () => true);
   expect(await restarted.list()).toEqual([]);
   expect(session.acceptWelcome).not.toHaveBeenCalled();
+});
+
+it('silently skips other-device Welcomes without exposing or notifying a row', async () => {
+  const { backend, session } = setup();
+  const notify = jest.fn();
+  const invitations = new MarmotPendingInvitations(backend, jest.fn(), notify);
+  session.previewWelcome.mockResolvedValueOnce({
+    forThisDevice: false,
+    groupId: undefined,
+    group: null,
+  });
+  await invitations.receive('other-device', rumor, false, true);
+  expect(await invitations.list()).toEqual([]);
+  await invitations.resume(session, () => true);
+  expect(await invitations.list()).toEqual([]);
+  expect(notify).not.toHaveBeenCalled();
+  expect(session.acceptWelcome).not.toHaveBeenCalled();
+});
+
+it('shows one row per MLS group, accepts the newest Welcome, and clears every candidate', async () => {
+  const { backend, invitations, session } = setup();
+  await invitations.receive('older', rumor, false);
+  const newer = { ...rumor, id: 'newer-rumor', created_at: 2 };
+  await invitations.receive('newer', newer, false);
+  await invitations.resume(session, () => true);
+  expect(await invitations.list()).toEqual([
+    expect.objectContaining({ id: 'newer', groupId: 'mls-group' }),
+  ]);
+  expect(await invitations.accept('older', session, () => true)).toEqual(group);
+  expect(session.acceptWelcome).toHaveBeenCalledWith(newer);
+  expect(await invitations.list()).toEqual([]);
+  for (const id of ['older', 'newer'])
+    expect(JSON.parse((await backend.get('welcomeInvitations', id))!)).toEqual({
+      id,
+      status: 'joined',
+    });
+});
+
+it('falls back to the older Welcome after a permanent failure', async () => {
+  const { backend, invitations, session } = setup();
+  const newer = { ...rumor, id: 'newer-rumor', created_at: 2 };
+  await invitations.receive('older', rumor, false);
+  await invitations.receive('newer', newer, false);
+  session.acceptWelcome.mockImplementationOnce(async () => {
+    await backend.set('welcomes', newer.id, JSON.stringify({ result: 'failed' }));
+    return null;
+  });
+  await invitations.resume(session, () => true);
+  expect(await invitations.accept('newer', session, () => true)).toEqual(group);
+  expect(session.acceptWelcome.mock.calls.map(([r]) => r.id)).toEqual([newer.id, rumor.id]);
+  expect(await invitations.list()).toEqual([]);
+});
+
+it('exposes a dismissible error after all candidates fail permanently', async () => {
+  const { backend, invitations, session } = setup();
+  await invitations.receive('wrap', rumor, false);
+  session.acceptWelcome.mockImplementation(async () => {
+    await backend.set('welcomes', rumor.id, JSON.stringify({ result: 'failed' }));
+    return null;
+  });
+  await invitations.resume(session, () => true);
+  await invitations.accept('wrap', session, () => true);
+  expect(await invitations.list()).toEqual([
+    expect.objectContaining({ error: true, status: 'pending' }),
+  ]);
+  await invitations.accept('wrap', session, () => true);
+  expect(session.acceptWelcome).toHaveBeenCalledTimes(1);
+  await invitations.decline('wrap');
+  expect(await invitations.list()).toEqual([]);
 });

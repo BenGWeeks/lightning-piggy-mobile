@@ -3294,6 +3294,7 @@
     "group": "Zaproszenie do grupy",
     "notification": "Nowe zaproszenie do grupy",
     "retry": "Zaproszenie zaakceptowane. Ponowimy próbę dołączenia po ponownym uruchomieniu aplikacji.",
-    "error": "Nie udało się zaktualizować zaproszenia. Spróbuj ponownie."
+    "error": "Nie udało się zaktualizować zaproszenia. Spróbuj ponownie.",
+    "unavailable": "Tego zaproszenia nie można już zaakceptować."
   }
 }

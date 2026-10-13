@@ -46,8 +46,20 @@ function controller(owner: string): MarmotPendingInvitations {
     // initiated during the delayed Marmot session's cold-start window.
     trackStoppedSession(owner, gate);
     gates.set(owner, gate);
-    c = new MarmotPendingInvitations(fenceBackend(createSqliteMarmotBackend(owner), gate), () =>
-      controllers.get(owner) === c ? changed(owner) : undefined,
+    c = new MarmotPendingInvitations(
+      fenceBackend(createSqliteMarmotBackend(owner), gate),
+      () => (controllers.get(owner) === c ? changed(owner) : undefined),
+      (record) => {
+        if (!claimWrapNotification(record.id)) return;
+        void fireMessageNotification({
+          owner,
+          kind: 'group',
+          threadId: `invite:${record.id}`,
+          title: t('marmotInvitation.notification'),
+          body: t('marmotInvitation.notification'),
+          data: { groupInvitation: true, senderPubkey: record.rumor.pubkey },
+        }).catch(reportFailure);
+      },
     );
     controllers.set(owner, c);
   }
@@ -83,19 +95,8 @@ export async function routeMarmotWelcome(
   } catch {
     return true;
   }
-  const newlyPending = await controller(owner).receive(wrapId, full, followed);
+  await controller(owner).receive(wrapId, full, followed, isFresh);
   if (shouldAbort()) return true;
-  if (newlyPending && isFresh && claimWrapNotification(wrapId)) {
-    // No sender or group plaintext, even with lock-screen content enabled.
-    void fireMessageNotification({
-      owner,
-      kind: 'group',
-      threadId: `invite:${wrapId}`,
-      title: t('marmotInvitation.notification'),
-      body: t('marmotInvitation.notification'),
-      data: { groupInvitation: true, senderPubkey: full.pubkey },
-    }).catch(reportFailure);
-  }
   // Do not hold the relay decrypt queue while MLS starts or joins.
   void resume(owner).catch(reportFailure);
   return true;
@@ -115,7 +116,11 @@ export function loadPendingMarmotInvitations(owner: string) {
 export async function acceptMarmotInvitation(owner: string, id: string) {
   const session = sessionFor(owner);
   if (!session) throw new Error('marmot: session not ready');
-  return controller(owner).accept(id, session, () => sessionFor(owner) === session);
+  const current = controller(owner);
+  const group = await current.accept(id, session, () => sessionFor(owner) === session);
+  if (!group && (await current.list()).some((r) => r.id === id && r.error))
+    throw new Error('marmot: invitation is no longer usable');
+  return group;
 }
 export function declineMarmotInvitation(owner: string, id: string) {
   return controller(owner).decline(id);

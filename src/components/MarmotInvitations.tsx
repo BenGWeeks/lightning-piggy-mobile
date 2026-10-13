@@ -33,6 +33,9 @@ const InvitationRow = React.memo(function InvitationRow({
   const styles = useMemo(() => createMarmotInvitationsStyles(colors), [colors]);
   const [busy, setBusy] = useState(false);
   const id8 = invitation.id.slice(0, 8);
+  const declineLabel = t(
+    invitation.error ? 'addContactCelebration.dismiss' : 'marmotInvitation.decline',
+  );
   const act = async (accept: boolean) => {
     setBusy(true);
     try {
@@ -66,26 +69,29 @@ const InvitationRow = React.memo(function InvitationRow({
           </Text>
         </View>
       </View>
+      {invitation.error && <Text style={styles.subtitle}>{t('marmotInvitation.unavailable')}</Text>}
       <View style={styles.actions}>
-        <TouchableOpacity
-          style={styles.button}
-          disabled={busy}
-          onPress={() => void act(true)}
-          accessibilityRole="button"
-          accessibilityLabel={t('marmotInvitation.accept')}
-          testID={`marmot-invite-accept-${id8}`}
-        >
-          <Text style={styles.buttonText}>{t('marmotInvitation.accept')}</Text>
-        </TouchableOpacity>
+        {!invitation.error && (
+          <TouchableOpacity
+            style={styles.button}
+            disabled={busy}
+            onPress={() => void act(true)}
+            accessibilityRole="button"
+            accessibilityLabel={t('marmotInvitation.accept')}
+            testID={`marmot-invite-accept-${id8}`}
+          >
+            <Text style={styles.buttonText}>{t('marmotInvitation.accept')}</Text>
+          </TouchableOpacity>
+        )}
         <TouchableOpacity
           style={styles.button}
           disabled={busy}
           onPress={() => void act(false)}
           accessibilityRole="button"
-          accessibilityLabel={t('marmotInvitation.decline')}
+          accessibilityLabel={declineLabel}
           testID={`marmot-invite-decline-${id8}`}
         >
-          <Text style={styles.buttonText}>{t('marmotInvitation.decline')}</Text>
+          <Text style={styles.buttonText}>{declineLabel}</Text>
         </TouchableOpacity>
       </View>
     </View>

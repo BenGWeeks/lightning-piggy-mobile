@@ -5,7 +5,11 @@ import { fireMessageNotification } from './notificationService';
 
 const mockBackends = new Map<string, MarmotKvBackend>();
 const mockAccept = jest.fn().mockResolvedValue({ id: 'joined-group' });
-const mockPreview = jest.fn().mockResolvedValue({ group: { name: 'Private family' } });
+const mockPreview = jest.fn().mockResolvedValue({
+  forThisDevice: true,
+  groupId: 'mls-group',
+  group: { name: 'Private family' },
+});
 let mockSession: {
   pubkey: string;
   acceptWelcome: typeof mockAccept;

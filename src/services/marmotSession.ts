@@ -1,3 +1,4 @@
+import { previewInvitationWelcome } from './marmotInvitationPreview';
 // One Marmot (MLS-over-Nostr) client per signed-in account.
 //
 // Owns the marmot-ts `MarmotClient`: loads + connects every group, keeps an
@@ -365,7 +366,7 @@ export class MarmotSession {
   /** Read-only preview: does not join or consume the invitation key. */
   async previewWelcome(rumor: MarmotRumor) {
     await this.ready;
-    return this.client.previewWelcome(rumor);
+    return previewInvitationWelcome(this.client, rumor);
   }
 
   stop(): void {

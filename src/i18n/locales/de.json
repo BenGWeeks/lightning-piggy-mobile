@@ -3254,6 +3254,7 @@
     "group": "Gruppeneinladung",
     "notification": "Neue Gruppeneinladung",
     "retry": "Einladung angenommen. Der Beitritt wird beim nächsten App-Start erneut versucht.",
-    "error": "Die Einladung konnte nicht aktualisiert werden. Bitte versuche es erneut."
+    "error": "Die Einladung konnte nicht aktualisiert werden. Bitte versuche es erneut.",
+    "unavailable": "Diese Einladung kann nicht mehr angenommen werden."
   }
 }

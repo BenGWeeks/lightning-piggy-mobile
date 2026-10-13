@@ -3254,6 +3254,7 @@
     "group": "Invitación a un grupo",
     "notification": "Nueva invitación a un grupo",
     "retry": "Invitación aceptada. Se volverá a intentar entrar al reiniciar la aplicación.",
-    "error": "No se pudo actualizar la invitación. Inténtalo de nuevo."
+    "error": "No se pudo actualizar la invitación. Inténtalo de nuevo.",
+    "unavailable": "Esta invitación ya no se puede aceptar."
   }
 }
