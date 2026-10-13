@@ -406,6 +406,7 @@ const GroupConversationScreen: React.FC = () => {
     scrollToId,
     clear,
     live.leaveEdge,
+    timelineRows,
   );
   const read = useChatReadPosition({
     owner: myPubkey,

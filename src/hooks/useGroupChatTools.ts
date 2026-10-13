@@ -1,3 +1,4 @@
+import type { GroupTimelineRow } from './useGroupTimeline';
 import { useMemo } from 'react';
 import { getMarmotSession } from '../services/marmotSession';
 import type { RootStackParamList } from '../navigation/types';
@@ -15,7 +16,12 @@ export function useGroupChatTools(
   jump: (id: string) => unknown,
   clear: () => Promise<void>,
   leaveEdge: (holdMs: number) => void,
+  rows: readonly GroupTimelineRow[],
 ) {
+  const renderedIds = useMemo(
+    () => rows.filter((row) => !('deviceNotice' in row)).map((row) => row.id),
+    [rows],
+  );
   const info = useMemo<RootStackParamList['ChatInfo']>(
     () => ({
       name: group?.name ?? '',
@@ -33,5 +39,5 @@ export function useGroupChatTools(
     () => ({ screen: 'GroupConversation' as const, params: { groupId: group?.id ?? '' } }),
     [group?.id],
   );
-  return useChatTools(messages, info, target, jump, clear, leaveEdge);
+  return useChatTools(messages, info, target, jump, clear, leaveEdge, renderedIds);
 }

@@ -1,3 +1,4 @@
+import type { Item } from '../utils/conversationItems';
 import { useCallback, useMemo } from 'react';
 import { getMarmotSession, toAppGroupId } from '../services/marmotSession';
 import type { ContactProfileBodyData } from '../components/ContactProfileBody';
@@ -15,7 +16,12 @@ export function useDmChatTools(
   jump: (id: string) => unknown,
   clear: () => Promise<void>,
   leaveEdge: (holdMs: number) => void,
+  rows: readonly Item[],
 ) {
+  const renderedIds = useMemo(
+    () => rows.filter((row) => row.id.startsWith('dm-')).map((row) => row.id.slice(3)),
+    [rows],
+  );
   const info = useMemo<RootStackParamList['ChatInfo']>(
     () => ({
       name: contact.name,
@@ -35,5 +41,5 @@ export function useDmChatTools(
     [params, protocol],
   );
   const jumpToMessage = useCallback((id: string) => jump(`dm-${id}`), [jump]);
-  return useChatTools(messages, info, target, jumpToMessage, clear, leaveEdge);
+  return useChatTools(messages, info, target, jumpToMessage, clear, leaveEdge, renderedIds);
 }

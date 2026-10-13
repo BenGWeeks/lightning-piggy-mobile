@@ -1,4 +1,4 @@
-import { buildFollowedSet, canAutoLoadMedia } from './mediaTrust';
+import { buildFollowedSet, canAutoLoadMedia, canAutoLoadChatMedia } from './mediaTrust';
 
 const FRIEND = 'a'.repeat(64);
 const STRANGER = 'b'.repeat(64);
@@ -43,4 +43,12 @@ describe('mediaTrust', () => {
       true,
     ]);
   });
+});
+
+it('auto-loads own group attachments by active pubkey and still gates other senders', () => {
+  const owner = 'a'.repeat(64);
+  expect(canAutoLoadChatMedia(undefined, owner.toUpperCase(), new Set(), owner)).toBe(true);
+  expect(canAutoLoadChatMedia(undefined, STRANGER, new Set(), owner)).toBe(false);
+  expect(canAutoLoadChatMedia(undefined, owner, new Set(), null)).toBe(false);
+  expect(canAutoLoadChatMedia(false, owner, new Set(), owner)).toBe(false);
 });

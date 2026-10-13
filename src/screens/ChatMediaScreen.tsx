@@ -8,8 +8,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { RootStackParamList } from '../navigation/types';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useLocale } from '../contexts/LocaleContext';
+import { useNostr } from '../contexts/NostrContext';
 import { useFollowedPubkeys } from '../hooks/useFollowedPubkeys';
-import { canAutoLoadMedia } from '../utils/mediaTrust';
+import { canAutoLoadChatMedia } from '../utils/mediaTrust';
 import { createChatToolsStyles } from '../styles/ChatTools.styles';
 import {
   extractChatAttachments,
@@ -29,6 +30,7 @@ export default function ChatMediaScreen() {
   const { t, formatLocale } = useLocale();
   const insets = useSafeAreaInsets();
   const followed = useFollowedPubkeys();
+  const { pubkey } = useNostr();
   const styles = useMemo(() => createChatToolsStyles(colors), [colors]);
   const [tab, setTab] = useState<AttachmentTab>('media');
   const [fullscreen, setFullscreen] = useState<string | null>(null);
@@ -59,13 +61,13 @@ export default function ChatMediaScreen() {
       return (
         <ChatAttachmentRow
           item={item}
-          autoLoad={canAutoLoadMedia(m?.fromMe ?? false, sender, followed)}
+          autoLoad={canAutoLoadChatMedia(m?.fromMe, sender, followed, pubkey)}
           onOpen={setFullscreen}
           onJump={jump}
         />
       );
     },
-    [messages, params.target, followed, jump],
+    [messages, params.target, followed, jump, pubkey],
   );
   return (
     <View

@@ -215,11 +215,23 @@ describe('group reply reconciliation', () => {
     const echoed = { ...wrap(id, 'yes', time), replyTo: parent };
     await appendGroupMessage(OWNER, GROUP, first);
     await appendGroupMessage(OWNER, GROUP, second);
-    expect(await appendGroupMessage(OWNER, GROUP, echoed)).toEqual([echoed, second]);
-    expect(await appendGroupMessage(OWNER, GROUP, echoed)).toEqual([echoed, second]);
-    expect(await loadGroupMessages(OWNER, GROUP)).toEqual([echoed, second]);
+    expect(await appendGroupMessage(OWNER, GROUP, echoed)).toEqual([
+      { ...echoed, localId: 'local_first' },
+      second,
+    ]);
+    expect(await appendGroupMessage(OWNER, GROUP, echoed)).toEqual([
+      { ...echoed, localId: 'local_first' },
+      second,
+    ]);
+    expect(await loadGroupMessages(OWNER, GROUP)).toEqual([
+      { ...echoed, localId: 'local_first' },
+      second,
+    ]);
     const secondEcho = { ...echoed, id: 'e'.repeat(64), createdAt: time + 1 };
-    expect(await appendGroupMessage(OWNER, GROUP, secondEcho)).toEqual([echoed, secondEcho]);
+    expect(await appendGroupMessage(OWNER, GROUP, secondEcho)).toEqual([
+      { ...echoed, localId: 'local_first' },
+      { ...secondEcho, localId: 'local_second' },
+    ]);
   });
 
   it('repairs replay metadata without consuming another pending reply', async () => {
@@ -244,7 +256,10 @@ describe('group reply reconciliation', () => {
     });
     const echoed = { ...wrap(id, 'yes', time), replyTo: otherParent };
     const after = await appendGroupMessage(OWNER, GROUP, echoed);
-    expect(after).toEqual([{ ...local('local_first', 'yes', time), replyTo: parent }, echoed]);
+    expect(after).toEqual([
+      { ...local('local_first', 'yes', time), replyTo: parent },
+      { ...echoed, localId: 'local_second' },
+    ]);
   });
 
   it('does not erase or redirect an existing reply reference on replay', async () => {
@@ -645,7 +660,9 @@ describe('rekeyGroupMessage (#1237)', () => {
     await appendGroupMessage(OWNER, GROUP, sent('local_1_a', 'a'));
     await appendGroupMessage(OWNER, GROUP, sent(REAL, 'b'));
     await rekeyGroupMessage(OWNER, GROUP, 'local_1_a', REAL);
-    expect(await loadGroupMessages(OWNER, GROUP)).toEqual([sent(REAL, 'b')]);
+    expect(await loadGroupMessages(OWNER, GROUP)).toEqual([
+      { ...sent(REAL, 'b'), localId: 'local_1_a' },
+    ]);
   });
   it('a replay of the real event then dedups by id (no second bubble)', async () => {
     await appendGroupMessage(OWNER, GROUP, sent('local_1_a'));

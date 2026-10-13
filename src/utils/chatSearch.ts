@@ -2,6 +2,9 @@ export interface SearchableMessage {
   id: string;
   text: string;
   createdAt: number;
+  /** Stable send identity across optimistic-to-relay ID replacement. */
+  rumorId?: string;
+  localId?: string;
   fromMe?: boolean;
   senderPubkey?: string;
 }

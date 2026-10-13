@@ -1,6 +1,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 import { useChatLocalHistory } from './useChatLocalHistory';
+import {
+  appendGroupMessage,
+  rekeyGroupMessage,
+  loadGroupMessages,
+  type GroupMessage,
+} from '../services/groupMessagesStorageService';
+import type { ConversationMessage } from '../contexts/nostrContextTypes';
+import { mergeConversationMessages } from '../contexts/nostrDmCache';
 import { loadChatClearBoundary } from '../services/chatLocalHistory';
 
 const now = 1700000000;
@@ -86,3 +94,72 @@ it('retains cleared future IDs across repeated clears even when absent from the 
   hook.rerender({ messages: [future, message('new', now + 11)] });
   expect(hook.result.current.messages.map((m) => m.id)).toEqual(['new']);
 });
+
+jest.mock('../services/groupMessagesMigration', () => ({
+  ensureGroupMessagesMigrated: async () => {},
+}));
+
+it.each(['nip17', 'marmot'] as const)(
+  'keeps a cleared %s send hidden after its relay echo and restart',
+  async (protocol) => {
+    const pending = {
+      ...message('local-rumor', now),
+      text: 'same text',
+      fromMe: true,
+      rumorId: 'rumor',
+      wireKind: 14,
+      protocol,
+    };
+    const hook = renderHook(
+      ({ messages }: { messages: ConversationMessage[] }) =>
+        useChatLocalHistory('owner', `${protocol}:peer`, messages),
+      { initialProps: { messages: [pending] } },
+    );
+    await waitFor(() => expect(hook.result.current.messages).toEqual([pending]));
+    await act(() => hook.result.current.clear());
+    const echo = { ...pending, id: 'real-wrap' };
+    const arriving = { ...pending, id: 'local-new', rumorId: 'new-rumor' };
+    const merged = mergeConversationMessages([pending], [echo, arriving], 100);
+    hook.rerender({ messages: merged });
+    expect(hook.result.current.messages).toEqual([arriving]);
+    hook.unmount();
+    const reloaded = renderHook(() => useChatLocalHistory('owner', `${protocol}:peer`, merged));
+    await waitFor(() => expect(reloaded.result.current.messages).toEqual([arriving]));
+  },
+);
+
+it.each(['nip17 echo', 'marmot rekey', 'marmot existing real row'])(
+  'keeps a cleared group send hidden through %s and storage reload',
+  async (path) => {
+    const pending: GroupMessage = {
+      ...message('local_pending', now),
+      text: 'same text',
+      senderPubkey: 'a'.repeat(64),
+    };
+    await appendGroupMessage('a'.repeat(64), 'group', pending);
+    const hook = renderHook(
+      ({ messages }: { messages: GroupMessage[] }) =>
+        useChatLocalHistory('a'.repeat(64), 'group', messages),
+      { initialProps: { messages: [pending] } },
+    );
+    await waitFor(() => expect(hook.result.current.messages).toEqual([pending]));
+    await act(() => hook.result.current.clear());
+    const echo = { ...pending, id: 'real-rumor' };
+    if (path === 'nip17 echo') await appendGroupMessage('a'.repeat(64), 'group', echo);
+    else {
+      if (path === 'marmot existing real row')
+        await appendGroupMessage('a'.repeat(64), 'group', { ...echo, text: 'edited text' });
+      await rekeyGroupMessage('a'.repeat(64), 'group', pending.id, echo.id);
+    }
+    // Replays, including repaired text, must retain the optimistic alias.
+    await appendGroupMessage('a'.repeat(64), 'group', { ...echo, createdAt: now + 1 });
+    const arriving = { ...pending, id: 'local_new' };
+    await appendGroupMessage('a'.repeat(64), 'group', arriving);
+    const stored = await loadGroupMessages('a'.repeat(64), 'group');
+    hook.rerender({ messages: stored });
+    expect(hook.result.current.messages).toEqual([arriving]);
+    hook.unmount();
+    const reloaded = renderHook(() => useChatLocalHistory('a'.repeat(64), 'group', stored));
+    await waitFor(() => expect(reloaded.result.current.messages).toEqual([arriving]));
+  },
+);

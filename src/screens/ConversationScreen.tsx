@@ -614,6 +614,7 @@ const ConversationScreen: React.FC = () => {
     read.scrollToId,
     clear,
     live.leaveEdge,
+    items,
   );
   const goBack = useCallback(() => navigation.goBack(), [navigation]);
 
