@@ -38,6 +38,10 @@ env:
 jobs:
   release-notes:
     name: Generate release notes
+    # Also locks out manual Nostr retries while either job updates a body.
+    concurrency:
+      group: release-body-${{ github.repository }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -68,15 +72,8 @@ jobs:
       - name: Append generated notes to GitHub Release
         if: github.event_name == 'release'
         run: |
-          gh release view "$RELEASE_REF" --json body --jq '.body' > "$RUNNER_TEMP/release-body.md"
-          # Idempotent on retries, preserving human notes and announcement links.
-          if ! grep -Fq '<!-- generated-pr-notes -->' "$RUNNER_TEMP/release-body.md"; then
-            {
-              printf '\n\n<!-- generated-pr-notes -->\n'
-              cat "$RUNNER_TEMP/release-notes.md"
-            } >> "$RUNNER_TEMP/release-body.md"
-            gh release edit "$RELEASE_REF" --notes-file "$RUNNER_TEMP/release-body.md"
-          fi
+          node scripts/update-release-body.mjs --tag "$RELEASE_REF" \
+            --section generated-notes --content-file "$RUNNER_TEMP/release-notes.md"
       - name: Append generated section to changelog archive
         if: github.event_name == 'release'
         env:
