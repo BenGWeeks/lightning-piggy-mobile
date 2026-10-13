@@ -16,7 +16,7 @@ beforeEach(() => {
   fetchBatch.mockResolvedValue(undefined);
 });
 
-it('resolves a cached sender-shared profile and avatar without relay work', async () => {
+it('resolves a cached sender-shared profile and avatar while refreshing verified payment details', async () => {
   getMany.mockResolvedValue(
     new Map([
       [
@@ -36,7 +36,7 @@ it('resolves a cached sender-shared profile and avatar without relay work', asyn
     name: 'Little Piggy',
     picture: 'https://example.com/piggy.png',
   });
-  expect(fetchBatch).not.toHaveBeenCalled();
+  expect(fetchBatch).toHaveBeenCalledWith([PK], PROFILE_RELAYS, 8000, expect.any(Function), true);
 });
 
 it('batches sender-shared cache misses with PROFILE_RELAYS and nprofile hints', async () => {
@@ -46,7 +46,7 @@ it('batches sender-shared cache misses with PROFILE_RELAYS and nprofile hints', 
       content: JSON.stringify({
         name: 'Little Piggy',
         picture: 'https://example.com/piggy.png',
-        lud16: 'unverified@example.com',
+        lud16: 'verified@example.com',
       }),
       created_at: 1,
     });
@@ -61,11 +61,12 @@ it('batches sender-shared cache misses with PROFILE_RELAYS and nprofile hints', 
     [...PROFILE_RELAYS, 'wss://hint.example'],
     8000,
     expect.any(Function),
+    true,
   );
   expect(result[PK]).toMatchObject({
     name: 'Little Piggy',
     picture: 'https://example.com/piggy.png',
-    lud16: null,
+    lud16: 'verified@example.com',
   });
   expect(result[OTHER]).toBeNull();
 });
@@ -97,4 +98,16 @@ it('a stuck lookup times out to fallback and ignores late events', async () => {
 it('a storage failure completes as fallback', async () => {
   getMany.mockRejectedValue(new Error('storage unavailable'));
   expect(await resolveSharedContactProfiles([{ pubkey: PK, relays: [] }])).toEqual({ [PK]: null });
+});
+
+it('filters private relay hints and caps unique public hints across the batch', async () => {
+  const publicHints = Array.from({ length: 10 }, (_, i) => `wss://relay${i}.example`);
+  await resolveSharedContactProfiles([
+    {
+      pubkey: PK,
+      relays: ['ws://127.0.0.1', 'wss://192.168.1.1', 'wss://localhost', ...publicHints],
+    },
+    { pubkey: OTHER, relays: publicHints },
+  ]);
+  expect(fetchBatch.mock.calls[0][1]).toEqual([...PROFILE_RELAYS, ...publicHints.slice(0, 5)]);
 });

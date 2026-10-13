@@ -6,6 +6,7 @@ import type { NostrContact, NostrProfile } from '../types/nostr';
 
 jest.mock('../services/sharedContactProfiles', () => ({
   SHARED_PROFILE_BATCH_SIZE: 50,
+  SHARED_PROFILE_TIMEOUT_MS: 10000,
   resolveSharedContactProfiles: jest.fn(),
 }));
 jest.mock('../utils/messageContent', () => ({ extractSharedContact: jest.fn() }));
@@ -81,3 +82,53 @@ it('does nothing for ordinary messages', () => {
   expect(result.current).toEqual({});
   expect(resolveProfiles).not.toHaveBeenCalled();
 });
+
+it.each([51, 151])(
+  'all %i scheduled cards fall back at ten seconds, including queued batches',
+  async (count) => {
+    jest.useFakeTimers();
+    try {
+      const pubkeys = Array.from({ length: count }, (_, i) => i.toString(16).padStart(64, '0'));
+      extract.mockImplementation((text) => ({ pubkey: text, relays: [] }));
+      let finishLate!: (profiles: Record<string, NostrProfile | null>) => void;
+      resolveProfiles
+        .mockImplementationOnce(
+          (refs) =>
+            new Promise((resolve) => {
+              setTimeout(
+                () => resolve(Object.fromEntries(refs.map(({ pubkey }) => [pubkey, null]))),
+                8000,
+              );
+            }),
+        )
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              finishLate = resolve;
+            }),
+        );
+      const { result, unmount } = renderHook(() =>
+        useSharedContactProfiles(pubkeys.map((text) => ({ text }))),
+      );
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(8000);
+      });
+      expect(resolveProfiles).toHaveBeenCalledTimes(2);
+      expect(result.current[pubkeys[50]]).toBeUndefined();
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(1999);
+      });
+      expect(result.current[pubkeys[count - 1]]).toBeUndefined();
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(1);
+      });
+      for (const pubkey of pubkeys) expect(result.current[pubkey]).toBeNull();
+      await act(async () => finishLate({ [pubkeys[50]]: profile }));
+      expect(result.current[pubkeys[50]]).toBeNull();
+      expect(resolveProfiles).toHaveBeenCalledTimes(2);
+      unmount();
+    } finally {
+      jest.useRealTimers();
+    }
+  },
+);

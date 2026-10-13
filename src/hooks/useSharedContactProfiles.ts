@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   resolveSharedContactProfiles,
   SHARED_PROFILE_BATCH_SIZE,
+  SHARED_PROFILE_TIMEOUT_MS,
 } from '../services/sharedContactProfiles';
 import { extractSharedContact } from '../utils/messageContent';
 import type { NostrContact, NostrProfile } from '../types/nostr';
@@ -19,12 +20,16 @@ export function useSharedContactProfiles(
   const [sharedProfiles, setSharedProfiles] = useState<Record<string, NostrProfile | null>>({});
   const scheduled = useRef(new Set<string>());
   const mounted = useRef(false);
+  const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
   useEffect(() => {
     mounted.current = true;
     const scheduledPubkeys = scheduled.current;
+    const pendingTimers = timers.current;
     return () => {
       mounted.current = false;
       scheduledPubkeys.clear();
+      for (const timer of pendingTimers) clearTimeout(timer);
+      pendingTimers.clear();
     };
   }, []);
 
@@ -47,15 +52,35 @@ export function useSharedContactProfiles(
     }
     const refs = [...byPubkey].map(([pubkey, relays]) => ({ pubkey, relays: [...relays] }));
     for (const ref of refs) scheduled.current.add(ref.pubkey);
+    if (refs.length === 0) return;
+    // The deadline belongs to scheduling, including cards waiting for a batch.
+    let expired = false;
+    const timer = setTimeout(() => {
+      expired = true;
+      timers.current.delete(timer);
+      if (mounted.current) {
+        setSharedProfiles((prev) => {
+          const next = { ...prev };
+          for (const ref of refs) {
+            if (next[ref.pubkey] === undefined) next[ref.pubkey] = null;
+          }
+          return next;
+        });
+      }
+    }, SHARED_PROFILE_TIMEOUT_MS);
+    timers.current.add(timer);
     void (async () => {
       for (let i = 0; i < refs.length; i += SHARED_PROFILE_BATCH_SIZE) {
-        if (!mounted.current) return;
+        if (!mounted.current || expired) return;
         const updates = await resolveSharedContactProfiles(
           refs.slice(i, i + SHARED_PROFILE_BATCH_SIZE),
         );
-        if (mounted.current) setSharedProfiles((prev) => ({ ...prev, ...updates }));
+        if (mounted.current && !expired) setSharedProfiles((prev) => ({ ...prev, ...updates }));
       }
-    })();
+    })().finally(() => {
+      clearTimeout(timer);
+      timers.current.delete(timer);
+    });
   }, [messages, known]);
 
   return useMemo(() => ({ ...sharedProfiles, ...known }), [sharedProfiles, known]);
