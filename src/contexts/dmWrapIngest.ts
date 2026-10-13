@@ -36,6 +36,8 @@ export interface InboxWrapIngestParams<W extends IngestableWrap> {
    * decrypted 1:1 rumor (the thread-open path, where the user explicitly
    * opened a conversation). */
   passesFollowGate: (pk: string) => boolean;
+  /** Actual follows, independent of permissive DM/WoT or thread-open policy. */
+  isFollowed?: (pk: string) => boolean;
   /** Per-account skip-set file key (#743). Omit on the thread-open path,
    * which never consulted or wrote the skip-set. */
   skipKey?: string;
@@ -87,7 +89,7 @@ const isPermissionNotGranted = (error: unknown): boolean => {
 /**
  * Decrypt-once ingest of kind-1059 inbox wraps into the encrypted DM store.
  * Order of gates per wrap: DB known-id (inside ingestWraps) → skip-set →
- * decrypt → group-route → follow-gate. Group-routed and non-followed rumors
+ * decrypt → Welcome-route → group-route → follow-gate. Group-routed and non-followed rumors
  * are added to the skip-set exactly as before (#743). An aborted run PERSISTS
  * the DM rows it already decrypted (idempotent + owner-keyed, so a cut-short
  * post-login rebuild isn't wasted — F1/#849), but suppresses skip-set growth
@@ -146,8 +148,26 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
           return null;
         }
         if (!rumor) return null;
-        // Multi-recipient (group) rumors: route to group storage and
-        // short-circuit the DM path — the 1:1 inbox never sees them.
+        // Welcomes belong to the encrypted consent inbox before DM policy.
+        if (
+          await routeMarmotWelcome(
+            rumor,
+            owner,
+            wrap.id,
+            params.isFollowed?.(rumor.pubkey?.toLowerCase() ?? '') ?? false,
+            Math.abs(Date.now() / 1000 - rumor.created_at) <= 120,
+            () => signal?.aborted === true,
+          )
+        ) {
+          // Only AFTER encrypted invitation persistence succeeds. A v2 skip
+          // is a handled Welcome, unlike the legacy v1 follow-gate drops.
+          if (skipKey) {
+            skipSet.add(wrap.id);
+            skipSetDirty = true;
+          }
+          return null;
+        }
+        // Multi-recipient group rumors also bypass the DM follow gate.
         const routeResult = await tryRouteGroupRumor(
           rumor,
           owner,
@@ -175,9 +195,6 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
           }
           return null;
         }
-        // A Marmot invite from a trusted sender: join it (the row below
-        // still records the invite in this NIP-17 thread).
-        if (!signal?.aborted) routeMarmotWelcome(rumor, owner);
         const text = textForRumor(rumor);
         // For a structured rumor (order kind 16/17, or an NWC wallet share) the
         // stored `text` is non-human JSON — the in-memory inbox preview must show

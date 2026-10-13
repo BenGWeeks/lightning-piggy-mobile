@@ -1,3 +1,12 @@
+import { ingestInboxWraps } from './dmWrapIngest';
+import { NWC_SHARE_KIND } from '../utils/nwcShareMessage';
+import type { DmMessageRow } from '../services/dmDb';
+import type { DecodedRumor } from '../utils/nip17Unwrap';
+
+const mockWelcome = jest.fn(async (rumor: { kind: number }) => rumor.kind === 444);
+jest.mock('../services/marmotWelcomeRouter', () => ({
+  routeMarmotWelcome: (...args: unknown[]) => mockWelcome(...(args as [{ kind: number }])),
+}));
 /**
  * Unit tests for the shared NIP-17 inbox-wrap ingest engine (#848) — the
  * seam where refreshDmInbox (nsec + Amber) and the cold thread-open path
@@ -46,11 +55,6 @@ jest.mock('../utils/nip17Unwrap', () => ({
     rumor.partnership ?? null,
   textForRumor: (rumor: { content: string }) => rumor.content,
 }));
-
-import { ingestInboxWraps } from './dmWrapIngest';
-import { NWC_SHARE_KIND } from '../utils/nwcShareMessage';
-import type { DmMessageRow } from '../services/dmDb';
-import type { DecodedRumor } from '../utils/nip17Unwrap';
 
 const OWNER = 'f'.repeat(64);
 const ALICE = 'a'.repeat(64);
@@ -338,3 +342,33 @@ describe('dmWrapIngest.ingestInboxWraps', () => {
     expect(mockWriteSkipSet).not.toHaveBeenCalled();
   });
 });
+
+it.each([true, false])(
+  'backfill routes kind-444 before the DM gate (followed=%s)',
+  async (followed) => {
+    const welcome = { ...rumorFrom(BOB, { kind: 444 }), pubkey: BOB };
+    const gate = jest.fn(() => false);
+    const result = await ingestInboxWraps({
+      owner: OWNER,
+      wraps: [wrap('welcome-wrap')],
+      unwrap: () => welcome,
+      passesFollowGate: gate,
+      isFollowed: () => followed,
+      skipKey: 'skip_key',
+      isColdStart: true,
+    });
+    expect(mockWelcome).toHaveBeenCalledWith(
+      welcome,
+      OWNER,
+      'welcome-wrap',
+      followed,
+      false,
+      expect.any(Function),
+    );
+    expect(gate).not.toHaveBeenCalled();
+    expect(mockRouteGroup).not.toHaveBeenCalled();
+    expect(mockUpsert).not.toHaveBeenCalled();
+    expect(result.entries).toEqual([]);
+    expect(mockWriteSkipSet).toHaveBeenCalledWith('skip_key', new Set(['welcome-wrap']));
+  },
+);

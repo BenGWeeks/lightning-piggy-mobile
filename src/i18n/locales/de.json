@@ -3246,5 +3246,15 @@
     "websiteHost": "lightningpiggy.com",
     "licenceType": "MIT",
     "lightningAddress": "Lightning-Adresse (LUD-16)"
+  },
+  "marmotInvitation": {
+    "pending": "Einladung ausstehend",
+    "accept": "Annehmen",
+    "decline": "Ablehnen",
+    "group": "Gruppeneinladung",
+    "notification": "Neue Gruppeneinladung",
+    "retry": "Einladung angenommen. Der Beitritt wird beim nächsten App-Start erneut versucht.",
+    "error": "Die Einladung konnte nicht aktualisiert werden. Bitte versuche es erneut.",
+    "unavailable": "Diese Einladung kann nicht mehr angenommen werden."
   }
 }

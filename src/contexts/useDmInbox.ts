@@ -368,10 +368,11 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
         getReadRelays,
         decryptNip04ViaSigner,
         otherPubkey,
+        isFollowed: (pk) => followPubkeys.has(pk),
         signal: opts?.signal,
         protocol: opts?.protocol,
       }),
-    [pubkey, isLoggedIn, signerType, getReadRelays, decryptNip04ViaSigner],
+    [pubkey, isLoggedIn, signerType, getReadRelays, decryptNip04ViaSigner, followPubkeys],
   );
 
   // Read-through (#868, single-sourced in #850): paint the thread from the
@@ -683,6 +684,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
                   ownerPubkey: refreshForPubkey,
                   wraps: kind1059,
                   passesFollowGate,
+                  isFollowed: (pk) => refreshFollows.has(pk),
                   bypassSkipSet,
                   isColdStart,
                   signal: effectiveSignal,

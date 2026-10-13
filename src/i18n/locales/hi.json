@@ -3246,5 +3246,15 @@
     "websiteHost": "lightningpiggy.com",
     "licenceType": "MIT",
     "lightningAddress": "Lightning ऐड्रेस (LUD-16)"
+  },
+  "marmotInvitation": {
+    "pending": "आमंत्रण लंबित है",
+    "accept": "स्वीकार करें",
+    "decline": "अस्वीकार करें",
+    "group": "समूह का आमंत्रण",
+    "notification": "नया समूह आमंत्रण",
+    "retry": "आमंत्रण स्वीकार किया गया। ऐप फिर से शुरू होने पर जुड़ने का दोबारा प्रयास होगा।",
+    "error": "आमंत्रण अपडेट नहीं हो सका। कृपया फिर से प्रयास करें।",
+    "unavailable": "यह आमंत्रण अब स्वीकार नहीं किया जा सकता।"
   }
 }

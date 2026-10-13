@@ -84,6 +84,7 @@ it.each(['room', 'no-room', 'cancelled'] as const)(
       isFreshArrival: () => true,
       queueInboxEntry,
       knownWrapIds: new Set(),
+      seen: new Set(),
       chainWrite: (task) => {
         writes.push(task());
       },
@@ -98,6 +99,8 @@ it.each(['room', 'no-room', 'cancelled'] as const)(
       },
       'first',
     );
+    // Welcome routing now completes before group reconciliation starts.
+    await new Promise<void>((resolve) => setImmediate(resolve));
     expect(reconcile).toHaveBeenCalledTimes(1);
     const followup = surface({ ...rumor(14), content: 'follow-up', created_at: 21 }, 'followup');
     // Let ordinary live delivery proceed while room creation is still blocked.
@@ -179,7 +182,7 @@ describe.each([
   ['refresh', false],
   ['refresh', true],
 ] as const)('%s receive with a matching two-member room (subject=%s)', (path, hasSubject) => {
-  async function receive(message: DecodedRumor) {
+  async function receive(message: DecodedRumor, expectedStored = 1) {
     if (hasSubject) message.tags.push(['subject', 'Family']);
     if (path === 'refresh') {
       const result = await ingestInboxWraps({
@@ -188,7 +191,7 @@ describe.each([
         unwrap: async () => message,
         passesFollowGate: () => true,
       });
-      expect(result.stored).toBe(1);
+      expect(result.stored).toBe(expectedStored);
       return result.entries[0];
     }
     const queueInboxEntry = jest.fn();
@@ -203,6 +206,7 @@ describe.each([
       isFreshArrival: () => true,
       queueInboxEntry,
       knownWrapIds: new Set(),
+      seen: new Set(),
       chainWrite: (task) => {
         writes.push(task());
       },
@@ -252,10 +256,19 @@ describe.each([
 
   it('dispatches a Marmot Welcome to its join handler and keeps it out of group storage', async () => {
     const message = { ...rumor(444), content: 'serialized-mls-welcome' };
-    const entry = await receive(message);
-    expect(routeMarmotWelcome).toHaveBeenCalledWith(message, ME);
-    expect(entry.wireKind).toBe(444);
-    expect(entry.text).not.toContain(message.content);
+    jest.mocked(routeMarmotWelcome).mockResolvedValueOnce(true);
+    const entry = await receive(message, 0);
+    expect(routeMarmotWelcome).toHaveBeenCalledWith(
+      message,
+      ME,
+      'wrap',
+      path === 'live',
+      path === 'live',
+      expect.any(Function),
+      ...(path === 'live' ? [undefined] : []),
+    );
+    expect(entry).toBeUndefined();
+    expect(upsertDmMessages).not.toHaveBeenCalled();
     expect(appendGroupMessage).not.toHaveBeenCalled();
     expect(fireMessageNotification).not.toHaveBeenCalled();
   });
@@ -322,6 +335,7 @@ describe.each(['live', 'refresh'] as const)('%s two-party room trust', (path) =>
           isFreshArrival: () => true,
           queueInboxEntry,
           knownWrapIds: new Set(),
+          seen: new Set(),
           chainWrite: (task) => void task(),
         })(message, 'untrusted-wrap');
         expect(queueInboxEntry).not.toHaveBeenCalled();

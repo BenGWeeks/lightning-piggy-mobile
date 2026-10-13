@@ -1,3 +1,4 @@
+import { previewInvitationWelcome } from './marmotInvitationPreview';
 // One Marmot (MLS-over-Nostr) client per signed-in account.
 //
 // Owns the marmot-ts `MarmotClient`: loads + connects every group, keeps an
@@ -362,6 +363,12 @@ export class MarmotSession {
       .catch(() => undefined);
   }
 
+  /** Read-only preview: does not join or consume the invitation key. */
+  async previewWelcome(rumor: MarmotRumor) {
+    await this.ready;
+    return previewInvitationWelcome(this.client, rumor);
+  }
+
   stop(): void {
     this.gate.stop();
     this.stopWelcomeRetries?.();
@@ -701,6 +708,7 @@ export class MarmotSession {
    */
   async acceptWelcome(welcomeRumor: MarmotRumor): Promise<MarmotGroupSummary | null> {
     await this.ready;
+    if (this.gate.stopped) return null;
     // Each Welcome is joined at most once: inbox refreshes re-surface the
     // same gift wrap, and re-joining must never reset a group we already
     // hold. The marker is written on success or a PERMANENT failure only —

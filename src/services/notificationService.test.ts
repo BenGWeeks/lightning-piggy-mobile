@@ -3,27 +3,6 @@
 // expo-notifications module is mocked so we can assert exactly what content
 // would be scheduled without a device.
 
-const mockScheduleNotificationAsync = jest.fn().mockResolvedValue('notif-id');
-const mockGetPresented = jest.fn().mockResolvedValue([]);
-const mockDismiss = jest.fn().mockResolvedValue(undefined);
-const mockGetScheduled = jest.fn().mockResolvedValue([]);
-const mockCancel = jest.fn().mockResolvedValue(undefined);
-
-jest.mock('expo-notifications', () => ({
-  setNotificationHandler: jest.fn(),
-  setNotificationChannelAsync: jest.fn().mockResolvedValue(undefined),
-  getPermissionsAsync: jest.fn().mockResolvedValue({ granted: true, status: 'granted' }),
-  requestPermissionsAsync: jest.fn().mockResolvedValue({ granted: true, status: 'granted' }),
-  scheduleNotificationAsync: (...args: unknown[]) => mockScheduleNotificationAsync(...args),
-  getPresentedNotificationsAsync: () => mockGetPresented(),
-  dismissNotificationAsync: (id: string) => mockDismiss(id),
-  getAllScheduledNotificationsAsync: () => mockGetScheduled(),
-  cancelScheduledNotificationAsync: (id: string) => mockCancel(id),
-  AndroidImportance: { HIGH: 4 },
-  AndroidNotificationVisibility: { SECRET: -1, PRIVATE: 0, PUBLIC: 1 },
-  SchedulableTriggerInputTypes: { TIME_INTERVAL: 'timeInterval' },
-}));
-
 import * as Notifications from 'expo-notifications';
 import { toggleMutedSender } from './mutedSenders';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -52,6 +31,27 @@ import {
   lastMarmotNotificationAt,
 } from './notificationService';
 import { setActivePubkeyForWalletStorage } from './walletStorageService';
+
+const mockScheduleNotificationAsync = jest.fn().mockResolvedValue('notif-id');
+const mockGetPresented = jest.fn().mockResolvedValue([]);
+const mockDismiss = jest.fn().mockResolvedValue(undefined);
+const mockGetScheduled = jest.fn().mockResolvedValue([]);
+const mockCancel = jest.fn().mockResolvedValue(undefined);
+
+jest.mock('expo-notifications', () => ({
+  setNotificationHandler: jest.fn(),
+  setNotificationChannelAsync: jest.fn().mockResolvedValue(undefined),
+  getPermissionsAsync: jest.fn().mockResolvedValue({ granted: true, status: 'granted' }),
+  requestPermissionsAsync: jest.fn().mockResolvedValue({ granted: true, status: 'granted' }),
+  scheduleNotificationAsync: (...args: unknown[]) => mockScheduleNotificationAsync(...args),
+  getPresentedNotificationsAsync: () => mockGetPresented(),
+  dismissNotificationAsync: (id: string) => mockDismiss(id),
+  getAllScheduledNotificationsAsync: () => mockGetScheduled(),
+  cancelScheduledNotificationAsync: (id: string) => mockCancel(id),
+  AndroidImportance: { HIGH: 4 },
+  AndroidNotificationVisibility: { SECRET: -1, PRIVATE: 0, PUBLIC: 1 },
+  SchedulableTriggerInputTypes: { TIME_INTERVAL: 'timeInterval' },
+}));
 
 const lastScheduledContent = () => mockScheduleNotificationAsync.mock.calls.at(-1)?.[0]?.content;
 
@@ -934,4 +934,36 @@ it('suppresses a scheduled local alert if the sender was muted before presentati
   expect(result.shouldShowBanner).toBe(false);
   expect(result.shouldShowList).toBe(false);
   expect(result.shouldPlaySound).toBe(false);
+});
+
+it.each([true, false])(
+  'keeps pending invitation notifications generic with preview preference %s',
+  async (enabled) => {
+    await setLockScreenContentEnabled(enabled);
+    await fireMessageNotification({
+      kind: 'group',
+      threadId: 'invite:wrap',
+      title: 'New group invitation',
+      body: 'New group invitation',
+      data: { groupInvitation: true },
+    });
+    expect(lastScheduledContent()).toMatchObject({
+      title: 'New group invitation',
+      body: 'New group invitation',
+    });
+    expect(lastScheduledContent()?.data).not.toHaveProperty('groupId');
+  },
+);
+it('respects message notification permission for pending invitations', async () => {
+  (Notifications.getPermissionsAsync as jest.Mock).mockResolvedValueOnce({ granted: false });
+  expect(
+    await fireMessageNotification({
+      kind: 'group',
+      threadId: 'invite:wrap',
+      title: 'New group invitation',
+      body: 'New group invitation',
+      data: { groupInvitation: true },
+    }),
+  ).toBeNull();
+  expect(mockScheduleNotificationAsync).not.toHaveBeenCalled();
 });

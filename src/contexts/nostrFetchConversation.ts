@@ -46,6 +46,7 @@ export interface FetchConversationParams {
   getReadRelays: () => string[];
   decryptNip04ViaSigner: (counterpartyPubkey: string, ciphertext: string) => Promise<string | null>;
   otherPubkey: string;
+  isFollowed?: (pk: string) => boolean;
   // Cancels the relay fetch + decrypt loop when the user navigates away (#868).
   // Mirrors refreshDmInbox's opts.signal: the loop bails at its yield points so
   // a back-press mid-fetch stops chewing the JS thread, and re-entering can
@@ -304,6 +305,7 @@ export async function fetchConversationFor(
         wraps: kind1059,
         unwrap,
         passesFollowGate: () => true,
+        isFollowed: params.isFollowed,
         onSkip,
         signal,
       });

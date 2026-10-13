@@ -46,6 +46,7 @@ it('still stores and surfaces muted inbound DMs in Messages while suppressing no
     isFreshArrival: () => true,
     queueInboxEntry,
     knownWrapIds: new Set(),
+    seen: new Set(),
     chainWrite: (task) => {
       writes.push(task());
     },
@@ -97,6 +98,7 @@ it.each([true, false])(
       isFreshArrival: () => true,
       queueInboxEntry: jest.fn(),
       knownWrapIds: new Set(),
+      seen: new Set(),
       chainWrite: jest.fn(),
     });
     await surface(

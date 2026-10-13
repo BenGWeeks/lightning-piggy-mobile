@@ -113,6 +113,7 @@ export type NotificationKind = 'dm' | 'group' | 'payment' | 'zap' | 'cache' | 's
  *  - cache     → cacheCoord (open the cache detail; #740)
  */
 export interface NotificationData {
+  groupInvitation?: boolean;
   conversationPubkey?: string;
   conversationProtocol?: DmProtocol;
   groupId?: string;
@@ -443,7 +444,10 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
     // is NOT carried in `data` — only routing metadata (kind + ids) is,
     // so the tap-router can reopen the right thread, which then loads the
     // actual message from the local store once the user has unlocked.
-    const presented = lockScreenContent ? payload : { ...payload, ...genericFor(payload.kind) };
+    const presented =
+      lockScreenContent || payload.data?.groupInvitation
+        ? payload
+        : { ...payload, ...genericFor(payload.kind) };
     const quiet = payload.data?.quiet === true;
 
     if (
