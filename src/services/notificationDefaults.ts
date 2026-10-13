@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { requestNotificationPermission } from './notificationService';
 import { resolveNotificationDefaults } from '../utils/notificationDefaults';
 import { enableMarmotPush, loadMarmotPushSettings } from './marmotPushRegistration';
 import { loadWatcherState, saveWatcherState, WATCHER_PUSH_KEY_BASE } from './watcherPushStore';
@@ -10,6 +11,15 @@ const PUSH_PREFIX = 'marmot_push_enabled_v1_';
 const EXPLICIT_PREFIX = 'notification_preference_explicit_v1_';
 const WATCHER_PREFIX = `${WATCHER_PUSH_KEY_BASE}_`;
 let chain: Promise<unknown> = Promise.resolve();
+const pending = new Map<string, Set<{ cancel: () => void; settled: Promise<void> }>>();
+
+/** Drain writes already submitted to storage before account cleanup deletes them. */
+export async function cancelNotificationDefaults(pubkey: string): Promise<void> {
+  const runs = pending.get(pubkey.toLowerCase());
+  if (!runs) return;
+  for (const run of runs) run.cancel();
+  await Promise.all([...runs].map((run) => run.settled));
+}
 
 /** Called only after Wallets is visible. Commit defaults after enablement
  * succeeds, so cancellation or token failure leaves setup retryable.
@@ -19,8 +29,14 @@ export function initialiseNotificationDefaults(
   pubkey: string,
   stillActive: () => boolean,
 ): Promise<void> {
+  const me = pubkey.toLowerCase();
+  let cancelled = false;
+  const accountActive = () => !cancelled && stillActive();
   const run = chain.then(async () => {
-    const me = pubkey.toLowerCase();
+    if (!accountActive()) return;
+    // Local alerts need OS permission even when push choices are already saved.
+    await requestNotificationPermission();
+    if (!accountActive()) return;
     await loadMarmotPushSettings(me); // migrate the legacy device-wide preference first
     const keys = await AsyncStorage.getAllKeys();
     const ownPush = await AsyncStorage.getItem(`${PUSH_PREFIX}${me}`);
@@ -40,12 +56,15 @@ export function initialiseNotificationDefaults(
       },
       otherAccountHasPreference,
     });
-    if (!stillActive()) return;
+    if (!accountActive()) return;
     if (ownPush === null && desired.instant) {
-      const outcome = await enableMarmotPush(me, { interactive: false, stillActive });
+      const outcome = await enableMarmotPush(me, {
+        interactive: false,
+        stillActive: accountActive,
+      });
       if (outcome.status !== 'enabled') return;
     }
-    if (!stillActive()) return;
+    if (!accountActive()) return;
     if (ownWatcher === null) {
       await saveWatcherState(me, {
         ...watcher,
@@ -57,15 +76,26 @@ export function initialiseNotificationDefaults(
           payment: desired.more,
         },
       });
+      if (!accountActive()) return;
       scheduleWatcherReconciliation(me);
     }
     if (ownPush === null && !desired.instant) {
+      if (!accountActive()) return;
       await AsyncStorage.setItem(`${PUSH_PREFIX}${me}`, '0');
     }
     // Commit the decision last: partial writes must retry the missing preferences.
     // '0' marks an automatic decision, '1' marks an existing user choice.
+    if (!accountActive()) return;
     await AsyncStorage.setItem(`${EXPLICIT_PREFIX}${me}`, ownPush !== null ? '1' : '0');
   });
-  chain = run.catch(() => undefined);
+  const entry = { cancel: () => (cancelled = true), settled: run.catch(() => undefined) };
+  const runs = pending.get(me) ?? new Set();
+  runs.add(entry);
+  pending.set(me, runs);
+  chain = entry.settled;
+  void entry.settled.then(() => {
+    runs.delete(entry);
+    if (runs.size === 0) pending.delete(me);
+  });
   return run;
 }

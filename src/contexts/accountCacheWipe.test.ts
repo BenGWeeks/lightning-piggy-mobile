@@ -28,6 +28,11 @@ import { resetGroupMessagesMigrationForTests } from '../services/groupMessagesMi
 import { groupMessagesKey, legacyGroupMessagesKey } from '../services/groupMessagesKeys';
 import { wipeDecryptedMediaForOwner } from '../services/decryptedMediaCache';
 
+jest.mock('../services/notificationService', () => ({
+  ...jest.requireActual('../services/notificationService'),
+  requestNotificationPermission: jest.fn(async () => true),
+}));
+
 jest.mock('../services/watcherPush', () => ({ scheduleWatcherReconciliation: jest.fn() }));
 
 jest.mock('../services/decryptedMediaCache', () => ({
@@ -153,6 +158,65 @@ it.each([PK, 'c'.repeat(64)])(
       });
     } finally {
       enable.mockRestore();
+    }
+  },
+);
+
+it.each(['watcher', 'push-off', 'decision'])(
+  'drains cancelled defaults during %s persistence before wiping the account',
+  async (stage) => {
+    await AsyncStorage.clear();
+    marmotPush.__resetMarmotPushForTests();
+    const pushKey = `marmot_push_enabled_v1_${PK}`;
+    const watcherKey = `watcher_push_v1_${PK}`;
+    const decisionKey = `notification_preference_explicit_v1_${PK}`;
+    await AsyncStorage.setItem(`marmot_push_enabled_v1_${OTHER_PK}`, '0');
+    const pausedKey = { watcher: watcherKey, 'push-off': pushKey, decision: decisionKey }[stage];
+    let started!: () => void;
+    let release!: () => void;
+    const persisting = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const resume = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let active = true;
+    const setItem = AsyncStorage.setItem as jest.Mock;
+    const original = setItem.getMockImplementation()!;
+    setItem.mockImplementation(async (key: string, value: string) => {
+      if (key === pausedKey) {
+        started();
+        await resume;
+      }
+      return original(key, value);
+    });
+    try {
+      const setup = initialiseNotificationDefaults(PK, () => active);
+      await persisting;
+      active = false;
+      let wiped = false;
+      const wipe = wipeAccountCaches(PK).then(() => {
+        wiped = true;
+      });
+      // Give cleanup a full event-loop turn while the native write is paused.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      const wipedBeforePersistence = wiped;
+      // Cleanup must not delete preferences until the pending native write lands.
+      release();
+      await Promise.all([setup, wipe]);
+      expect(wipedBeforePersistence).toBe(false);
+      expect(await AsyncStorage.multiGet([pushKey, watcherKey, decisionKey])).toEqual([
+        [pushKey, null],
+        [watcherKey, null],
+        [decisionKey, null],
+      ]);
+      expect(await AsyncStorage.getItem(`marmot_push_enabled_v1_${OTHER_PK}`)).toBe('0');
+      setItem.mockImplementation(original);
+      await initialiseNotificationDefaults(PK, () => true);
+      expect(await AsyncStorage.getItem(decisionKey)).not.toBeNull();
+      expect(await AsyncStorage.getItem(watcherKey)).not.toBeNull();
+    } finally {
+      setItem.mockImplementation(original);
     }
   },
 );

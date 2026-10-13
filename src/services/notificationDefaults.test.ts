@@ -1,8 +1,27 @@
+import * as Notifications from 'expo-notifications';
+import { requestNotificationPermission } from './notificationService';
+
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { initialiseNotificationDefaults } from './notificationDefaults';
 import { enableMarmotPush } from './marmotPushRegistration';
 import { loadWatcherState, saveWatcherState } from './watcherPushStore';
 import { scheduleWatcherReconciliation } from './watcherPush';
+
+jest.mock('expo-notifications', () => ({
+  setNotificationHandler: jest.fn(),
+  setNotificationChannelAsync: jest.fn(async () => undefined),
+  getPermissionsAsync: jest.fn(async () => ({ granted: true, status: 'granted' })),
+  requestPermissionsAsync: jest.fn(async () => ({ granted: true, status: 'granted' })),
+  AndroidImportance: { HIGH: 4, LOW: 2 },
+  AndroidNotificationVisibility: { PRIVATE: 0, PUBLIC: 1 },
+}));
+
+jest.mock('./notificationService', () => ({
+  ...jest.requireActual('./notificationService'),
+  requestNotificationPermission: jest.fn(
+    jest.requireActual('./notificationService').requestNotificationPermission,
+  ),
+}));
 
 jest.mock('./watcherPush', () => ({ scheduleWatcherReconciliation: jest.fn() }));
 
@@ -205,6 +224,63 @@ it.each(['watcher', 'push-off'])(
         await AsyncStorage.getItem(`notification_preference_explicit_v1_${me}`),
       ).not.toBeNull();
       expect(enableMarmotPush).toHaveBeenCalledTimes(enabled ? 1 : 0);
+    } finally {
+      setItem.mockImplementation(original);
+    }
+  },
+);
+
+// The foreground permission helper asks an undetermined OS permission even
+// when no automatic push enablement is needed.
+it.each(['decision', 'both-preferences', 'instant-off', 'additional-account'])(
+  'requests OS permission independently of saved %s choices',
+  async (scenario) => {
+    if (scenario === 'decision') {
+      await AsyncStorage.setItem(`notification_preference_explicit_v1_${me}`, '1');
+    } else if (scenario === 'both-preferences') {
+      await AsyncStorage.setItem(pushKey, '0');
+      await saveWatcherState(me, {
+        categories: { dm: false, zap: false, mention: false, payment: false },
+        lastTs: 0,
+        registered: null,
+      });
+    } else {
+      await AsyncStorage.setItem(
+        scenario === 'instant-off' ? pushKey : 'marmot_push_enabled_v1_other',
+        '0',
+      );
+    }
+    (Notifications.getPermissionsAsync as jest.Mock).mockResolvedValueOnce({
+      granted: false,
+      status: 'undetermined',
+      canAskAgain: true,
+    });
+    await initialiseNotificationDefaults(me, () => true);
+    expect(requestNotificationPermission).toHaveBeenCalledTimes(1);
+    expect(Notifications.requestPermissionsAsync).toHaveBeenCalledTimes(1);
+    expect(enableMarmotPush).not.toHaveBeenCalled();
+    expect(await AsyncStorage.getItem(pushKey)).not.toBe('1');
+  },
+);
+
+it.each(['watcher', 'push-off'])(
+  'skips subsequent writes when account cancellation occurs during %s persistence',
+  async (stage) => {
+    await AsyncStorage.setItem('marmot_push_enabled_v1_other', '0');
+    let active = true;
+    const setItem = AsyncStorage.setItem as jest.Mock;
+    const original = setItem.getMockImplementation()!;
+    setItem.mockImplementation(async (key: string, value: string) => {
+      await original(key, value);
+      if (key === (stage === 'watcher' ? watcherKey : pushKey)) active = false;
+    });
+    try {
+      await initialiseNotificationDefaults(me, () => active);
+      expect(await AsyncStorage.getItem(`notification_preference_explicit_v1_${me}`)).toBeNull();
+      if (stage === 'watcher') {
+        expect(await AsyncStorage.getItem(pushKey)).toBeNull();
+        expect(scheduleWatcherReconciliation).not.toHaveBeenCalled();
+      }
     } finally {
       setItem.mockImplementation(original);
     }

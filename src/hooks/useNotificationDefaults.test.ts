@@ -8,6 +8,11 @@ import { enableMarmotPush } from '../services/marmotPushRegistration';
 let mockAccount = { isLoggedIn: true, pubkey: 'first' as string | null };
 let mockLivePubkey: string | null = 'first';
 let mockBlur: (() => void) | undefined;
+jest.mock('../services/notificationService', () => ({
+  ...jest.requireActual('../services/notificationService'),
+  requestNotificationPermission: jest.fn(async () => true),
+}));
+
 jest.mock('../contexts/NostrContext', () => ({ useNostr: () => mockAccount }));
 jest.mock('../services/nostrService', () => ({
   getCurrentUserPubkey: () => mockLivePubkey,
