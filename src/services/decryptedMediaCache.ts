@@ -399,15 +399,22 @@ async function resolveUncached(
             if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
             return new Uint8Array(await res.arrayBuffer());
           })();
-    const plain = unencrypted
-      ? cipher
-      : marmot
-        ? decryptMarmotMedia(cipher, {
-            mime: ref.mime ?? (ref.kind === 'voice' ? 'audio/mp4' : 'image/jpeg'),
-            nonceHex,
-            marmot,
-          })
-        : decryptFile(cipher, keyHex as string, nonceHex as string);
+    let plain: Uint8Array;
+    try {
+      plain = unencrypted
+        ? cipher
+        : marmot
+          ? decryptMarmotMedia(cipher, {
+              mime: ref.mime ?? (ref.kind === 'voice' ? 'audio/mp4' : 'image/jpeg'),
+              nonceHex,
+              marmot,
+            })
+          : decryptFile(cipher, keyHex as string, nonceHex as string);
+    } catch (error) {
+      // File bubbles distinguish integrity/authentication failures from sharing errors.
+      if (ref.kind === 'file') throw new FileVerificationError();
+      throw error;
+    }
     if (
       unencrypted &&
       (!ref.plaintextSha256 || bytesToHex(sha256(plain)) !== ref.plaintextSha256.toLowerCase())

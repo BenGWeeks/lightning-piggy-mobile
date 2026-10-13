@@ -244,3 +244,30 @@ it('preserves the dangerous extension when imeta metadata is sanitized before st
   const metadata = attachmentMetadata([['imeta', 'name invoice..apk..']]);
   expect(attachmentSafety(metadata.name, 'application/pdf').dangerous).toBe(true);
 });
+
+it.each(['https://example.com/a/b', '1/2', 'Wait... a/b: \"quoted\"!'])(
+  'preserves caption punctuation in both stored formats: %s',
+  (caption) => {
+    expect(
+      parseFileAttachment(
+        '[FILE]' + JSON.stringify({ name: 'a.pdf', mime: 'application/pdf', caption }),
+      )?.caption,
+    ).toBe(caption);
+    expect(
+      parseFileAttachment(encoded('application/pdf') + `&caption=${encodeURIComponent(caption)}`)
+        ?.caption,
+    ).toBe(caption);
+  },
+);
+it('strips caption controls and caps length in both stored formats', () => {
+  const caption = '\u0000\u0085\u202e\u200b' + 'a'.repeat(2001);
+  expect(
+    parseFileAttachment(
+      '[FILE]' + JSON.stringify({ name: 'a.pdf', mime: 'application/pdf', caption }),
+    )?.caption,
+  ).toBe('a'.repeat(2000));
+  expect(
+    parseFileAttachment(encoded('application/pdf') + `&caption=${encodeURIComponent(caption)}`)
+      ?.caption,
+  ).toBe('a'.repeat(2000));
+});

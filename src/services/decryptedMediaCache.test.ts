@@ -1,3 +1,10 @@
+import React from 'react';
+import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import * as Sharing from 'expo-sharing';
+import MessageFileBubble from '../components/MessageFileBubble';
+import { parseFileAttachment } from '../utils/fileAttachment';
+import { encodeMarmotMediaUrl } from '../utils/encryptedFileUrl';
+import { FileVerificationError } from './fileDownload';
 import { encryptMediaFile } from '@internet-privacy/marmot-ts';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
@@ -22,6 +29,18 @@ import {
   wipeDecryptedMediaForOwner,
   type EncryptedMediaRef,
 } from './decryptedMediaCache';
+
+jest.mock('../contexts/ThemeContext', () => ({
+  useThemeColors: () => jest.requireActual('../styles/palettes').lightPalette,
+}));
+jest.mock('../contexts/LocaleContext', () => ({
+  useLocale: () => ({ t: (key: string) => key }),
+}));
+jest.mock('../components/BrandedAlert', () => ({ Alert: { alert: jest.fn() } }));
+jest.mock('expo-sharing', () => ({
+  isAvailableAsync: jest.fn(async () => true),
+  shareAsync: jest.fn(async () => {}),
+}));
 
 jest.mock('expo/fetch', () => ({
   fetch: async (...args: unknown[]) => {
@@ -538,3 +557,50 @@ it('bounds retained shares and cancels deferred cleanup when the account is wipe
   expect(filesUnder(A)).toEqual([]);
   expect(() => retainDecryptedFile(`${dir}file-new.bin`)()).not.toThrow();
 });
+
+it.each(['ciphertext hash', 'plaintext hash', 'authentication'] as const)(
+  'surfaces a Marmot %s failure through the real decrypt/share/bubble path',
+  async (failure) => {
+    const key = new Uint8Array(32).fill(17);
+    const { encrypted, attachment } = encryptMediaFile(PLAIN, key, {
+      version: 'encrypted-media-v2',
+      mediaType: 'application/pdf',
+      filename: 'invoice.pdf',
+      plaintextSha256: bytesToHex(sha256(PLAIN)),
+    });
+    const downloaded = encrypted.slice();
+    if (failure === 'ciphertext hash') downloaded[0] ^= 1;
+    const file = parseFileAttachment(
+      encodeMarmotMediaUrl({
+        url: URL_,
+        version: attachment.version,
+        mime: attachment.mediaType,
+        filename: attachment.filename,
+        nonceHex: attachment.nonce,
+        keysHex: [failure === 'authentication' ? '00'.repeat(32) : bytesToHex(key)],
+        plaintextSha256:
+          failure === 'plaintext hash' ? '00'.repeat(32) : attachment.plaintextSha256,
+        ciphertextSha256: attachment.ciphertextSha256,
+      }),
+    )!;
+    fetchMock.mockResolvedValue({ ok: true, arrayBuffer: async () => downloaded.slice().buffer });
+    setDecryptedMediaOwner(A);
+    await expect(resolveDecryptedMedia({ ...file, kind: 'file' })).rejects.toBeInstanceOf(
+      FileVerificationError,
+    );
+    const ui = render(
+      React.createElement(MessageFileBubble, {
+        id: 'verify',
+        file,
+        fromMe: false,
+        footer: null,
+      }),
+    );
+    fireEvent.press(ui.getByTestId('chat-file-share-verify'));
+    await waitFor(() => expect(ui.getByText('messageBubble.fileVerificationFailed')).toBeTruthy());
+    expect(ui.queryByText('messageBubble.fileShareFailed')).toBeNull();
+    expect(Sharing.shareAsync).not.toHaveBeenCalled();
+    expect(filesUnder(A)).toEqual([]);
+    expect(peekDecryptedMedia({ ...file, kind: 'file' })).toBeNull();
+  },
+);

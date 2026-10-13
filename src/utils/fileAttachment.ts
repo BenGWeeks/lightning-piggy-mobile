@@ -22,6 +22,11 @@ export function sanitizeAttachmentText(value: string): string {
     .replace(/\.{2,}/g, '.')
     .trim();
 }
+/** Captions are prose: preserve punctuation and bound display length. */
+export function sanitizeAttachmentCaption(value: string): string {
+  return value.replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, '').slice(0, 2000);
+}
+
 export function isSafeFileUrl(url: string): boolean {
   return url.startsWith('https://') && isPublicHttpUrl(url);
 }
@@ -175,7 +180,7 @@ export function parseFileAttachment(text: string): FileAttachment | null {
           typeof value.url === 'string' &&
           isSafeFileUrl(value.url),
         ...(typeof value.caption === 'string'
-          ? { caption: sanitizeAttachmentText(value.caption) }
+          ? { caption: sanitizeAttachmentCaption(value.caption) }
           : {}),
         ...(Number.isSafeInteger(value.size) && value.size >= 0 ? { size: value.size } : {}),
       };
@@ -211,7 +216,7 @@ export function parseFileAttachment(text: string): FileAttachment | null {
     keyHex,
     nonceHex,
     marmot,
-    ...(p.get('caption') ? { caption: sanitizeAttachmentText(p.get('caption')!) } : {}),
+    ...(p.get('caption') ? { caption: sanitizeAttachmentCaption(p.get('caption')!) } : {}),
     ...(size && /^\d+$/.test(size) && Number.isSafeInteger(Number(size))
       ? { size: Number(size) }
       : {}),
