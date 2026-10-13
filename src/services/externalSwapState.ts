@@ -86,6 +86,13 @@ export async function loadExternalSwaps(
     (record) => record.sourceWalletId === source && record.destinationWalletId === dest,
   );
 }
+
+/** Find a saved request for the active identity when startup could not arm tracking. */
+export async function loadExternalSwap(id: string): Promise<ExternalSwapState | undefined> {
+  await writes.catch(() => {});
+  return (await read(getActivePubkey() ?? undefined)).find((record) => record.id === id);
+}
+
 export function externalSwapState(
   swap: SubmarineSwapResult,
   source: string,

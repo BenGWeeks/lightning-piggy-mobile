@@ -3,7 +3,8 @@ import {
   classifySubmarineSwapStatus,
   fetchSwapStatus,
 } from './boltzSwapStatus';
-import { saveExternalSwap, type ExternalSwapState } from './externalSwapState';
+import { loadExternalSwap, saveExternalSwap, type ExternalSwapState } from './externalSwapState';
+import { recoverPendingSwaps } from './swapRecoveryService';
 
 export interface ExternalSwapUpdate {
   id: string;
@@ -40,12 +41,22 @@ export function subscribeExternalSwap(id: string, listener: Listener): () => voi
     const current = channel;
     const revision = current.revision;
     current.refresh = fetchSwapStatus(id)
-      .then((status) => {
+      .then(async (status) => {
         // A later watcher update wins over a read started before it.
         if (channels.get(id) === current && current.revision === revision) {
-          publish({ id, status, trackingFailed: false });
           const tracker = trackers.get(id);
-          if (tracker) trackExternalSwap({ ...tracker.state, status }, tracker.recover);
+          if (tracker) {
+            trackExternalSwap({ ...tracker.state, status }, tracker.recover);
+          } else {
+            // Offline startup can leave a durable request with no in-memory
+            // tracker. Restore app-owned settlement work before authorizing payment.
+            const state = await loadExternalSwap(id);
+            if (!state) throw new Error(`Missing saved external swap ${id}`);
+            if (channels.get(id) !== current || current.revision !== revision) return;
+            trackExternalSwap({ ...state, status }, recoverPendingSwaps);
+          }
+          if (channels.get(id) === current && current.revision === revision)
+            publish({ id, status, trackingFailed: false });
         }
       })
       .catch(() => {

@@ -1,17 +1,21 @@
 import { trackExternalSwap, subscribeExternalSwap } from './externalSwapTracking';
 import { watchSubmarineSwapStatus, fetchSwapStatus } from './boltzSwapStatus';
-import { saveExternalSwap, type ExternalSwapState } from './externalSwapState';
+import { loadExternalSwap, saveExternalSwap, type ExternalSwapState } from './externalSwapState';
 jest.mock('./boltzSwapStatus', () => ({
   watchSubmarineSwapStatus: jest.fn(),
   fetchSwapStatus: jest.fn(),
   classifySubmarineSwapStatus: (status: string) =>
     status === 'transaction.claimed'
       ? 'complete'
-      : status === 'swap.expired'
+      : ['swap.expired', 'invoice.failedToPay'].includes(status)
         ? 'failed'
         : 'awaiting-payment',
 }));
-jest.mock('./externalSwapState', () => ({ saveExternalSwap: jest.fn(async () => {}) }));
+jest.mock('./externalSwapState', () => ({
+  saveExternalSwap: jest.fn(async () => {}),
+  loadExternalSwap: jest.fn(),
+}));
+jest.mock('./swapRecoveryService', () => ({ recoverPendingSwaps: jest.fn(async () => {}) }));
 const state = { id: 'background', status: 'swap.created' } as ExternalSwapState;
 const flush = async () => {
   for (let i = 0; i < 12; i++) await Promise.resolve();
@@ -19,6 +23,8 @@ const flush = async () => {
 beforeEach(() => {
   jest.clearAllMocks();
   jest.mocked(fetchSwapStatus).mockResolvedValue('swap.created');
+  jest.mocked(loadExternalSwap).mockImplementation(async (id) => ({ ...state, id }));
+  jest.mocked(watchSubmarineSwapStatus).mockImplementation(() => new Promise(() => {}));
 });
 test('one app-level watcher persists settlement and runs recovery after the sheet closes', async () => {
   let finish!: (value: Awaited<ReturnType<typeof watchSubmarineSwapStatus>>) => void;
@@ -246,6 +252,42 @@ test('failed live validation hides instructions', async () => {
     trackingFailed: true,
   });
   close();
+});
+
+test.each(['missing', 'unreadable'])(
+  'hides instructions when durable state is %s',
+  async (failure) => {
+    if (failure === 'missing') jest.mocked(loadExternalSwap).mockResolvedValueOnce(undefined);
+    else jest.mocked(loadExternalSwap).mockRejectedValueOnce(new Error('Storage unavailable'));
+    const listener = jest.fn();
+    const close = subscribeExternalSwap(`durable-${failure}`, listener);
+    await flush();
+    expect(watchSubmarineSwapStatus).not.toHaveBeenCalled();
+    expect(listener).toHaveBeenLastCalledWith({
+      id: `durable-${failure}`,
+      status: null,
+      trackingFailed: true,
+    });
+    close();
+  },
+);
+
+test('closing during durable loading does not start a stale watcher', async () => {
+  let resolve!: (state: ExternalSwapState) => void;
+  jest.mocked(loadExternalSwap).mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  const listener = jest.fn();
+  const close = subscribeExternalSwap('closed-during-load', listener);
+  await flush();
+  close();
+  resolve({ ...state, id: 'closed-during-load' });
+  await flush();
+  expect(watchSubmarineSwapStatus).not.toHaveBeenCalled();
+  expect(listener).toHaveBeenCalledTimes(1);
 });
 
 test('an older pending read cannot overwrite a newer funded watcher update', async () => {

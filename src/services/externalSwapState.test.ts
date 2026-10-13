@@ -1,5 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { externalSwapState, loadExternalSwaps, saveExternalSwap } from './externalSwapState';
+import {
+  externalSwapState,
+  loadExternalSwap,
+  loadExternalSwaps,
+  saveExternalSwap,
+} from './externalSwapState';
 import Toast from '../components/BrandedToast';
 import { fireNotification } from './notificationService';
 let mockPubkey: string | null = 'alice';
@@ -72,4 +77,17 @@ test('invoice settlement followed by transaction claimed notifies completion onc
   expect(Toast.show).toHaveBeenCalledTimes(1);
   expect(fireNotification).toHaveBeenCalledTimes(1);
   expect((await loadExternalSwaps('watch', 'lightning'))[0].status).toBe('transaction.claimed');
+});
+
+test('single-request lookup waits for writes and isolates the active identity', async () => {
+  const write = saveExternalSwap(state());
+  expect(await loadExternalSwap('s1')).toMatchObject({
+    id: 's1',
+    ownerPubkey: 'alice',
+    status: 'swap.created',
+  });
+  await write;
+  expect(await loadExternalSwap('unknown')).toBeUndefined();
+  mockPubkey = 'bob';
+  expect(await loadExternalSwap('s1')).toBeUndefined();
 });
