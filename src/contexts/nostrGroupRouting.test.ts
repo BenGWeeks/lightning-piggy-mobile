@@ -63,94 +63,113 @@ it.each([15, 444, NWC_SHARE_KIND])(
   },
 );
 
-describe.each(['live', 'refresh'] as const)(
-  '%s receive with a matching two-member room',
-  (path) => {
-    async function receive(message: DecodedRumor) {
-      if (path === 'refresh') {
-        const result = await ingestInboxWraps({
-          owner: ME,
-          wraps: [{ id: 'wrap' }],
-          unwrap: async () => message,
-          passesFollowGate: () => true,
-        });
-        expect(result.stored).toBe(1);
-        return result.entries[0];
-      }
-      const queueInboxEntry = jest.fn();
-      const writes: Promise<void>[] = [];
-      const surface = createLiveRumorSurfacer({
-        viewerPubkey: ME,
-        isCancelled: () => false,
-        shouldAbort: () => false,
-        followPubkeysRef: { current: new Set([PEER]) },
-        followGateBuffer: { defer: jest.fn(), reevaluate: jest.fn(), clear: jest.fn(), size: 0 },
-        isFreshArrival: () => true,
-        queueInboxEntry,
-        knownWrapIds: new Set(),
-        chainWrite: (task) => {
-          writes.push(task());
-        },
+describe.each([
+  ['live', false],
+  ['live', true],
+  ['refresh', false],
+  ['refresh', true],
+] as const)('%s receive with a matching two-member room (subject=%s)', (path, hasSubject) => {
+  async function receive(message: DecodedRumor) {
+    if (hasSubject) message.tags.push(['subject', 'Family']);
+    if (path === 'refresh') {
+      const result = await ingestInboxWraps({
+        owner: ME,
+        wraps: [{ id: 'wrap' }],
+        unwrap: async () => message,
+        passesFollowGate: () => true,
       });
-      await surface(message, 'wrap');
-      await Promise.all(writes);
-      return queueInboxEntry.mock.calls[0]?.[0];
+      expect(result.stored).toBe(1);
+      return result.entries[0];
     }
-
-    it('redacts wallet-share previews and notifications while retaining the encrypted-store payload', async () => {
-      const content = serializeNwcShare({
-        nwcUrl: `nostr+walletconnect://${PEER}?relay=wss%3A%2F%2Frelay.example&secret=${SECRET}`,
-        walletName: 'Savings',
-      });
-      const entry = await receive({ ...rumor(NWC_SHARE_KIND), content });
-      expect(entry.text).toBe('🔌 Shared wallet "Savings"');
-      expect(JSON.stringify(entry)).not.toContain(SECRET);
-      expect(upsertDmMessages).toHaveBeenCalledWith([
-        expect.objectContaining({ conversation: PEER, content, wireKind: NWC_SHARE_KIND }),
-      ]);
-      expect(appendGroupMessage).not.toHaveBeenCalled();
-      if (path === 'live') {
-        expect(fireMessageNotification).toHaveBeenCalledWith(
-          expect.objectContaining({ kind: 'dm', body: entry.text }),
-        );
-        expect(JSON.stringify(jest.mocked(fireMessageNotification).mock.calls)).not.toContain(
-          SECRET,
-        );
-      }
+    const queueInboxEntry = jest.fn();
+    const writes: Promise<void>[] = [];
+    const surface = createLiveRumorSurfacer({
+      viewerPubkey: ME,
+      isCancelled: () => false,
+      shouldAbort: () => false,
+      followPubkeysRef: { current: new Set([PEER]) },
+      followGateBuffer: { defer: jest.fn(), reevaluate: jest.fn(), clear: jest.fn(), size: 0 },
+      isFreshArrival: () => true,
+      queueInboxEntry,
+      knownWrapIds: new Set(),
+      chainWrite: (task) => {
+        writes.push(task());
+      },
     });
+    await surface(message, 'wrap');
+    await Promise.all(writes);
+    return queueInboxEntry.mock.calls[0]?.[0];
+  }
 
-    it('dispatches a Marmot Welcome to its join handler and keeps it out of group storage', async () => {
-      const message = { ...rumor(444), content: 'serialized-mls-welcome' };
-      const entry = await receive(message);
-      expect(routeMarmotWelcome).toHaveBeenCalledWith(message, ME);
-      expect(entry.wireKind).toBe(444);
-      expect(entry.text).not.toContain(message.content);
-      expect(appendGroupMessage).not.toHaveBeenCalled();
-      expect(fireMessageNotification).not.toHaveBeenCalled();
+  if (!hasSubject) {
+    it.each([['subject', ''], ['subject', ' \t\n '], ['subject']])(
+      'delivers a two-party message with invalid subject %j and no matching room as a DM',
+      async (...subjectTag) => {
+        setKnownGroups([], ME);
+        const message = rumor(14);
+        message.tags.push(subjectTag);
+        const entry = await receive(message);
+        expect(entry).toMatchObject({ partnerPubkey: PEER, text: 'hello', wireKind: 14 });
+        expect(upsertDmMessages).toHaveBeenCalledWith([
+          expect.objectContaining({ conversation: PEER, content: 'hello', wireKind: 14 }),
+        ]);
+        expect(appendGroupMessage).not.toHaveBeenCalled();
+        expect(notifyGroupMessage).not.toHaveBeenCalled();
+      },
+    );
+  }
+
+  it('redacts wallet-share previews and notifications while retaining the encrypted-store payload', async () => {
+    const content = serializeNwcShare({
+      nwcUrl: `nostr+walletconnect://${PEER}?relay=wss%3A%2F%2Frelay.example&secret=${SECRET}`,
+      walletName: 'Savings',
     });
-
-    it('converts encrypted attachment metadata for storage and redacts its preview', async () => {
-      const message = rumor(15);
-      message.content = 'https://files.example/photo';
-      message.tags.push(
-        ['file-type', 'image/jpeg'],
-        ['decryption-key', SECRET],
-        ['decryption-nonce', 'e'.repeat(24)],
+    const entry = await receive({ ...rumor(NWC_SHARE_KIND), content });
+    expect(entry.text).toBe('🔌 Shared wallet "Savings"');
+    expect(JSON.stringify(entry)).not.toContain(SECRET);
+    expect(upsertDmMessages).toHaveBeenCalledWith([
+      expect.objectContaining({ conversation: PEER, content, wireKind: NWC_SHARE_KIND }),
+    ]);
+    expect(appendGroupMessage).not.toHaveBeenCalled();
+    if (path === 'live') {
+      expect(fireMessageNotification).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'dm', body: entry.text }),
       );
-      const entry = await receive(message);
-      const converted = textForRumor(message);
-      expect(converted).toContain('#lpe=1');
-      expect(converted).toContain(SECRET);
-      expect(upsertDmMessages).toHaveBeenCalledWith([
-        expect.objectContaining({ conversation: PEER, content: converted, wireKind: 15 }),
-      ]);
-      expect(entry.text).toBe('📎 Attachment');
-      expect(appendGroupMessage).not.toHaveBeenCalled();
-      if (path === 'live') {
-        expect(fireMessageNotification).toHaveBeenCalledWith(
-          expect.objectContaining({ kind: 'dm', body: '📎 Attachment' }),
-        );
-      }
-    });
-  },
-);
+      expect(JSON.stringify(jest.mocked(fireMessageNotification).mock.calls)).not.toContain(SECRET);
+    }
+  });
+
+  it('dispatches a Marmot Welcome to its join handler and keeps it out of group storage', async () => {
+    const message = { ...rumor(444), content: 'serialized-mls-welcome' };
+    const entry = await receive(message);
+    expect(routeMarmotWelcome).toHaveBeenCalledWith(message, ME);
+    expect(entry.wireKind).toBe(444);
+    expect(entry.text).not.toContain(message.content);
+    expect(appendGroupMessage).not.toHaveBeenCalled();
+    expect(fireMessageNotification).not.toHaveBeenCalled();
+  });
+
+  it('converts encrypted attachment metadata for storage and redacts its preview', async () => {
+    const message = rumor(15);
+    message.content = 'https://files.example/photo';
+    message.tags.push(
+      ['file-type', 'image/jpeg'],
+      ['decryption-key', SECRET],
+      ['decryption-nonce', 'e'.repeat(24)],
+    );
+    const entry = await receive(message);
+    const converted = textForRumor(message);
+    expect(converted).toContain('#lpe=1');
+    expect(converted).toContain(SECRET);
+    expect(upsertDmMessages).toHaveBeenCalledWith([
+      expect.objectContaining({ conversation: PEER, content: converted, wireKind: 15 }),
+    ]);
+    expect(entry.text).toBe('📎 Attachment');
+    expect(appendGroupMessage).not.toHaveBeenCalled();
+    if (path === 'live') {
+      expect(fireMessageNotification).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'dm', body: '📎 Attachment' }),
+      );
+    }
+  });
+});

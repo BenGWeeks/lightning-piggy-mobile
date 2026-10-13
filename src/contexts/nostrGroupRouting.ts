@@ -40,10 +40,11 @@ export async function tryRouteGroupRumor(
 ): Promise<GroupRouteResult> {
   const cls = classifyRumor(rumor, viewerPubkey);
   if (!cls || cls.type === 'order') return { kind: 'not-group' };
-  // Only plain chat can use the known-room 1:1 fallback. Specialized
-  // rumors must reach the DM handlers (wallet-share redaction, Marmot
+  // Two-party specialized rumors must reach the DM handlers even when
+  // a subject classifies them as a group (wallet-share redaction, Marmot
   // Welcome joins, and encrypted-file metadata conversion).
-  if (cls.type === 'dm' && rumor.kind !== 14) return { kind: 'not-group' };
+  const isTwoParty = cls.type === 'dm' || cls.otherParticipants.size === 1;
+  if (isTwoParty && rumor.kind !== 14) return { kind: 'not-group' };
   // NIP-17 does not require a subject on every message. A two-party
   // rumor can therefore belong to an already-known named room.
   const otherParticipants =

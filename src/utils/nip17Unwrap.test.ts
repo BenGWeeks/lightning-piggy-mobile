@@ -49,6 +49,32 @@ describe('subjectFromRumor (incoming kind-14)', () => {
   });
 });
 
+describe('classifyRumor — validated two-party subjects', () => {
+  it.each([['subject', ''], ['subject', ' \t\n '], ['subject']])(
+    'keeps an invalid subject %j on the DM path',
+    (...subjectTag) => {
+      const message: DecodedRumor = {
+        pubkey: PK_A,
+        created_at: 1,
+        kind: 14,
+        tags: [['p', PK_B], subjectTag],
+        content: 'hello',
+      };
+      expect(classifyRumor(message, PK_B)).toEqual({
+        type: 'dm',
+        partnerPubkey: PK_A,
+        fromMe: false,
+      });
+      message.tags.push(['p', 'c'.repeat(64)]);
+      expect(classifyRumor(message, PK_B)).toEqual({
+        type: 'group',
+        otherParticipants: new Set([PK_A, 'c'.repeat(64)]),
+        fromMe: false,
+      });
+    },
+  );
+});
+
 describe('partnerFromRumor (partner-pubkey extraction + validation, #849)', () => {
   const ME = PK_A;
   const rumor = (over: Partial<DecodedRumor>): DecodedRumor => ({

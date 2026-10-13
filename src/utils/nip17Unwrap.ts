@@ -428,9 +428,9 @@ export function textForRumor(rumor: DecodedRumor): string {
  * Classify a kind-14 rumor as either a 1:1 DM or a group message.
  * Returns null if the rumor is malformed (e.g. no resolvable partner).
  *
- *  - DM: one OTHER participant and no subject; the caller can still
+ *  - DM: one OTHER participant and no valid, nonempty subject; the caller can still
  *    resolve it to a known named room (subjects are optional on later messages).
- *  - Group: a subject tag or two or more OTHER participants. Caller looks
+ *  - Group: a valid, nonempty subject or two or more OTHER participants. Caller looks
  *    up the room by its participant set; changing the subject renames it.
  *
  * `fromMe` reflects whether the viewer is the sender. The set of
@@ -473,7 +473,7 @@ export function classifyRumor(
     // miscategorise as a DM with `partnerPubkey === me`.
     return null;
   }
-  if (others.size === 1 && !rumor.tags.some((tag) => tag[0] === 'subject')) {
+  if (others.size === 1 && !subjectFromRumor(rumor)) {
     const partnerPubkey = Array.from(others)[0];
     return { type: 'dm', partnerPubkey, fromMe };
   }
