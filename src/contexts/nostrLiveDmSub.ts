@@ -255,15 +255,17 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
             wireKind: item.entry.wireKind,
           },
         ]);
-        knownWrapIds.add(item.entry.id);
         pendingReplays.delete(item);
+        if (cancelled || !isCurrentOwner()) return;
+        knownWrapIds.add(item.entry.id);
+        // Conversation reloads read SQLite, so signal only after the row exists.
+        notifyDmMessage(item.partnerPubkey);
       } catch (error) {
         releaseReplayClaim(item);
         throw error;
       }
     });
     queueInboxEntry(item.entry);
-    notifyDmMessage(item.partnerPubkey);
     // claimWrapNotification: the background watch (same JS context, no follow
     // gate) may have already notified for this wrap — never post twice (#279).
     // Its contentless alert, though, is replaced by this real one — recorded
@@ -348,16 +350,18 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
   let engineActive = engineBridge.mode === 'engine';
 
   const handleInboxEvent = async (ev: nostrService.RawInboxDmEvent): Promise<void> => {
-    // Earliest-possible short-circuit for NIP-17 wraps we already
-    // decrypted on a previous launch. Cost saved per backlog wrap:
+    // Skip persisted kind-4 messages as well as known NIP-17 wraps: the
+    // retained kind-4 recovery floor re-streams already recovered messages.
+    // Earliest-possible short-circuit for wraps decrypted on a previous launch.
+    // Cost saved per backlog wrap:
     // console.log + seen.has + seen.add + kind dispatch + cacheKey
     // build + the async AsyncStorage.getItem race. On a busy
     // fixture with 100+ wraps in the backlog this compressed the
     // cold-start JS-thread occupation window from ~12 s to <1 s.
     // Per issue #505.
-    if (ev.kind === 1059 && knownWrapIds.has(ev.id)) {
+    if ((ev.kind === 1059 || ev.kind === 4) && knownWrapIds.has(ev.id)) {
       // Already stored (and shown): nothing for the background watch to alert.
-      markWrapHandled(ev.id);
+      if (ev.kind === 1059) markWrapHandled(ev.id);
       return;
     }
     // Eagerly claim this wrap.id in the in-memory dedup Set before
@@ -491,6 +495,8 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
           // refresh's `since` floor then re-fetches the event instead of
           // silently skipping past an unpersisted message.
           await upsertDmMessages([k4Row]);
+          if (cancelled || !isCurrentOwner()) return;
+          knownWrapIds.add(ev.id);
           const lastSeenRaw = await AsyncStorage.getItem(inboxLastSeenKey(viewerPubkey));
           const lastSeen = lastSeenRaw ? Number(lastSeenRaw) : 0;
           if (ev.created_at > lastSeen) {

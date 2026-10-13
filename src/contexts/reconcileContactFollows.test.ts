@@ -8,7 +8,7 @@ import {
   subscribeFollowSet,
 } from '../services/followSetEvents';
 import { startFollowGateFallback, FOLLOW_GATE_TIMEOUT_MS } from './liveDmFollowGateDecision';
-import { reconcileContactFollows } from './reconcileContactFollows';
+import { reconcileCachedContactFollows, reconcileContactFollows } from './reconcileContactFollows';
 
 jest.mock('../services/contactListSync', () => ({ fetchLatestContactList: jest.fn() }));
 jest.mock('../services/nostrRelayStorage', () => ({ getUserRelays: jest.fn(async () => []) }));
@@ -21,6 +21,7 @@ const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 beforeEach(async () => {
   jest.clearAllMocks();
+  jest.mocked(fetchLatestContactList).mockReset();
   clearFollowGateStores();
   await AsyncStorage.clear();
 });
@@ -174,5 +175,42 @@ it.each(['switch', 'sign-out'])(
     await reconcileContactFollows(OWNER, [], null, jest.fn(), finish);
     expect(returned.followHydratedRef.current).toBe(true);
     expect([...returned.followPubkeysRef.current]).toEqual([BOB]);
+  },
+);
+
+it.each(['switch', 'sign-out'])(
+  'does not recreate old follows when %s happens during both cache reads',
+  async (transition) => {
+    const original = jest.mocked(AsyncStorage.multiGet).getMockImplementation()!;
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const reads = jest.spyOn(AsyncStorage, 'multiGet').mockImplementation(async (keys) => {
+      await blocked;
+      return original(keys);
+    });
+    jest.mocked(fetchLatestContactList).mockResolvedValueOnce({
+      status: 'found',
+      base: { tags: [['p', ALICE]], content: '', createdAt: 200 },
+    });
+    const paint = jest.fn();
+    const finish = jest.fn();
+    try {
+      const pending = reconcileCachedContactFollows(OWNER, [], paint, finish);
+      expect(reads).toHaveBeenCalledTimes(2);
+      clearFollowGateStores();
+      if (transition === 'switch') getFollowGateStore(BOB);
+      release();
+      await pending;
+      const returned = getFollowGateStore(OWNER);
+      expect(returned.adopted).toBe(false);
+      expect(returned.followHydratedRef.current).toBe(false);
+      expect(returned.followPubkeysRef.current.size).toBe(0);
+      expect(paint).not.toHaveBeenCalled();
+      expect(finish).not.toHaveBeenCalled();
+    } finally {
+      reads.mockRestore();
+    }
   },
 );

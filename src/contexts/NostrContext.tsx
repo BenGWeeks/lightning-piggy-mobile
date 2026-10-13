@@ -1,5 +1,5 @@
 import { useFollowHydration } from './useFollowHydration';
-import { reconcileContactFollows } from './reconcileContactFollows';
+import { reconcileCachedContactFollows } from './reconcileContactFollows';
 import { buildFollowSet } from '../utils/followPubkeys';
 import { readFollowSnapshot } from '../services/contactFollowFreshness';
 import { signAccountEvent } from '../services/signAccountEvent';
@@ -65,7 +65,6 @@ import { useNip65Relays, type AdoptResult } from './useNip65Relays';
 import {
   CONTACTS_CACHE_KEY_BASE,
   PROFILES_CACHE_KEY_BASE,
-  CACHE_TIMESTAMP_KEY_BASE,
   CONTACTS_TIMESTAMP_KEY_BASE,
   OWN_PROFILE_CACHE_KEY_BASE,
   OWN_PROFILE_TIMESTAMP_KEY_BASE,
@@ -563,39 +562,17 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     ) => {
       const setContacts = contactsSetterFor(pk);
       const finishFollowHydration = followHydratedSetterFor(pk);
-      // Read the contact-list cache AND profile cache concurrently — both
-      // are independent AsyncStorage round-trips, and the profile cache is
-      // also used for merging into whichever contact list we end up with.
-      const [{ value: cachedContactsRaw }, { value: cachedProfileMapOrNull, ageMs: cacheAgeMs }] =
-        await Promise.all([
-          readCachedWithTtl<NostrContact[]>(
-            perAccountKey(CONTACTS_CACHE_KEY_BASE, pk),
-            perAccountKey(CONTACTS_TIMESTAMP_KEY_BASE, pk),
-          ),
-          readCachedWithTtl<Record<string, NostrProfile>>(
-            perAccountKey(PROFILES_CACHE_KEY_BASE, pk),
-            perAccountKey(CACHE_TIMESTAMP_KEY_BASE, pk),
-          ),
-        ]);
-      // Filter junk pubkeys out of the cached follow list on read so a cache
-      // poisoned before the ingest-time gate self-heals (#855).
-      const cachedContacts = cachedContactsRaw ? sanitizeContacts(cachedContactsRaw) : null;
-      const cachedProfileMap = cachedProfileMapOrNull ?? {};
-      const cacheFresh = cacheAgeMs < CACHE_MAX_AGE_MS;
-
-      const withCachedProfiles = (cs: NostrContact[]): NostrContact[] =>
-        cs.map((c) => ({ ...c, profile: cachedProfileMap[c.pubkey] ?? c.profile }));
-      const fetchedContacts = await reconcileContactFollows(
+      const { fetchedContacts, cachedProfileMap, cacheAgeMs } = await reconcileCachedContactFollows(
         pk,
         relayUrls,
-        cachedContacts,
-        (cs) => startTransition(() => setContacts(withCachedProfiles(cs))),
+        (cs) => startTransition(() => setContacts(cs)),
         (cs) =>
           startTransition(() => {
-            setContacts(withCachedProfiles(cs));
+            setContacts(cs);
             finishFollowHydration();
           }),
       );
+      const cacheFresh = cacheAgeMs < CACHE_MAX_AGE_MS;
 
       if (fetchedContacts.length === 0) return;
 

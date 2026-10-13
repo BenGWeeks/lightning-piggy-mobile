@@ -187,6 +187,7 @@ describe('startLiveDmSubscription — follow-gate race + teardown (#851 F2)', ()
       const replay = setDeferredReplay.mock.calls[0][0];
       buffer.reevaluate(follows.current, replay);
       buffer.reevaluate(follows.current, replay);
+      await flush();
       expect(mockNotifyDm).toHaveBeenCalledTimes(1);
       expect(mockNotifyDm).toHaveBeenCalledWith(middle);
       expect(setDmInbox).toHaveBeenCalledTimes(1);
@@ -489,11 +490,12 @@ describe('startLiveDmSubscription — follow-gate race + teardown (#851 F2)', ()
 
     // Follows hydrate: re-evaluate replays the buffered entry → it surfaces.
     // The inbox setter is debounced (queueInboxEntry batches over ~150 ms),
-    // so assert the synchronous replay side-effect (notifyDmMessage) + that
+    // so assert the post-persistence replay signal (notifyDmMessage) + that
     // the buffer drained, which together prove the entry was recovered.
     expect(replay).toBeTruthy();
     mockNotifyDm.mockClear();
     buffer.reevaluate(new Set([ALICE]), replay!);
+    await flush();
     expect(mockNotifyDm).toHaveBeenCalledWith(ALICE);
     expect(buffer.size).toBe(0);
   });
@@ -883,6 +885,57 @@ describe('review deferred persistence recovery', () => {
     },
   );
 
+  it.each(['current', 'teardown', 'switched'])(
+    'announces replay only after a blocked write commits (owner=%s)',
+    async (owner) => {
+      let current = true;
+      const params = makeParams({ isCurrentOwner: () => current, setDeferredReplay: jest.fn() });
+      const stop = startLiveDmSubscription(params);
+      await flush();
+      let commit!: () => void;
+      jest.mocked(upsertDmMessages).mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            commit = resolve;
+          }),
+      );
+      const replay = jest.mocked(params.setDeferredReplay).mock.calls[0][0]!;
+      replay({
+        partnerPubkey: ALICE,
+        entry: {
+          id: 'blocked-replay',
+          partnerPubkey: ALICE,
+          fromMe: false,
+          createdAt: 100,
+          text: 'hello',
+          wireKind: 4,
+        },
+      });
+      await flush();
+      replay({
+        partnerPubkey: ALICE,
+        entry: {
+          id: 'queued-replay',
+          partnerPubkey: ALICE,
+          fromMe: false,
+          createdAt: 101,
+          text: 'queued behind the blocked write',
+          wireKind: 4,
+        },
+      });
+      // A conversation reload after its 150 ms debounce must not run before SQLite commits.
+      await new Promise((resolve) => setTimeout(resolve, 160));
+      expect(upsertDmMessages).toHaveBeenCalledTimes(1);
+      expect(mockNotifyDm).not.toHaveBeenCalled();
+      if (owner === 'teardown') stop();
+      if (owner === 'switched') current = false;
+      commit();
+      await flush();
+      expect(mockNotifyDm).toHaveBeenCalledTimes(owner === 'current' ? 2 : 0);
+      if (owner === 'current') expect(mockNotifyDm).toHaveBeenCalledWith(ALICE);
+    },
+  );
+
   it.each([false, true])(
     'recovers evicted kind-4 backlog after hydration (reopen with advanced cursor=%s)',
     async (reopen) => {
@@ -923,14 +976,17 @@ describe('review deferred persistence recovery', () => {
         await flush();
         expect(mockSubscribe).toHaveBeenLastCalledWith(expect.objectContaining({ sinceK4: 100 }));
       }
-      // Same-sub relay retry and reopened-sub recovery both accept the victim.
-      capturedOnEvent!(messages[0]);
-      await flush();
+      // Retained recovery floor redelivers the full backlog, including persisted IDs.
+      for (const message of messages) {
+        capturedOnEvent!(message);
+        await flush();
+      }
       const ids = jest
         .mocked(upsertDmMessages)
         .mock.calls.flatMap(([rows]) => rows.map((row) => row.eventId));
       expect(ids).toHaveLength(51);
       expect(new Set(ids).size).toBe(51);
+      expect(mockNotifyDm).toHaveBeenCalledTimes(51);
       expect(mockFireNotification).not.toHaveBeenCalled();
     },
   );

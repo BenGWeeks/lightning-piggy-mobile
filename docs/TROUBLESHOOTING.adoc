@@ -915,6 +915,17 @@ A symlink is fine for Jest. For a worktree that serves Metro to an emulator,
 install dependencies locally instead (see "Dynamic imports fail in an emulator
 worktree with shared dependencies" above).
 
+=== A blocked Jest storage mock exhausts the Node heap
+
+Binding an existing `jest.fn` before replacing its implementation does not
+preserve the original implementation: the bound function still calls the
+mock's current implementation. A wrapper that awaits a barrier and then calls
+that bound mock recurses indefinitely after release. Capture
+`jest.mocked(AsyncStorage.multiGet).getMockImplementation()` before installing
+the wrapper, call that implementation after the barrier, and restore the spy
+in `finally`. The pending-cache regressions in
+`src/contexts/reconcileContactFollows.test.ts` demonstrate this pattern.
+
 === `marmotSession.test.ts` times out under heavy CPU load
 
 The group tests in `src/services/marmotSession.test.ts` run real MLS sessions
