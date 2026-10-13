@@ -40,7 +40,12 @@ it('classifies stored signing material and makes a legacy seed wallet a Move sou
   jest
     .mocked(SecureStore.getItemAsync)
     .mockImplementation(async (key) => (key === 'onchain_mnemonic_seed' ? '' : null));
-  await migrateLegacyOnchainWallets(owner, current);
+  expect(await migrateLegacyOnchainWallets(owner, current)).toEqual(
+    new Map([
+      ['seed', 'mnemonic'],
+      ['watch', 'xpub'],
+    ]),
+  );
   const wallets = (await getWalletList(owner)).map(state);
   expect(wallets.map((w) => w.onchainImportMethod)).toEqual(['mnemonic', 'xpub']);
   expect(isSendableWallet(wallets[0])).toBe(true);
@@ -52,7 +57,12 @@ it('classifies stored signing material and makes a legacy seed wallet a Move sou
   jest.mocked(SecureStore.getItemAsync).mockClear();
   const write = jest.mocked(AsyncStorage.setItem);
   write.mockClear();
-  await migrateLegacyOnchainWallets(owner, current);
+  expect(await migrateLegacyOnchainWallets(owner, current)).toEqual(
+    new Map([
+      ['seed', 'mnemonic'],
+      ['watch', 'xpub'],
+    ]),
+  );
   expect(SecureStore.getItemAsync).not.toHaveBeenCalled();
   expect(write).not.toHaveBeenCalled();
   expect((await getWalletList(owner)).map(state)).toEqual(wallets);
@@ -66,7 +76,13 @@ it('leaves all explicit methods and NWC metadata untouched', async () => {
     { ...wallet('n'), walletType: 'nwc' as const },
   ];
   await saveWalletList(wallets, owner);
-  await migrateLegacyOnchainWallets(owner, current);
+  expect(await migrateLegacyOnchainWallets(owner, current)).toEqual(
+    new Map([
+      ['x', 'xpub'],
+      ['m', 'mnemonic'],
+      ['g', 'generated'],
+    ]),
+  );
   expect(await getWalletList(owner)).toEqual(wallets);
   expect(SecureStore.getItemAsync).not.toHaveBeenCalled();
 });
@@ -91,7 +107,13 @@ it('preserves edits, removed wallets and newly explicit methods during secure re
     );
     return null;
   });
-  await migrateLegacyOnchainWallets(owner, current);
+  expect(await migrateLegacyOnchainWallets(owner, current)).toEqual(
+    new Map([
+      ['edit', 'xpub'],
+      ['explicit', 'generated'],
+      ['new', 'xpub'],
+    ]),
+  );
   expect(await getWalletList(owner)).toEqual([
     { ...wallet('edit', 'xpub'), alias: 'renamed' },
     wallet('explicit', 'generated'),
