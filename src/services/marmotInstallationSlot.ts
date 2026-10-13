@@ -1,27 +1,31 @@
-// Public random slot identity belongs to the installation, not the account's
-// encrypted MLS partition (which sign-out wipes). Never store private keys here.
+// The public random slot id (kind-30443 `d`) belongs to the account's
+// installation — a "device" in ideas/multi-device.md is one install signed in
+// to one account — not to the account's encrypted MLS partition (which
+// sign-out wipes). It is keyed by owner: two accounts on one phone must not
+// share a `d`, or relays could link them. Never store private keys here.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { bytesToHex, randomBytes } from '@noble/hashes/utils.js';
 
 import type { MarmotKvBackend } from './marmotStore';
 
-const INSTALLATION_SLOT_KEY = 'marmot_installation_slot_v1';
+const installationSlotKey = (owner: string) => `marmot_installation_slot_v1_${owner}`;
 const VALID_SLOT = /^[0-9a-f]{64}$/;
-let pending: Promise<string> | undefined;
+const pending = new Map<string, Promise<string>>();
 
 /** Test backends model separate installations; production persists outside account wipes. */
 export async function ensureKeyPackageSlot(
   backend: MarmotKvBackend,
+  owner: string,
   installationBackend?: MarmotKvBackend,
 ): Promise<string> {
   const get = () =>
     installationBackend
       ? installationBackend.get('installation', 'keyPackageSlot')
-      : AsyncStorage.getItem(INSTALLATION_SLOT_KEY);
+      : AsyncStorage.getItem(installationSlotKey(owner));
   const set = (slot: string) =>
     installationBackend
       ? installationBackend.set('installation', 'keyPackageSlot', slot)
-      : AsyncStorage.setItem(INSTALLATION_SLOT_KEY, slot);
+      : AsyncStorage.setItem(installationSlotKey(owner), slot);
   const resolve = async () => {
     const stored = await get();
     if (stored && VALID_SLOT.test(stored)) return stored;
@@ -31,12 +35,19 @@ export async function ensureKeyPackageSlot(
     await set(slot);
     return slot;
   };
-  // Account transitions can overlap; the production installation chooses once.
-  const slot = installationBackend
-    ? await resolve()
-    : await (pending ??= resolve().finally(() => {
-        pending = undefined;
-      }));
+  // Concurrent callers for one account (signing-key lookup, maintenance,
+  // an overlapping account transition) must agree: the first chooses.
+  let slot: string;
+  if (installationBackend) slot = await resolve();
+  else {
+    const inFlight =
+      pending.get(owner) ??
+      resolve().finally(() => {
+        pending.delete(owner);
+      });
+    pending.set(owner, inFlight);
+    slot = await inFlight;
+  }
   await backend.set('meta', 'keyPackageSlot', slot);
   return slot;
 }

@@ -271,7 +271,7 @@ export class MarmotSession {
       }),
       cryptoProvider: marmotCryptoProvider,
       getSignatureKeyPair: async (ciphersuite) => {
-        const slot = await this.gate.guard(ensureKeyPackageSlot(this.backend));
+        const slot = await this.installationSlot();
         return this.gate.guard(getInstallationSignatureKeyPair(this.pubkey, slot, ciphersuite));
       },
       groupStateStore: store('groups'),
@@ -428,7 +428,7 @@ export class MarmotSession {
       // a capability White Noise requires of every invitee (encrypted media
       // v2, 0x800b). Replaced keys are retired per the retention policy.
       const cancelled = () => this.gate.stopped;
-      const slot = await this.gate.guard(ensureKeyPackageSlot(this.backend, this.opts.backend));
+      const slot = await this.installationSlot();
       const outcome = await maintainKeyPackage(this.client.keyPackages, {
         relays: this.writeRelays(),
         slot,
@@ -438,7 +438,7 @@ export class MarmotSession {
         cancelled,
       });
       refresh.settle(outcome === 'published');
-      if (outcome === 'failed') this.replenisher.retry();
+      if (outcome === 'failed') this.retryReplenish();
       else this.replenisher.resetBackoff();
       // A sign-out of this account here whose relay cleanup failed: retry it
       // now the account's signer is back (and already in use).
@@ -450,9 +450,24 @@ export class MarmotSession {
       });
     } catch (e) {
       refresh.settle(false); // no-op if it already succeeded
-      this.replenisher.retry();
+      this.retryReplenish();
       if (__DEV__) console.warn('[Marmot] key package publish failed:', e);
     }
+  }
+
+  /**
+   * Retry a failed publish with backoff — for local keys only. A remote
+   * signer (Amber / NIP-46) must sign each attempt, so a loop would re-prompt
+   * the user every 30 s–5 min while offline or after they dismissed it; those
+   * accounts wait for the next trigger (join, resume, start) as before.
+   */
+  private retryReplenish(): void {
+    if (this.opts.signerType === 'nsec') this.replenisher.retry();
+  }
+
+  /** This install's kind-30443 `d` slot for this account (survives sign-out). */
+  private installationSlot(): Promise<string> {
+    return this.gate.guard(ensureKeyPackageSlot(this.backend, this.pubkey, this.opts.backend));
   }
 
   listGroups(): MarmotGroupSummary[] {

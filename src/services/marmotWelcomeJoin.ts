@@ -1,8 +1,12 @@
 // Serializes Welcome adoption: rumor ids differ for each invited slot, but
-// one installation must hold only one leaf per group. The library adopts
-// state without rejecting a group it already tracks. Its leave API operates
-// on that tracked state, so joining an extra leaf to SelfRemove it would
-// overwrite the membership we are protecting. Ignore the extra Welcome.
+// one installation must hold only one leaf per group. The library rejects a
+// group its registry already tracks ("already exists") — but only once the
+// first join has been tracked, so concurrent joins of several Welcomes for
+// one group all passed that check and the last one overwrote the membership
+// (#1426's ghost leaves). Joining one at a time closes the race; checking
+// the decrypted group id first skips the doomed MLS join. The library's leave
+// API operates on tracked state, so joining an extra leaf to SelfRemove it
+// would overwrite the membership we are protecting. Ignore the extra Welcome.
 import type { MarmotClient, MarmotGroup, GroupRumorHistory } from '@internet-privacy/marmot-ts';
 
 import type { MarmotRumor } from './marmotSession';
@@ -29,11 +33,23 @@ interface WelcomeJoinOptions {
 
 export class MarmotWelcomeJoin {
   private tail: Promise<unknown> = Promise.resolve();
-  private readonly joiningWelcomes = new Set<string>();
+  private readonly joining = new Map<string, Promise<MarmotGroup<GroupRumorHistory> | null>>();
   constructor(private readonly options: WelcomeJoinOptions) {}
 
   accept(welcomeRumor: MarmotRumor): Promise<MarmotGroup<GroupRumorHistory> | null> {
-    const run = this.tail.then(() => this.join(welcomeRumor));
+    const id = welcomeRumor.id;
+    // The inbox, the resume scan and an approved invitation can deliver the
+    // same Welcome at once. Later callers share the in-flight attempt rather
+    // than queueing a redundant pass — and rather than getting an immediate
+    // null, which marmotPendingInvitations would read (no outcome marker yet)
+    // as a transient failure and park the approval until restart. Only
+    // DISTINCT Welcomes queue; the guard is held from here until settled.
+    const inFlight = this.joining.get(id);
+    if (inFlight) return inFlight;
+    const run = this.tail
+      .then(() => this.join(welcomeRumor))
+      .finally(() => this.joining.delete(id));
+    this.joining.set(id, run);
     this.tail = run.catch(() => undefined); // a store failure must not block the queue
     return run;
   }
@@ -46,8 +62,8 @@ export class MarmotWelcomeJoin {
     if (this.options.stopped()) return null;
     const id = welcomeRumor.id;
     const ns = WELCOME_OUTCOMES_NS;
-    if (this.joiningWelcomes.has(id) || (await this.options.backend.get(ns, id))) return null;
-    this.joiningWelcomes.add(id);
+    if (await this.options.backend.get(ns, id)) return null;
+    if (this.options.stopped()) return null; // signed out during the read
     // The marker records what happened, so the inbox can hide or explain it.
     const markHandled = async (outcome: WelcomeOutcome) => {
       await this.options.backend.set(ns, id, JSON.stringify(outcome));
@@ -57,8 +73,8 @@ export class MarmotWelcomeJoin {
     try {
       // Durable until joined or permanently rejected: the inbox stores the
       // invite's gift wrap as processed and never re-routes it, so a transient
-      // failure is retried from here (next session start) instead. Inside the
-      // try so a failed write still releases `joiningWelcomes`.
+      // failure is retried on start, resume, or relay reconnect instead
+      // (marmotPendingWelcomes).
       await this.options.backend.set('pendingWelcomes', id, JSON.stringify(welcomeRumor));
       if (this.options.stopped()) return null;
       if (await isWelcomeForJoinedGroup(this.options.client, welcomeRumor)) {
@@ -89,8 +105,7 @@ export class MarmotWelcomeJoin {
       }
       return null;
     } finally {
-      this.joiningWelcomes.delete(id);
-      this.options.onFinished();
+      this.options.onFinished(); // accept() releases the per-Welcome guard
     }
   }
 }

@@ -72,3 +72,51 @@ it.each([false, true])(
   },
   60_000,
 );
+
+it('a remote signer is asked once per trigger: a rejected republish is not retried on a loop', async () => {
+  installMarmotCryptoProvider();
+  const relay = makeRelay();
+  let change!: (state: AppStateStatus) => void;
+  const listen = jest.spyOn(AppState, 'addEventListener').mockImplementation((_type, listener) => {
+    change = listener;
+    return { remove: jest.fn() };
+  });
+  const alice = makeSession(relay);
+  let inviteePubkey = '';
+  let reject = false;
+  let attempts = 0; // every signature a remote signer would have to approve
+  const publish = relay.network.publish;
+  relay.network.publish = async (relays, event) => {
+    if (event.kind === 30443 && event.pubkey === inviteePubkey) {
+      attempts++;
+      if (reject) return Object.fromEntries(relays.map((r) => [r, { from: r, ok: false }]));
+    }
+    return publish(relays, event);
+  };
+  const invitee = makeSession(relay, undefined, 'amber');
+  inviteePubkey = invitee.pubkey;
+  change('active');
+  try {
+    await Promise.all([alice.session.start(), invitee.session.start()]);
+    await Promise.all([alice.session.ensureKeyPackage(), invitee.session.ensureKeyPackage()]);
+    expect(attempts).toBe(1);
+    await alice.session.createGroup('replenish', [invitee.pubkey]);
+    const welcome = unwrapWelcomes(relay, invitee)[0];
+    jest.useFakeTimers();
+    expect(await invitee.session.acceptWelcome(welcome)).not.toBeNull();
+    reject = true;
+    await jest.advanceTimersByTimeAsync(KEY_PACKAGE_REPLENISH_MS);
+    expect(attempts).toBe(2); // the one debounced republish the join asked for
+    await jest.advanceTimersByTimeAsync(15 * 60_000);
+    expect(attempts).toBe(2); // no backoff loop: each retry would be another Amber prompt
+    // The next ordinary trigger (resume / start / join) still tries again.
+    reject = false;
+    await invitee.session.ensureKeyPackage();
+    expect(attempts).toBe(3);
+  } finally {
+    alice.session.stop();
+    invitee.session.stop();
+    jest.useRealTimers();
+    listen.mockRestore();
+  }
+}, 60_000);

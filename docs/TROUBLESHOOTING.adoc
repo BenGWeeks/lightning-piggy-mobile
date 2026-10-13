@@ -1096,9 +1096,10 @@ had not published a new key. Checking hulk alone incorrectly suggested that
 Lightning Piggy-initiated Welcomes were incompatible.
 
 Lightning Piggy refreshes this installation's key weekly in the same `d` slot.
-The random slot id survives account sign-out and re-sign-in for the lifetime
-of the installation. Superseded secrets (used or unused) are deleted as soon
-as replacement publication is confirmed. The adopted
+The random slot id is per account per installation and survives account
+sign-out and re-sign-in (two accounts on one install never share one).
+Superseded secrets (used or unused) are deleted as soon as replacement
+publication is confirmed. The adopted
 `foundation/key-packages.md` explicitly forbids a drain window: an inviter
 must retry a delayed Welcome with the current key. Older slots are retired
 with NIP-09 only when local publication records establish that this install

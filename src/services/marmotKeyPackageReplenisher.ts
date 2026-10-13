@@ -15,7 +15,10 @@ export class KeyPackageReplenisher {
   private due: number | undefined;
   private backoff = KEY_PACKAGE_REPLENISH_MS;
   private stopped = false;
-  private active = AppState.currentState === null || AppState.currentState === 'active';
+  // Same convention as marmotPendingWelcomes: anything but 'background' is
+  // foreground at construction (iOS can report 'unknown'/'inactive' briefly),
+  // so a deadline armed before the first AppState change still fires.
+  private active = AppState.currentState !== 'background';
   private readonly subscription;
 
   constructor(private readonly run: () => Promise<void>) {
