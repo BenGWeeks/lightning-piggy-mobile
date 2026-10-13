@@ -3,8 +3,37 @@ import {
   reconcileSyntheticGroup,
   setKnownGroups,
   setSyntheticGroupReconciler,
+  waitForPendingGroupReconciliation,
 } from './groupRoutingRegistry';
 import type { Group } from '../types/groups';
+
+it('scopes pending-room waits to owner and membership and cleans up failed reconciliation', async () => {
+  let fail!: (error: Error) => void;
+  setKnownGroups([], 'a');
+  setSyntheticGroupReconciler(
+    () => new Promise<Group | null>((_resolve, reject) => (fail = reject)),
+    'a',
+  );
+  const pending = reconcileSyntheticGroup(
+    { groupId: 'room', name: 'Family', memberPubkeys: ['partner'], createdAtSec: 1 },
+    'a',
+  );
+  const rejected = expect(pending).rejects.toThrow('storage unavailable');
+  let settled = false;
+  const waiting = waitForPendingGroupReconciliation(new Set(['PARTNER']), 'a').then(() => {
+    settled = true;
+  });
+  await waitForPendingGroupReconciliation(new Set(['other-partner']), 'a');
+  await waitForPendingGroupReconciliation(new Set(['partner']), 'b');
+  expect(settled).toBe(false);
+  fail(new Error('storage unavailable'));
+  await rejected;
+  await waiting;
+  expect(findGroupForParticipants(new Set(['partner']), 'a')).toBeNull();
+  await waitForPendingGroupReconciliation(new Set(['partner']), 'a');
+  setKnownGroups([]);
+  setSyntheticGroupReconciler(null);
+});
 
 it('never routes an old account rumor through the active account registry', async () => {
   const group: Group = {

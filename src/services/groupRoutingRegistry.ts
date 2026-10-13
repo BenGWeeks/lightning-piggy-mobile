@@ -54,6 +54,20 @@ export interface SyntheticRoomInput {
 
 type SyntheticReconciler = (input: SyntheticRoomInput) => Promise<Group | null>;
 let syntheticReconciler: SyntheticReconciler | null = null;
+const pendingRooms = new Map<string, Set<Promise<Group | null>>>();
+
+function pendingRoomKey(memberPubkeys: Iterable<string>, owner: string | null): string {
+  return JSON.stringify([owner, ...Array.from(memberPubkeys, (pk) => pk.toLowerCase()).sort()]);
+}
+
+/** Wait only for this account's matching room, never unrelated room creation. */
+export async function waitForPendingGroupReconciliation(
+  otherParticipants: Set<string>,
+  owner: string | null,
+): Promise<void> {
+  const pending = pendingRooms.get(pendingRoomKey(otherParticipants, owner));
+  if (pending) await Promise.allSettled(Array.from(pending));
+}
 
 export function setSyntheticGroupReconciler(
   fn: SyntheticReconciler | null,
@@ -69,18 +83,30 @@ export async function reconcileSyntheticGroup(
 ): Promise<Group | null> {
   if (owner !== reconcilerOwner || !syntheticReconciler) return null;
   const reconcile = syntheticReconciler;
-  const group = await reconcile(input);
-  // Publish before returning: React's state-mirroring effect may not have run
-  // when the next deferred subjectless rumor starts routing.
-  if (
-    group &&
-    owner === knownOwner &&
-    owner === reconcilerOwner &&
-    reconcile === syntheticReconciler
-  ) {
-    known = [group, ...known.filter((existing) => existing.id !== group.id)];
+  const key = pendingRoomKey(input.memberPubkeys, owner);
+  const pending = pendingRooms.get(key) ?? new Set<Promise<Group | null>>();
+  const task = (async () => {
+    const group = await reconcile(input);
+    // Publish before returning: React's state-mirroring effect may not have run
+    // when the next deferred subjectless rumor starts routing.
+    if (
+      group &&
+      owner === knownOwner &&
+      owner === reconcilerOwner &&
+      reconcile === syntheticReconciler
+    ) {
+      known = [group, ...known.filter((existing) => existing.id !== group.id)];
+    }
+    return group;
+  })();
+  pending.add(task);
+  pendingRooms.set(key, pending);
+  try {
+    return await task;
+  } finally {
+    pending.delete(task);
+    if (pending.size === 0) pendingRooms.delete(key);
   }
-  return group;
 }
 
 /**

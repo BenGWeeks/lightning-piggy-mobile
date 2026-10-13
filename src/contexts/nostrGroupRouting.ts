@@ -2,6 +2,7 @@ import { classifyRumor, subjectFromRumor, type DecodedRumor } from '../utils/nip
 import {
   findGroupForParticipants,
   reconcileSyntheticGroup,
+  waitForPendingGroupReconciliation,
 } from '../services/groupRoutingRegistry';
 import { isSyntheticGroupId, syntheticGroupIdForParticipants } from '../utils/syntheticGroupId';
 import { appendGroupMessage, type GroupMessage } from '../services/groupMessagesStorageService';
@@ -53,6 +54,14 @@ export async function tryRouteGroupRumor(
   const otherParticipants =
     cls.type === 'group' ? cls.otherParticipants : new Set([cls.partnerPubkey]);
   let group = findGroupForParticipants(otherParticipants, viewerPubkey);
+  if (!group && cls.type === 'dm') {
+    // Ordinary live callbacks run concurrently. A preceding subject-tagged
+    // message may still be creating this room; don't split its follow-up
+    // into the DM inbox while the registry is awaiting reconciliation.
+    await waitForPendingGroupReconciliation(otherParticipants, viewerPubkey);
+    if (shouldAbort()) return { kind: 'group-no-match' };
+    group = findGroupForParticipants(otherParticipants, viewerPubkey);
+  }
   // A subject names a room; it does not authenticate an unknown peer.
   // Before promoting a two-party DM, preserve the receive caller's follow
   // policy. Known rooms retain membership as their trust signal. Returning

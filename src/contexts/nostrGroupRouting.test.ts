@@ -1,14 +1,19 @@
 import { tryRouteGroupRumor } from './nostrGroupRouting';
 import { createLiveRumorSurfacer } from './liveDmRumorSurface';
 import { ingestInboxWraps } from './dmWrapIngest';
-import { setKnownGroups, setSyntheticGroupReconciler } from '../services/groupRoutingRegistry';
+import {
+  setKnownGroups,
+  setSyntheticGroupReconciler,
+  type SyntheticRoomInput,
+} from '../services/groupRoutingRegistry';
 import { appendGroupMessage } from '../services/groupMessagesStorageService';
 import { upsertDmMessages } from '../services/dmDb';
 import { routeMarmotWelcome } from '../services/marmotWelcomeRouter';
 import { fireMessageNotification } from '../services/notificationService';
-import { notifyGroupMessage } from './nostrEventBus';
+import { notifyDmMessage, notifyGroupMessage } from './nostrEventBus';
 import { textForRumor, type DecodedRumor } from '../utils/nip17Unwrap';
 import { NWC_SHARE_KIND, serializeNwcShare } from '../utils/nwcShareMessage';
+import type { Group } from '../types/groups';
 
 jest.mock('../services/groupMessagesStorageService', () => ({ appendGroupMessage: jest.fn() }));
 jest.mock('../services/dmDb', () => ({
@@ -56,6 +61,107 @@ afterEach(() => {
   setKnownGroups([]);
   setSyntheticGroupReconciler(null);
 });
+
+it.each(['room', 'no-room', 'cancelled'] as const)(
+  'waits for pending reconciliation before routing concurrent ordinary live arrivals (%s)',
+  async (outcome) => {
+    setKnownGroups([], ME);
+    let finish!: (group: Group | null) => void;
+    const reconcile = jest.fn(
+      (_input: SyntheticRoomInput) => new Promise<Group | null>((resolve) => (finish = resolve)),
+    );
+    setSyntheticGroupReconciler(reconcile, ME);
+    const queueInboxEntry = jest.fn();
+    const writes: Promise<void>[] = [];
+    let cancelled = false;
+    const surface = createLiveRumorSurfacer({
+      viewerPubkey: ME,
+      isCancelled: () => cancelled,
+      shouldAbort: () => cancelled,
+      followPubkeysRef: { current: new Set([PEER]) },
+      followGateBuffer: { defer: jest.fn(), reevaluate: jest.fn(), clear: jest.fn(), size: 0 },
+      isFreshArrival: () => true,
+      queueInboxEntry,
+      knownWrapIds: new Set(),
+      chainWrite: (task) => {
+        writes.push(task());
+      },
+    });
+    const first = surface(
+      {
+        ...rumor(14),
+        tags: [
+          ['p', ME],
+          ['subject', 'Family'],
+        ],
+      },
+      'first',
+    );
+    expect(reconcile).toHaveBeenCalledTimes(1);
+    const followup = surface({ ...rumor(14), content: 'follow-up', created_at: 21 }, 'followup');
+    // Let ordinary live delivery proceed while room creation is still blocked.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const prematureInboxCalls = queueInboxEntry.mock.calls.length;
+    const prematureDmWrites = jest.mocked(upsertDmMessages).mock.calls.length;
+    const prematureNotifications = jest.mocked(fireMessageNotification).mock.calls.length;
+    cancelled = outcome === 'cancelled';
+    const input = reconcile.mock.calls[0][0];
+    finish(
+      outcome === 'no-room'
+        ? null
+        : {
+            id: input.groupId,
+            name: input.name,
+            memberPubkeys: input.memberPubkeys,
+            createdAt: 1,
+            updatedAt: 1,
+          },
+    );
+    await Promise.all([first, followup]);
+    await Promise.all(writes);
+    expect(prematureInboxCalls).toBe(0);
+    expect(prematureDmWrites).toBe(0);
+    expect(prematureNotifications).toBe(0);
+    if (outcome === 'room') {
+      expect(appendGroupMessage).toHaveBeenCalledTimes(2);
+      for (const id of ['first', 'followup']) {
+        expect(appendGroupMessage).toHaveBeenCalledWith(
+          ME,
+          input.groupId,
+          expect.objectContaining({ id }),
+        );
+        expect(notifyGroupMessage).toHaveBeenCalledWith(
+          input.groupId,
+          expect.objectContaining({ id }),
+        );
+      }
+      expect(fireMessageNotification).toHaveBeenCalledTimes(2);
+      expect(fireMessageNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: 'group',
+          threadId: input.groupId,
+          body: 'follow-up',
+        }),
+      );
+      expect(queueInboxEntry).not.toHaveBeenCalled();
+      expect(upsertDmMessages).not.toHaveBeenCalled();
+      expect(notifyDmMessage).not.toHaveBeenCalled();
+    } else if (outcome === 'no-room') {
+      expect(queueInboxEntry).toHaveBeenCalledTimes(1);
+      expect(queueInboxEntry).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'followup', partnerPubkey: PEER }),
+      );
+      expect(upsertDmMessages).toHaveBeenCalledTimes(1);
+      expect(appendGroupMessage).not.toHaveBeenCalled();
+      expect(fireMessageNotification).toHaveBeenCalledWith(expect.objectContaining({ kind: 'dm' }));
+    } else {
+      expect(queueInboxEntry).not.toHaveBeenCalled();
+      expect(upsertDmMessages).not.toHaveBeenCalled();
+      expect(appendGroupMessage).not.toHaveBeenCalled();
+      expect(fireMessageNotification).not.toHaveBeenCalled();
+    }
+  },
+);
 
 it.each([15, 444, NWC_SHARE_KIND])(
   'leaves subjectless kind-%s rumors on their specialized DM path despite a matching room',
