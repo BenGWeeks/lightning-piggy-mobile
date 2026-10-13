@@ -244,7 +244,17 @@ The build number (iOS `CFBundleVersion` / Android `versionCode`) is independent 
 
 NOTE: The pre-`npm version` flow had `app.config.ts` hardcoded to `'1.0.0'` and a `sed` step in `release.yml` that overwrote it from the tag — but the sed only ran on actual GitHub Release events, so `workflow_dispatch` re-runs and local `eas build` invocations always shipped `1.0.0` regardless of the tag. The current flow eliminates that drift.
 
-==== Local production builds (fallback)
+==== Installing on an iPhone that can't use TestFlight (family members under 13)
+
+TestFlight requires an Apple ID aged 13+, so younger family members get the production app as a *device-signed* (ad-hoc) build instead. The `production-adhoc` profile in `eas.json` is the production app (same bundle id, same notification server) signed for the registered devices only.
+
+. Register the phone once: `eas device:create` (interactive: choose *Website*, open the link on the phone, install the profile). Plugging the phone into a Mac and running an Xcode build with `-allowProvisioningDeviceRegistration` also registers it.
+. Build the release tag: `git worktree add --detach ../lp-adhoc vX.Y.Z && cd ../lp-adhoc && eas build -p ios -e production-adhoc`. The first run must be *interactive* (it creates the ad-hoc provisioning profile and asks which devices to include; pick all). Later runs work with `--non-interactive`. Apple authentication can use the App Store Connect API key via `EXPO_ASC_API_KEY_PATH`, `EXPO_ASC_KEY_ID`, `EXPO_ASC_ISSUER_ID` instead of an Apple ID login.
+. Install: open the build page's install link on the phone (Safari), or over a cable from a Mac: `curl -L -o app.ipa <artifact url>` then `xcrun devicectl device install app --device <id> app.ipa` (`xcrun devicectl list devices` shows the id). The phone needs *Developer Mode* on (Settings → Privacy & Security) and must trust the Mac.
+
+The build doesn't auto-update: repeat step 2–3 for each release the phone should get. `autoIncrement` is off so the build number doesn't advance the release counter.
+
+== Local production builds (fallback)
 
 WARNING: **This is not the release path.** Cutting a release goes through `.github/workflows/release.yml` (see "Cutting a release" below), which runs EAS cloud builds anchored to the published tag. Running `eas build --local` manually for a release detaches the artifact from any published tag — the build comes from the local checkout snapshot whenever you happened to invoke it, with no record of which source revision actually shipped. The GitHub Release notes then drift away from what's in users' hands. We hit exactly this on v1.1.0 (the local build artifact wasn't anchored to the tag, and reconstructing what the binary contained meant inspecting working-tree state after the fact).
 
