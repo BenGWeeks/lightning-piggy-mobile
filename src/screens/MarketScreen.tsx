@@ -1,3 +1,4 @@
+import BrandedRefreshControl from '../components/BrandedRefreshControl';
 import { marketMerchants, resolveMerchantSelection } from '../utils/marketMerchants';
 import { useCollectionFilter } from '../hooks/useCollectionFilter';
 import MarketCollectionChips from '../components/MarketCollectionChips';
@@ -349,8 +350,9 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
 
       <FlatList
         data={products}
-        refreshing={live.loading}
-        onRefresh={live.refresh}
+        refreshControl={
+          <BrandedRefreshControl refreshing={live.loading} onRefresh={live.refresh} />
+        }
         keyExtractor={(p) => p.id}
         numColumns={MARKET_GRID_COLUMNS}
         columnWrapperStyle={styles.gridRow}

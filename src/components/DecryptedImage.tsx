@@ -1,6 +1,7 @@
+import BrandedSpinner from './BrandedSpinner';
 import { Image } from 'expo-image';
 import React, { useMemo } from 'react';
-import { View, Text, ActivityIndicator } from 'react-native';
+import { View, Text } from 'react-native';
 import { AlertCircle } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createDecryptedImageStyles } from '../styles/DecryptedImage.styles';
@@ -89,7 +90,7 @@ const DecryptedImage: React.FC<Props> = ({
   if (!localUri) {
     return (
       <View style={[style, styles.center]}>
-        <ActivityIndicator size="small" color={colors.brandPink} />
+        <BrandedSpinner size="small" />
       </View>
     );
   }

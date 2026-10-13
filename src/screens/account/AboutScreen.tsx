@@ -1,5 +1,6 @@
+import BrandedSpinner from '../../components/BrandedSpinner';
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, Image, ActivityIndicator, Linking } from 'react-native';
+import { View, Text, Image, Linking } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nip19 from 'nostr-tools/nip19';
@@ -90,7 +91,7 @@ const AboutScreen: React.FC = () => {
     <AccountScreenLayout title={t('aboutScreen.title')}>
       <View style={styles.teamCard}>
         {teamProfileLoading ? (
-          <ActivityIndicator size="small" color={colors.brandPink} style={styles.loading} />
+          <BrandedSpinner size="small" style={styles.loading} />
         ) : teamProfile ? (
           <>
             {teamProfile.banner && (

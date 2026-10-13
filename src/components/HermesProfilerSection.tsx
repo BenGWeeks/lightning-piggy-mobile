@@ -1,5 +1,6 @@
+import BrandedSpinner from './BrandedSpinner';
 import React, { useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { Alert } from './BrandedAlert';
@@ -129,7 +130,7 @@ const HermesProfilerSection: React.FC = () => {
             testID="hermes-profiler-stop"
           >
             {profilerBusy ? (
-              <ActivityIndicator color={colors.white} />
+              <BrandedSpinner onGradient />
             ) : (
               <Text style={[styles.profilerButtonText, styles.profilerButtonTextPrimary]}>
                 {t('hermesProfiler.stop')}

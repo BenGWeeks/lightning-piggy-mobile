@@ -1,5 +1,6 @@
+import BrandedSpinner from './BrandedSpinner';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Alert } from './BrandedAlert';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -118,7 +119,7 @@ function PublishButton({
       accessibilityLabel={t('publishedRelays.publish')}
     >
       {busy ? (
-        <ActivityIndicator />
+        <BrandedSpinner />
       ) : (
         <Text style={styles.publishButtonText}>{t('publishedRelays.publish')}</Text>
       )}
@@ -223,7 +224,7 @@ export default function PublishedRelayListsSection({
       {reportState && <PublishResult {...reportState} />}
       <View style={styles.list} testID="nip65-relay-list">
         {editor.nip65Loading ? (
-          <ActivityIndicator style={{ paddingVertical: 10 }} testID="nip65-loading" />
+          <BrandedSpinner style={{ paddingVertical: 10 }} testID="nip65-loading" />
         ) : (
           editor.nip65Draft.length === 0 && (
             <Text style={styles.empty}>{t('publishedRelays.nip65Empty')}</Text>
@@ -267,7 +268,7 @@ export default function PublishedRelayListsSection({
       />
       <View style={styles.list} testID="inbox-relay-list">
         {editor.inboxLoading ? (
-          <ActivityIndicator style={{ paddingVertical: 10 }} />
+          <BrandedSpinner style={{ paddingVertical: 10 }} />
         ) : (
           editor.inboxDraft.length === 0 && (
             <Text style={styles.empty}>{t('publishedRelays.inboxEmpty')}</Text>

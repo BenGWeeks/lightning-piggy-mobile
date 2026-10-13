@@ -1,5 +1,6 @@
+import BrandedSpinner from './BrandedSpinner';
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity } from 'react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { useNostr } from '../contexts/NostrContext';
@@ -96,7 +97,7 @@ const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount, regi
             activeOpacity={0.8}
           >
             {publishing ? (
-              <ActivityIndicator color={colors.white} size="small" />
+              <BrandedSpinner size="small" onGradient />
             ) : (
               <Text style={styles.submitText}>
                 {isEditing ? t('market.comments.save') : t('market.comments.post')}
@@ -128,7 +129,7 @@ const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount, regi
           </TouchableOpacity>
         </View>
       ) : loading && topLevel.length === 0 ? (
-        <ActivityIndicator style={styles.loading} color={colors.brandPink} />
+        <BrandedSpinner style={styles.loading} />
       ) : topLevel.length === 0 ? (
         <Text style={styles.state}>{t('market.comments.empty')}</Text>
       ) : (

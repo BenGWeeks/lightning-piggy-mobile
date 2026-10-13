@@ -1,13 +1,7 @@
+import BrandedSpinner from './BrandedSpinner';
 import type { MessageQuote } from '../utils/messageQuote';
 import React, { useMemo } from 'react';
-import {
-  ActivityIndicator,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-  type TextInputProps,
-} from 'react-native';
+import { Text, TextInput, TouchableOpacity, View, type TextInputProps } from 'react-native';
 import { Plus, Send, Mic, Pencil, X } from 'lucide-react-native';
 import Svg, { Path } from 'react-native-svg';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
@@ -230,11 +224,7 @@ const ConversationComposer: React.FC<ConversationComposerProps> = ({
           accessibilityLabel={accessibilityLabels?.attach ?? t('conversationComposer.attach')}
           testID={testIDs?.attach}
         >
-          {attachLoading ? (
-            <ActivityIndicator color={colors.brandPink} />
-          ) : (
-            <Plus size={22} color={colors.brandPink} />
-          )}
+          {attachLoading ? <BrandedSpinner /> : <Plus size={22} color={colors.brandPink} />}
         </TouchableOpacity>
         <TextInput
           style={styles.input}
@@ -270,7 +260,7 @@ const ConversationComposer: React.FC<ConversationComposerProps> = ({
             testID={testIDs?.send}
           >
             {sending ? (
-              <ActivityIndicator color={colors.white} />
+              <BrandedSpinner onGradient />
             ) : (
               <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
                 <Path
@@ -291,11 +281,7 @@ const ConversationComposer: React.FC<ConversationComposerProps> = ({
             accessibilityLabel={sendLabel}
             testID={testIDs?.send}
           >
-            {sending ? (
-              <ActivityIndicator color={colors.white} />
-            ) : (
-              <Send size={20} color={colors.white} />
-            )}
+            {sending ? <BrandedSpinner onGradient /> : <Send size={20} color={colors.white} />}
           </TouchableOpacity>
         )}
       </Animated.View>

@@ -1,5 +1,6 @@
+import BrandedSpinner from './BrandedSpinner';
 import React, { useMemo } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity } from 'react-native';
 import { Package, Truck } from 'lucide-react-native';
 import type { Event } from 'nostr-tools';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -60,7 +61,7 @@ const MarketListingDetails: React.FC<Props> = ({ event, currency }) => {
             <Text style={styles.heading}>{t('market.sell.detail.shipping')}</Text>
           </View>
           {shipping.status === 'loading' ? (
-            <ActivityIndicator color={colors.brandPink} />
+            <BrandedSpinner />
           ) : shipping.status === 'error' ? (
             <TouchableOpacity
               onPress={shipping.retry}

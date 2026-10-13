@@ -1,7 +1,8 @@
 import { checkRemoteUrl, PREVIEW_IMAGE_MAX_BYTES } from '../utils/remoteUrlPolicy';
 import { useRemoteMediaUri } from '../hooks/useRemoteMediaUri';
+import BrandedSpinner from './BrandedSpinner';
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Linking, Text, TouchableOpacity, View } from 'react-native';
+import { Linking, Text, TouchableOpacity, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useNostr } from '../contexts/NostrContext';
@@ -181,7 +182,7 @@ const MessageLinkPreview: React.FC<Props> = ({
         <View style={styles.body}>
           {loading && !preview ? (
             <View style={styles.loadingRow}>
-              <ActivityIndicator size="small" color={colors.brandPink} />
+              <BrandedSpinner size="small" />
               <Text style={styles.urlFallback} numberOfLines={1}>
                 {url}
               </Text>

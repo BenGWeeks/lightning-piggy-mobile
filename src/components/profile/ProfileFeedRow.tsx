@@ -1,5 +1,6 @@
+import BrandedSpinner from '../BrandedSpinner';
 import React from 'react';
-import { ActivityIndicator, Linking, Text, TouchableOpacity, View } from 'react-native';
+import { Linking, Text, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import { Play } from 'lucide-react-native';
 import NostrContent from '../nostr/NostrContent';
@@ -44,7 +45,6 @@ const STATUS_KEYS: Record<Exclude<ProfileStatus, 'loading'>, string> = {
  */
 const ProfileFeedRow: React.FC<Props> = ({ row, styles, onOpenImage, onOpenProduct }) => {
   const t = useTranslation();
-  const colors = useThemeColors();
   switch (row.type) {
     case 'post':
       return (
@@ -99,7 +99,7 @@ const ProfileFeedRow: React.FC<Props> = ({ row, styles, onOpenImage, onOpenProdu
       return (
         <View style={styles.statusRow} testID={`profile-status-${row.status}`}>
           {row.status === 'loading' ? (
-            <ActivityIndicator size="small" color={colors.brandPink} />
+            <BrandedSpinner size="small" />
           ) : (
             <Text
               style={styles.statusText}

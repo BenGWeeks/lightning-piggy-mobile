@@ -1,5 +1,6 @@
+import BrandedSpinner from './BrandedSpinner';
 import React from 'react';
-import { ActivityIndicator, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { Smartphone } from 'lucide-react-native';
 import { useLocale } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
@@ -26,7 +27,7 @@ const MemberDeviceList: React.FC<Props> = ({ tid, devices, styles, colors }) => 
   if (!devices) {
     return (
       <View style={styles.deviceList}>
-        <ActivityIndicator size="small" color={colors.textSupplementary} />
+        <BrandedSpinner size="small" />
       </View>
     );
   }

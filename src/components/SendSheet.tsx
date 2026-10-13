@@ -865,7 +865,6 @@ const SendSheet: React.FC<Props> = ({
                     currency={currency}
                     onEnterAmount={() => setStep('amount')}
                     styles={styles}
-                    spinnerColor={colors.brandPink}
                   />
 
                   {isOnchainAddress && invoiceData ? (
@@ -972,7 +971,6 @@ const SendSheet: React.FC<Props> = ({
                   onClose();
                 }}
                 styles={styles}
-                colors={colors}
               />
             </View>
           </BottomSheetScrollView>

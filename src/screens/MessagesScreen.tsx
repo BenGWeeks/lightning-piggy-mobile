@@ -1,5 +1,6 @@
 import { MarmotInvitations } from '../components/MarmotInvitations';
 import { preferredDmProtocol } from '../services/preferredDmProtocol';
+import BrandedRefreshControl from '../components/BrandedRefreshControl';
 import { useLocale } from '../contexts/LocaleContext';
 import { useLiveMessageIndicator } from '../hooks/useLiveMessageIndicator';
 import NewMessagesPill from '../components/NewMessagesPill';
@@ -11,7 +12,6 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  RefreshControl,
   InteractionManager,
   AppState,
 } from 'react-native';
@@ -858,7 +858,9 @@ const MessagesScreen: React.FC = () => {
             extraData={mentionedGroupIds}
             onScroll={live.onScroll}
             scrollEventThrottle={16}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
+            refreshControl={
+              <BrandedRefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+            }
             ListEmptyComponent={
               <View style={styles.emptyState}>
                 <Text style={styles.emptyTitle}>

@@ -5,6 +5,7 @@ import { fetchLinkPreview } from '../services/linkPreviewFetcher';
 import { getLinkPreviewEnabled } from '../services/linkPreviewPreference';
 import MessageLinkPreview from './MessageLinkPreview';
 
+jest.mock('../contexts/LocaleContext', () => ({ useTranslation: () => (key: string) => key }));
 jest.mock('../contexts/ThemeContext', () => ({
   useThemeColors: () => jest.requireActual('../styles/palettes').lightPalette,
 }));

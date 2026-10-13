@@ -1,3 +1,4 @@
+import BrandedSpinner from './BrandedSpinner';
 /**
  * BoltzReceiveSheet — issue #92.
  *
@@ -41,7 +42,6 @@ import {
   TouchableOpacity,
   Pressable,
   Share,
-  ActivityIndicator,
   BackHandler,
   Keyboard,
   Platform,
@@ -644,7 +644,7 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
 
             {creating ? (
               <View style={styles.loadingBlock}>
-                <ActivityIndicator size="large" color={colors.brandPink} />
+                <BrandedSpinner size="large" />
                 <Text style={styles.subtitle}>{t('boltzReceive.creating')}</Text>
               </View>
             ) : createError ? (
@@ -727,7 +727,7 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
                   ) : statusVariant === 'error' ? (
                     <AlertTriangle size={18} color={colors.red} />
                   ) : (
-                    <ActivityIndicator size="small" color={colors.brandPink} />
+                    <BrandedSpinner size="small" />
                   )}
                   <Text
                     style={[
@@ -786,7 +786,7 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
                     testID="boltz-receive-refund"
                   >
                     {refunding ? (
-                      <ActivityIndicator color={colors.brandPink} />
+                      <BrandedSpinner />
                     ) : (
                       <Text style={styles.refundButtonText}>{t('boltzReceive.refundButton')}</Text>
                     )}

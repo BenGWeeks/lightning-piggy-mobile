@@ -1,5 +1,6 @@
+import BrandedSpinner from './BrandedSpinner';
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { View, Text, FlatList, ActivityIndicator, type ListRenderItemInfo } from 'react-native';
+import { View, Text, FlatList, type ListRenderItemInfo } from 'react-native';
 import type { RefreshControlProps } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -263,15 +264,16 @@ const TransactionList: React.FC<Props> = ({ transactions, refreshControl, curren
     [styles, contactProfileByPubkey, contactByLud16, btcPrice, currency, onPressTx, swapStateTick],
   );
 
-  const listFooter = hasMore ? (
-    <View
-      style={styles.footerSpinner}
-      accessibilityLabel={t('transactionList.loadingMore')}
-      testID="transaction-list-loading-more"
-    >
-      <ActivityIndicator size="small" color={colors.brandPink} />
-    </View>
-  ) : null;
+  const listFooter =
+    hasMore && !refreshControl?.props.refreshing ? (
+      <View
+        style={styles.footerSpinner}
+        accessibilityLabel={t('transactionList.loadingMore')}
+        testID="transaction-list-loading-more"
+      >
+        <BrandedSpinner size="small" />
+      </View>
+    ) : null;
 
   return (
     <>

@@ -1,9 +1,11 @@
+import BrandedSpinner from './BrandedSpinner';
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, Image } from 'react-native';
+import { View, Text, TouchableOpacity, Image } from 'react-native';
 import { Alert } from './BrandedAlert';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import {
   BottomSheetBackdrop,
+  type BottomSheetBackdropProps,
   BottomSheetScrollView,
   BottomSheetTextInput,
   type BottomSheetScrollViewMethods,
@@ -211,7 +213,9 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
   );
 
   const renderBackdrop = useCallback(
-    (props: any) => <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} />,
+    (props: BottomSheetBackdropProps) => (
+      <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} />
+    ),
     [],
   );
 
@@ -663,7 +667,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                   }
                 >
                   {connecting ? (
-                    <ActivityIndicator color={colors.white} />
+                    <BrandedSpinner onGradient />
                   ) : (
                     <Text style={styles.primaryButtonText}>
                       {walletType === 'onchain'

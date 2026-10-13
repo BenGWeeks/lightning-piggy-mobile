@@ -1,4 +1,5 @@
 import { preferredConversationParams } from '../services/preferredDmProtocol';
+import BrandedSpinner from '../components/BrandedSpinner';
 import { useGroupConversationLoader } from '../hooks/useGroupConversationLoader';
 import { useGroupChatTools } from '../hooks/useGroupChatTools';
 import { useChatLocalHistory } from '../hooks/useChatLocalHistory';
@@ -17,7 +18,7 @@ import { useSharedContactProfiles } from '../hooks/useSharedContactProfiles';
 import { groupReadKey } from '../services/chatReadPositions';
 import { messageMentions } from '../utils/chatMentions';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, FlatList, ActivityIndicator, Linking } from 'react-native';
+import { View, Text, TouchableOpacity, FlatList, Linking } from 'react-native';
 import { Alert } from '../components/BrandedAlert';
 import {
   KeyboardController,
@@ -668,7 +669,7 @@ const GroupConversationScreen: React.FC = () => {
             avoidance via KeyboardStickyView. */}
           <Animated.View style={[{ flex: 1 }, animatedListLiftStyle]}>
             {loadingMessages ? (
-              <ActivityIndicator color={colors.brandPink} style={{ marginTop: 32 }} />
+              <BrandedSpinner style={{ marginTop: 32 }} />
             ) : (
               <FlatList
                 ref={listRef}

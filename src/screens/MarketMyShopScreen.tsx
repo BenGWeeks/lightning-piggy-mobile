@@ -1,7 +1,8 @@
+import BrandedRefreshControl from '../components/BrandedRefreshControl';
 import MerchantIdentity from '../components/MerchantIdentity';
 import CollectionManager from '../components/CollectionManager';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, FlatList, RefreshControl } from 'react-native';
+import { View, Text, TouchableOpacity, FlatList } from 'react-native';
 import { Plus, Settings, Store } from 'lucide-react-native';
 import type { Event } from 'nostr-tools';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -198,11 +199,7 @@ const MarketMyShopScreen: React.FC<Props> = ({ navigation }) => {
         contentContainerStyle={styles.listContent}
         style={styles.flex1}
         refreshControl={
-          <RefreshControl
-            refreshing={status === 'loading'}
-            onRefresh={refresh}
-            tintColor={colors.brandPink}
-          />
+          <BrandedRefreshControl refreshing={status === 'loading'} onRefresh={refresh} />
         }
         initialNumToRender={8}
         windowSize={7}

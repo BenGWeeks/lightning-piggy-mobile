@@ -1,6 +1,8 @@
 import { sendSharedDm } from '../services/sendSharedDm';
 import { DEFAULT_DM_PROTOCOL } from '../utils/dmProtocol';
 import { preferredDmProtocol } from '../services/preferredDmProtocol';
+import BrandedRefreshControl from '../components/BrandedRefreshControl';
+import BrandedSpinner from '../components/BrandedSpinner';
 import { useCollectionFilter } from '../hooks/useCollectionFilter';
 import MarketCollectionChips from '../components/MarketCollectionChips';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -8,7 +10,6 @@ import {
   View,
   Text,
   TouchableOpacity,
-  ActivityIndicator,
   type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -304,7 +305,7 @@ const ContactProfileScreen: React.FC = () => {
       return;
     }
     setSendSheetOpen(true);
-  }, [hasWallets, contact.lightningAddress, contact.pubkey, contact.name, relays]);
+  }, [hasWallets, contact.lightningAddress, contact.pubkey, contact.name, relays, t]);
 
   const handleSetLightningAddress = useCallback(
     async (address: string) => {
@@ -352,7 +353,7 @@ const ContactProfileScreen: React.FC = () => {
     } finally {
       setLoadingFollow(false);
     }
-  }, [contact.pubkey, contact.name, loadingFollow, following, followContact, unfollowContact]);
+  }, [contact.pubkey, contact.name, loadingFollow, following, followContact, unfollowContact, t]);
 
   const handleCopyNpub = useCallback(async () => {
     if (!npub) return;
@@ -363,7 +364,7 @@ const ContactProfileScreen: React.FC = () => {
       position: 'top',
       visibilityTime: 1800,
     });
-  }, [npub]);
+  }, [npub, t]);
 
   const handleCopyLnAddress = useCallback(async () => {
     if (!contact.lightningAddress) return;
@@ -374,7 +375,7 @@ const ContactProfileScreen: React.FC = () => {
       position: 'top',
       visibilityTime: 1800,
     });
-  }, [contact.lightningAddress]);
+  }, [contact.lightningAddress, t]);
 
   // "Share to friend" — opens FriendPickerSheet for NIP-17 DM share.
   const handleShareToFriendOpen = useCallback(() => {
@@ -399,7 +400,7 @@ const ContactProfileScreen: React.FC = () => {
     } catch {
       // User dismissed or platform rejected — nothing to surface.
     }
-  }, [contact.pubkey, contact.name, npub, contacts, relays]);
+  }, [contact.pubkey, contact.name, npub, contacts, relays, t]);
 
   const handleShareToFriend = useCallback(
     async (friend: PickedFriend) => {
@@ -451,6 +452,7 @@ const ContactProfileScreen: React.FC = () => {
       relays,
       viewerPubkey,
       navigation,
+      t,
     ],
   );
 
@@ -674,7 +676,7 @@ const ContactProfileScreen: React.FC = () => {
   const listFooter = canPage ? (
     <View style={tabStyles.footer}>
       {feed.loadingMore ? (
-        <ActivityIndicator size="small" color={colors.brandPink} />
+        <BrandedSpinner size="small" />
       ) : (
         <TouchableOpacity
           style={tabStyles.loadMoreButton}
@@ -737,8 +739,7 @@ const ContactProfileScreen: React.FC = () => {
         onEndReachedThreshold={0.5}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
-        refreshing={refreshing}
-        onRefresh={handleRefresh}
+        refreshControl={<BrandedRefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
         onScroll={handleScroll}
         scrollEventThrottle={16}
         testID="contact-profile-list"

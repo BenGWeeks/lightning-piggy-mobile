@@ -1,13 +1,6 @@
+import BrandedSpinner from './BrandedSpinner';
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  ActivityIndicator,
-  BackHandler,
-  ScrollView,
-  Share,
-} from 'react-native';
+import { View, Text, TouchableOpacity, BackHandler, ScrollView, Share } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import {
   BottomSheetBackdrop,
@@ -171,7 +164,7 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
           {/* QR Code at top */}
           <View style={styles.qrContainer}>
             {loading ? (
-              <ActivityIndicator size="large" color={colors.brandPink} />
+              <BrandedSpinner size="large" />
             ) : paymentReceived ? (
               <View style={styles.successOverlay}>
                 <Check size={48} color={colors.green} />

@@ -1,8 +1,9 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { Switch, Text, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import * as Clipboard from 'expo-clipboard';
 import Toast from '../../components/BrandedToast';
+import BrandedSpinner from '../../components/BrandedSpinner';
 import RelayOperatorSection from '../../components/RelayOperatorSection';
 import { relayAcceptedKinds, COMMON_KIND_NAMES } from '../../services/relayKindPolicy';
 import { Copy, Server } from 'lucide-react-native';
@@ -104,7 +105,7 @@ export default function RelayDetailsScreen({
       <View style={styles.card} testID="relay-details-about">
         <Text style={styles.heading}>{t('relayDetails.about')}</Text>
         {loading ? (
-          <ActivityIndicator testID="relay-details-loading" />
+          <BrandedSpinner testID="relay-details-loading" />
         ) : info ? (
           <>
             <View style={styles.about}>

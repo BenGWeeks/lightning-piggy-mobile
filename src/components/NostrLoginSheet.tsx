@@ -1,9 +1,9 @@
+import BrandedSpinner from './BrandedSpinner';
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
-  ActivityIndicator,
   Platform,
   BackHandler,
   Keyboard,
@@ -17,6 +17,7 @@ import {
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
   BottomSheetScrollView,
+  type BottomSheetScrollViewMethods,
   BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
 import { BottomSheetModal } from './AccessibleBottomSheetModal';
@@ -79,7 +80,7 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
    *  promise instead of leaving a relay subscription hanging. */
   const nip46AbortRef = useRef<AbortController | null>(null);
   const sheetRef = useRef<BottomSheetModal>(null);
-  const scrollRef = useRef<any>(null);
+  const scrollRef = useRef<BottomSheetScrollViewMethods>(null);
   // No explicit snapPoints — content-height only, not user-draggable.
 
   useEffect(() => {
@@ -430,7 +431,7 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
               testID="login-button"
             >
               {isLoggingIn ? (
-                <ActivityIndicator color={colors.white} />
+                <BrandedSpinner onGradient />
               ) : (
                 <Text style={styles.loginButtonText}>{t('nostrLoginSheet.login')}</Text>
               )}
@@ -524,7 +525,7 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
               testID="create-account-submit"
             >
               {creating ? (
-                <ActivityIndicator color={colors.white} />
+                <BrandedSpinner onGradient />
               ) : (
                 <Text style={styles.loginButtonText}>
                   {t('nostrLoginSheet.createAccountTitle')}
@@ -563,7 +564,7 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
 
             {(nip46Pairing || nip46Finalizing) && (
               <View style={styles.nip46WaitingRow}>
-                <ActivityIndicator color={colors.brandPink} />
+                <BrandedSpinner />
                 <Text style={styles.nip46WaitingText}>
                   {nip46Finalizing
                     ? t('nostrLoginSheet.nip46Finalizing')

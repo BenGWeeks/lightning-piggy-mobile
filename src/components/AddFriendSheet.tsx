@@ -1,13 +1,6 @@
+import BrandedSpinner from './BrandedSpinner';
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  BackHandler,
-  ActivityIndicator,
-  Keyboard,
-  Platform,
-} from 'react-native';
+import { View, Text, TouchableOpacity, BackHandler, Keyboard, Platform } from 'react-native';
 import { Alert } from './BrandedAlert';
 import { confirmLinkAction, looksLikeProfileReference } from '../utils/confirmLinkAction';
 import {
@@ -259,7 +252,7 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
               testID="add-friend-submit"
             >
               {loading ? (
-                <ActivityIndicator color={colors.white} />
+                <BrandedSpinner onGradient />
               ) : (
                 <Text style={styles.addButtonText}>{t('addFriendSheet.addFriend')}</Text>
               )}
@@ -269,7 +262,7 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
           <View style={styles.scanContent}>
             {loading ? (
               <View style={styles.scanLoading}>
-                <ActivityIndicator size="large" color={colors.brandPink} />
+                <BrandedSpinner size="large" />
                 <Text style={styles.scanLoadingText}>{t('addFriendSheet.addingFriend')}</Text>
               </View>
             ) : scanError ? (

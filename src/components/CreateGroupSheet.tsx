@@ -1,13 +1,6 @@
+import BrandedSpinner from './BrandedSpinner';
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  ActivityIndicator,
-  BackHandler,
-  Platform,
-  Keyboard,
-} from 'react-native';
+import { View, Text, TouchableOpacity, BackHandler, Platform, Keyboard } from 'react-native';
 import { Alert } from './BrandedAlert';
 import { Image } from 'expo-image';
 import Svg, { Path, Circle } from 'react-native-svg';
@@ -549,7 +542,7 @@ const CreateGroupSheet: React.FC<Props> = ({ visible, onClose, onCreated }) => {
           testID="create-group-submit"
         >
           {saving ? (
-            <ActivityIndicator color={colors.white} />
+            <BrandedSpinner onGradient />
           ) : (
             <Text style={styles.primaryButtonText}>{t('createGroupSheet.createGroup')}</Text>
           )}

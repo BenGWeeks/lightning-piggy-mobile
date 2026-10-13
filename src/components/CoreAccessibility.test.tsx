@@ -75,7 +75,6 @@ it('exposes send disabled and busy state, preserving cancel and preventing disab
       handleSend={handleSend}
       onCancel={onCancel}
       styles={styles}
-      colors={colors}
     />,
   );
   fireEvent.press(screen.getByRole('button', { name: 'Send', disabled: true }));
@@ -87,7 +86,6 @@ it('exposes send disabled and busy state, preserving cancel and preventing disab
       handleSend={handleSend}
       onCancel={onCancel}
       styles={styles}
-      colors={colors}
     />,
   );
   fireEvent.press(screen.getByRole('button', { name: 'Send', disabled: false }));
@@ -99,7 +97,6 @@ it('exposes send disabled and busy state, preserving cancel and preventing disab
       handleSend={handleSend}
       onCancel={onCancel}
       styles={styles}
-      colors={colors}
     />,
   );
   fireEvent.press(screen.getByRole('button', { name: 'Send', disabled: true, busy: true }));

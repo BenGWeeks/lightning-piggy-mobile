@@ -1,14 +1,7 @@
 import { useReceiveFriendShare } from '../hooks/useReceiveFriendShare';
+import BrandedSpinner from './BrandedSpinner';
 import React, { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  Pressable,
-  Share,
-  ActivityIndicator,
-  BackHandler,
-} from 'react-native';
+import { View, Text, TouchableOpacity, Pressable, Share, BackHandler } from 'react-native';
 import {
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
@@ -222,7 +215,7 @@ const ReceiveSheet: React.FC<Props> = ({
         if (sessionTokenRef.current === token) setLoading(false);
       }
     },
-    [makeInvoiceForWallet, refreshBalanceForWallet, capturedWalletId, expectPayment],
+    [makeInvoiceForWallet, refreshBalanceForWallet, capturedWalletId, expectPayment, t],
   );
 
   const isOnchainWallet = selectedWallet?.walletType === 'onchain';
@@ -472,7 +465,7 @@ const ReceiveSheet: React.FC<Props> = ({
     } finally {
       setSendingToFriend(false);
     }
-  }, [friendShareValue, presetGroup, onSendToGroup, sendingToFriend, mode, onSent, onClose]);
+  }, [friendShareValue, presetGroup, onSendToGroup, sendingToFriend, mode, onSent, onClose, t]);
 
   const handleSendToFriend = useCallback(() => {
     if (!friendShareValue) return;
@@ -737,7 +730,7 @@ const ReceiveSheet: React.FC<Props> = ({
                       testID="receive-send-to-friend"
                     >
                       {sendingToFriend ? (
-                        <ActivityIndicator color={colors.white} />
+                        <BrandedSpinner onGradient />
                       ) : (
                         <>
                           <Send size={20} color={colors.white} />

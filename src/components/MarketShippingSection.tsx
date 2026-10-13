@@ -1,5 +1,6 @@
+import BrandedSpinner from './BrandedSpinner';
 import React, { useMemo } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity } from 'react-native';
 import { ChevronRight, Globe, MessageCircle } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useLocale } from '../contexts/LocaleContext';
@@ -66,7 +67,7 @@ const MarketShippingSection: React.FC<Props> = ({
       <View style={styles.section}>
         <Text style={styles.sectionLabel}>{t('market.shipping.label')}</Text>
         <View style={styles.statusRow} testID="market-shipping-loading">
-          <ActivityIndicator size="small" color={colors.brandPink} />
+          <BrandedSpinner size="small" />
           <Text style={styles.statusText}>
             {t('market.shipping.checking', { seller: sellerName })}
           </Text>

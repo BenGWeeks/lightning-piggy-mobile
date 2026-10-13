@@ -1,16 +1,8 @@
+import BrandedSpinner from '../components/BrandedSpinner';
+import BrandedRefreshControl from '../components/BrandedRefreshControl';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  FlatList,
-  ActivityIndicator,
-  Image,
-  Linking,
-  RefreshControl,
-} from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, FlatList, Image, Linking } from 'react-native';
 import * as Location from 'expo-location';
 import {
   CalendarDays,
@@ -436,7 +428,7 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
 
       {loading && events.size === 0 ? (
         <View style={styles.center}>
-          <ActivityIndicator color={colors.brandPink} />
+          <BrandedSpinner />
           <Text style={styles.subtle}>{t('eventsScreen.lookingForEvents')}</Text>
         </View>
       ) : error ? (
@@ -456,11 +448,9 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
         <>
           <FlatList
             refreshControl={
-              <RefreshControl
+              <BrandedRefreshControl
                 refreshing={loading && events.size > 0}
                 onRefresh={() => reload()}
-                tintColor={colors.brandPink}
-                colors={[colors.brandPink]}
               />
             }
             // Hero card lives in the list header so it scrolls with the
@@ -623,7 +613,7 @@ const EventRow: React.FC<{
   onOpenInMaps: () => void;
   colors: Palette;
   styles: EventsScreenStyles;
-}> = ({ event, distance, upNext, expanded, onToggle, onOpenInMaps, colors, styles }) => {
+}> = ({ event, distance, upNext, expanded, onToggle, colors, styles }) => {
   const { t, formatLocale } = useLocale();
   const { day, month } = dayLabel(event.startsAt, formatLocale);
   return (

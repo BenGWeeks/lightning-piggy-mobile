@@ -1,3 +1,4 @@
+import BrandedSpinner from '../components/BrandedSpinner';
 import CollectionPicker from '../components/CollectionPicker';
 import { SellerSigningError } from '../utils/sellerSigning';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -7,7 +8,6 @@ import {
   TextInput,
   TouchableOpacity,
   ScrollView,
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
@@ -293,7 +293,7 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
               ) : null}
             </>
           ) : (
-            <ActivityIndicator color={colors.brandPink} />
+            <BrandedSpinner />
           )}
         </View>
       ) : (
@@ -451,7 +451,7 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
                   }
                   testID="listing-publish"
                 >
-                  {busy ? <ActivityIndicator color={colors.white} /> : null}
+                  {busy ? <BrandedSpinner onGradient /> : null}
                   <Text style={styles.primaryButtonText} numberOfLines={1}>
                     {busy
                       ? t('market.sell.editor.publishing')

@@ -1,5 +1,6 @@
+import BrandedSpinner from './BrandedSpinner';
 import React from 'react';
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
 import { Image } from 'expo-image';
 import { ImagePlus, X } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -57,7 +58,7 @@ const ListingPhotosField: React.FC<Props> = ({ images, uploading, onAdd, onRemov
             testID="listing-photo-add"
           >
             {uploading ? (
-              <ActivityIndicator color={colors.brandPink} />
+              <BrandedSpinner />
             ) : (
               <ImagePlus size={24} color={colors.brandPink} strokeWidth={2} />
             )}

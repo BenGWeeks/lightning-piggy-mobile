@@ -1,13 +1,6 @@
+import BrandedSpinner from './BrandedSpinner';
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  ActivityIndicator,
-  Platform,
-  BackHandler,
-  Keyboard,
-} from 'react-native';
+import { View, Text, TouchableOpacity, Platform, BackHandler, Keyboard } from 'react-native';
 import { Alert } from './BrandedAlert';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
@@ -15,6 +8,7 @@ import {
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
   BottomSheetScrollView,
+  type BottomSheetScrollViewMethods,
   BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
 import { BottomSheetModal } from './AccessibleBottomSheetModal';
@@ -46,7 +40,7 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
   const [uploadingBanner, setUploadingBanner] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const sheetRef = useRef<BottomSheetModal>(null);
-  const scrollRef = useRef<any>(null);
+  const scrollRef = useRef<BottomSheetScrollViewMethods>(null);
   // No explicit snapPoints — content-height only, not user-draggable.
 
   // Populate fields ONCE per open. Keying on `visible` alone: if `profile`
@@ -192,7 +186,7 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
           testID="edit-banner-picker"
         >
           {uploadingBanner ? (
-            <ActivityIndicator color={colors.brandPink} />
+            <BrandedSpinner />
           ) : bannerUrl ? (
             <Image source={{ uri: bannerUrl }} style={styles.bannerPreview} cachePolicy="none" />
           ) : (
@@ -230,7 +224,7 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
           testID="edit-picture-picker"
         >
           {uploadingPicture ? (
-            <ActivityIndicator color={colors.brandPink} />
+            <BrandedSpinner />
           ) : pictureUrl ? (
             <Image source={{ uri: pictureUrl }} style={styles.avatarPreview} cachePolicy="none" />
           ) : (
@@ -291,7 +285,7 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
           testID="save-profile"
         >
           {saving ? (
-            <ActivityIndicator color={colors.white} />
+            <BrandedSpinner onGradient />
           ) : (
             <Text style={styles.saveButtonText}>{t('editProfileSheet.saveProfile')}</Text>
           )}

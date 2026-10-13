@@ -1,4 +1,6 @@
 import { preferredConversationParams } from '../services/preferredDmProtocol';
+import BrandedRefreshControl from '../components/BrandedRefreshControl';
+import BrandedSpinner from '../components/BrandedSpinner';
 import { usePeerContact } from '../hooks/usePeerContact';
 import { useDmChatTools } from '../hooks/useDmChatTools';
 import { useChatLocalHistory } from '../hooks/useChatLocalHistory';
@@ -19,17 +21,7 @@ import { useConversationProtocol } from '../hooks/useConversationProtocol';
 import ConversationHeader from '../components/ConversationHeader';
 import DmMembersSheet from '../components/DmMembersSheet';
 import { useDmDevices } from '../hooks/useDmDevices';
-import {
-  View,
-  Text,
-  Pressable,
-  FlatList,
-  ActivityIndicator,
-  RefreshControl,
-  BackHandler,
-  Linking,
-  StyleSheet,
-} from 'react-native';
+import { View, Text, Pressable, FlatList, BackHandler, Linking, StyleSheet } from 'react-native';
 import { Alert } from '../components/BrandedAlert';
 import { KeyboardController } from 'react-native-keyboard-controller';
 import Animated from 'react-native-reanimated';
@@ -663,7 +655,7 @@ const ConversationScreen: React.FC = () => {
           <Animated.View style={[styles.flex, animatedListLiftStyle]}>
             {loading ? (
               <View style={styles.loading}>
-                <ActivityIndicator color={colors.brandPink} />
+                <BrandedSpinner />
                 <Text style={styles.loadingText}>{t('conversationScreen.loadingMessages')}</Text>
               </View>
             ) : (
@@ -704,7 +696,7 @@ const ConversationScreen: React.FC = () => {
                   </View>
                 }
                 refreshControl={
-                  <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+                  <BrandedRefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
                 }
                 onScroll={live.onScroll}
                 onContentSizeChange={live.onContentSizeChange}

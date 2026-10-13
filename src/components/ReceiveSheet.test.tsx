@@ -1,6 +1,5 @@
 import React from 'react';
 import { bech32 } from 'bech32';
-import { ActivityIndicator } from 'react-native';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import ReceiveSheet from './ReceiveSheet';
 
@@ -40,7 +39,7 @@ jest.mock('@gorhom/bottom-sheet', () => {
 const mockQrRenders: string[] = [];
 jest.mock('react-native-qrcode-svg', () => {
   const { Text } = jest.requireActual('react-native');
-  return ({ value }: { value: string }) => {
+  return function MockQrCode({ value }: { value: string }) {
     mockQrRenders.push(value);
     return <Text testID="receive-qr">{value}</Text>;
   };
@@ -320,7 +319,7 @@ it('a stale invoice request does not hide the spinner of the current one', async
 
   await resolveFor('LA', 'lnbc-alpha');
   expect(qrValue()).toBeNull();
-  expect(screen.UNSAFE_queryByType(ActivityIndicator)).not.toBeNull();
+  expect(screen.queryByTestId('branded-spinner')).not.toBeNull();
   await resolveFor('LB', 'lnbc-bravo');
   expect(qrValue()).toBe('lnbc-bravo');
 });

@@ -1,5 +1,6 @@
+import BrandedSpinner from './BrandedSpinner';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, Linking, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, Linking } from 'react-native';
 import { Image } from 'expo-image';
 import {
   BottomSheetScrollView,
@@ -558,7 +559,7 @@ const MarketCheckoutSheet: React.FC<Props> = ({
               testID="market-checkout-place-order"
             >
               {isPlacing || submitting ? (
-                <ActivityIndicator size="small" color={colors.white} />
+                <BrandedSpinner size="small" onGradient />
               ) : canOrder ? (
                 <>
                   <Zap size={16} color={colors.white} strokeWidth={2.5} fill={colors.white} />
