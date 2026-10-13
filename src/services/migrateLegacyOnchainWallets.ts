@@ -1,9 +1,9 @@
 import type { WalletMetadata, OnchainImportMethod } from '../types/wallet';
-import { getWalletList, hasMnemonic, saveWalletList } from './walletStorageService';
+import { getWalletList, hasMnemonic, updateWalletList } from './walletStorageService';
 
 /** Missing metadata is the migration marker; explicit values are never reclassified.
- * Pin writes to the captured owner and re-read after secure checks so edits/removals
- * made while they were pending are preserved. Failed checks leave metadata unset.
+ * Pin writes to the captured owner and serialize the final read/write with metadata
+ * edits so concurrent edits/removals are preserved. Failed checks leave metadata unset.
  */
 export async function migrateLegacyOnchainWallets(
   owner: string | null,
@@ -18,17 +18,18 @@ export async function migrateLegacyOnchainWallets(
     methods.set(wallet.id, method);
   }
   if (!isCurrent() || methods.size === 0) return new Map();
-  const latest = await getWalletList(owner);
-  if (!isCurrent()) return new Map();
   const applied = new Map<string, OnchainImportMethod>();
-  const updated: WalletMetadata[] = latest.map((wallet) => {
-    const method = methods.get(wallet.id);
-    if (!method || wallet.walletType !== 'onchain' || wallet.onchainImportMethod !== undefined) {
-      return wallet;
-    }
-    applied.set(wallet.id, method);
-    return { ...wallet, onchainImportMethod: method };
-  });
-  if (applied.size > 0) await saveWalletList(updated, owner);
+  await updateWalletList((latest) => {
+    if (!isCurrent()) return null;
+    const updated: WalletMetadata[] = latest.map((wallet) => {
+      const method = methods.get(wallet.id);
+      if (!method || wallet.walletType !== 'onchain' || wallet.onchainImportMethod !== undefined) {
+        return wallet;
+      }
+      applied.set(wallet.id, method);
+      return { ...wallet, onchainImportMethod: method };
+    });
+    return applied.size > 0 ? updated : null;
+  }, owner);
   return isCurrent() ? applied : new Map();
 }
