@@ -1,5 +1,6 @@
+import BrandedSpinner from './BrandedSpinner';
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity } from 'react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { useNostr } from '../contexts/NostrContext';
@@ -129,7 +130,7 @@ const ProductReviews: React.FC<Props> = ({ coord, onRequestSignIn, onCount, regi
           </TouchableOpacity>
         </View>
       ) : loading && reviews.length === 0 ? (
-        <ActivityIndicator style={styles.loading} color={colors.brandPink} />
+        <BrandedSpinner style={styles.loading} />
       ) : reviews.length === 0 ? (
         <Text style={styles.state}>
           {isSeller ? t('market.reviews.emptyOwn') : t('market.reviews.empty')}

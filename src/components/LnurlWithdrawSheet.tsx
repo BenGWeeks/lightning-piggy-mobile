@@ -1,3 +1,4 @@
+import BrandedSpinner from './BrandedSpinner';
 /**
  * Global LNURL-withdraw claim bottom sheet (#341).
  *
@@ -17,7 +18,7 @@
  */
 import { decodeLnurlWithdraw } from '../services/lnurlWithdrawService';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, Keyboard, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, Keyboard, Platform } from 'react-native';
 import {
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
@@ -410,7 +411,7 @@ export function LnurlWithdrawHost(): React.ReactElement {
                 <Gift size={56} color={colors.brandPink} strokeWidth={2} />
               </View>
               <Text style={styles.title}>{t('lnurlWithdrawSheet.claimFunds')}</Text>
-              <ActivityIndicator size="large" color={colors.brandPink} style={{ marginTop: 4 }} />
+              <BrandedSpinner size="large" style={{ marginTop: 4 }} />
               <Text style={styles.fineprint}>
                 {stage.kind === 'resolving'
                   ? t('lnurlWithdrawSheet.lookingUpVoucher')

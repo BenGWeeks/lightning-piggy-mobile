@@ -1,12 +1,6 @@
+import BrandedSpinner from './BrandedSpinner';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Text,
-  TouchableOpacity,
-  ActivityIndicator,
-  BackHandler,
-  Keyboard,
-  Platform,
-} from 'react-native';
+import { Text, TouchableOpacity, BackHandler, Keyboard, Platform } from 'react-native';
 import { Alert } from './BrandedAlert';
 import {
   BottomSheetBackdrop,
@@ -160,7 +154,7 @@ const RenameGroupSheet: React.FC<Props> = ({ visible, groupId, onClose }) => {
           testID="rename-group-save"
         >
           {saving ? (
-            <ActivityIndicator color={colors.white} />
+            <BrandedSpinner onGradient />
           ) : (
             <Text style={styles.saveButtonText}>{t('renameGroupSheet.save')}</Text>
           )}

@@ -1,3 +1,4 @@
+import BrandedSpinner from '../components/BrandedSpinner';
 import MerchantIdentity from '../components/MerchantIdentity';
 import { isLegacyShopCollection } from '../utils/marketCollections';
 import { SellerSigningError } from '../utils/sellerSigning';
@@ -7,7 +8,6 @@ import {
   Text,
   TouchableOpacity,
   ScrollView,
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
@@ -269,7 +269,7 @@ const MarketShopSettingsScreen: React.FC<Props> = ({ navigation }) => {
             </>
           ) : (
             <>
-              <ActivityIndicator color={colors.brandPink} />
+              <BrandedSpinner />
               <Text style={styles.muted}>{t('market.sell.loading')}</Text>
             </>
           )}
@@ -378,7 +378,7 @@ const MarketShopSettingsScreen: React.FC<Props> = ({ navigation }) => {
                 accessibilityLabel={t(saveLabel)}
                 testID={offerFirstItem ? 'shop-save-and-add-item' : 'shop-save'}
               >
-                {busy ? <ActivityIndicator color={colors.white} /> : null}
+                {busy ? <BrandedSpinner onGradient /> : null}
                 <Text style={[styles.primaryButtonText, styles.shopSaveButtonText]}>
                   {busy ? t('market.sell.shop.saving') : t(saveLabel)}
                 </Text>

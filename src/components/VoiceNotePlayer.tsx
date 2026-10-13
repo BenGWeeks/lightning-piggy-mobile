@@ -1,6 +1,7 @@
+import BrandedSpinner from './BrandedSpinner';
 import OutgoingBubbleBackground from './OutgoingBubbleBackground';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, Pressable } from 'react-native';
+import { View, Text, TouchableOpacity, Pressable } from 'react-native';
 import { Play, Pause, AlertCircle } from 'lucide-react-native';
 import { useAudioPlayer, useAudioPlayerStatus, setAudioModeAsync } from 'expo-audio';
 import { useTapToReveal } from '../hooks/useTapToReveal';
@@ -261,7 +262,7 @@ const VoiceNotePlayer: React.FC<Props> = ({
             testID={testID ? `${testID}-toggle` : undefined}
           >
             {busy ? (
-              <ActivityIndicator size="small" color={playFg} />
+              <BrandedSpinner size="small" onGradient={playBg !== colors.white} />
             ) : failed || plainFailed ? (
               <AlertCircle size={18} color={playFg} />
             ) : isPlaying ? (

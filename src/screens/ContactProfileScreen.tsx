@@ -1,6 +1,8 @@
 import { sendSharedDm } from '../services/sendSharedDm';
 import { DEFAULT_DM_PROTOCOL } from '../utils/dmProtocol';
 import { preferredDmProtocol } from '../services/preferredDmProtocol';
+import BrandedRefreshControl from '../components/BrandedRefreshControl';
+import BrandedSpinner from '../components/BrandedSpinner';
 import { useCollectionFilter } from '../hooks/useCollectionFilter';
 import MarketCollectionChips from '../components/MarketCollectionChips';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -8,7 +10,6 @@ import {
   View,
   Text,
   TouchableOpacity,
-  ActivityIndicator,
   type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -674,7 +675,7 @@ const ContactProfileScreen: React.FC = () => {
   const listFooter = canPage ? (
     <View style={tabStyles.footer}>
       {feed.loadingMore ? (
-        <ActivityIndicator size="small" color={colors.brandPink} />
+        <BrandedSpinner size="small" />
       ) : (
         <TouchableOpacity
           style={tabStyles.loadMoreButton}
@@ -737,8 +738,7 @@ const ContactProfileScreen: React.FC = () => {
         onEndReachedThreshold={0.5}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
-        refreshing={refreshing}
-        onRefresh={handleRefresh}
+        refreshControl={<BrandedRefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
         onScroll={handleScroll}
         scrollEventThrottle={16}
         testID="contact-profile-list"

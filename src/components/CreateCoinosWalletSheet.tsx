@@ -1,13 +1,7 @@
+import { createCreateCoinosWalletSheetStyles as createStyles } from '../styles/CreateCoinosWalletSheet.styles';
+import BrandedSpinner from './BrandedSpinner';
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  ActivityIndicator,
-  Platform,
-  Keyboard,
-} from 'react-native';
+import { View, Text, TouchableOpacity, Platform, Keyboard } from 'react-native';
 import {
   BottomSheetBackdrop,
   BottomSheetScrollView,
@@ -17,7 +11,6 @@ import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import { ChevronDown, ChevronUp, ShieldAlert } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import type { Palette } from '../styles/palettes';
 import { useWallet } from '../contexts/WalletContext';
 import * as coinosService from '../services/coinosService';
 import * as walletStorage from '../services/walletStorageService';
@@ -327,7 +320,7 @@ const CreateCoinosWalletSheet: React.FC<Props> = ({ visible, onClose, onComplete
                 testID="coinos-create-button"
               >
                 {probing ? (
-                  <ActivityIndicator color={colors.white} />
+                  <BrandedSpinner onGradient />
                 ) : (
                   <Text style={styles.primaryButtonText}>
                     {tr('createCoinosWalletSheet.createButton')}
@@ -350,7 +343,7 @@ const CreateCoinosWalletSheet: React.FC<Props> = ({ visible, onClose, onComplete
 
           {step === 'creating' && (
             <View style={styles.creatingBlock} testID="coinos-creating">
-              <ActivityIndicator size="large" color={colors.brandPink} />
+              <BrandedSpinner size="large" />
               <Text style={styles.creatingTitle}>
                 {probing
                   ? tr('createCoinosWalletSheet.checkingInstance')
@@ -406,144 +399,5 @@ function coinosErrorCopy(
       return err.message || tr('createCoinosWalletSheet.genericError');
   }
 }
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    sheetBackground: {
-      backgroundColor: colors.surface,
-      borderTopLeftRadius: 24,
-      borderTopRightRadius: 24,
-    },
-    handle: {
-      backgroundColor: colors.divider,
-      width: 40,
-    },
-    content: {
-      padding: 24,
-      paddingBottom: 40,
-      gap: 16,
-    },
-    section: {
-      gap: 16,
-    },
-    iconBubble: {
-      width: 72,
-      height: 72,
-      borderRadius: 36,
-      backgroundColor: colors.brandPink,
-      alignItems: 'center',
-      justifyContent: 'center',
-      alignSelf: 'center',
-    },
-    title: {
-      fontSize: 22,
-      fontWeight: '700',
-      color: colors.textHeader,
-      textAlign: 'center',
-    },
-    subtitle: {
-      fontSize: 14,
-      color: colors.textBody,
-      lineHeight: 20,
-      textAlign: 'center',
-    },
-    warningCard: {
-      backgroundColor: colors.background,
-      borderRadius: 12,
-      padding: 16,
-      gap: 6,
-      borderWidth: 1,
-      borderColor: colors.divider,
-    },
-    warningTitle: {
-      fontSize: 14,
-      fontWeight: '700',
-      color: colors.textHeader,
-    },
-    warningBody: {
-      fontSize: 13,
-      color: colors.textSupplementary,
-      lineHeight: 18,
-    },
-    advancedToggle: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingVertical: 8,
-    },
-    advancedToggleText: {
-      fontSize: 13,
-      fontWeight: '600',
-      color: colors.textSupplementary,
-    },
-    advancedBlock: {
-      gap: 8,
-    },
-    advancedLabel: {
-      fontSize: 12,
-      fontWeight: '700',
-      color: colors.textSupplementary,
-      letterSpacing: 0.5,
-      textTransform: 'uppercase',
-    },
-    advancedHint: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      lineHeight: 16,
-    },
-    input: {
-      backgroundColor: colors.background,
-      borderRadius: 12,
-      padding: 14,
-      fontSize: 15,
-      color: colors.textBody,
-    },
-    errorText: {
-      color: colors.red,
-      fontSize: 14,
-      fontWeight: '600',
-      textAlign: 'center',
-    },
-    primaryButton: {
-      backgroundColor: colors.brandPink,
-      height: 52,
-      borderRadius: 12,
-      justifyContent: 'center',
-      alignItems: 'center',
-      marginTop: 4,
-    },
-    primaryButtonText: {
-      color: colors.white,
-      fontSize: 16,
-      fontWeight: '700',
-    },
-    cancelButton: {
-      height: 44,
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    cancelButtonText: {
-      color: colors.textBody,
-      fontSize: 14,
-      fontWeight: '600',
-    },
-    creatingBlock: {
-      alignItems: 'center',
-      gap: 16,
-      padding: 32,
-    },
-    creatingTitle: {
-      fontSize: 18,
-      fontWeight: '700',
-      color: colors.textHeader,
-      textAlign: 'center',
-    },
-    creatingHint: {
-      fontSize: 13,
-      color: colors.textSupplementary,
-      lineHeight: 18,
-      textAlign: 'center',
-    },
-  });
 
 export default CreateCoinosWalletSheet;

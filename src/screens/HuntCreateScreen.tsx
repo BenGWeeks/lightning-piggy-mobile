@@ -1,3 +1,4 @@
+import BrandedSpinner from '../components/BrandedSpinner';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
@@ -5,7 +6,6 @@ import {
   TextInput,
   TouchableOpacity,
   ScrollView,
-  ActivityIndicator,
   Image,
   KeyboardAvoidingView,
   Linking,
@@ -1372,7 +1372,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                     testID="hunt-piggy-validate-button"
                   >
                     {stage.kind === 'validating' ? (
-                      <ActivityIndicator color={colors.white} />
+                      <BrandedSpinner onGradient />
                     ) : (
                       <Text style={styles.primaryButtonText}>{t('huntCreateScreen.validate')}</Text>
                     )}
@@ -1781,7 +1781,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                     testID="hunt-piggy-pin-here-button"
                   >
                     {pinning ? (
-                      <ActivityIndicator color={colors.brandPink} />
+                      <BrandedSpinner />
                     ) : (
                       <>
                         <MapPin size={18} color={colors.brandPink} strokeWidth={2} />
@@ -1841,7 +1841,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                 </View>
               ) : uploadingHint ? (
                 <View style={styles.hintUploadingWrapper}>
-                  <ActivityIndicator color={colors.brandPink} />
+                  <BrandedSpinner />
                   <Text style={styles.helper}>{t('huntCreateScreen.strippingExif')}</Text>
                 </View>
               ) : (

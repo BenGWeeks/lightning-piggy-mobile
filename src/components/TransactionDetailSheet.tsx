@@ -1,5 +1,6 @@
+import BrandedSpinner from './BrandedSpinner';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, Linking, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, Linking } from 'react-native';
 import { Image } from 'expo-image';
 import {
   BottomSheetView,
@@ -783,7 +784,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
                 accessibilityLabel={t('transactionDetailSheet.retryClaim')}
               >
                 {retrying ? (
-                  <ActivityIndicator color="#fff" />
+                  <BrandedSpinner onGradient />
                 ) : (
                   <Text style={styles.primaryButtonText}>
                     {t('transactionDetailSheet.retryClaim')}

@@ -1,5 +1,6 @@
+import BrandedSpinner from '../components/BrandedSpinner';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, TextInput } from 'react-native';
+import { View, Text, TouchableOpacity, TextInput } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { ChevronLeft, Gift, PartyPopper, PiggyBank } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -237,7 +238,7 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
             {stage.kind === 'claiming' && stage.params.defaultDescription ? (
               <Text style={styles.memo}>&ldquo;{stage.params.defaultDescription}&rdquo;</Text>
             ) : null}
-            <ActivityIndicator size="large" color={colors.brandPink} style={{ marginTop: 8 }} />
+            <BrandedSpinner size="large" style={{ marginTop: 8 }} />
             <Text style={styles.fineprint}>
               {stage.kind === 'resolving'
                 ? t('huntFoundScreen.lookingUpPiggy')

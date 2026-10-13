@@ -1,5 +1,6 @@
+import BrandedSpinner from '../../components/BrandedSpinner';
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity } from 'react-native';
 import { useFocusEffect, useRoute, type RouteProp } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nip19 from 'nostr-tools/nip19';
@@ -183,7 +184,7 @@ const KeyBackupScreen: React.FC = () => {
           testID="key-backup-reveal-toggle"
         >
           {reveal.busy ? (
-            <ActivityIndicator color={colors.brandPink} />
+            <BrandedSpinner />
           ) : showKey ? (
             <EyeOff size={24} color={colors.brandPink} />
           ) : (

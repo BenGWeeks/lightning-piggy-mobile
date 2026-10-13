@@ -1,5 +1,6 @@
+import BrandedSpinner from './BrandedSpinner';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
+import { Text, TouchableOpacity, View } from 'react-native';
 import { MessageCircle, Zap, AtSign, CreditCard } from 'lucide-react-native';
 
 import Toast from './BrandedToast';
@@ -150,7 +151,7 @@ const WatcherPushSection: React.FC<{ pushEnabled: boolean }> = ({ pushEnabled })
         <View style={push.statusRow} testID="security-watcher-status">
           <Text style={push.statusText}>{statusText}</Text>
           {(status.busy || retrying) && (
-            <ActivityIndicator color={colors.white} testID="security-watcher-busy" />
+            <BrandedSpinner testID="security-watcher-busy" onGradient />
           )}
           {canRetry && (
             <TouchableOpacity

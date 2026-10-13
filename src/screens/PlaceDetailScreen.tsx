@@ -1,14 +1,6 @@
+import BrandedSpinner from '../components/BrandedSpinner';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-  ActivityIndicator,
-  Linking,
-  Share,
-} from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Linking, Share } from 'react-native';
 import * as Location from 'expo-location';
 import {
   Accessibility,
@@ -250,7 +242,7 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
 
       <ScrollView contentContainerStyle={styles.body}>
         {loading ? (
-          <ActivityIndicator color={colors.brandPink} style={{ marginTop: 40 }} />
+          <BrandedSpinner style={{ marginTop: 40 }} />
         ) : error ? (
           <Text style={styles.errorText}>{error}</Text>
         ) : place ? (

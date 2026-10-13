@@ -1,5 +1,6 @@
+import BrandedSpinner from './BrandedSpinner';
 import React from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity } from 'react-native';
 import { satsToFiatString } from '../services/fiatService';
 import type { LnurlPayParams } from '../services/lnurlService';
 import { lnurlFixedAmountSats } from '../utils/sendSheetInput';
@@ -18,7 +19,6 @@ interface Props {
   currency: string;
   onEnterAmount: () => void;
   styles: SendSheetStyles;
-  spinnerColor: string;
 }
 
 // The amount area of the Send details card, extracted from SendSheet (over
@@ -38,7 +38,6 @@ const SendAmountSection: React.FC<Props> = ({
   currency,
   onEnterAmount,
   styles,
-  spinnerColor,
 }) => {
   const { t, formatLocale } = useLocale();
   const lnurlFixedSats = lnurlFixedAmountSats(lnurlParams);
@@ -65,7 +64,7 @@ const SendAmountSection: React.FC<Props> = ({
     return (
       <View style={styles.amountSection}>
         {resolving ? (
-          <ActivityIndicator size="small" color={spinnerColor} />
+          <BrandedSpinner size="small" />
         ) : lnurlParams || isOnchainAddress || isAmountlessBolt11 ? (
           <TouchableOpacity
             accessibilityRole="button"

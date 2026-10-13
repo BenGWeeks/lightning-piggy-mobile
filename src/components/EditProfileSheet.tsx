@@ -1,13 +1,6 @@
+import BrandedSpinner from './BrandedSpinner';
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  ActivityIndicator,
-  Platform,
-  BackHandler,
-  Keyboard,
-} from 'react-native';
+import { View, Text, TouchableOpacity, Platform, BackHandler, Keyboard } from 'react-native';
 import { Alert } from './BrandedAlert';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
@@ -192,7 +185,7 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
           testID="edit-banner-picker"
         >
           {uploadingBanner ? (
-            <ActivityIndicator color={colors.brandPink} />
+            <BrandedSpinner />
           ) : bannerUrl ? (
             <Image source={{ uri: bannerUrl }} style={styles.bannerPreview} cachePolicy="none" />
           ) : (
@@ -230,7 +223,7 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
           testID="edit-picture-picker"
         >
           {uploadingPicture ? (
-            <ActivityIndicator color={colors.brandPink} />
+            <BrandedSpinner />
           ) : pictureUrl ? (
             <Image source={{ uri: pictureUrl }} style={styles.avatarPreview} cachePolicy="none" />
           ) : (
@@ -291,7 +284,7 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
           testID="save-profile"
         >
           {saving ? (
-            <ActivityIndicator color={colors.white} />
+            <BrandedSpinner onGradient />
           ) : (
             <Text style={styles.saveButtonText}>{t('editProfileSheet.saveProfile')}</Text>
           )}

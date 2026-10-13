@@ -1,5 +1,6 @@
+import BrandedSpinner from '../../components/BrandedSpinner';
 import React, { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Text, TouchableOpacity, View } from 'react-native';
+import { FlatList, Text, TouchableOpacity, View } from 'react-native';
 import { Info } from 'lucide-react-native';
 import SettingsInfoSheet from '../../components/SettingsInfoSheet';
 import AccountScreenLayout from './AccountScreenLayout';
@@ -84,7 +85,7 @@ export default function InvitationKeysScreen() {
         <Text style={styles.linkText}>{t('invitationKeys.reload')}</Text>
       </TouchableOpacity>
       {(state.loading || state.busy) && (
-        <ActivityIndicator color={colors.white} testID="invitation-keys-loading" />
+        <BrandedSpinner testID="invitation-keys-loading" onGradient />
       )}
     </View>
   );

@@ -1,13 +1,6 @@
+import BrandedSpinner from './BrandedSpinner';
 import React, { useEffect, useMemo, useState } from 'react';
-import {
-  Modal,
-  View,
-  Text,
-  StyleSheet,
-  useWindowDimensions,
-  ActivityIndicator,
-  TouchableOpacity,
-} from 'react-native';
+import { Modal, View, Text, StyleSheet, useWindowDimensions, TouchableOpacity } from 'react-native';
 import { humanizePaymentError } from '../utils/paymentErrors';
 import Animated, {
   useSharedValue,
@@ -574,9 +567,7 @@ export default function PaymentProgressOverlay({
         )}
 
         <Animated.View style={[styles.card, cardAnimatedStyle]}>
-          {showSpinner && (
-            <ActivityIndicator size="large" color={colors.brandPink} style={styles.iconSlot} />
-          )}
+          {showSpinner && <BrandedSpinner size="large" style={styles.iconSlot} />}
           {state === 'success' && (
             <Animated.View style={[styles.iconSlot, styles.successCircle, iconAnimatedStyle]}>
               <Check size={44} color={colors.white} strokeWidth={3.5} />

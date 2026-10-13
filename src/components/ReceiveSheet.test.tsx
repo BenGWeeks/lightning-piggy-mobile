@@ -1,6 +1,5 @@
 import React from 'react';
 import { bech32 } from 'bech32';
-import { ActivityIndicator } from 'react-native';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import ReceiveSheet from './ReceiveSheet';
 
@@ -320,7 +319,7 @@ it('a stale invoice request does not hide the spinner of the current one', async
 
   await resolveFor('LA', 'lnbc-alpha');
   expect(qrValue()).toBeNull();
-  expect(screen.UNSAFE_queryByType(ActivityIndicator)).not.toBeNull();
+  expect(screen.queryByTestId('branded-spinner')).not.toBeNull();
   await resolveFor('LB', 'lnbc-bravo');
   expect(qrValue()).toBe('lnbc-bravo');
 });

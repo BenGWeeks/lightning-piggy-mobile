@@ -1,7 +1,8 @@
+import BrandedRefreshControl from '../components/BrandedRefreshControl';
 import ExploreEventCard from '../components/ExploreEventCard';
 import { useLocale } from '../contexts/LocaleContext';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Image, TouchableOpacity, ScrollView, RefreshControl } from 'react-native';
+import { View, Text, Image, TouchableOpacity, ScrollView } from 'react-native';
 import { useExploreRailsPosition } from '../hooks/useExploreRailsPosition';
 import { useFocusEffect } from '@react-navigation/native';
 import { ChevronRight, Compass, MapPin, PiggyBank, Sparkles } from 'lucide-react-native';
@@ -456,16 +457,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
         style={styles.scrollArea}
         contentContainerStyle={localStyles.scrollContent}
         showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            // Brand pink so the spinner reads as our UI, not a bare
-            // Android grey.
-            tintColor={colors.brandPink}
-            colors={[colors.brandPink]}
-          />
-        }
+        refreshControl={<BrandedRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         <ExploreMiniMap
           locationDenied={locationDenied}

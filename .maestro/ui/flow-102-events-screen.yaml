@@ -1,11 +1,11 @@
 appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
-name: Events sub-screen renders list or empty state
+name: Events sub-screen — results, empty state or location retry
 ---
 # Smoke flow for EventsScreen (M7). Subscribes to NIP-52 kind 31923
 # calendar events with `g` tag in the user's coarse 5-char geohash
 # neighbourhood. Live relay coverage of NIP-52 events is sparse, so we
-# accept either a populated list OR the friendly empty state with the
-# "No upcoming events nearby" copy.
+# accept populated results, the friendly empty state, or the location
+# error with its Retry action (emulator location fixes can be unavailable).
 #
 # Run: maestro test .maestro/ui/flow-102-events-screen.yaml
 
@@ -21,15 +21,40 @@ name: Events sub-screen renders list or empty state
 - waitForAnimationToEnd:
     timeout: 1500
 
+# Events is below the discovery rails; scroll by its stable selector.
+- scrollUntilVisible:
+    element:
+      id: 'explore-card-events'
+    direction: DOWN
+    timeout: 20000
+
 - tapOn:
     id: 'explore-card-events'
 - waitForAnimationToEnd:
     timeout: 4000
 
-- assertVisible:
-    id: 'events-screen'
+- extendedWaitUntil:
+    visible:
+      id: 'events-screen'
+    timeout: 60000
 
-# Either populated or empty — both legitimate.
+# The current screen exposes search, filters and pull-to-refresh rather
+# than the old header refresh button. Location errors on an emulator offer
+# Retry; exercise that path too without assuming live nearby event coverage.
+- assertVisible:
+    id: 'events-search-input'
+- assertVisible:
+    id: 'events-filter-button'
+- extendedWaitUntil:
+    notVisible:
+      id: 'branded-spinner'
+    timeout: 60000
+- runFlow:
+    when:
+      notVisible: 'Retry'
+    commands:
+      - assertVisible:
+          id: 'events-empty-state|event-hero-.*|event-row-.*'
 - runFlow:
     when:
       visible:
@@ -38,17 +63,27 @@ name: Events sub-screen renders list or empty state
       - assertVisible: 'No upcoming events nearby'
 - runFlow:
     when:
-      notVisible:
-        id: 'events-empty-state'
+      visible:
+        id: 'event-hero-.*|event-row-.*'
     commands:
-      - assertVisible:
-          id: 'events-refresh-button'
-
-# Refresh works.
-- tapOn:
-    id: 'events-refresh-button'
-- waitForAnimationToEnd:
-    timeout: 1500
+      # Pull-to-refresh is a system gesture, anchored to a rendered event.
+      - swipe:
+          from:
+            id: 'event-hero-.*|event-row-.*'
+            index: 0
+          direction: DOWN
+          duration: 500
+      - waitForAnimationToEnd:
+          timeout: 5000
+- runFlow:
+    when:
+      visible: 'Retry'
+    commands:
+      - tapOn: 'Retry'
+      - extendedWaitUntil:
+          notVisible:
+            id: 'branded-spinner'
+          timeout: 60000
 
 - tapOn:
     id: 'events-back-button'

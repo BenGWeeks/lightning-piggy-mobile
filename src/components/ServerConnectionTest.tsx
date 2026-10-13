@@ -1,5 +1,6 @@
+import BrandedSpinner from './BrandedSpinner';
 import React, { useMemo } from 'react';
-import { ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
+import { Text, TouchableOpacity, View } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
 import { CheckCircle, CircleAlert } from 'lucide-react-native';
 import { useConnectionTest } from '../utils/useConnectionTest';
@@ -51,7 +52,7 @@ export default function ServerConnectionTest({
           testID={`${testID}-${state.phase}`}
           accessibilityLiveRegion="polite"
         >
-          {checking && <ActivityIndicator color={colors.brandPink} />}
+          {checking && <BrandedSpinner />}
           {state.phase === 'success' && <CheckCircle size={20} color={colors.greenDark} />}
           {state.phase === 'error' && <CircleAlert size={20} color={colors.red} />}
           <Text

@@ -1,5 +1,6 @@
+import BrandedSpinner from './BrandedSpinner';
 import React, { useMemo } from 'react';
-import { View, Text, ActivityIndicator, type StyleProp, type ViewStyle } from 'react-native';
+import { View, Text, type StyleProp, type ViewStyle } from 'react-native';
 import { Check, Circle, X as XIcon } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createStepChecklistStyles } from '../styles/StepChecklist.styles';
@@ -44,7 +45,7 @@ const StepChecklist: React.FC<Props> = ({ steps, testID, stepTestIDPrefix, style
             ) : s.status === 'failed' ? (
               <XIcon size={20} color={colors.red} />
             ) : s.status === 'active' ? (
-              <ActivityIndicator size="small" color={colors.brandPink} />
+              <BrandedSpinner size="small" />
             ) : (
               <Circle size={20} color={colors.textSupplementary} />
             )}

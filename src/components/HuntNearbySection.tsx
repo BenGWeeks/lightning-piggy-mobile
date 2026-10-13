@@ -1,5 +1,6 @@
+import BrandedSpinner from './BrandedSpinner';
 import React from 'react';
-import { View, Text, TextInput, TouchableOpacity, FlatList, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, FlatList } from 'react-native';
 import { MapPin, PiggyBank, Search, SlidersHorizontal } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -86,7 +87,7 @@ const HuntNearbySection: React.FC<Props> = ({
       </View>
       {loading && items.length === 0 ? (
         <View style={styles.center} testID="hunt-discover-loading">
-          <ActivityIndicator color={colors.brandPink} />
+          <BrandedSpinner />
           <Text style={styles.subtle}>{t('huntScreen.lookingForCaches')}</Text>
         </View>
       ) : items.length === 0 && searchQuery.trim() !== '' ? (

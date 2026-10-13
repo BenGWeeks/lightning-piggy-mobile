@@ -1,3 +1,5 @@
+import BrandedRefreshControl from '../components/BrandedRefreshControl';
+import BrandedSpinner from '../components/BrandedSpinner';
 import { createHuntPiggyDetailScreenStyles as createStyles } from '../styles/HuntPiggyDetailScreen.styles';
 import { useLocale } from '../contexts/LocaleContext';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -6,13 +8,11 @@ import {
   Text,
   TouchableOpacity,
   ScrollView,
-  ActivityIndicator,
   Image,
   TextInput,
   KeyboardAvoidingView,
   Platform,
   Linking,
-  RefreshControl,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import {
@@ -477,17 +477,10 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
       <ScrollView
         ref={scrollRef}
         contentContainerStyle={styles.body}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={handleRefresh}
-            tintColor={colors.brandPink}
-            colors={[colors.brandPink]}
-          />
-        }
+        refreshControl={<BrandedRefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
       >
         {loading ? (
-          <ActivityIndicator color={colors.brandPink} />
+          <BrandedSpinner />
         ) : error ? (
           <Text style={styles.errorText}>{error}</Text>
         ) : cache ? (
@@ -707,7 +700,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                     </TouchableOpacity>
                   </View>
                 ) : composerUploading ? (
-                  <ActivityIndicator color={colors.brandPink} />
+                  <BrandedSpinner />
                 ) : (
                   <View style={styles.composerPhotoButtons}>
                     <TouchableOpacity style={styles.composerPhotoButton} onPress={handleTakePhoto}>
@@ -735,7 +728,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                     testID="hunt-piggy-detail-post-button"
                   >
                     {posting ? (
-                      <ActivityIndicator color={colors.white} />
+                      <BrandedSpinner onGradient />
                     ) : (
                       <>
                         <Send size={16} color={colors.white} strokeWidth={2.5} />

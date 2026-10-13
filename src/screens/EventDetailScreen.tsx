@@ -1,14 +1,6 @@
+import BrandedSpinner from '../components/BrandedSpinner';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  ScrollView,
-  ActivityIndicator,
-  Image,
-  Linking,
-  Share,
-} from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, Image, Linking, Share } from 'react-native';
 import * as Calendar from 'expo-calendar';
 import {
   CalendarPlus,
@@ -223,7 +215,7 @@ const EventDetailScreen: React.FC<Props> = ({ navigation, route }) => {
 
       <ScrollView contentContainerStyle={styles.body}>
         {loading ? (
-          <ActivityIndicator color={colors.brandPink} style={{ marginTop: 40 }} />
+          <BrandedSpinner style={{ marginTop: 40 }} />
         ) : !event ? (
           <Text style={styles.errorText}>{t('eventDetailScreen.notInFeed')}</Text>
         ) : (

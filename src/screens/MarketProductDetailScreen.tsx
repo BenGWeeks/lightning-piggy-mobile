@@ -1,6 +1,7 @@
+import BrandedRefreshControl from '../components/BrandedRefreshControl';
 import { marketEditorDestination } from '../utils/marketEditorNavigation';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Linking, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Linking } from 'react-native';
 import { Image } from 'expo-image';
 import { ChevronLeft, Zap, ExternalLink } from 'lucide-react-native';
 import type { CompositeNavigationProp } from '@react-navigation/native';
@@ -195,12 +196,7 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         keyboardDismissMode="on-drag"
         refreshControl={
           pull.enabled ? (
-            <RefreshControl
-              refreshing={pull.refreshing}
-              onRefresh={pull.onRefresh}
-              tintColor={colors.brandPink}
-              colors={[colors.brandPink]}
-            />
+            <BrandedRefreshControl refreshing={pull.refreshing} onRefresh={pull.onRefresh} />
           ) : undefined
         }
       >

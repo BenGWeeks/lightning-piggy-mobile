@@ -16,7 +16,10 @@ jest.mock('expo-audio', () => ({
 jest.mock('../contexts/ThemeContext', () => ({
   useThemeColors: () => jest.requireActual('../styles/palettes').lightPalette,
 }));
-jest.mock('../contexts/LocaleContext', () => ({ useLocale: () => ({ t: (key: string) => key }) }));
+jest.mock('../contexts/LocaleContext', () => ({
+  useLocale: () => ({ t: (key: string) => key }),
+  useTranslation: () => (key: string) => key,
+}));
 jest.mock('../hooks/useTapToReveal', () => ({ useTapToReveal: () => [true, jest.fn()] }));
 jest.mock('../utils/messageContent', () => ({ formatTime: () => '00:00' }));
 jest.mock('expo-file-system/legacy', () => ({

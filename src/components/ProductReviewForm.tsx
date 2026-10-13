@@ -1,5 +1,6 @@
+import BrandedSpinner from './BrandedSpinner';
 import React, { useEffect, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity } from 'react-native';
 import { useTranslation } from '../contexts/LocaleContext';
 import type { ParsedReview } from '../utils/productReviews';
 import type { Palette } from '../styles/palettes';
@@ -119,7 +120,7 @@ const ProductReviewForm: React.FC<{
         activeOpacity={0.8}
       >
         {submitting ? (
-          <ActivityIndicator color={colors.white} size="small" />
+          <BrandedSpinner size="small" onGradient />
         ) : (
           <Text style={styles.submitText}>
             {existing ? t('market.reviews.submitUpdate') : t('market.reviews.submit')}

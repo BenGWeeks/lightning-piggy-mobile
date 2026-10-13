@@ -1,6 +1,7 @@
+import BrandedSpinner from './BrandedSpinner';
 import { useLocale } from '../contexts/LocaleContext';
 import React, { useMemo } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity } from 'react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createTransferProgressStyles } from '../styles/TransferProgress.styles';
 import {
@@ -107,7 +108,7 @@ const TransferProgress: React.FC<Props> = ({
           testID="transfer-retry-now"
         >
           {retryingRecovery ? (
-            <ActivityIndicator color="#fff" />
+            <BrandedSpinner onGradient />
           ) : (
             <Text style={styles.closeButtonText}>Retry now</Text>
           )}

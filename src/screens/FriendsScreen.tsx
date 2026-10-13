@@ -1,4 +1,5 @@
 import { preferredDmProtocol } from '../services/preferredDmProtocol';
+import BrandedRefreshControl from '../components/BrandedRefreshControl';
 import React, {
   useState,
   useMemo,
@@ -8,7 +9,7 @@ import React, {
   useDeferredValue,
   Profiler,
 } from 'react';
-import { View, Text, TextInput, TouchableOpacity, RefreshControl } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity } from 'react-native';
 import { InteractionManager } from 'react-native';
 import BrandPatternBackground from '../components/BrandPatternBackground';
 import { Alert } from '../components/BrandedAlert';
@@ -786,7 +787,7 @@ const FriendsScreen: React.FC = () => {
                 keyExtractor={(item) => item.id}
                 renderItem={renderItem}
                 refreshControl={
-                  <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+                  <BrandedRefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
                 }
                 ListEmptyComponent={
                   <View style={styles.emptyState}>

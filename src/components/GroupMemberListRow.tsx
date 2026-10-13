@@ -1,5 +1,6 @@
+import BrandedSpinner from './BrandedSpinner';
 import React from 'react';
-import { ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
+import { Text, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import {
   Check,
@@ -143,7 +144,7 @@ const GroupMemberListRow: React.FC<Props> = ({
             hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
           >
             {followPending ? (
-              <ActivityIndicator size="small" color={colors.white} />
+              <BrandedSpinner size="small" onGradient />
             ) : (
               <>
                 <UserPlus size={14} color={colors.white} strokeWidth={2.5} />

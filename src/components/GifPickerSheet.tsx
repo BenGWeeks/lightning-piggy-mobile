@@ -1,13 +1,16 @@
+import {
+  createGifPickerSheetStyles as createStyles,
+  GRID_GAP,
+} from '../styles/GifPickerSheet.styles';
+import BrandedSpinner from './BrandedSpinner';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
-  StyleSheet,
   TouchableOpacity,
   BackHandler,
   Keyboard,
   Platform,
-  ActivityIndicator,
   Linking,
   useWindowDimensions,
 } from 'react-native';
@@ -22,7 +25,6 @@ import {
 import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import type { Palette } from '../styles/palettes';
 import { searchGifs, getTrending, isConfigured, Gif } from '../services/giphyService';
 
 interface Props {
@@ -32,7 +34,6 @@ interface Props {
 }
 
 const GRID_COLUMNS = 2;
-const GRID_GAP = 8;
 const TILE_HEIGHT = 110;
 
 const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
@@ -56,7 +57,7 @@ const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
   const visibleIdsRef = useRef<Set<string>>(visibleIds);
   visibleIdsRef.current = visibleIds;
   const onViewableItemsChanged = useRef(
-    ({ viewableItems }: { viewableItems: Array<{ key?: string; item?: Gif }> }) => {
+    ({ viewableItems }: { viewableItems: { key?: string; item?: Gif }[] }) => {
       const next = new Set<string>();
       for (const v of viewableItems) {
         const id = v.item?.id ?? v.key;
@@ -319,7 +320,7 @@ const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
           ListEmptyComponent={
             loading ? (
               <View style={styles.loading}>
-                <ActivityIndicator color={colors.brandPink} />
+                <BrandedSpinner />
               </View>
             ) : (
               <View style={styles.emptyState}>
@@ -335,107 +336,5 @@ const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
     </BottomSheetModal>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    sheetBackground: {
-      backgroundColor: colors.surface,
-    },
-    handleIndicator: {
-      backgroundColor: colors.divider,
-    },
-    header: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingHorizontal: 20,
-      paddingTop: 4,
-      paddingBottom: 8,
-    },
-    title: {
-      fontSize: 16,
-      fontWeight: '700',
-      color: colors.textHeader,
-    },
-    searchRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      marginHorizontal: 20,
-      marginBottom: 12,
-      paddingHorizontal: 12,
-      paddingVertical: 8,
-      borderRadius: 10,
-      backgroundColor: colors.background,
-    },
-    searchInput: {
-      flex: 1,
-      fontSize: 15,
-      color: colors.textBody,
-      padding: 0,
-    },
-    grid: {
-      paddingHorizontal: 20,
-      paddingBottom: 40,
-      gap: GRID_GAP,
-    },
-    row: {
-      gap: GRID_GAP,
-      marginBottom: GRID_GAP,
-    },
-    tile: {
-      borderRadius: 10,
-      overflow: 'hidden',
-      backgroundColor: colors.background,
-    },
-    tileImage: {
-      width: '100%',
-      height: '100%',
-    },
-    loading: {
-      paddingVertical: 60,
-      alignItems: 'center',
-    },
-    emptyState: {
-      paddingHorizontal: 20,
-      paddingVertical: 40,
-      alignItems: 'center',
-      gap: 8,
-    },
-    emptyTitle: {
-      fontSize: 16,
-      fontWeight: '700',
-      color: colors.textHeader,
-    },
-    emptySubtitle: {
-      fontSize: 14,
-      color: colors.textSupplementary,
-      textAlign: 'center',
-      lineHeight: 20,
-    },
-    code: {
-      fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-      fontSize: 13,
-      color: colors.textBody,
-    },
-    emptyAction: {
-      marginTop: 8,
-      paddingHorizontal: 16,
-      paddingVertical: 10,
-      borderRadius: 10,
-      backgroundColor: colors.brandPink,
-    },
-    emptyActionText: {
-      fontSize: 14,
-      fontWeight: '700',
-      color: colors.white,
-    },
-    attribution: {
-      textAlign: 'center',
-      fontSize: 11,
-      color: colors.textSupplementary,
-      paddingVertical: 12,
-    },
-  });
 
 export default GifPickerSheet;

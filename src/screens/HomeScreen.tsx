@@ -1,3 +1,5 @@
+import BrandedRefreshControl from '../components/BrandedRefreshControl';
+import BrandedSpinner from '../components/BrandedSpinner';
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View,
@@ -5,8 +7,6 @@ import {
   TouchableOpacity,
   Pressable,
   ScrollView,
-  RefreshControl,
-  ActivityIndicator,
   InteractionManager,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
@@ -242,7 +242,7 @@ const HomeScreen: React.FC = () => {
   // re-executed every visible row (#1014). Memoised, it only changes when
   // the spinner state genuinely flips.
   const homeRefreshControl = useMemo(
-    () => <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />,
+    () => <BrandedRefreshControl refreshing={refreshing} onRefresh={handleRefresh} />,
     [refreshing, handleRefresh],
   );
 
@@ -409,7 +409,7 @@ const HomeScreen: React.FC = () => {
               </View>
             ) : (
               <View style={styles.emptyState}>
-                <ActivityIndicator size="small" color="#EC008C" />
+                {!refreshing && <BrandedSpinner size="small" testID="home-tx-loading" />}
               </View>
             )}
           </ScrollView>
@@ -422,7 +422,7 @@ const HomeScreen: React.FC = () => {
             accessibilityLabel={t('homeScreen.updatingTransactions')}
             testID="home-tx-refreshing"
           >
-            <ActivityIndicator size="small" color={colors.brandPink} />
+            <BrandedSpinner size="small" />
           </View>
         ) : null}
       </View>

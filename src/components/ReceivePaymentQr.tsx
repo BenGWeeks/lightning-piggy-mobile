@@ -1,5 +1,6 @@
+import BrandedSpinner from './BrandedSpinner';
 import React from 'react';
-import { View, Text, ActivityIndicator } from 'react-native';
+import { View, Text } from 'react-native';
 import { Check } from 'lucide-react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -71,7 +72,7 @@ export default function ReceivePaymentQr({
           )}
         </View>
       ) : mode === 'amount' && loading ? (
-        <ActivityIndicator size="large" color={colors.brandPink} />
+        <BrandedSpinner size="large" />
       ) : mode === 'amount' && invoice ? (
         <View>
           <QRCode value={invoice} size={200} />

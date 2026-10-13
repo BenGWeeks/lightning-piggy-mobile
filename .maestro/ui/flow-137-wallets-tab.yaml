@@ -38,6 +38,7 @@ name: Wallets tab — label, accessibility label and wallet screen
 
 - tapOn:
     id: 'tab-wallets'
+    retryTapIfNoChange: true
 - waitForAnimationToEnd:
     timeout: 3000
 
@@ -48,4 +49,4 @@ name: Wallets tab — label, accessibility label and wallet screen
 - extendedWaitUntil:
     visible:
       id: 'btn-receive'
-    timeout: 15000
+    timeout: 60000

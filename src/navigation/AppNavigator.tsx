@@ -2,9 +2,10 @@ import { resolveStoredNotificationTarget } from '../services/notificationStoredT
 import { routeNotificationMessage } from '../services/notificationGroupNavigation';
 import { getMarmotSession } from '../services/marmotSession';
 import { appNavigatorStyles as styles } from '../styles/AppNavigator.styles';
+import BrandedSpinner from '../components/BrandedSpinner';
 import React, { useEffect, useMemo, useState } from 'react';
 import { DEFAULT_DM_PROTOCOL, dmThreadId, type DmProtocol } from '../utils/dmProtocol';
-import { Linking, ActivityIndicator, View, useWindowDimensions } from 'react-native';
+import { Linking, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   NavigationContainer,
@@ -707,7 +708,7 @@ export default function AppNavigator() {
   if (isLoading || isRestoringNavState) {
     return (
       <View style={[styles.loadingContainer, { backgroundColor: colors.brandPink }]}>
-        <ActivityIndicator size="large" color={colors.white} />
+        <BrandedSpinner size="large" onGradient />
       </View>
     );
   }

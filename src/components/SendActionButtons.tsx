@@ -1,5 +1,6 @@
+import BrandedSpinner from './BrandedSpinner';
 import React from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity } from 'react-native';
 import { useTranslation } from '../contexts/LocaleContext';
 import type { SendSheetStyles } from '../styles/SendSheet.styles';
 interface Props {
@@ -8,7 +9,6 @@ interface Props {
   handleSend: () => void;
   onCancel: () => void;
   styles: SendSheetStyles;
-  colors: { brandPink: string };
 }
 export default function SendActionButtons({
   canSend,
@@ -16,7 +16,6 @@ export default function SendActionButtons({
   handleSend,
   onCancel,
   styles,
-  colors,
 }: Props) {
   const t = useTranslation();
   return (
@@ -40,7 +39,7 @@ export default function SendActionButtons({
         testID="sendsheet-send-button"
       >
         {sending ? (
-          <ActivityIndicator color={colors.brandPink} />
+          <BrandedSpinner />
         ) : (
           <Text style={styles.sendButtonText}>{t('sendSheet.send')}</Text>
         )}

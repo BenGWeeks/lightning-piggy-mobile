@@ -1,13 +1,7 @@
+import { createLocationPickerSheetStyles as createStyles } from '../styles/LocationPickerSheet.styles';
+import BrandedSpinner from './BrandedSpinner';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  BackHandler,
-  Dimensions,
-  ActivityIndicator,
-} from 'react-native';
+import { View, Text, TouchableOpacity, BackHandler, Dimensions } from 'react-native';
 import * as Location from 'expo-location';
 import {
   BottomSheetBackdrop,
@@ -21,7 +15,6 @@ import { useUserLocation } from '../contexts/UserLocationContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { useNostr } from '../contexts/NostrContext';
-import type { Palette } from '../styles/palettes';
 
 interface Props {
   visible: boolean;
@@ -256,7 +249,7 @@ const LocationPickerSheet: React.FC<Props> = ({
         <View style={[styles.mapWrap, { height: mapHeight }]}>
           {resolvedStart === null ? (
             <View style={styles.mapLoading}>
-              <ActivityIndicator color={colors.brandPink} />
+              <BrandedSpinner />
             </View>
           ) : (
             // LibreMiniMap with the crosshair overlay + onBoundsChange
@@ -331,82 +324,5 @@ const LocationPickerSheet: React.FC<Props> = ({
     </BottomSheetModal>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    sheetBackground: {
-      backgroundColor: colors.surface,
-      borderTopLeftRadius: 24,
-      borderTopRightRadius: 24,
-    },
-    handleIndicator: { backgroundColor: colors.divider, width: 40 },
-    // No flex:1 — dynamic sizing means content drives sheet height, not
-    // the other way round.
-    content: { paddingHorizontal: 16, paddingBottom: 24 },
-    title: {
-      fontSize: 18,
-      fontWeight: '800',
-      color: colors.textHeader,
-      marginTop: 4,
-    },
-    subtitle: {
-      fontSize: 13,
-      color: colors.textSupplementary,
-      marginTop: 2,
-      marginBottom: 12,
-    },
-    mapWrap: {
-      // Height is set inline (50% of window) so it scales with the
-      // device; everything else lives here.
-      borderRadius: 14,
-      overflow: 'hidden',
-      backgroundColor: colors.background,
-    },
-    mapLoading: {
-      flex: 1,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    closeButton: {
-      position: 'absolute',
-      top: 8,
-      right: 16,
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      backgroundColor: colors.surface,
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 10,
-    },
-    coordRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      marginTop: 12,
-      marginBottom: 12,
-    },
-    coordText: {
-      fontSize: 13,
-      fontWeight: '600',
-      color: colors.textHeader,
-    },
-    coordPlaceholder: {
-      fontSize: 13,
-      fontStyle: 'italic',
-      color: colors.textSupplementary,
-    },
-    confirmButton: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 8,
-      backgroundColor: colors.brandPink,
-      borderRadius: 100,
-      paddingVertical: 14,
-    },
-    confirmButtonDisabled: { opacity: 0.4 },
-    confirmButtonText: { color: colors.white, fontSize: 15, fontWeight: '800' },
-  });
 
 export default LocationPickerSheet;

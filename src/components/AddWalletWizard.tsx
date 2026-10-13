@@ -1,5 +1,6 @@
+import BrandedSpinner from './BrandedSpinner';
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, Image } from 'react-native';
+import { View, Text, TouchableOpacity, Image } from 'react-native';
 import { Alert } from './BrandedAlert';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import {
@@ -663,7 +664,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                   }
                 >
                   {connecting ? (
-                    <ActivityIndicator color={colors.white} />
+                    <BrandedSpinner onGradient />
                   ) : (
                     <Text style={styles.primaryButtonText}>
                       {walletType === 'onchain'

@@ -1,5 +1,6 @@
+import BrandedSpinner from './BrandedSpinner';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { X as XIcon } from 'lucide-react-native';
 import { Alert } from './BrandedAlert';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -164,7 +165,7 @@ export default function BlossomServersSection() {
         testID="blossom-publish"
       >
         {publishing ? (
-          <ActivityIndicator color={colors.brandPink} />
+          <BrandedSpinner />
         ) : (
           <Text style={list.publishButtonText}>{t('blossomServers.publish')}</Text>
         )}

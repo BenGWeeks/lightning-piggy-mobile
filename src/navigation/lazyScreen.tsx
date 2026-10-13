@@ -1,5 +1,7 @@
+import { lazyScreenStyles as styles } from '../styles/lazyScreen.styles';
+import BrandedSpinner from '../components/BrandedSpinner';
 import React, { Suspense } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { View } from 'react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 
 /**
@@ -28,7 +30,7 @@ function LazyScreenFallback(): React.ReactElement {
   const colors = useThemeColors();
   return (
     <View style={[styles.fallback, { backgroundColor: colors.background }]}>
-      <ActivityIndicator size="large" color={colors.brandPink} />
+      <BrandedSpinner size="large" />
     </View>
   );
 }
@@ -54,11 +56,3 @@ export function lazyScreen<T extends React.ComponentType<any>>(
   }
   return LazyScreen as unknown as T;
 }
-
-const styles = StyleSheet.create({
-  fallback: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-});

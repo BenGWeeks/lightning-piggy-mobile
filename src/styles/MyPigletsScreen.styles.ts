@@ -1,0 +1,128 @@
+import { StyleSheet } from 'react-native';
+import type { Palette } from './palettes';
+export const createMyPigletsScreenStyles = (colors: Palette) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: colors.background },
+    header: {
+      paddingHorizontal: 16,
+      paddingTop: 48,
+      paddingBottom: 14,
+      backgroundColor: colors.brandPink,
+      minHeight: 140,
+      overflow: 'hidden',
+    },
+    headerRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+    headerTitle: {
+      flex: 1,
+      textAlign: 'center',
+      fontSize: 18,
+      fontWeight: '700',
+      color: colors.white,
+    },
+    headerTagline: {
+      marginTop: 10,
+      paddingHorizontal: 4,
+      color: 'rgba(255,255,255,0.85)',
+      fontSize: 13,
+      fontWeight: '500',
+    },
+    listContent: { paddingBottom: 32 },
+    hideCta: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      backgroundColor: colors.brandPink,
+      marginHorizontal: 16,
+      marginTop: 14,
+      marginBottom: 18,
+      borderRadius: 100,
+      paddingVertical: 14,
+    },
+    hideCtaText: { color: colors.white, fontSize: 15, fontWeight: '700' },
+    sectionHeader: {
+      fontSize: 13,
+      fontWeight: '800',
+      color: colors.textSupplementary,
+      letterSpacing: 0.4,
+      textTransform: 'uppercase',
+      marginHorizontal: 16,
+      marginTop: 18,
+      marginBottom: 8,
+    },
+    emptySection: {
+      fontSize: 13,
+      color: colors.textSupplementary,
+      marginHorizontal: 16,
+      marginBottom: 4,
+      lineHeight: 19,
+    },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      marginHorizontal: 16,
+      marginBottom: 10,
+    },
+    iconWrap: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    iconLp: { backgroundColor: colors.brandPink },
+    iconStandard: { backgroundColor: colors.textSupplementary },
+    thumb: { width: 44, height: 44, borderRadius: 8, backgroundColor: colors.divider },
+    // Relative wrapper so the LpPayoutBadge anchors to the icon's corner.
+    iconContainer: { position: 'relative' },
+    rowMain: { flex: 1 },
+    rowTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    rowTitle: { flex: 1, fontSize: 15, fontWeight: '700', color: colors.textHeader },
+    rowMeta: { fontSize: 12, color: colors.textSupplementary, marginTop: 2 },
+    expiryBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 6,
+    },
+    expiryBadgeExpired: { backgroundColor: colors.red },
+    expiryBadgeWarn: { backgroundColor: colors.zapYellow },
+    // "Draft" pill for local-only Piglets that were saved with Public off
+    // and haven't been published to relays yet (#909). Neutral grey so it
+    // reads as informational, not a warning/error like the expiry pills.
+    draftBadge: {
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 6,
+      backgroundColor: colors.textSupplementary,
+    },
+    draftBadgeText: {
+      color: colors.white,
+      fontSize: 10,
+      fontWeight: '800',
+      letterSpacing: 0.2,
+    },
+    expiryBadgeText: {
+      color: colors.white,
+      fontSize: 10,
+      fontWeight: '800',
+      letterSpacing: 0.2,
+    },
+    // Trash control on owned Hidden rows — a small square touch target
+    // sized to sit comfortably between the row body and the chevron.
+    deleteButton: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    center: { alignItems: 'center', justifyContent: 'center', padding: 32 },
+  });

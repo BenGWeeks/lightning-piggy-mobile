@@ -88,7 +88,11 @@ module.exports = [
     // 'react-native', but a future re-export for parity testing would
     // legitimately need to. See CLAUDE.md → "Code Style".
     files: ['src/**/*.ts', 'src/**/*.tsx'],
-    ignores: ['src/components/BrandedAlert.tsx'],
+    ignores: [
+      'src/components/BrandedAlert.tsx',
+      'src/components/BrandedSpinner.tsx',
+      'src/components/BrandedRefreshControl.tsx',
+    ],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -96,9 +100,9 @@ module.exports = [
           paths: [
             {
               name: 'react-native',
-              importNames: ['Alert'],
+              importNames: ['Alert', 'ActivityIndicator', 'RefreshControl'],
               message:
-                "Use the branded Alert from src/components/BrandedAlert.tsx instead. Import via the relative path matching this file's location (e.g. '../components/BrandedAlert' from src/screens/, './BrandedAlert' from src/components/). See CLAUDE.md → Code Style.",
+                "Use BrandedAlert, BrandedSpinner or BrandedRefreshControl from src/components instead. Import via the relative path matching this file's location (e.g. '../components/BrandedAlert' from src/screens/, './BrandedAlert' from src/components/). See CLAUDE.md → Code Style.",
             },
             {
               // Lives in this src/** block (not a new one) because flat
@@ -109,6 +113,52 @@ module.exports = [
               importNames: ['BottomSheetModal', 'default'],
               message:
                 "Import BottomSheetModal from src/components/AccessibleBottomSheetModal instead — the library defaults sheet content to accessible={true}, which on iOS collapses the whole sheet into one 'Bottom Sheet' element that VoiceOver and Maestro can't see inside. See CLAUDE.md → Code Style.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // Existing alert wrapper exception must still use branded loading indicators.
+    files: ['src/components/BrandedAlert.tsx'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'react-native',
+              importNames: ['ActivityIndicator', 'RefreshControl'],
+              message:
+                'Use BrandedSpinner or BrandedRefreshControl from src/components for theme-consistent loading indicators.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // Only the two loading wrappers may import the native loading controls.
+    files: ['src/components/BrandedSpinner.tsx', 'src/components/BrandedRefreshControl.tsx'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'react-native',
+              importNames: ['Alert'],
+              message: 'Use BrandedAlert from src/components.',
+            },
+            {
+              name: '@gorhom/bottom-sheet',
+              importNames: ['BottomSheetModal', 'default'],
+              message: 'Use AccessibleBottomSheetModal from src/components.',
+            },
+            {
+              name: 'react-native-toast-message',
+              message: 'Use BrandedToast from src/components.',
             },
           ],
         },

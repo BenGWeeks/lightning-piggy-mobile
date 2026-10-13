@@ -1,10 +1,10 @@
+import BrandedSpinner from './BrandedSpinner';
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   BackHandler,
-  ActivityIndicator,
   AppState,
   type AppStateStatus,
 } from 'react-native';
@@ -506,7 +506,7 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
 
           {(stage === 'reading' || stage === 'resolving' || stage === 'claiming') && (
             <View style={styles.stateContainer}>
-              <ActivityIndicator size="large" color={colors.brandPink} />
+              <BrandedSpinner size="large" />
               <Text style={styles.instruction}>
                 {stage === 'reading' ? t('nfcReadSheet.reading') : t('nfcReadSheet.claimingSats')}
               </Text>

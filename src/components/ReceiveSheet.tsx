@@ -1,14 +1,7 @@
 import { useReceiveFriendShare } from '../hooks/useReceiveFriendShare';
+import BrandedSpinner from './BrandedSpinner';
 import React, { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  Pressable,
-  Share,
-  ActivityIndicator,
-  BackHandler,
-} from 'react-native';
+import { View, Text, TouchableOpacity, Pressable, Share, BackHandler } from 'react-native';
 import {
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
@@ -737,7 +730,7 @@ const ReceiveSheet: React.FC<Props> = ({
                       testID="receive-send-to-friend"
                     >
                       {sendingToFriend ? (
-                        <ActivityIndicator color={colors.white} />
+                        <BrandedSpinner onGradient />
                       ) : (
                         <>
                           <Send size={20} color={colors.white} />
