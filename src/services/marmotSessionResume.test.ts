@@ -13,13 +13,13 @@ import {
 const mockQuery = jest.fn();
 const mockPublish = jest.fn();
 const mockSubscribe = jest.fn();
-const mockClose = jest.fn();
+const mockResetTransports = jest.fn();
 jest.mock('./nostrPool', () => ({
   pool: {
     querySync: (...args: unknown[]) => mockQuery(...args),
     publish: (...args: unknown[]) => mockPublish(...args),
     subscribeMany: (...args: unknown[]) => mockSubscribe(...args),
-    close: (...args: unknown[]) => mockClose(...args),
+    resetTransports: async (...args: unknown[]) => mockResetTransports(...args),
   },
   trackRelays: jest.fn(),
 }));
@@ -61,7 +61,7 @@ it('resumes a live session through all >500 offline messages and an older epoch 
       };
     },
   );
-  mockClose.mockImplementation(() => {
+  mockResetTransports.mockImplementation(() => {
     for (const sub of sockets) sub.unsubscribe();
     sockets.clear();
   });
@@ -121,7 +121,7 @@ it('resumes a live session through all >500 offline messages and an older epoch 
         .some(([, f]) => f.kinds.includes(445) && f.until !== undefined),
     ).toBe(true);
     expect(inbox).toEqual(expected);
-    expect(mockClose).toHaveBeenCalledWith([RELAY]);
+    expect(mockResetTransports).toHaveBeenCalledWith([RELAY]);
     const live = buildMarmotRumor(alice.pubkey, { kind: 9, content: 'live after catch-up' });
     await alice.session.sendRumor(group.id, live);
     await waitFor(() => inbox.includes(live.id));

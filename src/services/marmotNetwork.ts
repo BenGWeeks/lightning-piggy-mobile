@@ -57,7 +57,15 @@ export function createMarmotNetwork(
   let recovering = false;
   const attempts = new Map<string, number>();
   const liveSubscriptions = new Map<object, string[]>();
-  const resetTransport = () => pool.close([...new Set([...liveSubscriptions.values()].flat())]);
+  let resetting: Promise<void> | undefined;
+  const resetTransport = () => {
+    resetting ??= pool
+      .resetTransports([...new Set([...liveSubscriptions.values()].flat())])
+      .finally(() => {
+        resetting = undefined;
+      });
+    return resetting;
+  };
   const reconnect = onReconnect
     ? () => {
         recovering = true;

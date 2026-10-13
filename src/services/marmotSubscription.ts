@@ -12,7 +12,7 @@ const MAX_SEEN_EVENTS = 2_000;
 
 export interface MarmotRelayRecovery {
   reconnect(): void;
-  resetTransport(): void;
+  resetTransport(): Promise<void>;
   notifyInitial: boolean;
   attempts: Map<string, number>;
 }
@@ -98,7 +98,7 @@ export function subscribeMarmotRelays(
     if (!foreground || stopped) return;
     // Group MLS ingest is non-urgent work: DM wraps re-arm immediately,
     // group subscriptions follow the app's three-second resume stagger.
-    resumeTimer = setTimeout(() => {
+    resumeTimer = setTimeout(async () => {
       resumeTimer = null;
       if (stopped || !foreground) return;
       if (__DEV__) console.log('[Marmot] resume — re-arming relay subscriptions');
@@ -110,8 +110,9 @@ export function subscribeMarmotRelays(
       });
       // Closing a subscription does not evict SimplePool's cached WebSocket.
       // Replace the transport too: Doze can leave it OPEN but silently dead.
-      if (recovery) recovery.resetTransport();
-      else pool.close([...new Set(relays)]);
+      if (recovery) await recovery.resetTransport();
+      else await pool.resetTransports([...new Set(relays)]);
+      if (stopped || !foreground) return;
       // The session reconnects via GroupsManager: collect every backfill page,
       // drain one MLS batch, then subscribe live. No newest-page-only recovery.
       if (recovery) recovery.reconnect();
