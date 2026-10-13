@@ -2,7 +2,7 @@ import { StyleSheet } from 'react-native';
 
 import type { Palette } from './palettes';
 
-export const createNotificationPermissionRowStyles = (colors: Palette) =>
+export const createSettingsBannerStyles = (colors: Palette) =>
   StyleSheet.create({
     allowedRow: {
       flexDirection: 'row',
@@ -53,6 +53,4 @@ export const createNotificationPermissionRowStyles = (colors: Palette) =>
     },
   });
 
-export type NotificationPermissionRowStyles = ReturnType<
-  typeof createNotificationPermissionRowStyles
->;
+export type SettingsBannerStyles = ReturnType<typeof createSettingsBannerStyles>;

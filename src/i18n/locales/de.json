@@ -3192,5 +3192,16 @@
     "tls": "TLS-Fehler",
     "closed": "Verbindung geschlossen",
     "explanation": "Grün bedeutet, dass das Relay gerade geantwortet hat. „In Verwendung“ bedeutet, dass die App für dein Konto damit verbunden ist; Relays werden nach dem Veröffentlichen eingebunden."
+  },
+  "settingsKit": {
+    "search": "Optionen suchen",
+    "noResults": "Keine Optionen entsprechen deiner Suche.",
+    "custom": "Benutzerdefiniert",
+    "status": {
+      "ok": "In Ordnung",
+      "warn": "Handlungsbedarf",
+      "error": "Fehler",
+      "unknown": "Unbekannt"
+    }
   }
 }

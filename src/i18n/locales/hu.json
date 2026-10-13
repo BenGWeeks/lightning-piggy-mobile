@@ -3192,5 +3192,16 @@
     "tls": "TLS-hiba",
     "closed": "Kapcsolat lezárva",
     "explanation": "A zöld azt jelenti, hogy a relay éppen válaszolt. A „Használatban” azt jelenti, hogy az app a fiókodhoz kapcsolódik hozzá; a relayek közzététel után csatlakoznak."
+  },
+  "settingsKit": {
+    "search": "Lehetőségek keresése",
+    "noResults": "Nincs a keresésnek megfelelő lehetőség.",
+    "custom": "Egyéni",
+    "status": {
+      "ok": "Rendben",
+      "warn": "Figyelmet igényel",
+      "error": "Hiba",
+      "unknown": "Ismeretlen"
+    }
   }
 }

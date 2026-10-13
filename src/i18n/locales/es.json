@@ -3192,5 +3192,16 @@
     "tls": "Error de TLS",
     "closed": "Conexión cerrada",
     "explanation": "Verde significa que el relay acaba de responder. «En uso» significa que la app está conectada a él para tu cuenta; los relays se incorporan cuando publicas."
+  },
+  "settingsKit": {
+    "search": "Buscar opciones",
+    "noResults": "Ninguna opción coincide con tu búsqueda.",
+    "custom": "Personalizado",
+    "status": {
+      "ok": "Correcto",
+      "warn": "Requiere atención",
+      "error": "Error",
+      "unknown": "Desconocido"
+    }
   }
 }

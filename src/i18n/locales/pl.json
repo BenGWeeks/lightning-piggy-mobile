@@ -3228,5 +3228,16 @@
     "tls": "Błąd TLS",
     "closed": "Połączenie zamknięte",
     "explanation": "Zielony oznacza, że relay właśnie odpowiedział. „W użyciu” oznacza, że aplikacja jest z nim połączona dla Twojego konta; relaye dołączają po opublikowaniu."
+  },
+  "settingsKit": {
+    "search": "Szukaj opcji",
+    "noResults": "Żadna opcja nie pasuje do wyszukiwania.",
+    "custom": "Własne",
+    "status": {
+      "ok": "W porządku",
+      "warn": "Wymaga uwagi",
+      "error": "Błąd",
+      "unknown": "Nieznany"
+    }
   }
 }

@@ -4,7 +4,8 @@ import { Info } from 'lucide-react-native';
 import SettingsInfoSheet from './SettingsInfoSheet';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import { createSettingsScopeHeaderStyles } from '../styles/SettingsScopeHeader.styles';
+import { SettingsSectionCardContext } from '../contexts/SettingsSectionCardContext';
+import { createSettingsSectionStyles } from '../styles/SettingsSection.styles';
 
 interface Props {
   /** `account` = follows the signed-in account; `phone` = every account on this device. */
@@ -12,12 +13,15 @@ interface Props {
   /** Adds the top gap that separates the second half of a screen from the first. */
   spaced?: boolean;
   testID: string;
+  /** Omit children for the unchanged PR 0 header; migrations opt into the card. */
+  children?: React.ReactNode;
+  showInfo?: boolean;
 }
 
-const SettingsScopeHeader: React.FC<Props> = ({ scope, spaced, testID }) => {
+const SettingsSection: React.FC<Props> = ({ scope, spaced, testID, children, showInfo = true }) => {
   const colors = useThemeColors();
   const t = useTranslation();
-  const styles = useMemo(() => createSettingsScopeHeaderStyles(colors), [colors]);
+  const styles = useMemo(() => createSettingsSectionStyles(colors), [colors]);
   const account = scope === 'account';
   const [infoOpen, setInfoOpen] = useState(false);
   const title = t(account ? 'settingsScope.forThisAccount' : 'settingsScope.onThisPhone');
@@ -27,16 +31,30 @@ const SettingsScopeHeader: React.FC<Props> = ({ scope, spaced, testID }) => {
         <Text style={styles.header} accessibilityRole="header">
           {title}
         </Text>
-        <TouchableOpacity
-          style={styles.info}
-          onPress={() => setInfoOpen(true)}
-          accessibilityRole="button"
-          accessibilityLabel={`${title}: ${t('securityScreen.details')}`}
-          testID={`${testID}-info`}
-        >
-          <Info size={18} color={colors.white} />
-        </TouchableOpacity>
+        {showInfo && (
+          <TouchableOpacity
+            style={styles.info}
+            onPress={() => setInfoOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel={`${title}: ${t('securityScreen.details')}`}
+            testID={`${testID}-info`}
+          >
+            <Info size={18} color={colors.white} />
+          </TouchableOpacity>
+        )}
       </View>
+      {children != null && (
+        <SettingsSectionCardContext.Provider value={true}>
+          <View style={styles.card}>
+            {React.Children.toArray(children).map((child, index) => (
+              <React.Fragment key={index}>
+                {index > 0 && <View style={styles.separator} />}
+                {child}
+              </React.Fragment>
+            ))}
+          </View>
+        </SettingsSectionCardContext.Provider>
+      )}
       <SettingsInfoSheet
         visible={infoOpen}
         onClose={() => setInfoOpen(false)}
@@ -50,4 +68,4 @@ const SettingsScopeHeader: React.FC<Props> = ({ scope, spaced, testID }) => {
   );
 };
 
-export default SettingsScopeHeader;
+export default SettingsSection;

@@ -14,6 +14,11 @@ export const createSettingsRowStyles = (colors: Palette) =>
       marginTop: 8,
       minHeight: 76,
     },
+    grouped: { marginTop: 0, borderRadius: 0, backgroundColor: 'transparent' },
+    indent: { marginLeft: 24 },
+    disabled: { opacity: 0.5 },
+    destructive: { color: colors.red },
+    status: { width: 8, height: 8, borderRadius: 4, marginHorizontal: 8 },
     main: {
       flex: 1,
       flexDirection: 'row',

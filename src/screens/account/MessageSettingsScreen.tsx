@@ -11,7 +11,7 @@ import { useAccountState } from '../../contexts/useAccountState';
 import { getLinkPreviewEnabled, setLinkPreviewEnabled } from '../../services/linkPreviewPreference';
 import WebOfTrustBottomSheet from '../../components/WebOfTrustBottomSheet';
 import AmberPermissionSection from '../../components/AmberPermissionSection';
-import SettingsScopeHeader from '../../components/SettingsScopeHeader';
+import SettingsSection from '../../components/SettingsSection';
 
 // Same names as the Web of Trust sheet this row opens (and the filter chip
 // on Messages, Map and Events).
@@ -53,7 +53,7 @@ const MessageSettingsScreen: React.FC = () => {
   };
   return (
     <AccountScreenLayout title={t('messageSettingsScreen.title')}>
-      <SettingsScopeHeader scope="account" testID="messages-account" />
+      <SettingsSection scope="account" testID="messages-account" />
       <SettingsRow
         icon={ShieldCheck}
         title={t('messageSettingsScreen.trustTitle')}

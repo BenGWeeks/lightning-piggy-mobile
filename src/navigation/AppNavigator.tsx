@@ -107,6 +107,7 @@ const NostrScreen = lazyScreen(() => import('../screens/account/NostrScreen'));
 const RelayDetailsScreen = lazyScreen(() => import('../screens/account/RelayDetailsScreen'));
 const OnChainScreen = lazyScreen(() => import('../screens/account/OnChainScreen'));
 const DisplayLanguageScreen = lazyScreen(() => import('../screens/account/DisplayLanguageScreen'));
+const PickerScreen = lazyScreen(() => import('../screens/account/PickerScreen'));
 const DisplayScreen = lazyScreen(() => import('../screens/account/DisplayScreen'));
 const NotificationSettingsScreen = lazyScreen(
   () => import('../screens/account/NotificationSettingsScreen'),
@@ -708,6 +709,7 @@ export default function AppNavigator() {
     >
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         <Stack.Screen name="Main" component={MainDrawer} />
+        <Stack.Screen name="SettingsPicker" component={PickerScreen} />
         <Stack.Screen
           name="Conversation"
           component={ConversationScreen}

@@ -3192,5 +3192,16 @@
     "tls": "TLS error",
     "closed": "Connection closed",
     "explanation": "Green means the relay answered just now. 'In use' means the app is connected to it for your account; relays join once you publish."
+  },
+  "settingsKit": {
+    "search": "Search options",
+    "noResults": "No options match your search.",
+    "custom": "Custom",
+    "status": {
+      "ok": "OK",
+      "warn": "Needs attention",
+      "error": "Error",
+      "unknown": "Unknown"
+    }
   }
 }
