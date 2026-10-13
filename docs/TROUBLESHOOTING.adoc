@@ -1340,6 +1340,16 @@ filter. Native reconnect/resume reconciliation still waits three seconds
 and respects the shared automatic-refresh interval. If native resume fails,
 the live-DM bridge restores the JS wrap subscription.
 
+A transient join failure leaves the decrypted Welcome in `pendingWelcomes`,
+while the DM inbox has already marked its wrap processed. The session now
+retries those rows at startup, three seconds after app resume, and after a
+Marmot relay route recovers (replay or EOSE). Retry scans are single-flight,
+with at most three passes per trigger and exponential backoff from five
+seconds capped at five minutes. Repeated reconnect signals cannot bypass
+backoff. Backgrounding cancels queued work and session teardown removes the
+listeners. Each pass uses `acceptWelcome`, preserving the in-flight guard
+and durable outcome dedupe; successful or permanent outcomes remove the row.
+
 Marmot first shipped in PR #1163 after v1.4.1. PR #1417 changed automatic
 inbox reconciliation policy, not the group subscription lifecycle. A lack
 of `[Marmot]` log output alone cannot distinguish a dead group transport

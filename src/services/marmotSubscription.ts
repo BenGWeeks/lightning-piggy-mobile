@@ -3,6 +3,7 @@
 import { AppState } from 'react-native';
 import type { Event, Filter } from 'nostr-tools';
 import { pool } from './nostrPool';
+import { noteMarmotRelayReconnect } from './marmotRelayReconnect';
 
 const RESUME_DELAY_MS = 3_000;
 const RETRY_BASE_MS = 5_000;
@@ -39,10 +40,17 @@ export function subscribeMarmotRelays(
     const generation = ++route.generation;
     route.close?.(); // any synchronous close callback is now stale
     const current = () => !stopped && generation === route.generation;
+    let notified = false;
+    const recovered = () => {
+      if (!current() || !foreground || generation === 1 || notified) return;
+      notified = true;
+      noteMarmotRelayReconnect();
+    };
     const sub = pool.subscribeMany([route.relay], route.filter, {
       onevent: (event) => {
         if (!current()) return;
         route.attempt = 0;
+        recovered();
         // subscribeMany previously deduped the relay fan-out. Preserve that
         // boundary now that each relay has its own reconnect lifecycle.
         if (seen.has(event.id)) return;
@@ -50,6 +58,7 @@ export function subscribeMarmotRelays(
         if (seen.size > MAX_SEEN_EVENTS) seen.delete(seen.values().next().value!);
         onEvent(event);
       },
+      oneose: recovered,
       onclose: () => {
         if (!current() || !foreground || route.timer !== null) return;
         const delay = Math.min(RETRY_BASE_MS * 2 ** route.attempt++, RETRY_MAX_MS);

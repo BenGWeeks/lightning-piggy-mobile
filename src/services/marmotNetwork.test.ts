@@ -12,6 +12,7 @@ import {
   MAX_PUSH_RELAYS,
 } from './marmotNetwork';
 import { trackRelays } from './nostrPool';
+import { onMarmotRelayReconnect } from './marmotRelayReconnect';
 import { MARMOT_PUSH_SERVER_RELAYS } from './nostrRelayDefaults';
 
 const mockQuerySync = jest.fn();
@@ -266,6 +267,29 @@ describe('Marmot subscription lifecycle', () => {
     jest.advanceTimersByTime(5_000);
     expect(mockSubscribeMany).toHaveBeenCalledTimes(before + 1);
     expect(mockSubscribeMany.mock.calls.at(-1)[0]).toEqual(['wss://one.example']);
+  });
+  it('notifies recovery once on replay or EOSE, ignoring initial and stale routes', () => {
+    const recovered = jest.fn();
+    const removeListener = onMarmotRelayReconnect(recovered);
+    try {
+      const initial = mockSubscribeMany.mock.calls[0][2];
+      initial.oneose();
+      expect(recovered).not.toHaveBeenCalled();
+      initial.onclose(['offline']);
+      jest.advanceTimersByTime(5_000);
+      initial.oneose();
+      expect(recovered).not.toHaveBeenCalled();
+      const reopened = mockSubscribeMany.mock.calls.at(-1)[2];
+      reopened.onevent({ id: 'replay' });
+      reopened.oneose();
+      expect(recovered).toHaveBeenCalledTimes(1);
+      reopened.onclose(['offline again']);
+      jest.advanceTimersByTime(5_000);
+      mockSubscribeMany.mock.calls.at(-1)[2].oneose();
+      expect(recovered).toHaveBeenCalledTimes(2);
+    } finally {
+      removeListener();
+    }
   });
   it('ignores old close callbacks and cancels resume/retry work on unsubscribe', () => {
     const oldClose = mockSubscribeMany.mock.calls[0][2].onclose;

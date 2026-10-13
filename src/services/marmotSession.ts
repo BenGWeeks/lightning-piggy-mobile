@@ -46,6 +46,7 @@ import {
   SingleFlight,
   trackKeyPackageAcceptance,
 } from './marmotKeyPackageLifecycle';
+import { startPendingWelcomeRetries } from './marmotPendingWelcomes';
 import { retryPendingRetirement } from './marmotKeyPackageRetire';
 import { MarmotDeviceTracker } from './marmotDeviceTracker';
 import {
@@ -204,6 +205,7 @@ export class MarmotSession {
   private readonly outbox: MarmotWelcomeOutbox;
   /** MIP-05: announcing THIS device's push token in our groups. */
   readonly pushRegistration: MarmotPushRegistrar;
+  private stopWelcomeRetries: (() => void) | null = null;
   private connection: { unsubscribe(): void } | null = null;
   // Single-flight: start-up, resume, a new chat and a join can all ask at
   // once; one asking mid-run (e.g. a join just spent our key) gets a rerun.
@@ -346,7 +348,9 @@ export class MarmotSession {
     // user may never open — so for them it waits for first Marmot use (or an
     // account that has used Marmot before and needs its package kept fresh).
     void this.keepKeyPackageFresh();
-    void this.retryPendingWelcomes();
+    this.stopWelcomeRetries = startPendingWelcomeRetries(this.backend, (w) =>
+      this.acceptWelcome(w),
+    );
     void this.outbox.flush().catch(() => undefined);
     void this.failedInvites.run();
     void this.keyPackageLookup()
@@ -355,22 +359,9 @@ export class MarmotSession {
       .catch(() => undefined);
   }
 
-  /** Re-attempt Welcomes whose join failed transiently in an earlier session. */
-  private async retryPendingWelcomes(): Promise<void> {
-    for (const id of await this.backend.keys('pendingWelcomes')) {
-      if (this.gate.stopped) return;
-      const raw = await this.backend.get('pendingWelcomes', id);
-      if (!raw) continue;
-      try {
-        await this.acceptWelcome(JSON.parse(raw) as MarmotRumor);
-      } catch {
-        // leave it pending for the next start
-      }
-    }
-  }
-
   stop(): void {
     this.gate.stop();
+    this.stopWelcomeRetries?.();
     clearFailedMarmotInvites(this.pubkey);
     const run = this.keyPackageRuns.current;
     const pushStopped = Promise.all([this.push.stop(), this.pushRegistration.stop()]);
@@ -715,6 +706,7 @@ export class MarmotSession {
     const id = welcomeRumor.id;
     const ns = WELCOME_OUTCOMES_NS;
     if (this.joiningWelcomes.has(id) || (await this.backend.get(ns, id))) return null;
+    if (this.joiningWelcomes.has(id) || this.gate.stopped) return null;
     this.joiningWelcomes.add(id);
     // The marker records what happened, so the inbox can hide or explain it.
     const markHandled = async (outcome: WelcomeOutcome) => {
@@ -725,7 +717,7 @@ export class MarmotSession {
     try {
       // Durable until joined or permanently rejected: the inbox stores the
       // invite's gift wrap as processed and never re-routes it, so a transient
-      // failure is retried from here (next session start) instead. Inside the
+      // failure is retried on start, resume, or relay reconnect instead. Inside the
       // try so a failed write still releases `joiningWelcomes`.
       await this.backend.set('pendingWelcomes', id, JSON.stringify(welcomeRumor));
       const { group } = await this.client.joinGroupFromWelcome({ welcomeRumor });
