@@ -23,32 +23,37 @@ interface Props {
  * tab — it persists theme, alias and address together), so the sheet reads
  * as pure composition.
  */
-const WalletDesignTab: React.FC<Props> = ({ styles, t, selectedTheme, onSelectTheme, onSave }) => (
-  <View style={styles.tabContent}>
-    <SettingsRow
-      appearance="surface"
-      icon={Palette}
-      title={t('walletSettingsSheet.cardDesign')}
-      value={t('walletCardPicker.selectedTheme', {
-        name: (cardThemes[selectedTheme] ?? cardThemes['lightning-piggy']).name,
-      })}
-      testID="wallet-design-row"
-    />
-    {/* Small top gap between the label and the picker — preserves the
-        spacing the removed `themeGrid` (marginTop: 4) used to provide. */}
-    <View style={styles.pickerGap}>
-      <WalletCardPicker selectedTheme={selectedTheme} onSelect={onSelectTheme} />
-    </View>
+const WalletDesignTab: React.FC<Props> = ({ styles, t, selectedTheme, onSelectTheme, onSave }) => {
+  const config = cardThemes[selectedTheme] ?? cardThemes['lightning-piggy'];
+  const name = config.nameKey ? t(config.nameKey) : config.name;
 
-    <SettingsRow
-      appearance="surface"
-      icon={Save}
-      title={t('walletSettingsSheet.save')}
-      onPress={onSave}
-      testID="wallet-settings-save"
-      accessibilityLabel={t('walletSettingsSheet.saveWalletSettings')}
-    />
-  </View>
-);
+  return (
+    <View style={styles.tabContent}>
+      <SettingsRow
+        appearance="surface"
+        icon={Palette}
+        title={t('walletSettingsSheet.cardDesign')}
+        value={t('walletCardPicker.selectedTheme', {
+          name,
+        })}
+        testID="wallet-design-row"
+      />
+      {/* Small top gap between the label and the picker — preserves the
+        spacing the removed `themeGrid` (marginTop: 4) used to provide. */}
+      <View style={styles.pickerGap}>
+        <WalletCardPicker selectedTheme={selectedTheme} onSelect={onSelectTheme} />
+      </View>
+
+      <SettingsRow
+        appearance="surface"
+        icon={Save}
+        title={t('walletSettingsSheet.save')}
+        onPress={onSave}
+        testID="wallet-settings-save"
+        accessibilityLabel={t('walletSettingsSheet.saveWalletSettings')}
+      />
+    </View>
+  );
+};
 
 export default WalletDesignTab;
