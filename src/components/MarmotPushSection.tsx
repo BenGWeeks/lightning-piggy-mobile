@@ -19,6 +19,7 @@ import {
   type EnableOutcome,
 } from '../services/marmotPushRegistration';
 import type { SyncResult } from '../services/marmotPushRegistrar';
+import { getActivePubkey } from '../services/walletStorageService';
 import {
   getWatcherStatus,
   subscribeWatcherStatus,
@@ -146,6 +147,8 @@ const MarmotPushSection: React.FC<{ permissionGranted: boolean }> = ({ permissio
     setFinishing(true);
     try {
       reportSync(await syncMarmotPushNow(pubkey));
+      // Signer approval can outlive this account; the watcher uses the live identity.
+      if (getActivePubkey() !== pubkey) return;
       await syncWatcherNow();
     } finally {
       setFinishing(false);

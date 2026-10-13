@@ -594,6 +594,9 @@ async function enableNow(
       if (stillActive?.() === false) return rollback();
     }
   } catch {
+    // Automatic setup has not made a user choice: keep the preference
+    // absent so a transient storage failure can retry on the next run.
+    if (!interactive) return rollback();
     await AsyncStorage.setItem(accountKey(pubkey), '0').catch(() => undefined);
     return { status: 'unavailable' };
   }

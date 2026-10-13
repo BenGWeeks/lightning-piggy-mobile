@@ -834,6 +834,32 @@ it('leaves automatic setup retryable after a failed push preference write', asyn
 
 // --- automatic default setup: one cancellable task per account ---------------------
 
+it.each(['read', 'write'] as const)(
+  'leaves automatic setup absent and retryable after a failed forgotten-account %s',
+  async (operation) => {
+    // Fail inside enableNow, after hydration and the opt-in write succeeded.
+    await loadMarmotPushSettings(ME);
+    mockSecure.set('marmot_push_forgotten_v1', JSON.stringify([ME]));
+    const secure = jest.requireMock('expo-secure-store');
+    const storageOperation = operation === 'read' ? secure.getItemAsync : secure.deleteItemAsync;
+    storageOperation.mockRejectedValueOnce(new Error('storage unavailable'));
+
+    expect(await enableMarmotPush(ME, { interactive: false })).toEqual({
+      status: 'unavailable',
+    });
+    expect(await AsyncStorage.getItem(enabledKey(ME))).toBeNull();
+    expect(await AsyncStorage.getItem(`notification_preference_explicit_v1_${ME}`)).toBeNull();
+    expect(AsyncStorage.setItem).not.toHaveBeenCalledWith(enabledKey(ME), '0');
+    expect(currentPushDevice(ME)).toBeNull();
+    expect(Notifications.registerTaskAsync).not.toHaveBeenCalled();
+    expect(mockSession.pushRegistration.setRegistration).not.toHaveBeenCalled();
+
+    expect((await enableMarmotPush(ME, { interactive: false })).status).toBe('enabled');
+    expect(await AsyncStorage.getItem(enabledKey(ME))).toBe('1');
+    expect(mockSecure.has('marmot_push_forgotten_v1')).toBe(false);
+  },
+);
+
 it('records a user push toggle as a manual change before anything is awaited', async () => {
   const automatic = beginDefaultSetup(ME);
   const enabling = enableMarmotPush(ME);
