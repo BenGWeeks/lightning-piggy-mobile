@@ -1,3 +1,6 @@
+import { sendSharedDm } from './sendSharedDm';
+import { mergeConversationMessages, DM_CONV_CAP } from '../contexts/nostrDmCache';
+import { NWC_SHARE_KIND } from '../utils/nwcShareMessage';
 import { getEventHash } from 'nostr-tools';
 
 import {
@@ -149,3 +152,49 @@ describe('marmotDelivery', () => {
     expect(marmotDelivery({ a: false }, { eventId: 'e', kind: 14 }).delivered).toBe(false);
   });
 });
+
+it.each([14, NWC_SHARE_KIND])(
+  'persists kind %s with the timestamp built after slow first-time Marmot setup',
+  async (kind) => {
+    jest.useFakeTimers();
+    try {
+      jest.setSystemTime(1_700_000_000_000);
+      let builtAt = 0;
+      fakeSession({
+        getOrCreateDm: async () => {
+          jest.advanceTimersByTime(60_000);
+          return { id: 'marmot:dm', relays: ['wss://r1'] } as Awaited<
+            ReturnType<MarmotSession['getOrCreateDm']>
+          >;
+        },
+        sendRumor: async (_group, rumor) => {
+          builtAt = rumor.created_at;
+          jest.advanceTimersByTime(60_000);
+          return { 'wss://r1': true };
+        },
+      });
+      const append = jest.fn().mockResolvedValue(undefined);
+      await sendSharedDm({
+        peer: PEER,
+        text: 'shared content',
+        protocol: 'marmot',
+        kind,
+        send: () => sendMarmotDm(ME, PEER, { kind, content: 'shared content' }),
+        append,
+      });
+      const local = append.mock.calls[0][1];
+      expect(builtAt).toBe(1_700_000_060);
+      expect(local.createdAt).toBe(builtAt);
+      expect(
+        mergeConversationMessages(
+          [local],
+          [{ ...local, id: 'echo', createdAt: builtAt }],
+          DM_CONV_CAP,
+        ),
+      ).toHaveLength(1);
+    } finally {
+      jest.clearAllTimers();
+      jest.useRealTimers();
+    }
+  },
+);

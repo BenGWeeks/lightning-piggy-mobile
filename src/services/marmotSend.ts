@@ -112,7 +112,7 @@ export async function sendMarmotDm(
     const delivery = marmotDelivery(await session.sendRumor(dm.id, rumor), meta);
     hooks?.onDeliveryFinalized?.(delivery);
     return delivery.delivered
-      ? { success: true, delivery }
+      ? { success: true, delivery, rumorCreatedAt: rumor.created_at }
       : { success: false, delivery, error: 'No relay accepted the message' };
   } catch (e) {
     return marmotFailure(e);

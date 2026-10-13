@@ -27,6 +27,8 @@ import type { MarmotUnreachableReason } from '../services/marmotFallback';
 // (not logged in, signer cancelled) omits it (#857).
 export interface SendResult {
   success: boolean;
+  /** Timestamp of the built outgoing rumor, for share/echo reconciliation. */
+  rumorCreatedAt?: number;
   error?: string;
   delivery?: DeliveryStatus;
   /** A Marmot send that failed because the peer has no usable key package —
@@ -78,10 +80,11 @@ export interface UseMessageSendParams {
 // `delivery` is still returned in every case so the optimistic bubble settles to
 // its final tick and a partial/failed send keeps the draft for Re-publish
 // (#857; Copilot review on #283).
-function toTextSendResult(result: DmSendResult): SendResult {
+function toTextSendResult(result: DmSendResult, rumorCreatedAt?: number): SendResult {
   const fullyDelivered = result.wrapsPublished > 0 && result.errors.length === 0;
   return {
     success: fullyDelivered,
+    rumorCreatedAt,
     delivery: result.delivery,
     error: fullyDelivered ? undefined : (result.errors[0] ?? 'Send failed'),
   };
@@ -120,16 +123,15 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
       const targetRelays = Array.from(new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS]));
       try {
         if (protocol === 'nip04') {
-          return toTextSendResult(
-            await sendNip04Message({
-              senderPubkey: pubkey,
-              recipientPubkey: normalizedRecipientPubkey,
-              plaintext,
-              signerType,
-              relays: targetRelays,
-              hooks,
-            }),
-          );
+          const result = await sendNip04Message({
+            senderPubkey: pubkey,
+            recipientPubkey: normalizedRecipientPubkey,
+            plaintext,
+            signerType,
+            relays: targetRelays,
+            hooks,
+          });
+          return toTextSendResult(result, result.rumorCreatedAt);
         }
         const rumor = nostrService.createDirectMessageRumor({
           senderPubkey: pubkey,
@@ -156,7 +158,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
           // tick (delivered / partial / all-failed); `toTextSendResult` gates
           // `success` (composer-clear) on a fully-delivered send so a partial one
           // keeps the draft for Re-publish — no silent drop (#857).
-          return toTextSendResult(result);
+          return toTextSendResult(result, rumor.created_at);
         }
 
         if (signerType === 'amber') {
@@ -182,7 +184,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
               return JSON.parse(signedEventJson);
             },
           });
-          return toTextSendResult(result);
+          return toTextSendResult(result, rumor.created_at);
         }
 
         if (signerType === 'nip46') {
@@ -212,7 +214,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
               return JSON.parse(signedEventJson);
             },
           });
-          return toTextSendResult(result);
+          return toTextSendResult(result, rumor.created_at);
         }
 
         return { success: false, error: 'Unsupported signer type' };
@@ -492,7 +494,11 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
         };
         const preferred = await preferredDmProtocol(pubkey, normalizedRecipientPubkey, protocol);
         if (preferred === 'marmot') {
-          return await sendMarmotDm(pubkey, normalizedRecipientPubkey, rumor);
+          return await sendMarmotDm(pubkey, normalizedRecipientPubkey, {
+            kind: rumor.kind,
+            content: rumor.content,
+            tags: rumor.tags,
+          });
         }
 
         if (signerType === 'nsec') {
@@ -508,7 +514,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
           // errors — `delivery.delivered` alone can be true when only the
           // self-wrap landed but the recipient wrap failed, which would wrongly
           // claim "Wallet shared" (Copilot review on #431).
-          return toTextSendResult(result);
+          return toTextSendResult(result, rumor.created_at);
         }
 
         if (signerType === 'amber') {
@@ -532,7 +538,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
               return JSON.parse(signedEventJson);
             },
           });
-          return toTextSendResult(result);
+          return toTextSendResult(result, rumor.created_at);
         }
 
         if (signerType === 'nip46') {
@@ -560,7 +566,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
               return JSON.parse(signedEventJson);
             },
           });
-          return toTextSendResult(result);
+          return toTextSendResult(result, rumor.created_at);
         }
 
         return { success: false, error: 'Unsupported signer type' };

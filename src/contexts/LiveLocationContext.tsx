@@ -211,7 +211,7 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
           content: draft.content,
           pubkey,
         },
-        session.protocol ? { protocol: session.protocol } : undefined,
+        { protocol: transportFor(session) },
       );
       return result.success;
     },

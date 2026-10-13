@@ -23,7 +23,6 @@ export async function sendSharedDm({
   send,
   append,
 }: SharedDm): Promise<SendResult> {
-  const createdAt = Math.floor(Date.now() / 1000);
   const result = await send();
   if (result.success && append) {
     const rumorId = result.delivery?.eventId;
@@ -32,7 +31,7 @@ export async function sendSharedDm({
       rumorId,
       fromMe: true,
       text,
-      createdAt,
+      createdAt: result.rumorCreatedAt ?? Math.floor(Date.now() / 1000),
       protocol,
       wireKind: kind ?? result.delivery?.kind ?? (protocol === 'nip04' ? 4 : 14),
       deliveryStatus: result.delivery,
