@@ -1290,3 +1290,22 @@ malformed values with `null`, protecting both the merchant batch and relay
 fallback paths. Regression cases live in
 `src/services/marketMerchantProfiles.test.ts`, `src/utils/profileContent.test.ts`,
 and `src/hooks/usePubkeyProfile.test.ts` (#1448).
+
+== DM refresh freezes taps after restart or update
+
+If `[Perf] fetchInboxDmEvents` returns roughly 1,300 kind-4 events while
+`[Perf] heartbeat` reports a tens-of-seconds gap and `nostrCrypto
+schnorrVerify` reports ~34 ms per call, inspect the shared pool receive
+path before the inbox's stored-decrypt gate. The v1.5.0 in-memory verified
+LRU did not survive restart; relay replay synchronously re-verified every
+kind-4 envelope even when its plaintext was already stored. Kind-1059
+outer wraps and batch profiles use structure-only checks at that boundary.
+
+The fix persists successful checks in `nostrVerifyCache` and paces the
+shared relay receive path in `nostrRelayReceiveQueue`. An upgrade needs
+one paced pass to seed trust. Later restarts should produce zero Schnorr
+checks for retained records. Missing/corrupt storage or cache eviction
+requires paced verification again. Verify on device using heartbeat gaps,
+not total refresh duration: a first full backlog can still take tens of
+seconds overall while touch dispatch stays responsive. See
+`PERFORMANCE.adoc` → "Kind-4 replay verification after restart (v1.5.0)".
