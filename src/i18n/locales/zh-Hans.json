@@ -2312,7 +2312,10 @@
       "friendsOfFriends": "好友的好友",
       "friendsChip": "好友",
       "comingSoon": "即将推出",
-      "clearScope": "将卖家重置为 Lightning Piggy 首选卖家"
+      "clearScope": "将卖家重置为 Lightning Piggy 首选卖家",
+      "moreMerchants": "更多（%{count}）",
+      "searchMerchants": "搜索商家",
+      "noMerchants": "未找到商家"
     },
     "feedbackTabs": {
       "reviews": "评价",

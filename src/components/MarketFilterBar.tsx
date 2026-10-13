@@ -1,3 +1,5 @@
+import MarketMerchantFilter from './MarketMerchantFilter';
+import type { MarketMerchant } from '../utils/marketMerchants';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
@@ -25,7 +27,7 @@ interface Props {
   /** Close the panel (backdrop tap, Done, or Android back). */
   onClose: () => void;
   /** Distinct merchants present in the data; `null` selection means "All". */
-  merchants: string[];
+  merchants: MarketMerchant[];
   selectedMerchant: string | null;
   onSelectMerchant: (merchant: string | null) => void;
   /** Distinct countries present in the data; `null` selection means "All". */
@@ -245,34 +247,12 @@ const MarketFilterBar: React.FC<Props> = ({
               );
             })}
           </View>
-          {/* Merchant */}
           {merchants.length > 0 ? (
-            <View style={styles.section} testID="market-filter-merchants">
-              <Text style={styles.sectionLabel}>{t('market.filters.merchant')}</Text>
-              <View style={styles.chipWrap}>
-                <Chip
-                  label={t('market.filters.all')}
-                  selected={selectedMerchant === null}
-                  onPress={() => onSelectMerchant(null)}
-                  testID="market-filter-merchant-all"
-                  styles={styles}
-                />
-                {merchants.map((m) => (
-                  <Chip
-                    key={m}
-                    label={m}
-                    selected={selectedMerchant === m}
-                    onPress={() => onSelectMerchant(selectedMerchant === m ? null : m)}
-                    // Slugify the merchant name so the testID has no spaces
-                    // (e.g. "Danish Bacon" -> "danish-bacon"), keeping Maestro
-                    // selectors stable — matching the codebase's filter-chip
-                    // convention.
-                    testID={`market-filter-merchant-${vendorSlug(m)}`}
-                    styles={styles}
-                  />
-                ))}
-              </View>
-            </View>
+            <MarketMerchantFilter
+              merchants={merchants}
+              selected={selectedMerchant}
+              onSelect={onSelectMerchant}
+            />
           ) : null}
 
           {/* Country */}

@@ -102,11 +102,11 @@ const ContactProfileScreen: React.FC = () => {
   // Bumped on pull-to-refresh so the feed re-subscribes and the Shop tab
   // refetches.
   const [notesReloadNonce, setNotesReloadNonce] = useState(0);
-  const [tab, setTab] = useState<ProfileTab>('posts');
+  const [tab, setTab] = useState<ProfileTab>(route.params.initialTab ?? 'posts');
   // Posts tab filter: top-level posts by default, or posts and replies.
   const [postsMode, setPostsMode] = useState<PostsMode>('posts');
   // The Shop tab's listings are fetched only once it has been opened.
-  const [productsOpened, setProductsOpened] = useState(false);
+  const [productsOpened, setProductsOpened] = useState(route.params.initialTab === 'shop');
 
   // React Navigation may reuse this screen instance and only update params
   // when navigating to ContactProfile while it's already in the stack.
@@ -122,14 +122,15 @@ const ContactProfileScreen: React.FC = () => {
   // while the screen is reused would no-op (`null === null`) and keep
   // showing the previous contact's data.
   const paramIdentityKey = paramContact.pubkey ?? route.params.phoneContactId ?? null;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     setContact(paramContact);
-    // A different person starts on Posts, with their Shop not yet fetched.
-    setTab('posts');
+    // Seller links open Shop; other profile entry points start on Posts.
+    setTab(route.params.initialTab ?? 'posts');
     setPostsMode('posts');
-    setProductsOpened(false);
-  }, [paramIdentityKey]);
+    setProductsOpened(route.params.initialTab === 'shop');
+    // Profile objects may refresh without changing the intended identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paramIdentityKey, route.params.initialTab]);
 
   const npub = useMemo(
     () => (contact.pubkey ? npubEncode(contact.pubkey) : null),
@@ -452,7 +453,11 @@ const ContactProfileScreen: React.FC = () => {
   // first open of their tab.
   const feed = useProfileFeed(contact.pubkey, notesReloadNonce);
   const seller = useSellerProducts(contact.pubkey, productsOpened, notesReloadNonce, contact.name);
-  const collectionFilter = useCollectionFilter(seller.products, tab === 'shop');
+  const collectionFilter = useCollectionFilter(
+    seller.products,
+    tab === 'shop',
+    contact.pubkey ?? null,
+  );
   const selectTab = useCallback((next: ProfileTab) => {
     setTab(next);
     if (next === 'shop') setProductsOpened(true);

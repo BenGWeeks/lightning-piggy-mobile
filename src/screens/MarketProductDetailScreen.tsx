@@ -10,6 +10,7 @@ import { useLocale } from '../contexts/LocaleContext';
 import { useNostr } from '../contexts/NostrContext';
 import { createMarketProductDetailStyles } from '../styles/MarketProductDetailScreen.styles';
 import { MARKET_PRODUCTS, sellerOf } from '../data/marketProducts';
+import { vendorNostrPubkey } from '../utils/marketVendors';
 import { marketFeedbackContext } from '../utils/marketFeedback';
 import { marketCheckoutTarget } from '../utils/marketCheckout';
 import { perfLog } from '../utils/perfLog';
@@ -242,10 +243,28 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
             ) : null}
           </View>
 
-          <View style={styles.vendorRow}>
+          <TouchableOpacity
+            style={styles.vendorRow}
+            testID="market-seller-shop"
+            disabled={!product.listing?.event.pubkey && !(vendor && vendorNostrPubkey(vendor))}
+            onPress={() => {
+              const pubkey = product.listing?.event.pubkey ?? (vendor && vendorNostrPubkey(vendor));
+              if (pubkey)
+                navigation.navigate('ContactProfile', {
+                  contact: {
+                    pubkey,
+                    name: sellerName,
+                    picture: sellerProfile.picture ?? null,
+                    lightningAddress: null,
+                    source: 'nostr',
+                  },
+                  initialTab: 'shop',
+                });
+            }}
+          >
             {vendor ? <VendorAvatar vendor={vendor} size={24} /> : null}
             <Text style={styles.vendorName}>{t('market.fromSeller', { seller: sellerName })}</Text>
-          </View>
+          </TouchableOpacity>
 
           <MarkdownText markdown={product.description} testID="market-product-description" />
           {product.listing && !withdrawn ? (

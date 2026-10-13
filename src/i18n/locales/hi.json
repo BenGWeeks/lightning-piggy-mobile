@@ -2312,7 +2312,10 @@
       "friendsOfFriends": "दोस्तों के दोस्त",
       "friendsChip": "दोस्त",
       "comingSoon": "जल्द आ रहा है",
-      "clearScope": "विक्रेताओं को Lightning Piggy के पसंदीदा विक्रेताओं पर रीसेट करें"
+      "clearScope": "विक्रेताओं को Lightning Piggy के पसंदीदा विक्रेताओं पर रीसेट करें",
+      "moreMerchants": "और (%{count})",
+      "searchMerchants": "विक्रेता खोजें",
+      "noMerchants": "कोई विक्रेता नहीं मिला"
     },
     "feedbackTabs": {
       "reviews": "रिव्यू",

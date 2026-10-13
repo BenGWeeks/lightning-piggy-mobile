@@ -2312,7 +2312,10 @@
       "friendsOfFriends": "Barátok barátai",
       "friendsChip": "Barátok",
       "comingSoon": "Hamarosan",
-      "clearScope": "Eladók visszaállítása a Lightning Piggy ajánlott eladóira"
+      "clearScope": "Eladók visszaállítása a Lightning Piggy ajánlott eladóira",
+      "moreMerchants": "Továbbiak (%{count})",
+      "searchMerchants": "Kereskedők keresése",
+      "noMerchants": "Nem található kereskedő"
     },
     "feedbackTabs": {
       "reviews": "Értékelések",

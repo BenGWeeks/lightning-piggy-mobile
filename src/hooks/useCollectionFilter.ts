@@ -9,13 +9,26 @@ import {
   productsInCollection,
   visibleCollections,
 } from '../utils/marketCollectionFilters';
-export function useCollectionFilter(products: MarketProduct[], enabled: boolean) {
+/** Collections are local to one merchant; selections never enter remembered preferences. */
+export function useCollectionFilter(
+  products: MarketProduct[],
+  enabled: boolean,
+  merchant: string | null,
+) {
   const { relays } = useNostr();
   const relayKey = relays
     .filter((r) => r.read)
     .map((r) => r.url)
     .join(',');
-  const key = useMemo(() => products.map((p) => p.listing?.event.id ?? p.id).join(','), [products]);
+  const scopedProducts = useMemo(
+    () => (merchant ? products.filter((p) => p.listing?.event.pubkey === merchant) : []),
+    [products, merchant],
+  );
+  const key = useMemo(
+    () =>
+      `${enabled}:${merchant}:${scopedProducts.map((p) => p.listing?.event.id ?? p.id).join(',')}`,
+    [enabled, merchant, scopedProducts],
+  );
   const [state, setState] = useState<{ key: string; events: Event[]; incomplete: boolean }>({
     key: '',
     events: [],
@@ -25,14 +38,20 @@ export function useCollectionFilter(products: MarketProduct[], enabled: boolean)
     key: '',
     coordinate: null,
   });
+  // Discard the old selection, even if the user later returns to the same scope.
+  if (selection.key !== key) setSelection({ key, coordinate: null });
   useFocusEffect(
     useCallback(() => {
-      if (!enabled || !products.some((p) => p.listing)) return;
+      if (!enabled || !merchant || !scopedProducts.length) return;
       const controller = new AbortController();
-      void fetchMarketCollections(products, relayKey.split(','), controller.signal)
+      void fetchMarketCollections(scopedProducts, relayKey.split(','), controller.signal)
         .then(({ events, incomplete }) => {
           if (!controller.signal.aborted)
-            setState({ key, events: visibleCollections(events), incomplete });
+            setState({
+              key,
+              events: visibleCollections(events.filter((event) => event.pubkey === merchant)),
+              incomplete,
+            });
         })
         .catch(() => {
           if (!controller.signal.aborted)
@@ -43,9 +62,9 @@ export function useCollectionFilter(products: MarketProduct[], enabled: boolean)
             }));
         });
       return () => controller.abort();
-    }, [enabled, key, relayKey, products]),
+    }, [enabled, merchant, key, relayKey, scopedProducts]),
   );
-  const collections = state.key === key ? state.events : [];
+  const collections = enabled && merchant && state.key === key ? state.events : [];
   const selected = selection.key === key ? selection.coordinate : null;
   const collection = collections.find((e) => collectionCoordinate(e) === selected) ?? null;
   const filtered = useMemo(

@@ -2314,7 +2314,10 @@
       "friendsOfFriends": "Znajomi znajomych",
       "friendsChip": "Znajomi",
       "comingSoon": "Wkrótce",
-      "clearScope": "Przywróć preferowanych sprzedawców Lightning Piggy"
+      "clearScope": "Przywróć preferowanych sprzedawców Lightning Piggy",
+      "moreMerchants": "Więcej (%{count})",
+      "searchMerchants": "Szukaj sprzedawców",
+      "noMerchants": "Nie znaleziono sprzedawców"
     },
     "feedbackTabs": {
       "reviews": "Opinie",

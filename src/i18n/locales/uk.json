@@ -2270,7 +2270,10 @@
       "friendsOfFriends": "Друзі друзів",
       "friendsChip": "Друзі",
       "comingSoon": "Незабаром",
-      "clearScope": "Повернути вибір до рекомендованих продавців Lightning Piggy"
+      "clearScope": "Повернути вибір до рекомендованих продавців Lightning Piggy",
+      "moreMerchants": "Ще (%{count})",
+      "searchMerchants": "Пошук продавців",
+      "noMerchants": "Продавців не знайдено"
     },
     "feedbackTabs": {
       "reviews": "Відгуки",

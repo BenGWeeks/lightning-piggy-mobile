@@ -1,3 +1,4 @@
+import { merchantId } from './marketMerchants';
 // Pure search/filter helpers for the Market product list. Kept out of the
 // screens and components so the matching + option-derivation logic is
 // independently unit-testable (coverage scope: src/utils). No React, no I/O.
@@ -5,7 +6,7 @@
 // The Market screen composes four client-side filters over the visible
 // products:
 //   • search   — case-insensitive substring over title / description / seller
-//   • merchant — the selling vendor's `name`
+//   • merchant — the listing author's pubkey (curated fallback: vendor name)
 //   • country  — the selling vendor's `country`
 //   • currency — derived from the product's `priceFiatLabel` (e.g. "£60")
 //
@@ -173,14 +174,13 @@ export function productCountry(
   return vendor ? vendor.country : null;
 }
 
-/** The selling vendor's display name (merchant), or `null` when the product has
- * no known vendor (orphan seller). */
+/** Stable merchant key: listing pubkey, or curated fallback vendor name. */
 export function productMerchant(
   product: MarketProduct,
   resolveVendor: ResolveVendor,
 ): string | null {
   const vendor = resolveVendor(product);
-  return vendor ? vendor.name : null;
+  return product.listing ? merchantId(product) : vendor ? vendor.name : null;
 }
 
 /**

@@ -1276,3 +1276,17 @@ records whose deletion failed before attempting reconciliation, catches failed
 reads and publishes, and shows the branded reaction error toast. Confirmed
 retractions still suppress stale history and live events. Regression coverage is
 in `src/hooks/useConversationReactions.test.tsx` (#1422).
+
+=== Seller avatar crashes on malformed relay metadata
+
+Kind-0 JSON can contain objects or numbers in `name`, `display_name`, or
+`nip05` despite the profile parser's declared string types. Caching those
+values lets `usePubkeyProfile` return a non-string name, which can crash an
+avatar's `charAt()` fallback. Merchant cache entries omit `lud16`, so the
+hook refetches through the verified single-profile relay path. A valid
+signature does not guarantee valid metadata field types. The shared
+`parseProfileContent` parser validates all text fields as strings and replaces
+malformed values with `null`, protecting both the merchant batch and relay
+fallback paths. Regression cases live in
+`src/services/marketMerchantProfiles.test.ts`, `src/utils/profileContent.test.ts`,
+and `src/hooks/usePubkeyProfile.test.ts` (#1448).

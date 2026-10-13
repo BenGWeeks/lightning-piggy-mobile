@@ -2312,7 +2312,10 @@
       "friendsOfFriends": "Friends of friends",
       "friendsChip": "Friends",
       "comingSoon": "Coming soon",
-      "clearScope": "Reset sellers to Lightning Piggy Preferred Sellers"
+      "clearScope": "Reset sellers to Lightning Piggy Preferred Sellers",
+      "moreMerchants": "More (%{count})",
+      "searchMerchants": "Search merchants",
+      "noMerchants": "No merchants found"
     },
     "feedbackTabs": {
       "reviews": "Reviews",
