@@ -28,6 +28,7 @@ import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import { encodeMarmotMediaUrl } from '../utils/encryptedFileUrl';
 import type { MarmotImageParams } from '../utils/messageContent';
 import { t } from '../i18n';
+import { attachmentMetadata } from '../utils/fileAttachment';
 
 type Group = MarmotGroup<GroupRumorHistory>;
 type GroupState = Group['state'];
@@ -116,7 +117,7 @@ export function attachmentFallbackText(tags: string[][]): string | null {
 }
 
 /**
- * Derive every candidate key for a rumor's renderable attachments. `states` must
+ * Derive every candidate key for a rumor's attachments. `states` must
  * be captured when the message is processed — retained epochs are pruned
  * later, after which the media can no longer be decrypted.
  */
@@ -127,7 +128,7 @@ export async function deriveMediaKeys(
   tags: string[][],
 ): Promise<MarmotMediaKeys> {
   const keys: MarmotMediaKeys = {};
-  for (const a of renderableAttachments(tags)) {
+  for (const a of allAttachments(tags)) {
     const url = mediaFetchUrl(a, policy);
     if (!url) continue;
     const derived = await Promise.all(
@@ -138,14 +139,14 @@ export async function deriveMediaKeys(
   return keys;
 }
 
-/** The stored message text for a Marmot photo or voice note, or null if `tags` carry no
- * image attachment we hold keys for. Only the first attachment renders. */
+/** The stored message text for a Marmot attachment, or null if `tags` carry no
+ * attachment we hold keys for. Only the first attachment renders. */
 export function marmotMediaText(
   tags: string[][],
   keys: MarmotMediaKeys | undefined,
 ): string | null {
   if (!keys) return null;
-  for (const a of renderableAttachments(tags)) {
+  for (const a of allAttachments(tags)) {
     const ref = keys[a.ciphertextSha256];
     if (!ref?.url || !ref.keysHex?.length) continue;
     return encodeMarmotMediaUrl({
@@ -157,6 +158,7 @@ export function marmotMediaText(
       filename: a.filename,
       plaintextSha256: a.plaintextSha256,
       ciphertextSha256: a.ciphertextSha256,
+      ...attachmentMetadata(tags, a.filename),
     });
   }
   return null;

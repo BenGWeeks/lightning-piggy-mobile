@@ -614,6 +614,20 @@ const MessagesScreen: React.FC = () => {
     });
   }, [navigation, pubkey]);
 
+  const handleSeedDevFiles = useCallback(async () => {
+    if (!__DEV__ || !pubkey) return;
+    const { seedDevMarmotFiles } = await import('../utils/devSeedMarmotFiles');
+    const seeded = await seedDevMarmotFiles(pubkey);
+    if (seeded)
+      navigation.navigate('Conversation', {
+        pubkey: seeded.pubkey,
+        name: t('messageBubble.devFiles'),
+        picture: null,
+        lightningAddress: null,
+        protocol: 'marmot',
+      });
+  }, [navigation, pubkey, t]);
+
   const [preferredProtocol, setPreferredProtocol] = useState<DmProtocol>(DEFAULT_DM_PROTOCOL);
   const handlePickerSelect = useCallback(
     async (friend: PickedFriend) => {
@@ -794,6 +808,17 @@ const MessagesScreen: React.FC = () => {
               testID={`messages-zaps-toggle-${showZapCounterparties ? 'on' : 'off'}`}
               accessibilityElementsHidden
             />
+            {__DEV__ && (
+              <TouchableOpacity
+                style={styles.filterChipInteractive}
+                onPress={handleSeedDevFiles}
+                accessibilityLabel={t('messageBubble.devFilesA11y')}
+                accessibilityRole="button"
+                testID="messages-dev-seed-files"
+              >
+                <Text style={styles.filterChipText}>{t('messageBubble.devFiles')}</Text>
+              </TouchableOpacity>
+            )}
             {__DEV__ && (
               // Dev-only fixture launcher for the marketplace order cards. Never
               // present in release builds (see handleSeedDevOrder).

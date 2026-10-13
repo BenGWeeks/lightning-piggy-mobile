@@ -45,8 +45,10 @@ export interface ActionedMessage {
   /** Marmot event id (1:1: rumor id). */
   targetId: string;
   fromMe: boolean;
-  /** Plain chat text — set only for copyable (and so editable) messages. */
+  /** Copyable chat text or a sanitized attachment filename. */
   copyText?: string;
+  /** False when Copy exposes only a sanitized attachment filename. */
+  isPlainText?: boolean;
   /** Still sending (or failed): nothing to point an edit / delete at yet. */
   pending?: boolean;
 }
@@ -209,7 +211,7 @@ export function useMessageActionsMenu<T extends EditableRow>({
     isMarmot: target !== null,
     fromMe: !!actioned?.fromMe,
     targetId: actioned?.targetId,
-    isPlainText: !!copyText,
+    isPlainText: actioned?.isPlainText ?? !!copyText,
     pending: !!actioned?.pending,
   });
   const targetId = actioned?.targetId;

@@ -1,13 +1,29 @@
+import React from 'react';
+import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import * as Sharing from 'expo-sharing';
+import MessageFileBubble from '../components/MessageFileBubble';
+import { parseFileAttachment } from '../utils/fileAttachment';
+import { encodeMarmotMediaUrl } from '../utils/encryptedFileUrl';
+import { FileVerificationError } from './fileDownload';
+import { encryptMediaFile } from '@internet-privacy/marmot-ts';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { deleteAsync, moveAsync, writeAsStringAsync } from 'expo-file-system/legacy';
 import { encryptFile } from './encryptedFile';
 import {
+  namedFileExport,
+  deleteDecryptedFile,
+  retainDecryptedFile,
+  FILE_SHARE_RETENTION_MS,
+  verifiedFileMetadata,
   DecryptedMediaCancelledError,
   LEGACY_CLEANUP_FLAG_KEY,
   __resetDecryptedMediaCacheForTests,
   cleanupLegacyDecryptedMedia,
   clearDecryptedMediaMemory,
   ownerDirName,
+  mediaCacheKey,
   peekDecryptedMedia,
   resolveDecryptedMedia,
   setDecryptedMediaOwner,
@@ -15,18 +31,61 @@ import {
   type EncryptedMediaRef,
 } from './decryptedMediaCache';
 
+jest.mock('../contexts/ThemeContext', () => ({
+  useThemeColors: () => jest.requireActual('../styles/palettes').lightPalette,
+}));
+jest.mock('../contexts/LocaleContext', () => ({
+  useLocale: () => ({ t: (key: string) => key }),
+}));
+jest.mock('../components/BrandedAlert', () => ({ Alert: { alert: jest.fn() } }));
+jest.mock('expo-sharing', () => ({
+  isAvailableAsync: jest.fn(async () => true),
+  shareAsync: jest.fn(async () => {}),
+}));
+
+jest.mock('expo/fetch', () => ({
+  fetch: async (...args: unknown[]) => {
+    const res = await globalThis.fetch(...(args as Parameters<typeof globalThis.fetch>));
+    let done = false;
+    return {
+      ...res,
+      headers: { get: () => null },
+      body: {
+        getReader: () => ({
+          read: async () => {
+            if (done) return { done: true };
+            done = true;
+            return { done: false, value: new Uint8Array(await res.arrayBuffer()) };
+          },
+          cancel: async () => {},
+        }),
+      },
+    };
+  },
+}));
+
 // --- in-memory expo-file-system/legacy ------------------------------------
 // path → base64 contents. Directories are implicit (any path prefix).
 const mockFiles = new Map<string, string>();
 jest.mock('expo-file-system/legacy', () => ({
   cacheDirectory: 'file:///cache/',
-  getInfoAsync: jest.fn(async (uri: string) => ({ exists: mockFiles.has(uri) })),
+  getInfoAsync: jest.fn(async (uri: string) => ({
+    exists: mockFiles.has(uri),
+    size: Buffer.from(mockFiles.get(uri) ?? '', 'base64').length,
+    modificationTime: uri.includes('file-old') ? 0 : Date.now() / 1000,
+  })),
+  readAsStringAsync: jest.fn(async (uri: string) => mockFiles.get(uri) ?? ''),
   makeDirectoryAsync: jest.fn(async () => {}),
   writeAsStringAsync: jest.fn(async (uri: string, data: string) => {
     mockFiles.set(uri, data);
   }),
   deleteAsync: jest.fn(async (uri: string) => {
     for (const k of [...mockFiles.keys()]) if (k === uri || k.startsWith(uri)) mockFiles.delete(k);
+  }),
+  copyAsync: jest.fn(async ({ from, to }: { from: string; to: string }) => {
+    const data = mockFiles.get(from);
+    if (data === undefined) throw new Error('copy source missing');
+    mockFiles.set(to, data);
   }),
   moveAsync: jest.fn(async ({ from, to }: { from: string; to: string }) => {
     const data = mockFiles.get(from);
@@ -85,6 +144,54 @@ beforeEach(async () => {
 afterAll(() => __resetDecryptedMediaCacheForTests());
 
 describe('decryptedMediaCache', () => {
+  it('downloads a plain imeta file into the same account-scoped cache', async () => {
+    setDecryptedMediaOwner(A);
+    fetchMock.mockResolvedValue({ ok: true, arrayBuffer: async () => PLAIN.slice().buffer });
+    const uri = await resolveDecryptedMedia({
+      url: URL_,
+      kind: 'file',
+      mime: 'application/pdf',
+      encrypted: false,
+      plaintextSha256: bytesToHex(sha256(PLAIN)),
+    });
+    expect([...plaintextOf(uri)]).toEqual([...PLAIN]);
+    expect(uri).toContain(ownerDirName(A));
+    expect(uri.endsWith('.pdf')).toBe(true);
+  });
+
+  it('downloads and authenticates a MIP-04 PDF into an account-scoped shareable temp file', async () => {
+    const key = new Uint8Array(32).fill(17);
+    const { encrypted, attachment } = encryptMediaFile(PLAIN, key, {
+      version: 'encrypted-media-v2',
+      mediaType: 'application/pdf',
+      filename: 'invoice.pdf',
+      plaintextSha256: bytesToHex(sha256(PLAIN)),
+    });
+    fetchMock.mockResolvedValue({ ok: true, arrayBuffer: async () => encrypted.slice().buffer });
+    const pdf: EncryptedMediaRef = {
+      url: URL_,
+      kind: 'file',
+      mime: 'application/pdf',
+      nonceHex: attachment.nonce,
+      marmot: {
+        version: attachment.version,
+        keysHex: [bytesToHex(key)],
+        filename: attachment.filename,
+        plaintextSha256: attachment.plaintextSha256,
+        ciphertextSha256: attachment.ciphertextSha256,
+      },
+    };
+    setDecryptedMediaOwner(A);
+    const uri = await resolveDecryptedMedia(pdf);
+    expect(uri).toMatch(/file-.*\.pdf$/);
+    expect([...plaintextOf(uri)]).toEqual([...PLAIN]);
+    expect(await resolveDecryptedMedia(pdf)).toBe(uri);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await expect(
+      resolveDecryptedMedia({ ...pdf, marmot: { ...pdf.marmot!, keysHex: ['00'.repeat(32)] } }),
+    ).rejects.toThrow();
+  });
+
   it('decrypts once and reuses the file for the same account', async () => {
     setDecryptedMediaOwner(A);
     const uri = await resolveDecryptedMedia(ref);
@@ -326,4 +433,209 @@ describe('decryptedMediaCache', () => {
     await new Promise((r) => setImmediate(r));
     expect(mockFiles.size).toBe(0);
   });
+});
+
+it('rejects substituted plaintext and a missing hash without publishing', async () => {
+  setDecryptedMediaOwner(A);
+  fetchMock.mockResolvedValue({ ok: true, arrayBuffer: async () => PLAIN.slice().buffer });
+  for (const plaintextSha256 of ['00'.repeat(32), undefined]) {
+    await expect(
+      resolveDecryptedMedia({ url: URL_, kind: 'file', encrypted: false, plaintextSha256 }),
+    ).rejects.toThrow('File failed verification');
+    expect(filesUnder(A)).toEqual([]);
+  }
+});
+it('does not reuse plaintext cached against another committed hash', async () => {
+  setDecryptedMediaOwner(A);
+  fetchMock.mockResolvedValue({ ok: true, arrayBuffer: async () => PLAIN.slice().buffer });
+  const plainRef: EncryptedMediaRef = {
+    url: URL_,
+    kind: 'file',
+    encrypted: false,
+    plaintextSha256: bytesToHex(sha256(PLAIN)),
+  };
+  const uri = await resolveDecryptedMedia(plainRef);
+  expect(verifiedFileMetadata(uri)).toEqual({
+    size: PLAIN.length,
+    mime: 'application/octet-stream',
+  });
+  await expect(
+    resolveDecryptedMedia({ ...plainRef, plaintextSha256: '00'.repeat(32) }),
+  ).rejects.toThrow('verification');
+  await deleteDecryptedFile(uri);
+  expect(mockFiles.has(uri)).toBe(false);
+  expect(peekDecryptedMedia(plainRef)).toBeNull();
+});
+it('evicts abandoned plaintext shares on disk', async () => {
+  setDecryptedMediaOwner(A);
+  const stale = `file:///cache/decrypted/${ownerDirName(A)}/file-old.bin`;
+  mockFiles.set(stale, 'plaintext');
+  fetchMock.mockResolvedValue({ ok: true, arrayBuffer: async () => PLAIN.slice().buffer });
+  await resolveDecryptedMedia({
+    url: URL_,
+    kind: 'file',
+    encrypted: false,
+    plaintextSha256: bytesToHex(sha256(PLAIN)),
+  });
+  expect(mockFiles.has(stale)).toBe(false);
+});
+
+it('re-verifies bounded disk plaintext before sharing and rejects a substituted cached file', async () => {
+  setDecryptedMediaOwner(A);
+  const plainRef: EncryptedMediaRef = {
+    url: URL_,
+    kind: 'file',
+    encrypted: false,
+    plaintextSha256: bytesToHex(sha256(PLAIN)),
+  };
+  const uri = `file:///cache/decrypted/${ownerDirName(A)}/file-${mediaCacheKey(plainRef)}.bin`;
+  mockFiles.set(uri, Buffer.from(PLAIN).toString('base64'));
+  expect(await resolveDecryptedMedia(plainRef)).toBe(uri);
+  expect(fetchMock).not.toHaveBeenCalled();
+  clearDecryptedMediaMemory();
+  mockFiles.set(uri, Buffer.from('substituted').toString('base64'));
+  await expect(resolveDecryptedMedia(plainRef)).rejects.toThrow('File failed verification');
+  expect(mockFiles.has(uri)).toBe(false);
+});
+
+it('retains plaintext for a recipient read after chooser completion, then deletes it', async () => {
+  jest.useFakeTimers();
+  setDecryptedMediaOwner(A);
+  fetchMock.mockResolvedValue({ ok: true, arrayBuffer: async () => PLAIN.slice().buffer });
+  const fileRef: EncryptedMediaRef = {
+    url: URL_,
+    kind: 'file',
+    encrypted: false,
+    plaintextSha256: bytesToHex(sha256(PLAIN)),
+  };
+  const uri = await resolveDecryptedMedia(fileRef);
+  const release = retainDecryptedFile(uri);
+  release(); // Android chooser returns before the recipient reads its URI.
+  await jest.advanceTimersByTimeAsync(FILE_SHARE_RETENTION_MS - 1);
+  expect([...plaintextOf(uri)]).toEqual([...PLAIN]);
+  expect(peekDecryptedMedia(fileRef)).toBe(uri);
+  await jest.advanceTimersByTimeAsync(1);
+  expect(mockFiles.has(uri)).toBe(false);
+  expect(peekDecryptedMedia(fileRef)).toBeNull();
+  expect(verifiedFileMetadata(uri)).toBeUndefined();
+});
+it('extends retention on repeated/concurrent shares and excludes them from sweeps', async () => {
+  jest.useFakeTimers();
+  setDecryptedMediaOwner(A);
+  const uri = `file:///cache/decrypted/${ownerDirName(A)}/file-old.bin`;
+  mockFiles.set(uri, Buffer.from(PLAIN).toString('base64'));
+  const first = retainDecryptedFile(uri);
+  const second = retainDecryptedFile(uri);
+  first();
+  first(); // Releasing is idempotent.
+  await jest.advanceTimersByTimeAsync(FILE_SHARE_RETENTION_MS);
+  expect(mockFiles.has(uri)).toBe(true); // Includes the cold-start sweep at 5s.
+  second();
+  await jest.advanceTimersByTimeAsync(FILE_SHARE_RETENTION_MS - 1);
+  const again = retainDecryptedFile(uri);
+  await jest.advanceTimersByTimeAsync(1);
+  expect(mockFiles.has(uri)).toBe(true);
+  again();
+  await jest.advanceTimersByTimeAsync(FILE_SHARE_RETENTION_MS);
+  expect(mockFiles.has(uri)).toBe(false);
+});
+it('cleans expired abandoned shares on the next launch without a new download', async () => {
+  jest.useFakeTimers();
+  const dir = `file:///cache/decrypted/${ownerDirName(A)}/`;
+  mockFiles.set(dir, '');
+  mockFiles.set(`${dir}file-old.bin`, 'plaintext');
+  setDecryptedMediaOwner(A);
+  await jest.advanceTimersByTimeAsync(5000);
+  expect(mockFiles.has(`${dir}file-old.bin`)).toBe(false);
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+it('bounds retained shares and cancels deferred cleanup when the account is wiped', async () => {
+  jest.useFakeTimers();
+  setDecryptedMediaOwner(A);
+  const dir = `file:///cache/decrypted/${ownerDirName(A)}/`;
+  for (let i = 0; i < 16; i++) {
+    const uri = `${dir}file-${i}.bin`;
+    mockFiles.set(uri, 'plaintext');
+    retainDecryptedFile(uri)();
+  }
+  expect(() => retainDecryptedFile(`${dir}file-extra.bin`)).toThrow('Too many');
+  await wipeDecryptedMediaForOwner(A);
+  expect(filesUnder(A)).toEqual([]);
+  expect(() => retainDecryptedFile(`${dir}file-new.bin`)()).not.toThrow();
+});
+
+it.each(['ciphertext hash', 'plaintext hash', 'authentication'] as const)(
+  'surfaces a Marmot %s failure through the real decrypt/share/bubble path',
+  async (failure) => {
+    const key = new Uint8Array(32).fill(17);
+    const { encrypted, attachment } = encryptMediaFile(PLAIN, key, {
+      version: 'encrypted-media-v2',
+      mediaType: 'application/pdf',
+      filename: 'invoice.pdf',
+      plaintextSha256: bytesToHex(sha256(PLAIN)),
+    });
+    const downloaded = encrypted.slice();
+    if (failure === 'ciphertext hash') downloaded[0] ^= 1;
+    const file = parseFileAttachment(
+      encodeMarmotMediaUrl({
+        url: URL_,
+        version: attachment.version,
+        mime: attachment.mediaType,
+        filename: attachment.filename,
+        nonceHex: attachment.nonce,
+        keysHex: [failure === 'authentication' ? '00'.repeat(32) : bytesToHex(key)],
+        plaintextSha256:
+          failure === 'plaintext hash' ? '00'.repeat(32) : attachment.plaintextSha256,
+        ciphertextSha256: attachment.ciphertextSha256,
+      }),
+    )!;
+    fetchMock.mockResolvedValue({ ok: true, arrayBuffer: async () => downloaded.slice().buffer });
+    setDecryptedMediaOwner(A);
+    await expect(resolveDecryptedMedia({ ...file, kind: 'file' })).rejects.toBeInstanceOf(
+      FileVerificationError,
+    );
+    const ui = render(
+      React.createElement(MessageFileBubble, {
+        id: 'verify',
+        file,
+        fromMe: false,
+        footer: null,
+      }),
+    );
+    fireEvent.press(ui.getByTestId('chat-file-share-verify'));
+    await waitFor(() => expect(ui.getByText('messageBubble.fileVerificationFailed')).toBeTruthy());
+    expect(ui.queryByText('messageBubble.fileShareFailed')).toBeNull();
+    expect(Sharing.shareAsync).not.toHaveBeenCalled();
+    expect(filesUnder(A)).toEqual([]);
+    expect(peekDecryptedMedia({ ...file, kind: 'file' })).toBeNull();
+  },
+);
+
+it('exports identical bytes under the sanitized name and retains them for delayed recipient reads', async () => {
+  jest.useFakeTimers();
+  setDecryptedMediaOwner(A);
+  const uri = `file:///cache/decrypted/${ownerDirName(A)}/file-export.bin`;
+  const bytes = Buffer.from('invoice content').toString('base64');
+  mockFiles.set(uri, bytes);
+  const release = retainDecryptedFile(uri);
+  const target = await namedFileExport(uri, '../invoice.pdf');
+  expect(target).toBe(`${uri}.share/invoice.pdf`);
+  expect(mockFiles.get(target)).toBe(bytes);
+  release();
+  await jest.advanceTimersByTimeAsync(5000);
+  expect(mockFiles.get(target)).toBe(bytes);
+  await jest.advanceTimersByTimeAsync(FILE_SHARE_RETENTION_MS);
+  expect(mockFiles.has(target)).toBe(false);
+  expect(mockFiles.has(uri)).toBe(false);
+  jest.useRealTimers();
+});
+it('removes named exports on account wipe', async () => {
+  setDecryptedMediaOwner(A);
+  const uri = `file:///cache/decrypted/${ownerDirName(A)}/file-export.bin`;
+  mockFiles.set(uri, 'YQ==');
+  const release = retainDecryptedFile(uri);
+  const target = await namedFileExport(uri, 'report.csv');
+  await wipeDecryptedMediaForOwner(A);
+  expect(mockFiles.has(target)).toBe(false);
+  release();
 });

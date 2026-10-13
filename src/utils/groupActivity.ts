@@ -14,6 +14,7 @@ export interface ActivityMessage {
   text: string;
   createdAt: number;
   mentions?: string[];
+  wireKind?: number;
 }
 
 const RECENT_SENDERS_CAP = 3;
@@ -56,9 +57,9 @@ export function activityFromMessages(
   // `types/groups.ts:GroupActivity.lastActivityAt`.
   return {
     lastActivityAt: Math.max(last.createdAt, groupCreatedAtSec),
-    // An encrypted file's stored text (`#lpe=1…`, NIP-17 or Marmot) embeds its
-    // decryption key — redact it to the attachment label like DM previews.
-    lastText: dmRowPreview(last.text, last.text.includes('#lpe=1') ? 15 : 14),
+    // Dispatch by the stored kind so file metadata/keys and unknown payloads
+    // are redacted like DM previews. Keep the marker fallback for legacy rows.
+    lastText: dmRowPreview(last.text, last.wireKind ?? (last.text.includes('#lpe=1') ? 15 : 14)),
     lastMessageId: last.id,
     lastSenderPubkey: last.senderPubkey.toLowerCase(),
     recentSenderPubkeys: computeRecentSenders(messages),

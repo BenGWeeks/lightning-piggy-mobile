@@ -121,7 +121,7 @@ export function useGroupMessageActions({
         messages.map((m) => ({
           ...m,
           fromMe: m.senderPubkey.toLowerCase() === myPubkey?.toLowerCase(),
-          wireKind: deriveGroupWireKind(m.text),
+          wireKind: m.wireKind ?? deriveGroupWireKind(m.text),
         })),
       ),
       formatLocale,

@@ -7,6 +7,7 @@ import {
   isDeviceNoticeRow,
   mergeDeviceNotices,
   useGroupTimeline,
+  groupSenderLabel,
   type ClassifiedMessage,
 } from './useGroupTimeline';
 
@@ -138,4 +139,60 @@ describe('mergeDeviceNotices', () => {
   it('shows notices in an empty chat', () => {
     expect(mergeDeviceNotices([], [notice('n', 1)]).map((r) => r.id)).toEqual(['device-n']);
   });
+});
+
+it('keeps unknown kinds and files as unread timeline messages', () => {
+  const messages: GroupMessage[] = [
+    { id: 'unknown1', senderPubkey: 'b', text: '', wireKind: 1234, createdAt: 1 },
+    {
+      id: 'file0001',
+      senderPubkey: 'b',
+      text: '[FILE]{"name":"invoice.pdf","mime":"application/pdf"}',
+      wireKind: 15,
+      createdAt: 2,
+    },
+  ];
+  const { result } = renderHook(() =>
+    useGroupTimeline({
+      messages,
+      myPubkey: 'a',
+      memberNameByPubkey: new Map(),
+      formatLocale: 'en',
+      deviceNotices: [],
+    }),
+  );
+  expect(result.current.rows).toHaveLength(2);
+  expect(result.current.rows[0]).toMatchObject({ content: { kind: 'unsupported', rawKind: 1234 } });
+  expect(result.current.rows[1]).toMatchObject({ wireKind: 15, content: { kind: 'file' } });
+});
+
+it.each([14, 15])('classifies kind %s file payloads before geo captions in groups', (wireKind) => {
+  const text =
+    '[FILE]' +
+    JSON.stringify({
+      name: 'geo:1,2.pdf',
+      mime: 'application/pdf',
+      caption: 'geo:1,2',
+      encrypted: false,
+      url: 'https://example.com/f',
+    });
+  const { result } = renderHook(() =>
+    useGroupTimeline({
+      messages: [{ id: 'f', createdAt: 1, senderPubkey: 'a', text, wireKind }],
+      myPubkey: 'b',
+      memberNameByPubkey: new Map(),
+      formatLocale: 'en',
+      deviceNotices: [],
+    }),
+  );
+  const row = result.current.rows[0] as ClassifiedMessage;
+  if (wireKind === 15)
+    expect(row.content).toMatchObject({ kind: 'file', file: { name: 'geo:1,2.pdf' } });
+  else expect(row.content.kind).not.toBe('file');
+});
+
+it.each(['You', 'Tú'])('labels own unsupported group messages with localized %s', (you) => {
+  expect(groupSenderLabel(true, 'unsupported', 'Peer', you)).toBe(you);
+  expect(groupSenderLabel(false, 'unsupported', 'Peer', you)).toBe('Peer');
+  expect(groupSenderLabel(true, 'text', 'Peer', you)).toBeNull();
 });

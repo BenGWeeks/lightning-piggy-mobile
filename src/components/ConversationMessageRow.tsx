@@ -274,13 +274,22 @@ function ConversationMessageRow({
             ? ({ kind: 'liveLocationMarker', marker: item.marker } as const)
             : item.kind === 'unsupported'
               ? ({ kind: 'unsupported', rawKind: item.rawKind } as const)
-              : ({ kind: 'text', text: item.text } as const);
+              : item.file
+                ? ({ kind: 'file', file: item.file } as const)
+                : ({ kind: 'text', text: item.text } as const);
   return (
     <MessageBubble
       id={item.id}
       fromMe={item.fromMe}
       createdAt={item.createdAt}
       content={content}
+      senderName={
+        item.kind === 'unsupported'
+          ? item.fromMe
+            ? t('messageBubble.quoteYou')
+            : peerName
+          : undefined
+      }
       sharedProfiles={sharedProfiles}
       isInvoicePaid={isInvoicePaid}
       onPayInvoice={onPayInvoice}

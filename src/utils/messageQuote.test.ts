@@ -16,6 +16,17 @@ describe('resolveQuote', () => {
   it('redacts a quoted attachment instead of leaking its key', () => {
     expect(resolveQuote('e3', byId)?.text).not.toContain('secret');
   });
+  it('redacts a quoted file payload containing a URL access token', () => {
+    const files = indexMessagesById([
+      {
+        id: 'file',
+        fromMe: false,
+        wireKind: 15,
+        text: '[FILE]{"name":"Invoice.pdf","mime":"application/pdf","url":"https://example.com/invoice.pdf?token=secret"}',
+      },
+    ]);
+    expect(resolveQuote('file', files)).toEqual({ text: '📎 File', fromMe: false });
+  });
   it('marks a parent outside the thread as unavailable', () => {
     expect(resolveQuote('gone', byId)).toEqual({ text: null, fromMe: false });
   });

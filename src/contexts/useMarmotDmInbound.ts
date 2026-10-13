@@ -1,3 +1,4 @@
+import { logUnsupportedMarmotKind } from '../utils/unsupportedMarmotKind';
 import { getAppFormatLocale } from '../utils/appFormatLocale';
 import { useEffect, useRef } from 'react';
 import type React from 'react';
@@ -252,6 +253,7 @@ export function useMarmotDmInbound(
       }
       const stored = marmotRumorToDmRow(pubkey, event);
       if (!stored) return;
+      logUnsupportedMarmotKind(event.rumor.kind, event.rumor.pubkey, event.group.id);
       // An edit may have arrived before its message (or the history replays).
       const overlay =
         stored.wireKind === 14

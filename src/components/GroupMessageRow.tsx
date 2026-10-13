@@ -25,7 +25,13 @@ const GroupMessageRow = React.memo(function GroupMessageRow({
   const styles = useMemo(() => createGroupMessageRowStyles(colors), [colors]);
   const [failedPicture, setFailedPicture] = useState<string | null>(null);
   const open = useCallback(() => onOpenSender(senderPubkey), [onOpenSender, senderPubkey]);
-  if (bubble.fromMe) return <MessageBubble {...bubble} />;
+  if (bubble.fromMe)
+    return (
+      <MessageBubble
+        {...bubble}
+        senderName={bubble.content.kind === 'unsupported' ? senderName : undefined}
+      />
+    );
   const picture =
     senderPicture && isSupportedImageUrl(senderPicture) && failedPicture !== senderPicture
       ? senderPicture
@@ -71,7 +77,10 @@ const GroupMessageRow = React.memo(function GroupMessageRow({
             <Text style={styles.name}>{name}</Text>
           </TouchableOpacity>
         ) : null}
-        <MessageBubble {...bubble} />
+        <MessageBubble
+          {...bubble}
+          senderName={bubble.content.kind === 'unsupported' ? senderName : undefined}
+        />
       </View>
     </View>
   );

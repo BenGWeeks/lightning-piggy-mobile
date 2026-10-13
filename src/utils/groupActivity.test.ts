@@ -15,6 +15,22 @@ const group: Group = {
 const mention = `hey nostr:${nip19.npubEncode(ME)}`;
 
 describe('activityFromMessages', () => {
+  it.each([
+    ['[FILE]{"url":"https://example.com/f?token=secret","name":"invoice.pdf"}', 15, '📎 File'],
+    ['private unknown content', 1234, 'Unsupported message type (kind 1234)'],
+  ])('redacts persisted kind %s in group-list and search previews', (text, wireKind, preview) => {
+    expect(
+      activityFromMessages(group, [{ senderPubkey: BOB, text, wireKind, createdAt: 20 }], ME)
+        .lastText,
+    ).toBe(preview);
+  });
+
+  it('honours explicit text kinds and retains the legacy encrypted-file fallback', () => {
+    const text = 'https://example.com/f#lpe=1&k=secret';
+    const message = { senderPubkey: BOB, text, createdAt: 20 };
+    expect(activityFromMessages(group, [message], ME).lastText).toBe('📎 Attachment');
+    expect(activityFromMessages(group, [{ ...message, wireKind: 14 }], ME).lastText).toBe(text);
+  });
   it('falls back to the group creation time with no messages', () => {
     expect(activityFromMessages(group, [], ME)).toEqual({
       lastActivityAt: 10,

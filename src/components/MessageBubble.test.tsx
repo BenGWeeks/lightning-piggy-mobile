@@ -2,6 +2,7 @@ import React from 'react';
 import { fireEvent, render } from '@testing-library/react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import MessageBubble from './MessageBubble';
+import { parseFileAttachment } from '../utils/fileAttachment';
 import type { BubbleContent } from '../utils/messageContent';
 
 jest.mock('../contexts/ThemeContext', () => ({
@@ -93,6 +94,42 @@ test('received text keeps its plain surface; reaction pills still toggle', () =>
     />,
   );
   expect(ui.UNSAFE_queryByType(LinearGradient)).toBeNull();
+  fireEvent.press(ui.getByTestId('conversation-reaction-msg-❤'));
+  expect(onToggleReaction).toHaveBeenCalledWith('❤', null);
+});
+
+test.each([true, false])('file replies preserve their header and actions (fromMe=%s)', (fromMe) => {
+  const onLongPress = jest.fn();
+  const onToggleReaction = jest.fn();
+  const ui = render(
+    <MessageBubble
+      {...props}
+      fromMe={fromMe}
+      senderName={fromMe ? undefined : 'Curious Fox'}
+      content={{
+        kind: 'file',
+        file: parseFileAttachment(
+          '[FILE]' +
+            JSON.stringify({
+              url: '',
+              name: 'Invoice.pdf',
+              mime: 'application/pdf',
+              encrypted: true,
+            }),
+        )!,
+      }}
+      quote={{ text: 'Please send the invoice', fromMe: false, authorName: 'Parent author' }}
+      onLongPress={onLongPress}
+      reactions={{ byEmoji: { '❤': ['sender'] }, myReactions: {} }}
+      onToggleReaction={onToggleReaction}
+    />,
+  );
+  expect(ui.getByTestId('conversation-quote-msg')).toBeTruthy();
+  expect(ui.getByText('Please send the invoice')).toBeTruthy();
+  expect(ui.getByText('Parent author')).toBeTruthy();
+  if (!fromMe) expect(ui.getByText('Curious Fox')).toBeTruthy();
+  fireEvent(ui.getByTestId('chat-file-bubble-msg'), 'longPress');
+  expect(onLongPress).toHaveBeenCalledTimes(1);
   fireEvent.press(ui.getByTestId('conversation-reaction-msg-❤'));
   expect(onToggleReaction).toHaveBeenCalledWith('❤', null);
 });

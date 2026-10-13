@@ -3,7 +3,7 @@ import { useCallback, useMemo } from 'react';
 import type { GroupMessage } from '../services/groupMessagesStorageService';
 import type { DeviceNoticeView } from '../services/marmotDeviceTracker';
 import {
-  classifyMessageContent,
+  classifyStoredMessage,
   deriveGroupWireKind,
   type BubbleContent,
 } from '../utils/messageContent';
@@ -13,7 +13,7 @@ import { sanitizeDisplayText } from '../utils/sanitizeDisplayText';
 /** A group message, classified once (not in the hot renderItem path). */
 export type ClassifiedMessage = GroupMessage & {
   content: BubbleContent;
-  wireKind: 14 | 15;
+  wireKind: number;
   quote?: MessageQuote;
 };
 
@@ -92,7 +92,7 @@ export function useGroupTimeline({
         senderPubkey: m.senderPubkey,
         fromMe: m.senderPubkey.toLowerCase() === me,
         text: m.text,
-        wireKind: deriveGroupWireKind(m.text),
+        wireKind: m.wireKind ?? deriveGroupWireKind(m.text),
       })),
     );
     const quoteFor = (m: GroupMessage): MessageQuote | undefined => {
@@ -108,10 +108,13 @@ export function useGroupTimeline({
       .map((m) => ({
         ...m,
         quote: quoteFor(m),
-        content: classifyMessageContent(sanitizeDisplayText(m.text)),
+        content:
+          m.wireKind !== undefined && ![4, 14, 15, 16, 17, 1068, 1018].includes(m.wireKind)
+            ? { kind: 'unsupported' as const, rawKind: m.wireKind }
+            : classifyStoredMessage(sanitizeDisplayText(m.text), m.wireKind),
         // The real stored kind (14 chat / 15 encrypted file), so the info
         // sheet reports kind 15 for voice / image bubbles.
-        wireKind: deriveGroupWireKind(m.text),
+        wireKind: m.wireKind ?? deriveGroupWireKind(m.text),
       }))
       .filter((m) => m.content.kind !== 'pollVote');
   }, [messages, myPubkey, memberNameByPubkey, formatLocale]);
@@ -138,4 +141,14 @@ export function useGroupTimeline({
   );
 
   return { rows, senderOf };
+}
+
+/** Own unsupported placeholders must name the viewer even in senderless runs. */
+export function groupSenderLabel(
+  fromMe: boolean,
+  kind: BubbleContent['kind'],
+  peerName: string,
+  you: string,
+): string | null {
+  return fromMe ? (kind === 'unsupported' ? you : null) : peerName;
 }

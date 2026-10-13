@@ -1,0 +1,32 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Marmot file and unsupported message bubbles
+---
+# Existing signed-in test account only. Seeds local rumors, never sends.
+# The PDF is a warm authenticated cache fixture; Jest exercises cold download.
+- tapOn:
+    id: 'tab-messages'
+- tapOn:
+    id: 'messages-dev-seed-files'
+- extendedWaitUntil:
+    visible:
+      id: 'chat-file-bubble-file0001'
+    timeout: 60000
+- assertVisible:
+    text: 'invoice.pdf'
+- assertVisible:
+    text: 'application/pdf'
+- assertVisible:
+    id: 'chat-unsupported-bubble-unknown1'
+- assertVisible:
+    text: 'kind 1234'
+- tapOn:
+    id: 'chat-file-share-file0001'
+- extendedWaitUntil:
+    visible:
+      text: '.*(Nearby Share|Quick Share|Bluetooth).*'
+    timeout: 60000
+- back
+- extendedWaitUntil:
+    visible:
+      id: 'chat-file-share-file0001'
+    timeout: 15000

@@ -1,3 +1,4 @@
+import { parseFileAttachment, type FileAttachment } from './fileAttachment';
 import { decode as bolt11Decode } from 'light-bolt11-decoder';
 import { decodeProfileReference } from '../services/nostrService';
 import { extractGifUrl } from '../services/giphyService';
@@ -332,6 +333,7 @@ export function formatRelativeFuture(epochMs: number): string {
 // bubble (cheap regex / one bolt11Decode), so they're not pre-bound here
 // — they ride on the `text` variant.
 export type BubbleContent =
+  | { kind: 'file'; file: FileAttachment }
   | { kind: 'text'; text: string }
   | { kind: 'gif'; url: string }
   | { kind: 'location'; location: SharedLocation }
@@ -388,4 +390,10 @@ export function classifyMessageContent(text: string): BubbleContent {
   const loc = parseGeoMessage(text);
   if (loc) return { kind: 'location', location: loc };
   return { kind: 'text', text };
+}
+
+/** Files are wire-kind bound and must precede caption/filename URL detection. */
+export function classifyStoredMessage(text: string, wireKind?: number): BubbleContent {
+  const file = wireKind === 15 ? parseFileAttachment(text) : null;
+  return file ? { kind: 'file', file } : classifyMessageContent(text);
 }

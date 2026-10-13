@@ -22,6 +22,8 @@ export interface GroupMessage {
   id: string;
   /** Original optimistic ID, retained through echo replacement and rekeying. */
   localId?: string;
+  /** Stored application kind, retained for unsupported Marmot messages. */
+  wireKind?: number;
   /** Pubkey of the sender (lowercase hex). */
   senderPubkey: string;
   /** Text payload as authored (preserves casing); empty for system events. */
@@ -161,14 +163,18 @@ export async function appendGroupMessage(
       map.set(message.id, { ...message, ...(prior?.localId ? { localId: prior.localId } : {}) });
     } else if (
       prior.createdAt === message.createdAt &&
-      prior.senderPubkey.toLowerCase() === message.senderPubkey.toLowerCase() &&
-      !prior.replyTo &&
-      message.replyTo &&
-      /^[0-9a-f]{64}$/i.test(message.replyTo)
+      prior.senderPubkey.toLowerCase() === message.senderPubkey.toLowerCase()
     ) {
-      // Replayed history may restore reply metadata missing from an older
-      // stored row. Merge only the reference: keep any overlaid edit intact.
-      map.set(message.id, { ...prior, replyTo: message.replyTo.toLowerCase() });
+      // Authenticated replay repairs missing metadata, never overlaid text edits.
+      map.set(message.id, {
+        ...prior,
+        ...(prior.wireKind === undefined && message.wireKind !== undefined
+          ? { wireKind: message.wireKind }
+          : {}),
+        ...(!prior.replyTo && message.replyTo && /^[0-9a-f]{64}$/i.test(message.replyTo)
+          ? { replyTo: message.replyTo.toLowerCase() }
+          : {}),
+      });
     }
     const all = Array.from(map.values()).sort((a, b) => a.createdAt - b.createdAt);
     const capped = all.length <= CAP ? all : all.slice(all.length - CAP);
@@ -285,8 +291,10 @@ export async function rekeyGroupMessage(
  * (stored as JSON), or a legacy text poll / vote. The DM store gets the same
  * guarantee from `wire_kind = 14`.
  */
-export function isEditableGroupText(text: string): boolean {
+export function isEditableGroupText(text: string, wireKind?: number): boolean {
   return (
+    (wireKind === undefined || wireKind === 14) &&
+    !text.trimStart().startsWith('[FILE]') &&
     !text.includes('#lpe=1') &&
     !text.trimStart().startsWith('{') &&
     !parsePoll(text) &&
@@ -319,7 +327,8 @@ export async function editGroupMessages(
       if (i === undefined) continue;
       const target = next[i];
       if (target.senderPubkey.toLowerCase() !== edit.editor.toLowerCase()) continue;
-      if (!isEditableGroupText(target.text) || !isNewerEdit(edit, target)) continue;
+      if (!isEditableGroupText(target.text, target.wireKind) || !isNewerEdit(edit, target))
+        continue;
       next[i] = { ...target, text: edit.content, editedAt: edit.editedAt, editId: edit.editId };
       changed = true;
     }

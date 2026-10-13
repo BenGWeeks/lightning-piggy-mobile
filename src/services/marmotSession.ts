@@ -37,7 +37,7 @@ import {
   deriveMediaKeys,
   encryptMarmotMedia,
   isMediaKeys,
-  renderableAttachments,
+  allAttachments,
   type MarmotMediaKeys,
 } from './marmotMedia';
 import { forgetMarmotDeletionsForGroup } from './marmotDeletionStore';
@@ -842,7 +842,7 @@ export class MarmotSession {
       // MIP-05 token gossip: kept as local push state, never a chat row.
       void this.push.ingest(toPushGroup(g), rumor.kind, rumor.content).catch(() => undefined);
     }
-    if (rumor.kind === MARMOT_CHAT_KIND && renderableAttachments(rumor.tags).length > 0) {
+    if (rumor.kind === MARMOT_CHAT_KIND && allAttachments(rumor.tags).length > 0) {
       // Capture the epochs NOW: the photo or voice note's key comes from the epoch it was
       // sent in, and retained epochs are pruned as the group moves on.
       const states = candidateMediaStates(g);

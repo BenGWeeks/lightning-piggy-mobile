@@ -24,7 +24,7 @@ import {
   formatRelativeFuture,
 } from '../utils/messageContent';
 import type { PollTally } from '../utils/nip88Poll';
-import { marmotBubbleKey } from '../utils/dmProtocol';
+import MessageFileBubble from './MessageFileBubble';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { isPublicHttpUrl } from '../utils/publicUrl';
 import { type DeliveryStatus } from '../utils/dmDeliveryStatus';
@@ -468,18 +468,21 @@ const MessageBubble: React.FC<Props> = ({
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
         <View
           style={[styles.bubble, styles.unsupportedBubble]}
-          accessibilityLabel={t(
-            marmotBubbleKey(content.rawKind) ?? 'messageBubble.unsupportedA11y',
-            { kind: content.rawKind },
-          )}
+          accessibilityLabel={t('messageBubble.unsupportedSender', {
+            name: senderName ?? t('messageBubble.unknownSender'),
+          })}
           testID={`${testIdPrefix}-unsupported-${id}`}
         >
-          {BubbleHeader}
-          <Text style={styles.unsupportedText}>
-            {t(marmotBubbleKey(content.rawKind) ?? 'messageBubble.unsupportedText', {
-              kind: content.rawKind,
-            })}
-          </Text>
+          <View testID={`chat-unsupported-bubble-${id.replace(/^dm-/, '').slice(0, 8)}`}>
+            <Text style={styles.unsupportedText}>
+              {t('messageBubble.unsupportedSender', {
+                name: senderName ?? t('messageBubble.unknownSender'),
+              })}
+            </Text>
+            <Text style={styles.bubbleTime}>
+              {t('messageBubble.unsupportedKind', { kind: content.rawKind })}
+            </Text>
+          </View>
           {renderFooter([styles.bubbleTime])}
         </View>
       </View>
@@ -515,7 +518,18 @@ const MessageBubble: React.FC<Props> = ({
     );
   }
 
-  // content.kind === 'text' — fall through to per-text-format detection.
+  if (content.kind === 'file')
+    return wrapWithReactionRow(
+      <MessageFileBubble
+        id={id}
+        file={content.file}
+        fromMe={fromMe}
+        header={BubbleHeader}
+        onLongPress={onLongPress}
+        footer={renderFooter([styles.bubbleTime])}
+      />,
+    );
+
   const text = content.text;
 
   // Image (#688) — encrypted NIP-17 kind-15 (fetch ciphertext → decrypt →

@@ -67,7 +67,7 @@ describe('voice notes and other attachments', () => {
   it('labels an unsupported attachment without leaking its URL or keys', () => {
     const video = { ...voice, mediaType: 'video/mp4', filename: 'clip.mp4' };
     expect(renderableAttachments(tagsOf(video))).toHaveLength(0);
-    expect(marmotMediaText(tagsOf(video), keys)).toBeNull();
+    expect(marmotMediaText(tagsOf(video), keys)).toContain('m=video%2Fmp4');
     const text = attachmentFallbackText(tagsOf(video))!;
     expect(text).toBe('Unsupported attachment: clip.mp4 (video/mp4)');
     expect(text).not.toContain('blossom');

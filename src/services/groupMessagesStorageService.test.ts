@@ -696,3 +696,74 @@ describe('rekeyGroupMessage (#1237)', () => {
     expect(await loadGroupMessages(OWNER, GROUP)).toEqual([]);
   });
 });
+
+it.each([undefined, 14, 15])('refuses inbound edits of [FILE] rows (kind %s)', async (wireKind) => {
+  const message = {
+    ...wrap(
+      'f'.repeat(64),
+      '[FILE]{"name":"invoice.pdf","mime":"application/pdf","url":"https://example.com/?token=secret"}',
+      1,
+    ),
+    wireKind,
+  };
+  await appendGroupMessage(OWNER, GROUP, message);
+  expect(await editGroupMessage(OWNER, GROUP, message.id, SENDER, 'replace attachment', 50)).toBe(
+    false,
+  );
+  expect(await loadGroupMessages(OWNER, GROUP)).toEqual([message]);
+});
+
+it.each([15, 1234])('refuses inbound edits of persisted non-text kind %s', async (wireKind) => {
+  const message = { ...wrap('f'.repeat(64), 'internal body', 1), wireKind };
+  await appendGroupMessage(OWNER, GROUP, message);
+  expect(await editGroupMessage(OWNER, GROUP, message.id, SENDER, 'replacement', 50)).toBe(false);
+  expect(await loadGroupMessages(OWNER, GROUP)).toEqual([message]);
+});
+
+it.each([15, 1234])(
+  'repairs legacy kind %s on identical authenticated replay',
+  async (wireKind) => {
+    const message = wrap(
+      'f'.repeat(64),
+      wireKind === 15
+        ? '[FILE]{"name":"invoice.pdf","mime":"application/pdf"}'
+        : 'unsupported body',
+      1,
+    );
+    await appendGroupMessage(OWNER, GROUP, message);
+    await appendGroupMessage(OWNER, GROUP, { ...message, wireKind });
+    expect(await loadGroupMessages(OWNER, GROUP)).toEqual([{ ...message, wireKind }]);
+  },
+);
+
+it('repairs wire kind and reply together while preserving an overlaid edit', async () => {
+  const message = wrap('f'.repeat(64), 'original', 1);
+  await appendGroupMessage(OWNER, GROUP, message);
+  await editGroupMessage(OWNER, GROUP, message.id, SENDER, 'edited', 50, 'edit-id');
+  await appendGroupMessage(OWNER, GROUP, { ...message, wireKind: 14, replyTo: 'B'.repeat(64) });
+  expect(await loadGroupMessages(OWNER, GROUP)).toEqual([
+    {
+      ...message,
+      text: 'edited',
+      editedAt: 50,
+      editId: 'edit-id',
+      wireKind: 14,
+      replyTo: 'b'.repeat(64),
+    },
+  ]);
+});
+
+it('does not repair metadata from a different sender or timestamp, or overwrite a known kind', async () => {
+  const message = wrap('f'.repeat(64), 'original', 2);
+  await appendGroupMessage(OWNER, GROUP, message);
+  await appendGroupMessage(OWNER, GROUP, {
+    ...message,
+    senderPubkey: OTHER_SENDER,
+    wireKind: 1234,
+  });
+  await appendGroupMessage(OWNER, GROUP, { ...message, createdAt: 1, wireKind: 1234 });
+  expect(await loadGroupMessages(OWNER, GROUP)).toEqual([message]);
+  await appendGroupMessage(OWNER, GROUP, { ...message, wireKind: 14 });
+  await appendGroupMessage(OWNER, GROUP, { ...message, wireKind: 1234 });
+  expect(await loadGroupMessages(OWNER, GROUP)).toEqual([{ ...message, wireKind: 14 }]);
+});

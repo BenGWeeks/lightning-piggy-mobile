@@ -1,4 +1,5 @@
 import { marmotImetaTag } from './marmotMedia';
+import { parseFileAttachment } from '../utils/fileAttachment';
 import { parseVoiceNote } from '../utils/messageContent';
 import {
   marmotRumorToDmRow,
@@ -37,6 +38,13 @@ describe('marmotInbox', () => {
       wireKind: 14,
       rumorId: 'r'.repeat(64),
       protocol: 'marmot',
+    });
+  });
+
+  it('keeps an unknown group application kind even with an empty body', () => {
+    expect(marmotRumorToGroupMessage(rumor({ kind: 1234, content: '' }))).toMatchObject({
+      wireKind: 1234,
+      text: '',
     });
   });
 
@@ -99,19 +107,95 @@ describe('marmotInbox — attachments', () => {
     expect(parseVoiceNote(marmotRumorToGroupMessage(r, keys).text)).not.toBeNull();
   });
 
-  it('shows a label, never an empty bubble, for an attachment it cannot render', () => {
+  it('stores a PDF as a shareable file, or an unavailable file when keys are missing', () => {
     const r = withTag('application/pdf', 'doc.pdf');
     const row = marmotRumorToDmRow(ME, { group: dm, rumor: r, mediaKeys: keys })!;
-    expect(row).toMatchObject({
-      content: 'Unsupported attachment: doc.pdf (application/pdf)',
-      wireKind: 14,
+    expect(row.wireKind).toBe(15);
+    expect(parseFileAttachment(row.content)).toMatchObject({
+      mime: 'application/pdf',
+      available: true,
     });
-    expect(marmotRumorToGroupMessage(r).text).toContain('doc.pdf');
+    expect(parseFileAttachment(marmotRumorToGroupMessage(r).text)).toMatchObject({
+      available: false,
+    });
+  });
+
+  it('preserves plain imeta file metadata and never treats malformed encrypted files as plaintext', () => {
+    const tags = [
+      [
+        'imeta',
+        'url https://blossom.example/invoice.pdf',
+        'm application/pdf',
+        'name Invoice.pdf',
+        'size 2048',
+        'x ' + 'ab'.repeat(32),
+      ],
+    ];
+    const r = rumor({ content: '', tags } as never);
+    const row = marmotRumorToDmRow(ME, { group: dm, rumor: r })!;
+    expect(parseFileAttachment(row.content)).toMatchObject({
+      name: 'invoice.pdf',
+      size: 2048,
+      encrypted: false,
+      plaintextSha256: 'ab'.repeat(32),
+      available: true,
+    });
+    expect(marmotRumorToGroupMessage(r).wireKind).toBe(15);
+    const bad = rumor({ content: '', tags: [[...tags[0], 'v encrypted-media-v2']] } as never);
+    expect(parseFileAttachment(marmotRumorToGroupMessage(bad).text)).toMatchObject({
+      available: false,
+    });
+  });
+
+  it('preserves dangerous authenticated filenames behind benign blob URLs in DM and group rows', () => {
+    const url = 'https://blossom.example/hash.bin';
+    const r = rumor({
+      content: '',
+      tags: [
+        [
+          'imeta',
+          `url ${url}`,
+          'filename invoice.apk',
+          'm application/octet-stream',
+          'x ' + 'ab'.repeat(32),
+        ],
+      ],
+    } as never);
+    const row = marmotRumorToDmRow(ME, { group: dm, rumor: r })!;
+    expect(parseFileAttachment(row.content)).toMatchObject({
+      name: 'invoice.apk',
+      dangerous: true,
+    });
+    expect(parseFileAttachment(marmotRumorToGroupMessage(r).text)).toMatchObject({
+      name: 'invoice.apk',
+      dangerous: true,
+    });
+    const encrypted = withTag('application/octet-stream', 'invoice.apk');
+    const mediaKeys = { [CT]: { url, keysHex: ['11'.repeat(32)] } };
+    expect(
+      parseFileAttachment(
+        marmotRumorToDmRow(ME, { group: dm, rumor: encrypted, mediaKeys })!.content,
+      ),
+    ).toMatchObject({ name: 'invoice.apk', dangerous: true });
+    expect(parseFileAttachment(marmotRumorToGroupMessage(encrypted, mediaKeys).text)).toMatchObject(
+      { name: 'invoice.apk', dangerous: true },
+    );
   });
 
   it('keeps a real caption over the fallback', () => {
     const r = withTag('application/pdf', 'doc.pdf', 'see attached');
-    expect(marmotRumorToDmRow(ME, { group: dm, rumor: r })!.content).toBe('see attached');
+    expect(parseFileAttachment(marmotRumorToGroupMessage(r, keys).text)).toMatchObject({
+      caption: 'see attached',
+      available: true,
+    });
+    expect(
+      parseFileAttachment(
+        marmotRumorToDmRow(ME, { group: dm, rumor: r, mediaKeys: keys })!.content,
+      ),
+    ).toMatchObject({ caption: 'see attached', available: true });
+    expect(
+      parseFileAttachment(marmotRumorToDmRow(ME, { group: dm, rumor: r })!.content),
+    ).toMatchObject({ caption: 'see attached', available: false });
   });
 });
 
