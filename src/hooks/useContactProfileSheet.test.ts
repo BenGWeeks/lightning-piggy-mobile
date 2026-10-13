@@ -20,6 +20,10 @@ import { useContactProfileSheet } from './useContactProfileSheet';
 import * as nostrService from '../services/nostrService';
 import type { NostrProfile } from '../types/nostr';
 
+jest.mock('../services/preferredDmProtocol', () => ({
+  preferredDmProtocol: jest.fn().mockResolvedValue('marmot'),
+}));
+
 jest.mock('../services/nostrService', () => ({
   __esModule: true,
   fetchProfile: jest.fn(),
@@ -148,11 +152,13 @@ describe('useContactProfileSheet', () => {
     });
     await waitFor(() => expect(result.current.onMessage).toBeDefined());
 
-    act(() => result.current.onMessage?.());
+    await act(async () => {
+      await result.current.onMessage?.();
+    });
 
     expect((nav as unknown as { navigate: jest.Mock }).navigate).toHaveBeenCalledWith(
       'Conversation',
-      expect.objectContaining({ pubkey: PK }),
+      expect.objectContaining({ pubkey: PK, protocol: 'marmot' }),
     );
   });
 

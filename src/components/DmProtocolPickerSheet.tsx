@@ -61,7 +61,11 @@ export default function DmProtocolPickerSheet({ visible, selected, onSelect, onC
               <View style={styles.heading}>
                 <Text style={styles.name}>{DM_PROTOCOL_LABEL[protocol]}</Text>
                 <Text style={styles.badge}>{t(`dmProtocol.${protocol}.badge`)}</Text>
-                {selected === protocol && <Check size={18} color={colors.courseTeal} />}
+                {selected === protocol && (
+                  <View testID={`dm-protocol-selected-${protocol}`}>
+                    <Check size={18} color={colors.courseTeal} />
+                  </View>
+                )}
               </View>
               {protocol === 'nip17' && (
                 <Text style={styles.name}>{t('dmProtocol.privateMessages')}</Text>

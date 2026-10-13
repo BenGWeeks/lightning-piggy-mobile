@@ -216,7 +216,7 @@ export class MarmotSession {
   readonly devices: MarmotDeviceTracker;
   private markReady!: () => void;
   /** Resolves once stored groups are loaded — joins must not race loadAll. */
-  private readonly ready = new Promise<void>((resolve) => (this.markReady = resolve));
+  readonly ready = new Promise<void>((resolve) => (this.markReady = resolve));
 
   constructor(opts: MarmotSessionOptions) {
     installMarmotCryptoProvider();

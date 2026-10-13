@@ -1,0 +1,44 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Receive invoice prefers Middle Piggy's Marmot secure chat
+---
+# Big Piggy with an existing connected wallet. Only shares an invoice with
+# Middle Piggy (4b2fcb4e); no payment, account switching or setup is performed.
+- extendedWaitUntil:
+    visible: { id: 'tab-wallets' }
+    timeout: 60000
+- tapOn: { id: 'tab-wallets' }
+- tapOn: { id: 'btn-receive' }
+- waitForAnimationToEnd: { timeout: 2000 }
+- runFlow:
+    when:
+      visible: { id: 'receive-enter-custom-amount' }
+    commands:
+      - tapOn: { id: 'receive-enter-custom-amount' }
+- extendedWaitUntil:
+    visible: { id: 'amount-entry-screen' }
+    timeout: 10000
+- tapOn: { id: 'amount-entry-key-2' }
+- tapOn: { id: 'amount-entry-key-1' }
+- tapOn: { id: 'amount-entry-confirm' }
+- extendedWaitUntil:
+    visible: { id: 'receive-send-to-friend' }
+    timeout: 30000
+- tapOn: { id: 'receive-send-to-friend' }
+- extendedWaitUntil:
+    visible: { id: 'friend-picker-search' }
+    timeout: 10000
+- tapOn: { id: 'friend-picker-search' }
+- inputText: 'Middle Piggy'
+- extendedWaitUntil:
+    visible: { id: 'friend-picker-4b2fcb4e' }
+    timeout: 10000
+- tapOn: { id: 'friend-picker-4b2fcb4e' }
+- extendedWaitUntil:
+    visible: { id: 'conversation-protocol-tag' }
+    timeout: 60000
+- assertVisible: 'Middle Piggy'
+- assertVisible: 'Marmot'
+- extendedWaitUntil:
+    visible: 'Invoice sent'
+    timeout: 30000
+- assertVisible: '21 sats'

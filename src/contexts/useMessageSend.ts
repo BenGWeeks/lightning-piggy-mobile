@@ -1,7 +1,8 @@
 import { useCallback } from 'react';
 import { sendNip04Message } from '../services/nostrNip04Send';
 import { sendMarmotDm } from '../services/marmotSend';
-import { DEFAULT_DM_PROTOCOL, type DmProtocol } from '../utils/dmProtocol';
+import type { DmProtocol } from '../utils/dmProtocol';
+import { preferredDmProtocol } from '../services/preferredDmProtocol';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
 import * as nostrConnectService from '../services/nostrConnectService';
@@ -34,7 +35,7 @@ export interface SendResult {
 }
 
 // Per-send options. `protocol` picks the wire format for a send (defaults to
-// NIP-17; NIP-04 is legacy; Marmot rides the peer's MLS DM group). The hooks
+// the preferred recipient protocol; Marmot rides the peer's MLS DM group). The hooks
 // drive the optimistic-send flow (#857): `onRumorReady` fires
 // synchronously once the stable rumor eventId is known (before publishing), so
 // the caller can paint the pending bubble keyed by it. It also carries the
@@ -89,7 +90,6 @@ function toTextSendResult(result: DmSendResult): SendResult {
 export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMessageSendParams) {
   const sendDirectMessage = useCallback(
     async (recipientPubkey: string, plaintext: string, hooks?: SendHooks): Promise<SendResult> => {
-      const protocol = hooks?.protocol ?? DEFAULT_DM_PROTOCOL;
       if (!pubkey || !isLoggedIn) {
         return { success: false, error: 'Not logged in' };
       }
@@ -97,6 +97,11 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
       if (!/^[0-9a-f]{64}$/.test(normalizedRecipientPubkey)) {
         return { success: false, error: 'Invalid public key format' };
       }
+      const protocol = await preferredDmProtocol(
+        pubkey,
+        normalizedRecipientPubkey,
+        hooks?.protocol,
+      );
       if (protocol === 'marmot') {
         return sendMarmotDm(
           pubkey,
@@ -251,7 +256,12 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
       if (normalized.length === 0) {
         return { success: false, error: 'No valid recipients' };
       }
-      if (hooks?.protocol === 'marmot') {
+      const peers = normalized.filter((p) => p !== pubkey.toLowerCase());
+      const protocol =
+        peers.length === 1
+          ? await preferredDmProtocol(pubkey, peers[0], hooks?.protocol)
+          : hooks?.protocol;
+      if (protocol === 'marmot') {
         // A 1:1 Marmot thread: the one other party is the DM peer.
         const peer = normalized.find((p) => p !== pubkey.toLowerCase());
         if (!peer) return { success: false, error: 'No valid recipients' };
@@ -347,7 +357,8 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
           sha256Hex: file.sha256Hex,
           size: file.size,
         });
-        if (protocol === 'marmot') {
+        const preferred = await preferredDmProtocol(pubkey, normalizedRecipientPubkey, protocol);
+        if (preferred === 'marmot') {
           return await sendMarmotDm(pubkey, normalizedRecipientPubkey, rumor);
         }
 
@@ -479,7 +490,8 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
           tags: [['p', normalizedRecipientPubkey]],
           content: serializeNwcShare(card),
         };
-        if (protocol === 'marmot') {
+        const preferred = await preferredDmProtocol(pubkey, normalizedRecipientPubkey, protocol);
+        if (preferred === 'marmot') {
           return await sendMarmotDm(pubkey, normalizedRecipientPubkey, rumor);
         }
 

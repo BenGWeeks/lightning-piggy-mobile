@@ -1,3 +1,4 @@
+import { useReceiveFriendShare } from '../hooks/useReceiveFriendShare';
 import React, { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo } from 'react';
 import {
   View,
@@ -19,12 +20,9 @@ import ReceivePaymentQr from './ReceivePaymentQr';
 import * as Clipboard from 'expo-clipboard';
 import ReceiveClaimScanner from './ReceiveClaimScanner';
 import Toast from './BrandedToast';
-import { useNavigation } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { buildBip21 } from '../utils/bip21';
 import { paymentHashFromBolt11 } from '../utils/bolt11';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
-import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useLocale } from '../contexts/LocaleContext';
 import { walletLabel } from '../types/wallet';
@@ -33,7 +31,6 @@ import { satsToFiat, formatFiat } from '../services/fiatService';
 import AmountEntryScreen from './AmountEntryScreen';
 import FriendPickerSheet, { PickedFriend } from './FriendPickerSheet';
 import BoltzReceiveSheet from './BoltzReceiveSheet';
-import type { RootStackParamList } from '../navigation/types';
 import type { DmProtocol } from '../utils/dmProtocol';
 import type { MarmotUnreachableReason } from '../services/marmotFallback';
 import { isStaleReceipt } from '../utils/incomingReceipts';
@@ -129,9 +126,6 @@ const ReceiveSheet: React.FC<Props> = ({
   // Session + wallet the current view was initialised for, so the open effect
   // and the wallet effect it triggers issue ONE address request between them.
   const initialisedViewRef = useRef<{ token: number; key: string } | null>(null);
-  const { sendDirectMessage } = useNostr();
-  const { contacts } = useNostrContacts();
-  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
   // No explicit snapPoints — gorhom v5's default enableDynamicSizing=true
   // gives a single content-height snap (not user-draggable).
@@ -431,89 +425,19 @@ const ReceiveSheet: React.FC<Props> = ({
       ? lightningAddress || ''
       : invoice || '';
 
-  const handleFriendPicked = useCallback(
-    async (friend: PickedFriend) => {
-      if (!friendShareValue || sendingToFriend) return;
-      const sharedAddress = mode === 'address';
-      setSendingToFriend(true);
-      setFriendPickerOpen(false);
-      try {
-        // Bolt11 invoices are self-identifying by their `lnbc…` prefix — no
-        // URI scheme needed, and sending bare `lnbc…` matches what Damus
-        // (and other Nostr clients that use nostrdb's block parser) expect
-        // for cross-client interop. Lightning addresses look like plain
-        // emails (`alice@example.com`), so we have to prefix them with
-        // `lightning:` so the receiver can safely render a Pay button
-        // without mis-classifying a regular email. On-chain BIP-21 URIs
-        // already carry their own `bitcoin:` scheme — send as-is.
-        const payload = isOnchainWallet
-          ? friendShareValue
-          : mode === 'address'
-            ? `lightning:${friendShareValue}`
-            : friendShareValue;
-        let result = await sendDirectMessage(
-          friend.pubkey,
-          payload,
-          presetProtocol && friend.pubkey === presetFriend?.pubkey
-            ? { protocol: presetProtocol }
-            : undefined,
-        );
-        if (result.success) onSent?.(payload);
-        else if (result.marmotUnreachable && onMarmotUnreachable) {
-          if (!(await onMarmotUnreachable(result.marmotUnreachable, payload))) return;
-          result = { success: true };
-        }
-        if (!result.success) {
-          Toast.show({
-            type: 'error',
-            text1: t('receiveSheet.sendFailed'),
-            text2: result.error ?? t('receiveSheet.couldNotSendToFriend'),
-            position: 'top',
-            visibilityTime: 4000,
-          });
-          return;
-        }
-        Toast.show({
-          type: 'success',
-          text1: sharedAddress
-            ? t('receiveSheet.lightningAddressSentTo', { name: friend.name })
-            : t('receiveSheet.invoiceSentTo', { name: friend.name }),
-          position: 'top',
-          visibilityTime: 2500,
-        });
-        // Close this sheet and drop the user into the conversation so they
-        // can see the message land and the friend's "Pay" response. When
-        // opened from inside a conversation (presetFriend), we're already
-        // there — just close.
-        onClose();
-        if (!presetFriend) {
-          const contact = contacts.find((c) => c.pubkey === friend.pubkey);
-          navigation.navigate('Conversation', {
-            pubkey: friend.pubkey,
-            name: friend.name,
-            picture: friend.picture,
-            lightningAddress: contact?.profile?.lud16 ?? friend.lightningAddress,
-          });
-        }
-      } finally {
-        setSendingToFriend(false);
-      }
-    },
-    [
-      friendShareValue,
-      isOnchainWallet,
-      mode,
-      sendingToFriend,
-      sendDirectMessage,
-      contacts,
-      navigation,
-      onClose,
-      presetFriend,
-      presetProtocol,
-      onSent,
-      onMarmotUnreachable,
-    ],
-  );
+  const handleFriendPicked = useReceiveFriendShare({
+    value: friendShareValue,
+    isOnchain: isOnchainWallet,
+    isAddress: mode === 'address',
+    sending: sendingToFriend,
+    setSending: setSendingToFriend,
+    setFriendPickerOpen,
+    presetFriend,
+    presetProtocol,
+    onSent,
+    onMarmotUnreachable,
+    onClose,
+  });
 
   const handleSendToGroup = useCallback(async () => {
     if (!friendShareValue || !presetGroup || !onSendToGroup || sendingToFriend) return;

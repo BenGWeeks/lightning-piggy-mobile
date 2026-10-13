@@ -1,0 +1,32 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: New chat preselects Marmot but preserves an explicit NIP-17 choice
+---
+# Big Piggy with Middle Piggy in contacts. Does not send any message.
+- extendedWaitUntil:
+    visible: { id: 'tab-messages' }
+    timeout: 60000
+- tapOn: { id: 'tab-messages' }
+- tapOn: { id: 'start-conversation-button' }
+- extendedWaitUntil:
+    visible: { id: 'friend-picker-search' }
+    timeout: 10000
+- tapOn: { id: 'friend-picker-search' }
+- inputText: 'Middle Piggy'
+- extendedWaitUntil:
+    visible: { id: 'friend-picker-4b2fcb4e' }
+    timeout: 10000
+- tapOn: { id: 'friend-picker-4b2fcb4e' }
+- extendedWaitUntil:
+    visible: { id: 'dm-protocol-selected-marmot' }
+    timeout: 10000
+- tapOn: { id: 'dm-protocol-option-nip17' }
+- extendedWaitUntil:
+    visible: { id: 'conversation-protocol-tag' }
+    timeout: 10000
+- assertVisible: 'NIP-17'
+- assertVisible: 'Middle Piggy'
+- tapOn: { id: 'conversation-back' }
+- extendedWaitUntil:
+    visible: { id: 'tab-wallets' }
+    timeout: 10000
+- tapOn: { id: 'tab-wallets' }

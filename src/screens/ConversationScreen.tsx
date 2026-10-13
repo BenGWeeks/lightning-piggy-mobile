@@ -1,3 +1,4 @@
+import { preferredConversationParams } from '../services/preferredDmProtocol';
 import { usePeerContact } from '../hooks/usePeerContact';
 import { useDmChatTools } from '../hooks/useDmChatTools';
 import { useChatLocalHistory } from '../hooks/useChatLocalHistory';
@@ -951,16 +952,14 @@ const ConversationScreen: React.FC = () => {
           onViewFullProfile={handleViewFullProfile}
           onMessage={
             sheetContact?.pubkey && sheetContact.pubkey !== pubkey
-              ? () => {
+              ? async () => {
                   const c = sheetContact;
                   if (!c?.pubkey) return;
                   setProfileSheetVisible(false);
-                  navigation.replace('Conversation', {
-                    pubkey: c.pubkey,
-                    name: c.name,
-                    picture: c.picture,
-                    lightningAddress: c.lightningAddress,
-                  });
+                  navigation.replace(
+                    'Conversation',
+                    await preferredConversationParams(myPubkey, { ...c, pubkey: c.pubkey }),
+                  );
                 }
               : undefined
           }

@@ -1,3 +1,6 @@
+import { sendSharedDm } from '../services/sendSharedDm';
+import { DEFAULT_DM_PROTOCOL } from '../utils/dmProtocol';
+import { preferredDmProtocol } from '../services/preferredDmProtocol';
 import { useCollectionFilter } from '../hooks/useCollectionFilter';
 import MarketCollectionChips from '../components/MarketCollectionChips';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -82,7 +85,7 @@ const ContactProfileScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<ContactProfileNavigation>();
   const route = useRoute<ContactProfileRoute>();
-  const { sendDirectMessage, relays } = useNostr();
+  const { sendDirectMessage, relays, pubkey: viewerPubkey, appendLocalDmMessage } = useNostr();
   const { contacts, followContact, unfollowContact } = useNostrContacts();
   const { hasWallets } = useWallet();
 
@@ -249,20 +252,29 @@ const ContactProfileScreen: React.FC = () => {
     }
   }, [contact.pubkey, contacts]);
 
-  const handleMessage = useCallback(() => {
+  const handleMessage = useCallback(async () => {
     if (!contact.pubkey) return;
     // `navigate` (not `replace`) so the user can back-button from
     // Conversation → Profile → previous screen. The dedupe inside the
     // Conversation route already collapses re-opens of the same DM
     // peer, so we don't worry about a profile→conversation→profile
     // bounce stacking duplicates.
+    const state = navigation.getState();
+    const previous = state.routes[state.index - 1];
+    const thread =
+      previous?.name === 'Conversation'
+        ? (previous.params as RootStackParamList['Conversation'])
+        : undefined;
+    const explicit =
+      thread?.pubkey === contact.pubkey ? (thread.protocol ?? DEFAULT_DM_PROTOCOL) : undefined;
     navigation.navigate('Conversation', {
+      protocol: await preferredDmProtocol(viewerPubkey, contact.pubkey, explicit),
       pubkey: contact.pubkey,
       name: contact.name,
       picture: contact.picture,
       lightningAddress: contact.lightningAddress,
     });
-  }, [contact, navigation]);
+  }, [contact, navigation, viewerPubkey]);
 
   const handleZap = useCallback(async () => {
     if (!hasWallets) {
@@ -400,7 +412,14 @@ const ContactProfileScreen: React.FC = () => {
         const nprofile = nprofileEncode(contact.pubkey, relayHints);
         const label = contact.name || t('contactProfileScreen.contactFallback');
         const payload = t('contactProfileScreen.sharedContactPayload', { label, nprofile });
-        const result = await sendDirectMessage(friend.pubkey, payload);
+        const protocol = await preferredDmProtocol(viewerPubkey, friend.pubkey);
+        const result = await sendSharedDm({
+          peer: friend.pubkey,
+          text: payload,
+          protocol,
+          send: () => sendDirectMessage(friend.pubkey, payload, { protocol }),
+          append: appendLocalDmMessage,
+        });
         if (!result.success) {
           Toast.show({
             type: 'error',
@@ -411,6 +430,7 @@ const ContactProfileScreen: React.FC = () => {
           });
           return;
         }
+        navigation.navigate('Conversation', { ...friend, protocol });
         Toast.show({
           type: 'success',
           text1: t('contactProfileScreen.sharedWith', { label, name: friend.name }),
@@ -421,7 +441,17 @@ const ContactProfileScreen: React.FC = () => {
         setSharing(false);
       }
     },
-    [contact.pubkey, contact.name, sharing, sendDirectMessage, contacts, relays],
+    [
+      contact.pubkey,
+      contact.name,
+      sharing,
+      sendDirectMessage,
+      appendLocalDmMessage,
+      contacts,
+      relays,
+      viewerPubkey,
+      navigation,
+    ],
   );
 
   const handleViewProfile = useCallback(async () => {
