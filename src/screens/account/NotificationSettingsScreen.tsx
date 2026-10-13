@@ -8,7 +8,7 @@ import type { AccountDrawerNavigation } from '../../navigation/types';
 import { useMutedSenders } from '../../hooks/useMutedSenders';
 import { useNostr } from '../../contexts/NostrContext';
 import { loadMarmotPushSettings } from '../../services/marmotPushRegistration';
-import { loadNearbySettings } from '../../services/nearbySettingsService';
+import { loadShopAlertStatus } from '../../services/shopAlertStatus';
 import MarmotPushSection from '../../components/MarmotPushSection';
 import SettingsSection from '../../components/SettingsSection';
 import NotificationPermissionRow from '../../components/NotificationPermissionRow';
@@ -34,8 +34,8 @@ const NotificationSettingsScreen: React.FC = () => {
   useFocusEffect(
     useCallback(() => {
       let alive = true;
-      void loadNearbySettings().then((s) => {
-        if (alive) setShopOn(s.enabled);
+      void loadShopAlertStatus().then((active) => {
+        if (alive) setShopOn(active);
       });
       if (pubkey)
         void loadMarmotPushSettings(pubkey)
