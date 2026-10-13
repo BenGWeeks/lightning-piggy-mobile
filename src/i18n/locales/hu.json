@@ -2092,6 +2092,7 @@
     "send": "Küldés"
   },
   "walletCard": {
+    "zaplie": "Zaplie",
     "connected": "Csatlakozva",
     "notResponding": "Nem válaszol",
     "disconnected": "Nincs kapcsolat",

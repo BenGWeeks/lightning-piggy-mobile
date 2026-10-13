@@ -2092,6 +2092,7 @@
     "send": "Enviar"
   },
   "walletCard": {
+    "zaplie": "Zaplie",
     "connected": "Conectado",
     "notResponding": "Sin respuesta",
     "disconnected": "Desconectado",

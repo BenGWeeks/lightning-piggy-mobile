@@ -2066,6 +2066,7 @@
     "send": "Надіслати"
   },
   "walletCard": {
+    "zaplie": "Zaplie",
     "connected": "Підключено",
     "notResponding": "Не відповідає",
     "disconnected": "Відключено",

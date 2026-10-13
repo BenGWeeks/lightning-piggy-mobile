@@ -840,6 +840,27 @@ tapping their centre can hit a wallet option instead of the uncovered backdrop.
 Run the secret-mode flow alone for a
 nonfinancial check; the full curated runner imports wallets and moves funds.
 
+=== Emulator deep link leaves the native debug app on the previous Metro
+
+Some installed Android debug builds expose React Native's developer menu
+rather than Expo's development-client launcher. The
+`lightningpiggy://expo-development-client/` link can open the app without
+changing its bundle server. Verify that the intended Metro logs an Android
+bundle request. If it does not, open the developer menu with Android's Menu
+key, select `Change Bundle Location`, enter `10.0.2.2:<port>`, and apply the
+change. Restore `10.0.2.2:8090` through the same dialog after testing, as well
+as sending the usual restoration deep link. This preserves wallets and login.
+
+=== Maestro wallet design picker skips the target card
+
+A fast swipe on `wallet-card-picker-coverflow` can fling past several designs.
+Use an element-scoped swipe with `duration: 2000`; this moves one card per
+swipe on the API 34 emulator. Check the centred `wallet-card-picker-name`
+with a theme-name regex (for example `.*Zaplie.*`), which matches either the
+visible text or its separate Android accessibility label. Tapping neighbouring
+cards can hit the overlapping centred card; swipe until the target is centred
+before tapping its `theme-*` testID.
+
 === Maestro: Big Piggy shows no friends or conversations after a fresh sign-in
 
 As of 2026-10-05 the Piggy fixtures' kind-0 / kind-3 / kind-10002 events

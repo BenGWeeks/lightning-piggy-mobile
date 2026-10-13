@@ -2092,6 +2092,7 @@
     "send": "पाठवा"
   },
   "walletCard": {
+    "zaplie": "Zaplie",
     "connected": "कनेक्ट झाले",
     "notResponding": "प्रतिसाद देत नाही",
     "disconnected": "डिस्कनेक्ट झाले",

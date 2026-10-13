@@ -1,6 +1,7 @@
 import { ImageStyle } from 'react-native';
 import { knowAllCardStyles } from '../../styles/KnowAllCard.styles';
-import type { CardTheme } from '../../types/wallet';
+import type { CardBackgroundStyle } from '../cardThemes';
+import { bgStyle as zaplieStyle } from '../../styles/ZaplieCard.styles';
 import { bgStyle as albyStyle } from './alby';
 import { bgStyle as bitcoinStyle } from './bitcoin';
 import { bgStyle as bitpopartStyle } from './bitpopart';
@@ -25,11 +26,11 @@ import { bgStyle as spaceshipStyle } from './spaceship';
 import { bgStyle as aiRobotStyle } from './ai-robot';
 import { bgStyle as wiseOwlStyle } from '../../styles/WiseOwlCard.styles';
 
-// Typed as `Record<CardTheme | 'default', ...>` so adding a new theme
-// to the `CardTheme` union forces a corresponding entry here at
+// CardBackgroundStyle includes every CardTheme plus named artwork styles,
+// so adding a new theme or artwork name forces a corresponding entry here at
 // compile time. `'default'` lives outside `CardTheme` because it's
 // the fallback when no theme is selected, not a user-pickable option.
-const cardBgStyles: Record<CardTheme | 'default', ImageStyle> = {
+const cardBgStyles: Record<CardBackgroundStyle | 'default', ImageStyle> = {
   default: defaultStyle.full,
   'lightning-bee': lightningBeeStyle.full,
   'lightning-cat': lightningCatStyle.full,
@@ -39,6 +40,7 @@ const cardBgStyles: Record<CardTheme | 'default', ImageStyle> = {
   nostrich: nostrichStyle.full,
   'lightning-piggy': lightningPiggyStyle.full,
   'wise-owl': wiseOwlStyle.full,
+  zaplie: zaplieStyle.full,
   'lightning-whale': lightningWhaleStyle.full,
   sallie: knowAllCardStyles.background,
   poppie: knowAllCardStyles.background,
@@ -58,6 +60,9 @@ const cardBgStyles: Record<CardTheme | 'default', ImageStyle> = {
   'ai-robot': aiRobotStyle.full,
 };
 
-export function getCardBgStyle(styleName: CardTheme | undefined, _mini: boolean): ImageStyle {
+export function getCardBgStyle(
+  styleName: CardBackgroundStyle | undefined,
+  _mini: boolean,
+): ImageStyle {
   return cardBgStyles[styleName ?? 'default'] ?? cardBgStyles.default;
 }
