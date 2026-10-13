@@ -34,8 +34,8 @@ interface UseConversationPollsParams {
     plaintext: string,
     hooks?: SendHooks,
   ) => Promise<SendResult>;
-  /** This thread's protocol — a legacy text vote must stay in it, not fall
-   *  back to NIP-17 and land in the other thread. */
+  /** This thread's protocol — polls and votes must stay in it rather than
+   *  following the recipient's preferred protocol into another thread. */
   protocol?: DmProtocol;
   /** Structured send: gift-wrap a pre-built kind-1068/1018 rumor. */
   sendDirectRumor: (
@@ -171,7 +171,7 @@ export function useConversationPolls({
       }
       const stored = serializePollFromRumor(rumor);
       const result = await sendDirectRumor([pubkey], rumor, {
-        ...(protocol === 'marmot' ? { protocol } : {}),
+        protocol: protocol === 'marmot' ? 'marmot' : 'nip17',
         onRumorReady: ({ eventId, kind }) => {
           if (stored) appendOptimistic(eventId, kind, stored);
         },
@@ -237,7 +237,7 @@ export function useConversationPolls({
       });
       const stored = serializeVoteFromRumor(rumor);
       const result = await sendDirectRumor([pubkey], rumor, {
-        ...(protocol === 'marmot' ? { protocol } : {}),
+        protocol: protocol === 'marmot' ? 'marmot' : 'nip17',
         onRumorReady: ({ eventId, kind }) => {
           if (stored) appendOptimistic(eventId, kind, stored);
         },
