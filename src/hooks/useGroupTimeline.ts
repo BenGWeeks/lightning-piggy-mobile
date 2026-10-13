@@ -118,7 +118,12 @@ export function useGroupTimeline({
 
   const rows = useMemo(
     () =>
-      mergeDeviceNotices(classified, deviceNotices).filter((row) => row.createdAt > clearBoundary),
+      // Messages already passed the history hook's timestamp and cleared-ID
+      // checks; same-second arrivals survive. Notices still need the cutoff.
+      mergeDeviceNotices(
+        classified,
+        deviceNotices.filter((notice) => notice.at > clearBoundary),
+      ),
     [classified, deviceNotices, clearBoundary],
   );
 

@@ -1,4 +1,7 @@
-import { renderHook } from '@testing-library/react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { act, renderHook, waitFor } from '@testing-library/react-native';
+import type { GroupMessage } from '../services/groupMessagesStorageService';
+import { useChatLocalHistory } from './useChatLocalHistory';
 import type { DeviceNoticeView } from '../services/marmotDeviceTracker';
 import {
   isDeviceNoticeRow,
@@ -40,6 +43,67 @@ const notice = (id: string, at: number): DeviceNoticeView => ({
   joined: true,
   keys: ['k1', 'k2'],
   clients: ['Lightning Piggy', null],
+});
+
+it.each(['nip17:group', 'marmot:group'])(
+  'keeps same-second arrivals in the group timeline after clearing %s',
+  async (thread) => {
+    await AsyncStorage.clear();
+    const now = 1700000000;
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(now * 1000);
+    const raw: GroupMessage[] = [
+      { id: 'old', createdAt: now - 1, senderPubkey: 'a', text: 'old' },
+      { id: 'cleared', createdAt: now, senderPubkey: 'a', text: 'cleared' },
+      { id: 'future', createdAt: now + 86400, senderPubkey: 'a', text: 'future' },
+    ];
+    const hook = renderHook(
+      ({ messages }: { messages: GroupMessage[] }) => {
+        const history = useChatLocalHistory('owner', thread, messages);
+        const timeline = useGroupTimeline({
+          messages: history.messages,
+          myPubkey: 'b',
+          memberNameByPubkey: new Map(),
+          formatLocale: 'en',
+          deviceNotices: [notice('old', now - 1), notice('same-second', now)],
+          clearBoundary: history.clearBoundary,
+        });
+        return { ...history, ...timeline };
+      },
+      { initialProps: { messages: raw } },
+    );
+    try {
+      await waitFor(() => expect(hook.result.current.messages).toEqual(raw));
+      await act(() => hook.result.current.clear());
+      expect(hook.result.current.rows).toEqual([]);
+      hook.rerender({
+        messages: [...raw, { id: 'arriving', createdAt: now, senderPubkey: 'a', text: 'new' }],
+      });
+      expect(hook.result.current.rows).toEqual([
+        expect.objectContaining({
+          id: 'arriving',
+          createdAt: now,
+          content: { kind: 'text', text: 'new' },
+        }),
+      ]);
+    } finally {
+      hook.unmount();
+      clock.mockRestore();
+    }
+  },
+);
+
+it('retains device notices newer than the group clear boundary', () => {
+  const { result } = renderHook(() =>
+    useGroupTimeline({
+      messages: [],
+      myPubkey: 'a',
+      memberNameByPubkey: new Map(),
+      formatLocale: 'en',
+      deviceNotices: [notice('old', 9), notice('same-second', 10), notice('new', 11)],
+      clearBoundary: 10,
+    }),
+  );
+  expect(result.current.rows.map((row) => row.id)).toEqual(['device-new']);
 });
 
 describe('mergeDeviceNotices', () => {

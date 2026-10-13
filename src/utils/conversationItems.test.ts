@@ -6,10 +6,6 @@
 // classifyMessageContent → messageContent → boltzService pulls in
 // bitcoinjs-lib's bip32 (ESM Jest can't resolve under jest-expo). Mock the one
 // helper that drags it in; we don't exercise bitcoin-address detection here.
-jest.mock('../services/boltzService', () => ({
-  isBitcoinAddress: () => false,
-}));
-
 import {
   buildConversationItems,
   buildZapItems,
@@ -21,6 +17,13 @@ import {
 } from './conversationItems';
 import { NWC_SHARE_KIND } from './nwcShareMessage';
 import type { WalletState, ZapCounterpartyInfo } from '../types/wallet';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { act, renderHook, waitFor } from '@testing-library/react-native';
+import { useChatLocalHistory } from '../hooks/useChatLocalHistory';
+
+jest.mock('../services/boltzService', () => ({
+  isBitcoinAddress: () => false,
+}));
 
 const PEER = 'a'.repeat(64);
 const OTHER = 'b'.repeat(64);
@@ -51,6 +54,83 @@ function walletWithTx(tx: Partial<WalletState['transactions'][number]>): WalletS
 }
 
 describe('buildConversationItems', () => {
+  it.each(['nip17:peer', 'marmot:peer'])(
+    'keeps same-second arrivals in the rendered timeline after clearing %s',
+    async (thread) => {
+      await AsyncStorage.clear();
+      const clock = jest.spyOn(Date, 'now').mockReturnValue(DAY2 * 1000);
+      const raw: ConversationMessageInput[] = [
+        { id: 'old', fromMe: false, text: 'old', createdAt: DAY2 - 1 },
+        { id: 'cleared', fromMe: false, text: 'cleared', createdAt: DAY2 },
+        { id: 'future', fromMe: false, text: 'future', createdAt: DAY2 + 86400 },
+      ];
+      const hook = renderHook(
+        ({ messages }: { messages: ConversationMessageInput[] }) => {
+          const history = useChatLocalHistory('owner', thread, messages);
+          return {
+            ...history,
+            items: buildConversationItems(
+              history.messages,
+              [],
+              undefined,
+              [],
+              'en',
+              [],
+              history.clearBoundary,
+            ),
+          };
+        },
+        { initialProps: { messages: raw } },
+      );
+      try {
+        await waitFor(() => expect(hook.result.current.messages).toEqual(raw));
+        await act(() => hook.result.current.clear());
+        expect(hook.result.current.items).toEqual([]);
+        hook.rerender({
+          messages: [...raw, { id: 'arriving', fromMe: false, text: 'new', createdAt: DAY2 }],
+        });
+        expect(hook.result.current.items.filter((i) => i.kind !== 'dayHeader')).toEqual([
+          expect.objectContaining({ kind: 'message', id: 'dm-arriving', createdAt: DAY2 }),
+        ]);
+      } finally {
+        hook.unmount();
+        clock.mockRestore();
+      }
+    },
+  );
+
+  it('applies the clear cutoff only to supplemental zaps, invites and device notices', () => {
+    const times = [DAY2 - 1, DAY2, DAY2 + 1];
+    const zaps = buildZapItems(
+      times.map((at) =>
+        walletWithTx({ paymentHash: `zap-${at}`, settled_at: at, zapCounterparty: cp(PEER) }),
+      ),
+      PEER,
+    );
+    const items = buildConversationItems(
+      [{ id: 'arriving', fromMe: false, text: 'new', createdAt: DAY2 }],
+      zaps,
+      undefined,
+      times.map((at) => ({ id: `invite-${at}`, createdAt: at })),
+      'en',
+      times.map((at) => ({
+        id: `notice-${at}`,
+        createdAt: at,
+        isSelf: false,
+        joined: true,
+        clients: [],
+      })),
+      DAY2,
+    ).filter((i) => i.kind !== 'dayHeader');
+    expect(items).toHaveLength(4);
+    expect(items.filter((i) => i.kind !== 'message').map((i) => i.createdAt)).toEqual([
+      DAY2 + 1,
+      DAY2 + 1,
+      DAY2 + 1,
+    ]);
+    expect(items[3]).toMatchObject({ kind: 'message', id: 'dm-arriving', createdAt: DAY2 });
+  });
+
   it('returns an empty array for no messages and no zaps', () => {
     expect(buildConversationItems([], [])).toEqual([]);
   });
