@@ -43,7 +43,6 @@
     "signInButton": "登录／注册",
     "notifications": "通知",
     "displayLanguage": "显示与语言",
-    "yourAccount": "你的账户",
     "signOutOf": "退出{{name}}账户"
   },
   "accountSwitcherSheet": {
@@ -2802,9 +2801,9 @@
     "permissionTurnOn": "开启"
   },
   "settingsScope": {
-    "forThisAccount": "仅限此账户",
+    "forThisAccount": "此账户",
     "forThisAccountHint": "这部手机上的每个账户各自选择。",
-    "onThisPhone": "这部手机",
+    "onThisPhone": "此手机",
     "onThisPhoneHint": "这部手机上的所有账户相同。"
   },
   "locationSharing": {
@@ -3083,5 +3082,14 @@
     "voice": "语音消息",
     "openMedia": "打开媒体",
     "loadMedia": "点按加载媒体"
+  },
+  "settingsRows": {
+    "experimentalSubtitle": "仍在测试中的功能",
+    "notificationServerSubtitle": "Lightning Piggy 通知",
+    "deviceChangesSubtitle": "Marmot 聊天中的设备动态",
+    "profilerSubtitle": "记录应用性能",
+    "linkPreviewsSubtitle": "分享链接的预览卡片",
+    "notificationContentSubtitle": "消息内容和付款金额",
+    "backgroundSubtitle": "应用关闭时检查消息"
   }
 }

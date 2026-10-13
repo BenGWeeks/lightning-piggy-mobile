@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Switch, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
+import { LockKeyhole } from 'lucide-react-native';
+import SettingsRow from './SettingsRow';
+import { createSettingsInfoSheetStyles } from '../styles/SettingsInfoSheet.styles';
 import { useFocusEffect } from '@react-navigation/native';
-import { createSharedAccountStyles } from '../screens/account/sharedStyles';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import { createAdvancedScreenStyles } from '../styles/AdvancedScreen.styles';
 import { isNativeCryptoActive, isNativeCryptoAvailable } from '../services/nostrCrypto';
 import {
   loadNativeCryptoEnabled,
@@ -20,8 +21,7 @@ import {
 const NativeCryptoSection: React.FC = () => {
   const t = useTranslation();
   const colors = useThemeColors();
-  const shared = useMemo(() => createSharedAccountStyles(colors), [colors]);
-  const styles = useMemo(() => createAdvancedScreenStyles(colors), [colors]);
+  const styles = useMemo(() => createSettingsInfoSheetStyles(colors), [colors]);
 
   // Availability is a stable capability probe (native platform + module
   // linked) — compute once. `active` is re-read on a focus tick so a tester
@@ -52,32 +52,34 @@ const NativeCryptoSection: React.FC = () => {
   }, []);
 
   return (
-    <View style={styles.sectionGap} testID="advanced-experimental">
-      <Text style={shared.sectionLabel}>{t('advancedScreen.encryption')}</Text>
-      <Text style={shared.fieldHint}>{t('nostrScreen.nativeCryptoHint')}</Text>
-      <View style={[styles.experimentalRow, !available && styles.experimentalRowDisabled]}>
-        <View style={styles.experimentalTextBlock}>
-          <Text style={styles.experimentalLabel}>{t('nostrScreen.nativeCryptoLabel')}</Text>
-          <Text style={styles.experimentalSubtitle}>
-            {available
-              ? t('nostrScreen.nativeCryptoRestartCaption')
-              : t('nostrScreen.nativeCryptoUnavailable')}
-          </Text>
-        </View>
-        <Switch
-          value={available && on}
-          onValueChange={handleToggle}
-          disabled={!available}
-          accessibilityLabel={t('nostrScreen.nativeCryptoLabel')}
-          accessibilityHint={t('nostrScreen.nativeCryptoHint')}
-          testID="nostr-native-crypto-toggle"
-          trackColor={{ false: colors.divider, true: colors.brandPink }}
-          thumbColor={available && on ? colors.white : undefined}
-        />
-      </View>
-      <Text style={styles.experimentalActive} testID="nostr-native-crypto-active">
-        {active ? t('nostrScreen.nativeCryptoActiveYes') : t('nostrScreen.nativeCryptoActiveNo')}
-      </Text>
+    <View testID="advanced-experimental">
+      <SettingsRow
+        icon={LockKeyhole}
+        title={t('nostrScreen.nativeCryptoLabel')}
+        subtitle={
+          available
+            ? t('nostrScreen.nativeCryptoRestartCaption')
+            : t('nostrScreen.nativeCryptoUnavailable')
+        }
+        testID="advanced-native-crypto"
+        infoTestID="nostr-native-crypto-info"
+        toggle={{
+          value: available && on,
+          onValueChange: handleToggle,
+          disabled: !available,
+          testID: 'nostr-native-crypto-toggle',
+        }}
+        details={
+          <>
+            <Text style={styles.body}>{t('nostrScreen.nativeCryptoHint')}</Text>
+            <Text style={styles.body} testID="nostr-native-crypto-active">
+              {active
+                ? t('nostrScreen.nativeCryptoActiveYes')
+                : t('nostrScreen.nativeCryptoActiveNo')}
+            </Text>
+          </>
+        }
+      />
     </View>
   );
 };

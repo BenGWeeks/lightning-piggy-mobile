@@ -43,7 +43,6 @@
     "signInButton": "साइन इन / नवीन खाते",
     "notifications": "नोटिफिकेशन",
     "displayLanguage": "डिस्प्ले आणि भाषा",
-    "yourAccount": "तुमचे खाते",
     "signOutOf": "{{name}} मधून साइन आउट करा"
   },
   "accountSwitcherSheet": {
@@ -2802,9 +2801,9 @@
     "permissionTurnOn": "चालू करा"
   },
   "settingsScope": {
-    "forThisAccount": "या खात्यासाठी",
+    "forThisAccount": "हे खाते",
     "forThisAccountHint": "या फोनवरील प्रत्येक खात्यासाठी वेगळ्या सेटिंग्ज निवडता येतात.",
-    "onThisPhone": "या फोनवर",
+    "onThisPhone": "हा फोन",
     "onThisPhoneHint": "या फोनवरील प्रत्येक खात्यासाठी सारखेच."
   },
   "locationSharing": {
@@ -3083,5 +3082,14 @@
     "voice": "व्हॉइस नोट",
     "openMedia": "मीडिया उघडा",
     "loadMedia": "मीडिया लोड करण्यासाठी टॅप करा"
+  },
+  "settingsRows": {
+    "experimentalSubtitle": "अजून चाचणी सुरू असलेली वैशिष्ट्ये",
+    "notificationServerSubtitle": "Lightning Piggy नोटिफिकेशन्स",
+    "deviceChangesSubtitle": "Marmot चॅटमधील डिव्हाइसची हालचाल",
+    "profilerSubtitle": "अ‍ॅपची कामगिरी रेकॉर्ड करा",
+    "linkPreviewsSubtitle": "शेअर केलेल्या लिंकचे प्रीव्ह्यू",
+    "notificationContentSubtitle": "मेसेजचा मजकूर आणि पेमेंटची रक्कम",
+    "backgroundSubtitle": "अ‍ॅप बंद असताना मेसेज तपासा"
   }
 }

@@ -1,9 +1,8 @@
-import React, { useCallback, useMemo } from 'react';
-import { Switch, Text, View } from 'react-native';
-import { createSharedAccountStyles } from '../screens/account/sharedStyles';
-import { useThemeColors } from '../contexts/ThemeContext';
+import React, { useCallback } from 'react';
+import { View } from 'react-native';
+import { Smartphone } from 'lucide-react-native';
+import SettingsRow from './SettingsRow';
 import { useTranslation } from '../contexts/LocaleContext';
-import { createAdvancedScreenStyles } from '../styles/AdvancedScreen.styles';
 import { useDeviceNoticesEnabled } from '../hooks/useMarmotDevices';
 import { saveDeviceNoticesEnabled } from '../services/deviceNoticesPreference';
 
@@ -14,30 +13,19 @@ import { saveDeviceNoticesEnabled } from '../services/deviceNoticesPreference';
  */
 const DeviceNoticesSection: React.FC = () => {
   const t = useTranslation();
-  const colors = useThemeColors();
-  const shared = useMemo(() => createSharedAccountStyles(colors), [colors]);
-  const styles = useMemo(() => createAdvancedScreenStyles(colors), [colors]);
   const enabled = useDeviceNoticesEnabled();
   const toggle = useCallback((next: boolean) => void saveDeviceNoticesEnabled(next), []);
   return (
-    <View style={styles.sectionGap} testID="advanced-developer-options">
-      <Text style={shared.sectionLabel}>{t('advancedScreen.developerOptions')}</Text>
-      <View style={styles.experimentalRow}>
-        <View style={styles.experimentalTextBlock}>
-          <Text style={styles.experimentalLabel}>{t('chatDevices.showChanges')}</Text>
-          <Text style={styles.experimentalSubtitle}>{t('chatDevices.showChangesHint')}</Text>
-        </View>
-        <Switch
-          value={enabled}
-          onValueChange={toggle}
-          accessibilityLabel={t('chatDevices.showChanges')}
-          testID="advanced-device-notices-toggle"
-          trackColor={{ false: colors.divider, true: colors.brandPink }}
-          thumbColor={enabled ? colors.white : undefined}
-        />
-      </View>
+    <View testID="advanced-developer-options">
+      <SettingsRow
+        icon={Smartphone}
+        title={t('chatDevices.showChanges')}
+        subtitle={t('settingsRows.deviceChangesSubtitle')}
+        testID="advanced-device-notices"
+        details={t('chatDevices.showChangesHint')}
+        toggle={{ value: enabled, onValueChange: toggle, testID: 'advanced-device-notices-toggle' }}
+      />
     </View>
   );
 };
-
 export default DeviceNoticesSection;

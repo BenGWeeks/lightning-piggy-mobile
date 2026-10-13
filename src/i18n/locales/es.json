@@ -43,7 +43,6 @@
     "signInButton": "Iniciar sesión / Crear cuenta",
     "notifications": "Notificaciones",
     "displayLanguage": "Pantalla e idioma",
-    "yourAccount": "Tu cuenta",
     "signOutOf": "Cerrar sesión de {{name}}"
   },
   "accountSwitcherSheet": {
@@ -2802,9 +2801,9 @@
     "permissionTurnOn": "Activar"
   },
   "settingsScope": {
-    "forThisAccount": "Para esta cuenta",
+    "forThisAccount": "Esta cuenta",
     "forThisAccountHint": "Cada cuenta de este teléfono elige las suyas.",
-    "onThisPhone": "En este teléfono",
+    "onThisPhone": "Este teléfono",
     "onThisPhoneHint": "Igual para todas las cuentas de este teléfono."
   },
   "locationSharing": {
@@ -3083,5 +3082,14 @@
     "voice": "Nota de voz",
     "openMedia": "Abrir contenido multimedia",
     "loadMedia": "Toca para cargar el contenido"
+  },
+  "settingsRows": {
+    "experimentalSubtitle": "Funciones aún en pruebas",
+    "notificationServerSubtitle": "Notificaciones de Lightning Piggy",
+    "deviceChangesSubtitle": "Actividad de dispositivos en chats Marmot",
+    "profilerSubtitle": "Grabar el rendimiento de la app",
+    "linkPreviewsSubtitle": "Vistas previas de enlaces compartidos",
+    "notificationContentSubtitle": "Texto de mensajes e importes de pagos",
+    "backgroundSubtitle": "Buscar mensajes con la app cerrada"
   }
 }

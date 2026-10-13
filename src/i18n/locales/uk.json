@@ -43,7 +43,6 @@
     "signInButton": "Увійти / Створити акаунт",
     "notifications": "Сповіщення",
     "displayLanguage": "Екран і мова",
-    "yourAccount": "Ваш обліковий запис",
     "signOutOf": "Вийти з облікового запису «{{name}}»"
   },
   "accountSwitcherSheet": {
@@ -2810,9 +2809,9 @@
     "permissionTurnOn": "Увімкнути"
   },
   "settingsScope": {
-    "forThisAccount": "Для цього облікового запису",
+    "forThisAccount": "Цей обліковий запис",
     "forThisAccountHint": "Кожен обліковий запис на цьому телефоні налаштовує їх окремо.",
-    "onThisPhone": "На цьому телефоні",
+    "onThisPhone": "Цей телефон",
     "onThisPhoneHint": "Однаково для всіх облікових записів на цьому телефоні."
   },
   "locationSharing": {
@@ -3119,5 +3118,14 @@
     "voice": "Голосове повідомлення",
     "openMedia": "Відкрити медіа",
     "loadMedia": "Натисніть, щоб завантажити медіа"
+  },
+  "settingsRows": {
+    "experimentalSubtitle": "Функції, які ще тестуються",
+    "notificationServerSubtitle": "Сповіщення Lightning Piggy",
+    "deviceChangesSubtitle": "Активність пристроїв у чатах Marmot",
+    "profilerSubtitle": "Запис продуктивності застосунку",
+    "linkPreviewsSubtitle": "Попередній перегляд посилань",
+    "notificationContentSubtitle": "Текст повідомлень і суми платежів",
+    "backgroundSubtitle": "Перевірка повідомлень у закритому застосунку"
   }
 }

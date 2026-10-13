@@ -43,7 +43,6 @@
     "signInButton": "Sign In / Create Account",
     "notifications": "Notifications",
     "displayLanguage": "Display & language",
-    "yourAccount": "Your account",
     "signOutOf": "Sign out of {{name}}"
   },
   "accountSwitcherSheet": {
@@ -2802,9 +2801,9 @@
     "permissionTurnOn": "Turn on"
   },
   "settingsScope": {
-    "forThisAccount": "For this account",
+    "forThisAccount": "This account",
     "forThisAccountHint": "Each account on this phone chooses its own.",
-    "onThisPhone": "On this phone",
+    "onThisPhone": "This phone",
     "onThisPhoneHint": "The same for every account on this phone."
   },
   "locationSharing": {
@@ -3083,5 +3082,14 @@
     "voice": "Voice note",
     "openMedia": "Open media",
     "loadMedia": "Tap to load media"
+  },
+  "settingsRows": {
+    "experimentalSubtitle": "Features still being tested",
+    "notificationServerSubtitle": "Lightning Piggy notifications",
+    "deviceChangesSubtitle": "Device activity in Marmot chats",
+    "profilerSubtitle": "Record app performance",
+    "linkPreviewsSubtitle": "Preview cards for shared links",
+    "notificationContentSubtitle": "Message text and payment amounts",
+    "backgroundSubtitle": "Check messages while the app is closed"
   }
 }

@@ -1,12 +1,10 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity } from 'react-native';
+import React, { useCallback, useState } from 'react';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { ChevronRight, KeyRound } from 'lucide-react-native';
+import { KeyRound } from 'lucide-react-native';
 import { useNostr } from '../contexts/NostrContext';
-import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { isKeyBackedUp } from '../services/keyBackupStatus';
-import { createKeyBackupEntryStyles } from '../styles/KeyBackupEntry.styles';
+import SettingsRow from './SettingsRow';
 import type { AccountDrawerNavigation } from '../navigation/types';
 
 /**
@@ -15,9 +13,7 @@ import type { AccountDrawerNavigation } from '../navigation/types';
  * restructure puts account/key management. Currently in Settings → Security.
  */
 const KeyBackupEntry: React.FC = () => {
-  const colors = useThemeColors();
   const t = useTranslation();
-  const styles = useMemo(() => createKeyBackupEntryStyles(colors), [colors]);
   const navigation = useNavigation<AccountDrawerNavigation>();
   const { pubkey, signerType, isLoggedIn } = useNostr();
   const [backedUp, setBackedUp] = useState(false);
@@ -44,25 +40,13 @@ const KeyBackupEntry: React.FC = () => {
           : t('keyBackupScreen.statusNotBackedUp');
 
   return (
-    <>
-      <View style={styles.headerRow}>
-        <KeyRound size={22} color={colors.white} />
-        <Text style={styles.headerLabel}>{t('keyBackupScreen.entryHeader')}</Text>
-      </View>
-      <TouchableOpacity
-        style={styles.row}
-        onPress={() => navigation.navigate('AccountKeyBackup', { pubkey })}
-        accessibilityRole="button"
-        accessibilityLabel={t('keyBackupScreen.title')}
-        testID="security-key-backup"
-      >
-        <View style={styles.rowText}>
-          <Text style={styles.rowLabel}>{t('keyBackupScreen.title')}</Text>
-          <Text style={styles.rowSublabel}>{status}</Text>
-        </View>
-        <ChevronRight size={18} color={colors.textSupplementary} />
-      </TouchableOpacity>
-    </>
+    <SettingsRow
+      icon={KeyRound}
+      title={t('keyBackupScreen.title')}
+      subtitle={status}
+      testID="security-key-backup"
+      onPress={() => navigation.navigate('AccountKeyBackup', { pubkey })}
+    />
   );
 };
 

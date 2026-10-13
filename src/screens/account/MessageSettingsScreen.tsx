@@ -1,17 +1,13 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, Switch, TouchableOpacity } from 'react-native';
+import React, { useCallback, useState } from 'react';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { Link2, ChevronRight } from 'lucide-react-native';
+import { Link2, ShieldCheck, KeyRound } from 'lucide-react-native';
+import SettingsRow from '../../components/SettingsRow';
 import AccountScreenLayout from './AccountScreenLayout';
 import type { AccountDrawerNavigation } from '../../navigation/types';
-import { createSharedAccountStyles } from './sharedStyles';
-import { useThemeColors } from '../../contexts/ThemeContext';
 import { useTranslation } from '../../contexts/LocaleContext';
 import { useTrustGraph } from '../../contexts/TrustGraphContext';
 import { useNostr } from '../../contexts/NostrContext';
 import { useAccountState } from '../../contexts/useAccountState';
-import { createSecurityScreenStyles } from '../../styles/SecurityScreen.styles';
-import { createAdvancedScreenStyles } from '../../styles/AdvancedScreen.styles';
 import { getLinkPreviewEnabled, setLinkPreviewEnabled } from '../../services/linkPreviewPreference';
 import WebOfTrustBottomSheet from '../../components/WebOfTrustBottomSheet';
 import AmberPermissionSection from '../../components/AmberPermissionSection';
@@ -32,12 +28,8 @@ const TIER_TITLE = {
  * content you see" filter, not as a rule about who may message you.
  */
 const MessageSettingsScreen: React.FC = () => {
-  const colors = useThemeColors();
   const t = useTranslation();
   const navigation = useNavigation<AccountDrawerNavigation>();
-  const sharedAccountStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
-  const styles = useMemo(() => createSecurityScreenStyles(colors), [colors]);
-  const advanced = useMemo(() => createAdvancedScreenStyles(colors), [colors]);
   const { wotTier } = useTrustGraph();
   const { pubkey } = useNostr();
   // Per account (#1231): reload for the active account, ignore a late answer
@@ -62,61 +54,39 @@ const MessageSettingsScreen: React.FC = () => {
   return (
     <AccountScreenLayout title={t('messageSettingsScreen.title')}>
       <SettingsScopeHeader scope="account" testID="messages-account" />
-      <TouchableOpacity
-        style={advanced.navRow}
-        onPress={() => setTrustOpen(true)}
+      <SettingsRow
+        icon={ShieldCheck}
+        title={t('messageSettingsScreen.trustTitle')}
+        subtitle={t(TIER_TITLE[wotTier])}
+        subtitleTestID="messages-trust-tier-value"
+        testID="messages-trust-tier"
         accessibilityRole="button"
+        onPress={() => setTrustOpen(true)}
         accessibilityLabel={t('messageSettingsScreen.trustRowA11y', {
           tier: t(TIER_TITLE[wotTier]),
         })}
-        accessibilityHint={t('messageSettingsScreen.trustHint')}
-        testID="messages-trust-tier"
-      >
-        <View style={advanced.navText}>
-          <Text style={advanced.experimentalLabel}>{t('messageSettingsScreen.trustTitle')}</Text>
-          <Text style={advanced.experimentalSubtitle} testID="messages-trust-tier-value">
-            {t(TIER_TITLE[wotTier])}
-          </Text>
-        </View>
-        <ChevronRight size={20} color={colors.white} />
-      </TouchableOpacity>
-      <Text style={sharedAccountStyles.fieldHint}>{t('messageSettingsScreen.trustHint')}</Text>
-      <View style={[styles.headerRow, styles.sectionGap]}>
-        <Link2 size={22} color={colors.white} />
-        <Text style={[sharedAccountStyles.sectionLabel, styles.headerLabel]}>
-          {t('securityScreen.linkPreviews')}
-        </Text>
-      </View>
-      <Text style={sharedAccountStyles.fieldHint}>{t('securityScreen.linkPreviewsHint')}</Text>
-      <View style={styles.toggleRow}>
-        <Text style={[styles.optionLabel, styles.toggleLabel]}>
-          {t('securityScreen.showLinkPreviews')}
-        </Text>
-        <Switch
-          value={linkPreviewOn}
-          onValueChange={handleToggleLinkPreview}
-          accessibilityLabel={t('securityScreen.showLinkPreviewsA11y')}
-          testID="security-link-preview-toggle"
-          trackColor={{ false: colors.divider, true: colors.brandPink }}
-          thumbColor={linkPreviewOn ? colors.white : undefined}
-        />
-      </View>
+      />
+      <SettingsRow
+        icon={Link2}
+        title={t('securityScreen.showLinkPreviews')}
+        subtitle={t('settingsRows.linkPreviewsSubtitle')}
+        testID="messages-link-previews"
+        details={t('securityScreen.linkPreviewsHint')}
+        toggle={{
+          value: linkPreviewOn,
+          onValueChange: handleToggleLinkPreview,
+          accessibilityLabel: t('securityScreen.showLinkPreviewsA11y'),
+          testID: 'security-link-preview-toggle',
+        }}
+      />
       <AmberPermissionSection />
-      {/* Invitation keys are per account, so they sit under "For this account". */}
-      <TouchableOpacity
+      <SettingsRow
+        icon={KeyRound}
+        title={t('invitationKeys.title')}
+        subtitle={t('invitationKeys.entrySubtitle')}
         testID="nostr-invitation-keys"
-        accessibilityRole="button"
-        accessibilityLabel={t('invitationKeys.title')}
-        accessibilityHint={t('invitationKeys.entrySubtitle')}
-        style={[advanced.navRow, advanced.sectionGap]}
         onPress={() => navigation.navigate('AccountInvitationKeys')}
-      >
-        <View style={advanced.navText}>
-          <Text style={advanced.experimentalLabel}>{t('invitationKeys.title')}</Text>
-          <Text style={advanced.experimentalSubtitle}>{t('invitationKeys.entrySubtitle')}</Text>
-        </View>
-        <ChevronRight size={20} color={colors.white} />
-      </TouchableOpacity>
+      />
       <WebOfTrustBottomSheet visible={trustOpen} onClose={() => setTrustOpen(false)} />
     </AccountScreenLayout>
   );

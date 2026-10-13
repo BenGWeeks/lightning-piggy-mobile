@@ -94,6 +94,11 @@ const ProfileScreen = lazyScreen(() => import('../screens/account/ProfileScreen'
 const WalletsScreen = lazyScreen(() => import('../screens/account/WalletsScreen'));
 const InvitationKeysScreen = lazyScreen(() => import('../screens/account/InvitationKeysScreen'));
 const AdvancedScreen = lazyScreen(() => import('../screens/account/AdvancedScreen'));
+const NotificationServerScreen = lazyScreen(
+  () => import('../screens/account/NotificationServerScreen'),
+);
+const BubbleStyleScreen = lazyScreen(() => import('../screens/account/BubbleStyleScreen'));
+const ProfilerScreen = lazyScreen(() => import('../screens/account/ProfilerScreen'));
 const MessageSettingsScreen = lazyScreen(() => import('../screens/account/MessageSettingsScreen'));
 const NostrScreen = lazyScreen(() => import('../screens/account/NostrScreen'));
 const OnChainScreen = lazyScreen(() => import('../screens/account/OnChainScreen'));
@@ -584,6 +589,9 @@ function MainDrawer() {
       <AccountDrawer.Screen name="AccountProfile" component={ProfileScreen} />
       <AccountDrawer.Screen name="AccountWallets" component={WalletsScreen} />
       <AccountDrawer.Screen name="AccountAdvanced" component={AdvancedScreen} />
+      <AccountDrawer.Screen name="AccountNotificationServer" component={NotificationServerScreen} />
+      <AccountDrawer.Screen name="AccountBubbleStyle" component={BubbleStyleScreen} />
+      <AccountDrawer.Screen name="AccountProfiler" component={ProfilerScreen} />
       <AccountDrawer.Screen name="AccountMessages" component={MessageSettingsScreen} />
       <AccountDrawer.Screen name="AccountNostr" component={NostrScreen} />
       <AccountDrawer.Screen name="AccountInvitationKeys" component={InvitationKeysScreen} />
