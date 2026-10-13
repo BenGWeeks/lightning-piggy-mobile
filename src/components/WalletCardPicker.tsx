@@ -26,10 +26,9 @@ import {
   PICKER_CARD_WIDTH,
   PICKER_INTERVAL,
   PICKER_HIT_SLOP,
-  PICKER_SCALES,
-  PICKER_OFFSETS,
-  pickerTapRegion,
+  PICKER_GEOMETRY,
 } from '../styles/WalletCardPicker.styles';
+import { PICKER_SCALES, PICKER_OFFSETS, pickerTapRegion } from '../utils/pickerTapRegion';
 
 interface Props {
   selectedTheme: CardTheme;
@@ -73,7 +72,10 @@ const DesignPreview = React.memo(
   }) => {
     const t = useTranslation();
     const handlePress = useCallback(() => onCenter(index), [index, onCenter]);
-    const region = useMemo(() => pickerTapRegion(index, centredIndex), [index, centredIndex]);
+    const region = useMemo(
+      () => pickerTapRegion(index, centredIndex, PICKER_GEOMETRY),
+      [index, centredIndex],
+    );
     return (
       <View style={styles.coverflowItem}>
         <MiniWalletCard

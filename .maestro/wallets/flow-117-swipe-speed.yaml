@@ -1,7 +1,7 @@
 appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Wallet Swipe Speed Test
 ---
-# Requires at least two wallets. Slow element-scoped swipes advance one card; hard flings are tested separately.
+# Requires at least two wallets with transaction history. Slow element-scoped swipes advance one card; hard flings are tested separately.
 - tapOn: { id: 'tab-wallets' }
 - runFlow:
     file: ../common/scroll-wallet-strip.yaml
@@ -12,6 +12,10 @@ name: Wallet Swipe Speed Test
 - extendedWaitUntil:
     visible: { id: 'wallet-carousel-page-0', selected: true }
     timeout: 5000
+# Initial transaction load.
+- extendedWaitUntil:
+    visible: { id: 'transaction-row-.*' }
+    timeout: 30000
 - swipe:
     from: { id: 'wallet-carousel-page-0' }
     direction: LEFT
@@ -20,6 +24,10 @@ name: Wallet Swipe Speed Test
     visible: { id: 'wallet-carousel-page-1', selected: true }
     timeout: 5000
 - assertVisible: { id: 'wallet-chip-1', selected: true }
+# Initial transaction load.
+- extendedWaitUntil:
+    visible: { id: 'transaction-row-.*' }
+    timeout: 15000
 - swipe:
     from: { id: 'wallet-carousel-page-1' }
     direction: RIGHT
@@ -28,6 +36,10 @@ name: Wallet Swipe Speed Test
     visible: { id: 'wallet-carousel-page-0', selected: true }
     timeout: 5000
 - assertVisible: { id: 'wallet-chip-0', selected: true }
+# Cached transactions should reappear within two seconds.
+- extendedWaitUntil:
+    visible: { id: 'transaction-row-.*' }
+    timeout: 2000
 - swipe:
     from: { id: 'wallet-carousel-page-0' }
     direction: LEFT
@@ -36,3 +48,7 @@ name: Wallet Swipe Speed Test
     visible: { id: 'wallet-carousel-page-1', selected: true }
     timeout: 5000
 - assertVisible: { id: 'wallet-chip-1', selected: true }
+# Cached transactions should reappear within two seconds.
+- extendedWaitUntil:
+    visible: { id: 'transaction-row-.*' }
+    timeout: 2000
