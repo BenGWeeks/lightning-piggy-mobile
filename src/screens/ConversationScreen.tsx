@@ -117,7 +117,6 @@ const ConversationScreen: React.FC = () => {
     fetchReactionsForMessages,
     fetchReactionDeletionsForReactions,
   } = useNostr();
-  const { contacts } = useNostrContacts();
   const { armLiveDmSub } = useNostrDmInbox();
   // Trust gate (#1338): the peer's media auto-loads only if I follow them.
   const followed = useFollowedPubkeys();
@@ -158,7 +157,7 @@ const ConversationScreen: React.FC = () => {
   // Profiles resolved from `nostr:` contact references the other party has
   // shared in this conversation — see useSharedContactProfiles. Keyed by hex
   // pubkey; a `null` value means the kind-0 lookup ran and came back empty.
-  const sharedProfiles = useSharedContactProfiles(messages, contacts);
+  const sharedProfiles = useSharedContactProfiles(messages, useNostrContacts().contacts);
   const [attachPanelOpen, setAttachPanelOpen] = useState(false);
   // Secret Mode chat-trigger card overlay state — driven by
   // MessageBubble's "secretthreewords" magic message. Owned here so
