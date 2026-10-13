@@ -1,0 +1,49 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Wallet and design flings browse several centred cards
+---
+# Requires at least four test wallets. A gentle swipe is covered by flow-117.
+- tapOn: { id: 'tab-wallets' }
+- runFlow:
+    file: ../common/scroll-wallet-strip.yaml
+    env:
+      CHIP_ID: wallet-chip-0
+      STRIP_DIRECTION: RIGHT
+- tapOn: { id: 'wallet-chip-0' }
+- waitForAnimationToEnd: { timeout: 5000 }
+- swipe:
+    from: { id: 'wallet-carousel' }
+    direction: LEFT
+    duration: 100
+- waitForAnimationToEnd: { timeout: 10000 }
+# A hard fling must skip the immediate neighbour and settle on a selected card.
+- assertVisible: { id: 'wallet-carousel-page-([2-9]|[1-9][0-9]+)', selected: true }
+- assertVisible: { id: 'wallet-chip-([2-9]|[1-9][0-9]+)', selected: true }
+- runFlow:
+    file: ../common/scroll-wallet-strip.yaml
+    env:
+      CHIP_ID: wallet-chip-0
+      STRIP_DIRECTION: RIGHT
+- tapOn: { id: 'wallet-chip-0' }
+- waitForAnimationToEnd: { timeout: 5000 }
+- tapOn: { id: 'wallet-settings', index: 0, retryTapIfNoChange: true }
+- extendedWaitUntil:
+    visible: { id: 'wallet-card-picker-name' }
+    timeout: 10000
+- tapOn: { id: 'wallet-settings-tab-design' }
+- copyTextFrom: { id: 'wallet-card-picker-name' }
+- evalScript: ${output.startingDesign = maestro.copiedText}
+- swipe:
+    from: { id: 'wallet-card-picker-carousel' }
+    direction: LEFT
+    duration: 100
+- waitForAnimationToEnd: { timeout: 10000 }
+- assertNotVisible: { id: 'wallet-card-picker-name', text: '${output.startingDesign}' }
+# Selection is committed by onSnapToItem; its label must match the selected card.
+- copyTextFrom: { id: 'wallet-card-picker-name' }
+- assertVisible: { id: 'theme-.*', text: '.*${maestro.copiedText}.*', selected: true }
+# Persist the chosen test design and close via an instrumented button.
+- tapOn: { id: 'wallet-settings-save' }
+- extendedWaitUntil:
+    notVisible: { id: 'wallet-card-picker-name' }
+    timeout: 5000
+- waitForAnimationToEnd: { timeout: 5000 }

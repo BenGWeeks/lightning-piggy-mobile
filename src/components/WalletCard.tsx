@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useMemo } from 'react';
+import { walletCardGradientColors } from '../utils/walletCardColors';
 import { View, Text, Image, TouchableOpacity, Dimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Grayscale } from 'react-native-color-matrix-image-filters';
@@ -11,6 +12,7 @@ import { ChainIcon, SettingsIcon } from './icons/ArrowIcons';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useLocale } from '../contexts/LocaleContext';
 
+import { walletCarouselStyles } from '../styles/WalletCarousel.styles';
 import { CARD_WIDTH, CARD_HEIGHT, walletCardStyles as styles } from '../styles/WalletCard.styles';
 export { CARD_MARGIN, CARD_WIDTH, CARD_HEIGHT, CARD_ASPECT } from '../styles/WalletCard.styles';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -25,9 +27,11 @@ interface WalletCardProps {
   btcPrice: number | null;
   currency: FiatCurrency;
   onSettingsPress: () => void;
+  carousel?: boolean;
 }
 
 interface MiniCardProps {
+  interactive?: boolean;
   theme: CardThemeConfig;
   selected?: boolean;
   onPress?: () => void;
@@ -89,19 +93,10 @@ const CardContent: React.FC<{
         ? t('walletCard.notResponding')
         : t('walletCard.disconnected');
 
-  const toGrey = (hex: string): string => {
-    const h = hex.replace('#', '');
-    const r = parseInt(h.substring(0, 2), 16);
-    const g = parseInt(h.substring(2, 4), 16);
-    const b = parseInt(h.substring(4, 6), 16);
-    const grey = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
-    const gh = grey.toString(16).padStart(2, '0');
-    return `#${gh}${gh}${gh}`;
-  };
-
-  const gradientColors = isWatchOnly
-    ? (theme.gradientColors.map(toGrey) as [string, string, ...string[]])
-    : theme.gradientColors;
+  const gradientColors = useMemo(
+    () => walletCardGradientColors(theme.gradientColors, isWatchOnly),
+    [theme, isWatchOnly],
+  );
 
   const card = (
     <LinearGradient
@@ -213,7 +208,8 @@ const CardContent: React.FC<{
 };
 
 /** Mini card for theme selection — renders the full card design scaled down */
-export const MiniWalletCard: React.FC<MiniCardProps> = ({
+const MiniWalletCardPreview: React.FC<MiniCardProps> = ({
+  interactive = true,
   theme,
   selected,
   onPress,
@@ -224,7 +220,10 @@ export const MiniWalletCard: React.FC<MiniCardProps> = ({
   const height = CARD_HEIGHT * scale;
   return (
     <TouchableOpacity
-      accessibilityRole="button"
+      accessibilityRole={interactive ? 'button' : undefined}
+      accessible={interactive}
+      importantForAccessibility={interactive ? 'auto' : 'no-hide-descendants'}
+      disabled={!interactive}
       style={[styles.miniCardContainer, { width, height }, selected && styles.miniCardSelected]}
       onPress={onPress}
       activeOpacity={0.7}
@@ -232,7 +231,7 @@ export const MiniWalletCard: React.FC<MiniCardProps> = ({
       accessibilityLabel={t('walletCard.cardDesign', {
         name: theme.nameKey ? t(theme.nameKey) : theme.name,
       })}
-      testID={`theme-${theme.id}`}
+      testID={interactive ? `theme-${theme.id}` : undefined}
     >
       <View style={[styles.miniScaleWrapper, { width, height }]}>
         <View
@@ -253,7 +252,15 @@ export const MiniWalletCard: React.FC<MiniCardProps> = ({
   );
 };
 
-const WalletCard: React.FC<WalletCardProps> = ({ wallet, btcPrice, currency, onSettingsPress }) => {
+export const MiniWalletCard = React.memo(MiniWalletCardPreview);
+
+const WalletCard: React.FC<WalletCardProps> = ({
+  wallet,
+  btcPrice,
+  currency,
+  onSettingsPress,
+  carousel,
+}) => {
   // Defensive fallback: persisted wallets may carry a theme key that has
   // been renamed/removed in subsequent releases (or none at all). Without a
   // fallback the app crashes on `theme.gradientColors` of undefined on boot —
@@ -264,7 +271,7 @@ const WalletCard: React.FC<WalletCardProps> = ({ wallet, btcPrice, currency, onS
 
   return (
     <View
-      style={styles.cardContainer}
+      style={carousel ? walletCarouselStyles.cardContainer : styles.cardContainer}
       accessible={false}
       testID={`wallet-card-${wallet.walletType}`}
       accessibilityLabel={t('walletCard.walletAccessibility', {
@@ -292,4 +299,4 @@ const WalletCard: React.FC<WalletCardProps> = ({ wallet, btcPrice, currency, onS
   );
 };
 
-export default WalletCard;
+export default React.memo(WalletCard);

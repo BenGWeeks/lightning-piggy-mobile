@@ -1,29 +1,37 @@
-import { StyleSheet } from 'react-native';
+import { Dimensions, StyleSheet } from 'react-native';
+import { CARD_HEIGHT } from './WalletCard.styles';
 
-// Theme-independent (the carousel sits on the brand gradient in both themes),
-// so a static sheet rather than a `create…Styles(colors)` factory.
+const SCREEN_WIDTH = Dimensions.get('window').width;
+export const CAROUSEL_CARD_WIDTH = SCREEN_WIDTH * 0.86;
+export const CAROUSEL_INTERVAL = CAROUSEL_CARD_WIDTH + 8;
+export const CHIP_INTERVAL = 112;
+
+// The end gutters centre the first and last cards as well as interior cards.
 export const walletCarouselStyles = StyleSheet.create({
-  container: {
-    paddingTop: 8,
+  container: { paddingTop: 8 },
+  listContent: { paddingHorizontal: (SCREEN_WIDTH - CAROUSEL_INTERVAL) / 2 },
+  cardContainer: { width: CAROUSEL_CARD_WIDTH, marginHorizontal: 4 },
+  page: { width: CAROUSEL_INTERVAL, height: CARD_HEIGHT },
+  stripContent: { paddingHorizontal: 16, paddingVertical: 12 },
+  chipSlot: { width: CHIP_INTERVAL, height: 56, justifyContent: 'center', alignItems: 'center' },
+  chip: {
+    width: 100,
+    height: 48,
+    borderRadius: 10,
+    overflow: 'hidden',
+    opacity: 0.7,
+    borderWidth: 2,
+    borderColor: 'transparent',
   },
-  listContent: {},
-  dots: {
-    flexDirection: 'row',
+  chipTouch: { flex: 1 },
+  chipGradient: { flex: 1, paddingHorizontal: 8, justifyContent: 'center', gap: 2 },
+  chipName: { fontSize: 12, fontWeight: '600' },
+  chipBalance: { fontSize: 10 },
+  addChip: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 8,
-    paddingTop: 12,
-    paddingBottom: 4,
+    backgroundColor: 'rgba(255,255,255,0.15)',
   },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  dotActive: {
-    backgroundColor: '#FFFFFF',
-  },
-  dotInactive: {
-    backgroundColor: 'rgba(255, 255, 255, 0.4)',
-  },
+  plus: { fontSize: 24, color: '#FFFFFF' },
 });

@@ -1,22 +1,27 @@
-import React, { useRef, useCallback, useState } from 'react';
-import {
-  View,
-  FlatList,
-  ViewToken,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
-} from 'react-native';
+import React, { useCallback } from 'react';
+import { View, FlatList } from 'react-native';
+import Animated, {
+  useAnimatedScrollHandler,
+  useSharedValue,
+  runOnJS,
+} from 'react-native-reanimated';
 import { WalletState } from '../types/wallet';
-import WalletCard, { CARD_WIDTH, CARD_MARGIN } from './WalletCard';
+import WalletCard from './WalletCard';
 import AddWalletCard from './AddWalletCard';
+import WalletStripChip from './WalletStripChip';
 import { FiatCurrency } from '../services/fiatService';
+import { useTranslation } from '../contexts/LocaleContext';
 import { perfLog } from '../utils/perfLog';
-import { walletCarouselStyles as styles } from '../styles/WalletCarousel.styles';
-import { markWalletSwipeSettled, markWalletSwitchRequested } from '../utils/walletSwipeTiming';
+import { walletCarouselStyles as styles, CAROUSEL_INTERVAL } from '../styles/WalletCarousel.styles';
+import {
+  useWalletCarousel,
+  CarouselItem,
+  carouselItemKey,
+  carouselItemLayout,
+  walletChipLayout,
+} from '../hooks/useWalletCarousel';
 
-let __walletCarouselFirstRenderLogged = false;
-
-const SNAP_INTERVAL = CARD_WIDTH + CARD_MARGIN * 2;
+let firstRenderLogged = false;
 
 interface WalletCarouselProps {
   wallets: WalletState[];
@@ -26,13 +31,38 @@ interface WalletCarouselProps {
   onWalletChange: (walletId: string | null) => void;
   onAddWallet: () => void;
   onSettingsPress: (walletId: string) => void;
-  // Fires true when the trailing "Add wallet" card becomes the active page and
-  // false when a real wallet card is. Lets Home swap the transaction list for an
-  // add-wallet prompt on the add card without clearing activeWalletId (#666).
   onAddCardActiveChange?: (active: boolean) => void;
 }
 
-type CarouselItem = { type: 'wallet'; wallet: WalletState } | { type: 'add' };
+const WalletRow = React.memo(
+  ({
+    wallet,
+    btcPrice,
+    currency,
+    onSettingsPress,
+  }: {
+    wallet: WalletState;
+    btcPrice: number | null;
+    currency: FiatCurrency;
+    onSettingsPress: (id: string) => void;
+  }) => {
+    const handleSettings = useCallback(
+      () => onSettingsPress(wallet.id),
+      [onSettingsPress, wallet.id],
+    );
+    return (
+      <WalletCard
+        carousel
+        wallet={wallet}
+        btcPrice={btcPrice}
+        currency={currency}
+        onSettingsPress={handleSettings}
+      />
+    );
+  },
+);
+
+WalletRow.displayName = 'WalletRow';
 
 const WalletCarousel: React.FC<WalletCarouselProps> = ({
   wallets,
@@ -44,105 +74,118 @@ const WalletCarousel: React.FC<WalletCarouselProps> = ({
   onSettingsPress,
   onAddCardActiveChange,
 }) => {
-  if (!__walletCarouselFirstRenderLogged) {
-    __walletCarouselFirstRenderLogged = true;
+  if (!firstRenderLogged) {
+    firstRenderLogged = true;
     perfLog(`WalletCarousel first render (${wallets.length} wallets)`);
   }
-  const flatListRef = useRef<FlatList>(null);
-  const [currentIndex, setCurrentIndex] = useState(0);
-
-  const data: CarouselItem[] = [
-    ...wallets.map((wallet): CarouselItem => ({ type: 'wallet', wallet })),
-    { type: 'add' },
-  ];
-
-  const activeIndex = wallets.findIndex((w) => w.id === activeWalletId);
-
-  const onViewableItemsChanged = useCallback(
-    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
-      if (viewableItems.length === 0) return;
-      const index = viewableItems[0].index ?? 0;
-      setCurrentIndex(index);
-      const item = viewableItems[0].item as CarouselItem;
-      // Tell Home whether the add card is showing so it can swap the tx list
-      // for an add-wallet prompt (#666) — independent of activeWalletId.
-      onAddCardActiveChange?.(item.type === 'add');
-      // Only track the active wallet when a real wallet card is in view.
-      // Swiping onto the trailing "Add wallet" card must not clear
-      // activeWalletId — doing so would disable Home's Send/Receive
-      // buttons even though the user's just-added wallet still reports
-      // isConnected: true (see #166).
-      if (item.type === 'wallet') {
-        markWalletSwitchRequested(item.wallet.id);
-        onWalletChange(item.wallet.id);
-      }
-    },
-    [onWalletChange, onAddCardActiveChange],
+  const t = useTranslation();
+  const carousel = useWalletCarousel(
+    wallets,
+    activeWalletId,
+    onWalletChange,
+    onAddCardActiveChange,
   );
-
-  // Swipe-latency probe (#1304): the card the scroll came to rest on.
-  const onMomentumScrollEnd = useCallback(
-    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const wallet = wallets[Math.round(e.nativeEvent.contentOffset.x / SNAP_INTERVAL)];
-      if (wallet) markWalletSwipeSettled(wallet.id);
+  const { onChipPress, onScrollBeginDrag, onMomentumScrollEnd } = carousel;
+  // Highlight chips on the UI thread; React and wallet context update only at rest.
+  const scrollIndex = useSharedValue(carousel.initialIndex);
+  const scrollHandler = useAnimatedScrollHandler({
+    onScroll: (event) => {
+      scrollIndex.value = Math.round(event.contentOffset.x / CAROUSEL_INTERVAL);
     },
-    [wallets],
-  );
-
-  const viewabilityConfig = useRef({ viewAreaCoveragePercentThreshold: 50 }).current;
-
+    onBeginDrag: () => runOnJS(onScrollBeginDrag)(),
+    onEndDrag: (event) => {
+      // A slow drag can stop exactly on a snap without a momentum phase.
+      const offset = event.contentOffset.x;
+      const snapped = Math.round(offset / CAROUSEL_INTERVAL) * CAROUSEL_INTERVAL;
+      if (event.velocity?.x === 0 && Math.abs(offset - snapped) < 0.5)
+        runOnJS(onMomentumScrollEnd)({ nativeEvent: event });
+    },
+  });
+  const handleAddWallet = useCallback(() => {
+    // A user can tap the peeking add card before it becomes the active page.
+    onChipPress(wallets.length);
+    onAddWallet();
+  }, [onChipPress, wallets.length, onAddWallet]);
   const renderItem = useCallback(
-    ({ item }: { item: CarouselItem }) => {
-      if (item.type === 'add') {
-        return <AddWalletCard onPress={onAddWallet} />;
-      }
-      return (
-        <WalletCard
-          wallet={item.wallet}
-          btcPrice={btcPrice}
-          currency={currency}
-          onSettingsPress={() => onSettingsPress(item.wallet.id)}
-        />
-      );
-    },
-    [btcPrice, currency, onAddWallet, onSettingsPress],
+    ({ item, index }: { item: CarouselItem; index: number }) => (
+      <View
+        style={styles.page}
+        renderToHardwareTextureAndroid
+        shouldRasterizeIOS
+        testID={`wallet-carousel-page-${index}`}
+        accessibilityState={{ selected: index === carousel.currentIndex }}
+      >
+        {item.type === 'add' ? (
+          <AddWalletCard carousel onPress={handleAddWallet} />
+        ) : (
+          <WalletRow
+            wallet={item.wallet}
+            btcPrice={btcPrice}
+            currency={currency}
+            onSettingsPress={onSettingsPress}
+          />
+        )}
+      </View>
+    ),
+    [btcPrice, currency, handleAddWallet, onSettingsPress, carousel.currentIndex],
+  );
+  const renderChip = useCallback(
+    ({ item, index }: { item: CarouselItem; index: number }) => (
+      <WalletStripChip
+        item={item}
+        index={index}
+        selected={index === carousel.currentIndex}
+        scrollIndex={scrollIndex}
+        onPress={carousel.onChipPress}
+      />
+    ),
+    [carousel.currentIndex, carousel.onChipPress, scrollIndex],
   );
 
   return (
     <View style={styles.container}>
-      <FlatList
-        ref={flatListRef}
-        data={data}
+      <Animated.FlatList
+        ref={carousel.flatListRef}
+        testID="wallet-carousel"
+        accessibilityLabel={t('tabs.wallets')}
+        accessible={false}
+        data={carousel.data}
         renderItem={renderItem}
-        keyExtractor={(item, index) => (item.type === 'wallet' ? item.wallet.id : `add-${index}`)}
+        keyExtractor={carouselItemKey}
         horizontal
         showsHorizontalScrollIndicator={false}
-        snapToInterval={SNAP_INTERVAL}
-        snapToAlignment="start"
-        decelerationRate="fast"
-        onViewableItemsChanged={onViewableItemsChanged}
+        snapToInterval={CAROUSEL_INTERVAL}
+        snapToOffsets={carousel.snapToOffsets}
+        snapToAlignment="center"
+        decelerationRate="normal"
+        onScroll={scrollHandler}
         onMomentumScrollEnd={onMomentumScrollEnd}
-        viewabilityConfig={viewabilityConfig}
+        scrollEventThrottle={16}
+        onViewableItemsChanged={carousel.onViewableItemsChanged}
+        viewabilityConfig={carousel.viewabilityConfig}
         contentContainerStyle={styles.listContent}
-        getItemLayout={(_, index) => ({
-          length: SNAP_INTERVAL,
-          offset: SNAP_INTERVAL * index,
-          index,
-        })}
-        initialScrollIndex={activeIndex >= 0 ? activeIndex : 0}
+        getItemLayout={carouselItemLayout}
+        initialScrollIndex={carousel.initialIndex}
       />
-
-      {/* Dot indicators */}
-      <View style={styles.dots}>
-        {data.map((_, index) => (
-          <View
-            key={index}
-            style={[styles.dot, index === currentIndex ? styles.dotActive : styles.dotInactive]}
-          />
-        ))}
-      </View>
+      {wallets.length > 1 && (
+        <FlatList
+          ref={carousel.stripRef}
+          onLayout={carousel.onStripLayout}
+          testID="wallet-strip"
+          accessibilityLabel={t('tabs.wallets')}
+          accessible={false}
+          data={carousel.data}
+          extraData={carousel.currentIndex}
+          renderItem={renderChip}
+          keyExtractor={carouselItemKey}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.stripContent}
+          getItemLayout={walletChipLayout}
+        />
+      )}
     </View>
   );
 };
 
-export default WalletCarousel;
+export default React.memo(WalletCarousel);

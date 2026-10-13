@@ -1,0 +1,12 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Internal — type the supplied fixture without dropped characters
+---
+# Caller focuses and clears the input, and passes TEXT_TO_TYPE via runFlow.env.
+# Android dev builds can drop characters in a long inputText command.
+- evalScript: ${output.fixtureOffset = 0}
+- repeat:
+    while:
+      true: ${output.fixtureOffset < TEXT_TO_TYPE.length}
+    commands:
+      - inputText: ${TEXT_TO_TYPE.slice(output.fixtureOffset, output.fixtureOffset + 4)}
+      - evalScript: ${output.fixtureOffset = output.fixtureOffset + 4}

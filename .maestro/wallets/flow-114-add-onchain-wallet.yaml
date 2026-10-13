@@ -16,27 +16,13 @@ name: Add On-chain Wallet Test
 - waitForAnimationToEnd:
     timeout: 3000
 
-# Swipe carousel right until Add Wallet card is visible
+# Open Add Wallet using the strip or element-scoped carousel flicks.
+- runFlow: ../common/open-add-wallet.yaml
+
 - scrollUntilVisible:
-    element:
-      id: 'add-wallet-card'
-    direction: RIGHT
-    timeout: 20000
-    speed: 40
-
-# Tap the Add Wallet card
-- tapOn:
-    id: 'add-wallet-card'
-- waitForAnimationToEnd:
-    timeout: 3000
-
-# Scroll down to reveal Bitcoin option if needed
-- swipe:
-    start: 50%, 80%
-    end: 50%, 50%
-    duration: 300
-- waitForAnimationToEnd:
-    timeout: 1000
+    element: { id: 'wallet-type-onchain' }
+    direction: DOWN
+    timeout: 10000
 
 # Select Bitcoin (On-chain) wallet type
 - tapOn:
@@ -44,14 +30,24 @@ name: Add On-chain Wallet Test
 - waitForAnimationToEnd:
     timeout: 2000
 
-# Enter the xpub/zpub key
-- tapOn:
+# Verify exact public-key entry and retry if Android drops a character.
+- repeat:
+    times: 3
+    while:
+      notVisible:
+        id: 'xpub-input'
+        text: ${MAESTRO_XPUB}
+    commands:
+      - tapOn: { id: 'xpub-input' }
+      - tapOn: { id: 'xpub-input' }
+      - eraseText: 500
+      - runFlow:
+          file: ../common/type-text-in-chunks.yaml
+          env:
+            TEXT_TO_TYPE: ${MAESTRO_XPUB}
+- assertVisible:
     id: 'xpub-input'
-- tapOn:
-    id: 'xpub-input'
-- eraseText:
-    charactersToErase: 500
-- inputText: ${MAESTRO_XPUB}
+    text: ${MAESTRO_XPUB}
 - pressKey: back
 - waitForAnimationToEnd:
     timeout: 1000
@@ -62,14 +58,24 @@ name: Add On-chain Wallet Test
 - waitForAnimationToEnd:
     timeout: 2000
 
-# Enter wallet alias
-- tapOn:
+# Retry short name entry if Android drops a character or a space.
+- repeat:
+    times: 3
+    while:
+      notVisible:
+        id: 'wallet-alias-input'
+        text: ${WALLET_NAME}
+    commands:
+      - tapOn: { id: 'wallet-alias-input' }
+      - tapOn: { id: 'wallet-alias-input' }
+      - eraseText: 100
+      - runFlow:
+          file: ../common/type-text-in-chunks.yaml
+          env:
+            TEXT_TO_TYPE: ${WALLET_NAME}
+- assertVisible:
     id: 'wallet-alias-input'
-- tapOn:
-    id: 'wallet-alias-input'
-- eraseText:
-    charactersToErase: 100
-- inputText: ${WALLET_NAME}
+    text: ${WALLET_NAME}
 - pressKey: back
 - waitForAnimationToEnd:
     timeout: 1000
@@ -80,30 +86,39 @@ name: Add On-chain Wallet Test
 - waitForAnimationToEnd:
     timeout: 2000
 
-# Scroll down to reveal Add Wallet button
-- swipe:
-    start: 50%, 80%
-    end: 50%, 30%
-    duration: 300
-- waitForAnimationToEnd:
-    timeout: 1000
-- swipe:
-    start: 50%, 80%
-    end: 50%, 30%
-    duration: 300
-- waitForAnimationToEnd:
-    timeout: 1000
-
-# Tap Add Wallet button
+# Reveal Add Wallet without screen-size-dependent gestures.
+- scrollUntilVisible:
+    element: { id: 'wizard-connect-button' }
+    direction: DOWN
+    timeout: 10000
 - tapOn:
     id: 'wizard-connect-button'
 - waitForAnimationToEnd:
     timeout: 10000
 
-# Verify the on-chain wallet card is visible with "On-chain" label
+# Reuse the same reporting fixture when a previous setup already imported it.
+- runFlow:
+    when:
+      visible: 'This wallet has already been imported'
+    commands:
+      - swipe:
+          from: { text: 'Bottom sheet handle' }
+          direction: DOWN
+          duration: 200
+      - extendedWaitUntil:
+          notVisible: { id: 'wizard-connect-button' }
+          timeout: 5000
+      - tapOn: { text: '${WALLET_NAME}' }
+
+# A background card must not hide a failed import behind the wizard.
+- extendedWaitUntil:
+    notVisible: { id: 'wizard-connect-button' }
+    timeout: 60000
+
+# Verify the on-chain wallet card is visible
 - extendedWaitUntil:
     visible:
-      text: 'On-chain'
+      id: 'wallet-card-onchain'
     timeout: 30000
 
 # Verify the wallet alias appears
