@@ -1491,3 +1491,17 @@ Subscribers still share one watcher, and closing Move leaves settlement
 tracking running. The regression in `externalSwapTracking.test.ts` reproduces
 watcher failure → reopen → payment detected → settlement, including public
 state persistence and terminal recovery.
+
+=== Lazy screen shows "Requiring unknown module" after Fast Refresh
+
+Changing shared imports while lazy screens are already loaded can leave the
+development app with stale module IDs. During notification-routing verification,
+a group tap displayed `Requiring unknown module` at the first import in
+`GroupConversationScreen.tsx` while the Wallets tab continued to render.
+
+Restart the worktree's own Metro with `npm start -- --port <port> --clear`, then
+force-stop and relaunch the development app against that same port. This
+preserves accounts and wallets. Keep source files unchanged during the device
+flow; the first lazy screen bundle may take longer to compile on a busy host.
+See the existing Metro-host troubleshooting entries if the installed debug APK
+uses `debug_http_host` instead of the Expo development-client link.

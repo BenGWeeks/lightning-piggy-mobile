@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
@@ -16,10 +16,24 @@ export function useChatTools(
 ) {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute();
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (highlightTimer.current) clearTimeout(highlightTimer.current);
+    },
+    [],
+  );
   const jumpToHistory = useCallback(
     (id: string) => {
       leaveEdge(1500);
-      return jump(id);
+      const jumped = jump(id);
+      if (jumped) {
+        setHighlightedId(id);
+        if (highlightTimer.current) clearTimeout(highlightTimer.current);
+        highlightTimer.current = setTimeout(() => setHighlightedId(null), 5000);
+      }
+      return jumped;
     },
     [leaveEdge, jump],
   );
@@ -34,6 +48,22 @@ export function useChatTools(
       if (jumpToHistory(pending)) navigation.setParams({ jumpToMessage: undefined });
     }
   }, [pending, renderedMessages, jumpToHistory, navigation]);
+  const [expiredTarget, setExpiredTarget] = useState<string | null>(null);
+  useEffect(() => {
+    setExpiredTarget(null);
+    if (!pending) return;
+    const timer = setTimeout(() => setExpiredTarget(pending), 5000);
+    return () => clearTimeout(timer);
+  }, [pending]);
+  useEffect(() => {
+    // Keep the expired deadline while a cold start is still loading its rows.
+    if (!pending || expiredTarget !== pending || !renderedMessages.length) return;
+    if (renderedMessages.some((m) => m.id === pending)) return;
+    // The target may be deleted, hidden by local history, or unavailable.
+    const newest = renderedMessages.reduce((a, b) => (a.createdAt > b.createdAt ? a : b));
+    leaveEdge(1500);
+    if (jump(newest.id)) navigation.setParams({ jumpToMessage: undefined });
+  }, [pending, expiredTarget, renderedMessages, leaveEdge, jump, navigation]);
   const onInfo = useCallback(() => navigation.navigate('ChatInfo', info), [navigation, info]);
   const onAttachments = useCallback(
     () => navigation.navigate('ChatMedia', { messages: renderedMessages, target }),
@@ -50,5 +80,5 @@ export function useChatTools(
     }),
     [info, onInfo, onAttachments, search.open, clear],
   );
-  return { search, menu };
+  return { search, menu, highlightedId };
 }

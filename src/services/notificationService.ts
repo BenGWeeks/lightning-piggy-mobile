@@ -2,6 +2,11 @@ import {
   getLockScreenContentEnabled,
   resetLockScreenContentPreference,
 } from './notificationContentPreference';
+import { noteMarmotMessageShown, resetMarmotMessageTracking } from './notificationMarmotTracking';
+import {
+  canonicalMessageTarget,
+  type MessageNotificationTarget,
+} from '../utils/notificationRouting';
 import { shouldMuteNotification } from './mutedSenders';
 import { mutedNotificationPresentation } from './mutedNotificationPresentation';
 import { getAppFormatLocale } from '../utils/appFormatLocale';
@@ -74,6 +79,7 @@ export {
   getLockScreenContentEnabled,
   setLockScreenContentEnabled,
 } from './notificationContentPreference';
+export { marmotMessageShown } from './notificationMarmotTracking';
 
 // Android notification channel ids. Stable strings — changing them
 // orphans the user's per-channel mute state in system Settings.
@@ -120,7 +126,7 @@ export type NotificationKind = 'dm' | 'group' | 'payment' | 'zap' | 'cache' | 's
  *  - zap       → conversationPubkey OR groupId (zap context)
  *  - cache     → cacheCoord (open the cache detail; #740)
  */
-export interface NotificationData {
+export interface NotificationData extends Partial<MessageNotificationTarget> {
   groupInvitation?: boolean;
   conversationPubkey?: string;
   conversationProtocol?: DmProtocol;
@@ -527,7 +533,7 @@ export function threadCollapseKey(
   data: NotificationData | undefined,
 ): string | undefined {
   if (kind === 'dm' && data?.conversationPubkey)
-    return `dm:${data.conversationProtocol ?? 'nip17'}:${data.conversationPubkey.toLowerCase()}`;
+    return `dm:${data.protocol ?? data.conversationProtocol ?? 'nip17'}:${data.conversationPubkey.toLowerCase()}`;
   if (kind === 'group' && data?.groupId) return `group:${data.groupId}`;
   return undefined;
 }
@@ -542,7 +548,7 @@ export function notificationMatchesTarget(
     return (
       data.conversationPubkey?.toLowerCase() === target.conversationPubkey.toLowerCase() &&
       // The tap-router treats a missing protocol as NIP-17; match it the same way.
-      (data.conversationProtocol ?? 'nip17') === target.conversationProtocol
+      (data.protocol ?? data.conversationProtocol ?? 'nip17') === target.conversationProtocol
     );
   if ('groupId' in target) return data.groupId === target.groupId;
   if ('cacheCoord' in target) return data.kind === 'cache' && data.cacheCoord === target.cacheCoord;
@@ -733,7 +739,9 @@ export function isRemotePush(notification: Notifications.Notification): boolean 
 }
 
 const isMarmotMessage = (data: NotificationData) =>
-  data.conversationProtocol === 'marmot' || !!data.groupId?.startsWith('marmot:');
+  (data.protocol === 'marmot' && !!(data.conversationPubkey || data.groupId)) ||
+  data.conversationProtocol === 'marmot' ||
+  !!data.groupId?.startsWith('marmot:');
 
 // When the app last showed a Marmot message itself — lets a push wake tell
 // whether the running app already covered it.
@@ -771,7 +779,12 @@ export async function fireMessageNotification(opts: {
     kind: opts.kind,
     title: opts.title,
     body: opts.body,
-    data: opts.data,
+    data: {
+      ...opts.data,
+      ...(opts.data.groupInvitation
+        ? {}
+        : canonicalMessageTarget({ ...opts.data, threadKind: opts.data.threadKind ?? opts.kind })),
+    },
     owner: opts.owner,
     shouldSuppress: opts.shouldSuppress,
   });
@@ -784,20 +797,6 @@ export async function fireMessageNotification(opts: {
   }
   return id;
 }
-
-// Marmot messages that have their own row (alerted) or were on screen: a push
-// placeholder must never be turned into a second row for one (bounded).
-const shownMarmotMessages = new Set<string>();
-function noteMarmotMessageShown(messageId: string | undefined): void {
-  if (!messageId) return;
-  shownMarmotMessages.add(messageId);
-  if (shownMarmotMessages.size > 500) {
-    shownMarmotMessages.delete(shownMarmotMessages.values().next().value as string);
-  }
-}
-/** True once a Marmot message was alerted (its own row) or shown on screen. */
-export const marmotMessageShown = (messageId: string): boolean =>
-  shownMarmotMessages.has(messageId);
 
 /** A push placeholder posted up to this long after a message was sent can be
  * the alert for it (push latency + the wake's grace + clock skew). */
@@ -978,5 +977,5 @@ export function __resetForTests(): void {
   resetLockScreenContentPreference();
   __resetNotificationFocusForTests();
   lastMarmotNotifiedAt = 0;
-  shownMarmotMessages.clear();
+  resetMarmotMessageTracking();
 }

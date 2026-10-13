@@ -862,9 +862,8 @@ export class MarmotSession {
       fromMe: rumor.pubkey.toLowerCase() === this.pubkey.toLowerCase(),
       message: isMarmotMessageKind(rumor.kind),
       messageId: rumor.id,
-      ...(event.group.isDm
-        ? { conversationPubkey: event.group.memberPubkeys[0] }
-        : { groupId: event.group.id }),
+      groupId: event.group.id,
+      ...(event.group.isDm ? { conversationPubkey: event.group.memberPubkeys[0] } : {}),
     });
   }
 

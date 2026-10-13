@@ -291,6 +291,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
           body: item.notify.body,
           data: {
             conversationPubkey: item.partnerPubkey,
+            messageId: item.entry.id,
             conversationProtocol: protocolForWireKind(item.entry.wireKind),
           },
         }),
@@ -542,6 +543,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
           body: plaintext,
           data: {
             conversationPubkey: partnerPubkey,
+            messageId: ev.id,
             conversationProtocol: protocolForWireKind(ev.kind),
           },
         });
@@ -648,6 +650,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
             body: preview,
             data: {
               conversationPubkey: partnerPubkey,
+              messageId: ev.id,
               conversationProtocol: protocolForWireKind(ev.kind),
             },
           });

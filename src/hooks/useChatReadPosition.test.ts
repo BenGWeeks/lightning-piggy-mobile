@@ -287,3 +287,55 @@ it('retires the divider after reading everything and does not restore it for new
   await waitFor(() => expect(reopened.result.current.unread).toBe(0));
   expect(reopened.result.current.dividerId).toBeNull();
 });
+
+it('keeps an explicit message target ahead of the unread jump after its route param clears', async () => {
+  await seed({ [KEY]: { at: 20, id: 'b' } });
+  jest.useFakeTimers();
+  const scrollToId = jest.fn(() => true);
+  const { result, rerender } = renderHook(
+    ({ target, rows }: { target?: string; rows: UnreadEntry[] }) =>
+      useChatReadPosition({
+        owner: OWNER,
+        conversationKey: KEY,
+        entries: rows,
+        loading: false,
+        scrollToId,
+        leaveEdge: jest.fn(),
+        initialTarget: target,
+      }),
+    { initialProps: { target: 'a', rows: entries } },
+  );
+  await waitFor(() => expect(result.current.dividerId).toBe('c'));
+  rerender({
+    target: undefined,
+    rows: [entries[0], entries[1], e('late', 25), ...entries.slice(2)],
+  });
+  await waitFor(() => expect(result.current.dividerId).toBe('late'));
+  act(() => jest.advanceTimersByTime(100));
+  expect(scrollToId).not.toHaveBeenCalled();
+  act(() => result.current.jumpToNextMention());
+  expect(scrollToId).toHaveBeenCalledWith('c', true);
+});
+
+it('cancels a queued unread jump when a warm notification tap targets the open screen', async () => {
+  await seed({ [KEY]: { at: 20, id: 'b' } });
+  jest.useFakeTimers();
+  const scrollToId = jest.fn(() => true);
+  const { result, rerender } = renderHook(
+    ({ target }: { target?: string }) =>
+      useChatReadPosition({
+        owner: OWNER,
+        conversationKey: KEY,
+        entries,
+        loading: false,
+        scrollToId,
+        leaveEdge: jest.fn(),
+        initialTarget: target,
+      }),
+    { initialProps: { target: undefined as string | undefined } },
+  );
+  await waitFor(() => expect(result.current.dividerId).toBe('c'));
+  rerender({ target: 'a' });
+  act(() => jest.advanceTimersByTime(100));
+  expect(scrollToId).not.toHaveBeenCalled();
+});

@@ -1,3 +1,5 @@
+import { useRoute, type RouteProp } from '@react-navigation/native';
+import type { RootStackParamList } from '../navigation/types';
 import { useMemo, type RefObject } from 'react';
 import type { FlatList } from 'react-native';
 import { useChatReadPosition } from './useChatReadPosition';
@@ -29,6 +31,7 @@ export function useConversationReadPosition({
   loading: boolean;
   leaveEdge: (holdMs?: number) => void;
 }) {
+  const { params } = useRoute<RouteProp<RootStackParamList, 'Conversation'>>();
   const entries = useMemo(() => chatUnreadEntries(items, true), [items]);
   const { scrollToId, onScrollToIndexFailed } = useListScrollToId(
     listRef,
@@ -37,6 +40,7 @@ export function useConversationReadPosition({
     1,
   );
   const read = useChatReadPosition({
+    initialTarget: params.jumpToMessage,
     owner,
     conversationKey: dmReadKey(peer),
     entries,

@@ -6,6 +6,9 @@ import { lightPalette } from '../styles/palettes';
 import i18n from '../i18n';
 import type MessageBubble from './MessageBubble';
 
+jest.mock('../contexts/ThemeContext', () => ({
+  useThemeColors: () => jest.requireActual('../styles/palettes').lightPalette,
+}));
 jest.mock('../contexts/LocaleContext', () => ({
   useLocale: () => ({ t: jest.requireActual('../i18n').t, formatLocale: 'en' }),
 }));

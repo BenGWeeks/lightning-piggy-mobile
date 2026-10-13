@@ -1,3 +1,4 @@
+import { MessageHighlight } from './MessageHighlight';
 import { useLocale } from '../contexts/LocaleContext';
 import React from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
@@ -324,4 +325,13 @@ function ConversationMessageRow({
   );
 }
 
-export default React.memo(ConversationMessageRow);
+const MemoConversationMessageRow = React.memo(ConversationMessageRow);
+export default React.memo(function HighlightedConversationMessageRow(
+  props: ConversationMessageRowProps,
+) {
+  return (
+    <MessageHighlight messageId={props.item.id.replace(/^dm-/, '')}>
+      <MemoConversationMessageRow {...props} />
+    </MessageHighlight>
+  );
+});

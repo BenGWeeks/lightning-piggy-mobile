@@ -141,6 +141,11 @@ export default function App() {
   // foreground state for the suppress-when-viewing-this-thread gate, and
   // route notification taps to the right screen.
   useEffect(() => {
+    // Keep the local notification fixture out of the production startup path.
+    const stopDevNotifications = __DEV__
+      ? // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('./src/services/devMessageNotification').registerDevMessageNotifications()
+      : undefined;
     void ensureNotificationsInitialised();
     // Wallets requests permission after sign-in when resolving notification defaults.
     // Register the periodic background detect-and-ping (#279). Idempotent;
@@ -180,7 +185,7 @@ export default function App() {
       // LiveLocationProvider and must not navigate (#1300).
       if (isLiveShareStopResponse(response)) return;
       const raw = response?.notification?.request?.content?.data as
-        | { kind?: string; conversationPubkey?: string; groupId?: string; walletId?: string }
+        | (import('./src/services/notificationService').NotificationData & { kind?: string })
         | undefined;
       // The notification watcher's alert routes by its category; a Marmot
       // push alert (iOS, shown by the OS) carries no data: it means "a
@@ -200,7 +205,10 @@ export default function App() {
         if (tap !== latestTap) return;
         if (navigateFromNotification(data)) return;
         // ~10 s: also covers identity hydration on a cold start (#1154).
-        if (attempt >= 100) return;
+        if (attempt >= 100) {
+          if ('groupId' in data && data.groupId) navigateFromNotification({ kind: 'dm', owner });
+          return;
+        }
         setTimeout(() => tryNav(attempt + 1), 100);
       };
       tryNav(0);
@@ -225,6 +233,7 @@ export default function App() {
       appStateSub.remove();
       if (resumeDismissTimer) clearTimeout(resumeDismissTimer);
       responseSub.remove();
+      stopDevNotifications?.();
     };
   }, []);
 

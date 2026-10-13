@@ -9,6 +9,7 @@ import {
   importDmMessages,
   updateDmDeliveryStatuses,
   getConversationMessages,
+  getConversationMessageWindow,
   getOutgoingOrderRows,
   getInboxLatest,
   selectDmWrapIds,
@@ -204,6 +205,46 @@ describe('dmDb', () => {
 
     it('is false when no row exists', async () => {
       expect(await hasConversationWith(OWNER, 'convZ')).toBe(false);
+    });
+  });
+
+  describe('tapped message window', () => {
+    it('falls back without reading history when the target is absent in this account/thread', async () => {
+      mockExecute.mockResolvedValueOnce(rowsResult([]));
+      expect(await getConversationMessageWindow(OWNER, 'convA', 'marmot', 'gone')).toEqual([]);
+      expect(mockExecute).toHaveBeenCalledTimes(1);
+      expect(mockExecute.mock.calls[0][1]).toEqual([OWNER, 'convA', 'marmot', 'gone']);
+    });
+    it('always includes the target when the bounded timestamp window is full', async () => {
+      mockExecute
+        .mockResolvedValueOnce(
+          rowsResult([
+            {
+              owner: OWNER,
+              event_id: 'tapped',
+              conversation: 'convA',
+              created_at: 200,
+              sender: 'peer',
+              content: 'old',
+              from_me: 0,
+              wire_kind: 9,
+              protocol: 'marmot',
+            },
+          ]),
+        )
+        .mockResolvedValueOnce(rowsResult([]));
+      const window = await getConversationMessageWindow(OWNER, 'convA', 'marmot', 'tapped');
+      expect(window.map((m) => m.eventId)).toEqual(['tapped']);
+      expect(mockExecute.mock.calls[1][1]).toEqual([
+        OWNER,
+        'convA',
+        'marmot',
+        200,
+        OWNER,
+        'convA',
+        'marmot',
+        200,
+      ]);
     });
   });
 
