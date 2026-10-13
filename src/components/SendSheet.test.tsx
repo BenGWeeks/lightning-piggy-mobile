@@ -154,6 +154,7 @@ type InputArgs = {
   applyPasteText: (v: string) => void;
   onInvalidInvoice: () => void;
   setInvoiceData: (v: string | null) => void;
+  setDecoded: (v: import('../utils/sendSheetInput').DecodedInvoice | null) => void;
   setScanned: (v: boolean) => void;
   setSatsValue: (v: string) => void;
 };
@@ -452,3 +453,29 @@ it('clears a friend identity after Edit address replaces the destination with an
   );
   expect(mockWallet.payInvoiceForWallet).not.toHaveBeenCalled();
 });
+
+it.each([
+  ['Lightning address', 'alice@example.com', undefined, undefined, 'alice@example.com'],
+  ['contact', INVOICE_WITH_AMOUNT, 'a'.repeat(64), undefined, 'Alice'],
+  ['node', INVOICE_WITH_AMOUNT, undefined, '02' + 'b'.repeat(64), '02bbbbbbbbbb…bbbbbbbb'],
+  ['unknown invoice', INVOICE_WITH_AMOUNT, undefined, undefined, 'sendSheet.thisRecipient'],
+])(
+  'shows the %s destination separately from the memo below the confirmation threshold',
+  (_kind, address, pubkey, nodePubkey, expected) => {
+    render(<SendSheet visible onClose={onClose} recipientPubkey={pubkey} />);
+    act(() => {
+      mockInputArgs?.setInvoiceData(address);
+      mockInputArgs?.setScanned(true);
+      mockInputArgs?.setSatsValue('1');
+      mockInputArgs?.setDecoded({
+        amountSats: 1,
+        description: 'Attacker\u202ename',
+        expiry: null,
+        nodePubkey,
+      });
+    });
+    expect(screen.getByTestId('send-recipient').props.children).toBe(expected);
+    expect(screen.getByText('linkAction.memo: Attackername')).toBeTruthy();
+    expect(mockConfirmLargeSend).not.toHaveBeenCalled();
+  },
+);

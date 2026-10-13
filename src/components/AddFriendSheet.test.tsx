@@ -3,6 +3,8 @@ import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import AddFriendSheet from './AddFriendSheet';
 
+let mockDismiss: (() => void) | undefined;
+
 jest.mock('@gorhom/bottom-sheet', () => {
   const R = jest.requireActual('react');
   const RN = jest.requireActual('react-native');
@@ -10,9 +12,10 @@ jest.mock('@gorhom/bottom-sheet', () => {
     R.createElement(RN.View, null, children);
   return {
     BottomSheetModal: R.forwardRef(function Modal(
-      { children }: { children?: React.ReactNode },
+      { children, onDismiss }: { children?: React.ReactNode; onDismiss?: () => void },
       ref: React.Ref<unknown>,
     ) {
+      mockDismiss = onDismiss;
       R.useImperativeHandle(ref, () => ({ present: jest.fn(), dismiss: jest.fn() }));
       return R.createElement(RN.View, null, children);
     }),
@@ -91,4 +94,55 @@ it.each(['confirm', 'cancel'])('requires %s for scanned profile intake', async (
     jest.mocked(Alert.alert).mock.calls.at(-1)?.[2]?.[action === 'confirm' ? 1 : 0].onPress?.(),
   );
   expect(onAdd).toHaveBeenCalledTimes(action === 'confirm' ? 1 : 0);
+});
+
+it.each(['close', 'reopen', 'unmount', 'dismiss'])(
+  'ignores pending scan confirmation after %s',
+  async (transition) => {
+    jest.mocked(Alert.alert).mockClear();
+    const onAdd = jest.fn(async () => true);
+    const onClose = jest.fn();
+    const view = render(<AddFriendSheet visible onClose={onClose} onAdd={onAdd} />);
+    await act(async () => fireEvent.press(screen.getByTestId('add-friend-tab-scan')));
+    fireEvent(screen.getByTestId('profile-scanner'), 'barcodeScanned', { data: 'old-profile' });
+    const oldButtons = jest.mocked(Alert.alert).mock.calls.at(-1)![2]!;
+    if (transition === 'unmount') view.unmount();
+    else if (transition === 'dismiss') act(() => mockDismiss?.());
+    else {
+      view.rerender(<AddFriendSheet visible={false} onClose={onClose} onAdd={onAdd} />);
+      if (transition === 'reopen') {
+        view.rerender(<AddFriendSheet visible onClose={onClose} onAdd={onAdd} />);
+        await act(async () => fireEvent.press(screen.getByTestId('add-friend-tab-scan')));
+        fireEvent(screen.getByTestId('profile-scanner'), 'barcodeScanned', { data: 'new-profile' });
+      }
+    }
+    await act(async () => oldButtons[1].onPress?.());
+    expect(onAdd).not.toHaveBeenCalled();
+    if (transition === 'reopen') {
+      // A stale cancellation must not unlock the scanner in the new session.
+      act(() => oldButtons[0].onPress?.());
+      expect(screen.getByTestId('profile-scanner').props.onBarcodeScanned).toBeUndefined();
+      await act(async () => jest.mocked(Alert.alert).mock.calls.at(-1)![2]![1].onPress?.());
+      expect(onAdd).toHaveBeenCalledWith('new-profile');
+      expect(onAdd).toHaveBeenCalledTimes(1);
+    }
+  },
+);
+
+it('ignores a scanned add result that finishes during a new session', async () => {
+  let finish: (success: boolean) => void = () => {};
+  const onAdd = jest.fn(() => new Promise<boolean>((resolve) => (finish = resolve)));
+  const onClose = jest.fn();
+  const view = render(<AddFriendSheet visible onClose={onClose} onAdd={onAdd} />);
+  await act(async () => fireEvent.press(screen.getByTestId('add-friend-tab-scan')));
+  fireEvent(screen.getByTestId('profile-scanner'), 'barcodeScanned', { data: 'old-profile' });
+  act(() => jest.mocked(Alert.alert).mock.calls.at(-1)![2]![1].onPress?.());
+  view.rerender(<AddFriendSheet visible={false} onClose={onClose} onAdd={onAdd} />);
+  view.rerender(<AddFriendSheet visible onClose={onClose} onAdd={onAdd} />);
+  await act(async () => fireEvent.press(screen.getByTestId('add-friend-tab-scan')));
+  await act(async () => finish(true));
+  expect(onClose).not.toHaveBeenCalled();
+  expect(screen.getByTestId('profile-scanner').props.onBarcodeScanned).toEqual(
+    expect.any(Function),
+  );
 });

@@ -1,4 +1,4 @@
-import { paymentRecipientLabel, sanitizeInvoiceMemo } from '../utils/paymentIdentity';
+import { paymentRecipientLabel } from '../utils/paymentIdentity';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { View, Text, TouchableOpacity, BackHandler, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -58,6 +58,7 @@ import { useSendProgressOverlay } from '../hooks/useSendProgressOverlay';
 import { isReverseSwapNotPaid } from '../utils/swapHandoff';
 import AmountEntryScreen from './AmountEntryScreen';
 import SendAmountSection from './SendAmountSection';
+import SendPaymentIdentity from './SendPaymentIdentity';
 import SendModeTabs from './SendModeTabs';
 import SendNfcPane from './SendNfcPane';
 import SendScanPane from './SendScanPane';
@@ -202,6 +203,15 @@ const SendSheet: React.FC<Props> = ({
   const needsAmount =
     scanned &&
     (isLightningAddress(invoiceData || '') || isOnchainAddress || isAmountlessBolt11 || isLnurl);
+  const recipientLabel = isOnchainAddress
+    ? shortOnchainAddress(invoiceData || '')
+    : paymentRecipientLabel({
+        address: isLightningAddress(invoiceData || '') ? invoiceData : null,
+        pubkey: activePubkey,
+        contacts,
+        nodePubkey: decoded?.nodePubkey,
+        unknownLabel: t('sendSheet.thisRecipient'),
+      });
   const currentSats = parseInt(satsValue) || 0;
 
   const selectedWalletId = capturedWalletId ?? activeWalletId;
@@ -415,15 +425,7 @@ const SendSheet: React.FC<Props> = ({
     const confirmed = await confirmLargeSend({
       amountSats: decodedAmount > 0 ? decodedAmount : currentSats,
       // Name the destination itself — never the "Send to on-chain address" label.
-      recipient: isOnchainAddress
-        ? shortOnchainAddress(invoiceData)
-        : paymentRecipientLabel({
-            address: isLightningAddress(invoiceData) ? invoiceData : null,
-            pubkey: activePubkey,
-            contacts,
-            nodePubkey: decoded?.nodePubkey,
-            unknownLabel: t('sendSheet.thisRecipient'),
-          }),
+      recipient: recipientLabel,
       swapQuote,
     });
     if (!confirmed) return;
@@ -846,11 +848,11 @@ const SendSheet: React.FC<Props> = ({
                       autoplay={false}
                     />
                   )}
-                  {decoded?.description ? (
-                    <Text style={styles.detailDescription} numberOfLines={3}>
-                      {t('linkAction.memo')}: {sanitizeInvoiceMemo(decoded.description)}
-                    </Text>
-                  ) : null}
+                  <SendPaymentIdentity
+                    recipient={recipientLabel}
+                    memo={decoded?.description}
+                    styles={styles}
+                  />
 
                   <SendAmountSection
                     needsAmount={needsAmount}

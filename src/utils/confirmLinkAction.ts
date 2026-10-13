@@ -1,3 +1,4 @@
+import { isBitcoinAddress } from '../services/boltzService';
 import { showLinkActionSheet } from './linkActionSheet';
 import { t } from '../i18n';
 import { normalizeLnurlToUrl } from '../services/lnurlService';
@@ -25,6 +26,7 @@ export function linkActionDescription(raw: string): string {
   if (/^nostr:/i.test(input)) return t('linkAction.open', { target: sanitizeInvoiceMemo(input) });
   if (/^bitcoin:/i.test(input))
     return t('linkAction.pay', { target: sanitizeInvoiceMemo(input.slice(8).split('?')[0]) });
+  if (isBitcoinAddress(input)) return t('linkAction.pay', { target: input });
   if (/^[^@\s]+@[^@\s]+$/.test(input))
     return t('linkAction.pay', { target: sanitizeInvoiceMemo(input) });
   try {

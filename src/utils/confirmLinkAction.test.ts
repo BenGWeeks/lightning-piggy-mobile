@@ -86,3 +86,18 @@ it('describes only the host for endpoint links', () => {
 it('names a profile by its locally decoded npub', () => {
   expect(linkActionDescription(`nostr:${npub}`)).toBe(`Open profile ${npub.slice(0, 20)}…`);
 });
+
+it.each([
+  '1BoatSLRHtKNngkdXEeobR76b53LETtpyT',
+  '3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy',
+  'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh',
+])('names the actual bare Bitcoin destination in consent: %s', (address) => {
+  confirmLinkAction(address, jest.fn());
+  expect(Alert.alert).toHaveBeenCalledWith(
+    expect.any(String),
+    `Pay ${address}`,
+    expect.any(Array),
+    expect.any(Object),
+  );
+  expect(mockFetch).not.toHaveBeenCalled();
+});

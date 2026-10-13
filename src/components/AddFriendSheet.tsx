@@ -1,5 +1,5 @@
 import { confirmLinkAction } from '../utils/confirmLinkAction';
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -43,6 +43,22 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
   const [scanError, setScanError] = useState<string | null>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
 
+  const scanSession = useRef(0);
+  const scanPending = useRef(false);
+  useLayoutEffect(() => {
+    scanSession.current += 1;
+    scanPending.current = false;
+    return () => {
+      scanSession.current += 1;
+      scanPending.current = false;
+    };
+  }, [visible]);
+  const handleClose = useCallback(() => {
+    scanSession.current += 1;
+    scanPending.current = false;
+    onClose();
+  }, [onClose]);
+
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
@@ -58,6 +74,7 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
 
   useEffect(() => {
     if (visible) {
+      setLoading(false);
       setInputValue('');
       setMode('paste');
       setScanned(false);
@@ -71,11 +88,11 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
   useEffect(() => {
     if (!visible) return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      onClose();
+      handleClose();
       return true;
     });
     return () => sub.remove();
-  }, [visible, onClose]);
+  }, [visible, handleClose]);
 
   const renderBackdrop = useCallback(
     (props: BottomSheetBackdropProps) => (
@@ -98,21 +115,31 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
   };
 
   const handleBarCodeScanned = ({ data }: { data: string }) => {
-    if (scanned || loading) return;
+    if (!visible || scanned || loading || scanPending.current) return;
+    const session = scanSession.current;
+    const isCurrent = () => session === scanSession.current;
+    scanPending.current = true;
     setScanned(true);
     setScanError(null);
     confirmLinkAction(
       data,
       () => {
+        if (!isCurrent()) return;
         void (async () => {
           setLoading(true);
           const success = await onAdd(data.trim());
+          if (!isCurrent()) return;
+          scanPending.current = false;
           setLoading(false);
-          if (success) onClose();
+          if (success) handleClose();
           else setScanError(t('addFriendSheet.invalidNpub'));
         })();
       },
-      () => setScanned(false),
+      () => {
+        if (!isCurrent()) return;
+        scanPending.current = false;
+        setScanned(false);
+      },
     );
   };
 
@@ -133,7 +160,7 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
   return (
     <BottomSheetModal
       ref={sheetRef}
-      onDismiss={onClose}
+      onDismiss={handleClose}
       backdropComponent={renderBackdrop}
       backgroundStyle={styles.sheetBackground}
       handleIndicatorStyle={styles.handleIndicator}
