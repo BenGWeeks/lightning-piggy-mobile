@@ -863,9 +863,7 @@ export class MarmotSession {
       message: isMarmotMessageKind(rumor.kind),
       messageId: rumor.id,
       groupId: event.group.id,
-      ...(event.group.isDm
-        ? { conversationPubkey: event.group.memberPubkeys[0] }
-        : { groupId: event.group.id }),
+      ...(event.group.isDm ? { conversationPubkey: event.group.memberPubkeys[0] } : {}),
     });
   }
 

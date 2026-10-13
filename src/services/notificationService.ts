@@ -781,7 +781,9 @@ export async function fireMessageNotification(opts: {
     body: opts.body,
     data: {
       ...opts.data,
-      ...canonicalMessageTarget({ ...opts.data, threadKind: opts.data.threadKind ?? opts.kind }),
+      ...(opts.data.groupInvitation
+        ? {}
+        : canonicalMessageTarget({ ...opts.data, threadKind: opts.data.threadKind ?? opts.kind })),
     },
     owner: opts.owner,
     shouldSuppress: opts.shouldSuppress,

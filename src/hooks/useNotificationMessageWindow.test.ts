@@ -55,7 +55,7 @@ it('does not display a late history result after an account switch', async () =>
   expect(result.current).toEqual(newest);
 });
 
-it('retains loaded history without rereading it as live rows update, but loads a new target', async () => {
+it('refreshes retained history as live rows update and loads a new target', async () => {
   lookup.mockResolvedValue([older]);
   const { result, rerender } = renderHook(
     ({ messageId, messages }: { messageId?: string; messages: typeof newest }) =>
@@ -67,12 +67,12 @@ it('retains loaded history without rereading it as live rows update, but loads a
   rerender({ messageId: 'old', messages: updated });
   rerender({ messageId: undefined, messages: [...updated] });
   await act(async () => {});
-  expect(lookup).toHaveBeenCalledTimes(1);
+  expect(lookup).toHaveBeenCalledTimes(3);
   expect(result.current.map((m) => m.id)).toEqual(['old', 'new', 'newer']);
   lookup.mockResolvedValue([{ ...older, eventId: 'another' }]);
   rerender({ messageId: 'another', messages: updated });
   await waitFor(() => expect(result.current.map((m) => m.id)).toEqual(['another', 'new', 'newer']));
-  expect(lookup).toHaveBeenCalledTimes(2);
+  expect(lookup).toHaveBeenCalledTimes(4);
 });
 
 it('retries a missing history target when live messages update', async () => {
@@ -88,4 +88,55 @@ it('retries a missing history target when live messages update', async () => {
   rerender({ messages: [...newest] });
   await waitFor(() => expect(result.current.map((m) => m.id)).toEqual(['old', 'new']));
   expect(lookup).toHaveBeenCalledTimes(2);
+});
+
+it('drops a deleted history row after the jump param is consumed', async () => {
+  const neighbor = { ...older, eventId: 'neighbor', createdAt: 2 };
+  lookup.mockResolvedValue([older, neighbor]);
+  const { result, rerender } = renderHook(
+    ({ messageId, messages }: { messageId?: string; messages: typeof newest }) =>
+      useNotificationMessageWindow('big', 'peer', 'marmot', messageId, messages),
+    { initialProps: { messageId: 'old' as string | undefined, messages: newest } },
+  );
+  await waitFor(() => expect(result.current.map((m) => m.id)).toEqual(['old', 'neighbor', 'new']));
+  rerender({ messageId: undefined, messages: newest });
+  await act(async () => {});
+  // A delete-for-everyone commits to the store and refreshes the newest slice.
+  // Neither history row is in that slice, so absence there alone is not deletion.
+  lookup.mockResolvedValue([older]);
+  rerender({ messageId: undefined, messages: [...newest] });
+  await waitFor(() => expect(result.current.map((m) => m.id)).toEqual(['old', 'new']));
+});
+
+it('drops the retained window when its target is deleted after the jump param is consumed', async () => {
+  lookup.mockResolvedValue([older]);
+  const { result, rerender } = renderHook(
+    ({ messageId, messages }: { messageId?: string; messages: typeof newest }) =>
+      useNotificationMessageWindow('big', 'peer', 'marmot', messageId, messages),
+    { initialProps: { messageId: 'old' as string | undefined, messages: newest } },
+  );
+  await waitFor(() => expect(result.current.map((m) => m.id)).toEqual(['old', 'new']));
+  rerender({ messageId: undefined, messages: newest });
+  await act(async () => {});
+  lookup.mockResolvedValue([]);
+  rerender({ messageId: undefined, messages: [...newest] });
+  await waitFor(() => expect(result.current).toEqual(newest));
+});
+
+it('takes the latest edit outside the newest slice after the jump param is consumed', async () => {
+  lookup.mockResolvedValue([older]);
+  const { result, rerender } = renderHook(
+    ({ messageId, messages }: { messageId?: string; messages: typeof newest }) =>
+      useNotificationMessageWindow('big', 'peer', 'marmot', messageId, messages),
+    { initialProps: { messageId: 'old' as string | undefined, messages: newest } },
+  );
+  await waitFor(() => expect(result.current[0].text).toBe('old'));
+  rerender({ messageId: undefined, messages: newest });
+  await act(async () => {});
+  lookup.mockResolvedValue([{ ...older, content: 'edited', editedAt: 102 }]);
+  rerender({ messageId: undefined, messages: [...newest] });
+  await waitFor(() =>
+    expect(result.current[0]).toMatchObject({ id: 'old', text: 'edited', editedAt: 102 }),
+  );
+  expect(result.current.map((m) => m.id)).toEqual(['old', 'new']);
 });

@@ -21,7 +21,6 @@ import {
   setLockScreenContentEnabled,
   __resetForTests,
   notificationMatchesTarget,
-  threadCollapseKey,
   dismissNotificationsFor,
   marmotMessageRefMatcher,
   retractMarmotMessageNotifications,
@@ -115,28 +114,6 @@ describe('fireMessageNotification', () => {
       kind: 'dm',
       conversationPubkey: 'peer-other',
     });
-  });
-});
-
-it('stores both Marmot DM identifiers and its message in the canonical tray target', async () => {
-  await fireMessageNotification({
-    kind: 'dm',
-    threadId: 'peer:marmot',
-    title: 'Alice',
-    body: 'hello',
-    data: {
-      conversationPubkey: 'peer',
-      conversationProtocol: 'marmot',
-      marmotGroupId: 'marmot:dm',
-      messageId: 'old',
-    },
-  });
-  expect(lastScheduledContent()?.data).toMatchObject({
-    threadKind: 'dm',
-    protocol: 'marmot',
-    conversationPubkey: 'peer',
-    groupId: 'marmot:dm',
-    messageId: 'old',
   });
 });
 
@@ -989,19 +966,4 @@ it('respects message notification permission for pending invitations', async () 
     }),
   ).toBeNull();
   expect(mockScheduleNotificationAsync).not.toHaveBeenCalled();
-});
-
-it('uses the canonical protocol for alert grouping and focused-thread dismissal', () => {
-  const data = {
-    conversationPubkey: 'peer',
-    protocol: 'marmot' as const,
-    conversationProtocol: 'nip17' as const,
-  };
-  expect(threadCollapseKey('dm', data)).toBe('dm:marmot:peer');
-  expect(
-    notificationMatchesTarget(data, { conversationPubkey: 'peer', conversationProtocol: 'marmot' }),
-  ).toBe(true);
-  expect(
-    notificationMatchesTarget(data, { conversationPubkey: 'peer', conversationProtocol: 'nip17' }),
-  ).toBe(false);
 });

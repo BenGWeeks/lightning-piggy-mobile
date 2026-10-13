@@ -4,7 +4,7 @@ import type { DmProtocol } from '../utils/dmProtocol';
 import { getConversationMessageWindow } from '../services/dmDb';
 import { mapStoredRowsToMessages } from '../contexts/conversationReadThrough';
 
-/** Retain an older notification's local window while live updates refresh the newest slice. */
+/** Retain the notification target, re-reading its local window on live message changes. */
 export function useNotificationMessageWindow(
   owner: string | null,
   peer: string,
@@ -19,12 +19,11 @@ export function useNotificationMessageWindow(
     messages: ConversationMessageInput[];
   } | null>(null);
   const targetId = messageId ?? (window?.scope === scope ? window.messageId : undefined);
-  const targetLoaded =
-    window?.scope === scope &&
-    window.messageId === targetId &&
-    window.messages.some((m) => m.id === targetId);
   useEffect(() => {
-    if (!owner || !targetId || targetLoaded) return;
+    if (!owner || !targetId) return;
+    // The newest slice cannot tell us which older rows were deleted or edited.
+    // Re-derive the bounded window from the authoritative store, including after
+    // navigation consumes messageId; retain its target rather than stale rows.
     let cancelled = false;
     void getConversationMessageWindow(owner, peer, protocol, targetId)
       .then((rows) => {
@@ -35,7 +34,7 @@ export function useNotificationMessageWindow(
     return () => {
       cancelled = true;
     };
-  }, [owner, peer, protocol, targetId, scope, messages, targetLoaded]);
+  }, [owner, peer, protocol, targetId, scope, messages]);
   return useMemo(() => {
     if (window?.scope !== scope || !window.messages.length) return messages;
     const merged = new Map(window.messages.map((m) => [m.id, m]));
