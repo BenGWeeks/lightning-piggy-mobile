@@ -256,4 +256,7 @@ limit), preview HTML at 1 MiB and preview images at 10 MiB. Image and audio
 renderers receive local cache URIs after a bounded download. Existing sender
 trust gates and the preview preference still control loading. Blocked media
 shows a translated placeholder. Blossom descriptors must match the upload
-server's origin and the uploaded blob's SHA-256 path segment.
+server's origin and the uploaded blob's SHA-256 path segment. LNURL-pay and
+LNURL-withdraw endpoints and their callbacks (deep links, NFC vouchers, hunt
+caches, scanned QR codes) use the same policy and transport under the `payment`
+kind, which only differs by allowing the longer bolt11 / comment query strings.

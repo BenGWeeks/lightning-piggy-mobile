@@ -1,4 +1,5 @@
 import { bech32 } from 'bech32';
+import { checkRemoteUrl, fetchBounded, PREVIEW_MAX_BYTES } from '../utils/remoteUrlPolicy';
 
 /**
  * Wallet-agnostic LNURL-withdraw resolver. Lightning Piggy is NOT an
@@ -52,9 +53,11 @@ export const decodeLnurlWithdraw = (input: string): string => {
 
   // LUD-17 cleartext forms (`lnurlw://host/path`, and the rare spec-allowed
   // `lnurl://host/path`). Per LUD-17 these map to `http://` for `.onion` Tor
-  // hosts and `https://` everywhere else — rewriting `.onion` to https breaks
-  // Tor-only withdraw endpoints. The host is the authority up to the first
-  // `/ : ? #`; strip any port before the `.onion` test.
+  // hosts and `https://` everywhere else. Decoding stays spec-faithful, but
+  // the shared remote URL policy refuses `http:` and `.onion` at fetch time
+  // (the app has no Tor transport), so a Tor-only voucher fails with a clear
+  // "blocked" error rather than a dangling request. The host is the authority
+  // up to the first `/ : ? #`; strip any port before the `.onion` test.
   const cleartextToHttp = (rest: string): string => {
     const host = rest.split(/[/:?#]/, 1)[0].toLowerCase();
     return (host.endsWith('.onion') ? 'http://' : 'https://') + rest;
@@ -103,28 +106,7 @@ export const decodeLnurlWithdraw = (input: string): string => {
  */
 export const resolveLnurlWithdraw = async (input: string): Promise<LnurlWithdrawParams> => {
   const url = decodeLnurlWithdraw(input);
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-
-  let res: Response;
-  try {
-    res = await fetch(url, { signal: controller.signal });
-  } catch (e) {
-    throw new LnurlWithdrawError(`Could not reach LNURL endpoint: ${(e as Error).message}`);
-  } finally {
-    clearTimeout(timer);
-  }
-
-  if (!res.ok) {
-    throw new LnurlWithdrawError(`LNURL endpoint returned ${res.status} ${res.statusText}`);
-  }
-
-  let json: unknown;
-  try {
-    json = await res.json();
-  } catch {
-    throw new LnurlWithdrawError('LNURL endpoint did not return JSON');
-  }
+  const json = await fetchWithdrawJson(url, 'endpoint');
 
   if (json && typeof json === 'object' && (json as { status?: string }).status === 'ERROR') {
     const reason = (json as { reason?: unknown }).reason;
@@ -173,19 +155,31 @@ const isWithdrawRequest = (v: unknown): v is WithdrawRequest => {
   );
 };
 
-const isCallbackUrl = (value: string): boolean => {
+// The voucher (NFC tag, hunt cache, QR, deep link) and the issuer's callback
+// are both someone else's content: same URL policy and bounded transport as
+// every other remote fetch (https only, public host, size + time caps,
+// https-only redirects). `payment` kind allows the long bolt11 query string.
+const isCallbackUrl = (value: string): boolean => checkRemoteUrl(value, { kind: 'payment' }).ok;
+
+async function fetchWithdrawJson(url: string, label: 'endpoint' | 'callback'): Promise<unknown> {
+  let bytes: Uint8Array;
   try {
-    const url = new URL(value);
-    return (
-      (url.protocol === 'https:' || url.protocol === 'http:') &&
-      !!url.hostname &&
-      !url.username &&
-      !url.password
-    );
-  } catch {
-    return false;
+    ({ bytes } = await fetchBounded(url, {
+      kind: 'payment',
+      maxBytes: PREVIEW_MAX_BYTES,
+      timeoutMs: FETCH_TIMEOUT_MS,
+      redirects: 'https-only',
+      maxRedirects: 3,
+    }));
+  } catch (e) {
+    throw new LnurlWithdrawError(`Could not reach LNURL ${label}: ${(e as Error).message}`);
   }
-};
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+  } catch {
+    throw new LnurlWithdrawError(`LNURL ${label} did not return JSON`);
+  }
+}
 
 /** Convenience for UI surfaces — turn millisats into a clean sats display. */
 export const msatToSats = (msat: number): number => Math.floor(msat / 1_000);
@@ -233,25 +227,7 @@ export const claimLnurlWithdraw = async (
   url.searchParams.set('k1', params.k1);
   url.searchParams.set('pr', bolt11);
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  let res: Response;
-  try {
-    res = await fetch(url.toString(), { signal: controller.signal });
-  } catch (e) {
-    throw new LnurlWithdrawError(`Could not reach LNURL callback: ${(e as Error).message}`);
-  } finally {
-    clearTimeout(timer);
-  }
-  if (!res.ok) {
-    throw new LnurlWithdrawError(`LNURL callback returned ${res.status} ${res.statusText}`);
-  }
-  let json: unknown;
-  try {
-    json = await res.json();
-  } catch {
-    throw new LnurlWithdrawError('LNURL callback did not return JSON');
-  }
+  const json = await fetchWithdrawJson(url.toString(), 'callback');
   if (!isOkStatus(json)) {
     const reason = (json as { reason?: string })?.reason;
     throw new LnurlWithdrawError(reason || 'Issuer rejected the invoice');
