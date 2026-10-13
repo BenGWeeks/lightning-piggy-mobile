@@ -13,7 +13,7 @@ import { sanitizeDisplayText } from '../utils/sanitizeDisplayText';
 /** A group message, classified once (not in the hot renderItem path). */
 export type ClassifiedMessage = GroupMessage & {
   content: BubbleContent;
-  wireKind: 14 | 15;
+  wireKind: number;
   quote?: MessageQuote;
 };
 
@@ -92,7 +92,7 @@ export function useGroupTimeline({
         senderPubkey: m.senderPubkey,
         fromMe: m.senderPubkey.toLowerCase() === me,
         text: m.text,
-        wireKind: deriveGroupWireKind(m.text),
+        wireKind: m.wireKind ?? deriveGroupWireKind(m.text),
       })),
     );
     const quoteFor = (m: GroupMessage): MessageQuote | undefined => {
@@ -108,10 +108,13 @@ export function useGroupTimeline({
       .map((m) => ({
         ...m,
         quote: quoteFor(m),
-        content: classifyMessageContent(sanitizeDisplayText(m.text)),
+        content:
+          m.wireKind !== undefined && ![4, 14, 15, 16, 17, 1068, 1018].includes(m.wireKind)
+            ? { kind: 'unsupported' as const, rawKind: m.wireKind }
+            : classifyMessageContent(sanitizeDisplayText(m.text)),
         // The real stored kind (14 chat / 15 encrypted file), so the info
         // sheet reports kind 15 for voice / image bubbles.
-        wireKind: deriveGroupWireKind(m.text),
+        wireKind: m.wireKind ?? deriveGroupWireKind(m.text),
       }))
       .filter((m) => m.content.kind !== 'pollVote');
   }, [messages, myPubkey, memberNameByPubkey, formatLocale]);

@@ -22,6 +22,8 @@ export interface GroupMessage {
   id: string;
   /** Original optimistic ID, retained through echo replacement and rekeying. */
   localId?: string;
+  /** Stored application kind, retained for unsupported Marmot messages. */
+  wireKind?: number;
   /** Pubkey of the sender (lowercase hex). */
   senderPubkey: string;
   /** Text payload as authored (preserves casing); empty for system events. */

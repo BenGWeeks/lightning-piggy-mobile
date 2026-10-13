@@ -1293,7 +1293,18 @@
     "payLightningAddress": "या Lightning ॲड्रेसवर पे करा",
     "openLink": "लिंक उघडा {{url}}",
     "reactionRemove": "तुमची {{emoji}} रिॲक्शन काढा (एकूण {{count}})",
-    "reactionAdd": "{{emoji}} रिॲक्शन द्या (आतापर्यंत {{count}})"
+    "reactionAdd": "{{emoji}} रिॲक्शन द्या (आतापर्यंत {{count}})",
+    "unsupportedSender": "{{name}} यांनी या आवृत्तीत अद्याप दाखवता येत नसलेला संदेश पाठवला",
+    "unsupportedKind": "प्रकार {{kind}}",
+    "unknownSender": "कोणीतरी",
+    "file": "फाइल",
+    "fileBytes": "{{size}} बाइट",
+    "fileShare": "जतन करा / शेअर करा",
+    "filePreparing": "फाइल तयार होत आहे…",
+    "fileUnavailable": "फाइल उपलब्ध नाही",
+    "fileShareFailed": "ही फाइल तयार किंवा शेअर करता आली नाही. पुन्हा प्रयत्न करा.",
+    "devFiles": "चाचणी फाइल्स",
+    "devFilesA11y": "फाइल्ससह चाचणी संभाषण तयार करा"
   },
   "messageBubbleFooter": {
     "edited": "एडिट केले",

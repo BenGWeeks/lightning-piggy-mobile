@@ -1293,7 +1293,18 @@
     "payLightningAddress": "Pay this lightning address",
     "openLink": "Open link {{url}}",
     "reactionRemove": "Remove your {{emoji}} reaction ({{count}} total)",
-    "reactionAdd": "Add {{emoji}} reaction ({{count}} so far)"
+    "reactionAdd": "Add {{emoji}} reaction ({{count}} so far)",
+    "unsupportedSender": "{{name}} sent a message this version can't show yet",
+    "unsupportedKind": "kind {{kind}}",
+    "unknownSender": "Someone",
+    "file": "File",
+    "fileBytes": "{{size}} bytes",
+    "fileShare": "Save / Share",
+    "filePreparing": "Preparing file…",
+    "fileUnavailable": "File unavailable",
+    "fileShareFailed": "Could not prepare or share this file. Try again.",
+    "devFiles": "Dev files",
+    "devFilesA11y": "Seed a dev file conversation"
   },
   "messageBubbleFooter": {
     "edited": "Edited",

@@ -57,6 +57,8 @@ export interface MarmotMediaUrlParams {
   filename: string;
   plaintextSha256: string;
   ciphertextSha256: string;
+  name?: string;
+  size?: number;
 }
 
 export function encodeMarmotMediaUrl(input: MarmotMediaUrlParams): string {
@@ -64,5 +66,8 @@ export function encodeMarmotMediaUrl(input: MarmotMediaUrlParams): string {
     `${LPE_MARKER}&alg=${input.version}&k=${input.keysHex.join(',')}&n=${input.nonceHex}` +
     `&m=${encodeURIComponent(input.mime)}&f=${encodeURIComponent(input.filename)}` +
     `&ps=${input.plaintextSha256}&cs=${input.ciphertextSha256}`;
-  return `${input.url.split('#')[0]}#${frag}`;
+  const metadata =
+    `&name=${encodeURIComponent(input.name ?? input.filename)}` +
+    (input.size !== undefined ? `&size=${input.size}` : '');
+  return `${input.url.split('#')[0]}#${frag}${metadata}`;
 }

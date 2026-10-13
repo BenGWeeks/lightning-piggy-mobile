@@ -48,13 +48,15 @@ import { decryptFile } from './encryptedFile';
 import { decryptMarmotMedia } from './marmotMedia';
 import type { MarmotImageParams } from '../utils/messageContent';
 
-export type DecryptedMediaKind = 'voice' | 'image';
+export type DecryptedMediaKind = 'voice' | 'image' | 'file';
 
 /** Everything needed to fetch + decrypt one attachment. */
 export interface EncryptedMediaRef {
   url: string;
   kind: DecryptedMediaKind;
   mime?: string;
+  /** Explicitly unencrypted imeta files are still cached per account. */
+  encrypted?: boolean;
   /** NIP-17 (kind 15) AES-256-GCM key. */
   keyHex?: string;
   nonceHex?: string;
@@ -133,6 +135,7 @@ export function mediaCacheKey(ref: EncryptedMediaRef): string {
 }
 
 function extensionFor(kind: DecryptedMediaKind, mime?: string): string {
+  if (kind === 'file') return mime === 'application/pdf' ? 'pdf' : 'bin';
   if (kind === 'image') {
     return (mime || 'image/jpeg').split('/')[1]?.replace(/[^a-z0-9]/gi, '') || 'jpg';
   }
@@ -273,20 +276,24 @@ async function resolveUncached(
   const dir = ownerDirUri(owner);
   if (!dir) throw new Error('No cache directory available for decrypted media');
   const { keyHex, nonceHex, marmot } = ref;
-  if ((!keyHex && !marmot) || !nonceHex) throw new Error('Missing media key material');
+  const unencrypted = ref.kind === 'file' && ref.encrypted === false && !keyHex && !marmot;
+  if (!unencrypted && ((!keyHex && !marmot) || !nonceHex))
+    throw new Error('Missing media key material');
   const uri = `${dir}${ref.kind}-${mediaCacheKey(ref)}.${extensionFor(ref.kind, ref.mime)}`;
   // Same name ⇒ same URL + keys ⇒ already decrypted by this account.
   if (!(await getInfoAsync(uri)).exists) {
     const res = await fetch(ref.url);
     if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
     const cipher = new Uint8Array(await res.arrayBuffer());
-    const plain = marmot
-      ? decryptMarmotMedia(cipher, {
-          mime: ref.mime ?? (ref.kind === 'voice' ? 'audio/mp4' : 'image/jpeg'),
-          nonceHex,
-          marmot,
-        })
-      : decryptFile(cipher, keyHex as string, nonceHex);
+    const plain = unencrypted
+      ? cipher
+      : marmot
+        ? decryptMarmotMedia(cipher, {
+            mime: ref.mime ?? (ref.kind === 'voice' ? 'audio/mp4' : 'image/jpeg'),
+            nonceHex,
+            marmot,
+          })
+        : decryptFile(cipher, keyHex as string, nonceHex as string);
     assertCurrent();
     // Registered in the same tick as the check above, so a wipe that bumps
     // the generation after it will wait for this publish to settle.

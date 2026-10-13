@@ -1265,7 +1265,18 @@
     "payLightningAddress": "Оплатити цю адресу Lightning",
     "openLink": "Відкрити посилання {{url}}",
     "reactionRemove": "Прибрати вашу реакцію {{emoji}} (усього {{count}})",
-    "reactionAdd": "Додати реакцію {{emoji}} ({{count}} наразі)"
+    "reactionAdd": "Додати реакцію {{emoji}} ({{count}} наразі)",
+    "unsupportedSender": "{{name}} надіслав(-ла) повідомлення, яке ця версія ще не може показати",
+    "unsupportedKind": "тип {{kind}}",
+    "unknownSender": "Хтось",
+    "file": "Файл",
+    "fileBytes": "{{size}} байтів",
+    "fileShare": "Зберегти / Поділитися",
+    "filePreparing": "Підготовка файлу…",
+    "fileUnavailable": "Файл недоступний",
+    "fileShareFailed": "Не вдалося підготувати файл або поділитися ним. Спробуйте ще раз.",
+    "devFiles": "Тестові файли",
+    "devFilesA11y": "Створити тестову розмову з файлами"
   },
   "messageBubbleFooter": {
     "edited": "Змінено",

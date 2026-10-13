@@ -281,6 +281,7 @@ function ConversationMessageRow({
       fromMe={item.fromMe}
       createdAt={item.createdAt}
       content={content}
+      senderName={item.kind === 'unsupported' ? peerName : undefined}
       sharedProfiles={sharedProfiles}
       isInvoicePaid={isInvoicePaid}
       onPayInvoice={onPayInvoice}

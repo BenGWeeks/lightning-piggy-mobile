@@ -1,3 +1,4 @@
+import { logUnsupportedMarmotKind } from '../utils/unsupportedMarmotKind';
 import { getAppFormatLocale } from '../utils/appFormatLocale';
 import { useAccountState } from './useAccountState';
 import { useCallback, useEffect, useMemo } from 'react';
@@ -126,6 +127,7 @@ export function useMarmotGroups(
           continue;
         }
         let message = marmotRumorToGroupMessage(rumor, mediaKeys);
+        logUnsupportedMarmotKind(event.rumor.kind, event.rumor.pubkey, event.group.id);
         // An edit may have arrived first (or the history replays).
         const overlay =
           storedMarmotContent(rumor, mediaKeys).kind === storedKindForMarmot(MARMOT_CHAT_KIND) &&

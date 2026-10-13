@@ -1,3 +1,6 @@
+import { encryptMediaFile } from '@internet-privacy/marmot-ts';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { deleteAsync, moveAsync, writeAsStringAsync } from 'expo-file-system/legacy';
 import { encryptFile } from './encryptedFile';
@@ -85,6 +88,53 @@ beforeEach(async () => {
 afterAll(() => __resetDecryptedMediaCacheForTests());
 
 describe('decryptedMediaCache', () => {
+  it('downloads a plain imeta file into the same account-scoped cache', async () => {
+    setDecryptedMediaOwner(A);
+    fetchMock.mockResolvedValue({ ok: true, arrayBuffer: async () => PLAIN.slice().buffer });
+    const uri = await resolveDecryptedMedia({
+      url: URL_,
+      kind: 'file',
+      mime: 'application/pdf',
+      encrypted: false,
+    });
+    expect([...plaintextOf(uri)]).toEqual([...PLAIN]);
+    expect(uri).toContain(ownerDirName(A));
+    expect(uri.endsWith('.pdf')).toBe(true);
+  });
+
+  it('downloads and authenticates a MIP-04 PDF into an account-scoped shareable temp file', async () => {
+    const key = new Uint8Array(32).fill(17);
+    const { encrypted, attachment } = encryptMediaFile(PLAIN, key, {
+      version: 'encrypted-media-v2',
+      mediaType: 'application/pdf',
+      filename: 'invoice.pdf',
+      plaintextSha256: bytesToHex(sha256(PLAIN)),
+    });
+    fetchMock.mockResolvedValue({ ok: true, arrayBuffer: async () => encrypted.slice().buffer });
+    const pdf: EncryptedMediaRef = {
+      url: URL_,
+      kind: 'file',
+      mime: 'application/pdf',
+      nonceHex: attachment.nonce,
+      marmot: {
+        version: attachment.version,
+        keysHex: [bytesToHex(key)],
+        filename: attachment.filename,
+        plaintextSha256: attachment.plaintextSha256,
+        ciphertextSha256: attachment.ciphertextSha256,
+      },
+    };
+    setDecryptedMediaOwner(A);
+    const uri = await resolveDecryptedMedia(pdf);
+    expect(uri).toMatch(/file-.*\.pdf$/);
+    expect([...plaintextOf(uri)]).toEqual([...PLAIN]);
+    expect(await resolveDecryptedMedia(pdf)).toBe(uri);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await expect(
+      resolveDecryptedMedia({ ...pdf, marmot: { ...pdf.marmot!, keysHex: ['00'.repeat(32)] } }),
+    ).rejects.toThrow();
+  });
+
   it('decrypts once and reuses the file for the same account', async () => {
     setDecryptedMediaOwner(A);
     const uri = await resolveDecryptedMedia(ref);

@@ -1293,7 +1293,18 @@
     "payLightningAddress": "Fizetés erre a Lightning-címre",
     "openLink": "Link megnyitása: {{url}}",
     "reactionRemove": "{{emoji}} reakciód eltávolítása (összesen {{count}})",
-    "reactionAdd": "{{emoji}} reakció hozzáadása (eddig {{count}})"
+    "reactionAdd": "{{emoji}} reakció hozzáadása (eddig {{count}})",
+    "unsupportedSender": "{{name}} olyan üzenetet küldött, amelyet ez a verzió még nem tud megjeleníteni",
+    "unsupportedKind": "típus: {{kind}}",
+    "unknownSender": "Valaki",
+    "file": "Fájl",
+    "fileBytes": "{{size}} bájt",
+    "fileShare": "Mentés / Megosztás",
+    "filePreparing": "Fájl előkészítése…",
+    "fileUnavailable": "A fájl nem érhető el",
+    "fileShareFailed": "Nem sikerült előkészíteni vagy megosztani a fájlt. Próbáld újra.",
+    "devFiles": "Tesztfájlok",
+    "devFilesA11y": "Tesztbeszélgetés létrehozása fájlokkal"
   },
   "messageBubbleFooter": {
     "edited": "Szerkesztve",

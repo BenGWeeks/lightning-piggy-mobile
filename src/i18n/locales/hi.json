@@ -1293,7 +1293,18 @@
     "payLightningAddress": "इस Lightning ऐड्रेस पर पेमेंट करें",
     "openLink": "लिंक खोलें {{url}}",
     "reactionRemove": "अपना {{emoji}} रिएक्शन हटाएँ (कुल {{count}})",
-    "reactionAdd": "{{emoji}} रिएक्शन जोड़ें (अब तक {{count}})"
+    "reactionAdd": "{{emoji}} रिएक्शन जोड़ें (अब तक {{count}})",
+    "unsupportedSender": "{{name}} ने एक संदेश भेजा है जिसे यह संस्करण अभी नहीं दिखा सकता",
+    "unsupportedKind": "प्रकार {{kind}}",
+    "unknownSender": "किसी ने",
+    "file": "फ़ाइल",
+    "fileBytes": "{{size}} बाइट",
+    "fileShare": "सहेजें / साझा करें",
+    "filePreparing": "फ़ाइल तैयार हो रही है…",
+    "fileUnavailable": "फ़ाइल उपलब्ध नहीं है",
+    "fileShareFailed": "यह फ़ाइल तैयार या साझा नहीं हो सकी। फिर से कोशिश करें।",
+    "devFiles": "परीक्षण फ़ाइलें",
+    "devFilesA11y": "फ़ाइलों के साथ परीक्षण बातचीत बनाएँ"
   },
   "messageBubbleFooter": {
     "edited": "एडिट किया गया",

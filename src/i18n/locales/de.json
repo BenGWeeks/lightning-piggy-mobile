@@ -1293,7 +1293,18 @@
     "payLightningAddress": "An diese Lightning-Adresse zahlen",
     "openLink": "Link {{url}} öffnen",
     "reactionRemove": "Deine Reaktion {{emoji}} entfernen ({{count}} insgesamt)",
-    "reactionAdd": "Reaktion {{emoji}} hinzufügen (bisher {{count}})"
+    "reactionAdd": "Reaktion {{emoji}} hinzufügen (bisher {{count}})",
+    "unsupportedSender": "{{name}} hat eine Nachricht gesendet, die diese Version noch nicht anzeigen kann",
+    "unsupportedKind": "Typ {{kind}}",
+    "unknownSender": "Jemand",
+    "file": "Datei",
+    "fileBytes": "{{size}} Bytes",
+    "fileShare": "Speichern / Teilen",
+    "filePreparing": "Datei wird vorbereitet…",
+    "fileUnavailable": "Datei nicht verfügbar",
+    "fileShareFailed": "Diese Datei konnte nicht vorbereitet oder geteilt werden. Versuche es erneut.",
+    "devFiles": "Testdateien",
+    "devFilesA11y": "Eine Testunterhaltung mit Dateien erstellen"
   },
   "messageBubbleFooter": {
     "edited": "Bearbeitet",

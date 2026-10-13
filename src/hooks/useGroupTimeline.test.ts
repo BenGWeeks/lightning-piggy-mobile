@@ -139,3 +139,28 @@ describe('mergeDeviceNotices', () => {
     expect(mergeDeviceNotices([], [notice('n', 1)]).map((r) => r.id)).toEqual(['device-n']);
   });
 });
+
+it('keeps unknown kinds and files as unread timeline messages', () => {
+  const messages: GroupMessage[] = [
+    { id: 'unknown1', senderPubkey: 'b', text: '', wireKind: 1234, createdAt: 1 },
+    {
+      id: 'file0001',
+      senderPubkey: 'b',
+      text: '[FILE]{"name":"invoice.pdf","mime":"application/pdf"}',
+      wireKind: 15,
+      createdAt: 2,
+    },
+  ];
+  const { result } = renderHook(() =>
+    useGroupTimeline({
+      messages,
+      myPubkey: 'a',
+      memberNameByPubkey: new Map(),
+      formatLocale: 'en',
+      deviceNotices: [],
+    }),
+  );
+  expect(result.current.rows).toHaveLength(2);
+  expect(result.current.rows[0]).toMatchObject({ content: { kind: 'unsupported', rawKind: 1234 } });
+  expect(result.current.rows[1]).toMatchObject({ wireKind: 15, content: { kind: 'text' } });
+});

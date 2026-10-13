@@ -24,7 +24,8 @@ import {
   formatRelativeFuture,
 } from '../utils/messageContent';
 import type { PollTally } from '../utils/nip88Poll';
-import { marmotBubbleKey } from '../utils/dmProtocol';
+import { parseFileAttachment } from '../utils/fileAttachment';
+import MessageFileBubble from './MessageFileBubble';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { isPublicHttpUrl } from '../utils/publicUrl';
 import { type DeliveryStatus } from '../utils/dmDeliveryStatus';
@@ -468,18 +469,21 @@ const MessageBubble: React.FC<Props> = ({
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
         <View
           style={[styles.bubble, styles.unsupportedBubble]}
-          accessibilityLabel={t(
-            marmotBubbleKey(content.rawKind) ?? 'messageBubble.unsupportedA11y',
-            { kind: content.rawKind },
-          )}
+          accessibilityLabel={t('messageBubble.unsupportedSender', {
+            name: senderName ?? t('messageBubble.unknownSender'),
+          })}
           testID={`${testIdPrefix}-unsupported-${id}`}
         >
-          {BubbleHeader}
-          <Text style={styles.unsupportedText}>
-            {t(marmotBubbleKey(content.rawKind) ?? 'messageBubble.unsupportedText', {
-              kind: content.rawKind,
-            })}
-          </Text>
+          <View testID={`chat-unsupported-bubble-${id.replace(/^dm-/, '').slice(0, 8)}`}>
+            <Text style={styles.unsupportedText}>
+              {t('messageBubble.unsupportedSender', {
+                name: senderName ?? t('messageBubble.unknownSender'),
+              })}
+            </Text>
+            <Text style={styles.bubbleTime}>
+              {t('messageBubble.unsupportedKind', { kind: content.rawKind })}
+            </Text>
+          </View>
           {renderFooter([styles.bubbleTime])}
         </View>
       </View>
@@ -517,6 +521,16 @@ const MessageBubble: React.FC<Props> = ({
 
   // content.kind === 'text' — fall through to per-text-format detection.
   const text = content.text;
+  const file = parseFileAttachment(text);
+  if (file)
+    return wrapWithReactionRow(
+      <MessageFileBubble
+        id={id}
+        file={file}
+        fromMe={fromMe}
+        footer={renderFooter([styles.bubbleTime])}
+      />,
+    );
 
   // Image (#688) — encrypted NIP-17 kind-15 (fetch ciphertext → decrypt →
   // display) OR a plain image URL (legacy / other clients → display directly).

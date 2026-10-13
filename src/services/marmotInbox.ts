@@ -3,12 +3,18 @@
 // multi-member groups → the per-group message log. Kept free of React and
 // I/O so the shaping is unit-testable.
 
+import { attachmentMetadata } from '../utils/fileAttachment';
 import { textForRumor } from '../utils/nip17Unwrap';
 import type { DmMessageRow } from './dmDb';
 import type { GroupMessage } from './groupMessagesStorageService';
 import { marmotReplyParent } from './marmotEdits';
 import { isMarmotMessageKind } from './marmotKinds';
-import { attachmentFallbackText, marmotMediaText, type MarmotMediaKeys } from './marmotMedia';
+import {
+  attachmentFallbackText,
+  allAttachments,
+  marmotMediaText,
+  type MarmotMediaKeys,
+} from './marmotMedia';
 import { MARMOT_CHAT_KIND, type MarmotMessageEvent, type MarmotRumor } from './marmotSession';
 
 /** NIP-17's chat kind — the app's text pipeline (renderer, message-info,
@@ -41,6 +47,46 @@ export function storedMarmotContent(
   if (rumor.kind === MARMOT_CHAT_KIND) {
     const media = marmotMediaText(rumor.tags, mediaKeys);
     if (media) return { text: media, kind: APP_FILE_KIND };
+    const attachment = allAttachments(rumor.tags)[0];
+    if (
+      attachment &&
+      !attachment.mediaType.startsWith('image/') &&
+      !attachment.mediaType.startsWith('audio/')
+    ) {
+      return {
+        text:
+          '[FILE]' +
+          JSON.stringify({
+            url: '',
+            mime: attachment.mediaType,
+            encrypted: true,
+            caption: rumor.content,
+            ...attachmentMetadata(rumor.tags, attachment.filename),
+          }),
+        kind: APP_FILE_KIND,
+      };
+    }
+    const imeta = rumor.tags.find((tag) => tag[0] === 'imeta');
+    const mime =
+      imeta?.find((field) => field.startsWith('m '))?.slice(2) ?? 'application/octet-stream';
+    if (imeta && mime && !mime.startsWith('image/') && !mime.startsWith('audio/')) {
+      const url = imeta.find((field) => field.startsWith('url '))?.slice(4) ?? '';
+      const encrypted = imeta.some((field) =>
+        /^(v|encryption-algorithm|nonce|decryption-key) /.test(field),
+      );
+      return {
+        text:
+          '[FILE]' +
+          JSON.stringify({
+            url,
+            mime,
+            encrypted,
+            caption: rumor.content,
+            ...attachmentMetadata([imeta]),
+          }),
+        kind: APP_FILE_KIND,
+      };
+    }
     // An attachment we can't show (unsupported type, or no keys): say so
     // instead of an empty bubble. A real caption wins.
     const fallback = !rumor.content.trim() && attachmentFallbackText(rumor.tags);
@@ -112,10 +158,12 @@ export function marmotRumorToGroupMessage(
 ): GroupMessage {
   const replyTo = marmotReplyParent(rumor);
   const mentions = marmotTagMentions(rumor);
+  const stored = storedMarmotContent(rumor, mediaKeys);
   return {
     id: rumor.id,
     senderPubkey: rumor.pubkey.toLowerCase(),
-    text: storedMarmotContent(rumor, mediaKeys).text,
+    text: stored.text,
+    ...(stored.kind !== 14 ? { wireKind: stored.kind } : {}),
     createdAt: rumor.created_at,
     ...(replyTo ? { replyTo } : {}),
     ...(mentions.length > 0 ? { mentions } : {}),
