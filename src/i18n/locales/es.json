@@ -1309,7 +1309,9 @@
     "fileWarningTitle": "Archivo potencialmente peligroso",
     "fileWarning": "Este archivo puede contener código ejecutable o contenido activo. Guárdalo solo si confías en quien lo envió. No lo abras ni lo instales sin comprobarlo primero.",
     "fileVerificationFailed": "El archivo no superó la verificación",
-    "fileTypeMismatch": "El nombre del archivo no coincide con el tipo declarado: {{type}}"
+    "fileTypeMismatch": "El nombre del archivo no coincide con el tipo declarado: {{type}}",
+    "blockedLink": "Enlace bloqueado",
+    "invalidUpload": "El servidor de almacenamiento devolvió una URL de contenido no válida. Prueba otro servidor."
   },
   "messageBubbleFooter": {
     "edited": "Editado",

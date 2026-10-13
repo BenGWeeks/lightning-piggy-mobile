@@ -145,7 +145,7 @@ describe('isPublicRelayUrl', () => {
   it('accepts public wss relays', () => {
     expect(isPublicRelayUrl('wss://relay.primal.net')).toBe(true);
     expect(isPublicRelayUrl('wss://nos.lol/')).toBe(true);
-    expect(isPublicRelayUrl('wss://relay.example:4443/path')).toBe(true);
+    expect(isPublicRelayUrl('wss://relay.example:4443/path')).toBe(false);
     expect(isPublicRelayUrl('wss://8.8.8.8')).toBe(true);
   });
 
@@ -234,4 +234,17 @@ describe('embedKey / labels', () => {
       `hi @${shortNpubLabel(PK)} see ↪`,
     );
   });
+});
+
+it('drops blocked nevent hints before they can reach the embed fetcher', () => {
+  const ref = nip19.neventEncode({
+    id: ID,
+    relays: [
+      'ws://relay.example',
+      'wss://127.0.0.1',
+      'wss://relay.example:8443',
+      'wss://relay.example',
+    ],
+  });
+  expect(decodeNostrEntity(ref)).toMatchObject({ relays: ['wss://relay.example'] });
 });

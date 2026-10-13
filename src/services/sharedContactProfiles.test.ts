@@ -109,5 +109,20 @@ it('filters private relay hints and caps unique public hints across the batch', 
     },
     { pubkey: OTHER, relays: publicHints },
   ]);
-  expect(fetchBatch.mock.calls[0][1]).toEqual([...PROFILE_RELAYS, ...publicHints.slice(0, 5)]);
+  expect(fetchBatch.mock.calls[0][1]).toEqual([...PROFILE_RELAYS, ...publicHints.slice(0, 3)]);
+});
+
+it('does not connect to blocked sender-supplied hints', async () => {
+  await resolveSharedContactProfiles([
+    {
+      pubkey: PK,
+      relays: [
+        'ws://relay.example',
+        'wss://127.0.0.1',
+        'wss://relay.example:8443',
+        'wss://safe.example',
+      ],
+    },
+  ]);
+  expect(fetchBatch.mock.calls[0][1]).toEqual([...PROFILE_RELAYS, 'wss://safe.example']);
 });

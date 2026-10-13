@@ -31,8 +31,9 @@
  * provider's pubkey), so the media components don't need the pubkey threaded
  * through every bubble.
  */
-import { downloadFile, sniffFileMime, FileVerificationError, MAX_FILE_BYTES } from './fileDownload';
-import { isSafeFileUrl, sanitizeAttachmentText } from '../utils/fileAttachment';
+import { sniffFileMime, FileVerificationError, MAX_FILE_BYTES } from './fileDownload';
+import { sanitizeAttachmentText } from '../utils/fileAttachment';
+import { checkRemoteUrl, fetchBounded, MEDIA_MAX_BYTES } from '../utils/remoteUrlPolicy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   cacheDirectory,
@@ -233,6 +234,7 @@ export function mediaCacheKey(ref: EncryptedMediaRef): string {
       ref.keyHex ?? '',
       ref.nonceHex ?? '',
       ref.mime ?? '',
+      ref.size ?? null,
       m ? [m.version, m.keysHex, m.filename, m.plaintextSha256, m.ciphertextSha256] : null,
     ]),
   );
@@ -355,8 +357,12 @@ async function requestOwner(): Promise<string> {
  * `DecryptedMediaCancelledError` if the account's session ended meanwhile.
  */
 export async function resolveDecryptedMedia(ref: EncryptedMediaRef): Promise<string> {
-  if (ref.kind === 'file' && (!isSafeFileUrl(ref.url) || (ref.size ?? 0) > MAX_FILE_BYTES))
-    throw new Error('Unsafe file request');
+  if (!checkRemoteUrl(ref.url, { kind: 'media' }).ok) throw new Error('Blocked remote URL');
+  if (
+    ref.size !== undefined &&
+    (!Number.isSafeInteger(ref.size) || ref.size <= 0 || ref.size > MEDIA_MAX_BYTES)
+  )
+    throw new Error('Invalid media size');
   const owner = await requestOwner();
   const ownerDir = ownerDirName(owner);
   const memoKey = `${ownerDir}/${mediaCacheKey(ref)}`;
@@ -417,14 +423,12 @@ async function resolveUncached(
   }
   // Voice and image disk entries remain keyed to their authenticated decrypt.
   if (ref.kind === 'file' || !disk.exists) {
-    const cipher =
-      ref.kind === 'file'
-        ? await downloadFile(ref.url, ref.size)
-        : await (async () => {
-            const res = await fetch(ref.url);
-            if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
-            return new Uint8Array(await res.arrayBuffer());
-          })();
+    const { bytes: cipher } = await fetchBounded(ref.url, {
+      maxBytes: ref.size ?? MEDIA_MAX_BYTES,
+      timeoutMs: 30000,
+      redirects: 'https-only',
+      maxRedirects: 3,
+    });
     let plain: Uint8Array;
     try {
       plain = unencrypted

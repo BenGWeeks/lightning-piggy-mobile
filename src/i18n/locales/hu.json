@@ -1309,7 +1309,9 @@
     "fileWarningTitle": "Potenciálisan veszélyes fájl",
     "fileWarning": "Ez a fájl futtatható kódot vagy aktív tartalmat tartalmazhat. Csak akkor mentsd, ha megbízol a feladóban. Ellenőrzés nélkül ne nyisd meg és ne telepítsd.",
     "fileVerificationFailed": "A fájl ellenőrzése sikertelen",
-    "fileTypeMismatch": "A fájlnév nem egyezik a megadott típussal: {{type}}"
+    "fileTypeMismatch": "A fájlnév nem egyezik a megadott típussal: {{type}}",
+    "blockedLink": "Blokkolt hivatkozás",
+    "invalidUpload": "A tárolószerver érvénytelen média-URL-t adott vissza. Próbálj másik szervert."
   },
   "messageBubbleFooter": {
     "edited": "Szerkesztve",

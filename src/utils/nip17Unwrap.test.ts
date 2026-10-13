@@ -446,3 +446,26 @@ describe('unwrapWrapViaNip44 (NIP-46 signer denials reach the ingest loop)', () 
     );
   });
 });
+
+it('validates kind-15 URLs and carries the advertised size into render text', () => {
+  const rumor: DecodedRumor = {
+    pubkey: PK_A,
+    created_at: 0,
+    kind: 15,
+    content: 'https://example.com/blob',
+    tags: [
+      ['file-type', 'image/jpeg'],
+      ['decryption-key', 'a'.repeat(64)],
+      ['decryption-nonce', 'b'.repeat(24)],
+      ['size', '123'],
+    ],
+  };
+  expect(textForRumor(rumor)).toContain('&s=123');
+  expect(textForRumor({ ...rumor, content: 'https://127.0.0.1/blob' })).not.toContain('#lpe=1');
+  expect(
+    textForRumor({
+      ...rumor,
+      tags: [...rumor.tags.filter((t) => t[0] !== 'size'), ['size', String(50 * 1024 * 1024 + 1)]],
+    }),
+  ).not.toContain('#lpe=1');
+});

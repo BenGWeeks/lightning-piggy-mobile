@@ -1,4 +1,5 @@
 import { bech32 } from 'bech32';
+import { fetch as expoFetch } from 'expo/fetch';
 import {
   claimLnurlWithdraw,
   decodeLnurlWithdraw,
@@ -6,12 +7,58 @@ import {
   msatToSats,
   resolveLnurlWithdraw,
 } from './lnurlWithdrawService';
+import { PREVIEW_MAX_BYTES } from '../utils/remoteUrlPolicy';
+
+// The withdraw flow goes through the shared bounded transport, which uses
+// Expo's native fetch (manual redirects + streaming bytes).
+jest.mock('expo/fetch', () => ({ fetch: jest.fn() }));
+const fetchMock = expoFetch as unknown as jest.Mock;
 
 const encodeLnurl = (url: string): string => {
   const bytes = new TextEncoder().encode(url);
   const words = bech32.toWords(Array.from(bytes));
   return bech32.encode('lnurl', words, 2_000);
 };
+
+/** A streaming response the bounded transport can consume. */
+function response(
+  body: unknown,
+  { status = 200, headers = {} as Record<string, string> } = {},
+  chunks?: Uint8Array[],
+) {
+  const data = chunks ?? [
+    new TextEncoder().encode(typeof body === 'string' ? body : JSON.stringify(body)),
+  ];
+  let index = 0;
+  const reader = {
+    read: jest.fn(async () =>
+      index < data.length ? { done: false, value: data[index++] } : { done: true },
+    ),
+    cancel: jest.fn(async () => {}),
+    releaseLock: jest.fn(),
+  };
+  const lower = Object.fromEntries(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v]));
+  return {
+    status,
+    ok: status >= 200 && status < 300,
+    url: '',
+    redirected: false,
+    headers: { get: (name: string) => lower[name.toLowerCase()] ?? null },
+    body: { getReader: () => reader },
+    reader,
+  };
+}
+
+const withdrawRequest = {
+  tag: 'withdrawRequest',
+  callback: 'https://example.com/cb',
+  k1: 'deadbeef',
+  defaultDescription: '🐷 Birthday Piggy',
+  minWithdrawable: 21_000,
+  maxWithdrawable: 21_000,
+};
+
+beforeEach(() => fetchMock.mockReset());
 
 describe('decodeLnurlWithdraw', () => {
   it('decodes a bech32 lnurl1 string', () => {
@@ -52,26 +99,8 @@ describe('decodeLnurlWithdraw', () => {
 });
 
 describe('resolveLnurlWithdraw', () => {
-  beforeEach(() => {
-    (global as unknown as { fetch: jest.Mock }).fetch = jest.fn();
-  });
-  afterEach(() => {
-    delete (global as unknown as { fetch?: unknown }).fetch;
-  });
-
   it('returns withdraw params on a valid response', async () => {
-    const fetchMock = (global as unknown as { fetch: jest.Mock }).fetch;
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        tag: 'withdrawRequest',
-        callback: 'https://example.com/cb',
-        k1: 'deadbeef',
-        defaultDescription: '🐷 Birthday Piggy',
-        minWithdrawable: 21_000,
-        maxWithdrawable: 21_000,
-      }),
-    });
+    fetchMock.mockResolvedValueOnce(response(withdrawRequest));
 
     const params = await resolveLnurlWithdraw('lnurlw://example.com/w');
     expect(params).toEqual({
@@ -81,23 +110,96 @@ describe('resolveLnurlWithdraw', () => {
       minWithdrawable: 21_000,
       maxWithdrawable: 21_000,
     });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe('https://example.com/w');
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ redirect: 'manual', credentials: 'omit' });
   });
 
   it('throws when the JSON is not a withdrawRequest', async () => {
-    const fetchMock = (global as unknown as { fetch: jest.Mock }).fetch;
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ tag: 'payRequest', callback: 'https://x' }),
-    });
+    fetchMock.mockResolvedValueOnce(response({ tag: 'payRequest', callback: 'https://x' }));
+    await expect(resolveLnurlWithdraw('lnurlw://example.com/w')).rejects.toThrow(
+      /not a withdrawRequest/i,
+    );
+  });
+
+  it('rejects a withdrawRequest whose callback is not an https public host', async () => {
+    fetchMock.mockResolvedValueOnce(
+      response({ ...withdrawRequest, callback: 'http://example.com/cb' }),
+    );
     await expect(resolveLnurlWithdraw('lnurlw://example.com/w')).rejects.toThrow(
       /not a withdrawRequest/i,
     );
   });
 
   it('throws when the endpoint returns non-OK', async () => {
-    const fetchMock = (global as unknown as { fetch: jest.Mock }).fetch;
-    fetchMock.mockResolvedValueOnce({ ok: false, status: 404, statusText: 'Not Found' });
+    fetchMock.mockResolvedValueOnce(response('', { status: 404 }));
     await expect(resolveLnurlWithdraw('lnurlw://example.com/w')).rejects.toThrow(/404/);
+  });
+
+  it('throws when the endpoint does not return JSON', async () => {
+    fetchMock.mockResolvedValueOnce(response('<html>'));
+    await expect(resolveLnurlWithdraw('lnurlw://example.com/w')).rejects.toThrow(
+      /did not return JSON/i,
+    );
+  });
+
+  it('surfaces an expired voucher reason at resolution', async () => {
+    fetchMock.mockResolvedValueOnce(response({ status: 'ERROR', reason: 'Voucher expired' }));
+    await expect(resolveLnurlWithdraw('lnurlw://example.com/voucher')).rejects.toThrow(
+      'Voucher expired',
+    );
+  });
+
+  it.each([
+    'lnurlw://127.0.0.1/w',
+    'lnurlw://192.168.1.1:8080/w',
+    'lnurlw://wallet.local/w',
+    'lnurlw://metadata.google.internal/w',
+    'lnurlw://hidden.onion/w', // LUD-17 maps this to http://, which the policy refuses
+    'https://example.com:8443/w',
+    'https://user:pw@example.com/w',
+    encodeLnurl('http://example.com/w'),
+  ])('blocks voucher endpoint %s before any request', async (input) => {
+    await expect(resolveLnurlWithdraw(input)).rejects.toThrow(/Blocked/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('follows an https redirect to a public host, re-checking the policy', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        response('', { status: 302, headers: { location: 'https://cdn.example.com/w2' } }),
+      )
+      .mockResolvedValueOnce(response(withdrawRequest));
+    await expect(resolveLnurlWithdraw('lnurlw://example.com/w')).resolves.toMatchObject({
+      k1: 'deadbeef',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][0]).toBe('https://cdn.example.com/w2');
+  });
+
+  it.each(['http://example.com/w2', 'https://10.0.0.1/w2', 'https://example.com:8443/w2'])(
+    'never follows a redirect to %s',
+    async (location) => {
+      fetchMock.mockResolvedValueOnce(response('', { status: 302, headers: { location } }));
+      await expect(resolveLnurlWithdraw('lnurlw://example.com/w')).rejects.toThrow(/Blocked/);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('rejects an oversized declared body before reading it', async () => {
+    const res = response(withdrawRequest, {
+      headers: { 'content-length': String(PREVIEW_MAX_BYTES + 1) },
+    });
+    fetchMock.mockResolvedValueOnce(res);
+    await expect(resolveLnurlWithdraw('lnurlw://example.com/w')).rejects.toThrow(/limit/);
+    expect(res.reader.read).not.toHaveBeenCalled();
+  });
+
+  it('rejects a streamed body that overruns the cap and cancels the reader', async () => {
+    const res = response(null, {}, [new Uint8Array(PREVIEW_MAX_BYTES), new Uint8Array(1)]);
+    fetchMock.mockResolvedValueOnce(res);
+    await expect(resolveLnurlWithdraw('lnurlw://example.com/w')).rejects.toThrow(/limit/);
+    expect(res.reader.cancel).toHaveBeenCalled();
   });
 });
 
@@ -120,16 +222,8 @@ describe('claimLnurlWithdraw', () => {
     maxWithdrawable: 21_000,
   };
 
-  beforeEach(() => {
-    (global as unknown as { fetch: jest.Mock }).fetch = jest.fn();
-  });
-  afterEach(() => {
-    delete (global as unknown as { fetch?: unknown }).fetch;
-  });
-
   it('happy path — sends k1+pr to callback, returns sats + bolt11', async () => {
-    const fetchMock = (global as unknown as { fetch: jest.Mock }).fetch;
-    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ status: 'OK' }) });
+    fetchMock.mockResolvedValueOnce(response({ status: 'OK' }));
     const getInvoice = jest.fn(async () => 'lnbcfakeinvoice');
 
     const result = await claimLnurlWithdraw(params, getInvoice);
@@ -150,11 +244,9 @@ describe('claimLnurlWithdraw', () => {
   });
 
   it('surfaces issuer ERROR.reason verbatim', async () => {
-    const fetchMock = (global as unknown as { fetch: jest.Mock }).fetch;
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ status: 'ERROR', reason: 'wait_time not yet expired' }),
-    });
+    fetchMock.mockResolvedValueOnce(
+      response({ status: 'ERROR', reason: 'wait_time not yet expired' }),
+    );
     const getInvoice = jest.fn(async () => 'lnbcfake');
     await expect(claimLnurlWithdraw(params, getInvoice)).rejects.toThrow(
       'wait_time not yet expired',
@@ -162,22 +254,44 @@ describe('claimLnurlWithdraw', () => {
   });
 
   it('throws on non-OK HTTP', async () => {
-    const fetchMock = (global as unknown as { fetch: jest.Mock }).fetch;
-    fetchMock.mockResolvedValueOnce({ ok: false, status: 503, statusText: 'Service Unavailable' });
+    fetchMock.mockResolvedValueOnce(response('', { status: 503 }));
     const getInvoice = jest.fn(async () => 'lnbcfake');
     await expect(claimLnurlWithdraw(params, getInvoice)).rejects.toThrow(/503/);
   });
 
   it('throws if the response is not JSON', async () => {
-    const fetchMock = (global as unknown as { fetch: jest.Mock }).fetch;
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: async () => {
-        throw new Error('bad json');
-      },
-    });
+    fetchMock.mockResolvedValueOnce(response('bad json'));
     const getInvoice = jest.fn(async () => 'lnbcfake');
     await expect(claimLnurlWithdraw(params, getInvoice)).rejects.toThrow(/did not return JSON/i);
+  });
+
+  it.each([
+    'http://example.com/cb',
+    'https://10.0.0.1/cb',
+    'https://issuer.local/cb',
+    'https://example.com:8443/cb',
+  ])('never mints an invoice for a blocked callback %s', async (callback) => {
+    const getInvoice = jest.fn(async () => 'lnbcfake');
+    await expect(claimLnurlWithdraw({ ...params, callback }, getInvoice)).rejects.toThrow(
+      /Invalid withdrawal parameters/,
+    );
+    expect(getInvoice).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('never follows a callback redirect off https', async () => {
+    fetchMock.mockResolvedValueOnce(
+      response('', { status: 302, headers: { location: 'http://example.com/cb2' } }),
+    );
+    await expect(claimLnurlWithdraw(params, async () => 'lnbcfake')).rejects.toThrow(/Blocked/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects an oversized callback response', async () => {
+    fetchMock.mockResolvedValueOnce(
+      response({ status: 'OK' }, { headers: { 'content-length': String(PREVIEW_MAX_BYTES + 1) } }),
+    );
+    await expect(claimLnurlWithdraw(params, async () => 'lnbcfake')).rejects.toThrow(/limit/);
   });
 });
 
@@ -201,21 +315,8 @@ describe('withdraw validation before invoice creation', () => {
     await expect(claimLnurlWithdraw({ ...params, ...override }, invoice)).rejects.toThrow();
     expect(invoice).not.toHaveBeenCalled();
   });
-  it('surfaces an expired voucher reason at resolution', async () => {
-    const fetchMock = jest.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ status: 'ERROR', reason: 'Voucher expired' }),
-    });
-    global.fetch = fetchMock;
-    await expect(resolveLnurlWithdraw('lnurlw://example.com/voucher')).rejects.toThrow(
-      'Voucher expired',
-    );
-  });
   it('preserves callback query parameters and URL-encodes the invoice', async () => {
-    const fetchMock = jest
-      .fn()
-      .mockResolvedValue({ ok: true, json: async () => ({ status: 'OK' }) });
-    global.fetch = fetchMock;
+    fetchMock.mockResolvedValueOnce(response({ status: 'OK' }));
     await claimLnurlWithdraw(params, async () => 'fixture+invoice');
     const callback = new URL(fetchMock.mock.calls[0][0]);
     expect(callback.searchParams.get('token')).toBe('fixture');

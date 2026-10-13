@@ -1,10 +1,11 @@
 import OutgoingBubbleBackground from './OutgoingBubbleBackground';
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { View, TouchableOpacity } from 'react-native';
 import { useLocale } from '../contexts/LocaleContext';
 import type { MessageBubbleStyles } from '../styles/MessageBubble.styles';
 import type { ParsedImageMessage } from '../utils/messageContent';
-import { isPublicHttpUrl } from '../utils/publicUrl';
+import { checkRemoteUrl } from '../utils/remoteUrlPolicy';
+import { useActivePubkey } from '../hooks/useActivePubkey';
 import { useTapToReveal } from '../hooks/useTapToReveal';
 import DecryptedImage from './DecryptedImage';
 import TapToLoadMedia, { displayHost } from './TapToLoadMedia';
@@ -56,22 +57,27 @@ const MessageImageBubble: React.FC<Props> = ({
   footer,
 }) => {
   const { t } = useLocale();
-  const [loadAllowed, reveal] = useTapToReveal(
-    `image:${messageId}:${image.url}`,
-    autoLoad && isPublicHttpUrl(image.url),
-  );
-  // For plain images the fetchable URL is the display source; for encrypted
-  // ones DecryptedImage resolves a data: URI, which it reports back here so
-  // the fullscreen tap shows the decrypted image, not the ciphertext blob.
-  const [displayUri, setDisplayUri] = useState<string | null>(image.encrypted ? null : image.url);
-  const canOpen = loadAllowed && !!onOpenImageFullscreen && !!displayUri;
+  const owner = useActivePubkey();
+  const safe = checkRemoteUrl(image.url, { kind: 'media' }).ok;
+  const [loadAllowed, reveal] = useTapToReveal(`image:${messageId}:${image.url}`, autoLoad && safe);
+  // DecryptedImage reports the local cache URI it resolved (plain download or
+  // decrypted plaintext) so the fullscreen tap shows that, never the remote
+  // URL. The URI is a per-account cache file for ONE image, so it is only
+  // honoured while the account and the image URL it was resolved for are
+  // still current — otherwise a tap during the next image's load would open
+  // the previous image (or the previous account's file).
+  const mediaKey = `${owner ?? ''}|${image.url}`;
+  const [display, setDisplay] = useState<{ key: string; uri: string } | null>(null);
+  const displayUri = display?.key === mediaKey ? display.uri : null;
+  const onResolved = useCallback((uri: string) => setDisplay({ key: mediaKey, uri }), [mediaKey]);
+  const canOpen = safe && loadAllowed && !!onOpenImageFullscreen && !!displayUri;
   // Until revealed, a tap loads the image; long-press still opens the menu.
   const onPress = loadAllowed ? () => displayUri && onOpenImageFullscreen?.(displayUri) : reveal;
   return (
     <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
       <TouchableOpacity
         activeOpacity={0.85}
-        onPress={onPress}
+        onPress={safe ? onPress : undefined}
         onLongPress={onLongPress}
         delayLongPress={350}
         style={[styles.imageBubble, fromMe ? styles.imageBubbleMe : styles.imageBubbleThem]}
@@ -103,7 +109,8 @@ const MessageImageBubble: React.FC<Props> = ({
             marmot={image.marmot}
             style={styles.imageBubbleImage}
             accessibilityLabel={t('messageBubble.sharedImage')}
-            onResolved={image.encrypted ? setDisplayUri : undefined}
+            onResolved={onResolved}
+            size={image.size}
           />
         ) : (
           <TapToLoadMedia

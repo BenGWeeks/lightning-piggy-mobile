@@ -1309,7 +1309,9 @@
     "fileWarningTitle": "可能存在危险的文件",
     "fileWarning": "此文件可能包含可执行代码或活动内容。仅在信任发送者时保存。请先检查，再打开或安装。",
     "fileVerificationFailed": "文件验证失败",
-    "fileTypeMismatch": "文件名与声明的类型不符：{{type}}"
+    "fileTypeMismatch": "文件名与声明的类型不符：{{type}}",
+    "blockedLink": "已阻止的链接",
+    "invalidUpload": "存储服务器返回了无效的媒体链接。请尝试其他服务器。"
   },
   "messageBubbleFooter": {
     "edited": "已编辑",

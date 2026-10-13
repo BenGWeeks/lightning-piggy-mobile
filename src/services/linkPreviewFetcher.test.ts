@@ -47,7 +47,20 @@ function fakeResponse({
     redirected,
     url,
     headers: { get: (k: string) => lower[k.toLowerCase()] ?? null },
-    body: null,
+    body: {
+      getReader: () => {
+        let sent = false;
+        return {
+          read: async () => {
+            if (sent) return { done: true };
+            sent = true;
+            return { done: false, value: new TextEncoder().encode(body) };
+          },
+          cancel: async () => {},
+          releaseLock: () => {},
+        };
+      },
+    },
     text: async () => body,
   };
 }
@@ -71,6 +84,8 @@ describe('fetchLinkPreview — address checks', () => {
     'http://169.254.169.254/latest/meta-data/',
     'http://localhost./',
     'http://router/',
+    'http://example.com/',
+    'https://example.com:8443/',
   ])('never requests a private URL: %s', async (url) => {
     expect(await fetchLinkPreview(url)).toBeNull();
     expect(mockFetch).not.toHaveBeenCalled();

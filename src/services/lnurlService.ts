@@ -1,3 +1,4 @@
+import { fetchBounded, PREVIEW_MAX_BYTES } from '../utils/remoteUrlPolicy';
 /**
  * LNURL service for resolving lightning addresses and LNURL strings to invoices.
  *
@@ -258,26 +259,20 @@ async function resolveLnurlFromUrl(
   | { tag: 'payRequest'; params: LnurlPayParams }
   | { tag: 'withdrawRequest'; params: LnurlWithdrawParams }
 > {
-  // Bound the fetch — RN's fetch can hang indefinitely on a network stall, and
-  // for a cold-start deep link that would leave the user with no resolution and
-  // no error toast for an unbounded time.
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), LNURL_FETCH_TIMEOUT_MS);
-  let response: Response;
-  try {
-    response = await fetch(url, { signal: controller.signal });
-  } catch (e) {
-    throw new Error(`Could not reach LNURL endpoint: ${(e as Error).message}`);
-  } finally {
-    clearTimeout(timer);
-  }
-
-  if (!response.ok) {
-    throw new Error(`Failed to resolve LNURL (${response.status})`);
-  }
-
-  const data = await response.json();
+  const data = await fetchLnurlJson(url);
   return parseLnurlResponse(data);
+}
+
+/** All LNURL endpoints and callbacks share the same transport budget and URL policy. */
+async function fetchLnurlJson(url: string) {
+  const { bytes } = await fetchBounded(url, {
+    kind: 'payment',
+    maxBytes: PREVIEW_MAX_BYTES,
+    timeoutMs: LNURL_FETCH_TIMEOUT_MS,
+    redirects: 'https-only',
+    maxRedirects: 3,
+  });
+  return JSON.parse(new TextDecoder().decode(bytes));
 }
 
 // Loose shape — the LNURL spec leaves a lot optional and the field set
@@ -369,13 +364,7 @@ export async function resolveLightningAddress(address: string): Promise<LnurlPay
   }
 
   const url = `https://${domain}/.well-known/lnurlp/${encodeURIComponent(user)}`;
-  const response = await fetch(url);
-
-  if (!response.ok) {
-    throw new Error(`Failed to resolve lightning address (${response.status})`);
-  }
-
-  const data: LnurlPayResponse = await response.json();
+  const data: LnurlPayResponse = await fetchLnurlJson(url);
 
   if (data.tag !== 'payRequest') {
     throw new Error('Invalid LNURL-pay response');
@@ -438,13 +427,7 @@ export async function fetchInvoice(
   }
 
   const url = callbackUrl.toString();
-  const response = await fetch(url);
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch invoice (${response.status})`);
-  }
-
-  const data: LnurlInvoiceResponse = await response.json();
+  const data: LnurlInvoiceResponse = await fetchLnurlJson(url);
 
   if (typeof data.pr !== 'string' || !data.pr) {
     throw new Error('No invoice returned from LNURL service');

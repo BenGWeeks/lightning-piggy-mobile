@@ -2,6 +2,10 @@ import { initialiseNotificationDefaults } from '../services/notificationDefaults
 import * as marmotPush from '../services/marmotPushRegistration';
 import { setActivePubkeyForWalletStorage } from '../services/walletStorageService';
 import { loadWatcherState } from '../services/watcherPushStore';
+import * as walletStorage from '../services/walletStorageService';
+import * as dmWipe from './dmAccountWipe';
+import { deleteAsync, readDirectoryAsync } from 'expo-file-system/legacy';
+import { wipeRemoteMediaForOwner } from '../services/remoteMediaCache';
 import {
   readMarketPreferences,
   writeMarketPreferences,
@@ -36,6 +40,16 @@ jest.mock('../services/notificationService', () => ({
 
 jest.mock('../services/watcherPush', () => ({ scheduleWatcherReconciliation: jest.fn() }));
 
+jest.mock('expo-file-system/legacy', () => ({
+  cacheDirectory: 'file:///cache/',
+  deleteAsync: jest.fn(async () => {}),
+  readDirectoryAsync: jest.fn(async () => []),
+}));
+
+jest.mock('../services/remoteMediaCache', () => ({
+  wipeRemoteMediaForOwner: jest.fn(async () => {}),
+}));
+
 jest.mock('../services/decryptedMediaCache', () => ({
   wipeDecryptedMediaForOwner: jest.fn(async () => {}),
 }));
@@ -68,6 +82,7 @@ it("drops the signed-out account's key-backup flag but keeps other accounts' (#1
 it("deletes the signed-out account's decrypted voice notes and photos (#1241)", async () => {
   await wipeAccountCaches(PK);
   expect(wipeDecryptedMediaForOwner).toHaveBeenCalledWith(PK);
+  expect(wipeRemoteMediaForOwner).toHaveBeenCalledWith(PK);
 });
 
 // #1240: a family shares one phone — signing out the child's account must
@@ -220,6 +235,41 @@ it.each(['watcher', 'push-off', 'decision'])(
       expect(await AsyncStorage.getItem(watcherKey)).not.toBeNull();
     } finally {
       setItem.mockImplementation(original);
+    }
+  },
+);
+
+it.each(['delete', 'list'])(
+  'continues wallet, DM and decrypted cleanup after remote-cache %s failure',
+  async (operation) => {
+    const error = new Error('filesystem unavailable');
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const secrets = ['deleteNwcUrl', 'deleteXpub', 'deleteMnemonic'] as const;
+    const spies = secrets.map((name) => jest.spyOn(walletStorage, name));
+    const dmSpy = jest.spyOn(dmWipe, 'wipeDmStoresForAccount');
+    const failing = jest.mocked(operation === 'delete' ? deleteAsync : readDirectoryAsync);
+    failing.mockRejectedValueOnce(error);
+    jest
+      .mocked(wipeRemoteMediaForOwner)
+      .mockImplementationOnce(
+        jest.requireActual('../services/remoteMediaCache').wipeRemoteMediaForOwner,
+      );
+    await AsyncStorage.setItem(`wallet_list_${PK}`, JSON.stringify([{ id: 'wallet' }]));
+    await AsyncStorage.setItem(`dm-kind4-retries:${PK}`, '[]');
+    jest.mocked(wipeDecryptedMediaForOwner).mockClear();
+    try {
+      // Resolving allows signOutIdentity to continue to identity removal.
+      await expect(wipeAccountCaches(PK)).resolves.toBeUndefined();
+      for (const spy of spies) expect(spy).toHaveBeenCalledWith('wallet');
+      expect(dmSpy).toHaveBeenCalledWith(PK);
+      expect(wipeDecryptedMediaForOwner).toHaveBeenCalledWith(PK);
+      expect(await AsyncStorage.getItem(`wallet_list_${PK}`)).toBeNull();
+      expect(await AsyncStorage.getItem(`dm-kind4-retries:${PK}`)).toBeNull();
+      expect(warn).toHaveBeenCalledWith('[wipeAccountCaches] remote media wipe failed:', error);
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+      dmSpy.mockRestore();
+      warn.mockRestore();
     }
   },
 );

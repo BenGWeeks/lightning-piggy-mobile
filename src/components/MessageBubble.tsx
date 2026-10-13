@@ -1,3 +1,5 @@
+import { useGifMedia } from '../hooks/useGifMedia';
+import TapToLoadMedia, { displayHost } from './TapToLoadMedia';
 import { npubEncode } from 'nostr-tools/nip19';
 import MessageReactionRow from './MessageReactionRow';
 import OutgoingBubbleBackground from './OutgoingBubbleBackground';
@@ -25,8 +27,7 @@ import {
 } from '../utils/messageContent';
 import type { PollTally } from '../utils/nip88Poll';
 import MessageFileBubble from './MessageFileBubble';
-import { isSupportedImageUrl } from '../utils/imageUrl';
-import { isPublicHttpUrl } from '../utils/publicUrl';
+import { useSharedContactAvatar } from '../hooks/useSharedContactAvatar';
 import { type DeliveryStatus } from '../utils/dmDeliveryStatus';
 import { resendPayloadFor } from '../utils/messageInfo';
 import type { ShowMessageInfoArgs } from '../hooks/useMessageInfoSheet';
@@ -202,9 +203,20 @@ const MessageBubble: React.FC<Props> = ({
   edited,
   autoLoadMedia,
 }) => {
+  const contact = content.kind === 'text' ? extractSharedContact(content.text) : null;
+  const contactAvatarUri = useSharedContactAvatar(
+    contact ? sharedProfiles?.[contact.pubkey]?.picture : undefined,
+    autoLoadMedia,
+  );
   const colors = useThemeColors();
   const styles = useMemo(() => createMessageBubbleStyles(colors), [colors]);
   const { t } = useLocale();
+  const {
+    uri: gifUri,
+    loadAllowed: gifLoadAllowed,
+    reveal: revealGif,
+    safe: gifSafe,
+  } = useGifMedia(id, content.kind === 'gif' ? content.url : null, autoLoadMedia);
 
   // Sender label (group bubbles, incoming) + a Marmot reply's quote: one header
   // slot every variant renders, so photo / GIF / invoice replies show it too.
@@ -286,24 +298,45 @@ const MessageBubble: React.FC<Props> = ({
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
         <TouchableOpacity
           activeOpacity={0.85}
-          onPress={() => onOpenGifFullscreen?.(content.url)}
+          onPress={
+            gifSafe
+              ? gifLoadAllowed
+                ? () => gifUri && onOpenGifFullscreen?.(gifUri)
+                : revealGif
+              : undefined
+          }
           onLongPress={onLongPress}
           delayLongPress={350}
           style={[styles.gifCard, fromMe ? styles.gifCardMe : styles.gifCardThem]}
-          accessibilityLabel={fromMe ? t('messageBubble.gifSent') : t('messageBubble.gifReceived')}
-          accessibilityRole="imagebutton"
+          accessibilityLabel={
+            !gifLoadAllowed && gifSafe
+              ? t('messageBubble.loadImageA11y', { host: displayHost(content.url) })
+              : fromMe
+                ? t('messageBubble.gifSent')
+                : t('messageBubble.gifReceived')
+          }
+          accessibilityRole={!gifLoadAllowed ? 'button' : 'imagebutton'}
           testID={`${testIdPrefix}-gif-${id}`}
         >
           <OutgoingBubbleBackground fromMe={fromMe} />
           {BubbleHeader}
-          <ExpoImage
-            source={{ uri: content.url }}
-            style={styles.gifImage}
-            contentFit="cover"
-            cachePolicy="memory-disk"
-            transition={150}
-            accessibilityIgnoresInvertColors
-          />
+          {!gifSafe || !gifLoadAllowed ? (
+            <TapToLoadMedia
+              variant="image"
+              url={content.url}
+              fromMe={fromMe}
+              testID={`${testIdPrefix}-gif-${gifSafe ? 'tap-to-load' : 'blocked'}-${id}`}
+            />
+          ) : gifUri ? (
+            <ExpoImage
+              source={{ uri: gifUri }}
+              style={styles.gifImage}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+              transition={150}
+              accessibilityIgnoresInvertColors
+            />
+          ) : null}
           {renderFooter([styles.gifTime, fromMe && styles.gifTimeMe])}
         </TouchableOpacity>
       </View>,
@@ -570,6 +603,7 @@ const MessageBubble: React.FC<Props> = ({
         nonceHex={voice.nonceHex}
         marmot={voice.marmot}
         mime={voice.mime}
+        size={voice.size}
         fromMe={fromMe}
         autoLoad={autoLoadMedia}
         createdAt={createdAt}
@@ -782,15 +816,12 @@ const MessageBubble: React.FC<Props> = ({
               {/* The shared profile's picture URL is chosen by whoever published
                   it, so it only loads for trusted senders and public hosts
                   (#1338); otherwise the silhouette stays. */}
-              {prof?.picture &&
-              autoLoadMedia &&
-              isSupportedImageUrl(prof.picture) &&
-              isPublicHttpUrl(prof.picture) ? (
+              {contactAvatarUri ? (
                 <ExpoImage
-                  source={{ uri: prof.picture }}
+                  source={{ uri: contactAvatarUri }}
                   style={[StyleSheet.absoluteFillObject, { borderRadius: 22 }]}
                   cachePolicy="memory-disk"
-                  recyclingKey={prof.picture}
+                  recyclingKey={contactAvatarUri}
                   autoplay={false}
                 />
               ) : null}

@@ -1309,7 +1309,9 @@
     "fileWarningTitle": "Potentially dangerous file",
     "fileWarning": "This file may contain executable or active content. Save only if you trust the sender. Do not open or install it without checking it first.",
     "fileVerificationFailed": "File failed verification",
-    "fileTypeMismatch": "Filename does not match the declared type: {{type}}"
+    "fileTypeMismatch": "Filename does not match the declared type: {{type}}",
+    "blockedLink": "Blocked link",
+    "invalidUpload": "The storage server returned an invalid media URL. Please try another server."
   },
   "messageBubbleFooter": {
     "edited": "Edited",

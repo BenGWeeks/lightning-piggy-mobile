@@ -1,4 +1,5 @@
 import { parseFileAttachment, type FileAttachment } from './fileAttachment';
+import { checkRemoteUrl } from './remoteUrlPolicy';
 import { decode as bolt11Decode } from 'light-bolt11-decoder';
 import { decodeProfileReference } from '../services/nostrService';
 import { extractGifUrl } from '../services/giphyService';
@@ -92,6 +93,8 @@ export interface ParsedVoiceNote {
   url: string;
   mime: string;
   encrypted: boolean;
+  blocked?: boolean;
+  size?: number;
   keyHex?: string;
   nonceHex?: string;
   /** Set for a Marmot (MIP-04) voice note — decrypted with these instead of AES-GCM. */
@@ -114,6 +117,8 @@ export function parseVoiceNote(text: string): ParsedVoiceNote | null {
     // on unrelated fragments like `#lpe=10` and try to decrypt them.
     if (params.get('lpe') === '1') {
       const url = trimmed.slice(0, hashIdx);
+      const blocked = !checkRemoteUrl(url, { kind: 'media' }).ok;
+      const size = params.has('s') ? Number(params.get('s')) : undefined;
       const keyHex = params.get('k') ?? undefined;
       const nonceHex = params.get('n') ?? undefined;
       const mime = params.get('m') ?? 'application/octet-stream';
@@ -124,16 +129,41 @@ export function parseVoiceNote(text: string): ParsedVoiceNote | null {
       const alg = params.get('alg') ?? 'aes-gcm';
       if (isMarmotMediaVersion(alg)) {
         const marmot = parseMarmotMedia(alg, mime, nonceHex, params, 'audio/');
-        return marmot && { url, mime, encrypted: true, nonceHex, marmot };
+        return (
+          marmot && {
+            url,
+            mime,
+            encrypted: true,
+            nonceHex,
+            marmot,
+            ...(blocked ? { blocked } : {}),
+            size,
+          }
+        );
       }
       if (alg !== 'aes-gcm') return null;
       // Only audio here — encrypted images are handled separately (#688).
       if (!keyHex || !nonceHex || !mime.startsWith('audio/')) return null;
-      return { url, mime, encrypted: true, keyHex, nonceHex };
+      return {
+        url,
+        mime,
+        encrypted: true,
+        keyHex,
+        nonceHex,
+        ...(blocked ? { blocked } : {}),
+        size,
+      };
     }
   }
   const plain = extractAudioUrl(trimmed);
-  return plain ? { url: plain, mime: 'audio/mp4', encrypted: false } : null;
+  return plain
+    ? {
+        url: plain,
+        mime: 'audio/mp4',
+        encrypted: false,
+        ...(!checkRemoteUrl(plain, { kind: 'media' }).ok ? { blocked: true } : {}),
+      }
+    : null;
 }
 
 /**
@@ -160,6 +190,8 @@ export interface ParsedImageMessage {
   url: string;
   mime: string;
   encrypted: boolean;
+  blocked?: boolean;
+  size?: number;
   keyHex?: string;
   nonceHex?: string;
   /** Set for a Marmot (MIP-04) photo — decrypted with these instead of AES-GCM. */
@@ -193,13 +225,25 @@ export function parseImageMessage(text: string): ParsedImageMessage | null {
     // on unrelated fragments like `#lpe=10` and try to decrypt them.
     if (params.get('lpe') === '1') {
       const url = trimmed.slice(0, hashIdx);
+      const blocked = !checkRemoteUrl(url, { kind: 'media' }).ok;
+      const size = params.has('s') ? Number(params.get('s')) : undefined;
       const keyHex = params.get('k') ?? undefined;
       const nonceHex = params.get('n') ?? undefined;
       const mime = params.get('m') ?? 'application/octet-stream';
       const alg = params.get('alg') ?? 'aes-gcm';
       if (isMarmotMediaVersion(alg)) {
         const marmot = parseMarmotMedia(alg, mime, nonceHex, params, 'image/');
-        return marmot && { url, mime, encrypted: true, nonceHex, marmot };
+        return (
+          marmot && {
+            url,
+            mime,
+            encrypted: true,
+            nonceHex,
+            marmot,
+            ...(blocked ? { blocked } : {}),
+            size,
+          }
+        );
       }
       // Otherwise we only implement AES-GCM (see encryptedFile.ts). A kind-15
       // file with a different `alg` falls back to plain rendering rather than
@@ -208,11 +252,26 @@ export function parseImageMessage(text: string): ParsedImageMessage | null {
       if (alg !== 'aes-gcm') return null;
       // Only images here — encrypted audio is handled by parseVoiceNote.
       if (!keyHex || !nonceHex || !mime.startsWith('image/')) return null;
-      return { url, mime, encrypted: true, keyHex, nonceHex };
+      return {
+        url,
+        mime,
+        encrypted: true,
+        keyHex,
+        nonceHex,
+        ...(blocked ? { blocked } : {}),
+        size,
+      };
     }
   }
   const plain = extractImageUrl(trimmed);
-  return plain ? { url: plain, mime: 'image/jpeg', encrypted: false } : null;
+  return plain
+    ? {
+        url: plain,
+        mime: 'image/jpeg',
+        encrypted: false,
+        ...(!checkRemoteUrl(plain, { kind: 'media' }).ok ? { blocked: true } : {}),
+      }
+    : null;
 }
 
 /** The MIP-04 fields of a `#lpe=1&alg=encrypted-media-v*` fragment, or null

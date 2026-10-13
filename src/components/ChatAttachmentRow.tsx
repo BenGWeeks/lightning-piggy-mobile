@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import { FileText, Link, Mic, ImageIcon } from 'lucide-react-native';
@@ -6,13 +6,10 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createChatToolsStyles } from '../styles/ChatTools.styles';
 import type { ChatAttachment } from '../utils/chatAttachments';
-import {
-  peekDecryptedMedia,
-  resolveDecryptedMedia,
-  type EncryptedMediaRef,
-} from '../services/decryptedMediaCache';
+import type { EncryptedMediaRef } from '../services/decryptedMediaCache';
 import { useTapToReveal } from '../hooks/useTapToReveal';
-import { isPublicHttpUrl } from '../utils/publicUrl';
+import { checkRemoteUrl } from '../utils/remoteUrlPolicy';
+import { useImageMediaUri } from '../hooks/useImageMediaUri';
 /** Encrypted thumbnails use the same account-scoped cache as chat bubbles. */
 function ChatAttachmentRow({
   item,
@@ -34,23 +31,9 @@ function ChatAttachmentRow({
   );
   const [allowed, reveal] = useTapToReveal(
     `chat-media:${item.id}:${item.url}`,
-    autoLoad && isPublicHttpUrl(item.url),
+    autoLoad && checkRemoteUrl(item.url, { kind: 'media' }).ok,
   );
-  const [uri, setUri] = useState<string | null>(() =>
-    item.image?.encrypted ? peekDecryptedMedia(ref) : item.image ? item.url : null,
-  );
-  useEffect(() => {
-    let cancelled = false;
-    if (allowed && item.image?.encrypted)
-      void resolveDecryptedMedia(ref)
-        .then((value) => {
-          if (!cancelled) setUri(value);
-        })
-        .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [allowed, item.image?.encrypted, ref]);
+  const { uri } = useImageMediaUri(ref, !!item.image?.encrypted, allowed && !!item.image);
   const Icon =
     item.kind === 'voice'
       ? Mic
@@ -60,6 +43,7 @@ function ChatAttachmentRow({
           ? Link
           : ImageIcon;
   const press = () => {
+    if (!checkRemoteUrl(item.url, { kind: 'media' }).ok) return;
     if (item.image && !allowed) {
       reveal();
       return;
@@ -92,7 +76,11 @@ function ChatAttachmentRow({
           {item.kind === 'voice' ? t('chatMenu.voice') : item.label}
         </Text>
         <Text style={styles.muted} numberOfLines={1}>
-          {item.kind === 'image' && !allowed ? t('chatMenu.loadMedia') : item.url}
+          {!checkRemoteUrl(item.url, { kind: 'media' }).ok
+            ? t('messageBubble.blockedLink')
+            : item.kind === 'image' && !allowed
+              ? t('chatMenu.loadMedia')
+              : item.url}
         </Text>
       </View>
     </TouchableOpacity>

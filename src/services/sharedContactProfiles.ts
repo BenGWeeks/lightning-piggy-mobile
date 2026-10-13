@@ -4,7 +4,7 @@ import { PROFILE_RELAYS } from './nostrRelayDefaults';
 import * as profileCache from './zapSenderProfileStorage';
 import { parseProfileContent } from '../utils/profileContent';
 import { slimDisplayProfile } from '../utils/profileSanitize';
-import { isPublicRelayUrl } from '../utils/publicUrl';
+import { isSafeRelayHint as isPublicRelayUrl } from '../utils/remoteUrlPolicy';
 import type { NostrProfile } from '../types/nostr';
 import type { SharedContactRef } from '../utils/messageContent';
 
@@ -43,7 +43,7 @@ export async function resolveSharedContactProfiles(
     // hits so shared-card taps retain Zap eligibility without trusting storage.
     const hints = [...new Set(batch.flatMap((ref) => ref.relays).filter(isPublicRelayUrl))].slice(
       0,
-      5,
+      3,
     );
     const relays = [...new Set([...PROFILE_RELAYS, ...hints])];
     await fetchProfilesBatch(

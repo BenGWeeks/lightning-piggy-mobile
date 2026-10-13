@@ -151,7 +151,7 @@ Cached contact data in AsyncStorage is also cleared.
 === Network Security
 
 * All relay connections use `wss://` (WebSocket Secure)
-* With a signer, image uploads go to configured Blossom servers; without one, `uploadBlob` uses nostr.build over HTTPS. Saved Blossom URLs are not checked for an HTTPS scheme, so a configured `http://` server can receive uploads.
+* With a signer, image uploads go to configured Blossom servers; without one, `uploadBlob` uses nostr.build over HTTPS. Configured Blossom servers and returned descriptors must satisfy the shared HTTPS remote URL policy before use.
 * LNURL-pay callbacks use HTTPS
 
 ==== Automatic requests from chat messages (#1338)
@@ -241,3 +241,22 @@ What it cannot protect against (out of scope at the app layer):
 * Keys/credentials go in `expo-secure-store`; bulk data never does (Keychain items must stay small).
 * Any migration off a plaintext store must follow the `dmStoreMigration` ordering: populate the encrypted copy, delete the plaintext, **verify** it is gone, only then set the migrated flag.
 * Every wipe path (logout, account removal) must cover new keys — add them to `wipeAccountCaches` / `wipeDmStoresForAccount` in the same PR that introduces them.
+
+=== Remote content URL and download policy
+
+`src/utils/remoteUrlPolicy.ts` validates remote media, preview, relay-hint and
+Blossom descriptor URLs. Media and previews require HTTPS; relay hints require
+WSS. Default-port public hosts without credentials are accepted. URL validation
+runs before requests, including every manually followed redirect. DNS resolution
+is owned by the platform; hostname validation cannot prevent DNS rebinding.
+
+`fetchBounded` uses Expo's native streaming fetch, a deadline and a hard byte
+limit. Chat media is capped at 50 MiB (kind-15 advertised sizes can lower the
+limit), preview HTML at 1 MiB and preview images at 10 MiB. Image and audio
+renderers receive local cache URIs after a bounded download. Existing sender
+trust gates and the preview preference still control loading. Blocked media
+shows a translated placeholder. Blossom descriptors must match the upload
+server's origin and the uploaded blob's SHA-256 path segment. LNURL-pay and
+LNURL-withdraw endpoints and their callbacks (deep links, NFC vouchers, hunt
+caches, scanned QR codes) use the same policy and transport under the `payment`
+kind, which only differs by allowing the longer bolt11 / comment query strings.

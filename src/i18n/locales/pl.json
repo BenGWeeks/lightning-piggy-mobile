@@ -1309,7 +1309,9 @@
     "fileWarningTitle": "Potencjalnie niebezpieczny plik",
     "fileWarning": "Ten plik może zawierać kod wykonywalny lub aktywną zawartość. Zapisz go tylko, jeśli ufasz nadawcy. Nie otwieraj ani nie instaluj go bez wcześniejszego sprawdzenia.",
     "fileVerificationFailed": "Plik nie przeszedł weryfikacji",
-    "fileTypeMismatch": "Nazwa pliku nie odpowiada zadeklarowanemu typowi: {{type}}"
+    "fileTypeMismatch": "Nazwa pliku nie odpowiada zadeklarowanemu typowi: {{type}}",
+    "blockedLink": "Zablokowany link",
+    "invalidUpload": "Serwer przechowywania zwrócił nieprawidłowy adres URL multimediów. Spróbuj innego serwera."
   },
   "messageBubbleFooter": {
     "edited": "Edytowano",

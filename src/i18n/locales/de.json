@@ -1309,7 +1309,9 @@
     "fileWarningTitle": "Möglicherweise gefährliche Datei",
     "fileWarning": "Diese Datei kann ausführbaren Code oder aktive Inhalte enthalten. Speichere sie nur, wenn du dem Absender vertraust. Öffne oder installiere sie erst nach einer Prüfung.",
     "fileVerificationFailed": "Dateiüberprüfung fehlgeschlagen",
-    "fileTypeMismatch": "Dateiname passt nicht zum angegebenen Typ: {{type}}"
+    "fileTypeMismatch": "Dateiname passt nicht zum angegebenen Typ: {{type}}",
+    "blockedLink": "Blockierter Link",
+    "invalidUpload": "Der Speicherserver hat eine ungültige Medien-URL zurückgegeben. Bitte versuche einen anderen Server."
   },
   "messageBubbleFooter": {
     "edited": "Bearbeitet",
