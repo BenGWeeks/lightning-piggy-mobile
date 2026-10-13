@@ -25,7 +25,7 @@ import { routeMarmotWelcome } from '../services/marmotWelcomeRouter';
 import type { LiveSubFollowGateBuffer } from './liveSubFollowGate';
 
 /**
- * The live sub's post-unwrap kind-1059 surface path: group-route →
+ * The live sub's post-unwrap kind-1059 surface path: Welcome → group-route →
  * partnership → follow-gate → encrypted-store persist → inbox surface →
  * OS notification. Extracted VERBATIM from `startLiveDmSubscription`'s
  * `handleInboxEvent` (Stage 2 M2, #1036) so the native relay engine — which
@@ -104,6 +104,20 @@ export function createLiveRumorSurfacer(
         .catch(() => undefined);
     };
 
+    if (
+      await routeMarmotWelcome(
+        rumor,
+        viewerPubkey,
+        wrapId,
+        followPubkeysRef.current.has(rumor.pubkey?.toLowerCase() ?? ''),
+        isFreshArrival(rumor.created_at),
+        shouldAbort,
+      )
+    ) {
+      nothingToSee();
+      return;
+    }
+
     // Group-route first — multi-recipient rumors are owned by the
     // group surface, not the 1:1 inbox. tryRouteGroupRumor handles
     // appendGroupMessage + notifyGroupMessage internally so an open
@@ -172,8 +186,6 @@ export function createLiveRumorSurfacer(
       return;
     }
 
-    // Trusted-sender Marmot invite: join it (the row below still records it).
-    routeMarmotWelcome(rumor, viewerPubkey);
     const wrapText = textForRumor(rumor);
     const wrapRow: DmMessageRow = {
       owner: viewerPubkey,

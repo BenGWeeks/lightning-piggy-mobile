@@ -3246,5 +3246,14 @@
     "websiteHost": "lightningpiggy.com",
     "licenceType": "MIT",
     "lightningAddress": "Lightning-cím (LUD-16)"
+  },
+  "marmotInvitation": {
+    "pending": "Függőben lévő meghívás",
+    "accept": "Elfogadás",
+    "decline": "Elutasítás",
+    "group": "Csoportmeghívás",
+    "notification": "Új csoportmeghívás",
+    "retry": "Meghívás elfogadva. Az alkalmazás újraindításakor újra megpróbálunk csatlakozni.",
+    "error": "Nem sikerült frissíteni a meghívást. Próbáld újra."
   }
 }

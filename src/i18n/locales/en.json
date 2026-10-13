@@ -3246,5 +3246,14 @@
     "websiteHost": "lightningpiggy.com",
     "licenceType": "MIT",
     "lightningAddress": "Lightning Address (LUD-16)"
+  },
+  "marmotInvitation": {
+    "pending": "Invitation pending",
+    "accept": "Accept",
+    "decline": "Decline",
+    "group": "Group invitation",
+    "notification": "New group invitation",
+    "retry": "Invitation accepted. Joining will retry when the app restarts.",
+    "error": "Could not update the invitation. Please try again."
   }
 }

@@ -3286,5 +3286,14 @@
     "websiteHost": "lightningpiggy.com",
     "licenceType": "MIT",
     "lightningAddress": "Adres Lightning (LUD-16)"
+  },
+  "marmotInvitation": {
+    "pending": "Zaproszenie oczekuje",
+    "accept": "Akceptuj",
+    "decline": "Odrzuć",
+    "group": "Zaproszenie do grupy",
+    "notification": "Nowe zaproszenie do grupy",
+    "retry": "Zaproszenie zaakceptowane. Ponowimy próbę dołączenia po ponownym uruchomieniu aplikacji.",
+    "error": "Nie udało się zaktualizować zaproszenia. Spróbuj ponownie."
   }
 }

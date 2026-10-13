@@ -45,6 +45,7 @@ export async function ingestInboxNip17ForSigner(args: {
   ownerPubkey: string;
   wraps: readonly RawGiftWrapEvent[];
   passesFollowGate: (pk: string) => boolean;
+  isFollowed?: (pk: string) => boolean;
   bypassSkipSet?: boolean;
   isColdStart?: boolean;
   signal?: AbortSignal;
@@ -56,6 +57,7 @@ export async function ingestInboxNip17ForSigner(args: {
     ownerPubkey,
     wraps,
     passesFollowGate,
+    isFollowed,
     bypassSkipSet,
     isColdStart,
     signal,
@@ -73,6 +75,7 @@ export async function ingestInboxNip17ForSigner(args: {
       wraps,
       unwrap: (wrap) => unwrapWrapNsec(wrap, secretKey, onSkip),
       passesFollowGate,
+      isFollowed,
       skipKey: perAccountKey(NSEC_NIP17_SKIP_KEY_BASE, ownerPubkey),
       bypassSkipSet,
       isColdStart,
@@ -85,6 +88,7 @@ export async function ingestInboxNip17ForSigner(args: {
       wraps,
       unwrap: (wrap) => unwrapWrapViaNip44(wrap, amberNip44DecryptSilent, onSkip),
       passesFollowGate,
+      isFollowed,
       skipKey: perAccountKey(AMBER_NIP17_SKIP_KEY_BASE, ownerPubkey),
       bypassSkipSet,
       isColdStart,
@@ -98,6 +102,7 @@ export async function ingestInboxNip17ForSigner(args: {
       wraps,
       unwrap: nip46Unwrap(ownerPubkey, onSkip),
       passesFollowGate,
+      isFollowed,
       skipKey: perAccountKey(NIP46_NIP17_SKIP_KEY_BASE, ownerPubkey),
       bypassSkipSet,
       isColdStart,

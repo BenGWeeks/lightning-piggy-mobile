@@ -1,3 +1,4 @@
+import { MarmotInvitations } from '../components/MarmotInvitations';
 import { useLocale } from '../contexts/LocaleContext';
 import { useLiveMessageIndicator } from '../hooks/useLiveMessageIndicator';
 import NewMessagesPill from '../components/NewMessagesPill';
@@ -803,6 +804,7 @@ const MessagesScreen: React.FC = () => {
             )}
           </View>
         )}
+        {isLoggedIn && <MarmotInvitations />}
         {!isLoggedIn ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyTitle}>{t('messagesScreen.connectNostr')}</Text>
