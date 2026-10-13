@@ -1,3 +1,5 @@
+import { getActivePubkey } from '../services/walletStorageService';
+import { t } from '../i18n';
 import { Alert } from '../components/BrandedAlert';
 import Toast from '../components/BrandedToast';
 import * as boltzService from '../services/boltzService';
@@ -124,6 +126,14 @@ export async function recoverSubmarineRefund(
   swap: PersistedSubmarineSwap,
   locale?: string,
 ): Promise<void> {
+  if (swap.externalFunding) {
+    if (swap.ownerPubkey && swap.ownerPubkey !== getActivePubkey()) return;
+    if (!shownWaiting.has(swap.id)) {
+      shownWaiting.add(swap.id);
+      notifySwapAttention(t('externalSwap.failed'), t('externalSwap.refund'));
+    }
+    return;
+  }
   if (!swap.swapTree) {
     // Older records (pre-recovery) lack the script tree — nothing we can
     // reconstruct, so point the user at whoever runs the swap server.

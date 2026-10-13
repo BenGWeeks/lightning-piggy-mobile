@@ -1,0 +1,113 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Watch-only Swap to Lightning (never pay)
+---
+# Manual test Piggy run only. Requires a connected Lightning wallet and the
+# flow-114 test-xpub fixture named Watch Wallet 1 (override WATCH_WALLET).
+# No clearState, signing, payment, or refund. With no swap server, stop at setup.
+# The payment-screen branch creates only an unpaid request at the existing server.
+# Requests 26,000 sats; this must fit the configured backend limits.
+- extendedWaitUntil:
+    visible:
+      id: tab-wallets
+    timeout: 90000
+- tapOn:
+    id: external-swap-close
+    optional: true
+- tapOn:
+    id: transfer-cancel
+    optional: true
+- tapOn:
+    id: tab-wallets
+- tapOn:
+    id: btn-transfer
+- extendedWaitUntil:
+    visible:
+      id: transfer-source-dropdown
+    timeout: 20000
+- tapOn:
+    id: transfer-source-dropdown
+- extendedWaitUntil:
+    visible:
+      text: '${WATCH_WALLET || "Watch Wallet 1"} .*Pay from your other wallet'
+    timeout: 10000
+- tapOn:
+    text: '${WATCH_WALLET || "Watch Wallet 1"} .*Pay from your other wallet'
+- extendedWaitUntil:
+    visible:
+      id: external-swap-flow
+    timeout: 20000
+- extendedWaitUntil:
+    notVisible:
+      id: external-swap-quote-loading
+    timeout: 30000
+- runFlow:
+    when:
+      visible:
+        id: external-swap-settings
+    commands:
+      - assertVisible:
+          id: transfer-swap-quote-error
+      - assertVisible:
+          id: external-swap-create
+          enabled: false
+- runFlow:
+    when:
+      visible:
+        id: external-swap-amount
+        enabled: true
+    commands:
+      - tapOn:
+          id: external-swap-amount
+      - extendedWaitUntil:
+          visible:
+            id: amount-entry-input
+          timeout: 10000
+      - scrollUntilVisible:
+          element:
+            id: amount-entry-key-2
+          direction: DOWN
+          timeout: 10000
+      - tapOn:
+          id: amount-entry-key-2
+      - tapOn:
+          id: amount-entry-key-6
+      - scrollUntilVisible:
+          element:
+            id: amount-entry-key-0
+          direction: DOWN
+          timeout: 10000
+      - repeat:
+          times: 3
+          commands:
+            - tapOn:
+                id: amount-entry-key-0
+      - scrollUntilVisible:
+          element:
+            id: amount-entry-confirm
+          direction: UP
+          timeout: 10000
+      - tapOn:
+          id: amount-entry-confirm
+      - scrollUntilVisible:
+          element:
+            id: external-swap-create
+          direction: DOWN
+          timeout: 10000
+      - extendedWaitUntil:
+          visible:
+            id: external-swap-create
+            enabled: true
+          timeout: 15000
+      - tapOn:
+          id: external-swap-create
+      - extendedWaitUntil:
+          visible:
+            id: external-swap-exact-amount
+          timeout: 60000
+      - assertVisible:
+          id: external-swap-address
+      - assertVisible:
+          id: external-swap-qr
+      # Stop here: never pay, copy private recovery keys, or claim a refund.
+- assertVisible:
+    id: 'external-swap-settings|external-swap-payment'

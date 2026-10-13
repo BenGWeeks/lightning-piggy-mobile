@@ -1,4 +1,10 @@
-import { getTransferSourceWallets } from '../utils/transferSourceWallets';
+import ExternalFundingSwap from './ExternalFundingSwap';
+import {
+  getTransferDestinationWallets,
+  selectTransferDestination,
+} from '../utils/transferDestinationWallets';
+import { useTransferProfileNames } from '../hooks/useTransferProfileNames';
+import { isMoveSource, isExternalFundingSource } from '../utils/moveSources';
 import { formatTransferWalletLabel, formatTransferProfileLabel } from '../utils/transferLabels';
 import TransferSwapQuoteStatus from './TransferSwapQuoteStatus';
 import { useTransferSwapFees } from '../utils/useTransferSwapFees';
@@ -22,7 +28,6 @@ import {
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
 import { BottomSheetModal } from './AccessibleBottomSheetModal';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import Toast from './BrandedToast';
 import { completeReverseSwap, createSwapWalletRefresher } from '../utils/swapCompletion';
 import * as swapRecoveryService from '../services/swapRecoveryService';
@@ -31,9 +36,7 @@ import { watchForwardSwap } from '../utils/forwardSwapWatch';
 import { paymentHashFromBolt11 } from '../utils/bolt11';
 import { useSwapSettleFollowUp } from '../hooks/useSwapSettleFollowUp';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
-import { useNostr, OWN_PROFILE_CACHE_KEY_BASE } from '../contexts/NostrContext';
-import { perAccountKey } from '../services/perAccountStorage';
-import type { NostrProfile } from '../types/nostr';
+import { useNostr } from '../contexts/NostrContext';
 import { useLocale } from '../contexts/LocaleContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createTransferSheetStyles } from '../styles/TransferSheet.styles';
@@ -118,7 +121,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   // which is unhelpful when you've named those accounts (e.g. "Middle
   // Piggy"). Phase-1-only (no relay fan-out) — the data we need is
   // always on disk if the user has ever switched to that profile.
-  const [profileNameById, setProfileNameById] = useState<Record<string, string>>({});
+  const profileNameById = useTransferProfileNames(visible, identities);
   const [satsValue, setSatsValue] = useState('');
   const [step, setStep] = useState<Step>('main');
   const [sending, setSending] = useState(false);
@@ -184,11 +187,13 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     return wallets.find((w) => w.id === destId) ?? null;
   }, [isCrossProfile, otherProfileWallets, wallets, destId]);
 
-  // Available wallets for source: NWC wallets that are connected, or hot wallets (mnemonic)
+  // Move sources include watch-only wallets funded from an external signer.
   // Always scoped to the ACTIVE profile — signing always happens with
   // the active pubkey, so a cross-profile transfer is "active profile
   // sends → other profile receives".
-  const sourceWallets = useMemo(() => getTransferSourceWallets(wallets), [wallets]);
+  const sourceWallets = useMemo(() => wallets.filter(isMoveSource), [wallets]);
+
+  const externalFunding = isExternalFundingSource(source);
 
   // Destination dropdown contents.
   //  - Same profile: live WalletState list (existing behaviour) —
@@ -203,16 +208,15 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   //    xpub blob is keyed by walletId, not pubkey, so onchainService
   //    can read it for any local profile). The two SendSheet-style
   //    routes (BIP-21 paste, lud16 string) work identically here.
-  const destWallets = useMemo<(WalletState | WalletMetadata)[]>(() => {
-    if (isCrossProfile) {
-      return otherProfileWallets.filter(
-        (w) => w.walletType === 'onchain' || w.walletType === 'nwc',
-      );
-    }
-    return wallets.filter(
-      (w) => w.id !== sourceId && (w.walletType === 'onchain' || w.isConnected),
-    );
-  }, [isCrossProfile, otherProfileWallets, wallets, sourceId]);
+  const destWallets = useMemo(
+    () =>
+      getTransferDestinationWallets(
+        source,
+        isCrossProfile ? otherProfileWallets : wallets,
+        isCrossProfile,
+      ),
+    [source, isCrossProfile, otherProfileWallets, wallets],
+  );
 
   // Determine transfer type
   const transferType = useMemo(() => {
@@ -237,14 +241,14 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     dest.walletType === 'nwc' &&
     !dest.lightningAddress;
 
-  const swapQuote = useTransferSwapFees(transferType, visible);
+  const swapQuote = useTransferSwapFees(transferType, visible && !externalFunding);
   const cachedBoltzFees = swapQuote.fees;
 
   const feeEstimate = useTransferFeeEstimate({
     transferType,
     currentSats,
     swapFees: cachedBoltzFees,
-    sourceId,
+    sourceId: externalFunding ? null : sourceId,
   });
 
   useEffect(() => {
@@ -257,7 +261,11 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       let defaultSource: string | null;
       let defaultDest: string | null;
 
-      if (isWatchOnly && activeWalletId) {
+      if (
+        isWatchOnly &&
+        activeWalletId &&
+        !wallets.some((w) => w.walletType === 'nwc' && w.isConnected)
+      ) {
         // Watch-only: default as destination, pick first sendable wallet as source
         defaultDest = activeWalletId;
         defaultSource = sourceWallets.find((w) => w.id !== activeWalletId)?.id ?? null;
@@ -360,52 +368,6 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       hideSub.remove();
     };
   }, []);
-
-  // Phase-1 (cache-only) profile-name hydration for the Profile
-  // dropdown — read each non-active identity's own-profile blob from
-  // per-account AsyncStorage so the row reads "Middle Piggy" rather
-  // than "npub1…tqp265". Same source AccountSwitcherSheet uses, no
-  // relay fan-out (the kind-0 is always on disk after the user has
-  // ever switched to that profile, and the relay fallback would slow
-  // the sheet open and add UI flicker).
-  useEffect(() => {
-    if (!visible || identities.length <= 1) return;
-    let cancelled = false;
-    (async () => {
-      const reads = await Promise.all(
-        identities.map(async (id) => {
-          // Hydrate every identity, including the active one — the
-          // active row's display name is rendered as "<Name> · default"
-          // by renderProfileLabel so the user can see *which* profile
-          // they're currently transferring from. Per Copilot review.
-          if (profileNameById[id.pubkey]) return null;
-          try {
-            const raw = await AsyncStorage.getItem(
-              perAccountKey(OWN_PROFILE_CACHE_KEY_BASE, id.pubkey),
-            );
-            if (!raw) return null;
-            const parsed = JSON.parse(raw) as NostrProfile;
-            const name = parsed?.displayName || parsed?.name || null;
-            if (!name) return null;
-            return { pubkey: id.pubkey, name };
-          } catch {
-            return null;
-          }
-        }),
-      );
-      if (cancelled) return;
-      const next: Record<string, string> = {};
-      for (const r of reads) if (r) next[r.pubkey] = r.name;
-      if (Object.keys(next).length > 0) {
-        setProfileNameById((prev) => ({ ...next, ...prev }));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // profileNameById omitted — re-running on every resolve creates a loop.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, identities, activePubkey]);
 
   const handleTransfer = async () => {
     if (!sourceId || !destId || !source || !dest || currentSats <= 0) return;
@@ -1040,11 +1002,14 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                           onPress={() => {
                             setSourceId(w.id);
                             setSourceDropdownOpen(false);
-                            // Adjust dest if same
-                            if (destId === w.id) {
-                              const alt = wallets.find((ww) => ww.id !== w.id);
-                              setDestId(alt?.id ?? null);
-                            }
+                            setDestId(
+                              selectTransferDestination(
+                                w,
+                                destId,
+                                isCrossProfile ? otherProfileWallets : wallets,
+                                isCrossProfile,
+                              ),
+                            );
                           }}
                         >
                           <Text
@@ -1054,6 +1019,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                             ]}
                           >
                             {formatTransferWalletLabel(w, formatLocale)}
+                            {isExternalFundingSource(w) ? ` · ${t('externalSwap.source')}` : ''}
                           </Text>
                         </TouchableOpacity>
                       ))}
@@ -1189,110 +1155,116 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                   )}
                 </View>
 
-                {/* Amount picker — opens dedicated amount-entry step */}
-                <Text style={styles.sectionLabel}>Amount</Text>
-                <TouchableOpacity
-                  style={styles.amountPickerRow}
-                  onPress={() => setStep('amount')}
-                  testID="transfer-amount-picker"
-                  accessibilityLabel="Enter move amount"
-                >
-                  {currentSats > 0 ? (
-                    <>
-                      <Text style={styles.amountPickerValue}>
-                        {currentSats.toLocaleString(formatLocale)} sats
-                      </Text>
-                      {btcPrice ? (
-                        <Text style={styles.amountPickerFiat}>
-                          {satsToFiatString(currentSats, btcPrice, currency, formatLocale)}
-                        </Text>
-                      ) : null}
-                    </>
-                  ) : (
-                    <Text style={styles.amountPickerPlaceholder}>Enter amount</Text>
-                  )}
-                </TouchableOpacity>
-
-                <TransferSwapQuoteStatus {...swapQuote} styles={styles} />
-
-                {/* Fee estimate */}
-                {feeEstimate && (
-                  <View style={styles.feeRow}>
-                    {(transferType === 'ln-to-onchain' || transferType === 'onchain-to-ln') && (
-                      <TouchableOpacity
-                        onPress={() => Linking.openURL('https://boltz.exchange')}
-                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                      >
-                        <Image
-                          source={require('../../assets/images/boltz-logo.png')}
-                          style={styles.boltzLogo}
-                          resizeMode="contain"
-                        />
-                      </TouchableOpacity>
-                    )}
-                    <View style={styles.feeLines}>
-                      <Text style={styles.feeText}>
-                        Estimated fee: {feeEstimate.split('\u00B7')[0].trim()}
-                      </Text>
-                      {feeEstimate.includes('\u00B7') && (
-                        <Text style={styles.feeText}>
-                          Estimated time: {feeEstimate.split('\u00B7')[1].trim()}
-                        </Text>
+                {externalFunding ? (
+                  <ExternalFundingSwap
+                    key={`${sourceId}-${destId}-${selectedProfilePubkey}`}
+                    sourceId={sourceId!}
+                    dest={dest?.walletType === 'nwc' ? dest : null}
+                    crossProfile={isCrossProfile}
+                    onClose={onClose}
+                  />
+                ) : (
+                  <>
+                    {/* Amount picker — opens dedicated amount-entry step */}
+                    <Text style={styles.sectionLabel}>Amount</Text>
+                    <TouchableOpacity
+                      style={styles.amountPickerRow}
+                      onPress={() => setStep('amount')}
+                      testID="transfer-amount-picker"
+                      accessibilityLabel="Enter move amount"
+                    >
+                      {currentSats > 0 ? (
+                        <>
+                          <Text style={styles.amountPickerValue}>
+                            {currentSats.toLocaleString(formatLocale)} sats
+                          </Text>
+                          {btcPrice ? (
+                            <Text style={styles.amountPickerFiat}>
+                              {satsToFiatString(currentSats, btcPrice, currency, formatLocale)}
+                            </Text>
+                          ) : null}
+                        </>
+                      ) : (
+                        <Text style={styles.amountPickerPlaceholder}>Enter amount</Text>
                       )}
-                    </View>
-                  </View>
-                )}
+                    </TouchableOpacity>
 
-                {/* Boltz minimum amount warning */}
-                {belowBoltzMin && (
-                  <Text style={styles.warningText}>
-                    Boltz swaps require a minimum of {boltzMin?.toLocaleString(formatLocale)} sats.
-                  </Text>
-                )}
+                    <TransferSwapQuoteStatus {...swapQuote} styles={styles} />
 
-                {/* Watch-only warning */}
-                {source?.walletType === 'onchain' && source?.onchainImportMethod !== 'mnemonic' && (
-                  <Text style={styles.warningText}>
-                    Watch-only wallets cannot send. Select a different wallet as source.
-                  </Text>
-                )}
+                    {/* Fee estimate */}
+                    {feeEstimate && (
+                      <View style={styles.feeRow}>
+                        {(transferType === 'ln-to-onchain' || transferType === 'onchain-to-ln') && (
+                          <TouchableOpacity
+                            onPress={() => Linking.openURL('https://boltz.exchange')}
+                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                          >
+                            <Image
+                              source={require('../../assets/images/boltz-logo.png')}
+                              style={styles.boltzLogo}
+                              resizeMode="contain"
+                            />
+                          </TouchableOpacity>
+                        )}
+                        <View style={styles.feeLines}>
+                          <Text style={styles.feeText}>
+                            Estimated fee: {feeEstimate.split('\u00B7')[0].trim()}
+                          </Text>
+                          {feeEstimate.includes('\u00B7') && (
+                            <Text style={styles.feeText}>
+                              Estimated time: {feeEstimate.split('\u00B7')[1].trim()}
+                            </Text>
+                          )}
+                        </View>
+                      </View>
+                    )}
 
-                {/* Cross-profile LN without lightning address — see #485.
+                    {/* Boltz minimum amount warning */}
+                    {belowBoltzMin && (
+                      <Text style={styles.warningText}>
+                        Boltz swaps require a minimum of {boltzMin?.toLocaleString(formatLocale)}{' '}
+                        sats.
+                      </Text>
+                    )}
+
+                    {/* Cross-profile LN without lightning address — see #485.
                     NWC-based invoice creation against another profile's
                     wallet isn't wired up yet (would require running that
                     profile's NWC client out-of-band). LNURL-pay via the
                     destination's lud16 is the only cross-profile LN path
                     today; this surfaces a clear remediation. */}
-                {crossProfileLnNoAddress && (
-                  <Text style={styles.warningText} testID="transfer-cross-profile-no-lud16">
-                    Set a lightning address on the destination wallet to receive cross-profile
-                    moves. On-chain destinations work without one.
-                  </Text>
-                )}
+                    {crossProfileLnNoAddress && (
+                      <Text style={styles.warningText} testID="transfer-cross-profile-no-lud16">
+                        Set a lightning address on the destination wallet to receive cross-profile
+                        moves. On-chain destinations work without one.
+                      </Text>
+                    )}
 
-                {/* Action buttons */}
-                <View style={styles.buttonRow}>
-                  <TouchableOpacity
-                    style={styles.cancelButton}
-                    onPress={onClose}
-                    testID="transfer-cancel"
-                    accessibilityLabel="Cancel move"
-                  >
-                    <Text style={styles.cancelButtonText}>Cancel</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[
-                      styles.transferButton,
-                      (!canTransfer || sending) && styles.buttonDisabled,
-                    ]}
-                    onPress={handleTransfer}
-                    disabled={!canTransfer || sending}
-                    testID="transfer-execute"
-                    accessibilityLabel="Execute move"
-                  >
-                    <Text style={styles.transferButtonText}>Move</Text>
-                  </TouchableOpacity>
-                </View>
+                    {/* Action buttons */}
+                    <View style={styles.buttonRow}>
+                      <TouchableOpacity
+                        style={styles.cancelButton}
+                        onPress={onClose}
+                        testID="transfer-cancel"
+                        accessibilityLabel="Cancel move"
+                      >
+                        <Text style={styles.cancelButtonText}>Cancel</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[
+                          styles.transferButton,
+                          (!canTransfer || sending) && styles.buttonDisabled,
+                        ]}
+                        onPress={handleTransfer}
+                        disabled={!canTransfer || sending}
+                        testID="transfer-execute"
+                        accessibilityLabel="Execute move"
+                      >
+                        <Text style={styles.transferButtonText}>Move</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                )}
               </>
             )}
           </>

@@ -1463,3 +1463,24 @@ disappears before checking the card. When reusing the reporting xpub fixture,
 `flow-114` handles the specific already-imported response by closing the
 wizard and selecting that existing wallet. Other import errors still fail
 the dismissal assertion.
+
+== Navigation hooks inside payment sheets (#1394)
+
+A component rendered through the bottom-sheet portal can sit outside the
+NavigationContainer even when its launching screen is inside it. Calling
+`useNavigation` or `useFocusEffect` there throws “Couldn't find a navigation
+object” when the sheet opens. Use the app's `navigationRef` for a settings
+link and tie sheet-only status subscriptions to mount/unmount. App-level
+swap settlement tracking remains independent of the sheet. Verify by opening
+the sheet on-device; a TypeScript check cannot detect the missing context.
+
+=== Reopening Move restores payment instructions but misses settlement (#1447)
+
+After an external-funding swap watcher rejects, a one-shot status read can
+restore pending payment instructions without tracking later payment or
+settlement. Keep the failed watcher's app-owned state and recovery callback,
+then re-arm the shared watcher when reopening validates a nonterminal status.
+Subscribers still share one watcher, and closing Move leaves settlement
+tracking running. The regression in `externalSwapTracking.test.ts` reproduces
+watcher failure → reopen → payment detected → settlement, including public
+state persistence and terminal recovery.
