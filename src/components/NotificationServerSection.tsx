@@ -1,11 +1,12 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { ChevronDown, ChevronRight, Copy, Server } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
 import { Image } from 'expo-image';
 import { useFocusEffect } from '@react-navigation/native';
 
 import { Alert } from './BrandedAlert';
+import BrandedSpinner from './BrandedSpinner';
 import { usePubkeyProfile } from '../hooks/usePubkeyProfile';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { notificationServerDisplay } from '../utils/notificationServerDisplay';
@@ -150,7 +151,7 @@ const NotificationServerSection: React.FC = () => {
       {settingsUnavailable ? (
         <Text style={shared.fieldHint}>{t('securityScreen.marmotPushUnavailable')}</Text>
       ) : customServer === undefined ? (
-        <ActivityIndicator color={colors.white} />
+        <BrandedSpinner onGradient />
       ) : (
         <View style={styles.card} testID="security-marmot-push-server-card">
           <View style={styles.identity}>
