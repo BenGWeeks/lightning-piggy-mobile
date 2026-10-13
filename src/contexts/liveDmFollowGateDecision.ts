@@ -18,9 +18,13 @@ export function gateLiveDm({
   cacheReady = false,
   bypassOwn = false,
   groupRumor,
+  rumor,
+  onEvict,
 }: {
   entry: DmInboxEntry;
   groupRumor?: DecodedRumor;
+  rumor?: DecodedRumor;
+  onEvict?: () => void;
   kind: 4 | 1059;
   follows: Set<string>;
   hydrated: boolean;
@@ -39,6 +43,8 @@ export function gateLiveDm({
       ...(groupRumor ? { groupRumor } : {}),
       entry: { ...entry, text },
       content: entry.text,
+      ...(rumor?.kind === MARMOT_WELCOME_KIND ? { rumor } : {}),
+      onEvict,
       ...(fresh && entry.wireKind !== MARMOT_WELCOME_KIND
         ? { notify: { title: 'New message', body: text } }
         : {}),

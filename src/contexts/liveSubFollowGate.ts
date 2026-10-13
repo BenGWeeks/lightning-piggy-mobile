@@ -1,4 +1,5 @@
 import { isFollowed } from '../utils/followPubkeys';
+import type { DecodedRumor } from '../utils/nip17Unwrap';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
 import type { DecodedRumor } from '../utils/nip17Unwrap';
 
@@ -18,6 +19,10 @@ export interface DeferredFollowGateEntry {
   groupRumor?: DecodedRumor;
   /** Original decrypted body; the inbox preview may redact structured content. */
   content?: string;
+  /** Full invitation needed by the Marmot router on release. */
+  rumor?: DecodedRumor;
+  /** Release an unpersisted dedup claim when bounded recovery evicts this item. */
+  onEvict?: () => void;
   // Notification payload to (re)fire if the partner becomes followed.
   // Undefined for own echoes / non-fresh arrivals that should stay silent.
   notify?: { title: string; body: string };
@@ -51,7 +56,11 @@ export function createLiveSubFollowGateBuffer(
       // Evict oldest (insertion-order) when at cap so the buffer stays bounded.
       if (deferred.size >= cap) {
         const oldest = deferred.keys().next().value;
-        if (oldest !== undefined) deferred.delete(oldest);
+        if (oldest !== undefined) {
+          const evicted = deferred.get(oldest);
+          deferred.delete(oldest);
+          evicted?.onEvict?.();
+        }
       }
       deferred.set(item.entry.id, item);
     },

@@ -1,5 +1,6 @@
 import { PROFILE_RELAYS } from '../services/nostrRelayDefaults';
 import { getEventHash } from 'nostr-tools/pure';
+import { captureFollowSession } from '../services/followSetEvents';
 import { adoptFollowSnapshot } from '../services/contactFollowFreshness';
 import {
   useCallback,
@@ -165,8 +166,9 @@ export function useContactActions({
   // verified kind-3 to build on, or the signer declined).
   const updateContactList = useCallback(
     (change: ContactChange): Promise<boolean> => {
+      const isCurrentSession = captureFollowSession();
       const run = async (): Promise<boolean> => {
-        if (!pubkey || !isLoggedIn) return false;
+        if (!pubkey || !isLoggedIn || !isCurrentSession()) return false;
         const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
         const update = await prepareContactListUpdate({
           pubkey,
@@ -207,6 +209,7 @@ export function useContactActions({
             id: update.changed ? getEventHash({ ...update.event, pubkey }) : update.base.id,
           },
           (next) => startTransition(() => setContacts(next)),
+          isCurrentSession,
         );
         // Bumps the *contacts* timestamp (the freshness clock for kind-3 list
         // reads), not the profiles one (#442).

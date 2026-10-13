@@ -47,6 +47,7 @@ export interface LiveRumorSurfaceDeps {
   isFreshArrival: (createdAtSec: number) => boolean;
   queueInboxEntry: (entry: DmInboxEntry) => void;
   knownWrapIds: Set<string>;
+  releaseWrapClaim?: (wrapId: string) => void;
   /** Append a task to the sub's serialised writeChain (with its load-bearing
    * trailing catch — see the note at the call in nostrLiveDmSub). */
   chainWrite: (task: () => Promise<void>) => void;
@@ -66,6 +67,9 @@ export function createLiveRumorSurfacer(
     isFreshArrival,
     queueInboxEntry,
     knownWrapIds,
+    releaseWrapClaim = (id) => {
+      knownWrapIds.delete(id);
+    },
     chainWrite,
   } = deps;
 
@@ -154,6 +158,8 @@ export function createLiveRumorSurfacer(
       },
       kind: 1059,
       groupRumor: routeResult.deferredGroupRumor,
+      rumor,
+      onEvict: () => releaseWrapClaim(wrapId),
       follows: followPubkeysRef.current,
       hydrated: isFollowHydrated(),
       cacheReady: isFollowCacheReady(),

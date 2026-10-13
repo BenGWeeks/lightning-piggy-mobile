@@ -143,3 +143,36 @@ it('confirmed empty relay results complete hydration', async () => {
   expect(finish).toHaveBeenCalledWith([]);
   expect(getFollowGateStore(OWNER).followHydratedRef.current).toBe(true);
 });
+
+it.each(['switch', 'sign-out'])(
+  'rejects an old refresh after %s and returning A→B→A',
+  async (transition) => {
+    let resolve!: (value: Awaited<ReturnType<typeof fetchLatestContactList>>) => void;
+    jest.mocked(fetchLatestContactList).mockReturnValueOnce(
+      new Promise((r) => {
+        resolve = r;
+      }),
+    );
+    const finish = jest.fn();
+    const pending = reconcileContactFollows(OWNER, [], null, jest.fn(), finish);
+    await flush();
+    clearFollowGateStores();
+    if (transition === 'switch') getFollowGateStore(BOB);
+    // The delayed A refresh completes while A is signed out / B is active.
+    resolve({ status: 'found', base: { tags: [['p', ALICE]], content: '', createdAt: 200 } });
+    await pending;
+    expect(finish).not.toHaveBeenCalled();
+    // Return to A: the old callback must not have recreated a hydrated store.
+    const returned = getFollowGateStore(OWNER);
+    expect(returned.adopted).toBe(false);
+    expect(returned.followHydratedRef.current).toBe(false);
+    expect(returned.followPubkeysRef.current.size).toBe(0);
+    jest.mocked(fetchLatestContactList).mockResolvedValueOnce({
+      status: 'found',
+      base: { tags: [['p', BOB]], content: '', createdAt: 300 },
+    });
+    await reconcileContactFollows(OWNER, [], null, jest.fn(), finish);
+    expect(returned.followHydratedRef.current).toBe(true);
+    expect([...returned.followPubkeysRef.current]).toEqual([BOB]);
+  },
+);

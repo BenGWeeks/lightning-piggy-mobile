@@ -4,6 +4,7 @@ import {
   readFollowSnapshot,
   resolveCachedFollowContacts,
 } from '../services/contactFollowFreshness';
+import { captureFollowSession } from '../services/followSetEvents';
 import { getUserRelays } from '../services/nostrRelayStorage';
 import type { NostrContact } from '../types/nostr';
 
@@ -15,14 +16,18 @@ export async function reconcileContactFollows(
   paint: (contacts: NostrContact[]) => void,
   finish: (contacts: NostrContact[]) => void,
 ): Promise<NostrContact[]> {
+  const isCurrentSession = captureFollowSession();
+  const paintCurrent = (next: NostrContact[]) => {
+    if (isCurrentSession()) paint(next);
+  };
   const snapshot = await readFollowSnapshot(pubkey);
   const contacts = snapshot?.contacts ?? cached ?? [];
-  paint(contacts);
+  paintCurrent(contacts);
   const configured = await getUserRelays();
   const fresh = await fetchFollowSnapshot(pubkey, [
     ...relayUrls,
     ...configured.filter((r) => r.read).map((r) => r.url),
   ]);
-  if (fresh) return (await adoptFollowSnapshot(pubkey, fresh, finish)).contacts;
-  return resolveCachedFollowContacts(pubkey, contacts, paint);
+  if (fresh) return (await adoptFollowSnapshot(pubkey, fresh, finish, isCurrentSession)).contacts;
+  return resolveCachedFollowContacts(pubkey, contacts, paintCurrent);
 }

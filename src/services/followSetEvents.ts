@@ -16,6 +16,14 @@ export function createFollowGateStore() {
   };
 }
 type FollowGateStore = ReturnType<typeof createFollowGateStore>;
+let sessionGeneration = 0;
+
+/** Capture before asynchronous follow work, including a queued local write. */
+export function captureFollowSession(): () => boolean {
+  const generation = sessionGeneration;
+  return () => generation === sessionGeneration;
+}
+
 const stores = new Map<string, FollowGateStore>();
 type Listener = () => void;
 const listeners = new Map<string, Set<Listener>>();
@@ -32,6 +40,7 @@ export function getFollowGateStore(owner: string): FollowGateStore {
 
 /** Account switch/sign-out only. Subscription teardown must never call this. */
 export function clearFollowGateStores(): void {
+  sessionGeneration++;
   for (const store of stores.values()) {
     store.followGateBufferRef.current.clear();
     store.followPubkeysRef.current = new Set();

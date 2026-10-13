@@ -1,3 +1,4 @@
+import { clearFollowGateStores, getFollowGateStore } from './followSetEvents';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   adoptFollowSnapshot,
@@ -110,4 +111,27 @@ it('replays a gated wrap exactly once when the refreshed follow list hydrates (#
   await adoptFollowSnapshot('owner', newer, hydrate);
   expect(replay).toHaveBeenCalledTimes(1);
   expect(buffer.size).toBe(0);
+});
+
+it('does not publish a queued adoption from an earlier login after A→B→A', async () => {
+  await AsyncStorage.clear();
+  clearFollowGateStores();
+  const finish = jest.fn();
+  const pending = adoptFollowSnapshot(
+    'account-a',
+    {
+      contacts: [{ pubkey: LITTLE, relay: null, petname: null, profile: null }],
+      createdAt: 200,
+    },
+    finish,
+  );
+  clearFollowGateStores();
+  getFollowGateStore('account-b');
+  clearFollowGateStores();
+  const returned = getFollowGateStore('account-a');
+  await pending;
+  expect(finish).not.toHaveBeenCalled();
+  expect(returned.adopted).toBe(false);
+  expect(returned.followHydratedRef.current).toBe(false);
+  expect(returned.followPubkeysRef.current.size).toBe(0);
 });

@@ -1,4 +1,4 @@
-import { publishFollowSet } from './followSetEvents';
+import { captureFollowSession, publishFollowSet } from './followSetEvents';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fetchLatestContactList } from './contactListSync';
 import { PROFILE_RELAYS } from './nostrRelayDefaults';
@@ -65,10 +65,13 @@ export function adoptFollowSnapshot(
   pubkey: string,
   candidate: FollowSnapshot,
   onAdopt?: (contacts: NostrContact[]) => void,
+  isCurrentSession = captureFollowSession(),
 ): Promise<FollowSnapshot> {
   const run = async () => {
     const best = newestFollowSnapshot(await readFollowSnapshot(pubkey), candidate);
+    if (!isCurrentSession()) return best;
     await AsyncStorage.setItem(perAccountKey(FOLLOW_SNAPSHOT_KEY, pubkey), JSON.stringify(best));
+    if (!isCurrentSession()) return best;
     publishFollowSet(pubkey, best.contacts, best.createdAt);
     onAdopt?.(best.contacts);
     return best;

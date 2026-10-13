@@ -1,3 +1,4 @@
+import { routeMarmotWelcome } from '../services/marmotWelcomeRouter';
 import { gateLiveDm, startFollowGateFallback } from './liveDmFollowGateDecision';
 import { isFollowed } from '../utils/followPubkeys';
 import { loadKind4ReplayCursor } from './kind4RetryStore';
@@ -227,6 +228,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         });
       return;
     }
+    if (item.rumor) routeMarmotWelcome(item.rumor, viewerPubkey);
     chainWrite(async () => {
       if (cancelled || !isCurrentOwner()) return;
       await upsertDmMessages([
@@ -294,6 +296,10 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     isFreshArrival,
     queueInboxEntry,
     knownWrapIds,
+    releaseWrapClaim: (id) => {
+      knownWrapIds.delete(id);
+      seen.delete(id);
+    },
     chainWrite,
   });
 

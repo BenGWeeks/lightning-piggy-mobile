@@ -23,7 +23,10 @@ import { clearFollowGateStores } from '../services/followSetEvents';
 import { createLiveSubFollowGateBuffer } from './liveSubFollowGate';
 import { createYieldScheduler } from './nostrDecryptPacing';
 import { nip04PlaintextCache } from './nostrSecretKeyCache';
+import { routeMarmotWelcome } from '../services/marmotWelcomeRouter';
 import { upsertDmMessages } from '../services/dmDb';
+
+jest.mock('../services/marmotWelcomeRouter', () => ({ routeMarmotWelcome: jest.fn() }));
 
 const mockSubscribe = jest.fn();
 let capturedOnEvent: ((ev: unknown) => void) | null = null;
@@ -693,6 +696,124 @@ describe('live plaintext marketplace order persistence', () => {
     finish();
     await flush();
     expect(mockNotifyDm).not.toHaveBeenCalled();
+    expect(mockFireNotification).not.toHaveBeenCalled();
+  });
+});
+
+describe('review replay delivery regressions', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('routes the full deferred Marmot invitation once after hydration and reopening', async () => {
+    const buffer = createLiveSubFollowGateBuffer();
+    const hydrated = { current: false };
+    const follows = { current: new Set<string>() };
+    const setDeferredReplay = jest.fn();
+    const params = makeParams({
+      followGateBuffer: buffer,
+      followHydratedRef: hydrated,
+      followPubkeysRef: follows,
+      setDeferredReplay,
+    });
+    const stop = startLiveDmSubscription(params);
+    await flush();
+    const rumor = {
+      kind: 444,
+      pubkey: ALICE,
+      created_at: 100,
+      tags: [
+        ['p', VIEWER],
+        ['relays', 'wss://marmot.example'],
+      ],
+      content: 'welcome',
+      partnership: { partnerPubkey: ALICE, fromMe: false },
+    };
+    const wrap = {
+      id: 'welcome-wrap',
+      kind: 1059,
+      pubkey: ALICE,
+      created_at: 100,
+      tags: [],
+      content: 'sealed',
+      rumor,
+    };
+    capturedOnEvent!(wrap);
+    await flush();
+    expect(buffer.size).toBe(1);
+    expect(routeMarmotWelcome).not.toHaveBeenCalled();
+    stop();
+    hydrated.current = true;
+    follows.current.add(ALICE);
+    startLiveDmSubscription(params);
+    await flush();
+    const replay = setDeferredReplay.mock.calls.at(-1)![0];
+    buffer.reevaluate(follows.current, replay);
+    buffer.reevaluate(follows.current, replay);
+    await flush();
+    capturedOnEvent!(wrap);
+    await flush();
+    expect(routeMarmotWelcome).toHaveBeenCalledTimes(1);
+    expect(routeMarmotWelcome).toHaveBeenCalledWith(rumor, VIEWER);
+    expect(upsertDmMessages).toHaveBeenCalledWith([
+      expect.objectContaining({
+        eventId: 'welcome-wrap',
+        wireKind: 444,
+        content: 'welcome',
+      }),
+    ]);
+    expect(mockFireNotification).not.toHaveBeenCalled();
+  });
+
+  it('recovers all 51 backlog wraps across bounded eviction, hydration and reopen', async () => {
+    const buffer = createLiveSubFollowGateBuffer();
+    const hydrated = { current: false };
+    const follows = { current: new Set<string>() };
+    const setDeferredReplay = jest.fn();
+    const params = makeParams({
+      followGateBuffer: buffer,
+      followHydratedRef: hydrated,
+      followPubkeysRef: follows,
+      setDeferredReplay,
+    });
+    const stop = startLiveDmSubscription(params);
+    await flush();
+    const wraps = Array.from({ length: 51 }, (_, i) => ({
+      id: `overflow-${i}`,
+      kind: 1059,
+      pubkey: ALICE,
+      created_at: 100,
+      tags: [],
+      content: 'sealed',
+      rumor: {
+        kind: 14,
+        created_at: 100,
+        content: `message ${i}`,
+        partnership: { partnerPubkey: ALICE, fromMe: false },
+      },
+    }));
+    for (const wrap of wraps) {
+      capturedOnEvent!(wrap);
+      await flush();
+    }
+    expect(buffer.size).toBe(50);
+    expect(params.knownWrapIdsRef.current.set.has('overflow-0')).toBe(false);
+    hydrated.current = true;
+    follows.current.add(ALICE);
+    buffer.reevaluate(follows.current, setDeferredReplay.mock.calls[0][0]);
+    await flush();
+    expect(upsertDmMessages).toHaveBeenCalledTimes(50);
+    stop();
+    startLiveDmSubscription(params);
+    await flush();
+    for (const wrap of wraps) {
+      capturedOnEvent!(wrap);
+      await flush();
+    }
+    const ids = jest
+      .mocked(upsertDmMessages)
+      .mock.calls.flatMap(([rows]) => rows.map((r) => r.eventId));
+    expect(ids).toHaveLength(51);
+    expect(new Set(ids).size).toBe(51);
+    expect(buffer.size).toBe(0);
     expect(mockFireNotification).not.toHaveBeenCalled();
   });
 });
