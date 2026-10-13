@@ -1,3 +1,4 @@
+import { canonicalMessageTarget } from '../utils/notificationRouting';
 // What a Marmot push does when it lands (MIP-05 receive side).
 //
 // The notification server knows nothing about the message, so a push is
@@ -137,7 +138,7 @@ export function noteMarmotCommit(now = Date.now()): void {
 export type PlaceholderOutcome =
   | { kind: 'keep' }
   | { kind: 'retract' }
-  | { kind: 'replace'; conversationPubkey?: string; groupId?: string };
+  | { kind: 'replace'; conversationPubkey?: string; groupId?: string; messageId?: string };
 
 /**
  * Pure: what decrypted traffic (the session has caught up) says about a
@@ -150,7 +151,10 @@ export type PlaceholderOutcome =
  */
 export function placeholderOutcome(
   postedAt: number,
-  traffic: readonly (Pick<Seen, 'at' | 'fromMe' | 'message' | 'conversationPubkey' | 'groupId'> & {
+  traffic: readonly (Pick<
+    Seen,
+    'at' | 'fromMe' | 'message' | 'conversationPubkey' | 'groupId' | 'messageId'
+  > & {
     shown?: boolean;
   })[],
 ): PlaceholderOutcome {
@@ -161,7 +165,12 @@ export function placeholderOutcome(
     .filter((t) => t.message && !t.fromMe && !t.shown)
     .sort((a, b) => b.at - a.at)[0];
   if (peer)
-    return { kind: 'replace', conversationPubkey: peer.conversationPubkey, groupId: peer.groupId };
+    return {
+      kind: 'replace',
+      conversationPubkey: peer.conversationPubkey,
+      groupId: peer.groupId,
+      ...(peer.messageId ? { messageId: peer.messageId } : {}),
+    };
   return window.length > 0 ? { kind: 'retract' } : { kind: 'keep' };
 }
 
@@ -190,20 +199,20 @@ export async function settlePushPlaceholders(owner: string): Promise<string[]> {
 /** The placeholder row, now naming where its message is (a tap opens it). */
 function replacedPlaceholder(
   e: NotificationHistoryEntry,
-  to: { conversationPubkey?: string; groupId?: string },
+  to: { conversationPubkey?: string; groupId?: string; messageId?: string },
 ): NotificationHistoryEntry {
-  const { marmotPush: _marmotPush, ...rest } = e.data;
-  return to.groupId
-    ? { ...e, kind: 'group', data: { ...rest, groupId: to.groupId } }
-    : {
-        ...e,
-        kind: 'dm',
-        data: {
-          ...rest,
-          conversationPubkey: to.conversationPubkey,
-          conversationProtocol: 'marmot',
-        },
-      };
+  const rest = { ...e.data };
+  delete rest.marmotPush;
+  const target = canonicalMessageTarget({
+    ...to,
+    protocol: 'marmot',
+    threadKind: to.conversationPubkey ? 'dm' : 'group',
+  });
+  return {
+    ...e,
+    kind: target.threadKind,
+    data: { ...rest, ...target, conversationProtocol: 'marmot' },
+  };
 }
 
 export type WakeOutcome = 'covered' | 'notified';
@@ -232,7 +241,7 @@ export async function postGenericPushAlert(): Promise<void> {
     title: 'New message',
     body: 'Open Lightning Piggy to read',
     // Marked so the real Marmot notification can replace it.
-    data: { marmotPush: true },
+    data: { marmotPush: true, protocol: 'marmot' },
   });
   placeholdersMayExist = true;
   // The real message alerted while we were posting: it already tried to

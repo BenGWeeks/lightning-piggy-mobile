@@ -9,6 +9,7 @@ describe('messageNotificationTarget (#1154)', () => {
     expect(messageNotificationTarget([ev('1', 4), ev('2', 4)])).toEqual({
       conversationPubkey: A,
       conversationProtocol: 'nip04',
+      messageId: '2',
     });
   });
 

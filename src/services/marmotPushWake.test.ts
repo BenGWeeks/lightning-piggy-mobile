@@ -141,7 +141,11 @@ describe('handleMarmotPushWake', () => {
     expect(dismissNotificationsFor).toHaveBeenCalledWith({ genericMessages: true });
     // kind 'dm' with no thread id = a no-thread ping → the Messages list.
     expect(fireMessageNotification).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: 'dm', threadId: '__push__', data: { marmotPush: true } }),
+      expect.objectContaining({
+        kind: 'dm',
+        threadId: '__push__',
+        data: { marmotPush: true, protocol: 'marmot' },
+      }),
     );
   });
 
@@ -281,9 +285,33 @@ describe('push placeholders: replaced or retracted only on evidence (never lost)
     expect(dismissNotificationsFor).not.toHaveBeenCalled();
   });
 
+  it('a Marmot DM replacement retains both chat identifiers and the tapped message', async () => {
+    await placeholder(T);
+    noteMarmotGroupTraffic(
+      ME,
+      traffic(T / 1000 - 5, { groupId: 'marmot:dm', messageId: 'older' }),
+      T + 1000,
+    );
+    await settlePushPlaceholders(ME);
+    expect((await listNotifications(ME))[0]).toMatchObject({
+      kind: 'dm',
+      data: {
+        threadKind: 'dm',
+        protocol: 'marmot',
+        conversationPubkey: PEER,
+        groupId: 'marmot:dm',
+        messageId: 'older',
+      },
+    });
+  });
+
   it('a group message points it at the group', async () => {
     await placeholder(T);
-    noteMarmotGroupTraffic(ME, traffic(T / 1000 - 5, { groupId: 'marmot:g' }), T + 1000);
+    noteMarmotGroupTraffic(
+      ME,
+      traffic(T / 1000 - 5, { groupId: 'marmot:g', conversationPubkey: undefined }),
+      T + 1000,
+    );
     await settlePushPlaceholders(ME);
     expect((await listNotifications(ME))[0]).toMatchObject({
       kind: 'group',
@@ -390,13 +418,21 @@ describe('review r4: no duplicate row, no early retract during a backfill', () =
       // Group A decrypts first: only our own message (from desktop White Noise) in the window.
       noteMarmotGroupTraffic(
         ME,
-        traffic(now / 1000 - 20, { fromMe: true, groupId: 'marmot:a' }),
+        traffic(now / 1000 - 20, {
+          fromMe: true,
+          groupId: 'marmot:a',
+          conversationPubkey: undefined,
+        }),
         now,
       );
       await jest.advanceTimersByTimeAsync(5_000);
       expect(await listNotifications(ME)).toHaveLength(1); // not retracted mid-backfill
       // Group B's message decrypts a moment later (not fresh: no alert of its own).
-      noteMarmotGroupTraffic(ME, traffic(now / 1000 - 6, { groupId: 'marmot:b' }), now);
+      noteMarmotGroupTraffic(
+        ME,
+        traffic(now / 1000 - 6, { groupId: 'marmot:b', conversationPubkey: undefined }),
+        now,
+      );
       setMarmotCatchingUp(ME, false); // every group live
       await jest.advanceTimersByTimeAsync(2_000);
     } finally {

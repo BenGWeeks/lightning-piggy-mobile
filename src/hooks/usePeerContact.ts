@@ -1,3 +1,4 @@
+import { shortNpub } from '../utils/shortNpub';
 import { useCallback, useMemo } from 'react';
 import { useNostrContacts } from '../contexts/NostrContext';
 import type { ContactProfileBodyData } from '../components/ContactProfileBody';
@@ -13,7 +14,7 @@ export function usePeerContact(
     const known = contacts.find((c) => c.pubkey === pubkey)?.profile;
     return {
       pubkey,
-      name,
+      name: name || known?.displayName || known?.name || shortNpub(pubkey),
       picture: known?.picture ?? picture ?? null,
       banner: known?.banner ?? null,
       nip05: known?.nip05 ?? null,

@@ -329,7 +329,9 @@ it('removes muted senders from mixed background batches and routes to the unmute
   ]);
   expect(await runBackgroundSync()).toMatchObject({ pinged: true, freshCount: 1 });
   expect(mockFireMessageNotification).toHaveBeenCalledWith(
-    expect.objectContaining({ data: { conversationPubkey: peer, conversationProtocol: 'nip04' } }),
+    expect.objectContaining({
+      data: { conversationPubkey: peer, conversationProtocol: 'nip04', messageId: 'normal' },
+    }),
   );
   expect(JSON.parse((await AsyncStorage.getItem(SEEN_KEY))!)).toEqual(['muted', 'normal']);
 });

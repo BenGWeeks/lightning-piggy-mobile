@@ -361,6 +361,7 @@ async function handleWrap(input: {
     body: preview,
     data: {
       conversationPubkey: partnership.partnerPubkey,
+      messageId: ev.id,
       conversationProtocol: protocolForWireKind(rumor.kind),
     },
   });

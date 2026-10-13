@@ -1,3 +1,4 @@
+import { MessageHighlight } from './MessageHighlight';
 import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { Image } from 'expo-image';
@@ -85,4 +86,10 @@ const GroupMessageRow = React.memo(function GroupMessageRow({
     </View>
   );
 });
-export default GroupMessageRow;
+export default React.memo(function HighlightedGroupMessageRow(props: Props) {
+  return (
+    <MessageHighlight messageId={props.id}>
+      <GroupMessageRow {...props} />
+    </MessageHighlight>
+  );
+});

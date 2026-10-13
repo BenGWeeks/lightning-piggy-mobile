@@ -1,0 +1,56 @@
+# Read-only: alerts for existing local Marmot history; no messages are sent.
+# Run with THREAD=dm|group, OLDER=true|false, LEGACY=true|false.
+# The app must already be on this worktree's Metro with Big Piggy active.
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+---
+- repeat:
+    while:
+      notVisible:
+        id: tab-wallets
+    times: 5
+    commands:
+      - back
+- tapOn:
+    id: tab-wallets
+- openLink: 'lightningpiggy://dev-message-notification?thread=${THREAD || "dm"}&older=${OLDER || "false"}&legacy=${LEGACY || "false"}'
+- tapOn:
+    text: 'Just once'
+    optional: true
+- pressKey: Home
+# OS-owned notification shade; the app cannot provide a testID for this gesture.
+- swipe:
+    start: 50%, 0%
+    end: 50%, 90%
+    duration: 500
+- extendedWaitUntil:
+    visible:
+      text: 'New (group )?messages?'
+    timeout: 90000
+- tapOn:
+    text: 'New (group )?messages?'
+- runFlow:
+    when:
+      true: ${OLDER === 'true'}
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: 'message-highlight-.*'
+          timeout: 10000
+- runFlow:
+    when:
+      true: ${THREAD !== 'group'}
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: conversation-protocol-tag
+          timeout: 90000
+      - assertNotVisible:
+          id: group-member-count
+- runFlow:
+    when:
+      true: ${THREAD === 'group'}
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: group-member-count
+          timeout: 90000

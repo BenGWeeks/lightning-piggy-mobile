@@ -1,3 +1,4 @@
+import { useNotificationMessageWindow } from './useNotificationMessageWindow';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { filterMessagesByProtocol, type DmProtocol } from '../utils/dmProtocol';
@@ -17,6 +18,7 @@ import { createAbortReplacer } from '../utils/abortReplace';
 // the result and the composer hook still appends optimistic rows via setMessages.
 
 export interface UseConversationLoaderParams {
+  notification?: { owner: string | null; messageId?: string };
   pubkey: string;
   protocol: DmProtocol;
   isLoggedIn: boolean;
@@ -45,6 +47,7 @@ export interface UseConversationLoaderResult {
 export function useConversationLoader({
   pubkey,
   protocol,
+  notification,
   isLoggedIn,
   fetchConversation,
   loadInitialConversation,
@@ -237,5 +240,12 @@ export function useConversationLoader({
     () => filterMessagesByProtocol(messages, protocol),
     [messages, protocol],
   );
-  return { messages: threadMessages, setMessages, loading, refreshing, handleRefresh };
+  const routedMessages = useNotificationMessageWindow(
+    notification?.owner ?? null,
+    pubkey,
+    protocol,
+    notification?.messageId,
+    threadMessages,
+  );
+  return { messages: routedMessages, setMessages, loading, refreshing, handleRefresh };
 }

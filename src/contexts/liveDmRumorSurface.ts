@@ -154,7 +154,11 @@ export function createLiveRumorSurfacer(
               threadId: routed.group.id,
               title: routed.group.name || 'New group message',
               body: routed.message.text,
-              data: { groupId: routed.group.id, senderPubkey: routed.message.senderPubkey },
+              data: {
+                groupId: routed.group.id,
+                messageId: routed.message.id,
+                senderPubkey: routed.message.senderPubkey,
+              },
             }),
           );
         else markWrapHandled(wrapId); // alerted already
@@ -261,6 +265,7 @@ export function createLiveRumorSurfacer(
             body: inboxEntry.text,
             data: {
               conversationPubkey: partnership.partnerPubkey,
+              messageId: wrapId,
               conversationProtocol: protocolForWireKind(rumor.kind),
             },
           }),

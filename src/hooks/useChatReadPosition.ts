@@ -48,11 +48,14 @@ export function useChatReadPosition({
   loading,
   scrollToId,
   leaveEdge,
+  initialTarget,
 }: {
   owner: string | null;
   conversationKey: string | null;
   entries: readonly UnreadEntry[];
   loading: boolean;
+  /** An explicit message tap takes priority over the unread-position jump. */
+  initialTarget?: string;
   scrollToId: (id: string, animated?: boolean) => boolean;
   /** Stop the list following the live edge (so the jump isn't undone), and
    * ignore the edge for `holdMs` while the jump lands. */
@@ -61,6 +64,11 @@ export function useChatReadPosition({
   const isFocused = useIsFocused();
   const getMarker = useReadPositions(owner);
   const scope = owner && conversationKey ? `${owner}:${conversationKey}` : null;
+
+  const explicitScope = useRef<string | null>(null);
+  if (initialTarget && scope) explicitScope.current = scope;
+  // Keep the priority after the screen consumes its jump param, including late history.
+  const explicitJump = explicitScope.current === scope && scope !== null;
 
   const [snapshot, setSnapshot] = useState<{ scope: string; dividerId: string | null } | null>(
     null,
@@ -92,6 +100,12 @@ export function useChatReadPosition({
     timers.current = [];
   }, []);
   useEffect(() => clearTimers, [clearTimers]);
+  useEffect(() => {
+    if (!initialTarget) return;
+    clearTimers();
+    settling.current = false;
+    jumpTarget.current = null;
+  }, [initialTarget, clearTimers]);
 
   // Advance the position to the newest row currently on screen.
   const applyViewable = useCallback((ids: readonly string[]) => {
@@ -171,7 +185,7 @@ export function useChatReadPosition({
       setSnapshot({ scope, dividerId });
       if (lateTimer.current) clearTimeout(lateTimer.current);
       lateTimer.current = setTimeout(persistPosition, LATE_ARRIVAL_MS);
-      if (dividerId) jumpTo(dividerId);
+      if (dividerId && !explicitJump) jumpTo(dividerId);
       return;
     }
     if (Date.now() - openedAt.current >= LATE_ARRIVAL_MS) return;
@@ -184,8 +198,18 @@ export function useChatReadPosition({
     setSnapshot({ scope, dividerId: late });
     markerRef.current = snapshotMarker.current;
     setMarker(snapshotMarker.current);
-    jumpTo(late);
-  }, [scope, conversationKey, loading, getMarker, entries, clearTimers, jumpTo, persistPosition]);
+    if (!explicitJump) jumpTo(late);
+  }, [
+    scope,
+    conversationKey,
+    loading,
+    getMarker,
+    entries,
+    clearTimers,
+    jumpTo,
+    persistPosition,
+    explicitJump,
+  ]);
 
   // Back on this screen: count what's on screen now; leaving it writes the
   // position straight away rather than waiting for the coalescing window.

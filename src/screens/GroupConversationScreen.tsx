@@ -2,7 +2,7 @@ import { preferredConversationParams } from '../services/preferredDmProtocol';
 import { useGroupConversationLoader } from '../hooks/useGroupConversationLoader';
 import { useGroupChatTools } from '../hooks/useGroupChatTools';
 import { useChatLocalHistory } from '../hooks/useChatLocalHistory';
-import { ChatSearchContext } from '../contexts/ChatSearchContext';
+import { ChatToolsProvider } from '../components/ChatToolsProvider';
 import ChatSearchHeader from '../components/ChatSearchHeader';
 import { useAccountState } from '../contexts/useAccountState';
 import { useLiveMessageIndicator } from '../hooks/useLiveMessageIndicator';
@@ -411,6 +411,7 @@ const GroupConversationScreen: React.FC = () => {
     timelineRows,
   );
   const read = useChatReadPosition({
+    initialTarget: route.params.jumpToMessage,
     owner: myPubkey,
     conversationKey: loadedGroupId ? groupReadKey(loadedGroupId) : null,
     entries: readEntries,
@@ -610,7 +611,7 @@ const GroupConversationScreen: React.FC = () => {
   }
 
   return (
-    <ChatSearchContext.Provider value={tools.search.query}>
+    <ChatToolsProvider query={tools.search.query} highlightedId={tools.highlightedId}>
       <View style={styles.container}>
         <BrandPatternBackground variant="messages-weave" />
         {tools.search.active ? (
@@ -915,7 +916,7 @@ const GroupConversationScreen: React.FC = () => {
           devices={groupDevices.messageDevices(messageSheetSender, messageSheetSentAt)}
         />
       </View>
-    </ChatSearchContext.Provider>
+    </ChatToolsProvider>
   );
 };
 export default GroupConversationScreen;

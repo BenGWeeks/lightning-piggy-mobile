@@ -1,3 +1,7 @@
+import { resolveStoredNotificationTarget } from '../services/notificationStoredTarget';
+import { messageNotificationRoute } from '../utils/notificationRouting';
+import { getMarmotSession } from '../services/marmotSession';
+import { appNavigatorStyles as styles } from '../styles/AppNavigator.styles';
 import React, { useEffect, useMemo, useState } from 'react';
 import { DEFAULT_DM_PROTOCOL, dmThreadId, type DmProtocol } from '../utils/dmProtocol';
 import { Linking, ActivityIndicator, View, useWindowDimensions } from 'react-native';
@@ -26,6 +30,7 @@ import {
   dropMarmotPushAlerts,
   markHistoryReadFor,
   type NotificationTarget,
+  type NotificationData,
 } from '../services/notificationService';
 import {
   RootStackParamList,
@@ -38,7 +43,6 @@ import type { ContactProfileBodyData } from '../components/ContactProfileBody';
 
 import { lazyScreen } from './lazyScreen';
 import { RelayListEditorProvider } from '../contexts/RelayListEditorContext';
-import { appNavigatorStyles as styles } from '../styles/AppNavigator.styles';
 
 // Tab-root + drawer-chrome screens stay EAGER — they must render instantly on
 // tab switch / drawer open, so paying their Hermes parse cost up-front is the
@@ -232,46 +236,44 @@ export const navigateToUnsupportedEntity = (entity: string, detail?: string): bo
 // pending wrap resolution.
 let notificationNavGeneration = 0;
 
-export const navigateFromNotification = (data: {
-  kind?: string;
-  conversationPubkey?: string;
-  conversationProtocol?: DmProtocol;
-  groupId?: string;
-  walletId?: string;
-  cacheCoord?: string;
-  /** Display name when the caller already knows it (the Notifications screen). */
-  name?: string;
-  /** NIP-17 gift wrap the background couldn't decrypt (#1154). */
-  wrapId?: string;
-  /** Account the notification belongs to. */
-  owner?: string;
-}): boolean => {
+export const navigateFromNotification = (
+  data: NotificationData & { kind?: string; name?: string },
+): boolean => {
   if (!navigationRef.isReady()) return false;
   // A message alert for another signed-in account would open that peer's
   // thread under the wrong identity: show the list instead (#1154).
   // Cold start: the tap can arrive before the identity has hydrated. Unknown is
   // not "another account" — report not-ready so the caller retries.
-  if ((data.kind === 'dm' || data.kind === 'group') && data.owner && !getActivePubkey())
+  if (
+    (data.kind === 'dm' || data.kind === 'group' || data.threadKind) &&
+    data.owner &&
+    !getActivePubkey()
+  )
     return false;
   // Each handled tap supersedes any earlier one still resolving a wrap (#1154);
   // counted only once it's actually routed, not per not-ready retry.
   const generation = ++notificationNavGeneration;
-  if (isForAnotherAccount(data, getActivePubkey())) {
+  if (isForAnotherAccount({ ...data, kind: data.threadKind ?? data.kind }, getActivePubkey())) {
     navigationRef.navigate('Main', { screen: 'MainTabs', params: { screen: 'Messages' } });
     return true;
   }
-  if (data.conversationPubkey) {
-    // `name` is required by the route type; the screen fills the header from
-    // its own profile fetch, so seed it with what the caller knows, if anything.
-    navigationRef.navigate('Conversation', {
-      pubkey: data.conversationPubkey,
-      name: data.name ?? '',
-      protocol: data.conversationProtocol ?? 'nip17',
-    });
-    return true;
-  }
-  if (data.groupId) {
-    navigationRef.navigate('GroupConversation', { groupId: data.groupId });
+  if (data.conversationPubkey || data.groupId || data.marmotGroupId) {
+    const groupId = data.groupId ?? data.marmotGroupId;
+    const candidate = getMarmotSession();
+    const session =
+      candidate?.pubkey.toLowerCase() === getActivePubkey()?.toLowerCase() ? candidate : null;
+    // Legacy classification and real groups need the hydrated Messages summary.
+    const needsGroup = !data.conversationPubkey || data.threadKind === 'group';
+    if (groupId?.startsWith('marmot:') && needsGroup && !session?.getGroup(groupId)) return false;
+    const target = messageNotificationRoute(
+      data,
+      getActivePubkey(),
+      groupId ? session?.getGroup(groupId) : undefined,
+    );
+    if (target.screen === 'Conversation') navigationRef.navigate(target.screen, target.params);
+    else if (target.screen === 'GroupConversation')
+      navigationRef.navigate(target.screen, target.params);
+    else navigationRef.navigate('Main', { screen: 'MainTabs', params: { screen: 'Messages' } });
     return true;
   }
   // Find-log on one of my caches (#740) → open that cache detail. The
@@ -292,12 +294,16 @@ export const navigateFromNotification = (data: {
   // path, which doesn't decrypt) → open the Messages list. With a wrap id,
   // then open that message's conversation once the app has decrypted it —
   // unless the user has moved on from the list meanwhile (#1154).
-  if (data.kind === 'dm' || data.kind === 'group') {
+  if (data.kind === 'dm' || data.kind === 'group' || data.threadKind) {
     navigationRef.navigate('Main', { screen: 'MainTabs', params: { screen: 'Messages' } });
     const owner = data.owner ?? getActivePubkey();
     // Only for the active account: another account's stored wrap would open
     // a conversation under the wrong identity, so its alert stays on the list.
-    if (data.wrapId && owner && owner === getActivePubkey()) {
+    if (
+      (data.wrapId || (data.marmotPush && data.historyId)) &&
+      owner &&
+      owner === getActivePubkey()
+    ) {
       // Every route change, so leaving the list is seen even between polls.
       const tracker = createRouteLeaveTracker('Messages');
       const report = () => tracker.onRoute(navigationRef.getCurrentRoute()?.name);
@@ -307,14 +313,22 @@ export const navigateFromNotification = (data: {
         tracker.movedOn() ||
         getActivePubkey() !== owner ||
         generation !== notificationNavGeneration;
-      void resolveWrapConversation(owner, data.wrapId, { shouldStop: cancelled }).then((target) => {
+      const resolved = data.wrapId
+        ? resolveWrapConversation(owner, data.wrapId, { shouldStop: cancelled }).then((target) =>
+            target
+              ? {
+                  conversationPubkey: target.pubkey,
+                  protocol: target.protocol,
+                  threadKind: 'dm' as const,
+                  messageId: data.messageId ?? data.wrapId,
+                  owner,
+                }
+              : null,
+          )
+        : resolveStoredNotificationTarget(owner, data.historyId!, { shouldStop: cancelled });
+      void resolved.then((target) => {
         unsubscribe();
-        if (target && !cancelled())
-          navigationRef.navigate('Conversation', {
-            pubkey: target.pubkey,
-            name: data.name ?? '',
-            protocol: target.protocol,
-          });
+        if (target && !cancelled()) navigateFromNotification({ ...target, name: data.name });
       });
     }
     return true;

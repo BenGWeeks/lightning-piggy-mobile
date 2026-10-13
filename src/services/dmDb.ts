@@ -372,6 +372,32 @@ export async function getConversationMessages(
   return (res.rows ?? []).map(toRow);
 }
 
+/** Bounded indexed local history around a tapped message, scoped to account/peer/protocol. */
+export async function getConversationMessageWindow(
+  owner: string,
+  conversation: string,
+  protocol: DmProtocol,
+  eventId: string,
+): Promise<DmMessageRow[]> {
+  const db = await getLocalDb();
+  const target = await db.execute(
+    `SELECT * FROM dm_messages WHERE owner = ? AND conversation = ? AND ${PROTOCOL_SQL} = ? AND event_id = ? LIMIT 1;`,
+    [owner, conversation, protocol, eventId],
+  );
+  const at = target.rows?.[0]?.created_at;
+  if (at == null) return [];
+  const result = await db.execute(
+    `SELECT * FROM (SELECT * FROM dm_messages WHERE owner = ? AND conversation = ? AND ${PROTOCOL_SQL} = ? AND created_at <= ? ORDER BY created_at DESC LIMIT 30)
+     UNION SELECT * FROM (SELECT * FROM dm_messages WHERE owner = ? AND conversation = ? AND ${PROTOCOL_SQL} = ? AND created_at > ? ORDER BY created_at ASC LIMIT 20);`,
+    [owner, conversation, protocol, Number(at), owner, conversation, protocol, Number(at)],
+  );
+  // Include the exact target even if many messages share its timestamp.
+  const rows = new Map((result.rows ?? []).map((r) => [String(r.event_id), toRow(r)]));
+  const tapped = toRow(target.rows![0]);
+  rows.set(tapped.eventId, tapped);
+  return [...rows.values()];
+}
+
 const escapeLike = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
 
 /**

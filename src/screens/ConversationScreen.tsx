@@ -3,7 +3,7 @@ import { usePeerContact } from '../hooks/usePeerContact';
 import { useDmChatTools } from '../hooks/useDmChatTools';
 import { useChatLocalHistory } from '../hooks/useChatLocalHistory';
 import { useChatKeyboardLift } from '../hooks/useChatKeyboardLift';
-import { ChatSearchContext } from '../contexts/ChatSearchContext';
+import { ChatToolsProvider } from '../components/ChatToolsProvider';
 import ChatSearchHeader from '../components/ChatSearchHeader';
 import { useLiveMessageIndicator } from '../hooks/useLiveMessageIndicator';
 import NewMessagesPill from '../components/NewMessagesPill';
@@ -130,8 +130,7 @@ const ConversationScreen: React.FC = () => {
   const { wallets, addNwcWallet } = useWallet();
   const { stopShare } = useLiveLocation();
 
-  // Thread data lifecycle — read-through paint, background relay top-up,
-  // abort-on-unmount, single-flight refresh (#868) — lives in this hook.
+  // The loader owns live reads, refreshes, and the tapped message’s history window.
   const {
     messages: rawMessages,
     setMessages,
@@ -139,6 +138,7 @@ const ConversationScreen: React.FC = () => {
     refreshing,
     handleRefresh,
   } = useConversationLoader({
+    notification: { owner: myPubkey, messageId: route.params.jumpToMessage },
     protocol,
     pubkey,
     isLoggedIn,
@@ -620,7 +620,7 @@ const ConversationScreen: React.FC = () => {
   const goBack = useCallback(() => navigation.goBack(), [navigation]);
 
   return (
-    <ChatSearchContext.Provider value={tools.search.query}>
+    <ChatToolsProvider query={tools.search.query} highlightedId={tools.highlightedId}>
       <View style={styles.container}>
         {/* Paint the safe-area / status-bar strip pink so the white
           system icons (time, signal, battery) stay visible against
@@ -632,8 +632,8 @@ const ConversationScreen: React.FC = () => {
         ) : (
           <ConversationHeader
             menu={tools.menu}
-            name={name}
-            picture={picture}
+            name={contact.name}
+            picture={contact.picture}
             protocol={protocol}
             styles={styles}
             colors={colors}
@@ -992,7 +992,7 @@ const ConversationScreen: React.FC = () => {
           onMemberTap={openPeerProfile}
         />
       </View>
-    </ChatSearchContext.Provider>
+    </ChatToolsProvider>
   );
 };
 
