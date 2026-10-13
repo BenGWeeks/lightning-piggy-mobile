@@ -11,6 +11,8 @@ export async function subscribePaymentSent(
   accept: (candidate: PaymentCandidate) => void,
   signal: AbortSignal,
 ): Promise<() => void> {
+  // Include settlements during slow discovery/negotiation, plus clock skew.
+  const since = Math.floor(Date.now() / 1000) - 5;
   const info = await client.getWalletServiceInfo();
   throwIfAborted(signal);
   if (!info.notifications?.includes('payment_sent')) return () => {};
@@ -25,7 +27,7 @@ export async function subscribePaymentSent(
       kinds: [client.encryptionType === 'nip04' ? 23196 : 23197],
       authors: [client.walletPubkey],
       '#p': [client.publicKey],
-      since: Math.floor(Date.now() / 1000) - 5,
+      since,
       limit: 10,
     },
     {

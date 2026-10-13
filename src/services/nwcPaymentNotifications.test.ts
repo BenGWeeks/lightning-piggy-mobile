@@ -24,6 +24,50 @@ it('only subscribes when payment_sent is advertised', async () => {
   expect(client.pool.subscribe).not.toHaveBeenCalled();
 });
 
+it('includes a payment settled during delayed discovery and encryption negotiation', async () => {
+  jest.useFakeTimers();
+  jest.setSystemTime(100_000);
+  try {
+    const { client, sdkClient } = fixture();
+    client.getWalletServiceInfo.mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 7_000));
+      return { notifications: ['payment_sent'] };
+    });
+    client._selectEncryptionType.mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 6_000));
+    });
+    const hash = 'a'.repeat(64);
+    const accept = jest.fn();
+    const subscription = subscribePaymentSent(
+      sdkClient,
+      hash,
+      accept,
+      new AbortController().signal,
+    );
+    await jest.advanceTimersByTimeAsync(13_000);
+    const unsubscribe = await subscription;
+    const [, filter, handlers] = client.pool.subscribe.mock.calls[0] as unknown as [
+      unknown,
+      { since: number },
+      { onevent: (event: { content: string; created_at: number }) => Promise<void> },
+    ];
+    expect(filter.since).toBe(95);
+    // The relay only returns this setup-time settlement if the filter includes it.
+    const event = {
+      created_at: 101,
+      content: JSON.stringify({
+        notification_type: 'payment_sent',
+        notification: { payment_hash: hash, preimage: 'b'.repeat(64) },
+      }),
+    };
+    if (event.created_at >= filter.since) await handlers.onevent(event);
+    expect(accept).toHaveBeenCalledTimes(1);
+    unsubscribe();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
 it('bounds the encrypted subscription, matches the hash and closes it', async () => {
   const { client, sdkClient, close } = fixture();
   const accept = jest.fn();
