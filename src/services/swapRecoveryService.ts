@@ -868,7 +868,9 @@ async function recoverSubmarineSwaps(): Promise<void> {
       const data = await res.json();
       const status: string = data.status ?? 'unknown';
       if (swap.externalFunding) {
-        await saveExternalSwap({ ...swap, status } as ExternalSwapState);
+        await saveExternalSwap({ ...swap, status } as ExternalSwapState).catch((e) =>
+          console.warn(`[SwapRecovery] external state save failed for ${swapId}:`, e),
+        );
         if (typeof data.transaction?.id === 'string')
           await recordSubmarineSwapLegs(data.transaction.id, swap.invoice, swap.id);
       }

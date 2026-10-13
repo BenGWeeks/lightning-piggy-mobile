@@ -407,3 +407,44 @@ it('preserves external refund keys and failed status for a funded expired swap',
   expect(handler).toHaveBeenCalledWith(expect.objectContaining({ externalFunding: true }));
   expect((await loadExternalSwaps('wallet-1', 'ln-wallet'))[0].status).toBe('swap.expired');
 });
+
+it.each(['invoice.settled', 'transaction.refunded', 'swap.expired'])(
+  'continues external swap recovery after a mirror write fails (%s)',
+  async (status) => {
+    await AsyncStorage.clear();
+    seed({
+      externalFunding: true,
+      destinationWalletId: 'ln-wallet',
+      invoiceSats: 49000,
+      invoice: 'invoice',
+      createdAt: 123,
+    });
+    const handler = jest.fn().mockResolvedValue(undefined);
+    setSubmarineRefundHandler(handler);
+    route(status);
+    const error = new Error('Storage full');
+    const save = jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(error);
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await recoverPendingSwaps();
+
+      expect(save).toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(
+        `[SwapRecovery] external state save failed for ${SWAP_ID}:`,
+        error,
+      );
+      if (status === 'swap.expired') {
+        expect(handler).toHaveBeenCalledWith(expect.objectContaining({ externalFunding: true }));
+        expect(mockStore.has(KEY)).toBe(true);
+        expect(JSON.parse(mockStore.get('boltz_submarine_index')!)).toEqual([SWAP_ID]);
+      } else {
+        expect(handler).not.toHaveBeenCalled();
+        expect(mockStore.has(KEY)).toBe(false);
+        expect(JSON.parse(mockStore.get('boltz_submarine_index')!)).toEqual([]);
+      }
+    } finally {
+      save.mockRestore();
+      warn.mockRestore();
+    }
+  },
+);
