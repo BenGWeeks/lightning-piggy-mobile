@@ -1320,3 +1320,27 @@ network timers are cleared must first call `__resetVerifiedEventCache()` to
 remove this independent cache timer, and reset the cache before restoring
 real timers in teardown. Do not clear all timers before a network assertion,
 as that would hide leaked network work.
+
+=== Marmot sync stops after backgrounding
+
+Marmot's kind-445 group subscriptions use the shared JS SimplePool, whose
+`enableReconnect` is false. A socket drop used to leave the MLS connection
+record alive with a dead transport; the MarmotBridge resume handler only
+checked key-package freshness. `marmotSubscription.ts` now reopens each relay
+route after a drop with capped backoff, and proactively rearms group routes
+three seconds after resume. Backgrounding cancels pending timers; account
+teardown invalidates callbacks and closes routes. Group filters retain their
+bounded watermark window and relay fan-out remains deduplicated.
+
+Welcomes (kind 444 inside kind 1059) arrive through the ordinary DM inbox,
+not a separate key-package inbox. The JS DM controller already rearms on
+resume. The native adapter now replaces its pool immediately on resume and
+seeds the new subscription with current known wrap ids, without a `since`
+filter. Native reconnect/resume reconciliation still waits three seconds
+and respects the shared automatic-refresh interval. If native resume fails,
+the live-DM bridge restores the JS wrap subscription.
+
+Marmot first shipped in PR #1163 after v1.4.1. PR #1417 changed automatic
+inbox reconciliation policy, not the group subscription lifecycle. A lack
+of `[Marmot]` log output alone cannot distinguish a dead group transport
+from an undelivered Welcome, a follow-gated sender, or a transient join error.

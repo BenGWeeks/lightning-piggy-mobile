@@ -1,16 +1,7 @@
 // The strict push transport's server-inbox (kind 10050) lookup. The pool is
 // mocked: these tests never touch a real relay.
-const mockQuerySync = jest.fn();
-const mockPublish = jest.fn();
-jest.mock('./nostrPool', () => ({
-  pool: {
-    querySync: (...args: unknown[]) => mockQuerySync(...args),
-    publish: (...args: unknown[]) => mockPublish(...args),
-  },
-  trackRelays: jest.fn(),
-}));
-
 import type { Event } from 'nostr-tools';
+import { AppState, type AppStateStatus } from 'react-native';
 import { MarmotWelcomeOutbox } from './marmotWelcomeOutbox';
 import { createMemoryMarmotBackend } from './marmotStore';
 import {
@@ -20,8 +11,20 @@ import {
   MAX_PUSH_INBOX_RELAYS,
   MAX_PUSH_RELAYS,
 } from './marmotNetwork';
-import { pool, trackRelays } from './nostrPool';
+import { trackRelays } from './nostrPool';
 import { MARMOT_PUSH_SERVER_RELAYS } from './nostrRelayDefaults';
+
+const mockQuerySync = jest.fn();
+const mockPublish = jest.fn();
+const mockSubscribeMany = jest.fn();
+jest.mock('./nostrPool', () => ({
+  pool: {
+    querySync: (...args: unknown[]) => mockQuerySync(...args),
+    publish: (...args: unknown[]) => mockPublish(...args),
+    subscribeMany: (...args: unknown[]) => mockSubscribeMany(...args),
+  },
+  trackRelays: jest.fn(),
+}));
 
 const SERVER = 'ee'.repeat(32);
 const inboxEvent = (relays: string[], createdAt = 100) => ({
@@ -195,5 +198,95 @@ describe('createMarmotNetwork().publish', () => {
     ]);
     await outbox.flush();
     expect(await outbox.pending()).toHaveLength(0);
+  });
+});
+
+// Simulate Doze silently losing sockets and individual relay failures.
+describe('Marmot subscription lifecycle', () => {
+  let onState: (state: AppStateStatus) => void;
+  let remove: jest.Mock;
+  let close: jest.Mock;
+  let stop: () => void;
+  let next: jest.Mock;
+  beforeEach(() => {
+    jest.useFakeTimers();
+    remove = jest.fn();
+    close = jest.fn();
+    mockSubscribeMany.mockReset().mockReturnValue({ close });
+    jest.spyOn(AppState, 'addEventListener').mockImplementation((_name, cb) => {
+      onState = cb;
+      return { remove };
+    });
+    next = jest.fn();
+    const network = createMarmotNetwork(() => []);
+    stop = network
+      .subscription(['wss://one.example', 'wss://two.example'], {
+        kinds: [445],
+        '#h': ['group'],
+        limit: 200,
+        since: 100,
+      })
+      .subscribe({ next }).unsubscribe;
+  });
+  afterEach(() => {
+    stop();
+    jest.restoreAllMocks();
+    jest.useRealTimers();
+  });
+  it('dedupes events across relay routes and suppresses stale deliveries', () => {
+    const event = { id: 'same-id' };
+    const oldEvent = mockSubscribeMany.mock.calls[0][2].onevent;
+    mockSubscribeMany.mock.calls[0][2].onevent(event);
+    mockSubscribeMany.mock.calls[1][2].onevent(event);
+    expect(next).toHaveBeenCalledTimes(1);
+    onState('active');
+    jest.advanceTimersByTime(3_000);
+    oldEvent({ id: 'stale' });
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+  it('reopens after silent background loss, staggered by three seconds', () => {
+    const before = mockSubscribeMany.mock.calls.length;
+    onState('background');
+    jest.advanceTimersByTime(5 * 60_000);
+    onState('active');
+    expect(mockSubscribeMany).toHaveBeenCalledTimes(before);
+    jest.advanceTimersByTime(3_000);
+    expect(mockSubscribeMany.mock.calls.length).toBeGreaterThan(before);
+    expect(close).toHaveBeenCalled();
+    expect(mockSubscribeMany.mock.calls.at(-1)[1]).toEqual({
+      kinds: [445],
+      '#h': ['group'],
+      limit: 200,
+      since: 100,
+    });
+  });
+  it('retries a failed relay even when another relay remains healthy', () => {
+    const before = mockSubscribeMany.mock.calls.length;
+    mockSubscribeMany.mock.calls[0][2].onclose(['connection closed']);
+    jest.advanceTimersByTime(5_000);
+    expect(mockSubscribeMany).toHaveBeenCalledTimes(before + 1);
+    expect(mockSubscribeMany.mock.calls.at(-1)[0]).toEqual(['wss://one.example']);
+  });
+  it('ignores old close callbacks and cancels resume/retry work on unsubscribe', () => {
+    const oldClose = mockSubscribeMany.mock.calls[0][2].onclose;
+    onState('active');
+    jest.advanceTimersByTime(3_000);
+    const before = mockSubscribeMany.mock.calls.length;
+    oldClose(['stale close']);
+    jest.advanceTimersByTime(5_000);
+    expect(mockSubscribeMany).toHaveBeenCalledTimes(before);
+    mockSubscribeMany.mock.calls.at(-1)[2].onclose(['drop']);
+    onState('active');
+    stop();
+    jest.advanceTimersByTime(10 * 60_000);
+    expect(mockSubscribeMany).toHaveBeenCalledTimes(before);
+    expect(remove).toHaveBeenCalledTimes(1);
+  });
+  it('cancels queued resume work when backgrounded again', () => {
+    const before = mockSubscribeMany.mock.calls.length;
+    onState('active');
+    onState('background');
+    jest.advanceTimersByTime(10_000);
+    expect(mockSubscribeMany).toHaveBeenCalledTimes(before);
   });
 });

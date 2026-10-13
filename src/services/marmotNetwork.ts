@@ -11,6 +11,7 @@ import { dmInboxRelaysFromTags, isRelayUrl } from '../utils/relayListEvents';
 import { isPublicRelayUrl } from '../utils/publicUrl';
 import { pool, trackRelays } from './nostrPool';
 import { DEFAULT_RELAYS, MARMOT_PUSH_SERVER_RELAYS } from './nostrRelayDefaults';
+import { subscribeMarmotRelays } from './marmotSubscription';
 
 const REQUEST_MAX_WAIT_MS = 6_000;
 const PUBLISH_TIMEOUT_MS = 10_000;
@@ -96,12 +97,9 @@ export function createMarmotNetwork(getFallbackRelays: () => string[]): NostrNet
         subscribe(observer) {
           const targets = relaysOr(relays);
           trackRelays(targets);
-          const closers = asArray(filters as Filter | Filter[]).map((f) =>
-            pool.subscribeMany(targets, f, {
-              onevent: (e) => observer.next?.(e),
-            }),
+          return subscribeMarmotRelays(targets, asArray(filters as Filter | Filter[]), (e) =>
+            observer.next?.(e),
           );
-          return { unsubscribe: () => closers.forEach((c) => c.close()) };
         },
       };
     },

@@ -1,4 +1,5 @@
 import { getNostrEngine, type EngineRumorBatchEvent } from '../../modules/nostr-native';
+import { AppState } from 'react-native';
 import type { SignerType } from '../types/nostr';
 import type { DecodedRumor } from '../utils/nip17Unwrap';
 
@@ -68,6 +69,8 @@ export interface StartNativeDmEngineOptions {
    * the existing refreshDmInbox blind-window flush, as #1039 does for the
    * JS sub's re-arm. */
   onReconnect: () => void;
+  /** Restore the JS wrap subscription if a resume replacement fails. */
+  onUnavailable?: () => void;
 }
 
 /** Validate + normalise one native batch entry. Mirrors parseRumor /
@@ -143,6 +146,7 @@ export async function startNativeDmEngine(
   const generation = ++engineGeneration;
   const isCurrent = () => generation === engineGeneration;
   let acceptingEvents = false;
+  let resumeSub: ReturnType<typeof AppState.addEventListener> | null = null;
 
   const batchSub = engine.addListener('onEngineRumorBatch', (event: EngineRumorBatchEvent) => {
     if (!isCurrent() || !acceptingEvents) return;
@@ -167,6 +171,8 @@ export async function startNativeDmEngine(
   });
 
   const removeListeners = (): void => {
+    resumeSub?.remove();
+    resumeSub = null;
     batchSub.remove();
     reconnectSub.remove();
   };
@@ -212,6 +218,49 @@ export async function startNativeDmEngine(
   }
 
   let stopped = false;
+  let resuming = false;
+  let lastResumeMs = -Infinity;
+  // Rust normally reconnects itself, but Doze can leave a half-open socket
+  // without a reconnect signal. Replace the pool on resume just as the JS
+  // inbox proactively re-arms. engineStart replaces the old pool, avoiding
+  // accumulating native subscriptions; lifecycle calls remain serialized.
+  resumeSub = AppState.addEventListener('change', (state) => {
+    if (state !== 'active' || stopped || !isCurrent() || resuming) return;
+    const now = Date.now();
+    if (now - lastResumeMs < 2_000) return; // match the JS inbox's resume debounce
+    lastResumeMs = now;
+    resuming = true;
+    acceptingEvents = false;
+    void (async () => {
+      try {
+        const started = await dispatchIfCurrent(() =>
+          engine.engineStart(opts.relays, opts.viewerPubkeyHex, opts.secretKeyHex),
+        );
+        if (!started || stopped || !isCurrent()) return;
+        acceptingEvents = true;
+        const subscribed = await dispatchIfCurrent(() =>
+          engine.engineSubscribeWraps(
+            JSON.stringify({ kinds: [1059], '#p': [opts.viewerPubkeyHex], limit: opts.wrapsLimit }),
+            [...opts.knownWrapIds],
+          ),
+        );
+        if (subscribed && !stopped && isCurrent()) {
+          if (__DEV__) console.log('[Marmot] native Welcome inbox re-armed on resume');
+          opts.onReconnect(); // caller staggers reconciliation by three seconds
+        }
+      } catch (e) {
+        if (__DEV__) console.warn('[NostrEngine] resume re-arm failed:', e);
+        if (!stopped && isCurrent()) {
+          acceptingEvents = false;
+          removeListeners();
+          await dispatchIfCurrent(() => engine.engineStop()).catch(() => {});
+          if (!stopped && isCurrent()) opts.onUnavailable?.();
+        }
+      } finally {
+        resuming = false;
+      }
+    })();
+  });
   return {
     stop: async () => {
       if (stopped) return;
