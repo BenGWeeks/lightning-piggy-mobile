@@ -29,7 +29,7 @@ import { usePostSendRefresh } from '../hooks/usePostSendRefresh';
 import SendWalletSelector from './SendWalletSelector';
 import SendPastePane from './SendPastePane';
 import SendActionButtons from './SendActionButtons';
-import { fetchInvoice, LnurlPayParams } from '../services/lnurlService';
+import { fetchInvoiceWithVerification, LnurlPayParams } from '../services/lnurlService';
 import {
   type DecodedInvoice,
   editAddressPrefill,
@@ -410,6 +410,7 @@ const SendSheet: React.FC<Props> = ({
 
   const handleSend = async () => {
     if (!invoiceData) return;
+    const sendTappedAt = Date.now();
     // Read the memo from its ref, not state: the memo field is uncontrolled and
     // sits right next to the Send button, so a type-then-immediately-Send can
     // outrun the state flush. The ref is written synchronously in onChangeText.
@@ -528,8 +529,13 @@ const SendSheet: React.FC<Props> = ({
           invoiceOptions.comment = submittedMemo.slice(0, lnurlParams.commentAllowed);
         }
 
-        const bolt11 = await fetchInvoice(lnurlParams.callback, currentSats, invoiceOptions);
+        const { invoice: bolt11, verifyUrl } = await fetchInvoiceWithVerification(
+          lnurlParams.callback,
+          currentSats,
+          invoiceOptions,
+        );
         await payInvoiceForWallet(walletId!, bolt11, {
+          verifyUrl,
           signal,
           onReplyTimeout,
         });
@@ -540,61 +546,62 @@ const SendSheet: React.FC<Props> = ({
           );
 
         // Persist the recipient locally whenever we know who we're paying — i.e. when activePubkey is set (Friends → Zap, ConversationScreen send, anything that arrived with a recipientPubkey prop). Decoupled from invoiceOptions.nostr so a signer failure or an LNURL server with allowsNostr=false doesn't strip the recipient's name from the transaction row. The Nostr-side path (zap receipt) is still emitted when invoiceOptions.nostr is set; this just guarantees local UI attribution even when the on-network NIP-57 receipt path is broken.
-        if (activePubkey) {
-          try {
-            const decoded = bolt11Decode(bolt11);
-            const hashSection = decoded.sections?.find(
-              (s: { name: string }) => s.name === 'payment_hash',
-            ) as { value?: string } | undefined;
-            const paymentHash = hashSection?.value;
-            if (paymentHash) {
-              const contact = contacts.find((c) => c.pubkey === activePubkey);
-              const p = contact?.profile ?? null;
-              const counterparty = {
-                pubkey: activePubkey,
-                profile: {
-                  npub: npubEncode(activePubkey),
-                  name: p?.name ?? null,
-                  displayName: p?.displayName ?? null,
-                  picture: p?.picture ?? activePicture ?? null,
-                  nip05: p?.nip05 ?? null,
-                },
-                comment: submittedMemo,
-                anonymous: false,
-              };
-              await recordOutgoingCounterparty(paymentHash, counterparty);
-              if (__DEV__)
-                console.log(`[Zap-send] stored counterparty for ph=${paymentHash.slice(0, 12)}…`);
-              // Optimistic insert: surface the outgoing zap in ConversationScreen
-              // (and the transaction list) without waiting for LNbits to flush
-              // the tx and the next resolver pass. The subsequent
-              // fetchTransactionsForWallet refresh reconciles by paymentHash —
-              // see WalletContext's counterpartyByHash loop which preserves
-              // this attribution across refreshes.
-              if (walletId) {
-                const nowSec = Math.floor(Date.now() / 1000);
-                // Convention throughout the app: amount is a POSITIVE magnitude
-                // and `type` alone carries direction (see TransferSheet's
-                // optimistic inserts, ConversationScreen's zapItems, and every
-                // TransactionDetail consumer — all read Math.abs(tx.amount)).
-                addPendingTransaction(walletId, {
-                  type: 'outgoing',
-                  amount: currentSats,
-                  description: submittedMemo || undefined,
-                  created_at: nowSec,
-                  settled_at: nowSec,
-                  paymentHash,
-                  bolt11,
-                  invoice: bolt11,
-                  zapCounterparty: counterparty,
-                  optimistic: true,
-                });
+        if (activePubkey)
+          void (async () => {
+            try {
+              const decoded = bolt11Decode(bolt11);
+              const hashSection = decoded.sections?.find(
+                (s: { name: string }) => s.name === 'payment_hash',
+              ) as { value?: string } | undefined;
+              const paymentHash = hashSection?.value;
+              if (paymentHash) {
+                const contact = contacts.find((c) => c.pubkey === activePubkey);
+                const p = contact?.profile ?? null;
+                const counterparty = {
+                  pubkey: activePubkey,
+                  profile: {
+                    npub: npubEncode(activePubkey),
+                    name: p?.name ?? null,
+                    displayName: p?.displayName ?? null,
+                    picture: p?.picture ?? activePicture ?? null,
+                    nip05: p?.nip05 ?? null,
+                  },
+                  comment: submittedMemo,
+                  anonymous: false,
+                };
+                await recordOutgoingCounterparty(paymentHash, counterparty);
+                if (__DEV__)
+                  console.log(`[Zap-send] stored counterparty for ph=${paymentHash.slice(0, 12)}…`);
+                // Optimistic insert: surface the outgoing zap in ConversationScreen
+                // (and the transaction list) without waiting for LNbits to flush
+                // the tx and the next resolver pass. The subsequent
+                // fetchTransactionsForWallet refresh reconciles by paymentHash —
+                // see WalletContext's counterpartyByHash loop which preserves
+                // this attribution across refreshes.
+                if (walletId) {
+                  const nowSec = Math.floor(Date.now() / 1000);
+                  // Convention throughout the app: amount is a POSITIVE magnitude
+                  // and `type` alone carries direction (see TransferSheet's
+                  // optimistic inserts, ConversationScreen's zapItems, and every
+                  // TransactionDetail consumer — all read Math.abs(tx.amount)).
+                  addPendingTransaction(walletId, {
+                    type: 'outgoing',
+                    amount: currentSats,
+                    description: submittedMemo || undefined,
+                    created_at: nowSec,
+                    settled_at: nowSec,
+                    paymentHash,
+                    bolt11,
+                    invoice: bolt11,
+                    zapCounterparty: counterparty,
+                    optimistic: true,
+                  });
+                }
               }
+            } catch (e) {
+              if (__DEV__) console.warn('[Zap-send] store failed:', e);
             }
-          } catch (e) {
-            if (__DEV__) console.warn('[Zap-send] store failed:', e);
-          }
-        }
+          })();
       } else {
         // Amount-bearing bolt11s pay as-is; amount-less bolt11s require
         // the user-entered sats threaded through as msats per NIP-47.
@@ -620,11 +627,11 @@ const SendSheet: React.FC<Props> = ({
           amountMsats: isAmountlessBolt11 ? currentSats * 1000 : undefined,
         });
       }
-      // Balance now, history after the overlay's tap frame (#859), and a
-      // reverse swap's late-settling Lightning leg until it settles (#1179).
-      if (walletId) await refreshAfterSend(walletId, swapPaymentHash);
       if (signal.aborted) return;
       showOutcome(send, 'success');
+      if (__DEV__) console.log(`[Send] Sent in ${Date.now() - sendTappedAt}ms`);
+      // Confirmation owns the overlay; refresh failures must not turn a settled send into failure.
+      if (walletId) void refreshAfterSend(walletId, swapPaymentHash).catch(() => {});
     } catch (error) {
       // Reply-timeout (ambiguous pay outcome) and a post-commit reverse-swap
       // settling error both mean "the money may have moved; it'll settle" —

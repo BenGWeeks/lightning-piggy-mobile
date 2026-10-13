@@ -188,7 +188,7 @@ jest.mock('../services/sendThresholdService', () => ({
   getSendThreshold: jest.fn(),
   shouldConfirmSend: jest.fn(),
 }));
-jest.mock('../services/lnurlService', () => ({ fetchInvoice: jest.fn() }));
+jest.mock('../services/lnurlService', () => ({ fetchInvoiceWithVerification: jest.fn() }));
 jest.mock('../services/boltzService', () => ({ isBitcoinAddress: () => false }));
 jest.mock('../services/onchainService', () => ({}));
 jest.mock('../services/nostrService', () => ({ npubEncode: jest.fn() }));

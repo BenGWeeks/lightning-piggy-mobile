@@ -38,6 +38,7 @@ interface LnurlPayResponse {
 interface LnurlInvoiceResponse {
   pr: string; // bolt11 invoice
   routes: unknown[];
+  verify?: string;
 }
 
 export interface LnurlPayParams {
@@ -398,6 +399,14 @@ export async function fetchInvoice(
   amountSats: number,
   options?: { nostr?: string; comment?: string },
 ): Promise<string> {
+  return (await fetchInvoiceWithVerification(callback, amountSats, options)).invoice;
+}
+
+export async function fetchInvoiceWithVerification(
+  callback: string,
+  amountSats: number,
+  options?: { nostr?: string; comment?: string },
+): Promise<{ invoice: string; verifyUrl?: string }> {
   if (
     !Number.isSafeInteger(amountSats) ||
     amountSats <= 0 ||
@@ -439,7 +448,7 @@ export async function fetchInvoice(
     throw new Error('LNURL invoice amount does not match the requested payment — refusing to pay');
   }
 
-  return data.pr;
+  return { invoice: data.pr, verifyUrl: data.verify };
 }
 
 // The LNURL-withdraw claim (callback?k1=&pr= → OK/reason) lives in

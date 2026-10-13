@@ -1,17 +1,13 @@
 import { sanitizeDisplayText } from '../utils/sanitizeDisplayText';
+import { confirmNwcPayment } from './nwcPaymentCompletion';
+import { isSettledPayment, matchesPaymentHash } from '../utils/paymentCompletion';
 import { listTransactionsWithRetry } from './nwcTransactionRetry';
 import { hydratePaymentProofs, recordPaymentProof } from './paymentProofs';
 import { NostrWebLNProvider } from '@getalby/sdk';
 import type { Nip47GetInfoResponse } from '@getalby/sdk';
 import { pinNip04IfNoInfoEvent, clearEncryptionDecision } from './nwcEncryption';
 import { patchRelayPublish } from './nwcRelayPublishPatch';
-import {
-  createReplyTimeoutError,
-  isConnectionError,
-  throwIfAborted,
-  abortableSleep,
-  abortable,
-} from './nwcErrors';
+import { createReplyTimeoutError, isConnectionError, throwIfAborted } from './nwcErrors';
 // Per-wallet relay-health bookkeeping (reply-timeout cooldown + rate-limit
 // back-off + the tri-state wallet health) lives in ./nwcRelayHealth so this
 // service stays under the file-size cap and the health signal is unit-testable
@@ -402,7 +398,7 @@ export async function makeInvoice(
  * Apply the shared no-wait-for-OK relay patch (`nwcRelayPublishPatch`) with
  * the FOREGROUND failure handling: when the fire-and-forget publish rejects
  * (e.g. the relay is unreachable), record the timestamp per-walletId so
- * payInvoice can fast-fail instead of waiting 5 min for a preimage that's
+ * payInvoice can fast-fail instead of waiting for a preimage that's
  * never going to arrive (see #175).
  */
 function patchForegroundRelayPublish(provider: NostrWebLNProvider, walletId: string): void {
@@ -566,6 +562,8 @@ export interface PayInvoiceOptions {
   onReplyTimeout?: () => void;
   /** Amount in millisats; only used for zero-amount invoices. */
   amountMsats?: number;
+  /** Optional LUD-21 endpoint returned with this invoice. */
+  verifyUrl?: string;
 }
 
 export async function payInvoice(
@@ -595,10 +593,33 @@ async function payInvoiceOnce(
   throwIfAborted(signal);
   let provider = await ensureConnected(walletId);
   if (!provider) throw new Error('Not connected');
+  const paymentHash = extractPaymentHash(bolt11);
+  if (!paymentHash) throw new Error('Invoice has no payment hash');
+  const sentAt = Date.now();
+  const sendAndConfirm = (current: NostrWebLNProvider) =>
+    confirmNwcPayment({
+      provider: current,
+      paymentHash,
+      reply: () => sendPaymentWithTimeout(current, bolt11, amountMsats),
+      signal,
+      verifyUrl: options.verifyUrl,
+      timeoutError: () => {
+        if (hasRecentPublishFailure(walletId)) {
+          return new Error("Couldn't reach your wallet: relay publish timed out");
+        }
+        onReplyTimeout?.();
+        return createReplyTimeoutError();
+      },
+      onReplyError: (error) => {
+        if (!(error instanceof Error) || !error.message.includes('reply timeout')) throw error;
+        if (hasRecentPublishFailure(walletId)) {
+          throw new Error("Couldn't reach your wallet: relay publish timed out");
+        }
+        onReplyTimeout?.();
+      },
+    });
   try {
-    const result = await sendPaymentWithTimeout(provider, bolt11, amountMsats);
-    throwIfAborted(signal);
-    return { preimage: result.preimage, confirmed: true };
+    return await sendAndConfirm(provider);
   } catch (error) {
     // Propagate user-initiated cancel straight away.
     if ((error as Error)?.name === 'AbortError') throw error;
@@ -630,9 +651,11 @@ async function payInvoiceOnce(
             2500,
             `lookupInvoice(${walletId})`,
           );
-          if (lookup?.preimage) {
+          if (isSettledPayment(lookup) && matchesPaymentHash(lookup?.preimage, paymentHash)) {
             console.log('[NWC] Invoice already paid — returning existing preimage');
-            return { preimage: lookup.preimage, confirmed: lookup.paid === true };
+            if (__DEV__)
+              console.log(`[NWC] payment confirmed via lookup in ${Date.now() - sentAt}ms`);
+            return { preimage: lookup.preimage, confirmed: true };
           }
         } catch {
           // lookup failed — fall through to retry. The wallet would refuse
@@ -640,60 +663,7 @@ async function payInvoiceOnce(
         }
       }
       throwIfAborted(signal);
-      const result = await sendPaymentWithTimeout(provider, bolt11, amountMsats);
-      return { preimage: result.preimage, confirmed: true };
-    }
-    if (msg.includes('reply timeout')) {
-      // If the relay's fire-and-forget publish just failed, the NIP-47
-      // request never reached the wallet. Don't waste 5 minutes polling
-      // lookupInvoice for a preimage that isn't coming — bail out now
-      // with a message the humanizer can turn into the UX string.
-      if (hasRecentPublishFailure(walletId)) {
-        console.log('[NWC] pay_invoice reply timeout + recent publish failure — failing fast');
-        throw new Error("Couldn't reach your wallet: relay publish timed out");
-      }
-
-      // NWC SDK times out after ~60s but the payment may still be in flight.
-      // Poll lookupInvoice to check if it completes within 5 minutes.
-      console.log('[NWC] pay_invoice timed out, polling for completion...');
-      const paymentHash = extractPaymentHash(bolt11);
-      if (!paymentHash) throw createReplyTimeoutError();
-      onReplyTimeout?.();
-      const deadline = Date.now() + 5 * 60 * 1000;
-      while (Date.now() < deadline) {
-        // abortableSleep rejects with AbortError when the caller cancels,
-        // so the poll loop exits immediately on a Cancel tap.
-        await abortableSleep(5000, signal);
-        if (hasRecentPublishFailure(walletId)) {
-          throw new Error("Couldn't reach your wallet: relay publish timed out");
-        }
-        try {
-          // `abortable` lets Cancel win the race even while the SDK is
-          // blocked inside lookupInvoice's own NIP-47 round-trip; the
-          // underlying promise completes in the background and its
-          // result is discarded. 5000 ms cap on the SDK call itself so
-          // a slow relay doesn't pin the 5 s sleep + ~10 s SDK default
-          // into a 15 s effective tick — recipients had been seeing
-          // payments land before our app marked them paid (#553).
-          const lookup = await abortable(
-            withTimeout(
-              provider.lookupInvoice({ paymentHash }),
-              5000,
-              `lookupInvoice(${walletId})`,
-            ),
-            signal,
-          );
-          if (lookup?.preimage) {
-            console.log('[NWC] Payment completed after timeout:', paymentHash);
-            return { preimage: lookup.preimage, confirmed: lookup.paid === true };
-          }
-        } catch (err) {
-          // AbortError must propagate so the caller sees the cancel.
-          if ((err as Error)?.name === 'AbortError') throw err;
-          // Any other lookupInvoice failure — keep polling.
-        }
-      }
-      throw createReplyTimeoutError();
+      return await sendAndConfirm(provider);
     }
     // The Alby SDK wraps a NIP-47 error response with no body as
     // `Nip47WalletError("unknown Error", "INTERNAL")` (see
@@ -718,7 +688,7 @@ async function payInvoiceOnce(
             2500,
             `lookupInvoice(${walletId})`,
           );
-          if (lookup?.paid && lookup.preimage) {
+          if (isSettledPayment(lookup) && matchesPaymentHash(lookup?.preimage, paymentHash)) {
             // `warn` (not `log`) so this survives the production
             // `transform-remove-console` strip — without it field logs
             // can't tell a benign Alby-SDK-wrapping case (wallet did
@@ -728,6 +698,8 @@ async function payInvoiceOnce(
             console.warn(
               `[NWC] pay_invoice surfaced "${msg}" but lookup confirms paid + has preimage — returning it (paymentHash=${paymentHash.slice(0, 8)})`,
             );
+            if (__DEV__)
+              console.log(`[NWC] payment confirmed via lookup in ${Date.now() - sentAt}ms`);
             return { preimage: lookup.preimage, confirmed: true };
           }
           // No usable preimage — BUT the lookup's paid=false is NOT a
@@ -913,13 +885,9 @@ export interface LookupInvoiceOptions {
    * call fails fast so the caller's next poll tick can race a fresh
    * request rather than waiting on a slow reply.
    *
-   * Passed by both settlement-detection callers: the receive-side
-   * `expectPayment` poll in `WalletContext` (1 s ticks, 2500 ms cap
-   * mirrors the sibling `getBalance` ceiling) and the send-side
-   * post-reply-timeout poll here in `nwcService.payInvoice` (5 s
-   * ticks, 5000 ms cap). Without this, a slow relay reply blocked
-   * the pile-up-guarded tick for the SDK's full default — recipients
-   * saw the payment land before our app marked it paid (#553).
+   * The receive-side `expectPayment` poll uses a 2500 ms ceiling.
+   * The payment completion race uses the raw SDK lookup with the same
+   * ceiling in `nwcPaymentCompletion`, starting before the pay reply timeout.
    */
   replyTimeoutMs?: number;
 }
