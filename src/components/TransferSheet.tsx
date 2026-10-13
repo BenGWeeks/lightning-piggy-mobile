@@ -1,3 +1,4 @@
+import { getTransferSourceWallets } from '../utils/transferSourceWallets';
 import { formatTransferWalletLabel, formatTransferProfileLabel } from '../utils/transferLabels';
 import TransferSwapQuoteStatus from './TransferSwapQuoteStatus';
 import { useTransferSwapFees } from '../utils/useTransferSwapFees';
@@ -187,15 +188,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   // Always scoped to the ACTIVE profile — signing always happens with
   // the active pubkey, so a cross-profile transfer is "active profile
   // sends → other profile receives".
-  const sourceWallets = useMemo(
-    () =>
-      wallets.filter(
-        (w) =>
-          (w.walletType === 'nwc' && w.isConnected) ||
-          (w.walletType === 'onchain' && w.onchainImportMethod === 'mnemonic'),
-      ),
-    [wallets],
-  );
+  const sourceWallets = useMemo(() => getTransferSourceWallets(wallets), [wallets]);
 
   // Destination dropdown contents.
   //  - Same profile: live WalletState list (existing behaviour) —

@@ -266,6 +266,11 @@ export async function saveMnemonic(walletId: string, mnemonic: string): Promise<
   await SecureStore.setItemAsync(`${ONCHAIN_MNEMONIC_PREFIX}${walletId}`, mnemonic, SECURE_OPTIONS);
 }
 
+/** Existence check only: never expose signing material to metadata migrations. */
+export async function hasMnemonic(walletId: string): Promise<boolean> {
+  return (await SecureStore.getItemAsync(`${ONCHAIN_MNEMONIC_PREFIX}${walletId}`)) != null;
+}
+
 export async function getMnemonic(walletId: string): Promise<string | null> {
   return SecureStore.getItemAsync(`${ONCHAIN_MNEMONIC_PREFIX}${walletId}`);
 }
