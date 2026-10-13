@@ -4,6 +4,7 @@ import { resolveNotificationDefaults } from '../utils/notificationDefaults';
 import { enableMarmotPush, loadMarmotPushSettings } from './marmotPushRegistration';
 import { loadWatcherState, saveWatcherState, WATCHER_PUSH_KEY_BASE } from './watcherPushStore';
 import { anyCategory } from './watcherRegistration';
+import { scheduleWatcherReconciliation } from './watcherPush';
 
 const PUSH_PREFIX = 'marmot_push_enabled_v1_';
 const EXPLICIT_PREFIX = 'notification_preference_explicit_v1_';
@@ -54,6 +55,7 @@ export function initialiseNotificationDefaults(
           payment: desired.more,
         },
       });
+      scheduleWatcherReconciliation(me);
     }
     if (ownPush === null) {
       await AsyncStorage.setItem(`${PUSH_PREFIX}${me}`, '0');

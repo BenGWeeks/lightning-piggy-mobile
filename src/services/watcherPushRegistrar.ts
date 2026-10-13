@@ -201,6 +201,11 @@ export class WatcherPushRegistrar {
     else if (changed) this.schedule('token');
   }
 
+  /** Defaults were saved outside this registrar: rerun silently for that account. */
+  reconcile(pubkey: string): void {
+    if (this.ctx?.pubkey.toLowerCase() === pubkey.toLowerCase()) this.schedule('start');
+  }
+
   // --- user actions ---------------------------------------------------------
 
   async categories(): Promise<WatcherCategories | null> {

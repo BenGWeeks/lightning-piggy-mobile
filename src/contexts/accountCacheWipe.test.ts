@@ -1,3 +1,6 @@
+import { initialiseNotificationDefaults } from '../services/notificationDefaults';
+import * as marmotPush from '../services/marmotPushRegistration';
+import { loadWatcherState } from '../services/watcherPushStore';
 import {
   readMarketPreferences,
   writeMarketPreferences,
@@ -24,6 +27,8 @@ import {
 import { resetGroupMessagesMigrationForTests } from '../services/groupMessagesMigration';
 import { groupMessagesKey, legacyGroupMessagesKey } from '../services/groupMessagesKeys';
 import { wipeDecryptedMediaForOwner } from '../services/decryptedMediaCache';
+
+jest.mock('../services/watcherPush', () => ({ scheduleWatcherReconciliation: jest.fn() }));
 
 jest.mock('../services/decryptedMediaCache', () => ({
   wipeDecryptedMediaForOwner: jest.fn(async () => {}),
@@ -120,3 +125,34 @@ it('wipes retry and exhausted kind-4 metadata only for the signed-out account', 
   expect(await AsyncStorage.multiGet(keys)).toEqual(keys.map((key) => [key, null]));
   expect(await AsyncStorage.multiGet(otherKeys)).toEqual(otherKeys.map((key) => [key, '[]']));
 });
+
+it.each([PK, 'c'.repeat(64)])(
+  'removes notification decision markers so %s can initialise',
+  async (nextAccount) => {
+    await AsyncStorage.clear();
+    marmotPush.__resetMarmotPushForTests();
+    const marker = (pk: string) => `notification_preference_explicit_v1_${pk}`;
+    await AsyncStorage.multiSet([
+      [marker(PK), '1'],
+      [marker(OTHER_PK), '0'],
+    ]);
+    await wipeAccountCaches(PK);
+    expect(await AsyncStorage.getItem(marker(PK))).toBeNull();
+    expect(await AsyncStorage.getItem(marker(OTHER_PK))).toBe('0');
+    await wipeAccountCaches(OTHER_PK);
+    const enable = jest
+      .spyOn(marmotPush, 'enableMarmotPush')
+      .mockResolvedValue({ status: 'no-permission' });
+    try {
+      // Cover both re-login and a new identity after all earlier accounts were removed.
+      await initialiseNotificationDefaults(nextAccount, () => true);
+      expect((await loadWatcherState(nextAccount)).categories.dm).toBe(true);
+      expect(enable).toHaveBeenCalledWith(nextAccount, {
+        interactive: false,
+        stillActive: expect.any(Function),
+      });
+    } finally {
+      enable.mockRestore();
+    }
+  },
+);

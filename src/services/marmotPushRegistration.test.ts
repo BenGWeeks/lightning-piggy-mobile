@@ -759,3 +759,34 @@ it('schedules default group records without an interactive signer batch', async 
   expect(mockSession.pushRegistration.sync).not.toHaveBeenCalled();
   expect(mockSession.pushRegistration.schedule).toHaveBeenCalled();
 });
+
+it.each(['switch', 'sign-out'])(
+  'cancels automatic enablement during token acquisition on %s',
+  async (action) => {
+    let active = true;
+    let release!: (v: unknown) => void;
+    let tokenStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      tokenStarted = resolve;
+    });
+    (Notifications.getDevicePushTokenAsync as jest.Mock).mockImplementationOnce(() => {
+      tokenStarted();
+      return new Promise((resolve) => {
+        release = resolve;
+      });
+    });
+    const enabling = enableMarmotPush(ME, { interactive: false, stillActive: () => active });
+    await started;
+    active = false;
+    mockActive = action === 'switch' ? sessionFor('other-account') : null;
+    mockActivePubkey = mockActive?.pubkey ?? null;
+    await AsyncStorage.multiRemove([enabledKey(ME), `notification_preference_explicit_v1_${ME}`]);
+    release({ type: 'android', data: 'late-token' });
+    expect(await enabling).toEqual({ status: 'unavailable' });
+    expect(await AsyncStorage.getItem(enabledKey(ME))).toBeNull();
+    expect(await AsyncStorage.getItem(`notification_preference_explicit_v1_${ME}`)).toBeNull();
+    expect(currentPushDevice(ME)).toBeNull();
+    expect(Notifications.registerTaskAsync).not.toHaveBeenCalled();
+    expect(mockSession.pushRegistration.setRegistration).not.toHaveBeenCalled();
+  },
+);

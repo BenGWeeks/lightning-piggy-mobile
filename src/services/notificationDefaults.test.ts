@@ -2,6 +2,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { initialiseNotificationDefaults } from './notificationDefaults';
 import { enableMarmotPush } from './marmotPushRegistration';
 import { loadWatcherState, saveWatcherState } from './watcherPushStore';
+import { scheduleWatcherReconciliation } from './watcherPush';
+
+jest.mock('./watcherPush', () => ({ scheduleWatcherReconciliation: jest.fn() }));
 
 jest.mock('./marmotPushRegistration', () => ({
   loadMarmotPushSettings: jest.fn(async () => ({ enabled: false })),
@@ -98,4 +101,17 @@ it('serialises concurrent first-account decisions so only one phone account defa
     mention: false,
     payment: false,
   });
+});
+
+it('reconciles new categories for an already push-enabled account without enabling again', async () => {
+  await AsyncStorage.setItem(pushKey, '1');
+  await initialiseNotificationDefaults(me, () => true);
+  expect(enableMarmotPush).not.toHaveBeenCalled();
+  expect((await loadWatcherState(me)).categories).toEqual({
+    dm: true,
+    zap: true,
+    mention: true,
+    payment: true,
+  });
+  expect(scheduleWatcherReconciliation).toHaveBeenCalledWith(me);
 });

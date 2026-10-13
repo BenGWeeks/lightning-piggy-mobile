@@ -513,11 +513,15 @@ export async function enableMarmotPush(
   return serial(() =>
     opts.stillActive?.() === false
       ? Promise.resolve({ status: 'unavailable' } as EnableOutcome)
-      : enableNow(pubkey, opts.interactive ?? true),
+      : enableNow(pubkey, opts.interactive ?? true, opts.stillActive),
   );
 }
 
-async function enableNow(pubkey: string, interactive: boolean = true): Promise<EnableOutcome> {
+async function enableNow(
+  pubkey: string,
+  interactive: boolean = true,
+  stillActive?: () => boolean,
+): Promise<EnableOutcome> {
   try {
     await ensureSettings();
   } catch {
@@ -536,6 +540,8 @@ async function enableNow(pubkey: string, interactive: boolean = true): Promise<E
     if (__DEV__) console.warn('[MarmotPush] no device token:', e);
     return { status: 'unavailable' };
   }
+  // Token acquisition can outlive the account: never recreate wiped preferences.
+  if (stillActive?.() === false) return { status: 'unavailable' };
   // Persist first, then commit: a failed write must leave push off. Then
   // lift a tombstone from an earlier removal of this account (it would turn
   // the fresh opt-in back off at the next start) — only after the opt-in is

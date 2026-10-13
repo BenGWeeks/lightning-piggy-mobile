@@ -740,3 +740,27 @@ it.each(['amber', 'nip46'] as const)(
     expect(h.signs).toBe(1);
   },
 );
+
+describe('reconciliation after default categories are saved', () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+  it.each(['nsec', 'amber', 'nip46'] as const)(
+    'reconciles after completed startup for %s',
+    async (signerType) => {
+      const h = harness();
+      h.registrar.setContext(ctx({ signerType }));
+      await h.advance(3000);
+      expect(h.published).toHaveLength(0);
+      await h.deps.save(USER, {
+        categories: { dm: true, zap: true, mention: true, payment: true },
+        explicitlySet: false,
+        lastTs: 0,
+        registered: null,
+      });
+      h.registrar.reconcile(USER);
+      await h.advance(3000);
+      expect(h.published).toHaveLength(signerType === 'nsec' ? 1 : 0);
+      expect(h.registrar.getStatus().last).toBe(signerType === 'nsec' ? 'registered' : 'pending');
+    },
+  );
+});

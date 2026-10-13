@@ -78,6 +78,8 @@ export const setWatcherCategory = (
   category: WatcherCategory,
   on: boolean,
 ): Promise<WatcherCategories | null> => registrar.setCategory(category, on);
+/** Reconcile externally saved defaults without prompting remote signers. */
+export const scheduleWatcherReconciliation = (pubkey: string): void => registrar.reconcile(pubkey);
 export const syncWatcherNow = (): Promise<WatcherSyncOutcome> => registrar.syncNow();
 
 const UNREGISTER_TIMEOUT_MS = 20_000;

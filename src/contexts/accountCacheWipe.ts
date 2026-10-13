@@ -119,6 +119,8 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
     // so no signed unregister: the registration dies with the push token,
     // which wipeDmStoresForAccount (Marmot push teardown) deletes below.
     perAccountKey(WATCHER_PUSH_KEY_BASE, loggedOutPubkey),
+    // A future re-login must reconsider notification defaults after preferences are wiped.
+    `notification_preference_explicit_v1_${loggedOutPubkey.toLowerCase()}`,
     // The key it vouched for is gone with the account (#1223).
     perAccountKey(KEY_BACKED_UP_KEY_BASE, loggedOutPubkey),
     // Where this account had read each chat up to (#1295).
