@@ -53,6 +53,7 @@ function surfacer({ fresh = true, follows = new Set([PEER]), hydrated = true } =
     isFreshArrival: () => fresh,
     queueInboxEntry: jest.fn(),
     knownWrapIds: new Set(),
+    seen: new Set(),
     chainWrite: (task) => void task(),
   });
 }

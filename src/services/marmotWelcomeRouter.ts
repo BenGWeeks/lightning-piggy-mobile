@@ -131,6 +131,7 @@ subscribeMarmotSession((session) => {
   if (previousOwner && previousOwner !== session?.pubkey) {
     snapshots.delete(previousOwner);
     controllers.delete(previousOwner);
+    gates.get(previousOwner)?.fence();
     gates.delete(previousOwner);
     const timer = timers.get(previousOwner);
     if (timer) clearTimeout(timer);

@@ -325,6 +325,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       knownWrapIds.delete(id);
       seen.delete(id);
     },
+    seen,
     chainWrite,
   });
 

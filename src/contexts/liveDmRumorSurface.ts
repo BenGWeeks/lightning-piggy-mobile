@@ -48,6 +48,7 @@ export interface LiveRumorSurfaceDeps {
   queueInboxEntry: (entry: DmInboxEntry) => void;
   knownWrapIds: Set<string>;
   releaseWrapClaim?: (wrapId: string) => void;
+  seen?: Set<string>;
   /** Append a task to the sub's serialised writeChain (with its load-bearing
    * trailing catch — see the note at the call in nostrLiveDmSub). */
   chainWrite: (task: () => Promise<void>) => void;
@@ -67,8 +68,10 @@ export function createLiveRumorSurfacer(
     isFreshArrival,
     queueInboxEntry,
     knownWrapIds,
+    seen,
     releaseWrapClaim = (id) => {
       knownWrapIds.delete(id);
+      seen?.delete(id);
     },
     chainWrite,
   } = deps;
@@ -104,16 +107,22 @@ export function createLiveRumorSurfacer(
         .catch(() => undefined);
     };
 
-    if (
-      await routeMarmotWelcome(
+    let routedWelcome: boolean;
+    try {
+      routedWelcome = await routeMarmotWelcome(
         rumor,
         viewerPubkey,
         wrapId,
         followPubkeysRef.current.has(rumor.pubkey?.toLowerCase() ?? ''),
         isFreshArrival(rumor.created_at),
         shouldAbort,
-      )
-    ) {
+      );
+    } catch (error) {
+      // Release the eager live-sub claims so another relay delivery can retry.
+      releaseWrapClaim(wrapId);
+      throw error;
+    }
+    if (routedWelcome) {
       nothingToSee();
       return;
     }

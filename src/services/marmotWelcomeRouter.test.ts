@@ -101,3 +101,47 @@ it('does not join or notify own, malformed, or cancelled Welcomes', async () => 
   expect(mockAccept).not.toHaveBeenCalled();
   expect(fireMessageNotification).not.toHaveBeenCalled();
 });
+
+it.each([null, 'f'.repeat(64)])(
+  'fences in-flight invitation writes when the session changes to %s',
+  async (nextOwner) => {
+    const owner = 'e'.repeat(64);
+    mockSession = { pubkey: owner, acceptWelcome: mockAccept, previewWelcome: mockPreview };
+    mockSessionChanged(mockSession);
+    await settle();
+    const backend = mockBackends.get(owner)!;
+    const read = backend.get.bind(backend);
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let started!: () => void;
+    const reading = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const spy = jest.spyOn(backend, 'get').mockImplementation(async (namespace, key) => {
+      if (namespace === 'welcomeInvitations' && key === 'in-flight-wrap') {
+        started();
+        await blocked;
+      }
+      return read(namespace, key);
+    });
+    try {
+      const routing = routeMarmotWelcome(rumor, owner, 'in-flight-wrap', false);
+      await reading;
+      mockSession = nextOwner
+        ? { pubkey: nextOwner, acceptWelcome: mockAccept, previewWelcome: mockPreview }
+        : null;
+      mockSessionChanged(mockSession);
+      release();
+      await routing;
+      expect(await read('welcomeInvitations', 'in-flight-wrap')).toBeNull();
+      expect(await backend.keys('welcomeInvitationRumorWraps')).toEqual([]);
+    } finally {
+      release();
+      spy.mockRestore();
+      mockSession = null;
+      mockSessionChanged(null);
+    }
+  },
+);
