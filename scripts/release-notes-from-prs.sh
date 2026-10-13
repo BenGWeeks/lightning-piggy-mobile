@@ -27,8 +27,8 @@ trap 'rm -f "$selected"' EXIT
 while IFS= read -r pr; do
   sha=$(jq -r '.mergeCommit.oid // empty' <<<"$pr")
   [ -n "$sha" ] || { echo 'Merged PR has no merge commit.' >&2; exit 1; }
-  # Full history contains every ancestor of the target. Older merged PRs may
-  # name commits removed by historical rebases; those cannot be in this release.
+  # Full history contains every ancestor of the target. Candidates merged after
+  # checkout or removed by historical rebases may be absent; neither is in range.
   git cat-file -e "${sha}^{commit}" 2>/dev/null || continue
   if git merge-base --is-ancestor "$sha" "$to" &&
     { [ -z "$from" ] || ! git merge-base --is-ancestor "$sha" "$from"; }; then

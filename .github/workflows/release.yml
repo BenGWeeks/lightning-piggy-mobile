@@ -86,8 +86,9 @@ jobs:
           [ -f "$archive" ] || archive=CHANGELOG.md
           if [ -f "$archive" ]; then
             # Carry forward prior generated sections without writing to protected main.
-            if [ -n "$PREVIOUS_TAG" ]; then
-              gh release view "$PREVIOUS_TAG" --json assets --jq '.assets[].name' > "$RUNNER_TEMP/previous-assets.txt"
+            # A Git tag need not have a GitHub Release or an archive attachment.
+            if [ -n "$PREVIOUS_TAG" ] &&
+              gh release view "$PREVIOUS_TAG" --json assets --jq '.assets[].name' > "$RUNNER_TEMP/previous-assets.txt"; then
               if grep -Fxq CHANGELOG.md "$RUNNER_TEMP/previous-assets.txt"; then
                 gh release download "$PREVIOUS_TAG" --pattern CHANGELOG.md --dir "$RUNNER_TEMP/previous"
                 cp "$RUNNER_TEMP/previous/CHANGELOG.md" "$archive"

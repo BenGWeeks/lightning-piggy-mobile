@@ -11,7 +11,7 @@ afterEach(() => fs.rmSync(repo, { recursive: true, force: true }));
 test('includes shipped PRs merged after tag commit time, with date-filtering CLI', () => {
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-notes-dates-'));
   const git = (...args: string[]) =>
-    execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
+    execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: 'pipe' }).trim();
   git('init', '-q');
   git('config', 'user.name', 'Offline Test');
   git('config', 'user.email', 'offline@example.invalid');
@@ -73,4 +73,35 @@ process.stdout.write(JSON.stringify(prs));
   expect(execFileSync(generator, ['v1.0.1', 'v1.0.1'], options)).toBe(
     'Bug fixes and improvements.\n',
   );
+});
+
+test('skips an unavailable post-checkout merge SHA and keeps shipped notes', () => {
+  repo = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-notes-missing-'));
+  const git = (...args: string[]) =>
+    execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: 'pipe' }).trim();
+  git('init', '-q');
+  git('config', 'user.name', 'Offline Test');
+  git('config', 'user.email', 'offline@example.invalid');
+  git('commit', '--allow-empty', '-qm', 'fixture');
+  git('tag', 'v1.0.0');
+  git('commit', '--allow-empty', '-qm', 'shipped');
+  git('tag', 'v1.0.1');
+  const shipped = git('rev-parse', 'HEAD');
+  const unavailable = 'f'.repeat(40);
+  expect(() => git('cat-file', '-e', `${unavailable}^{commit}`)).toThrow();
+  fs.writeFileSync(
+    path.join(repo, 'prs.json'),
+    JSON.stringify([
+      { number: 2, title: 'fix: future fix', mergeCommit: { oid: unavailable } },
+      { number: 1, title: 'fix: shipped fix', mergeCommit: { oid: shipped } },
+    ]),
+  );
+  fs.writeFileSync(path.join(repo, 'gh'), '#!/bin/sh\ncat prs.json\n', { mode: 0o755 });
+  expect(
+    execFileSync(generator, ['v1.0.0', 'v1.0.1'], {
+      cwd: repo,
+      env: { ...process.env, PATH: `${repo}:${process.env.PATH}` },
+      encoding: 'utf8',
+    }),
+  ).toBe('### Fixed\n\n- Shipped fix (#1)\n');
 });
