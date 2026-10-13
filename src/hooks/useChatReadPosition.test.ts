@@ -99,7 +99,9 @@ it('advances the position as rows are seen, and the mention queue with it', asyn
   // The divider stays where it was for this visit.
   expect(result.current.dividerId).toBe('c');
   jest.useRealTimers();
-  await flushReadPositions(OWNER);
+  await act(async () => {
+    await flushReadPositions(OWNER);
+  });
 });
 
 it('jumps to the oldest pending mention', async () => {
@@ -199,4 +201,89 @@ it('moves the divider back when an older unread lands just after the jump', asyn
   await waitFor(() => expect(result.current.dividerId).toBe('late'));
   expect(result.current.unread).toBe(4);
   await waitFor(() => expect(scrollToId).toHaveBeenCalledWith('late', false));
+});
+
+it.each(['dm:peer', KEY])(
+  'reconciles older backfill after completing the unread section in %s',
+  async (conversationKey) => {
+    await seed({ [conversationKey]: { at: 20, id: 'b' } });
+    jest.useFakeTimers();
+    const scrollToId = jest.fn(() => true);
+    const { result, rerender, unmount } = renderHook(
+      ({ list }: { list: UnreadEntry[] }) =>
+        useChatReadPosition({
+          owner: OWNER,
+          conversationKey,
+          entries: list,
+          loading: false,
+          scrollToId,
+          leaveEdge: jest.fn(),
+        }),
+      { initialProps: { list: entries } },
+    );
+    await waitFor(() => expect(result.current.dividerId).toBe('c'));
+    act(() => view(result.current, seen('c', 'd', 'e')));
+    expect(result.current.unread).toBe(0);
+    expect(result.current.dividerId).toBeNull();
+
+    act(() => jest.advanceTimersByTime(1000));
+    rerender({ list: [...entries.slice(0, 2), e('late', 25, false, true), ...entries.slice(2)] });
+    expect(result.current.dividerId).toBe('late');
+    expect(result.current.unread).toBe(4);
+    expect(result.current.pendingMentions).toEqual(['late', 'c', 'e']);
+    act(() => jest.advanceTimersByTime(60));
+    expect(scrollToId).toHaveBeenLastCalledWith('late', false);
+    // Passing newer rows during the jump cannot consume the unseen backfill.
+    act(() => view(result.current, seen('e')));
+    expect(result.current.unread).toBe(4);
+    // The list leaves those rows while the jump lands.
+    act(() => view(result.current, seen()));
+    act(() => jest.advanceTimersByTime(2940));
+    expect(getReadMarker(OWNER, conversationKey)).toEqual({ at: 20, id: 'b' });
+
+    act(() => view(result.current, seen('late', 'c', 'd', 'e')));
+    expect(result.current.unread).toBe(0);
+    expect(result.current.dividerId).toBeNull();
+    expect(getReadMarker(OWNER, conversationKey)).toEqual({ at: 50, id: 'e' });
+    unmount();
+  },
+);
+
+it('retires the divider after reading everything and does not restore it for new arrivals', async () => {
+  await seed({ [KEY]: { at: 20, id: 'b' } });
+  jest.useFakeTimers();
+  const { result, rerender, unmount } = renderHook(
+    ({ list }: { list: UnreadEntry[] }) =>
+      useChatReadPosition({
+        owner: OWNER,
+        conversationKey: KEY,
+        entries: list,
+        loading: false,
+        scrollToId: jest.fn(() => true),
+        leaveEdge: jest.fn(),
+      }),
+    { initialProps: { list: entries } },
+  );
+  await waitFor(() => expect(result.current.dividerId).toBe('c'));
+  act(() => view(result.current, seen('c', 'd')));
+  rerender({ list: [...entries, e('own', 55, true)] });
+  expect(result.current.unread).toBe(1);
+  expect(result.current.dividerId).toBe('c');
+  act(() => view(result.current, seen('e')));
+  expect(result.current.unread).toBe(0);
+  expect(result.current.dividerId).toBeNull();
+  // Still in the late-arrival window: completion must not reset the marker.
+  rerender({ list: [...entries, e('f', 60)] });
+  expect(result.current.unread).toBe(1);
+  expect(result.current.dividerId).toBeNull();
+  act(() => view(result.current, seen('f')));
+  expect(result.current.unread).toBe(0);
+  unmount();
+  await act(async () => {
+    await flushReadPositions(OWNER);
+  });
+  expect(getReadMarker(OWNER, KEY)).toEqual({ at: 60, id: 'f' });
+  const reopened = setup();
+  await waitFor(() => expect(reopened.result.current.unread).toBe(0));
+  expect(reopened.result.current.dividerId).toBeNull();
 });

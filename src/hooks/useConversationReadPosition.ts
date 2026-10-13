@@ -4,7 +4,7 @@ import { useChatReadPosition } from './useChatReadPosition';
 import { useListScrollToId } from './useListScrollToId';
 import { dmReadKey } from '../services/chatReadPositions';
 import type { Item } from '../utils/conversationItems';
-import type { UnreadEntry } from '../utils/chatUnread';
+import { chatUnreadEntries } from '../utils/unreadDivider';
 
 export const conversationItemKey = (it: Item) => it.id;
 
@@ -29,15 +29,7 @@ export function useConversationReadPosition({
   loading: boolean;
   leaveEdge: (holdMs?: number) => void;
 }) {
-  const entries = useMemo<UnreadEntry[]>(() => {
-    const out: UnreadEntry[] = [];
-    for (let i = items.length - 1; i >= 0; i--) {
-      const it = items[i];
-      if (it.kind !== 'dayHeader')
-        out.push({ id: it.id, createdAt: it.createdAt, fromMe: it.fromMe });
-    }
-    return out;
-  }, [items]);
+  const entries = useMemo(() => chatUnreadEntries(items, true), [items]);
   const { scrollToId, onScrollToIndexFailed } = useListScrollToId(
     listRef,
     items,

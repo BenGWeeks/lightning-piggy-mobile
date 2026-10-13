@@ -5,13 +5,13 @@ import { useReadPositions } from './useReadPositions';
 import { flushReadPositions, markConversationRead } from '../services/chatReadPositions';
 import {
   advanceReadMarker,
-  firstUnreadId,
   newestEntryMarker,
   unreadCount,
   unreadMentionIds,
   type ReadMarker,
   type UnreadEntry,
 } from '../utils/chatUnread';
+import { unreadDividerId } from '../utils/unreadDivider';
 
 /** If the jump target never reports visible, start counting rows after this. */
 const SETTLE_MAX_MS = 2500;
@@ -166,7 +166,7 @@ export function useChatReadPosition({
       openedAt.current = Date.now();
       markerRef.current = stored;
       setMarker(stored);
-      const dividerId = firstUnreadId(entries, stored);
+      const dividerId = unreadDividerId(entries, stored, false);
       divider.current = dividerId;
       setSnapshot({ scope, dividerId });
       if (lateTimer.current) clearTimeout(lateTimer.current);
@@ -175,7 +175,7 @@ export function useChatReadPosition({
       return;
     }
     if (Date.now() - openedAt.current >= LATE_ARRIVAL_MS) return;
-    const late = firstUnreadId(entries, snapshotMarker.current);
+    const late = unreadDividerId(entries, snapshotMarker.current, false);
     if (!late || late === divider.current) return;
     const current = divider.current;
     const pos = (id: string) => entries.findIndex((entry) => entry.id === id);
@@ -225,6 +225,20 @@ export function useChatReadPosition({
   const unread = useMemo(() => unreadCount(entries, live), [entries, live]);
   const pendingMentions = useMemo(() => unreadMentionIds(entries, live), [entries, live]);
 
+  // Hide the opening boundary once read, retaining its ref so older backfill
+  // can still reconcile during the late-arrival window. Newer messages alone
+  // must not resurrect an already completed unread section.
+  const visibleDividerId = unreadDividerId(
+    entries,
+    live,
+    false,
+    snapshot?.scope === scope ? snapshot.dividerId : null,
+  );
+  useEffect(() => {
+    if (snapshot?.scope !== scope || !snapshot?.dividerId || unread > 0) return;
+    setSnapshot({ scope: snapshot.scope, dividerId: null });
+  }, [scope, snapshot, unread]);
+
   const jumpToNextMention = useCallback(() => {
     const id = pendingMentions[0];
     if (!id) return;
@@ -233,8 +247,8 @@ export function useChatReadPosition({
   }, [pendingMentions]);
 
   return {
-    /** Draw the "Unread messages" divider above this row (fixed for the visit). */
-    dividerId: snapshot?.scope === scope ? snapshot.dividerId : null,
+    /** Opening boundary, stable while unread messages remain. */
+    dividerId: visibleDividerId,
     unread,
     pendingMentions,
     jumpToNextMention,

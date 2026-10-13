@@ -4,6 +4,9 @@
 |===
 | Problem | Solution
 
+| "Unread messages" appears below the newest DM, or remains after everything is read
+| React Native's inverted list cells use `column-reverse`, so a Fragment containing the divider and message reverses their visual order. Keep them inside a normal-column `View` (`ConversationScreen.tsx`). `utils/unreadDivider.ts` selects real incoming messages in reading order, excluding local device notices, failed invites and date headers. The shared `useChatReadPosition` hook keeps the opening boundary while unread messages remain and retires it when the live count reaches zero, for both DMs and groups. Do not recompute the boundary from the advancing live marker on every viewability report.
+
 | Boltz reverse swap claim broadcast fails with "mandatory-script-verify-flag-failed (Witness program hash mismatch)"
 | The Taproot internal key for Boltz v2 swaps is a MuSig2 aggregate of Boltz's key and the user's key — in a specific order. Per Boltz docs, **"Boltz's public key always coming first"**: for reverse swaps that means `keyAggregate([refundPubKey, claimPubKey])` (Boltz's refund key first, user's claim key second; **not sorted, not the other way round, not just refundPubKey alone**). Keys must be 33-byte compressed, aggregated via `@scure/btc-signer`'s `keyAggregate` + `keyAggExport`, then used as the x-only internal key when computing the Taproot tweak. See `boltzService.ts` `claimSwap()` and the Boltz docs at https://api.docs.boltz.exchange/claiming-swaps.html. Confirmed against the chain by computing `p2tr(internalKey, [claimLeaf, refundLeaf], undefined, true)` from `@scure/btc-signer` and matching its `.script` to the on-chain lockup scriptPubKey.
 
