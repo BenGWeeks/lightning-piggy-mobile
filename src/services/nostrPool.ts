@@ -4,9 +4,10 @@ import { SimplePool } from 'nostr-tools/pool';
 import { normalizeURL } from 'nostr-tools/utils';
 import { withRelayHealth } from './healthAwarePool';
 import { hydrateRelayHealth } from './relayHealth';
+import { withResumableSubscriptions } from './resumablePool';
 
 /** `SimplePool` that skips relays known to be dead (#1326, see ./healthAwarePool). */
-class HealthAwarePool extends withRelayHealth(SimplePool) {
+class HealthAwarePool extends withResumableSubscriptions(withRelayHealth(SimplePool)) {
   private readonly pendingPublishes = new Map<string, number>();
 
   async ensureRelay(url: string, params?: Parameters<SimplePool['ensureRelay']>[1]) {
@@ -103,7 +104,7 @@ class HealthAwarePool extends withRelayHealth(SimplePool) {
  * `nostrService` imports this same instance, applies its custom fast-path
  * `pool.verifyEvent`, and re-exports `pool` / `trackRelays` for back-compat.
  */
-export const pool: SimplePool = new HealthAwarePool();
+export const pool = new HealthAwarePool();
 
 // Load what we learned about dead relays last session, so they're skipped
 // from the first query rather than after two more timeouts.

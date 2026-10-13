@@ -1,3 +1,4 @@
+import { AppState, type AppStateStatus } from 'react-native';
 /**
  * Unit tests for the native relay engine JS adapter (Stage 2 M2, #1036).
  * The native module is mocked — these cover mode selection, start/subscribe
@@ -375,4 +376,73 @@ describe('logout during a delayed start', () => {
     await handle!.stop();
     expect(native).toEqual({ running: false, cachedKey: null });
   });
+});
+
+// A silent Doze socket loss need not emit onEngineReconnect.
+describe('native inbox resume', () => {
+  it('replaces the native pool immediately on resume, using the current dedupe seed', async () => {
+    let onState!: (state: AppStateStatus) => void;
+    const remove = jest.fn();
+    const spy = jest.spyOn(AppState, 'addEventListener').mockImplementation((_name, cb) => {
+      onState = cb;
+      return { remove };
+    });
+    const engine = makeFakeEngine();
+    mockGetNostrEngine.mockReturnValue(engine);
+    const known = new Set<string>();
+    const opts = startOpts({ knownWrapIds: known });
+    const handle = await startNativeDmEngine(opts);
+    known.add(WRAP_ID);
+    onState('background');
+    expect(engine.engineStart).toHaveBeenCalledTimes(1);
+    onState('active');
+    onState('active'); // coalesce while the replacement is in flight
+    await flushMicrotasks();
+    expect(engine.engineStart).toHaveBeenCalledTimes(2);
+    expect(engine.engineSubscribeWraps).toHaveBeenLastCalledWith(
+      JSON.stringify({ kinds: [1059], '#p': [VIEWER], limit: 200 }),
+      [WRAP_ID],
+    );
+    expect(opts.onReconnect).toHaveBeenCalledTimes(1);
+    onState('active'); // rapid app switching also coalesces after completion
+    await flushMicrotasks();
+    expect(engine.engineStart).toHaveBeenCalledTimes(2);
+    await handle!.stop();
+    onState('active');
+    await flushMicrotasks();
+    expect(engine.engineStart).toHaveBeenCalledTimes(2);
+    expect(remove).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
+  });
+});
+
+it('falls back after resume failure and does not subscribe after a stop racing resume', async () => {
+  let onState!: (state: AppStateStatus) => void;
+  const spy = jest.spyOn(AppState, 'addEventListener').mockImplementation((_name, cb) => {
+    onState = cb;
+    return { remove: jest.fn() };
+  });
+  const engine = makeFakeEngine();
+  mockGetNostrEngine.mockReturnValue(engine);
+  const onUnavailable = jest.fn();
+  const handle = await startNativeDmEngine(startOpts({ onUnavailable }));
+  engine.engineStart.mockRejectedValueOnce(new Error('resume failed'));
+  onState('active');
+  await flushMicrotasks();
+  expect(onUnavailable).toHaveBeenCalledTimes(1);
+  expect(engine.engineStop).toHaveBeenCalledTimes(1);
+  await handle!.stop();
+
+  const newer = await startNativeDmEngine(startOpts());
+  let complete!: () => void;
+  engine.engineStart.mockImplementationOnce(() => new Promise<void>((r) => (complete = r)));
+  onState('active');
+  await flushMicrotasks();
+  const stopped = newer!.stop();
+  complete();
+  await stopped;
+  await flushMicrotasks();
+  // Only the two initial subscriptions: the stopped resume must not open one.
+  expect(engine.engineSubscribeWraps).toHaveBeenCalledTimes(2);
+  spy.mockRestore();
 });

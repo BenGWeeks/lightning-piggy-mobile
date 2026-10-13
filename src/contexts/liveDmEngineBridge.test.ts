@@ -164,6 +164,18 @@ describe('createLiveDmEngineBridge', () => {
     expect(deps.onEngineUnavailable).toHaveBeenCalledTimes(1);
   });
 
+  it('restores JS wraps after a native resume failure, unless cancelled', async () => {
+    mockMode.mockReturnValue('engine');
+    let cancelled = false;
+    const { deps, opts, bridge } = await startCapturing({ isCancelled: () => cancelled });
+    opts.onUnavailable!();
+    expect(deps.onEngineUnavailable).toHaveBeenCalledTimes(1);
+    cancelled = true;
+    opts.onUnavailable!();
+    expect(deps.onEngineUnavailable).toHaveBeenCalledTimes(1);
+    bridge.stop();
+  });
+
   it('stop() stops the engine handle (which clears the native key cache)', async () => {
     mockMode.mockReturnValue('engine');
     const { bridge, stop } = await startCapturing();

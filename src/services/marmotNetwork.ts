@@ -11,6 +11,7 @@ import { dmInboxRelaysFromTags, isRelayUrl } from '../utils/relayListEvents';
 import { isPublicRelayUrl } from '../utils/publicUrl';
 import { pool, trackRelays } from './nostrPool';
 import { DEFAULT_RELAYS, MARMOT_PUSH_SERVER_RELAYS } from './nostrRelayDefaults';
+import { subscribeMarmotRelays } from './marmotSubscription';
 
 const REQUEST_MAX_WAIT_MS = 6_000;
 const PUBLISH_TIMEOUT_MS = 10_000;
@@ -49,7 +50,28 @@ const withTimeout = <T>(p: Promise<T>, ms: number) =>
     new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
   ]);
 
-export function createMarmotNetwork(getFallbackRelays: () => string[]): NostrNetworkInterface {
+export function createMarmotNetwork(
+  getFallbackRelays: () => string[],
+  onReconnect?: () => void,
+): NostrNetworkInterface {
+  let recovering = false;
+  const attempts = new Map<string, number>();
+  const liveSubscriptions = new Map<object, string[]>();
+  let resetting: Promise<void> | undefined;
+  const resetTransport = () => {
+    resetting ??= pool
+      .resetTransports([...new Set([...liveSubscriptions.values()].flat())])
+      .finally(() => {
+        resetting = undefined;
+      });
+    return resetting;
+  };
+  const reconnect = onReconnect
+    ? () => {
+        recovering = true;
+        onReconnect();
+      }
+    : undefined;
   const relaysOr = (relays: string[]) => {
     const cleaned = cleanRelays(relays);
     return cleaned.length > 0 ? cleaned : cleanRelays([...getFallbackRelays(), ...DEFAULT_RELAYS]);
@@ -96,12 +118,22 @@ export function createMarmotNetwork(getFallbackRelays: () => string[]): NostrNet
         subscribe(observer) {
           const targets = relaysOr(relays);
           trackRelays(targets);
-          const closers = asArray(filters as Filter | Filter[]).map((f) =>
-            pool.subscribeMany(targets, f, {
-              onevent: (e) => observer.next?.(e),
-            }),
+          const token = {};
+          liveSubscriptions.set(token, targets);
+          const sub = subscribeMarmotRelays(
+            targets,
+            asArray(filters as Filter | Filter[]),
+            (e) => observer.next?.(e),
+            reconnect
+              ? { reconnect, resetTransport, notifyInitial: recovering, attempts }
+              : undefined,
           );
-          return { unsubscribe: () => closers.forEach((c) => c.close()) };
+          return {
+            unsubscribe: () => {
+              liveSubscriptions.delete(token);
+              sub.unsubscribe();
+            },
+          };
         },
       };
     },

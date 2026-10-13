@@ -134,6 +134,9 @@ export function createLiveDmEngineBridge(deps: LiveDmEngineBridgeDeps): LiveDmEn
               });
             },
             onReconnect: onEngineReconnect,
+            onUnavailable: () => {
+              if (!deps.isCancelled() && mode === 'engine') deps.onEngineUnavailable();
+            },
           })
         : null;
     if (deps.isCancelled()) {

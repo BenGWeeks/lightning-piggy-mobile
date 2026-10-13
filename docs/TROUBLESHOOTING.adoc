@@ -1334,3 +1334,56 @@ network timers are cleared must first call `__resetVerifiedEventCache()` to
 remove this independent cache timer, and reset the cache before restoring
 real timers in teardown. Do not clear all timers before a network assertion,
 as that would hide leaked network work.
+
+=== Marmot sync stops after backgrounding
+
+Marmot's kind-445 group subscriptions use the shared JS SimplePool, whose
+`enableReconnect` is false. A socket drop used to leave the MLS connection
+record alive with a dead transport; the MarmotBridge resume handler only
+checked key-package freshness. `marmotSubscription.ts` now retries relay
+failures with capped backoff and replaces the cached SimplePool transport
+three seconds after resume: closing a subscription alone leaves a silently
+dead WebSocket cached. Both paths reconnect the session through
+`GroupsManager.connectAll`, which collects every bounded backfill page and
+ingests the complete ordered MLS batch before opening live delivery. This
+recovers offline gaps beyond 500 events, including older epoch commits.
+Backoff survives replacement of the group connections. Backgrounding cancels
+pending timers; account teardown invalidates callbacks and closes routes.
+Group filters retain their watermark window and relay fan-out dedupe.
+
+Transport replacement isolates each SDK connection attempt's relay registry:
+a retired connecting publish timing out must not delete the fresh relay at
+the same URL. Explicit pool `close` and `destroy` invalidate affected active
+and queued subscriptions before closing sockets. Teardown generations also
+prevent pending connections or resets from reviving those routes; unrelated
+subscriptions and deliberate requests made after teardown remain usable.
+Closing one relay in a multi-relay subscription preserves its healthy routes
+and excludes the closed route from later resume restoration. Direct
+`ensureRelay()` / `relay.subscribe()` reads (reactions and contact lists) drain
+on the retired socket until their original subscription closes, so replacement
+does not turn an in-flight authoritative read into a failure. Their existing
+read deadlines bound the drain; explicit pool close/destroy still releases
+retired sockets.
+
+Welcomes (kind 444 inside kind 1059) arrive through the ordinary DM inbox,
+not a separate key-package inbox. The JS DM controller already rearms on
+resume. The native adapter now replaces its pool immediately on resume and
+seeds the new subscription with current known wrap ids, without a `since`
+filter. Native reconnect/resume reconciliation still waits three seconds
+and respects the shared automatic-refresh interval. If native resume fails,
+the live-DM bridge restores the JS wrap subscription.
+
+A transient join failure leaves the decrypted Welcome in `pendingWelcomes`,
+while the DM inbox has already marked its wrap processed. The session now
+retries those rows at startup, three seconds after app resume, and after a
+Marmot relay route recovers (replay or EOSE). Retry scans are single-flight,
+with at most three passes per trigger and exponential backoff from five
+seconds capped at five minutes. Repeated reconnect signals cannot bypass
+backoff. Backgrounding cancels queued work and session teardown removes the
+listeners. Each pass uses `acceptWelcome`, preserving the in-flight guard
+and durable outcome dedupe; successful or permanent outcomes remove the row.
+
+Marmot first shipped in PR #1163 after v1.4.1. PR #1417 changed automatic
+inbox reconciliation policy, not the group subscription lifecycle. A lack
+of `[Marmot]` log output alone cannot distinguish a dead group transport
+from an undelivered Welcome, a follow-gated sender, or a transient join error.
