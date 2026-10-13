@@ -1,6 +1,8 @@
 appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Add NWC Wallet Test
 ---
+# Fail before opening the wizard when the required fixture is absent.
+- assertTrue: ${typeof MAESTRO_NWC === 'string' && MAESTRO_NWC.trim().length > 0}
 # Tests adding a Lightning wallet via NWC connection string.
 # Run with either NWC URL:
 #   source .env && maestro test -e MAESTRO_NWC="$MAESTRO_NWC1" -e WALLET_NAME="Wallet 1" .maestro/wallets/flow-112-add-nwc-wallet.yaml
@@ -18,19 +20,8 @@ name: Add NWC Wallet Test
 - waitForAnimationToEnd:
     timeout: 3000
 
-# Swipe carousel right until Add Wallet card is visible
-- scrollUntilVisible:
-    element:
-      id: 'add-wallet-card'
-    direction: RIGHT
-    timeout: 20000
-    speed: 40
-
-# Tap the Add Wallet card
-- tapOn:
-    id: 'add-wallet-card'
-- waitForAnimationToEnd:
-    timeout: 3000
+# Select Add Wallet using the strip or element-scoped carousel flicks.
+- runFlow: ../common/open-add-wallet.yaml
 
 # Select Lightning (NWC) wallet type
 - tapOn:
@@ -46,48 +37,76 @@ name: Add NWC Wallet Test
     id: 'nwc-url-input'
 - eraseText:
     charactersToErase: 500
-- inputText: ${MAESTRO_NWC}
+# Verify the fixture before continuing; Android can drop long inputText runs.
+- repeat:
+    times: 3
+    while:
+      notVisible:
+        id: 'nwc-url-input'
+        text: ${MAESTRO_NWC.replace(/[.*+?^$()|[\]{}\\]/g, '\\$&')}
+    commands:
+      - tapOn: { id: 'nwc-url-input' }
+      - eraseText: 500
+      - runFlow:
+          file: ../common/type-text-in-chunks.yaml
+          env:
+            TEXT_TO_TYPE: ${MAESTRO_NWC}
+- assertVisible:
+    id: 'nwc-url-input'
+    text: ${MAESTRO_NWC.replace(/[.*+?^$()|[\]{}\\]/g, '\\$&')}
 - pressKey: back
 - waitForAnimationToEnd:
     timeout: 1000
 
-# Tap Next to proceed to alias step
-- tapOn:
-    text: 'Next'
-- waitForAnimationToEnd:
-    timeout: 5000
+# Wait for URL validation and the alias step before entering the name.
+- tapOn: { id: 'wizard-url-next' }
+- extendedWaitUntil:
+    visible: { id: 'wallet-alias-input' }
+    timeout: 15000
 
-# Enter wallet alias
-- tapOn:
+# Retry short name entry if Android drops a character or a space.
+- repeat:
+    times: 3
+    while:
+      notVisible:
+        id: 'wallet-alias-input'
+        text: ${WALLET_NAME}
+    commands:
+      - tapOn: { id: 'wallet-alias-input' }
+      - tapOn: { id: 'wallet-alias-input' }
+      - eraseText: 100
+      - runFlow:
+          file: ../common/type-text-in-chunks.yaml
+          env:
+            TEXT_TO_TYPE: ${WALLET_NAME}
+- assertVisible:
     id: 'wallet-alias-input'
-- tapOn:
-    id: 'wallet-alias-input'
-- eraseText:
-    charactersToErase: 100
-- inputText: ${WALLET_NAME}
+    text: ${WALLET_NAME}
 - pressKey: back
 - waitForAnimationToEnd:
     timeout: 1000
 
 # Tap Next to proceed to theme step
-- tapOn:
-    text: 'Next'
+- tapOn: { id: 'wizard-alias-next' }
 - waitForAnimationToEnd:
     timeout: 2000
 
-# Scroll down in the bottom sheet to reveal Connect button
-- swipe:
-    start: 50%, 80%
-    end: 50%, 40%
-    duration: 300
-- waitForAnimationToEnd:
-    timeout: 1000
+# Reveal Connect without screen-size-dependent gestures.
+- scrollUntilVisible:
+    element: { id: 'wizard-connect-button' }
+    direction: DOWN
+    timeout: 10000
 
 # Tap Connect
 - tapOn:
     id: 'wizard-connect-button'
 - waitForAnimationToEnd:
     timeout: 15000
+
+# Require successful wizard dismissal before checking the wallet card.
+- extendedWaitUntil:
+    notVisible: { id: 'wizard-connect-button' }
+    timeout: 60000
 
 # Verify the wallet is connected
 - extendedWaitUntil:

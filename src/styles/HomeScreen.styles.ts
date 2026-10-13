@@ -12,14 +12,6 @@ export const createHomeScreenStyles = (colors: Palette) =>
       paddingBottom: 44,
       overflow: 'hidden',
     },
-    bgPigImage: {
-      position: 'absolute',
-      width: 420,
-      height: 420,
-      right: -60,
-      top: -20,
-      opacity: 0.15,
-    },
     buttonRow: {
       flexDirection: 'row',
       justifyContent: 'center',

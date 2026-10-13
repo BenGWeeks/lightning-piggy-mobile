@@ -1,65 +1,38 @@
 appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Wallet Swipe Speed Test
 ---
-# Tests that swiping between wallets updates transactions quickly.
-# Requires at least 1 NWC wallet + 1 on-chain wallet.
-# Run: maestro test .maestro/wallets/flow-117-swipe-speed.yaml
-
-# Wait for app to be ready and wallets to connect
-- waitForAnimationToEnd:
-    timeout: 30000
-
-# Wait for initial wallet to show Connected and load transactions
+# Requires at least two wallets. Slow element-scoped swipes advance one card; hard flings are tested separately.
+- tapOn: { id: 'tab-wallets' }
+- runFlow:
+    file: ../common/scroll-wallet-strip.yaml
+    env:
+      CHIP_ID: wallet-chip-0
+      STRIP_DIRECTION: RIGHT
+- tapOn: { id: 'wallet-chip-0' }
 - extendedWaitUntil:
-    visible:
-      text: 'Connected'
-    timeout: 30000
-
-# Wait for transactions to load (first load may take time)
-- extendedWaitUntil:
-    visible:
-      text: '.*sats'
-    timeout: 30000
-
-# === First swipe: move to next wallet ===
+    visible: { id: 'wallet-carousel-page-0', selected: true }
+    timeout: 5000
 - swipe:
-    start: 85%, 30%
-    end: 15%, 30%
-    duration: 300
-- waitForAnimationToEnd:
-    timeout: 2000
-
-# Wait for transactions to appear (first load of this wallet)
+    from: { id: 'wallet-carousel-page-0' }
+    direction: LEFT
+    duration: 500
 - extendedWaitUntil:
-    visible:
-      text: '.*sats'
-    timeout: 15000
-
-# === Swipe back to first wallet ===
-# This should be FAST — transactions are cached in WalletContext
+    visible: { id: 'wallet-carousel-page-1', selected: true }
+    timeout: 5000
+- assertVisible: { id: 'wallet-chip-1', selected: true }
 - swipe:
-    start: 15%, 30%
-    end: 85%, 30%
-    duration: 300
-- waitForAnimationToEnd:
-    timeout: 2000
-
-# Cached transactions should appear within 2 seconds
+    from: { id: 'wallet-carousel-page-1' }
+    direction: RIGHT
+    duration: 500
 - extendedWaitUntil:
-    visible:
-      text: '.*sats'
-    timeout: 2000
-
-# === Swipe forward again — also cached ===
+    visible: { id: 'wallet-carousel-page-0', selected: true }
+    timeout: 5000
+- assertVisible: { id: 'wallet-chip-0', selected: true }
 - swipe:
-    start: 85%, 30%
-    end: 15%, 30%
-    duration: 300
-- waitForAnimationToEnd:
-    timeout: 2000
-
-# Should be instant from cache
+    from: { id: 'wallet-carousel-page-0' }
+    direction: LEFT
+    duration: 500
 - extendedWaitUntil:
-    visible:
-      text: '.*sats'
-    timeout: 2000
+    visible: { id: 'wallet-carousel-page-1', selected: true }
+    timeout: 5000
+- assertVisible: { id: 'wallet-chip-1', selected: true }

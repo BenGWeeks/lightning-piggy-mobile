@@ -17,27 +17,13 @@ name: Add Hot Wallet Test
 - waitForAnimationToEnd:
     timeout: 3000
 
-# Swipe carousel right until Add Wallet card is visible
+# Open Add Wallet using the strip or element-scoped carousel flicks.
+- runFlow: ../common/open-add-wallet.yaml
+
 - scrollUntilVisible:
-    element:
-      id: 'add-wallet-card'
-    direction: RIGHT
-    timeout: 20000
-    speed: 40
-
-# Tap Add Wallet
-- tapOn:
-    id: 'add-wallet-card'
-- waitForAnimationToEnd:
-    timeout: 3000
-
-# Scroll down to see the mnemonic option
-- swipe:
-    start: 50%, 80%
-    end: 50%, 50%
-    duration: 300
-- waitForAnimationToEnd:
-    timeout: 1000
+    element: { id: 'wallet-type-mnemonic' }
+    direction: DOWN
+    timeout: 10000
 
 # Select "Import Seed Phrase (Beta)" — requires dev mode enabled
 - tapOn:
@@ -45,49 +31,90 @@ name: Add Hot Wallet Test
 - waitForAnimationToEnd:
     timeout: 2000
 
-# Enter the mnemonic
-- tapOn:
+# Retry the exact reporting phrase if Android drops a character.
+- repeat:
+    times: 3
+    while:
+      notVisible:
+        id: 'mnemonic-input'
+        text: ${MAESTRO_MNEMONIC.trim().split(/\s+/).join('\\s+')}
+    commands:
+      - tapOn:
+          id: 'mnemonic-input'
+      - tapOn:
+          id: 'mnemonic-input'
+      # A second tap can leave the cursor in the middle of a multiline phrase.
+      # Select the whole value before deleting; the menu is absent on an empty field.
+      - longPressOn: { id: 'mnemonic-input' }
+      - tapOn: { text: '(?i)select all', optional: true }
+      - eraseText:
+          charactersToErase: 500
+      # Separate words with an explicit Enter key. The app normalizes newlines to
+      # spaces; this avoids Android dropping a space inside an inputText chunk.
+      - evalScript: ${output.mnemonicWordIndex = 0}
+      - repeat:
+          while:
+            true: ${output.mnemonicWordIndex < MAESTRO_MNEMONIC.trim().split(/\s+/).length}
+          commands:
+            - runFlow:
+                file: ../common/type-text-in-chunks.yaml
+                env:
+                  TEXT_TO_TYPE: ${MAESTRO_MNEMONIC.trim().split(/\s+/)[output.mnemonicWordIndex]}
+            - runFlow:
+                when:
+                  true: ${output.mnemonicWordIndex + 1 < MAESTRO_MNEMONIC.trim().split(/\s+/).length}
+                commands:
+                  - pressKey: ENTER
+            - evalScript: ${output.mnemonicWordIndex = output.mnemonicWordIndex + 1}
+- assertVisible:
     id: 'mnemonic-input'
-- tapOn:
-    id: 'mnemonic-input'
-- eraseText:
-    charactersToErase: 500
-- inputText: ${MAESTRO_MNEMONIC}
+    text: ${MAESTRO_MNEMONIC.trim().split(/\s+/).join('\\s+')}
 - pressKey: back
 - waitForAnimationToEnd:
     timeout: 1000
 
-# Tap Next
-- tapOn:
-    text: 'Next'
-- waitForAnimationToEnd:
-    timeout: 2000
+# Newline-separated input can make this step taller on smaller displays.
+- scrollUntilVisible:
+    element: { id: 'wizard-mnemonic-next' }
+    direction: DOWN
+    timeout: 10000
+- tapOn: { id: 'wizard-mnemonic-next' }
+- extendedWaitUntil:
+    visible: { id: 'wallet-alias-input' }
+    timeout: 10000
 
-# Enter wallet alias
-- tapOn:
+# Retry short name entry if Android drops a character or a space.
+- repeat:
+    times: 3
+    while:
+      notVisible:
+        id: 'wallet-alias-input'
+        text: ${WALLET_NAME}
+    commands:
+      - tapOn: { id: 'wallet-alias-input' }
+      - tapOn: { id: 'wallet-alias-input' }
+      - eraseText: 100
+      - runFlow:
+          file: ../common/type-text-in-chunks.yaml
+          env:
+            TEXT_TO_TYPE: ${WALLET_NAME}
+- assertVisible:
     id: 'wallet-alias-input'
-- tapOn:
-    id: 'wallet-alias-input'
-- eraseText:
-    charactersToErase: 100
-- inputText: ${WALLET_NAME}
+    text: ${WALLET_NAME}
 - pressKey: back
 - waitForAnimationToEnd:
     timeout: 1000
 
 # Tap Next to theme step
-- tapOn:
-    text: 'Next'
+- tapOn: { id: 'wizard-alias-next' }
 - waitForAnimationToEnd:
     timeout: 2000
 
-# Scroll to Add Wallet button and tap
-- swipe:
-    start: 50%, 80%
-    end: 50%, 40%
-    duration: 300
-- waitForAnimationToEnd:
-    timeout: 1000
+# Reveal Add Wallet without screen-size-dependent gestures.
+- scrollUntilVisible:
+    element: { id: 'wizard-connect-button' }
+    direction: DOWN
+    timeout: 10000
 - tapOn:
     id: 'wizard-connect-button'
 - waitForAnimationToEnd:

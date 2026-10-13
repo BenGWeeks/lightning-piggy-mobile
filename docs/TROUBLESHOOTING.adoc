@@ -1387,3 +1387,58 @@ Marmot first shipped in PR #1163 after v1.4.1. PR #1417 changed automatic
 inbox reconciliation policy, not the group subscription lifecycle. A lack
 of `[Marmot]` log output alone cannot distinguish a dead group transport
 from an undelivered Welcome, a follow-gated sender, or a transient join error.
+
+=== Metro cannot resolve Expo's virtual environment module in a symlinked worktree
+
+When a temporary worktree shares `node_modules` with another checkout, Metro
+may report `Unable to resolve "expo/virtual/env"` before loading any application
+modules. For a screenshot session that must share dependencies, add the real
+path of `node_modules` to both `config.watchFolders` and
+`config.resolver.nodeModulesPaths` in the temporary Metro configuration, restart
+with `--clear`, and set `EXPO_NO_METRO_LAZY=1` to avoid sibling-path lazy bundle
+URLs. An Android build using React Native's saved `debug_http_host` can still
+request `lazy=true` despite that environment flag. For that temporary server,
+rewrite the request query to `lazy=false` in `config.server.enhanceMiddleware`
+before handing it to Metro. Confirm the returned entry bundle includes the
+dynamically imported validation module, then reload the app after Metro is
+listening. Remove these local configuration overrides after verification.
+
+On hulk, check the app's `debug_http_host` preference after opening the
+`lightningpiggy` development-client URL: the installed build can retain its
+previous port. Set it to `localhost:<test-port>` as documented in the hulk lane
+instructions, then restore `localhost:8090` when finished. If both Dev and
+Preview handle the scheme, select Dev in Android's Open with chooser.
+
+=== Maestro drops characters while importing wallet fixtures
+
+Long `inputText` commands can lose letters or spaces in an Android development
+build. `common/type-text-in-chunks.yaml` types short pieces for xpubs and wallet
+names. Mnemonic imports also send Enter between words: `AddWalletWizard`
+normalizes those newlines to spaces before validation. Keep fixtures in env
+variables, verify names before leaving the alias step, and never print process
+arguments for Maestro commands that pass credentials with `-e`.
+
+=== Maestro cannot reveal a chip in the wallet strip
+
+`scrollUntilVisible` starts its swipe in the middle of the screen, below the
+wallet strip, so a horizontal chip search can time out without moving the
+strip. Use `common/scroll-wallet-strip.yaml`: its bounded loop swipes from the
+`wallet-strip` testID until the requested chip is visible. Pass `LEFT` to
+reveal later chips and `RIGHT` to reveal earlier ones. This keeps gestures
+inside the list without screen coordinates (#1462).
+
+=== Maestro reporting fails for a flow name containing a slash
+
+Maestro uses the flow's `name` in its AI report filename. A name such as
+`Send/Receive` can produce a `FileNotFoundException` because the slash becomes
+an unexpected subdirectory. Use `Send and Receive` in the flow name and rerun
+it to obtain a complete result; keep the flow filename and selectors intact.
+
+=== Maestro setup matches an existing card behind the import wizard
+
+A wallet alias or card testID can remain visible to accessibility while the
+import wizard is open. After Connect, wait until `wizard-connect-button`
+disappears before checking the card. When reusing the reporting xpub fixture,
+`flow-114` handles the specific already-imported response by closing the
+wizard and selecting that existing wallet. Other import errors still fail
+the dismissal assertion.

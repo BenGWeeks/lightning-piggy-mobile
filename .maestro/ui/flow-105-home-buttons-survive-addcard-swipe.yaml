@@ -1,5 +1,5 @@
 appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
-name: Home Send/Receive buttons stay enabled after swiping to Add card
+name: Home Send and Receive buttons stay enabled after swiping to Add card
 ---
 # Covers #166. Swiping the wallet carousel onto the trailing "Add wallet"
 # card previously cleared activeWalletId to null, which disabled Home's
@@ -7,7 +7,7 @@ name: Home Send/Receive buttons stay enabled after swiping to Add card
 # "Connected" on its card. Fix keeps activeWalletId on the last real
 # wallet while the add card is in view, so Receive remains tappable.
 #
-# Assumes at least one connected NWC wallet is present.
+# Assumes at least one wallet with Receive enabled is present.
 
 - waitForAnimationToEnd: { timeout: 10000 }
 
@@ -17,18 +17,35 @@ name: Home Send/Receive buttons stay enabled after swiping to Add card
 # Receive must be enabled on the wallet card.
 - tapOn: { id: 'btn-receive' }
 - waitForAnimationToEnd: { timeout: 3000 }
-# Close the sheet via hardware back.
-- pressKey: back
+# Dismiss the portal sheet without navigating the screen underneath it.
+- swipe:
+    from: { text: 'Bottom sheet handle' }
+    direction: DOWN
+    duration: 200
 - waitForAnimationToEnd: { timeout: 2000 }
 
-# Swipe the carousel to expose the "Add wallet" card.
-- scrollUntilVisible:
-    element:
-      id: 'add-wallet-card'
-    direction: RIGHT
-    timeout: 10000
-    speed: 40
-- waitForAnimationToEnd: { timeout: 1500 }
+# Select the add page explicitly: a neighbour's peek is not the active page.
+- runFlow:
+    when:
+      visible: { id: 'wallet-strip' }
+    commands:
+      - runFlow:
+          file: ../common/scroll-wallet-strip.yaml
+          env:
+            CHIP_ID: wallet-chip-add
+            STRIP_DIRECTION: LEFT
+      - tapOn: { id: 'wallet-chip-add' }
+- runFlow:
+    when:
+      notVisible: { id: 'wallet-strip' }
+    commands:
+      - swipe:
+          from: { id: 'wallet-card-.*' }
+          direction: LEFT
+          duration: 200
+- extendedWaitUntil:
+    visible: { id: 'home-add-wallet-empty' }
+    timeout: 5000
 
 # #666: on the Add card the transactions area shows the add-wallet prompt
 # instead of the previous wallet's transactions.

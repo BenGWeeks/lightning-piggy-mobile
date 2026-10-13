@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
   View,
   Text,
-  Image,
   TouchableOpacity,
   Pressable,
   ScrollView,
@@ -21,7 +20,7 @@ import WarmTransactionLists from '../components/WarmTransactionLists';
 import HomeSheets from '../components/HomeSheets';
 import type { HomeSheetActions } from '../hooks/useHomeSheetState';
 import WalletCarousel from '../components/WalletCarousel';
-import BrandGradientBackground from '../components/BrandGradientBackground';
+import WalletHeaderBackdrop from '../components/WalletHeaderBackdrop';
 import WelcomeWalletPrompt from '../components/WelcomeWalletPrompt';
 import TabHeader from '../components/TabHeader';
 import NotificationBell from '../components/NotificationBell';
@@ -285,15 +284,7 @@ const HomeScreen: React.FC = () => {
     <View style={styles.container}>
       {/* Header area with brand background + faded pig behind carousel */}
       <View style={styles.headerBackground}>
-        {/* Pink→purple brand fade behind the wallet card, matching the
-            Messages/Friends header treatment. Sits below the faded pig
-            and the header content (both render after it). */}
-        <BrandGradientBackground />
-        <Image
-          source={require('../../assets/images/lightning-piggy-intro.png')}
-          style={styles.bgPigImage}
-          resizeMode="contain"
-        />
+        <WalletHeaderBackdrop />
 
         <TabHeader
           title={t('homeScreen.greeting', { name: greetingName })}
