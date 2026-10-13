@@ -3205,7 +3205,7 @@
     "other": "події"
   },
   "publishResult": {
-    "summary": "Надіслано до {{sent}} ваших реле · поширено серед {{shared}} індексаторів",
+    "summary": "Опубліковано на {{sent}} із {{total}} реле",
     "skipped": "{{host}} пропущено ({{reason}})",
     "problem": "Проблема надсилання до {{host}}: {{reason}}",
     "details": "Подробиці",

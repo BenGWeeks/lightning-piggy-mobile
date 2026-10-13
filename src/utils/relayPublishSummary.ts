@@ -8,12 +8,13 @@ const key = (url: string) => {
   }
 };
 
-/** Auxiliary targets cannot turn an otherwise successful own publish into a problem. */
+/** Count every target's delivery; keep own failures separate from auxiliary failures. */
 export function relayPublishSummary(results: RelayPublishResult[], ownRelays: string[]) {
   const own = new Set(ownRelays.map(key));
   const indexers = new Set(RELAY_LIST_INDEXERS.map(key));
   return {
-    sent: results.filter((r) => r.ok && own.has(key(r.url))).length,
+    sent: results.filter((r) => r.ok).length,
+    total: results.length,
     shared: results.filter((r) => r.ok && indexers.has(key(r.url)) && !own.has(key(r.url))).length,
     problems: results.filter((r) => !r.ok && !r.skipped && own.has(key(r.url))),
     skipped: results.filter(

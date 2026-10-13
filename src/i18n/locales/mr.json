@@ -3169,7 +3169,7 @@
     "other": "इव्हेंट"
   },
   "publishResult": {
-    "summary": "तुमच्या {{sent}} रिलेना पाठवले · {{shared}} इंडेक्सरना शेअर केले",
+    "summary": "{{total}} पैकी {{sent}} रिलेवर पब्लिश झाले",
     "skipped": "{{host}} वगळले ({{reason}})",
     "problem": "{{host}} ला पाठवताना समस्या: {{reason}}",
     "details": "तपशील",

@@ -3169,7 +3169,7 @@
     "other": "events"
   },
   "publishResult": {
-    "summary": "Sent to your {{sent}} relays · shared with {{shared}} indexers",
+    "summary": "Published to {{sent}} of {{total}} relays",
     "skipped": "{{host}} skipped ({{reason}})",
     "problem": "Problem sending to {{host}}: {{reason}}",
     "details": "Details",

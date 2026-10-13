@@ -30,7 +30,7 @@ export default function PublishResult({
   return (
     <View style={styles.card} testID="relay-publish-result">
       <Text style={styles.value}>
-        {t('publishResult.summary', { sent: summary.sent, shared: summary.shared })}
+        {t('publishResult.summary', { sent: summary.sent, total: summary.total })}
       </Text>
       {summary.skipped.map((r) => (
         <Text key={r.url} style={styles.value}>

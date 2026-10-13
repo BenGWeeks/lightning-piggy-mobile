@@ -3169,7 +3169,7 @@
     "other": "események"
   },
   "publishResult": {
-    "summary": "Elküldve {{sent}} saját relére · megosztva {{shared}} indexelővel",
+    "summary": "Közzétéve {{sent}} / {{total}} relay-en",
     "skipped": "{{host}} kihagyva ({{reason}})",
     "problem": "Küldési hiba, {{host}}: {{reason}}",
     "details": "Részletek",

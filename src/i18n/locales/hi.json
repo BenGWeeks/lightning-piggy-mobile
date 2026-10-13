@@ -3169,7 +3169,7 @@
     "other": "इवेंट"
   },
   "publishResult": {
-    "summary": "आपके {{sent}} रिले को भेजा · {{shared}} इंडेक्सर से साझा किया",
+    "summary": "{{total}} में से {{sent}} रिले पर पब्लिश हो गया",
     "skipped": "{{host}} छोड़ा गया ({{reason}})",
     "problem": "{{host}} को भेजने में समस्या: {{reason}}",
     "details": "विवरण",

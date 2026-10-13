@@ -3205,7 +3205,7 @@
     "other": "zdarzenia"
   },
   "publishResult": {
-    "summary": "Wysłano do {{sent}} Twoich przekaźników · udostępniono {{shared}} indekserom",
+    "summary": "Opublikowano na {{sent}} z {{total}} przekaźników",
     "skipped": "Pominięto {{host}} ({{reason}})",
     "problem": "Problem z wysyłaniem do {{host}}: {{reason}}",
     "details": "Szczegóły",

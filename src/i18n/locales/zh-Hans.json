@@ -3169,7 +3169,7 @@
     "other": "事件"
   },
   "publishResult": {
-    "summary": "已发送至你的 {{sent}} 个中继 · 已共享至 {{shared}} 个索引器",
+    "summary": "已发布到 {{total}} 个中继中的 {{sent}} 个",
     "skipped": "已跳过 {{host}}（{{reason}}）",
     "problem": "发送至 {{host}} 时出错：{{reason}}",
     "details": "详情",

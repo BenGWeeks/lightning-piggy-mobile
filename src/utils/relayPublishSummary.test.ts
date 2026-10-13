@@ -13,10 +13,54 @@ it('counts own accepts and shared indexers; only real own failures are problems'
     'wss://own-failed.example',
     'wss://nos.lol',
   ]);
-  expect(summary.sent).toBe(1);
+  expect(summary.sent).toBe(2);
+  expect(summary.total).toBe(6);
   expect(summary.shared).toBe(1);
   expect(summary.problems).toEqual([results[5]]);
   expect(summary.skipped).toEqual(results.slice(2, 5));
+});
+it('counts a successful default-only publish even when no own relay or indexer accepts', () => {
+  const summary = relayPublishSummary(
+    [
+      { url: 'wss://relay.damus.io', ok: true },
+      { url: 'wss://nos.lol', ok: true },
+    ],
+    [],
+  );
+  expect(summary.sent).toBe(2);
+  expect(summary.total).toBe(2);
+  expect(summary.shared).toBe(0);
+  expect(summary.problems).toEqual([]);
+});
+it('distinguishes auxiliary-only delivery from complete failure and counts all targets', () => {
+  const results = [
+    { url: 'wss://own.example', ok: false, message: 'payment required' },
+    { url: 'wss://relay.damus.io', ok: true },
+    { url: 'wss://purplepag.es', ok: true },
+    { url: 'wss://user.kindpag.es', ok: false, skipped: 'kind' as const },
+    { url: 'wss://nos.lol', ok: false, skipped: 'unhealthy' as const },
+  ];
+  const delivered = relayPublishSummary(results, ['wss://own.example']);
+  expect(delivered.sent).toBe(2);
+  expect(delivered.total).toBe(5);
+  expect(delivered.shared).toBe(1);
+  expect(delivered.problems).toEqual([results[0]]);
+  const failed = relayPublishSummary(
+    results.map((r) => (r.ok ? { ...r, ok: false, message: 'timed out' } : r)),
+    ['wss://own.example'],
+  );
+  expect(failed.sent).toBe(0);
+  expect(failed.total).toBe(5);
+  expect(failed.shared).toBe(0);
+});
+it('counts an accepted own relay that is also an indexer only once', () => {
+  const summary = relayPublishSummary(
+    [{ url: 'wss://purplepag.es', ok: true }],
+    ['wss://purplepag.es/'],
+  );
+  expect(summary.sent).toBe(1);
+  expect(summary.total).toBe(1);
+  expect(summary.shared).toBe(0);
 });
 it('leaves auxiliary rejections in Details without labelling them as deliberate skips or own problems', () => {
   const summary = relayPublishSummary(
