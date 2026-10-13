@@ -1837,15 +1837,15 @@
     "marmotPushAllSet": "Minden biztonságos csevegésedben beállítva.",
     "marmotPushPending": "{{count}} biztonságos csevegés még nincs beállítva.",
     "marmotPushFinish": "Beállítás befejezése",
-    "marmotPushAdvanced": "Értesítési szerver módosítása",
+    "marmotPushAdvanced": "Másik szerver használata",
     "marmotPushServerDefault": "A telefon minden fiókjának azonnali értesítései a Lightning Piggy értesítési szerverén mennek át.",
     "marmotPushServerCustom": "A telefon minden fiókjának azonnali értesítései egy egyéni értesítési szerveren mennek át: {{npub}}",
     "marmotPushServerHint": "Csak az a szerver tud kézbesíteni ennek az alkalmazásnak, amely birtokolja a Lightning Piggy Apple/Google push-hitelesítő adatait.",
     "marmotPushServerPlaceholder": "npub1…",
     "marmotPushServerLabel": "Értesítési szerver npub-ja",
     "marmotPushServerSave": "Szerver használata",
-    "marmotPushServerReset": "Alapértelmezett szerver",
-    "marmotPushServerInvalid": "Ez nem érvényes npub.",
+    "marmotPushServerReset": "Alapértelmezett visszaállítása",
+    "marmotPushServerInvalid": "Ez nem érvényes npub vagy hexadecimális nyilvános kulcs.",
     "marmotPushNoPermission": "Előbb engedélyezd a Lightning Piggy értesítéseit a rendszerbeállításokban.",
     "marmotPushUnavailable": "Ez a telefon nem tudott push-tokent kérni az Apple-től/Google-től. Androidon ehhez Google Play-szolgáltatások kellenek.",
     "marmotPushDeclined": "Az aláíród elutasította, ezért az azonnali értesítések még nincsenek beállítva minden biztonságos csevegésben. Koppints a Beállítás befejezése gombra az újrapróbáláshoz.",
@@ -1870,7 +1870,13 @@
     "watcherFailed": "Az értesítési szervert nem sikerült frissíteni. Lehet, hogy az aláíród elutasította, vagy nincs internetkapcsolatod.",
     "watcherRetry": "Újra",
     "watcherSaveFailed": "Ezt a beállítást nem sikerült menteni.",
-    "marmotPushServerTitle": "Értesítési szerver"
+    "marmotPushServerTitle": "Értesítési szerver",
+    "marmotPushServerName": "Lightning Piggy értesítések",
+    "marmotPushServerUsing": "Használatban: {{name}}",
+    "marmotPushServerBadge": "(alapértelmezett)",
+    "marmotPushServerNotFound": "Nem találtuk a szerver bejövő relay-eit (kind-10050). Ellenőrizd a kulcsot és a kapcsolatot, majd próbáld újra.",
+    "marmotPushServerInboxFound": "Bejövő relay-ek megtalálva",
+    "marmotPushServerInboxUnknown": "Nem találhatók bejövő relay-ek – próbáld újra később"
   },
   "sendAmountSection": {
     "fixedAmount": "Fix összeg",
@@ -2306,7 +2312,10 @@
       "friendsOfFriends": "Barátok barátai",
       "friendsChip": "Barátok",
       "comingSoon": "Hamarosan",
-      "clearScope": "Eladók visszaállítása a Lightning Piggy ajánlott eladóira"
+      "clearScope": "Eladók visszaállítása a Lightning Piggy ajánlott eladóira",
+      "moreMerchants": "Továbbiak (%{count})",
+      "searchMerchants": "Kereskedők keresése",
+      "noMerchants": "Nem található kereskedő"
     },
     "feedbackTabs": {
       "reviews": "Értékelések",

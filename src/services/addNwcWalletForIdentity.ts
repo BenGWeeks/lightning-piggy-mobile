@@ -38,11 +38,14 @@ export async function addNwcWalletForIdentity(
     };
     await storage.saveNwcUrl(id, url.trim());
     if (!isCurrent()) return cancelled;
-    const list = await storage.getWalletList(owner);
-    if (!isCurrent()) return cancelled;
     // Owner is explicit even if the account changes during native storage I/O.
-    await storage.saveWalletList([...list, metadata], owner);
-    committed = true;
+    let shouldCommit = false;
+    await storage.updateWalletList((list) => {
+      if (!isCurrent()) return null;
+      shouldCommit = true;
+      return [...list, metadata];
+    }, owner);
+    committed = shouldCommit;
     if (!isCurrent()) return cancelled;
     return {
       success: true,

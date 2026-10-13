@@ -148,16 +148,51 @@ export async function getWalletList(
   }
 }
 
-export async function saveWalletList(
-  wallets: WalletMetadata[],
-  owner: string | null = _activePubkey,
-): Promise<void> {
+// Serialize the entire read/modify/write per owner, not just native writes.
+// Capture the owner before queuing so account switches cannot redirect a mutation.
+const walletListUpdates = new Map<string, Promise<void>>();
+
+function serializeWalletListUpdate<T>(owner: string | null, update: () => Promise<T>): Promise<T> {
+  const key = perAccountKey(WALLET_LIST_KEY_BASE, owner);
+  const run = (walletListUpdates.get(key) ?? Promise.resolve()).then(update);
+  const tail = run.then(
+    () => {},
+    () => {},
+  );
+  walletListUpdates.set(key, tail);
+  void tail.then(() => {
+    if (walletListUpdates.get(key) === tail) walletListUpdates.delete(key);
+  });
+  return run;
+}
+
+async function writeWalletList(wallets: WalletMetadata[], owner: string | null): Promise<void> {
   invalidateBackgroundPaymentScope();
   try {
     await AsyncStorage.setItem(perAccountKey(WALLET_LIST_KEY_BASE, owner), JSON.stringify(wallets));
   } finally {
     invalidateBackgroundPaymentScope();
   }
+}
+
+/** Replace a list (initialization/tests). For metadata edits use updateWalletList. */
+export function saveWalletList(
+  wallets: WalletMetadata[],
+  owner: string | null = _activePubkey,
+): Promise<void> {
+  return serializeWalletListUpdate(owner, () => writeWalletList(wallets, owner));
+}
+
+/** A null result skips persistence. The transform must not call queued wallet writes. */
+export function updateWalletList(
+  update: (wallets: WalletMetadata[]) => WalletMetadata[] | null,
+  owner: string | null = _activePubkey,
+): Promise<void> {
+  return serializeWalletListUpdate(owner, async () => {
+    const latest = await getWalletList(owner);
+    const updated = update(latest);
+    if (updated !== null) await writeWalletList(updated, owner);
+  });
 }
 
 // --- NWC ---
@@ -264,6 +299,11 @@ const ONCHAIN_MNEMONIC_PREFIX = 'onchain_mnemonic_';
 
 export async function saveMnemonic(walletId: string, mnemonic: string): Promise<void> {
   await SecureStore.setItemAsync(`${ONCHAIN_MNEMONIC_PREFIX}${walletId}`, mnemonic, SECURE_OPTIONS);
+}
+
+/** Existence check only: never expose signing material to metadata migrations. */
+export async function hasMnemonic(walletId: string): Promise<boolean> {
+  return (await SecureStore.getItemAsync(`${ONCHAIN_MNEMONIC_PREFIX}${walletId}`)) != null;
 }
 
 export async function getMnemonic(walletId: string): Promise<string | null> {
@@ -483,7 +523,7 @@ async function migrateLegacyFor(owner: string): Promise<void> {
         lightningAddress: null,
       };
       await saveNwcUrl(id, legacyUrl);
-      await saveWalletList([wallet], owner);
+      await updateWalletList((list) => (list.length === 0 ? [wallet] : null), owner);
       await setOnboarded();
       // Only after the new records are durably written do we drop the
       // legacy key. If this delete fails, next startup sees existingList
@@ -499,18 +539,10 @@ async function migrateLegacyFor(owner: string): Promise<void> {
   }
 
   // 2. Backfill walletType for wallets that predate on-chain support
-  const wallets = await getWalletList(owner);
-  let needsSave = false;
-  const updated = wallets.map((w) => {
-    if (!w.walletType) {
-      needsSave = true;
-      return { ...w, walletType: 'nwc' as const };
-    }
-    return w;
-  });
-  if (needsSave) {
-    await saveWalletList(updated, owner);
-  }
+  await updateWalletList((wallets) => {
+    if (wallets.every((w) => w.walletType)) return null;
+    return wallets.map((w) => (w.walletType ? w : { ...w, walletType: 'nwc' as const }));
+  }, owner);
 
   // 3. Versioned migrations. See #169 for the original driver.
   const persistedVersionRaw = await AsyncStorage.getItem(STORAGE_MIGRATION_VERSION_KEY);
@@ -529,25 +561,17 @@ async function migrateLegacyFor(owner: string): Promise<void> {
     // remove the global storage key — nothing reads it anymore.
     const globalAddress = await AsyncStorage.getItem(GLOBAL_LIGHTNING_ADDRESS_KEY);
     if (globalAddress) {
-      const list = await getWalletList(owner);
-      if (list.length === 0) {
-        // Defer: older builds let users set a lightning address before
-        // adding any wallet. Dropping the key now would throw that
-        // value away before a wallet exists to own it — retry next
-        // startup (and leave `storage_migration_version` at 0 so we
-        // re-run). Nothing else in the codebase reads the legacy key,
-        // so leaving it in place is harmless.
-        canAdvance = false;
-      } else {
-        const backfilled = list.map((w) =>
-          w.lightningAddress ? w : { ...w, lightningAddress: globalAddress },
-        );
-        const anyChange = backfilled.some(
-          (w, i) => w.lightningAddress !== list[i].lightningAddress,
-        );
-        if (anyChange) await saveWalletList(backfilled, owner);
-        await AsyncStorage.removeItem(GLOBAL_LIGHTNING_ADDRESS_KEY);
-      }
+      await updateWalletList((list) => {
+        if (list.length === 0) {
+          // Defer until a wallet exists to own the legacy address.
+          canAdvance = false;
+          return null;
+        }
+        return list.some((w) => !w.lightningAddress)
+          ? list.map((w) => (w.lightningAddress ? w : { ...w, lightningAddress: globalAddress }))
+          : null;
+      }, owner);
+      if (canAdvance) await AsyncStorage.removeItem(GLOBAL_LIGHTNING_ADDRESS_KEY);
     }
   }
 

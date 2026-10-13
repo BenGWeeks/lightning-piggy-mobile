@@ -1,15 +1,7 @@
 import ExploreEventCard from '../components/ExploreEventCard';
 import { useLocale } from '../contexts/LocaleContext';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  View,
-  Text,
-  Image,
-  TouchableOpacity,
-  ScrollView,
-  RefreshControl,
-  Linking,
-} from 'react-native';
+import { View, Text, Image, TouchableOpacity, ScrollView, RefreshControl } from 'react-native';
 import { useExploreRailsPosition } from '../hooks/useExploreRailsPosition';
 import { useFocusEffect } from '@react-navigation/native';
 import { ChevronRight, Compass, MapPin, PiggyBank, Sparkles } from 'lucide-react-native';
@@ -190,13 +182,13 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   const onSeeAllHunt = useCallback(() => navigation.navigate('Hunt'), [navigation]);
   const onSeeAllEvents = useCallback(() => navigation.navigate('Events'), [navigation]);
   const onSeeAllMarket = useCallback(() => navigation.navigate('Market'), [navigation]);
-  // Explore-rail product tap opens the seller's external "Buy" link directly —
-  // a deliberate shortcut for the compact hub rail. (The full Market GRID
-  // instead pushes MarketProductDetail, where reviews/comments live; the rail
-  // keeps its lightweight tap so the hub doesn't deep-link into a sub-stack.)
-  const openMarketProduct = useCallback((product: MarketProduct) => {
-    Linking.openURL(product.url).catch(() => {});
-  }, []);
+  // Open the same in-app product detail as the full Market grid.
+  const openMarketProduct = useCallback(
+    (product: MarketProduct) => {
+      navigation.navigate('MarketProductDetail', { productId: product.id, product });
+    },
+    [navigation],
+  );
   const onSeeAllLessons = useCallback(() => navigation.navigate('Lessons'), [navigation]);
   const onCloseLegend = useCallback(() => setLegendVisible(false), []);
   // Stale-while-revalidate: `peekCachedPlacesSync()` already seeded

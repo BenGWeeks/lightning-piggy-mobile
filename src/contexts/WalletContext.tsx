@@ -1,4 +1,6 @@
-import { readCachedWalletBalance } from '../services/walletBalanceCache';
+import { useWalletMetadataActions } from './useWalletMetadataActions';
+import { hydrateWalletStates } from './hydrateWalletStates';
+import { useLegacyOnchainMigration } from './useLegacyOnchainMigration';
 import React, {
   createContext,
   useContext,
@@ -254,6 +256,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     [seedSeenReceipts],
   );
 
+  useLegacyOnchainMigration(wallets, walletsHydrated, setWallets);
+
   // Derived state
   const activeWallet = wallets.find((w) => w.id === activeWalletId) ?? null;
   const hasWallets = wallets.length > 0;
@@ -368,50 +372,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         perfLog('WalletProvider startup: getWalletList begin');
         const walletList = await walletStorage.getWalletList();
         perfLog(`WalletProvider startup: getWalletList -> ${walletList.length} wallets`);
-        const walletStates: WalletState[] = await Promise.all(
-          walletList.map(async (w) => {
-            // Load cached transactions from AsyncStorage
-            let cachedTxs: WalletTransaction[] = [];
-            try {
-              const tTxRead = Date.now();
-              const txJson = await AsyncStorage.getItem(`txs_${w.id}`);
-              perfLog(
-                `WalletProvider: txs_${w.id.slice(0, 8)} read ${Date.now() - tTxRead}ms (${txJson?.length ?? 0}B)`,
-              );
-              if (txJson) {
-                const tTxParse = Date.now();
-                cachedTxs = JSON.parse(txJson);
-                // Seed the unchanged-poll fingerprint from the persisted JSON
-                // so the first poll after cold start can skip too when the
-                // server list matches what we hydrated (#1014).
-                if (isStartupCurrent()) lastTxsJsonRef.current.set(w.id, txJson);
-                perfLog(
-                  `WalletProvider: txs_${w.id.slice(0, 8)} parse ${Date.now() - tTxParse}ms (${cachedTxs.length} txs)`,
-                );
-              }
-            } catch (err) {
-              console.warn(`Corrupted cached txs for ${w.id}, clearing:`, err);
-              await AsyncStorage.removeItem(`txs_${w.id}`);
-            }
-            // Hydrate cached balance from disk so the wallet card shows
-            // a number on cold start instead of `---` while we hold off
-            // the BDK `Wallet.create() + Electrum.sync()` work (~9 s of
-            // JS-thread time per onchain wallet) until the user actually
-            // asks for fresh data (pull-to-refresh, open wallet detail,
-            // open Send sheet for that wallet). Closes the cold-start
-            // "Send button feels frozen for 12 s" symptom: BDK is the
-            // dominant blocker, and BDK isn't needed to paint Home.
-            const cachedBalance = await readCachedWalletBalance(w.id);
-            // Seed the announced-receipts set BEFORE the detector runs.
-            await hydrateSeenReceipts(w.id, cachedTxs, isStartupCurrent);
-            return {
-              ...w,
-              isConnected: false,
-              balance: cachedBalance,
-              walletAlias: null,
-              transactions: cachedTxs,
-            };
-          }),
+        const walletStates = await hydrateWalletStates(
+          walletList,
+          lastTxsJsonRef,
+          hydrateSeenReceipts,
+          isStartupCurrent,
         );
         if (!isStartupCurrent()) return;
         setWallets(walletStates);
@@ -615,8 +580,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
       // Persist xpub securely
       await walletStorage.saveXpub(id, trimmedXpub);
-      const currentList = await walletStorage.getWalletList();
-      await walletStorage.saveWalletList([...currentList, metadata]);
+      await walletStorage.updateWalletList((list) => [...list, metadata]);
 
       // Fetch initial balance
       const bal = await onchainService.getBalance(id);
@@ -675,8 +639,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
       // Store mnemonic securely
       await walletStorage.saveMnemonic(id, normalized);
-      const currentList = await walletStorage.getWalletList();
-      await walletStorage.saveWalletList([...currentList, metadata]);
+      await walletStorage.updateWalletList((list) => [...list, metadata]);
 
       // Fetch initial balance via BDK
       const bal = await onchainService.getBalance(id);
@@ -714,10 +677,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         await walletStorage.deleteCoinosRecovery(walletId);
       }
 
-      await walletStorage.deleteWalletCaches(walletId); // before saveWalletList: no orphaned cache residue if we crash mid-op
+      await walletStorage.deleteWalletCaches(walletId); // before metadata removal: no orphaned cache residue if we crash mid-op
       lastTxsJsonRef.current.delete(walletId); // drop stale fingerprint so a future wallet with the same id starts fresh
-      const currentList = await walletStorage.getWalletList();
-      await walletStorage.saveWalletList(currentList.filter((w) => w.id !== walletId));
+      await walletStorage.updateWalletList((list) => list.filter((w) => w.id !== walletId));
 
       setWallets((prev) => {
         const remaining = prev.filter((w) => w.id !== walletId);
@@ -730,47 +692,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     [activeWalletId, wallets],
   );
 
-  const updateWalletSettings = useCallback(
-    async (
-      walletId: string,
-      settings: {
-        alias?: string;
-        theme?: CardTheme;
-        hideBalance?: boolean;
-        lightningAddress?: string | null;
-      },
-    ) => {
-      // Update in-memory state
-      setWallets((prev) => prev.map((w) => (w.id === walletId ? { ...w, ...settings } : w)));
-
-      // Persist metadata changes
-      const currentList = await walletStorage.getWalletList();
-      const updatedList = currentList.map((w) => (w.id === walletId ? { ...w, ...settings } : w));
-      await walletStorage.saveWalletList(updatedList);
-    },
-    [],
-  );
-
-  const reorderWallet = useCallback(async (walletId: string, direction: 'up' | 'down') => {
-    let reorderedList: WalletMetadata[] | null = null;
-
-    setWallets((prev) => {
-      const sorted = [...prev].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-      const idx = sorted.findIndex((w) => w.id === walletId);
-      if (idx < 0) return prev;
-      const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
-      if (targetIdx < 0 || targetIdx >= sorted.length) return prev;
-      [sorted[idx], sorted[targetIdx]] = [sorted[targetIdx], sorted[idx]];
-      const result = sorted.map((w, i) => ({ ...w, order: i }));
-      reorderedList = result;
-      return result;
-    });
-
-    // Persist the same reordered list that was applied to state
-    if (reorderedList) {
-      await walletStorage.saveWalletList(reorderedList);
-    }
-  }, []);
+  const { updateWalletSettings, reorderWallet } = useWalletMetadataActions(setWallets);
 
   const setActiveWallet = useCallback((walletId: string | null) => {
     setActiveWalletId(walletId);

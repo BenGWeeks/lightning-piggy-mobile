@@ -1837,15 +1837,15 @@
     "marmotPushAllSet": "Skonfigurowano we wszystkich bezpiecznych czatach.",
     "marmotPushPending": "Bezpieczne czaty jeszcze nieskonfigurowane: {{count}}.",
     "marmotPushFinish": "Dokończ konfigurację",
-    "marmotPushAdvanced": "Zmień serwer powiadomień",
+    "marmotPushAdvanced": "Użyj innego serwera",
     "marmotPushServerDefault": "Natychmiastowe alerty dla każdego konta na tym telefonie przechodzą przez serwer powiadomień Lightning Piggy.",
     "marmotPushServerCustom": "Natychmiastowe alerty dla każdego konta na tym telefonie przechodzą przez własny serwer powiadomień: {{npub}}",
     "marmotPushServerHint": "Tylko serwer z danymi uwierzytelniającymi push Apple/Google dla Lightning Piggy może dostarczać powiadomienia do tej aplikacji.",
     "marmotPushServerPlaceholder": "npub1…",
     "marmotPushServerLabel": "npub serwera powiadomień",
     "marmotPushServerSave": "Użyj tego serwera",
-    "marmotPushServerReset": "Użyj serwera domyślnego",
-    "marmotPushServerInvalid": "To nie jest prawidłowy npub.",
+    "marmotPushServerReset": "Przywróć domyślny",
+    "marmotPushServerInvalid": "To nie jest prawidłowy npub ani szesnastkowy klucz publiczny.",
     "marmotPushNoPermission": "Najpierw zezwól na powiadomienia dla Lightning Piggy w ustawieniach systemu.",
     "marmotPushUnavailable": "Ten telefon nie mógł uzyskać tokenu push od Apple/Google. Na Androidzie wymaga to usług Google Play.",
     "marmotPushDeclined": "Twoja aplikacja podpisująca odmówiła, więc natychmiastowe alerty nie są jeszcze skonfigurowane w każdym bezpiecznym czacie. Dotknij „Dokończ konfigurację”, aby spróbować ponownie.",
@@ -1870,7 +1870,13 @@
     "watcherFailed": "Nie udało się zaktualizować serwera powiadomień. Twoja aplikacja podpisująca mogła odmówić lub jesteś offline.",
     "watcherRetry": "Spróbuj ponownie",
     "watcherSaveFailed": "Nie udało się zapisać tego ustawienia.",
-    "marmotPushServerTitle": "Serwer powiadomień"
+    "marmotPushServerTitle": "Serwer powiadomień",
+    "marmotPushServerName": "Powiadomienia Lightning Piggy",
+    "marmotPushServerUsing": "W użyciu: {{name}}",
+    "marmotPushServerBadge": "(domyślny)",
+    "marmotPushServerNotFound": "Nie znaleźliśmy przekaźników odbiorczych tego serwera (kind-10050). Sprawdź klucz i połączenie, a następnie spróbuj ponownie.",
+    "marmotPushServerInboxFound": "Znaleziono przekaźniki odbiorcze",
+    "marmotPushServerInboxUnknown": "Nie znaleziono przekaźników odbiorczych — spróbuj później"
   },
   "sendAmountSection": {
     "fixedAmount": "Stała kwota",
@@ -2308,7 +2314,10 @@
       "friendsOfFriends": "Znajomi znajomych",
       "friendsChip": "Znajomi",
       "comingSoon": "Wkrótce",
-      "clearScope": "Przywróć preferowanych sprzedawców Lightning Piggy"
+      "clearScope": "Przywróć preferowanych sprzedawców Lightning Piggy",
+      "moreMerchants": "Więcej (%{count})",
+      "searchMerchants": "Szukaj sprzedawców",
+      "noMerchants": "Nie znaleziono sprzedawców"
     },
     "feedbackTabs": {
       "reviews": "Opinie",

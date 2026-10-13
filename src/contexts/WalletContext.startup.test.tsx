@@ -38,7 +38,9 @@ jest.mock('../services/swapRecoveryService', () => ({
   ensureSwapMetaLoaded: jest.fn(async () => {}),
   getSwapMeta: jest.fn(() => undefined),
 }));
-jest.mock('../services/onchainService', () => ({}));
+jest.mock('../services/onchainService', () => ({
+  syncAndRefresh: jest.fn(async () => ({ balance: 100, transactions: [] })),
+}));
 jest.mock('../services/nostrService', () => ({
   DEFAULT_RELAYS: [],
   getCurrentUserPubkey: jest.fn(() => null),
@@ -386,4 +388,44 @@ it('clears old cards during a delayed identity reload without flashing the new-u
     dimActions: false,
   });
   view.unmount();
+});
+
+it('finishes cached hydration before legacy key checks, then enables Send and Move', async () => {
+  walletStorage.setActivePubkeyForWalletStorage('legacy-seed-profile');
+  await AsyncStorage.clear();
+  const card: WalletMetadata = {
+    id: 'legacy-seed-card',
+    alias: 'Seed',
+    order: 0,
+    theme: 'lightning-piggy',
+    walletType: 'onchain',
+    lightningAddress: null,
+  };
+  await walletStorage.saveWalletList([card], 'legacy-seed-profile');
+  const keyRead = deferred<string | null>();
+  const secureRead = jest
+    .spyOn(SecureStore, 'getItemAsync')
+    .mockImplementation(async (key) =>
+      key === 'onchain_mnemonic_legacy-seed-card' ? keyRead.promise : null,
+    );
+  const view = renderProvider();
+  await waitFor(() => expect(secureRead).toHaveBeenCalledWith('onchain_mnemonic_legacy-seed-card'));
+  expect(latest?.isLoading).toBe(false);
+  expect(latest?.walletsHydrated).toBe(true);
+  expect(latest?.wallets[0].onchainImportMethod).toBeUndefined();
+  await act(async () => keyRead.resolve(''));
+  await waitFor(() => expect(latest?.wallets[0].onchainImportMethod).toBe('mnemonic'));
+  expect(homeState().isSendDisabled).toBe(false);
+  expect((await walletStorage.getWalletList('legacy-seed-profile'))[0].onchainImportMethod).toBe(
+    'mnemonic',
+  );
+  view.unmount();
+  secureRead.mockClear();
+  const reload = renderProvider();
+  await waitFor(() => expect(latest?.walletsHydrated).toBe(true));
+  expect(latest?.wallets[0].onchainImportMethod).toBe('mnemonic');
+  expect(secureRead.mock.calls.some(([key]) => key === 'onchain_mnemonic_legacy-seed-card')).toBe(
+    false,
+  );
+  reload.unmount();
 });

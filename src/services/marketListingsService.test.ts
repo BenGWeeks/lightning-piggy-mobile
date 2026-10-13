@@ -125,7 +125,10 @@ beforeEach(() => {
       : Promise.reject(new Error('offline')),
   );
 });
-afterEach(() => jest.useRealTimers());
+afterEach(() => {
+  __resetVerifiedEventCache();
+  jest.useRealTimers();
+});
 
 it('asks for listings only, author-scoped, and rejects forged or unsolicited events', async () => {
   const pending = start();
@@ -207,6 +210,8 @@ it('does not wait for a dead relay once another relay has answered', async () =>
   pass('deletions').forEach((s) => s.c.oneose());
   const result = await pending;
   expect(result).toMatchObject({ incomplete: false, products: [expect.anything()] });
+  // Verification persistence has its own debounce; check only network timers.
+  __resetVerifiedEventCache();
   expect(jest.getTimerCount()).toBe(0);
 });
 

@@ -1,163 +1,165 @@
-/**
- * Unit tests for the shared-contact-profile resolver hook (#988 follow-up).
- *
- * The hook was extracted from ConversationScreen (#431) to "give the fetch its
- * own testable seam"; these tests pin the stateful behaviour that seam exists
- * to protect:
- *
- *   1. It fetches the kind-0 for a `nostr:` contact shared by the other party
- *      and exposes it keyed by pubkey.
- *   2. It merges the nprofile's relay hints with DEFAULT_RELAYS (so someone
- *      publishing on niche relays is still found) and de-dups the union.
- *   3. It de-dups scheduling across `messages` updates — the same pubkey is
- *      never re-fetched when a later render re-lists it.
- *   4. Empty / missing refs do nothing; an empty lookup surfaces as `null`; a
- *      failed fetch is swallowed to `null` rather than thrown.
- *   5. Distinct pubkeys in one batch are fetched in parallel and all merged.
- */
-import { renderHook, waitFor } from '@testing-library/react-native';
+import { act, renderHook, waitFor } from '@testing-library/react-native';
 import { useSharedContactProfiles } from './useSharedContactProfiles';
-import * as nostrService from '../services/nostrService';
-import * as messageContent from '../utils/messageContent';
-import type { ConversationMessageInput } from '../utils/conversationItems';
-import type { NostrProfile } from '../types/nostr';
+import { resolveSharedContactProfiles } from '../services/sharedContactProfiles';
+import { extractSharedContact } from '../utils/messageContent';
+import type { NostrContact, NostrProfile } from '../types/nostr';
+import { slimDisplayProfile } from '../utils/profileSanitize';
 
-const DEFAULT_RELAYS = ['wss://relay.damus.io', 'wss://nos.lol'];
-
-jest.mock('../services/nostrService', () => ({
-  __esModule: true,
-  DEFAULT_RELAYS: ['wss://relay.damus.io', 'wss://nos.lol'],
-  fetchProfile: jest.fn(),
+jest.mock('../services/sharedContactProfiles', () => ({
+  SHARED_PROFILE_BATCH_SIZE: 50,
+  SHARED_PROFILE_TIMEOUT_MS: 10000,
+  resolveSharedContactProfiles: jest.fn(),
 }));
-
-jest.mock('../utils/messageContent', () => ({
-  __esModule: true,
-  extractSharedContact: jest.fn(),
-}));
-
-const mockedFetchProfile = nostrService.fetchProfile as jest.MockedFunction<
-  typeof nostrService.fetchProfile
->;
-const mockedExtract = messageContent.extractSharedContact as jest.MockedFunction<
-  typeof messageContent.extractSharedContact
->;
-
-const PK_A = 'a'.repeat(64);
-const PK_B = 'b'.repeat(64);
-
-/**
- * A `messages` update where each entry's `text` is a `share:<pk>|<relays>`
- * token the mocked `extractSharedContact` decodes back into a ref. Plain text
- * (no `share:` prefix) decodes to `null`, standing in for a normal message.
- */
-const msg = (id: string, text: string): ConversationMessageInput => ({
-  id,
-  fromMe: false,
-  text,
-  createdAt: 1,
-});
-const share = (pubkey: string, relays: string[] = []) => `share:${pubkey}|${relays.join(',')}`;
-
-const profile = (pubkey: string): NostrProfile =>
-  ({ pubkey, npub: `npub_${pubkey}`, name: pubkey.slice(0, 4) }) as NostrProfile;
+jest.mock('../utils/messageContent', () => ({ extractSharedContact: jest.fn() }));
+const resolveProfiles = jest.mocked(resolveSharedContactProfiles);
+const extract = jest.mocked(extractSharedContact);
+const PK = 'a'.repeat(64);
+const profile = {
+  pubkey: PK,
+  name: 'Little Piggy',
+  picture: 'https://example.com/piggy.png',
+} as NostrProfile;
+const message = { id: 'local-1', text: 'contact', fromMe: true };
 
 beforeEach(() => {
-  jest.clearAllMocks();
-  mockedExtract.mockImplementation((text: string) => {
-    if (!text?.startsWith('share:')) return null;
-    const [pubkey, relaysCsv] = text.slice('share:'.length).split('|');
-    return { pubkey, relays: relaysCsv ? relaysCsv.split(',') : [] };
-  });
+  jest.resetAllMocks();
+  extract.mockImplementation((text) =>
+    text === 'contact' ? { pubkey: PK, relays: ['wss://hint.example'] } : null,
+  );
+  resolveProfiles.mockResolvedValue({ [PK]: profile });
 });
 
-describe('useSharedContactProfiles', () => {
-  it('resolves the shared contact profile keyed by pubkey', async () => {
-    mockedFetchProfile.mockResolvedValue(profile(PK_A));
-
-    const { result } = renderHook(
-      (props: { messages: ConversationMessageInput[] }) => useSharedContactProfiles(props.messages),
+it.each(['nip17', 'marmot'])(
+  'a %s sender resolves after optimistic message reconciliation',
+  async (protocol) => {
+    let finish!: (profiles: Record<string, NostrProfile | null>) => void;
+    resolveProfiles.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const { result, rerender } = renderHook(
+      (messages: (typeof message & { protocol: string })[]) => useSharedContactProfiles(messages),
       {
-        initialProps: { messages: [msg('1', share(PK_A))] },
+        initialProps: [{ ...message, protocol }],
       },
     );
-
-    // Nothing resolved synchronously.
-    expect(result.current).toEqual({});
-
-    await waitFor(() => expect(result.current[PK_A]).toEqual(profile(PK_A)));
-    expect(mockedFetchProfile).toHaveBeenCalledTimes(1);
-  });
-
-  it('merges nprofile relay hints with DEFAULT_RELAYS (de-duped)', async () => {
-    mockedFetchProfile.mockResolvedValue(profile(PK_A));
-    // One hint is novel, one duplicates a default — the union must de-dup it.
-    const hints = ['wss://niche.example', 'wss://relay.damus.io'];
-
-    renderHook(() => useSharedContactProfiles([msg('1', share(PK_A, hints))]));
-
-    await waitFor(() => expect(mockedFetchProfile).toHaveBeenCalled());
-    const [, passedRelays] = mockedFetchProfile.mock.calls[0];
-    expect(passedRelays).toEqual([...DEFAULT_RELAYS, 'wss://niche.example']);
-    // No duplicate of the shared default relay.
-    expect(passedRelays).toHaveLength(new Set(passedRelays).size);
-  });
-
-  it('does not re-fetch a pubkey already scheduled on a later messages update', async () => {
-    mockedFetchProfile.mockResolvedValue(profile(PK_A));
-
-    const { result, rerender } = renderHook(
-      (messages: ConversationMessageInput[]) => useSharedContactProfiles(messages),
-      { initialProps: [msg('1', share(PK_A))] },
+    expect(result.current[PK]).toBeUndefined();
+    rerender([{ ...message, protocol, id: 'published-id' }]);
+    await act(async () => finish({ [PK]: profile }));
+    expect(result.current[PK]).toEqual(profile);
+    expect(resolveProfiles).toHaveBeenCalledTimes(1);
+    expect(resolveProfiles).toHaveBeenCalledWith(
+      [{ pubkey: PK, relays: ['wss://hint.example'] }],
+      expect.any(Function),
     );
-    await waitFor(() => expect(result.current[PK_A]).toBeDefined());
-    expect(mockedFetchProfile).toHaveBeenCalledTimes(1);
+  },
+);
 
-    // A fresh messages array (new object, new id) still lists the same pubkey.
-    rerender([msg('1', share(PK_A)), msg('2', share(PK_A))]);
-    // Give any (unwanted) async fetch a chance to fire.
-    await Promise.resolve();
-    expect(mockedFetchProfile).toHaveBeenCalledTimes(1);
-  });
-
-  it('does nothing when no message carries a shared contact', async () => {
-    const { result } = renderHook(() =>
-      useSharedContactProfiles([msg('1', 'just a normal message'), msg('2', 'hi')]),
-    );
-
-    await Promise.resolve();
-    expect(mockedFetchProfile).not.toHaveBeenCalled();
-    expect(result.current).toEqual({});
-  });
-
-  it('records null when the lookup comes back empty', async () => {
-    mockedFetchProfile.mockResolvedValue(null);
-
-    const { result } = renderHook(() => useSharedContactProfiles([msg('1', share(PK_A))]));
-
-    await waitFor(() => expect(PK_A in result.current).toBe(true));
-    expect(result.current[PK_A]).toBeNull();
-  });
-
-  it('swallows a failed fetch to null rather than throwing', async () => {
-    mockedFetchProfile.mockRejectedValue(new Error('relay down'));
-
-    const { result } = renderHook(() => useSharedContactProfiles([msg('1', share(PK_A))]));
-
-    await waitFor(() => expect(PK_A in result.current).toBe(true));
-    expect(result.current[PK_A]).toBeNull();
-  });
-
-  it('fetches distinct shared pubkeys in one batch and merges them all', async () => {
-    mockedFetchProfile.mockImplementation(async (pk: string) => profile(pk));
-
-    const { result } = renderHook(() =>
-      useSharedContactProfiles([msg('1', share(PK_A)), msg('2', share(PK_B))]),
-    );
-
-    await waitFor(() => {
-      expect(result.current[PK_A]).toEqual(profile(PK_A));
-      expect(result.current[PK_B]).toEqual(profile(PK_B));
-    });
-    expect(mockedFetchProfile).toHaveBeenCalledTimes(2);
-  });
+it('shows a display-only friend immediately and refreshes its verified Lightning address', async () => {
+  const verified = { ...profile, lud16: 'piggy@example.com' };
+  const displayOnly = slimDisplayProfile(verified);
+  let finish!: (profiles: Record<string, NostrProfile | null>) => void;
+  resolveProfiles.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const contacts = [{ pubkey: PK, profile: displayOnly }] as NostrContact[];
+  const { result } = renderHook(() => useSharedContactProfiles([message], contacts));
+  expect(result.current[PK]).toEqual(displayOnly);
+  expect(resolveProfiles).toHaveBeenCalledWith(
+    [{ pubkey: PK, relays: ['wss://hint.example'] }],
+    expect.any(Function),
+  );
+  await act(async () => finish({ [PK]: verified }));
+  expect(result.current[PK]).toEqual(verified);
 });
+
+it('preserves a verified profile when display-only friends hydrate later', async () => {
+  const verified = { ...profile, lud16: 'piggy@example.com' };
+  resolveProfiles.mockResolvedValue({ [PK]: verified });
+  const { result, rerender } = renderHook(
+    (contacts: NostrContact[]) => useSharedContactProfiles([message], contacts),
+    { initialProps: [] },
+  );
+  await waitFor(() => expect(result.current[PK]).toEqual(verified));
+  rerender([{ pubkey: PK, profile: slimDisplayProfile(verified) }] as NostrContact[]);
+  expect(result.current[PK]).toEqual(verified);
+  expect(resolveProfiles).toHaveBeenCalledTimes(1);
+});
+
+it('a completed miss is null rather than indefinitely pending', async () => {
+  resolveProfiles.mockResolvedValue({ [PK]: null });
+  const { result } = renderHook(() => useSharedContactProfiles([message]));
+  await waitFor(() => expect(result.current[PK]).toBeNull());
+});
+
+it('a friend cache hydration replaces a prior miss', async () => {
+  resolveProfiles.mockResolvedValue({ [PK]: null });
+  const { result, rerender } = renderHook(
+    (contacts: NostrContact[]) => useSharedContactProfiles([message], contacts),
+    { initialProps: [] },
+  );
+  await waitFor(() => expect(result.current[PK]).toBeNull());
+  rerender([{ pubkey: PK, profile }] as NostrContact[]);
+  expect(result.current[PK]).toEqual(profile);
+});
+
+it('does nothing for ordinary messages', () => {
+  const { result } = renderHook(() => useSharedContactProfiles([{ text: 'hello' }]));
+  expect(result.current).toEqual({});
+  expect(resolveProfiles).not.toHaveBeenCalled();
+});
+
+it.each([51, 151])(
+  'all %i scheduled cards fall back at ten seconds, including queued batches',
+  async (count) => {
+    jest.useFakeTimers();
+    try {
+      const pubkeys = Array.from({ length: count }, (_, i) => i.toString(16).padStart(64, '0'));
+      extract.mockImplementation((text) => ({ pubkey: text, relays: [] }));
+      let finishLate!: (profiles: Record<string, NostrProfile | null>) => void;
+      resolveProfiles
+        .mockImplementationOnce(
+          (refs) =>
+            new Promise((resolve) => {
+              setTimeout(
+                () => resolve(Object.fromEntries(refs.map(({ pubkey }) => [pubkey, null]))),
+                8000,
+              );
+            }),
+        )
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              finishLate = resolve;
+            }),
+        );
+      const { result, unmount } = renderHook(() =>
+        useSharedContactProfiles(pubkeys.map((text) => ({ text }))),
+      );
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(8000);
+      });
+      expect(resolveProfiles).toHaveBeenCalledTimes(2);
+      expect(result.current[pubkeys[50]]).toBeUndefined();
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(1999);
+      });
+      expect(result.current[pubkeys[count - 1]]).toBeUndefined();
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(1);
+      });
+      for (const pubkey of pubkeys) expect(result.current[pubkey]).toBeNull();
+      await act(async () => finishLate({ [pubkeys[50]]: profile }));
+      expect(result.current[pubkeys[50]]).toBeNull();
+      expect(resolveProfiles).toHaveBeenCalledTimes(2);
+      unmount();
+    } finally {
+      jest.useRealTimers();
+    }
+  },
+);

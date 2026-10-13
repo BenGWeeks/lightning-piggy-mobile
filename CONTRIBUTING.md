@@ -82,6 +82,10 @@ bash scripts/check-file-size.sh          # file-size cap (see below)
 - Geo-caches published by the app are **Piglets** (the wallet is the "Piggy", a cache stash is its
   "Piglet"). Cache listings that do not come from Lightning Piggy stay "NIP-GC cache".
 - **Keep "sats" in Latin letters in every translation.** Do not transliterate the unit into the target script.
+- **Keep spec labels in settings titles for now**, e.g. "Your relays (NIP-65)", "Message inbox relays
+  (NIP-17)", "Photo & voice-note storage (Blossom · BUD-03)". Today's Nostr users are technical and
+  cross-check settings against other clients. Explanatory text goes behind the ⓘ sheet, not inline.
+  Once Nostr reaches everyday users, drop the labels from titles and keep the spec name in the ⓘ.
 
 ## Testing
 

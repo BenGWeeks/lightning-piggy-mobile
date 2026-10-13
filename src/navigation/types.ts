@@ -80,6 +80,7 @@ export type RootStackParamList = {
   // contact came from the device address book and can be edited inline.
   ContactProfile: {
     contact: ContactProfileBodyData;
+    initialTab?: 'posts' | 'media' | 'shop';
     phoneContactId?: string;
   };
   // A Market product page opened from outside the Explore tab — a seller's

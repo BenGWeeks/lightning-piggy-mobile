@@ -1837,15 +1837,15 @@
     "marmotPushAllSet": "In allen deinen sicheren Chats eingerichtet.",
     "marmotPushPending": "Noch nicht eingerichtete sichere Chats: {{count}}.",
     "marmotPushFinish": "Einrichtung abschließen",
-    "marmotPushAdvanced": "Benachrichtigungsserver ändern",
+    "marmotPushAdvanced": "Anderen Server verwenden",
     "marmotPushServerDefault": "Sofortmeldungen für alle Konten auf diesem Handy laufen über den Benachrichtigungsserver von Lightning Piggy.",
     "marmotPushServerCustom": "Sofortmeldungen für alle Konten auf diesem Handy laufen über einen eigenen Benachrichtigungsserver: {{npub}}",
     "marmotPushServerHint": "Nur ein Server mit den Apple/Google-Push-Zugangsdaten von Lightning Piggy kann an diese App zustellen.",
     "marmotPushServerPlaceholder": "npub1…",
     "marmotPushServerLabel": "npub des Benachrichtigungsservers",
     "marmotPushServerSave": "Diesen Server verwenden",
-    "marmotPushServerReset": "Standardserver verwenden",
-    "marmotPushServerInvalid": "Das ist kein gültiger öffentlicher Schlüssel (npub).",
+    "marmotPushServerReset": "Auf Standard zurücksetzen",
+    "marmotPushServerInvalid": "Das ist kein gültiger npub oder öffentlicher Hex-Schlüssel.",
     "marmotPushNoPermission": "Erlaube zuerst in den Systemeinstellungen Benachrichtigungen für Lightning Piggy.",
     "marmotPushUnavailable": "Dieses Handy konnte von Apple/Google kein Push-Token erhalten. Unter Android braucht das die Google Play-Dienste.",
     "marmotPushDeclined": "Dein Signer hat abgelehnt, daher sind Sofortmeldungen noch nicht in jedem sicheren Chat eingerichtet. Tippe auf „Einrichtung abschließen“, um es erneut zu versuchen.",
@@ -1870,7 +1870,13 @@
     "watcherFailed": "Der Benachrichtigungsserver konnte nicht aktualisiert werden. Dein Signer hat möglicherweise abgelehnt oder du bist offline.",
     "watcherRetry": "Erneut versuchen",
     "watcherSaveFailed": "Diese Einstellung konnte nicht gespeichert werden.",
-    "marmotPushServerTitle": "Benachrichtigungsserver"
+    "marmotPushServerTitle": "Benachrichtigungsserver",
+    "marmotPushServerName": "Lightning Piggy Benachrichtigungen",
+    "marmotPushServerUsing": "Verwendet: {{name}}",
+    "marmotPushServerBadge": "(Standard)",
+    "marmotPushServerNotFound": "Die Eingangsrelays dieses Servers (kind-10050) wurden nicht gefunden. Prüfe den Schlüssel und deine Verbindung und versuche es erneut.",
+    "marmotPushServerInboxFound": "Eingangsrelays gefunden",
+    "marmotPushServerInboxUnknown": "Keine Eingangsrelays gefunden – versuche es später erneut"
   },
   "sendAmountSection": {
     "fixedAmount": "Fester Betrag",
@@ -2306,7 +2312,10 @@
       "friendsOfFriends": "Freunde von Freunden",
       "friendsChip": "Freunde",
       "comingSoon": "Demnächst verfügbar",
-      "clearScope": "Verkäufer auf bevorzugte Verkäufer von Lightning Piggy zurücksetzen"
+      "clearScope": "Verkäufer auf bevorzugte Verkäufer von Lightning Piggy zurücksetzen",
+      "moreMerchants": "Mehr (%{count})",
+      "searchMerchants": "Händler suchen",
+      "noMerchants": "Keine Händler gefunden"
     },
     "feedbackTabs": {
       "reviews": "Bewertungen",

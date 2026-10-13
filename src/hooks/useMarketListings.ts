@@ -2,6 +2,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { Toast } from '../components/BrandedToast';
 import { useTranslation } from '../contexts/LocaleContext';
+import { useMarketMerchantProfiles } from './useMarketMerchantProfiles';
 import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import { fetchMarketListings, type MarketListingsResult } from '../services/marketListingsService';
 import {
@@ -173,33 +174,37 @@ export function useMarketListings(
       };
     }, [enabled, focused, key, account, authorsKey, relaysKey, revision, t]),
   );
-  // O(1) seller lookup — a linear `contacts.find` per product was O(products ×
-  // follows) on every profile trickle (250 × 650+ for a typical account).
-  const contactsByPubkey = useMemo(
-    () => new Map(contacts.map((c) => [c.pubkey.toLowerCase(), c])),
-    [contacts],
+  // Legacy filters stored contact labels. Preserve those selections while
+  // moving to pubkey keys, even when a petname differs from the shop profile.
+  const merchantAliases = useMemo(() => {
+    const aliases = new Map<string, string>();
+    for (const contact of contacts) {
+      for (const label of [
+        contact.petname,
+        contact.profile?.displayName,
+        contact.profile?.name,
+        contact.profile?.nip05,
+      ]) {
+        if (label) aliases.set(label, contact.pubkey.toLowerCase());
+      }
+    }
+    return aliases;
+  }, [contacts]);
+  const currentProducts = useMemo(
+    () => (state.key === key ? unexpiredMarketProducts(state.products) : []),
+    // Recheck expiration when returning to this scope, even with a fresh snapshot.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state, key, enabled, focused],
+  );
+  const { products, profilesReady } = useMarketMerchantProfiles(
+    currentProducts,
+    enabled && focused,
   );
   return useMemo(
     () => ({
-      products:
-        state.key === key
-          ? unexpiredMarketProducts(state.products).map((product) => {
-              const contact = product.listing
-                ? contactsByPubkey.get(product.listing.event.pubkey)
-                : undefined;
-              const name =
-                contact?.petname ||
-                contact?.profile?.displayName ||
-                contact?.profile?.name ||
-                product.sellerName;
-              if (!product.listing) return product;
-              return {
-                ...product,
-                sellerName: name,
-                listing: { ...product.listing, vendor: { ...product.listing.vendor, name } },
-              };
-            })
-          : [],
+      products,
+      profilesReady,
+      merchantAliases,
       loading: enabled && !!account && (state.key !== key || state.loading),
       completed: state.key === key && state.completed,
       hasSnapshot:
@@ -210,6 +215,6 @@ export function useMarketListings(
       incomplete: state.key === key && state.incomplete,
       refresh,
     }),
-    [state, key, enabled, account, refresh, contactsByPubkey],
+    [state, key, enabled, account, refresh, products, profilesReady, merchantAliases],
   );
 }

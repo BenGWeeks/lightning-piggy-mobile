@@ -1837,15 +1837,15 @@
     "marmotPushAllSet": "तुमच्या सर्व सुरक्षित चॅटमध्ये सेट झाले.",
     "marmotPushPending": "{{count}} सुरक्षित चॅट अजून सेट झालेले नाहीत.",
     "marmotPushFinish": "सेटअप पूर्ण करा",
-    "marmotPushAdvanced": "नोटिफिकेशन सर्व्हर बदला",
+    "marmotPushAdvanced": "वेगळा सर्व्हर वापरा",
     "marmotPushServerDefault": "या फोनवरील प्रत्येक खात्याचे तत्काळ अलर्ट Lightning Piggy च्या नोटिफिकेशन सर्व्हरमधून जातात.",
     "marmotPushServerCustom": "या फोनवरील प्रत्येक खात्याचे तत्काळ अलर्ट कस्टम नोटिफिकेशन सर्व्हरमधून जातात: {{npub}}",
     "marmotPushServerHint": "Lightning Piggy ची Apple/Google पुश क्रेडेन्शियल असलेला सर्व्हरच या ॲपला पुश पोहोचवू शकतो.",
     "marmotPushServerPlaceholder": "npub1…",
     "marmotPushServerLabel": "नोटिफिकेशन सर्व्हर npub",
     "marmotPushServerSave": "हा सर्व्हर वापरा",
-    "marmotPushServerReset": "डीफॉल्ट सर्व्हर वापरा",
-    "marmotPushServerInvalid": "ही चुकीची npub आहे.",
+    "marmotPushServerReset": "डीफॉल्टवर रीसेट करा",
+    "marmotPushServerInvalid": "ही वैध npub किंवा हेक्स सार्वजनिक की नाही.",
     "marmotPushNoPermission": "आधी तुमच्या सिस्टीम सेटिंग्जमध्ये Lightning Piggy साठी नोटिफिकेशनला परवानगी द्या.",
     "marmotPushUnavailable": "या फोनला Apple/Google कडून पुश टोकन मिळाले नाही. Android वर यासाठी Google Play सेवा लागतात.",
     "marmotPushDeclined": "तुमच्या साइनरने नकार दिला, त्यामुळे तत्काळ अलर्ट अजून सर्व सुरक्षित चॅटमध्ये सेट झालेले नाहीत. पुन्हा प्रयत्न करण्यासाठी सेटअप पूर्ण करा वर टॅप करा.",
@@ -1870,7 +1870,13 @@
     "watcherFailed": "नोटिफिकेशन सर्व्हर अपडेट करता आला नाही. तुमच्या साइनरने नकार दिला असेल, किंवा तुम्ही ऑफलाइन आहात.",
     "watcherRetry": "पुन्हा प्रयत्न करा",
     "watcherSaveFailed": "ती सेटिंग सेव्ह करता आली नाही.",
-    "marmotPushServerTitle": "नोटिफिकेशन सर्व्हर"
+    "marmotPushServerTitle": "नोटिफिकेशन सर्व्हर",
+    "marmotPushServerName": "Lightning Piggy सूचना",
+    "marmotPushServerUsing": "वापरात: {{name}}",
+    "marmotPushServerBadge": "(डीफॉल्ट)",
+    "marmotPushServerNotFound": "या सर्व्हरचे इनबॉक्स रिले (kind-10050) सापडले नाहीत. की आणि तुमचे कनेक्शन तपासा, नंतर पुन्हा प्रयत्न करा.",
+    "marmotPushServerInboxFound": "इनबॉक्स रिले सापडले",
+    "marmotPushServerInboxUnknown": "इनबॉक्स रिले सापडले नाहीत — नंतर पुन्हा प्रयत्न करा"
   },
   "sendAmountSection": {
     "fixedAmount": "निश्चित रक्कम",
@@ -2306,7 +2312,10 @@
       "friendsOfFriends": "मित्रांचे मित्र",
       "friendsChip": "मित्र",
       "comingSoon": "लवकरच येत आहे",
-      "clearScope": "विक्रेते पुन्हा Lightning Piggy च्या पसंतीच्या विक्रेत्यांवर सेट करा"
+      "clearScope": "विक्रेते पुन्हा Lightning Piggy च्या पसंतीच्या विक्रेत्यांवर सेट करा",
+      "moreMerchants": "आणखी (%{count})",
+      "searchMerchants": "विक्रेते शोधा",
+      "noMerchants": "कोणतेही विक्रेते आढळले नाहीत"
     },
     "feedbackTabs": {
       "reviews": "रिव्ह्यू",
