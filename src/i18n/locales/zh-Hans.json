@@ -1815,7 +1815,7 @@
     "sats": "sats",
     "linkPreviews": "消息中的链接预览",
     "linkPreviewsHint": "开启后，你的手机会为消息中分享的任何网址获取预览卡片（标题、图片、摘要）——在消息显示时自动进行，即使你从未点开它。获取时，网址所在的服务器会知道有人在预览该页面。如果你想保护这部分流量的隐私，请关闭。默认：开启。",
-    "showLinkPreviews": "显示链接预览",
+    "showLinkPreviews": "链接预览",
     "showLinkPreviewsA11y": "在消息中显示链接预览",
     "notificationContent": "通知内容",
     "notificationContentHint": "关闭时，通知只会告诉你收到了消息或付款，不会包含详情——你会看到“新消息”而不是消息正文，看到“已收到付款”而不是金额，锁屏和通知栏都是如此。开启则显示完整内容。默认：关闭。",
@@ -2863,7 +2863,7 @@
     "notReachedBody": "我们暂时无法把邀请送达{{names}}。Lightning Piggy会自动继续尝试。"
   },
   "invitationKeys": {
-    "title": "可接收新聊天的设备",
+    "title": "用于新聊天的设备",
     "entrySubtitle": "查看别人可以向哪些设备发起新的私密聊天",
     "description": "要和你发起私密聊天，别人的应用会使用你每台设备在你的中继上共享的邀请密钥。请移除你不再使用的设备，以免新聊天发到你永远看不到的地方。你现有的聊天不受影响。",
     "thisPhone": "这部手机",
@@ -2957,9 +2957,9 @@
   },
   "messageSettingsScreen": {
     "title": "消息",
-    "trustTitle": "你能看到谁的帖子和消息",
+    "trustTitle": "你看到的人",
     "trustHint": "此信任网络过滤也决定了你在地图、活动和群组中看到的内容。",
-    "trustRowA11y": "你能看到谁的帖子和消息：{{tier}}"
+    "trustRowA11y": "你看到的人：{{tier}}"
   },
   "hermesProfiler": {
     "title": "性能分析器（开发）",
@@ -3256,5 +3256,25 @@
     "retry": "已接受邀请。应用重启后将重试加入。",
     "error": "无法更新邀请，请重试。",
     "unavailable": "此邀请已无法接受。"
+  },
+  "settingsScreens": {
+    "on": "开启",
+    "off": "关闭",
+    "thresholdValue": "{{amount}} sats",
+    "linkPrivacy": "预览链接会连接到该网站。",
+    "languages": {
+      "en": "English",
+      "de": "Deutsch",
+      "es": "Español",
+      "hu": "Magyar",
+      "pl": "Polski",
+      "uk": "Українська",
+      "hi": "हिन्दी",
+      "mr": "मराठी",
+      "zh-Hans": "中文（简体）"
+    },
+    "systemLanguage": "{{system}} · {{language}}",
+    "currencyValue": "{{code}} · {{name}}",
+    "pseudoLanguage": "伪语言（测试）"
   }
 }

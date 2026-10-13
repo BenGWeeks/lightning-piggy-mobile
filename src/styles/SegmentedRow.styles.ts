@@ -10,6 +10,7 @@ export const createSegmentedRowStyles = (colors: Palette) =>
     },
     grouped: { marginTop: 0, borderRadius: 0, backgroundColor: 'transparent' },
     heading: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 },
+    info: { minWidth: 48, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
     title: { flex: 1, color: colors.white, fontSize: 15, fontWeight: '600' },
     segments: { flexDirection: 'row', gap: 4 },
     segment: {

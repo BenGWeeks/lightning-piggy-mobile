@@ -1,82 +1,86 @@
-import React, { useDeferredValue, useMemo, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, FlatList } from 'react-native';
+import React, { useCallback, useDeferredValue, useMemo, useState } from 'react';
+import { View, Text, TextInput, FlatList } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { Check, Search } from 'lucide-react-native';
+import { Search } from 'lucide-react-native';
+import SettingsPickerOptionRow from '../../components/SettingsPickerOptionRow';
 import AccountScreenLayout from './AccountScreenLayout';
-import { createSharedAccountStyles } from './sharedStyles';
 import { useWallet } from '../../contexts/WalletContext';
 import { useThemeColors } from '../../contexts/ThemeContext';
 import { useTranslation } from '../../contexts/LocaleContext';
 import { createDisplayScreenStyles } from '../../styles/DisplayScreen.styles';
 import { CURRENCY_LIST, type CurrencyInfo } from '../../services/fiatService';
+import type { SettingsPickerOption } from '../../utils/settingsPicker';
 import type { AccountDrawerNavigation } from '../../navigation/types';
 
 // Substring match against code OR name (case-insensitive). Mirrors the
 // Wallet of Satoshi picker pattern — typing "kr" matches both "KRW" and
 // "Danish Krone".
-const filterCurrencies = (query: string): readonly CurrencyInfo[] => {
+type CurrencyOption = SettingsPickerOption & { name: string };
+
+const filterCurrencies = (
+  options: readonly CurrencyOption[],
+  query: string,
+): readonly CurrencyOption[] => {
   const q = query.trim().toLowerCase();
-  if (!q) return CURRENCY_LIST;
-  return CURRENCY_LIST.filter(
-    (c) => c.code.toLowerCase().includes(q) || c.name.toLowerCase().includes(q),
+  if (!q) return options;
+  return options.filter(
+    (c) => c.value.toLowerCase().includes(q) || c.name.toLowerCase().includes(q),
   );
 };
 
 const DisplayScreen: React.FC = () => {
   const colors = useThemeColors();
   const t = useTranslation();
-  const sharedAccountStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const styles = useMemo(() => createDisplayScreenStyles(colors), [colors]);
   const { currency, setCurrency } = useWallet();
   const navigation = useNavigation<AccountDrawerNavigation>();
   const [search, setSearch] = useState('');
   // Defer the filter pass off the keystroke so the input stays responsive
-  // even with 38 rows re-rendering. Same pattern as FriendPickerSheet.
+  // even with 38 currencies to search. Same pattern as FriendPickerSheet.
   const deferredSearch = useDeferredValue(search);
-  const filtered = useMemo(() => filterCurrencies(deferredSearch), [deferredSearch]);
+  const options = useMemo(
+    () =>
+      CURRENCY_LIST.map((item) => ({
+        value: item.code,
+        name: item.name,
+        label: t('settingsScreens.currencyValue', { code: item.code, name: item.name }),
+      })),
+    [t],
+  );
+  const filtered = useMemo(
+    () => filterCurrencies(options, deferredSearch),
+    [options, deferredSearch],
+  );
 
   // Picking a currency finishes the job: go straight back to Display &
   // language (where the row shows the new choice) rather than leaving the
   // user on a 38-row list with no "Done".
-  const handlePick = (code: CurrencyInfo['code']) => {
-    void setCurrency(code);
-    setSearch('');
-    navigation.navigate('AccountDisplayLanguage');
-  };
+  const handlePick = useCallback(
+    (value: string) => {
+      void setCurrency(value as CurrencyInfo['code']);
+      setSearch('');
+      navigation.navigate('AccountDisplayLanguage');
+    },
+    [setCurrency, navigation],
+  );
 
-  const renderItem = ({ item }: { item: CurrencyInfo }) => {
-    const active = item.code === currency;
-    return (
-      <TouchableOpacity
-        accessibilityRole="button"
-        style={[styles.row, active && styles.rowActive]}
-        onPress={() => handlePick(item.code)}
-        accessibilityLabel={t('displayScreen.currencyItem', { code: item.code, name: item.name })}
-        accessibilityState={{ selected: active }}
-        testID={`currency-${item.code}`}
-      >
-        <View style={styles.symbolBadge}>
-          <Text style={styles.symbolText} numberOfLines={1}>
-            {item.symbol}
-          </Text>
-        </View>
-        <View style={styles.rowText}>
-          <Text style={styles.rowCode}>{item.code}</Text>
-          <Text style={styles.rowName} numberOfLines={1}>
-            {item.name}
-          </Text>
-        </View>
-        {active ? <Check size={20} color={colors.accentSecondary} /> : null}
-      </TouchableOpacity>
-    );
-  };
+  const renderItem = useCallback(
+    ({ item }: { item: CurrencyOption }) => (
+      <SettingsPickerOptionRow
+        option={item}
+        selected={item.value === currency}
+        onSelect={handlePick}
+        testID={`currency-${item.value}`}
+      />
+    ),
+    [currency, handlePick],
+  );
 
   // Render the section label + search input inside the FlatList header
   // so the FlatList is the only scrollable surface on this screen and
   // RN doesn't warn about VirtualizedList nested inside a ScrollView.
   const listHeader = (
     <>
-      <Text style={sharedAccountStyles.sectionLabel}>{t('displayScreen.currency')}</Text>
       <View style={styles.searchRow}>
         <Search size={18} color={colors.textSupplementary} />
         <TextInput
@@ -103,7 +107,7 @@ const DisplayScreen: React.FC = () => {
       <View style={styles.listCard}>
         <FlatList
           data={filtered}
-          keyExtractor={(c) => c.code}
+          keyExtractor={(c) => c.value}
           renderItem={renderItem}
           ListHeaderComponent={listHeader}
           ItemSeparatorComponent={() => <View style={styles.separator} />}

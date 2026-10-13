@@ -1815,7 +1815,7 @@
     "sats": "sats",
     "linkPreviews": "Podglądy linków w wiadomościach",
     "linkPreviewsHint": "Gdy WŁĄCZONE, telefon pobiera kartę podglądu (tytuł, obraz, opis) dla każdego adresu URL udostępnionego w wiadomości — automatycznie, gdy wiadomość się wyświetla, nawet jeśli jej nie dotkniesz. Pobranie informuje hosta adresu URL, że ktoś ogląda podgląd strony. WYŁĄCZ, jeśli wolisz zachować ten ruch dla siebie. Domyślnie: WŁĄCZONE.",
-    "showLinkPreviews": "Pokazuj podglądy linków",
+    "showLinkPreviews": "Podglądy linków",
     "showLinkPreviewsA11y": "Pokazuj podglądy linków w wiadomościach",
     "notificationContent": "Treść powiadomień",
     "notificationContentHint": "Gdy WYŁĄCZONE, powiadomienia informują, że przyszła wiadomość lub płatność, ale bez szczegółów — zobaczysz „Nowa wiadomość” zamiast tekstu i „Płatność odebrana” zamiast kwoty, zarówno na ekranie blokady, jak i w panelu powiadomień. WŁĄCZ, aby pokazywać pełną treść. Domyślnie: WYŁĄCZONE.",
@@ -2877,7 +2877,7 @@
     "notReachedBody": "Nie udało się jeszcze dostarczyć zaproszenia. Odbiorcy: {{names}}. Lightning Piggy będzie próbować automatycznie."
   },
   "invitationKeys": {
-    "title": "Urządzenia, które mogą odbierać nowe czaty",
+    "title": "Urządzenia do nowych czatów",
     "entrySubtitle": "Zobacz, z którymi urządzeniami inni mogą zacząć nowe prywatne czaty",
     "description": "Aby rozpocząć z tobą prywatny czat, aplikacje innych osób używają klucza zaproszenia, który każde z twoich urządzeń udostępnia na twoich przekaźnikach. Usuń urządzenia, których już nie używasz, żeby nowe czaty nie trafiały tam, gdzie ich nigdy nie zobaczysz. Twoje istniejące czaty nie ulegną zmianie.",
     "thisPhone": "Ten telefon",
@@ -2985,9 +2985,9 @@
   },
   "messageSettingsScreen": {
     "title": "Wiadomości",
-    "trustTitle": "Czyje wpisy i wiadomości widzisz",
+    "trustTitle": "Kogo widzisz",
     "trustHint": "Ten filtr sieci zaufania decyduje też o tym, co widzisz na mapie, w wydarzeniach i w grupach.",
-    "trustRowA11y": "Czyje wpisy i wiadomości widzisz: {{tier}}"
+    "trustRowA11y": "Kogo widzisz: {{tier}}"
   },
   "hermesProfiler": {
     "title": "Profiler wydajności (dev)",
@@ -3296,5 +3296,25 @@
     "retry": "Zaproszenie zaakceptowane. Ponowimy próbę dołączenia po ponownym uruchomieniu aplikacji.",
     "error": "Nie udało się zaktualizować zaproszenia. Spróbuj ponownie.",
     "unavailable": "Tego zaproszenia nie można już zaakceptować."
+  },
+  "settingsScreens": {
+    "on": "Włączone",
+    "off": "Wyłączone",
+    "thresholdValue": "{{amount}} sats",
+    "linkPrivacy": "Podgląd linku łączy się z jego witryną.",
+    "languages": {
+      "en": "English",
+      "de": "Deutsch",
+      "es": "Español",
+      "hu": "Magyar",
+      "pl": "Polski",
+      "uk": "Українська",
+      "hi": "हिन्दी",
+      "mr": "मराठी",
+      "zh-Hans": "中文（简体）"
+    },
+    "systemLanguage": "{{system}} · {{language}}",
+    "currencyValue": "{{code}} · {{name}}",
+    "pseudoLanguage": "Pseudo (testowanie)"
   }
 }

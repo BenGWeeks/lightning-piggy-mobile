@@ -1,5 +1,14 @@
 import React, { useMemo } from 'react';
-import { Modal, Pressable, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { X } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -29,7 +38,12 @@ export default function SettingsInfoSheet({
   const styles = useMemo(() => createSettingsInfoSheetStyles(colors), [colors]);
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.overlay}>
+      {/* Modal content owns a separate native window, outside the screen's keyboard layout. */}
+      <KeyboardAvoidingView
+        style={styles.overlay}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        testID={`${testID}-keyboard-layout`}
+      >
         <Pressable
           style={styles.backdrop}
           onPress={onClose}
@@ -65,7 +79,7 @@ export default function SettingsInfoSheet({
             {typeof children === 'string' ? <Text style={styles.body}>{children}</Text> : children}
           </ScrollView>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

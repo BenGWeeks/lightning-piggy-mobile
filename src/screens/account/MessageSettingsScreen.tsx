@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { Link2, ShieldCheck, KeyRound } from 'lucide-react-native';
 import SettingsRow from '../../components/SettingsRow';
@@ -9,7 +9,11 @@ import { useTrustGraph } from '../../contexts/TrustGraphContext';
 import { useNostr } from '../../contexts/NostrContext';
 import { useAccountState } from '../../contexts/useAccountState';
 import { getLinkPreviewEnabled, setLinkPreviewEnabled } from '../../services/linkPreviewPreference';
-import WebOfTrustBottomSheet from '../../components/WebOfTrustBottomSheet';
+import { useSettingsPicker } from '../../hooks/useSettingsPicker';
+import { Text } from 'react-native';
+import { useThemeColors } from '../../contexts/ThemeContext';
+import { createSharedAccountStyles } from './sharedStyles';
+import type { WotTier } from '../../services/wotSettingsService';
 import AmberPermissionSection from '../../components/AmberPermissionSection';
 import SettingsSection from '../../components/SettingsSection';
 
@@ -29,13 +33,17 @@ const TIER_TITLE = {
  */
 const MessageSettingsScreen: React.FC = () => {
   const t = useTranslation();
+  const colors = useThemeColors();
+  const shared = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const navigation = useNavigation<AccountDrawerNavigation>();
-  const { wotTier } = useTrustGraph();
+  const { wotTier, setWotTier } = useTrustGraph();
   const { pubkey } = useNostr();
   // Per account (#1231): reload for the active account, ignore a late answer
   // for one we've switched away from.
   const [linkPreviewOn, setLinkPreviewOn] = useAccountState<boolean>(pubkey, true);
-  const [trustOpen, setTrustOpen] = useState(false);
+  const openPicker = useSettingsPicker(pubkey, (value) => {
+    if (value === 'friends' || value === 'all') setWotTier(value as WotTier);
+  });
   useFocusEffect(
     useCallback(() => {
       let alive = true;
@@ -53,41 +61,61 @@ const MessageSettingsScreen: React.FC = () => {
   };
   return (
     <AccountScreenLayout title={t('messageSettingsScreen.title')}>
-      <SettingsSection scope="account" testID="messages-account" />
-      <SettingsRow
-        icon={ShieldCheck}
-        title={t('messageSettingsScreen.trustTitle')}
-        subtitle={t(TIER_TITLE[wotTier])}
-        subtitleTestID="messages-trust-tier-value"
-        testID="messages-trust-tier"
-        accessibilityRole="button"
-        onPress={() => setTrustOpen(true)}
-        accessibilityLabel={t('messageSettingsScreen.trustRowA11y', {
-          tier: t(TIER_TITLE[wotTier]),
-        })}
-      />
-      <SettingsRow
-        icon={Link2}
-        title={t('securityScreen.showLinkPreviews')}
-        subtitle={t('settingsRows.linkPreviewsSubtitle')}
-        testID="messages-link-previews"
-        details={t('securityScreen.linkPreviewsHint')}
-        toggle={{
-          value: linkPreviewOn,
-          onValueChange: handleToggleLinkPreview,
-          accessibilityLabel: t('securityScreen.showLinkPreviewsA11y'),
-          testID: 'security-link-preview-toggle',
-        }}
-      />
       <AmberPermissionSection />
-      <SettingsRow
-        icon={KeyRound}
-        title={t('invitationKeys.title')}
-        subtitle={t('invitationKeys.entrySubtitle')}
-        testID="nostr-invitation-keys"
-        onPress={() => navigation.navigate('AccountInvitationKeys')}
-      />
-      <WebOfTrustBottomSheet visible={trustOpen} onClose={() => setTrustOpen(false)} />
+      <SettingsSection scope="account" testID="messages-account">
+        <SettingsRow
+          icon={ShieldCheck}
+          title={t('messageSettingsScreen.trustTitle')}
+          subtitle={t(TIER_TITLE[wotTier])}
+          subtitleTestID="messages-trust-tier-value"
+          testID="messages-trust-tier"
+          accessibilityRole="button"
+          details={[
+            t('messageSettingsScreen.trustHint'),
+            t('webOfTrustBottomSheet.explainer'),
+            t('webOfTrustBottomSheet.gateHint'),
+          ].join('\n\n')}
+          onPress={() =>
+            openPicker({
+              title: t('messageSettingsScreen.trustTitle'),
+              selectedValue: wotTier,
+              testID: 'messages-trust-picker',
+              options: (['friends', 'fof', 'all'] as const).map((value) => ({
+                value,
+                label: t(TIER_TITLE[value]),
+                subtitle: t(`webOfTrustBottomSheet.${value}Subtitle`),
+                disabled: value === 'fof',
+                testID: `wot-tier-${value}-chip`,
+              })),
+            })
+          }
+          accessibilityLabel={t('messageSettingsScreen.trustRowA11y', {
+            tier: t(TIER_TITLE[wotTier]),
+          })}
+        />
+        <SettingsRow
+          icon={Link2}
+          title={t('securityScreen.showLinkPreviews')}
+          value={t(linkPreviewOn ? 'settingsScreens.on' : 'settingsScreens.off')}
+          testID="messages-link-previews"
+          details={t('securityScreen.linkPreviewsHint')}
+          toggle={{
+            value: linkPreviewOn,
+            onValueChange: handleToggleLinkPreview,
+            accessibilityLabel: t('securityScreen.showLinkPreviewsA11y'),
+            testID: 'security-link-preview-toggle',
+          }}
+        />
+        <SettingsRow
+          icon={KeyRound}
+          title={t('invitationKeys.title')}
+          value={t('settingsKit.status.unknown')}
+          details={t('invitationKeys.description')}
+          testID="nostr-invitation-keys"
+          onPress={() => navigation.navigate('AccountInvitationKeys')}
+        />
+      </SettingsSection>
+      <Text style={shared.fieldHint}>{t('settingsScreens.linkPrivacy')}</Text>
     </AccountScreenLayout>
   );
 };

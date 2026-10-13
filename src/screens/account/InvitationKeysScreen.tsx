@@ -1,5 +1,7 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Text, TouchableOpacity, View } from 'react-native';
+import { Info } from 'lucide-react-native';
+import SettingsInfoSheet from '../../components/SettingsInfoSheet';
 import AccountScreenLayout from './AccountScreenLayout';
 import InvitationDeviceRow from '../../components/InvitationDeviceRow';
 import { useThemeColors } from '../../contexts/ThemeContext';
@@ -20,6 +22,7 @@ export default function InvitationKeysScreen() {
   const { t } = useLocale();
   const styles = useMemo(() => createInvitationKeysScreenStyles(colors), [colors]);
   const state = useInvitationKeys();
+  const [infoOpen, setInfoOpen] = useState(false);
   const disabled = state.busy || state.loading;
   const canRemoveOld = !disabled && state.oldCount > 0;
 
@@ -38,7 +41,15 @@ export default function InvitationKeysScreen() {
 
   const header = (
     <View style={styles.header}>
-      <Text style={styles.intro}>{t('invitationKeys.description')}</Text>
+      <TouchableOpacity
+        style={styles.info}
+        onPress={() => setInfoOpen(true)}
+        accessibilityRole="button"
+        accessibilityLabel={t('securityScreen.details')}
+        testID="invitation-keys-info"
+      >
+        <Info size={22} color={colors.white} />
+      </TouchableOpacity>
       <TouchableOpacity
         accessibilityRole="button"
         accessibilityLabel={t('invitationKeys.removeOldA11y', { count: state.oldCount })}
@@ -65,6 +76,7 @@ export default function InvitationKeysScreen() {
       <TouchableOpacity
         accessibilityRole="button"
         testID="invitation-keys-reload"
+        accessibilityLabel={t('invitationKeys.reload')}
         style={[styles.link, disabled && styles.disabled]}
         disabled={disabled}
         onPress={state.reload}
@@ -83,6 +95,13 @@ export default function InvitationKeysScreen() {
       scrollable={false}
       parent="AccountMessages"
     >
+      <SettingsInfoSheet
+        visible={infoOpen}
+        onClose={() => setInfoOpen(false)}
+        title={t('invitationKeys.title')}
+        testID="invitation-keys-info-sheet"
+        paragraphs={[t('invitationKeys.description')]}
+      />
       <FlatList
         testID="invitation-keys-list"
         style={styles.list}

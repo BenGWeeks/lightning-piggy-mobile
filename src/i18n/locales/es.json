@@ -1815,7 +1815,7 @@
     "sats": "sats",
     "linkPreviews": "Vistas previas de enlaces en los mensajes",
     "linkPreviewsHint": "Cuando está activado, tu teléfono obtiene una tarjeta de vista previa (título, imagen, resumen) de cualquier URL compartida en un mensaje, automáticamente al mostrarse el mensaje, aunque nunca la toques. Esa consulta informa al servidor de la URL de que alguien está previsualizando la página. Desactívalo si prefieres mantener ese tráfico privado. Predeterminado: activado.",
-    "showLinkPreviews": "Mostrar vistas previas de enlaces",
+    "showLinkPreviews": "Vistas previas de enlaces",
     "showLinkPreviewsA11y": "Mostrar vistas previas de enlaces en los mensajes",
     "notificationContent": "Contenido de las notificaciones",
     "notificationContentHint": "Cuando está desactivado, las notificaciones te avisan de que llegó un mensaje o un pago pero nunca incluyen los detalles: verás \"Nuevo mensaje\" en lugar del texto y \"Pago recibido\" en lugar del importe, tanto en la pantalla de bloqueo como en el panel de notificaciones. Actívalo para incluir el contenido completo. Predeterminado: desactivado.",
@@ -2863,7 +2863,7 @@
     "notReachedBody": "Todavía no pudimos entregar la invitación a {{names}}. Lightning Piggy lo seguirá intentando automáticamente."
   },
   "invitationKeys": {
-    "title": "Dispositivos que pueden recibir chats nuevos",
+    "title": "Dispositivos para nuevos chats",
     "entrySubtitle": "Mira con qué dispositivos pueden iniciar chats privados contigo",
     "description": "Para iniciar un chat privado contigo, las apps de otras personas usan una clave de invitación que cada uno de tus dispositivos comparte en tus relays. Quita los dispositivos que ya no usas para que los chats nuevos no vayan a un sitio donde nunca los verás. Tus chats actuales no se ven afectados.",
     "thisPhone": "Este teléfono",
@@ -2957,9 +2957,9 @@
   },
   "messageSettingsScreen": {
     "title": "Mensajes",
-    "trustTitle": "De quién ves publicaciones y mensajes",
+    "trustTitle": "A quién ves",
     "trustHint": "Este filtro de Red de Confianza también decide lo que ves en el Mapa, en Eventos y en Grupos.",
-    "trustRowA11y": "De quién ves publicaciones y mensajes: {{tier}}"
+    "trustRowA11y": "A quién ves: {{tier}}"
   },
   "hermesProfiler": {
     "title": "Perfilador de rendimiento (desarrollo)",
@@ -3256,5 +3256,25 @@
     "retry": "Invitación aceptada. Se volverá a intentar entrar al reiniciar la aplicación.",
     "error": "No se pudo actualizar la invitación. Inténtalo de nuevo.",
     "unavailable": "Esta invitación ya no se puede aceptar."
+  },
+  "settingsScreens": {
+    "on": "Activado",
+    "off": "Desactivado",
+    "thresholdValue": "{{amount}} sats",
+    "linkPrivacy": "La vista previa de un enlace contacta con su sitio web.",
+    "languages": {
+      "en": "English",
+      "de": "Deutsch",
+      "es": "Español",
+      "hu": "Magyar",
+      "pl": "Polski",
+      "uk": "Українська",
+      "hi": "हिन्दी",
+      "mr": "मराठी",
+      "zh-Hans": "中文（简体）"
+    },
+    "systemLanguage": "{{system}} · {{language}}",
+    "currencyValue": "{{code}} · {{name}}",
+    "pseudoLanguage": "Pseudo (pruebas)"
   }
 }

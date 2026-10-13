@@ -1,38 +1,54 @@
 appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
-name: Sending animation options — view only
+name: Sending animation segments
 ---
-# The shared device lane is view-only. Preserve the original mutation and
-# persistence checks for a dedicated test device with -e EXERCISE_SETTINGS=true.
+# The shared device lane is view-only. Run persistence checks on a dedicated
+# test device with -e EXERCISE_SETTINGS=true; VIEW_ONLY=true stays view-only.
 - runFlow:
     when:
-      true: ${typeof EXERCISE_SETTINGS === 'undefined' || EXERCISE_SETTINGS !== 'true'}
+      true: ${typeof EXERCISE_SETTINGS === 'undefined' || EXERCISE_SETTINGS !== 'true' || (typeof VIEW_ONLY !== 'undefined' && VIEW_ONLY === 'true')}
     commands:
-      # Presentation checks: never change the device preferences.
-      - tapOn: { id: tab-wallets }
-      - tapOn: { id: profile-icon }
+      # Inspect the current preferences without changing them.
+      - runFlow: ../common/open-drawer.yaml
       - scrollUntilVisible:
-          element: { id: drawer-row-display-language }
+          element:
+            id: drawer-row-display-language
           direction: DOWN
-      - tapOn: { id: drawer-row-display-language }
+          timeout: 15000
+      - tapOn:
+          id: drawer-row-display-language
       - extendedWaitUntil:
-          visible: { id: display-language-currency-row }
+          visible:
+            id: display-language-currency-row
           timeout: 30000
       - scrollUntilVisible:
-          element: { id: sending-animation-bubbles }
+          element:
+            id: sending-animation-lightning
           direction: DOWN
-      - assertVisible: { id: sending-animation-bubbles }
+          timeout: 15000
+      - assertVisible:
+          id: sending-animation-bubbles
+      - assertVisible:
+          id: sending-animation-lightning
+      - assertVisible:
+          id: 'sending-animation-(bubbles|lightning)-check'
+      - tapOn:
+          id: sending-animation-info
+      - extendedWaitUntil:
+          visible:
+            id: sending-animation-info-sheet
+          timeout: 15000
+      - tapOn:
+          id: sending-animation-info-sheet-close
       - scrollUntilVisible:
-          element: { id: sending-animation-lightning }
-          direction: DOWN
-      - assertVisible: { id: sending-animation-lightning }
-      - scrollUntilVisible:
-          element: { id: account-back-button }
+          element:
+            id: account-back-button
           direction: UP
-      - tapOn: { id: account-back-button }
-      - assertVisible: { id: tab-wallets }
+          timeout: 15000
+      - tapOn:
+          id: account-back-button
 - runFlow:
     when:
-      true: ${typeof EXERCISE_SETTINGS !== 'undefined' && EXERCISE_SETTINGS === 'true'}
+      true: ${typeof EXERCISE_SETTINGS !== 'undefined' && EXERCISE_SETTINGS === 'true' && (typeof VIEW_ONLY === 'undefined' || VIEW_ONLY !== 'true')}
     commands:
       # Exercises the Bubbles/Lightning sending-animation toggle on the Appearance
       # screen:

@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo } from 'react';
-import { View, Text, TextInput, TouchableOpacity } from 'react-native';
-import { Check, ShieldCheck } from 'lucide-react-native';
+import { View, Text, TextInput } from 'react-native';
+import { ShieldCheck } from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
-import { createSharedAccountStyles } from './sharedStyles';
 import { useThemeColors } from '../../contexts/ThemeContext';
 import { useTranslation } from '../../contexts/LocaleContext';
 import { useAccountState } from '../../contexts/useAccountState';
@@ -10,6 +9,9 @@ import { useNostr } from '../../contexts/NostrContext';
 import { createSecurityScreenStyles } from '../../styles/SecurityScreen.styles';
 import KeyBackupEntry from '../../components/KeyBackupEntry';
 import SettingsSection from '../../components/SettingsSection';
+import SettingsRow from '../../components/SettingsRow';
+import SettingsInfoSheet from '../../components/SettingsInfoSheet';
+import { useSettingsPicker } from '../../hooks/useSettingsPicker';
 import { Toast } from '../../components/BrandedToast';
 import {
   DEFAULT_HIGH_VALUE_SEND_THRESHOLD_SATS,
@@ -42,7 +44,6 @@ const SecurityScreen: React.FC = () => {
   const colors = useThemeColors();
   const t = useTranslation();
   const { pubkey } = useNostr();
-  const sharedAccountStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const styles = useMemo(() => createSecurityScreenStyles(colors), [colors]);
   const [threshold, setThresholdState] = useAccountState<number | null>(
     pubkey,
@@ -97,63 +98,77 @@ const SecurityScreen: React.FC = () => {
     await saveThreshold(parsed);
   };
 
+  const [customOpen, setCustomOpen] = useAccountState(pubkey, false);
+  const handleCustomClose = async () => {
+    await handleCustomSave();
+    setCustomOpen(false);
+  };
+  const openPicker = useSettingsPicker(pubkey, (value) => {
+    if (value === 'custom') setCustomOpen(true);
+    else void handlePickPreset(value === 'off' ? null : Number(value));
+  });
+
   const customActive = threshold !== null && !PRESETS.some((p) => p.value === threshold);
 
   return (
     <AccountScreenLayout title={t('securityScreen.title')}>
-      <SettingsSection scope="account" testID="security-account" />
-      <KeyBackupEntry />
-      <View style={[styles.headerRow, styles.sectionGap]}>
-        <ShieldCheck size={22} color={colors.white} />
-        <Text style={[sharedAccountStyles.sectionLabel, styles.headerLabel]}>
-          {t('securityScreen.confirmLargeSends')}
-        </Text>
-      </View>
-      <Text style={sharedAccountStyles.fieldHint}>{t('securityScreen.confirmLargeSendsHint')}</Text>
-
-      <View style={styles.optionList}>
-        {PRESETS.map((opt) => {
-          const selected = opt.value === threshold && !customActive;
-          return (
-            <TouchableOpacity
-              key={String(opt.value)}
-              style={[styles.optionRow, selected && styles.optionRowSelected]}
-              onPress={() => handlePickPreset(opt.value)}
-              accessibilityLabel={t(opt.labelKey)}
-              accessibilityRole="radio"
-              accessibilityState={{ selected }}
-              testID={`security-threshold-${opt.value === null ? 'off' : opt.value}`}
-            >
-              <View style={styles.optionTextBlock}>
-                <Text style={styles.optionLabel}>{t(opt.labelKey)}</Text>
-                <Text style={styles.optionSublabel}>{t(opt.sublabelKey)}</Text>
-              </View>
-              {selected && <Check size={18} color={colors.brandPink} />}
-            </TouchableOpacity>
-          );
-        })}
-
-        <View style={[styles.optionRow, customActive && styles.optionRowSelected]}>
-          <View style={styles.optionTextBlock}>
-            <Text style={styles.optionLabel}>{t('securityScreen.custom')}</Text>
-            <View style={styles.customInputRow}>
-              <TextInput
-                style={styles.customInput}
-                value={customDraft}
-                onChangeText={setCustomDraft}
-                onBlur={handleCustomSave}
-                placeholder={t('securityScreen.customPlaceholder')}
-                placeholderTextColor={colors.textSupplementary}
-                keyboardType="numeric"
-                testID="security-threshold-custom-input"
-                accessibilityLabel={t('securityScreen.customThresholdLabel')}
-              />
-              <Text style={styles.customSatsLabel}>{t('securityScreen.sats')}</Text>
-            </View>
-          </View>
-          {customActive && <Check size={18} color={colors.brandPink} />}
+      <SettingsSection scope="account" testID="security-account">
+        <KeyBackupEntry />
+        <SettingsRow
+          icon={ShieldCheck}
+          title={t('securityScreen.confirmLargeSends')}
+          value={
+            threshold === null
+              ? t('securityScreen.presetOff')
+              : t('settingsScreens.thresholdValue', { amount: threshold.toLocaleString() })
+          }
+          details={t('securityScreen.confirmLargeSendsHint')}
+          testID="security-confirm-large-payments"
+          onPress={() =>
+            openPicker({
+              title: t('securityScreen.confirmLargeSends'),
+              selectedValue: customActive
+                ? 'custom'
+                : threshold === null
+                  ? 'off'
+                  : String(threshold),
+              testID: 'security-threshold-picker',
+              options: PRESETS.map((opt) => ({
+                value: opt.value === null ? 'off' : String(opt.value),
+                label: t(opt.labelKey),
+                subtitle: t(opt.sublabelKey),
+                testID: `security-threshold-${opt.value === null ? 'off' : opt.value}`,
+              })),
+              customOption: {
+                value: 'custom',
+                label: t('securityScreen.custom'),
+                testID: 'security-threshold-custom',
+              },
+            })
+          }
+        />
+      </SettingsSection>
+      <SettingsInfoSheet
+        visible={customOpen}
+        onClose={handleCustomClose}
+        title={t('securityScreen.custom')}
+        testID="security-custom-sheet"
+      >
+        <View style={styles.customInputRow}>
+          <TextInput
+            style={styles.customInput}
+            value={customDraft}
+            onChangeText={setCustomDraft}
+            onBlur={handleCustomSave}
+            placeholder={t('securityScreen.customPlaceholder')}
+            placeholderTextColor={colors.textSupplementary}
+            keyboardType="numeric"
+            testID="security-threshold-custom-input"
+            accessibilityLabel={t('securityScreen.customThresholdLabel')}
+          />
+          <Text style={styles.customSatsLabel}>{t('securityScreen.sats')}</Text>
         </View>
-      </View>
+      </SettingsInfoSheet>
     </AccountScreenLayout>
   );
 };

@@ -1,0 +1,98 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Messages and Safety — inspect pickers and independent info controls
+---
+# View only: no setting changes, key exports or device retirement.
+- runFlow: ../common/open-drawer.yaml
+- tapOn:
+    id: drawer-row-messages
+- extendedWaitUntil:
+    visible:
+      id: messages-trust-tier
+    timeout: 30000
+- tapOn:
+    id: messages-trust-tier-info
+- extendedWaitUntil:
+    visible:
+      id: messages-trust-tier-info-sheet
+    timeout: 15000
+- tapOn:
+    id: messages-trust-tier-info-sheet-close
+- tapOn:
+    id: messages-trust-tier
+- extendedWaitUntil:
+    visible:
+      id: wot-tier-friends-chip
+    timeout: 15000
+- assertVisible:
+    id: wot-tier-fof-chip
+    enabled: false
+- assertVisible:
+    id: wot-tier-all-chip
+- tapOn:
+    id: account-back-button
+- tapOn:
+    id: messages-link-previews-info
+- extendedWaitUntil:
+    visible:
+      id: messages-link-previews-info-sheet
+    timeout: 15000
+- tapOn:
+    id: messages-link-previews-info-sheet-close
+- assertVisible:
+    id: security-link-preview-toggle
+- tapOn:
+    id: nostr-invitation-keys-info
+- extendedWaitUntil:
+    visible:
+      id: nostr-invitation-keys-info-sheet
+    timeout: 15000
+- tapOn:
+    id: nostr-invitation-keys-info-sheet-close
+- tapOn:
+    id: nostr-invitation-keys
+- extendedWaitUntil:
+    visible:
+      id: invitation-keys-info
+    timeout: 30000
+- tapOn:
+    id: invitation-keys-info
+- extendedWaitUntil:
+    visible:
+      id: invitation-keys-info-sheet
+    timeout: 15000
+- tapOn:
+    id: invitation-keys-info-sheet-close
+- tapOn:
+    id: account-back-button
+- tapOn:
+    id: account-back-button
+- runFlow: ../common/open-drawer.yaml
+- scrollUntilVisible:
+    element:
+      id: drawer-row-security
+    direction: DOWN
+    timeout: 15000
+- tapOn:
+    id: drawer-row-security
+- extendedWaitUntil:
+    visible:
+      id: security-key-backup
+    timeout: 15000
+- tapOn:
+    id: security-confirm-large-payments
+- extendedWaitUntil:
+    visible:
+      id: security-threshold-off
+    timeout: 15000
+- assertVisible:
+    id: security-threshold-1000
+- assertVisible:
+    id: security-threshold-10000
+- assertVisible:
+    id: security-threshold-100000
+- assertVisible:
+    id: security-threshold-custom
+- tapOn:
+    id: account-back-button
+- tapOn:
+    id: account-back-button
