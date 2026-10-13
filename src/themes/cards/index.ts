@@ -23,6 +23,7 @@ import { bgStyle as basketballStyle } from './basketball';
 import { bgStyle as f1Style } from './f1';
 import { bgStyle as spaceshipStyle } from './spaceship';
 import { bgStyle as aiRobotStyle } from './ai-robot';
+import { bgStyle as wiseOwlStyle } from '../../styles/WiseOwlCard.styles';
 
 // Typed as `Record<CardTheme | 'default', ...>` so adding a new theme
 // to the `CardTheme` union forces a corresponding entry here at
@@ -37,6 +38,7 @@ const cardBgStyles: Record<CardTheme | 'default', ImageStyle> = {
   'lightning-goat': lightningGoatStyle.full,
   nostrich: nostrichStyle.full,
   'lightning-piggy': lightningPiggyStyle.full,
+  'wise-owl': wiseOwlStyle.full,
   'lightning-whale': lightningWhaleStyle.full,
   sallie: knowAllCardStyles.background,
   poppie: knowAllCardStyles.background,

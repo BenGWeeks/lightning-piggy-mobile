@@ -2101,7 +2101,8 @@
     "cardDesign": "Kartendesign {{name}}",
     "walletAccessibility": "{{alias}} {{type}}-Wallet",
     "typeLightning": "Lightning",
-    "typeOnchain": "On-Chain"
+    "typeOnchain": "On-Chain",
+    "owl": "Eule"
   },
   "walletCardPicker": {
     "selectedTheme": "Gewähltes Kartendesign: {{name}}"

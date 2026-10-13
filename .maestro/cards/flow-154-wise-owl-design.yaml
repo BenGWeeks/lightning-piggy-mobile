@@ -1,0 +1,79 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Select Wise Owl wallet card design
+---
+# Requires an existing test wallet. Exercises the settings Design tab,
+# centres Owl in the shared full-card picker, then persists the selection.
+- extendedWaitUntil:
+    visible:
+      id: 'tab-wallets'
+    timeout: 60000
+- tapOn:
+    id: 'tab-wallets'
+- extendedWaitUntil:
+    visible:
+      id: 'wallet-settings'
+    timeout: 15000
+- tapOn:
+    id: 'wallet-settings'
+- extendedWaitUntil:
+    visible:
+      id: 'wallet-settings-tab-design'
+    timeout: 15000
+- tapOn:
+    id: 'wallet-settings-tab-design'
+- extendedWaitUntil:
+    visible:
+      id: 'wallet-card-picker-coverflow'
+    timeout: 15000
+- repeat:
+    while:
+      notVisible:
+        id: 'theme-wise-owl'
+    times: 24
+    commands:
+      - swipe:
+          from:
+            id: 'wallet-card-picker-coverflow'
+          direction: LEFT
+          duration: 600
+      - waitForAnimationToEnd:
+          timeout: 1500
+- tapOn:
+    id: 'theme-wise-owl'
+- extendedWaitUntil:
+    visible:
+      id: 'wallet-card-picker-name'
+      text: 'Selected card theme: Owl'
+    timeout: 15000
+- assertVisible:
+    id: 'wallet-card-design-wise-owl'
+- tapOn:
+    id: 'wallet-settings-save'
+- extendedWaitUntil:
+    notVisible:
+      id: 'wallet-settings-tab-design'
+    timeout: 15000
+- assertVisible:
+    id: 'wallet-card-design-wise-owl'
+# Reopening proves the persisted design centres Owl without another swipe.
+- tapOn:
+    id: 'wallet-settings'
+- extendedWaitUntil:
+    visible:
+      id: 'wallet-settings-tab-design'
+    timeout: 15000
+- tapOn:
+    id: 'wallet-settings-tab-design'
+- extendedWaitUntil:
+    visible:
+      id: 'wallet-card-picker-name'
+      text: 'Selected card theme: Owl'
+    timeout: 15000
+- tapOn:
+    id: 'wallet-settings-save'
+- extendedWaitUntil:
+    notVisible:
+      id: 'wallet-settings-tab-design'
+    timeout: 15000
+- assertVisible:
+    id: 'wallet-card-design-wise-owl'

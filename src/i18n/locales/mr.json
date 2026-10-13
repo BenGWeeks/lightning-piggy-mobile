@@ -2101,7 +2101,8 @@
     "cardDesign": "{{name}} कार्ड डिझाइन",
     "walletAccessibility": "{{alias}} {{type}} वॉलेट",
     "typeLightning": "Lightning",
-    "typeOnchain": "ऑन-चेन"
+    "typeOnchain": "ऑन-चेन",
+    "owl": "घुबड"
   },
   "walletCardPicker": {
     "selectedTheme": "निवडलेली कार्ड थीम: {{name}}"

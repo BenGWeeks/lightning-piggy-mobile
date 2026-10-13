@@ -29,6 +29,17 @@ export const cardThemes: Record<CardTheme, CardThemeConfig> = {
     backgroundImage: require('../../assets/images/lightning-piggy-intro.png'),
     backgroundImageStyle: 'lightning-piggy',
   },
+  'wise-owl': {
+    id: 'wise-owl',
+    name: 'Owl',
+    nameKey: 'walletCard.owl',
+    gradientColors: ['#2B1D5E', '#120C2E'],
+    textColor: '#FFFFFF',
+    accentColor: '#FFD700',
+    backgroundImage: require('../../assets/images/wise-owl.png'),
+    backgroundImageStyle: 'wise-owl',
+    backgroundImageResizeMode: 'contain',
+  },
   'lightning-bee': {
     id: 'lightning-bee',
     name: 'Bee',
@@ -259,11 +270,16 @@ export const cardThemes: Record<CardTheme, CardThemeConfig> = {
   },
 };
 
-// Pickers (Add-wallet wizard + Wallet settings) render this list in order,
-// so present the cards alphabetically by display name. Sorting here (rather
-// than hand-ordering the map) keeps the map grouped logically while the UI
-// stays A→Z as new cards are added.
-export const themeList = Object.values(cardThemes).sort((a, b) => a.name.localeCompare(b.name));
+// Keep the existing alphabetical picker order, with Owl immediately after Piggy.
+const orderedThemes = Object.values(cardThemes)
+  .filter((theme) => theme.id !== 'wise-owl')
+  .sort((a, b) => a.name.localeCompare(b.name));
+orderedThemes.splice(
+  orderedThemes.findIndex((theme) => theme.id === 'lightning-piggy') + 1,
+  0,
+  cardThemes['wise-owl'],
+);
+export const themeList = orderedThemes;
 
 /**
  * Card design a wallet falls back to when it carries no explicit (or a

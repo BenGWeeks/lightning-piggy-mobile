@@ -2101,7 +2101,8 @@
     "cardDesign": "Diseño de tarjeta {{name}}",
     "walletAccessibility": "Cartera {{type}} de {{alias}}",
     "typeLightning": "Lightning",
-    "typeOnchain": "On-chain"
+    "typeOnchain": "On-chain",
+    "owl": "Búho"
   },
   "walletCardPicker": {
     "selectedTheme": "Tema de tarjeta seleccionado: {{name}}"

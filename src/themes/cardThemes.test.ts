@@ -35,8 +35,10 @@ describe('cardThemes registry', () => {
     }
   });
 
-  it('exposes themeList alphabetically by display name (picker order)', () => {
-    const names = themeList.map((t) => t.name);
+  it('keeps alphabetical picker order with Owl immediately after Piggy', () => {
+    const ids = themeList.map((theme) => theme.id);
+    expect(ids[ids.indexOf('lightning-piggy') + 1]).toBe('wise-owl');
+    const names = themeList.filter((theme) => theme.id !== 'wise-owl').map((theme) => theme.name);
     const sorted = [...names].sort((a, b) => a.localeCompare(b));
     expect(names).toEqual(sorted);
   });
