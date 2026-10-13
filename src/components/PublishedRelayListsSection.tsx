@@ -1,6 +1,5 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { X as XIcon } from 'lucide-react-native';
 import { Alert } from './BrandedAlert';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -9,9 +8,18 @@ import {
   createPublishedRelayListsSectionStyles,
   type PublishedRelayListsSectionStyles,
 } from '../styles/PublishedRelayListsSection.styles';
-import { useRelayListEditor, type RelayListPublishOutcome } from '../hooks/useRelayListEditor';
-import { isPublishableRelayUrl } from '../utils/relayListEvents';
-import RelayStatusDot from './RelayStatusDot';
+import type { RelayListPublishOutcome } from '../hooks/useRelayListEditor';
+import { useRelayListDraft } from '../contexts/RelayListEditorContext';
+import { useRelayReachability } from '../hooks/useRelayReachability';
+import RelaySettingsRow from './RelaySettingsRow';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { RelaySettingsParamList } from '../navigation/types';
+
+import { useNostr } from '../contexts/NostrContext';
+import NetworkSectionHeading from './NetworkSectionHeading';
+import PublishResult from './PublishResult';
+import type { RelayPublishResult } from '../services/nostrRelayLists';
 
 type T = ReturnType<typeof useTranslation>;
 
@@ -126,17 +134,46 @@ function PublishButton({
 export default function PublishedRelayListsSection({
   connection,
 }: {
-  /** Live status by relay URL, for the per-row dots. */
+  /** Live pool membership by relay URL, for the In use chips. */
   connection?: Map<string, boolean>;
 }) {
   const colors = useThemeColors();
   const t = useTranslation();
-  const shared = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const styles = useMemo(() => createPublishedRelayListsSectionStyles(colors), [colors]);
-  const editor = useRelayListEditor();
+  const editor = useRelayListDraft();
+  const reachability = useRelayReachability([
+    ...editor.nip65Draft.map((r) => r.url),
+    ...editor.inboxDraft,
+  ]);
+  const { pubkey, nip65Relays, userRelays, dmInboxRelays } = useNostr();
+  const [reportState, setReportState] = useState<{
+    results: RelayPublishResult[];
+    ownRelays: string[];
+  } | null>(null);
+  const activePubkey = useRef(pubkey);
+  activePubkey.current = pubkey;
+  useEffect(() => setReportState(null), [pubkey]);
+  const ownRelays = useMemo(
+    () => [
+      ...nip65Relays.map((r) => r.url),
+      ...userRelays.map((r) => r.url),
+      ...dmInboxRelays,
+      ...editor.nip65Draft.map((r) => r.url),
+      ...editor.inboxDraft,
+    ],
+    [nip65Relays, userRelays, dmInboxRelays, editor.nip65Draft, editor.inboxDraft],
+  );
+  const navigation = useNavigation<NativeStackNavigationProp<RelaySettingsParamList>>();
+  const openRelay = useCallback(
+    (url: string, kind: 'nip65' | 'inbox') => {
+      navigation.navigate('RelayDetails', { url, kind });
+    },
+    [navigation],
+  );
 
   const report = useCallback(
-    (outcome: RelayListPublishOutcome) => {
+    (outcome: RelayListPublishOutcome, ownAtPublish: string[], publishingPubkey: string | null) => {
+      if (publishingPubkey !== activePubkey.current) return;
       if (!outcome.ok && (!outcome.results || outcome.error === 'superseded')) {
         Alert.alert(
           t('publishedRelays.notPublishedTitle'),
@@ -144,18 +181,7 @@ export default function PublishedRelayListsSection({
         );
         return;
       }
-      const results = outcome.results ?? [];
-      const accepted = results.filter((r) => r.ok).length;
-      const failures = results
-        .filter((r) => !r.ok)
-        .map((r) => `• ${r.url.replace('wss://', '')}: ${r.message ?? '—'}`)
-        .join('\n');
-      Alert.alert(
-        outcome.ok ? t('publishedRelays.publishedTitle') : t('publishedRelays.notPublishedTitle'),
-        [t('publishedRelays.acceptedCount', { accepted, total: results.length }), failures]
-          .filter(Boolean)
-          .join('\n\n'),
-      );
+      setReportState({ results: outcome.results ?? [], ownRelays: ownAtPublish });
     },
     [t],
   );
@@ -174,56 +200,27 @@ export default function PublishedRelayListsSection({
           {
             text: t('publishedRelays.publish'),
             onPress: async () =>
-              report(await (which === 'nip65' ? editor.publishNip65() : editor.publishInbox())),
+              report(
+                await (which === 'nip65' ? editor.publishNip65() : editor.publishInbox()),
+                ownRelays,
+                pubkey,
+              ),
           },
         ],
       );
     },
-    [editor, report, t],
+    [editor, report, t, ownRelays, pubkey],
   );
-
-  const pill = (on: boolean, label: string, onPress: () => void, testID: string) => (
-    <TouchableOpacity
-      style={[
-        styles.pill,
-        on && styles.pillOn,
-        !editor.nip65Editable && styles.publishButtonDisabled,
-      ]}
-      onPress={onPress}
-      disabled={!editor.nip65Editable}
-      testID={testID}
-      accessibilityRole="switch"
-      accessibilityState={{ checked: on, disabled: !editor.nip65Editable }}
-      accessibilityLabel={label}
-      hitSlop={6}
-    >
-      <Text style={[styles.pillText, on && styles.pillTextOn]}>{label}</Text>
-    </TouchableOpacity>
-  );
-
-  const removeButton = (url: string, testID: string) => {
-    const editable = testID.startsWith('nip65') ? editor.nip65Editable : editor.inboxEditable;
-    return (
-      <TouchableOpacity
-        style={[styles.removeButton, !editable && styles.publishButtonDisabled]}
-        disabled={!editable}
-        onPress={() =>
-          testID.startsWith('nip65') ? editor.removeNip65(url) : editor.removeInbox(url)
-        }
-        testID={testID}
-        accessibilityRole="button"
-        accessibilityLabel={t('publishedRelays.removeLabel', { url })}
-        hitSlop={8}
-      >
-        <XIcon size={16} color={colors.white} />
-      </TouchableOpacity>
-    );
-  };
 
   return (
     <View testID="published-relay-lists">
-      <Text style={shared.sectionLabel}>{t('publishedRelays.nip65Title')}</Text>
-      <Text style={shared.fieldHint}>{t('publishedRelays.intro')}</Text>
+      <NetworkSectionHeading
+        title={t('publishedRelays.nip65Title')}
+        explanation={`${t('networkInfo.nip65Hint')}\n\n${t('relayReachability.explanation')}`}
+        testID="nip65"
+        spec="https://github.com/nostr-protocol/nips/blob/master/65.md"
+      />
+      {reportState && <PublishResult {...reportState} />}
       <View style={styles.list} testID="nip65-relay-list">
         {editor.nip65Loading ? (
           <ActivityIndicator style={{ paddingVertical: 10 }} testID="nip65-loading" />
@@ -232,31 +229,17 @@ export default function PublishedRelayListsSection({
             <Text style={styles.empty}>{t('publishedRelays.nip65Empty')}</Text>
           )
         )}
-        {editor.nip65Draft.map((r) => (
-          <View key={r.url} style={styles.row}>
-            <RelayStatusDot status={connection?.get(r.url)} testID={`nip65-status-${r.url}`} />
-            <View style={styles.urlColumn}>
-              <Text style={styles.url} numberOfLines={1} ellipsizeMode="middle">
-                {r.url}
-              </Text>
-              {!isPublishableRelayUrl(r.url) && (
-                <Text style={styles.urlWarning}>{t('publishedRelays.notPublishable')}</Text>
-              )}
-            </View>
-            {pill(
-              r.read,
-              t('publishedRelays.read'),
-              () => editor.toggleNip65(r.url, 'read'),
-              `nip65-read-${r.url}`,
-            )}
-            {pill(
-              r.write,
-              t('publishedRelays.write'),
-              () => editor.toggleNip65(r.url, 'write'),
-              `nip65-write-${r.url}`,
-            )}
-            {removeButton(r.url, `nip65-remove-${r.url}`)}
-          </View>
+        {editor.nip65Draft.map((r, index) => (
+          <RelaySettingsRow
+            key={r.url}
+            url={r.url}
+            read={r.read}
+            write={r.write}
+            status={reachability.get(r.url)?.reachable}
+            inUse={connection?.get(r.url) === true}
+            probeIndex={index}
+            onOpen={openRelay}
+          />
         ))}
       </View>
       <AddRelayInput
@@ -266,7 +249,7 @@ export default function PublishedRelayListsSection({
         styles={styles}
         t={t}
       />
-      <Text style={shared.fieldHint}>{t('publishedRelays.nip65Hint')}</Text>
+
       <PublishButton
         onPress={() => confirmPublish('nip65')}
         disabled={!editor.nip65Dirty || editor.nip65Loading}
@@ -276,9 +259,12 @@ export default function PublishedRelayListsSection({
         t={t}
       />
 
-      <Text style={[shared.sectionLabel, { marginTop: 24 }]}>
-        {t('publishedRelays.inboxTitle')}
-      </Text>
+      <NetworkSectionHeading
+        title={t('publishedRelays.inboxTitle')}
+        explanation={`${t('networkInfo.inboxHint')}\n\n${t('relayReachability.explanation')}`}
+        testID="inbox"
+        spec="https://github.com/nostr-protocol/nips/blob/master/17.md"
+      />
       <View style={styles.list} testID="inbox-relay-list">
         {editor.inboxLoading ? (
           <ActivityIndicator style={{ paddingVertical: 10 }} />
@@ -287,16 +273,16 @@ export default function PublishedRelayListsSection({
             <Text style={styles.empty}>{t('publishedRelays.inboxEmpty')}</Text>
           )
         )}
-        {editor.inboxDraft.map((url) => (
-          <View key={url} style={styles.row}>
-            <RelayStatusDot status={connection?.get(url)} testID={`inbox-status-${url}`} />
-            <View style={styles.urlColumn}>
-              <Text style={styles.url} numberOfLines={1} ellipsizeMode="middle">
-                {url}
-              </Text>
-            </View>
-            {removeButton(url, `inbox-remove-${url}`)}
-          </View>
+        {editor.inboxDraft.map((url, index) => (
+          <RelaySettingsRow
+            key={url}
+            url={url}
+            inbox
+            status={reachability.get(url)?.reachable}
+            inUse={connection?.get(url) === true}
+            probeIndex={editor.nip65Draft.length + index}
+            onOpen={openRelay}
+          />
         ))}
       </View>
       <AddRelayInput
@@ -306,7 +292,7 @@ export default function PublishedRelayListsSection({
         styles={styles}
         t={t}
       />
-      <Text style={shared.fieldHint}>{t('publishedRelays.inboxHint')}</Text>
+
       <PublishButton
         onPress={() => confirmPublish('inbox')}
         disabled={!editor.inboxDirty || editor.inboxLoading}

@@ -1,11 +1,16 @@
 import { publishToRelays, fetchLatestReplaceable } from './nostrRelayLists';
 import { pool } from './nostrPool';
+import { relayAllowsKind } from './relayKindPolicy';
+import { RELAY_SKIPPED_REASON } from './relayHealth';
 import type { Event } from 'nostr-tools';
+
+jest.mock('./relayKindPolicy', () => ({ relayAllowsKind: jest.fn(async () => true) }));
 
 jest.mock('./nostrPool', () => ({
   pool: { publish: jest.fn(), querySync: jest.fn() },
   trackRelays: jest.fn(),
 }));
+const mockAllowsKind = relayAllowsKind as jest.Mock;
 const publish = pool.publish as jest.Mock;
 const query = pool.querySync as jest.Mock;
 const event = { id: 'e', kind: 10002 } as unknown as Event;
@@ -70,4 +75,53 @@ describe('fetchLatestReplaceable', () => {
     query.mockRejectedValue(new Error('offline'));
     expect(await fetchLatestReplaceable(PK, 10050, ['wss://a'])).toBeNull();
   });
+});
+
+it('filters kind-denied targets before handing events to the pool and preserves outcomes', async () => {
+  mockAllowsKind.mockImplementation(
+    async (url: string, kind: number) => url !== 'wss://user.kindpag.es' || kind === 10002,
+  );
+  publish.mockReturnValue([Promise.resolve('ok')]);
+  for (const kind of [10050, 10063]) {
+    const results = await publishToRelays({ ...event, kind }, [
+      'wss://user.kindpag.es',
+      'wss://purplepag.es',
+    ]);
+    expect(publish).toHaveBeenLastCalledWith(
+      ['wss://purplepag.es'],
+      expect.objectContaining({ kind }),
+    );
+    expect(results).toEqual([
+      {
+        url: 'wss://user.kindpag.es',
+        ok: false,
+        skipped: 'kind',
+        message: `kind ${kind} not accepted`,
+      },
+      { url: 'wss://purplepag.es', ok: true },
+    ]);
+  }
+  publish.mockReturnValue([Promise.resolve('ok'), Promise.resolve('ok')]);
+  await publishToRelays(event, ['wss://user.kindpag.es', 'wss://purplepag.es']);
+  expect(publish).toHaveBeenLastCalledWith(['wss://user.kindpag.es', 'wss://purplepag.es'], event);
+});
+it('marks intentionally parked relays as skipped, never as genuine errors', async () => {
+  mockAllowsKind.mockResolvedValue(true);
+  publish.mockReturnValue([Promise.reject(new Error(RELAY_SKIPPED_REASON))]);
+  expect(await publishToRelays(event, ['wss://nos.lol'])).toEqual([
+    { url: 'wss://nos.lol', ok: false, skipped: 'unhealthy', message: RELAY_SKIPPED_REASON },
+  ]);
+});
+it('never opens publish connections when every target is kind-filtered', async () => {
+  mockAllowsKind.mockResolvedValue(false);
+  publish.mockClear();
+  expect(await publishToRelays({ ...event, kind: 10063 }, ['wss://user.kindpag.es'])).toEqual([
+    {
+      url: 'wss://user.kindpag.es',
+      ok: false,
+      skipped: 'kind',
+      message: 'kind 10063 not accepted',
+    },
+  ]);
+  expect(publish).not.toHaveBeenCalled();
 });

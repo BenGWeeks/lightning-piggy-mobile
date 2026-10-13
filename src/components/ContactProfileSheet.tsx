@@ -20,6 +20,9 @@ interface Props {
   contact: ContactProfileBodyData | null;
   onZap?: () => void;
   onMessage?: () => void;
+  onFollow?: () => void;
+  following?: boolean;
+  followingBusy?: boolean;
   /** Whether the user can actually send a zap (wallet attached + contact
    * has a Lightning address). When false, the zap button still renders
    * but in a disabled state with `zapDisabledReason` surfaced in the
@@ -38,6 +41,9 @@ const ContactProfileSheet: React.FC<Props> = ({
   contact,
   onZap,
   onMessage,
+  onFollow,
+  following = false,
+  followingBusy = false,
   canZap = false,
   zapDisabledReason,
   onViewFullProfile,
@@ -88,6 +94,9 @@ const ContactProfileSheet: React.FC<Props> = ({
           contact={contact}
           onZap={onZap}
           onMessage={onMessage}
+          onFollow={onFollow}
+          following={following}
+          followingBusy={followingBusy}
           canZap={canZap}
           zapDisabledReason={zapDisabledReason}
           onViewFullProfile={onViewFullProfile}

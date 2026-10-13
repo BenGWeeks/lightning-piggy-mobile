@@ -145,3 +145,32 @@ describe('fetchProfilesBatch early-resolve (#852)', () => {
     expect(m.spy).not.toHaveBeenCalled();
   });
 });
+
+describe('fetchProfilesBatch cancellation', () => {
+  afterEach(() => jest.restoreAllMocks());
+  it('closes on abort and ignores events after cancellation', async () => {
+    const m = mockSubscribeMany();
+    const controller = new AbortController();
+    const onEvent = jest.fn();
+    const promise = fetchProfilesBatch(
+      [PK_A],
+      RELAYS,
+      SOFT_TIMEOUT,
+      onEvent,
+      false,
+      controller.signal,
+    );
+    controller.abort();
+    await expect(promise).resolves.toBeUndefined();
+    m.emit(PK_A);
+    expect(m.close).toHaveBeenCalledTimes(1);
+    expect(onEvent).not.toHaveBeenCalled();
+  });
+  it('does not open a subscription with an already aborted signal', async () => {
+    const m = mockSubscribeMany();
+    const controller = new AbortController();
+    controller.abort();
+    await fetchProfilesBatch([PK_A], RELAYS, SOFT_TIMEOUT, jest.fn(), false, controller.signal);
+    expect(m.spy).not.toHaveBeenCalled();
+  });
+});

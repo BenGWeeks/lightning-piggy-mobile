@@ -27,6 +27,9 @@ interface Props {
   contact: ContactProfileBodyData;
   onZap?: () => void;
   onMessage?: () => void;
+  onFollow?: () => void;
+  following?: boolean;
+  followingBusy?: boolean;
   /** Truthy when we can actually send a zap. Requires the user to have
    * a wallet AND the contact to have a Lightning address. Caller passes
    * the boolean and the human-readable reason for the disabled-state
@@ -49,6 +52,9 @@ const ContactProfileBody: React.FC<Props> = ({
   contact,
   onZap,
   onMessage,
+  onFollow,
+  following = false,
+  followingBusy = false,
   canZap = false,
   zapDisabledReason,
   onViewFullProfile,
@@ -173,6 +179,23 @@ const ContactProfileBody: React.FC<Props> = ({
           full context instead of a silently inert circle. */}
       {contact.pubkey && (
         <MuteNotificationsButton pubkey={contact.pubkey} testID="profile-mute-notifications" />
+      )}
+      {onFollow && (
+        <TouchableOpacity
+          onPress={onFollow}
+          disabled={followingBusy}
+          style={[styles.viewProfileButton, followingBusy && styles.iconCircleButtonDisabled]}
+          testID="profile-follow"
+          accessibilityRole="button"
+          accessibilityState={{ disabled: followingBusy, busy: followingBusy }}
+          accessibilityLabel={t(
+            following ? 'contactProfileScreen.unfollow' : 'contactProfileScreen.follow',
+          )}
+        >
+          <Text style={styles.viewProfileButtonText}>
+            {t(following ? 'contactProfileScreen.unfollow' : 'contactProfileScreen.follow')}
+          </Text>
+        </TouchableOpacity>
       )}
       <View style={styles.actionRowSheet}>
         {/* Compose the same boolean for `disabled` and `accessibilityState`

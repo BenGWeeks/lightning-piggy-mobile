@@ -576,3 +576,18 @@ it('signs a retry after the newer list that superseded the previous publish', as
   });
   expect(mockSign.mock.calls[1][0].created_at).toBeGreaterThan(newer);
 });
+
+it('marks the shared draft dirty when details toggles a permission without publishing', async () => {
+  const { result, rerender } = await setup();
+  expect(result.current.nip65Dirty).toBe(false);
+  act(() => result.current.toggleNip65('wss://relay.primal.net', 'read'));
+  rerender({});
+  expect(result.current.nip65Dirty).toBe(true);
+  expect(result.current.nip65Draft[0]).toEqual({
+    url: 'wss://relay.primal.net',
+    read: false,
+    write: true,
+  });
+  expect(mockSign).not.toHaveBeenCalled();
+  expect(publish).not.toHaveBeenCalled();
+});

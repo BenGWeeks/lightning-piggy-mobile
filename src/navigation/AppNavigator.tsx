@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { DEFAULT_DM_PROTOCOL, dmThreadId, type DmProtocol } from '../utils/dmProtocol';
-import { Linking, StyleSheet, ActivityIndicator, View, useWindowDimensions } from 'react-native';
+import { Linking, ActivityIndicator, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   NavigationContainer,
@@ -32,10 +32,13 @@ import {
   ExploreStackParamList,
   MainTabParamList,
   AccountDrawerParamList,
+  RelaySettingsParamList,
 } from './types';
 import type { ContactProfileBodyData } from '../components/ContactProfileBody';
 
 import { lazyScreen } from './lazyScreen';
+import { RelayListEditorProvider } from '../contexts/RelayListEditorContext';
+import { appNavigatorStyles as styles } from '../styles/AppNavigator.styles';
 
 // Tab-root + drawer-chrome screens stay EAGER — they must render instantly on
 // tab switch / drawer open, so paying their Hermes parse cost up-front is the
@@ -101,6 +104,7 @@ const BubbleStyleScreen = lazyScreen(() => import('../screens/account/BubbleStyl
 const ProfilerScreen = lazyScreen(() => import('../screens/account/ProfilerScreen'));
 const MessageSettingsScreen = lazyScreen(() => import('../screens/account/MessageSettingsScreen'));
 const NostrScreen = lazyScreen(() => import('../screens/account/NostrScreen'));
+const RelayDetailsScreen = lazyScreen(() => import('../screens/account/RelayDetailsScreen'));
 const OnChainScreen = lazyScreen(() => import('../screens/account/OnChainScreen'));
 const DisplayLanguageScreen = lazyScreen(() => import('../screens/account/DisplayLanguageScreen'));
 const DisplayScreen = lazyScreen(() => import('../screens/account/DisplayScreen'));
@@ -383,6 +387,18 @@ export function dismissNotificationsForFocusedRoute(): void {
   }
 }
 
+const RelaySettingsStack = createNativeStackNavigator<RelaySettingsParamList>();
+function RelaySettingsNavigator() {
+  return (
+    <RelayListEditorProvider>
+      <RelaySettingsStack.Navigator screenOptions={{ headerShown: false }}>
+        <RelaySettingsStack.Screen name="RelaySettingsList" component={NostrScreen} />
+        <RelaySettingsStack.Screen name="RelayDetails" component={RelayDetailsScreen} />
+      </RelaySettingsStack.Navigator>
+    </RelayListEditorProvider>
+  );
+}
+
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
 const ExploreStack = createNativeStackNavigator<ExploreStackParamList>();
@@ -593,7 +609,7 @@ function MainDrawer() {
       <AccountDrawer.Screen name="AccountBubbleStyle" component={BubbleStyleScreen} />
       <AccountDrawer.Screen name="AccountProfiler" component={ProfilerScreen} />
       <AccountDrawer.Screen name="AccountMessages" component={MessageSettingsScreen} />
-      <AccountDrawer.Screen name="AccountNostr" component={NostrScreen} />
+      <AccountDrawer.Screen name="AccountNostr" component={RelaySettingsNavigator} />
       <AccountDrawer.Screen name="AccountInvitationKeys" component={InvitationKeysScreen} />
       <AccountDrawer.Screen name="AccountOnChain" component={OnChainScreen} />
       <AccountDrawer.Screen name="AccountDisplayLanguage" component={DisplayLanguageScreen} />
@@ -718,11 +734,3 @@ export default function AppNavigator() {
     </NavigationContainer>
   );
 }
-
-const styles = StyleSheet.create({
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-});

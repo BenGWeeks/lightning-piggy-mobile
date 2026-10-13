@@ -1,0 +1,95 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Draft relay reachability and pool membership
+---
+# Signed-in test Piggy. Adds/removes only a draft invalid relay; never publishes.
+- launchApp:
+    stopApp: false
+- repeat:
+    times: 6
+    while:
+      notVisible:
+        id: 'profile-icon'
+    commands:
+      - back
+- tapOn:
+    id: 'tab-wallets'
+- tapOn:
+    id: 'profile-icon'
+- extendedWaitUntil:
+    visible:
+      id: 'drawer-row-advanced'
+    timeout: 60000
+- tapOn:
+    id: 'drawer-row-advanced'
+- extendedWaitUntil:
+    visible:
+      id: 'advanced-nostr-network'
+    timeout: 30000
+- tapOn:
+    id: 'advanced-nostr-network'
+- extendedWaitUntil:
+    visible:
+      id: 'nip65-add-input'
+    timeout: 30000
+- tapOn:
+    id: 'nip65-add-input'
+- inputText: 'wss:'
+- inputText: '//re'
+- inputText: 'lay.'
+- inputText: 'exam'
+- inputText: 'ple.'
+- inputText: 'inva'
+- inputText: 'lid'
+- hideKeyboard
+- tapOn:
+    id: 'nip65-add-button'
+- scrollUntilVisible:
+    element:
+      id: 'relay-row-relay.example.invalid'
+    direction: DOWN
+- extendedWaitUntil:
+    visible:
+      text: 'Unreachable'
+    timeout: 30000
+- scrollUntilVisible:
+    element:
+      id: 'relay-row-relay.example.invalid'
+    direction: DOWN
+- tapOn:
+    id: 'relay-row-relay.example.invalid'
+- scrollUntilVisible:
+    element:
+      text: 'Pool checked at'
+    direction: DOWN
+- assertVisible: 'Unreachable'
+- assertVisible: 'In use'
+- assertVisible: 'Probe checked at'
+- assertVisible: 'Pool checked at'
+- scrollUntilVisible:
+    element:
+      id: 'relay-details-remove'
+    direction: DOWN
+- tapOn:
+    id: 'relay-details-remove'
+- extendedWaitUntil:
+    visible:
+      id: 'nip65-info'
+    timeout: 30000
+- tapOn:
+    id: 'nip65-info'
+- extendedWaitUntil:
+    visible:
+      id: 'nip65-info-sheet'
+    timeout: 10000
+- assertVisible:
+    text: '.*Green means the relay answered just now.*'
+- back
+- repeat:
+    times: 6
+    while:
+      notVisible:
+        id: 'tab-wallets'
+    commands:
+      - back
+- tapOn:
+    id: 'tab-wallets'

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { X as XIcon } from 'lucide-react-native';
 import { Alert } from './BrandedAlert';
@@ -7,6 +7,12 @@ import { useTranslation } from '../contexts/LocaleContext';
 import { createSharedAccountStyles } from '../screens/account/sharedStyles';
 import { createPublishedRelayListsSectionStyles } from '../styles/PublishedRelayListsSection.styles';
 import { createBlossomServersSectionStyles } from '../styles/BlossomServersSection.styles';
+import NetworkSectionHeading from './NetworkSectionHeading';
+import PublishResult from './PublishResult';
+import { useNostr } from '../contexts/NostrContext';
+import type { RelayPublishResult } from '../services/nostrRelayLists';
+import RelayStatusDot from './RelayStatusDot';
+import { useRelayReachability } from '../hooks/useRelayReachability';
 import { useBlossomServerList } from '../hooks/useBlossomServerList';
 
 /**
@@ -21,6 +27,15 @@ export default function BlossomServersSection() {
   const styles = useMemo(() => createBlossomServersSectionStyles(colors), [colors]);
   const { servers, dirty, publishing, editable, addServer, removeServer, makePrimary, publish } =
     useBlossomServerList();
+  const reachability = useRelayReachability(servers);
+  const { pubkey, nip65Relays, userRelays } = useNostr();
+  const [reportState, setReportState] = useState<{
+    results: RelayPublishResult[];
+    ownRelays: string[];
+  } | null>(null);
+  const activePubkey = useRef(pubkey);
+  activePubkey.current = pubkey;
+  useEffect(() => setReportState(null), [pubkey]);
   const [input, setInput] = useState('');
   const [error, setError] = useState(false);
 
@@ -33,28 +48,42 @@ export default function BlossomServersSection() {
   };
 
   const onPublish = async () => {
+    const ownAtPublish = [...nip65Relays, ...userRelays].map((r) => r.url);
+    const publishingPubkey = pubkey;
     const outcome = await publish();
-    if (outcome.ok)
-      Alert.alert(
-        t('blossomServers.publishedTitle'),
-        t('blossomServers.acceptedCount', { accepted: outcome.accepted, total: outcome.total }),
-      );
-    else
-      Alert.alert(
-        t('blossomServers.notPublishedTitle'),
-        t(`blossomServers.error.${outcome.error}`),
-      );
+    if (publishingPubkey !== activePubkey.current) return;
+    if (outcome.results) {
+      setReportState({ results: outcome.results, ownRelays: ownAtPublish });
+      return;
+    }
+    if (outcome.ok) return;
+    Alert.alert(t('blossomServers.notPublishedTitle'), t(`blossomServers.error.${outcome.error}`));
   };
 
   return (
     <View testID="blossom-servers">
-      <Text style={[shared.sectionLabel, { marginTop: 24 }]}>{t('blossomServers.title')}</Text>
-      <Text style={shared.fieldHint}>{t('blossomServers.intro')}</Text>
+      <NetworkSectionHeading
+        title={t('blossomServers.title')}
+        explanation={t('networkInfo.blossomHint')}
+        testID="blossom"
+        spec="https://github.com/hzrd149/blossom/blob/master/buds/03.md"
+      />
+      {reportState && <PublishResult {...reportState} />}
       <View style={list.list} testID="blossom-server-list">
         {servers.map((url, i) => (
           <View key={url} style={list.row}>
+            <RelayStatusDot
+              probe
+              status={reachability.get(url)?.reachable}
+              testID={`blossom-dot-${i}`}
+            />
             <View style={list.urlColumn}>
-              <Text style={list.url} numberOfLines={1} ellipsizeMode="middle">
+              <Text
+                style={list.url}
+                numberOfLines={2}
+                ellipsizeMode="tail"
+                accessibilityLabel={url}
+              >
                 {url}
               </Text>
             </View>
@@ -124,7 +153,7 @@ export default function BlossomServersSection() {
           {t('blossomServers.invalid')}
         </Text>
       )}
-      <Text style={shared.fieldHint}>{t('blossomServers.hint')}</Text>
+
       <TouchableOpacity
         style={[list.publishButton, (!dirty || !editable) && list.publishButtonDisabled]}
         onPress={() => void onPublish()}

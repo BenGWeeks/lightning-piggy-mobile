@@ -224,3 +224,9 @@ export type MarketListingEditorRoute = RouteProp<ExploreStackParamList, 'MarketL
 export type MissionDetailRoute = RouteProp<ExploreStackParamList, 'MissionDetail'>;
 export type GroupConversationRoute = RouteProp<RootStackParamList, 'GroupConversation'>;
 export type HuntLeaderboardRoute = RouteProp<ExploreStackParamList, 'HuntLeaderboard'>;
+
+/** One draft session shared by the Nostr settings list and relay details. */
+export type RelaySettingsParamList = {
+  RelaySettingsList: undefined;
+  RelayDetails: { url: string; kind: 'nip65' | 'inbox' | 'readonly' };
+};

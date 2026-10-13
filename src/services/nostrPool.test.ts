@@ -7,6 +7,7 @@ jest.mock('./relayHealth', () => ({
   hydrateRelayHealth: jest.fn(),
   selectHealthyRelays: (urls: string[]) => urls,
   noteNetworkActivity: jest.fn(),
+  recordRelayPublish: jest.fn(),
 }));
 
 const relays = (pool as unknown as { relays: Map<string, AbstractRelay> }).relays;

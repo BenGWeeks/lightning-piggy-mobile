@@ -6,6 +6,7 @@ jest.mock('./relayHealth', () => ({
   selectHealthyRelays: (urls: string[]) => urls,
   RELAY_CONNECT_TIMEOUT_MS: 5000,
   recordRelaySuccess: jest.fn(),
+  recordRelayConnectionObservation: jest.fn(),
   noteNetworkActivity: jest.fn(),
 }));
 jest.mock('./nostrVerifyCache', () => ({

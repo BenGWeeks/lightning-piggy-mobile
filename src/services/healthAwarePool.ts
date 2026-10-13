@@ -7,6 +7,8 @@ import {
   noteNetworkActivity,
   recordRelayFailure,
   recordRelaySuccess,
+  recordRelayConnectionObservation,
+  recordRelayPublish,
   selectHealthyRelays,
 } from './relayHealth';
 
@@ -53,6 +55,7 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
         params?.connectionTimeout ?? RELAY_CONNECT_TIMEOUT_MS,
         RELAY_CONNECT_TIMEOUT_MS,
       );
+      const startedAt = Date.now();
       const relay = super.ensureRelay(url, { ...params, connectionTimeout });
       // A reused open socket proves nothing either way. Concurrent callers
       // share nostr-tools' single connection promise, so only the caller that
@@ -60,9 +63,15 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
       // (which rejects every waiter) records nothing.
       if (wasConnected || this.connectAttempts.has(key)) return relay;
       const outcome = relay.then(
-        () => recordRelaySuccess(url),
         () => {
-          if (!params?.abort?.aborted) recordRelayFailure(url);
+          recordRelaySuccess(url);
+          recordRelayConnectionObservation(url, Date.now() - startedAt);
+        },
+        (error: unknown) => {
+          if (!params?.abort?.aborted) {
+            recordRelayFailure(url);
+            recordRelayConnectionObservation(url, Date.now() - startedAt, error);
+          }
         },
       );
       this.connectAttempts.set(key, outcome);
@@ -94,17 +103,23 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
     ): Promise<string>[] {
       const keep = new Set(selectHealthyRelays(relays));
       const kept = relays.filter((r) => keep.has(r));
-      const results = super.publish(kept, event, params).map((p) =>
+      const results = super.publish(kept, event, params).map((p, i) =>
         // nostr-tools RESOLVES a failed connect with "connection failure: …".
         // Turn that into a rejection here, once, so no caller can mistake an
         // unreachable relay for an accepted publish (Promise.any /
         // allSettled callers would otherwise report success). An OK from a
         // relay proves the network works (corroborates failures).
-        p.then((reason) => {
-          if (String(reason).startsWith('connection failure')) throw new Error(String(reason));
-          noteNetworkActivity();
-          return reason;
-        }),
+        p
+          .then((reason) => {
+            if (String(reason).startsWith('connection failure')) throw new Error(String(reason));
+            noteNetworkActivity();
+            recordRelayPublish(kept[i], event.pubkey, true);
+            return reason;
+          })
+          .catch((error: unknown) => {
+            recordRelayPublish(kept[i], event.pubkey, false, error);
+            throw error;
+          }),
       );
       if (kept.length === relays.length) return results;
       let next = 0;

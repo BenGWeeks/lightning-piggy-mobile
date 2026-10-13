@@ -1,5 +1,7 @@
 import type { Event, Filter } from 'nostr-tools';
 import { pool, trackRelays } from './nostrPool';
+import { relayAllowsKind } from './relayKindPolicy';
+import { RELAY_SKIPPED_REASON } from './relayHealth';
 import { isConnectionFailure } from './nostrDmPublish';
 
 export interface RelayPublishResult {
@@ -7,6 +9,7 @@ export interface RelayPublishResult {
   ok: boolean;
   /** Relay's reason on rejection (e.g. "rate-limited: …"), or "timed out". */
   message?: string;
+  skipped?: 'kind' | 'unhealthy';
 }
 
 /**
@@ -53,15 +56,21 @@ export async function publishToRelays(
   relays: string[],
   timeoutMs = 8_000,
 ): Promise<RelayPublishResult[]> {
-  trackRelays(relays);
-  const attempts = pool.publish(relays, event);
+  const allowed = await Promise.all(relays.map((url) => relayAllowsKind(url, event.kind)));
+  const targets = relays.filter((_, i) => allowed[i]);
+  trackRelays(targets);
+  const attempts = targets.length ? pool.publish(targets, event) : [];
+  let attemptIndex = 0;
   return Promise.all(
     relays.map(async (url, i): Promise<RelayPublishResult> => {
+      if (!allowed[i])
+        return { url, ok: false, skipped: 'kind', message: `kind ${event.kind} not accepted` };
+      const index = attemptIndex++;
       let timer: ReturnType<typeof setTimeout> | undefined;
       const timeout = new Promise<RelayPublishResult>((resolve) => {
         timer = setTimeout(() => resolve({ url, ok: false, message: 'timed out' }), timeoutMs);
       });
-      const attempt = Promise.resolve(attempts[i]).then(
+      const attempt = Promise.resolve(attempts[index]).then(
         // nostr-tools RESOLVES (not rejects) with "connection failure: …" when
         // it can't reach the relay — that's a failure, never an accept.
         (value: unknown): RelayPublishResult =>
@@ -70,6 +79,9 @@ export async function publishToRelays(
           url,
           ok: false,
           message: e instanceof Error ? e.message : String(e),
+          ...((e instanceof Error ? e.message : String(e)) === RELAY_SKIPPED_REASON
+            ? { skipped: 'unhealthy' as const }
+            : {}),
         }),
       );
       try {

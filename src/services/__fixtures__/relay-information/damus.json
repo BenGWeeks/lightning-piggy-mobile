@@ -1,0 +1,12 @@
+{
+  "contact": "jb55@jb55.com",
+  "description": "Damus strfry relay",
+  "icon": "https://damus.io/img/logo.png",
+  "limitation": { "max_limit": 500, "max_message_length": 1000000, "max_subscriptions": 200 },
+  "name": "damus.io",
+  "negentropy": 1,
+  "pubkey": "32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245",
+  "software": "git+https://github.com/hoytech/strfry.git",
+  "supported_nips": [1, 2, 4, 9, 11, 28, 40, 45, 59, 70],
+  "version": "1.1.0-158-gb705403ddf49"
+}

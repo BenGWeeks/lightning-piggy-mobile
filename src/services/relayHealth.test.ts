@@ -1,3 +1,9 @@
+import {
+  recordRelayPublish,
+  recordRelayError,
+  getRelayHealthObservation,
+  recordRelayConnectionObservation,
+} from './relayHealth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
@@ -193,5 +199,25 @@ describe('persistence', () => {
     await AsyncStorage.setItem('nostr_relay_health_v1', JSON.stringify([{ u: 1 }, null]));
     await hydrateRelayHealth(T0);
     expect(parkedRelays(T0)).toEqual([]);
+  });
+});
+
+it('keeps publish evidence separate for each key and bounds recent errors', () => {
+  recordRelayPublish('wss://example.com', 'alice', true);
+  recordRelayPublish('wss://example.com/', 'bob', false, 'restricted');
+  expect(getRelayHealthObservation('wss://example.com', 'alice').lastPublish?.ok).toBe(true);
+  expect(getRelayHealthObservation('wss://example.com', 'bob').lastPublish?.ok).toBe(false);
+  expect(getRelayHealthObservation('wss://example.com', 'charlie').lastPublish).toBeUndefined();
+  for (let i = 0; i < 10; i++) recordRelayError('wss://example.com', `error ${i}`);
+  expect(getRelayHealthObservation('wss://example.com', null).errors).toHaveLength(5);
+});
+
+it('records connection latency and clears the failure observation on recovery', () => {
+  recordRelayConnectionObservation('wss://example.com', 100, 'timeout');
+  expect(getRelayHealthObservation('wss://example.com', null).lastConnectFailed).toBe(true);
+  recordRelayConnectionObservation('wss://example.com', 42);
+  expect(getRelayHealthObservation('wss://example.com', null)).toMatchObject({
+    latencyMs: 42,
+    lastConnectFailed: false,
   });
 });

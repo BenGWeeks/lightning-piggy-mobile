@@ -31,8 +31,9 @@ export async function fetchProfilesBatch(
   softTimeoutMs: number,
   onEvent: (event: { pubkey: string; content: string; created_at: number }) => void,
   requireVerified = false,
+  signal?: AbortSignal,
 ): Promise<void> {
-  if (pubkeys.length === 0) return;
+  if (pubkeys.length === 0 || signal?.aborted) return;
   trackRelays(relays);
   // Deduped set of the pubkeys we're waiting on — see condition (1) above.
   // Also used for the subscription `authors` filter so we don't ask relays
@@ -47,6 +48,7 @@ export async function fetchProfilesBatch(
     const finish = (): void => {
       if (closed) return;
       closed = true;
+      signal?.removeEventListener('abort', finish);
       if (timer !== null) clearTimeout(timer);
       try {
         sub?.close();
@@ -55,6 +57,7 @@ export async function fetchProfilesBatch(
       }
       resolve();
     };
+    signal?.addEventListener('abort', finish, { once: true });
     sub = pool.subscribeMany(relays, { kinds: [0], authors, limit: authors.length } as Filter, {
       onevent: (ev: { pubkey: string; content: string; created_at: number }) => {
         // Ignore unsolicited pubkeys. A misbehaving relay could send a kind-0
@@ -77,6 +80,7 @@ export async function fetchProfilesBatch(
         if (best.size >= wanted.size) finish();
       },
     });
-    timer = setTimeout(finish, softTimeoutMs);
+    if (closed) sub.close();
+    else timer = setTimeout(finish, softTimeoutMs);
   });
 }
