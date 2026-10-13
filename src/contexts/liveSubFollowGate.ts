@@ -1,4 +1,5 @@
 import type { DmInboxEntry } from '../utils/conversationSummaries';
+import type { DecodedRumor } from '../utils/nip17Unwrap';
 
 // Follow-gate deferral buffer for the live NIP-17 / NIP-04 sub (#851 F2).
 //
@@ -22,6 +23,9 @@ import type { DmInboxEntry } from '../utils/conversationSummaries';
 export interface DeferredFollowGateEntry {
   partnerPubkey: string;
   entry: DmInboxEntry;
+  // A group-shaped chat must be re-routed after trust hydrates; its subject
+  // and participants cannot be reconstructed from the DM preview alone.
+  groupRumor?: DecodedRumor;
   // Notification payload to (re)fire if the partner becomes followed.
   // Undefined for own echoes / non-fresh arrivals that should stay silent.
   notify?: { title: string; body: string };

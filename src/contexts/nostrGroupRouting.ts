@@ -15,14 +15,16 @@ import type { Group } from '../types/groups';
  * multi-recipient rumor would arbitrarily pick the FIRST p tag and
  * mis-catalogue the rumor as a 1:1 DM with that pubkey. Callers must
  * therefore distinguish "not a group" (safe to fall through to DM)
- * from "group-shaped, no local match" (must NOT fall through).
+ * from "group-shaped, no local match" (must NOT fall through). An unknown
+ * two-party chat awaiting trust uses DM follow-gate deferral but carries
+ * its original rumor so hydration replay can retry group routing.
  */
 export type GroupRouteResult =
   // appended; carries the group + message so the LIVE caller can fire an
   // OS notification (#279). Only live deliveries notify — see nostrLiveDmSub.
   | { kind: 'routed'; group: Group; message: GroupMessage }
   | { kind: 'group-no-match' } // group-shaped but no matching local group
-  | { kind: 'not-group' }; // 1:1 DM (or malformed) — safe to use the DM path
+  | { kind: 'not-group'; deferredGroupRumor?: DecodedRumor }; // DM fallthrough, or pending trust
 
 /**
  * Try to route a decoded kind-14 rumor as a group message.
@@ -55,8 +57,13 @@ export async function tryRouteGroupRumor(
   // Before promoting a two-party DM, preserve the receive caller's follow
   // policy. Known rooms retain membership as their trust signal. Returning
   // not-group lets the caller apply its usual drop/defer/skip-set behavior.
+  // Preserve group-shaped chat rumors so live follow hydration can retry
+  // routing with their subject and participant tags instead of a DM preview.
   if (!group && isTwoParty && !passesFollowGate(Array.from(otherParticipants)[0])) {
-    return { kind: 'not-group' };
+    return {
+      kind: 'not-group',
+      ...(cls.type === 'group' ? { deferredGroupRumor: rumor } : {}),
+    };
   }
   if (cls.type === 'dm' && !group) return { kind: 'not-group' };
   if (shouldAbort()) return { kind: 'group-no-match' };

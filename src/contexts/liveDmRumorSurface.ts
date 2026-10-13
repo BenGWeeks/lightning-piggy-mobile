@@ -159,6 +159,7 @@ export function createLiveRumorSurfacer(
         const deferredText = dmRowPreview(textForRumor(rumor), rumor.kind, getAppFormatLocale());
         followGateBuffer.defer({
           partnerPubkey: partnership.partnerPubkey,
+          ...(routeResult.deferredGroupRumor ? { groupRumor: routeResult.deferredGroupRumor } : {}),
           entry: {
             id: wrapId,
             partnerPubkey: partnership.partnerPubkey,
