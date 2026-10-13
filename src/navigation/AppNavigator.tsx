@@ -1,5 +1,5 @@
 import { resolveStoredNotificationTarget } from '../services/notificationStoredTarget';
-import { messageNotificationRoute } from '../utils/notificationRouting';
+import { routeNotificationMessage } from '../services/notificationGroupNavigation';
 import { getMarmotSession } from '../services/marmotSession';
 import { appNavigatorStyles as styles } from '../styles/AppNavigator.styles';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -258,24 +258,27 @@ export const navigateFromNotification = (
     return true;
   }
   if (data.conversationPubkey || data.groupId || data.marmotGroupId) {
-    const groupId = data.groupId ?? data.marmotGroupId;
-    const candidate = getMarmotSession();
-    const session =
-      candidate?.pubkey.toLowerCase() === getActivePubkey()?.toLowerCase() ? candidate : null;
-    // Legacy classification and real groups need the hydrated Messages summary.
-    const needsGroup = !data.conversationPubkey || data.threadKind === 'group';
-    if (groupId?.startsWith('marmot:') && needsGroup && !session?.getGroup(groupId)) return false;
-    const target = messageNotificationRoute(
-      data,
-      getActivePubkey(),
-      groupId ? session?.getGroup(groupId) : undefined,
-    );
-    if (target.screen === 'Conversation') navigationRef.navigate(target.screen, target.params);
-    else if (target.screen === 'GroupConversation')
-      navigationRef.navigate(target.screen, target.params);
-    else navigationRef.navigate('Main', { screen: 'MainTabs', params: { screen: 'Messages' } });
-    return true;
+    return routeNotificationMessage(data, {
+      getActivePubkey,
+      getGroup: (groupId) => {
+        const session = getMarmotSession();
+        return session?.pubkey.toLowerCase() === getActivePubkey()?.toLowerCase()
+          ? session?.getGroup(groupId)
+          : undefined;
+      },
+      navigate: (target) => {
+        if (target.screen === 'Messages')
+          navigationRef.navigate('Main', { screen: 'MainTabs', params: { screen: 'Messages' } });
+        else if (target.screen === 'Conversation')
+          navigationRef.navigate(target.screen, target.params);
+        else navigationRef.navigate(target.screen, target.params);
+      },
+      currentRoute: () => navigationRef.getCurrentRoute()?.name,
+      subscribeState: (report) => navigationRef.addListener('state', report),
+      shouldStop: () => generation !== notificationNavGeneration,
+    });
   }
+
   // Find-log on one of my caches (#740) → open that cache detail. The
   // background detect-and-ping path passes the sentinel `__background__`
   // coord (it didn't resolve to a specific cache) — fall through to the

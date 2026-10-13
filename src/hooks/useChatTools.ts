@@ -48,19 +48,21 @@ export function useChatTools(
       if (jumpToHistory(pending)) navigation.setParams({ jumpToMessage: undefined });
     }
   }, [pending, renderedMessages, jumpToHistory, navigation]);
+  const fallbackState = useRef({ renderedMessages, leaveEdge, jump, navigation });
+  fallbackState.current = { renderedMessages, leaveEdge, jump, navigation };
   useEffect(() => {
-    if (!pending || !renderedMessages.length) return;
+    if (!pending) return;
     const timer = setTimeout(() => {
+      // Keep one deadline per target, but use the rows and callbacks at expiry.
+      const { renderedMessages: current, leaveEdge, jump, navigation } = fallbackState.current;
+      if (!current.length || current.some((m) => m.id === pending)) return;
       // The target may be deleted, hidden by local history, or unavailable.
-      // Give the local history window / live loader time, then land quietly at newest.
-      const newest = renderedMessages.reduce((a, b) => (a.createdAt > b.createdAt ? a : b));
-      if (!renderedMessages.some((m) => m.id === pending)) {
-        leaveEdge(1500);
-        if (jump(newest.id)) navigation.setParams({ jumpToMessage: undefined });
-      }
+      const newest = current.reduce((a, b) => (a.createdAt > b.createdAt ? a : b));
+      leaveEdge(1500);
+      if (jump(newest.id)) navigation.setParams({ jumpToMessage: undefined });
     }, 5000);
     return () => clearTimeout(timer);
-  }, [pending, renderedMessages, leaveEdge, jump, navigation]);
+  }, [pending]);
   const onInfo = useCallback(() => navigation.navigate('ChatInfo', info), [navigation, info]);
   const onAttachments = useCallback(
     () => navigation.navigate('ChatMedia', { messages: renderedMessages, target }),

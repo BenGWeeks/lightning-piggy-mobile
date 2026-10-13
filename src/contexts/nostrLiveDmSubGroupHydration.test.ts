@@ -207,7 +207,7 @@ it.each([false, true])(
           threadId: groupId,
           title: 'Family',
           body: message.text,
-          data: { groupId, senderPubkey: ALICE },
+          data: { groupId, messageId: message.id, senderPubkey: ALICE },
         }),
       );
       params.followGateBuffer.reevaluate(params.followPubkeysRef.current, registeredReplay);
