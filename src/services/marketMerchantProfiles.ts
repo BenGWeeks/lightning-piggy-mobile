@@ -47,12 +47,14 @@ export async function fetchMarketMerchantProfiles(pubkeys: string[], signal: Abo
       if (result.status !== 'fulfilled') continue;
       for (const [pubkey, event] of result.value) {
         const p = parseProfileContent(event.content);
+        // Relay JSON can violate the parser's declared string types. Validate
+        // display fields before sharing them with avatar/name consumers.
         // Display-only metadata: never cache unverified payment fields.
         fetched.set(pubkey, {
           npub: nip19.npubEncode(pubkey),
-          name: p.name,
-          displayName: p.displayName,
-          nip05: p.nip05,
+          name: typeof p.name === 'string' ? p.name : null,
+          displayName: typeof p.displayName === 'string' ? p.displayName : null,
+          nip05: typeof p.nip05 === 'string' ? p.nip05 : null,
           picture: p.picture,
         });
       }

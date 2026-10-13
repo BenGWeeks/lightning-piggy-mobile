@@ -64,3 +64,51 @@ it('cancels without persisting partial results', async () => {
   expect(query).not.toHaveBeenCalled();
   expect(save).not.toHaveBeenCalled();
 });
+
+it.each([{}, 42, true, ['Seller'], null])(
+  'discards malformed display metadata (%j) before returning or caching it',
+  async (value) => {
+    query.mockResolvedValue([
+      {
+        ...event(key(1), 20, 'Seller'),
+        content: JSON.stringify({ name: value, display_name: value, nip05: value }),
+      },
+    ]);
+    const profiles = await fetchMarketMerchantProfiles([key(1)], new AbortController().signal);
+    const expected = { name: null, displayName: null, nip05: null };
+    expect(profiles.get(key(1))).toMatchObject(expected);
+    expect(save.mock.calls[0][0].get(key(1))).toMatchObject(expected);
+    // The shared-cache consumer uses this name for the avatar's initial tile.
+    const profile = profiles.get(key(1));
+    const name = profile?.displayName ?? profile?.name ?? 'Seller';
+    expect(name.charAt(0).toUpperCase()).toBe('S');
+  },
+);
+
+it('preserves valid display metadata alongside malformed fields', async () => {
+  query.mockResolvedValue([
+    {
+      ...event(key(1), 20, 'Seller'),
+      content: JSON.stringify({ name: {}, display_name: 'Shop', nip05: 'shop@example.com' }),
+    },
+    {
+      ...event(key(2), 20, 'Seller'),
+      content: JSON.stringify({ name: 'Seller', display_name: 42, nip05: false }),
+    },
+  ]);
+  const profiles = await fetchMarketMerchantProfiles(
+    [key(1), key(2)],
+    new AbortController().signal,
+  );
+  expect(profiles.get(key(1))).toMatchObject({
+    name: null,
+    displayName: 'Shop',
+    nip05: 'shop@example.com',
+  });
+  expect(profiles.get(key(2))).toMatchObject({
+    name: 'Seller',
+    displayName: null,
+    nip05: null,
+  });
+  expect(save.mock.calls[0][0]).toEqual(profiles);
+});
