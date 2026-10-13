@@ -71,26 +71,10 @@ export function boundGroupQueries(
 
   /** Page a bounded group filter backwards until a short page. */
   const backfill = async (relays: string[], f: Filter): Promise<NostrEvent[]> => {
-    const limit = f.limit ?? GROUP_BACKFILL_LIMIT;
-    const byId = new Map<string, NostrEvent>();
-    let until: number | undefined;
-    for (let page = 0; page < GROUP_BACKFILL_MAX_PAGES; page++) {
-      const events = (await network.request(relays, {
-        ...f,
-        ...(until !== undefined ? { until } : {}),
-      })) as NostrEvent[];
-      const before = byId.size;
-      for (const e of events) byId.set(e.id, e);
-      if (events.length < limit || byId.size === before) break;
-      until = Math.min(...events.map((e) => e.created_at));
-    }
-    // Collect EVERY page before ingestion: processing the newest page first
-    // discards older sender ratchet keys (ts-mls retains only 10 generations).
-    // MLS epochs are encrypted, so the adapter cannot sort on them. Marmot's
-    // engine peels the current epoch, processes its applications before commits,
-    // then retries later epochs. Preserve timestamp/id order within each epoch.
-    return [...byId.values()].sort(
-      (a, b) => a.created_at - b.created_at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+    return pageGroupHistory(
+      (urls, filter) => network.request(urls, filter) as Promise<NostrEvent[]>,
+      relays,
+      f,
     );
   };
 
@@ -98,13 +82,19 @@ export function boundGroupQueries(
     ...network,
     request: async (relays, filters) => {
       const list = (Array.isArray(filters) ? filters : [filters]) as Filter[];
-      const batches = await Promise.all(
-        list.map((f) =>
-          groupH(f)
-            ? backfill(relays, bound(f))
-            : (network.request(relays, f) as Promise<NostrEvent[]>),
-        ),
-      );
+      // Keep non-group filters together: Welcome ownership verification uses
+      // an exact-id lookup plus a corroborating author filter in ONE REQ.
+      const ordinary = list.filter((f) => !groupH(f));
+      const batches = await Promise.all([
+        ...list.filter((f) => groupH(f)).map((f) => backfill(relays, bound(f))),
+        ...(ordinary.length
+          ? [
+              network.request(relays, ordinary.length === 1 ? ordinary[0] : ordinary) as Promise<
+                NostrEvent[]
+              >,
+            ]
+          : []),
+      ]);
       const byId = new Map<string, NostrEvent>();
       for (const e of batches.flat()) byId.set(e.id, e);
       for (const e of byId.values()) {
@@ -143,4 +133,37 @@ export function boundGroupQueries(
       };
     },
   };
+}
+
+/** Shared bounded paging; short pages may be relay-clamped rather than exhausted. */
+export async function pageGroupHistory(
+  request: (relays: string[], filter: Filter) => Promise<NostrEvent[]>,
+  relays: string[],
+  f: Filter,
+  continueShortPages = false,
+  signal?: AbortSignal,
+  yieldPage?: () => Promise<void>,
+): Promise<NostrEvent[]> {
+  const limit = f.limit ?? GROUP_BACKFILL_LIMIT;
+  const byId = new Map<string, NostrEvent>();
+  let until: number | undefined;
+  for (let page = 0; page < GROUP_BACKFILL_MAX_PAGES && !signal?.aborted; page++) {
+    const events = (await request(relays, {
+      ...f,
+      ...(until !== undefined ? { until } : {}),
+    })) as NostrEvent[];
+    const before = byId.size;
+    for (const e of events) byId.set(e.id, e);
+    if ((!continueShortPages && events.length < limit) || byId.size === before) break;
+    await yieldPage?.();
+    until = Math.min(...events.map((e) => e.created_at));
+  }
+  // Collect EVERY page before ingestion: processing the newest page first
+  // discards older sender ratchet keys (ts-mls retains only 10 generations).
+  // MLS epochs are encrypted, so the adapter cannot sort on them. Marmot's
+  // engine peels the current epoch, processes its applications before commits,
+  // then retries later epochs. Preserve timestamp/id order within each epoch.
+  return [...byId.values()].sort(
+    (a, b) => a.created_at - b.created_at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+  );
 }

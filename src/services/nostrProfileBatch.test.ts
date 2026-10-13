@@ -27,17 +27,20 @@ const SOFT_TIMEOUT = 10000;
 function mockSubscribeMany() {
   const close = jest.fn();
   let captured: OnEvent | null = null;
-  const spy = jest.spyOn(pool, 'subscribeMany').mockImplementation(((
+  let eose: (() => void) | undefined;
+  const spy = jest.spyOn(pool, 'subscribeManyEose').mockImplementation(((
     _relays: string[],
     _filter: unknown,
-    handlers: { onevent?: OnEvent },
+    handlers: { onevent?: OnEvent; onclose?: () => void },
   ) => {
     captured = handlers.onevent ?? null;
+    eose = handlers.onclose;
     return { close };
-  }) as unknown as typeof pool.subscribeMany);
+  }) as unknown as typeof pool.subscribeManyEose);
   return {
     close,
     spy,
+    eose: () => eose?.(),
     emit: (pubkey: string, created_at = 1700000000) =>
       captured?.({ pubkey, content: '{}', created_at }),
   };
@@ -137,6 +140,17 @@ describe('fetchProfilesBatch early-resolve (#852)', () => {
     m.emit(PK_B);
     await expect(promise).resolves.toBeUndefined();
     expect(m.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses one bounded authors filter and closes at EOSE even when an author has no profile', async () => {
+    const m = mockSubscribeMany();
+    const promise = fetchProfilesBatch([PK_A, PK_B, PK_A], RELAYS, SOFT_TIMEOUT, jest.fn());
+    expect(m.spy.mock.calls[0][1]).toEqual({ kinds: [0], authors: [PK_A, PK_B], limit: 2 });
+    m.emit(PK_A);
+    m.eose();
+    await expect(promise).resolves.toBeUndefined();
+    expect(m.close).toHaveBeenCalledTimes(1);
+    expect(jest.getTimerCount()).toBe(0);
   });
 
   it('resolves immediately for an empty pubkey list (no sub opened)', async () => {

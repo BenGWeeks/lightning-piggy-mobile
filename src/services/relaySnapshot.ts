@@ -1,5 +1,6 @@
 import type { Event, Filter } from 'nostr-tools';
 import type { AbstractSimplePool } from 'nostr-tools/abstract-pool';
+import { subscribeRelayWithBudget } from './relayReqSubscription';
 import { pool as sharedPool } from './nostrPool';
 
 /**
@@ -137,7 +138,7 @@ export function collectRelaySnapshot(opts: RelaySnapshotOptions): Promise<RelayS
                   else pump();
                 });
               };
-              const sub = relay.subscribe([filter], {
+              const sub = subscribeRelayWithBudget(relayPool, relay, [filter], {
                 // Keep the relay's own EOSE timeout past our deadline so a
                 // timeout can never masquerade as a real EOSE.
                 eoseTimeout: remaining * 2,

@@ -579,3 +579,85 @@ options → Performance profiler. Start recording, reproduce the slow action,
 then return and choose Stop & share. The profiler is no longer on Help & about.
 Secret Mode is a separate visible switch ("Show experimental features", under
 Advanced → Experimental features); turning it on requires confirmation. About's version label no longer toggles it (#1222).
+
+== Relay subscription capacity (#1399)
+
+`healthAwarePool` budgets REQs independently for each relay/socket on both
+shared and Market pools, including raw relay reads for snapshots, contact-list
+reconciliation and reactions. The default is 10; NIP-11 discovery may lower it to
+`limitation.max_subscriptions`. Discovery is asynchronous, limited to two
+HTTP requests, with a 3-second timeout. A configured limit can be supplied
+with `pool.setRelaySubscriptionLimit(url, max)`.
+
+Kind-1059 / kind-4 inbox work has first priority, Welcome key-package and
+initial kind-445 group-state reads second, and profile / reaction / market /
+backfill continuation work third. Only live owners may be preempted.
+At the default limit of 10, live owners use at most 7 slots, reserving 3
+for one-shots. For smaller limits, live/one-shot reservations are 2/2 at
+4, 2/1 at 3, and 2/0 at 2. At limits 1–2 a one-shot temporarily pauses a
+live owner, which resumes afterward. Limit CLOSED messages retry with bounded
+exponential backoff. Since a NOTICE carries no subscription id, a limit
+NOTICE closes and retries all possibly refused REQs, with the inbox first
+and a reduced budget. Live owners remain subscribed after EOSE; one-shot
+queries release each answered relay immediately and have an overall deadline
+that includes connection time and queueing. Abort, account switch and pool
+shutdown cancel queued work too. Every one-shot has a budget-owned deadline
+of at most 20 seconds, even if its caller abandons the promise. Physical CLOSE
+is sent before reusing the slot; a canceled connection or AUTH completion
+cannot open a late REQ. Socket close disposes both active and queued owners.
+After 15 seconds at capacity, the watchdog logs one `budget stall` warning
+with the oldest queued label and holder counts; `budget timeout` names each
+one-shot force-released at its deadline. These warnings are always enabled.
+
+Marmot live subscriptions merge compatible group filters into one filter with
+all group ids in its `#h` array. This REQ is live-only: `since` is refreshed
+at every physical arm to now minus 60 seconds, with a modest limit of 100.
+Split a filter only above 256 group ids or the 64 KiB serialized UTF-8 bound
+(with 256 bytes reserved for REQ framing and the subscription id); split
+filters share one physical REQ when they fit. If the routing set exceeds one
+message, rotate REQs every ten seconds on one group slot. Old REQs close
+before rebuilding. This keeps 41 groups at limit 4 and 201 groups at limit 10
+on one group slot alongside the inbox.
+
+History is separate: subscribe, budget resume and socket reconnect trigger
+independent per-group catch-up from each group's cursor with the existing
+10-minute slack. Bounded one-shot pages share the relay budget and yield
+between pages and delivery batches. Short pages are not assumed exhausted:
+relays can clamp the requested limit. All pages are collected and sorted
+before delivery, and live events wait behind recovery so they cannot advance
+a group's cursor past a missed commit. Event dispatch checks each owner's
+original filter and rejects ambiguous `h`
+tags before the Marmot engine's signature and group checks. Profile rounds
+combine the former three 50-author REQs into one 150-author filter and close
+at EOSE. The provider arms its sole inbox at login, before first Messages
+focus. Gift wraps retain `limit` without `since`. Welcome joins reuse the
+already decrypted rumor and local MLS key material. Multi-filter Marmot
+lookups (including Welcome ownership verification) send one fresh REQ per
+relay, rather than one REQ per filter.
+
+Fake-pool evidence (`healthAwarePoolBudget.test.ts`): 20 groups sharing
+Primal and Snort plus seven legacy/cache/DM owners require 27 REQs per relay
+before merging and 7 after (one live owner waits). Saturation holds the default peak at 10 and
+preempts background work for the inbox. CLOSED/NOTICE regressions fail
+against the original pool. These counts describe the test fixture, not a
+measured device peak or Primal's actual enforced limit.
+
+Group backfill already pages backwards in 500-event pages (up to 40 pages).
+The 1,200-event regression drains three bounded pages, then receives a live
+event; there is no 512-event page cap in this path. A busy group's ingestion
+can delay that group's live attachment, but cannot consume the inbox's slot.
+
+With a dev build or `EXPO_PUBLIC_KEEP_PERF_LOGS=1`, grep logcat for:
+
+[source,shell]
+----
+rg '\[Relay\] budget|\[Marmot\] inbox armed on|\[Marmot\] group subs merged:' app.log
+----
+
+Expected lines include `[Relay] budget <relay> open=N/max queued=M`,
+`[Marmot] inbox armed on <relay>`, and
+`[Marmot] group subs merged: N groups -> M REQs on <relay>`.
+A stall reports `[Relay] budget stall <relay> open=N/max queued=M
+oldest=<label> <age>s holders: <label>×N ...`; deadline recovery reports
+`[Relay] budget timeout <relay> label=<label>`. A successful Welcome then
+reports `[Marmot] joined <group> from welcome` in development builds.

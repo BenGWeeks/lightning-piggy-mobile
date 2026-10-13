@@ -121,3 +121,20 @@ describe('boundGroupQueries — bounded, paged kind-445 group backfill', () => {
     expect(onLive).toHaveBeenCalledWith(H);
   });
 });
+
+// #1399: 512 replay log lines must not be mistaken for a transport page cap.
+test('drains more than 512 group events in bounded pages, then delivers live events', async () => {
+  const t = now() - 2000;
+  const events = Array.from({ length: 1200 }, (_, i) => groupEvent(i + 1, t + i));
+  const net = fakeNetwork(events);
+  const bounded = boundGroupQueries(net.network, { watermarks: new Map(), persist: jest.fn() });
+  expect(await bounded.request(['wss://r'], { kinds: [445], '#h': [H] })).toEqual(events);
+  expect(net.requests).toHaveLength(3);
+  expect(net.requests.every((f) => f.limit === 500)).toBe(true);
+  const next = jest.fn();
+  const sub = bounded.subscription(['wss://r'], { kinds: [445], '#h': [H] }).subscribe({ next });
+  const fresh = groupEvent(1201, t + 1200);
+  net.emit(fresh);
+  expect(next).toHaveBeenCalledWith(fresh);
+  sub.unsubscribe();
+});

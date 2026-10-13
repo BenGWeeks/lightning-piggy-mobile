@@ -62,8 +62,22 @@ export const fetchL2Follows = async (
 
   await new Promise<void>((resolve) => {
     let closed = false;
-    const filter: Filter = { kinds: [3], authors };
-    const sub = pool.subscribeMany(relays, filter, {
+    let sub: { close(): void } | undefined;
+    const finish = () => {
+      if (closed) return;
+      closed = true;
+      clearTimeout(timer);
+      try {
+        sub?.close();
+      } finally {
+        resolve();
+      }
+    };
+    const timer = setTimeout(finish, FETCH_TIMEOUT_MS);
+    const filter: Filter = { kinds: [3], authors, limit: authors.length };
+    sub = pool.subscribeManyEose(relays, filter, {
+      maxWait: FETCH_TIMEOUT_MS,
+      onclose: finish,
       onevent: (ev: NostrEvent) => {
         // Keep only the latest kind-3 per author — Nostr clients edit
         // their contact list and we want the newest revision.
@@ -77,16 +91,7 @@ export const fetchL2Follows = async (
         }
       },
     });
-    setTimeout(() => {
-      if (closed) return;
-      closed = true;
-      try {
-        sub.close();
-      } catch {
-        /* best-effort */
-      }
-      resolve();
-    }, FETCH_TIMEOUT_MS);
+    if (closed) sub.close();
   });
 
   return result;

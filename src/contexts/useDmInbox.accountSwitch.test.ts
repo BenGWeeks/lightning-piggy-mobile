@@ -83,6 +83,23 @@ const renderInbox = (pubkey: string) =>
   });
 
 describe('useDmInbox account scoping', () => {
+  it('arms exactly one inbox at login before any Messages focus and replaces its owner on account switch', () => {
+    const stop = jest.fn();
+    const start = jest.mocked(startLiveDmSubscription);
+    start.mockClear();
+    start.mockReturnValue(stop);
+    const { result, rerender, unmount } = renderInbox(A);
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(start).toHaveBeenLastCalledWith(expect.objectContaining({ viewerPubkey: A }));
+    act(() => result.current.armLiveDmSub());
+    expect(start).toHaveBeenCalledTimes(1);
+    rerender(optionsFor(B));
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(start).toHaveBeenLastCalledWith(expect.objectContaining({ viewerPubkey: B }));
+    unmount();
+    expect(stop).toHaveBeenCalledTimes(2);
+  });
+
   it("hides the previous account's conversations from the first render after a switch", async () => {
     const { result, rerender } = renderInbox(A);
     await act(() => result.current.hydrateDmInboxFromCache(A));

@@ -4,6 +4,7 @@ import type { Event } from 'nostr-tools';
 import { AppState, type AppStateStatus } from 'react-native';
 import { MarmotWelcomeOutbox } from './marmotWelcomeOutbox';
 import { createMemoryMarmotBackend } from './marmotStore';
+import { boundGroupQueries } from './marmotGroupBackfill';
 import {
   cleanPushRelays,
   createMarmotNetwork,
@@ -19,11 +20,14 @@ import { MARMOT_PUSH_SERVER_RELAYS } from './nostrRelayDefaults';
 const mockQuerySync = jest.fn();
 const mockPublish = jest.fn();
 const mockSubscribeMany = jest.fn();
+const mockSubscribeMap = jest.fn();
 jest.mock('./nostrPool', () => ({
   pool: {
     querySync: (...args: unknown[]) => mockQuerySync(...args),
+    querySyncFilters: (...args: unknown[]) => mockQuerySync(...args),
     publish: (...args: unknown[]) => mockPublish(...args),
     subscribeMany: (...args: unknown[]) => mockSubscribeMany(...args),
+    subscribeMap: (...args: unknown[]) => mockSubscribeMap(...args),
     resetTransports: jest.fn().mockResolvedValue(undefined),
   },
   trackRelays: jest.fn(),
@@ -204,8 +208,10 @@ describe('createMarmotNetwork().publish', () => {
   });
 });
 
-// Simulate Doze silently losing sockets and individual relay failures.
+// Simulate Doze silently losing sockets and individual relay failures on the
+// per-relay (non-group) routes, e.g. a Welcome gift-wrap subscription.
 describe('Marmot subscription lifecycle', () => {
+  const inbox = { kinds: [1059], '#p': ['me'], limit: 200, since: 100 };
   let onState: (state: AppStateStatus) => void;
   let remove: jest.Mock;
   let close: jest.Mock;
@@ -223,12 +229,7 @@ describe('Marmot subscription lifecycle', () => {
     next = jest.fn();
     const network = createMarmotNetwork(() => []);
     stop = network
-      .subscription(['wss://one.example', 'wss://two.example'], {
-        kinds: [445],
-        '#h': ['group'],
-        limit: 200,
-        since: 100,
-      })
+      .subscription(['wss://one.example', 'wss://two.example'], inbox)
       .subscribe({ next }).unsubscribe;
   });
   afterEach(() => {
@@ -256,12 +257,7 @@ describe('Marmot subscription lifecycle', () => {
     await jest.advanceTimersByTimeAsync(3_000);
     expect(mockSubscribeMany.mock.calls.length).toBeGreaterThan(before);
     expect(close).toHaveBeenCalled();
-    expect(mockSubscribeMany.mock.calls.at(-1)[1]).toEqual({
-      kinds: [445],
-      '#h': ['group'],
-      limit: 200,
-      since: 100,
-    });
+    expect(mockSubscribeMany.mock.calls.at(-1)[1]).toEqual(inbox);
   });
   it('retries a failed relay even when another relay remains healthy', () => {
     const before = mockSubscribeMany.mock.calls.length;
@@ -270,37 +266,7 @@ describe('Marmot subscription lifecycle', () => {
     expect(mockSubscribeMany).toHaveBeenCalledTimes(before + 1);
     expect(mockSubscribeMany.mock.calls.at(-1)[0]).toEqual(['wss://one.example']);
   });
-  it('replaces transports for every group before reconnect cancels sibling resume timers', async () => {
-    stop();
-    jest.mocked(pool.resetTransports).mockClear();
-    const network = createMarmotNetwork(
-      () => [],
-      () => connections.reconnect(),
-    );
-    const connections = createMarmotGroupConnections(() => {
-      const subs = ['one', 'two'].map((group) =>
-        network
-          .subscription([`wss://${group}.example`], {
-            kinds: [445],
-            '#h': [group],
-            limit: 500,
-          })
-          .subscribe({ next }),
-      );
-      return { unsubscribe: () => subs.forEach((sub) => sub.unsubscribe()) };
-    });
-    connections.start();
-    stop = connections.unsubscribe;
-    onState('active');
-    await jest.advanceTimersByTimeAsync(3_000);
-    expect(pool.resetTransports).toHaveBeenCalledTimes(1);
-    expect(pool.resetTransports).toHaveBeenCalledWith(['wss://one.example', 'wss://two.example']);
-    expect(mockSubscribeMany.mock.calls.slice(-2).map(([relays]) => relays[0])).toEqual([
-      'wss://one.example',
-      'wss://two.example',
-    ]);
-  });
-  it('hands relay retries to group catch-up, retaining backoff and recovery notifications across new routes', () => {
+  it('hands relay retries to session reconnect, retaining backoff and recovery notifications across new routes', () => {
     stop();
     mockSubscribeMany.mockClear();
     let since = 100;
@@ -311,14 +277,8 @@ describe('Marmot subscription lifecycle', () => {
     });
     const network = createMarmotNetwork(() => [], reconnect);
     const arm = () =>
-      network
-        .subscription(['wss://one.example'], {
-          kinds: [445],
-          '#h': ['group'],
-          limit: 500,
-          since,
-        })
-        .subscribe({ next }).unsubscribe;
+      network.subscription(['wss://one.example'], { ...inbox, since }).subscribe({ next })
+        .unsubscribe;
     stop = arm();
     const recovered = jest.fn();
     const removeListener = onMarmotRelayReconnect(recovered);
@@ -386,4 +346,144 @@ describe('Marmot subscription lifecycle', () => {
     jest.advanceTimersByTime(10_000);
     expect(mockSubscribeMany).toHaveBeenCalledTimes(before);
   });
+});
+
+// Group kind-445 routing is merged into one REQ per relay (#1399); it has no
+// per-route AppState handling, so the network itself must restore #1440's
+// resume + reconnect behaviour and the relay-reconnect notification.
+describe('merged group subscription lifecycle', () => {
+  let onState: (state: AppStateStatus) => void;
+  let remove: jest.Mock;
+  const group = (h: string) => ({ kinds: [445], '#h': [h], limit: 500 });
+  beforeEach(() => {
+    jest.useFakeTimers();
+    remove = jest.fn();
+    mockQuerySync.mockResolvedValue([]);
+    mockSubscribeMap.mockReset().mockImplementation(() => ({ close: jest.fn() }));
+    jest.mocked(pool.resetTransports).mockClear();
+    jest.spyOn(AppState, 'addEventListener').mockImplementation((_name, cb) => {
+      onState = cb;
+      return { remove };
+    });
+  });
+  afterEach(() => {
+    jest.restoreAllMocks();
+    jest.useRealTimers();
+  });
+  it('replaces every group relay transport after the resume stagger, then reconnects the session once', async () => {
+    const next = jest.fn();
+    const reconnect = jest.fn(() => connections.reconnect());
+    const network = createMarmotNetwork(() => [], reconnect);
+    const connections = createMarmotGroupConnections(() => {
+      const subs = ['one', 'two'].map((h) =>
+        network.subscription([`wss://${h}.example`], group(h)).subscribe({ next }),
+      );
+      return { unsubscribe: () => subs.forEach((sub) => sub.unsubscribe()) };
+    });
+    connections.start();
+    await jest.advanceTimersByTimeAsync(10);
+    expect(mockSubscribeMap).toHaveBeenCalledTimes(2);
+    onState('background');
+    onState('active');
+    await jest.advanceTimersByTimeAsync(2_999);
+    expect(pool.resetTransports).not.toHaveBeenCalled();
+    await jest.advanceTimersByTimeAsync(1);
+    expect(pool.resetTransports).toHaveBeenCalledTimes(1);
+    expect(pool.resetTransports).toHaveBeenCalledWith(['wss://one.example', 'wss://two.example']);
+    expect(reconnect).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(10);
+    // The reconnected session armed fresh merged REQs on both relays.
+    expect(mockSubscribeMap).toHaveBeenCalledTimes(4);
+    connections.unsubscribe();
+    expect(remove).toHaveBeenCalled();
+    await jest.advanceTimersByTimeAsync(5_000);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+  it('a lost group socket re-arms, recovers each group, and notifies relay reconnect listeners', async () => {
+    const recovered = jest.fn();
+    const removeListener = onMarmotRelayReconnect(recovered);
+    const network = createMarmotNetwork(() => []);
+    const owner = network.subscription(['wss://one.example'], group('a')).subscribe({});
+    try {
+      await jest.advanceTimersByTimeAsync(10);
+      expect(mockSubscribeMap).toHaveBeenCalledTimes(1);
+      const first = mockSubscribeMap.mock.calls[0][1];
+      first.onReqOpen();
+      await jest.advanceTimersByTimeAsync(100);
+      expect(mockQuerySync).toHaveBeenCalled();
+      expect(recovered).not.toHaveBeenCalled();
+      first.onclose(['connection closed']);
+      await jest.advanceTimersByTimeAsync(1_010);
+      expect(mockSubscribeMap).toHaveBeenCalledTimes(2);
+      const requests = mockQuerySync.mock.calls.length;
+      mockSubscribeMap.mock.calls[1][1].onReqOpen();
+      await jest.advanceTimersByTimeAsync(100);
+      expect(mockQuerySync.mock.calls.length).toBeGreaterThan(requests);
+      expect(recovered).toHaveBeenCalledTimes(1);
+    } finally {
+      removeListener();
+      owner.unsubscribe();
+    }
+    expect(remove).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(5_000);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+});
+
+test('the app network merges connectAll group fan-out into one REQ on each usable relay', () => {
+  jest.useFakeTimers();
+  mockQuerySync.mockResolvedValue([]);
+  mockSubscribeMap.mockReset().mockImplementation(() => ({ close: jest.fn() }));
+  const network = createMarmotNetwork(() => []);
+  const relays = ['wss://relay.primal.net', 'wss://relay.snort.social'];
+  const owners = Array.from({ length: 20 }, (_, i) =>
+    network
+      .subscription(relays, {
+        kinds: [445],
+        '#h': [String(i)],
+        limit: 500,
+      })
+      .subscribe({ next: jest.fn() }),
+  );
+  jest.runOnlyPendingTimers();
+  expect(mockSubscribeMap).toHaveBeenCalledTimes(2);
+  for (const [requests] of mockSubscribeMap.mock.calls) {
+    expect(new Set(requests.map((r: { url: string }) => r.url)).size).toBe(1);
+    expect(requests).toHaveLength(1);
+    expect(requests[0].filter['#h']).toEqual(Array.from({ length: 20 }, (_, i) => String(i)));
+    expect(requests[0].filter.limit).toBe(100);
+  }
+  owners.forEach((owner) => owner.unsubscribe());
+  jest.clearAllTimers();
+  jest.useRealTimers();
+});
+
+test('non-group filters open one reconnecting route per relay and filter', () => {
+  mockSubscribeMany.mockReset().mockReturnValue({ close: jest.fn() });
+  const network = createMarmotNetwork(() => []);
+  const filters = [
+    { kinds: [1059], '#p': ['me'], limit: 100 },
+    { kinds: [4], '#p': ['me'], limit: 100, since: 10 },
+  ];
+  const sub = network.subscription(['wss://relay.primal.net'], filters).subscribe({});
+  expect(mockSubscribeMany).toHaveBeenCalledTimes(2);
+  expect(mockSubscribeMany.mock.calls.map(([relays, filter]) => [relays, filter])).toEqual(
+    filters.map((filter) => [['wss://relay.primal.net'], filter]),
+  );
+  sub.unsubscribe();
+});
+
+test('Welcome ownership filters share one fresh REQ per relay', async () => {
+  mockQuerySync.mockResolvedValue([]);
+  const filters = [
+    { kinds: [30443], ids: ['kp'], limit: 1 },
+    { kinds: [30443], authors: ['me'], limit: 1 },
+  ];
+  const sessionNetwork = boundGroupQueries(
+    createMarmotNetwork(() => []),
+    { watermarks: new Map(), persist: jest.fn() },
+  );
+  await sessionNetwork.request(['wss://relay.primal.net'], filters);
+  expect(mockQuerySync).toHaveBeenCalledTimes(1);
+  expect(mockQuerySync).toHaveBeenCalledWith(['wss://relay.primal.net'], filters, 6000);
 });

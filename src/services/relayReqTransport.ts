@@ -1,0 +1,59 @@
+import type { AbstractSimplePool } from 'nostr-tools/abstract-pool';
+
+type Params = Parameters<AbstractSimplePool['subscribeMap']>[1];
+/** Close the physical REQ synchronously, and prevent late connection/AUTH
+ * completions from sending a REQ after its budget slot has been released. */
+export function openRelayReq(
+  pool: Pick<AbstractSimplePool, 'ensureRelay' | 'seenOn' | 'trackRelays'>,
+  url: string,
+  filters: Parameters<AbstractSimplePool['subscribe']>[1][],
+  params: Params & { onReqOpen?: () => void },
+) {
+  let stopped = false;
+  let sub: { close(reason?: string): void } | undefined;
+  const fail = (error: unknown) => {
+    if (!stopped) params.onclose?.([error instanceof Error ? error.message : String(error)]);
+  };
+  void pool
+    .ensureRelay(url, { connectionTimeout: 5000 })
+    .then((relay) => {
+      const arm = (authenticated = false) => {
+        if (stopped) return;
+        params.onReqOpen?.();
+        sub = relay.subscribe(filters, {
+          ...params,
+          abort: undefined, // the budget handle owns cancellation, not the SDK's onabort field
+          eoseTimeout: params.maxWait,
+          receivedEvent: (source, id) => {
+            if (pool.trackRelays) {
+              const seen = pool.seenOn.get(id) ?? new Set();
+              seen.add(source);
+              pool.seenOn.set(id, seen);
+            }
+            params.receivedEvent?.(source, id);
+          },
+          onclose: (reason) => {
+            if (stopped) return;
+            sub = undefined; // CLOSED/socket close already retired this physical sub
+            if (!authenticated && reason.startsWith('auth-required: ') && params.onauth)
+              void relay
+                .auth(params.onauth)
+                .then(() => arm(true))
+                .catch(fail);
+            else params.onclose?.([reason]);
+          },
+        });
+        if (stopped) sub.close('request already finished');
+      };
+      arm();
+    })
+    .catch(fail);
+  return {
+    close: (reason?: string) => {
+      stopped = true;
+      const current = sub;
+      sub = undefined;
+      current?.close(reason);
+    },
+  };
+}

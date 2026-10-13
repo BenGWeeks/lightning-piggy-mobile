@@ -6,12 +6,15 @@
 import type { NostrNetworkInterface } from '@internet-privacy/marmot-ts';
 import type { Event as NostrEvent, Filter } from 'nostr-tools';
 
+import { createGroupSubscriptionMux } from './marmotGroupSubscriptions';
+import { noteMarmotRelayReconnect } from './marmotRelayReconnect';
+import { watchMarmotResume } from './marmotResume';
+import { subscribeMarmotRelays } from './marmotSubscription';
 import { requireRelayAcknowledgement } from '../utils/relayPublishResult';
 import { dmInboxRelaysFromTags, isRelayUrl } from '../utils/relayListEvents';
 import { isPublicRelayUrl } from '../utils/publicUrl';
 import { pool, trackRelays } from './nostrPool';
 import { DEFAULT_RELAYS, MARMOT_PUSH_SERVER_RELAYS } from './nostrRelayDefaults';
-import { subscribeMarmotRelays } from './marmotSubscription';
 
 const REQUEST_MAX_WAIT_MS = 6_000;
 const PUBLISH_TIMEOUT_MS = 10_000;
@@ -49,6 +52,9 @@ const withTimeout = <T>(p: Promise<T>, ms: number) =>
     p,
     new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
   ]);
+/** GroupsManager's live kind-445 routing: merged into one REQ per relay (#1399). */
+const isGroupLive = (filters: Filter[]) =>
+  filters.every((f) => f.kinds?.length === 1 && f.kinds[0] === 445 && f['#h']?.length);
 
 export function createMarmotNetwork(
   getFallbackRelays: () => string[],
@@ -76,6 +82,36 @@ export function createMarmotNetwork(
     const cleaned = cleanRelays(relays);
     return cleaned.length > 0 ? cleaned : cleanRelays([...getFallbackRelays(), ...DEFAULT_RELAYS]);
   };
+  const groupSubscribe = createGroupSubscriptionMux(
+    (url, filters, next, onReqOpen, onClose) =>
+      pool.subscribeMap(
+        filters.map((filter) => ({ url, filter })),
+        { onevent: next, onReqOpen, onclose: onClose },
+      ),
+    (urls, filter, signal) =>
+      pool.querySyncFilters(urls, [filter], REQUEST_MAX_WAIT_MS, {
+        abort: signal,
+        requireEose: true,
+      }),
+    // A relay came back and its groups caught up: pending Welcomes retry.
+    noteMarmotRelayReconnect,
+  );
+  // Merged group REQs have no per-route AppState handling (unlike
+  // subscribeMarmotRelays). One watcher per network replaces transports after
+  // the resume stagger — Doze can leave a socket OPEN but silently dead — then
+  // reconnects the session so GroupsManager collects every backfill page and
+  // drains one MLS batch before subscribing live, exactly as per-relay routes do.
+  const groupOwners = new Set<object>();
+  let groupResume: (() => void) | undefined;
+  let resumeGeneration = 0;
+  const watchGroupResume = () =>
+    watchMarmotResume(async () => {
+      const generation = ++resumeGeneration;
+      await resetTransport();
+      // Unsubscribed meanwhile (e.g. a sibling route already reconnected).
+      if (generation !== resumeGeneration || groupOwners.size === 0) return;
+      reconnect?.();
+    });
   const inboxCache = new Map<string, { relays: string[]; at: number }>();
 
   return {
@@ -103,14 +139,11 @@ export function createMarmotNetwork(
     async request(relays, filters) {
       const targets = relaysOr(relays);
       trackRelays(targets);
-      const batches = await Promise.all(
-        asArray(filters as Filter | Filter[]).map((f) =>
-          pool.querySync(targets, f, { maxWait: REQUEST_MAX_WAIT_MS }),
-        ),
+      return pool.querySyncFilters(
+        targets,
+        asArray(filters as Filter | Filter[]),
+        REQUEST_MAX_WAIT_MS,
       );
-      const byId = new Map<string, NostrEvent>();
-      for (const e of batches.flat()) byId.set(e.id, e);
-      return [...byId.values()];
     },
 
     subscription(relays, filters) {
@@ -120,9 +153,27 @@ export function createMarmotNetwork(
           trackRelays(targets);
           const token = {};
           liveSubscriptions.set(token, targets);
+          const list = asArray(filters as Filter | Filter[]);
+          if (isGroupLive(list)) {
+            const sub = groupSubscribe(targets, list, observer);
+            groupOwners.add(token);
+            groupResume ??= watchGroupResume();
+            return {
+              unsubscribe: () => {
+                liveSubscriptions.delete(token);
+                if (!groupOwners.delete(token)) return;
+                resumeGeneration++;
+                if (groupOwners.size === 0) {
+                  groupResume?.();
+                  groupResume = undefined;
+                }
+                sub.unsubscribe();
+              },
+            };
+          }
           const sub = subscribeMarmotRelays(
             targets,
-            asArray(filters as Filter | Filter[]),
+            list,
             (e) => observer.next?.(e),
             reconnect
               ? { reconnect, resetTransport, notifyInitial: recovering, attempts }

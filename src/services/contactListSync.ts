@@ -1,3 +1,4 @@
+import { subscribeRelayWithBudget } from './relayReqSubscription';
 import type { Filter } from 'nostr-tools/filter';
 import { verifyEvent, type Event as NostrEvent } from 'nostr-tools/pure';
 import { normalizeURL } from 'nostr-tools/utils';
@@ -75,8 +76,10 @@ export interface ContactListRelay {
 export type ConnectContactListRelay = (url: string, timeoutMs: number) => Promise<ContactListRelay>;
 
 // The pool's shared socket per relay (no extra connections).
-const connectViaPool: ConnectContactListRelay = (url, timeoutMs) =>
-  pool.ensureRelay(url, { connectionTimeout: timeoutMs }) as unknown as Promise<ContactListRelay>;
+const connectViaPool: ConnectContactListRelay = async (url, timeoutMs) => {
+  const relay = await pool.ensureRelay(url, { connectionTimeout: timeoutMs });
+  return { subscribe: (filters, params) => subscribeRelayWithBudget(pool, relay, filters, params) };
+};
 
 /** Replaceable-event order: newer `created_at` wins; on a tie, the lowest id. */
 function isNewerKind3(candidate: NostrEvent, current: NostrEvent | null): boolean {
@@ -207,7 +210,11 @@ export function fetchLatestContactList(
             oninvalidevent(event) {
               if (isAuthorKind3(event)) unverifiable++;
             },
-            oneose: () => settle(url, 'eose'),
+            oneose: () => {
+              settle(url, 'eose');
+              // Free this relay's slot while the other relays are still answering.
+              queueMicrotask(() => sub.close());
+            },
             onclose: () => settle(url, 'failed'),
           });
           subs.push(sub);

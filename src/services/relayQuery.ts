@@ -1,3 +1,4 @@
+import { reqLabel, type ReqOptions } from './relayReqBudget';
 import type { SimplePool } from 'nostr-tools/pool';
 import type { Filter } from 'nostr-tools/filter';
 import type { Event as NostrEvent } from 'nostr-tools/pure';
@@ -70,7 +71,12 @@ export function querySyncAbortable(
           ),
         params.maxWait,
       );
-    closer = pool.subscribeMany(relays, filter, {
+    const queryParams: Parameters<SimplePool['subscribeMany']>[2] & { reqOptions: ReqOptions } = {
+      reqOptions: {
+        mode: 'oneshot',
+        label: reqLabel([filter], 'oneshot'),
+        timeoutMs: params.maxWait,
+      },
       // Our deadline queues its completion marker first. The pool's SDK timeout
       // also drains through the receive queue (and bounds connection timeouts).
       maxWait: params.maxWait !== undefined ? params.maxWait + 1000 : undefined,
@@ -82,8 +88,9 @@ export function querySyncAbortable(
       },
       oneose() {
         // The pool emits aggregate EOSE immediately before aggregate close
-        // when every connection failed. Let onclose inspect those reasons first.
-        if (params.rejectOnAllRelaysFailure) queueMicrotask(() => finish());
+        // on failure or budget expiry. Let onclose inspect those reasons first.
+        if (params.rejectOnAllRelaysFailure || params.rejectOnTimeout)
+          queueMicrotask(() => finish());
         else finish();
       },
       onclose(reasons: (string | { url: string; reason: string })[]) {
@@ -108,9 +115,21 @@ export function querySyncAbortable(
               typeof reason === 'string' ? reason : reason.reason,
             ),
           );
-        finish(allFailed ? new Error('All relays failed to connect') : undefined);
+        const timedOut =
+          params.rejectOnTimeout &&
+          reasons.some(
+            (reason) => (typeof reason === 'string' ? reason : reason.reason) === 'query deadline',
+          );
+        finish(
+          allFailed
+            ? new Error('All relays failed to connect')
+            : timedOut
+              ? new Error('Relay query timed out before EOSE')
+              : undefined,
+        );
       },
-    });
+    };
+    closer = pool.subscribeMany(relays, filter, queryParams);
     // A synchronous callback can finish before the closer is assigned.
     if (settled) {
       try {
