@@ -1,9 +1,13 @@
 import React from 'react';
-import { fireEvent, render } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import MessageBubble from './MessageBubble';
 import { parseFileAttachment } from '../utils/fileAttachment';
 import type { BubbleContent } from '../utils/messageContent';
+import { resolveRemoteMedia } from '../services/remoteMediaCache';
+import { __resetForTests } from '../services/mediaRevealStore';
+
+jest.mock('../services/remoteMediaCache', () => ({ resolveRemoteMedia: jest.fn() }));
 
 jest.mock('../contexts/ThemeContext', () => ({
   useThemeColors: () => jest.requireActual('../styles/palettes').lightPalette,
@@ -24,6 +28,12 @@ jest.mock('expo-audio', () => ({
 }));
 jest.mock('../services/decryptedMediaCache', () => ({ resolveDecryptedMedia: jest.fn() }));
 jest.mock('./DecryptedImage', () => () => null);
+
+beforeEach(() => {
+  __resetForTests();
+  jest.mocked(resolveRemoteMedia).mockClear();
+  jest.mocked(resolveRemoteMedia).mockResolvedValue('file:///cache/animation.gif');
+});
 
 const props = {
   id: 'msg',
@@ -74,13 +84,17 @@ const variants: [string, BubbleContent][] = [
   ['location', { kind: 'location', location: { lat: 1, lon: 2, accuracyMeters: null } }],
 ];
 
-test.each(variants)('outgoing %s renders the default diagonal gradient', (_label, content) => {
-  const ui = render(<MessageBubble {...props} content={content} />);
-  const gradient = ui.UNSAFE_getByType(LinearGradient);
-  expect(gradient.props.colors).toEqual(['#EC008C', '#8B5CF6']);
-  expect(gradient.props.start).toEqual({ x: 0, y: 0 });
-  expect(gradient.props.end).toEqual({ x: 1, y: 1 });
-});
+test.each(variants)(
+  'outgoing %s renders the default diagonal gradient',
+  async (_label, content) => {
+    const ui = render(<MessageBubble {...props} content={content} />);
+    const gradient = ui.UNSAFE_getByType(LinearGradient);
+    expect(gradient.props.colors).toEqual(['#EC008C', '#8B5CF6']);
+    expect(gradient.props.start).toEqual({ x: 0, y: 0 });
+    expect(gradient.props.end).toEqual({ x: 1, y: 1 });
+    await act(async () => {});
+  },
+);
 
 test('received text keeps its plain surface; reaction pills still toggle', () => {
   const onToggleReaction = jest.fn();
@@ -132,4 +146,27 @@ test.each([true, false])('file replies preserve their header and actions (fromMe
   expect(onLongPress).toHaveBeenCalledTimes(1);
   fireEvent.press(ui.getByTestId('conversation-reaction-msg-❤'));
   expect(onToggleReaction).toHaveBeenCalledWith('❤', null);
+});
+
+test('an unfollowed sender GIF waits for the placeholder tap before downloading', async () => {
+  const openFullscreen = jest.fn();
+  const ui = render(
+    <MessageBubble
+      {...props}
+      fromMe={false}
+      autoLoadMedia={false}
+      content={{ kind: 'gif', url: 'https://example.com/animation.gif' }}
+      onOpenGifFullscreen={openFullscreen}
+    />,
+  );
+  await act(async () => {});
+  expect(ui.getByTestId('conversation-gif-tap-to-load-msg')).toBeTruthy();
+  expect(resolveRemoteMedia).not.toHaveBeenCalled();
+  fireEvent.press(ui.getByTestId('conversation-gif-msg'));
+  await waitFor(() => expect(ui.queryByTestId('conversation-gif-tap-to-load-msg')).toBeNull());
+  await waitFor(() => expect(resolveRemoteMedia).toHaveBeenCalledTimes(1));
+  expect(openFullscreen).not.toHaveBeenCalled();
+  await act(async () => {});
+  fireEvent.press(ui.getByTestId('conversation-gif-msg'));
+  expect(openFullscreen).toHaveBeenCalledWith('file:///cache/animation.gif');
 });

@@ -1,6 +1,5 @@
-import { useRemoteMediaUri } from '../hooks/useRemoteMediaUri';
-import { checkRemoteUrl, MEDIA_MAX_BYTES } from '../utils/remoteUrlPolicy';
-import TapToLoadMedia from './TapToLoadMedia';
+import { useGifMedia } from '../hooks/useGifMedia';
+import TapToLoadMedia, { displayHost } from './TapToLoadMedia';
 import { npubEncode } from 'nostr-tools/nip19';
 import MessageReactionRow from './MessageReactionRow';
 import OutgoingBubbleBackground from './OutgoingBubbleBackground';
@@ -208,7 +207,12 @@ const MessageBubble: React.FC<Props> = ({
   const colors = useThemeColors();
   const styles = useMemo(() => createMessageBubbleStyles(colors), [colors]);
   const { t } = useLocale();
-  const gifUri = useRemoteMediaUri(content.kind === 'gif' ? content.url : null, MEDIA_MAX_BYTES);
+  const {
+    uri: gifUri,
+    loadAllowed: gifLoadAllowed,
+    reveal: revealGif,
+    safe: gifSafe,
+  } = useGifMedia(id, content.kind === 'gif' ? content.url : null, autoLoadMedia);
 
   // Sender label (group bubbles, incoming) + a Marmot reply's quote: one header
   // slot every variant renders, so photo / GIF / invoice replies show it too.
@@ -290,22 +294,34 @@ const MessageBubble: React.FC<Props> = ({
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
         <TouchableOpacity
           activeOpacity={0.85}
-          onPress={() => gifUri && onOpenGifFullscreen?.(gifUri)}
+          onPress={
+            gifSafe
+              ? gifLoadAllowed
+                ? () => gifUri && onOpenGifFullscreen?.(gifUri)
+                : revealGif
+              : undefined
+          }
           onLongPress={onLongPress}
           delayLongPress={350}
           style={[styles.gifCard, fromMe ? styles.gifCardMe : styles.gifCardThem]}
-          accessibilityLabel={fromMe ? t('messageBubble.gifSent') : t('messageBubble.gifReceived')}
-          accessibilityRole="imagebutton"
+          accessibilityLabel={
+            !gifLoadAllowed && gifSafe
+              ? t('messageBubble.loadImageA11y', { host: displayHost(content.url) })
+              : fromMe
+                ? t('messageBubble.gifSent')
+                : t('messageBubble.gifReceived')
+          }
+          accessibilityRole={!gifLoadAllowed ? 'button' : 'imagebutton'}
           testID={`${testIdPrefix}-gif-${id}`}
         >
           <OutgoingBubbleBackground fromMe={fromMe} />
           {BubbleHeader}
-          {!checkRemoteUrl(content.url, { kind: 'media' }).ok ? (
+          {!gifSafe || !gifLoadAllowed ? (
             <TapToLoadMedia
               variant="image"
               url={content.url}
               fromMe={fromMe}
-              testID={`${testIdPrefix}-gif-blocked-${id}`}
+              testID={`${testIdPrefix}-gif-${gifSafe ? 'tap-to-load' : 'blocked'}-${id}`}
             />
           ) : gifUri ? (
             <ExpoImage

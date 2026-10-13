@@ -1,18 +1,26 @@
 import { bech32 } from 'bech32';
-import { fetchInvoice, normalizeLnurlToUrl, resolveLnurlDirection } from './lnurlService';
+import {
+  fetchInvoice,
+  normalizeLnurlToUrl,
+  resolveLightningAddress,
+  resolveLnurlDirection,
+} from './lnurlService';
 
 jest.mock('expo/fetch', () => ({
   fetch: async (...args: unknown[]) => {
     const response = await (
-      globalThis.fetch as unknown as (
-        ...args: unknown[]
-      ) => Promise<{ ok: boolean; status?: number; json?: () => Promise<unknown> }>
+      globalThis.fetch as unknown as (...args: unknown[]) => Promise<{
+        ok: boolean;
+        status?: number;
+        headers?: { get: (name: string) => string | null };
+        json?: () => Promise<unknown>;
+      }>
     )(...args);
     let sent = false;
     return {
       ...response,
       status: response.status ?? 200,
-      headers: { get: () => null },
+      headers: response.headers ?? { get: () => null },
       body: {
         getReader: () => ({
           read: async () => {
@@ -236,3 +244,80 @@ it.each(['https://127.0.0.1/lnurl', 'https://example.com:8443/lnurl'])(
     }
   },
 );
+
+describe('Lightning address and invoice remote URL policy', () => {
+  const originalFetch = global.fetch;
+  let fetchMock: jest.Mock;
+  beforeEach(() => {
+    fetchMock = jest.fn();
+    global.fetch = fetchMock;
+  });
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  const paths = [
+    { name: 'lightning address', run: (host: string) => resolveLightningAddress(`alice@${host}`) },
+    { name: 'invoice callback', run: (host: string) => fetchInvoice(`https://${host}/cb`, 100) },
+  ];
+
+  describe.each(paths)('$name', ({ run }) => {
+    it.each(['metadata.google.internal', 'wallet.local', 'hidden.onion'])(
+      'blocks host %s before any request',
+      async (host) => {
+        await expect(run(host)).rejects.toThrow('Blocked');
+        expect(fetchMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      'https://127.0.0.1/private',
+      'https://metadata.google.internal/',
+      'http://example.com/cb',
+    ])('blocks redirect to %s before contacting the target', async (location) => {
+      fetchMock.mockResolvedValueOnce({
+        ok: false,
+        status: 302,
+        headers: { get: (name: string) => (name === 'location' ? location : null) },
+      });
+      await expect(run('example.com')).rejects.toThrow('Blocked');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0][1]).toEqual(expect.objectContaining({ redirect: 'manual' }));
+    });
+
+    it('rejects a declared body over the shared byte cap', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        headers: {
+          get: (name: string) => (name === 'content-length' ? String(1024 * 1024 + 1) : null),
+        },
+      });
+      await expect(run('example.com')).rejects.toThrow('limit');
+    });
+  });
+
+  it('preserves Lightning address pay parameters through the bounded transport', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        tag: 'payRequest',
+        callback: 'https://example.com/cb',
+        minSendable: 1000,
+        maxSendable: 100000,
+        metadata: JSON.stringify([['text/plain', 'Pay Alice']]),
+        commentAllowed: 120,
+        allowsNostr: true,
+        nostrPubkey: 'abc',
+      }),
+    });
+    await expect(resolveLightningAddress('alice@example.com')).resolves.toEqual({
+      callback: 'https://example.com/cb',
+      minSats: 1,
+      maxSats: 100,
+      description: 'Pay Alice',
+      commentAllowed: 120,
+      allowsNostr: true,
+      nostrPubkey: 'abc',
+    });
+  });
+});
