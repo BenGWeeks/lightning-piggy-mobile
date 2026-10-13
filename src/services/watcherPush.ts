@@ -9,6 +9,7 @@ import type { NostrEvent } from 'nostr-tools/pure';
 import type { SignerType } from '../types/nostr';
 import { createMarmotSigner } from './marmotSigner';
 import { currentPushDevice, subscribePushDevice } from './marmotPushRegistration';
+import { noteManualNotificationChange } from './notificationDefaultsTask';
 import { getNwcUrl } from './walletStorageService';
 import { loadWatcherState, saveWatcherState } from './watcherPushStore';
 import { publishToWatcher } from './watcherPushTransport';
@@ -74,10 +75,15 @@ export function startWatcherPush(): () => void {
 
 export const setWatcherContext = (ctx: WatcherContext | null): void => registrar.setContext(ctx);
 export const getWatcherCategories = (): Promise<WatcherCategories | null> => registrar.categories();
+/** A user's category choice; recorded as a manual change first, so an
+ * automatic default-setup run in flight stops rather than write over it. */
 export const setWatcherCategory = (
   category: WatcherCategory,
   on: boolean,
-): Promise<WatcherCategories | null> => registrar.setCategory(category, on);
+): Promise<WatcherCategories | null> => {
+  noteManualNotificationChange();
+  return registrar.setCategory(category, on);
+};
 /** Reconcile externally saved defaults without prompting remote signers. */
 export const scheduleWatcherReconciliation = (pubkey: string): void => registrar.reconcile(pubkey);
 export const syncWatcherNow = (): Promise<WatcherSyncOutcome> => registrar.syncNow();

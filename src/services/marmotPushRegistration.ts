@@ -33,6 +33,7 @@ import { perAccountKey } from './perAccountStorage';
 import { getActivePubkey } from './walletStorageService';
 import { getMarmotSession, subscribeMarmotSession, type MarmotSession } from './marmotSession';
 import { requestNotificationPermission } from './notificationService';
+import { noteManualNotificationChange } from './notificationDefaultsTask';
 import { MARMOT_PUSH_WAKE_TASK, setLiveMarmotSession } from './marmotPushWake';
 
 /** Per account (`perAccountKey`): '1' = this account opted in. */
@@ -503,12 +504,19 @@ export type EnableOutcome =
   /** No token from Apple/Google — e.g. no Google Play services. */
   | { status: 'unavailable' };
 
-/** Turn push on for `pubkey` (user action): permission, token, then that
- * account's groups. Other accounts on the phone are left as they are. */
+/** Turn push on for `pubkey`: permission, token, then that account's
+ * groups. Other accounts on the phone are left as they are. A user action
+ * (the default) is recorded as a manual change before anything is awaited,
+ * so an automatic default-setup run in flight stops rather than write over
+ * it. Automatic setup passes `interactive: false` and its task guard as
+ * `stillActive`: checked before the token is fetched, after it arrives, and
+ * after the opt-in is persisted — a stale run discards the token, rolls the
+ * write back and commits nothing at runtime. */
 export async function enableMarmotPush(
   pubkey: string,
   opts: { interactive?: boolean; stillActive?: () => boolean } = {},
 ): Promise<EnableOutcome> {
+  if (opts.interactive !== false) noteManualNotificationChange();
   if (!(await requestNotificationPermission())) return { status: 'no-permission' };
   return serial(() =>
     opts.stillActive?.() === false
@@ -533,6 +541,9 @@ async function enableNow(
   if ((await retirementPending()) && !(await retireDeviceToken())) {
     return { status: 'unavailable' };
   }
+  // The token is fetched for THIS account only: a stale automatic run
+  // (account switched, signed out, or the user chose meanwhile) gets none.
+  if (stillActive?.() === false) return { status: 'unavailable' };
   let next: DeviceRegistration;
   try {
     next = await readRegistration(currentServer());
@@ -556,6 +567,13 @@ async function enableNow(
     }
     await AsyncStorage.setItem(accountKey(pubkey), '1');
   } catch {
+    return { status: 'unavailable' };
+  }
+  // The write itself can outlive the account. An automatic opt-in that is
+  // stale now is taken back (it was absent before), and nothing is committed
+  // at runtime: no token for the departed account, no wake task.
+  if (stillActive?.() === false) {
+    await AsyncStorage.removeItem(accountKey(pubkey)).catch(() => undefined);
     return { status: 'unavailable' };
   }
   try {
@@ -595,6 +613,7 @@ export function disableMarmotPush(
    * this account: never keep it for the other accounts. */
   opts: { stillRegistered?: boolean } = {},
 ): Promise<DisableOutcome> {
+  noteManualNotificationChange(); // before anything is awaited — see enableMarmotPush
   return serial(async () => {
     // Explicitly off — an unreadable store doesn't change that.
     const known = await ensureSettings().then(

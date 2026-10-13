@@ -3,6 +3,24 @@ import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
 import type { DeviceRegistration } from './marmotPushEntries';
+import {
+  BUILT_IN_SERVERS,
+  builtInServer,
+  disableMarmotPush,
+  enableMarmotPush,
+  loadMarmotPushSettings,
+  parseServerKey,
+  retireMarmotPushForAccount,
+  setMarmotPushServer,
+  startMarmotPushRegistration,
+  pendingMarmotPushGroups,
+  syncMarmotPushNow,
+  currentPushDevice,
+  subscribePushDevice,
+  __resetMarmotPushForTests,
+} from './marmotPushRegistration';
+import { beginDefaultSetup, isDefaultSetupCurrent } from './notificationDefaultsTask';
+import { requestNotificationPermission } from './notificationService';
 
 import {
   BUILT_IN_SERVERS,
@@ -53,7 +71,10 @@ jest.mock('expo-secure-store', () => ({
   deleteItemAsync: jest.fn(async (k: string) => void mockSecure.delete(k)),
 }));
 let mockActivePubkey: string | null = 'active-account';
-jest.mock('./walletStorageService', () => ({ getActivePubkey: () => mockActivePubkey }));
+jest.mock('./walletStorageService', () => ({
+  getActivePubkey: () => mockActivePubkey,
+  subscribeActivePubkey: () => () => undefined,
+}));
 jest.mock('./notificationService', () => ({
   requestNotificationPermission: jest.fn(async () => true),
 }));
@@ -806,3 +827,68 @@ it('leaves automatic setup retryable after a failed push preference write', asyn
   expect(await AsyncStorage.getItem(enabledKey(ME))).toBe('1');
   expect(await AsyncStorage.getItem(`notification_preference_explicit_v1_${ME}`)).toBeNull();
 });
+
+// --- automatic default setup: one cancellable task per account ---------------------
+
+it('records a user push toggle as a manual change before anything is awaited', async () => {
+  const automatic = beginDefaultSetup(ME);
+  const enabling = enableMarmotPush(ME);
+  expect(isDefaultSetupCurrent(automatic)).toBe(false); // synchronously — no await yet
+  await enabling;
+  const next = beginDefaultSetup(ME);
+  const disabling = disableMarmotPush(ME);
+  expect(isDefaultSetupCurrent(next)).toBe(false);
+  await disabling;
+  // Automatic enablement is not a user choice.
+  const last = beginDefaultSetup(ME);
+  await enableMarmotPush(ME, { interactive: false });
+  expect(isDefaultSetupCurrent(last)).toBe(true);
+});
+
+it('fetches no token for an automatic run that went stale before the token read', async () => {
+  let checks = 0;
+  const outcome = await enableMarmotPush(ME, {
+    interactive: false,
+    stillActive: () => ++checks <= 1, // current when queued, stale once it runs
+  });
+  expect(outcome).toEqual({ status: 'unavailable' });
+  expect(Notifications.getDevicePushTokenAsync).not.toHaveBeenCalled();
+  expect(await AsyncStorage.getItem(enabledKey(ME))).toBeNull();
+});
+
+it.each(['switch', 'sign-out'])(
+  'commits nothing when %s lands while the automatic opt-in is being persisted',
+  async (action) => {
+    let active = true;
+    let release!: () => void;
+    let writing!: () => void;
+    const started = new Promise<void>((resolve) => {
+      writing = resolve;
+    });
+    const setItem = AsyncStorage.setItem as jest.Mock;
+    const original = setItem.getMockImplementation()!;
+    setItem.mockImplementationOnce(async (key: string, value: string) => {
+      writing();
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return original(key, value);
+    });
+    const enabling = enableMarmotPush(ME, { interactive: false, stillActive: () => active });
+    await started;
+    // The account changes while the write is in flight.
+    active = false;
+    mockActive = action === 'switch' ? sessionFor('other-account') : null;
+    mockActivePubkey = mockActive?.pubkey ?? null;
+    release();
+    expect(await enabling).toEqual({ status: 'unavailable' });
+    // The automatic write is taken back; nothing is committed at runtime.
+    expect(await AsyncStorage.getItem(enabledKey(ME))).toBeNull();
+    expect((await loadMarmotPushSettings(ME)).enabled).toBe(false);
+    expect(currentPushDevice(ME)).toBeNull();
+    expect(currentPushDevice('other-account')).toBeNull();
+    expect(Notifications.registerTaskAsync).not.toHaveBeenCalled();
+    expect(mockSession.pushRegistration.setRegistration).not.toHaveBeenCalled();
+    if (mockActive) expect(mockActive.pushRegistration.setRegistration).not.toHaveBeenCalled();
+  },
+);

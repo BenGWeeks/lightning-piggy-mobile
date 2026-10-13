@@ -241,11 +241,28 @@ Legacy stored `0` / `1` preferences are respected, including the old device-wide
 switch migrated to the active account. Existing enabled installs keep their
 Instant alerts preference; an explicitly disabled switch stays off.
 
-The default decision is persisted only after permission and token acquisition
-and all notification preferences have saved successfully. Denial leaves both
-Instant alerts and More alerts off alongside the existing phone-settings banner
-and setup retryable. Permission can be restored through the existing settings
-surface.
+The automatic setup is one cancellable task bound to one account
+(`notificationDefaultsTask.ts`). It spans the OS permission prompt, the token
+fetch and several storage writes, so every write — and the push runtime commit
+inside `enableMarmotPush` (token, wake task, group records) — goes through one
+guard, checked immediately before and after each step against the *live*
+identity at call time, never a render-time snapshot (tabs are `freezeOnBlur`).
+The guard fails once the account changes (switch or sign-out bump the task
+generation), once account cleanup aborts the task (the wipe drains any write
+already handed to storage, then deletes the keys; nothing is recreated), or
+once the user makes a notification choice of their own (`enableMarmotPush`,
+`disableMarmotPush` and `setWatcherCategory` record a manual change before
+anything is awaited): the user's choice stands and the task writes nothing more.
+A stale task discards the device token and rolls back its own opt-in write.
+Wallets losing focus does not cancel a task that has started.
+
+The order is: OS permission (asked for undetermined permission whether or not
+anything else runs), push enablement, watcher categories, automatic push OFF,
+and the decision marker LAST — so a crash, a cancelled token fetch or a failed
+write leaves the missing preferences absent and the next launch retries them.
+Denial leaves both Instant alerts and More alerts off alongside the existing
+phone-settings banner and setup retryable. Permission can be restored through
+the existing settings surface.
 
 . `marmotPushRegistration.ts` asks Apple/Google for this device's *native*
   token (`getDevicePushTokenAsync` — FCM on Android, APNs on iOS; never Expo's

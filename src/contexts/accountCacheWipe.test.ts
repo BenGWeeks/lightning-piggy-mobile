@@ -1,5 +1,6 @@
 import { initialiseNotificationDefaults } from '../services/notificationDefaults';
 import * as marmotPush from '../services/marmotPushRegistration';
+import { setActivePubkeyForWalletStorage } from '../services/walletStorageService';
 import { loadWatcherState } from '../services/watcherPushStore';
 import {
   readMarketPreferences,
@@ -150,7 +151,8 @@ it.each([PK, 'c'.repeat(64)])(
       .mockResolvedValue({ status: 'enabled', sync: null });
     try {
       // Cover both re-login and a new identity after all earlier accounts were removed.
-      await initialiseNotificationDefaults(nextAccount, () => true);
+      setActivePubkeyForWalletStorage(nextAccount);
+      await initialiseNotificationDefaults(nextAccount);
       expect((await loadWatcherState(nextAccount)).categories.dm).toBe(true);
       expect(enable).toHaveBeenCalledWith(nextAccount, {
         interactive: false,
@@ -180,7 +182,6 @@ it.each(['watcher', 'push-off', 'decision'])(
     const resume = new Promise<void>((resolve) => {
       release = resolve;
     });
-    let active = true;
     const setItem = AsyncStorage.setItem as jest.Mock;
     const original = setItem.getMockImplementation()!;
     setItem.mockImplementation(async (key: string, value: string) => {
@@ -191,9 +192,11 @@ it.each(['watcher', 'push-off', 'decision'])(
       return original(key, value);
     });
     try {
-      const setup = initialiseNotificationDefaults(PK, () => active);
+      setActivePubkeyForWalletStorage(PK);
+      const setup = initialiseNotificationDefaults(PK);
       await persisting;
-      active = false;
+      // Sign-out wipes while PK is still the live identity: the wipe itself
+      // must abort the task — nothing else will before the keys are deleted.
       let wiped = false;
       const wipe = wipeAccountCaches(PK).then(() => {
         wiped = true;
@@ -212,7 +215,7 @@ it.each(['watcher', 'push-off', 'decision'])(
       ]);
       expect(await AsyncStorage.getItem(`marmot_push_enabled_v1_${OTHER_PK}`)).toBe('0');
       setItem.mockImplementation(original);
-      await initialiseNotificationDefaults(PK, () => true);
+      await initialiseNotificationDefaults(PK);
       expect(await AsyncStorage.getItem(decisionKey)).not.toBeNull();
       expect(await AsyncStorage.getItem(watcherKey)).not.toBeNull();
     } finally {

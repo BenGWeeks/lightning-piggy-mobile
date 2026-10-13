@@ -4,9 +4,9 @@ import { AppState } from 'react-native';
 
 import { useNotificationDefaults } from './useNotificationDefaults';
 import { enableMarmotPush } from '../services/marmotPushRegistration';
+import { setActivePubkeyForWalletStorage } from '../services/walletStorageService';
 
 let mockAccount = { isLoggedIn: true, pubkey: 'first' as string | null };
-let mockLivePubkey: string | null = 'first';
 let mockBlur: (() => void) | undefined;
 jest.mock('../services/notificationService', () => ({
   ...jest.requireActual('../services/notificationService'),
@@ -14,9 +14,6 @@ jest.mock('../services/notificationService', () => ({
 }));
 
 jest.mock('../contexts/NostrContext', () => ({ useNostr: () => mockAccount }));
-jest.mock('../services/nostrService', () => ({
-  getCurrentUserPubkey: () => mockLivePubkey,
-}));
 jest.mock('@react-navigation/native', () => {
   const { useEffect } = jest.requireActual('react');
   return {
@@ -48,7 +45,8 @@ beforeEach(async () => {
   jest.clearAllMocks();
   jest.useFakeTimers();
   mockAccount = { isLoggedIn: true, pubkey: 'first' };
-  mockLivePubkey = 'first';
+  // The live identity mirror NostrProvider publishes before paint.
+  setActivePubkeyForWalletStorage('first');
   AppState.currentState = 'active';
 });
 afterEach(() => jest.useRealTimers());
@@ -104,7 +102,7 @@ it.each(['switch', 'sign-out'])(
       action === 'switch'
         ? { isLoggedIn: true, pubkey: 'second' }
         : { isLoggedIn: false, pubkey: null };
-    mockLivePubkey = mockAccount.pubkey;
+    setActivePubkeyForWalletStorage(mockAccount.pubkey);
     rerender({});
     await act(async () => release());
     expect(await AsyncStorage.getItem(pushKey)).toBeNull();
@@ -128,7 +126,7 @@ it.each(['switch', 'sign-out'])(
     act(() => mockBlur?.());
     // NostrProvider updates its live identity while freezeOnBlur prevents this
     // hook from rendering again: its useNostr snapshot still says 'first'.
-    mockLivePubkey = action === 'switch' ? 'second' : null;
+    setActivePubkeyForWalletStorage(action === 'switch' ? 'second' : null);
     await act(async () => release());
     expect(await AsyncStorage.getItem(pushKey)).toBeNull();
     expect(await AsyncStorage.getItem(decisionKey)).toBeNull();
