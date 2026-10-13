@@ -205,7 +205,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
   // hydrate and the buffered partner is confirmed followed — so we re-run
   // group routing for deferred two-party chats using the shared live path
   // to store and notify the correct room or DM. Other deferred previews
-  // leave persistence to refreshDmInbox.
+  // persist directly after adoption confirms their partners.
   // Preserve buffer order across async room creation: a later subjectless
   // chat must see the room registered by the preceding subject-tagged chat.
   let deferredRumorReplayChain = Promise.resolve();
@@ -220,6 +220,22 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         });
       return;
     }
+    chainWrite(async () => {
+      if (cancelled || !isCurrentOwner()) return;
+      await upsertDmMessages([
+        {
+          owner: viewerPubkey,
+          eventId: item.entry.id,
+          conversation: item.partnerPubkey,
+          createdAt: item.entry.createdAt,
+          sender: item.entry.fromMe ? viewerPubkey : item.partnerPubkey,
+          content: item.content ?? item.entry.text,
+          fromMe: item.entry.fromMe,
+          wireKind: item.entry.wireKind,
+        },
+      ]);
+      knownWrapIds.add(item.entry.id);
+    });
     queueInboxEntry(item.entry);
     notifyDmMessage(item.partnerPubkey);
     // claimWrapNotification: the background watch (same JS context, no follow

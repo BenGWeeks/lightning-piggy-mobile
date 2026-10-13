@@ -1,3 +1,4 @@
+import { publishFollowSet } from './followSetEvents';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fetchLatestContactList } from './contactListSync';
 import { PROFILE_RELAYS } from './nostrRelayDefaults';
@@ -50,6 +51,7 @@ export function adoptFollowSnapshot(
     const best = newestFollowSnapshot(await readFollowSnapshot(pubkey), candidate);
     await AsyncStorage.setItem(perAccountKey(FOLLOW_SNAPSHOT_KEY, pubkey), JSON.stringify(best));
     onAdopt?.(best.contacts);
+    publishFollowSet(pubkey, best.contacts);
     if (__DEV__)
       console.log(`[Nostr] follow set: ${best.contacts.length} follows (kind-3 ${best.createdAt})`);
     return best;

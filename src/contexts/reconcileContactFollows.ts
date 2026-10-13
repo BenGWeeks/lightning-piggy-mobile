@@ -1,3 +1,4 @@
+import { publishFollowSet } from '../services/followSetEvents';
 import {
   adoptFollowSnapshot,
   fetchFollowSnapshot,
@@ -23,6 +24,7 @@ export async function reconcileContactFollows(
     ...configured.filter((r) => r.read).map((r) => r.url),
   ]);
   if (fresh) contacts = (await adoptFollowSnapshot(pubkey, fresh)).contacts;
+  else publishFollowSet(pubkey, contacts);
   finish(contacts);
   return contacts;
 }

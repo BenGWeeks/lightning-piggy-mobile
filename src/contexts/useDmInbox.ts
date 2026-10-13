@@ -857,7 +857,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
   }, [isLoggedIn, setDmInbox]);
 
   const { followPubkeysRef, followHydratedRef, followGateBufferRef, deferredReplayRef } =
-    useLiveFollowGate(followPubkeys, followHydrated);
+    useLiveFollowGate(followPubkeys, followHydrated, pubkey);
 
   // Idempotent — any DM-surface (Messages tab, ConversationScreen)
   // calls this on focus. The first call flips `liveSubArmed`, the

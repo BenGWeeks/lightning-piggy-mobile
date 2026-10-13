@@ -16,6 +16,8 @@ export interface DeferredFollowGateEntry {
   // A two-party chat must be re-routed after trust hydrates: a preceding
   // subject-tagged rumor may establish its room. Preserve the original tags.
   groupRumor?: DecodedRumor;
+  /** Original decrypted body; the inbox preview may redact structured content. */
+  content?: string;
   // Notification payload to (re)fire if the partner becomes followed.
   // Undefined for own echoes / non-fresh arrivals that should stay silent.
   notify?: { title: string; body: string };

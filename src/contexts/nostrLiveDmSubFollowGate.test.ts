@@ -18,6 +18,9 @@ import {
   startLiveDmSubscription as openLiveDmSubscription,
   type LiveDmSubscriptionParams,
 } from './nostrLiveDmSub';
+import { act, renderHook } from '@testing-library/react-native';
+import { useLiveFollowGate } from './useLiveFollowGate';
+import { adoptFollowSnapshot } from '../services/contactFollowFreshness';
 import { createLiveSubFollowGateBuffer } from './liveSubFollowGate';
 import { createYieldScheduler } from './nostrDecryptPacing';
 import { nip04PlaintextCache } from './nostrSecretKeyCache';
@@ -186,6 +189,94 @@ describe('startLiveDmSubscription — follow-gate race + teardown (#851 F2)', ()
       teardown();
     },
   );
+
+  it('adoption releases buffered kind-4 and 1059 once despite known ids, then Middle passes (#1458)', async () => {
+    const middle = '4b2fcb4e3c30c1363c4af5e3a6adebfe93cd572c3d57c31aaa4479d908612036';
+    const { result, unmount } = renderHook(() =>
+      useLiveFollowGate(new Set<string>(), false, VIEWER),
+    );
+    const gate = result.current;
+    const knownWrapIdsRef = { current: { pubkey: VIEWER, set: new Set<string>() } };
+    const teardown = startLiveDmSubscription(
+      makeParams({
+        followPubkeysRef: gate.followPubkeysRef,
+        followHydratedRef: gate.followHydratedRef,
+        followGateBuffer: gate.followGateBufferRef.current,
+        setDeferredReplay: (fn) => {
+          gate.deferredReplayRef.current = fn;
+        },
+        knownWrapIdsRef,
+      }),
+    );
+    jest.mocked(nip04PlaintextCache.get).mockReturnValue('Middle plaintext');
+    await flush();
+    const now = Math.floor(Date.now() / 1000) - 600;
+    const kind4 = (id: string) => ({
+      id,
+      kind: 4,
+      pubkey: middle,
+      created_at: now,
+      tags: [['p', VIEWER]],
+      content: 'ciphertext',
+    });
+    capturedOnEvent!(kind4('buffered-middle'));
+    capturedOnEvent!({
+      id: 'buffered-wrap',
+      kind: 1059,
+      pubkey: ALICE,
+      created_at: now,
+      tags: [],
+      content: 'ciphertext',
+      rumor: {
+        kind: 14,
+        created_at: now,
+        content: 'Alice plaintext',
+        partnership: { partnerPubkey: ALICE, fromMe: false },
+      },
+    });
+    await flush();
+    expect(gate.followGateBufferRef.current.size).toBe(2);
+    expect(mockNotifyDm).not.toHaveBeenCalled();
+    knownWrapIdsRef.current.set.add('buffered-middle');
+    expect(knownWrapIdsRef.current.set.has('buffered-wrap')).toBe(true);
+    const snapshot = {
+      createdAt: 1791834639,
+      contacts: [middle, ALICE, 'b'.repeat(64)].map((pubkey) => ({
+        pubkey,
+        relay: null,
+        petname: null,
+        profile: null,
+      })),
+    };
+    await act(async () => {
+      await adoptFollowSnapshot(VIEWER, snapshot);
+    });
+    await flush();
+    expect(mockNotifyDm.mock.calls).toEqual([[middle], [ALICE]]);
+    expect(
+      jest
+        .mocked(upsertDmMessages)
+        .mock.calls.flatMap(([rows]) => rows)
+        .map(({ eventId, content, wireKind }) => ({ eventId, content, wireKind })),
+    ).toEqual([
+      { eventId: 'buffered-middle', content: 'Middle plaintext', wireKind: 4 },
+      { eventId: 'buffered-wrap', content: 'Alice plaintext', wireKind: 14 },
+    ]);
+    expect(gate.followGateBufferRef.current.size).toBe(0);
+    await act(async () => {
+      await adoptFollowSnapshot(VIEWER, snapshot);
+    });
+    capturedOnEvent!(kind4('buffered-middle'));
+    await flush();
+    expect(mockNotifyDm).toHaveBeenCalledTimes(2);
+    capturedOnEvent!(kind4('middle-after-hydration'));
+    await flush();
+    expect(mockNotifyDm).toHaveBeenCalledTimes(3);
+    expect(mockNotifyDm).toHaveBeenLastCalledWith(middle);
+    expect(gate.followGateBufferRef.current.size).toBe(0);
+    teardown();
+    unmount();
+  });
 
   it('registers a replay hook on open and clears it on teardown', async () => {
     const setDeferredReplay = jest.fn();

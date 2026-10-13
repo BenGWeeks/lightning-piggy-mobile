@@ -38,13 +38,14 @@ export function gateLiveDm({
       partnerPubkey: entry.partnerPubkey,
       ...(groupRumor ? { groupRumor } : {}),
       entry: { ...entry, text },
+      content: entry.text,
       ...(fresh && entry.wireKind !== MARMOT_WELCOME_KIND
         ? { notify: { title: 'New message', body: text } }
         : {}),
     });
     if (__DEV__)
       console.log(
-        `[Nostr] live ${label} ${entry.id.slice(0, 8)} deferred by follow-gate (partner=${entry.partnerPubkey.slice(0, 8)}, kind=${kind})`,
+        `[Nostr] live ${label} ${entry.id.slice(0, 8)} deferred by follow-gate (partner=${entry.partnerPubkey.slice(0, 8)}, kind=${kind}, follows=${follows.size}, hydrated=${hydrated}, inSet=${isFollowed(follows, entry.partnerPubkey)})`,
       );
     return 'defer';
   }

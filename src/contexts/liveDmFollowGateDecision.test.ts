@@ -119,3 +119,28 @@ it('cancels the offline replay on teardown', () => {
   expect(replay).not.toHaveBeenCalled();
   jest.useRealTimers();
 });
+
+// Babel strips console.log in NODE_ENV=test unless this diagnostic flag is set.
+const diagnosticTest = process.env.EXPO_PUBLIC_KEEP_PERF_LOGS === '1' ? it : it.skip;
+diagnosticTest.each([4, 1059] as const)('logs the exact deferral state for kind %s', (kind) => {
+  const log = jest.spyOn(console, 'log').mockImplementation(() => {});
+  try {
+    expect(
+      gateLiveDm({
+        entry,
+        kind,
+        follows: new Set([MIDDLE]),
+        hydrated: false,
+        buffer: createLiveSubFollowGateBuffer(),
+        fresh: false,
+      }),
+    ).toBe('defer');
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining(
+        `deferred by follow-gate (partner=4b2fcb4e, kind=${kind}, follows=1, hydrated=false, inSet=true)`,
+      ),
+    );
+  } finally {
+    log.mockRestore();
+  }
+});
