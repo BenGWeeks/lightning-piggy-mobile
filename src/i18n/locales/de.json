@@ -1,4 +1,8 @@
 {
+  "cardThemes": {
+    "sallie": "Sallie",
+    "poppie": "Poppie"
+  },
   "serverConnection": {
     "electrumLoadError": "Die Electrum-Einstellungen konnten nicht geladen werden. Gib die gewünschte Serveradresse ein, bevor du testest oder speicherst.",
     "test": "Verbindung testen",

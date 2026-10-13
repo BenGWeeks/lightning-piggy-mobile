@@ -109,6 +109,7 @@ const CardContent: React.FC<{
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={styles.card}
+      testID={showDetails ? `wallet-card-design-${theme.id}` : undefined}
     >
       {theme.backgroundImage && isWatchOnly ? (
         <Grayscale style={getCardBgStyle(theme.backgroundImageStyle, false)}>
@@ -200,7 +201,9 @@ const CardContent: React.FC<{
         </>
       ) : (
         <View style={styles.previewLabel}>
-          <Text style={[styles.previewName, { color: theme.textColor }]}>{theme.name}</Text>
+          <Text style={[styles.previewName, { color: theme.textColor }]}>
+            {theme.nameKey ? t(theme.nameKey) : theme.name}
+          </Text>
         </View>
       )}
     </LinearGradient>
@@ -226,7 +229,9 @@ export const MiniWalletCard: React.FC<MiniCardProps> = ({
       onPress={onPress}
       activeOpacity={0.7}
       accessibilityState={{ selected: !!selected }}
-      accessibilityLabel={t('walletCard.cardDesign', { name: theme.name })}
+      accessibilityLabel={t('walletCard.cardDesign', {
+        name: theme.nameKey ? t(theme.nameKey) : theme.name,
+      })}
       testID={`theme-${theme.id}`}
     >
       <View style={[styles.miniScaleWrapper, { width, height }]}>

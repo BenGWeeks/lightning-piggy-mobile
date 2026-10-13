@@ -1,4 +1,8 @@
 {
+  "cardThemes": {
+    "sallie": "Sallie",
+    "poppie": "Poppie"
+  },
   "serverConnection": {
     "electrumLoadError": "无法加载Electrum设置。测试或保存前，请先输入你要使用的服务器地址。",
     "test": "测试连接",

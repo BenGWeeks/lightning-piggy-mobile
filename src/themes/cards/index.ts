@@ -1,4 +1,5 @@
 import { ImageStyle } from 'react-native';
+import { knowAllCardStyles } from '../../styles/KnowAllCard.styles';
 import type { CardTheme } from '../../types/wallet';
 import { bgStyle as albyStyle } from './alby';
 import { bgStyle as bitcoinStyle } from './bitcoin';
@@ -37,6 +38,8 @@ const cardBgStyles: Record<CardTheme | 'default', ImageStyle> = {
   nostrich: nostrichStyle.full,
   'lightning-piggy': lightningPiggyStyle.full,
   'lightning-whale': lightningWhaleStyle.full,
+  sallie: knowAllCardStyles.background,
+  poppie: knowAllCardStyles.background,
   bitcoin: bitcoinStyle.full,
   alby: albyStyle.full,
   lnbits: lnbitsStyle.full,

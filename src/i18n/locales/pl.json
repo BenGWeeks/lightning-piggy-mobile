@@ -1,4 +1,8 @@
 {
+  "cardThemes": {
+    "sallie": "Sallie",
+    "poppie": "Poppie"
+  },
   "serverConnection": {
     "electrumLoadError": "Nie udało się wczytać ustawień Electrum. Przed testem lub zapisem wpisz docelowy adres serwera.",
     "test": "Testuj połączenie",

@@ -1,4 +1,8 @@
 {
+  "cardThemes": {
+    "sallie": "Sallie",
+    "poppie": "Poppie"
+  },
   "serverConnection": {
     "electrumLoadError": "Az Electrum beállításait nem sikerült betölteni. Teszt vagy mentés előtt add meg a használni kívánt szervercímet.",
     "test": "Kapcsolat tesztelése",
