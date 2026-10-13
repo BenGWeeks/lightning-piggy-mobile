@@ -2,6 +2,7 @@ import { classifyRumor, subjectFromRumor, type DecodedRumor } from '../utils/nip
 import {
   findGroupForParticipants,
   reconcileSyntheticGroup,
+  waitForPendingGroupReconciliation,
 } from '../services/groupRoutingRegistry';
 import { isSyntheticGroupId, syntheticGroupIdForParticipants } from '../utils/syntheticGroupId';
 import { appendGroupMessage, type GroupMessage } from '../services/groupMessagesStorageService';
@@ -15,14 +16,16 @@ import type { Group } from '../types/groups';
  * multi-recipient rumor would arbitrarily pick the FIRST p tag and
  * mis-catalogue the rumor as a 1:1 DM with that pubkey. Callers must
  * therefore distinguish "not a group" (safe to fall through to DM)
- * from "group-shaped, no local match" (must NOT fall through).
+ * from "group-shaped, no local match" (must NOT fall through). An unknown
+ * two-party chat awaiting trust uses DM follow-gate deferral but carries
+ * its original rumor so hydration replay can retry group routing.
  */
 export type GroupRouteResult =
   // appended; carries the group + message so the LIVE caller can fire an
   // OS notification (#279). Only live deliveries notify — see nostrLiveDmSub.
   | { kind: 'routed'; group: Group; message: GroupMessage }
   | { kind: 'group-no-match' } // group-shaped but no matching local group
-  | { kind: 'not-group' }; // 1:1 DM (or malformed) — safe to use the DM path
+  | { kind: 'not-group'; deferredGroupRumor?: DecodedRumor }; // DM fallthrough, or pending trust
 
 /**
  * Try to route a decoded kind-14 rumor as a group message.
@@ -37,11 +40,42 @@ export async function tryRouteGroupRumor(
   viewerPubkey: string,
   wrapId: string,
   shouldAbort: () => boolean = () => false,
+  passesFollowGate: (pk: string) => boolean = () => false,
 ): Promise<GroupRouteResult> {
   const cls = classifyRumor(rumor, viewerPubkey);
-  if (!cls || cls.type !== 'group') return { kind: 'not-group' };
+  if (!cls || cls.type === 'order') return { kind: 'not-group' };
+  // Two-party specialized rumors must reach the DM handlers even when
+  // a subject classifies them as a group (wallet-share redaction, Marmot
+  // Welcome joins, and encrypted-file metadata conversion).
+  const isTwoParty = cls.type === 'dm' || cls.otherParticipants.size === 1;
+  if (isTwoParty && rumor.kind !== 14) return { kind: 'not-group' };
+  // NIP-17 does not require a subject on every message. A two-party
+  // rumor can therefore belong to an already-known named room.
+  const otherParticipants =
+    cls.type === 'group' ? cls.otherParticipants : new Set([cls.partnerPubkey]);
+  let group = findGroupForParticipants(otherParticipants, viewerPubkey);
+  if (!group && cls.type === 'dm') {
+    // Ordinary live callbacks run concurrently. A preceding subject-tagged
+    // message may still be creating this room; don't split its follow-up
+    // into the DM inbox while the registry is awaiting reconciliation.
+    await waitForPendingGroupReconciliation(otherParticipants, viewerPubkey);
+    if (shouldAbort()) return { kind: 'group-no-match' };
+    group = findGroupForParticipants(otherParticipants, viewerPubkey);
+  }
+  // A subject names a room; it does not authenticate an unknown peer.
+  // Before promoting a two-party DM, preserve the receive caller's follow
+  // policy. Known rooms retain membership as their trust signal. Returning
+  // not-group lets the caller apply its usual drop/defer/skip-set behavior.
+  // Preserve every two-party chat rumor so follow hydration can retry routing.
+  // A preceding deferred subject may establish a room for a subjectless follow-up.
+  if (!group && isTwoParty && !passesFollowGate(Array.from(otherParticipants)[0])) {
+    return {
+      kind: 'not-group',
+      deferredGroupRumor: rumor,
+    };
+  }
+  if (cls.type === 'dm' && !group) return { kind: 'not-group' };
   if (shouldAbort()) return { kind: 'group-no-match' };
-  let group = findGroupForParticipants(cls.otherParticipants, viewerPubkey);
   // Always run the synthetic-reconcile path when the matched group is
   // synthetic (no kind-30200 backing it) — that's the only way later
   // `subject`-tag renames from foreign clients propagate to the local
@@ -70,7 +104,7 @@ export async function tryRouteGroupRumor(
       // (viewer included). `participantsFromRumor` returns exactly
       // that set; it's what `classifyRumor` derived `otherParticipants`
       // from minus the viewer, so re-include the viewer here.
-      const fullRoom = new Set<string>(cls.otherParticipants);
+      const fullRoom = new Set<string>(otherParticipants);
       fullRoom.add(viewerPubkey.toLowerCase());
       const synthId = syntheticGroupIdForParticipants(fullRoom);
       // memberPubkeys excludes the viewer by LP convention (see Group
@@ -79,7 +113,7 @@ export async function tryRouteGroupRumor(
         {
           groupId: synthId,
           name: subject,
-          memberPubkeys: Array.from(cls.otherParticipants),
+          memberPubkeys: Array.from(otherParticipants),
           createdAtSec: rumor.created_at,
         },
         viewerPubkey,
@@ -100,7 +134,7 @@ export async function tryRouteGroupRumor(
     // `since:` filter) may miss them. Buffering pending-group-wraps
     // for replay after a 30200 lands is tracked as a follow-up.
     if (__DEV__) {
-      const all = Array.from(cls.otherParticipants);
+      const all = Array.from(otherParticipants);
       const fp = all
         .slice(0, 3)
         .map((p) => p.slice(0, 8))

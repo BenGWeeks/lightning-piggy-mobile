@@ -153,6 +153,7 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
           owner,
           wrap.id,
           () => signal?.aborted === true,
+          passesFollowGate,
         );
         if (routeResult.kind !== 'not-group') {
           if (skipKey) {
