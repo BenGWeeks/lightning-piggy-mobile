@@ -55,6 +55,7 @@ it.each([true, false])(
       followed,
       true,
       expect.any(Function),
+      undefined,
     );
     expect(knownWrapIds.has('wrap-id')).toBe(true);
     expect(seen.has('wrap-id')).toBe(true);

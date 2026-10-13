@@ -14,6 +14,7 @@ export interface PendingMarmotInvitation {
   groupName?: string;
   groupId?: string;
   error?: boolean;
+  replacesContentlessAlert?: boolean;
 }
 type InvitationRecord = PendingMarmotInvitation & {
   status: 'pending' | 'approved';
@@ -81,32 +82,51 @@ export class MarmotPendingInvitations {
     }
     return [...groups.values()];
   }
-  receive(id: string, rumor: MarmotRumor, followed: boolean, fresh = false): Promise<boolean> {
+  receive(
+    id: string,
+    rumor: MarmotRumor,
+    followed: boolean,
+    fresh = false,
+    replacesContentlessAlert = false,
+  ): Promise<boolean> {
     const run = this.receiveChain.then(async () => {
       if (await this.read(id)) return false;
       const original = await this.backend.get(RUMOR_WRAPS_NS, rumor.id);
       if (original && (await this.read(original))) return false;
       await this.backend.set(RUMOR_WRAPS_NS, rumor.id, id);
-      await this.write({ id, rumor, fresh, status: followed ? 'approved' : 'pending' });
+      await this.write({
+        id,
+        rumor,
+        fresh,
+        replacesContentlessAlert,
+        status: followed ? 'approved' : 'pending',
+      });
       return !followed;
     });
     this.receiveChain = run.catch(() => undefined);
     return run;
   }
-  private async clearGroup(record: InvitationRecord, status: 'joined' | 'declined') {
+  private groupCandidates(record: InvitationRecord, records: InvitationRecord[]) {
+    return records
+      .filter((r) => r.id === record.id || (record.groupId && r.groupId === record.groupId))
+      .sort(newestFirst);
+  }
+  private async clearGroup(
+    record: InvitationRecord,
+    status: 'joined' | 'declined',
+    candidates: InvitationRecord[],
+  ) {
     // Persist consent by group before removing plaintext candidates. A distinct,
     // delayed Welcome can only be associated with this group after preview.
     if (status === 'declined' && record.groupId)
       await this.backend.set(DECLINED_GROUPS_NS, record.groupId, 'declined');
-    for (const candidate of await this.records()) {
-      if (candidate.id === record.id || (record.groupId && candidate.groupId === record.groupId)) {
-        await this.write({
-          id: candidate.id,
-          status,
-          ...(status === 'declined' ? { groupId: candidate.groupId } : {}),
-        });
-        await this.backend.remove('pendingWelcomes', candidate.rumor.id);
-      }
+    for (const candidate of candidates) {
+      await this.write({
+        id: candidate.id,
+        status,
+        ...(status === 'declined' ? { groupId: candidate.groupId } : {}),
+      });
+      await this.backend.remove('pendingWelcomes', candidate.rumor.id);
     }
   }
   private async validate(
@@ -160,26 +180,30 @@ export class MarmotPendingInvitations {
   resume(session: InvitationSession, isCurrent: () => boolean): Promise<void> {
     return this.process(async (pacing) => {
       await this.validate(session, isCurrent, pacing);
+      // One batch-local index serves both fallback and cleanup. Ingestion can
+      // add unpreviewed candidates during MLS work; the next pass validates them.
+      const groups = new Map<string, InvitationRecord[]>();
       for (const record of await this.records()) {
+        if (!record.groupId) continue;
+        const candidates = groups.get(record.groupId) ?? [];
+        candidates.push(record);
+        groups.set(record.groupId, candidates);
+      }
+      for (const candidates of groups.values()) {
         if (!isCurrent()) return;
-        if (
-          record.groupId &&
-          record.status === 'approved' &&
-          (await this.read(record.id))?.status === 'approved'
-        )
-          await this.join(record, session, isCurrent, pacing);
+        const approved = candidates.find((r) => r.status === 'approved');
+        if (approved)
+          await this.join(approved, candidates.sort(newestFirst), session, isCurrent, pacing);
       }
     });
   }
   private async join(
     record: InvitationRecord,
+    candidates: InvitationRecord[],
     session: InvitationSession,
     isCurrent: () => boolean,
     pacing: YieldScheduler,
   ) {
-    const candidates = (await this.records())
-      .filter((r) => r.id === record.id || (record.groupId && r.groupId === record.groupId))
-      .sort(newestFirst);
     for (const candidate of candidates) {
       if (!isCurrent()) return null;
       await pacing.maybeYield();
@@ -188,14 +212,14 @@ export class MarmotPendingInvitations {
       const group = await session.acceptWelcome(candidate.rumor);
       if (!isCurrent()) return null;
       if (group) {
-        await this.clearGroup(record, 'joined');
+        await this.clearGroup(record, 'joined', candidates);
         return group;
       }
       const raw = await this.backend.get(WELCOME_OUTCOMES_NS, candidate.rumor.id);
       if (!raw) return null; // Transient failure: retain durable approval for restart.
       const outcome = JSON.parse(raw) as WelcomeOutcome;
       if (outcome.result === 'joined') {
-        await this.clearGroup(record, 'joined');
+        await this.clearGroup(record, 'joined', candidates);
         return null;
       }
     }
@@ -210,14 +234,20 @@ export class MarmotPendingInvitations {
       const record = await this.read(id);
       if (record?.status !== 'pending' || !record.groupId || record.error || !isCurrent())
         return null;
-      return this.join(record, session, isCurrent, pacing);
+      const candidates = this.groupCandidates(record, await this.records());
+      return this.join(record, candidates, session, isCurrent, pacing);
     });
   }
   decline(id: string): Promise<void> {
     return this.serial(async () => {
       await this.receiveChain;
       const record = await this.read(id);
-      if (record?.status === 'pending') await this.clearGroup(record, 'declined');
+      if (record?.status === 'pending')
+        await this.clearGroup(
+          record,
+          'declined',
+          this.groupCandidates(record, await this.records()),
+        );
     });
   }
 }

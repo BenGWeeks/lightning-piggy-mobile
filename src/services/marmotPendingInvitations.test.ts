@@ -386,3 +386,41 @@ it('paces between join fallback attempts and disposes after success', async () =
   );
   expect(pacing.dispose).toHaveBeenCalledTimes(1);
 });
+
+it.each([10, 20, 40])(
+  'joins %i distinct followed groups with linear invitation reads, including retained tombstones',
+  async (count) => {
+    const { backend, invitations, session } = setup();
+    const tombstones = 100;
+    for (let i = 0; i < tombstones; i++)
+      await backend.set(
+        'welcomeInvitations',
+        `old-${i}`,
+        JSON.stringify({ id: `old-${i}`, status: 'declined' }),
+      );
+    for (let i = 0; i < count; i++)
+      await invitations.receive(`wrap-${i}`, { ...rumor, id: `rumor-${i}` }, true);
+    session.previewWelcome.mockImplementation(async (r) => ({
+      forThisDevice: true,
+      groupId: r.id,
+      group: { name: 'Family' },
+    }));
+    const get = jest.spyOn(backend, 'get');
+    const keys = jest.spyOn(backend, 'keys');
+    await invitations.resume(session, () => true);
+    expect(session.acceptWelcome).toHaveBeenCalledTimes(count);
+    expect(keys.mock.calls.filter(([ns]) => ns === 'welcomeInvitations')).toHaveLength(2);
+    expect(get.mock.calls.filter(([ns]) => ns === 'welcomeInvitations')).toHaveLength(
+      2 * (count + tombstones),
+    );
+    // Every group is cleaned and plaintext removed, without rescanning history.
+    for (let i = 0; i < count; i++) {
+      expect(JSON.parse((await backend.get('welcomeInvitations', `wrap-${i}`))!)).toEqual({
+        id: `wrap-${i}`,
+        status: 'joined',
+      });
+      expect(await backend.get('pendingWelcomes', `rumor-${i}`)).toBeNull();
+    }
+    expect(await invitations.list()).toEqual([]);
+  },
+);

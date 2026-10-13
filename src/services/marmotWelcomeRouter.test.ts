@@ -3,6 +3,13 @@ import type { DecodedRumor } from '../utils/nip17Unwrap';
 import { getPendingMarmotInvitations, routeMarmotWelcome } from './marmotWelcomeRouter';
 import { fireMessageNotification } from './notificationService';
 import { MarmotPendingInvitations } from './marmotPendingInvitations';
+import { createLiveRumorSurfacer } from '../contexts/liveDmRumorSurface';
+import {
+  claimWrapNotification,
+  noteContentlessWrapAlert,
+  __resetForTests,
+} from './dmWrapNotificationDedupe';
+import { dismissNotificationsFor } from './notificationService';
 
 const mockBackends = new Map<string, MarmotKvBackend>();
 const mockAccept = jest.fn().mockResolvedValue({ id: 'joined-group' });
@@ -36,10 +43,16 @@ jest.mock('./marmotStore', () => {
 });
 jest.mock('./notificationService', () => ({
   fireMessageNotification: jest.fn().mockResolvedValue('notification'),
+  dismissNotificationsFor: jest.fn().mockResolvedValue(0),
+  cancelInFlightNotifications: jest.fn(),
+  isThreadActivelyViewed: jest.fn().mockReturnValue(false),
 }));
-jest.mock('./dmWrapNotificationDedupe', () => ({
-  claimWrapNotification: jest.fn().mockReturnValue(true),
+jest.mock('./notificationHistory', () => ({
+  removeNotificationsWhere: jest.fn().mockResolvedValue([]),
 }));
+jest.mock('./dmDb', () => ({ upsertDmMessages: jest.fn() }));
+jest.mock('../contexts/nostrGroupRouting', () => ({ tryRouteGroupRumor: jest.fn() }));
+jest.mock('../contexts/nostrEventBus', () => ({ notifyDmMessage: jest.fn() }));
 
 const rumor: DecodedRumor = {
   kind: 444,
@@ -51,6 +64,7 @@ const rumor: DecodedRumor = {
 const settle = () => new Promise((resolve) => setTimeout(resolve, 200));
 beforeEach(() => {
   jest.clearAllMocks();
+  __resetForTests();
   mockSession = null;
   mockSessionChanged(null);
 });
@@ -212,4 +226,42 @@ it('coalesces a burst during blocked MLS work into one follow-up pass with bound
     mockSessionChanged(null);
     jest.useRealTimers();
   }
+});
+
+it('replaces a claimed background alert after live ingestion and delayed session startup, once', async () => {
+  const owner = '2'.repeat(64);
+  const wrapId = 'background-welcome';
+  expect(claimWrapNotification(wrapId)).toBe(true);
+  noteContentlessWrapAlert(wrapId);
+  const surface = createLiveRumorSurfacer({
+    viewerPubkey: owner,
+    isCancelled: () => false,
+    shouldAbort: () => false,
+    followPubkeysRef: { current: new Set() },
+    followGateBuffer: { defer: jest.fn(), clear: jest.fn(), reevaluate: jest.fn(), size: 0 },
+    isFreshArrival: () => true,
+    queueInboxEntry: jest.fn(),
+    knownWrapIds: new Set(),
+    seen: new Set(),
+    chainWrite: jest.fn(),
+  });
+  await surface(rumor, wrapId);
+  expect(dismissNotificationsFor).toHaveBeenCalledWith({ wrapId });
+  expect(fireMessageNotification).not.toHaveBeenCalled();
+  mockSession = { pubkey: owner, acceptWelcome: mockAccept, previewWelcome: mockPreview };
+  mockSessionChanged(mockSession);
+  await settle();
+  expect(fireMessageNotification).toHaveBeenCalledTimes(1);
+  expect(fireMessageNotification).toHaveBeenCalledWith(
+    expect.objectContaining({
+      owner,
+      threadId: `invite:${wrapId}`,
+      title: 'New group invitation',
+      body: 'New group invitation',
+    }),
+  );
+  await surface(rumor, wrapId);
+  await settle();
+  expect(fireMessageNotification).toHaveBeenCalledTimes(1);
+  expect(mockAccept).not.toHaveBeenCalled();
 });

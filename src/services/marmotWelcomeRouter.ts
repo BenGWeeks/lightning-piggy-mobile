@@ -52,7 +52,7 @@ function controller(owner: string): MarmotPendingInvitations {
       fenceBackend(createSqliteMarmotBackend(owner), gate),
       () => (controllers.get(owner) === c ? changed(owner) : undefined),
       (record) => {
-        if (!claimWrapNotification(record.id)) return;
+        if (!claimWrapNotification(record.id) && !record.replacesContentlessAlert) return;
         void fireMessageNotification({
           owner,
           kind: 'group',
@@ -116,6 +116,7 @@ export async function routeMarmotWelcome(
   followed: boolean,
   isFresh = false,
   shouldAbort: () => boolean = () => false,
+  replacesContentlessAlert = false,
 ): Promise<boolean> {
   if (rumor.kind !== MARMOT_WELCOME_KIND) return false;
   if (shouldAbort() || rumor.pubkey.toLowerCase() === owner.toLowerCase()) return true;
@@ -125,7 +126,7 @@ export async function routeMarmotWelcome(
   } catch {
     return true;
   }
-  await controller(owner).receive(wrapId, full, followed, isFresh);
+  await controller(owner).receive(wrapId, full, followed, isFresh, replacesContentlessAlert);
   if (shouldAbort()) return true;
   // Do not hold the relay decrypt queue while MLS starts or joins.
   resume(owner);

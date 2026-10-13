@@ -116,6 +116,7 @@ export function createLiveRumorSurfacer(
         followPubkeysRef.current.has(rumor.pubkey?.toLowerCase() ?? ''),
         isFreshArrival(rumor.created_at),
         shouldAbort,
+        placeholder,
       );
     } catch (error) {
       // Release the eager live-sub claims so another relay delivery can retry.
