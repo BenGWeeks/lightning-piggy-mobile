@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, fireEvent, render, waitFor, within } from '@testing-library/react-native';
-import { DeviceEventEmitter, Platform, StyleSheet } from 'react-native';
+import { DeviceEventEmitter, Modal, Platform, StyleSheet } from 'react-native';
 import SecurityScreen from './SecurityScreen';
 import { getSendThreshold, setSendThreshold } from '../../services/sendThresholdService';
 import { Toast } from '../../components/BrandedToast';
@@ -80,6 +80,58 @@ it('does not save an empty or zero Custom draft on blur', async () => {
   expect(setSendThreshold).not.toHaveBeenCalled();
 });
 
+const dismissalPaths = ['close', 'backdrop', 'back'] as const;
+
+function dismissCustomSheet(ui: ReturnType<typeof render>, path: (typeof dismissalPaths)[number]) {
+  if (path === 'back') {
+    const modal = ui.UNSAFE_getAllByType(Modal).find((node) => node.props.visible);
+    if (!modal) throw new Error('Expected the custom sheet to be visible');
+    fireEvent(modal, 'requestClose');
+  } else {
+    fireEvent.press(
+      ui.getByTestId(`security-custom-sheet-${path}`, { includeHiddenElements: true }),
+    );
+  }
+}
+
+it.each(dismissalPaths)('saves a valid Custom draft on Android %s without blur', async (path) => {
+  const platform = jest.replaceProperty(Platform, 'OS', 'android');
+  try {
+    const ui = render(<SecurityScreen />);
+    await act(async () => {});
+    act(() => mockSelect('custom'));
+    fireEvent.changeText(ui.getByTestId('security-threshold-custom-input'), '25000');
+    expect(setSendThreshold).not.toHaveBeenCalled();
+
+    await act(async () => dismissCustomSheet(ui, path));
+
+    expect(setSendThreshold).toHaveBeenCalledWith(25000, 'a'.repeat(64));
+    expect(ui.queryByTestId('security-threshold-custom-input')).toBeNull();
+    fireEvent.press(ui.getByTestId('security-confirm-large-payments'));
+    expect(mockOpenPicker).toHaveBeenLastCalledWith(
+      expect.objectContaining({ selectedValue: 'custom' }),
+    );
+  } finally {
+    platform.restore();
+  }
+});
+
+it.each(dismissalPaths)('discards empty and zero Custom drafts on %s', async (path) => {
+  const ui = render(<SecurityScreen />);
+  await act(async () => {});
+  for (const draft of ['', '0']) {
+    act(() => mockSelect('custom'));
+    fireEvent.changeText(ui.getByTestId('security-threshold-custom-input'), draft);
+    await act(async () => dismissCustomSheet(ui, path));
+    expect(ui.queryByTestId('security-threshold-custom-input')).toBeNull();
+  }
+  expect(setSendThreshold).not.toHaveBeenCalled();
+  fireEvent.press(ui.getByTestId('security-confirm-large-payments'));
+  expect(mockOpenPicker).toHaveBeenLastCalledWith(
+    expect.objectContaining({ selectedValue: '10000' }),
+  );
+});
+
 it('a failed threshold save is caught: toast, and the stored value is shown again', async () => {
   (setSendThreshold as jest.Mock).mockRejectedValueOnce(new Error('locked registry'));
   const ui = render(<SecurityScreen />);
@@ -128,7 +180,7 @@ it('moves the modal input and close button above the iOS keyboard and saves on b
     expect(setSendThreshold).not.toHaveBeenCalled();
     await act(async () => fireEvent(input, 'blur'));
     expect(setSendThreshold).toHaveBeenCalledWith(25000, 'a'.repeat(64));
-    fireEvent.press(ui.getByTestId('security-custom-sheet-close'));
+    await act(async () => fireEvent.press(ui.getByTestId('security-custom-sheet-close')));
     expect(ui.queryByTestId('security-threshold-custom-input')).toBeNull();
   } finally {
     platform.restore();

@@ -99,6 +99,10 @@ const SecurityScreen: React.FC = () => {
   };
 
   const [customOpen, setCustomOpen] = useAccountState(pubkey, false);
+  const handleCustomClose = async () => {
+    await handleCustomSave();
+    setCustomOpen(false);
+  };
   const openPicker = useSettingsPicker(pubkey, (value) => {
     if (value === 'custom') setCustomOpen(true);
     else void handlePickPreset(value === 'off' ? null : Number(value));
@@ -146,7 +150,7 @@ const SecurityScreen: React.FC = () => {
       </SettingsSection>
       <SettingsInfoSheet
         visible={customOpen}
-        onClose={() => setCustomOpen(false)}
+        onClose={handleCustomClose}
         title={t('securityScreen.custom')}
         testID="security-custom-sheet"
       >
