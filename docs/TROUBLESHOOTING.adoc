@@ -1518,3 +1518,17 @@ preserves accounts and wallets. Keep source files unchanged during the device
 flow; the first lazy screen bundle may take longer to compile on a busy host.
 See the existing Metro-host troubleshooting entries if the installed debug APK
 uses `debug_http_host` instead of the Expo development-client link.
+
+=== Marmot install cannot be invited again after joining
+
+A Welcome consumes this install's invitation key. If no fresh kind-30443
+appears in the same `d` slot, multi-device inviters correctly skip it. Earlier
+builds attempted maintenance once after joining but did not retry publication
+failure, leaving replenishment until resume or restart.
+
+`KeyPackageReplenisher` now coalesces successful joins over 30 seconds and
+retries failed maintenance with exponential delays from 30 seconds up to five
+minutes. It pauses timers in background and preserves the deadline for a
+staggered resume; OS suspension can delay publication. Sign-out cancels the
+scheduler. Maintenance reuses the installation slot and only deletes replaced
+secrets after a relay confirms the fresh publication.

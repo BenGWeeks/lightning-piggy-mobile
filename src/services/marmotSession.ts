@@ -60,6 +60,7 @@ import {
   resolveInvitees,
 } from './marmotInvitees';
 import { KeyPackageRefreshRequests } from './marmotKeyRefresh';
+import { KeyPackageReplenisher } from './marmotKeyPackageReplenisher';
 import { alignCommitForMdk, spreadProposals } from './marmotProposals';
 import { MarmotWelcomeOutbox } from './marmotWelcomeOutbox';
 import { boundGroupQueries } from './marmotGroupBackfill';
@@ -206,6 +207,7 @@ export class MarmotSession {
   private readonly gate = fence.createStopGate();
   private readonly acceptedKeyPackages = new Set<string>();
   private readonly refreshes = new KeyPackageRefreshRequests();
+  private readonly replenisher = new KeyPackageReplenisher(() => this.ensureKeyPackage());
   /** Each chat's devices per person (#1267) — read-only over group state. */
   readonly devices: MarmotDeviceTracker;
   private markReady!: () => void;
@@ -290,7 +292,7 @@ export class MarmotSession {
       client: this.client,
       backend: this.backend,
       stopped: () => this.gate.stopped,
-      onJoined: () => void this.ensureKeyPackage(),
+      onJoined: () => this.replenisher.request(),
       onFinished: () => void this.failedInvites.run(),
       keyPackageLookup: () => this.keyPackageLookup(),
     });
@@ -368,6 +370,7 @@ export class MarmotSession {
   stop(): void {
     this.gate.stop();
     this.stopWelcomeRetries?.();
+    this.replenisher.stop();
     clearFailedMarmotInvites(this.pubkey);
     const run = this.keyPackageRuns.current;
     const pushStopped = Promise.all([this.push.stop(), this.pushRegistration.stop()]);
@@ -435,6 +438,8 @@ export class MarmotSession {
         cancelled,
       });
       refresh.settle(outcome === 'published');
+      if (outcome === 'failed') this.replenisher.retry();
+      else this.replenisher.resetBackoff();
       // A sign-out of this account here whose relay cleanup failed: retry it
       // now the account's signer is back (and already in use).
       await retryPendingRetirement({
@@ -445,6 +450,7 @@ export class MarmotSession {
       });
     } catch (e) {
       refresh.settle(false); // no-op if it already succeeded
+      this.replenisher.retry();
       if (__DEV__) console.warn('[Marmot] key package publish failed:', e);
     }
   }

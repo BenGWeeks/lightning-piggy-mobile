@@ -68,9 +68,9 @@ export class MarmotWelcomeJoin {
       }
       if (this.options.stopped()) return null;
       const { group } = await this.options.client.joinGroupFromWelcome({ welcomeRumor });
+      this.options.onJoined(); // the key is spent, even if outcome persistence fails
       await markHandled(buildWelcomeOutcome(welcomeRumor, 'joined'));
       if (__DEV__) console.log(`[Marmot] joined ${group.idStr.slice(0, 8)} from welcome`);
-      this.options.onJoined(); // the joined key package is now spent
       return group;
     } catch (e) {
       // Permanent = no key we hold opens it (another device's / a deleted key).
