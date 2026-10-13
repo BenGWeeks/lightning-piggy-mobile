@@ -472,3 +472,20 @@ describe('extractSharedContact vs inline mentions (#1295)', () => {
     expect(extractSharedContact('no reference here')).toBeNull();
   });
 });
+
+it('marks blocked plain and encrypted media for the blocked-link placeholder', () => {
+  expect(parseImageMessage('https://127.0.0.1/x.jpg')).toMatchObject({ blocked: true });
+  expect(parseImageMessage('https://example.com/x.jpg')).not.toHaveProperty('blocked');
+  const fragment = '#lpe=1&alg=aes-gcm&k=abcd&n=abcd&m=image/jpeg&s=123';
+  expect(parseImageMessage('https://127.0.0.1/x' + fragment)).toMatchObject({
+    blocked: true,
+    size: 123,
+  });
+  expect(parseImageMessage('https://example.com/x' + fragment)).toMatchObject({
+    encrypted: true,
+    size: 123,
+  });
+  expect(
+    parseVoiceNote('https://127.0.0.1/x' + fragment.replace('image/jpeg', 'audio/mp4')),
+  ).toMatchObject({ blocked: true });
+});

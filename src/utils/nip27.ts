@@ -6,7 +6,7 @@
 // share one tested tokenizer.
 import * as nip19 from 'nostr-tools/nip19';
 import { classifyMediaUrl } from './noteMedia';
-import { isPublicRelayUrl } from './publicUrl';
+import { isSafeRelayHint as isPublicRelayUrl } from './remoteUrlPolicy';
 
 export type NostrContentToken =
   | { type: 'text'; text: string }
@@ -60,7 +60,7 @@ export { isPublicRelayUrl };
 
 function cleanRelays(relays: string[] | undefined): string[] {
   if (!Array.isArray(relays)) return [];
-  return relays.filter(isPublicRelayUrl).slice(0, 5);
+  return relays.filter(isPublicRelayUrl).slice(0, 3);
 }
 
 const HEX64 = /^[0-9a-f]{64}$/;

@@ -4,7 +4,9 @@ import { View, Text, TouchableOpacity, ActivityIndicator, Pressable } from 'reac
 import { Play, Pause, AlertCircle } from 'lucide-react-native';
 import { useAudioPlayer, useAudioPlayerStatus, setAudioModeAsync } from 'expo-audio';
 import { useTapToReveal } from '../hooks/useTapToReveal';
-import { isPublicHttpUrl } from '../utils/publicUrl';
+import { checkRemoteUrl, MEDIA_MAX_BYTES } from '../utils/remoteUrlPolicy';
+import { useRemoteMediaUri } from '../hooks/useRemoteMediaUri';
+import { useLocale } from '../contexts/LocaleContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createVoiceNotePlayerStyles } from '../styles/VoiceNotePlayer.styles';
 import { formatTime } from '../utils/messageContent';
@@ -59,6 +61,7 @@ interface Props {
   /** A Marmot (MIP-04) voice note: decrypted with these instead of `keyHex`. */
   marmot?: MarmotImageParams;
   mime?: string;
+  size?: number;
   /** Trust gate (#1338): stream a PLAIN note's URL on mount only for my own /
    *  followed senders. Otherwise nothing is requested until play is tapped.
    *  (Encrypted notes already fetch only on play.) Defaults to false. */
@@ -83,6 +86,7 @@ const VoiceNotePlayer: React.FC<Props> = ({
   nonceHex,
   marmot,
   mime,
+  size,
   autoLoad = false,
   testID,
   footer,
@@ -107,14 +111,20 @@ const VoiceNotePlayer: React.FC<Props> = ({
   const marmotRef = useRef(marmot);
   marmotRef.current = marmot;
 
-  // A plain note streams on mount only for a trusted sender AND a public URL;
+  // A plain note downloads on mount only for a trusted sender AND a safe URL;
   // otherwise it stays unloaded until the first tap. Consent is keyed by the
   // URL, so an edited message needs a fresh tap.
   const [plainAllowed, revealPlain] = useTapToReveal(
     `voice:${url}`,
-    autoLoad && isPublicHttpUrl(url),
+    autoLoad && checkRemoteUrl(url, { kind: 'media' }).ok,
   );
-  const source = encrypted ? localUri : plainAllowed ? url : null;
+  const { t } = useLocale();
+  const safe = checkRemoteUrl(url, { kind: 'media' }).ok;
+  const plainUri = useRemoteMediaUri(
+    !encrypted && plainAllowed && safe ? url : null,
+    MEDIA_MAX_BYTES,
+  );
+  const source = safe ? (encrypted ? localUri : plainUri) : null;
   const player = useAudioPlayer(source ?? undefined);
   const status = useAudioPlayerStatus(player);
   const isPlaying = status?.playing ?? false;
@@ -126,9 +136,9 @@ const VoiceNotePlayer: React.FC<Props> = ({
   // Fetch ciphertext → decrypt → cache a playable file, via the shared
   // per-account cache (decrypt once across remounts, #730; scoped to the
   // account and wiped on sign-out, #1241). Returns the local uri (or null on
-  // failure). No-op (returns the url) for plain notes.
+  // failure). Plain notes resolve through useRemoteMediaUri.
   const ensureLocal = useCallback(async (): Promise<string | null> => {
-    if (!encrypted) return url;
+    if (!encrypted) return plainUri;
     if (localUri) return localUri;
     const marmotParams = marmotRef.current;
     if ((!keyHex && !marmotParams) || !nonceHex) {
@@ -141,6 +151,7 @@ const VoiceNotePlayer: React.FC<Props> = ({
         url,
         kind: 'voice',
         mime,
+        size,
         keyHex,
         nonceHex,
         marmot: marmotParams,
@@ -154,7 +165,7 @@ const VoiceNotePlayer: React.FC<Props> = ({
     } finally {
       setBusy(false);
     }
-  }, [encrypted, url, localUri, keyHex, nonceHex, mime]);
+  }, [encrypted, url, localUri, keyHex, nonceHex, mime, size, plainUri]);
 
   // Once the decrypted file lands and the user had asked to play, start it
   // (the player's source only switches on the next render). Covers both a
@@ -167,6 +178,7 @@ const VoiceNotePlayer: React.FC<Props> = ({
   }, [source, player]);
 
   const onToggle = useCallback(async () => {
+    if (!safe) return;
     try {
       await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
       if (isPlaying) {
@@ -189,7 +201,18 @@ const VoiceNotePlayer: React.FC<Props> = ({
     } catch {
       // Playback is best-effort; a failed load just leaves the button idle.
     }
-  }, [isPlaying, player, current, duration, encrypted, localUri, ensureLocal, source, revealPlain]);
+  }, [
+    safe,
+    isPlaying,
+    player,
+    current,
+    duration,
+    encrypted,
+    localUri,
+    ensureLocal,
+    source,
+    revealPlain,
+  ]);
 
   // On-bubble colours: white-on-pink for my bubbles, themed for theirs.
   const fg = fromMe ? colors.outgoingBubble.foreground : colors.textBody;
@@ -199,6 +222,8 @@ const VoiceNotePlayer: React.FC<Props> = ({
   const unplayedColor = fromMe ? colors.outgoingBubble.foreground + '73' : colors.divider;
 
   const timeLabel = fmtDuration(isPlaying ? current : duration);
+
+  if (!safe) return <Text style={styles.title}>{t('messageBubble.blockedLink')}</Text>;
 
   return (
     <View style={[styles.row, fromMe ? styles.rowRight : styles.rowLeft]}>

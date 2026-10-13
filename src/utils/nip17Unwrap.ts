@@ -1,3 +1,4 @@
+import { checkRemoteUrl, MEDIA_MAX_BYTES } from './remoteUrlPolicy';
 import { nip44DecryptFrom, nostrGetEventHash } from '../services/nostrCrypto';
 import type { RawGiftWrapEvent } from '../services/nostrService';
 import { encodeEncryptedFileUrl } from './encryptedFileUrl';
@@ -358,9 +359,11 @@ export function fileMetaFromRumor(rumor: DecodedRumor): ConversationFileMeta | u
   const url = rumor.content?.trim() || tag('url');
   const keyHex = tag('decryption-key');
   const nonceHex = tag('decryption-nonce');
-  if (!url || !keyHex || !nonceHex) return undefined;
+  if (!url || !checkRemoteUrl(url, { kind: 'media' }).ok || !keyHex || !nonceHex) return undefined;
   const sizeRaw = tag('size');
   const size = sizeRaw && /^\d+$/.test(sizeRaw) ? Number(sizeRaw) : undefined;
+  if (size !== undefined && (!Number.isSafeInteger(size) || size <= 0 || size > MEDIA_MAX_BYTES))
+    return undefined;
   return {
     url,
     mime: tag('file-type') ?? 'application/octet-stream',

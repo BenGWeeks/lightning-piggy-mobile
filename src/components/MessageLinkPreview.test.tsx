@@ -1,6 +1,8 @@
 import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { Platform, StyleSheet } from 'react-native';
+import { fetchLinkPreview } from '../services/linkPreviewFetcher';
+import { getLinkPreviewEnabled } from '../services/linkPreviewPreference';
 import MessageLinkPreview from './MessageLinkPreview';
 
 jest.mock('../contexts/ThemeContext', () => ({
@@ -10,16 +12,19 @@ jest.mock('../contexts/NostrContext', () => ({ useNostr: () => ({ pubkey: 'owner
 jest.mock('../hooks/useTapToReveal', () => ({ useTapToReveal: () => [true, jest.fn()] }));
 jest.mock('./TapToLoadMedia', () => () => null);
 jest.mock('../services/linkPreviewPreference', () => ({
-  getLinkPreviewEnabled: async () => true,
+  getLinkPreviewEnabled: jest.fn(async () => true),
   subscribeLinkPreviewEnabled: () => () => {},
 }));
 jest.mock('../services/linkPreviewBlocklist', () => ({ isBlocklisted: () => false }));
 jest.mock('../services/linkPreviewFetcher', () => ({
-  fetchLinkPreview: async (url: string) => ({
+  fetchLinkPreview: jest.fn(async (url: string) => ({
     title: 'Preview',
     domain: 'example.com',
     image: `${url}/image.png`,
-  }),
+  })),
+}));
+jest.mock('../hooks/useRemoteMediaUri', () => ({
+  useRemoteMediaUri: (url: string) => `file:///cache/${encodeURIComponent(url)}`,
 }));
 // Expose the native image props so the test can deliver an actual load event.
 jest.mock('expo-image', () => ({
@@ -55,4 +60,18 @@ describe.each(['android', 'ios'] as const)('preview image layout on %s', (platfo
     const cachedImage = await remounted.findByTestId('message-link-preview-image-message');
     expect(StyleSheet.flatten(cachedImage.props.style)).toEqual(before);
   });
+});
+
+it('honours a disabled preview preference without requesting metadata', async () => {
+  jest.mocked(fetchLinkPreview).mockClear();
+  jest.mocked(getLinkPreviewEnabled).mockResolvedValueOnce(false);
+  render(<MessageLinkPreview url="https://example.com/disabled" eventId="disabled" autoLoad />);
+  await act(async () => {});
+  expect(fetchLinkPreview).not.toHaveBeenCalled();
+});
+it('never requests metadata for a blocked URL even with previews enabled', async () => {
+  jest.mocked(fetchLinkPreview).mockClear();
+  render(<MessageLinkPreview url="https://127.0.0.1/" eventId="blocked" autoLoad />);
+  await act(async () => {});
+  expect(fetchLinkPreview).not.toHaveBeenCalled();
 });

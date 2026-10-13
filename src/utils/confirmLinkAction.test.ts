@@ -9,6 +9,36 @@ import {
 import { resolveLnurlDirection } from '../services/lnurlService';
 import { INVOICE_WITH_AMOUNT } from './bolt11TestVectors';
 
+jest.mock('expo/fetch', () => ({
+  fetch: async (...args: unknown[]) => {
+    const response = await (
+      globalThis.fetch as unknown as (
+        ...args: unknown[]
+      ) => Promise<{ ok: boolean; status?: number; json?: () => Promise<unknown> }>
+    )(...args);
+    let sent = false;
+    return {
+      ...response,
+      status: response.status ?? 200,
+      headers: { get: () => null },
+      body: {
+        getReader: () => ({
+          read: async () => {
+            if (sent) return { done: true };
+            sent = true;
+            return {
+              done: false,
+              value: new TextEncoder().encode(JSON.stringify(await response.json?.())),
+            };
+          },
+          cancel: async () => {},
+          releaseLock: () => {},
+        }),
+      },
+    };
+  },
+}));
+
 jest.mock('../components/BrandedAlert', () => ({ Alert: { alert: jest.fn() } }));
 const lnurl = bech32.encode(
   'lnurl',

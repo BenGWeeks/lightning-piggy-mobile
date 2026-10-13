@@ -12,7 +12,8 @@ import {
   type EncryptedMediaRef,
 } from '../services/decryptedMediaCache';
 import { useTapToReveal } from '../hooks/useTapToReveal';
-import { isPublicHttpUrl } from '../utils/publicUrl';
+import { checkRemoteUrl } from '../utils/remoteUrlPolicy';
+import { resolveRemoteMedia } from '../services/remoteMediaCache';
 /** Encrypted thumbnails use the same account-scoped cache as chat bubbles. */
 function ChatAttachmentRow({
   item,
@@ -34,15 +35,15 @@ function ChatAttachmentRow({
   );
   const [allowed, reveal] = useTapToReveal(
     `chat-media:${item.id}:${item.url}`,
-    autoLoad && isPublicHttpUrl(item.url),
+    autoLoad && checkRemoteUrl(item.url, { kind: 'media' }).ok,
   );
   const [uri, setUri] = useState<string | null>(() =>
-    item.image?.encrypted ? peekDecryptedMedia(ref) : item.image ? item.url : null,
+    item.image?.encrypted ? peekDecryptedMedia(ref) : null,
   );
   useEffect(() => {
     let cancelled = false;
-    if (allowed && item.image?.encrypted)
-      void resolveDecryptedMedia(ref)
+    if (allowed && item.image)
+      void (item.image.encrypted ? resolveDecryptedMedia(ref) : resolveRemoteMedia(item.url))
         .then((value) => {
           if (!cancelled) setUri(value);
         })
@@ -50,7 +51,7 @@ function ChatAttachmentRow({
     return () => {
       cancelled = true;
     };
-  }, [allowed, item.image?.encrypted, ref]);
+  }, [allowed, item.image, item.url, ref]);
   const Icon =
     item.kind === 'voice'
       ? Mic
@@ -60,6 +61,7 @@ function ChatAttachmentRow({
           ? Link
           : ImageIcon;
   const press = () => {
+    if (!checkRemoteUrl(item.url, { kind: 'media' }).ok) return;
     if (item.image && !allowed) {
       reveal();
       return;
@@ -92,7 +94,11 @@ function ChatAttachmentRow({
           {item.kind === 'voice' ? t('chatMenu.voice') : item.label}
         </Text>
         <Text style={styles.muted} numberOfLines={1}>
-          {item.kind === 'image' && !allowed ? t('chatMenu.loadMedia') : item.url}
+          {!checkRemoteUrl(item.url, { kind: 'media' }).ok
+            ? t('messageBubble.blockedLink')
+            : item.kind === 'image' && !allowed
+              ? t('chatMenu.loadMedia')
+              : item.url}
         </Text>
       </View>
     </TouchableOpacity>

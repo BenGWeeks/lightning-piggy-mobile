@@ -1,3 +1,6 @@
+import { useRemoteMediaUri } from '../hooks/useRemoteMediaUri';
+import { checkRemoteUrl, MEDIA_MAX_BYTES } from '../utils/remoteUrlPolicy';
+import TapToLoadMedia from './TapToLoadMedia';
 import { npubEncode } from 'nostr-tools/nip19';
 import MessageReactionRow from './MessageReactionRow';
 import OutgoingBubbleBackground from './OutgoingBubbleBackground';
@@ -205,6 +208,7 @@ const MessageBubble: React.FC<Props> = ({
   const colors = useThemeColors();
   const styles = useMemo(() => createMessageBubbleStyles(colors), [colors]);
   const { t } = useLocale();
+  const gifUri = useRemoteMediaUri(content.kind === 'gif' ? content.url : null, MEDIA_MAX_BYTES);
 
   // Sender label (group bubbles, incoming) + a Marmot reply's quote: one header
   // slot every variant renders, so photo / GIF / invoice replies show it too.
@@ -286,7 +290,7 @@ const MessageBubble: React.FC<Props> = ({
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
         <TouchableOpacity
           activeOpacity={0.85}
-          onPress={() => onOpenGifFullscreen?.(content.url)}
+          onPress={() => gifUri && onOpenGifFullscreen?.(gifUri)}
           onLongPress={onLongPress}
           delayLongPress={350}
           style={[styles.gifCard, fromMe ? styles.gifCardMe : styles.gifCardThem]}
@@ -296,14 +300,23 @@ const MessageBubble: React.FC<Props> = ({
         >
           <OutgoingBubbleBackground fromMe={fromMe} />
           {BubbleHeader}
-          <ExpoImage
-            source={{ uri: content.url }}
-            style={styles.gifImage}
-            contentFit="cover"
-            cachePolicy="memory-disk"
-            transition={150}
-            accessibilityIgnoresInvertColors
-          />
+          {!checkRemoteUrl(content.url, { kind: 'media' }).ok ? (
+            <TapToLoadMedia
+              variant="image"
+              url={content.url}
+              fromMe={fromMe}
+              testID={`${testIdPrefix}-gif-blocked-${id}`}
+            />
+          ) : gifUri ? (
+            <ExpoImage
+              source={{ uri: gifUri }}
+              style={styles.gifImage}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+              transition={150}
+              accessibilityIgnoresInvertColors
+            />
+          ) : null}
           {renderFooter([styles.gifTime, fromMe && styles.gifTimeMe])}
         </TouchableOpacity>
       </View>,
@@ -570,6 +583,7 @@ const MessageBubble: React.FC<Props> = ({
         nonceHex={voice.nonceHex}
         marmot={voice.marmot}
         mime={voice.mime}
+        size={voice.size}
         fromMe={fromMe}
         autoLoad={autoLoadMedia}
         createdAt={createdAt}

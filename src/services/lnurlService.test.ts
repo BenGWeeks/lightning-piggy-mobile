@@ -1,6 +1,36 @@
 import { bech32 } from 'bech32';
 import { fetchInvoice, normalizeLnurlToUrl, resolveLnurlDirection } from './lnurlService';
 
+jest.mock('expo/fetch', () => ({
+  fetch: async (...args: unknown[]) => {
+    const response = await (
+      globalThis.fetch as unknown as (
+        ...args: unknown[]
+      ) => Promise<{ ok: boolean; status?: number; json?: () => Promise<unknown> }>
+    )(...args);
+    let sent = false;
+    return {
+      ...response,
+      status: response.status ?? 200,
+      headers: { get: () => null },
+      body: {
+        getReader: () => ({
+          read: async () => {
+            if (sent) return { done: true };
+            sent = true;
+            return {
+              done: false,
+              value: new TextEncoder().encode(JSON.stringify(await response.json?.())),
+            };
+          },
+          cancel: async () => {},
+          releaseLock: () => {},
+        }),
+      },
+    };
+  },
+}));
+
 // Encode an https URL as a bech32 `lnurl1…` string, mirroring the helper
 // in lnurlWithdrawService.test.ts so both directions test the same form.
 const encodeLnurl = (url: string): string => {
@@ -191,3 +221,18 @@ describe('fetchInvoice amount authorization', () => {
     },
   );
 });
+
+it.each(['https://127.0.0.1/lnurl', 'https://example.com:8443/lnurl'])(
+  'blocks a deep-linked LNURL endpoint before fetching %s',
+  async (url) => {
+    const original = globalThis.fetch;
+    const fetchMock = jest.fn();
+    globalThis.fetch = fetchMock;
+    try {
+      await expect(resolveLnurlDirection('lightning:' + url)).rejects.toThrow('Blocked');
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = original;
+    }
+  },
+);

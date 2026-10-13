@@ -1,3 +1,4 @@
+import { checkRemoteUrl } from '../utils/remoteUrlPolicy';
 import React, { useMemo } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 import { ImageIcon, Link2 } from 'lucide-react-native';
@@ -36,6 +37,14 @@ const TapToLoadMedia: React.FC<Props> = ({ variant, url, fromMe, testID, onPress
   const styles = useMemo(() => createTapToLoadMediaStyles(colors, fromMe), [colors, fromMe]);
   const host = displayHost(url);
   const iconColor = fromMe ? colors.white : colors.brandPink;
+
+  if (!checkRemoteUrl(url, { kind: variant === 'preview' ? 'preview' : 'media' }).ok) {
+    return (
+      <View style={styles.textCol} testID={testID}>
+        <Text style={styles.label}>{t('messageBubble.blockedLink')}</Text>
+      </View>
+    );
+  }
 
   if (variant === 'thumb') {
     return (

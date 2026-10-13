@@ -18,7 +18,8 @@ import {
   type BlockLimits,
 } from '../../utils/nostrContentBlocks';
 import { isSupportedImageUrl } from '../../utils/imageUrl';
-import { isPublicHttpUrl } from '../../utils/publicUrl';
+import { checkRemoteUrl, MEDIA_MAX_BYTES } from '../../utils/remoteUrlPolicy';
+import { useRemoteMediaUri } from '../../hooks/useRemoteMediaUri';
 import type { NoteMediaItem } from '../../utils/noteMedia';
 import { useIsTrustedAuthor } from '../../hooks/useFollowedPubkeys';
 import { useTapToReveal } from '../../hooks/useTapToReveal';
@@ -158,13 +159,16 @@ const MediaThumb: React.FC<{
   const isImage = !isVideo && isSupportedImageUrl(item.url);
   const [loadAllowed, reveal] = useTapToReveal(
     `nostr-image:${item.url}`,
-    autoLoad && isPublicHttpUrl(item.url),
+    autoLoad && checkRemoteUrl(item.url, { kind: 'media' }).ok,
   );
-  const gated = isImage && !loadAllowed;
+  const safe = checkRemoteUrl(item.url, { kind: 'media' }).ok;
+  const uri = useRemoteMediaUri(isImage && loadAllowed && safe ? item.url : null, MEDIA_MAX_BYTES);
+  const gated = isImage && (!loadAllowed || !safe);
   const onPress = () => {
+    if (!safe) return;
     if (gated) reveal();
     else if (isVideo || !isImage) openUrl(item.url);
-    else onImagePress(item.url);
+    else if (uri) onImagePress(uri);
   };
   return (
     <TouchableOpacity
@@ -181,9 +185,9 @@ const MediaThumb: React.FC<{
       testID={`nostr-inline-${item.type}-${index}`}
       activeOpacity={0.85}
     >
-      {isImage && loadAllowed ? (
+      {isImage && uri ? (
         <Image
-          source={{ uri: item.url }}
+          source={{ uri }}
           style={styles.thumbImage}
           contentFit="cover"
           cachePolicy="memory-disk"

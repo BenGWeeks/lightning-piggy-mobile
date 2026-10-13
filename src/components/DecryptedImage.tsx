@@ -1,5 +1,6 @@
+import { Image } from 'expo-image';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Image, ActivityIndicator } from 'react-native';
+import { View, Text, ActivityIndicator } from 'react-native';
 import { AlertCircle } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createDecryptedImageStyles } from '../styles/DecryptedImage.styles';
@@ -8,13 +9,16 @@ import {
   peekDecryptedMedia,
   resolveDecryptedMedia,
 } from '../services/decryptedMediaCache';
+import { useLocale } from '../contexts/LocaleContext';
+import { checkRemoteUrl } from '../utils/remoteUrlPolicy';
+import { resolveRemoteMedia } from '../services/remoteMediaCache';
 import type { MarmotImageParams } from '../utils/messageContent';
 
 /**
  * Renders an inline chat image that may be either plain or encrypted (#688):
  *
  *  - **Plain** (`encrypted=false`): legacy / unencrypted images (or images
- *    from other clients) — display the URL directly via `<Image>`.
+ *    from other clients) — download with a hard byte cap and display a local cache URI.
  *  - **Encrypted** (`encrypted=true`, NIP-17 kind 15): fetch the
  *    AES-256-GCM ciphertext from Blossom, decrypt with the key/nonce carried
  *    inside the E2E DM, write the plaintext to a cache file, and display that
@@ -35,6 +39,7 @@ interface Props {
   keyHex?: string;
   nonceHex?: string;
   mime?: string;
+  size?: number;
   /** A Marmot (MIP-04) photo: decrypted with these instead of `keyHex`. */
   marmot?: MarmotImageParams;
   /** Style applied to the rendered <Image>. */
@@ -52,16 +57,19 @@ const DecryptedImage: React.FC<Props> = ({
   keyHex,
   nonceHex,
   mime,
+  size,
   marmot,
   style,
   accessibilityLabel,
   onResolved,
 }) => {
   const colors = useThemeColors();
+  const { t } = useLocale();
+  const blocked = !checkRemoteUrl(url, { kind: 'media' }).ok;
   const styles = useMemo(() => createDecryptedImageStyles(colors), [colors]);
 
-  // For plain images we feed the URL straight to <Image>. For encrypted ones
-  // we resolve a cache `file://` URI after fetch+decrypt; seed from the cache
+  // All images resolve to local cache URIs; encrypted images decrypt first.
+  // Seed encrypted images from the account cache
   // so an already-decrypted image shows instantly with no spinner.
   const [localUri, setLocalUri] = useState<string | null>(() =>
     encrypted ? peekDecryptedMedia({ url, kind: 'image', mime, keyHex, nonceHex, marmot }) : null,
@@ -74,15 +82,15 @@ const DecryptedImage: React.FC<Props> = ({
   const marmotSig = marmot ? `${marmot.ciphertextSha256}:${marmot.keysHex.join(',')}` : '';
 
   useEffect(() => {
-    if (!encrypted) return;
+    if (blocked) return;
     const marmotParams = marmotRef.current;
-    if ((!keyHex && !marmotParams) || !nonceHex) {
+    if (encrypted && ((!keyHex && !marmotParams) || !nonceHex)) {
       setFailed(true);
       return;
     }
-    const ref = { url, kind: 'image' as const, mime, keyHex, nonceHex, marmot: marmotParams };
+    const ref = { url, kind: 'image' as const, mime, size, keyHex, nonceHex, marmot: marmotParams };
     // Already decrypted this session → reuse immediately, no work.
-    const memo = peekDecryptedMedia(ref);
+    const memo = encrypted ? peekDecryptedMedia(ref) : null;
     if (memo) {
       setLocalUri(memo);
       onResolved?.(memo);
@@ -91,7 +99,7 @@ const DecryptedImage: React.FC<Props> = ({
     let cancelled = false;
     setFailed(false);
     setLocalUri(null);
-    resolveDecryptedMedia(ref).then(
+    (encrypted ? resolveDecryptedMedia(ref) : resolveRemoteMedia(url)).then(
       (uri) => {
         if (cancelled) return;
         setLocalUri(uri);
@@ -108,7 +116,14 @@ const DecryptedImage: React.FC<Props> = ({
     return () => {
       cancelled = true;
     };
-  }, [encrypted, url, keyHex, nonceHex, mime, marmotSig, onResolved]);
+  }, [blocked, encrypted, url, keyHex, nonceHex, mime, size, marmotSig, onResolved]);
+
+  if (blocked)
+    return (
+      <View style={styles.center}>
+        <Text style={styles.blocked}>{t('messageBubble.blockedLink')}</Text>
+      </View>
+    );
 
   if (failed) {
     return (
@@ -119,7 +134,7 @@ const DecryptedImage: React.FC<Props> = ({
   }
 
   // Encrypted + still decrypting → spinner placeholder at the image footprint.
-  if (encrypted && !localUri) {
+  if (!localUri) {
     return (
       <View style={[style, styles.center]}>
         <ActivityIndicator size="small" color={colors.brandPink} />
@@ -129,9 +144,10 @@ const DecryptedImage: React.FC<Props> = ({
 
   return (
     <Image
-      source={{ uri: encrypted ? (localUri as string) : url }}
+      source={{ uri: localUri as string }}
       style={style}
-      resizeMode="cover"
+      contentFit="cover"
+      cachePolicy="memory-disk"
       accessibilityLabel={accessibilityLabel}
     />
   );

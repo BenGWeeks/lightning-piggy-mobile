@@ -1,3 +1,4 @@
+import { fetchBounded, PREVIEW_MAX_BYTES } from '../utils/remoteUrlPolicy';
 /**
  * LNURL service for resolving lightning addresses and LNURL strings to invoices.
  *
@@ -258,25 +259,13 @@ async function resolveLnurlFromUrl(
   | { tag: 'payRequest'; params: LnurlPayParams }
   | { tag: 'withdrawRequest'; params: LnurlWithdrawParams }
 > {
-  // Bound the fetch — RN's fetch can hang indefinitely on a network stall, and
-  // for a cold-start deep link that would leave the user with no resolution and
-  // no error toast for an unbounded time.
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), LNURL_FETCH_TIMEOUT_MS);
-  let response: Response;
-  try {
-    response = await fetch(url, { signal: controller.signal });
-  } catch (e) {
-    throw new Error(`Could not reach LNURL endpoint: ${(e as Error).message}`);
-  } finally {
-    clearTimeout(timer);
-  }
-
-  if (!response.ok) {
-    throw new Error(`Failed to resolve LNURL (${response.status})`);
-  }
-
-  const data = await response.json();
+  const { bytes } = await fetchBounded(url, {
+    maxBytes: PREVIEW_MAX_BYTES,
+    timeoutMs: LNURL_FETCH_TIMEOUT_MS,
+    redirects: 'https-only',
+    maxRedirects: 3,
+  });
+  const data = JSON.parse(new TextDecoder().decode(bytes));
   return parseLnurlResponse(data);
 }
 

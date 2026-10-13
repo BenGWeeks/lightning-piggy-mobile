@@ -4,7 +4,7 @@ import { View, TouchableOpacity } from 'react-native';
 import { useLocale } from '../contexts/LocaleContext';
 import type { MessageBubbleStyles } from '../styles/MessageBubble.styles';
 import type { ParsedImageMessage } from '../utils/messageContent';
-import { isPublicHttpUrl } from '../utils/publicUrl';
+import { checkRemoteUrl } from '../utils/remoteUrlPolicy';
 import { useTapToReveal } from '../hooks/useTapToReveal';
 import DecryptedImage from './DecryptedImage';
 import TapToLoadMedia, { displayHost } from './TapToLoadMedia';
@@ -58,20 +58,21 @@ const MessageImageBubble: React.FC<Props> = ({
   const { t } = useLocale();
   const [loadAllowed, reveal] = useTapToReveal(
     `image:${messageId}:${image.url}`,
-    autoLoad && isPublicHttpUrl(image.url),
+    autoLoad && checkRemoteUrl(image.url, { kind: 'media' }).ok,
   );
   // For plain images the fetchable URL is the display source; for encrypted
   // ones DecryptedImage resolves a data: URI, which it reports back here so
   // the fullscreen tap shows the decrypted image, not the ciphertext blob.
-  const [displayUri, setDisplayUri] = useState<string | null>(image.encrypted ? null : image.url);
-  const canOpen = loadAllowed && !!onOpenImageFullscreen && !!displayUri;
+  const [displayUri, setDisplayUri] = useState<string | null>(null);
+  const safe = checkRemoteUrl(image.url, { kind: 'media' }).ok;
+  const canOpen = safe && loadAllowed && !!onOpenImageFullscreen && !!displayUri;
   // Until revealed, a tap loads the image; long-press still opens the menu.
   const onPress = loadAllowed ? () => displayUri && onOpenImageFullscreen?.(displayUri) : reveal;
   return (
     <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
       <TouchableOpacity
         activeOpacity={0.85}
-        onPress={onPress}
+        onPress={safe ? onPress : undefined}
         onLongPress={onLongPress}
         delayLongPress={350}
         style={[styles.imageBubble, fromMe ? styles.imageBubbleMe : styles.imageBubbleThem]}
@@ -103,7 +104,8 @@ const MessageImageBubble: React.FC<Props> = ({
             marmot={image.marmot}
             style={styles.imageBubbleImage}
             accessibilityLabel={t('messageBubble.sharedImage')}
-            onResolved={image.encrypted ? setDisplayUri : undefined}
+            onResolved={setDisplayUri}
+            size={image.size}
           />
         ) : (
           <TapToLoadMedia

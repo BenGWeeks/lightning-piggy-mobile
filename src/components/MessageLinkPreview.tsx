@@ -1,3 +1,5 @@
+import { checkRemoteUrl, PREVIEW_IMAGE_MAX_BYTES } from '../utils/remoteUrlPolicy';
+import { useRemoteMediaUri } from '../hooks/useRemoteMediaUri';
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Linking, Text, TouchableOpacity, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
@@ -46,7 +48,12 @@ const LinkPreviewImage = React.memo(function LinkPreviewImage({
   eventId: string;
   styles: ReturnType<typeof createMessageLinkPreviewStyles>;
 }) {
-  const source = useMemo(() => ({ uri: url }), [url]);
+  const uri = useRemoteMediaUri(
+    checkRemoteUrl(url, { kind: 'preview' }).ok ? url : null,
+    PREVIEW_IMAGE_MAX_BYTES,
+  );
+  const source = useMemo(() => ({ uri: uri ?? '' }), [uri]);
+  if (!uri) return null;
 
   return (
     <ExpoImage
@@ -68,6 +75,7 @@ const MessageLinkPreview: React.FC<Props> = ({
   autoLoad = false,
 }) => {
   const colors = useThemeColors();
+  const blocked = !checkRemoteUrl(url, { kind: 'preview' }).ok;
   const styles = useMemo(() => createMessageLinkPreviewStyles(colors, fromMe), [colors, fromMe]);
   const { pubkey } = useNostr();
   // Owner-tagged: never shows the previous account's preference after a switch.
@@ -97,7 +105,7 @@ const MessageLinkPreview: React.FC<Props> = ({
   // the card doesn't briefly render the previous URL's title/image
   // while the new fetch is in-flight.
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || blocked) return;
     if (!loadAllowed) return;
     if (isBlocklisted(url)) return;
     setPreview(null);
@@ -115,12 +123,21 @@ const MessageLinkPreview: React.FC<Props> = ({
     return () => {
       cancelled = true;
     };
-  }, [enabled, loadAllowed, url]);
+  }, [enabled, loadAllowed, url, blocked]);
 
   // Preference disabled, blocklisted, or fetch yielded no metadata —
   // render nothing extra. The bare URL stays clickable in the
   // surrounding bubble text.
   if (enabled !== true) return null;
+  if (blocked)
+    return (
+      <TapToLoadMedia
+        variant="preview"
+        url={url}
+        fromMe={fromMe}
+        testID={`message-link-preview-blocked-${eventId}`}
+      />
+    );
   if (isBlocklisted(url)) return null;
   // Untrusted sender: no request until the reader opts in.
   if (!loadAllowed) {

@@ -144,11 +144,6 @@ export function nprofileEncode(pubkey: string, relays: string[] = []): string {
   return nip19.nprofileEncode({ pubkey, relays });
 }
 
-export interface DecodedProfileReference {
-  pubkey: string;
-  relays: string[];
-}
-
 // Best-effort relay hints to embed in an outgoing nprofile. Prefers the
 // contact's own kind-3 relay (where the user's follow entry suggests they
 // publish), falls back to the viewer's NIP-65 read relays (the places we
@@ -198,26 +193,7 @@ export function buildOwnProfileRelayHints(ownWriteRelays: string[], max = 2): st
   return deduped;
 }
 
-// Accepts a NIP-21 `nostr:` URI or a bare bech32 identifier and returns
-// the pubkey + optional relay hints when it's a profile reference
-// (npub or nprofile). Returns null for anything else (note, nevent, …).
-// NIP-21 URI schemes are case-insensitive — `NOSTR:`, `Nostr:`, etc.
-// all need to be accepted, so strip with a case-insensitive match.
-export function decodeProfileReference(input: string): DecodedProfileReference | null {
-  const stripped = /^nostr:/i.test(input) ? input.slice(6) : input;
-  try {
-    const decoded = nip19.decode(stripped);
-    if (decoded.type === 'npub') {
-      return { pubkey: decoded.data, relays: [] };
-    }
-    if (decoded.type === 'nprofile') {
-      return { pubkey: decoded.data.pubkey, relays: decoded.data.relays ?? [] };
-    }
-  } catch {
-    // fall through
-  }
-  return null;
-}
+export { decodeProfileReference, type DecodedProfileReference } from '../utils/profileReference';
 
 // Kind-0 parsing lives in utils/profileContent (pure); re-exported for importers.
 export { parseProfileContent };

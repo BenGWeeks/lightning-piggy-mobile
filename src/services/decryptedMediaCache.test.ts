@@ -46,6 +46,7 @@ jest.mock('expo-sharing', () => ({
 jest.mock('expo/fetch', () => ({
   fetch: async (...args: unknown[]) => {
     const res = await globalThis.fetch(...(args as Parameters<typeof globalThis.fetch>));
+    if (res.body?.getReader) return res;
     let done = false;
     return {
       ...res,
@@ -58,6 +59,7 @@ jest.mock('expo/fetch', () => ({
             return { done: false, value: new Uint8Array(await res.arrayBuffer()) };
           },
           cancel: async () => {},
+          releaseLock: () => {},
         }),
       },
     };
@@ -115,12 +117,27 @@ const ref: EncryptedMediaRef = {
 const wrongKeys: EncryptedMediaRef = { ...ref, keyHex: encryptFile(PLAIN).keyHex };
 
 const fetchMock = jest.fn();
-function serveCiphertext() {
-  fetchMock.mockImplementation(async () => ({
+function cipherResponse() {
+  let sent = false;
+  return {
     ok: true,
     status: 200,
-    arrayBuffer: async () => sealed.ciphertext.slice().buffer,
-  }));
+    headers: { get: () => null },
+    body: {
+      getReader: () => ({
+        read: async () => {
+          if (sent) return { done: true };
+          sent = true;
+          return { done: false, value: sealed.ciphertext.slice() };
+        },
+        cancel: async () => {},
+        releaseLock: () => {},
+      }),
+    },
+  };
+}
+function serveCiphertext() {
+  fetchMock.mockImplementation(async () => cipherResponse());
 }
 
 const filesUnder = (owner: string) =>
@@ -249,12 +266,7 @@ describe('decryptedMediaCache', () => {
     fetchMock.mockImplementationOnce(
       () =>
         new Promise((resolve) => {
-          release = () =>
-            resolve({
-              ok: true,
-              status: 200,
-              arrayBuffer: async () => sealed.ciphertext.slice().buffer,
-            });
+          release = () => resolve(cipherResponse());
         }),
     );
     const pending = resolveDecryptedMedia(ref);
@@ -275,12 +287,7 @@ describe('decryptedMediaCache', () => {
       fetchMock.mockImplementationOnce(
         () =>
           new Promise((resolve) => {
-            release = () =>
-              resolve({
-                ok: true,
-                status: 200,
-                arrayBuffer: async () => sealed.ciphertext.slice().buffer,
-              });
+            release = () => resolve(cipherResponse());
           }),
       );
       const pending = resolveDecryptedMedia(ref);
@@ -360,12 +367,7 @@ describe('decryptedMediaCache', () => {
     fetchMock.mockImplementationOnce(
       () =>
         new Promise((resolve) => {
-          release = () =>
-            resolve({
-              ok: true,
-              status: 200,
-              arrayBuffer: async () => sealed.ciphertext.slice().buffer,
-            });
+          release = () => resolve(cipherResponse());
         }),
     );
     const stale = resolveDecryptedMedia(ref);
@@ -638,4 +640,29 @@ it('removes named exports on account wipe', async () => {
   await wipeDecryptedMediaForOwner(A);
   expect(mockFiles.has(target)).toBe(false);
   release();
+});
+
+it.each(['https://127.0.0.1/x', 'http://example.com/x', 'https://example.com:8443/x'])(
+  'never fetches blocked encrypted media %s',
+  async (url) => {
+    setDecryptedMediaOwner(A);
+    await expect(resolveDecryptedMedia({ ...ref, url })).rejects.toThrow('Blocked');
+    expect(fetchMock).not.toHaveBeenCalled();
+  },
+);
+it.each([0, -1, NaN, 1.5, 50 * 1024 * 1024 + 1])(
+  'rejects invalid advertised size %s before fetching',
+  async (size) => {
+    setDecryptedMediaOwner(A);
+    await expect(resolveDecryptedMedia({ ...ref, size })).rejects.toThrow('size');
+    expect(fetchMock).not.toHaveBeenCalled();
+  },
+);
+it('honours the advertised size on download', async () => {
+  setDecryptedMediaOwner(A);
+  await expect(resolveDecryptedMedia({ ...ref, size: 1 })).rejects.toThrow('limit');
+  expect(filesUnder(A)).toEqual([]);
+  expect(await resolveDecryptedMedia({ ...ref, size: sealed.ciphertext.length })).toContain(
+    'file:///',
+  );
 });

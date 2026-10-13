@@ -1,6 +1,15 @@
+import { checkRemoteUrl } from '../utils/remoteUrlPolicy';
+import { t } from '../i18n';
+
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { Buffer } from 'buffer';
+
+export class InvalidBlossomDescriptorError extends Error {
+  constructor() {
+    super(t('messageBubble.invalidUpload'));
+  }
+}
 
 /**
  * Minimal Blossom client (BUD-01 / BUD-02).
@@ -100,7 +109,12 @@ function put(
   });
 }
 
-function descriptorUrl(status: number, responseText: string): string {
+function descriptorUrl(
+  status: number,
+  responseText: string,
+  server: string,
+  hashHex: string,
+): string {
   if (status < 200 || status >= 300) {
     throw new Error(
       `Blossom upload failed: ${status}${responseText ? ` ${responseText.slice(0, 200)}` : ''}`,
@@ -113,7 +127,17 @@ function descriptorUrl(status: number, responseText: string): string {
     throw new Error('Blossom server returned invalid JSON');
   }
   if (!descriptor?.url) throw new Error('Blossom server did not return a URL');
-  return descriptor.url;
+  const checked = checkRemoteUrl(descriptor.url, { kind: 'blossom' });
+  if (!checked.ok) throw new InvalidBlossomDescriptorError();
+  const url = new URL(checked.url);
+  if (
+    url.origin !== new URL(server).origin ||
+    !url.pathname
+      .split('/')
+      .some((segment) => segment === hashHex || segment.startsWith(`${hashHex}.`))
+  )
+    throw new InvalidBlossomDescriptorError();
+  return checked.url;
 }
 
 /**
@@ -136,6 +160,8 @@ export async function uploadToBlossomServers(
   contentTypeOverride?: string,
 ): Promise<string> {
   const servers = [...new Set(serverUrls.map(trimServer).filter(Boolean))];
+  if (servers.some((server) => !checkRemoteUrl(server, { kind: 'blossom' }).ok))
+    throw new InvalidBlossomDescriptorError();
   if (servers.length === 0) throw new Error('Blossom server URL is empty');
 
   // Prefer the base64 payload returned directly by expo-image-picker (or
@@ -183,7 +209,7 @@ export async function uploadToBlossomServers(
         body,
         UPLOAD_TIMEOUT_MS,
       );
-      const url = descriptorUrl(status, responseText);
+      const url = descriptorUrl(status, responseText, servers[i], hashHex);
       // Backups: every other server mirrors the stored blob (fire-and-forget).
       for (const backup of servers.filter((_, j) => j !== i)) {
         void put(
@@ -200,6 +226,7 @@ export async function uploadToBlossomServers(
       }
       return url;
     } catch (e) {
+      if (e instanceof InvalidBlossomDescriptorError) throw e;
       lastError = e;
       console.warn('[Blossom] upload failed on', servers[i], e);
     }
@@ -237,6 +264,7 @@ export async function uploadEncryptedBlobToBlossom(
       'application/octet-stream',
     );
   } catch (e) {
+    if (e instanceof InvalidBlossomDescriptorError) throw e;
     const tried = new Set(serverUrls.map(trimServer));
     const fallbacks = ENCRYPTED_BLOB_FALLBACK_SERVERS.filter((u) => !tried.has(trimServer(u)));
     if (fallbacks.length === 0) throw e;
