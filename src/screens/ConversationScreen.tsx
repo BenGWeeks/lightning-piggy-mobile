@@ -562,13 +562,13 @@ const ConversationScreen: React.FC = () => {
           peerMediaTrusted={peerMediaTrusted}
         />
       );
-      // Each inverted-list cell is flipped whole, so the divider still draws
-      // above the row.
+      // Inverted cells reverse direct siblings. Keep the divider and message
+      // in one normal-column child so the divider stays visually above it.
       return item.id === read.dividerId ? (
-        <>
+        <View>
           <UnreadDivider testID="conversation-unread-divider" />
           {row}
-        </>
+        </View>
       ) : (
         row
       );
