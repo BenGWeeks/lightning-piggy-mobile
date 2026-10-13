@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['*']
   pull_request:
     branches: [main]
   # Manual runs always include the native jobs (see the `changes` job).
@@ -18,14 +19,7 @@ permissions:
   contents: read
 
 jobs:
-  # Gate for the slow native jobs (iOS pod build ~27 min, Android APK
-  # alignment ~25 min, ...). They run when native-relevant files change, on
-  # every push to main, on manual dispatch, or when a PR carries the
-  # `ci:native` label. A *skipped* job reports as skipped, which satisfies
-  # required status checks — unlike a workflow-level `on.paths` filter, which
-  # leaves a required check "pending" forever. Only TypeScript, ESLint and
-  # Prettier are required today, and they are never gated.
-  # The path list lives in scripts/ci-native-paths.sh.
+  # Keep native check names stable; skipped jobs still report a merge signal.
   changes:
     name: Detect native changes
     runs-on: ubuntu-latest
@@ -39,53 +33,46 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-          sparse-checkout: scripts/ci-native-paths.sh
-          sparse-checkout-cone-mode: false
-      - id: filter
-        env:
-          GH_TOKEN: ${{ github.token }}
-          EVENT: ${{ github.event_name }}
-          REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          native=false
-          if [ "$EVENT" != "pull_request" ]; then
-            echo "Event '$EVENT' (push to main / manual run): always run native jobs."
-            native=true
-          else
-            # Read labels live (not from the event payload) so that adding
-            # `ci:native` and using "Re-run all jobs" picks the label up.
-            if labels=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.labels[].name') \
-              && files=$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" \
-                --jq '.[] | .filename, (.previous_filename // empty)'); then
-              if grep -Fxq 'ci:native' <<<"$labels"; then
-                echo "PR has the ci:native label: run native jobs."
-                native=true
-              elif [ "$(wc -l <<<"$files")" -ge 3000 ]; then
-                # The files API caps at 3000 entries; can't prove it is JS-only.
-                echo "3000+ changed files: run native jobs to be safe."
-                native=true
-              elif [ ! -f scripts/ci-native-paths.sh ] || ! bash -n scripts/ci-native-paths.sh; then
-                # A PR that deletes or breaks the filter must not skip native validation.
-                echo "::warning::Native path filter missing or invalid; running native jobs to be safe."
-                native=true
-              else
-                rc=0
-                bash scripts/ci-native-paths.sh <<<"$files" || rc=$?
-                case "$rc" in
-                  0) native=true ;;
-                  1) echo "No native-relevant files changed: skipping native jobs." ;;
-                  *) echo "::warning::Native path filter failed (exit $rc); running native jobs to be safe."
-                     native=true ;;
-                esac
-              fi
-            else
-              echo "::warning::Could not list PR files/labels; running native jobs to be safe."
-              native=true
-            fi
-          fi
-          echo "native=$native" >> "$GITHUB_OUTPUT"
-          echo "### Native jobs: $native" >> "$GITHUB_STEP_SUMMARY"
+      - uses: dorny/paths-filter@v3
+        id: filter
+        if: github.event_name == 'pull_request'
+        with:
+          filters: |
+            native:
+              - 'package.json'
+              - 'package-lock.json'
+              - 'app.config.ts'
+              - 'app.json'
+              - 'eas.json'
+              - 'plugins/**'
+              - 'android/**'
+              - 'ios/**'
+              - 'modules/**'
+              - 'patches/**'
+              - 'metro.config.js'
+              - 'babel.config.js'
+              - '.github/workflows/ci.yml'
+
+  bundle:
+    name: Metro bundle
+    needs: []
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      EXPO_NO_TELEMETRY: '1'
+      CI: '1'
+      EXPO_NO_DOTENV: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npx expo export --platform android --dev --output-dir /tmp/bundle
+
   typecheck:
     name: TypeScript
     runs-on: ubuntu-latest
@@ -149,7 +136,10 @@ jobs:
   native-sdk-tests:
     name: Native SDK artifact tests
     needs: changes
-    if: needs.changes.outputs.native == 'true'
+    if: >-
+      needs.changes.outputs.native == 'true' ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))) ||
+      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -165,7 +155,10 @@ jobs:
   android-native-alignment:
     name: Android APK 16 KB alignment
     needs: changes
-    if: needs.changes.outputs.native == 'true'
+    if: >-
+      needs.changes.outputs.native == 'true' ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))) ||
+      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -209,7 +202,10 @@ jobs:
   ios-engine-lifecycle:
     name: iOS engine lifecycle
     needs: changes
-    if: needs.changes.outputs.native == 'true'
+    if: >-
+      needs.changes.outputs.native == 'true' ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))) ||
+      github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     timeout-minutes: 5
     steps:
@@ -235,7 +231,10 @@ jobs:
   ios-native-build:
     name: iOS native pod build
     needs: changes
-    if: needs.changes.outputs.native == 'true'
+    if: >-
+      needs.changes.outputs.native == 'true' ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))) ||
+      github.event_name == 'workflow_dispatch'
     runs-on: macos-26
     timeout-minutes: 90
     env:

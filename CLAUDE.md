@@ -118,6 +118,8 @@ The app supports three Nostr signers, branched on `signerType` in `NostrContext.
 
 ## Pull Request Titles
 
+Release notes are generated from merged PR titles. Use Conventional Commits and imperative, user-facing wording for `feat` and `fix`; no shared notes file needs updating.
+
 Follow [Conventional Commits](https://www.conventionalcommits.org/) plus a trailing issue reference when the PR resolves one:
 
 ```

@@ -67,7 +67,11 @@ test('unsigned event uses Ben, kind 1, time, t tags and release r tag', () => {
   ]);
   assert.equal(event.content, formatReleaseNote({ tag, notes: '- Fix' }));
 });
-test('CLI event mode reads notes and emits unsigned JSON with current time', () => {
+test('CLI event mode reads generated notes and emits unsigned JSON with current time', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-notes-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const notesFile = path.join(dir, 'notes.md');
+  fs.writeFileSync(notesFile, '### Fixed\n\n- Restore sync (#1440)\n');
   const before = Math.floor(Date.now() / 1000);
   const event = JSON.parse(
     execFileSync(
@@ -76,6 +80,8 @@ test('CLI event mode reads notes and emits unsigned JSON with current time', () 
         fileURLToPath(new URL('./build-release-note.mjs', import.meta.url)),
         '--tag',
         tag,
+        '--notes-file',
+        notesFile,
         '--event',
       ],
       { encoding: 'utf8' },
@@ -84,6 +90,7 @@ test('CLI event mode reads notes and emits unsigned JSON with current time', () 
   assert.equal(event.pubkey, BEN_PUBKEY);
   assert.ok(event.created_at >= before && event.created_at <= Math.floor(Date.now() / 1000));
   assert.equal(event.sig, undefined);
+  assert.match(event.content, /Restore sync \(#1440\)/);
 });
 test('invalid tags fail before constructing a release URL', () => {
   assert.throws(() => formatReleaseNote({ tag: '../main', notes: '- Fix' }), /Tag must/);

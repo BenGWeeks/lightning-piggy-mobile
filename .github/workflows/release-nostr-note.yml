@@ -23,6 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
+      pull-requests: read # List merged PR titles for the release.
       contents: write # Only used to append the public note link to the Release.
     env:
       TAG: ${{ inputs.tag || github.event.release.tag_name }}
@@ -49,7 +50,7 @@ jobs:
           ref: main
           persist-credentials: false
 
-      - name: Checkout release notes at tag (before the archive/reset)
+      - name: Checkout release history at tag
         if: steps.secrets.outputs.enabled == 'true'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -69,11 +70,20 @@ jobs:
         # Lockfile-verified; --ignore-scripts skips native/postinstall work this job doesn't need.
         run: npm ci --ignore-scripts --no-audit --no-fund
 
+      - name: Generate release notes from merged PR titles
+        if: steps.secrets.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          previous=$(git -C release-source describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
+          generator="$GITHUB_WORKSPACE/scripts/release-notes-from-prs.sh"
+          (cd release-source && "$generator" "$previous" "$TAG") > "$RUNNER_TEMP/release-notes.md"
+
       - name: Build unsigned event
         if: steps.secrets.outputs.enabled == 'true'
         run: |
           node scripts/build-release-note.mjs --tag "$TAG" \
-            --notes-file release-source/docs/RELEASE_NOTES_NEXT.md \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
             --repo-dir release-source --event > "$RUNNER_TEMP/release-note.json"
 
       - name: Sign in Amber and publish to write relays

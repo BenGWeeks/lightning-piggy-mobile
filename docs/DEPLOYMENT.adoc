@@ -2,6 +2,10 @@
 
 This guide covers building, deploying, and distributing the Lightning Piggy mobile app.
 
+=== CI checks
+
+Every PR runs TypeScript, ESLint, Prettier, file-size and performance checks, plus an Android Metro development bundle export in parallel. Native builds run only when the native inputs listed in `.github/workflows/ci.yml` change, and always on pushes to main, tags, or manual dispatch. JavaScript-only PRs can get their fast merge signal in about five minutes; native changes still need the longer builds. Required checks remain configured in repository settings.
+
 === App Variants
 
 Lightning Piggy supports three build variants, each with distinct identifiers so they can be installed side-by-side on the same device.
@@ -389,7 +393,7 @@ eas build:list --platform android --status finished --limit 1 \
 . Choose a tag like `v1.0.1` (create on publish) targeted at `main`. **The tag is the source of truth for the user-visible version** — the workflow strips the leading `v` and writes it into `package.json` via `npm version --no-git-tag-version`. `app.config.ts` reads `version: pkg.version`, so iOS `CFBundleShortVersionString`, Android `versionName`, and the in-app version label (drawer + About screen, via `src/utils/appVersion.ts`) all flow from that single value. Pre-release suffixes (e.g. `v1.0.0-rc1`) are stripped to keep the store-facing version a strict `X.Y.Z`.
 . Write release notes, click *Publish release*.
 . Watch *Actions → Release*. When it finishes, the Release page has the APK and PDF attached; TestFlight has the iOS build (auto-distributed to the Public Beta external group via `eas.json` `submit.production.ios.groups`).
-. *What to Test* fills itself in — the `set-testflight-whats-new` workflow job reads `docs/RELEASE_NOTES_NEXT.md`, polls App Store Connect for the just-submitted build, and PATCHes the localisation via `scripts/asc-set-whats-new.mjs` (see "TestFlight 'What to Test' notes" below). Manual pasting is only needed when the `EXPO_ASC_API_KEY_ID` / `EXPO_ASC_API_KEY_ISSUER_ID` / `EXPO_ASC_API_KEY_P8` secrets aren't configured.
+. *What to Test* fills itself in — the `set-testflight-whats-new` workflow job uses the generated PR-title notes, polls App Store Connect for the just-submitted build, and PATCHes the localisation via `scripts/asc-set-whats-new.mjs` (see "TestFlight 'What to Test' notes" below). Manual pasting is only needed when the `EXPO_ASC_API_KEY_ID` / `EXPO_ASC_API_KEY_ISSUER_ID` / `EXPO_ASC_API_KEY_P8` secrets aren't configured.
 
 NOTE: `versionCode` (Android) and `buildNumber` (iOS) are managed by EAS's remote counter (`eas.json` → `"appVersionSource": "remote"` + `"autoIncrement": true`). Don't hand-edit them for releases — cloud builds auto-increment past whatever's in `app.config.ts`. The integer in the file is only the floor for `eas build --local` and `expo run:android --variant release`, both of which are dev-test paths, not release paths.
 
@@ -397,7 +401,7 @@ NOTE: `versionCode` (Android) and `buildNumber` (iOS) are managed by EAS's remot
 
 ==== Publishing the release note to Nostr (Amber)
 
-`.github/workflows/release-nostr-note.yml` publishes a kind-1 announcement from BenGWeeks when a stable GitHub Release is published. It reads `docs/RELEASE_NOTES_NEXT.md` at the release tag's commit, before the archive/reset, and includes Android, TestFlight and website install links. A manual dispatch can publish any existing release tag, including prereleases.
+`.github/workflows/release-nostr-note.yml` publishes a kind-1 announcement from BenGWeeks when a stable GitHub Release is published. It generates notes from PR titles in the release tag range and includes Android, TestFlight and website install links. A manual dispatch can publish any existing release tag, including prereleases.
 
 Ben's account key stays only in Amber. `nostr-tools/nip46`'s `BunkerSigner` uses `NOSTR_RELEASE_CLIENT_KEY`, a separate stable client key, to request remote signing through `NOSTR_RELEASE_BUNKER_URI`. `nak` v0.21's `event --help` and global help expose no stable client-key option for bunker signing, so the Node client supplies it explicitly. The runner verifies Ben's public key, the signature and every event field before publishing.
 
@@ -428,7 +432,7 @@ If a release run fails (EAS queue timeout, flaky network), re-run it via *Action
 
 Manual runs skip the asset-attach steps (they need a Release to attach to); use them for rebuilds, not for the first cut.
 
-A failed iOS build or TestFlight submission no longer skips the Android build: the iOS step continues on error, Android still builds (and attaches its APK on a Release run), and the job is then marked failed so the iOS problem stays visible. After fixing the cause: if only the *submission* failed (the build finished), resubmit that build with `eas submit --platform ios --id <build-id>`; if the *build* itself failed, re-run this workflow with `platform: ios` to build again. Then set the build's "What to Test" by running *Actions → Release → Run workflow* with `whats_new_build` set to the iOS build number (e.g. `45`). That run builds nothing; it only fills in the TestFlight notes from `docs/RELEASE_NOTES_NEXT.md`, so do it before the notes are reset.
+A failed iOS build or TestFlight submission no longer skips the Android build: the iOS step continues on error, Android still builds (and attaches its APK on a Release run), and the job is then marked failed so the iOS problem stays visible. After fixing the cause: if only the *submission* failed (the build finished), resubmit that build with `eas submit --platform ios --id <build-id>`; if the *build* itself failed, re-run this workflow with `platform: ios` to build again. Then set the build's "What to Test" by running *Actions → Release → Run workflow* with `whats_new_build` set to the iOS build number (e.g. `45`). That run builds nothing; it only fills in the TestFlight notes from merged PR titles; select the release tag when dispatching.
 
 ==== Secrets
 
@@ -554,19 +558,15 @@ CAUTION: The App Store Connect *app-record creation* step still requires interac
 
 ==== TestFlight "What to Test" automation
 
-`eas build --auto-submit` ships a build to TestFlight with a blank *What to Test* field — `eas.json` has no slot for it (as of EAS CLI 18) and the underlying `eas submit` does not expose the App Store Connect `betaBuildLocalizations` endpoint either. The release workflow's `set-testflight-whats-new` job fills it in post-submit, sourcing the notes from `docs/RELEASE_NOTES_NEXT.md`.
+`eas build --auto-submit` ships a build to TestFlight with a blank *What to Test* field — `eas.json` has no slot for it (as of EAS CLI 18) and the underlying `eas submit` does not expose the App Store Connect `betaBuildLocalizations` endpoint either. The release workflow's `set-testflight-whats-new` job fills it in post-submit, using the same generated notes as the GitHub Release.
 
-===== How contributors update the notes
+===== Release notes
 
-When opening a PR with a user-visible change, append a one-line bullet to `docs/RELEASE_NOTES_NEXT.md` describing what a tester should look for. Pure refactors / CI / docs PRs do not need an entry. The release workflow:
+PR titles are the source of release notes. Use Conventional Commits and imperative, user-facing wording for `feat` and `fix`. `scripts/release-notes-from-prs.sh <from-tag> <to-ref>` lists PRs merged into main between the tags and groups `feat` under *New*, `perf` / `refactor` under *Improved*, and `fix` under *Fixed*, with PR numbers. Other types are omitted. Contributors do not edit a shared notes file.
 
-. Reads bullets from `docs/RELEASE_NOTES_NEXT.md` (deduped, capped at 3 900 chars to stay under TestFlight's 4 000-char limit).
-. Falls back to `feat:` / `fix:` / `perf:` commit subjects since the previous tag if the file is empty.
-. Calls App Store Connect's `PATCH /v1/betaBuildLocalizations/{id}` to set the iOS build's `whatsNew` in **every locale TestFlight might show**: the build's existing localisations, the app's TestFlight (beta app) localisations and its primary locale (`en-US` only if none are found). Writing only `en-US` left the field blank for a UK-primary app, which shows its `en-GB` text.
-. Once Apple has processed the build, **submits it for Beta App Review** (`POST /v1/betaAppReviewSubmissions`) unless it's already submitted, so external groups (Public Beta) get it without a manual *Submit for Review*. This step only warns on failure and never fails the release. Set `ASC_SKIP_REVIEW=1` to skip it.
-. Archives the bullets into `docs/CHANGELOG.md` and resets `docs/RELEASE_NOTES_NEXT.md` to the placeholder by copying `docs/RELEASE_NOTES_NEXT.template.md`. The reset commit is pushed to `main` with `[skip ci]` so it doesn't kick off another CI run.
+The release workflow appends generated notes below any human-written GitHub Release notes and uses the same text for TestFlight (capped at 3 900 characters). It appends the generated section to the existing changelog archive and attaches the cumulative `CHANGELOG.md` to the Release, carrying forward the previous release's archive. It creates no reset commit or post-release PR.
 
-If the release tagger forgot to populate the file and no qualifying commits are found, the workflow defaults to `Bug fixes and improvements.` rather than leaving the field blank.
+The TestFlight job calls App Store Connect's `PATCH /v1/betaBuildLocalizations/{id}` in every applicable locale. Once Apple processes the build, it submits it for Beta App Review unless already submitted. Review submission failures warn without failing the release; set `ASC_SKIP_REVIEW=1` to skip review submission. If no qualifying PRs are found, notes default to `Bug fixes and improvements.`
 
 ===== One-time GitHub Secrets setup
 

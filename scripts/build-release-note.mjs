@@ -124,10 +124,8 @@ function main() {
     },
   });
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-  const notesFile = path.resolve(
-    values['notes-file'] || path.join(root, 'docs/RELEASE_NOTES_NEXT.md'),
-  );
-  let notes = fs.existsSync(notesFile) ? fs.readFileSync(notesFile, 'utf8') : '';
+  const notesFile = values['notes-file'] && path.resolve(values['notes-file']);
+  let notes = notesFile && fs.existsSync(notesFile) ? fs.readFileSync(notesFile, 'utf8') : '';
   if (!/^[ \t]*[-*+][ \t]+\S/m.test(notes.replace(/<!--[\s\S]*?-->/g, ''))) {
     notes = gitHistoryNotes(path.resolve(values['repo-dir'] || root), values.tag);
   }
