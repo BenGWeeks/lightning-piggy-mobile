@@ -71,7 +71,11 @@ import {
 export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise<void> {
   if (!loggedOutPubkey) return;
   await cancelNotificationDefaults(loggedOutPubkey);
-  await wipeRemoteMediaForOwner(loggedOutPubkey);
+  try {
+    await wipeRemoteMediaForOwner(loggedOutPubkey);
+  } catch (e) {
+    if (__DEV__) console.warn('[wipeAccountCaches] remote media wipe failed:', e);
+  }
   await wipeMarketAccount(loggedOutPubkey);
   // In-app notification history (#1143): names, amounts and routing ids.
   await clearNotificationHistory(loggedOutPubkey);

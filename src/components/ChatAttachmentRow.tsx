@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import { FileText, Link, Mic, ImageIcon } from 'lucide-react-native';
@@ -6,14 +6,10 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createChatToolsStyles } from '../styles/ChatTools.styles';
 import type { ChatAttachment } from '../utils/chatAttachments';
-import {
-  peekDecryptedMedia,
-  resolveDecryptedMedia,
-  type EncryptedMediaRef,
-} from '../services/decryptedMediaCache';
+import type { EncryptedMediaRef } from '../services/decryptedMediaCache';
 import { useTapToReveal } from '../hooks/useTapToReveal';
 import { checkRemoteUrl } from '../utils/remoteUrlPolicy';
-import { resolveRemoteMedia } from '../services/remoteMediaCache';
+import { useImageMediaUri } from '../hooks/useImageMediaUri';
 /** Encrypted thumbnails use the same account-scoped cache as chat bubbles. */
 function ChatAttachmentRow({
   item,
@@ -37,21 +33,7 @@ function ChatAttachmentRow({
     `chat-media:${item.id}:${item.url}`,
     autoLoad && checkRemoteUrl(item.url, { kind: 'media' }).ok,
   );
-  const [uri, setUri] = useState<string | null>(() =>
-    item.image?.encrypted ? peekDecryptedMedia(ref) : null,
-  );
-  useEffect(() => {
-    let cancelled = false;
-    if (allowed && item.image)
-      void (item.image.encrypted ? resolveDecryptedMedia(ref) : resolveRemoteMedia(item.url))
-        .then((value) => {
-          if (!cancelled) setUri(value);
-        })
-        .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [allowed, item.image, item.url, ref]);
+  const { uri } = useImageMediaUri(ref, !!item.image?.encrypted, allowed && !!item.image);
   const Icon =
     item.kind === 'voice'
       ? Mic

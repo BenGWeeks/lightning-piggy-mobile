@@ -1,17 +1,12 @@
 import { Image } from 'expo-image';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, ActivityIndicator } from 'react-native';
 import { AlertCircle } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createDecryptedImageStyles } from '../styles/DecryptedImage.styles';
-import {
-  DecryptedMediaCancelledError,
-  peekDecryptedMedia,
-  resolveDecryptedMedia,
-} from '../services/decryptedMediaCache';
 import { useLocale } from '../contexts/LocaleContext';
 import { checkRemoteUrl } from '../utils/remoteUrlPolicy';
-import { resolveRemoteMedia } from '../services/remoteMediaCache';
+import { useImageMediaUri } from '../hooks/useImageMediaUri';
 import type { MarmotImageParams } from '../utils/messageContent';
 
 /**
@@ -68,55 +63,12 @@ const DecryptedImage: React.FC<Props> = ({
   const blocked = !checkRemoteUrl(url, { kind: 'media' }).ok;
   const styles = useMemo(() => createDecryptedImageStyles(colors), [colors]);
 
-  // All images resolve to local cache URIs; encrypted images decrypt first.
-  // Seed encrypted images from the account cache
-  // so an already-decrypted image shows instantly with no spinner.
-  const [localUri, setLocalUri] = useState<string | null>(() =>
-    encrypted ? peekDecryptedMedia({ url, kind: 'image', mime, keyHex, nonceHex, marmot }) : null,
+  const { uri: localUri, failed } = useImageMediaUri(
+    { url, kind: 'image', mime, size, keyHex, nonceHex, marmot },
+    encrypted,
+    !blocked,
+    onResolved,
   );
-  const [failed, setFailed] = useState(false);
-  // parseImageMessage builds a fresh `marmot` object every render; key the
-  // effect on its content so a re-render doesn't restart a decrypt.
-  const marmotRef = useRef(marmot);
-  marmotRef.current = marmot;
-  const marmotSig = marmot ? `${marmot.ciphertextSha256}:${marmot.keysHex.join(',')}` : '';
-
-  useEffect(() => {
-    if (blocked) return;
-    const marmotParams = marmotRef.current;
-    if (encrypted && ((!keyHex && !marmotParams) || !nonceHex)) {
-      setFailed(true);
-      return;
-    }
-    const ref = { url, kind: 'image' as const, mime, size, keyHex, nonceHex, marmot: marmotParams };
-    // Already decrypted this session → reuse immediately, no work.
-    const memo = encrypted ? peekDecryptedMedia(ref) : null;
-    if (memo) {
-      setLocalUri(memo);
-      onResolved?.(memo);
-      return;
-    }
-    let cancelled = false;
-    setFailed(false);
-    setLocalUri(null);
-    (encrypted ? resolveDecryptedMedia(ref) : resolveRemoteMedia(url)).then(
-      (uri) => {
-        if (cancelled) return;
-        setLocalUri(uri);
-        onResolved?.(uri);
-      },
-      (e) => {
-        // Cancelled = the account changed or its cache was wiped mid-decrypt;
-        // this bubble is on its way out, so don't flag it as broken.
-        if (cancelled || e instanceof DecryptedMediaCancelledError) return;
-        console.warn('[DecryptedImage] decrypt failed:', e);
-        setFailed(true);
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [blocked, encrypted, url, keyHex, nonceHex, mime, size, marmotSig, onResolved]);
 
   if (blocked)
     return (

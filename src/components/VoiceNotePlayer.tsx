@@ -5,7 +5,7 @@ import { Play, Pause, AlertCircle } from 'lucide-react-native';
 import { useAudioPlayer, useAudioPlayerStatus, setAudioModeAsync } from 'expo-audio';
 import { useTapToReveal } from '../hooks/useTapToReveal';
 import { checkRemoteUrl, MEDIA_MAX_BYTES } from '../utils/remoteUrlPolicy';
-import { useRemoteMediaUri } from '../hooks/useRemoteMediaUri';
+import { useRemoteMedia } from '../hooks/useRemoteMediaUri';
 import { useLocale } from '../contexts/LocaleContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createVoiceNotePlayerStyles } from '../styles/VoiceNotePlayer.styles';
@@ -19,8 +19,8 @@ const BARS = 40;
  * Inline voice-note player for chat bubbles (#235) — sender AND receiver.
  *
  * Two playback modes:
- *  - **Plain** (`encrypted=false`): legacy / unencrypted notes — stream the
- *    URL directly via expo-audio.
+ *  - **Plain** (`encrypted=false`): legacy / unencrypted notes — bounded download to an
+ *    account-scoped cache file before playback.
  *  - **Encrypted** (`encrypted=true`, NIP-17 kind 15): on first play, fetch
  *    the AES-256-GCM ciphertext from Blossom, decrypt with the key/nonce
  *    (carried inside the E2E DM), write the plaintext to a cache file, and
@@ -98,8 +98,9 @@ const VoiceNotePlayer: React.FC<Props> = ({
   const bars = useMemo(() => pseudoWave(url, BARS), [url]);
 
   // Decrypted clip is written to a cache file on first play; for plain notes
-  // we stream the URL directly. NOT seeded from the memory cache: the OS can
-  // evict cacheDirectory, so a hit isn't proof the file still exists —
+  // we download through the bounded, account-scoped transport. Encrypted
+  // clips are NOT seeded from memory: the OS can evict cacheDirectory,
+  // so a hit isn't proof the file still exists —
   // resolveDecryptedMedia verifies existence (and re-decrypts on a miss)
   // before ensureLocal sets localUri (#732 review).
   const [localUri, setLocalUri] = useState<string | null>(null);
@@ -120,10 +121,11 @@ const VoiceNotePlayer: React.FC<Props> = ({
   );
   const { t } = useLocale();
   const safe = checkRemoteUrl(url, { kind: 'media' }).ok;
-  const plainUri = useRemoteMediaUri(
-    !encrypted && plainAllowed && safe ? url : null,
-    MEDIA_MAX_BYTES,
-  );
+  const {
+    uri: plainUri,
+    failed: plainFailed,
+    retry: retryPlain,
+  } = useRemoteMedia(!encrypted && plainAllowed && safe ? url : null, MEDIA_MAX_BYTES);
   const source = safe ? (encrypted ? localUri : plainUri) : null;
   const player = useAudioPlayer(source ?? undefined);
   const status = useAudioPlayerStatus(player);
@@ -193,7 +195,8 @@ const VoiceNotePlayer: React.FC<Props> = ({
       if (!source) {
         // Gated plain note: load it now; playback fires from the effect.
         wantPlayRef.current = true;
-        revealPlain();
+        if (plainFailed) retryPlain();
+        else revealPlain();
         return;
       }
       if (duration > 0 && current >= duration - 0.05) player.seekTo(0);
@@ -212,6 +215,8 @@ const VoiceNotePlayer: React.FC<Props> = ({
     ensureLocal,
     source,
     revealPlain,
+    plainFailed,
+    retryPlain,
   ]);
 
   // On-bubble colours: white-on-pink for my bubbles, themed for theirs.
@@ -257,7 +262,7 @@ const VoiceNotePlayer: React.FC<Props> = ({
           >
             {busy ? (
               <ActivityIndicator size="small" color={playFg} />
-            ) : failed ? (
+            ) : failed || plainFailed ? (
               <AlertCircle size={18} color={playFg} />
             ) : isPlaying ? (
               <Pause size={18} color={playFg} fill={playFg} />
@@ -279,7 +284,9 @@ const VoiceNotePlayer: React.FC<Props> = ({
               />
             ))}
           </View>
-          <Text style={[styles.duration, { color: fg }]}>{failed ? '--:--' : timeLabel}</Text>
+          <Text style={[styles.duration, { color: fg }]}>
+            {failed || plainFailed ? '--:--' : timeLabel}
+          </Text>
         </View>
         {footer ?? (
           <Text style={[styles.time, fromMe ? styles.timeMe : styles.timeThem]}>
