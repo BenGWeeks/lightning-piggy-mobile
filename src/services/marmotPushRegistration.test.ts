@@ -19,7 +19,11 @@ import {
   subscribePushDevice,
   __resetMarmotPushForTests,
 } from './marmotPushRegistration';
-import { beginDefaultSetup, isDefaultSetupCurrent } from './notificationDefaultsTask';
+import {
+  beginDefaultSetup,
+  isDefaultSetupCurrent,
+  noteManualNotificationChange,
+} from './notificationDefaultsTask';
 import { requestNotificationPermission } from './notificationService';
 
 import {
@@ -890,5 +894,103 @@ it.each(['switch', 'sign-out'])(
     expect(Notifications.registerTaskAsync).not.toHaveBeenCalled();
     expect(mockSession.pushRegistration.setRegistration).not.toHaveBeenCalled();
     if (mockActive) expect(mockActive.pushRegistration.setRegistration).not.toHaveBeenCalled();
+  },
+);
+
+it.each(['forgotten read', 'forgotten write', 'wake task'] as const)(
+  'rolls back stale automatic enablement during %s',
+  async (window) => {
+    // Hydrate first so the blocked operation belongs to enableNow, not startup.
+    await loadMarmotPushSettings(ME);
+    mockSecure.set('marmot_push_forgotten_v1', JSON.stringify([ME]));
+    const SecureStore = jest.requireMock('expo-secure-store');
+    const operation =
+      window === 'forgotten read'
+        ? SecureStore.getItemAsync
+        : window === 'forgotten write'
+          ? SecureStore.deleteItemAsync
+          : Notifications.registerTaskAsync;
+    const original = operation.getMockImplementation()!;
+    let release!: () => void;
+    let enter!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve;
+    });
+    operation.mockImplementationOnce(async (...args: unknown[]) => {
+      enter();
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return original(...args);
+    });
+    const task = beginDefaultSetup(ME);
+    const enabling = enableMarmotPush(ME, {
+      interactive: false,
+      stillActive: () => isDefaultSetupCurrent(task),
+    });
+    await entered;
+    // Switching accounts while this await is pending invalidates the live guard.
+    const other = sessionFor('other-account');
+    mockActive = other;
+    mockActivePubkey = other.pubkey;
+    release();
+    expect(await enabling).toEqual({ status: 'unavailable' });
+    expect(await AsyncStorage.getItem(enabledKey(ME))).toBeNull();
+    expect((await loadMarmotPushSettings(ME)).enabled).toBe(false);
+    expect(currentPushDevice(ME)).toBeNull();
+    expect(mockSession.pushRegistration.setRegistration).not.toHaveBeenCalled();
+    expect(other.pushRegistration.setRegistration).not.toHaveBeenCalled();
+    expect(mockSession.pushRegistration.schedule).not.toHaveBeenCalled();
+    if (window === 'forgotten read') {
+      expect(SecureStore.deleteItemAsync).not.toHaveBeenCalled();
+    }
+    if (window === 'wake task') {
+      expect(Notifications.unregisterTaskAsync).toHaveBeenCalledWith('lp-marmot-push-wake');
+    } else {
+      expect(Notifications.registerTaskAsync).not.toHaveBeenCalled();
+    }
+  },
+);
+
+it.each(['forgotten storage', 'wake task'] as const)(
+  'honours a manual choice during automatic %s',
+  async (window) => {
+    await loadMarmotPushSettings(ME);
+    const operation =
+      window === 'forgotten storage'
+        ? jest.requireMock('expo-secure-store').getItemAsync
+        : Notifications.registerTaskAsync;
+    const original = operation.getMockImplementation()!;
+    let release!: () => void;
+    let enter!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve;
+    });
+    operation.mockImplementationOnce(async (...args: unknown[]) => {
+      enter();
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return original(...args);
+    });
+    const task = beginDefaultSetup(ME);
+    const enabling = enableMarmotPush(ME, {
+      interactive: false,
+      stillActive: () => isDefaultSetupCurrent(task),
+    });
+    await entered;
+    noteManualNotificationChange();
+    release();
+    expect(await enabling).toEqual({ status: 'unavailable' });
+    expect(await AsyncStorage.getItem(enabledKey(ME))).toBeNull();
+    expect((await loadMarmotPushSettings(ME)).enabled).toBe(false);
+    expect(currentPushDevice(ME)).toBeNull();
+    expect(mockSession.pushRegistration.setRegistration).not.toHaveBeenCalled();
+    expect(mockSession.pushRegistration.schedule).not.toHaveBeenCalled();
+    if (window === 'wake task') {
+      expect(Notifications.unregisterTaskAsync).toHaveBeenCalledWith('lp-marmot-push-wake');
+    } else {
+      expect(Notifications.registerTaskAsync).not.toHaveBeenCalled();
+    }
   },
 );

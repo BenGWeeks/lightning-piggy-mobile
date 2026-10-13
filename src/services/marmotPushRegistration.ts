@@ -510,8 +510,8 @@ export type EnableOutcome =
  * so an automatic default-setup run in flight stops rather than write over
  * it. Automatic setup passes `interactive: false` and its task guard as
  * `stillActive`: checked before the token is fetched, after it arrives, and
- * after the opt-in is persisted — a stale run discards the token, rolls the
- * write back and commits nothing at runtime. */
+ * after each storage and wake-task await — a stale run discards the token,
+ * rolls the opt-in back and commits nothing at runtime. */
 export async function enableMarmotPush(
   pubkey: string,
   opts: { interactive?: boolean; stillActive?: () => boolean } = {},
@@ -538,8 +538,12 @@ async function enableNow(
   // An old token still waiting to be deleted (e.g. a removed account's,
   // whose groups may still hold it): it must really be gone before this
   // account publishes a token — else the two would be linkable. Retryable.
-  if ((await retirementPending()) && !(await retireDeviceToken())) {
-    return { status: 'unavailable' };
+  if (stillActive?.() === false) return { status: 'unavailable' };
+  const pendingRetirement = await retirementPending();
+  if (stillActive?.() === false) return { status: 'unavailable' };
+  if (pendingRetirement) {
+    const retired = await retireDeviceToken();
+    if (stillActive?.() === false || !retired) return { status: 'unavailable' };
   }
   // The token is fetched for THIS account only: a stale automatic run
   // (account switched, signed out, or the user chose meanwhile) gets none.
@@ -569,25 +573,36 @@ async function enableNow(
   } catch {
     return { status: 'unavailable' };
   }
+  const rollback = async (wakeTaskRegistered = false): Promise<EnableOutcome> => {
+    await AsyncStorage.removeItem(accountKey(pubkey)).catch(() => undefined);
+    // Keep a shared task needed by an already opted-in account.
+    if (wakeTaskRegistered && Platform.OS === 'android' && !anyEnabled()) {
+      await Notifications.unregisterTaskAsync(MARMOT_PUSH_WAKE_TASK).catch(() => undefined);
+    }
+    return { status: 'unavailable' };
+  };
   // The write itself can outlive the account. An automatic opt-in that is
   // stale now is taken back (it was absent before), and nothing is committed
   // at runtime: no token for the departed account, no wake task.
-  if (stillActive?.() === false) {
-    await AsyncStorage.removeItem(accountKey(pubkey)).catch(() => undefined);
-    return { status: 'unavailable' };
-  }
+  if (stillActive?.() === false) return rollback();
   try {
     const forgotten = await readForgotten();
+    if (stillActive?.() === false) return rollback();
     const me = pubkey.toLowerCase();
-    if (forgotten.includes(me)) await writeForgotten(forgotten.filter((a) => a !== me));
+    if (forgotten.includes(me)) {
+      await writeForgotten(forgotten.filter((a) => a !== me));
+      if (stillActive?.() === false) return rollback();
+    }
   } catch {
     await AsyncStorage.setItem(accountKey(pubkey), '0').catch(() => undefined);
     return { status: 'unavailable' };
   }
+  await registerWakeTask();
+  if (stillActive?.() === false) return rollback(true);
+  // Runtime publication is synchronous and only follows the final guard.
   explicit.set(pubkey.toLowerCase(), true);
   // This account's token appeared, even if the phone's didn't change.
   if (!setDeviceRegistration(next)) notifyDevice();
-  await registerWakeTask();
   if (!interactive) {
     applyTo(getMarmotSession());
     return { status: 'enabled', sync: null };
