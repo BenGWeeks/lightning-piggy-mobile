@@ -25,6 +25,8 @@ export interface RegisteredRecord {
 
 export interface WatcherAccountState {
   categories: WatcherCategories;
+  /** User changed a category; legacy stored categories also count as explicit. */
+  explicitlySet?: boolean;
   /** The last `ts` sent (unix s). The watcher needs it to strictly increase
    * per user, so it is written BEFORE each publish. */
   lastTs: number;
@@ -58,6 +60,7 @@ function sanitise(raw: unknown): WatcherAccountState {
       : null;
   return {
     categories,
+    ...(typeof r.explicitlySet === 'boolean' ? { explicitlySet: r.explicitlySet } : {}),
     lastTs: typeof r.lastTs === 'number' && Number.isFinite(r.lastTs) ? r.lastTs : 0,
     registered,
   };

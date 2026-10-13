@@ -171,11 +171,11 @@ async function readStoredSettings(): Promise<StoredSettings> {
   // belongs to the account that was active then — never to the others, and
   // never over any per-account choice already recorded (e.g. a later "off").
   if (legacy !== null) {
-    if (legacy === '1' && keys.length === 0) {
+    if ((legacy === '1' || legacy === '0') && keys.length === 0) {
       // Owner not known yet: "unreadable" for now — touch nothing, retry.
       if (!legacyOwner) throw new Error('push: legacy opt-in owner not known yet');
-      await AsyncStorage.setItem(accountKey(legacyOwner), '1');
-      enabledAccounts.add(legacyOwner);
+      await AsyncStorage.setItem(accountKey(legacyOwner), legacy);
+      if (legacy === '1') enabledAccounts.add(legacyOwner);
       everEnabled.add(legacyOwner);
     }
     await AsyncStorage.removeItem(ENABLED_KEY);
@@ -505,12 +505,19 @@ export type EnableOutcome =
 
 /** Turn push on for `pubkey` (user action): permission, token, then that
  * account's groups. Other accounts on the phone are left as they are. */
-export async function enableMarmotPush(pubkey: string): Promise<EnableOutcome> {
+export async function enableMarmotPush(
+  pubkey: string,
+  opts: { interactive?: boolean; stillActive?: () => boolean } = {},
+): Promise<EnableOutcome> {
   if (!(await requestNotificationPermission())) return { status: 'no-permission' };
-  return serial(() => enableNow(pubkey));
+  return serial(() =>
+    opts.stillActive?.() === false
+      ? Promise.resolve({ status: 'unavailable' } as EnableOutcome)
+      : enableNow(pubkey, opts.interactive ?? true),
+  );
 }
 
-async function enableNow(pubkey: string): Promise<EnableOutcome> {
+async function enableNow(pubkey: string, interactive: boolean = true): Promise<EnableOutcome> {
   try {
     await ensureSettings();
   } catch {
@@ -534,6 +541,10 @@ async function enableNow(pubkey: string): Promise<EnableOutcome> {
   // the fresh opt-in back off at the next start) — only after the opt-in is
   // written, so a failure never leaves a stale '1' unprotected.
   try {
+    await AsyncStorage.setItem(
+      `notification_preference_explicit_v1_${pubkey.toLowerCase()}`,
+      interactive ? '1' : '0',
+    );
     await AsyncStorage.setItem(accountKey(pubkey), '1');
   } catch {
     return { status: 'unavailable' };
@@ -550,6 +561,10 @@ async function enableNow(pubkey: string): Promise<EnableOutcome> {
   // This account's token appeared, even if the phone's didn't change.
   if (!setDeviceRegistration(next)) notifyDevice();
   await registerWakeTask();
+  if (!interactive) {
+    applyTo(getMarmotSession());
+    return { status: 'enabled', sync: null };
+  }
   return { status: 'enabled', sync: await syncAccountSession(pubkey) };
 }
 
@@ -585,10 +600,14 @@ export function disableMarmotPush(
     if (othersUsePush) notifyDevice();
     else setDeviceRegistration(null);
     // Retract + revoke regardless of whether the setting could be saved.
-    const saved = await AsyncStorage.setItem(accountKey(pubkey), '0').then(
-      () => true,
-      () => false,
-    );
+    const saved = await AsyncStorage.setItem(accountKey(pubkey), '0')
+      .then(() =>
+        AsyncStorage.setItem(`notification_preference_explicit_v1_${pubkey.toLowerCase()}`, '1'),
+      )
+      .then(
+        () => true,
+        () => false,
+      );
     const session = getMarmotSession();
     const sync = await syncAccountSession(pubkey).catch(() => null);
     // Another account still uses the token. If every one of this account's

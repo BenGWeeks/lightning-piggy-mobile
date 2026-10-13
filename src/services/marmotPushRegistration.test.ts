@@ -744,3 +744,18 @@ describe('the device token, shared with the notification watcher', () => {
     unsubscribe();
   });
 });
+
+it('preserves the legacy device-wide OFF preference during migration', async () => {
+  await AsyncStorage.setItem('marmot_push_enabled_v1', '0');
+  expect(await loadMarmotPushSettings(ME)).toMatchObject({ enabled: false });
+  expect(await AsyncStorage.getItem(enabledKey(ME))).toBe('0');
+});
+
+it('schedules default group records without an interactive signer batch', async () => {
+  expect(await enableMarmotPush(ME, { interactive: false })).toEqual({
+    status: 'enabled',
+    sync: null,
+  });
+  expect(mockSession.pushRegistration.sync).not.toHaveBeenCalled();
+  expect(mockSession.pushRegistration.schedule).toHaveBeenCalled();
+});

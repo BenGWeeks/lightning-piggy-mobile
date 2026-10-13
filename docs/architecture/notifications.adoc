@@ -6,7 +6,8 @@ This document explains how Lightning Piggy delivers OS-level
 notifications (incoming DMs, group messages, payments, zaps) to a
 backgrounded or closed app *without* depending on Firebase Cloud
 Messaging or any other Google Play Services component. The exceptions
-are opt-in and off by default: Marmot push (MIP-05), a content-free
+default on for the first account on a phone (subject to OS permission), with
+additional accounts opting in: Marmot push (MIP-05), a content-free
 "New message" wake through Apple/Google — see "Marmot messages and
 MIP-05 push" below — and, under the same push switch, the notification
 watcher's per-category alerts for DMs, zaps, mentions and NWC wallet
@@ -25,7 +26,7 @@ setup, delivery limits and device validation. Payment checks cover Android NWC
 wallets; the foundation background worker itself only checks messages and cache
 activity. Its iOS scheduling estimates below are not a guaranteed delivery bound.
 
-== Why local-first (no FCM by default)
+== Why local-first (working without Google Play Services)
 
 Lightning Piggy targets users on de-Googled Android distributions
 (GrapheneOS, CalyxOS, /e/OS, microG-flashed stock ROMs). FCM
@@ -39,7 +40,7 @@ on top of FCM and inherit this constraint. They are excluded from
 Lightning Piggy's dependency graph by policy, not just preference.
 (`expo-notifications` itself links the Firebase Messaging SDK on Android;
 it stays dormant — auto-init disabled by `plugins/withFcmAutoInitDisabled.js`
-— until the user turns on Marmot push, and nothing else depends on it.)
+— until Marmot push is enabled, and nothing else depends on it.)
 
 Apple Push Notification service (APNs) is the equivalent on iOS but
 requires us to operate a remote push server that holds an APNs token
@@ -53,8 +54,8 @@ notifications fired by the JS runtime when it next runs (see
 Marmot changed one part of this: MIP-05 defines a remote sender that
 learns nothing about the message — a notification server that only turns
 an encrypted device token into a content-free native push. Lightning Piggy
-runs one per app (a MIP-05 Transponder) and offers it as an *opt-in* for
-Marmot chats. Everything above still holds when it is off (the default),
+runs one per app (a MIP-05 Transponder) and offers it for
+Marmot chats. Everything above still holds when it is off,
 and on a de-Googled Android it simply can't be turned on.
 
 == The three pieces
@@ -136,7 +137,7 @@ alternatives we evaluated:
 1. **Silent push via APNs** — requires us to run a remote server
    that holds APNs tokens and forwards events. *Rejected* as the general
    mechanism — same architectural reason as FCM (no backend). For Marmot
-   chats only, the opt-in MIP-05 push (below) is the exception: our
+   chats only, MIP-05 push (below) is the exception: our
    notification server sends a generic alert, never message content.
 2. **`audio` background mode keep-alive trick** — plays a near-silent
    audio stream so iOS keeps the app process alive. App Store
@@ -220,17 +221,30 @@ other members' encrypted device tokens to their notification server, which
 wakes their phones (White Noise users via White Noise's Transponder, Lightning
 Piggy users via ours).
 
-*Receive side (opt-in per account, off by default).* Settings → Security →
-"Message notifications via push (Marmot)". The phone has one token, so every
-account that publishes it shows the same fingerprint in its chats; two
-accounts on one phone (a parent and a smart saver, say) would become linkable
-by anyone who chats with both. So the switch is stored per account
-(`marmot_push_enabled_v1_<pubkey>`): a session only carries the token if its
-own account opted in, an account that is added or switched to never inherits
-it, and enabling it while another account on the phone has it shows "Other
-accounts on this phone also use push; people who chat with both could tell
-they're on the same phone." A pre-release device-wide switch migrates to the
-account that was active, only.
+*Receive side (default on for the first account).* Settings → Notifications →
+"Instant alerts". First account means no other account on this phone has push
+enabled or a stored notification preference, including an explicit OFF.
+`notificationDefaults.ts` resolves missing preferences after legacy migration;
+`useNotificationDefaults` runs once Wallets is visible after sign-in. It requests
+the existing OS permission flow, then uses the existing enable path to obtain the
+token and schedule per-group records. Local signers publish automatically;
+Amber / NIP-46 approvals wait for the existing "Finish setup" and watcher Retry
+surfaces, with no automatic signer batch at launch.
+
+The phone has one token: accounts publishing it show the same fingerprint in
+chats, making two accounts on one phone linkable to anyone chatting with both.
+Additional accounts therefore remain opt-in, with the existing linkability
+warning. The per-account switch is `marmot_push_enabled_v1_<pubkey>`.
+`notification_preference_explicit_v1_<pubkey>` records an explicit choice (`1`)
+or an already-applied default (`0`); either prevents reconsidering that default.
+Legacy stored `0` / `1` preferences are respected, including the old device-wide
+switch migrated to the active account. Existing enabled installs keep their
+Instant alerts preference; an explicitly disabled switch stays off.
+
+The default decision is persisted before asking permission. Denial shows both
+Instant alerts and More alerts off alongside the existing phone-settings banner;
+launches do not retry permission or registration in a loop. Permission can be
+restored through the existing settings surface.
 
 . `marmotPushRegistration.ts` asks Apple/Google for this device's *native*
   token (`getDevicePushTokenAsync` — FCM on Android, APNs on iOS; never Expo's
@@ -321,7 +335,7 @@ decrypts the device tokens in each, so it can see how many
 phones one message fans out to and how often this phone is woken, but not who
 sent it, which chat it was, or who you are. People in your Marmot chats can
 see that this phone has push on, and the same phone shows the same token
-fingerprint in every chat — hence the per-account opt-in above.
+fingerprint in every chat — hence the additional-account opt-in above.
 
 *Limits.* On de-Googled Android there is no FCM token, so enabling reports
 "unavailable" and the local paths above remain the only ones. A force-stopped
@@ -354,12 +368,16 @@ is:
 
 *Settings.* Under the push switch (Settings → Security → Push notifications),
 "More push notifications" lists four toggles — Messages (NIP-04/17), Zaps,
-Mentions, Payments — each off by default and only switchable while *this
+Mentions, Payments — each defaults on for the first account and is only
+switchable while *this
 account's* push is on (they need the device token the push switch obtains).
 Like the Marmot switch, everything is per account: the registrar only gets the
 token for an account that turned push on itself (`currentPushDevice(pubkey)`),
-so switching to or adding an account never registers it with the watcher. The
-privacy note there says what the watcher learns.
+so additional accounts do not automatically register with the watcher. Stored
+categories (including legacy OFF) are preserved. `explicitlySet` in the watcher
+state records category changes; automatic defaults set it to false so a remote
+signer's first registration waits for Retry / Finish setup. The privacy note
+there says what the watcher learns.
 
 *What a registration contains.* `{v:1, action, app, platform, token,
 apns_env?, categories, relays, nwc, ts}` — `app` is the build's application id

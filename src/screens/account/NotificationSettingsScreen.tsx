@@ -53,6 +53,7 @@ const NotificationSettingsScreen: React.FC = () => {
   const [lockScreenContentOn, setLockScreenContentOn] = useState<boolean>(false);
   // Background DM watch is Android-only (iOS can't hold a background socket).
   const [backgroundDmOn, setBackgroundDmOn] = useState<boolean>(false);
+  const [permissionGranted, setPermissionGranted] = useState(false);
   const isAndroid = Platform.OS === 'android';
 
   useEffect(() => {
@@ -90,10 +91,10 @@ const NotificationSettingsScreen: React.FC = () => {
 
   return (
     <AccountScreenLayout title={t('notificationSettingsScreen.title')}>
-      <NotificationPermissionRow />
+      <NotificationPermissionRow onPermissionChange={setPermissionGranted} />
 
       <SettingsSection scope="account" testID="notifications-account">
-        <MarmotPushSection />
+        <MarmotPushSection permissionGranted={permissionGranted} />
 
         <SettingsRow
           icon={BellOff}

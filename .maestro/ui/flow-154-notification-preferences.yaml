@@ -1,0 +1,134 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Notifications — defaults, stored choices and OS permission
+---
+# Read-only verification on an already signed-in test account. Never resets
+# preferences or signs in/out. A fresh first account defaults all expectations
+# to true; pass EXPECTED_PUSH/DM/ZAP/MENTION/PAYMENT=false for stored OFF choices.
+- runFlow: ../common/open-drawer.yaml
+- scrollUntilVisible:
+    element:
+      id: 'drawer-row-notifications'
+    direction: DOWN
+    timeout: 15000
+- tapOn:
+    id: 'drawer-row-notifications'
+- extendedWaitUntil:
+    visible:
+      id: 'security-marmot-push-toggle'
+    timeout: 30000
+- extendedWaitUntil:
+    visible:
+      id: 'notifications-permission-status'
+    timeout: 15000
+- runFlow:
+    when:
+      visible:
+        id: 'notifications-permission-turn-on'
+    commands:
+      - assertVisible:
+          id: 'security-marmot-push-toggle'
+          checked: false
+- runFlow:
+    when:
+      notVisible:
+        id: 'notifications-permission-turn-on'
+    commands:
+      - runFlow:
+          when:
+            true: ${EXPECTED_PUSH !== 'false'}
+          commands:
+            - assertVisible:
+                id: 'security-marmot-push-toggle'
+                checked: true
+      - runFlow:
+          when:
+            true: ${EXPECTED_PUSH === 'false'}
+          commands:
+            - assertVisible:
+                id: 'security-marmot-push-toggle'
+                checked: false
+- scrollUntilVisible:
+    element:
+      id: 'security-watcher-toggle-payment'
+    direction: DOWN
+    timeout: 15000
+- runFlow:
+    when:
+      visible:
+        id: 'security-watcher-toggle-dm'
+        enabled: false
+    commands:
+      - assertVisible:
+          id: 'security-watcher-toggle-dm'
+          checked: false
+      - assertVisible:
+          id: 'security-watcher-toggle-zap'
+          checked: false
+      - assertVisible:
+          id: 'security-watcher-toggle-mention'
+          checked: false
+      - assertVisible:
+          id: 'security-watcher-toggle-payment'
+          checked: false
+- runFlow:
+    when:
+      visible:
+        id: 'security-watcher-toggle-dm'
+        enabled: true
+    commands:
+      - runFlow:
+          when:
+            true: ${EXPECTED_DM !== 'false'}
+          commands:
+            - assertVisible:
+                id: 'security-watcher-toggle-dm'
+                checked: true
+      - runFlow:
+          when:
+            true: ${EXPECTED_DM === 'false'}
+          commands:
+            - assertVisible:
+                id: 'security-watcher-toggle-dm'
+                checked: false
+      - runFlow:
+          when:
+            true: ${EXPECTED_ZAP !== 'false'}
+          commands:
+            - assertVisible:
+                id: 'security-watcher-toggle-zap'
+                checked: true
+      - runFlow:
+          when:
+            true: ${EXPECTED_ZAP === 'false'}
+          commands:
+            - assertVisible:
+                id: 'security-watcher-toggle-zap'
+                checked: false
+      - runFlow:
+          when:
+            true: ${EXPECTED_MENTION !== 'false'}
+          commands:
+            - assertVisible:
+                id: 'security-watcher-toggle-mention'
+                checked: true
+      - runFlow:
+          when:
+            true: ${EXPECTED_MENTION === 'false'}
+          commands:
+            - assertVisible:
+                id: 'security-watcher-toggle-mention'
+                checked: false
+      - runFlow:
+          when:
+            true: ${EXPECTED_PAYMENT !== 'false'}
+          commands:
+            - assertVisible:
+                id: 'security-watcher-toggle-payment'
+                checked: true
+      - runFlow:
+          when:
+            true: ${EXPECTED_PAYMENT === 'false'}
+          commands:
+            - assertVisible:
+                id: 'security-watcher-toggle-payment'
+                checked: false

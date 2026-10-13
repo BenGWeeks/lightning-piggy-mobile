@@ -721,3 +721,22 @@ describe('WatcherPushRegistrar account isolation', () => {
     expect(h.store.get(other)).toBeUndefined();
   });
 });
+
+it.each(['amber', 'nip46'] as const)(
+  'defers a defaulted %s registration until Finish setup / Retry',
+  async (signerType) => {
+    const h = harness({
+      state: {
+        categories: { dm: true, zap: true, mention: true, payment: true },
+        explicitlySet: false,
+      },
+    });
+    h.registrar.setContext(ctx({ signerType }));
+    h.setDevice({ platform: 'fcm', token: 'fresh-token' });
+    await h.advance(3000);
+    expect(h.signs).toBe(0);
+    expect(h.registrar.getStatus().last).toBe('pending');
+    expect(await h.registrar.syncNow()).toBe('registered');
+    expect(h.signs).toBe(1);
+  },
+);

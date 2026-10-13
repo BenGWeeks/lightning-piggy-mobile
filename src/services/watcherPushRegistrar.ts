@@ -219,7 +219,7 @@ export class WatcherPushRegistrar {
       if (!ctx || ctx.pubkey !== pubkey) return null;
       const state = await this.deps.load(ctx.pubkey);
       const categories = { ...state.categories, [category]: on };
-      await this.deps.save(ctx.pubkey, { ...state, categories });
+      await this.deps.save(ctx.pubkey, { ...state, categories, explicitlySet: true });
       this.schedule('user');
       return categories;
     });
@@ -342,6 +342,15 @@ export class WatcherPushRegistrar {
       silentSigner: ctx.signerType === 'nsec',
       nowMs: this.deps.now(),
     });
+    // A newly defaulted remote account waits for the existing Finish setup / Retry surface.
+    if (
+      ctx.signerType !== 'nsec' &&
+      state.explicitlySet === false &&
+      !state.registered &&
+      !triggers.has('user') &&
+      action !== 'none'
+    )
+      return this.finish('pending');
     if (action === 'none') return this.finish('unchanged');
     if (action === 'defer') return this.finish('pending');
     return this.send(ctx, state, action === 'register' ? built : null, device, generation);

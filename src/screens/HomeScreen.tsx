@@ -30,6 +30,7 @@ import { selectHomeWalletState } from '../utils/homeWalletState';
 import { perfLog } from '../utils/perfLog';
 import { noteWalletListCommitted } from '../utils/walletSwipeTiming';
 import { useActiveWalletRefresh } from '../hooks/useActiveWalletRefresh';
+import { useNotificationDefaults } from '../hooks/useNotificationDefaults';
 import { WALLET_FRESH_MS } from '../utils/walletRefreshScheduler';
 import type { WalletState } from '../types/wallet';
 import * as swapRecoveryService from '../services/swapRecoveryService';
@@ -39,6 +40,7 @@ import type { MainTabParamList } from '../navigation/types';
 const ONCHAIN_SWIPE_FRESH_MS = 5 * 60_000;
 
 const HomeScreen: React.FC = () => {
+  useNotificationDefaults();
   const colors = useThemeColors();
   const t = useTranslation();
   // First-render marker: fires once per mount when the first commit lands. Used by scripts/perf-startup.sh to measure tap-to-render latency for tab-wallets.
