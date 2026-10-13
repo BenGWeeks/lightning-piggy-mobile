@@ -46,6 +46,11 @@ export function getPickerOptions(key: string): readonly SettingsPickerOption[] {
   return registry.get(key)?.options ?? EMPTY_OPTIONS;
 }
 
+/** An empty registration is valid; an absent one cannot survive a cold start. */
+export function hasPickerOptions(key: string): boolean {
+  return registry.has(key);
+}
+
 export type SettingsPickerParams = {
   title: string;
   selectedValue?: string;
