@@ -1,7 +1,7 @@
 import { tryRouteGroupRumor } from './nostrGroupRouting';
 import { createLiveRumorSurfacer } from './liveDmRumorSurface';
 import { ingestInboxWraps } from './dmWrapIngest';
-import { setKnownGroups } from '../services/groupRoutingRegistry';
+import { setKnownGroups, setSyntheticGroupReconciler } from '../services/groupRoutingRegistry';
 import { appendGroupMessage } from '../services/groupMessagesStorageService';
 import { upsertDmMessages } from '../services/dmDb';
 import { routeMarmotWelcome } from '../services/marmotWelcomeRouter';
@@ -52,7 +52,10 @@ beforeEach(() => {
     ME,
   );
 });
-afterEach(() => setKnownGroups([]));
+afterEach(() => {
+  setKnownGroups([]);
+  setSyntheticGroupReconciler(null);
+});
 
 it.each([15, 444, NWC_SHARE_KIND])(
   'leaves subjectless kind-%s rumors on their specialized DM path despite a matching room',
@@ -172,4 +175,61 @@ describe.each([
       );
     }
   });
+});
+
+describe.each(['live', 'refresh'] as const)('%s two-party room trust', (path) => {
+  it.each([false, true])(
+    'requires the follow gate before creating an unknown subject-tagged room (trusted=%s)',
+    async (trusted) => {
+      setKnownGroups([], ME);
+      const reconcile = jest.fn(async (input) => ({
+        id: input.groupId,
+        name: input.name,
+        memberPubkeys: input.memberPubkeys,
+        createdAt: 1,
+        updatedAt: 1,
+      }));
+      setSyntheticGroupReconciler(reconcile, ME);
+      const message = rumor(14);
+      message.tags.push(['subject', 'Unsolicited room']);
+      const queueInboxEntry = jest.fn();
+      const defer = jest.fn();
+      if (path === 'refresh') {
+        const result = await ingestInboxWraps({
+          owner: ME,
+          wraps: [{ id: 'untrusted-wrap' }],
+          unwrap: () => message,
+          passesFollowGate: (pk) => trusted && pk === PEER,
+        });
+        expect(result.stored).toBe(0);
+        expect(result.entries).toEqual([]);
+      } else {
+        await createLiveRumorSurfacer({
+          viewerPubkey: ME,
+          isCancelled: () => false,
+          shouldAbort: () => false,
+          followPubkeysRef: { current: new Set(trusted ? [PEER] : [SECRET]) },
+          followGateBuffer: { defer, reevaluate: jest.fn(), clear: jest.fn(), size: 0 },
+          isFreshArrival: () => true,
+          queueInboxEntry,
+          knownWrapIds: new Set(),
+          chainWrite: (task) => void task(),
+        })(message, 'untrusted-wrap');
+        expect(queueInboxEntry).not.toHaveBeenCalled();
+        expect(defer).toHaveBeenCalledTimes(trusted ? 0 : 1);
+      }
+      expect(upsertDmMessages).not.toHaveBeenCalled();
+      if (trusted) {
+        expect(reconcile).toHaveBeenCalledTimes(1);
+        expect(appendGroupMessage).toHaveBeenCalledTimes(1);
+        expect(notifyGroupMessage).toHaveBeenCalledTimes(1);
+        expect(fireMessageNotification).toHaveBeenCalledTimes(path === 'live' ? 1 : 0);
+      } else {
+        expect(reconcile).not.toHaveBeenCalled();
+        expect(appendGroupMessage).not.toHaveBeenCalled();
+        expect(notifyGroupMessage).not.toHaveBeenCalled();
+        expect(fireMessageNotification).not.toHaveBeenCalled();
+      }
+    },
+  );
 });

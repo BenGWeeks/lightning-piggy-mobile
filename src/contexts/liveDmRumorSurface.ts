@@ -99,7 +99,9 @@ export function createLiveRumorSurfacer(
     // group surface, not the 1:1 inbox. tryRouteGroupRumor handles
     // appendGroupMessage + notifyGroupMessage internally so an open
     // GroupConversationScreen auto-refreshes.
-    const routeResult = await tryRouteGroupRumor(rumor, viewerPubkey, wrapId, shouldAbort);
+    const routeResult = await tryRouteGroupRumor(rumor, viewerPubkey, wrapId, shouldAbort, (pk) =>
+      followPubkeysRef.current.has(pk),
+    );
     if (shouldAbort()) return;
     if (routeResult.kind !== 'not-group') {
       // OS notification (#279) — fired HERE (live path) not inside

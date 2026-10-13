@@ -122,7 +122,9 @@ it('materialises a two-member room and keeps its id and history across a subject
     return resolved;
   });
   setSyntheticGroupReconciler(reconcile, ME);
-  expect(await tryRouteGroupRumor(rumor('Family'), ME, 'first')).toMatchObject({
+  expect(
+    await tryRouteGroupRumor(rumor('Family'), ME, 'first', undefined, () => true),
+  ).toMatchObject({
     kind: 'routed',
     group: { id, name: 'Family' },
   });
@@ -146,7 +148,7 @@ it('materialises a two-member room and keeps its id and history across a subject
 });
 
 it('never falls through to the 1:1 when a subject-tagged group cannot yet be resolved', async () => {
-  expect(await tryRouteGroupRumor(rumor('Family'), ME, 'pending')).toEqual({
+  expect(await tryRouteGroupRumor(rumor('Family'), ME, 'pending', undefined, () => true)).toEqual({
     kind: 'group-no-match',
   });
   expect(appendGroupMessage).not.toHaveBeenCalled();

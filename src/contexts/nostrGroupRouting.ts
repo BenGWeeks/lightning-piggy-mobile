@@ -37,6 +37,7 @@ export async function tryRouteGroupRumor(
   viewerPubkey: string,
   wrapId: string,
   shouldAbort: () => boolean = () => false,
+  passesFollowGate: (pk: string) => boolean = () => false,
 ): Promise<GroupRouteResult> {
   const cls = classifyRumor(rumor, viewerPubkey);
   if (!cls || cls.type === 'order') return { kind: 'not-group' };
@@ -50,6 +51,13 @@ export async function tryRouteGroupRumor(
   const otherParticipants =
     cls.type === 'group' ? cls.otherParticipants : new Set([cls.partnerPubkey]);
   let group = findGroupForParticipants(otherParticipants, viewerPubkey);
+  // A subject names a room; it does not authenticate an unknown peer.
+  // Before promoting a two-party DM, preserve the receive caller's follow
+  // policy. Known rooms retain membership as their trust signal. Returning
+  // not-group lets the caller apply its usual drop/defer/skip-set behavior.
+  if (!group && isTwoParty && !passesFollowGate(Array.from(otherParticipants)[0])) {
+    return { kind: 'not-group' };
+  }
   if (cls.type === 'dm' && !group) return { kind: 'not-group' };
   if (shouldAbort()) return { kind: 'group-no-match' };
   // Always run the synthetic-reconcile path when the matched group is
