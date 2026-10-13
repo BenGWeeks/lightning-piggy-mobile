@@ -1,9 +1,7 @@
+import { useFollowHydration } from './useFollowHydration';
+import { reconcileContactFollows } from './reconcileContactFollows';
 import { buildFollowSet } from '../utils/followPubkeys';
-import {
-  adoptFollowSnapshot,
-  fetchFollowSnapshot,
-  readFollowSnapshot,
-} from '../services/contactFollowFreshness';
+import { readFollowSnapshot } from '../services/contactFollowFreshness';
 import { signAccountEvent } from '../services/signAccountEvent';
 import React, {
   createContext,
@@ -336,6 +334,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     null,
   );
   const [contacts, setContacts, contactsSetterFor] = useAccountState(pubkey, EMPTY_CONTACTS);
+  const [followHydrated, followHydratedSetterFor] = useFollowHydration(pubkey);
   // Multi-account registry (#288). Mirrors the SecureStore `identities_v1`
   // blob so the drawer header and AccountSwitcherSheet can render without
   // each rendering its own SecureStore round-trip. The `pubkey` state above
@@ -439,7 +438,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setDmInbox,
     setAmberNip44Permission,
     knownWrapIdsRef,
-  } = useDmInbox({ pubkey, isLoggedIn, signerType, followPubkeys, getReadRelays });
+  } = useDmInbox({ pubkey, isLoggedIn, signerType, followPubkeys, followHydrated, getReadRelays });
   // Identity-transition teardown (switch + add-account logins); see helper.
   const { resetIdentityMemory, activateLoginPubkey } = useIdentityMemoryReset(pubkey, setPubkey, {
     setProfile,
@@ -563,6 +562,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       opts?: { force?: boolean; awaitProfiles?: boolean },
     ) => {
       const setContacts = contactsSetterFor(pk);
+      const finishFollowHydration = followHydratedSetterFor(pk);
       // Read the contact-list cache AND profile cache concurrently — both
       // are independent AsyncStorage round-trips, and the profile cache is
       // also used for merging into whichever contact list we end up with.
@@ -585,21 +585,17 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       const withCachedProfiles = (cs: NostrContact[]): NostrContact[] =>
         cs.map((c) => ({ ...c, profile: cachedProfileMap[c.pubkey] ?? c.profile }));
-      // Disk is an immediate first paint, never a reason to skip reconciliation.
-      const snapshot = await readFollowSnapshot(pk);
-      let fetchedContacts = snapshot?.contacts ?? cachedContacts ?? [];
-      startTransition(() => setContacts(withCachedProfiles(fetchedContacts)));
-      const configured = await getUserRelays();
-      const fresh = await fetchFollowSnapshot(pk, [
-        ...relayUrls,
-        ...configured.filter((r) => r.read).map((r) => r.url),
-      ]);
-      if (fresh) {
-        const adopted = await adoptFollowSnapshot(pk, fresh, (cs) =>
-          startTransition(() => setContacts(withCachedProfiles(cs))),
-        );
-        fetchedContacts = adopted.contacts;
-      }
+      const fetchedContacts = await reconcileContactFollows(
+        pk,
+        relayUrls,
+        cachedContacts,
+        (cs) => startTransition(() => setContacts(withCachedProfiles(cs))),
+        (cs) =>
+          startTransition(() => {
+            setContacts(withCachedProfiles(cs));
+            finishFollowHydration();
+          }),
+      );
 
       if (fetchedContacts.length === 0) return;
 
@@ -680,7 +676,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         await runProfileFetch();
       }
     },
-    [contactsSetterFor],
+    [contactsSetterFor, followHydratedSetterFor],
   );
 
   // Single-fire perf log when isLoggedIn becomes true — the

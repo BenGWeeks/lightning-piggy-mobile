@@ -2,24 +2,13 @@ import { isFollowed } from '../utils/followPubkeys';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
 import type { DecodedRumor } from '../utils/nip17Unwrap';
 
-// Follow-gate deferral buffer for the live NIP-17 / NIP-04 sub (#851 F2).
-//
-// Immediately after an account switch the contacts list hydrates
-// asynchronously (`setContacts([])` then a cache/relay load), so for a
-// short window `followPubkeysRef.current` is empty or stale. A genuinely
-// fresh inbound message that arrives in that window is dropped by the
-// follow-gate (`nostrLiveDmSub` :220 / :413). The drop is recoverable —
-// it is NOT skip-set-persisted, so the next `refreshDmInbox` re-surfaces
-// it — but the live inbox update and the one-shot OS notification for that
-// arrival are lost until the user manually refreshes.
-//
-// This buffer holds the already-decrypted side-effects (inbox entry +
-// optional notification) of such drops, capped and only for fresh
-// arrivals. When `followPubkeys` later hydrates, `reevaluate` replays the
-// surface + notify for any buffered partner that now passes the gate. It
-// holds NO ciphertext and never persists — purely an in-memory recovery
-// for the hydration window. The buffer is owned per sub instance, so a
-// wipe / account switch that tears down the sub drops it atomically.
+// Per-sub, bounded recovery during follow reconciliation (#851 / #1458).
+// Both kind-4 and kind-1059 hold decrypted inbox previews in memory while
+// follows load. Backlog replays silently; only fresh inbound carries a
+// notification. No ciphertext or secrets are persisted by this buffer.
+// Cached friends can replay after the offline timeout; unmatched entries
+// remain recoverable until reconciliation completes (which clears strangers).
+// Teardown clears the buffer atomically with the subscription.
 
 export interface DeferredFollowGateEntry {
   partnerPubkey: string;
@@ -33,7 +22,7 @@ export interface DeferredFollowGateEntry {
 }
 
 export interface LiveSubFollowGateBuffer {
-  // Buffer a fresh inbound dropped purely by the follow-gate.
+  // Buffer an inbound deferred while follows reconcile.
   defer: (item: DeferredFollowGateEntry) => void;
   // Re-test buffered entries against the now-current follows. Entries that
   // pass are removed and handed to `onPass` (newest-last); the rest stay
@@ -45,9 +34,7 @@ export interface LiveSubFollowGateBuffer {
   readonly size: number;
 }
 
-// Small cap: the hydration window is sub-second, so only a handful of
-// wraps can realistically land in it. Bounding the buffer keeps a stuck
-// "never hydrates" state (no contacts at all) from growing it unbounded.
+// Bound memory even when reconciliation is slow or never completes offline.
 export const FOLLOW_GATE_DEFER_CAP = 50;
 
 export function createLiveSubFollowGateBuffer(

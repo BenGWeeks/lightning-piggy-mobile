@@ -1,4 +1,4 @@
-import { isFollowed } from '../utils/followPubkeys';
+import { gateLiveDm } from './liveDmFollowGateDecision';
 import { getAppFormatLocale } from '../utils/appFormatLocale';
 import { dmThreadId, MARMOT_WELCOME_KIND, protocolForWireKind } from '../utils/dmProtocol';
 import type React from 'react';
@@ -42,6 +42,8 @@ export interface LiveRumorSurfaceDeps {
   shouldAbort: () => boolean;
   followPubkeysRef: React.MutableRefObject<Set<string>>;
   followGateBuffer: LiveSubFollowGateBuffer;
+  isFollowHydrated: () => boolean;
+  isFollowCacheReady?: () => boolean;
   isFreshArrival: (createdAtSec: number) => boolean;
   queueInboxEntry: (entry: DmInboxEntry) => void;
   knownWrapIds: Set<string>;
@@ -59,6 +61,8 @@ export function createLiveRumorSurfacer(
     shouldAbort,
     followPubkeysRef,
     followGateBuffer,
+    isFollowHydrated,
+    isFollowCacheReady = () => false,
     isFreshArrival,
     queueInboxEntry,
     knownWrapIds,
@@ -139,45 +143,25 @@ export function createLiveRumorSurfacer(
       return;
     }
 
-    // Follow gate (mirrors refreshDmInbox B1) — keeps non-followed
-    // sender plaintext off AsyncStorage. Group rumors above don't
-    // hit this gate because group membership is its own auth signal.
-    if (!isFollowed(followPubkeysRef.current, partnership.partnerPubkey)) {
-      if (__DEV__)
-        console.log(
-          `[Nostr] live wrap ${wrapId.slice(0, 8)} dropped by follow-gate (partner=${partnership.partnerPubkey.slice(0, 8)})`,
-        );
-      // Defer fresh inbound for replay once follows hydrate (#851 F2). Skip my
-      // own echoes and historical backlog (silent); persistence is left to the
-      // next refreshDmInbox — see replayDeferredFollowGate.
-      if (!partnership.fromMe && isFreshArrival(rumor.created_at)) {
-        // For a structured rumor (order kind 16/17, or an NWC wallet share)
-        // `textForRumor` returns non-human JSON; surface a readable, SECRET-FREE
-        // preview so a raw blob (or, for a share, a bearer connection string)
-        // never leaks into the conversation list OR the notification body when
-        // the sender isn't followed (mirrors the non-deferred path below). Plain
-        // DM rumors pass through unchanged.
-        const deferredText = dmRowPreview(textForRumor(rumor), rumor.kind, getAppFormatLocale());
-        followGateBuffer.defer({
-          partnerPubkey: partnership.partnerPubkey,
-          ...(routeResult.deferredGroupRumor ? { groupRumor: routeResult.deferredGroupRumor } : {}),
-          entry: {
-            id: wrapId,
-            partnerPubkey: partnership.partnerPubkey,
-            fromMe: partnership.fromMe,
-            createdAt: rumor.created_at,
-            text: deferredText,
-            wireKind: rumor.kind,
-          },
-          // A Marmot invite stays silent on replay too (#1269).
-          ...(rumor.kind !== MARMOT_WELCOME_KIND
-            ? { notify: { title: 'New message', body: deferredText } }
-            : {}),
-        });
-      }
-      // Follows known: a stranger — nothing to see. Still hydrating: may be
-      // a friend, so the placeholder stays for the replay to replace.
-      if (partnership.fromMe || followPubkeysRef.current.size > 0) nothingToSee();
+    const decision = gateLiveDm({
+      entry: {
+        id: wrapId,
+        partnerPubkey: partnership.partnerPubkey,
+        fromMe: partnership.fromMe,
+        createdAt: rumor.created_at,
+        text: textForRumor(rumor),
+        wireKind: rumor.kind,
+      },
+      kind: 1059,
+      groupRumor: routeResult.deferredGroupRumor,
+      follows: followPubkeysRef.current,
+      hydrated: isFollowHydrated(),
+      cacheReady: isFollowCacheReady(),
+      buffer: followGateBuffer,
+      fresh: isFreshArrival(rumor.created_at),
+    });
+    if (decision !== 'pass') {
+      if (decision === 'drop') nothingToSee();
       else if (placeholder) noteContentlessWrapAlert(wrapId);
       return;
     }

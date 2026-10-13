@@ -1,3 +1,4 @@
+import { gateLiveDm, startFollowGateFallback } from './liveDmFollowGateDecision';
 import { isFollowed } from '../utils/followPubkeys';
 import { loadKind4ReplayCursor } from './kind4RetryStore';
 import { getAppFormatLocale } from '../utils/appFormatLocale';
@@ -77,6 +78,7 @@ export interface LiveDmSubscriptionParams {
   readRelays: string[];
   knownWrapIdsRef: React.MutableRefObject<{ pubkey: string | null; set: Set<string> }>;
   followPubkeysRef: React.MutableRefObject<Set<string>>;
+  followHydratedRef?: React.MutableRefObject<boolean>;
   setDmInbox: React.Dispatch<React.SetStateAction<DmInboxEntry[]>>;
   setAmberNip44Permission: React.Dispatch<React.SetStateAction<'unknown' | 'granted' | 'denied'>>;
   // Follow-gate deferral buffer (#851 F2). Fresh inbound dropped while the
@@ -112,6 +114,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     readRelays,
     knownWrapIdsRef,
     followPubkeysRef,
+    followHydratedRef = { current: false },
     setDmInbox,
     setAmberNip44Permission,
     followGateBuffer,
@@ -249,6 +252,12 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     }
   };
   setDeferredReplay(replayDeferredFollowGate);
+  const followGate = startFollowGateFallback(
+    followPubkeysRef,
+    followHydratedRef,
+    followGateBuffer,
+    replayDeferredFollowGate,
+  );
 
   // Shared post-unwrap surface path (group-route → follow-gate → persist →
   // surface → notify), extracted verbatim to liveDmRumorSurface.ts so the
@@ -268,6 +277,8 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       cancelled || !isCurrentOwner() || viewerPubkey !== pubkey || activeSigner !== signerType,
     followPubkeysRef,
     followGateBuffer,
+    isFollowHydrated: () => followHydratedRef.current,
+    isFollowCacheReady: followGate.ready,
     isFreshArrival,
     queueInboxEntry,
     knownWrapIds,
@@ -398,32 +409,6 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       if (cancelled || !isCurrentOwner() || viewerPubkey !== pubkey || activeSigner !== signerType)
         return;
 
-      // Follow gate (mirrors refreshDmInbox B1) — incoming kind-4 from a non-followed sender is dropped from inbox state. Outgoing (fromMe) bypasses since we sent it.
-      if (!fromMe && !isFollowed(followPubkeysRef.current, partnerPubkey)) {
-        if (__DEV__)
-          console.log(
-            `[Nostr] live kind-4 ${ev.id.slice(0, 8)} dropped by follow-gate (partner=${partnerPubkey.slice(0, 8)})`,
-          );
-        // Defer fresh inbound for replay once follows hydrate (#851 F2). Only
-        // genuinely-fresh arrivals carry a notification; older backlog stays
-        // silent. Persistence is intentionally skipped — see replay helper.
-        if (isFreshArrival(ev.created_at)) {
-          followGateBuffer.defer({
-            partnerPubkey,
-            entry: {
-              id: ev.id,
-              partnerPubkey,
-              fromMe,
-              createdAt: ev.created_at,
-              text: plaintext,
-              wireKind: 4,
-            },
-            notify: { title: 'New message', body: plaintext },
-          });
-        }
-        return;
-      }
-
       const k4InboxEntry: DmInboxEntry = {
         id: ev.id,
         partnerPubkey,
@@ -432,6 +417,19 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         text: plaintext,
         wireKind: 4,
       };
+      if (
+        gateLiveDm({
+          entry: k4InboxEntry,
+          kind: 4,
+          follows: followPubkeysRef.current,
+          hydrated: followHydratedRef.current,
+          cacheReady: followGate.ready(),
+          buffer: followGateBuffer,
+          fresh: isFreshArrival(ev.created_at),
+          bypassOwn: true,
+        }) !== 'pass'
+      )
+        return;
       // Persist the decrypted kind-4 to the encrypted store (#848 — the RAM
       // LRU dies with the session). The store is the ONLY at-rest home now
       // (#850; the plaintext inbox-preview blob is retired). Same writeChain
@@ -817,6 +815,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     // the sub down, so buffered just-wiped wraps can never be replayed into
     // the next identity's inbox.
     setDeferredReplay(null);
+    followGate.dispose();
     followGateBuffer.clear();
     // Stop the native engine — tears the rust-nostr pool down AND clears the
     // module's single-entry key cache, so a logout / account switch never

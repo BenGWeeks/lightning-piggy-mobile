@@ -14,6 +14,15 @@
  *     rather than lost; replaying it surfaces the entry.
  */
 
+import {
+  startLiveDmSubscription as openLiveDmSubscription,
+  type LiveDmSubscriptionParams,
+} from './nostrLiveDmSub';
+import { createLiveSubFollowGateBuffer } from './liveSubFollowGate';
+import { createYieldScheduler } from './nostrDecryptPacing';
+import { nip04PlaintextCache } from './nostrSecretKeyCache';
+import { upsertDmMessages } from '../services/dmDb';
+
 const mockSubscribe = jest.fn();
 let capturedOnEvent: ((ev: unknown) => void) | null = null;
 const mockUnsub = jest.fn();
@@ -90,10 +99,19 @@ jest.mock('./nostrDmCache', () => ({
   mergeInboxEntries: (prev: unknown[], batch: unknown[]) => [...prev, ...batch],
 }));
 
-import { startLiveDmSubscription, type LiveDmSubscriptionParams } from './nostrLiveDmSub';
-import { createLiveSubFollowGateBuffer } from './liveSubFollowGate';
-import { createYieldScheduler } from './nostrDecryptPacing';
-import { upsertDmMessages } from '../services/dmDb';
+const subscriptions = new Set<() => void>();
+function startLiveDmSubscription(params: LiveDmSubscriptionParams) {
+  const stop = openLiveDmSubscription(params);
+  const teardown = () => {
+    subscriptions.delete(teardown);
+    stop();
+  };
+  subscriptions.add(teardown);
+  return teardown;
+}
+afterEach(() => {
+  for (const stop of subscriptions) stop();
+});
 
 const VIEWER = 'f'.repeat(64);
 const ALICE = 'a'.repeat(64);
@@ -125,6 +143,49 @@ describe('startLiveDmSubscription — follow-gate race + teardown (#851 F2)', ()
     jest.clearAllMocks();
     capturedOnEvent = null;
   });
+
+  it.each([true, false])(
+    'defers live kind-4 from Middle until reconciliation, then surfaces once (fresh=%s, #1458)',
+    async (fresh) => {
+      const middle = '4b2fcb4e3c30c1363c4af5e3a6adebfe93cd572c3d57c31aaa4479d908612036';
+      const follows = { current: new Set(fresh ? [middle] : [ALICE]) }; // cache alone is not hydration
+      const hydrated = { current: false };
+      const buffer = createLiveSubFollowGateBuffer();
+      const setDeferredReplay = jest.fn();
+      const setDmInbox = jest.fn();
+      jest.mocked(nip04PlaintextCache.get).mockReturnValue('hello from Middle');
+      const teardown = startLiveDmSubscription(
+        makeParams({
+          followPubkeysRef: follows,
+          followHydratedRef: hydrated,
+          followGateBuffer: buffer,
+          setDeferredReplay,
+          setDmInbox,
+        } as Partial<LiveDmSubscriptionParams>),
+      );
+      await flush();
+      capturedOnEvent!({
+        id: `middle-kind4-${fresh}`,
+        kind: 4,
+        pubkey: middle,
+        created_at: Math.floor(Date.now() / 1000) - (fresh ? 0 : 600),
+        tags: [['p', VIEWER]],
+        content: 'ciphertext',
+      });
+      await flush();
+      expect(setDmInbox).not.toHaveBeenCalled();
+      expect(buffer.size).toBe(1);
+      follows.current = new Set([middle]);
+      hydrated.current = true;
+      const replay = setDeferredReplay.mock.calls[0][0];
+      buffer.reevaluate(follows.current, replay);
+      buffer.reevaluate(follows.current, replay);
+      expect(mockNotifyDm).toHaveBeenCalledTimes(1);
+      expect(mockNotifyDm).toHaveBeenCalledWith(middle);
+      expect(setDmInbox).toHaveBeenCalledTimes(1);
+      teardown();
+    },
+  );
 
   it('registers a replay hook on open and clears it on teardown', async () => {
     const setDeferredReplay = jest.fn();
@@ -297,7 +358,9 @@ describe('startLiveDmSubscription — follow-gate race + teardown (#851 F2)', ()
 
     const knownWrapIdsRef = { current: { pubkey: null as string | null, set: new Set<string>() } };
     const followPubkeysRef = { current: new Set<string>([ALICE]) };
-    const teardown = startLiveDmSubscription(makeParams({ knownWrapIdsRef, followPubkeysRef }));
+    const teardown = startLiveDmSubscription(
+      makeParams({ knownWrapIdsRef, followPubkeysRef, followHydratedRef: { current: true } }),
+    );
     await flush();
     expect(capturedOnEvent).toBeTruthy();
 
@@ -330,7 +393,9 @@ describe('startLiveDmSubscription — follow-gate race + teardown (#851 F2)', ()
     // (relay-list change, same viewer). The relay re-streams the wrap; it
     // must be processed and surfaced this time, not deduped away.
     mockNotifyDm.mockClear();
-    startLiveDmSubscription(makeParams({ knownWrapIdsRef, followPubkeysRef }));
+    startLiveDmSubscription(
+      makeParams({ knownWrapIdsRef, followPubkeysRef, followHydratedRef: { current: true } }),
+    );
     await flush();
     capturedOnEvent!({
       id: 'parked-wrap',
