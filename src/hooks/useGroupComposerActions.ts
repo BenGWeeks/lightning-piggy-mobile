@@ -173,7 +173,9 @@ export function useGroupComposerActions(params: {
       owner = myPubkey,
     ): Promise<void> => {
       if (!targetGroup || !owner || !rumorId) return;
-      setMessages((prev) => prev.map((m) => (m.id === rowId ? { ...m, id: rumorId } : m)));
+      setMessages((prev) =>
+        prev.map((m) => (m.id === rowId ? { ...m, id: rumorId, localId: m.localId ?? rowId } : m)),
+      );
       try {
         setMessages(await rekeyGroupMessage(owner, targetGroup.id, rowId, rumorId));
       } catch (err) {

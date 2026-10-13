@@ -26,6 +26,9 @@ jest.mock('../contexts/NostrContext', () => ({
     ],
   }),
 }));
+jest.mock('../contexts/GroupsContext', () => ({
+  useGroups: () => ({ getGroup: () => undefined }),
+}));
 jest.mock('../contexts/ThemeContext', () => ({ useThemeColors: () => mockPalette }));
 jest.mock('../contexts/LocaleContext', () => ({
   useTranslation: () => (key: string) =>

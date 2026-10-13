@@ -1,0 +1,53 @@
+= Chat menu evidence (#1428)
+
+Captured with ADB on War Machine's `emulator-5554`, using the active Big
+Piggy's existing Middle Piggy Marmot thread and the `IO i6zq renamed` test
+group. No sign-in/out, messages, membership edits or history clearing.
+PNG originals: `/tmp/claude-1000/chat-menu/shots/`. WebP copies here are
+resized to a maximum of 1200 pixels.
+
+* `before-mute-popup.webp`: user-supplied original mute-only menu screenshot.
+* `menu.webp`: shared conversation menu.
+* `view-contact.webp`: identity, copyable npub, profile, security, devices and relays.
+* `group-info.webp`: group identity, security, relays and management actions.
+* `search.webp`: loaded-history matches highlighted in the conversation.
+* `media.webp`: month-grouped thumbnails from stored messages.
+* `docs.webp`, `links.webp`: separate tabs (empty in this existing thread).
+* `mute.webp`, `unmute.webp`, `unmute-confirm.webp`: branded confirmation and flipped label.
+
+The reusable flow is `.maestro/messaging/flow-154-chat-menu.yaml`. Its
+fixtures are existing Piggy chats; `GROUP_ID`, `PEER_PROTOCOL` and
+`SEARCH_QUERY` can select other existing test histories. The query must
+match at least two messages. The flow toggles mute twice to restore the
+starting state and cancels the Clear chat confirmation.
+
+Device work holds `flock -w 3600 /tmp/claude-1000/emulator.lock`; each
+Maestro invocation additionally holds `/tmp/claude-1000/maestro.lock`.
+Metro runs from this worktree on port 8108. The documented development
+link alone does not override this emulator's saved `debug_http_host`:
+stop the dev app, update that preference while preserving the XML, then
+open the development-client link. Restore `10.0.2.2:8090` afterwards.
+
+Search and media use the conversation's bounded loaded messages, without
+new relay subscriptions. Image thumbnails use the existing account-scoped
+decryption cache and retain the media trust gate. Voice notes and docs
+jump back to their message; images and GIFs open the viewer. Local Clear
+chat persists an account/thread/protocol cutoff: older relay replays stay
+hidden, while other participants and the underlying encrypted history
+are unaffected. Block is omitted because the app has no blocking feature.
+
+== Validation
+
+* TypeScript, ESLint with zero warnings, Prettier, i18n sync guard,
+  file-size and performance anti-pattern gates pass.
+* Related Jest (including locale and navigation privacy guards): 199 tests in 14 suites.
+* Flow 154: exit 0, 95 completed commands (3 conditional branches skipped).
+  The initial profile chunk took 84 seconds to compile, so the flow allows
+  120 seconds for that first load and retains the active app session.
+* Additional NIP-17 checks passed for Little Piggy's 1:1 and the existing
+  `Mntions smmv682wpc` group: info, applicable actions, search and media tabs.
+* Media snapshots (including attachment decryption metadata) are stripped
+  from saved navigation state. Restarting from All media returns to the
+  underlying chat. Message-jump requests are also transient.
+* Cold restart from All media was verified on the emulator: it returns to
+  the underlying conversation, with no private media snapshot restored.

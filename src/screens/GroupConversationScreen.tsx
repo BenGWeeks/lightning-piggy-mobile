@@ -1,3 +1,8 @@
+import { useGroupConversationLoader } from '../hooks/useGroupConversationLoader';
+import { useGroupChatTools } from '../hooks/useGroupChatTools';
+import { useChatLocalHistory } from '../hooks/useChatLocalHistory';
+import { ChatSearchContext } from '../contexts/ChatSearchContext';
+import ChatSearchHeader from '../components/ChatSearchHeader';
 import { useAccountState } from '../contexts/useAccountState';
 import { useLiveMessageIndicator } from '../hooks/useLiveMessageIndicator';
 import NewMessagesPill from '../components/NewMessagesPill';
@@ -10,7 +15,7 @@ import { useMentionComposer } from '../hooks/useMentionComposer';
 import { useSharedContactProfiles } from '../hooks/useSharedContactProfiles';
 import { groupReadKey } from '../services/chatReadPositions';
 import { messageMentions } from '../utils/chatMentions';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, FlatList, ActivityIndicator, Linking } from 'react-native';
 import { Alert } from '../components/BrandedAlert';
 import {
@@ -26,7 +31,7 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import { useLocale } from '../contexts/LocaleContext';
 import { createGroupConversationScreenStyles } from '../styles/GroupConversationScreen.styles';
 import { useGroups } from '../contexts/GroupsContext';
-import { useNostr, useNostrContacts, subscribeGroupMessages } from '../contexts/NostrContext';
+import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import { useGroupComposerActions } from '../hooks/useGroupComposerActions';
 import { useGroupMemberProfiles } from '../hooks/useGroupMemberProfiles';
 import { buildGroupMemberRows } from '../utils/groupMemberRows';
@@ -70,7 +75,7 @@ import { useMessageInfoSheet } from '../hooks/useMessageInfoSheet';
 import SecretModeCelebration from '../components/SecretModeCelebration';
 import { isConfigured as isGifConfigured } from '../services/giphyService';
 import { buildOsmViewUrl, type SharedLocation } from '../services/locationService';
-import { loadGroupMessages, type GroupMessage } from '../services/groupMessagesStorageService';
+import { type GroupMessage } from '../services/groupMessagesStorageService';
 import { useGroupPolls } from '../hooks/useGroupPolls';
 import { usePaidInvoiceTracker } from '../hooks/usePaidInvoiceTracker';
 import type { NostrProfile } from '../types/nostr';
@@ -105,7 +110,7 @@ const GroupConversationScreen: React.FC = () => {
   const colors = useThemeColors();
   const { t, formatLocale } = useLocale();
   const styles = useMemo(() => createGroupConversationScreenStyles(colors), [colors]);
-  const { getGroup, deleteGroup, secretMode, setSecretMode } = useGroups();
+  const { getGroup, secretMode, setSecretMode } = useGroups();
   const { pubkey: myPubkey, profile: myProfile, fetchProfilesForPubkeys } = useNostr();
   const { contacts } = useNostrContacts();
   // Trust gate (#1338), decided per SENDER: a stranger's media in a group
@@ -115,7 +120,12 @@ const GroupConversationScreen: React.FC = () => {
   const [membersSheetVisible, setMembersSheetVisible] = useState(false);
   const messageOwner = myPubkey ? `${myPubkey}:${route.params.groupId}` : null;
   const [draft, setDraft] = useAccountState(messageOwner, '');
-  const [messages, setMessages] = useAccountState(messageOwner, EMPTY_MESSAGES);
+  const [rawMessages, setMessages] = useAccountState(messageOwner, EMPTY_MESSAGES);
+  const { messages, clear, clearBoundary } = useChatLocalHistory(
+    myPubkey,
+    `group:${route.params.groupId}`,
+    rawMessages,
+  );
   const [loadingMessages, setLoadingMessages] = useState(true);
   const [attachPanelOpen, setAttachPanelOpen] = useState(false);
   const [gifPickerOpen, setGifPickerOpen] = useState(false);
@@ -152,50 +162,7 @@ const GroupConversationScreen: React.FC = () => {
 
   const loadedGroupId = group?.id;
 
-  // Load persisted messages only when the thread or identity changes.
-  // Metadata edits must not unmount the list and discard its reading position.
-  useEffect(() => {
-    if (!loadedGroupId) return;
-    let cancelled = false;
-    setLoadingMessages(true);
-    loadGroupMessages(myPubkey, loadedGroupId)
-      .then((loaded) => {
-        if (!cancelled) {
-          setMessages(loaded);
-          setLoadingMessages(false);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setLoadingMessages(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [loadedGroupId, myPubkey, setMessages]);
-
-  // Live updates: NostrContext fires `subscribeGroupMessages` when an
-  // inbound NIP-17 wrap decrypts to a kind-14 rumor that matches this
-  // group's roster. Re-load from storage so we pick up the appended
-  // entry (cheap — capped at 500 messages per group). We could be
-  // smarter and merge in-memory, but file-of-truth simplicity wins.
-  useEffect(() => {
-    if (!loadedGroupId) return;
-    let cancelled = false;
-    const unsubscribe = subscribeGroupMessages((groupId) => {
-      if (groupId !== loadedGroupId) return;
-      loadGroupMessages(myPubkey, loadedGroupId)
-        .then((loaded) => {
-          if (!cancelled) setMessages(loaded);
-        })
-        .catch(() => {
-          /* Keep existing history if local storage cannot refresh. */
-        });
-    });
-    return () => {
-      cancelled = true;
-      unsubscribe();
-    };
-  }, [loadedGroupId, myPubkey, setMessages]);
+  useGroupConversationLoader(myPubkey, loadedGroupId, setMessages, setLoadingMessages);
 
   const liveEntries = useMemo(
     () => messages.map((message) => ({ id: message.id, createdAt: message.createdAt })),
@@ -266,6 +233,7 @@ const GroupConversationScreen: React.FC = () => {
     memberNameByPubkey,
     formatLocale,
     deviceNotices: groupDevices.notices,
+    clearBoundary,
   });
   // @mentions (#1295): the member picker + `@Name` → `nostr:npub…` on send.
   const mention = useMentionComposer({ draft, setDraft, members, selfPubkey: myPubkey });
@@ -429,6 +397,16 @@ const GroupConversationScreen: React.FC = () => {
     timelineRows,
     timelineRowId,
     0.1,
+  );
+  const tools = useGroupChatTools(
+    messages,
+    group,
+    members,
+    groupDevices,
+    scrollToId,
+    clear,
+    live.leaveEdge,
+    timelineRows,
   );
   const read = useChatReadPosition({
     owner: myPubkey,
@@ -626,337 +604,315 @@ const GroupConversationScreen: React.FC = () => {
     );
   }
 
-  // "Leave" not "Delete": this only removes the group from THIS device.
-  // We don't publish a kind-30200 deletion event (and other members keep
-  // the group in their local stores). True multi-party delete would
-  // require either a NIP-09 event the receivers honour, or a kind-30200
-  // tombstone — tracked as a follow-up.
-  const handleLeave = () => {
-    Alert.alert(
-      t('groupConversationScreen.leaveGroupTitle'),
-      t('groupConversationScreen.leaveGroupMessage', { name: group.name }),
-      [
-        { text: t('groupConversationScreen.cancel'), style: 'cancel' },
-        {
-          text: t('groupConversationScreen.leave'),
-          style: 'destructive',
-          onPress: async () => {
-            await deleteGroup(group.id);
-            navigation.goBack();
-          },
-        },
-      ],
-    );
-  };
-
   return (
-    // Outer wrapper used to be a KeyboardAvoidingView — that was a no-op
-    // on Android (behavior=undefined) and let the composer slide behind
-    // the IME (#250). The shared ConversationComposer (#251) now owns
-    // the keyboard-handling via KeyboardStickyView, so the screen's own
-    // wrapper is just a plain View that stacks header + content + composer.
-    <View style={styles.container}>
-      <BrandPatternBackground variant="messages-weave" />
-      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-        <View style={styles.titleRow}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => navigation.goBack()}
-            accessibilityLabel={t('groupConversationScreen.back')}
-            testID="group-back"
-          >
-            <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-              <Path
-                d="m15 18-6-6 6-6"
-                stroke={colors.brandPink}
-                strokeWidth={2.5}
-                strokeLinecap="round"
-                strokeLinejoin="round"
+    <ChatSearchContext.Provider value={tools.search.query}>
+      <View style={styles.container}>
+        <BrandPatternBackground variant="messages-weave" />
+        {tools.search.active ? (
+          <ChatSearchHeader search={tools.search} topInset={insets.top} />
+        ) : (
+          <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
+            <View style={styles.titleRow}>
+              <TouchableOpacity
+                style={styles.backButton}
+                onPress={() => navigation.goBack()}
+                accessibilityLabel={t('groupConversationScreen.back')}
+                testID="group-back"
+              >
+                <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+                  <Path
+                    d="m15 18-6-6 6-6"
+                    stroke={colors.brandPink}
+                    strokeWidth={2.5}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </Svg>
+              </TouchableOpacity>
+              <GroupHeaderTitle
+                name={group.name}
+                canRename={canManageGroup(group, myPubkey)}
+                onRename={() => setRenameVisible(true)}
               />
-            </Svg>
-          </TouchableOpacity>
-          <GroupHeaderTitle
-            name={group.name}
-            canRename={canManageGroup(group, myPubkey)}
-            onRename={() => setRenameVisible(true)}
-          />
-          <GroupHeaderActions group={group} onLeave={handleLeave} />
-        </View>
-        {/* Tappable member-count line — opens GroupMembersSheet for
+              <GroupHeaderActions group={group} menu={tools.menu} />
+            </View>
+            {/* Tappable member-count line — opens GroupMembersSheet for
             add/remove. Replaces the inert text + horizontal chip strip
             that used to live below this header. See issue #259. */}
-        <TouchableOpacity
-          onPress={() => setMembersSheetVisible(true)}
-          accessibilityLabel={t('groupConversationScreen.manageMembers')}
-          testID="group-member-count"
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <Text style={styles.memberCount}>
-            {members.length === 1
-              ? t('groupConversationScreen.memberCountOne', { count: members.length })
-              : t('groupConversationScreen.memberCountOther', { count: members.length })}
-          </Text>
-        </TouchableOpacity>
-      </View>
+            <TouchableOpacity
+              onPress={() => setMembersSheetVisible(true)}
+              accessibilityLabel={t('groupConversationScreen.manageMembers')}
+              testID="group-member-count"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Text style={styles.memberCount}>
+                {members.length === 1
+                  ? t('groupConversationScreen.memberCountOne', { count: members.length })
+                  : t('groupConversationScreen.memberCountOther', { count: members.length })}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
-      <View style={styles.content}>
-        {/* See #470 — wrap the FlatList (NOT the composer) in an
+        <View style={styles.content}>
+          {/* See #470 — wrap the FlatList (NOT the composer) in an
             Animated.View whose marginBottom tracks the keyboard
             height so the IME doesn't hide the bottom messages. The
             composer below this wrapper handles its own keyboard
             avoidance via KeyboardStickyView. */}
-        <Animated.View style={[{ flex: 1 }, animatedListLiftStyle]}>
-          {loadingMessages ? (
-            <ActivityIndicator color={colors.brandPink} style={{ marginTop: 32 }} />
-          ) : (
-            <FlatList
-              ref={listRef}
-              data={timelineRows}
-              keyExtractor={timelineRowId}
-              renderItem={renderMessage}
-              contentContainerStyle={styles.messagesList}
-              testID="group-messages-list"
-              onScroll={live.onScroll}
-              scrollEventThrottle={100}
-              onContentSizeChange={live.onContentSizeChange}
-              viewabilityConfigCallbackPairs={read.viewabilityConfigCallbackPairs}
-              onScrollToIndexFailed={onScrollToIndexFailed}
-              ListEmptyComponent={
-                <View style={styles.emptyState}>
-                  <Text style={styles.emptySubtitle}>
-                    {t('groupConversationScreen.noMessages')}
-                  </Text>
-                </View>
-              }
-            />
-          )}
-          {live.hasNewMessages && !loadingMessages && (
-            <NewMessagesPill onPress={live.jumpToLatest} testID="group-new-messages" />
-          )}
-          {!loadingMessages && (
-            <ChatJumpButtons
-              mentionCount={read.pendingMentions.length}
-              onJumpToMention={read.jumpToNextMention}
-              showLatest={!live.atEdge && !live.hasNewMessages}
-              hasNewMessages={live.hasNewMessages}
-              unreadCount={read.unread}
-              onJumpToLatest={live.jumpToLatest}
-              testIDs={{ mention: 'group-jump-to-mention', latest: 'group-jump-to-latest' }}
-            />
-          )}
-        </Animated.View>
+          <Animated.View style={[{ flex: 1 }, animatedListLiftStyle]}>
+            {loadingMessages ? (
+              <ActivityIndicator color={colors.brandPink} style={{ marginTop: 32 }} />
+            ) : (
+              <FlatList
+                ref={listRef}
+                data={timelineRows}
+                keyExtractor={timelineRowId}
+                renderItem={renderMessage}
+                contentContainerStyle={styles.messagesList}
+                testID="group-messages-list"
+                onScroll={live.onScroll}
+                scrollEventThrottle={100}
+                onContentSizeChange={live.onContentSizeChange}
+                viewabilityConfigCallbackPairs={read.viewabilityConfigCallbackPairs}
+                onScrollToIndexFailed={onScrollToIndexFailed}
+                ListEmptyComponent={
+                  <View style={styles.emptyState}>
+                    <Text style={styles.emptySubtitle}>
+                      {t('groupConversationScreen.noMessages')}
+                    </Text>
+                  </View>
+                }
+              />
+            )}
+            {live.hasNewMessages && !loadingMessages && (
+              <NewMessagesPill onPress={live.jumpToLatest} testID="group-new-messages" />
+            )}
+            {!loadingMessages && (
+              <ChatJumpButtons
+                mentionCount={read.pendingMentions.length}
+                onJumpToMention={read.jumpToNextMention}
+                showLatest={!live.atEdge && !live.hasNewMessages}
+                hasNewMessages={live.hasNewMessages}
+                unreadCount={read.unread}
+                onJumpToLatest={live.jumpToLatest}
+                testIDs={{ mention: 'group-jump-to-mention', latest: 'group-jump-to-latest' }}
+              />
+            )}
+          </Animated.View>
 
-        {/* Composer + attach panel + IME-aware safe area now live in the
+          {/* Composer + attach panel + IME-aware safe area now live in the
             shared ConversationComposer (#251). Style overrides preserve
             the group-specific look (paper-plane Send button, transparent
             attach button, 12 dp horizontal padding). */}
-        <ConversationComposer
-          value={draft}
-          onChangeText={setDraft}
-          {...menu.composer}
-          replying={replyQuote ? { quote: replyQuote, onCancel: cancelReply } : undefined}
-          accessory={<MentionPicker candidates={mention.candidates} onPick={mention.pick} />}
-          onSelectionChange={mention.onSelectionChange}
-          selection={mention.selection}
-          onStartVoiceNote={() => setVoiceSheetOpen(true)}
-          sending={sending}
-          onAttachToggle={() => (attachPanelOpen ? closeAttachPanel() : openAttachPanel())}
-          attachOpen={attachPanelOpen}
-          attachDisabled={sharingLocation || uploadingImage}
-          attachLoading={sharingLocation || uploadingImage}
-          onInputFocus={closeAttachPanel}
-          placeholder={t('groupConversationScreen.typeMessage')}
-          sendButtonVariant="paper-plane"
-          composerPaddingHorizontal={12}
-          accessibilityLabels={{
-            input: t('groupConversationScreen.messageInput'),
-            attach: t('groupConversationScreen.attach'),
-            send: t('groupConversationScreen.sendMessage'),
-          }}
-          testIDs={{
-            input: 'group-message-input',
-            attach: 'group-attach-button',
-            send: 'group-send-button',
-          }}
-          attachPanel={
-            <AttachPanel
-              onShareLocation={liveLoc.openLocation}
-              onSendImage={handlePickAndSendImage}
-              onTakePhoto={handleTakeAndSendPhoto}
-              onSendGif={isGifConfigured() ? () => setGifPickerOpen(true) : undefined}
-              // Zap renders but stays disabled — there's no single recipient
-              // to zap in a group, but hiding the tile entirely confused
-              // users who expected the same set as 1:1 (#237).
-              onSendZap={() => {}}
-              zapDisabled
-              zapAccessibilityLabel={t('groupConversationScreen.zapUnavailable')}
-              onSendInvoice={() => {
-                closeAttachPanel();
-                setInvoiceSheetOpen(true);
-              }}
-              onShareContact={() => {
-                // Picker opens over the panel; close on cancel/select.
-                setContactPickerOpen(true);
-              }}
-              onSharePoll={() => {
-                // Composer opens over the panel — close it first so the
-                // BottomSheet snaps without competing for touch focus
-                // with the visible attach grid behind it.
-                closeAttachPanel();
-                setPollComposerOpen(true);
-              }}
-              onSendVoiceNote={() => setVoiceSheetOpen(true)}
-              // Shown but disabled: wallet connections are only shared 1:1.
-              onShareWallet={() => {}}
-              walletDisabled
-              walletAccessibilityLabel={t('groupConversationScreen.walletUnavailable')}
-            />
-          }
+          <ConversationComposer
+            value={draft}
+            onChangeText={setDraft}
+            {...menu.composer}
+            replying={replyQuote ? { quote: replyQuote, onCancel: cancelReply } : undefined}
+            accessory={<MentionPicker candidates={mention.candidates} onPick={mention.pick} />}
+            onSelectionChange={mention.onSelectionChange}
+            selection={mention.selection}
+            onStartVoiceNote={() => setVoiceSheetOpen(true)}
+            sending={sending}
+            onAttachToggle={() => (attachPanelOpen ? closeAttachPanel() : openAttachPanel())}
+            attachOpen={attachPanelOpen}
+            attachDisabled={sharingLocation || uploadingImage}
+            attachLoading={sharingLocation || uploadingImage}
+            onInputFocus={closeAttachPanel}
+            placeholder={t('groupConversationScreen.typeMessage')}
+            sendButtonVariant="paper-plane"
+            composerPaddingHorizontal={12}
+            accessibilityLabels={{
+              input: t('groupConversationScreen.messageInput'),
+              attach: t('groupConversationScreen.attach'),
+              send: t('groupConversationScreen.sendMessage'),
+            }}
+            testIDs={{
+              input: 'group-message-input',
+              attach: 'group-attach-button',
+              send: 'group-send-button',
+            }}
+            attachPanel={
+              <AttachPanel
+                onShareLocation={liveLoc.openLocation}
+                onSendImage={handlePickAndSendImage}
+                onTakePhoto={handleTakeAndSendPhoto}
+                onSendGif={isGifConfigured() ? () => setGifPickerOpen(true) : undefined}
+                // Zap renders but stays disabled — there's no single recipient
+                // to zap in a group, but hiding the tile entirely confused
+                // users who expected the same set as 1:1 (#237).
+                onSendZap={() => {}}
+                zapDisabled
+                zapAccessibilityLabel={t('groupConversationScreen.zapUnavailable')}
+                onSendInvoice={() => {
+                  closeAttachPanel();
+                  setInvoiceSheetOpen(true);
+                }}
+                onShareContact={() => {
+                  // Picker opens over the panel; close on cancel/select.
+                  setContactPickerOpen(true);
+                }}
+                onSharePoll={() => {
+                  // Composer opens over the panel — close it first so the
+                  // BottomSheet snaps without competing for touch focus
+                  // with the visible attach grid behind it.
+                  closeAttachPanel();
+                  setPollComposerOpen(true);
+                }}
+                onSendVoiceNote={() => setVoiceSheetOpen(true)}
+                // Shown but disabled: wallet connections are only shared 1:1.
+                onShareWallet={() => {}}
+                walletDisabled
+                walletAccessibilityLabel={t('groupConversationScreen.walletUnavailable')}
+              />
+            }
+          />
+        </View>
+
+        <LiveLocationDurationPicker
+          visible={liveLoc.pickerOpen}
+          onClose={liveLoc.closePicker}
+          onChooseSnapshot={liveLoc.shareSnapshot}
+          onChooseLive={liveLoc.shareLive}
         />
-      </View>
 
-      <LiveLocationDurationPicker
-        visible={liveLoc.pickerOpen}
-        onClose={liveLoc.closePicker}
-        onChooseSnapshot={liveLoc.shareSnapshot}
-        onChooseLive={liveLoc.shareLive}
-      />
+        <VoiceRecordingSheet
+          visible={voiceSheetOpen}
+          onClose={() => setVoiceSheetOpen(false)}
+          onSend={handleSendVoiceNote}
+          sending={uploadingVoice}
+        />
 
-      <VoiceRecordingSheet
-        visible={voiceSheetOpen}
-        onClose={() => setVoiceSheetOpen(false)}
-        onSend={handleSendVoiceNote}
-        sending={uploadingVoice}
-      />
+        <RenameGroupSheet
+          visible={renameVisible}
+          groupId={group.id}
+          onClose={() => setRenameVisible(false)}
+        />
 
-      <RenameGroupSheet
-        visible={renameVisible}
-        groupId={group.id}
-        onClose={() => setRenameVisible(false)}
-      />
+        <GroupMembersSheet
+          visible={membersSheetVisible}
+          groupId={group.id}
+          onClose={() => setMembersSheetVisible(false)}
+          members={members}
+          chatId={groupDevices.chatId}
+          deviceCounts={groupDevices.counts}
+          onMemberTap={openSender}
+        />
 
-      <GroupMembersSheet
-        visible={membersSheetVisible}
-        groupId={group.id}
-        onClose={() => setMembersSheetVisible(false)}
-        members={members}
-        chatId={groupDevices.chatId}
-        deviceCounts={groupDevices.counts}
-        onMemberTap={openSender}
-      />
+        <GifPickerSheet
+          visible={gifPickerOpen}
+          onClose={() => setGifPickerOpen(false)}
+          onSelect={handleSendGif}
+        />
 
-      <GifPickerSheet
-        visible={gifPickerOpen}
-        onClose={() => setGifPickerOpen(false)}
-        onSelect={handleSendGif}
-      />
+        <PollComposerSheet
+          visible={pollComposerOpen}
+          onClose={() => setPollComposerOpen(false)}
+          onSend={handleSendPoll}
+        />
 
-      <PollComposerSheet
-        visible={pollComposerOpen}
-        onClose={() => setPollComposerOpen(false)}
-        onSend={handleSendPoll}
-      />
+        <FriendPickerSheet
+          visible={contactPickerOpen}
+          onClose={() => {
+            // Closing the picker (cancel or pick) also closes the
+            // AttachPanel underneath — same behaviour as 1:1 chats.
+            setContactPickerOpen(false);
+            setAttachPanelOpen(false);
+          }}
+          onSelect={handleShareContactPicked}
+          title={t('groupConversationScreen.shareContactTitle', { name: group.name })}
+          subtitle={t('groupConversationScreen.shareContactSubtitle')}
+        />
 
-      <FriendPickerSheet
-        visible={contactPickerOpen}
-        onClose={() => {
-          // Closing the picker (cancel or pick) also closes the
-          // AttachPanel underneath — same behaviour as 1:1 chats.
-          setContactPickerOpen(false);
-          setAttachPanelOpen(false);
-        }}
-        onSelect={handleShareContactPicked}
-        title={t('groupConversationScreen.shareContactTitle', { name: group.name })}
-        subtitle={t('groupConversationScreen.shareContactSubtitle')}
-      />
+        <ReceiveSheet
+          visible={invoiceSheetOpen}
+          onClose={() => setInvoiceSheetOpen(false)}
+          presetGroup={{ name: group.name }}
+          onSendToGroup={handleSendInvoiceToGroup}
+        />
 
-      <ReceiveSheet
-        visible={invoiceSheetOpen}
-        onClose={() => setInvoiceSheetOpen(false)}
-        presetGroup={{ name: group.name }}
-        onSendToGroup={handleSendInvoiceToGroup}
-      />
-
-      {/* Pay button on a received invoice routes to SendSheet pre-filled
+        {/* Pay button on a received invoice routes to SendSheet pre-filled
           with the bolt11. Group invoices have no per-message wallet
           binding, so we leave initialPicture / recipientPubkey unset and
           let SendSheet decode the invoice for the destination. */}
-      <SendSheet
-        visible={sendSheetOpen}
-        onClose={() => {
-          setSendSheetOpen(false);
-          setInvoiceToPay(null);
-        }}
-        initialAddress={invoiceToPay ?? undefined}
-      />
+        <SendSheet
+          visible={sendSheetOpen}
+          onClose={() => {
+            setSendSheetOpen(false);
+            setInvoiceToPay(null);
+          }}
+          initialAddress={invoiceToPay ?? undefined}
+        />
 
-      <FullscreenGifModal
-        url={fullscreenGifUrl}
-        onClose={() => setFullscreenGifUrl(null)}
-        closeLabel={t('groupConversationScreen.closeFullscreenGif')}
-        testID="group-conversation-gif-fullscreen"
-      />
+        <FullscreenGifModal
+          url={fullscreenGifUrl}
+          onClose={() => setFullscreenGifUrl(null)}
+          closeLabel={t('groupConversationScreen.closeFullscreenGif')}
+          testID="group-conversation-gif-fullscreen"
+        />
 
-      <MessageActionsSheet
-        visible={actioned !== null}
-        onClose={closeActions}
-        myReactions={
-          actioned ? (reactions.reactionsByTarget.get(actioned.targetId)?.myReactions ?? {}) : {}
-        }
-        onToggleReaction={reactions.handleToggleReaction}
-        showReactions={!!marmotGroupId}
-        onReply={
-          actioned
-            ? () => {
-                menu.composer.editing?.onCancel();
-                startReply();
-              }
-            : undefined
-        }
-        {...menu.sheet}
-        onEdit={
-          menu.sheet.onEdit
-            ? () => {
-                cancelReply();
-                menu.sheet.onEdit?.();
-              }
-            : undefined
-        }
-      />
+        <MessageActionsSheet
+          visible={actioned !== null}
+          onClose={closeActions}
+          myReactions={
+            actioned ? (reactions.reactionsByTarget.get(actioned.targetId)?.myReactions ?? {}) : {}
+          }
+          onToggleReaction={reactions.handleToggleReaction}
+          showReactions={!!marmotGroupId}
+          onReply={
+            actioned
+              ? () => {
+                  menu.composer.editing?.onCancel();
+                  startReply();
+                }
+              : undefined
+          }
+          {...menu.sheet}
+          onEdit={
+            menu.sheet.onEdit
+              ? () => {
+                  cancelReply();
+                  menu.sheet.onEdit?.();
+                }
+              : undefined
+          }
+        />
 
-      <ContactProfileSheet
-        visible={profileSheetVisible}
-        onClose={() => setProfileSheetVisible(false)}
-        contact={sheetContact}
-        onViewFullProfile={handleViewFullProfile}
-        onMessage={
-          sheetContact?.pubkey
-            ? () => {
-                const c = sheetContact;
-                if (!c?.pubkey) return;
-                setProfileSheetVisible(false);
-                navigation.navigate('Conversation', {
-                  pubkey: c.pubkey,
-                  name: c.name,
-                  picture: c.picture,
-                  lightningAddress: c.lightningAddress,
-                });
-              }
-            : undefined
-        }
-      />
-      <SecretModeCelebration
-        visible={secretCelebrationVisible}
-        enabled={secretPendingEnabled}
-        onDismiss={() => setSecretCelebrationVisible(false)}
-      />
-      <DeliveryDetailSheet
-        info={messageSheetInfo}
-        onClose={closeMessageInfo}
-        onResend={canResendFromInfo ? handleResendFromInfo : undefined}
-        devices={groupDevices.messageDevices(messageSheetSender, messageSheetSentAt)}
-      />
-    </View>
+        <ContactProfileSheet
+          visible={profileSheetVisible}
+          onClose={() => setProfileSheetVisible(false)}
+          contact={sheetContact}
+          onViewFullProfile={handleViewFullProfile}
+          onMessage={
+            sheetContact?.pubkey
+              ? () => {
+                  const c = sheetContact;
+                  if (!c?.pubkey) return;
+                  setProfileSheetVisible(false);
+                  navigation.navigate('Conversation', {
+                    pubkey: c.pubkey,
+                    name: c.name,
+                    picture: c.picture,
+                    lightningAddress: c.lightningAddress,
+                  });
+                }
+              : undefined
+          }
+        />
+        <SecretModeCelebration
+          visible={secretCelebrationVisible}
+          enabled={secretPendingEnabled}
+          onDismiss={() => setSecretCelebrationVisible(false)}
+        />
+        <DeliveryDetailSheet
+          info={messageSheetInfo}
+          onClose={closeMessageInfo}
+          onResend={canResendFromInfo ? handleResendFromInfo : undefined}
+          devices={groupDevices.messageDevices(messageSheetSender, messageSheetSentAt)}
+        />
+      </View>
+    </ChatSearchContext.Provider>
   );
 };
 export default GroupConversationScreen;

@@ -11,7 +11,15 @@ export function useMuteNotificationAction() {
     (sender: string, testID: string) => {
       if (!ready) return;
       const muted = mutedSenders.has(sender.toLowerCase());
-      const title = t(muted ? 'notificationMute.unmute' : 'notificationMute.mute');
+      const title = t(
+        sender.startsWith('group:')
+          ? muted
+            ? 'chatMenu.unmute'
+            : 'chatMenu.mute'
+          : muted
+            ? 'notificationMute.unmute'
+            : 'notificationMute.mute',
+      );
       const label = t(muted ? 'notificationMute.unmuteAction' : 'notificationMute.muteAction');
       Alert.alert(title, undefined, [
         { text: t('addWalletWizard.cancel'), style: 'cancel' },

@@ -83,6 +83,8 @@ const EventDetailScreen = lazyScreen(() => import('../screens/EventDetailScreen'
 const CourseDetailScreen = lazyScreen(() => import('../screens/CourseDetailScreen'));
 const MissionDetailScreen = lazyScreen(() => import('../screens/MissionDetailScreen'));
 const ConversationScreen = lazyScreen(() => import('../screens/ConversationScreen'));
+const ChatInfoScreen = lazyScreen(() => import('../screens/ChatInfoScreen'));
+const ChatMediaScreen = lazyScreen(() => import('../screens/ChatMediaScreen'));
 const GroupsScreen = lazyScreen(() => import('../screens/GroupsScreen'));
 const GroupConversationScreen = lazyScreen(() => import('../screens/GroupConversationScreen'));
 const ContactProfileScreen = lazyScreen(() => import('../screens/ContactProfileScreen'));
@@ -693,6 +695,8 @@ export default function AppNavigator() {
         />
         <Stack.Screen name="Groups" component={GroupsScreen} />
         <Stack.Screen name="GroupConversation" component={GroupConversationScreen} />
+        <Stack.Screen name="ChatInfo" component={ChatInfoScreen} />
+        <Stack.Screen name="ChatMedia" component={ChatMediaScreen} />
         <Stack.Screen name="ContactProfile" component={ContactProfileScreen} />
         <Stack.Screen
           name="ProductDetail"

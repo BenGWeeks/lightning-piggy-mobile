@@ -56,3 +56,15 @@ it('filters sender metadata without treating wallet IDs or group IDs as senders'
   expect(isMutedNotification({ groupId: PEER }, 'group', muted)).toBe(false);
   expect(isMutedNotification({}, 'dm', muted)).toBe(false);
 });
+
+it('mutes a group without muting its members in other threads', async () => {
+  const groupId = 'marmot:abc123';
+  await toggleMutedSender(OWNER, `group:${groupId}`);
+  expect(await loadMutedSenders(OWNER)).toEqual(new Set([`group:${groupId}`]));
+  expect(await shouldMuteNotification(OWNER, { groupId, senderPubkey: PEER }, 'group')).toBe(true);
+  expect(await shouldMuteNotification(OWNER, { groupId }, 'group')).toBe(true);
+  expect(await shouldMuteNotification(OWNER, { conversationPubkey: PEER }, 'dm')).toBe(false);
+  expect(await shouldMuteNotification(OTHER, { groupId }, 'group')).toBe(false);
+  await toggleMutedSender(OWNER, `group:${groupId}`);
+  expect(await shouldMuteNotification(OWNER, { groupId }, 'group')).toBe(false);
+});

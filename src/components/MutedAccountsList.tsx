@@ -8,6 +8,7 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createMuteNotificationsStyles } from '../styles/MuteNotifications.styles';
 import { createSecurityScreenStyles } from '../styles/SecurityScreen.styles';
+import { useGroups } from '../contexts/GroupsContext';
 import { shortNpub } from '../utils/shortNpub';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import Toast from './BrandedToast';
@@ -71,6 +72,7 @@ const MutedAccountRow = React.memo(function MutedAccountRow({
 export default function MutedAccountsList({ header }: { header?: React.ReactElement }) {
   const { mutedSenders, toggle } = useMutedSenders();
   const { contacts } = useNostrContacts();
+  const { getGroup } = useGroups();
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createMuteNotificationsStyles(colors), [colors]);
@@ -88,13 +90,15 @@ export default function MutedAccountsList({ header }: { header?: React.ReactElem
               contact?.profile?.displayName?.trim() ||
               contact?.profile?.name?.trim() ||
               contact?.petname?.trim() ||
-              shortNpub(pubkey),
+              (pubkey.startsWith('group:')
+                ? (getGroup(pubkey.slice(6))?.name ?? t('chatMenu.group'))
+                : shortNpub(pubkey)),
             picture: contact?.profile?.picture,
           },
         ];
       }),
     );
-  }, [contacts, data]);
+  }, [contacts, data, getGroup, t]);
   const onUnmute = useCallback(
     (pubkey: string) => {
       void toggle(pubkey).catch(() =>

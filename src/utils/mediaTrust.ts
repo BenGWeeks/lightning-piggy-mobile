@@ -31,3 +31,17 @@ export function canAutoLoadMedia(
   if (!senderPubkey) return false;
   return followed.has(senderPubkey.toLowerCase());
 }
+
+/** Stored group messages have no fromMe flag; derive it from the active account. */
+export function canAutoLoadChatMedia(
+  fromMe: boolean | undefined,
+  senderPubkey: string,
+  followed: ReadonlySet<string>,
+  owner: string | null | undefined,
+): boolean {
+  return canAutoLoadMedia(
+    fromMe ?? (!!owner && senderPubkey.toLowerCase() === owner.toLowerCase()),
+    senderPubkey,
+    followed,
+  );
+}

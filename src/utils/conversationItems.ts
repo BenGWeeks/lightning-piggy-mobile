@@ -345,6 +345,7 @@ export function buildConversationItems(
   failedInvites: readonly { id: string; createdAt: number }[] = [],
   locale?: string,
   deviceNotices: readonly DeviceNoticeInput[] = [],
+  clearBoundary = 0,
 ): Item[] {
   const expectedAmounts = collectApprovedOrderAmounts(messages, olderOrderAmounts);
   const byId = indexMessagesById(messages);
@@ -551,8 +552,9 @@ export function buildConversationItems(
   // its kind-16 order card is also present (#market dedup) — a selector over the
   // assembled set, so the two events can arrive in either order.
   const deduped = suppressDuplicateOrderInvoiceNotes(msgItems);
+  const supplemental: TimedItem[] = [...zapItems];
   for (const f of failedInvites) {
-    deduped.push({
+    supplemental.push({
       kind: 'marmotInviteFailed',
       id: `invite-${f.id}`,
       fromMe: false,
@@ -560,14 +562,19 @@ export function buildConversationItems(
     });
   }
   for (const n of deviceNotices) {
-    deduped.push({ kind: 'deviceNotice', ...n, id: `device-${n.id}`, fromMe: false });
+    supplemental.push({ kind: 'deviceNotice', ...n, id: `device-${n.id}`, fromMe: false });
   }
 
   // Descending order — index 0 is newest. The FlatList is `inverted`, so
   // index 0 renders at the visual bottom (chat default) and the
   // RefreshControl attaches to the visual bottom too, which is what
   // drives the pull-up-to-refresh gesture.
-  const sorted = [...deduped, ...zapItems].sort((a, b) => b.createdAt - a.createdAt);
+  // Messages were already filtered by useChatLocalHistory, including the IDs
+  // cleared in this second. Only supplemental rows still need the cutoff.
+  const sorted = [
+    ...deduped,
+    ...supplemental.filter((item) => item.createdAt > clearBoundary),
+  ].sort((a, b) => b.createdAt - a.createdAt);
 
   // Interleave "Today / Yesterday / <date>" dividers between day groups.
   // With an inverted FlatList the array runs newest → oldest, so each

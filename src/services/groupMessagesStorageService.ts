@@ -20,6 +20,8 @@ import { ensureGroupMessagesMigrated, releaseLegacyGroupLogs } from './groupMess
 export interface GroupMessage {
   /** Stable id; for self-sent messages we use a generated wrap id. */
   id: string;
+  /** Original optimistic ID, retained through echo replacement and rekeying. */
+  localId?: string;
   /** Pubkey of the sender (lowercase hex). */
   senderPubkey: string;
   /** Text payload as authored (preserves casing); empty for system events. */
@@ -140,7 +142,10 @@ export async function appendGroupMessage(
           bestKey = k;
         }
       }
-      if (bestKey !== null) map.delete(bestKey);
+      if (bestKey !== null) {
+        message = { ...message, localId: map.get(bestKey)!.localId ?? bestKey };
+        map.delete(bestKey);
+      }
     }
 
     // Dedup on id; keep the newer copy when ids collide (createdAt wins). At the
@@ -153,7 +158,7 @@ export async function appendGroupMessage(
       message.text !== prior.text &&
       isAttachmentPlaceholderText(prior.text);
     if (!prior || prior.createdAt < message.createdAt || repairs) {
-      map.set(message.id, message);
+      map.set(message.id, { ...message, ...(prior?.localId ? { localId: prior.localId } : {}) });
     } else if (
       prior.createdAt === message.createdAt &&
       prior.senderPubkey.toLowerCase() === message.senderPubkey.toLowerCase() &&
@@ -262,9 +267,13 @@ export async function rekeyGroupMessage(
     requireOwnerKey(owner, groupId);
     const existing = await readLog(key);
     if (!existing.some((m) => m.id === localId)) return existing;
-    const next = existing.some((m) => m.id === realId)
-      ? existing.filter((m) => m.id !== localId)
-      : existing.map((m) => (m.id === localId ? { ...m, id: realId } : m));
+    const stableId = existing.find((m) => m.id === localId)!.localId ?? localId;
+    const hasReal = existing.some((m) => m.id === realId);
+    const next = existing.flatMap((m) => {
+      if (m.id === realId) return [{ ...m, localId: stableId }];
+      if (m.id !== localId) return [m];
+      return hasReal ? [] : [{ ...m, id: realId, localId: stableId }];
+    });
     await AsyncStorage.setItem(key, JSON.stringify(next));
     return next;
   });
