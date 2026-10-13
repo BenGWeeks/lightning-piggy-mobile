@@ -263,6 +263,7 @@ it('replaces a claimed background alert after live ingestion and delayed session
     viewerPubkey: owner,
     isCancelled: () => false,
     shouldAbort: () => false,
+    isFollowHydrated: () => true,
     followPubkeysRef: { current: new Set() },
     followGateBuffer: { defer: jest.fn(), clear: jest.fn(), reevaluate: jest.fn(), size: 0 },
     isFreshArrival: () => true,

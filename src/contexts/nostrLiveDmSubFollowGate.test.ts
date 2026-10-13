@@ -27,7 +27,9 @@ import { routeMarmotWelcome } from '../services/marmotWelcomeRouter';
 import { upsertDmMessages } from '../services/dmDb';
 import { loadLastSeen } from './nostrDmCache';
 
-jest.mock('../services/marmotWelcomeRouter', () => ({ routeMarmotWelcome: jest.fn() }));
+jest.mock('../services/marmotWelcomeRouter', () => ({
+  routeMarmotWelcome: jest.fn(async (rumor: { kind: number }) => rumor.kind === 444),
+}));
 
 const mockSubscribe = jest.fn();
 let capturedOnEvent: ((ev: unknown) => void) | null = null;
@@ -706,7 +708,7 @@ describe('live plaintext marketplace order persistence', () => {
 describe('review replay delivery regressions', () => {
   beforeEach(() => jest.clearAllMocks());
 
-  it('routes the full deferred Marmot invitation once after hydration and reopening', async () => {
+  it('routes the full Marmot invitation before hydration and deduplicates after reopening', async () => {
     const buffer = createLiveSubFollowGateBuffer();
     const hydrated = { current: false };
     const follows = { current: new Set<string>() };
@@ -741,8 +743,8 @@ describe('review replay delivery regressions', () => {
     };
     capturedOnEvent!(wrap);
     await flush();
-    expect(buffer.size).toBe(1);
-    expect(routeMarmotWelcome).not.toHaveBeenCalled();
+    expect(buffer.size).toBe(0);
+    expect(routeMarmotWelcome).toHaveBeenCalledTimes(1);
     stop();
     hydrated.current = true;
     follows.current.add(ALICE);
@@ -755,14 +757,16 @@ describe('review replay delivery regressions', () => {
     capturedOnEvent!(wrap);
     await flush();
     expect(routeMarmotWelcome).toHaveBeenCalledTimes(1);
-    expect(routeMarmotWelcome).toHaveBeenCalledWith(rumor, VIEWER);
-    expect(upsertDmMessages).toHaveBeenCalledWith([
-      expect.objectContaining({
-        eventId: 'welcome-wrap',
-        wireKind: 444,
-        content: 'welcome',
-      }),
-    ]);
+    expect(routeMarmotWelcome).toHaveBeenCalledWith(
+      rumor,
+      VIEWER,
+      'welcome-wrap',
+      false,
+      false,
+      expect.any(Function),
+      false,
+    );
+    expect(upsertDmMessages).not.toHaveBeenCalled();
     expect(mockFireNotification).not.toHaveBeenCalled();
   });
 

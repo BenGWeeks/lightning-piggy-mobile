@@ -1,4 +1,3 @@
-import { routeMarmotWelcome } from '../services/marmotWelcomeRouter';
 import { gateLiveDm, startFollowGateFallback } from './liveDmFollowGateDecision';
 import { isFollowed } from '../utils/followPubkeys';
 import { loadKind4ReplayCursor } from './kind4RetryStore';
@@ -235,7 +234,6 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         });
       return;
     }
-    if (item.rumor) routeMarmotWelcome(item.rumor, viewerPubkey);
     // A reopened subscription has a fresh seen set: claim before queuing I/O
     // so relay redelivery cannot race this replay. Cleanup releases both sets.
     seen.add(item.entry.id);
