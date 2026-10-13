@@ -63,7 +63,7 @@ export function saveExternalSwap(input: ExternalSwapState): Promise<void> {
       else records[index] = state;
       await AsyncStorage.setItem(key(state.ownerPubkey), JSON.stringify(records));
       if (
-        state.status !== previous?.status &&
+        classifySubmarineSwapStatus(previous?.status) !== 'complete' &&
         classifySubmarineSwapStatus(state.status) === 'complete' &&
         state.ownerPubkey === (getActivePubkey() ?? undefined)
       ) {

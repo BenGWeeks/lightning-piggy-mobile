@@ -11,13 +11,15 @@ export function buildBoltzBip21Uri(address: string, sats: number): string {
   return `bitcoin:${address}?amount=${formatBtcSats(sats)}`;
 }
 
-/** Fail closed until a fresh chain height and an awaiting-payment status agree. */
+/** Fail closed until a fresh live status and chain height agree. */
 export function canPayExternalSwap(
   status: string,
   height: number | null,
   timeoutBlockHeight: number,
+  liveStatus: string | null = null,
 ): boolean {
   return (
+    status === liveStatus &&
     (status === 'swap.created' || status === 'invoice.set') &&
     height !== null &&
     height < timeoutBlockHeight

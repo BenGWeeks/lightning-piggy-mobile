@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { externalSwapState, loadExternalSwaps, saveExternalSwap } from './externalSwapState';
+import Toast from '../components/BrandedToast';
 import { fireNotification } from './notificationService';
 let mockPubkey: string | null = 'alice';
 jest.mock('./walletStorageService', () => ({ getActivePubkey: () => mockPubkey }));
@@ -62,4 +63,13 @@ test('strips recovery secrets even when recovery supplies a richer object', asyn
   } as ReturnType<typeof state>);
   expect(JSON.stringify(await loadExternalSwaps('watch', 'lightning'))).not.toContain('PRIVATE');
   expect((await loadExternalSwaps('watch', 'lightning'))[0]).not.toHaveProperty('swapTree');
+});
+
+test('invoice settlement followed by transaction claimed notifies completion once', async () => {
+  await saveExternalSwap(state());
+  await saveExternalSwap({ ...state(), status: 'invoice.settled' });
+  await saveExternalSwap({ ...state(), status: 'transaction.claimed' });
+  expect(Toast.show).toHaveBeenCalledTimes(1);
+  expect(fireNotification).toHaveBeenCalledTimes(1);
+  expect((await loadExternalSwaps('watch', 'lightning'))[0].status).toBe('transaction.claimed');
 });

@@ -15,7 +15,6 @@ import { useTransferSwapFees } from '../utils/useTransferSwapFees';
 import { quoteForwardSwap } from '../utils/forwardSwapQuote';
 import {
   buildBoltzBip21Uri,
-  watchSubmarineSwapStatus,
   classifySubmarineSwapStatus,
   isQuoteChangedError,
 } from '../services/boltzService';
@@ -23,9 +22,9 @@ import { createRecoverableSubmarineSwap } from '../services/createRecoverableSub
 import {
   externalSwapState,
   loadExternalSwaps,
-  saveExternalSwap,
   type ExternalSwapState,
 } from '../services/externalSwapState';
+import { subscribeExternalSwap, type ExternalSwapUpdate } from '../services/externalSwapTracking';
 import { getActivePubkey } from '../services/walletStorageService';
 import { recordSubmarineSwapLegs } from '../services/swapRecoveryService';
 import { buildSwapPlaceholders, markSwapPlaceholdersResolved } from '../utils/swapPendingMerge';
@@ -54,6 +53,7 @@ export default function ExternalFundingSwap({
   const [amount, setAmount] = useState(0);
   const [enteringAmount, setEnteringAmount] = useState(false);
   const [swap, setSwap] = useState<ExternalSwapState | null>(null);
+  const [tracking, setTracking] = useState<ExternalSwapUpdate | null>(null);
   const [history, setHistory] = useState<ExternalSwapState[]>([]);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState('');
@@ -89,31 +89,25 @@ export default function ExternalFundingSwap({
   }, [sourceId, destinationId, t]);
 
   useEffect(() => {
-    if (!swap || ['complete', 'failed'].includes(classifySubmarineSwapStatus(swap.status))) return;
-    const controller = new AbortController();
-    void watchSubmarineSwapStatus(
-      swap.id,
-      (phase, status, raw) => {
-        const next = { ...swap, status };
-        // Phase changes only, with a cancelled watcher on sheet close.
-        setSwap(next);
-        void saveExternalSwap(next).catch(() => setError(t('externalSwap.loadError')));
-        const txId = raw?.transaction?.id;
-        if (typeof txId === 'string') {
-          void recordSubmarineSwapLegs(txId, swap.invoice, swap.id).catch(() => {});
-        }
-        if (phase === 'complete' || phase === 'failed') {
-          markSwapPlaceholdersResolved(swap.id);
-          void wallet.fetchTransactionsForWallet(swap.destinationWalletId).catch(() => {});
-        }
-      },
-      undefined,
-      controller.signal,
-    ).catch(() => {
-      if (!controller.signal.aborted) setError(t('externalSwap.trackingError'));
+    if (!swap) return;
+    return subscribeExternalSwap(swap.id, (update) => {
+      setTracking(update);
+      if (update.trackingFailed) setError(t('externalSwap.trackingError'));
+      if (!update.status) return;
+      const next = { ...swap, status: update.status };
+      setSwap(next);
+      setHistory((previous) => previous.map((item) => (item.id === next.id ? next : item)));
+      const txId = update.raw?.transaction?.id;
+      if (typeof txId === 'string') {
+        void recordSubmarineSwapLegs(txId, swap.invoice, swap.id).catch(() => {});
+      }
+      const phase = classifySubmarineSwapStatus(update.status);
+      if (phase === 'complete' || phase === 'failed') {
+        markSwapPlaceholdersResolved(swap.id);
+        void wallet.fetchTransactionsForWallet(swap.destinationWalletId).catch(() => {});
+      }
     });
-    return () => controller.abort();
-    // Status updates must not tear down and restart the same watcher.
+    // Status updates must not tear down and restart the same subscription.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [swap?.id, t]);
 
@@ -212,7 +206,14 @@ export default function ExternalFundingSwap({
     );
   const expired = !!swap && height !== null && height >= swap.timeoutBlockHeight;
   const phase = swap ? classifySubmarineSwapStatus(swap.status) : null;
-  const awaiting = !!swap && canPayExternalSwap(swap.status, height, swap.timeoutBlockHeight);
+  const awaiting =
+    !!swap &&
+    canPayExternalSwap(
+      swap.status,
+      height,
+      swap.timeoutBlockHeight,
+      tracking?.id === swap.id && !tracking.trackingFailed ? tracking.status : null,
+    );
   const fee = quote.fees && amount > 0 ? quoteForwardSwap(amount, quote.fees, null) : null;
   return (
     <View style={styles.container} testID="external-swap-flow">
