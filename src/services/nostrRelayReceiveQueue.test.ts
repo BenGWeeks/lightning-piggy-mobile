@@ -128,3 +128,36 @@ it('holds EOSE until the successful verification records are durable', async () 
   expect(eose).toHaveBeenCalledTimes(1);
   relay.close();
 });
+
+it('preserves wire EOSE before later events, including while persistence is pending', async () => {
+  let finishWrite!: () => void;
+  jest.mocked(flushVerifiedEventCache).mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        finishWrite = resolve;
+      }),
+  );
+  const relay = new AbstractRelay('wss://test/', {
+    verifyEvent: verifyEventCached as (e: unknown) => e is VerifiedEvent,
+  });
+  jest.spyOn(relay, 'send').mockResolvedValue();
+  paceRelayReceive(relay, new RelayReceiveQueue());
+  const delivered: string[] = [];
+  const sub = relay.subscribe([{ kinds: [4] }], {
+    id: 'dm',
+    onevent: (e) => delivered.push(e.content),
+    oneose: () => delivered.push('EOSE'),
+    eoseTimeout: 10_000,
+  });
+  const event = (content: string) =>
+    finalizeEvent({ kind: 4, created_at: 1, tags: [], content }, key);
+  relay._onmessage(message(['EVENT', sub.id, event('before')]));
+  relay._onmessage(message(['EOSE', sub.id]));
+  relay._onmessage(message(['EVENT', sub.id, event('after')]));
+  await jest.advanceTimersByTimeAsync(100);
+  expect(delivered).toEqual(['before']);
+  finishWrite();
+  await jest.advanceTimersByTimeAsync(100);
+  expect(delivered).toEqual(['before', 'EOSE', 'after']);
+  relay.close();
+});

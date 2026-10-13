@@ -60,6 +60,8 @@ export function paceRelayReceive(relay: AbstractRelay, queue = sharedQueue): voi
   const prepare = relay.prepareSubscription.bind(relay);
   const close = relay.close.bind(relay);
   let closed = false;
+  let receiving = false;
+  let wireEose: (() => Promise<void>) | undefined;
   const enqueue = (run: () => void | Promise<void>, bytes = 0) => {
     if (
       !queue.enqueue(() => {
@@ -75,7 +77,21 @@ export function paceRelayReceive(relay: AbstractRelay, queue = sharedQueue): voi
     // JSON too: an escaped "\\u0045VENT" also decodes to EVENT in the SDK.
     if (typeof data === 'string' && /^\s*\[\s*"(?:AUTH|OK|COUNT|NOTICE)"/.test(data)) {
       receive(message);
-    } else enqueue(() => receive(message), typeof data === 'string' ? data.length * 2 : 0);
+    } else
+      enqueue(
+        () => {
+          receiving = true;
+          try {
+            receive(message);
+          } finally {
+            receiving = false;
+          }
+          const complete = wireEose;
+          wireEose = undefined;
+          return complete?.();
+        },
+        typeof data === 'string' ? data.length * 2 : 0,
+      );
   };
   relay.prepareSubscription = (...args) => {
     const sub = prepare(...args);
@@ -83,13 +99,18 @@ export function paceRelayReceive(relay: AbstractRelay, queue = sharedQueue): voi
     // The SDK's wall-clock timeout may expire while a large valid backlog is
     // being paced. Queue that timeout behind received events rather than close
     // the subscription and discard events already received before the timeout.
-    sub.receivedEose = () =>
-      enqueue(async () => {
+    sub.receivedEose = () => {
+      const complete = async () => {
         // A completed snapshot has durable verification trust before its
         // caller stores/decrypts the results. Live events also debounce writes.
         await flushVerifiedEventCache();
         if (!closed && relay.openSubs.get(sub.id) === sub) eose();
-      });
+      };
+      // Wire EOSE already occupies its ordered queue position. Await its flush
+      // there; only wall-clock timeouts need a new job behind received events.
+      if (receiving) wireEose = complete;
+      else enqueue(complete);
+    };
     return sub;
   };
   relay.close = () => {

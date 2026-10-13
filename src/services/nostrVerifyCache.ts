@@ -141,12 +141,13 @@ export function hydrateVerifiedEventCache(): Promise<void> {
 export function verifyEventCached(event: NostrEvent): boolean {
   if (typeof event?.id !== 'string' || typeof event.sig !== 'string') return false;
   try {
-    if (verified.has(event.id)) {
-      if (verified.get(event.id) !== event.sig || nostrGetEventHash(event) !== event.id)
-        return false;
+    if (verified.get(event.id) === event.sig) {
+      if (nostrGetEventHash(event) !== event.id) return false;
       remember(event.id, event.sig, false);
       return true;
     }
+    // A different signature can still validly sign the same canonical event.
+    // Fall through to full verification before replacing the cached signature.
     // Drop nostr-tools' caller-provided verifiedSymbol; only our own records
     // may bypass the cryptographic check, including on locally mutated objects.
     const candidate = { ...event };

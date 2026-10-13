@@ -1,3 +1,5 @@
+import { schnorr } from '@noble/curves/secp256k1.js';
+import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { finalizeEvent, verifiedSymbol } from 'nostr-tools/pure';
 import {
@@ -72,4 +74,29 @@ it('does not confer trust when storage cannot be read', async () => {
   } finally {
     read.mockRestore();
   }
+});
+
+it('fully verifies distinct valid Schnorr signatures for the same canonical event and id', async () => {
+  const event = signed();
+  const first = {
+    ...event,
+    sig: bytesToHex(schnorr.sign(hexToBytes(event.id), key, new Uint8Array(32))),
+  };
+  const second = {
+    ...event,
+    sig: bytesToHex(schnorr.sign(hexToBytes(event.id), key, new Uint8Array(32).fill(1))),
+  };
+  expect(first.id).toBe(second.id);
+  expect(first.sig).not.toBe(second.sig);
+  expect(verifyEventCached(first)).toBe(true);
+  await flushVerifiedEventCache();
+  __resetVerifiedEventCache();
+  await hydrateVerifiedEventCache();
+  expect(verifyEventCached(second)).toBe(true);
+  expect(verifyEventCached({ ...second, sig: '0'.repeat(128), [verifiedSymbol]: true })).toBe(
+    false,
+  );
+  expect(verifyEventCached(second)).toBe(true);
+  expect(verifyEventCached(first)).toBe(true);
+  expect(__verifiedEventCacheSize()).toBe(1);
 });
