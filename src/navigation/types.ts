@@ -43,6 +43,8 @@ export type AccountDrawerParamList = {
   /** Currency picker, pushed from Display & language. */
   AccountCurrency: undefined;
   AccountNotifications: undefined;
+  AccountShopAlerts: undefined;
+  AccountMutedAccounts: undefined;
   AccountSecurity: undefined;
   // Back up your key (#1223). `pubkey` (public, hex) picks the account —
   // defaults to the active one. Never put key material in params.

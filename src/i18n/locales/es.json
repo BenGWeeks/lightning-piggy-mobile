@@ -2799,7 +2799,28 @@
     "permissionTitle": "Notificaciones de Lightning Piggy",
     "permissionAllowed": "Las notificaciones están permitidas en los ajustes del teléfono.",
     "permissionBlocked": "Desactivadas en los ajustes del teléfono, así que no se puede mostrar ningún aviso",
-    "permissionTurnOn": "Activar"
+    "permissionTurnOn": "Activar",
+    "on": "Activado",
+    "off": "Desactivado",
+    "showDetails": "Mostrar detalles en las alertas",
+    "detailsOn": "Activado · texto y cantidades de pagos",
+    "detailsOff": "Desactivado — las alertas dicen «Nuevo mensaje»",
+    "checkClosed": "Comprobar con la app cerrada",
+    "needsInstant": "Necesita alertas instantáneas",
+    "pushReady": "Activado · todos los chats listos",
+    "pushNoToken": "Activado · falta configurar",
+    "pushConsequence": "Las alertas push dicen «Nuevo mensaje»; los detalles aparecen al abrir Lightning Piggy.",
+    "shopConsequence": "Usa tu ubicación en segundo plano.",
+    "customServer": "Servidor personalizado",
+    "defaultServer": "Lightning Piggy",
+    "pushPending": {
+      "one": "Activado · {{count}} chat sin configurar",
+      "other": "Activado · {{count}} chats sin configurar"
+    },
+    "mutedCount": {
+      "one": "{{count}} cuenta silenciada",
+      "other": "{{count}} cuentas silenciadas"
+    }
   },
   "settingsScope": {
     "forThisAccount": "Esta cuenta",

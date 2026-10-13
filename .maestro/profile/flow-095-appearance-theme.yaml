@@ -1,156 +1,193 @@
 appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
-name: Appearance Theme Toggle Test
+name: Theme options — view only
 ---
-# Exercises the light/dark/system theme toggle:
-#   1. Establishes a known baseline by tapping "System" first (this test
-#      doesn't depend on the device's pre-existing preference).
-#   2. Tapping "Dark" moves the check to the Dark row immediately.
-#   3. Navigating away (Home) and back into Appearance shows Dark still
-#      selected — proves the preference is held across screens.
-#   4. Killing + relaunching the app preserves Dark — proves the
-#      AsyncStorage persistence works.
-#   5. Reset to System so the test leaves the device in the default state.
-#
-# Run: maestro --device emulator-5554 test .maestro/profile/flow-095-appearance-theme.yaml
+# The shared device lane is view-only. Preserve the original mutation and
+# persistence checks for a dedicated test device with -e EXERCISE_SETTINGS=true.
+- runFlow:
+    when:
+      true: ${typeof EXERCISE_SETTINGS === 'undefined' || EXERCISE_SETTINGS !== 'true'}
+    commands:
+      # Presentation checks: never change the device preferences.
+      - tapOn: { id: tab-wallets }
+      - tapOn: { id: profile-icon }
+      - scrollUntilVisible:
+          element: { id: drawer-row-display-language }
+          direction: DOWN
+      - tapOn: { id: drawer-row-display-language }
+      - extendedWaitUntil:
+          visible: { id: display-language-currency-row }
+          timeout: 30000
+      - scrollUntilVisible:
+          element: { id: appearance-system }
+          direction: DOWN
+      - assertVisible: { id: appearance-system }
+      - scrollUntilVisible:
+          element: { id: appearance-light }
+          direction: DOWN
+      - assertVisible: { id: appearance-light }
+      - scrollUntilVisible:
+          element: { id: appearance-dark }
+          direction: DOWN
+      - assertVisible: { id: appearance-dark }
+      - scrollUntilVisible:
+          element: { id: account-back-button }
+          direction: UP
+      - tapOn: { id: account-back-button }
+      - assertVisible: { id: tab-wallets }
+- runFlow:
+    when:
+      true: ${typeof EXERCISE_SETTINGS !== 'undefined' && EXERCISE_SETTINGS === 'true'}
+    commands:
+      # Exercises the light/dark/system theme toggle:
+      #   1. Establishes a known baseline by tapping "System" first (this test
+      #      doesn't depend on the device's pre-existing preference).
+      #   2. Tapping "Dark" moves the check to the Dark row immediately.
+      #   3. Navigating away (Home) and back into Appearance shows Dark still
+      #      selected — proves the preference is held across screens.
+      #   4. Killing + relaunching the app preserves Dark — proves the
+      #      AsyncStorage persistence works.
+      #   5. Reset to System so the test leaves the device in the default state.
+      #
+      # Run: maestro --device emulator-5554 test .maestro/profile/flow-095-appearance-theme.yaml
 
-# Cold-launch so the test starts on Home regardless of where the app
-# was last left.
-- launchApp:
-    clearState: false
-- waitForAnimationToEnd:
-    timeout: 15000
+      # Cold-launch so the test starts on Home regardless of where the app
+      # was last left.
+      - launchApp:
+          clearState: false
+      - waitForAnimationToEnd:
+          timeout: 15000
 
-# --- 1. Open drawer → Appearance, establish baseline at "System" ---
-- tapOn:
-    id: 'tab-wallets'
-    optional: true
-- waitForAnimationToEnd:
-    timeout: 3000
-- tapOn:
-    id: 'profile-icon'
-- waitForAnimationToEnd:
-    timeout: 3000
-- scrollUntilVisible:
-    element:
-      id: 'drawer-row-display-language'
-    direction: DOWN
-    timeout: 10000
-- tapOn:
-    id: 'drawer-row-display-language'
-- waitForAnimationToEnd:
-    timeout: 3000
-# Theme and Sending animation sit under "On this phone", below Currency and
-# Language on the Display & language screen (#1222).
-- scrollUntilVisible:
-    element:
-      id: 'appearance-dark'
-    direction: DOWN
-    timeout: 15000
+      # --- 1. Open drawer → Appearance, establish baseline at "System" ---
+      - tapOn:
+          id: 'tab-wallets'
+          optional: true
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - tapOn:
+          id: 'profile-icon'
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - scrollUntilVisible:
+          element:
+            id: 'drawer-row-display-language'
+          direction: DOWN
+          timeout: 10000
+      - tapOn:
+          id: 'drawer-row-display-language'
+      - waitForAnimationToEnd:
+          timeout: 3000
+      # Theme and Sending animation sit under "On this phone", below Currency and
+      # Language on the Display & language screen (#1222).
+      - scrollUntilVisible:
+          element:
+            id: 'appearance-dark'
+          direction: DOWN
+          timeout: 15000
 
-# All three options render
-- assertVisible:
-    id: 'appearance-system'
-- assertVisible:
-    id: 'appearance-light'
-- assertVisible:
-    id: 'appearance-dark'
+      # All three options render
+      - assertVisible:
+          id: 'appearance-system'
+      - assertVisible:
+          id: 'appearance-light'
+      - assertVisible:
+          id: 'appearance-dark'
 
-# Tap System to establish a known baseline regardless of any persisted
-# preference left over from a prior run.
-- tapOn:
-    id: 'appearance-system'
-- waitForAnimationToEnd:
-    timeout: 1000
-- assertVisible:
-    id: 'appearance-system-check'
-- assertNotVisible:
-    id: 'appearance-dark-check'
+      # Tap System to establish a known baseline regardless of any persisted
+      # preference left over from a prior run.
+      - tapOn:
+          id: 'appearance-system'
+      - waitForAnimationToEnd:
+          timeout: 1000
+      - assertVisible:
+          id: 'appearance-system-check'
+      - assertNotVisible:
+          id: 'appearance-dark-check'
 
-# --- 2. Tap Dark — selection moves immediately ---
-- tapOn:
-    id: 'appearance-dark'
-- waitForAnimationToEnd:
-    timeout: 1000
-- assertVisible:
-    id: 'appearance-dark-check'
-- assertNotVisible:
-    id: 'appearance-system-check'
+      # --- 2. Tap Dark — selection moves immediately ---
+      - tapOn:
+          id: 'appearance-dark'
+      - waitForAnimationToEnd:
+          timeout: 1000
+      - assertVisible:
+          id: 'appearance-dark-check'
+      - assertNotVisible:
+          id: 'appearance-system-check'
 
-# --- 3. Navigate away (Home) and back — preference held ---
-- scrollUntilVisible:
-    element:
-      id: 'account-back-button'
-    direction: UP
-    timeout: 15000
-- tapOn:
-    id: 'account-back-button'
-- waitForAnimationToEnd:
-    timeout: 2000
-- assertVisible:
-    id: 'tab-wallets'
+      # --- 3. Navigate away (Home) and back — preference held ---
+      - scrollUntilVisible:
+          element:
+            id: 'account-back-button'
+          direction: UP
+          timeout: 15000
+      - tapOn:
+          id: 'account-back-button'
+      - waitForAnimationToEnd:
+          timeout: 2000
+      - assertVisible:
+          id: 'tab-wallets'
 
-- tapOn:
-    id: 'profile-icon'
-- waitForAnimationToEnd:
-    timeout: 3000
-- scrollUntilVisible:
-    element:
-      id: 'drawer-row-display-language'
-    direction: DOWN
-    timeout: 10000
-- tapOn:
-    id: 'drawer-row-display-language'
-- waitForAnimationToEnd:
-    timeout: 3000
-# Theme and Sending animation sit under "On this phone", below Currency and
-# Language on the Display & language screen (#1222).
-- scrollUntilVisible:
-    element:
-      id: 'appearance-dark'
-    direction: DOWN
-    timeout: 15000
-- assertVisible:
-    id: 'appearance-dark-check'
+      - tapOn:
+          id: 'profile-icon'
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - scrollUntilVisible:
+          element:
+            id: 'drawer-row-display-language'
+          direction: DOWN
+          timeout: 10000
+      - tapOn:
+          id: 'drawer-row-display-language'
+      - waitForAnimationToEnd:
+          timeout: 3000
+      # Theme and Sending animation sit under "On this phone", below Currency and
+      # Language on the Display & language screen (#1222).
+      - scrollUntilVisible:
+          element:
+            id: 'appearance-dark'
+          direction: DOWN
+          timeout: 15000
+      - assertVisible:
+          id: 'appearance-dark-check'
 
-# --- 4. Kill + relaunch — preference persists across cold start ---
-- stopApp
-- launchApp
-- waitForAnimationToEnd:
-    timeout: 15000
-- tapOn:
-    id: 'tab-wallets'
-    optional: true
-- waitForAnimationToEnd:
-    timeout: 3000
-- tapOn:
-    id: 'profile-icon'
-- waitForAnimationToEnd:
-    timeout: 3000
-- scrollUntilVisible:
-    element:
-      id: 'drawer-row-display-language'
-    direction: DOWN
-    timeout: 10000
-- tapOn:
-    id: 'drawer-row-display-language'
-- waitForAnimationToEnd:
-    timeout: 3000
-# Theme and Sending animation sit under "On this phone", below Currency and
-# Language on the Display & language screen (#1222).
-- scrollUntilVisible:
-    element:
-      id: 'appearance-dark'
-    direction: DOWN
-    timeout: 15000
-- assertVisible:
-    id: 'appearance-dark-check'
+      # --- 4. Kill + relaunch — preference persists across cold start ---
+      - stopApp
+      - launchApp
+      - waitForAnimationToEnd:
+          timeout: 15000
+      - tapOn:
+          id: 'tab-wallets'
+          optional: true
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - tapOn:
+          id: 'profile-icon'
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - scrollUntilVisible:
+          element:
+            id: 'drawer-row-display-language'
+          direction: DOWN
+          timeout: 10000
+      - tapOn:
+          id: 'drawer-row-display-language'
+      - waitForAnimationToEnd:
+          timeout: 3000
+      # Theme and Sending animation sit under "On this phone", below Currency and
+      # Language on the Display & language screen (#1222).
+      - scrollUntilVisible:
+          element:
+            id: 'appearance-dark'
+          direction: DOWN
+          timeout: 15000
+      - assertVisible:
+          id: 'appearance-dark-check'
 
-# --- 5. Reset to System so the test leaves the device in default state ---
-- tapOn:
-    id: 'appearance-system'
-- waitForAnimationToEnd:
-    timeout: 1000
-- assertVisible:
-    id: 'appearance-system-check'
-- assertNotVisible:
-    id: 'appearance-dark-check'
+      # --- 5. Reset to System so the test leaves the device in default state ---
+      - tapOn:
+          id: 'appearance-system'
+      - waitForAnimationToEnd:
+          timeout: 1000
+      - assertVisible:
+          id: 'appearance-system-check'
+      - assertNotVisible:
+          id: 'appearance-dark-check'

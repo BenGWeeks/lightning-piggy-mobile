@@ -1,108 +1,141 @@
 appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
-name: Display language — switch locale and capture Wallets, Messages and the picker
+name: Language options — view only
 ---
-# Switches the active account's language in Settings › Display & language,
-# then captures the language picker, Wallets and Messages in that language (the
-# i18n screenshots for #1312: text overflow, glyph fallback for 中文 and
-# Devanagari).
-#
-# Env:
-#   LOCALE  catalogue code to select: system | en | de | es | hu | pl | uk |
-#           hi | mr | zh-Hans  (row testID is `locale-<LOCALE>`)
-#   SHOT    screenshot name prefix, e.g. /tmp/i18n/de  ("" = no screenshots
-#           — use that to restore the original language afterwards)
-#
-# Run: maestro --device <serial> test -e LOCALE=de -e SHOT=/tmp/i18n/de \
-#        .maestro/profile/flow-141-display-language-screens.yaml
-# Language is per account and persists: run again with the original LOCALE
-# (usually `system`) and SHOT="" to put it back.
-
-- runFlow: ../common/open-drawer.yaml
-- scrollUntilVisible:
-    element:
-      id: 'drawer-row-display-language'
-    direction: DOWN
-    timeout: 10000
-- tapOn:
-    id: 'drawer-row-display-language'
-- waitForAnimationToEnd:
-    timeout: 3000
-- scrollUntilVisible:
-    element:
-      id: 'locale-${LOCALE}'
-    direction: DOWN
-    timeout: 15000
-- tapOn:
-    id: 'locale-${LOCALE}'
-# Switching language re-renders the whole screen; give the tick time to land.
-- extendedWaitUntil:
-    visible:
-      id: 'locale-${LOCALE}-check'
-    timeout: 10000
-
+# The shared device lane is view-only. Preserve the original mutation and
+# persistence checks for a dedicated test device with -e EXERCISE_SETTINGS=true.
 - runFlow:
     when:
-      true: ${SHOT != ''}
+      true: ${typeof EXERCISE_SETTINGS === 'undefined' || EXERCISE_SETTINGS !== 'true'}
     commands:
-      # The picker, centred on the selected language (with its tick).
+      # Presentation checks: never change the device preferences.
+      - tapOn: { id: tab-wallets }
+      - tapOn: { id: profile-icon }
+      - scrollUntilVisible:
+          element: { id: drawer-row-display-language }
+          direction: DOWN
+      - tapOn: { id: drawer-row-display-language }
+      - extendedWaitUntil:
+          visible: { id: display-language-currency-row }
+          timeout: 30000
+      - scrollUntilVisible:
+          element: { id: locale-en }
+          direction: DOWN
+      - assertVisible: { id: locale-en }
+      - scrollUntilVisible:
+          element: { id: locale-de }
+          direction: DOWN
+      - assertVisible: { id: locale-de }
+      - scrollUntilVisible:
+          element: { id: account-back-button }
+          direction: UP
+      - tapOn: { id: account-back-button }
+      - assertVisible: { id: tab-wallets }
+- runFlow:
+    when:
+      true: ${typeof EXERCISE_SETTINGS !== 'undefined' && EXERCISE_SETTINGS === 'true'}
+    commands:
+      # Switches the active account's language in Settings › Display & language,
+      # then captures the language picker, Wallets and Messages in that language (the
+      # i18n screenshots for #1312: text overflow, glyph fallback for 中文 and
+      # Devanagari).
+      #
+      # Env:
+      #   LOCALE  catalogue code to select: system | en | de | es | hu | pl | uk |
+      #           hi | mr | zh-Hans  (row testID is `locale-<LOCALE>`)
+      #   SHOT    screenshot name prefix, e.g. /tmp/i18n/de  ("" = no screenshots
+      #           — use that to restore the original language afterwards)
+      #
+      # Run: maestro --device <serial> test -e LOCALE=de -e SHOT=/tmp/i18n/de \
+      #        .maestro/profile/flow-141-display-language-screens.yaml
+      # Language is per account and persists: run again with the original LOCALE
+      # (usually `system`) and SHOT="" to put it back.
+
+      - runFlow: ../common/open-drawer.yaml
+      - scrollUntilVisible:
+          element:
+            id: 'drawer-row-display-language'
+          direction: DOWN
+          timeout: 10000
+      - tapOn:
+          id: 'drawer-row-display-language'
+      - waitForAnimationToEnd:
+          timeout: 3000
       - scrollUntilVisible:
           element:
             id: 'locale-${LOCALE}'
           direction: DOWN
           timeout: 15000
-          centerElement: true
-      - takeScreenshot: ${SHOT}-picker
-      - scrollUntilVisible:
-          element:
-            id: 'account-back-button'
-          direction: UP
-          timeout: 15000
       - tapOn:
-          id: 'account-back-button'
-      - waitForAnimationToEnd:
-          timeout: 2000
-      - runFlow: ../common/close-sheets.yaml
-      - tapOn:
-          id: 'tab-wallets'
-      - waitForAnimationToEnd:
-          timeout: 4000
-      - takeScreenshot: ${SHOT}-wallets
-      - runFlow: ../common/open-messages.yaml
-      - waitForAnimationToEnd:
-          timeout: 4000
-      - takeScreenshot: ${SHOT}-messages
-      # Real CLDR plural strings on device (Hermes): Messages settings ›
-      # Invitation keys shows "Last updated N days ago" / "N copies found".
-      - runFlow: ../common/open-drawer.yaml
-      - tapOn:
-          id: 'drawer-row-messages'
-      - waitForAnimationToEnd:
-          timeout: 3000
-      - scrollUntilVisible:
-          element:
-            id: 'nostr-invitation-keys'
-          direction: DOWN
-          timeout: 15000
-      - tapOn:
-          id: 'nostr-invitation-keys'
-      # The device list loads from relays; wait for a row before capturing.
+          id: 'locale-${LOCALE}'
+      # Switching language re-renders the whole screen; give the tick time to land.
       - extendedWaitUntil:
           visible:
-            id: 'invitation-device-.*'
-          timeout: 45000
-          optional: true
-      # Expand the first device's details: "N copies found on relays" is a
-      # CLDR plural (invitationKeys.versions).
-      - tapOn:
-          id: 'invitation-device-details-(?!body).*'
-          optional: true
-      - waitForAnimationToEnd:
-          timeout: 3000
-      - takeScreenshot: ${SHOT}-plurals
-      - scrollUntilVisible:
-          element:
-            id: 'account-back-button'
-          direction: UP
-          timeout: 15000
-      - tapOn:
-          id: 'account-back-button'
+            id: 'locale-${LOCALE}-check'
+          timeout: 10000
+
+      - runFlow:
+          when:
+            true: ${SHOT != ''}
+          commands:
+            # The picker, centred on the selected language (with its tick).
+            - scrollUntilVisible:
+                element:
+                  id: 'locale-${LOCALE}'
+                direction: DOWN
+                timeout: 15000
+                centerElement: true
+            - takeScreenshot: ${SHOT}-picker
+            - scrollUntilVisible:
+                element:
+                  id: 'account-back-button'
+                direction: UP
+                timeout: 15000
+            - tapOn:
+                id: 'account-back-button'
+            - waitForAnimationToEnd:
+                timeout: 2000
+            - runFlow: ../common/close-sheets.yaml
+            - tapOn:
+                id: 'tab-wallets'
+            - waitForAnimationToEnd:
+                timeout: 4000
+            - takeScreenshot: ${SHOT}-wallets
+            - runFlow: ../common/open-messages.yaml
+            - waitForAnimationToEnd:
+                timeout: 4000
+            - takeScreenshot: ${SHOT}-messages
+            # Real CLDR plural strings on device (Hermes): Messages settings ›
+            # Invitation keys shows "Last updated N days ago" / "N copies found".
+            - runFlow: ../common/open-drawer.yaml
+            - tapOn:
+                id: 'drawer-row-messages'
+            - waitForAnimationToEnd:
+                timeout: 3000
+            - scrollUntilVisible:
+                element:
+                  id: 'nostr-invitation-keys'
+                direction: DOWN
+                timeout: 15000
+            - tapOn:
+                id: 'nostr-invitation-keys'
+            # The device list loads from relays; wait for a row before capturing.
+            - extendedWaitUntil:
+                visible:
+                  id: 'invitation-device-.*'
+                timeout: 45000
+                optional: true
+            # Expand the first device's details: "N copies found on relays" is a
+            # CLDR plural (invitationKeys.versions).
+            - tapOn:
+                id: 'invitation-device-details-(?!body).*'
+                optional: true
+            - waitForAnimationToEnd:
+                timeout: 3000
+            - takeScreenshot: ${SHOT}-plurals
+            - scrollUntilVisible:
+                element:
+                  id: 'account-back-button'
+                direction: UP
+                timeout: 15000
+            - tapOn:
+                id: 'account-back-button'

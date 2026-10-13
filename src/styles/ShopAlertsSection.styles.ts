@@ -4,6 +4,7 @@ import type { Palette } from './palettes';
 
 export const createShopAlertsSectionStyles = (colors: Palette) =>
   StyleSheet.create({
+    card: { borderRadius: 12, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.1)' },
     subHeader: {
       color: colors.white,
       fontSize: 15,
@@ -17,6 +18,7 @@ export const createShopAlertsSectionStyles = (colors: Palette) =>
       marginTop: 2,
     },
     chipRow: {
+      paddingHorizontal: 14,
       flexDirection: 'row',
       flexWrap: 'wrap',
       gap: 8,
@@ -43,6 +45,8 @@ export const createShopAlertsSectionStyles = (colors: Palette) =>
       marginTop: 0,
     },
     privacyHint: {
+      paddingHorizontal: 14,
+      marginBottom: 14,
       marginTop: 16,
       color: 'rgba(255,255,255,0.7)',
       fontSize: 12,

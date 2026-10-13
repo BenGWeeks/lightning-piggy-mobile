@@ -2799,7 +2799,28 @@
     "permissionTitle": "A Lightning Piggy értesítései",
     "permissionAllowed": "Az értesítések engedélyezve vannak a telefon beállításaiban.",
     "permissionBlocked": "Ki van kapcsolva a telefon beállításaiban, ezért nem jelenhet meg értesítés",
-    "permissionTurnOn": "Bekapcsolás"
+    "permissionTurnOn": "Bekapcsolás",
+    "on": "Be",
+    "off": "Ki",
+    "showDetails": "Részletek az értesítésekben",
+    "detailsOn": "Be · üzenetszöveg és fizetési összegek",
+    "detailsOff": "Ki — az értesítés szövege: „Új üzenet”",
+    "checkClosed": "Ellenőrzés bezárt alkalmazásnál",
+    "needsInstant": "Azonnali értesítések szükségesek",
+    "pushReady": "Be · minden csevegés kész",
+    "pushNoToken": "Be · beállítás szükséges",
+    "pushConsequence": "A push értesítés szövege „Új üzenet”; a részletek a Lightning Piggy megnyitásakor jelennek meg.",
+    "shopConsequence": "A háttérben használja a helyzetedet.",
+    "customServer": "Egyéni szerver",
+    "defaultServer": "Lightning Piggy",
+    "pushPending": {
+      "one": "Be · {{count}} csevegés nincs beállítva",
+      "other": "Be · {{count}} csevegés nincs beállítva"
+    },
+    "mutedCount": {
+      "one": "{{count}} némított fiók",
+      "other": "{{count}} némított fiók"
+    }
   },
   "settingsScope": {
     "forThisAccount": "Ez a fiók",

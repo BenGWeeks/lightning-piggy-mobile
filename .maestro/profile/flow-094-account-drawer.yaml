@@ -104,7 +104,7 @@ name: Account Drawer Test
     timeout: 120000
 - scrollUntilVisible:
     element:
-      id: advanced-notification-server
+      id: advanced-bitcoin-network
     direction: DOWN
     timeout: 15000
 - extendedWaitUntil:

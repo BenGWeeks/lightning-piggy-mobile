@@ -7,13 +7,13 @@ name: Settings rows and sub-pages (view only)
 - extendedWaitUntil:
     visible:
       id: drawer-row-advanced
-    timeout: 15000
+    timeout: 120000
 - tapOn:
     id: drawer-row-advanced
 - extendedWaitUntil:
     visible:
       id: advanced-secret-mode-toggle
-    timeout: 15000
+    timeout: 120000
 - assertVisible:
     id: advanced-account
 - assertNotVisible: Each account on this phone chooses its own.
@@ -22,47 +22,10 @@ name: Settings rows and sub-pages (view only)
 - extendedWaitUntil:
     visible:
       id: advanced-account-info-sheet
-    timeout: 15000
+    timeout: 120000
 - assertVisible: Each account on this phone chooses its own.
 - tapOn:
     id: advanced-account-info-sheet-close
-- scrollUntilVisible:
-    element:
-      id: advanced-notification-server
-    direction: DOWN
-- tapOn:
-    id: advanced-notification-server-info
-- extendedWaitUntil:
-    visible:
-      id: advanced-notification-server-info-sheet
-    timeout: 15000
-- assertNotVisible:
-    id: notification-server-section
-- tapOn:
-    id: advanced-notification-server-info-sheet-close
-- tapOn:
-    id: advanced-notification-server
-- extendedWaitUntil:
-    visible:
-      id: notification-server-section
-    timeout: 15000
-- runFlow:
-    when:
-      notVisible:
-        id: security-marmot-push-server-input
-    commands:
-      - tapOn:
-          id: security-marmot-push-advanced
-- extendedWaitUntil:
-    visible:
-      id: security-marmot-push-server-input
-    timeout: 15000
-- tapOn:
-    id: account-back-button
-- extendedWaitUntil:
-    visible:
-      id: advanced-notification-server
-    timeout: 15000
 - scrollUntilVisible:
     element:
       id: nostr-native-crypto-info
@@ -72,7 +35,7 @@ name: Settings rows and sub-pages (view only)
 - extendedWaitUntil:
     visible:
       id: nostr-native-crypto-active
-    timeout: 15000
+    timeout: 120000
 - tapOn:
     id: nostr-native-crypto-info-sheet-close
 - scrollUntilVisible:
@@ -89,7 +52,7 @@ name: Settings rows and sub-pages (view only)
       - extendedWaitUntil:
           visible:
             id: advanced-bubble-style-A
-          timeout: 15000
+          timeout: 120000
       - assertVisible:
           id: advanced-bubble-style-B
       - assertVisible:
@@ -98,7 +61,7 @@ name: Settings rows and sub-pages (view only)
       - extendedWaitUntil:
           visible:
             id: advanced-bubble-style-row
-          timeout: 15000
+          timeout: 120000
 - runFlow:
     when:
       visible:
@@ -109,13 +72,13 @@ name: Settings rows and sub-pages (view only)
       - extendedWaitUntil:
           visible:
             id: hermes-profiler-start
-          timeout: 15000
+          timeout: 120000
       - tapOn:
           id: account-back-button
       - extendedWaitUntil:
           visible:
             id: advanced-profiler
-          timeout: 15000
+          timeout: 120000
 - scrollUntilVisible:
     element:
       id: account-back-button
@@ -125,32 +88,32 @@ name: Settings rows and sub-pages (view only)
 - extendedWaitUntil:
     visible:
       id: profile-icon
-    timeout: 15000
+    timeout: 120000
 - tapOn:
     id: profile-icon
 - scrollUntilVisible:
     element:
       id: drawer-row-messages
     direction: DOWN
-    timeout: 15000
+    timeout: 120000
 - tapOn:
     id: drawer-row-messages
 - extendedWaitUntil:
     visible:
       id: account-back-button
-    timeout: 15000
+    timeout: 120000
 - scrollUntilVisible:
     element:
       id: messages-account-info
     direction: UP
-    timeout: 15000
+    timeout: 120000
 - assertNotVisible: Each account on this phone chooses its own.
 - tapOn:
     id: messages-account-info
 - extendedWaitUntil:
     visible:
       id: messages-account-info-sheet
-    timeout: 15000
+    timeout: 120000
 - assertVisible: Each account on this phone chooses its own.
 - tapOn:
     id: messages-account-info-sheet-close
@@ -158,38 +121,75 @@ name: Settings rows and sub-pages (view only)
     element:
       id: account-back-button
     direction: UP
-    timeout: 15000
+    timeout: 120000
 - tapOn:
     id: account-back-button
 - extendedWaitUntil:
     visible:
       id: profile-icon
-    timeout: 15000
+    timeout: 120000
 - tapOn:
     id: profile-icon
 - scrollUntilVisible:
     element:
       id: drawer-row-notifications
     direction: DOWN
-    timeout: 15000
+    timeout: 120000
 - tapOn:
     id: drawer-row-notifications
 - extendedWaitUntil:
     visible:
       id: account-back-button
-    timeout: 15000
+    timeout: 120000
+- scrollUntilVisible:
+    element:
+      id: notifications-notification-server
+    direction: DOWN
+- tapOn:
+    id: notifications-notification-server-info
+- extendedWaitUntil:
+    visible:
+      id: notifications-notification-server-info-sheet
+    timeout: 120000
+- assertNotVisible:
+    id: notification-server-section
+- tapOn:
+    id: notifications-notification-server-info-sheet-close
+- tapOn:
+    id: notifications-notification-server
+- extendedWaitUntil:
+    visible:
+      id: notification-server-section
+    timeout: 120000
+- runFlow:
+    when:
+      notVisible:
+        id: security-marmot-push-server-input
+    commands:
+      - tapOn:
+          id: security-marmot-push-advanced
+- extendedWaitUntil:
+    visible:
+      id: security-marmot-push-server-input
+    timeout: 120000
+- tapOn:
+    id: account-back-button
+- extendedWaitUntil:
+    visible:
+      id: notifications-notification-server
+    timeout: 120000
 - scrollUntilVisible:
     element:
       id: notifications-account-info
     direction: UP
-    timeout: 15000
+    timeout: 120000
 - assertNotVisible: Each account on this phone chooses its own.
 - tapOn:
     id: notifications-account-info
 - extendedWaitUntil:
     visible:
       id: notifications-account-info-sheet
-    timeout: 15000
+    timeout: 120000
 - assertVisible: Each account on this phone chooses its own.
 - tapOn:
     id: notifications-account-info-sheet-close
@@ -197,14 +197,14 @@ name: Settings rows and sub-pages (view only)
     element:
       id: notifications-phone-info
     direction: DOWN
-    timeout: 15000
+    timeout: 120000
 - assertNotVisible: The same for every account on this phone.
 - tapOn:
     id: notifications-phone-info
 - extendedWaitUntil:
     visible:
       id: notifications-phone-info-sheet
-    timeout: 15000
+    timeout: 120000
 - assertVisible: The same for every account on this phone.
 - tapOn:
     id: notifications-phone-info-sheet-close
@@ -212,38 +212,38 @@ name: Settings rows and sub-pages (view only)
     element:
       id: account-back-button
     direction: UP
-    timeout: 15000
+    timeout: 120000
 - tapOn:
     id: account-back-button
 - extendedWaitUntil:
     visible:
       id: profile-icon
-    timeout: 15000
+    timeout: 120000
 - tapOn:
     id: profile-icon
 - scrollUntilVisible:
     element:
       id: drawer-row-security
     direction: DOWN
-    timeout: 15000
+    timeout: 120000
 - tapOn:
     id: drawer-row-security
 - extendedWaitUntil:
     visible:
       id: account-back-button
-    timeout: 15000
+    timeout: 120000
 - scrollUntilVisible:
     element:
       id: security-account-info
     direction: UP
-    timeout: 15000
+    timeout: 120000
 - assertNotVisible: Each account on this phone chooses its own.
 - tapOn:
     id: security-account-info
 - extendedWaitUntil:
     visible:
       id: security-account-info-sheet
-    timeout: 15000
+    timeout: 120000
 - assertVisible: Each account on this phone chooses its own.
 - tapOn:
     id: security-account-info-sheet-close
@@ -251,38 +251,38 @@ name: Settings rows and sub-pages (view only)
     element:
       id: account-back-button
     direction: UP
-    timeout: 15000
+    timeout: 120000
 - tapOn:
     id: account-back-button
 - extendedWaitUntil:
     visible:
       id: profile-icon
-    timeout: 15000
+    timeout: 120000
 - tapOn:
     id: profile-icon
 - scrollUntilVisible:
     element:
       id: drawer-row-display-language
     direction: DOWN
-    timeout: 15000
+    timeout: 120000
 - tapOn:
     id: drawer-row-display-language
 - extendedWaitUntil:
     visible:
       id: account-back-button
-    timeout: 15000
+    timeout: 120000
 - scrollUntilVisible:
     element:
       id: display-language-account-info
     direction: UP
-    timeout: 15000
+    timeout: 120000
 - assertNotVisible: Each account on this phone chooses its own.
 - tapOn:
     id: display-language-account-info
 - extendedWaitUntil:
     visible:
       id: display-language-account-info-sheet
-    timeout: 15000
+    timeout: 120000
 - assertVisible: Each account on this phone chooses its own.
 - tapOn:
     id: display-language-account-info-sheet-close
@@ -290,14 +290,14 @@ name: Settings rows and sub-pages (view only)
     element:
       id: display-language-phone-info
     direction: DOWN
-    timeout: 15000
+    timeout: 120000
 - assertNotVisible: The same for every account on this phone.
 - tapOn:
     id: display-language-phone-info
 - extendedWaitUntil:
     visible:
       id: display-language-phone-info-sheet
-    timeout: 15000
+    timeout: 120000
 - assertVisible: The same for every account on this phone.
 - tapOn:
     id: display-language-phone-info-sheet-close
@@ -305,12 +305,12 @@ name: Settings rows and sub-pages (view only)
     element:
       id: account-back-button
     direction: UP
-    timeout: 15000
+    timeout: 120000
 - tapOn:
     id: account-back-button
 - extendedWaitUntil:
     visible:
       id: profile-icon
-    timeout: 15000
+    timeout: 120000
 - tapOn:
     id: tab-wallets

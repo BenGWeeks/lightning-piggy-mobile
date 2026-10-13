@@ -1,13 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Switch, Text, TouchableOpacity, View } from 'react-native';
-import { BellPlus } from 'lucide-react-native';
+import { ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
+import { MessageCircle, Zap, AtSign, CreditCard } from 'lucide-react-native';
 
 import Toast from './BrandedToast';
-import DetailsDisclosure from './DetailsDisclosure';
+import SettingsRow from './SettingsRow';
 import { useNostr } from '../contexts/NostrContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { createSharedAccountStyles } from '../screens/account/sharedStyles';
 import {
   getWatcherCategories,
   getWatcherStatus,
@@ -24,8 +23,6 @@ import {
   type WatcherCategory,
 } from '../services/watcherRegistration';
 import { createMarmotPushSectionStyles } from '../styles/MarmotPushSection.styles';
-import { createSecurityScreenStyles } from '../styles/SecurityScreen.styles';
-import { createWatcherPushSectionStyles } from '../styles/WatcherPushSection.styles';
 
 const LABEL: Record<WatcherCategory, string> = {
   dm: 'securityScreen.watcherDm',
@@ -45,10 +42,7 @@ const WatcherPushSection: React.FC<{ pushEnabled: boolean }> = ({ pushEnabled })
   const colors = useThemeColors();
   const t = useTranslation();
   const { signerType } = useNostr();
-  const shared = useMemo(() => createSharedAccountStyles(colors), [colors]);
-  const screen = useMemo(() => createSecurityScreenStyles(colors), [colors]);
   const push = useMemo(() => createMarmotPushSectionStyles(colors), [colors]);
-  const styles = useMemo(() => createWatcherPushSectionStyles(colors), [colors]);
   const [categories, setCategories] = useState<WatcherCategories>(NO_CATEGORIES);
   const [status, setStatus] = useState<WatcherStatus>(getWatcherStatus);
   const [retrying, setRetrying] = useState(false);
@@ -105,46 +99,43 @@ const WatcherPushSection: React.FC<{ pushEnabled: boolean }> = ({ pushEnabled })
 
   return (
     <View testID="security-watcher-push">
-      <View style={[screen.headerRow, screen.sectionGap]}>
-        <BellPlus size={22} color={colors.white} />
-        <Text style={[shared.sectionLabel, screen.headerLabel]}>
-          {t('securityScreen.watcherPush')}
-        </Text>
-      </View>
-      <Text style={shared.fieldHint}>{t('securityScreen.watcherPushHint')}</Text>
-      <DetailsDisclosure
-        label={t('securityScreen.privacyDetails')}
-        testID="security-watcher-details"
-        paragraphs={[
-          t('securityScreen.watcherPushPrivacy'),
-          t('securityScreen.watcherPaymentNote'),
-          remoteSigner && t('securityScreen.watcherSignerNote'),
-        ]}
-      />
-      {!pushEnabled && <Text style={shared.fieldHint}>{t('securityScreen.watcherNeedsPush')}</Text>}
-
-      {WATCHER_CATEGORIES.map((category) => {
-        const label = t(LABEL[category]);
-        return (
-          <View
-            key={category}
-            style={[screen.toggleRow, !pushEnabled && styles.disabled]}
+      {WATCHER_CATEGORIES.map((category) => (
+        <React.Fragment key={category}>
+          <View style={push.separator} />
+          <SettingsRow
+            icon={{ dm: MessageCircle, zap: Zap, mention: AtSign, payment: CreditCard }[category]}
+            title={t(LABEL[category])}
+            indent
+            subtitle={t(
+              categories[category]
+                ? 'notificationSettingsScreen.on'
+                : 'notificationSettingsScreen.off',
+            )}
+            disabled={!pushEnabled}
+            disabledSubtitle={t('notificationSettingsScreen.needsInstant')}
             testID={`security-watcher-row-${category}`}
-          >
-            <Text style={[screen.optionLabel, screen.toggleLabel]}>{label}</Text>
-            <Switch
-              value={pushEnabled && categories[category]}
-              disabled={!pushEnabled}
-              onValueChange={(on) => void toggle(category, on)}
-              accessibilityLabel={label}
-              testID={`security-watcher-toggle-${category}`}
-              trackColor={{ false: colors.divider, true: colors.brandPink }}
-              thumbColor={pushEnabled && categories[category] ? colors.white : undefined}
-            />
-          </View>
-        );
-      })}
-
+            infoTestID={category === 'dm' ? 'security-watcher-details' : undefined}
+            details={
+              category === 'dm'
+                ? [
+                    t('securityScreen.watcherPushHint'),
+                    t('securityScreen.watcherPushPrivacy'),
+                    t('securityScreen.watcherPaymentNote'),
+                    remoteSigner && t('securityScreen.watcherSignerNote'),
+                  ]
+                    .filter(Boolean)
+                    .join('\n\n')
+                : undefined
+            }
+            toggle={{
+              value: pushEnabled && categories[category],
+              disabled: !pushEnabled,
+              onValueChange: (on) => void toggle(category, on),
+              testID: `security-watcher-toggle-${category}`,
+            }}
+          />
+        </React.Fragment>
+      ))}
       {pushEnabled && statusText && (anyCategory(categories) || canRetry) && (
         <View style={push.statusRow} testID="security-watcher-status">
           <Text style={push.statusText}>{statusText}</Text>

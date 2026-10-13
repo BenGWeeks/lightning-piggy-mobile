@@ -19,7 +19,6 @@ jest.mock('../../contexts/NostrContext', () => ({ useNostr: () => ({ pubkey: 'a'
 jest.mock('../../components/MarmotPushSection', () => () => null);
 jest.mock('../../components/SettingsInfoSheet', () => () => null);
 jest.mock('../../components/KeyBackupEntry', () => () => null);
-jest.mock('../../components/DetailsDisclosure', () => () => null);
 jest.mock('../../components/BrandedToast', () => ({ Toast: { show: jest.fn() } }));
 jest.mock('lucide-react-native', () => new Proxy({}, { get: () => () => null }));
 jest.mock('../../services/sendThresholdService', () => ({

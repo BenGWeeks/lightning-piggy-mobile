@@ -2799,7 +2799,28 @@
     "permissionTitle": "Benachrichtigungen für Lightning Piggy",
     "permissionAllowed": "Benachrichtigungen sind in den Einstellungen deines Handys erlaubt.",
     "permissionBlocked": "In den Einstellungen deines Handys ausgeschaltet, daher können keine Hinweise erscheinen",
-    "permissionTurnOn": "Einschalten"
+    "permissionTurnOn": "Einschalten",
+    "on": "Ein",
+    "off": "Aus",
+    "showDetails": "Details in Benachrichtigungen anzeigen",
+    "detailsOn": "Ein · Nachrichtentext und Zahlungsbeträge",
+    "detailsOff": "Aus — Benachrichtigungen sagen „Neue Nachricht“",
+    "checkClosed": "Bei geschlossener App prüfen",
+    "needsInstant": "Benötigt Sofortbenachrichtigungen",
+    "pushReady": "Ein · alle Chats bereit",
+    "pushNoToken": "Ein · Einrichtung nötig",
+    "pushConsequence": "Push-Benachrichtigungen sagen „Neue Nachricht“; Details erscheinen beim Öffnen von Lightning Piggy.",
+    "shopConsequence": "Verwendet deinen Standort im Hintergrund.",
+    "customServer": "Eigener Server",
+    "defaultServer": "Lightning Piggy",
+    "pushPending": {
+      "one": "Ein · {{count}} Chat nicht eingerichtet",
+      "other": "Ein · {{count}} Chats nicht eingerichtet"
+    },
+    "mutedCount": {
+      "one": "{{count}} stummgeschaltetes Konto",
+      "other": "{{count}} stummgeschaltete Konten"
+    }
   },
   "settingsScope": {
     "forThisAccount": "Dieses Konto",

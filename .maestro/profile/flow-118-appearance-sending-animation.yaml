@@ -1,155 +1,188 @@
 appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
-name: Appearance Sending-Animation Toggle Test
+name: Sending animation options — view only
 ---
-# Exercises the Bubbles/Lightning sending-animation toggle on the Appearance
-# screen:
-#   1. Establishes a known baseline by tapping "Bubbles" first, so the test
-#      doesn't depend on any persisted preference from a prior run. (Lightning
-#      is the app default; Bubbles is the explicit non-default we toggle from.)
-#   2. Tapping "Lightning" moves the check to the Lightning row immediately.
-#   3. Navigating away (Home) and back shows Lightning still selected — proves
-#      the preference is held across screens.
-#   4. Killing + relaunching the app preserves Lightning — proves the
-#      AsyncStorage persistence works.
-#   5. Reset to Bubbles at the end so the test leaves a deterministic state.
-#
-# Selectors use testIDs only (no coordinates) per CLAUDE.md.
-# Run: maestro --device emulator-5554 test .maestro/profile/flow-118-appearance-sending-animation.yaml
+# The shared device lane is view-only. Preserve the original mutation and
+# persistence checks for a dedicated test device with -e EXERCISE_SETTINGS=true.
+- runFlow:
+    when:
+      true: ${typeof EXERCISE_SETTINGS === 'undefined' || EXERCISE_SETTINGS !== 'true'}
+    commands:
+      # Presentation checks: never change the device preferences.
+      - tapOn: { id: tab-wallets }
+      - tapOn: { id: profile-icon }
+      - scrollUntilVisible:
+          element: { id: drawer-row-display-language }
+          direction: DOWN
+      - tapOn: { id: drawer-row-display-language }
+      - extendedWaitUntil:
+          visible: { id: display-language-currency-row }
+          timeout: 30000
+      - scrollUntilVisible:
+          element: { id: sending-animation-bubbles }
+          direction: DOWN
+      - assertVisible: { id: sending-animation-bubbles }
+      - scrollUntilVisible:
+          element: { id: sending-animation-lightning }
+          direction: DOWN
+      - assertVisible: { id: sending-animation-lightning }
+      - scrollUntilVisible:
+          element: { id: account-back-button }
+          direction: UP
+      - tapOn: { id: account-back-button }
+      - assertVisible: { id: tab-wallets }
+- runFlow:
+    when:
+      true: ${typeof EXERCISE_SETTINGS !== 'undefined' && EXERCISE_SETTINGS === 'true'}
+    commands:
+      # Exercises the Bubbles/Lightning sending-animation toggle on the Appearance
+      # screen:
+      #   1. Establishes a known baseline by tapping "Bubbles" first, so the test
+      #      doesn't depend on any persisted preference from a prior run. (Lightning
+      #      is the app default; Bubbles is the explicit non-default we toggle from.)
+      #   2. Tapping "Lightning" moves the check to the Lightning row immediately.
+      #   3. Navigating away (Home) and back shows Lightning still selected — proves
+      #      the preference is held across screens.
+      #   4. Killing + relaunching the app preserves Lightning — proves the
+      #      AsyncStorage persistence works.
+      #   5. Reset to Bubbles at the end so the test leaves a deterministic state.
+      #
+      # Selectors use testIDs only (no coordinates) per CLAUDE.md.
+      # Run: maestro --device emulator-5554 test .maestro/profile/flow-118-appearance-sending-animation.yaml
 
-# Cold-launch so the test starts on Home regardless of where the app was left.
-- launchApp:
-    clearState: false
-- waitForAnimationToEnd:
-    timeout: 15000
+      # Cold-launch so the test starts on Home regardless of where the app was left.
+      - launchApp:
+          clearState: false
+      - waitForAnimationToEnd:
+          timeout: 15000
 
-# --- 1. Open drawer → Appearance, establish baseline at "Bubbles" ---
-- tapOn:
-    id: 'tab-wallets'
-    optional: true
-- waitForAnimationToEnd:
-    timeout: 3000
-- tapOn:
-    id: 'profile-icon'
-- waitForAnimationToEnd:
-    timeout: 3000
-- scrollUntilVisible:
-    element:
-      id: 'drawer-row-display-language'
-    direction: DOWN
-    timeout: 10000
-- tapOn:
-    id: 'drawer-row-display-language'
-- waitForAnimationToEnd:
-    timeout: 3000
-# Theme and Sending animation sit under "On this phone", below Currency and
-# Language on the Display & language screen (#1222).
-- scrollUntilVisible:
-    element:
-      id: 'sending-animation-lightning'
-    direction: DOWN
-    timeout: 15000
+      # --- 1. Open drawer → Appearance, establish baseline at "Bubbles" ---
+      - tapOn:
+          id: 'tab-wallets'
+          optional: true
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - tapOn:
+          id: 'profile-icon'
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - scrollUntilVisible:
+          element:
+            id: 'drawer-row-display-language'
+          direction: DOWN
+          timeout: 10000
+      - tapOn:
+          id: 'drawer-row-display-language'
+      - waitForAnimationToEnd:
+          timeout: 3000
+      # Theme and Sending animation sit under "On this phone", below Currency and
+      # Language on the Display & language screen (#1222).
+      - scrollUntilVisible:
+          element:
+            id: 'sending-animation-lightning'
+          direction: DOWN
+          timeout: 15000
 
-# Both options render.
-- assertVisible:
-    id: 'sending-animation-bubbles'
-- assertVisible:
-    id: 'sending-animation-lightning'
+      # Both options render.
+      - assertVisible:
+          id: 'sending-animation-bubbles'
+      - assertVisible:
+          id: 'sending-animation-lightning'
 
-# Tap Bubbles to establish a known baseline regardless of any persisted value.
-- tapOn:
-    id: 'sending-animation-bubbles'
-- waitForAnimationToEnd:
-    timeout: 1000
-- assertVisible:
-    id: 'sending-animation-bubbles-check'
-- assertNotVisible:
-    id: 'sending-animation-lightning-check'
+      # Tap Bubbles to establish a known baseline regardless of any persisted value.
+      - tapOn:
+          id: 'sending-animation-bubbles'
+      - waitForAnimationToEnd:
+          timeout: 1000
+      - assertVisible:
+          id: 'sending-animation-bubbles-check'
+      - assertNotVisible:
+          id: 'sending-animation-lightning-check'
 
-# --- 2. Tap Lightning — selection moves immediately ---
-- tapOn:
-    id: 'sending-animation-lightning'
-- waitForAnimationToEnd:
-    timeout: 1000
-- assertVisible:
-    id: 'sending-animation-lightning-check'
-- assertNotVisible:
-    id: 'sending-animation-bubbles-check'
+      # --- 2. Tap Lightning — selection moves immediately ---
+      - tapOn:
+          id: 'sending-animation-lightning'
+      - waitForAnimationToEnd:
+          timeout: 1000
+      - assertVisible:
+          id: 'sending-animation-lightning-check'
+      - assertNotVisible:
+          id: 'sending-animation-bubbles-check'
 
-# --- 3. Navigate away (Home) and back — preference held ---
-- scrollUntilVisible:
-    element:
-      id: 'account-back-button'
-    direction: UP
-    timeout: 15000
-- tapOn:
-    id: 'account-back-button'
-- waitForAnimationToEnd:
-    timeout: 2000
-- assertVisible:
-    id: 'tab-wallets'
+      # --- 3. Navigate away (Home) and back — preference held ---
+      - scrollUntilVisible:
+          element:
+            id: 'account-back-button'
+          direction: UP
+          timeout: 15000
+      - tapOn:
+          id: 'account-back-button'
+      - waitForAnimationToEnd:
+          timeout: 2000
+      - assertVisible:
+          id: 'tab-wallets'
 
-- tapOn:
-    id: 'profile-icon'
-- waitForAnimationToEnd:
-    timeout: 3000
-- scrollUntilVisible:
-    element:
-      id: 'drawer-row-display-language'
-    direction: DOWN
-    timeout: 10000
-- tapOn:
-    id: 'drawer-row-display-language'
-- waitForAnimationToEnd:
-    timeout: 3000
-# Theme and Sending animation sit under "On this phone", below Currency and
-# Language on the Display & language screen (#1222).
-- scrollUntilVisible:
-    element:
-      id: 'sending-animation-lightning'
-    direction: DOWN
-    timeout: 15000
-- assertVisible:
-    id: 'sending-animation-lightning-check'
+      - tapOn:
+          id: 'profile-icon'
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - scrollUntilVisible:
+          element:
+            id: 'drawer-row-display-language'
+          direction: DOWN
+          timeout: 10000
+      - tapOn:
+          id: 'drawer-row-display-language'
+      - waitForAnimationToEnd:
+          timeout: 3000
+      # Theme and Sending animation sit under "On this phone", below Currency and
+      # Language on the Display & language screen (#1222).
+      - scrollUntilVisible:
+          element:
+            id: 'sending-animation-lightning'
+          direction: DOWN
+          timeout: 15000
+      - assertVisible:
+          id: 'sending-animation-lightning-check'
 
-# --- 4. Kill + relaunch — preference persists across cold start ---
-- stopApp
-- launchApp
-- waitForAnimationToEnd:
-    timeout: 15000
-- tapOn:
-    id: 'tab-wallets'
-    optional: true
-- waitForAnimationToEnd:
-    timeout: 3000
-- tapOn:
-    id: 'profile-icon'
-- waitForAnimationToEnd:
-    timeout: 3000
-- scrollUntilVisible:
-    element:
-      id: 'drawer-row-display-language'
-    direction: DOWN
-    timeout: 10000
-- tapOn:
-    id: 'drawer-row-display-language'
-- waitForAnimationToEnd:
-    timeout: 3000
-# Theme and Sending animation sit under "On this phone", below Currency and
-# Language on the Display & language screen (#1222).
-- scrollUntilVisible:
-    element:
-      id: 'sending-animation-lightning'
-    direction: DOWN
-    timeout: 15000
-- assertVisible:
-    id: 'sending-animation-lightning-check'
+      # --- 4. Kill + relaunch — preference persists across cold start ---
+      - stopApp
+      - launchApp
+      - waitForAnimationToEnd:
+          timeout: 15000
+      - tapOn:
+          id: 'tab-wallets'
+          optional: true
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - tapOn:
+          id: 'profile-icon'
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - scrollUntilVisible:
+          element:
+            id: 'drawer-row-display-language'
+          direction: DOWN
+          timeout: 10000
+      - tapOn:
+          id: 'drawer-row-display-language'
+      - waitForAnimationToEnd:
+          timeout: 3000
+      # Theme and Sending animation sit under "On this phone", below Currency and
+      # Language on the Display & language screen (#1222).
+      - scrollUntilVisible:
+          element:
+            id: 'sending-animation-lightning'
+          direction: DOWN
+          timeout: 15000
+      - assertVisible:
+          id: 'sending-animation-lightning-check'
 
-# --- 5. Reset to Bubbles so the test leaves the device in default state ---
-- tapOn:
-    id: 'sending-animation-bubbles'
-- waitForAnimationToEnd:
-    timeout: 1000
-- assertVisible:
-    id: 'sending-animation-bubbles-check'
-- assertNotVisible:
-    id: 'sending-animation-lightning-check'
+      # --- 5. Reset to Bubbles so the test leaves the device in default state ---
+      - tapOn:
+          id: 'sending-animation-bubbles'
+      - waitForAnimationToEnd:
+          timeout: 1000
+      - assertVisible:
+          id: 'sending-animation-bubbles-check'
+      - assertNotVisible:
+          id: 'sending-animation-lightning-check'

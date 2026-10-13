@@ -2807,7 +2807,32 @@
     "permissionTitle": "Powiadomienia Lightning Piggy",
     "permissionAllowed": "Powiadomienia są dozwolone w ustawieniach telefonu.",
     "permissionBlocked": "Wyłączone w ustawieniach telefonu, więc alerty się nie pokażą",
-    "permissionTurnOn": "Włącz"
+    "permissionTurnOn": "Włącz",
+    "on": "Włączone",
+    "off": "Wyłączone",
+    "showDetails": "Pokazuj szczegóły w alertach",
+    "detailsOn": "Włączone · treść wiadomości i kwoty płatności",
+    "detailsOff": "Wyłączone — alerty mówią „Nowa wiadomość”",
+    "checkClosed": "Sprawdzaj po zamknięciu",
+    "needsInstant": "Wymaga natychmiastowych alertów",
+    "pushReady": "Włączone · wszystkie czaty gotowe",
+    "pushNoToken": "Włączone · wymaga konfiguracji",
+    "pushConsequence": "Alerty push mówią „Nowa wiadomość”; szczegóły pojawiają się po otwarciu Lightning Piggy.",
+    "shopConsequence": "Używa lokalizacji w tle.",
+    "customServer": "Własny serwer",
+    "defaultServer": "Lightning Piggy",
+    "pushPending": {
+      "one": "Włączone · {{count}} czat nieskonfigurowany",
+      "few": "Włączone · {{count}} czaty nieskonfigurowane",
+      "many": "Włączone · {{count}} czatów nieskonfigurowanych",
+      "other": "Włączone · {{count}} czatu nieskonfigurowanego"
+    },
+    "mutedCount": {
+      "one": "{{count}} wyciszone konto",
+      "few": "{{count}} wyciszone konta",
+      "many": "{{count}} wyciszonych kont",
+      "other": "{{count}} wyciszonego konta"
+    }
   },
   "settingsScope": {
     "forThisAccount": "To konto",
