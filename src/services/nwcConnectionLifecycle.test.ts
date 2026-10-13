@@ -268,3 +268,6 @@ it('shares a retry reconnect across concurrent transaction requests', async () =
     jest.useRealTimers();
   }
 });
+
+// Expo fetch requires a native module; these SDK tests never use HTTPS verification.
+jest.mock('expo/fetch', () => ({ fetch: jest.fn() }));

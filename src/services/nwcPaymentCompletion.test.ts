@@ -57,3 +57,6 @@ it('clears the public lookup timeout when cancellation wins', async () => {
   controller.abort();
   await assertion;
 });
+
+// Expo fetch requires a native module; these SDK tests never use HTTPS verification.
+jest.mock('expo/fetch', () => ({ fetch: jest.fn() }));

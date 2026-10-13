@@ -1,3 +1,4 @@
+import { fetch } from 'expo/fetch';
 import { parsePublicUrl } from '../utils/publicUrl';
 import type { PaymentCandidate } from '../utils/paymentCompletion';
 import { throwIfAborted } from './nwcErrors';
@@ -6,7 +7,8 @@ export function isPaymentVerifyUrl(value: unknown): value is string {
   return typeof value === 'string' && parsePublicUrl(value, ['https']) !== null;
 }
 
-/** LUD-21: untrusted optional URL; refuse redirects to prevent private-network requests. */
+/** LUD-21: Expo's native transport rejects redirects before following them.
+ * React Native's XHR-backed global fetch ignores the redirect option. */
 export async function fetchPaymentVerification(
   url: string,
   signal: AbortSignal,

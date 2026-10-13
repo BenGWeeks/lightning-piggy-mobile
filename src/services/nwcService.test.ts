@@ -390,3 +390,5 @@ it.each([
   mockGetInfo.mockResolvedValueOnce({ alias });
   expect(await getInfo(WALLET_ID)).toEqual({ alias: expected, lud16: undefined });
 });
+// Expo fetch requires a native module; these SDK tests never use HTTPS verification.
+jest.mock('expo/fetch', () => ({ fetch: jest.fn() }));

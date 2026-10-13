@@ -1,4 +1,8 @@
+import { fetch as nativeFetch } from 'expo/fetch';
+
 import { fetchPaymentVerification, isPaymentVerifyUrl } from './lnurlVerification';
+
+jest.mock('expo/fetch', () => ({ fetch: jest.fn() }));
 
 it.each([
   'http://wallet.example/verify',
@@ -16,22 +20,26 @@ it('accepts a public HTTPS URL', () => {
 });
 
 describe('verification request', () => {
+  const fetchMock = jest.mocked(nativeFetch);
   const originalFetch = global.fetch;
-  beforeEach(() => jest.useFakeTimers());
+  beforeEach(() => {
+    jest.useFakeTimers();
+    fetchMock.mockReset();
+  });
   afterEach(() => {
     global.fetch = originalFetch;
     jest.useRealTimers();
   });
 
   it('uses GET, refuses redirects and preserves the settled response', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    fetchMock.mockResolvedValue({
       ok: true,
       json: async () => ({ settled: true, preimage: 'a'.repeat(64) }),
-    });
+    } as Awaited<ReturnType<typeof nativeFetch>>);
     await expect(
       fetchPaymentVerification('https://wallet.example/verify', new AbortController().signal),
     ).resolves.toMatchObject({ settled: true });
-    expect(global.fetch).toHaveBeenCalledWith(
+    expect(fetchMock).toHaveBeenCalledWith(
       'https://wallet.example/verify',
       expect.objectContaining({ method: 'GET', redirect: 'error' }),
     );
@@ -39,12 +47,12 @@ describe('verification request', () => {
   });
 
   it.each(['cancel', 'timeout'])('aborts on %s and clears the request timer', async (reason) => {
-    global.fetch = jest.fn(
+    fetchMock.mockImplementation(
       (_url, options) =>
         new Promise((_resolve, reject) => {
           options!.signal!.addEventListener('abort', () => reject(new Error('aborted')));
         }),
-    ) as typeof fetch;
+    );
     const controller = new AbortController();
     const result = fetchPaymentVerification('https://wallet.example/verify', controller.signal);
     const assertion = expect(result).rejects.toThrow('aborted');
@@ -55,10 +63,33 @@ describe('verification request', () => {
   });
 
   it('never fetches an unsafe URL', async () => {
-    global.fetch = jest.fn();
+    fetchMock.mockReset();
     expect(
       await fetchPaymentVerification('https://localhost/verify', new AbortController().signal),
     ).toBeNull();
-    expect(global.fetch).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
+});
+
+// Keep the unsafe RN global transport out of this security boundary. Native
+// enforcement lives in Expo's native transport; this test guards our selection.
+it('propagates a native redirect rejection without using XHR fetch', async () => {
+  const unsafeXhrFetch = jest.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({ settled: true, preimage: 'a'.repeat(64) }),
+  });
+  const original = global.fetch;
+  global.fetch = unsafeXhrFetch;
+  jest.mocked(nativeFetch).mockRejectedValue(new Error('Redirect is not allowed'));
+  try {
+    await expect(
+      fetchPaymentVerification(
+        'https://wallet.example/redirect-to-private',
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow('Redirect is not allowed');
+    expect(unsafeXhrFetch).not.toHaveBeenCalled();
+  } finally {
+    global.fetch = original;
+  }
 });
