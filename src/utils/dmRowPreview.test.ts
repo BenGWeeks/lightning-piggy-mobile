@@ -43,3 +43,31 @@ describe('dmRowPreview — encrypted attachments', () => {
     expect(dmRowPreview(frag('image/jpeg'), 15)).toBe('📎 Attachment');
   });
 });
+
+describe('dmRowPreview — stored file payloads', () => {
+  const payload =
+    '[FILE]' +
+    JSON.stringify({
+      url: 'https://blossom.example/invoice.pdf?token=secret-access-token',
+      name: 'Invoice.pdf',
+      mime: 'application/pdf',
+      encrypted: false,
+      caption: 'Private invoice',
+    });
+
+  it.each([payload, '[FILE]{"url":"https://example.com/?token=secret"'])(
+    'redacts file metadata and URLs even when the payload is malformed',
+    (content) => {
+      expect(dmRowPreview(content, 15)).toBe('📎 File');
+    },
+  );
+
+  it('localizes the file label', () => {
+    i18n.locale = 'es';
+    try {
+      expect(dmRowPreview(payload, 15)).toBe('📎 Archivo');
+    } finally {
+      i18n.locale = 'en';
+    }
+  });
+});

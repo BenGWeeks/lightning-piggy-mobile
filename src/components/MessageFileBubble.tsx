@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Text, TouchableOpacity, View } from 'react-native';
+import { Pressable, Text, TouchableOpacity, View } from 'react-native';
 import { FileText } from 'lucide-react-native';
 import * as Sharing from 'expo-sharing';
 import { useLocale } from '../contexts/LocaleContext';
@@ -12,11 +12,15 @@ export default React.memo(function MessageFileBubble({
   id,
   file,
   fromMe,
+  header,
+  onLongPress,
   footer,
 }: {
   id: string;
   file: FileAttachment;
   fromMe: boolean;
+  header?: React.ReactNode;
+  onLongPress?: () => void;
   footer: React.ReactNode;
 }) {
   const { t } = useLocale();
@@ -45,11 +49,15 @@ export default React.memo(function MessageFileBubble({
   const shortId = id.replace(/^dm-/, '').slice(0, 8);
   return (
     <View style={[styles.row, fromMe && styles.sent]}>
-      <View
+      <Pressable
         style={styles.bubble}
+        onLongPress={onLongPress}
+        delayLongPress={350}
+        accessible={false}
         testID={`chat-file-bubble-${shortId}`}
         accessibilityLabel={file.name || t('messageBubble.file')}
       >
+        {header}
         <FileText size={24} color={colors.textSupplementary} />
         <Text style={styles.name}>{file.name || t('messageBubble.file')}</Text>
         <Text style={styles.caption}>{file.mime}</Text>
@@ -79,7 +87,7 @@ export default React.memo(function MessageFileBubble({
           </Text>
         )}
         {footer}
-      </View>
+      </Pressable>
     </View>
   );
 });

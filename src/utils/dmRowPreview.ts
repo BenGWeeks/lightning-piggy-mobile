@@ -19,6 +19,8 @@ import { liveMarkerPhaseOf } from '../services/liveLocationService';
  *    `encodeEncryptedFileUrl` / `textForRumor`); it must never surface in a
  *    conversation-list preview or a lock-screen notification, so it's redacted
  *    to a label here. Plain kind-15 rows (bare blob URL, no secret) pass through.
+ *  - Stored `[FILE]` payload (kind 15) → a localized file label, never JSON
+ *    metadata or URLs that may carry access tokens, even if malformed.
  *  - Structured NIP-88 poll / vote (kind 1068/1018) → the poll summary.
  *  - Marketplace order / receipt (kind 16/17) → the order summary.
  *  - Marmot group invite / message (kind 443–445) → a "not supported yet"
@@ -30,6 +32,7 @@ import { liveMarkerPhaseOf } from '../services/liveLocationService';
  */
 export function dmRowPreview(content: string, wireKind: number, locale?: string): string {
   if (wireKind === NWC_SHARE_KIND) return nwcSharePreviewFromContent(content);
+  if (wireKind === 15 && content.startsWith('[FILE]')) return `📎 ${t('messageBubble.file')}`;
   // `#lpe=1` is the encrypted-file fragment marker (see encryptedFileUrl.ts);
   // its `&k=…&n=…` params are the decryption secret, so never let it through.
   if (wireKind === 15 && content.includes('#lpe=1')) {

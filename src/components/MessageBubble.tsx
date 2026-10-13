@@ -528,6 +528,8 @@ const MessageBubble: React.FC<Props> = ({
         id={id}
         file={file}
         fromMe={fromMe}
+        header={BubbleHeader}
+        onLongPress={onLongPress}
         footer={renderFooter([styles.bubbleTime])}
       />,
     );
