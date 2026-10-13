@@ -1,3 +1,6 @@
+import { PROFILE_RELAYS } from '../services/nostrRelayDefaults';
+import { getEventHash } from 'nostr-tools/pure';
+import { adoptFollowSnapshot } from '../services/contactFollowFreshness';
 import {
   useCallback,
   useEffect,
@@ -16,7 +19,6 @@ import { NSEC_KEY } from './nostrAuthKeys';
 import { perAccountKey } from '../services/perAccountStorage';
 import { CONTACTS_CACHE_KEY_BASE, CONTACTS_TIMESTAMP_KEY_BASE } from './nostrCacheKeys';
 import {
-  contactsFromEvent,
   prepareContactListUpdate,
   type ContactChange,
   type ContactListBase,
@@ -168,7 +170,12 @@ export function useContactActions({
         const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
         const update = await prepareContactListUpdate({
           pubkey,
-          relays: [...getReadRelays(), ...writeRelays, ...nostrService.DEFAULT_RELAYS],
+          relays: [
+            ...getReadRelays(),
+            ...writeRelays,
+            ...nostrService.DEFAULT_RELAYS,
+            ...PROFILE_RELAYS,
+          ],
           localContacts: contacts,
           change,
           lastPublished: lastPublished.current.get(pubkey),
@@ -192,14 +199,14 @@ export function useContactActions({
           });
           await clearAccountCreatedHere(pubkey);
         }
-        const cKey = perAccountKey(CONTACTS_CACHE_KEY_BASE, pubkey);
-        startTransition(() =>
-          setContacts((prev) => {
-            // Rebuild from the published tags, keeping profiles already in state.
-            const next = contactsFromEvent(update.event.tags, prev);
-            AsyncStorage.setItem(cKey, JSON.stringify(next)).catch(() => {});
-            return next;
-          }),
+        await adoptFollowSnapshot(
+          pubkey,
+          {
+            contacts: update.contacts,
+            createdAt: update.changed ? update.event.created_at : update.base.createdAt,
+            id: update.changed ? getEventHash({ ...update.event, pubkey }) : update.base.id,
+          },
+          (next) => startTransition(() => setContacts(next)),
         );
         // Bumps the *contacts* timestamp (the freshness clock for kind-3 list
         // reads), not the profiles one (#442).

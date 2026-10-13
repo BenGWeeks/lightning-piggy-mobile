@@ -1,3 +1,4 @@
+import { isFollowed } from '../utils/followPubkeys';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
 import type { DecodedRumor } from '../utils/nip17Unwrap';
 
@@ -68,7 +69,7 @@ export function createLiveSubFollowGateBuffer(
     reevaluate(follows, onPass) {
       if (deferred.size === 0) return;
       for (const [id, item] of deferred) {
-        if (follows.has(item.partnerPubkey)) {
+        if (isFollowed(follows, item.partnerPubkey)) {
           deferred.delete(id);
           onPass(item);
         }

@@ -1,3 +1,4 @@
+import { isFollowed } from '../utils/followPubkeys';
 import { loadKind4ReplayCursor } from './kind4RetryStore';
 import { getAppFormatLocale } from '../utils/appFormatLocale';
 import { dmThreadId, protocolForWireKind } from '../utils/dmProtocol';
@@ -398,7 +399,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         return;
 
       // Follow gate (mirrors refreshDmInbox B1) — incoming kind-4 from a non-followed sender is dropped from inbox state. Outgoing (fromMe) bypasses since we sent it.
-      if (!fromMe && !followPubkeysRef.current.has(partnerPubkey)) {
+      if (!fromMe && !isFollowed(followPubkeysRef.current, partnerPubkey)) {
         if (__DEV__)
           console.log(
             `[Nostr] live kind-4 ${ev.id.slice(0, 8)} dropped by follow-gate (partner=${partnerPubkey.slice(0, 8)})`,
@@ -559,7 +560,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       // Explore Market checkout — into a trust set so a first legitimate order
       // notifies too.) `partnerKnown` is checked BEFORE this event's own upsert,
       // so the very first order from a stranger can't self-qualify.
-      const partnerFollowed = followPubkeysRef.current.has(partnerPubkey);
+      const partnerFollowed = isFollowed(followPubkeysRef.current, partnerPubkey);
       let partnerKnown = partnerFollowed;
       let persisted = false;
       writeChain = writeChain

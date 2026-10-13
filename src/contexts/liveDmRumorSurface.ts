@@ -1,3 +1,4 @@
+import { isFollowed } from '../utils/followPubkeys';
 import { getAppFormatLocale } from '../utils/appFormatLocale';
 import { dmThreadId, MARMOT_WELCOME_KIND, protocolForWireKind } from '../utils/dmProtocol';
 import type React from 'react';
@@ -141,7 +142,7 @@ export function createLiveRumorSurfacer(
     // Follow gate (mirrors refreshDmInbox B1) — keeps non-followed
     // sender plaintext off AsyncStorage. Group rumors above don't
     // hit this gate because group membership is its own auth signal.
-    if (!followPubkeysRef.current.has(partnership.partnerPubkey)) {
+    if (!isFollowed(followPubkeysRef.current, partnership.partnerPubkey)) {
       if (__DEV__)
         console.log(
           `[Nostr] live wrap ${wrapId.slice(0, 8)} dropped by follow-gate (partner=${partnership.partnerPubkey.slice(0, 8)})`,
