@@ -594,7 +594,7 @@ If any of the three secrets is unset, the job emits a `::warning` and skips sile
 
 `eas submit` uses Apple's `pilot` (fastlane) under the hood, which does accept a `changelog` argument — but EAS doesn't surface it through `eas.json` or `eas submit --changelog`. Until Expo wires that through, the post-submit ASC PATCH is the cleanest option that works with `--auto-submit`. Two pieces of code do the work:
 
-* `scripts/build-testflight-changelog.mjs` — assembles the changelog string (notes file → git fallback → default).
+* `scripts/release-notes-from-prs.sh` — groups merged PR titles for the release tag range.
 * `scripts/asc-set-whats-new.mjs` — generates an ES256-signed JWT, polls `/v1/builds` until the just-uploaded build appears in App Store Connect (Apple typically takes 5–15 min after EAS reports the submit complete), then PATCHes the localisation.
 
 The polling loop in the second script is bounded by `ASC_MAX_WAIT_SECS` (default 900 s = 15 min). If Apple's processing queue is unusually backed up and the build hasn't appeared in time, the script exits 0 with a warning so the release isn't gated on Apple's queue depth — re-run the same script locally with the same env vars to fill it in once the build is visible.
