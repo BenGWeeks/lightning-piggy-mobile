@@ -14,7 +14,22 @@
 // Mock @getalby/sdk so we can drive `provider.getBalance()` without
 // real Nostr relays. The mock provider stores a configurable
 // implementation that each test swaps in.
+import {
+  connect,
+  disconnect,
+  getBalance,
+  isConnectionError,
+  isReplyTimeoutError,
+  isWalletConnected,
+  payInvoice,
+  getInfo,
+} from './nwcService';
+import { clearPaymentProofsForTests, getPaymentProof } from './paymentProofs';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
+
 let mockGetBalanceImpl: () => Promise<{ balance: number }> = async () => ({ balance: 0 });
+const mockGetInfo = jest.fn();
 const mockEnable = jest.fn(async () => undefined);
 // pay_invoice + lookupInvoice are driven per-test for the ambiguous
 // "unknown Error" outcome path (#891). Defaults are benign so the existing
@@ -33,6 +48,7 @@ jest.mock('@getalby/sdk', () => ({
   NostrWebLNProvider: jest.fn().mockImplementation(() => ({
     enable: mockEnable,
     getBalance: () => mockGetBalanceImpl(),
+    getInfo: () => mockGetInfo(),
     sendPayment: (bolt11: string) => mockSendPaymentImpl(bolt11),
     lookupInvoice: (args: { paymentHash: string }) => mockLookupInvoiceImpl(args),
     close: jest.fn(),
@@ -41,19 +57,6 @@ jest.mock('@getalby/sdk', () => ({
     client: { connected: true, pool: undefined },
   })),
 }));
-
-import {
-  connect,
-  disconnect,
-  getBalance,
-  isConnectionError,
-  isReplyTimeoutError,
-  isWalletConnected,
-  payInvoice,
-} from './nwcService';
-import { clearPaymentProofsForTests, getPaymentProof } from './paymentProofs';
-import { sha256 } from '@noble/hashes/sha2.js';
-import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 
 const VALID_NWC_URL =
   'nostr+walletconnect://' +
@@ -368,4 +371,14 @@ describe('nwcService.payInvoice — proof of payment is recorded only when confi
     await expect(p).resolves.toEqual({ preimage });
     expect(getPaymentProof(WALLET_ID, hash)).toBeUndefined();
   });
+});
+
+it.each([
+  ['Piggy', 'Piggy'],
+  ['Pi\u202eggy\u200b', 'Piggy'],
+  [42, ''],
+  ['x'.repeat(65), 'x'.repeat(63) + '…'],
+])('sanitises NWC wallet names', async (alias, expected) => {
+  mockGetInfo.mockResolvedValueOnce({ alias });
+  expect(await getInfo(WALLET_ID)).toEqual({ alias: expected, lud16: undefined });
 });

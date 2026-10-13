@@ -9,8 +9,10 @@ import { encryptMediaFile } from '@internet-privacy/marmot-ts';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { deleteAsync, moveAsync, writeAsStringAsync } from 'expo-file-system/legacy';
+import { deleteAsync, getInfoAsync, moveAsync, writeAsStringAsync } from 'expo-file-system/legacy';
 import { encryptFile } from './encryptedFile';
+import { encodeEncryptedFileUrl } from '../utils/encryptedFileUrl';
+import { parseVoiceNote } from '../utils/messageContent';
 import {
   namedFileExport,
   deleteDecryptedFile,
@@ -24,6 +26,7 @@ import {
   clearDecryptedMediaMemory,
   ownerDirName,
   mediaCacheKey,
+  clearDecryptedMediaCache,
   peekDecryptedMedia,
   resolveDecryptedMedia,
   setDecryptedMediaOwner,
@@ -220,32 +223,32 @@ describe('decryptedMediaCache', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps each account's files separate and drops the memory cache on switch", async () => {
+  it('deletes outgoing plaintext on identity switch', async () => {
     setDecryptedMediaOwner(A);
     const uriA = await resolveDecryptedMedia(ref);
     setDecryptedMediaOwner(B);
     expect(peekDecryptedMedia(ref)).toBeNull();
     const uriB = await resolveDecryptedMedia(ref);
     expect(uriB).not.toBe(uriA);
-    expect(filesUnder(A)).toEqual([uriA]);
+    expect(filesUnder(A)).toEqual([]);
     expect(filesUnder(B)).toEqual([uriB]);
     // B decrypted for itself rather than reusing A's file.
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("wipe deletes the account's files and memory entries, and leaves others alone", async () => {
-    setDecryptedMediaOwner(B);
-    const uriB = await resolveDecryptedMedia(ref);
+    const uriB = `file:///cache/decrypted/${ownerDirName(B)}/keep.m4a`;
+    mockFiles.set(uriB, 'other account');
     setDecryptedMediaOwner(A);
     await resolveDecryptedMedia(ref);
-    await wipeDecryptedMediaForOwner(A);
+    await clearDecryptedMediaCache(A);
     expect(filesUnder(A)).toEqual([]);
     expect(peekDecryptedMedia(ref)).toBeNull();
     expect(filesUnder(B)).toEqual([uriB]);
     // Signing back in, the next play decrypts again.
     setDecryptedMediaOwner(A);
     await resolveDecryptedMedia(ref);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('never serves cached plaintext to a request with the wrong keys', async () => {
@@ -665,4 +668,114 @@ it('honours the advertised size on download', async () => {
   expect(await resolveDecryptedMedia({ ...ref, size: sealed.ciphertext.length })).toContain(
     'file:///',
   );
+});
+
+it('keys identical basenames by URL, keys, nonce and declared Marmot hashes', () => {
+  const key = mediaCacheKey(ref);
+  expect(mediaCacheKey({ ...ref })).toBe(key);
+  for (const other of [
+    { ...ref, url: 'https://other.example/abc123' },
+    { ...ref, keyHex: wrongKeys.keyHex },
+    { ...ref, nonceHex: '00'.repeat(12) },
+    {
+      ...ref,
+      marmot: {
+        version: 'encrypted-media-v1' as const,
+        keysHex: ['11'.repeat(32)],
+        filename: 'photo.jpg',
+        plaintextSha256: '22'.repeat(32),
+        ciphertextSha256: '33'.repeat(32),
+      },
+    },
+  ])
+    expect(mediaCacheKey(other)).not.toBe(key);
+});
+it('a returning identity waits for its old folder deletion before writing new media', async () => {
+  setDecryptedMediaOwner(A);
+  const uri = await resolveDecryptedMedia(ref);
+  let release!: () => void;
+  const original = (deleteAsync as jest.Mock).getMockImplementation()!;
+  (deleteAsync as jest.Mock).mockImplementationOnce(async (path: string) => {
+    await new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await original(path);
+  });
+  setDecryptedMediaOwner(B);
+  setDecryptedMediaOwner(A);
+  const pending = resolveDecryptedMedia(ref);
+  await new Promise((resolve) => setImmediate(resolve));
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  release();
+  expect(await pending).toBe(uri);
+  expect(filesUnder(A)).toEqual([uri]);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+it('checks declared ciphertext hashes before decrypting or publishing', async () => {
+  setDecryptedMediaOwner(A);
+  const hash = bytesToHex(sha256(sealed.ciphertext));
+  const good = { ...ref, sha256: hash };
+  const uri = await resolveDecryptedMedia(good);
+  expect([...plaintextOf(uri)]).toEqual([...PLAIN]);
+  for (const hash of ['00'.repeat(32), 'invalid', '']) {
+    const bad = { ...ref, sha256: hash };
+    expect(mediaCacheKey(bad)).not.toBe(mediaCacheKey(good));
+    expect(peekDecryptedMedia(bad)).toBeNull();
+    await expect(resolveDecryptedMedia(bad)).rejects.toThrow('hash mismatch');
+  }
+  expect(filesUnder(A)).toEqual([uri]);
+});
+
+it.each(['memory', 'disk'])(
+  'rejects malformed hashes after warming the %s cache without a hash',
+  async (cache) => {
+    setDecryptedMediaOwner(A);
+    const uri = await resolveDecryptedMedia(ref);
+    if (cache === 'disk') clearDecryptedMediaMemory();
+    (getInfoAsync as jest.Mock).mockClear();
+    fetchMock.mockClear();
+    for (const hash of ['', 'invalid', '00'.repeat(31), 'gg'.repeat(32)]) {
+      const bad = { ...ref, sha256: hash };
+      expect(peekDecryptedMedia(bad)).toBeNull();
+      await expect(resolveDecryptedMedia(bad)).rejects.toThrow('hash mismatch');
+      expect(mediaCacheKey(bad)).not.toBe(mediaCacheKey(ref));
+    }
+    expect(getInfoAsync).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(filesUnder(A)).toEqual([uri]);
+    expect(await resolveDecryptedMedia(ref)).toBe(uri);
+    expect(fetchMock).not.toHaveBeenCalled();
+  },
+);
+
+it('rejects a kind-15 that declares an empty hash, end to end (encode → parse → resolve)', async () => {
+  setDecryptedMediaOwner(A);
+  const meta = { url: URL_, mime: 'audio/mp4', keyHex: sealed.keyHex, nonceHex: sealed.nonceHex };
+  // The same path a received kind-15 takes: nip17Unwrap encodes the `x` tag
+  // into the `#lpe` URL, the bubble parses it back into a media ref.
+  const toRef = (sha256?: string): EncryptedMediaRef => {
+    const parsed = parseVoiceNote(encodeEncryptedFileUrl({ ...meta, sha256 }));
+    if (!parsed?.encrypted) throw new Error('expected an encrypted voice note');
+    return {
+      url: parsed.url,
+      kind: 'voice',
+      mime: parsed.mime,
+      keyHex: parsed.keyHex,
+      nonceHex: parsed.nonceHex,
+      ...(parsed.sha256 !== undefined ? { sha256: parsed.sha256 } : {}),
+    };
+  };
+  const uri = await resolveDecryptedMedia(toRef(undefined));
+  const empty = toRef('');
+  expect(empty.sha256).toBe('');
+  expect(mediaCacheKey(empty)).not.toBe(mediaCacheKey(toRef(undefined)));
+  expect(peekDecryptedMedia(empty)).toBeNull();
+  await expect(resolveDecryptedMedia(empty)).rejects.toThrow('hash mismatch');
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(filesUnder(A)).toEqual([uri]);
+  // A correct declared hash still resolves.
+  await expect(
+    resolveDecryptedMedia(toRef(bytesToHex(sha256(sealed.ciphertext)))),
+  ).resolves.toMatch(/\.m4a$/);
 });

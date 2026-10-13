@@ -3379,5 +3379,9 @@
     "profile": "Відкрити профіль %{target}",
     "open": "Відкрити посилання Lightning від %{target}",
     "memo": "Примітка (з рахунку)"
+  },
+  "profileSafety": {
+    "unavailable": "Профіль недоступний",
+    "unverified": "не перевірено"
   }
 }

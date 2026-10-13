@@ -22,12 +22,12 @@ function listing(pubkey = pk, d = 'item', tags: string[][] = []) {
     sig: '',
   } as Event;
 }
-it('uses shop, display name, name, NIP-05, then a shortened npub', () => {
+it('uses shop, display name, name, then a shortened npub', () => {
   const profile = { displayName: 'Display', name: 'Name', nip05: 'shop@example.com' };
   expect(merchantLabel(pk, profile, 'Shop')).toBe('Shop');
   expect(merchantLabel(pk, profile)).toBe('Display');
   expect(merchantLabel(pk, { ...profile, displayName: ' ' })).toBe('Name');
-  expect(merchantLabel(pk, { nip05: profile.nip05 })).toBe('shop@example.com');
+  expect(merchantLabel(pk, { nip05: profile.nip05 })).toMatch(/^npub1/);
   expect(merchantLabel(pk)).toMatch(/^npub1.{7}….{4}$/);
   expect(merchantLabel(pk, { name: 123 as unknown as string })).toMatch(/^npub/);
 });
@@ -91,4 +91,13 @@ it('upgrades remembered labels and npubs and keeps unresolved values while loadi
   expect(resolveMerchantSelection(merchantLabel(pk), options)).toBe(pk);
   expect(resolveMerchantSelection(pk, options)).toBe(pk);
   expect(resolveMerchantSelection('Still loading', [])).toBe('Still loading');
+});
+
+it.each([
+  ['Shop', 'Shop'],
+  ['Sh\u202eop\u200b', 'Shop'],
+  ['x'.repeat(65), 'x'.repeat(63) + '…'],
+])('sanitises Market seller labels', (name, expected) => {
+  expect(merchantLabel(pk, { displayName: name })).toBe(expected);
+  expect(merchantLabel(pk, undefined, name)).toBe(expected);
 });

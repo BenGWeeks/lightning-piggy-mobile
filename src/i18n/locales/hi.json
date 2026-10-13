@@ -3339,5 +3339,9 @@
     "profile": "प्रोफ़ाइल %{target} खोलें",
     "open": "%{target} का Lightning लिंक खोलें",
     "memo": "मेमो (इनवॉइस से)"
+  },
+  "profileSafety": {
+    "unavailable": "प्रोफ़ाइल उपलब्ध नहीं है",
+    "unverified": "असत्यापित"
   }
 }

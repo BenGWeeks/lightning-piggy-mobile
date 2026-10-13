@@ -32,6 +32,7 @@ import type { MarmotImageParams } from '../utils/messageContent';
 interface Props {
   url: string;
   encrypted: boolean;
+  sha256?: string;
   keyHex?: string;
   nonceHex?: string;
   mime?: string;
@@ -50,6 +51,7 @@ interface Props {
 const DecryptedImage: React.FC<Props> = ({
   url,
   encrypted,
+  sha256,
   keyHex,
   nonceHex,
   mime,
@@ -65,7 +67,7 @@ const DecryptedImage: React.FC<Props> = ({
   const styles = useMemo(() => createDecryptedImageStyles(colors), [colors]);
 
   const { uri: localUri, failed } = useImageMediaUri(
-    { url, kind: 'image', mime, size, keyHex, nonceHex, marmot },
+    { url, kind: 'image', mime, size, sha256, keyHex, nonceHex, marmot },
     encrypted,
     !blocked,
     onResolved,

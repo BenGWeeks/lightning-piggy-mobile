@@ -967,3 +967,15 @@ it('respects message notification permission for pending invitations', async () 
   ).toBeNull();
   expect(mockScheduleNotificationAsync).not.toHaveBeenCalled();
 });
+
+it.each([
+  ['Alice', 'Hello', 'Alice', 'Hello'],
+  ['Al\u202eice', 'Hi\u200b there', 'Alice', 'Hi there'],
+])('sanitises notification display content', async (title, body, expectedTitle, expectedBody) => {
+  setLockScreenContentEnabled(true);
+  await fireNotification({ kind: 'payment', title, body, owner: 'a'.repeat(64) });
+  expect(lastScheduledContent()).toMatchObject({ title: expectedTitle, body: expectedBody });
+  expect(await listNotifications('a'.repeat(64))).toEqual(
+    expect.arrayContaining([expect.objectContaining({ title: expectedTitle, body: expectedBody })]),
+  );
+});

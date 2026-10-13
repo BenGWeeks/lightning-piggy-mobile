@@ -1,3 +1,4 @@
+import { sanitizeDisplayText } from '../utils/sanitizeDisplayText';
 import { listTransactionsWithRetry } from './nwcTransactionRetry';
 import { hydratePaymentProofs, recordPaymentProof } from './paymentProofs';
 import { NostrWebLNProvider } from '@getalby/sdk';
@@ -497,7 +498,7 @@ async function ensureConnected(
   let provider = providers.get(walletId);
   if (!provider) return null;
 
-  const client = (provider as any).client;
+  const client = provider.client;
   if (client && !client.connected && nwcUrls.has(walletId)) {
     provider = await reconnectOnce(walletId, isActive);
   }
@@ -778,6 +779,7 @@ function extractPaymentHash(bolt11: string): string | null {
   try {
     // Simple bolt11 payment_hash extraction — it's tag 'p' (01 in bech32)
     // For reliability, decode with light-bolt11-decoder if available
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- Keep this optional decoder lazy.
     const { decode } = require('light-bolt11-decoder');
     const decoded = decode(bolt11);
     const hashSection = decoded.sections?.find((s: { name: string }) => s.name === 'payment_hash');
@@ -796,7 +798,7 @@ export async function getInfo(
   try {
     const info: Nip47GetInfoResponse = await provider.getInfo();
     if (__DEV__) console.log('NWC getInfo response:', JSON.stringify(info));
-    const alias = info.alias || '';
+    const alias = sanitizeDisplayText(info.alias, { maxLen: 64 });
     const lud16 = info.lud16;
     return { alias, lud16 };
   } catch (error) {
@@ -808,7 +810,7 @@ export async function getInfo(
 export async function listTransactions(
   walletId: string,
   isActive: () => boolean = () => true,
-): Promise<any[]> {
+): ReturnType<typeof listTransactionsWithRetry> {
   const provider = await ensureConnected(walletId, isActive);
   if (!provider) throw new Error(`NWC wallet ${walletId} not connected — cannot list transactions`);
   await hydratePaymentProofs(); // proofs from earlier sessions, before the list is mapped
@@ -974,7 +976,7 @@ export async function lookupInvoice(
 export function isSocketConnected(walletId: string): boolean {
   const provider = providers.get(walletId);
   if (!provider) return false;
-  const client = (provider as any).client;
+  const client = provider.client;
   return client?.connected ?? false;
 }
 

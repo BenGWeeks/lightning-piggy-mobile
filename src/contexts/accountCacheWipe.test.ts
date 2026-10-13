@@ -31,7 +31,7 @@ import {
 } from '../services/groupMessagesStorageService';
 import { resetGroupMessagesMigrationForTests } from '../services/groupMessagesMigration';
 import { groupMessagesKey, legacyGroupMessagesKey } from '../services/groupMessagesKeys';
-import { wipeDecryptedMediaForOwner } from '../services/decryptedMediaCache';
+import { clearDecryptedMediaCache } from '../services/decryptedMediaCache';
 
 jest.mock('../services/notificationService', () => ({
   ...jest.requireActual('../services/notificationService'),
@@ -51,7 +51,7 @@ jest.mock('../services/remoteMediaCache', () => ({
 }));
 
 jest.mock('../services/decryptedMediaCache', () => ({
-  wipeDecryptedMediaForOwner: jest.fn(async () => {}),
+  clearDecryptedMediaCache: jest.fn(async () => {}),
 }));
 
 const PK = 'a'.repeat(64);
@@ -81,7 +81,7 @@ it("drops the signed-out account's key-backup flag but keeps other accounts' (#1
 
 it("deletes the signed-out account's decrypted voice notes and photos (#1241)", async () => {
   await wipeAccountCaches(PK);
-  expect(wipeDecryptedMediaForOwner).toHaveBeenCalledWith(PK);
+  expect(clearDecryptedMediaCache).toHaveBeenCalledWith(PK);
   expect(wipeRemoteMediaForOwner).toHaveBeenCalledWith(PK);
 });
 
@@ -256,13 +256,13 @@ it.each(['delete', 'list'])(
       );
     await AsyncStorage.setItem(`wallet_list_${PK}`, JSON.stringify([{ id: 'wallet' }]));
     await AsyncStorage.setItem(`dm-kind4-retries:${PK}`, '[]');
-    jest.mocked(wipeDecryptedMediaForOwner).mockClear();
+    jest.mocked(clearDecryptedMediaCache).mockClear();
     try {
       // Resolving allows signOutIdentity to continue to identity removal.
       await expect(wipeAccountCaches(PK)).resolves.toBeUndefined();
       for (const spy of spies) expect(spy).toHaveBeenCalledWith('wallet');
       expect(dmSpy).toHaveBeenCalledWith(PK);
-      expect(wipeDecryptedMediaForOwner).toHaveBeenCalledWith(PK);
+      expect(clearDecryptedMediaCache).toHaveBeenCalledWith(PK);
       expect(await AsyncStorage.getItem(`wallet_list_${PK}`)).toBeNull();
       expect(await AsyncStorage.getItem(`dm-kind4-retries:${PK}`)).toBeNull();
       expect(warn).toHaveBeenCalledWith('[wipeAccountCaches] remote media wipe failed:', error);

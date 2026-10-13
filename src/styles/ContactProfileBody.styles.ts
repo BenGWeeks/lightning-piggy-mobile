@@ -72,12 +72,26 @@ export const createContactProfileBodyStyles = (colors: Palette) =>
       marginTop: 12,
       paddingHorizontal: 24,
     },
+    // Handle + "unverified" badge side by side: the handle may truncate, the
+    // badge never does, so a long nip05 can't push the label off-screen.
+    nip05Row: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      justifyContent: 'center',
+      marginTop: 2,
+      paddingHorizontal: 24,
+    },
     nip05: {
       fontSize: 13,
       color: colors.textSupplementary,
-      textAlign: 'center',
-      marginTop: 2,
-      paddingHorizontal: 24,
+      flexShrink: 1,
+    },
+    nip05Badge: {
+      fontSize: 13,
+      color: colors.textSupplementary,
+      fontStyle: 'italic',
+      flexShrink: 0,
+      marginLeft: 6,
     },
     about: {
       fontSize: 14,

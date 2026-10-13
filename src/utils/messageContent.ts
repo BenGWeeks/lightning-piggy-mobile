@@ -95,6 +95,7 @@ export interface ParsedVoiceNote {
   encrypted: boolean;
   blocked?: boolean;
   size?: number;
+  sha256?: string;
   keyHex?: string;
   nonceHex?: string;
   /** Set for a Marmot (MIP-04) voice note — decrypted with these instead of AES-GCM. */
@@ -152,6 +153,7 @@ export function parseVoiceNote(text: string): ParsedVoiceNote | null {
         nonceHex,
         ...(blocked ? { blocked } : {}),
         size,
+        ...(params.has('x') ? { sha256: params.get('x')! } : {}),
       };
     }
   }
@@ -192,6 +194,7 @@ export interface ParsedImageMessage {
   encrypted: boolean;
   blocked?: boolean;
   size?: number;
+  sha256?: string;
   keyHex?: string;
   nonceHex?: string;
   /** Set for a Marmot (MIP-04) photo — decrypted with these instead of AES-GCM. */
@@ -260,6 +263,7 @@ export function parseImageMessage(text: string): ParsedImageMessage | null {
         nonceHex,
         ...(blocked ? { blocked } : {}),
         size,
+        ...(params.has('x') ? { sha256: params.get('x')! } : {}),
       };
     }
   }

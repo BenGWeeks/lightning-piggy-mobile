@@ -1,3 +1,4 @@
+import { groupDisplay } from '../utils/groupDisplay';
 import { useAccountState } from './useAccountState';
 import React, {
   createContext,
@@ -177,7 +178,10 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     [contacts],
   );
   const marmot = useMarmotGroups(pubkey, contactName);
-  const groups = useMemo(() => [...storedGroups, ...marmot.groups], [storedGroups, marmot.groups]);
+  const groups = useMemo(
+    () => [...storedGroups, ...marmot.groups].map(groupDisplay),
+    [storedGroups, marmot.groups],
+  );
   // Track the latest reconciler in a ref so the subscription effect can
   // call it without re-subscribing on every group state change.
   const reconcilerRef = useRef<

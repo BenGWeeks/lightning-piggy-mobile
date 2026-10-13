@@ -7,6 +7,8 @@ import {
   canonicalMessageTarget,
   type MessageNotificationTarget,
 } from '../utils/notificationRouting';
+import { genericFor } from './notificationDisplay';
+import { sanitizeDisplayText } from '../utils/sanitizeDisplayText';
 import { shouldMuteNotification } from './mutedSenders';
 import { mutedNotificationPresentation } from './mutedNotificationPresentation';
 import { getAppFormatLocale } from '../utils/appFormatLocale';
@@ -367,28 +369,6 @@ function channelForKind(kind: NotificationKind): string {
   }
 }
 
-/** Generic title / body to use when the user has lock-screen content
- * disabled. Picked per-kind so the notification still tells the user
- * roughly what happened ("New message" vs "Payment received") without
- * leaking specifics. */
-function genericFor(kind: NotificationKind): { title: string; body: string } {
-  switch (kind) {
-    case 'dm':
-      return { title: 'New message', body: 'Open Lightning Piggy to read' };
-    case 'group':
-      return { title: 'New group message', body: 'Open Lightning Piggy to read' };
-    case 'payment':
-      return { title: 'Payment received', body: 'Open Lightning Piggy for details' };
-    case 'zap':
-      return { title: 'Zap received', body: 'Open Lightning Piggy for details' };
-    case 'cache':
-      return { title: 'New find on your cache', body: 'Open Lightning Piggy to view' };
-    // A swap needing action must not be redacted into "Payment received".
-    case 'swap':
-      return { title: 'Action needed', body: 'Open Lightning Piggy for details' };
-  }
-}
-
 /**
  * Fire a local notification.
  *
@@ -404,6 +384,11 @@ function genericFor(kind: NotificationKind): { title: string; body: string } {
 const inFlightNotifications = new Set<{ data: NotificationData; cancelled: boolean }>();
 
 export async function fireNotification(payload: NotificationPayload): Promise<string | null> {
+  payload = {
+    ...payload,
+    title: sanitizeDisplayText(payload.title, { maxLen: 128 }),
+    body: sanitizeDisplayText(payload.body, { maxLen: 2000, allowNewlines: true }),
+  };
   const flight = {
     data: { ...payload.data, owner: payload.owner ?? getActivePubkey() ?? undefined },
     cancelled: false,

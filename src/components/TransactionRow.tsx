@@ -1,3 +1,4 @@
+import { sanitizeDisplayText } from '../utils/sanitizeDisplayText';
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { Image } from 'expo-image';
@@ -40,7 +41,7 @@ function zapCounterpartyLabel(cp: ZapCounterpartyInfo, t: Translate): string {
 // a LNURL comment shows the host prominent and the full URL/memo below,
 // matching Primal's treatment.
 function splitDescription(desc: string): { primary: string; subtitle: string | null } {
-  const trimmed = desc.trim();
+  const trimmed = sanitizeDisplayText(desc, { maxLen: 2000, allowNewlines: true });
   const urlMatch = trimmed.match(/^(https?:\/\/)([^\s/]+)(.*)$/i);
   if (urlMatch) {
     const [, , host, rest] = urlMatch;

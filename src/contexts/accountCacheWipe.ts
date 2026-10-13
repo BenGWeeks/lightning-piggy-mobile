@@ -38,8 +38,8 @@ import { PER_ACCOUNT_SETTING_BASES } from '../services/safetySettingsMigration';
 import { forgetAccountSettings } from '../services/accountSettingsCache';
 import { forgetLinkPreviewMirror } from '../services/linkPreviewPreference';
 import { forgetRevealedMedia } from '../services/mediaRevealStore';
-import { wipeDecryptedMediaForOwner } from '../services/decryptedMediaCache';
 import { cancelNotificationDefaults } from '../services/notificationDefaults';
+import { clearDecryptedMediaCache } from '../services/decryptedMediaCache';
 import { WATCHER_PUSH_KEY_BASE } from '../services/watcherPushStore';
 import { KEY_BACKED_UP_KEY_BASE } from '../services/keyBackupStatus';
 import { CHAT_READ_POSITIONS_KEY_BASE, forgetReadPositions } from '../services/chatReadPositions';
@@ -194,7 +194,7 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
   // owner's rows in the encrypted DB (#848) — see dmAccountWipe.
   await wipeDmStoresForAccount(loggedOutPubkey);
   // Decrypted voice notes and photos (files + memory), same rule (#1241).
-  await wipeDecryptedMediaForOwner(loggedOutPubkey);
+  await clearDecryptedMediaCache(loggedOutPubkey);
   // Nostr places cache is device-global and not pubkey-namespaced, yet holds
   // this identity's own by-author Piglets — wipe it on logout / switch so
   // pins don't leak across accounts (the next live sub repopulates it).

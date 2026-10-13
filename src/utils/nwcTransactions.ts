@@ -1,3 +1,4 @@
+import { sanitizeDisplayText } from './sanitizeDisplayText';
 import type { WalletTransaction } from '../types/wallet';
 import { getSwapMeta } from '../services/swapRecoveryService';
 import { preserveOptimisticSwapRows } from './swapPendingMerge';
@@ -66,7 +67,9 @@ export function mapNwcTransactions(
         ? meta.swapType === 'reverse'
           ? 'Boltz swap — sent via Lightning'
           : 'Boltz swap — received via Lightning'
-        : (tx.description ?? undefined),
+        : tx.description == null
+          ? undefined
+          : sanitizeDisplayText(tx.description, { maxLen: 2000, allowNewlines: true }),
       // Some backends report a pending row's settled_at as 0 — on the
       // proof-backed path treat that as absent, not an epoch timestamp.
       settled_at:
