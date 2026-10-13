@@ -405,7 +405,7 @@ const GroupConversationScreen: React.FC = () => {
 
   // Kind-0 profiles for shared-contact cards, keyed by pubkey (`null` = looked
   // up, none found) — the same batched fetch the 1:1 thread uses.
-  const sharedProfiles = useSharedContactProfiles(messages);
+  const sharedProfiles = useSharedContactProfiles(messages, contacts);
 
   // Read position (#1295): jump to the first unread with a divider, the `@`
   // button for unread mentions, and the unread count on jump-to-latest.

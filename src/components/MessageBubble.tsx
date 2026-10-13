@@ -1,3 +1,4 @@
+import { npubEncode } from 'nostr-tools/nip19';
 import MessageReactionRow from './MessageReactionRow';
 import OutgoingBubbleBackground from './OutgoingBubbleBackground';
 import React, { useMemo } from 'react';
@@ -738,7 +739,7 @@ const MessageBubble: React.FC<Props> = ({
   if (sharedContact) {
     const loaded = sharedProfiles ? sharedContact.pubkey in sharedProfiles : false;
     const prof = sharedProfiles?.[sharedContact.pubkey] ?? null;
-    const displayName = prof?.displayName || prof?.name || `${sharedContact.pubkey.slice(0, 8)}…`;
+    const displayName = prof?.displayName || prof?.name || npubEncode(sharedContact.pubkey);
     return wrapWithReactionRow(
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
         <TouchableOpacity
@@ -784,7 +785,11 @@ const MessageBubble: React.FC<Props> = ({
               <Text style={[styles.contactName, fromMe && styles.contactNameMe]} numberOfLines={1}>
                 {loaded ? displayName : t('messageBubble.loading')}
               </Text>
-              {prof?.lud16 ? (
+              {loaded && !prof ? (
+                <Text style={[styles.contactLn, fromMe && styles.contactLnMe]}>
+                  {t('contactProfileBody.viewProfile')}
+                </Text>
+              ) : prof?.lud16 ? (
                 <Text style={[styles.contactLn, fromMe && styles.contactLnMe]} numberOfLines={1}>
                   {prof.lud16}
                 </Text>

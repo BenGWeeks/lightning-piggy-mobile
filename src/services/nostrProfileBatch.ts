@@ -1,4 +1,6 @@
 import type { Filter } from 'nostr-tools/filter';
+import type { Event } from 'nostr-tools/pure';
+import { verifyEventCached } from './nostrVerifyCache';
 
 import { pool, trackRelays } from './nostrPool';
 
@@ -28,6 +30,7 @@ export async function fetchProfilesBatch(
   relays: string[],
   softTimeoutMs: number,
   onEvent: (event: { pubkey: string; content: string; created_at: number }) => void,
+  requireVerified = false,
 ): Promise<void> {
   if (pubkeys.length === 0) return;
   trackRelays(relays);
@@ -52,14 +55,17 @@ export async function fetchProfilesBatch(
       }
       resolve();
     };
-    sub = pool.subscribeMany(relays, { kinds: [0], authors } as Filter, {
+    sub = pool.subscribeMany(relays, { kinds: [0], authors, limit: authors.length } as Filter, {
       onevent: (ev: { pubkey: string; content: string; created_at: number }) => {
         // Ignore unsolicited pubkeys. A misbehaving relay could send a kind-0
         // for an author outside our `authors` filter; counting it toward
         // `best.size` would let the early-exit condition (best.size >=
         // wanted.size) fire before every REQUESTED pubkey has answered,
         // closing the sub too soon. Only events we actually asked for count.
-        if (!wanted.has(ev.pubkey)) return;
+        if (closed || !wanted.has(ev.pubkey)) return;
+        // Payment-capable consumers must bypass the pool's kind-0 fast path.
+        // Reject before newest-wins/early-exit so a forgery cannot hide a valid event.
+        if (requireVerified && !verifyEventCached(ev as Event)) return;
         // Keep only the newest kind-0 per pubkey — Nostr clients can
         // re-publish kind-0 with edits and we want the latest.
         const prev = best.get(ev.pubkey);
