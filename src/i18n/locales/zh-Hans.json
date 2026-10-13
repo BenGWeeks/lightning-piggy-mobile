@@ -2822,7 +2822,10 @@
     "mutedCount": {
       "one": "{{count}} 个已静音账号",
       "other": "{{count}} 个已静音账号"
-    }
+    },
+    "updating": "正在更新…",
+    "updateFailed": "无法更新此设置。请重试。",
+    "locationUnavailable": "开启定位服务以接收商店提醒。"
   },
   "settingsScope": {
     "forThisAccount": "此账户",

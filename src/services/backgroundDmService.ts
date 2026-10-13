@@ -610,7 +610,7 @@ function stopBackgroundDmWatchSubscription(): void {
  * absent (e.g. Expo Go, or a dev client predating the native build), where
  * the chip + subscription persist only while the app's JS context is alive.
  */
-export async function startBackgroundDmWatch(): Promise<void> {
+export async function startBackgroundDmWatch(reportFailure = false): Promise<void> {
   if (Platform.OS !== 'android') return;
   // A stop / identity re-arm during this start's awaits supersedes it: it
   // must neither arm after an explicit stop nor second-guess the newer owner.
@@ -622,6 +622,7 @@ export async function startBackgroundDmWatch(): Promise<void> {
   if (!isCurrent()) return;
   if (!granted) {
     console.warn('[BgDmWatch] not started: notification permission missing');
+    if (reportFailure) throw new Error('Notification permission missing');
     return;
   }
   try {
@@ -659,6 +660,7 @@ export async function startBackgroundDmWatch(): Promise<void> {
       if (!isCurrent()) return;
       if (chipId === null) {
         console.warn('[BgDmWatch] not started: foreground chip could not be posted');
+        if (reportFailure) throw new Error('Foreground notification unavailable');
         return;
       }
       const armed = await enqueueArm(isCurrent);
@@ -687,6 +689,7 @@ export async function startBackgroundDmWatch(): Promise<void> {
     stopBackgroundPaymentWatch();
     stopBackgroundDmWatchSubscription();
     await dismissForegroundServiceNotification();
+    if (reportFailure) throw e;
   }
 }
 

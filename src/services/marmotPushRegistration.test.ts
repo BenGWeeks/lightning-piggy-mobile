@@ -420,6 +420,8 @@ describe('native token reads', () => {
     (AsyncStorage.setItem as jest.Mock).mockRejectedValueOnce(new Error('disk full'));
     const off = await disableMarmotPush(ME);
     expect(off.saved).toBe(false);
+    expect((await loadMarmotPushSettings(ME)).enabled).toBe(false);
+    expect(off.sync).toMatchObject({ published: 2 });
     expect(lastRegistration()).toBeNull();
     expect(Notifications.unregisterForNotificationsAsync).toHaveBeenCalled();
   });

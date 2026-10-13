@@ -2822,7 +2822,10 @@
     "mutedCount": {
       "one": "{{count}} muted account",
       "other": "{{count}} muted accounts"
-    }
+    },
+    "updating": "Updating…",
+    "updateFailed": "Could not update this setting. Please try again.",
+    "locationUnavailable": "Turn on location services to enable shop alerts."
   },
   "settingsScope": {
     "forThisAccount": "This account",

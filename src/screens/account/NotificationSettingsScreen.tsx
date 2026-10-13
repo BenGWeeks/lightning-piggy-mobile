@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Platform } from 'react-native';
 import { BellRing, Radio, MapPin, Server, BellOff } from 'lucide-react-native';
+import Toast from '../../components/BrandedToast';
+import { useOptimisticSwitch } from '../../hooks/useOptimisticSwitch';
 import AccountScreenLayout from './AccountScreenLayout';
 import { useTranslation } from '../../contexts/LocaleContext';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -58,30 +60,33 @@ const NotificationSettingsScreen: React.FC = () => {
     if (isAndroid) loadBackgroundDmEnabled().then(setBackgroundDmOn);
   }, [isAndroid]);
 
-  const handleToggleLockScreenContent = async (next: boolean) => {
-    setLockScreenContentOn(next);
-    await setLockScreenContentEnabled(next);
-  };
+  const reportFailure = () =>
+    Toast.show({ type: 'error', text1: t('notificationSettingsScreen.updateFailed') });
+  const lockScreen = useOptimisticSwitch(
+    lockScreenContentOn,
+    setLockScreenContentOn,
+    reportFailure,
+  );
+  const background = useOptimisticSwitch(backgroundDmOn, setBackgroundDmOn, reportFailure);
 
-  const handleToggleBackgroundDm = async (next: boolean) => {
-    if (next) {
-      // Turning ON needs notification permission for the persistent chip +
-      // per-message alerts. If the user denies, leave the toggle off rather
-      // than running a watch that can never surface anything.
-      const granted = await requestNotificationPermission();
-      if (!granted) {
-        setBackgroundDmOn(false);
-        return;
+  const handleToggleLockScreenContent = (next: boolean) =>
+    lockScreen.run(next, () => setLockScreenContentEnabled(next, true));
+
+  const handleToggleBackgroundDm = (next: boolean) =>
+    background.run(next, async () => {
+      if (next && !(await requestNotificationPermission())) {
+        Toast.show({ type: 'error', text1: t('securityScreen.marmotPushNoPermission') });
+        return false;
       }
-      setBackgroundDmOn(true);
-      await setBackgroundDmEnabled(true);
-      await startBackgroundDmWatch();
-    } else {
-      setBackgroundDmOn(false);
-      await setBackgroundDmEnabled(false);
-      await stopBackgroundDmWatch();
-    }
-  };
+      try {
+        await setBackgroundDmEnabled(next, true);
+        if (next) await startBackgroundDmWatch(true);
+        else await stopBackgroundDmWatch();
+      } catch (error) {
+        await setBackgroundDmEnabled(backgroundDmOn);
+        throw error;
+      }
+    });
 
   return (
     <AccountScreenLayout title={t('notificationSettingsScreen.title')}>
@@ -111,6 +116,7 @@ const NotificationSettingsScreen: React.FC = () => {
           details={t('securityScreen.notificationContentHint')}
           toggle={{
             value: lockScreenContentOn,
+            pending: lockScreen.pending,
             onValueChange: handleToggleLockScreenContent,
             accessibilityLabel: t('securityScreen.showMessagePaymentDetailsA11y'),
             testID: 'security-lockscreen-content-toggle',
@@ -133,6 +139,7 @@ const NotificationSettingsScreen: React.FC = () => {
             ].join('\n\n')}
             toggle={{
               value: backgroundDmOn,
+              pending: background.pending,
               onValueChange: handleToggleBackgroundDm,
               testID: 'security-background-dm-toggle',
             }}

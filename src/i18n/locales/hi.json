@@ -2822,7 +2822,10 @@
     "mutedCount": {
       "one": "{{count}} म्यूट किया गया खाता",
       "other": "{{count}} म्यूट किए गए खाते"
-    }
+    },
+    "updating": "अपडेट हो रहा है…",
+    "updateFailed": "यह सेटिंग अपडेट नहीं हो सकी। कृपया फिर से कोशिश करें।",
+    "locationUnavailable": "दुकानों के अलर्ट पाने के लिए लोकेशन सेवाएँ चालू करें।"
   },
   "settingsScope": {
     "forThisAccount": "यह अकाउंट",

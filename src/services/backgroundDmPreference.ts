@@ -25,13 +25,20 @@ export async function loadBackgroundDmEnabled(): Promise<boolean> {
 }
 
 /** Persist the preference. */
-export async function setBackgroundDmEnabled(enabled: boolean): Promise<void> {
+export async function setBackgroundDmEnabled(
+  enabled: boolean,
+  reportFailure = false,
+): Promise<void> {
   invalidateBackgroundPaymentScope();
+  const previous = cached;
   try {
     cached = enabled;
-    await AsyncStorage.setItem(BACKGROUND_DM_ENABLED_KEY, enabled ? 'true' : 'false').catch(
-      () => {},
-    );
+    await AsyncStorage.setItem(BACKGROUND_DM_ENABLED_KEY, enabled ? 'true' : 'false');
+  } catch (error) {
+    if (reportFailure) {
+      cached = previous;
+      throw error;
+    }
   } finally {
     invalidateBackgroundPaymentScope();
   }

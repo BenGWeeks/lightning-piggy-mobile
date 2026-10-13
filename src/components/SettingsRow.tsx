@@ -4,6 +4,7 @@ import { ChevronRight, Info, type LucideIcon } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createSettingsRowStyles } from '../styles/SettingsRow.styles';
+import PendingSettingsSwitch from './PendingSettingsSwitch';
 import SettingsInfoSheet from './SettingsInfoSheet';
 import { SettingsSectionCardContext } from '../contexts/SettingsSectionCardContext';
 
@@ -30,7 +31,7 @@ interface Props {
   toggle?: Pick<
     SwitchProps,
     'value' | 'onValueChange' | 'disabled' | 'testID' | 'accessibilityLabel'
-  >;
+  > & { pending?: boolean; pendingTestID?: string };
   details?: React.ReactNode;
   infoTestID?: string;
 }
@@ -65,6 +66,7 @@ export default function SettingsRow({
   const [infoOpen, setInfoOpen] = useState(false);
   const inCard = useContext(SettingsSectionCardContext);
   const grouped = groupedProp ?? inCard;
+  const ToggleControl = toggle?.pending !== undefined ? PendingSettingsSwitch : Switch;
   const rowDisabled = disabled || !!toggle?.disabled;
   const hint = rowDisabled && disabledSubtitle ? disabledSubtitle : (value ?? subtitle);
   const statusLabel = status ? t(`settingsKit.status.${status}`) : undefined;
@@ -162,7 +164,8 @@ export default function SettingsRow({
           </TouchableOpacity>
         )}
         {toggle && (
-          <Switch
+          <ToggleControl
+            pending={toggle.pending ?? false}
             {...toggle}
             testID={toggle.testID ?? `${testID}-toggle`}
             disabled={rowDisabled}

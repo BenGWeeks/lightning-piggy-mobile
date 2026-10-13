@@ -918,11 +918,11 @@ describe('start / stop lifecycle', () => {
   });
 
   it('hard-stops without arming when notification permission is missing', async () => {
-    // Without permission the watch is an invisible battery drain — no chip,
-    // no message alerts (Copilot review, PR #958).
+    // Settings needs a rejection to roll back; automatic starts stay best effort.
     mockLoadIdentities.mockResolvedValue(nsecIdentity());
     mockHasPermission.mockResolvedValue(false);
     await startBackgroundDmWatch();
+    await expect(startBackgroundDmWatch(true)).rejects.toThrow('Notification permission missing');
     expect(mockShowForeground).not.toHaveBeenCalled();
     expect(mockSubscribe).not.toHaveBeenCalled();
     expect(__isWatchActiveForTests()).toBe(false);

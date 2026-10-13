@@ -38,3 +38,13 @@ describe('backgroundDmPreference', () => {
     expect(await loadBackgroundDmEnabled()).toBe(true);
   });
 });
+
+it('reports failed user writes and restores the confirmed preference', async () => {
+  await setBackgroundDmEnabled(false);
+  const write = jest
+    .spyOn(AsyncStorage, 'setItem')
+    .mockRejectedValueOnce(new Error('Storage unavailable'));
+  await expect(setBackgroundDmEnabled(true, true)).rejects.toThrow('Storage unavailable');
+  expect(await loadBackgroundDmEnabled()).toBe(false);
+  write.mockRestore();
+});
