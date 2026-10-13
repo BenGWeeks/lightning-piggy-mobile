@@ -21,8 +21,17 @@ it('previews a real pending Welcome without consuming its key, then acceptance j
     const invitations = new MarmotPendingInvitations(bob.backend, () => {});
     const join = jest.spyOn(MarmotClient.prototype, 'joinGroupFromWelcome');
     try {
+      await invitations.receive(
+        'malformed-wrap',
+        { ...welcome, id: 'malformed', content: 'garbage' },
+        true,
+      );
       await invitations.receive('real-wrap', welcome, false);
       await invitations.resume(bob.session, () => true);
+      expect(JSON.parse((await bob.backend.get('welcomeInvitations', 'malformed-wrap'))!)).toEqual({
+        id: 'malformed-wrap',
+        status: 'skipped',
+      });
       expect((await invitations.list())[0].groupName).toBe('Family');
       expect(bob.session.listGroups()).toEqual([]);
       expect(await bob.backend.keys('pendingWelcomes')).toEqual([]);

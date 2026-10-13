@@ -1,7 +1,20 @@
+import { createYieldScheduler } from '../contexts/nostrDecryptPacing';
 import { MarmotPendingInvitations } from './marmotPendingInvitations';
 import type { MarmotRumor } from './marmotSession';
 import { createMemoryMarmotBackend } from './marmotStore';
 jest.mock('./localDb', () => ({ getLocalDb: jest.fn() }));
+jest.mock('@internet-privacy/marmot-ts', () => ({
+  getWelcome: (r: MarmotRumor) => {
+    if (r.content === 'malformed') throw new Error('Failed to decode welcome message');
+    return { secrets: [] };
+  },
+}));
+jest.mock('../contexts/nostrDecryptPacing', () => ({
+  createYieldScheduler: jest.fn(() => ({
+    maybeYield: jest.fn().mockResolvedValue(undefined),
+    dispose: jest.fn(),
+  })),
+}));
 
 const rumor: MarmotRumor = {
   id: 'rumor',
@@ -186,4 +199,152 @@ it('exposes a dismissible error after all candidates fail permanently', async ()
   expect(session.acceptWelcome).toHaveBeenCalledTimes(1);
   await invitations.decline('wrap');
   expect(await invitations.list()).toEqual([]);
+});
+
+it('tombstones a malformed preview and still validates and accepts later invitations after restart', async () => {
+  const { backend, invitations, session } = setup();
+  const malformed = { ...rumor, id: 'malformed-rumor', content: 'malformed' };
+  await invitations.receive('bad-wrap', malformed, true);
+  await invitations.receive('valid-wrap', rumor, false);
+  session.previewWelcome.mockImplementation(async (r) => {
+    if (r.id === malformed.id) throw new Error('Failed to decode welcome message');
+    return { forThisDevice: true, groupId: 'mls-group', group: { name: 'Family' } };
+  });
+  await invitations.resume(session, () => true);
+  expect(JSON.parse((await backend.get('welcomeInvitations', 'bad-wrap'))!)).toEqual({
+    id: 'bad-wrap',
+    status: 'skipped',
+  });
+  expect(await invitations.list()).toEqual([expect.objectContaining({ id: 'valid-wrap' })]);
+  const restarted = new MarmotPendingInvitations(backend, jest.fn());
+  session.previewWelcome.mockClear();
+  expect(await restarted.receive('rewrapped-bad', malformed, true)).toBe(false);
+  expect(await restarted.accept('valid-wrap', session, () => true)).toEqual(group);
+  expect(session.previewWelcome).not.toHaveBeenCalledWith(malformed);
+  expect(session.acceptWelcome).toHaveBeenCalledWith(rumor);
+});
+
+it('retains a transient preview failure without starving later invitations, then retries after restart', async () => {
+  const { backend, invitations, session } = setup();
+  const retryable = { ...rumor, id: 'retryable' };
+  await invitations.receive('retry-wrap', retryable, true);
+  await invitations.receive('valid-wrap', rumor, false);
+  let unavailable = true;
+  session.previewWelcome.mockImplementation(async (r) => {
+    if (r.id === retryable.id && unavailable) throw new Error('key store unavailable');
+    return { forThisDevice: true, groupId: r.id, group: { name: 'Family' } };
+  });
+  await invitations.resume(session, () => true);
+  expect(JSON.parse((await backend.get('welcomeInvitations', 'retry-wrap'))!)).toMatchObject({
+    status: 'approved',
+    rumor: retryable,
+  });
+  expect(session.acceptWelcome).not.toHaveBeenCalled();
+  expect(await invitations.accept('valid-wrap', session, () => true)).toEqual(group);
+  unavailable = false;
+  const restarted = new MarmotPendingInvitations(backend, jest.fn());
+  await restarted.resume(session, () => true);
+  expect(session.acceptWelcome).toHaveBeenCalledWith(retryable);
+});
+
+it.each(['preview', 'join'] as const)(
+  'persists and deduplicates new deliveries while %s is blocked',
+  async (stage) => {
+    const { backend, invitations, session } = setup();
+    let unblock!: () => void;
+    let entered!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      unblock = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    if (stage === 'preview')
+      session.previewWelcome.mockImplementationOnce(async () => {
+        entered();
+        await blocked;
+        return { forThisDevice: true, groupId: 'mls-group', group: { name: 'Family' } };
+      });
+    else
+      session.acceptWelcome.mockImplementationOnce(async () => {
+        entered();
+        await blocked;
+        return group;
+      });
+    await invitations.receive('first-wrap', rumor, true);
+    const processing = invitations.resume(session, () => true);
+    await started;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const incoming = { ...rumor, id: 'next-rumor' };
+      const persisted = Promise.all([
+        invitations.receive('next-wrap', incoming, false),
+        invitations.receive('duplicate-wrap', incoming, false),
+      ]);
+      expect(
+        await Promise.race([
+          persisted,
+          new Promise((_, reject) => {
+            timeout = setTimeout(() => reject(new Error('ingestion blocked by MLS')), 1000);
+          }),
+        ]),
+      ).toEqual([true, false]);
+      expect(JSON.parse((await backend.get('welcomeInvitations', 'next-wrap'))!)).toMatchObject({
+        status: 'pending',
+        rumor: incoming,
+      });
+    } finally {
+      clearTimeout(timeout);
+      unblock();
+      await processing;
+    }
+  },
+);
+
+it('paces every preview and reads records linearly while notifying once per group', async () => {
+  const { backend, session } = setup();
+  const notify = jest.fn();
+  const invitations = new MarmotPendingInvitations(backend, jest.fn(), notify);
+  for (let i = 0; i < 24; i++)
+    await invitations.receive(`wrap-${i}`, { ...rumor, id: `rumor-${i}` }, false, true);
+  const get = jest.spyOn(backend, 'get');
+  const keys = jest.spyOn(backend, 'keys');
+  const scheduler = jest.mocked(createYieldScheduler);
+  scheduler.mockClear();
+  await invitations.resume(session, () => true);
+  expect(keys.mock.calls.filter(([ns]) => ns === 'welcomeInvitations')).toHaveLength(2);
+  expect(get.mock.calls.filter(([ns]) => ns === 'welcomeInvitations')).toHaveLength(48);
+  const pacing = scheduler.mock.results[0].value;
+  expect(pacing.maybeYield).toHaveBeenCalledTimes(24);
+  expect(pacing.dispose).toHaveBeenCalledTimes(1);
+  expect(notify).toHaveBeenCalledTimes(1);
+  const yields = pacing.maybeYield.mock.invocationCallOrder;
+  const previews = session.previewWelcome.mock.invocationCallOrder;
+  for (let i = 0; i < previews.length; i++) {
+    expect(yields[i]).toBeLessThan(previews[i]);
+    if (i > 0) expect(yields[i]).toBeGreaterThan(previews[i - 1]);
+  }
+});
+
+it('paces between join fallback attempts and disposes after success', async () => {
+  const { backend, invitations, session } = setup();
+  const newer = { ...rumor, id: 'newer', created_at: 2 };
+  await invitations.receive('older', rumor, false);
+  await invitations.receive('newer', newer, false);
+  session.acceptWelcome.mockImplementationOnce(async () => {
+    await backend.set('welcomes', newer.id, JSON.stringify({ result: 'failed' }));
+    return null;
+  });
+  const scheduler = jest.mocked(createYieldScheduler);
+  scheduler.mockClear();
+  expect(await invitations.accept('newer', session, () => true)).toEqual(group);
+  const pacing = scheduler.mock.results[0].value;
+  expect(pacing.maybeYield).toHaveBeenCalledTimes(4);
+  expect(pacing.maybeYield.mock.invocationCallOrder[3]).toBeGreaterThan(
+    session.acceptWelcome.mock.invocationCallOrder[0],
+  );
+  expect(pacing.maybeYield.mock.invocationCallOrder[3]).toBeLessThan(
+    session.acceptWelcome.mock.invocationCallOrder[1],
+  );
+  expect(pacing.dispose).toHaveBeenCalledTimes(1);
 });
