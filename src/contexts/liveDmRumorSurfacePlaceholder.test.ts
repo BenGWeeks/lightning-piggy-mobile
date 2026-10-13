@@ -2,6 +2,15 @@
 // is a placeholder: once the live sub decrypts the wrap, the real alert
 // replaces it — or, when the wrap shows nothing new (our own sent copy), it
 // is retracted from the tray and the history.
+import { createLiveRumorSurfacer } from './liveDmRumorSurface';
+import {
+  claimWrapNotification,
+  noteContentlessWrapAlert,
+  takeContentlessWrapAlert,
+  wasWrapHandled,
+  __resetForTests,
+} from '../services/dmWrapNotificationDedupe';
+
 const mockFire = jest.fn().mockResolvedValue('id');
 const mockDismiss = jest.fn().mockResolvedValue(0);
 const mockRemove = jest.fn().mockResolvedValue([]);
@@ -27,27 +36,19 @@ jest.mock('../services/nostrCrypto', () => ({
   nostrGetEventHash: () => 'rumor-id',
 }));
 
-import { createLiveRumorSurfacer } from './liveDmRumorSurface';
-import {
-  claimWrapNotification,
-  noteContentlessWrapAlert,
-  takeContentlessWrapAlert,
-  wasWrapHandled,
-  __resetForTests,
-} from '../services/dmWrapNotificationDedupe';
-
 const ME = 'a'.repeat(64);
 const PEER = 'b'.repeat(64);
 const now = () => Math.floor(Date.now() / 1000);
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
-function surfacer({ fresh = true, follows = new Set([PEER]) } = {}) {
+function surfacer({ fresh = true, follows = new Set([PEER]), hydrated = true } = {}) {
   return createLiveRumorSurfacer({
     viewerPubkey: ME,
     isCancelled: () => false,
     shouldAbort: () => false,
     followPubkeysRef: { current: follows },
+    isFollowHydrated: () => hydrated,
     followGateBuffer: { defer: jest.fn(), reevaluate: jest.fn(), clear: jest.fn(), size: 0 },
     isFreshArrival: () => fresh,
     queueInboxEntry: jest.fn(),
@@ -133,7 +134,7 @@ it("retracts a stranger's contentless alert once the follow list is known", asyn
 it('keeps it while follows are still loading (may be a friend), for the replay to replace', async () => {
   claimWrapNotification('maybe');
   noteContentlessWrapAlert('maybe');
-  await surfacer({ follows: new Set() })(
+  await surfacer({ follows: new Set(), hydrated: false })(
     { pubkey: PEER, created_at: now(), kind: 14, tags: [['p', ME]], content: 'hey' },
     'maybe',
   );

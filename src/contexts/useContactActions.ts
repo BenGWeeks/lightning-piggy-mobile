@@ -1,3 +1,7 @@
+import { PROFILE_RELAYS } from '../services/nostrRelayDefaults';
+import { getEventHash } from 'nostr-tools/pure';
+import { captureFollowSession } from '../services/followSetEvents';
+import { adoptFollowSnapshot } from '../services/contactFollowFreshness';
 import {
   useCallback,
   useEffect,
@@ -16,7 +20,6 @@ import { NSEC_KEY } from './nostrAuthKeys';
 import { perAccountKey } from '../services/perAccountStorage';
 import { CONTACTS_CACHE_KEY_BASE, CONTACTS_TIMESTAMP_KEY_BASE } from './nostrCacheKeys';
 import {
-  contactsFromEvent,
   prepareContactListUpdate,
   type ContactChange,
   type ContactListBase,
@@ -96,20 +99,18 @@ export function useContactActions({
   }, [pubkey, getReadRelays, loadContacts]);
 
   const publishContactList = useCallback(
-    async (event: {
-      kind: number;
-      created_at: number;
-      tags: string[][];
-      content: string;
-    }): Promise<boolean> => {
-      if (!pubkey || !isLoggedIn) return false;
+    async (
+      event: { kind: number; created_at: number; tags: string[][]; content: string },
+      isCurrentSession: () => boolean,
+    ): Promise<boolean> => {
+      if (!pubkey || !isLoggedIn || !isCurrentSession()) return false;
       try {
         const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
         const targetRelays = writeRelays.length > 0 ? writeRelays : nostrService.DEFAULT_RELAYS;
 
         if (signerType === 'nsec') {
           const nsec = await SecureStore.getItemAsync(NSEC_KEY);
-          if (!nsec) return false;
+          if (!nsec || !isCurrentSession()) return false;
           const { secretKey } = nostrService.decodeNsec(nsec);
           await nostrService.signAndPublishEvent(event, secretKey, targetRelays);
         } else if (signerType === 'amber') {
@@ -119,12 +120,12 @@ export function useContactActions({
             '',
             pubkey,
           );
-          if (!signedEventJson) return false;
+          if (!signedEventJson || !isCurrentSession()) return false;
           const signed = JSON.parse(signedEventJson);
           await nostrService.publishSignedEvent(signed, targetRelays);
         } else if (signerType === 'nip46') {
           const signedEventJson = await nip46Sign(event, pubkey);
-          if (!signedEventJson) return false;
+          if (!signedEventJson || !isCurrentSession()) return false;
           await nostrService.publishSignedEvent(JSON.parse(signedEventJson), targetRelays);
         } else {
           // No usable signer (null / unsupported): nothing was published, so
@@ -163,12 +164,18 @@ export function useContactActions({
   // verified kind-3 to build on, or the signer declined).
   const updateContactList = useCallback(
     (change: ContactChange): Promise<boolean> => {
+      const isCurrentSession = captureFollowSession();
       const run = async (): Promise<boolean> => {
-        if (!pubkey || !isLoggedIn) return false;
+        if (!pubkey || !isLoggedIn || !isCurrentSession()) return false;
         const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
         const update = await prepareContactListUpdate({
           pubkey,
-          relays: [...getReadRelays(), ...writeRelays, ...nostrService.DEFAULT_RELAYS],
+          relays: [
+            ...getReadRelays(),
+            ...writeRelays,
+            ...nostrService.DEFAULT_RELAYS,
+            ...PROFILE_RELAYS,
+          ],
           localContacts: contacts,
           change,
           lastPublished: lastPublished.current.get(pubkey),
@@ -177,6 +184,7 @@ export function useContactActions({
           allowEmptyList: await isAccountCreatedHere(pubkey),
           onListSeen: () => clearAccountCreatedHere(pubkey),
         });
+        if (!isCurrentSession()) return false;
         if (!update) {
           // No verified relay copy to build on: publishing from the local
           // list could replace the user's real follow list (#1271).
@@ -184,7 +192,8 @@ export function useContactActions({
           return false;
         }
         if (update.changed) {
-          if (!(await publishContactList(update.event))) return false;
+          if (!(await publishContactList(update.event, isCurrentSession))) return false;
+          if (!isCurrentSession()) return false;
           lastPublished.current.set(pubkey, {
             tags: update.event.tags,
             content: update.event.content,
@@ -192,14 +201,15 @@ export function useContactActions({
           });
           await clearAccountCreatedHere(pubkey);
         }
-        const cKey = perAccountKey(CONTACTS_CACHE_KEY_BASE, pubkey);
-        startTransition(() =>
-          setContacts((prev) => {
-            // Rebuild from the published tags, keeping profiles already in state.
-            const next = contactsFromEvent(update.event.tags, prev);
-            AsyncStorage.setItem(cKey, JSON.stringify(next)).catch(() => {});
-            return next;
-          }),
+        await adoptFollowSnapshot(
+          pubkey,
+          {
+            contacts: update.contacts,
+            createdAt: update.changed ? update.event.created_at : update.base.createdAt,
+            id: update.changed ? getEventHash({ ...update.event, pubkey }) : update.base.id,
+          },
+          (next) => startTransition(() => setContacts(next)),
+          isCurrentSession,
         );
         // Bumps the *contacts* timestamp (the freshness clock for kind-3 list
         // reads), not the profiles one (#442).

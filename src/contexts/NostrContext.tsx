@@ -1,3 +1,7 @@
+import { useFollowHydration } from './useFollowHydration';
+import { reconcileCachedContactFollows } from './reconcileContactFollows';
+import { buildFollowSet } from '../utils/followPubkeys';
+import { readFollowSnapshot } from '../services/contactFollowFreshness';
 import { signAccountEvent } from '../services/signAccountEvent';
 import React, {
   createContext,
@@ -33,7 +37,7 @@ import {
 } from '../services/identitiesStore';
 import { migrateToPerAccountStorage } from '../services/migrateToPerAccountStorage';
 import { perfLog } from '../utils/perfLog';
-import { sanitizeContacts, resolveForcedRefreshContacts } from '../utils/contacts';
+import { sanitizeContacts } from '../utils/contacts';
 import { useReactionActions, type UseReactionActionsResult } from '../hooks/useReactionActions';
 import { setActivePubkeyForWalletStorage } from '../services/walletStorageService';
 import { NSEC_KEY, PUBKEY_KEY, SIGNER_TYPE_KEY, NIP46_CONNECTION_KEY } from './nostrAuthKeys';
@@ -61,7 +65,6 @@ import { useNip65Relays, type AdoptResult } from './useNip65Relays';
 import {
   CONTACTS_CACHE_KEY_BASE,
   PROFILES_CACHE_KEY_BASE,
-  CACHE_TIMESTAMP_KEY_BASE,
   CONTACTS_TIMESTAMP_KEY_BASE,
   OWN_PROFILE_CACHE_KEY_BASE,
   OWN_PROFILE_TIMESTAMP_KEY_BASE,
@@ -330,6 +333,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     null,
   );
   const [contacts, setContacts, contactsSetterFor] = useAccountState(pubkey, EMPTY_CONTACTS);
+  const [followHydrated, followHydratedSetterFor] = useFollowHydration(pubkey);
   // Multi-account registry (#288). Mirrors the SecureStore `identities_v1`
   // blob so the drawer header and AccountSwitcherSheet can render without
   // each rendering its own SecureStore round-trip. The `pubkey` state above
@@ -343,9 +347,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
    * whenever that state updates.
    */
   const followPubkeys = useMemo(() => {
-    const set = new Set<string>();
-    for (const c of contacts) set.add(c.pubkey.toLowerCase());
-    return set;
+    return buildFollowSet(contacts.map((c) => c.pubkey));
   }, [contacts]);
 
   // Publish identity before paint so providers above NostrProvider (currency,
@@ -435,7 +437,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setDmInbox,
     setAmberNip44Permission,
     knownWrapIdsRef,
-  } = useDmInbox({ pubkey, isLoggedIn, signerType, followPubkeys, getReadRelays });
+  } = useDmInbox({ pubkey, isLoggedIn, signerType, followPubkeys, followHydrated, getReadRelays });
   // Identity-transition teardown (switch + add-account logins); see helper.
   const { resetIdentityMemory, activateLoginPubkey } = useIdentityMemoryReset(pubkey, setPubkey, {
     setProfile,
@@ -513,12 +515,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             'loadContactsFromCache: contacts cache stale, still hydrating from disk (relay refresh will reconcile)',
           );
         }
-        if (contactsJson) {
+        const followSnapshot = await readFollowSnapshot(pk);
+        if (contactsJson || followSnapshot) {
           const tParse = Date.now();
           // sanitizeContacts drops any junk pubkeys persisted before the
           // ingest-time HEX64 gate landed, so a poisoned cache self-heals on
           // the next read instead of rendering zero-prefixed rows (#855).
-          const cached: NostrContact[] = sanitizeContacts(JSON.parse(contactsJson));
+          const cached: NostrContact[] =
+            followSnapshot?.contacts ?? sanitizeContacts(JSON.parse(contactsJson!));
           perfLog(`loadContactsFromCache: JSON.parse(contacts) ${Date.now() - tParse}ms`);
           if (profilesJson) {
             const tProfilesParse = Date.now();
@@ -557,119 +561,18 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       opts?: { force?: boolean; awaitProfiles?: boolean },
     ) => {
       const setContacts = contactsSetterFor(pk);
-      const t0 = Date.now();
-
-      // Read the contact-list cache AND profile cache concurrently — both
-      // are independent AsyncStorage round-trips, and the profile cache is
-      // also used for merging into whichever contact list we end up with.
-      const [
-        { value: cachedContactsRaw, ageMs: contactsAgeMs },
-        { value: cachedProfileMapOrNull, ageMs: cacheAgeMs },
-      ] = await Promise.all([
-        readCachedWithTtl<NostrContact[]>(
-          perAccountKey(CONTACTS_CACHE_KEY_BASE, pk),
-          perAccountKey(CONTACTS_TIMESTAMP_KEY_BASE, pk),
-        ),
-        readCachedWithTtl<Record<string, NostrProfile>>(
-          perAccountKey(PROFILES_CACHE_KEY_BASE, pk),
-          perAccountKey(CACHE_TIMESTAMP_KEY_BASE, pk),
-        ),
-      ]);
-      // Filter junk pubkeys out of the cached follow list on read so a cache
-      // poisoned before the ingest-time gate self-heals (#855).
-      const cachedContacts = cachedContactsRaw ? sanitizeContacts(cachedContactsRaw) : null;
-      const cachedProfileMap = cachedProfileMapOrNull ?? {};
-      const contactsCacheFresh = !opts?.force && contactsAgeMs < CACHE_MAX_AGE_MS;
+      const finishFollowHydration = followHydratedSetterFor(pk);
+      const { fetchedContacts, cachedProfileMap, cacheAgeMs } = await reconcileCachedContactFollows(
+        pk,
+        relayUrls,
+        (cs) => startTransition(() => setContacts(cs)),
+        (cs) =>
+          startTransition(() => {
+            setContacts(cs);
+            finishFollowHydration();
+          }),
+      );
       const cacheFresh = cacheAgeMs < CACHE_MAX_AGE_MS;
-
-      // Persist relay-fetched contacts back to AsyncStorage. Hoisted so
-      // both the stale-while-revalidate path and the no-cache path can
-      // call it.
-      const persistContacts = (contacts: NostrContact[]): void => {
-        InteractionManager.runAfterInteractions(() => {
-          AsyncStorage.setItem(
-            perAccountKey(CONTACTS_CACHE_KEY_BASE, pk),
-            JSON.stringify(contacts),
-          ).catch(() => {});
-          AsyncStorage.setItem(
-            perAccountKey(CONTACTS_TIMESTAMP_KEY_BASE, pk),
-            Date.now().toString(),
-          ).catch(() => {});
-        });
-      };
-
-      // Hydrate each contact's profile from the profile cache (avatar/name
-      // for the per-row zap gate) without re-fetching kind-0s.
-      const withCachedProfiles = (cs: NostrContact[]): NostrContact[] =>
-        cs.map((c) => ({ ...c, profile: cachedProfileMap[c.pubkey] ?? c.profile }));
-
-      let fetchedContacts: NostrContact[];
-      if (contactsCacheFresh && cachedContacts) {
-        // Cache fully fresh — skip the relay fetch entirely.
-        fetchedContacts = cachedContacts;
-        if (__DEV__)
-          console.log(
-            `[Nostr] fetchContactList: skipped (cache fresh @ ${Math.round(contactsAgeMs / 1000)}s old, ${fetchedContacts.length} contacts)`,
-          );
-      } else if (cachedContacts && !opts?.force) {
-        // Stale-while-revalidate: paint immediately from the (stale)
-        // cache so the follow-gate / Friends tab / contact-tab UIs
-        // surface useful data within ms of app open instead of waiting
-        // for the relay fetch (#372 — that wait was ~53s on cold start).
-        // The relay fetch fires in the background and overwrites the
-        // cache + state when it returns.
-        fetchedContacts = cachedContacts;
-        if (__DEV__)
-          console.log(
-            `[Nostr] fetchContactList: stale-while-revalidate (${Math.round(contactsAgeMs / 1000)}s old, ${fetchedContacts.length} contacts) — refreshing in background`,
-          );
-        nostrService
-          .fetchContactList(pk, relayUrls)
-          .then((fresh) => {
-            // null = network couldn't produce a kind-3; keep the cached
-            // value, don't touch the timestamp. An empty array is a
-            // legitimate state (user follows nobody) and DOES persist
-            // so the cache reflects truth and the timestamp bumps.
-            if (fresh === null) return;
-            if (__DEV__)
-              console.log(
-                `[Nostr] fetchContactList background refresh: ${Date.now() - t0}ms, ${fresh.length} contacts`,
-              );
-            persistContacts(fresh);
-            startTransition(() => setContacts(withCachedProfiles(fresh)));
-          })
-          .catch(() => {
-            /* silent — caller already painted from cache */
-          });
-      } else {
-        // No cache (or forced refresh) — must block on the relay fetch.
-        // fetchContactList itself is now race-to-first (resolves on the
-        // first matching event from any relay), so this typically lands
-        // in <2s instead of waiting for every relay's EOSE.
-        const fetched = await nostrService.fetchContactList(pk, relayUrls, {
-          onLatest: (newer) => {
-            // A newer kind-3 arrived during the keep-open window after
-            // first paint — re-render and overwrite the cache. Fires
-            // once at sub close, after our await has resumed and our
-            // own persistContacts has run, so we're safely "newer".
-            persistContacts(newer);
-            startTransition(() => setContacts(withCachedProfiles(newer)));
-          },
-        });
-        // A null fetch (relay timeout) keeps the cached follows rather than
-        // wiping the list on a blip; a non-null result is authoritative and
-        // is persisted. See resolveForcedRefreshContacts (#908).
-        fetchedContacts = resolveForcedRefreshContacts(fetched, cachedContacts);
-        if (fetched !== null) {
-          if (__DEV__)
-            console.log(
-              `[Nostr] fetchContactList: ${Date.now() - t0}ms, ${fetchedContacts.length} contacts`,
-            );
-          persistContacts(fetchedContacts);
-        }
-      }
-
-      startTransition(() => setContacts(withCachedProfiles(fetchedContacts)));
 
       if (fetchedContacts.length === 0) return;
 
@@ -750,7 +653,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         await runProfileFetch();
       }
     },
-    [contactsSetterFor],
+    [contactsSetterFor, followHydratedSetterFor],
   );
 
   // Single-fire perf log when isLoggedIn becomes true — the
@@ -916,14 +819,16 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             const __tR = Date.now();
             const __tP = Date.now();
             const __tC = Date.now();
+            const relayRefresh = loadRelays(pk!);
             Promise.all([
-              loadRelays(pk!)
+              relayRefresh
                 .catch((e) => console.warn('[Nostr] relay refresh failed:', e))
                 .finally(() => console.log(`[PerfBlock] loadRelays: ${Date.now() - __tR}ms`)),
               loadProfile(pk!, workingRelays)
                 .catch((e) => console.warn('[Nostr] profile refresh failed:', e))
                 .finally(() => console.log(`[PerfBlock] loadProfile: ${Date.now() - __tP}ms`)),
-              loadContacts(pk!, workingRelays)
+              relayRefresh
+                .then((latestRelays) => loadContacts(pk!, [...workingRelays, ...latestRelays]))
                 .catch((e) => console.warn('[Nostr] contact refresh failed:', e))
                 .finally(() => console.log(`[PerfBlock] loadContacts: ${Date.now() - __tC}ms`)),
             ]).then(() => {

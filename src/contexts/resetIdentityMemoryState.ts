@@ -1,3 +1,4 @@
+import { clearFollowGateStores } from '../services/followSetEvents';
 import { clearConversationReactions } from '../utils/conversationReactionCache';
 import { useCallback, useLayoutEffect } from 'react';
 import type { NostrContact, NostrProfile } from '../types/nostr';
@@ -23,6 +24,7 @@ export interface IdentityMemoryState {
  * account), and the NIP-04 plaintext cache.
  */
 export function dropIdentityKeyMaterial(): void {
+  clearFollowGateStores();
   clearConversationReactions();
   clearMemoisedSecretKey();
   void stopNativeDmEngineGlobal();

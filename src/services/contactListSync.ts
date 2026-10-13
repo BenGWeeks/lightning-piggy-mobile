@@ -26,6 +26,7 @@ export interface ContactListBase {
   content: string;
   /** `created_at` of the event this came from. */
   createdAt: number;
+  id?: string;
 }
 
 export type ContactListFetchResult =
@@ -108,10 +109,13 @@ export function fetchLatestContactList(
     timeoutMs = CONTACT_LIST_FETCH_TIMEOUT_MS,
     connectTimeoutMs = CONTACT_LIST_CONNECT_TIMEOUT_MS,
     connect = connectViaPool,
+    includeParked = false,
   }: {
     timeoutMs?: number;
     connectTimeoutMs?: number;
     connect?: ConnectContactListRelay;
+    /** Freshness reads must cover every configured relay, even one parked by health checks. */
+    includeParked?: boolean;
   } = {},
 ): Promise<ContactListFetchResult> {
   const author = pubkey.toLowerCase();
@@ -121,7 +125,7 @@ export function fetchLatestContactList(
   // hold the follow path for a connect timeout and then count as `failed`.
   const urls = [
     ...new Set(
-      selectHealthyRelays(relays).map((r) => {
+      (includeParked ? relays : selectHealthyRelays(relays)).map((r) => {
         try {
           return normalizeURL(r);
         } catch {
@@ -158,7 +162,7 @@ export function fetchLatestContactList(
       if (best) {
         result = {
           status: 'found',
-          base: { tags: best.tags, content: best.content, createdAt: best.created_at },
+          base: { tags: best.tags, content: best.content, createdAt: best.created_at, id: best.id },
         };
       } else if (
         unverifiable === 0 &&
@@ -326,6 +330,7 @@ export async function prepareContactListUpdate({
   event: { kind: 3; created_at: number; tags: string[][]; content: string };
   contacts: NostrContact[];
   changed: boolean;
+  base: ContactListBase;
   /** A kind-3 for the account exists on the relays (so it's no longer "new"). */
   listSeen: boolean;
 } | null> {
@@ -344,6 +349,7 @@ export async function prepareContactListUpdate({
   const changed = before.size !== after.size || [...after].some((pk) => !before.has(pk));
   return {
     event,
+    base,
     contacts: contactsFromEvent(event.tags, localContacts),
     changed,
     listSeen,

@@ -1,3 +1,4 @@
+import { FOLLOW_SNAPSHOT_KEY } from '../services/contactFollowFreshness';
 /**
  * wipeAccountCaches — delete every per-account persisted artifact for a
  * signed-out identity: per-wallet secrets (SecureStore), all per-wallet
@@ -81,7 +82,7 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
   try {
     const json = await AsyncStorage.getItem(walletListKey);
     if (json) {
-      const list = JSON.parse(json) as Array<{ id: string }>;
+      const list = JSON.parse(json) as { id: string }[];
       if (Array.isArray(list)) walletIds = list.map((w) => w.id).filter(Boolean);
     }
   } catch {
@@ -98,6 +99,7 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
 
   const toRemove: string[] = [
     // Per-account namespaced caches (#288 storage refactor)
+    perAccountKey(FOLLOW_SNAPSHOT_KEY, loggedOutPubkey),
     perAccountKey(CONTACTS_CACHE_KEY_BASE, loggedOutPubkey),
     perAccountKey(CONTACTS_TIMESTAMP_KEY_BASE, loggedOutPubkey),
     perAccountKey(PROFILES_CACHE_KEY_BASE, loggedOutPubkey),

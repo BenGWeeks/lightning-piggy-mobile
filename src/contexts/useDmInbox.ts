@@ -1,3 +1,4 @@
+import { useLiveFollowGate } from './useLiveFollowGate';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Kind4RetryStore } from './kind4RetryStore';
 import * as nostrService from '../services/nostrService';
@@ -39,7 +40,6 @@ import {
   shouldDropK4Since,
 } from './dmRefreshGate';
 import { startLiveDmSubscription } from './nostrLiveDmSub';
-import { createLiveSubFollowGateBuffer, type DeferredFollowGateEntry } from './liveSubFollowGate';
 import { fetchConversationFor } from './nostrFetchConversation';
 import { loadInitialConversation as loadInitialConversationFor } from './conversationReadThrough';
 import { scheduleColdStartBackfill } from './dmColdStartBackfill';
@@ -71,6 +71,7 @@ export interface UseDmInboxOptions {
   isLoggedIn: boolean;
   signerType: SignerType | null;
   followPubkeys: Set<string>;
+  followHydrated?: boolean;
   getReadRelays: () => string[];
 }
 
@@ -112,7 +113,14 @@ export interface UseDmInboxResult {
 }
 
 export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
-  const { pubkey, isLoggedIn, signerType, followPubkeys, getReadRelays } = options;
+  const {
+    pubkey,
+    isLoggedIn,
+    signerType,
+    followPubkeys,
+    followHydrated = false,
+    getReadRelays,
+  } = options;
 
   // The inbox is tagged with the account that owns it (see dmInboxScope):
   // only the active account's entries are ever exposed, and writes computed
@@ -848,28 +856,8 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
     if (!isLoggedIn) setDmInbox([]);
   }, [isLoggedIn, setDmInbox]);
 
-  // Live mirror of `followPubkeys` for the long-lived kind-1059
-  // subscription below. The sub captures `followPubkeys` at the time
-  // the effect ran; without this ref, a follow added after sub
-  // creation would be invisible to the gate until the sub
-  // reconnected. Reading via ref keeps the gate fresh per event
-  // without thrashing the subscription on every contacts update.
-  const followPubkeysRef = useRef(followPubkeys);
-
-  // Follow-gate deferral (#851 F2). The buffer holds fresh inbound the live
-  // sub dropped while the post-switch follows list was still hydrating; the
-  // sub registers its replay function here. When `followPubkeys` updates we
-  // re-test the buffer and replay (surface + notify) any partner that now
-  // passes the gate. Buffer + replay are owned across sub re-opens via refs
-  // and reset on viewer change alongside `knownWrapIdsRef`.
-  const followGateBufferRef = useRef(createLiveSubFollowGateBuffer());
-  const deferredReplayRef = useRef<((item: DeferredFollowGateEntry) => void) | null>(null);
-
-  useEffect(() => {
-    followPubkeysRef.current = followPubkeys;
-    const replay = deferredReplayRef.current;
-    if (replay) followGateBufferRef.current.reevaluate(followPubkeys, replay);
-  }, [followPubkeys]);
+  const { followPubkeysRef, followHydratedRef, followGateBufferRef, setDeferredReplay } =
+    useLiveFollowGate(followPubkeys, followHydrated, pubkey);
 
   // Idempotent — any DM-surface (Messages tab, ConversationScreen)
   // calls this on focus. The first call flips `liveSubArmed`, the
@@ -955,14 +943,13 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       readRelays: getReadRelays(),
       knownWrapIdsRef,
       followPubkeysRef,
+      followHydratedRef,
       // Bound to this sub's viewer so its teardown flush can't land in the
       // next account's inbox.
       setDmInbox: inboxSetterFor(pubkey),
       setAmberNip44Permission,
       followGateBuffer: followGateBufferRef.current,
-      setDeferredReplay: (fn) => {
-        deferredReplayRef.current = fn;
-      },
+      setDeferredReplay,
       // Close the reconnect blind window (#1035): after a JS-sub socket-drop
       // or Doze-resume re-arm — or the native engine's relay reconnect
       // (Stage 2 M2 of #1036, same semantics) — trigger a full refreshDmInbox
@@ -972,7 +959,18 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       // (which would re-open the sub on every inbox refresh).
       onReconnect: (opts) => refreshDmInboxRef.current?.(opts) ?? Promise.resolve(),
     });
-  }, [isLoggedIn, pubkey, signerType, getReadRelays, liveSubArmed, inboxSetterFor]);
+  }, [
+    isLoggedIn,
+    pubkey,
+    signerType,
+    getReadRelays,
+    liveSubArmed,
+    inboxSetterFor,
+    setDeferredReplay,
+    followGateBufferRef,
+    followHydratedRef,
+    followPubkeysRef,
+  ]);
 
   return {
     dmInbox,

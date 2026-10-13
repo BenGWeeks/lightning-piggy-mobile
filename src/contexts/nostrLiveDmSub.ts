@@ -1,3 +1,6 @@
+import { routeMarmotWelcome } from '../services/marmotWelcomeRouter';
+import { gateLiveDm, startFollowGateFallback } from './liveDmFollowGateDecision';
+import { isFollowed } from '../utils/followPubkeys';
 import { loadKind4ReplayCursor } from './kind4RetryStore';
 import { getAppFormatLocale } from '../utils/appFormatLocale';
 import { dmThreadId, protocolForWireKind } from '../utils/dmProtocol';
@@ -76,6 +79,7 @@ export interface LiveDmSubscriptionParams {
   readRelays: string[];
   knownWrapIdsRef: React.MutableRefObject<{ pubkey: string | null; set: Set<string> }>;
   followPubkeysRef: React.MutableRefObject<Set<string>>;
+  followHydratedRef?: React.MutableRefObject<boolean>;
   setDmInbox: React.Dispatch<React.SetStateAction<DmInboxEntry[]>>;
   setAmberNip44Permission: React.Dispatch<React.SetStateAction<'unknown' | 'granted' | 'denied'>>;
   // Follow-gate deferral buffer (#851 F2). Fresh inbound dropped while the
@@ -111,6 +115,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     readRelays,
     knownWrapIdsRef,
     followPubkeysRef,
+    followHydratedRef = { current: false },
     setDmInbox,
     setAmberNip44Permission,
     followGateBuffer,
@@ -195,13 +200,27 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
   const queueInboxEntry = inboxFlushQueue.push;
   const flushPendingInbox = inboxFlushQueue.flush;
 
+  // Initialize before replay registration: a hydrated store drains synchronously.
+  // Catch failures so one rejected write cannot prevent subsequent persistence.
+  const chainWrite = (task: () => Promise<void>): void => {
+    writeChain = writeChain.then(task).catch((e) => {
+      if (__DEV__) console.warn('[Nostr] live wrap persist failed:', e);
+    });
+  };
+  const pendingReplays = new Set<DeferredFollowGateEntry>();
+  const releaseReplayClaim = (item: DeferredFollowGateEntry): void => {
+    if (!pendingReplays.delete(item)) return;
+    knownWrapIds.delete(item.entry.id);
+    seen.delete(item.entry.id);
+    item.onEvict?.();
+  };
   // Replay the surface + notify side-effects of a fresh inbound that was
   // deferred by the follow-gate during the post-switch hydration window
   // (#851 F2). Called by the hook (via the registered ref) once follows
   // hydrate and the buffered partner is confirmed followed — so we re-run
   // group routing for deferred two-party chats using the shared live path
   // to store and notify the correct room or DM. Other deferred previews
-  // leave persistence to refreshDmInbox.
+  // persist directly after adoption confirms their partners.
   // Preserve buffer order across async room creation: a later subjectless
   // chat must see the room registered by the preceding subject-tagged chat.
   let deferredRumorReplayChain = Promise.resolve();
@@ -216,8 +235,43 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         });
       return;
     }
+    if (item.rumor) routeMarmotWelcome(item.rumor, viewerPubkey);
+    // A reopened subscription has a fresh seen set: claim before queuing I/O
+    // so relay redelivery cannot race this replay. Cleanup releases both sets.
+    seen.add(item.entry.id);
+    knownWrapIds.add(item.entry.id);
+    capKnownWrapIds(knownWrapIds);
+    pendingReplays.add(item);
+    chainWrite(async () => {
+      if (cancelled || !isCurrentOwner()) {
+        releaseReplayClaim(item);
+        return;
+      }
+      try {
+        await upsertDmMessages([
+          {
+            owner: viewerPubkey,
+            eventId: item.entry.id,
+            conversation: item.partnerPubkey,
+            createdAt: item.entry.createdAt,
+            sender: item.entry.fromMe ? viewerPubkey : item.partnerPubkey,
+            content: item.content ?? item.entry.text,
+            fromMe: item.entry.fromMe,
+            wireKind: item.entry.wireKind,
+          },
+        ]);
+        pendingReplays.delete(item);
+        if (cancelled || !isCurrentOwner()) return;
+        knownWrapIds.add(item.entry.id);
+        capKnownWrapIds(knownWrapIds);
+        // Conversation reloads read SQLite, so signal only after the row exists.
+        notifyDmMessage(item.partnerPubkey);
+      } catch (error) {
+        releaseReplayClaim(item);
+        throw error;
+      }
+    });
     queueInboxEntry(item.entry);
-    notifyDmMessage(item.partnerPubkey);
     // claimWrapNotification: the background watch (same JS context, no follow
     // gate) may have already notified for this wrap — never post twice (#279).
     // Its contentless alert, though, is replaced by this real one — recorded
@@ -248,18 +302,13 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     }
   };
   setDeferredReplay(replayDeferredFollowGate);
+  const followGate = startFollowGateFallback(
+    followPubkeysRef,
+    followHydratedRef,
+    followGateBuffer,
+    replayDeferredFollowGate,
+  );
 
-  // Shared post-unwrap surface path (group-route → follow-gate → persist →
-  // surface → notify), extracted verbatim to liveDmRumorSurface.ts so the
-  // engine path — which delivers already-unwrapped rumors — runs the exact
-  // same policy as the JS unwrap path below. The trailing `.catch` in
-  // chainWrite is load-bearing: without it a single throw leaves `writeChain`
-  // rejected and every later `.then(...)` skips its onFulfilled.
-  const chainWrite = (task: () => Promise<void>): void => {
-    writeChain = writeChain.then(task).catch((e) => {
-      if (__DEV__) console.warn('[Nostr] live wrap persist failed:', e);
-    });
-  };
   const surfaceRumor = createLiveRumorSurfacer({
     viewerPubkey,
     isCancelled: () => cancelled || !isCurrentOwner(),
@@ -267,9 +316,15 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       cancelled || !isCurrentOwner() || viewerPubkey !== pubkey || activeSigner !== signerType,
     followPubkeysRef,
     followGateBuffer,
+    isFollowHydrated: () => followHydratedRef.current,
+    isFollowCacheReady: followGate.ready,
     isFreshArrival,
     queueInboxEntry,
     knownWrapIds,
+    releaseWrapClaim: (id) => {
+      knownWrapIds.delete(id);
+      seen.delete(id);
+    },
     chainWrite,
   });
 
@@ -301,16 +356,18 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
   let engineActive = engineBridge.mode === 'engine';
 
   const handleInboxEvent = async (ev: nostrService.RawInboxDmEvent): Promise<void> => {
-    // Earliest-possible short-circuit for NIP-17 wraps we already
-    // decrypted on a previous launch. Cost saved per backlog wrap:
+    // Skip persisted kind-4 messages as well as known NIP-17 wraps: the
+    // retained kind-4 recovery floor re-streams already recovered messages.
+    // Earliest-possible short-circuit for wraps decrypted on a previous launch.
+    // Cost saved per backlog wrap:
     // console.log + seen.has + seen.add + kind dispatch + cacheKey
     // build + the async AsyncStorage.getItem race. On a busy
     // fixture with 100+ wraps in the backlog this compressed the
     // cold-start JS-thread occupation window from ~12 s to <1 s.
     // Per issue #505.
-    if (ev.kind === 1059 && knownWrapIds.has(ev.id)) {
+    if ((ev.kind === 1059 || ev.kind === 4) && knownWrapIds.has(ev.id)) {
       // Already stored (and shown): nothing for the background watch to alert.
-      markWrapHandled(ev.id);
+      if (ev.kind === 1059) markWrapHandled(ev.id);
       return;
     }
     // Eagerly claim this wrap.id in the in-memory dedup Set before
@@ -397,32 +454,6 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       if (cancelled || !isCurrentOwner() || viewerPubkey !== pubkey || activeSigner !== signerType)
         return;
 
-      // Follow gate (mirrors refreshDmInbox B1) — incoming kind-4 from a non-followed sender is dropped from inbox state. Outgoing (fromMe) bypasses since we sent it.
-      if (!fromMe && !followPubkeysRef.current.has(partnerPubkey)) {
-        if (__DEV__)
-          console.log(
-            `[Nostr] live kind-4 ${ev.id.slice(0, 8)} dropped by follow-gate (partner=${partnerPubkey.slice(0, 8)})`,
-          );
-        // Defer fresh inbound for replay once follows hydrate (#851 F2). Only
-        // genuinely-fresh arrivals carry a notification; older backlog stays
-        // silent. Persistence is intentionally skipped — see replay helper.
-        if (isFreshArrival(ev.created_at)) {
-          followGateBuffer.defer({
-            partnerPubkey,
-            entry: {
-              id: ev.id,
-              partnerPubkey,
-              fromMe,
-              createdAt: ev.created_at,
-              text: plaintext,
-              wireKind: 4,
-            },
-            notify: { title: 'New message', body: plaintext },
-          });
-        }
-        return;
-      }
-
       const k4InboxEntry: DmInboxEntry = {
         id: ev.id,
         partnerPubkey,
@@ -431,6 +462,20 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         text: plaintext,
         wireKind: 4,
       };
+      if (
+        gateLiveDm({
+          entry: k4InboxEntry,
+          kind: 4,
+          follows: followPubkeysRef.current,
+          hydrated: followHydratedRef.current,
+          cacheReady: followGate.ready(),
+          buffer: followGateBuffer,
+          fresh: isFreshArrival(ev.created_at),
+          bypassOwn: true,
+          onEvict: () => seen.delete(ev.id),
+        }) !== 'pass'
+      )
+        return;
       // Persist the decrypted kind-4 to the encrypted store (#848 — the RAM
       // LRU dies with the session). The store is the ONLY at-rest home now
       // (#850; the plaintext inbox-preview blob is retired). Same writeChain
@@ -456,6 +501,9 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
           // refresh's `since` floor then re-fetches the event instead of
           // silently skipping past an unpersisted message.
           await upsertDmMessages([k4Row]);
+          if (cancelled || !isCurrentOwner()) return;
+          knownWrapIds.add(ev.id);
+          capKnownWrapIds(knownWrapIds);
           const lastSeenRaw = await AsyncStorage.getItem(inboxLastSeenKey(viewerPubkey));
           const lastSeen = lastSeenRaw ? Number(lastSeenRaw) : 0;
           if (ev.created_at > lastSeen) {
@@ -559,7 +607,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       // Explore Market checkout — into a trust set so a first legitimate order
       // notifies too.) `partnerKnown` is checked BEFORE this event's own upsert,
       // so the very first order from a stranger can't self-qualify.
-      const partnerFollowed = followPubkeysRef.current.has(partnerPubkey);
+      const partnerFollowed = isFollowed(followPubkeysRef.current, partnerPubkey);
       let partnerKnown = partnerFollowed;
       let persisted = false;
       writeChain = writeChain
@@ -793,7 +841,12 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         console.warn('[Nostr] live DM sub: knownWrapIds seed failed, dedup degraded:', e);
     }
     if (cancelled || !isCurrentOwner()) return;
-    reconnectController.start(sinceK4Cursor);
+    const recoverySince = followGateBuffer.kind4RecoverySince;
+    reconnectController.start(
+      recoverySince === undefined
+        ? sinceK4Cursor
+        : Math.min(sinceK4Cursor ?? recoverySince, recoverySince),
+    );
     // Native engine (Stage 2 M2, #1036) — started AFTER the knownWrapIds
     // seed so the engine's native dedupe set is seeded with the same ids.
     // No-op in 'off' mode; falls back to a JS re-arm on failure.
@@ -802,6 +855,9 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
 
   return () => {
     cancelled = true;
+    // Release synchronously before a new subscription can claim these ids.
+    // Old queued cancellations must not remove claims owned by the new sub.
+    for (const item of pendingReplays) releaseReplayClaim(item);
     noteLiveDmSubArmed(false);
     // Invalidate any in-flight close signal + pending reconnect FIRST (#934):
     // stopReconnecting() bumps the generation and stops the AppState-resume
@@ -811,12 +867,10 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     // change must fully stop the sub, not resurrect it).
     reconnectController.stopReconnecting();
     flushPendingInbox();
-    // Drop the follow-gate deferral buffer + unregister the replay hook
-    // atomically with sub teardown (#851 F2). A wipe / account switch tears
-    // the sub down, so buffered just-wiped wraps can never be replayed into
-    // the next identity's inbox.
+    // Detach this closure; account-owned deferrals survive relay-list re-opens.
+    // Identity teardown clears the canonical store on switch/sign-out.
     setDeferredReplay(null);
-    followGateBuffer.clear();
+    followGate.dispose();
     // Stop the native engine — tears the rust-nostr pool down AND clears the
     // module's single-entry key cache, so a logout / account switch never
     // leaves the old identity's secret in native memory (Stage 2 M2 key

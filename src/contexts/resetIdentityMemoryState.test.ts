@@ -1,3 +1,4 @@
+import { getFollowGateStore } from '../services/followSetEvents';
 import {
   cacheConversationReactions,
   readConversationReactions,
@@ -117,3 +118,30 @@ it.each(['switch', 'logout'])(
     expect(readConversationReactions(key).records).toEqual([]);
   },
 );
+
+it.each(['switch', 'logout'])('clears canonical follows and deferred plaintext on %s', (action) => {
+  const store = getFollowGateStore(A);
+  store.followHydratedRef.current = true;
+  store.followPubkeysRef.current = new Set([B]);
+  store.followGateBufferRef.current.defer({
+    partnerPubkey: B,
+    entry: {
+      id: 'pending',
+      partnerPubkey: B,
+      fromMe: false,
+      createdAt: 100,
+      text: 'secret',
+      wireKind: 4,
+    },
+  });
+  const replay = jest.fn();
+  store.deferredReplayRef.current = replay;
+  if (action === 'switch') setup(A).result.current.resetIdentityMemory();
+  else dropIdentityKeyMaterial();
+  expect(store.followGateBufferRef.current.size).toBe(0);
+  expect(store.followPubkeysRef.current.size).toBe(0);
+  expect(store.followHydratedRef.current).toBe(false);
+  expect(store.deferredReplayRef.current).toBeNull();
+  expect(getFollowGateStore(A)).not.toBe(store);
+  expect(replay).not.toHaveBeenCalled();
+});

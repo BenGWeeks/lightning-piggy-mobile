@@ -6,6 +6,7 @@ import { Toast } from '../components/BrandedToast';
 import type { ContactListFetchResult } from '../services/contactListSync';
 import type { NostrContact, RelayConfig } from '../types/nostr';
 import { useContactActions } from './useContactActions';
+import { clearFollowGateStores } from '../services/followSetEvents';
 import {
   __resetForTests,
   isAccountCreatedHere,
@@ -40,19 +41,21 @@ const relays: RelayConfig[] = [{ url: 'wss://mine', read: true, write: true }];
 
 function setup(contacts: NostrContact[]) {
   const setContacts = jest.fn();
-  const { result } = renderHook(() =>
-    useContactActions({
-      pubkey: ME,
-      isLoggedIn: true,
-      signerType: 'nsec',
-      relays,
-      contacts,
-      setContacts,
-      getReadRelays: () => ['wss://mine'],
-      loadContacts: jest.fn(async () => {}),
-    }),
+  const { result, rerender } = renderHook(
+    (owner: string) =>
+      useContactActions({
+        pubkey: owner,
+        isLoggedIn: true,
+        signerType: 'nsec',
+        relays,
+        contacts,
+        setContacts,
+        getReadRelays: () => ['wss://mine'],
+        loadContacts: jest.fn(async () => {}),
+      }),
+    { initialProps: ME },
   );
-  return { result, setContacts };
+  return { result, setContacts, rerender };
 }
 
 beforeEach(async () => {
@@ -63,6 +66,58 @@ beforeEach(async () => {
 });
 
 describe('useContactActions follow path (#1271)', () => {
+  it.each(['fetch', 'secure-store'] as const)(
+    'refuses an old follow write after A→B while awaiting %s',
+    async (blockedAt) => {
+      let release!: () => void;
+      let started!: () => void;
+      const blocked = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const reachedBoundary = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      const relayList: ContactListFetchResult = {
+        status: 'found',
+        base: { tags: [['p', BIG]], content: '', createdAt: 10 },
+      };
+      mockFetch.mockImplementation(async () => {
+        if (blockedAt === 'fetch') {
+          started();
+          await blocked;
+        }
+        return relayList;
+      });
+      jest.spyOn(SecureStore, 'getItemAsync').mockImplementation(async () => {
+        if (blockedAt === 'secure-store') {
+          started();
+          await blocked;
+        }
+        return 'nsec1-account-b';
+      });
+      const { result, setContacts, rerender } = setup([]);
+      let pending!: Promise<boolean>;
+      await act(async () => {
+        pending = result.current.followContact(NEW);
+        await reachedBoundary;
+      });
+      clearFollowGateStores(); // same session invalidation used by account switching
+      rerender(BIG);
+      let ok = true;
+      await act(async () => {
+        release();
+        ok = await pending;
+      });
+      expect(ok).toBe(false);
+      expect(nostrService.decodeNsec).not.toHaveBeenCalled();
+      expect(nostrService.signAndPublishEvent).not.toHaveBeenCalled();
+      expect(nostrService.publishSignedEvent).not.toHaveBeenCalled();
+      expect(setContacts).not.toHaveBeenCalled();
+      expect(nostrService.fetchProfile).not.toHaveBeenCalled();
+      if (blockedAt === 'fetch') expect(SecureStore.getItemAsync).not.toHaveBeenCalled();
+    },
+  );
+
   it('follows on top of the relay list when the local list never loaded', async () => {
     mockFetch.mockResolvedValue({
       status: 'found',

@@ -17,7 +17,7 @@ import { nip44EncryptForRecipient, nostrFinalizeEvent, nostrGetEventHash } from 
 import * as nip59 from 'nostr-tools/nip59';
 import type { NostrProfile, NostrContact, RelayConfig } from '../types/nostr';
 import { slimDisplayProfile } from '../utils/profileSanitize';
-import { tagsToContacts } from '../utils/contacts';
+import { fetchFollowSnapshot } from './contactFollowFreshness';
 import { publishWrapsTrackingRelays } from './nostrDmPublish';
 import type { DmSendResult, OnDeliveryFinalized } from './nostrDmPublish';
 import { LP_CLIENT_TAG } from './nip89ClientTag';
@@ -158,7 +158,7 @@ export interface DecodedProfileReference {
 // compact; receiving clients still search their own relays on top.
 export function buildProfileRelayHints(
   targetPubkey: string,
-  viewerContacts: Array<{ pubkey: string; relay: string | null }>,
+  viewerContacts: { pubkey: string; relay: string | null }[],
   viewerReadRelays: string[],
 ): string[] {
   const hints: string[] = [];
@@ -363,15 +363,9 @@ export async function fetchSingleLatest<T>(
 export async function fetchContactList(
   pubkey: string,
   relays: string[],
-  opts?: { onLatest?: (contacts: NostrContact[]) => void },
 ): Promise<NostrContact[] | null> {
   try {
-    return await fetchSingleLatest<NostrContact[]>(
-      { kinds: [3], authors: [pubkey] } as Filter,
-      relays,
-      tagsToContacts,
-      { onLatest: opts?.onLatest },
-    );
+    return (await fetchFollowSnapshot(pubkey, relays))?.contacts ?? null;
   } catch (error) {
     console.warn('Failed to fetch Nostr contact list:', error);
     return null;
