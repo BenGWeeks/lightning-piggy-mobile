@@ -1,6 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { X as XIcon } from 'lucide-react-native';
 import { Alert } from './BrandedAlert';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -9,9 +8,12 @@ import {
   createPublishedRelayListsSectionStyles,
   type PublishedRelayListsSectionStyles,
 } from '../styles/PublishedRelayListsSection.styles';
-import { useRelayListEditor, type RelayListPublishOutcome } from '../hooks/useRelayListEditor';
-import { isPublishableRelayUrl } from '../utils/relayListEvents';
-import RelayStatusDot from './RelayStatusDot';
+import type { RelayListPublishOutcome } from '../hooks/useRelayListEditor';
+import { useRelayListDraft } from '../contexts/RelayListEditorContext';
+import RelaySettingsRow from './RelaySettingsRow';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { RelaySettingsParamList } from '../navigation/types';
 
 type T = ReturnType<typeof useTranslation>;
 
@@ -133,7 +135,14 @@ export default function PublishedRelayListsSection({
   const t = useTranslation();
   const shared = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const styles = useMemo(() => createPublishedRelayListsSectionStyles(colors), [colors]);
-  const editor = useRelayListEditor();
+  const editor = useRelayListDraft();
+  const navigation = useNavigation<NativeStackNavigationProp<RelaySettingsParamList>>();
+  const openRelay = useCallback(
+    (url: string, kind: 'nip65' | 'inbox') => {
+      navigation.navigate('RelayDetails', { url, kind });
+    },
+    [navigation],
+  );
 
   const report = useCallback(
     (outcome: RelayListPublishOutcome) => {
@@ -182,44 +191,6 @@ export default function PublishedRelayListsSection({
     [editor, report, t],
   );
 
-  const pill = (on: boolean, label: string, onPress: () => void, testID: string) => (
-    <TouchableOpacity
-      style={[
-        styles.pill,
-        on && styles.pillOn,
-        !editor.nip65Editable && styles.publishButtonDisabled,
-      ]}
-      onPress={onPress}
-      disabled={!editor.nip65Editable}
-      testID={testID}
-      accessibilityRole="switch"
-      accessibilityState={{ checked: on, disabled: !editor.nip65Editable }}
-      accessibilityLabel={label}
-      hitSlop={6}
-    >
-      <Text style={[styles.pillText, on && styles.pillTextOn]}>{label}</Text>
-    </TouchableOpacity>
-  );
-
-  const removeButton = (url: string, testID: string) => {
-    const editable = testID.startsWith('nip65') ? editor.nip65Editable : editor.inboxEditable;
-    return (
-      <TouchableOpacity
-        style={[styles.removeButton, !editable && styles.publishButtonDisabled]}
-        disabled={!editable}
-        onPress={() =>
-          testID.startsWith('nip65') ? editor.removeNip65(url) : editor.removeInbox(url)
-        }
-        testID={testID}
-        accessibilityRole="button"
-        accessibilityLabel={t('publishedRelays.removeLabel', { url })}
-        hitSlop={8}
-      >
-        <XIcon size={16} color={colors.white} />
-      </TouchableOpacity>
-    );
-  };
-
   return (
     <View testID="published-relay-lists">
       <Text style={shared.sectionLabel}>{t('publishedRelays.nip65Title')}</Text>
@@ -233,30 +204,14 @@ export default function PublishedRelayListsSection({
           )
         )}
         {editor.nip65Draft.map((r) => (
-          <View key={r.url} style={styles.row}>
-            <RelayStatusDot status={connection?.get(r.url)} testID={`nip65-status-${r.url}`} />
-            <View style={styles.urlColumn}>
-              <Text style={styles.url} numberOfLines={1} ellipsizeMode="middle">
-                {r.url}
-              </Text>
-              {!isPublishableRelayUrl(r.url) && (
-                <Text style={styles.urlWarning}>{t('publishedRelays.notPublishable')}</Text>
-              )}
-            </View>
-            {pill(
-              r.read,
-              t('publishedRelays.read'),
-              () => editor.toggleNip65(r.url, 'read'),
-              `nip65-read-${r.url}`,
-            )}
-            {pill(
-              r.write,
-              t('publishedRelays.write'),
-              () => editor.toggleNip65(r.url, 'write'),
-              `nip65-write-${r.url}`,
-            )}
-            {removeButton(r.url, `nip65-remove-${r.url}`)}
-          </View>
+          <RelaySettingsRow
+            key={r.url}
+            url={r.url}
+            read={r.read}
+            write={r.write}
+            status={connection?.get(r.url)}
+            onOpen={openRelay}
+          />
         ))}
       </View>
       <AddRelayInput
@@ -288,15 +243,13 @@ export default function PublishedRelayListsSection({
           )
         )}
         {editor.inboxDraft.map((url) => (
-          <View key={url} style={styles.row}>
-            <RelayStatusDot status={connection?.get(url)} testID={`inbox-status-${url}`} />
-            <View style={styles.urlColumn}>
-              <Text style={styles.url} numberOfLines={1} ellipsizeMode="middle">
-                {url}
-              </Text>
-            </View>
-            {removeButton(url, `inbox-remove-${url}`)}
-          </View>
+          <RelaySettingsRow
+            key={url}
+            url={url}
+            inbox
+            status={connection?.get(url)}
+            onOpen={openRelay}
+          />
         ))}
       </View>
       <AddRelayInput

@@ -1,4 +1,5 @@
 import { withRelayHealth } from './healthAwarePool';
+import { recordRelayPublish } from './relayHealth';
 
 jest.mock('./relayHealth', () => ({
   RELAY_CONNECT_TIMEOUT_MS: 5000,
@@ -6,6 +7,8 @@ jest.mock('./relayHealth', () => ({
   noteNetworkActivity: jest.fn(),
   recordRelayFailure: jest.fn(),
   recordRelaySuccess: jest.fn(),
+  recordRelayConnectionObservation: jest.fn(),
+  recordRelayPublish: jest.fn(),
   selectHealthyRelays: (relays: string[]) => relays,
 }));
 
@@ -35,6 +38,13 @@ describe('withRelayHealth publish', () => {
     const [failed, ok] = pool.publish(['wss://a.example', 'wss://b.example'], event);
     await expect(failed).rejects.toThrow('connection failure: timeout');
     await expect(ok).resolves.toBe('');
+    expect(recordRelayPublish).toHaveBeenCalledWith(
+      'wss://a.example',
+      'p',
+      false,
+      expect.any(Error),
+    );
+    expect(recordRelayPublish).toHaveBeenCalledWith('wss://b.example', 'p', true);
   });
 
   it('makes Promise.any fail when every relay was unreachable', async () => {

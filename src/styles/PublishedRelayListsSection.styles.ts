@@ -28,31 +28,20 @@ export const createPublishedRelayListsSectionStyles = (colors: Palette) =>
       opacity: 0.75,
       marginTop: 1,
     },
+    accessTag: {
+      color: colors.white,
+      fontSize: 11,
+      backgroundColor: 'rgba(255,255,255,0.15)',
+      borderRadius: 6,
+      paddingHorizontal: 6,
+      paddingVertical: 4,
+    },
     empty: {
       color: colors.white,
       fontSize: 12,
       opacity: 0.7,
       paddingVertical: 10,
       paddingHorizontal: 12,
-    },
-    pill: {
-      paddingHorizontal: 9,
-      paddingVertical: 4,
-      borderRadius: 999,
-      borderWidth: 1,
-      borderColor: 'rgba(255,255,255,0.5)',
-    },
-    pillOn: {
-      backgroundColor: colors.white,
-      borderColor: colors.white,
-    },
-    pillText: {
-      color: colors.white,
-      fontSize: 11,
-      fontWeight: '600',
-    },
-    pillTextOn: {
-      color: colors.brandPink,
     },
     removeButton: {
       width: 28,

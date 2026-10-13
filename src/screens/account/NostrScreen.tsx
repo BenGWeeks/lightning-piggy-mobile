@@ -7,7 +7,6 @@ import BlossomServersSection from '../../components/BlossomServersSection';
 import { useRelayConnectionStatus } from '../../hooks/useRelayConnectionStatus';
 import { useNostr } from '../../contexts/NostrContext';
 import { useTranslation } from '../../contexts/LocaleContext';
-
 /**
  * Settings → Advanced → Nostr network: your published relay lists, the
  * app-default / geo-cache / device-only relays, and photo & voice-note

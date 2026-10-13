@@ -219,6 +219,57 @@ export function parkedRelays(now: number = Date.now()): { url: string; until: nu
     .map(([url, e]) => ({ url, until: e.parkedUntil }));
 }
 
+/** Session-only observations. No extra sockets or events are sent to collect these. */
+export interface RelayPublishObservation {
+  pubkey: string;
+  ok: boolean;
+  at: number;
+}
+interface RelayObservation {
+  latencyMs?: number;
+  errors: { at: number; message: string }[];
+  publishes: RelayPublishObservation[];
+  lastConnectFailed?: boolean;
+}
+const observations = new Map<string, RelayObservation>();
+function observation(url: string): RelayObservation {
+  const key = relayKey(url);
+  let value = observations.get(key);
+  if (!value) {
+    value = { errors: [], publishes: [] };
+    observations.set(key, value);
+    if (observations.size > MAX_ENTRIES) observations.delete(observations.keys().next().value!);
+  }
+  return value;
+}
+export function recordRelayConnectionObservation(url: string, latencyMs: number, error?: unknown) {
+  const value = observation(url);
+  value.lastConnectFailed = error !== undefined;
+  if (error === undefined) value.latencyMs = latencyMs;
+  else recordRelayError(url, error);
+}
+export function recordRelayError(url: string, error: unknown) {
+  const value = observation(url);
+  value.errors.push({ at: Date.now(), message: String(error).slice(0, 300) });
+  value.errors = value.errors.slice(-5);
+}
+export function recordRelayPublish(url: string, pubkey: string, ok: boolean, error?: unknown) {
+  const value = observation(url);
+  value.publishes = value.publishes.filter((p) => p.pubkey !== pubkey);
+  value.publishes.push({ pubkey, ok, at: Date.now() });
+  value.publishes = value.publishes.slice(-10);
+  if (error !== undefined) recordRelayError(url, error);
+}
+export function getRelayHealthObservation(url: string, pubkey: string | null) {
+  const value = observations.get(relayKey(url));
+  return {
+    latencyMs: value?.latencyMs,
+    errors: (value?.errors ?? []).filter((e) => Date.now() - e.at < 60 * 60_000),
+    lastPublish: value?.publishes.find((p) => p.pubkey === pubkey),
+    lastConnectFailed: value?.lastConnectFailed === true,
+  };
+}
+
 // --- persistence -----------------------------------------------------------
 
 type StoredEntry = { u: string; f: number; p: number; l: number };
@@ -282,6 +333,7 @@ export async function hydrateRelayHealth(now: number = Date.now()): Promise<void
 
 /** Test seam: wipe state and cancel a pending write. */
 export function __resetRelayHealthForTests(): void {
+  observations.clear();
   entries.clear();
   recentSuccess.clear();
   touched.clear();
