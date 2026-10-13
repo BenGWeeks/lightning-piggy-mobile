@@ -1343,6 +1343,13 @@ the same URL. Explicit pool `close` and `destroy` invalidate affected active
 and queued subscriptions before closing sockets. Teardown generations also
 prevent pending connections or resets from reviving those routes; unrelated
 subscriptions and deliberate requests made after teardown remain usable.
+Closing one relay in a multi-relay subscription preserves its healthy routes
+and excludes the closed route from later resume restoration. Direct
+`ensureRelay()` / `relay.subscribe()` reads (reactions and contact lists) drain
+on the retired socket until their original subscription closes, so replacement
+does not turn an in-flight authoritative read into a failure. Their existing
+read deadlines bound the drain; explicit pool close/destroy still releases
+retired sockets.
 
 Welcomes (kind 444 inside kind 1059) arrive through the ordinary DM inbox,
 not a separate key-package inbox. The JS DM controller already rearms on

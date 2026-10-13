@@ -10,6 +10,25 @@ export class RelayOperationDrain {
     relay.publish = this.wrap(relay.publish.bind(relay));
     relay.auth = this.wrap(relay.auth.bind(relay));
     relay.count = this.wrap(relay.count.bind(relay));
+    // Pool-level subscriptions are paused before retirement; direct relay
+    // reads must finish on the old socket with their original close handles.
+    const prepare = relay.prepareSubscription.bind(relay);
+    relay.prepareSubscription = (filters, params) => {
+      let finish!: () => void;
+      const closed = new Promise<void>((resolve) => (finish = resolve));
+      const sub = prepare(filters, {
+        ...params,
+        onclose: (reason) => {
+          try {
+            params.onclose?.(reason);
+          } finally {
+            finish();
+          }
+        },
+      });
+      this.track(closed);
+      return sub;
+    };
   }
 
   private wrap<Args extends unknown[], Result>(operation: (...args: Args) => Promise<Result>) {

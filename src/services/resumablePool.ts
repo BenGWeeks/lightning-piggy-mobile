@@ -81,7 +81,7 @@ export function withResumableSubscriptions<TBase extends PoolClass>(Base: TBase)
         this.relayGenerations.set(url, (this.relayGenerations.get(url) ?? 0) + 1);
       }
       for (const entry of [...this.subscriptions]) {
-        if (entry.urls.some((url) => targets.has(url))) entry.stop();
+        entry.removeRoutes(targets);
       }
       super.close(urls);
       for (const relay of this.retiredRelays) {
@@ -105,17 +105,26 @@ export function withResumableSubscriptions<TBase extends PoolClass>(Base: TBase)
       pause(): Promise<void>;
       open(): void;
       stop(): void;
+      removeRoutes(targets: Set<string>): void;
     }>();
 
     subscribeMap(
       requests: Parameters<AbstractSimplePool['subscribeMap']>[0],
       params: Parameters<AbstractSimplePool['subscribeMap']>[1],
     ): SubCloser {
+      let activeRequests = requests;
       let generation = 0;
       let stopped = false;
       let sub: SubCloser | undefined;
       const entry = {
         urls: requests.map(({ url }) => normalizeURL(url)),
+        removeRoutes: (targets: Set<string>) => {
+          activeRequests = activeRequests.filter(({ url }) => !targets.has(normalizeURL(url)));
+          // The SDK closes only the targeted relay's child subscription. Keep
+          // healthy children running, and exclude removed routes on later resets.
+          if (activeRequests.length === 0) entry.stop();
+          else entry.urls = activeRequests.map(({ url }) => normalizeURL(url));
+        },
         stop: () => {
           if (stopped) return;
           stopped = true;
@@ -137,7 +146,7 @@ export function withResumableSubscriptions<TBase extends PoolClass>(Base: TBase)
           }
           const currentGeneration = ++generation;
           const current = () => generation === currentGeneration;
-          sub = super.subscribeMap(requests, {
+          sub = super.subscribeMap(activeRequests, {
             ...params,
             onevent: (event) => {
               if (current()) params.onevent?.(event);

@@ -78,6 +78,97 @@ class PendingSocket {
   }
 }
 
+it('preserves healthy inbox routes when publish retry closes only a stale relay', async () => {
+  jest.useFakeTimers();
+  PendingSocket.sockets = [];
+  setWebSocketImplementation(PendingSocket);
+  const pool = new TestPool();
+  const next = jest.fn();
+  const onclose = jest.fn();
+  const sub = pool.subscribeMany(
+    ['wss://stale.test', 'wss://healthy.test'],
+    { kinds: [1059], limit: 100 },
+    { id: 'inbox', onevent: next, onclose },
+  );
+  try {
+    PendingSocket.sockets.forEach((socket) => socket.open());
+    await jest.advanceTimersByTimeAsync(0);
+    const healthy = PendingSocket.sockets[1];
+    pool.close(['wss://STALE.test:443']);
+    await jest.advanceTimersByTimeAsync(0);
+    expect(healthy.subscriptions.has('inbox')).toBe(true);
+    expect(onclose).not.toHaveBeenCalled();
+    const event = finalizeEvent(
+      { kind: 1059, content: '', tags: [], created_at: 100 },
+      generateSecretKey(),
+    );
+    healthy.onmessage?.({ data: JSON.stringify(['EVENT', 'inbox', event]) });
+    await jest.advanceTimersByTimeAsync(0);
+    expect(next).toHaveBeenCalledWith(expect.objectContaining({ id: event.id }));
+    // A subsequent reset must restore only the remaining healthy route.
+    await pool.resetTransports(['wss://healthy.test']);
+    expect(PendingSocket.sockets).toHaveLength(3);
+    const fresh = PendingSocket.sockets[2];
+    fresh.open();
+    await jest.advanceTimersByTimeAsync(0);
+    expect(fresh.subscriptions.has('inbox')).toBe(true);
+    await sub.close();
+    expect(fresh.subscriptions.has('inbox')).toBe(false);
+  } finally {
+    await sub.close();
+    pool.destroy();
+    setWebSocketImplementation(global.WebSocket);
+    jest.useRealTimers();
+  }
+});
+
+it.each([7, 3])('drains a direct kind-%s read during transport replacement', async (kind) => {
+  jest.useFakeTimers();
+  PendingSocket.sockets = [];
+  setWebSocketImplementation(PendingSocket);
+  const pool = new TestPool();
+  const connecting = pool.ensureRelay('wss://relay.test');
+  const old = PendingSocket.sockets[0];
+  old.open();
+  const relay = await connecting;
+  const next = jest.fn();
+  const onclose = jest.fn();
+  const oneose = jest.fn(() => read.close());
+  const read = relay.subscribe([{ kinds: [kind], limit: 1 }], {
+    id: 'direct-read',
+    onevent: next,
+    oneose,
+    onclose,
+  });
+  try {
+    await pool.resetTransports(['wss://relay.test']);
+    expect(old.readyState).toBe(PendingSocket.OPEN);
+    expect(onclose).not.toHaveBeenCalled();
+    const freshConnecting = pool.ensureRelay('wss://relay.test');
+    const fresh = PendingSocket.sockets[1];
+    fresh.open();
+    const freshRelay = await freshConnecting;
+    const event = finalizeEvent(
+      { kind, content: '', tags: [], created_at: 100 },
+      generateSecretKey(),
+    );
+    old.onmessage?.({ data: JSON.stringify(['EVENT', 'direct-read', event]) });
+    old.onmessage?.({ data: JSON.stringify(['EOSE', 'direct-read']) });
+    await jest.advanceTimersByTimeAsync(0);
+    expect(next).toHaveBeenCalledWith(expect.objectContaining({ id: event.id }));
+    expect(oneose).toHaveBeenCalledTimes(1);
+    expect(onclose).toHaveBeenCalledWith('closed by caller');
+    expect(old.readyState).toBe(3);
+    expect(await pool.ensureRelay('wss://relay.test')).toBe(freshRelay);
+    expect(fresh.readyState).toBe(PendingSocket.OPEN);
+  } finally {
+    read.close();
+    pool.destroy();
+    setWebSocketImplementation(global.WebSocket);
+    jest.useRealTimers();
+  }
+});
+
 it.each([false, true])(
   'protects a subscription created during pending transport replacement (cancelled: %s)',
   async (cancelled) => {
