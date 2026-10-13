@@ -92,9 +92,9 @@ const ShopAlertsSection: React.FC = () => {
     }, []),
   );
 
-  const persist = useCallback(async (next: NearbySettings) => {
+  const persist = useCallback(async (next: NearbySettings, reportFailure = false) => {
     setSettings(next);
-    await saveNearbySettings(next);
+    await saveNearbySettings(next, reportFailure);
   }, []);
 
   const handleToggle = (next: boolean) =>
@@ -103,9 +103,20 @@ const ShopAlertsSection: React.FC = () => {
         Toast.show({ type: 'error', text1: t(key) });
         return false;
       };
+      const persistMaster = async () => {
+        try {
+          await persist({ ...settings, enabled: next }, true);
+        } catch (error) {
+          // Registration changes precede persistence. Restore the previous
+          // native state before the optimistic switch rolls back and toasts.
+          await (active ? enableGeofencing() : disableGeofencing()).catch(() => undefined);
+          setActive(await isGeofencingActive());
+          throw error;
+        }
+      };
       if (!next) {
         await disableGeofencing();
-        await persist({ ...settings, enabled: false });
+        await persistMaster();
         setActive(false);
         return;
       }
@@ -122,7 +133,7 @@ const ShopAlertsSection: React.FC = () => {
 
       const count = await enableGeofencing();
       if (count === null) return fail('shopAlerts.noNearbyMerchantsTitle');
-      await persist({ ...settings, enabled: true });
+      await persistMaster();
       setActive(true);
     });
 
@@ -156,7 +167,11 @@ const ShopAlertsSection: React.FC = () => {
         grouped
         icon={MapPin}
         title={t('shopAlerts.alertMeNearShops')}
-        subtitle={t(active ? 'notificationSettingsScreen.on' : 'notificationSettingsScreen.off')}
+        subtitle={
+          !locationAvailable
+            ? t('notificationSettingsScreen.locationUnavailable')
+            : t(active ? 'notificationSettingsScreen.on' : 'notificationSettingsScreen.off')
+        }
         testID="shop-alerts-enabled"
         details={t('shopAlerts.privacyHint')}
         infoTestID="shop-alerts-privacy"

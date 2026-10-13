@@ -117,7 +117,8 @@ const MarmotPushSection: React.FC = () => {
               ? { type: 'success', text1: t('securityScreen.marmotPushOff') }
               : { type: 'info', text1: t('securityScreen.marmotPushRetirePending') },
         );
-        return off.saved;
+        // Push is off even if storing the preference failed: disable still
+        // retracts registrations and retires the token. Keep the switch off.
       }
     });
   };
