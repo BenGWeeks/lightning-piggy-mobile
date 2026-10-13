@@ -71,7 +71,6 @@ export function useChatReadPosition({
   const snapshotMarker = useRef<ReadMarker | null>(null);
   const divider = useRef<string | null>(null);
   const openedAt = useRef(0);
-  const dividerDismissed = useRef(false);
   const settling = useRef(false);
   const jumpTarget = useRef<string | null>(null);
   // Latest on-screen ids per viewability config (see VIEWABILITY_CONFIGS).
@@ -163,7 +162,6 @@ export function useChatReadPosition({
       if (!stored) return; // store still hydrating — `getMarker` changes when it lands
       clearTimers();
       snapshotScope.current = scope;
-      dividerDismissed.current = false;
       snapshotMarker.current = stored;
       openedAt.current = Date.now();
       markerRef.current = stored;
@@ -176,7 +174,7 @@ export function useChatReadPosition({
       if (dividerId) jumpTo(dividerId);
       return;
     }
-    if (dividerDismissed.current || Date.now() - openedAt.current >= LATE_ARRIVAL_MS) return;
+    if (Date.now() - openedAt.current >= LATE_ARRIVAL_MS) return;
     const late = unreadDividerId(entries, snapshotMarker.current, false);
     if (!late || late === divider.current) return;
     const current = divider.current;
@@ -227,8 +225,9 @@ export function useChatReadPosition({
   const unread = useMemo(() => unreadCount(entries, live), [entries, live]);
   const pendingMentions = useMemo(() => unreadMentionIds(entries, live), [entries, live]);
 
-  // Keep the opening boundary while reading, then retire it for this visit.
-  // New messages must not resurrect an already completed unread section.
+  // Hide the opening boundary once read, retaining its ref so older backfill
+  // can still reconcile during the late-arrival window. Newer messages alone
+  // must not resurrect an already completed unread section.
   const visibleDividerId = unreadDividerId(
     entries,
     live,
@@ -237,8 +236,6 @@ export function useChatReadPosition({
   );
   useEffect(() => {
     if (snapshot?.scope !== scope || !snapshot?.dividerId || unread > 0) return;
-    dividerDismissed.current = true;
-    divider.current = null;
     setSnapshot({ scope: snapshot.scope, dividerId: null });
   }, [scope, snapshot, unread]);
 
