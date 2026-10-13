@@ -21,6 +21,7 @@ export function encodeEncryptedFileUrl(input: {
   nonceHex: string;
   algorithm?: string;
   size?: number;
+  sha256?: string;
 }): string {
   const frag =
     `${LPE_MARKER}&alg=${encodeURIComponent(input.algorithm ?? 'aes-gcm')}` +
@@ -31,7 +32,7 @@ export function encodeEncryptedFileUrl(input: {
   // `#` and would then fail to read our params. Blossom URLs don't normally
   // carry a fragment, but a foreign/unexpected URL might.
   const base = input.url.split('#')[0];
-  return `${base}#${frag}`;
+  return `${base}#${frag}${input.sha256 ? `&x=${encodeURIComponent(input.sha256)}` : ''}`;
 }
 
 // --- Marmot encrypted media (MIP-04 `encrypted-media-v1` / `-v2`) ---

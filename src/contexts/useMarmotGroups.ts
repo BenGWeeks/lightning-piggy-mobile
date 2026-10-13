@@ -1,4 +1,5 @@
 import { logUnsupportedMarmotKind } from '../utils/unsupportedMarmotKind';
+import { sanitizeDisplayText } from '../utils/sanitizeDisplayText';
 import { getAppFormatLocale } from '../utils/appFormatLocale';
 import { useAccountState } from './useAccountState';
 import { useCallback, useEffect, useMemo } from 'react';
@@ -41,7 +42,7 @@ const NOTIFY_SKEW_SEC = 120;
 
 const toGroup = (g: MarmotGroupSummary): Group => ({
   id: g.id,
-  name: g.name,
+  name: sanitizeDisplayText(g.name, { maxLen: 64 }),
   memberPubkeys: g.memberPubkeys,
   createdAt: g.createdAt,
   updatedAt: g.createdAt,

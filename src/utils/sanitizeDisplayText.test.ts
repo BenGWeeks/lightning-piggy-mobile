@@ -44,3 +44,29 @@ describe('sanitizeDisplayText', () => {
     expect(sanitizeDisplayText(null)).toBe(null);
   });
 });
+
+describe('bounded display labels', () => {
+  it.each([
+    ['Alice', 'Alice'],
+    ['a\u0000\u007f\u0085b', 'ab'],
+    ['a\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069b', 'ab'],
+    ['a\u200b\u200c\u200d\u2060\ufeffb', 'ab'],
+    ['  Alice   Smith \n Jones  ', 'Alice Smith Jones'],
+    ['cafe\u0301', 'café'],
+    [null, ''],
+    [{ name: 'Alice' }, ''],
+  ])('sanitises %j', (input, expected) => {
+    expect(sanitizeDisplayText(input, { maxLen: 64 })).toBe(expected);
+  });
+  it('preserves permitted newlines and caps with an ellipsis', () => {
+    expect(sanitizeDisplayText('Alice\n  Smith', { maxLen: 64, allowNewlines: true })).toBe(
+      'Alice\n Smith',
+    );
+    expect(sanitizeDisplayText('abcdef', { maxLen: 4 })).toBe('abc…');
+    expect(sanitizeDisplayText('abc', { maxLen: 3 })).toBe('abc');
+    expect(sanitizeDisplayText('abc', { maxLen: 0 })).toBe('');
+    expect(sanitizeDisplayText('a😀bc', { maxLen: 3 })).toBe('a…');
+    const once = sanitizeDisplayText('a\u202eb   c', { maxLen: 4 });
+    expect(sanitizeDisplayText(once, { maxLen: 4 })).toBe(once);
+  });
+});

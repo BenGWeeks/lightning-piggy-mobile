@@ -1,3 +1,4 @@
+import { sanitizeDisplayText } from './sanitizeDisplayText';
 import { nip19, type Event } from 'nostr-tools';
 import type { MarketProduct } from '../data/marketProducts';
 import type { MarketVendor } from '../data/marketVendors';
@@ -114,7 +115,7 @@ export function parseMarketListing(event: Event, now = Date.now() / 1000): Marke
   };
   return {
     id: `nostr-${event.kind}-${event.pubkey}-${encodeURIComponent(d)}`,
-    title: title.trim(),
+    title: sanitizeDisplayText(title, { maxLen: 200 }),
     description: typeof description === 'string' ? description.slice(0, 12000) : '',
     priceSats: Math.round(sats),
     priceFiatLabel: priceLabel,

@@ -3339,5 +3339,9 @@
     "profile": "Profil megnyitása: %{target}",
     "open": "Lightning-hivatkozás megnyitása innen: %{target}",
     "memo": "Megjegyzés (a számlából)"
+  },
+  "profileSafety": {
+    "unavailable": "A profil nem érhető el",
+    "unverified": "nem ellenőrzött"
   }
 }

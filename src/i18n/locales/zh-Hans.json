@@ -3339,5 +3339,9 @@
     "profile": "打开个人资料 %{target}",
     "open": "打开来自 %{target} 的 Lightning 链接",
     "memo": "备注（来自发票）"
+  },
+  "profileSafety": {
+    "unavailable": "个人资料不可用",
+    "unverified": "未验证"
   }
 }

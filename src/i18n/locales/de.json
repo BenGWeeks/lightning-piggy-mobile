@@ -3339,5 +3339,9 @@
     "profile": "Profil %{target} öffnen",
     "open": "Lightning-Link von %{target} öffnen",
     "memo": "Notiz (aus der Rechnung)"
+  },
+  "profileSafety": {
+    "unavailable": "Profil nicht verfügbar",
+    "unverified": "nicht verifiziert"
   }
 }

@@ -1,16 +1,16 @@
 // Stub the swap-meta lookup so the test stays independent of the heavy
 // swapRecoveryService (bitcoinjs/secp256k1/SecureStore). Default: no swap.
-const mockGetSwapMeta = jest.fn();
-jest.mock('../services/swapRecoveryService', () => ({
-  getSwapMeta: (key: string) => mockGetSwapMeta(key),
-}));
-
 import { mapNwcTransactions, type NwcRawTransaction } from './nwcTransactions';
 import { isTransactionSettled } from './transactionSettlement';
 import type { WalletTransaction } from '../types/wallet';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import { clearPaymentProofsForTests, recordPaymentProof } from '../services/paymentProofs';
+
+const mockGetSwapMeta = jest.fn();
+jest.mock('../services/swapRecoveryService', () => ({
+  getSwapMeta: (key: string) => mockGetSwapMeta(key),
+}));
 
 const H1 = 'a'.repeat(64);
 const H2 = 'b'.repeat(64);
@@ -303,4 +303,12 @@ describe('mapNwcTransactions — proof of payment (pending after a successful se
     expect(mapNwcTransactions([pending({ state: 'failed' })], [], 'w1')[0].settled).toBe(false);
     expect(mapNwcTransactions([pending({ type: 'incoming' })], [], 'w1')[0].settled).toBe(false);
   });
+});
+
+it.each([
+  ['Coffee', 'Coffee'],
+  ['Co\u202effee\u200b', 'Coffee'],
+  ['x'.repeat(2001), 'x'.repeat(1999) + '…'],
+])('sanitises wallet memos', (description, expected) => {
+  expect(mapNwcTransactions([raw({ description })], [])[0].description).toBe(expected);
 });

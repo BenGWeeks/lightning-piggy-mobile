@@ -103,6 +103,7 @@ const MessageImageBubble: React.FC<Props> = ({
           <DecryptedImage
             url={image.url}
             encrypted={image.encrypted}
+            sha256={image.sha256}
             keyHex={image.keyHex}
             nonceHex={image.nonceHex}
             mime={image.mime}

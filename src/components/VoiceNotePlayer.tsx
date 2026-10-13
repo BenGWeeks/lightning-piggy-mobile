@@ -56,6 +56,7 @@ interface Props {
   senderName?: string | null;
   /** Encrypted (NIP-17 kind 15) → fetch ciphertext + decrypt before play. */
   encrypted?: boolean;
+  sha256?: string;
   keyHex?: string;
   nonceHex?: string;
   /** A Marmot (MIP-04) voice note: decrypted with these instead of `keyHex`. */
@@ -82,6 +83,7 @@ const VoiceNotePlayer: React.FC<Props> = ({
   createdAt,
   senderName,
   encrypted = false,
+  sha256,
   keyHex,
   nonceHex,
   marmot,
@@ -154,6 +156,7 @@ const VoiceNotePlayer: React.FC<Props> = ({
         kind: 'voice',
         mime,
         size,
+        sha256,
         keyHex,
         nonceHex,
         marmot: marmotParams,
@@ -167,7 +170,7 @@ const VoiceNotePlayer: React.FC<Props> = ({
     } finally {
       setBusy(false);
     }
-  }, [encrypted, url, localUri, keyHex, nonceHex, mime, size, plainUri]);
+  }, [encrypted, url, localUri, sha256, keyHex, nonceHex, mime, size, plainUri]);
 
   // Once the decrypted file lands and the user had asked to play, start it
   // (the player's source only switches on the next render). Covers both a

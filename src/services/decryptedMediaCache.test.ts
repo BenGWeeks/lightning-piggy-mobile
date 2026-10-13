@@ -24,6 +24,7 @@ import {
   clearDecryptedMediaMemory,
   ownerDirName,
   mediaCacheKey,
+  clearDecryptedMediaCache,
   peekDecryptedMedia,
   resolveDecryptedMedia,
   setDecryptedMediaOwner,
@@ -220,32 +221,32 @@ describe('decryptedMediaCache', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps each account's files separate and drops the memory cache on switch", async () => {
+  it('deletes outgoing plaintext on identity switch', async () => {
     setDecryptedMediaOwner(A);
     const uriA = await resolveDecryptedMedia(ref);
     setDecryptedMediaOwner(B);
     expect(peekDecryptedMedia(ref)).toBeNull();
     const uriB = await resolveDecryptedMedia(ref);
     expect(uriB).not.toBe(uriA);
-    expect(filesUnder(A)).toEqual([uriA]);
+    expect(filesUnder(A)).toEqual([]);
     expect(filesUnder(B)).toEqual([uriB]);
     // B decrypted for itself rather than reusing A's file.
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("wipe deletes the account's files and memory entries, and leaves others alone", async () => {
-    setDecryptedMediaOwner(B);
-    const uriB = await resolveDecryptedMedia(ref);
+    const uriB = `file:///cache/decrypted/${ownerDirName(B)}/keep.m4a`;
+    mockFiles.set(uriB, 'other account');
     setDecryptedMediaOwner(A);
     await resolveDecryptedMedia(ref);
-    await wipeDecryptedMediaForOwner(A);
+    await clearDecryptedMediaCache(A);
     expect(filesUnder(A)).toEqual([]);
     expect(peekDecryptedMedia(ref)).toBeNull();
     expect(filesUnder(B)).toEqual([uriB]);
     // Signing back in, the next play decrypts again.
     setDecryptedMediaOwner(A);
     await resolveDecryptedMedia(ref);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('never serves cached plaintext to a request with the wrong keys', async () => {
@@ -665,4 +666,61 @@ it('honours the advertised size on download', async () => {
   expect(await resolveDecryptedMedia({ ...ref, size: sealed.ciphertext.length })).toContain(
     'file:///',
   );
+});
+
+it('keys identical basenames by URL, keys, nonce and declared Marmot hashes', () => {
+  const key = mediaCacheKey(ref);
+  expect(mediaCacheKey({ ...ref })).toBe(key);
+  for (const other of [
+    { ...ref, url: 'https://other.example/abc123' },
+    { ...ref, keyHex: wrongKeys.keyHex },
+    { ...ref, nonceHex: '00'.repeat(12) },
+    {
+      ...ref,
+      marmot: {
+        version: 'encrypted-media-v1' as const,
+        keysHex: ['11'.repeat(32)],
+        filename: 'photo.jpg',
+        plaintextSha256: '22'.repeat(32),
+        ciphertextSha256: '33'.repeat(32),
+      },
+    },
+  ])
+    expect(mediaCacheKey(other)).not.toBe(key);
+});
+it('a returning identity waits for its old folder deletion before writing new media', async () => {
+  setDecryptedMediaOwner(A);
+  const uri = await resolveDecryptedMedia(ref);
+  let release!: () => void;
+  const original = (deleteAsync as jest.Mock).getMockImplementation()!;
+  (deleteAsync as jest.Mock).mockImplementationOnce(async (path: string) => {
+    await new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await original(path);
+  });
+  setDecryptedMediaOwner(B);
+  setDecryptedMediaOwner(A);
+  const pending = resolveDecryptedMedia(ref);
+  await new Promise((resolve) => setImmediate(resolve));
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  release();
+  expect(await pending).toBe(uri);
+  expect(filesUnder(A)).toEqual([uri]);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+it('checks declared ciphertext hashes before decrypting or publishing', async () => {
+  setDecryptedMediaOwner(A);
+  const hash = bytesToHex(sha256(sealed.ciphertext));
+  const good = { ...ref, sha256: hash };
+  const uri = await resolveDecryptedMedia(good);
+  expect([...plaintextOf(uri)]).toEqual([...PLAIN]);
+  for (const hash of ['00'.repeat(32), 'invalid', '']) {
+    const bad = { ...ref, sha256: hash };
+    expect(mediaCacheKey(bad)).not.toBe(mediaCacheKey(good));
+    expect(peekDecryptedMedia(bad)).toBeNull();
+    await expect(resolveDecryptedMedia(bad)).rejects.toThrow('hash mismatch');
+  }
+  expect(filesUnder(A)).toEqual([uri]);
 });

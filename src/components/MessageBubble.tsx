@@ -1,5 +1,6 @@
 import { useGifMedia } from '../hooks/useGifMedia';
 import TapToLoadMedia, { displayHost } from './TapToLoadMedia';
+import { sanitizeDisplayText } from '../utils/sanitizeDisplayText';
 import { npubEncode } from 'nostr-tools/nip19';
 import MessageReactionRow from './MessageReactionRow';
 import OutgoingBubbleBackground from './OutgoingBubbleBackground';
@@ -225,7 +226,9 @@ const MessageBubble: React.FC<Props> = ({
   const BubbleHeader =
     senderName || QuoteStrip ? (
       <>
-        {senderName ? <Text style={styles.senderLabel}>{senderName}</Text> : null}
+        {senderName ? (
+          <Text style={styles.senderLabel}>{sanitizeDisplayText(senderName, { maxLen: 64 })}</Text>
+        ) : null}
         {QuoteStrip}
       </>
     ) : null;
@@ -599,6 +602,7 @@ const MessageBubble: React.FC<Props> = ({
       <VoiceNotePlayer
         url={voice.url}
         encrypted={voice.encrypted}
+        sha256={voice.sha256}
         keyHex={voice.keyHex}
         nonceHex={voice.nonceHex}
         marmot={voice.marmot}

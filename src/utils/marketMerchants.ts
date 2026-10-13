@@ -1,3 +1,4 @@
+import { sanitizeDisplayText } from './sanitizeDisplayText';
 import { nip19 } from 'nostr-tools';
 import { sellerOf, type MarketProduct } from '../data/marketProducts';
 import { MARKET_VENDORS } from '../data/marketVendors';
@@ -20,7 +21,7 @@ const curated = new Map(
     return pubkey ? [[pubkey, vendor] as const] : [];
   }),
 );
-const text = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+const text = (value: unknown) => sanitizeDisplayText(value, { maxLen: 64 });
 
 /** Gamma's shop is the merchant's kind-0 profile, never a 30405 collection.
  * A curated shop name takes precedence over that profile's display fields. */
@@ -29,8 +30,7 @@ export function merchantLabel(
   profile?: MerchantProfile,
   shopName?: string,
 ): string {
-  const name =
-    text(shopName) || text(profile?.displayName) || text(profile?.name) || text(profile?.nip05);
+  const name = text(shopName) || text(profile?.displayName) || text(profile?.name);
   if (name) return name;
   const npub = nip19.npubEncode(pubkey);
   return `${npub.slice(0, 12)}…${npub.slice(-4)}`;

@@ -96,7 +96,7 @@ export const createContactProfileScreenStyles = (colors: Palette, layout: Profil
     },
     nip05: {
       fontSize: 13,
-      color: colors.brandPink,
+      color: colors.textSupplementary,
       marginTop: 2,
       paddingHorizontal: 16,
     },

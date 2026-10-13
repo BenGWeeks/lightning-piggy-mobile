@@ -3379,5 +3379,9 @@
     "profile": "Otwórz profil %{target}",
     "open": "Otwórz link Lightning z %{target}",
     "memo": "Notatka (z faktury)"
+  },
+  "profileSafety": {
+    "unavailable": "Profil niedostępny",
+    "unverified": "niezweryfikowany"
   }
 }

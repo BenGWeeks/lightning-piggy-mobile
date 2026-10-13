@@ -3339,5 +3339,9 @@
     "profile": "Open profile %{target}",
     "open": "Open Lightning link from %{target}",
     "memo": "Memo (from invoice)"
+  },
+  "profileSafety": {
+    "unavailable": "Profile unavailable",
+    "unverified": "unverified"
   }
 }

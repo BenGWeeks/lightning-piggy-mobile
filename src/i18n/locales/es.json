@@ -3339,5 +3339,9 @@
     "profile": "Abrir perfil %{target}",
     "open": "Abrir enlace Lightning de %{target}",
     "memo": "Nota (de la factura)"
+  },
+  "profileSafety": {
+    "unavailable": "Perfil no disponible",
+    "unverified": "sin verificar"
   }
 }

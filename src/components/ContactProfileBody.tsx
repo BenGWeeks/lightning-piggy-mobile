@@ -1,3 +1,5 @@
+import ProfileErrorBoundary from './ProfileErrorBoundary';
+import { sanitizeDisplayText } from '../utils/sanitizeDisplayText';
 import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, TouchableOpacity, Share } from 'react-native';
 import { Image } from 'expo-image';
@@ -158,7 +160,7 @@ const ContactProfileBody: React.FC<Props> = ({
 
       {contact.nip05 ? (
         <Text style={styles.nip05} numberOfLines={1}>
-          {contact.nip05}
+          {contact.nip05} · {t('profileSafety.unverified')}
         </Text>
       ) : null}
 
@@ -302,4 +304,16 @@ const ContactProfileBody: React.FC<Props> = ({
   );
 };
 
-export default ContactProfileBody;
+export default React.memo(function GuardedContactProfileBody(props: Props) {
+  const contact = {
+    ...props.contact,
+    name: sanitizeDisplayText(props.contact.name, { maxLen: 64 }),
+    nip05: sanitizeDisplayText(props.contact.nip05, { maxLen: 320 }),
+    about: sanitizeDisplayText(props.contact.about, { maxLen: 2000, allowNewlines: true }),
+  };
+  return (
+    <ProfileErrorBoundary key={contact.pubkey}>
+      <ContactProfileBody {...props} contact={contact} />
+    </ProfileErrorBoundary>
+  );
+});

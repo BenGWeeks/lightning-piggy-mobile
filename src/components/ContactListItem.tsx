@@ -1,3 +1,5 @@
+import ProfileErrorBoundary from './ProfileErrorBoundary';
+import { sanitizeDisplayText } from '../utils/sanitizeDisplayText';
 import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { Image } from 'expo-image';
@@ -188,4 +190,10 @@ const ContactListItem: React.FC<Props> = ({
 // references it).
 export const CONTACT_LIST_ITEM_HEIGHT = 72;
 
-export default React.memo(ContactListItem);
+export default React.memo(function GuardedContactListItem(props: Props) {
+  return (
+    <ProfileErrorBoundary key={props.testID}>
+      <ContactListItem {...props} name={sanitizeDisplayText(props.name, { maxLen: 64 })} />
+    </ProfileErrorBoundary>
+  );
+});

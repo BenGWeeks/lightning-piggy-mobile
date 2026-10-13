@@ -19,7 +19,7 @@
  *    was in flight when that happened never fills the memory cache, and only
  *    publishes a file if it was already past its last check — on a wipe the
  *    wipe waits for that publish and then deletes the folder; on a switch the
- *    file lands in the outgoing account's own folder.
+ *    same wipe removes the outgoing account's folder.
  *  - **Sessions.** Only a cold start (no account yet in this process) waits
  *    for an owner; a request made between sessions is cancelled, so one
  *    account's media can never be decrypted into the next account's folder.
@@ -64,6 +64,8 @@ export interface EncryptedMediaRef {
   plaintextSha256?: string;
   /** Explicitly unencrypted imeta files are still cached per account. */
   encrypted?: boolean;
+  /** Declared NIP-17 ciphertext hash, checked before decryption. */
+  sha256?: string;
   /** NIP-17 (kind 15) AES-256-GCM key. */
   keyHex?: string;
   nonceHex?: string;
@@ -132,7 +134,7 @@ export async function deleteDecryptedFile(uri: string): Promise<void> {
 
 /** Named exports share the source lease, account directory, and wipe generation. */
 export async function namedFileExport(uri: string, name: string): Promise<string> {
-  const owner = await requestOwner();
+  const { owner } = await requestOwner();
   const dir = ownerDirUri(owner);
   if (!dir || !uri.startsWith(dir) || !retainedFiles.has(uri))
     throw new DecryptedMediaCancelledError();
@@ -198,6 +200,7 @@ type OwnerWaiter = (owner: string | null, epoch: number) => void;
 let ownerWaiters: OwnerWaiter[] = [];
 // ownerDir → file publishes in flight, so a wipe can wait for them.
 const publishing = new Map<string, Set<Promise<void>>>();
+const wiping = new Map<string, Promise<void>>();
 const OWNER_WAIT_MS = 15_000;
 let legacyCleanupTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -233,6 +236,7 @@ export function mediaCacheKey(ref: EncryptedMediaRef): string {
         : []),
       ref.keyHex ?? '',
       ref.nonceHex ?? '',
+      ref.sha256 ?? '',
       ref.mime ?? '',
       ref.size ?? null,
       m ? [m.version, m.keysHex, m.filename, m.plaintextSha256, m.ciphertextSha256] : null,
@@ -277,17 +281,19 @@ function remember(memoKey: string, uri: string): void {
 /**
  * Point the cache at the active account. Changing owner ends the previous
  * owner's session: its in-flight decrypts are cancelled and the memory cache
- * is dropped (its files stay on disk, so switching back is still fast).
+ * is dropped and its decrypted files are deleted.
  */
 export function setDecryptedMediaOwner(pubkey: string | null): void {
   const next = pubkey ? pubkey.toLowerCase() : null;
   if (next === activeOwner) return;
-  if (activeOwner) bump(ownerDirName(activeOwner));
+  const previous = activeOwner;
+  if (previous) bump(ownerDirName(previous));
   memory.clear();
   verifiedFiles.clear();
   inflight.clear();
   activeOwner = next;
   sessionEpoch++;
+  if (previous) void clearDecryptedMediaCache(previous);
   if (next) {
     everHadOwner = true;
     const waiters = ownerWaiters;
@@ -338,8 +344,8 @@ function waitForOwner(): Promise<{ owner: string; epoch: number }> {
 }
 
 /** The account a new request belongs to (see `everHadOwner`). */
-async function requestOwner(): Promise<string> {
-  if (activeOwner) return activeOwner;
+async function requestOwner(): Promise<{ owner: string; epoch: number }> {
+  if (activeOwner) return { owner: activeOwner, epoch: sessionEpoch };
   // Between sessions (after a sign-out / switch to nobody): the request
   // belongs to an account that's gone, so it must never land in the next one.
   if (everHadOwner) throw new DecryptedMediaCancelledError();
@@ -347,7 +353,7 @@ async function requestOwner(): Promise<string> {
   // messages aren't per-account yet) before the session's pubkey lands.
   const { owner, epoch } = await waitForOwner();
   if (epoch !== sessionEpoch) throw new DecryptedMediaCancelledError();
-  return owner;
+  return { owner, epoch };
 }
 
 /**
@@ -363,8 +369,10 @@ export async function resolveDecryptedMedia(ref: EncryptedMediaRef): Promise<str
     (!Number.isSafeInteger(ref.size) || ref.size <= 0 || ref.size > MEDIA_MAX_BYTES)
   )
     throw new Error('Invalid media size');
-  const owner = await requestOwner();
+  const { owner, epoch } = await requestOwner();
   const ownerDir = ownerDirName(owner);
+  await wiping.get(ownerDir);
+  if (epoch !== sessionEpoch || activeOwner !== owner) throw new DecryptedMediaCancelledError();
   const memoKey = `${ownerDir}/${mediaCacheKey(ref)}`;
   const pending = inflight.get(memoKey);
   if (pending) return pending;
@@ -429,6 +437,15 @@ async function resolveUncached(
       redirects: 'https-only',
       maxRedirects: 3,
     });
+    // A kind-15 that declares its ciphertext hash (`x` tag) must match it —
+    // and a declared-but-malformed hash is a mismatch, never "no hash".
+    if (
+      ref.sha256 !== undefined &&
+      (!/^[a-f0-9]{64}$/i.test(ref.sha256) ||
+        bytesToHex(sha256(cipher)) !== ref.sha256.toLowerCase())
+    ) {
+      throw new Error('Media ciphertext hash mismatch');
+    }
     let plain: Uint8Array;
     try {
       plain = unencrypted
@@ -513,7 +530,18 @@ function trackPublish(ownerDir: string, publish: Promise<void>): Promise<void> {
  * Delete every decrypted file belonging to `pubkey` and forget its memory
  * entries; cancels its in-flight decrypts. Called from `wipeAccountCaches`.
  */
-export async function wipeDecryptedMediaForOwner(pubkey: string): Promise<void> {
+export function clearDecryptedMediaCache(pubkey: string): Promise<void> {
+  const ownerDir = ownerDirName(pubkey);
+  const pending = wiping.get(ownerDir);
+  if (pending) return pending;
+  const run = wipeOwner(pubkey).finally(() => {
+    if (wiping.get(ownerDir) === run) wiping.delete(ownerDir);
+  });
+  wiping.set(ownerDir, run);
+  return run;
+}
+
+async function wipeOwner(pubkey: string): Promise<void> {
   const ownerDir = ownerDirName(pubkey);
   bump(ownerDir);
   // Signing out the active account retires its session right away: a bubble
@@ -571,6 +599,10 @@ export function __resetDecryptedMediaCacheForTests(): void {
   sessionEpoch = 0;
   ownerWaiters = [];
   publishing.clear();
+  wiping.clear();
   if (legacyCleanupTimer) clearTimeout(legacyCleanupTimer);
   legacyCleanupTimer = null;
 }
+
+/** Compatibility for existing consumers. */
+export const wipeDecryptedMediaForOwner = clearDecryptedMediaCache;

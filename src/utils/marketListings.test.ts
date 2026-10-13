@@ -363,3 +363,20 @@ it('selectVerifiedListings: a forged newest copy cannot give an old fallback a c
   ).toEqual([50]);
   expect(result.overflow).toBe(true);
 });
+
+it.each([
+  ['Book', 'Book'],
+  ['Bo\u202eok\u200b', 'Book'],
+])('sanitises Market listing titles', (title, expected) => {
+  expect(
+    parseMarketListing(
+      event({
+        tags: [
+          ['d', 'item'],
+          ['title', title],
+          ['price', '21', 'SATS'],
+        ],
+      }),
+    )?.title,
+  ).toBe(expected);
+});
