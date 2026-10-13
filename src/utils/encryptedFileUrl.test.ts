@@ -18,3 +18,16 @@ it.each(['image/jpeg', 'audio/mp4'])(
     );
   },
 );
+
+it('keeps an explicitly empty hash distinct from no hash', () => {
+  const meta = {
+    url: 'https://cdn.example/voice',
+    mime: 'audio/mp4',
+    keyHex: '11'.repeat(32),
+    nonceHex: '22'.repeat(12),
+  };
+  expect(parseVoiceNote(encodeEncryptedFileUrl({ ...meta, sha256: '' }))).toMatchObject({
+    sha256: '',
+  });
+  expect(parseVoiceNote(encodeEncryptedFileUrl(meta))).not.toHaveProperty('sha256');
+});

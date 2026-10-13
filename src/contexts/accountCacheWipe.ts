@@ -38,7 +38,6 @@ import { PER_ACCOUNT_SETTING_BASES } from '../services/safetySettingsMigration';
 import { forgetAccountSettings } from '../services/accountSettingsCache';
 import { forgetLinkPreviewMirror } from '../services/linkPreviewPreference';
 import { forgetRevealedMedia } from '../services/mediaRevealStore';
-import { wipeDecryptedMediaForOwner } from '../services/decryptedMediaCache';
 import { cancelNotificationDefaults } from '../services/notificationDefaults';
 import { clearDecryptedMediaCache } from '../services/decryptedMediaCache';
 import { WATCHER_PUSH_KEY_BASE } from '../services/watcherPushStore';

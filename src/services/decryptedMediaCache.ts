@@ -300,7 +300,8 @@ export function setDecryptedMediaOwner(pubkey: string | null): void {
   inflight.clear();
   activeOwner = next;
   sessionEpoch++;
-  if (previous) void clearDecryptedMediaCache(previous);
+  // Best-effort: the switch must complete even if the folder delete fails.
+  if (previous) clearDecryptedMediaCache(previous).catch(() => {});
   if (next) {
     everHadOwner = true;
     const waiters = ownerWaiters;

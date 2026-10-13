@@ -218,17 +218,21 @@ const MessageBubble: React.FC<Props> = ({
     reveal: revealGif,
     safe: gifSafe,
   } = useGifMedia(id, content.kind === 'gif' ? content.url : null, autoLoadMedia);
+  // Bubbles re-render on reactions / delivery ticks; bound the sender label
+  // once per sender rather than on every pass (#1500 M4).
+  const senderLabel = useMemo(
+    () => (senderName ? sanitizeDisplayText(senderName, { maxLen: 64 }) : null),
+    [senderName],
+  );
 
   // Sender label (group bubbles, incoming) + a Marmot reply's quote: one header
   // slot every variant renders, so photo / GIF / invoice replies show it too.
   const quoteProps = { styles, fromMe, messageId: id, testIdPrefix };
   const QuoteStrip = quote ? <MessageQuote {...quoteProps} quote={quote} /> : null;
   const BubbleHeader =
-    senderName || QuoteStrip ? (
+    senderLabel || QuoteStrip ? (
       <>
-        {senderName ? (
-          <Text style={styles.senderLabel}>{sanitizeDisplayText(senderName, { maxLen: 64 })}</Text>
-        ) : null}
+        {senderLabel ? <Text style={styles.senderLabel}>{senderLabel}</Text> : null}
         {QuoteStrip}
       </>
     ) : null;

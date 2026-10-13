@@ -11,6 +11,8 @@ import { bytesToHex } from '@noble/hashes/utils.js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { deleteAsync, getInfoAsync, moveAsync, writeAsStringAsync } from 'expo-file-system/legacy';
 import { encryptFile } from './encryptedFile';
+import { encodeEncryptedFileUrl } from '../utils/encryptedFileUrl';
+import { parseVoiceNote } from '../utils/messageContent';
 import {
   namedFileExport,
   deleteDecryptedFile,
@@ -746,3 +748,34 @@ it.each(['memory', 'disk'])(
     expect(fetchMock).not.toHaveBeenCalled();
   },
 );
+
+it('rejects a kind-15 that declares an empty hash, end to end (encode → parse → resolve)', async () => {
+  setDecryptedMediaOwner(A);
+  const meta = { url: URL_, mime: 'audio/mp4', keyHex: sealed.keyHex, nonceHex: sealed.nonceHex };
+  // The same path a received kind-15 takes: nip17Unwrap encodes the `x` tag
+  // into the `#lpe` URL, the bubble parses it back into a media ref.
+  const toRef = (sha256?: string): EncryptedMediaRef => {
+    const parsed = parseVoiceNote(encodeEncryptedFileUrl({ ...meta, sha256 }));
+    if (!parsed?.encrypted) throw new Error('expected an encrypted voice note');
+    return {
+      url: parsed.url,
+      kind: 'voice',
+      mime: parsed.mime,
+      keyHex: parsed.keyHex,
+      nonceHex: parsed.nonceHex,
+      ...(parsed.sha256 !== undefined ? { sha256: parsed.sha256 } : {}),
+    };
+  };
+  const uri = await resolveDecryptedMedia(toRef(undefined));
+  const empty = toRef('');
+  expect(empty.sha256).toBe('');
+  expect(mediaCacheKey(empty)).not.toBe(mediaCacheKey(toRef(undefined)));
+  expect(peekDecryptedMedia(empty)).toBeNull();
+  await expect(resolveDecryptedMedia(empty)).rejects.toThrow('hash mismatch');
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(filesUnder(A)).toEqual([uri]);
+  // A correct declared hash still resolves.
+  await expect(
+    resolveDecryptedMedia(toRef(bytesToHex(sha256(sealed.ciphertext)))),
+  ).resolves.toMatch(/\.m4a$/);
+});

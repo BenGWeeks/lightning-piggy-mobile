@@ -159,9 +159,14 @@ const ContactProfileBody: React.FC<Props> = ({
       </Text>
 
       {contact.nip05 ? (
-        <Text style={styles.nip05} numberOfLines={1}>
-          {contact.nip05} · {t('profileSafety.unverified')}
-        </Text>
+        <View style={styles.nip05Row}>
+          <Text style={styles.nip05} numberOfLines={1}>
+            {contact.nip05}
+          </Text>
+          <Text style={styles.nip05Badge} testID="contact-nip05-unverified">
+            {t('profileSafety.unverified')}
+          </Text>
+        </View>
       ) : null}
 
       {contact.about && contact.about.trim().length > 0 ? (
