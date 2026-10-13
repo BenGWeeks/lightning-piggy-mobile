@@ -2799,7 +2799,28 @@
     "permissionTitle": "Lightning Piggy通知",
     "permissionAllowed": "手机设置中已允许通知。",
     "permissionBlocked": "手机设置中已关闭，因此无法显示提醒",
-    "permissionTurnOn": "开启"
+    "permissionTurnOn": "开启",
+    "on": "已开启",
+    "off": "已关闭",
+    "showDetails": "在提醒中显示详情",
+    "detailsOn": "已开启 · 消息内容和付款金额",
+    "detailsOff": "已关闭 — 提醒显示“新消息”",
+    "checkClosed": "关闭应用后检查",
+    "needsInstant": "需要开启即时提醒",
+    "pushReady": "已开启 · 所有聊天已就绪",
+    "pushNoToken": "已开启 · 需要设置",
+    "pushConsequence": "推送提醒显示“新消息”；打开 Lightning Piggy 后显示详情。",
+    "shopConsequence": "在后台使用你的位置。",
+    "customServer": "自定义服务器",
+    "defaultServer": "Lightning Piggy",
+    "pushPending": {
+      "one": "已开启 · {{count}} 个聊天未设置",
+      "other": "已开启 · {{count}} 个聊天未设置"
+    },
+    "mutedCount": {
+      "one": "{{count}} 个已静音账号",
+      "other": "{{count}} 个已静音账号"
+    }
   },
   "settingsScope": {
     "forThisAccount": "此账户",

@@ -2799,7 +2799,28 @@
     "permissionTitle": "Lightning Piggy के नोटिफ़िकेशन",
     "permissionAllowed": "आपके फ़ोन की सेटिंग्स में नोटिफ़िकेशन की अनुमति है।",
     "permissionBlocked": "आपके फ़ोन की सेटिंग्स में बंद हैं, इसलिए कोई अलर्ट नहीं दिख सकता",
-    "permissionTurnOn": "चालू करें"
+    "permissionTurnOn": "चालू करें",
+    "on": "चालू",
+    "off": "बंद",
+    "showDetails": "अलर्ट में विवरण दिखाएँ",
+    "detailsOn": "चालू · संदेश का पाठ और भुगतान राशि",
+    "detailsOff": "बंद — अलर्ट में «नया संदेश» दिखता है",
+    "checkClosed": "ऐप बंद होने पर जाँचें",
+    "needsInstant": "तुरंत अलर्ट चालू होने चाहिए",
+    "pushReady": "चालू · सभी चैट तैयार हैं",
+    "pushNoToken": "चालू · सेटअप ज़रूरी है",
+    "pushConsequence": "पुश अलर्ट में «नया संदेश» दिखता है; Lightning Piggy खोलने पर विवरण दिखते हैं।",
+    "shopConsequence": "पृष्ठभूमि में आपके स्थान का उपयोग करता है।",
+    "customServer": "कस्टम सर्वर",
+    "defaultServer": "Lightning Piggy",
+    "pushPending": {
+      "one": "चालू · {{count}} चैट का सेटअप नहीं हुआ",
+      "other": "चालू · {{count}} चैट का सेटअप नहीं हुआ"
+    },
+    "mutedCount": {
+      "one": "{{count}} म्यूट किया गया खाता",
+      "other": "{{count}} म्यूट किए गए खाते"
+    }
   },
   "settingsScope": {
     "forThisAccount": "यह अकाउंट",

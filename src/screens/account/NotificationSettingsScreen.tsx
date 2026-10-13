@@ -1,13 +1,17 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Platform } from 'react-native';
-import { BellRing, Radio } from 'lucide-react-native';
+import { BellRing, Radio, MapPin, Server, BellOff } from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
 import { useTranslation } from '../../contexts/LocaleContext';
-import MutedAccountsList from '../../components/MutedAccountsList';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import type { AccountDrawerNavigation } from '../../navigation/types';
+import { useMutedSenders } from '../../hooks/useMutedSenders';
+import { useNostr } from '../../contexts/NostrContext';
+import { loadMarmotPushSettings } from '../../services/marmotPushRegistration';
+import { loadShopAlertStatus } from '../../services/shopAlertStatus';
 import MarmotPushSection from '../../components/MarmotPushSection';
 import SettingsSection from '../../components/SettingsSection';
 import NotificationPermissionRow from '../../components/NotificationPermissionRow';
-import ShopAlertsSection from '../../components/ShopAlertsSection';
 import SettingsRow from '../../components/SettingsRow';
 import {
   getLockScreenContentEnabled,
@@ -20,17 +24,30 @@ import {
 } from '../../services/backgroundDmPreference';
 import { startBackgroundDmWatch, stopBackgroundDmWatch } from '../../services/backgroundDmService';
 
-/**
- * Settings → Notifications: every notification setting in one place. The
- * system permission comes first because every alert below depends on it;
- * the rest is split by where it's stored. "For this account" follows the
- * signed-in account (push registrations are per account); "On this phone"
- * applies to every account on the device (lock-screen content, the Android
- * background watch and the shop geofences). The notification server is
- * phone-wide too, but rarely touched, so it lives under Settings → Advanced.
- */
 const NotificationSettingsScreen: React.FC = () => {
   const t = useTranslation();
+  const navigation = useNavigation<AccountDrawerNavigation>();
+  const { mutedSenders } = useMutedSenders();
+  const { pubkey } = useNostr();
+  const [shopOn, setShopOn] = useState(false);
+  const [customServer, setCustomServer] = useState(false);
+  useFocusEffect(
+    useCallback(() => {
+      let alive = true;
+      void loadShopAlertStatus().then((active) => {
+        if (alive) setShopOn(active);
+      });
+      if (pubkey)
+        void loadMarmotPushSettings(pubkey)
+          .then((s) => {
+            if (alive) setCustomServer(!!s.customServer);
+          })
+          .catch(() => undefined);
+      return () => {
+        alive = false;
+      };
+    }, [pubkey]),
+  );
   const [lockScreenContentOn, setLockScreenContentOn] = useState<boolean>(false);
   // Background DM watch is Android-only (iOS can't hold a background socket).
   const [backgroundDmOn, setBackgroundDmOn] = useState<boolean>(false);
@@ -67,55 +84,81 @@ const NotificationSettingsScreen: React.FC = () => {
   };
 
   return (
-    <AccountScreenLayout title={t('notificationSettingsScreen.title')} scrollable={false}>
-      <MutedAccountsList
-        header={
-          <>
-            <NotificationPermissionRow />
+    <AccountScreenLayout title={t('notificationSettingsScreen.title')}>
+      <NotificationPermissionRow />
 
-            <SettingsSection scope="account" testID="notifications-account" />
-            <MarmotPushSection />
+      <SettingsSection scope="account" testID="notifications-account">
+        <MarmotPushSection />
 
-            <SettingsSection scope="phone" spaced testID="notifications-phone" />
-
-            <SettingsRow
-              icon={BellRing}
-              title={t('securityScreen.showMessagePaymentDetails')}
-              subtitle={t('settingsRows.notificationContentSubtitle')}
-              testID="notifications-content"
-              details={t('securityScreen.notificationContentHint')}
-              toggle={{
-                value: lockScreenContentOn,
-                onValueChange: handleToggleLockScreenContent,
-                accessibilityLabel: t('securityScreen.showMessagePaymentDetailsA11y'),
-                testID: 'security-lockscreen-content-toggle',
-              }}
-            />
-            {isAndroid && (
-              <SettingsRow
-                icon={Radio}
-                title={t('securityScreen.watchForMessages')}
-                subtitle={t('settingsRows.backgroundSubtitle')}
-                testID="notifications-background"
-                infoTestID="security-background-dm-details"
-                details={[
-                  t('securityScreen.backgroundNotificationsHint'),
-                  t('securityScreen.backgroundDetailsNoGoogle'),
-                  t('securityScreen.backgroundDetailsBattery'),
-                  t('securityScreen.backgroundDetailsPayments'),
-                ].join('\n\n')}
-                toggle={{
-                  value: backgroundDmOn,
-                  onValueChange: handleToggleBackgroundDm,
-                  testID: 'security-background-dm-toggle',
-                }}
-              />
+        <SettingsRow
+          icon={BellOff}
+          title={t('notificationMute.accounts')}
+          subtitle={t('notificationSettingsScreen.mutedCount', { count: mutedSenders.size })}
+          testID="notifications-muted-accounts"
+          onPress={() => navigation.navigate('AccountMutedAccounts')}
+        />
+      </SettingsSection>
+      <SettingsSection scope="phone" testID="notifications-phone">
+        <SettingsRow
+          icon={BellRing}
+          title={t('notificationSettingsScreen.showDetails')}
+          subtitle={t(
+            lockScreenContentOn
+              ? 'notificationSettingsScreen.detailsOn'
+              : 'notificationSettingsScreen.detailsOff',
+          )}
+          testID="notifications-content"
+          details={t('securityScreen.notificationContentHint')}
+          toggle={{
+            value: lockScreenContentOn,
+            onValueChange: handleToggleLockScreenContent,
+            accessibilityLabel: t('securityScreen.showMessagePaymentDetailsA11y'),
+            testID: 'security-lockscreen-content-toggle',
+          }}
+        />
+        {isAndroid && (
+          <SettingsRow
+            icon={Radio}
+            title={t('notificationSettingsScreen.checkClosed')}
+            subtitle={t(
+              backgroundDmOn ? 'notificationSettingsScreen.on' : 'notificationSettingsScreen.off',
             )}
+            testID="notifications-background"
+            infoTestID="security-background-dm-details"
+            details={[
+              t('securityScreen.backgroundNotificationsHint'),
+              t('securityScreen.backgroundDetailsNoGoogle'),
+              t('securityScreen.backgroundDetailsBattery'),
+              t('securityScreen.backgroundDetailsPayments'),
+            ].join('\n\n')}
+            toggle={{
+              value: backgroundDmOn,
+              onValueChange: handleToggleBackgroundDm,
+              testID: 'security-background-dm-toggle',
+            }}
+          />
+        )}
 
-            <ShopAlertsSection />
-          </>
-        }
-      />
+        <SettingsRow
+          icon={MapPin}
+          title={t('shopAlerts.title')}
+          subtitle={t(shopOn ? 'notificationSettingsScreen.on' : 'notificationSettingsScreen.off')}
+          testID="notifications-shop-alerts"
+          onPress={() => navigation.navigate('AccountShopAlerts')}
+        />
+        <SettingsRow
+          icon={Server}
+          title={t('securityScreen.marmotPushServerTitle')}
+          details={t('securityScreen.marmotPushServerHint')}
+          subtitle={t(
+            customServer
+              ? 'notificationSettingsScreen.customServer'
+              : 'notificationSettingsScreen.defaultServer',
+          )}
+          testID="notifications-notification-server"
+          onPress={() => navigation.navigate('AccountNotificationServer')}
+        />
+      </SettingsSection>
     </AccountScreenLayout>
   );
 };

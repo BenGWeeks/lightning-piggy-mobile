@@ -4,12 +4,18 @@ import type { Palette } from './palettes';
 
 export const createMarmotPushSectionStyles = (colors: Palette) =>
   StyleSheet.create({
+    separator: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: 'rgba(255,255,255,0.2)',
+      marginHorizontal: 14,
+    },
     statusRow: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
       gap: 8,
       marginTop: 8,
+      paddingHorizontal: 14,
     },
     statusText: {
       flex: 1,
@@ -20,6 +26,7 @@ export const createMarmotPushSectionStyles = (colors: Palette) =>
       color: colors.white,
       fontSize: 13,
       marginTop: 8,
+      paddingHorizontal: 14,
     },
     pillButton: {
       paddingHorizontal: 14,

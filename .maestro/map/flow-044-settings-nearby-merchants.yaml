@@ -1,87 +1,63 @@
 appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
-name: Alerts near Bitcoin shops — toggle, radius preset, quiet hours
+name: Notifications sub-pages — view only
 ---
-# Walks through the "Alerts near Bitcoin shops" settings (the geofence half
-# of #467), which live under Settings → Notifications → On this phone
-# (#1222). Verifies that the screen renders, the radius
-# preset chips switch (visual selection), and the quiet-hours toggle
-# flips. The actual permission grant + geofence-task registration are
-# not stable enough to assert under Maestro (they depend on whether the
-# emulator has Google Play Services + a configured location), so the
-# permission flow is left to manual smoke test in milestone 8.
-#
-# Run: maestro test .maestro/map/flow-044-settings-nearby-merchants.yaml
-
-- waitForAnimationToEnd:
-    timeout: 10000
-
-# Open the account drawer via the Wallets tab's avatar header. The drawer
-# has a `drawer-row-notifications` row that takes us into the screen.
-- tapOn:
-    id: 'tab-wallets'
-- waitForAnimationToEnd:
-    timeout: 1500
-
-# Open the drawer by its stable accessibility ID.
+# Open pages and information sheets without changing any preferences.
+- tapOn: { id: tab-wallets }
+- tapOn: { id: profile-icon }
+- scrollUntilVisible:
+    element: { id: drawer-row-notifications }
+    direction: DOWN
+- tapOn: { id: drawer-row-notifications }
 - extendedWaitUntil:
-    visible:
-      id: 'profile-icon'
+    visible: { id: security-marmot-push-toggle }
     timeout: 30000
-- tapOn:
-    id: 'profile-icon'
-
-- scrollUntilVisible:
-    element:
-      id: 'drawer-row-notifications'
-    direction: DOWN
-    timeout: 10000
-- tapOn:
-    id: 'drawer-row-notifications'
-- waitForAnimationToEnd:
-    timeout: 1500
-
-# The system-permission status sits above both halves of the screen.
+- tapOn: { id: security-marmot-push-details }
 - extendedWaitUntil:
-    visible:
-      id: 'notifications-permission-row'
+    visible: { id: security-marmot-push-details-sheet }
     timeout: 10000
-
-# The shop alerts sit near the end of the "On this phone" half.
+- tapOn: { id: security-marmot-push-details-sheet-close }
 - scrollUntilVisible:
-    element:
-      id: 'settings-quiet-hours-toggle'
+    element: { id: notifications-shop-alerts }
     direction: DOWN
+- tapOn: { id: notifications-shop-alerts }
+- extendedWaitUntil:
+    visible: { id: settings-nearby-merchants-toggle }
     timeout: 15000
-- assertVisible: 'Alerts near Bitcoin shops'
-- assertVisible: 'Alert me near Bitcoin shops'
-- assertVisible:
-    id: 'settings-nearby-merchants-toggle'
-
-# Tap a radius preset and check selection persists by re-reading the chip
-# (the chip's text doesn't change but its accessibilityState does — we
-# rely on visual + a follow-up assertion that the 250m chip is present).
-- tapOn:
-    id: 'settings-alert-radius-250'
-- waitForAnimationToEnd:
-    timeout: 600
-- assertVisible:
-    id: 'settings-alert-radius-250'
-
-# Quiet hours toggle.
-- tapOn:
-    id: 'settings-quiet-hours-toggle'
-- waitForAnimationToEnd:
-    timeout: 600
-- assertVisible:
-    id: 'settings-quiet-hours-toggle'
-
-# Back out of the drawer screen.
+- assertVisible: { id: settings-alert-radius-250 }
+- assertVisible: { id: settings-quiet-hours-toggle }
+- tapOn: { id: shop-alerts-privacy }
+- extendedWaitUntil:
+    visible: { id: shop-alerts-privacy-sheet }
+    timeout: 10000
+- tapOn: { id: shop-alerts-privacy-sheet-close }
+- tapOn: { id: account-back-button }
 - scrollUntilVisible:
-    element:
-      id: 'account-back-button'
-    direction: UP
+    element: { id: notifications-notification-server }
+    direction: DOWN
+- tapOn: { id: notifications-notification-server }
+- extendedWaitUntil:
+    visible: { id: security-marmot-push-server-current }
     timeout: 15000
-- tapOn:
-    id: 'account-back-button'
-- waitForAnimationToEnd:
-    timeout: 1000
+- runFlow:
+    when:
+      notVisible: { id: security-marmot-push-server-input }
+    commands:
+      - tapOn: { id: security-marmot-push-advanced }
+- extendedWaitUntil:
+    visible: { id: security-marmot-push-server-input }
+    timeout: 10000
+- assertVisible: "Only a server holding Lightning Piggy's Apple/Google push credentials can deliver to this app."
+- tapOn: { id: account-back-button }
+- scrollUntilVisible:
+    element: { id: notifications-muted-accounts }
+    direction: UP
+- tapOn: { id: notifications-muted-accounts }
+- extendedWaitUntil:
+    visible: { id: muted-accounts-list }
+    timeout: 15000
+- tapOn: { id: account-back-button }
+- scrollUntilVisible:
+    element: { id: account-back-button }
+    direction: UP
+- tapOn: { id: account-back-button }
+- assertVisible: { id: tab-wallets }

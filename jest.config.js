@@ -16,7 +16,7 @@ module.exports = {
   setupFiles: ['<rootDir>/jest.setup.js'],
   // Co-located convention: tests live next to their subject as `<file>.test.ts`.
   // Centralised `tests/unit/` is intentionally NOT matched — see CLAUDE.md.
-  testMatch: ['<rootDir>/src/**/*.test.{ts,tsx}'],
+  testMatch: ['<rootDir>/src/**/*.test.{ts,tsx}', '<rootDir>/.maestro/reporting/**/*.test.ts'],
   collectCoverageFrom: [
     'src/services/**/*.{ts,tsx}',
     'src/utils/**/*.{ts,tsx}',

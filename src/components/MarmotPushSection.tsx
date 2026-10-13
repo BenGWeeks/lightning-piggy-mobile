@@ -1,14 +1,13 @@
 import { useFocusEffect } from '@react-navigation/native';
 import React, { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Platform, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Platform, Text, TouchableOpacity, View } from 'react-native';
 import { Smartphone } from 'lucide-react-native';
 
 import Toast from './BrandedToast';
-import DetailsDisclosure from './DetailsDisclosure';
+import SettingsRow from './SettingsRow';
 import { useNostr } from '../contexts/NostrContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { createSharedAccountStyles } from '../screens/account/sharedStyles';
 import {
   disableMarmotPush,
   enableMarmotPush,
@@ -22,22 +21,12 @@ import type { SyncResult } from '../services/marmotPushRegistrar';
 import { unregisterWatcherPush } from '../services/watcherPush';
 import WatcherPushSection from './WatcherPushSection';
 import { createMarmotPushSectionStyles } from '../styles/MarmotPushSection.styles';
-import { createSecurityScreenStyles } from '../styles/SecurityScreen.styles';
 
-/**
- * Settings → Notifications → For this account: opt-in Marmot push (MIP-05) for the signed-in
- * account. Off by default, and per account: another account on this phone
- * never inherits it. The privacy trade-off (and, for remote-signer users,
- * what approving costs them) sits behind "Privacy details" right above the
- * switch. The notification server is one choice for the whole phone, so it
- * lives under Settings → Advanced (NotificationServerSection).
- */
+/** Account push controls; service handlers and signer setup remain unchanged. */
 const MarmotPushSection: React.FC = () => {
   const colors = useThemeColors();
   const t = useTranslation();
   const { signerType, pubkey } = useNostr();
-  const shared = useMemo(() => createSharedAccountStyles(colors), [colors]);
-  const screen = useMemo(() => createSecurityScreenStyles(colors), [colors]);
   const styles = useMemo(() => createMarmotPushSectionStyles(colors), [colors]);
   const [enabled, setEnabled] = useState(false);
   // Another account on this phone has push on (same token → linkable).
@@ -143,77 +132,62 @@ const MarmotPushSection: React.FC = () => {
 
   return (
     <>
-      <View style={screen.headerRow}>
-        <Smartphone size={22} color={colors.white} />
-        <Text style={[shared.sectionLabel, screen.headerLabel]}>
-          {t('securityScreen.marmotPush')}
-        </Text>
-      </View>
-      <Text style={shared.fieldHint}>
-        {t(
-          Platform.OS === 'ios'
-            ? 'securityScreen.marmotPushHintIos'
-            : 'securityScreen.marmotPushHintAndroid',
-        )}
-      </Text>
-      <DetailsDisclosure
-        label={t('securityScreen.privacyDetails')}
-        testID="security-marmot-push-details"
-        paragraphs={[
+      <SettingsRow
+        icon={Smartphone}
+        title={t('securityScreen.marmotPushToggle')}
+        subtitle={
+          !enabled
+            ? t('notificationSettingsScreen.off')
+            : pending === null
+              ? t('notificationSettingsScreen.pushNoToken')
+              : pending > 0
+                ? t('notificationSettingsScreen.pushPending', { count: pending })
+                : t('notificationSettingsScreen.pushReady')
+        }
+        subtitleTestID="security-marmot-push-status"
+        testID="notifications-instant-alerts"
+        infoTestID="security-marmot-push-details"
+        details={[
+          t(
+            Platform.OS === 'ios'
+              ? 'securityScreen.marmotPushHintIos'
+              : 'securityScreen.marmotPushHintAndroid',
+          ),
           t('securityScreen.marmotPushPrivacy'),
           Platform.OS === 'android' && t('securityScreen.marmotPushGoogleFree'),
           remoteSigner && t('securityScreen.marmotPushSignerNote'),
-        ]}
+        ]
+          .filter(Boolean)
+          .join('\n\n')}
+        toggle={{
+          value: enabled,
+          onValueChange: handleToggle,
+          disabled: !pubkey || busy,
+          accessibilityLabel: t('securityScreen.marmotPushToggle'),
+          testID: 'security-marmot-push-toggle',
+        }}
       />
-
-      <View style={screen.toggleRow}>
-        <Text style={[screen.optionLabel, screen.toggleLabel]}>
-          {t('securityScreen.marmotPushToggle')}
-        </Text>
-        {busy ? (
-          <ActivityIndicator color={colors.brandPink} testID="security-marmot-push-busy" />
-        ) : (
-          <Switch
-            disabled={!pubkey}
-            value={enabled}
-            onValueChange={handleToggle}
-            accessibilityLabel={t('securityScreen.marmotPushToggle')}
-            testID="security-marmot-push-toggle"
-            trackColor={{ false: colors.divider, true: colors.brandPink }}
-            thumbColor={enabled ? colors.white : undefined}
-          />
-        )}
-      </View>
-
+      {busy && <ActivityIndicator color={colors.brandPink} testID="security-marmot-push-busy" />}
       {otherAccounts && (
         <Text style={styles.noticeText} testID="security-marmot-push-other-accounts">
           {t('securityScreen.marmotPushOtherAccounts')}
         </Text>
       )}
 
-      {enabled && (
-        <View style={styles.statusRow} testID="security-marmot-push-status">
-          <Text style={styles.statusText}>
-            {pending === null
-              ? t('securityScreen.marmotPushNoToken')
-              : pending > 0
-                ? t('securityScreen.marmotPushPending', { count: pending })
-                : t('securityScreen.marmotPushAllSet')}
-          </Text>
-          {(pending === null || pending > 0) && !busy && (
-            <TouchableOpacity
-              style={styles.pillButton}
-              onPress={handleFinish}
-              accessibilityRole="button"
-              accessibilityLabel={t('securityScreen.marmotPushFinish')}
-              testID="security-marmot-push-finish"
-            >
-              <Text style={styles.pillButtonText}>{t('securityScreen.marmotPushFinish')}</Text>
-            </TouchableOpacity>
-          )}
+      {enabled && (pending === null || pending > 0) && !busy && (
+        <View style={styles.statusRow}>
+          <TouchableOpacity
+            style={styles.pillButton}
+            onPress={handleFinish}
+            accessibilityRole="button"
+            accessibilityLabel={t('securityScreen.marmotPushFinish')}
+            testID="security-marmot-push-finish"
+          >
+            <Text style={styles.pillButtonText}>{t('securityScreen.marmotPushFinish')}</Text>
+          </TouchableOpacity>
         </View>
       )}
-
+      <Text style={styles.noticeText}>{t('notificationSettingsScreen.pushConsequence')}</Text>
       <WatcherPushSection pushEnabled={enabled} />
     </>
   );

@@ -1,26 +1,21 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { AppState, Linking, Text, View } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { AppState, Linking } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Notifications from 'expo-notifications';
-import { BellOff, BellRing } from 'lucide-react-native';
-import { useThemeColors } from '../contexts/ThemeContext';
+import { BellOff } from 'lucide-react-native';
 import { useTranslation } from '../contexts/LocaleContext';
 import { requestNotificationPermission } from '../services/notificationService';
-import { createSettingsBannerStyles } from '../styles/SettingsBanner.styles';
 import SettingsBanner from './SettingsBanner';
 
 /**
  * Top of Settings → Notifications: whether the system lets Lightning Piggy
  * show notifications at all. Every alert on the screen — this account's and
- * the phone's — depends on it, so it sits above both halves: a quiet status
- * line while allowed, a banner with a "Turn on" button while blocked.
+ * the phone's — depends on it, so it shows a banner with a "Turn on" button above both halves only while blocked.
  * Re-reads the status whenever the screen regains focus or the app comes
  * back from the system settings page.
  */
 const NotificationPermissionRow: React.FC = () => {
-  const colors = useThemeColors();
   const t = useTranslation();
-  const styles = useMemo(() => createSettingsBannerStyles(colors), [colors]);
   // null = not read yet.
   const [granted, setGranted] = useState<boolean | null>(null);
 
@@ -54,18 +49,7 @@ const NotificationPermissionRow: React.FC = () => {
     void refresh();
   };
 
-  if (granted === null) return null;
-
-  if (granted) {
-    return (
-      <View style={styles.allowedRow} testID="notifications-permission-row">
-        <BellRing size={16} color={colors.white} />
-        <Text style={styles.allowedText} testID="notifications-permission-status">
-          {t('notificationSettingsScreen.permissionAllowed')}
-        </Text>
-      </View>
-    );
-  }
+  if (granted === null || granted) return null;
 
   return (
     <SettingsBanner

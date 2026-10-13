@@ -69,7 +69,13 @@ const MutedAccountRow = React.memo(function MutedAccountRow({
   );
 });
 
-export default function MutedAccountsList({ header }: { header?: React.ReactElement }) {
+export default function MutedAccountsList({
+  header,
+  showHeading = true,
+}: {
+  header?: React.ReactElement;
+  showHeading?: boolean;
+}) {
   const { mutedSenders, toggle } = useMutedSenders();
   const { contacts } = useNostrContacts();
   const { getGroup } = useGroups();
@@ -133,7 +139,7 @@ export default function MutedAccountsList({ header }: { header?: React.ReactElem
             style={[settings.optionRow, styles.cardSegment, styles.cardHeader]}
             testID="muted-accounts-card-header"
           >
-            <Text style={styles.heading}>{t('notificationMute.accounts')}</Text>
+            {showHeading && <Text style={styles.heading}>{t('notificationMute.accounts')}</Text>}
           </View>
         </>
       }

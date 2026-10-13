@@ -1,13 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, Switch } from 'react-native';
+import { View, Text, TouchableOpacity } from 'react-native';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
-import { MapPin } from 'lucide-react-native';
+import { MapPin, Moon, Radius } from 'lucide-react-native';
 import { Alert } from './BrandedAlert';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import { createSharedAccountStyles } from '../screens/account/sharedStyles';
-import { createSecurityScreenStyles } from '../styles/SecurityScreen.styles';
+import SettingsRow from './SettingsRow';
 import { createShopAlertsSectionStyles } from '../styles/ShopAlertsSection.styles';
 import {
   DEFAULT_NEARBY_SETTINGS,
@@ -31,8 +30,6 @@ const RADIUS_PRESETS: NearbySettings['alertRadiusMeters'][] = [50, 100, 250, 500
 const ShopAlertsSection: React.FC = () => {
   const t = useTranslation();
   const colors = useThemeColors();
-  const shared = useMemo(() => createSharedAccountStyles(colors), [colors]);
-  const screen = useMemo(() => createSecurityScreenStyles(colors), [colors]);
   const styles = useMemo(() => createShopAlertsSectionStyles(colors), [colors]);
 
   const [settings, setSettings] = useState<NearbySettings>(DEFAULT_NEARBY_SETTINGS);
@@ -148,30 +145,30 @@ const ShopAlertsSection: React.FC = () => {
   );
 
   return (
-    <View testID="notifications-shop-alerts">
-      <View style={[screen.headerRow, screen.sectionGap]}>
-        <MapPin size={22} color={colors.white} />
-        <Text style={[shared.sectionLabel, screen.headerLabel]}>{t('shopAlerts.title')}</Text>
-      </View>
-      <Text style={shared.fieldHint}>
-        {active ? t('shopAlerts.geofencingOn') : t('shopAlerts.geofencingOff')}
-      </Text>
-      <View style={screen.toggleRow}>
-        <Text style={[screen.optionLabel, screen.toggleLabel]}>
-          {t('shopAlerts.alertMeNearShops')}
-        </Text>
-        <Switch
-          value={settings.enabled}
-          onValueChange={handleToggle}
-          disabled={busy}
-          accessibilityLabel={t('shopAlerts.enableAlertsLabel')}
-          testID="settings-nearby-merchants-toggle"
-          trackColor={{ false: colors.divider, true: colors.brandPink }}
-          thumbColor={settings.enabled ? colors.white : undefined}
-        />
-      </View>
-
-      <Text style={styles.subHeader}>{t('shopAlerts.alertRadius')}</Text>
+    <View style={styles.card} testID="notifications-shop-alerts">
+      <SettingsRow
+        grouped
+        icon={MapPin}
+        title={t('shopAlerts.alertMeNearShops')}
+        subtitle={t(active ? 'notificationSettingsScreen.on' : 'notificationSettingsScreen.off')}
+        testID="shop-alerts-enabled"
+        details={t('shopAlerts.privacyHint')}
+        infoTestID="shop-alerts-privacy"
+        toggle={{
+          value: settings.enabled,
+          onValueChange: handleToggle,
+          disabled: busy,
+          accessibilityLabel: t('shopAlerts.enableAlertsLabel'),
+          testID: 'settings-nearby-merchants-toggle',
+        }}
+      />
+      <SettingsRow
+        grouped
+        icon={Radius}
+        title={t('shopAlerts.alertRadius')}
+        subtitle={t('shopAlerts.radiusMeters', { meters: settings.alertRadiusMeters })}
+        testID="shop-alerts-radius"
+      />
       <View style={styles.chipRow}>
         {RADIUS_PRESETS.map((m) => {
           const selected = settings.alertRadiusMeters === m;
@@ -193,23 +190,24 @@ const ShopAlertsSection: React.FC = () => {
         })}
       </View>
 
-      <Text style={styles.subHeader}>{t('shopAlerts.quietHours')}</Text>
-      <View style={[screen.toggleRow, styles.flushTop]}>
-        <View style={screen.toggleLabel}>
-          <Text style={screen.optionLabel}>{t('shopAlerts.quietHoursWindow')}</Text>
-          <Text style={styles.optionSublabel}>{t('shopAlerts.quietHoursSub')}</Text>
-        </View>
-        <Switch
-          value={settings.quietHoursEnabled}
-          onValueChange={handleQuietHours}
-          accessibilityLabel={t('shopAlerts.quietHours')}
-          testID="settings-quiet-hours-toggle"
-          trackColor={{ false: colors.divider, true: colors.brandPink }}
-          thumbColor={settings.quietHoursEnabled ? colors.white : undefined}
-        />
-      </View>
-
-      <Text style={styles.privacyHint}>{t('shopAlerts.privacyHint')}</Text>
+      <SettingsRow
+        grouped
+        icon={Moon}
+        title={t('shopAlerts.quietHours')}
+        subtitle={
+          settings.quietHoursEnabled
+            ? t('shopAlerts.quietHoursWindow')
+            : t('notificationSettingsScreen.off')
+        }
+        testID="shop-alerts-quiet-hours"
+        details={t('shopAlerts.quietHoursSub')}
+        toggle={{
+          value: settings.quietHoursEnabled,
+          onValueChange: handleQuietHours,
+          testID: 'settings-quiet-hours-toggle',
+        }}
+      />
+      <Text style={styles.privacyHint}>{t('notificationSettingsScreen.shopConsequence')}</Text>
     </View>
   );
 };

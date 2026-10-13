@@ -1,7 +1,7 @@
 import React from 'react';
 import { View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { Bitcoin, FlaskConical, Gauge, MessageCircle, Radio, Server } from 'lucide-react-native';
+import { Bitcoin, FlaskConical, Gauge, MessageCircle, Radio } from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
 import { Alert } from '../../components/BrandedAlert';
 import SettingsSection from '../../components/SettingsSection';
@@ -31,64 +31,58 @@ const AdvancedScreen: React.FC = () => {
   };
   return (
     <AccountScreenLayout title={t('advancedScreen.title')}>
-      <SettingsSection scope="account" testID="advanced-account" />
-      <SettingsRow
-        icon={Radio}
-        title={t('nostrScreen.title')}
-        subtitle={t('advancedScreen.nostrNetworkSubtitle')}
-        testID="advanced-nostr-network"
-        onPress={() => navigation.navigate('AccountNostr')}
-      />
-      <View testID="advanced-experimental-features">
+      <SettingsSection scope="account" testID="advanced-account">
         <SettingsRow
-          icon={FlaskConical}
-          title={t('advancedScreen.secretMode')}
-          subtitle={t('settingsRows.experimentalSubtitle')}
-          testID="advanced-secret-mode"
-          details={t('advancedScreen.secretHint')}
-          toggle={{
-            value: secretMode,
-            onValueChange: toggleSecretMode,
-            testID: 'advanced-secret-mode-toggle',
-          }}
+          icon={Radio}
+          title={t('nostrScreen.title')}
+          subtitle={t('advancedScreen.nostrNetworkSubtitle')}
+          testID="advanced-nostr-network"
+          onPress={() => navigation.navigate('AccountNostr')}
         />
-      </View>
-      <SettingsSection scope="phone" spaced testID="advanced-phone" />
-      <SettingsRow
-        icon={Bitcoin}
-        title={t('onChainScreen.title')}
-        subtitle={t('advancedScreen.bitcoinNetworkSubtitle')}
-        testID="advanced-bitcoin-network"
-        onPress={() => navigation.navigate('AccountOnChain')}
-      />
-      <SettingsRow
-        icon={Server}
-        title={t('securityScreen.marmotPushServerTitle')}
-        subtitle={t('settingsRows.notificationServerSubtitle')}
-        details={t('securityScreen.marmotPushServerHint')}
-        testID="advanced-notification-server"
-        onPress={() => navigation.navigate('AccountNotificationServer')}
-      />
-      <NativeCryptoSection />
-      <DeviceNoticesSection />
-      {__DEV__ && (
+        <View testID="advanced-experimental-features">
+          <SettingsRow
+            icon={FlaskConical}
+            title={t('advancedScreen.secretMode')}
+            subtitle={t('settingsRows.experimentalSubtitle')}
+            testID="advanced-secret-mode"
+            details={t('advancedScreen.secretHint')}
+            toggle={{
+              value: secretMode,
+              onValueChange: toggleSecretMode,
+              testID: 'advanced-secret-mode-toggle',
+            }}
+          />
+        </View>
+      </SettingsSection>
+      <SettingsSection scope="phone" testID="advanced-phone">
         <SettingsRow
-          icon={MessageCircle}
-          title={t('advancedScreen.bubbleStyle')}
-          subtitle={t(`advancedScreen.bubbleStyle${outgoingBubbleStyle}`)}
-          testID="advanced-bubble-style-row"
-          onPress={() => navigation.navigate('AccountBubbleStyle')}
+          icon={Bitcoin}
+          title={t('onChainScreen.title')}
+          subtitle={t('advancedScreen.bitcoinNetworkSubtitle')}
+          testID="advanced-bitcoin-network"
+          onPress={() => navigation.navigate('AccountOnChain')}
         />
-      )}
-      {(__DEV__ || process.env.EXPO_PUBLIC_KEEP_PERF_LOGS === '1') && (
-        <SettingsRow
-          icon={Gauge}
-          title={t('hermesProfiler.title')}
-          subtitle={t('settingsRows.profilerSubtitle')}
-          testID="advanced-profiler"
-          onPress={() => navigation.navigate('AccountProfiler')}
-        />
-      )}
+        <NativeCryptoSection />
+        <DeviceNoticesSection />
+        {__DEV__ && (
+          <SettingsRow
+            icon={MessageCircle}
+            title={t('advancedScreen.bubbleStyle')}
+            subtitle={t(`advancedScreen.bubbleStyle${outgoingBubbleStyle}`)}
+            testID="advanced-bubble-style-row"
+            onPress={() => navigation.navigate('AccountBubbleStyle')}
+          />
+        )}
+        {(__DEV__ || process.env.EXPO_PUBLIC_KEEP_PERF_LOGS === '1') && (
+          <SettingsRow
+            icon={Gauge}
+            title={t('hermesProfiler.title')}
+            subtitle={t('settingsRows.profilerSubtitle')}
+            testID="advanced-profiler"
+            onPress={() => navigation.navigate('AccountProfiler')}
+          />
+        )}
+      </SettingsSection>
     </AccountScreenLayout>
   );
 };
