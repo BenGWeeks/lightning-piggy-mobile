@@ -50,10 +50,8 @@ export function adoptFollowSnapshot(
   const run = async () => {
     const best = newestFollowSnapshot(await readFollowSnapshot(pubkey), candidate);
     await AsyncStorage.setItem(perAccountKey(FOLLOW_SNAPSHOT_KEY, pubkey), JSON.stringify(best));
+    publishFollowSet(pubkey, best.contacts, best.createdAt);
     onAdopt?.(best.contacts);
-    publishFollowSet(pubkey, best.contacts);
-    if (__DEV__)
-      console.log(`[Nostr] follow set: ${best.contacts.length} follows (kind-3 ${best.createdAt})`);
     return best;
   };
   const next = writes.then(run, run);

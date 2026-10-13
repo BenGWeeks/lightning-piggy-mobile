@@ -45,7 +45,7 @@ export function gateLiveDm({
     });
     if (__DEV__)
       console.log(
-        `[Nostr] live ${label} ${entry.id.slice(0, 8)} deferred by follow-gate (partner=${entry.partnerPubkey.slice(0, 8)}, kind=${kind}, follows=${follows.size}, hydrated=${hydrated}, inSet=${isFollowed(follows, entry.partnerPubkey)})`,
+        `[Nostr] live ${label} ${entry.id.slice(0, 8)} deferred by follow-gate (partner=${entry.partnerPubkey.slice(0, 8)}, kind=${kind}, follows=${follows.size}, hydrated=${hydrated}, inSet=${isFollowed(follows, entry.partnerPubkey)}, buffered=${buffer.size})`,
       );
     return 'defer';
   }

@@ -24,7 +24,7 @@ export async function reconcileContactFollows(
     ...configured.filter((r) => r.read).map((r) => r.url),
   ]);
   if (fresh) contacts = (await adoptFollowSnapshot(pubkey, fresh)).contacts;
-  else publishFollowSet(pubkey, contacts);
+  else publishFollowSet(pubkey, contacts, snapshot?.createdAt);
   finish(contacts);
   return contacts;
 }

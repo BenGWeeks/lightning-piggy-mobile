@@ -1,51 +1,34 @@
-import { useEffect, useLayoutEffect, useRef } from 'react';
-import { subscribeFollowSet } from '../services/followSetEvents';
-import { buildFollowSet } from '../utils/followPubkeys';
-import { createLiveSubFollowGateBuffer, type DeferredFollowGateEntry } from './liveSubFollowGate';
+import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
+import {
+  createFollowGateStore,
+  getFollowGateStore,
+  replayFollowGateStore,
+  subscribeFollowSet,
+} from '../services/followSetEvents';
+import type { DeferredFollowGateEntry } from './liveSubFollowGate';
 
-/** Keep both wire paths current without waiting for contact-list transitions. */
+/** Canonical account state survives hook remounts and subscription re-opens. */
 export function useLiveFollowGate(follows: Set<string>, hydrated: boolean, owner?: string | null) {
-  const followPubkeysRef = useRef(follows);
-  const followHydratedRef = useRef(hydrated);
-  const followGateBufferRef = useRef(createLiveSubFollowGateBuffer());
-  const deferredReplayRef = useRef<((item: DeferredFollowGateEntry) => void) | null>(null);
-  const adopted = useRef(false);
-  const replayBuffered = () => {
-    const replay = deferredReplayRef.current;
-    if (!replay) return;
-    const buffer = followGateBufferRef.current;
-    let released = 0;
-    buffer.reevaluate(followPubkeysRef.current, (item) => {
-      released++;
-      replay(item);
-    });
-    const dropped = buffer.size;
-    buffer.clear();
-    if (__DEV__)
-      console.log(`[Nostr] follow-gate replay: ${released} released, ${dropped} dropped`);
-  };
-  const replayBufferedRef = useRef(replayBuffered);
-  replayBufferedRef.current = replayBuffered;
+  const [unowned] = useState(createFollowGateStore);
+  const store = owner ? getFollowGateStore(owner) : unowned;
   useLayoutEffect(() => {
-    adopted.current = false;
-    followHydratedRef.current = false;
-    followPubkeysRef.current = new Set();
     if (!owner) return;
-    return subscribeFollowSet(owner, (contacts) => {
-      adopted.current = true;
-      followPubkeysRef.current = buildFollowSet(contacts.map((c) => c.pubkey));
-      followHydratedRef.current = true;
-      // This is the same synchronous adoption that logs "follow set".
-      // Replay the buffer directly; knownWrapIds/seen must not suppress it.
-      replayBufferedRef.current();
-    });
-  }, [owner]);
+    return subscribeFollowSet(owner, () => replayFollowGateStore(store));
+  }, [owner, store]);
   useEffect(() => {
-    // Delayed UI props must never roll back the authoritative adopted list.
-    if (adopted.current) return;
-    followPubkeysRef.current = follows;
-    followHydratedRef.current = hydrated;
-    if (hydrated) replayBufferedRef.current();
-  }, [follows, hydrated]);
-  return { followPubkeysRef, followHydratedRef, followGateBufferRef, deferredReplayRef };
+    // Cache paints and delayed UI props must not roll back authoritative adoption.
+    if (store.adopted) return;
+    store.followPubkeysRef.current = follows;
+    store.followHydratedRef.current = hydrated;
+    if (hydrated) replayFollowGateStore(store);
+  }, [follows, hydrated, store]);
+  const setDeferredReplay = useCallback(
+    (replay: ((item: DeferredFollowGateEntry) => void) | null) => {
+      store.deferredReplayRef.current = replay;
+      // Adoption may have completed while the subscription was closed.
+      if (replay) replayFollowGateStore(store);
+    },
+    [store],
+  );
+  return { ...store, setDeferredReplay };
 }

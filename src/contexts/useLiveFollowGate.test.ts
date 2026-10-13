@@ -1,6 +1,7 @@
 import { act, renderHook } from '@testing-library/react-native';
 import { useLiveFollowGate } from './useLiveFollowGate';
 import { adoptFollowSnapshot } from '../services/contactFollowFreshness';
+import { clearFollowGateStores, getFollowGateStore } from '../services/followSetEvents';
 import { gateLiveDm } from './liveDmFollowGateDecision';
 
 jest.mock('../services/contactListSync', () => ({ fetchLatestContactList: jest.fn() }));
@@ -15,6 +16,8 @@ const contacts = [MIDDLE, LITTLE, OTHER].map((pubkey) => ({
   petname: null,
   profile: null,
 }));
+
+beforeEach(() => clearFollowGateStores());
 
 it('adoption updates the live refs and drains both kinds before UI hydration commits (#1458)', async () => {
   const log = jest.spyOn(console, 'log').mockImplementation(() => {});
@@ -56,6 +59,11 @@ it('adoption updates the live refs and drains both kinds before UI hydration com
   if (process.env.EXPO_PUBLIC_KEEP_PERF_LOGS === '1') {
     expect(log).toHaveBeenCalledWith('[Nostr] follow-gate replay: 2 released, 1 dropped');
     expect(log).toHaveBeenCalledWith('[Nostr] follow set: 3 follows (kind-3 1791834639)');
+    expect(log).toHaveBeenCalledWith('[Nostr] follow-gate replay: start buffered=3');
+    const lines = log.mock.calls.map(([line]) => line);
+    expect(lines.indexOf('[Nostr] follow set: 3 follows (kind-3 1791834639)')).toBeLessThan(
+      lines.indexOf('[Nostr] follow-gate replay: start buffered=3'),
+    );
   }
   // A stale UI render must not overwrite the adopted live refs or re-defer forever.
   act(() => rerender({}));
@@ -74,6 +82,8 @@ it('ignores another account and unsubscribes on account switch', async () => {
     await adoptFollowSnapshot(OTHER, { contacts, createdAt: 100 });
   });
   expect(result.current.followHydratedRef.current).toBe(false);
+  // The provider clears canonical memory before switching identity.
+  clearFollowGateStores();
   act(() => rerender(OTHER));
   await act(async () => {
     await adoptFollowSnapshot(BIG, { contacts, createdAt: 1791834640 });
@@ -123,4 +133,70 @@ it('waits past cache paint and replays only after reconciliation, including an e
   act(() => rerender({ follows: new Set(), hydrated: true }));
   expect(replay).toHaveBeenCalledTimes(1);
   expect(result.current.followGateBufferRef.current.size).toBe(0);
+});
+
+it("keeps two viewers' buffers and canonical follows separate (#1458)", async () => {
+  const first = renderHook(() => useLiveFollowGate(new Set<string>(), false, BIG));
+  const second = renderHook(() => useLiveFollowGate(new Set<string>(), false, OTHER));
+  const replayFirst = jest.fn();
+  const replaySecond = jest.fn();
+  first.result.current.setDeferredReplay(replayFirst);
+  second.result.current.setDeferredReplay(replaySecond);
+  for (const gate of [first.result.current, second.result.current]) {
+    gate.followGateBufferRef.current.defer({
+      partnerPubkey: MIDDLE,
+      entry: {
+        id: 'same-id',
+        partnerPubkey: MIDDLE,
+        fromMe: false,
+        createdAt: 100,
+        text: 'hello',
+        wireKind: 4,
+      },
+    });
+  }
+  await act(async () => {
+    await adoptFollowSnapshot(BIG, { contacts, createdAt: 1791834641 });
+  });
+  expect(replayFirst).toHaveBeenCalledTimes(1);
+  expect(replaySecond).not.toHaveBeenCalled();
+  expect(second.result.current.followGateBufferRef.current.size).toBe(1);
+  expect(second.result.current.followHydratedRef.current).toBe(false);
+  await act(async () => {
+    await adoptFollowSnapshot(OTHER, { contacts, createdAt: 1791834641 });
+  });
+  expect(replaySecond).toHaveBeenCalledTimes(1);
+  expect(first.result.current.followGateBufferRef.current.size).toBe(0);
+  expect(getFollowGateStore(BIG.toUpperCase())).toBe(getFollowGateStore(BIG));
+  first.unmount();
+  second.unmount();
+});
+
+it('retains pending DMs when hydration finishes between subscription closures (#1458)', async () => {
+  const first = renderHook(() => useLiveFollowGate(new Set<string>(), false, BIG));
+  const buffer = first.result.current.followGateBufferRef.current;
+  buffer.defer({
+    partnerPubkey: MIDDLE,
+    entry: {
+      id: 'gap',
+      partnerPubkey: MIDDLE,
+      fromMe: false,
+      createdAt: 100,
+      text: 'hello',
+      wireKind: 4,
+    },
+  });
+  first.result.current.setDeferredReplay(null);
+  first.unmount();
+  await act(async () => {
+    await adoptFollowSnapshot(BIG, { contacts, createdAt: 1791834642 });
+  });
+  expect(buffer.size).toBe(1);
+  const reopened = renderHook(() => useLiveFollowGate(new Set<string>(), false, BIG));
+  const replay = jest.fn();
+  reopened.result.current.setDeferredReplay(replay);
+  expect(reopened.result.current.followGateBufferRef.current).toBe(buffer);
+  expect(replay).toHaveBeenCalledTimes(1);
+  expect(buffer.size).toBe(0);
+  reopened.unmount();
 });

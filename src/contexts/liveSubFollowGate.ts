@@ -2,13 +2,13 @@ import { isFollowed } from '../utils/followPubkeys';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
 import type { DecodedRumor } from '../utils/nip17Unwrap';
 
-// Per-sub, bounded recovery during follow reconciliation (#851 / #1458).
+// Account-owned, bounded recovery during follow reconciliation (#851 / #1458).
 // Both kind-4 and kind-1059 hold decrypted inbox previews in memory while
 // follows load. Backlog replays silently; only fresh inbound carries a
 // notification. No ciphertext or secrets are persisted by this buffer.
 // Cached friends can replay after the offline timeout; unmatched entries
 // remain recoverable until reconciliation completes (which clears strangers).
-// Teardown clears the buffer atomically with the subscription.
+// Subscription teardown retains pending entries; identity teardown clears them.
 
 export interface DeferredFollowGateEntry {
   partnerPubkey: string;
@@ -30,7 +30,7 @@ export interface LiveSubFollowGateBuffer {
   // pass are removed and handed to `onPass` (newest-last); the rest stay
   // buffered in case follows are still partially hydrated.
   reevaluate: (follows: Set<string>, onPass: (item: DeferredFollowGateEntry) => void) => void;
-  // Drop everything (sub teardown). Atomic with wipe / account switch.
+  // Drop strangers after reconciliation, or everything on account switch/sign-out.
   clear: () => void;
   // Test/observability hook.
   readonly size: number;

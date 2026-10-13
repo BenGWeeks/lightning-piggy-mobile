@@ -826,13 +826,10 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     // change must fully stop the sub, not resurrect it).
     reconnectController.stopReconnecting();
     flushPendingInbox();
-    // Drop the follow-gate deferral buffer + unregister the replay hook
-    // atomically with sub teardown (#851 F2). A wipe / account switch tears
-    // the sub down, so buffered just-wiped wraps can never be replayed into
-    // the next identity's inbox.
+    // Detach this closure; account-owned deferrals survive relay-list re-opens.
+    // Identity teardown clears the canonical store on switch/sign-out.
     setDeferredReplay(null);
     followGate.dispose();
-    followGateBuffer.clear();
     // Stop the native engine — tears the rust-nostr pool down AND clears the
     // module's single-entry key cache, so a logout / account switch never
     // leaves the old identity's secret in native memory (Stage 2 M2 key

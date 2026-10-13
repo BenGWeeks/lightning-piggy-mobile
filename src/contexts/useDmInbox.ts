@@ -856,7 +856,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
     if (!isLoggedIn) setDmInbox([]);
   }, [isLoggedIn, setDmInbox]);
 
-  const { followPubkeysRef, followHydratedRef, followGateBufferRef, deferredReplayRef } =
+  const { followPubkeysRef, followHydratedRef, followGateBufferRef, setDeferredReplay } =
     useLiveFollowGate(followPubkeys, followHydrated, pubkey);
 
   // Idempotent — any DM-surface (Messages tab, ConversationScreen)
@@ -949,9 +949,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       setDmInbox: inboxSetterFor(pubkey),
       setAmberNip44Permission,
       followGateBuffer: followGateBufferRef.current,
-      setDeferredReplay: (fn) => {
-        deferredReplayRef.current = fn;
-      },
+      setDeferredReplay,
       // Close the reconnect blind window (#1035): after a JS-sub socket-drop
       // or Doze-resume re-arm — or the native engine's relay reconnect
       // (Stage 2 M2 of #1036, same semantics) — trigger a full refreshDmInbox
@@ -968,7 +966,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
     getReadRelays,
     liveSubArmed,
     inboxSetterFor,
-    deferredReplayRef,
+    setDeferredReplay,
     followGateBufferRef,
     followHydratedRef,
     followPubkeysRef,

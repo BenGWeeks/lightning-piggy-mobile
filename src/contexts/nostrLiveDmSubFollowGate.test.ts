@@ -4,10 +4,8 @@
  * These exercise `startLiveDmSubscription` with its data-layer boundaries
  * mocked, pinning the three behaviours the #851 fix introduces:
  *
- *  1. Teardown (which a wipe / account switch triggers) unregisters the
- *     replay hook and clears the follow-gate buffer — atomically with the
- *     sub stopping — so a just-wiped wrap can never replay into the next
- *     identity's inbox.
+ *  1. Subscription teardown unregisters its replay closure but retains
+ *     account-owned deferrals. Identity teardown clears the canonical store.
  *  2. A late live callback that fires AFTER teardown no-ops (doesn't surface
  *     to `setDmInbox`): the live-sub race a wipe-then-resubscribe could hit.
  *  3. A fresh wrap from a not-yet-hydrated (non-followed) partner is buffered
@@ -21,6 +19,7 @@ import {
 import { act, renderHook } from '@testing-library/react-native';
 import { useLiveFollowGate } from './useLiveFollowGate';
 import { adoptFollowSnapshot } from '../services/contactFollowFreshness';
+import { clearFollowGateStores } from '../services/followSetEvents';
 import { createLiveSubFollowGateBuffer } from './liveSubFollowGate';
 import { createYieldScheduler } from './nostrDecryptPacing';
 import { nip04PlaintextCache } from './nostrSecretKeyCache';
@@ -144,6 +143,7 @@ function makeParams(overrides: Partial<LiveDmSubscriptionParams> = {}): LiveDmSu
 describe('startLiveDmSubscription — follow-gate race + teardown (#851 F2)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    clearFollowGateStores();
     capturedOnEvent = null;
   });
 
@@ -278,6 +278,76 @@ describe('startLiveDmSubscription — follow-gate race + teardown (#851 F2)', ()
     unmount();
   });
 
+  it('defer 3 → re-open with new hook refs and sub closure → hydrate releases all 3 (#1458)', async () => {
+    const first = renderHook(() => useLiveFollowGate(new Set<string>(), false, VIEWER));
+    const originalBuffer = first.result.current.followGateBufferRef.current;
+    const knownWrapIdsRef = { current: { pubkey: VIEWER, set: new Set<string>() } };
+    const open = (gate: ReturnType<typeof useLiveFollowGate>) =>
+      startLiveDmSubscription(
+        makeParams({
+          knownWrapIdsRef,
+          followPubkeysRef: gate.followPubkeysRef,
+          followHydratedRef: gate.followHydratedRef,
+          followGateBuffer: gate.followGateBufferRef.current,
+          setDeferredReplay: gate.setDeferredReplay,
+        }),
+      );
+    const stop = open(first.result.current);
+    await flush();
+    jest.mocked(nip04PlaintextCache.get).mockReturnValue('Alice plaintext');
+    const now = Math.floor(Date.now() / 1000) - 600;
+    for (const id of ['legacy-1', 'legacy-2'])
+      capturedOnEvent!({
+        id,
+        kind: 4,
+        pubkey: ALICE,
+        created_at: now,
+        tags: [['p', VIEWER]],
+        content: 'ciphertext',
+      });
+    capturedOnEvent!({
+      id: 'wrap-3',
+      kind: 1059,
+      pubkey: ALICE,
+      created_at: now,
+      tags: [],
+      content: 'ciphertext',
+      rumor: {
+        kind: 14,
+        created_at: now,
+        content: 'Alice plaintext',
+        partnership: { partnerPubkey: ALICE, fromMe: false },
+      },
+    });
+    await flush();
+    expect(originalBuffer.size).toBe(3);
+    expect(mockNotifyDm).not.toHaveBeenCalled();
+    stop();
+    first.unmount();
+    expect(originalBuffer.size).toBe(3);
+    const second = renderHook(() => useLiveFollowGate(new Set<string>(), false, VIEWER));
+    expect(second.result.current.followGateBufferRef.current).toBe(originalBuffer);
+    const stopSecond = open(second.result.current);
+    await flush();
+    await act(async () => {
+      await adoptFollowSnapshot(VIEWER, {
+        createdAt: 1791834639,
+        contacts: [{ pubkey: ALICE, relay: null, petname: null, profile: null }],
+      });
+    });
+    await flush();
+    expect(mockNotifyDm.mock.calls).toEqual([[ALICE], [ALICE], [ALICE]]);
+    expect(
+      jest
+        .mocked(upsertDmMessages)
+        .mock.calls.flatMap(([rows]) => rows)
+        .map((row) => row.eventId),
+    ).toEqual(['legacy-1', 'legacy-2', 'wrap-3']);
+    expect(originalBuffer.size).toBe(0);
+    stopSecond();
+    second.unmount();
+  });
+
   it('registers a replay hook on open and clears it on teardown', async () => {
     const setDeferredReplay = jest.fn();
     const buffer = createLiveSubFollowGateBuffer();
@@ -293,9 +363,9 @@ describe('startLiveDmSubscription — follow-gate race + teardown (#851 F2)', ()
     expect(typeof setDeferredReplay.mock.calls[0][0]).toBe('function');
 
     teardown();
-    // Teardown unregisters (null) AND clears the buffer — atomic with the sub stopping.
+    // Relay-list re-opens detach the old closure and preserve pending entries.
     expect(setDeferredReplay).toHaveBeenLastCalledWith(null);
-    expect(clearSpy).toHaveBeenCalledTimes(1);
+    expect(clearSpy).not.toHaveBeenCalled();
     expect(mockUnsub).toHaveBeenCalledTimes(1);
   });
 

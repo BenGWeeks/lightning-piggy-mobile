@@ -137,7 +137,7 @@ diagnosticTest.each([4, 1059] as const)('logs the exact deferral state for kind 
     ).toBe('defer');
     expect(log).toHaveBeenCalledWith(
       expect.stringContaining(
-        `deferred by follow-gate (partner=4b2fcb4e, kind=${kind}, follows=1, hydrated=false, inSet=true)`,
+        `deferred by follow-gate (partner=4b2fcb4e, kind=${kind}, follows=1, hydrated=false, inSet=true, buffered=1)`,
       ),
     );
   } finally {

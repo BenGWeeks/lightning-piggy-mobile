@@ -1,20 +1,85 @@
 import type { NostrContact } from '../types/nostr';
+import { buildFollowSet } from '../utils/followPubkeys';
+import {
+  createLiveSubFollowGateBuffer,
+  type DeferredFollowGateEntry,
+} from '../contexts/liveSubFollowGate';
 
-// The adopted list is authoritative for live delivery before React commits
-// the contact-list transition. No cache paints or profile updates emit here.
-type Listener = (contacts: NostrContact[]) => void;
+/** One canonical gate per viewer, independent of React and relay subscription lifetimes. */
+export function createFollowGateStore() {
+  return {
+    followPubkeysRef: { current: new Set<string>() },
+    followHydratedRef: { current: false },
+    followGateBufferRef: { current: createLiveSubFollowGateBuffer() },
+    deferredReplayRef: { current: null as ((item: DeferredFollowGateEntry) => void) | null },
+    adopted: false,
+  };
+}
+type FollowGateStore = ReturnType<typeof createFollowGateStore>;
+const stores = new Map<string, FollowGateStore>();
+type Listener = () => void;
 const listeners = new Map<string, Set<Listener>>();
 
+export function getFollowGateStore(owner: string): FollowGateStore {
+  const key = owner.toLowerCase();
+  let store = stores.get(key);
+  if (!store) {
+    store = createFollowGateStore();
+    stores.set(key, store);
+  }
+  return store;
+}
+
+/** Account switch/sign-out only. Subscription teardown must never call this. */
+export function clearFollowGateStores(): void {
+  for (const store of stores.values()) {
+    store.followGateBufferRef.current.clear();
+    store.followPubkeysRef.current = new Set();
+    store.followHydratedRef.current = false;
+    store.deferredReplayRef.current = null;
+    store.adopted = false;
+  }
+  stores.clear();
+}
+
+export function replayFollowGateStore(store: FollowGateStore): void {
+  const replay = store.deferredReplayRef.current;
+  if (!store.followHydratedRef.current || !replay) return;
+  const buffer = store.followGateBufferRef.current;
+  if (__DEV__) console.log(`[Nostr] follow-gate replay: start buffered=${buffer.size}`);
+  let released = 0;
+  buffer.reevaluate(store.followPubkeysRef.current, (item) => {
+    released++;
+    replay(item);
+  });
+  const dropped = buffer.size;
+  buffer.clear();
+  if (__DEV__) console.log(`[Nostr] follow-gate replay: ${released} released, ${dropped} dropped`);
+}
+
 export function subscribeFollowSet(owner: string, listener: Listener): () => void {
-  const owned = listeners.get(owner) ?? new Set<Listener>();
+  const key = owner.toLowerCase();
+  const owned = listeners.get(key) ?? new Set<Listener>();
   owned.add(listener);
-  listeners.set(owner, owned);
+  listeners.set(key, owned);
   return () => {
     owned.delete(listener);
-    if (owned.size === 0) listeners.delete(owner);
+    if (owned.size === 0) listeners.delete(key);
   };
 }
 
-export function publishFollowSet(owner: string, contacts: NostrContact[]): void {
-  for (const listener of listeners.get(owner) ?? []) listener(contacts);
+export function publishFollowSet(
+  owner: string,
+  contacts: NostrContact[],
+  createdAt?: number,
+): void {
+  const store = getFollowGateStore(owner);
+  store.followPubkeysRef.current = buildFollowSet(contacts.map((c) => c.pubkey));
+  store.followHydratedRef.current = true;
+  store.adopted = true;
+  if (__DEV__)
+    console.log(
+      `[Nostr] follow set: ${store.followPubkeysRef.current.size} follows (kind-3 ${createdAt ?? 'unavailable'})`,
+    );
+  for (const listener of listeners.get(owner.toLowerCase()) ?? []) listener();
 }
