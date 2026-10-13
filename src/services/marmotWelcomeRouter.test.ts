@@ -20,6 +20,7 @@ const mockPreview = jest.fn().mockResolvedValue({
 });
 let mockSession: {
   pubkey: string;
+  getGroup: () => undefined;
   acceptWelcome: typeof mockAccept;
   previewWelcome: typeof mockPreview;
 } | null = null;
@@ -75,7 +76,12 @@ it('stores a cold-start stranger durably, then previews without joining when Mar
   expect(await mockBackends.get(owner)!.get('welcomeInvitations', 'cold-wrap')).toContain(
     '"status":"pending"',
   );
-  mockSession = { pubkey: owner, acceptWelcome: mockAccept, previewWelcome: mockPreview };
+  mockSession = {
+    pubkey: owner,
+    acceptWelcome: mockAccept,
+    previewWelcome: mockPreview,
+    getGroup: () => undefined,
+  };
   mockSessionChanged(mockSession);
   await settle();
   expect(mockAccept).not.toHaveBeenCalled();
@@ -94,7 +100,12 @@ it('stores a cold-start stranger durably, then previews without joining when Mar
 });
 it('live and backfill delivery of a followed wrap hand off exactly once', async () => {
   const owner = 'c'.repeat(64);
-  mockSession = { pubkey: owner, acceptWelcome: mockAccept, previewWelcome: mockPreview };
+  mockSession = {
+    pubkey: owner,
+    acceptWelcome: mockAccept,
+    previewWelcome: mockPreview,
+    getGroup: () => undefined,
+  };
   await Promise.all([
     routeMarmotWelcome(rumor, owner, 'same-wrap', true, true),
     routeMarmotWelcome(rumor, owner, 'same-wrap', true, false),
@@ -121,7 +132,12 @@ it.each([null, 'f'.repeat(64)])(
   'fences in-flight invitation writes when the session changes to %s',
   async (nextOwner) => {
     const owner = 'e'.repeat(64);
-    mockSession = { pubkey: owner, acceptWelcome: mockAccept, previewWelcome: mockPreview };
+    mockSession = {
+      pubkey: owner,
+      acceptWelcome: mockAccept,
+      previewWelcome: mockPreview,
+      getGroup: () => undefined,
+    };
     mockSessionChanged(mockSession);
     await settle();
     const backend = mockBackends.get(owner)!;
@@ -145,7 +161,12 @@ it.each([null, 'f'.repeat(64)])(
       const routing = routeMarmotWelcome(rumor, owner, 'in-flight-wrap', false);
       await reading;
       mockSession = nextOwner
-        ? { pubkey: nextOwner, acceptWelcome: mockAccept, previewWelcome: mockPreview }
+        ? {
+            pubkey: nextOwner,
+            acceptWelcome: mockAccept,
+            previewWelcome: mockPreview,
+            getGroup: () => undefined,
+          }
         : null;
       mockSessionChanged(mockSession);
       release();
@@ -185,7 +206,12 @@ it('coalesces a burst during blocked MLS work into one follow-up pass with bound
       );
     const keys = jest.spyOn(backend, 'keys');
     const get = jest.spyOn(backend, 'get');
-    mockSession = { pubkey: owner, acceptWelcome: mockAccept, previewWelcome: mockPreview };
+    mockSession = {
+      pubkey: owner,
+      acceptWelcome: mockAccept,
+      previewWelcome: mockPreview,
+      getGroup: () => undefined,
+    };
     mockSessionChanged(mockSession);
     await jest.advanceTimersByTimeAsync(150);
     await started;
@@ -248,7 +274,12 @@ it('replaces a claimed background alert after live ingestion and delayed session
   await surface(rumor, wrapId);
   expect(dismissNotificationsFor).toHaveBeenCalledWith({ wrapId });
   expect(fireMessageNotification).not.toHaveBeenCalled();
-  mockSession = { pubkey: owner, acceptWelcome: mockAccept, previewWelcome: mockPreview };
+  mockSession = {
+    pubkey: owner,
+    acceptWelcome: mockAccept,
+    previewWelcome: mockPreview,
+    getGroup: () => undefined,
+  };
   mockSessionChanged(mockSession);
   await settle();
   expect(fireMessageNotification).toHaveBeenCalledTimes(1);

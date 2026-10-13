@@ -37,6 +37,7 @@ function setup() {
   const changed = jest.fn();
   const invitations = new MarmotPendingInvitations(backend, changed);
   const session = {
+    getGroup: jest.fn().mockReturnValue(undefined),
     acceptWelcome: jest.fn().mockResolvedValue(group),
     previewWelcome: jest
       .fn()
@@ -422,5 +423,63 @@ it.each([10, 20, 40])(
       expect(await backend.get('pendingWelcomes', `rumor-${i}`)).toBeNull();
     }
     expect(await invitations.list()).toEqual([]);
+  },
+);
+
+it.each(['failed-wrap', 'late-older-wrap'])(
+  'exposes an older usable Welcome after permanent failure and accepts %s',
+  async (acceptId) => {
+    const { backend, invitations, session } = setup();
+    const failed = { ...rumor, id: 'failed-newer', created_at: 2 };
+    await invitations.receive('failed-wrap', failed, false);
+    session.acceptWelcome.mockImplementationOnce(async () => {
+      await backend.set('welcomes', failed.id, JSON.stringify({ result: 'failed' }));
+      return null;
+    });
+    await invitations.accept('failed-wrap', session, () => true);
+    expect(await invitations.list()).toEqual([
+      expect.objectContaining({ id: 'failed-wrap', error: true }),
+    ]);
+    const restarted = new MarmotPendingInvitations(backend, jest.fn());
+    await restarted.receive('late-older-wrap', rumor, false);
+    await restarted.resume(session, () => true);
+    const rows = await restarted.list();
+    expect(rows).toEqual([
+      expect.objectContaining({ id: 'late-older-wrap', groupId: 'mls-group' }),
+    ]);
+    expect(rows[0].error).toBeUndefined();
+    // A tap captured before the snapshot refresh can still refer to the failed row.
+    expect(await restarted.accept(acceptId, session, () => true)).toEqual(group);
+    expect(session.acceptWelcome.mock.calls.map(([r]) => r.id)).toEqual([failed.id, rumor.id]);
+    expect(await restarted.list()).toEqual([]);
+  },
+);
+
+it.each([false, true])(
+  'tombstones a distinct delayed Welcome after joining and restart (followed: %s)',
+  async (followed) => {
+    const { backend, invitations, session } = setup();
+    await invitations.receive('first-wrap', rumor, false);
+    expect(await invitations.accept('first-wrap', session, () => true)).toEqual(group);
+    session.getGroup.mockImplementation((id) => (id === 'marmot:mls-group' ? group : undefined));
+    session.acceptWelcome.mockClear();
+    const notify = jest.fn();
+    const restarted = new MarmotPendingInvitations(backend, jest.fn(), notify);
+    const late = { ...rumor, id: 'late-distinct', created_at: 2 };
+    await backend.set('pendingWelcomes', late.id, JSON.stringify(late));
+    await restarted.receive('late-wrap', late, followed, true);
+    await restarted.resume(session, () => true);
+    expect(await restarted.list()).toEqual([]);
+    expect(notify).not.toHaveBeenCalled();
+    expect(session.acceptWelcome).not.toHaveBeenCalled();
+    expect(session.getGroup).toHaveBeenCalledWith('marmot:mls-group');
+    expect(JSON.parse((await backend.get('welcomeInvitations', 'late-wrap'))!)).toEqual({
+      id: 'late-wrap',
+      status: 'joined',
+    });
+    expect(await backend.get('pendingWelcomes', late.id)).toBeNull();
+    expect(await restarted.receive('rewrapped-late', late, followed, true)).toBe(false);
+    await restarted.resume(session, () => true);
+    expect(await restarted.list()).toEqual([]);
   },
 );
