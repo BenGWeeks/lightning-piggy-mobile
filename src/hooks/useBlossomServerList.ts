@@ -2,7 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Event } from 'nostr-tools';
 import { useNostr } from '../contexts/NostrContext';
 import { DEFAULT_RELAYS } from '../services/nostrService';
-import { fetchLatestReplaceable, publishToRelays } from '../services/nostrRelayLists';
+import {
+  fetchLatestReplaceable,
+  publishToRelays,
+  type RelayPublishResult,
+} from '../services/nostrRelayLists';
 import {
   DEFAULT_BLOSSOM_SERVER,
   getBlossomServersCreatedAt,
@@ -22,8 +26,12 @@ import {
 } from '../utils/blossomServerList';
 
 export type BlossomPublishOutcome =
-  | { ok: true; accepted: number; total: number }
-  | { ok: false; error: 'not-signed' | 'none-accepted' | 'no-valid-servers' | 'busy' };
+  | { ok: true; accepted: number; total: number; results: RelayPublishResult[] }
+  | {
+      ok: false;
+      results?: RelayPublishResult[];
+      error: 'not-signed' | 'none-accepted' | 'no-valid-servers' | 'busy';
+    };
 
 const sameList = (a: string[], b: string[]) =>
   a.length === b.length && a.every((s, i) => s === b[i]);
@@ -181,7 +189,7 @@ export function useBlossomServerList() {
       const targets = [...new Set([...relayUrls, ...DEFAULT_RELAYS, ...RELAY_LIST_INDEXERS])];
       const results = await publishToRelays(signed as unknown as Event, targets);
       const accepted = results.filter((r) => r.ok).length;
-      if (accepted === 0) return { ok: false, error: 'none-accepted' };
+      if (accepted === 0) return { ok: false, error: 'none-accepted', results };
       noteCreatedAt(pk, unsigned.created_at);
       // Record exactly what was published; a list edited meanwhile (here or in
       // another screen instance) still differs from it, so stays publishable.
@@ -190,7 +198,7 @@ export function useBlossomServerList() {
       await setPublishedBlossomServers(pk, sent);
       // Only reflect it on screen if this is still the identity being shown.
       if (mountedRef.current && activePubkeyRef.current === pk) setPublishedList(sent);
-      return { ok: true, accepted, total: results.length };
+      return { ok: true, accepted, total: results.length, results };
     } finally {
       publishingRef.current = false;
       if (mountedRef.current) setPublishing(false);

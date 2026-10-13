@@ -1,8 +1,8 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, Linking } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { View, Text, TouchableOpacity } from 'react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import { Alert } from './BrandedAlert';
+import { useSafeExternalLink } from '../hooks/useSafeExternalLink';
 import {
   parseMarkdown,
   truncateBlocks,
@@ -133,27 +133,7 @@ const MarkdownText: React.FC<Props> = ({ markdown, testID, collapsedChars = 700 
   const collapsed = useMemo(() => truncateBlocks(all, collapsedChars), [all, collapsedChars]);
   const [expanded, setExpanded] = useState(false);
 
-  const onLink = useCallback(
-    (url: string) => {
-      let host = url;
-      try {
-        host = new URL(url).host;
-      } catch {
-        /* keep the raw url */
-      }
-      Alert.alert(t('market.markdown.openLinkTitle'), t('market.markdown.openLinkBody', { host }), [
-        { text: t('market.markdown.cancel'), style: 'cancel' },
-        {
-          text: t('market.markdown.open'),
-          onPress: () => {
-            // A malformed URL / missing handler must not raise.
-            void Linking.openURL(url).catch(() => {});
-          },
-        },
-      ]);
-    },
-    [t],
-  );
+  const onLink = useSafeExternalLink();
 
   if (all.length === 0) return null;
   const shown = expanded ? all : collapsed.blocks;

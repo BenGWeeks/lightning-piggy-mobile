@@ -2651,7 +2651,7 @@
     "nip65Title": "A relay-eid (NIP-65)",
     "nip65Hint": "Írás = ahol a bejegyzéseid megjelennek, és ahol mások keresik őket. Olvasás = ahová mások azokat a bejegyzéseket küldik, amelyekben megemlítenek téged.",
     "nip65Empty": "Még nincs közzétett relay-lista.",
-    "inboxTitle": "Üzenet-postaláda relay-ek",
+    "inboxTitle": "Bejövő üzenetek reléi (NIP-17)",
     "inboxHint": "Más alkalmazások ide küldik a privát üzeneteidet. Két-három megbízható relay elég.",
     "inboxEmpty": "Még nincs közzétett üzenet-postaláda relay.",
     "read": "Olvasás",
@@ -2698,7 +2698,7 @@
     }
   },
   "blossomServers": {
-    "title": "Fotó- és hangüzenet-tárhely (Blossom)",
+    "title": "Fotók és hangüzenetek tárolása (Blossom · BUD-03)",
     "intro": "Itt tárolódnak a küldött képeid, hangüzeneteid és a profilképed. A feltöltések az elsődleges szerverre mennek, és másolatként a többire is.",
     "primary": "Elsődleges",
     "makePrimary": "Legyen elsődleges",
@@ -3125,6 +3125,57 @@
     "blocked": "Ezen a hálózaton blokkolva lehet",
     "noErrors": "Nincs rögzített friss hiba",
     "bytes": "%{count} bájt",
-    "milliseconds": "%{count} ms"
+    "milliseconds": "%{count} ms",
+    "operator": "Üzemeltető és szabályzatok",
+    "runBy": "Üzemeltető",
+    "copyUrl": "Relé URL másolása",
+    "terms_of_service": "Felhasználási feltételek",
+    "privacy_policy": "Adatvédelmi szabályzat",
+    "posting_policy": "Közzétételi szabályzat",
+    "payments_url": "Fizetés",
+    "countries": "Országok",
+    "languages": "Nyelvek",
+    "admissionFee": "Belépési díj",
+    "subscriptionFee": "Előfizetési díj",
+    "publicationFee": "Közzétételi díj",
+    "feePeriod": "{{seconds}} másodpercenként",
+    "feeKinds": "típusok: {{kinds}}",
+    "acceptedKinds": "Elfogadott típusok",
+    "noKinds": "Nincs elfogadott típus",
+    "fromNotes": "a Lightning Piggy jegyzeteiből",
+    "restrictedWrites": "Korlátozott írás"
+  },
+  "networkInfo": {
+    "aboutSection": "A(z) {{title}} szakaszról",
+    "readSpec": "Specifikáció megnyitása",
+    "indexersTitle": "Indexelők: segítenek másoknak megtalálni a reléid",
+    "indexersHint": "Ezek az itt nem szerkeszthető indexelők megosztják a nyilvános listáidat, hogy más appok megtalálják a reléid.",
+    "nip65Hint": "Ez a nyilvános lista megmutatja más appoknak, hol olvassák a bejegyzéseidet és hová küldjenek említéseket: az Írás közzétesz, az Olvasás említéseket fogad.",
+    "inboxHint": "Ez a nyilvános lista megmutatja, hová küldhetők a privát üzeneteid és a Marmot-meghívók.",
+    "blossomHint": "Az első szerver tárolja a fotókat és hangüzeneteket; a tartalékok másolatokat őriznek, a Közzététel megosztja a listát más appokkal."
+  },
+  "relayKinds": {
+    "profiles": "profilok",
+    "posts": "bejegyzések",
+    "follows": "követések",
+    "legacyMessages": "régi üzenetek",
+    "deletions": "törlések",
+    "reactions": "reakciók",
+    "privateMessages": "privát üzenetek",
+    "relayLists": "relélisták",
+    "inboxRelays": "bejövő üzenetek reléi",
+    "keyPackageRelays": "Marmot kulcscsomag-relék",
+    "storageServers": "tárolószerverek",
+    "other": "események"
+  },
+  "publishResult": {
+    "summary": "Elküldve {{sent}} saját relére · megosztva {{shared}} indexelővel",
+    "skipped": "{{host}} kihagyva ({{reason}})",
+    "problem": "Küldési hiba, {{host}}: {{reason}}",
+    "details": "Részletek",
+    "accepted": "elfogadva",
+    "kindSkipped": "ez a típus nem elfogadott",
+    "unreachable": "erről a hálózatról nem érhető el",
+    "failed": "sikertelen"
   }
 }

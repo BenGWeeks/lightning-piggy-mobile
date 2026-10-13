@@ -101,3 +101,70 @@ it('aborts the HTTP request after five seconds', async () => {
   jest.advanceTimersByTime(5000);
   await expect(request).resolves.toBeNull();
 });
+
+it('parses real Damus and Weeks Family NIP-11 fixtures without confusing self and operator', () => {
+  const damus = parseRelayInformation(require('./__fixtures__/relay-information/damus.json'));
+  const weeks = parseRelayInformation(require('./__fixtures__/relay-information/weeksfamily.json'));
+  expect(damus).toMatchObject({ name: 'damus.io', contact: 'jb55@jb55.com' });
+  expect(weeks).toMatchObject({
+    name: 'Weeks Family Relay',
+    pubkey: '971615b70ad9ec896f8d5ba0f2d01652f1dfe5f9ced81ac9469ca7facefad68b',
+  });
+  const selfOnly = parseRelayInformation({ self: 'b'.repeat(64) });
+  expect(selfOnly.self).toBe('b'.repeat(64));
+  expect(selfOnly.pubkey).toBeUndefined();
+});
+it('parses optional policies, paid fees, countries, languages and accepted kinds', () => {
+  const info = parseRelayInformation({
+    pubkey: 'A'.repeat(64),
+    self: 'b'.repeat(64),
+    terms_of_service: 'https://example.com/terms',
+    privacy_policy: 'https://example.com/privacy',
+    posting_policy: 'https://example.com/posting',
+    payments_url: 'https://example.com/pay',
+    relay_countries: ['GB', 'SV', 'GB', 'bad', 2],
+    language_tags: ['en-GB', 'es', 'es', {}, 'bad_tag'],
+    limitation: { allowed_kinds: [0, 3, 10002, 10002, -1, '10050', 1.5] },
+    fees: {
+      subscription: [
+        { amount: 5000, unit: 'msats', period: 3600, kinds: [1, '3'] },
+        { amount: -1, unit: 'msats' },
+        null,
+      ],
+    },
+  });
+  expect(info.pubkey).toBe('a'.repeat(64));
+  expect(info.self).toBe('b'.repeat(64));
+  expect(info.relay_countries).toEqual(['GB', 'SV']);
+  expect(info.language_tags).toEqual(['en-GB', 'es']);
+  expect(info.limitation.allowed_kinds).toEqual([0, 3, 10002]);
+  expect(info.fees).toEqual({
+    subscription: [{ amount: 5000, unit: 'msats', period: 3600, kinds: [1] }],
+  });
+  expect(info.terms_of_service).toBe('https://example.com/terms');
+  expect(info.privacy_policy).toBe('https://example.com/privacy');
+  expect(info.posting_policy).toBe('https://example.com/posting');
+  expect(info.payments_url).toBe('https://example.com/pay');
+});
+it('tolerates missing and malformed optional fields', () => {
+  expect(parseRelayInformation({})).toEqual({ limitation: {} });
+  expect(
+    parseRelayInformation({
+      pubkey: 'npub1bad',
+      self: 1,
+      terms_of_service: 'javascript:alert(1)',
+      privacy_policy: {},
+      posting_policy: [],
+      payments_url: 'file:///etc/passwd',
+      relay_countries: {},
+      language_tags: null,
+      fees: 'free',
+      limitation: { allowed_kinds: ['bad'] },
+    }),
+  ).toEqual({ limitation: {} });
+  expect(
+    parseRelayInformation({
+      fees: { admission: [null, {}, { amount: Infinity, unit: 'msats' }, { amount: 2, unit: 4 }] },
+    }).fees,
+  ).toEqual({ admission: [] });
+});

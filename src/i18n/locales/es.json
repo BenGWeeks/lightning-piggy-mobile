@@ -2651,7 +2651,7 @@
     "nip65Title": "Tus relays (NIP-65)",
     "nip65Hint": "Escritura = donde se publican tus publicaciones y donde otros las buscan. Lectura = donde otros envían publicaciones que te mencionan.",
     "nip65Empty": "Aún no hay una lista de relays publicada.",
-    "inboxTitle": "Relays de la bandeja de mensajes",
+    "inboxTitle": "Relays de la bandeja de mensajes (NIP-17)",
     "inboxHint": "Otras apps envían aquí tus mensajes privados. Con dos o tres relays fiables es suficiente.",
     "inboxEmpty": "Aún no hay relays de mensajes publicados.",
     "read": "Lectura",
@@ -2698,7 +2698,7 @@
     }
   },
   "blossomServers": {
-    "title": "Almacenamiento de fotos y notas de voz (Blossom)",
+    "title": "Almacenamiento de fotos y notas de voz (Blossom · BUD-03)",
     "intro": "Alojan las imágenes y notas de voz que envías, y tu foto de perfil. Las subidas van al servidor principal y se copian a los demás como respaldo.",
     "primary": "Principal",
     "makePrimary": "Hacer principal",
@@ -3125,6 +3125,57 @@
     "blocked": "Puede estar bloqueado desde esta red",
     "noErrors": "Sin errores recientes registrados",
     "bytes": "%{count} bytes",
-    "milliseconds": "%{count} ms"
+    "milliseconds": "%{count} ms",
+    "operator": "Operador y políticas",
+    "runBy": "Administrado por",
+    "copyUrl": "Copiar URL del relay",
+    "terms_of_service": "Términos del servicio",
+    "privacy_policy": "Política de privacidad",
+    "posting_policy": "Política de publicación",
+    "payments_url": "Pagos",
+    "countries": "Países",
+    "languages": "Idiomas",
+    "admissionFee": "Cuota de admisión",
+    "subscriptionFee": "Cuota de suscripción",
+    "publicationFee": "Cuota de publicación",
+    "feePeriod": "cada {{seconds}} segundos",
+    "feeKinds": "tipos {{kinds}}",
+    "acceptedKinds": "Acepta",
+    "noKinds": "Ningún tipo",
+    "fromNotes": "según las notas de Lightning Piggy",
+    "restrictedWrites": "Escritura restringida"
+  },
+  "networkInfo": {
+    "aboutSection": "Acerca de {{title}}",
+    "readSpec": "Leer la especificación",
+    "indexersTitle": "Indexadores: ayudan a encontrar tus relays",
+    "indexersHint": "Estos indexadores comparten tus listas públicas para que otras apps encuentren tus relays; aquí no se pueden editar.",
+    "nip65Hint": "Esta lista pública indica dónde leer tus publicaciones y enviar menciones: Escribir publica y Leer recibe menciones.",
+    "inboxHint": "Esta lista pública indica dónde enviarte mensajes privados e invitaciones de Marmot.",
+    "blossomHint": "El primer servidor guarda fotos y notas de voz; los respaldos conservan copias y Publicar comparte la lista con otras apps."
+  },
+  "relayKinds": {
+    "profiles": "perfiles",
+    "posts": "publicaciones",
+    "follows": "seguidos",
+    "legacyMessages": "mensajes antiguos",
+    "deletions": "eliminaciones",
+    "reactions": "reacciones",
+    "privateMessages": "mensajes privados",
+    "relayLists": "listas de relays",
+    "inboxRelays": "relays de la bandeja de entrada",
+    "keyPackageRelays": "relays de paquetes de claves Marmot",
+    "storageServers": "servidores de almacenamiento",
+    "other": "eventos"
+  },
+  "publishResult": {
+    "summary": "Enviado a {{sent}} de tus relays · compartido con {{shared}} indexadores",
+    "skipped": "{{host}} omitido ({{reason}})",
+    "problem": "Problema al enviar a {{host}}: {{reason}}",
+    "details": "Detalles",
+    "accepted": "aceptado",
+    "kindSkipped": "no acepta este tipo",
+    "unreachable": "no accesible desde esta red",
+    "failed": "falló"
   }
 }

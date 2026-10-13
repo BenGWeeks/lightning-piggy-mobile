@@ -2651,7 +2651,7 @@
     "nip65Title": "你的中继（NIP-65）",
     "nip65Hint": "写入 = 你的帖子发布到哪里，别人去哪里查找。读取 = 别人把提到你的帖子发到哪里。",
     "nip65Empty": "还没有已发布的中继列表。",
-    "inboxTitle": "消息收件中继",
+    "inboxTitle": "消息收件箱中继 (NIP-17)",
     "inboxHint": "其他应用会把你的私密消息发到这里。两三个可靠的中继就够了。",
     "inboxEmpty": "还没有已发布的消息收件中继。",
     "read": "读取",
@@ -2698,7 +2698,7 @@
     }
   },
   "blossomServers": {
-    "title": "照片和语音消息存储（Blossom）",
+    "title": "照片与语音留言存储 (Blossom · BUD-03)",
     "intro": "存放你发送的图片和语音消息，以及你的头像。上传内容会发到主服务器，并复制到其他服务器作为备份。",
     "primary": "主服务器",
     "makePrimary": "设为主服务器",
@@ -3125,6 +3125,57 @@
     "blocked": "可能被此网络屏蔽",
     "noErrors": "暂无近期错误记录",
     "bytes": "%{count} 字节",
-    "milliseconds": "%{count} ms"
+    "milliseconds": "%{count} ms",
+    "operator": "运营者与政策",
+    "runBy": "运营者",
+    "copyUrl": "复制中继 URL",
+    "terms_of_service": "服务条款",
+    "privacy_policy": "隐私政策",
+    "posting_policy": "发布政策",
+    "payments_url": "付款",
+    "countries": "国家",
+    "languages": "语言",
+    "admissionFee": "准入费用",
+    "subscriptionFee": "订阅费用",
+    "publicationFee": "发布费用",
+    "feePeriod": "每 {{seconds}} 秒",
+    "feeKinds": "类型 {{kinds}}",
+    "acceptedKinds": "接受",
+    "noKinds": "无类型",
+    "fromNotes": "来自 Lightning Piggy 的记录",
+    "restrictedWrites": "受限写入"
+  },
+  "networkInfo": {
+    "aboutSection": "关于{{title}}",
+    "readSpec": "阅读规范",
+    "indexersTitle": "索引器：帮助他人找到你的中继",
+    "indexersHint": "这些只读索引器共享你的公开列表，让其他应用找到你的中继。",
+    "nip65Hint": "这个公开列表告诉其他应用在哪里读取你的帖子并发送提及：“写入”发布帖子，“读取”接收提及。",
+    "inboxHint": "这个公开列表告诉他人向哪里发送私信和 Marmot 邀请。",
+    "blossomHint": "第一个服务器存储照片和语音留言，备用服务器保存额外副本；“发布”将列表共享给其他应用。"
+  },
+  "relayKinds": {
+    "profiles": "个人资料",
+    "posts": "帖子",
+    "follows": "关注",
+    "legacyMessages": "旧版消息",
+    "deletions": "删除",
+    "reactions": "回应",
+    "privateMessages": "私信",
+    "relayLists": "中继列表",
+    "inboxRelays": "收件箱中继",
+    "keyPackageRelays": "Marmot 密钥包中继",
+    "storageServers": "存储服务器",
+    "other": "事件"
+  },
+  "publishResult": {
+    "summary": "已发送至你的 {{sent}} 个中继 · 已共享至 {{shared}} 个索引器",
+    "skipped": "已跳过 {{host}}（{{reason}}）",
+    "problem": "发送至 {{host}} 时出错：{{reason}}",
+    "details": "详情",
+    "accepted": "已接受",
+    "kindSkipped": "不接受此类型",
+    "unreachable": "无法从此网络访问",
+    "failed": "失败"
   }
 }

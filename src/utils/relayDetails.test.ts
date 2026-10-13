@@ -1,4 +1,4 @@
-import { relayAccessTag, relayWriteAcceptance } from './relayDetails';
+import { relayAccessTag, relayWriteAcceptance, relayDisplayName } from './relayDetails';
 
 it.each([
   [true, true, null],
@@ -26,4 +26,10 @@ it('uses the last observed publish result over advertised restrictions', () => {
   const info = { limitation: { payment_required: true } };
   expect(relayWriteAcceptance(info, { pubkey: 'a', ok: true, at: 1 })).toBe('lastAccepted');
   expect(relayWriteAcceptance(info, { pubkey: 'a', ok: false, at: 2 })).toBe('lastRejected');
+});
+
+it('shows secure relay names without a scheme, preserving insecure schemes and URL paths', () => {
+  expect(relayDisplayName('wss://relay.primal.net')).toBe('relay.primal.net');
+  expect(relayDisplayName('wss://example.com:443/path')).toBe('example.com:443/path');
+  expect(relayDisplayName('ws://example.com/path')).toBe('ws://example.com/path');
 });

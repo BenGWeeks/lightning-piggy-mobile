@@ -2659,7 +2659,7 @@
     "nip65Title": "Twoje przekaźniki (NIP-65)",
     "nip65Hint": "Zapis = gdzie publikowane są twoje wpisy i gdzie inni ich szukają. Odczyt = gdzie inni wysyłają wpisy, które o tobie wspominają.",
     "nip65Empty": "Brak opublikowanej listy przekaźników.",
-    "inboxTitle": "Przekaźniki skrzynki wiadomości",
+    "inboxTitle": "Przekaźniki skrzynki wiadomości (NIP-17)",
     "inboxHint": "Inne aplikacje wysyłają tu twoje wiadomości prywatne. Wystarczą dwa lub trzy niezawodne przekaźniki.",
     "inboxEmpty": "Brak opublikowanych przekaźników skrzynki wiadomości.",
     "read": "Odczyt",
@@ -2706,7 +2706,7 @@
     }
   },
   "blossomServers": {
-    "title": "Przechowywanie zdjęć i wiadomości głosowych (Blossom)",
+    "title": "Pamięć zdjęć i notatek głosowych (Blossom · BUD-03)",
     "intro": "Przechowuje wysyłane przez ciebie obrazy i wiadomości głosowe oraz twoje zdjęcie profilowe. Pliki trafiają na serwer główny i są kopiowane na pozostałe jako kopie zapasowe.",
     "primary": "Główny",
     "makePrimary": "Ustaw jako główny",
@@ -3161,6 +3161,57 @@
     "blocked": "Może być blokowany w tej sieci",
     "noErrors": "Nie zapisano ostatnich błędów",
     "bytes": "%{count} bajtów",
-    "milliseconds": "%{count} ms"
+    "milliseconds": "%{count} ms",
+    "operator": "Operator i zasady",
+    "runBy": "Prowadzony przez",
+    "copyUrl": "Kopiuj URL przekaźnika",
+    "terms_of_service": "Warunki korzystania",
+    "privacy_policy": "Polityka prywatności",
+    "posting_policy": "Zasady publikowania",
+    "payments_url": "Płatności",
+    "countries": "Kraje",
+    "languages": "Języki",
+    "admissionFee": "Opłata za dostęp",
+    "subscriptionFee": "Opłata za subskrypcję",
+    "publicationFee": "Opłata za publikację",
+    "feePeriod": "co {{seconds}} sekund",
+    "feeKinds": "rodzaje {{kinds}}",
+    "acceptedKinds": "Akceptuje",
+    "noKinds": "Żadnych rodzajów",
+    "fromNotes": "z notatek Lightning Piggy",
+    "restrictedWrites": "Ograniczony zapis"
+  },
+  "networkInfo": {
+    "aboutSection": "O sekcji {{title}}",
+    "readSpec": "Przeczytaj specyfikację",
+    "indexersTitle": "Indeksery: pomagają innym znaleźć Twoje przekaźniki",
+    "indexersHint": "Te indeksery udostępniają Twoje publiczne listy, aby inne aplikacje znalazły Twoje przekaźniki; tutaj nie można ich edytować.",
+    "nip65Hint": "Ta publiczna lista wskazuje innym aplikacjom, gdzie czytać Twoje posty i wysyłać wzmianki: Zapis publikuje posty, Odczyt odbiera wzmianki.",
+    "inboxHint": "Ta publiczna lista wskazuje, gdzie wysyłać Ci prywatne wiadomości i zaproszenia Marmot.",
+    "blossomHint": "Pierwszy serwer przechowuje zdjęcia i notatki głosowe; zapasowe zachowują kopie, a Publikuj udostępnia listę innym aplikacjom."
+  },
+  "relayKinds": {
+    "profiles": "profile",
+    "posts": "posty",
+    "follows": "obserwowani",
+    "legacyMessages": "starsze wiadomości",
+    "deletions": "usunięcia",
+    "reactions": "reakcje",
+    "privateMessages": "prywatne wiadomości",
+    "relayLists": "listy przekaźników",
+    "inboxRelays": "przekaźniki skrzynki odbiorczej",
+    "keyPackageRelays": "przekaźniki pakietów kluczy Marmot",
+    "storageServers": "serwery pamięci",
+    "other": "zdarzenia"
+  },
+  "publishResult": {
+    "summary": "Wysłano do {{sent}} Twoich przekaźników · udostępniono {{shared}} indekserom",
+    "skipped": "Pominięto {{host}} ({{reason}})",
+    "problem": "Problem z wysyłaniem do {{host}}: {{reason}}",
+    "details": "Szczegóły",
+    "accepted": "zaakceptowano",
+    "kindSkipped": "ten rodzaj nie jest akceptowany",
+    "unreachable": "nieosiągalny z tej sieci",
+    "failed": "niepowodzenie"
   }
 }

@@ -228,5 +228,5 @@ export type HuntLeaderboardRoute = RouteProp<ExploreStackParamList, 'HuntLeaderb
 /** One draft session shared by the Nostr settings list and relay details. */
 export type RelaySettingsParamList = {
   RelaySettingsList: undefined;
-  RelayDetails: { url: string; kind: 'nip65' | 'inbox' };
+  RelayDetails: { url: string; kind: 'nip65' | 'inbox' | 'readonly' };
 };

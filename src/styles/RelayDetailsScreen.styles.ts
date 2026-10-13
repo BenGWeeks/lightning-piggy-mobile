@@ -3,7 +3,10 @@ import type { Palette } from './palettes';
 
 export const createRelayDetailsScreenStyles = (colors: Palette) =>
   StyleSheet.create({
-    url: { color: colors.white, fontSize: 15, marginBottom: 16 },
+    avatar: { width: 44, height: 44, borderRadius: 22 },
+    link: { color: colors.white, textDecorationLine: 'underline', fontSize: 14, lineHeight: 20 },
+    urlRow: { flexDirection: 'row', gap: 12, alignItems: 'flex-start', marginBottom: 16 },
+    url: { color: colors.white, fontSize: 15, flex: 1 },
     card: {
       backgroundColor: 'rgba(255,255,255,0.12)',
       padding: 14,

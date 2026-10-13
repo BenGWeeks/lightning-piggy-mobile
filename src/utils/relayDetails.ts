@@ -32,3 +32,8 @@ export function relayRowHost(url: string): string {
     return url;
   }
 }
+
+/** Preserve path/port; only the default secure scheme is redundant in lists. */
+export function relayDisplayName(url: string): string {
+  return url.replace(/^wss:\/\//i, '');
+}

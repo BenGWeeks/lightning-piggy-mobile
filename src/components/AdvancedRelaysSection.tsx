@@ -1,13 +1,19 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 import { ChevronDown, ChevronUp, X as XIcon } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { DEFAULT_RELAYS } from '../services/nostrService';
 import { GC_RELAYS } from '../services/geocacheRelays';
-import { createSharedAccountStyles } from '../screens/account/sharedStyles';
 import { createAdvancedRelaysSectionStyles } from '../styles/AdvancedRelaysSection.styles';
+import RelaySettingsRow from './RelaySettingsRow';
+import { RELAY_LIST_INDEXERS } from '../utils/relayListEvents';
+import { relayDisplayName } from '../utils/relayDetails';
 import RelayStatusDot from './RelayStatusDot';
+import NetworkSectionHeading from './NetworkSectionHeading';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { RelaySettingsParamList } from '../navigation/types';
 
 interface Props {
   connection: Map<string, boolean>;
@@ -28,19 +34,24 @@ export default function AdvancedRelaysSection({
 }: Props) {
   const colors = useThemeColors();
   const t = useTranslation();
-  const shared = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const styles = useMemo(() => createAdvancedRelaysSectionStyles(colors), [colors]);
+  const navigation = useNavigation<NativeStackNavigationProp<RelaySettingsParamList>>();
   const [open, setOpen] = useState(false);
+  const openReadOnlyRelay = useCallback(
+    (url: string) => navigation.navigate('RelayDetails', { url, kind: 'readonly' }),
+    [navigation],
+  );
 
   const readOnlyList = (urls: readonly string[], testID: string) => (
     <View style={styles.list} testID={testID}>
       {urls.map((url) => (
-        <View key={url} style={styles.row}>
-          <RelayStatusDot status={connection.get(url)} />
-          <Text style={styles.url} numberOfLines={1} ellipsizeMode="middle">
-            {url}
-          </Text>
-        </View>
+        <RelaySettingsRow
+          key={url}
+          url={url}
+          testIDPrefix={`${testID}-`}
+          status={connection.get(url)}
+          onOpen={openReadOnlyRelay}
+        />
       ))}
     </View>
   );
@@ -64,23 +75,44 @@ export default function AdvancedRelaysSection({
       </TouchableOpacity>
       {open && (
         <>
-          <Text style={styles.subTitle}>{t('nostrScreen.defaultRelaysTitle')}</Text>
+          <NetworkSectionHeading
+            title={t('nostrScreen.defaultRelaysTitle')}
+            explanation={t('nostrScreen.defaultRelaysHint')}
+            testID="default-relays"
+          />
           {readOnlyList(DEFAULT_RELAYS, 'default-relay-list')}
-          <Text style={shared.fieldHint}>{t('nostrScreen.defaultRelaysHint')}</Text>
+          <NetworkSectionHeading
+            title={t('networkInfo.indexersTitle')}
+            explanation={t('networkInfo.indexersHint')}
+            testID="indexers"
+          />
+          {readOnlyList(RELAY_LIST_INDEXERS, 'indexer-relay-list')}
 
-          <Text style={styles.subTitle}>{t('nostrScreen.geoCacheRelays')}</Text>
+          <NetworkSectionHeading
+            title={t('nostrScreen.geoCacheRelays')}
+            explanation={t('nostrScreen.geoCacheRelaysHint')}
+            testID="geoCacheRelays"
+          />
           {readOnlyList(GC_RELAYS, 'gc-relay-list')}
-          <Text style={shared.fieldHint}>{t('nostrScreen.geoCacheRelaysHint')}</Text>
 
           {deviceRelays.length > 0 && (
             <>
-              <Text style={styles.subTitle}>{t('nostrScreen.deviceRelaysTitle')}</Text>
+              <NetworkSectionHeading
+                title={t('nostrScreen.deviceRelaysTitle')}
+                explanation={t('nostrScreen.deviceRelaysHint')}
+                testID="deviceRelaysTitle"
+              />
               <View style={styles.list} testID="device-relay-list">
                 {deviceRelays.map((url) => (
                   <View key={url} style={styles.row}>
                     <RelayStatusDot status={connection.get(url)} />
-                    <Text style={styles.url} numberOfLines={1} ellipsizeMode="middle">
-                      {url}
+                    <Text
+                      style={styles.url}
+                      numberOfLines={2}
+                      ellipsizeMode="tail"
+                      accessibilityLabel={url}
+                    >
+                      {relayDisplayName(url)}
                     </Text>
                     <TouchableOpacity
                       onPress={() => onRemoveDeviceRelay(url)}
@@ -95,7 +127,6 @@ export default function AdvancedRelaysSection({
                   </View>
                 ))}
               </View>
-              <Text style={shared.fieldHint}>{t('nostrScreen.deviceRelaysHint')}</Text>
             </>
           )}
         </>

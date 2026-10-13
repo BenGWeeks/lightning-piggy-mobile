@@ -70,7 +70,11 @@ it('remembers unpublished changes across visits, and a successful publish clears
 
   publish.mockResolvedValueOnce([{ url: 'wss://default.example', ok: false }]);
   await act(async () => {
-    expect(await second.result.current.publish()).toEqual({ ok: false, error: 'none-accepted' });
+    expect(await second.result.current.publish()).toEqual({
+      ok: false,
+      error: 'none-accepted',
+      results: [{ url: 'wss://default.example', ok: false }],
+    });
   });
   expect(second.result.current.dirty).toBe(true);
 

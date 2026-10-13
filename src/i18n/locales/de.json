@@ -2651,7 +2651,7 @@
     "nip65Title": "Deine Relays (NIP-65)",
     "nip65Hint": "Schreiben = wo deine Beiträge veröffentlicht werden und wo andere sie suchen. Lesen = wo andere Beiträge hinschicken, die dich erwähnen.",
     "nip65Empty": "Noch keine Relay-Liste veröffentlicht.",
-    "inboxTitle": "Posteingangs-Relays für Nachrichten",
+    "inboxTitle": "Posteingangs-Relays (NIP-17)",
     "inboxHint": "Andere Apps senden deine privaten Nachrichten hierher. Zwei oder drei zuverlässige Relays reichen aus.",
     "inboxEmpty": "Noch keine Posteingangs-Relays für Nachrichten veröffentlicht.",
     "read": "Lesen",
@@ -2698,7 +2698,7 @@
     }
   },
   "blossomServers": {
-    "title": "Speicher für Fotos & Sprachnachrichten (Blossom)",
+    "title": "Foto- und Sprachnachrichtenspeicher (Blossom · BUD-03)",
     "intro": "Hostet die Bilder und Sprachnachrichten, die du sendest, sowie dein Profilbild. Uploads gehen an den Hauptserver und werden als Backup auf die anderen kopiert.",
     "primary": "Hauptserver",
     "makePrimary": "Zum Hauptserver machen",
@@ -3125,6 +3125,57 @@
     "blocked": "Möglicherweise in diesem Netzwerk blockiert",
     "noErrors": "Keine aktuellen Fehler aufgezeichnet",
     "bytes": "%{count} Bytes",
-    "milliseconds": "%{count} ms"
+    "milliseconds": "%{count} ms",
+    "operator": "Betreiber und Richtlinien",
+    "runBy": "Betrieben von",
+    "copyUrl": "Relay-URL kopieren",
+    "terms_of_service": "Nutzungsbedingungen",
+    "privacy_policy": "Datenschutzrichtlinie",
+    "posting_policy": "Veröffentlichungsrichtlinie",
+    "payments_url": "Zahlungen",
+    "countries": "Länder",
+    "languages": "Sprachen",
+    "admissionFee": "Aufnahmegebühr",
+    "subscriptionFee": "Abonnementgebühr",
+    "publicationFee": "Veröffentlichungsgebühr",
+    "feePeriod": "alle {{seconds}} Sekunden",
+    "feeKinds": "Arten {{kinds}}",
+    "acceptedKinds": "Akzeptiert",
+    "noKinds": "Keine Arten",
+    "fromNotes": "aus Lightning Piggys Notizen",
+    "restrictedWrites": "Eingeschränktes Schreiben"
+  },
+  "networkInfo": {
+    "aboutSection": "Über {{title}}",
+    "readSpec": "Spezifikation lesen",
+    "indexersTitle": "Indexer: helfen anderen, deine Relays zu finden",
+    "indexersHint": "Diese schreibgeschützte Liste zeigt Indexer, die deine öffentlichen Listen für andere Apps bereitstellen.",
+    "nip65Hint": "Diese öffentliche Liste zeigt anderen Apps, wo sie deine Beiträge lesen und Erwähnungen senden: Schreiben veröffentlicht Beiträge, Lesen empfängt Erwähnungen.",
+    "inboxHint": "Diese öffentliche Liste zeigt anderen, wohin sie private Nachrichten und Marmot-Einladungen senden.",
+    "blossomHint": "Der erste Server speichert Fotos und Sprachnachrichten; Backups halten Kopien, und Veröffentlichen teilt die Liste mit anderen Apps."
+  },
+  "relayKinds": {
+    "profiles": "Profile",
+    "posts": "Beiträge",
+    "follows": "Folgelisten",
+    "legacyMessages": "ältere Nachrichten",
+    "deletions": "Löschungen",
+    "reactions": "Reaktionen",
+    "privateMessages": "private Nachrichten",
+    "relayLists": "Relay-Listen",
+    "inboxRelays": "Posteingangs-Relays",
+    "keyPackageRelays": "Marmot-Schlüsselpaket-Relays",
+    "storageServers": "Speicherserver",
+    "other": "Ereignisse"
+  },
+  "publishResult": {
+    "summary": "An {{sent}} deiner Relays gesendet · mit {{shared}} Indexern geteilt",
+    "skipped": "{{host}} übersprungen ({{reason}})",
+    "problem": "Problem beim Senden an {{host}}: {{reason}}",
+    "details": "Details",
+    "accepted": "akzeptiert",
+    "kindSkipped": "diese Art wird nicht akzeptiert",
+    "unreachable": "aus diesem Netzwerk nicht erreichbar",
+    "failed": "fehlgeschlagen"
   }
 }

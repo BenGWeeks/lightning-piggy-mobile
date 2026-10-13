@@ -2651,7 +2651,7 @@
     "nip65Title": "Your relays (NIP-65)",
     "nip65Hint": "Write = where your posts are published, and where others look for them. Read = where others send posts that mention you.",
     "nip65Empty": "No published relay list yet.",
-    "inboxTitle": "Message inbox relays",
+    "inboxTitle": "Message inbox relays (NIP-17)",
     "inboxHint": "Other apps send your private messages here. Two or three reliable relays are enough.",
     "inboxEmpty": "No message inbox relays published yet.",
     "read": "Read",
@@ -2698,7 +2698,7 @@
     }
   },
   "blossomServers": {
-    "title": "Photo & voice-note storage (Blossom)",
+    "title": "Photo & voice-note storage (Blossom · BUD-03)",
     "intro": "Host the images and voice notes you send, and your profile picture. Uploads go to the primary server and are copied to the others as backups.",
     "primary": "Primary",
     "makePrimary": "Make primary",
@@ -3125,6 +3125,57 @@
     "blocked": "May be blocked from this network",
     "noErrors": "No recent errors recorded",
     "bytes": "%{count} bytes",
-    "milliseconds": "%{count} ms"
+    "milliseconds": "%{count} ms",
+    "operator": "Operator & policies",
+    "runBy": "Run by",
+    "copyUrl": "Copy relay URL",
+    "terms_of_service": "Terms of service",
+    "privacy_policy": "Privacy policy",
+    "posting_policy": "Posting policy",
+    "payments_url": "Payments",
+    "countries": "Countries",
+    "languages": "Languages",
+    "admissionFee": "Admission fee",
+    "subscriptionFee": "Subscription fee",
+    "publicationFee": "Publication fee",
+    "feePeriod": "every {{seconds}} seconds",
+    "feeKinds": "kinds {{kinds}}",
+    "acceptedKinds": "Accepts",
+    "noKinds": "No kinds",
+    "fromNotes": "from Lightning Piggy's notes",
+    "restrictedWrites": "Restricted writes"
+  },
+  "networkInfo": {
+    "aboutSection": "About {{title}}",
+    "readSpec": "Read the spec",
+    "indexersTitle": "Indexers: help others find your relays",
+    "indexersHint": "These read-only indexers share your public lists so other apps can find your relays.",
+    "nip65Hint": "This public list tells other apps where to read your posts and send mentions: Write publishes your posts, Read receives mentions.",
+    "inboxHint": "This public list tells others where to send your private messages and Marmot invites.",
+    "blossomHint": "The first server stores your photos and voice notes; backups keep extra copies, and Publish shares this list with other apps."
+  },
+  "relayKinds": {
+    "profiles": "profiles",
+    "posts": "posts",
+    "follows": "follows",
+    "legacyMessages": "legacy messages",
+    "deletions": "deletions",
+    "reactions": "reactions",
+    "privateMessages": "private messages",
+    "relayLists": "relay lists",
+    "inboxRelays": "inbox relays",
+    "keyPackageRelays": "Marmot key-package relays",
+    "storageServers": "storage servers",
+    "other": "events"
+  },
+  "publishResult": {
+    "summary": "Sent to your {{sent}} relays · shared with {{shared}} indexers",
+    "skipped": "{{host}} skipped ({{reason}})",
+    "problem": "Problem sending to {{host}}: {{reason}}",
+    "details": "Details",
+    "accepted": "accepted",
+    "kindSkipped": "this kind is not accepted",
+    "unreachable": "not reachable from this network",
+    "failed": "failed"
   }
 }

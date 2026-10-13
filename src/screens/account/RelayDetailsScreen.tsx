@@ -1,7 +1,11 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
-import { Server } from 'lucide-react-native';
+import * as Clipboard from 'expo-clipboard';
+import Toast from 'react-native-toast-message';
+import RelayOperatorSection from '../../components/RelayOperatorSection';
+import { relayAcceptedKinds, COMMON_KIND_NAMES } from '../../services/relayKindPolicy';
+import { Copy, Server } from 'lucide-react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import AccountScreenLayout from './AccountScreenLayout';
@@ -60,7 +64,7 @@ export default function RelayDetailsScreen({
     }, [url, snapshot]),
   );
   const row = editor.nip65Draft.find((r) => r.url === url);
-  const present = kind === 'nip65' ? !!row : editor.inboxDraft.includes(url);
+  const present = kind === 'nip65' ? !!row : kind === 'inbox' && editor.inboxDraft.includes(url);
   const editable = present && (kind === 'nip65' ? editor.nip65Editable : editor.inboxEditable);
   const unknown = t('relayDetails.unknown');
   const booleanValue = (value?: boolean) =>
@@ -74,11 +78,26 @@ export default function RelayDetailsScreen({
     </View>
   );
   const limits = info?.limitation;
+  const accepted = relayAcceptedKinds(url, info);
   return (
     <AccountScreenLayout title={t('relayDetails.title')}>
-      <Text selectable style={styles.url}>
-        {url}
-      </Text>
+      <View style={styles.urlRow}>
+        <Text selectable style={styles.url} accessibilityLabel={url}>
+          {url}
+        </Text>
+        <TouchableOpacity
+          testID="relay-details-copy"
+          accessibilityRole="button"
+          accessibilityLabel={t('relayDetails.copyUrl')}
+          hitSlop={8}
+          onPress={async () => {
+            await Clipboard.setStringAsync(url);
+            Toast.show({ type: 'success', text1: t('messageActionsSheet.copied') });
+          }}
+        >
+          <Copy size={20} color={colors.white} />
+        </TouchableOpacity>
+      </View>
       <View style={styles.card} testID="relay-details-about">
         <Text style={styles.heading}>{t('relayDetails.about')}</Text>
         {loading ? (
@@ -109,7 +128,6 @@ export default function RelayDetailsScreen({
                 {info.description}
               </Text>
             )}
-            {field(t('relayDetails.contact'), info.contact ?? info.pubkey)}
             {field(
               t('relayDetails.software'),
               [info.software, info.version].filter(Boolean).join(' ') || undefined,
@@ -124,8 +142,24 @@ export default function RelayDetailsScreen({
           <Text style={styles.value}>{t('relayDetails.unavailable')}</Text>
         )}
       </View>
+      {info && <RelayOperatorSection key={url} info={info} />}
       <View style={styles.card} testID="relay-details-access">
         <Text style={styles.heading}>{t('relayDetails.access')}</Text>
+        {field(
+          t('relayDetails.acceptedKinds'),
+          accepted
+            ? accepted.kinds
+                .map(
+                  (n) =>
+                    `${COMMON_KIND_NAMES[n] ? t(`relayKinds.${COMMON_KIND_NAMES[n]}`) : t('relayKinds.other')} (${n})`,
+                )
+                .join(', ') || t('relayDetails.noKinds')
+            : undefined,
+        )}
+        {accepted?.source === 'notes' && (
+          <Text style={styles.label}>{t('relayDetails.fromNotes')}</Text>
+        )}
+        {field(t('relayDetails.restrictedWrites'), booleanValue(limits?.restricted_writes))}
         {field(t('relayDetails.payment'), booleanValue(limits?.payment_required))}
         {field(t('relayDetails.auth'), booleanValue(limits?.auth_required))}
         {field(t('relayDetails.maxSubscriptions'), limits?.max_subscriptions)}
@@ -184,20 +218,22 @@ export default function RelayDetailsScreen({
           <Text style={styles.value}>{t('publishedRelays.nip65Hint')}</Text>
         </View>
       )}
-      <TouchableOpacity
-        style={[styles.remove, !editable && styles.disabled]}
-        disabled={!editable}
-        testID="relay-details-remove"
-        accessibilityRole="button"
-        accessibilityLabel={t('publishedRelays.removeLabel', { url })}
-        onPress={() => {
-          if (kind === 'nip65') editor.removeNip65(url);
-          else editor.removeInbox(url);
-          navigation.goBack();
-        }}
-      >
-        <Text style={styles.removeText}>{t('relayDetails.remove')}</Text>
-      </TouchableOpacity>
+      {kind !== 'readonly' && (
+        <TouchableOpacity
+          style={[styles.remove, !editable && styles.disabled]}
+          disabled={!editable}
+          testID="relay-details-remove"
+          accessibilityRole="button"
+          accessibilityLabel={t('publishedRelays.removeLabel', { url })}
+          onPress={() => {
+            if (kind === 'nip65') editor.removeNip65(url);
+            else editor.removeInbox(url);
+            navigation.goBack();
+          }}
+        >
+          <Text style={styles.removeText}>{t('relayDetails.remove')}</Text>
+        </TouchableOpacity>
+      )}
     </AccountScreenLayout>
   );
 }
