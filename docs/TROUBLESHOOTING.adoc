@@ -1309,3 +1309,11 @@ requires paced verification again. Verify on device using heartbeat gaps,
 not total refresh duration: a first full backlog can still take tens of
 seconds overall while touch dispatch stays responsive. See
 `PERFORMANCE.adoc` → "Kind-4 replay verification after restart (v1.5.0)".
+
+=== Jest network timer assertions with the verification cache
+
+Successful verification schedules a persistence debounce. Tests that assert
+network timers are cleared must first call `__resetVerifiedEventCache()` to
+remove this independent cache timer, and reset the cache before restoring
+real timers in teardown. Do not clear all timers before a network assertion,
+as that would hide leaked network work.
