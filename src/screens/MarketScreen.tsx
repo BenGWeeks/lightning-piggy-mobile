@@ -1,3 +1,4 @@
+import { marketMerchants, resolveMerchantSelection } from '../utils/marketMerchants';
 import { useCollectionFilter } from '../hooks/useCollectionFilter';
 import MarketCollectionChips from '../components/MarketCollectionChips';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -29,7 +30,6 @@ import {
   countActiveMarketFilters,
   distinctCountries,
   distinctCurrencies,
-  distinctMerchants,
   filterMarketProducts,
   isMarketFilterActive,
   type MarketFilter,
@@ -55,7 +55,7 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
   const tileWidth = useMemo(() => marketGridTileWidth(windowWidth), [windowWidth]);
 
   const { ready, preferences, update } = useMarketPreferences();
-  const { mode, merchant, country, currency } = preferences;
+  const { mode, merchant: savedMerchant, country, currency } = preferences;
   const friends = useMarketListings(ready && mode === 'wotFriends');
   const preferred = usePreferredMarketListings(ready && mode === 'preferred');
   const live = mode === 'wotFriends' ? friends : preferred;
@@ -91,7 +91,9 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
   }, [ready, live.products]);
 
   // Filter option lists sourced from the data actually loaded (not hardcoded).
-  const merchants = useMemo(() => distinctMerchants(baseProducts, sellerOf), [baseProducts]);
+  const merchantOptions = useMemo(() => marketMerchants(baseProducts), [baseProducts]);
+  const merchants = useMemo(() => merchantOptions.map((option) => option.id), [merchantOptions]);
+  const merchant = resolveMerchantSelection(savedMerchant, merchantOptions, live.merchantAliases);
   const countries = useMemo(() => distinctCountries(baseProducts, sellerOf), [baseProducts]);
   const currencies = useMemo(() => distinctCurrencies(baseProducts), [baseProducts]);
 
@@ -100,10 +102,20 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
   // one mode may not exist under the next, and a chip that no longer renders
   // can't be un-selected from its axis — the grid would just sit empty.
   useEffect(() => {
-    if (!ready || !live.completed || live.loading || live.incomplete) return;
-    const validated = validateMarketPreferences(preferences, { merchants, countries, currencies });
     if (
-      validated.merchant !== merchant ||
+      !ready ||
+      !live.completed ||
+      live.loading ||
+      live.incomplete ||
+      live.profilesReady === false
+    )
+      return;
+    const validated = validateMarketPreferences(
+      { ...preferences, merchant },
+      { merchants, countries, currencies },
+    );
+    if (
+      validated.merchant !== savedMerchant ||
       validated.country !== country ||
       validated.currency !== currency
     )
@@ -112,12 +124,14 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
     ready,
     mode,
     live.completed,
+    live.profilesReady,
     live.loading,
     live.incomplete,
     merchants,
     countries,
     currencies,
     merchant,
+    savedMerchant,
     country,
     currency,
     preferences,
@@ -318,7 +332,7 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
         onSelectMode={selectMode}
         visible={filtersOpen}
         onClose={() => setFiltersOpen(false)}
-        merchants={merchants}
+        merchants={merchantOptions}
         selectedMerchant={merchant}
         onSelectMerchant={setMerchant}
         countries={countries}

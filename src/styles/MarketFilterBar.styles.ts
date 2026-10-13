@@ -76,6 +76,7 @@ export const createMarketFilterBarStyles = (colors: Palette) =>
     sellerHint: { fontSize: 12, color: colors.textSupplementary },
     // ----- chips -----------------------------------------------------------
     chip: {
+      maxWidth: '100%',
       paddingHorizontal: 12,
       paddingVertical: 6,
       borderRadius: 999,
@@ -95,6 +96,26 @@ export const createMarketFilterBarStyles = (colors: Palette) =>
     chipTextSelected: {
       color: colors.white,
       fontWeight: '700',
+    },
+    merchantListTitle: { fontSize: 20, fontWeight: '800', color: colors.textBody },
+    merchantRowLabel: { flex: 1, fontSize: 14, color: colors.textBody },
+    merchantSheetOverlay: { flex: 1, justifyContent: 'flex-end' },
+    merchantList: {
+      height: '85%',
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+      backgroundColor: colors.background,
+      padding: 20,
+      paddingTop: 24,
+      paddingBottom: 28,
+    },
+    merchantSearch: {
+      marginVertical: 16,
+      padding: 12,
+      borderWidth: 1,
+      borderColor: colors.divider,
+      borderRadius: 16,
+      color: colors.textBody,
     },
     // ----- done ------------------------------------------------------------
     doneButton: {

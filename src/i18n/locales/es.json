@@ -2306,7 +2306,10 @@
       "friendsOfFriends": "Amigos de amigos",
       "friendsChip": "Amigos",
       "comingSoon": "Próximamente",
-      "clearScope": "Restablecer vendedores a los vendedores preferidos de Lightning Piggy"
+      "clearScope": "Restablecer vendedores a los vendedores preferidos de Lightning Piggy",
+      "moreMerchants": "Más (%{count})",
+      "searchMerchants": "Buscar vendedores",
+      "noMerchants": "No se encontraron vendedores"
     },
     "feedbackTabs": {
       "reviews": "Reseñas",
