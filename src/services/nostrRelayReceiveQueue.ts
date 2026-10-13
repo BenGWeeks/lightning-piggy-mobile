@@ -50,6 +50,22 @@ export class RelayReceiveQueue {
 const sharedQueue = new RelayReceiveQueue();
 const installed = new WeakSet<AbstractRelay>();
 
+/** Snapshot deadlines share the receive queue's boundary: finish only after
+ * events already received have been verified, delivered and persisted. Explicit
+ * cancellation must bypass this barrier so tab-blur still closes immediately. */
+export function finishAfterRelayReceive(finish: () => void): void {
+  const queued = sharedQueue.enqueue(async () => {
+    try {
+      await flushVerifiedEventCache();
+    } finally {
+      finish();
+    }
+  });
+  // Overload already closes paced sockets; don't leave a query pending forever
+  // if the bounded queue cannot accept its completion marker either.
+  if (!queued) finish();
+}
+
 /** Install BEFORE connect(): nostr-tools binds _onmessage when opening WS.
  * Uses the SDK's public receive/prepare hooks; integration tests guard those
  * hooks on upgrades. Control replies bypass crypto backlog (AUTH/OK/COUNT). */

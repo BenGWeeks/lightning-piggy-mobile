@@ -1,14 +1,15 @@
 import type { SimplePool } from 'nostr-tools/pool';
 import type { Filter } from 'nostr-tools/filter';
 import type { Event as NostrEvent } from 'nostr-tools/pure';
+import { finishAfterRelayReceive } from './nostrRelayReceiveQueue';
 
 /**
  * Abortable variant of `pool.querySync`. nostr-tools' `querySync` collects
  * events until EOSE but its public *type* omits the `abort` param — even though
  * the implementation forwards it down to `subscribe`, which closes the sub on
  * abort (see nostr-tools pool.js). This typed wrapper exposes that: the promise
- * resolves with whatever has arrived when EOSE fires, the per-relay `maxWait`
- * elapses, OR `signal` aborts.
+ * resolves with whatever has arrived when EOSE fires, the `maxWait` deadline's
+ * receive backlog drains, OR `signal` aborts (which closes immediately).
  *
  * That last case is the point — it lets a screen cancel an in-flight inbox
  * fetch on tab-blur/unmount instead of the JS thread chewing through the full
@@ -62,14 +63,16 @@ export function querySyncAbortable(
     if (params.maxWait !== undefined)
       deadline = setTimeout(
         () =>
-          finish(
-            params.rejectOnTimeout ? new Error('Relay query timed out before EOSE') : undefined,
+          finishAfterRelayReceive(() =>
+            finish(
+              params.rejectOnTimeout ? new Error('Relay query timed out before EOSE') : undefined,
+            ),
           ),
         params.maxWait,
       );
     closer = pool.subscribeMany(relays, filter, {
-      // The pool's own timeout sits 1 s behind ours so our deadline always
-      // settles first (it still bounds the pool's connection-timeout maths).
+      // Our deadline queues its completion marker first. The pool's SDK timeout
+      // also drains through the receive queue (and bounds connection timeouts).
       maxWait: params.maxWait !== undefined ? params.maxWait + 1000 : undefined,
       abort: params.signal,
       onevent(event) {
@@ -83,7 +86,7 @@ export function querySyncAbortable(
         if (params.rejectOnAllRelaysFailure) queueMicrotask(() => finish());
         else finish();
       },
-      onclose(reasons: Array<string | { url: string; reason: string }>) {
+      onclose(reasons: (string | { url: string; reason: string })[]) {
         // nostr-tools close reasons, verbatim (abstract-relay.js / pool.js):
         // "connection failed" / "connection timed out" (optionally "relay "-
         // prefixed; never connected), "relay connection closed" + "websocket

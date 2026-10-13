@@ -440,7 +440,10 @@ safely establish signature trust because they lack the signed envelope.
 sockets, dispatching each wire message through the original SDK verifier,
 filter, dedup and delivery path. It yields before the next unit when the
 budget is spent. Wire EOSE and EOSE timeouts wait behind already received
-events; verification trust is flushed before a query completes. AUTH, OK
+events; `querySyncAbortable` also queues its independent deadline at that
+receive boundary, so pre-deadline events drain even beyond `maxWait`.
+Explicit abort still closes immediately. Verification trust is flushed
+before EOSE or deadline completion. AUTH, OK
 and COUNT replies bypass the backlog. Closing a subscription drops its
 queued delivery. The queue is bounded at 20,000 jobs / 8 MiB of estimated
 UTF-16 payload; overflow closes the affected relay for a later refetch.

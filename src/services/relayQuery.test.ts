@@ -2,6 +2,13 @@ import { querySyncAbortable } from './relayQuery';
 import type { SimplePool } from 'nostr-tools/pool';
 import type { Event as NostrEvent } from 'nostr-tools/pure';
 
+// These fake-pool tests exercise completion policy; the signed-event backlog
+// and persistence barrier are covered in relayQuery.receiveQueue.test.ts.
+jest.mock('./nostrVerifyCache', () => ({
+  hydrateVerifiedEventCache: jest.fn(async () => {}),
+  flushVerifiedEventCache: jest.fn(async () => {}),
+}));
+
 type SubParams = {
   maxWait?: number;
   abort?: AbortSignal;
@@ -109,7 +116,7 @@ describe('querySyncAbortable deadline', () => {
       { maxWait: 1000, rejectOnAllRelaysFailure: true },
     );
     expect(params().maxWait).toBe(2000); // pool's own timeout trails ours
-    jest.advanceTimersByTime(1000);
+    await jest.advanceTimersByTimeAsync(1000);
     await expect(promise).resolves.toEqual([]);
     expect(close).toHaveBeenCalled();
   });
@@ -121,7 +128,7 @@ describe('querySyncAbortable deadline', () => {
     a.params().onevent(makeEvent('x'));
     const b = fakePool();
     const noFlag = querySyncAbortable(b.pool, ['wss://a'], { kinds: [1] }, { maxWait: 1000 });
-    jest.advanceTimersByTime(1000);
+    await jest.advanceTimersByTimeAsync(1000);
     expect((await withEvents).map((e) => e.id)).toEqual(['x']);
     expect(await noFlag).toEqual([]);
   });
@@ -267,7 +274,7 @@ describe('strict shipping query completion', () => {
       { maxWait: 6000, rejectOnTimeout: true },
     );
     const assertion = expect(result).rejects.toThrow('before EOSE');
-    jest.advanceTimersByTime(6000);
+    await jest.advanceTimersByTimeAsync(6000);
     await assertion;
     expect(relay.close).toHaveBeenCalledTimes(1);
   });
@@ -282,7 +289,7 @@ describe('strict shipping query completion', () => {
     );
     relay.params().oneose();
     await expect(result).resolves.toEqual([]);
-    jest.advanceTimersByTime(6000);
+    await jest.advanceTimersByTimeAsync(6000);
     expect(relay.close).toHaveBeenCalledTimes(1);
   });
 });
