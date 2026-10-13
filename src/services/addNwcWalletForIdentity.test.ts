@@ -15,6 +15,7 @@ jest.mock('./walletStorageService', () => ({
   deleteNwcUrl: jest.fn(),
   getWalletList: jest.fn(),
   saveWalletList: jest.fn(),
+  updateWalletList: jest.fn(),
 }));
 const url =
   'nostr+walletconnect://' + 'a'.repeat(64) + '?relay=wss://example.com&secret=' + 'b'.repeat(64);
@@ -29,6 +30,10 @@ beforeEach(() => {
   jest.resetAllMocks();
   jest.mocked(storage.getActivePubkey).mockReturnValue('B');
   jest.mocked(storage.getWalletList).mockResolvedValue([]);
+  jest.mocked(storage.updateWalletList).mockImplementation(async (update, owner) => {
+    const updated = update(await storage.getWalletList(owner));
+    if (updated !== null) await storage.saveWalletList(updated, owner);
+  });
   jest.mocked(nwc.connect).mockResolvedValue({ success: true, balance: 7 });
   jest.mocked(nwc.getInfo).mockResolvedValue(null);
 });
