@@ -2092,6 +2092,8 @@
     "send": "Senden"
   },
   "walletCard": {
+    "zaplie": "Zaplie",
+    "zaplieBolt": "Zaplie Bolt",
     "connected": "Verbunden",
     "notResponding": "Reagiert nicht",
     "disconnected": "Getrennt",

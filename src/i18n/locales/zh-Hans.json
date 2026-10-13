@@ -2092,6 +2092,8 @@
     "send": "发送"
   },
   "walletCard": {
+    "zaplie": "Zaplie",
+    "zaplieBolt": "Zaplie Bolt",
     "connected": "已连接",
     "notResponding": "无响应",
     "disconnected": "已断开",

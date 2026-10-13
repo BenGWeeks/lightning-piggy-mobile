@@ -1,6 +1,8 @@
 import type { CardTheme, WalletType } from '../types/wallet';
 import { ImageSourcePropType, ImageResizeMode } from 'react-native';
 
+export type CardBackgroundStyle = CardTheme | 'zaplie';
+
 export interface CardThemeConfig {
   id: CardTheme;
   name: string;
@@ -11,7 +13,7 @@ export interface CardThemeConfig {
   backgroundImage?: ImageSourcePropType;
   // Tighter than `string`: must be one of the registered cards/* style
   // names so a typo doesn't silently fall back to the default style.
-  backgroundImageStyle?: CardTheme;
+  backgroundImageStyle?: CardBackgroundStyle;
   // Defaults to 'contain' (line-art mascots sit as a corner decoration
   // over the gradient). Full-bleed photo backgrounds set 'stretch' (or
   // 'cover') so the art fills the whole card with no gradient gap at the
@@ -38,6 +40,28 @@ export const cardThemes: Record<CardTheme, CardThemeConfig> = {
     accentColor: '#FFD700',
     backgroundImage: require('../../assets/images/wise-owl.png'),
     backgroundImageStyle: 'wise-owl',
+    backgroundImageResizeMode: 'contain',
+  },
+  zaplie: {
+    id: 'zaplie',
+    name: 'Zaplie',
+    nameKey: 'walletCard.zaplie',
+    gradientColors: ['#2A1500', '#120A00'],
+    textColor: '#FFFFFF',
+    accentColor: '#FF9F1C',
+    backgroundImage: require('../../assets/images/zaplie.png'),
+    backgroundImageStyle: 'zaplie',
+    backgroundImageResizeMode: 'contain',
+  },
+  'zaplie-bolt': {
+    id: 'zaplie-bolt',
+    name: 'Zaplie Bolt',
+    nameKey: 'walletCard.zaplieBolt',
+    gradientColors: ['#2A1500', '#120A00'],
+    textColor: '#FFFFFF',
+    accentColor: '#FF9F1C',
+    backgroundImage: require('../../assets/images/zaplie-bolt.png'),
+    backgroundImageStyle: 'zaplie-bolt',
     backgroundImageResizeMode: 'contain',
   },
   'lightning-bee': {
@@ -270,16 +294,18 @@ export const cardThemes: Record<CardTheme, CardThemeConfig> = {
   },
 };
 
-// Keep the existing alphabetical picker order, with Owl immediately after Piggy.
-const orderedThemes = Object.values(cardThemes)
-  .filter((theme) => theme.id !== 'wise-owl')
+// Keep Owl immediately after Piggy, followed by Zaplie and Zaplie Bolt (#1471).
+const alphabeticalThemes = Object.values(cardThemes)
+  .filter((theme) => theme.id !== 'wise-owl' && theme.id !== 'zaplie' && theme.id !== 'zaplie-bolt')
   .sort((a, b) => a.name.localeCompare(b.name));
-orderedThemes.splice(
-  orderedThemes.findIndex((theme) => theme.id === 'lightning-piggy') + 1,
-  0,
+const piggyIndex = alphabeticalThemes.findIndex((theme) => theme.id === 'lightning-piggy');
+export const themeList = [
+  ...alphabeticalThemes.slice(0, piggyIndex + 1),
   cardThemes['wise-owl'],
-);
-export const themeList = orderedThemes;
+  cardThemes.zaplie,
+  cardThemes['zaplie-bolt'],
+  ...alphabeticalThemes.slice(piggyIndex + 1),
+];
 
 /**
  * Card design a wallet falls back to when it carries no explicit (or a

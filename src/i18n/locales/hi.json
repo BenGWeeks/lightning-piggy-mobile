@@ -2092,6 +2092,8 @@
     "send": "भेजें"
   },
   "walletCard": {
+    "zaplie": "Zaplie",
+    "zaplieBolt": "Zaplie Bolt",
     "connected": "कनेक्ट है",
     "notResponding": "जवाब नहीं मिल रहा",
     "disconnected": "डिसकनेक्ट है",

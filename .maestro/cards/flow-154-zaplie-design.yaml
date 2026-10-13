@@ -1,0 +1,133 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Select and persist Zaplie and Zaplie Bolt wallet designs
+---
+# Requires an existing test wallet. Keep its alias, connection and balance.
+- extendedWaitUntil:
+    visible:
+      id: 'tab-wallets'
+    timeout: 60000
+- tapOn:
+    id: 'tab-wallets'
+- extendedWaitUntil:
+    visible:
+      id: 'wallet-settings'
+    timeout: 15000
+- tapOn:
+    id: 'wallet-settings'
+- extendedWaitUntil:
+    visible:
+      id: 'wallet-settings-tab-design'
+    timeout: 10000
+- tapOn:
+    id: 'wallet-settings-tab-design'
+# Match the centred name by testID and visible text. Android exposes its
+# accessibility label separately from the text field used by Maestro.
+- repeat:
+    times: 22
+    while:
+      notVisible:
+        id: 'wallet-card-picker-name'
+        text: '.*Zaplie.*'
+    commands:
+      - swipe:
+          from:
+            id: 'wallet-card-picker-coverflow'
+          direction: LEFT
+          duration: 2000
+      - waitForAnimationToEnd:
+          timeout: 1000
+- repeat:
+    times: 22
+    while:
+      notVisible:
+        id: 'wallet-card-picker-name'
+        text: '.*Zaplie.*'
+    commands:
+      - swipe:
+          from:
+            id: 'wallet-card-picker-coverflow'
+          direction: RIGHT
+          duration: 2000
+      - waitForAnimationToEnd:
+          timeout: 1000
+- tapOn:
+    id: 'theme-zaplie'
+- extendedWaitUntil:
+    visible:
+      id: 'wallet-card-picker-name'
+      text: '.*Zaplie.*'
+    timeout: 10000
+- tapOn:
+    id: 'wallet-settings-save'
+- extendedWaitUntil:
+    notVisible:
+      id: 'wallet-settings-tab-design'
+    timeout: 10000
+- assertVisible:
+    id: 'wallet-card-design-zaplie'
+# Reopen the picker to verify the saved selection survives remounting.
+- tapOn:
+    id: 'wallet-settings'
+- extendedWaitUntil:
+    visible:
+      id: 'wallet-card-picker-name'
+      text: '.*Zaplie.*'
+    timeout: 10000
+- assertVisible:
+    id: 'theme-zaplie'
+    selected: true
+- tapOn:
+    id: 'wallet-settings-save'
+- extendedWaitUntil:
+    notVisible:
+      id: 'wallet-settings-tab-design'
+    timeout: 10000
+- assertVisible:
+    id: 'wallet-card-design-zaplie'
+
+# Zaplie Bolt follows Zaplie. Select it and verify persistence as well.
+- tapOn:
+    id: 'wallet-settings'
+- extendedWaitUntil:
+    visible:
+      id: 'theme-zaplie'
+      selected: true
+    timeout: 10000
+- swipe:
+    from:
+      id: 'wallet-card-picker-coverflow'
+    direction: LEFT
+    duration: 2000
+- tapOn:
+    id: 'theme-zaplie-bolt'
+- extendedWaitUntil:
+    visible:
+      id: 'wallet-card-picker-name'
+      text: '.*Zaplie Bolt.*'
+    timeout: 10000
+- tapOn:
+    id: 'wallet-settings-save'
+- extendedWaitUntil:
+    notVisible:
+      id: 'wallet-settings-tab-design'
+    timeout: 10000
+- assertVisible:
+    id: 'wallet-card-design-zaplie-bolt'
+- tapOn:
+    id: 'wallet-settings'
+- extendedWaitUntil:
+    visible:
+      id: 'wallet-card-picker-name'
+      text: '.*Zaplie Bolt.*'
+    timeout: 10000
+- assertVisible:
+    id: 'theme-zaplie-bolt'
+    selected: true
+- tapOn:
+    id: 'wallet-settings-save'
+- extendedWaitUntil:
+    notVisible:
+      id: 'wallet-settings-tab-design'
+    timeout: 10000
+- assertVisible:
+    id: 'wallet-card-design-zaplie-bolt'
