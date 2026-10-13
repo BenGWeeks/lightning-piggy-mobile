@@ -54,6 +54,7 @@ export function LinkActionSheetHost(): React.ReactElement {
   return (
     <BottomSheetModal
       ref={sheetRef}
+      stackBehavior="push"
       enableDynamicSizing
       backdropComponent={backdrop}
       backgroundStyle={styles.background}

@@ -351,10 +351,12 @@ const SendSheet: React.FC<Props> = ({
   // Fix-in-place recovery (#871): return to the paste/input step with the bad
   // value RETAINED (unlike handleReset, which blanks it) so a one-char typo
   // can be corrected without retyping the whole address. Unwinds the
-  // resolved/scanned state but keeps pasteText / activePubkey. Reads the live
+  // resolved/scanned state and retains the editable text. Reads the live
   // submitted value via refs so the callback identity stays stable (see above).
   const handleEditAddress = useCallback(() => {
     const prefill = editAddressPrefill(pasteTextRef.current, invoiceDataRef.current);
+    setActivePubkey(undefined);
+    setActivePicture(undefined);
     setInvoiceData(null);
     setDecoded(null);
     setScanned(false);

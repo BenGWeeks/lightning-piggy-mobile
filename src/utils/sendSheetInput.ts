@@ -16,7 +16,6 @@ export function decodeInvoice(bolt11: string): DecodedInvoice | null {
     let amountSats: number | null = null;
     let description: string | null = null;
     let expiry: number | null = null;
-    let nodePubkey: string | null = null;
     let hasPaymentHash = false;
 
     for (const section of decoded.sections) {
@@ -26,9 +25,6 @@ export function decodeInvoice(bolt11: string): DecodedInvoice | null {
         amountSats = Math.round(Number(section.value) / 1000);
       } else if (section.name === 'description') {
         description = section.value as string;
-      } else if ((section.name as string) === 'payee') {
-        // The decoder supports the BOLT11 n tag; its bundled type omits it.
-        nodePubkey = (section as unknown as { value: string }).value;
       } else if (section.name === 'expiry') {
         expiry = section.value as number;
       }
@@ -36,7 +32,9 @@ export function decodeInvoice(bolt11: string): DecodedInvoice | null {
     // A checksum-valid string can still be an empty payload (e.g. `lnbc1w4pnfm`):
     // without a payment hash there is nothing to pay.
     if (!hasPaymentHash) return null;
-    return { amountSats, description, expiry, ...(nodePubkey ? { nodePubkey } : {}) };
+    // light-bolt11-decoder does not verify signatures. An n (payee) tag is
+    // untrusted metadata, so omit node identity and use the unknown recipient.
+    return { amountSats, description, expiry };
   } catch {
     return null;
   }

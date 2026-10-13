@@ -1,3 +1,5 @@
+import { decode as bolt11Decode } from 'light-bolt11-decoder';
+import { paymentRecipientLabel } from './paymentIdentity';
 import { bech32 } from '@scure/base';
 import {
   INVOICE_WITH_AMOUNT,
@@ -130,4 +132,39 @@ describe('decodeInvoice with real BOLT11 vectors', () => {
   it('decodes an uppercase invoice (QR alphanumeric mode)', () => {
     expect(decodeInvoice(INVOICE_WITH_AMOUNT.toUpperCase())?.amountSats).toBe(250000);
   });
+});
+
+it.each(['02', '03'])('never trusts a forged %s payee tag with a valid checksum', (prefix) => {
+  const original = bech32.decode(INVOICE_WITH_AMOUNT, false);
+  const payee = prefix + '11'.repeat(32);
+  const payeeWords = bech32.toWords(Uint8Array.from(Buffer.from(payee, 'hex')));
+  // Inject an n tag without signing the altered payload, then recompute only
+  // the checksum. The lightweight decoder still accepts and exposes the tag.
+  const forged = bech32.encode(
+    original.prefix,
+    [
+      ...original.words.slice(0, -104),
+      19,
+      payeeWords.length >> 5,
+      payeeWords.length & 31,
+      ...payeeWords,
+      ...original.words.slice(-104),
+    ],
+    false,
+  );
+  expect(bolt11Decode(forged).sections).toContainEqual(
+    expect.objectContaining({
+      name: 'payee',
+      value: payee,
+    }),
+  );
+  const decoded = decodeInvoice(forged);
+  expect(decoded).toEqual({ amountSats: 250000, description: '1 cup coffee', expiry: 60 });
+  expect(
+    paymentRecipientLabel({
+      contacts: [],
+      nodePubkey: decoded?.nodePubkey,
+      unknownLabel: 'Unknown recipient',
+    }),
+  ).toBe('Unknown recipient');
 });

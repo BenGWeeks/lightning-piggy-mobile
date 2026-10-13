@@ -1,6 +1,8 @@
 import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import SendSheet from './SendSheet';
+import { LinkActionSheetHost } from './LinkActionSheet';
+import { INVOICE_WITH_AMOUNT } from '../utils/bolt11TestVectors';
 
 // Boundary test for the real SendSheet: native sheet/camera, contexts and
 // payment services are stubbed; the sheet's own open effect, tab state and
@@ -29,6 +31,8 @@ jest.mock('expo-camera', () => {
 // effects flush — the window where the uncontrolled field's native text (and
 // pasteTextRef) is ahead of `pasteText` state.
 let mockNativeKeystroke: string | null = null;
+let mockRealInput = false;
+let mockModalStack: { onChange?: (index: number) => void }[] = [];
 jest.mock('@gorhom/bottom-sheet', () => {
   const R = jest.requireActual('react');
   const RN = jest.requireActual('react-native');
@@ -45,10 +49,35 @@ jest.mock('@gorhom/bottom-sheet', () => {
   }
   return {
     BottomSheetModal: R.forwardRef(function Modal(
-      { children }: { children?: React.ReactNode },
+      {
+        children,
+        onChange,
+        onDismiss,
+        stackBehavior = 'switch',
+      }: {
+        children?: React.ReactNode;
+        onChange?: (index: number) => void;
+        onDismiss?: () => void;
+        stackBehavior?: string;
+      },
       ref: React.Ref<unknown>,
     ) {
-      R.useImperativeHandle(ref, () => ({ present: jest.fn(), dismiss: jest.fn() }));
+      const entry = R.useRef({ onChange });
+      entry.current.onChange = onChange;
+      R.useImperativeHandle(ref, () => ({
+        present: () => {
+          if (!mockRealInput) return;
+          if (mockModalStack.includes(entry.current)) return;
+          // Gorhom's switch minimizes the previous modal to index -1.
+          if (stackBehavior === 'switch') mockModalStack.at(-1)?.onChange?.(-1);
+          mockModalStack.push(entry.current);
+        },
+        dismiss: () => {
+          if (!mockRealInput) return;
+          mockModalStack = mockModalStack.filter((modal) => modal !== entry.current);
+          onDismiss?.();
+        },
+      }));
       return R.createElement(RN.View, null, children);
     }),
     BottomSheetBackdrop: () => null,
@@ -83,7 +112,7 @@ jest.mock('../contexts/WalletContext', () => ({
 }));
 jest.mock('../contexts/NostrContext', () => ({
   useNostr: () => ({ signZapRequest: jest.fn() }),
-  useNostrContacts: () => ({ contacts: [] }),
+  useNostrContacts: () => ({ contacts: [{ pubkey: 'a'.repeat(64), petname: 'Alice' }] }),
 }));
 jest.mock('../contexts/ThemeContext', () => ({
   useThemeColors: () => new Proxy({}, { get: () => '#000' }),
@@ -131,6 +160,8 @@ type InputArgs = {
 let mockInputArgs: InputArgs | null = null;
 jest.mock('../hooks/useSendSheetInput', () => ({
   useSendSheetInput: (args: InputArgs) => {
+    if (mockRealInput)
+      return jest.requireActual('../hooks/useSendSheetInput').useSendSheetInput(args);
     mockInputArgs = args;
     return {
       processInput: mockProcessInput,
@@ -148,7 +179,7 @@ jest.mock('../services/sendThresholdService', () => ({
   shouldConfirmSend: jest.fn(),
 }));
 jest.mock('../services/lnurlService', () => ({ fetchInvoice: jest.fn() }));
-jest.mock('../services/boltzService', () => ({}));
+jest.mock('../services/boltzService', () => ({ isBitcoinAddress: () => false }));
 jest.mock('../services/onchainService', () => ({}));
 jest.mock('../services/nostrService', () => ({ npubEncode: jest.fn() }));
 jest.mock('../services/zapCounterpartyStorage', () => ({ recordOutgoing: jest.fn() }));
@@ -163,6 +194,11 @@ jest.mock('../utils/reverseSwapSend', () => ({
 }));
 jest.mock('../utils/perfLog', () => ({ perfLog: jest.fn() }));
 
+const mockConfirmLargeSend = jest.fn(async () => false);
+jest.mock('../hooks/useLargeSendConfirm', () => ({
+  useLargeSendConfirm: () => mockConfirmLargeSend,
+}));
+
 const onClose = jest.fn();
 const resolvePermission = (p: Permission) => act(() => mockSetPermission?.(p));
 const selectedTab = (id: string) =>
@@ -170,6 +206,10 @@ const selectedTab = (id: string) =>
 
 beforeEach(() => {
   jest.useFakeTimers();
+  mockRealInput = false;
+  mockModalStack = [];
+  onClose.mockClear();
+  mockConfirmLargeSend.mockClear();
   mockPermission = null;
   mockSetPermission = null;
   mockNativeKeystroke = null;
@@ -350,4 +390,65 @@ it('returns a rejected QR to Paste so the camera stops until deliberately select
   expect(screen.getByTestId('send-paste-input').props.defaultValue).toBe('lnbc1corrupt');
   fireEvent.press(screen.getByTestId('send-tab-scan'));
   expect(selectedTab('send-tab-scan')).toBe(true);
+});
+
+it.each(['confirm', 'cancel'])(
+  'preserves Send and its intake session when consent is stacked: %s',
+  (choice) => {
+    mockRealInput = true;
+    render(
+      <>
+        <SendSheet visible onClose={onClose} />
+        <LinkActionSheetHost />
+      </>,
+    );
+    fireEvent.changeText(screen.getByTestId('send-paste-input'), INVOICE_WITH_AMOUNT);
+    fireEvent.press(screen.getByTestId('send-paste-go'));
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('mock-send-amount')).toBeNull();
+    fireEvent.press(
+      screen.getByTestId(choice === 'confirm' ? 'link-action-confirm' : 'link-action-button-0'),
+    );
+    expect(onClose).not.toHaveBeenCalled();
+    if (choice === 'confirm') {
+      expect(screen.getByTestId('mock-send-amount')).toBeTruthy();
+      expect(screen.queryByTestId('send-paste-input')).toBeNull();
+    } else {
+      expect(screen.getByTestId('send-paste-input')).toBeTruthy();
+      // Cancelling frees the intake guard for the next attempt.
+      fireEvent.press(screen.getByTestId('send-paste-go'));
+      fireEvent.press(screen.getByTestId('link-action-confirm'));
+      expect(screen.getByTestId('mock-send-amount')).toBeTruthy();
+    }
+  },
+);
+
+it('clears a friend identity after Edit address replaces the destination with an unrelated invoice', async () => {
+  mockRealInput = true;
+  render(
+    <>
+      <SendSheet
+        visible
+        onClose={onClose}
+        initialAddress="alice@example.com"
+        recipientPubkey={'a'.repeat(64)}
+        recipientName="Alice"
+      />
+      <LinkActionSheetHost />
+    </>,
+  );
+  act(() => jest.runOnlyPendingTimers());
+  fireEvent.press(screen.getByTestId('link-action-confirm'));
+  fireEvent.press(screen.getByTestId('sendsheet-edit-address'));
+  fireEvent.changeText(screen.getByTestId('send-paste-input'), INVOICE_WITH_AMOUNT);
+  fireEvent.press(screen.getByTestId('send-paste-go'));
+  fireEvent.press(screen.getByTestId('link-action-confirm'));
+  await act(async () => fireEvent.press(screen.getByTestId('sendsheet-send-button')));
+  expect(mockConfirmLargeSend).toHaveBeenCalledWith(
+    expect.objectContaining({
+      amountSats: 250000,
+      recipient: 'sendSheet.thisRecipient',
+    }),
+  );
+  expect(mockWallet.payInvoiceForWallet).not.toHaveBeenCalled();
 });
