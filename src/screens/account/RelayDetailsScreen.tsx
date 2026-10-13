@@ -2,7 +2,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import * as Clipboard from 'expo-clipboard';
-import Toast from 'react-native-toast-message';
+import Toast from '../../components/BrandedToast';
 import RelayOperatorSection from '../../components/RelayOperatorSection';
 import { relayAcceptedKinds, COMMON_KIND_NAMES } from '../../services/relayKindPolicy';
 import { Copy, Server } from 'lucide-react-native';

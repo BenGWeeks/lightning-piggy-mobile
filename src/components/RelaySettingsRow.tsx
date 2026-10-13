@@ -38,7 +38,6 @@ export default React.memo(function RelaySettingsRow({
       style={styles.row}
       onPress={() => onOpen(url, inbox ? 'inbox' : 'nip65')}
       testID={`${testIDPrefix}${inbox ? 'inbox-' : ''}relay-row-${relayRowHost(url)}`}
-      accessible={false}
       accessibilityRole="button"
       accessibilityLabel={url}
     >
@@ -48,9 +47,7 @@ export default React.memo(function RelaySettingsRow({
         testID={probeIndex === undefined ? undefined : `relay-dot-${probeIndex}`}
       />
       <View style={styles.urlColumn}>
-        <Text style={styles.url} numberOfLines={2} ellipsizeMode="tail">
-          {relayDisplayName(url)}
-        </Text>
+        <Text style={styles.url}>{relayDisplayName(url)}</Text>
         {!isPublishableRelayUrl(url) && (
           <Text style={styles.urlWarning}>{t('publishedRelays.notPublishable')}</Text>
         )}
