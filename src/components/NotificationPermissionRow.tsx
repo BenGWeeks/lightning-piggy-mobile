@@ -1,12 +1,13 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { AppState, Linking, Text, TouchableOpacity, View } from 'react-native';
+import { AppState, Linking, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Notifications from 'expo-notifications';
 import { BellOff, BellRing } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { requestNotificationPermission } from '../services/notificationService';
-import { createNotificationPermissionRowStyles } from '../styles/NotificationPermissionRow.styles';
+import { createSettingsBannerStyles } from '../styles/SettingsBanner.styles';
+import SettingsBanner from './SettingsBanner';
 
 /**
  * Top of Settings → Notifications: whether the system lets Lightning Piggy
@@ -19,7 +20,7 @@ import { createNotificationPermissionRowStyles } from '../styles/NotificationPer
 const NotificationPermissionRow: React.FC = () => {
   const colors = useThemeColors();
   const t = useTranslation();
-  const styles = useMemo(() => createNotificationPermissionRowStyles(colors), [colors]);
+  const styles = useMemo(() => createSettingsBannerStyles(colors), [colors]);
   // null = not read yet.
   const [granted, setGranted] = useState<boolean | null>(null);
 
@@ -67,26 +68,18 @@ const NotificationPermissionRow: React.FC = () => {
   }
 
   return (
-    <View style={styles.banner} testID="notifications-permission-row" accessibilityRole="alert">
-      <BellOff size={22} color={colors.brandPink} />
-      <View style={styles.bannerText}>
-        <Text style={styles.bannerTitle}>{t('notificationSettingsScreen.permissionTitle')}</Text>
-        <Text style={styles.bannerStatus} testID="notifications-permission-status">
-          {t('notificationSettingsScreen.permissionBlocked')}
-        </Text>
-      </View>
-      <TouchableOpacity
-        style={styles.bannerButton}
-        onPress={handleTurnOn}
-        accessibilityRole="button"
-        accessibilityLabel={t('notificationSettingsScreen.permissionTurnOn')}
-        testID="notifications-permission-turn-on"
-      >
-        <Text style={styles.bannerButtonText}>
-          {t('notificationSettingsScreen.permissionTurnOn')}
-        </Text>
-      </TouchableOpacity>
-    </View>
+    <SettingsBanner
+      icon={BellOff}
+      title={t('notificationSettingsScreen.permissionTitle')}
+      subtitle={t('notificationSettingsScreen.permissionBlocked')}
+      testID="notifications-permission-row"
+      subtitleTestID="notifications-permission-status"
+      action={{
+        label: t('notificationSettingsScreen.permissionTurnOn'),
+        onPress: handleTurnOn,
+        testID: 'notifications-permission-turn-on',
+      }}
+    />
   );
 };
 

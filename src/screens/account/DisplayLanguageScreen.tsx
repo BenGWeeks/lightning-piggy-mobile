@@ -13,7 +13,7 @@ import {
 } from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
 import { createSharedAccountStyles } from './sharedStyles';
-import SettingsScopeHeader from '../../components/SettingsScopeHeader';
+import SettingsSection from '../../components/SettingsSection';
 import SettingsOptionList, { type SettingsOption } from '../../components/SettingsOptionList';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useWallet } from '../../contexts/WalletContext';
@@ -150,7 +150,7 @@ const DisplayLanguageScreen: React.FC = () => {
 
   return (
     <AccountScreenLayout title={t('displayLanguageScreen.title')}>
-      <SettingsScopeHeader scope="account" testID="display-language-account" />
+      <SettingsSection scope="account" testID="display-language-account" />
 
       <Text style={shared.sectionLabel}>{t('displayScreen.currency')}</Text>
       <TouchableOpacity
@@ -191,7 +191,7 @@ const DisplayLanguageScreen: React.FC = () => {
         })}
       </Text>
 
-      <SettingsScopeHeader scope="phone" spaced testID="display-language-phone" />
+      <SettingsSection scope="phone" spaced testID="display-language-phone" />
 
       <Text style={shared.sectionLabel}>{t('appearanceScreen.themeSectionLabel')}</Text>
       <SettingsOptionList

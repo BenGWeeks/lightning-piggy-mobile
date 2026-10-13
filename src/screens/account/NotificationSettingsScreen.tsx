@@ -5,7 +5,7 @@ import AccountScreenLayout from './AccountScreenLayout';
 import { useTranslation } from '../../contexts/LocaleContext';
 import MutedAccountsList from '../../components/MutedAccountsList';
 import MarmotPushSection from '../../components/MarmotPushSection';
-import SettingsScopeHeader from '../../components/SettingsScopeHeader';
+import SettingsSection from '../../components/SettingsSection';
 import NotificationPermissionRow from '../../components/NotificationPermissionRow';
 import ShopAlertsSection from '../../components/ShopAlertsSection';
 import SettingsRow from '../../components/SettingsRow';
@@ -73,10 +73,10 @@ const NotificationSettingsScreen: React.FC = () => {
           <>
             <NotificationPermissionRow />
 
-            <SettingsScopeHeader scope="account" testID="notifications-account" />
+            <SettingsSection scope="account" testID="notifications-account" />
             <MarmotPushSection />
 
-            <SettingsScopeHeader scope="phone" spaced testID="notifications-phone" />
+            <SettingsSection scope="phone" spaced testID="notifications-phone" />
 
             <SettingsRow
               icon={BellRing}

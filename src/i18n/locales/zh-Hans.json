@@ -3192,5 +3192,16 @@
     "tls": "TLS 错误",
     "closed": "连接已关闭",
     "explanation": "绿色表示中继刚刚响应。‘使用中’表示应用正为你的账户连接到该中继；发布后中继才会加入。"
+  },
+  "settingsKit": {
+    "search": "搜索选项",
+    "noResults": "没有符合搜索条件的选项。",
+    "custom": "自定义",
+    "status": {
+      "ok": "正常",
+      "warn": "需要关注",
+      "error": "错误",
+      "unknown": "未知"
+    }
   }
 }

@@ -4,7 +4,7 @@ import { useNavigation } from '@react-navigation/native';
 import { Bitcoin, FlaskConical, Gauge, MessageCircle, Radio, Server } from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
 import { Alert } from '../../components/BrandedAlert';
-import SettingsScopeHeader from '../../components/SettingsScopeHeader';
+import SettingsSection from '../../components/SettingsSection';
 import SettingsRow from '../../components/SettingsRow';
 import NativeCryptoSection from '../../components/NativeCryptoSection';
 import DeviceNoticesSection from '../../components/DeviceNoticesSection';
@@ -31,7 +31,7 @@ const AdvancedScreen: React.FC = () => {
   };
   return (
     <AccountScreenLayout title={t('advancedScreen.title')}>
-      <SettingsScopeHeader scope="account" testID="advanced-account" />
+      <SettingsSection scope="account" testID="advanced-account" />
       <SettingsRow
         icon={Radio}
         title={t('nostrScreen.title')}
@@ -53,7 +53,7 @@ const AdvancedScreen: React.FC = () => {
           }}
         />
       </View>
-      <SettingsScopeHeader scope="phone" spaced testID="advanced-phone" />
+      <SettingsSection scope="phone" spaced testID="advanced-phone" />
       <SettingsRow
         icon={Bitcoin}
         title={t('onChainScreen.title')}

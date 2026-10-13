@@ -1,5 +1,6 @@
 import type { SearchableMessage } from '../utils/chatSearch';
 import type { GroupMemberRow } from '../utils/groupMemberRows';
+import type { SettingsPickerParams } from '../utils/settingsPicker';
 import type { DmProtocol } from '../utils/dmProtocol';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { DrawerNavigationProp } from '@react-navigation/drawer';
@@ -51,6 +52,7 @@ export type AccountDrawerParamList = {
 
 // Root stack
 export type RootStackParamList = {
+  SettingsPicker: SettingsPickerParams;
   Main: NavigatorScreenParams<AccountDrawerParamList>;
   Conversation: {
     jumpToMessage?: string;
