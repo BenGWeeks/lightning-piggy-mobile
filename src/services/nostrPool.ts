@@ -1,3 +1,5 @@
+import { AbstractRelay } from 'nostr-tools/abstract-relay';
+import { paceRelayReceive } from './nostrRelayReceiveQueue';
 import { SimplePool } from 'nostr-tools/pool';
 import { normalizeURL } from 'nostr-tools/utils';
 import { withRelayHealth } from './healthAwarePool';
@@ -6,6 +8,26 @@ import { hydrateRelayHealth } from './relayHealth';
 /** `SimplePool` that skips relays known to be dead (#1326, see ./healthAwarePool). */
 class HealthAwarePool extends withRelayHealth(SimplePool) {
   private readonly pendingPublishes = new Map<string, number>();
+
+  async ensureRelay(url: string, params?: Parameters<SimplePool['ensureRelay']>[1]) {
+    const key = normalizeURL(url);
+    if (!this.relays.has(key)) {
+      // Pre-create with public SDK APIs so the receive hook is installed before
+      // connect() binds its WebSocket callback. Keep the existing verifier.
+      const relay = new AbstractRelay(key, {
+        verifyEvent: this.verifyEvent,
+        websocketImplementation: WebSocket,
+        enablePing: this.enablePing,
+        enableReconnect: this.enableReconnect,
+      });
+      paceRelayReceive(relay);
+      relay.onclose = () => {
+        if (this.relays.get(key) === relay) this.relays.delete(key);
+      };
+      this.relays.set(key, relay);
+    }
+    return super.ensureRelay(url, params);
+  }
 
   publish(...args: Parameters<SimplePool['publish']>): Promise<string>[] {
     const urls = args[0].map((url) => {
