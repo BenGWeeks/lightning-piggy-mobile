@@ -1,0 +1,35 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Explore Market rail opens in-app product detail
+---
+# Requires at least one product in the Explore Market rail.
+# Read-only: never taps Buy / View on web or places an order.
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: 'tab-explore'
+    timeout: 60000
+- tapOn:
+    id: 'tab-explore'
+- scrollUntilVisible:
+    element:
+      id: 'market-product-card-.*'
+      index: 0
+    direction: DOWN
+    timeout: 60000
+- tapOn:
+    id: 'market-product-card-.*'
+    index: 0
+- extendedWaitUntil:
+    visible:
+      id: 'market-product-detail-screen'
+    timeout: 30000
+- assertVisible:
+    id: 'market-product-detail-back'
+- tapOn:
+    id: 'market-product-detail-back'
+- extendedWaitUntil:
+    visible:
+      id: 'explore-card-market'
+    timeout: 15000
+- assertNotVisible:
+    id: 'market-product-detail-screen'
