@@ -25,7 +25,9 @@ import {
 } from '@internet-privacy/marmot-ts';
 import type { EventSigner } from 'applesauce-core';
 import { bytesToHex } from '@noble/hashes/utils.js';
-import { getEventHash, type Event as NostrEvent } from 'nostr-tools';
+import { type Event as NostrEvent } from 'nostr-tools';
+import { buildMarmotRumor } from './marmotRumor';
+import { getInstallationSignatureKeyPair } from './marmotSignatureKey';
 
 import type { SignerType } from '../types/nostr';
 import { LastAdminError, normaliseAdmins } from '../utils/groupAdmins';
@@ -97,6 +99,8 @@ import {
 } from './marmotStore';
 import { isTransientMarmotKind, transientFreeHistoryFactory } from './marmotTransientRumors';
 import type { Rumor } from 'applesauce-common/helpers/gift-wrap';
+
+export { buildMarmotRumor } from './marmotRumor';
 
 /** Marmot's default chat-message kind (foundation/application-messages.md). */
 export const MARMOT_CHAT_KIND = 9;
@@ -175,21 +179,6 @@ export interface MarmotSessionOptions {
 export const toAppGroupId = (mlsGroupIdHex: string) => `${MARMOT_GROUP_ID_PREFIX}${mlsGroupIdHex}`;
 export const isMarmotGroupId = (id: string) => id.startsWith(MARMOT_GROUP_ID_PREFIX);
 const toMlsGroupId = (appGroupId: string) => appGroupId.slice(MARMOT_GROUP_ID_PREFIX.length);
-
-/** Build an unsigned app event (Marmot app payloads are never signed). */
-export function buildMarmotRumor(
-  pubkey: string,
-  draft: { kind: number; content: string; tags?: string[][]; created_at?: number },
-): MarmotRumor {
-  const unsigned = {
-    pubkey,
-    kind: draft.kind,
-    content: draft.content,
-    tags: draft.tags ?? [],
-    created_at: draft.created_at ?? Math.floor(Date.now() / 1000),
-  };
-  return { ...unsigned, id: getEventHash(unsigned) };
-}
 
 export class MarmotSession {
   readonly pubkey: string;
@@ -284,6 +273,10 @@ export class MarmotSession {
         onLive: (h) => this.noteGroupLive(h),
       }),
       cryptoProvider: marmotCryptoProvider,
+      getSignatureKeyPair: async (ciphersuite) => {
+        const slot = await this.gate.guard(ensureKeyPackageSlot(this.backend));
+        return this.gate.guard(getInstallationSignatureKeyPair(this.pubkey, slot, ciphersuite));
+      },
       groupStateStore: store('groups'),
       keyPackageStore: store('keyPackages'),
       inviteStore: store('invites'),

@@ -1,10 +1,30 @@
 // Manual Refresh of this phone's invitation key (#1236), built on the
 // session's single-flight key-package run and #1230's acceptance tracking.
+import * as SecureStore from 'expo-secure-store';
+import { keyPackageSignatureKey } from './marmotDevices';
 import { finalizeEvent, generateSecretKey, getPublicKey, matchFilters } from 'nostr-tools';
 import type { Event as NostrEvent, Filter } from 'nostr-tools';
 
 import { MarmotSession, quiesceMarmotSession, setMarmotSession } from './marmotSession';
 import { createMemoryMarmotBackend } from './marmotStore';
+
+jest.mock('expo-secure-store', () => ({
+  AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 5,
+  getItemAsync: jest.fn(),
+  setItemAsync: jest.fn(),
+  deleteItemAsync: jest.fn(),
+}));
+
+beforeEach(() => {
+  const stored = new Map<string, string>();
+  jest.mocked(SecureStore.getItemAsync).mockImplementation(async (key) => stored.get(key) ?? null);
+  jest.mocked(SecureStore.setItemAsync).mockImplementation(async (key, value) => {
+    stored.set(key, value);
+  });
+  jest.mocked(SecureStore.deleteItemAsync).mockImplementation(async (key) => {
+    stored.delete(key);
+  });
+});
 
 const RELAY = 'wss://relay.test';
 
@@ -69,6 +89,9 @@ describe('MarmotSession.refreshInvitationKey', () => {
     expect(second.created_at).toBeGreaterThan(first.created_at);
     const slot = (e: NostrEvent) => e.tags.find((t) => t[0] === 'd')?.[1];
     expect(slot(second)).toBe(slot(first));
+    // Session → client → publisher preserves the install's leaf identity.
+    expect(keyPackageSignatureKey(first)).not.toBeNull();
+    expect(keyPackageSignatureKey(second)).toBe(keyPackageSignatureKey(first));
     // A normal run afterwards doesn't publish again: the forced one was answered.
     await session.ensureKeyPackage();
     expect(keyPackages(relay)).toHaveLength(2);
