@@ -10,6 +10,9 @@ import { SettingsSectionCardContext } from '../contexts/SettingsSectionCardConte
 interface Props {
   icon: LucideIcon;
   title: string;
+  appearance?: 'gradient' | 'surface';
+  iconColor?: string;
+  iconBackground?: string;
   subtitle?: string;
   value?: string;
   status?: 'ok' | 'warn' | 'error' | 'unknown';
@@ -36,6 +39,9 @@ interface Props {
 export default function SettingsRow({
   icon: Icon,
   title,
+  appearance = 'gradient',
+  iconColor,
+  iconBackground,
   subtitle,
   value,
   status,
@@ -63,7 +69,11 @@ export default function SettingsRow({
   const hint = rowDisabled && disabledSubtitle ? disabledSubtitle : (value ?? subtitle);
   const statusLabel = status ? t(`settingsKit.status.${status}`) : undefined;
   const accessibilityHint = [hint, statusLabel].filter(Boolean).join('. ');
-  const foreground = destructive ? colors.red : colors.white;
+  const foreground = destructive
+    ? colors.red
+    : appearance === 'surface'
+      ? colors.textHeader
+      : colors.white;
   const statusColor =
     status &&
     { ok: colors.green, warn: colors.amber, error: colors.red, unknown: colors.textSupplementary }[
@@ -71,12 +81,30 @@ export default function SettingsRow({
     ];
   const content = (
     <>
-      <View style={styles.icon}>
-        <Icon size={22} color={foreground} />
+      <View
+        style={[
+          styles.icon,
+          iconBackground ? styles.colorChip : undefined,
+          iconBackground ? { backgroundColor: iconBackground } : undefined,
+        ]}
+      >
+        <Icon size={22} color={iconColor ?? foreground} />
       </View>
       <View style={styles.text}>
-        <Text style={[styles.title, destructive && styles.destructive]}>{title}</Text>
-        <Text style={styles.subtitle} numberOfLines={1} testID={subtitleTestID}>
+        <Text
+          style={[
+            styles.title,
+            appearance === 'surface' && styles.surfaceTitle,
+            destructive && styles.destructive,
+          ]}
+        >
+          {title}
+        </Text>
+        <Text
+          style={[styles.subtitle, appearance === 'surface' && styles.surfaceSubtitle]}
+          numberOfLines={1}
+          testID={subtitleTestID}
+        >
           {hint}
         </Text>
       </View>
@@ -96,6 +124,7 @@ export default function SettingsRow({
       <View
         style={[
           styles.row,
+          appearance === 'surface' && styles.surface,
           grouped && styles.grouped,
           indent && styles.indent,
           disabled && styles.disabled,

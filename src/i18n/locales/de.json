@@ -3224,5 +3224,25 @@
       "error": "Fehler",
       "unknown": "Unbekannt"
     }
+  },
+  "settingsPages": {
+    "notSet": "Nicht festgelegt",
+    "pictureSet": "Bild hinzugefügt",
+    "account": "Konto",
+    "localKey": "Schlüssel auf diesem Telefon (nsec)",
+    "watchOnly": "On-chain · nur ansehen",
+    "version": "Version",
+    "website": "Website",
+    "support": "Hilfe",
+    "releaseNotes": "Versionshinweise",
+    "licences": "Lizenz",
+    "brand": "Lightning Piggy",
+    "nwc": "NWC (NIP-47)",
+    "connectionWarning": "Jeder mit dieser Verbindung kann auf deine Wallet zugreifen.",
+    "amberSigner": "Amber (NIP-55)",
+    "remoteSigner": "Nostr Connect (NIP-46)",
+    "websiteHost": "lightningpiggy.com",
+    "licenceType": "MIT",
+    "lightningAddress": "Lightning-Adresse (LUD-16)"
   }
 }

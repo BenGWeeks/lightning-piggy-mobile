@@ -3,11 +3,10 @@ import type { Palette } from './palettes';
 
 export const createDefaultOnchainWalletSectionStyles = (colors: Palette) =>
   StyleSheet.create({
-    sectionGap: {
-      marginTop: 28,
-    },
     walletRow: {
       flexDirection: 'row',
+      gap: 12,
+      minHeight: 76,
       alignItems: 'center',
       justifyContent: 'space-between',
       paddingHorizontal: 14,
@@ -28,9 +27,5 @@ export const createDefaultOnchainWalletSectionStyles = (colors: Palette) =>
       fontWeight: '500',
       flex: 1,
       marginRight: 8,
-    },
-    emptyHint: {
-      fontStyle: 'italic',
-      marginTop: 4,
     },
   });

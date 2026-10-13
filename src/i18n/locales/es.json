@@ -3224,5 +3224,25 @@
       "error": "Error",
       "unknown": "Desconocido"
     }
+  },
+  "settingsPages": {
+    "notSet": "Sin configurar",
+    "pictureSet": "Imagen añadida",
+    "account": "Cuenta",
+    "localKey": "Clave en este teléfono (nsec)",
+    "watchOnly": "En cadena · solo lectura",
+    "version": "Versión",
+    "website": "Sitio web",
+    "support": "Ayuda",
+    "releaseNotes": "Notas de la versión",
+    "licences": "Licencia",
+    "brand": "Lightning Piggy",
+    "nwc": "NWC (NIP-47)",
+    "connectionWarning": "Cualquier persona con esta conexión puede acceder a tu cartera.",
+    "amberSigner": "Amber (NIP-55)",
+    "remoteSigner": "Nostr Connect (NIP-46)",
+    "websiteHost": "lightningpiggy.com",
+    "licenceType": "MIT",
+    "lightningAddress": "Dirección Lightning (LUD-16)"
   }
 }

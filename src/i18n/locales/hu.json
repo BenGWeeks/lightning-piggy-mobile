@@ -3224,5 +3224,25 @@
       "error": "Hiba",
       "unknown": "Ismeretlen"
     }
+  },
+  "settingsPages": {
+    "notSet": "Nincs beállítva",
+    "pictureSet": "Kép hozzáadva",
+    "account": "Fiók",
+    "localKey": "Kulcs ezen a telefonon (nsec)",
+    "watchOnly": "On-chain · csak megtekintés",
+    "version": "Verzió",
+    "website": "Weboldal",
+    "support": "Segítség",
+    "releaseNotes": "Kiadási megjegyzések",
+    "licences": "Licenc",
+    "brand": "Lightning Piggy",
+    "nwc": "NWC (NIP-47)",
+    "connectionWarning": "Bárki hozzáférhet a tárcádhoz, aki rendelkezik ezzel a kapcsolattal.",
+    "amberSigner": "Amber (NIP-55)",
+    "remoteSigner": "Nostr Connect (NIP-46)",
+    "websiteHost": "lightningpiggy.com",
+    "licenceType": "MIT",
+    "lightningAddress": "Lightning-cím (LUD-16)"
   }
 }

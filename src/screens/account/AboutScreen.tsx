@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, Image, TouchableOpacity, ActivityIndicator, Linking } from 'react-native';
+import { View, Text, Image, ActivityIndicator, Linking } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nip19 from 'nostr-tools/nip19';
-import { UserRound } from 'lucide-react-native';
+import { UserRound, ExternalLink, Info, MessageCircle, Zap } from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
-import { createSharedAccountStyles } from './sharedStyles';
+import SettingsRow from '../../components/SettingsRow';
+import SettingsSection from '../../components/SettingsSection';
 import NostrLoginSheet from '../../components/NostrLoginSheet';
 import SendSheet from '../../components/SendSheet';
 import FeedbackSheet from '../../components/FeedbackSheet';
@@ -26,7 +27,6 @@ const LEGACY_TEAM_PROFILE_CACHE_KEY = 'team_profile_cache';
 const AboutScreen: React.FC = () => {
   const colors = useThemeColors();
   const t = useTranslation();
-  const sharedAccountStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const styles = useMemo(() => createAboutScreenStyles(colors), [colors]);
   const { isLoggedIn, signerType, sendDirectMessage } = useNostr();
 
@@ -90,7 +90,7 @@ const AboutScreen: React.FC = () => {
     <AccountScreenLayout title={t('aboutScreen.title')}>
       <View style={styles.teamCard}>
         {teamProfileLoading ? (
-          <ActivityIndicator size="small" color={colors.brandPink} style={{ padding: 20 }} />
+          <ActivityIndicator size="small" color={colors.brandPink} style={styles.loading} />
         ) : teamProfile ? (
           <>
             {teamProfile.banner && (
@@ -117,62 +117,76 @@ const AboutScreen: React.FC = () => {
               )}
               <View style={styles.teamInfo}>
                 <Text style={styles.teamName}>
-                  {teamProfile.displayName || teamProfile.name || 'Lightning Piggy'}
+                  {teamProfile.displayName || teamProfile.name || t('settingsPages.brand')}
                 </Text>
-                {teamProfile.about && (
-                  <Text style={styles.teamAbout} numberOfLines={2}>
-                    {teamProfile.about}
-                  </Text>
-                )}
               </View>
-            </View>
-            <View style={styles.teamButtonRow}>
-              {teamProfile.lud16 && (
-                <TouchableOpacity
-                  style={styles.zapButton}
-                  onPress={() => setZapSheetOpen(true)}
-                  accessibilityLabel={t('aboutScreen.zapLightningPiggy')}
-                  testID="zap-team-button"
-                >
-                  <Text style={styles.zapButtonText}>
-                    {'⚡'} {t('aboutScreen.zapTheTeam')}
-                  </Text>
-                </TouchableOpacity>
-              )}
-              <TouchableOpacity
-                style={styles.feedbackButton}
-                onPress={() => setFeedbackSheetOpen(true)}
-                accessibilityLabel={t('aboutScreen.sendFeedback')}
-                testID="feedback-button"
-              >
-                <Text style={styles.feedbackButtonText}>{t('aboutScreen.sendFeedback')}</Text>
-              </TouchableOpacity>
             </View>
           </>
         ) : (
           <Text style={styles.teamFallbackText}>{t('aboutScreen.couldNotLoadTeamProfile')}</Text>
         )}
       </View>
-
-      <View style={[sharedAccountStyles.card, { marginTop: 16 }]}>
-        <Text style={styles.aboutTitle}>Lightning Piggy</Text>
-        <Text style={styles.aboutBody}>{t('aboutScreen.aboutBody')}</Text>
-        <TouchableOpacity
+      <SettingsSection scope="phone" showHeading={false} testID="about-links-section">
+        <SettingsRow
+          icon={Info}
+          title={t('settingsPages.version')}
+          value={appVersionLabel}
+          subtitleTestID="version-text"
+          testID="about-version-row"
+          accessibilityLabel={t('aboutScreen.appVersion', { version: appVersionLabel })}
+          details={[t('aboutScreen.aboutBody'), teamProfile?.about].filter(Boolean).join('\n\n')}
+        />
+        <SettingsRow
+          icon={ExternalLink}
+          title={t('settingsPages.website')}
+          value={t('settingsPages.websiteHost')}
           onPress={() => Linking.openURL('https://www.lightningpiggy.com')}
           accessibilityLabel={t('aboutScreen.openWebsite')}
           testID="about-website-link"
-        >
-          <Text style={styles.websiteLink}>www.lightningpiggy.com</Text>
-        </TouchableOpacity>
-      </View>
-
-      <Text
-        style={styles.versionText}
-        testID="version-text"
-        accessibilityLabel={t('aboutScreen.appVersion', { version: appVersionLabel })}
-      >
-        v{appVersionLabel}
-      </Text>
+        />
+        {teamProfile && (
+          <SettingsRow
+            icon={MessageCircle}
+            title={t('aboutScreen.sendFeedback')}
+            onPress={() => setFeedbackSheetOpen(true)}
+            testID="feedback-button"
+          />
+        )}
+        <SettingsRow
+          icon={ExternalLink}
+          title={t('settingsPages.support')}
+          onPress={() =>
+            Linking.openURL('https://github.com/BenGWeeks/lightning-piggy-mobile/issues')
+          }
+          testID="about-support-link"
+        />
+        <SettingsRow
+          icon={ExternalLink}
+          title={t('settingsPages.releaseNotes')}
+          onPress={() =>
+            Linking.openURL('https://github.com/BenGWeeks/lightning-piggy-mobile/releases')
+          }
+          testID="about-release-notes-link"
+        />
+        <SettingsRow
+          icon={ExternalLink}
+          title={t('settingsPages.licences')}
+          value={t('settingsPages.licenceType')}
+          onPress={() =>
+            Linking.openURL('https://github.com/BenGWeeks/lightning-piggy-mobile/blob/main/LICENSE')
+          }
+          testID="about-licences-link"
+        />
+        {teamProfile?.lud16 && (
+          <SettingsRow
+            icon={Zap}
+            title={t('aboutScreen.zapTheTeam')}
+            onPress={() => setZapSheetOpen(true)}
+            accessibilityLabel={t('aboutScreen.zapLightningPiggy')}
+            testID="zap-team-button"
+          />
+        )}
+      </SettingsSection>
 
       {teamProfile?.lud16 && (
         <SendSheet

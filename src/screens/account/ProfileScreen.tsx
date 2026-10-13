@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, Image, TouchableOpacity } from 'react-native';
-import { Image as ExpoImage } from 'expo-image';
+import { View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { UserRound } from 'lucide-react-native';
+import { UserRound, Image, AlignLeft, Zap, KeyRound, Pencil } from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
-import { createSharedAccountStyles } from './sharedStyles';
+import SettingsRow from '../../components/SettingsRow';
+import SettingsSection from '../../components/SettingsSection';
 import NostrLoginSheet from '../../components/NostrLoginSheet';
 import EditProfileSheet from '../../components/EditProfileSheet';
 import QrWithIdentityToggle from '../../components/QrWithIdentityToggle';
@@ -19,9 +19,8 @@ import { createProfileScreenStyles } from '../../styles/ProfileScreen.styles';
 const ProfileScreen: React.FC = () => {
   const colors = useThemeColors();
   const t = useTranslation();
-  const sharedAccountStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const styles = useMemo(() => createProfileScreenStyles(colors), [colors]);
-  const { isLoggedIn, profile, refreshProfile, pubkey, relays } = useNostr();
+  const { isLoggedIn, profile, refreshProfile, pubkey, relays, signerType } = useNostr();
 
   // Build the `nostr:nprofile1…` to write to an NFC tag when sharing my
   // own profile (#755). Embeds my NIP-65 *write* (outbox) relays, capped
@@ -59,77 +58,85 @@ const ProfileScreen: React.FC = () => {
   );
 
   return (
-    <AccountScreenLayout title={t('profileScreen.title')}>
+    <AccountScreenLayout title={t('accountDrawerContent.profile')}>
       {isLoggedIn && profile ? (
-        <View style={styles.profileSection}>
-          {profile.banner && (
-            <Image source={{ uri: profile.banner }} style={styles.banner} resizeMode="cover" />
-          )}
-          <View style={styles.profileRow}>
-            {profile.picture ? (
-              <ExpoImage
-                source={{ uri: profile.picture }}
-                style={styles.profilePicture}
-                cachePolicy="memory-disk"
-                recyclingKey={profile.picture}
-                autoplay={false}
-              />
-            ) : (
-              <View style={styles.profilePicturePlaceholder}>
-                <UserRound size={28} color={colors.textBody} strokeWidth={1.75} />
-              </View>
-            )}
-            <View style={styles.profileInfo}>
-              <Text style={styles.profileName}>
-                {profile.displayName || profile.name || t('profileScreen.unknown')}
-              </Text>
-              {profile.nip05 && <Text style={styles.profileNip05}>{profile.nip05}</Text>}
-            </View>
+        <>
+          <SettingsSection scope="account" showHeading={false} testID="profile-fields-section">
+            <SettingsRow
+              icon={UserRound}
+              title={t('editProfileSheet.displayName')}
+              value={profile.displayName || profile.name || t('settingsPages.notSet')}
+              onPress={() => setEditProfileOpen(true)}
+              testID="profile-name-row"
+            />
+            <SettingsRow
+              icon={AlignLeft}
+              title={t('editProfileSheet.about')}
+              value={profile.about || t('settingsPages.notSet')}
+              onPress={() => setEditProfileOpen(true)}
+              testID="profile-about-row"
+            />
+            <SettingsRow
+              icon={Image}
+              title={t('editProfileSheet.profilePicture')}
+              value={profile.picture ? t('settingsPages.pictureSet') : t('settingsPages.notSet')}
+              onPress={() => setEditProfileOpen(true)}
+              testID="profile-picture-row"
+            />
+            <SettingsRow
+              icon={Image}
+              title={t('editProfileSheet.bannerImage')}
+              value={profile.banner ? t('settingsPages.pictureSet') : t('settingsPages.notSet')}
+              onPress={() => setEditProfileOpen(true)}
+              testID="profile-banner-row"
+            />
+            <SettingsRow
+              icon={Zap}
+              title={t('settingsPages.lightningAddress')}
+              value={profile.lud16 || t('settingsPages.notSet')}
+              onPress={() => setEditProfileOpen(true)}
+              testID="profile-lightning-row"
+            />
+            <SettingsRow
+              icon={Pencil}
+              title={t('profileScreen.editProfile')}
+              onPress={() => setEditProfileOpen(true)}
+              testID="edit-profile-button"
+            />
+            <SettingsRow
+              icon={KeyRound}
+              title={t('settingsPages.account')}
+              value={
+                signerType === 'amber'
+                  ? t('settingsPages.amberSigner')
+                  : signerType === 'nip46'
+                    ? t('settingsPages.remoteSigner')
+                    : t('settingsPages.localKey')
+              }
+              subtitleTestID="profile-signer-value"
+              testID="profile-account-row"
+              details={t('profileScreen.identityHint')}
+            />
+          </SettingsSection>
+          <View style={styles.qrCard} testID="profile-qr-card">
+            <QrWithIdentityToggle
+              npub={profile.npub}
+              lightningAddress={profile.lud16 ?? null}
+              defaultMode="npub"
+              nfcSupported={nfcSupported}
+              onNfcWrite={() => setNfcWriteVisible(true)}
+            />
           </View>
-
-          {profile.about ? <Text style={styles.profileAbout}>{profile.about}</Text> : null}
-
-          {/* Inline QR + npub/Lightning toggle (issue #463). Replaces both
-              the QR-icon-opens-bottom-sheet path AND the inline npub /
-              lud16 rows that used to live here — the QR's own value-row
-              renders the active value with a copy affordance, so the
-              upper rows would just duplicate it. NFC + Share + Copy
-              actions are wired to the active toggle value, so swapping
-              npub <-> Lightning swaps which value the action buttons
-              operate on. */}
-          <QrWithIdentityToggle
-            npub={profile.npub}
-            lightningAddress={profile.lud16 ?? null}
-            defaultMode="npub"
-            nfcSupported={nfcSupported}
-            onNfcWrite={() => setNfcWriteVisible(true)}
-          />
-
-          <TouchableOpacity
-            accessibilityRole="button"
-            style={styles.editProfileButton}
-            onPress={() => setEditProfileOpen(true)}
-            accessibilityLabel={t('profileScreen.editProfile')}
-            testID="edit-profile-button"
-          >
-            <Text style={styles.editProfileButtonText}>{t('profileScreen.editProfile')}</Text>
-          </TouchableOpacity>
-        </View>
+        </>
       ) : (
-        <TouchableOpacity
-          accessibilityRole="button"
-          style={styles.connectButton}
+        <SettingsRow
+          icon={UserRound}
+          title={t('profileScreen.connectNostr')}
           onPress={() => setLoginSheetOpen(true)}
-          accessibilityLabel={t('profileScreen.connectNostr')}
           testID="connect-nostr"
-        >
-          <Text style={styles.connectButtonText}>{t('profileScreen.connectNostr')}</Text>
-        </TouchableOpacity>
+          details={t('profileScreen.identityHint')}
+        />
       )}
-
-      <Text style={[sharedAccountStyles.fieldHint, { marginTop: 16 }]}>
-        {t('profileScreen.identityHint')}
-      </Text>
 
       <NostrLoginSheet visible={loginSheetOpen} onClose={() => setLoginSheetOpen(false)} />
       <EditProfileSheet visible={editProfileOpen} onClose={() => setEditProfileOpen(false)} />

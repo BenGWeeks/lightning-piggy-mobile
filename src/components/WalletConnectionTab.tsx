@@ -8,7 +8,10 @@ import {
   ShieldAlert,
   QrCode as QrCodeIcon,
   Share2,
+  Radio,
+  KeyRound,
 } from 'lucide-react-native';
+import SettingsRow from './SettingsRow';
 import QRCode from 'react-native-qrcode-svg';
 import { Alert } from './BrandedAlert';
 import type { useTranslation } from '../contexts/LocaleContext';
@@ -83,25 +86,27 @@ const WalletConnectionTab: React.FC<Props> = ({
     (walletType === 'onchain' && (xpubLoading || !!xpubDisplay)) || walletType === 'nwc';
 
   return (
-    <View style={{ gap: 8 }}>
+    <View style={styles.tabContent}>
       {/* CoinOS managed-wallet recovery callout (#287). Visually prominent
           block — pink-bordered surface with shield-alert badge — so the
           recovery credentials read as a "save this now" affordance. */}
       {coinosRecovery && (
         <View style={styles.recoveryCallout}>
-          <View style={styles.recoveryCalloutHeader}>
-            <ShieldAlert size={20} color={colors.brandPink} strokeWidth={2.5} />
-            <Text style={styles.recoveryCalloutTitle}>
-              {t('walletSettingsSheet.recoveryInfoTitle')}
-            </Text>
-          </View>
-          <Text style={styles.recoveryCalloutBody}>
-            {t('walletSettingsSheet.recoveryInfoBody', {
+          <SettingsRow
+            appearance="surface"
+            icon={ShieldAlert}
+            title={t('walletSettingsSheet.recoveryInfoTitle')}
+            testID="wallet-recovery-info-row"
+            details={t('walletSettingsSheet.recoveryInfoBody', {
               host: hostFromBaseUrl(coinosRecovery.baseUrl),
             })}
-          </Text>
-
-          <Text style={styles.recoveryCalloutLabel}>{t('walletSettingsSheet.username')}</Text>
+          />
+          <SettingsRow
+            appearance="surface"
+            icon={KeyRound}
+            title={t('walletSettingsSheet.username')}
+            testID="wallet-recovery-username-row"
+          />
           <TouchableOpacity
             activeOpacity={0.7}
             onPress={async () => {
@@ -121,7 +126,12 @@ const WalletConnectionTab: React.FC<Props> = ({
             <CopyIcon size={18} color={colors.brandPink} strokeWidth={2} />
           </TouchableOpacity>
 
-          <Text style={styles.recoveryCalloutLabel}>{t('walletSettingsSheet.password')}</Text>
+          <SettingsRow
+            appearance="surface"
+            icon={KeyRound}
+            title={t('walletSettingsSheet.password')}
+            testID="wallet-recovery-password-row"
+          />
           <View style={styles.credentialRow}>
             <Text style={styles.credentialText} selectable={passwordRevealed}>
               {passwordRevealed ? coinosRecovery.password : '••••••••••••'}
@@ -134,6 +144,7 @@ const WalletConnectionTab: React.FC<Props> = ({
                   : t('walletSettingsSheet.revealCoinosPassword')
               }
               testID="settings-coinos-reveal-password"
+              style={styles.credentialAction}
               hitSlop={8}
             >
               {passwordRevealed ? (
@@ -152,6 +163,7 @@ const WalletConnectionTab: React.FC<Props> = ({
               }}
               accessibilityLabel={t('walletSettingsSheet.copyCoinosPassword')}
               testID="settings-coinos-copy-password"
+              style={styles.credentialAction}
               hitSlop={8}
             >
               <CopyIcon size={18} color={colors.brandPink} strokeWidth={2} />
@@ -170,10 +182,13 @@ const WalletConnectionTab: React.FC<Props> = ({
       {/* NWC wallet: relay URL (read-only) */}
       {walletType === 'nwc' && relayUrl && (
         <>
-          <Text style={[styles.label, { marginTop: 20 }]}>{t('walletSettingsSheet.relay')}</Text>
-          <Text style={styles.xpubText} numberOfLines={2}>
-            {relayUrl}
-          </Text>
+          <SettingsRow
+            appearance="surface"
+            icon={Radio}
+            title={t('walletSettingsSheet.relay')}
+            value={relayUrl}
+            testID="wallet-relay-row"
+          />
         </>
       )}
 
@@ -184,9 +199,13 @@ const WalletConnectionTab: React.FC<Props> = ({
           reveal the secret first. Applies to every NWC wallet. */}
       {walletType === 'nwc' && nwcConnection && (
         <>
-          <Text style={[styles.label, { marginTop: 20 }]}>
-            {t('walletSettingsSheet.nwcConnection')}
-          </Text>
+          <SettingsRow
+            appearance="surface"
+            icon={KeyRound}
+            title={t('walletSettingsSheet.nwcConnection')}
+            testID="wallet-nwc-connection-row"
+            details={t('walletSettingsSheet.nwcConnectionHint')}
+          />
           <View style={styles.nwcRow}>
             <Text
               style={styles.nwcRowText}
@@ -203,6 +222,7 @@ const WalletConnectionTab: React.FC<Props> = ({
                   : t('walletSettingsSheet.revealNwcConnection')
               }
               testID="settings-nwc-reveal"
+              style={styles.credentialAction}
               hitSlop={8}
             >
               {nwcRevealed ? (
@@ -217,6 +237,7 @@ const WalletConnectionTab: React.FC<Props> = ({
                 nwcQrShown ? t('walletSettingsSheet.hideNwcQr') : t('walletSettingsSheet.showNwcQr')
               }
               testID="settings-nwc-qr"
+              style={styles.credentialAction}
               hitSlop={8}
             >
               <QrCodeIcon size={18} color={colors.textSupplementary} strokeWidth={2} />
@@ -231,11 +252,13 @@ const WalletConnectionTab: React.FC<Props> = ({
               }}
               accessibilityLabel={t('walletSettingsSheet.copyNwcConnection')}
               testID="settings-nwc-copy"
+              style={styles.credentialAction}
               hitSlop={8}
             >
               <CopyIcon size={18} color={colors.brandPink} strokeWidth={2} />
             </TouchableOpacity>
           </View>
+          <Text style={styles.hintText}>{t('settingsPages.connectionWarning')}</Text>
           {nwcQrShown && (
             <View style={styles.qrPanel} testID="settings-nwc-qr-panel">
               <QRCode
@@ -251,7 +274,6 @@ const WalletConnectionTab: React.FC<Props> = ({
               <Text style={styles.qrHint}>{t('walletSettingsSheet.nwcQrHint')}</Text>
             </View>
           )}
-          <Text style={styles.hintText}>{t('walletSettingsSheet.nwcConnectionHint')}</Text>
         </>
       )}
 
@@ -261,16 +283,13 @@ const WalletConnectionTab: React.FC<Props> = ({
           then a recipient picker; the raw connection secret is never rendered —
           it only travels inside the gift-wrapped DM. */}
       {walletType === 'nwc' && (
-        <TouchableOpacity
-          style={[styles.coinosRow, { marginTop: 20 }]}
+        <SettingsRow
+          appearance="surface"
+          icon={Share2}
+          title={t('walletSettingsSheet.shareWallet')}
           onPress={onShare}
-          activeOpacity={0.7}
-          accessibilityLabel={t('walletSettingsSheet.shareWallet')}
           testID="wallet-settings-share"
-        >
-          <Text style={styles.coinosRowText}>{t('walletSettingsSheet.shareWallet')}</Text>
-          <Share2 size={18} color={colors.brandPink} strokeWidth={2} />
-        </TouchableOpacity>
+        />
       )}
 
       {/* On-chain wallet: show xpub (read-only).
@@ -278,9 +297,12 @@ const WalletConnectionTab: React.FC<Props> = ({
           absent (render nothing), `string` = ready to display. */}
       {walletType === 'onchain' && xpubDisplay !== null && (
         <>
-          <Text style={[styles.label, { marginTop: 20 }]}>
-            {t('walletSettingsSheet.extendedPublicKey')}
-          </Text>
+          <SettingsRow
+            appearance="surface"
+            icon={KeyRound}
+            title={t('walletSettingsSheet.extendedPublicKey')}
+            testID="wallet-xpub-row"
+          />
           {xpubDisplay === undefined ? (
             <Text style={styles.xpubText}>{'…'}</Text>
           ) : (
@@ -301,17 +323,15 @@ const WalletConnectionTab: React.FC<Props> = ({
 
       {/* Migrate to self-custody (CoinOS managed wallets only, coming soon) */}
       {coinosRecovery && (
-        <TouchableOpacity
-          style={[styles.coinosRow, styles.coinosRowDisabled, { marginTop: 20 }]}
+        <SettingsRow
+          appearance="surface"
+          icon={ShieldAlert}
+          title={t('walletSettingsSheet.migrateSelfCustody')}
+          value={t('walletSettingsSheet.comingSoon')}
           disabled
           accessibilityLabel={t('walletSettingsSheet.migrateSelfCustodyComingSoon')}
           testID="wallet-settings-migrate"
-        >
-          <Text style={[styles.coinosRowText, styles.coinosRowTextDisabled]}>
-            {t('walletSettingsSheet.migrateSelfCustody')}
-          </Text>
-          <Text style={styles.coinosRowHint}>{t('walletSettingsSheet.comingSoon')}</Text>
-        </TouchableOpacity>
+        />
       )}
 
       {!hasContent && (

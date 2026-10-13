@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
-import { Check } from 'lucide-react-native';
-import { createSharedAccountStyles } from '../screens/account/sharedStyles';
+import { Check, Bitcoin } from 'lucide-react-native';
+import SettingsRow from './SettingsRow';
+import SettingsInfoSheet from './SettingsInfoSheet';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { useWallet } from '../contexts/WalletContext';
@@ -20,10 +21,10 @@ import { createDefaultOnchainWalletSectionStyles } from '../styles/DefaultOnchai
 const DefaultOnchainWalletSection: React.FC = () => {
   const colors = useThemeColors();
   const t = useTranslation();
-  const shared = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const styles = useMemo(() => createDefaultOnchainWalletSectionStyles(colors), [colors]);
   const { wallets } = useWallet();
   const { pubkey } = useNostr();
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [defaultId, setDefaultId] = useState<string | null>(null);
 
   // Empty list = the section renders a hint prompting the user to add one.
@@ -65,39 +66,46 @@ const DefaultOnchainWalletSection: React.FC = () => {
     }
   };
 
+  const selected = onchainWallets.find((w) => w.id === defaultId) ?? onchainWallets[0];
   return (
-    <View style={styles.sectionGap} testID="default-onchain-section">
-      <Text style={shared.sectionLabel}>{t('onChainScreen.defaultWalletTitle')}</Text>
-      {onchainWallets.length === 0 ? (
-        <Text style={[shared.fieldHint, styles.emptyHint]}>
-          {t('onChainScreen.defaultWalletEmpty')}
-        </Text>
-      ) : (
-        <>
-          {onchainWallets.map((w) => {
-            const active = w.id === defaultId;
-            return (
-              <TouchableOpacity
-                key={w.id}
-                style={[styles.walletRow, active && styles.walletRowActive]}
-                onPress={() => handlePick(w.id)}
-                testID={`default-onchain-row-${w.id}`}
-                accessibilityLabel={t('onChainScreen.defaultWalletRowA11y', {
-                  wallet: w.alias || t('onChainScreen.walletFallback'),
-                })}
-                accessibilityRole="radio"
-                accessibilityState={{ selected: active }}
-              >
-                <Text style={styles.walletName} numberOfLines={1}>
-                  {w.alias || w.id.slice(0, 8)}
-                </Text>
-                {active && <Check size={18} color={colors.brandPink} />}
-              </TouchableOpacity>
-            );
-          })}
-          <Text style={shared.fieldHint}>{t('onChainScreen.defaultWalletHint')}</Text>
-        </>
-      )}
+    <View testID="default-onchain-section">
+      <SettingsRow
+        icon={Bitcoin}
+        title={t('onChainScreen.defaultWalletTitle')}
+        value={selected?.alias ?? t('onChainScreen.defaultWalletEmpty')}
+        testID="default-onchain-picker"
+        onPress={onchainWallets.length ? () => setPickerOpen(true) : undefined}
+        details={t('onChainScreen.defaultWalletHint')}
+      />
+      <SettingsInfoSheet
+        visible={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        title={t('onChainScreen.defaultWalletTitle')}
+        testID="default-onchain-sheet"
+      >
+        {onchainWallets.map((w) => {
+          const active = w.id === defaultId;
+          return (
+            <TouchableOpacity
+              key={w.id}
+              style={[styles.walletRow, active && styles.walletRowActive]}
+              onPress={() => handlePick(w.id)}
+              testID={`default-onchain-row-${w.id}`}
+              accessibilityLabel={t('onChainScreen.defaultWalletRowA11y', {
+                wallet: w.alias || t('onChainScreen.walletFallback'),
+              })}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: active }}
+            >
+              <Bitcoin size={22} color={colors.textHeader} />
+              <Text style={styles.walletName} numberOfLines={1}>
+                {w.alias || w.id.slice(0, 8)}
+              </Text>
+              {active && <Check size={18} color={colors.brandPink} />}
+            </TouchableOpacity>
+          );
+        })}
+      </SettingsInfoSheet>
     </View>
   );
 };
