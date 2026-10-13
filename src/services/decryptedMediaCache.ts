@@ -236,11 +236,18 @@ export function mediaCacheKey(ref: EncryptedMediaRef): string {
         : []),
       ref.keyHex ?? '',
       ref.nonceHex ?? '',
-      ref.sha256 ?? '',
+      ref.sha256 === undefined ? null : ref.sha256,
       ref.mime ?? '',
       ref.size ?? null,
       m ? [m.version, m.keysHex, m.filename, m.plaintextSha256, m.ciphertextSha256] : null,
     ]),
+  );
+}
+
+function hasValidDeclaredHash(ref: EncryptedMediaRef): boolean {
+  return (
+    ref.sha256 === undefined ||
+    (typeof ref.sha256 === 'string' && /^[a-f0-9]{64}$/i.test(ref.sha256))
   );
 }
 
@@ -323,7 +330,7 @@ export function clearDecryptedMediaMemory(): void {
 
 /** Synchronous memory lookup (for seeding a bubble without a spinner). */
 export function peekDecryptedMedia(ref: EncryptedMediaRef): string | null {
-  if (!activeOwner) return null;
+  if (!activeOwner || !hasValidDeclaredHash(ref)) return null;
   return memory.get(`${ownerDirName(activeOwner)}/${mediaCacheKey(ref)}`) ?? null;
 }
 
@@ -369,6 +376,7 @@ export async function resolveDecryptedMedia(ref: EncryptedMediaRef): Promise<str
     (!Number.isSafeInteger(ref.size) || ref.size <= 0 || ref.size > MEDIA_MAX_BYTES)
   )
     throw new Error('Invalid media size');
+  if (!hasValidDeclaredHash(ref)) throw new Error('Media ciphertext hash mismatch');
   const { owner, epoch } = await requestOwner();
   const ownerDir = ownerDirName(owner);
   await wiping.get(ownerDir);
@@ -439,11 +447,7 @@ async function resolveUncached(
     });
     // A kind-15 that declares its ciphertext hash (`x` tag) must match it —
     // and a declared-but-malformed hash is a mismatch, never "no hash".
-    if (
-      ref.sha256 !== undefined &&
-      (!/^[a-f0-9]{64}$/i.test(ref.sha256) ||
-        bytesToHex(sha256(cipher)) !== ref.sha256.toLowerCase())
-    ) {
+    if (ref.sha256 !== undefined && bytesToHex(sha256(cipher)) !== ref.sha256.toLowerCase()) {
       throw new Error('Media ciphertext hash mismatch');
     }
     let plain: Uint8Array;

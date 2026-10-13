@@ -17,8 +17,9 @@ export function sanitizeDisplayText(
   if (!limit) return '';
   const clean = text
     .normalize('NFC')
+    .replace(/\t/g, ' ')
     .replace(
-      /[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069\u200b-\u200d\u2060\ufeff\ufffc]/g,
+      /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069\u200b\u2060\ufeff\ufffc]/g,
       '',
     )
     .replace(allowNewlines ? /[^\S\n]+/g : /\s+/g, ' ')

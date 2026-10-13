@@ -9,7 +9,7 @@ import { encryptMediaFile } from '@internet-privacy/marmot-ts';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { deleteAsync, moveAsync, writeAsStringAsync } from 'expo-file-system/legacy';
+import { deleteAsync, getInfoAsync, moveAsync, writeAsStringAsync } from 'expo-file-system/legacy';
 import { encryptFile } from './encryptedFile';
 import {
   namedFileExport,
@@ -724,3 +724,25 @@ it('checks declared ciphertext hashes before decrypting or publishing', async ()
   }
   expect(filesUnder(A)).toEqual([uri]);
 });
+
+it.each(['memory', 'disk'])(
+  'rejects malformed hashes after warming the %s cache without a hash',
+  async (cache) => {
+    setDecryptedMediaOwner(A);
+    const uri = await resolveDecryptedMedia(ref);
+    if (cache === 'disk') clearDecryptedMediaMemory();
+    (getInfoAsync as jest.Mock).mockClear();
+    fetchMock.mockClear();
+    for (const hash of ['', 'invalid', '00'.repeat(31), 'gg'.repeat(32)]) {
+      const bad = { ...ref, sha256: hash };
+      expect(peekDecryptedMedia(bad)).toBeNull();
+      await expect(resolveDecryptedMedia(bad)).rejects.toThrow('hash mismatch');
+      expect(mediaCacheKey(bad)).not.toBe(mediaCacheKey(ref));
+    }
+    expect(getInfoAsync).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(filesUnder(A)).toEqual([uri]);
+    expect(await resolveDecryptedMedia(ref)).toBe(uri);
+    expect(fetchMock).not.toHaveBeenCalled();
+  },
+);

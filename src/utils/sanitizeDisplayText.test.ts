@@ -50,13 +50,22 @@ describe('bounded display labels', () => {
     ['Alice', 'Alice'],
     ['a\u0000\u007f\u0085b', 'ab'],
     ['a\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069b', 'ab'],
-    ['a\u200b\u200c\u200d\u2060\ufeffb', 'ab'],
+    ['a\u200b\u2060\ufeffb', 'ab'],
     ['  Alice   Smith \n Jones  ', 'Alice Smith Jones'],
     ['cafe\u0301', 'café'],
     [null, ''],
     [{ name: 'Alice' }, ''],
   ])('sanitises %j', (input, expected) => {
     expect(sanitizeDisplayText(input, { maxLen: 64 })).toBe(expected);
+  });
+  it.each(['👨‍👩‍👧', '🏳️‍🌈', 'क्\u200dष', 'क्\u200cष'])('preserves joiners in %s', (text) => {
+    expect(sanitizeDisplayText(text, { maxLen: 64 })).toBe(text);
+  });
+  it('normalises tabs to spaces without merging words', () => {
+    expect(sanitizeDisplayText('Alice\t\tSmith', { maxLen: 64 })).toBe('Alice Smith');
+    expect(sanitizeDisplayText('Alice\tSmith\nJones', { maxLen: 64, allowNewlines: true })).toBe(
+      'Alice Smith\nJones',
+    );
   });
   it('preserves permitted newlines and caps with an ellipsis', () => {
     expect(sanitizeDisplayText('Alice\n  Smith', { maxLen: 64, allowNewlines: true })).toBe(
