@@ -1,7 +1,6 @@
 import { isFollowed } from '../utils/followPubkeys';
 import type { DecodedRumor } from '../utils/nip17Unwrap';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
-import type { DecodedRumor } from '../utils/nip17Unwrap';
 
 // Account-owned, bounded recovery during follow reconciliation (#851 / #1458).
 // Both kind-4 and kind-1059 hold decrypted inbox previews in memory while

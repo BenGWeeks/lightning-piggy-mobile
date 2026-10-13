@@ -258,6 +258,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         pendingReplays.delete(item);
         if (cancelled || !isCurrentOwner()) return;
         knownWrapIds.add(item.entry.id);
+        capKnownWrapIds(knownWrapIds);
         // Conversation reloads read SQLite, so signal only after the row exists.
         notifyDmMessage(item.partnerPubkey);
       } catch (error) {
@@ -497,6 +498,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
           await upsertDmMessages([k4Row]);
           if (cancelled || !isCurrentOwner()) return;
           knownWrapIds.add(ev.id);
+          capKnownWrapIds(knownWrapIds);
           const lastSeenRaw = await AsyncStorage.getItem(inboxLastSeenKey(viewerPubkey));
           const lastSeen = lastSeenRaw ? Number(lastSeenRaw) : 0;
           if (ev.created_at > lastSeen) {

@@ -106,6 +106,7 @@ function makeParams(overrides: Partial<LiveDmSubscriptionParams> = {}): LiveDmSu
     readRelays: ['wss://relay.example'],
     knownWrapIdsRef: { current: { pubkey: null, set: new Set<string>() } },
     followPubkeysRef: { current: new Set<string>() },
+    followHydratedRef: { current: false },
     setDmInbox: jest.fn(),
     setAmberNip44Permission: jest.fn(),
     followGateBuffer: buffer,
@@ -175,6 +176,7 @@ it.each([false, true])(
       stop();
     }
     params.followPubkeysRef.current = new Set([ALICE]);
+    params.followHydratedRef!.current = true;
     params.followGateBuffer.reevaluate(params.followPubkeysRef.current, registeredReplay);
     if (bufferedItem) registeredReplay(bufferedItem);
     await flush();
@@ -267,6 +269,7 @@ it('replays a subject-tagged message before its subjectless follow-up after foll
   expect(reconcile).not.toHaveBeenCalled();
   expect(appendGroupMessage).not.toHaveBeenCalled();
   params.followPubkeysRef.current = new Set([ALICE]);
+  params.followHydratedRef!.current = true;
   params.followGateBuffer.reevaluate(params.followPubkeysRef.current, replay);
   await flush();
   // The second rumor must wait for the first to register the new room.
@@ -325,6 +328,7 @@ it('keeps a deferred subjectless chat as a DM when hydration establishes no room
   await flush();
   expect(params.followGateBuffer.size).toBe(1);
   params.followPubkeysRef.current = new Set([ALICE]);
+  params.followHydratedRef!.current = true;
   params.followGateBuffer.reevaluate(params.followPubkeysRef.current, replay);
   await flush();
   expect(params.setDmInbox).toHaveBeenCalledTimes(1);

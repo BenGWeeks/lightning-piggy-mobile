@@ -99,20 +99,18 @@ export function useContactActions({
   }, [pubkey, getReadRelays, loadContacts]);
 
   const publishContactList = useCallback(
-    async (event: {
-      kind: number;
-      created_at: number;
-      tags: string[][];
-      content: string;
-    }): Promise<boolean> => {
-      if (!pubkey || !isLoggedIn) return false;
+    async (
+      event: { kind: number; created_at: number; tags: string[][]; content: string },
+      isCurrentSession: () => boolean,
+    ): Promise<boolean> => {
+      if (!pubkey || !isLoggedIn || !isCurrentSession()) return false;
       try {
         const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
         const targetRelays = writeRelays.length > 0 ? writeRelays : nostrService.DEFAULT_RELAYS;
 
         if (signerType === 'nsec') {
           const nsec = await SecureStore.getItemAsync(NSEC_KEY);
-          if (!nsec) return false;
+          if (!nsec || !isCurrentSession()) return false;
           const { secretKey } = nostrService.decodeNsec(nsec);
           await nostrService.signAndPublishEvent(event, secretKey, targetRelays);
         } else if (signerType === 'amber') {
@@ -122,12 +120,12 @@ export function useContactActions({
             '',
             pubkey,
           );
-          if (!signedEventJson) return false;
+          if (!signedEventJson || !isCurrentSession()) return false;
           const signed = JSON.parse(signedEventJson);
           await nostrService.publishSignedEvent(signed, targetRelays);
         } else if (signerType === 'nip46') {
           const signedEventJson = await nip46Sign(event, pubkey);
-          if (!signedEventJson) return false;
+          if (!signedEventJson || !isCurrentSession()) return false;
           await nostrService.publishSignedEvent(JSON.parse(signedEventJson), targetRelays);
         } else {
           // No usable signer (null / unsupported): nothing was published, so
@@ -186,6 +184,7 @@ export function useContactActions({
           allowEmptyList: await isAccountCreatedHere(pubkey),
           onListSeen: () => clearAccountCreatedHere(pubkey),
         });
+        if (!isCurrentSession()) return false;
         if (!update) {
           // No verified relay copy to build on: publishing from the local
           // list could replace the user's real follow list (#1271).
@@ -193,7 +192,8 @@ export function useContactActions({
           return false;
         }
         if (update.changed) {
-          if (!(await publishContactList(update.event))) return false;
+          if (!(await publishContactList(update.event, isCurrentSession))) return false;
+          if (!isCurrentSession()) return false;
           lastPublished.current.set(pubkey, {
             tags: update.event.tags,
             content: update.event.content,
