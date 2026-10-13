@@ -1304,7 +1304,12 @@
     "fileUnavailable": "A fájl nem érhető el",
     "fileShareFailed": "Nem sikerült előkészíteni vagy megosztani a fájlt. Próbáld újra.",
     "devFiles": "Tesztfájlok",
-    "devFilesA11y": "Tesztbeszélgetés létrehozása fájlokkal"
+    "devFilesA11y": "Tesztbeszélgetés létrehozása fájlokkal",
+    "fileSave": "Mentés",
+    "fileWarningTitle": "Potenciálisan veszélyes fájl",
+    "fileWarning": "Ez a fájl futtatható kódot vagy aktív tartalmat tartalmazhat. Csak akkor mentsd, ha megbízol a feladóban. Ellenőrzés nélkül ne nyisd meg és ne telepítsd.",
+    "fileVerificationFailed": "A fájl ellenőrzése sikertelen",
+    "fileTypeMismatch": "A fájlnév nem egyezik a megadott típussal: {{type}}"
   },
   "messageBubbleFooter": {
     "edited": "Szerkesztve",

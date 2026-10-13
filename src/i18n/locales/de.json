@@ -1304,7 +1304,12 @@
     "fileUnavailable": "Datei nicht verfügbar",
     "fileShareFailed": "Diese Datei konnte nicht vorbereitet oder geteilt werden. Versuche es erneut.",
     "devFiles": "Testdateien",
-    "devFilesA11y": "Eine Testunterhaltung mit Dateien erstellen"
+    "devFilesA11y": "Eine Testunterhaltung mit Dateien erstellen",
+    "fileSave": "Speichern",
+    "fileWarningTitle": "Möglicherweise gefährliche Datei",
+    "fileWarning": "Diese Datei kann ausführbaren Code oder aktive Inhalte enthalten. Speichere sie nur, wenn du dem Absender vertraust. Öffne oder installiere sie erst nach einer Prüfung.",
+    "fileVerificationFailed": "Dateiüberprüfung fehlgeschlagen",
+    "fileTypeMismatch": "Dateiname passt nicht zum angegebenen Typ: {{type}}"
   },
   "messageBubbleFooter": {
     "edited": "Bearbeitet",

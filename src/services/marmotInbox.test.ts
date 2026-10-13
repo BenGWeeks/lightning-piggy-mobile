@@ -128,6 +128,7 @@ describe('marmotInbox — attachments', () => {
         'm application/pdf',
         'name Invoice.pdf',
         'size 2048',
+        'x ' + 'ab'.repeat(32),
       ],
     ];
     const r = rumor({ content: '', tags } as never);
@@ -136,6 +137,7 @@ describe('marmotInbox — attachments', () => {
       name: 'Invoice.pdf',
       size: 2048,
       encrypted: false,
+      plaintextSha256: 'ab'.repeat(32),
       available: true,
     });
     expect(marmotRumorToGroupMessage(r).wireKind).toBe(15);
@@ -147,6 +149,15 @@ describe('marmotInbox — attachments', () => {
 
   it('keeps a real caption over the fallback', () => {
     const r = withTag('application/pdf', 'doc.pdf', 'see attached');
+    expect(parseFileAttachment(marmotRumorToGroupMessage(r, keys).text)).toMatchObject({
+      caption: 'see attached',
+      available: true,
+    });
+    expect(
+      parseFileAttachment(
+        marmotRumorToDmRow(ME, { group: dm, rumor: r, mediaKeys: keys })!.content,
+      ),
+    ).toMatchObject({ caption: 'see attached', available: true });
     expect(
       parseFileAttachment(marmotRumorToDmRow(ME, { group: dm, rumor: r })!.content),
     ).toMatchObject({ caption: 'see attached', available: false });

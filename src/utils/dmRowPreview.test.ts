@@ -71,3 +71,23 @@ describe('dmRowPreview — stored file payloads', () => {
     }
   });
 });
+
+it('never previews raw unknown-kind JSON, phishing text or marker payloads', () => {
+  for (const content of [
+    '{"url":"https://phishing.example"}',
+    'Urgent: send your keys',
+    'geo:1,2',
+  ]) {
+    expect(dmRowPreview(content, 1234)).toBe('Unsupported message type (kind 1234)');
+  }
+  i18n.locale = 'es';
+  try {
+    expect(dmRowPreview('secret', 1234)).not.toContain('secret');
+  } finally {
+    i18n.locale = 'en';
+  }
+});
+
+it.each([9, 1234, 99999])('redacts every stored kind outside the renderable set (%s)', (kind) => {
+  expect(dmRowPreview('phishing text', kind)).toBe(`Unsupported message type (kind ${kind})`);
+});

@@ -2,6 +2,7 @@ import React from 'react';
 import { fireEvent, render } from '@testing-library/react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import MessageBubble from './MessageBubble';
+import { parseFileAttachment } from '../utils/fileAttachment';
 import type { BubbleContent } from '../utils/messageContent';
 
 jest.mock('../contexts/ThemeContext', () => ({
@@ -106,15 +107,16 @@ test.each([true, false])('file replies preserve their header and actions (fromMe
       fromMe={fromMe}
       senderName={fromMe ? undefined : 'Curious Fox'}
       content={{
-        kind: 'text',
-        text:
+        kind: 'file',
+        file: parseFileAttachment(
           '[FILE]' +
-          JSON.stringify({
-            url: '',
-            name: 'Invoice.pdf',
-            mime: 'application/pdf',
-            encrypted: true,
-          }),
+            JSON.stringify({
+              url: '',
+              name: 'Invoice.pdf',
+              mime: 'application/pdf',
+              encrypted: true,
+            }),
+        )!,
       }}
       quote={{ text: 'Please send the invoice', fromMe: false, authorName: 'Parent author' }}
       onLongPress={onLongPress}

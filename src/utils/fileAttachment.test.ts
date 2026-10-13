@@ -1,7 +1,13 @@
 import { buildConversationItems } from './conversationItems';
 import { chatUnreadEntries } from './unreadDivider';
 import { unreadCount, firstUnreadId } from './chatUnread';
-import { attachmentMetadata, classifyAttachment, parseFileAttachment } from './fileAttachment';
+import {
+  attachmentMetadata,
+  attachmentSafety,
+  sanitizeAttachmentText,
+  classifyAttachment,
+  parseFileAttachment,
+} from './fileAttachment';
 import { encodeMarmotMediaUrl } from './encryptedFileUrl';
 
 const encoded = (mime: string) =>
@@ -88,4 +94,79 @@ it('counts PDF and unknown-kind rows in the same order they render', () => {
   expect(entries.map((e) => e.id)).toEqual(['dm-unknown1', 'dm-file0001']);
   expect(unreadCount(entries, { at: 0 })).toBe(2);
   expect(firstUnreadId(entries, { at: 0 })).toBe('dm-unknown1');
+});
+
+it.each('apk exe msi dmg pkg sh bat cmd ps1 js jar html htm xhtml svg lnk scr iso'.split(' '))(
+  'blocks dangerous .%s extensions even with benign MIME',
+  (ext) => {
+    expect(attachmentSafety(`invoice.pdf.${ext}`, 'application/pdf').dangerous).toBe(true);
+  },
+);
+it.each([
+  'application/vnd.android.package-archive',
+  'text/html',
+  'application/xhtml+xml',
+  'image/svg+xml',
+  'application/javascript',
+  'application/x-msdownload',
+  'application/x-sh',
+  'application/java-archive',
+  'application/x-iso9660-image',
+])('blocks dangerous MIME %s with a harmless name', (mime) => {
+  expect(attachmentSafety('invoice.pdf', mime).dangerous).toBe(true);
+});
+it('strips bidi, zero-width, separators, traversal and controls in every stored shape', () => {
+  const name = '../a\\b\u202e\u2066\u200b\u200c\u200d\u2060\ufeff\u2028\u2029\x7f.pdf';
+  expect(sanitizeAttachmentText(name)).toBe('ab.pdf');
+  const parsed = parseFileAttachment(
+    '[FILE]' +
+      JSON.stringify({
+        name,
+        mime: 'application/\u202epdf',
+        encrypted: false,
+        url: 'https://example.com/f',
+      }),
+  )!;
+  expect(parsed).toMatchObject({ name: 'ab.pdf', mime: 'application/pdf' });
+  expect(attachmentMetadata([['imeta', `name ${name}`]]).name).toBe('ab.pdf');
+});
+it('caps the displayed name while preserving a dangerous suffix and flags mismatched types', () => {
+  const parsed = parseFileAttachment(
+    '[FILE]' + JSON.stringify({ name: 'a'.repeat(120) + '.exe', mime: 'application/pdf' }),
+  )!;
+  expect(parsed.name.length).toBeLessThanOrEqual(80);
+  expect(parsed.name.endsWith('.exe')).toBe(true);
+  expect(parsed).toMatchObject({ dangerous: true, typeMismatch: true, mime: 'application/pdf' });
+});
+it.each([14, 15])('wire kind %s controls file detection before geo classification', (wireKind) => {
+  const text =
+    '[FILE]' +
+    JSON.stringify({
+      name: 'geo:1,2.pdf',
+      mime: 'application/pdf',
+      caption: 'geo:1,2',
+      encrypted: false,
+      url: 'https://example.com/f',
+    });
+  const item = buildConversationItems(
+    [{ id: 'f', fromMe: false, createdAt: 1, text, wireKind }],
+    [],
+  ).find((i) => i.id === 'dm-f');
+  if (wireKind === 15)
+    expect(item).toMatchObject({ kind: 'message', file: { name: 'geo:1,2.pdf' } });
+  else expect(item).not.toHaveProperty('file');
+});
+it('does not upgrade a kind-14 encrypted-looking PDF URL to a file', () => {
+  const item = buildConversationItems(
+    [{ id: 'f', fromMe: false, createdAt: 1, text: encoded('application/pdf'), wireKind: 14 }],
+    [],
+  ).find((i) => i.id === 'dm-f');
+  expect(item).toMatchObject({ kind: 'message' });
+  expect(item).not.toHaveProperty('file');
+});
+
+it('sanitizes malformed MIME tokens to generic bytes without trusting object properties', () => {
+  expect(
+    parseFileAttachment('[FILE]' + JSON.stringify({ name: 'invoice.pdf', mime: 'constructor' })),
+  ).toMatchObject({ mime: 'application/octet-stream' });
 });

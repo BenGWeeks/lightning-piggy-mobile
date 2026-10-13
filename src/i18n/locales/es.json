@@ -1304,7 +1304,12 @@
     "fileUnavailable": "Archivo no disponible",
     "fileShareFailed": "No se pudo preparar o compartir este archivo. Inténtalo de nuevo.",
     "devFiles": "Archivos de prueba",
-    "devFilesA11y": "Crear una conversación de prueba con archivos"
+    "devFilesA11y": "Crear una conversación de prueba con archivos",
+    "fileSave": "Guardar",
+    "fileWarningTitle": "Archivo potencialmente peligroso",
+    "fileWarning": "Este archivo puede contener código ejecutable o contenido activo. Guárdalo solo si confías en quien lo envió. No lo abras ni lo instales sin comprobarlo primero.",
+    "fileVerificationFailed": "El archivo no superó la verificación",
+    "fileTypeMismatch": "El nombre del archivo no coincide con el tipo declarado: {{type}}"
   },
   "messageBubbleFooter": {
     "edited": "Editado",

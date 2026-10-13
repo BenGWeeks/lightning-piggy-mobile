@@ -766,3 +766,22 @@ describe('buildConversationItems — Marmot device notices (#1267)', () => {
     });
   });
 });
+
+it.each([14, 15])('binds file actions to kind %s before geo detection', (wireKind) => {
+  const text =
+    '[FILE]' +
+    JSON.stringify({
+      name: 'geo:1,2.pdf',
+      caption: 'geo:1,2',
+      mime: 'application/pdf',
+      encrypted: false,
+      url: 'https://example.com/file',
+    });
+  const item = buildConversationItems(
+    [{ id: 'f', fromMe: false, text, wireKind, createdAt: 1 }],
+    [],
+  ).find((row) => row.id === 'dm-f');
+  if (wireKind === 15)
+    expect(item).toMatchObject({ kind: 'message', file: { name: 'geo:1,2.pdf' } });
+  else expect(item).not.toHaveProperty('file');
+});

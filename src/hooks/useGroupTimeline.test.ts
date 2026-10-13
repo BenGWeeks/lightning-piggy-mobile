@@ -7,6 +7,7 @@ import {
   isDeviceNoticeRow,
   mergeDeviceNotices,
   useGroupTimeline,
+  groupSenderLabel,
   type ClassifiedMessage,
 } from './useGroupTimeline';
 
@@ -162,5 +163,36 @@ it('keeps unknown kinds and files as unread timeline messages', () => {
   );
   expect(result.current.rows).toHaveLength(2);
   expect(result.current.rows[0]).toMatchObject({ content: { kind: 'unsupported', rawKind: 1234 } });
-  expect(result.current.rows[1]).toMatchObject({ wireKind: 15, content: { kind: 'text' } });
+  expect(result.current.rows[1]).toMatchObject({ wireKind: 15, content: { kind: 'file' } });
+});
+
+it.each([14, 15])('classifies kind %s file payloads before geo captions in groups', (wireKind) => {
+  const text =
+    '[FILE]' +
+    JSON.stringify({
+      name: 'geo:1,2.pdf',
+      mime: 'application/pdf',
+      caption: 'geo:1,2',
+      encrypted: false,
+      url: 'https://example.com/f',
+    });
+  const { result } = renderHook(() =>
+    useGroupTimeline({
+      messages: [{ id: 'f', createdAt: 1, senderPubkey: 'a', text, wireKind }],
+      myPubkey: 'b',
+      memberNameByPubkey: new Map(),
+      formatLocale: 'en',
+      deviceNotices: [],
+    }),
+  );
+  const row = result.current.rows[0] as ClassifiedMessage;
+  if (wireKind === 15)
+    expect(row.content).toMatchObject({ kind: 'file', file: { name: 'geo:1,2.pdf' } });
+  else expect(row.content.kind).not.toBe('file');
+});
+
+it.each(['You', 'Tú'])('labels own unsupported group messages with localized %s', (you) => {
+  expect(groupSenderLabel(true, 'unsupported', 'Peer', you)).toBe(you);
+  expect(groupSenderLabel(false, 'unsupported', 'Peer', you)).toBe('Peer');
+  expect(groupSenderLabel(true, 'text', 'Peer', you)).toBeNull();
 });

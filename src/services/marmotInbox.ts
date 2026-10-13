@@ -3,7 +3,7 @@
 // multi-member groups → the per-group message log. Kept free of React and
 // I/O so the shaping is unit-testable.
 
-import { attachmentMetadata } from '../utils/fileAttachment';
+import { attachmentMetadata, parseFileAttachment } from '../utils/fileAttachment';
 import { textForRumor } from '../utils/nip17Unwrap';
 import type { DmMessageRow } from './dmDb';
 import type { GroupMessage } from './groupMessagesStorageService';
@@ -38,7 +38,7 @@ export function storedKindForMarmot(kind: number): number {
  * Stored text + kind for a Marmot app event. A photo or voice note (MIP-04: kind 9
  * with an `imeta` attachment) is stored like a NIP-17 encrypted file — the
  * `#lpe=1` URL, kind 15 — so the image / voice bubble and the redacted previews apply; its
- * file keys come from the session (`mediaKeys`). A caption is dropped.
+ * file keys come from the session (`mediaKeys`). File captions are preserved.
  */
 export function storedMarmotContent(
   rumor: MarmotRumor,
@@ -46,7 +46,15 @@ export function storedMarmotContent(
 ): { text: string; kind: number } {
   if (rumor.kind === MARMOT_CHAT_KIND) {
     const media = marmotMediaText(rumor.tags, mediaKeys);
-    if (media) return { text: media, kind: APP_FILE_KIND };
+    if (media) {
+      if (parseFileAttachment(media) && rumor.content) {
+        return {
+          text: `${media}&caption=${encodeURIComponent(rumor.content)}`,
+          kind: APP_FILE_KIND,
+        };
+      }
+      return { text: media, kind: APP_FILE_KIND };
+    }
     const attachment = allAttachments(rumor.tags)[0];
     if (
       attachment &&
@@ -81,6 +89,7 @@ export function storedMarmotContent(
             url,
             mime,
             encrypted,
+            plaintextSha256: imeta.find((field) => field.startsWith('x '))?.slice(2),
             caption: rumor.content,
             ...attachmentMetadata([imeta]),
           }),

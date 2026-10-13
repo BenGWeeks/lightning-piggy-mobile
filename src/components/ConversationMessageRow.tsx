@@ -274,7 +274,9 @@ function ConversationMessageRow({
             ? ({ kind: 'liveLocationMarker', marker: item.marker } as const)
             : item.kind === 'unsupported'
               ? ({ kind: 'unsupported', rawKind: item.rawKind } as const)
-              : ({ kind: 'text', text: item.text } as const);
+              : item.file
+                ? ({ kind: 'file', file: item.file } as const)
+                : ({ kind: 'text', text: item.text } as const);
   return (
     <MessageBubble
       id={item.id}

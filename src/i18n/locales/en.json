@@ -1304,7 +1304,12 @@
     "fileUnavailable": "File unavailable",
     "fileShareFailed": "Could not prepare or share this file. Try again.",
     "devFiles": "Dev files",
-    "devFilesA11y": "Seed a dev file conversation"
+    "devFilesA11y": "Seed a dev file conversation",
+    "fileSave": "Save",
+    "fileWarningTitle": "Potentially dangerous file",
+    "fileWarning": "This file may contain executable or active content. Save only if you trust the sender. Do not open or install it without checking it first.",
+    "fileVerificationFailed": "File failed verification",
+    "fileTypeMismatch": "Filename does not match the declared type: {{type}}"
   },
   "messageBubbleFooter": {
     "edited": "Edited",

@@ -25,12 +25,18 @@ import { liveMarkerPhaseOf } from '../services/liveLocationService';
  *  - Marketplace order / receipt (kind 16/17) → the order summary.
  *  - Marmot group invite / message (kind 443–445) → a "not supported yet"
  *    label, never the serialized MLS payload (#1140).
- *  - Everything else → the content unchanged (plain chat text, …).
+ *  - Unknown kinds → a localized unsupported label with the kind number.
+ *  - Plain chat text → the content unchanged.
  *
  * Shared by every store → preview projection (inbox refresh, live sub,
  * wrap ingest, background notification) so they redact identically.
  */
 export function dmRowPreview(content: string, wireKind: number, locale?: string): string {
+  if (
+    ![4, 14, 15, 16, 17, 1068, 1018, NWC_SHARE_KIND].includes(wireKind) &&
+    !isMarmotKind(wireKind)
+  )
+    return t('messageBubble.unsupportedText', { kind: wireKind });
   if (wireKind === NWC_SHARE_KIND) return nwcSharePreviewFromContent(content);
   if (wireKind === 15 && content.startsWith('[FILE]')) return `📎 ${t('messageBubble.file')}`;
   // `#lpe=1` is the encrypted-file fragment marker (see encryptedFileUrl.ts);

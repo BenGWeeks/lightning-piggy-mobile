@@ -70,6 +70,7 @@ import { useGroupDevices } from '../hooks/useGroupDevices';
 import {
   isDeviceNoticeRow,
   useGroupTimeline,
+  groupSenderLabel,
   type GroupTimelineRow,
 } from '../hooks/useGroupTimeline';
 import { useMessageInfoSheet } from '../hooks/useMessageInfoSheet';
@@ -487,10 +488,12 @@ const GroupConversationScreen: React.FC = () => {
         );
       }
       const fromMe = item.senderPubkey.toLowerCase() === myPubkey?.toLowerCase();
-      const senderName = fromMe
-        ? null
-        : (memberByPubkey.get(item.senderPubkey.toLowerCase())?.name ??
-          shortNpub(item.senderPubkey));
+      const senderName = groupSenderLabel(
+        fromMe,
+        item.content.kind,
+        memberByPubkey.get(item.senderPubkey.toLowerCase())?.name ?? shortNpub(item.senderPubkey),
+        t('messageBubble.quoteYou'),
+      );
       // Reuse the shared bubble — same renderer 1:1 chats use, so contact /
       // invoice / location / image / GIF / poll cards all render identically
       // across chat types (#239). The classifier handles geo: + GIF + poll
@@ -546,6 +549,7 @@ const GroupConversationScreen: React.FC = () => {
       );
     },
     [
+      t,
       colors,
       senderRuns,
       memberByPubkey,

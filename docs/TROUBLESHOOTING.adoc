@@ -1467,6 +1467,10 @@ disappears before checking the card. When reusing the reporting xpub fixture,
 wizard and selecting that existing wallet. Other import errors still fail
 the dismissal assertion.
 
+=== Deferred native modules in Jest
+
+If a unit test reports `A dynamic import callback was invoked without --experimental-vm-modules`, the Expo Babel preset left a deferred `import()` for Node to execute outside Jest's module mocks. For a native dependency loaded only on a user action (such as `expo/fetch` in the bounded file downloader), use a literal lazy `require()` with a `typeof import(...)` type annotation. Metro can still resolve the module and Jest can use its mock without enabling experimental VM modules.
+
 == Navigation hooks inside payment sheets (#1394)
 
 A component rendered through the bottom-sheet portal can sit outside the

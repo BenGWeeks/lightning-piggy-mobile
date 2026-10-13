@@ -1,4 +1,5 @@
 import { isMarmotMediaVersion } from './encryptedFileUrl';
+import { isPublicHttpUrl } from './publicUrl';
 import type { ParsedImageMessage } from './messageContent';
 
 export interface FileAttachment extends ParsedImageMessage {
@@ -6,6 +7,128 @@ export interface FileAttachment extends ParsedImageMessage {
   size?: number;
   available: boolean;
   caption?: string;
+  plaintextSha256?: string;
+  dangerous: boolean;
+  typeMismatch: boolean;
+}
+
+// Remove direction controls and invisible separators before checking extensions.
+export function sanitizeAttachmentText(value: string): string {
+  return value
+    .replace(/[\r\n\x00-\x1f]/g, ' ')
+    .replace(/[\x7f\u200b-\u200d\u2028-\u202e\u2060\u2066-\u2069\ufeff]/g, '')
+    .replace(/[/\\]/g, '')
+    .replace(/\.\./g, '')
+    .trim();
+}
+export function isSafeFileUrl(url: string): boolean {
+  return url.startsWith('https://') && isPublicHttpUrl(url);
+}
+const DANGEROUS_EXTENSIONS = new Set(
+  'apk exe msi dmg pkg sh bat cmd ps1 js jar html htm xhtml svg lnk scr iso'.split(' '),
+);
+const DANGEROUS_MIMES = new Set([
+  'application/vnd.android.package-archive',
+  'application/x-msdownload',
+  'application/x-msdos-program',
+  'application/x-msi',
+  'application/x-ms-installer',
+  'application/x-apple-diskimage',
+  'application/x-newton-compatible-pkg',
+  'application/vnd.apple.installer+xml',
+  'application/x-sh',
+  'application/x-shellscript',
+  'application/x-bat',
+  'application/x-powershell',
+  'text/x-shellscript',
+  'application/javascript',
+  'text/javascript',
+  'application/x-javascript',
+  'application/java-archive',
+  'application/x-java-archive',
+  'text/html',
+  'application/xhtml+xml',
+  'image/svg+xml',
+  'application/x-ms-shortcut',
+  'application/x-iso9660-image',
+  'application/x-dosexec',
+  'application/x-ms-dos-executable',
+  'application/x-executable',
+  'application/x-csh',
+  'text/x-sh',
+  'text/x-powershell',
+  'application/x-batch',
+  'application/ecmascript',
+  'text/ecmascript',
+  'application/x-iso-image',
+]);
+const MIME_EXTENSIONS: Record<string, string[]> = {
+  'application/pdf': ['pdf'],
+  'image/png': ['png'],
+  'image/jpeg': ['jpg', 'jpeg'],
+  'text/plain': ['txt'],
+  'application/zip': ['zip'],
+  'application/vnd.android.package-archive': ['apk'],
+  'text/html': ['html', 'htm'],
+  'image/svg+xml': ['svg'],
+  'application/javascript': ['js'],
+  'text/javascript': ['js'],
+  'application/xhtml+xml': ['xhtml'],
+  'application/x-msdownload': ['exe', 'dll', 'scr'],
+  'application/x-msi': ['msi'],
+  'application/x-apple-diskimage': ['dmg'],
+  'application/vnd.apple.installer+xml': ['pkg'],
+  'application/x-sh': ['sh'],
+  'application/x-bat': ['bat', 'cmd'],
+  'application/x-powershell': ['ps1'],
+  'application/java-archive': ['jar'],
+  'application/x-ms-shortcut': ['lnk'],
+  'application/x-iso9660-image': ['iso'],
+  'application/msword': ['doc'],
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['docx'],
+  'application/vnd.ms-excel': ['xls'],
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['xlsx'],
+  'application/json': ['json'],
+  'text/csv': ['csv'],
+};
+export function attachmentSafety(name: string, mime: string) {
+  const clean = sanitizeAttachmentText(name);
+  const extension = clean.split('.').pop()?.toLowerCase() ?? '';
+  const type = mime
+    .split('/')
+    .map(sanitizeAttachmentText)
+    .join('/')
+    .toLowerCase()
+    .split(';')[0]
+    .trim();
+  const expectedExtensions = Object.hasOwn(MIME_EXTENSIONS, type)
+    ? MIME_EXTENSIONS[type]
+    : undefined;
+  return {
+    dangerous: DANGEROUS_EXTENSIONS.has(extension) || DANGEROUS_MIMES.has(type),
+    typeMismatch:
+      (!!expectedExtensions && !expectedExtensions.includes(extension)) ||
+      (type !== 'application/octet-stream' &&
+        !expectedExtensions &&
+        Object.values(MIME_EXTENSIONS).some((extensions) => extensions.includes(extension))),
+  };
+}
+function displayMetadata(name: string, mime: string) {
+  // Check the full sanitised name before truncating so a hidden suffix stays blocked.
+  const safety = attachmentSafety(name, mime);
+  const clean = sanitizeAttachmentText(name);
+  const name80 = clean.length <= 80 ? clean : `${clean.slice(0, 60)}…${clean.slice(-19)}`;
+  const type = mime.split('/').map(sanitizeAttachmentText).join('/');
+  // MIME is a token, not arbitrary display text; invalid tokens become generic bytes.
+  const canonical = type.toLowerCase().split(';')[0].trim();
+  return {
+    name: name80,
+    mime:
+      canonical.length <= 100 && /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/.test(canonical)
+        ? canonical
+        : 'application/octet-stream',
+    ...safety,
+  };
 }
 
 /** Display metadata is separate from the authenticated MIP-04 filename. */
@@ -22,12 +145,13 @@ export function attachmentMetadata(tags: string[][], filename?: string) {
   } catch {
     /* Keep malformed percent escapes literal. */
   }
-  const name = (field('name') || field('alt') || segment || filename || '')
-    .replace(/[\r\n\x00-\x1f]/g, ' ')
-    .slice(0, 160);
+  const name = sanitizeAttachmentText(field('name') || field('alt') || segment || filename || '');
   const rawSize = field('size');
   const size = rawSize && /^\d+$/.test(rawSize) ? Number(rawSize) : undefined;
-  return { name, ...(size !== undefined && Number.isSafeInteger(size) ? { size } : {}) };
+  return {
+    name: displayMetadata(name, 'application/octet-stream').name,
+    ...(size !== undefined && Number.isSafeInteger(size) ? { size } : {}),
+  };
 }
 
 /** Stored file URLs carry decryption parameters; never expose their fragments in UI. */
@@ -39,12 +163,12 @@ export function parseFileAttachment(text: string): FileAttachment | null {
       return {
         url: typeof value.url === 'string' ? value.url : '',
         encrypted: value.encrypted !== false,
-        name: value.name,
-        mime: value.mime,
+        ...displayMetadata(value.name, value.mime),
+        ...(typeof value.plaintextSha256 === 'string'
+          ? { plaintextSha256: value.plaintextSha256 }
+          : {}),
         available:
-          value.encrypted === false &&
-          typeof value.url === 'string' &&
-          /^https?:\/\//.test(value.url),
+          value.encrypted === false && typeof value.url === 'string' && isSafeFileUrl(value.url),
         ...(typeof value.caption === 'string' ? { caption: value.caption } : {}),
         ...(Number.isSafeInteger(value.size) && value.size >= 0 ? { size: value.size } : {}),
       };
@@ -56,8 +180,9 @@ export function parseFileAttachment(text: string): FileAttachment | null {
   if (!fragment || !/^https?:\/\//.test(url)) return null;
   const p = new URLSearchParams(fragment);
   if (p.get('lpe') !== '1') return null;
-  const mime = p.get('m') ?? 'application/octet-stream';
-  if (mime.startsWith('image/') || mime.startsWith('audio/')) return null;
+  const mime = displayMetadata('', p.get('m') ?? 'application/octet-stream').mime;
+  if ((mime.startsWith('image/') && mime !== 'image/svg+xml') || mime.startsWith('audio/'))
+    return null;
   const alg = p.get('alg') ?? 'aes-gcm';
   const nonceHex = p.get('n') ?? undefined;
   const keyHex = p.get('k') ?? undefined;
@@ -71,16 +196,19 @@ export function parseFileAttachment(text: string): FileAttachment | null {
   const size = p.get('size');
   return {
     url,
-    mime,
+    ...displayMetadata(
+      p.get('name') || filename || attachmentMetadata([['imeta', `url ${url}`]]).name,
+      mime,
+    ),
     encrypted: true,
     keyHex,
     nonceHex,
     marmot,
-    name: p.get('name') || filename || attachmentMetadata([['imeta', `url ${url}`]]).name,
+    ...(p.get('caption') ? { caption: p.get('caption')! } : {}),
     ...(size && /^\d+$/.test(size) && Number.isSafeInteger(Number(size))
       ? { size: Number(size) }
       : {}),
-    available: !!nonceHex && (!!marmot || (alg === 'aes-gcm' && !!keyHex)),
+    available: isSafeFileUrl(url) && !!nonceHex && (!!marmot || (alg === 'aes-gcm' && !!keyHex)),
   };
 }
 
@@ -90,7 +218,7 @@ export function classifyAttachment(
 ): 'image' | 'voice' | 'file' | 'unknown' | 'text' {
   if (wireKind !== undefined && ![4, 9, 14, 15, 16, 17, 1068, 1018].includes(wireKind))
     return 'unknown';
-  if (parseFileAttachment(text)) return 'file';
+  if (wireKind === 15 && parseFileAttachment(text)) return 'file';
   const fragment = text.split('#')[1];
   const mime = fragment ? new URLSearchParams(fragment).get('m') : null;
   if (mime?.startsWith('image/')) return 'image';

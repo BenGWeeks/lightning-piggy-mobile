@@ -1304,7 +1304,12 @@
     "fileUnavailable": "文件不可用",
     "fileShareFailed": "无法准备或分享此文件。请重试。",
     "devFiles": "测试文件",
-    "devFilesA11y": "创建包含文件的测试会话"
+    "devFilesA11y": "创建包含文件的测试会话",
+    "fileSave": "保存",
+    "fileWarningTitle": "可能存在危险的文件",
+    "fileWarning": "此文件可能包含可执行代码或活动内容。仅在信任发送者时保存。请先检查，再打开或安装。",
+    "fileVerificationFailed": "文件验证失败",
+    "fileTypeMismatch": "文件名与声明的类型不符：{{type}}"
   },
   "messageBubbleFooter": {
     "edited": "已编辑",

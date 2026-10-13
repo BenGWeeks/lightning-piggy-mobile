@@ -5,12 +5,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { deleteAsync, moveAsync, writeAsStringAsync } from 'expo-file-system/legacy';
 import { encryptFile } from './encryptedFile';
 import {
+  deleteDecryptedFile,
+  verifiedFileMetadata,
   DecryptedMediaCancelledError,
   LEGACY_CLEANUP_FLAG_KEY,
   __resetDecryptedMediaCacheForTests,
   cleanupLegacyDecryptedMedia,
   clearDecryptedMediaMemory,
   ownerDirName,
+  mediaCacheKey,
   peekDecryptedMedia,
   resolveDecryptedMedia,
   setDecryptedMediaOwner,
@@ -18,12 +21,38 @@ import {
   type EncryptedMediaRef,
 } from './decryptedMediaCache';
 
+jest.mock('expo/fetch', () => ({
+  fetch: async (...args: unknown[]) => {
+    const res = await globalThis.fetch(...(args as Parameters<typeof globalThis.fetch>));
+    let done = false;
+    return {
+      ...res,
+      headers: { get: () => null },
+      body: {
+        getReader: () => ({
+          read: async () => {
+            if (done) return { done: true };
+            done = true;
+            return { done: false, value: new Uint8Array(await res.arrayBuffer()) };
+          },
+          cancel: async () => {},
+        }),
+      },
+    };
+  },
+}));
+
 // --- in-memory expo-file-system/legacy ------------------------------------
 // path → base64 contents. Directories are implicit (any path prefix).
 const mockFiles = new Map<string, string>();
 jest.mock('expo-file-system/legacy', () => ({
   cacheDirectory: 'file:///cache/',
-  getInfoAsync: jest.fn(async (uri: string) => ({ exists: mockFiles.has(uri) })),
+  getInfoAsync: jest.fn(async (uri: string) => ({
+    exists: mockFiles.has(uri),
+    size: Buffer.from(mockFiles.get(uri) ?? '', 'base64').length,
+    modificationTime: uri.includes('file-old') ? 0 : Date.now() / 1000,
+  })),
+  readAsStringAsync: jest.fn(async (uri: string) => mockFiles.get(uri) ?? ''),
   makeDirectoryAsync: jest.fn(async () => {}),
   writeAsStringAsync: jest.fn(async (uri: string, data: string) => {
     mockFiles.set(uri, data);
@@ -96,6 +125,7 @@ describe('decryptedMediaCache', () => {
       kind: 'file',
       mime: 'application/pdf',
       encrypted: false,
+      plaintextSha256: bytesToHex(sha256(PLAIN)),
     });
     expect([...plaintextOf(uri)]).toEqual([...PLAIN]);
     expect(uri).toContain(ownerDirName(A));
@@ -376,4 +406,67 @@ describe('decryptedMediaCache', () => {
     await new Promise((r) => setImmediate(r));
     expect(mockFiles.size).toBe(0);
   });
+});
+
+it('rejects substituted plaintext and a missing hash without publishing', async () => {
+  setDecryptedMediaOwner(A);
+  fetchMock.mockResolvedValue({ ok: true, arrayBuffer: async () => PLAIN.slice().buffer });
+  for (const plaintextSha256 of ['00'.repeat(32), undefined]) {
+    await expect(
+      resolveDecryptedMedia({ url: URL_, kind: 'file', encrypted: false, plaintextSha256 }),
+    ).rejects.toThrow('File failed verification');
+    expect(filesUnder(A)).toEqual([]);
+  }
+});
+it('does not reuse plaintext cached against another committed hash', async () => {
+  setDecryptedMediaOwner(A);
+  fetchMock.mockResolvedValue({ ok: true, arrayBuffer: async () => PLAIN.slice().buffer });
+  const plainRef: EncryptedMediaRef = {
+    url: URL_,
+    kind: 'file',
+    encrypted: false,
+    plaintextSha256: bytesToHex(sha256(PLAIN)),
+  };
+  const uri = await resolveDecryptedMedia(plainRef);
+  expect(verifiedFileMetadata(uri)).toEqual({
+    size: PLAIN.length,
+    mime: 'application/octet-stream',
+  });
+  await expect(
+    resolveDecryptedMedia({ ...plainRef, plaintextSha256: '00'.repeat(32) }),
+  ).rejects.toThrow('verification');
+  await deleteDecryptedFile(uri);
+  expect(mockFiles.has(uri)).toBe(false);
+  expect(peekDecryptedMedia(plainRef)).toBeNull();
+});
+it('evicts abandoned plaintext shares on disk', async () => {
+  setDecryptedMediaOwner(A);
+  const stale = `file:///cache/decrypted/${ownerDirName(A)}/file-old.bin`;
+  mockFiles.set(stale, 'plaintext');
+  fetchMock.mockResolvedValue({ ok: true, arrayBuffer: async () => PLAIN.slice().buffer });
+  await resolveDecryptedMedia({
+    url: URL_,
+    kind: 'file',
+    encrypted: false,
+    plaintextSha256: bytesToHex(sha256(PLAIN)),
+  });
+  expect(mockFiles.has(stale)).toBe(false);
+});
+
+it('re-verifies bounded disk plaintext before sharing and rejects a substituted cached file', async () => {
+  setDecryptedMediaOwner(A);
+  const plainRef: EncryptedMediaRef = {
+    url: URL_,
+    kind: 'file',
+    encrypted: false,
+    plaintextSha256: bytesToHex(sha256(PLAIN)),
+  };
+  const uri = `file:///cache/decrypted/${ownerDirName(A)}/file-${mediaCacheKey(plainRef)}.bin`;
+  mockFiles.set(uri, Buffer.from(PLAIN).toString('base64'));
+  expect(await resolveDecryptedMedia(plainRef)).toBe(uri);
+  expect(fetchMock).not.toHaveBeenCalled();
+  clearDecryptedMediaMemory();
+  mockFiles.set(uri, Buffer.from('substituted').toString('base64'));
+  await expect(resolveDecryptedMedia(plainRef)).rejects.toThrow('File failed verification');
+  expect(mockFiles.has(uri)).toBe(false);
 });

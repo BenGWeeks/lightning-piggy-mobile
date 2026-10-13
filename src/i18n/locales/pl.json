@@ -1304,7 +1304,12 @@
     "fileUnavailable": "Plik niedostępny",
     "fileShareFailed": "Nie udało się przygotować lub udostępnić pliku. Spróbuj ponownie.",
     "devFiles": "Pliki testowe",
-    "devFilesA11y": "Utwórz rozmowę testową z plikami"
+    "devFilesA11y": "Utwórz rozmowę testową z plikami",
+    "fileSave": "Zapisz",
+    "fileWarningTitle": "Potencjalnie niebezpieczny plik",
+    "fileWarning": "Ten plik może zawierać kod wykonywalny lub aktywną zawartość. Zapisz go tylko, jeśli ufasz nadawcy. Nie otwieraj ani nie instaluj go bez wcześniejszego sprawdzenia.",
+    "fileVerificationFailed": "Plik nie przeszedł weryfikacji",
+    "fileTypeMismatch": "Nazwa pliku nie odpowiada zadeklarowanemu typowi: {{type}}"
   },
   "messageBubbleFooter": {
     "edited": "Edytowano",

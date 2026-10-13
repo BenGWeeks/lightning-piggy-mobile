@@ -2,7 +2,7 @@ import type { SharedLocation } from '../services/locationService';
 import type { LiveLocationMarker } from '../services/liveLocationService';
 import type { TransactionDetailData } from '../components/TransactionDetailSheet';
 import type { WalletState } from '../types/wallet';
-import { classifyMessageContent } from './messageContent';
+import { classifyStoredMessage } from './messageContent';
 import { POLL_KIND, VOTE_KIND, parseStoredPoll, type DisplayPoll } from './nip88Poll';
 import { sanitizeDisplayText } from './sanitizeDisplayText';
 import type { DeliveryStatus } from './dmDeliveryStatus';
@@ -25,6 +25,7 @@ export type Item =
       id: string;
       fromMe: boolean;
       text: string;
+      file?: import('./fileAttachment').FileAttachment;
       createdAt: number;
       // Per-relay delivery breakdown for a sent (fromMe) message (#856).
       deliveryStatus?: DeliveryStatus;
@@ -469,7 +470,7 @@ export function buildConversationItems(
     // Classify each raw DM into the variant the renderer expects. Same
     // shape used by the group screen (via `classifyMessageContent`)
     // — keeps gif / geo / poll detection in one place.
-    const classified = classifyMessageContent(m.text);
+    const classified = classifyStoredMessage(m.text, m.wireKind);
     // A Marmot reply quotes its parent whatever the bubble: text, GIF,
     // location or poll.
     const quoted = m.replyTo ? { quote: resolveQuote(m.replyTo, byId, locale) } : {};
@@ -539,6 +540,7 @@ export function buildConversationItems(
         // Drop orphaned object-replacement / zero-width placeholders so an
         // inline-attachment artifact doesn't render as a tofu box (#764).
         text: sanitizeDisplayText(m.text),
+        ...(classified.kind === 'file' ? { file: classified.file } : {}),
         createdAt: m.createdAt,
         deliveryStatus: m.deliveryStatus,
         wireKind: m.wireKind,

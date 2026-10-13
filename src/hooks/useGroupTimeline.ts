@@ -3,7 +3,7 @@ import { useCallback, useMemo } from 'react';
 import type { GroupMessage } from '../services/groupMessagesStorageService';
 import type { DeviceNoticeView } from '../services/marmotDeviceTracker';
 import {
-  classifyMessageContent,
+  classifyStoredMessage,
   deriveGroupWireKind,
   type BubbleContent,
 } from '../utils/messageContent';
@@ -111,7 +111,7 @@ export function useGroupTimeline({
         content:
           m.wireKind !== undefined && ![4, 14, 15, 16, 17, 1068, 1018].includes(m.wireKind)
             ? { kind: 'unsupported' as const, rawKind: m.wireKind }
-            : classifyMessageContent(sanitizeDisplayText(m.text)),
+            : classifyStoredMessage(sanitizeDisplayText(m.text), m.wireKind),
         // The real stored kind (14 chat / 15 encrypted file), so the info
         // sheet reports kind 15 for voice / image bubbles.
         wireKind: m.wireKind ?? deriveGroupWireKind(m.text),
@@ -141,4 +141,14 @@ export function useGroupTimeline({
   );
 
   return { rows, senderOf };
+}
+
+/** Own unsupported placeholders must name the viewer even in senderless runs. */
+export function groupSenderLabel(
+  fromMe: boolean,
+  kind: BubbleContent['kind'],
+  peerName: string,
+  you: string,
+): string | null {
+  return fromMe ? (kind === 'unsupported' ? you : null) : peerName;
 }

@@ -24,7 +24,6 @@ import {
   formatRelativeFuture,
 } from '../utils/messageContent';
 import type { PollTally } from '../utils/nip88Poll';
-import { parseFileAttachment } from '../utils/fileAttachment';
 import MessageFileBubble from './MessageFileBubble';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { isPublicHttpUrl } from '../utils/publicUrl';
@@ -519,20 +518,19 @@ const MessageBubble: React.FC<Props> = ({
     );
   }
 
-  // content.kind === 'text' — fall through to per-text-format detection.
-  const text = content.text;
-  const file = parseFileAttachment(text);
-  if (file)
+  if (content.kind === 'file')
     return wrapWithReactionRow(
       <MessageFileBubble
         id={id}
-        file={file}
+        file={content.file}
         fromMe={fromMe}
         header={BubbleHeader}
         onLongPress={onLongPress}
         footer={renderFooter([styles.bubbleTime])}
       />,
     );
+
+  const text = content.text;
 
   // Image (#688) — encrypted NIP-17 kind-15 (fetch ciphertext → decrypt →
   // display) OR a plain image URL (legacy / other clients → display directly).
