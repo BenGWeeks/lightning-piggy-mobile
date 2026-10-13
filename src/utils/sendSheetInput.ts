@@ -5,6 +5,7 @@ export interface DecodedInvoice {
   amountSats: number | null;
   description: string | null;
   expiry: number | null;
+  nodePubkey?: string | null;
 }
 
 // A decode failure (bad checksum, unknown network, or no payment hash) is
@@ -31,6 +32,8 @@ export function decodeInvoice(bolt11: string): DecodedInvoice | null {
     // A checksum-valid string can still be an empty payload (e.g. `lnbc1w4pnfm`):
     // without a payment hash there is nothing to pay.
     if (!hasPaymentHash) return null;
+    // light-bolt11-decoder does not verify signatures. An n (payee) tag is
+    // untrusted metadata, so omit node identity and use the unknown recipient.
     return { amountSats, description, expiry };
   } catch {
     return null;
@@ -93,5 +96,5 @@ export function isLnurlString(input: string): boolean {
   if (/^lightning:/i.test(s)) {
     s = s.slice('lightning:'.length).trim();
   }
-  return /^lnurl1/i.test(s) || /^(?:lnurlp|lnurlw|lnurl):\/\//i.test(s);
+  return /^https:\/\//i.test(s) || /^lnurl1/i.test(s) || /^(?:lnurlp|lnurlw|lnurl):\/\//i.test(s);
 }

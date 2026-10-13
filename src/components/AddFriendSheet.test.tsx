@@ -1,6 +1,9 @@
+import { Alert } from './BrandedAlert';
 import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import AddFriendSheet from './AddFriendSheet';
+
+let mockDismiss: (() => void) | undefined;
 
 jest.mock('@gorhom/bottom-sheet', () => {
   const R = jest.requireActual('react');
@@ -9,9 +12,10 @@ jest.mock('@gorhom/bottom-sheet', () => {
     R.createElement(RN.View, null, children);
   return {
     BottomSheetModal: R.forwardRef(function Modal(
-      { children }: { children?: React.ReactNode },
+      { children, onDismiss }: { children?: React.ReactNode; onDismiss?: () => void },
       ref: React.Ref<unknown>,
     ) {
+      mockDismiss = onDismiss;
       R.useImperativeHandle(ref, () => ({ present: jest.fn(), dismiss: jest.fn() }));
       return R.createElement(RN.View, null, children);
     }),
@@ -22,7 +26,11 @@ jest.mock('@gorhom/bottom-sheet', () => {
 });
 jest.mock('expo-camera', () => ({
   useCameraPermissions: () => [{ granted: true }, jest.fn()],
-  CameraView: () => null,
+  CameraView: (props: object) =>
+    jest.requireActual('react').createElement(jest.requireActual('react-native').View, {
+      ...props,
+      testID: 'profile-scanner',
+    }),
 }));
 jest.mock('expo-clipboard', () => ({ getStringAsync: jest.fn().mockResolvedValue('npub1public') }));
 jest.mock('./BrandedAlert', () => ({ Alert: { alert: jest.fn() } }));
@@ -72,3 +80,88 @@ it('labels the paste button and fills the public-key input', async () => {
   await act(async () => fireEvent.press(screen.getByRole('button', { name: 'Paste npub' })));
   expect(screen.getByTestId('npub-input').props.value).toBe('npub1public');
 });
+
+it.each(['confirm', 'cancel'])('requires %s for scanned profile intake', async (action) => {
+  jest.mocked(Alert.alert).mockClear();
+  const onAdd = jest.fn(async () => true);
+  render(<AddFriendSheet visible onClose={jest.fn()} onAdd={onAdd} />);
+  await act(async () => fireEvent.press(screen.getByRole('tab', { name: 'Scan QR' })));
+  act(() =>
+    fireEvent(screen.getByTestId('profile-scanner'), 'barcodeScanned', { data: 'npub1public' }),
+  );
+  expect(onAdd).not.toHaveBeenCalled();
+  await act(async () =>
+    jest.mocked(Alert.alert).mock.calls.at(-1)?.[2]?.[action === 'confirm' ? 1 : 0].onPress?.(),
+  );
+  expect(onAdd).toHaveBeenCalledTimes(action === 'confirm' ? 1 : 0);
+});
+
+it.each(['close', 'reopen', 'unmount', 'dismiss'])(
+  'ignores pending scan confirmation after %s',
+  async (transition) => {
+    jest.mocked(Alert.alert).mockClear();
+    const onAdd = jest.fn(async () => true);
+    const onClose = jest.fn();
+    const view = render(<AddFriendSheet visible onClose={onClose} onAdd={onAdd} />);
+    await act(async () => fireEvent.press(screen.getByTestId('add-friend-tab-scan')));
+    fireEvent(screen.getByTestId('profile-scanner'), 'barcodeScanned', { data: 'npub1oldprofile' });
+    const oldButtons = jest.mocked(Alert.alert).mock.calls.at(-1)![2]!;
+    if (transition === 'unmount') view.unmount();
+    else if (transition === 'dismiss') act(() => mockDismiss?.());
+    else {
+      view.rerender(<AddFriendSheet visible={false} onClose={onClose} onAdd={onAdd} />);
+      if (transition === 'reopen') {
+        view.rerender(<AddFriendSheet visible onClose={onClose} onAdd={onAdd} />);
+        await act(async () => fireEvent.press(screen.getByTestId('add-friend-tab-scan')));
+        fireEvent(screen.getByTestId('profile-scanner'), 'barcodeScanned', {
+          data: 'npub1newprofile',
+        });
+      }
+    }
+    await act(async () => oldButtons[1].onPress?.());
+    expect(onAdd).not.toHaveBeenCalled();
+    if (transition === 'reopen') {
+      // A stale cancellation must not unlock the scanner in the new session.
+      act(() => oldButtons[0].onPress?.());
+      expect(screen.getByTestId('profile-scanner').props.onBarcodeScanned).toBeUndefined();
+      await act(async () => jest.mocked(Alert.alert).mock.calls.at(-1)![2]![1].onPress?.());
+      expect(onAdd).toHaveBeenCalledWith('npub1newprofile');
+      expect(onAdd).toHaveBeenCalledTimes(1);
+    }
+  },
+);
+
+it('ignores a scanned add result that finishes during a new session', async () => {
+  let finish: (success: boolean) => void = () => {};
+  const onAdd = jest.fn(() => new Promise<boolean>((resolve) => (finish = resolve)));
+  const onClose = jest.fn();
+  const view = render(<AddFriendSheet visible onClose={onClose} onAdd={onAdd} />);
+  await act(async () => fireEvent.press(screen.getByTestId('add-friend-tab-scan')));
+  fireEvent(screen.getByTestId('profile-scanner'), 'barcodeScanned', { data: 'npub1oldprofile' });
+  act(() => jest.mocked(Alert.alert).mock.calls.at(-1)![2]![1].onPress?.());
+  view.rerender(<AddFriendSheet visible={false} onClose={onClose} onAdd={onAdd} />);
+  view.rerender(<AddFriendSheet visible onClose={onClose} onAdd={onAdd} />);
+  await act(async () => fireEvent.press(screen.getByTestId('add-friend-tab-scan')));
+  await act(async () => finish(true));
+  expect(onClose).not.toHaveBeenCalled();
+  expect(screen.getByTestId('profile-scanner').props.onBarcodeScanned).toEqual(
+    expect.any(Function),
+  );
+});
+
+it.each(['alice@example.com', 'lnurlp://example.com/pay', 'not-a-key'])(
+  'rejects a non-profile QR locally without a mis-describing consent sheet: %s',
+  async (data) => {
+    jest.mocked(Alert.alert).mockClear();
+    const onAdd = jest.fn(async () => false);
+    render(<AddFriendSheet visible onClose={jest.fn()} onAdd={onAdd} />);
+    await act(async () => fireEvent.press(screen.getByTestId('add-friend-tab-scan')));
+    await act(async () =>
+      fireEvent(screen.getByTestId('profile-scanner'), 'barcodeScanned', { data }),
+    );
+    // No "Pay alice@…" prompt for an add-friend action; addContact fails locally.
+    expect(Alert.alert).not.toHaveBeenCalled();
+    expect(onAdd).toHaveBeenCalledWith(data);
+    expect(screen.getByText('Invalid npub or public key')).toBeTruthy();
+  },
+);

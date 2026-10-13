@@ -3325,5 +3325,17 @@
     "trackingError": "Az állapot átmenetileg nem érhető el. Nyisd meg újra az Áthelyezést; ne hozz létre ismételt fizetést.",
     "refundDetails": "Privát visszatérítési adatok másolása",
     "newSwap": "Új váltás"
+  },
+  "linkAction": {
+    "title": "Hivatkozás műveletének megerősítése",
+    "cancel": "Mégse",
+    "continue": "Folytatás",
+    "withdrawButton": "Felvétel",
+    "withdrawSats": "%{amount} sats felvétele",
+    "withdraw": "Felvétel innen: %{target}",
+    "pay": "Fizetés: %{target}",
+    "profile": "Profil megnyitása: %{target}",
+    "open": "Lightning-hivatkozás megnyitása innen: %{target}",
+    "memo": "Megjegyzés (a számlából)"
   }
 }

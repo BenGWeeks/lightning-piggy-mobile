@@ -10,13 +10,12 @@
  * presented as a bottom sheet over whatever screen the user is on rather than
  * a full-screen page.
  *
- * Flow: resolve LUD-03 → fixed-amount (min === max) auto-claims; variable
- * (min < max) shows an amount picker (editable amount + bold slider, default
- * max, fiat hint) and a destination-wallet chooser. Scanned vouchers always
- * require Redeem, including fixed amounts. → claim into the chosen
+ * Flow: confirm issuer → resolve LUD-03 → show amount and destination wallet
+ * → explicit Withdraw tap → claim into the chosen
  * Lightning wallet. On settle the app-root celebration fires and the sheet
  * auto-dismisses.
  */
+import { decodeLnurlWithdraw } from '../services/lnurlWithdrawService';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator, Keyboard, Platform } from 'react-native';
 import {
@@ -51,11 +50,18 @@ import { useLocale } from '../contexts/LocaleContext';
 let listener: ((lnurl: string, walletId?: string, requireConfirmation?: boolean) => void) | null =
   null;
 /** Open the global withdraw sheet for `lnurl`. Returns false if the host
- *  isn't mounted yet (cold launch race) so the caller can retry. */
+ *  isn't mounted yet (cold launch race) so the caller can retry.
+ *
+ *  `requireConfirmation` (default true) shows the "Withdraw from <host>"
+ *  consent step BEFORE the endpoint is fetched. Pass false ONLY when the
+ *  caller has already obtained consent for this exact link and resolved it
+ *  (the App deep-link router after `resolveLnurlDirection`) — the sheet then
+ *  starts resolving straight away. Either way the amount + Withdraw tap are
+ *  always required: nothing can auto-claim (#1500). */
 export function openLnurlWithdrawSheet(
   lnurl: string,
   walletId?: string,
-  requireConfirmation = false,
+  requireConfirmation = true,
 ): boolean {
   if (listener) {
     listener(lnurl, walletId, requireConfirmation);
@@ -66,6 +72,7 @@ export function openLnurlWithdrawSheet(
 
 type Stage =
   | { kind: 'idle' }
+  | { kind: 'confirm' }
   | { kind: 'resolving' }
   | { kind: 'ready'; params: LnurlWithdrawParams }
   | { kind: 'claiming' }
@@ -94,7 +101,6 @@ export function LnurlWithdrawHost(): React.ReactElement {
     [],
   );
 
-  const requireConfirmationRef = useRef(false);
   const [lnurl, setLnurl] = useState<string | null>(null);
   const [stage, setStage] = useState<Stage>({ kind: 'idle' });
   const [amountSats, setAmountSats] = useState<number>(0);
@@ -211,20 +217,21 @@ export function LnurlWithdrawHost(): React.ReactElement {
         setStage({ kind: 'error', reason: friendly ?? reason });
       }
     },
-    [selectedWalletId, makeInvoiceForWallet, expectPayment],
+    [selectedWalletId, makeInvoiceForWallet, expectPayment, t],
   );
 
   // Open + resolve when a deep-link fires.
   useEffect(() => {
-    listener = (url: string, walletId?: string, requireConfirmation = false) => {
+    listener = (url: string, walletId?: string, requireConfirmation = true) => {
       if (!mountedRef.current) return;
-      requireConfirmationRef.current = requireConfirmation;
       const preferredId = walletId ?? activeWalletId;
       setSelectedWalletId(
         lightningWallets.find((w) => w.id === preferredId)?.id ?? lightningWallets[0]?.id ?? null,
       );
       setLnurl(url);
-      setStage({ kind: 'resolving' });
+      // 'confirm' = host consent before any fetch; 'resolving' only when the
+      // caller already got consent for this link. The claim tap stays mandatory.
+      setStage({ kind: requireConfirmation ? 'confirm' : 'resolving' });
       sheetRef.current?.present();
     };
     return () => {
@@ -232,8 +239,7 @@ export function LnurlWithdrawHost(): React.ReactElement {
     };
   }, [activeWalletId, lightningWallets]);
 
-  // Resolve whenever a new lnurl is set. Fixed-amount → auto-claim; variable
-  // → show the picker.
+  // Resolve only after consent. Every amount requires a separate claim tap.
   useEffect(() => {
     if (!lnurl || stage.kind !== 'resolving') return;
     let cancelled = false;
@@ -258,17 +264,8 @@ export function LnurlWithdrawHost(): React.ReactElement {
           });
           return;
         }
-        // Variable amount → show the picker. Fixed amount (lo === hi) →
-        // auto-claim, BUT only when a wallet is connected; with no wallet fall
-        // through to the ready state so the picker's Add-wallet path shows
-        // instead of auto-claiming straight into a hard error (Copilot #341).
-        // Either way the voucher value is visible before a wallet is required.
-        if (lo < hi || !selectedWalletId || requireConfirmationRef.current) {
-          setAmountSats(hi);
-          setStage({ kind: 'ready', params });
-          return;
-        }
-        await handleClaim(params, hi, lnurl);
+        setAmountSats(hi);
+        setStage({ kind: 'ready', params });
       } catch (e) {
         if (cancelled || !mountedRef.current) return;
         const reason =
@@ -281,7 +278,7 @@ export function LnurlWithdrawHost(): React.ReactElement {
     return () => {
       cancelled = true;
     };
-  }, [lnurl, stage.kind, handleClaim, selectedWalletId]);
+  }, [lnurl, stage.kind, t]);
 
   // Tick the cooldown countdown each second while sleeping. Decrements the
   // `remaining` carried in the sleeping stage; stops at 0 (the user can then
@@ -341,6 +338,13 @@ export function LnurlWithdrawHost(): React.ReactElement {
     [],
   );
 
+  let issuerHost = '';
+  try {
+    issuerHost = lnurl ? new URL(decodeLnurlWithdraw(lnurl)).host : '';
+  } catch {
+    /* Resolve reports invalid inputs after consent. */
+  }
+
   const close = () => sheetRef.current?.dismiss();
 
   return (
@@ -387,6 +391,19 @@ export function LnurlWithdrawHost(): React.ReactElement {
           keyboardShouldPersistTaps="handled"
           testID="lnurl-withdraw-sheet"
         >
+          {(stage.kind === 'confirm' || stage.kind === 'ready') && (
+            <Text style={styles.title}>{t('linkAction.withdraw', { target: issuerHost })}</Text>
+          )}
+          {stage.kind === 'confirm' && (
+            <TouchableOpacity
+              style={styles.primaryButton}
+              testID="lnurl-withdraw-resolve-button"
+              accessibilityLabel={t('linkAction.continue')}
+              onPress={() => setStage({ kind: 'resolving' })}
+            >
+              <Text style={styles.primaryButtonText}>{t('linkAction.continue')}</Text>
+            </TouchableOpacity>
+          )}
           {(stage.kind === 'resolving' || stage.kind === 'claiming') && (
             <>
               <View style={styles.iconWrap}>
@@ -473,7 +490,7 @@ export function LnurlWithdrawHost(): React.ReactElement {
               >
                 <Gift size={20} color={colors.white} strokeWidth={2.5} />
                 <Text style={styles.primaryButtonText}>
-                  {t('lnurlWithdrawSheet.redeemSats', {
+                  {t('linkAction.withdrawSats', {
                     amount: amountSats.toLocaleString(formatLocale),
                   })}
                 </Text>

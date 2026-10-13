@@ -3365,5 +3365,17 @@
     "trackingError": "Status jest chwilowo niedostępny. Otwórz ponownie Przenieś; nie twórz drugiej płatności.",
     "refundDetails": "Kopiuj prywatne dane zwrotu",
     "newSwap": "Nowa wymiana"
+  },
+  "linkAction": {
+    "title": "Potwierdź działanie linku",
+    "cancel": "Anuluj",
+    "continue": "Kontynuuj",
+    "withdrawButton": "Wypłać",
+    "withdrawSats": "Wypłać %{amount} sats",
+    "withdraw": "Wypłać z %{target}",
+    "pay": "Zapłać do %{target}",
+    "profile": "Otwórz profil %{target}",
+    "open": "Otwórz link Lightning z %{target}",
+    "memo": "Notatka (z faktury)"
   }
 }

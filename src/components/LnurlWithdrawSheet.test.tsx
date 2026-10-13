@@ -82,8 +82,12 @@ it('requires redemption after scanning a fixed voucher and invoices the chosen w
   await act(async () => {
     openLnurlWithdrawSheet('lnurlw://example.com/voucher', 'first', true);
   });
+  expect(mockResolve).not.toHaveBeenCalled();
   expect(mockClaim).not.toHaveBeenCalled();
   expect(mockMakeInvoice).not.toHaveBeenCalled();
+  await act(async () => fireEvent.press(screen.getByTestId('lnurl-withdraw-resolve-button')));
+  expect(mockResolve).toHaveBeenCalledTimes(1);
+  expect(mockClaim).not.toHaveBeenCalled();
   await act(async () => {
     fireEvent.press(screen.getByTestId('lnurl-withdraw-claim-button'));
   });
@@ -95,6 +99,10 @@ it('defaults deep-link claims to the active Lightning wallet', async () => {
   await act(async () => {
     openLnurlWithdrawSheet('lnurlw://example.com/voucher');
   });
+  expect(mockMakeInvoice).not.toHaveBeenCalled();
+  await act(async () => fireEvent.press(screen.getByTestId('lnurl-withdraw-resolve-button')));
+  expect(mockMakeInvoice).not.toHaveBeenCalled();
+  await act(async () => fireEvent.press(screen.getByTestId('lnurl-withdraw-claim-button')));
   expect(mockMakeInvoice).toHaveBeenCalledWith('active', 21, 'Voucher');
 });
 
@@ -104,6 +112,7 @@ it('does not mint an invoice when a scanned voucher cannot resolve', async () =>
   await act(async () => {
     openLnurlWithdrawSheet('lnurlw://example.com/expired', 'first', true);
   });
+  await act(async () => fireEvent.press(screen.getByTestId('lnurl-withdraw-resolve-button')));
   expect(mockMakeInvoice).not.toHaveBeenCalled();
   expect(mockClaim).not.toHaveBeenCalled();
   expect(screen.queryByTestId('lnurl-withdraw-claim-button')).toBeNull();
@@ -115,14 +124,44 @@ it('resolves the same voucher again after dismissing and reopening, with confirm
   await act(async () => {
     openLnurlWithdrawSheet(voucher, 'first', true);
   });
+  await act(async () => fireEvent.press(screen.getByTestId('lnurl-withdraw-resolve-button')));
   expect(screen.getByTestId('lnurl-withdraw-claim-button')).toBeTruthy();
   act(() => mockDismiss!());
   expect(screen.queryByTestId('lnurl-withdraw-claim-button')).toBeNull();
   await act(async () => {
     openLnurlWithdrawSheet(voucher, 'active', true);
   });
+  expect(mockResolve).toHaveBeenCalledTimes(1);
+  await act(async () => fireEvent.press(screen.getByTestId('lnurl-withdraw-resolve-button')));
   expect(mockResolve).toHaveBeenCalledTimes(2);
   expect(mockClaim).not.toHaveBeenCalled();
   await act(async () => fireEvent.press(screen.getByTestId('lnurl-withdraw-claim-button')));
   expect(mockMakeInvoice).toHaveBeenCalledWith('active', 21, 'Voucher');
+});
+
+it('dismisses an unopened voucher without any resolution or invoice creation', async () => {
+  render(<LnurlWithdrawHost />);
+  act(() => openLnurlWithdrawSheet('lnurlw://example.com/voucher', 'first'));
+  expect(mockResolve).not.toHaveBeenCalled();
+  act(() => mockDismiss!());
+  expect(mockResolve).not.toHaveBeenCalled();
+  expect(mockClaim).not.toHaveBeenCalled();
+  expect(mockMakeInvoice).not.toHaveBeenCalled();
+});
+
+it('skips only the host step for an already-consented caller; the claim tap stays mandatory', async () => {
+  render(<LnurlWithdrawHost />);
+  await act(async () => {
+    openLnurlWithdrawSheet('lnurlw://example.com/voucher', 'first', false);
+  });
+  // No duplicate consent prompt — the caller (App deep-link router) already
+  // showed the host — but the endpoint is only resolved, never claimed.
+  expect(screen.queryByTestId('lnurl-withdraw-resolve-button')).toBeNull();
+  expect(mockResolve).toHaveBeenCalledTimes(1);
+  expect(screen.getByText('linkAction.withdraw')).toBeTruthy();
+  expect(screen.getByTestId('lnurl-withdraw-amount-input').props.value).toBe('21');
+  expect(mockClaim).not.toHaveBeenCalled();
+  expect(mockMakeInvoice).not.toHaveBeenCalled();
+  await act(async () => fireEvent.press(screen.getByTestId('lnurl-withdraw-claim-button')));
+  expect(mockClaim).toHaveBeenCalledTimes(1);
 });

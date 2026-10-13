@@ -48,6 +48,7 @@ import {
 } from '../utils/reverseSwapSend';
 import { quoteExactRecipient, formatRecipientFee } from '../utils/reverseSwapAmounts';
 import { reverseSwapAmountBounds, shortOnchainAddress } from '../utils/onchainSwapSend';
+import { paymentRecipientLabel } from '../utils/paymentIdentity';
 import SendOnchainFeeRow from './SendOnchainFeeRow';
 import { npubEncode } from '../services/nostrService';
 import { recordOutgoing as recordOutgoingCounterparty } from '../services/zapCounterpartyStorage';
@@ -57,6 +58,7 @@ import { useSendProgressOverlay } from '../hooks/useSendProgressOverlay';
 import { isReverseSwapNotPaid } from '../utils/swapHandoff';
 import AmountEntryScreen from './AmountEntryScreen';
 import SendAmountSection from './SendAmountSection';
+import SendPaymentIdentity from './SendPaymentIdentity';
 import SendModeTabs from './SendModeTabs';
 import SendNfcPane from './SendNfcPane';
 import SendScanPane from './SendScanPane';
@@ -201,6 +203,16 @@ const SendSheet: React.FC<Props> = ({
   const needsAmount =
     scanned &&
     (isLightningAddress(invoiceData || '') || isOnchainAddress || isAmountlessBolt11 || isLnurl);
+  const recipientLabel = isOnchainAddress
+    ? shortOnchainAddress(invoiceData || '')
+    : paymentRecipientLabel({
+        address: isLightningAddress(invoiceData || '') ? invoiceData : null,
+        lnurl: isLnurl ? invoiceData : null,
+        pubkey: activePubkey,
+        contacts,
+        nodePubkey: decoded?.nodePubkey,
+        unknownLabel: t('sendSheet.thisRecipient'),
+      });
   const currentSats = parseInt(satsValue) || 0;
 
   const selectedWalletId = capturedWalletId ?? activeWalletId;
@@ -242,6 +254,36 @@ const SendSheet: React.FC<Props> = ({
     [onchainViaBoltz, boltzFees, walletBalance],
   );
 
+  const {
+    acceptVettedInput,
+    resetInputForOpen,
+    handleBarCodeScanned,
+    handleNfcContent,
+    handlePaste,
+    handlePasteSubmit,
+  } = useSendSheetInput({
+    visible,
+    targetKey: JSON.stringify([
+      initialAddress,
+      initialPicture,
+      recipientPubkey,
+      recipientName,
+      zapEventId,
+    ]),
+    scanned,
+    pasteTextRef,
+    activePubkey,
+    recipientName,
+    applyPasteText,
+    onInvalidInvoice: () => selectInputMode('paste'),
+    setIsOnchainAddress,
+    setIsLnurl,
+    setInvoiceData,
+    setDecoded,
+    setScanned,
+    setSatsValue,
+  });
+
   useEffect(() => {
     openSessionRef.current += 1;
     if (visible) {
@@ -270,13 +312,12 @@ const SendSheet: React.FC<Props> = ({
       setActivePicture(initialPicture);
       bottomSheetRef.current?.present();
       if (initialAddress) {
-        // Use setTimeout to process after state reset. The sheet stays mounted
-        // across opens, so the cleanup cancels it on close/unmount and the
-        // session check drops it if it still fires after a reopen — a stale
-        // prefill must never overwrite the next open's target.
+        // Deferred past the state reset; cleanup + session check drop a stale
+        // prefill on close/reopen. Vetted: the target is an in-app contact or a
+        // deep link App.tsx already confirmed, so no consent sheet here (#1500).
         const session = openSessionRef.current;
         const prefill = setTimeout(() => {
-          if (openSessionRef.current === session) processInput(initialAddress);
+          if (openSessionRef.current === session) acceptVettedInput(initialAddress);
         }, 0);
         return () => clearTimeout(prefill);
       }
@@ -293,11 +334,12 @@ const SendSheet: React.FC<Props> = ({
   useEffect(() => {
     if (!visible) return;
     const handler = BackHandler.addEventListener('hardwareBackPress', () => {
+      resetInputForOpen();
       onClose();
       return true;
     });
     return () => handler.remove();
-  }, [visible, onClose]);
+  }, [visible, onClose, resetInputForOpen]);
 
   // Mirror latest pasteText / invoiceData into refs so handleEditAddress reads the submitted value without closing over it — keeping the callback (and onResolveError) reference-stable so useSendSheetLnurl's effects can depend on it without re-firing on keystrokes (Copilot #872). invoiceDataRef is synced in render so it is current before any failure callback.
   // (pasteTextRef is declared above, before useSendInputMode, and written only by its setters.)
@@ -316,13 +358,14 @@ const SendSheet: React.FC<Props> = ({
   const memoRef = useRef(memo);
   memoRef.current = memo;
 
-  // Fix-in-place recovery (#871): return to the paste/input step with the bad
-  // value RETAINED (unlike handleReset, which blanks it) so a one-char typo
-  // can be corrected without retyping the whole address. Unwinds the
-  // resolved/scanned state but keeps pasteText / activePubkey. Reads the live
-  // submitted value via refs so the callback identity stays stable (see above).
+  // Fix-in-place recovery (#871): back to the paste/input step with the bad
+  // value RETAINED (handleReset blanks it) so a one-char typo can be fixed
+  // without retyping. Unwinds resolved/scanned state, keeps the editable text,
+  // and reads the submitted value via refs so the callback identity stays stable.
   const handleEditAddress = useCallback(() => {
     const prefill = editAddressPrefill(pasteTextRef.current, invoiceDataRef.current);
+    setActivePubkey(undefined);
+    setActivePicture(undefined);
     setInvoiceData(null);
     setDecoded(null);
     setScanned(false);
@@ -365,31 +408,6 @@ const SendSheet: React.FC<Props> = ({
     onResolveError: handleResolveError,
   });
 
-  // Input-intake: classify a scanned/pasted/typed target and drive decoded-send
-  // state. Extracted to keep SendSheet under the file-size cap — see
-  // useSendSheetInput (mirrors useSendSheetLnurl above).
-  const {
-    processInput,
-    resetInputForOpen,
-    handleBarCodeScanned,
-    handleNfcContent,
-    handlePaste,
-    handlePasteSubmit,
-  } = useSendSheetInput({
-    scanned,
-    pasteTextRef,
-    activePubkey,
-    recipientName,
-    applyPasteText,
-    onInvalidInvoice: () => selectInputMode('paste'),
-    setIsOnchainAddress,
-    setIsLnurl,
-    setInvoiceData,
-    setDecoded,
-    setScanned,
-    setSatsValue,
-  });
-
   const handleSend = async () => {
     if (!invoiceData) return;
     // Read the memo from its ref, not state: the memo field is uncontrolled and
@@ -406,12 +424,7 @@ const SendSheet: React.FC<Props> = ({
     const confirmed = await confirmLargeSend({
       amountSats: decodedAmount > 0 ? decodedAmount : currentSats,
       // Name the destination itself — never the "Send to on-chain address" label.
-      recipient: isOnchainAddress
-        ? shortOnchainAddress(invoiceData)
-        : recipientName ||
-          (isLightningAddress(invoiceData) ? invoiceData : null) ||
-          decoded?.description ||
-          t('sendSheet.thisRecipient'),
+      recipient: recipientLabel,
       swapQuote,
     });
     if (!confirmed) return;
@@ -692,9 +705,12 @@ const SendSheet: React.FC<Props> = ({
 
   const handleSheetChange = useCallback(
     (index: number) => {
-      if (index === -1) onClose();
+      if (index === -1) {
+        resetInputForOpen();
+        onClose();
+      }
     },
-    [onClose],
+    [onClose, resetInputForOpen],
   );
 
   const renderBackdrop = useCallback(
@@ -831,9 +847,11 @@ const SendSheet: React.FC<Props> = ({
                       autoplay={false}
                     />
                   )}
-                  {decoded?.description ? (
-                    <Text style={styles.detailDescription}>{decoded.description}</Text>
-                  ) : null}
+                  <SendPaymentIdentity
+                    recipient={recipientLabel}
+                    memo={decoded?.description}
+                    styles={styles}
+                  />
 
                   <SendAmountSection
                     needsAmount={needsAmount}
@@ -949,6 +967,7 @@ const SendSheet: React.FC<Props> = ({
                 sending={sending}
                 handleSend={handleSend}
                 onCancel={() => {
+                  resetInputForOpen();
                   handleReset();
                   onClose();
                 }}

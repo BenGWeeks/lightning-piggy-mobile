@@ -3325,5 +3325,17 @@
     "trackingError": "El estado no está disponible temporalmente. Vuelve a abrir Mover; no crees un pago duplicado.",
     "refundDetails": "Copiar datos privados de reembolso",
     "newSwap": "Nuevo intercambio"
+  },
+  "linkAction": {
+    "title": "Confirmar acción del enlace",
+    "cancel": "Cancelar",
+    "continue": "Continuar",
+    "withdrawButton": "Retirar",
+    "withdrawSats": "Retirar %{amount} sats",
+    "withdraw": "Retirar de %{target}",
+    "pay": "Pagar a %{target}",
+    "profile": "Abrir perfil %{target}",
+    "open": "Abrir enlace Lightning de %{target}",
+    "memo": "Nota (de la factura)"
   }
 }

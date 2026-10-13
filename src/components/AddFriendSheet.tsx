@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   Platform,
 } from 'react-native';
 import { Alert } from './BrandedAlert';
+import { confirmLinkAction, looksLikeProfileReference } from '../utils/confirmLinkAction';
 import {
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
@@ -42,6 +43,22 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
   const [scanError, setScanError] = useState<string | null>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
 
+  const scanSession = useRef(0);
+  const scanPending = useRef(false);
+  useLayoutEffect(() => {
+    scanSession.current += 1;
+    scanPending.current = false;
+    return () => {
+      scanSession.current += 1;
+      scanPending.current = false;
+    };
+  }, [visible]);
+  const handleClose = useCallback(() => {
+    scanSession.current += 1;
+    scanPending.current = false;
+    onClose();
+  }, [onClose]);
+
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
@@ -57,6 +74,7 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
 
   useEffect(() => {
     if (visible) {
+      setLoading(false);
       setInputValue('');
       setMode('paste');
       setScanned(false);
@@ -70,11 +88,11 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
   useEffect(() => {
     if (!visible) return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      onClose();
+      handleClose();
       return true;
     });
     return () => sub.remove();
-  }, [visible, onClose]);
+  }, [visible, handleClose]);
 
   const renderBackdrop = useCallback(
     (props: BottomSheetBackdropProps) => (
@@ -96,18 +114,38 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
     if (success) onClose();
   };
 
-  const handleBarCodeScanned = async ({ data }: { data: string }) => {
-    if (scanned || loading) return;
+  const handleBarCodeScanned = ({ data }: { data: string }) => {
+    if (!visible || scanned || loading || scanPending.current) return;
+    const session = scanSession.current;
+    const isCurrent = () => session === scanSession.current;
+    scanPending.current = true;
     setScanned(true);
     setScanError(null);
-    setLoading(true);
-    const success = await onAdd(data.trim());
-    setLoading(false);
-    if (success) {
-      onClose();
-    } else {
-      setScanError(t('addFriendSheet.invalidNpub'));
+    const add = () => {
+      if (!isCurrent()) return;
+      void (async () => {
+        setLoading(true);
+        const success = await onAdd(data.trim());
+        if (!isCurrent()) return;
+        scanPending.current = false;
+        setLoading(false);
+        if (success) handleClose();
+        else setScanError(t('addFriendSheet.invalidNpub'));
+      })();
+    };
+    // Only a profile-shaped payload leads anywhere (follow + kind-0 fetch), so
+    // only that gets the "Open profile npub…" consent. Anything else is rejected
+    // locally by `onAdd` (addContact decodes npub/hex, no network) — showing a
+    // "Pay …" consent for a payment QR here would mis-describe the action.
+    if (!looksLikeProfileReference(data)) {
+      add();
+      return;
     }
+    confirmLinkAction(data, add, () => {
+      if (!isCurrent()) return;
+      scanPending.current = false;
+      setScanned(false);
+    });
   };
 
   const handleScanMode = async () => {
@@ -127,7 +165,7 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
   return (
     <BottomSheetModal
       ref={sheetRef}
-      onDismiss={onClose}
+      onDismiss={handleClose}
       backdropComponent={renderBackdrop}
       backgroundStyle={styles.sheetBackground}
       handleIndicatorStyle={styles.handleIndicator}

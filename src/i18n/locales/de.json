@@ -3325,5 +3325,17 @@
     "trackingError": "Status vorübergehend nicht verfügbar. Öffne Verschieben erneut; erstelle keine doppelte Zahlung.",
     "refundDetails": "Private Erstattungsdaten kopieren",
     "newSwap": "Neuer Swap"
+  },
+  "linkAction": {
+    "title": "Link-Aktion bestätigen",
+    "cancel": "Abbrechen",
+    "continue": "Weiter",
+    "withdrawButton": "Abheben",
+    "withdrawSats": "%{amount} sats abheben",
+    "withdraw": "Von %{target} abheben",
+    "pay": "An %{target} zahlen",
+    "profile": "Profil %{target} öffnen",
+    "open": "Lightning-Link von %{target} öffnen",
+    "memo": "Notiz (aus der Rechnung)"
   }
 }

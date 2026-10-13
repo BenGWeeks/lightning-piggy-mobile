@@ -1,7 +1,15 @@
-import { useRef, type Dispatch, type RefObject, type SetStateAction } from 'react';
+import {
+  useCallback,
+  useLayoutEffect,
+  useRef,
+  type Dispatch,
+  type RefObject,
+  type SetStateAction,
+} from 'react';
 import * as Clipboard from 'expo-clipboard';
 import { Alert } from '../components/BrandedAlert';
 import { useTranslation } from '../contexts/LocaleContext';
+import { confirmLinkAction } from '../utils/confirmLinkAction';
 import { parseBip21 } from '../utils/bip21';
 import {
   type DecodedInvoice,
@@ -29,6 +37,8 @@ import type { NfcTagContent } from '../services/nfcService';
  */
 export function useSendSheetInput(opts: {
   scanned: boolean;
+  visible?: boolean;
+  targetKey?: string;
   // Ref (not a plain value) holding the freshest paste-field string. The field is
   // uncontrolled, so its onChangeText writes the native text into this ref
   // synchronously; reading `.current` at submit time avoids the one-render lag a
@@ -48,6 +58,7 @@ export function useSendSheetInput(opts: {
   setSatsValue: (v: string) => void;
 }): {
   processInput: (data: string) => void;
+  acceptVettedInput: (data: string) => void;
   resetInputForOpen: () => void;
   handleBarCodeScanned: (e: { data: string }) => void;
   handleNfcContent: (content: NfcTagContent) => void;
@@ -57,8 +68,6 @@ export function useSendSheetInput(opts: {
   const {
     scanned,
     pasteTextRef,
-    activePubkey,
-    recipientName,
     applyPasteText,
     onInvalidInvoice,
     setIsOnchainAddress,
@@ -70,12 +79,24 @@ export function useSendSheetInput(opts: {
   } = opts;
   const t = useTranslation();
   const invalidInvoiceAlertVisible = useRef(false);
+  const linkConfirmationVisible = useRef(false);
+  const sessionRef = useRef(0);
+  useLayoutEffect(() => {
+    sessionRef.current += 1;
+    invalidInvoiceAlertVisible.current = false;
+    linkConfirmationVisible.current = false;
+    return () => {
+      sessionRef.current += 1;
+    };
+  }, [opts.visible, opts.targetKey]);
 
   // A new Send session starts with intake open. The sheet stays mounted, so a
   // guard left set by an alert that never settled must not carry over.
-  const resetInputForOpen = () => {
+  const resetInputForOpen = useCallback(() => {
+    sessionRef.current += 1;
     invalidInvoiceAlertVisible.current = false;
-  };
+    linkConfirmationVisible.current = false;
+  }, []);
 
   const rejectInvoiceInput = (input: string, titleKey: string, bodyKey: string) => {
     setInvoiceData(null);
@@ -91,7 +112,9 @@ export function useSendSheetInput(opts: {
     // A camera can deliver the same bad QR on every frame. Keep one alert
     // visible, then allow another attempt when the user dismisses it.
     invalidInvoiceAlertVisible.current = true;
+    const session = sessionRef.current;
     const dismiss = () => {
+      if (session !== sessionRef.current) return;
       invalidInvoiceAlertVisible.current = false;
     };
     Alert.alert(
@@ -102,7 +125,7 @@ export function useSendSheetInput(opts: {
     );
   };
 
-  const processInput = (data: string) => {
+  const acceptInput = (data: string) => {
     if (invalidInvoiceAlertVisible.current) return;
     let input = stripLightningPrefix(data);
     let bip21Amount: number | null = null;
@@ -118,23 +141,13 @@ export function useSendSheetInput(opts: {
       setIsOnchainAddress(false);
       setIsLnurl(false);
       setInvoiceData(input);
-      // Only use the caller-supplied friend name while we're still
-      // pointed at that friend (activePubkey set). After "Scan / paste
-      // different invoice" clears activePubkey, the next scanned address
-      // may be a stranger — fall back to the raw input string.
-      setDecoded({
-        amountSats: null,
-        description: t('sendSheet.payTo', {
-          name: activePubkey && recipientName ? recipientName : input,
-        }),
-        expiry: null,
-      });
+      setDecoded({ amountSats: null, description: null, expiry: null });
       setScanned(true);
     } else if (boltzService.isBitcoinAddress(input)) {
       setIsOnchainAddress(true);
       setIsLnurl(false);
       setInvoiceData(input);
-      setDecoded({ amountSats: null, description: t('sendSheet.sendToOnchain'), expiry: null });
+      setDecoded({ amountSats: null, description: null, expiry: null });
       setScanned(true);
       // Pre-fill amount from BIP-21 URI if present (fiat view is derived
       // inside AmountEntryScreen from satsValue when the user opens it).
@@ -177,6 +190,45 @@ export function useSendSheetInput(opts: {
     }
   };
 
+  // Caller-vetted targets skip the consent sheet: an in-app contact's address
+  // (Friends / zap / conversation send) or a deep link that App.tsx has ALREADY
+  // confirmed with the user. Prompting again would be pure friction and would
+  // make the consent sheet feel like noise. Scan / NFC / paste never use this —
+  // they go through `processInput`, which confirms first (#1500).
+  const acceptVettedInput = (data: string) => {
+    if (opts.visible === false) return;
+    acceptInput(data);
+  };
+
+  const processInput = (data: string) => {
+    if (
+      opts.visible === false ||
+      linkConfirmationVisible.current ||
+      invalidInvoiceAlertVisible.current
+    )
+      return;
+    // Reject malformed invoices locally without presenting an action confirmation.
+    const input = stripLightningPrefix(data);
+    if (/^ln/i.test(input) && !isLnurlString(input) && !decodeInvoice(input)) {
+      acceptInput(data);
+      return;
+    }
+    const session = sessionRef.current;
+    linkConfirmationVisible.current = true;
+    confirmLinkAction(
+      data,
+      () => {
+        if (session !== sessionRef.current) return;
+        linkConfirmationVisible.current = false;
+        acceptInput(data);
+      },
+      () => {
+        if (session !== sessionRef.current) return;
+        linkConfirmationVisible.current = false;
+      },
+    );
+  };
+
   const handleBarCodeScanned = ({ data }: { data: string }) => {
     if (scanned) return;
     processInput(data);
@@ -204,7 +256,9 @@ export function useSendSheetInput(opts: {
 
   const handlePaste = async () => {
     try {
+      const session = sessionRef.current;
       const clip = await Clipboard.getStringAsync();
+      if (session !== sessionRef.current || opts.visible === false) return;
       if (clip) {
         applyPasteText(clip);
         processInput(clip);
@@ -223,6 +277,7 @@ export function useSendSheetInput(opts: {
 
   return {
     processInput,
+    acceptVettedInput,
     resetInputForOpen,
     handleBarCodeScanned,
     handleNfcContent,

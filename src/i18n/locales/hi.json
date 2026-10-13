@@ -3325,5 +3325,17 @@
     "trackingError": "स्टेटस अभी उपलब्ध नहीं है। जाँचने के लिए मूव फिर खोलें; दोबारा भुगतान न बनाएँ।",
     "refundDetails": "निजी रिफंड विवरण कॉपी करें",
     "newSwap": "नया स्वैप"
+  },
+  "linkAction": {
+    "title": "लिंक की कार्रवाई की पुष्टि करें",
+    "cancel": "रद्द करें",
+    "continue": "जारी रखें",
+    "withdrawButton": "निकालें",
+    "withdrawSats": "%{amount} sats निकालें",
+    "withdraw": "%{target} से निकालें",
+    "pay": "%{target} को भुगतान करें",
+    "profile": "प्रोफ़ाइल %{target} खोलें",
+    "open": "%{target} का Lightning लिंक खोलें",
+    "memo": "मेमो (इनवॉइस से)"
   }
 }

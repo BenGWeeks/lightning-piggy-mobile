@@ -48,8 +48,6 @@ export function useSendSheetLnurl(opts: {
     scanned,
     invoiceData,
     isLnurl,
-    recipientName,
-    activePubkey,
     setLnurlParams,
     setDecoded,
     setResolving,
@@ -78,16 +76,10 @@ export function useSendSheetLnurl(opts: {
         if (!cancelled) {
           setLnurlParams(params);
           prefillFixedAmount(params);
-          // When we're still pointed at a named friend (activePubkey +
-          // recipientName both set), keep the friendly `Pay to <Name>`
-          // label. After "Scan / paste different invoice" clears
-          // activePubkey, let the LNURL server's metadata win again.
-          if (!(activePubkey && recipientName)) {
-            setDecoded((prev) => ({
-              ...prev!,
-              description: params.description || prev?.description || null,
-            }));
-          }
+          setDecoded((prev) => ({
+            ...prev!,
+            description: params.description || null,
+          }));
         }
       } catch (error) {
         if (!cancelled) {
@@ -107,7 +99,7 @@ export function useSendSheetLnurl(opts: {
     };
     // onResolveError is caller-stabilised (useCallback); listing it avoids a stale-closure prefill without re-firing on keystrokes. Disable still covers the stable setters + per-render prefillFixedAmount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scanned, invoiceData, recipientName, activePubkey, onResolveError]);
+  }, [scanned, invoiceData, onResolveError]);
 
   // Resolve a raw LNURL string when scanned/pasted. Unlike a lightning
   // address (always LNURL-pay), a bech32 `lnurl1…` / cleartext `lnurlp://`
