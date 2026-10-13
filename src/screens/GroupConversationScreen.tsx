@@ -398,7 +398,15 @@ const GroupConversationScreen: React.FC = () => {
     timelineRowId,
     0.1,
   );
-  const tools = useGroupChatTools(messages, group, members, groupDevices, scrollToId, clear);
+  const tools = useGroupChatTools(
+    messages,
+    group,
+    members,
+    groupDevices,
+    scrollToId,
+    clear,
+    live.leaveEdge,
+  );
   const read = useChatReadPosition({
     owner: myPubkey,
     conversationKey: loadedGroupId ? groupReadKey(loadedGroupId) : null,

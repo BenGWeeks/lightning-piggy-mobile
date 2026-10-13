@@ -11,16 +11,24 @@ export function useChatTools(
   target: RootStackParamList['ChatMedia']['target'],
   jump: (id: string) => unknown,
   clear: () => Promise<void>,
+  leaveEdge: (holdMs: number) => void,
 ) {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute();
-  const search = useChatSearch(messages, jump);
+  const jumpToHistory = useCallback(
+    (id: string) => {
+      leaveEdge(1500);
+      return jump(id);
+    },
+    [leaveEdge, jump],
+  );
+  const search = useChatSearch(messages, jumpToHistory);
   const pending = (route.params as { jumpToMessage?: string })?.jumpToMessage;
   useEffect(() => {
     if (pending && messages.some((m) => m.id === pending)) {
-      if (jump(pending)) navigation.setParams({ jumpToMessage: undefined });
+      if (jumpToHistory(pending)) navigation.setParams({ jumpToMessage: undefined });
     }
-  }, [pending, messages, jump, navigation]);
+  }, [pending, messages, jumpToHistory, navigation]);
   const onInfo = useCallback(() => navigation.navigate('ChatInfo', info), [navigation, info]);
   const onAttachments = useCallback(
     () => navigation.navigate('ChatMedia', { messages, target }),

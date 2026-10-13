@@ -26,23 +26,6 @@ function labelOf(url: string): string {
 export function extractChatAttachments(messages: readonly SearchableMessage[]): ChatAttachment[] {
   const out: ChatAttachment[] = [];
   for (const m of messages) {
-    const image = parseImageMessage(m.text);
-    const voice = parseVoiceNote(m.text);
-    const gif = extractGifUrl(m.text);
-    if (image || voice || gif) {
-      const url = image?.url ?? voice?.url ?? gif!;
-      out.push({
-        id: `${m.id}:0`,
-        messageId: m.id,
-        createdAt: m.createdAt,
-        tab: 'media',
-        kind: voice ? 'voice' : 'image',
-        url,
-        label: labelOf(url),
-        image: image ?? (gif ? { url: gif, mime: 'image/gif', encrypted: false } : undefined),
-      });
-      continue;
-    }
     const seen = new Set<string>();
     for (const match of m.text.matchAll(URLS)) {
       const raw = match[0].replace(/[.,;!?\])}]+$/, '');
@@ -56,8 +39,9 @@ export function extractChatAttachments(messages: readonly SearchableMessage[]): 
       }
       const inlineImage = parseImageMessage(raw);
       const inlineVoice = parseVoiceNote(raw);
-      if (inlineImage || inlineVoice) {
-        const url = inlineImage?.url ?? inlineVoice!.url;
+      const gif = extractGifUrl(raw);
+      if (inlineImage || inlineVoice || gif) {
+        const url = inlineImage?.url ?? inlineVoice?.url ?? gif!;
         out.push({
           id: `${m.id}:${seen.size - 1}`,
           messageId: m.id,
@@ -66,7 +50,8 @@ export function extractChatAttachments(messages: readonly SearchableMessage[]): 
           kind: inlineVoice ? 'voice' : 'image',
           url,
           label: labelOf(url),
-          image: inlineImage ?? undefined,
+          image:
+            inlineImage ?? (gif ? { url: gif, mime: 'image/gif', encrypted: false } : undefined),
         });
         continue;
       }

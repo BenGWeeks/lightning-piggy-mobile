@@ -14,6 +14,7 @@ export function useGroupChatTools(
   devices: ReturnType<typeof useGroupDevices>,
   jump: (id: string) => unknown,
   clear: () => Promise<void>,
+  leaveEdge: (holdMs: number) => void,
 ) {
   const info = useMemo<RootStackParamList['ChatInfo']>(
     () => ({
@@ -32,5 +33,5 @@ export function useGroupChatTools(
     () => ({ screen: 'GroupConversation' as const, params: { groupId: group?.id ?? '' } }),
     [group?.id],
   );
-  return useChatTools(messages, info, target, jump, clear);
+  return useChatTools(messages, info, target, jump, clear, leaveEdge);
 }

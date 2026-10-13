@@ -14,6 +14,7 @@ export function useDmChatTools(
   devices: ReturnType<typeof useDmDevices>,
   jump: (id: string) => unknown,
   clear: () => Promise<void>,
+  leaveEdge: (holdMs: number) => void,
 ) {
   const info = useMemo<RootStackParamList['ChatInfo']>(
     () => ({
@@ -34,5 +35,5 @@ export function useDmChatTools(
     [params, protocol],
   );
   const jumpToMessage = useCallback((id: string) => jump(`dm-${id}`), [jump]);
-  return useChatTools(messages, info, target, jumpToMessage, clear);
+  return useChatTools(messages, info, target, jumpToMessage, clear, leaveEdge);
 }

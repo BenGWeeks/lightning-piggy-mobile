@@ -613,6 +613,7 @@ const ConversationScreen: React.FC = () => {
     dmDevices,
     read.scrollToId,
     clear,
+    live.leaveEdge,
   );
   const goBack = useCallback(() => navigation.goBack(), [navigation]);
 
