@@ -164,3 +164,105 @@ it('withdraws a carried listing after an authenticated sold revision on another 
   expect(result.products).toEqual([]);
   expect(result.withdrawn).toEqual([`nostr-30402-${author}-book`]);
 });
+
+it.each([
+  ['hash', false],
+  ['hash', true],
+  ['signature', false],
+  ['signature', true],
+] as const)(
+  'does not persist a forged %s source, genuine arrives first: %s',
+  async (failure, genuineFirst) => {
+    const book = listing('book');
+    const forged = copy(book);
+    if (failure === 'hash') forged.content = 'tampered';
+    else forged.sig = '0'.repeat(128);
+    const genuineSource = genuineFirst ? SHOP : FAMILY;
+    const forgedSource = genuineFirst ? FAMILY : SHOP;
+    relays({ [forgedSource]: { listings: [forged] }, [genuineSource]: { listings: [book] } });
+    const initial = await fetchMarketListings(
+      [author],
+      genuineFirst ? [FAMILY, SHOP] : [SHOP, FAMILY],
+      new AbortController().signal,
+    );
+    expect(initial.products[0].listing?.seenOn).toEqual([genuineSource]);
+
+    // The forged source answers empty while the genuine source is offline.
+    relays({ [forgedSource]: {} });
+    const refreshed = await fetchMarketListings(
+      [author],
+      [SHOP, FAMILY],
+      new AbortController().signal,
+      undefined,
+      { carried: [book] },
+    );
+    expect(mergeMarketSnapshot(initial.products, refreshed)).toEqual(initial.products);
+  },
+);
+
+it.each(['sold', 'hidden', 'oversized'])(
+  'keeps a newer carried listing when another relay serves an older signed %s revision',
+  async (status) => {
+    const book = listing('book', 200);
+    const old = finalizeEvent(
+      {
+        kind: 30402,
+        created_at: 100,
+        content: status === 'oversized' ? 'x'.repeat(40000) : '',
+        tags: [
+          ['d', 'book'],
+          ['status', status],
+        ],
+      },
+      key,
+    );
+    relays({ [SHOP]: { listings: [old] } });
+    const result = await fetchMarketListings(
+      [author],
+      [SHOP, FAMILY],
+      new AbortController().signal,
+      undefined,
+      { carried: [book] },
+    );
+    expect(result.products).toEqual([]);
+    expect(result.withdrawn).toEqual([]);
+    const previous = parseMarketListing(book)!;
+    previous.listing!.seenOn = [FAMILY];
+    expect(mergeMarketSnapshot([previous], result)).toEqual([previous]);
+  },
+);
+
+it.each([true, false])(
+  'orders signed withdrawals against carried revisions by lowest id on timestamp ties: wins=%s',
+  async (wins) => {
+    const book = listing('book', 200);
+    let sold: Event;
+    for (let i = 0; ; i++) {
+      sold = finalizeEvent(
+        {
+          kind: 30402,
+          created_at: book.created_at,
+          content: `sold ${i}`,
+          tags: [
+            ['d', 'book'],
+            ['status', 'sold'],
+          ],
+        },
+        key,
+      );
+      if (sold.id < book.id === wins) break;
+    }
+    relays({ [SHOP]: { listings: [sold] } });
+    const result = await fetchMarketListings(
+      [author],
+      [SHOP, FAMILY],
+      new AbortController().signal,
+      undefined,
+      { carried: [book] },
+    );
+    expect(result.withdrawn).toEqual(wins ? [`nostr-30402-${author}-book`] : []);
+    const previous = parseMarketListing(book)!;
+    previous.listing!.seenOn = [FAMILY];
+    expect(mergeMarketSnapshot([previous], result)).toEqual(wins ? [] : [previous]);
+  },
+);

@@ -21,6 +21,7 @@ import {
 } from '../utils/marketListingsQuery';
 import { addressRefs, deletionFilters, idRefs } from '../utils/nip09';
 import { hasValidSignature } from '../utils/eventSignature';
+import { isNewerRevision } from '../utils/marketSellerRevision';
 import { startJsStallProbe } from '../utils/jsStallProbe';
 import { PERF_LOGS_ENABLED } from '../utils/perfLog';
 import { ROBOTECHY_PUBKEY } from '../utils/marketSample';
@@ -180,21 +181,46 @@ async function runSnapshot(
   // `verifyEventCached` skips the schnorr for ids already checked this
   // session, so a refetch doesn't pay for the snapshot again.
   const verified = verifyEventCached;
-  // Only authenticated revisions can rule out a carried listing. Relay
-  // provenance is collected before verification and is not withdrawal evidence.
-  const authenticatedListings = new Set<string>();
+  // Keep sources per payload AND signature until that candidate authenticates.
+  const candidateSources = new Map<string, Set<string>>();
+  const seenOn = new Map<string, Set<string>>();
+  const noteCandidateSource = (event: Event, url?: string) => {
+    if (!url || !MARKET_LISTING_KINDS.includes(event.kind)) return;
+    const key = `${event.id}:${event.sig}`;
+    const sources = candidateSources.get(key);
+    if (sources) sources.add(url);
+    else candidateSources.set(key, new Set([url]));
+  };
+  // Only an authenticated revision at least as recent as the carried one
+  // can rule it out. Signature validity alone does not establish ordering.
+  const authenticatedListings = new Map<string, Event>();
+  const carriedRevisions = new Map<string, Event>();
+  for (const event of carried) {
+    const d = event.tags.find((t) => t[0] === 'd')?.[1];
+    if (!d) continue;
+    const id = marketListingProductId(event.kind, event.pubkey, d);
+    if (isNewerRevision(event, carriedRevisions.get(id) ?? null)) carriedRevisions.set(id, event);
+  }
   const noteAuthenticatedListing = (event: Event) => {
     if (!MARKET_LISTING_KINDS.includes(event.kind)) return;
     const d = event.tags.find((t) => t[0] === 'd')?.[1];
     if (!d) return;
     try {
-      authenticatedListings.add(marketListingProductId(event.kind, event.pubkey, d));
+      const id = marketListingProductId(event.kind, event.pubkey, d);
+      if (isNewerRevision(event, authenticatedListings.get(id) ?? null))
+        authenticatedListings.set(id, event);
+      const sources = candidateSources.get(`${event.id}:${event.sig}`);
+      if (sources) {
+        const relays = seenOn.get(id);
+        if (relays) sources.forEach((url) => relays.add(url));
+        else seenOn.set(id, new Set(sources));
+      }
     } catch {
       // Malformed identifiers cannot name a renderable listing.
     }
   };
   const oversizedQueue: Event[] = [];
-  // Retain queued ids across both passes; at most MAX_OVERSIZED_CHECKS entries.
+  // Retain queued id/signature pairs across both passes; at most MAX_OVERSIZED_CHECKS entries.
   const oversizedIds = new Set<string>();
   let oversizedChecks = 0;
   const idMatches = (event: Event) => {
@@ -295,24 +321,15 @@ async function runSnapshot(
       scheduler.dispose();
     }
   };
-  // Product id -> relays that served any revision of it this round. Bounded
-  // by the listing budget (only addresses already in the snapshot grow it).
-  const seenOn = new Map<string, Set<string>>();
-  const noteSource = (event: Event, url: string) => {
-    if (!MARKET_LISTING_KINDS.includes(event.kind)) return;
-    const d = event.tags.find((t) => t[0] === 'd')?.[1];
-    if (!d) return;
-    const id = marketListingProductId(event.kind, event.pubkey, d);
-    const relays = seenOn.get(id);
-    if (relays) relays.add(url);
-    else if (seenOn.size < MAX_EVENTS) seenOn.set(id, new Set([url]));
-  };
   const ingest = (event: Event, url?: string) => {
     received++;
     if (!scope.has(event.pubkey) || event.created_at > Date.now() / 1000 + 300) return;
-    if (url) noteSource(event, url);
     if (event.content.length > 32768 || event.tags.length > 256) {
-      if (oversizedIds.has(event.id)) return;
+      const key = `${event.id}:${event.sig}`;
+      if (oversizedIds.has(key)) {
+        if (idMatches(event)) noteCandidateSource(event, url);
+        return;
+      }
       if (
         event.content.length > MAX_VERIFY_CHARS ||
         budgetFull(event.kind === 5) ||
@@ -328,13 +345,17 @@ async function runSnapshot(
         // Queued payloads share the event budget with ordinary candidates.
         if (event.kind === 5) deletionCount++;
         else listingCount++;
-        oversizedIds.add(event.id);
+        oversizedIds.add(key);
+        noteCandidateSource(event, url);
         oversizedQueue.push(event);
       }
       return;
     }
     const key = `${event.id}:${event.sig}`;
-    if (events.has(key)) return;
+    if (events.has(key)) {
+      if (idMatches(event)) noteCandidateSource(event, url);
+      return;
+    }
     const deletion = event.kind === 5;
     if (budgetFull(deletion)) {
       limited = true;
@@ -346,6 +367,7 @@ async function runSnapshot(
     // hash to its id is junk, so drop it now before it takes budget.
     if (!idMatches(event)) return;
     events.set(key, event);
+    noteCandidateSource(event, url);
     if (deletion) deletionCount++;
     else listingCount++;
   };
@@ -477,7 +499,15 @@ async function runSnapshot(
       withdrawn: signal.aborted
         ? []
         : [
-            ...[...authenticatedListings].filter((id) => !shown.has(id)),
+            ...[...authenticatedListings]
+              .filter(([id, event]) => {
+                const previous = carriedRevisions.get(id);
+                return (
+                  !shown.has(id) &&
+                  (!previous || event.id === previous.id || isNewerRevision(event, previous))
+                );
+              })
+              .map(([id]) => id),
             ...carriedWithdrawals(carried, [...events.values(), ...suppressions.values()], scope),
           ],
       // Unanswered passes or unchecked data. Reaching MAX_PRODUCTS is a deliberate display
