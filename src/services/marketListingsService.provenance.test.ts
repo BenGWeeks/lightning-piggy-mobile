@@ -330,3 +330,23 @@ it.each(['unavailable deletion', 'failed deletion checks', 'aborted'])(
     expect(mergeMarketSnapshot([previous], result)).toEqual([previous]);
   },
 );
+
+it.each(['forged first', 'genuine first'])(
+  'never records the relay of an oversized forged copy as provenance (%s)',
+  async (order) => {
+    const book = listing('book');
+    const forged = { ...copy(book), content: 'x'.repeat(40000) };
+    relays(
+      order === 'forged first'
+        ? { [FAMILY]: { listings: [forged] }, [SHOP]: { listings: [book] } }
+        : { [SHOP]: { listings: [book] }, [FAMILY]: { listings: [forged] } },
+    );
+    const result = await fetchMarketListings(
+      [author],
+      [FAMILY, SHOP],
+      new AbortController().signal,
+    );
+    expect(result.products).toHaveLength(1);
+    expect(result.products[0].listing?.seenOn).toEqual([SHOP]);
+  },
+);

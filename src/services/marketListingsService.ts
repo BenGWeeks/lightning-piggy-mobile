@@ -223,7 +223,10 @@ async function runSnapshot(
       // Malformed identifiers cannot name a renderable listing.
     }
   };
-  const oversizedQueue: Event[] = [];
+  // Each queued payload keeps the relay that served it; that relay is only
+  // recorded as a source once the payload verifies (a forged oversized copy
+  // must never become provenance for the genuine listing).
+  const oversizedQueue: { event: Event; url: string | undefined }[] = [];
   // Retain queued id/signature pairs across both passes; at most MAX_OVERSIZED_CHECKS entries.
   const oversizedIds = new Set<string>();
   let oversizedChecks = 0;
@@ -308,7 +311,7 @@ async function runSnapshot(
   const drainOversized = async () => {
     const scheduler = createYieldScheduler({ signal, safetyEvery: 32 });
     try {
-      for (const event of oversizedQueue) {
+      for (const { event, url: sourceUrl } of oversizedQueue) {
         await scheduler.maybeYield();
         if (signal.aborted) break;
         // Release the queued candidate's reserved slot before retaining its marker.
@@ -316,6 +319,7 @@ async function runSnapshot(
         else listingCount--;
         oversizedChecks++;
         if (verified(event)) {
+          noteCandidateSource(event, sourceUrl);
           noteAuthenticatedListing(event);
           suppressOversized(event);
         }
@@ -350,8 +354,7 @@ async function runSnapshot(
         if (event.kind === 5) deletionCount++;
         else listingCount++;
         oversizedIds.add(key);
-        noteCandidateSource(event, url);
-        oversizedQueue.push(event);
+        oversizedQueue.push({ event, url });
       }
       return;
     }
