@@ -1,8 +1,9 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import { Switch, Text, TouchableOpacity, View } from 'react-native';
 import { useLocale } from '../contexts/LocaleContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { localizedCountryName } from '../data/countries';
+import CountryPickerSheet from './CountryPickerSheet';
 import type { MarketFilterBarStyles } from '../styles/MarketFilterBar.styles';
 
 interface ChipProps {
@@ -43,8 +44,9 @@ const ShipsToChip = React.memo(function ShipsToChip({
 /**
  * "Ships to" section of the Market filter panel. Chips are the countries the
  * loaded listings' sellers publish shipping options for (phone's country
- * first — ordering is `shipsToOptions`'), led by Anywhere. With a country
- * picked, a toggle decides whether listings without shipping info stay.
+ * always offered first — ordering is `shipsToOptions`'), led by Anywhere.
+ * More countries opens the shared checkout picker. With a country picked,
+ * a toggle decides whether listings without shipping info stay.
  */
 export default function MarketShipsToFilter({
   countries,
@@ -63,6 +65,9 @@ export default function MarketShipsToFilter({
 }) {
   const colors = useThemeColors();
   const { t, locale } = useLocale();
+  const [pickerVisible, setPickerVisible] = useState(false);
+  const openPicker = useCallback(() => setPickerVisible(true), []);
+  const closePicker = useCallback(() => setPickerVisible(false), []);
   return (
     <View style={styles.section} testID="market-filter-shipsto">
       <Text style={styles.sectionLabel}>{t('market.filters.shipsTo')}</Text>
@@ -85,7 +90,23 @@ export default function MarketShipsToFilter({
             styles={styles}
           />
         ))}
+        <TouchableOpacity
+          style={styles.chip}
+          onPress={openPicker}
+          accessibilityRole="button"
+          accessibilityLabel={t('market.filters.moreCountries')}
+          testID="market-filter-shipsto-more"
+          activeOpacity={0.7}
+        >
+          <Text style={styles.chipText}>{t('market.filters.moreCountries')}</Text>
+        </TouchableOpacity>
       </View>
+      <CountryPickerSheet
+        visible={pickerVisible}
+        onClose={closePicker}
+        selectedCode={selected}
+        onSelect={onSelect}
+      />
       {selected !== null ? (
         <View style={styles.toggleRow}>
           <Text style={styles.toggleLabel}>{t('market.filters.includeUnknownShipping')}</Text>

@@ -4,6 +4,7 @@ import type { Palette } from './palettes';
 /** Styles for the Market's seller scope and category filter drawer. */
 export const createMarketFilterBarStyles = (colors: Palette) =>
   StyleSheet.create({
+    modalRoot: { flex: 1 },
     // ----- panel shell -----------------------------------------------------
     backdrop: {
       ...StyleSheet.absoluteFillObject,

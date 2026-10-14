@@ -2340,6 +2340,7 @@
       "merchant": "Merchant",
       "shipsTo": "Ships to",
       "anywhere": "Anywhere",
+      "moreCountries": "More countries…",
       "includeUnknownShipping": "Include listings without shipping info",
       "currency": "Currency",
       "satsChip": "sats",

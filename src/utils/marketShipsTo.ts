@@ -134,8 +134,8 @@ export function shipsToMatches(
 /**
  * The Ships-to chip codes: every country named by the loaded listings'
  * shipping data, sorted by display name, with the phone's region country
- * first when present. A saved selection no longer in the data is kept (after
- * the device country) so its chip can still be seen and cleared.
+ * always first, even if no listing names it. A saved selection no longer in
+ * the data is kept (after the device country) so it can be seen and cleared.
  */
 export function shipsToOptions(
   shipsTos: Iterable<ShipsTo>,
@@ -152,7 +152,10 @@ export function shipsToOptions(
   }
   const lead: string[] = [];
   const { deviceCountry, selected } = options;
-  if (deviceCountry && codes.delete(deviceCountry)) lead.push(deviceCountry);
+  if (deviceCountry) {
+    codes.delete(deviceCountry);
+    lead.push(deviceCountry);
+  }
   if (selected && !lead.includes(selected) && !codes.has(selected)) lead.push(selected);
   const rest = [...codes]
     .map((code) => ({ code, name: options.nameOf(code) }))

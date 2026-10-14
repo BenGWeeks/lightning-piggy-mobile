@@ -2342,6 +2342,7 @@
       "merchant": "Sprzedawca",
       "shipsTo": "Wysyłka do",
       "anywhere": "Dowolne miejsce",
+      "moreCountries": "Więcej krajów…",
       "includeUnknownShipping": "Uwzględnij oferty bez informacji o dostawie",
       "currency": "Waluta",
       "satsChip": "sats",

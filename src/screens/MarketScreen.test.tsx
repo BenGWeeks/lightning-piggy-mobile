@@ -5,6 +5,35 @@ import { act, fireEvent, render } from '@testing-library/react-native';
 import MarketScreen from './MarketScreen';
 import type { ExploreNavigation, MarketRoute } from '../navigation/types';
 
+jest.mock('@gorhom/bottom-sheet', () => ({
+  BottomSheetModalProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
+jest.mock('react-native-gesture-handler', () => ({
+  GestureHandlerRootView: jest.requireActual('react-native').View,
+}));
+jest.mock('../components/CountryPickerSheet', () => {
+  const { TouchableOpacity } = jest.requireActual('react-native');
+  return function MockCountryPicker({
+    visible,
+    onSelect,
+    onClose,
+  }: {
+    visible: boolean;
+    onSelect: (code: string) => void;
+    onClose: () => void;
+  }) {
+    return visible ? (
+      <TouchableOpacity
+        testID="country-picker-row-JP"
+        onPress={() => {
+          onSelect('JP');
+          onClose();
+        }}
+      />
+    ) : null;
+  };
+});
+
 jest.mock('../hooks/useCollectionFilter', () => ({
   useCollectionFilter: function useMockCollectionFilter(
     products: unknown[],
@@ -259,6 +288,27 @@ it('filters by Ships to from shipping data, with unknown shipping behind the inc
   expect(ids()).toEqual(['ships-gb', 'worldwide']);
   fireEvent.press(screen.getByTestId('market-filter-shipsto-anywhere'));
   expect(ids()).toEqual(['ships-gb', 'ships-de', 'worldwide', 'unknown']);
+});
+
+it('offers the phone country for worldwide sellers and keeps a picker selection as a chip', () => {
+  mockLiveProducts = [{ ...MARKET_PRODUCTS[0], id: 'worldwide' }];
+  mockShipsTo = new Map([['worldwide', { kind: 'anywhere', reason: 'worldwide' }]]);
+  const screen = render(<MarketScreen navigation={navigation} />);
+  fireEvent.press(screen.getByTestId('market-filter-button'));
+  expect(screen.getByTestId('market-filter-shipsto-GB')).toBeTruthy();
+  fireEvent.press(screen.getByTestId('market-filter-shipsto-more'));
+  fireEvent.press(screen.getByTestId('country-picker-row-JP'));
+  expect(screen.queryByTestId('country-picker-row-JP')).toBeNull();
+  expect(screen.getByTestId('market-filter-shipsto-JP').props.accessibilityState.selected).toBe(
+    true,
+  );
+  expect(mockUpdate).toHaveBeenCalledWith({ shipsTo: 'JP' });
+  fireEvent(screen.getByTestId('market-filter-shipsto-include-unknown'), 'valueChange', false);
+  expect(
+    screen.UNSAFE_getByType(FlatList).props.data.map((product: { id: string }) => product.id),
+  ).toEqual(['worldwide']);
+  fireEvent.press(screen.getByTestId('market-filter-shipsto-JP'));
+  expect(mockUpdate).toHaveBeenCalledWith({ shipsTo: null });
 });
 
 it('shows live preferred listings rather than the bundled catalogue', () => {

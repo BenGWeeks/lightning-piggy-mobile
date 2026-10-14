@@ -1,3 +1,5 @@
+import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import MarketMerchantFilter from './MarketMerchantFilter';
 import MarketShipsToFilter from './MarketShipsToFilter';
 import type { MarketMerchant } from '../utils/marketMerchants';
@@ -170,145 +172,149 @@ const MarketFilterBar: React.FC<Props> = ({
       onRequestClose={onClose}
       onShow={() => perfLog('[PerfBlock] market filter panel shown')}
     >
-      <Pressable style={styles.backdrop} onPress={onClose} testID="market-filter-backdrop" />
-      <Animated.View
-        style={[styles.panel, { width: panelWidth, transform: [{ translateX }] }]}
-        testID="market-filter-panel"
-      >
-        <View style={styles.panelHeader}>
-          <Text style={styles.panelTitle}>{t('market.filters.title')}</Text>
-          {active ? (
-            <TouchableOpacity
-              onPress={onClear}
-              accessibilityLabel={t('market.filters.clearAll')}
-              testID="market-filter-clear"
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Text style={styles.clearText}>{t('market.filters.clear')}</Text>
-            </TouchableOpacity>
-          ) : null}
-          <TouchableOpacity
-            onPress={onClose}
-            accessibilityLabel={t('market.filters.close')}
-            testID="market-filter-close"
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      <GestureHandlerRootView style={styles.modalRoot}>
+        <BottomSheetModalProvider>
+          <Pressable style={styles.backdrop} onPress={onClose} testID="market-filter-backdrop" />
+          <Animated.View
+            style={[styles.panel, { width: panelWidth, transform: [{ translateX }] }]}
+            testID="market-filter-panel"
           >
-            <X size={20} color={colors.textHeader} strokeWidth={2.5} />
-          </TouchableOpacity>
-        </View>
-
-        <ScrollView
-          style={styles.panelScroll}
-          contentContainerStyle={styles.panelScrollContent}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
-          <View style={styles.section} testID="market-filter-sellers">
-            <Text style={styles.sectionLabel}>{t('market.filters.sellers')}</Text>
-            {MARKET_MODE_OPTIONS.filter((option) => option.mode !== 'wotAll').map((option) => {
-              const selected = mode === option.mode;
-              const label = t(
-                option.mode === 'preferred'
-                  ? option.labelKey
-                  : option.mode === 'wotFriends'
-                    ? 'market.filters.friends'
-                    : 'market.filters.friendsOfFriends',
-              );
-              const id =
-                option.mode === 'preferred'
-                  ? 'preferred'
-                  : option.mode === 'wotFriends'
-                    ? 'friends'
-                    : 'friends-of-friends';
-              return (
+            <View style={styles.panelHeader}>
+              <Text style={styles.panelTitle}>{t('market.filters.title')}</Text>
+              {active ? (
                 <TouchableOpacity
-                  key={option.mode}
-                  style={[
-                    styles.sellerOption,
-                    selected && styles.chipSelected,
-                    !option.enabled && styles.sellerOptionDisabled,
-                  ]}
-                  onPress={() => {
-                    if (option.enabled) onSelectMode(option.mode);
-                  }}
-                  disabled={!option.enabled}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected, disabled: !option.enabled }}
-                  accessibilityLabel={
-                    option.enabled ? label : t('market.modes.comingSoon', { label })
-                  }
-                  testID={`market-filter-sellers-${id}`}
-                  activeOpacity={0.7}
+                  onPress={onClear}
+                  accessibilityLabel={t('market.filters.clearAll')}
+                  testID="market-filter-clear"
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
-                  <View style={styles.sellerCopy}>
-                    <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
-                      {label}
-                    </Text>
-                    {!option.enabled ? (
-                      <Text style={styles.sellerHint}>{t('market.filters.comingSoon')}</Text>
-                    ) : null}
-                  </View>
-                  {selected ? <Check size={18} color={colors.white} strokeWidth={2.5} /> : null}
+                  <Text style={styles.clearText}>{t('market.filters.clear')}</Text>
                 </TouchableOpacity>
-              );
-            })}
-          </View>
-          {merchants.length > 0 ? (
-            <MarketMerchantFilter
-              merchants={merchants}
-              selected={selectedMerchant}
-              onSelect={onSelectMerchant}
-            />
-          ) : null}
-
-          <MarketShipsToFilter
-            countries={shipsToCountries}
-            selected={selectedShipsTo}
-            onSelect={onSelectShipsTo}
-            includeUnknown={includeUnknownShipping}
-            onIncludeUnknownChange={onIncludeUnknownShippingChange}
-            styles={styles}
-          />
-
-          {/* Currency */}
-          {currencies.length > 0 ? (
-            <View style={styles.section} testID="market-filter-currencies">
-              <Text style={styles.sectionLabel}>{t('market.filters.currency')}</Text>
-              <View style={styles.chipWrap}>
-                <Chip
-                  label={t('market.filters.all')}
-                  selected={selectedCurrency === null}
-                  onPress={() => onSelectCurrency(null)}
-                  testID="market-filter-currency-all"
-                  styles={styles}
-                />
-                {currencies.map((cur) => (
-                  <Chip
-                    key={cur}
-                    // Sats read as the app's lower-case "sats" unit; fiat
-                    // stays as its ISO code (EUR, GBP …).
-                    label={cur === SATS_CURRENCY_CODE ? t('market.filters.satsChip') : cur}
-                    selected={selectedCurrency === cur}
-                    onPress={() => onSelectCurrency(selectedCurrency === cur ? null : cur)}
-                    testID={`market-filter-currency-${cur}`}
-                    styles={styles}
-                  />
-                ))}
-              </View>
+              ) : null}
+              <TouchableOpacity
+                onPress={onClose}
+                accessibilityLabel={t('market.filters.close')}
+                testID="market-filter-close"
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <X size={20} color={colors.textHeader} strokeWidth={2.5} />
+              </TouchableOpacity>
             </View>
-          ) : null}
-        </ScrollView>
 
-        <TouchableOpacity
-          style={styles.doneButton}
-          onPress={onClose}
-          accessibilityLabel={t('market.filters.close')}
-          testID="market-filter-done"
-          activeOpacity={0.8}
-        >
-          <Text style={styles.doneText}>{t('market.filters.done')}</Text>
-        </TouchableOpacity>
-      </Animated.View>
+            <ScrollView
+              style={styles.panelScroll}
+              contentContainerStyle={styles.panelScrollContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              <View style={styles.section} testID="market-filter-sellers">
+                <Text style={styles.sectionLabel}>{t('market.filters.sellers')}</Text>
+                {MARKET_MODE_OPTIONS.filter((option) => option.mode !== 'wotAll').map((option) => {
+                  const selected = mode === option.mode;
+                  const label = t(
+                    option.mode === 'preferred'
+                      ? option.labelKey
+                      : option.mode === 'wotFriends'
+                        ? 'market.filters.friends'
+                        : 'market.filters.friendsOfFriends',
+                  );
+                  const id =
+                    option.mode === 'preferred'
+                      ? 'preferred'
+                      : option.mode === 'wotFriends'
+                        ? 'friends'
+                        : 'friends-of-friends';
+                  return (
+                    <TouchableOpacity
+                      key={option.mode}
+                      style={[
+                        styles.sellerOption,
+                        selected && styles.chipSelected,
+                        !option.enabled && styles.sellerOptionDisabled,
+                      ]}
+                      onPress={() => {
+                        if (option.enabled) onSelectMode(option.mode);
+                      }}
+                      disabled={!option.enabled}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected, disabled: !option.enabled }}
+                      accessibilityLabel={
+                        option.enabled ? label : t('market.modes.comingSoon', { label })
+                      }
+                      testID={`market-filter-sellers-${id}`}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.sellerCopy}>
+                        <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
+                          {label}
+                        </Text>
+                        {!option.enabled ? (
+                          <Text style={styles.sellerHint}>{t('market.filters.comingSoon')}</Text>
+                        ) : null}
+                      </View>
+                      {selected ? <Check size={18} color={colors.white} strokeWidth={2.5} /> : null}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              {merchants.length > 0 ? (
+                <MarketMerchantFilter
+                  merchants={merchants}
+                  selected={selectedMerchant}
+                  onSelect={onSelectMerchant}
+                />
+              ) : null}
+
+              <MarketShipsToFilter
+                countries={shipsToCountries}
+                selected={selectedShipsTo}
+                onSelect={onSelectShipsTo}
+                includeUnknown={includeUnknownShipping}
+                onIncludeUnknownChange={onIncludeUnknownShippingChange}
+                styles={styles}
+              />
+
+              {/* Currency */}
+              {currencies.length > 0 ? (
+                <View style={styles.section} testID="market-filter-currencies">
+                  <Text style={styles.sectionLabel}>{t('market.filters.currency')}</Text>
+                  <View style={styles.chipWrap}>
+                    <Chip
+                      label={t('market.filters.all')}
+                      selected={selectedCurrency === null}
+                      onPress={() => onSelectCurrency(null)}
+                      testID="market-filter-currency-all"
+                      styles={styles}
+                    />
+                    {currencies.map((cur) => (
+                      <Chip
+                        key={cur}
+                        // Sats read as the app's lower-case "sats" unit; fiat
+                        // stays as its ISO code (EUR, GBP …).
+                        label={cur === SATS_CURRENCY_CODE ? t('market.filters.satsChip') : cur}
+                        selected={selectedCurrency === cur}
+                        onPress={() => onSelectCurrency(selectedCurrency === cur ? null : cur)}
+                        testID={`market-filter-currency-${cur}`}
+                        styles={styles}
+                      />
+                    ))}
+                  </View>
+                </View>
+              ) : null}
+            </ScrollView>
+
+            <TouchableOpacity
+              style={styles.doneButton}
+              onPress={onClose}
+              accessibilityLabel={t('market.filters.close')}
+              testID="market-filter-done"
+              activeOpacity={0.8}
+            >
+              <Text style={styles.doneText}>{t('market.filters.done')}</Text>
+            </TouchableOpacity>
+          </Animated.View>
+        </BottomSheetModalProvider>
+      </GestureHandlerRootView>
     </Modal>
   );
 };

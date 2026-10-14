@@ -9,9 +9,9 @@ import {
 import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import { Check } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useTranslation } from '../contexts/LocaleContext';
+import { useLocale } from '../contexts/LocaleContext';
 import { createCountryPickerSheetStyles } from '../styles/CountryPickerSheet.styles';
-import { COUNTRIES, type Country } from '../data/countries';
+import { COUNTRIES, localizedCountryName, type Country } from '../data/countries';
 
 interface Props {
   visible: boolean;
@@ -30,7 +30,7 @@ interface Props {
  */
 const CountryPickerSheet: React.FC<Props> = ({ visible, onClose, selectedCode, onSelect }) => {
   const colors = useThemeColors();
-  const t = useTranslation();
+  const { t, locale } = useLocale();
   const styles = useMemo(() => createCountryPickerSheetStyles(colors), [colors]);
   const sheetRef = useRef<BottomSheetModal>(null);
   const [search, setSearch] = useState('');
@@ -48,11 +48,20 @@ const CountryPickerSheet: React.FC<Props> = ({ visible, onClose, selectedCode, o
     }
   }, [visible]);
 
+  const countries = useMemo(
+    () =>
+      COUNTRIES.map((country) => ({
+        ...country,
+        name: localizedCountryName(country.code, locale),
+      })).sort((a, b) => a.name.localeCompare(b.name, locale)),
+    [locale],
+  );
+
   const filtered = useMemo(() => {
     const q = deferredSearch.trim().toLowerCase();
-    if (!q) return COUNTRIES;
-    return COUNTRIES.filter((c) => c.name.toLowerCase().includes(q) || c.code.toLowerCase() === q);
-  }, [deferredSearch]);
+    if (!q) return countries;
+    return countries.filter((c) => c.name.toLowerCase().includes(q) || c.code.toLowerCase() === q);
+  }, [deferredSearch, countries]);
 
   const renderBackdrop = useCallback(
     (props: BottomSheetBackdropProps) => (

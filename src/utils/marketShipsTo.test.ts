@@ -201,8 +201,9 @@ describe('shipsToOptions', () => {
     ]);
   });
 
-  it("doesn't invent a chip for the phone's country when nobody ships there", () => {
+  it("always offers the phone's country even when no listing names it", () => {
     expect(shipsToOptions(data, { deviceCountry: 'JP', selected: null, nameOf: en })).toEqual([
+      'JP',
       'DE',
       'GB',
       'US',
@@ -216,6 +217,25 @@ describe('shipsToOptions', () => {
       'DE',
       'GB',
     ]);
+  });
+
+  it('offers the phone country when all loaded listings ship worldwide', () => {
+    expect(
+      shipsToOptions([{ kind: 'anywhere', reason: 'worldwide' }], {
+        deviceCountry: 'GB',
+        selected: null,
+        nameOf: en,
+      }),
+    ).toEqual(['GB']);
+  });
+
+  it('keeps a picker selection visible with no country-restricted listings', () => {
+    expect(shipsToOptions([], { deviceCountry: 'GB', selected: 'JP', nameOf: en })).toEqual([
+      'GB',
+      'JP',
+    ]);
+    expect(shipsToOptions([], { deviceCountry: 'GB', selected: 'GB', nameOf: en })).toEqual(['GB']);
+    expect(shipsToOptions([], { deviceCountry: null, selected: 'JP', nameOf: en })).toEqual(['JP']);
   });
 
   it('sorts by the localised name in the display locale', () => {
