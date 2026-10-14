@@ -135,8 +135,8 @@ export interface DmDeviceSyncOptions {
 export class MarmotDmDeviceSync {
   private readonly opts: DmDeviceSyncOptions;
   private readonly nextCheck = new Map<string, number>();
-  // A declined device add stays suppressed for this session (app restart resets it).
-  private readonly inviting = new Set<string>();
+  // Refusals suppress only the attempted group + key packages for this session.
+  private readonly inviting = new Map<string, readonly NostrEvent[]>();
   private readonly declined = new Set<string>();
   private readonly running = new Map<string, Promise<void>>();
   private readonly lookups = new Map<string, { at: number; events: Promise<NostrEvent[]> }>();
@@ -151,7 +151,7 @@ export class MarmotDmDeviceSync {
       try {
         return await call();
       } catch (error) {
-        for (const id of this.inviting) this.noteDeclined(id, error);
+        for (const [id, packages] of this.inviting) this.noteDeclined(id, packages, error);
         throw error;
       }
     };
@@ -168,13 +168,13 @@ export class MarmotDmDeviceSync {
     };
   }
 
-  private noteDeclined(mlsId: string, error: unknown): void {
+  private noteDeclined(mlsId: string, packages: readonly NostrEvent[], error: unknown): void {
     if (
       !this.opts.silentSigner &&
       (amberFailureKind(error) === 'declined' ||
         (error instanceof NostrConnectError && error.kind === 'permission'))
     ) {
-      this.declined.add(mlsId);
+      for (const kp of packages) this.declined.add(`${mlsId}:${kp.id}`);
     }
   }
 
@@ -187,11 +187,7 @@ export class MarmotDmDeviceSync {
    * at most. `open`: background; never prompts a remote signer. Never throws.
    */
   sync(mlsId: string, peer: string, reason: 'send' | 'open'): Promise<void> {
-    if (
-      this.opts.stopped() ||
-      this.declined.has(mlsId) ||
-      (this.nextCheck.get(mlsId) ?? 0) > this.now()
-    ) {
+    if (this.opts.stopped() || (this.nextCheck.get(mlsId) ?? 0) > this.now()) {
       return Promise.resolve();
     }
     if (reason === 'open' && !this.opts.silentSigner) {
@@ -225,7 +221,11 @@ export class MarmotDmDeviceSync {
    * skip the next check — its devices are current as of now. */
   async noteInvited(mlsId: string, invited: readonly NostrEvent[]): Promise<void> {
     this.nextCheck.set(mlsId, this.now() + DM_DEVICE_SYNC_COOLDOWN_MS);
-    const ids = invited.flatMap((e) => {
+    await this.rememberSlots(mlsId, invited);
+  }
+
+  private async rememberSlots(mlsId: string, packages: readonly NostrEvent[]): Promise<void> {
+    const ids = packages.flatMap((e) => {
       const slot = slotOf(e);
       return slot ? [slotId(e.pubkey, slot)] : [];
     });
@@ -273,20 +273,33 @@ export class MarmotDmDeviceSync {
     } finally {
       scheduler.dispose();
     }
+    const leaves = readGroupLeaves(await this.opts.groupState(mlsId));
+    // Chats created/joined before slot tracking can still identify an install
+    // by its signing key. Remember that association before its key rotates.
+    const peerKeys = new Set(leaves.filter((leaf) => leaf.pubkey === peer).map((leaf) => leaf.key));
+    await this.rememberSlots(
+      mlsId,
+      (fresh.get(peer) ?? []).filter((kp) => peerKeys.has(keyPackageSignatureKey(kp) ?? '')),
+    );
+    fresh.set(
+      peer,
+      (fresh.get(peer) ?? []).filter((kp) => !this.declined.has(`${mlsId}:${kp.id}`)),
+    );
     const plan = planDmDeviceAdds({
       self,
       peer,
-      leaves: readGroupLeaves(await this.opts.groupState(mlsId)),
+      leaves,
       fresh,
       peerOnWhiteNoise: events.some(isWhiteNoise),
       invitedSlots: new Set(await this.invitedSlots(mlsId)),
     });
     if (plan.size === 0 || this.opts.stopped()) return ok;
-    this.inviting.add(mlsId);
+    const packages = [...plan.values()].flat();
+    this.inviting.set(mlsId, packages);
     try {
       await this.opts.invite(mlsId, plan);
     } catch (error) {
-      this.noteDeclined(mlsId, error);
+      this.noteDeclined(mlsId, packages, error);
       throw error;
     } finally {
       this.inviting.delete(mlsId);

@@ -215,7 +215,7 @@ describe('MarmotDmDeviceSync scheduling', () => {
   it.each([
     ['Amber', () => new AmberSignerError('CANCELLED', 'declined', 'User declined')],
     ['NIP-46', () => new NostrConnectError('permission', 'Signer denied sign_event')],
-  ])('%s never prompts again after a declined add, until a new session', async (_, error) => {
+  ])('%s suppresses the declined package but allows a new package or session', async (_, error) => {
     const selected = jest
       .spyOn(invitees, 'selectDeviceKeyPackages')
       .mockImplementation(async (p) => [kp(p, slot(2), 'new-device')]);
@@ -225,7 +225,7 @@ describe('MarmotDmDeviceSync scheduling', () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {
       const invite = jest.fn().mockRejectedValue(error());
-      const { sync, fetchKeyPackages, tick } = makeSync({ silentSigner: false, invite });
+      const { sync, tick } = makeSync({ silentSigner: false, invite });
       await sync.sync('g1', PEER, 'send');
       expect(invite).toHaveBeenCalledTimes(1);
       // Subsequent sends and background opens remain quiet, even beyond cooldown.
@@ -235,12 +235,18 @@ describe('MarmotDmDeviceSync scheduling', () => {
         await sync.sync('g1', PEER, 'open');
       }
       expect(invite).toHaveBeenCalledTimes(1);
-      expect(fetchKeyPackages).toHaveBeenCalledTimes(1);
+      // A new package (even for the same slot) may prompt; other chats are independent.
+      selected.mockImplementation(async (p) => [kp(p, slot(2), 'replenished-device')]);
+      tick(DM_DEVICE_SYNC_COOLDOWN_MS + 1);
+      await sync.sync('g1', PEER, 'send');
+      expect(invite).toHaveBeenCalledTimes(2);
+      await sync.sync('g2', PEER, 'send');
+      expect(invite).toHaveBeenCalledTimes(3);
       const restarted = makeSync({ silentSigner: false, invite });
       await restarted.sync.sync('g1', PEER, 'open');
-      expect(invite).toHaveBeenCalledTimes(1);
+      expect(invite).toHaveBeenCalledTimes(3);
       await restarted.sync.sync('g1', PEER, 'send');
-      expect(invite).toHaveBeenCalledTimes(2);
+      expect(invite).toHaveBeenCalledTimes(4);
     } finally {
       selected.mockRestore();
       signature.mockRestore();
@@ -287,6 +293,40 @@ describe('MarmotDmDeviceSync scheduling', () => {
     } finally {
       selected.mockRestore();
       signature.mockRestore();
+    }
+  });
+
+  it('remembers an existing White Noise leaf slot before its signing key rotates', async () => {
+    let current = kp(PEER, slot(1), 'peer-phone', 'White Noise Android');
+    const selected = jest
+      .spyOn(invitees, 'selectDeviceKeyPackages')
+      .mockImplementation(async () => [current]);
+    const signature = jest
+      .spyOn(devices, 'keyPackageSignatureKey')
+      .mockImplementation((e) => e.content);
+    const leaves = jest
+      .spyOn(devices, 'readGroupLeaves')
+      .mockReturnValue([
+        { pubkey: PEER, key: 'peer-phone', leafIndex: 1, keyCreatedAt: null, isOwn: false },
+      ]);
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const { sync, fetchKeyPackages, invite, backend, tick } = makeSync();
+      fetchKeyPackages.mockImplementation(async () => [current]);
+      await sync.sync('g1', PEER, 'send');
+      expect(JSON.parse((await backend.get('dmDeviceSlots', 'g1')) ?? '[]')).toEqual([
+        `${PEER}:${slot(1)}`,
+      ]);
+      current = kp(PEER, slot(1), 'peer-rotated', 'White Noise Android');
+      tick(DM_DEVICE_SYNC_COOLDOWN_MS + 1);
+      await sync.sync('g1', PEER, 'send');
+      expect(invite).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('White Noise invited slot'));
+    } finally {
+      selected.mockRestore();
+      signature.mockRestore();
+      leaves.mockRestore();
+      warn.mockRestore();
     }
   });
 

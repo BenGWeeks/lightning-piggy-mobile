@@ -96,7 +96,7 @@ describe('MarmotSession: existing 1:1s add newer devices (no WebCrypto)', () => 
     [phone, tablet, bigOther].forEach((p) => p.session.stop());
   }, 120_000);
 
-  it('a declined remote Welcome suppresses later device adds on the real MLS path', async () => {
+  it('a declined remote Welcome suppresses the same package on the real MLS path', async () => {
     const relay = makeRelay();
     const identity = makeSigner();
     const signEvent = jest.fn(async (draft: Parameters<typeof identity.signer.signEvent>[0]) =>
@@ -110,7 +110,6 @@ describe('MarmotSession: existing 1:1s add newer devices (no WebCrypto)', () => 
     });
     const little = makeSession(relay);
     const tablet = makeInstall(relay, little);
-    const newer = makeInstall(relay, little);
     try {
       await Promise.all([big.session.start(), little.session.start()]);
       await waitFor(() => slots(relay, little.pubkey) === 1);
@@ -125,14 +124,12 @@ describe('MarmotSession: existing 1:1s add newer devices (no WebCrypto)', () => 
       await big.session.syncDmDevices(dm.id, 'send');
       const attempts = signEvent.mock.calls.length;
       expect(attempts).toBeGreaterThan(beforeDecline);
-      await newer.session.start();
-      await waitFor(() => slots(relay, little.pubkey) === 3);
       later();
       await big.session.syncDmDevices(dm.id, 'open');
       await big.session.syncDmDevices(dm.id, 'send');
       expect(signEvent).toHaveBeenCalledTimes(attempts);
     } finally {
-      [big, little, tablet, newer].forEach((install) => install.session.stop());
+      [big, little, tablet].forEach((install) => install.session.stop());
     }
   }, 120_000);
 
