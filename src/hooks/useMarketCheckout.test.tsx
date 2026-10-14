@@ -1,4 +1,5 @@
 import { act, renderHook } from '@testing-library/react-native';
+import { sendNip17Rumor } from '../services/nip17RumorSend';
 import { useMarketCheckout } from './useMarketCheckout';
 import { useNostr } from '../contexts/NostrContext';
 import * as nostrService from '../services/nostrService';
@@ -38,7 +39,12 @@ beforeEach(() => {
   (nostrService.sendNip17ToManyWithSigner as jest.Mock).mockImplementation(async (options) => {
     await options.signerNip44Encrypt('plaintext', vendor);
     await options.signerSignSeal({ kind: 13, pubkey: buyer });
-    return { wrapsPublished: 2, delivery: { delivered: true }, errors: [] };
+    return {
+      wrapOutcomes: [{ recipientPubkey: vendor, published: true }],
+      wrapsPublished: 2,
+      delivery: { delivered: true },
+      errors: [],
+    };
   });
 });
 
@@ -87,6 +93,10 @@ test('a self-wrap success with a failed merchant wrap does not report the order 
     wrapsPublished: 1,
     delivery: { delivered: true },
     errors: ['vendor publish failed'],
+    wrapOutcomes: [
+      { recipientPubkey: buyer, published: true },
+      { recipientPubkey: vendor, published: false, error: 'vendor publish failed' },
+    ],
   });
   const { result } = renderHook(() => useMarketCheckout());
   await act(async () => {
@@ -105,6 +115,7 @@ describe('nsec checkout', () => {
       relays: [],
     });
     (nostrService.sendNip17ToManyWithNsec as jest.Mock).mockResolvedValue({
+      wrapOutcomes: [{ recipientPubkey: vendor, published: true }],
       wrapsPublished: 2,
       errors: [],
     });
@@ -134,3 +145,45 @@ describe('nsec checkout', () => {
     expect(result.current.error).toBe('market.checkout.errors.signingKeyMissing');
   });
 });
+
+test.each(['nsec', 'amber', 'nip46'])(
+  'recipient delivery succeeds despite self-copy failure with %s',
+  async (signerType) => {
+    (useNostr as jest.Mock).mockReturnValue({
+      pubkey: buyer,
+      isLoggedIn: true,
+      signerType,
+      relays: [],
+    });
+    (getMemoisedSecretKey as jest.Mock).mockResolvedValue(new Uint8Array(32).fill(7));
+    const outcome = {
+      wrapsPublished: 1,
+      delivery: { delivered: true },
+      errors: ['self-copy publish failed'],
+      wrapOutcomes: [
+        { recipientPubkey: buyer, published: false, error: 'self-copy publish failed' },
+        { recipientPubkey: vendor, published: true },
+      ],
+    };
+    const send =
+      signerType === 'nsec'
+        ? nostrService.sendNip17ToManyWithNsec
+        : nostrService.sendNip17ToManyWithSigner;
+    (send as jest.Mock).mockResolvedValue(outcome);
+    const { result } = renderHook(() => useMarketCheckout());
+    await act(async () => {
+      await result.current.placeOrder(input);
+    });
+    expect(result.current.status).toBe('sent');
+    // Diagnostics survive without logging or persisting the rumor/address.
+    await expect(
+      sendNip17Rumor({
+        senderPubkey: buyer,
+        signerType,
+        recipientPubkey: vendor,
+        relays: [],
+        rumor: { pubkey: buyer, kind: 16, created_at: 1, tags: [], content: '' },
+      }),
+    ).resolves.toBe(outcome);
+  },
+);

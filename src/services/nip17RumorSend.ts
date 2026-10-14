@@ -13,6 +13,7 @@ import * as nostrService from './nostrService';
 import * as amberService from './amberService';
 import * as nostrConnectService from './nostrConnectService';
 import { getMemoisedSecretKey } from '../contexts/nostrSecretKeyCache';
+import type { DmSendResult } from './nostrDmPublish';
 import type { RelayConfig } from '../types/nostr';
 
 /** Stable reason a send failed; the UI maps it to localised copy. */
@@ -67,10 +68,10 @@ export function nip17TargetRelays(relays: Pick<RelayConfig, 'url' | 'write'>[]):
 
 /**
  * Seal + gift-wrap `rumor` to `recipientPubkey` (and a self-copy) and publish.
- * Throws {@link Nip17SendError} with a code on every failure; resolves only
- * when at least one wrap reached a relay without errors.
+ * Resolves when the recipient wrap reaches a relay. Self-copy failures stay
+ * in the returned diagnostics and must not make an already delivered order retryable.
  */
-export async function sendNip17Rumor(input: SendNip17RumorInput): Promise<void> {
+export async function sendNip17Rumor(input: SendNip17RumorInput): Promise<DmSendResult> {
   const { senderPubkey: pubkey, signerType, rumor } = input;
   if (!pubkey) throw new Nip17SendError('notSignedIn', 'Sign in first');
   if (rumor.pubkey !== pubkey) {
@@ -83,7 +84,7 @@ export async function sendNip17Rumor(input: SendNip17RumorInput): Promise<void> 
   }
   const targetRelays = nip17TargetRelays(input.relays);
 
-  let result: { wrapsPublished: number; errors: string[] };
+  let result: DmSendResult;
   if (signerType === 'nsec') {
     // Pubkey-checked read: the shared SecureStore slot must decode to the
     // ACTIVE identity, or the rumor would be sealed with a different key.
@@ -124,10 +125,14 @@ export async function sendNip17Rumor(input: SendNip17RumorInput): Promise<void> 
     throw new Nip17SendError('unsupportedSigner', 'Unsupported signer');
   }
 
-  if (!(result.wrapsPublished > 0 && result.errors.length === 0)) {
+  const recipientOutcome = result.wrapOutcomes.find((wrap) => wrap.recipientPubkey === recipient);
+  if (!recipientOutcome?.published) {
     throw new Nip17SendError(
       'relayUnreachable',
-      result.errors[0] ?? 'Could not reach a relay to deliver the message',
+      recipientOutcome?.error ??
+        result.errors[0] ??
+        'Could not reach a relay to deliver the message',
     );
   }
+  return result;
 }

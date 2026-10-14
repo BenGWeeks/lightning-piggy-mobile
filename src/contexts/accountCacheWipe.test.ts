@@ -305,3 +305,46 @@ it("wipes the signed-out account's buyer order titles while preserving other acc
   expect(await loadBuyerOrderTitles(PK)).toEqual({});
   expect(await loadBuyerOrderTitles(OTHER_PK)).toEqual({ 'order-2': titles });
 });
+
+it.each(['read', 'write'])('drains buyer-title %s before wiping the account', async (stage) => {
+  const titleKey = `market-buyer-order-titles:${PK}`;
+  const titles = { [`30402:${OTHER_PK}:mug`]: 'Private purchase' };
+  await recordBuyerOrderTitles(OTHER_PK, 'other-order', titles);
+  let started!: () => void;
+  let release!: () => void;
+  const paused = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const resume = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const method = (stage === 'read' ? AsyncStorage.getItem : AsyncStorage.setItem) as jest.Mock;
+  const original = method.getMockImplementation()!;
+  method.mockImplementation(async (key: string, value?: string) => {
+    if (key === titleKey) {
+      started();
+      await resume;
+    }
+    return original(key, value);
+  });
+  try {
+    const write = recordBuyerOrderTitles(PK, 'pending-order', titles);
+    await paused;
+    let wiped = false;
+    const wipe = wipeAccountCaches(PK).then(() => {
+      wiped = true;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const wipedBeforeWrite = wiped;
+    release();
+    await Promise.all([write, wipe]);
+    expect(wipedBeforeWrite).toBe(false);
+    expect(await AsyncStorage.getItem(titleKey)).toBeNull();
+    expect(await loadBuyerOrderTitles(OTHER_PK)).toEqual(
+      expect.objectContaining({ 'other-order': titles }),
+    );
+  } finally {
+    release();
+    method.mockImplementation(original);
+  }
+});

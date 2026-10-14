@@ -161,8 +161,7 @@ export async function sendNip17ToManyWithSigner(input: {
     input.onDeliveryFinalized,
   );
   return {
-    wrapsPublished: publishResult.wrapsPublished,
+    ...publishResult,
     errors: [...errors, ...publishResult.errors],
-    delivery: publishResult.delivery,
   };
 }

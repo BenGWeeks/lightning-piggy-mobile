@@ -7,6 +7,11 @@ const MAX_ORDERS = 300;
 const key = (pubkey: string) => `market-buyer-order-titles:${pubkey}`;
 let writeChain: Promise<unknown> = Promise.resolve();
 
+/** Drain queued writes before deleting account caches. */
+export function waitForBuyerOrderTitleWrites(): Promise<void> {
+  return writeChain.then(() => undefined);
+}
+
 /** orderId → (item ref → title). */
 export type BuyerOrderTitles = Record<string, Record<string, string>>;
 

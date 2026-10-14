@@ -1,4 +1,5 @@
 import { wipeRemoteMediaForOwner } from '../services/remoteMediaCache';
+import { waitForBuyerOrderTitleWrites } from '../services/buyerOrderTitles';
 import { FOLLOW_SNAPSHOT_KEY } from '../services/contactFollowFreshness';
 /**
  * wipeAccountCaches — delete every per-account persisted artifact for a
@@ -196,6 +197,7 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
     if (__DEV__) console.warn('[wipeAccountCaches] group history wipe failed:', e);
   }
   // Best-effort so a transient multiRemove rejection can't abort the wipe below.
+  await waitForBuyerOrderTitleWrites();
   await bestEffortMultiRemove(toRemove);
   // All per-wallet caches (balance / txs / receipt-dedup), not just txs_ —
   // deleteWalletCaches wipes the full set so a deleted-identity wallet leaves
