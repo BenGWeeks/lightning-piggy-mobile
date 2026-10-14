@@ -42,9 +42,9 @@ const ShipsToChip = React.memo(function ShipsToChip({
 });
 
 /**
- * "Ships to" section of the Market filter panel. Chips are the countries the
- * loaded listings' sellers publish shipping options for (phone's country
- * always offered first — ordering is `shipsToOptions`'), led by Anywhere.
+ * "Ships to" section of the Market filter panel. Anywhere leads the bounded
+ * quick chips from `shipsToOptions`: phone region, selected destination, then
+ * up to six popular seller-published countries.
  * More countries opens the shared checkout picker. With a country picked,
  * a toggle decides whether listings without shipping info stay.
  */

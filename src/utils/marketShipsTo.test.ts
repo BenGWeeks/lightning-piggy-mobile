@@ -1,7 +1,7 @@
 import type { Event } from 'nostr-tools';
 import type { MarketProduct } from '../data/marketProducts';
 import { MARKET_VENDORS } from '../data/marketVendors';
-import { localizedCountryName } from '../data/countries';
+import { COUNTRIES, localizedCountryName } from '../data/countries';
 import { parseShippingOptionEvent, type ShippingOption } from './marketShipping';
 import {
   isDigitalListing,
@@ -185,10 +185,10 @@ describe('shipsToOptions', () => {
   ];
   const en = (code: string) => localizedCountryName(code, 'en');
 
-  it('lists distinct countries from the shipping data, sorted by name', () => {
+  it('ranks distinct countries by listing count, then name', () => {
     expect(shipsToOptions(data, { deviceCountry: null, selected: null, nameOf: en })).toEqual([
+      'GB', // Named by two listings
       'DE', // Germany
-      'GB', // United Kingdom
       'US', // United States
     ]);
   });
@@ -196,16 +196,16 @@ describe('shipsToOptions', () => {
   it("puts the phone's country first when the data has it", () => {
     expect(shipsToOptions(data, { deviceCountry: 'US', selected: null, nameOf: en })).toEqual([
       'US',
-      'DE',
       'GB',
+      'DE',
     ]);
   });
 
   it("always offers the phone's country even when no listing names it", () => {
     expect(shipsToOptions(data, { deviceCountry: 'JP', selected: null, nameOf: en })).toEqual([
       'JP',
-      'DE',
       'GB',
+      'DE',
       'US',
     ]);
   });
@@ -214,8 +214,8 @@ describe('shipsToOptions', () => {
     expect(shipsToOptions(data, { deviceCountry: 'US', selected: 'JP', nameOf: en })).toEqual([
       'US',
       'JP',
-      'DE',
       'GB',
+      'DE',
     ]);
   });
 
@@ -238,11 +238,82 @@ describe('shipsToOptions', () => {
     expect(shipsToOptions([], { deviceCountry: null, selected: 'JP', nameOf: en })).toEqual(['JP']);
   });
 
-  it('sorts by the localised name in the display locale', () => {
+  it('pins a selected country ahead of popular candidates and caps extras at six', () => {
+    const countries = ['AF', 'AL', 'AD', 'AU', 'AT', 'BE', 'BR', 'CA', 'JP', 'US'];
+    const options = shipsToOptions(
+      [
+        { kind: 'countries', countries },
+        { kind: 'countries', countries: ['CA', 'CA'] },
+        { kind: 'countries', countries: ['BR'] },
+      ],
+      { deviceCountry: 'US', selected: 'JP', nameOf: en },
+    );
+    expect(options).toEqual(['US', 'JP', 'BR', 'CA', 'AF', 'AL', 'AD', 'AU']);
+    expect(
+      shipsToOptions([{ kind: 'countries', countries }], {
+        deviceCountry: null,
+        selected: null,
+        nameOf: en,
+      }),
+    ).toHaveLength(6);
+  });
+
+  it('keeps an explicitly worldwide option out of chips while matching its named countries', () => {
+    const codes = COUNTRIES.map(({ code }) => code);
+    const world = published('explicit-world', [['country', ...codes]]);
+    const reach = listingShipsTo(listing([ref('explicit-world')]), () => world);
+    const chips = shipsToOptions([reach], {
+      deviceCountry: 'US',
+      selected: 'JP',
+      nameOf: en,
+    });
+    // The component adds Anywhere and More countries around this country list.
+    expect(chips).toEqual(['US', 'JP']);
+    expect(chips.length + 1).toBeLessThanOrEqual(8);
+    for (const code of codes) expect(shipsToMatches(reach, code, false)).toBe(true);
+    expect(shipsToMatches(reach, 'ZZ', false)).toBe(false);
+  });
+
+  it('excludes broad options at the 50-country boundary but retains narrow options', () => {
+    const codes = COUNTRIES.slice(0, 50).map(({ code }) => code);
+    const broad = published('broad', [['country', ...codes]]);
+    const narrow = published('narrow', [['country', ...codes.slice(0, 49)]]);
+    const lookup = (coordinate: string) => (coordinate === broad.coordinate ? broad : OPTIONS.uk);
+    const reach = listingShipsTo(listing([ref('broad'), ref('uk')]), lookup);
+    expect(shipsToOptions([reach], { deviceCountry: null, selected: null, nameOf: en })).toEqual([
+      'GB',
+    ]);
+    expect(
+      shipsToOptions([listingShipsTo(listing([ref('narrow')]), () => narrow)], {
+        deviceCountry: null,
+        selected: null,
+        nameOf: en,
+      }),
+    ).toHaveLength(6);
+  });
+
+  it('does not mistake a union of narrow options for a single worldwide option', () => {
+    const codes = COUNTRIES.slice(0, 60).map(({ code }) => code);
+    const a = published('a', [['country', ...codes.slice(0, 30)]]);
+    const b = published('b', [['country', ...codes.slice(30)]]);
+    const reach = listingShipsTo(listing([ref('a'), ref('b')]), (coordinate) =>
+      coordinate === a.coordinate ? a : b,
+    );
+    expect(
+      shipsToOptions([reach], { deviceCountry: null, selected: null, nameOf: en }),
+    ).toHaveLength(6);
+  });
+
+  it('sorts equally frequent countries by localised name in the display locale', () => {
     const de = (code: string) => localizedCountryName(code, 'de');
     // Deutschland, Vereinigtes Königreich, Vereinigte Staaten
     expect(
-      shipsToOptions(data, { deviceCountry: null, selected: null, nameOf: de, locale: 'de' }),
+      shipsToOptions([data[0], data[1], { kind: 'countries', countries: ['DE', 'US'] }], {
+        deviceCountry: null,
+        selected: null,
+        nameOf: de,
+        locale: 'de',
+      }),
     ).toEqual(['DE', 'US', 'GB']);
   });
 });

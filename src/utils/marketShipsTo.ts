@@ -26,7 +26,12 @@ export type ShipsTo =
   /** Digital goods, or a referenced option with no country restriction. */
   | { kind: 'anywhere'; reason: 'digital' | 'worldwide' }
   /** The union of the referenced options' countries (alpha-2, sorted). */
-  | { kind: 'countries'; countries: readonly string[] }
+  | {
+      kind: 'countries';
+      countries: readonly string[];
+      /** Countries from options naming fewer than 50 destinations, for quick chips only. */
+      quickChipCountries?: readonly string[];
+    }
   /** Referenced options are still being fetched. */
   | { kind: 'pending' }
   /** No usable shipping data: ask the seller. */
@@ -40,6 +45,8 @@ export type ShipsTo =
 export type ShippingOptionLookup = (coordinate: string) => ShippingOption | null | undefined;
 
 export const SHIPS_TO_UNKNOWN: ShipsTo = { kind: 'unknown' };
+const WORLDWIDE_CHIP_THRESHOLD = 50;
+const MAX_EXTRA_CHIPS = 6;
 const SHIPS_TO_PENDING: ShipsTo = { kind: 'pending' };
 const SHIPS_TO_DIGITAL: ShipsTo = { kind: 'anywhere', reason: 'digital' };
 const SHIPS_TO_WORLDWIDE: ShipsTo = { kind: 'anywhere', reason: 'worldwide' };
@@ -82,6 +89,8 @@ export function listingShipsTo(
 ): ShipsTo {
   if (isDigitalListing(event)) return SHIPS_TO_DIGITAL;
   const countries = new Set<string>();
+  const quickChipCountries = new Set<string>();
+  let hasBroadOption = false;
   let pending = false;
   for (const ref of listingShippingRefs(event)) {
     const option = lookup(ref.coordinate);
@@ -91,11 +100,24 @@ export function listingShipsTo(
     }
     if (option === null) continue;
     if (option.countries.length === 0) return SHIPS_TO_WORLDWIDE;
-    for (const code of option.countries) countries.add(code);
+    const broad = option.countries.length >= WORLDWIDE_CHIP_THRESHOLD;
+    hasBroadOption ||= broad;
+    for (const code of option.countries) {
+      countries.add(code);
+      if (!broad) quickChipCountries.add(code);
+    }
   }
   // A partial answer is still an answer for the countries it names, but don't
   // call a listing `unknown` while some of its options are still loading.
-  if (countries.size > 0) return { kind: 'countries', countries: [...countries].sort() };
+  if (countries.size > 0) {
+    return {
+      kind: 'countries',
+      countries: [...countries].sort(),
+      ...(hasBroadOption || countries.size >= WORLDWIDE_CHIP_THRESHOLD
+        ? { quickChipCountries: [...quickChipCountries].sort() }
+        : {}),
+    };
+  }
   return pending ? SHIPS_TO_PENDING : SHIPS_TO_UNKNOWN;
 }
 
@@ -132,10 +154,9 @@ export function shipsToMatches(
 }
 
 /**
- * The Ships-to chip codes: every country named by the loaded listings'
- * shipping data, sorted by display name, with the phone's region country
- * always first, even if no listing names it. A saved selection no longer in
- * the data is kept (after the device country) so it can be seen and cleared.
+ * Quick country chips: phone region, then the saved selection, then at most
+ * six destinations ranked by listing count and localised name. Broad shipping
+ * options don't contribute candidates; matching still uses their full reach.
  */
 export function shipsToOptions(
   shipsTos: Iterable<ShipsTo>,
@@ -146,20 +167,28 @@ export function shipsToOptions(
     locale?: string;
   },
 ): string[] {
-  const codes = new Set<string>();
+  const counts = new Map<string, number>();
   for (const shipsTo of shipsTos) {
-    if (shipsTo.kind === 'countries') for (const code of shipsTo.countries) codes.add(code);
+    if (shipsTo.kind !== 'countries') continue;
+    const candidates =
+      shipsTo.quickChipCountries ??
+      (shipsTo.countries.length < WORLDWIDE_CHIP_THRESHOLD ? shipsTo.countries : []);
+    for (const code of new Set(candidates)) counts.set(code, (counts.get(code) ?? 0) + 1);
   }
   const lead: string[] = [];
   const { deviceCountry, selected } = options;
-  if (deviceCountry) {
-    codes.delete(deviceCountry);
-    lead.push(deviceCountry);
-  }
-  if (selected && !lead.includes(selected) && !codes.has(selected)) lead.push(selected);
-  const rest = [...codes]
-    .map((code) => ({ code, name: options.nameOf(code) }))
-    .sort((a, b) => a.name.localeCompare(b.name, options.locale) || a.code.localeCompare(b.code))
+  if (deviceCountry) lead.push(deviceCountry);
+  if (selected && !lead.includes(selected)) lead.push(selected);
+  for (const code of lead) counts.delete(code);
+  const rest = [...counts]
+    .map(([code, count]) => ({ code, count, name: options.nameOf(code) }))
+    .sort(
+      (a, b) =>
+        b.count - a.count ||
+        a.name.localeCompare(b.name, options.locale) ||
+        a.code.localeCompare(b.code),
+    )
+    .slice(0, MAX_EXTRA_CHIPS)
     .map((entry) => entry.code);
   return [...lead, ...rest];
 }
