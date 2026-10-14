@@ -17,7 +17,7 @@ Currently based on upstream `v1.3.0`, tagged `v1.3.0-wf2`.
 | Wait for relay NIP-20 OK before closing socket on zap-receipt publish (fixes silent kind-9735 loss for ~75 % of outgoing zaps).
 | https://github.com/lnbits/lnurlp/pull/133[#133]
 | https://github.com/lnbits/lnurlp/issues/132[#132]
-| https://github.com/BenGWeeks/lightning-piggy-mobile/issues/411[#411] root-cause comments
+| https://github.com/LightningPiggy/lightning-piggy-mobile/issues/411[#411] root-cause comments
 |===
 
 ==== `BenGWeeks/nostrclient` weeks-family

@@ -21,7 +21,7 @@ import { pickRole, resolvePiggy } from './_piggyFixtures.mjs';
 // eslint-disable-next-line react-hooks/rules-of-hooks
 useWebSocketImplementation(WebSocket);
 
-const REPO_RAW = 'https://github.com/BenGWeeks/lightning-piggy-mobile/raw/main';
+const REPO_RAW = 'https://github.com/LightningPiggy/lightning-piggy-mobile/raw/main';
 const FIXTURES = [
   {
     d: 'cambridge-bitcoin-drinks',

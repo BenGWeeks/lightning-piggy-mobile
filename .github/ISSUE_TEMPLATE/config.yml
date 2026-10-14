@@ -1,5 +1,5 @@
 blank_issues_enabled: true
 contact_links:
   - name: Report a security vulnerability
-    url: https://github.com/BenGWeeks/lightning-piggy-mobile/security/policy
+    url: https://github.com/LightningPiggy/lightning-piggy-mobile/security/policy
     about: Please do not file security issues publicly. Read the security policy and report privately.

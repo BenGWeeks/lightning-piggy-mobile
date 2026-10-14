@@ -256,7 +256,7 @@ See [docs/ARCHITECTURE.adoc](docs/ARCHITECTURE.adoc) for the module map, the ful
 ### Installation
 
 ```bash
-git clone https://github.com/BenGWeeks/lightning-piggy-mobile
+git clone https://github.com/LightningPiggy/lightning-piggy-mobile
 cd lightning-piggy-mobile
 npm install
 ```

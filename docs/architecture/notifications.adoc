@@ -14,7 +14,7 @@ watcher's per-category alerts for DMs, zaps, mentions and NWC wallet
 activity — see "The notification watcher" below.
 
 It is the canonical reference for the foundation landed in PR for
-issue https://github.com/BenGWeeks/lightning-piggy-mobile/issues/279[#279].
+issue https://github.com/LightningPiggy/lightning-piggy-mobile/issues/279[#279].
 
 == Current implementation note
 

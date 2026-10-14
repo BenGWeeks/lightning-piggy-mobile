@@ -9,7 +9,7 @@ export const BEN_PUBKEY = '971615b70ad9ec896f8d5ba0f2d01652f1dfe5f9ced81ac9469ca
 export const HASHTAGS = ['LightningPiggy', 'bitcoin', 'nostr'];
 export const MAX_CHARS = 4000;
 export const releaseUrl = (tag) =>
-  `https://github.com/BenGWeeks/lightning-piggy-mobile/releases/tag/${tag}`;
+  `https://github.com/LightningPiggy/lightning-piggy-mobile/releases/tag/${tag}`;
 
 export function plainText(markdown) {
   return markdown

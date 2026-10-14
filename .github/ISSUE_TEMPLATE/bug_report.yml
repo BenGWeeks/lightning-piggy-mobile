@@ -6,9 +6,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to report a bug. Please search [existing issues](https://github.com/BenGWeeks/lightning-piggy-mobile/issues) first.
+        Thanks for taking the time to report a bug. Please search [existing issues](https://github.com/LightningPiggy/lightning-piggy-mobile/issues) first.
 
-        **Security problem?** Do not file it here. Use [private vulnerability reporting](https://github.com/BenGWeeks/lightning-piggy-mobile/security/advisories/new) instead.
+        **Security problem?** Do not file it here. Use [private vulnerability reporting](https://github.com/LightningPiggy/lightning-piggy-mobile/security/advisories/new) instead.
   - type: markdown
     attributes:
       value: |

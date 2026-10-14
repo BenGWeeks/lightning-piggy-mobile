@@ -42,7 +42,7 @@ This guide covers setting up the Lightning Piggy development environment from sc
 
 [source,bash]
 ----
-git clone https://github.com/BenGWeeks/lightning-piggy-mobile.git
+git clone https://github.com/LightningPiggy/lightning-piggy-mobile.git
 cd lightning-piggy-mobile
 npm install
 ----

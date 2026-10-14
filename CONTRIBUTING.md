@@ -11,7 +11,7 @@ that your work is licensed under the [MIT License](LICENSE).
 
 ## Ways to contribute
 
-- **Report a bug or suggest a feature** using the [issue forms](https://github.com/BenGWeeks/lightning-piggy-mobile/issues/new/choose).
+- **Report a bug or suggest a feature** using the [issue forms](https://github.com/LightningPiggy/lightning-piggy-mobile/issues/new/choose).
   Search existing issues first. Never paste an nsec, an NWC connection string, a seed phrase or an invoice
   containing private information.
 - **Pick up an issue** labelled `good first issue` or `help wanted`. Comment on it first so work is not duplicated.
@@ -23,7 +23,7 @@ You need Node.js (the exact version is pinned in `.nvmrc`), npm, and the Android
 iOS). See [`docs/INSTALLATION.adoc`](docs/INSTALLATION.adoc) for the full walkthrough.
 
 ```sh
-git clone https://github.com/BenGWeeks/lightning-piggy-mobile.git
+git clone https://github.com/LightningPiggy/lightning-piggy-mobile.git
 cd lightning-piggy-mobile
 nvm install && nvm use   # reads .nvmrc
 npm ci

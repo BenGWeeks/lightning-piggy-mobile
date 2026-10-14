@@ -29,10 +29,10 @@ Source of truth: `/tmp/perf-suite-1778890010/summary.md` (commit it in if you wa
 
 ## ✅ New PRs opened against `feat/explore-tab`
 
-| PR                                                                   | Branch                             | Purpose                                                      | State     |
-| -------------------------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------ | --------- |
-| [#562](https://github.com/BenGWeeks/lightning-piggy-mobile/pull/562) | `perf/render-profiler-nip17-yield` | React.Profiler on Home + Explore + NIP-17 yield 4 → 2        | open      |
-| [#563](https://github.com/BenGWeeks/lightning-piggy-mobile/pull/563) | `feat/maplibre-native`             | MapLibre Native scaffolding (#552 — replace Leaflet WebView) | **draft** |
+| PR                                                                        | Branch                             | Purpose                                                      | State     |
+| ------------------------------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------ | --------- |
+| [#562](https://github.com/LightningPiggy/lightning-piggy-mobile/pull/562) | `perf/render-profiler-nip17-yield` | React.Profiler on Home + Explore + NIP-17 yield 4 → 2        | open      |
+| [#563](https://github.com/LightningPiggy/lightning-piggy-mobile/pull/563) | `feat/maplibre-native`             | MapLibre Native scaffolding (#552 — replace Leaflet WebView) | **draft** |
 
 ## ✅ Shipped on `feat/explore-tab` while you slept
 

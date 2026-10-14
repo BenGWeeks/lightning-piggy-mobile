@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for the idea! Please search [existing issues](https://github.com/BenGWeeks/lightning-piggy-mobile/issues) first, in case it has already been suggested.
+        Thanks for the idea! Please search [existing issues](https://github.com/LightningPiggy/lightning-piggy-mobile/issues) first, in case it has already been suggested.
 
         Please do not include secrets (nsecs, NWC connection strings, seed phrases) in this issue.
   - type: textarea

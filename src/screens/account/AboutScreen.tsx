@@ -157,7 +157,7 @@ const AboutScreen: React.FC = () => {
           icon={ExternalLink}
           title={t('settingsPages.support')}
           onPress={() =>
-            Linking.openURL('https://github.com/BenGWeeks/lightning-piggy-mobile/issues')
+            Linking.openURL('https://github.com/LightningPiggy/lightning-piggy-mobile/issues')
           }
           testID="about-support-link"
         />
@@ -165,7 +165,7 @@ const AboutScreen: React.FC = () => {
           icon={ExternalLink}
           title={t('settingsPages.releaseNotes')}
           onPress={() =>
-            Linking.openURL('https://github.com/BenGWeeks/lightning-piggy-mobile/releases')
+            Linking.openURL('https://github.com/LightningPiggy/lightning-piggy-mobile/releases')
           }
           testID="about-release-notes-link"
         />
@@ -174,7 +174,9 @@ const AboutScreen: React.FC = () => {
           title={t('settingsPages.licences')}
           value={t('settingsPages.licenceType')}
           onPress={() =>
-            Linking.openURL('https://github.com/BenGWeeks/lightning-piggy-mobile/blob/main/LICENSE')
+            Linking.openURL(
+              'https://github.com/LightningPiggy/lightning-piggy-mobile/blob/main/LICENSE',
+            )
           }
           testID="about-licences-link"
         />
