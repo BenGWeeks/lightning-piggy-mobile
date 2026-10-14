@@ -1,3 +1,4 @@
+import { wipeCheckoutAddress } from '../services/checkoutAddressStorage';
 import { wipeRemoteMediaForOwner } from '../services/remoteMediaCache';
 import { waitForBuyerOrderTitleWrites } from '../services/buyerOrderTitles';
 import { FOLLOW_SNAPSHOT_KEY } from '../services/contactFollowFreshness';
@@ -76,6 +77,7 @@ import {
 
 export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise<void> {
   if (!loggedOutPubkey) return;
+  await wipeCheckoutAddress(loggedOutPubkey);
   await cancelNotificationDefaults(loggedOutPubkey);
   // Its weekly "Back up your key" reminder goes with it (#1546).
   await retireKeyBackupReminder(loggedOutPubkey).catch(() => undefined);

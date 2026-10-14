@@ -2456,7 +2456,19 @@
       "addressPlaceholder": "Imię i nazwisko, ulica, miasto, kod pocztowy, kraj",
       "addressHint": "Wysyłany prywatnie (zaszyfrowany) razem z zamówieniem, tylko do {{seller}}.",
       "outOfStock": "Brak w magazynie",
-      "inStock": "W magazynie: {{stock}}"
+      "inStock": "W magazynie: {{stock}}",
+      "delivery": {
+        "name": "Imię",
+        "line1": "Adres, wiersz 1",
+        "line2": "Adres, wiersz 2 (opcjonalnie)",
+        "town": "Miejscowość / miasto",
+        "postcode": "Kod pocztowy",
+        "country": "Kraj",
+        "nameHint": "Dowolne imię, pod które kurier może dostarczyć przesyłkę — pseudonim jest w porządku, jeśli widnieje na skrzynce pocztowej",
+        "remember": "Zapamiętaj na tym telefonie",
+        "postcodeInvalid": "Wpisz prawidłowy kod pocztowy dla wybranego kraju",
+        "tooLong": "Pełny adres dostawy może mieć najwyżej 500 znaków"
+      }
     },
     "shipping": {
       "label": "Dostawa",

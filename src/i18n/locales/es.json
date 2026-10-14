@@ -2452,7 +2452,19 @@
       "addressPlaceholder": "Nombre, calle, ciudad, código postal, país",
       "addressHint": "Se envía en privado (cifrado) con tu pedido, solo a {{seller}}.",
       "outOfStock": "Agotado",
-      "inStock": "En stock: {{stock}}"
+      "inStock": "En stock: {{stock}}",
+      "delivery": {
+        "name": "Nombre",
+        "line1": "Dirección, línea 1",
+        "line2": "Dirección, línea 2 (opcional)",
+        "town": "Localidad / ciudad",
+        "postcode": "Código postal",
+        "country": "País",
+        "nameHint": "Cualquier nombre al que el repartidor pueda entregar — un apodo sirve si aparece en tu buzón",
+        "remember": "Recordar en este teléfono",
+        "postcodeInvalid": "Introduce un código postal válido para el país seleccionado",
+        "tooLong": "La dirección de entrega completa debe tener como máximo 500 caracteres"
+      }
     },
     "shipping": {
       "label": "Envío",

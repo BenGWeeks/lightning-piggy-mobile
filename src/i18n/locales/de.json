@@ -2452,7 +2452,19 @@
       "addressPlaceholder": "Name, Straße, Ort, Postleitzahl, Land",
       "addressHint": "Wird privat (verschlüsselt verpackt) mit deiner Bestellung gesendet, nur an {{seller}}.",
       "outOfStock": "Ausverkauft",
-      "inStock": "Auf Lager: {{stock}}"
+      "inStock": "Auf Lager: {{stock}}",
+      "delivery": {
+        "name": "Name",
+        "line1": "Adresszeile 1",
+        "line2": "Adresszeile 2 (optional)",
+        "town": "Ort / Stadt",
+        "postcode": "Postleitzahl",
+        "country": "Land",
+        "nameHint": "Ein Name, an den der Zusteller liefern kann — ein Spitzname ist in Ordnung, wenn er am Briefkasten steht",
+        "remember": "Auf diesem Telefon speichern",
+        "postcodeInvalid": "Gib eine gültige Postleitzahl für das gewählte Land ein",
+        "tooLong": "Die vollständige Lieferadresse darf höchstens 500 Zeichen enthalten"
+      }
     },
     "shipping": {
       "label": "Versand",

@@ -2452,7 +2452,19 @@
       "addressPlaceholder": "Name, street, town, postcode, country",
       "addressHint": "Sent privately (gift-wrapped) with your order, only to {{seller}}.",
       "outOfStock": "Out of stock",
-      "inStock": "In stock: {{stock}}"
+      "inStock": "In stock: {{stock}}",
+      "delivery": {
+        "name": "Name",
+        "line1": "Address line 1",
+        "line2": "Address line 2 (optional)",
+        "town": "Town / city",
+        "postcode": "Postcode",
+        "country": "Country",
+        "nameHint": "Any name the courier can deliver to — a nickname is fine if it’s on your letterbox",
+        "remember": "Remember on this phone",
+        "postcodeInvalid": "Enter a valid postcode for the selected country",
+        "tooLong": "Keep the complete delivery address within 500 characters"
+      }
     },
     "shipping": {
       "label": "Shipping",

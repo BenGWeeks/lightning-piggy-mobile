@@ -7,7 +7,6 @@ import {
   BottomSheetScrollView,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
-  BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
 import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import { Zap, Plus, Minus, Check, ExternalLink, LogIn } from 'lucide-react-native';
@@ -26,7 +25,9 @@ import {
   checkoutUnitPriceSats,
   isSatsDenominated,
 } from '../utils/marketCheckoutPricing';
-import { MAX_ORDER_ADDRESS_LENGTH, normalizeOrderAddress } from '../utils/marketOrder';
+import { composeDeliveryAddress } from '../utils/deliveryAddress';
+import { useCheckoutAddress } from '../hooks/useCheckoutAddress';
+import MarketDeliveryAddress from './MarketDeliveryAddress';
 import { useCheckoutCountry } from '../hooks/useCheckoutCountry';
 import MarketShippingSection from './MarketShippingSection';
 import CountryPickerSheet from './CountryPickerSheet';
@@ -90,7 +91,7 @@ const MarketCheckoutSheet: React.FC<Props> = ({
   const { status, error, isPlacing, canOrder, placeOrder, reset } = useMarketCheckout();
 
   const [quantity, setQuantity] = useState(1);
-  const [address, setAddress] = useState('');
+  const delivery = useCheckoutAddress(visible);
   const [imageFailed, setImageFailed] = useState(false);
   // In-flight guard for the WHOLE submit path (rate revalidation + publish):
   // `isPlacing` only covers the hook's publish, so the ref (synchronous) stops
@@ -128,7 +129,6 @@ const MarketCheckoutSheet: React.FC<Props> = ({
   useEffect(() => {
     if (visible) {
       setQuantity(1);
-      setAddress('');
       setImageFailed(false);
       setSelectedCoordinate(null);
       reset();
@@ -218,7 +218,8 @@ const MarketCheckoutSheet: React.FC<Props> = ({
     shippingSettled && subtotalSats !== null
       ? orderTotalWithShippingSats(subtotalSats, selectedShippingSats ?? 0)
       : null;
-  const addressMissing = needsAddress && !normalizeOrderAddress(address);
+  const address = composeDeliveryAddress(delivery.fields, countryCode ?? '');
+  const addressMissing = needsAddress && !address;
   const shippingBlocksSubmit =
     totalSats === null ||
     outOfStock ||
@@ -310,9 +311,10 @@ const MarketCheckoutSheet: React.FC<Props> = ({
         priceSats: unitSats,
         quantity,
         shipping: shippingInput,
-        ...(needsAddress ? { address: normalizeOrderAddress(address) } : {}),
+        ...(needsAddress ? { address: address ?? '' } : {}),
         title: product.title,
       });
+      if (needsAddress) await delivery.save();
       if (hasShipping) rememberCountry();
       Toast.show({
         type: 'success',
@@ -350,6 +352,7 @@ const MarketCheckoutSheet: React.FC<Props> = ({
     refreshRates,
     retryRates,
     needsAddress,
+    delivery,
     address,
     t,
   ]);
@@ -538,26 +541,12 @@ const MarketCheckoutSheet: React.FC<Props> = ({
             ) : null}
 
             {needsAddress ? (
-              <View style={styles.addressField}>
-                <Text style={styles.addressLabel}>{t('market.checkout.addressLabel')}</Text>
-                <BottomSheetTextInput
-                  style={styles.addressInput}
-                  value={address}
-                  onChangeText={setAddress}
-                  editable={!submitting && !isPlacing}
-                  multiline
-                  maxLength={MAX_ORDER_ADDRESS_LENGTH}
-                  autoComplete="postal-address"
-                  textContentType="fullStreetAddress"
-                  placeholder={t('market.checkout.addressPlaceholder')}
-                  placeholderTextColor={colors.textSupplementary}
-                  accessibilityLabel={t('market.checkout.addressLabel')}
-                  testID="market-checkout-address"
-                />
-                <Text style={styles.addressHint}>
-                  {t('market.checkout.addressHint', { seller: sellerName })}
-                </Text>
-              </View>
+              <MarketDeliveryAddress
+                delivery={delivery}
+                countryCode={countryCode}
+                disabled={submitting || isPlacing}
+                sellerName={sellerName}
+              />
             ) : null}
 
             {hasShipping ? (

@@ -1,3 +1,5 @@
+import * as SecureStore from 'expo-secure-store';
+import { checkoutAddressKey } from '../services/checkoutAddressStorage';
 import { loadBuyerOrderTitles, recordBuyerOrderTitles } from '../services/buyerOrderTitles';
 import { initialiseNotificationDefaults } from '../services/notificationDefaults';
 import * as marmotPush from '../services/marmotPushRegistration';
@@ -354,4 +356,13 @@ it.each(['read', 'write'])('drains buyer-title %s before wiping the account', as
     release();
     method.mockImplementation(original);
   }
+});
+
+it('deletes the saved delivery address from SecureStore on sign-out', async () => {
+  const remove = jest.spyOn(SecureStore, 'deleteItemAsync');
+  remove.mockClear();
+  await wipeAccountCaches(PK);
+  expect(remove).toHaveBeenCalledWith(checkoutAddressKey(PK));
+  expect(remove).not.toHaveBeenCalledWith(checkoutAddressKey(OTHER_PK));
+  remove.mockRestore();
 });

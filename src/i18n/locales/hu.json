@@ -2452,7 +2452,19 @@
       "addressPlaceholder": "Név, utca, település, irányítószám, ország",
       "addressHint": "Privát módon (titkosítva) a rendeléseddel együtt küldjük, csak {{seller}} részére.",
       "outOfStock": "Elfogyott",
-      "inStock": "Készleten: {{stock}}"
+      "inStock": "Készleten: {{stock}}",
+      "delivery": {
+        "name": "Név",
+        "line1": "Cím 1. sora",
+        "line2": "Cím 2. sora (nem kötelező)",
+        "town": "Település / város",
+        "postcode": "Irányítószám",
+        "country": "Ország",
+        "nameHint": "Bármilyen név, amelyre a futár kézbesíteni tud — becenév is jó, ha szerepel a postaládán",
+        "remember": "Megjegyzés ezen a telefonon",
+        "postcodeInvalid": "Adj meg az adott országban érvényes irányítószámot",
+        "tooLong": "A teljes szállítási cím legfeljebb 500 karakter lehet"
+      }
     },
     "shipping": {
       "label": "Szállítás",

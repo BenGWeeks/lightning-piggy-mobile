@@ -65,6 +65,10 @@ jest.mock('../contexts/WalletContext', () => ({
   useWalletLive: () => ({ btcPrice: mockBtcPrice }),
 }));
 
+jest.mock('../contexts/NostrContext', () => ({
+  useNostr: () => ({ pubkey: 'a'.repeat(64), profile: { displayName: 'Buyer' } }),
+}));
+
 const vendorPubkey = 'b'.repeat(64);
 const product: MarketProduct = {
   id: 'catalogue-id',
@@ -330,7 +334,9 @@ describe('Nostr listing (Gamma kind 30402)', () => {
     });
     expect(placeOrder).not.toHaveBeenCalled(); // no address yet
 
-    fireEvent.changeText(ui.getByTestId('market-checkout-address'), '  1 High St \n\n London  ');
+    fireEvent.changeText(ui.getByTestId('market-checkout-address-line1'), '  1 High St  ');
+    fireEvent.changeText(ui.getByTestId('market-checkout-address-town'), 'London');
+    fireEvent.changeText(ui.getByTestId('market-checkout-address-postcode'), 'SW1A 1AA');
     await act(async () => {
       fireEvent.press(ui.getByTestId('market-checkout-place-order'));
     });
@@ -341,7 +347,7 @@ describe('Nostr listing (Gamma kind 30402)', () => {
       quantity: 1,
       // (£5 base + £1 surcharge) at £50,000/BTC.
       shipping: { coordinate: ukOption.coordinate, costSats: 12000, title: 'Royal Mail' },
-      address: '1 High St\nLondon',
+      address: 'Buyer\n1 High St\nLondon\nSW1A 1AA\nGB',
       title: 'Test Item',
     });
   });

@@ -221,6 +221,7 @@ export const createMarketCheckoutSheetStyles = (colors: Palette) =>
       fontWeight: '600',
       color: colors.brandPink,
     },
+    rememberAddress: { paddingVertical: 12 },
     addressField: {
       marginTop: 4,
       marginBottom: 12,
@@ -232,7 +233,8 @@ export const createMarketCheckoutSheetStyles = (colors: Palette) =>
       marginBottom: 6,
     },
     addressInput: {
-      minHeight: 76,
+      minHeight: 48,
+      marginBottom: 8,
       borderRadius: 12,
       borderWidth: 1,
       borderColor: colors.divider,
@@ -241,7 +243,7 @@ export const createMarketCheckoutSheetStyles = (colors: Palette) =>
       paddingHorizontal: 12,
       paddingVertical: 10,
       fontSize: 15,
-      textAlignVertical: 'top',
+      textAlignVertical: 'center',
     },
     addressHint: {
       fontSize: 12,
