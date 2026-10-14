@@ -59,8 +59,35 @@ describe('fetchListingLikes', () => {
     const [, relays, reactionFilter] = query.mock.calls[0];
     expect(reactionFilter).toEqual({ kinds: [7], '#a': [COORD], limit: 500 });
     expect(relays).toContain('wss://mine.example');
-    expect(query.mock.calls[1][2]).toMatchObject({ kinds: [5], '#e': ['r1', 'r2', 'r3'] });
+    expect(query.mock.calls[1][2]).toEqual({
+      kinds: [7],
+      authors: [ME],
+      '#a': [COORD],
+      limit: 50,
+    });
+    expect(query.mock.calls[2][2]).toMatchObject({ kinds: [5], '#e': ['r1', 'r2', 'r3'] });
     expect(likes).toEqual({ count: 2, myReactionId: 'r2', myReactionIds: ['r2'] });
+  });
+
+  it("finds the viewer's like even when the public query's limit crowds it out", async () => {
+    query.mockImplementation((_pool, _relays, filter) =>
+      Promise.resolve(
+        filter.kinds[0] !== 7
+          ? []
+          : filter.authors
+            ? [like('mine', ME)]
+            : [like('a1', ALICE), like('a2', 'e'.repeat(64))],
+      ),
+    );
+    const likes = await fetchListingLikes(COORD, ME, [], new AbortController().signal);
+    expect(likes.myReactionIds).toEqual(['mine']);
+    expect(likes.count).toBe(3);
+  });
+
+  it('skips the own-reactions query when signed out', async () => {
+    query.mockResolvedValue([like('a1', ALICE)]);
+    await fetchListingLikes(COORD, null, [], new AbortController().signal);
+    expect(query.mock.calls.filter(([, , f]) => f.kinds[0] === 7)).toHaveLength(1);
   });
 });
 

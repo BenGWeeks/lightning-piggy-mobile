@@ -5,7 +5,11 @@ import { DEFAULT_RELAYS } from '../services/nostrService';
 import { fetchLikedListings } from '../services/marketLikesService';
 import type { MarketProduct } from '../data/marketProducts';
 
+const EMPTY: MarketProduct[] = [];
+
 interface State {
+  /** Whose likes `products` are — never shown for another account. */
+  owner: string | null;
   products: MarketProduct[];
   loading: boolean;
   failed: boolean;
@@ -22,21 +26,32 @@ export function useLikedListings() {
     const r = relays.filter((x) => x.read).map((x) => x.url);
     return r.length > 0 ? r : DEFAULT_RELAYS;
   }, [relays]);
-  const [state, setState] = useState<State>({ products: [], loading: false, failed: false });
+  const [state, setState] = useState<State>({
+    owner: null,
+    products: [],
+    loading: false,
+    failed: false,
+  });
   const controllerRef = useRef<AbortController | null>(null);
 
   const load = useCallback(() => {
     controllerRef.current?.abort();
     if (!pubkey) {
-      setState({ products: [], loading: false, failed: false });
+      setState({ owner: null, products: [], loading: false, failed: false });
       return;
     }
     const controller = new AbortController();
     controllerRef.current = controller;
-    setState((prev) => ({ ...prev, loading: true, failed: false }));
+    // Keep the current list while refreshing, but only if it's this account's.
+    setState((prev) =>
+      prev.owner === pubkey
+        ? { ...prev, loading: true, failed: false }
+        : { owner: pubkey, products: [], loading: true, failed: false },
+    );
     fetchLikedListings(pubkey, readRelays, controller.signal).then(
       (products) => {
-        if (!controller.signal.aborted) setState({ products, loading: false, failed: false });
+        if (!controller.signal.aborted)
+          setState({ owner: pubkey, products, loading: false, failed: false });
       },
       () => {
         if (!controller.signal.aborted)
@@ -51,5 +66,12 @@ export function useLikedListings() {
       return () => controllerRef.current?.abort();
     }, [load]),
   );
-  return { ...state, signedIn: !!pubkey, refresh: load };
+  const products = state.owner === pubkey ? state.products : EMPTY;
+  return {
+    products,
+    loading: state.loading,
+    failed: state.failed,
+    signedIn: !!pubkey,
+    refresh: load,
+  };
 }

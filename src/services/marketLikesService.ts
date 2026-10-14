@@ -19,6 +19,8 @@ import type { MarketProduct } from '../data/marketProducts';
 // skew the count or the viewer's Liked items.
 
 const TIMEOUT_MS = 5000;
+/** Bound on the viewer's own reactions to one listing (normally 0 or 1). */
+const OWN_REACTIONS_LIMIT = 50;
 
 /** The user's read relays plus the Market relays listings (and likes) live on. */
 export function likeReadRelays(readRelays: readonly string[]): string[] {
@@ -54,12 +56,28 @@ export async function fetchListingLikes(
 ): Promise<ListingLikes> {
   const relays = likeReadRelays(readRelays);
   trackRelays(relays);
-  const reactions = await querySyncAbortable(
-    pool,
-    relays,
-    { kinds: [7], '#a': [coordinate], limit: LIKES_QUERY_LIMIT },
-    { maxWait: TIMEOUT_MS, signal, rejectOnAllRelaysFailure: true },
-  );
+  const [publicReactions, ownReactions] = await Promise.all([
+    querySyncAbortable(
+      pool,
+      relays,
+      { kinds: [7], '#a': [coordinate], limit: LIKES_QUERY_LIMIT },
+      { maxWait: TIMEOUT_MS, signal, rejectOnAllRelaysFailure: true },
+    ),
+    // The viewer's own reactions, author-scoped: on a popular listing the
+    // public query's limit can crowd them out, and Unlike must see every
+    // active like of ours or it retracts only some of them.
+    viewer
+      ? querySyncAbortable(
+          pool,
+          relays,
+          { kinds: [7], authors: [viewer], '#a': [coordinate], limit: OWN_REACTIONS_LIMIT },
+          { maxWait: TIMEOUT_MS, signal, rejectOnAllRelaysFailure: true },
+        )
+      : Promise.resolve([] as Event[]),
+  ]);
+  const byId = new Map<string, Event>();
+  for (const event of [...publicReactions, ...ownReactions]) byId.set(event.id, event);
+  const reactions = [...byId.values()];
   const deletions = signal.aborted ? [] : await fetchRetractions(reactions, relays, signal);
   return aggregateListingLikes(reactions, deletions, coordinate, viewer);
 }
