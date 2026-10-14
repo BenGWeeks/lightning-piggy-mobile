@@ -6,6 +6,7 @@ import MarketListingEditorScreen from './MarketListingEditorScreen';
 import { Alert } from '../components/BrandedAlert';
 import { StaleRevisionError } from '../utils/marketSellerRevision';
 import type { SellerSnapshot } from '../utils/marketSellerSnapshot';
+import type { ShippingOption } from '../utils/marketShipping';
 import { buildListingTemplate } from '../utils/marketSellerEvents';
 import type { ExploreNavigation, MarketListingEditorRoute } from '../navigation/types';
 
@@ -24,7 +25,13 @@ jest.mock('../components/MarketSellerHeader', () => () => null);
 jest.mock('../components/SellerCurrencyChips', () => () => null);
 jest.mock('../components/ListingPhotosField', () => () => null);
 jest.mock('../components/ListingShippingPicker', () => () => null);
-jest.mock('lucide-react-native', () => ({ Eye: () => null, Trash2: () => null }));
+jest.mock('lucide-react-native', () => ({
+  Eye: () => null,
+  Trash2: () => null,
+  Check: () => null,
+  Plus: () => null,
+}));
+jest.mock('../components/NewCollectionSheet', () => () => null);
 
 const key = new Uint8Array(32).fill(7);
 const pubkey = getPublicKey(key);
@@ -98,7 +105,19 @@ describe('listing creation after shop setup', () => {
         key,
       ),
       listings: [],
-      zones: [],
+      // A physical item needs a shipping option (#1534) — see
+      // MarketListingEditorGate.test.tsx for the gate itself.
+      zones: [
+        {
+          coordinate: `30406:${pubkey}:uk`,
+          pubkey,
+          dTag: 'uk',
+          title: 'UK',
+          baseAmount: 3,
+          currency: 'GBP',
+          countries: ['GB'],
+        } as ShippingOption,
+      ],
       zoneEvents: new Map(),
     };
   });

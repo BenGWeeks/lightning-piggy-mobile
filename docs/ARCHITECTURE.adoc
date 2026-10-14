@@ -219,8 +219,9 @@ A large, mostly-stateless service layer grouped by domain. Selected modules:
   ** *Friends* (`tab-friends`) — Nostr contacts + phone contacts.
 * The **Explore stack**: `ExploreHome`, `Lessons` / `CourseDetail` /
   `MissionDetail`, `Map`, `Places` / `PlaceDetail`, `Market` /
-  `MarketProductDetail` / `MarketMyShop` / `MarketShopSettings` /
-  `MarketListingEditor`, `Hunt` / `HuntCreate` / `HuntFound` /
+  `MarketProductDetail` / `MarketMyShop` (the seller hub) with
+  `MarketShopCurrencies` / `MarketShopShipping` / `MarketShopCollections` /
+  `MarketShopListings` / `MarketShopOrders`, and `MarketListingEditor`, `Hunt` / `HuntCreate` / `HuntFound` /
   `HuntPiggyDetail` / `MyPiglets` / `HuntLeaderboard`, `Events` /
   `EventDetail`.
 

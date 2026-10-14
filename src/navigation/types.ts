@@ -167,8 +167,15 @@ export type ExploreStackParamList = {
   // Seller side (#1273): the user's own shop, its settings (name, currency,
   // shipping zones) and the listing editor (`dTag` = edit that listing).
   MarketMyShop: undefined;
-  MarketShopSettings: undefined;
-  MarketListingEditor: { dTag?: string; returnToMyShop?: boolean } | undefined;
+  // My shop hub sub-screens (#1534).
+  MarketShopCurrencies: undefined;
+  MarketShopShipping: undefined;
+  MarketShopCollections: undefined;
+  MarketShopListings: undefined;
+  MarketShopOrders: undefined;
+  // `digital` presets a new listing's item type (the "It's a digital item"
+  // way past the shipping gate).
+  MarketListingEditor: { dTag?: string; returnToMyShop?: boolean; digital?: boolean } | undefined;
   Hunt: undefined;
   // `piggyId` opens the wizard in edit mode for an existing HiddenPiggy —
   // reuses the same screen, pre-fills every field, and on save replaces

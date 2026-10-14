@@ -1208,7 +1208,15 @@ The Market lists physical goods sold for sats, and lets anyone with a signer sel
 
 == Selling: My shop (#1273)
 
-A store button in the Market header opens *My shop* (`MarketMyShopScreen`). The first time, the seller sets up the shop (`MarketShopSettingsScreen` + `ShippingZoneEditor`): name, description, currency, and up to 10 shipping options, each with a name, a cost and the countries it ships to (quick picks Worldwide / UK / EU / US & Canada, or any country). *Sell an item* (`MarketListingEditorScreen`) takes photos (EXIF-stripped, uploaded to Blossom), title, Markdown description, price and currency, stock, which shipping options apply (each with an optional extra cost) and categories. *Your listings* has Edit, Preview (the real product page, with a banner) and Delete.
+A store button in the Market header opens *My shop* (`MarketMyShopScreen`), a hub (#1534). It has the merchant's profile card (with *Edit Profile*), then one grouped card of sections, each showing a live summary, then the primary *Sell an item* button:
+
+* *Currencies* (`MarketShopCurrenciesScreen`) — the shop's default currency. Gamma has no shop currency, so it stays on this phone (`sellerPreferences`) and prefills new listings and shipping options. A "Receive payments to" wallet setting will sit here too.
+* *Shipping options* (`MarketShopShippingScreen` + `ShippingZoneEditor`) — up to 10 kind-30406 options, each with a name, a cost and the countries it ships to (quick picks Worldwide / UK / EU / US & Canada, or any country). The form only loads from a completed relay fetch, and every save checks each option's current revision first (fail closed).
+* *Collections* (`MarketShopCollectionsScreen`) — create / edit / delete kind-30405 collections, and remove the legacy "shop" collection older versions wrote.
+* *Listings* (`MarketShopListingsScreen`) — *Your listings*, with Edit, Preview (the real product page, with a banner) and Delete.
+* *Orders* (`MarketShopOrdersScreen`) — incoming kind-16 orders for the seller's own listings, read from the encrypted DM store (`dmDb.getShopOrderRows` → `utils/shopOrders.ts`). It adds no relay subscription. Tapping an order opens the buyer's NIP-17 conversation at that order.
+
+*Sell an item* (`MarketListingEditorScreen`) takes photos (EXIF-stripped, uploaded to Blossom; the first is the cover, and photos can be reordered), title, Markdown description, price and currency, stock, collections (chips, plus a *New collection* popup), physical or digital, which shipping options apply (each with an optional extra cost) and categories. A physical item needs at least one shipping option. If the shop has none, *Sell an item* asks the seller to add some, or to say the item is digital, and the editor won't publish a physical listing until one exists (`utils/shopSellGate.ts`). A failed fetch counts as unknown, never as "no shipping options".
 
 [cols="1,3",options="header"]
 |===

@@ -20,6 +20,15 @@ export async function loadSellerCurrency(
   }
   return SELLER_CURRENCIES.includes(currency) ? currency : 'SATS';
 }
+const listeners = new Set<(pubkey: string) => void>();
+/** Fires after a currency save, so every open seller screen re-reads it. */
+export function subscribeSellerCurrency(listener: (pubkey: string) => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
 export async function saveSellerCurrency(pubkey: string, currency: string): Promise<void> {
   await AsyncStorage.setItem(key(pubkey), normaliseCurrency(currency));
+  for (const listener of listeners) listener(pubkey);
 }

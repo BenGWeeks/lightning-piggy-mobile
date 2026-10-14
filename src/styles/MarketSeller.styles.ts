@@ -115,6 +115,7 @@ export const createMarketSellerStyles = (colors: Palette) =>
     chipSelected: { borderColor: colors.brandPink, backgroundColor: colors.brandPinkLight },
     chipText: { fontSize: 13, fontWeight: '600', color: colors.textBody },
     chipTextSelected: { color: colors.brandPink },
+    chipNew: { borderStyle: 'dashed', borderColor: colors.brandPink },
     // ----- zone editor ----------------------------------------------------
     zoneCard: {
       borderRadius: 14,
@@ -153,6 +154,32 @@ export const createMarketSellerStyles = (colors: Palette) =>
       gap: 4,
     },
     photoAddText: { fontSize: 12, fontWeight: '600', color: colors.brandPink },
+    photoCount: { fontSize: 11, color: colors.textSupplementary },
+    photoTile: { gap: 4 },
+    photoCover: { borderWidth: 2, borderColor: colors.brandPink },
+    coverBadge: {
+      position: 'absolute',
+      left: 6,
+      bottom: 6,
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 8,
+      backgroundColor: colors.brandPink,
+    },
+    coverBadgeText: { fontSize: 11, fontWeight: '700', color: colors.white },
+    photoControls: { flexDirection: 'row', justifyContent: 'space-between', width: 88 },
+    photoControl: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
+    // ----- item type / shipping gate in the editor ---------------------------
+    shippingNotice: {
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.brandPink,
+      backgroundColor: colors.brandPinkLight,
+      padding: 12,
+      gap: 8,
+    },
+    shippingNoticeText: { fontSize: 14, lineHeight: 20, color: colors.textBody },
+    linkText: { fontSize: 15, fontWeight: '700', color: colors.brandPink },
     // ----- shipping toggles in the editor -----------------------------------
     shipRow: {
       borderRadius: 14,

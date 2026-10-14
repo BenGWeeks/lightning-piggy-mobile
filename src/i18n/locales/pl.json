@@ -2479,7 +2479,6 @@
       "loadError": "Nie udało się połączyć z twoimi przekaźnikami. Przeciągnij w dół, aby spróbować ponownie.",
       "retry": "Spróbuj ponownie",
       "setupButton": "Załóż sklep",
-      "editShop": "Edytuj sklep",
       "sellItem": "Sprzedaj produkt",
       "yourListings": "Twoje oferty",
       "noListings": "Nie masz jeszcze żadnych ofert. Dotknij „Sprzedaj produkt”, aby utworzyć pierwszą ofertę.",
@@ -2497,18 +2496,11 @@
       "deleted": "Oferta usunięta",
       "deleteFailed": "Nie udało się usunąć oferty",
       "shop": {
-        "title": "Ustawienia sklepu",
         "description": "Opis",
-        "currency": "Waluta",
-        "currencyHint": "Używana do kosztów dostawy i jako domyślna waluta cen.",
         "shipping": "Opcje dostawy",
         "shippingHint": "Każda opcja określa, dokąd wysyłasz i ile to kosztuje. Przy wystawianiu produktów wybierasz spośród tych opcji.",
         "addZone": "Dodaj opcję dostawy",
-        "save": "Zapisz sklep",
-        "saveAndAddFirstItem": "Zapisz i dodaj swój pierwszy przedmiot",
-        "saveForNow": "Na razie zapisz",
         "saving": "Zapisywanie…",
-        "saved": "Sklep zapisany",
         "saveFailed": "Nie udało się zapisać twojego sklepu",
         "fixErrors": "Sprawdź wyróżnione pola",
         "existingFound": "Znaleźliśmy i wczytaliśmy twój istniejący sklep. Sprawdź szczegóły, a potem zapisz ponownie.",
@@ -2532,7 +2524,6 @@
       "editor": {
         "newTitle": "Sprzedaj produkt",
         "editTitle": "Edytuj ofertę",
-        "photos": "Zdjęcia",
         "addPhoto": "Dodaj zdjęcie",
         "uploading": "Przesyłanie…",
         "removePhoto": "Usuń zdjęcie {{index}}",
@@ -2549,8 +2540,7 @@
         "quantity": "Ilość w magazynie",
         "quantityPlaceholder": "Zostaw puste, jeśli nie śledzisz stanu",
         "shipping": "Dostawa",
-        "shippingHint": "Wybierz sposób dostawy tego produktu. Dla produktów cyfrowych lub odbioru osobistego pozostaw wszystkie opcje wyłączone.",
-        "noZones": "Twój sklep nie ma jeszcze opcji dostawy. Dodaj je w ustawieniach sklepu.",
+        "shippingHint": "Wybierz, jak ten przedmiot jest wysyłany. Zostaw wszystkie wyłączone przy odbiorze osobistym.",
         "zoneBase": "{{amount}} {{currency}}",
         "extraCost": "Dopłata za ten produkt ({{currency}})",
         "extraCostPlaceholder": "0",
@@ -2571,7 +2561,22 @@
         "delete": "Usuń ofertę",
         "conflictBody": "Od otwarcia oferty jej dane zostały zmienione na innym urządzeniu lub w innej aplikacji. Mimo to zapisać twoją wersję?",
         "deletedBody": "To ogłoszenie zostało usunięte. Utworzyć je ponownie z wartościami z tego formularza?",
-        "recreate": "Utwórz ponownie"
+        "recreate": "Utwórz ponownie",
+        "photosLabel": "Zdjęcia (do {{max}}) — pierwsze to okładka",
+        "cover": "Okładka",
+        "setCover": "Ustaw zdjęcie {{index}} jako okładkę",
+        "movePhotoLeft": "Przesuń zdjęcie {{index}} w lewo",
+        "movePhotoRight": "Przesuń zdjęcie {{index}} w prawo",
+        "photoCount": "{{n}} / {{max}}",
+        "itemType": "Rodzaj przedmiotu",
+        "format": {
+          "physical": "Fizyczny",
+          "digital": "Cyfrowy"
+        },
+        "formatHint": {
+          "physical": "Wysyłany do kupującego lub odbierany osobiście.",
+          "digital": "Plik do pobrania, kod lub usługa. Nie wymaga wysyłki."
+        }
       },
       "errors": {
         "title": "Dodaj tytuł (do 200 znaków).",
@@ -2613,7 +2618,95 @@
         "image": "URL obrazu",
         "location": "Lokalizacja"
       },
-      "deleteCollectionTitle": "Usunąć tę kolekcję?"
+      "deleteCollectionTitle": "Usunąć tę kolekcję?",
+      "hub": {
+        "currencies": "Waluty",
+        "shipping": "Opcje wysyłki",
+        "collections": "Kolekcje",
+        "listings": "Oferty",
+        "orders": "Zamówienia",
+        "currencyValue": "{{currency}}",
+        "noneYet": "Jeszcze brak",
+        "checking": "Sprawdzanie…",
+        "unavailable": "Nie udało się wczytać",
+        "noOrders": "Brak zamówień",
+        "shippingCount": {
+          "one": "{{count}} opcja",
+          "other": "{{count}} opcji",
+          "few": "{{count}} opcje",
+          "many": "{{count}} opcji"
+        },
+        "collectionsCount": {
+          "one": "{{count}} kolekcja",
+          "other": "{{count}} kolekcji",
+          "few": "{{count}} kolekcje",
+          "many": "{{count}} kolekcji"
+        },
+        "listingsCount": {
+          "one": "{{count}} wystawiona",
+          "other": "{{count}} wystawionych",
+          "few": "{{count}} wystawione",
+          "many": "{{count}} wystawionych"
+        },
+        "ordersCount": {
+          "one": "{{count}} zamówienie",
+          "other": "{{count}} zamówień",
+          "few": "{{count}} zamówienia",
+          "many": "{{count}} zamówień"
+        },
+        "ordersNeedInvoice": {
+          "one": "{{count}} czeka na fakturę",
+          "other": "{{count}} czeka na fakturę",
+          "few": "{{count}} czekają na fakturę",
+          "many": "{{count}} czeka na fakturę"
+        }
+      },
+      "currencies": {
+        "defaultTitle": "Domyślna waluta",
+        "hint": "Wypełnia z góry cenę nowych ofert i nowych opcji wysyłki. Ceny, które już ustawiłeś, zachowują swoją walutę. Zapisywana na tym telefonie.",
+        "saved": "Waluta zapisana",
+        "saveFailed": "Nie udało się zapisać waluty"
+      },
+      "shipping": {
+        "save": "Zapisz opcje wysyłki",
+        "saved": "Opcje wysyłki zapisane",
+        "saveFailed": "Nie udało się zapisać opcji wysyłki",
+        "empty": "Brak opcji wysyłki. Dodaj jedną dla każdego miejsca, do którego wysyłasz."
+      },
+      "gate": {
+        "title": "Najpierw ustaw wysyłkę",
+        "body": "Kupujący muszą wiedzieć, jak wyślesz przedmioty fizyczne. Dodaj co najmniej jedną opcję wysyłki, zanim wystawisz produkt.",
+        "addShipping": "Dodaj opcje wysyłki",
+        "digital": "To przedmiot cyfrowy"
+      },
+      "orders": {
+        "line": "{{title}} × {{quantity}}",
+        "amount": "{{amount}} sats",
+        "hint": "Zamówienia od kupujących na twoje oferty. Dotknij, aby otworzyć czat.",
+        "emptyBody": "Gdy ktoś kupi jedną z twoich ofert, zamówienie pojawi się tutaj.",
+        "rowAccessibility": "Zamówienie od {{name}}: {{items}}, {{time}}"
+      },
+      "newCollection": {
+        "chip": "Nowa kolekcja",
+        "title": "Nowa kolekcja",
+        "name": "Nazwa",
+        "namePlaceholder": "np. wydruki 3D",
+        "nameRequired": "Nadaj kolekcji nazwę.",
+        "description": "Opis (opcjonalnie)",
+        "descriptionPlaceholder": "Co jest w tej kolekcji?",
+        "save": "Utwórz kolekcję",
+        "created": "Kolekcja utworzona",
+        "failed": "Nie udało się utworzyć kolekcji",
+        "hint": "Grupuj oferty, np. wydruki 3D"
+      },
+      "collectionsHint": "Grupuj swoje oferty, aby kupujący mogli przeglądać je razem.",
+      "noCollections": "Brak kolekcji.",
+      "collectionListings": {
+        "one": "{{count}} oferta",
+        "other": "{{count}} ofert",
+        "few": "{{count}} oferty",
+        "many": "{{count}} ofert"
+      }
     },
     "markdown": {
       "openLinkTitle": "Otworzyć link?",

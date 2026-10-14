@@ -433,6 +433,30 @@ export async function getOutgoingOrderRows(
   return out;
 }
 
+/** Bound for the seller Orders read — far more than a hobby shop's history. */
+export const SHOP_ORDER_ROW_LIMIT = 500;
+
+/**
+ * The owner's newest kind-16 order rows in BOTH directions (incoming orders
+ * plus our own payment requests) for the seller's Orders screen (#1534). The
+ * caller (`deriveShopOrders`) keeps only orders for the seller's own listings
+ * and pairs them with the invoices already sent. Bounded by `limit`.
+ */
+export async function getShopOrderRows(
+  owner: string,
+  limit = SHOP_ORDER_ROW_LIMIT,
+): Promise<DmMessageRow[]> {
+  const db = await getLocalDb();
+  const res = await db.execute(
+    `SELECT * FROM dm_messages
+      WHERE owner = ? AND wire_kind = 16
+      ORDER BY created_at DESC
+      LIMIT ?;`,
+    [owner, limit],
+  );
+  return (res.rows ?? []).map(toRow);
+}
+
 /**
  * The latest message in each of this owner's conversations, newest-first —
  * the inbox list. This is the read that replaces the whole-inbox blob parse:

@@ -1,4 +1,4 @@
-import { loadSellerCurrency } from '../services/sellerPreferences';
+import { loadSellerCurrency, subscribeSellerCurrency } from '../services/sellerPreferences';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { useNostr } from '../contexts/NostrContext';
@@ -111,6 +111,15 @@ export function useSellerShop(): UseSellerShop {
   }, [pubkey, version]);
 
   const shopId = snapshot.shop?.id ?? '';
+  // Bumped when the Currencies screen saves, so every seller screen re-reads.
+  const [currencyVersion, setCurrencyVersion] = useState(0);
+  useEffect(
+    () =>
+      subscribeSellerCurrency((changed) => {
+        if (changed === pubkey) setCurrencyVersion((v) => v + 1);
+      }),
+    [pubkey],
+  );
   useEffect(() => {
     if (!pubkey) return;
     let cancelled = false;
@@ -124,7 +133,7 @@ export function useSellerShop(): UseSellerShop {
     return () => {
       cancelled = true;
     };
-  }, [pubkey, snapshot.shop, shopId]);
+  }, [pubkey, snapshot.shop, shopId, currencyVersion]);
 
   const canPublish = Boolean(isLoggedIn && ['nsec', 'amber', 'nip46'].includes(signerType ?? ''));
   const defaultCurrency = currency.pubkey === pubkey ? currency.value : 'SATS';

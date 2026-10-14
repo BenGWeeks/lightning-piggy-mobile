@@ -1,0 +1,88 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: My shop hub — Currencies, Shipping, Collections, Listings, Orders (#1534)
+---
+# Run signed in with a known seller fixture (a key, Amber or Nostr Connect
+# signer). Read-only: it opens each hub section and comes back. It never
+# saves a currency, publishes shipping options or collections, or lists an
+# item. Saves, publishing and the shipping gate are covered by unit tests.
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: 'tab-explore'
+    timeout: 60000
+- tapOn:
+    id: 'tab-explore'
+- extendedWaitUntil:
+    visible:
+      id: 'explore-card-market'
+    timeout: 15000
+- tapOn:
+    id: 'explore-card-market'
+- extendedWaitUntil:
+    visible:
+      id: 'market-my-shop-button'
+    timeout: 15000
+- tapOn:
+    id: 'market-my-shop-button'
+- extendedWaitUntil:
+    visible:
+      id: 'shop-hub-card'
+    timeout: 30000
+# "Edit shop" is gone. The profile card keeps "Edit Profile".
+- assertVisible:
+    id: 'merchant-edit-profile'
+- assertNotVisible:
+    id: 'my-shop-edit'
+- assertVisible:
+    id: 'my-shop-sell-item'
+
+- tapOn:
+    id: 'shop-hub-currencies'
+- extendedWaitUntil:
+    visible:
+      id: 'shop-currency-list'
+    timeout: 10000
+- tapOn:
+    id: 'shop-currencies-back'
+
+- tapOn:
+    id: 'shop-hub-shipping'
+- extendedWaitUntil:
+    visible:
+      id: 'shop-shipping-(save|retry)'
+    timeout: 30000
+- tapOn:
+    id: 'shop-shipping-back'
+
+- tapOn:
+    id: 'shop-hub-collections'
+- extendedWaitUntil:
+    visible:
+      id: 'shop-collections-screen'
+    timeout: 10000
+- assertVisible:
+    id: 'collection-create'
+- tapOn:
+    id: 'shop-collections-back'
+
+- tapOn:
+    id: 'shop-hub-listings'
+- extendedWaitUntil:
+    visible:
+      id: 'shop-listings-sell-item'
+    timeout: 10000
+- tapOn:
+    id: 'shop-listings-back'
+
+- tapOn:
+    id: 'shop-hub-orders'
+- extendedWaitUntil:
+    visible:
+      id: 'shop-orders-screen'
+    timeout: 10000
+- tapOn:
+    id: 'shop-orders-back'
+- extendedWaitUntil:
+    visible:
+      id: 'shop-hub-card'
+    timeout: 10000

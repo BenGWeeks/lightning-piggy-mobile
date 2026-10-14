@@ -1,7 +1,11 @@
 import { finalizeEvent, getPublicKey } from 'nostr-tools';
 import { buildShopTemplate } from '../utils/marketSellerTestFixtures';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { loadSellerCurrency, saveSellerCurrency } from './sellerPreferences';
+import {
+  loadSellerCurrency,
+  saveSellerCurrency,
+  subscribeSellerCurrency,
+} from './sellerPreferences';
 it('keeps currency as an account-scoped app default rather than publishing a shop event', async () => {
   await saveSellerCurrency('seller-a', 'eur');
   expect(await loadSellerCurrency('seller-a')).toBe('EUR');
@@ -31,4 +35,14 @@ it('migrates a verified GBP legacy merchant before the legacy collection is remo
   await saveSellerCurrency(pubkey, 'EUR');
   expect(await loadSellerCurrency(pubkey, shop)).toBe('EUR');
   expect(await loadSellerCurrency('other-account', shop)).toBe('SATS');
+});
+
+it('tells open seller screens when the currency is saved', async () => {
+  const listener = jest.fn();
+  const unsubscribe = subscribeSellerCurrency(listener);
+  await saveSellerCurrency('seller-a', 'gbp');
+  expect(listener).toHaveBeenCalledWith('seller-a');
+  unsubscribe();
+  await saveSellerCurrency('seller-a', 'usd');
+  expect(listener).toHaveBeenCalledTimes(1);
 });

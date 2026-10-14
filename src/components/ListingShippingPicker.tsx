@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TextInput, Switch } from 'react-native';
+import { View, Text, TextInput, Switch, TouchableOpacity } from 'react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { countryName } from '../data/countries';
@@ -15,6 +15,8 @@ interface Props {
   currency: string;
   showErrors: boolean;
   onChange: (value: ListingShippingDraft[]) => void;
+  /** Opens the shop's Shipping Options screen. */
+  onAddShipping: () => void;
   styles: MarketSellerStyles;
 }
 
@@ -32,12 +34,26 @@ const ListingShippingPicker: React.FC<Props> = ({
   currency,
   showErrors,
   onChange,
+  onAddShipping,
   styles,
 }) => {
   const colors = useThemeColors();
   const t = useTranslation();
   if (zones.length === 0) {
-    return <Text style={styles.muted}>{t('market.sell.editor.noZones')}</Text>;
+    // A physical item can't be published without a shipping option (#1534).
+    return (
+      <View style={styles.shippingNotice} testID="shop-shipping-required">
+        <Text style={styles.shippingNoticeText}>{t('market.sell.gate.body')}</Text>
+        <TouchableOpacity
+          onPress={onAddShipping}
+          accessibilityRole="link"
+          accessibilityLabel={t('market.sell.gate.addShipping')}
+          testID="shop-shipping-required-add"
+        >
+          <Text style={styles.linkText}>{t('market.sell.gate.addShipping')}</Text>
+        </TouchableOpacity>
+      </View>
+    );
   }
   return (
     <View style={styles.field}>
