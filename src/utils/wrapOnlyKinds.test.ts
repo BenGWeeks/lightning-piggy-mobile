@@ -94,6 +94,8 @@ describe('Marmot send path', () => {
       pubkey: ME,
       stop: () => undefined,
       getOrCreateDm: async () => ({ id: 'marmot:dm', relays: ['wss://r1'] }),
+      // sendMarmotDm adds a peer's newer devices before sending (#1559).
+      syncDmDevices: async () => undefined,
       sendRumor: async (_groupId: string, rumor: unknown) => {
         sent.push(rumor);
         return { 'wss://r1': true };
