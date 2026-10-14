@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
-import { ChevronRight, Trash2 } from 'lucide-react-native';
+import { Trash2 } from 'lucide-react-native';
 import RelayStatusDot from './RelayStatusDot';
 import { useTranslation } from '../contexts/LocaleContext';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -69,7 +69,6 @@ export default React.memo(function RelaySettingsRow({
           </Text>
         )}
         {tag && <Text style={styles.accessTag}>{t(`relayDetails.${tag}`)}</Text>}
-        <ChevronRight size={16} color={colors.white} />
       </TouchableOpacity>
       {onRemove && (
         <TouchableOpacity
