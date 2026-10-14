@@ -34,13 +34,12 @@ import { LastAdminError, normaliseAdmins } from '../utils/groupAdmins';
 import { installMarmotCryptoProvider, marmotCryptoProvider } from './marmotCryptoProvider';
 import {
   candidateMediaStates,
-  deriveMediaKeys,
   encryptMarmotMedia,
-  isMediaKeys,
   allAttachments,
   type MarmotMediaKeys,
 } from './marmotMedia';
 import { forgetMarmotDeletionsForGroup } from './marmotDeletionStore';
+import { forgetMediaKeys, loadOrDeriveMediaKeys, rememberMediaKeys } from './marmotMediaKeyStore';
 import {
   advertisesMediaV2,
   ensureKeyPackageSlot,
@@ -52,6 +51,8 @@ import {
 import { startPendingWelcomeRetries } from './marmotPendingWelcomes';
 import { retryPendingRetirement } from './marmotKeyPackageRetire';
 import { MarmotDeviceTracker } from './marmotDeviceTracker';
+import { MarmotDmDeviceSync } from './marmotDmDeviceSync';
+import { installMarmotSameClientRule } from './marmotSameClient';
 import {
   fetchDevices,
   fetchKeyPackageEvents,
@@ -169,6 +170,8 @@ export interface MarmotSessionOptions {
   groupBackfillPageSize?: number;
   /** Test seam: sign-out's wait for a key-package publish (default 5 s). */
   keyPackageDrainMs?: number;
+  /** Test seam: a send's wait for adding a 1:1's new devices (default 5 s). */
+  dmDeviceSyncWaitMs?: number;
 }
 
 export const toAppGroupId = (mlsGroupIdHex: string) => `${MARMOT_GROUP_ID_PREFIX}${mlsGroupIdHex}`;
@@ -210,12 +213,15 @@ export class MarmotSession {
   private readonly replenisher = new KeyPackageReplenisher(() => this.ensureKeyPackage());
   /** Each chat's devices per person (#1267) — read-only over group state. */
   readonly devices: MarmotDeviceTracker;
+  /** Adds devices installed since a 1:1 began (#1559). */
+  private readonly dmDevices: MarmotDmDeviceSync;
   private markReady!: () => void;
   /** Resolves once stored groups are loaded — joins must not race loadAll. */
   readonly ready = new Promise<void>((resolve) => (this.markReady = resolve));
 
   constructor(opts: MarmotSessionOptions) {
     installMarmotCryptoProvider();
+    installMarmotSameClientRule(); // a device per install, not per account (#1559)
     this.opts = opts;
     this.pubkey = opts.pubkey;
     const backend = opts.backend ?? createSqliteMarmotBackend(opts.pubkey);
@@ -301,6 +307,17 @@ export class MarmotSession {
       groups: () => this.client.groups.loaded,
       fetchKeyPackages: (pk) => fetchKeyPackageEvents(network, opts.getLookupRelays(), pk),
       ownClient: CLIENT_NAME,
+    });
+    this.dmDevices = new MarmotDmDeviceSync({
+      self: opts.pubkey,
+      backend: this.backend,
+      fetchKeyPackages: (pk) => fetchKeyPackageEvents(network, opts.getLookupRelays(), pk),
+      groupState: async (mlsId) => (await this.client.groups.get(mlsId)).state,
+      invite: (mlsId, devices) => this.inviteAll(mlsId, devices, { partial: true }),
+      ownSlot: () => this.installationSlot(),
+      silentSigner: opts.signerType === 'nsec',
+      stopped: () => this.gate.stopped,
+      sendWaitMs: opts.dmDeviceSyncWaitMs,
     });
   }
 
@@ -557,7 +574,11 @@ export class MarmotSession {
     return undelivered;
   }
 
-  private inviteAll(mlsId: string, devices: Map<string, NostrEvent[]>) {
+  private async inviteAll(
+    mlsId: string,
+    devices: Map<string, NostrEvent[]>,
+    opts: { partial?: boolean } = {},
+  ) {
     const progress = (done: number, total: number) =>
       this.listeners.forEach((l) => l.onInviteProgress?.({ done, total }));
     const groups = {
@@ -565,7 +586,27 @@ export class MarmotSession {
       send: (id: string, intent: GroupSendIntent) => this.sendIntent(id, intent),
     };
     void this.devices.rememberKeyPackages([...devices.values()].flat()).catch(() => undefined);
-    return inviteDevices(groups, this.outbox, mlsId, this.pubkey, devices, progress);
+    const result = await inviteDevices(
+      groups,
+      this.outbox,
+      mlsId,
+      this.pubkey,
+      devices,
+      progress,
+      opts,
+    );
+    await this.dmDevices.noteInvited(mlsId, result.invited).catch(() => undefined);
+    return result;
+  }
+
+  /** Before a send / on open: add devices the 1:1's two people installed
+   * since it began (#1559). Bounded; never throws, never blocks for long. */
+  async syncDmDevices(appGroupId: string, reason: 'send' | 'open' = 'send'): Promise<void> {
+    const dm = this.getGroup(appGroupId);
+    // Adds are admin-only; in a DM both people are admins.
+    if (!dm?.isDm || !dm.memberPubkeys[0] || !dm.adminPubkeys.includes(this.pubkey.toLowerCase()))
+      return;
+    await this.dmDevices.sync(toMlsGroupId(appGroupId), dm.memberPubkeys[0], reason);
   }
 
   /** Every outbound group intent goes through here: never queued inside
@@ -667,7 +708,7 @@ export class MarmotSession {
   /** Record the key of a photo we're sending, so its row reads back the
    * same when the startup replay re-delivers our own message. */
   async rememberMediaKeys(appGroupId: string, rumorId: string, keys: MarmotMediaKeys) {
-    await this.backend.set(`mediaKeys:${toMlsGroupId(appGroupId)}`, rumorId, JSON.stringify(keys));
+    await rememberMediaKeys(this.backend, toMlsGroupId(appGroupId), rumorId, keys);
   }
 
   /** Send an app event; resolves with relay URL → accepted. Rejects with
@@ -826,7 +867,9 @@ export class MarmotSession {
       // Capture the epochs NOW: the photo or voice note's key comes from the epoch it was
       // sent in, and retained epochs are pruned as the group moves on.
       const states = candidateMediaStates(g);
-      void this.mediaKeysFor(g, rumor, states).then((mediaKeys) => this.emit(g, rumor, mediaKeys));
+      void loadOrDeriveMediaKeys(this.backend, g, rumor, states).then((mediaKeys) =>
+        this.emit(g, rumor, mediaKeys),
+      );
       return;
     }
     this.emit(g, rumor);
@@ -845,37 +888,6 @@ export class MarmotSession {
       groupId: event.group.id,
       ...(event.group.isDm ? { conversationPubkey: event.group.memberPubkeys[0] } : {}),
     });
-  }
-
-  /**
-   * A photo message's file keys, derived once and kept: the startup history
-   * replay re-delivers it after its epoch may have been pruned, and must not
-   * replace the stored keys with ones that can no longer decrypt it.
-   */
-  private async mediaKeysFor(
-    g: SessionGroup,
-    rumor: MarmotRumor,
-    states: SessionGroup['state'][],
-  ): Promise<MarmotMediaKeys | undefined> {
-    const ns = `mediaKeys:${g.idStr}`;
-    try {
-      const saved = await this.backend.get(ns, rumor.id);
-      // Only trust a saved entry in the current shape; anything else (an
-      // older dev build's format) is re-derived rather than read as empty.
-      const parsed = saved ? (JSON.parse(saved) as unknown) : null;
-      if (isMediaKeys(parsed)) return parsed;
-      const keys = await deriveMediaKeys(
-        states,
-        g.ciphersuite,
-        g.mediaService.mediaPolicy,
-        rumor.tags,
-      );
-      await this.backend.set(ns, rumor.id, JSON.stringify(keys));
-      return keys;
-    } catch (e) {
-      if (__DEV__) console.warn('[Marmot] media key derivation failed:', e);
-      return undefined;
-    }
   }
 
   /**
@@ -898,7 +910,7 @@ export class MarmotSession {
     all.sort((a, b) => b.created_at - a.created_at);
     for (const old of all.slice(HISTORY_KEEP)) {
       await this.backend.remove(ns, old.id);
-      await this.backend.remove(`mediaKeys:${g.idStr}`, old.id);
+      await forgetMediaKeys(this.backend, g.idStr, old.id);
     }
   }
 

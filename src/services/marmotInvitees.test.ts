@@ -130,6 +130,14 @@ describe('selectDeviceKeyPackages', () => {
     // Nothing fresh: the newest valid one still keeps the contact reachable.
     const onlyStale = await selectDeviceKeyPackages(little.pubkey, [wn40, lp20], { nowSecs: now });
     expect(onlyStale.map((e) => e.id)).toEqual([lp20.id]);
+    // Topping up an existing chat (#1559): stale devices are ignored, no fallback.
+    const freshOnly = { nowSecs: now, freshOnly: true };
+    const topUp = await selectDeviceKeyPackages(little.pubkey, [lp20, wn20, wn40], freshOnly);
+    expect(topUp.map((e) => e.id)).toEqual([wn20.id]);
+    expect(await selectDeviceKeyPackages(little.pubkey, [wn40, lp20], freshOnly)).toEqual([]);
+    // ...and an unusable key package is "no new device", not an error.
+    const year = { nowSecs: now + 365 * DAY, freshOnly: true };
+    expect(await selectDeviceKeyPackages(little.pubkey, [devices[0]], year)).toEqual([]);
   });
 
   it('skips installs without encrypted media v2 (White Noise drops the whole Welcome)', async () => {
