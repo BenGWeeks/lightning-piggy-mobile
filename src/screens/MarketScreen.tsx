@@ -199,7 +199,8 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
     update({
       merchant: request.merchant,
       ...(request.mode ? { mode: request.mode } : {}),
-      country: null,
+      shipsTo: null,
+      includeUnknownShipping: true,
       currency: null,
     });
     setQuery('');

@@ -323,7 +323,13 @@ it.each(['preferred', 'wotFriends'] as const)(
     const seller = 'a'.repeat(64);
     mockCompleted = true;
     mockLoading = false;
-    mockInitialPreferences = { mode, merchant: seller, country: 'DE', currency: 'EUR' };
+    mockInitialPreferences = {
+      mode,
+      merchant: seller,
+      shipsTo: 'DE',
+      includeUnknownShipping: false,
+      currency: 'EUR',
+    };
     mockSelectedCollection = `30405:${seller}:old-collection`;
     mockLiveProducts = [
       {
@@ -350,7 +356,8 @@ it.each(['preferred', 'wotFriends'] as const)(
     expect(mockUpdate).toHaveBeenCalledWith({
       merchant: seller,
       mode,
-      country: null,
+      shipsTo: null,
+      includeUnknownShipping: true,
       currency: null,
     });
     expect(mockSelectCollection).toHaveBeenCalledWith(null);
