@@ -164,6 +164,7 @@ const ShopAlertsSection: React.FC = () => {
   return (
     <View style={styles.card} testID="notifications-shop-alerts">
       <SettingsRow
+        kind="toggle"
         grouped
         icon={MapPin}
         title={t('shopAlerts.alertMeNearShops')}
@@ -185,6 +186,7 @@ const ShopAlertsSection: React.FC = () => {
         }}
       />
       <SettingsRow
+        kind="value"
         grouped
         icon={Radius}
         title={t('shopAlerts.alertRadius')}
@@ -214,6 +216,7 @@ const ShopAlertsSection: React.FC = () => {
       </View>
 
       <SettingsRow
+        kind="toggle"
         grouped
         icon={Moon}
         title={t('shopAlerts.quietHours')}

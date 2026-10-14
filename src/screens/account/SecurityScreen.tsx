@@ -115,6 +115,7 @@ const SecurityScreen: React.FC = () => {
       <SettingsSection scope="account" testID="security-account">
         <KeyBackupEntry />
         <SettingsRow
+          kind="navigate"
           icon={ShieldCheck}
           title={t('securityScreen.confirmLargeSends')}
           value={

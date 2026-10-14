@@ -99,6 +99,7 @@ export default function SegmentedRow({
         ))}
       {fallback ? (
         <SettingsRow
+          kind="navigate"
           icon={Icon}
           title={title}
           details={details}

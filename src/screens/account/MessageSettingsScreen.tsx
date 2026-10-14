@@ -10,6 +10,8 @@ import { useNostr } from '../../contexts/NostrContext';
 import { useAccountState } from '../../contexts/useAccountState';
 import { getLinkPreviewEnabled, setLinkPreviewEnabled } from '../../services/linkPreviewPreference';
 import { useSettingsPicker } from '../../hooks/useSettingsPicker';
+import { useInvitationDeviceSummary } from '../../hooks/useInvitationDeviceSummary';
+import { invitationDeviceSummaryLabel } from '../../utils/invitationDeviceSummary';
 import { Text } from 'react-native';
 import { useThemeColors } from '../../contexts/ThemeContext';
 import { createSharedAccountStyles } from './sharedStyles';
@@ -41,6 +43,7 @@ const MessageSettingsScreen: React.FC = () => {
   // Per account (#1231): reload for the active account, ignore a late answer
   // for one we've switched away from.
   const [linkPreviewOn, setLinkPreviewOn] = useAccountState<boolean>(pubkey, true);
+  const deviceSummary = invitationDeviceSummaryLabel(useInvitationDeviceSummary());
   const openPicker = useSettingsPicker(pubkey, (value) => {
     if (value === 'friends' || value === 'all') setWotTier(value as WotTier);
   });
@@ -64,12 +67,12 @@ const MessageSettingsScreen: React.FC = () => {
       <AmberPermissionSection />
       <SettingsSection scope="account" testID="messages-account">
         <SettingsRow
+          kind="navigate"
           icon={ShieldCheck}
           title={t('messageSettingsScreen.trustTitle')}
           subtitle={t(TIER_TITLE[wotTier])}
           subtitleTestID="messages-trust-tier-value"
           testID="messages-trust-tier"
-          accessibilityRole="button"
           details={[
             t('messageSettingsScreen.trustHint'),
             t('webOfTrustBottomSheet.explainer'),
@@ -94,6 +97,7 @@ const MessageSettingsScreen: React.FC = () => {
           })}
         />
         <SettingsRow
+          kind="toggle"
           icon={Link2}
           title={t('securityScreen.showLinkPreviews')}
           value={t(linkPreviewOn ? 'settingsScreens.on' : 'settingsScreens.off')}
@@ -107,9 +111,11 @@ const MessageSettingsScreen: React.FC = () => {
           }}
         />
         <SettingsRow
+          kind="navigate"
           icon={KeyRound}
           title={t('invitationKeys.title')}
-          value={t('settingsKit.status.unknown')}
+          value={t(deviceSummary.key, deviceSummary.options)}
+          subtitleTestID="nostr-invitation-keys-value"
           details={t('invitationKeys.description')}
           testID="nostr-invitation-keys"
           onPress={() => navigation.navigate('AccountInvitationKeys')}

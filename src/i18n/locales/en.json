@@ -3041,7 +3041,15 @@
     "loadFailed": "Couldn't check your relays. Try again when you're connected.",
     "cancel": "Cancel",
     "failedTitle": "Couldn't stop invites",
-    "failedBody": "Some relays or your signer didn't respond. Tap Check again, then retry."
+    "failedBody": "Some relays or your signer didn't respond. Tap Check again, then retry.",
+    "summaryChecking": "Checking…",
+    "summaryUnavailable": "Couldn't check",
+    "summaryNotShared": "Not shared yet",
+    "summaryThisPhoneOnly": "This phone only",
+    "summaryDevices": {
+      "one": "%{count} device",
+      "other": "%{count} devices"
+    }
   },
   "displayLanguageScreen": {
     "title": "Display & language",
@@ -3335,7 +3343,8 @@
       "warn": "Needs attention",
       "error": "Error",
       "unknown": "Unknown"
-    }
+    },
+    "opensInBrowser": "Opens in browser"
   },
   "settingsPages": {
     "notSet": "Not set",

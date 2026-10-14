@@ -18,6 +18,7 @@ const DeviceNoticesSection: React.FC = () => {
   return (
     <View testID="advanced-developer-options">
       <SettingsRow
+        kind="toggle"
         icon={Smartphone}
         title={t('chatDevices.showChanges')}
         subtitle={t('settingsRows.deviceChangesSubtitle')}

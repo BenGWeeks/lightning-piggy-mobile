@@ -112,6 +112,7 @@ const WatcherPushSection: React.FC<{ pushEnabled: boolean }> = ({ pushEnabled })
         <React.Fragment key={category}>
           <View style={push.separator} />
           <SettingsRow
+            kind="toggle"
             icon={{ dm: MessageCircle, zap: Zap, mention: AtSign, payment: CreditCard }[category]}
             title={t(LABEL[category])}
             indent

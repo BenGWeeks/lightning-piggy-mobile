@@ -33,6 +33,7 @@ const AdvancedScreen: React.FC = () => {
     <AccountScreenLayout title={t('advancedScreen.title')}>
       <SettingsSection scope="account" testID="advanced-account">
         <SettingsRow
+          kind="navigate"
           icon={Radio}
           title={t('nostrScreen.title')}
           subtitle={t('advancedScreen.nostrNetworkSubtitle')}
@@ -41,6 +42,7 @@ const AdvancedScreen: React.FC = () => {
         />
         <View testID="advanced-experimental-features">
           <SettingsRow
+            kind="toggle"
             icon={FlaskConical}
             title={t('advancedScreen.secretMode')}
             subtitle={t('settingsRows.experimentalSubtitle')}
@@ -56,6 +58,7 @@ const AdvancedScreen: React.FC = () => {
       </SettingsSection>
       <SettingsSection scope="phone" testID="advanced-phone">
         <SettingsRow
+          kind="navigate"
           icon={Bitcoin}
           title={t('onChainScreen.title')}
           subtitle={t('advancedScreen.bitcoinNetworkSubtitle')}
@@ -66,6 +69,7 @@ const AdvancedScreen: React.FC = () => {
         <DeviceNoticesSection />
         {__DEV__ && (
           <SettingsRow
+            kind="navigate"
             icon={MessageCircle}
             title={t('advancedScreen.bubbleStyle')}
             subtitle={t(`advancedScreen.bubbleStyle${outgoingBubbleStyle}`)}
@@ -75,6 +79,7 @@ const AdvancedScreen: React.FC = () => {
         )}
         {(__DEV__ || process.env.EXPO_PUBLIC_KEEP_PERF_LOGS === '1') && (
           <SettingsRow
+            kind="navigate"
             icon={Gauge}
             title={t('hermesProfiler.title')}
             subtitle={t('settingsRows.profilerSubtitle')}

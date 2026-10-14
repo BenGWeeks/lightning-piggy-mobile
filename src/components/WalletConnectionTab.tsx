@@ -93,6 +93,7 @@ const WalletConnectionTab: React.FC<Props> = ({
       {coinosRecovery && (
         <View style={styles.recoveryCallout}>
           <SettingsRow
+            kind="value"
             appearance="surface"
             icon={ShieldAlert}
             title={t('walletSettingsSheet.recoveryInfoTitle')}
@@ -102,6 +103,7 @@ const WalletConnectionTab: React.FC<Props> = ({
             })}
           />
           <SettingsRow
+            kind="value"
             appearance="surface"
             icon={KeyRound}
             title={t('walletSettingsSheet.username')}
@@ -127,6 +129,7 @@ const WalletConnectionTab: React.FC<Props> = ({
           </TouchableOpacity>
 
           <SettingsRow
+            kind="value"
             appearance="surface"
             icon={KeyRound}
             title={t('walletSettingsSheet.password')}
@@ -183,6 +186,7 @@ const WalletConnectionTab: React.FC<Props> = ({
       {walletType === 'nwc' && relayUrl && (
         <>
           <SettingsRow
+            kind="value"
             appearance="surface"
             icon={Radio}
             title={t('walletSettingsSheet.relay')}
@@ -200,6 +204,7 @@ const WalletConnectionTab: React.FC<Props> = ({
       {walletType === 'nwc' && nwcConnection && (
         <>
           <SettingsRow
+            kind="value"
             appearance="surface"
             icon={KeyRound}
             title={t('walletSettingsSheet.nwcConnection')}
@@ -284,6 +289,7 @@ const WalletConnectionTab: React.FC<Props> = ({
           it only travels inside the gift-wrapped DM. */}
       {walletType === 'nwc' && (
         <SettingsRow
+          kind="action"
           appearance="surface"
           icon={Share2}
           title={t('walletSettingsSheet.shareWallet')}
@@ -298,6 +304,7 @@ const WalletConnectionTab: React.FC<Props> = ({
       {walletType === 'onchain' && xpubDisplay !== null && (
         <>
           <SettingsRow
+            kind="value"
             appearance="surface"
             icon={KeyRound}
             title={t('walletSettingsSheet.extendedPublicKey')}
@@ -324,6 +331,7 @@ const WalletConnectionTab: React.FC<Props> = ({
       {/* Migrate to self-custody (CoinOS managed wallets only, coming soon) */}
       {coinosRecovery && (
         <SettingsRow
+          kind="value"
           appearance="surface"
           icon={ShieldAlert}
           title={t('walletSettingsSheet.migrateSelfCustody')}

@@ -14,6 +14,8 @@ export const createSettingsRowStyles = (colors: Palette) =>
       marginTop: 8,
       minHeight: 76,
     },
+    // Single-line rows (no subtitle/value) don't reserve an empty second line.
+    compact: { minHeight: 56 },
     surface: { backgroundColor: colors.background },
     surfaceTitle: { color: colors.textHeader },
     surfaceSubtitle: { color: colors.textSupplementary },
@@ -36,4 +38,6 @@ export const createSettingsRowStyles = (colors: Palette) =>
     title: { color: colors.white, fontSize: 15, fontWeight: '600' },
     subtitle: { color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: 2 },
     info: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+    // Chevron / ↗ always sits last, after the ⓘ, and stretches to the row's height.
+    trailing: { alignSelf: 'stretch', justifyContent: 'center', paddingLeft: 4, minWidth: 28 },
   });

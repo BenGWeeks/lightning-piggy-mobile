@@ -45,6 +45,7 @@ const WalletsScreen: React.FC = () => {
           />
         ))}
         <SettingsRow
+          kind="navigate"
           icon={Plus}
           title={t('walletsScreen.addWallet')}
           onPress={() => setWizardOpen(true)}

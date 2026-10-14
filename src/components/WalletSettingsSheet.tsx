@@ -421,6 +421,7 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
         {/* Fixed footer: Remove stays outside the tabs, always visible. */}
         <View style={styles.footer} onLayout={(e) => setFooterHeight(e.nativeEvent.layout.height)}>
           <SettingsRow
+            kind="action"
             appearance="surface"
             icon={Trash2}
             title={t('walletSettingsSheet.removeWalletTitle')}

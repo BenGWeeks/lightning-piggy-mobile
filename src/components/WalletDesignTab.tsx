@@ -30,6 +30,7 @@ const WalletDesignTab: React.FC<Props> = ({ styles, t, selectedTheme, onSelectTh
   return (
     <View style={styles.tabContent}>
       <SettingsRow
+        kind="value"
         appearance="surface"
         icon={Palette}
         title={t('walletSettingsSheet.cardDesign')}
@@ -45,6 +46,7 @@ const WalletDesignTab: React.FC<Props> = ({ styles, t, selectedTheme, onSelectTh
       </View>
 
       <SettingsRow
+        kind="action"
         appearance="surface"
         icon={Save}
         title={t('walletSettingsSheet.save')}

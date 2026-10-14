@@ -67,6 +67,7 @@ export default function DisplayLanguageScreen() {
     <AccountScreenLayout title={t('displayLanguageScreen.title')}>
       <SettingsSection scope="account" testID="display-language-account">
         <SettingsRow
+          kind="navigate"
           icon={CircleDollarSign}
           title={t('displayScreen.currency')}
           value={t('settingsScreens.currencyValue', { code: currency, name: currencyName })}
@@ -78,6 +79,7 @@ export default function DisplayLanguageScreen() {
           onPress={() => navigation.navigate('AccountCurrency')}
         />
         <SettingsRow
+          kind="navigate"
           icon={Globe}
           title={t('languageScreen.sectionLabel')}
           value={

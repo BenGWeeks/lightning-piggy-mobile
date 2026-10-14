@@ -11,6 +11,10 @@ import {
   type InvitationInventory,
 } from '../services/marmotInvitationKeys';
 import { groupInvitationDevices, type InvitationDevice } from '../services/marmotInvitationDevices';
+import {
+  rememberInvitationDeviceSummary,
+  summariseInvitationDevices,
+} from '../utils/invitationDeviceSummary';
 
 const EMPTY: InvitationInventory = { keys: [], partial: false };
 /** Signer approvals one removal needs: the deletion, plus one replacement per device. */
@@ -37,6 +41,13 @@ export function useInvitationKeys() {
     setError(false);
     try {
       const result = await loadInvitationKeys(pubkey, relays);
+      if (owner.current === pubkey) {
+        // Keeps Settings → Messages' "Devices for new chats" value in step.
+        rememberInvitationDeviceSummary(
+          pubkey,
+          summariseInvitationDevices(groupInvitationDevices(result.keys, result.localSlot)),
+        );
+      }
       if (seq === sequence.current && owner.current === pubkey) setInventory(result);
     } catch {
       if (seq === sequence.current) setError(true);
