@@ -1,4 +1,4 @@
-appId: dev.ipf.whitenoise.android
+appId: ${WN_APP_ID || 'dev.ipf.whitenoise.android'}
 ---
 # Building block (never run alone) for .maestro/interop/: open the run's
 # group in White Noise (third-party UI — text selectors only, its English copy

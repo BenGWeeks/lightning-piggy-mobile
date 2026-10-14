@@ -23,7 +23,11 @@ name: Interop — after an admin change, Lightning Piggy renames the group and s
 - tapOn:
     id: 'rename-group-input'
 - eraseText: 40
-- inputText: 'IO ${TAG} renamed'
+# Typed in chunks: Gboard dropped a character from the one-shot input.
+- inputText: 'IO '
+- inputText: '${TAG}'
+- inputText: ' ren'
+- inputText: 'amed'
 - tapOn:
     id: 'rename-group-save'
 - waitForAnimationToEnd:

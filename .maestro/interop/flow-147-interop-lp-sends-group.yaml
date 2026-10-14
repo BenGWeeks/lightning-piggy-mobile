@@ -104,13 +104,13 @@ name: Interop — Lightning Piggy sends the item set into the run's Marmot group
     times: 6
     while:
       notVisible:
-        text: 'IO${TAG}L deleteme should disappear'
+        text: '(?s).*IO${TAG}L (deleteme|Delete-me) should disappear.*'
     commands:
       - swipe:
           direction: DOWN
           duration: 500
 - longPressOn:
-    text: 'IO${TAG}L deleteme should disappear'
+    text: '(?s).*IO${TAG}L (deleteme|Delete-me) should disappear.*'
 - tapOn:
     id: 'message-action-delete'
 - runFlow:

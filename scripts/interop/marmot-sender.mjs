@@ -11,8 +11,12 @@
 //           no name, both admins). Invites each invitee's fresh key packages
 //           whose `client` tag contains the substring (default: any) — one
 //           per install, so it doubles as the multi-device check.
+//           `<hex>@kp:<event id prefix>` pins one exact key package (install).
 //   send    --tag <tag> [--only a,b,c]   Send the item set (items.mjs).
 //   say     --text <text>                One chat message.
+//   raw     --kind <n> --text <text>     One application message of any kind.
+//   file    --path <file> --type <mime> [--text <caption>]
+//           An encrypted MIP-04 file attachment (imeta).
 //   rename  --name <name>                Admin rename (group-profile commit).
 //   admins  --set <hex>,<hex>            Replace the admin set (admin-policy commit).
 //   listen  --seconds <n> [--expect <regex>]...
@@ -245,6 +249,9 @@ async function freshKeyPackages(target, clientFilter) {
   }
   return [...bySlot.values()].filter((e) => {
     if (!e.content) return false;
+    // `kp:<id prefix>` pins one exact key package (one install) instead of a client substring.
+    if (clientFilter?.startsWith('kp:'))
+      return e.id.startsWith(clientFilter.slice(3).toLowerCase());
     const clientTag = e.tags.find((t) => t[0] === 'client')?.[1] ?? '';
     return !clientFilter || clientTag.toLowerCase().includes(clientFilter.toLowerCase());
   });
@@ -382,6 +389,33 @@ async function cmdSay() {
   out({ ok: true, id: res.id.slice(0, 12) });
 }
 
+// raw --kind <n> --text <content>: one application message of any kind (e.g. an
+// unknown kind, to check the receiver's unsupported-message placeholder).
+async function cmdRaw() {
+  const kind = Number(flags.kind ?? die('--kind is required'));
+  const group = await openGroup();
+  await connectAndSettle();
+  const res = await send(group, rumor(kind, flags.text ?? ''));
+  out({ ok: true, kind, id: res.id.slice(0, 12) });
+}
+
+// file --path <file> --type <mime> [--text <caption>]: an encrypted MIP-04 file
+// attachment (imeta), the same shape as the image / voice items.
+async function cmdFile() {
+  const path = flags.path ?? die('--path is required');
+  const type = flags.type ?? 'application/octet-stream';
+  const filename = path.split('/').pop();
+  const group = await openGroup();
+  await connectAndSettle();
+  const { attachment } = await group.uploadMedia(
+    new Blob([readFileSync(path)], { type }),
+    { filename, type },
+    { servers: MEDIA_SERVERS },
+  );
+  const res = await send(group, rumor(9, flags.text ?? '', [encodeMediaImetaTag(attachment)]));
+  out({ ok: true, file: filename, type, id: res.id.slice(0, 12) });
+}
+
 async function cmdCommit(proposals, label) {
   const group = await openGroup();
   await connectAndSettle();
@@ -435,6 +469,8 @@ const commands = {
   create: cmdCreate,
   send: cmdSend,
   say: cmdSay,
+  raw: cmdRaw,
+  file: cmdFile,
   rename: () =>
     cmdCommit(
       spread(Proposals.proposeUpdateMetadata({ name: flags.name ?? die('--name') }), 1),
