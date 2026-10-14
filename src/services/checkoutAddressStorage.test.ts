@@ -1,6 +1,7 @@
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
+  MAX_REMEMBERED_CHARS,
   checkoutAddressGeneration,
   checkoutAddressKey,
   readCheckoutAddress,
@@ -9,6 +10,7 @@ import {
 } from './checkoutAddressStorage';
 const mockDisk = new Map<string, string>();
 jest.mock('expo-secure-store', () => ({
+  AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 'afterFirstUnlockThisDeviceOnly',
   getItemAsync: jest.fn(async (key: string) => mockDisk.get(key) ?? null),
   setItemAsync: jest.fn(async (key: string, value: string) => {
     mockDisk.set(key, value);
@@ -35,6 +37,7 @@ it('remember off writes nothing; opt-in uses SecureStore only', async () => {
   expect(SecureStore.setItemAsync).toHaveBeenCalledWith(
     checkoutAddressKey('a'),
     JSON.stringify(fields),
+    { keychainAccessible: 'afterFirstUnlockThisDeviceOnly' },
   );
   expect(await readCheckoutAddress('a')).toEqual(fields);
   expect(AsyncStorage.setItem).not.toHaveBeenCalled();
@@ -68,4 +71,11 @@ it('drains a native write before deleting the address', async () => {
   release();
   await Promise.all([write, wipe]);
   expect(await readCheckoutAddress('a')).toBeNull();
+});
+
+it("doesn't remember an address too long for secure storage", async () => {
+  (SecureStore.setItemAsync as jest.Mock).mockClear();
+  const huge = { ...fields, line2: 'x'.repeat(MAX_REMEMBERED_CHARS) };
+  await rememberCheckoutAddress('big', huge, true);
+  expect(SecureStore.setItemAsync).not.toHaveBeenCalled();
 });

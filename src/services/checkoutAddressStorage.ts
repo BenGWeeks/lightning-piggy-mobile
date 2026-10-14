@@ -41,12 +41,22 @@ export function rememberCheckoutAddress(
   queue = queue
     .catch(() => {})
     .then(async () => {
-      if (checkoutAddressGeneration(account) === epoch) {
-        await SecureStore.setItemAsync(checkoutAddressKey(account), JSON.stringify(fields));
-      }
+      if (checkoutAddressGeneration(account) !== epoch) return;
+      const value = JSON.stringify(fields);
+      // expo-secure-store's Android limit is 2048 bytes; a longer address simply
+      // isn't remembered rather than failing the write.
+      if (value.length > MAX_REMEMBERED_CHARS) return;
+      // Device-only, like every other secret in the app: never migrates via
+      // iCloud Keychain / device-to-device transfer.
+      await SecureStore.setItemAsync(checkoutAddressKey(account), value, {
+        keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
+      });
     });
   return queue;
 }
+/** Stays under expo-secure-store's 2048-byte Android value limit. */
+export const MAX_REMEMBERED_CHARS = 1800;
+
 export function wipeCheckoutAddress(account: string): Promise<void> {
   generations.set(account, checkoutAddressGeneration(account) + 1);
   queue = queue

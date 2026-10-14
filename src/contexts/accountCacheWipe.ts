@@ -77,7 +77,8 @@ import {
 
 export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise<void> {
   if (!loggedOutPubkey) return;
-  await wipeCheckoutAddress(loggedOutPubkey);
+  // Never let a SecureStore failure abort the rest of the per-account wipe.
+  await wipeCheckoutAddress(loggedOutPubkey).catch(() => undefined);
   await cancelNotificationDefaults(loggedOutPubkey);
   // Its weekly "Back up your key" reminder goes with it (#1546).
   await retireKeyBackupReminder(loggedOutPubkey).catch(() => undefined);
