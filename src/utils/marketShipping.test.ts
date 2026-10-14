@@ -299,3 +299,15 @@ describe('parseShippingOptionEvent — Gamma region tags', () => {
     expect(option?.regions).toEqual([]);
   });
 });
+
+it.each([
+  ['region'],
+  ['region', ''],
+  ['region', ' '],
+  ['region', 'bogus'],
+  ['region', 'US-TOOLONG'],
+])('rejects an empty or malformed region-only restriction: %j', (...region) => {
+  expect(
+    parseShippingOptionEvent(makeEvent([['d', 'bad-region'], ['price', '5', 'USD'], region])),
+  ).toBeNull();
+});

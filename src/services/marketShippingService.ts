@@ -87,12 +87,48 @@ export async function fetchShippingOptions(input: {
 // share a filter only when they request exactly the same set of identifiers.
 const COORDINATES_PER_QUERY = 100;
 const AUTHORS_PER_QUERY = 20;
+/** A display fetch must stay bounded even when sellers publish thousands of refs. */
+export const MAX_DISPLAY_SHIPPING_REFERENCES = 200;
+const MAX_CONCURRENT_DISPLAY_QUERIES = 4;
 
-/** Bounded filters whose authors × #d matches only requested coordinates. */
+function displayReferences(coordinates: readonly string[]): Set<string> {
+  const references = new Set<string>();
+  for (const coordinate of coordinates) {
+    if (!/^30406:[a-f0-9]{64}:.+$/.test(coordinate)) continue;
+    references.add(coordinate);
+    if (references.size === MAX_DISPLAY_SHIPPING_REFERENCES) break;
+  }
+  return references;
+}
+
+/** Drain each small group before starting more work, including on failure.
+ * Both shipping and deletion lookups share this concurrency bound. */
+async function queryDisplayFilters(
+  queryPool: Parameters<typeof querySyncAbortable>[0],
+  relays: string[],
+  filters: Filter[],
+  params: Parameters<typeof querySyncAbortable>[3],
+): Promise<Event[]> {
+  const events: Event[] = [];
+  for (let i = 0; i < filters.length; i += MAX_CONCURRENT_DISPLAY_QUERIES) {
+    if (params.signal?.aborted) return [];
+    const results = await Promise.allSettled(
+      filters
+        .slice(i, i + MAX_CONCURRENT_DISPLAY_QUERIES)
+        .map((filter) => querySyncAbortable(queryPool, relays, filter, params)),
+    );
+    for (const result of results) {
+      if (result.status === 'rejected') throw result.reason;
+      events.push(...result.value);
+    }
+  }
+  return events;
+}
+
+/** Filters for at most 200 references; authors × #d matches only requested coordinates. */
 export function shippingOptionFilters(coordinates: readonly string[]): Filter[] {
   const byAuthor = new Map<string, string[]>();
-  for (const coordinate of new Set(coordinates)) {
-    if (!/^30406:[a-f0-9]{64}:.+$/.test(coordinate)) continue;
+  for (const coordinate of displayReferences(coordinates)) {
     const author = coordinate.slice(6, 70);
     const identifiers = byAuthor.get(author) ?? [];
     identifiers.push(coordinate.slice(71));
@@ -137,7 +173,7 @@ export async function fetchShippingOptionsForDisplay(input: {
   relays: string[];
   signal?: AbortSignal;
 }): Promise<ShippingOption[]> {
-  const references = new Set(input.coordinates.filter((c) => /^30406:[a-f0-9]{64}:.+$/.test(c)));
+  const references = displayReferences(input.coordinates);
   if (references.size === 0) return [];
   const relays = Array.from(new Set([...input.relays, ...DEFAULT_RELAYS]));
   trackRelays(relays);
@@ -146,26 +182,23 @@ export async function fetchShippingOptionsForDisplay(input: {
     signal: input.signal,
     rejectOnAllRelaysFailure: true,
   };
-  const queries = shippingOptionFilters([...references]).map((filter) =>
-    querySyncAbortable(pool, relays, filter, params),
+  const events = (
+    await queryDisplayFilters(pool, relays, shippingOptionFilters([...references]), params)
+  ).filter(
+    (event) => event.kind === SHIPPING_OPTION_KIND && references.has(addressOf(event) ?? ''),
   );
-  const events = (await Promise.all(queries))
-    .flat()
-    .filter(
-      (event) => event.kind === SHIPPING_OPTION_KIND && references.has(addressOf(event) ?? ''),
-    );
+  if (input.signal?.aborted) return [];
   // The shared pool verifies signatures synchronously during delivery. Keep
   // deletion crypto in the budget-paced loop below instead.
   const lease = acquireMarketListingsPool(relays);
   let deletions: Event[];
   try {
-    deletions = (
-      await Promise.all(
-        [...deletionFilters('a', addressRefs(events)), ...deletionFilters('e', idRefs(events))].map(
-          (filter) => querySyncAbortable(lease.pool, relays, filter, params),
-        ),
-      )
-    ).flat();
+    deletions = await queryDisplayFilters(
+      lease.pool,
+      relays,
+      [...deletionFilters('a', addressRefs(events)), ...deletionFilters('e', idRefs(events))],
+      params,
+    );
   } finally {
     lease.release();
   }

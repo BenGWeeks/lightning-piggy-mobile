@@ -6,6 +6,7 @@ import { deviceCountryCode } from '../data/countries';
 import type { MarketProduct } from '../data/marketProducts';
 import { cachedShippingOption, resolveShippingOptions } from '../services/marketShippingCache';
 import type { ShippingOption } from '../utils/marketShipping';
+import { marketSnapshotRelays } from '../utils/marketListingsQuery';
 import {
   normalizeShipsToSelection,
   productShipsTo,
@@ -36,10 +37,9 @@ export function useMarketShipsTo(
   enabled: boolean,
 ): MarketShipsTo {
   const { relays } = useNostr();
-  const readKey = relays
-    .filter((r) => r.read)
-    .map((r) => r.url)
-    .join(',');
+  const readKey = marketSnapshotRelays(relays.filter((r) => r.read).map((r) => r.url)).urls.join(
+    ',',
+  );
   const coordinateKey = useMemo(
     () => shippingCoordinatesOf(products).sort().join('\n'),
     [products],

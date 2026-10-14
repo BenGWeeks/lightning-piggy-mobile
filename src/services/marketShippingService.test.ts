@@ -367,3 +367,90 @@ test('retains all 20 requested pairs when 380 newer cross-matches would truncate
   const options = await fetchShippingOptionsForDisplay({ ...input, coordinates });
   expect(options.map((option) => option.coordinate).sort()).toEqual([...coordinates].sort());
 });
+
+describe('display fetch resource bounds', () => {
+  const references = Array.from(
+    { length: 10_000 },
+    (_, i) => `30406:${i.toString(16).padStart(64, '0')}:std`,
+  );
+
+  test('caps 10,000 seller references and limits shipping AND deletion concurrency', async () => {
+    let active = 0;
+    const peak = new Map<number, number>();
+    (querySyncAbortable as jest.Mock)
+      .mockReset()
+      .mockImplementation(async (_pool, _relays, filter) => {
+        active++;
+        const kind = filter.kinds[0];
+        peak.set(kind, Math.max(peak.get(kind) ?? 0, active));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        active--;
+        if (kind === 5) return [];
+        // Two revisions per coordinate create six deletion queries (2 address,
+        // 4 event-id), so deletion concurrency exercises the same bound.
+        return filter.authors.flatMap((pubkey: string) =>
+          filter['#d'].flatMap((d: string) =>
+            [1, 2].map((revision) => ({
+              id: `${pubkey}-${d}-${revision}`,
+              kind,
+              pubkey,
+              created_at: revision,
+              tags: [
+                ['d', d],
+                ['price', '5', 'GBP'],
+                ['country', 'GB'],
+              ],
+            })),
+          ),
+        );
+      });
+    const options = await fetchShippingOptionsForDisplay({ ...input, coordinates: references });
+    const filters = (querySyncAbortable as jest.Mock).mock.calls.map((call) => call[2]);
+    const shippingFilters = filters.filter((filter) => filter.kinds[0] === 30406);
+    expect(shippingFilters).toHaveLength(10); // Previously 500 simultaneous queries.
+    expect(options.map((option) => option.coordinate).sort()).toEqual(
+      references.slice(0, 200).sort(),
+    );
+    expect(peak.get(30406)).toBe(4);
+    expect(peak.get(5)).toBe(4);
+    expect(filters.filter((filter) => filter.kinds[0] === 5)).toHaveLength(6);
+    expect(active).toBe(0);
+  });
+
+  test('the reference cap counts unique valid coordinates', () => {
+    const duplicated = references.flatMap((coordinate) => ['invalid', coordinate, coordinate]);
+    const requested = shippingOptionFilters(duplicated).flatMap((filter) =>
+      filter.authors!.flatMap((author) => filter['#d']!.map((d) => `30406:${author}:${d}`)),
+    );
+    expect(requested).toEqual(references.slice(0, 200));
+  });
+
+  test.each(['abort', 'failure'])(
+    'stops queued work on %s and drains active queries',
+    async (reason) => {
+      const controller = new AbortController();
+      let active = 0;
+      let calls = 0;
+      (querySyncAbortable as jest.Mock).mockReset().mockImplementation(async () => {
+        const first = calls++ === 0;
+        active++;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        active--;
+        if (first) {
+          if (reason === 'failure') throw new Error('relay failure');
+          controller.abort();
+        }
+        return [];
+      });
+      const fetch = fetchShippingOptionsForDisplay({
+        ...input,
+        coordinates: references,
+        signal: controller.signal,
+      });
+      if (reason === 'failure') await expect(fetch).rejects.toThrow('relay failure');
+      else await expect(fetch).resolves.toEqual([]);
+      expect(calls).toBe(4);
+      expect(active).toBe(0);
+    },
+  );
+});

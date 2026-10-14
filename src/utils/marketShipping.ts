@@ -107,8 +107,10 @@ export function parseShippingOptionEvent(ev: ShippingOptionEventInput): Shipping
   // regions still ships to those regions' countries — never read it as
   // worldwide just because the country tag was left out.
   const regions = new Set<string>();
+  let hasRegionTag = false;
   for (const t of ev.tags) {
     if (t[0] !== 'region') continue;
+    hasRegionTag = true;
     for (const v of t.slice(1)) {
       const code = typeof v === 'string' ? v.trim().toUpperCase() : '';
       if (/^[A-Z]{2}-[A-Z0-9]{1,3}$/.test(code)) regions.add(code);
@@ -118,7 +120,7 @@ export function parseShippingOptionEvent(ev: ShippingOptionEventInput): Shipping
   // ABSENT country (and region) tags = worldwide. A PRESENT tag that yields no usable code
   // (`['country']`, `['country', '']`) is a malformed restriction — reject it
   // rather than collapse to [] and offer the option to every destination.
-  if (hasCountryTag && countries.size === 0) return null;
+  if ((hasCountryTag || hasRegionTag) && countries.size === 0) return null;
   // Every restriction must be a real ISO 3166-1 code: `toAlpha2` passes
   // unknown tokens through, and a bogus `ZZZ` would otherwise read as a
   // legitimate "we don't ship there" instead of an invalid option.

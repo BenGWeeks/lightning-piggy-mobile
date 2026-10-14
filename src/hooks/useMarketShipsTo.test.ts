@@ -5,6 +5,7 @@ import { MARKET_VENDORS } from '../data/marketVendors';
 import { clearShippingOptionCache } from '../services/marketShippingCache';
 import { fetchShippingOptionsForDisplay } from '../services/marketShippingService';
 import { parseShippingOptionEvent } from '../utils/marketShipping';
+import { shipsToMatches } from '../utils/marketShipsTo';
 import { useMarketShipsTo } from './useMarketShipsTo';
 
 let mockFocused = true;
@@ -21,6 +22,7 @@ jest.mock('../contexts/NostrContext', () => ({
 jest.mock('expo-localization', () => ({ useLocales: () => [{ regionCode: 'GB' }] }));
 jest.mock('../services/marketShippingService', () => ({
   fetchShippingOptionsForDisplay: jest.fn(),
+  MAX_DISPLAY_SHIPPING_REFERENCES: 200,
 }));
 const fetchMock = fetchShippingOptionsForDisplay as jest.Mock;
 const seller = 'a'.repeat(64);
@@ -143,3 +145,24 @@ test('keeps fresh cached shipping when fetching a new coordinate fails', async (
   expect(result.current.byProduct.get('product')).toEqual({ kind: 'countries', countries: ['GB'] });
   expect(result.current.byProduct.get('new-product')).toEqual({ kind: 'unknown' });
 });
+
+test.each(['wss://relay.plebeian.market', 'wss://nostr.mom'])(
+  'resolves shipping published only on marketplace relay %s',
+  async (shippingRelay) => {
+    fetchMock.mockImplementation(async ({ relays }: { relays: string[] }) =>
+      relays.includes(shippingRelay) ? [option('GB')] : [],
+    );
+    const { result } = renderHook(() => useMarketShipsTo(products, true));
+    await settle();
+    expect(fetchMock.mock.calls[0][0].relays).toEqual([
+      'wss://relay.plebeian.market',
+      'wss://nostr.mom',
+      'wss://example.com',
+    ]);
+    expect(result.current.byProduct.get('product')).toEqual({
+      kind: 'countries',
+      countries: ['GB'],
+    });
+    expect(shipsToMatches(result.current.byProduct.get('product')!, 'GB', false)).toBe(true);
+  },
+);

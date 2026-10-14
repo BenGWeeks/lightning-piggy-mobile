@@ -6,7 +6,10 @@ import {
 import { fetchShippingOptionsForDisplay } from './marketShippingService';
 import type { ShippingOption } from '../utils/marketShipping';
 
-jest.mock('./marketShippingService', () => ({ fetchShippingOptionsForDisplay: jest.fn() }));
+jest.mock('./marketShippingService', () => ({
+  fetchShippingOptionsForDisplay: jest.fn(),
+  MAX_DISPLAY_SHIPPING_REFERENCES: 200,
+}));
 const fetchMock = fetchShippingOptionsForDisplay as jest.Mock;
 
 const SELLER = 'a'.repeat(64);
@@ -81,4 +84,18 @@ test("doesn't record an aborted fetch's gaps as unpublished", async () => {
   });
   await resolveShippingOptions({ coordinates: [coord('uk')], relays, signal: controller.signal });
   expect(cachedShippingOption(coord('uk'))).toBeUndefined();
+});
+
+test('does not cache references beyond the fetch cap as unpublished and retries them next focus', async () => {
+  fetchMock.mockResolvedValue([]);
+  const coordinates = Array.from({ length: 201 }, (_, i) => coord(`zone-${i}`));
+  const first = await resolveShippingOptions({ coordinates, relays });
+  expect(fetchMock.mock.calls[0][0].coordinates).toEqual(coordinates.slice(0, 200));
+  expect(first.get(coordinates[200])).toBeNull();
+  expect(cachedShippingOption(coordinates[199])).toBeNull();
+  expect(cachedShippingOption(coordinates[200])).toBeUndefined();
+  fetchMock.mockResolvedValue([option('zone-200')]);
+  const second = await resolveShippingOptions({ coordinates, relays });
+  expect(fetchMock.mock.calls[1][0].coordinates).toEqual([coordinates[200]]);
+  expect(second.get(coordinates[200])?.countries).toEqual(['GB']);
 });
