@@ -1,4 +1,9 @@
-import { activeAccountRelays, activeAccountRelayRequests } from './testRelayRouting';
+import {
+  activeAccountRelays,
+  activeAccountRelayRequests,
+  eventAuthorRelays,
+  type RelayConnectionParams,
+} from './testRelayRouting';
 import type { AbstractSimplePool } from 'nostr-tools/abstract-pool';
 import type { Event as NostrEvent } from 'nostr-tools/pure';
 import {
@@ -92,9 +97,9 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
 
     ensureRelay(
       url: string,
-      params?: { connectionTimeout?: number; abort?: AbortSignal },
+      params?: RelayConnectionParams,
     ): ReturnType<AbstractSimplePool['ensureRelay']> {
-      url = activeAccountRelays([url])[0];
+      if (!params?.forPublish) url = activeAccountRelays([url])[0];
       let key = url;
       let wasConnected = false;
       try {
@@ -464,10 +469,16 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
       event: NostrEvent,
       params?: Parameters<AbstractSimplePool['publish']>[2],
     ): Promise<string>[] {
-      relays = activeAccountRelays(relays);
+      relays = eventAuthorRelays(relays, event);
       const keep = new Set(selectHealthyRelays(relays));
       const kept = relays.filter((r) => keep.has(r));
-      const results = super.publish(kept, event, params).map((p, i) =>
+      // The SDK calls this.ensureRelay asynchronously for writes. Give this
+      // operation a facade that carries the write context, without changing
+      // the singleton's read routing or mutable connection bookkeeping.
+      const publisher = Object.create(this) as this;
+      publisher.ensureRelay = (url, options) =>
+        this.ensureRelay(url, { ...options, forPublish: true });
+      const results = super.publish.call(publisher, kept, event, params).map((p, i) =>
         // nostr-tools RESOLVES a failed connect with "connection failure: …".
         // Turn that into a rejection here, once, so no caller can mistake an
         // unreachable relay for an accepted publish (Promise.any /

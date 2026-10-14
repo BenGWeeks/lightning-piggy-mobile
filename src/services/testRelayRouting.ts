@@ -6,6 +6,18 @@ export function activeAccountRelays(urls: string[]): string[] {
   return lockRelays(urls, getCurrentUserPubkey());
 }
 
+/** Signed writes belong to their author, even after the active account changes. */
+export function eventAuthorRelays(urls: string[], event: { pubkey: string }): string[] {
+  return lockRelays(urls, event.pubkey);
+}
+
+/** Internal connection context: publish destinations were already resolved by author. */
+export interface RelayConnectionParams {
+  connectionTimeout?: number;
+  abort?: AbortSignal;
+  forPublish?: boolean;
+}
+
 /** Preserve the SDK request objects and array outside lockdown. */
 export function activeAccountRelayRequests<T extends { url: string }>(requests: T[]): T[] {
   if (!isTestRelayLockdown(getCurrentUserPubkey())) return requests;

@@ -1,4 +1,9 @@
-import { activeAccountRelays, watchTestRelayLockdown } from './testRelayRouting';
+import {
+  activeAccountRelays,
+  eventAuthorRelays,
+  watchTestRelayLockdown,
+  type RelayConnectionParams,
+} from './testRelayRouting';
 import { AbstractRelay } from 'nostr-tools/abstract-relay';
 import { paceRelayReceive } from './nostrRelayReceiveQueue';
 import { SimplePool } from 'nostr-tools/pool';
@@ -11,8 +16,8 @@ import { withResumableSubscriptions } from './resumablePool';
 class HealthAwarePool extends withResumableSubscriptions(withRelayHealth(SimplePool)) {
   private readonly pendingPublishes = new Map<string, number>();
 
-  async ensureRelay(url: string, params?: Parameters<SimplePool['ensureRelay']>[1]) {
-    url = activeAccountRelays([url])[0];
+  async ensureRelay(url: string, params?: RelayConnectionParams) {
+    if (!params?.forPublish) url = activeAccountRelays([url])[0];
     const key = normalizeURL(url);
     if (!this.relays.has(key)) {
       // Pre-create with public SDK APIs so the receive hook is installed before
@@ -33,7 +38,7 @@ class HealthAwarePool extends withResumableSubscriptions(withRelayHealth(SimpleP
   }
 
   publish(...args: Parameters<SimplePool['publish']>): Promise<string>[] {
-    args[0] = activeAccountRelays(args[0]);
+    args[0] = eventAuthorRelays(args[0], args[1]);
     const urls = args[0].map((url) => {
       try {
         return normalizeURL(url);

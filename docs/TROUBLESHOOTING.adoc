@@ -1656,6 +1656,22 @@ old TEST account's pending wraps escape to public relays after an account
 switch. `nostrNip17Send` retains the sender's locked relay snapshot for the
 whole send, including delivery tracking and stale-socket retries.
 
+=== Pending profile publishes or market connects cross an account switch
+
+A profile publish may resume after SecureStore or external signing completes.
+Route signed writes by `event.pubkey` at the pool boundary, including the
+health wrapper and the SDK's internal `ensureRelay` call; active-account
+routing is for reads. NIP-59 wraps keep the sender-bound destinations captured
+by `nostrNip17Send` because the outer author is ephemeral. Relay-list metadata
+checks use the same author-bound destination array as publish result indexing;
+a missing attempt must fail rather than count as relay acceptance.
+
+The SDK's `relay.close()` ignores CONNECTING sockets. The market pool uses
+`withResumableSubscriptions` like the shared pool: teardown increments a
+generation, and old connection results close and reject before raw snapshot
+consumers can send a public REQ. `relayLockdownConnections.test.ts` exercises
+both write routing and the delayed-open race with real SDK pools.
+
 === Related crypto Jest suites take up to one minute to exit
 
 `nostrCrypto` schedules a DEV summary timer at most once per 60 seconds.

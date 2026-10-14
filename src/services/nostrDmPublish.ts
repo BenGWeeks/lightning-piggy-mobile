@@ -1,4 +1,3 @@
-import { activeAccountRelays } from './testRelayRouting';
 import type { VerifiedEvent } from 'nostr-tools/pure';
 import {
   aggregateRelayResults,
@@ -242,7 +241,7 @@ export async function publishWrapsTrackingRelays(
   // so tests can drive it to 0.
   timeoutMs: number = DM_PUBLISH_TIMEOUT_MS,
 ): Promise<DmSendResult> {
-  relays = activeAccountRelays(relays);
+  // Gift-wrap authors are ephemeral; the send caller captures sender routing.
   // The caller's finalize must only ever fire for the attempt whose result we
   // return. Whether attempt 1 is that attempt isn't known until it resolves,
   // and its background finalize can land in the same microtask turn — so gate
