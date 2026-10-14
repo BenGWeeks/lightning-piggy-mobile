@@ -24,11 +24,12 @@ interface Props {
 }
 
 /**
- * Comments tab body: a compose box (or sign-in prompt) and the list of
- * top-level comments (NIP-22 kind 1111), with Edit / Delete on your own
- * (#1272). Pure logic lives in `utils/productComments` and
- * `utils/commentEdits`; the compose + edit/delete orchestration in
- * `useProductCommentActions`.
+ * Comments tab body: a new-comment compose box (or sign-in prompt) and the
+ * list of top-level comments (NIP-22 kind 1111), with Edit / Delete on your
+ * own (#1272). Edit happens in place inside the comment's card (#1524) — the
+ * top composer is only ever for new comments. Pure logic lives in
+ * `utils/productComments`, `utils/commentEdits` and `utils/commentEditDraft`;
+ * the compose + edit/delete orchestration in `useProductCommentActions`.
  */
 const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount, registerRefresh }) => {
   const colors = useThemeColors();
@@ -41,15 +42,17 @@ const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount, regi
   const {
     content,
     setContent,
-    inputRef,
     submit,
-    publishing,
+    posting,
     canPublish,
-    isEditing,
+    editDraft,
+    savingEditId,
+    startEdit,
+    setEditText,
     cancelEdit,
+    saveEdit,
     menuFor,
     toggleMenu,
-    startEdit,
     requestDelete,
   } = useProductCommentActions({ root, pubkey, addLocally, hideLocally, refetch });
 
@@ -66,21 +69,7 @@ const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount, regi
     <View testID="product-comments">
       {canPublish ? (
         <View style={styles.form} testID="product-comment-form">
-          {isEditing ? (
-            <View style={styles.editingBar} testID="product-comment-editing">
-              <Text style={styles.editingText}>{t('market.comments.editing')}</Text>
-              <TouchableOpacity
-                onPress={cancelEdit}
-                accessibilityRole="button"
-                hitSlop={8}
-                testID="product-comment-edit-cancel"
-              >
-                <Text style={styles.editingCancel}>{t('market.comments.cancel')}</Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
           <TextInput
-            ref={inputRef}
             style={styles.input}
             value={content}
             onChangeText={setContent}
@@ -90,18 +79,16 @@ const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount, regi
             testID="product-comment-text"
           />
           <TouchableOpacity
-            style={[styles.submit, publishing && styles.submitDisabled]}
+            style={[styles.submit, posting && styles.submitDisabled]}
             onPress={submit}
-            disabled={publishing}
+            disabled={posting}
             testID="product-comment-submit"
             activeOpacity={0.8}
           >
-            {publishing ? (
+            {posting ? (
               <BrandedSpinner size="small" onGradient />
             ) : (
-              <Text style={styles.submitText}>
-                {isEditing ? t('market.comments.save') : t('market.comments.post')}
-              </Text>
+              <Text style={styles.submitText}>{t('market.comments.post')}</Text>
             )}
           </TouchableOpacity>
         </View>
@@ -141,9 +128,16 @@ const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount, regi
               styles={styles}
               isMine={!!pubkey && c.pubkey === pubkey}
               menuOpen={menuFor === c.id}
+              // Only the card being edited gets the draft, so typing
+              // re-renders that one memoised row, not the whole list.
+              editText={editDraft?.comment.id === c.id ? editDraft.text : null}
+              editSaving={savingEditId === c.id}
               onToggleMenu={toggleMenu}
               onEdit={startEdit}
               onDelete={requestDelete}
+              onEditChange={setEditText}
+              onEditCancel={cancelEdit}
+              onEditSave={saveEdit}
             />
           ))}
           {hiddenCount > 0 ? (

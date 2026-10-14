@@ -1,23 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Event as NostrEvent } from 'nostr-tools';
-import type { TextInput } from 'react-native';
 import { Alert } from '../components/BrandedAlert';
 import { Toast } from '../components/BrandedToast';
 import { useTranslation } from '../contexts/LocaleContext';
 import { usePublishProductFeedback } from './usePublishProductFeedback';
 import type { CommentRoot } from '../utils/productComments';
-
-interface Composer {
-  text: string;
-  /** The comment being edited, and the draft the composer held before. */
-  editing: { comment: NostrEvent; priorDraft: string } | null;
-}
-
-const EMPTY_COMPOSER: Composer = { text: '', editing: null };
-
-/** Leave edit mode, giving the composer back its earlier draft. */
-const stopEditing = (prev: Composer): Composer =>
-  prev.editing ? { text: prev.editing.priorDraft, editing: null } : prev;
+import {
+  beginCommentEdit,
+  canSaveCommentEdit,
+  endCommentEditFor,
+  updateCommentEditText,
+  type CommentEditDraft,
+} from '../utils/commentEditDraft';
 
 interface Params {
   root: CommentRoot;
@@ -29,11 +23,13 @@ interface Params {
 }
 
 /**
- * The comment composer and the "⋯" actions on your own comments (#1272):
- * post, Edit (the composer is borrowed, prefilled, and Save publishes the
- * replacement + a kind-5 for the old version), and Delete (confirm, hide at
- * once, publish a NIP-09 kind-5; roll back if no relay took it). Reconciliation
- * of what readers see lives in `utils/commentEdits`.
+ * The new-comment composer and the "⋯" actions on your own comments (#1272):
+ * post, Edit IN PLACE (#1524 — the comment's own card becomes the editor; Save
+ * publishes the replacement + a kind-5 for the old version, and the top
+ * composer stays a plain new-comment box), and Delete (confirm, hide at once,
+ * publish a NIP-09 kind-5; roll back if no relay took it). The edit-state
+ * transitions live in `utils/commentEditDraft`; reconciliation of what readers
+ * see in `utils/commentEdits`.
  */
 export function useProductCommentActions({
   root,
@@ -43,19 +39,20 @@ export function useProductCommentActions({
   refetch,
 }: Params) {
   const t = useTranslation();
-  const { publishComment, editComment, deleteComment, publishing, canPublish } =
-    usePublishProductFeedback();
-  // Draft text and edit state live together so every update is one pure step.
-  const [composer, setComposer] = useState<Composer>(EMPTY_COMPOSER);
-  const { text: content, editing } = composer;
-  const setContent = useCallback((text: string) => setComposer((prev) => ({ ...prev, text })), []);
+  const { publishComment, editComment, deleteComment, canPublish } = usePublishProductFeedback();
+  // The new-comment draft (top composer).
+  const [content, setContent] = useState('');
+  const [posting, setPosting] = useState(false);
+  // The comment being edited in place — at most one at a time.
+  const [editDraft, setEditDraft] = useState<CommentEditDraft>(null);
+  const [savingEditId, setSavingEditId] = useState<string | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
-  const inputRef = useRef<TextInput>(null);
 
   // The account switcher keeps screens mounted — a draft typed under one
   // identity must never be published by the next (or survive logout).
   useEffect(() => {
-    setComposer(EMPTY_COMPOSER);
+    setContent('');
+    setEditDraft(null);
     setMenuFor(null);
   }, [pubkey]);
 
@@ -84,23 +81,52 @@ export function useProductCommentActions({
     setMenuFor((open) => (open === id ? null : id));
   }, []);
 
+  /** Turn `comment`'s card into the editor (cancelling any other open edit). */
   const startEdit = useCallback((comment: NostrEvent) => {
     setMenuFor(null);
-    // Keep whatever was being typed so Cancel can give it back.
-    setComposer((prev) => ({
-      text: comment.content,
-      editing: { comment, priorDraft: prev.editing ? prev.editing.priorDraft : prev.text },
-    }));
-    inputRef.current?.focus();
+    setEditDraft(beginCommentEdit(comment));
   }, []);
 
-  const cancelEdit = useCallback(() => setComposer(stopEditing), []);
+  const setEditText = useCallback((text: string) => {
+    setEditDraft((prev) => updateCommentEditText(prev, text));
+  }, []);
+
+  const cancelEdit = useCallback(() => setEditDraft(null), []);
+
+  /** Publish the in-place edit of `original`. The card stays open on failure. */
+  const saveEdit = useCallback(
+    async (original: NostrEvent, text: string) => {
+      if (!canSaveCommentEdit(original.content, text)) return;
+      setSavingEditId(original.id);
+      try {
+        const result = await editComment(original, text);
+        // Only end THIS edit — the user may have moved on to another comment
+        // while it was publishing.
+        setEditDraft((prev) => endCommentEditFor(prev, original.id));
+        if (!result) return; // unchanged text — nothing to publish
+        addLocally(result.replacement);
+        hideLocally(original.id);
+        Toast.show({
+          type: 'success',
+          text1: t('market.comments.updated'),
+          position: 'top',
+          visibilityTime: 3000,
+        });
+      } catch {
+        // The edit is kept in the card; tell the user it didn't go out.
+        showError('market.comments.editFailed');
+      } finally {
+        setSavingEditId((id) => (id === original.id ? null : id));
+      }
+    },
+    [editComment, addLocally, hideLocally, t, showError],
+  );
 
   const deleteNow = useCallback(
     async (comment: NostrEvent) => {
       const undo = hideLocally(comment.id);
       // Deleting the comment being edited ends the edit.
-      setComposer((prev) => (prev.editing?.comment.id === comment.id ? stopEditing(prev) : prev));
+      setEditDraft((prev) => endCommentEditFor(prev, comment.id));
       try {
         await deleteComment(comment);
         Toast.show({
@@ -132,72 +158,38 @@ export function useProductCommentActions({
     [t, deleteNow],
   );
 
+  /** Post the top composer's text as a new comment. */
   const submit = useCallback(async () => {
-    if (!content.trim()) return;
-    if (editing) {
-      const original = editing.comment;
-      try {
-        const result = await editComment(original, content);
-        // Only end THIS edit — the user may have moved on to another comment
-        // while it was publishing.
-        setComposer((prev) =>
-          prev.editing?.comment.id === original.id ? stopEditing(prev) : prev,
-        );
-        if (!result) return; // unchanged text — nothing to publish
-        addLocally(result.replacement);
-        hideLocally(original.id);
-        Toast.show({
-          type: 'success',
-          text1: t('market.comments.updated'),
-          position: 'top',
-          visibilityTime: 3000,
-        });
-      } catch {
-        // The edit is kept in the composer; tell the user it didn't go out.
-        showError('market.comments.editFailed');
-      }
-      return;
-    }
+    if (!content.trim() || posting) return;
+    setPosting(true);
     try {
       const posted = await publishComment({ root, content });
-      // An edit started while this was publishing keeps the composer, but
-      // must not hand the just-posted text back as its "prior draft".
-      setComposer((prev) => {
-        if (!prev.editing) return EMPTY_COMPOSER;
-        if (prev.editing.priorDraft !== content) return prev;
-        return { ...prev, editing: { ...prev.editing, priorDraft: '' } };
-      });
+      // Only clear the box if it still holds what was posted.
+      setContent((prev) => (prev === content ? '' : prev));
       addLocally(posted);
       scheduleRefetch();
     } catch {
       // The draft is kept; tell the user it didn't go out.
       showError('market.feedbackTabs.publishFailed');
+    } finally {
+      setPosting(false);
     }
-  }, [
-    content,
-    editing,
-    editComment,
-    addLocally,
-    hideLocally,
-    t,
-    showError,
-    publishComment,
-    root,
-    scheduleRefetch,
-  ]);
+  }, [content, posting, publishComment, root, addLocally, scheduleRefetch, showError]);
 
   return {
     content,
     setContent,
-    inputRef,
     submit,
-    publishing,
+    posting,
     canPublish,
-    isEditing: editing !== null,
+    editDraft,
+    savingEditId,
+    startEdit,
+    setEditText,
     cancelEdit,
+    saveEdit,
     menuFor,
     toggleMenu,
-    startEdit,
     requestDelete,
   };
 }
