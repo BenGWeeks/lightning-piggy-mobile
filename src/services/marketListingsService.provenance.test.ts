@@ -373,3 +373,11 @@ it('does not report an unreachable seller whose cached products remain in the me
   expect(mergeMarketSnapshot([previous], result)).toEqual([previous]);
   expect(result.unreachableSellers).toEqual([]);
 });
+
+it('does not let a forged listing suppress a missing seller warning', async () => {
+  const forged = { ...copy(listing('forged')), sig: '0'.repeat(128) };
+  relays({ [SHOP]: { listings: [forged] } });
+  const result = await fetchMarketListings([author], [SHOP, FAMILY], new AbortController().signal);
+  expect(result.products).toEqual([]);
+  expect(result.unreachableSellers).toEqual([author]);
+});

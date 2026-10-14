@@ -166,6 +166,7 @@ async function runSnapshot(
   let limited = false;
   let received = 0;
   const receivedAuthors = new Set<string>();
+  const observedAuthors = new Set<string>();
   // Keyed by id AND signature: the id doesn't cover the signature, so a
   // bad-signature copy of a genuine payload must not displace the good copy.
   const events = new Map<string, Event>();
@@ -216,6 +217,7 @@ async function runSnapshot(
   }
   const noteAuthenticatedListing = (event: Event) => {
     if (!MARKET_LISTING_KINDS.includes(event.kind)) return;
+    receivedAuthors.add(event.pubkey);
     const d = event.tags.find((t) => t[0] === 'd')?.[1];
     if (!d) return;
     try {
@@ -341,7 +343,7 @@ async function runSnapshot(
   const ingest = (event: Event, url?: string) => {
     received++;
     if (!scope.has(event.pubkey) || event.created_at > Date.now() / 1000 + 300) return;
-    if (MARKET_LISTING_KINDS.includes(event.kind)) receivedAuthors.add(event.pubkey);
+    if (MARKET_LISTING_KINDS.includes(event.kind)) observedAuthors.add(event.pubkey);
     if (event.content.length > 32768 || event.tags.length > 256) {
       const key = `${event.id}:${event.sig}`;
       if (oversizedIds.has(key)) {
@@ -550,7 +552,12 @@ async function runSnapshot(
           scope,
           urls,
           listings.answered,
-          receivedAuthors,
+          // Unchecked candidates withheld by internal work/display limits
+          // cannot establish a missing seller. Otherwise only authenticated
+          // listings count: a forged payload must not hide a transport failure.
+          withheld || limited || selection.gaveUp || reserved.gaveUp || selection.overflow
+            ? new Set([...receivedAuthors, ...observedAuthors])
+            : new Set([...receivedAuthors, ...withheldAuthors]),
           previousProducts,
           mergeMarketSnapshot(previousProducts, result),
         );
