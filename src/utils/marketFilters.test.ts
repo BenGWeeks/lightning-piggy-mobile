@@ -1,5 +1,6 @@
 import {
   EMPTY_MARKET_FILTER,
+  canClearMarketFilters,
   countActiveMarketFilters,
   currencyOf,
   distinctCurrencies,
@@ -7,7 +8,9 @@ import {
   distinctMerchants,
   filterMarketProducts,
   isMarketFilterActive,
+  isMarketScopeNarrowing,
   productCountry,
+  productCurrency,
   productMerchant,
   productMatchesSearch,
   type ResolveVendor,
@@ -217,6 +220,61 @@ describe('distinctCurrencies', () => {
   });
 });
 
+// A relay listing priced in `currency` (the parser keeps the seller's
+// spelling upper-cased, so SAT and SATS both reach the filter layer).
+const listed = (id: string, currency: string): MarketProduct =>
+  product({
+    id,
+    priceFiatLabel: `21 ${currency}`,
+    listing: { currency, priceLabel: `21 ${currency}` } as MarketProduct['listing'],
+  });
+
+describe('productCurrency', () => {
+  it('normalises listing currencies so sats spellings bucket together', () => {
+    expect(productCurrency(listed('1', 'SAT'))).toBe('SATS');
+    expect(productCurrency(listed('2', 'sats'))).toBe('SATS');
+    expect(productCurrency(listed('3', 'eur'))).toBe('EUR');
+  });
+
+  it('falls back to the price label, and is null when unreadable', () => {
+    expect(productCurrency(product({ id: '4', priceFiatLabel: '£60' }))).toBe('GBP');
+    expect(productCurrency(product({ id: '5', priceFiatLabel: 'free' }))).toBeNull();
+  });
+});
+
+describe('currency normalisation in options and filtering', () => {
+  const products = [
+    listed('sat', 'SAT'),
+    listed('sats', 'SATS'),
+    listed('lower', 'sats'),
+    listed('eur', 'eur'),
+    product({ id: 'gbp', priceFiatLabel: '£60' }),
+  ];
+
+  it('lists one SATS chip for every sats spelling, and upper-cases other codes', () => {
+    expect(distinctCurrencies(products)).toEqual(['EUR', 'GBP', 'SATS']);
+  });
+
+  it('the SATS chip matches listings priced in any sats spelling', () => {
+    const ids = filterMarketProducts(
+      products,
+      { query: '', merchant: null, country: null, currency: 'SATS' },
+      resolve,
+    ).map((p) => p.id);
+    expect(ids).toEqual(['sat', 'sats', 'lower']);
+  });
+
+  it('normalises the selected currency too (a legacy "sat" selection still matches)', () => {
+    expect(
+      filterMarketProducts(
+        products,
+        { query: '', merchant: null, country: null, currency: 'sat' },
+        resolve,
+      ),
+    ).toHaveLength(3);
+  });
+});
+
 describe('isMarketFilterActive', () => {
   it('is false for the empty filter', () => {
     expect(isMarketFilterActive(EMPTY_MARKET_FILTER)).toBe(false);
@@ -238,42 +296,69 @@ describe('isMarketFilterActive', () => {
   });
 });
 
+describe('isMarketScopeNarrowing', () => {
+  it('treats every scope short of the whole web of trust as a filter', () => {
+    expect(isMarketScopeNarrowing('preferred')).toBe(true);
+    expect(isMarketScopeNarrowing('wotFriends')).toBe(true);
+    expect(isMarketScopeNarrowing('wotFof')).toBe(true);
+    expect(isMarketScopeNarrowing('wotAll')).toBe(false);
+  });
+});
+
 describe('countActiveMarketFilters', () => {
-  it('is 0 for the empty filter', () => {
-    expect(countActiveMarketFilters(EMPTY_MARKET_FILTER)).toBe(0);
+  it('is 0 only when nothing narrows (whole web of trust, no axes)', () => {
+    expect(countActiveMarketFilters(EMPTY_MARKET_FILTER, 'wotAll')).toBe(0);
+  });
+
+  it('counts the default preferred-sellers scope as an active filter', () => {
+    expect(countActiveMarketFilters(EMPTY_MARKET_FILTER, 'preferred')).toBe(1);
+    expect(countActiveMarketFilters(EMPTY_MARKET_FILTER, 'wotFriends')).toBe(1);
   });
 
   it('counts each active category axis (merchant / country / currency)', () => {
     expect(
-      countActiveMarketFilters({
-        query: '',
-        merchant: 'Robotechy',
-        country: null,
-        currency: null,
-      }),
+      countActiveMarketFilters(
+        { query: '', merchant: 'Robotechy', country: null, currency: null },
+        'wotAll',
+      ),
     ).toBe(1);
     expect(
-      countActiveMarketFilters({
-        query: '',
-        merchant: 'Robotechy',
-        country: 'United Kingdom',
-        currency: 'GBP',
-      }),
-    ).toBe(3);
+      countActiveMarketFilters(
+        { query: '', merchant: 'Robotechy', country: 'United Kingdom', currency: 'GBP' },
+        'preferred',
+      ),
+    ).toBe(4);
   });
 
   it('ignores the search query (it has its own inline field, not the panel badge)', () => {
     expect(
-      countActiveMarketFilters({ query: 'piggy', merchant: null, country: null, currency: null }),
+      countActiveMarketFilters(
+        { query: 'piggy', merchant: null, country: null, currency: null },
+        'wotAll',
+      ),
     ).toBe(0);
     expect(
-      countActiveMarketFilters({
-        query: 'piggy',
-        merchant: 'Robotechy',
-        country: null,
-        currency: null,
-      }),
+      countActiveMarketFilters(
+        { query: 'piggy', merchant: 'Robotechy', country: null, currency: null },
+        'wotAll',
+      ),
     ).toBe(1);
+  });
+});
+
+describe('canClearMarketFilters', () => {
+  it('is false at the defaults, even though the default scope narrows', () => {
+    expect(canClearMarketFilters(EMPTY_MARKET_FILTER, 'preferred')).toBe(false);
+  });
+
+  it('is true when the scope or any category axis differs from its default', () => {
+    expect(canClearMarketFilters(EMPTY_MARKET_FILTER, 'wotFriends')).toBe(true);
+    expect(
+      canClearMarketFilters(
+        { query: '', merchant: null, country: null, currency: 'SATS' },
+        'preferred',
+      ),
+    ).toBe(true);
   });
 });
 
@@ -384,8 +469,8 @@ describe('filterMarketProducts', () => {
   });
 });
 
-it('counts seller scope alongside category filters without counting default scope', () => {
-  expect(countActiveMarketFilters(EMPTY_MARKET_FILTER, 'preferred')).toBe(0);
+it('counts seller scope alongside category filters, including the default scope', () => {
+  expect(countActiveMarketFilters(EMPTY_MARKET_FILTER, 'preferred')).toBe(1);
   expect(countActiveMarketFilters(EMPTY_MARKET_FILTER, 'wotFriends')).toBe(1);
   expect(
     countActiveMarketFilters(

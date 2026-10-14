@@ -2296,7 +2296,7 @@
       "searchPlaceholder": "Search products or sellers",
       "clearSearch": "Clear search",
       "filters": "Filters",
-      "filtersApplied": "Filters, {{count}} applied",
+      "filtersApplied": "Filters, {{count}} active",
       "emptyNoMatch": "No products match your search or filters.",
       "emptyNoFriends": "None of your Nostr friends are selling Lightning Piggy products yet.",
       "emptyNone": "No products available right now."
@@ -2332,6 +2332,7 @@
       "merchant": "Merchant",
       "country": "Country",
       "currency": "Currency",
+      "satsChip": "sats",
       "chipSelected": "{{label}}, selected",
       "sellers": "Sellers",
       "friends": "Friends (people you follow)",

@@ -50,6 +50,12 @@ name: Market — grid → product detail → reviews/comments tabs (#948)
 - assertVisible:
     id: 'market-product-card-robotechy-lightning-piggy'
 
+# The default preferred-sellers scope narrows the list, so the filter button
+# is already active with one filter.
+- assertVisible:
+    id: 'market-filter-active-count'
+    text: '1'
+
 # Seller scope is selected in Filters; the compact chip resets it (#1362).
 - tapOn:
     id: 'market-filter-button'
@@ -69,8 +75,10 @@ name: Market — grid → product detail → reviews/comments tabs (#948)
     id: 'market-scope-chip-clear'
 - assertNotVisible:
     id: 'market-scope-chip-clear'
-- assertNotVisible:
-    id: 'market-filter-badge'
+# Back on preferred sellers: still one (scope) filter, not zero.
+- assertVisible:
+    id: 'market-filter-active-count'
+    text: '1'
 - assertVisible:
     id: 'market-product-card-robotechy-lightning-piggy'
 

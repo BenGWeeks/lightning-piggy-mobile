@@ -18,6 +18,7 @@ import { createMarketFilterBarStyles } from '../styles/MarketFilterBar.styles';
 import { vendorSlug } from '../utils/marketVendors';
 import { perfLog } from '../utils/perfLog';
 import { MARKET_MODE_OPTIONS, type MarketMode } from '../utils/marketMode';
+import { SATS_CURRENCY_CODE } from '../utils/currencyCode';
 
 interface Props {
   mode: MarketMode;
@@ -34,7 +35,8 @@ interface Props {
   countries: string[];
   selectedCountry: string | null;
   onSelectCountry: (country: string | null) => void;
-  /** Distinct currencies present in the data; `null` selection means "All". */
+  /** Distinct canonical currency codes in the data (see `normalizeCurrencyCode`);
+   * `null` selection means "All". */
   currencies: string[];
   selectedCurrency: string | null;
   onSelectCurrency: (currency: string | null) => void;
@@ -300,7 +302,9 @@ const MarketFilterBar: React.FC<Props> = ({
                 {currencies.map((cur) => (
                   <Chip
                     key={cur}
-                    label={cur}
+                    // Sats read as the app's lower-case "sats" unit; fiat
+                    // stays as its ISO code (EUR, GBP …).
+                    label={cur === SATS_CURRENCY_CODE ? t('market.filters.satsChip') : cur}
                     selected={selectedCurrency === cur}
                     onPress={() => onSelectCurrency(selectedCurrency === cur ? null : cur)}
                     testID={`market-filter-currency-${cur}`}

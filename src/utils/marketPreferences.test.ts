@@ -16,3 +16,10 @@ it('restores known axes and falls back to All for unknown values', () => {
     }),
   ).toEqual({ mode: 'wotFriends', merchant: null, country: null, currency: null });
 });
+
+it('maps a legacy sats spelling onto the canonical SATS chip', () => {
+  const saved = { mode: 'preferred' as const, merchant: null, country: null, currency: 'SAT' };
+  expect(
+    validateMarketPreferences(saved, { merchants: [], countries: [], currencies: ['SATS'] }),
+  ).toEqual({ ...saved, currency: 'SATS' });
+});

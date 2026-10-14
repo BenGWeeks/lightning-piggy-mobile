@@ -2332,6 +2332,7 @@
       "merchant": "Comercio",
       "country": "País",
       "currency": "Moneda",
+      "satsChip": "sats",
       "chipSelected": "Filtro seleccionado: {{label}}",
       "sellers": "Vendedores",
       "friends": "Amigos (personas a las que sigues)",

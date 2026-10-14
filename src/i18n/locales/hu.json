@@ -2332,6 +2332,7 @@
       "merchant": "Kereskedő",
       "country": "Ország",
       "currency": "Pénznem",
+      "satsChip": "sats",
       "chipSelected": "{{label}}, kiválasztva",
       "sellers": "Eladók",
       "friends": "Barátok (akiket követsz)",
