@@ -11,7 +11,7 @@
 
 # Source code, and where zsp fetches the APK: the release workflow attaches the
 # EAS production build as `lightning-piggy-vX.Y.Z.apk` to every GitHub Release.
-repository: https://github.com/BenGWeeks/lightning-piggy-mobile
+repository: https://github.com/LightningPiggy/lightning-piggy-mobile
 match: '^lightning-piggy-v[0-9]+\.[0-9]+\.[0-9]+\.apk$'
 
 # Lightning Piggy team account. zsp refuses a local signer that doesn't match;

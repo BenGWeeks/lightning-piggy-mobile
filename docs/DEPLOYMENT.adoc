@@ -859,12 +859,12 @@ set +x
 set -o pipefail
 # A separate client key: 64 hex characters (zsp rejects nsec). Run ONCE and
 # keep it, so the bunker recognises the same client on every release.
-openssl rand -hex 32 | gh secret set ZAPSTORE_CLIENT_KEY --repo BenGWeeks/lightning-piggy-mobile
+openssl rand -hex 32 | gh secret set ZAPSTORE_CLIENT_KEY --repo LightningPiggy/lightning-piggy-mobile
 
 # Paste the bunker:// URI into a hidden prompt; it never reaches history or the screen.
 read -r -s -p 'Zapstore bunker URI: ' zapstore_bunker_uri
 printf '\n'
-printf '%s' "$zapstore_bunker_uri" | gh secret set ZAPSTORE_BUNKER_URI --repo BenGWeeks/lightning-piggy-mobile
+printf '%s' "$zapstore_bunker_uri" | gh secret set ZAPSTORE_BUNKER_URI --repo LightningPiggy/lightning-piggy-mobile
 unset zapstore_bunker_uri
 ----
 
@@ -874,7 +874,7 @@ Never put the Lightning Piggy account's nsec in a secret. If a new bunker URI is
 
 [source,bash]
 ----
-gh workflow run release-zapstore.yml --repo BenGWeeks/lightning-piggy-mobile --ref main -f tag=v1.5.2
+gh workflow run release-zapstore.yml --repo LightningPiggy/lightning-piggy-mobile --ref main -f tag=v1.5.2
 ----
 
 Richard approves the new client's connection when the pre-flight step asks. If Amber prompts for the four kinds, approve them with "remember". If the publish step then fails on a Blossom signature timeout, re-run it: the remembered permissions now apply. When it finishes, check https://zapstore.dev/apps/com.lightningpiggy.app shows the Lightning Piggy account as publisher.
