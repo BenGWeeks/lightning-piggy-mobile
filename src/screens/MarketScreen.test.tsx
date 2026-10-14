@@ -280,7 +280,7 @@ it('filters by Ships to from shipping data, with unknown shipping behind the inc
     screen.UNSAFE_getByType(FlatList).props.data.map((product: { id: string }) => product.id);
   expect(ids()).toEqual(['ships-gb', 'ships-de', 'worldwide', 'unknown']);
   fireEvent.press(screen.getByTestId('market-filter-button'));
-  // Phone's country (GB) leads the chips, after Anywhere.
+  // Phone's country (GB) leads the chips, after Worldwide.
   expect(screen.getByTestId('market-filter-shipsto-anywhere')).toBeTruthy();
   fireEvent.press(screen.getByTestId('market-filter-shipsto-GB'));
   expect(ids()).toEqual(['ships-gb', 'worldwide', 'unknown']);
