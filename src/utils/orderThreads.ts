@@ -9,6 +9,7 @@
 // type-3 / type-4 updates (either side may send a type-3 `cancelled`).
 import { parseStoredOrder, payableBolt11, type ParsedOrderEvent } from './orderEvents';
 import { matchesExpectedOrderAmount } from './orderInvoiceAmount';
+import { expiresAtFromBolt11 } from './bolt11';
 
 export type OrderRole = 'buyer' | 'seller';
 
@@ -32,7 +33,7 @@ export interface OrderThread {
   /** Row id of the placed order, when known. */
   placedRowId?: string;
   /** The merchant's latest payment request matching the buyer-approved amount. */
-  invoice?: { bolt11: string; amountSats?: number; at: number; rowId?: string };
+  invoice?: { bolt11: string; amountSats?: number; at: number; rowId?: string; expiresAt: number };
   /** The buyer's latest kind-17 receipt. */
   receipt?: ParsedOrderEvent;
   /** The merchant's latest status (type 3). */
@@ -81,8 +82,19 @@ export function orderThreads(
     const fromBuyer = byBuyer(row);
     if (order.type === 'payment' && !fromBuyer) {
       const bolt11 = payableBolt11(order);
-      if (bolt11 && matchesExpectedOrderAmount(bolt11, thread.placed.amountSats)) {
-        thread.invoice = { bolt11, amountSats: order.amountSats, at: row.createdAt, rowId: row.id };
+      const expiresAt = bolt11 ? expiresAtFromBolt11(bolt11) : null;
+      if (
+        bolt11 &&
+        expiresAt !== null &&
+        matchesExpectedOrderAmount(bolt11, thread.placed.amountSats)
+      ) {
+        thread.invoice = {
+          bolt11,
+          amountSats: order.amountSats,
+          at: row.createdAt,
+          rowId: row.id,
+          expiresAt,
+        };
       }
     } else if (order.type === 'receipt' && fromBuyer) {
       thread.receipt = order;
@@ -111,7 +123,7 @@ export type BuyerOrderStatus =
  */
 export function buyerOrderStatus(
   thread: OrderThread,
-  opts: { invoicePaid?: boolean } = {},
+  opts: { invoicePaid?: boolean; nowMs?: number } = {},
 ): BuyerOrderStatus {
   if (thread.cancelled) return 'cancelled';
   if (thread.status === 'completed' || thread.shipping === 'delivered') return 'completed';
@@ -123,7 +135,8 @@ export function buyerOrderStatus(
   ) {
     return 'paid';
   }
-  if (thread.invoice) return 'payNow';
+  if (thread.invoice && thread.invoice.expiresAt * 1000 > (opts.nowMs ?? Date.now()))
+    return 'payNow';
   return 'awaitingInvoice';
 }
 
@@ -137,6 +150,8 @@ export interface BuyerOrderEntry {
   /** Row to scroll the conversation to: the invoice when there's one to
    * pay, else the placed order. */
   jumpToRowId?: string;
+  /** Allows a focused view to refresh when its payment request expires. */
+  paymentExpiresAt?: number;
 }
 
 /**
@@ -146,12 +161,14 @@ export interface BuyerOrderEntry {
 export function buyerOrderEntries(
   conversations: ReadonlyMap<string, readonly OrderRowInput[]>,
   isInvoicePaid: (bolt11: string) => boolean = () => false,
+  nowMs = Date.now(),
 ): BuyerOrderEntry[] {
   const entries: BuyerOrderEntry[] = [];
   for (const [sellerPubkey, rows] of conversations) {
     for (const thread of orderThreads(rows, 'buyer').values()) {
       const status = buyerOrderStatus(thread, {
         invoicePaid: thread.invoice ? isInvoicePaid(thread.invoice.bolt11) : false,
+        nowMs,
       });
       entries.push({
         orderId: thread.orderId,
@@ -159,6 +176,7 @@ export function buyerOrderEntries(
         placedAt: thread.placedAt,
         status,
         order: thread.placed,
+        paymentExpiresAt: status === 'payNow' ? thread.invoice?.expiresAt : undefined,
         jumpToRowId:
           status === 'payNow' ? (thread.invoice?.rowId ?? thread.placedRowId) : thread.placedRowId,
       });

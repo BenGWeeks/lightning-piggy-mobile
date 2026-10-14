@@ -306,7 +306,8 @@ export function extractInvoice(text: string): DecodedInvoice | null {
     let amountSats: number | null = null;
     let description: string | null = null;
     let timestamp: number | null = null;
-    let expirySeconds: number | null = null;
+    // BOLT11's default when no explicit expiry tag is present.
+    let expirySeconds = 3600;
     let paymentHash: string | null = null;
     for (const section of decoded.sections) {
       if (section.name === 'amount') {
@@ -321,8 +322,7 @@ export function extractInvoice(text: string): DecodedInvoice | null {
         paymentHash = section.value as string;
       }
     }
-    const expiresAt =
-      timestamp !== null && expirySeconds !== null ? timestamp + expirySeconds : null;
+    const expiresAt = timestamp !== null ? timestamp + expirySeconds : null;
     return { raw, amountSats, description, expiresAt, paymentHash };
   } catch {
     return { raw, amountSats: null, description: null, expiresAt: null, paymentHash: null };

@@ -11,14 +11,28 @@ import { serializeOrder, type ParsedOrderEvent } from './orderEvents';
 
 const SELLER = 'b'.repeat(64);
 // Use real BOLT11 encoding so amount checks exercise the decoder.
-function bolt11(hrp: string): string {
+const NOW = 1_800_000_000;
+function bolt11(hrp: string, timestamp = NOW, expiry?: number): string {
+  const words = (value: number, length: number) =>
+    Array.from({ length }, (_, i) => Math.floor(value / 32 ** (length - i - 1)) % 32);
   return bech32.encode(
     hrp,
-    [...Array(7).fill(0), 1, 1, 20, ...bech32.toWords(Buffer.alloc(32, 1)), ...Array(104).fill(0)],
+    [
+      ...words(timestamp, 7),
+      1,
+      1,
+      20,
+      ...bech32.toWords(Buffer.alloc(32, 1)),
+      ...(expiry === undefined ? [] : [6, 0, 3, ...words(expiry, 3)]),
+      ...Array(104).fill(0),
+    ],
     2000,
   );
 }
 const BOLT11 = bolt11('lnbc21u');
+
+beforeEach(() => jest.spyOn(Date, 'now').mockReturnValue(NOW * 1000));
+afterEach(() => jest.restoreAllMocks());
 
 function row(
   fromMe: boolean,
@@ -147,6 +161,35 @@ describe('buyerOrderStatus', () => {
 });
 
 describe('buyerOrderEntries', () => {
+  it.each([
+    ['explicit expiry', bolt11('lnbc21u', NOW - 61, 60)],
+    ['default one-hour expiry', bolt11('lnbc21u', NOW - 3600)],
+  ])('does not prompt for payment after %s', (_scenario, expiredInvoice) => {
+    const rows = [
+      placed(true),
+      row(false, 20, {
+        type: 'payment',
+        payment: { method: 'lightning', value: expiredInvoice },
+      }),
+    ];
+    const conversations = new Map([[SELLER, rows]]);
+    const entries = buyerOrderEntries(conversations);
+    expect(entries[0]).toMatchObject({ status: 'awaitingInvoice', jumpToRowId: 'r10' });
+    expect(payNowCount(entries)).toBe(0);
+    // Expiry does not undo a settled payment.
+    expect(buyerOrderEntries(conversations, () => true)[0].status).toBe('paid');
+  });
+
+  it('updates the chip, badge and jump target at the expiry boundary', () => {
+    const conversations = new Map([[SELLER, [placed(true), invoice(false)]]]);
+    expect(buyerOrderEntries(conversations, undefined, (NOW + 3600) * 1000 - 1)[0].status).toBe(
+      'payNow',
+    );
+    const entries = buyerOrderEntries(conversations, undefined, (NOW + 3600) * 1000);
+    expect(entries[0]).toMatchObject({ status: 'awaitingInvoice', jumpToRowId: 'r10' });
+    expect(payNowCount(entries)).toBe(0);
+  });
+
   it.each([
     ['larger amount', bolt11('lnbc42u'), 2100],
     ['smaller amount', bolt11('lnbc10u'), 2100],

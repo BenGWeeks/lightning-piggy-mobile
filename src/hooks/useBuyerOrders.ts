@@ -38,6 +38,7 @@ export function useBuyerOrders(): UseBuyerOrders {
   const [rows, setRows] = useState<Row[]>([]);
   const [titles, setTitles] = useState<BuyerOrderTitles>({});
   const [loading, setLoading] = useState(true);
+  const [nowMs, setNowMs] = useState(Date.now);
   const loadId = useRef(0);
 
   const load = useCallback(async (owner: string) => {
@@ -101,11 +102,28 @@ export function useBuyerOrders(): UseBuyerOrders {
 
   const entries = useMemo(
     () =>
-      buyerOrderEntries(groupRowsByConversation(rows), (bolt11) => {
-        const hash = paymentHashFromBolt11(bolt11);
-        return hash !== null && paidHashes.has(hash.toLowerCase());
-      }),
-    [rows, paidHashes],
+      buyerOrderEntries(
+        groupRowsByConversation(rows),
+        (bolt11) => {
+          const hash = paymentHashFromBolt11(bolt11);
+          return hash !== null && paidHashes.has(hash.toLowerCase());
+        },
+        Math.max(nowMs, Date.now()),
+      ),
+    [rows, paidHashes, nowMs],
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      const expiries = entries.flatMap((entry) =>
+        entry.paymentExpiresAt === undefined ? [] : [entry.paymentExpiresAt * 1000],
+      );
+      if (expiries.length === 0) return;
+      const delay = Math.max(0, Math.min(...expiries) - Date.now());
+      // Long-lived invoices must not overflow the platform's signed 32-bit timer.
+      const timer = setTimeout(() => setNowMs(Date.now()), Math.min(delay, 2_147_483_647));
+      return () => clearTimeout(timer);
+    }, [entries]),
   );
 
   return { entries, titles, loading, payNow: payNowCount(entries) };
