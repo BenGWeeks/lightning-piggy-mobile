@@ -3,16 +3,25 @@ import { FlatList } from 'react-native';
 import { MARKET_PRODUCTS } from '../data/marketProducts';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import MarketScreen from './MarketScreen';
-import type { ExploreNavigation } from '../navigation/types';
+import type { ExploreNavigation, MarketRoute } from '../navigation/types';
 
 jest.mock('../hooks/useCollectionFilter', () => ({
-  useCollectionFilter: (products: unknown[], enabled: boolean, merchant: string | null) => {
+  useCollectionFilter: function useMockCollectionFilter(
+    products: unknown[],
+    enabled: boolean,
+    merchant: string | null,
+  ) {
+    const mockReact = jest.requireActual<typeof React>('react');
+    const [selected, setSelected] = mockReact.useState<string | null>(mockSelectedCollection);
     mockCollectionScope(enabled, merchant);
     return {
-      products,
+      products: selected ? [] : products,
       collections: mockCollections,
-      selected: null,
-      select: jest.fn(),
+      selected,
+      select: (value: string | null) => {
+        mockSelectCollection(value);
+        setSelected(value);
+      },
     };
   },
 }));
@@ -21,6 +30,8 @@ jest.mock('../hooks/useMarketPreferences', () => ({
   useMarketPreferences: () => mockPreferencesHook(),
 }));
 const mockCollectionScope = jest.fn();
+const mockSelectCollection = jest.fn();
+let mockSelectedCollection: string | null = null;
 let mockCollections: import('nostr-tools').Event[] = [];
 let mockReady = true;
 let mockCompleted = false;
@@ -86,6 +97,8 @@ beforeEach(() => {
   jest.useFakeTimers();
   mockLiveEnabled.mockClear();
   mockCollectionScope.mockClear();
+  mockSelectCollection.mockClear();
+  mockSelectedCollection = null;
   mockCollections = [];
   mockReady = true;
   mockCompleted = false;
@@ -257,3 +270,51 @@ it('enables merchant-scoped collections for a remembered single merchant', () =>
   expect(mockCollectionScope).toHaveBeenLastCalledWith(true, merchant);
   expect(screen.getByTestId('market-collection-filters')).toBeTruthy();
 });
+
+it.each(['preferred', 'wotFriends'] as const)(
+  'See all resets conflicting filters on a reused %s grid, even for the same seller',
+  (mode) => {
+    const seller = 'a'.repeat(64);
+    mockCompleted = true;
+    mockLoading = false;
+    mockInitialPreferences = { mode, merchant: seller, country: 'DE', currency: 'EUR' };
+    mockSelectedCollection = `30405:${seller}:old-collection`;
+    mockLiveProducts = [
+      {
+        ...MARKET_PRODUCTS[0],
+        id: 'seller-item',
+        listing: {
+          event: { pubkey: seller, tags: [] },
+          currency: 'SAT',
+          vendor: { country: 'GB' },
+        },
+      } as unknown as (typeof MARKET_PRODUCTS)[number],
+    ];
+    const screen = render(<MarketScreen navigation={navigation} />);
+    fireEvent.changeText(screen.getByTestId('market-search-input'), 'unrelated search');
+    act(() => jest.advanceTimersByTime(300));
+    expect(screen.UNSAFE_getByType(FlatList).props.data).toEqual([]);
+    const route = {
+      key: 'market',
+      name: 'Market',
+      params: { merchant: seller, mode },
+    } as MarketRoute;
+    screen.rerender(<MarketScreen navigation={navigation} route={route} />);
+    act(() => jest.advanceTimersByTime(300));
+    expect(mockUpdate).toHaveBeenCalledWith({
+      merchant: seller,
+      mode,
+      country: null,
+      currency: null,
+    });
+    expect(mockSelectCollection).toHaveBeenCalledWith(null);
+    expect(screen.getByTestId('market-search-input').props.value).toBe('');
+    expect(screen.UNSAFE_getByType(FlatList).props.data.map((p: { id: string }) => p.id)).toEqual([
+      'seller-item',
+    ]);
+    // Consumed params must not reset subsequent searches on preference renders.
+    fireEvent.changeText(screen.getByTestId('market-search-input'), 'new search');
+    screen.rerender(<MarketScreen navigation={navigation} route={route} />);
+    expect(screen.getByTestId('market-search-input').props.value).toBe('new search');
+  },
+);

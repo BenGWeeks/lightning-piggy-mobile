@@ -2,7 +2,7 @@ import BrandedRefreshControl from '../components/BrandedRefreshControl';
 import { marketMerchants, resolveMerchantSelection } from '../utils/marketMerchants';
 import { useCollectionFilter } from '../hooks/useCollectionFilter';
 import MarketCollectionChips from '../components/MarketCollectionChips';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -141,20 +141,6 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
     update,
   ]);
 
-  // Opened filtered to one seller (a product page's "More from <seller>" See
-  // all, #1542). Declared after the reconcile effect so, in the same commit,
-  // the requested merchant lands last.
-  const requestedMerchant = route?.params?.merchant;
-  const requestedMode = route?.params?.mode;
-  useEffect(() => {
-    if (!ready || !requestedMerchant) return;
-    update(
-      requestedMode
-        ? { merchant: requestedMerchant, mode: requestedMode }
-        : { merchant: requestedMerchant },
-    );
-  }, [ready, requestedMerchant, requestedMode, update]);
-
   const filter = useMemo<MarketFilter>(
     () => ({ query: debouncedQuery, merchant, country, currency }),
     [debouncedQuery, merchant, country, currency],
@@ -177,6 +163,25 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
     () => filterMarketProducts(collectionFilter.products, filter, sellerOf),
     [collectionFilter.products, filter],
   );
+
+  // A See all request replaces filters on a reused grid, including a collection
+  // from this same merchant. Consume each navigation request once so later
+  // user edits are not overwritten by preference updates.
+  const { select: selectCollection } = collectionFilter;
+  const appliedRequest = useRef<MarketRoute['params']>(undefined);
+  const request = route?.params;
+  useEffect(() => {
+    if (!ready || !request?.merchant || appliedRequest.current === request) return;
+    appliedRequest.current = request;
+    update({
+      merchant: request.merchant,
+      ...(request.mode ? { mode: request.mode } : {}),
+      country: null,
+      currency: null,
+    });
+    setQuery('');
+    selectCollection(null);
+  }, [ready, request, update, selectCollection]);
 
   const clearFilters = useCallback(() => {
     setMerchant(null);

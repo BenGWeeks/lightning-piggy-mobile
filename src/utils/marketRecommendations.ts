@@ -70,7 +70,7 @@ export function mergeCatalogue(
   const modeBySeller = new Map<string, MarketMode>();
   for (const source of sources) {
     for (const product of source.products) {
-      if (!isActiveListing(product, now)) continue;
+      if (product.listing?.event.kind !== 30402) continue;
       const address = listingAddress(product);
       if (!address) continue;
       const seller = product.listing!.event.pubkey;
@@ -86,7 +86,12 @@ export function mergeCatalogue(
         byAddress.set(address, product);
     }
   }
-  return { products: [...byAddress.values()].sort(newestFirst), modeBySeller };
+  return {
+    products: [...byAddress.values()]
+      .filter((product) => isActiveListing(product, now))
+      .sort(newestFirst),
+    modeBySeller,
+  };
 }
 
 /**

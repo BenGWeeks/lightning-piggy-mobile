@@ -165,13 +165,48 @@ export function loadedMarketSnapshots(
   accounts: readonly string[],
 ): { account: string; products: MarketProduct[] }[] {
   const wanted = new Set(accounts);
-  const snapshots: { account: string; products: MarketProduct[] }[] = [];
+  const loaded: MarketSnapshot[] = [];
   for (const key of [...memory.keys()]) {
-    const account = snapshotAccount(key);
-    if (!wanted.has(account)) continue;
-    const snapshot = getMarketSnapshot(key);
-    if (snapshot) snapshots.push({ account, products: snapshot.result.products });
+    if (!wanted.has(snapshotAccount(key)) || signedOut.has(snapshotAccount(key))) continue;
+    const snapshot = memory.get(key)!;
+    if (valid(snapshot)) loaded.push(snapshot);
+    else memory.delete(key);
   }
+  // Reduced snapshots omit withdrawals. The latest query for a seller must
+  // replace their entire older contribution, even when it returned no items.
+  // Scope keys retain the queried authors; include product authors for legacy
+  // keys. Equal-time snapshots must agree on presence: fail closed when
+  // their ordering is unknown, including after disk hydration.
+  const latestBySeller = new Map<string, MarketSnapshot[]>();
+  for (const snapshot of loaded) {
+    const authors = new Set([
+      ...(snapshot.key.split('|')[1] ?? '').split(',').filter((key) => /^[a-f0-9]{64}$/.test(key)),
+      ...snapshot.result.products.flatMap((product) =>
+        product.listing ? [product.listing.event.pubkey] : [],
+      ),
+    ]);
+    for (const author of authors) {
+      const previous = latestBySeller.get(author);
+      if (!previous || snapshot.at > previous[0].at) latestBySeller.set(author, [snapshot]);
+      else if (snapshot.at === previous[0].at) previous.push(snapshot);
+    }
+  }
+  const snapshots = loaded.map((snapshot) => ({
+    account: snapshotAccount(snapshot.key),
+    // Keep inactive revisions here so mergeCatalogue can select the winner
+    // before checking status, visibility and expiry.
+    products: snapshot.result.products.filter((product) => {
+      if (!product.listing) return true;
+      const latest = latestBySeller.get(product.listing.event.pubkey)!;
+      return (
+        latest.includes(snapshot) &&
+        (latest.length === 1 ||
+          latest.every((entry) =>
+            entry.result.products.some((candidate) => candidate.id === product.id),
+          ))
+      );
+    }),
+  }));
   return snapshots;
 }
 export function clearMarketSnapshotMemory() {

@@ -103,6 +103,29 @@ describe('mergeCatalogue', () => {
     expect(products[0].listing!.event.created_at).toBe(20);
   });
 
+  it.each([[['status', 'sold']], [['visibility', 'hidden']], [['expiration', String(NOW - 1)]]])(
+    'does not resurrect an active revision superseded by %j',
+    (...tags) => {
+      const older = listing('withdrawn', { createdAt: 10 });
+      const newer = listing('withdrawn', { createdAt: 20, tags });
+      for (const products of [
+        [older, newer],
+        [newer, older],
+      ]) {
+        expect(mergeCatalogue([{ mode: 'preferred', products }], NOW).products).toEqual([]);
+      }
+      expect(
+        mergeCatalogue(
+          [
+            { mode: 'preferred', products: [older] },
+            { mode: 'wotFriends', products: [newer] },
+          ],
+          NOW,
+        ).products,
+      ).toEqual([]);
+    },
+  );
+
   it('records the mode each seller was loaded under, preferring the preferred catalogue', () => {
     const { modeBySeller } = mergeCatalogue(
       [
