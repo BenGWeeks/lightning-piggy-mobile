@@ -303,28 +303,32 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                 </TouchableOpacity>
               ) : null}
 
-              <TouchableOpacity
-                style={styles.buyButton}
-                onPress={openShop}
-                testID="market-product-detail-buy"
-                activeOpacity={0.85}
-                accessibilityLabel={t('market.detail.buyAccessibility', {
-                  title: product.title,
-                  seller: sellerName,
-                })}
-              >
-                <Zap size={16} color={colors.white} strokeWidth={2.5} fill={colors.white} />
-                <Text style={styles.buyText}>
-                  {product.listing
-                    ? t('market.live.openListing')
-                    : t('market.detail.buyFrom', { seller: sellerName })}
-                </Text>
-                {/* In-app checkout for opted-in products; the external-link glyph is
-                  only shown when tapping Buy leaves the app for the seller's website. */}
-                {checkoutTarget ? null : (
-                  <ExternalLink size={16} color={colors.white} strokeWidth={2.5} />
-                )}
-              </TouchableOpacity>
+              {/* Nostr listings without in-app checkout used to get an "Open listing"
+                button that only ever reached njump (slow and often broken), so it's
+                gone: those buyers use Message seller. Curated products still link to
+                the seller's website, and opted-in listings keep in-app checkout. */}
+              {product.listing && !checkoutTarget ? null : (
+                <TouchableOpacity
+                  style={styles.buyButton}
+                  onPress={openShop}
+                  testID="market-product-detail-buy"
+                  activeOpacity={0.85}
+                  accessibilityLabel={t('market.detail.buyAccessibility', {
+                    title: product.title,
+                    seller: sellerName,
+                  })}
+                >
+                  <Zap size={16} color={colors.white} strokeWidth={2.5} fill={colors.white} />
+                  <Text style={styles.buyText}>
+                    {t('market.detail.buyFrom', { seller: sellerName })}
+                  </Text>
+                  {/* In-app checkout for opted-in products; the external-link glyph is
+                    only shown when tapping Buy leaves the app for the seller's website. */}
+                  {checkoutTarget ? null : (
+                    <ExternalLink size={16} color={colors.white} strokeWidth={2.5} />
+                  )}
+                </TouchableOpacity>
+              )}
             </>
           )}
         </View>
