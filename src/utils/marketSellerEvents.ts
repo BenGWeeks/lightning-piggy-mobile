@@ -161,7 +161,9 @@ export function validateListingDraft(draft: ListingDraft): SellerDraftError[] {
     draft.collections?.some((c) => !/^30405:[0-9a-f]{64}:.+$/.test(c))
   )
     errors.push('categories');
+  // Digital events omit shipping; retained physical values are hidden in the editor.
   if (
+    draft.format !== 'digital' &&
     draft.shipping.some(
       (s) =>
         !/^3040[56]:[0-9a-f]{64}:.+/.test(s.coordinate) ||

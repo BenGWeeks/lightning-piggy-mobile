@@ -247,6 +247,20 @@ describe('listing events (kind 30402)', () => {
 });
 
 describe('listing validation', () => {
+  it.each(['x', '-1', '1.5'])(
+    'ignores hidden shipping extra cost %s only for digital items',
+    (extraCost) => {
+      const physical = draft({
+        format: 'physical',
+        currency: 'SATS',
+        price: '500',
+        shipping: [{ coordinate: zoneCoord('z'), extraCost }],
+      });
+      expect(validateListingDraft(physical)).toContain('shipping');
+      expect(validateListingDraft({ ...physical, format: 'digital' })).toEqual([]);
+    },
+  );
+
   it('accepts a complete draft', () => {
     expect(validateListingDraft(draft())).toEqual([]);
   });

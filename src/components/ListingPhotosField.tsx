@@ -140,7 +140,7 @@ const ListingPhotosField: React.FC<Props> = ({
             </Text>
             <Text style={styles.photoCount} testID="listing-photo-count">
               {t('market.sell.editor.photoCount', {
-                count: images.length,
+                n: images.length,
                 max: MAX_LISTING_IMAGES,
               })}
             </Text>

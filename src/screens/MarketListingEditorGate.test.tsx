@@ -123,6 +123,24 @@ beforeEach(() => {
 });
 
 describe('shipping gate', () => {
+  it('publishes after switching to digital with an invalid hidden shipping cost', async () => {
+    mockShop.snapshot = { ...mockShop.snapshot, zones: [zone] };
+    const screen = render(<MarketListingEditorScreen navigation={navigation} route={route()} />);
+    fillNewListing(screen);
+    fireEvent.changeText(screen.getByTestId('listing-ship-extra-0'), 'x');
+    await act(async () => fireEvent.press(screen.getByTestId('listing-publish')));
+    expect(mockSaveListing).not.toHaveBeenCalled();
+
+    fireEvent.press(screen.getByTestId('listing-format-digital'));
+    expect(screen.queryByTestId('listing-ship-extra-0')).toBeNull();
+    await act(async () => fireEvent.press(screen.getByTestId('listing-publish')));
+    expect(mockSaveListing).toHaveBeenCalledTimes(1);
+    expect(savedDraft().format).toBe('digital');
+    const { tags } = buildListingTemplate({ draft: savedDraft(), pubkey: SELLER, nowSeconds: 1 });
+    expect(tags).toContainEqual(['type', 'simple', 'digital']);
+    expect(tags.some((tag) => tag[0] === 'shipping_option')).toBe(false);
+  });
+
   it('blocks publishing a physical item while the shop has no shipping options', async () => {
     const screen = render(<MarketListingEditorScreen navigation={navigation} route={route()} />);
     expect(screen.getByTestId('shop-shipping-required')).toBeTruthy();
