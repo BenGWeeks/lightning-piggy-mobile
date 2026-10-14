@@ -2306,6 +2306,7 @@
       "filters": "Filters",
       "filtersApplied": "Filters, {{count}} active",
       "emptyNoMatch": "No products match your search or filters.",
+      "emptyMerchantMissing": "No listings from {{name}} right now — pull to refresh.",
       "emptyNoFriends": "None of your Nostr friends are selling Lightning Piggy products yet.",
       "emptyNone": "No products available right now."
     },
@@ -2351,6 +2352,7 @@
       "friendsChip": "Friends",
       "comingSoon": "Coming soon",
       "clearScope": "Reset sellers to Lightning Piggy Preferred Sellers",
+      "changeScope": "{{label}}. Opens Filters to change sellers",
       "moreMerchants": "More (%{count})",
       "searchMerchants": "Search merchants",
       "noMerchants": "No merchants found"
@@ -2467,11 +2469,7 @@
     },
     "live": {
       "loading": "Loading listings from your friends…",
-      "updating": "Updating…",
       "partialToast": "Some sellers didn’t respond. Pull to refresh.",
-      "loaded": "Live listings from your friends",
-      "loadedPreferred": "Live listings from Lightning Piggy's preferred sellers",
-      "refresh": "Refresh",
       "contactSeller": "Message seller"
     },
     "sell": {

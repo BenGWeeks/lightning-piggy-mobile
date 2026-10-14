@@ -8,14 +8,20 @@ import { collectRelaySnapshot } from './relaySnapshot';
 import { verifyEventCached } from './nostrVerifyCache';
 import { nostrGetEventHash } from './nostrCrypto';
 import { createYieldScheduler } from '../contexts/nostrDecryptPacing';
-import { reduceMarketListings, selectVerifiedListings } from '../utils/marketListings';
+import {
+  marketListingProductId,
+  reduceMarketListings,
+  selectVerifiedListings,
+} from '../utils/marketListings';
 import {
   deletionFilters as listingDeletionFilters,
   listingFilters,
+  MARKET_LISTING_KINDS,
   marketSnapshotRelays,
 } from '../utils/marketListingsQuery';
 import { addressRefs, deletionFilters, idRefs } from '../utils/nip09';
 import { hasValidSignature } from '../utils/eventSignature';
+import { isNewerRevision } from '../utils/marketSellerRevision';
 import { startJsStallProbe } from '../utils/jsStallProbe';
 import { PERF_LOGS_ENABLED } from '../utils/perfLog';
 import { ROBOTECHY_PUBKEY } from '../utils/marketSample';
@@ -27,6 +33,22 @@ export interface MarketListingsResult {
   /** Deliberate query/work limits, separately from an unanswered relay pass. */
   budgetLimited?: boolean;
   transportFailed?: boolean;
+  /** Relays that answered the listings pass in full. */
+  answeredRelays?: string[];
+  /**
+   * Product ids this snapshot has ruled on without showing them: listings a
+   * verified revision withdrew, superseded or excluded from display, plus
+   * carried-over listings a NIP-09 deletion (or expiry) now removes. A merge
+   * must never keep a previous copy of these.
+   */
+  withdrawn?: string[];
+}
+
+export interface MarketListingsOptions {
+  /** Listing events still shown from an earlier snapshot. Pass 2 looks up
+   * their deletions too, so a stale copy can't outlive its withdrawal while
+   * its own relay is unreachable. */
+  carried?: readonly Event[];
 }
 
 const MAX_AUTHORS = 1024;
@@ -88,6 +110,7 @@ export async function fetchMarketListings(
   signal: AbortSignal,
   /** Called at most once with the newest verified listings, before the rest. */
   onFirstPage?: (products: MarketProduct[]) => void,
+  options: MarketListingsOptions = {},
 ): Promise<MarketListingsResult> {
   const keys = [...new Set(authors.filter((a) => /^[a-f0-9]{64}$/.test(a)))].sort();
   const scope = new Set(keys.slice(0, MAX_AUTHORS));
@@ -97,7 +120,7 @@ export async function fetchMarketListings(
   // timeout each. The healthiest 2 are always kept.
   const urls = selectHealthyRelays(planned.urls);
   const dropped = planned.dropped;
-  if (urls.length === 0) return { products: [], incomplete: true };
+  if (urls.length === 0) return { products: [], incomplete: true, answeredRelays: [] };
   // A dedicated structure-only pool: every event is verified here before use
   // (see marketListingsPool). Its sockets close when the last snapshot ends.
   const lease = acquireMarketListingsPool(urls);
@@ -109,6 +132,10 @@ export async function fetchMarketListings(
       lease.pool,
       signal,
       onFirstPage,
+      // Already-verified listings from a previous snapshot, in scope only.
+      (options.carried ?? []).filter(
+        (event) => scope.has(event.pubkey) && MARKET_LISTING_KINDS.includes(event.kind),
+      ),
     );
   } finally {
     lease.release();
@@ -122,6 +149,7 @@ async function runSnapshot(
   relayPool: Pick<AbstractSimplePool, 'ensureRelay'>,
   signal: AbortSignal,
   onFirstPage: ((products: MarketProduct[]) => void) | undefined,
+  carried: readonly Event[],
 ): Promise<MarketListingsResult> {
   const startedAt = Date.now();
   const probe = PERF_LOGS_ENABLED ? startJsStallProbe() : null;
@@ -153,8 +181,53 @@ async function runSnapshot(
   // `verifyEventCached` skips the schnorr for ids already checked this
   // session, so a refetch doesn't pay for the snapshot again.
   const verified = verifyEventCached;
-  const oversizedQueue: Event[] = [];
-  // Retain queued ids across both passes; at most MAX_OVERSIZED_CHECKS entries.
+  // Keep sources per payload AND signature until that candidate authenticates.
+  const candidateSources = new Map<string, Set<string>>();
+  const seenOn = new Map<string, Set<string>>();
+  const noteCandidateSource = (event: Event, url?: string) => {
+    if (!url || !MARKET_LISTING_KINDS.includes(event.kind)) return;
+    const key = `${event.id}:${event.sig}`;
+    const sources = candidateSources.get(key);
+    if (sources) sources.add(url);
+    else candidateSources.set(key, new Set([url]));
+  };
+  // Only an authenticated revision at least as recent as the carried one
+  // can rule it out. Signature validity alone does not establish ordering.
+  const authenticatedListings = new Map<string, Event>();
+  const carriedRevisions = new Map<string, Event>();
+  for (const event of carried) {
+    const d = event.tags.find((t) => t[0] === 'd')?.[1];
+    if (!d) continue;
+    try {
+      const id = marketListingProductId(event.kind, event.pubkey, d);
+      if (isNewerRevision(event, carriedRevisions.get(id) ?? null)) carriedRevisions.set(id, event);
+    } catch {
+      // Malformed identifiers cannot name a renderable listing.
+    }
+  }
+  const noteAuthenticatedListing = (event: Event) => {
+    if (!MARKET_LISTING_KINDS.includes(event.kind)) return;
+    const d = event.tags.find((t) => t[0] === 'd')?.[1];
+    if (!d) return;
+    try {
+      const id = marketListingProductId(event.kind, event.pubkey, d);
+      if (isNewerRevision(event, authenticatedListings.get(id) ?? null))
+        authenticatedListings.set(id, event);
+      const sources = candidateSources.get(`${event.id}:${event.sig}`);
+      if (sources) {
+        const relays = seenOn.get(id);
+        if (relays) sources.forEach((url) => relays.add(url));
+        else seenOn.set(id, new Set(sources));
+      }
+    } catch {
+      // Malformed identifiers cannot name a renderable listing.
+    }
+  };
+  // Each queued payload keeps the relay that served it; that relay is only
+  // recorded as a source once the payload verifies (a forged oversized copy
+  // must never become provenance for the genuine listing).
+  const oversizedQueue: { event: Event; url: string | undefined }[] = [];
+  // Retain queued id/signature pairs across both passes; at most MAX_OVERSIZED_CHECKS entries.
   const oversizedIds = new Set<string>();
   let oversizedChecks = 0;
   const idMatches = (event: Event) => {
@@ -238,25 +311,33 @@ async function runSnapshot(
   const drainOversized = async () => {
     const scheduler = createYieldScheduler({ signal, safetyEvery: 32 });
     try {
-      for (const event of oversizedQueue) {
+      for (const { event, url: sourceUrl } of oversizedQueue) {
         await scheduler.maybeYield();
         if (signal.aborted) break;
         // Release the queued candidate's reserved slot before retaining its marker.
         if (event.kind === 5) deletionCount--;
         else listingCount--;
         oversizedChecks++;
-        if (verified(event)) suppressOversized(event);
+        if (verified(event)) {
+          noteCandidateSource(event, sourceUrl);
+          noteAuthenticatedListing(event);
+          suppressOversized(event);
+        }
       }
       oversizedQueue.length = 0;
     } finally {
       scheduler.dispose();
     }
   };
-  const ingest = (event: Event) => {
+  const ingest = (event: Event, url?: string) => {
     received++;
     if (!scope.has(event.pubkey) || event.created_at > Date.now() / 1000 + 300) return;
     if (event.content.length > 32768 || event.tags.length > 256) {
-      if (oversizedIds.has(event.id)) return;
+      const key = `${event.id}:${event.sig}`;
+      if (oversizedIds.has(key)) {
+        if (idMatches(event)) noteCandidateSource(event, url);
+        return;
+      }
       if (
         event.content.length > MAX_VERIFY_CHARS ||
         budgetFull(event.kind === 5) ||
@@ -272,13 +353,16 @@ async function runSnapshot(
         // Queued payloads share the event budget with ordinary candidates.
         if (event.kind === 5) deletionCount++;
         else listingCount++;
-        oversizedIds.add(event.id);
-        oversizedQueue.push(event);
+        oversizedIds.add(key);
+        oversizedQueue.push({ event, url });
       }
       return;
     }
     const key = `${event.id}:${event.sig}`;
-    if (events.has(key)) return;
+    if (events.has(key)) {
+      if (idMatches(event)) noteCandidateSource(event, url);
+      return;
+    }
     const deletion = event.kind === 5;
     if (budgetFull(deletion)) {
       limited = true;
@@ -290,6 +374,7 @@ async function runSnapshot(
     // hash to its id is junk, so drop it now before it takes budget.
     if (!idMatches(event)) return;
     events.set(key, event);
+    noteCandidateSource(event, url);
     if (deletion) deletionCount++;
     else listingCount++;
   };
@@ -306,7 +391,9 @@ async function runSnapshot(
   });
   await drainOversized();
   const listingsDoneAt = Date.now();
-  const candidates = [...events.values(), ...suppressions.values()].filter((e) => e.kind !== 5);
+  const found = [...events.values(), ...suppressions.values()].filter((e) => e.kind !== 5);
+  // Carried-over listings take part in the deletion lookup only.
+  const candidates = [...found, ...carried];
   knownTargets = new Set(
     candidates.flatMap((e) => {
       const d = e.tags.find((t) => t[0] === 'd')?.[1];
@@ -354,7 +441,8 @@ async function runSnapshot(
     const verifyListing = (event: Event) => {
       if (signal.aborted) return false;
       const valid = trusted.has(event) || verified(event);
-      if (!valid) failedListingChecks++;
+      if (valid) noteAuthenticatedListing(event);
+      else failedListingChecks++;
       return valid;
     };
     const selection = await selectVerifiedListings(
@@ -405,8 +493,31 @@ async function runSnapshot(
       if (cappedProducts.length === MAX_PRODUCTS) cappedProducts.pop();
       cappedProducts.push(robot);
     }
+    const shown = new Set(cappedProducts.map((product) => product.id));
+    const withheld = signal.aborted || deletionChecksGaveUp || deletionUnavailable;
     const result: MarketListingsResult = {
-      products: cappedProducts,
+      products: cappedProducts.map((product) => ({
+        ...product,
+        listing: product.listing && {
+          ...product.listing,
+          seenOn: [...(seenOn.get(product.id) ?? [])],
+        },
+      })),
+      answeredRelays: withheld ? [] : [...listings.answered],
+      withdrawn: withheld
+        ? []
+        : [
+            ...[...authenticatedListings]
+              .filter(([id, event]) => {
+                const previous = carriedRevisions.get(id);
+                return (
+                  !shown.has(id) &&
+                  (!previous || event.id === previous.id || isNewerRevision(event, previous))
+                );
+              })
+              .map(([id]) => id),
+            ...carriedWithdrawals(carried, [...events.values(), ...suppressions.values()], scope),
+          ],
       // Unanswered passes or unchecked data. Reaching MAX_PRODUCTS is a deliberate display
       // cap (newest first), not a failed load — "could not be loaded, try
       // refreshing" would be untrue, and refreshing can't change it.
@@ -450,6 +561,31 @@ async function runSnapshot(
   } finally {
     scheduler.dispose();
   }
+}
+
+/**
+ * Carried-over listings that this round's authenticated deletions (or their
+ * own expiry) now remove — the same reducer rules as the feed.
+ */
+function carriedWithdrawals(
+  carried: readonly Event[],
+  events: readonly Event[],
+  scope: ReadonlySet<string>,
+): string[] {
+  if (carried.length === 0) return [];
+  const deletions = events.filter((event) => event.kind === 5);
+  const kept = new Set(reduceMarketListings([...carried, ...deletions], scope).map((p) => p.id));
+  return carried.flatMap((event) => {
+    const d = event.tags.find((t) => t[0] === 'd')?.[1];
+    if (!d) return [];
+    try {
+      const id = marketListingProductId(event.kind, event.pubkey, d);
+      return !kept.has(id) ? [id] : [];
+    } catch {
+      // Malformed identifiers cannot name a renderable listing.
+      return [];
+    }
+  });
 }
 
 /**

@@ -27,8 +27,7 @@ import { useMarketPreferences } from '../hooks/useMarketPreferences';
 import { useMarketShipsTo } from '../hooks/useMarketShipsTo';
 import { localizedCountryName } from '../data/countries';
 import { SHIPS_TO_UNKNOWN, shipsToOptions } from '../utils/marketShipsTo';
-import { validateMarketPreferences } from '../utils/marketPreferences';
-import { marketLoadingStatus } from '../utils/marketLoadingStatus';
+import { useMarketSelectionGuard } from '../hooks/useMarketSelectionGuard';
 import { DEFAULT_MARKET_MODE, type MarketMode } from '../utils/marketMode';
 import {
   canClearMarketFilters,
@@ -86,6 +85,10 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
   // The category filters (merchant / ships to / currency) live in a right-anchored
   // slide-in panel to keep the main view compact; the search box stays inline.
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const openFilters = useCallback(() => {
+    perfLog('[PerfBlock] market filter tap');
+    setFiltersOpen(true);
+  }, []);
 
   // Search + merchant + ships-to + currency filters. The query is debounced so
   // re-filtering stays off the per-keystroke path; the chip axes apply
@@ -100,12 +103,11 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [ready, live.products]);
 
   // Filter option lists sourced from the data actually loaded (not hardcoded).
-  const merchantOptions = useMemo(() => marketMerchants(baseProducts), [baseProducts]);
-  const merchants = useMemo(() => merchantOptions.map((option) => option.id), [merchantOptions]);
-  const merchant = resolveMerchantSelection(savedMerchant, merchantOptions, live.merchantAliases);
+  const loadedMerchants = useMemo(() => marketMerchants(baseProducts), [baseProducts]);
+  const merchant = resolveMerchantSelection(savedMerchant, loadedMerchants, live.merchantAliases);
   // Ships-to comes from the sellers' published shipping options, fetched in
   // batches for the whole catalogue — never per card.
-  const shipping = useMarketShipsTo(baseProducts, ready);
+  const shipping = useMarketShipsTo(baseProducts, ready, live.generation);
   const shipsToCountries = useMemo(
     () =>
       shipsToOptions(shipping.byProduct.values(), {
@@ -120,47 +122,23 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
     (product: MarketProduct) => shipping.byProduct.get(product.id) ?? SHIPS_TO_UNKNOWN,
     [shipping],
   );
-  const currencies = useMemo(() => distinctCurrencies(baseProducts), [baseProducts]);
+  const loadedCurrencies = useMemo(() => distinctCurrencies(baseProducts), [baseProducts]);
 
-  // Reconcile the category selections with the option lists whenever the
-  // mode-scoped catalogue changes: a merchant / currency picked under
-  // one mode may not exist under the next, and a chip that no longer renders
-  // can't be un-selected from its axis — the grid would just sit empty.
-  useEffect(() => {
-    if (
-      !ready ||
-      !live.completed ||
-      live.loading ||
-      live.incomplete ||
-      live.profilesReady === false
-    )
-      return;
-    const validated = validateMarketPreferences(
-      { ...preferences, merchant },
-      { merchants, currencies },
-    );
-    if (
-      validated.merchant !== savedMerchant ||
-      validated.shipsTo !== shipsTo ||
-      validated.currency !== currency
-    )
-      update(validated);
-  }, [
+  // A transient load (one seller's relay slow or silent) must never wipe a
+  // choice the shopper made: selections are only reconciled on a seller-scope
+  // change or after the choice has been missing from consecutive answered
+  // loads, and their chips stay rendered (and selected) meanwhile.
+  const { merchantOptions, currencies, merchantMissing, merchantName } = useMarketSelectionGuard({
     ready,
     mode,
-    live.completed,
-    live.profilesReady,
-    live.loading,
-    live.incomplete,
-    merchants,
-    currencies,
-    merchant,
-    savedMerchant,
-    shipsTo,
-    currency,
+    live,
+    products: baseProducts,
     preferences,
+    merchant,
+    merchantOptions: loadedMerchants,
+    currencies: loadedCurrencies,
     update,
-  ]);
+  });
 
   const filter = useMemo<MarketFilter>(
     () => ({ query: debouncedQuery, merchant, shipsTo, includeUnknownShipping, currency }),
@@ -248,11 +226,13 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
   const emptyCopy =
     live.loading && baseProducts.length === 0
       ? t('market.live.loading')
-      : filterActive
-        ? t('market.screen.emptyNoMatch')
-        : mode === 'wotFriends'
-          ? t('market.screen.emptyNoFriends')
-          : t('market.screen.emptyNone');
+      : merchantMissing
+        ? t('market.screen.emptyMerchantMissing', { name: merchantName ?? merchant ?? '' })
+        : filterActive
+          ? t('market.screen.emptyNoMatch')
+          : mode === 'wotFriends'
+            ? t('market.screen.emptyNoFriends')
+            : t('market.screen.emptyNone');
 
   if (!ready) return <View style={styles.container} testID="market-screen" />;
 
@@ -316,10 +296,7 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
         </View>
         <TouchableOpacity
           style={[styles.filterButton, filtersActive && styles.filterButtonActive]}
-          onPress={() => {
-            perfLog('[PerfBlock] market filter tap');
-            setFiltersOpen(true);
-          }}
+          onPress={openFilters}
           accessibilityLabel={
             filtersActive
               ? t('market.screen.filtersApplied', { count: activeFilterCount })
@@ -344,37 +321,43 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
         </TouchableOpacity>
       </View>
 
-      {mode !== DEFAULT_MARKET_MODE ? (
-        <View style={styles.scopeRow}>
+      {/* The seller scope is always shown as a pill. Preferred is the default
+          with no wider option yet, so it has no × — tapping it opens Filters
+          (Sellers leads the sheet); Friends' × returns to Preferred. */}
+      <View style={styles.scopeRow}>
+        {mode === DEFAULT_MARKET_MODE ? (
+          <TouchableOpacity
+            style={styles.scopeChip}
+            onPress={openFilters}
+            accessibilityLabel={t('market.filters.changeScope', {
+              label: t('market.modes.preferred'),
+            })}
+            testID="market-scope-pill-preferred"
+            activeOpacity={0.7}
+          >
+            <Text style={styles.scopeChipText}>{t('market.modes.preferred')}</Text>
+          </TouchableOpacity>
+        ) : (
           <TouchableOpacity
             style={styles.scopeChip}
             onPress={() => selectMode(DEFAULT_MARKET_MODE)}
             accessibilityLabel={t('market.filters.clearScope')}
-            testID="market-scope-chip-clear"
+            testID="market-scope-pill-friends"
             activeOpacity={0.7}
           >
             <Text style={styles.scopeChipText}>{t('market.filters.friendsChip')}</Text>
             <X size={14} color={colors.brandPink} strokeWidth={2.25} />
           </TouchableOpacity>
+        )}
+      </View>
+
+      {/* Pull-to-refresh replaces the old status row; only a load that missed
+          some sellers says so, inline. */}
+      {live.incomplete && !live.loading ? (
+        <View style={styles.partialBanner} testID="market-partial-banner">
+          <Text style={styles.partialBannerText}>{t('market.live.partialToast')}</Text>
         </View>
       ) : null}
-
-      {
-        <View style={styles.liveStatus}>
-          <Text style={styles.liveStatusText} testID="market-live-status">
-            {t(marketLoadingStatus(live.loading, live.incomplete, baseProducts.length, mode))}
-          </Text>
-          <TouchableOpacity
-            onPress={live.refresh}
-            disabled={live.loading}
-            accessibilityState={{ disabled: live.loading }}
-            accessibilityLabel={t('market.live.refresh')}
-            testID="market-live-refresh"
-          >
-            <Text style={styles.liveStatusText}>{t('market.live.refresh')}</Text>
-          </TouchableOpacity>
-        </View>
-      }
       {merchant !== null ? (
         <MarketCollectionChips
           collections={collectionFilter.collections}

@@ -11,6 +11,8 @@ import {
   readMarketSnapshot,
   writeMarketSnapshot,
 } from '../services/marketStorage';
+import { carriedListingEvents, mergeMarketSnapshot } from '../utils/marketSnapshotMerge';
+import type { MarketProduct } from '../data/marketProducts';
 
 /**
  * A snapshot younger than this is reused when the user flips back to WoT:
@@ -62,6 +64,14 @@ export function useMarketListings(
     revision: number;
     result: MarketListingsResult;
   } | null>(null);
+  // The last whole catalogue for a scope (never a first page): what the next
+  // result merges over, so a relay that stays silent can't shrink the grid.
+  const confirmed = useRef<{ key: string; products: MarketProduct[] }>({
+    key,
+    products: getMarketSnapshot(key)?.result.products ?? [],
+  });
+  // Counts completed loads, so consumers can tell one load from the next.
+  const [generation, setGeneration] = useState(0);
   const refresh = useCallback(() => setRevision((r) => r + 1), []);
   useFocusEffect(
     useCallback(() => {
@@ -77,6 +87,7 @@ export function useMarketListings(
         // aborted mid-flight (mode switch / blur) leaves `loading` set, and a
         // brief detour through another scope leaves that scope's key.
         const cached = last.result;
+        confirmed.current = { key, products: cached.products };
         setState((prev) =>
           prev.key === key && !prev.loading
             ? prev
@@ -90,10 +101,13 @@ export function useMarketListings(
       if (!cached)
         void readMarketSnapshot(key).then((snapshot) => {
           if (!snapshot || received || controller.signal.aborted) return;
+          confirmed.current = { key, products: snapshot.result.products };
           setState({ ...snapshot.result, key, loading: true, completed: false });
         });
       // Refreshing the same account/follow scope keeps the current snapshot on
       // screen (and so the user's filters); only a new scope starts empty.
+      if (confirmed.current.key !== key)
+        confirmed.current = { key, products: cached?.result.products ?? [] };
       setState((prev) =>
         prev.key === key
           ? { ...prev, loading: true }
@@ -123,24 +137,29 @@ export function useMarketListings(
           relaysKey.split(','),
           controller.signal,
           onFirstPage,
+          { carried: carriedListingEvents(confirmed.current.products) },
         ).catch(
-          (): MarketListingsResult => ({ products: [], incomplete: true, transportFailed: true }),
+          (): MarketListingsResult => ({
+            products: [],
+            incomplete: true,
+            transportFailed: true,
+            answeredRelays: [],
+          }),
         );
-      const showResult = (result: MarketListingsResult, loading: boolean, completed: boolean) =>
-        setState((prev) => ({
-          ...result,
-          products:
-            result.transportFailed && result.products.length === 0 && prev.key === key
-              ? prev.products
-              : result.products,
-          key,
-          loading,
-          completed,
-        }));
-      const publish = (result: MarketListingsResult) => {
+      // Merge over the last whole catalogue (stale-while-revalidate): listings
+      // whose relays stayed silent this round stay on screen.
+      const showResult = (fetched: MarketListingsResult, loading: boolean, completed: boolean) => {
+        const base = confirmed.current.key === key ? confirmed.current.products : [];
+        const result = { ...fetched, products: mergeMarketSnapshot(base, fetched) };
+        confirmed.current = { key, products: result.products };
+        setState({ ...result, key, loading, completed });
+        return result;
+      };
+      const publish = (fetched: MarketListingsResult) => {
         if (controller.signal.aborted) return;
         received = true;
-        showResult(result, false, true);
+        const result = showResult(fetched, false, true);
+        setGeneration((value) => value + 1);
         if (!result.incomplete || result.products.length > 0) void writeMarketSnapshot(key, result);
         // Only a complete snapshot is worth reusing; a partial one refetches.
         lastFetch.current = result.incomplete ? null : { key, at: Date.now(), revision, result };
@@ -207,6 +226,8 @@ export function useMarketListings(
       merchantAliases,
       loading: enabled && !!account && (state.key !== key || state.loading),
       completed: state.key === key && state.completed,
+      generation,
+      answeredRelays: state.key === key ? state.answeredRelays : undefined,
       hasSnapshot:
         state.key === key &&
         ((state.completed && !state.incomplete) ||
@@ -215,6 +236,6 @@ export function useMarketListings(
       incomplete: state.key === key && state.incomplete,
       refresh,
     }),
-    [state, key, enabled, account, refresh, products, profilesReady, merchantAliases],
+    [state, key, enabled, account, refresh, products, profilesReady, merchantAliases, generation],
   );
 }

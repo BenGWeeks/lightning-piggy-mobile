@@ -77,11 +77,17 @@ name: Market — grid → product detail → reviews/comments tabs (#948)
 - waitForAnimationToEnd
 - assertVisible:
     id: 'market-filter-badge'
+# The Friends scope pill carries the × that returns to Preferred.
 - tapOn:
-    id: 'market-scope-chip-clear'
+    id: 'market-scope-pill-friends'
 - assertNotVisible:
-    id: 'market-scope-chip-clear'
-# Back on preferred sellers: still one (scope) filter, not zero.
+    id: 'market-scope-pill-friends'
+# Back on preferred sellers: shown as its own pill (no ×), and still one
+# (scope) filter, not zero. The old status row / Refresh link is gone.
+- assertVisible:
+    id: 'market-scope-pill-preferred'
+- assertNotVisible:
+    id: 'market-live-refresh'
 - assertVisible:
     id: 'market-filter-active-count'
     text: '1'

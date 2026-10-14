@@ -28,8 +28,8 @@ export interface RelaySnapshotOptions {
   deadline: number;
   /** How long the remaining relays get after the first full answer. */
   graceMs: number;
-  /** Called with each event that passed the relay layer. */
-  onEvent: (event: Event) => void;
+  /** Called with each event that passed the relay layer, and the relay it came from. */
+  onEvent: (event: Event, url: string) => void;
   /** Pool to subscribe through (default: the shared, fully verifying pool). */
   relayPool?: Pick<AbstractSimplePool, 'ensureRelay'>;
 }
@@ -156,7 +156,7 @@ export function collectRelaySnapshot(opts: RelaySnapshotOptions): Promise<RelayS
                 },
                 onevent: (event) => {
                   if (event.created_at < oldest) oldest = event.created_at;
-                  if (!finished && !done) onEvent(event);
+                  if (!finished && !done) onEvent(event, url);
                 },
                 oneose: () => {
                   heard.add(url);

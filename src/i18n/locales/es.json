@@ -2306,6 +2306,7 @@
       "filters": "Filtros",
       "filtersApplied": "Filtros, {{count}} aplicados",
       "emptyNoMatch": "Ningún producto coincide con tu búsqueda o filtros.",
+      "emptyMerchantMissing": "Ahora mismo no hay anuncios de {{name}}. Desliza hacia abajo para actualizar.",
       "emptyNoFriends": "Ninguno de tus amigos de Nostr vende productos de Lightning Piggy todavía.",
       "emptyNone": "No hay productos disponibles en este momento."
     },
@@ -2351,6 +2352,7 @@
       "friendsChip": "Amigos",
       "comingSoon": "Próximamente",
       "clearScope": "Restablecer vendedores a los vendedores preferidos de Lightning Piggy",
+      "changeScope": "{{label}}. Abre los filtros para cambiar de vendedores",
       "moreMerchants": "Más (%{count})",
       "searchMerchants": "Buscar vendedores",
       "noMerchants": "No se encontraron vendedores"
@@ -2467,11 +2469,7 @@
     },
     "live": {
       "loading": "Cargando anuncios de tus amigos…",
-      "updating": "Actualizando…",
       "partialToast": "Algunos vendedores no respondieron. Desliza hacia abajo para actualizar.",
-      "loaded": "Anuncios actuales de tus amigos",
-      "loadedPreferred": "Anuncios actuales de los vendedores preferidos de Lightning Piggy",
-      "refresh": "Actualizar",
       "contactSeller": "Enviar mensaje al vendedor"
     },
     "sell": {

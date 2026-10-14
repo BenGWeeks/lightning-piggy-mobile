@@ -2306,6 +2306,7 @@
       "filters": "Szűrők",
       "filtersApplied": "Szűrők, {{count}} alkalmazva",
       "emptyNoMatch": "Nincs a keresésnek vagy szűrőknek megfelelő termék.",
+      "emptyMerchantMissing": "{{name}} jelenleg nem kínál semmit — húzd le a frissítéshez.",
       "emptyNoFriends": "A Nostr-barátaid közül még senki sem árul Lightning Piggy termékeket.",
       "emptyNone": "Jelenleg nincs elérhető termék."
     },
@@ -2351,6 +2352,7 @@
       "friendsChip": "Barátok",
       "comingSoon": "Hamarosan",
       "clearScope": "Eladók visszaállítása a Lightning Piggy ajánlott eladóira",
+      "changeScope": "{{label}}. Megnyitja a szűrőket az eladók módosításához",
       "moreMerchants": "Továbbiak (%{count})",
       "searchMerchants": "Kereskedők keresése",
       "noMerchants": "Nem található kereskedő"
@@ -2467,11 +2469,7 @@
     },
     "live": {
       "loading": "A barátaid hirdetéseinek betöltése…",
-      "updating": "Frissítés…",
       "partialToast": "Néhány eladó nem válaszolt. Húzd lefelé a frissítéshez.",
-      "loaded": "Élő hirdetések a barátaidtól",
-      "loadedPreferred": "Élő hirdetések a Lightning Piggy ajánlott eladóitól",
-      "refresh": "Frissítés",
       "contactSeller": "Üzenet az eladónak"
     },
     "sell": {

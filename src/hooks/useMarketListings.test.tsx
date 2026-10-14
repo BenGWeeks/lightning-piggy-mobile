@@ -359,3 +359,66 @@ it.each(['blur', 'mode', 'account', 'unmount'])(
     jest.useRealTimers();
   },
 );
+
+describe('stale-while-revalidate across partial refreshes', () => {
+  const sold = (id: string, relay: string) =>
+    ({
+      id,
+      sellerName: id,
+      listing: {
+        event: { id: `event-${id}`, pubkey: id, kind: 30402, created_at: 1, tags: [] },
+        seenOn: [relay],
+      },
+    }) as unknown as MarketListingsResult['products'][number];
+  const eden = sold('eden', 'wss://relay.weeksfamily.me');
+  const shop = sold('shop', 'wss://example.com');
+
+  it("keeps a seller whose relay didn't answer the refresh, then drops them once it answers without them", async () => {
+    const h = renderHook(() => useMarketListings(true));
+    await act(async () =>
+      finish({
+        products: [shop, eden],
+        incomplete: false,
+        answeredRelays: ['wss://example.com', 'wss://relay.weeksfamily.me'],
+      }),
+    );
+    const firstGeneration = h.result.current.generation;
+    act(() => h.result.current.refresh());
+    // The shown listings ride along so pass 2 can check their deletions.
+    expect(fetch.mock.calls[1][4]).toEqual({
+      carried: [shop.listing!.event, eden.listing!.event],
+    });
+    await act(async () =>
+      finish({ products: [shop], incomplete: false, answeredRelays: ['wss://example.com'] }),
+    );
+    expect(h.result.current.products.map((p) => p.id).sort()).toEqual(['eden', 'shop']);
+    expect(h.result.current.generation).toBe(firstGeneration + 1);
+    expect(h.result.current.answeredRelays).toEqual(['wss://example.com']);
+    act(() => h.result.current.refresh());
+    await act(async () =>
+      finish({
+        products: [shop],
+        incomplete: false,
+        answeredRelays: ['wss://example.com', 'wss://relay.weeksfamily.me'],
+      }),
+    );
+    expect(h.result.current.products.map((p) => p.id)).toEqual(['shop']);
+  });
+
+  it('removes a carried listing the refresh reports withdrawn (NIP-09 deletion)', async () => {
+    const h = renderHook(() => useMarketListings(true));
+    await act(async () =>
+      finish({ products: [shop, eden], incomplete: false, answeredRelays: ['wss://example.com'] }),
+    );
+    act(() => h.result.current.refresh());
+    await act(async () =>
+      finish({
+        products: [shop],
+        incomplete: false,
+        answeredRelays: ['wss://example.com'],
+        withdrawn: ['eden'],
+      }),
+    );
+    expect(h.result.current.products.map((p) => p.id)).toEqual(['shop']);
+  });
+});
