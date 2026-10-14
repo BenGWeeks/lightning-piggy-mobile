@@ -2911,6 +2911,16 @@
     "keptInSigner": "Dein Schlüssel wird in deiner Signer-App aufbewahrt",
     "keptInSignerBody": "Lightning Piggy bekommt den geheimen Schlüssel dieses Kontos nie zu sehen. Sichere ihn in deiner Signer-App. Wallet-Wiederherstellungsphrasen, die in Lightning Piggy gespeichert sind, brauchen vor dem Abmelden ein eigenes Backup."
   },
+  "keyBackupReminder": {
+    "channelName": "Erinnerungen",
+    "channelDescription": "Sanfte Erinnerungen, zum Beispiel an die Sicherung deines Kontoschlüssels",
+    "title": "Sichere deinen Schlüssel",
+    "body": "Dein Konto {{name}} ist noch nicht gesichert. Wenn du dieses Handy verlierst, ist es weg. Tippe, um deinen Schlüssel zu sichern.",
+    "bannerBody": "Dieses Konto ist noch nicht gesichert. Wenn du dieses Handy verlierst, ist es weg. Tippe, um deinen Schlüssel zu sichern.",
+    "bannerDismiss": "Nächste Woche erinnern",
+    "settingsTitle": "Sicherungs-Erinnerungen",
+    "settingsDetails": "Einmal pro Woche eine Erinnerung, jedes Konto auf diesem Handy zu sichern, dessen Schlüssel noch nicht gesichert ist — bis du bestätigst, dass du ihn gesichert hast. Nur für Konten, deren Schlüssel in Lightning Piggy liegt, nie für Amber- oder Signer-App-Konten. Sind Benachrichtigungen aus, erscheint sie stattdessen im Tab „Wallets“."
+  },
   "notificationSettingsScreen": {
     "title": "Benachrichtigungen",
     "permissionTitle": "Benachrichtigungen für Lightning Piggy",

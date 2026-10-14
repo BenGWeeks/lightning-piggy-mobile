@@ -3,6 +3,20 @@
 // shape (identities + activePubkey) can be asserted without touching
 // the OS keychain.
 
+import {
+  retiredBackupAccounts,
+  resetKeyBackupReminderQueueForTests,
+} from './keyBackupReminderQueue';
+
+import * as SecureStore from 'expo-secure-store';
+import {
+  loadIdentities,
+  upsertIdentity,
+  removeIdentity,
+  setActiveIdentity,
+  clearIdentities,
+} from './identitiesStore';
+
 jest.mock('expo-secure-store', () => {
   const store = new Map<string, string>();
   return {
@@ -18,19 +32,11 @@ jest.mock('expo-secure-store', () => {
   };
 });
 
-import * as SecureStore from 'expo-secure-store';
-import {
-  loadIdentities,
-  upsertIdentity,
-  removeIdentity,
-  setActiveIdentity,
-  clearIdentities,
-} from './identitiesStore';
-
 const PK1 = 'a'.repeat(64);
 const PK2 = 'b'.repeat(64);
 
 beforeEach(() => {
+  resetKeyBackupReminderQueueForTests();
   // The mock factory above exposes __resetForTests on the module object.
   (SecureStore as unknown as { __resetForTests: () => void }).__resetForTests();
 });
@@ -119,6 +125,36 @@ describe('identitiesStore', () => {
     const blob = await removeIdentity(PK1);
     expect(blob.identities).toEqual([]);
     expect(blob.activePubkey).toBeNull();
+  });
+
+  it('releases retirement on last-account removal without an empty-registry reconcile', async () => {
+    await upsertIdentity({ pubkey: PK1, signerType: 'nsec', nsec: 'a', lastUsedAt: 1 });
+    retiredBackupAccounts.add(PK1);
+    await removeIdentity(PK1);
+    expect(retiredBackupAccounts.has(PK1)).toBe(false);
+    await upsertIdentity({ pubkey: PK1, signerType: 'nsec', nsec: 'a', lastUsedAt: 1 });
+    expect(retiredBackupAccounts.has(PK1)).toBe(false);
+  });
+
+  it('releases retirement when the same account is added again', async () => {
+    retiredBackupAccounts.add(PK1);
+    await upsertIdentity({ pubkey: PK1, signerType: 'nsec', nsec: 'a', lastUsedAt: 1 });
+    expect(retiredBackupAccounts.has(PK1)).toBe(false);
+  });
+
+  it('releases all retirement on full sign-out', async () => {
+    retiredBackupAccounts.add(PK1);
+    retiredBackupAccounts.add(PK2);
+    await clearIdentities();
+    expect(retiredBackupAccounts.size).toBe(0);
+  });
+
+  it('keeps retirement if the removal write fails', async () => {
+    await upsertIdentity({ pubkey: PK1, signerType: 'nsec', nsec: 'a', lastUsedAt: 1 });
+    retiredBackupAccounts.add(PK1);
+    jest.mocked(SecureStore.setItemAsync).mockRejectedValueOnce(new Error('write failed'));
+    await expect(removeIdentity(PK1)).rejects.toThrow('write failed');
+    expect(retiredBackupAccounts.has(PK1)).toBe(true);
   });
 
   it('setActiveIdentity flips the active flag and bumps lastUsedAt', async () => {

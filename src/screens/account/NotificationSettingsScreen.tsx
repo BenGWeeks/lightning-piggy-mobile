@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Platform } from 'react-native';
-import { BellRing, Radio, MapPin, Server, BellOff } from 'lucide-react-native';
+import { BellRing, Radio, MapPin, Server, BellOff, KeyRound } from 'lucide-react-native';
 import Toast from '../../components/BrandedToast';
 import { useOptimisticSwitch } from '../../hooks/useOptimisticSwitch';
 import AccountScreenLayout from './AccountScreenLayout';
@@ -25,6 +25,10 @@ import {
   setBackgroundDmEnabled,
 } from '../../services/backgroundDmPreference';
 import { startBackgroundDmWatch, stopBackgroundDmWatch } from '../../services/backgroundDmService';
+import {
+  areKeyBackupRemindersEnabled,
+  setKeyBackupRemindersEnabled,
+} from '../../services/keyBackupReminder';
 
 const NotificationSettingsScreen: React.FC = () => {
   const t = useTranslation();
@@ -56,8 +60,11 @@ const NotificationSettingsScreen: React.FC = () => {
   const [permissionGranted, setPermissionGranted] = useState(false);
   const isAndroid = Platform.OS === 'android';
 
+  const [backupRemindersOn, setBackupRemindersOn] = useState<boolean>(true);
+
   useEffect(() => {
     getLockScreenContentEnabled().then(setLockScreenContentOn);
+    areKeyBackupRemindersEnabled().then(setBackupRemindersOn);
     if (isAndroid) loadBackgroundDmEnabled().then(setBackgroundDmOn);
   }, [isAndroid]);
 
@@ -69,9 +76,19 @@ const NotificationSettingsScreen: React.FC = () => {
     reportFailure,
   );
   const background = useOptimisticSwitch(backgroundDmOn, setBackgroundDmOn, reportFailure);
+  const backupReminders = useOptimisticSwitch(
+    backupRemindersOn,
+    setBackupRemindersOn,
+    reportFailure,
+  );
 
   const handleToggleLockScreenContent = (next: boolean) =>
     lockScreen.run(next, () => setLockScreenContentEnabled(next, true));
+
+  // Never asks for notification permission: without it, the Wallets tab
+  // shows a banner instead (#1546).
+  const handleToggleBackupReminders = (next: boolean) =>
+    backupReminders.run(next, () => setKeyBackupRemindersEnabled(next));
 
   const handleToggleBackgroundDm = (next: boolean) =>
     background.run(next, async () => {
@@ -149,6 +166,23 @@ const NotificationSettingsScreen: React.FC = () => {
             }}
           />
         )}
+
+        <SettingsRow
+          kind="toggle"
+          icon={KeyRound}
+          title={t('keyBackupReminder.settingsTitle')}
+          subtitle={t(
+            backupRemindersOn ? 'notificationSettingsScreen.on' : 'notificationSettingsScreen.off',
+          )}
+          testID="notifications-backup-reminders"
+          details={t('keyBackupReminder.settingsDetails')}
+          toggle={{
+            value: backupRemindersOn,
+            pending: backupReminders.pending,
+            onValueChange: handleToggleBackupReminders,
+            testID: 'notif-backup-reminders-toggle',
+          }}
+        />
 
         <SettingsRow
           kind="navigate"

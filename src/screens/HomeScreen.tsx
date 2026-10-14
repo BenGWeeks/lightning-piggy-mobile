@@ -31,10 +31,12 @@ import { perfLog } from '../utils/perfLog';
 import { noteWalletListCommitted } from '../utils/walletSwipeTiming';
 import { useActiveWalletRefresh } from '../hooks/useActiveWalletRefresh';
 import { useNotificationDefaults } from '../hooks/useNotificationDefaults';
+import { useKeyBackupReminder } from '../hooks/useKeyBackupReminder';
+import KeyBackupBanner from '../components/KeyBackupBanner';
 import { WALLET_FRESH_MS } from '../utils/walletRefreshScheduler';
 import type { WalletState } from '../types/wallet';
 import * as swapRecoveryService from '../services/swapRecoveryService';
-import type { MainTabParamList } from '../navigation/types';
+import type { AccountDrawerNavigation, MainTabParamList } from '../navigation/types';
 
 // How often swiping to an on-chain card may trigger its (heavy) BDK sync.
 const ONCHAIN_SWIPE_FRESH_MS = 5 * 60_000;
@@ -73,6 +75,14 @@ const HomeScreen: React.FC = () => {
   const { btcPrice } = useWalletLive();
   const { isLoggedIn, profile, refreshProfile } = useNostr();
   const navigation = useNavigation<BottomTabNavigationProp<MainTabParamList, 'Home'>>();
+  const drawerNavigation = useNavigation<AccountDrawerNavigation>();
+  // Weekly key-backup reminder (#1546): schedules the notifications and, with
+  // notifications off, drives the in-app banner below.
+  const keyBackup = useKeyBackupReminder();
+  const keyBackupPubkey = keyBackup.pubkey;
+  const openKeyBackup = useCallback(() => {
+    if (keyBackupPubkey) drawerNavigation.navigate('AccountKeyBackup', { pubkey: keyBackupPubkey });
+  }, [drawerNavigation, keyBackupPubkey]);
   const route = useRoute<RouteProp<MainTabParamList, 'Home'>>();
 
   const sheetsRef = useRef<HomeSheetActions>(null);
@@ -380,6 +390,9 @@ const HomeScreen: React.FC = () => {
           / first-load spinner) stay in a ScrollView so pull-to-refresh keeps
           working on them too. */}
       <View style={styles.transactionsWrapper}>
+        {keyBackup.visible ? (
+          <KeyBackupBanner onOpen={openKeyBackup} onDismiss={keyBackup.dismiss} />
+        ) : null}
         {/* One list per warm wallet (active + neighbours), kept mounted so a
             swipe reveals already-rendered rows (#1304). Hidden, not unmounted,
             while an empty / add-wallet / first-load state shows instead. */}

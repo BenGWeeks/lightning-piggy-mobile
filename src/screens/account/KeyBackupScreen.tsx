@@ -13,6 +13,7 @@ import { useThemeColors } from '../../contexts/ThemeContext';
 import { useTranslation } from '../../contexts/LocaleContext';
 import { useKeyBackupReveal } from '../../hooks/useKeyBackupReveal';
 import { isKeyBackedUp, markKeyBackedUp } from '../../services/keyBackupStatus';
+import { cancelKeyBackupReminder } from '../../services/keyBackupReminder';
 import { perAccountKey } from '../../services/perAccountStorage';
 import {
   SENSITIVE_CLIPBOARD_CLEAR_MS,
@@ -105,6 +106,8 @@ const KeyBackupScreen: React.FC = () => {
   const handleSaved = async () => {
     if (!targetPubkey || !knownAccount || !reveal.hasUnlocked) return;
     await markKeyBackedUp(targetPubkey);
+    // No more weekly "Back up your key" reminders for it (#1546).
+    void cancelKeyBackupReminder(targetPubkey);
     setBackedUp(true);
     Toast.show({ type: 'success', text1: t('keyBackupScreen.markedBackedUp') });
   };

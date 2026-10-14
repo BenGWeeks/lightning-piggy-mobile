@@ -24,6 +24,7 @@ import {
 } from './nostrCacheKeys';
 import { NOTIFICATION_HISTORY_KEY_BASE } from '../services/notificationHistory';
 import { isKeyBackedUp, markKeyBackedUp } from '../services/keyBackupStatus';
+import * as keyBackupReminder from '../services/keyBackupReminder';
 import {
   appendGroupMessage,
   loadGroupMessages,
@@ -77,6 +78,23 @@ it("drops the signed-out account's key-backup flag but keeps other accounts' (#1
   await wipeAccountCaches(PK);
   expect(await isKeyBackedUp(PK)).toBe(false);
   expect(await isKeyBackedUp(other)).toBe(true);
+});
+
+it("cancels the signed-out account's backup reminder and drops its state (#1546)", async () => {
+  const retire = jest.spyOn(keyBackupReminder, 'retireKeyBackupReminder');
+  const keys = [
+    keyBackupReminder.REMINDER_ANCHOR_KEY_BASE,
+    keyBackupReminder.BANNER_SNOOZE_KEY_BASE,
+  ];
+  await AsyncStorage.multiSet(keys.map((base) => [perAccountKey(base, PK), '1']));
+  await AsyncStorage.multiSet(keys.map((base) => [perAccountKey(base, OTHER_PK), '1']));
+  await wipeAccountCaches(PK);
+  expect(retire).toHaveBeenCalledWith(PK);
+  const mine = await AsyncStorage.multiGet(keys.map((base) => perAccountKey(base, PK)));
+  expect(mine.map(([, v]) => v)).toEqual([null, null]);
+  const theirs = await AsyncStorage.multiGet(keys.map((base) => perAccountKey(base, OTHER_PK)));
+  expect(theirs.map(([, v]) => v)).toEqual(['1', '1']);
+  retire.mockRestore();
 });
 
 it("deletes the signed-out account's decrypted voice notes and photos (#1241)", async () => {

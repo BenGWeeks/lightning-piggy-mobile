@@ -2911,6 +2911,16 @@
     "keptInSigner": "A kulcsod az aláíró alkalmazásodban van",
     "keptInSignerBody": "A Lightning Piggy sosem látja ennek a fióknak a titkos kulcsát. Az aláíró alkalmazásodból mentsd el. A Lightning Piggyben tárolt pénztárca-helyreállító kifejezéseket kijelentkezés előtt külön kell menteni."
   },
+  "keyBackupReminder": {
+    "channelName": "Emlékeztetők",
+    "channelDescription": "Barátságos emlékeztetők, például a fiókkulcsod biztonsági mentésére",
+    "title": "Kulcs mentése",
+    "body": "A(z) {{name}} fiókod még nincs elmentve. Ha elveszíted ezt a telefont, a fiók is elvész. Koppints a kulcsod mentéséhez.",
+    "bannerBody": "Ez a fiók még nincs elmentve. Ha elveszíted ezt a telefont, a fiók is elvész. Koppints a kulcsod mentéséhez.",
+    "bannerDismiss": "Emlékeztess jövő héten",
+    "settingsTitle": "Mentési emlékeztetők",
+    "settingsDetails": "Hetente egyszer emlékeztető, hogy mentsd el a telefon minden olyan fiókját, amelynek kulcsa még nincs elmentve — amíg meg nem erősíted, hogy elmentetted. Csak olyan fiókokhoz, amelyek kulcsa a Lightning Piggyben van, Amber- vagy aláíróalkalmazás-fiókokhoz soha. Kikapcsolt értesítéseknél a Pénztárcák fülön jelenik meg."
+  },
   "notificationSettingsScreen": {
     "title": "Értesítések",
     "permissionTitle": "A Lightning Piggy értesítései",

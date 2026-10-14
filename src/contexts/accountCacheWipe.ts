@@ -42,6 +42,11 @@ import { cancelNotificationDefaults } from '../services/notificationDefaults';
 import { clearDecryptedMediaCache } from '../services/decryptedMediaCache';
 import { WATCHER_PUSH_KEY_BASE } from '../services/watcherPushStore';
 import { KEY_BACKED_UP_KEY_BASE } from '../services/keyBackupStatus';
+import {
+  BANNER_SNOOZE_KEY_BASE,
+  REMINDER_ANCHOR_KEY_BASE,
+  retireKeyBackupReminder,
+} from '../services/keyBackupReminder';
 import { CHAT_READ_POSITIONS_KEY_BASE, forgetReadPositions } from '../services/chatReadPositions';
 import {
   AMBER_NIP17_CACHE_KEY_BASE,
@@ -71,6 +76,8 @@ import {
 export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise<void> {
   if (!loggedOutPubkey) return;
   await cancelNotificationDefaults(loggedOutPubkey);
+  // Its weekly "Back up your key" reminder goes with it (#1546).
+  await retireKeyBackupReminder(loggedOutPubkey).catch(() => undefined);
   try {
     await wipeRemoteMediaForOwner(loggedOutPubkey);
   } catch (e) {
@@ -134,6 +141,9 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
     `notification_preference_explicit_v1_${loggedOutPubkey.toLowerCase()}`,
     // The key it vouched for is gone with the account (#1223).
     perAccountKey(KEY_BACKED_UP_KEY_BASE, loggedOutPubkey),
+    // Its backup-reminder anchor and banner snooze (#1546).
+    perAccountKey(REMINDER_ANCHOR_KEY_BASE, loggedOutPubkey),
+    perAccountKey(BANNER_SNOOZE_KEY_BASE, loggedOutPubkey),
     // Where this account had read each chat up to (#1295).
     perAccountKey(CHAT_READ_POSITIONS_KEY_BASE, loggedOutPubkey),
     // DM-store migration flags (#848 wrap cache, #850 blobs) — a future

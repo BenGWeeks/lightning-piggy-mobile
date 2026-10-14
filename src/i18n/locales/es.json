@@ -2911,6 +2911,16 @@
     "keptInSigner": "Tu clave está guardada en tu app de firma",
     "keptInSignerBody": "Lightning Piggy nunca ve la clave secreta de esta cuenta. Haz una copia desde tu app de firma. Las frases de recuperación de carteras guardadas en Lightning Piggy necesitan una copia aparte antes de cerrar sesión."
   },
+  "keyBackupReminder": {
+    "channelName": "Recordatorios",
+    "channelDescription": "Recordatorios amables, como hacer una copia de seguridad de la clave de tu cuenta",
+    "title": "Respalda tu clave",
+    "body": "Tu cuenta {{name}} aún no está respaldada. Si pierdes este teléfono, la perderás. Toca para guardar tu clave.",
+    "bannerBody": "Esta cuenta aún no está respaldada. Si pierdes este teléfono, la perderás. Toca para guardar tu clave.",
+    "bannerDismiss": "Recuérdamelo la próxima semana",
+    "settingsTitle": "Recordatorios de respaldo",
+    "settingsDetails": "Una vez a la semana, un recordatorio para respaldar cualquier cuenta de este teléfono cuya clave aún no esté guardada, hasta que confirmes que la guardaste. Solo para cuentas cuya clave está en Lightning Piggy, nunca para cuentas de Amber o de una app firmante. Si las notificaciones están desactivadas, aparece en la pestaña Carteras."
+  },
   "notificationSettingsScreen": {
     "title": "Notificaciones",
     "permissionTitle": "Notificaciones de Lightning Piggy",

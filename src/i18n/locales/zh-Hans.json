@@ -2911,6 +2911,16 @@
     "keptInSigner": "你的密钥保存在你的签名器应用中",
     "keptInSignerBody": "Lightning Piggy永远看不到此账户的私钥。请在你的签名器应用中备份。保存在Lightning Piggy中的钱包助记词，退出登录前需要另外备份。"
   },
+  "keyBackupReminder": {
+    "channelName": "提醒",
+    "channelDescription": "贴心提醒，例如备份你的账号密钥",
+    "title": "备份你的私钥",
+    "body": "你的账户 {{name}} 还没有备份。如果丢了这部手机，账户也会丢失。点按保存你的私钥。",
+    "bannerBody": "这个账户还没有备份。如果丢了这部手机，账户也会丢失。点按保存你的私钥。",
+    "bannerDismiss": "下周再提醒我",
+    "settingsTitle": "备份提醒",
+    "settingsDetails": "每周一次，提醒你备份这部手机上私钥尚未保存的账户，直到你确认已保存。仅适用于私钥保存在 Lightning Piggy 中的账户，绝不适用于 Amber 或签名应用账户。通知关闭时，提醒会改为显示在“钱包”标签页。"
+  },
   "notificationSettingsScreen": {
     "title": "通知",
     "permissionTitle": "Lightning Piggy通知",
