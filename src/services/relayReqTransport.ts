@@ -44,7 +44,7 @@ export function openRelayReq(
           if (stopped || retired) return;
           retired = true; // SDK CLOSED leaves the old EOSE timer alive
           sub = undefined; // CLOSED/socket close already retired this physical sub
-          if (!authenticated && reason.startsWith('auth-required:'))
+          if (!authenticated && /(^|:\s*)auth-required:/i.test(reason))
             void authenticateRelay(relay)
               .then(() => arm(true))
               .catch(fail);

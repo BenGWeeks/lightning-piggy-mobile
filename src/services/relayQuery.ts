@@ -104,7 +104,8 @@ export function querySyncAbortable(
         // by allowConnectingToRelay". A relay that
         // REFUSED the query — NIP-42 "auth was required and attempted, but
         // failed…", or a CLOSED with the NIP-01 "auth-required:" /
-        // "restricted:" prefixes — didn't serve an empty result either.
+        // "restricted:" prefixes (including strfry's "ERROR:" wrapper)
+        // didn't serve an empty result either.
         // Deliberate closes ("closed by caller", "… closed by us") are NOT
         // failures.
         const allFailed =
@@ -113,7 +114,7 @@ export function querySyncAbortable(
           events.length === 0 &&
           reasons.length > 0 &&
           reasons.every((reason) =>
-            /^(?:relay )?connection (?:failed|timed out|closed|skipped by allowConnectingToRelay)$|^websocket closed$|^auth timed out$|^auth was required|^auth-required:|^restricted:/.test(
+            /^(?:relay )?connection (?:failed|timed out|closed|skipped by allowConnectingToRelay)$|^websocket closed$|^auth timed out$|^auth was required|(^|:\s*)(?:auth-required|restricted):/i.test(
               typeof reason === 'string' ? reason : reason.reason,
             ),
           );

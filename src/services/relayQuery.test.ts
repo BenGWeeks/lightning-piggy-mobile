@@ -14,7 +14,7 @@ type SubParams = {
   abort?: AbortSignal;
   onevent: (e: NostrEvent) => void;
   oneose: () => void;
-  onclose: (reasons: string[]) => void;
+  onclose: (reasons: (string | { url: string; reason: string })[]) => void;
 };
 
 const makeEvent = (id: string): NostrEvent =>
@@ -162,6 +162,24 @@ describe('scoped aggregate connection failures', () => {
       'auth-required: we only serve subscriptions to registered users',
       'restricted: not allowed',
     ]);
+    await expect(promise).rejects.toThrow('All relays failed');
+  });
+
+  it.each([
+    'ERROR: auth-required: this event may only be read by its recipients',
+    'ERROR: restricted: not allowed',
+    'ERROR: AUTH-REQUIRED: this event may only be read by its recipients',
+    'ERROR: policy:restricted: not allowed',
+  ])('treats prefixed relay refusal %s as a failure', async (reason) => {
+    const { pool, params } = fakePool();
+    const promise = querySyncAbortable(
+      pool,
+      ['wss://a'],
+      { kinds: [1] },
+      { rejectOnAllRelaysFailure: true },
+    );
+    params().oneose();
+    params().onclose([{ url: 'wss://a', reason }]);
     await expect(promise).rejects.toThrow('All relays failed');
   });
 

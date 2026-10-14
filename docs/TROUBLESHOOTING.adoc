@@ -1739,3 +1739,18 @@ on a closed connection and expose the signed event in an unhandled rejection.
 close event, and guards the AUTH send through the SDK's existing OK waiter.
 Send failures clear that waiter and reject with a sanitized error; late signer
 completion and reconnects cannot authenticate the retired socket.
+
+
+=== strfry auth-only reads never authenticate
+
+strfry can close a restricted REQ with
+`ERROR: auth-required: this event may only be read by its recipients`.
+Checking only the start of the reason misses its `ERROR:` wrapper.
+`relayReqTransport` recognises `auth-required:` at colon-separated token
+boundaries, case-insensitively; `relayQuery` does the same for authentication
+and `restricted:` refusals so failed reads cannot appear to succeed empty.
+
+nostr-tools retains AUTH challenges received on connect, before any CLOSED.
+The transport uses that challenge when the first auth-required CLOSED arrives,
+signs once, and re-arms once after successful AUTH. A second auth-required or
+restricted CLOSED ends the read without another authentication attempt.

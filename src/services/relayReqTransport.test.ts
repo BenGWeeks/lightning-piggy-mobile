@@ -69,13 +69,17 @@ afterEach(() => {
 });
 
 test.each([
-  ['query', 1000],
-  ['query', 5000],
-  ['raw subscription', 1000],
-  ['raw subscription', 5000],
+  ...['query', 'raw subscription'].flatMap((path) =>
+    [1000, 5000].flatMap((delay) =>
+      [
+        'auth-required: authenticate first',
+        'ERROR: auth-required: this event may only be read by its recipients',
+      ].map((reason) => [path, delay, reason] as const),
+    ),
+  ),
 ])(
-  'nsec auto-auth re-arms %s after %i ms and ignores the retired EOSE timer',
-  async (path, signDelay) => {
+  'nsec auto-auth re-arms %s after %i ms for %s and ignores the retired EOSE timer',
+  async (path, signDelay, reason) => {
     const secret = new Uint8Array(32).fill(3);
     const pubkey = getPublicKey(secret);
     setCurrentUserPubkey(pubkey);
@@ -87,7 +91,6 @@ test.each([
     const pool = new TestPool();
     const relay = new AbstractRelay(url, { verifyEvent: (() => true) as never });
     Object.assign(relay, {
-      challenge: 'test-challenge',
       _connected: true,
       connectionPromise: Promise.resolve(),
     });
@@ -107,6 +110,11 @@ test.each([
       }
     });
     Object.assign(relay, { ws: { readyState: 1, send } });
+    // The relay challenges on connect, before any REQ or CLOSED. The SDK
+    // retains it, but the app must wait for auth-required before signing.
+    relay._onmessage({ data: JSON.stringify(['AUTH', 'test-challenge']) } as MessageEvent);
+    expect(sign).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
     jest.spyOn(pool, 'ensureRelay').mockResolvedValue(relay);
     const event = finalizeEvent({ kind: 4, tags: [], content: 'DM', created_at: 1 }, secret);
     const received = jest.fn();
@@ -117,12 +125,21 @@ test.each([
     await Promise.resolve();
     const original = [...relay.openSubs.values()][0];
     relay._onmessage({
-      data: JSON.stringify(['CLOSED', original.id, 'auth-required: authenticate first']),
+      data: JSON.stringify(['CLOSED', original.id, reason]),
     } as MessageEvent);
     await jest.advanceTimersByTimeAsync(signDelay as number);
     // Flush signing, SDK AUTH/OK and transport continuation.
     for (let i = 0; i < 20; i++) await Promise.resolve();
     expect(sign).toHaveBeenCalledTimes(1);
+    expect(sign).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tags: [
+          ['relay', url],
+          ['challenge', 'test-challenge'],
+        ],
+      }),
+    );
+    expect(send.mock.calls.filter(([message]) => message.startsWith('["AUTH"'))).toHaveLength(1);
     expect(send.mock.calls.filter(([message]) => message.startsWith('["REQ"'))).toHaveLength(2);
     await jest.advanceTimersByTimeAsync(Math.max(0, 4500 - (signDelay as number)));
     const retried = [...relay.openSubs.values()][0];
@@ -136,7 +153,12 @@ test.each([
   },
 );
 
-test('a repeated auth-required after successful AUTH terminates without looping', async () => {
+test.each([
+  'auth-required: again',
+  'ERROR: auth-required: this event may only be read by its recipients',
+  'restricted: not allowed',
+  'ERROR: restricted: not allowed',
+])('CLOSED %s after successful AUTH terminates without looping', async (reason) => {
   const secret = new Uint8Array(32).fill(4);
   const pubkey = getPublicKey(secret);
   setCurrentUserPubkey(pubkey);
@@ -162,7 +184,7 @@ test('a repeated auth-required after successful AUTH terminates without looping'
   await Promise.resolve();
   [...relay.openSubs.values()][0].close('auth-required: first');
   for (let i = 0; i < 20; i++) await Promise.resolve();
-  [...relay.openSubs.values()][0].close('auth-required: again');
+  [...relay.openSubs.values()][0].close(reason);
   await assertion;
   expect(sign).toHaveBeenCalledTimes(1);
   expect(relay.auth).toHaveBeenCalledTimes(1);
