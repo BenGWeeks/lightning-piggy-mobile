@@ -4,6 +4,7 @@ import { BottomSheetTextInput } from '@gorhom/bottom-sheet';
 import { useLocale } from '../contexts/LocaleContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createMarketCheckoutSheetStyles } from '../styles/MarketCheckoutSheet.styles';
+import { createMarketShippingSectionStyles } from '../styles/MarketShippingSection.styles';
 import { localizedCountryName } from '../data/countries';
 import type { useCheckoutAddress } from '../hooks/useCheckoutAddress';
 import {
@@ -27,6 +28,7 @@ export default function MarketDeliveryAddress({
 }: Props) {
   const colors = useThemeColors();
   const styles = useMemo(() => createMarketCheckoutSheetStyles(colors), [colors]);
+  const shippingStyles = useMemo(() => createMarketShippingSectionStyles(colors), [colors]);
   const { t, locale } = useLocale();
   const postcodeInvalid =
     !!delivery.fields.postcode && !validPostcode(delivery.fields.postcode, countryCode ?? '');
@@ -34,10 +36,10 @@ export default function MarketDeliveryAddress({
     .filter((key) => key !== 'line2')
     .every((key) => delivery.fields[key].trim());
   return (
-    <View style={styles.addressField}>
-      <Text style={styles.addressLabel}>{t('market.checkout.addressLabel')}</Text>
+    <View style={shippingStyles.section}>
+      <Text style={shippingStyles.sectionLabel}>{t('market.checkout.addressLabel')}</Text>
       {fields.map((key) => (
-        <View key={key}>
+        <View key={key} style={styles.addressField}>
           <Text style={styles.addressLabel}>{t(`market.checkout.delivery.${key}`)}</Text>
           <BottomSheetTextInput
             style={styles.addressInput}
@@ -52,21 +54,28 @@ export default function MarketDeliveryAddress({
           {key === 'name' ? (
             <Text style={styles.addressHint}>{t('market.checkout.delivery.nameHint')}</Text>
           ) : null}
+          {key === 'postcode' && postcodeInvalid ? (
+            <Text style={styles.addressHint}>{t('market.checkout.delivery.postcodeInvalid')}</Text>
+          ) : null}
         </View>
       ))}
-      <Text style={styles.addressLabel}>{t('market.checkout.delivery.country')}</Text>
-      <Text style={styles.addressHint} testID="market-checkout-address-country">
-        {countryCode ? localizedCountryName(countryCode, locale) : '—'}
-      </Text>
-      {postcodeInvalid ? (
-        <Text style={styles.addressHint}>{t('market.checkout.delivery.postcodeInvalid')}</Text>
-      ) : null}
-      {complete &&
-      !postcodeInvalid &&
-      countryCode &&
-      !composeDeliveryAddress(delivery.fields, countryCode) ? (
-        <Text style={styles.addressHint}>{t('market.checkout.delivery.tooLong')}</Text>
-      ) : null}
+      <View style={styles.addressField}>
+        <Text style={styles.addressLabel}>{t('market.checkout.delivery.country')}</Text>
+        <BottomSheetTextInput
+          style={[styles.addressInput, styles.addressInputDisabled]}
+          value={countryCode ? localizedCountryName(countryCode, locale) : '—'}
+          editable={false}
+          accessibilityLabel={t('market.checkout.delivery.country')}
+          accessibilityState={{ disabled: true }}
+          testID="market-checkout-address-country"
+        />
+        {complete &&
+        !postcodeInvalid &&
+        countryCode &&
+        !composeDeliveryAddress(delivery.fields, countryCode) ? (
+          <Text style={styles.addressHint}>{t('market.checkout.delivery.tooLong')}</Text>
+        ) : null}
+      </View>
       <TouchableOpacity
         onPress={delivery.toggleRemember}
         disabled={disabled}
@@ -76,7 +85,7 @@ export default function MarketDeliveryAddress({
         testID="market-checkout-address-remember"
         style={styles.rememberAddress}
       >
-        <Text style={styles.addressLabel}>
+        <Text style={[styles.addressLabel, styles.rememberAddressLabel]}>
           {delivery.remember ? '☑' : '☐'} {t('market.checkout.delivery.remember')}
         </Text>
       </TouchableOpacity>
