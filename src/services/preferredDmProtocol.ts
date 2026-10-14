@@ -58,10 +58,14 @@ export async function preferredDmProtocol(
   return run;
 }
 
+type ConversationParams = RootStackParamList['Conversation'];
+/** A person to chat with; a protocol here is an explicit choice and is kept. */
+export type DirectChatTarget = Omit<ConversationParams, 'protocol'> & { protocol?: DmProtocol };
+
 /** Build navigation params using the same choice as the send path. */
 export async function preferredConversationParams(
   viewer: string | null,
-  target: RootStackParamList['Conversation'],
-): Promise<RootStackParamList['Conversation']> {
+  target: DirectChatTarget,
+): Promise<ConversationParams> {
   return { ...target, protocol: await preferredDmProtocol(viewer, target.pubkey, target.protocol) };
 }

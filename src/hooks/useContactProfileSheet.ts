@@ -1,4 +1,4 @@
-import { preferredDmProtocol } from '../services/preferredDmProtocol';
+import { openDirectChat } from '../utils/openDirectChat';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CompositeNavigationProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -176,8 +176,7 @@ export function useContactProfileSheet(
         ? async () => {
             const target = profileSheet;
             setProfileSheet(null);
-            navigation.navigate('Conversation', {
-              protocol: await preferredDmProtocol(viewerPubkey, target.pubkey),
+            await openDirectChat(navigation, viewerPubkey, {
               pubkey: target.pubkey,
               name: target.name,
               picture: target.picture,

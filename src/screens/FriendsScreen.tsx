@@ -1,4 +1,4 @@
-import { preferredDmProtocol } from '../services/preferredDmProtocol';
+import { openDirectChat } from '../utils/openDirectChat';
 import BrandedRefreshControl from '../components/BrandedRefreshControl';
 import React, {
   useState,
@@ -601,9 +601,7 @@ const FriendsScreen: React.FC = () => {
   const handleMessage = useCallback(
     async (item: ListItem) => {
       if (!item.pubkey) return;
-      const protocol = await preferredDmProtocol(viewerPubkey, item.pubkey);
-      navigation.navigate('Conversation', {
-        protocol,
+      await openDirectChat(navigation, viewerPubkey, {
         pubkey: item.pubkey,
         name: item.name,
         picture: item.picture,

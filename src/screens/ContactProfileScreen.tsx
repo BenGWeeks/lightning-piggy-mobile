@@ -1,6 +1,7 @@
 import { sendSharedDm } from '../services/sendSharedDm';
 import { DEFAULT_DM_PROTOCOL } from '../utils/dmProtocol';
 import { preferredDmProtocol } from '../services/preferredDmProtocol';
+import { openDirectChat } from '../utils/openDirectChat';
 import BrandedRefreshControl from '../components/BrandedRefreshControl';
 import BrandedSpinner from '../components/BrandedSpinner';
 import { useCollectionFilter } from '../hooks/useCollectionFilter';
@@ -268,8 +269,8 @@ const ContactProfileScreen: React.FC = () => {
         : undefined;
     const explicit =
       thread?.pubkey === contact.pubkey ? (thread.protocol ?? DEFAULT_DM_PROTOCOL) : undefined;
-    navigation.navigate('Conversation', {
-      protocol: await preferredDmProtocol(viewerPubkey, contact.pubkey, explicit),
+    await openDirectChat(navigation, viewerPubkey, {
+      protocol: explicit,
       pubkey: contact.pubkey,
       name: contact.name,
       picture: contact.picture,

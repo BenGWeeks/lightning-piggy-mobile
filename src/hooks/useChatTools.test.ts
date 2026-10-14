@@ -20,7 +20,7 @@ const info: RootStackParamList['ChatInfo'] = {
 };
 const target: RootStackParamList['ChatMedia']['target'] = {
   screen: 'Conversation',
-  params: { pubkey: 'peer', name: 'Peer' },
+  params: { pubkey: 'peer', name: 'Peer', protocol: 'nip17' },
 };
 const messages = [{ id: 'old', text: 'needle', createdAt: 1 }];
 const clear = async () => {};
