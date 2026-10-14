@@ -52,6 +52,14 @@ export const createMarketProductDetailStyles = (colors: Palette) =>
       marginTop: 4,
     },
     buyText: { color: colors.white, fontWeight: '800', fontSize: 15 },
+    buyButtonDisabled: { opacity: 0.5 },
+    // Under a Nostr listing's Buy: the seller answers the order with an invoice.
+    invoiceNote: {
+      fontSize: 13,
+      color: colors.textSupplementary,
+      textAlign: 'center',
+      marginTop: 8,
+    },
     // Replaces the buy affordances when a refresh finds the listing gone.
     withdrawn: {
       padding: 14,

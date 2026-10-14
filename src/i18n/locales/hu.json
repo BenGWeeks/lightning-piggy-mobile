@@ -2323,7 +2323,10 @@
       "buyFrom": "Vásárlás: {{seller}}",
       "buyAccessibility": "{{title}} megvásárlása, eladó: {{seller}}",
       "noFeedback": "Ennél az eladónál még nem érhetők el értékelések és hozzászólások – a visszajelzésekhez Nostr-azonosság kell.",
-      "refreshFailed": "Nem sikerült frissíteni a terméket – ellenőrizd a kapcsolatot, és próbáld újra."
+      "refreshFailed": "Nem sikerült frissíteni a terméket – ellenőrizd a kapcsolatot, és próbáld újra.",
+      "buy": "Vásárlás",
+      "outOfStock": "Elfogyott",
+      "invoiceNote": "Az eladó számlát küld a rendelésedről"
     },
     "modes": {
       "comingSoon": "{{label}} – hamarosan",
@@ -2443,7 +2446,13 @@
         "relayUnreachable": "Nem értünk el relay-t a rendelésed leadásához. Próbáld újra.",
         "generic": "Valami félrement a rendelés leadásakor. Próbáld újra."
       },
-      "rateUpdated": "A szállítási díj frissült. Nézd meg az új végösszeget, és koppints újra a Rendelés leadására."
+      "rateUpdated": "Változott az árfolyam, ezért a végösszeg is. Ellenőrizd az új végösszeget, és koppints újra a Rendelés leadása gombra.",
+      "unitPriceSats": "{{amount}} sats darabonként",
+      "addressLabel": "Szállítási cím",
+      "addressPlaceholder": "Név, utca, település, irányítószám, ország",
+      "addressHint": "Privát módon (titkosítva) a rendeléseddel együtt küldjük, csak {{seller}} részére.",
+      "outOfStock": "Elfogyott",
+      "inStock": "Készleten: {{stock}}"
     },
     "shipping": {
       "label": "Szállítás",
@@ -3489,5 +3498,8 @@
   "profileSafety": {
     "unavailable": "A profil nem érhető el",
     "unverified": "nem ellenőrzött"
+  },
+  "orderCard": {
+    "waitingForInvoice": "Várakozás az eladó számlájára"
   }
 }

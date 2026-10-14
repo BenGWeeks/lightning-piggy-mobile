@@ -2325,7 +2325,10 @@
       "buyFrom": "Kup — sprzedawca: {{seller}}",
       "buyAccessibility": "Kup: {{title}}, sprzedawca: {{seller}}",
       "noFeedback": "Opinie i komentarze nie są jeszcze dostępne dla tego sprzedawcy — potrzebuje on tożsamości Nostr, do której można je przypiąć.",
-      "refreshFailed": "Nie udało się odświeżyć produktu — sprawdź połączenie i spróbuj ponownie."
+      "refreshFailed": "Nie udało się odświeżyć produktu — sprawdź połączenie i spróbuj ponownie.",
+      "buy": "Kup",
+      "outOfStock": "Brak w magazynie",
+      "invoiceNote": "Sprzedawca wyśle fakturę za Twoje zamówienie"
     },
     "modes": {
       "comingSoon": "{{label}} — wkrótce",
@@ -2447,7 +2450,13 @@
         "relayUnreachable": "Nie udało się połączyć z przekaźnikiem, aby złożyć zamówienie. Spróbuj ponownie.",
         "generic": "Coś poszło nie tak przy składaniu zamówienia. Spróbuj ponownie."
       },
-      "rateUpdated": "Koszt dostawy został zaktualizowany. Sprawdź nową sumę i dotknij Złóż zamówienie ponownie."
+      "rateUpdated": "Kurs wymiany się zmienił, więc zmieniła się suma. Sprawdź nową sumę i ponownie stuknij Złóż zamówienie.",
+      "unitPriceSats": "{{amount}} sats za sztukę",
+      "addressLabel": "Adres dostawy",
+      "addressPlaceholder": "Imię i nazwisko, ulica, miasto, kod pocztowy, kraj",
+      "addressHint": "Wysyłany prywatnie (zaszyfrowany) razem z zamówieniem, tylko do {{seller}}.",
+      "outOfStock": "Brak w magazynie",
+      "inStock": "W magazynie: {{stock}}"
     },
     "shipping": {
       "label": "Dostawa",
@@ -3543,5 +3552,8 @@
   "profileSafety": {
     "unavailable": "Profil niedostępny",
     "unverified": "niezweryfikowany"
+  },
+  "orderCard": {
+    "waitingForInvoice": "Czekamy na fakturę od sprzedawcy"
   }
 }

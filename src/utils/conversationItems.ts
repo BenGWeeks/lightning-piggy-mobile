@@ -86,6 +86,9 @@ export type Item =
       fromMe: boolean;
       order: ParsedOrderEvent;
       expectedAmountSats?: number;
+      /** My own placed order (kind-16 type 1) the seller hasn't answered with
+       * a payment request (or cancelled) yet — the card says so. */
+      awaitingInvoice?: boolean;
       createdAt: number;
     }
   | {
@@ -311,6 +314,23 @@ export function collectApprovedOrderAmounts(
 }
 
 /**
+ * Order ids the peer has answered: a received payment request (kind-16
+ * type 2) or a received status update (type 3, e.g. cancelled / confirmed).
+ * My placed orders NOT in this set are still waiting for the seller.
+ */
+export function answeredOrderIds(messages: ConversationMessageInput[]): Set<string> {
+  const answered = new Set<string>();
+  for (const message of messages) {
+    if (message.fromMe || message.wireKind !== 16) continue;
+    const order = parseStoredOrder(message.text);
+    if (order && (order.type === 'payment' || order.type === 'status')) {
+      answered.add(order.orderId);
+    }
+  }
+  return answered;
+}
+
+/**
  * Order ids of RECEIVED payment requests (kind-16 carrying a payable invoice)
  * and receipts (kind-17) whose originating outgoing order isn't in `messages` — i.e. it's older than
  * the loaded thread slice (DM_CONV_CAP). The screen resolves these from the
@@ -349,6 +369,7 @@ export function buildConversationItems(
   clearBoundary = 0,
 ): Item[] {
   const expectedAmounts = collectApprovedOrderAmounts(messages, olderOrderAmounts);
+  const answered = answeredOrderIds(messages);
   const byId = indexMessagesById(messages);
   const msgItems: TimedItem[] = messages.flatMap((m): TimedItem[] => {
     // A Marmot invite's gift wrap: never a bubble. Joined ones have their
@@ -366,6 +387,9 @@ export function buildConversationItems(
             fromMe: m.fromMe,
             order,
             expectedAmountSats: expectedAmounts.get(order.orderId),
+            ...(m.fromMe && order.type === 'order' && !answered.has(order.orderId)
+              ? { awaitingInvoice: true }
+              : {}),
             createdAt: m.createdAt,
           },
         ];

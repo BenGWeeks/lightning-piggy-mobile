@@ -2323,7 +2323,10 @@
       "buyFrom": "向{{seller}}购买",
       "buyAccessibility": "向{{seller}}购买{{title}}",
       "noFeedback": "此卖家暂不支持评价和评论——需要有Nostr身份才能关联反馈。",
-      "refreshFailed": "无法刷新此商品，请检查网络连接后重试。"
+      "refreshFailed": "无法刷新此商品，请检查网络连接后重试。",
+      "buy": "购买",
+      "outOfStock": "缺货",
+      "invoiceNote": "卖家会为你的订单发送发票"
     },
     "modes": {
       "comingSoon": "{{label}}——即将推出",
@@ -2443,7 +2446,13 @@
         "relayUnreachable": "无法连接中继提交订单，请重试。",
         "generic": "提交订单时出了点问题，请重试。"
       },
-      "rateUpdated": "运费已更新。请查看新的合计金额，然后再次点按“提交订单”。"
+      "rateUpdated": "汇率变动，总价已更新。请确认新的总价后再次点击“提交订单”。",
+      "unitPriceSats": "每件 {{amount}} sats",
+      "addressLabel": "收货地址",
+      "addressPlaceholder": "姓名、街道、城市、邮编、国家",
+      "addressHint": "随订单私密（加密）发送，仅 {{seller}} 可见。",
+      "outOfStock": "缺货",
+      "inStock": "库存：{{stock}}"
     },
     "shipping": {
       "label": "运费",
@@ -3489,5 +3498,8 @@
   "profileSafety": {
     "unavailable": "个人资料不可用",
     "unverified": "未验证"
+  },
+  "orderCard": {
+    "waitingForInvoice": "正在等待卖家的发票"
   }
 }

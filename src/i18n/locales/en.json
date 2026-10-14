@@ -2323,7 +2323,10 @@
       "buyFrom": "Buy from {{seller}}",
       "buyAccessibility": "Buy {{title}} from {{seller}}",
       "noFeedback": "Reviews and comments aren't available for this seller yet — they need a Nostr identity to anchor feedback on.",
-      "refreshFailed": "Couldn't refresh this product — check your connection and try again."
+      "refreshFailed": "Couldn't refresh this product — check your connection and try again.",
+      "buy": "Buy",
+      "outOfStock": "Out of stock",
+      "invoiceNote": "The seller sends an invoice for your order"
     },
     "modes": {
       "comingSoon": "{{label}} — coming soon",
@@ -2443,7 +2446,13 @@
         "relayUnreachable": "Couldn't reach a relay to place your order. Please try again.",
         "generic": "Something went wrong placing your order. Please try again."
       },
-      "rateUpdated": "Shipping cost updated. Check the new total and tap Place order again."
+      "rateUpdated": "The exchange rate moved, so the total changed. Check the new total and tap Place order again.",
+      "unitPriceSats": "{{amount}} sats each",
+      "addressLabel": "Delivery address",
+      "addressPlaceholder": "Name, street, town, postcode, country",
+      "addressHint": "Sent privately (gift-wrapped) with your order, only to {{seller}}.",
+      "outOfStock": "Out of stock",
+      "inStock": "In stock: {{stock}}"
     },
     "shipping": {
       "label": "Shipping",
@@ -3489,5 +3498,8 @@
   "profileSafety": {
     "unavailable": "Profile unavailable",
     "unverified": "unverified"
+  },
+  "orderCard": {
+    "waitingForInvoice": "Waiting for the seller's invoice"
   }
 }

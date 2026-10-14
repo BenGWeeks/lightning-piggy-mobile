@@ -216,6 +216,40 @@ export const createMarketCheckoutSheetStyles = (colors: Palette) =>
       fontWeight: '600',
       color: colors.brandPink,
     },
+    addressField: {
+      marginTop: 4,
+      marginBottom: 12,
+    },
+    addressLabel: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: colors.textHeader,
+      marginBottom: 6,
+    },
+    addressInput: {
+      minHeight: 76,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.divider,
+      backgroundColor: colors.surface,
+      color: colors.textBody,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      fontSize: 15,
+      textAlignVertical: 'top',
+    },
+    addressHint: {
+      fontSize: 12,
+      color: colors.textSupplementary,
+      marginTop: 6,
+    },
+    stockNote: {
+      fontSize: 13,
+      color: colors.textSupplementary,
+      textAlign: 'right',
+      marginTop: -8,
+      marginBottom: 12,
+    },
   });
 
 export type MarketCheckoutSheetStyles = ReturnType<typeof createMarketCheckoutSheetStyles>;
