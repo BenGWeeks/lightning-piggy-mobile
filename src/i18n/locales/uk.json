@@ -2096,7 +2096,8 @@
     "walletAccessibility": "Гаманець {{alias}} {{type}}",
     "typeLightning": "Lightning",
     "typeOnchain": "Ончейн",
-    "owl": "Сова"
+    "owl": "Сова",
+    "invaders": "Загарбники"
   },
   "walletCardPicker": {
     "selectedTheme": "Вибрана тема картки: {{name}}"

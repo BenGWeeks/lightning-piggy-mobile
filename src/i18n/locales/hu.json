@@ -2122,7 +2122,8 @@
     "walletAccessibility": "{{alias}} {{type}} pénztárca",
     "typeLightning": "Lightning",
     "typeOnchain": "On-chain",
-    "owl": "Bagoly"
+    "owl": "Bagoly",
+    "invaders": "Hódítók"
   },
   "walletCardPicker": {
     "selectedTheme": "Kiválasztott kártyakinézet: {{name}}"

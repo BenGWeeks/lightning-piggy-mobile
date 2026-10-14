@@ -2122,7 +2122,8 @@
     "walletAccessibility": "{{alias}} {{type}}钱包",
     "typeLightning": "Lightning",
     "typeOnchain": "链上",
-    "owl": "猫头鹰"
+    "owl": "猫头鹰",
+    "invaders": "入侵者"
   },
   "walletCardPicker": {
     "selectedTheme": "已选卡片主题：{{name}}"

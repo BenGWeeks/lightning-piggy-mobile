@@ -42,6 +42,17 @@ export const cardThemes: Record<CardTheme, CardThemeConfig> = {
     backgroundImageStyle: 'wise-owl',
     backgroundImageResizeMode: 'contain',
   },
+  invaders: {
+    id: 'invaders',
+    name: 'Invaders',
+    nameKey: 'walletCard.invaders',
+    gradientColors: ['#0A0A12', '#000000'],
+    textColor: '#FFFFFF',
+    accentColor: '#39FF14',
+    backgroundImage: require('../../assets/images/invaders.png'),
+    backgroundImageStyle: 'invaders',
+    backgroundImageResizeMode: 'contain',
+  },
   zaplie: {
     id: 'zaplie',
     name: 'Zaplie',
@@ -294,14 +305,21 @@ export const cardThemes: Record<CardTheme, CardThemeConfig> = {
   },
 };
 
-// Keep Owl immediately after Piggy, followed by Zaplie and Zaplie Bolt (#1471).
+// Keep Owl and Invaders immediately after Piggy, followed by Zaplie and Zaplie Bolt.
 const alphabeticalThemes = Object.values(cardThemes)
-  .filter((theme) => theme.id !== 'wise-owl' && theme.id !== 'zaplie' && theme.id !== 'zaplie-bolt')
+  .filter(
+    (theme) =>
+      theme.id !== 'wise-owl' &&
+      theme.id !== 'invaders' &&
+      theme.id !== 'zaplie' &&
+      theme.id !== 'zaplie-bolt',
+  )
   .sort((a, b) => a.name.localeCompare(b.name));
 const piggyIndex = alphabeticalThemes.findIndex((theme) => theme.id === 'lightning-piggy');
 export const themeList = [
   ...alphabeticalThemes.slice(0, piggyIndex + 1),
   cardThemes['wise-owl'],
+  cardThemes.invaders,
   cardThemes.zaplie,
   cardThemes['zaplie-bolt'],
   ...alphabeticalThemes.slice(piggyIndex + 1),

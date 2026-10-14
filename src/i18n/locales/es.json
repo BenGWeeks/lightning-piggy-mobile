@@ -2122,7 +2122,8 @@
     "walletAccessibility": "Cartera {{type}} de {{alias}}",
     "typeLightning": "Lightning",
     "typeOnchain": "On-chain",
-    "owl": "Búho"
+    "owl": "Búho",
+    "invaders": "Invasores"
   },
   "walletCardPicker": {
     "selectedTheme": "Tema de tarjeta seleccionado: {{name}}"

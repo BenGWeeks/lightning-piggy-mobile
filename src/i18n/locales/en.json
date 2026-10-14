@@ -2122,7 +2122,8 @@
     "walletAccessibility": "{{alias}} {{type}} wallet",
     "typeLightning": "Lightning",
     "typeOnchain": "On-chain",
-    "owl": "Owl"
+    "owl": "Owl",
+    "invaders": "Invaders"
   },
   "walletCardPicker": {
     "selectedTheme": "Selected card theme: {{name}}"

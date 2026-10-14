@@ -35,24 +35,33 @@ describe('cardThemes registry', () => {
     }
   });
 
-  it('keeps alphabetical picker order with Owl immediately after Piggy', () => {
+  it('keeps alphabetical picker order with Owl and Invaders immediately after Piggy', () => {
     const ids = themeList.map((theme) => theme.id);
     expect(ids[ids.indexOf('lightning-piggy') + 1]).toBe('wise-owl');
+    expect(ids[ids.indexOf('wise-owl') + 1]).toBe('invaders');
     const names = themeList
       .filter(
-        (theme) => theme.id !== 'wise-owl' && theme.id !== 'zaplie' && theme.id !== 'zaplie-bolt',
+        (theme) =>
+          theme.id !== 'wise-owl' &&
+          theme.id !== 'invaders' &&
+          theme.id !== 'zaplie' &&
+          theme.id !== 'zaplie-bolt',
       )
       .map((theme) => theme.name);
     expect(names).toEqual([...names].sort((a, b) => a.localeCompare(b)));
   });
 
-  it('places Zaplie and Zaplie Bolt after Owl and keeps the other themes alphabetical', () => {
-    const owlIndex = themeList.findIndex((theme) => theme.id === 'wise-owl');
-    expect(themeList[owlIndex + 1].id).toBe('zaplie');
-    expect(themeList[owlIndex + 2].id).toBe('zaplie-bolt');
+  it('places Zaplie and Zaplie Bolt after Invaders and keeps the other themes alphabetical', () => {
+    const invadersIndex = themeList.findIndex((theme) => theme.id === 'invaders');
+    expect(themeList[invadersIndex + 1].id).toBe('zaplie');
+    expect(themeList[invadersIndex + 2].id).toBe('zaplie-bolt');
     const names = themeList
       .filter(
-        (theme) => theme.id !== 'wise-owl' && theme.id !== 'zaplie' && theme.id !== 'zaplie-bolt',
+        (theme) =>
+          theme.id !== 'wise-owl' &&
+          theme.id !== 'invaders' &&
+          theme.id !== 'zaplie' &&
+          theme.id !== 'zaplie-bolt',
       )
       .map((theme) => theme.name);
     const sorted = [...names].sort((a, b) => a.localeCompare(b));

@@ -1,6 +1,7 @@
 export type CardTheme =
   | 'lightning-piggy'
   | 'wise-owl'
+  | 'invaders'
   | 'zaplie'
   | 'zaplie-bolt'
   | 'lightning-bee'
