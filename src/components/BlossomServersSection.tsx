@@ -29,7 +29,7 @@ export default function BlossomServersSection() {
   const styles = useMemo(() => createBlossomServersSectionStyles(colors), [colors]);
   const { servers, dirty, publishing, editable, addServer, removeServer, makePrimary, publish } =
     useBlossomServerList();
-  const reachability = useRelayReachability(servers);
+  const reachability = useRelayReachability(servers, 'blossom');
   const { pubkey, nip65Relays, userRelays } = useNostr();
   const [reportState, setReportState] = useState<{
     results: RelayPublishResult[];

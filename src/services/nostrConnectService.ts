@@ -41,6 +41,7 @@ import { NostrConnectError, isCiphertextDecryptError } from './signerErrors';
 /** Lazily-constructed BunkerSigner. Re-created when the active
  *  connection changes (login / logout / re-pair). */
 let _activeSigner: BunkerSigner | null = null;
+let lockdownGeneration = 0;
 let _activeConnection: Nip46Connection | null = null;
 /** In-flight `getSigner()` connect, memoised so a burst of concurrent
  *  requests (e.g. the inbox refresh decrypting a batch of wraps in
@@ -139,6 +140,7 @@ async function getSigner(): Promise<BunkerSigner> {
     throw new NostrConnectError('unavailable', 'NIP-46 signer not connected');
   }
   const connection = _activeConnection;
+  const generation = lockdownGeneration;
   const promise = (async () => {
     const pointer: BunkerPointer = {
       pubkey: connection.remoteSignerPubkey,
@@ -172,7 +174,7 @@ async function getSigner(): Promise<BunkerSigner> {
     // this signer belongs to the OLD identity. Caching it would leave a
     // stale signer/subscription under the wrong connection and re-enable
     // signing after logout. Close it and fail this attempt instead.
-    if (_activeConnection !== connection) {
+    if (_activeConnection !== connection || generation !== lockdownGeneration) {
       try {
         await signer.close();
       } catch {
@@ -522,6 +524,7 @@ function raceAbort<T>(
 // Entering lockdown destroys the shared pool's old public subscriptions.
 // Rebuild the signer lazily so its RPC subscription uses the LAN relay too.
 watchTestRelayLockdown(() => {
+  lockdownGeneration++;
   const signer = _activeSigner;
   _activeSigner = null;
   _signerPromise = null;

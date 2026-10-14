@@ -8,9 +8,12 @@ import {
 } from '../utils/relayReachability';
 
 const activeSockets = new Set<WebSocket>();
+const activeRelayHttpProbes = new Set<AbortController>();
 watchTestRelayLockdown(() => {
   for (const socket of activeSockets) socket.close();
   activeSockets.clear();
+  for (const controller of activeRelayHttpProbes) controller.abort();
+  activeRelayHttpProbes.clear();
 });
 
 export const reachabilityCache = createProbeCache();
@@ -70,8 +73,13 @@ function socketProbe(url: string, signal: AbortSignal): Promise<ProbeResult | un
   });
 }
 
-async function httpProbe(url: string, signal: AbortSignal): Promise<ProbeResult | undefined> {
+async function httpProbe(
+  url: string,
+  signal: AbortSignal,
+  service: ReachabilityService,
+): Promise<ProbeResult | undefined> {
   const controller = new AbortController();
+  if (service === 'nostr') activeRelayHttpProbes.add(controller);
   const cancel = () => controller.abort();
   signal.addEventListener('abort', cancel);
   let timedOut = false;
@@ -86,24 +94,33 @@ async function httpProbe(url: string, signal: AbortSignal): Promise<ProbeResult 
     root.search = '';
     root.hash = '';
     const response = await fetch(root.toString(), { method: 'HEAD', signal: controller.signal });
-    if (response.status === 405 || response.status === 501) {
+    if (
+      !(service === 'nostr' && controller.signal.aborted && !timedOut) &&
+      (response.status === 405 || response.status === 501)
+    ) {
       await fetch(root.toString(), { method: 'GET', signal: controller.signal });
     }
     // Any HTTP response demonstrates reachability, including auth / missing root.
-    return signal.aborted ? undefined : finishProbe(undefined, 'message', Date.now());
+    return signal.aborted || (service === 'nostr' && controller.signal.aborted && !timedOut)
+      ? undefined
+      : finishProbe(undefined, 'message', Date.now());
   } catch (error) {
-    return signal.aborted
+    return signal.aborted || (controller.signal.aborted && !timedOut)
       ? undefined
       : finishProbe(undefined, timedOut ? 'timeout' : 'error', Date.now(), String(error));
   } finally {
     clearTimeout(timer);
+    activeRelayHttpProbes.delete(controller);
     signal.removeEventListener('abort', cancel);
   }
 }
 
+export type ReachabilityService = 'nostr' | 'blossom';
+
 export function probeReachability(
   url: string,
   signal: AbortSignal,
+  service: ReachabilityService = 'nostr',
 ): Promise<ProbeResult | undefined> {
   return new Promise((resolve) => {
     const cancelQueued = () => {
@@ -120,7 +137,12 @@ export function probeReachability(
         return;
       }
       running++;
-      void (url.startsWith('https:') ? httpProbe(url, signal) : socketProbe(url, signal))
+      const target = service === 'nostr' ? activeAccountRelays([url])[0] : url;
+      void (
+        target.startsWith('https:')
+          ? httpProbe(target, signal, service)
+          : socketProbe(target, signal)
+      )
         .then(resolve)
         .finally(() => {
           running--;

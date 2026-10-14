@@ -1,3 +1,5 @@
+import { setCurrentUserPubkey } from './nostrActiveAccount';
+import { TEST_ACCOUNT_KEYS } from '../utils/testAccounts';
 /**
  * Unit tests for the NIP-46 ("Nostr Connect") signer service. The nostr-tools
  * BunkerSigner + URI builder and the noble hex helper are mocked so we can
@@ -294,4 +296,26 @@ it.each([
   expect(error).toBeInstanceOf(NostrConnectError);
   expect(error.kind).toBe(kind);
   expect(isTransientKind4Error(error)).toBe(transient);
+});
+
+it('discards a signer that finishes connecting after lockdown begins', async () => {
+  let finish!: () => void;
+  mockSigner.connect.mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  await svc.setActiveConnection(conn());
+  const pending = svc.requestPublicKey();
+  setCurrentUserPubkey(TEST_ACCOUNT_KEYS.big);
+  finish();
+  try {
+    await expect(pending).rejects.toThrow('connection changed during connect');
+    expect(mockSigner.close).toHaveBeenCalled();
+    await expect(svc.requestPublicKey()).resolves.toBe('userpubkeyhex');
+    expect(mockFromBunker).toHaveBeenCalledTimes(2);
+  } finally {
+    setCurrentUserPubkey(null);
+  }
 });

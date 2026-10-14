@@ -17,7 +17,7 @@ import { activeAccountRelays } from '../services/testRelayRouting';
 // dead code in every normal build), lazily imported, __DEV__-gated.
 
 import { Platform } from 'react-native';
-import { pool } from '../services/nostrPool';
+import { pool, pruneIdleRelays } from '../services/nostrPool';
 import type { Filter } from 'nostr-tools/filter';
 import { hexToBytes } from '@noble/hashes/utils.js';
 import { getPublicKey } from 'nostr-tools/pure';
@@ -140,8 +140,8 @@ async function runJsPhase(secretKey: Uint8Array, pubkeyHex: string): Promise<voi
   try {
     await withTimeout(finished, 'js phase');
   } finally {
-    sub.close();
-    pool.close(activeAccountRelays([BENCH_RELAY]));
+    await sub.close();
+    pruneIdleRelays();
   }
   logPhase('js', processed, t0, firstAt, lastAt, sampler.stop());
 }

@@ -1,10 +1,17 @@
 import { useCallback, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
-import { probeReachability, reachabilityCache } from '../services/relayReachabilityProbe';
+import {
+  probeReachability,
+  reachabilityCache,
+  type ReachabilityService,
+} from '../services/relayReachabilityProbe';
 import type { ProbeResult } from '../utils/relayReachability';
 
 /** One React update per round; blur cancels active transports and queued work. */
-export function useRelayReachability(urls: readonly string[]) {
+export function useRelayReachability(
+  urls: readonly string[],
+  service: ReachabilityService = 'nostr',
+) {
   const key = JSON.stringify([...new Set(urls)].sort());
   const [results, setResults] = useState<Map<string, ProbeResult>>(new Map());
   useFocusEffect(
@@ -19,7 +26,7 @@ export function useRelayReachability(urls: readonly string[]) {
           targets.map(async (url) => {
             const result =
               (!refresh && reachabilityCache.get(url)) ||
-              (await probeReachability(url, controller.signal));
+              (await probeReachability(url, controller.signal, service));
             if (result && !controller.signal.aborted) reachabilityCache.set(url, result);
             return [url, result] as const;
           }),
@@ -44,7 +51,7 @@ export function useRelayReachability(urls: readonly string[]) {
         clearInterval(timer);
         controller.abort();
       };
-    }, [key]),
+    }, [key, service]),
   );
   return results;
 }
