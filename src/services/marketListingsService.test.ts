@@ -177,14 +177,25 @@ it('asks for deletions of the found listings only, on the relays that answered',
   );
   deliver(deletions[0], del);
   deletions.forEach((s) => s.c.oneose());
-  expect(await pending).toEqual({ products: [], incomplete: false });
+  // The withdrawn listing is ruled on, so a merge can't keep an older copy.
+  expect(await pending).toEqual({
+    products: [],
+    incomplete: false,
+    answeredRelays: ['wss://example.com'],
+    withdrawn: [expect.stringContaining('-book')],
+  });
 });
 
 it('skips the deletion pass when no listings were found', async () => {
   const pending = start();
   await flush();
   pass('listings')[0].c.oneose();
-  expect(await pending).toEqual({ products: [], incomplete: false });
+  expect(await pending).toEqual({
+    products: [],
+    incomplete: false,
+    answeredRelays: ['wss://example.com'],
+    withdrawn: [],
+  });
   expect(pass('deletions')).toHaveLength(0);
 });
 

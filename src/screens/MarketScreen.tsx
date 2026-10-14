@@ -27,7 +27,7 @@ import { useMarketPreferences } from '../hooks/useMarketPreferences';
 import { useMarketShipsTo } from '../hooks/useMarketShipsTo';
 import { localizedCountryName } from '../data/countries';
 import { SHIPS_TO_UNKNOWN, shipsToOptions } from '../utils/marketShipsTo';
-import { validateMarketPreferences } from '../utils/marketPreferences';
+import { useMarketSelectionGuard } from '../hooks/useMarketSelectionGuard';
 import { marketLoadingStatus } from '../utils/marketLoadingStatus';
 import { DEFAULT_MARKET_MODE, type MarketMode } from '../utils/marketMode';
 import {
@@ -100,9 +100,8 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [ready, live.products]);
 
   // Filter option lists sourced from the data actually loaded (not hardcoded).
-  const merchantOptions = useMemo(() => marketMerchants(baseProducts), [baseProducts]);
-  const merchants = useMemo(() => merchantOptions.map((option) => option.id), [merchantOptions]);
-  const merchant = resolveMerchantSelection(savedMerchant, merchantOptions, live.merchantAliases);
+  const loadedMerchants = useMemo(() => marketMerchants(baseProducts), [baseProducts]);
+  const merchant = resolveMerchantSelection(savedMerchant, loadedMerchants, live.merchantAliases);
   // Ships-to comes from the sellers' published shipping options, fetched in
   // batches for the whole catalogue — never per card.
   const shipping = useMarketShipsTo(baseProducts, ready);
@@ -120,47 +119,23 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
     (product: MarketProduct) => shipping.byProduct.get(product.id) ?? SHIPS_TO_UNKNOWN,
     [shipping],
   );
-  const currencies = useMemo(() => distinctCurrencies(baseProducts), [baseProducts]);
+  const loadedCurrencies = useMemo(() => distinctCurrencies(baseProducts), [baseProducts]);
 
-  // Reconcile the category selections with the option lists whenever the
-  // mode-scoped catalogue changes: a merchant / currency picked under
-  // one mode may not exist under the next, and a chip that no longer renders
-  // can't be un-selected from its axis — the grid would just sit empty.
-  useEffect(() => {
-    if (
-      !ready ||
-      !live.completed ||
-      live.loading ||
-      live.incomplete ||
-      live.profilesReady === false
-    )
-      return;
-    const validated = validateMarketPreferences(
-      { ...preferences, merchant },
-      { merchants, currencies },
-    );
-    if (
-      validated.merchant !== savedMerchant ||
-      validated.shipsTo !== shipsTo ||
-      validated.currency !== currency
-    )
-      update(validated);
-  }, [
+  // A transient load (one seller's relay slow or silent) must never wipe a
+  // choice the shopper made: selections are only reconciled on a seller-scope
+  // change or after the choice has been missing from consecutive answered
+  // loads, and their chips stay rendered (and selected) meanwhile.
+  const { merchantOptions, currencies, merchantMissing, merchantName } = useMarketSelectionGuard({
     ready,
     mode,
-    live.completed,
-    live.profilesReady,
-    live.loading,
-    live.incomplete,
-    merchants,
-    currencies,
-    merchant,
-    savedMerchant,
-    shipsTo,
-    currency,
+    live,
+    products: baseProducts,
     preferences,
+    merchant,
+    merchantOptions: loadedMerchants,
+    currencies: loadedCurrencies,
     update,
-  ]);
+  });
 
   const filter = useMemo<MarketFilter>(
     () => ({ query: debouncedQuery, merchant, shipsTo, includeUnknownShipping, currency }),
@@ -248,11 +223,13 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
   const emptyCopy =
     live.loading && baseProducts.length === 0
       ? t('market.live.loading')
-      : filterActive
-        ? t('market.screen.emptyNoMatch')
-        : mode === 'wotFriends'
-          ? t('market.screen.emptyNoFriends')
-          : t('market.screen.emptyNone');
+      : merchantMissing
+        ? t('market.screen.emptyMerchantMissing', { name: merchantName ?? merchant ?? '' })
+        : filterActive
+          ? t('market.screen.emptyNoMatch')
+          : mode === 'wotFriends'
+            ? t('market.screen.emptyNoFriends')
+            : t('market.screen.emptyNone');
 
   if (!ready) return <View style={styles.container} testID="market-screen" />;
 

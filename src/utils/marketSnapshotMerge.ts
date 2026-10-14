@@ -1,0 +1,57 @@
+// Stale-while-revalidate for the market catalogue. A refresh that hears from
+// only some relays must not shrink the grid: a listing stays until a relay
+// that holds it answers without it (or a NIP-09 deletion / expiry removes it).
+import type { Event } from 'nostr-tools';
+import type { MarketProduct } from '../data/marketProducts';
+import type { MarketListingsResult } from '../services/marketListingsService';
+
+/** Same display cap as the listings service. */
+export const MARKET_MERGE_CAP = 250;
+
+const createdAt = (product: MarketProduct) => product.listing?.event.created_at ?? -Infinity;
+
+/**
+ * Previous listings this round couldn't have seen: every relay that served
+ * them stayed silent. Listings without provenance (older cached snapshots)
+ * are kept only when no relay answered at all.
+ */
+function carriedOver(previous: readonly MarketProduct[], next: MarketListingsResult) {
+  const answered = new Set(next.answeredRelays ?? []);
+  const ruled = new Set([...next.products.map((p) => p.id), ...(next.withdrawn ?? [])]);
+  return previous.filter((product) => {
+    if (ruled.has(product.id)) return false;
+    if (answered.size === 0) return true;
+    const relays = product.listing?.seenOn ?? [];
+    return relays.length > 0 && relays.every((relay) => !answered.has(relay));
+  });
+}
+
+/**
+ * Merge a fresh snapshot over the previous one. The fresh result always wins
+ * for anything it ruled on; carried listings only fill spare capacity under
+ * the display cap, newest first, so the merged set stays bounded.
+ */
+export function mergeMarketSnapshot(
+  previous: readonly MarketProduct[],
+  next: MarketListingsResult,
+): MarketProduct[] {
+  // A result without relay outcomes (legacy envelope) can't tell a silent
+  // relay from an empty one: keep the old replace semantics, except that a
+  // transport failure never wipes what's on screen.
+  if (next.answeredRelays === undefined)
+    return next.transportFailed && next.products.length === 0 ? [...previous] : next.products;
+  if (previous.length === 0) return next.products;
+  const room = Math.max(0, MARKET_MERGE_CAP - next.products.length);
+  const carried = carriedOver(previous, next)
+    .sort((a, b) => createdAt(b) - createdAt(a))
+    .slice(0, room);
+  if (carried.length === 0) return next.products;
+  return [...next.products, ...carried].sort(
+    (a, b) => createdAt(b) - createdAt(a) || a.id.localeCompare(b.id),
+  );
+}
+
+/** Listing events of the products still shown — pass 2 checks their deletions. */
+export function carriedListingEvents(products: readonly MarketProduct[]): Event[] {
+  return products.flatMap((product) => (product.listing ? [product.listing.event] : []));
+}

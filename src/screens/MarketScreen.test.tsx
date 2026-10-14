@@ -65,6 +65,8 @@ let mockCollections: import('nostr-tools').Event[] = [];
 let mockReady = true;
 let mockCompleted = false;
 let mockLoading = true;
+let mockGeneration = 0;
+let mockAnsweredRelays: string[] | undefined;
 let mockInitialPreferences = {
   mode: 'preferred',
   merchant: null as string | null,
@@ -114,6 +116,8 @@ jest.mock('../hooks/useMarketListings', () => ({
       loading: enabled && mockLoading,
       completed: mockCompleted,
       incomplete: false,
+      generation: mockGeneration,
+      answeredRelays: mockAnsweredRelays,
       refresh: jest.fn(),
     };
   },
@@ -140,6 +144,8 @@ beforeEach(() => {
   mockReady = true;
   mockCompleted = false;
   mockLoading = true;
+  mockGeneration = 0;
+  mockAnsweredRelays = undefined;
   mockUpdate.mockClear();
   mockInitialPreferences = {
     mode: 'preferred',
@@ -238,7 +244,7 @@ it('shows no-match copy instead of full loading when filters hide an existing sn
   expect(screen.getByText('market.screen.emptyNoMatch')).toBeTruthy();
 });
 
-it('preserves all restored WoT filters before the first completed current-scope snapshot', () => {
+it('preserves restored WoT filters until they are missing from two completed loads', () => {
   mockLoading = false; // Hydration render before the fetch effect sets loading.
   mockInitialPreferences = {
     mode: 'wotFriends',
@@ -254,12 +260,98 @@ it('preserves all restored WoT filters before the first completed current-scope 
   expect(mockUpdate).not.toHaveBeenCalled();
   mockLoading = false;
   mockCompleted = true;
+  mockGeneration = 1;
   screen.rerender(<MarketScreen navigation={navigation} />);
-  expect(mockUpdate).toHaveBeenCalledWith(
-    // Ships-to is the shopper's destination, so it survives a catalogue
-    // that has no listings for it; catalogue-derived axes reset.
-    expect.objectContaining({ merchant: null, shipsTo: 'DE', currency: null }),
-  );
+  // One load without them is not enough: it may just have missed a relay.
+  expect(mockUpdate).not.toHaveBeenCalled();
+  mockGeneration = 2;
+  screen.rerender(<MarketScreen navigation={navigation} />);
+  // Ships-to is the shopper's destination, so it survives a catalogue that
+  // has no listings for it; catalogue-derived axes reset.
+  expect(mockUpdate).toHaveBeenCalledWith({ merchant: null, currency: null });
+});
+
+describe('a chosen merchant across partial refreshes', () => {
+  const EDEN = 'e'.repeat(64);
+  const EDEN_RELAY = 'wss://relay.weeksfamily.me';
+  const MARKET_RELAY = 'wss://relay.plebeian.market';
+  const listed = (id: string, pubkey: string, sellerName: string, relay: string) => ({
+    ...MARKET_PRODUCTS[0],
+    id,
+    sellerName,
+    listing: {
+      event: { id, pubkey, kind: 30402, created_at: 1, tags: [], content: '', sig: '' },
+      currency: 'SATS',
+      priceLabel: '21 sats',
+      vendor: { ...MARKET_PRODUCTS[0], name: sellerName },
+      seenOn: [relay],
+    },
+  });
+  const scarf = listed('eden-scarf', EDEN, 'Eden', EDEN_RELAY);
+  const mug = listed('shop-mug', 'f'.repeat(64), 'Shop', MARKET_RELAY);
+  const edenChip = () => screen.getByTestId(`market-filter-merchant-${EDEN}`);
+  const ids = () =>
+    screen.UNSAFE_getByType(FlatList).props.data.map((product: { id: string }) => product.id);
+  let screen: ReturnType<typeof render>;
+  const load = (generation: number, products: typeof mockLiveProducts, answered: string[]) => {
+    mockGeneration = generation;
+    mockLiveProducts = products;
+    mockAnsweredRelays = answered;
+    screen.rerender(<MarketScreen navigation={navigation} />);
+  };
+
+  beforeEach(() => {
+    mockInitialPreferences.mode = 'wotFriends';
+    mockLoading = false;
+    mockCompleted = true;
+    mockGeneration = 1;
+    mockAnsweredRelays = [MARKET_RELAY, EDEN_RELAY];
+    mockLiveProducts = [scarf, mug] as unknown as typeof mockLiveProducts;
+    screen = render(<MarketScreen navigation={navigation} />);
+    fireEvent.press(screen.getByTestId('market-filter-button'));
+  });
+
+  it('applies the merchant filter as soon as the chip is tapped', () => {
+    expect(ids()).toEqual(['eden-scarf', 'shop-mug']);
+    fireEvent.press(edenChip());
+    expect(ids()).toEqual(['eden-scarf']);
+    expect(edenChip().props.accessibilityState).toEqual({ selected: true });
+  });
+
+  it("keeps the selection and the chip through a refresh that missed the seller's relay", () => {
+    fireEvent.press(edenChip());
+    mockUpdate.mockClear();
+    load(2, [mug] as unknown as typeof mockLiveProducts, [MARKET_RELAY]);
+    load(3, [mug] as unknown as typeof mockLiveProducts, [MARKET_RELAY]);
+    expect(mockUpdate).not.toHaveBeenCalled();
+    // The chip stays rendered and selected, so it can be unselected.
+    expect(edenChip().props.accessibilityState).toEqual({ selected: true });
+    expect(screen.getByTestId(`market-filter-merchant-${EDEN}`)).toHaveTextContent('Eden');
+    expect(ids()).toEqual([]);
+    expect(screen.getByText('market.screen.emptyMerchantMissing')).toBeTruthy();
+    fireEvent.press(edenChip());
+    expect(mockUpdate).toHaveBeenLastCalledWith({ merchant: null });
+    expect(ids()).toEqual(['shop-mug']);
+  });
+
+  it('clears the merchant once their relay answered two loads in a row without them', () => {
+    fireEvent.press(edenChip());
+    mockUpdate.mockClear();
+    load(2, [mug] as unknown as typeof mockLiveProducts, [MARKET_RELAY, EDEN_RELAY]);
+    expect(mockUpdate).not.toHaveBeenCalled();
+    load(3, [mug] as unknown as typeof mockLiveProducts, [MARKET_RELAY, EDEN_RELAY]);
+    expect(mockUpdate).toHaveBeenCalledWith({ merchant: null });
+    expect(screen.queryByTestId(`market-filter-merchant-${EDEN}`)).toBeNull();
+  });
+
+  it('clears a merchant missing from the new seller scope on its first load', () => {
+    fireEvent.press(edenChip());
+    mockUpdate.mockClear();
+    // The preferred scope's catalogue (mocked) has no listings from Eden.
+    mockLiveProducts = [mug] as unknown as typeof mockLiveProducts;
+    fireEvent.press(screen.getByTestId('market-filter-sellers-preferred'));
+    expect(mockUpdate).toHaveBeenCalledWith({ merchant: null });
+  });
 });
 
 it('filters by Ships to from shipping data, with unknown shipping behind the include toggle', () => {

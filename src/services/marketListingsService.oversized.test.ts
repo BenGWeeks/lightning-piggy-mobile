@@ -45,7 +45,7 @@ beforeEach(() => {
 const relayListings = (events: Event[]) => {
   snapshot.mockImplementation(async (opts: Parameters<typeof collectRelaySnapshot>[0]) => {
     if (opts.filters[0]?.kinds?.[0] !== 5) {
-      events.forEach((event) => opts.onEvent(JSON.parse(JSON.stringify(event))));
+      events.forEach((event) => opts.onEvent(JSON.parse(JSON.stringify(event)), opts.urls[0]));
     }
     return { answered: opts.urls, responded: opts.urls, truncated: false, truncatedSince: null };
   });

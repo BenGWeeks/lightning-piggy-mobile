@@ -2306,6 +2306,7 @@
       "filters": "Filter",
       "filtersApplied": "Filter, {{count}} angewendet",
       "emptyNoMatch": "Keine Produkte passen zu deiner Suche oder deinen Filtern.",
+      "emptyMerchantMissing": "Gerade keine Angebote von {{name}} – zum Aktualisieren nach unten ziehen.",
       "emptyNoFriends": "Keiner deiner Nostr-Freunde verkauft bisher Lightning-Piggy-Produkte.",
       "emptyNone": "Derzeit sind keine Produkte verfügbar."
     },

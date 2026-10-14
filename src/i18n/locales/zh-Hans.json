@@ -2306,6 +2306,7 @@
       "filters": "筛选",
       "filtersApplied": "筛选，已应用{{count}}项",
       "emptyNoMatch": "没有符合搜索或筛选条件的商品。",
+      "emptyMerchantMissing": "{{name}} 目前没有商品——下拉刷新。",
       "emptyNoFriends": "你的Nostr好友暂时还没有人销售Lightning Piggy商品。",
       "emptyNone": "目前没有可购买的商品。"
     },

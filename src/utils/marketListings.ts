@@ -15,6 +15,17 @@ export interface MarketListing {
   /** Billing-period suffix such as `/month`, or `''` for one-off prices. */
   recurrence?: string;
   vendor: MarketVendor;
+  /**
+   * Relays that served this listing (any revision) in the snapshot that last
+   * fetched it. A refresh keeps the listing while none of them answers, and
+   * drops it once one answers without it (see `mergeMarketSnapshot`).
+   */
+  seenOn?: string[];
+}
+
+/** Stable product id of a listing address (`kind` + author + `d`). */
+export function marketListingProductId(kind: number, pubkey: string, d: string): string {
+  return `nostr-${kind}-${pubkey}-${encodeURIComponent(d)}`;
 }
 
 const tag = (event: Event, name: string) => event.tags.find((t) => t[0] === name)?.[1];
@@ -140,7 +151,7 @@ export function parseMarketListing(event: Event, now = Date.now() / 1000): Marke
     featured: false,
   };
   return {
-    id: `nostr-${event.kind}-${event.pubkey}-${encodeURIComponent(d)}`,
+    id: marketListingProductId(event.kind, event.pubkey, d),
     title: sanitizeDisplayText(title, { maxLen: 200 }),
     description: typeof description === 'string' ? description.slice(0, 12000) : '',
     priceSats: Math.round(sats),
