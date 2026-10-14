@@ -1551,6 +1551,7 @@
     "savedMyKey": "He guardado mi clave"
   },
   "nostrScreen": {
+    "testRelayLockdown": "Cuenta de prueba — limitada al relay de prueba de la LAN ({{url}}) — notificaciones push desactivadas",
     "title": "Red Nostr",
     "connected": "Conectado",
     "disconnected": "Desconectado",

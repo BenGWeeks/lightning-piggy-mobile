@@ -1,3 +1,5 @@
+import { isTestRelayLockdown, TEST_RELAY_URL } from '../config/testRelayLockdown';
+import { getCurrentUserPubkey } from '../services/nostrActiveAccount';
 import type { RelayConfig } from '../types/nostr';
 
 /** Relay-list indexers most clients consult when looking up someone's relays. */
@@ -86,6 +88,13 @@ export function relayListFromTags(tags: string[][]): RelayConfig[] {
 
 /** NIP-65 kind 10002: `["r", url]` (read+write) / `["r", url, "read"|"write"]`. */
 export function buildRelayListEvent(relays: RelayConfig[], now = Date.now()): UnsignedEvent {
+  if (isTestRelayLockdown(getCurrentUserPubkey()))
+    return {
+      kind: 10002,
+      created_at: Math.floor(now / 1000),
+      tags: [['r', TEST_RELAY_URL]],
+      content: '',
+    };
   // Merge duplicate rows per URL (a list may carry separate read and write
   // tags for one relay) so neither permission is silently dropped.
   const merged = new Map<string, { read: boolean; write: boolean }>();
@@ -105,6 +114,13 @@ export function buildRelayListEvent(relays: RelayConfig[], now = Date.now()): Un
 
 /** NIP-17 kind 10050: the relays where the user receives DMs (`["relay", url]`). */
 export function buildDmInboxEvent(urls: string[], now = Date.now()): UnsignedEvent {
+  if (isTestRelayLockdown(getCurrentUserPubkey()))
+    return {
+      kind: 10050,
+      created_at: Math.floor(now / 1000),
+      tags: [['relay', TEST_RELAY_URL]],
+      content: '',
+    };
   const tags = [...new Set(urls.map(norm))]
     .filter(isPublishableRelayUrl)
     .map((url) => ['relay', url]);
@@ -136,6 +152,7 @@ export function dmInboxRelaysFromTags(tags: string[][]): string[] {
  * from (so it gets replaced there), the new list's relays, and the indexers.
  */
 export function relayListPublishTargets(previous: string[], next: string[]): string[] {
+  if (isTestRelayLockdown(getCurrentUserPubkey())) return [TEST_RELAY_URL];
   return [...new Set([...previous, ...next, ...RELAY_LIST_INDEXERS].map(norm))].filter(
     isPublishableRelayUrl,
   );

@@ -1,3 +1,9 @@
+import {
+  isTestRelayLockdown,
+  TEST_PUSH_DISABLED,
+  TEST_RELAY_URL,
+} from '../config/testRelayLockdown';
+import { getCurrentUserPubkey } from './nostrActiveAccount';
 // marmot-ts `NostrNetworkInterface` over the app's shared nostr-tools pool.
 //
 // Every relay call stays bounded (#perf rules): requests carry the library's
@@ -59,7 +65,10 @@ const isGroupLive = (filters: Filter[]) =>
 export function createMarmotNetwork(
   getFallbackRelays: () => string[],
   onReconnect?: () => void,
+  ownerPubkey: string | null = getCurrentUserPubkey(),
 ): NostrNetworkInterface {
+  // Anonymous group events and Welcomes belong to this session, not their outer author.
+  const locked = isTestRelayLockdown(ownerPubkey);
   let recovering = false;
   const attempts = new Map<string, number>();
   const liveSubscriptions = new Map<object, string[]>();
@@ -80,7 +89,11 @@ export function createMarmotNetwork(
     : undefined;
   const relaysOr = (relays: string[]) => {
     const cleaned = cleanRelays(relays);
-    return cleaned.length > 0 ? cleaned : cleanRelays([...getFallbackRelays(), ...DEFAULT_RELAYS]);
+    return locked
+      ? [TEST_RELAY_URL]
+      : cleaned.length > 0
+        ? cleaned
+        : cleanRelays([...getFallbackRelays(), ...DEFAULT_RELAYS]);
   };
   const groupSubscribe = createGroupSubscriptionMux(
     (url, filters, next, onReqOpen, onClose) =>
@@ -211,13 +224,19 @@ export function createMarmotNetwork(
  * relays and read a server's inbox list without falling back to defaults —
  * triggers go to the records' relay hints and the server's own 10050 inbox;
  * anywhere else would just leak the trigger.
+ * Locked test initiators skip both lookup and publication: public push
+ * servers cannot receive a trigger on the LAN test relay.
  */
 export interface PushTransport {
-  publish(relays: string[], event: NostrEvent): Promise<void>;
+  publish(relays: string[], event: NostrEvent): Promise<void | typeof TEST_PUSH_DISABLED>;
   inboxRelays(pubkey: string): Promise<string[]>;
 }
 
-export function createPushTransport(getLookupRelays: () => string[]): PushTransport {
+export function createPushTransport(
+  getLookupRelays: () => string[],
+  /** Account-owned transports retain their initiator across signing/lookup waits. */
+  initiatingPubkey?: string,
+): PushTransport {
   // Per server: its 10050 relays (cached, so a busy chat doesn't re-query on
   // every send) and any lookup in flight (concurrent triggers share it).
   const cache = new Map<string, { relays: string[]; at: number }>();
@@ -241,6 +260,10 @@ export function createPushTransport(getLookupRelays: () => string[]): PushTransp
   };
   return {
     async publish(relays, event) {
+      // Gift wraps have ephemeral authors: decide before author-based pool routing.
+      if (isTestRelayLockdown(initiatingPubkey ?? getCurrentUserPubkey())) {
+        return TEST_PUSH_DISABLED;
+      }
       const targets = cleanPushRelays(relays);
       if (targets.length === 0) return;
       trackRelays(targets);
@@ -249,6 +272,9 @@ export function createPushTransport(getLookupRelays: () => string[]): PushTransp
       );
     },
     inboxRelays(pubkey) {
+      if (isTestRelayLockdown(initiatingPubkey ?? getCurrentUserPubkey())) {
+        return Promise.resolve([]);
+      }
       const hit = cache.get(pubkey);
       const ttl = hit?.relays.length ? INBOX_CACHE_TTL_MS : INBOX_MISS_TTL_MS;
       if (hit && Date.now() - hit.at < ttl) return Promise.resolve(hit.relays);

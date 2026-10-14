@@ -1,3 +1,4 @@
+import { activeAccountRelays } from './testRelayRouting';
 import { relayKey } from './relayHealth';
 
 export interface RelayFee {
@@ -142,7 +143,7 @@ const cache = new Map<string, { until: number; request: Promise<RelayInformation
 
 /** One bounded HTTP GET, shared across screens; never opens a Nostr subscription. */
 export function fetchRelayInformation(url: string): Promise<RelayInformation | null> {
-  const key = relayKey(url);
+  const key = relayKey(activeAccountRelays([url])[0]);
   const previous = cache.get(key);
   if (previous && previous.until > Date.now()) return previous.request;
   let http: URL;

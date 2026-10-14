@@ -2,6 +2,8 @@ import { publishToRelays, fetchLatestReplaceable } from './nostrRelayLists';
 import { pool } from './nostrPool';
 import { relayAllowsKind } from './relayKindPolicy';
 import { RELAY_SKIPPED_REASON } from './relayHealth';
+import { setCurrentUserPubkey } from './nostrActiveAccount';
+import { TEST_ACCOUNT_PUBKEYS, TEST_RELAY_URL } from '../config/testRelayLockdown';
 import type { Event } from 'nostr-tools';
 
 jest.mock('./relayKindPolicy', () => ({ relayAllowsKind: jest.fn(async () => true) }));
@@ -124,4 +126,46 @@ it('never opens publish connections when every target is kind-filtered', async (
     },
   ]);
   expect(publish).not.toHaveBeenCalled();
+});
+
+it.each([true, false])(
+  'keeps targets aligned across a metadata await (test author: %s)',
+  async (testAuthor) => {
+    const testPubkey = [...TEST_ACCOUNT_PUBKEYS][0];
+    setCurrentUserPubkey(testAuthor ? testPubkey : 'a'.repeat(64));
+    let resume!: () => void;
+    const metadata = new Promise<void>((resolve) => {
+      resume = resolve;
+    });
+    mockAllowsKind.mockImplementation(async () => {
+      await metadata;
+      return true;
+    });
+    publish.mockImplementation((targets: string[]) =>
+      targets.map(() => Promise.reject(new Error('offline'))),
+    );
+    try {
+      const pending = publishToRelays(
+        { ...event, pubkey: testAuthor ? testPubkey : 'a'.repeat(64) },
+        ['wss://a', 'wss://b'],
+      );
+      setCurrentUserPubkey(testAuthor ? 'a'.repeat(64) : testPubkey);
+      resume();
+      const targets = testAuthor ? [TEST_RELAY_URL] : ['wss://a', 'wss://b'];
+      expect(await pending).toEqual(targets.map((url) => ({ url, ok: false, message: 'offline' })));
+      expect(publish).toHaveBeenLastCalledWith(targets, expect.anything());
+    } finally {
+      resume();
+      setCurrentUserPubkey(null);
+    }
+  },
+);
+
+it('fails missing publish attempts instead of recording an unpublished list as accepted', async () => {
+  mockAllowsKind.mockResolvedValue(true);
+  publish.mockReturnValue([Promise.resolve('ok')]);
+  expect(await publishToRelays(event, ['wss://a', 'wss://b'])).toEqual([
+    { url: 'wss://a', ok: true },
+    { url: 'wss://b', ok: false, message: 'missing publish result' },
+  ]);
 });

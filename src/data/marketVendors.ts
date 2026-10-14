@@ -1,3 +1,6 @@
+import { npubEncode } from 'nostr-tools/nip19';
+import { TEST_ACCOUNT_KEYS } from '../utils/testAccounts';
+
 // Lightning Piggy "Market" vendor directory.
 //
 // Source of truth: the companion website repo (`lightning-piggy-website`),
@@ -90,8 +93,7 @@ const PIG_TEST_VENDORS: MarketVendor[] = __DEV__
         description: 'TEST seller — do not buy. NIP-17 order-flow validation only. ⚠️',
         url: 'https://lightningpiggy.com',
         logo: `${LIGHTNING_PIGGY_SITE_ORIGIN}/images/logos/danish-bacon.png`,
-        nostrUrl:
-          'https://njump.me/npub1enkml7dx7fsm8zq83dczyh06g9r7l2447p32wu32p5jn7qmqclns65f4st',
+        nostrUrl: `https://njump.me/${npubEncode(TEST_ACCOUNT_KEYS.big)}`,
         xUrl: '',
         featured: false,
       },
@@ -103,8 +105,7 @@ const PIG_TEST_VENDORS: MarketVendor[] = __DEV__
         description: 'TEST seller — do not buy. NIP-17 order-flow validation only. ⚠️',
         url: 'https://lightningpiggy.com',
         logo: `${LIGHTNING_PIGGY_SITE_ORIGIN}/images/logos/danish-bacon.png`,
-        nostrUrl:
-          'https://njump.me/npub1mxen9q96wvexrk94t877p4nzkm9s0phrq7znzwsgdnw2j43eg4lqtqp265',
+        nostrUrl: `https://njump.me/${npubEncode(TEST_ACCOUNT_KEYS.little)}`,
         xUrl: '',
         featured: false,
       },

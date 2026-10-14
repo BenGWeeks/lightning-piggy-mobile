@@ -92,3 +92,5 @@ name: Internal — make a Piggy the active identity, signed in with its nsec
     visible:
       id: 'tab-wallets'
     timeout: 5000
+
+- runFlow: assert-test-relay-lockdown.yaml

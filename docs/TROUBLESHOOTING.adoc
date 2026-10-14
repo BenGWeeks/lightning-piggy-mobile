@@ -4,6 +4,12 @@
 |===
 | Problem | Solution
 
+| Android Marmot push alerts disappear after NIP-46 login, or background work replaces foreground relay routing
+| DEV background routing must prefer a live foreground mirror, then the foreground legacy signer keys (NIP-46 uses the validated connection's `userPubkey`, not `identities_v1` or the legacy pubkey slot). Unknown/unreadable identities must not suppress generic push alerts; only known locked test accounts disable push alerts. Release builds skip routing hydration and push/location guards entirely; background sync retains its original registry lookup. Regressions cover all three release signers and missing/corrupt/locked DEV storage.
+
+| DEV Nostr Connect QR pairing fails with "subscription closed before connection was established" after approval
+| `nostr-tools` 2.23.3 closes the pairing subscription before setting its handshake success flag. The shared health-aware pool must retire the REQ immediately but defer the caller-initiated aggregate `onclose` callback to a Promise microtask, matching the SDK pool timing. A synchronous callback rejects even a valid encrypted acknowledgement. `healthAwarePool.test.ts` exercises the real `BunkerSigner.fromURI` with both health and resumable pool mixins, and checks that closing before an acknowledgement still rejects. DM subscription tests must likewise assert immediate REQ retirement, then await the Promise microtask before asserting the close callback; a synchronous callback assertion is stale after this fix.
+
 | "Unread messages" appears below the newest DM, or remains after everything is read
 | React Native's inverted list cells use `column-reverse`, so a Fragment containing the divider and message reverses their visual order. Keep them inside a normal-column `View` (`ConversationScreen.tsx`). `utils/unreadDivider.ts` selects real incoming messages in reading order, excluding local device notices, failed invites and date headers. The shared `useChatReadPosition` hook keeps the opening boundary while unread messages remain and retires it when the live count reaches zero, for both DMs and groups. Do not recompute the boundary from the advancing live marker on every viewability report.
 
@@ -958,6 +964,21 @@ for several members and allow 90 seconds (`90_000`). When the machine is busy
 fail with a timeout. Before investigating, rerun the file on its own with
 `npx jest src/services/marmotSession.test.ts`. It passes in isolation.
 
+=== Coverage CI times out on the first Marmot file-verification bubble test
+
+If the Coverage job fails in `decryptedMediaCache.test.ts` with
+`Exceeded timeout of 5000 ms` on the ciphertext-hash case, check the failing
+step before assuming a coverage regression. On PR #1573, all other suites
+passed and the job stopped before the coverage comparison. The same full
+suite and a cold-cache isolated run passed locally.
+
+These three cases exercise real decrypt, sharing and React Native rendering.
+The first render loads native component implementations with a cold Jest
+transform cache, which can exceed the default five-second unit-test budget
+under coverage on CI. Give these integration cases a local 30-second timeout;
+keep their integrity assertions, the remaining tests' default timeout and
+the coverage comparison threshold unchanged.
+
 === EAS preview builds don't bump `versionCode`
 
 `eas.json` sets `cli.appVersionSource: "remote"`, and only the `production`
@@ -1625,3 +1646,81 @@ and `[Relay] budget timeout` for forced recovery. Live group logs should show
 combine their filters into one REQ and joins reuse the decrypted rumor and local
 keys. The no-network regression registers 10 live owners, admits only 7, then
 runs three one-shots without exceeding the relay cap.
+
+
+=== NIP-46 fixture pairing times out or RPCs stop after account activation
+
+The QR's advertised relays, the app's signer subscription and the fixture
+bunker's reply destinations must agree. Active TEST accounts route pairing
+URIs to the LAN relay. When logged out, use the DEV-only test-account Nostr
+Connect button (`nip46-test-account-button`), which selects LAN before the
+bunker reveals its account. The ordinary pairing button retains public
+relays when no TEST account is active. The Little Piggy Maestro login and
+pairing-timeout flows use the test-account button.
+
+`scripts/nip46-test-bunker.sh` reads the two `EXPO_PUBLIC_TEST_RELAY_*`
+settings from the environment or `.env`, without sourcing unrelated secrets.
+The bunker defaults to LAN, rejects public pairing URIs under lockdown and
+routes restored client subscriptions and subsequent signing/decrypt replies
+only to LAN. Set `EXPO_PUBLIC_TEST_RELAY_LOCKDOWN=0` in both app and bunker
+for deliberate public interop; restart both after changing relay settings.
+
+=== An account switch must not change a pending DM's relay policy
+
+NIP-17 nsec sends yield between wraps; external-signer sends await encryption
+and signing. Lock relay destinations to the sender identity before those
+waits. Reading only the currently active account at publish time can let an
+old TEST account's pending wraps escape to public relays after an account
+switch. `nostrNip17Send` retains the sender's locked relay snapshot for the
+whole send, including delivery tracking and stale-socket retries.
+
+=== Pending profile publishes or market connects cross an account switch
+
+A profile publish may resume after SecureStore or external signing completes.
+Route signed writes by `event.pubkey` at the pool boundary, including the
+health wrapper and the SDK's internal `ensureRelay` call; active-account
+routing is for reads. NIP-59 wraps keep the sender-bound destinations captured
+by `nostrNip17Send` because the outer author is ephemeral. Relay-list metadata
+checks use the same author-bound destination array as publish result indexing;
+a missing attempt must fail rather than count as relay acceptance.
+
+The SDK's `relay.close()` ignores CONNECTING sockets. The market pool uses
+`withResumableSubscriptions` like the shared pool: teardown increments a
+generation, and old connection results close and reject before raw snapshot
+consumers can send a public REQ. `relayLockdownConnections.test.ts` exercises
+both write routing and the delayed-open race with real SDK pools.
+
+=== Related crypto Jest suites take up to one minute to exit
+
+`nostrCrypto` schedules a DEV summary timer at most once per 60 seconds.
+`npx jest --silent --detectOpenHandles` identifies `scheduleSummary` when a
+suite passes but stays alive briefly. Allow the summary timer to settle;
+this is separate from relay subscriptions and does not require force-exit.
+
+=== DEV test accounts send anonymous push wraps to public relays
+
+MIP-05 triggers and notification-watcher registrations use kind-1059 wraps
+with ephemeral authors. Author-based relay routing cannot identify their
+initiating TEST account. Push servers listen on public relays and cannot
+receive triggers on LAN, so locked TEST accounts skip push lookup and
+publication entirely, returning `push disabled for test accounts in lockdown`.
+The DEV lockdown badge also says "push notifications off".
+
+Marmot's account-owned transport retains the session pubkey; watcher register
+and unregister operations pass their captured context pubkey through signing
+to the transport. An account switch cannot let a pending test operation escape
+to public relays. Ordinary accounts, release builds and the explicit interop
+override keep their existing behaviour. Transport regressions verify no relay
+lookup, tracking or EVENT publication occurs for locked test initiators.
+
+
+=== Headless TEST accounts or pending Marmot Welcomes use public relays
+
+A headless restart mounts no Nostr provider. Initialise the relay account
+mirror from the persisted active identity before background sync, DM-watch,
+push-wake or live-location relay work. An unreadable identity must stop relay
+work. Background read destinations also retain the saved owner's policy.
+Marmot networks capture the session owner's lockdown at construction; inbox
+lookups, anonymous kind-445 messages, Welcomes and key packages all use it
+through asynchronous waits and account switches. The Nostr network settings
+show the effective LAN destinations for every relay list during lockdown.

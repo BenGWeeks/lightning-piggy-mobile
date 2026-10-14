@@ -1551,6 +1551,7 @@
     "savedMyKey": "Ich habe meinen Schlüssel gesichert"
   },
   "nostrScreen": {
+    "testRelayLockdown": "Testkonto — auf den LAN-Test-Relay beschränkt ({{url}}) — Push-Benachrichtigungen aus",
     "title": "Nostr-Netzwerk",
     "connected": "Verbunden",
     "disconnected": "Getrennt",

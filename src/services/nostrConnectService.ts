@@ -1,3 +1,6 @@
+import { lockRelays } from '../config/testRelayLockdown';
+import { activeAccountRelays, watchTestRelayLockdown } from './testRelayRouting';
+import { pool } from './nostrPool';
 /**
  * NIP-46 ("Nostr Connect" / bunker) signer service.
  *
@@ -39,6 +42,7 @@ import { NostrConnectError, isCiphertextDecryptError } from './signerErrors';
 /** Lazily-constructed BunkerSigner. Re-created when the active
  *  connection changes (login / logout / re-pair). */
 let _activeSigner: BunkerSigner | null = null;
+let lockdownGeneration = 0;
 let _activeConnection: Nip46Connection | null = null;
 /** In-flight `getSigner()` connect, memoised so a burst of concurrent
  *  requests (e.g. the inbox refresh decrypting a batch of wraps in
@@ -137,14 +141,19 @@ async function getSigner(): Promise<BunkerSigner> {
     throw new NostrConnectError('unavailable', 'NIP-46 signer not connected');
   }
   const connection = _activeConnection;
+  const generation = lockdownGeneration;
   const promise = (async () => {
     const pointer: BunkerPointer = {
       pubkey: connection.remoteSignerPubkey,
-      relays: connection.relays,
+      relays: lockRelays(connection.relays, connection.userPubkey),
       secret: null,
     };
     const clientSecretKey = hexToBytes(connection.clientSecretKeyHex);
-    const signer = BunkerSigner.fromBunker(clientSecretKey, pointer);
+    const signer = BunkerSigner.fromBunker(
+      clientSecretKey,
+      pointer,
+      __DEV__ ? { pool } : undefined,
+    );
     // `connect()` is the explicit handshake — it sends a `connect`
     // request through the relay so the bunker registers this session
     // before we start firing signEvent / nip44_encrypt at it. Subsequent
@@ -166,7 +175,7 @@ async function getSigner(): Promise<BunkerSigner> {
     // this signer belongs to the OLD identity. Caching it would leave a
     // stale signer/subscription under the wrong connection and re-enable
     // signing after logout. Close it and fail this attempt instead.
-    if (_activeConnection !== connection) {
+    if (_activeConnection !== connection || generation !== lockdownGeneration) {
       try {
         await signer.close();
       } catch {
@@ -321,6 +330,11 @@ export async function requestNip44DecryptSilent(
   throw new Error('NIP-46 does not support silent batch decrypt — use requestNip44Decrypt');
 }
 
+/** Explicit target identity allows fixture pairing before an account is active. */
+export function pairingRelays(relays: string[], targetPubkey?: string): string[] {
+  return [...lockRelays(activeAccountRelays(relays), targetPubkey)];
+}
+
 /**
  * Build a `nostrconnect://` pairing URI. The bunker (Clave / Aegis /
  * nsec.app / etc.) scans this and replies with a `connect` ack that
@@ -338,6 +352,7 @@ export async function requestNip44DecryptSilent(
  */
 export function buildPairingUri(input: {
   clientPubkey: string;
+  targetPubkey?: string;
   relays: string[];
   secret: string;
   perms: string[];
@@ -348,7 +363,7 @@ export function buildPairingUri(input: {
   // in sync with what BunkerSigner.fromURI parses on the other side.
   return createNostrConnectURI({
     clientPubkey: input.clientPubkey,
-    relays: input.relays,
+    relays: pairingRelays(input.relays, input.targetPubkey),
     secret: input.secret,
     perms: input.perms,
     name: input.name,
@@ -387,6 +402,7 @@ export function buildPairingUri(input: {
 export async function awaitBunkerPair(input: {
   clientSecretKey: Uint8Array;
   clientPubkey: string;
+  targetPubkey?: string;
   relays: string[];
   secret: string;
   perms: string[];
@@ -394,9 +410,10 @@ export async function awaitBunkerPair(input: {
   maxWaitSeconds?: number;
   signal?: AbortSignal;
 }): Promise<{ signer: BunkerSigner; connection: Nip46Connection; userPubkey: string }> {
+  const relays = pairingRelays(input.relays, input.targetPubkey);
   const uri = buildPairingUri({
     clientPubkey: input.clientPubkey,
-    relays: input.relays,
+    relays,
     secret: input.secret,
     perms: input.perms,
     name: input.name,
@@ -408,7 +425,12 @@ export async function awaitBunkerPair(input: {
   // BunkerSigner.fromURI has no AbortSignal input of its own, so race the
   // pairing promise against the abort. On abort we reject immediately and,
   // if the bunker acks late, close the orphaned signer rather than leak it.
-  const pairPromise = BunkerSigner.fromURI(input.clientSecretKey, uri, undefined, maxWait);
+  const pairPromise = BunkerSigner.fromURI(
+    input.clientSecretKey,
+    uri,
+    __DEV__ ? { pool } : undefined,
+    maxWait,
+  );
   const signer = await raceAbort(pairPromise, signal, (late) => {
     late.close().catch(() => {});
   });
@@ -431,7 +453,7 @@ export async function awaitBunkerPair(input: {
   const connection: Nip46Connection = {
     remoteSignerPubkey: signer.bp.pubkey,
     userPubkey,
-    relays: input.relays,
+    relays,
     clientSecretKeyHex: bytesToHex(input.clientSecretKey),
     perms: input.perms.join(','),
   };
@@ -507,3 +529,13 @@ function raceAbort<T>(
     );
   });
 }
+
+// Entering lockdown destroys the shared pool's old public subscriptions.
+// Rebuild the signer lazily so its RPC subscription uses the LAN relay too.
+watchTestRelayLockdown(() => {
+  lockdownGeneration++;
+  const signer = _activeSigner;
+  _activeSigner = null;
+  _signerPromise = null;
+  void signer?.close().catch(() => {});
+});

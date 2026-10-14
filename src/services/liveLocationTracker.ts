@@ -1,3 +1,5 @@
+import { isTestRelayLockdown } from '../config/testRelayLockdown';
+import { initialiseBackgroundRelayAccount } from './backgroundRelayAccount';
 /**
  * GPS side of live-location sharing (#1300): WhatsApp-style updates that keep
  * flowing while the app is minimised or the phone is locked.
@@ -162,6 +164,15 @@ async function endShares(owner: string, persisted: OutgoingSession[], ids: Set<s
 
 async function runHeadless(fix: TrackedFix): Promise<void> {
   const ctx = await loadTrackingContext();
+  if (__DEV__) {
+    const activePubkey = await initialiseBackgroundRelayAccount();
+    if (
+      ctx &&
+      (isTestRelayLockdown(ctx.owner) || isTestRelayLockdown(activePubkey)) &&
+      ctx.owner.toLowerCase() !== activePubkey
+    )
+      return;
+  }
   const persisted = ctx ? await loadPersistedSessions(ctx.owner) : [];
   let live = ctx ? headlessLiveSessions(persisted, Date.now()) : [];
   // Marmot shares can't continue here. Their updates need the MLS session,

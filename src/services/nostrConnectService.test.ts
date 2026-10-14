@@ -1,3 +1,6 @@
+import { setCurrentUserPubkey } from './nostrActiveAccount';
+import { TEST_RELAY_URL } from '../config/testRelayLockdown';
+import { TEST_ACCOUNT_KEYS } from '../utils/testAccounts';
 /**
  * Unit tests for the NIP-46 ("Nostr Connect") signer service. The nostr-tools
  * BunkerSigner + URI builder and the noble hex helper are mocked so we can
@@ -5,6 +8,12 @@
  * permission-error normalisation) without a live relay/bunker.
  */
 import type { Nip46Connection } from '../types/nostr';
+
+import * as svc from './nostrConnectService';
+import { NostrConnectError } from './signerErrors';
+import { isTransientKind4Error } from '../contexts/kind4RetryStore';
+
+jest.mock('./nostrPool', () => ({ pool: {} }));
 
 const mockSigner = {
   connect: jest.fn(),
@@ -39,10 +48,6 @@ jest.mock('@noble/hashes/utils.js', () => ({
     Array.from(b, (x) => x.toString(16).padStart(2, '0')).join(''),
   ),
 }));
-
-import * as svc from './nostrConnectService';
-import { NostrConnectError } from './signerErrors';
-import { isTransientKind4Error } from '../contexts/kind4RetryStore';
 
 const conn = (over: Partial<Nip46Connection> = {}): Nip46Connection => ({
   remoteSignerPubkey: 'bunkerpubkeyhex',
@@ -243,7 +248,7 @@ describe('awaitBunkerPair', () => {
     expect(mockFromURI).toHaveBeenCalledWith(
       new Uint8Array([1, 2, 3, 4]),
       'nostrconnect://mock-uri',
-      undefined,
+      { pool: {} },
       60_000,
     );
     expect(result.userPubkey).toBe('userpubkeyhex');
@@ -292,4 +297,75 @@ it.each([
   expect(error).toBeInstanceOf(NostrConnectError);
   expect(error.kind).toBe(kind);
   expect(isTransientKind4Error(error)).toBe(transient);
+});
+
+it('discards a signer that finishes connecting after lockdown begins', async () => {
+  let finish!: () => void;
+  mockSigner.connect.mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  await svc.setActiveConnection(conn());
+  const pending = svc.requestPublicKey();
+  setCurrentUserPubkey(TEST_ACCOUNT_KEYS.big);
+  finish();
+  try {
+    await expect(pending).rejects.toThrow('connection changed during connect');
+    expect(mockSigner.close).toHaveBeenCalled();
+    await expect(svc.requestPublicKey()).resolves.toBe('userpubkeyhex');
+    expect(mockFromBunker).toHaveBeenCalledTimes(2);
+  } finally {
+    setCurrentUserPubkey(null);
+  }
+});
+
+describe('pairing relay lockdown', () => {
+  afterEach(() => setCurrentUserPubkey(null));
+
+  it.each([TEST_ACCOUNT_KEYS.big, TEST_ACCOUNT_KEYS.middle, TEST_ACCOUNT_KEYS.evil, null])(
+    'pairs Little on LAN from active identity %s and keeps subsequent RPCs there',
+    async (activePubkey) => {
+      setCurrentUserPubkey(activePubkey);
+      const input = {
+        clientSecretKey: new Uint8Array([1, 2, 3, 4]),
+        clientPubkey: 'clientpub',
+        targetPubkey: TEST_ACCOUNT_KEYS.little,
+        relays: ['wss://public.example'],
+        secret: 'deadbeef',
+        perms: ['sign_event', 'nip44_decrypt'],
+        name: 'Lightning Piggy',
+      };
+      svc.buildPairingUri(input);
+      expect(mockCreateNostrConnectURI).toHaveBeenLastCalledWith(
+        expect.objectContaining({ relays: [TEST_RELAY_URL] }),
+      );
+      mockSigner.getPublicKey.mockResolvedValue(TEST_ACCOUNT_KEYS.little);
+      const result = await svc.awaitBunkerPair(input);
+      expect(result.connection.relays).toEqual([TEST_RELAY_URL]);
+      svc.adoptPairedSigner(result.connection, result.signer);
+      setCurrentUserPubkey(TEST_ACCOUNT_KEYS.little);
+      await svc.requestPublicKey();
+      await svc.requestNip44Decrypt('cipher', 'peer', TEST_ACCOUNT_KEYS.little);
+      await svc.requestEventSignature('{}', '', TEST_ACCOUNT_KEYS.little);
+      expect(mockFromBunker).toHaveBeenLastCalledWith(
+        expect.any(Uint8Array),
+        expect.objectContaining({ relays: [TEST_RELAY_URL] }),
+        { pool: {} },
+      );
+    },
+  );
+
+  it('routes the ordinary pairing button to LAN while a test identity is active', () => {
+    setCurrentUserPubkey(TEST_ACCOUNT_KEYS.big);
+    expect(svc.pairingRelays(['wss://public.example'])).toEqual([TEST_RELAY_URL]);
+  });
+
+  it('preserves ordinary and logged-out public pairing destinations', () => {
+    setCurrentUserPubkey(null);
+    expect(svc.pairingRelays(['wss://public.example'])).toEqual(['wss://public.example']);
+    setCurrentUserPubkey('a'.repeat(64));
+    expect(svc.pairingRelays(['wss://public.example'])).toEqual(['wss://public.example']);
+  });
 });

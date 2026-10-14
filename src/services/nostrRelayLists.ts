@@ -1,3 +1,4 @@
+import { eventAuthorRelays } from './testRelayRouting';
 import type { Event, Filter } from 'nostr-tools';
 import { pool, trackRelays } from './nostrPool';
 import { relayAllowsKind } from './relayKindPolicy';
@@ -56,6 +57,7 @@ export async function publishToRelays(
   relays: string[],
   timeoutMs = 8_000,
 ): Promise<RelayPublishResult[]> {
+  relays = eventAuthorRelays(relays, event);
   const allowed = await Promise.all(relays.map((url) => relayAllowsKind(url, event.kind)));
   const targets = relays.filter((_, i) => allowed[i]);
   trackRelays(targets);
@@ -74,7 +76,11 @@ export async function publishToRelays(
         // nostr-tools RESOLVES (not rejects) with "connection failure: …" when
         // it can't reach the relay — that's a failure, never an accept.
         (value: unknown): RelayPublishResult =>
-          isConnectionFailure(value) ? { url, ok: false, message: value } : { url, ok: true },
+          value === undefined
+            ? { url, ok: false, message: 'missing publish result' }
+            : isConnectionFailure(value)
+              ? { url, ok: false, message: value }
+              : { url, ok: true },
         (e: unknown): RelayPublishResult => ({
           url,
           ok: false,

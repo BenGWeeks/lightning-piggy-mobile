@@ -3,6 +3,7 @@ import {
   stopBackgroundDmWatch,
   __resetForTests,
 } from './backgroundDmService';
+jest.mock('expo-secure-store', () => ({ getItemAsync: jest.fn().mockResolvedValue(null) }));
 
 const mockStartNative = jest.fn();
 const mockStartPayments = jest.fn();

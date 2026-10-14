@@ -58,24 +58,34 @@ const KIND = 24133;
 const STATE_DIR = process.env.NIP46_STATE_DIR;
 const PORT = Number(process.env.NIP46_PORT || 8746);
 const DEVICE = process.env.NIP46_DEVICE || 'emulator-5554';
+// Fixtures stay on LAN by default, including restored clients and every reply.
+// Public interop requires the same explicit lockdown opt-out as the app.
+const lockdown = process.env.EXPO_PUBLIC_TEST_RELAY_LOCKDOWN !== '0';
+const testRelay = process.env.EXPO_PUBLIC_TEST_RELAY_URL || 'ws://192.168.1.89:7778';
 const RELAYS = (
-  process.env.NIP46_RELAYS || 'wss://relay.primal.net,wss://relay.ditto.pub,wss://nos.lol'
+  lockdown
+    ? testRelay
+    : process.env.NIP46_RELAYS || 'wss://relay.primal.net,wss://relay.ditto.pub,wss://nos.lol'
 )
   .split(',')
-  .map((r) => r.trim())
+  .map((r) => r.trim().replace(/\/+$/, ''))
   .filter(Boolean);
-// Pairing URIs may only name relays from this list (plus NIP46_RELAYS), so a
-// caller can't make the bunker connect to arbitrary hosts.
-const RELAY_ALLOWLIST = new Set([
-  ...RELAYS,
-  'wss://relay.primal.net',
-  'wss://relay.ditto.pub',
-  'wss://nos.lol',
-  'wss://relay.damus.io',
-  'wss://nostr.mom',
-  'wss://relay.snort.social',
-  'wss://offchain.pub',
-]);
+// In lockdown, reject public pairing URIs instead of silently splitting the
+// client's request subscription and the bunker's acknowledgement destination.
+const RELAY_ALLOWLIST = new Set(
+  lockdown
+    ? RELAYS
+    : [
+        ...RELAYS,
+        'wss://relay.primal.net',
+        'wss://relay.ditto.pub',
+        'wss://nos.lol',
+        'wss://relay.damus.io',
+        'wss://nostr.mom',
+        'wss://relay.snort.social',
+        'wss://offchain.pub',
+      ],
+);
 const MODES = ['approve', 'decline', 'silent', 'decline-all', 'silent-all'];
 const SESSION_METHODS = new Set(['connect', 'ping', 'get_public_key', 'switch_relays']);
 const GATED_METHODS = new Set(['sign_event', 'nip04_encrypt', 'nip44_encrypt']);
@@ -139,6 +149,7 @@ const seal = (scheme, peer, obj) =>
 
 const pool = new SimplePool();
 async function publish(relays, ev) {
+  if (lockdown) relays = RELAYS;
   const res = await Promise.allSettled(pool.publish(relays, ev));
   // nostr-tools resolves (not rejects) with "connection failure: …" when a
   // relay is unreachable — only count real acceptances.
@@ -329,6 +340,7 @@ async function pairFromScreen(waitSeconds) {
 // nostrconnect:// URI — so the bunker follows LP if its pairing relay changes.
 const subscribed = new Set();
 async function ensureSubscribed(relays) {
+  if (lockdown) relays = RELAYS;
   const fresh = relays.filter((r) => !subscribed.has(r));
   if (!fresh.length) return;
   fresh.forEach((r) => subscribed.add(r));

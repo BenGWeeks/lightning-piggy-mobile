@@ -40,7 +40,7 @@ name: Internal — sign Little Piggy in through the local NIP-46 test bunker
       - tapOn:
           id: 'account-switcher-add-existing'
 - tapOn:
-    id: 'nip46-button'
+    id: 'nip46-test-account-button'
 # QR + "Waiting for bunker…" are up once Cancel renders.
 - extendedWaitUntil:
     visible:
@@ -62,3 +62,5 @@ name: Internal — sign Little Piggy in through the local NIP-46 test bunker
       text: 'npub1mxen9q9…tqp265'
     timeout: 20000
 - pressKey: back
+
+- runFlow: assert-test-relay-lockdown.yaml

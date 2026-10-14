@@ -1551,6 +1551,7 @@
     "savedMyKey": "I've Saved My Key"
   },
   "nostrScreen": {
+    "testRelayLockdown": "Test account — locked to the LAN test relay ({{url}}) — push notifications off",
     "title": "Nostr network",
     "connected": "Connected",
     "disconnected": "Disconnected",

@@ -1,0 +1,18 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Internal — require LAN test relay lockdown
+---
+- runFlow: open-drawer.yaml
+- scrollUntilVisible:
+    element:
+      id: drawer-row-advanced
+    direction: DOWN
+- tapOn:
+    id: drawer-row-advanced
+- tapOn:
+    id: advanced-nostr-network
+- assertVisible:
+    id: test-relay-lockdown-badge
+- pressKey: back
+- pressKey: back
+- tapOn:
+    id: tab-wallets

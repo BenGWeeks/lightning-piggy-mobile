@@ -1,3 +1,5 @@
+import { isTestRelayLockdown, TEST_RELAY_URL } from '../config/testRelayLockdown';
+import { getCurrentUserPubkey } from '../services/nostrActiveAccount';
 // Relay plan for the WoT: Friends market snapshot. Pure (no I/O) so the
 // bounding rules are unit-testable.
 //
@@ -44,6 +46,8 @@ export function marketSnapshotRelays(userRelays: readonly string[]): {
   urls: string[];
   dropped: boolean;
 } {
+  if (isTestRelayLockdown(getCurrentUserPubkey()))
+    return { urls: [TEST_RELAY_URL], dropped: false };
   const seen = new Set<string>();
   const all: string[] = [];
   for (const raw of [...MARKET_RELAYS, ...userRelays]) {

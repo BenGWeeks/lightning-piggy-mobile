@@ -2,6 +2,8 @@
 // in its kind-10050 inbox list (PROTOCOL.md), falling back to its defaults.
 
 import type { NostrEvent } from 'nostr-tools/pure';
+import { isTestRelayLockdown, TEST_PUSH_DISABLED } from '../config/testRelayLockdown';
+import { getCurrentUserPubkey } from './nostrActiveAccount';
 
 import { dmInboxRelaysFromTags, isRelayUrl } from '../utils/relayListEvents';
 import { pool, trackRelays } from './nostrPool';
@@ -59,12 +61,16 @@ const withTimeout = <T>(p: Promise<T>, ms: number) =>
     new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
   ]);
 
-/** Publish `wrap` to the watcher; true when at least one relay accepted it.
+/** Publish `wrap` to the watcher; true when at least one relay accepted it,
+ * or a disabled reason without network access for a locked test initiator.
  * The watcher never replies (a reply would itself be a push). */
 export async function publishToWatcher(
   wrap: NostrEvent,
   stillValid: () => boolean = () => true,
-): Promise<boolean> {
+  initiatingPubkey: string | null = getCurrentUserPubkey(),
+): Promise<boolean | typeof TEST_PUSH_DISABLED> {
+  // Capture the initiator before lookup; the wrap's outer pubkey is anonymous.
+  if (isTestRelayLockdown(initiatingPubkey)) return TEST_PUSH_DISABLED;
   const targets = watcherPublishTargets(await watcherInbox());
   // The lookup took a moment: the caller may no longer want this sent.
   if (!stillValid()) return false;

@@ -1,3 +1,4 @@
+import { activeAccountRelays } from './testRelayRouting';
 import { reqLabel, type ReqOptions } from './relayReqBudget';
 import type { SimplePool } from 'nostr-tools/pool';
 import type { Filter } from 'nostr-tools/filter';
@@ -30,6 +31,7 @@ export function querySyncAbortable(
     rejectOnTimeout?: boolean;
   },
 ): Promise<NostrEvent[]> {
+  relays = activeAccountRelays(relays);
   return new Promise((resolve, reject) => {
     const events: NostrEvent[] = [];
     // SimplePool already de-dupes across relays (`_knownIds`), but this is

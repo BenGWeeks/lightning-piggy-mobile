@@ -1,3 +1,4 @@
+import { isTestRelayLockdown, TEST_RELAY_URL } from '../config/testRelayLockdown';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Event } from 'nostr-tools';
 import { useNostr } from '../contexts/NostrContext';
@@ -197,8 +198,17 @@ export function useRelayListEditor() {
     setInboxBaseline(dmInboxRelays);
   }, [dmInboxRelays]);
 
-  const nip65Editable = !nip65Loading && publishing === null;
-  const inboxEditable = !inboxLoading && publishing === null;
+  const locked = isTestRelayLockdown(pubkey);
+  const displayedNip65 = useMemo(
+    () => (locked ? [{ url: TEST_RELAY_URL, read: true, write: true }] : nip65Draft),
+    [locked, nip65Draft],
+  );
+  const displayedInbox = useMemo(
+    () => (locked ? [TEST_RELAY_URL] : inboxDraft),
+    [locked, inboxDraft],
+  );
+  const nip65Editable = !locked && !nip65Loading && publishing === null;
+  const inboxEditable = !locked && !inboxLoading && publishing === null;
 
   const addNip65 = useCallback(
     (input: string): boolean => {
@@ -380,7 +390,7 @@ export function useRelayListEditor() {
 
   return useMemo(
     () => ({
-      nip65Draft,
+      nip65Draft: displayedNip65,
       nip65Dirty,
       nip65Loading,
       nip65Editable,
@@ -388,7 +398,7 @@ export function useRelayListEditor() {
       removeNip65,
       toggleNip65,
       publishNip65,
-      inboxDraft,
+      inboxDraft: displayedInbox,
       inboxDirty,
       inboxLoading,
       inboxEditable,
@@ -398,7 +408,7 @@ export function useRelayListEditor() {
       publishing,
     }),
     [
-      nip65Draft,
+      displayedNip65,
       nip65Dirty,
       nip65Loading,
       nip65Editable,
@@ -406,7 +416,7 @@ export function useRelayListEditor() {
       removeNip65,
       toggleNip65,
       publishNip65,
-      inboxDraft,
+      displayedInbox,
       inboxDirty,
       inboxLoading,
       inboxEditable,

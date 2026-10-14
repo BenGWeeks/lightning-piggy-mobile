@@ -1,3 +1,4 @@
+import { activeAccountRelays, watchTestRelayLockdown } from './testRelayRouting';
 import {
   createProbeCache,
   finishProbe,
@@ -5,6 +6,15 @@ import {
   type ProbeEvent,
   type ProbeResult,
 } from '../utils/relayReachability';
+
+const activeSockets = new Set<WebSocket>();
+const activeRelayHttpProbes = new Set<AbortController>();
+watchTestRelayLockdown(() => {
+  for (const socket of activeSockets) socket.close();
+  activeSockets.clear();
+  for (const controller of activeRelayHttpProbes) controller.abort();
+  activeRelayHttpProbes.clear();
+});
 
 export const reachabilityCache = createProbeCache();
 // Shared by all focused lists (including Blossom); never exceed three transports.
@@ -24,6 +34,7 @@ function socketProbe(url: string, signal: AbortSignal): Promise<ProbeResult | un
       clearTimeout(timer);
       signal.removeEventListener('abort', cancel);
       if (socket) {
+        activeSockets.delete(socket);
         socket.onopen = socket.onmessage = socket.onerror = socket.onclose = null;
         try {
           socket.close();
@@ -37,7 +48,8 @@ function socketProbe(url: string, signal: AbortSignal): Promise<ProbeResult | un
     const timer = setTimeout(() => finish('timeout'), PROBE_TIMEOUT_MS);
     signal.addEventListener('abort', cancel);
     try {
-      socket = new WebSocket(url);
+      socket = new WebSocket(activeAccountRelays([url])[0]);
+      activeSockets.add(socket);
       socket.onopen = () => {
         try {
           socket!.send(
@@ -61,8 +73,13 @@ function socketProbe(url: string, signal: AbortSignal): Promise<ProbeResult | un
   });
 }
 
-async function httpProbe(url: string, signal: AbortSignal): Promise<ProbeResult | undefined> {
+async function httpProbe(
+  url: string,
+  signal: AbortSignal,
+  service: ReachabilityService,
+): Promise<ProbeResult | undefined> {
   const controller = new AbortController();
+  if (service === 'nostr') activeRelayHttpProbes.add(controller);
   const cancel = () => controller.abort();
   signal.addEventListener('abort', cancel);
   let timedOut = false;
@@ -77,24 +94,40 @@ async function httpProbe(url: string, signal: AbortSignal): Promise<ProbeResult 
     root.search = '';
     root.hash = '';
     const response = await fetch(root.toString(), { method: 'HEAD', signal: controller.signal });
-    if (response.status === 405 || response.status === 501) {
+    if (
+      !(service === 'nostr' && controller.signal.aborted && !timedOut) &&
+      (response.status === 405 || response.status === 501)
+    ) {
       await fetch(root.toString(), { method: 'GET', signal: controller.signal });
     }
     // Any HTTP response demonstrates reachability, including auth / missing root.
-    return signal.aborted ? undefined : finishProbe(undefined, 'message', Date.now());
+    return signal.aborted || (service === 'nostr' && controller.signal.aborted && !timedOut)
+      ? undefined
+      : finishProbe(undefined, 'message', Date.now());
   } catch (error) {
-    return signal.aborted
+    return signal.aborted || (controller.signal.aborted && !timedOut)
       ? undefined
       : finishProbe(undefined, timedOut ? 'timeout' : 'error', Date.now(), String(error));
   } finally {
     clearTimeout(timer);
+    activeRelayHttpProbes.delete(controller);
     signal.removeEventListener('abort', cancel);
   }
+}
+
+export type ReachabilityService = 'nostr' | 'blossom';
+
+/** DEV routing can send the same input URL to two different services. */
+export function reachabilityCacheKey(url: string, service: ReachabilityService = 'nostr'): string {
+  if (!__DEV__) return url;
+  const target = service === 'nostr' ? activeAccountRelays([url])[0] : url;
+  return `${service}:${target}`;
 }
 
 export function probeReachability(
   url: string,
   signal: AbortSignal,
+  service: ReachabilityService = 'nostr',
 ): Promise<ProbeResult | undefined> {
   return new Promise((resolve) => {
     const cancelQueued = () => {
@@ -111,7 +144,12 @@ export function probeReachability(
         return;
       }
       running++;
-      void (url.startsWith('https:') ? httpProbe(url, signal) : socketProbe(url, signal))
+      const target = service === 'nostr' ? activeAccountRelays([url])[0] : url;
+      void (
+        target.startsWith('https:')
+          ? httpProbe(target, signal, service)
+          : socketProbe(target, signal)
+      )
         .then(resolve)
         .finally(() => {
           running--;

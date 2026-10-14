@@ -232,7 +232,8 @@ export class MarmotSession {
     const store = <T>(ns: string) => createMarmotKvStore<T>(this.backend, ns);
     this.outbox = new MarmotWelcomeOutbox(this.backend, () => this.gate.stopped);
     const network = this.outbox.wrapNetwork(
-      opts.network ?? createMarmotNetwork(opts.getLookupRelays, this.connection.reconnect),
+      opts.network ??
+        createMarmotNetwork(opts.getLookupRelays, this.connection.reconnect, opts.pubkey),
     );
     this.push = new MarmotPushNotifier({
       pubkey: opts.pubkey,
@@ -243,7 +244,7 @@ export class MarmotSession {
             publish: async (relays, event) => void (await network.publish(relays, event)),
             inboxRelays: (pk) => network.getUserInboxRelays(pk),
           }
-        : createPushTransport(opts.getLookupRelays),
+        : createPushTransport(opts.getLookupRelays, opts.pubkey),
     });
     const signer = opts.signer ?? createMarmotSigner(opts.pubkey, opts.signerType);
     this.pushRegistration = new MarmotPushRegistrar({

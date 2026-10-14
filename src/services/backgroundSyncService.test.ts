@@ -1,3 +1,14 @@
+import { setCurrentUserPubkey, getCurrentUserPubkey } from './nostrActiveAccount';
+import { TEST_ACCOUNT_PUBKEYS, TEST_RELAY_URL } from '../config/testRelayLockdown';
+
+import { toggleMutedSender } from './mutedSenders';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { runBackgroundSync } from './backgroundSyncService';
+import {
+  markWrapHandled,
+  noteLiveDmSubArmed,
+  __resetForTests as __resetDedupeForTests,
+} from './dmWrapNotificationDedupe';
 // Tests for the detect-and-ping background sync (#279). The relay pool,
 // identity/relay storage, and notificationService are mocked so we assert
 // the detection + dedupe logic without network or native modules.
@@ -21,15 +32,6 @@ jest.mock('./notificationService', () => ({
 jest.mock('./nostrPlacesPublisher', () => ({
   fetchCachesByAuthor: (...a: unknown[]) => mockFetchCachesByAuthor(...a),
 }));
-
-import { toggleMutedSender } from './mutedSenders';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { runBackgroundSync } from './backgroundSyncService';
-import {
-  markWrapHandled,
-  noteLiveDmSubArmed,
-  __resetForTests as __resetDedupeForTests,
-} from './dmWrapNotificationDedupe';
 
 const ME = 'a'.repeat(64);
 const READ_RELAYS = [{ url: 'wss://r.example', read: true, write: true }];
@@ -334,4 +336,37 @@ it('removes muted senders from mixed background batches and routes to the unmute
     }),
   );
   expect(JSON.parse((await AsyncStorage.getItem(SEEN_KEY))!)).toEqual(['muted', 'normal']);
+});
+
+it('initialises a saved test identity before headless relay reads', async () => {
+  const owner = [...TEST_ACCOUNT_PUBKEYS][0];
+  setCurrentUserPubkey(null);
+  mockLoadIdentities.mockResolvedValue({ activePubkey: owner, identities: [] });
+  await runBackgroundSync();
+  expect(getCurrentUserPubkey()).toBe(owner);
+  expect(mockQuerySync.mock.calls[0][0]).toEqual([TEST_RELAY_URL]);
+  setCurrentUserPubkey(null);
+});
+
+it('does no relay work when the persisted identity cannot be read', async () => {
+  mockLoadIdentities.mockRejectedValueOnce(new Error('locked storage'));
+  expect(await runBackgroundSync()).toMatchObject({ pinged: false, freshCount: 0 });
+  expect(mockQuerySync).not.toHaveBeenCalled();
+});
+
+it('keeps release sync on its original registry identity and leaves routing untouched', async () => {
+  (globalThis as unknown as { __DEV__: boolean }).__DEV__ = false;
+  const saved = [...TEST_ACCOUNT_PUBKEYS][0];
+  mockLoadIdentities.mockResolvedValue({ activePubkey: saved, identities: [] });
+  setCurrentUserPubkey(ME);
+  try {
+    await runBackgroundSync();
+    expect(mockLoadIdentities).toHaveBeenCalledTimes(1);
+    expect(mockQuerySync.mock.calls[0][0]).toEqual(['wss://r.example']);
+    expect(mockQuerySync.mock.calls[0][1]['#p']).toEqual([saved]);
+    expect(getCurrentUserPubkey()).toBe(ME);
+  } finally {
+    (globalThis as unknown as { __DEV__: boolean }).__DEV__ = true;
+    setCurrentUserPubkey(null);
+  }
 });

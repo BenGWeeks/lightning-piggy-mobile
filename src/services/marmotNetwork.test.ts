@@ -16,6 +16,12 @@ import { pool, trackRelays } from './nostrPool';
 import { createMarmotGroupConnections } from './marmotGroupConnections';
 import { onMarmotRelayReconnect } from './marmotRelayReconnect';
 import { MARMOT_PUSH_SERVER_RELAYS } from './nostrRelayDefaults';
+import {
+  TEST_ACCOUNT_PUBKEYS,
+  TEST_PUSH_DISABLED,
+  TEST_RELAY_URL,
+} from '../config/testRelayLockdown';
+import { setCurrentUserPubkey } from './nostrActiveAccount';
 
 const mockQuerySync = jest.fn();
 const mockPublish = jest.fn();
@@ -41,8 +47,48 @@ const inboxEvent = (relays: string[], createdAt = 100) => ({
 });
 
 beforeEach(() => {
+  setCurrentUserPubkey(null);
   mockQuerySync.mockReset();
   jest.useRealTimers();
+});
+
+afterEach(() => setCurrentUserPubkey(null));
+
+describe('push lockdown', () => {
+  const testPubkey = [...TEST_ACCOUNT_PUBKEYS][0];
+  const wrap = { kind: 1059, pubkey: 'e'.repeat(64) } as Event;
+  beforeEach(() => {
+    mockQuerySync.mockResolvedValue([]);
+    mockPublish.mockReset().mockReturnValue([]);
+    jest.mocked(trackRelays).mockClear();
+  });
+
+  it('skips inbox lookup and anonymous publications for the active locked test account', async () => {
+    const transport = createPushTransport(() => []);
+    setCurrentUserPubkey(testPubkey);
+    expect(await transport.inboxRelays(SERVER)).toEqual([]);
+    expect(await transport.publish(['wss://relay.primal.net'], wrap)).toBe(TEST_PUSH_DISABLED);
+    expect(mockQuerySync).not.toHaveBeenCalled();
+    expect(mockPublish).not.toHaveBeenCalled();
+    expect(trackRelays).not.toHaveBeenCalled();
+  });
+
+  it('retains the initiating test account after signing switches the active account', async () => {
+    setCurrentUserPubkey(testPubkey);
+    const transport = createPushTransport(() => [], testPubkey);
+    await Promise.resolve().then(() => setCurrentUserPubkey('a'.repeat(64)));
+    expect(await transport.inboxRelays(SERVER)).toEqual([]);
+    expect(await transport.publish(['wss://relay.primal.net'], wrap)).toBe(TEST_PUSH_DISABLED);
+    expect(mockQuerySync).not.toHaveBeenCalled();
+    expect(mockPublish).not.toHaveBeenCalled();
+    expect(trackRelays).not.toHaveBeenCalled();
+  });
+
+  it('keeps ordinary-account publications unchanged', async () => {
+    setCurrentUserPubkey('a'.repeat(64));
+    await createPushTransport(() => []).publish(['wss://relay.primal.net'], wrap);
+    expect(mockPublish).toHaveBeenCalledWith(['wss://relay.primal.net'], wrap);
+  });
 });
 
 describe('createPushTransport().inboxRelays', () => {
@@ -486,4 +532,31 @@ test('Welcome ownership filters share one fresh REQ per relay', async () => {
   await sessionNetwork.request(['wss://relay.primal.net'], filters);
   expect(mockQuerySync).toHaveBeenCalledTimes(1);
   expect(mockQuerySync).toHaveBeenCalledWith(['wss://relay.primal.net'], filters, 6000);
+});
+
+test('session-owned Welcome lookup and anonymous publications stay on LAN after an account switch', async () => {
+  const owner = [...TEST_ACCOUNT_PUBKEYS][0];
+  setCurrentUserPubkey(owner);
+  const network = createMarmotNetwork(() => ['wss://public.example'], undefined, owner);
+  let finishLookup!: (events: ReturnType<typeof inboxEvent>[]) => void;
+  mockQuerySync.mockReset().mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finishLookup = resolve;
+      }),
+  );
+  mockPublish.mockReset().mockReturnValue([Promise.resolve('saved')]);
+  const pending = network.getUserInboxRelays(SERVER);
+  expect(mockQuerySync.mock.calls[0][0]).toEqual([TEST_RELAY_URL]);
+  setCurrentUserPubkey('a'.repeat(64));
+  finishLookup([inboxEvent(['wss://public.example'])]);
+  const inbox = await pending;
+  expect(inbox).toEqual([TEST_RELAY_URL]);
+  for (const kind of [1059, 445, 443]) {
+    await network.publish(['wss://public.example'], { kind, pubkey: SERVER } as Event);
+    expect(mockPublish.mock.calls.at(-1)[0]).toEqual([TEST_RELAY_URL]);
+  }
+  mockQuerySync.mockResolvedValue([]);
+  await network.request(['wss://public.example'], { kinds: [443], limit: 1 });
+  expect(mockQuerySync.mock.calls.at(-1)[0]).toEqual([TEST_RELAY_URL]);
 });

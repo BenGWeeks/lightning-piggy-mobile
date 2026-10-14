@@ -1,3 +1,5 @@
+import { lockRelays, isTestRelayLockdown } from '../config/testRelayLockdown';
+import { useNostr } from '../contexts/NostrContext';
 import React, { useCallback, useMemo, useState } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 import { ChevronDown, ChevronUp, Trash2 } from 'lucide-react-native';
@@ -32,6 +34,8 @@ export default function AdvancedRelaysSection({
   deviceRelays,
   onRemoveDeviceRelay,
 }: Props) {
+  const { pubkey } = useNostr();
+  const locked = isTestRelayLockdown(pubkey);
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createAdvancedRelaysSectionStyles(colors), [colors]);
@@ -44,7 +48,7 @@ export default function AdvancedRelaysSection({
 
   const readOnlyList = (urls: readonly string[], testID: string) => (
     <View style={styles.list} testID={testID}>
-      {urls.map((url) => (
+      {lockRelays(urls, pubkey).map((url) => (
         <RelaySettingsRow
           key={url}
           url={url}
@@ -103,7 +107,7 @@ export default function AdvancedRelaysSection({
                 testID="deviceRelaysTitle"
               />
               <View style={styles.list} testID="device-relay-list">
-                {deviceRelays.map((url, index) => (
+                {lockRelays(deviceRelays, pubkey).map((url, index) => (
                   <View key={url} style={styles.row}>
                     <RelayStatusDot status={connection.get(url)} />
                     <Text
@@ -116,6 +120,7 @@ export default function AdvancedRelaysSection({
                     </Text>
                     <TouchableOpacity
                       onPress={() => onRemoveDeviceRelay(url)}
+                      disabled={locked}
                       style={styles.removeButton}
                       testID={`relay-row-remove-device-${index}`}
                       accessibilityLabel={t('publishedRelays.removeHostLabel', {

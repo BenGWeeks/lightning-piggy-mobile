@@ -1,3 +1,9 @@
+import {
+  activeAccountRelays,
+  eventAuthorRelays,
+  watchTestRelayLockdown,
+  type RelayConnectionParams,
+} from './testRelayRouting';
 import { AbstractRelay } from 'nostr-tools/abstract-relay';
 import { paceRelayReceive } from './nostrRelayReceiveQueue';
 import { SimplePool } from 'nostr-tools/pool';
@@ -10,7 +16,8 @@ import { withResumableSubscriptions } from './resumablePool';
 class HealthAwarePool extends withResumableSubscriptions(withRelayHealth(SimplePool)) {
   private readonly pendingPublishes = new Map<string, number>();
 
-  async ensureRelay(url: string, params?: Parameters<SimplePool['ensureRelay']>[1]) {
+  async ensureRelay(url: string, params?: RelayConnectionParams) {
+    if (!params?.forPublish) url = activeAccountRelays([url])[0];
     const key = normalizeURL(url);
     if (!this.relays.has(key)) {
       // Pre-create with public SDK APIs so the receive hook is installed before
@@ -31,6 +38,7 @@ class HealthAwarePool extends withResumableSubscriptions(withRelayHealth(SimpleP
   }
 
   publish(...args: Parameters<SimplePool['publish']>): Promise<string>[] {
+    args[0] = eventAuthorRelays(args[0], args[1]);
     const urls = args[0].map((url) => {
       try {
         return normalizeURL(url);
@@ -105,6 +113,10 @@ class HealthAwarePool extends withResumableSubscriptions(withRelayHealth(SimpleP
  * `pool.verifyEvent`, and re-exports `pool` / `trackRelays` for back-compat.
  */
 export const pool = new HealthAwarePool();
+watchTestRelayLockdown(() => {
+  pool.destroy();
+  connectedRelays.clear();
+});
 
 // Load what we learned about dead relays last session, so they're skipped
 // from the first query rather than after two more timeouts.
@@ -116,7 +128,7 @@ export const connectedRelays = new Set<string>();
 
 // Track all relays we connect to for proper cleanup.
 export function trackRelays(relays: string[]): void {
-  relays.forEach((r) => connectedRelays.add(r));
+  activeAccountRelays(relays).forEach((r) => connectedRelays.add(r));
 }
 
 /** Release idle sockets after transient batches, preserving active subscriptions. */
