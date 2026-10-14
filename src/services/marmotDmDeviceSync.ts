@@ -136,7 +136,6 @@ export class MarmotDmDeviceSync {
   private readonly opts: DmDeviceSyncOptions;
   private readonly nextCheck = new Map<string, number>();
   // Refusals suppress only the attempted group + key packages for this session.
-  private readonly inviting = new Map<string, readonly NostrEvent[]>();
   private readonly declined = new Set<string>();
   private readonly running = new Map<string, Promise<void>>();
   private readonly lookups = new Map<string, { at: number; events: Promise<NostrEvent[]> }>();
@@ -146,12 +145,12 @@ export class MarmotDmDeviceSync {
   }
 
   /** Observe typed refusals before marmot-ts turns them into delivery outcomes. */
-  observeSigner(signer: EventSigner): EventSigner {
+  observeSigner(signer: EventSigner, mlsId: string, packages: readonly NostrEvent[]): EventSigner {
     const observe = async <T>(call: () => T | Promise<T>): Promise<T> => {
       try {
         return await call();
       } catch (error) {
-        for (const [id, packages] of this.inviting) this.noteDeclined(id, packages, error);
+        this.noteDeclined(mlsId, packages, error);
         throw error;
       }
     };
@@ -166,6 +165,10 @@ export class MarmotDmDeviceSync {
         },
       }),
     };
+  }
+
+  isDeclined(mlsId: string, packageId: string): boolean {
+    return this.declined.has(`${mlsId}:${packageId}`);
   }
 
   private noteDeclined(mlsId: string, packages: readonly NostrEvent[], error: unknown): void {
@@ -295,14 +298,11 @@ export class MarmotDmDeviceSync {
     });
     if (plan.size === 0 || this.opts.stopped()) return ok;
     const packages = [...plan.values()].flat();
-    this.inviting.set(mlsId, packages);
     try {
       await this.opts.invite(mlsId, plan);
     } catch (error) {
       this.noteDeclined(mlsId, packages, error);
       throw error;
-    } finally {
-      this.inviting.delete(mlsId);
     }
     return ok;
   }

@@ -139,6 +139,10 @@ export class MarmotWelcomeOutbox {
     }
   }
 
+  async remove(eventId: string): Promise<void> {
+    await this.backend.remove(OUTBOX_NS, eventId);
+  }
+
   async pending(): Promise<PendingWelcome[]> {
     const items: PendingWelcome[] = [];
     for (const id of await this.backend.keys(OUTBOX_NS)) {

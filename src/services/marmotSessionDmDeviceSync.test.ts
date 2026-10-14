@@ -133,6 +133,79 @@ describe('MarmotSession: existing 1:1s add newer devices (no WebCrypto)', () => 
     }
   }, 120_000);
 
+  it.each([
+    ['sign', 'restart'],
+    ['encrypt', 'restart'],
+    ['sign', 'send'],
+    ['encrypt', 'send'],
+  ] as const)(
+    'retries a failed Welcome %s after key refresh and %s without another Add',
+    async (method, trigger) => {
+      const relay = makeRelay();
+      const identity = makeSigner();
+      let fail = false;
+      const signer = {
+        ...identity.signer,
+        signEvent: async (draft: Parameters<typeof identity.signer.signEvent>[0]) => {
+          if (fail && method === 'sign' && draft.kind === 13) throw new Error('signer timeout');
+          return identity.signer.signEvent(draft);
+        },
+        nip44: {
+          ...identity.signer.nip44,
+          encrypt: async (pk: string, plaintext: string) => {
+            if (fail && method === 'encrypt') throw new Error('encrypt timeout');
+            return identity.signer.nip44.encrypt(pk, plaintext);
+          },
+        },
+      };
+      const big = makeSession(relay, undefined, 'nsec', {
+        ...OPTS,
+        pubkey: identity.pubkey,
+        signer,
+      });
+      const little = makeSession(relay);
+      const tablet = makeInstall(relay, little);
+      let restarted: ReturnType<typeof makeSession> | undefined;
+      try {
+        await Promise.all([big.session.start(), little.session.start()]);
+        await waitFor(() => slots(relay, little.pubkey) === 1);
+        const dm = await big.session.getOrCreateDm(little.pubkey);
+        await little.session.acceptWelcome(unwrapWelcomes(relay, little)[0]);
+        await tablet.session.start();
+        await waitFor(() => slots(relay, little.pubkey) === 2);
+        fail = true;
+        later();
+        await big.session.syncDmDevices(dm.id, 'send');
+        expect(await big.backend.keys('welcomePayloads')).toHaveLength(1);
+        expect(unwrapWelcomes(relay, little)).toHaveLength(1);
+        const commits = relay.events.filter((e) => e.kind === 445).length;
+        // A new key package cannot replace the Welcome to the consumed one.
+        await tablet.session.refreshInvitationKey();
+        if (trigger === 'restart') big.session.stop();
+        fail = false;
+        if (trigger === 'send') {
+          await big.session.syncDmDevices(dm.id, 'send');
+        } else {
+          restarted = makeSession(relay, undefined, 'nsec', {
+            ...OPTS,
+            pubkey: identity.pubkey,
+            signer,
+            backend: big.backend,
+          });
+          await restarted.session.start();
+        }
+        await waitFor(() => unwrapWelcomes(relay, little).length === 2);
+        const welcome = unwrapWelcomes(relay, little)[1];
+        expect(await tablet.session.acceptWelcome(welcome)).toMatchObject({ id: dm.id });
+        expect(await big.backend.keys('welcomePayloads')).toHaveLength(0);
+        expect(relay.events.filter((e) => e.kind === 445)).toHaveLength(commits);
+      } finally {
+        [big, little, tablet, restarted].forEach((install) => install?.session.stop());
+      }
+    },
+    120_000,
+  );
+
   it('a failed device lookup still sends to the current members', async () => {
     const relay = makeRelay();
     // Installed before the sessions capture `request`.

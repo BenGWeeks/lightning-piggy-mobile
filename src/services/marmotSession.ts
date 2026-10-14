@@ -64,6 +64,7 @@ import { KeyPackageRefreshRequests } from './marmotKeyRefresh';
 import { KeyPackageReplenisher } from './marmotKeyPackageReplenisher';
 import { alignCommitForMdk, spreadProposals } from './marmotProposals';
 import { MarmotWelcomeOutbox } from './marmotWelcomeOutbox';
+import { MarmotWelcomePayloads } from './marmotWelcomePayloads';
 import { boundGroupQueries } from './marmotGroupBackfill';
 import { createMarmotGroupConnections } from './marmotGroupConnections';
 import { submitWhenSettled, type GroupSendIntent } from './marmotSendGate';
@@ -192,6 +193,7 @@ export class MarmotSession {
   private readonly deliveredRumors = new Set<string>();
   private readonly push: MarmotPushNotifier;
   private readonly outbox: MarmotWelcomeOutbox;
+  private readonly welcomePayloads: MarmotWelcomePayloads;
   /** MIP-05: announcing THIS device's push token in our groups. */
   readonly pushRegistration: MarmotPushRegistrar;
   private stopWelcomeRetries: (() => void) | null = null;
@@ -278,10 +280,7 @@ export class MarmotSession {
       sendWaitMs: opts.dmDeviceSyncWaitMs,
     });
     this.client = new MarmotClient({
-      signer: fence.fenceSigner(
-        monotonicKeyPackageSigner(this.dmDevices.observeSigner(clientSigner)),
-        this.gate,
-      ),
+      signer: fence.fenceSigner(monotonicKeyPackageSigner(clientSigner), this.gate),
       network: boundGroupQueries(trackKeyPackageAcceptance(network, this.acceptedKeyPackages), {
         watermarks: this.watermarks,
         persist: (h, createdAt) => void this.backend.set('watermark', h, String(createdAt)),
@@ -307,6 +306,12 @@ export class MarmotSession {
         store<Rumor>(historyNamespace(bytesToHex(groupId))),
       ),
     });
+    this.welcomePayloads = new MarmotWelcomePayloads(
+      this.backend,
+      this.outbox,
+      this.dmDevices,
+      cancelled,
+    );
     this.welcomeJoins = new MarmotWelcomeJoin({
       client: this.client,
       backend: this.backend,
@@ -337,6 +342,7 @@ export class MarmotSession {
         // We're out of it: forget what we published there (MIP-05 state)
         // and its "delete for everyone" tombstones.
         this.pushRegistration.forgetGroup(bytesToHex(id));
+        void this.welcomePayloads.drop(bytesToHex(id)).catch(() => undefined);
         void forgetMarmotDeletionsForGroup(this.pubkey, toAppGroupId(bytesToHex(id))).catch(
           () => undefined,
         );
@@ -373,6 +379,7 @@ export class MarmotSession {
       this.acceptWelcome(w),
     );
     void this.outbox.flush().catch(() => undefined);
+    if (this.opts.signerType === 'nsec') void this.welcomePayloads.flush().catch(() => undefined);
     void this.failedInvites.run();
     void this.keyPackageLookup()
       .then((lookup) => reverifyWelcomeOutcomes(this.backend, lookup))
@@ -562,6 +569,7 @@ export class MarmotSession {
       // a retry would otherwise create another one each time.
       await this.client.groups.destroy(group.id).catch(() => undefined);
       await this.outbox.drop(group.idStr).catch(() => undefined);
+      await this.welcomePayloads.drop(group.idStr).catch(() => undefined);
       this.emitGroupsChanged();
       throw e;
     }
@@ -608,6 +616,10 @@ export class MarmotSession {
     // Adds are admin-only; in a DM both people are admins.
     if (!dm?.isDm || !dm.memberPubkeys[0] || !dm.adminPubkeys.includes(this.pubkey.toLowerCase()))
       return;
+    if (reason === 'send' || this.opts.signerType === 'nsec') {
+      void this.outbox.flush().catch(() => undefined);
+      void this.welcomePayloads.flush(toMlsGroupId(appGroupId)).catch(() => undefined);
+    }
     await this.dmDevices.sync(toMlsGroupId(appGroupId), dm.memberPubkeys[0], reason);
   }
 
@@ -819,6 +831,7 @@ export class MarmotSession {
   private wireGroup(g: SessionGroup): void {
     if (this.wiredGroups.has(g.idStr)) return;
     this.wiredGroups.add(g.idStr);
+    this.welcomePayloads.attach(g);
     this.devices.watch(g);
     // Membership / name changes (ours or another member's commit) move the epoch.
     g.on('stateChanged', () => {

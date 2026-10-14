@@ -12,6 +12,7 @@ import {
   type DmDevicePlanInput,
 } from './marmotDmDeviceSync';
 import * as invitees from './marmotInvitees';
+import { MarmotWelcomeOutbox } from './marmotWelcomeOutbox';
 import * as devices from './marmotDevices';
 import { AmberSignerError } from './amberErrors';
 import { NostrConnectError } from './signerErrors';
@@ -273,11 +274,15 @@ describe('MarmotDmDeviceSync scheduling', () => {
           silentSigner: false,
           // marmot-ts catches the error and resolves with a failed delivery outcome.
           invite: async () => {
-            const signer = sync.observeSigner({
-              getPublicKey: async () => ME,
-              signEvent,
-              nip44: { encrypt, decrypt: async () => '' },
-            });
+            const signer = sync.observeSigner(
+              {
+                getPublicKey: async () => ME,
+                signEvent,
+                nip44: { encrypt, decrypt: async () => '' },
+              },
+              'g1',
+              [kp(PEER, slot(2), 'new-device')],
+            );
             await Promise.resolve(
               method === 'signEvent'
                 ? signer.signEvent({ kind: 13, created_at: 1, tags: [], content: '' })
@@ -290,6 +295,63 @@ describe('MarmotDmDeviceSync scheduling', () => {
         await sync.sync('g1', PEER, 'send');
         expect(method === 'signEvent' ? signEvent : encrypt).toHaveBeenCalledTimes(1);
       }
+    } finally {
+      selected.mockRestore();
+      signature.mockRestore();
+    }
+  });
+
+  it('attributes a swallowed refusal only to the active invitation while another chat is queued', async () => {
+    const selected = jest
+      .spyOn(invitees, 'selectDeviceKeyPackages')
+      .mockImplementation(async (p) => [kp(p, slot(2), 'new-device')]);
+    const signature = jest
+      .spyOn(devices, 'keyPackageSignatureKey')
+      .mockImplementation((e) => e.content);
+    try {
+      const outbox = new MarmotWelcomeOutbox(createMemoryMarmotBackend());
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const calls: string[] = [];
+      let transient = true;
+      const { sync, tick } = makeSync({
+        silentSigner: false,
+        invite: (id, plan) =>
+          outbox.capture(async () => {
+            calls.push(id);
+            if (id === 'g1') {
+              await gate;
+              const signer = sync.observeSigner(
+                {
+                  getPublicKey: async () => ME,
+                  signEvent: async () => {
+                    throw new NostrConnectError('permission', 'denied');
+                  },
+                },
+                id,
+                [...plan.values()].flat(),
+              );
+              await Promise.resolve(
+                signer.signEvent({ kind: 13, created_at: 1, tags: [], content: '' }),
+              ).catch(() => undefined);
+            } else if (transient) {
+              throw new Error('commit publication failed');
+            }
+          }),
+      });
+      const first = sync.sync('g1', PEER, 'send');
+      const queued = sync.sync('g2', PEER, 'send');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(calls).toEqual(['g1']);
+      release();
+      await Promise.all([first, queued]);
+      transient = false;
+      tick(DM_DEVICE_SYNC_COOLDOWN_MS + 1);
+      await sync.sync('g1', PEER, 'send');
+      await sync.sync('g2', PEER, 'send');
+      expect(calls).toEqual(['g1', 'g2', 'g2']);
     } finally {
       selected.mockRestore();
       signature.mockRestore();
