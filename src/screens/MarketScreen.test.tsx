@@ -125,6 +125,7 @@ jest.mock('../hooks/useMarketListings', () => ({
 }));
 jest.mock('lucide-react-native', () => ({
   ChevronLeft: () => null,
+  Heart: () => null,
   Search: () => null,
   SlidersHorizontal: () => null,
   Store: () => null,
@@ -535,3 +536,9 @@ it.each(['preferred', 'wotFriends'] as const)(
     expect(screen.getByTestId('market-search-input').props.value).toBe('new search');
   },
 );
+
+it('opens Liked items from the header heart (#1541)', () => {
+  const screen = render(<MarketScreen navigation={navigation} />);
+  fireEvent.press(screen.getByTestId('market-liked-items-button'));
+  expect(navigation.navigate).toHaveBeenCalledWith('MarketLikedItems');
+});

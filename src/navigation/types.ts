@@ -182,6 +182,8 @@ export type ExploreStackParamList = {
   // `digital` presets a new listing's item type (the "It's a digital item"
   // way past the shipping gate).
   MarketListingEditor: { dTag?: string; returnToMyShop?: boolean; digital?: boolean } | undefined;
+  // The viewer's liked listings (#1541) — their NIP-25 likes, as a grid.
+  MarketLikedItems: undefined;
   Hunt: undefined;
   // `piggyId` opens the wizard in edit mode for an existing HiddenPiggy —
   // reuses the same screen, pre-fills every field, and on save replaces

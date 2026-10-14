@@ -2715,6 +2715,33 @@
       "youMightLike": "Te puede gustar",
       "seeAll": "Ver todo",
       "seeAllAccessibility": "Ver todos los anuncios de {{seller}}"
+    },
+    "like": {
+      "like": "Me gusta",
+      "unlike": "Ya no me gusta",
+      "likeFailed": "No se pudo marcar este artículo como favorito: revisa tu conexión e inténtalo de nuevo.",
+      "unlikeFailed": "No se pudo quitar el me gusta: revisa tu conexión e inténtalo de nuevo."
+    },
+    "share": {
+      "share": "Compartir",
+      "title": "Compartir este artículo",
+      "sendToFriend": "Enviar a un amigo",
+      "shareLink": "Compartir enlace",
+      "pickerTitle": "Enviar a un amigo",
+      "pickerSubtitle": "Lo recibirá como mensaje privado.",
+      "sentTo": "Enviado a {{name}}",
+      "sendFailed": "No se pudo enviar este artículo",
+      "sharedItem": "Artículo compartido"
+    },
+    "liked": {
+      "title": "Artículos que me gustan",
+      "openAccessibility": "Abrir los artículos que me gustan",
+      "back": "Volver al mercado",
+      "empty": "Los artículos que te gusten aparecerán aquí. Toca el corazón de cualquier producto para guardarlo.",
+      "loading": "Cargando los artículos que te gustan…",
+      "loadFailed": "No se pudieron cargar los artículos que te gustan: desliza hacia abajo para reintentar.",
+      "signedOut": "Inicia sesión con Nostr para ver los artículos que te gustan.",
+      "signIn": "Iniciar sesión"
     }
   },
   "dmProtocol": {

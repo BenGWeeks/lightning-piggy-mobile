@@ -22,6 +22,7 @@ import ProductFeedbackTabs from '../components/ProductFeedbackTabs';
 import NostrLoginSheet from '../components/NostrLoginSheet';
 import MarketCheckoutSheet from '../components/MarketCheckoutSheet';
 import MarketPrice from '../components/MarketPrice';
+import MarketListingActions from '../components/MarketListingActions';
 import { Toast } from '../components/BrandedToast';
 import { usePullToRefresh, useRegisterRefresher } from '../hooks/usePullToRefresh';
 import { useLatestListing } from '../hooks/useLatestListing';
@@ -214,6 +215,9 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
       >
         <MarketProductGallery image={product.image} images={product.images} title={product.title} />
 
+        {preview ? null : (
+          <MarketListingActions product={product} onRequestSignIn={onRequestSignIn} />
+        )}
         <View style={styles.body}>
           {preview ? (
             <View style={styles.previewBanner} testID="market-product-preview-banner">

@@ -28,14 +28,21 @@ export interface UseReactionActionsParams {
   getReadRelays: () => string[];
 }
 
+export interface ReactionPublishInput {
+  emoji: string;
+  targetEventId: string;
+  targetAuthorPubkey: string;
+  targetEventKind?: number;
+  /** Addressable target (a Market listing): adds the NIP-25 `a` tag. */
+  targetAddress?: { coordinate: string; relayHint?: string };
+  /** Relays added to the usual publish set, e.g. where the target lives. */
+  extraRelays?: readonly string[];
+}
+
 export interface UseReactionActionsResult {
-  publishReaction: (input: {
-    emoji: string;
-    targetEventId: string;
-    targetAuthorPubkey: string;
-    targetEventKind?: number;
-  }) => Promise<string | null>;
-  deleteReaction: (reactionEventId: string) => Promise<boolean>;
+  publishReaction: (input: ReactionPublishInput) => Promise<string | null>;
+  /** `extraRelays` widen the publish set, e.g. the Market relays a listing lives on. */
+  deleteReaction: (reactionEventId: string, extraRelays?: readonly string[]) => Promise<boolean>;
   fetchReactionsForMessages: (targetEventIds: string[]) => Promise<
     {
       id: string;
@@ -68,29 +75,28 @@ export function useReactionActions({
   // Amethyst, …) on disjoint relay sets still see the reaction. DMs
   // themselves use the same union, so reactions land on the same relay
   // surface as the message they target.
-  const getReactionPublishRelays = useCallback((): string[] => {
-    const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
-    return [...new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS])];
-  }, [relays]);
+  const getReactionPublishRelays = useCallback(
+    (extraRelays: readonly string[] = []): string[] => {
+      const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
+      return [...new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS, ...extraRelays])];
+    },
+    [relays],
+  );
 
   const publishReaction = useCallback(
-    async (input: {
-      emoji: string;
-      targetEventId: string;
-      targetAuthorPubkey: string;
-      targetEventKind?: number;
-    }): Promise<string | null> => {
+    async (input: ReactionPublishInput): Promise<string | null> => {
       if (!pubkey || !isLoggedIn) return null;
       const unsigned = buildReactionEvent(
         input.emoji,
         input.targetEventId,
         input.targetAuthorPubkey,
         input.targetEventKind,
+        input.targetAddress,
       );
       const signed = await signEvent(unsigned);
       if (!signed) return null;
       try {
-        await nostrService.publishSignedEvent(signed, getReactionPublishRelays());
+        await nostrService.publishSignedEvent(signed, getReactionPublishRelays(input.extraRelays));
         return signed.id;
       } catch (error) {
         if (__DEV__) console.warn('[Nostr] publishReaction failed:', error);
@@ -101,13 +107,13 @@ export function useReactionActions({
   );
 
   const deleteReaction = useCallback(
-    async (reactionEventId: string): Promise<boolean> => {
+    async (reactionEventId: string, extraRelays?: readonly string[]): Promise<boolean> => {
       if (!pubkey || !isLoggedIn) return false;
       const unsigned = buildReactionDeletionEvent(reactionEventId);
       const signed = await signEvent(unsigned);
       if (!signed) return false;
       try {
-        await nostrService.publishSignedEvent(signed, getReactionPublishRelays());
+        await nostrService.publishSignedEvent(signed, getReactionPublishRelays(extraRelays));
         return true;
       } catch (error) {
         if (__DEV__) console.warn('[Nostr] deleteReaction failed:', error);

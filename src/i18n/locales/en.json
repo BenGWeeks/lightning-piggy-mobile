@@ -2715,6 +2715,33 @@
       "youMightLike": "You might like",
       "seeAll": "See all",
       "seeAllAccessibility": "See all listings from {{seller}}"
+    },
+    "like": {
+      "like": "Like",
+      "unlike": "Unlike",
+      "likeFailed": "Couldn't like this item — check your connection and try again.",
+      "unlikeFailed": "Couldn't unlike this item — check your connection and try again."
+    },
+    "share": {
+      "share": "Share",
+      "title": "Share this item",
+      "sendToFriend": "Send to a friend",
+      "shareLink": "Share link",
+      "pickerTitle": "Send to a friend",
+      "pickerSubtitle": "They'll get it as a private message.",
+      "sentTo": "Sent to {{name}}",
+      "sendFailed": "Couldn't send this item",
+      "sharedItem": "Shared item"
+    },
+    "liked": {
+      "title": "Liked items",
+      "openAccessibility": "Open my liked items",
+      "back": "Back to Market",
+      "empty": "Items you like will show up here. Tap the heart on any product to save it.",
+      "loading": "Loading your liked items…",
+      "loadFailed": "Couldn't load your liked items — pull down to try again.",
+      "signedOut": "Sign in with Nostr to see the items you have liked.",
+      "signIn": "Sign in"
     }
   },
   "dmProtocol": {

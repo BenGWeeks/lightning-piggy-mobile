@@ -71,6 +71,38 @@ describe('buildReactionEvent', () => {
     const ev = buildReactionEvent('❤️', TARGET_1, PK_A);
     expect(ev.tags.find((t) => t[0] === 'k')).toBeUndefined();
   });
+
+  it('targets an addressable listing with a/e/p/k tags and relay hints (#1541)', () => {
+    const coordinate = `30402:${PK_A}:widget`;
+    const ev = buildReactionEvent('+', TARGET_1, PK_A, 30402, {
+      coordinate,
+      relayHint: 'wss://relay.example',
+    });
+    expect(ev.kind).toBe(7);
+    expect(ev.content).toBe('+');
+    expect(ev.tags).toEqual([
+      ['e', TARGET_1, 'wss://relay.example'],
+      ['p', PK_A],
+      ['a', coordinate, 'wss://relay.example'],
+      ['k', '30402'],
+    ]);
+  });
+
+  it('omits relay hints when none is given', () => {
+    const coordinate = `30402:${PK_A}:widget`;
+    const ev = buildReactionEvent('+', TARGET_1, PK_A, 30402, { coordinate });
+    expect(ev.tags).toEqual([
+      ['e', TARGET_1],
+      ['p', PK_A],
+      ['a', coordinate],
+      ['k', '30402'],
+    ]);
+  });
+
+  it('never adds an a tag for a plain (DM / note) target', () => {
+    const ev = buildReactionEvent('👍', TARGET_1, PK_A, 14);
+    expect(ev.tags.find((t) => t[0] === 'a')).toBeUndefined();
+  });
 });
 
 describe('buildReactionDeletionEvent', () => {

@@ -2715,6 +2715,33 @@
       "youMightLike": "Ez is tetszhet",
       "seeAll": "Összes",
       "seeAllAccessibility": "{{seller}} összes hirdetésének megtekintése"
+    },
+    "like": {
+      "like": "Tetszik",
+      "unlike": "Mégsem tetszik",
+      "likeFailed": "Nem sikerült kedvelni ezt a terméket – ellenőrizd a kapcsolatot, és próbáld újra.",
+      "unlikeFailed": "Nem sikerült visszavonni a kedvelést – ellenőrizd a kapcsolatot, és próbáld újra."
+    },
+    "share": {
+      "share": "Megosztás",
+      "title": "Termék megosztása",
+      "sendToFriend": "Küldés egy barátnak",
+      "shareLink": "Hivatkozás megosztása",
+      "pickerTitle": "Küldés egy barátnak",
+      "pickerSubtitle": "Privát üzenetként kapja meg.",
+      "sentTo": "Elküldve neki: {{name}}",
+      "sendFailed": "Nem sikerült elküldeni ezt a terméket",
+      "sharedItem": "Megosztott termék"
+    },
+    "liked": {
+      "title": "Kedvelt termékek",
+      "openAccessibility": "Kedvelt termékeim megnyitása",
+      "back": "Vissza a piacra",
+      "empty": "A kedvelt termékeid itt jelennek meg. Koppints bármelyik termék szívére a mentéshez.",
+      "loading": "Kedvelt termékeid betöltése…",
+      "loadFailed": "Nem sikerült betölteni a kedvelt termékeidet – húzd le az újrapróbáláshoz.",
+      "signedOut": "Jelentkezz be Nostrral a kedvelt termékeid megtekintéséhez.",
+      "signIn": "Bejelentkezés"
     }
   },
   "dmProtocol": {

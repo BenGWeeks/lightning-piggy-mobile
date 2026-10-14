@@ -28,6 +28,8 @@ import {
 } from '../utils/messageContent';
 import type { PollTally } from '../utils/nip88Poll';
 import MessageFileBubble from './MessageFileBubble';
+import MessageSharedListing from './MessageSharedListing';
+import { extractSharedListing } from '../utils/listingShare';
 import { useSharedContactAvatar } from '../hooks/useSharedContactAvatar';
 import { type DeliveryStatus } from '../utils/dmDeliveryStatus';
 import { resendPayloadFor } from '../utils/messageInfo';
@@ -785,6 +787,29 @@ const MessageBubble: React.FC<Props> = ({
               id={id}
             />
           )}
+          {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
+        </Pressable>
+      </View>,
+    );
+  }
+
+  // A Market listing shared as `nostr:naddr1…` (#1541) renders as its product card.
+  const sharedListing = extractSharedListing(text);
+  if (sharedListing) {
+    return wrapWithReactionRow(
+      <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
+        <Pressable
+          onLongPress={onLongPress}
+          delayLongPress={350}
+          style={[styles.contactCard, fromMe ? styles.contactCardMe : styles.contactCardThem]}
+          testID={`${testIdPrefix}-listing-${id}`}
+        >
+          <OutgoingBubbleBackground fromMe={fromMe} />
+          {BubbleHeader}
+          <Text style={[styles.contactLabel, fromMe && styles.contactLabelMe]}>
+            {t('market.share.sharedItem')}
+          </Text>
+          <MessageSharedListing token={sharedListing} />
           {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
         </Pressable>
       </View>,

@@ -87,6 +87,7 @@ const MarketShopCollectionsScreen = lazyScreen(
 );
 const MarketShopListingsScreen = lazyScreen(() => import('../screens/MarketShopListingsScreen'));
 const MarketShopOrdersScreen = lazyScreen(() => import('../screens/MarketShopOrdersScreen'));
+const MarketLikedItemsScreen = lazyScreen(() => import('../screens/MarketLikedItemsScreen'));
 const MarketListingEditorScreen = lazyScreen(() => import('../screens/MarketListingEditorScreen'));
 const HuntScreen = lazyScreen(() => import('../screens/HuntScreen'));
 const HuntCreateScreen = lazyScreen(() => import('../screens/HuntCreateScreen'));
@@ -461,6 +462,7 @@ function ExploreStackNavigator() {
       <ExploreStack.Screen name="MarketShopCollections" component={MarketShopCollectionsScreen} />
       <ExploreStack.Screen name="MarketShopListings" component={MarketShopListingsScreen} />
       <ExploreStack.Screen name="MarketShopOrders" component={MarketShopOrdersScreen} />
+      <ExploreStack.Screen name="MarketLikedItems" component={MarketLikedItemsScreen} />
       <ExploreStack.Screen name="MarketListingEditor" component={MarketListingEditorScreen} />
       <ExploreStack.Screen name="Hunt" component={HuntScreen} />
       <ExploreStack.Screen name="HuntCreate" component={HuntCreateScreen} />
