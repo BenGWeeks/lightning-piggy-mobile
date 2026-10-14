@@ -11,9 +11,10 @@
 // `getGroupMembers` returns distinct credential pubkeys, and marmot-ts binds
 // every app event's `pubkey` to its sender leaf's account.
 //
-// Only the PEER's devices: our own other installs are never added here (that
-// would be device linking, MIP-06 — not specified yet). One exception for
-// 1:1s with White Noise users — see devicesForDm.
+// Only the PEER's devices: our own other installs are never invited into a
+// new chat. One exception for 1:1s with White Noise users — see devicesForDm.
+// The peer's devices installed after a 1:1 began are added later by
+// marmotDmDeviceSync (#1559), through inviteDevices' `partial` mode.
 
 import {
   createInviteIntent,
@@ -56,9 +57,9 @@ export const MAX_DEVICES_PER_PERSON = 10;
 /** Per-relay cap on a peer's key-package query (newest per slot is kept). */
 const KEY_PACKAGE_QUERY_LIMIT = 50;
 const WHITE_NOISE_CLIENT = /white\s*noise/i;
-const isWhiteNoise = (e: NostrEvent) =>
+export const isWhiteNoise = (e: Pick<NostrEvent, 'tags'>) =>
   e.tags.some((t) => t[0] === 'client' && WHITE_NOISE_CLIENT.test(t[1] ?? ''));
-const maxAgeFor = (e: NostrEvent) =>
+const maxAgeFor = (e: Pick<NostrEvent, 'tags'>) =>
   isWhiteNoise(e) ? WHITE_NOISE_MAX_AGE_SECS : DEVICE_MAX_AGE_SECS;
 
 type CommitIntent = ReturnType<typeof createInviteIntent>;
@@ -113,12 +114,14 @@ function isValidDeviceKeyPackage(e: NostrEvent, peer: string, nowSecs: number): 
  * a contact whose only install is old or quiet must stay reachable. The per-person cap is applied once each key
  * is checked against the group (buildInviteBatch), so a rejected one makes
  * room for the next. Returns [] when they published none (or only retired
- * slots); throws when none is usable.
+ * slots); throws when none is usable. `freshOnly` (topping up an existing
+ * chat, #1559) drops the stale fallback and never throws: only devices
+ * refreshed within their window, possibly none.
  */
 export async function selectDeviceKeyPackages(
   peer: string,
   events: NostrEvent[],
-  opts: { nowSecs?: number; yieldNow?: Yield } = {},
+  opts: { nowSecs?: number; yieldNow?: Yield; freshOnly?: boolean } = {},
 ): Promise<NostrEvent[]> {
   const p = peer.toLowerCase();
   const nowSecs = opts.nowSecs ?? Math.floor(Date.now() / 1000);
@@ -132,7 +135,7 @@ export async function selectDeviceKeyPackages(
     if (isValidDeviceKeyPackage(e, p, nowSecs)) valid.push(e);
   }
   if (valid.length === 0) {
-    if (candidates.length > 0) throw new MarmotUnusableKeyPackageError(peer);
+    if (candidates.length > 0 && !opts.freshOnly) throw new MarmotUnusableKeyPackageError(peer);
     return [];
   }
   // Compatible = advertises encrypted media v2 (0x800b). White Noise requires
@@ -141,7 +144,7 @@ export async function selectDeviceKeyPackages(
   // group's White Noise users (seen on device with old Marmot test installs).
   const compatible = valid.filter((e) => advertisesMediaV2([e]));
   const fresh = compatible.filter((e) => e.created_at >= nowSecs - maxAgeFor(e));
-  return fresh.length > 0 ? fresh : [compatible[0] ?? valid[0]];
+  return fresh.length > 0 || opts.freshOnly ? fresh : [compatible[0] ?? valid[0]];
 }
 
 export interface InviteBatch {
@@ -149,32 +152,43 @@ export interface InviteBatch {
   intent: CommitIntent | null;
   /** Person → number of their devices in the commit. */
   devices: Map<string, number>;
+  /** The key packages the commit adds. */
+  invited: NostrEvent[];
   /** People none of whose devices can join this group. */
   unreachable: string[];
 }
+
+const ALREADY_MEMBER = 'already a member';
 
 /**
  * Merge every device's Add into one commit. A key package the group can't
  * take (cipher suite, required capabilities, the library's own invite checks)
  * is skipped and logged — the person's other devices still join.
+ * `siblings`: a new device of an account already in the group is welcome
+ * (topping up a chat, #1559 — the caller has checked it isn't a leaf yet).
  */
 export function buildInviteBatch(
   state: MarmotGroup['state'],
   actorPubkey: string,
   devicesByPerson: Map<string, NostrEvent[]>,
+  opts: { siblings?: boolean } = {},
 ): InviteBatch {
   const extraProposals: NonNullable<CommitIntent['extraProposals']> = [];
   const welcomeRecipients: NonNullable<CommitIntent['welcomeRecipients']> = [];
   const devices = new Map<string, number>();
+  const invited: NostrEvent[] = [];
   const unreachable: string[] = [];
   for (const [person, keyPackages] of devicesByPerson) {
     let added = 0;
     for (const kp of keyPackages) {
       if (added >= MAX_DEVICES_PER_PERSON) break;
       const verdict = evaluateKeyPackageForGroup(state, kp);
-      if (!verdict.eligible) {
+      const reasons = opts.siblings
+        ? verdict.reasons.filter((r) => r !== ALREADY_MEMBER)
+        : verdict.reasons;
+      if (reasons.length > 0) {
         if (__DEV__) {
-          console.warn(`[Marmot] skipping key package ${kp.id.slice(0, 12)}:`, verdict.reasons);
+          console.warn(`[Marmot] skipping key package ${kp.id.slice(0, 12)}:`, reasons);
         }
         continue;
       }
@@ -182,6 +196,7 @@ export function buildInviteBatch(
         const intent = createInviteIntent({ keyPackageEvent: kp, actorPubkey });
         extraProposals.push(...(intent.extraProposals ?? []));
         welcomeRecipients.push(...(intent.welcomeRecipients ?? []));
+        invited.push(kp);
         added++;
       } catch (e) {
         if (__DEV__) console.warn(`[Marmot] skipping key package ${kp.id.slice(0, 12)}:`, e);
@@ -196,6 +211,7 @@ export function buildInviteBatch(
         ? { kind: 'commit', actorPubkey, extraProposals, welcomeRecipients }
         : null,
     devices,
+    invited,
     unreachable,
   };
 }
@@ -278,6 +294,8 @@ export async function resolveInvitees(
 export interface InviteResult {
   /** People none of whose devices got their Welcome yet (queued for retry). */
   undelivered: string[];
+  /** The key packages the commit added. */
+  invited: NostrEvent[];
 }
 
 /**
@@ -285,7 +303,8 @@ export interface InviteResult {
  * Welcome no relay accepted is republished once straight away and then kept
  * in the outbox for retry — no second Add commit, no new signer prompt.
  * `onProgress` ticks as each device's Welcome is sent (with Amber / NIP-46
- * each one is an approval).
+ * each one is an approval). `partial` (topping up an existing chat, #1559)
+ * adds whoever can be added instead of failing over one unusable device.
  */
 export async function inviteDevices(
   groups: Pick<MarmotClient['groups'], 'get' | 'send'>,
@@ -294,10 +313,12 @@ export async function inviteDevices(
   actorPubkey: string,
   devices: Map<string, NostrEvent[]>,
   onProgress?: (done: number, total: number) => void,
+  opts: { partial?: boolean } = {},
 ): Promise<InviteResult> {
   const group = await groups.get(mlsId);
-  const batch = buildInviteBatch(group.state, actorPubkey, devices);
-  if (batch.unreachable.length > 0 || !batch.intent) {
+  const batch = buildInviteBatch(group.state, actorPubkey, devices, { siblings: opts.partial });
+  if (opts.partial && !batch.intent) return { undelivered: [], invited: [] };
+  if ((batch.unreachable.length > 0 && !opts.partial) || !batch.intent) {
     throw new MarmotUnusableKeyPackageError(batch.unreachable[0] ?? '');
   }
   const intent = batch.intent;
@@ -312,7 +333,7 @@ export async function inviteDevices(
   const stillFailed = failed.length > 0 ? await outbox.resend(failed) : [];
   for (const w of failed) if (!stillFailed.includes(w)) delivered.add(w.recipient);
   if (stillFailed.length > 0) await outbox.enqueue(mlsId, stillFailed);
-  const undelivered = [...devices.keys()].filter((p) => !delivered.has(p));
+  const undelivered = [...batch.devices.keys()].filter((p) => !delivered.has(p));
   if (__DEV__) {
     const counts = [...batch.devices].map(([p, n]) => `${p.slice(0, 8)}×${n}`).join(', ');
     console.log(
@@ -320,5 +341,5 @@ export async function inviteDevices(
         (undelivered.length > 0 ? `; ${undelivered.length} not reached yet` : ''),
     );
   }
-  return { undelivered };
+  return { undelivered, invited: batch.invited };
 }

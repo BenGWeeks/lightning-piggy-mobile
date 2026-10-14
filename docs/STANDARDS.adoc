@@ -226,7 +226,7 @@ Status against the https://github.com/marmot-protocol/marmot/blob/master/mip-cov
 
 | MIP-06
 | Multi-device (being redesigned upstream)
-| Partial: an invite adds all of a contact's fresh devices in one commit (`marmotInvitees`). No device linking of your own installs
+| Partial: an invite adds all of a contact's fresh devices in one commit (`marmotInvitees`); an existing 1:1 later adds devices the contact installed since, from their published key packages (`marmotDmDeviceSync`, #1559). No device linking or pairing
 |===
 
 See `PROTOCOLS.adoc` → "Marmot (MLS over Nostr)" for the event kinds.

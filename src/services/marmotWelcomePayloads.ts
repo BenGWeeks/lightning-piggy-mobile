@@ -1,0 +1,147 @@
+// Preserve the Welcome before the remote signer can fail. The Add is already
+// canonical: retry this rumor, never another Add or a refreshed key package.
+import type { MarmotGroup, NostrWelcomeDelivery } from '@internet-privacy/marmot-ts';
+import { GiftWrapFactory } from 'applesauce-common/factories/gift-wrap';
+import type { Rumor } from 'applesauce-common/helpers/gift-wrap';
+import type { Event as NostrEvent } from 'nostr-tools';
+
+import type { MarmotDmDeviceSync } from './marmotDmDeviceSync';
+import type { MarmotKvBackend } from './marmotStore';
+import { WELCOME_OUTBOX_TTL_SECS, type MarmotWelcomeOutbox } from './marmotWelcomeOutbox';
+
+const NS = 'welcomePayloads';
+/** Cap on stored Welcomes awaiting a signature; the oldest go first. */
+export const MAX_PENDING_WELCOME_PAYLOADS = 50;
+type PendingPayload = {
+  groupId: string;
+  rumor: Rumor;
+  keyPackage: NostrEvent;
+  relays: string[];
+  queuedAt: number;
+};
+
+export class MarmotWelcomePayloads {
+  private readonly deliveries = new Map<string, NostrWelcomeDelivery>();
+  private readonly running = new Map<string, ReturnType<NostrWelcomeDelivery['deliver']>>();
+
+  constructor(
+    private readonly backend: MarmotKvBackend,
+    private readonly outbox: MarmotWelcomeOutbox,
+    private readonly devices: MarmotDmDeviceSync,
+    private readonly stopped: () => boolean,
+  ) {}
+
+  attach(group: Pick<MarmotGroup, 'idStr' | 'runtime'>): void {
+    const delivery = group.runtime.welcomeDelivery;
+    this.deliveries.set(group.idStr, delivery);
+    delivery.deliver = async (options) => {
+      const item: PendingPayload = {
+        groupId: group.idStr,
+        rumor: delivery.createRumor(options),
+        keyPackage: options.recipient.keyPackageEvent,
+        relays: options.groupRelays,
+        queuedAt: Math.floor(Date.now() / 1000),
+      };
+      // Persist before signing/encryption, including before a session stop.
+      await this.prune();
+      await this.backend.set(NS, this.id(item), JSON.stringify(item));
+      return this.send(item, delivery);
+    };
+  }
+
+  /** Drop expired / unreadable entries and make room for one more. */
+  private async prune(): Promise<void> {
+    const now = Math.floor(Date.now() / 1000);
+    const live: { id: string; queuedAt: number }[] = [];
+    for (const id of await this.backend.keys(NS)) {
+      const raw = await this.backend.get(NS, id);
+      let queuedAt: number | undefined;
+      try {
+        queuedAt = raw ? (JSON.parse(raw) as PendingPayload).queuedAt : undefined;
+      } catch {
+        queuedAt = undefined;
+      }
+      if (typeof queuedAt !== 'number' || now - queuedAt > WELCOME_OUTBOX_TTL_SECS) {
+        await this.backend.remove(NS, id);
+      } else {
+        live.push({ id, queuedAt });
+      }
+    }
+    live.sort((a, b) => a.queuedAt - b.queuedAt);
+    for (const entry of live.slice(
+      0,
+      Math.max(0, live.length - MAX_PENDING_WELCOME_PAYLOADS + 1),
+    )) {
+      await this.backend.remove(NS, entry.id);
+    }
+  }
+
+  private id(item: PendingPayload): string {
+    return `${item.groupId}:${item.keyPackage.id}`;
+  }
+
+  private send(item: PendingPayload, delivery: NostrWelcomeDelivery) {
+    const id = this.id(item);
+    const existing = this.running.get(id);
+    if (existing) return existing;
+    const run = this.deliver(item, delivery).finally(() => this.running.delete(id));
+    this.running.set(id, run);
+    return run;
+  }
+
+  private async deliver(item: PendingPayload, delivery: NostrWelcomeDelivery) {
+    if (this.stopped()) throw new Error('Marmot session stopped');
+    const signer = this.devices.observeSigner(delivery.signer, item.groupId, [item.keyPackage]);
+    const event = await GiftWrapFactory.create(signer, item.keyPackage.pubkey, item.rumor);
+    let relays = await delivery.network
+      .getUserInboxRelays(item.keyPackage.pubkey)
+      .catch(() => item.relays);
+    if (relays.length === 0) relays = item.relays;
+    // Promote to the signed outbox before publishing: further retries need
+    // no approval, and a thrown publish cannot lose the invitation either.
+    await this.outbox.enqueue(item.groupId, [{ event, relays, recipient: item.keyPackage.pubkey }]);
+    await this.backend.remove(NS, this.id(item));
+    if (this.stopped()) throw new Error('Marmot session stopped');
+    const response = await delivery.network.publish(relays, event);
+    if (Object.values(response).some((r) => r.ok)) await this.outbox.remove(event.id);
+    return response;
+  }
+
+  async drop(groupId: string): Promise<void> {
+    this.deliveries.delete(groupId);
+    for (const id of await this.backend.keys(NS)) {
+      if (id.startsWith(`${groupId}:`)) await this.backend.remove(NS, id);
+    }
+  }
+
+  /** Remote signers call this only on send; local signers also retry on start/open. */
+  async flush(groupId?: string): Promise<void> {
+    for (const id of await this.backend.keys(NS)) {
+      if (this.stopped()) return;
+      // Check persisted state only once this capture owns the queue: an earlier
+      // retry may have delivered the payload or recorded a signer refusal.
+      await this.outbox
+        .capture(async () => {
+          if (this.stopped()) return;
+          const raw = await this.backend.get(NS, id);
+          if (!raw) return;
+          let item: PendingPayload;
+          try {
+            item = JSON.parse(raw) as PendingPayload;
+          } catch {
+            await this.backend.remove(NS, id);
+            return;
+          }
+          if (Math.floor(Date.now() / 1000) - item.queuedAt > WELCOME_OUTBOX_TTL_SECS) {
+            await this.backend.remove(NS, id);
+            return;
+          }
+          if (groupId && item.groupId !== groupId) return;
+          if (this.devices.isDeclined(item.groupId, item.keyPackage.id)) return;
+          const delivery = this.deliveries.get(item.groupId);
+          if (delivery) return this.send(item, delivery);
+        })
+        .catch(() => undefined);
+    }
+  }
+}

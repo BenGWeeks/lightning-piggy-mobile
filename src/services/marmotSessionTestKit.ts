@@ -15,6 +15,7 @@ import type { MarmotClient } from '@internet-privacy/marmot-ts';
 import {
   MarmotSession,
   toAppGroupId,
+  type MarmotSessionOptions,
   type MarmotMessageEvent,
   type MarmotRumor,
 } from './marmotSession';
@@ -110,6 +111,7 @@ export function makeSession(
   relay: ReturnType<typeof makeRelay>,
   pageSize?: number,
   signerType: 'nsec' | 'amber' = 'nsec',
+  extra: Partial<MarmotSessionOptions> = {},
 ) {
   const who = makeSigner();
   const inbox: MarmotMessageEvent[] = [];
@@ -123,6 +125,7 @@ export function makeSession(
     getWriteRelays: () => [RELAY],
     getLookupRelays: () => [RELAY],
     groupBackfillPageSize: pageSize,
+    ...extra,
   });
   session.subscribe({ onMessage: (m) => inbox.push(m) });
   return { ...who, session, inbox, backend };
@@ -132,6 +135,7 @@ export function makeSession(
 export function makeInstall(
   relay: ReturnType<typeof makeRelay>,
   who: ReturnType<typeof makeSigner>,
+  extra: Partial<MarmotSessionOptions> = {},
 ) {
   const inbox: MarmotMessageEvent[] = [];
   const backend = createMemoryMarmotBackend();
@@ -143,6 +147,7 @@ export function makeInstall(
     backend,
     getWriteRelays: () => [RELAY],
     getLookupRelays: () => [RELAY],
+    ...extra,
   });
   session.subscribe({ onMessage: (m) => inbox.push(m) });
   return { ...who, session, inbox, backend };

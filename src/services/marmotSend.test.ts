@@ -23,6 +23,7 @@ function fakeSession(overrides: Partial<MarmotSession> = {}) {
     pubkey: ME,
     stop: () => undefined,
     getOrCreateDm: async () => ({ id: 'marmot:dm', relays: ['wss://r1', 'wss://r2'] }),
+    syncDmDevices: async () => undefined,
     sendRumor: async (groupId: string, rumor: (typeof sent)[number]['rumor']) => {
       sent.push({ groupId, rumor });
       return { 'wss://r1': true, 'wss://r2': false };
@@ -135,6 +136,17 @@ describe('sendMarmotDm', () => {
       error: expect.stringMatching(/expired, or uses an older version of Marmot/),
       marmotUnreachable: 'outdatedKeyPackage',
     });
+  });
+
+  it('still sends to the current members when adding new devices fails (#1559)', async () => {
+    const syncDmDevices = jest.fn(async () => {
+      throw new Error('relay down');
+    });
+    const sent = fakeSession({ syncDmDevices });
+    const result = await sendMarmotDm(ME, PEER, { kind: 14, content: 'hi' });
+    expect(syncDmDevices).toHaveBeenCalledWith('marmot:dm');
+    expect(result.success).toBe(true);
+    expect(sent).toHaveLength(1);
   });
 
   it('fails cleanly before the session has started', async () => {

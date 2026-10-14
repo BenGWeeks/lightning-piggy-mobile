@@ -100,6 +100,8 @@ export async function sendMarmotDm(
   try {
     const session = requireMarmotSession(pubkey);
     const dm = await session.getOrCreateDm(recipient);
+    // Devices the peer installed since the chat began (#1559): short wait.
+    await session.syncDmDevices(dm.id).catch(() => undefined);
     const rumor = buildMarmotRumor(pubkey, {
       kind: marmotKindForAppKind(draft.kind),
       content: draft.content,
@@ -196,6 +198,8 @@ export async function sendMarmotImage(
         ? await session.getOrCreateDm(target.peer)
         : session.getGroup(target.groupId);
     if (!group) throw new Error('This group is not available yet.');
+    // Before encrypting: a device added now needs this epoch's key (#1559).
+    if ('peer' in target) await session.syncDmDevices(group.id).catch(() => undefined);
     const plaintext = new Uint8Array(Buffer.from(image.base64, 'base64'));
     const filename =
       image.filename ?? `photo.${image.mime.split('/')[1]?.replace('jpeg', 'jpg') || 'jpg'}`;

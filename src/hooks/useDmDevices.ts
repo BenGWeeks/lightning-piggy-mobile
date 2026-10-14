@@ -4,6 +4,7 @@ import { useTranslation } from '../contexts/LocaleContext';
 import type { MessageDevicesSource } from '../components/MessageDeviceRows';
 import type { DmProtocol } from '../utils/dmProtocol';
 import { useMarmotChatDevices, useMarmotDeviceNotices } from './useMarmotDevices';
+import { useMarmotDmDeviceSync } from './useMarmotDmDeviceSync';
 
 /**
  * Everything a 1:1 thread needs for a person's devices (#1267), so the
@@ -29,6 +30,8 @@ export function useDmDevices({
     myPubkey,
   );
   const notices = useMarmotDeviceNotices(chatId);
+  // Invite devices installed since the chat began (#1559).
+  useMarmotDmDeviceSync(protocol === 'marmot' ? peer : null, myPubkey);
   const [sheetOpen, setSheetOpen] = useState(false);
   const openSheet = useCallback(() => setSheetOpen(true), []);
   const closeSheet = useCallback(() => setSheetOpen(false), []);
