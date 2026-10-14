@@ -1316,7 +1316,8 @@
     "fileVerificationFailed": "文件验证失败",
     "fileTypeMismatch": "文件名与声明的类型不符：{{type}}",
     "blockedLink": "已阻止的链接",
-    "invalidUpload": "存储服务器返回了无效的媒体链接。请尝试其他服务器。"
+    "invalidUpload": "存储服务器返回了无效的媒体链接。请尝试其他服务器。",
+    "uploadFailedAllServers": "无法上传到任何存储服务器。请检查网络连接后重试，或在设置中添加其他存储服务器。"
   },
   "messageBubbleFooter": {
     "edited": "已编辑",

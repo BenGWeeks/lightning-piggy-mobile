@@ -1,7 +1,9 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import {
+  BlossomUploadFailedError,
   ENCRYPTED_BLOB_FALLBACK_SERVERS,
+  blossomBlobUrl,
   uploadEncryptedBlobToBlossom,
   uploadToBlossomServers,
   type BlossomSigner,
@@ -102,11 +104,18 @@ it("doesn't let a failing backup affect the upload", async () => {
   ).resolves.toBe(`https://a.example/${HASH}`);
 });
 
-it('throws the last error when every server rejects the upload', async () => {
+it('throws a branded error, keeping the last cause, when every server rejects the upload', async () => {
   respond = () => ({ status: 413, responseText: 'too big' });
-  await expect(
-    uploadToBlossomServers('file.jpg', ['https://a.example', 'https://b.example'], signer, B64),
-  ).rejects.toThrow('Blossom upload failed: 413 too big');
+  const error = await uploadToBlossomServers(
+    'file.jpg',
+    ['https://a.example', 'https://b.example'],
+    signer,
+    B64,
+  ).catch((e: unknown) => e);
+  expect(error).toBeInstanceOf(BlossomUploadFailedError);
+  expect((error as Error).message).toMatch("Couldn't upload to any storage server");
+  expect(((error as Error).cause as Error).message).toBe('Blossom upload failed: 413 too big');
+  expect(calls.map((c) => c.url)).toEqual(['https://a.example/upload', 'https://b.example/upload']);
 });
 
 it('times out an unresponsive primary and fails over to the next server', async () => {
@@ -168,21 +177,70 @@ describe('uploadEncryptedBlobToBlossom', () => {
   });
 });
 
+describe('blossomBlobUrl (descriptor rule, #1508 / #1558)', () => {
+  it.each([
+    `https://a.example/${HASH}`,
+    `https://a.example/${HASH}.jpg`,
+    `https://a.example/media/${HASH}.bin`,
+    // BUD-02: a server may serve its blobs from another host (its CDN).
+    `https://cdn.divine.video/${HASH}`,
+    `https://cdn.divine.video/${HASH}.bin`,
+  ])('accepts %s', (url) => {
+    expect(blossomBlobUrl(url, HASH)).toBe(url);
+  });
+
+  it.each([
+    ['plain http', `http://a.example/${HASH}`],
+    ['userinfo', `https://user@a.example/${HASH}`],
+    ['loopback IP', `https://127.0.0.1/${HASH}`],
+    ['private IP', `https://192.168.1.10/${HASH}`],
+    ['localhost', `https://localhost/${HASH}`],
+    ['non-default port', `https://a.example:8443/${HASH}`],
+    ['no hash', 'https://a.example/wrong'],
+    ['a different hash', `https://cdn.divine.video/${'0'.repeat(64)}`],
+    ['hash with a suffix', `https://a.example/${HASH}extra`],
+    ['hash not the last segment', `https://a.example/${HASH}/other`],
+    ['hash only in the query', `https://a.example/?x=${HASH}`],
+    ['upper-case hash', `https://a.example/${HASH.toUpperCase()}`],
+    ['not a string', 42],
+  ])('rejects %s', (_label, url) => {
+    expect(blossomBlobUrl(url, HASH)).toBeNull();
+  });
+
+  it('rejects a descriptor whose declared sha256 disagrees with the bytes we sent', () => {
+    expect(blossomBlobUrl(`https://a.example/${HASH}`, HASH, '0'.repeat(64))).toBeNull();
+    expect(blossomBlobUrl(`https://a.example/${HASH}`, HASH, HASH.toUpperCase())).toBe(
+      `https://a.example/${HASH}`,
+    );
+  });
+});
+
 it.each([
   'http://a.example/' + HASH,
-  'https://b.example/' + HASH,
   'https://user@a.example/' + HASH,
   'https://127.0.0.1/' + HASH,
   'https://a.example:8443/' + HASH,
   'https://a.example/wrong',
   'https://a.example/' + HASH + 'extra',
-])('rejects invalid descriptors without mirroring or falling back: %s', async (url) => {
-  respond = () => ({ status: 200, responseText: JSON.stringify({ url }) });
+  `https://cdn.example/${'0'.repeat(64)}`,
+])('skips a server with an invalid descriptor and uses the next one: %s', async (bad) => {
+  respond = (url) =>
+    url.startsWith('https://a.example')
+      ? { status: 200, responseText: JSON.stringify({ url: bad }) }
+      : ok(url);
   await expect(
-    uploadEncryptedBlobToBlossom('f', ['https://a.example', 'https://b.example'], signer, B64),
-  ).rejects.toThrow('invalid media URL');
-  expect(calls.map((c) => c.url)).toEqual(['https://a.example/upload']);
+    uploadToBlossomServers('f', ['https://a.example', 'https://b.example'], signer, B64),
+  ).resolves.toBe(`https://b.example/${HASH}`);
+  await flush();
+  // The rejected URL is never mirrored; the next server's blob is.
+  expect(calls.map((c) => c.url)).toEqual([
+    'https://a.example/upload',
+    'https://b.example/upload',
+    'https://a.example/mirror',
+  ]);
+  expect(JSON.parse(calls[2].body as string)).toEqual({ url: `https://b.example/${HASH}` });
 });
+
 it('accepts the expected hash with a file extension', async () => {
   respond = () => ({
     status: 200,
@@ -192,6 +250,102 @@ it('accepts the expected hash with a file extension', async () => {
     `https://a.example/${HASH}.jpg`,
   );
 });
+
+describe('encrypted uploads across fallbacks (#1558)', () => {
+  const refuse = { status: 415, responseText: 'unsupported media type application/octet-stream' };
+  const [divine, ditto, hzrd] = ENCRYPTED_BLOB_FALLBACK_SERVERS;
+
+  it('accepts a CDN descriptor on another host when the hash matches', async () => {
+    respond = (url) =>
+      url.startsWith('https://blossom.primal.net')
+        ? refuse
+        : url.startsWith(divine)
+          ? {
+              status: 200,
+              responseText: JSON.stringify({ url: `https://cdn.divine.video/${HASH}` }),
+            }
+          : ok(url);
+    await expect(
+      uploadEncryptedBlobToBlossom('f', ['https://blossom.primal.net'], signer, B64),
+    ).resolves.toBe(`https://cdn.divine.video/${HASH}`);
+    await flush();
+  });
+
+  it('moves on to the next fallback when one returns a wrong-hash descriptor', async () => {
+    respond = (url) =>
+      url.startsWith('https://blossom.primal.net')
+        ? refuse
+        : url.startsWith(divine)
+          ? {
+              status: 200,
+              responseText: JSON.stringify({ url: `https://cdn.divine.video/${'0'.repeat(64)}` }),
+            }
+          : ok(url);
+    await expect(
+      uploadEncryptedBlobToBlossom('f', ['https://blossom.primal.net'], signer, B64),
+    ).resolves.toBe(`${ditto}/${HASH}`);
+    await flush();
+    expect(calls.slice(0, 3).map((c) => c.url)).toEqual([
+      'https://blossom.primal.net/upload',
+      `${divine}/upload`,
+      `${ditto}/upload`,
+    ]);
+  });
+
+  it("falls back when the user's own server returns an invalid descriptor", async () => {
+    respond = (url) =>
+      url.startsWith('https://mine.example')
+        ? { status: 200, responseText: JSON.stringify({ url: 'https://127.0.0.1/' + HASH }) }
+        : ok(url);
+    await expect(
+      uploadEncryptedBlobToBlossom('f', ['https://mine.example'], signer, B64),
+    ).resolves.toBe(`${divine}/${HASH}`);
+    await flush();
+  });
+
+  it('throws the branded error only after every server has failed', async () => {
+    respond = (url) =>
+      url.startsWith(hzrd)
+        ? {
+            status: 200,
+            responseText: JSON.stringify({ url: `http://${new URL(hzrd).host}/${HASH}` }),
+          }
+        : refuse;
+    const error = await uploadEncryptedBlobToBlossom(
+      'f',
+      ['https://blossom.primal.net'],
+      signer,
+      B64,
+    ).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(BlossomUploadFailedError);
+    expect(calls.map((c) => c.url)).toEqual([
+      'https://blossom.primal.net/upload',
+      `${divine}/upload`,
+      `${ditto}/upload`,
+      `${hzrd}/upload`,
+    ]);
+  });
+
+  it("doesn't fall back (or re-prompt the signer) when signing is declined", async () => {
+    respond = (url) => ok(url);
+    const declining: BlossomSigner = jest.fn(async () => null);
+    await expect(
+      uploadEncryptedBlobToBlossom('f', ['https://mine.example'], declining, B64),
+    ).rejects.toThrow('Could not sign upload authorization');
+    expect(declining).toHaveBeenCalledTimes(1);
+    expect(calls).toEqual([]);
+  });
+
+  it('skips a blocked user server and uses the fallbacks without contacting it', async () => {
+    respond = (url) => ok(url);
+    await expect(
+      uploadEncryptedBlobToBlossom('f', ['https://192.168.1.10'], signer, B64),
+    ).resolves.toBe(`${divine}/${HASH}`);
+    await flush();
+    expect(calls.some((c) => c.url.includes('192.168.1.10'))).toBe(false);
+  });
+});
+
 it('never uploads to a blocked Blossom server', async () => {
   await expect(uploadToBlossomServers('f', ['https://127.0.0.1'], signer, B64)).rejects.toThrow();
   expect(calls).toEqual([]);

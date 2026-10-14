@@ -1316,7 +1316,8 @@
     "fileVerificationFailed": "El archivo no superó la verificación",
     "fileTypeMismatch": "El nombre del archivo no coincide con el tipo declarado: {{type}}",
     "blockedLink": "Enlace bloqueado",
-    "invalidUpload": "El servidor de almacenamiento devolvió una URL de contenido no válida. Prueba otro servidor."
+    "invalidUpload": "El servidor de almacenamiento devolvió una URL de contenido no válida. Prueba otro servidor.",
+    "uploadFailedAllServers": "No se pudo subir a ningún servidor de almacenamiento. Comprueba tu conexión y vuelve a intentarlo, o añade otro servidor de almacenamiento en Ajustes."
   },
   "messageBubbleFooter": {
     "edited": "Editado",
