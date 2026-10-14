@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { View, FlatList } from 'react-native';
+import { View } from 'react-native';
 import Animated, {
   useAnimatedScrollHandler,
   useSharedValue,
@@ -8,7 +8,7 @@ import Animated, {
 import { WalletState } from '../types/wallet';
 import WalletCard from './WalletCard';
 import AddWalletCard from './AddWalletCard';
-import WalletStripChip from './WalletStripChip';
+import WalletCarouselDots from './WalletCarouselDots';
 import { FiatCurrency } from '../services/fiatService';
 import { useTranslation } from '../contexts/LocaleContext';
 import { perfLog } from '../utils/perfLog';
@@ -18,7 +18,6 @@ import {
   CarouselItem,
   carouselItemKey,
   carouselItemLayout,
-  walletChipLayout,
 } from '../hooks/useWalletCarousel';
 
 let firstRenderLogged = false;
@@ -85,8 +84,8 @@ const WalletCarousel: React.FC<WalletCarouselProps> = ({
     onWalletChange,
     onAddCardActiveChange,
   );
-  const { onChipPress, onScrollBeginDrag, onMomentumScrollEnd } = carousel;
-  // Highlight chips on the UI thread; React and wallet context update only at rest.
+  const { scrollToIndex, onScrollBeginDrag, onMomentumScrollEnd } = carousel;
+  // Highlight dots on the UI thread; React and wallet context update only at rest.
   const scrollIndex = useSharedValue(carousel.initialIndex);
   const scrollHandler = useAnimatedScrollHandler({
     onScroll: (event) => {
@@ -103,9 +102,9 @@ const WalletCarousel: React.FC<WalletCarouselProps> = ({
   });
   const handleAddWallet = useCallback(() => {
     // A user can tap the peeking add card before it becomes the active page.
-    onChipPress(wallets.length);
+    scrollToIndex(wallets.length);
     onAddWallet();
-  }, [onChipPress, wallets.length, onAddWallet]);
+  }, [scrollToIndex, wallets.length, onAddWallet]);
   const renderItem = useCallback(
     ({ item, index }: { item: CarouselItem; index: number }) => (
       <View
@@ -128,18 +127,6 @@ const WalletCarousel: React.FC<WalletCarouselProps> = ({
       </View>
     ),
     [btcPrice, currency, handleAddWallet, onSettingsPress, carousel.currentIndex],
-  );
-  const renderChip = useCallback(
-    ({ item, index }: { item: CarouselItem; index: number }) => (
-      <WalletStripChip
-        item={item}
-        index={index}
-        selected={index === carousel.currentIndex}
-        scrollIndex={scrollIndex}
-        onPress={carousel.onChipPress}
-      />
-    ),
-    [carousel.currentIndex, carousel.onChipPress, scrollIndex],
   );
 
   return (
@@ -167,23 +154,11 @@ const WalletCarousel: React.FC<WalletCarouselProps> = ({
         getItemLayout={carouselItemLayout}
         initialScrollIndex={carousel.initialIndex}
       />
-      {wallets.length > 1 && (
-        <FlatList
-          ref={carousel.stripRef}
-          onLayout={carousel.onStripLayout}
-          testID="wallet-strip"
-          accessibilityLabel={t('tabs.wallets')}
-          accessible={false}
-          data={carousel.data}
-          extraData={carousel.currentIndex}
-          renderItem={renderChip}
-          keyExtractor={carouselItemKey}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.stripContent}
-          getItemLayout={walletChipLayout}
-        />
-      )}
+      <WalletCarouselDots
+        count={carousel.data.length}
+        currentIndex={carousel.currentIndex}
+        scrollIndex={scrollIndex}
+      />
     </View>
   );
 };

@@ -2125,7 +2125,8 @@
     "typeLightning": "Lightning",
     "typeOnchain": "On-chain",
     "owl": "Sowa",
-    "invaders": "Najeźdźcy"
+    "invaders": "Najeźdźcy",
+    "carouselPosition": "Portfel {{current}} z {{total}}"
   },
   "walletCardPicker": {
     "selectedTheme": "Wybrany motyw karty: {{name}}"

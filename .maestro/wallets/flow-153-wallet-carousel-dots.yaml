@@ -1,0 +1,34 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Wallet carousel dots follow the selected card
+---
+# Requires at least two wallets. One dot per page, including the Add-wallet
+# page; the selected dot must match the settled card after each swipe.
+- tapOn: { id: 'tab-wallets' }
+- runFlow:
+    file: ../common/scroll-wallet-carousel.yaml
+    env:
+      PAGE: 0
+      DIRECTION: RIGHT
+- assertVisible: { id: 'wallet-carousel-dots' }
+- assertVisible: { id: 'wallet-carousel-dot-0', text: 'Wallet 1 of .*', selected: true }
+- assertVisible: { id: 'wallet-carousel-dot-1', selected: false }
+- assertVisible: { id: 'wallet-carousel-dot-2' }
+- runFlow:
+    file: ../common/scroll-wallet-carousel.yaml
+    env:
+      PAGE: 1
+      DIRECTION: LEFT
+- assertVisible: { id: 'wallet-carousel-dot-1', text: 'Wallet 2 of .*', selected: true }
+- assertVisible: { id: 'wallet-carousel-dot-0', selected: false }
+# The trailing Add-wallet page owns the last dot.
+- runFlow:
+    file: ../common/scroll-wallet-carousel.yaml
+    env:
+      PAGE: add
+- assertNotVisible: { id: 'wallet-carousel-dot-0', selected: true }
+- runFlow:
+    file: ../common/scroll-wallet-carousel.yaml
+    env:
+      PAGE: 0
+      DIRECTION: RIGHT
+- assertVisible: { id: 'wallet-carousel-dot-0', selected: true }

@@ -2123,7 +2123,8 @@
     "typeLightning": "Lightning",
     "typeOnchain": "ऑन-चेन",
     "owl": "उल्लू",
-    "invaders": "आक्रमणकारी"
+    "invaders": "आक्रमणकारी",
+    "carouselPosition": "वॉलेट {{current}} / {{total}}"
   },
   "walletCardPicker": {
     "selectedTheme": "चुनी गई कार्ड थीम: {{name}}"
