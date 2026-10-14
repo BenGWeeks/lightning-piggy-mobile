@@ -198,8 +198,12 @@ async function runSnapshot(
   for (const event of carried) {
     const d = event.tags.find((t) => t[0] === 'd')?.[1];
     if (!d) continue;
-    const id = marketListingProductId(event.kind, event.pubkey, d);
-    if (isNewerRevision(event, carriedRevisions.get(id) ?? null)) carriedRevisions.set(id, event);
+    try {
+      const id = marketListingProductId(event.kind, event.pubkey, d);
+      if (isNewerRevision(event, carriedRevisions.get(id) ?? null)) carriedRevisions.set(id, event);
+    } catch {
+      // Malformed identifiers cannot name a renderable listing.
+    }
   }
   const noteAuthenticatedListing = (event: Event) => {
     if (!MARKET_LISTING_KINDS.includes(event.kind)) return;
@@ -570,8 +574,14 @@ function carriedWithdrawals(
   const kept = new Set(reduceMarketListings([...carried, ...deletions], scope).map((p) => p.id));
   return carried.flatMap((event) => {
     const d = event.tags.find((t) => t[0] === 'd')?.[1];
-    const id = d ? marketListingProductId(event.kind, event.pubkey, d) : null;
-    return id && !kept.has(id) ? [id] : [];
+    if (!d) return [];
+    try {
+      const id = marketListingProductId(event.kind, event.pubkey, d);
+      return !kept.has(id) ? [id] : [];
+    } catch {
+      // Malformed identifiers cannot name a renderable listing.
+      return [];
+    }
   });
 }
 

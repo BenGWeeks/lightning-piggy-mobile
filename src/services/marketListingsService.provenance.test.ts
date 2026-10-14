@@ -103,6 +103,31 @@ it('looks up deletions for carried-over listings and reports them withdrawn', as
   expect(result.withdrawn).toEqual([`nostr-30402-${author}-mug`]);
 });
 
+it.each(['\ud800', '\udfff'])(
+  'skips a malformed carried identifier %j while refreshing listings and withdrawals',
+  async (d) => {
+    const malformed = listing(d);
+    const book = listing('book');
+    const mug = listing('mug', 90);
+    const deletion = finalizeEvent(
+      { kind: 5, created_at: 300, content: '', tags: [['a', `30402:${author}:mug`]] },
+      key,
+    );
+    relays({ [SHOP]: { listings: [book], deletions: [deletion] } });
+    const result = await fetchMarketListings(
+      [author],
+      [SHOP],
+      new AbortController().signal,
+      undefined,
+      { carried: [malformed, mug] },
+    );
+    expect(result.products.map((p) => p.title)).toEqual(['book']);
+    expect(result.withdrawn).toEqual([`nostr-30402-${author}-mug`]);
+    expect(result.incomplete).toBe(false);
+    expect(result.transportFailed).toBeUndefined();
+  },
+);
+
 it('ignores carried listings outside the current follow scope', async () => {
   const stranger = finalizeEvent(
     { kind: 30402, created_at: 1, content: '', tags: [['d', 'x']] },
