@@ -36,7 +36,7 @@ export const createFriendsScreenStyles = (colors: Palette) =>
       borderRadius: 20,
     },
     chipActive: {
-      backgroundColor: colors.white,
+      backgroundColor: colors.white, // White chip contrasts brand header
     },
     chipText: {
       color: 'rgba(255,255,255,0.8)',

@@ -909,6 +909,15 @@ git tag -a v1.0.0 -m "Release v1.0.0"
 git push origin v1.0.0
 ----
 
+=== System Appearance
+
+`app.config.ts` uses `userInterfaceStyle: 'automatic'` and `expo-system-ui`
+so the System theme follows OS appearance on Android and iOS. Changes to
+this configuration or native dependency require a native rebuild; an OTA
+JavaScript update alone is insufficient. `ThemeProvider` resolves the initial
+appearance and subscribes to live changes; the global status bar uses the
+resolved theme. Validate light/dark OS switching on rebuilt devices before merge.
+
 === Expo Config Plugins
 
 The app uses custom Expo config plugins to modify native project settings during prebuild:

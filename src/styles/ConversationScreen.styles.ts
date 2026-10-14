@@ -155,7 +155,7 @@ export const createConversationScreenStyles = (colors: Palette) =>
       justifyContent: 'center',
     },
     zapCardIconBadgeMe: {
-      backgroundColor: colors.white,
+      backgroundColor: colors.white, // White badge contrasts pink bubble
     },
     zapCardIconBadgeThem: {
       backgroundColor: colors.zapYellow,

@@ -19,7 +19,7 @@ export const createNotificationBellStyles = (colors: Palette) =>
       height: 18,
       borderRadius: 9,
       paddingHorizontal: 4,
-      backgroundColor: colors.white,
+      backgroundColor: colors.white, // White badge contrasts brand header
       justifyContent: 'center',
       alignItems: 'center',
     },

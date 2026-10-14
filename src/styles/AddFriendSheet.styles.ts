@@ -37,7 +37,7 @@ export const createAddFriendSheetStyles = (colors: Palette) =>
       borderRadius: 8,
     },
     toggleTabActive: {
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
     },
     toggleText: {
       fontSize: 14,

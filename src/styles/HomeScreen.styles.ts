@@ -33,7 +33,7 @@ export const createHomeScreenStyles = (colors: Palette) =>
       width: 52,
       height: 52,
       borderRadius: 26,
-      backgroundColor: colors.white,
+      backgroundColor: colors.white, // White button contrasts brand header
       justifyContent: 'center',
       alignItems: 'center',
       shadowColor: '#000',

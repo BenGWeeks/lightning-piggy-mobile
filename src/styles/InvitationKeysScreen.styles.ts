@@ -42,7 +42,7 @@ export const createInvitationKeysScreenStyles = (colors: Palette) =>
     details: { gap: 4, paddingTop: 2 },
     detail: { color: 'rgba(255,255,255,0.8)', fontSize: 12, lineHeight: 18 },
     button: {
-      backgroundColor: colors.white,
+      backgroundColor: colors.white, // White button contrasts brand background
       borderRadius: 10,
       padding: 13,
       alignItems: 'center',

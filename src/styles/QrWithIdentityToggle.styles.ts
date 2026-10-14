@@ -35,7 +35,7 @@ export const createQrWithIdentityToggleStyles = (colors: Palette) =>
       borderRadius: 8,
     },
     toggleTabActive: {
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
     },
     toggleText: {
       fontSize: 14,
@@ -47,7 +47,7 @@ export const createQrWithIdentityToggleStyles = (colors: Palette) =>
     },
     qrContainer: {
       padding: 16,
-      backgroundColor: colors.white,
+      backgroundColor: colors.white, // White quiet zone preserves QR scanning
       borderRadius: 16,
     },
     valueRow: {

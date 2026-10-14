@@ -53,7 +53,7 @@ export const createNwcShareCardStyles = (colors: Palette) =>
     },
     qrWrap: {
       alignSelf: 'center',
-      backgroundColor: colors.white,
+      backgroundColor: colors.white, // White quiet zone preserves QR scanning
       padding: 12,
       borderRadius: 12,
     },
