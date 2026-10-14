@@ -104,8 +104,15 @@ it('moves the single-choice seller scope into Filters and resets it from the sea
   expect(screen.queryByTestId('market-mode-selector')).toBeNull();
   expect(screen.queryByText('market.screen.showing')).toBeNull();
   expect(screen.queryByTestId('market-scope-chip-clear')).toBeNull();
-  expect(screen.queryByTestId('market-filter-badge')).toBeNull();
+  // The default preferred-sellers scope narrows the list, so the button is
+  // already active with one filter.
+  expect(screen.getByTestId('market-filter-active-count')).toHaveTextContent('1');
+  expect(screen.getByTestId('market-filter-button').props.accessibilityState).toEqual({
+    selected: true,
+  });
   fireEvent.press(screen.getByTestId('market-filter-button'));
+  // Nothing beyond the default to reset yet, so the panel's Clear is hidden.
+  expect(screen.queryByTestId('market-filter-clear')).toBeNull();
   const preferred = screen.getByTestId('market-filter-sellers-preferred');
   const friends = screen.getByTestId('market-filter-sellers-friends');
   const fof = screen.getByTestId('market-filter-sellers-friends-of-friends');
@@ -123,11 +130,11 @@ it('moves the single-choice seller scope into Filters and resets it from the sea
   expect(mockLiveEnabled).toHaveBeenLastCalledWith(true);
   fireEvent.press(screen.getByTestId('market-filter-done'));
   act(() => jest.runOnlyPendingTimers());
-  expect(screen.getByTestId('market-filter-badge')).toBeTruthy();
+  expect(screen.getByTestId('market-filter-active-count')).toHaveTextContent('1');
   expect(screen.getByTestId('market-live-status')).toHaveTextContent('market.live.loading');
   fireEvent.press(screen.getByTestId('market-scope-chip-clear'));
   expect(mockLiveEnabled).toHaveBeenLastCalledWith(false);
-  expect(screen.queryByTestId('market-filter-badge')).toBeNull();
+  expect(screen.getByTestId('market-filter-active-count')).toHaveTextContent('1');
   expect(screen.queryByTestId('market-scope-chip-clear')).toBeNull();
 });
 
@@ -140,10 +147,11 @@ it('clears seller scope with the sheet filters and badges a non-empty search', (
   expect(screen.queryByTestId('market-scope-chip-clear')).toBeNull();
   fireEvent.press(screen.getByTestId('market-filter-done'));
   act(() => jest.runOnlyPendingTimers());
+  expect(screen.getByTestId('market-filter-active-count')).toHaveTextContent('1');
   fireEvent.changeText(screen.getByTestId('market-search-input'), 'piggy');
-  expect(screen.getByTestId('market-filter-badge')).toBeTruthy();
+  expect(screen.getByTestId('market-filter-active-count')).toHaveTextContent('2');
   fireEvent.press(screen.getByTestId('market-search-clear'));
-  expect(screen.queryByTestId('market-filter-badge')).toBeNull();
+  expect(screen.getByTestId('market-filter-active-count')).toHaveTextContent('1');
 });
 
 it('gates listings and the first query until account filters finish restoring', () => {

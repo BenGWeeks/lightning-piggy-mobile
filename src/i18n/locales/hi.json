@@ -2331,6 +2331,7 @@
       "merchant": "मर्चेंट",
       "country": "देश",
       "currency": "करेंसी",
+      "satsChip": "sats",
       "chipSelected": "{{label}}, चुना गया",
       "sellers": "विक्रेता",
       "friends": "दोस्त (जिन लोगों को आप फ़ॉलो करते हैं)",

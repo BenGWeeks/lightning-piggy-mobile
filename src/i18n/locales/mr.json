@@ -2331,6 +2331,7 @@
       "merchant": "व्यापारी",
       "country": "देश",
       "currency": "चलन",
+      "satsChip": "sats",
       "chipSelected": "{{label}}, निवडले",
       "sellers": "विक्रेते",
       "friends": "मित्र (तुम्ही फॉलो करत असलेले लोक)",

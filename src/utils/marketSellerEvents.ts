@@ -22,6 +22,7 @@
 import type { Event } from 'nostr-tools';
 import { CURRENCIES } from '../services/fiatService';
 import { isKnownCountry } from '../data/countries';
+import { normalizeCurrencyCode } from './currencyCode';
 import { SHIPPING_OPTION_KIND, type ShippingOption } from './marketShipping';
 
 export const LISTING_KIND = 30402;
@@ -35,10 +36,7 @@ export const SHOP_COLLECTION_D = 'lightning-piggy-shop';
 export const SELLER_CURRENCIES: readonly string[] = ['SATS', ...CURRENCIES, 'BTC'];
 
 /** Upper-case a currency, folding the `SAT` spelling into `SATS`. */
-export const normaliseCurrency = (currency: string) => {
-  const upper = currency.trim().toUpperCase();
-  return upper === 'SAT' ? 'SATS' : upper;
-};
+export const normaliseCurrency = normalizeCurrencyCode;
 export const MAX_LISTING_IMAGES = 8;
 export const MAX_LISTING_CATEGORIES = 10;
 export const MAX_SHIPPING_ZONES = 10;

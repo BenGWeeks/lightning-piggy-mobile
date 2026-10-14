@@ -2289,6 +2289,7 @@
       "merchant": "Продавець",
       "country": "Країна",
       "currency": "Валюта",
+      "satsChip": "sats",
       "chipSelected": "{{label}}, вибрано",
       "sellers": "Продавці",
       "friends": "Друзі (люди, на яких ви підписані)",

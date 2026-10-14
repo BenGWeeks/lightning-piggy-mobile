@@ -1,4 +1,5 @@
 import { merchantId } from './marketMerchants';
+import { normalizeCurrencyCode } from './currencyCode';
 // Pure search/filter helpers for the Market product list. Kept out of the
 // screens and components so the matching + option-derivation logic is
 // independently unit-testable (coverage scope: src/utils). No React, no I/O.
@@ -8,7 +9,9 @@ import { merchantId } from './marketMerchants';
 //   • search   — case-insensitive substring over title / description / seller
 //   • merchant — the listing author's pubkey (curated fallback: vendor name)
 //   • country  — the selling vendor's `country`
-//   • currency — derived from the product's `priceFiatLabel` (e.g. "£60")
+//   • currency — the listing's currency, else derived from the product's
+//                `priceFiatLabel` (e.g. "£60"); normalised so SAT/sats/SATS
+//                are one option
 //
 // Option lists (merchants, countries, currencies) are DERIVED FROM THE LOADED
 // DATA, not hardcoded, so they stay correct if the catalogue (or a future live
@@ -51,22 +54,45 @@ export function isMarketFilterActive(filter: MarketFilter): boolean {
 }
 
 /**
- * Count of active panel filter axes (seller scope / merchant / country / currency) — the
- * axes housed in the slide-in filter panel. Drives the count badge on the
- * Market header's filter icon so the user can see how many hidden filters are
- * applied without opening the panel. The search query is intentionally
- * EXCLUDED: it has its own always-visible inline field, so it never
- * contributes to the panel badge.
+ * Whether the seller scope narrows the catalogue. Every scope short of the
+ * whole web of trust (`wotAll`, not yet selectable) is a subset of what a
+ * shopper could see — including the default Lightning Piggy preferred
+ * sellers — so it counts as an applied filter on the header button.
  */
-export function countActiveMarketFilters(
-  filter: MarketFilter,
-  mode: MarketMode = DEFAULT_MARKET_MODE,
-): number {
-  let n = mode === DEFAULT_MARKET_MODE ? 0 : 1;
+export function isMarketScopeNarrowing(mode: MarketMode): boolean {
+  return mode !== 'wotAll';
+}
+
+/**
+ * Count of active panel filter axes (seller scope / merchant / country /
+ * currency) — the axes housed in the slide-in filter panel. Drives the active
+ * state + count badge on the Market header's filter icon so the user can see
+ * how many hidden filters narrow the list without opening the panel. The
+ * seller scope counts whenever it narrows (see `isMarketScopeNarrowing`), so
+ * the default preferred-sellers view shows as filtered. The search query is
+ * intentionally EXCLUDED: it has its own always-visible inline field.
+ */
+export function countActiveMarketFilters(filter: MarketFilter, mode: MarketMode): number {
+  let n = isMarketScopeNarrowing(mode) ? 1 : 0;
   if (filter.merchant !== null) n += 1;
   if (filter.country !== null) n += 1;
   if (filter.currency !== null) n += 1;
   return n;
+}
+
+/**
+ * Whether any panel axis differs from its default (drives the panel's "Clear
+ * filters" action). Distinct from `countActiveMarketFilters`: the default
+ * seller scope narrows the list, but Clear can't reset it any further, so it
+ * alone doesn't make Clear appear.
+ */
+export function canClearMarketFilters(filter: MarketFilter, mode: MarketMode): boolean {
+  return (
+    mode !== DEFAULT_MARKET_MODE ||
+    filter.merchant !== null ||
+    filter.country !== null ||
+    filter.currency !== null
+  );
 }
 
 // Fiat currency-symbol → ISO 4217 code. The curated catalogue authors prices
@@ -240,12 +266,21 @@ export function distinctMerchants(
   return [...set].sort((a, b) => a.localeCompare(b));
 }
 
-/** Distinct currencies present in the products, sorted alphabetically.
- * Drives the currency filter chips (derived from data, not hardcoded). */
+/** A product's canonical currency code — the listing's own currency, else
+ * one read from its price label — or `null` when none can be read. Normalised
+ * so every sats spelling (SAT / sats / SATS) buckets together. */
+export function productCurrency(product: MarketProduct): string | null {
+  const raw = product.listing?.currency ?? currencyOf(product.priceFiatLabel);
+  return raw ? normalizeCurrencyCode(raw) : null;
+}
+
+/** Distinct canonical currencies present in the products, sorted
+ * alphabetically. Drives the currency filter chips (derived from data, not
+ * hardcoded). */
 export function distinctCurrencies(products: readonly MarketProduct[]): string[] {
   const set = new Set<string>();
   for (const p of products) {
-    const cur = p.listing?.currency ?? currencyOf(p.priceFiatLabel);
+    const cur = productCurrency(p);
     if (cur) set.add(cur);
   }
   return [...set].sort((a, b) => a.localeCompare(b));
@@ -262,6 +297,7 @@ export function filterMarketProducts(
   filter: MarketFilter,
   resolveVendor: ResolveVendor,
 ): MarketProduct[] {
+  const currency = filter.currency === null ? null : normalizeCurrencyCode(filter.currency);
   return products.filter((p) => {
     if (!productMatchesSearch(p, resolveVendor, filter.query)) return false;
     if (filter.merchant !== null && productMerchant(p, resolveVendor) !== filter.merchant) {
@@ -270,12 +306,7 @@ export function filterMarketProducts(
     if (filter.country !== null && productCountry(p, resolveVendor) !== filter.country) {
       return false;
     }
-    if (
-      filter.currency !== null &&
-      (p.listing?.currency ?? currencyOf(p.priceFiatLabel)) !== filter.currency
-    ) {
-      return false;
-    }
+    if (currency !== null && productCurrency(p) !== currency) return false;
     return true;
   });
 }

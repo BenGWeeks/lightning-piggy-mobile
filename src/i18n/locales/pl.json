@@ -2333,6 +2333,7 @@
       "merchant": "Sprzedawca",
       "country": "Kraj",
       "currency": "Waluta",
+      "satsChip": "sats",
       "chipSelected": "{{label}}, wybrano",
       "sellers": "Sprzedawcy",
       "friends": "Znajomi (osoby, które obserwujesz)",

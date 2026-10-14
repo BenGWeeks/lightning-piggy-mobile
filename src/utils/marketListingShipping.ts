@@ -7,6 +7,7 @@
 // currency (or there is no surcharge); otherwise both parts are shown.
 import type { Event } from 'nostr-tools';
 import type { ShippingOption } from './marketShipping';
+import { sameCurrencyCode as sameCurrency } from './currencyCode';
 
 export interface ListingShippingRef {
   coordinate: string;
@@ -25,11 +26,6 @@ export interface ListingShippingQuote {
   /** Currency of `totalAmount` (the option's). */
   currency: string;
 }
-
-const sameCurrency = (a: string, b: string) => {
-  const norm = (c: string) => (c.toUpperCase() === 'SAT' ? 'SATS' : c.toUpperCase());
-  return norm(a) === norm(b);
-};
 
 /** The listing's direct 30406 shipping references (collection refs are not
  * expanded — the Market reader doesn't fetch collections). */

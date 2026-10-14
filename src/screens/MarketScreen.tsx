@@ -28,6 +28,7 @@ import { validateMarketPreferences } from '../utils/marketPreferences';
 import { marketLoadingStatus } from '../utils/marketLoadingStatus';
 import { DEFAULT_MARKET_MODE, type MarketMode } from '../utils/marketMode';
 import {
+  canClearMarketFilters,
   countActiveMarketFilters,
   distinctCountries,
   distinctCurrencies,
@@ -146,10 +147,15 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
   // `active` tracks the live (un-debounced) query so the empty-state copy flips
   // as soon as the user types.
   const filterActive = isMarketFilterActive({ query, merchant, country, currency });
-  // Seller scope shares the panel's badge and Clear action. Search also
-  // contributes to the button badge, but retains its own clear control.
+  // The seller scope counts toward the button badge whenever it narrows the
+  // catalogue — including the default preferred-sellers view — so the button
+  // never looks unfiltered while the list is scoped. Search also contributes,
+  // but retains its own clear control.
   const panelFilterCount = countActiveMarketFilters({ query, merchant, country, currency }, mode);
   const activeFilterCount = panelFilterCount + (query.trim().length > 0 ? 1 : 0);
+  const filtersActive = activeFilterCount > 0;
+  // The panel's Clear only shows when something can actually be reset.
+  const filtersClearable = canClearMarketFilters({ query, merchant, country, currency }, mode);
 
   const collectionFilter = useCollectionFilter(baseProducts, ready && merchant !== null, merchant);
   const products = useMemo(
@@ -266,27 +272,30 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
           ) : null}
         </View>
         <TouchableOpacity
-          style={[styles.filterButton, activeFilterCount > 0 && styles.filterButtonActive]}
+          style={[styles.filterButton, filtersActive && styles.filterButtonActive]}
           onPress={() => {
             perfLog('[PerfBlock] market filter tap');
             setFiltersOpen(true);
           }}
           accessibilityLabel={
-            activeFilterCount > 0
+            filtersActive
               ? t('market.screen.filtersApplied', { count: activeFilterCount })
               : t('market.screen.filters')
           }
+          accessibilityState={{ selected: filtersActive }}
           testID="market-filter-button"
           activeOpacity={0.7}
         >
           <SlidersHorizontal
             size={18}
-            color={activeFilterCount > 0 ? colors.white : colors.textBody}
+            color={filtersActive ? colors.white : colors.textBody}
             strokeWidth={2.25}
           />
-          {activeFilterCount > 0 ? (
+          {filtersActive ? (
             <View style={styles.filterBadge} testID="market-filter-badge">
-              <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
+              <Text style={styles.filterBadgeText} testID="market-filter-active-count">
+                {activeFilterCount}
+              </Text>
             </View>
           ) : null}
         </TouchableOpacity>
@@ -344,7 +353,7 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
         currencies={currencies}
         selectedCurrency={currency}
         onSelectCurrency={setCurrency}
-        active={panelFilterCount > 0}
+        active={filtersClearable}
         onClear={clearFilters}
       />
 

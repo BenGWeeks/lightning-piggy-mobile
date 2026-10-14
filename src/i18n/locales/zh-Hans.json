@@ -2331,6 +2331,7 @@
       "merchant": "商家",
       "country": "国家/地区",
       "currency": "货币",
+      "satsChip": "sats",
       "chipSelected": "{{label}}，已选择",
       "sellers": "卖家",
       "friends": "好友（你关注的人）",

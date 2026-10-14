@@ -2331,6 +2331,7 @@
       "merchant": "Händler",
       "country": "Land",
       "currency": "Währung",
+      "satsChip": "sats",
       "chipSelected": "{{label}}, ausgewählt",
       "sellers": "Verkäufer",
       "friends": "Freunde (Personen, denen du folgst)",
