@@ -1,6 +1,6 @@
 // Execute the real DAL SQL against SQLite, including JSON extraction and limits.
 import { DatabaseSync } from 'node:sqlite';
-import { getOrderRows } from './dmDb';
+import { getOrderRows, getShopOrderRows } from './dmDb';
 import { parseOrderEvent, serializeOrder } from '../utils/orderEvents';
 
 let mockDb: DatabaseSync;
@@ -71,6 +71,49 @@ it('limits by newest placed orders, including older invoices only for selected o
   insert('new-invoice', 'new-order', '2', 3);
   insert('old-invoice', 'old-order', '2', 4);
   expect((await getOrderRows('buyer', 1)).map((row) => row.eventId)).toEqual([
+    'new-invoice',
+    'new',
+  ]);
+});
+
+it('keeps incoming seller orders and all lifecycle kinds despite newer update bursts', async () => {
+  insert('incoming', 'purchase', '1', 1, 'buyer', 'seller', false);
+  insert('second-incoming', 'second-purchase', '1', 2, 'buyer', 'seller', false);
+  insert('invoice', 'purchase', '2', 3, 'buyer', 'seller', true);
+  for (let i = 0; i < 600; i++)
+    insert(`status-${i}`, 'purchase', '3', 10 + i, 'buyer', 'seller', true);
+  insert('shipping', 'purchase', '4', 700, 'buyer', 'seller', true);
+  const receipt = serializeOrder({
+    kind: 17,
+    type: 'receipt',
+    orderId: 'purchase',
+    message: '',
+    items: [],
+  });
+  mockDb
+    .prepare('INSERT INTO dm_messages VALUES (?, ?, ?, ?, ?, ?, ?, 17)')
+    .run('seller', 'receipt', 'buyer', 701, 'buyer', receipt, 0);
+  insert('unsolicited', 'unknown', '2', 1000, 'buyer', 'seller', true);
+  insert('other-buyer', 'purchase', '2', 1001, 'stranger', 'seller', false);
+  insert('other-account', 'purchase', '1', 1002, 'buyer', 'other-seller', false);
+  insert('outgoing-purchase', 'my-purchase', '1', 1003, 'merchant', 'seller', true);
+  mockDb
+    .prepare('INSERT INTO dm_messages VALUES (?, ?, ?, ?, ?, ?, ?, 16)')
+    .run('seller', 'bad-json', 'buyer', 1004, 'buyer', '{broken', 0);
+  const rows = await getShopOrderRows('seller');
+  expect(rows).toHaveLength(605);
+  expect(rows.map((row) => row.eventId)).toEqual(
+    expect.arrayContaining(['incoming', 'second-incoming', 'invoice', 'shipping', 'receipt']),
+  );
+  expect(rows[0].eventId).toBe('receipt');
+});
+
+it('limits seller history by incoming orders and isolates identical ids across buyers', async () => {
+  insert('old', 'same-id', '1', 1, 'older-buyer', 'seller', false);
+  insert('new', 'same-id', '1', 2, 'newer-buyer', 'seller', false);
+  insert('new-invoice', 'same-id', '2', 3, 'newer-buyer', 'seller', true);
+  insert('old-invoice', 'same-id', '2', 4, 'older-buyer', 'seller', true);
+  expect((await getShopOrderRows('seller', 1)).map((row) => row.eventId)).toEqual([
     'new-invoice',
     'new',
   ]);

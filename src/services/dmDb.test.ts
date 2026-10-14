@@ -363,7 +363,7 @@ describe('dmDb', () => {
   });
 
   describe('getShopOrderRows', () => {
-    it('reads the owner’s newest kind-16 rows in both directions, bounded', async () => {
+    it('bounds incoming placed orders and reads their lifecycle rows in both directions', async () => {
       mockExecute.mockResolvedValueOnce(
         rowsResult([
           { owner: OWNER, event_id: 'o1', conversation: 'buyer', created_at: 9, sender: 'buyer', content: '{}', from_me: 0, wire_kind: 16 }, // prettier-ignore
@@ -372,10 +372,13 @@ describe('dmDb', () => {
       const rows = await getShopOrderRows(OWNER, 50);
       expect(rows.map((r) => [r.eventId, r.fromMe])).toEqual([['o1', false]]);
       const [sql, params] = mockExecute.mock.calls[0];
-      expect(sql).toContain('owner = ? AND wire_kind = 16');
+      expect(sql).toContain(
+        'owner = ? AND sender = conversation AND from_me = 0 AND wire_kind = 16',
+      );
+      expect(sql).toContain('owner = ? AND wire_kind IN (16, 17)');
       expect(sql).toContain('ORDER BY created_at DESC');
       expect(sql).toContain('LIMIT ?');
-      expect(params).toEqual([OWNER, 50]);
+      expect(params).toEqual([OWNER, 50, OWNER]);
     });
   });
 

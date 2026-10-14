@@ -8,7 +8,7 @@ import { sellerOrderThreads, type SellerOrderThread } from '../utils/shopOrderSt
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { useNostr } from '../contexts/NostrContext';
-import { getOrderRows, subscribeDmStorage, type DmMessageRow } from '../services/dmDb';
+import { getShopOrderRows, subscribeDmStorage, type DmMessageRow } from '../services/dmDb';
 import { deriveShopOrders, type ShopOrder } from '../utils/shopOrders';
 
 /** Store writes arrive in bursts (inbox refresh, decrypt batches): re-read
@@ -48,7 +48,7 @@ export function useShopOrders(titles: ReadonlyMap<string, string>): {
       let timer: ReturnType<typeof setTimeout> | null = null;
       const load = () => {
         const run = ++generation.current;
-        Promise.all([getOrderRows(pubkey), loadSellerInvoices(pubkey)])
+        Promise.all([getShopOrderRows(pubkey), loadSellerInvoices(pubkey)])
           .then(([rows, invoices]) => {
             if (active && run === generation.current) setState({ owner: pubkey, rows, invoices });
           })
