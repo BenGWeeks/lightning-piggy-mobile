@@ -36,7 +36,7 @@ export interface MarketListingsResult {
   answeredRelays?: string[];
   /**
    * Product ids this snapshot has ruled on without showing them: listings a
-   * relay served but that were withdrawn, superseded, withheld or cut, plus
+   * verified revision withdrew, superseded or excluded from display, plus
    * carried-over listings a NIP-09 deletion (or expiry) now removes. A merge
    * must never keep a previous copy of these.
    */
@@ -180,6 +180,19 @@ async function runSnapshot(
   // `verifyEventCached` skips the schnorr for ids already checked this
   // session, so a refetch doesn't pay for the snapshot again.
   const verified = verifyEventCached;
+  // Only authenticated revisions can rule out a carried listing. Relay
+  // provenance is collected before verification and is not withdrawal evidence.
+  const authenticatedListings = new Set<string>();
+  const noteAuthenticatedListing = (event: Event) => {
+    if (!MARKET_LISTING_KINDS.includes(event.kind)) return;
+    const d = event.tags.find((t) => t[0] === 'd')?.[1];
+    if (!d) return;
+    try {
+      authenticatedListings.add(marketListingProductId(event.kind, event.pubkey, d));
+    } catch {
+      // Malformed identifiers cannot name a renderable listing.
+    }
+  };
   const oversizedQueue: Event[] = [];
   // Retain queued ids across both passes; at most MAX_OVERSIZED_CHECKS entries.
   const oversizedIds = new Set<string>();
@@ -272,7 +285,10 @@ async function runSnapshot(
         if (event.kind === 5) deletionCount--;
         else listingCount--;
         oversizedChecks++;
-        if (verified(event)) suppressOversized(event);
+        if (verified(event)) {
+          noteAuthenticatedListing(event);
+          suppressOversized(event);
+        }
       }
       oversizedQueue.length = 0;
     } finally {
@@ -396,7 +412,8 @@ async function runSnapshot(
     const verifyListing = (event: Event) => {
       if (signal.aborted) return false;
       const valid = trusted.has(event) || verified(event);
-      if (!valid) failedListingChecks++;
+      if (valid) noteAuthenticatedListing(event);
+      else failedListingChecks++;
       return valid;
     };
     const selection = await selectVerifiedListings(
@@ -460,7 +477,7 @@ async function runSnapshot(
       withdrawn: signal.aborted
         ? []
         : [
-            ...[...seenOn.keys()].filter((id) => !shown.has(id)),
+            ...[...authenticatedListings].filter((id) => !shown.has(id)),
             ...carriedWithdrawals(carried, [...events.values(), ...suppressions.values()], scope),
           ],
       // Unanswered passes or unchecked data. Reaching MAX_PRODUCTS is a deliberate display

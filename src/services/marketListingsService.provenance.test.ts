@@ -5,6 +5,8 @@ import { finalizeEvent, getPublicKey, type Event, type Filter } from 'nostr-tool
 import { fetchMarketListings } from './marketListingsService';
 import { collectRelaySnapshot } from './relaySnapshot';
 import { __resetVerifiedEventCache } from './nostrVerifyCache';
+import { parseMarketListing } from '../utils/marketListings';
+import { mergeMarketSnapshot } from '../utils/marketSnapshotMerge';
 
 jest.mock('./nostrPool', () => ({ pool: {}, trackRelays: jest.fn() }));
 jest.mock('./marketListingsPool', () => ({
@@ -112,4 +114,53 @@ it('ignores carried listings outside the current follow scope', async () => {
   });
   // No listings and no in-scope carried events: pass 2 never runs.
   expect(filters).toHaveLength(1);
+});
+
+it.each(['hash', 'signature'])(
+  'does not withdraw a carried listing after a forged %s',
+  async (failure) => {
+    const book = listing('book');
+    const forged = copy(listing('book', 200));
+    if (failure === 'hash') forged.content = 'tampered';
+    else forged.sig = '0'.repeat(128);
+    relays({ [SHOP]: { listings: [forged] } });
+    const result = await fetchMarketListings(
+      [author],
+      [SHOP, FAMILY],
+      new AbortController().signal,
+      undefined,
+      { carried: [book] },
+    );
+    expect(result.products).toEqual([]);
+    expect(result.withdrawn).toEqual([]);
+    const previous = parseMarketListing(book)!;
+    previous.listing!.seenOn = [FAMILY];
+    expect(mergeMarketSnapshot([previous], result)).toEqual([previous]);
+  },
+);
+
+it('withdraws a carried listing after an authenticated sold revision on another relay', async () => {
+  const book = listing('book');
+  const sold = finalizeEvent(
+    {
+      kind: 30402,
+      created_at: 200,
+      content: '',
+      tags: [
+        ['d', 'book'],
+        ['status', 'sold'],
+      ],
+    },
+    key,
+  );
+  relays({ [SHOP]: { listings: [sold] } });
+  const result = await fetchMarketListings(
+    [author],
+    [SHOP, FAMILY],
+    new AbortController().signal,
+    undefined,
+    { carried: [book] },
+  );
+  expect(result.products).toEqual([]);
+  expect(result.withdrawn).toEqual([`nostr-30402-${author}-book`]);
 });

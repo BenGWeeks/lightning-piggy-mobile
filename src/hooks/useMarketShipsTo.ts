@@ -35,6 +35,8 @@ export interface MarketShipsTo {
 export function useMarketShipsTo(
   products: readonly MarketProduct[],
   enabled: boolean,
+  /** Completed catalogue loads, including refreshes with unchanged coordinates. */
+  generation = 0,
 ): MarketShipsTo {
   const { relays } = useNostr();
   const readKey = marketSnapshotRelays(relays.filter((r) => r.read).map((r) => r.url)).urls.join(
@@ -53,14 +55,11 @@ export function useMarketShipsTo(
       // expiry and retries; local display state must never bypass it.
       const coordinates = coordinateKey.split('\n');
       const controller = new AbortController();
-      // Merge a batch of answers — once per fetch, so one Map copy per batch.
+      // Replace the displayed batch once per fetch, keeping only this catalogue's
+      // coordinates. The shared cache retains reusable answers for other scopes.
       const commit = (batch: ReadonlyMap<string, ShippingOption | null>) => {
         if (controller.signal.aborted || batch.size === 0) return;
-        setAnswers((current) => {
-          const merged = new Map(current);
-          for (const [coordinate, option] of batch) merged.set(coordinate, option);
-          return merged;
-        });
+        setAnswers(batch);
       };
       const timer = setTimeout(() => {
         resolveShippingOptions({
@@ -80,7 +79,9 @@ export function useMarketShipsTo(
         clearTimeout(timer);
         controller.abort();
       };
-    }, [enabled, coordinateKey, readKey]),
+      // A completed load rechecks TTLs even when its coordinate set is unchanged.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [enabled, coordinateKey, readKey, generation]),
   );
 
   const byProduct = useMemo(() => {

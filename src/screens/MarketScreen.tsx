@@ -107,7 +107,7 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
   const merchant = resolveMerchantSelection(savedMerchant, loadedMerchants, live.merchantAliases);
   // Ships-to comes from the sellers' published shipping options, fetched in
   // batches for the whole catalogue — never per card.
-  const shipping = useMarketShipsTo(baseProducts, ready);
+  const shipping = useMarketShipsTo(baseProducts, ready, live.generation);
   const shipsToCountries = useMemo(
     () =>
       shipsToOptions(shipping.byProduct.values(), {
