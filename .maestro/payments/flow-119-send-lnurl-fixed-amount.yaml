@@ -12,7 +12,7 @@ name: Send — fixed-amount LNURL (min = max) skips the amount prompt
 # SHA-pinning makes the URL immutable and repo-owned — it survives branch
 # deletion and can't drift, unlike a personal gist. To regenerate after
 # editing the fixture: commit it, then
-#   node -e "const{bech32}=require('bech32');const u='https://raw.githubusercontent.com/BenGWeeks/lightning-piggy-mobile/<commit-sha>/tests/fixtures/lnurl/pay-fixed-100.json';console.log(bech32.encode('lnurl',bech32.toWords(Buffer.from(u)),2000))"
+#   node -e "const{bech32}=require('bech32');const u='https://raw.githubusercontent.com/LightningPiggy/lightning-piggy-mobile/<commit-sha>/tests/fixtures/lnurl/pay-fixed-100.json';console.log(bech32.encode('lnurl',bech32.toWords(Buffer.from(u)),2000))"
 # No payment is made — the test stops at the details card (the fixture's
 # callback host is example.com, so a send attempt would fail anyway).
 # Run: maestro --device emulator-5554 test .maestro/payments/flow-119-send-lnurl-fixed-amount.yaml

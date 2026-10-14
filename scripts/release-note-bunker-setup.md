@@ -19,7 +19,7 @@ Amber and publishes notes; local previews and tests are offline.
    ```bash
    set +x
    set -o pipefail
-   nak key generate | gh secret set NOSTR_RELEASE_CLIENT_KEY --repo BenGWeeks/lightning-piggy-mobile
+   nak key generate | gh secret set NOSTR_RELEASE_CLIENT_KEY --repo LightningPiggy/lightning-piggy-mobile
    ```
 
 3. Paste the bunker URI into a hidden prompt, then send it straight to GitHub.
@@ -28,7 +28,7 @@ Amber and publishes notes; local previews and tests are offline.
    ```bash
    read -r -s -p 'Amber bunker URI: ' release_bunker_uri
    printf '\n'
-   printf '%s' "$release_bunker_uri" | gh secret set NOSTR_RELEASE_BUNKER_URI --repo BenGWeeks/lightning-piggy-mobile
+   printf '%s' "$release_bunker_uri" | gh secret set NOSTR_RELEASE_BUNKER_URI --repo LightningPiggy/lightning-piggy-mobile
    unset release_bunker_uri
    ```
 
@@ -53,7 +53,7 @@ After this feature is on the default branch, published stable releases trigger
 choose **Run workflow**, select the default branch, and enter the release tag, or:
 
 ```bash
-gh workflow run release-nostr-note.yml --repo BenGWeeks/lightning-piggy-mobile --ref main -f tag=v1.4.2
+gh workflow run release-nostr-note.yml --repo LightningPiggy/lightning-piggy-mobile --ref main -f tag=v1.4.2
 ```
 
 A manual dispatch publishes a real note, including for prereleases. The tag must

@@ -7,11 +7,11 @@ responsible disclosure.
 
 Security fixes are made against:
 
-| Version                                                                        | Supported |
-| ------------------------------------------------------------------------------ | --------- |
-| `main` branch                                                                  | Yes       |
-| Latest [release](https://github.com/BenGWeeks/lightning-piggy-mobile/releases) | Yes       |
-| Older releases                                                                 | No        |
+| Version                                                                             | Supported |
+| ----------------------------------------------------------------------------------- | --------- |
+| `main` branch                                                                       | Yes       |
+| Latest [release](https://github.com/LightningPiggy/lightning-piggy-mobile/releases) | Yes       |
+| Older releases                                                                      | No        |
 
 Please update to the latest release before reporting, and check whether the issue still reproduces.
 
@@ -21,9 +21,9 @@ Please update to the latest release before reporting, and check whether the issu
 
 Report it privately using GitHub's private vulnerability reporting:
 
-1. Go to the [Security tab](https://github.com/BenGWeeks/lightning-piggy-mobile/security) of this repository.
+1. Go to the [Security tab](https://github.com/LightningPiggy/lightning-piggy-mobile/security) of this repository.
 2. Choose **Report a vulnerability**
-   ([direct link](https://github.com/BenGWeeks/lightning-piggy-mobile/security/advisories/new)).
+   ([direct link](https://github.com/LightningPiggy/lightning-piggy-mobile/security/advisories/new)).
 3. Describe the issue, the affected version or commit, the steps to reproduce, and the impact you expect.
 
 **Never include secrets in a report.** Do not paste Nostr private keys (`nsec`), NWC connection strings

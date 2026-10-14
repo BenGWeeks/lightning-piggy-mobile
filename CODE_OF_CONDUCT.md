@@ -53,7 +53,7 @@ online or offline event.
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the community leaders
 responsible for enforcement by opening a
-[private security advisory](https://github.com/BenGWeeks/lightning-piggy-mobile/security/advisories/new) on
+[private security advisory](https://github.com/LightningPiggy/lightning-piggy-mobile/security/advisories/new) on
 this repository, or by contacting the maintainers via GitHub
 ([@BenGWeeks](https://github.com/BenGWeeks)). All complaints will be reviewed and investigated promptly and
 fairly.

@@ -114,9 +114,9 @@ async function main() {
         display_name: 'Little Piggy',
         about: 'Test account used to verify NIP-17 unwrap on Amber.',
         picture:
-          'https://raw.githubusercontent.com/BenGWeeks/lightning-piggy-mobile/claude/pr-issue-112-b1og0/assets/images/test-account-b-avatar.png',
+          'https://raw.githubusercontent.com/LightningPiggy/lightning-piggy-mobile/claude/pr-issue-112-b1og0/assets/images/test-account-b-avatar.png',
         banner:
-          'https://raw.githubusercontent.com/BenGWeeks/lightning-piggy-mobile/claude/pr-issue-112-b1og0/assets/images/test-account-b-avatar.png',
+          'https://raw.githubusercontent.com/LightningPiggy/lightning-piggy-mobile/claude/pr-issue-112-b1og0/assets/images/test-account-b-avatar.png',
       }),
     },
     senderSecretKey,

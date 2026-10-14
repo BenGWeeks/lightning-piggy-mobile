@@ -2,7 +2,7 @@ appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Group send via Amber — regression for issue #247
 ---
 # Regression coverage for issue #247
-# (https://github.com/BenGWeeks/lightning-piggy-mobile/issues/247).
+# (https://github.com/LightningPiggy/lightning-piggy-mobile/issues/247).
 #
 # Before the fix, sendGroupMessage hard-rejected any signer other than
 # nsec with the toast text:

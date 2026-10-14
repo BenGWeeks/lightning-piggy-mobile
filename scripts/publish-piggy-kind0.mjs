@@ -29,7 +29,7 @@ import { getPublicKey, finalizeEvent } from 'nostr-tools/pure';
 const RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net'];
 
 const BRANCH = env.BRANCH || 'main';
-const RAW_BASE = `https://raw.githubusercontent.com/BenGWeeks/lightning-piggy-mobile/${BRANCH}/.maestro/fixtures`;
+const RAW_BASE = `https://raw.githubusercontent.com/LightningPiggy/lightning-piggy-mobile/${BRANCH}/.maestro/fixtures`;
 
 // Each Piggy maps to (env var, fixture filename, friendly label, lud16).
 // `lud16` resolves to a dedicated LNbits wallet on bank.weeksfamily.me

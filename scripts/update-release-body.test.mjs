@@ -67,7 +67,7 @@ else if (args[1] === 'view') {
       TAG: 'v1.0.0',
       GITHUB_ENV: path.join(dir, 'env'),
       GITHUB_OUTPUT: path.join(dir, 'output'),
-      GITHUB_REPOSITORY: 'BenGWeeks/lightning-piggy-mobile',
+      GITHUB_REPOSITORY: 'LightningPiggy/lightning-piggy-mobile',
     },
   };
 }

@@ -15,10 +15,10 @@ Pod::Spec.new do |s|
   s.summary        = 'rust-nostr crypto + relay engine for Lightning Piggy'
   s.description    = 'Native NIP-44 encrypt/decrypt, BIP-340 schnorr sign/verify, and the kind-1059 relay engine (Stage 2 of #1036) over rust-nostr UniFFI Swift bindings — prebuilt nostr_sdkFFI.xcframework, no local Rust toolchain.'
   s.author         = 'Lightning Piggy'
-  s.homepage       = 'https://github.com/BenGWeeks/lightning-piggy-mobile'
+  s.homepage       = 'https://github.com/LightningPiggy/lightning-piggy-mobile'
   s.license        = { type: 'MIT' }
   s.platforms      = { ios: '15.1' }
-  s.source         = { git: 'https://github.com/BenGWeeks/lightning-piggy-mobile.git' }
+  s.source         = { git: 'https://github.com/LightningPiggy/lightning-piggy-mobile.git' }
   s.static_framework = true
   s.swift_version  = '5.9'
 
