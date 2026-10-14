@@ -117,6 +117,13 @@ async function httpProbe(
 
 export type ReachabilityService = 'nostr' | 'blossom';
 
+/** DEV routing can send the same input URL to two different services. */
+export function reachabilityCacheKey(url: string, service: ReachabilityService = 'nostr'): string {
+  if (!__DEV__) return url;
+  const target = service === 'nostr' ? activeAccountRelays([url])[0] : url;
+  return `${service}:${target}`;
+}
+
 export function probeReachability(
   url: string,
   signal: AbortSignal,

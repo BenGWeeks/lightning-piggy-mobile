@@ -3,6 +3,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import {
   probeReachability,
   reachabilityCache,
+  reachabilityCacheKey,
   type ReachabilityService,
 } from '../services/relayReachabilityProbe';
 import type { ProbeResult } from '../utils/relayReachability';
@@ -12,22 +13,26 @@ export function useRelayReachability(
   urls: readonly string[],
   service: ReachabilityService = 'nostr',
 ) {
-  const key = JSON.stringify([...new Set(urls)].sort());
+  const sortedUrls = [...new Set(urls)].sort();
+  const key = JSON.stringify(sortedUrls);
+  const routingKey = JSON.stringify(sortedUrls.map((url) => reachabilityCacheKey(url, service)));
   const [results, setResults] = useState<Map<string, ProbeResult>>(new Map());
   useFocusEffect(
     useCallback(() => {
       const controller = new AbortController();
       const targets: string[] = JSON.parse(key);
+      const cacheKeys: string[] = JSON.parse(routingKey);
       let busy = false;
       const round = async (refresh = false) => {
         if (busy) return;
         busy = true;
         const entries = await Promise.all(
-          targets.map(async (url) => {
+          targets.map(async (url, index) => {
+            const cacheKey = cacheKeys[index];
             const result =
-              (!refresh && reachabilityCache.get(url)) ||
+              (!refresh && reachabilityCache.get(cacheKey)) ||
               (await probeReachability(url, controller.signal, service));
-            if (result && !controller.signal.aborted) reachabilityCache.set(url, result);
+            if (result && !controller.signal.aborted) reachabilityCache.set(cacheKey, result);
             return [url, result] as const;
           }),
         );
@@ -39,8 +44,8 @@ export function useRelayReachability(
       };
       setResults(
         new Map(
-          targets.flatMap((url) => {
-            const cached = reachabilityCache.get(url);
+          targets.flatMap((url, index) => {
+            const cached = reachabilityCache.get(cacheKeys[index]);
             return cached ? [[url, cached] as const] : [];
           }),
         ),
@@ -51,7 +56,7 @@ export function useRelayReachability(
         clearInterval(timer);
         controller.abort();
       };
-    }, [key, service]),
+    }, [key, service, routingKey]),
   );
   return results;
 }

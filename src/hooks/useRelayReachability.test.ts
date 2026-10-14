@@ -3,7 +3,7 @@ import { TEST_ACCOUNT_KEYS } from '../utils/testAccounts';
 import { TEST_RELAY_URL } from '../config/testRelayLockdown';
 import { act, renderHook } from '@testing-library/react-native';
 import { useRelayReachability } from './useRelayReachability';
-import { reachabilityCache } from '../services/relayReachabilityProbe';
+import { reachabilityCache, reachabilityCacheKey } from '../services/relayReachabilityProbe';
 
 let mockFocused = true;
 
@@ -82,7 +82,10 @@ it('times out after six seconds and refreshes at 30 seconds despite cached resul
   unmount();
 });
 it('uses the cache on focus, probes added entries and cancels sockets and queue on blur', async () => {
-  reachabilityCache.set('wss://cached', { reachable: true, checkedAt: Date.now() });
+  reachabilityCache.set(reachabilityCacheKey('wss://cached'), {
+    reachable: true,
+    checkedAt: Date.now(),
+  });
   const { result, rerender, unmount } = renderHook(
     ({ urls }: { urls: string[] }) => useRelayReachability(urls),
     {
@@ -100,7 +103,7 @@ it('uses the cache on focus, probes added entries and cancels sockets and queue 
   act(() => jest.advanceTimersByTime(60_000));
   await flush();
   expect(MockSocket.instances).toHaveLength(3);
-  expect(reachabilityCache.get('wss://a')).toBeUndefined();
+  expect(reachabilityCache.get(reachabilityCacheKey('wss://a'))).toBeUndefined();
 });
 it('summarises TLS and connection-close failures', async () => {
   const { result, unmount } = renderHook(() => useRelayReachability(['wss://tls', 'wss://closed']));
@@ -221,5 +224,58 @@ it('aborts an in-flight HTTPS relay probe when switching into lockdown', async (
   } finally {
     relay.unmount();
     global.fetch = originalFetch;
+  }
+});
+
+it('keeps cached LAN relay results separate from Blossom results for the same URL', async () => {
+  const originalFetch = global.fetch;
+  const fetchMock = jest.fn().mockResolvedValue({ status: 200 });
+  global.fetch = fetchMock;
+  setCurrentUserPubkey(TEST_ACCOUNT_KEYS.big);
+  const url = 'https://shared.example';
+  const relay = renderHook(() => useRelayReachability([url]));
+  let blossom: ReturnType<typeof renderHook> | undefined;
+  try {
+    MockSocket.instances[0].onmessage?.();
+    await flush();
+    expect(reachabilityCache.get(reachabilityCacheKey(url, 'nostr'))?.reachable).toBe(true);
+    blossom = renderHook(() => useRelayReachability([url], 'blossom'));
+    await flush();
+    expect(fetchMock).toHaveBeenCalledWith('https://shared.example/', expect.anything());
+    expect(reachabilityCacheKey(url, 'nostr')).not.toBe(reachabilityCacheKey(url, 'blossom'));
+  } finally {
+    relay.unmount();
+    blossom?.unmount();
+    global.fetch = originalFetch;
+  }
+});
+
+it('uses the new effective target instead of a cached public result after switching accounts', async () => {
+  const url = 'wss://cached';
+  reachabilityCache.set(reachabilityCacheKey(url), { reachable: true, checkedAt: Date.now() });
+  const hook = renderHook(() => useRelayReachability([url]));
+  try {
+    await flush();
+    expect(MockSocket.instances).toHaveLength(0);
+    act(() => setCurrentUserPubkey(TEST_ACCOUNT_KEYS.big));
+    hook.rerender({});
+    await flush();
+    expect(MockSocket.instances[0].url).toBe(TEST_RELAY_URL);
+  } finally {
+    hook.unmount();
+  }
+});
+
+it('retains release cache keys for both services', () => {
+  const originalDev = __DEV__;
+  (globalThis as unknown as { __DEV__: boolean }).__DEV__ = false;
+  try {
+    setCurrentUserPubkey(TEST_ACCOUNT_KEYS.big);
+    expect(reachabilityCacheKey('wss://relay.example')).toBe('wss://relay.example');
+    expect(reachabilityCacheKey('https://blossom.example', 'blossom')).toBe(
+      'https://blossom.example',
+    );
+  } finally {
+    (globalThis as unknown as { __DEV__: boolean }).__DEV__ = originalDev;
   }
 });
