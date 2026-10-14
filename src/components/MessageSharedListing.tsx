@@ -10,10 +10,13 @@ import type { EmbedRef } from '../services/nostrEmbedCache';
  * product card (image, title, price, seller; tap opens the product page),
  * resolved through the same batched, verified, cached embed lookup.
  */
-const MessageSharedListing: React.FC<{ token: EmbedRef }> = ({ token }) => {
+const MessageSharedListing: React.FC<{ token: EmbedRef; autoLoadMedia: boolean }> = ({
+  token,
+  autoLoadMedia,
+}) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createNostrContentStyles(colors), [colors]);
-  return <EmbeddedEventCard token={token} styles={styles} />;
+  return <EmbeddedEventCard token={token} styles={styles} autoLoadMedia={autoLoadMedia} />;
 };
 
 export default React.memo(MessageSharedListing);

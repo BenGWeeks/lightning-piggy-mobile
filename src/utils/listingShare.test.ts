@@ -1,5 +1,10 @@
 import * as nip19 from 'nostr-tools/nip19';
-import { extractSharedListing, listingNaddr, listingShareContent } from './listingShare';
+import {
+  extractSharedListing,
+  listingNaddr,
+  listingShareContent,
+  sharedListingParts,
+} from './listingShare';
 import { MARKET_RELAYS } from './marketListingsQuery';
 
 const SELLER = 'a'.repeat(64);
@@ -70,4 +75,19 @@ describe('extractSharedListing', () => {
   it('ignores malformed references', () => {
     expect(extractSharedListing('Thing\nnostr:naddr1qqqqqq')).toBeNull();
   });
+});
+
+it('preserves warnings, sender titles, trailing text and every standalone listing', () => {
+  const first = listingNaddr(listing)!;
+  const second = listingNaddr({ ...listing, tags: [['d', 'other']] })!;
+  const parts = sharedListingParts(
+    `Scam warning\nSender title\nnostr:${first}\nDo not buy\nnostr:${second}\nAfterword`,
+  );
+  expect(parts).toEqual([
+    'Scam warning\nSender title',
+    expect.objectContaining({ identifier: 'widget' }),
+    'Do not buy',
+    expect.objectContaining({ identifier: 'other' }),
+    'Afterword',
+  ]);
 });

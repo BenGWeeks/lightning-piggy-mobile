@@ -29,7 +29,7 @@ import {
 import type { PollTally } from '../utils/nip88Poll';
 import MessageFileBubble from './MessageFileBubble';
 import MessageSharedListing from './MessageSharedListing';
-import { extractSharedListing } from '../utils/listingShare';
+import { extractSharedListing, sharedListingParts } from '../utils/listingShare';
 import { useSharedContactAvatar } from '../hooks/useSharedContactAvatar';
 import { type DeliveryStatus } from '../utils/dmDeliveryStatus';
 import { resendPayloadFor } from '../utils/messageInfo';
@@ -809,7 +809,20 @@ const MessageBubble: React.FC<Props> = ({
           <Text style={[styles.contactLabel, fromMe && styles.contactLabelMe]}>
             {t('market.share.sharedItem')}
           </Text>
-          <MessageSharedListing token={sharedListing} />
+          {sharedListingParts(text).map((part, index) =>
+            typeof part === 'string' ? (
+              <LinkifiedText
+                key={index}
+                text={part}
+                fromMe={fromMe}
+                styles={styles}
+                messageId={`${id}-${index}`}
+                testIdPrefix={testIdPrefix}
+              />
+            ) : (
+              <MessageSharedListing key={index} token={part} autoLoadMedia={autoLoadMedia} />
+            ),
+          )}
           {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
         </Pressable>
       </View>,

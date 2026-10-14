@@ -63,3 +63,21 @@ export function extractSharedListing(text: string): AddressRef | null {
   }
   return null;
 }
+
+/** Preserve all sender text and listing references in their original order. */
+export function sharedListingParts(text: string): (string | AddressRef)[] {
+  const parts: (string | AddressRef)[] = [];
+  let lines: string[] = [];
+  for (const line of text.split('\n')) {
+    const ref = extractSharedListing(line);
+    if (ref) {
+      if (lines.length) parts.push(lines.join('\n'));
+      lines = [];
+      parts.push(ref);
+    } else {
+      lines.push(line);
+    }
+  }
+  if (lines.length) parts.push(lines.join('\n'));
+  return parts;
+}

@@ -30,6 +30,7 @@ interface Props {
    * shows its own context line.
    */
   compact?: boolean;
+  autoLoadMedia?: boolean;
 }
 
 const tagValue = (event: Event, name: string) => event.tags.find((t) => t[0] === name)?.[1];
@@ -50,7 +51,12 @@ function openOnWeb(raw: string): void {
  * Shows a skeleton while the batched fetch runs; notes and articles open on
  * the web (there's no in-app note view yet — #540).
  */
-const EmbeddedEventCard: React.FC<Props> = ({ token, styles, compact = false }) => {
+const EmbeddedEventCard: React.FC<Props> = ({
+  token,
+  styles,
+  compact = false,
+  autoLoadMedia = true,
+}) => {
   const t = useTranslation();
   const { result, loading } = useEmbeddedEvent(token);
   const event = result?.event ?? null;
@@ -66,7 +72,7 @@ const EmbeddedEventCard: React.FC<Props> = ({ token, styles, compact = false }) 
 
   if (kind === PRODUCT_KIND) {
     return result?.product ? (
-      <ProductEmbed product={result.product} />
+      <ProductEmbed product={result.product} autoLoadMedia={autoLoadMedia} />
     ) : (
       <Unavailable label={t('nostrContent.productUnavailable')} styles={styles} raw={token.raw} />
     );
@@ -176,7 +182,10 @@ const ArticleEmbed: React.FC<{ event: Event; raw: string; styles: NostrContentSt
   );
 };
 
-const ProductEmbed: React.FC<{ product: MarketProduct }> = ({ product }) => {
+const ProductEmbed: React.FC<{ product: MarketProduct; autoLoadMedia: boolean }> = ({
+  product,
+  autoLoadMedia,
+}) => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const seller = usePubkeyProfile(product.listing?.event.pubkey ?? null);
   const open = useCallback(
@@ -186,6 +195,7 @@ const ProductEmbed: React.FC<{ product: MarketProduct }> = ({ product }) => {
   return (
     <MarketProductCard
       product={product}
+      autoLoadMedia={autoLoadMedia}
       sellerName={seller.name?.trim() || product.sellerName}
       onPress={open}
       variant="list"

@@ -41,17 +41,24 @@ export function useListingLike(product: MarketProduct, onRequestSignIn: () => vo
     return r.length > 0 ? r : DEFAULT_RELAYS;
   }, [relays]);
   const [state, setState] = useState<LikeState>(EMPTY);
-  // A fetch that lands mid-toggle must not overwrite the optimistic state.
+  // Focus results captured before a toggle must not overwrite its result.
   const busyRef = useRef(false);
+  const mutationGeneration = useRef(0);
   const [busy, setBusy] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
-      if (!coordinate) return undefined;
+      if (!coordinate || busyRef.current) return undefined;
       const controller = new AbortController();
+      const generation = mutationGeneration.current;
       fetchListingLikes(coordinate, pubkey, readRelays, controller.signal)
         .then((likes) => {
-          if (controller.signal.aborted || busyRef.current) return;
+          if (
+            controller.signal.aborted ||
+            busyRef.current ||
+            generation !== mutationGeneration.current
+          )
+            return;
           setState({ count: likes.count, myIds: likes.myReactionIds });
         })
         .catch(() => {
@@ -70,6 +77,7 @@ export function useListingLike(product: MarketProduct, onRequestSignIn: () => vo
       return;
     }
     const before = state;
+    mutationGeneration.current += 1;
     busyRef.current = true;
     setBusy(true);
     const fail = () => {
