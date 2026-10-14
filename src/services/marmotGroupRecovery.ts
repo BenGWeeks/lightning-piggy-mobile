@@ -1,13 +1,25 @@
 import type { Event, Filter } from 'nostr-tools';
 import { matchFilter } from 'nostr-tools/filter';
 import { createYieldScheduler } from '../contexts/nostrDecryptPacing';
-import { GROUP_BACKFILL_SLACK_SECS, pageGroupHistory } from './marmotGroupBackfill';
+import {
+  GROUP_BACKFILL_MAX_EVENTS,
+  GROUP_BACKFILL_SLACK_SECS,
+  byTimeThenId,
+  pageGroupHistoryStatus,
+} from './marmotGroupBackfill';
 
 export type GroupHistoryRequest = (
   urls: string[],
   filter: Filter,
   signal: AbortSignal,
 ) => Promise<Event[]>;
+
+/** Live events held while history is outstanding. Past this the buffer is
+ * dropped and the cursor retained, so the omitted events return through the
+ * next history pass instead of staying resident behind a failing relay. */
+export const MAX_BUFFERED_EVENTS = 1_000;
+/** Delivered ids kept for cross-relay and overlap deduplication. */
+const MAX_SEEN_EVENTS = 5_000;
 
 /** Per-owner history and delivery ordering, independent of the merged live REQ. */
 export function createGroupRecovery(
@@ -19,8 +31,13 @@ export function createGroupRecovery(
   const abort = new AbortController();
   const seen = new Set<string>();
   const cursors = new Map<string, number>();
+  // A pass that hit the page cap with older events unread: continue below
+  // `until` next pass. Delivering the newest pages alone would advance the
+  // cursor past the commits still missing (MLS needs the older ones first).
+  const partial = new Map<string, { events: Map<string, Event>; until: number }>();
   let pending: Promise<void> | undefined;
-  let buffered: Event[] = [];
+  let buffered = new Map<string, Event>();
+  let overflowed = false;
   let stalled = false;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   let retryDelay = 1000;
@@ -30,6 +47,7 @@ export function createGroupRecovery(
     if (!filters.some((filter) => matchFilter(filter, event))) return;
     next(event);
     seen.add(event.id);
+    if (seen.size > MAX_SEEN_EVENTS) seen.delete(seen.values().next().value!);
     const h = event.tags.find((tag) => tag[0] === 'h')![1];
     if (event.created_at <= Math.floor(Date.now() / 1000) + 300)
       cursors.set(h, Math.max(cursors.get(h) ?? 0, event.created_at));
@@ -47,7 +65,10 @@ export function createGroupRecovery(
           safetyEvery: 32,
           coldStart: true,
         });
+        // Anything dropped before this pass is inside its `since` window.
+        overflowed = false;
         let complete = false;
+        let continuing = false;
         try {
           for (const filter of filters)
             for (const h of filter['#h'] ?? []) {
@@ -57,30 +78,53 @@ export function createGroupRecovery(
                 cursor === undefined
                   ? filter.since
                   : Math.max(filter.since ?? 0, cursor - GROUP_BACKFILL_SLACK_SECS);
-              const events = await pageGroupHistory(
+              const resume = partial.get(h);
+              const { events, exhausted } = await pageGroupHistoryStatus(
                 (relays, page) => request(relays, page, abort.signal),
                 urls,
-                { ...filter, '#h': [h], since, limit: filter.limit ?? 500 },
+                {
+                  ...filter,
+                  '#h': [h],
+                  since,
+                  limit: filter.limit ?? 500,
+                  ...(resume ? { until: resume.until } : {}),
+                },
                 true,
                 abort.signal,
                 pacing.maybeYield,
               );
-              for (const event of events) {
+              if (abort.signal.aborted) return;
+              const collected = resume?.events ?? new Map<string, Event>();
+              for (const event of events) collected.set(event.id, event);
+              if (!exhausted && collected.size < GROUP_BACKFILL_MAX_EVENTS) {
+                // Relay-clamped pages ran into the page cap: older events remain.
+                partial.set(h, { events: collected, until: events[0].created_at });
+                continuing = true;
+                continue;
+              }
+              if (!exhausted)
+                console.warn(`[Marmot] group history exceeds ${GROUP_BACKFILL_MAX_EVENTS} events`);
+              partial.delete(h);
+              for (const event of [...collected.values()].sort(byTimeThenId)) {
                 deliver(event);
                 await pacing.maybeYield();
               }
             }
-          // Keep pending set while yielding: new live events join the next batch.
-          while (buffered.length && !abort.signal.aborted) {
-            const batch = buffered.sort((a, b) => a.created_at - b.created_at);
-            buffered = [];
-            for (const event of batch) {
-              if (abort.signal.aborted) return;
-              deliver(event);
-              await pacing.maybeYield();
+          // Live traffic stays held until every group's range is complete, and
+          // a dropped buffer is re-read from the retained cursor rather than
+          // delivering survivors that would advance it past the omitted events.
+          if (!continuing && !overflowed)
+            // Keep pending set while yielding: new live events join the next batch.
+            while (buffered.size && !abort.signal.aborted && !overflowed) {
+              const batch = [...buffered.values()].sort((a, b) => a.created_at - b.created_at);
+              buffered = new Map();
+              for (const event of batch) {
+                if (abort.signal.aborted) return;
+                deliver(event);
+                await pacing.maybeYield();
+              }
             }
-          }
-          complete = !abort.signal.aborted;
+          complete = !abort.signal.aborted && !continuing && !overflowed;
         } catch (error) {
           if (!abort.signal.aborted) console.warn('[Marmot] group recovery failed', error);
         } finally {
@@ -88,13 +132,14 @@ export function createGroupRecovery(
           // Live traffic cannot advance a cursor past a commit still being fetched.
           stalled = !complete;
           pending = undefined;
-          if (complete) retryDelay = 1000;
-          else if (!abort.signal.aborted) {
+          const progressed = complete || continuing || overflowed;
+          if (progressed) retryDelay = 1000;
+          if (!complete && !abort.signal.aborted) {
             retryTimer = setTimeout(() => {
               retryTimer = undefined;
               void recovery.recover();
             }, retryDelay);
-            retryDelay = Math.min(retryDelay * 2, 30_000);
+            if (!progressed) retryDelay = Math.min(retryDelay * 2, 30_000);
           }
         }
       });
@@ -102,14 +147,23 @@ export function createGroupRecovery(
     },
     receive: (event: Event) => {
       if (!filters.some((filter) => matchFilter(filter, event))) return;
-      if (pending || stalled) buffered.push(event);
-      else deliver(event);
+      if (!pending && !stalled) return deliver(event);
+      if (overflowed || seen.has(event.id) || buffered.has(event.id)) return;
+      if (buffered.size >= MAX_BUFFERED_EVENTS) {
+        // Bounded memory under a failing relay: drop the buffer and let the
+        // next history pass (from the unchanged cursor) re-read every event.
+        buffered = new Map();
+        overflowed = true;
+        return;
+      }
+      buffered.set(event.id, event);
     },
     close: () => {
       if (retryTimer) clearTimeout(retryTimer);
       retryTimer = undefined;
       abort.abort();
-      buffered = [];
+      buffered = new Map();
+      partial.clear();
     },
   };
   return recovery;

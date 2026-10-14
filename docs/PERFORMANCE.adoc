@@ -625,7 +625,10 @@ independent per-group catch-up from each group's cursor with the existing
 between pages and delivery batches. Short pages are not assumed exhausted:
 relays can clamp the requested limit. All pages are collected and sorted
 before delivery, and live events wait behind recovery so they cannot advance
-a group's cursor past a missed commit. Event dispatch checks each owner's
+a group's cursor past a missed commit. A pass that hits the 40-page cap with
+older events unread continues below its oldest event next pass (bounded at
+20,000 events per group); the live buffer holds at most 1,000 distinct ids and
+on overflow is dropped and re-read from the retained cursor. Event dispatch checks each owner's
 original filter and rejects ambiguous `h`
 tags before the Marmot engine's signature and group checks. Profile rounds
 combine the former three 50-author REQs into one 150-author filter and close

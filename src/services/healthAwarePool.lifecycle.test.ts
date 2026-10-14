@@ -149,3 +149,41 @@ test('delayed old-socket close and notice cannot retire a replacement inbox/grou
   groups.close();
   pool.destroy();
 });
+
+// resetTransports retires a socket but keeps it open while its publishes/AUTH
+// drain; its eventual close must not dispose the budget the replacement's REQs
+// are already queued in (they would all surface as 'relay connection closed').
+test('a retired socket closing while its replacement connects keeps the replacement budget', async () => {
+  const pool = new BudgetPool();
+  pool.socket.onclose = () => pool.forgetRelay();
+  const old = await pool.ensureRelay(url);
+  const oldClose = old.onclose!;
+  pool.forgetRelay();
+  const replacement = makeRelay();
+  let connected!: () => void;
+  jest.spyOn(ReplacementPool.prototype, 'ensureRelay').mockImplementation(function (
+    this: ReplacementPool,
+  ) {
+    this.relays.set(url, replacement);
+    return new Promise((resolve) => {
+      connected = () => resolve(replacement);
+    });
+  });
+  const onclose = jest.fn();
+  const groups = pool.subscribeMany(
+    [url],
+    { kinds: [445], '#h': ['group'], limit: 500 },
+    { onclose },
+  );
+  await jest.advanceTimersByTimeAsync(0);
+  oldClose();
+  await jest.advanceTimersByTimeAsync(0);
+  expect(onclose).not.toHaveBeenCalled();
+  connected();
+  await jest.advanceTimersByTimeAsync(0);
+  expect(replacement.openSubs.size).toBe(1);
+  expect(onclose).not.toHaveBeenCalled();
+  groups.close();
+  expect(replacement.openSubs.size).toBe(0);
+  pool.destroy();
+});

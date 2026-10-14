@@ -106,7 +106,14 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
         RELAY_CONNECT_TIMEOUT_MS,
       );
       const startedAt = Date.now();
-      const relay = super.ensureRelay(url, { ...params, connectionTimeout }).then((relay) => {
+      const connecting = super.ensureRelay(url, { ...params, connectionTimeout });
+      // The SDK registers the relay before awaiting connect(). Claim the budget
+      // for it now: a replaced socket (resetTransports) may close only once its
+      // drained operations settle, by which time the replacement's REQs are
+      // already queued in this budget and must not be disposed with the old one.
+      const created = this.relays.get(key);
+      if (created) this.budgetOwners.set(key, created);
+      const relay = connecting.then((relay) => {
         this.budgetOwners.set(key, relay);
         if (!this.observedRelays.has(relay)) {
           this.observedRelays.add(relay);

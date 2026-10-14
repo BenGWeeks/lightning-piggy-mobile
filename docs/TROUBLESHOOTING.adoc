@@ -1573,8 +1573,14 @@ combined limit: 1,000 newer busy-group events can hide a quiet group's MLS
 commit, and relays can clamp limits further. Subscribe, scheduler resume and
 socket reconnect instead run independent paged per-group recovery as budgeted
 one-shots from each group's cursor. Live delivery waits behind its group's
-recovery. Regressions cover the quiet commit behind 1,001 busy events, clamped
-pages, all 41 groups at limit 4, splitting above 256 ids, reconnect and cleanup.
+recovery. A pass that reaches the 40-page cap with older events unread (a relay
+clamping pages to 100) delivers nothing and continues below its oldest event on
+the next pass, bounded at 20,000 events per group, so the cursor never skips the
+oldest commits. Live events buffered behind recovery are bounded to 1,000
+distinct ids; on overflow the buffer is dropped and the next pass re-reads them
+from the unchanged cursor. Regressions cover the quiet commit behind 1,001 busy
+events, clamped pages past the page cap, buffer overflow, all 41 groups at
+limit 4, splitting above 256 ids, reconnect and cleanup.
 
 
 

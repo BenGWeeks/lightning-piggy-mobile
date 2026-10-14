@@ -135,6 +135,9 @@ export function boundGroupQueries(
   };
 }
 
+/** Most events one group's history may hold in memory before ingestion. */
+export const GROUP_BACKFILL_MAX_EVENTS = GROUP_BACKFILL_LIMIT * GROUP_BACKFILL_MAX_PAGES;
+
 /** Shared bounded paging; short pages may be relay-clamped rather than exhausted. */
 export async function pageGroupHistory(
   request: (relays: string[], filter: Filter) => Promise<NostrEvent[]>,
@@ -144,9 +147,35 @@ export async function pageGroupHistory(
   signal?: AbortSignal,
   yieldPage?: () => Promise<void>,
 ): Promise<NostrEvent[]> {
+  const { events } = await pageGroupHistoryStatus(
+    request,
+    relays,
+    f,
+    continueShortPages,
+    signal,
+    yieldPage,
+  );
+  return events;
+}
+
+/**
+ * `pageGroupHistory`, also reporting whether the range was exhausted. A relay
+ * that clamps pages below `limit` can run into the page cap with older events
+ * still unread; `exhausted: false` tells the caller to continue below the
+ * oldest event rather than treating the newest pages as the whole range.
+ */
+export async function pageGroupHistoryStatus(
+  request: (relays: string[], filter: Filter) => Promise<NostrEvent[]>,
+  relays: string[],
+  f: Filter,
+  continueShortPages = false,
+  signal?: AbortSignal,
+  yieldPage?: () => Promise<void>,
+): Promise<{ events: NostrEvent[]; exhausted: boolean }> {
   const limit = f.limit ?? GROUP_BACKFILL_LIMIT;
   const byId = new Map<string, NostrEvent>();
-  let until: number | undefined;
+  let until = f.until;
+  let exhausted = false;
   for (let page = 0; page < GROUP_BACKFILL_MAX_PAGES && !signal?.aborted; page++) {
     const events = (await request(relays, {
       ...f,
@@ -154,7 +183,10 @@ export async function pageGroupHistory(
     })) as NostrEvent[];
     const before = byId.size;
     for (const e of events) byId.set(e.id, e);
-    if ((!continueShortPages && events.length < limit) || byId.size === before) break;
+    if ((!continueShortPages && events.length < limit) || byId.size === before) {
+      exhausted = true;
+      break;
+    }
     await yieldPage?.();
     until = Math.min(...events.map((e) => e.created_at));
   }
@@ -163,7 +195,8 @@ export async function pageGroupHistory(
   // MLS epochs are encrypted, so the adapter cannot sort on them. Marmot's
   // engine peels the current epoch, processes its applications before commits,
   // then retries later epochs. Preserve timestamp/id order within each epoch.
-  return [...byId.values()].sort(
-    (a, b) => a.created_at - b.created_at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
-  );
+  return { events: [...byId.values()].sort(byTimeThenId), exhausted };
 }
+
+export const byTimeThenId = (a: NostrEvent, b: NostrEvent) =>
+  a.created_at - b.created_at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
