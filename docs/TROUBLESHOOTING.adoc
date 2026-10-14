@@ -1678,3 +1678,19 @@ both write routing and the delayed-open race with real SDK pools.
 `npx jest --silent --detectOpenHandles` identifies `scheduleSummary` when a
 suite passes but stays alive briefly. Allow the summary timer to settle;
 this is separate from relay subscriptions and does not require force-exit.
+
+=== DEV test accounts send anonymous push wraps to public relays
+
+MIP-05 triggers and notification-watcher registrations use kind-1059 wraps
+with ephemeral authors. Author-based relay routing cannot identify their
+initiating TEST account. Push servers listen on public relays and cannot
+receive triggers on LAN, so locked TEST accounts skip push lookup and
+publication entirely, returning `push disabled for test accounts in lockdown`.
+The DEV lockdown badge also says "push notifications off".
+
+Marmot's account-owned transport retains the session pubkey; watcher register
+and unregister operations pass their captured context pubkey through signing
+to the transport. An account switch cannot let a pending test operation escape
+to public relays. Ordinary accounts, release builds and the explicit interop
+override keep their existing behaviour. Transport regressions verify no relay
+lookup, tracking or EVENT publication occurs for locked test initiators.

@@ -1551,7 +1551,7 @@
     "savedMyKey": "Potwierdzam zapisanie klucza"
   },
   "nostrScreen": {
-    "testRelayLockdown": "Konto testowe — ograniczone do testowego relay w sieci LAN ({{url}})",
+    "testRelayLockdown": "Konto testowe — ograniczone do testowego relay w sieci LAN ({{url}}) — powiadomienia push wyłączone",
     "title": "Sieć Nostr",
     "connected": "Połączono",
     "disconnected": "Rozłączono",

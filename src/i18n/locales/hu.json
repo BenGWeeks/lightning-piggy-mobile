@@ -1551,7 +1551,7 @@
     "savedMyKey": "Elmentettem a kulcsomat"
   },
   "nostrScreen": {
-    "testRelayLockdown": "Tesztfiók — a LAN teszt relay használatára korlátozva ({{url}})",
+    "testRelayLockdown": "Tesztfiók — a LAN teszt relay használatára korlátozva ({{url}}) — push értesítések kikapcsolva",
     "title": "Nostr-hálózat",
     "connected": "Csatlakozva",
     "disconnected": "Nincs kapcsolat",

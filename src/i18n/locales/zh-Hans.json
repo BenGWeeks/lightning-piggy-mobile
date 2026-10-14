@@ -1551,7 +1551,7 @@
     "savedMyKey": "我已保存私钥"
   },
   "nostrScreen": {
-    "testRelayLockdown": "测试账户 — 仅连接 LAN 测试 relay（{{url}}）",
+    "testRelayLockdown": "测试账户 — 仅连接 LAN 测试 relay（{{url}}） — 推送通知已关闭",
     "title": "Nostr网络",
     "connected": "已连接",
     "disconnected": "已断开",

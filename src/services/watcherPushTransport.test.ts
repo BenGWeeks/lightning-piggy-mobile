@@ -1,3 +1,13 @@
+import {
+  __resetWatcherTransportForTests,
+  publishToWatcher,
+  watcherPublishTargets,
+} from './watcherPushTransport';
+import { WATCHER_DEFAULT_RELAYS, WATCHER_PUBKEY } from './watcherRegistration';
+import { TEST_ACCOUNT_PUBKEYS, TEST_PUSH_DISABLED } from '../config/testRelayLockdown';
+import { setCurrentUserPubkey } from './nostrActiveAccount';
+import { trackRelays } from './nostrPool';
+
 const mockQuerySync = jest.fn();
 const mockPublish = jest.fn();
 
@@ -10,20 +20,17 @@ jest.mock('./nostrPool', () => ({
 }));
 jest.mock('./nostrCrypto', () => ({ nip44EncryptForRecipient: jest.fn() }));
 
-import {
-  __resetWatcherTransportForTests,
-  publishToWatcher,
-  watcherPublishTargets,
-} from './watcherPushTransport';
-import { WATCHER_DEFAULT_RELAYS, WATCHER_PUBKEY } from './watcherRegistration';
-
-const wrap = { id: 'w', kind: 1059 } as never;
+const wrap = { id: 'w', kind: 1059, pubkey: 'e'.repeat(64) } as never;
 
 beforeEach(() => {
+  setCurrentUserPubkey('a'.repeat(64));
   __resetWatcherTransportForTests();
-  mockQuerySync.mockReset();
-  mockPublish.mockReset();
+  mockQuerySync.mockReset().mockResolvedValue([]);
+  mockPublish.mockReset().mockReturnValue([Promise.resolve('ok')]);
+  jest.mocked(trackRelays).mockClear();
 });
+
+afterEach(() => setCurrentUserPubkey(null));
 
 describe('watcherPublishTargets', () => {
   it("prefers the watcher's open inbox relays over auth-gated damus", () => {
@@ -49,6 +56,26 @@ describe('watcherPublishTargets', () => {
 });
 
 describe('publishToWatcher', () => {
+  it('returns a clear disabled result without any network for a locked test account', async () => {
+    setCurrentUserPubkey([...TEST_ACCOUNT_PUBKEYS][0]);
+    await expect(publishToWatcher(wrap)).resolves.toBe(TEST_PUSH_DISABLED);
+    expect(mockQuerySync).not.toHaveBeenCalled();
+    expect(mockPublish).not.toHaveBeenCalled();
+    expect(trackRelays).not.toHaveBeenCalled();
+  });
+
+  it('uses the captured initiating test account after signing switches accounts', async () => {
+    const initiatingPubkey = [...TEST_ACCOUNT_PUBKEYS][0];
+    setCurrentUserPubkey(initiatingPubkey);
+    await Promise.resolve().then(() => setCurrentUserPubkey('a'.repeat(64)));
+    await expect(publishToWatcher(wrap, () => true, initiatingPubkey)).resolves.toBe(
+      TEST_PUSH_DISABLED,
+    );
+    expect(mockQuerySync).not.toHaveBeenCalled();
+    expect(mockPublish).not.toHaveBeenCalled();
+    expect(trackRelays).not.toHaveBeenCalled();
+  });
+
   it("publishes to the watcher's kind-10050 relays and reports any acceptance", async () => {
     mockQuerySync.mockResolvedValue([
       {

@@ -1551,7 +1551,7 @@
     "savedMyKey": "मैंने अपनी प्राइवेट की सेव कर ली है"
   },
   "nostrScreen": {
-    "testRelayLockdown": "परीक्षण खाता — LAN परीक्षण relay तक सीमित ({{url}})",
+    "testRelayLockdown": "परीक्षण खाता — LAN परीक्षण relay तक सीमित ({{url}}) — पुश सूचनाएँ बंद",
     "title": "Nostr नेटवर्क",
     "connected": "कनेक्ट है",
     "disconnected": "डिसकनेक्ट है",

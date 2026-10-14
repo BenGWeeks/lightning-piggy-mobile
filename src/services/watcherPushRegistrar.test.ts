@@ -3,6 +3,7 @@ import { getConversationKey, decrypt as nip44Decrypt, encrypt } from 'nostr-tool
 import { finalizeEvent, generateSecretKey, getPublicKey, type NostrEvent } from 'nostr-tools/pure';
 
 import type { PushDevice } from './marmotPushRegistration';
+import { TEST_PUSH_DISABLED } from '../config/testRelayLockdown';
 import type { RegisteredRecord, WatcherAccountState } from './watcherPushStore';
 import {
   planWatcherSync,
@@ -428,6 +429,22 @@ describe('WatcherPushRegistrar lifecycle', () => {
     const signs = h.signs;
     await h.registrar.unregisterNow();
     expect(h.signs).toBe(signs + 1); // an unregister is signed and sent for it
+  });
+
+  it('passes the captured initiator and does not count a disabled transport result as acceptance', async () => {
+    const h = harness();
+    const publish = jest.fn().mockResolvedValue(TEST_PUSH_DISABLED);
+    h.deps.publish = publish;
+    h.registrar.setContext(ctx());
+    await h.registrar.setCategory('dm', true);
+    await h.advance(3_000);
+    expect(publish).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 1059 }),
+      expect.any(Function),
+      USER,
+    );
+    expect(h.registrar.getStatus().last).toBe('failed');
+    expect(h.store.get(USER)?.registered?.fingerprint).toBe('unconfirmed');
   });
 
   it('waits for the token: a toggle before it is known registers once it arrives', async () => {

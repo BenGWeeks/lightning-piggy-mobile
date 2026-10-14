@@ -16,6 +16,7 @@
 // rejects concurrent intents with BUSY) and `ts` stays strictly increasing.
 
 import type { SignerType } from '../types/nostr';
+import { TEST_PUSH_DISABLED } from '../config/testRelayLockdown';
 import type { PushDevice } from './marmotPushRegistration';
 import type { RegisteredRecord, WatcherAccountState } from './watcherPushStore';
 import {
@@ -124,7 +125,11 @@ export interface WatcherDeps {
   /** `cancelled` is checked before each signer request reaches the backend. */
   signer: (pubkey: string, signerType: SignerType, cancelled: () => boolean) => SealSigner;
   /** `stillValid` is checked right before the wrap goes out. */
-  publish: (wrap: NostrEvent, stillValid: () => boolean) => Promise<boolean>;
+  publish: (
+    wrap: NostrEvent,
+    stillValid: () => boolean,
+    initiatingPubkey: string,
+  ) => Promise<boolean | typeof TEST_PUSH_DISABLED>;
   load: (pubkey: string) => Promise<WatcherAccountState>;
   save: (pubkey: string, state: WatcherAccountState) => Promise<void>;
   now: () => number;
@@ -435,7 +440,7 @@ export class WatcherPushRegistrar {
           },
         });
       }
-      if (!(await this.deps.publish(wrap, stillValid))) {
+      if ((await this.deps.publish(wrap, stillValid, ctx.pubkey)) !== true) {
         return this.finish(stillValid() ? 'failed' : 'unavailable');
       }
       const registered: RegisteredRecord | null = built

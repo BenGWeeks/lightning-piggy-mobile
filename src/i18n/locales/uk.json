@@ -1523,7 +1523,7 @@
     "savedMyKey": "Ключ збережено"
   },
   "nostrScreen": {
-    "testRelayLockdown": "Тестовий обліковий запис — лише тестовий relay у LAN ({{url}})",
+    "testRelayLockdown": "Тестовий обліковий запис — лише тестовий relay у LAN ({{url}}) — push-сповіщення вимкнено",
     "title": "Мережа Nostr",
     "connected": "Підключено",
     "disconnected": "Відключено",

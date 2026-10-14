@@ -16,6 +16,8 @@ import { pool, trackRelays } from './nostrPool';
 import { createMarmotGroupConnections } from './marmotGroupConnections';
 import { onMarmotRelayReconnect } from './marmotRelayReconnect';
 import { MARMOT_PUSH_SERVER_RELAYS } from './nostrRelayDefaults';
+import { TEST_ACCOUNT_PUBKEYS, TEST_PUSH_DISABLED } from '../config/testRelayLockdown';
+import { setCurrentUserPubkey } from './nostrActiveAccount';
 
 const mockQuerySync = jest.fn();
 const mockPublish = jest.fn();
@@ -41,8 +43,48 @@ const inboxEvent = (relays: string[], createdAt = 100) => ({
 });
 
 beforeEach(() => {
+  setCurrentUserPubkey(null);
   mockQuerySync.mockReset();
   jest.useRealTimers();
+});
+
+afterEach(() => setCurrentUserPubkey(null));
+
+describe('push lockdown', () => {
+  const testPubkey = [...TEST_ACCOUNT_PUBKEYS][0];
+  const wrap = { kind: 1059, pubkey: 'e'.repeat(64) } as Event;
+  beforeEach(() => {
+    mockQuerySync.mockResolvedValue([]);
+    mockPublish.mockReset().mockReturnValue([]);
+    jest.mocked(trackRelays).mockClear();
+  });
+
+  it('skips inbox lookup and anonymous publications for the active locked test account', async () => {
+    const transport = createPushTransport(() => []);
+    setCurrentUserPubkey(testPubkey);
+    expect(await transport.inboxRelays(SERVER)).toEqual([]);
+    expect(await transport.publish(['wss://relay.primal.net'], wrap)).toBe(TEST_PUSH_DISABLED);
+    expect(mockQuerySync).not.toHaveBeenCalled();
+    expect(mockPublish).not.toHaveBeenCalled();
+    expect(trackRelays).not.toHaveBeenCalled();
+  });
+
+  it('retains the initiating test account after signing switches the active account', async () => {
+    setCurrentUserPubkey(testPubkey);
+    const transport = createPushTransport(() => [], testPubkey);
+    await Promise.resolve().then(() => setCurrentUserPubkey('a'.repeat(64)));
+    expect(await transport.inboxRelays(SERVER)).toEqual([]);
+    expect(await transport.publish(['wss://relay.primal.net'], wrap)).toBe(TEST_PUSH_DISABLED);
+    expect(mockQuerySync).not.toHaveBeenCalled();
+    expect(mockPublish).not.toHaveBeenCalled();
+    expect(trackRelays).not.toHaveBeenCalled();
+  });
+
+  it('keeps ordinary-account publications unchanged', async () => {
+    setCurrentUserPubkey('a'.repeat(64));
+    await createPushTransport(() => []).publish(['wss://relay.primal.net'], wrap);
+    expect(mockPublish).toHaveBeenCalledWith(['wss://relay.primal.net'], wrap);
+  });
 });
 
 describe('createPushTransport().inboxRelays', () => {

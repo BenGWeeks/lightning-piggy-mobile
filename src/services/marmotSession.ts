@@ -243,7 +243,7 @@ export class MarmotSession {
             publish: async (relays, event) => void (await network.publish(relays, event)),
             inboxRelays: (pk) => network.getUserInboxRelays(pk),
           }
-        : createPushTransport(opts.getLookupRelays),
+        : createPushTransport(opts.getLookupRelays, opts.pubkey),
     });
     const signer = opts.signer ?? createMarmotSigner(opts.pubkey, opts.signerType);
     this.pushRegistration = new MarmotPushRegistrar({
