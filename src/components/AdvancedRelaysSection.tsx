@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
-import { ChevronDown, ChevronUp, X as XIcon } from 'lucide-react-native';
+import { ChevronDown, ChevronUp, Trash2 } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { DEFAULT_RELAYS } from '../services/nostrService';
@@ -8,7 +8,7 @@ import { GC_RELAYS } from '../services/geocacheRelays';
 import { createAdvancedRelaysSectionStyles } from '../styles/AdvancedRelaysSection.styles';
 import RelaySettingsRow from './RelaySettingsRow';
 import { RELAY_LIST_INDEXERS } from '../utils/relayListEvents';
-import { relayDisplayName } from '../utils/relayDetails';
+import { relayDisplayName, relayRowHost } from '../utils/relayDetails';
 import RelayStatusDot from './RelayStatusDot';
 import NetworkSectionHeading from './NetworkSectionHeading';
 import { useNavigation } from '@react-navigation/native';
@@ -103,7 +103,7 @@ export default function AdvancedRelaysSection({
                 testID="deviceRelaysTitle"
               />
               <View style={styles.list} testID="device-relay-list">
-                {deviceRelays.map((url) => (
+                {deviceRelays.map((url, index) => (
                   <View key={url} style={styles.row}>
                     <RelayStatusDot status={connection.get(url)} />
                     <Text
@@ -117,12 +117,14 @@ export default function AdvancedRelaysSection({
                     <TouchableOpacity
                       onPress={() => onRemoveDeviceRelay(url)}
                       style={styles.removeButton}
-                      testID={`device-relay-remove-${url}`}
-                      accessibilityLabel={t('nostrScreen.removeRelayLabel', { url })}
+                      testID={`relay-row-remove-device-${index}`}
+                      accessibilityLabel={t('publishedRelays.removeHostLabel', {
+                        host: relayRowHost(url),
+                      })}
                       accessibilityRole="button"
                       hitSlop={8}
                     >
-                      <XIcon size={16} color={colors.white} />
+                      <Trash2 size={16} color={colors.brandPink} />
                     </TouchableOpacity>
                   </View>
                 ))}

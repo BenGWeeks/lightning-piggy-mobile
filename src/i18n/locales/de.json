@@ -2781,6 +2781,7 @@
     "addLabel": "Relay hinzufügen",
     "addUrlLabel": "Relay-URL",
     "removeLabel": "{{url}} entfernen",
+    "removeHostLabel": "{{host}} entfernen",
     "invalidUrl": "Verwende eine öffentliche Relay-Adresse, die mit wss:// beginnt.",
     "publish": "Veröffentlichen",
     "cancel": "Abbrechen",

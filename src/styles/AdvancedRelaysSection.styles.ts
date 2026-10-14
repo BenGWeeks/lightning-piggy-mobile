@@ -45,6 +45,6 @@ export const createAdvancedRelaysSectionStyles = (colors: Palette) =>
       borderRadius: 14,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: 'rgba(255,255,255,0.15)',
+      backgroundColor: colors.surface,
     },
   });

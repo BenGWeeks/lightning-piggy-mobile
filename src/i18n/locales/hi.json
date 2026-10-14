@@ -2781,6 +2781,7 @@
     "addLabel": "रिले जोड़ें",
     "addUrlLabel": "रिले URL",
     "removeLabel": "{{url}} हटाएँ",
+    "removeHostLabel": "{{host}} हटाएँ",
     "invalidUrl": "wss:// से शुरू होने वाला सार्वजनिक रिले पता इस्तेमाल करें।",
     "publish": "पब्लिश करें",
     "cancel": "रद्द करें",

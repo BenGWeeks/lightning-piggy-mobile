@@ -8,6 +8,17 @@ export const createPublishedRelayListsSectionStyles = (colors: Palette) =>
       borderRadius: 10,
       paddingVertical: 4,
     },
+    rowContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    openRow: {
+      flex: 1,
+      minWidth: 0,
+    },
+    rowRemoveButton: {
+      marginRight: 12,
+    },
     row: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -49,7 +60,7 @@ export const createPublishedRelayListsSectionStyles = (colors: Palette) =>
       borderRadius: 14,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: 'rgba(255,255,255,0.15)',
+      backgroundColor: colors.surface,
     },
     addRow: {
       flexDirection: 'row',

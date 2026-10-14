@@ -2781,6 +2781,7 @@
     "addLabel": "रिले जोडा",
     "addUrlLabel": "रिले URL",
     "removeLabel": "{{url}} काढा",
+    "removeHostLabel": "{{host}} काढा",
     "invalidUrl": "wss:// ने सुरू होणारा सार्वजनिक रिले ॲड्रेस वापरा.",
     "publish": "प्रकाशित करा",
     "cancel": "रद्द करा",

@@ -2781,6 +2781,7 @@
     "addLabel": "添加中继",
     "addUrlLabel": "中继网址",
     "removeLabel": "移除{{url}}",
+    "removeHostLabel": "移除 {{host}}",
     "invalidUrl": "请使用以wss://开头的公开中继地址。",
     "publish": "发布",
     "cancel": "取消",
