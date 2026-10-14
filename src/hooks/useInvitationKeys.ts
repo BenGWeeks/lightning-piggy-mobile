@@ -12,8 +12,8 @@ import {
 } from '../services/marmotInvitationKeys';
 import { groupInvitationDevices, type InvitationDevice } from '../services/marmotInvitationDevices';
 import {
-  rememberInvitationDeviceSummary,
-  summariseInvitationDevices,
+  beginInvitationDeviceSummaryScan,
+  completeInvitationDeviceSummaryScan,
 } from '../utils/invitationDeviceSummary';
 
 const EMPTY: InvitationInventory = { keys: [], partial: false };
@@ -37,18 +37,16 @@ export function useInvitationKeys() {
   const reload = useCallback(async () => {
     const seq = ++sequence.current;
     if (!pubkey) return;
+    const scan = beginInvitationDeviceSummaryScan(pubkey);
     setLoading(true);
     setError(false);
     try {
       const result = await loadInvitationKeys(pubkey, relays);
-      if (owner.current === pubkey) {
+      if (seq === sequence.current && owner.current === pubkey) {
         // Keeps Settings → Messages' "Devices for new chats" value in step.
-        rememberInvitationDeviceSummary(
-          pubkey,
-          summariseInvitationDevices(groupInvitationDevices(result.keys, result.localSlot)),
-        );
+        completeInvitationDeviceSummaryScan(pubkey, scan, result);
+        setInventory(result);
       }
-      if (seq === sequence.current && owner.current === pubkey) setInventory(result);
     } catch {
       if (seq === sequence.current) setError(true);
     } finally {

@@ -2,11 +2,10 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { useNostr } from '../contexts/NostrContext';
 import { loadInvitationKeys } from '../services/marmotInvitationKeys';
-import { groupInvitationDevices } from '../services/marmotInvitationDevices';
 import {
+  beginInvitationDeviceSummaryScan,
   cachedInvitationDeviceSummary,
-  rememberInvitationDeviceSummary,
-  summariseInvitationDevices,
+  completeInvitationDeviceSummaryScan,
   type InvitationDeviceSummary,
 } from '../utils/invitationDeviceSummary';
 
@@ -32,13 +31,14 @@ export function useInvitationDeviceSummary(): InvitationDeviceSummary {
       const cached = cachedInvitationDeviceSummary(pubkey);
       setSummary(cached?.summary ?? { state: 'checking' });
       if (!cached?.fresh) {
+        const scan = beginInvitationDeviceSummaryScan(pubkey);
         loadInvitationKeys(pubkey, relays)
           .then((inventory) => {
-            const next = summariseInvitationDevices(
-              groupInvitationDevices(inventory.keys, inventory.localSlot),
+            if (seq !== sequence.current) return;
+            const next = completeInvitationDeviceSummaryScan(pubkey, scan, inventory);
+            setSummary(
+              next ?? cachedInvitationDeviceSummary(pubkey)?.summary ?? { state: 'unavailable' },
             );
-            rememberInvitationDeviceSummary(pubkey, next);
-            if (seq === sequence.current) setSummary(next);
           })
           .catch(() => {
             // Keep a previous answer if we have one; otherwise say so plainly.

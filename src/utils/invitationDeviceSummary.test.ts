@@ -1,9 +1,12 @@
 import { createI18nInstance } from '../i18n';
 import type { InvitationDevice } from '../services/marmotInvitationDevices';
+import type { InvitationInventory } from '../services/marmotInvitationKeys';
 import {
   SUMMARY_FRESH_MS,
+  beginInvitationDeviceSummaryScan,
   cachedInvitationDeviceSummary,
   clearInvitationDeviceSummaries,
+  completeInvitationDeviceSummaryScan,
   invitationDeviceSummaryLabel,
   rememberInvitationDeviceSummary,
   summariseInvitationDevices,
@@ -20,6 +23,26 @@ const device = (kind: InvitationDevice['kind'], published = true): InvitationDev
 });
 
 const en = createI18nInstance('en');
+const publishedInventory: InvitationInventory = {
+  partial: false,
+  keys: [
+    {
+      slot: 'remote-device',
+      client: 'White Noise',
+      thisPhone: false,
+      relays: ['wss://relay.test'],
+      event: {
+        id: 'key',
+        pubkey: 'alice',
+        kind: 30443,
+        created_at: 1_000,
+        content: 'key',
+        sig: '',
+        tags: [],
+      },
+    },
+  ],
+};
 const label = (summary: InvitationDeviceSummary) => {
   const { key, options } = invitationDeviceSummaryLabel(summary);
   return en.t(key, options);
@@ -77,5 +100,74 @@ describe('"Devices for new chats" value (#1552)', () => {
     rememberInvitationDeviceSummary('alice', { state: 'checking' });
     rememberInvitationDeviceSummary('alice', { state: 'unavailable' });
     expect(cachedInvitationDeviceSummary('alice')).toBeUndefined();
+  });
+
+  it('does not interpret a partial empty scan as no published devices', () => {
+    const scan = beginInvitationDeviceSummaryScan('alice');
+    expect(
+      completeInvitationDeviceSummaryScan('alice', scan, { keys: [], partial: true }),
+    ).toBeUndefined();
+    expect(cachedInvitationDeviceSummary('alice')).toBeUndefined();
+  });
+
+  it('preserves the last complete answer and its stale age after a partial scan', () => {
+    rememberInvitationDeviceSummary('alice', { state: 'devices', count: 2 }, 1_000);
+    const scan = beginInvitationDeviceSummaryScan('alice');
+    expect(
+      completeInvitationDeviceSummaryScan(
+        'alice',
+        scan,
+        { ...publishedInventory, partial: true },
+        1_000 + SUMMARY_FRESH_MS,
+      ),
+    ).toBeUndefined();
+    expect(cachedInvitationDeviceSummary('alice', 1_000 + SUMMARY_FRESH_MS)).toEqual({
+      summary: { state: 'devices', count: 2 },
+      fresh: false,
+    });
+  });
+
+  it('rejects an older scan that finishes after the post-removal scan', () => {
+    const older = beginInvitationDeviceSummaryScan('alice');
+    const newer = beginInvitationDeviceSummaryScan('alice');
+    expect(
+      completeInvitationDeviceSummaryScan('alice', newer, { keys: [], partial: false }, 1_000),
+    ).toEqual({ state: 'notShared' });
+    expect(
+      completeInvitationDeviceSummaryScan(
+        'alice',
+        older,
+        publishedInventory,
+        1_000 + SUMMARY_FRESH_MS,
+      ),
+    ).toBeUndefined();
+    expect(cachedInvitationDeviceSummary('alice', 1_000 + SUMMARY_FRESH_MS)).toEqual({
+      summary: { state: 'notShared' },
+      fresh: false,
+    });
+  });
+
+  it('supersedes older scans even if the newer scan is partial or still pending', () => {
+    const older = beginInvitationDeviceSummaryScan('alice');
+    const newer = beginInvitationDeviceSummaryScan('alice');
+    expect(
+      completeInvitationDeviceSummaryScan('alice', older, { keys: [], partial: false }),
+    ).toBeUndefined();
+    completeInvitationDeviceSummaryScan('alice', newer, { keys: [], partial: true });
+    expect(
+      completeInvitationDeviceSummaryScan('alice', older, { keys: [], partial: false }),
+    ).toBeUndefined();
+    expect(cachedInvitationDeviceSummary('alice')).toBeUndefined();
+  });
+
+  it('keeps scan ordering independent for different accounts', () => {
+    const alice = beginInvitationDeviceSummaryScan('alice');
+    const bob = beginInvitationDeviceSummaryScan('bob');
+    expect(
+      completeInvitationDeviceSummaryScan('alice', alice, { keys: [], partial: false }),
+    ).toEqual({ state: 'notShared' });
+    expect(completeInvitationDeviceSummaryScan('bob', bob, { keys: [], partial: false })).toEqual({
+      state: 'notShared',
+    });
   });
 });

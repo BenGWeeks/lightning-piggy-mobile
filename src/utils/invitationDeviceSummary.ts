@@ -1,7 +1,8 @@
 // One-line answer for Settings → Messages → "Devices for new chats" (#1552):
 // how many of the account's devices currently share an invitation key, as
 // last seen by a relay scan. Pure: no relays, no React.
-import type { InvitationDevice } from '../services/marmotInvitationDevices';
+import { groupInvitationDevices, type InvitationDevice } from '../services/marmotInvitationDevices';
+import type { InvitationInventory } from '../services/marmotInvitationKeys';
 
 export type InvitationDeviceSummary =
   | { state: 'checking' }
@@ -45,6 +46,29 @@ export function invitationDeviceSummaryLabel(summary: InvitationDeviceSummary): 
 export const SUMMARY_FRESH_MS = 10 * 60 * 1000;
 
 const cache = new Map<string, { summary: InvitationDeviceSummary; at: number }>();
+const scans = new Map<string, symbol>();
+
+/** Supersede older scans from either the settings row or the full device screen. */
+export function beginInvitationDeviceSummaryScan(owner: string): symbol {
+  const scan = Symbol();
+  scans.set(owner, scan);
+  return scan;
+}
+
+/** Only the latest complete scan can refresh the shared answer and its age. */
+export function completeInvitationDeviceSummaryScan(
+  owner: string,
+  scan: symbol,
+  inventory: InvitationInventory,
+  now = Date.now(),
+): InvitationDeviceSummary | undefined {
+  if (scans.get(owner) !== scan || inventory.partial) return undefined;
+  const summary = summariseInvitationDevices(
+    groupInvitationDevices(inventory.keys, inventory.localSlot),
+  );
+  rememberInvitationDeviceSummary(owner, summary, now);
+  return summary;
+}
 
 /** Remember the latest scan for an account (the full device list feeds this too). */
 export function rememberInvitationDeviceSummary(
@@ -67,4 +91,5 @@ export function cachedInvitationDeviceSummary(
 /** Test seam. */
 export function clearInvitationDeviceSummaries(): void {
   cache.clear();
+  scans.clear();
 }
