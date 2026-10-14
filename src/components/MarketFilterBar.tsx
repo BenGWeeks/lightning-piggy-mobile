@@ -1,4 +1,5 @@
 import MarketMerchantFilter from './MarketMerchantFilter';
+import MarketShipsToFilter from './MarketShipsToFilter';
 import type { MarketMerchant } from '../utils/marketMerchants';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -15,7 +16,6 @@ import { Check, X } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createMarketFilterBarStyles } from '../styles/MarketFilterBar.styles';
-import { vendorSlug } from '../utils/marketVendors';
 import { perfLog } from '../utils/perfLog';
 import { MARKET_MODE_OPTIONS, type MarketMode } from '../utils/marketMode';
 import { SATS_CURRENCY_CODE } from '../utils/currencyCode';
@@ -31,10 +31,12 @@ interface Props {
   merchants: MarketMerchant[];
   selectedMerchant: string | null;
   onSelectMerchant: (merchant: string | null) => void;
-  /** Distinct countries present in the data; `null` selection means "All". */
-  countries: string[];
-  selectedCountry: string | null;
-  onSelectCountry: (country: string | null) => void;
+  /** Ships-to chip codes (see `shipsToOptions`); `null` selection = Anywhere. */
+  shipsToCountries: readonly string[];
+  selectedShipsTo: string | null;
+  onSelectShipsTo: (country: string | null) => void;
+  includeUnknownShipping: boolean;
+  onIncludeUnknownShippingChange: (include: boolean) => void;
   /** Distinct canonical currency codes in the data (see `normalizeCurrencyCode`);
    * `null` selection means "All". */
   currencies: string[];
@@ -73,7 +75,7 @@ const Chip: React.FC<{
 /**
  * Right-anchored, slide-in **filter panel** for the Market screen.
  *
- * Houses the seller scope / merchant / country / currency filter controls so the main view
+ * Houses the seller scope / merchant / ships-to / currency filter controls so the main view
  * stays compact — the header keeps only the inline search box plus a filter
  * icon that opens this panel. The chip axes are sourced from the DISTINCT
  * values present in the loaded products (passed in by the screen) rather than
@@ -96,9 +98,11 @@ const MarketFilterBar: React.FC<Props> = ({
   merchants,
   selectedMerchant,
   onSelectMerchant,
-  countries,
-  selectedCountry,
-  onSelectCountry,
+  shipsToCountries,
+  selectedShipsTo,
+  onSelectShipsTo,
+  includeUnknownShipping,
+  onIncludeUnknownShippingChange,
   currencies,
   selectedCurrency,
   onSelectCurrency,
@@ -257,35 +261,14 @@ const MarketFilterBar: React.FC<Props> = ({
             />
           ) : null}
 
-          {/* Country */}
-          {countries.length > 0 ? (
-            <View style={styles.section} testID="market-filter-countries">
-              <Text style={styles.sectionLabel}>{t('market.filters.country')}</Text>
-              <View style={styles.chipWrap}>
-                <Chip
-                  label={t('market.filters.all')}
-                  selected={selectedCountry === null}
-                  onPress={() => onSelectCountry(null)}
-                  testID="market-filter-country-all"
-                  styles={styles}
-                />
-                {countries.map((c) => (
-                  <Chip
-                    key={c}
-                    label={c}
-                    selected={selectedCountry === c}
-                    onPress={() => onSelectCountry(selectedCountry === c ? null : c)}
-                    // Slugify the country so the testID has no spaces (e.g.
-                    // "United Kingdom" -> "united-kingdom"), keeping Maestro
-                    // selectors stable — matching the codebase's filter-chip
-                    // convention (per Copilot review on #948).
-                    testID={`market-filter-country-${vendorSlug(c)}`}
-                    styles={styles}
-                  />
-                ))}
-              </View>
-            </View>
-          ) : null}
+          <MarketShipsToFilter
+            countries={shipsToCountries}
+            selected={selectedShipsTo}
+            onSelect={onSelectShipsTo}
+            includeUnknown={includeUnknownShipping}
+            onIncludeUnknownChange={onIncludeUnknownShippingChange}
+            styles={styles}
+          />
 
           {/* Currency */}
           {currencies.length > 0 ? (

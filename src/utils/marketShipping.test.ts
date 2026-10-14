@@ -271,3 +271,31 @@ it.each(['GBP&extra=value', 'USD?x=y', 'NOPE'])(
     ).toBeNull();
   },
 );
+
+describe('parseShippingOptionEvent — Gamma region tags', () => {
+  const base = [
+    ['d', 'fl'],
+    ['price', '5.99', 'USD'],
+  ];
+  it('keeps ISO 3166-2 regions alongside the country they narrow', () => {
+    const option = parseShippingOptionEvent(
+      makeEvent([...base, ['country', 'US'], ['region', 'us-fl', 'US-CA', 'bogus']]),
+    );
+    expect(option?.countries).toEqual(['US']);
+    expect(option?.regions).toEqual(['US-FL', 'US-CA']);
+  });
+  it('derives the country from region codes when the country tag is missing', () => {
+    // `country` is required by the spec; a regions-only option must not read
+    // as worldwide.
+    const option = parseShippingOptionEvent(makeEvent([...base, ['region', 'US-FL', 'CA-ON']]));
+    expect(option?.countries.sort()).toEqual(['CA', 'US']);
+  });
+  it('rejects a regions-only option whose region country is not real', () => {
+    expect(parseShippingOptionEvent(makeEvent([...base, ['region', 'ZZ-01']]))).toBeNull();
+  });
+  it('still treats an option with neither country nor region as worldwide', () => {
+    const option = parseShippingOptionEvent(makeEvent(base));
+    expect(option?.countries).toEqual([]);
+    expect(option?.regions).toEqual([]);
+  });
+});

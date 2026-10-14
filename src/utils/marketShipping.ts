@@ -11,6 +11,7 @@ import { CURRENCIES } from '../services/fiatService';
 //   ["title", <name>]               – human label ("Royal Mail Tracked 48")
 //   ["price", <amount>, <currency>] – base cost
 //   ["country", <ISO-3166-1-a2>, …] – where it applies; ABSENT = worldwide
+//   ["region", <ISO-3166-2>, …]     – optional narrowing within those countries
 //
 // A product (kind 30402) may reference options it supports via
 //   ["shipping_option", "30406:<pubkey>:<d>", <extra-cost?>]
@@ -38,6 +39,9 @@ export interface ShippingOption {
   currency: string;
   /** Upper-cased ISO 3166-1 alpha-2 codes this option ships to. EMPTY = worldwide. */
   countries: string[];
+  /** Upper-cased ISO 3166-2 subdivisions (`US-FL`) narrowing `countries`; empty
+   * = the whole of each country. Optional so hand-built options stay valid. */
+  regions?: string[];
   /** Event `created_at` — used to keep only the newest per `d` (addressable). */
   createdAt: number;
 }
@@ -98,7 +102,20 @@ export function parseShippingOptionEvent(ev: ShippingOptionEventInput): Shipping
       if (typeof v === 'string' && v.trim()) countries.add(toAlpha2(v));
     }
   }
-  // ABSENT country tags = worldwide. A PRESENT tag that yields no usable code
+  // Gamma `region` tags (ISO 3166-2, e.g. US-FL) narrow an option within its
+  // countries. `country` is required by the spec, so an option that names only
+  // regions still ships to those regions' countries — never read it as
+  // worldwide just because the country tag was left out.
+  const regions = new Set<string>();
+  for (const t of ev.tags) {
+    if (t[0] !== 'region') continue;
+    for (const v of t.slice(1)) {
+      const code = typeof v === 'string' ? v.trim().toUpperCase() : '';
+      if (/^[A-Z]{2}-[A-Z0-9]{1,3}$/.test(code)) regions.add(code);
+    }
+  }
+  if (!hasCountryTag) for (const region of regions) countries.add(region.slice(0, 2));
+  // ABSENT country (and region) tags = worldwide. A PRESENT tag that yields no usable code
   // (`['country']`, `['country', '']`) is a malformed restriction — reject it
   // rather than collapse to [] and offer the option to every destination.
   if (hasCountryTag && countries.size === 0) return null;
@@ -115,6 +132,7 @@ export function parseShippingOptionEvent(ev: ShippingOptionEventInput): Shipping
     baseAmount,
     currency,
     countries: [...countries],
+    regions: [...regions],
     createdAt: ev.created_at,
   };
 }

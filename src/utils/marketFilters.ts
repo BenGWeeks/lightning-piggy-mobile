@@ -8,38 +8,47 @@ import { normalizeCurrencyCode } from './currencyCode';
 // products:
 //   • search   — case-insensitive substring over title / description / seller
 //   • merchant — the listing author's pubkey (curated fallback: vendor name)
-//   • country  — the selling vendor's `country`
+//   • ships to — a destination country, matched against the seller's
+//                published kind-30406 shipping options (utils/marketShipsTo)
 //   • currency — the listing's currency, else derived from the product's
 //                `priceFiatLabel` (e.g. "£60"); normalised so SAT/sats/SATS
 //                are one option
 //
-// Option lists (merchants, countries, currencies) are DERIVED FROM THE LOADED
-// DATA, not hardcoded, so they stay correct if the catalogue (or a future live
-// Nostr feed) changes.
+// Option lists (merchants, ships-to countries, currencies) are DERIVED FROM
+// THE LOADED DATA, not hardcoded, so they stay correct as listings change.
 import type { MarketProduct } from '../data/marketProducts';
 import type { MarketVendor } from '../data/marketVendors';
 import { DEFAULT_MARKET_MODE, type MarketMode } from './marketMode';
+import { shipsToMatches, type ShipsTo } from './marketShipsTo';
 
 /** Resolve the vendor a product is sold by. Injected (rather than importing
  * `sellerOf` directly) so these helpers stay free of the data module and are
  * trivially testable with a stub directory. */
 export type ResolveVendor = (product: MarketProduct) => MarketVendor | undefined;
 
-/** The four composable Market filters. A `null` merchant/country/currency means
- * "no filter on that axis" (i.e. All); an empty/whitespace query means "no
- * search filter". */
+/** Where a product ships to (see `productShipsTo`); injected like the vendor
+ * resolver so filtering stays pure. */
+export type ResolveShipsTo = (product: MarketProduct) => ShipsTo;
+
+/** The four composable Market filters. A `null` merchant/shipsTo/currency
+ * means "no filter on that axis" (All / Anywhere); an empty/whitespace query
+ * means "no search filter". */
 export interface MarketFilter {
   query: string;
   merchant: string | null;
-  country: string | null;
+  /** Destination country (ISO 3166-1 alpha-2), or null for Anywhere. */
+  shipsTo: string | null;
+  /** With a destination set, keep listings whose shipping is unknown. */
+  includeUnknownShipping: boolean;
   currency: string | null;
 }
 
-/** A cleared filter — empty search, no merchant, no country, no currency. */
+/** A cleared filter — empty search, no merchant, ships anywhere, no currency. */
 export const EMPTY_MARKET_FILTER: MarketFilter = {
   query: '',
   merchant: null,
-  country: null,
+  shipsTo: null,
+  includeUnknownShipping: true,
   currency: null,
 };
 
@@ -48,7 +57,7 @@ export function isMarketFilterActive(filter: MarketFilter): boolean {
   return (
     filter.query.trim().length > 0 ||
     filter.merchant !== null ||
-    filter.country !== null ||
+    filter.shipsTo !== null ||
     filter.currency !== null
   );
 }
@@ -64,7 +73,7 @@ export function isMarketScopeNarrowing(mode: MarketMode): boolean {
 }
 
 /**
- * Count of active panel filter axes (seller scope / merchant / country /
+ * Count of active panel filter axes (seller scope / merchant / ships to /
  * currency) — the axes housed in the slide-in filter panel. Drives the active
  * state + count badge on the Market header's filter icon so the user can see
  * how many hidden filters narrow the list without opening the panel. The
@@ -75,7 +84,7 @@ export function isMarketScopeNarrowing(mode: MarketMode): boolean {
 export function countActiveMarketFilters(filter: MarketFilter, mode: MarketMode): number {
   let n = isMarketScopeNarrowing(mode) ? 1 : 0;
   if (filter.merchant !== null) n += 1;
-  if (filter.country !== null) n += 1;
+  if (filter.shipsTo !== null) n += 1;
   if (filter.currency !== null) n += 1;
   return n;
 }
@@ -90,7 +99,8 @@ export function canClearMarketFilters(filter: MarketFilter, mode: MarketMode): b
   return (
     mode !== DEFAULT_MARKET_MODE ||
     filter.merchant !== null ||
-    filter.country !== null ||
+    filter.shipsTo !== null ||
+    !filter.includeUnknownShipping ||
     filter.currency !== null
   );
 }
@@ -190,16 +200,6 @@ export function currencyOf(priceFiatLabel: string | null | undefined): string | 
   return SYMBOL_TO_CURRENCY[symbol]!;
 }
 
-/** The selling vendor's country, or `null` when the product has no known
- * vendor (orphan seller — a data error caught elsewhere). */
-export function productCountry(
-  product: MarketProduct,
-  resolveVendor: ResolveVendor,
-): string | null {
-  const vendor = resolveVendor(product);
-  return vendor ? vendor.country : null;
-}
-
 /** Stable merchant key: listing pubkey, or curated fallback vendor name. */
 export function productMerchant(
   product: MarketProduct,
@@ -223,32 +223,12 @@ export function productMatchesSearch(
   const q = query.trim().toLowerCase();
   if (q.length === 0) return true;
   const vendor = resolveVendor(product);
-  const haystack = [
-    product.title,
-    product.description,
-    product.sellerName,
-    vendor?.name ?? '',
-    vendor?.country ?? '',
-  ]
+  const haystack = [product.title, product.description, product.sellerName, vendor?.name ?? '']
     // NUL separator (written as an escape so the source stays plain text): a
     // typed query can't contain it, so a match never spans two fields.
     .join('\u0000')
     .toLowerCase();
   return haystack.includes(q);
-}
-
-/** Distinct vendor countries present in the products, sorted alphabetically.
- * Drives the country filter chips (derived from data, not hardcoded). */
-export function distinctCountries(
-  products: readonly MarketProduct[],
-  resolveVendor: ResolveVendor,
-): string[] {
-  const set = new Set<string>();
-  for (const p of products) {
-    const country = productCountry(p, resolveVendor);
-    if (country) set.add(country);
-  }
-  return [...set].sort((a, b) => a.localeCompare(b));
 }
 
 /** Distinct merchant (vendor) names present in the products, sorted
@@ -287,15 +267,16 @@ export function distinctCurrencies(products: readonly MarketProduct[]): string[]
 }
 
 /**
- * Apply the composed filter (search AND merchant AND country AND currency) to
+ * Apply the composed filter (search AND merchant AND ships-to AND currency) to
  * the product list. Each axis is independent and ANDs with the others; a `null`
- * merchant/country/currency or empty query disables that axis. Returns a new
+ * merchant/shipsTo/currency or empty query disables that axis. Returns a new
  * array (a subset, original order preserved); never mutates the input.
  */
 export function filterMarketProducts(
   products: readonly MarketProduct[],
   filter: MarketFilter,
   resolveVendor: ResolveVendor,
+  resolveShipsTo: ResolveShipsTo,
 ): MarketProduct[] {
   const currency = filter.currency === null ? null : normalizeCurrencyCode(filter.currency);
   return products.filter((p) => {
@@ -303,7 +284,10 @@ export function filterMarketProducts(
     if (filter.merchant !== null && productMerchant(p, resolveVendor) !== filter.merchant) {
       return false;
     }
-    if (filter.country !== null && productCountry(p, resolveVendor) !== filter.country) {
+    if (
+      filter.shipsTo !== null &&
+      !shipsToMatches(resolveShipsTo(p), filter.shipsTo, filter.includeUnknownShipping)
+    ) {
       return false;
     }
     if (currency !== null && productCurrency(p) !== currency) return false;

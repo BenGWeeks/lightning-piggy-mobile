@@ -1,4 +1,13 @@
-import { deviceCountryCode, COUNTRIES, countryName, isKnownCountry, toAlpha2 } from './countries';
+import {
+  deviceCountryCode,
+  COUNTRIES,
+  countryName,
+  isKnownCountry,
+  localizedCountryName,
+  toAlpha2,
+} from './countries';
+import COUNTRY_NAMES_BY_LOCALE from './countryNames.json';
+import { SUPPORTED_LOCALES } from '../i18n';
 
 describe('COUNTRIES', () => {
   it('codes are unique, uppercase ISO 3166-1 alpha-2', () => {
@@ -69,5 +78,27 @@ describe('toAlpha2 with country names (#1273)', () => {
     expect(toAlpha2(' united kingdom ')).toBe('GB');
     expect(toAlpha2('UK')).toBe('GB');
     expect(toAlpha2('Narnia')).toBe('NARNIA');
+  });
+});
+
+describe('localizedCountryName (CLDR table, Hermes has no Intl.DisplayNames)', () => {
+  it('uses the picker names for English', () => {
+    expect(localizedCountryName('GB', 'en')).toBe(countryName('GB'));
+  });
+  it('reads the generated CLDR names for other app locales', () => {
+    expect(localizedCountryName('GB', 'de')).toBe('Vereinigtes Königreich');
+    expect(localizedCountryName('de', 'es')).toBe('Alemania');
+    expect(localizedCountryName('US', 'zh-Hans')).toBe('美国');
+  });
+  it('falls back to the English name, then the code', () => {
+    expect(localizedCountryName('GB', 'xx')).toBe(countryName('GB'));
+    expect(localizedCountryName('ZZ', 'de')).toBe('ZZ');
+  });
+  it('covers every app locale and every country code (regenerate with scripts/generate-country-names.mjs)', () => {
+    const table = COUNTRY_NAMES_BY_LOCALE as Record<string, Record<string, string>>;
+    expect(Object.keys(table).sort()).toEqual(SUPPORTED_LOCALES.filter((l) => l !== 'en').sort());
+    for (const names of Object.values(table)) {
+      for (const { code } of COUNTRIES) expect(names[code]).toEqual(expect.any(String));
+    }
   });
 });

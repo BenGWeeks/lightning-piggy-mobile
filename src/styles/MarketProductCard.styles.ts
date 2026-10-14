@@ -102,6 +102,11 @@ export const createMarketProductCardStyles = (colors: Palette) =>
       fontWeight: '600',
       color: colors.textSupplementary,
     },
+    shippingUnknown: {
+      marginTop: 2,
+      fontSize: 11,
+      color: colors.textSupplementary,
+    },
     description: {
       fontSize: 12,
       color: colors.textSupplementary,

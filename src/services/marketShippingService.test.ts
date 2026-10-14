@@ -1,5 +1,9 @@
 import { finalizeEvent, getPublicKey } from 'nostr-tools';
-import { fetchShippingOptions, fetchShippingOptionsForDisplay } from './marketShippingService';
+import {
+  fetchShippingOptions,
+  fetchShippingOptionsForDisplay,
+  shippingOptionFilters,
+} from './marketShippingService';
 import { querySyncAbortable } from './relayQuery';
 import { acquireMarketListingsPool } from './marketListingsPool';
 import * as pacing from '../contexts/nostrDecryptPacing';
@@ -150,18 +154,38 @@ test('fetches exact references grouped by embedded author and validates unsolici
     );
   const options = await fetchShippingOptionsForDisplay({ ...input, coordinates });
   expect(options.map((o) => o.coordinate).sort()).toEqual([...coordinates].sort());
-  const filters = (querySyncAbortable as jest.Mock).mock.calls.map((c) => c[2]);
-  expect(filters).toContainEqual({
-    kinds: [30406],
-    authors: [other],
-    '#d': ['std', 'zone:colon'],
-    limit: 100,
+  const filters = (querySyncAbortable as jest.Mock).mock.calls
+    .map((c) => c[2])
+    .filter((f) => f.kinds[0] === 30406);
+  // One batched query across both sellers, not one per seller.
+  expect(filters).toEqual([
+    {
+      kinds: [30406],
+      authors: [input.merchantPubkey, other],
+      '#d': ['std', 'zone:colon'],
+      limit: 100,
+    },
+  ]);
+});
+
+describe('shippingOptionFilters (batched across sellers)', () => {
+  const author = (i: number) => i.toString(16).padStart(64, '0');
+  test('caps each query at 20 authors and 100 coordinates, with a bounded limit', () => {
+    const many = Array.from({ length: 45 }, (_, i) => `30406:${author(i)}:std`);
+    const filters = shippingOptionFilters(many);
+    expect(filters.map((f) => f.authors!.length)).toEqual([20, 20, 5]);
+    expect(filters.every((f) => f['#d']!.length === 1 && f.limit === 100)).toBe(true);
+    const oneSeller = Array.from({ length: 150 }, (_, i) => `30406:${author(1)}:zone-${i}`);
+    const chunks = shippingOptionFilters(oneSeller);
+    expect(chunks.map((f) => f['#d']!.length)).toEqual([100, 50]);
+    expect(chunks.map((f) => f.limit)).toEqual([200, 100]);
   });
-  expect(filters).toContainEqual({
-    kinds: [30406],
-    authors: [input.merchantPubkey],
-    '#d': ['std'],
-    limit: 100,
+  test('dedupes and skips malformed coordinates', () => {
+    const ok = `30406:${author(2)}:std`;
+    expect(shippingOptionFilters([ok, ok, '30402:abc:std', `30406:${author(2)}:`])).toEqual([
+      { kinds: [30406], authors: [author(2)], '#d': ['std'], limit: 100 },
+    ]);
+    expect(shippingOptionFilters([])).toEqual([]);
   });
 });
 

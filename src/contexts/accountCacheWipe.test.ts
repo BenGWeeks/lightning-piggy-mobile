@@ -120,7 +120,8 @@ it('wipes market filters and every follow scope only for the signed-out account'
   const preferences = {
     mode: 'wotFriends' as const,
     merchant: 'Seller',
-    country: 'DE',
+    shipsTo: 'DE',
+    includeUnknownShipping: true,
     currency: 'EUR',
   };
   await writeMarketPreferences(PK, preferences);

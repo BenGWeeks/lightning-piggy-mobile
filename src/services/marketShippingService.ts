@@ -2,7 +2,7 @@
 // Thin I/O shell over the PURE parsing/filtering in utils/marketShipping —
 // query the merchant's addressable shipping-option events once per checkout
 // open, newest-revision-per-d.
-import type { Event } from 'nostr-tools';
+import type { Event, Filter } from 'nostr-tools';
 import { pool, trackRelays, DEFAULT_RELAYS } from './nostrService';
 import { acquireMarketListingsPool } from './marketListingsPool';
 import { verifyEventCached } from './nostrVerifyCache';
@@ -83,9 +83,52 @@ export async function fetchShippingOptions(input: {
   return parsed as ShippingOption[];
 }
 
+// One query covers many sellers' options: a filter names up to this many
+// coordinates across at most this many authors, so a whole Market page of
+// listings resolves in a handful of round-trips instead of one per seller.
+const COORDINATES_PER_QUERY = 100;
+const AUTHORS_PER_QUERY = 20;
+
 /**
- * Display-only variant for the product page (#1273): shows whatever valid
- * options at the listing's referenced coordinates within the deadline. Unlike
+ * Bounded relay filters for exact 30406 coordinates, batched across authors.
+ * `authors` × `#d` can also match an author's option that another seller's
+ * `d` names, so callers must keep only the coordinates they asked for.
+ */
+export function shippingOptionFilters(coordinates: readonly string[]): Filter[] {
+  const filters: Filter[] = [];
+  let authors = new Set<string>();
+  let dTags = new Set<string>();
+  let count = 0;
+  const flush = () => {
+    if (count === 0) return;
+    filters.push({
+      kinds: [SHIPPING_OPTION_KIND],
+      authors: [...authors],
+      '#d': [...dTags],
+      // Room for a stale revision or a cross-matched option per coordinate.
+      limit: Math.max(100, 2 * count),
+    });
+    authors = new Set();
+    dTags = new Set();
+    count = 0;
+  };
+  for (const coordinate of new Set(coordinates)) {
+    if (!/^30406:[a-f0-9]{64}:.+$/.test(coordinate)) continue;
+    const author = coordinate.slice(6, 70);
+    if (!authors.has(author) && authors.size >= AUTHORS_PER_QUERY) flush();
+    authors.add(author);
+    dTags.add(coordinate.slice(71));
+    if (++count >= COORDINATES_PER_QUERY) flush();
+  }
+  flush();
+  return filters;
+}
+
+/**
+ * Display-only fetch: whatever valid options exist at the given coordinates
+ * within the deadline — one listing's for its product page (#1273), or a whole
+ * Market page's for the Ships-to filter (batched by `shippingOptionFilters`,
+ * cached in `marketShippingCache`). Unlike
  * {@link fetchShippingOptions} (which gates a checkout and so fails closed on
  * any timeout or malformed option), a slow relay or one bad option here just
  * drops out; only a relay set that entirely fails is an error.
@@ -99,36 +142,14 @@ export async function fetchShippingOptionsForDisplay(input: {
   if (references.size === 0) return [];
   const relays = Array.from(new Set([...input.relays, ...DEFAULT_RELAYS]));
   trackRelays(relays);
-  const byAuthor = new Map<string, string[]>();
-  for (const coordinate of references) {
-    const author = coordinate.slice(6, 70);
-    const tags = byAuthor.get(author) ?? [];
-    tags.push(coordinate.slice(71));
-    byAuthor.set(author, tags);
-  }
   const params = {
     maxWait: FETCH_MAX_WAIT_MS,
     signal: input.signal,
     rejectOnAllRelaysFailure: true,
   };
-  const queries: Promise<Event[]>[] = [];
-  for (const [author, tags] of byAuthor) {
-    for (let i = 0; i < tags.length; i += 100) {
-      queries.push(
-        querySyncAbortable(
-          pool,
-          relays,
-          {
-            kinds: [SHIPPING_OPTION_KIND],
-            authors: [author],
-            '#d': tags.slice(i, i + 100),
-            limit: 100,
-          },
-          params,
-        ),
-      );
-    }
-  }
+  const queries = shippingOptionFilters([...references]).map((filter) =>
+    querySyncAbortable(pool, relays, filter, params),
+  );
   const events = (await Promise.all(queries))
     .flat()
     .filter(

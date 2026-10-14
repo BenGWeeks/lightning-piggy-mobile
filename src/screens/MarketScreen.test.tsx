@@ -39,9 +39,14 @@ let mockLoading = true;
 let mockInitialPreferences = {
   mode: 'preferred',
   merchant: null as string | null,
-  country: null as string | null,
+  shipsTo: null as string | null,
+  includeUnknownShipping: true,
   currency: null as string | null,
 };
+let mockShipsTo = new Map<string, import('../utils/marketShipsTo').ShipsTo>();
+jest.mock('../hooks/useMarketShipsTo', () => ({
+  useMarketShipsTo: () => ({ byProduct: mockShipsTo, deviceCountry: 'GB' }),
+}));
 const mockUpdate = jest.fn();
 let mockLiveProducts: typeof import('../data/marketProducts').MARKET_PRODUCTS = [];
 const mockPreferencesHook = function useMockPreferences() {
@@ -56,7 +61,10 @@ const mockPreferencesHook = function useMockPreferences() {
   };
 };
 jest.mock('../contexts/ThemeContext', () => ({ useThemeColors: () => ({}) }));
-jest.mock('../contexts/LocaleContext', () => ({ useTranslation: () => (key: string) => key }));
+jest.mock('../contexts/LocaleContext', () => ({
+  useTranslation: () => (key: string) => key,
+  useLocale: () => ({ t: (key: string) => key, locale: 'en', formatLocale: 'en-GB' }),
+}));
 jest.mock('../components/MarketProductCard', () => () => null);
 jest.mock('../hooks/usePreferredMarketListings', () => ({
   usePreferredMarketListings: () => ({
@@ -104,7 +112,14 @@ beforeEach(() => {
   mockCompleted = false;
   mockLoading = true;
   mockUpdate.mockClear();
-  mockInitialPreferences = { mode: 'preferred', merchant: null, country: null, currency: null };
+  mockInitialPreferences = {
+    mode: 'preferred',
+    merchant: null,
+    shipsTo: null,
+    includeUnknownShipping: true,
+    currency: null,
+  };
+  mockShipsTo = new Map();
   mockLiveProducts = [];
 });
 afterEach(() => {
@@ -199,7 +214,8 @@ it('preserves all restored WoT filters before the first completed current-scope 
   mockInitialPreferences = {
     mode: 'wotFriends',
     merchant: 'Saved merchant',
-    country: 'DE',
+    shipsTo: 'DE',
+    includeUnknownShipping: true,
     currency: 'EUR',
   };
   const screen = render(<MarketScreen navigation={navigation} />);
@@ -211,8 +227,38 @@ it('preserves all restored WoT filters before the first completed current-scope 
   mockCompleted = true;
   screen.rerender(<MarketScreen navigation={navigation} />);
   expect(mockUpdate).toHaveBeenCalledWith(
-    expect.objectContaining({ merchant: null, country: null, currency: null }),
+    // Ships-to is the shopper's destination, so it survives a catalogue
+    // that has no listings for it; catalogue-derived axes reset.
+    expect.objectContaining({ merchant: null, shipsTo: 'DE', currency: null }),
   );
+});
+
+it('filters by Ships to from shipping data, with unknown shipping behind the include toggle', () => {
+  mockLiveProducts = [
+    { ...MARKET_PRODUCTS[0], id: 'ships-gb' },
+    { ...MARKET_PRODUCTS[0], id: 'ships-de' },
+    { ...MARKET_PRODUCTS[0], id: 'worldwide' },
+    { ...MARKET_PRODUCTS[0], id: 'unknown' },
+  ];
+  mockShipsTo = new Map([
+    ['ships-gb', { kind: 'countries', countries: ['GB'] }],
+    ['ships-de', { kind: 'countries', countries: ['DE'] }],
+    ['worldwide', { kind: 'anywhere', reason: 'worldwide' }],
+    ['unknown', { kind: 'unknown' }],
+  ]);
+  const screen = render(<MarketScreen navigation={navigation} />);
+  const ids = () =>
+    screen.UNSAFE_getByType(FlatList).props.data.map((product: { id: string }) => product.id);
+  expect(ids()).toEqual(['ships-gb', 'ships-de', 'worldwide', 'unknown']);
+  fireEvent.press(screen.getByTestId('market-filter-button'));
+  // Phone's country (GB) leads the chips, after Anywhere.
+  expect(screen.getByTestId('market-filter-shipsto-anywhere')).toBeTruthy();
+  fireEvent.press(screen.getByTestId('market-filter-shipsto-GB'));
+  expect(ids()).toEqual(['ships-gb', 'worldwide', 'unknown']);
+  fireEvent(screen.getByTestId('market-filter-shipsto-include-unknown'), 'valueChange', false);
+  expect(ids()).toEqual(['ships-gb', 'worldwide']);
+  fireEvent.press(screen.getByTestId('market-filter-shipsto-anywhere'));
+  expect(ids()).toEqual(['ships-gb', 'ships-de', 'worldwide', 'unknown']);
 });
 
 it('shows live preferred listings rather than the bundled catalogue', () => {

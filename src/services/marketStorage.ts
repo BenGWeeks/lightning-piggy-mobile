@@ -4,17 +4,22 @@ import { perAccountKey } from './perAccountStorage';
 import type { MarketProduct } from '../data/marketProducts';
 import type { MarketListingsResult } from './marketListingsService';
 import { DEFAULT_MARKET_MODE, type MarketMode } from '../utils/marketMode';
+import { normalizeShipsToSelection } from '../utils/marketShipsTo';
 
 export interface MarketPreferences {
   mode: MarketMode;
   merchant: string | null;
-  country: string | null;
+  /** Ships-to destination (ISO 3166-1 alpha-2); null = Anywhere. */
+  shipsTo: string | null;
+  /** With a destination set, still show listings without shipping info. */
+  includeUnknownShipping: boolean;
   currency: string | null;
 }
 export const DEFAULT_MARKET_PREFERENCES: MarketPreferences = {
   mode: DEFAULT_MARKET_MODE,
   merchant: null,
-  country: null,
+  shipsTo: null,
+  includeUnknownShipping: true,
   currency: null,
 };
 const signedOut = new Set<string>();
@@ -33,7 +38,10 @@ export async function readMarketPreferences(account: string): Promise<MarketPref
     return {
       mode: value?.mode === 'wotFriends' ? 'wotFriends' : DEFAULT_MARKET_MODE,
       merchant: typeof value?.merchant === 'string' ? value.merchant : null,
-      country: typeof value?.country === 'string' ? value.country : null,
+      // The retired Country filter saved a vendor-directory name under
+      // `country`; it is deliberately not carried over (→ Anywhere).
+      shipsTo: normalizeShipsToSelection(value?.shipsTo),
+      includeUnknownShipping: value?.includeUnknownShipping !== false,
       currency: typeof value?.currency === 'string' ? value.currency : null,
     };
   } catch {

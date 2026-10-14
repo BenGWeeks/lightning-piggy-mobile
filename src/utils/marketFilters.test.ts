@@ -4,17 +4,18 @@ import {
   countActiveMarketFilters,
   currencyOf,
   distinctCurrencies,
-  distinctCountries,
   distinctMerchants,
   filterMarketProducts,
   isMarketFilterActive,
   isMarketScopeNarrowing,
-  productCountry,
   productCurrency,
   productMerchant,
   productMatchesSearch,
+  type MarketFilter,
+  type ResolveShipsTo,
   type ResolveVendor,
 } from './marketFilters';
+import { SHIPS_TO_UNKNOWN, type ShipsTo } from './marketShipsTo';
 import type { MarketProduct } from '../data/marketProducts';
 import type { MarketVendor } from '../data/marketVendors';
 
@@ -53,6 +54,17 @@ const directory: Record<string, MarketVendor> = {
   TBHS: vendor({ name: 'TBHS', country: 'El Salvador' }),
 };
 const resolve: ResolveVendor = (p) => directory[p.sellerName];
+const f = (over: Partial<MarketFilter>): MarketFilter => ({ ...EMPTY_MARKET_FILTER, ...over });
+
+// Ships-to per product id, as `useMarketShipsTo` would derive it from the
+// sellers' kind-30406 options. Deliberately unrelated to the directory's
+// `country` values above — the filter must never read those.
+const SHIPS_TO: Record<string, ShipsTo> = {
+  'piggy-uk': { kind: 'countries', countries: ['GB', 'IE'] },
+  'badge-uk': { kind: 'anywhere', reason: 'worldwide' },
+  'piggy-dk': { kind: 'countries', countries: ['DK'] },
+};
+const shipsToOf: ResolveShipsTo = (p) => SHIPS_TO[p.id] ?? SHIPS_TO_UNKNOWN;
 
 describe('currencyOf', () => {
   it('maps fiat symbols to ISO codes', () => {
@@ -103,17 +115,6 @@ describe('currencyOf', () => {
   });
 });
 
-describe('productCountry', () => {
-  it("returns the selling vendor's country", () => {
-    expect(productCountry(product({ sellerName: 'Robotechy' }), resolve)).toBe('United Kingdom');
-    expect(productCountry(product({ sellerName: 'TBHS' }), resolve)).toBe('El Salvador');
-  });
-
-  it('returns null for an orphan seller (not in the directory)', () => {
-    expect(productCountry(product({ sellerName: 'Unknown Shop' }), resolve)).toBeNull();
-  });
-});
-
 describe('productMerchant', () => {
   it("returns the selling vendor's display name", () => {
     expect(productMerchant(product({ sellerName: 'Robotechy' }), resolve)).toBe('Robotechy');
@@ -152,34 +153,15 @@ describe('productMatchesSearch', () => {
     expect(productMatchesSearch(p, resolve, 'pride')).toBe(true);
   });
 
-  it('matches on seller name and vendor country', () => {
+  it('matches on seller name, but not the curated directory country', () => {
     expect(productMatchesSearch(p, resolve, 'robotechy')).toBe(true);
-    expect(productMatchesSearch(p, resolve, 'united kingdom')).toBe(true);
+    // No hard-coded locations: where a seller ships comes from Nostr shipping
+    // options (Ships-to filter), never the vendor directory.
+    expect(productMatchesSearch(p, resolve, 'united kingdom')).toBe(false);
   });
 
   it('does not match unrelated text', () => {
     expect(productMatchesSearch(p, resolve, 'umbrella')).toBe(false);
-  });
-});
-
-describe('distinctCountries', () => {
-  it('returns sorted distinct vendor countries', () => {
-    const products = [
-      product({ id: '1', sellerName: 'Robotechy' }), // United Kingdom
-      product({ id: '2', sellerName: 'Danish Bacon' }), // Denmark
-      product({ id: '3', sellerName: 'TBHS' }), // El Salvador
-      product({ id: '4', sellerName: 'Robotechy' }), // dup UK
-    ];
-    expect(distinctCountries(products, resolve)).toEqual([
-      'Denmark',
-      'El Salvador',
-      'United Kingdom',
-    ]);
-  });
-
-  it('skips orphan sellers with no resolvable country', () => {
-    const products = [product({ id: '1', sellerName: 'Unknown Shop' })];
-    expect(distinctCountries(products, resolve)).toEqual([]);
   });
 });
 
@@ -256,22 +238,16 @@ describe('currency normalisation in options and filtering', () => {
   });
 
   it('the SATS chip matches listings priced in any sats spelling', () => {
-    const ids = filterMarketProducts(
-      products,
-      { query: '', merchant: null, country: null, currency: 'SATS' },
-      resolve,
-    ).map((p) => p.id);
+    const ids = filterMarketProducts(products, f({ currency: 'SATS' }), resolve, shipsToOf).map(
+      (p) => p.id,
+    );
     expect(ids).toEqual(['sat', 'sats', 'lower']);
   });
 
   it('normalises the selected currency too (a legacy "sat" selection still matches)', () => {
-    expect(
-      filterMarketProducts(
-        products,
-        { query: '', merchant: null, country: null, currency: 'sat' },
-        resolve,
-      ),
-    ).toHaveLength(3);
+    expect(filterMarketProducts(products, f({ currency: 'sat' }), resolve, shipsToOf)).toHaveLength(
+      3,
+    );
   });
 });
 
@@ -281,18 +257,10 @@ describe('isMarketFilterActive', () => {
   });
 
   it('is true when any axis is set', () => {
-    expect(
-      isMarketFilterActive({ query: 'pig', merchant: null, country: null, currency: null }),
-    ).toBe(true);
-    expect(
-      isMarketFilterActive({ query: '', merchant: 'Robotechy', country: null, currency: null }),
-    ).toBe(true);
-    expect(
-      isMarketFilterActive({ query: '', merchant: null, country: 'Denmark', currency: null }),
-    ).toBe(true);
-    expect(
-      isMarketFilterActive({ query: '  ', merchant: null, country: null, currency: 'GBP' }),
-    ).toBe(true);
+    expect(isMarketFilterActive(f({ query: 'pig' }))).toBe(true);
+    expect(isMarketFilterActive(f({ merchant: 'Robotechy' }))).toBe(true);
+    expect(isMarketFilterActive(f({ shipsTo: 'DK' }))).toBe(true);
+    expect(isMarketFilterActive(f({ query: '  ', currency: 'GBP' }))).toBe(true);
   });
 });
 
@@ -315,34 +283,21 @@ describe('countActiveMarketFilters', () => {
     expect(countActiveMarketFilters(EMPTY_MARKET_FILTER, 'wotFriends')).toBe(1);
   });
 
-  it('counts each active category axis (merchant / country / currency)', () => {
+  it('counts each active category axis (merchant / ships to / currency)', () => {
+    expect(countActiveMarketFilters(f({ merchant: 'Robotechy' }), 'wotAll')).toBe(1);
     expect(
       countActiveMarketFilters(
-        { query: '', merchant: 'Robotechy', country: null, currency: null },
-        'wotAll',
-      ),
-    ).toBe(1);
-    expect(
-      countActiveMarketFilters(
-        { query: '', merchant: 'Robotechy', country: 'United Kingdom', currency: 'GBP' },
+        f({ merchant: 'Robotechy', shipsTo: 'GB', currency: 'GBP' }),
         'preferred',
       ),
     ).toBe(4);
   });
 
   it('ignores the search query (it has its own inline field, not the panel badge)', () => {
-    expect(
-      countActiveMarketFilters(
-        { query: 'piggy', merchant: null, country: null, currency: null },
-        'wotAll',
-      ),
-    ).toBe(0);
-    expect(
-      countActiveMarketFilters(
-        { query: 'piggy', merchant: 'Robotechy', country: null, currency: null },
-        'wotAll',
-      ),
-    ).toBe(1);
+    expect(countActiveMarketFilters(f({ query: 'piggy' }), 'wotAll')).toBe(0);
+    expect(countActiveMarketFilters(f({ query: 'piggy', merchant: 'Robotechy' }), 'wotAll')).toBe(
+      1,
+    );
   });
 });
 
@@ -353,12 +308,17 @@ describe('canClearMarketFilters', () => {
 
   it('is true when the scope or any category axis differs from its default', () => {
     expect(canClearMarketFilters(EMPTY_MARKET_FILTER, 'wotFriends')).toBe(true);
-    expect(
-      canClearMarketFilters(
-        { query: '', merchant: null, country: null, currency: 'SATS' },
-        'preferred',
-      ),
-    ).toBe(true);
+    expect(canClearMarketFilters(f({ currency: 'SATS' }), 'preferred')).toBe(true);
+  });
+
+  it('offers Clear for a ships-to destination or a switched-off include toggle', () => {
+    expect(canClearMarketFilters(f({ shipsTo: 'GB' }), 'preferred')).toBe(true);
+    expect(canClearMarketFilters(f({ includeUnknownShipping: false }), 'preferred')).toBe(true);
+  });
+
+  it('badges a ships-to destination but not the include toggle on its own', () => {
+    expect(countActiveMarketFilters(f({ shipsTo: 'GB' }), 'wotAll')).toBe(1);
+    expect(countActiveMarketFilters(f({ includeUnknownShipping: false }), 'wotAll')).toBe(0);
   });
 });
 
@@ -398,61 +358,79 @@ describe('filterMarketProducts', () => {
   ];
 
   it('returns all products for the empty filter', () => {
-    expect(filterMarketProducts(products, EMPTY_MARKET_FILTER, resolve)).toHaveLength(4);
+    expect(filterMarketProducts(products, EMPTY_MARKET_FILTER, resolve, shipsToOf)).toHaveLength(4);
   });
 
   it('filters by search query', () => {
-    const out = filterMarketProducts(
-      products,
-      { query: 'piggy', merchant: null, country: null, currency: null },
-      resolve,
-    );
+    const out = filterMarketProducts(products, f({ query: 'piggy' }), resolve, shipsToOf);
     expect(out.map((p) => p.id)).toEqual(['piggy-uk', 'piggy-dk']);
   });
 
   it('filters by merchant', () => {
+    const out = filterMarketProducts(products, f({ merchant: 'Robotechy' }), resolve, shipsToOf);
+    expect(out.map((p) => p.id)).toEqual(['piggy-uk', 'badge-uk']);
+  });
+
+  it('filters by ships-to country: named and worldwide listings, plus unknown by default', () => {
+    const out = filterMarketProducts(products, f({ shipsTo: 'GB' }), resolve, shipsToOf);
+    // merch-sv has no shipping info: kept while "include unknown" is on.
+    expect(out.map((p) => p.id)).toEqual(['piggy-uk', 'badge-uk', 'merch-sv']);
+  });
+
+  it('hides listings without shipping info once the include toggle is off', () => {
     const out = filterMarketProducts(
       products,
-      { query: '', merchant: 'Robotechy', country: null, currency: null },
+      f({ shipsTo: 'GB', includeUnknownShipping: false }),
       resolve,
+      shipsToOf,
     );
     expect(out.map((p) => p.id)).toEqual(['piggy-uk', 'badge-uk']);
   });
 
-  it('filters by country', () => {
+  it('ignores the include toggle while Ships to is Anywhere', () => {
     const out = filterMarketProducts(
       products,
-      { query: '', merchant: null, country: 'United Kingdom', currency: null },
+      f({ includeUnknownShipping: false }),
       resolve,
+      shipsToOf,
     );
-    expect(out.map((p) => p.id)).toEqual(['piggy-uk', 'badge-uk']);
+    expect(out).toHaveLength(4);
+  });
+
+  it('never uses the vendor directory country (Robotechy is "United Kingdom" there)', () => {
+    const out = filterMarketProducts(
+      products,
+      f({ shipsTo: 'DK', includeUnknownShipping: false }),
+      resolve,
+      shipsToOf,
+    );
+    expect(out.map((p) => p.id)).toEqual(['badge-uk', 'piggy-dk']);
   });
 
   it('filters by currency', () => {
-    const out = filterMarketProducts(
-      products,
-      { query: '', merchant: null, country: null, currency: 'USD' },
-      resolve,
-    );
+    const out = filterMarketProducts(products, f({ currency: 'USD' }), resolve, shipsToOf);
     expect(out.map((p) => p.id)).toEqual(['merch-sv']);
   });
 
-  it('composes search + merchant + country + currency (AND semantics)', () => {
+  it('composes search + merchant + ships-to + currency (AND semantics)', () => {
     const out = filterMarketProducts(
       products,
-      { query: 'lightning', merchant: 'Robotechy', country: 'United Kingdom', currency: 'GBP' },
+      f({ query: 'lightning', merchant: 'Robotechy', shipsTo: 'GB', currency: 'GBP' }),
       resolve,
+      shipsToOf,
     );
     expect(out.map((p) => p.id)).toEqual(['piggy-uk']);
   });
 
-  it('merchant AND country compose to exclude a same-country different-merchant row', () => {
-    // Danish Bacon is the only DK merchant here; narrowing to merchant
-    // "Robotechy" AND country "Denmark" yields nothing (AND, not OR).
+  it('merchant AND ships-to compose (AND, not OR)', () => {
+    // TBHS publishes no shipping info, so with unknown shipping hidden,
+    // merchant "TBHS" AND ships-to "DK" yields nothing even though another
+    // merchant ships there.
     const out = filterMarketProducts(
       products,
-      { query: '', merchant: 'Robotechy', country: 'Denmark', currency: null },
+      f({ merchant: 'TBHS', shipsTo: 'DK', includeUnknownShipping: false }),
       resolve,
+      shipsToOf,
     );
     expect(out).toEqual([]);
   });
@@ -461,8 +439,9 @@ describe('filterMarketProducts', () => {
     const copy = [...products];
     const out = filterMarketProducts(
       products,
-      { query: 'lightning', merchant: null, country: 'El Salvador', currency: null },
+      f({ query: 'lightning', shipsTo: 'SV' }),
       resolve,
+      shipsToOf,
     );
     expect(out).toEqual([]);
     expect(products).toEqual(copy);
@@ -474,7 +453,7 @@ it('counts seller scope alongside category filters, including the default scope'
   expect(countActiveMarketFilters(EMPTY_MARKET_FILTER, 'wotFriends')).toBe(1);
   expect(
     countActiveMarketFilters(
-      { query: '', merchant: 'Robotechy', country: 'United Kingdom', currency: 'GBP' },
+      f({ merchant: 'Robotechy', shipsTo: 'GB', currency: 'GBP' }),
       'wotFriends',
     ),
   ).toBe(4);

@@ -27,9 +27,35 @@ it('rejects corrupt preferences and disabled scopes', async () => {
   expect(await readMarketPreferences('bob')).toEqual({
     mode: 'preferred',
     merchant: null,
-    country: null,
+    shipsTo: null,
+    includeUnknownShipping: true,
     currency: null,
   });
+});
+it('migrates the retired Country filter value to Anywhere and keeps a saved Ships-to', async () => {
+  (AsyncStorage.getItem as jest.Mock).mockResolvedValue(
+    JSON.stringify({
+      mode: 'preferred',
+      merchant: null,
+      country: 'United Kingdom',
+      currency: null,
+    }),
+  );
+  expect(await readMarketPreferences('legacy')).toEqual({
+    mode: 'preferred',
+    merchant: null,
+    shipsTo: null,
+    includeUnknownShipping: true,
+    currency: null,
+  });
+  (AsyncStorage.getItem as jest.Mock).mockResolvedValue(
+    JSON.stringify({ shipsTo: 'deu', includeUnknownShipping: false, country: 'GB' }),
+  );
+  const restored = await readMarketPreferences('current');
+  expect(restored.shipsTo).toBe('DE');
+  expect(restored.includeUnknownShipping).toBe(false);
+  (AsyncStorage.getItem as jest.Mock).mockResolvedValue(JSON.stringify({ shipsTo: 'Narnia' }));
+  expect((await readMarketPreferences('bogus')).shipsTo).toBeNull();
 });
 it('bounds disk and session scopes and isolates accounts', async () => {
   for (let i = 0; i < 12; i++)
@@ -139,7 +165,8 @@ it('cancels queued writes before removing account data', async () => {
   const prefs = writeMarketPreferences('write-race', {
     mode: 'wotFriends',
     merchant: 'Seller',
-    country: null,
+    shipsTo: null,
+    includeUnknownShipping: true,
     currency: null,
   });
   const snapshot = writeMarketSnapshot('write-race|scope', { products: [], incomplete: false });
@@ -210,7 +237,8 @@ it('drains a write already in disk storage before removing it', async () => {
   const pending = writeMarketPreferences('inflight', {
     mode: 'wotFriends',
     merchant: 'Seller',
-    country: null,
+    shipsTo: null,
+    includeUnknownShipping: true,
     currency: null,
   });
   await entered;
@@ -228,7 +256,8 @@ it('blocks a late relay write after cleanup until a new account hydration', asyn
   await writeMarketPreferences('late-relay', {
     mode: 'wotFriends',
     merchant: 'Seller',
-    country: null,
+    shipsTo: null,
+    includeUnknownShipping: true,
     currency: null,
   });
   expect(AsyncStorage.setItem).not.toHaveBeenCalled();
