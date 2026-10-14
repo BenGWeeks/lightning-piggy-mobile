@@ -9,6 +9,8 @@ import { useLocale } from '../contexts/LocaleContext';
 import { useWalletLive } from '../contexts/WalletContext';
 import type { FiatCurrency } from '../services/fiatService';
 import { useNostrContacts } from '../contexts/NostrContext';
+import { getActivePubkey } from '../services/walletStorageService';
+import { openDirectChat } from '../utils/openDirectChat';
 import ContactProfileSheet from './ContactProfileSheet';
 import type { ContactProfileBodyData } from './ContactProfileBody';
 import TransactionDetailSheet, {
@@ -322,7 +324,7 @@ const TransactionList: React.FC<Props> = ({ transactions, refreshControl, curren
             }}
             onMessageCounterparty={(contact) => {
               setDetail(null);
-              navigation.navigate('Conversation', {
+              void openDirectChat(navigation, getActivePubkey(), {
                 pubkey: contact.pubkey,
                 name: contact.name,
                 picture: contact.picture,
@@ -353,7 +355,7 @@ const TransactionList: React.FC<Props> = ({ transactions, refreshControl, curren
                     const c = sheetContact;
                     if (!c?.pubkey) return;
                     setProfileSheetVisible(false);
-                    navigation.navigate('Conversation', {
+                    void openDirectChat(navigation, getActivePubkey(), {
                       pubkey: c.pubkey,
                       name: c.name,
                       picture: c.picture,

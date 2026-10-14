@@ -10,6 +10,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useLocale } from '../contexts/LocaleContext';
 import { useNostr } from '../contexts/NostrContext';
+import { openDirectChat } from '../utils/openDirectChat';
 import { createMarketProductDetailStyles } from '../styles/MarketProductDetailScreen.styles';
 import { MARKET_PRODUCTS, sellerOf } from '../data/marketProducts';
 import { vendorNostrPubkey } from '../utils/marketVendors';
@@ -137,10 +138,12 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const onOrderPlaced = useCallback(
     (info: { vendorPubkey: string; vendorName: string; vendorLogo?: string }) => {
+      // The order went out as a NIP-17 gift wrap: open the thread it's in.
       navigation.navigate('Conversation', {
         pubkey: info.vendorPubkey,
         name: info.vendorName,
         picture: info.vendorLogo ?? null,
+        protocol: 'nip17',
       });
     },
     [navigation],
@@ -303,7 +306,7 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                   testID="market-contact-seller"
                   accessibilityLabel={t('market.live.contactSeller')}
                   onPress={() =>
-                    navigation.navigate('Conversation', {
+                    void openDirectChat(navigation, pubkey, {
                       pubkey: product.listing!.event.pubkey,
                       name: sellerName,
                       picture: null,

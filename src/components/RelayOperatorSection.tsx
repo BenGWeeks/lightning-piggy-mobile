@@ -6,6 +6,8 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { useNostrContacts } from '../contexts/NostrContext';
+import { getActivePubkey } from '../services/walletStorageService';
+import { openDirectChat } from '../utils/openDirectChat';
 import { useTranslation, useLocale } from '../contexts/LocaleContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createRelayDetailsScreenStyles } from '../styles/RelayDetailsScreen.styles';
@@ -179,7 +181,7 @@ export default function RelayOperatorSection({ info }: { info: RelayInformation 
           contact
             ? () => {
                 setOpen(false);
-                navigation.navigate('Conversation', {
+                void openDirectChat(navigation, getActivePubkey(), {
                   pubkey: contact.pubkey,
                   name: contact.name,
                   picture: contact.picture,

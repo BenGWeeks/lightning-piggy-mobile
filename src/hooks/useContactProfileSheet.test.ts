@@ -21,7 +21,10 @@ import * as nostrService from '../services/nostrService';
 import type { NostrProfile } from '../types/nostr';
 
 jest.mock('../services/preferredDmProtocol', () => ({
-  preferredDmProtocol: jest.fn().mockResolvedValue('marmot'),
+  preferredConversationParams: jest.fn(async (_viewer, target) => ({
+    ...target,
+    protocol: target.protocol ?? 'marmot',
+  })),
 }));
 
 jest.mock('../services/nostrService', () => ({

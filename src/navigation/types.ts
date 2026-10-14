@@ -58,7 +58,10 @@ export type RootStackParamList = {
   Main: NavigatorScreenParams<AccountDrawerParamList>;
   Conversation: {
     jumpToMessage?: string;
-    protocol?: DmProtocol;
+    /** Required so every way in names its thread: rows and notifications pass
+     * the thread's own protocol; "chat with this person" goes through
+     * `openDirectChat`, which picks Marmot when the peer can receive it. */
+    protocol: DmProtocol;
     pubkey: string;
     name: string;
     picture?: string | null;

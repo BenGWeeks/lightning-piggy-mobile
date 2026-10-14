@@ -566,8 +566,10 @@ const MessagesScreen: React.FC = () => {
       const picture = summary.picture ?? info?.picture ?? null;
       const lightningAddress = summary.lightningAddress ?? info?.lightningAddress ?? null;
       if (summary.pubkey) {
+        // A row is a specific thread: keep its protocol. Zap-only rows have
+        // none, and zaps are listed in the NIP-17 thread.
         navigation.navigate('Conversation', {
-          protocol: summary.protocol,
+          protocol: summary.protocol ?? DEFAULT_DM_PROTOCOL,
           pubkey: summary.pubkey,
           name: summary.name,
           picture,
@@ -611,6 +613,7 @@ const MessagesScreen: React.FC = () => {
       name: seeded.name,
       picture: null,
       lightningAddress: null,
+      protocol: 'nip17', // the seeded order rows are NIP-17 (kind 16/17)
     });
   }, [navigation, pubkey]);
 
