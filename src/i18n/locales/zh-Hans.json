@@ -2352,6 +2352,7 @@
       "friendsChip": "好友",
       "comingSoon": "即将推出",
       "clearScope": "将卖家重置为 Lightning Piggy 首选卖家",
+      "changeScope": "{{label}}。打开筛选以更换卖家",
       "moreMerchants": "更多（%{count}）",
       "searchMerchants": "搜索商家",
       "noMerchants": "未找到商家"
@@ -2468,11 +2469,7 @@
     },
     "live": {
       "loading": "正在加载好友的商品……",
-      "updating": "正在更新…",
       "partialToast": "部分卖家未响应。下拉刷新。",
-      "loaded": "好友的实时商品",
-      "loadedPreferred": "Lightning Piggy优选卖家的实时商品",
-      "refresh": "刷新",
       "contactSeller": "给卖家发消息"
     },
     "sell": {

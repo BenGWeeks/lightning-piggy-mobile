@@ -2354,6 +2354,7 @@
       "friendsChip": "Znajomi",
       "comingSoon": "Wkrótce",
       "clearScope": "Przywróć preferowanych sprzedawców Lightning Piggy",
+      "changeScope": "{{label}}. Otwiera filtry, aby zmienić sprzedawców",
       "moreMerchants": "Więcej (%{count})",
       "searchMerchants": "Szukaj sprzedawców",
       "noMerchants": "Nie znaleziono sprzedawców"
@@ -2472,11 +2473,7 @@
     },
     "live": {
       "loading": "Wczytywanie ofert od twoich znajomych…",
-      "updating": "Aktualizowanie…",
       "partialToast": "Niektórzy sprzedawcy nie odpowiedzieli. Pociągnij w dół, aby odświeżyć.",
-      "loaded": "Oferty na żywo od twoich znajomych",
-      "loadedPreferred": "Oferty na żywo od preferowanych sprzedawców Lightning Piggy",
-      "refresh": "Odśwież",
       "contactSeller": "Napisz do sprzedawcy"
     },
     "sell": {

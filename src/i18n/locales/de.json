@@ -2352,6 +2352,7 @@
       "friendsChip": "Freunde",
       "comingSoon": "Demnächst verfügbar",
       "clearScope": "Verkäufer auf bevorzugte Verkäufer von Lightning Piggy zurücksetzen",
+      "changeScope": "{{label}}. Öffnet die Filter, um die Verkäufer zu ändern",
       "moreMerchants": "Mehr (%{count})",
       "searchMerchants": "Händler suchen",
       "noMerchants": "Keine Händler gefunden"
@@ -2468,11 +2469,7 @@
     },
     "live": {
       "loading": "Angebote deiner Freunde werden geladen…",
-      "updating": "Wird aktualisiert…",
       "partialToast": "Einige Verkäufer haben nicht geantwortet. Zum Aktualisieren nach unten ziehen.",
-      "loaded": "Live-Angebote deiner Freunde",
-      "loadedPreferred": "Live-Angebote der bevorzugten Verkäufer von Lightning Piggy",
-      "refresh": "Aktualisieren",
       "contactSeller": "Dem Verkäufer schreiben"
     },
     "sell": {

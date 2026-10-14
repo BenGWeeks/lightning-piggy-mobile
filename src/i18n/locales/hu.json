@@ -2352,6 +2352,7 @@
       "friendsChip": "Barátok",
       "comingSoon": "Hamarosan",
       "clearScope": "Eladók visszaállítása a Lightning Piggy ajánlott eladóira",
+      "changeScope": "{{label}}. Megnyitja a szűrőket az eladók módosításához",
       "moreMerchants": "Továbbiak (%{count})",
       "searchMerchants": "Kereskedők keresése",
       "noMerchants": "Nem található kereskedő"
@@ -2468,11 +2469,7 @@
     },
     "live": {
       "loading": "A barátaid hirdetéseinek betöltése…",
-      "updating": "Frissítés…",
       "partialToast": "Néhány eladó nem válaszolt. Húzd lefelé a frissítéshez.",
-      "loaded": "Élő hirdetések a barátaidtól",
-      "loadedPreferred": "Élő hirdetések a Lightning Piggy ajánlott eladóitól",
-      "refresh": "Frissítés",
       "contactSeller": "Üzenet az eladónak"
     },
     "sell": {

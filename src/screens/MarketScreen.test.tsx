@@ -66,6 +66,7 @@ let mockReady = true;
 let mockCompleted = false;
 let mockLoading = true;
 let mockGeneration = 0;
+let mockIncomplete = false;
 let mockAnsweredRelays: string[] | undefined;
 let mockInitialPreferences = {
   mode: 'preferred',
@@ -115,7 +116,7 @@ jest.mock('../hooks/useMarketListings', () => ({
       products: mockLiveProducts,
       loading: enabled && mockLoading,
       completed: mockCompleted,
-      incomplete: false,
+      incomplete: mockIncomplete,
       generation: mockGeneration,
       answeredRelays: mockAnsweredRelays,
       refresh: jest.fn(),
@@ -145,6 +146,7 @@ beforeEach(() => {
   mockCompleted = false;
   mockLoading = true;
   mockGeneration = 0;
+  mockIncomplete = false;
   mockAnsweredRelays = undefined;
   mockUpdate.mockClear();
   mockInitialPreferences = {
@@ -166,7 +168,11 @@ it('moves the single-choice seller scope into Filters and resets it from the sea
   const screen = render(<MarketScreen navigation={navigation} />);
   expect(screen.queryByTestId('market-mode-selector')).toBeNull();
   expect(screen.queryByText('market.screen.showing')).toBeNull();
-  expect(screen.queryByTestId('market-scope-chip-clear')).toBeNull();
+  // The default scope is a pill too, with no × (there's nothing wider yet).
+  expect(screen.getByTestId('market-scope-pill-preferred')).toHaveTextContent(
+    'market.modes.preferred',
+  );
+  expect(screen.queryByTestId('market-scope-pill-friends')).toBeNull();
   // The default preferred-sellers scope narrows the list, so the button is
   // already active with one filter.
   expect(screen.getByTestId('market-filter-active-count')).toHaveTextContent('1');
@@ -194,11 +200,11 @@ it('moves the single-choice seller scope into Filters and resets it from the sea
   fireEvent.press(screen.getByTestId('market-filter-done'));
   act(() => jest.runOnlyPendingTimers());
   expect(screen.getByTestId('market-filter-active-count')).toHaveTextContent('1');
-  expect(screen.getByTestId('market-live-status')).toHaveTextContent('market.live.loading');
-  fireEvent.press(screen.getByTestId('market-scope-chip-clear'));
+  expect(screen.getByText('market.live.loading')).toBeTruthy();
+  fireEvent.press(screen.getByTestId('market-scope-pill-friends'));
   expect(mockLiveEnabled).toHaveBeenLastCalledWith(false);
   expect(screen.getByTestId('market-filter-active-count')).toHaveTextContent('1');
-  expect(screen.queryByTestId('market-scope-chip-clear')).toBeNull();
+  expect(screen.queryByTestId('market-scope-pill-friends')).toBeNull();
 });
 
 it('clears seller scope with the sheet filters and badges a non-empty search', () => {
@@ -207,7 +213,7 @@ it('clears seller scope with the sheet filters and badges a non-empty search', (
   fireEvent.press(screen.getByTestId('market-filter-sellers-friends'));
   fireEvent.press(screen.getByTestId('market-filter-clear'));
   expect(mockLiveEnabled).toHaveBeenLastCalledWith(false);
-  expect(screen.queryByTestId('market-scope-chip-clear')).toBeNull();
+  expect(screen.queryByTestId('market-scope-pill-friends')).toBeNull();
   fireEvent.press(screen.getByTestId('market-filter-done'));
   act(() => jest.runOnlyPendingTimers());
   expect(screen.getByTestId('market-filter-active-count')).toHaveTextContent('1');
@@ -229,7 +235,6 @@ it('removes full loading copy once a cached or first-page result exists', () => 
   const screen = render(<MarketScreen navigation={navigation} />);
   fireEvent.press(screen.getByTestId('market-filter-button'));
   fireEvent.press(screen.getByTestId('market-filter-sellers-friends'));
-  expect(screen.getByTestId('market-live-status')).toHaveTextContent('market.live.updating');
   expect(screen.queryByText('market.live.loading')).toBeNull();
 });
 
@@ -412,17 +417,34 @@ it('shows live preferred listings rather than the bundled catalogue', () => {
   expect(list.props.data.map((product: { id: string }) => product.id)).toEqual(['live-preferred']);
 });
 
-it('updates the loaded label when switching between preferred sellers and friends', () => {
+it('drops the status row: pull-to-refresh only, with a banner just for a partial load', () => {
   mockLoading = false;
   const screen = render(<MarketScreen navigation={navigation} />);
-  expect(screen.getByTestId('market-live-status')).toHaveTextContent('market.live.loadedPreferred');
+  expect(screen.queryByTestId('market-live-status')).toBeNull();
+  expect(screen.queryByTestId('market-live-refresh')).toBeNull();
+  expect(screen.queryByTestId('market-partial-banner')).toBeNull();
+  expect(screen.UNSAFE_getByType(FlatList).props.refreshControl).toBeTruthy();
+  mockIncomplete = true;
   fireEvent.press(screen.getByTestId('market-filter-button'));
   fireEvent.press(screen.getByTestId('market-filter-sellers-friends'));
-  expect(screen.getByTestId('market-live-status')).toHaveTextContent(/^market\.live\.loaded$/);
+  expect(screen.getByTestId('market-partial-banner')).toHaveTextContent('market.live.partialToast');
+});
+
+it('opens Filters from the Preferred pill; the Friends pill × returns to Preferred', () => {
+  mockLoading = false;
+  const screen = render(<MarketScreen navigation={navigation} />);
+  fireEvent.press(screen.getByTestId('market-scope-pill-preferred'));
+  expect(screen.getByTestId('market-filter-sellers')).toBeTruthy();
+  fireEvent.press(screen.getByTestId('market-filter-sellers-friends'));
   fireEvent.press(screen.getByTestId('market-filter-done'));
   act(() => jest.runOnlyPendingTimers());
-  fireEvent.press(screen.getByTestId('market-scope-chip-clear'));
-  expect(screen.getByTestId('market-live-status')).toHaveTextContent('market.live.loadedPreferred');
+  expect(screen.queryByTestId('market-scope-pill-preferred')).toBeNull();
+  expect(screen.getByTestId('market-scope-pill-friends')).toHaveTextContent(
+    'market.filters.friendsChip',
+  );
+  fireEvent.press(screen.getByTestId('market-scope-pill-friends'));
+  expect(mockUpdate).toHaveBeenLastCalledWith({ mode: 'preferred' });
+  expect(screen.getByTestId('market-scope-pill-preferred')).toBeTruthy();
 });
 
 it('hides collections without a merchant even when collection results exist', () => {

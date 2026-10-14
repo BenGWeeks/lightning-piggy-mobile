@@ -40,9 +40,8 @@ export const createMarketScreenStyles = (colors: Palette) =>
       fontSize: 13,
       fontWeight: '500',
     },
-    // Mode-selector bar sitting just under the header — the chip row plus a
-    // small caption naming the active mode.
-    scopeRow: { paddingHorizontal: 16, paddingTop: 4, alignItems: 'flex-start' },
+    // The active seller-scope pill, just under the search row.
+    scopeRow: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 8, alignItems: 'flex-start' },
     scopeChip: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -137,14 +136,16 @@ export const createMarketScreenStyles = (colors: Palette) =>
       justifyContent: 'space-between',
       marginBottom: 12,
     },
-    liveStatus: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      paddingHorizontal: 16,
-      paddingVertical: 10,
-      gap: 12,
+    // Shown only when a load missed some sellers — never a permanent row.
+    partialBanner: {
+      marginHorizontal: 16,
+      marginTop: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderRadius: 10,
+      backgroundColor: colors.surface,
     },
-    liveStatusText: { fontSize: 12, color: colors.textSupplementary, flexShrink: 1 },
+    partialBannerText: { fontSize: 12, color: colors.textSupplementary },
     emptyWrap: {
       paddingVertical: 48,
       paddingHorizontal: 24,
