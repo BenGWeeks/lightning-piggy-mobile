@@ -62,7 +62,13 @@ export function mergeMarketSnapshot(
   if (next.answeredRelays === undefined)
     return next.transportFailed && next.products.length === 0 ? [...previous] : next.products;
   if (previous.length === 0) return next.products;
-  const fresh = newestRevisions(previous, next.products);
+  // A cached revision this round withdrew (e.g. deleted by its author) must
+  // never win over the fresh one, however new it is.
+  const withdrawn = new Set(next.withdrawn ?? []);
+  const fresh = newestRevisions(
+    previous.filter((product) => !withdrawn.has(product.id)),
+    next.products,
+  );
   const room = Math.max(0, MARKET_MERGE_CAP - fresh.length);
   const carried = carriedOver(previous, next)
     .sort((a, b) => createdAt(b) - createdAt(a))
