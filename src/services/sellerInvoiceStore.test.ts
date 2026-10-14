@@ -1,5 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { loadSellerInvoices, recordSellerInvoice, sellerInvoiceKey } from './sellerInvoiceStore';
+import {
+  loadSellerInvoices,
+  patchSellerInvoice,
+  recordSellerInvoice,
+  sellerInvoiceKey,
+} from './sellerInvoiceStore';
 import { resetSellerStore } from './sellerEventStore';
 const OWNER = 'a'.repeat(64);
 beforeEach(async () => {
@@ -37,3 +42,34 @@ it('ignores legacy records without a buyer binding', async () => {
   );
   expect(await loadSellerInvoices(OWNER)).toEqual({});
 });
+
+it.each(['read', 'record', 'patch', 'corrupt'])(
+  'fails closed on a failed store %s',
+  async (action) => {
+    const record = {
+      buyerPubkey: 'b'.repeat(64),
+      orderId: 'old',
+      walletId: 'wallet',
+      paymentHash: 'hash',
+      bolt11: 'invoice',
+      amountSats: 10,
+      sentAt: 100,
+    };
+    await recordSellerInvoice(OWNER, record);
+    const before = await AsyncStorage.getItem(`market-seller-invoices:${OWNER}`);
+    if (action === 'corrupt') (AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce('{');
+    else (AsyncStorage.getItem as jest.Mock).mockRejectedValueOnce(new Error('read failed'));
+    const result =
+      action === 'record'
+        ? recordSellerInvoice(OWNER, { ...record, orderId: 'new' })
+        : action === 'patch'
+          ? patchSellerInvoice(OWNER, 'old', record.buyerPubkey, { paidAt: 200 })
+          : loadSellerInvoices(OWNER);
+    await expect(result).rejects.toThrow();
+    expect(await AsyncStorage.getItem(`market-seller-invoices:${OWNER}`)).toBe(before);
+    await patchSellerInvoice(OWNER, 'old', record.buyerPubkey, { paidAt: 300 });
+    expect(
+      (await loadSellerInvoices(OWNER))[sellerInvoiceKey(record.buyerPubkey, 'old')].paidAt,
+    ).toBe(300);
+  },
+);

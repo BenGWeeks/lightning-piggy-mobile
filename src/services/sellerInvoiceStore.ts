@@ -47,19 +47,15 @@ function isRecord(v: unknown): v is SellerInvoiceRecord {
 export async function loadSellerInvoices(
   pubkey: string,
 ): Promise<Record<string, SellerInvoiceRecord>> {
-  try {
-    const raw = await AsyncStorage.getItem(key(pubkey));
-    const parsed: unknown = raw ? JSON.parse(raw) : {};
-    const out: Record<string, SellerInvoiceRecord> = {};
-    if (parsed && typeof parsed === 'object') {
-      for (const value of Object.values(parsed as Record<string, unknown>)) {
-        if (isRecord(value)) out[sellerInvoiceKey(value.buyerPubkey, value.orderId)] = value;
-      }
+  const raw = await AsyncStorage.getItem(key(pubkey));
+  const parsed: unknown = raw ? JSON.parse(raw) : {};
+  const out: Record<string, SellerInvoiceRecord> = {};
+  if (parsed && typeof parsed === 'object') {
+    for (const value of Object.values(parsed as Record<string, unknown>)) {
+      if (isRecord(value)) out[sellerInvoiceKey(value.buyerPubkey, value.orderId)] = value;
     }
-    return out;
-  } catch {
-    return {};
   }
+  return out;
 }
 
 /** Serialised read-modify-write so concurrent cards can't clobber each other. */

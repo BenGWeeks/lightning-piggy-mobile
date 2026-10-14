@@ -86,9 +86,13 @@ function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.Reac
     }
   }, [invoice, t, errorText]);
   const onCheckPaid = useCallback(async () => {
-    const paid = await invoice.checkPaid();
-    if (!paid) Toast.show({ type: 'info', text1: t('sellerOrders.notPaidYet') });
-  }, [invoice, t]);
+    try {
+      const paid = await invoice.checkPaid();
+      if (!paid) Toast.show({ type: 'info', text1: t('sellerOrders.notPaidYet') });
+    } catch (e) {
+      Toast.show({ type: 'error', text1: errorText(e) });
+    }
+  }, [invoice, t, errorText]);
 
   const expiresAt =
     thread?.invoice?.expiresAt ??
@@ -135,6 +139,13 @@ function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.Reac
     (!thread?.invoice || thread.invoice.bolt11 === record?.bolt11) &&
     expiresAt !== null &&
     expiresAt * 1000 <= now;
+  const canRetry =
+    status === 'invoiceSent' &&
+    Boolean(record?.deliveryPending) &&
+    !record?.paidAt &&
+    !confirmedSent &&
+    (!thread?.invoice || thread.invoice.bolt11 === record?.bolt11) &&
+    (expiresAt === null || expiresAt * 1000 > now);
   const busy = invoice.sending;
   const invoiceBlocked = quote.totalSats === null || quote.totalSats !== order.amountSats || busy;
   const sats = (n: number) => t('market.sats', { amount: n.toLocaleString(formatLocale) });
@@ -247,7 +258,7 @@ function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.Reac
       ) : null}
 
       <View style={styles.actions}>
-        {status === 'needsInvoice' || canReplace ? (
+        {status === 'needsInvoice' || canReplace || canRetry ? (
           <TouchableOpacity
             style={[styles.primaryButton, invoiceBlocked && styles.buttonDisabled]}
             onPress={() => {

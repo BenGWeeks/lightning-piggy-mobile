@@ -157,3 +157,43 @@ it.each([true, false])(
     expect(Boolean(ui.queryByTestId('seller-order-send-invoice-x'))).toBe(hasRecord);
   },
 );
+
+it.each([true, false])(
+  'offers retry for an unexpired self-echo only while delivery is pending: %s',
+  (deliveryPending) => {
+    (useSellerInvoice as jest.Mock).mockReturnValue({
+      sending: false,
+      checking: false,
+      checkPaid: jest.fn(),
+      sendInvoice: jest.fn(),
+      markPaid: jest.fn(),
+      record: { bolt11: 'pending-invoice', paymentHash: 'h', amountSats: 4200, deliveryPending },
+    });
+    const placed = { ...order(), amountSats: 4200 };
+    const ui = render(
+      <SellerOrderPanel
+        order={placed}
+        buyerPubkey={'b'.repeat(64)}
+        id="x"
+        thread={{
+          placed,
+          orderId: 'o-1',
+          role: 'seller',
+          placedAt: 1,
+          cancelled: false,
+          invoices: [],
+          invoice: {
+            bolt11: 'pending-invoice',
+            expiresAt: Math.floor(Date.now() / 1000) + 3600,
+            at: 1,
+          },
+        }}
+      />,
+    );
+    expect(Boolean(ui.queryByTestId('seller-order-send-invoice-x'))).toBe(deliveryPending);
+    if (deliveryPending) {
+      fireEvent.press(ui.getByTestId('seller-order-send-invoice-x'));
+      expect(ui.getByTestId('sheet-open')).toBeTruthy();
+    }
+  },
+);

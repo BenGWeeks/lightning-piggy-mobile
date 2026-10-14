@@ -261,3 +261,72 @@ it('keeps the same payable invoice when delivery succeeds but the completion wri
     (sendNip17Rumor as jest.Mock).mock.calls[0][0].rumor.tags,
   );
 });
+
+it.each([false, true])(
+  'serializes creation across instances, including unmount: %s',
+  async (unmount) => {
+    let resolveInvoice!: (invoice: string) => void;
+    makeInvoiceForWallet.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveInvoice = resolve;
+        }),
+    );
+    const first = renderHook(() => useSellerInvoice(BUYER, 'order-1'));
+    let firstAction!: Promise<void>;
+    act(() => {
+      firstAction = first.result.current.sendInvoice({
+        walletId: 'original-wallet',
+        amountSats: 4200,
+        remember: false,
+      });
+    });
+    // Attach the rejection handler before cancelling the old instance.
+    const outcome = firstAction.catch((error) => error);
+    await waitFor(() => expect(makeInvoiceForWallet).toHaveBeenCalledTimes(1));
+    if (unmount) first.unmount();
+    const second = renderHook(() => useSellerInvoice(BUYER, 'order-1'));
+    let secondAction!: Promise<void>;
+    act(() => {
+      secondAction = second.result.current.sendInvoice({
+        walletId: 'other-wallet',
+        amountSats: 4200,
+        remember: false,
+      });
+    });
+    const secondOutcome = secondAction.catch((error) => error);
+    await act(async () => {
+      resolveInvoice(BOLT11);
+      const firstResult = await outcome;
+      const secondResult = await secondOutcome;
+      if (unmount) {
+        expect(firstResult).toMatchObject({ code: 'notSignedIn' });
+        expect(secondResult).toBeUndefined();
+      } else {
+        expect(firstResult).toBeUndefined();
+        expect(secondResult).toMatchObject({ code: 'invoiceFailed' });
+      }
+    });
+    expect(makeInvoiceForWallet).toHaveBeenCalledTimes(1);
+    expect(sendNip17Rumor).toHaveBeenCalledTimes(1);
+    expect((await loadSellerInvoices(SELLER))[`${BUYER}:order-1`]).toMatchObject({
+      walletId: 'original-wallet',
+      deliveryPending: false,
+    });
+  },
+);
+
+it('does not create an invoice when the store read fails', async () => {
+  const { result } = renderHook(() => useSellerInvoice(BUYER, 'order-1'));
+  await act(async () => {
+    await Promise.resolve();
+  });
+  (AsyncStorage.getItem as jest.Mock).mockRejectedValueOnce(new Error('read failed'));
+  await act(async () => {
+    await expect(
+      result.current.sendInvoice({ walletId: 'wallet', amountSats: 4200, remember: false }),
+    ).rejects.toThrow('read failed');
+  });
+  expect(makeInvoiceForWallet).not.toHaveBeenCalled();
+  expect(sendNip17Rumor).not.toHaveBeenCalled();
+});
