@@ -56,6 +56,11 @@ export interface ParsedOrderEvent {
   shipping?: string;
   /** Lightning payment detail (kind-16 type-2 request, or kind-17 receipt). */
   payment?: OrderPayment;
+  /** Buyer's shipping address on a type-1 order (Gamma `address` tag). */
+  address?: string;
+  /** Buyer contact on a type-1 order (Gamma `email` / `phone` tags). */
+  email?: string;
+  phone?: string;
   /** The event's free-text content. */
   message: string;
 }
@@ -106,9 +111,15 @@ export function parseOrderEvent(ev: OrderEventInput): ParsedOrderEvent | null {
   let type: OrderEventType;
   if (ev.kind === 17) {
     // kind 17 is also used by NIP-25 (reactions to websites), so an `order`
-    // tag alone is too weak — require the market receipt subject so unrelated
-    // kind-17 events aren't misclassified as receipts, stored, and notified.
-    if (tagValue(ev.tags, 'subject') !== 'order-receipt') return null;
+    // tag alone is too weak. A Gamma receipt carries the market receipt
+    // subject (spec example) OR a `payment` proof tag (spec: "at least one
+    // required" — `["payment", <medium>, <reference>, <proof>]`); clients
+    // differ on the subject (Robotechy sends "Payment for order <id>"), but a
+    // website reaction never carries a payment proof.
+    const payTag = firstTag(ev.tags, 'payment');
+    const hasProof =
+      typeof payTag?.[1] === 'string' && payTag[1].length > 0 && typeof payTag[2] === 'string';
+    if (tagValue(ev.tags, 'subject') !== 'order-receipt' && !hasProof) return null;
     type = 'receipt';
   } else {
     const typeVal = tagValue(ev.tags, 'type');
@@ -149,8 +160,28 @@ export function parseOrderEvent(ev: OrderEventInput): ParsedOrderEvent | null {
     items,
     shipping: tagValue(ev.tags, 'shipping'),
     payment,
+    ...contactFields(ev.tags),
     message: typeof ev.content === 'string' ? ev.content : '',
   };
+}
+
+/** Longest buyer-supplied contact value kept (an address, not a document). */
+const MAX_CONTACT_LENGTH = 500;
+
+/** Bounded string, or undefined. */
+const boundedText = (raw: unknown): string | undefined =>
+  typeof raw === 'string' && raw.trim() ? raw.trim().slice(0, MAX_CONTACT_LENGTH) : undefined;
+
+/** Buyer address / email / phone off a type-1 order's tags. */
+function contactFields(tags: string[][]): Pick<ParsedOrderEvent, 'address' | 'email' | 'phone'> {
+  const out: Pick<ParsedOrderEvent, 'address' | 'email' | 'phone'> = {};
+  const address = boundedText(tagValue(tags, 'address'));
+  const email = boundedText(tagValue(tags, 'email'));
+  const phone = boundedText(tagValue(tags, 'phone'));
+  if (address) out.address = address;
+  if (email) out.email = email;
+  if (phone) out.phone = phone;
+  return out;
 }
 
 /** True when the event is a marketplace order/receipt (vs a repost / unrelated). */
@@ -221,6 +252,9 @@ export function parseStoredOrder(content: string): ParsedOrderEvent | null {
         : [],
       shipping: typeof o.shipping === 'string' ? o.shipping : undefined,
       payment: parseStoredPayment(o.payment),
+      address: boundedText(o.address),
+      email: boundedText(o.email),
+      phone: boundedText(o.phone),
       message: typeof o.message === 'string' ? o.message : '',
     };
   } catch {

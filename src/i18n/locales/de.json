@@ -3554,5 +3554,57 @@
     "comment": "Neuer Kommentar zu %{title}",
     "review": "Neue Bewertung für %{title} ★%{stars}",
     "replyAction": "Antworten"
+  },
+  "sellerOrders": {
+    "newOrderNotification": "Neue Bestellung: {{items}}",
+    "yourShopOrder": "Bestellung für deinen Shop",
+    "loadingShop": "Dein Shop wird geladen, um diese Bestellung zu berechnen …",
+    "lineTitle": "{{title}} × {{qty}}",
+    "unitPrice": "{{amount}} {{currency}} pro Stück",
+    "overStock": "Mehr als dein Bestand ({{stock}} übrig)",
+    "shippingLine": "Versand: {{title}}",
+    "shippingNotOffered": "Diese Versandoption bietet dein Angebot nicht an.",
+    "shippingMissing": "Der Käufer hat für einen physischen Artikel keinen Versand gewählt.",
+    "total": "Summe",
+    "waitingForRate": "Warte auf Wechselkurs …",
+    "fiatAtRate": "{{amount}} {{currency}}, zum heutigen Kurs umgerechnet",
+    "amountDiffers": "In der Bestellung standen {{buyer}} sats. Die Rechnung verwendet deine aktuellen Preise.",
+    "shipTo": "Lieferung an:",
+    "contact": "Kontakt:",
+    "receiptUnverified": "Der Käufer hat einen Zahlungsbeleg geschickt, der aber die Zahlung deiner Rechnung nicht belegt.",
+    "sendInvoice": "Rechnung senden",
+    "confirmSend": "Rechnung erstellen und senden",
+    "checkPayment": "Zahlung prüfen",
+    "waitingForPayment": "Rechnung gesendet – warte auf Zahlung",
+    "markPaid": "Als bezahlt markieren",
+    "buyerNotified": "Bezahlt – Käufer benachrichtigt",
+    "invoiceSent": "Rechnung gesendet",
+    "notPaidYet": "Noch nicht bezahlt",
+    "orderNumber": "Bestellung #{{id}}",
+    "rowA11y": "Bestellung von {{buyer}}: {{items}}. {{status}}",
+    "problems": {
+      "notMine": "Diese Bestellung betrifft Angebote, die nicht dir gehören.",
+      "missingListing": "Einer dieser Artikel ist nicht mehr in deinem Shop.",
+      "badPrice": "Eines dieser Angebote hat keinen festen Preis für eine Rechnung.",
+      "unknownShipping": "Die gewählte Versandoption wird von dir nicht angeboten.",
+      "noRate": "Warte auf Wechselkurs …"
+    },
+    "errors": {
+      "noWallet": "Wähle eine Wallet für den Zahlungseingang.",
+      "invoiceFailed": "Diese Wallet konnte keine Rechnung erstellen. Prüfe, ob sie verbunden ist und empfangen darf.",
+      "amountMismatch": "Die Wallet hat eine Rechnung über einen anderen Betrag erstellt, daher wurde sie nicht gesendet.",
+      "sendFailed": "Senden an den Käufer fehlgeschlagen. Prüfe deine Verbindung und versuche es erneut.",
+      "notSignedIn": "Melde dich an, um Bestellungen zu verwalten."
+    },
+    "wallet": {
+      "none": "Keine deiner Wallets kann Rechnungen erstellen. Füge eine Lightning-Wallet (NWC) mit Empfangsberechtigung hinzu.",
+      "checking": "Prüfe, ob sie empfangen kann …",
+      "offline": "Nicht verbunden",
+      "receiveTo": "Zahlungen empfangen auf",
+      "receiveToHint": "Rechnungen für Bestellungen werden mit dieser Wallet erstellt. Auf diesem Gerät gespeichert.",
+      "remember": "Für meinen Shop merken",
+      "choose": "Wallet wählen",
+      "saveFailed": "Die Wallet-Auswahl konnte nicht gespeichert werden."
+    }
   }
 }

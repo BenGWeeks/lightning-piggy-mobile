@@ -6,6 +6,8 @@ import { lightPalette } from '../styles/palettes';
 import i18n from '../i18n';
 import type MessageBubble from './MessageBubble';
 
+// The seller panel (wallet + relay hooks) is covered by SellerOrderPanel.test.
+jest.mock('./SellerOrderPanel', () => () => null);
 jest.mock('../contexts/ThemeContext', () => ({
   useThemeColors: () => jest.requireActual('../styles/palettes').lightPalette,
 }));

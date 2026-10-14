@@ -779,6 +779,25 @@ export async function getInfo(
   }
 }
 
+/**
+ * The NIP-47 methods this connection grants (e.g. `make_invoice`), read from
+ * the raw NWC client's `get_info`. Deliberately NOT the WebLN provider's
+ * getInfo: that maps names to WebLN (`makeInvoice`) and, on failure, returns
+ * a fake minimal `["sendPayment"]` that would read as "can't make invoices".
+ * Resolves null when the wallet can't be asked right now (unknown ≠ no).
+ */
+export async function getWalletMethods(walletId: string): Promise<string[] | null> {
+  const provider = await ensureConnected(walletId);
+  if (!provider) return null;
+  try {
+    const info = await withTimeout(provider.client.getInfo(), 10_000, `getInfo(${walletId})`);
+    return Array.isArray(info?.methods) ? info.methods.map(String) : null;
+  } catch (error) {
+    if (__DEV__) console.warn(`NWC get_info (methods) failed for ${walletId}:`, error);
+    return null;
+  }
+}
+
 export async function listTransactions(
   walletId: string,
   isActive: () => boolean = () => true,

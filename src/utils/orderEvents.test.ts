@@ -426,3 +426,55 @@ describe('bolt11FromText', () => {
     expect(bolt11FromText('here is lnbc1short for you')).toBeNull();
   });
 });
+
+describe('seller-side fields and spec-shaped receipts', () => {
+  it('keeps the buyer address / email / phone on a type-1 order and round-trips them', () => {
+    const order = parseOrderEvent({
+      kind: 16,
+      content: '',
+      tags: [
+        ['type', '1'],
+        ['order', 'o-1'],
+        ['item', `30402:${'a'.repeat(64)}:mug`, '1'],
+        ['address', '  1 High St, London '],
+        ['email', 'jane@example.com'],
+        ['phone', '+44 1234'],
+      ],
+    })!;
+    expect(order).toMatchObject({
+      address: '1 High St, London',
+      email: 'jane@example.com',
+      phone: '+44 1234',
+    });
+    expect(parseStoredOrder(serializeOrder(order))).toMatchObject({
+      address: '1 High St, London',
+      email: 'jane@example.com',
+    });
+  });
+
+  it('accepts a kind-17 receipt with a payment proof whatever its subject (Robotechy-style)', () => {
+    const receipt = parseOrderEvent({
+      kind: 17,
+      content: '',
+      tags: [
+        ['subject', 'Payment for order o-1'],
+        ['order', 'o-1'],
+        ['payment', 'lightning', 'lnbc1invoice', 'preimage'],
+      ],
+    });
+    expect(receipt).toMatchObject({ type: 'receipt', payment: { preimage: 'preimage' } });
+  });
+
+  it('still rejects a kind-17 with neither the receipt subject nor a payment proof (NIP-25)', () => {
+    expect(
+      parseOrderEvent({
+        kind: 17,
+        content: '+',
+        tags: [
+          ['order', 'o-1'],
+          ['r', 'https://x'],
+        ],
+      }),
+    ).toBeNull();
+  });
+});

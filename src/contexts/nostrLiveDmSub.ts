@@ -45,6 +45,9 @@ import { ensureDmStoreMigrated } from './dmStoreMigrationRunner';
 import { createCoalescedFlushQueue } from '../utils/coalescedFlushQueue';
 import type { RefreshDmInboxOptions } from './nostrContextTypes';
 import { createLiveDmReconnectController } from './nostrLiveDmReconnect';
+import { sellerOrderSignal } from '../services/ownListingIndex';
+import { orderLinesSummary } from '../utils/sellerOrderSignal';
+import { t } from '../i18n';
 
 // Self-re-arm on relay drop / app resume (#934) — the connection lifecycle
 // (open / backoff-reconnect / resume-rearm / the post-reconnect settle timer
@@ -612,10 +615,22 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       // so the very first order from a stranger can't self-qualify.
       const partnerFollowed = isFollowed(followPubkeysRef.current, partnerPubkey);
       let partnerKnown = partnerFollowed;
+      // Seller exception: an order for one of MY listings notifies even from
+      // a stranger ("New order: Mug × 2") — see utils/sellerOrderSignal.
+      let shopOrderTitle: string | null = null;
       let persisted = false;
       writeChain = writeChain
         .then(async () => {
           if (cancelled || !isCurrentOwner()) return;
+          if (!fromMe) {
+            const signal = await sellerOrderSignal(ev, viewerPubkey);
+            if (signal) partnerKnown = true;
+            if (signal?.kind === 'order') {
+              shopOrderTitle = t('sellerOrders.newOrderNotification', {
+                items: orderLinesSummary(signal.lines),
+              });
+            }
+          }
           if (!partnerKnown) {
             partnerKnown = await hasConversationWith(viewerPubkey, partnerPubkey).catch(
               () => false,
@@ -648,7 +663,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
             owner: viewerPubkey,
             kind: 'dm',
             threadId: dmThreadId(partnerPubkey, protocolForWireKind(ev.kind)),
-            title: 'Marketplace update',
+            title: shopOrderTitle ?? 'Marketplace update',
             body: preview,
             data: {
               conversationPubkey: partnerPubkey,

@@ -1,0 +1,98 @@
+// Per-account record of the invoices a seller sent for Gamma orders: which
+// wallet made each one (so payment is checked on THAT wallet, not whichever
+// is active), its payment hash, and when the wallet reported it paid.
+// Device-local (AsyncStorage) — the payment request itself is in the
+// encrypted DM store; this only adds what the wallet side needs.
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+export interface SellerInvoiceRecord {
+  orderId: string;
+  /** Wallet the invoice was created on. */
+  walletId: string;
+  paymentHash: string;
+  bolt11: string;
+  amountSats: number;
+  sentAt: number;
+  /** When the wallet reported the invoice settled (ms). */
+  paidAt?: number;
+  /** When the `confirmed` status update went to the buyer (ms). */
+  confirmedAt?: number;
+}
+
+const MAX_RECORDS = 300;
+const key = (pubkey: string) => `market-seller-invoices:${pubkey}`;
+const listeners = new Set<() => void>();
+let writeChain: Promise<unknown> = Promise.resolve();
+
+function isRecord(v: unknown): v is SellerInvoiceRecord {
+  const r = v as SellerInvoiceRecord;
+  return (
+    !!r &&
+    typeof r.orderId === 'string' &&
+    typeof r.walletId === 'string' &&
+    typeof r.paymentHash === 'string' &&
+    typeof r.bolt11 === 'string' &&
+    Number.isSafeInteger(r.amountSats)
+  );
+}
+
+export async function loadSellerInvoices(
+  pubkey: string,
+): Promise<Record<string, SellerInvoiceRecord>> {
+  try {
+    const raw = await AsyncStorage.getItem(key(pubkey));
+    const parsed: unknown = raw ? JSON.parse(raw) : {};
+    const out: Record<string, SellerInvoiceRecord> = {};
+    if (parsed && typeof parsed === 'object') {
+      for (const value of Object.values(parsed as Record<string, unknown>)) {
+        if (isRecord(value)) out[value.orderId] = value;
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** Serialised read-modify-write so concurrent cards can't clobber each other. */
+function update(
+  pubkey: string,
+  mutate: (records: Record<string, SellerInvoiceRecord>) => void,
+): Promise<void> {
+  const run = writeChain.then(async () => {
+    const records = await loadSellerInvoices(pubkey);
+    mutate(records);
+    const kept = Object.values(records)
+      .sort((a, b) => b.sentAt - a.sentAt)
+      .slice(0, MAX_RECORDS);
+    await AsyncStorage.setItem(
+      key(pubkey),
+      JSON.stringify(Object.fromEntries(kept.map((r) => [r.orderId, r]))),
+    );
+  });
+  writeChain = run.catch(() => undefined);
+  return run.then(() => listeners.forEach((listener) => listener()));
+}
+
+/** Remember an invoice just sent (replaces an earlier one for the order). */
+export function recordSellerInvoice(pubkey: string, record: SellerInvoiceRecord): Promise<void> {
+  return update(pubkey, (records) => {
+    records[record.orderId] = record;
+  });
+}
+
+export function patchSellerInvoice(
+  pubkey: string,
+  orderId: string,
+  patch: Partial<Pick<SellerInvoiceRecord, 'paidAt' | 'confirmedAt'>>,
+): Promise<void> {
+  return update(pubkey, (records) => {
+    const existing = records[orderId];
+    if (existing) records[orderId] = { ...existing, ...patch };
+  });
+}
+
+export function subscribeSellerInvoices(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}

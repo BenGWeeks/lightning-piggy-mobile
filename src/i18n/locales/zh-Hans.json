@@ -3554,5 +3554,57 @@
     "comment": "%{title} 有新评论",
     "review": "%{title} 有新评价 ★%{stars}",
     "replyAction": "回复"
+  },
+  "sellerOrders": {
+    "newOrderNotification": "新订单：{{items}}",
+    "yourShopOrder": "你店铺的订单",
+    "loadingShop": "正在加载你的店铺以计算此订单…",
+    "lineTitle": "{{title}} × {{qty}}",
+    "unitPrice": "每件 {{amount}} {{currency}}",
+    "overStock": "超出你的库存（剩余 {{stock}}）",
+    "shippingLine": "配送：{{title}}",
+    "shippingNotOffered": "你的商品没有提供此配送方式。",
+    "shippingMissing": "买家没有为实物商品选择配送方式。",
+    "total": "总计",
+    "waitingForRate": "正在获取汇率…",
+    "fiatAtRate": "{{amount}} {{currency}}，按今日汇率换算",
+    "amountDiffers": "买家订单写的是 {{buyer}} sats。发票将按你当前的价格开具。",
+    "shipTo": "收货地址：",
+    "contact": "联系方式：",
+    "receiptUnverified": "买家发送了付款凭证，但无法证明已支付你的发票。",
+    "sendInvoice": "发送发票",
+    "confirmSend": "创建并发送发票",
+    "checkPayment": "检查付款",
+    "waitingForPayment": "发票已发送——等待付款",
+    "markPaid": "标记为已付款",
+    "buyerNotified": "已付款——已通知买家",
+    "invoiceSent": "发票已发送",
+    "notPaidYet": "尚未付款",
+    "orderNumber": "订单 #{{id}}",
+    "rowA11y": "来自 {{buyer}} 的订单：{{items}}。{{status}}",
+    "problems": {
+      "notMine": "此订单针对的不是你的商品。",
+      "missingListing": "其中一件商品已不在你的店铺中。",
+      "badPrice": "其中一件商品没有可开票的固定价格。",
+      "unknownShipping": "所选配送方式不是你发布的。",
+      "noRate": "正在获取汇率…"
+    },
+    "errors": {
+      "noWallet": "请选择接收付款的钱包。",
+      "invoiceFailed": "该钱包无法创建发票。请检查它已连接并允许收款。",
+      "amountMismatch": "钱包创建的发票金额不符，因此未发送。",
+      "sendFailed": "无法发送给买家。请检查网络后重试。",
+      "notSignedIn": "请登录以管理订单。"
+    },
+    "wallet": {
+      "none": "你的钱包都无法创建发票。请添加具有收款权限的 Lightning（NWC）钱包。",
+      "checking": "正在检查是否可以收款…",
+      "offline": "未连接",
+      "receiveTo": "收款到",
+      "receiveToHint": "订单发票将在此钱包上创建。保存在此设备上。",
+      "remember": "为我的店铺记住",
+      "choose": "选择钱包",
+      "saveFailed": "无法保存所选钱包。"
+    }
   }
 }

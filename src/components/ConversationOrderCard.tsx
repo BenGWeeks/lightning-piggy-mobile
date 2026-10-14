@@ -3,6 +3,7 @@ import React, { useMemo } from 'react';
 import { View, Text } from 'react-native';
 import { Clock } from 'lucide-react-native';
 import OrderPaymentActions from './OrderPaymentActions';
+import SellerOrderPanel from './SellerOrderPanel';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useLocale } from '../contexts/LocaleContext';
 import { createConversationOrderCardStyles } from '../styles/ConversationOrderCard.styles';
@@ -14,6 +15,8 @@ type OrderItem = Extract<Item, { kind: 'order' }>;
 
 interface Props {
   item: OrderItem;
+  /** The conversation's peer (hex) — the buyer, on an order I received. */
+  peerPubkey?: string;
   /** 1:1 settlement predicate (NWC poll + wallet-tx history). */
   isInvoicePaid?: (paymentHash: string, fromMe: boolean) => boolean;
   onPayInvoice: (rawInvoice: string) => void;
@@ -26,7 +29,12 @@ interface Props {
  * the order lifecycle (waiting for the seller's invoice, pay, paid) lives in
  * one place.
  */
-function ConversationOrderCard({ item, isInvoicePaid, onPayInvoice }: Props): React.ReactElement {
+function ConversationOrderCard({
+  item,
+  peerPubkey,
+  isInvoicePaid,
+  onPayInvoice,
+}: Props): React.ReactElement {
   const colors = useThemeColors();
   const { formatLocale, t } = useLocale();
   const styles = useMemo(() => createConversationOrderCardStyles(colors), [colors]);
@@ -76,6 +84,16 @@ function ConversationOrderCard({ item, isInvoicePaid, onPayInvoice }: Props): Re
             <Clock size={14} color={colors.textSupplementary} strokeWidth={2.5} />
             <Text style={styles.orderCardWaitingText}>{t('orderCard.waitingForInvoice')}</Text>
           </View>
+        ) : null}
+        {!item.fromMe && item.order.type === 'order' && peerPubkey ? (
+          // An order I RECEIVED: price it from my own listings and invoice it.
+          // Renders nothing unless every item is one of my listings.
+          <SellerOrderPanel
+            order={item.order}
+            thread={item.sellerThread}
+            buyerPubkey={peerPubkey}
+            id={item.id}
+          />
         ) : null}
         {/* Pay / QR affordance — a Pay button + QR + copy on a kind-16 type-2
             payment request, or a "Paid ✓" badge on a kind-17 receipt (#925

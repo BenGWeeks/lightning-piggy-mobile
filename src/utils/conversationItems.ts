@@ -12,6 +12,7 @@ import {
   payableBolt11,
   type ParsedOrderEvent,
 } from './orderEvents';
+import { sellerOrderThreads, type SellerOrderThread } from './shopOrderStatus';
 import { indexMessagesById, resolveQuote, type MessageQuote } from './messageQuote';
 import { NWC_SHARE_KIND, parseNwcShare, type NwcShareCard } from './nwcShareMessage';
 import { MARMOT_WELCOME_KIND } from './dmProtocol';
@@ -89,6 +90,9 @@ export type Item =
       /** My own placed order (kind-16 type 1) the seller hasn't answered with
        * a payment request (or cancelled) yet — the card says so. */
       awaitingInvoice?: boolean;
+      /** An order I RECEIVED (type 1): what I've done about it so far (my
+       * invoice, the buyer's receipt, my status / shipping updates). */
+      sellerThread?: SellerOrderThread;
       createdAt: number;
     }
   | {
@@ -370,6 +374,7 @@ export function buildConversationItems(
 ): Item[] {
   const expectedAmounts = collectApprovedOrderAmounts(messages, olderOrderAmounts);
   const answered = answeredOrderIds(messages);
+  const sellerThreads = sellerOrderThreads(messages);
   const byId = indexMessagesById(messages);
   const msgItems: TimedItem[] = messages.flatMap((m): TimedItem[] => {
     // A Marmot invite's gift wrap: never a bubble. Joined ones have their
@@ -389,6 +394,9 @@ export function buildConversationItems(
             expectedAmountSats: expectedAmounts.get(order.orderId),
             ...(m.fromMe && order.type === 'order' && !answered.has(order.orderId)
               ? { awaitingInvoice: true }
+              : {}),
+            ...(!m.fromMe && order.type === 'order' && sellerThreads.has(order.orderId)
+              ? { sellerThread: sellerThreads.get(order.orderId) }
               : {}),
             createdAt: m.createdAt,
           },

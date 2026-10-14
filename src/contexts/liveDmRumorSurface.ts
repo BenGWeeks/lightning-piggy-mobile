@@ -24,6 +24,9 @@ import {
 } from '../services/dmWrapNotificationDedupe';
 import { routeMarmotWelcome } from '../services/marmotWelcomeRouter';
 import type { LiveSubFollowGateBuffer } from './liveSubFollowGate';
+import { sellerOrderSignal } from '../services/ownListingIndex';
+import { orderLinesSummary } from '../utils/sellerOrderSignal';
+import { t } from '../i18n';
 
 /**
  * The live sub's post-unwrap kind-1059 surface path: Welcome → group-route →
@@ -204,6 +207,7 @@ export function createLiveRumorSurfacer(
       nothingToSee();
       return;
     }
+    const shopSignal = await sellerOrderSignal(rumor, viewerPubkey);
     const decision = orderRumor
       ? 'pass'
       : gateLiveDm({
@@ -296,7 +300,12 @@ export function createLiveRumorSurfacer(
             owner: viewerPubkey,
             kind: 'dm',
             threadId: dmThreadId(partnership.partnerPubkey, protocolForWireKind(rumor.kind)),
-            title: 'New message',
+            title:
+              shopSignal?.kind === 'order'
+                ? t('sellerOrders.newOrderNotification', {
+                    items: orderLinesSummary(shopSignal.lines),
+                  })
+                : 'New message',
             // Use the already-redacted preview, not raw `rumor.content`: a
             // structured rumor (order JSON, or an NWC wallet-share bearer
             // connection string) must never surface its payload in a push body.
