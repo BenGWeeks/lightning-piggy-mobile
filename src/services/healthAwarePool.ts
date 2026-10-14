@@ -1,3 +1,4 @@
+import { activeAccountRelays, activeAccountRelayRequests } from './testRelayRouting';
 import type { AbstractSimplePool } from 'nostr-tools/abstract-pool';
 import type { Event as NostrEvent } from 'nostr-tools/pure';
 import {
@@ -93,6 +94,7 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
       url: string,
       params?: { connectionTimeout?: number; abort?: AbortSignal },
     ): ReturnType<AbstractSimplePool['ensureRelay']> {
+      url = activeAccountRelays([url])[0];
       let key = url;
       let wasConnected = false;
       try {
@@ -250,6 +252,7 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
         onReqOpen?: () => void;
       },
     ): ReturnType<AbstractSimplePool['subscribeMap']> {
+      requests = activeAccountRelayRequests(requests);
       const keep = new Set(selectHealthyRelays(requests.map((r) => r.url)));
       const healthy = requests.filter((r) => keep.has(r.url));
       const grouped = new Map<string, typeof requests>();
@@ -366,6 +369,7 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
           reqOptions?: ReqOptions;
         },
     ): ReturnType<AbstractSimplePool['subscribeEose']> {
+      urls = activeAccountRelays(urls);
       const relays = [...new Set(selectHealthyRelays(urls).map(normalizeURL))];
       const seen = new Set<string>();
       const delivered = new Set<string>();
@@ -453,6 +457,7 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
       event: NostrEvent,
       params?: Parameters<AbstractSimplePool['publish']>[2],
     ): Promise<string>[] {
+      relays = activeAccountRelays(relays);
       const keep = new Set(selectHealthyRelays(relays));
       const kept = relays.filter((r) => keep.has(r));
       const results = super.publish(kept, event, params).map((p, i) =>

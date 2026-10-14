@@ -1551,6 +1551,7 @@
     "savedMyKey": "मी माझी की सेव्ह केली आहे"
   },
   "nostrScreen": {
+    "testRelayLockdown": "चाचणी खाते — LAN चाचणी relay पुरते मर्यादित ({{url}})",
     "title": "Nostr नेटवर्क",
     "connected": "कनेक्ट झाले",
     "disconnected": "डिस्कनेक्ट झाले",

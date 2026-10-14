@@ -1,3 +1,4 @@
+import { activeAccountRelayRequests } from './testRelayRouting';
 import type { AbstractSimplePool, SubCloser } from 'nostr-tools/abstract-pool';
 import { normalizeURL } from 'nostr-tools/utils';
 import type { AbstractRelay } from 'nostr-tools/abstract-relay';
@@ -112,6 +113,7 @@ export function withResumableSubscriptions<TBase extends PoolClass>(Base: TBase)
       requests: Parameters<AbstractSimplePool['subscribeMap']>[0],
       params: Parameters<AbstractSimplePool['subscribeMap']>[1],
     ): SubCloser {
+      requests = activeAccountRelayRequests(requests);
       let activeRequests = requests;
       let generation = 0;
       let stopped = false;

@@ -92,3 +92,5 @@ name: Internal — login as the nsec passed via PIGGY_NSEC env var
     visible:
       id: 'tab-wallets'
     timeout: 8000
+
+- runFlow: assert-test-relay-lockdown.yaml

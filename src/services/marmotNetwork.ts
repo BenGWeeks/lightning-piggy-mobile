@@ -1,3 +1,4 @@
+import { activeAccountRelays } from './testRelayRouting';
 // marmot-ts `NostrNetworkInterface` over the app's shared nostr-tools pool.
 //
 // Every relay call stays bounded (#perf rules): requests carry the library's
@@ -80,7 +81,9 @@ export function createMarmotNetwork(
     : undefined;
   const relaysOr = (relays: string[]) => {
     const cleaned = cleanRelays(relays);
-    return cleaned.length > 0 ? cleaned : cleanRelays([...getFallbackRelays(), ...DEFAULT_RELAYS]);
+    return activeAccountRelays(
+      cleaned.length > 0 ? cleaned : cleanRelays([...getFallbackRelays(), ...DEFAULT_RELAYS]),
+    );
   };
   const groupSubscribe = createGroupSubscriptionMux(
     (url, filters, next, onReqOpen, onClose) =>

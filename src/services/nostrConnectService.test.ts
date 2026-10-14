@@ -6,6 +6,12 @@
  */
 import type { Nip46Connection } from '../types/nostr';
 
+import * as svc from './nostrConnectService';
+import { NostrConnectError } from './signerErrors';
+import { isTransientKind4Error } from '../contexts/kind4RetryStore';
+
+jest.mock('./nostrPool', () => ({ pool: {} }));
+
 const mockSigner = {
   connect: jest.fn(),
   getPublicKey: jest.fn(),
@@ -39,10 +45,6 @@ jest.mock('@noble/hashes/utils.js', () => ({
     Array.from(b, (x) => x.toString(16).padStart(2, '0')).join(''),
   ),
 }));
-
-import * as svc from './nostrConnectService';
-import { NostrConnectError } from './signerErrors';
-import { isTransientKind4Error } from '../contexts/kind4RetryStore';
 
 const conn = (over: Partial<Nip46Connection> = {}): Nip46Connection => ({
   remoteSignerPubkey: 'bunkerpubkeyhex',
@@ -243,7 +245,7 @@ describe('awaitBunkerPair', () => {
     expect(mockFromURI).toHaveBeenCalledWith(
       new Uint8Array([1, 2, 3, 4]),
       'nostrconnect://mock-uri',
-      undefined,
+      { pool: {} },
       60_000,
     );
     expect(result.userPubkey).toBe('userpubkeyhex');

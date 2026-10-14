@@ -1,3 +1,4 @@
+import { activeAccountRelays } from './testRelayRouting';
 import type { Event, Filter } from 'nostr-tools';
 import { pool, trackRelays } from './nostrPool';
 import { relayAllowsKind } from './relayKindPolicy';
@@ -56,6 +57,7 @@ export async function publishToRelays(
   relays: string[],
   timeoutMs = 8_000,
 ): Promise<RelayPublishResult[]> {
+  relays = activeAccountRelays(relays);
   const allowed = await Promise.all(relays.map((url) => relayAllowsKind(url, event.kind)));
   const targets = relays.filter((_, i) => allowed[i]);
   trackRelays(targets);

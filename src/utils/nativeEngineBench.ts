@@ -1,3 +1,4 @@
+import { activeAccountRelays } from '../services/testRelayRouting';
 // Dev-only benchmark for the #1049 native relay engine: the reconnect-
 // backlog drill. Drains the SAME synthetic 200-wrap kind-1059 backlog from a
 // local bench relay (scripts/bench-engine-relay.mjs — the Android emulator
@@ -16,7 +17,7 @@
 // dead code in every normal build), lazily imported, __DEV__-gated.
 
 import { Platform } from 'react-native';
-import { SimplePool } from 'nostr-tools/pool';
+import { pool } from '../services/nostrPool';
 import type { Filter } from 'nostr-tools/filter';
 import { hexToBytes } from '@noble/hashes/utils.js';
 import { getPublicKey } from 'nostr-tools/pure';
@@ -103,7 +104,6 @@ function logPhase(
 }
 
 async function runJsPhase(secretKey: Uint8Array, pubkeyHex: string): Promise<void> {
-  const pool = new SimplePool();
   const knownWrapIds = new Set<string>();
   const sampler = startGapSampler();
   let processed = 0;
@@ -113,7 +113,7 @@ async function runJsPhase(secretKey: Uint8Array, pubkeyHex: string): Promise<voi
   const finished = new Promise<void>((resolve) => (done = resolve));
   const t0 = Date.now();
   const sub = pool.subscribeMany(
-    [BENCH_RELAY],
+    activeAccountRelays([BENCH_RELAY]),
     { kinds: [1059], '#p': [pubkeyHex], limit: TARGET_WRAPS } as Filter,
     {
       onevent: (ev) => {
@@ -141,7 +141,7 @@ async function runJsPhase(secretKey: Uint8Array, pubkeyHex: string): Promise<voi
     await withTimeout(finished, 'js phase');
   } finally {
     sub.close();
-    pool.close([BENCH_RELAY]);
+    pool.close(activeAccountRelays([BENCH_RELAY]));
   }
   logPhase('js', processed, t0, firstAt, lastAt, sampler.stop());
 }
@@ -183,7 +183,7 @@ async function runEnginePhase(secretKeyHex: string, pubkeyHex: string): Promise<
   });
   const t0 = Date.now();
   try {
-    await engine.engineStart([BENCH_RELAY], pubkeyHex, secretKeyHex);
+    await engine.engineStart(activeAccountRelays([BENCH_RELAY]), pubkeyHex, secretKeyHex);
     await engine.engineSubscribeWraps(
       JSON.stringify({ kinds: [1059], '#p': [pubkeyHex], limit: TARGET_WRAPS }),
       [],

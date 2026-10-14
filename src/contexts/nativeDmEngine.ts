@@ -1,3 +1,4 @@
+import { activeAccountRelays, watchTestRelayLockdown } from '../services/testRelayRouting';
 import { getNostrEngine, type EngineRumorBatchEvent } from '../../modules/nostr-native';
 import { AppState } from 'react-native';
 import type { SignerType } from '../types/nostr';
@@ -189,7 +190,7 @@ export async function startNativeDmEngine(
 
   try {
     const started = await dispatchIfCurrent(() =>
-      engine.engineStart(opts.relays, opts.viewerPubkeyHex, opts.secretKeyHex),
+      engine.engineStart(activeAccountRelays(opts.relays), opts.viewerPubkeyHex, opts.secretKeyHex),
     );
     if (!started || !isCurrent()) {
       removeListeners();
@@ -234,7 +235,11 @@ export async function startNativeDmEngine(
     void (async () => {
       try {
         const started = await dispatchIfCurrent(() =>
-          engine.engineStart(opts.relays, opts.viewerPubkeyHex, opts.secretKeyHex),
+          engine.engineStart(
+            activeAccountRelays(opts.relays),
+            opts.viewerPubkeyHex,
+            opts.secretKeyHex,
+          ),
         );
         if (!started || stopped || !isCurrent()) return;
         acceptingEvents = true;
@@ -287,3 +292,7 @@ export async function stopNativeDmEngineGlobal(): Promise<void> {
   if (!engine) return;
   await enqueueEngineCall(() => engine.engineStop()).catch(() => {});
 }
+
+watchTestRelayLockdown(() => {
+  void stopNativeDmEngineGlobal();
+});

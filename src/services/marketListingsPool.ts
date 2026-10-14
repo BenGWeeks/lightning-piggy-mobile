@@ -1,3 +1,4 @@
+import { activeAccountRelays, watchTestRelayLockdown } from './testRelayRouting';
 import { AbstractSimplePool } from 'nostr-tools/abstract-pool';
 import { validateEvent, type Event, type VerifiedEvent } from 'nostr-tools/pure';
 import { withRelayHealth } from './healthAwarePool';
@@ -30,6 +31,8 @@ const pool: AbstractSimplePool = new HealthAwareMarketPool({
   maxWaitForConnection: 3000,
 });
 
+watchTestRelayLockdown(() => pool.destroy());
+
 let active = 0;
 const opened = new Set<string>();
 
@@ -39,7 +42,7 @@ export function acquireMarketListingsPool(urls: readonly string[]): {
   release: () => void;
 } {
   active++;
-  urls.forEach((u) => opened.add(u));
+  activeAccountRelays([...urls]).forEach((u) => opened.add(u));
   let released = false;
   return {
     pool,

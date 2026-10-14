@@ -78,3 +78,5 @@ name: Internal — login as the nsec passed via MAESTRO_NSEC_BIG
     visible:
       id: 'tab-wallets'
     timeout: 15000
+
+- runFlow: assert-test-relay-lockdown.yaml

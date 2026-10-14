@@ -1,3 +1,5 @@
+import { watchTestRelayLockdown } from './testRelayRouting';
+import { pool } from './nostrPool';
 /**
  * NIP-46 ("Nostr Connect" / bunker) signer service.
  *
@@ -144,7 +146,11 @@ async function getSigner(): Promise<BunkerSigner> {
       secret: null,
     };
     const clientSecretKey = hexToBytes(connection.clientSecretKeyHex);
-    const signer = BunkerSigner.fromBunker(clientSecretKey, pointer);
+    const signer = BunkerSigner.fromBunker(
+      clientSecretKey,
+      pointer,
+      __DEV__ ? { pool } : undefined,
+    );
     // `connect()` is the explicit handshake — it sends a `connect`
     // request through the relay so the bunker registers this session
     // before we start firing signEvent / nip44_encrypt at it. Subsequent
@@ -408,7 +414,12 @@ export async function awaitBunkerPair(input: {
   // BunkerSigner.fromURI has no AbortSignal input of its own, so race the
   // pairing promise against the abort. On abort we reject immediately and,
   // if the bunker acks late, close the orphaned signer rather than leak it.
-  const pairPromise = BunkerSigner.fromURI(input.clientSecretKey, uri, undefined, maxWait);
+  const pairPromise = BunkerSigner.fromURI(
+    input.clientSecretKey,
+    uri,
+    __DEV__ ? { pool } : undefined,
+    maxWait,
+  );
   const signer = await raceAbort(pairPromise, signal, (late) => {
     late.close().catch(() => {});
   });
@@ -507,3 +518,12 @@ function raceAbort<T>(
     );
   });
 }
+
+// Entering lockdown destroys the shared pool's old public subscriptions.
+// Rebuild the signer lazily so its RPC subscription uses the LAN relay too.
+watchTestRelayLockdown(() => {
+  const signer = _activeSigner;
+  _activeSigner = null;
+  _signerPromise = null;
+  void signer?.close().catch(() => {});
+});

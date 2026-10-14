@@ -1,3 +1,4 @@
+import { activeAccountRelays, watchTestRelayLockdown } from './testRelayRouting';
 import {
   createProbeCache,
   finishProbe,
@@ -5,6 +6,12 @@ import {
   type ProbeEvent,
   type ProbeResult,
 } from '../utils/relayReachability';
+
+const activeSockets = new Set<WebSocket>();
+watchTestRelayLockdown(() => {
+  for (const socket of activeSockets) socket.close();
+  activeSockets.clear();
+});
 
 export const reachabilityCache = createProbeCache();
 // Shared by all focused lists (including Blossom); never exceed three transports.
@@ -24,6 +31,7 @@ function socketProbe(url: string, signal: AbortSignal): Promise<ProbeResult | un
       clearTimeout(timer);
       signal.removeEventListener('abort', cancel);
       if (socket) {
+        activeSockets.delete(socket);
         socket.onopen = socket.onmessage = socket.onerror = socket.onclose = null;
         try {
           socket.close();
@@ -37,7 +45,8 @@ function socketProbe(url: string, signal: AbortSignal): Promise<ProbeResult | un
     const timer = setTimeout(() => finish('timeout'), PROBE_TIMEOUT_MS);
     signal.addEventListener('abort', cancel);
     try {
-      socket = new WebSocket(url);
+      socket = new WebSocket(activeAccountRelays([url])[0]);
+      activeSockets.add(socket);
       socket.onopen = () => {
         try {
           socket!.send(

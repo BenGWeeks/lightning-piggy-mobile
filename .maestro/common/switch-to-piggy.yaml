@@ -27,3 +27,5 @@ name: Internal — switch to an already-registered Piggy account
     visible:
       id: 'tab-wallets'
     timeout: 5000
+
+- runFlow: assert-test-relay-lockdown.yaml

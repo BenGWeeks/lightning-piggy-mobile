@@ -1,3 +1,4 @@
+import TestRelayLockdownBadge from '../../components/TestRelayLockdownBadge';
 import React, { useCallback, useMemo } from 'react';
 import { Alert } from '../../components/BrandedAlert';
 import AccountScreenLayout from './AccountScreenLayout';
@@ -37,6 +38,7 @@ const NostrScreen: React.FC = () => {
 
   return (
     <AccountScreenLayout title={t('nostrScreen.title')} parent="AccountAdvanced">
+      <TestRelayLockdownBadge />
       <PublishedRelayListsSection connection={connStatus} />
       <AdvancedRelaysSection
         connection={connStatus}

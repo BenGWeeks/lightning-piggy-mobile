@@ -1,3 +1,4 @@
+import { useActiveNostrAccount } from './useActiveNostrAccount';
 import { useFollowHydration } from './useFollowHydration';
 import { reconcileCachedContactFollows } from './reconcileContactFollows';
 import { buildFollowSet } from '../utils/followPubkeys';
@@ -8,7 +9,6 @@ import React, {
   useContext,
   useState,
   useEffect,
-  useLayoutEffect,
   useCallback,
   useMemo,
   startTransition,
@@ -39,7 +39,6 @@ import { migrateToPerAccountStorage } from '../services/migrateToPerAccountStora
 import { perfLog } from '../utils/perfLog';
 import { sanitizeContacts } from '../utils/contacts';
 import { useReactionActions, type UseReactionActionsResult } from '../hooks/useReactionActions';
-import { setActivePubkeyForWalletStorage } from '../services/walletStorageService';
 import { NSEC_KEY, PUBKEY_KEY, SIGNER_TYPE_KEY, NIP46_CONNECTION_KEY } from './nostrAuthKeys';
 import { persistActiveIdentityKeys } from './persistActiveIdentityKeys';
 import { promoteSuccessorIdentity } from './promoteSuccessorIdentity';
@@ -327,7 +326,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [nip65Relays, userRelays],
   );
   const [signerType, setSignerType] = useState<SignerType | null>(null);
-  const [pubkey, setPubkey] = useState<string | null>(null);
+  const [pubkey, setPubkey] = useActiveNostrAccount();
   const [profile, setProfile, profileSetterFor] = useAccountState<NostrProfile | null>(
     pubkey,
     null,
@@ -349,14 +348,6 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const followPubkeys = useMemo(() => {
     return buildFollowSet(contacts.map((c) => c.pubkey));
   }, [contacts]);
-
-  // Publish identity before paint so providers above NostrProvider (currency,
-  // language) cannot display the previous account's preference during a switch.
-  // Non-React wallet storage and zap consumers use the same identity mirror.
-  useLayoutEffect(() => {
-    nostrService.setCurrentUserPubkey(pubkey);
-    setActivePubkeyForWalletStorage(pubkey);
-  }, [pubkey]);
 
   // Hydrate the user-added relay overrides once at mount. Persisted
   // separately from the NIP-65 cache so they survive logout/login and
@@ -841,6 +832,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
     })();
   }, [
+    setPubkey,
     loadRelays,
     loadProfile,
     loadContacts,
@@ -1117,6 +1109,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     nostrService.cleanup();
   }, [
+    setPubkey,
     resetRelayLists,
     pubkey,
     signerType,
@@ -1196,6 +1189,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       });
     },
     [
+      setPubkey,
       pubkey,
       resetIdentityMemory,
       loadContactsFromCache,

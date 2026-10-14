@@ -1,10 +1,17 @@
 = Maestro E2E test suite
 
-Maestro flows in this directory run on the developer's AVD (and
-sometimes their physical Pixel) against *real* Nostr relays under the
-developer's *real* signed-in identity. There is no test relay or test
-sandbox — anything a flow does will publish real events that real
-contacts may see.
+Maestro flows run on the developer's AVD or physical Pixel. In DEV builds,
+the four Piggy TEST accounts use only the LAN test relay for all Nostr reads
+and writes: `ws://192.168.1.89:7778` (override with
+`EXPO_PUBLIC_TEST_RELAY_URL`). Shared sign-in flows assert the lockdown badge
+before proceeding. Release builds and ordinary accounts retain their existing
+relay behaviour, so the safety rules below still apply.
+
+For deliberate interop testing, set `EXPO_PUBLIC_TEST_RELAY_LOCKDOWN=0` and
+restart the dev bundle. The shared Maestro pre-flight intentionally fails
+with this override; interop runs must explicitly omit that assertion.
+Android's Expo debug manifest already sets `android:usesCleartextTraffic="true"`,
+allowing the LAN `ws://` transport without changing release configuration.
 
 That makes selector hygiene a safety issue, not just a code-quality
 issue. The rules below are enforced by hand on every PR that touches

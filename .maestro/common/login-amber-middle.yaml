@@ -47,3 +47,5 @@ name: Internal — sign Middle Piggy in through Amber (NIP-55)
       text: 'npub1fvhukn3…8vtatq'
     timeout: 20000
 - pressKey: back
+
+- runFlow: assert-test-relay-lockdown.yaml
