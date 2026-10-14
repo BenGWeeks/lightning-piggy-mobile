@@ -4,6 +4,7 @@ import type { Palette } from './palettes';
 /** One order in the buyer's My orders list. */
 export const createMyOrderRowStyles = (colors: Palette) =>
   StyleSheet.create({
+    amount: { alignItems: 'flex-end', gap: 2 },
     row: {
       flexDirection: 'row',
       alignItems: 'center',

@@ -4,6 +4,7 @@ import type { Palette } from './palettes';
 /** Styles for the in-app Market checkout bottom sheet (#market). */
 export const createMarketCheckoutSheetStyles = (colors: Palette) =>
   StyleSheet.create({
+    amountColumn: { alignItems: 'flex-end', gap: 2 },
     sheetBackground: {
       backgroundColor: colors.background,
     },

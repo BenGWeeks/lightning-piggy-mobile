@@ -1,3 +1,4 @@
+import FiatAmount from './FiatAmount';
 import BrandedSpinner from './BrandedSpinner';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, Linking } from 'react-native';
@@ -458,6 +459,7 @@ const MarketCheckoutSheet: React.FC<Props> = ({
                         fiat: product.priceFiatLabel,
                       })}
                 </Text>
+                <FiatAmount sats={unitPriceSats} testID="market-checkout-unit-fiat" />
               </View>
             </View>
 
@@ -553,34 +555,51 @@ const MarketCheckoutSheet: React.FC<Props> = ({
               <>
                 <View style={styles.summaryRow}>
                   <Text style={styles.summaryLabel}>{t('market.checkout.subtotal')}</Text>
-                  <Text style={styles.summaryValue} testID="market-checkout-subtotal">
-                    {t('market.sats', {
-                      amount: subtotalSats?.toLocaleString(formatLocale) ?? '—',
-                    })}
-                  </Text>
+                  <View style={styles.amountColumn}>
+                    <Text style={styles.summaryValue} testID="market-checkout-subtotal">
+                      {t('market.sats', {
+                        amount: subtotalSats?.toLocaleString(formatLocale) ?? '—',
+                      })}
+                    </Text>
+                    <FiatAmount sats={subtotalSats} testID="market-checkout-subtotal-fiat" />
+                  </View>
                 </View>
                 <View style={styles.summaryRow}>
                   <Text style={styles.summaryLabel}>{t('market.checkout.shipping')}</Text>
-                  <Text style={styles.summaryValue} testID="market-checkout-shipping">
-                    {selectedShippingSats !== null
-                      ? selectedShippingSats === 0
-                        ? t('market.free')
-                        : t('market.sats', {
-                            amount: selectedShippingSats.toLocaleString(formatLocale),
-                          })
-                      : '—'}
-                  </Text>
+                  <View style={styles.amountColumn}>
+                    <Text style={styles.summaryValue} testID="market-checkout-shipping">
+                      {selectedShippingSats !== null
+                        ? selectedShippingSats === 0
+                          ? t('market.free')
+                          : t('market.sats', {
+                              amount: selectedShippingSats.toLocaleString(formatLocale),
+                            })
+                        : '—'}
+                    </Text>
+                    <FiatAmount
+                      sats={selectedShippingSats}
+                      testID="market-checkout-shipping-fiat"
+                    />
+                  </View>
                 </View>
               </>
             ) : null}
 
             <View style={styles.totalRow}>
               <Text style={styles.totalLabel}>{t('market.checkout.total')}</Text>
-              <View style={styles.totalValue}>
-                <Zap size={16} color={colors.brandPink} strokeWidth={2.5} fill={colors.brandPink} />
-                <Text style={styles.totalSats} testID="market-checkout-total">
-                  {t('market.sats', { amount: totalSats?.toLocaleString(formatLocale) ?? '—' })}
-                </Text>
+              <View style={styles.amountColumn}>
+                <View style={styles.totalValue}>
+                  <Zap
+                    size={16}
+                    color={colors.brandPink}
+                    strokeWidth={2.5}
+                    fill={colors.brandPink}
+                  />
+                  <Text style={styles.totalSats} testID="market-checkout-total">
+                    {t('market.sats', { amount: totalSats?.toLocaleString(formatLocale) ?? '—' })}
+                  </Text>
+                </View>
+                <FiatAmount sats={totalSats} testID="market-checkout-total-fiat" />
               </View>
             </View>
 

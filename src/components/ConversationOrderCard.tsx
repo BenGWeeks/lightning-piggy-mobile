@@ -1,3 +1,4 @@
+import FiatAmount from './FiatAmount';
 import React, { useMemo } from 'react';
 import { View, Text } from 'react-native';
 import { Clock } from 'lucide-react-native';
@@ -48,6 +49,7 @@ function ConversationOrderCard({ item, isInvoicePaid, onPayInvoice }: Props): Re
             {item.order.amountSats.toLocaleString(formatLocale)} sats
           </Text>
         ) : null}
+        <FiatAmount sats={item.order.amountSats} testID={`conversation-order-fiat-${item.id}`} />
         {item.order.status ? (
           <Text style={styles.orderCardMeta}>Status: {item.order.status}</Text>
         ) : null}

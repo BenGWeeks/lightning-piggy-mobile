@@ -52,7 +52,16 @@ jest.mock('../data/countries', () => ({
 }));
 jest.mock('../hooks/useMarketCheckout', () => ({ useMarketCheckout: jest.fn() }));
 jest.mock('../hooks/useShippingOptions', () => ({ useShippingOptions: jest.fn() }));
-jest.mock('../services/fiatService', () => ({ getBtcPrice: jest.fn() }));
+jest.mock('../services/fiatService', () => ({
+  ...jest.requireActual('../services/fiatService'),
+  getBtcPrice: jest.fn(),
+}));
+let mockCurrency = 'USD';
+let mockBtcPrice: number | null = 100_000;
+jest.mock('../contexts/WalletContext', () => ({
+  useWallet: () => ({ currency: mockCurrency }),
+  useWalletLive: () => ({ btcPrice: mockBtcPrice }),
+}));
 
 const vendorPubkey = 'b'.repeat(64);
 const product: MarketProduct = {
@@ -108,6 +117,8 @@ function renderSheet(checkout: MarketCheckoutTarget = physical, item: MarketProd
 }
 
 beforeEach(() => {
+  mockCurrency = 'USD';
+  mockBtcPrice = 100_000;
   jest.clearAllMocks();
   placeOrder.mockResolvedValue(undefined);
   (useMarketCheckout as jest.Mock).mockReturnValue({
@@ -349,4 +360,35 @@ describe('Nostr listing (Gamma kind 30402)', () => {
     expect(ui.queryByTestId('market-shipping-option-uk')).toBeNull();
     expect(ui.getByTestId('market-shipping-option-eu')).toBeTruthy();
   });
+});
+
+// Display conversion uses the wallet currency even when shipping is quoted in GBP.
+it('shows wallet-currency equivalents for the selected checkout amounts', async () => {
+  setShipping('ready', [ukOption]);
+  (getBtcPrice as jest.Mock).mockResolvedValue(50_000);
+  const view = renderSheet();
+  await waitFor(() => expect(view.getByTestId('market-shipping-option-uk')).toBeTruthy());
+  fireEvent.press(view.getByTestId('market-shipping-option-uk'));
+  await waitFor(() =>
+    expect(view.getByTestId('market-checkout-shipping-fiat').props.children).toBe('≈ $10.00'),
+  );
+  expect(view.getByTestId('market-checkout-subtotal-fiat').props.children).toBe('≈ $0.02');
+  expect(view.getByTestId('market-checkout-total-fiat').props.children).toBe('≈ $10.02');
+});
+
+it('hides display equivalents without a wallet rate without blocking a sats order', async () => {
+  mockBtcPrice = null;
+  setShipping('ready', []);
+  const view = renderSheet({ ...physical, fulfilment: 'none' });
+  expect(view.queryByTestId('market-checkout-total-fiat')).toBeNull();
+  fireEvent.press(view.getByTestId('market-checkout-place-order'));
+  await waitFor(() => expect(placeOrder).toHaveBeenCalled());
+});
+
+it('uses the chosen wallet currency for display equivalents', () => {
+  mockCurrency = 'GBP';
+  mockBtcPrice = 50_000;
+  setShipping('ready', []);
+  const view = renderSheet({ ...physical, fulfilment: 'none' });
+  expect(view.getByTestId('market-checkout-total-fiat').props.children).toBe('≈ £0.01');
 });
