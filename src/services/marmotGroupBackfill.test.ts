@@ -1,7 +1,11 @@
 import type { NostrNetworkInterface } from '@internet-privacy/marmot-ts';
 import type { Event as NostrEvent, Filter } from 'nostr-tools';
 
-import { boundGroupQueries, GROUP_BACKFILL_SLACK_SECS } from './marmotGroupBackfill';
+import {
+  boundGroupQueries,
+  GROUP_BACKFILL_SLACK_SECS,
+  pageGroupHistoryStatus,
+} from './marmotGroupBackfill';
 
 const H = 'a'.repeat(64);
 const now = () => Math.floor(Date.now() / 1000);
@@ -137,4 +141,39 @@ test('drains more than 512 group events in bounded pages, then delivers live eve
   net.emit(fresh);
   expect(next).toHaveBeenCalledWith(fresh);
   sub.unsubscribe();
+});
+
+describe('pageGroupHistoryStatus — saturated timestamp boundaries', () => {
+  // A relay that clamps every page to 100 regardless of `limit`.
+  const clamped = (net: ReturnType<typeof fakeNetwork>) => async (_relays: string[], f: Filter) =>
+    ((await net.network.request(['wss://r'], f)) as NostrEvent[]).slice(0, 100);
+  const filter: Filter = { kinds: [445], '#h': [H], limit: 500 };
+
+  it('steps past a second holding more events than one page, still reading the older history', async () => {
+    const t = 5_000;
+    const net = fakeNetwork([
+      ...Array.from({ length: 301 }, (_, i) => groupEvent(1000 + i, t)),
+      ...Array.from({ length: 300 }, (_, i) => groupEvent(i + 1, t - 1000 + i)),
+    ]);
+    const { events, exhausted, saturated } = await pageGroupHistoryStatus(
+      clamped(net),
+      ['wss://r'],
+      filter,
+      true,
+    );
+    expect(saturated).toBe(true);
+    expect(exhausted).toBe(true);
+    // The 300 older events are read rather than lost behind the saturated page.
+    expect(events.filter((e) => e.created_at < t)).toHaveLength(300);
+    expect(events.filter((e) => e.created_at === t)).toHaveLength(100);
+    expect(net.requests.length).toBeLessThan(10);
+  });
+
+  it('treats a tiny group whose events share one second as exhausted, not saturated', async () => {
+    const net = fakeNetwork(Array.from({ length: 3 }, (_, i) => groupEvent(i + 1, 5_000)));
+    const result = await pageGroupHistoryStatus(clamped(net), ['wss://r'], filter, true);
+    expect(result.events).toHaveLength(3);
+    expect(result).toMatchObject({ exhausted: true, saturated: false });
+    expect(net.requests).toHaveLength(2);
+  });
 });

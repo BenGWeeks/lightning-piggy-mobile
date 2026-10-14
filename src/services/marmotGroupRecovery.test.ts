@@ -1,4 +1,5 @@
 import type { Event, Filter } from 'nostr-tools';
+import { GROUP_BACKFILL_MAX_EVENTS } from './marmotGroupBackfill';
 import { createGroupRecovery, MAX_BUFFERED_EVENTS } from './marmotGroupRecovery';
 
 const event = (id: string, time: number, h = 'quiet') =>
@@ -217,4 +218,36 @@ test('duplicate live deliveries do not consume buffer capacity', async () => {
   await pending;
   expect(next.mock.calls.map(([e]) => e.id)).toEqual(live.map((e) => e.id));
   recovery.close();
+});
+
+test('a history past the memory cap is delivered oldest-first in passes, never skipping older commits', async () => {
+  const warning = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  jest.setSystemTime(20_000_000_000);
+  const all = Array.from({ length: GROUP_BACKFILL_MAX_EVENTS + 5000 }, (_, i) =>
+    event(`e${i}`, 1000 + i),
+  );
+  const request = jest.fn(async (_urls: string[], f: Filter) =>
+    all
+      .filter((e) => e.created_at >= (f.since ?? 0) && e.created_at <= (f.until ?? Infinity))
+      .sort((a, b) => b.created_at - a.created_at)
+      .slice(0, f.limit),
+  );
+  const next = jest.fn();
+  const recovery = createGroupRecovery(['wss://r/'], [filter], next, request);
+  const pending = recovery.recover();
+  await Promise.resolve();
+  recovery.receive(event('live', 40_000));
+  await jest.advanceTimersByTimeAsync(500);
+  await pending;
+  // The first pass read the newest 20,000 with older events unread: nothing
+  // may be delivered yet (that would advance the cursor past the oldest 5,000).
+  expect(next).not.toHaveBeenCalled();
+  for (let i = 0; i < 100 && next.mock.calls.length <= all.length; i++)
+    await jest.advanceTimersByTimeAsync(1000);
+  expect(next.mock.calls.map(([e]) => e.id)).toEqual([...all.map((e) => e.id), 'live']);
+  expect(warning).toHaveBeenCalledWith(expect.stringContaining('exceeds'));
+  // Memory stayed bounded: no single pass held more than the cap plus one page set.
+  recovery.close();
+  expect(jest.getTimerCount()).toBe(0);
+  warning.mockRestore();
 });

@@ -626,9 +626,19 @@ between pages and delivery batches. Short pages are not assumed exhausted:
 relays can clamp the requested limit. All pages are collected and sorted
 before delivery, and live events wait behind recovery so they cannot advance
 a group's cursor past a missed commit. A pass that hits the 40-page cap with
-older events unread continues below its oldest event next pass (bounded at
-20,000 events per group); the live buffer holds at most 1,000 distinct ids and
-on overflow is dropped and re-read from the retained cursor. Event dispatch checks each owner's
+older events unread continues below its oldest event next pass. Memory is
+bounded at 20,000 events per group by keeping the oldest and dropping the
+newest, which are re-read from the advanced cursor once the older range is
+delivered, so a longer history still arrives oldest-first, in passes. A
+duplicate-only page as full as any the relay served marks a second holding
+more events than one page: paging steps past it and warns rather than
+reporting exhaustion after one page. A recovery read is authoritative once
+any relay reaches EOSE; it fails (cursor and buffer retained, retried with
+backoff) only when no relay does, so one dead, AUTH-gated or slow relay in a
+group's list cannot hold its live delivery. The live buffer holds at most
+1,000 distinct ids and on overflow is dropped and re-read from the retained
+cursor. A group relay whose socket keeps failing re-arms with exponential
+backoff (one second doubling to a minute, reset by a successful arm). Event dispatch checks each owner's
 original filter and rejects ambiguous `h`
 tags before the Marmot engine's signature and group checks. Profile rounds
 combine the former three 50-author REQs into one 150-author filter and close

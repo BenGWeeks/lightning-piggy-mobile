@@ -2,6 +2,8 @@ import {
   chunkGroupFilters,
   createGroupSubscriptionMux,
   mergedGroupFilters,
+  ROUTE_RETRY_BASE_MS,
+  ROUTE_RETRY_MAX_MS,
 } from './marmotGroupSubscriptions';
 import type { Event } from 'nostr-tools/pure';
 import { matchFilter, type Filter } from 'nostr-tools/filter';
@@ -308,6 +310,48 @@ test('subscribe starts independent history even while the physical live REQ is q
     expect.any(AbortSignal),
   );
   owner.unsubscribe();
+  expect(jest.getTimerCount()).toBe(0);
+  jest.useRealTimers();
+});
+
+test('a relay whose socket keeps failing re-arms with exponential backoff, reset by a successful arm', () => {
+  jest.useFakeTimers({ now: 1_000_000 });
+  let failing = true;
+  const open = jest.fn(
+    (
+      _url: string,
+      _filters: Filter[],
+      _next: (e: Event) => void,
+      onOpen: () => void,
+      onClose: () => void,
+    ) => {
+      // A dead relay fails its connect attempt shortly after each arm.
+      if (failing) setTimeout(onClose, 1);
+      else onOpen();
+      return { close: jest.fn() };
+    },
+  );
+  const subscribe = createGroupSubscriptionMux(open);
+  const owner = subscribe(['wss://dead.example'], [{ kinds: [445], '#h': ['a'], limit: 500 }], {
+    next: jest.fn(),
+  });
+  jest.advanceTimersByTime(60_000);
+  // 1 s, 2 s, 4 s, 8 s, 16 s, 32 s: seven attempts in a minute, not sixty.
+  expect(open.mock.calls.length).toBeGreaterThanOrEqual(6);
+  expect(open.mock.calls.length).toBeLessThanOrEqual(7);
+  jest.advanceTimersByTime(10 * 60_000);
+  expect(open.mock.calls.length).toBeLessThanOrEqual(7 + 10);
+  // The relay comes back: the next arm opens and the backoff resets.
+  failing = false;
+  jest.advanceTimersByTime(ROUTE_RETRY_MAX_MS + 10);
+  const opened = open.mock.calls.length;
+  expect(opened).toBeGreaterThan(7);
+  failing = true;
+  open.mock.calls[opened - 1][4]();
+  jest.advanceTimersByTime(ROUTE_RETRY_BASE_MS + 10);
+  expect(open.mock.calls.length).toBe(opened + 1);
+  owner.unsubscribe();
+  jest.runOnlyPendingTimers();
   expect(jest.getTimerCount()).toBe(0);
   jest.useRealTimers();
 });

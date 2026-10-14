@@ -78,7 +78,9 @@ export type ConnectContactListRelay = (url: string, timeoutMs: number) => Promis
 // The pool's shared socket per relay (no extra connections).
 const connectViaPool: ConnectContactListRelay = async (url, timeoutMs) => {
   const relay = await pool.ensureRelay(url, { connectionTimeout: timeoutMs });
-  return { subscribe: (filters, params) => subscribeRelayWithBudget(pool, relay, filters, params) };
+  return {
+    subscribe: (filters, params) => subscribeRelayWithBudget(pool, relay, filters, params, url),
+  };
 };
 
 /** Replaceable-event order: newer `created_at` wins; on a tie, the lowest id. */

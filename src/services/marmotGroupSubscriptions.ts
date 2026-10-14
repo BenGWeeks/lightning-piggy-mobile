@@ -48,6 +48,11 @@ export function mergedGroupFilters(filters: Filter[]): Filter[] {
 
 const MAX_REQ_BYTES = 64 * 1024;
 const FRAMING_BYTES = 256;
+/** Re-arm backoff for a relay whose socket keeps failing (DNS, refused, device
+ * offline). Doubles per consecutive loss and resets on a successful arm, so an
+ * unreachable group relay costs a connect attempt a minute, not one a second. */
+export const ROUTE_RETRY_BASE_MS = 1_000;
+export const ROUTE_RETRY_MAX_MS = 60_000;
 const filterBytes = (filter: Filter) => utf8ToBytes(JSON.stringify(filter)).length + 1;
 
 /** Keep split filters in the same physical REQ when they fit, conserving live slots. */
@@ -93,6 +98,7 @@ export function createGroupSubscriptionMux(
       recovering?: boolean;
       lost?: boolean;
       generation: number;
+      retryDelay: number;
     }
   >();
   return (urls: string[], filters: Filter[], observer: Observer) => {
@@ -147,6 +153,7 @@ export function createGroupSubscriptionMux(
             // lost socket is a reconnect. Either way, catching up means "back".
             const rearm = ++opens > 1 || route.lost === true;
             route.lost = false;
+            route.retryDelay = ROUTE_RETRY_BASE_MS;
             if (!route.recovering) {
               route.recovering = true;
               void Promise.all([...route.owners].map((o) => o.recovery?.recover())).finally(() => {
@@ -166,7 +173,9 @@ export function createGroupSubscriptionMux(
                     !route.timer
                   ) {
                     route.lost = true;
-                    route.timer = setTimeout(() => update(url), 1000);
+                    const delay = route.retryDelay;
+                    route.retryDelay = Math.min(delay * 2, ROUTE_RETRY_MAX_MS);
+                    route.timer = setTimeout(() => update(url), delay);
                   }
                 }),
               ]
@@ -191,7 +200,13 @@ export function createGroupSubscriptionMux(
       }, 0);
     };
     for (const key of keys) {
-      if (!routes.has(key)) routes.set(key, { owners: new Set(), subs: [], generation: 0 });
+      if (!routes.has(key))
+        routes.set(key, {
+          owners: new Set(),
+          subs: [],
+          generation: 0,
+          retryDelay: ROUTE_RETRY_BASE_MS,
+        });
       routes.get(key)!.owners.add(owner);
       update(key);
     }

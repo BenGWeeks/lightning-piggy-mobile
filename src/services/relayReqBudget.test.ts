@@ -558,3 +558,23 @@ test('a requeued one-shot retains its original deadline after a limit reduction'
   budget.dispose();
   expect(jest.getTimerCount()).toBe(0);
 });
+
+test('a refused first REQ or a NOTICE with one REQ open still leaves room for inbox and groups', () => {
+  const f = fake(10);
+  const inbox = f.add('inbox', 0);
+  inbox.retry(); // CLOSED rate-limited: while it was the only open REQ
+  jest.advanceTimersByTime(1000);
+  f.add('group', 1);
+  expect(f.active).toEqual(new Set(['inbox', 'group']));
+  f.budget.notice('rate-limited: slow down');
+  expect(f.active.size).toBe(0);
+  jest.advanceTimersByTime(30_000);
+  expect(f.active).toEqual(new Set(['inbox', 'group']));
+  // An explicit NIP-11 limit below the floor is still honoured.
+  f.budget.setMax(1);
+  expect(f.active).toEqual(new Set(['inbox']));
+  inbox.retry();
+  jest.advanceTimersByTime(60_000);
+  expect(f.active).toEqual(new Set(['inbox']));
+  f.budget.dispose();
+});

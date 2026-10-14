@@ -34,6 +34,12 @@ export const isReqLimitError = (reason: string): boolean =>
 // Retain inbox + merged groups even at small limits, reserving up to three
 // one-shot slots where possible. At limits 1–2, one-shots pause a live owner.
 export const liveReqCap = (max: number): number => Math.max(Math.min(2, max), max - 3);
+/** A limit inferred from a refusal never drops below the inbox + merged
+ * groups pair: a `rate-limited:` CLOSED on the first REQ of a socket (open
+ * count 0) or a NOTICE with one REQ open would otherwise pin `max` at 1 for
+ * the socket's lifetime, and the groups would never be armed on that relay.
+ * Only an explicit NIP-11 `max_subscriptions` may set a lower limit. */
+export const MIN_INFERRED_REQ_BUDGET = 2;
 type Task = {
   priority: number;
   options: ReqOptions;
@@ -83,6 +89,10 @@ export class RelayReqBudget {
   get open(): number {
     return [...this.tasks].filter((t) => t.sub).length;
   }
+  /** Refusals shrink `max` no further than this; an explicit NIP-11 limit may be lower. */
+  private get inferredFloor(): number {
+    return Math.min(MIN_INFERRED_REQ_BUDGET, this.max);
+  }
   private get liveOpen(): number {
     return [...this.tasks].filter((t) => t.sub && t.options.mode === 'live').length;
   }
@@ -122,7 +132,7 @@ export class RelayReqBudget {
         if (task.cancelled) return;
         task.readyAt = Date.now() + Math.min(30_000, 1000 * 2 ** task.attempts++);
         this.pause(task);
-        this.max = Math.max(1, Math.min(this.max, this.open));
+        this.max = Math.max(this.inferredFloor, Math.min(this.max, this.open));
         this.setMax(this.max);
       },
     };
@@ -131,7 +141,7 @@ export class RelayReqBudget {
   notice(reason: string): void {
     if (!isReqLimitError(reason)) return;
     const active = [...this.tasks].filter((t) => t.sub);
-    this.max = Math.max(1, Math.min(this.max - 1, active.length - 1));
+    this.max = Math.max(this.inferredFloor, Math.min(this.max - 1, active.length - 1));
     for (const task of active) {
       task.readyAt = Date.now() + Math.min(30_000, 1000 * 2 ** task.attempts++);
       this.pause(task);

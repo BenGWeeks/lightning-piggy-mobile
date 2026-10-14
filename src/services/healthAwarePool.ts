@@ -173,6 +173,8 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
       relay: Awaited<ReturnType<AbstractSimplePool['ensureRelay']>>,
       filters: Parameters<typeof relay.subscribe>[0],
       params: Parameters<typeof relay.subscribe>[1] & { reqOptions?: ReqOptions },
+      /** The URL the caller connected; the socket is shared per normalised URL. */
+      url: string = relay.url,
     ): { close: (reason?: string) => void } {
       let closed = false;
       let generation = 0;
@@ -192,7 +194,7 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
           notify(reason);
         }
       };
-      handle = this.budget(relay.url).add(
+      handle = this.budget(url).add(
         reqPriority(filters),
         () => {
           const current = ++generation;
@@ -431,12 +433,13 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
             },
             onevent: (event) => events.push(event),
             onclose: (reasons) => {
-              if (
-                options.requireEose &&
-                !options.abort?.aborted &&
-                (reasons.length === 0 ||
-                  reasons.some((reason) => reason !== 'closed automatically on eose'))
-              )
+              // A read is authoritative once ANY relay served its history to
+              // EOSE. Group relay lists routinely carry a dead, AUTH-gated or
+              // slow relay (and the health layer always keeps two), so demanding
+              // EOSE from every relay would hold live delivery for ever. Only a
+              // read that no relay completed (failed, timed out, skipped) rejects.
+              const eosed = reasons.filter((reason) => reason === 'closed automatically on eose');
+              if (options.requireEose && !options.abort?.aborted && eosed.length === 0)
                 reject(new Error('Group recovery did not reach EOSE: ' + reasons.join('; ')));
               else resolve(events);
             },

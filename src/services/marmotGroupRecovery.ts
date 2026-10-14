@@ -34,7 +34,12 @@ export function createGroupRecovery(
   // A pass that hit the page cap with older events unread: continue below
   // `until` next pass. Delivering the newest pages alone would advance the
   // cursor past the commits still missing (MLS needs the older ones first).
-  const partial = new Map<string, { events: Map<string, Event>; until: number }>();
+  // `truncated`: the memory cap dropped the newest events; they are re-read
+  // from the advanced cursor once the retained older range is delivered.
+  const partial = new Map<
+    string,
+    { events: Map<string, Event>; until: number; truncated: boolean }
+  >();
   let pending: Promise<void> | undefined;
   let buffered = new Map<string, Event>();
   let overflowed = false;
@@ -79,7 +84,7 @@ export function createGroupRecovery(
                   ? filter.since
                   : Math.max(filter.since ?? 0, cursor - GROUP_BACKFILL_SLACK_SECS);
               const resume = partial.get(h);
-              const { events, exhausted } = await pageGroupHistoryStatus(
+              const { events, exhausted, saturated } = await pageGroupHistoryStatus(
                 (relays, page) => request(relays, page, abort.signal),
                 urls,
                 {
@@ -94,21 +99,42 @@ export function createGroupRecovery(
                 pacing.maybeYield,
               );
               if (abort.signal.aborted) return;
-              const collected = resume?.events ?? new Map<string, Event>();
-              for (const event of events) collected.set(event.id, event);
-              if (!exhausted && collected.size < GROUP_BACKFILL_MAX_EVENTS) {
+              if (saturated)
+                console.warn(
+                  '[Marmot] group history: a relay page held fewer events than share one second; some may be unreachable',
+                );
+              let collected = resume?.events ?? new Map<string, Event>();
+              let truncated = resume?.truncated ?? false;
+              // Delivered overlap (cursor slack) must not count toward the cap.
+              for (const event of events) if (!seen.has(event.id)) collected.set(event.id, event);
+              if (collected.size > GROUP_BACKFILL_MAX_EVENTS) {
+                // Memory cap: keep the OLDEST events (MLS needs them first) and
+                // drop the newest, which the pass after delivery re-reads from
+                // the advanced cursor. Delivering the newest instead would
+                // advance the cursor past every older commit.
+                const kept = [...collected.values()]
+                  .sort(byTimeThenId)
+                  .slice(0, GROUP_BACKFILL_MAX_EVENTS);
+                collected = new Map(kept.map((event) => [event.id, event]));
+                if (!truncated)
+                  console.warn(
+                    `[Marmot] group history exceeds ${GROUP_BACKFILL_MAX_EVENTS} events; delivering in passes`,
+                  );
+                truncated = true;
+              }
+              if (!exhausted) {
                 // Relay-clamped pages ran into the page cap: older events remain.
-                partial.set(h, { events: collected, until: events[0].created_at });
+                partial.set(h, { events: collected, until: events[0].created_at, truncated });
                 continuing = true;
                 continue;
               }
-              if (!exhausted)
-                console.warn(`[Marmot] group history exceeds ${GROUP_BACKFILL_MAX_EVENTS} events`);
               partial.delete(h);
               for (const event of [...collected.values()].sort(byTimeThenId)) {
                 deliver(event);
                 await pacing.maybeYield();
               }
+              // Newer events were dropped at the cap: read them from the new cursor.
+              if (truncated) continuing = true;
             }
           // Live traffic stays held until every group's range is complete, and
           // a dropped buffer is re-read from the retained cursor rather than

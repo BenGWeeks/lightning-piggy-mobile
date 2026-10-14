@@ -1398,8 +1398,9 @@ Merged group REQs (#1399, `marmotGroupSubscriptions.ts`) are not per-relay
 routes, so `createMarmotNetwork` owns their resume: one `watchMarmotResume`
 watcher per network replaces every group relay's transport after the same
 three-second stagger and then reconnects the session once; a lost group socket
-re-arms the merged REQ after one second and runs per-group paged recovery,
-notifying the Welcome retry listener once its groups have caught up.
+re-arms the merged REQ with exponential backoff (one second doubling to a
+minute, reset once a REQ opens) and runs per-group paged recovery, notifying
+the Welcome retry listener once its groups have caught up.
 
 Transport replacement isolates each SDK connection attempt's relay registry:
 a retired connecting publish timing out must not delete the fresh relay at
@@ -1575,12 +1576,20 @@ socket reconnect instead run independent paged per-group recovery as budgeted
 one-shots from each group's cursor. Live delivery waits behind its group's
 recovery. A pass that reaches the 40-page cap with older events unread (a relay
 clamping pages to 100) delivers nothing and continues below its oldest event on
-the next pass, bounded at 20,000 events per group, so the cursor never skips the
-oldest commits. Live events buffered behind recovery are bounded to 1,000
-distinct ids; on overflow the buffer is dropped and the next pass re-reads them
-from the unchanged cursor. Regressions cover the quiet commit behind 1,001 busy
-events, clamped pages past the page cap, buffer overflow, all 41 groups at
-limit 4, splitting above 256 ids, reconnect and cleanup.
+the next pass, so the cursor never skips the oldest commits. Memory is bounded
+at 20,000 events per group by retaining the oldest: the dropped newer events
+are re-read from the advanced cursor after that range is delivered. A
+duplicate-only page as full as any the relay served (more events in one second
+than a page holds) is stepped past with a warning instead of ending the range.
+A recovery read succeeds once any relay reaches EOSE and fails only when none
+does, so a dead or AUTH-gated relay in a group's list (the health layer always
+keeps two) cannot hold the group's live delivery. Live events buffered behind
+recovery are bounded to 1,000 distinct ids; on overflow the buffer is dropped
+and the next pass re-reads them from the unchanged cursor. Regressions cover
+the quiet commit behind 1,001 busy events, clamped pages past the page cap, a
+25,000-event history, saturated seconds, one dead relay of two, buffer
+overflow, all 41 groups at limit 4, splitting above 256 ids, re-arm backoff,
+reconnect and cleanup.
 
 
 

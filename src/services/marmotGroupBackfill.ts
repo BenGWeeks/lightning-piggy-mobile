@@ -171,11 +171,13 @@ export async function pageGroupHistoryStatus(
   continueShortPages = false,
   signal?: AbortSignal,
   yieldPage?: () => Promise<void>,
-): Promise<{ events: NostrEvent[]; exhausted: boolean }> {
+): Promise<{ events: NostrEvent[]; exhausted: boolean; saturated: boolean }> {
   const limit = f.limit ?? GROUP_BACKFILL_LIMIT;
   const byId = new Map<string, NostrEvent>();
   let until = f.until;
   let exhausted = false;
+  let saturated = false;
+  let largest = 0;
   for (let page = 0; page < GROUP_BACKFILL_MAX_PAGES && !signal?.aborted; page++) {
     const events = (await request(relays, {
       ...f,
@@ -183,10 +185,26 @@ export async function pageGroupHistoryStatus(
     })) as NostrEvent[];
     const before = byId.size;
     for (const e of events) byId.set(e.id, e);
-    if ((!continueShortPages && events.length < limit) || byId.size === before) {
+    if (!continueShortPages && events.length < limit) {
       exhausted = true;
       break;
     }
+    if (byId.size === before) {
+      // Only duplicates at `until`. When that page is as full as any this
+      // relay has served, more events share the second than one page holds
+      // and `until` can never reach the rest: step past the second so the
+      // older history is still read, and report the gap, rather than claim
+      // the range was exhausted after one page.
+      if (until !== undefined && events.length >= Math.max(largest, SATURATION_MIN_PAGE)) {
+        saturated = true;
+        until -= 1;
+        await yieldPage?.();
+        continue;
+      }
+      exhausted = true;
+      break;
+    }
+    largest = Math.max(largest, events.length);
     await yieldPage?.();
     until = Math.min(...events.map((e) => e.created_at));
   }
@@ -195,8 +213,12 @@ export async function pageGroupHistoryStatus(
   // MLS epochs are encrypted, so the adapter cannot sort on them. Marmot's
   // engine peels the current epoch, processes its applications before commits,
   // then retries later epochs. Preserve timestamp/id order within each epoch.
-  return { events: [...byId.values()].sort(byTimeThenId), exhausted };
+  return { events: [...byId.values()].sort(byTimeThenId), exhausted, saturated };
 }
+
+// A duplicate-only page this small is a tiny group whose events share one
+// second, not a relay clamp (relays clamp in the hundreds), so it is exhausted.
+const SATURATION_MIN_PAGE = 10;
 
 export const byTimeThenId = (a: NostrEvent, b: NostrEvent) =>
   a.created_at - b.created_at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
