@@ -63,6 +63,7 @@ const ProfileScreen: React.FC = () => {
         <>
           <SettingsSection scope="account" showHeading={false} testID="profile-fields-section">
             <SettingsRow
+              kind="navigate"
               icon={UserRound}
               title={t('editProfileSheet.displayName')}
               value={profile.displayName || profile.name || t('settingsPages.notSet')}
@@ -70,6 +71,7 @@ const ProfileScreen: React.FC = () => {
               testID="profile-name-row"
             />
             <SettingsRow
+              kind="navigate"
               icon={AlignLeft}
               title={t('editProfileSheet.about')}
               value={profile.about || t('settingsPages.notSet')}
@@ -77,6 +79,7 @@ const ProfileScreen: React.FC = () => {
               testID="profile-about-row"
             />
             <SettingsRow
+              kind="navigate"
               icon={Image}
               title={t('editProfileSheet.profilePicture')}
               value={profile.picture ? t('settingsPages.pictureSet') : t('settingsPages.notSet')}
@@ -84,6 +87,7 @@ const ProfileScreen: React.FC = () => {
               testID="profile-picture-row"
             />
             <SettingsRow
+              kind="navigate"
               icon={Image}
               title={t('editProfileSheet.bannerImage')}
               value={profile.banner ? t('settingsPages.pictureSet') : t('settingsPages.notSet')}
@@ -91,6 +95,7 @@ const ProfileScreen: React.FC = () => {
               testID="profile-banner-row"
             />
             <SettingsRow
+              kind="navigate"
               icon={Zap}
               title={t('settingsPages.lightningAddress')}
               value={profile.lud16 || t('settingsPages.notSet')}
@@ -98,12 +103,14 @@ const ProfileScreen: React.FC = () => {
               testID="profile-lightning-row"
             />
             <SettingsRow
+              kind="navigate"
               icon={Pencil}
               title={t('profileScreen.editProfile')}
               onPress={() => setEditProfileOpen(true)}
               testID="edit-profile-button"
             />
             <SettingsRow
+              kind="value"
               icon={KeyRound}
               title={t('settingsPages.account')}
               value={
@@ -130,6 +137,7 @@ const ProfileScreen: React.FC = () => {
         </>
       ) : (
         <SettingsRow
+          kind="navigate"
           icon={UserRound}
           title={t('profileScreen.connectNostr')}
           onPress={() => setLoginSheetOpen(true)}

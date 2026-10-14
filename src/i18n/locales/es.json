@@ -3049,7 +3049,15 @@
     "loadFailed": "No se pudieron comprobar tus relays. Inténtalo de nuevo cuando tengas conexión.",
     "cancel": "Cancelar",
     "failedTitle": "No se pudieron detener las invitaciones",
-    "failedBody": "Algunos relays o tu app de firma no respondieron. Toca Comprobar de nuevo y vuelve a intentarlo."
+    "failedBody": "Algunos relays o tu app de firma no respondieron. Toca Comprobar de nuevo y vuelve a intentarlo.",
+    "summaryChecking": "Comprobando…",
+    "summaryUnavailable": "No se pudo comprobar",
+    "summaryNotShared": "Aún no compartido",
+    "summaryThisPhoneOnly": "Solo este teléfono",
+    "summaryDevices": {
+      "one": "%{count} dispositivo",
+      "other": "%{count} dispositivos"
+    }
   },
   "displayLanguageScreen": {
     "title": "Pantalla e idioma",
@@ -3343,7 +3351,8 @@
       "warn": "Requiere atención",
       "error": "Error",
       "unknown": "Desconocido"
-    }
+    },
+    "opensInBrowser": "Se abre en el navegador"
   },
   "settingsPages": {
     "notSet": "Sin configurar",

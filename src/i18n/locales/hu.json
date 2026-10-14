@@ -3049,7 +3049,15 @@
     "loadFailed": "A relay-eidet nem sikerült ellenőrizni. Próbáld újra, ha van kapcsolatod.",
     "cancel": "Mégse",
     "failedTitle": "A meghívókat nem sikerült leállítani",
-    "failedBody": "Néhány relay vagy az aláíród nem válaszolt. Koppints az Újraellenőrzés gombra, majd próbáld újra."
+    "failedBody": "Néhány relay vagy az aláíród nem válaszolt. Koppints az Újraellenőrzés gombra, majd próbáld újra.",
+    "summaryChecking": "Ellenőrzés…",
+    "summaryUnavailable": "Nem sikerült ellenőrizni",
+    "summaryNotShared": "Még nincs megosztva",
+    "summaryThisPhoneOnly": "Csak ez a telefon",
+    "summaryDevices": {
+      "one": "%{count} eszköz",
+      "other": "%{count} eszköz"
+    }
   },
   "displayLanguageScreen": {
     "title": "Megjelenés és nyelv",
@@ -3343,7 +3351,8 @@
       "warn": "Figyelmet igényel",
       "error": "Hiba",
       "unknown": "Ismeretlen"
-    }
+    },
+    "opensInBrowser": "Böngészőben nyílik meg"
   },
   "settingsPages": {
     "notSet": "Nincs beállítva",

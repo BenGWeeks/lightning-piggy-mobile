@@ -40,6 +40,14 @@ name: Messages and Safety — inspect pickers and independent info controls
     id: messages-link-previews-info-sheet-close
 - assertVisible:
     id: security-link-preview-toggle
+# "Devices for new chats" shows a real value, never "Unknown" (#1552).
+- assertVisible:
+    id: nostr-invitation-keys-value
+- assertNotVisible:
+    id: nostr-invitation-keys-value
+    text: Unknown
+- assertVisible:
+    id: nostr-invitation-keys-chevron
 - tapOn:
     id: nostr-invitation-keys-info
 - extendedWaitUntil:

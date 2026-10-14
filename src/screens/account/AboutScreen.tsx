@@ -4,7 +4,16 @@ import { View, Text, Image, Linking } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nip19 from 'nostr-tools/nip19';
-import { UserRound, ExternalLink, Info, MessageCircle, Zap } from 'lucide-react-native';
+import {
+  Globe,
+  LifeBuoy,
+  MessageCircle,
+  Scale,
+  ScrollText,
+  Tag,
+  UserRound,
+  Zap,
+} from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
 import SettingsRow from '../../components/SettingsRow';
 import SettingsSection from '../../components/SettingsSection';
@@ -129,7 +138,8 @@ const AboutScreen: React.FC = () => {
       </View>
       <SettingsSection scope="phone" showHeading={false} testID="about-links-section">
         <SettingsRow
-          icon={Info}
+          kind="value"
+          icon={Tag}
           title={t('settingsPages.version')}
           value={appVersionLabel}
           subtitleTestID="version-text"
@@ -138,7 +148,8 @@ const AboutScreen: React.FC = () => {
           details={[t('aboutScreen.aboutBody'), teamProfile?.about].filter(Boolean).join('\n\n')}
         />
         <SettingsRow
-          icon={ExternalLink}
+          kind="external"
+          icon={Globe}
           title={t('settingsPages.website')}
           value={t('settingsPages.websiteHost')}
           onPress={() => Linking.openURL('https://www.lightningpiggy.com')}
@@ -147,6 +158,7 @@ const AboutScreen: React.FC = () => {
         />
         {teamProfile && (
           <SettingsRow
+            kind="navigate"
             icon={MessageCircle}
             title={t('aboutScreen.sendFeedback')}
             onPress={() => setFeedbackSheetOpen(true)}
@@ -154,7 +166,8 @@ const AboutScreen: React.FC = () => {
           />
         )}
         <SettingsRow
-          icon={ExternalLink}
+          kind="external"
+          icon={LifeBuoy}
           title={t('settingsPages.support')}
           onPress={() =>
             Linking.openURL('https://github.com/LightningPiggy/lightning-piggy-mobile/issues')
@@ -162,7 +175,8 @@ const AboutScreen: React.FC = () => {
           testID="about-support-link"
         />
         <SettingsRow
-          icon={ExternalLink}
+          kind="external"
+          icon={ScrollText}
           title={t('settingsPages.releaseNotes')}
           onPress={() =>
             Linking.openURL('https://github.com/LightningPiggy/lightning-piggy-mobile/releases')
@@ -170,7 +184,8 @@ const AboutScreen: React.FC = () => {
           testID="about-release-notes-link"
         />
         <SettingsRow
-          icon={ExternalLink}
+          kind="external"
+          icon={Scale}
           title={t('settingsPages.licences')}
           value={t('settingsPages.licenceType')}
           onPress={() =>
@@ -182,6 +197,7 @@ const AboutScreen: React.FC = () => {
         />
         {teamProfile?.lud16 && (
           <SettingsRow
+            kind="navigate"
             icon={Zap}
             title={t('aboutScreen.zapTheTeam')}
             onPress={() => setZapSheetOpen(true)}

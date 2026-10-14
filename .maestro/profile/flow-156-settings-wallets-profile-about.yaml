@@ -113,6 +113,13 @@ name: Settings wallets, profile and about — shared rows (view only)
     timeout: 60000
 - assertVisible:
     id: about-website-link
+# External links end in ↗, never a chevron (#1552); Version is read-only.
+- assertVisible:
+    id: about-website-link-external
+- assertNotVisible:
+    id: about-website-link-chevron
+- assertNotVisible:
+    id: about-version-row-chevron
 - scrollUntilVisible:
     element:
       id: about-licences-link
@@ -122,6 +129,10 @@ name: Settings wallets, profile and about — shared rows (view only)
     id: about-release-notes-link
 - assertVisible:
     id: about-support-link
+- assertVisible:
+    id: about-licences-link-external
+- assertNotVisible:
+    id: about-licences-link-chevron
 - scrollUntilVisible:
     element:
       id: account-back-button

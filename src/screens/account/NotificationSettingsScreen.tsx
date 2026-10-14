@@ -97,6 +97,7 @@ const NotificationSettingsScreen: React.FC = () => {
         <MarmotPushSection permissionGranted={permissionGranted} />
 
         <SettingsRow
+          kind="navigate"
           icon={BellOff}
           title={t('notificationMute.accounts')}
           subtitle={t('notificationSettingsScreen.mutedCount', { count: mutedSenders.size })}
@@ -106,6 +107,7 @@ const NotificationSettingsScreen: React.FC = () => {
       </SettingsSection>
       <SettingsSection scope="phone" testID="notifications-phone">
         <SettingsRow
+          kind="toggle"
           icon={BellRing}
           title={t('notificationSettingsScreen.showDetails')}
           subtitle={t(
@@ -125,6 +127,7 @@ const NotificationSettingsScreen: React.FC = () => {
         />
         {isAndroid && (
           <SettingsRow
+            kind="toggle"
             icon={Radio}
             title={t('notificationSettingsScreen.checkClosed')}
             subtitle={t(
@@ -148,6 +151,7 @@ const NotificationSettingsScreen: React.FC = () => {
         )}
 
         <SettingsRow
+          kind="navigate"
           icon={MapPin}
           title={t('shopAlerts.title')}
           subtitle={t(shopOn ? 'notificationSettingsScreen.on' : 'notificationSettingsScreen.off')}
@@ -155,6 +159,7 @@ const NotificationSettingsScreen: React.FC = () => {
           onPress={() => navigation.navigate('AccountShopAlerts')}
         />
         <SettingsRow
+          kind="navigate"
           icon={Server}
           title={t('securityScreen.marmotPushServerTitle')}
           details={t('securityScreen.marmotPushServerHint')}

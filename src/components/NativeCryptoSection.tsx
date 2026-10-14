@@ -54,6 +54,7 @@ const NativeCryptoSection: React.FC = () => {
   return (
     <View testID="advanced-experimental">
       <SettingsRow
+        kind="toggle"
         icon={LockKeyhole}
         title={t('nostrScreen.nativeCryptoLabel')}
         subtitle={

@@ -3049,7 +3049,15 @@
     "loadFailed": "Deine Relays konnten nicht geprüft werden. Versuche es erneut, wenn du verbunden bist.",
     "cancel": "Abbrechen",
     "failedTitle": "Einladungen konnten nicht gestoppt werden",
-    "failedBody": "Einige Relays oder dein Signer haben nicht geantwortet. Tippe auf „Erneut prüfen“ und versuche es dann noch einmal."
+    "failedBody": "Einige Relays oder dein Signer haben nicht geantwortet. Tippe auf „Erneut prüfen“ und versuche es dann noch einmal.",
+    "summaryChecking": "Wird geprüft …",
+    "summaryUnavailable": "Konnte nicht prüfen",
+    "summaryNotShared": "Noch nicht geteilt",
+    "summaryThisPhoneOnly": "Nur dieses Telefon",
+    "summaryDevices": {
+      "one": "%{count} Gerät",
+      "other": "%{count} Geräte"
+    }
   },
   "displayLanguageScreen": {
     "title": "Anzeige & Sprache",
@@ -3343,7 +3351,8 @@
       "warn": "Handlungsbedarf",
       "error": "Fehler",
       "unknown": "Unbekannt"
-    }
+    },
+    "opensInBrowser": "Öffnet im Browser"
   },
   "settingsPages": {
     "notSet": "Nicht festgelegt",

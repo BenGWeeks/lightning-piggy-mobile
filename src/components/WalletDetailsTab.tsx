@@ -39,6 +39,7 @@ const WalletDetailsTab: React.FC<Props> = ({
 }) => (
   <View style={styles.tabContent}>
     <SettingsRow
+      kind="value"
       appearance="surface"
       icon={UserRound}
       title={t('walletSettingsSheet.alias')}
@@ -59,6 +60,7 @@ const WalletDetailsTab: React.FC<Props> = ({
     {walletType === 'nwc' && (
       <>
         <SettingsRow
+          kind="value"
           appearance="surface"
           icon={Zap}
           title={t('settingsPages.lightningAddress')}
@@ -81,6 +83,7 @@ const WalletDetailsTab: React.FC<Props> = ({
     )}
 
     <SettingsRow
+      kind="action"
       appearance="surface"
       icon={Save}
       title={t('walletSettingsSheet.save')}

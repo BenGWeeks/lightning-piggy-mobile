@@ -3089,7 +3089,17 @@
     "loadFailed": "Nie udało się sprawdzić twoich przekaźników. Spróbuj ponownie, gdy będziesz online.",
     "cancel": "Anuluj",
     "failedTitle": "Nie udało się zatrzymać zaproszeń",
-    "failedBody": "Niektóre przekaźniki lub twoja aplikacja podpisująca nie odpowiedziały. Dotknij Sprawdź ponownie, a potem spróbuj jeszcze raz."
+    "failedBody": "Niektóre przekaźniki lub twoja aplikacja podpisująca nie odpowiedziały. Dotknij Sprawdź ponownie, a potem spróbuj jeszcze raz.",
+    "summaryChecking": "Sprawdzanie…",
+    "summaryUnavailable": "Nie udało się sprawdzić",
+    "summaryNotShared": "Jeszcze nie udostępniono",
+    "summaryThisPhoneOnly": "Tylko ten telefon",
+    "summaryDevices": {
+      "one": "%{count} urządzenie",
+      "few": "%{count} urządzenia",
+      "many": "%{count} urządzeń",
+      "other": "%{count} urządzenia"
+    }
   },
   "displayLanguageScreen": {
     "title": "Wygląd i język",
@@ -3395,7 +3405,8 @@
       "warn": "Wymaga uwagi",
       "error": "Błąd",
       "unknown": "Nieznany"
-    }
+    },
+    "opensInBrowser": "Otwiera się w przeglądarce"
   },
   "settingsPages": {
     "notSet": "Nie ustawiono",

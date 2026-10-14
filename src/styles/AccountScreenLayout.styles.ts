@@ -20,13 +20,16 @@ export const createAccountScreenLayoutStyles = (colors: Palette) =>
     },
     content: {
       paddingHorizontal: 20,
-      paddingBottom: 40,
+      paddingTop: 16,
     },
-    titleRow: {
+    // Fixed above the scroll view: the page background shows through, and
+    // content scrolls beneath it rather than under the status bar.
+    header: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 12,
-      marginBottom: 24,
+      paddingHorizontal: 20,
+      paddingBottom: 8,
     },
     backButton: {
       width: 36,

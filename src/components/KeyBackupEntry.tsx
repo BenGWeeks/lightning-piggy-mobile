@@ -41,6 +41,7 @@ const KeyBackupEntry: React.FC = () => {
 
   return (
     <SettingsRow
+      kind="navigate"
       icon={KeyRound}
       title={t('keyBackupScreen.title')}
       subtitle={status}

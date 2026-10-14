@@ -1,14 +1,41 @@
 import React, { useContext, useMemo, useState } from 'react';
 import { Switch, Text, TouchableOpacity, View, type SwitchProps } from 'react-native';
-import { ChevronRight, Info, type LucideIcon } from 'lucide-react-native';
+import { ChevronRight, ExternalLink, Info, type LucideIcon } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createSettingsRowStyles } from '../styles/SettingsRow.styles';
 import PendingSettingsSwitch from './PendingSettingsSwitch';
 import SettingsInfoSheet from './SettingsInfoSheet';
 import { SettingsSectionCardContext } from '../contexts/SettingsSectionCardContext';
+import {
+  isTwoLineSettingsRow,
+  resolveSettingsRowKind,
+  settingsRowAccessibilityRole,
+  settingsRowTrailing,
+} from '../utils/settingsRowKind';
 
-interface Props {
+type ToggleConfig = Pick<
+  SwitchProps,
+  'value' | 'onValueChange' | 'disabled' | 'testID' | 'accessibilityLabel'
+> & { pending?: boolean; pendingTestID?: string };
+
+/**
+ * The row's kind decides its trailing affordance (#1552), so a screen can't
+ * put a chevron on an external link or a switch on a navigation row.
+ */
+type KindProps =
+  /** In-app screen / sheet / picker. A missing handler renders as a read-only row. */
+  | { kind: 'navigate'; onPress: (() => void) | undefined; toggle?: never }
+  /** Opens a URL or another app: ↗ instead of a chevron, announced as a link. */
+  | { kind: 'external'; onPress: () => void; toggle?: never }
+  /** Acts on the spot (save, share, remove): no trailing affordance. */
+  | { kind: 'action'; onPress: () => void; toggle?: never }
+  | { kind: 'toggle'; toggle: ToggleConfig; onPress?: never }
+  | { kind: 'value'; onPress?: never; toggle?: never }
+  /** Derived as `navigate`. Prefer an explicit `kind`; kept so in-flight branches compile. */
+  | { kind?: undefined; onPress: () => void; toggle?: never };
+
+type Props = KindProps & {
   icon: LucideIcon;
   title: string;
   appearance?: 'gradient' | 'surface';
@@ -26,18 +53,17 @@ interface Props {
   testID: string;
   subtitleTestID?: string;
   accessibilityLabel?: string;
-  accessibilityRole?: 'button' | 'link';
-  onPress?: () => void;
-  toggle?: Pick<
-    SwitchProps,
-    'value' | 'onValueChange' | 'disabled' | 'testID' | 'accessibilityLabel'
-  > & { pending?: boolean; pendingTestID?: string };
   details?: React.ReactNode;
   infoTestID?: string;
-}
+};
 
-/** Shared settings navigation/switch row. Fine print is one tap away. */
+/**
+ * Shared settings row. Layout, always: [icon] [title / second line] … [ⓘ]
+ * [one trailing affordance]. Fine print is one tap away behind ⓘ; rows with
+ * no second line collapse to single-line height.
+ */
 export default function SettingsRow({
+  kind: kindProp,
   icon: Icon,
   title,
   appearance = 'gradient',
@@ -54,7 +80,6 @@ export default function SettingsRow({
   testID,
   subtitleTestID,
   accessibilityLabel,
-  accessibilityRole = 'link',
   onPress,
   toggle,
   details,
@@ -66,11 +91,21 @@ export default function SettingsRow({
   const [infoOpen, setInfoOpen] = useState(false);
   const inCard = useContext(SettingsSectionCardContext);
   const grouped = groupedProp ?? inCard;
+  const kind = resolveSettingsRowKind({ kind: kindProp, onPress, toggle });
+  const trailing = settingsRowTrailing(kind);
+  const pressable = kind === 'navigate' || kind === 'external' || kind === 'action';
   const ToggleControl = toggle?.pending !== undefined ? PendingSettingsSwitch : Switch;
   const rowDisabled = disabled || !!toggle?.disabled;
   const hint = rowDisabled && disabledSubtitle ? disabledSubtitle : (value ?? subtitle);
+  const twoLine = isTwoLineSettingsRow(hint);
   const statusLabel = status ? t(`settingsKit.status.${status}`) : undefined;
-  const accessibilityHint = [hint, statusLabel].filter(Boolean).join('. ');
+  const accessibilityHint = [
+    twoLine ? hint : undefined,
+    statusLabel,
+    kind === 'external' ? t('settingsKit.opensInBrowser') : undefined,
+  ]
+    .filter(Boolean)
+    .join('. ');
   const foreground = destructive
     ? colors.red
     : appearance === 'surface'
@@ -81,6 +116,7 @@ export default function SettingsRow({
     { ok: colors.green, warn: colors.amber, error: colors.red, unknown: colors.textSupplementary }[
       status
     ];
+  const height = twoLine ? undefined : styles.compact;
   const content = (
     <>
       <View
@@ -102,13 +138,15 @@ export default function SettingsRow({
         >
           {title}
         </Text>
-        <Text
-          style={[styles.subtitle, appearance === 'surface' && styles.surfaceSubtitle]}
-          numberOfLines={1}
-          testID={subtitleTestID}
-        >
-          {hint}
-        </Text>
+        {twoLine && (
+          <Text
+            style={[styles.subtitle, appearance === 'surface' && styles.surfaceSubtitle]}
+            numberOfLines={1}
+            testID={subtitleTestID}
+          >
+            {hint}
+          </Text>
+        )}
       </View>
       {status && (
         <View
@@ -118,7 +156,6 @@ export default function SettingsRow({
           accessibilityRole="text"
         />
       )}
-      {onPress && <ChevronRight size={20} color={foreground} />}
     </>
   );
   return (
@@ -126,29 +163,30 @@ export default function SettingsRow({
       <View
         style={[
           styles.row,
+          height,
           appearance === 'surface' && styles.surface,
           grouped && styles.grouped,
           indent && styles.indent,
           disabled && styles.disabled,
         ]}
-        testID={onPress ? undefined : testID}
+        testID={pressable ? undefined : testID}
         accessible={false}
       >
-        {onPress ? (
+        {pressable ? (
           <TouchableOpacity
-            style={styles.main}
+            style={[styles.main, height]}
             onPress={onPress}
             disabled={rowDisabled}
             accessibilityState={{ disabled: rowDisabled }}
             testID={testID}
-            accessibilityRole={accessibilityRole}
+            accessibilityRole={settingsRowAccessibilityRole(kind)}
             accessibilityLabel={accessibilityLabel ?? title}
             accessibilityHint={accessibilityHint}
           >
             {content}
           </TouchableOpacity>
         ) : (
-          <View style={styles.main} accessible={false}>
+          <View style={[styles.main, height]} accessible={false}>
             {content}
           </View>
         )}
@@ -163,7 +201,24 @@ export default function SettingsRow({
             <Info size={20} color={foreground} />
           </TouchableOpacity>
         )}
-        {toggle && (
+        {(trailing === 'chevron' || trailing === 'external') && (
+          // Extends the row's tap target to the far edge; screen readers
+          // already get the whole row (and its hint) from the main target.
+          <TouchableOpacity
+            style={styles.trailing}
+            onPress={onPress}
+            disabled={rowDisabled}
+            accessible={false}
+            testID={`${testID}-${trailing}`}
+          >
+            {trailing === 'chevron' ? (
+              <ChevronRight size={20} color={foreground} />
+            ) : (
+              <ExternalLink size={16} color={foreground} />
+            )}
+          </TouchableOpacity>
+        )}
+        {trailing === 'switch' && toggle && (
           <ToggleControl
             pending={toggle.pending ?? false}
             {...toggle}

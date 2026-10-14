@@ -3049,7 +3049,15 @@
     "loadFailed": "无法检查你的中继。请在联网后重试。",
     "cancel": "取消",
     "failedTitle": "无法停止邀请",
-    "failedBody": "部分中继或你的签名器没有响应。请点按“重新检查”，然后重试。"
+    "failedBody": "部分中继或你的签名器没有响应。请点按“重新检查”，然后重试。",
+    "summaryChecking": "正在检查…",
+    "summaryUnavailable": "无法检查",
+    "summaryNotShared": "尚未共享",
+    "summaryThisPhoneOnly": "仅此手机",
+    "summaryDevices": {
+      "one": "%{count} 台设备",
+      "other": "%{count} 台设备"
+    }
   },
   "displayLanguageScreen": {
     "title": "显示与语言",
@@ -3343,7 +3351,8 @@
       "warn": "需要关注",
       "error": "错误",
       "unknown": "未知"
-    }
+    },
+    "opensInBrowser": "在浏览器中打开"
   },
   "settingsPages": {
     "notSet": "未设置",

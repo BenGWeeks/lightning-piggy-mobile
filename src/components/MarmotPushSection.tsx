@@ -158,6 +158,7 @@ const MarmotPushSection: React.FC<{ permissionGranted: boolean }> = ({ permissio
   return (
     <>
       <SettingsRow
+        kind="toggle"
         icon={Smartphone}
         title={t('securityScreen.marmotPushToggle')}
         subtitle={

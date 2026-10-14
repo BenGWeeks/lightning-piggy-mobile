@@ -70,6 +70,7 @@ const DefaultOnchainWalletSection: React.FC = () => {
   return (
     <View testID="default-onchain-section">
       <SettingsRow
+        kind="navigate"
         icon={Bitcoin}
         title={t('onChainScreen.defaultWalletTitle')}
         value={selected?.alias ?? t('onChainScreen.defaultWalletEmpty')}
