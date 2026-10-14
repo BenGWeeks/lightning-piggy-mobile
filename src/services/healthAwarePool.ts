@@ -268,20 +268,27 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
       let closed = false;
       let didEose = false;
       let notifiedClose = false;
-      const close = (reason = 'closed by caller') => {
+      const close = (reason = 'closed by caller', deferNotification = true) => {
         if (closed) return;
         closed = true;
         params.abort?.removeEventListener('abort', abort);
         handles.forEach((handle) => handle.close(reason));
-        notifyClose([...grouped.keys()].map((url) => reasons.get(url) ?? reason));
+        notifyClose(
+          [...grouped.keys()].map((url) => reasons.get(url) ?? reason),
+          deferNotification,
+        );
       };
-      const abort = () => close('aborted');
-      const notifyClose = (errors: string[]) => {
+      const abort = () => close('aborted', false);
+      const notifyClose = (errors: string[], deferNotification = false) => {
         if (notifiedClose) return;
         notifiedClose = true;
         closed = true;
         params.abort?.removeEventListener('abort', abort);
-        params.onclose?.(errors);
+        // Match the SDK pool's asynchronous caller-close notification. NIP-46
+        // fromURI closes its pairing REQ before marking the handshake successful.
+        // Retire the REQ immediately, but let that caller finish before notifying.
+        if (deferNotification) void Promise.resolve().then(() => params.onclose?.(errors));
+        else params.onclose?.(errors);
       };
       const eose = (url: string) => {
         eosed.add(url);

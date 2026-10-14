@@ -3,6 +3,10 @@ import { AbstractRelay } from 'nostr-tools/abstract-relay';
 import { withRelayHealth } from './healthAwarePool';
 import { recordRelayPublish } from './relayHealth';
 import { querySyncAbortable } from './relayQuery';
+import { BunkerSigner, createNostrConnectURI } from 'nostr-tools/nip46';
+import { finalizeEvent, generateSecretKey, getPublicKey, verifyEvent } from 'nostr-tools/pure';
+import { encrypt, getConversationKey } from 'nostr-tools/nip44';
+import { withResumableSubscriptions } from './resumablePool';
 
 jest.mock('./relayReqLimit', () => ({ discoverRelayReqLimit: async () => undefined }));
 
@@ -16,6 +20,98 @@ jest.mock('./relayHealth', () => ({
   recordRelayPublish: jest.fn(),
   selectHealthyRelays: (relays: string[]) => relays,
 }));
+
+it('accepts an encrypted NIP-46 pairing ack through the health/resumable pool', async () => {
+  jest.useFakeTimers();
+  class PairingPool extends withResumableSubscriptions(withRelayHealth(SimplePool)) {}
+  const pool = new PairingPool();
+  const url = 'wss://pairing.example/';
+  const relay = new AbstractRelay(url, { verifyEvent });
+  jest.spyOn(relay, 'send').mockResolvedValue();
+  jest.spyOn(pool, 'ensureRelay').mockResolvedValue(relay);
+  // Relay switching is a later RPC; exercise the real encrypted pairing handler.
+  const switchRelays = jest.spyOn(BunkerSigner.prototype, 'switchRelays').mockResolvedValue(false);
+  const clientKey = generateSecretKey();
+  const bunkerKey = generateSecretKey();
+  const secret = 'pairing-secret';
+  let signer: BunkerSigner | undefined;
+  try {
+    const pairing = BunkerSigner.fromURI(
+      clientKey,
+      createNostrConnectURI({
+        clientPubkey: getPublicKey(clientKey),
+        relays: [url],
+        secret,
+      }),
+      { pool },
+      60_000,
+    );
+    await jest.advanceTimersByTimeAsync(0);
+    const pairingSub = [...relay.openSubs.values()][0];
+    expect(pairingSub).toBeDefined();
+    const ack = finalizeEvent(
+      {
+        kind: 24133,
+        created_at: 100,
+        tags: [['p', getPublicKey(clientKey)]],
+        content: encrypt(
+          JSON.stringify({ id: 'connect', result: secret }),
+          getConversationKey(bunkerKey, getPublicKey(clientKey)),
+        ),
+      },
+      bunkerKey,
+    );
+    const resolved = expect(pairing).resolves.toBeInstanceOf(BunkerSigner);
+    pairingSub.onevent(ack);
+    await jest.advanceTimersByTimeAsync(0);
+    await resolved;
+    signer = await pairing;
+    expect(signer.bp.pubkey).toBe(getPublicKey(bunkerKey));
+    expect(relay.openSubs.has(pairingSub.id)).toBe(false);
+    expect(relay.openSubs.size).toBe(1); // Only the live signer subscription remains.
+  } finally {
+    await signer?.close();
+    pool.destroy();
+    relay.close();
+    switchRelays.mockRestore();
+    jest.useRealTimers();
+  }
+});
+
+it('still rejects NIP-46 pairing when the subscription closes before an ack', async () => {
+  jest.useFakeTimers();
+  class PairingPool extends withResumableSubscriptions(withRelayHealth(SimplePool)) {}
+  const pool = new PairingPool();
+  const relay = new AbstractRelay('wss://pairing.example/', { verifyEvent });
+  jest.spyOn(relay, 'send').mockResolvedValue();
+  jest.spyOn(pool, 'ensureRelay').mockResolvedValue(relay);
+  const clientKey = generateSecretKey();
+  try {
+    const pairing = BunkerSigner.fromURI(
+      clientKey,
+      createNostrConnectURI({
+        clientPubkey: getPublicKey(clientKey),
+        relays: [relay.url],
+        secret: 'pairing-secret',
+      }),
+      { pool },
+      60_000,
+    );
+    const rejected = expect(pairing).rejects.toThrow(
+      'subscription closed before connection was established',
+    );
+    await jest.advanceTimersByTimeAsync(0);
+    const pairingSub = [...relay.openSubs.values()][0];
+    pairingSub.close('relay disconnected');
+    await jest.advanceTimersByTimeAsync(0);
+    await rejected;
+    expect(relay.openSubs.size).toBe(0);
+  } finally {
+    pool.destroy();
+    relay.close();
+    jest.useRealTimers();
+  }
+});
 
 // Stand-in for nostr-tools' pool: publish resolves per relay with whatever
 // the test queues, exactly like SimplePool resolving "connection failure: …".
