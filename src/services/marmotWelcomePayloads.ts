@@ -10,6 +10,8 @@ import type { MarmotKvBackend } from './marmotStore';
 import { WELCOME_OUTBOX_TTL_SECS, type MarmotWelcomeOutbox } from './marmotWelcomeOutbox';
 
 const NS = 'welcomePayloads';
+/** Cap on stored Welcomes awaiting a signature; the oldest go first. */
+export const MAX_PENDING_WELCOME_PAYLOADS = 50;
 type PendingPayload = {
   groupId: string;
   rumor: Rumor;
@@ -41,9 +43,37 @@ export class MarmotWelcomePayloads {
         queuedAt: Math.floor(Date.now() / 1000),
       };
       // Persist before signing/encryption, including before a session stop.
+      await this.prune();
       await this.backend.set(NS, this.id(item), JSON.stringify(item));
       return this.send(item, delivery);
     };
+  }
+
+  /** Drop expired / unreadable entries and make room for one more. */
+  private async prune(): Promise<void> {
+    const now = Math.floor(Date.now() / 1000);
+    const live: { id: string; queuedAt: number }[] = [];
+    for (const id of await this.backend.keys(NS)) {
+      const raw = await this.backend.get(NS, id);
+      let queuedAt: number | undefined;
+      try {
+        queuedAt = raw ? (JSON.parse(raw) as PendingPayload).queuedAt : undefined;
+      } catch {
+        queuedAt = undefined;
+      }
+      if (typeof queuedAt !== 'number' || now - queuedAt > WELCOME_OUTBOX_TTL_SECS) {
+        await this.backend.remove(NS, id);
+      } else {
+        live.push({ id, queuedAt });
+      }
+    }
+    live.sort((a, b) => a.queuedAt - b.queuedAt);
+    for (const entry of live.slice(
+      0,
+      Math.max(0, live.length - MAX_PENDING_WELCOME_PAYLOADS + 1),
+    )) {
+      await this.backend.remove(NS, entry.id);
+    }
   }
 
   private id(item: PendingPayload): string {

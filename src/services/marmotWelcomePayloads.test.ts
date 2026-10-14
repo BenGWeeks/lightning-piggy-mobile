@@ -5,7 +5,7 @@ import type { Event as NostrEvent } from 'nostr-tools';
 import { MarmotDmDeviceSync } from './marmotDmDeviceSync';
 import { createMemoryMarmotBackend } from './marmotStore';
 import { MarmotWelcomeOutbox } from './marmotWelcomeOutbox';
-import { MarmotWelcomePayloads } from './marmotWelcomePayloads';
+import { MAX_PENDING_WELCOME_PAYLOADS, MarmotWelcomePayloads } from './marmotWelcomePayloads';
 import { NostrConnectError } from './signerErrors';
 
 const GROUP = 'group';
@@ -31,6 +31,7 @@ function setup() {
   const delivery = {
     signer: { getPublicKey: () => 'a'.repeat(64), signEvent },
     network: { getUserInboxRelays: async () => ['relay'], publish },
+    createRumor: () => ({}),
   } as unknown as NostrWelcomeDelivery;
   const payloads = new MarmotWelcomePayloads(backend, outbox, devices, () => false);
   payloads.attach({ idStr: GROUP, runtime: { welcomeDelivery: delivery } } as Parameters<
@@ -48,7 +49,7 @@ function setup() {
         queuedAt: Math.floor(Date.now() / 1000),
       }),
     );
-  return { backend, outbox, devices, signEvent, publish, payloads, seed };
+  return { backend, outbox, devices, signEvent, publish, payloads, seed, delivery };
 }
 
 describe('MarmotWelcomePayloads retries', () => {
@@ -98,5 +99,44 @@ describe('MarmotWelcomePayloads retries', () => {
     expect(await backend.get('welcomePayloads', 'corrupt')).toBeNull();
     expect(signEvent).toHaveBeenCalledTimes(1);
     expect(await backend.keys('welcomePayloads')).toEqual([]);
+  });
+});
+
+describe('MarmotWelcomePayloads storage bound', () => {
+  it('drops expired and corrupt entries and keeps at most the cap, oldest first', async () => {
+    const { backend, delivery, signEvent } = setup();
+    signEvent.mockRejectedValue(new Error('signer offline'));
+    const now = Math.floor(Date.now() / 1000);
+    await backend.set('welcomePayloads', 'corrupt', '{');
+    await backend.set(
+      'welcomePayloads',
+      'expired',
+      JSON.stringify({ groupId: GROUP, keyPackage, rumor: {}, relays: [], queuedAt: 0 }),
+    );
+    for (let i = 0; i < MAX_PENDING_WELCOME_PAYLOADS; i++) {
+      await backend.set(
+        'welcomePayloads',
+        `old-${i}`,
+        JSON.stringify({
+          groupId: GROUP,
+          keyPackage,
+          rumor: {},
+          relays: [],
+          queuedAt: now - 100 + i,
+        }),
+      );
+    }
+    await delivery
+      .deliver({
+        recipient: { keyPackageEvent: { id: 'fresh', pubkey: keyPackage.pubkey } },
+        groupRelays: ['relay'],
+      } as unknown as Parameters<NostrWelcomeDelivery['deliver']>[0])
+      .catch(() => undefined);
+    const keys = await backend.keys('welcomePayloads');
+    expect(keys).toHaveLength(MAX_PENDING_WELCOME_PAYLOADS);
+    expect(keys).not.toContain('corrupt');
+    expect(keys).not.toContain('expired');
+    expect(keys).not.toContain('old-0');
+    expect(keys).toContain(`${GROUP}:fresh`);
   });
 });
