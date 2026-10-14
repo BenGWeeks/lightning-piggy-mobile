@@ -1098,10 +1098,13 @@ Lightning Piggy-initiated Welcomes were incompatible.
 Lightning Piggy refreshes this installation's key weekly in the same `d` slot.
 The random slot id is per account per installation and survives account
 sign-out and re-sign-in (two accounts on one install never share one).
-Superseded secrets (used or unused) are deleted as soon as replacement
-publication is confirmed. The adopted
-`foundation/key-packages.md` explicitly forbids a drain window: an inviter
-must retry a delayed Welcome with the current key. Older slots are retired
+Once a replacement is confirmed published, a USED superseded secret is
+deleted at once (spec). An UNUSED one is kept until its own `not_after`
+(at most 84 days), matching MDK / White Noise, so a Welcome made with the
+previous key package — say for someone who was offline over the weekly
+refresh — still joins (Ben's retention decision, #1230, extended
+2026-10-14). That stays inside the bound `foundation/key-packages.md` sets
+(retention never extends past the key package's lifetime). Older slots are retired
 with NIP-09 only when local publication records establish that this install
 owns them; a matching public client tag does not establish ownership.
 

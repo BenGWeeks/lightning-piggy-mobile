@@ -102,7 +102,7 @@ describe('marmotKeyPackageLifecycle', () => {
   beforeAll(() => installMarmotCryptoProvider());
   afterEach(() => jest.restoreAllMocks());
 
-  it('rotation keeps one slot and deletes the old secret after confirmed publication', async () => {
+  it('rotation keeps one slot and keeps the unused old secret until it expires', async () => {
     const relay = makeRelay();
     const { client } = makeClient(relay.network);
 
@@ -119,12 +119,13 @@ describe('marmotKeyPackageLifecycle', () => {
     const current = currentKeyPackage(await client.keyPackages.list())!;
     expect(current.keyPackageRef).not.toEqual(first.keyPackageRef);
 
-    // Confirmed replacement immediately deletes superseded private material.
-    expect(await client.keyPackages.getPrivateKey(first.keyPackageRef)).toBeNull();
-    expect(await client.keyPackages.list()).toHaveLength(1);
+    // Retention policy (#1230, 84-day / not_after alignment with MDK): the
+    // UNUSED replaced key keeps its secret so a late invite made with it works.
+    expect(await client.keyPackages.getPrivateKey(first.keyPackageRef)).not.toBeNull();
+    expect(await client.keyPackages.list()).toHaveLength(2);
   }, 60_000);
 
-  it('rejects a delayed Welcome for a replaced key; the inviter must retry', async () => {
+  it('accepts a delayed Welcome made with the replaced (unused) key', async () => {
     const relay = makeRelay();
     const bob = makeClient(relay.network);
     const alice = makeClient(relay.network);
@@ -138,7 +139,7 @@ describe('marmotKeyPackageLifecycle', () => {
     await alice.client.groups.invite(group.id, oldEvent);
     const wrap = relay.events.find((e) => e.kind === 1059)!;
     const welcomeRumor = nip59.unwrapEvent(wrap, bob.sk) as unknown as NostrEvent;
-    await expect(bob.client.joinGroupFromWelcome({ welcomeRumor })).rejects.toThrow();
+    await expect(bob.client.joinGroupFromWelcome({ welcomeRumor })).resolves.toBeDefined();
   }, 60_000);
 
   it('drops private material only once the key package has expired', async () => {
@@ -177,14 +178,21 @@ describe('marmotKeyPackageLifecycle', () => {
     expect(newestEvent([])).toBeUndefined();
   });
 
-  it('deletes unused and used replacements immediately, never before confirmation', () => {
+  it('deletes used replacements at once, keeps unused ones until expiry, never before confirmation', () => {
     const t = 1_800_000_000;
     const current = listed(2, t + DAY);
-    expect(shouldDeleteReplacedKeyPackage(listed(1, t), current)).toBe(true);
+    // Unused, with a known lifetime: kept (retiredKeyPackages drops it after not_after).
+    expect(shouldDeleteReplacedKeyPackage(listed(1, t), current, t + 80 * DAY)).toBe(false);
     expect(shouldDeleteReplacedKeyPackage(listed(1, t, true), current)).toBe(true);
     expect(shouldDeleteReplacedKeyPackage(listed(1), current)).toBe(true);
     expect(shouldDeleteReplacedKeyPackage(current, current)).toBe(false);
     expect(shouldDeleteReplacedKeyPackage(listed(1, t), listed(2))).toBe(false);
+    // Newer than current (its publish failed): not replaced.
+    expect(shouldDeleteReplacedKeyPackage(listed(3, t + 2 * DAY), current)).toBe(false);
+    // Unused with no readable lifetime: capped at 84 days.
+    const noLifetime = { ...listed(4, t), publicPackage: { leafNode: {} } } as unknown as Listed;
+    expect(shouldDeleteReplacedKeyPackage(noLifetime, current, t + 83 * DAY)).toBe(false);
+    expect(shouldDeleteReplacedKeyPackage(noLifetime, current, t + 84 * DAY)).toBe(true);
   });
 
   it('deletes a USED key package once its replacement is published (spec)', async () => {
@@ -253,8 +261,9 @@ describe('marmotKeyPackageLifecycle', () => {
     expect(await client.keyPackages.getPrivateKey(previous.keyPackageRef)).not.toBeNull();
     release();
     await replacement;
-    expect(await client.keyPackages.getPrivateKey(previous.keyPackageRef)).toBeNull();
-    expect(await client.keyPackages.list()).toHaveLength(1);
+    // Unused, so the retention policy keeps it until its own expiry.
+    expect(await client.keyPackages.getPrivateKey(previous.keyPackageRef)).not.toBeNull();
+    expect(await client.keyPackages.list()).toHaveLength(2);
   }, 60_000);
 
   it('retries retirement of owned legacy slots when no relay accepts their deletion', async () => {
@@ -357,13 +366,13 @@ describe('marmotKeyPackageLifecycle', () => {
     expect(next.tags).toEqual(first.tags);
   });
 
-  it('republishes when the newest key package is consumed and earlier secrets are erased', async () => {
+  it('republishes when the newest key package is consumed; erases it, keeps the unused earlier one', async () => {
     const relay = makeRelay();
     const { client } = makeClient(relay.network);
     await maintain(client); // A
     const a = currentKeyPackage(await client.keyPackages.list())!;
     advance(60);
-    // B replaces A early (A lacked a capability); A is immediately erased.
+    // B replaces A early (A lacked a capability); A is unused, so it's retained.
     await maintain(client, {
       isUpToDate: (events) => !events.some((e) => e.id === a.published![0].id),
     });
@@ -375,6 +384,6 @@ describe('marmotKeyPackageLifecycle', () => {
     expect(currentKeyPackage(await client.keyPackages.list(), SLOT)).toBeUndefined();
     expect(await maintain(client)).toBe('published');
     expect(await client.keyPackages.getPrivateKey(b.keyPackageRef)).toBeNull(); // used: gone
-    expect(await client.keyPackages.getPrivateKey(a.keyPackageRef)).toBeNull(); // confirmed replacement
+    expect(await client.keyPackages.getPrivateKey(a.keyPackageRef)).not.toBeNull(); // unused: kept until expiry
   }, 60_000);
 });

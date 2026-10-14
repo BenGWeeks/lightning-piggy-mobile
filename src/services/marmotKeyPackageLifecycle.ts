@@ -5,8 +5,10 @@
 //    it, so relays replace the old event instead of piling up stale ones.
 //  - The key package is refreshed weekly (#1210) — or sooner, once half its
 //    lifetime has passed — so it never silently expires on relays.
-//  - Replaced secrets are deleted after confirmed publication, without a
-//    drain window (foundation/key-packages.md).
+//  - Once a replacement is confirmed published, USED replaced secrets are
+//    deleted at once (spec); UNUSED ones are kept until their own expiry
+//    (`not_after`, at most 84 days), like MDK / White Noise — see the
+//    retention policy on shouldDeleteReplacedKeyPackage.
 
 import {
   getKeyPackageLifetime,
@@ -25,6 +27,13 @@ type ListedKeyPackage = Awaited<ReturnType<KeyPackageManager['list']>>[number];
 const DAY_SECS = 24 * 60 * 60;
 /** Refresh our published key package at least this often (#1210). */
 export const KEY_PACKAGE_REFRESH_SECS = 7 * DAY_SECS;
+/** Clock-skew grace before an expired key package's secret is dropped. */
+const EXPIRY_GRACE_SECS = 60 * 60;
+/**
+ * Upper bound for keeping an UNUSED replaced key package whose lifetime we
+ * can't read: MDK / White Noise's longest key package lifetime.
+ */
+export const UNUSED_REPLACED_KEY_MAX_RETENTION_SECS = 84 * DAY_SECS;
 /** A valid `d` slot: 32 random bytes, hex (transports/nostr.md). */
 export const SLOT_ID_HEX = /^[0-9a-f]{64}$/;
 
@@ -100,12 +109,34 @@ export function needsRefresh(kp: ListedKeyPackage, nowSecs: number): boolean {
 const sameKeyPackage = (a: ListedKeyPackage, b: ListedKeyPackage) =>
   a.keyPackageRef.join() === b.keyPackageRef.join();
 
-/** No retention window after an authenticated slot replacement is published. */
+/**
+ * RETENTION POLICY (Ben, #1230; extended on 2026-10-14 to match MDK / White
+ * Noise): whether a key package that `current` (our newest published one in
+ * the slot) replaced can lose its private material now.
+ *
+ * - USED (consumed) key packages follow the spec: deleted as soon as the
+ *   replacement is confirmed published.
+ * - UNUSED ones are kept until their own `not_after` (plus a clock-skew grace,
+ *   handled by retiredKeyPackages) — at most 84 days. Relays and peers can keep
+ *   serving the previous key package after our weekly refresh, and someone
+ *   offline for a week may only now receive a Welcome made with it; deleting
+ *   it would make that invite fail for good ("No matching key"). Keeping it
+ *   until expiry stays within the spec's bound (foundation/key-packages.md:
+ *   retention must not extend past the key package's lifetime).
+ */
 export function shouldDeleteReplacedKeyPackage(
   kp: ListedKeyPackage,
   current: ListedKeyPackage,
+  nowSecs: number = Math.floor(Date.now() / 1000),
 ): boolean {
-  return !sameKeyPackage(kp, current) && publishedAt(current) !== undefined;
+  const currentAt = publishedAt(current);
+  if (sameKeyPackage(kp, current) || currentAt === undefined) return false; // no confirmed replacement
+  const at = publishedAt(kp);
+  // Newer than "current" (e.g. its publish failed): not replaced.
+  if (at !== undefined && at > currentAt) return false;
+  if (kp.used || at === undefined) return true;
+  if (keyPackageLifetime(kp) !== undefined) return false; // expiry decides
+  return nowSecs - at >= UNUSED_REPLACED_KEY_MAX_RETENTION_SECS;
 }
 
 /**
@@ -120,8 +151,8 @@ export function retiredKeyPackages(
   return list.filter((kp) => {
     if (current && sameKeyPackage(kp, current)) return false;
     const lifetime = keyPackageLifetime(kp);
-    if (lifetime !== undefined && nowSecs > lifetime.notAfter) return true;
-    return current !== undefined && shouldDeleteReplacedKeyPackage(kp, current);
+    if (lifetime !== undefined && nowSecs > lifetime.notAfter + EXPIRY_GRACE_SECS) return true;
+    return current !== undefined && shouldDeleteReplacedKeyPackage(kp, current, nowSecs);
   });
 }
 
