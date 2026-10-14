@@ -383,9 +383,11 @@ export async function fetchProfiles(
     if (missing.length > 0 && missing.length < pubkeys.length && Date.now() < overallDeadline) {
       if (__DEV__)
         console.log(`[Nostr] fetchProfiles: retrying ${missing.length} missing profiles`);
+      // Same 150-author batches as the main pass: one relay slot per round
+      // without turning 300 misses into fifteen sequential 8 s rounds.
       const retryBatches: string[][] = [];
-      for (let i = 0; i < missing.length; i += 20) {
-        retryBatches.push(missing.slice(i, i + 20));
+      for (let i = 0; i < missing.length; i += batchSize) {
+        retryBatches.push(missing.slice(i, i + batchSize));
       }
       for (let i = 0; i < retryBatches.length; i += concurrency) {
         if (Date.now() > overallDeadline) break;

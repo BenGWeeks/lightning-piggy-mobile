@@ -1399,7 +1399,8 @@ routes, so `createMarmotNetwork` owns their resume: one `watchMarmotResume`
 watcher per network replaces every group relay's transport after the same
 three-second stagger and then reconnects the session once; a lost group socket
 re-arms the merged REQ with exponential backoff (one second doubling to a
-minute, reset once a REQ opens) and runs per-group paged recovery, notifying
+minute; it resets only after an arm stayed open for 30 seconds, so a relay
+that accepts the REQ and CLOSEs it at once keeps backing off) and runs per-group paged recovery, notifying
 the Welcome retry listener once its groups have caught up.
 
 Transport replacement isolates each SDK connection attempt's relay registry:
