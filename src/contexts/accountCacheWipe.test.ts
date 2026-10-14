@@ -1,3 +1,4 @@
+import { loadBuyerOrderTitles, recordBuyerOrderTitles } from '../services/buyerOrderTitles';
 import { initialiseNotificationDefaults } from '../services/notificationDefaults';
 import * as marmotPush from '../services/marmotPushRegistration';
 import { setActivePubkeyForWalletStorage } from '../services/walletStorageService';
@@ -292,3 +293,15 @@ it.each(['delete', 'list'])(
     }
   },
 );
+
+it("wipes the signed-out account's buyer order titles while preserving other accounts'", async () => {
+  const titles = { [`30402:${OTHER_PK}:mug`]: 'Private purchase' };
+  await recordBuyerOrderTitles(PK, 'order-1', titles);
+  await recordBuyerOrderTitles(OTHER_PK, 'order-2', titles);
+
+  await wipeAccountCaches(PK);
+
+  expect(await AsyncStorage.getItem(`market-buyer-order-titles:${PK}`)).toBeNull();
+  expect(await loadBuyerOrderTitles(PK)).toEqual({});
+  expect(await loadBuyerOrderTitles(OTHER_PK)).toEqual({ 'order-2': titles });
+});

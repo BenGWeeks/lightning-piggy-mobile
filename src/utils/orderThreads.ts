@@ -8,6 +8,7 @@
 // kind-17 receipt; the merchant authors the type-2 payment request and the
 // type-3 / type-4 updates (either side may send a type-3 `cancelled`).
 import { parseStoredOrder, payableBolt11, type ParsedOrderEvent } from './orderEvents';
+import { matchesExpectedOrderAmount } from './orderInvoiceAmount';
 
 export type OrderRole = 'buyer' | 'seller';
 
@@ -30,7 +31,7 @@ export interface OrderThread {
   placedAt: number;
   /** Row id of the placed order, when known. */
   placedRowId?: string;
-  /** The merchant's latest payment request carrying a payable bolt11. */
+  /** The merchant's latest payment request matching the buyer-approved amount. */
   invoice?: { bolt11: string; amountSats?: number; at: number; rowId?: string };
   /** The buyer's latest kind-17 receipt. */
   receipt?: ParsedOrderEvent;
@@ -80,7 +81,7 @@ export function orderThreads(
     const fromBuyer = byBuyer(row);
     if (order.type === 'payment' && !fromBuyer) {
       const bolt11 = payableBolt11(order);
-      if (bolt11) {
+      if (bolt11 && matchesExpectedOrderAmount(bolt11, thread.placed.amountSats)) {
         thread.invoice = { bolt11, amountSats: order.amountSats, at: row.createdAt, rowId: row.id };
       }
     } else if (order.type === 'receipt' && fromBuyer) {

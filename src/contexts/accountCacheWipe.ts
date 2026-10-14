@@ -161,6 +161,8 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
     inboxLastSeenKey(loggedOutPubkey),
     `dm-kind4-retries:${loggedOutPubkey}`,
     `dm-kind4-exhausted:${loggedOutPubkey}`,
+    // Product titles reveal this account's purchase history.
+    `market-buyer-order-titles:${loggedOutPubkey}`,
     `nostr_group_activity_${loggedOutPubkey}`,
     `nostr_groups_${loggedOutPubkey}`,
     `groups_following_only_${loggedOutPubkey}`,

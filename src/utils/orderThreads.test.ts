@@ -1,3 +1,4 @@
+import { bech32 } from 'bech32';
 import {
   buyerOrderEntries,
   buyerOrderStatus,
@@ -9,8 +10,15 @@ import {
 import { serializeOrder, type ParsedOrderEvent } from './orderEvents';
 
 const SELLER = 'b'.repeat(64);
-// A syntactically valid bolt11 for payableBolt11 (regex-only check).
-const BOLT11 = `lnbc210n1${'q'.repeat(60)}`;
+// Use real BOLT11 encoding so amount checks exercise the decoder.
+function bolt11(hrp: string): string {
+  return bech32.encode(
+    hrp,
+    [...Array(7).fill(0), 1, 1, 20, ...bech32.toWords(Buffer.alloc(32, 1)), ...Array(104).fill(0)],
+    2000,
+  );
+}
+const BOLT11 = bolt11('lnbc21u');
 
 function row(
   fromMe: boolean,
@@ -139,6 +147,30 @@ describe('buyerOrderStatus', () => {
 });
 
 describe('buyerOrderEntries', () => {
+  it.each([
+    ['larger amount', bolt11('lnbc42u'), 2100],
+    ['smaller amount', bolt11('lnbc10u'), 2100],
+    ['amountless invoice', bolt11('lnbc'), 2100],
+    ['malformed invoice', `lnbc21u1${'q'.repeat(60)}`, 2100],
+    ['missing approved amount', BOLT11, undefined],
+  ])('does not prompt for payment with %s', (_scenario, paymentInvoice, expectedAmount) => {
+    const rows = [
+      row(true, 10, { type: 'order', amountSats: expectedAmount }),
+      row(false, 20, {
+        type: 'payment',
+        // An untrusted amount tag must not override the decoded invoice amount.
+        amountSats: 2100,
+        payment: { method: 'lightning', value: paymentInvoice },
+      }),
+    ];
+    expect(orderThreads(rows, 'buyer').get('o-1')?.invoice).toBeUndefined();
+    const isInvoicePaid = jest.fn(() => false);
+    const entries = buyerOrderEntries(new Map([[SELLER, rows]]), isInvoicePaid);
+    expect(entries[0]).toMatchObject({ status: 'awaitingInvoice', jumpToRowId: 'r10' });
+    expect(payNowCount(entries)).toBe(0);
+    expect(isInvoicePaid).not.toHaveBeenCalled();
+  });
+
   it('lists my orders newest first across sellers, jumping to the invoice when payable', () => {
     const other = 'c'.repeat(64);
     const older = row(true, 5, { type: 'order', orderId: 'o-0', items: [] }, 'old');
