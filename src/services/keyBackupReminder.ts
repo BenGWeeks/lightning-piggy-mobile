@@ -2,28 +2,27 @@
 //
 // For every account on this phone whose secret key lives in the app (a local
 // "nsec" account) and that hasn't been marked backed up (keyBackupStatus.ts),
-// one local notification repeats weekly at 10:00 local time. The first one
-// fires at least 7 days after the account was first seen on this phone (the
-// per-account "anchor", set by the first reconcile — for accounts that
-// predate this feature, that's the first launch after it ships).
+// one local notification repeats every seven days, starting seven days after
+// scheduling. The OS owns repetition, including while the app is closed.
+// The per-account anchor still controls the no-permission fallback banner.
+// Amber and NIP-46 accounts never qualify: their key isn't in the app.
+// Notification permission is never requested here.
 //
-// Amber (NIP-55) and NIP-46 accounts never qualify: their key isn't in the
-// app. Notification permission is never requested here — without it the
-// reminders are cancelled and the Wallets tab shows a banner instead (see
-// useKeyBackupReminder / shouldShowKeyBackupBanner).
-//
-// Trigger: expo-notifications' WEEKLY trigger (weekday + hour + minute; local
-// time, supported on Android and iOS). A WEEKLY trigger fires at the next
-// matching slot after it's armed, so during the ~day after the anchor — when
-// that slot would land before the 7-day mark — a one-shot DATE trigger holds
-// the first reminder instead, and a later reconcile swaps it for the weekly
-// one (same identifier; rescheduling a WEEKLY trigger never shifts it).
+// Expo's WEEKLY trigger cannot delay its first matching slot. A repeating
+// TIME_INTERVAL avoids an early reminder and a one-shot that needs the app
+// to reopen before weekly repetition can start. Delivery time is relative
+// to scheduling, rather than fixed at 10:00 local time.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import * as nip19 from 'nostr-tools/nip19';
 import { t } from '../i18n';
 import { loadIdentities } from './identitiesStore';
+import {
+  serialKeyBackupReminder,
+  retiredBackupAccounts,
+  resetKeyBackupReminderQueueForTests,
+} from './keyBackupReminderQueue';
 import { isKeyBackedUp } from './keyBackupStatus';
 import { hasNotificationPermission } from './notificationService';
 import { perAccountKey } from './perAccountStorage';
@@ -41,13 +40,8 @@ const OWN_PROFILE_CACHE_KEY_BASE = 'nostr_own_profile_cache';
 
 export const REMINDER_ID_PREFIX = 'key-backup-';
 export const REMINDER_KIND = 'keyBackup';
-export const REMINDER_HOUR = 10;
 const REMINDER_CHANNEL = 'reminders';
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-
-export type ReminderPlan =
-  | { mode: 'once'; date: number }
-  | { mode: 'weekly'; weekday: number; hour: number; minute: number };
 
 interface ReminderData {
   kind: typeof REMINDER_KIND;
@@ -60,45 +54,13 @@ export function reminderId(pubkey: string): string {
   return `${REMINDER_ID_PREFIX}${pubkey.toLowerCase().slice(0, 16)}`;
 }
 
-/** The first REMINDER_HOUR:00 (local) at or after anchor + 7 days. */
-export function firstReminderAt(anchor: number): number {
-  const due = new Date(anchor + WEEK_MS);
-  const slot = new Date(due);
-  slot.setHours(REMINDER_HOUR, 0, 0, 0);
-  if (slot.getTime() < due.getTime()) slot.setDate(slot.getDate() + 1);
-  return slot.getTime();
-}
-
-/** Which trigger to arm at `now` for an account anchored at `anchor`. */
-export function planReminder(anchor: number, now: number): ReminderPlan {
-  const first = new Date(firstReminderAt(anchor));
-  // A WEEKLY trigger armed now fires at the next matching slot after `now`.
-  // Until the slot one week before the first reminder has passed, that would
-  // be early — hold the first reminder in a one-shot instead. (Local-date
-  // maths, so a DST change in between doesn't shift it by an hour.)
-  const weekBefore = new Date(first);
-  weekBefore.setDate(weekBefore.getDate() - 7);
-  if (now <= weekBefore.getTime()) return { mode: 'once', date: first.getTime() };
+function reminderTrigger(): Notifications.TimeIntervalTriggerInput {
   return {
-    mode: 'weekly',
-    // expo-notifications: 1 = Sunday … 7 = Saturday.
-    weekday: first.getDay() + 1,
-    hour: REMINDER_HOUR,
-    minute: 0,
+    type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+    seconds: WEEK_MS / 1000,
+    repeats: true,
+    channelId: REMINDER_CHANNEL,
   };
-}
-
-function triggerFor(plan: ReminderPlan): Notifications.NotificationTriggerInput {
-  const channelId = REMINDER_CHANNEL;
-  return plan.mode === 'once'
-    ? { type: Notifications.SchedulableTriggerInputTypes.DATE, date: plan.date, channelId }
-    : {
-        type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
-        weekday: plan.weekday,
-        hour: plan.hour,
-        minute: plan.minute,
-        channelId,
-      };
 }
 
 // ---------------------------------------------------------------------------
@@ -162,20 +124,6 @@ export async function accountDisplayName(pubkey: string): Promise<string> {
 // ---------------------------------------------------------------------------
 // Scheduling
 
-// Reconciles and cancellations run one at a time, so a cancel (backup
-// confirmed, sign-out) can never be overtaken by a reconcile that read the
-// account list before it.
-let chain: Promise<unknown> = Promise.resolve();
-function serial<T>(op: () => Promise<T>): Promise<T> {
-  const run = chain.then(op, op);
-  chain = run.catch(() => undefined);
-  return run;
-}
-
-// Signed-out accounts whose registry entry may not be gone yet (the cache
-// wipe runs before removeIdentity): skipped until a reconcile sees them gone.
-const retired = new Set<string>();
-
 let channelReady: Promise<void> | null = null;
 function ensureReminderChannel(): Promise<void> {
   if (Platform.OS !== 'android') return Promise.resolve();
@@ -209,7 +157,7 @@ export async function eligibleReminderAccounts(
 ): Promise<string[]> {
   const out: string[] = [];
   for (const a of accounts) {
-    if (a.signerType !== 'nsec' || retired.has(a.pubkey.toLowerCase())) continue;
+    if (a.signerType !== 'nsec' || retiredBackupAccounts.has(a.pubkey.toLowerCase())) continue;
     if (!(await isKeyBackedUp(a.pubkey))) out.push(a.pubkey);
   }
   return out;
@@ -222,17 +170,17 @@ export async function eligibleReminderAccounts(
  * throws and never prompts for permission.
  */
 export function reconcileKeyBackupReminders(now: number = Date.now()): Promise<void> {
-  return serial(async () => {
+  return serialKeyBackupReminder(async () => {
     try {
       const { identities } = await loadIdentities();
       const present = new Set(identities.map((i) => i.pubkey.toLowerCase()));
-      for (const pk of retired) if (!present.has(pk)) retired.delete(pk);
+      for (const pk of retiredBackupAccounts)
+        if (!present.has(pk)) retiredBackupAccounts.delete(pk);
 
       const eligible = await eligibleReminderAccounts(identities);
       // Anchor regardless of permission / toggle, so the first reminder (or
       // banner) still waits a week from when the account arrived.
-      const anchors = new Map<string, number>();
-      for (const pk of eligible) anchors.set(pk, await ensureReminderAnchor(pk, now));
+      for (const pk of eligible) await ensureReminderAnchor(pk, now);
 
       const enabled = await areKeyBackupRemindersEnabled();
       const permitted = enabled && eligible.length > 0 && (await hasNotificationPermission());
@@ -244,10 +192,10 @@ export function reconcileKeyBackupReminders(now: number = Date.now()): Promise<v
         for (const pk of eligible) {
           const id = reminderId(pk);
           wanted.add(id);
-          const plan = planReminder(anchors.get(pk)!, now);
+          const trigger = reminderTrigger();
           const title = t('keyBackupReminder.title');
           const body = t('keyBackupReminder.body', { name: await accountDisplayName(pk) });
-          const reminderKey = JSON.stringify({ plan, title, body });
+          const reminderKey = JSON.stringify({ trigger, title, body });
           const current = existing.find((r) => r.identifier === id);
           const currentData = current?.content.data as Partial<ReminderData> | undefined;
           if (currentData?.reminderKey === reminderKey) continue;
@@ -256,7 +204,7 @@ export function reconcileKeyBackupReminders(now: number = Date.now()): Promise<v
           await Notifications.scheduleNotificationAsync({
             identifier: id,
             content: { title, body, data: data as unknown as Record<string, unknown> },
-            trigger: triggerFor(plan),
+            trigger,
           });
         }
       }
@@ -271,19 +219,19 @@ export function reconcileKeyBackupReminders(now: number = Date.now()): Promise<v
 
 /** Stop `pubkey`'s reminder — backup confirmed, or the signer changed. */
 export function cancelKeyBackupReminder(pubkey: string): Promise<void> {
-  return serial(() => cancelById(reminderId(pubkey)));
+  return serialKeyBackupReminder(() => cancelById(reminderId(pubkey)));
 }
 
 /** Sign-out / account removal: cancel and keep it cancelled until the
- * registry entry is gone (see `retired`). */
+ * registry entry is gone (see `retiredBackupAccounts`). */
 export function retireKeyBackupReminder(pubkey: string): Promise<void> {
-  retired.add(pubkey.toLowerCase());
+  retiredBackupAccounts.add(pubkey.toLowerCase());
   return cancelKeyBackupReminder(pubkey);
 }
 
 /** Toggle off: cancel every scheduled reminder and clear delivered ones. */
 export function cancelAllKeyBackupReminders(): Promise<void> {
-  return serial(async () => {
+  return serialKeyBackupReminder(async () => {
     try {
       for (const r of await scheduledReminders()) await cancelById(r.identifier);
       const shown = await Notifications.getPresentedNotificationsAsync();
@@ -334,7 +282,6 @@ export async function snoozeKeyBackupBanner(
 }
 
 export function __resetKeyBackupReminderForTests(): void {
-  chain = Promise.resolve();
-  retired.clear();
+  resetKeyBackupReminderQueueForTests();
   channelReady = null;
 }

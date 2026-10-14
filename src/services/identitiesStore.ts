@@ -1,5 +1,6 @@
 import { invalidateBackgroundPaymentScope } from './backgroundPaymentScope';
 import * as SecureStore from 'expo-secure-store';
+import { completeKeyBackupReminderRetirement } from './keyBackupReminderQueue';
 
 // Multi-account identity registry.
 //
@@ -106,6 +107,7 @@ export async function upsertIdentity(identity: StoredIdentity): Promise<Identiti
   else list[idx] = next;
   const out: IdentitiesBlob = { identities: list, activePubkey: identity.pubkey };
   await saveIdentities(out);
+  await completeKeyBackupReminderRetirement(identity.pubkey);
   return out;
 }
 
@@ -122,6 +124,7 @@ export async function removeIdentity(pubkey: string): Promise<IdentitiesBlob> {
   }
   const out: IdentitiesBlob = { identities: list, activePubkey: active };
   await saveIdentities(out);
+  await completeKeyBackupReminderRetirement(pubkey);
   return out;
 }
 
@@ -144,6 +147,7 @@ export async function clearIdentities(): Promise<void> {
   invalidateBackgroundPaymentScope();
   try {
     await SecureStore.deleteItemAsync(IDENTITIES_KEY);
+    await completeKeyBackupReminderRetirement();
   } finally {
     invalidateBackgroundPaymentScope();
   }

@@ -5,12 +5,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   BANNER_SNOOZE_KEY_BASE,
   REMINDER_ANCHOR_KEY_BASE,
-  REMINDER_HOUR,
   __resetKeyBackupReminderForTests,
   cancelKeyBackupReminder,
   eligibleReminderAccounts,
-  firstReminderAt,
-  planReminder,
   reconcileKeyBackupReminders,
   reminderId,
   retireKeyBackupReminder,
@@ -18,6 +15,7 @@ import {
   shouldShowKeyBackupBanner,
   snoozeKeyBackupBanner,
 } from './keyBackupReminder';
+import { completeKeyBackupReminderRetirement } from './keyBackupReminderQueue';
 import { markKeyBackedUp } from './keyBackupStatus';
 import { perAccountKey } from './perAccountStorage';
 
@@ -46,7 +44,7 @@ jest.mock('expo-notifications', () => ({
   cancelScheduledNotificationAsync: (id: string) => mockCancel(id),
   dismissNotificationAsync: (id: string) => mockDismiss(id),
   getPresentedNotificationsAsync: async () => mockPresented,
-  SchedulableTriggerInputTypes: { DATE: 'date', WEEKLY: 'weekly' },
+  SchedulableTriggerInputTypes: { DATE: 'date', WEEKLY: 'weekly', TIME_INTERVAL: 'timeInterval' },
   AndroidImportance: { DEFAULT: 3 },
   AndroidNotificationVisibility: { PRIVATE: 0 },
 }));
@@ -71,7 +69,6 @@ const nsec = (pubkey: string): Identity => ({ pubkey, signerType: 'nsec', lastUs
 const amber = (pubkey: string): Identity => ({ pubkey, signerType: 'amber', lastUsedAt: 1 });
 // Wednesday 2026-10-14, local time.
 const WED_14 = new Date(2026, 9, 14, 14, 0).getTime();
-const WED_09 = new Date(2026, 9, 14, 9, 0).getTime();
 
 const anchorOf = async (pk: string) =>
   Number(await AsyncStorage.getItem(perAccountKey(REMINDER_ANCHOR_KEY_BASE, pk)));
@@ -96,38 +93,6 @@ describe('eligibility', () => {
   });
 });
 
-describe('schedule maths', () => {
-  it('first reminder is the first 10:00 at least 7 days after the anchor', () => {
-    const afternoon = firstReminderAt(WED_14);
-    expect(afternoon - WED_14).toBeGreaterThanOrEqual(WEEK);
-    expect(new Date(afternoon)).toEqual(new Date(2026, 9, 22, REMINDER_HOUR, 0)); // Thu +8d
-    const morning = firstReminderAt(WED_09);
-    expect(morning - WED_09).toBeGreaterThanOrEqual(WEEK);
-    expect(new Date(morning)).toEqual(new Date(2026, 9, 21, REMINDER_HOUR, 0)); // Wed +7d
-  });
-
-  it('holds the first reminder in a one-shot until a weekly trigger would be on time', () => {
-    // Right after the anchor a WEEKLY Thursday trigger would fire tomorrow.
-    expect(planReminder(WED_14, WED_14)).toEqual({
-      mode: 'once',
-      date: new Date(2026, 9, 22, 10, 0).getTime(),
-    });
-    // From Thursday 10:00 on, the next Thursday slot IS the first reminder.
-    expect(planReminder(WED_14, new Date(2026, 9, 15, 10, 1).getTime())).toEqual({
-      mode: 'weekly',
-      weekday: 5, // Thursday (1 = Sunday)
-      hour: 10,
-      minute: 0,
-    });
-    // Morning anchor: one-shot until today's 10:00 has passed.
-    expect(planReminder(WED_09, WED_09).mode).toBe('once');
-    expect(planReminder(WED_09, new Date(2026, 9, 14, 10, 30).getTime())).toMatchObject({
-      mode: 'weekly',
-      weekday: 4,
-    });
-  });
-});
-
 describe('reconcile', () => {
   it('anchors a new account now and first fires no sooner than 7 days later', async () => {
     mockIdentities = [nsec(A), amber(B)];
@@ -136,8 +101,12 @@ describe('reconcile', () => {
     expect(await AsyncStorage.getItem(perAccountKey(REMINDER_ANCHOR_KEY_BASE, B))).toBeNull();
     expect([...mockScheduled.keys()]).toEqual([reminderId(A)]);
     const req = mockScheduled.get(reminderId(A))!;
-    expect(req.trigger).toMatchObject({ type: 'date', channelId: 'reminders' });
-    expect(req.trigger.date as number).toBeGreaterThanOrEqual(WED_14 + WEEK);
+    expect(req.trigger).toEqual({
+      type: 'timeInterval',
+      channelId: 'reminders',
+      seconds: WEEK / 1000,
+      repeats: true,
+    });
     expect(req.content.data).toMatchObject({ kind: 'keyBackup', keyBackupPubkey: A });
     expect(req.content.title).toBe('Back up your key');
     expect(req.content.body).toContain("isn't backed up yet");
@@ -148,25 +117,44 @@ describe('reconcile', () => {
     await AsyncStorage.setItem(perAccountKey(REMINDER_ANCHOR_KEY_BASE, A), String(WED_14 - WEEK));
     await reconcileKeyBackupReminders(WED_14);
     expect(await anchorOf(A)).toBe(WED_14 - WEEK);
-    expect(mockScheduled.get(reminderId(A))!.trigger).toMatchObject({ type: 'weekly' });
+    expect(mockScheduled.get(reminderId(A))!.trigger).toMatchObject({
+      type: 'timeInterval',
+      repeats: true,
+    });
   });
 
-  it('is idempotent and swaps the one-shot for the weekly trigger later', async () => {
+  it('keeps the repeating trigger unchanged across later reconciles', async () => {
     mockIdentities = [nsec(A)];
     await reconcileKeyBackupReminders(WED_14);
     await reconcileKeyBackupReminders(WED_14 + 60_000);
     expect(mockSchedule).toHaveBeenCalledTimes(1);
 
     await reconcileKeyBackupReminders(WED_14 + 2 * DAY);
-    expect(mockSchedule).toHaveBeenCalledTimes(2);
+    expect(mockSchedule).toHaveBeenCalledTimes(1);
     expect(mockScheduled.size).toBe(1);
     expect(mockScheduled.get(reminderId(A))!.trigger).toMatchObject({
-      type: 'weekly',
-      weekday: 5,
-      hour: 10,
+      type: 'timeInterval',
+      seconds: WEEK / 1000,
+      repeats: true,
     });
     await reconcileKeyBackupReminders(WED_14 + 3 * DAY);
-    expect(mockSchedule).toHaveBeenCalledTimes(2);
+    expect(mockSchedule).toHaveBeenCalledTimes(1);
+  });
+
+  it('replaces a legacy one-shot with an OS-owned repeating reminder', async () => {
+    mockIdentities = [nsec(A)];
+    mockScheduled.set(reminderId(A), {
+      identifier: reminderId(A),
+      content: { title: 'Back up your key', body: '', data: { reminderKey: 'legacy-plan' } },
+      trigger: { type: 'date', date: WED_14 + WEEK },
+    });
+    await reconcileKeyBackupReminders(WED_14);
+    expect(mockCancel).toHaveBeenCalledWith(reminderId(A));
+    expect(mockScheduled.get(reminderId(A))!.trigger).toMatchObject({
+      type: 'timeInterval',
+      seconds: WEEK / 1000,
+      repeats: true,
+    });
   });
 
   it('reschedules when the account name changes', async () => {
@@ -213,10 +201,28 @@ describe('cancel paths', () => {
     expect(mockScheduled.size).toBe(0);
     // Registry entry gone → no longer retired; signing back in reminds again.
     mockIdentities = [];
-    await reconcileKeyBackupReminders(WED_14 + 120_000);
+    await AsyncStorage.removeItem(perAccountKey(REMINDER_ANCHOR_KEY_BASE, A));
+    await completeKeyBackupReminderRetirement(A);
     mockIdentities = [nsec(A)];
     await reconcileKeyBackupReminders(WED_14 + 180_000);
     expect([...mockScheduled.keys()]).toEqual([reminderId(A)]);
+    expect(await anchorOf(A)).toBe(WED_14 + 180_000);
+    mockPermission.mockResolvedValue(false);
+    expect(await shouldShowKeyBackupBanner(A, 'nsec', WED_14 + 180_000 + WEEK)).toBe(true);
+  });
+
+  it('keeps queued stale reconciles retired until removal completion reaches the queue', async () => {
+    mockIdentities = [nsec(A)];
+    await reconcileKeyBackupReminders(WED_14);
+    const cancellation = retireKeyBackupReminder(A);
+    const staleReconcile = reconcileKeyBackupReminders(WED_14 + 60_000);
+    const completion = completeKeyBackupReminderRetirement(A);
+    await Promise.all([cancellation, staleReconcile, completion]);
+    expect(mockScheduled.size).toBe(0);
+    expect(mockSchedule).toHaveBeenCalledTimes(1);
+    // Re-add can schedule again after the older reconcile is finished.
+    await reconcileKeyBackupReminders(WED_14 + 120_000);
+    expect(mockScheduled.has(reminderId(A))).toBe(true);
   });
 
   it('cancels a reminder for an account no longer on the phone', async () => {
