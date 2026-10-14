@@ -1,6 +1,10 @@
 // Which of a contact's devices get invited: real kind-30443 key packages,
 // one MarmotClient per "install" sharing an account key.
-import { MarmotClient, type GroupPublishResult } from '@internet-privacy/marmot-ts';
+import {
+  evaluateKeyPackageForGroup,
+  MarmotClient,
+  type GroupPublishResult,
+} from '@internet-privacy/marmot-ts';
 import { InMemoryKeyValueStore } from '@internet-privacy/marmot-ts/extra';
 import { finalizeEvent, generateSecretKey, getPublicKey, nip44 } from 'nostr-tools';
 import type { Event as NostrEvent } from 'nostr-tools';
@@ -16,6 +20,8 @@ import {
   resolveInvitees,
   selectDeviceKeyPackages,
 } from './marmotInvitees';
+import { MarmotDmDeviceSync } from './marmotDmDeviceSync';
+import { createMemoryMarmotBackend } from './marmotStore';
 import { MarmotNoKeyPackageError, MarmotUnusableKeyPackageError } from './marmotKeyPackages';
 
 const RELAY = 'wss://relay.test';
@@ -166,6 +172,61 @@ describe('selectDeviceKeyPackages', () => {
     );
     expect(await selectDeviceKeyPackages(little.pubkey, [devices[0], placeholder])).toEqual([]);
   });
+
+  it('pins the library membership reason used to permit sibling devices', async () => {
+    const client = new MarmotClient({
+      signer: little.signer,
+      network: {
+        publish: async (relays: string[]) =>
+          Object.fromEntries(relays.map((r) => [r, { from: r, ok: true }])),
+        request: async () => [],
+        subscription: () => ({ subscribe: () => ({ unsubscribe: () => undefined }) }),
+        getUserInboxRelays: async () => [RELAY],
+      },
+      cryptoProvider: marmotCryptoProvider,
+      groupStateStore: new InMemoryKeyValueStore(),
+      keyPackageStore: new InMemoryKeyValueStore(),
+    });
+    const group = await client.groups.create('Sibling', { relays: [RELAY] });
+    const verdict = evaluateKeyPackageForGroup(group.state, devices[0]);
+    expect(verdict.reasons).toEqual(['already a member']);
+    const candidates = new Map([[little.pubkey, [devices[0]]]]);
+    expect(buildInviteBatch(group.state, little.pubkey, candidates).invited).toEqual([]);
+    expect(
+      buildInviteBatch(group.state, little.pubkey, candidates, { siblings: true }).invited,
+    ).toEqual([devices[0]]);
+  });
+
+  it.each(['stale', 'forged', 'wrong author', 'retired'])(
+    'adds a fresh Lightning Piggy device alongside a %s White Noise event',
+    async (caseName) => {
+      const lp = variant(devices[0], { client: 'Lightning Piggy', at: now });
+      const wn = variant(devices[1], { client: 'White Noise Android', at: now });
+      const ignored =
+        caseName === 'stale'
+          ? variant(devices[1], { client: 'White Noise Android', at: now - 36 * DAY })
+          : caseName === 'forged'
+            ? ({ ...JSON.parse(JSON.stringify(wn)), sig: '0'.repeat(128) } as NostrEvent)
+            : caseName === 'wrong author'
+              ? resign(wn, makeAccount().sk)
+              : finalizeEvent(
+                  { kind: wn.kind, tags: wn.tags, content: '', created_at: now + 1 },
+                  little.sk,
+                );
+      const invite = jest.fn(async () => undefined);
+      const sync = new MarmotDmDeviceSync({
+        self: makeAccount().pubkey,
+        backend: createMemoryMarmotBackend(),
+        fetchKeyPackages: async () => [ignored, lp],
+        groupState: async () => ({ ratchetTree: [] }),
+        invite,
+        silentSigner: true,
+        stopped: () => false,
+      });
+      await sync.sync('group', little.pubkey, 'send');
+      expect(invite).toHaveBeenCalledWith('group', new Map([[little.pubkey, [lp]]]));
+    },
+  );
 
   it('caps a person at 10 devices AFTER group checks, so a rejected key makes room', async () => {
     const big = makeAccount();

@@ -13,7 +13,7 @@
 //
 // Only the PEER's devices: our own other installs are never invited into a
 // new chat. One exception for 1:1s with White Noise users — see devicesForDm.
-// Devices installed after a 1:1 began (either person's) are added later by
+// The peer's devices installed after a 1:1 began are added later by
 // marmotDmDeviceSync (#1559), through inviteDevices' `partial` mode.
 
 import {

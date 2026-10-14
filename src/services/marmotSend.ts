@@ -100,7 +100,7 @@ export async function sendMarmotDm(
   try {
     const session = requireMarmotSession(pubkey);
     const dm = await session.getOrCreateDm(recipient);
-    // Devices they (or we) installed since the chat began (#1559): short wait.
+    // Devices the peer installed since the chat began (#1559): short wait.
     await session.syncDmDevices(dm.id).catch(() => undefined);
     const rumor = buildMarmotRumor(pubkey, {
       kind: marmotKindForAppKind(draft.kind),

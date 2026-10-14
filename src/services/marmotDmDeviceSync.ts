@@ -276,6 +276,7 @@ export class MarmotDmDeviceSync {
     } finally {
       scheduler.dispose();
     }
+    const peerOnWhiteNoise = (fresh.get(peer) ?? []).some(isWhiteNoise);
     const leaves = readGroupLeaves(await this.opts.groupState(mlsId));
     // Chats created/joined before slot tracking can still identify an install
     // by its signing key. Remember that association before its key rotates.
@@ -293,7 +294,7 @@ export class MarmotDmDeviceSync {
       peer,
       leaves,
       fresh,
-      peerOnWhiteNoise: events.some(isWhiteNoise),
+      peerOnWhiteNoise,
       invitedSlots: new Set(await this.invitedSlots(mlsId)),
     });
     if (plan.size === 0 || this.opts.stopped()) return ok;

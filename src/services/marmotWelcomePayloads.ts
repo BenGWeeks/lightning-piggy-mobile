@@ -88,20 +88,30 @@ export class MarmotWelcomePayloads {
   async flush(groupId?: string): Promise<void> {
     for (const id of await this.backend.keys(NS)) {
       if (this.stopped()) return;
-      const raw = await this.backend.get(NS, id);
-      if (!raw) continue;
-      const item = JSON.parse(raw) as PendingPayload;
-      if (Math.floor(Date.now() / 1000) - item.queuedAt > WELCOME_OUTBOX_TTL_SECS) {
-        await this.backend.remove(NS, id);
-        continue;
-      }
-      if (groupId && item.groupId !== groupId) continue;
-      if (this.devices.isDeclined(item.groupId, item.keyPackage.id)) continue;
-      const delivery = this.deliveries.get(item.groupId);
-      // Share the invite capture queue: publishing a retry during another
-      // group's capture would otherwise attribute its failed wrap to that group.
-      if (delivery)
-        await this.outbox.capture(() => this.send(item, delivery)).catch(() => undefined);
+      // Check persisted state only once this capture owns the queue: an earlier
+      // retry may have delivered the payload or recorded a signer refusal.
+      await this.outbox
+        .capture(async () => {
+          if (this.stopped()) return;
+          const raw = await this.backend.get(NS, id);
+          if (!raw) return;
+          let item: PendingPayload;
+          try {
+            item = JSON.parse(raw) as PendingPayload;
+          } catch {
+            await this.backend.remove(NS, id);
+            return;
+          }
+          if (Math.floor(Date.now() / 1000) - item.queuedAt > WELCOME_OUTBOX_TTL_SECS) {
+            await this.backend.remove(NS, id);
+            return;
+          }
+          if (groupId && item.groupId !== groupId) return;
+          if (this.devices.isDeclined(item.groupId, item.keyPackage.id)) return;
+          const delivery = this.deliveries.get(item.groupId);
+          if (delivery) return this.send(item, delivery);
+        })
+        .catch(() => undefined);
     }
   }
 }
