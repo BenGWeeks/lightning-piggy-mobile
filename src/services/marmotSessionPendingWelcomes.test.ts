@@ -36,7 +36,10 @@ test('resume retries a transient Welcome and does not duplicate an inbox join in
     expect(await bob.backend.get('pendingWelcomes', welcome.id)).toBeNull();
     jest.useRealTimers();
 
-    // A second Welcome races inbox delivery with the resume scan.
+    // A second Welcome races inbox delivery with the resume scan. Later
+    // callers for the SAME rumor share the in-flight join (#1426): they must
+    // neither start another MLS join nor get an immediate null, which
+    // marmotPendingInvitations would read as a transient failure.
     await alice.session.createGroup('in-flight', [bob.pubkey]);
     const second = unwrapWelcomes(relay, bob).find((w) => w.id !== welcome.id)!;
     let release!: () => void;
@@ -53,10 +56,13 @@ test('resume retries a transient Welcome and does not duplicate an inbox join in
     changes.forEach((change) => change('active'));
     await jest.advanceTimersByTimeAsync(3_000);
     expect(join).toHaveBeenCalledTimes(3);
-    expect(await duplicate).toBeNull();
     release();
-    await joining;
+    const [joined, shared] = await Promise.all([joining, duplicate]);
+    expect(joined?.id).toBeTruthy();
+    expect(shared?.id).toBe(joined?.id);
+    expect(join).toHaveBeenCalledTimes(3);
     expect(bob.session.listGroups()).toHaveLength(2);
+    expect(await bob.backend.get('pendingWelcomes', second.id)).toBeNull();
   } finally {
     alice.session.stop();
     bob.session.stop();

@@ -28,6 +28,7 @@ import {
 import { relayListFromTags, isRelayUrl } from '../utils/relayListEvents';
 import { createSqliteMarmotBackend, decodeMarmotValue, type MarmotKvBackend } from './marmotStore';
 import { newestEvent } from './marmotKeyPackages';
+import { rememberKeyPackageTimestamp } from './marmotInstallationSlot';
 import { pool, trackRelays } from './nostrPool';
 import { DEFAULT_RELAYS } from './nostrService';
 
@@ -196,6 +197,7 @@ export async function retireFootprint(opts: RetireFootprintOptions): Promise<Ret
     ) {
       throw new Error('Invitation-key signer returned a different account or event');
     }
+    await rememberKeyPackageTimestamp(event);
     return event;
   };
   if (footprint.slots.length === 0 && footprint.eventIds.length === 0) return 'nothing';

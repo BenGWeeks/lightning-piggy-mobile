@@ -60,6 +60,7 @@ import {
   resolveInvitees,
 } from './marmotInvitees';
 import { KeyPackageRefreshRequests } from './marmotKeyRefresh';
+import { KeyPackageReplenisher } from './marmotKeyPackageReplenisher';
 import { alignCommitForMdk, spreadProposals } from './marmotProposals';
 import { MarmotWelcomeOutbox } from './marmotWelcomeOutbox';
 import { boundGroupQueries } from './marmotGroupBackfill';
@@ -79,17 +80,11 @@ import { isMarmotMessageKind } from './marmotKinds';
 import { noteMarmotCommit, noteMarmotGroupTraffic, setMarmotCatchingUp } from './marmotPushWake';
 import { createMarmotSigner } from './marmotSigner';
 import * as fence from './marmotSessionFence';
-import { isPermanentWelcomeFailure, isWelcomeForJoinedGroup } from './marmotWelcomeFailure';
+import { MarmotWelcomeJoin } from './marmotWelcomeJoin';
 import {
-  buildWelcomeOutcome,
-  countWelcomeAttempt,
-  forgetWelcomeAttempts,
   loadFailedInvites,
-  permanentFailureOutcome,
   reverifyWelcomeOutcomes,
-  WELCOME_OUTCOMES_NS,
   type KeyPackageLookup,
-  type WelcomeOutcome,
 } from './marmotWelcomeOutcomes';
 import { clearFailedMarmotInvites, publishFailedMarmotInvites } from './marmotFailedInvitesStore';
 import {
@@ -190,7 +185,7 @@ export class MarmotSession {
   private readonly watermarks = new Map<string, number>();
   private readonly firstSeen = new Map<string, number>();
   private readonly creatingDms = new Map<string, Promise<MarmotGroupSummary>>();
-  private readonly joiningWelcomes = new Set<string>();
+  private readonly welcomeJoins: MarmotWelcomeJoin;
   private readonly deliveredRumors = new Set<string>();
   private readonly push: MarmotPushNotifier;
   private readonly outbox: MarmotWelcomeOutbox;
@@ -212,6 +207,7 @@ export class MarmotSession {
   private readonly gate = fence.createStopGate();
   private readonly acceptedKeyPackages = new Set<string>();
   private readonly refreshes = new KeyPackageRefreshRequests();
+  private readonly replenisher = new KeyPackageReplenisher(() => this.ensureKeyPackage());
   /** Each chat's devices per person (#1267) — read-only over group state. */
   readonly devices: MarmotDeviceTracker;
   private markReady!: () => void;
@@ -224,6 +220,7 @@ export class MarmotSession {
     this.pubkey = opts.pubkey;
     const backend = opts.backend ?? createSqliteMarmotBackend(opts.pubkey);
     this.backend = fence.fenceBackend(backend, this.gate); // drops writes after a wipe
+
     const store = <T>(ns: string) => createMarmotKvStore<T>(this.backend, ns);
     this.outbox = new MarmotWelcomeOutbox(this.backend, () => this.gate.stopped);
     const network = this.outbox.wrapNetwork(
@@ -274,7 +271,7 @@ export class MarmotSession {
       }),
       cryptoProvider: marmotCryptoProvider,
       getSignatureKeyPair: async (ciphersuite) => {
-        const slot = await this.gate.guard(ensureKeyPackageSlot(this.backend));
+        const slot = await this.installationSlot();
         return this.gate.guard(getInstallationSignatureKeyPair(this.pubkey, slot, ciphersuite));
       },
       groupStateStore: store('groups'),
@@ -290,6 +287,14 @@ export class MarmotSession {
       historyFactory: transientFreeHistoryFactory((groupId) =>
         store<Rumor>(historyNamespace(bytesToHex(groupId))),
       ),
+    });
+    this.welcomeJoins = new MarmotWelcomeJoin({
+      client: this.client,
+      backend: this.backend,
+      stopped: () => this.gate.stopped,
+      onJoined: () => this.replenisher.request(),
+      onFinished: () => void this.failedInvites.run(),
+      keyPackageLookup: () => this.keyPackageLookup(),
     });
     this.devices = new MarmotDeviceTracker({
       backend: this.backend,
@@ -365,6 +370,7 @@ export class MarmotSession {
   stop(): void {
     this.gate.stop();
     this.stopWelcomeRetries?.();
+    this.replenisher.stop();
     clearFailedMarmotInvites(this.pubkey);
     const run = this.keyPackageRuns.current;
     const pushStopped = Promise.all([this.push.stop(), this.pushRegistration.stop()]);
@@ -422,7 +428,7 @@ export class MarmotSession {
       // a capability White Noise requires of every invitee (encrypted media
       // v2, 0x800b). Replaced keys are retired per the retention policy.
       const cancelled = () => this.gate.stopped;
-      const slot = await this.gate.guard(ensureKeyPackageSlot(this.backend));
+      const slot = await this.installationSlot();
       const outcome = await maintainKeyPackage(this.client.keyPackages, {
         relays: this.writeRelays(),
         slot,
@@ -432,6 +438,8 @@ export class MarmotSession {
         cancelled,
       });
       refresh.settle(outcome === 'published');
+      if (outcome === 'failed') this.retryReplenish();
+      else this.replenisher.resetBackoff();
       // A sign-out of this account here whose relay cleanup failed: retry it
       // now the account's signer is back (and already in use).
       await retryPendingRetirement({
@@ -442,8 +450,24 @@ export class MarmotSession {
       });
     } catch (e) {
       refresh.settle(false); // no-op if it already succeeded
+      this.retryReplenish();
       if (__DEV__) console.warn('[Marmot] key package publish failed:', e);
     }
+  }
+
+  /**
+   * Retry a failed publish with backoff — for local keys only. A remote
+   * signer (Amber / NIP-46) must sign each attempt, so a loop would re-prompt
+   * the user every 30 s–5 min while offline or after they dismissed it; those
+   * accounts wait for the next trigger (join, resume, start) as before.
+   */
+  private retryReplenish(): void {
+    if (this.opts.signerType === 'nsec') this.replenisher.retry();
+  }
+
+  /** This install's kind-30443 `d` slot for this account (survives sign-out). */
+  private installationSlot(): Promise<string> {
+    return this.gate.guard(ensureKeyPackageSlot(this.backend, this.pubkey, this.opts.backend));
   }
 
   listGroups(): MarmotGroupSummary[] {
@@ -701,52 +725,8 @@ export class MarmotSession {
    */
   async acceptWelcome(welcomeRumor: MarmotRumor): Promise<MarmotGroupSummary | null> {
     await this.ready;
-    if (this.gate.stopped) return null;
-    // Each Welcome is joined at most once: inbox refreshes re-surface the
-    // same gift wrap, and re-joining must never reset a group we already
-    // hold. The marker is written on success or a PERMANENT failure only —
-    // a transient error (relay / store) leaves the invite retryable.
-    const id = welcomeRumor.id;
-    const ns = WELCOME_OUTCOMES_NS;
-    if (this.joiningWelcomes.has(id) || (await this.backend.get(ns, id))) return null;
-    if (this.joiningWelcomes.has(id) || this.gate.stopped) return null;
-    this.joiningWelcomes.add(id);
-    // The marker records what happened, so the inbox can hide or explain it.
-    const markHandled = async (outcome: WelcomeOutcome) => {
-      await this.backend.set(ns, id, JSON.stringify(outcome));
-      await this.backend.remove('pendingWelcomes', id);
-      await forgetWelcomeAttempts(this.backend, id);
-    };
-    try {
-      // Durable until joined or permanently rejected: the inbox stores the
-      // invite's gift wrap as processed and never re-routes it, so a transient
-      // failure is retried on start, resume, or relay reconnect instead. Inside the
-      // try so a failed write still releases `joiningWelcomes`.
-      await this.backend.set('pendingWelcomes', id, JSON.stringify(welcomeRumor));
-      const { group } = await this.client.joinGroupFromWelcome({ welcomeRumor });
-      await markHandled(buildWelcomeOutcome(welcomeRumor, 'joined'));
-      if (__DEV__) console.log(`[Marmot] joined ${group.idStr.slice(0, 8)} from welcome`);
-      void this.ensureKeyPackage(); // the joined key package is now spent
-      return this.summarise(group);
-    } catch (e) {
-      // Permanent = no key we hold opens it (another device's / a deleted key).
-      const joined = await isWelcomeForJoinedGroup(this.client, welcomeRumor);
-      const permanent =
-        joined || (await isPermanentWelcomeFailure(this.client.keyPackages, welcomeRumor, e));
-      if (joined) await markHandled(buildWelcomeOutcome(welcomeRumor, 'joined'));
-      else if (permanent) {
-        const lookup = await this.keyPackageLookup();
-        await markHandled(await permanentFailureOutcome(welcomeRumor, e, lookup));
-      } else await countWelcomeAttempt(this.backend, id);
-      if (__DEV__) {
-        const kp = welcomeRumor.tags.find((t) => t[0] === 'e')?.[1]?.slice(0, 12);
-        console.warn(`[Marmot] welcome for key package ${kp} failed (permanent: ${permanent}):`, e);
-      }
-      return null;
-    } finally {
-      this.joiningWelcomes.delete(id);
-      void this.failedInvites.run();
-    }
+    const group = await this.welcomeJoins.accept(welcomeRumor);
+    return group ? this.summarise(group) : null;
   }
 
   /** Where to check whose invitation key a Welcome named (#1269). */

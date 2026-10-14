@@ -1096,9 +1096,29 @@ had not published a new key. Checking hulk alone incorrectly suggested that
 Lightning Piggy-initiated Welcomes were incompatible.
 
 Lightning Piggy refreshes this installation's key weekly in the same `d` slot.
-Unused superseded keys retain their private material for 30 days after
-replacement for delayed Welcomes, then are deleted. Used keys are deleted
-once their replacement is confirmed published.
+The random slot id is per account per installation and survives account
+sign-out and re-sign-in (two accounts on one install never share one).
+Once a replacement is confirmed published, a USED superseded secret is
+deleted at once (spec). An UNUSED one is kept until its own `not_after`
+(at most 84 days), matching MDK / White Noise, so a Welcome made with the
+previous key package — say for someone who was offline over the weekly
+refresh — still joins (Ben's retention decision, #1230, extended
+2026-10-14). That stays inside the bound `foundation/key-packages.md` sets
+(retention never extends past the key package's lifetime). Older slots are retired
+with NIP-09 only when local publication records establish that this install
+owns them; a matching public client tag does not establish ownership.
+
+If one installation logs several joins for the same group ("ghost leaves"),
+compare the stored Welcome commit fingerprints. Inviters send a separate
+rumor for each slot, but the MLS Welcome can be identical and contain the
+secret for this install in every copy. Rumor-id dedupe alone therefore cannot
+prevent rejoining. Welcome adoption is serialized, and a copy whose commit
+fingerprint (sha256 of the encrypted GroupInfo) matches a group this session
+already joined is ignored without any MLS work — `readInviteGroupInfo` is a
+full `joinGroup` in marmot-ts, so it is never run ahead of a join. A copy from
+a later commit still fails inside the library ("already exists") and is then
+recorded as joined. The stack's SelfRemove operates on its tracked membership; it
+cannot safely remove an extra leaf without first overwriting that membership.
 Account removal waits for pending key publication, requests deletion, and
 publishes an empty replacement for each local slot before wiping local state.
 Relay deletion is best-effort; a warning means old advertisements may remain.
@@ -1505,3 +1525,17 @@ preserves accounts and wallets. Keep source files unchanged during the device
 flow; the first lazy screen bundle may take longer to compile on a busy host.
 See the existing Metro-host troubleshooting entries if the installed debug APK
 uses `debug_http_host` instead of the Expo development-client link.
+
+=== Marmot install cannot be invited again after joining
+
+A Welcome consumes this install's invitation key. If no fresh kind-30443
+appears in the same `d` slot, multi-device inviters correctly skip it. Earlier
+builds attempted maintenance once after joining but did not retry publication
+failure, leaving replenishment until resume or restart.
+
+`KeyPackageReplenisher` now coalesces successful joins over 30 seconds and
+retries failed maintenance with exponential delays from 30 seconds up to five
+minutes. It pauses timers in background and preserves the deadline for a
+staggered resume; OS suspension can delay publication. Sign-out cancels the
+scheduler. Maintenance reuses the installation slot and only deletes replaced
+secrets after a relay confirms the fresh publication.
