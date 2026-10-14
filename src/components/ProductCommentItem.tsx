@@ -7,6 +7,7 @@ import { isEditedComment } from '../utils/commentEdits';
 import type { ProductCommentsStyles as Styles } from '../styles/ProductComments.styles';
 import AuthorInline from './AuthorInline';
 import { FeedbackActionsButton, FeedbackActionsRow } from './FeedbackActions';
+import ProductCommentEditor from './ProductCommentEditor';
 
 interface Props {
   comment: NostrEvent;
@@ -14,32 +15,46 @@ interface Props {
   /** The signed-in user wrote it — only then are Edit / Delete offered. */
   isMine: boolean;
   menuOpen: boolean;
+  /** The in-place edit draft when THIS card is the editor, else null. */
+  editText: string | null;
+  /** This card's edit is publishing. */
+  editSaving: boolean;
   onToggleMenu: (id: string) => void;
   onEdit: (comment: NostrEvent) => void;
   onDelete: (comment: NostrEvent) => void;
+  onEditChange: (text: string) => void;
+  onEditCancel: () => void;
+  onEditSave: (comment: NostrEvent, text: string) => void;
 }
 
 /**
  * One product comment row. Your own comments get a "⋯" button (and
- * long-press) that reveals Edit / Delete inline (#1272); an edited comment
- * shows an "Edited" marker beside its time.
+ * long-press) that reveals Edit / Delete inline (#1272); Edit turns this card
+ * into the editor in place (#1524). An edited comment shows an "Edited"
+ * marker beside its time.
  */
 const ProductCommentItem: React.FC<Props> = ({
   comment,
   styles,
   isMine,
   menuOpen,
+  editText,
+  editSaving,
   onToggleMenu,
   onEdit,
   onDelete,
+  onEditChange,
+  onEditCancel,
+  onEditSave,
 }) => {
   const t = useTranslation();
   const edited = isEditedComment(comment);
+  const editing = isMine && editText !== null;
   return (
     <Pressable
-      style={styles.item}
+      style={[styles.item, editing && styles.itemEditing]}
       testID={`product-comment-${comment.id}`}
-      onLongPress={isMine ? () => onToggleMenu(comment.id) : undefined}
+      onLongPress={isMine && !editing ? () => onToggleMenu(comment.id) : undefined}
     >
       <View style={styles.itemHeader}>
         <AuthorInline pubkey={comment.pubkey} size={26} />
@@ -48,7 +63,7 @@ const ProductCommentItem: React.FC<Props> = ({
             {relativeTime(comment.created_at ?? 0)}
             {edited ? ` · ${t('market.comments.editedMarker')}` : ''}
           </Text>
-          {isMine ? (
+          {isMine && !editing ? (
             <FeedbackActionsButton
               kind="comment"
               id={comment.id}
@@ -58,8 +73,20 @@ const ProductCommentItem: React.FC<Props> = ({
           ) : null}
         </View>
       </View>
-      <Text style={styles.itemText}>{comment.content}</Text>
-      {isMine && menuOpen ? (
+      {editing ? (
+        <ProductCommentEditor
+          comment={comment}
+          text={editText}
+          saving={editSaving}
+          styles={styles}
+          onChangeText={onEditChange}
+          onCancel={onEditCancel}
+          onSave={onEditSave}
+        />
+      ) : (
+        <Text style={styles.itemText}>{comment.content}</Text>
+      )}
+      {isMine && menuOpen && !editing ? (
         <FeedbackActionsRow
           kind="comment"
           onEdit={() => onEdit(comment)}

@@ -2,9 +2,10 @@ import { StyleSheet } from 'react-native';
 import type { Palette } from './palettes';
 
 /**
- * Styles for {@link ProductComments} — the comments tab body: a compose box
- * (or sign-in prompt, or edit state) and the list of top-level comment rows
- * ({@link ProductCommentItem}, incl. its Edit / Delete actions).
+ * Styles for {@link ProductComments} — the comments tab body: a new-comment
+ * compose box (or sign-in prompt) and the list of top-level comment rows
+ * ({@link ProductCommentItem}, incl. its Edit / Delete actions and the
+ * in-place {@link ProductCommentEditor}).
  */
 export const createProductCommentsStyles = (colors: Palette) =>
   StyleSheet.create({
@@ -57,9 +58,30 @@ export const createProductCommentsStyles = (colors: Palette) =>
     },
     itemMeta: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     when: { fontSize: 12, color: colors.textSupplementary },
-    editingBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-    editingText: { fontSize: 13, fontWeight: '700', color: colors.textHeader },
-    editingCancel: { fontSize: 13, fontWeight: '700', color: colors.brandPink },
+    // The card while it is the in-place editor (#1524).
+    itemEditing: { borderWidth: 1, borderColor: colors.brandPink },
+    editor: { gap: 10 },
+    editActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10 },
+    editCancel: {
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: colors.divider,
+      paddingVertical: 8,
+      paddingHorizontal: 16,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    editCancelText: { color: colors.textBody, fontWeight: '700', fontSize: 13 },
+    editSave: {
+      backgroundColor: colors.brandPink,
+      borderRadius: 999,
+      paddingVertical: 8,
+      paddingHorizontal: 16,
+      minWidth: 120,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    editSaveText: { color: colors.white, fontWeight: '800', fontSize: 13 },
     itemText: { fontSize: 14, color: colors.textBody, lineHeight: 20 },
     state: {
       fontSize: 13,

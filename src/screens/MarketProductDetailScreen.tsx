@@ -1,7 +1,8 @@
 import BrandedRefreshControl from '../components/BrandedRefreshControl';
 import { marketEditorDestination } from '../utils/marketEditorNavigation';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Linking } from 'react-native';
+import { View, Text, TouchableOpacity, Linking } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { Image } from 'expo-image';
 import { ChevronLeft, Zap, ExternalLink } from 'lucide-react-native';
 import type { CompositeNavigationProp } from '@react-navigation/native';
@@ -43,6 +44,12 @@ interface Props {
   navigation: MarketProductDetailNavigation;
   route: MarketProductDetailRoute;
 }
+
+/**
+ * Space kept between a focused feedback input's caret and the keyboard — room
+ * for the button row under it (Post, or a comment card's Cancel / Save).
+ */
+const FEEDBACK_INPUT_BOTTOM_OFFSET = 72;
 
 /**
  * Full Market PRODUCT page opened from a grid tile: product image, title,
@@ -188,8 +195,12 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         </View>
       </View>
 
-      <ScrollView
+      {/* Keyboard-aware so the review / comment inputs — the top composer and
+          a comment card being edited in place (#1524) — scroll above the IME
+          when focused (the app is edge-to-edge, so the window never resizes). */}
+      <KeyboardAwareScrollView
         testID="market-product-detail-scroll"
+        bottomOffset={FEEDBACK_INPUT_BOTTOM_OFFSET}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
@@ -349,7 +360,7 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
             <Text style={styles.noFeedbackText}>{t('market.detail.noFeedback')}</Text>
           </View>
         )}
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       {checkoutTarget ? (
         <MarketCheckoutSheet
