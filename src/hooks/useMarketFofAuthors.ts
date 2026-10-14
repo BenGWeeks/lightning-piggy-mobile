@@ -14,7 +14,14 @@ export interface FofProgress {
 // The last built set, per account + follow list, so flipping scopes or
 // refocusing the Market reuses it without even an AsyncStorage read. (The
 // service's own 24 h AsyncStorage cache covers app restarts.)
-let memo: { key: string; fof: readonly string[] } | null = null;
+const FAILURE_COOLDOWN_MS = 30_000;
+let memo: { key: string; fof: readonly string[]; failedUntil?: number } | null = null;
+
+function cachedMemo(key: string) {
+  if (memo?.key !== key) return null;
+  if (memo.failedUntil !== undefined && Date.now() >= memo.failedUntil) return null;
+  return memo;
+}
 
 /** Test hook: forget the in-memory set. */
 export const __resetMarketFofMemo = () => {
@@ -56,19 +63,26 @@ export function useMarketFofAuthors(enabled: boolean) {
     fof: readonly string[] | undefined;
     failed: boolean;
     progress: FofProgress | null;
-  }>(() => ({
-    key,
-    fof: memo?.key === key ? memo.fof : undefined,
-    failed: false,
-    progress: null,
-  }));
+  }>(() => {
+    const cached = cachedMemo(key);
+    return {
+      key,
+      fof: cached?.fof,
+      failed: cached?.failedUntil !== undefined,
+      progress: null,
+    };
+  });
   useFocusEffect(
     useCallback(() => {
       if (!enabled || !pubkey) return;
-      if (memo?.key === key) {
-        const fof = memo.fof;
+      const cached = cachedMemo(key);
+      if (cached) {
+        const fof = cached.fof;
+        const failed = cached.failedUntil !== undefined;
         setState((prev) =>
-          prev.key === key && prev.fof === fof ? prev : { key, fof, failed: false, progress: null },
+          prev.key === key && prev.fof === fof && prev.failed === failed
+            ? prev
+            : { key, fof, failed, progress: null },
         );
         return;
       }
@@ -100,7 +114,10 @@ export function useMarketFofAuthors(enabled: boolean) {
           memo = { key, fof };
           setState({ key, fof, failed: false, progress: null });
         } catch {
-          if (!signal.aborted) setState({ key, fof: [], failed: true, progress: null });
+          if (signal.aborted) return;
+          const fof: readonly string[] = [];
+          memo = { key, fof, failedUntil: Date.now() + FAILURE_COOLDOWN_MS };
+          setState({ key, fof, failed: true, progress: null });
         }
       })();
       return () => controller.abort();

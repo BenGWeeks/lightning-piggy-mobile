@@ -1,5 +1,7 @@
 // The experimental All seller scope: author-less, bounded, spam-curated.
 import { finalizeEvent, getPublicKey, type Filter } from 'nostr-tools';
+import { mergeMarketSnapshot } from '../utils/marketSnapshotMerge';
+import { parseMarketListing } from '../utils/marketListings';
 import { fetchOpenMarketListings } from './marketListingsService';
 import { OPEN_LISTING_LIMIT, OPEN_LISTING_WINDOW_DAYS } from '../utils/marketListingsQuery';
 import { OPEN_SCOPE_PER_AUTHOR } from '../utils/marketOpenScope';
@@ -194,4 +196,38 @@ it('rejects a forged listing even with no author filter', async () => {
   await answerAll();
   const { products } = await pending;
   expect(products.map((p) => p.listing?.event.pubkey)).toEqual([getPublicKey(keyOf(7))]);
+});
+
+it('retains carried listings absent from a sample while honoring authenticated withdrawals', async () => {
+  const absent = listing(1, 'outside-sample', NOW_S - 100);
+  const deleted = listing(2, 'deleted', NOW_S - 90);
+  const previous = [absent, deleted].map((event) => {
+    const product = parseMarketListing(event)!;
+    product.listing!.seenOn = ['wss://example.com'];
+    return product;
+  });
+  const pending = fetchOpenMarketListings(
+    ['wss://example.com'],
+    new AbortController().signal,
+    undefined,
+    { carried: [absent, deleted] },
+  );
+  await flush();
+  deliver(listingSubs()[0], listing(3, 'fresh', NOW_S - 10));
+  listingSubs()[0].c.oneose();
+  await flush();
+  const deletion = finalizeEvent(
+    { kind: 5, created_at: NOW_S, content: '', tags: [['e', deleted.id]] },
+    keyOf(2),
+  );
+  const deletionSub = subs.find((sub) => sub.filters[0].kinds?.[0] === 5)!;
+  deliver(deletionSub, deletion);
+  await answerAll();
+  const result = await pending;
+  expect(result.answeredRelays).toEqual([]);
+  expect(result.withdrawn).toContain(previous[1].id);
+  const merged = mergeMarketSnapshot(previous, result);
+  expect(merged.map((product) => product.id)).toContain(previous[0].id);
+  expect(merged.map((product) => product.id)).not.toContain(previous[1].id);
+  expect(merged).toHaveLength(2);
 });

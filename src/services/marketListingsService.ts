@@ -593,7 +593,7 @@ async function runSnapshot(
           seenOn: [...(seenOn.get(product.id) ?? [])],
         },
       })),
-      answeredRelays: withheld ? [] : [...listings.answered],
+      answeredRelays: withheld || plan.sampled ? [] : [...listings.answered],
       withdrawn: withheld
         ? []
         : [
