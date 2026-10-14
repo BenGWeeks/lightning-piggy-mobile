@@ -88,17 +88,7 @@ export const createMarketProductCardStyles = (colors: Palette) =>
       lineHeight: 17,
       minHeight: 34,
     },
-    priceRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      marginTop: 2,
-    },
-    price: {
-      fontSize: 13,
-      fontWeight: '800',
-      color: colors.brandPink,
-    },
+    // Price line: see MarketPrice.styles.ts (shared with the product page).
     // Seller line — optional merchant avatar followed by "from <shop>".
     sellerRow: {
       flexDirection: 'row',

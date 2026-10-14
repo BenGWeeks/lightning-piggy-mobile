@@ -2288,6 +2288,8 @@
   },
   "market": {
     "sats": "{{amount}} sats",
+    "priceApprox": "≈ {{value}}",
+    "priceApproxBoth": "≈ {{fiat}} · {{sats}}",
     "free": "Za darmo",
     "fromSeller": "sprzedawca: {{seller}}",
     "screen": {

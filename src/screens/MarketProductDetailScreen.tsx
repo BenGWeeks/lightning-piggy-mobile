@@ -20,6 +20,7 @@ import VendorAvatar from '../components/VendorAvatar';
 import ProductFeedbackTabs from '../components/ProductFeedbackTabs';
 import NostrLoginSheet from '../components/NostrLoginSheet';
 import MarketCheckoutSheet from '../components/MarketCheckoutSheet';
+import MarketPrice from '../components/MarketPrice';
 import { Toast } from '../components/BrandedToast';
 import { usePullToRefresh, useRegisterRefresher } from '../hooks/usePullToRefresh';
 import { useLatestListing } from '../hooks/useLatestListing';
@@ -63,7 +64,7 @@ const FEEDBACK_INPUT_BOTTOM_OFFSET = 72;
  */
 const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
-  const { t, formatLocale } = useLocale();
+  const { t } = useLocale();
   // Pairs with `market product tap` on the Market screen: tap-to-first-commit.
   useEffect(() => perfLog('[PerfBlock] market product detail shown'), []);
   const styles = useMemo(() => createMarketProductDetailStyles(colors), [colors]);
@@ -239,16 +240,7 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
             </View>
           ) : null}
           <Text style={styles.title}>{product.title}</Text>
-          <View style={styles.priceRow}>
-            <Zap size={16} color={colors.brandPink} strokeWidth={2.5} fill={colors.brandPink} />
-            <Text style={styles.priceSats} testID="market-product-detail-price">
-              {product.listing?.priceLabel ??
-                t('market.sats', { amount: product.priceSats.toLocaleString(formatLocale) })}
-            </Text>
-            {!product.listing ? (
-              <Text style={styles.priceFiat}>· {product.priceFiatLabel}</Text>
-            ) : null}
-          </View>
+          <MarketPrice product={product} variant="detail" />
 
           <TouchableOpacity
             style={styles.vendorRow}

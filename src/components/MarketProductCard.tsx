@@ -7,6 +7,8 @@ import { useLocale } from '../contexts/LocaleContext';
 import { createMarketProductCardStyles } from '../styles/MarketProductCard.styles';
 import { usePubkeyProfile } from '../hooks/usePubkeyProfile';
 import VendorAvatar from './VendorAvatar';
+import MarketPrice from './MarketPrice';
+import { formatPrimaryPrice, marketPriceOf } from '../utils/marketPrice';
 import type { MarketProduct } from '../data/marketProducts';
 import type { MarketVendor } from '../data/marketVendors';
 
@@ -37,8 +39,8 @@ interface Props {
 /**
  * Reusable Market PRODUCT card, shared by the Explore "Market" rail and the
  * full Market screen. Leads with the product image, then shows the title,
- * price in sats, and the seller/shop it comes from — mirroring the product
- * grid on lightningpiggy.com/market/.
+ * price (with its conversion into the user's currency), and the seller/shop
+ * it comes from — mirroring the product grid on lightningpiggy.com/market/.
  */
 const MarketProductCard: React.FC<Props> = ({
   product,
@@ -54,6 +56,15 @@ const MarketProductCard: React.FC<Props> = ({
   const colors = useThemeColors();
   const { t, formatLocale } = useLocale();
   const styles = useMemo(() => createMarketProductCardStyles(colors), [colors]);
+  const listingPriceLabel = useMemo(
+    () =>
+      formatPrimaryPrice(
+        marketPriceOf(product),
+        (amount) => t('market.sats', { amount }),
+        formatLocale,
+      ),
+    [product, t, formatLocale],
+  );
   // Fall back to a branded placeholder tile if the image 404s / dead host.
   const [imageFailed, setImageFailed] = useState(false);
   const hasImage = product.image.length > 0 && !imageFailed;
@@ -96,7 +107,7 @@ const MarketProductCard: React.FC<Props> = ({
       accessibilityRole="button"
       accessibilityLabel={
         product.listing
-          ? `${product.title}, ${product.listing.priceLabel}, ${displaySellerName}`
+          ? `${product.title}, ${listingPriceLabel}, ${displaySellerName}`
           : t('market.card.accessibility', {
               title: product.title,
               amount: product.priceSats.toLocaleString(formatLocale),
@@ -111,13 +122,11 @@ const MarketProductCard: React.FC<Props> = ({
         <Text style={[styles.title, isGrid && styles.gridTitle]} numberOfLines={2}>
           {product.title}
         </Text>
-        <View style={styles.priceRow}>
-          <Zap size={12} color={colors.brandPink} strokeWidth={2.5} fill={colors.brandPink} />
-          <Text style={styles.price} testID={testID ? `${testID}-price` : undefined}>
-            {product.listing?.priceLabel ??
-              t('market.sats', { amount: product.priceSats.toLocaleString(formatLocale) })}
-          </Text>
-        </View>
+        <MarketPrice
+          product={product}
+          variant="compact"
+          testIDPrefix={testID ? `${testID}-price` : undefined}
+        />
         <View style={styles.sellerRow}>
           {vendor ? (
             <VendorAvatar

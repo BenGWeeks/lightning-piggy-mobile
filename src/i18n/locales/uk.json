@@ -2244,6 +2244,8 @@
   },
   "market": {
     "sats": "{{amount}} sats",
+    "priceApprox": "≈ {{value}}",
+    "priceApproxBoth": "≈ {{fiat}} · {{sats}}",
     "free": "Безкоштовно",
     "fromSeller": "продавець: {{seller}}",
     "screen": {

@@ -9,7 +9,7 @@ name: Market — grid → product detail → reviews/comments tabs (#948)
 #   - The Explore "Market" rail "See all →" opens the full Market screen grid
 #     (`market-screen`, with `market-product-card-<id>` tiles).
 #   - Tapping a product tile pushes the product detail
-#     (`market-product-detail-screen`) with a price (`-price`) and a buy
+#     (`market-product-detail-screen`) with a price (`market-price-primary`) and a buy
 #     affordance (`-buy`).
 #   - The Reviews / Comments feedback tabs render and switch: the Reviews
 #     body (`product-reviews`) is shown first; tapping the Comments tab
@@ -91,7 +91,7 @@ name: Market — grid → product detail → reviews/comments tabs (#948)
 - assertVisible:
     id: 'market-product-detail-screen'
 - assertVisible:
-    id: 'market-product-detail-price'
+    id: 'market-price-primary'
 # Buy shows for curated products and in-app-checkout listings; plain Nostr
 # listings rely on Message seller (the njump "Open listing" button is gone).
 - assertVisible:
