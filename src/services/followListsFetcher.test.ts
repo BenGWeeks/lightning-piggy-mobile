@@ -97,3 +97,34 @@ it('rejects when aborted, so a cut-short batch is never cached as complete', asy
   controller.abort();
   await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
 });
+
+it('accepts an empty follow list only after a relay answers in full', async () => {
+  const pending = fetchFollowLists([friend(1)], []);
+  await flush();
+  subs[0].c.oneose();
+  await expect(pending).resolves.toEqual({});
+});
+
+it('rejects when every relay is offline and releases the pool', async () => {
+  ensureRelay.mockRejectedValue(new Error('offline'));
+  await expect(fetchFollowLists([friend(1)], [])).rejects.toThrow('No follow-list relay answered');
+  expect(release).toHaveBeenCalledTimes(1);
+});
+
+it.each([false, true])(
+  'rejects a timed-out batch even with partial events: %s',
+  async (partial) => {
+    jest.useFakeTimers();
+    try {
+      const pending = fetchFollowLists([friend(1)], []);
+      const rejected = expect(pending).rejects.toThrow('No follow-list relay answered');
+      await flush();
+      if (partial) subs[0].c.onevent(contacts(1, 100, [hex(10)]));
+      await jest.advanceTimersByTimeAsync(8000);
+      await rejected;
+      expect(release).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  },
+);

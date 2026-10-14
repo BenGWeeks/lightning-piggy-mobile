@@ -16,7 +16,7 @@ import {
   writeMarketSnapshot,
 } from '../services/marketStorage';
 import { carriedListingEvents, mergeMarketSnapshot } from '../utils/marketSnapshotMerge';
-import { withKnownProfiles } from '../utils/marketOpenScope';
+import { curateOpenListingProducts, withKnownProfiles } from '../utils/marketOpenScope';
 import type { MarketProduct } from '../data/marketProducts';
 
 /**
@@ -177,7 +177,8 @@ export function useMarketListings(enabled: boolean, scope?: MarketListingsScope)
       // whose relays stayed silent this round stay on screen.
       const showResult = (fetched: MarketListingsResult, loading: boolean, completed: boolean) => {
         const base = confirmed.current.key === key ? confirmed.current.products : [];
-        const products = mergeMarketSnapshot(base, fetched);
+        const merged = mergeMarketSnapshot(base, fetched);
+        const products = open ? curateOpenListingProducts(merged) : merged;
         const shownSellers = new Set(products.map((product) => product.listing?.event.pubkey));
         const result = {
           ...fetched,

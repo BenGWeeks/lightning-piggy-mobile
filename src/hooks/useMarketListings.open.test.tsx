@@ -6,7 +6,7 @@ import { act, renderHook } from '@testing-library/react-native';
 import { useMarketListings } from './useMarketListings';
 import { fetchMarketListings, fetchOpenMarketListings } from '../services/marketListingsService';
 import { fetchMarketMerchantProfiles } from '../services/marketMerchantProfiles';
-import { clearMarketSnapshotMemory } from '../services/marketStorage';
+import { clearMarketSnapshotMemory, getMarketSnapshot } from '../services/marketStorage';
 import { parseMarketListing } from '../utils/marketListings';
 
 jest.mock('../services/marketListingsService', () => ({
@@ -97,4 +97,39 @@ it('drops sellers with no kind-0 profile once the profile pass answers', async (
     answerProfiles(new Map([[getPublicKey(keyOf(1)), { npub: 'npub1x', name: 'Shop' }]])),
   );
   expect(h.result.current.products.map((p) => p.id)).toEqual([withProfile.id]);
+});
+
+it('caps each seller again after merging successive All samples, including the cached result', async () => {
+  const makeProducts = (start: number) =>
+    Array.from({ length: 10 }, (_, i) => {
+      const event = product(1).listing!.event;
+      return parseMarketListing(
+        finalizeEvent(
+          {
+            kind: event.kind,
+            created_at: 100 + start + i,
+            content: event.content,
+            tags: event.tags.map((tag) => (tag[0] === 'd' ? ['d', `item-${start + i}`] : tag)),
+          },
+          keyOf(1),
+        ),
+        0,
+      )!;
+    }).reverse();
+  const old = makeProducts(0);
+  const fresh = makeProducts(10);
+  (fetchMarketMerchantProfiles as jest.Mock).mockResolvedValue(
+    new Map([[getPublicKey(keyOf(1)), { npub: 'npub1x', name: 'Shop' }]]),
+  );
+  (fetchOpenMarketListings as jest.Mock)
+    .mockResolvedValueOnce({ products: old, incomplete: false, answeredRelays: [] })
+    .mockResolvedValueOnce({ products: fresh, incomplete: false, answeredRelays: [] });
+  const h = renderHook(() => useMarketListings(true, SCOPE));
+  await act(async () => {});
+  expect(h.result.current.products).toHaveLength(10);
+  await act(async () => h.result.current.refresh());
+  expect(h.result.current.products.map((p) => p.id)).toEqual(fresh.map((p) => p.id));
+  expect(
+    getMarketSnapshot(`${SCOPE.account}|*|wss://example.com`)?.result.products.map((p) => p.id),
+  ).toEqual(fresh.map((p) => p.id));
 });

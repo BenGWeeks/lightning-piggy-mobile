@@ -41,12 +41,19 @@ const newerFirst = (a: Event, b: Event) =>
  * address's newest revision decides (a newer sold / malformed revision must
  * still win, so older revisions are never judged on their own), and a kept
  * address keeps every revision for the verifier to fall back through.
- * Deletions pass through untouched.
+ * Carried addresses bypass these filters so authenticated withdrawals can
+ * remove the previous snapshot. Deletions pass through untouched.
  */
 export async function curateOpenListingEvents(
   events: readonly Event[],
-  opts: { maybeYield?: () => Promise<void>; now?: number } = {},
+  opts: { maybeYield?: () => Promise<void>; now?: number; carried?: readonly Event[] } = {},
 ): Promise<Event[]> {
+  // Carried addresses are bounded by the displayed snapshot. Their revisions
+  // must reach authentication even when hygiene or the seller cap excludes them.
+  const carried = new Set(
+    (opts.carried ?? []).map((e) => `${e.kind}:${e.pubkey}:${tagValue(e, 'd')}`),
+  );
+  const retained: Event[] = [];
   const deletions: Event[] = [];
   const revisions = new Map<string, Event[]>();
   for (const event of events) {
@@ -62,9 +69,13 @@ export async function curateOpenListingEvents(
     else revisions.set(address, [event]);
   }
   const byAuthor = new Map<string, { newest: Event; list: Event[] }[]>();
-  for (const list of revisions.values()) {
+  for (const [address, list] of revisions) {
     await opts.maybeYield?.();
     list.sort(newerFirst);
+    if (carried.has(address)) {
+      retained.push(...list);
+      continue;
+    }
     const product = parseMarketListing(list[0], opts.now);
     if (!product || !passesOpenScopeHygiene(product)) continue;
     const entry = { newest: list[0], list };
@@ -77,7 +88,7 @@ export async function curateOpenListingEvents(
     entries.sort((a, b) => newerFirst(a.newest, b.newest));
     for (const entry of entries.slice(0, OPEN_SCOPE_PER_AUTHOR)) kept.push(...entry.list);
   }
-  return [...kept, ...deletions];
+  return [...kept, ...retained, ...deletions];
 }
 
 /** Rules 1-2 on final products (newest first, as the reducer returns them). */

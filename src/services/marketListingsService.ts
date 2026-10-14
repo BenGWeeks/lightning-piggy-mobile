@@ -174,7 +174,8 @@ export async function fetchOpenMarketListings(
       {
         filters: openListingFilters(openListingSince()),
         sampled: true,
-        prefilter: (events, maybeYield) => curateOpenListingEvents(events, { maybeYield }),
+        prefilter: (events, maybeYield) =>
+          curateOpenListingEvents(events, { maybeYield, carried: options.carried }),
         curate: curateOpenListingProducts,
       },
     ),

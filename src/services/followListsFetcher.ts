@@ -64,12 +64,13 @@ export async function fetchFollowLists(
   const wanted = new Set(pubkeys.map((p) => p.toLowerCase()).filter((p) => HEX64.test(p)));
   const abort = signal ?? new AbortController().signal;
   const urls = selectHealthyRelays(followListRelays(userRelays));
-  if (wanted.size === 0 || urls.length === 0) return {};
-  const latest = new Map<string, Event>();
   if (abort.aborted) throw abortError();
+  if (wanted.size === 0) return {};
+  if (urls.length === 0) throw new Error('No follow-list relays available');
+  const latest = new Map<string, Event>();
   const lease = acquireMarketListingsPool(urls);
   try {
-    await collectRelaySnapshot({
+    const snapshot = await collectRelaySnapshot({
       urls,
       // Replaceable kind: one event per author, so the author count bounds it.
       filters: [{ kinds: [3], authors: [...wanted], limit: wanted.size }],
@@ -83,6 +84,8 @@ export async function fetchFollowLists(
         if (supersedes(event, latest.get(event.pubkey))) latest.set(event.pubkey, event);
       },
     });
+    if (abort.aborted) throw abortError();
+    if (snapshot.answered.length === 0) throw new Error('No follow-list relay answered');
   } finally {
     lease.release();
   }

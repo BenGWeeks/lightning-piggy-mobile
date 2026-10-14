@@ -7,6 +7,7 @@ import { MARKET_FOF_MAX } from '../utils/marketFofScope';
 jest.mock('../services/friendsOfFriendsService', () => ({
   computeFofSet: jest.fn(),
   loadFofCache: jest.fn(),
+  FOF_CACHE_TTL_MS: jest.requireActual('../services/friendsOfFriendsService').FOF_CACHE_TTL_MS,
 }));
 jest.mock('../services/followListsFetcher', () => ({ fetchFollowLists: jest.fn() }));
 const hex = (n: number) => n.toString(16).padStart(64, '0');
@@ -71,7 +72,11 @@ it('builds the set with the shared FoF service: follows first, then ranked FoF',
 });
 
 it('reuses the service cache without recomputing, and the in-memory set on remount', async () => {
-  loadCache.mockResolvedValue({ set: new Set([hex(7)]), excludedFriends: 0, computedAt: 1 });
+  loadCache.mockResolvedValue({
+    set: new Set([hex(7)]),
+    excludedFriends: 0,
+    computedAt: Date.now(),
+  });
   const h = renderHook(() => useMarketFofAuthors(true));
   await act(async () => {});
   expect(compute).not.toHaveBeenCalled();
@@ -172,4 +177,29 @@ it('does not memoize a rejection after abort', async () => {
   expect(compute).toHaveBeenCalledTimes(2);
   expect(again.result.current.failed).toBe(false);
   expect(again.result.current.authors).toContain(hex(9));
+});
+
+it('expires a successful memo from the original computation time, including cache reads', async () => {
+  const now = jest.spyOn(Date, 'now').mockReturnValue(100_000);
+  const ttl = 24 * 60 * 60 * 1000;
+  try {
+    loadCache.mockResolvedValueOnce({ set: new Set([hex(7)]), computedAt: 1 });
+    const first = renderHook(() => useMarketFofAuthors(true));
+    await act(async () => {});
+    first.unmount();
+    now.mockReturnValue(ttl);
+    const fresh = renderHook(() => useMarketFofAuthors(true));
+    await act(async () => {});
+    expect(loadCache).toHaveBeenCalledTimes(1);
+    fresh.unmount();
+    now.mockReturnValue(ttl + 2);
+    compute.mockResolvedValueOnce({ set: new Set([hex(9)]), computedAt: ttl + 2 });
+    const expired = renderHook(() => useMarketFofAuthors(true));
+    await act(async () => {});
+    expect(loadCache).toHaveBeenCalledTimes(2);
+    expect(compute).toHaveBeenCalledTimes(1);
+    expect(expired.result.current.authors).toEqual([hex(1), hex(2), hex(9)]);
+  } finally {
+    now.mockRestore();
+  }
 });

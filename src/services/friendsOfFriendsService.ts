@@ -32,7 +32,7 @@ export const FANOUT_CAP = 500;
 // FoF dominated by their remaining 2 friends.
 export const SOFT_CAP_MIN_RATIO = 0.5;
 const FOF_CACHE_KEY = '@lp:wot-fof:v1';
-const FOF_CACHE_TTL_MS = 24 * 60 * 60 * 1_000;
+export const FOF_CACHE_TTL_MS = 24 * 60 * 60 * 1_000;
 
 export interface FofResult {
   set: Set<string>;

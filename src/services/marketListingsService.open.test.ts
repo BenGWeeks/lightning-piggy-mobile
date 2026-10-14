@@ -231,3 +231,32 @@ it('retains carried listings absent from a sample while honoring authenticated w
   expect(merged.map((product) => product.id)).not.toContain(previous[1].id);
   expect(merged).toHaveLength(2);
 });
+
+it.each(['sold', 'hidden', 'forged', 'older'])(
+  'authenticates a carried listing revision excluded by hygiene: %s',
+  async (status) => {
+    const old = listing(1, 'carried', NOW_S - 100);
+    const previous = [parseMarketListing(old)!];
+    const unsigned = {
+      kind: old.kind,
+      created_at: status === 'older' ? NOW_S - 200 : NOW_S - 10,
+      content: old.content,
+      tags: [...old.tags, ['status', status === 'forged' || status === 'older' ? 'sold' : status]],
+    };
+    const signed = finalizeEvent(unsigned, keyOf(1));
+    const revision = status === 'forged' ? { ...signed, sig: '0'.repeat(128) } : signed;
+    const pending = fetchOpenMarketListings(
+      ['wss://example.com'],
+      new AbortController().signal,
+      undefined,
+      { carried: [old] },
+    );
+    await flush();
+    deliver(listingSubs()[0], revision);
+    await answerAll();
+    const result = await pending;
+    const withdrawn = status === 'sold' || status === 'hidden';
+    expect(result.withdrawn?.includes(previous[0].id)).toBe(withdrawn);
+    expect(mergeMarketSnapshot(previous, result)).toHaveLength(withdrawn ? 0 : 1);
+  },
+);

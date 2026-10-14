@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { useNostr, useNostrContacts } from '../contexts/NostrContext';
-import { computeFofSet, loadFofCache } from '../services/friendsOfFriendsService';
+import { computeFofSet, loadFofCache, FOF_CACHE_TTL_MS } from '../services/friendsOfFriendsService';
 import { fetchFollowLists } from '../services/followListsFetcher';
 import { marketFofAuthors, MARKET_FOF_MAX } from '../utils/marketFofScope';
 
@@ -15,11 +15,20 @@ export interface FofProgress {
 // refocusing the Market reuses it without even an AsyncStorage read. (The
 // service's own 24 h AsyncStorage cache covers app restarts.)
 const FAILURE_COOLDOWN_MS = 30_000;
-let memo: { key: string; fof: readonly string[]; failedUntil?: number } | null = null;
+let memo: {
+  key: string;
+  fof: readonly string[];
+  failedUntil?: number;
+  computedAt?: number;
+} | null = null;
 
 function cachedMemo(key: string) {
   if (memo?.key !== key) return null;
-  if (memo.failedUntil !== undefined && Date.now() >= memo.failedUntil) return null;
+  if (memo.failedUntil !== undefined) {
+    if (Date.now() >= memo.failedUntil) return null;
+  } else if (memo.computedAt === undefined || Date.now() - memo.computedAt > FOF_CACHE_TTL_MS) {
+    return null;
+  }
   return memo;
 }
 
@@ -111,7 +120,7 @@ export function useMarketFofAuthors(enabled: boolean) {
             }));
           if (signal.aborted) return;
           const fof = [...result.set];
-          memo = { key, fof };
+          memo = { key, fof, computedAt: result.computedAt };
           setState({ key, fof, failed: false, progress: null });
         } catch {
           if (signal.aborted) return;
