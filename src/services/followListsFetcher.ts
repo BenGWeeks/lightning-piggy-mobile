@@ -6,9 +6,9 @@
 // Perf (#1274 pattern): kind-3 events are large (hundreds of `p` tags) and a
 // schnorr check costs ~25 ms on a phone, so the shared pool's eager per-event
 // verification is avoided. Events arrive through the structure-only market
-// pool, only the newest revision per friend is kept, and those winners are
-// verified here in a budget-gated, yielded loop. A revision that fails is
-// dropped (that friend contributes nothing) rather than trusted.
+// pool, bounded candidates are retained, and revisions are verified newest
+// first in a budget-gated, yielded loop until each friend has a valid winner.
+// Forged newer revisions cannot displace an older authenticated follow list.
 import type { Event } from 'nostr-tools';
 import { acquireMarketListingsPool } from './marketListingsPool';
 import { collectRelaySnapshot } from './relaySnapshot';
@@ -62,11 +62,8 @@ export function followListRelays(userRelays: readonly string[]): string[] {
   return [...seen].slice(0, MAX_FOLLOW_LIST_RELAYS);
 }
 
-/** Newest revision wins; on a timestamp tie the lowest id (replaceable-event rule). */
-const supersedes = (next: Event, prev: Event | undefined) =>
-  !prev ||
-  next.created_at > prev.created_at ||
-  (next.created_at === prev.created_at && next.id < prev.id);
+/** Newest first; on a timestamp tie the lowest id (replaceable-event rule). */
+const newestFirst = (a: Event, b: Event) => b.created_at - a.created_at || a.id.localeCompare(b.id);
 
 /**
  * Fetch the newest verified kind-3 for each of `pubkeys` (one bounded batch —
@@ -84,7 +81,11 @@ export async function fetchFollowLists(
   if (abort.aborted) throw abortError();
   if (wanted.size === 0) return {};
   if (urls.length === 0) throw new Error('No follow-list relays available');
-  const latest = new Map<string, Event>();
+  // Enforce the aggregate requested limit even if a relay ignores it. Fail
+  // instead of caching a graph whose valid candidates might have been lost.
+  const maxCandidates = wanted.size * urls.length;
+  const candidates: Event[] = [];
+  let overflow = false;
   const lease = acquireMarketListingsPool(urls);
   try {
     const snapshot = await collectRelaySnapshot({
@@ -98,20 +99,27 @@ export async function fetchFollowLists(
       relayPool: lease.pool,
       onEvent: (event) => {
         if (event.kind !== 3 || !wanted.has(event.pubkey) || !boundedPayload(event)) return;
-        if (supersedes(event, latest.get(event.pubkey))) latest.set(event.pubkey, event);
+        if (candidates.length >= maxCandidates) {
+          overflow = true;
+          return;
+        }
+        candidates.push(event);
       },
     });
     if (abort.aborted) throw abortError();
     if (snapshot.answered.length === 0) throw new Error('No follow-list relay answered');
+    if (overflow) throw new Error('Follow-list candidate budget exceeded');
   } finally {
     lease.release();
   }
   const out: Record<string, string[]> = {};
   const scheduler = createYieldScheduler({ signal: abort, safetyEvery: 8 });
   try {
-    for (const [pubkey, event] of latest) {
+    for (const event of candidates.sort(newestFirst)) {
       await scheduler.maybeYield();
       if (abort.aborted) break;
+      const pubkey = event.pubkey;
+      if (Object.hasOwn(out, pubkey)) continue;
       if (!verifyEventCached(event)) continue;
       const follows: string[] = [];
       for (const tag of event.tags) {

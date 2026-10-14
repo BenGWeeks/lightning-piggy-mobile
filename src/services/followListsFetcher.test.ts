@@ -104,6 +104,49 @@ it('rejects when aborted, so a cut-short batch is never cached as complete', asy
   await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
 });
 
+it.each([false, true])(
+  'retains an older authenticated list after a forged newer revision, forged first: %s',
+  async (forgedFirst) => {
+    const pending = fetchFollowLists([friend(1)], []);
+    await flush();
+    const valid = contacts(1, 100, [hex(10)]);
+    const forged = { ...contacts(1, 200, [hex(99)]), sig: '0'.repeat(128) };
+    const events = forgedFirst ? [forged, valid] : [valid, forged];
+    events.forEach((event) => subs[0].c.onevent(event));
+    subs[0].c.oneose();
+    expect(await pending).toEqual({ [friend(1)]: [hex(10)] });
+    expect(verifyEventCached).toHaveBeenCalledTimes(2);
+  },
+);
+
+it('uses the lowest authenticated id on timestamp ties and skips older revisions', async () => {
+  const pending = fetchFollowLists([friend(1), friend(2)], []);
+  await flush();
+  const tied = [contacts(1, 200, [hex(10)]), contacts(1, 200, [hex(11)])].sort((a, b) =>
+    a.id.localeCompare(b.id),
+  );
+  const forged = { ...tied[0], id: '0'.repeat(64), sig: '0'.repeat(128) };
+  subs[0].c.onevent(tied[1]);
+  subs[0].c.onevent(contacts(1, 100, [hex(12)]));
+  subs[0].c.onevent(forged);
+  subs[0].c.onevent(tied[0]);
+  subs[0].c.oneose();
+  expect(await pending).toEqual({ [friend(1)]: [tied[0].tags[0][1]] });
+  expect(verifyEventCached).toHaveBeenCalledTimes(2);
+});
+
+it('rejects a candidate flood without verifying or caching a partial graph', async () => {
+  const pending = fetchFollowLists([friend(1)], []);
+  await flush();
+  for (let i = 0; i < FOLLOW_LIST_RELAYS.length + 1; i++) {
+    subs[0].c.onevent(contacts(1, i, [hex(10)]));
+  }
+  subs[0].c.oneose();
+  await expect(pending).rejects.toThrow('Follow-list candidate budget exceeded');
+  expect(verifyEventCached).not.toHaveBeenCalled();
+  expect(release).toHaveBeenCalledTimes(1);
+});
+
 it('accepts an empty follow list only after a relay answers in full', async () => {
   const pending = fetchFollowLists([friend(1)], []);
   await flush();
