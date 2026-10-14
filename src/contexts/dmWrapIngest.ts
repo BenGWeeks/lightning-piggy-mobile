@@ -38,9 +38,6 @@ export interface InboxWrapIngestParams<W extends IngestableWrap> {
    * decrypted 1:1 rumor (the thread-open path, where the user explicitly
    * opened a conversation). */
   passesFollowGate: (pk: string) => boolean;
-  /** Thread opens may admit ordinary chat by explicit user intent; structured
-   * orders still require the account's usual inbound policy. */
-  passesOrderFollowGate?: (pk: string) => boolean;
   /** Actual follows, independent of permissive DM/WoT or thread-open policy. */
   isFollowed?: (pk: string) => boolean;
   /** Per-account skip-set file key (#743). Omit on the thread-open path,

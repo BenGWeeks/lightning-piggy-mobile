@@ -274,10 +274,8 @@ describe('orderPreviewText', () => {
   it('summarises an order with amount', () => {
     expect(orderPreviewText(parseOrderEvent(orderPlaced)!)).toBe('🛒 Order Placed · 21 sats');
   });
-  it('summarises a status update with status', () => {
-    expect(orderPreviewText(parseOrderEvent(statusUpdate)!)).toBe(
-      '📋 Order Status Update · confirmed',
-    );
+  it('summarises a status update without free text', () => {
+    expect(orderPreviewText(parseOrderEvent(statusUpdate)!)).toBe('📋 Order Status Update');
   });
   it('summarises a receipt with amount', () => {
     expect(orderPreviewText(parseOrderEvent(receipt)!)).toBe('🧾 Payment Receipt · 21 sats');
@@ -517,3 +515,24 @@ it.each([16, 17])('rejects signed public kind %s even with order tags', (kind) =
     }),
   ).toBeNull();
 });
+
+it.each(['order', 'payment', 'status', 'shipping', 'receipt'] as const)(
+  'keeps %s previews free of delivery details and all free text',
+  (type) => {
+    const order = {
+      ...parseOrderEvent(orderPlaced)!,
+      type,
+      address: 'private address',
+      email: 'private email',
+      phone: 'private phone',
+      contact: 'private contact',
+      notes: 'private notes',
+      message: 'private message',
+      status: 'private status',
+      tracking: 'private tracking',
+    };
+    const preview = orderPreviewText(order);
+    expect(preview).toBe(`${orderCardHeader(type).emoji} ${orderCardHeader(type).label} · 21 sats`);
+    expect(orderPreviewFromContent(serializeOrder(order), 16)).toBe(preview);
+  },
+);

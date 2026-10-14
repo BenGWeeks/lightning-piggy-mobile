@@ -359,7 +359,7 @@ describe('buildConversationItems — structured NIP-88 polls (#203)', () => {
     }
   });
 
-  it('hides a valid kind-16 order from chat', () => {
+  it('renders a valid kind-16 order as a structured card', () => {
     const orderJson = JSON.stringify({
       kind: 16,
       orderId: 'abc-123',
@@ -371,7 +371,7 @@ describe('buildConversationItems — structured NIP-88 polls (#203)', () => {
       [{ id: '1', fromMe: false, text: orderJson, createdAt: DAY2, wireKind: 16 }],
       [],
     ).filter((i) => i.kind !== 'dayHeader');
-    expect(items).toEqual([]);
+    expect(items).toEqual([expect.objectContaining({ kind: 'order', id: 'dm-1' })]);
   });
 
   it('hides an unparseable kind-16/17 row from chat', () => {
@@ -428,14 +428,14 @@ describe('buildConversationItems — duplicate order-invoice note dedup', () => 
 
   it('suppresses the kind-14 note when a matching kind-16 order card exists', () => {
     const items = nonHeader([cardMsg(INVOICE), noteMsg(INVOICE)]);
-    expect(items).toEqual([]);
+    expect(items).toEqual([expect.objectContaining({ kind: 'order', id: 'dm-card' })]);
   });
 
   it('suppresses regardless of arrival order (note before OR after the card)', () => {
     const noteFirst = nonHeader([noteMsg(INVOICE), cardMsg(INVOICE)]);
     const cardFirst = nonHeader([cardMsg(INVOICE), noteMsg(INVOICE)]);
     for (const items of [noteFirst, cardFirst]) {
-      expect(items).toEqual([]);
+      expect(items).toEqual([expect.objectContaining({ kind: 'order', id: 'dm-card' })]);
     }
   });
 
@@ -447,7 +447,7 @@ describe('buildConversationItems — duplicate order-invoice note dedup', () => 
 
   it('shows the note when the order card carries a DIFFERENT invoice', () => {
     const items = nonHeader([cardMsg(OTHER_INVOICE), noteMsg(INVOICE)]);
-    expect(items.some((i) => i.kind === 'order')).toBe(false);
+    expect(items.some((i) => i.kind === 'order')).toBe(true);
     expect(items.some((i) => i.kind === 'message' && i.id === 'dm-note')).toBe(true);
   });
 
@@ -549,9 +549,9 @@ describe('formatDayHeader', () => {
   });
 });
 
-describe('Gamma orders stay off chat', () => {
+describe('Gamma orders appear as cards in chat', () => {
   it.each(['order', 'payment', 'status', 'shipping', 'receipt'])(
-    'hides %s in both directions',
+    'renders %s in both directions',
     (type) => {
       for (const fromMe of [true, false]) {
         const wireKind = type === 'receipt' ? 17 : 16;
@@ -575,7 +575,12 @@ describe('Gamma orders stay off chat', () => {
             ],
             [],
           ).filter((item) => item.kind !== 'dayHeader'),
-        ).toEqual([expect.objectContaining({ kind: 'message', id: 'dm-chat', text: 'hello' })]);
+        ).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ kind: 'message', id: 'dm-chat', text: 'hello' }),
+            expect.objectContaining({ kind: 'order', id: 'dm-order', fromMe }),
+          ]),
+        );
       }
     },
   );

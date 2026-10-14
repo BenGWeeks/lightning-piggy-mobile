@@ -507,12 +507,12 @@ export async function getInboxLatest(owner: string): Promise<DmMessageRow[]> {
     `SELECT m.* FROM dm_messages m
        JOIN (
          SELECT conversation, ${PROTOCOL_SQL} AS proto, MAX(created_at) AS mx
-         FROM dm_messages WHERE owner = ? AND wire_kind NOT IN (${MARMOT_WELCOME_KIND}, 16, 17)
+         FROM dm_messages WHERE owner = ? AND wire_kind NOT IN (${MARMOT_WELCOME_KIND})
          GROUP BY conversation, ${PROTOCOL_SQL}
        ) g ON m.conversation = g.conversation
           AND COALESCE(m.protocol, CASE WHEN m.wire_kind = 4 THEN 'nip04' ELSE 'nip17' END) = g.proto
           AND m.created_at = g.mx
-     WHERE m.owner = ? AND m.wire_kind NOT IN (${MARMOT_WELCOME_KIND}, 16, 17)
+     WHERE m.owner = ? AND m.wire_kind NOT IN (${MARMOT_WELCOME_KIND})
      ORDER BY m.created_at DESC;`,
     [owner, owner],
   );

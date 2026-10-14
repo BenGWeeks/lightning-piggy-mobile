@@ -366,13 +366,15 @@ export function orderIdsNeedingHistory(messages: ConversationMessageInput[]): st
 export function buildConversationItems(
   messages: ConversationMessageInput[],
   zapItems: TimedItem[],
-  _olderOrderAmounts?: ReadonlyMap<string, number | undefined>,
+  olderOrderAmounts?: ReadonlyMap<string, number | undefined>,
   failedInvites: readonly { id: string; createdAt: number }[] = [],
   locale?: string,
   deviceNotices: readonly DeviceNoticeInput[] = [],
   clearBoundary = 0,
 ): Item[] {
   const byId = indexMessagesById(messages);
+  const approvedAmounts = collectApprovedOrderAmounts(messages, olderOrderAmounts);
+  const answered = answeredOrderIds(messages);
   const orderInvoices = new Set(
     messages.flatMap((message) => {
       if (message.wireKind !== 16) return [];
@@ -385,8 +387,22 @@ export function buildConversationItems(
     // A Marmot invite's gift wrap: never a bubble. Joined ones have their
     // own chat; failed ones are drawn from the session's record below.
     if (m.wireKind === MARMOT_WELCOME_KIND) return [];
-    // Gamma lifecycle content belongs exclusively to the market order screens.
-    if (m.wireKind === 16 || m.wireKind === 17) return [];
+    // Structured cards never pass through the free-text/link classifier.
+    if (m.wireKind === 16 || m.wireKind === 17) {
+      const order = parseStoredOrder(m.text);
+      if (!order) return [];
+      return [
+        {
+          kind: 'order',
+          id: `dm-${m.id}`,
+          fromMe: m.fromMe,
+          createdAt: m.createdAt,
+          order,
+          expectedAmountSats: approvedAmounts.get(order.orderId),
+          awaitingInvoice: m.fromMe && order.type === 'order' && !answered.has(order.orderId),
+        },
+      ];
+    }
     // Older clients also sent a kind-14 copy of the same invoice. Hide that
     // duplicate alongside its order, while ordinary chat invoices still render.
     if (m.wireKind === 14 && orderInvoices.has(bolt11FromText(m.text) ?? '')) return [];

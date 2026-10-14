@@ -7,7 +7,7 @@ import { isSellerAccountForgotten } from './sellerEventStore';
 export const orderBudgetKey = (owner: string) => `market-order-budget:${owner.toLowerCase()}`;
 let chain: Promise<unknown> = Promise.resolve();
 
-/** Shared by batch, live and deferred NIP-17 ingest, AFTER the normal follow gate.
+/** Shared by batch, live and deferred NIP-17 ingest, independent of the Messages follow gate.
  * Serialize persistent reservations so simultaneous deliveries cannot exceed the budget.
  * A storage failure fails closed. No relay-controlled clock or public event is admitted. */
 export function acceptOrderRumor(

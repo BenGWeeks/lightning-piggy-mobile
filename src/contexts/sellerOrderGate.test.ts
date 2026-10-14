@@ -1,4 +1,4 @@
-// Shop orders use the same follow gate as other untrusted inbound rumors.
+// Order storage is independent of the Messages Only friends filter.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import type { Event } from 'nostr-tools';
@@ -9,6 +9,7 @@ import { addSellerEvents, resetSellerStore } from '../services/sellerEventStore'
 import { recordSellerInvoice } from '../services/sellerInvoiceStore';
 import { listNotifications } from '../services/notificationHistory';
 import { __resetForTests } from '../services/dmWrapNotificationDedupe';
+import { buildDmSummaries } from '../utils/conversationSummaries';
 import type { DecodedRumor } from '../utils/nip17Unwrap';
 
 jest.mock('expo-notifications', () => ({
@@ -93,6 +94,7 @@ beforeEach(async () => {
 describe('live gift-wrap path', () => {
   function surfacer(followed = false) {
     const writes: Promise<void>[] = [];
+    const queueInboxEntry = jest.fn();
     const surface = createLiveRumorSurfacer({
       viewerPubkey: SELLER,
       isCancelled: () => false,
@@ -102,14 +104,14 @@ describe('live gift-wrap path', () => {
       followPubkeysRef: { current: new Set(followed ? [STRANGER] : []) },
       followGateBuffer: { defer: jest.fn(), reevaluate: jest.fn(), clear: jest.fn(), size: 0 },
       isFreshArrival: () => true,
-      queueInboxEntry: jest.fn(),
+      queueInboxEntry,
       knownWrapIds: new Set(),
       seen: new Set(),
       chainWrite: (task) => {
         writes.push(task());
       },
     });
-    return { surface, writes };
+    return { surface, writes, queueInboxEntry };
   }
 
   it("stores a followed buyer's order and routes its notification to the shop", async () => {
@@ -136,14 +138,14 @@ describe('live gift-wrap path', () => {
     ["another seller's listing", `30402:${OTHER_SELLER}:mug`],
     ['a listing I no longer have', `30402:${SELLER}:gone`],
     ['a malformed ref', 'mug'],
-  ])('keeps the gate for an order naming %s', async (_label, ref) => {
+  ])('stores a stranger order naming %s', async (_label, ref) => {
     const { surface, writes } = surfacer();
     await surface(orderRumor(ref), 'wrap-other');
     await Promise.all(writes);
     await new Promise((r) => setTimeout(r, 0));
-    expect(upsertDmMessages).not.toHaveBeenCalled();
-    expect(await listNotifications(SELLER)).toEqual([]);
-    expect(Notifications.scheduleNotificationAsync).not.toHaveBeenCalled();
+    expect(upsertDmMessages).toHaveBeenCalledWith([
+      expect.objectContaining({ owner: SELLER, conversation: STRANGER, wireKind: 16 }),
+    ]);
   });
 
   it("keeps the gate for a stranger's ordinary chat message", async () => {
@@ -162,7 +164,7 @@ describe('live gift-wrap path', () => {
     expect(upsertDmMessages).not.toHaveBeenCalled();
   });
 
-  it("keeps the gate for a stranger's receipt even after I invoiced them", async () => {
+  it("stores a stranger's receipt after I invoiced them", async () => {
     await recordSellerInvoice(SELLER, {
       orderId: 'order-1',
       buyerPubkey: STRANGER,
@@ -189,12 +191,28 @@ describe('live gift-wrap path', () => {
       'wrap-receipt',
     );
     await Promise.all(writes);
-    expect(upsertDmMessages).not.toHaveBeenCalled();
+    expect(upsertDmMessages).toHaveBeenCalledWith([expect.objectContaining({ wireKind: 17 })]);
   });
+  it.each([true, false])(
+    'live stores a non-friend invoice; Messages Only friends=%s',
+    async (onlyFriends) => {
+      const { surface, writes, queueInboxEntry } = surfacer();
+      await surface(sellerInvoice(), 'live-invoice');
+      await Promise.all(writes);
+      expect(upsertDmMessages).toHaveBeenCalledWith([expect.objectContaining({ wireKind: 16 })]);
+      const entries = queueInboxEntry.mock.calls.map(([entry]) => entry);
+      expect(entries).toHaveLength(1);
+      expect(buildDmSummaries(entries, [], onlyFriends ? new Set() : undefined)).toHaveLength(
+        onlyFriends ? 0 : 1,
+      );
+      expect(JSON.stringify(entries)).not.toContain('private');
+      expect(JSON.stringify(await listNotifications(SELLER))).not.toContain('private');
+    },
+  );
 });
 
 describe('batch ingest path', () => {
-  it('drops stranger orders irrespective of listing ownership', async () => {
+  it('stores stranger orders irrespective of listing ownership', async () => {
     const rumors: Record<string, DecodedRumor> = {
       mine: orderRumor(`30402:${SELLER}:mug`),
       theirs: orderRumor(`30402:${OTHER_SELLER}:mug`),
@@ -206,7 +224,40 @@ describe('batch ingest path', () => {
       passesFollowGate: () => false,
       skipKey: 'skip',
     });
-    expect(res.entries).toEqual([]);
-    expect(res.stored).toBe(0);
+    expect(res.entries).toHaveLength(2);
+    expect(res.stored).toBe(2);
   });
 });
+
+const sellerInvoice = (): DecodedRumor => ({
+  pubkey: STRANGER,
+  kind: 16,
+  created_at: Math.floor(Date.now() / 1000),
+  content: 'private delivery text',
+  tags: [
+    ['p', SELLER],
+    ['type', '2'],
+    ['order', 'buyer-order'],
+    ['amount', '4200'],
+    ['payment', 'lightning', 'lnbc1' + 'a'.repeat(60)],
+    ['address', 'private address'],
+  ],
+});
+
+it.each([true, false])(
+  'batch admits a non-friend invoice; Messages Only friends=%s',
+  async (onlyFriends) => {
+    const res = await ingestInboxWraps({
+      owner: SELLER,
+      wraps: [{ id: 'seller-invoice' }],
+      unwrap: sellerInvoice,
+      passesFollowGate: () => !onlyFriends,
+    });
+    expect(res.stored).toBe(1);
+    expect(upsertDmMessages).toHaveBeenCalledWith([expect.objectContaining({ wireKind: 16 })]);
+    const summaries = buildDmSummaries(res.entries, [], onlyFriends ? new Set() : undefined);
+    expect(summaries).toHaveLength(onlyFriends ? 0 : 1);
+    if (!onlyFriends) expect(summaries[0].lastComment).toBe('💳 Payment · 4,200 sats');
+    expect(JSON.stringify(res.entries)).not.toContain('private');
+  },
+);

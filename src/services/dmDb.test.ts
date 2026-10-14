@@ -403,8 +403,8 @@ describe('dmDb', () => {
       );
       expect(sql).toContain('WHERE m.owner = ?');
       // Marmot invite gift wraps never become a thread's latest (#1269).
-      expect(sql).toContain('WHERE owner = ? AND wire_kind NOT IN (444, 16, 17)');
-      expect(sql).toContain('WHERE m.owner = ? AND m.wire_kind NOT IN (444, 16, 17)');
+      expect(sql).toContain('WHERE owner = ? AND wire_kind NOT IN (444)');
+      expect(sql).toContain('WHERE m.owner = ? AND m.wire_kind NOT IN (444)');
       expect(params).toEqual([OWNER, OWNER]);
     });
   });

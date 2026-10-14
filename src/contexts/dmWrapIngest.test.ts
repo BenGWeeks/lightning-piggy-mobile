@@ -175,7 +175,9 @@ describe('dmWrapIngest.ingestInboxWraps', () => {
       passesFollowGate: () => true,
       skipKey: 'skip_key',
     });
-    expect(res.entries).toEqual([]);
+    expect(res.entries).toEqual([
+      expect.objectContaining({ text: '🛒 Order Placed · 21 sats', wireKind: 16 }),
+    ]);
     const rows: DmMessageRow[] = mockUpsert.mock.calls[0][0];
     expect(rows[0].content).toBe(orderJson); // raw order JSON persisted
     expect(rows[0].wireKind).toBe(16);

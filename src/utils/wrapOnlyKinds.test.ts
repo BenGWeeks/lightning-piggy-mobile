@@ -138,12 +138,12 @@ describe('incoming kind 16/17 never render as chat text', () => {
     ],
   })!;
 
-  it('an order row stays out of chat', () => {
+  it('an order row renders as a structured card', () => {
     const items = buildConversationItems(
       [{ id: 'm1', fromMe: false, text: serializeOrder(order), createdAt: 10, wireKind: 16 }],
       [],
     );
-    expect(items.filter((i) => i.kind !== 'dayHeader').map((i) => i.kind)).toEqual([]);
+    expect(items.filter((i) => i.kind !== 'dayHeader').map((i) => i.kind)).toEqual(['order']);
   });
 
   it.each([16, 17])('a non-order kind-%i row stays out of chat', (wireKind) => {

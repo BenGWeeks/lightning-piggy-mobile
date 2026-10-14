@@ -332,10 +332,7 @@ export function bolt11FromText(text: string): string | null {
 export function orderPreviewText(order: ParsedOrderEvent, locale?: string): string {
   const { emoji, label } = orderCardHeader(order.type);
   const parts: string[] = [`${emoji} ${label}`];
-  if (order.type === 'status' && order.status) parts.push(order.status);
-  else if (order.type === 'shipping' && order.status) parts.push(order.status);
-  else if (order.amountSats !== undefined)
-    parts.push(`${order.amountSats.toLocaleString(locale)} sats`);
+  if (order.amountSats !== undefined) parts.push(`${order.amountSats.toLocaleString(locale)} sats`);
   return parts.join(' · ');
 }
 
