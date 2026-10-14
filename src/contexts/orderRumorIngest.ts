@@ -1,3 +1,4 @@
+import { loadSellerInvoices, sellerInvoiceKey } from '../services/sellerInvoiceStore';
 import { getOutgoingOrderRows } from '../services/dmDb';
 import { parseStoredOrder, parseOrderEvent, type OrderEventInput } from '../utils/orderEvents';
 
@@ -55,6 +56,13 @@ export async function admitOrderLifecycle(
 ): Promise<boolean> {
   const order = parseOrderEvent(rumor);
   if (fromMe || order?.type === 'order') return true;
+  // A seller receives receipts/cancellations from the buyer they invoiced.
+  // This role-specific exception never admits merchant payment/shipping updates.
+  if (order?.type === 'receipt' || (order?.type === 'status' && order.status === 'cancelled')) {
+    const invoices = await loadSellerInvoices(owner);
+    const invoice = invoices[sellerInvoiceKey(partner, order.orderId)];
+    if (invoice?.buyerPubkey === partner && invoice.orderId === order.orderId) return true;
+  }
   if (order) {
     const placed = await getOutgoingOrderRows(owner, partner, [order.orderId]);
     if (

@@ -1,3 +1,4 @@
+import { recordSellerInvoice } from '../services/sellerInvoiceStore';
 import { getOutgoingOrderRows } from '../services/dmDb';
 import { serializeOrder, parseOrderEvent } from '../utils/orderEvents';
 import {
@@ -102,3 +103,38 @@ it.each(['2', '3', '4', 'receipt'])(
     expect(await admitOrderLifecycle(owner, 'seller', false, rumor)).toBe(false);
   },
 );
+
+it('binds seller receipts to the invoiced buyer without admitting their merchant updates', async () => {
+  const owner = 'seller-role';
+  const partner = 'e'.repeat(64);
+  const rumor = {
+    kind: 17,
+    content: '',
+    tags: [
+      ['subject', 'order-receipt'],
+      ['order', 'sold-order'],
+    ],
+  };
+  (getOutgoingOrderRows as jest.Mock).mockResolvedValue([]);
+  await recordSellerInvoice(owner, {
+    orderId: 'sold-order',
+    buyerPubkey: partner,
+    walletId: 'wallet',
+    paymentHash: '0'.repeat(64),
+    bolt11: 'lnbc1',
+    amountSats: 21,
+    sentAt: 1,
+  });
+  expect(await admitOrderLifecycle(owner, partner, false, rumor)).toBe(true);
+  expect(await admitOrderLifecycle(owner, 'impostor', false, rumor)).toBe(false);
+  expect(
+    await admitOrderLifecycle(owner, partner, false, {
+      ...rumor,
+      kind: 16,
+      tags: [
+        ['type', '2'],
+        ['order', 'sold-order'],
+      ],
+    }),
+  ).toBe(false);
+});

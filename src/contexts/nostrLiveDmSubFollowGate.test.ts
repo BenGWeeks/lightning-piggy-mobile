@@ -528,8 +528,10 @@ describe('startLiveDmSubscription — follow-gate race + teardown (#851 F2)', ()
       tags: [],
       content: 'x',
       rumor: {
+        pubkey: ALICE,
         kind: 16,
         tags: [
+          ['p', VIEWER],
           ['type', '1'],
           ['order', 'abc-12345678'],
           ['amount', '21'],

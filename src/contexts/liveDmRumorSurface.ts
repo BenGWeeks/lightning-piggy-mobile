@@ -1,4 +1,4 @@
-import { admitOrderLifecycle, isBoundedOrderRumor } from './orderRumorIngest';
+import { admitOrderLifecycle, admitUnfollowedOrder, isBoundedOrderRumor } from './orderRumorIngest';
 import { gateLiveDm } from './liveDmFollowGateDecision';
 import { getAppFormatLocale } from '../utils/appFormatLocale';
 import { dmThreadId, MARMOT_WELCOME_KIND, protocolForWireKind } from '../utils/dmProtocol';
@@ -151,10 +151,6 @@ export function createLiveRumorSurfacer(
           );
     if (shouldAbort()) return;
     if (routeResult.kind !== 'not-group') {
-      if (order && !showOrderInMessages) {
-        nothingToSee();
-        return;
-      }
       // OS notification (#279) — fired HERE (live path) not inside
       // tryRouteGroupRumor (which also runs on batch refresh). Only for
       // genuinely-fresh messages (backlog has old timestamps → silent),
@@ -197,7 +193,12 @@ export function createLiveRumorSurfacer(
     if (
       (rumor.kind === 16 || rumor.kind === 17) &&
       (!isBoundedOrderRumor(rumor) ||
-        !(await admitOrderLifecycle(viewerPubkey, partnership.partnerPubkey, partnership.fromMe, rumor)))
+        !(await admitOrderLifecycle(
+          viewerPubkey,
+          partnership.partnerPubkey,
+          partnership.fromMe,
+          rumor,
+        )))
     ) {
       nothingToSee();
       return;
@@ -205,25 +206,36 @@ export function createLiveRumorSurfacer(
     if (shouldAbort()) return;
     const showOrderInMessages =
       followPubkeysRef.current.has(partnership.partnerPubkey) || includeNonFollowOrders();
-    const decision = order ? 'pass' : gateLiveDm({
-      entry: {
-        id: wrapId,
-        partnerPubkey: partnership.partnerPubkey,
-        fromMe: partnership.fromMe,
-        createdAt: rumor.created_at,
-        text: textForRumor(rumor),
-        wireKind: rumor.kind,
-      },
-      kind: 1059,
-      groupRumor: order ? rumor : routeResult.deferredGroupRumor,
-      rumor,
-      onEvict: () => releaseWrapClaim(wrapId),
-      follows: followPubkeysRef.current,
-      hydrated: isFollowHydrated(),
-      cacheReady: isFollowCacheReady(),
-      buffer: followGateBuffer,
-      fresh: isFreshArrival(rumor.created_at),
-    });
+    if (
+      order &&
+      !followPubkeysRef.current.has(partnership.partnerPubkey) &&
+      !admitUnfollowedOrder(viewerPubkey)
+    ) {
+      releaseWrapClaim(wrapId);
+      nothingToSee();
+      return;
+    }
+    const decision = order
+      ? 'pass'
+      : gateLiveDm({
+          entry: {
+            id: wrapId,
+            partnerPubkey: partnership.partnerPubkey,
+            fromMe: partnership.fromMe,
+            createdAt: rumor.created_at,
+            text: textForRumor(rumor),
+            wireKind: rumor.kind,
+          },
+          kind: 1059,
+          groupRumor: order ? rumor : routeResult.deferredGroupRumor,
+          rumor,
+          onEvict: () => releaseWrapClaim(wrapId),
+          follows: followPubkeysRef.current,
+          hydrated: isFollowHydrated(),
+          cacheReady: isFollowCacheReady(),
+          buffer: followGateBuffer,
+          fresh: isFreshArrival(rumor.created_at),
+        });
     if (decision !== 'pass') {
       if (decision === 'drop') nothingToSee();
       else if (placeholder) noteContentlessWrapAlert(wrapId);
@@ -234,6 +246,7 @@ export function createLiveRumorSurfacer(
       (rumor.kind === 16 || rumor.kind === 17) &&
       !(await acceptOrderRumor(viewerPubkey, rumor, partnership.fromMe))
     ) {
+      releaseWrapClaim(wrapId);
       nothingToSee();
       return;
     }

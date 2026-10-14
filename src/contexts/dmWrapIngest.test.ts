@@ -503,7 +503,7 @@ it.each([
   const result = await ingestInboxWraps({
     owner: OWNER,
     wraps: [wrap('lifecycle')],
-    unwrap: () => ({ ...sellerInvoice, ...event }),
+    unwrap: () => ({ ...sellerInvoice, ...event, tags: [['p', OWNER], ...event.tags] }),
     passesFollowGate: () => false,
   });
   expect(result.stored).toBe(1);

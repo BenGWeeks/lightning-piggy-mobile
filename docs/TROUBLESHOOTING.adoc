@@ -1762,3 +1762,18 @@ nostr-tools retains AUTH challenges received on connect, before any CLOSED.
 The transport uses that challenge when the first auth-required CLOSED arrives,
 signs once, and re-arms once after successful AUTH. A second auth-required or
 restricted CLOSED ends the read without another authentication attempt.
+
+=== Rebasing seller order ingest onto buyer lifecycle admission
+
+The buyer and seller branches both change the shared NIP-17 live/backfill
+paths. Keep lifecycle admission scoped to the buyer's placed order and its
+seller; incoming type-1 seller orders bypass the Messages follow gate for
+storage but still consume the persistent admission budget. Seller receipts
+and cancellations must match an invoice for that buyer. Keep order history
+paged by placed orders, and signal an open conversation after persistence,
+even when Only friends hides the order preview. Contact fields belong only
+to type-1 orders and must stay out of inbox entries and notifications.
+
+In Jest, decoded order fixtures need the author's `pubkey` and recipient
+`p` tag for persistent admission. Clear AsyncStorage between cases so a
+completed reservation in one test does not suppress another test's rumor.

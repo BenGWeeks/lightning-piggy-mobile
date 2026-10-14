@@ -146,7 +146,7 @@ export function parseOrderEvent(ev: OrderEventInput): ParsedOrderEvent | null {
     items,
     shipping: tagValue(ev.tags, 'shipping'),
     payment,
-    ...contactFields(ev.tags),
+    ...(type === 'order' ? contactFields(ev.tags) : {}),
     message: typeof ev.content === 'string' ? ev.content.slice(0, 500) : '',
   };
 }

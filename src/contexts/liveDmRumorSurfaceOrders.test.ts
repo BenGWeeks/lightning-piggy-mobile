@@ -22,7 +22,8 @@ jest.mock('../services/dmDb', () => ({
   getOutgoingOrderRows: jest.fn(),
 }));
 
-beforeEach(() => {
+beforeEach(async () => {
+  await AsyncStorage.clear();
   (getOutgoingOrderRows as jest.Mock).mockImplementation(async (owner, seller, ids) => [
     {
       owner,

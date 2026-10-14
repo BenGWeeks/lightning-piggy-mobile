@@ -4,11 +4,12 @@ import * as Notifications from 'expo-notifications';
 import type { Event } from 'nostr-tools';
 import { createLiveRumorSurfacer } from './liveDmRumorSurface';
 import { ingestInboxWraps } from './dmWrapIngest';
-import { selectKnownEventIds, upsertDmMessages } from '../services/dmDb';
+import { getOutgoingOrderRows, selectKnownEventIds, upsertDmMessages } from '../services/dmDb';
 import { addSellerEvents, resetSellerStore } from '../services/sellerEventStore';
 import { recordSellerInvoice } from '../services/sellerInvoiceStore';
 import { listNotifications } from '../services/notificationHistory';
 import { __resetForTests } from '../services/dmWrapNotificationDedupe';
+import { serializeOrder, parseOrderEvent } from '../utils/orderEvents';
 import { buildDmSummaries } from '../utils/conversationSummaries';
 import type { DecodedRumor } from '../utils/nip17Unwrap';
 
@@ -24,6 +25,7 @@ jest.mock('expo-notifications', () => ({
 jest.mock('../services/dmDb', () => ({
   upsertDmMessages: jest.fn().mockResolvedValue(undefined),
   selectKnownEventIds: jest.fn(),
+  getOutgoingOrderRows: jest.fn(),
 }));
 jest.mock('./nostrEventBus', () => ({ notifyDmMessage: jest.fn() }));
 jest.mock('./nostrGroupRouting', () => ({
@@ -84,6 +86,24 @@ function orderRumor(itemRef: string, qty = 2): DecodedRumor {
 
 beforeEach(async () => {
   jest.clearAllMocks();
+  (getOutgoingOrderRows as jest.Mock).mockImplementation(async (owner, seller, ids) => [
+    {
+      owner,
+      sender: owner,
+      conversation: seller,
+      fromMe: true,
+      content: serializeOrder(
+        parseOrderEvent({
+          kind: 16,
+          content: '',
+          tags: [
+            ['type', '1'],
+            ['order', ids[0]],
+          ],
+        })!,
+      ),
+    },
+  ]);
   await AsyncStorage.clear();
   __resetForTests();
   resetSellerStore();
@@ -92,7 +112,7 @@ beforeEach(async () => {
 });
 
 describe('live gift-wrap path', () => {
-  function surfacer(followed = false, isCancelled = () => false) {
+  function surfacer(followed = false, isCancelled = () => false, includeNonFollowOrders = false) {
     const writes: Promise<void>[] = [];
     const queueInboxEntry = jest.fn();
     const surface = createLiveRumorSurfacer({
@@ -104,6 +124,7 @@ describe('live gift-wrap path', () => {
       followPubkeysRef: { current: new Set(followed ? [STRANGER] : []) },
       followGateBuffer: { defer: jest.fn(), reevaluate: jest.fn(), clear: jest.fn(), size: 0 },
       isFreshArrival: () => true,
+      includeNonFollowOrders: () => includeNonFollowOrders,
       queueInboxEntry,
       knownWrapIds: new Set(),
       seen: new Set(),
@@ -219,19 +240,22 @@ describe('live gift-wrap path', () => {
   it.each([true, false])(
     'live stores a non-friend invoice; Messages Only friends=%s',
     async (onlyFriends) => {
-      const { surface, writes, queueInboxEntry } = surfacer();
+      const { surface, writes, queueInboxEntry } = surfacer(false, () => false, !onlyFriends);
       await surface(sellerInvoice(), 'live-invoice');
       await Promise.all(writes);
       expect(upsertDmMessages).toHaveBeenCalledWith([expect.objectContaining({ wireKind: 16 })]);
       const entries = queueInboxEntry.mock.calls.map(([entry]) => entry);
-      expect(entries).toHaveLength(1);
+      expect(entries).toHaveLength(onlyFriends ? 0 : 1);
       expect(buildDmSummaries(entries, [], onlyFriends ? new Set() : undefined)).toHaveLength(
         onlyFriends ? 0 : 1,
       );
-      expect((await listNotifications(SELLER))[0].data).toMatchObject({
-        myOrderId: 'buyer-order',
-        orderSellerPubkey: STRANGER,
-      });
+      const notifications = await listNotifications(SELLER);
+      expect(notifications).toHaveLength(onlyFriends ? 0 : 1);
+      if (!onlyFriends)
+        expect(notifications[0].data).toMatchObject({
+          myOrderId: 'buyer-order',
+          orderSellerPubkey: STRANGER,
+        });
       expect(JSON.stringify(entries)).not.toContain('private');
       expect(JSON.stringify(await listNotifications(SELLER))).not.toContain('private');
     },
@@ -265,7 +289,7 @@ describe('batch ingest path', () => {
       passesFollowGate: () => false,
       skipKey: 'skip',
     });
-    expect(res.entries).toHaveLength(2);
+    expect(res.entries).toHaveLength(0);
     expect(res.stored).toBe(2);
   });
 });
