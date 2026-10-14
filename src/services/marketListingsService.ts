@@ -26,10 +26,14 @@ import { startJsStallProbe } from '../utils/jsStallProbe';
 import { PERF_LOGS_ENABLED } from '../utils/perfLog';
 import { ROBOTECHY_PUBKEY } from '../utils/marketSample';
 import type { MarketProduct } from '../data/marketProducts';
+import { mergeMarketSnapshot } from '../utils/marketSnapshotMerge';
+import { unreachableMarketSellers } from '../utils/marketUnreachableSellers';
 
 export interface MarketListingsResult {
   products: MarketProduct[];
   incomplete: boolean;
+  /** In-scope sellers with unanswered listing sources and nothing left to show. */
+  unreachableSellers?: string[];
   /** Deliberate query/work limits, separately from an unanswered relay pass. */
   budgetLimited?: boolean;
   transportFailed?: boolean;
@@ -49,6 +53,8 @@ export interface MarketListingsOptions {
    * their deletions too, so a stale copy can't outlive its withdrawal while
    * its own relay is unreachable. */
   carried?: readonly Event[];
+  /** Products/provenance used to determine whether an unreachable seller is still visible. */
+  previousProducts?: readonly MarketProduct[];
 }
 
 const MAX_AUTHORS = 1024;
@@ -136,6 +142,7 @@ export async function fetchMarketListings(
       (options.carried ?? []).filter(
         (event) => scope.has(event.pubkey) && MARKET_LISTING_KINDS.includes(event.kind),
       ),
+      options.previousProducts ?? [],
     );
   } finally {
     lease.release();
@@ -150,6 +157,7 @@ async function runSnapshot(
   signal: AbortSignal,
   onFirstPage: ((products: MarketProduct[]) => void) | undefined,
   carried: readonly Event[],
+  previousProducts: readonly MarketProduct[],
 ): Promise<MarketListingsResult> {
   const startedAt = Date.now();
   const probe = PERF_LOGS_ENABLED ? startJsStallProbe() : null;
@@ -157,6 +165,7 @@ async function runSnapshot(
   // Planning caps are deliberate, unlike dropping an unchecked candidate.
   let limited = false;
   let received = 0;
+  const receivedAuthors = new Set<string>();
   // Keyed by id AND signature: the id doesn't cover the signature, so a
   // bad-signature copy of a genuine payload must not displace the good copy.
   const events = new Map<string, Event>();
@@ -332,6 +341,7 @@ async function runSnapshot(
   const ingest = (event: Event, url?: string) => {
     received++;
     if (!scope.has(event.pubkey) || event.created_at > Date.now() / 1000 + 300) return;
+    if (MARKET_LISTING_KINDS.includes(event.kind)) receivedAuthors.add(event.pubkey);
     if (event.content.length > 32768 || event.tags.length > 256) {
       const key = `${event.id}:${event.sig}`;
       if (oversizedIds.has(key)) {
@@ -534,6 +544,16 @@ async function runSnapshot(
         listings.answered.length === 0 ||
         deletions.answered.length === 0,
     };
+    result.unreachableSellers = signal.aborted
+      ? []
+      : unreachableMarketSellers(
+          scope,
+          urls,
+          listings.answered,
+          receivedAuthors,
+          previousProducts,
+          mergeMarketSnapshot(previousProducts, result),
+        );
     // Diagnostics are optional so old cached envelopes remain valid.
     if (
       initiallyLimited ||

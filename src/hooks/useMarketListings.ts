@@ -137,7 +137,10 @@ export function useMarketListings(
           relaysKey.split(','),
           controller.signal,
           onFirstPage,
-          { carried: carriedListingEvents(confirmed.current.products) },
+          {
+            carried: carriedListingEvents(confirmed.current.products),
+            previousProducts: confirmed.current.products,
+          },
         ).catch(
           (): MarketListingsResult => ({
             products: [],
@@ -150,7 +153,15 @@ export function useMarketListings(
       // whose relays stayed silent this round stay on screen.
       const showResult = (fetched: MarketListingsResult, loading: boolean, completed: boolean) => {
         const base = confirmed.current.key === key ? confirmed.current.products : [];
-        const result = { ...fetched, products: mergeMarketSnapshot(base, fetched) };
+        const products = mergeMarketSnapshot(base, fetched);
+        const shownSellers = new Set(products.map((product) => product.listing?.event.pubkey));
+        const result = {
+          ...fetched,
+          products,
+          unreachableSellers: (fetched.unreachableSellers ?? []).filter(
+            (author) => !shownSellers.has(author),
+          ),
+        };
         confirmed.current = { key, products: result.products };
         setState({ ...result, key, loading, completed });
         return result;
@@ -163,20 +174,27 @@ export function useMarketListings(
         if (!result.incomplete || result.products.length > 0) void writeMarketSnapshot(key, result);
         // Only a complete snapshot is worth reusing; a partial one refetches.
         lastFetch.current = result.incomplete ? null : { key, at: Date.now(), revision, result };
+        return result;
       };
       void load().then((result) => {
         if (controller.signal.aborted) return;
         if (!result.incomplete) {
-          publish(result);
+          publish({ ...result, unreachableSellers: [] });
           return;
         }
         received = true;
-        showResult(result, true, false);
+        showResult({ ...result, unreachableSellers: [] }, true, false);
         retryTimer = setTimeout(() => {
           void load().then((retried) => {
             if (controller.signal.aborted) return;
-            publish(retried);
-            if (retried.incomplete)
+            const firstUnreachable = new Set(result.unreachableSellers ?? []);
+            const published = publish({
+              ...retried,
+              unreachableSellers: (retried.unreachableSellers ?? []).filter((author) =>
+                firstUnreachable.has(author),
+              ),
+            });
+            if (published?.unreachableSellers?.length)
               dismissToast = Toast.showOwned({
                 type: 'info',
                 text1: t('market.live.partialToast'),
@@ -234,6 +252,8 @@ export function useMarketListings(
           state.products.length > 0 ||
           !!getMarketSnapshot(key)),
       incomplete: state.key === key && state.incomplete,
+      sellersUnreachable:
+        state.key === key && state.completed && !!state.unreachableSellers?.length,
       refresh,
     }),
     [state, key, enabled, account, refresh, products, profilesReady, merchantAliases, generation],

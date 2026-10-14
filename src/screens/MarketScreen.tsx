@@ -353,7 +353,7 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
 
       {/* Pull-to-refresh replaces the old status row; only a load that missed
           some sellers says so, inline. */}
-      {live.incomplete && !live.loading ? (
+      {live.sellersUnreachable && !live.loading ? (
         <View style={styles.partialBanner} testID="market-partial-banner">
           <Text style={styles.partialBannerText}>{t('market.live.partialToast')}</Text>
         </View>

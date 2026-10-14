@@ -183,6 +183,7 @@ it('asks for deletions of the found listings only, on the relays that answered',
     incomplete: false,
     answeredRelays: ['wss://example.com'],
     withdrawn: [expect.stringContaining('-book')],
+    unreachableSellers: [],
   });
 });
 
@@ -195,6 +196,7 @@ it('skips the deletion pass when no listings were found', async () => {
     incomplete: false,
     answeredRelays: ['wss://example.com'],
     withdrawn: [],
+    unreachableSellers: [author],
   });
   expect(pass('deletions')).toHaveLength(0);
 });
