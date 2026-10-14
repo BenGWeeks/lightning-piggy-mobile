@@ -58,6 +58,9 @@ export interface OrderEventInput {
   content: string;
 }
 
+export const MAX_ORDER_ITEMS = 50;
+export const MAX_ORDER_ITEM_QUANTITY = 1_000;
+
 const firstTag = (tags: string[][], name: string): string[] | undefined =>
   tags.find((t) => t[0] === name);
 
@@ -121,12 +124,24 @@ export function parseOrderEvent(ev: OrderEventInput): ParsedOrderEvent | null {
       : undefined;
 
   const items: OrderItemRef[] = [];
+  const byRef = new Map<string, OrderItemRef>();
+  let itemTags = 0;
   for (const t of ev.tags) {
-    if (t[0] !== 'item' || typeof t[1] !== 'string') continue;
+    if (t[0] !== 'item') continue;
+    if (++itemTags > MAX_ORDER_ITEMS) return null;
+    if (typeof t[1] !== 'string') continue;
     // Trim + require a string (mirrors `amount`), then keep a positive integer.
     const qtyRaw = typeof t[2] === 'string' ? t[2].trim() : undefined;
     const qtyNum = qtyRaw !== undefined && /^\d+$/.test(qtyRaw) ? Number(qtyRaw) : 1;
-    items.push({ ref: t[1], quantity: qtyNum > 0 ? qtyNum : 1 });
+    const quantity = Math.min(MAX_ORDER_ITEM_QUANTITY, qtyNum > 0 ? qtyNum : 1);
+    const existing = byRef.get(t[1]);
+    if (existing) {
+      existing.quantity = Math.min(MAX_ORDER_ITEM_QUANTITY, existing.quantity + quantity);
+    } else {
+      const item = { ref: t[1], quantity };
+      byRef.set(t[1], item);
+      items.push(item);
+    }
   }
 
   let payment: OrderPayment | undefined;

@@ -3525,7 +3525,8 @@
     "unverified": "sin verificar"
   },
   "orderCard": {
-    "waitingForInvoice": "Esperando la factura del vendedor"
+    "waitingForInvoice": "Esperando la factura del vendedor",
+    "viewOrder": "Ver pedido"
   },
   "myOrders": {
     "title": "Mis pedidos",

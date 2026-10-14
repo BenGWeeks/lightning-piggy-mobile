@@ -42,9 +42,10 @@ it('uses receipt time, rejects malformed orders, and never budgets outgoing copi
   for (let n = 0; n < 8; n++) expect(await acceptOrderRumor(OWNER, rumor(n), true)).toBe(true);
   expect(await AsyncStorage.getItem(orderBudgetKey(OWNER))).toBeNull();
 });
-it('fails closed on corrupted persisted counters and storage failure', async () => {
+it('recovers corrupted persisted counters and fails closed on storage failure', async () => {
   await AsyncStorage.setItem(orderBudgetKey(OWNER), '{bad');
-  expect(await acceptOrderRumor(OWNER, rumor(1), false)).toBe(false);
+  expect(await acceptOrderRumor(OWNER, rumor(1), false)).toBe(true);
+  expect(JSON.parse((await AsyncStorage.getItem(orderBudgetKey(OWNER)))!).accepted).toHaveLength(1);
   await AsyncStorage.clear();
   jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('disk'));
   expect(await acceptOrderRumor(OWNER, rumor(2), false)).toBe(false);
@@ -110,4 +111,35 @@ it('scopes pending claims and completion to account and sender', async () => {
   expect(await acceptOrderRumor(OWNER, otherSender, false)).toBe(true);
   await completeOrderRumors(otherOwner, [rumor(1)]);
   await completeOrderRumors(OWNER, [otherSender]);
+});
+
+it('budgets buyer orders and receipts while merchant lifecycle updates bypass a full window', async () => {
+  for (let n = 0; n < 5; n++) await acceptOrderRumor(OWNER, rumor(n), false);
+  for (const type of ['2', '3', '4']) {
+    const update = {
+      ...rumor(20),
+      tags: [
+        ['order', 'placed'],
+        ['type', type],
+      ],
+    };
+    expect(await acceptOrderRumor(OWNER, update, false)).toBe(true);
+    await completeOrderRumors(OWNER, [update]);
+  }
+  expect(await acceptOrderRumor(OWNER, rumor(30), false)).toBe(false);
+  expect(
+    await acceptOrderRumor(
+      OWNER,
+      {
+        ...rumor(31),
+        kind: 17,
+        tags: [
+          ['order', '31'],
+          ['subject', 'order-receipt'],
+        ],
+      },
+      false,
+    ),
+  ).toBe(false);
+  expect(JSON.parse((await AsyncStorage.getItem(orderBudgetKey(OWNER)))!).accepted).toHaveLength(5);
 });

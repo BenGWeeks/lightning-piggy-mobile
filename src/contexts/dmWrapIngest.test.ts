@@ -582,3 +582,76 @@ it('releases batch delivery claims after a failed encrypted payload write', asyn
   expect(retry.stored).toBe(1);
   expect(mockUpsert).toHaveBeenCalledTimes(2);
 });
+
+it.each(['malformed', 'limited', 'over-cap'])(
+  'remembers %s order wraps in the skip-set across refreshes',
+  async (reason) => {
+    const order = rumorFrom(ALICE, {
+      kind: 16,
+      tags:
+        reason === 'malformed'
+          ? []
+          : [
+              ['type', '1'],
+              ['order', 'limited'],
+              ...(reason === 'over-cap'
+                ? Array.from({ length: 51 }, () => ['item', 'product', '1'])
+                : []),
+            ],
+    });
+    if (reason === 'limited') {
+      const { orderBudgetKey } = jest.requireActual('../services/orderAdmission');
+      await AsyncStorage.setItem(
+        orderBudgetKey(OWNER),
+        JSON.stringify({
+          accepted: Array.from({ length: 5 }, (_, n) => ({
+            id: String(n),
+            sender: ALICE,
+            at: Date.now(),
+            stored: true,
+          })),
+          dropped: 0,
+          droppedSince: Date.now(),
+        }),
+      );
+    }
+    const unwrap = jest.fn(() => order);
+    const params = {
+      owner: OWNER,
+      wraps: [wrap('rejected-order')],
+      unwrap,
+      passesFollowGate: () => true,
+      skipKey: 'orders-skip',
+    };
+    expect((await ingestInboxWraps(params)).stored).toBe(0);
+    expect(mockWriteSkipSet).toHaveBeenCalledWith('orders-skip', new Set(['rejected-order']));
+    mockLoadSkipSet.mockResolvedValue(mockWriteSkipSet.mock.calls[0][1]);
+    expect((await ingestInboxWraps(params)).skipHits).toBe(1);
+    expect(unwrap).toHaveBeenCalledTimes(1);
+  },
+);
+
+it('keeps order wraps retryable after a budget storage failure', async () => {
+  const unwrap = jest.fn(() =>
+    rumorFrom(BOB, {
+      kind: 16,
+      tags: [
+        ['type', '1'],
+        ['order', 'retry-storage'],
+      ],
+    }),
+  );
+  const storage = jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('storage'));
+  const params = {
+    owner: OWNER,
+    wraps: [wrap('retry-storage')],
+    unwrap,
+    passesFollowGate: () => true,
+    skipKey: 'orders-skip',
+  };
+  expect((await ingestInboxWraps(params)).stored).toBe(0);
+  expect(mockWriteSkipSet).not.toHaveBeenCalled();
+  storage.mockRestore();
+  expect((await ingestInboxWraps(params)).stored).toBe(1);
+  expect(unwrap).toHaveBeenCalledTimes(2);
+});

@@ -3525,7 +3525,8 @@
     "unverified": "nicht verifiziert"
   },
   "orderCard": {
-    "waitingForInvoice": "Warte auf die Rechnung des Verkäufers"
+    "waitingForInvoice": "Warte auf die Rechnung des Verkäufers",
+    "viewOrder": "Bestellung ansehen"
   },
   "myOrders": {
     "title": "Meine Bestellungen",

@@ -536,3 +536,35 @@ it.each(['order', 'payment', 'status', 'shipping', 'receipt'] as const)(
     expect(orderPreviewFromContent(serializeOrder(order), 16)).toBe(preview);
   },
 );
+
+it('rejects more than 50 item tags, including duplicate refs', () => {
+  const tags = Array.from({ length: 51 }, () => ['item', 'product', '1']);
+  expect(
+    parseOrderEvent({
+      ...orderPlaced,
+      tags: [...orderPlaced.tags.filter((t) => t[0] !== 'item'), ...tags],
+    }),
+  ).toBeNull();
+  expect(
+    parseOrderEvent({
+      ...orderPlaced,
+      tags: [...orderPlaced.tags.filter((t) => t[0] !== 'item'), ...tags.slice(0, 50)],
+    })?.items,
+  ).toEqual([{ ref: 'product', quantity: 50 }]);
+});
+it('merges duplicate item refs and caps individual and summed quantities', () => {
+  const tags = [
+    ['item', 'one', '600'],
+    ['item', 'one', '600'],
+    ['item', 'two', '9'.repeat(400)],
+  ];
+  expect(
+    parseOrderEvent({
+      ...orderPlaced,
+      tags: [...orderPlaced.tags.filter((t) => t[0] !== 'item'), ...tags],
+    })?.items,
+  ).toEqual([
+    { ref: 'one', quantity: 1000 },
+    { ref: 'two', quantity: 1000 },
+  ]);
+});

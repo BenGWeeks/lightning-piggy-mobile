@@ -1,3 +1,5 @@
+import { useFocusEffect } from '@react-navigation/native';
+import { AppState } from 'react-native';
 import { useTranslation } from '../contexts/LocaleContext';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNostr } from '../contexts/NostrContext';
@@ -309,19 +311,41 @@ export function useSellerInvoice(
     }
   }, [pubkey]);
 
-  // Bounded auto-check while the card is mounted and the invoice is unpaid.
+  // Poll only while this order is visible and the app is active.
   const unpaidHash = currentRecord && !currentRecord.paidAt ? currentRecord.paymentHash : null;
-  useEffect(() => {
-    if (!unpaidHash) return;
-    let checks = 0;
-    void checkPaid().catch(() => undefined);
-    const timer = setInterval(() => {
-      checks += 1;
-      if (checks >= MAX_AUTO_CHECKS) clearInterval(timer);
-      void checkPaid().catch(() => undefined);
-    }, CHECK_EVERY_MS);
-    return () => clearInterval(timer);
-  }, [unpaidHash, checkPaid]);
+  useFocusEffect(
+    useCallback(() => {
+      if (!unpaidHash) return;
+      let checks = 0;
+      let timer: ReturnType<typeof setInterval> | undefined;
+      let resume: ReturnType<typeof setTimeout> | undefined;
+      const stop = () => {
+        clearInterval(timer);
+        clearTimeout(resume);
+        timer = undefined;
+      };
+      const poll = () => {
+        if (checks >= MAX_AUTO_CHECKS) return;
+        checks++;
+        void checkPaid().catch(() => undefined);
+        if (checks >= MAX_AUTO_CHECKS) stop();
+      };
+      const start = () => {
+        if (AppState.currentState !== 'active' || checks >= MAX_AUTO_CHECKS) return;
+        poll();
+        if (checks < MAX_AUTO_CHECKS) timer = setInterval(poll, CHECK_EVERY_MS);
+      };
+      start();
+      const subscription = AppState.addEventListener('change', (state) => {
+        stop();
+        if (state === 'active') resume = setTimeout(start, 3000);
+      });
+      return () => {
+        stop();
+        subscription.remove();
+      };
+    }, [unpaidHash, checkPaid]),
+  );
 
   const markPaid = useCallback(async () => {
     if (!pubkey || !buyerPubkey || !orderId) {

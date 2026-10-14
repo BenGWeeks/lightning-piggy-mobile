@@ -1,3 +1,4 @@
+import { AppState, type AppStateStatus } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 import { useSellerInvoice } from './useSellerInvoice';
@@ -9,6 +10,13 @@ import { loadSellerInvoices, recordSellerInvoice } from '../services/sellerInvoi
 import { loadSellerReceiveWallet } from '../services/sellerReceiveWallet';
 import { extractInvoice } from '../utils/messageContent';
 import { amountSatsFromBolt11, paymentHashFromBolt11 } from '../utils/bolt11';
+let mockFocused = true;
+jest.mock('@react-navigation/native', () => ({
+  useFocusEffect: (callback: () => void) =>
+    jest
+      .requireActual('react')
+      .useEffect(() => (mockFocused ? callback() : undefined), [callback, mockFocused]),
+}));
 
 jest.mock('../contexts/LocaleContext', () => ({ useTranslation: () => (key: string) => key }));
 
@@ -35,6 +43,7 @@ const makeInvoiceForWallet = jest.fn();
 
 beforeEach(async () => {
   jest.clearAllMocks();
+  mockFocused = true;
   (extractInvoice as jest.Mock).mockReturnValue({ expiresAt: 1_800_000_000 });
   await AsyncStorage.clear();
   (useNostr as jest.Mock).mockReturnValue({ pubkey: SELLER, signerType: 'nsec', relays: [] });
@@ -329,4 +338,59 @@ it('does not create an invoice when the store read fails', async () => {
   });
   expect(makeInvoiceForWallet).not.toHaveBeenCalled();
   expect(sendNip17Rumor).not.toHaveBeenCalled();
+});
+
+it('polls only while focused and active, with a staggered resume', async () => {
+  const originalState = AppState.currentState;
+  let onChange: (state: AppStateStatus) => void = () => {};
+  const remove = jest.fn();
+  const listener = jest
+    .spyOn(AppState, 'addEventListener')
+    .mockImplementation((_event, callback) => {
+      onChange = callback;
+      return { remove };
+    });
+  AppState.currentState = 'active';
+  await recordSellerInvoice(SELLER, {
+    orderId: 'order-1',
+    buyerPubkey: BUYER,
+    walletId: 'shop-wallet',
+    paymentHash: HASH,
+    bolt11: BOLT11,
+    amountSats: 4200,
+    sentAt: Date.now(),
+  });
+  const hook = renderHook(() => useSellerInvoice(BUYER, 'order-1'));
+  await waitFor(() => expect(lookupInvoice).toHaveBeenCalledTimes(1));
+  jest.useFakeTimers();
+  try {
+    await act(async () => {
+      AppState.currentState = 'background';
+      onChange('background');
+      jest.advanceTimersByTime(30000);
+    });
+    expect(lookupInvoice).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      AppState.currentState = 'active';
+      onChange('active');
+      jest.advanceTimersByTime(2999);
+    });
+    expect(lookupInvoice).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      jest.advanceTimersByTime(1);
+    });
+    expect(lookupInvoice).toHaveBeenCalledTimes(2);
+    mockFocused = false;
+    hook.rerender({});
+    await act(async () => {
+      jest.advanceTimersByTime(30000);
+    });
+    expect(lookupInvoice).toHaveBeenCalledTimes(2);
+    expect(remove).toHaveBeenCalled();
+  } finally {
+    hook.unmount();
+    listener.mockRestore();
+    AppState.currentState = originalState;
+    jest.useRealTimers();
+  }
 });

@@ -3525,7 +3525,8 @@
     "unverified": "nem ellenőrzött"
   },
   "orderCard": {
-    "waitingForInvoice": "Várakozás az eladó számlájára"
+    "waitingForInvoice": "Várakozás az eladó számlájára",
+    "viewOrder": "Rendelés megtekintése"
   },
   "myOrders": {
     "title": "Rendeléseim",

@@ -22,20 +22,32 @@ export function acceptOrderRumor(
   owner: string,
   rumor: DecodedRumor,
   fromMe: boolean,
+  onBudgetRejected?: () => void,
 ): Promise<boolean> {
   if (rumor.kind !== 16 && rumor.kind !== 17) return Promise.resolve(true);
-  if (!parseOrderEvent(rumor)) return Promise.resolve(false);
+  const order = parseOrderEvent(rumor);
+  if (!order) return Promise.resolve(false);
   if (fromMe) return Promise.resolve(true);
   const run = chain
     .then(async () => {
       if (isSellerAccountForgotten(owner)) return false;
       const key = deliveryKey(owner, rumor);
       if (pending.has(key)) return false;
+      // Merchant lifecycle updates already passed the placed-order/seller gate.
+      if (order.type !== 'order' && order.type !== 'receipt') {
+        pending.add(key);
+        return true;
+      }
       const raw = await AsyncStorage.getItem(orderBudgetKey(owner));
       const now = Date.now();
-      const budget: OrderBudget = raw
-        ? JSON.parse(raw)
-        : { accepted: [], dropped: 0, droppedSince: now };
+      let budget: OrderBudget = { accepted: [], dropped: 0, droppedSince: now };
+      if (raw) {
+        try {
+          budget = JSON.parse(raw);
+        } catch {
+          // Recover a corrupt local window without logging order data.
+        }
+      }
       // Reservations survive crashes but remain retryable until the encrypted
       // payload write succeeds. A retry consumes no additional budget slot.
       const existing = budget.accepted.find(
@@ -54,6 +66,7 @@ export function acceptOrderRumor(
       await AsyncStorage.setItem(orderBudgetKey(owner), JSON.stringify(result.budget));
       const allowed = !isSellerAccountForgotten(owner) && result.allowed;
       if (allowed) pending.add(key);
+      else if (!result.allowed) onBudgetRejected?.();
       return allowed;
     })
     .catch(() => false);

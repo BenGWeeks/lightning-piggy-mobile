@@ -3525,7 +3525,8 @@
     "unverified": "असत्यापित"
   },
   "orderCard": {
-    "waitingForInvoice": "विक्रेता के इनवॉइस की प्रतीक्षा है"
+    "waitingForInvoice": "विक्रेता के इनवॉइस की प्रतीक्षा है",
+    "viewOrder": "ऑर्डर देखें"
   },
   "myOrders": {
     "title": "मेरे ऑर्डर",

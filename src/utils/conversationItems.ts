@@ -12,7 +12,6 @@ import {
   payableBolt11,
   type ParsedOrderEvent,
 } from './orderEvents';
-import { type SellerOrderThread } from './shopOrderStatus';
 import { indexMessagesById, resolveQuote, type MessageQuote } from './messageQuote';
 import { NWC_SHARE_KIND, parseNwcShare, type NwcShareCard } from './nwcShareMessage';
 import { MARMOT_WELCOME_KIND } from './dmProtocol';
@@ -90,9 +89,6 @@ export type Item =
       /** My own placed order (kind-16 type 1) the seller hasn't answered with
        * a payment request (or cancelled) yet — the card says so. */
       awaitingInvoice?: boolean;
-      /** An order I RECEIVED (type 1): what I've done about it so far (my
-       * invoice, the buyer's receipt, my status / shipping updates). */
-      sellerThread?: SellerOrderThread;
       createdAt: number;
     }
   | {

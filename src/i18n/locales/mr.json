@@ -3525,7 +3525,8 @@
     "unverified": "अप्रमाणित"
   },
   "orderCard": {
-    "waitingForInvoice": "विक्रेत्याच्या इनव्हॉइसची प्रतीक्षा आहे"
+    "waitingForInvoice": "विक्रेत्याच्या इनव्हॉइसची प्रतीक्षा आहे",
+    "viewOrder": "ऑर्डर पहा"
   },
   "myOrders": {
     "title": "माझे ऑर्डर",

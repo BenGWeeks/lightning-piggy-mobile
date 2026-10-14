@@ -3525,7 +3525,8 @@
     "unverified": "未验证"
   },
   "orderCard": {
-    "waitingForInvoice": "正在等待卖家的发票"
+    "waitingForInvoice": "正在等待卖家的发票",
+    "viewOrder": "查看订单"
   },
   "myOrders": {
     "title": "我的订单",

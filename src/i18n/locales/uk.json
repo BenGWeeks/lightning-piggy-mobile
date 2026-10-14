@@ -3579,7 +3579,8 @@
     "unverified": "не перевірено"
   },
   "orderCard": {
-    "waitingForInvoice": "Очікуємо рахунок від продавця"
+    "waitingForInvoice": "Очікуємо рахунок від продавця",
+    "viewOrder": "Переглянути замовлення"
   },
   "myOrders": {
     "title": "Мої замовлення",

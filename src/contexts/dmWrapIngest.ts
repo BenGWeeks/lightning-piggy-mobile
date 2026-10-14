@@ -113,6 +113,13 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
   let permissionDenied = false;
   let skipSetDirty = false;
   const skipSet = skipKey ? await loadNip17SkipSet(skipKey) : new Set<string>();
+  const skipOrderWrap = (id: string): null => {
+    if (skipKey) {
+      skipSet.add(id);
+      skipSetDirty = true;
+    }
+    return null;
+  };
   // Frame-budget pacing (#532) + cold-start macro-task yields (#788). Runs
   // inside the decryptor so only fresh decrypts pay for yields — DB-known
   // wraps are a Set lookup in ingestWraps and need no pacing.
@@ -202,15 +209,10 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
         // the CHECK above so a newly-followed sender's wraps re-evaluate (#745).
         const showInMessages = passesFollowGate(partnership.partnerPubkey);
         const orderRumor = isBoundedOrderRumor(rumor);
+        if ((rumor.kind === 16 || rumor.kind === 17) && !orderRumor) return skipOrderWrap(wrap.id);
         if (
-          (rumor.kind === 16 || rumor.kind === 17) &&
-          (!orderRumor ||
-            !(await admitOrderLifecycle(
-              owner,
-              partnership.partnerPubkey,
-              partnership.fromMe,
-              rumor,
-            )))
+          orderRumor &&
+          !(await admitOrderLifecycle(owner, partnership.partnerPubkey, partnership.fromMe, rumor))
         )
           return null;
         if (!showInMessages && !orderRumor) {
@@ -222,9 +224,14 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
         }
         const followed = params.isFollowed?.(partnership.partnerPubkey) ?? showInMessages;
         if (!followed && (rumor.kind === 16 || rumor.kind === 17)) {
-          if (!orderRumor || !admitUnfollowedOrder(owner)) return null;
+          if (!orderRumor || !admitUnfollowedOrder(owner)) return skipOrderWrap(wrap.id);
         }
-        if (!(await acceptOrderRumor(owner, rumor, partnership.fromMe))) return null;
+        if (
+          !(await acceptOrderRumor(owner, rumor, partnership.fromMe, () => {
+            skipOrderWrap(wrap.id);
+          }))
+        )
+          return null;
         if (orderRumor && !partnership.fromMe) claimedOrders.add(rumor);
         const text = textForRumor(rumor);
         // For a structured rumor (order kind 16/17, or an NWC wallet share) the

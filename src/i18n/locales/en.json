@@ -3525,7 +3525,8 @@
     "unverified": "unverified"
   },
   "orderCard": {
-    "waitingForInvoice": "Waiting for the seller's invoice"
+    "waitingForInvoice": "Waiting for the seller's invoice",
+    "viewOrder": "View order"
   },
   "myOrders": {
     "title": "My orders",
