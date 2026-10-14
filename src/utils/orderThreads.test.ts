@@ -238,6 +238,40 @@ describe('buyerOrderEntries', () => {
     expect(entries[0]).toMatchObject({ status: 'paid', jumpToRowId: 'r10' });
   });
 
+  it.each([false, true])('retains earlier settlement across a reissue (paid=%s)', (paid) => {
+    const earlierInvoice = bolt11('lnbc21u', NOW - 3600);
+    const replacement = row(false, 30, {
+      type: 'payment',
+      payment: { method: 'lightning', value: BOLT11 },
+    });
+    const rows = [
+      replacement,
+      placed(true),
+      row(false, 20, {
+        type: 'payment',
+        payment: { method: 'lightning', value: earlierInvoice },
+      }),
+      // A later request with the wrong amount must not enter payment history.
+      row(false, 40, {
+        type: 'payment',
+        payment: { method: 'lightning', value: bolt11('lnbc42u') },
+      }),
+    ];
+    const thread = orderThreads(rows, 'buyer').get('o-1')!;
+    expect(thread.invoices.map((invoice) => invoice.bolt11)).toEqual([earlierInvoice, BOLT11]);
+    expect(thread.invoice?.rowId).toBe('r30');
+    const entries = buyerOrderEntries(
+      new Map([[SELLER, rows]]),
+      (invoice) => paid && invoice === earlierInvoice,
+    );
+    expect(entries[0]).toMatchObject({
+      status: paid ? 'paid' : 'payNow',
+      jumpToRowId: paid ? 'r10' : 'r30',
+      paymentExpiresAt: paid ? undefined : NOW + 3600,
+    });
+    expect(payNowCount(entries)).toBe(paid ? 0 : 1);
+  });
+
   it('groups store rows by conversation', () => {
     const rows = [
       { ...placed(true), conversation: SELLER },

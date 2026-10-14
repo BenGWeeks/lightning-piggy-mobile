@@ -34,6 +34,8 @@ export interface OrderThread {
   placedRowId?: string;
   /** The merchant's latest payment request matching the buyer-approved amount. */
   invoice?: { bolt11: string; amountSats?: number; at: number; rowId?: string; expiresAt: number };
+  /** All merchant requests matching the buyer-approved amount, including reissues. */
+  invoices: NonNullable<OrderThread['invoice']>[];
   /** The buyer's latest kind-17 receipt. */
   receipt?: ParsedOrderEvent;
   /** The merchant's latest status (type 3). */
@@ -73,6 +75,7 @@ export function orderThreads(
         placedAt: row.createdAt,
         placedRowId: row.id,
         cancelled: false,
+        invoices: [],
       });
     }
   }
@@ -95,6 +98,7 @@ export function orderThreads(
           rowId: row.id,
           expiresAt,
         };
+        thread.invoices.push(thread.invoice);
       }
     } else if (order.type === 'receipt' && fromBuyer) {
       thread.receipt = order;
@@ -119,7 +123,7 @@ export type BuyerOrderStatus =
 
 /**
  * Where my order stands. `invoicePaid` = my wallet paid the seller's invoice
- * (an outgoing payment with its payment hash).
+ * (a settled outgoing payment with its payment hash).
  */
 export function buyerOrderStatus(
   thread: OrderThread,
@@ -156,7 +160,7 @@ export interface BuyerOrderEntry {
 
 /**
  * My orders across seller conversations, newest first. `isInvoicePaid`
- * answers from wallet history (outgoing payment with the invoice's hash).
+ * answers from wallet history (settled outgoing payment with the invoice's hash).
  */
 export function buyerOrderEntries(
   conversations: ReadonlyMap<string, readonly OrderRowInput[]>,
@@ -167,7 +171,7 @@ export function buyerOrderEntries(
   for (const [sellerPubkey, rows] of conversations) {
     for (const thread of orderThreads(rows, 'buyer').values()) {
       const status = buyerOrderStatus(thread, {
-        invoicePaid: thread.invoice ? isInvoicePaid(thread.invoice.bolt11) : false,
+        invoicePaid: thread.invoices.some((invoice) => isInvoicePaid(invoice.bolt11)),
         nowMs,
       });
       entries.push({

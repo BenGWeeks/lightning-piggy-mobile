@@ -5,6 +5,7 @@ import { useWallet } from '../contexts/WalletContext';
 import { getOrderRows, subscribeDmStorage } from '../services/dmDb';
 import { loadBuyerOrderTitles, type BuyerOrderTitles } from '../services/buyerOrderTitles';
 import { paymentHashFromBolt11 } from '../utils/bolt11';
+import { isTransactionSettled } from '../utils/transactionSettlement';
 import {
   buyerOrderEntries,
   groupRowsByConversation,
@@ -94,7 +95,9 @@ export function useBuyerOrders(): UseBuyerOrders {
     const set = new Set<string>();
     for (const wallet of wallets) {
       for (const tx of wallet.transactions) {
-        if (tx.type === 'outgoing' && tx.paymentHash) set.add(tx.paymentHash.toLowerCase());
+        if (tx.type === 'outgoing' && tx.paymentHash && isTransactionSettled(tx)) {
+          set.add(tx.paymentHash.toLowerCase());
+        }
       }
     }
     return set;
