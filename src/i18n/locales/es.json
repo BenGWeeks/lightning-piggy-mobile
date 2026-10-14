@@ -2778,6 +2778,7 @@
     "addLabel": "Añadir relé",
     "addUrlLabel": "URL del relé",
     "removeLabel": "Quitar {{url}}",
+    "removeHostLabel": "Eliminar {{host}}",
     "invalidUrl": "Usa una dirección de relé pública que empiece por wss://.",
     "publish": "Publicar",
     "cancel": "Cancelar",

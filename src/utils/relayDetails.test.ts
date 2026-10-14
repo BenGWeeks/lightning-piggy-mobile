@@ -1,4 +1,9 @@
-import { relayAccessTag, relayWriteAcceptance, relayDisplayName } from './relayDetails';
+import {
+  relayAccessTag,
+  relayWriteAcceptance,
+  relayDisplayName,
+  relayRowHost,
+} from './relayDetails';
 
 it.each([
   [true, true, null],
@@ -32,4 +37,13 @@ it('shows secure relay names without a scheme, preserving insecure schemes and U
   expect(relayDisplayName('wss://relay.primal.net')).toBe('relay.primal.net');
   expect(relayDisplayName('wss://example.com:443/path')).toBe('example.com:443/path');
   expect(relayDisplayName('ws://example.com/path')).toBe('ws://example.com/path');
+});
+
+it.each([
+  ['wss://relay.example.com/path', 'relay.example.com'],
+  ['wss://relay.example.com:8443/path', 'relay.example.com:8443'],
+  ['https://blossom.example.com/upload', 'blossom.example.com'],
+  ['invalid-url', 'invalid-url'],
+])('uses the host of %s in row accessibility labels', (url, host) => {
+  expect(relayRowHost(url)).toBe(host);
 });

@@ -2778,6 +2778,7 @@
     "addLabel": "Relay hozzáadása",
     "addUrlLabel": "Relay URL-je",
     "removeLabel": "Eltávolítás: {{url}}",
+    "removeHostLabel": "{{host}} eltávolítása",
     "invalidUrl": "Használj wss://-sel kezdődő nyilvános relay-címet.",
     "publish": "Közzététel",
     "cancel": "Mégse",

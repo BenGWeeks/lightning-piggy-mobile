@@ -1,7 +1,7 @@
 import BrandedSpinner from './BrandedSpinner';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { X as XIcon } from 'lucide-react-native';
+import { Trash2 } from 'lucide-react-native';
 import { Alert } from './BrandedAlert';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -13,6 +13,7 @@ import PublishResult from './PublishResult';
 import { useNostr } from '../contexts/NostrContext';
 import type { RelayPublishResult } from '../services/nostrRelayLists';
 import RelayStatusDot from './RelayStatusDot';
+import { relayRowHost } from '../utils/relayDetails';
 import { useRelayReachability } from '../hooks/useRelayReachability';
 import { useBlossomServerList } from '../hooks/useBlossomServerList';
 
@@ -110,11 +111,13 @@ export default function BlossomServersSection() {
                 onPress={() => removeServer(url)}
                 disabled={!editable}
                 accessibilityRole="button"
-                accessibilityLabel={t('blossomServers.removeLabel', { url })}
-                testID={`blossom-remove-${url}`}
+                accessibilityLabel={t('publishedRelays.removeHostLabel', {
+                  host: relayRowHost(url),
+                })}
+                testID={`relay-row-remove-blossom-${i}`}
                 hitSlop={8}
               >
-                <XIcon size={16} color={colors.white} />
+                <Trash2 size={16} color={colors.brandPink} />
               </TouchableOpacity>
             )}
           </View>

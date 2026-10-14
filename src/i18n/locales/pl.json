@@ -2798,6 +2798,7 @@
     "addLabel": "Dodaj przekaźnik",
     "addUrlLabel": "Adres przekaźnika",
     "removeLabel": "Usuń: {{url}}",
+    "removeHostLabel": "Usuń {{host}}",
     "invalidUrl": "Użyj publicznego adresu przekaźnika zaczynającego się od wss://.",
     "publish": "Opublikuj",
     "cancel": "Anuluj",

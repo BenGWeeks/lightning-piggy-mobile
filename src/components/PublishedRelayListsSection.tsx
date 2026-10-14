@@ -240,6 +240,9 @@ export default function PublishedRelayListsSection({
             inUse={connection?.get(r.url) === true}
             probeIndex={index}
             onOpen={openRelay}
+            onRemove={editor.removeNip65}
+            removeDisabled={!editor.nip65Editable}
+            removeTestID={`relay-row-remove-nip65-${index}`}
           />
         ))}
       </View>
@@ -283,6 +286,9 @@ export default function PublishedRelayListsSection({
             inUse={connection?.get(url) === true}
             probeIndex={editor.nip65Draft.length + index}
             onOpen={openRelay}
+            onRemove={editor.removeInbox}
+            removeDisabled={!editor.inboxEditable}
+            removeTestID={`relay-row-remove-inbox-${index}`}
           />
         ))}
       </View>

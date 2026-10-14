@@ -2798,6 +2798,7 @@
     "addLabel": "Додати реле",
     "addUrlLabel": "Адреса реле",
     "removeLabel": "Видалити {{url}}",
+    "removeHostLabel": "Видалити {{host}}",
     "invalidUrl": "Вкажіть публічну адресу реле, що починається з wss://.",
     "publish": "Опублікувати",
     "cancel": "Скасувати",
