@@ -1316,7 +1316,8 @@
     "fileVerificationFailed": "A fájl ellenőrzése sikertelen",
     "fileTypeMismatch": "A fájlnév nem egyezik a megadott típussal: {{type}}",
     "blockedLink": "Blokkolt hivatkozás",
-    "invalidUpload": "A tárolószerver érvénytelen média-URL-t adott vissza. Próbálj másik szervert."
+    "invalidUpload": "A tárolószerver érvénytelen média-URL-t adott vissza. Próbálj másik szervert.",
+    "uploadFailedAllServers": "Egyik tárolószerverre sem sikerült feltölteni. Ellenőrizd a kapcsolatot, és próbáld újra, vagy adj hozzá másik tárolószervert a Beállításokban."
   },
   "messageBubbleFooter": {
     "edited": "Szerkesztve",

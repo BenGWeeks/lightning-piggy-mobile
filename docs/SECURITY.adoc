@@ -255,8 +255,14 @@ limit. Chat media is capped at 50 MiB (kind-15 advertised sizes can lower the
 limit), preview HTML at 1 MiB and preview images at 10 MiB. Image and audio
 renderers receive local cache URIs after a bounded download. Existing sender
 trust gates and the preview preference still control loading. Blocked media
-shows a translated placeholder. Blossom descriptors must match the upload
-server's origin and the uploaded blob's SHA-256 path segment. LNURL-pay and
+shows a translated placeholder. A Blossom descriptor URL must pass the same
+policy and its last path segment must be the SHA-256 of the bytes we uploaded
+(optionally with an extension); the host may differ from the upload server,
+since BUD-02 lets servers serve blobs from a CDN (e.g. `blossom.divine.video`
+→ `cdn.divine.video`, #1558). Content integrity is enforced by recipients:
+kind-15 files check the `x` hash and AES-GCM tag, Marmot media check both
+hashes and the AEAD tag. A server with a blocked address or an unusable
+descriptor counts as failed and the upload moves on to the next one. LNURL-pay and
 LNURL-withdraw endpoints and their callbacks (deep links, NFC vouchers, hunt
 caches, scanned QR codes) use the same policy and transport under the `payment`
 kind, which only differs by allowing the longer bolt11 / comment query strings.

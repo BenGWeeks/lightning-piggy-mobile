@@ -1316,7 +1316,8 @@
     "fileVerificationFailed": "File failed verification",
     "fileTypeMismatch": "Filename does not match the declared type: {{type}}",
     "blockedLink": "Blocked link",
-    "invalidUpload": "The storage server returned an invalid media URL. Please try another server."
+    "invalidUpload": "The storage server returned an invalid media URL. Please try another server.",
+    "uploadFailedAllServers": "Couldn't upload to any storage server. Check your connection and try again, or add another storage server in Settings."
   },
   "messageBubbleFooter": {
     "edited": "Edited",

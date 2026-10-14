@@ -5,9 +5,20 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { Buffer } from 'buffer';
 
+/** One server answered with a descriptor URL we won't publish (#1508). That
+ * server counts as failed; the upload moves on to the next one (#1558). */
 export class InvalidBlossomDescriptorError extends Error {
   constructor() {
     super(t('messageBubble.invalidUpload'));
+  }
+}
+
+/** No server stored the blob: every configured server was blocked, refused
+ * the upload or returned an unusable descriptor. User-facing message. */
+export class BlossomUploadFailedError extends Error {
+  constructor(cause?: unknown) {
+    super(t('messageBubble.uploadFailedAllServers'));
+    this.cause = cause;
   }
 }
 
@@ -109,12 +120,39 @@ function put(
   });
 }
 
-function descriptorUrl(
-  status: number,
-  responseText: string,
-  server: string,
+// BUD-01: a blob is addressed by its sha256 — the last path segment is the
+// lowercase hex hash, optionally followed by a file extension.
+const BLOB_PATH_SEGMENT = /^([0-9a-f]{64})(?:\.[A-Za-z0-9]{1,10})?$/;
+
+/**
+ * The descriptor URL to publish for a blob we just uploaded, or null if it is
+ * unusable (#1508, #1558). The host is NOT required to match the upload
+ * server: BUD-02 lets a server hand back any public URL (blossom.divine.video
+ * serves from cdn.divine.video). What is required:
+ *  - it passes the shared remote-URL policy (https, public host, default
+ *    port, no credentials) — the same check every recipient applies again
+ *    before fetching;
+ *  - its last path segment is exactly the sha256 of the bytes we uploaded
+ *    (plus an optional extension), and a declared descriptor `sha256` agrees.
+ * Content integrity is enforced where it matters, on the recipient: kind-15
+ * files check the `x` ciphertext hash and the AES-GCM tag, Marmot (MIP-04)
+ * media check both hashes and the AEAD tag — so a URL on another host can't
+ * deliver different content.
+ */
+export function blossomBlobUrl(
+  value: unknown,
   hashHex: string,
-): string {
+  declaredSha256?: unknown,
+): string | null {
+  if (typeof value !== 'string') return null;
+  if (declaredSha256 !== undefined && String(declaredSha256).toLowerCase() !== hashHex) return null;
+  const checked = checkRemoteUrl(value, { kind: 'blossom' });
+  if (!checked.ok) return null;
+  const segment = new URL(checked.url).pathname.split('/').pop() ?? '';
+  return BLOB_PATH_SEGMENT.exec(segment)?.[1] === hashHex ? checked.url : null;
+}
+
+function descriptorUrl(status: number, responseText: string, hashHex: string): string {
   if (status < 200 || status >= 300) {
     throw new Error(
       `Blossom upload failed: ${status}${responseText ? ` ${responseText.slice(0, 200)}` : ''}`,
@@ -127,17 +165,9 @@ function descriptorUrl(
     throw new Error('Blossom server returned invalid JSON');
   }
   if (!descriptor?.url) throw new Error('Blossom server did not return a URL');
-  const checked = checkRemoteUrl(descriptor.url, { kind: 'blossom' });
-  if (!checked.ok) throw new InvalidBlossomDescriptorError();
-  const url = new URL(checked.url);
-  if (
-    url.origin !== new URL(server).origin ||
-    !url.pathname
-      .split('/')
-      .some((segment) => segment === hashHex || segment.startsWith(`${hashHex}.`))
-  )
-    throw new InvalidBlossomDescriptorError();
-  return checked.url;
+  const url = blossomBlobUrl(descriptor.url, hashHex, descriptor.sha256);
+  if (!url) throw new InvalidBlossomDescriptorError();
+  return url;
 }
 
 /**
@@ -159,10 +189,17 @@ export async function uploadToBlossomServers(
   // real mime travels in the NIP-17 kind-15 `file-type` tag).
   contentTypeOverride?: string,
 ): Promise<string> {
-  const servers = [...new Set(serverUrls.map(trimServer).filter(Boolean))];
-  if (servers.some((server) => !checkRemoteUrl(server, { kind: 'blossom' }).ok))
-    throw new InvalidBlossomDescriptorError();
-  if (servers.length === 0) throw new Error('Blossom server URL is empty');
+  const configured = [...new Set(serverUrls.map(trimServer).filter(Boolean))];
+  // A blocked server (private host, http, odd port) is never contacted — not
+  // for the upload, not for a mirror. The rest still get their turn.
+  const servers = configured.filter((server) => {
+    const verdict = checkRemoteUrl(server, { kind: 'blossom' });
+    // Log only the rejection reason: the configured string may carry
+    // credentials (user:pass@host), and console.warn survives release builds.
+    if (!verdict.ok && __DEV__) console.warn('[Blossom] skipping blocked server:', verdict.reason);
+    return verdict.ok;
+  });
+  if (servers.length === 0) throw new BlossomUploadFailedError();
 
   // Prefer the base64 payload returned directly by expo-image-picker (or
   // the file→base64 step in uploadBlob for non-image blobs) when the
@@ -209,7 +246,7 @@ export async function uploadToBlossomServers(
         body,
         UPLOAD_TIMEOUT_MS,
       );
-      const url = descriptorUrl(status, responseText, servers[i], hashHex);
+      const url = descriptorUrl(status, responseText, hashHex);
       // Backups: every other server mirrors the stored blob (fire-and-forget).
       for (const backup of servers.filter((_, j) => j !== i)) {
         void put(
@@ -226,12 +263,13 @@ export async function uploadToBlossomServers(
       }
       return url;
     } catch (e) {
-      if (e instanceof InvalidBlossomDescriptorError) throw e;
+      // Network error, refusal or an unusable descriptor: this server failed
+      // (its URL is never mirrored or returned) — try the next one.
       lastError = e;
       console.warn('[Blossom] upload failed on', servers[i], e);
     }
   }
-  throw lastError instanceof Error ? lastError : new Error('Blossom upload failed');
+  throw new BlossomUploadFailedError(lastError);
 }
 
 // Servers known to store opaque encrypted blobs — White Noise's defaults
@@ -245,9 +283,11 @@ export const ENCRYPTED_BLOB_FALLBACK_SERVERS = [
 ];
 
 /**
- * Upload ciphertext (NIP-17 kind-15 files, Marmot photos). Tries the user's
- * servers first; if none accepts opaque bytes, falls back to servers that do
- * (mirrored among themselves only — never back to the refusing ones).
+ * Upload ciphertext (NIP-17 kind-15 files and voice notes, Marmot photos and
+ * voice notes). Tries the user's servers first; if none stores it, falls back
+ * to servers that accept opaque bytes, one after another (mirrored among
+ * themselves only — never back to the refusing ones). Throws
+ * BlossomUploadFailedError only once every server has failed.
  */
 export async function uploadEncryptedBlobToBlossom(
   fileUri: string,
@@ -264,7 +304,9 @@ export async function uploadEncryptedBlobToBlossom(
       'application/octet-stream',
     );
   } catch (e) {
-    if (e instanceof InvalidBlossomDescriptorError) throw e;
+    // Only a server-side failure falls back; a declined signature or an empty
+    // payload would fail the same way again (and re-prompt a remote signer).
+    if (!(e instanceof BlossomUploadFailedError)) throw e;
     const tried = new Set(serverUrls.map(trimServer));
     const fallbacks = ENCRYPTED_BLOB_FALLBACK_SERVERS.filter((u) => !tried.has(trimServer(u)));
     if (fallbacks.length === 0) throw e;
