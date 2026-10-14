@@ -67,6 +67,7 @@ let mockCompleted = false;
 let mockLoading = true;
 let mockGeneration = 0;
 let mockIncomplete = false;
+let mockSellersUnreachable = false;
 let mockAnsweredRelays: string[] | undefined;
 let mockInitialPreferences = {
   mode: 'preferred',
@@ -117,6 +118,7 @@ jest.mock('../hooks/useMarketListings', () => ({
       loading: enabled && mockLoading,
       completed: mockCompleted,
       incomplete: mockIncomplete,
+      sellersUnreachable: mockSellersUnreachable,
       generation: mockGeneration,
       answeredRelays: mockAnsweredRelays,
       refresh: jest.fn(),
@@ -147,6 +149,7 @@ beforeEach(() => {
   mockLoading = true;
   mockGeneration = 0;
   mockIncomplete = false;
+  mockSellersUnreachable = false;
   mockAnsweredRelays = undefined;
   mockUpdate.mockClear();
   mockInitialPreferences = {
@@ -417,7 +420,7 @@ it('shows live preferred listings rather than the bundled catalogue', () => {
   expect(list.props.data.map((product: { id: string }) => product.id)).toEqual(['live-preferred']);
 });
 
-it('drops the status row: pull-to-refresh only, with a banner just for a partial load', () => {
+it('drops the status row: pull-to-refresh only, with a banner only for unreachable sellers', () => {
   mockLoading = false;
   const screen = render(<MarketScreen navigation={navigation} />);
   expect(screen.queryByTestId('market-live-status')).toBeNull();
@@ -427,7 +430,13 @@ it('drops the status row: pull-to-refresh only, with a banner just for a partial
   mockIncomplete = true;
   fireEvent.press(screen.getByTestId('market-filter-button'));
   fireEvent.press(screen.getByTestId('market-filter-sellers-friends'));
+  expect(screen.queryByTestId('market-partial-banner')).toBeNull();
+  mockSellersUnreachable = true;
+  screen.rerender(<MarketScreen navigation={navigation} />);
   expect(screen.getByTestId('market-partial-banner')).toHaveTextContent('market.live.partialToast');
+  mockLoading = true;
+  screen.rerender(<MarketScreen navigation={navigation} />);
+  expect(screen.queryByTestId('market-partial-banner')).toBeNull();
 });
 
 it('opens Filters from the Preferred pill; the Friends pill × returns to Preferred', () => {
