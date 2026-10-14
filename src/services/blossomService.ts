@@ -193,9 +193,11 @@ export async function uploadToBlossomServers(
   // A blocked server (private host, http, odd port) is never contacted — not
   // for the upload, not for a mirror. The rest still get their turn.
   const servers = configured.filter((server) => {
-    const allowed = checkRemoteUrl(server, { kind: 'blossom' }).ok;
-    if (!allowed) console.warn('[Blossom] skipping blocked server', server);
-    return allowed;
+    const verdict = checkRemoteUrl(server, { kind: 'blossom' });
+    // Log only the rejection reason: the configured string may carry
+    // credentials (user:pass@host), and console.warn survives release builds.
+    if (!verdict.ok && __DEV__) console.warn('[Blossom] skipping blocked server:', verdict.reason);
+    return verdict.ok;
   });
   if (servers.length === 0) throw new BlossomUploadFailedError();
 
