@@ -69,6 +69,8 @@ test.each([1, 2, 3, 4])(
     expect(onEose).toHaveBeenCalledTimes(1);
     cleanup();
     expect(relay.openSubs.size).toBe(0);
+    expect(onWrapsClose).not.toHaveBeenCalled();
+    await tick();
     expect(onWrapsClose).toHaveBeenCalledTimes(1);
     mockPool.destroy();
   },
@@ -95,6 +97,9 @@ test('native-engine inbox omits wraps and retains EOSE and close signals', async
   sub.oneose?.();
   expect(onEose).toHaveBeenCalledTimes(1);
   cleanup();
+  expect(relay.openSubs.size).toBe(0);
+  expect(onWrapsClose).not.toHaveBeenCalled();
+  await tick();
   expect(onWrapsClose).toHaveBeenCalledTimes(1);
   mockPool.destroy();
 });
