@@ -62,7 +62,7 @@ import {
 import { captureBackgroundPaymentScope } from './backgroundPaymentScope';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { setCurrentUserPubkey } from './nostrActiveAccount';
+import { initialiseBackgroundRelayAccount } from './backgroundRelayAccount';
 import { loadIdentities, type StoredIdentity } from './identitiesStore';
 import { perAccountKey } from './perAccountStorage';
 import { CONTACTS_CACHE_KEY_BASE } from '../contexts/nostrCacheKeys';
@@ -466,7 +466,7 @@ async function armBackgroundDmWatchOnce(isCurrent: () => boolean): Promise<boole
     return false;
   }
 
-  setCurrentUserPubkey(activePubkey);
+  if (__DEV__) await initialiseBackgroundRelayAccount();
   const readRelays = await resolveReadRelays(activePubkey);
   if (!isCurrent()) return false;
   if (readRelays.length === 0) {

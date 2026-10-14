@@ -19,6 +19,7 @@ import {
   claimWrapNotification,
   __resetForTests as __resetDedupeForTests,
 } from './dmWrapNotificationDedupe';
+jest.mock('expo-secure-store', () => ({ getItemAsync: jest.fn().mockResolvedValue(null) }));
 
 const mockSubscribe = jest.fn();
 const mockLoadIdentities = jest.fn();

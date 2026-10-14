@@ -353,3 +353,20 @@ it('does no relay work when the persisted identity cannot be read', async () => 
   expect(await runBackgroundSync()).toMatchObject({ pinged: false, freshCount: 0 });
   expect(mockQuerySync).not.toHaveBeenCalled();
 });
+
+it('keeps release sync on its original registry identity and leaves routing untouched', async () => {
+  (globalThis as unknown as { __DEV__: boolean }).__DEV__ = false;
+  const saved = [...TEST_ACCOUNT_PUBKEYS][0];
+  mockLoadIdentities.mockResolvedValue({ activePubkey: saved, identities: [] });
+  setCurrentUserPubkey(ME);
+  try {
+    await runBackgroundSync();
+    expect(mockLoadIdentities).toHaveBeenCalledTimes(1);
+    expect(mockQuerySync.mock.calls[0][0]).toEqual(['wss://r.example']);
+    expect(mockQuerySync.mock.calls[0][1]['#p']).toEqual([saved]);
+    expect(getCurrentUserPubkey()).toBe(ME);
+  } finally {
+    (globalThis as unknown as { __DEV__: boolean }).__DEV__ = true;
+    setCurrentUserPubkey(null);
+  }
+});

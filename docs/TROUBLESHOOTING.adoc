@@ -4,6 +4,9 @@
 |===
 | Problem | Solution
 
+| Android Marmot push alerts disappear after NIP-46 login, or background work replaces foreground relay routing
+| DEV background routing must prefer a live foreground mirror, then the foreground legacy signer keys (NIP-46 uses the validated connection's `userPubkey`, not `identities_v1` or the legacy pubkey slot). Unknown/unreadable identities must not suppress generic push alerts; only known locked test accounts disable push alerts. Release builds skip routing hydration and push/location guards entirely; background sync retains its original registry lookup. Regressions cover all three release signers and missing/corrupt/locked DEV storage.
+
 | DEV Nostr Connect QR pairing fails with "subscription closed before connection was established" after approval
 | `nostr-tools` 2.23.3 closes the pairing subscription before setting its handshake success flag. The shared health-aware pool must retire the REQ immediately but defer the caller-initiated aggregate `onclose` callback to a Promise microtask, matching the SDK pool timing. A synchronous callback rejects even a valid encrypted acknowledgement. `healthAwarePool.test.ts` exercises the real `BunkerSigner.fromURI` with both health and resumable pool mixins, and checks that closing before an acknowledgement still rejects. DM subscription tests must likewise assert immediate REQ retirement, then await the Promise microtask before asserting the close callback; a synchronous callback assertion is stale after this fix.
 

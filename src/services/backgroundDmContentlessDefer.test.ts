@@ -1,3 +1,17 @@
+import {
+  runBackgroundDmWatch,
+  stopBackgroundDmWatch,
+  __resetForTests,
+  LIVE_SUB_DECRYPT_GRACE_MS,
+} from './backgroundDmService';
+import {
+  markWrapHandled,
+  noteLiveDmSubArmed,
+  takeContentlessWrapAlert,
+  __resetForTests as __resetDedupeForTests,
+} from './dmWrapNotificationDedupe';
+
+jest.mock('expo-secure-store', () => ({ getItemAsync: jest.fn().mockResolvedValue(null) }));
 // A remote signer (Amber / NIP-46) can't decrypt in the background, so the
 // watch's alert is contentless — and used to fire for every gift wrap,
 // including the copy of each message we SEND (NIP-17 wraps one to the sender)
@@ -65,19 +79,6 @@ jest.mock('./backgroundPaymentService', () => ({
   stopBackgroundPaymentWatch: (...a: unknown[]) => mockStopPayments(...a),
 }));
 jest.mock('./backgroundDmPreference', () => ({ loadBackgroundDmEnabled: jest.fn() }));
-
-import {
-  runBackgroundDmWatch,
-  stopBackgroundDmWatch,
-  __resetForTests,
-  LIVE_SUB_DECRYPT_GRACE_MS,
-} from './backgroundDmService';
-import {
-  markWrapHandled,
-  noteLiveDmSubArmed,
-  takeContentlessWrapAlert,
-  __resetForTests as __resetDedupeForTests,
-} from './dmWrapNotificationDedupe';
 
 const ME = 'a'.repeat(64);
 

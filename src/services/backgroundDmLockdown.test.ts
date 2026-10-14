@@ -2,6 +2,7 @@ import { setCurrentUserPubkey, getCurrentUserPubkey } from './nostrActiveAccount
 import { TEST_ACCOUNT_PUBKEYS, TEST_RELAY_URL } from '../config/testRelayLockdown';
 
 import { runBackgroundDmWatch, __resetForTests } from './backgroundDmService';
+jest.mock('expo-secure-store', () => ({ getItemAsync: jest.fn().mockResolvedValue(null) }));
 // Tests for the Amethyst-style realtime background DM watch (#279 realtime
 // upgrade). The relay subscription, identity/relay storage, notification
 // service, profile cache, and NIP-17 unwrap are all mocked so we assert the

@@ -29,6 +29,7 @@
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { pool } from './nostrService';
+import { loadIdentities } from './identitiesStore';
 import { initialiseBackgroundRelayAccount } from './backgroundRelayAccount';
 import { lockRelays } from '../config/testRelayLockdown';
 import { getUserRelays } from './nostrRelayStorage';
@@ -116,7 +117,9 @@ async function persistSeenIds(seen: Set<string>, key: string = BG_SEEN_IDS_KEY):
  * errors so a flaky relay never crashes the native host.
  */
 export async function runBackgroundSync(): Promise<BackgroundSyncResult> {
-  const activePubkey = await initialiseBackgroundRelayAccount();
+  const activePubkey = __DEV__
+    ? await initialiseBackgroundRelayAccount()
+    : (await loadIdentities()).activePubkey;
   if (!activePubkey) return { pinged: false, freshCount: 0, freshCacheCommentCount: 0 };
 
   const readRelays = lockRelays(

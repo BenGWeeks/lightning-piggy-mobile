@@ -224,3 +224,18 @@ it('never reaps without a headless stop, or while tracking', async () => {
   await reapOrphanedService();
   expect(loc.startLocationUpdatesAsync).not.toHaveBeenCalled();
 });
+
+it('keeps headless release location updates running without identity hydration', async () => {
+  (globalThis as unknown as { __DEV__: boolean }).__DEV__ = false;
+  try {
+    loc.startLocationUpdatesAsync.mockResolvedValue(undefined);
+    await startTracking({ owner: ME, relays: ['wss://location.example'] });
+    await savePersistedSessions(ME, [session()]);
+    mockSend.mockResolvedValue(true);
+    await handleTaskLocations([point(Date.now())]);
+    expect(mockSend).toHaveBeenCalledTimes(1);
+    expect(loadIdentities).not.toHaveBeenCalled();
+  } finally {
+    (globalThis as unknown as { __DEV__: boolean }).__DEV__ = true;
+  }
+});
