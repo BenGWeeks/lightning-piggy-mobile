@@ -2705,6 +2705,12 @@
       "cancel": "取消",
       "showMore": "显示更多",
       "showLess": "收起"
+    },
+    "recommendations": {
+      "moreFromSeller": "{{seller}} 的更多商品",
+      "youMightLike": "猜你喜欢",
+      "seeAll": "查看全部",
+      "seeAllAccessibility": "查看 {{seller}} 的全部商品"
     }
   },
   "dmProtocol": {

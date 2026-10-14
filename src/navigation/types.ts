@@ -8,6 +8,7 @@ import { RouteProp } from '@react-navigation/native';
 import { NavigatorScreenParams } from '@react-navigation/native';
 import type { ContactProfileBodyData } from '../components/ContactProfileBody';
 import type { MarketProduct } from '../data/marketProducts';
+import type { MarketMode } from '../utils/marketMode';
 import type { LeaderboardEntry } from '../utils/huntLeaderboard';
 
 // Main tab param list
@@ -160,7 +161,9 @@ export type ExploreStackParamList = {
   // Market — Lightning Piggy product grid ("See all" from the Explore Market
   // rail); tiles open MarketProductDetail. Static catalogue today (see
   // src/data/marketProducts.ts, resolved to sellers via src/data/marketVendors.ts).
-  Market: undefined;
+  // `merchant` (hex pubkey) + `mode` open the grid filtered to one seller —
+  // a product page's "More from <seller>" See all (#1542).
+  Market: { merchant?: string; mode?: MarketMode } | undefined;
   // Full product page opened from a Market grid tile — product info plus
   // Nostr reviews (kind 31555) + comments (kind 1111). `productId` keys into
   // MARKET_PRODUCTS (see src/data/marketProducts.ts).
@@ -235,6 +238,7 @@ export type AccountDrawerNavigation = DrawerNavigationProp<AccountDrawerParamLis
 export type CourseDetailRoute = RouteProp<ExploreStackParamList, 'CourseDetail'>;
 export type MarketProductDetailRoute = RouteProp<ExploreStackParamList, 'MarketProductDetail'>;
 export type MarketListingEditorRoute = RouteProp<ExploreStackParamList, 'MarketListingEditor'>;
+export type MarketRoute = RouteProp<ExploreStackParamList, 'Market'>;
 export type MissionDetailRoute = RouteProp<ExploreStackParamList, 'MissionDetail'>;
 export type GroupConversationRoute = RouteProp<RootStackParamList, 'GroupConversation'>;
 export type HuntLeaderboardRoute = RouteProp<ExploreStackParamList, 'HuntLeaderboard'>;

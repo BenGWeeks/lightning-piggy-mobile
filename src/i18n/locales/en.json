@@ -2705,6 +2705,12 @@
       "cancel": "Cancel",
       "showMore": "Show more",
       "showLess": "Show less"
+    },
+    "recommendations": {
+      "moreFromSeller": "More from {{seller}}",
+      "youMightLike": "You might like",
+      "seeAll": "See all",
+      "seeAllAccessibility": "See all listings from {{seller}}"
     }
   },
   "dmProtocol": {

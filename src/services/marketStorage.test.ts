@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   clearMarketSnapshotMemory,
   getMarketSnapshot,
+  loadedMarketSnapshots,
   readMarketPreferences,
   writeMarketPreferences,
   wipeMarketAccount,
@@ -235,4 +236,79 @@ it('blocks a late relay write after cleanup until a new account hydration', asyn
   await readMarketPreferences('late-relay');
   await writeMarketSnapshot('late-relay|scope', { products: [], incomplete: false });
   expect(getMarketSnapshot('late-relay|scope')).toBeDefined();
+});
+it('lists in-memory snapshots for the requested accounts only', async () => {
+  const product = { id: 'p1', sellerName: 'shop' } as never;
+  await writeMarketSnapshot('alice|x|r', { products: [product], incomplete: false });
+  await writeMarketSnapshot('team|y|r', { products: [], incomplete: false });
+  await writeMarketSnapshot('bob|z|r', { products: [product], incomplete: false });
+  const loaded = loadedMarketSnapshots(['alice', 'team']);
+  expect(loaded.map((s) => s.account).sort()).toEqual(['alice', 'team']);
+  expect(loaded.find((s) => s.account === 'alice')?.products).toEqual([product]);
+  await wipeMarketAccount('alice');
+  expect(loadedMarketSnapshots(['alice'])).toEqual([]);
+});
+
+it.each(['sold', 'hidden', 'deleted', 'expired'])(
+  'does not resurrect %s listings omitted from a newer reduced snapshot',
+  async () => {
+    const seller = 'a'.repeat(64);
+    const other = 'b'.repeat(64);
+    const product = (pubkey: string) =>
+      ({
+        id: pubkey,
+        sellerName: 'shop',
+        listing: { event: { pubkey, tags: [] }, vendor: {} },
+      }) as unknown as import('../data/marketProducts').MarketProduct;
+    const clock = jest.spyOn(Date, 'now');
+    const now = Date.now();
+    clock.mockReturnValue(now - 1000);
+    const old = product(seller);
+    const unrelated = product(other);
+    await writeMarketSnapshot(`reco-viewer|${seller},${other}|old-relay`, {
+      products: [old, unrelated],
+      incomplete: false,
+    });
+    clock.mockReturnValue(now);
+    await writeMarketSnapshot(`reco-team|${seller}|new-relay`, {
+      products: [],
+      incomplete: false,
+    });
+    expect(loadedMarketSnapshots(['reco-viewer', 'reco-team']).flatMap((s) => s.products)).toEqual([
+      unrelated,
+    ]);
+    clock.mockRestore();
+    // The same suppression must survive a cold disk hydration in either order.
+    const writes = (AsyncStorage.setItem as jest.Mock).mock.calls.filter(
+      ([key]) => key === MARKET_CACHE_KEY,
+    );
+    const disk = JSON.parse(writes[writes.length - 1][1]);
+    // The storage mock does not persist earlier writes; include the old envelope.
+    const olderDisk = JSON.parse(writes[writes.length - 2][1]);
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValue(JSON.stringify([...disk, ...olderDisk]));
+    clearMarketSnapshotMemory();
+    await readMarketSnapshot(`reco-team|${seller}|new-relay`);
+    await readMarketSnapshot(`reco-viewer|${seller},${other}|old-relay`);
+    expect(loadedMarketSnapshots(['reco-viewer', 'reco-team']).flatMap((s) => s.products)).toEqual([
+      unrelated,
+    ]);
+  },
+);
+
+it('fails closed for overlapping snapshots with equal timestamps, regardless of insertion order', async () => {
+  const seller = 'e'.repeat(64);
+  const product = {
+    id: 'old',
+    sellerName: 'shop',
+    listing: { event: { pubkey: seller, tags: [] }, vendor: {} },
+  } as never;
+  const at = Date.now();
+  const raw = JSON.stringify([
+    { key: `tie-new|${seller}|r`, at, result: { products: [], incomplete: false } },
+    { key: `tie-old|${seller}|r`, at, result: { products: [product], incomplete: false } },
+  ]);
+  (AsyncStorage.getItem as jest.Mock).mockResolvedValue(raw);
+  await readMarketSnapshot(`tie-new|${seller}|r`);
+  await readMarketSnapshot(`tie-old|${seller}|r`);
+  expect(loadedMarketSnapshots(['tie-new', 'tie-old']).flatMap((s) => s.products)).toEqual([]);
 });

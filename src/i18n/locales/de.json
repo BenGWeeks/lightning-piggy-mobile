@@ -2705,6 +2705,12 @@
       "cancel": "Abbrechen",
       "showMore": "Mehr anzeigen",
       "showLess": "Weniger anzeigen"
+    },
+    "recommendations": {
+      "moreFromSeller": "Mehr von {{seller}}",
+      "youMightLike": "Das könnte dir gefallen",
+      "seeAll": "Alle anzeigen",
+      "seeAllAccessibility": "Alle Angebote von {{seller}} anzeigen"
     }
   },
   "dmProtocol": {
