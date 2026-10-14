@@ -2480,7 +2480,6 @@
       "loadError": "No se pudo contactar con tus relés. Desliza para reintentar.",
       "retry": "Reintentar",
       "setupButton": "Crear tienda",
-      "editShop": "Editar tienda",
       "sellItem": "Vender un artículo",
       "yourListings": "Tus anuncios",
       "noListings": "Aún no has anunciado nada. Toca \"Vender un artículo\" para crear tu primer anuncio.",
@@ -2498,18 +2497,11 @@
       "deleted": "Anuncio eliminado",
       "deleteFailed": "No se pudo eliminar el anuncio",
       "shop": {
-        "title": "Ajustes de la tienda",
         "description": "Descripción",
-        "currency": "Moneda",
-        "currencyHint": "Se usa para los gastos de envío y como moneda de precio predeterminada.",
         "shipping": "Opciones de envío",
         "shippingHint": "Cada opción es un lugar al que envías y lo que cuesta. Tus artículos eligen entre ellas.",
         "addZone": "Añadir opción de envío",
-        "save": "Guardar tienda",
-        "saveAndAddFirstItem": "Guardar y añadir tu primer artículo",
-        "saveForNow": "Guardar por ahora",
         "saving": "Guardando…",
-        "saved": "Tienda guardada",
         "saveFailed": "No se pudo guardar tu tienda",
         "fixErrors": "Revisa los campos marcados",
         "existingFound": "Encontramos tu tienda y la cargamos. Revisa los datos y vuelve a guardar.",
@@ -2533,7 +2525,6 @@
       "editor": {
         "newTitle": "Vender un artículo",
         "editTitle": "Editar anuncio",
-        "photos": "Fotos",
         "addPhoto": "Añadir foto",
         "uploading": "Subiendo…",
         "removePhoto": "Quitar foto {{index}}",
@@ -2550,8 +2541,7 @@
         "quantity": "Cantidad en existencias",
         "quantityPlaceholder": "Déjalo vacío si no lo controlas",
         "shipping": "Envío",
-        "shippingHint": "Elige cómo se envía este artículo. Déjalas todas desactivadas para artículos digitales o recogida en persona.",
-        "noZones": "Tu tienda aún no tiene opciones de envío. Añádelas en los ajustes de la tienda.",
+        "shippingHint": "Elige cómo se envía este artículo. Déjalas todas desactivadas para recogida en persona.",
         "zoneBase": "{{amount}} {{currency}}",
         "extraCost": "Extra por este artículo ({{currency}})",
         "extraCostPlaceholder": "0",
@@ -2572,7 +2562,22 @@
         "delete": "Eliminar anuncio",
         "conflictBody": "Este anuncio se cambió en otro dispositivo o app desde que lo abriste. ¿Guardar tu versión de todos modos?",
         "deletedBody": "Este anuncio se eliminó. ¿Quieres volver a crearlo con los valores de este formulario?",
-        "recreate": "Volver a crear"
+        "recreate": "Volver a crear",
+        "photosLabel": "Fotos (hasta {{max}}): la primera es la portada",
+        "cover": "Portada",
+        "setCover": "Usar la foto {{index}} como portada",
+        "movePhotoLeft": "Mover la foto {{index}} a la izquierda",
+        "movePhotoRight": "Mover la foto {{index}} a la derecha",
+        "photoCount": "{{n}} / {{max}}",
+        "itemType": "Tipo de artículo",
+        "format": {
+          "physical": "Físico",
+          "digital": "Digital"
+        },
+        "formatHint": {
+          "physical": "Se envía al comprador o se recoge en persona.",
+          "digital": "Una descarga, un código o un servicio. No necesita envío."
+        }
       },
       "errors": {
         "title": "Añade un título (hasta 200 caracteres).",
@@ -2614,7 +2619,83 @@
         "image": "URL de la imagen",
         "location": "Ubicación"
       },
-      "deleteCollectionTitle": "¿Eliminar esta colección?"
+      "deleteCollectionTitle": "¿Eliminar esta colección?",
+      "hub": {
+        "currencies": "Monedas",
+        "shipping": "Opciones de envío",
+        "collections": "Colecciones",
+        "listings": "Anuncios",
+        "orders": "Pedidos",
+        "currencyValue": "{{currency}}",
+        "noneYet": "Ninguna todavía",
+        "checking": "Comprobando…",
+        "unavailable": "No se pudo cargar",
+        "noOrders": "Aún no hay pedidos",
+        "shippingCount": {
+          "one": "{{count}} opción",
+          "other": "{{count}} opciones"
+        },
+        "collectionsCount": {
+          "one": "{{count}} colección",
+          "other": "{{count}} colecciones"
+        },
+        "listingsCount": {
+          "one": "{{count}} publicado",
+          "other": "{{count}} publicados"
+        },
+        "ordersCount": {
+          "one": "{{count}} pedido",
+          "other": "{{count}} pedidos"
+        },
+        "ordersNeedInvoice": {
+          "one": "{{count}} necesita factura",
+          "other": "{{count}} necesitan factura"
+        }
+      },
+      "currencies": {
+        "defaultTitle": "Moneda predeterminada",
+        "hint": "Se usa para rellenar el precio de los nuevos anuncios y las nuevas opciones de envío. Los precios que ya has puesto mantienen su moneda. Se guarda en este teléfono.",
+        "saved": "Moneda guardada",
+        "saveFailed": "No se pudo guardar la moneda"
+      },
+      "shipping": {
+        "save": "Guardar opciones de envío",
+        "saved": "Opciones de envío guardadas",
+        "saveFailed": "No se pudieron guardar tus opciones de envío",
+        "empty": "Aún no hay opciones de envío. Añade una por cada lugar al que envías."
+      },
+      "gate": {
+        "title": "Configura el envío primero",
+        "body": "Los compradores necesitan saber cómo enviarás los artículos físicos. Añade al menos una opción de envío antes de publicar un producto.",
+        "addShipping": "Añadir opciones de envío",
+        "digital": "Es un artículo digital"
+      },
+      "orders": {
+        "line": "{{title}} × {{quantity}}",
+        "amount": "{{amount}} sats",
+        "hint": "Pedidos de compradores para tus anuncios. Toca uno para abrir el chat.",
+        "emptyBody": "Cuando alguien compre uno de tus anuncios, su pedido aparecerá aquí.",
+        "rowAccessibility": "Pedido de {{name}}: {{items}}, {{time}}"
+      },
+      "newCollection": {
+        "chip": "Nueva colección",
+        "title": "Nueva colección",
+        "name": "Nombre",
+        "namePlaceholder": "p. ej. impresiones 3D",
+        "nameRequired": "Ponle un nombre a la colección.",
+        "description": "Descripción (opcional)",
+        "descriptionPlaceholder": "¿Qué hay en esta colección?",
+        "save": "Crear colección",
+        "created": "Colección creada",
+        "failed": "No se pudo crear la colección",
+        "hint": "Agrupa anuncios, p. ej. impresiones 3D"
+      },
+      "collectionsHint": "Agrupa tus anuncios para que los compradores puedan verlos juntos.",
+      "noCollections": "Aún no hay colecciones.",
+      "collectionListings": {
+        "one": "{{count}} anuncio",
+        "other": "{{count}} anuncios"
+      }
     },
     "markdown": {
       "openLinkTitle": "¿Abrir enlace?",

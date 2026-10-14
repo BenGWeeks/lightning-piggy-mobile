@@ -21,6 +21,7 @@ import {
 } from './marketSellerEvents';
 import { parseShippingOptionEvent } from './marketShipping';
 import { parseMarketListing } from './marketListings';
+import { movePhoto, setCoverPhoto } from './listingPhotos';
 
 const key = new Uint8Array(32).fill(3);
 const pubkey = getPublicKey(key);
@@ -49,7 +50,50 @@ describe('listing events (kind 30402)', () => {
   it('round-trips build → sign → parse back to the same draft', () => {
     const event = sign(buildListingTemplate({ draft: draft(), pubkey, nowSeconds: 1_800_000_000 }));
     expect(event.kind).toBe(30402);
-    expect(parseListingDraft(event)).toEqual(draft());
+    expect(parseListingDraft(event)).toEqual({ ...draft(), format: 'physical' });
+  });
+
+  it('writes the explicit item type and drops shipping from a digital item', () => {
+    const digital = buildListingTemplate({
+      draft: draft({ format: 'digital' }),
+      pubkey,
+      nowSeconds: 1,
+    });
+    expect(digital.tags).toContainEqual(['type', 'simple', 'digital']);
+    expect(digital.tags.some((t) => t[0] === 'shipping_option')).toBe(false);
+    const physical = buildListingTemplate({
+      draft: draft({ format: 'physical', shipping: [] }),
+      pubkey,
+      nowSeconds: 1,
+    });
+    expect(physical.tags).toContainEqual(['type', 'simple', 'physical']);
+    expect(parseListingDraft(sign(physical)).format).toBe('physical');
+    expect(parseListingDraft(sign(digital)).format).toBe('digital');
+  });
+
+  it('writes image tags in the displayed order after set-as-cover and reorder', () => {
+    const images = [
+      'https://b.example/1.jpg',
+      'https://b.example/2.jpg',
+      'https://b.example/3.jpg',
+    ];
+    const reordered = movePhoto(setCoverPhoto(images, 2), 1, 2);
+    expect(reordered).toEqual([images[2], images[1], images[0]]);
+    const { tags } = buildListingTemplate({
+      draft: draft({ images: reordered }),
+      pubkey,
+      nowSeconds: 1,
+    });
+    expect(tags.filter((t) => t[0] === 'image')).toEqual([
+      ['image', images[2], '', '0'],
+      ['image', images[1], '', '1'],
+      ['image', images[0], '', '2'],
+    ]);
+    const product = parseMarketListing(
+      sign(buildListingTemplate({ draft: draft({ images: reordered }), pubkey, nowSeconds: 1 })),
+      0,
+    );
+    expect(product!.image).toBe(images[2]);
   });
 
   it('writes the Gamma Markets tags in spec shape', () => {
@@ -203,6 +247,20 @@ describe('listing events (kind 30402)', () => {
 });
 
 describe('listing validation', () => {
+  it.each(['x', '-1', '1.5'])(
+    'ignores hidden shipping extra cost %s only for digital items',
+    (extraCost) => {
+      const physical = draft({
+        format: 'physical',
+        currency: 'SATS',
+        price: '500',
+        shipping: [{ coordinate: zoneCoord('z'), extraCost }],
+      });
+      expect(validateListingDraft(physical)).toContain('shipping');
+      expect(validateListingDraft({ ...physical, format: 'digital' })).toEqual([]);
+    },
+  );
+
   it('accepts a complete draft', () => {
     expect(validateListingDraft(draft())).toEqual([]);
   });

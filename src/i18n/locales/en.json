@@ -2480,7 +2480,6 @@
       "loadError": "Couldn't reach your relays. Pull to retry.",
       "retry": "Retry",
       "setupButton": "Set up shop",
-      "editShop": "Edit shop",
       "sellItem": "Sell an item",
       "yourListings": "Your listings",
       "noListings": "You haven't listed anything yet. Tap \"Sell an item\" to create your first listing.",
@@ -2498,18 +2497,11 @@
       "deleted": "Listing deleted",
       "deleteFailed": "Couldn't delete the listing",
       "shop": {
-        "title": "Shop settings",
         "description": "Description",
-        "currency": "Currency",
-        "currencyHint": "Used for your shipping costs and as the default price currency.",
         "shipping": "Shipping options",
         "shippingHint": "Each option is a place you ship to and what it costs. Your items pick from these.",
         "addZone": "Add shipping option",
-        "save": "Save shop",
-        "saveAndAddFirstItem": "Save and add your first item",
-        "saveForNow": "Save for now",
         "saving": "Saving…",
-        "saved": "Shop saved",
         "saveFailed": "Couldn't save your shop",
         "fixErrors": "Please check the highlighted fields",
         "existingFound": "We found your existing shop and loaded it. Check the details, then save again.",
@@ -2533,7 +2525,6 @@
       "editor": {
         "newTitle": "Sell an item",
         "editTitle": "Edit listing",
-        "photos": "Photos",
         "addPhoto": "Add photo",
         "uploading": "Uploading…",
         "removePhoto": "Remove photo {{index}}",
@@ -2550,8 +2541,7 @@
         "quantity": "Quantity in stock",
         "quantityPlaceholder": "Leave empty if not tracked",
         "shipping": "Shipping",
-        "shippingHint": "Choose how this item ships. Leave all off for digital items or collection in person.",
-        "noZones": "Your shop has no shipping options yet. Add them in shop settings.",
+        "shippingHint": "Choose how this item ships. Leave all off for collection in person.",
         "zoneBase": "{{amount}} {{currency}}",
         "extraCost": "Extra for this item ({{currency}})",
         "extraCostPlaceholder": "0",
@@ -2572,7 +2562,22 @@
         "delete": "Delete listing",
         "conflictBody": "This listing was changed on another device or app since you opened it. Save your version anyway?",
         "deletedBody": "This listing was deleted. Recreate it with the values in this form?",
-        "recreate": "Recreate"
+        "recreate": "Recreate",
+        "photosLabel": "Photos (up to {{max}}) — first is the cover",
+        "cover": "Cover",
+        "setCover": "Make photo {{index}} the cover",
+        "movePhotoLeft": "Move photo {{index}} left",
+        "movePhotoRight": "Move photo {{index}} right",
+        "photoCount": "{{n}} / {{max}}",
+        "itemType": "Item type",
+        "format": {
+          "physical": "Physical",
+          "digital": "Digital"
+        },
+        "formatHint": {
+          "physical": "Shipped to the buyer or collected in person.",
+          "digital": "A download, code or service. Needs no shipping."
+        }
       },
       "errors": {
         "title": "Add a title (up to 200 characters).",
@@ -2614,7 +2619,83 @@
         "image": "Image URL",
         "location": "Location"
       },
-      "deleteCollectionTitle": "Delete this collection?"
+      "deleteCollectionTitle": "Delete this collection?",
+      "hub": {
+        "currencies": "Currencies",
+        "shipping": "Shipping options",
+        "collections": "Collections",
+        "listings": "Listings",
+        "orders": "Orders",
+        "currencyValue": "{{currency}}",
+        "noneYet": "None yet",
+        "checking": "Checking…",
+        "unavailable": "Couldn't load",
+        "noOrders": "No orders yet",
+        "shippingCount": {
+          "one": "{{count}} option",
+          "other": "{{count}} options"
+        },
+        "collectionsCount": {
+          "one": "{{count}} collection",
+          "other": "{{count}} collections"
+        },
+        "listingsCount": {
+          "one": "{{count}} listed",
+          "other": "{{count}} listed"
+        },
+        "ordersCount": {
+          "one": "{{count}} order",
+          "other": "{{count}} orders"
+        },
+        "ordersNeedInvoice": {
+          "one": "{{count}} needs an invoice",
+          "other": "{{count}} need an invoice"
+        }
+      },
+      "currencies": {
+        "defaultTitle": "Default currency",
+        "hint": "Prefills the price of new listings and new shipping options. Prices you've already set keep their currency. Saved on this phone.",
+        "saved": "Currency saved",
+        "saveFailed": "Couldn't save the currency"
+      },
+      "shipping": {
+        "save": "Save shipping options",
+        "saved": "Shipping options saved",
+        "saveFailed": "Couldn't save your shipping options",
+        "empty": "No shipping options yet. Add one for each place you ship to."
+      },
+      "gate": {
+        "title": "Set up shipping first",
+        "body": "Buyers need to know how you'll send physical items. Add at least one shipping option before you list a product.",
+        "addShipping": "Add shipping options",
+        "digital": "It's a digital item"
+      },
+      "orders": {
+        "line": "{{title}} × {{quantity}}",
+        "amount": "{{amount}} sats",
+        "hint": "Orders from buyers for your listings. Tap one to open the chat.",
+        "emptyBody": "When someone buys one of your listings, their order shows up here.",
+        "rowAccessibility": "Order from {{name}}: {{items}}, {{time}}"
+      },
+      "newCollection": {
+        "chip": "New collection",
+        "title": "New collection",
+        "name": "Name",
+        "namePlaceholder": "e.g. 3D prints",
+        "nameRequired": "Give the collection a name.",
+        "description": "Description (optional)",
+        "descriptionPlaceholder": "What's in this collection?",
+        "save": "Create collection",
+        "created": "Collection created",
+        "failed": "Couldn't create the collection",
+        "hint": "Group listings, e.g. 3D prints"
+      },
+      "collectionsHint": "Group your listings so buyers can browse them together.",
+      "noCollections": "No collections yet.",
+      "collectionListings": {
+        "one": "{{count}} listing",
+        "other": "{{count}} listings"
+      }
     },
     "markdown": {
       "openLinkTitle": "Open link?",

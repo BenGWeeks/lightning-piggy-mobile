@@ -1,109 +1,113 @@
 import BrandedRefreshControl from '../components/BrandedRefreshControl';
 import MerchantIdentity from '../components/MerchantIdentity';
-import CollectionManager from '../components/CollectionManager';
-import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, FlatList } from 'react-native';
-import { Plus, Settings, Store } from 'lucide-react-native';
-import type { Event } from 'nostr-tools';
+import SettingsRow from '../components/SettingsRow';
+import React, { useMemo, useState } from 'react';
+import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
+import type { LucideIcon } from 'lucide-react-native';
+import { Coins, FolderOpen, Plus, ShoppingBag, Store, Tag, Truck } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { useSellerShop } from '../hooks/useSellerShop';
-import { useSellerActions } from '../hooks/useSellerActions';
-import { Alert } from '../components/BrandedAlert';
-import { Toast } from '../components/BrandedToast';
+import { useSellItem } from '../hooks/useSellItem';
+import { useShopOrders } from '../hooks/useShopOrders';
 import MarketSellerHeader from '../components/MarketSellerHeader';
-import SellerListingRow from '../components/SellerListingRow';
 import NostrLoginSheet from '../components/NostrLoginSheet';
 import { createMarketSellerStyles } from '../styles/MarketSeller.styles';
-import { parseListingDraft, type ListingDraft } from '../utils/marketSellerEvents';
-import { parseMarketListing } from '../utils/marketListings';
+import { createMarketMyShopStyles } from '../styles/MarketMyShop.styles';
+import { isLegacyShopCollection } from '../utils/marketCollections';
+import { hubSummaries, type HubSummaries } from '../utils/myShopHubSummary';
+import { listingTitleMap, ordersNeedingInvoice } from '../utils/shopOrders';
 import type { ExploreNavigation } from '../navigation/types';
 
 interface Props {
   navigation: ExploreNavigation;
 }
 
-interface Row {
-  event: Event;
-  draft: ListingDraft;
+interface HubRow {
+  id: keyof HubSummaries;
+  icon: LucideIcon;
+  titleKey: string;
+  route:
+    | 'MarketShopCurrencies'
+    | 'MarketShopShipping'
+    | 'MarketShopCollections'
+    | 'MarketShopListings'
+    | 'MarketShopOrders';
+  testID: string;
 }
 
-/** "My shop": the user's shop card, "Sell an item", and their listings. */
+const HUB_ROWS: readonly HubRow[] = [
+  {
+    id: 'currencies',
+    icon: Coins,
+    titleKey: 'market.sell.hub.currencies',
+    route: 'MarketShopCurrencies',
+    testID: 'shop-hub-currencies',
+  },
+  {
+    id: 'shipping',
+    icon: Truck,
+    titleKey: 'market.sell.hub.shipping',
+    route: 'MarketShopShipping',
+    testID: 'shop-hub-shipping',
+  },
+  {
+    id: 'collections',
+    icon: FolderOpen,
+    titleKey: 'market.sell.hub.collections',
+    route: 'MarketShopCollections',
+    testID: 'shop-hub-collections',
+  },
+  {
+    id: 'listings',
+    icon: Tag,
+    titleKey: 'market.sell.hub.listings',
+    route: 'MarketShopListings',
+    testID: 'shop-hub-listings',
+  },
+  {
+    id: 'orders',
+    icon: ShoppingBag,
+    titleKey: 'market.sell.hub.orders',
+    route: 'MarketShopOrders',
+    testID: 'shop-hub-orders',
+  },
+];
+
+/** "My shop" hub (#1534): the shop's profile card, one grouped card linking
+ * to each part of the shop with a live summary, and "Sell an item". */
 const MarketMyShopScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createMarketSellerStyles(colors), [colors]);
-  const { pubkey, snapshot, status, refresh, canPublish } = useSellerShop();
-  const { deleteListing, busy } = useSellerActions(snapshot);
+  const hubStyles = useMemo(() => createMarketMyShopStyles(colors), [colors]);
+  const { pubkey, snapshot, status, refresh, canPublish, defaultCurrency } = useSellerShop();
   const [loginVisible, setLoginVisible] = useState(false);
+  const titles = useMemo(() => listingTitleMap(snapshot.listings), [snapshot.listings]);
+  const { orders } = useShopOrders(titles);
+  const onSellItem = useSellItem({
+    navigation,
+    zoneCount: snapshot.zones.length,
+    status,
+    refresh,
+  });
 
-  // Re-use a row (and so its parsed draft) while the event is unchanged, so
-  // the memoised rows skip re-rendering on unrelated store updates.
-  const rowCache = useRef(new Map<string, Row>());
-  const rows = useMemo<Row[]>(() => {
-    const next = new Map<string, Row>();
-    const out = snapshot.listings.map((event) => {
-      const row = rowCache.current.get(event.id) ?? { event, draft: parseListingDraft(event) };
-      next.set(event.id, row);
-      return row;
-    });
-    rowCache.current = next;
-    return out;
-  }, [snapshot.listings]);
-
-  const onEdit = useCallback(
-    (dTag: string) => navigation.navigate('MarketListingEditor', { dTag }),
-    [navigation],
+  const collectionCount = useMemo(
+    () => (snapshot.collections ?? []).filter((e) => !isLegacyShopCollection(e)).length,
+    [snapshot.collections],
   );
-  const onPreview = useCallback(
-    (event: Event) => {
-      const product = parseMarketListing(event);
-      if (product) navigation.navigate('MarketProductDetail', { productId: product.id, product });
-    },
-    [navigation],
+  const summaries = useMemo(
+    () =>
+      hubSummaries({
+        status,
+        currency: defaultCurrency ?? 'SATS',
+        zoneCount: snapshot.zones.length,
+        collectionCount,
+        listingCount: snapshot.listings.length,
+        orders: orders ? { total: orders.length, needInvoice: ordersNeedingInvoice(orders) } : null,
+      }),
+    [status, defaultCurrency, snapshot.zones.length, collectionCount, snapshot.listings, orders],
   );
-  const onDelete = useCallback(
-    (event: Event) => {
-      // One change at a time: two quick deletes would both rebuild the shop
-      // from the same snapshot.
-      if (busy) return;
-      const title = parseListingDraft(event).title;
-      Alert.alert(t('market.sell.deleteTitle'), t('market.sell.deleteBody', { title }), [
-        { text: t('market.sell.cancel'), style: 'cancel' },
-        {
-          text: t('market.sell.delete'),
-          style: 'destructive',
-          onPress: () => {
-            deleteListing(event)
-              .then(() => Toast.show({ type: 'success', text1: t('market.sell.deleted') }))
-              .catch((e: Error) =>
-                Toast.show({
-                  type: 'error',
-                  text1: t('market.sell.deleteFailed'),
-                  text2: e.message,
-                }),
-              );
-          },
-        },
-      ]);
-    },
-    [deleteListing, busy, t],
-  );
-
-  const renderItem = useCallback(
-    ({ item }: { item: Row }) => (
-      <SellerListingRow
-        event={item.event}
-        draft={item.draft}
-        styles={styles}
-        onEdit={onEdit}
-        onPreview={onPreview}
-        onDelete={onDelete}
-      />
-    ),
-    [styles, onEdit, onPreview, onDelete],
-  );
-  const renderSeparator = useCallback(() => <View style={styles.separator} />, [styles]);
 
   const header = (
     <MarketSellerHeader
@@ -141,69 +145,60 @@ const MarketMyShopScreen: React.FC<Props> = ({ navigation }) => {
     );
   }
 
-  const listHeader = (
-    <View style={styles.listHeader}>
-      <View style={styles.card} testID="my-shop-card">
-        <MerchantIdentity />
-        <TouchableOpacity
-          style={styles.secondaryButton}
-          onPress={() => navigation.navigate('MarketShopSettings')}
-          testID="my-shop-edit"
-          accessibilityLabel={t('market.sell.editShop')}
-        >
-          <Settings size={22} color={colors.brandPink} />
-          <Text style={styles.secondaryButtonText}>{t('market.sell.editShop')}</Text>
-        </TouchableOpacity>
-      </View>
-      <CollectionManager snapshot={snapshot} />
-      {status === 'error' ? (
-        <TouchableOpacity
-          onPress={refresh}
-          accessibilityLabel={t('market.sell.retry')}
-          testID="my-shop-retry"
-        >
-          <Text style={styles.errorText}>{t('market.sell.loadError')}</Text>
-        </TouchableOpacity>
-      ) : null}
-      {canPublish ? (
+  return (
+    <View style={styles.container} testID="my-shop-screen">
+      {header}
+      <ScrollView
+        contentContainerStyle={styles.content}
+        style={styles.flex1}
+        refreshControl={
+          <BrandedRefreshControl refreshing={status === 'loading'} onRefresh={refresh} />
+        }
+      >
+        <View style={styles.card} testID="my-shop-card">
+          <MerchantIdentity />
+        </View>
+        {status === 'error' ? (
+          <TouchableOpacity
+            onPress={refresh}
+            accessibilityLabel={t('market.sell.retry')}
+            testID="my-shop-retry"
+          >
+            <Text style={styles.errorText}>{t('market.sell.loadError')}</Text>
+          </TouchableOpacity>
+        ) : null}
+        <View style={hubStyles.groupCard} testID="shop-hub-card">
+          {HUB_ROWS.map((row, index) => {
+            const summary = summaries[row.id];
+            return (
+              <React.Fragment key={row.id}>
+                {index > 0 ? <View style={hubStyles.groupSeparator} /> : null}
+                <SettingsRow
+                  grouped
+                  appearance="surface"
+                  icon={row.icon}
+                  iconColor={colors.brandPink}
+                  title={t(row.titleKey)}
+                  value={t(summary.key, summary.params)}
+                  onPress={() => navigation.navigate(row.route)}
+                  testID={row.testID}
+                  subtitleTestID={`${row.testID}-summary`}
+                />
+              </React.Fragment>
+            );
+          })}
+        </View>
+        {/* The main seller action. Easy to drop if the Listings row is enough. */}
         <TouchableOpacity
           style={styles.primaryButton}
-          onPress={() => navigation.navigate('MarketListingEditor')}
+          onPress={onSellItem}
           accessibilityLabel={t('market.sell.sellItem')}
           testID="my-shop-sell-item"
         >
           <Plus size={18} color={colors.white} strokeWidth={2.5} />
           <Text style={styles.primaryButtonText}>{t('market.sell.sellItem')}</Text>
         </TouchableOpacity>
-      ) : null}
-      <Text style={styles.sectionTitle}>{t('market.sell.yourListings')}</Text>
-    </View>
-  );
-
-  return (
-    <View style={styles.container} testID="my-shop-screen">
-      {header}
-      <FlatList
-        data={rows}
-        keyExtractor={(row) => row.event.id}
-        renderItem={renderItem}
-        ListHeaderComponent={listHeader}
-        ListEmptyComponent={
-          status === 'loading' ? null : (
-            <Text style={[styles.muted, styles.emptyText]} testID="my-shop-no-listings">
-              {t('market.sell.noListings')}
-            </Text>
-          )
-        }
-        ItemSeparatorComponent={renderSeparator}
-        contentContainerStyle={styles.listContent}
-        style={styles.flex1}
-        refreshControl={
-          <BrandedRefreshControl refreshing={status === 'loading'} onRefresh={refresh} />
-        }
-        initialNumToRender={8}
-        windowSize={7}
-      />
+      </ScrollView>
     </View>
   );
 };

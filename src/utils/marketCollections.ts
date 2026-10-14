@@ -1,5 +1,10 @@
 import type { Event } from 'nostr-tools';
-import { COLLECTION_KIND, SHOP_COLLECTION_D, type EventTemplate } from './marketSellerEvents';
+import {
+  COLLECTION_KIND,
+  SHOP_COLLECTION_D,
+  newIdentifier,
+  type EventTemplate,
+} from './marketSellerEvents';
 
 export interface CollectionDraft {
   dTag: string;
@@ -10,6 +15,16 @@ export interface CollectionDraft {
   shipping: string[];
   products: string[];
 }
+/** A blank collection with a fresh `d` tag. */
+export const newCollectionDraft = (title = '', summary = ''): CollectionDraft => ({
+  dTag: newIdentifier('collection'),
+  title,
+  summary,
+  image: '',
+  location: '',
+  shipping: [],
+  products: [],
+});
 const value = (event: Pick<Event, 'tags'>, key: string) =>
   event.tags.find((t) => t[0] === key)?.[1] ?? '';
 const references = (event: Pick<Event, 'tags'>, key: string) =>

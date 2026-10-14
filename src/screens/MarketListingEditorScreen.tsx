@@ -1,5 +1,6 @@
 import BrandedSpinner from '../components/BrandedSpinner';
 import CollectionPicker from '../components/CollectionPicker';
+import NewCollectionSheet from '../components/NewCollectionSheet';
 import { SellerSigningError } from '../utils/sellerSigning';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -24,6 +25,7 @@ import MarketSellerHeader from '../components/MarketSellerHeader';
 import SellerCurrencyChips from '../components/SellerCurrencyChips';
 import ListingPhotosField from '../components/ListingPhotosField';
 import ListingShippingPicker from '../components/ListingShippingPicker';
+import ListingFormatChips from '../components/ListingFormatChips';
 import { createMarketSellerStyles } from '../styles/MarketSeller.styles';
 import {
   MAX_LISTING_IMAGES,
@@ -35,6 +37,8 @@ import {
   type ListingDraft,
 } from '../utils/marketSellerEvents';
 import { parseMarketListing } from '../utils/marketListings';
+import { movePhoto, setCoverPhoto } from '../utils/listingPhotos';
+import { sellGate, type ListingFormat } from '../utils/shopSellGate';
 import type { ExploreNavigation, MarketListingEditorRoute } from '../navigation/types';
 
 interface Props {
@@ -51,8 +55,10 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
   const styles = useMemo(() => createMarketSellerStyles(colors), [colors]);
   const editDTag = route.params?.dTag;
   const returnToMyShop = route.params?.returnToMyShop;
+  const presetDigital = !!route.params?.digital;
   const { pubkey, snapshot, status, refresh, defaultCurrency } = useSellerShop();
-  const { saveListing, deleteListing, busy } = useSellerActions(snapshot);
+  const { saveListing, deleteListing, saveCollection, busy } = useSellerActions(snapshot);
+  const [newCollectionOpen, setNewCollectionOpen] = useState(false);
   const { uploading, pickAndUpload } = useListingPhotoUpload();
   const [draft, setDraft] = useState<ListingDraft | null>(null);
   const [categoriesText, setCategoriesText] = useState('');
@@ -88,10 +94,23 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
         quantity: '1',
         categories: [],
         collections: [],
-        shipping: snapshot.zones.map((z) => ({ coordinate: z.coordinate, extraCost: '' })),
+        format: presetDigital ? 'digital' : 'physical',
+        shipping: presetDigital
+          ? []
+          : snapshot.zones.map((z) => ({ coordinate: z.coordinate, extraCost: '' })),
       });
     }
-  }, [draft, dirty, base, existing, editDTag, status, defaultCurrency, snapshot.zones]);
+  }, [
+    draft,
+    dirty,
+    base,
+    existing,
+    editDTag,
+    status,
+    defaultCurrency,
+    snapshot.zones,
+    presetDigital,
+  ]);
 
   const fullDraft = useMemo(
     () => (draft ? { ...draft, categories: splitCategories(categoriesText) } : null),
@@ -112,6 +131,18 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
     (collections: string[]) => update({ collections }),
     [update],
   );
+  const onFormatChange = useCallback((format: ListingFormat) => update({ format }), [update]);
+  const onAddShipping = useCallback(() => navigation.navigate('MarketShopShipping'), [navigation]);
+  const onCollectionCreated = useCallback(
+    (coordinate: string) =>
+      editDraft((prev) => ({
+        ...prev,
+        collections: [...new Set([...(prev.collections ?? []), coordinate])],
+      })),
+    [editDraft],
+  );
+  const onNewCollection = useCallback(() => setNewCollectionOpen(true), []);
+  const onCloseNewCollection = useCallback(() => setNewCollectionOpen(false), []);
   const onCategoriesChange = useCallback((text: string) => {
     setDirty(true);
     setCategoriesText(text);
@@ -135,6 +166,16 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
       picking.current = false;
     }
   }, [pickAndUpload, editDraft]);
+  const onMovePhoto = useCallback(
+    (from: number, to: number) =>
+      editDraft((prev) => ({ ...prev, images: movePhoto(prev.images, from, to) })),
+    [editDraft],
+  );
+  const onSetCover = useCallback(
+    (index: number) =>
+      editDraft((prev) => ({ ...prev, images: setCoverPhoto(prev.images, index) })),
+    [editDraft],
+  );
   const onRemovePhoto = useCallback(
     (index: number) =>
       editDraft((prev) => ({ ...prev, images: prev.images.filter((_, i) => i !== index) })),
@@ -169,6 +210,25 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const onPublish = useCallback(async () => {
     if (!fullDraft || !checkValid()) return;
+    // A physical item needs a shipping option (#1534); unknown is not "none".
+    const gate = sellGate({
+      zoneCount: snapshot.zones.length,
+      status,
+      format: fullDraft.format ?? 'physical',
+    });
+    if (gate === 'unknown') {
+      Toast.show({ type: 'error', text1: t('market.sell.loadFailedTryAgain') });
+      refresh();
+      return;
+    }
+    if (gate === 'needs-shipping') {
+      Alert.alert(t('market.sell.gate.title'), t('market.sell.gate.body'), [
+        { text: t('market.sell.gate.addShipping'), onPress: onAddShipping },
+        { text: t('market.sell.gate.digital'), onPress: () => onFormatChange('digital') },
+        { text: t('market.sell.cancel'), style: 'cancel' },
+      ]);
+      return;
+    }
     // The base is the revision the FORM was loaded from (not whatever the
     // store holds now), so a newer revision that arrived since is caught.
     const editBase = editDTag ? (base ?? existing) : null;
@@ -221,7 +281,22 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
       }
     };
     await publish(false);
-  }, [fullDraft, editDTag, base, existing, checkValid, saveListing, navigation, returnToMyShop, t]);
+  }, [
+    fullDraft,
+    editDTag,
+    base,
+    existing,
+    checkValid,
+    saveListing,
+    navigation,
+    returnToMyShop,
+    snapshot.zones.length,
+    status,
+    refresh,
+    onAddShipping,
+    onFormatChange,
+    t,
+  ]);
 
   const onDelete = useCallback(() => {
     if (!existing) return;
@@ -284,7 +359,7 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
               ) : !editDTag ? (
                 <TouchableOpacity
                   style={styles.primaryButton}
-                  onPress={() => navigation.replace('MarketShopSettings')}
+                  onPress={() => navigation.replace('MarketShopShipping')}
                   accessibilityLabel={t('market.sell.setupButton')}
                   testID="listing-editor-setup-shop"
                 >
@@ -308,6 +383,8 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
               uploading={uploading}
               onAdd={onAddPhoto}
               onRemove={onRemovePhoto}
+              onMove={onMovePhoto}
+              onSetCover={onSetCover}
               styles={styles}
             />
             <View style={styles.field}>
@@ -382,17 +459,28 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
               collections={snapshot.collections ?? []}
               value={draft.collections ?? []}
               onChange={onCollectionsChange}
+              onNewCollection={onNewCollection}
             />
-            <Text style={styles.sectionTitle}>{t('market.sell.editor.shipping')}</Text>
-            <Text style={styles.hint}>{t('market.sell.editor.shippingHint')}</Text>
-            <ListingShippingPicker
-              zones={snapshot.zones}
-              value={draft.shipping}
-              currency={draft.currency}
-              showErrors={showErrors}
-              onChange={(shipping) => update({ shipping })}
+            <ListingFormatChips
+              value={draft.format ?? 'physical'}
+              onChange={onFormatChange}
               styles={styles}
             />
+            {draft.format !== 'digital' ? (
+              <>
+                <Text style={styles.sectionTitle}>{t('market.sell.editor.shipping')}</Text>
+                <Text style={styles.hint}>{t('market.sell.editor.shippingHint')}</Text>
+                <ListingShippingPicker
+                  zones={snapshot.zones}
+                  value={draft.shipping}
+                  currency={draft.currency}
+                  showErrors={showErrors}
+                  onChange={(shipping) => update({ shipping })}
+                  onAddShipping={onAddShipping}
+                  styles={styles}
+                />
+              </>
+            ) : null}
             <View style={styles.field}>
               <Text style={styles.label}>{t('market.sell.editor.categories')}</Text>
               <TextInput
@@ -465,6 +553,12 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
           </ScrollView>
         </>
       )}
+      <NewCollectionSheet
+        visible={newCollectionOpen}
+        onClose={onCloseNewCollection}
+        saveCollection={saveCollection}
+        onCreated={onCollectionCreated}
+      />
     </KeyboardAvoidingView>
   );
 };

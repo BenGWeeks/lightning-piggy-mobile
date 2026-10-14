@@ -85,6 +85,9 @@ export interface ListingDraft {
   categories: string[];
   shipping: ListingShippingDraft[];
   collections?: string[];
+  /** Gamma `type` format (3rd element). A digital item never ships. Unset =
+   * derived from shipping, as before the editor exposed it. */
+  format?: 'physical' | 'digital';
 }
 
 export type SellerDraftError =
@@ -158,7 +161,9 @@ export function validateListingDraft(draft: ListingDraft): SellerDraftError[] {
     draft.collections?.some((c) => !/^30405:[0-9a-f]{64}:.+$/.test(c))
   )
     errors.push('categories');
+  // Digital events omit shipping; retained physical values are hidden in the editor.
   if (
+    draft.format !== 'digital' &&
     draft.shipping.some(
       (s) =>
         !/^3040[56]:[0-9a-f]{64}:.+/.test(s.coordinate) ||
@@ -254,9 +259,12 @@ export function buildListingTemplate(input: {
   const prevType = prevTags.find((t) => t[0] === 'type');
   const prevFrequency = prevTags.find((t) => t[0] === 'price')?.[3];
 
-  const shipping = draft.shipping.filter(
-    (s, i, all) => all.findIndex((o) => o.coordinate === s.coordinate) === i,
-  );
+  const shipping =
+    draft.format === 'digital'
+      ? []
+      : draft.shipping.filter(
+          (s, i, all) => all.findIndex((o) => o.coordinate === s.coordinate) === i,
+        );
   const tags: string[][] = [
     ['d', draft.dTag],
     ['title', draft.title.trim()],
@@ -265,9 +273,10 @@ export function buildListingTemplate(input: {
     [
       'type',
       prevType?.[1] || 'simple',
-      // Shipping implies physical; otherwise keep the published format
-      // (a physical item can be collect-in-person), defaulting to digital.
-      shipping.length > 0 ? 'physical' : prevType?.[2] || 'digital',
+      // The editor's explicit choice wins. Otherwise shipping implies
+      // physical, else keep the published format (a physical item can be
+      // collect-in-person), defaulting to digital.
+      draft.format ?? (shipping.length > 0 ? 'physical' : prevType?.[2] || 'digital'),
     ],
     ['visibility', tagValue(prevTags, 'visibility') || 'on-sale'],
   ];
@@ -324,6 +333,10 @@ export function parseListingDraft(event: Pick<Event, 'tags' | 'content'>): Listi
     .sort((a, b) => a.order - b.order)
     .map((i) => i.url);
   const price = event.tags.find((t) => t[0] === 'price');
+  const shipping = event.tags
+    .filter((t) => t[0] === 'shipping_option' && typeof t[1] === 'string')
+    .map((t) => ({ coordinate: t[1], extraCost: t[2] ?? '' }));
+  const typeFormat = event.tags.find((t) => t[0] === 'type')?.[2];
   return {
     dTag: tagValue(event.tags, 'd') ?? '',
     title: tagValue(event.tags, 'title') ?? '',
@@ -336,9 +349,13 @@ export function parseListingDraft(event: Pick<Event, 'tags' | 'content'>): Listi
     collections: event.tags
       .filter((t) => t[0] === 'a' && /^30405:[0-9a-f]{64}:.+/.test(t[1] ?? ''))
       .map((t) => t[1]),
-    shipping: event.tags
-      .filter((t) => t[0] === 'shipping_option' && typeof t[1] === 'string')
-      .map((t) => ({ coordinate: t[1], extraCost: t[2] ?? '' })),
+    shipping,
+    format:
+      typeFormat === 'digital' || typeFormat === 'physical'
+        ? typeFormat
+        : shipping.length > 0
+          ? 'physical'
+          : 'digital',
   };
 }
 

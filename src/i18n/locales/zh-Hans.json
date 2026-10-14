@@ -2480,7 +2480,6 @@
       "loadError": "无法连接你的中继。下拉重试。",
       "retry": "重试",
       "setupButton": "创建店铺",
-      "editShop": "编辑店铺",
       "sellItem": "出售商品",
       "yourListings": "你的商品",
       "noListings": "你还没有发布商品。点按“出售商品”发布你的第一件商品。",
@@ -2498,18 +2497,11 @@
       "deleted": "商品已删除",
       "deleteFailed": "无法删除商品",
       "shop": {
-        "title": "店铺设置",
         "description": "描述",
-        "currency": "货币",
-        "currencyHint": "用于运费，并作为商品价格的默认货币。",
         "shipping": "配送选项",
         "shippingHint": "每个选项包含配送目的地和运费。发布商品时可以从中选择。",
         "addZone": "添加配送选项",
-        "save": "保存店铺",
-        "saveAndAddFirstItem": "保存并添加你的第一件商品",
-        "saveForNow": "暂时只保存",
         "saving": "正在保存…",
-        "saved": "店铺已保存",
         "saveFailed": "无法保存你的店铺",
         "fixErrors": "请检查标出的字段",
         "existingFound": "已找到并加载你现有的店铺。请核对详情，然后再次保存。",
@@ -2533,7 +2525,6 @@
       "editor": {
         "newTitle": "出售商品",
         "editTitle": "编辑商品",
-        "photos": "照片",
         "addPhoto": "添加照片",
         "uploading": "正在上传…",
         "removePhoto": "移除第{{index}}张照片",
@@ -2550,8 +2541,7 @@
         "quantity": "库存数量",
         "quantityPlaceholder": "不跟踪库存可留空",
         "shipping": "配送",
-        "shippingHint": "选择这件商品的配送方式。数字商品或当面自提请关闭所有选项。",
-        "noZones": "你的店铺还没有配送选项。请在店铺设置中添加。",
+        "shippingHint": "选择这件商品的配送方式。当面自取请全部关闭。",
         "zoneBase": "{{amount}} {{currency}}",
         "extraCost": "此商品的额外运费（{{currency}}）",
         "extraCostPlaceholder": "0",
@@ -2572,7 +2562,22 @@
         "delete": "删除商品",
         "conflictBody": "你打开商品后，它已在其他设备或应用中被修改。仍要保存你的版本吗？",
         "deletedBody": "此商品已被删除。是否使用此表单中的值重新创建？",
-        "recreate": "重新创建"
+        "recreate": "重新创建",
+        "photosLabel": "照片（最多 {{max}} 张）— 第一张为封面",
+        "cover": "封面",
+        "setCover": "将第 {{index}} 张照片设为封面",
+        "movePhotoLeft": "将第 {{index}} 张照片左移",
+        "movePhotoRight": "将第 {{index}} 张照片右移",
+        "photoCount": "{{n}} / {{max}}",
+        "itemType": "商品类型",
+        "format": {
+          "physical": "实物",
+          "digital": "数字"
+        },
+        "formatHint": {
+          "physical": "寄送给买家或当面自取。",
+          "digital": "下载、兑换码或服务，无需配送。"
+        }
       },
       "errors": {
         "title": "请填写标题（最多200个字符）。",
@@ -2614,7 +2619,83 @@
         "image": "图片 URL",
         "location": "位置"
       },
-      "deleteCollectionTitle": "删除此合集？"
+      "deleteCollectionTitle": "删除此合集？",
+      "hub": {
+        "currencies": "货币",
+        "shipping": "配送选项",
+        "collections": "商品合集",
+        "listings": "商品",
+        "orders": "订单",
+        "currencyValue": "{{currency}}",
+        "noneYet": "暂无",
+        "checking": "正在检查…",
+        "unavailable": "无法加载",
+        "noOrders": "暂无订单",
+        "shippingCount": {
+          "one": "{{count}} 个选项",
+          "other": "{{count}} 个选项"
+        },
+        "collectionsCount": {
+          "one": "{{count}} 个合集",
+          "other": "{{count}} 个合集"
+        },
+        "listingsCount": {
+          "one": "已上架 {{count}} 件",
+          "other": "已上架 {{count}} 件"
+        },
+        "ordersCount": {
+          "one": "{{count}} 个订单",
+          "other": "{{count}} 个订单"
+        },
+        "ordersNeedInvoice": {
+          "one": "{{count}} 个待开发票",
+          "other": "{{count}} 个待开发票"
+        }
+      },
+      "currencies": {
+        "defaultTitle": "默认货币",
+        "hint": "用于预填新商品和新配送选项的价格。已设置的价格保持原有货币。保存在这部手机上。",
+        "saved": "货币已保存",
+        "saveFailed": "无法保存货币"
+      },
+      "shipping": {
+        "save": "保存配送选项",
+        "saved": "配送选项已保存",
+        "saveFailed": "无法保存你的配送选项",
+        "empty": "暂无配送选项。为每个配送地区添加一个。"
+      },
+      "gate": {
+        "title": "请先设置配送",
+        "body": "买家需要知道你将如何寄送实物商品。上架商品前，请至少添加一个配送选项。",
+        "addShipping": "添加配送选项",
+        "digital": "这是数字商品"
+      },
+      "orders": {
+        "line": "{{title}} × {{quantity}}",
+        "amount": "{{amount}} sats",
+        "hint": "买家对你商品的订单。点按即可打开聊天。",
+        "emptyBody": "有人购买你的商品后，订单会显示在这里。",
+        "rowAccessibility": "来自 {{name}} 的订单：{{items}}，{{time}}"
+      },
+      "newCollection": {
+        "chip": "新建合集",
+        "title": "新建合集",
+        "name": "名称",
+        "namePlaceholder": "例如：3D 打印品",
+        "nameRequired": "请为合集命名。",
+        "description": "描述（可选）",
+        "descriptionPlaceholder": "这个合集里有什么？",
+        "save": "创建合集",
+        "created": "合集已创建",
+        "failed": "无法创建合集",
+        "hint": "将商品分组，例如：3D 打印品"
+      },
+      "collectionsHint": "将你的商品分组，方便买家一起浏览。",
+      "noCollections": "暂无合集。",
+      "collectionListings": {
+        "one": "{{count}} 件商品",
+        "other": "{{count}} 件商品"
+      }
     },
     "markdown": {
       "openLinkTitle": "打开链接？",

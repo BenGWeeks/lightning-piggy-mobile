@@ -2480,7 +2480,6 @@
       "loadError": "A relay-eidet nem sikerült elérni. Húzd le az újrapróbáláshoz.",
       "retry": "Újra",
       "setupButton": "Üzlet létrehozása",
-      "editShop": "Üzlet szerkesztése",
       "sellItem": "Termék eladása",
       "yourListings": "Hirdetéseid",
       "noListings": "Még nem adtál fel hirdetést. Az első hirdetésed létrehozásához koppints a „Termék eladása” gombra.",
@@ -2498,18 +2497,11 @@
       "deleted": "Hirdetés törölve",
       "deleteFailed": "A hirdetést nem sikerült törölni",
       "shop": {
-        "title": "Üzlet beállításai",
         "description": "Leírás",
-        "currency": "Pénznem",
-        "currencyHint": "A szállítási díjak pénzneme és a termékárak alapértelmezett pénzneme.",
         "shipping": "Szállítási lehetőségek",
         "shippingHint": "Minden lehetőség megadja, hova szállítasz és mennyiért. Ezek közül választhatsz a termékeidhez.",
         "addZone": "Szállítási lehetőség hozzáadása",
-        "save": "Üzlet mentése",
-        "saveAndAddFirstItem": "Mentés és az első termék hozzáadása",
-        "saveForNow": "Egyelőre csak mentés",
         "saving": "Mentés…",
-        "saved": "Üzlet mentve",
         "saveFailed": "Az üzletedet nem sikerült menteni",
         "fixErrors": "Ellenőrizd a kiemelt mezőket",
         "existingFound": "Megtaláltuk és betöltöttük a meglévő üzletedet. Ellenőrizd az adatokat, majd mentsd újra.",
@@ -2533,7 +2525,6 @@
       "editor": {
         "newTitle": "Termék eladása",
         "editTitle": "Hirdetés szerkesztése",
-        "photos": "Fotók",
         "addPhoto": "Fotó hozzáadása",
         "uploading": "Feltöltés…",
         "removePhoto": "Fotó eltávolítása: {{index}}",
@@ -2550,8 +2541,7 @@
         "quantity": "Készleten lévő mennyiség",
         "quantityPlaceholder": "Hagyd üresen, ha nem követed",
         "shipping": "Szállítás",
-        "shippingHint": "Válaszd ki, hogyan szállítod ezt a terméket. Digitális termékeknél vagy személyes átvételnél hagyd az összes lehetőséget kikapcsolva.",
-        "noZones": "Az üzletedben még nincs szállítási lehetőség. Adj hozzá az üzlet beállításaiban.",
+        "shippingHint": "Válaszd ki, hogyan szállítod ezt a terméket. Személyes átvételhez hagyd mindet kikapcsolva.",
         "zoneBase": "{{amount}} {{currency}}",
         "extraCost": "A termék szállítási felára ({{currency}})",
         "extraCostPlaceholder": "0",
@@ -2572,7 +2562,22 @@
         "delete": "Hirdetés törlése",
         "conflictBody": "Ezt a hirdetést egy másik eszközön vagy alkalmazásban módosították, mióta megnyitottad. Mégis mented a saját változatodat?",
         "deletedBody": "Ezt a hirdetést törölték. Újra létrehozod az űrlap értékeivel?",
-        "recreate": "Újra létrehozás"
+        "recreate": "Újra létrehozás",
+        "photosLabel": "Fotók (legfeljebb {{max}}) – az első a borítókép",
+        "cover": "Borító",
+        "setCover": "A(z) {{index}}. fotó legyen a borítókép",
+        "movePhotoLeft": "A(z) {{index}}. fotó mozgatása balra",
+        "movePhotoRight": "A(z) {{index}}. fotó mozgatása jobbra",
+        "photoCount": "{{n}} / {{max}}",
+        "itemType": "Termék típusa",
+        "format": {
+          "physical": "Fizikai",
+          "digital": "Digitális"
+        },
+        "formatHint": {
+          "physical": "A vevőnek küldöd, vagy személyesen veszi át.",
+          "digital": "Letöltés, kód vagy szolgáltatás. Nem kell szállítani."
+        }
       },
       "errors": {
         "title": "Adj meg egy címet (legfeljebb 200 karakter).",
@@ -2614,7 +2619,83 @@
         "image": "Kép URL-je",
         "location": "Hely"
       },
-      "deleteCollectionTitle": "Törlöd ezt a gyűjteményt?"
+      "deleteCollectionTitle": "Törlöd ezt a gyűjteményt?",
+      "hub": {
+        "currencies": "Pénznemek",
+        "shipping": "Szállítási lehetőségek",
+        "collections": "Gyűjtemények",
+        "listings": "Hirdetések",
+        "orders": "Rendelések",
+        "currencyValue": "{{currency}}",
+        "noneYet": "Még nincs",
+        "checking": "Ellenőrzés…",
+        "unavailable": "Nem sikerült betölteni",
+        "noOrders": "Még nincs rendelés",
+        "shippingCount": {
+          "one": "{{count}} lehetőség",
+          "other": "{{count}} lehetőség"
+        },
+        "collectionsCount": {
+          "one": "{{count}} gyűjtemény",
+          "other": "{{count}} gyűjtemény"
+        },
+        "listingsCount": {
+          "one": "{{count}} meghirdetve",
+          "other": "{{count}} meghirdetve"
+        },
+        "ordersCount": {
+          "one": "{{count}} rendelés",
+          "other": "{{count}} rendelés"
+        },
+        "ordersNeedInvoice": {
+          "one": "{{count}} számlára vár",
+          "other": "{{count}} számlára vár"
+        }
+      },
+      "currencies": {
+        "defaultTitle": "Alapértelmezett pénznem",
+        "hint": "Ezzel töltjük ki előre az új hirdetések és új szállítási lehetőségek árát. A már megadott árak megtartják a pénznemüket. Ezen a telefonon tároljuk.",
+        "saved": "Pénznem mentve",
+        "saveFailed": "Nem sikerült menteni a pénznemet"
+      },
+      "shipping": {
+        "save": "Szállítási lehetőségek mentése",
+        "saved": "Szállítási lehetőségek mentve",
+        "saveFailed": "Nem sikerült menteni a szállítási lehetőségeidet",
+        "empty": "Még nincs szállítási lehetőség. Adj hozzá egyet minden helyhez, ahová szállítasz."
+      },
+      "gate": {
+        "title": "Előbb állítsd be a szállítást",
+        "body": "A vevőknek tudniuk kell, hogyan küldöd a fizikai termékeket. Adj hozzá legalább egy szállítási lehetőséget, mielőtt meghirdetsz egy terméket.",
+        "addShipping": "Szállítási lehetőségek hozzáadása",
+        "digital": "Ez digitális termék"
+      },
+      "orders": {
+        "line": "{{title}} × {{quantity}}",
+        "amount": "{{amount}} sats",
+        "hint": "Vevők rendelései a hirdetéseidre. Koppints egyre a csevegés megnyitásához.",
+        "emptyBody": "Ha valaki megvesz egyet a hirdetéseid közül, a rendelése itt jelenik meg.",
+        "rowAccessibility": "{{name}} rendelése: {{items}}, {{time}}"
+      },
+      "newCollection": {
+        "chip": "Új gyűjtemény",
+        "title": "Új gyűjtemény",
+        "name": "Név",
+        "namePlaceholder": "pl. 3D nyomatok",
+        "nameRequired": "Adj nevet a gyűjteménynek.",
+        "description": "Leírás (nem kötelező)",
+        "descriptionPlaceholder": "Mi van ebben a gyűjteményben?",
+        "save": "Gyűjtemény létrehozása",
+        "created": "Gyűjtemény létrehozva",
+        "failed": "Nem sikerült létrehozni a gyűjteményt",
+        "hint": "Csoportosítsd a hirdetéseket, pl. 3D nyomatok"
+      },
+      "collectionsHint": "Csoportosítsd a hirdetéseidet, hogy a vevők együtt böngészhessék őket.",
+      "noCollections": "Még nincs gyűjtemény.",
+      "collectionListings": {
+        "one": "{{count}} hirdetés",
+        "other": "{{count}} hirdetés"
+      }
     },
     "markdown": {
       "openLinkTitle": "Megnyitod a linket?",

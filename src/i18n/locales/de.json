@@ -2480,7 +2480,6 @@
       "loadError": "Deine Relays konnten nicht erreicht werden. Ziehe nach unten, um es erneut zu versuchen.",
       "retry": "Erneut versuchen",
       "setupButton": "Shop einrichten",
-      "editShop": "Shop bearbeiten",
       "sellItem": "Produkt verkaufen",
       "yourListings": "Deine Angebote",
       "noListings": "Du hast noch nichts zum Verkauf angeboten. Tippe auf „Produkt verkaufen“, um dein erstes Angebot zu erstellen.",
@@ -2498,18 +2497,11 @@
       "deleted": "Angebot gelöscht",
       "deleteFailed": "Das Angebot konnte nicht gelöscht werden",
       "shop": {
-        "title": "Shop-Einstellungen",
         "description": "Beschreibung",
-        "currency": "Währung",
-        "currencyHint": "Wird für deine Versandkosten und als Standardwährung für Preise verwendet.",
         "shipping": "Versandoptionen",
         "shippingHint": "Jede Option legt fest, wohin du versendest und was es kostet. Für deine Produkte wählst du aus diesen Optionen.",
         "addZone": "Versandoption hinzufügen",
-        "save": "Shop speichern",
-        "saveAndAddFirstItem": "Speichern und deinen ersten Artikel hinzufügen",
-        "saveForNow": "Vorerst speichern",
         "saving": "Wird gespeichert…",
-        "saved": "Shop gespeichert",
         "saveFailed": "Dein Shop konnte nicht gespeichert werden",
         "fixErrors": "Bitte prüfe die markierten Felder",
         "existingFound": "Wir haben deinen bestehenden Shop gefunden und geladen. Prüfe die Angaben und speichere erneut.",
@@ -2533,7 +2525,6 @@
       "editor": {
         "newTitle": "Produkt verkaufen",
         "editTitle": "Angebot bearbeiten",
-        "photos": "Fotos",
         "addPhoto": "Foto hinzufügen",
         "uploading": "Wird hochgeladen…",
         "removePhoto": "Foto {{index}} entfernen",
@@ -2550,8 +2541,7 @@
         "quantity": "Menge auf Lager",
         "quantityPlaceholder": "Leer lassen, wenn nicht erfasst",
         "shipping": "Versand",
-        "shippingHint": "Wähle, wie dieses Produkt versendet wird. Lass für digitale Produkte oder Abholung alle Optionen deaktiviert.",
-        "noZones": "Dein Shop hat noch keine Versandoptionen. Füge sie in den Shop-Einstellungen hinzu.",
+        "shippingHint": "Wähle, wie dieser Artikel verschickt wird. Lass alles aus für persönliche Abholung.",
         "zoneBase": "{{amount}} {{currency}}",
         "extraCost": "Aufpreis für dieses Produkt ({{currency}})",
         "extraCostPlaceholder": "0",
@@ -2572,7 +2562,22 @@
         "delete": "Angebot löschen",
         "conflictBody": "Dieses Angebot wurde auf einem anderen Gerät oder in einer anderen App geändert, seit du es geöffnet hast. Deine Version trotzdem speichern?",
         "deletedBody": "Dieses Angebot wurde gelöscht. Mit den Werten dieses Formulars erneut erstellen?",
-        "recreate": "Erneut erstellen"
+        "recreate": "Erneut erstellen",
+        "photosLabel": "Fotos (bis zu {{max}}) – das erste ist das Titelbild",
+        "cover": "Titelbild",
+        "setCover": "Foto {{index}} als Titelbild festlegen",
+        "movePhotoLeft": "Foto {{index}} nach links verschieben",
+        "movePhotoRight": "Foto {{index}} nach rechts verschieben",
+        "photoCount": "{{n}} / {{max}}",
+        "itemType": "Artikelart",
+        "format": {
+          "physical": "Physisch",
+          "digital": "Digital"
+        },
+        "formatHint": {
+          "physical": "Wird an den Käufer verschickt oder persönlich abgeholt.",
+          "digital": "Ein Download, Code oder eine Dienstleistung. Kein Versand nötig."
+        }
       },
       "errors": {
         "title": "Füge einen Titel hinzu (bis zu 200 Zeichen).",
@@ -2614,7 +2619,83 @@
         "image": "Bild-URL",
         "location": "Standort"
       },
-      "deleteCollectionTitle": "Diese Kollektion löschen?"
+      "deleteCollectionTitle": "Diese Kollektion löschen?",
+      "hub": {
+        "currencies": "Währungen",
+        "shipping": "Versandoptionen",
+        "collections": "Kollektionen",
+        "listings": "Angebote",
+        "orders": "Bestellungen",
+        "currencyValue": "{{currency}}",
+        "noneYet": "Noch keine",
+        "checking": "Wird geprüft…",
+        "unavailable": "Laden fehlgeschlagen",
+        "noOrders": "Noch keine Bestellungen",
+        "shippingCount": {
+          "one": "{{count}} Option",
+          "other": "{{count}} Optionen"
+        },
+        "collectionsCount": {
+          "one": "{{count}} Kollektion",
+          "other": "{{count}} Kollektionen"
+        },
+        "listingsCount": {
+          "one": "{{count}} eingestellt",
+          "other": "{{count}} eingestellt"
+        },
+        "ordersCount": {
+          "one": "{{count}} Bestellung",
+          "other": "{{count}} Bestellungen"
+        },
+        "ordersNeedInvoice": {
+          "one": "{{count}} braucht eine Rechnung",
+          "other": "{{count}} brauchen eine Rechnung"
+        }
+      },
+      "currencies": {
+        "defaultTitle": "Standardwährung",
+        "hint": "Wird für den Preis neuer Angebote und neuer Versandoptionen vorausgefüllt. Bereits festgelegte Preise behalten ihre Währung. Auf diesem Telefon gespeichert.",
+        "saved": "Währung gespeichert",
+        "saveFailed": "Währung konnte nicht gespeichert werden"
+      },
+      "shipping": {
+        "save": "Versandoptionen speichern",
+        "saved": "Versandoptionen gespeichert",
+        "saveFailed": "Deine Versandoptionen konnten nicht gespeichert werden",
+        "empty": "Noch keine Versandoptionen. Füge für jedes Versandziel eine hinzu."
+      },
+      "gate": {
+        "title": "Richte zuerst den Versand ein",
+        "body": "Käufer müssen wissen, wie du physische Artikel verschickst. Füge mindestens eine Versandoption hinzu, bevor du ein Produkt einstellst.",
+        "addShipping": "Versandoptionen hinzufügen",
+        "digital": "Es ist ein digitaler Artikel"
+      },
+      "orders": {
+        "line": "{{title}} × {{quantity}}",
+        "amount": "{{amount}} sats",
+        "hint": "Bestellungen von Käufern für deine Angebote. Tippe eine an, um den Chat zu öffnen.",
+        "emptyBody": "Wenn jemand eines deiner Angebote kauft, erscheint die Bestellung hier.",
+        "rowAccessibility": "Bestellung von {{name}}: {{items}}, {{time}}"
+      },
+      "newCollection": {
+        "chip": "Neue Kollektion",
+        "title": "Neue Kollektion",
+        "name": "Name",
+        "namePlaceholder": "z. B. 3D-Drucke",
+        "nameRequired": "Gib der Kollektion einen Namen.",
+        "description": "Beschreibung (optional)",
+        "descriptionPlaceholder": "Was gehört zu dieser Kollektion?",
+        "save": "Kollektion erstellen",
+        "created": "Kollektion erstellt",
+        "failed": "Kollektion konnte nicht erstellt werden",
+        "hint": "Gruppiere Angebote, z. B. 3D-Drucke"
+      },
+      "collectionsHint": "Gruppiere deine Angebote, damit Käufer sie gemeinsam durchstöbern können.",
+      "noCollections": "Noch keine Kollektionen.",
+      "collectionListings": {
+        "one": "{{count}} Angebot",
+        "other": "{{count}} Angebote"
+      }
     },
     "markdown": {
       "openLinkTitle": "Link öffnen?",
