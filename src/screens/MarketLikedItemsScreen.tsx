@@ -103,6 +103,15 @@ const MarketLikedItemsScreen: React.FC<Props> = ({ navigation }) => {
         initialNumToRender={8}
         windowSize={7}
         renderItem={renderProduct}
+        ListHeaderComponent={
+          failed && signedIn && products.length > 0 ? (
+            <View style={styles.emptyWrap} testID="liked-items-refresh-error">
+              <Text style={styles.emptyText} accessibilityRole="alert">
+                {t('market.liked.loadFailed')}
+              </Text>
+            </View>
+          ) : null
+        }
         ListEmptyComponent={
           <View style={styles.emptyWrap} testID="liked-items-empty">
             <Text style={styles.emptyText}>{emptyCopy}</Text>

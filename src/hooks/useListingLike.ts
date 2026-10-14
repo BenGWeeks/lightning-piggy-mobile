@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { useNostr } from '../contexts/NostrContext';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -46,7 +46,7 @@ export function useListingLike(product: MarketProduct, onRequestSignIn: () => vo
   const mutationGeneration = useRef(0);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setState(EMPTY);
     busyRef.current = false;
     setBusy(false);

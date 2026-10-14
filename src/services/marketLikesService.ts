@@ -27,7 +27,7 @@ export function likeReadRelays(readRelays: readonly string[]): string[] {
   return marketSnapshotRelays(readRelays).urls;
 }
 
-/** Retractions (kind 5) of the given reactions, chunked; best effort. */
+/** Retractions (kind 5) of the given reactions, chunked. */
 async function fetchRetractions(
   reactions: readonly Event[],
   relays: string[],
@@ -39,9 +39,12 @@ async function fetchRetractions(
     chunkIds(ids).map((chunk) => {
       const filter: Filter = { kinds: [5], '#e': chunk, limit: chunk.length };
       if (authors) filter.authors = authors;
-      return querySyncAbortable(pool, relays, filter, { maxWait: TIMEOUT_MS, signal }).catch(
-        () => [] as Event[],
-      );
+      return querySyncAbortable(pool, relays, filter, {
+        maxWait: TIMEOUT_MS,
+        signal,
+        rejectOnAllRelaysFailure: true,
+        rejectOnTimeout: true,
+      });
     }),
   );
   return batches.flat();

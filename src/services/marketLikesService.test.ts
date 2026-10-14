@@ -128,3 +128,23 @@ describe('fetchLikedListings', () => {
     expect(resolve).not.toHaveBeenCalled();
   });
 });
+
+it.each(['timeout', 'all relays failed'])(
+  'propagates retraction lookup failure (%s) for counts and liked items',
+  async (reason) => {
+    const error = new Error(reason);
+    const signal = new AbortController().signal;
+    query.mockImplementation((_pool, _relays, filter, options) => {
+      if (filter.kinds[0] === 7) return Promise.resolve([like('mine', ME)]);
+      expect(options).toMatchObject({
+        signal,
+        rejectOnAllRelaysFailure: true,
+        rejectOnTimeout: true,
+      });
+      return Promise.reject(error);
+    });
+    await expect(fetchListingLikes(COORD, ME, [], signal)).rejects.toThrow(error);
+    await expect(fetchLikedListings(ME, [], signal)).rejects.toThrow(error);
+    expect(resolve).not.toHaveBeenCalled();
+  },
+);

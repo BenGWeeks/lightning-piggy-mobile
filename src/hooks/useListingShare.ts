@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Share } from 'react-native';
 import { useNostr } from '../contexts/NostrContext';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -25,6 +25,19 @@ export function useListingShare(product: MarketProduct) {
     return naddr ? listingShareContent(product.title, naddr) : null;
   }, [event, product.title]);
   const [sending, setSending] = useState(false);
+  const generation = useRef(0);
+  const mounted = useRef(false);
+  const sendingRef = useRef(false);
+
+  useLayoutEffect(() => {
+    mounted.current = true;
+    sendingRef.current = false;
+    setSending(false);
+    return () => {
+      mounted.current = false;
+      generation.current += 1;
+    };
+  }, [pubkey]);
 
   const shareLink = useCallback(async () => {
     if (!content) return;
@@ -37,19 +50,27 @@ export function useListingShare(product: MarketProduct) {
 
   const sendToFriend = useCallback(
     async (friend: PickedFriend) => {
-      if (!content || !pubkey || sending) return;
+      if (!content || !pubkey || !mounted.current || sendingRef.current) return;
+      const ownerPubkey = pubkey;
+      const ownerGeneration = generation.current;
+      const isCurrent = () => mounted.current && generation.current === ownerGeneration;
+      sendingRef.current = true;
       setSending(true);
       try {
         // Same choice as starting a chat: an existing Marmot 1:1 or a usable
         // invitation key means Marmot, otherwise NIP-17.
-        const protocol = await preferredDmProtocol(pubkey, friend.pubkey);
+        const protocol = await preferredDmProtocol(ownerPubkey, friend.pubkey);
+        if (!isCurrent()) return;
         const result = await sendSharedDm({
           peer: friend.pubkey,
           text: content.message,
           protocol,
           send: () => sendDirectMessage(friend.pubkey, content.message, { protocol }),
-          append: appendLocalDmMessage,
+          append: async (peer, message) => {
+            if (isCurrent()) await appendLocalDmMessage(peer, message);
+          },
         });
+        if (!isCurrent()) return;
         Toast.show(
           result.success
             ? { type: 'success', text1: t('market.share.sentTo', { name: friend.name }) }
@@ -59,11 +80,16 @@ export function useListingShare(product: MarketProduct) {
                 text2: result.error,
               },
         );
+      } catch {
+        if (isCurrent()) Toast.show({ type: 'error', text1: t('market.share.sendFailed') });
       } finally {
-        setSending(false);
+        if (isCurrent()) {
+          sendingRef.current = false;
+          setSending(false);
+        }
       }
     },
-    [content, pubkey, sending, sendDirectMessage, appendLocalDmMessage, t],
+    [content, pubkey, sendDirectMessage, appendLocalDmMessage, t],
   );
 
   return { available: !!content, signedIn: !!pubkey, sending, shareLink, sendToFriend };
