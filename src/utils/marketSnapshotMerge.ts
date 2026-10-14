@@ -20,10 +20,11 @@ function supersedes(a: Event, b: Event): boolean {
  * same listing — a relay serving an older (still validly signed) revision
  * while the one with the latest is offline must not roll the listing back.
  */
-function newestRevisions(previous: readonly MarketProduct[], fresh: readonly MarketProduct[]) {
-  const held = new Map(previous.map((product) => [product.id, product]));
+function newestRevisions(held: readonly MarketProduct[], fresh: readonly MarketProduct[]) {
+  // One id index per merge (a fetch round), not a per-event Map clone.
+  const heldById = new Map(held.map((product) => [product.id, product]));
   return fresh.map((product) => {
-    const old = held.get(product.id);
+    const old = heldById.get(product.id);
     return old?.listing && product.listing && supersedes(old.listing.event, product.listing.event)
       ? old
       : product;
