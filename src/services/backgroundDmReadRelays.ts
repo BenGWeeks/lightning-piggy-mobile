@@ -1,3 +1,4 @@
+import { lockRelays } from '../config/testRelayLockdown';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { RelayConfig } from '../types/nostr';
 import { perAccountKey } from './perAccountStorage';
@@ -48,5 +49,5 @@ export async function resolveReadRelays(pubkey: string): Promise<string[]> {
   } catch {
     // Unreadable cache — the merged read relays above still apply.
   }
-  return [...new Set([...read, ...inbox])];
+  return lockRelays([...new Set([...read, ...inbox])], pubkey);
 }

@@ -1,5 +1,22 @@
+import { loadIdentities } from './identitiesStore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
+
+import {
+  getTrackingMode,
+  handleTaskLocations,
+  headlessLiveSessions,
+  liveUpdateDispatcher,
+  newestFix,
+  setLiveLocationFixHandler,
+  startTracking,
+  reapOrphanedService,
+  stopSharingHeadless,
+  stopTracking,
+} from './liveLocationTracker';
+import { loadPersistedSessions, savePersistedSessions } from './liveLocationStorage';
+import type { OutgoingSession } from './liveLocationStateMachine';
+jest.mock('./identitiesStore', () => ({ loadIdentities: jest.fn() }));
 
 jest.mock('expo-location', () => ({
   Accuracy: { High: 4 },
@@ -16,21 +33,6 @@ jest.mock('./liveLocationNotification', () => ({
   dismissLiveShareNotification: jest.fn(),
   showLiveShareStoppedNotification: (...a: unknown[]) => mockStopped(...a),
 }));
-
-import {
-  getTrackingMode,
-  handleTaskLocations,
-  headlessLiveSessions,
-  liveUpdateDispatcher,
-  newestFix,
-  setLiveLocationFixHandler,
-  startTracking,
-  reapOrphanedService,
-  stopSharingHeadless,
-  stopTracking,
-} from './liveLocationTracker';
-import { loadPersistedSessions, savePersistedSessions } from './liveLocationStorage';
-import type { OutgoingSession } from './liveLocationStateMachine';
 
 const loc = Location as jest.Mocked<typeof Location>;
 const ME = 'a'.repeat(64);
@@ -55,6 +57,7 @@ const session = (over: Partial<OutgoingSession> = {}): OutgoingSession => ({
 
 beforeEach(async () => {
   jest.clearAllMocks();
+  jest.mocked(loadIdentities).mockResolvedValue({ activePubkey: ME, identities: [] });
   await AsyncStorage.clear();
   await stopTracking();
   liveUpdateDispatcher.reset();

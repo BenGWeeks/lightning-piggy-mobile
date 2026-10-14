@@ -4,6 +4,22 @@
 // signer-gating + fresh-arrival + contentless logic without network or
 // native modules.
 
+import {
+  armBackgroundPaymentWatch,
+  runBackgroundDmWatch,
+  startBackgroundDmWatch,
+  stopBackgroundDmWatch,
+  rearmBackgroundDmWatchForActiveIdentity,
+  rearmBackgroundWatchAfterNwcWalletAdded,
+  __isWatchActiveForTests,
+  __resetForTests,
+} from './backgroundDmService';
+import { invalidateBackgroundPaymentScope } from './backgroundPaymentScope';
+import {
+  claimWrapNotification,
+  __resetForTests as __resetDedupeForTests,
+} from './dmWrapNotificationDedupe';
+
 const mockSubscribe = jest.fn();
 const mockLoadIdentities = jest.fn();
 const mockGetUserRelays = jest.fn();
@@ -66,22 +82,6 @@ jest.mock('./backgroundPaymentService', () => ({
   stopBackgroundPaymentWatch: (...a: unknown[]) => mockStopPayments(...a),
 }));
 jest.mock('./backgroundDmPreference', () => ({ loadBackgroundDmEnabled: jest.fn() }));
-
-import {
-  armBackgroundPaymentWatch,
-  runBackgroundDmWatch,
-  startBackgroundDmWatch,
-  stopBackgroundDmWatch,
-  rearmBackgroundDmWatchForActiveIdentity,
-  rearmBackgroundWatchAfterNwcWalletAdded,
-  __isWatchActiveForTests,
-  __resetForTests,
-} from './backgroundDmService';
-import { invalidateBackgroundPaymentScope } from './backgroundPaymentScope';
-import {
-  claimWrapNotification,
-  __resetForTests as __resetDedupeForTests,
-} from './dmWrapNotificationDedupe';
 
 const ME = 'a'.repeat(64);
 const PARTNER = 'b'.repeat(64);

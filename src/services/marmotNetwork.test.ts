@@ -16,7 +16,11 @@ import { pool, trackRelays } from './nostrPool';
 import { createMarmotGroupConnections } from './marmotGroupConnections';
 import { onMarmotRelayReconnect } from './marmotRelayReconnect';
 import { MARMOT_PUSH_SERVER_RELAYS } from './nostrRelayDefaults';
-import { TEST_ACCOUNT_PUBKEYS, TEST_PUSH_DISABLED } from '../config/testRelayLockdown';
+import {
+  TEST_ACCOUNT_PUBKEYS,
+  TEST_PUSH_DISABLED,
+  TEST_RELAY_URL,
+} from '../config/testRelayLockdown';
 import { setCurrentUserPubkey } from './nostrActiveAccount';
 
 const mockQuerySync = jest.fn();
@@ -528,4 +532,31 @@ test('Welcome ownership filters share one fresh REQ per relay', async () => {
   await sessionNetwork.request(['wss://relay.primal.net'], filters);
   expect(mockQuerySync).toHaveBeenCalledTimes(1);
   expect(mockQuerySync).toHaveBeenCalledWith(['wss://relay.primal.net'], filters, 6000);
+});
+
+test('session-owned Welcome lookup and anonymous publications stay on LAN after an account switch', async () => {
+  const owner = [...TEST_ACCOUNT_PUBKEYS][0];
+  setCurrentUserPubkey(owner);
+  const network = createMarmotNetwork(() => ['wss://public.example'], undefined, owner);
+  let finishLookup!: (events: ReturnType<typeof inboxEvent>[]) => void;
+  mockQuerySync.mockReset().mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finishLookup = resolve;
+      }),
+  );
+  mockPublish.mockReset().mockReturnValue([Promise.resolve('saved')]);
+  const pending = network.getUserInboxRelays(SERVER);
+  expect(mockQuerySync.mock.calls[0][0]).toEqual([TEST_RELAY_URL]);
+  setCurrentUserPubkey('a'.repeat(64));
+  finishLookup([inboxEvent(['wss://public.example'])]);
+  const inbox = await pending;
+  expect(inbox).toEqual([TEST_RELAY_URL]);
+  for (const kind of [1059, 445, 443]) {
+    await network.publish(['wss://public.example'], { kind, pubkey: SERVER } as Event);
+    expect(mockPublish.mock.calls.at(-1)[0]).toEqual([TEST_RELAY_URL]);
+  }
+  mockQuerySync.mockResolvedValue([]);
+  await network.request(['wss://public.example'], { kinds: [443], limit: 1 });
+  expect(mockQuerySync.mock.calls.at(-1)[0]).toEqual([TEST_RELAY_URL]);
 });

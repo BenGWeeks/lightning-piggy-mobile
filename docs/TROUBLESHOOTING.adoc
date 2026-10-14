@@ -1694,3 +1694,15 @@ to the transport. An account switch cannot let a pending test operation escape
 to public relays. Ordinary accounts, release builds and the explicit interop
 override keep their existing behaviour. Transport regressions verify no relay
 lookup, tracking or EVENT publication occurs for locked test initiators.
+
+
+=== Headless TEST accounts or pending Marmot Welcomes use public relays
+
+A headless restart mounts no Nostr provider. Initialise the relay account
+mirror from the persisted active identity before background sync, DM-watch,
+push-wake or live-location relay work. An unreadable identity must stop relay
+work. Background read destinations also retain the saved owner's policy.
+Marmot networks capture the session owner's lockdown at construction; inbox
+lookups, anonymous kind-445 messages, Welcomes and key packages all use it
+through asynchronous waits and account switches. The Nostr network settings
+show the effective LAN destinations for every relay list during lockdown.

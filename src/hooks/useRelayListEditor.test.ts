@@ -1,3 +1,4 @@
+import { TEST_ACCOUNT_PUBKEYS, TEST_RELAY_URL } from '../config/testRelayLockdown';
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 import { useRelayListEditor } from './useRelayListEditor';
 import { fetchLatestReplaceable, publishToRelays } from '../services/nostrRelayLists';
@@ -590,4 +591,14 @@ it('marks the shared draft dirty when details toggles a permission without publi
   });
   expect(mockSign).not.toHaveBeenCalled();
   expect(publish).not.toHaveBeenCalled();
+});
+
+it('displays only LAN lists and disables public edits for a locked identity', async () => {
+  mockPubkey = [...TEST_ACCOUNT_PUBKEYS][0];
+  const { result } = renderHook(() => useRelayListEditor());
+  await waitFor(() => expect(result.current.inboxLoading).toBe(false));
+  expect(result.current.nip65Draft).toEqual([{ url: TEST_RELAY_URL, read: true, write: true }]);
+  expect(result.current.inboxDraft).toEqual([TEST_RELAY_URL]);
+  expect(result.current.addNip65('wss://public.example')).toBe(false);
+  expect(result.current.addInbox('wss://public.example')).toBe(false);
 });

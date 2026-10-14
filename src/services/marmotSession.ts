@@ -232,7 +232,8 @@ export class MarmotSession {
     const store = <T>(ns: string) => createMarmotKvStore<T>(this.backend, ns);
     this.outbox = new MarmotWelcomeOutbox(this.backend, () => this.gate.stopped);
     const network = this.outbox.wrapNetwork(
-      opts.network ?? createMarmotNetwork(opts.getLookupRelays, this.connection.reconnect),
+      opts.network ??
+        createMarmotNetwork(opts.getLookupRelays, this.connection.reconnect, opts.pubkey),
     );
     this.push = new MarmotPushNotifier({
       pubkey: opts.pubkey,

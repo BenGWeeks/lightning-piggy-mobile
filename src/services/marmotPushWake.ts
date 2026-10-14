@@ -1,3 +1,4 @@
+import { initialiseBackgroundRelayAccount } from './backgroundRelayAccount';
 import { canonicalMessageTarget } from '../utils/notificationRouting';
 // What a Marmot push does when it lands (MIP-05 receive side).
 //
@@ -307,6 +308,7 @@ if (!TaskManager.isTaskDefined(MARMOT_PUSH_WAKE_TASK)) {
     // notification watcher's pushes post their own alert and wake nothing.
     if (isWatcherTaskPayload(data)) return;
     try {
+      if (!(await initialiseBackgroundRelayAccount())) return;
       await handleMarmotPushWake();
     } catch (e) {
       if (__DEV__) console.warn('[MarmotPush] wake handling failed:', e);

@@ -1,5 +1,8 @@
-import { activeAccountRelays } from './testRelayRouting';
-import { isTestRelayLockdown, TEST_PUSH_DISABLED } from '../config/testRelayLockdown';
+import {
+  isTestRelayLockdown,
+  TEST_PUSH_DISABLED,
+  TEST_RELAY_URL,
+} from '../config/testRelayLockdown';
 import { getCurrentUserPubkey } from './nostrActiveAccount';
 // marmot-ts `NostrNetworkInterface` over the app's shared nostr-tools pool.
 //
@@ -62,7 +65,10 @@ const isGroupLive = (filters: Filter[]) =>
 export function createMarmotNetwork(
   getFallbackRelays: () => string[],
   onReconnect?: () => void,
+  ownerPubkey: string | null = getCurrentUserPubkey(),
 ): NostrNetworkInterface {
+  // Anonymous group events and Welcomes belong to this session, not their outer author.
+  const locked = isTestRelayLockdown(ownerPubkey);
   let recovering = false;
   const attempts = new Map<string, number>();
   const liveSubscriptions = new Map<object, string[]>();
@@ -83,9 +89,11 @@ export function createMarmotNetwork(
     : undefined;
   const relaysOr = (relays: string[]) => {
     const cleaned = cleanRelays(relays);
-    return activeAccountRelays(
-      cleaned.length > 0 ? cleaned : cleanRelays([...getFallbackRelays(), ...DEFAULT_RELAYS]),
-    );
+    return locked
+      ? [TEST_RELAY_URL]
+      : cleaned.length > 0
+        ? cleaned
+        : cleanRelays([...getFallbackRelays(), ...DEFAULT_RELAYS]);
   };
   const groupSubscribe = createGroupSubscriptionMux(
     (url, filters, next, onReqOpen, onClose) =>
