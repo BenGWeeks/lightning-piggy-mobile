@@ -614,6 +614,10 @@ it.each(['ciphertext hash', 'plaintext hash', 'authentication'] as const)(
     expect(filesUnder(A)).toEqual([]);
     expect(peekDecryptedMedia({ ...file, kind: 'file' })).toBeNull();
   },
+  // The first render loads RN's native component implementations on a cold
+  // Jest cache. Coverage instrumentation on CI can exceed the 5s unit-test
+  // budget; allow the real decrypt/share/render integration path to finish.
+  30_000,
 );
 
 it('exports identical bytes under the sanitized name and retains them for delayed recipient reads', async () => {

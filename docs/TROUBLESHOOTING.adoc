@@ -964,6 +964,21 @@ for several members and allow 90 seconds (`90_000`). When the machine is busy
 fail with a timeout. Before investigating, rerun the file on its own with
 `npx jest src/services/marmotSession.test.ts`. It passes in isolation.
 
+=== Coverage CI times out on the first Marmot file-verification bubble test
+
+If the Coverage job fails in `decryptedMediaCache.test.ts` with
+`Exceeded timeout of 5000 ms` on the ciphertext-hash case, check the failing
+step before assuming a coverage regression. On PR #1573, all other suites
+passed and the job stopped before the coverage comparison. The same full
+suite and a cold-cache isolated run passed locally.
+
+These three cases exercise real decrypt, sharing and React Native rendering.
+The first render loads native component implementations with a cold Jest
+transform cache, which can exceed the default five-second unit-test budget
+under coverage on CI. Give these integration cases a local 30-second timeout;
+keep their integrity assertions, the remaining tests' default timeout and
+the coverage comparison threshold unchanged.
+
 === EAS preview builds don't bump `versionCode`
 
 `eas.json` sets `cli.appVersionSource: "remote"`, and only the `production`
