@@ -92,3 +92,17 @@ it('lists the listing events still shown for the deletion lookup', () => {
     eden.listing!.event,
   ]);
 });
+
+it('keeps the newer cached revision when a relay serves an older one of the same listing', () => {
+  const newer = product('shop-mug', 200, [EDEN_RELAY]);
+  const older = product('shop-mug', 100, [MARKET_RELAY]);
+  const merged = mergeMarketSnapshot([newer], result([older], [MARKET_RELAY]));
+  expect(merged).toHaveLength(1);
+  expect(merged[0].listing?.event.created_at).toBe(200);
+});
+
+it('takes a newer fetched revision over the cached one', () => {
+  const cached = product('shop-mug', 100, [MARKET_RELAY]);
+  const fetched = product('shop-mug', 200, [MARKET_RELAY]);
+  expect(mergeMarketSnapshot([cached], result([fetched], [MARKET_RELAY]))[0]).toBe(fetched);
+});

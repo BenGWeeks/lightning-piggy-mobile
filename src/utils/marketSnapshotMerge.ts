@@ -10,6 +10,26 @@ export const MARKET_MERGE_CAP = 250;
 
 const createdAt = (product: MarketProduct) => product.listing?.event.created_at ?? -Infinity;
 
+/** NIP-01 replaceable ordering: newer `created_at` wins, ties go to the lowest id. */
+function supersedes(a: Event, b: Event): boolean {
+  return a.created_at > b.created_at || (a.created_at === b.created_at && a.id < b.id);
+}
+
+/**
+ * The fresh products, except where we already hold a newer revision of the
+ * same listing — a relay serving an older (still validly signed) revision
+ * while the one with the latest is offline must not roll the listing back.
+ */
+function newestRevisions(previous: readonly MarketProduct[], fresh: readonly MarketProduct[]) {
+  const held = new Map(previous.map((product) => [product.id, product]));
+  return fresh.map((product) => {
+    const old = held.get(product.id);
+    return old?.listing && product.listing && supersedes(old.listing.event, product.listing.event)
+      ? old
+      : product;
+  });
+}
+
 /**
  * Previous listings this round couldn't have seen: every relay that served
  * them stayed silent. Listings without provenance (older cached snapshots)
@@ -41,12 +61,13 @@ export function mergeMarketSnapshot(
   if (next.answeredRelays === undefined)
     return next.transportFailed && next.products.length === 0 ? [...previous] : next.products;
   if (previous.length === 0) return next.products;
-  const room = Math.max(0, MARKET_MERGE_CAP - next.products.length);
+  const fresh = newestRevisions(previous, next.products);
+  const room = Math.max(0, MARKET_MERGE_CAP - fresh.length);
   const carried = carriedOver(previous, next)
     .sort((a, b) => createdAt(b) - createdAt(a))
     .slice(0, room);
-  if (carried.length === 0) return next.products;
-  return [...next.products, ...carried].sort(
+  if (carried.length === 0) return fresh;
+  return [...fresh, ...carried].sort(
     (a, b) => createdAt(b) - createdAt(a) || a.id.localeCompare(b.id),
   );
 }
