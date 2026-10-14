@@ -97,6 +97,34 @@ name: Market — grid → product detail → reviews/comments tabs (#948)
 - assertVisible:
     id: '(market-product-detail-buy|market-contact-seller)'
 
+# Multi-image listings show a paged gallery (#1531); tapping an image opens
+# the full-screen viewer as a swipeable gallery. Curated products have one
+# image (no gallery), so this only runs when a gallery is present.
+- runFlow:
+    when:
+      visible:
+        id: 'market-product-gallery'
+    commands:
+      - assertVisible:
+          id: 'market-product-gallery-dot-0'
+      - assertVisible:
+          id: 'market-product-gallery-dot-1'
+      - tapOn:
+          id: 'market-product-gallery-image-0'
+      - waitForAnimationToEnd:
+          timeout: 1500
+      - assertVisible:
+          id: 'fullscreen-image-gallery'
+      - assertVisible:
+          id: 'fullscreen-image-counter'
+          text: '1 / .*'
+      - tapOn:
+          id: 'fullscreen-image-close'
+      - waitForAnimationToEnd:
+          timeout: 1000
+      - assertVisible:
+          id: 'market-product-detail-screen'
+
 # Reviews + comments live below the fold — scroll the detail until the
 # feedback tabs come into view.
 - scrollUntilVisible:

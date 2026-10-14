@@ -624,6 +624,11 @@
     "imageLabel": "全屏图片",
     "close": "关闭全屏图片"
   },
+  "imageGallery": {
+    "open": "打开图片",
+    "position": "第 {{current}} 张图片，共 {{total}} 张",
+    "openHint": "全屏打开图片"
+  },
   "gifPickerSheet": {
     "title": "发送GIF",
     "searchPlaceholder": "搜索GIF",

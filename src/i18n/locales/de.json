@@ -624,6 +624,11 @@
     "imageLabel": "Bild im Vollbild",
     "close": "Vollbild schließen"
   },
+  "imageGallery": {
+    "open": "Bild öffnen",
+    "position": "Bild {{current}} von {{total}}",
+    "openHint": "Öffnet das Bild im Vollbild"
+  },
   "gifPickerSheet": {
     "title": "GIF senden",
     "searchPlaceholder": "Nach GIFs suchen",

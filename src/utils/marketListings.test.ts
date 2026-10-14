@@ -2,6 +2,7 @@ import { finalizeEvent, getPublicKey, nip19, type Event } from 'nostr-tools';
 import {
   parseMarketListing,
   reduceMarketListings,
+  safeMarketImages,
   safeMarketUrl,
   selectVerifiedListings,
 } from './marketListings';
@@ -204,6 +205,79 @@ describe('market relay listings', () => {
         }),
       )?.image,
     ).toBe('');
+  });
+});
+
+describe('listing images', () => {
+  const withImages = (images: string[][]) =>
+    parseMarketListing(
+      event({
+        tags: [['d', 'x'], ['title', 'Book'], ['price', '1', 'SAT'], ...images],
+      }),
+    )!;
+
+  it('keeps every image tag of a kind-30402 listing, in order, with the first as `image`', () => {
+    const p = withImages([
+      ['image', 'https://cdn.example.com/a.png', '800x600'],
+      ['image', 'https://cdn.example.com/b.png'],
+      ['image', 'https://cdn.example.com/c.png', '1024x1024'],
+    ]);
+    expect(p.images).toEqual([
+      'https://cdn.example.com/a.png',
+      'https://cdn.example.com/b.png',
+      'https://cdn.example.com/c.png',
+    ]);
+    expect(p.image).toBe('https://cdn.example.com/a.png');
+  });
+
+  it('de-duplicates repeated images and drops unsafe ones', () => {
+    const p = withImages([
+      ['image', 'javascript:evil'],
+      ['image', 'https://cdn.example.com/a.png'],
+      ['image', 'http://cdn.example.com/plain.png'],
+      ['image', 'https://192.168.1.1/lan.png'],
+      ['image', 'https://cdn.example.com/a.png'],
+      ['image'],
+      ['image', 'https://cdn.example.com/b.png'],
+    ]);
+    expect(p.images).toEqual(['https://cdn.example.com/a.png', 'https://cdn.example.com/b.png']);
+    // The first SAFE image leads, so an unsafe first tag doesn't blank the card.
+    expect(p.image).toBe('https://cdn.example.com/a.png');
+  });
+
+  it('gives a listing with no usable image an empty list and an empty `image`', () => {
+    const p = withImages([['image', 'javascript:evil']]);
+    expect(p.images).toEqual([]);
+    expect(p.image).toBe('');
+  });
+
+  it('keeps the whole images array of a NIP-15 product', () => {
+    const p = parseMarketListing(
+      event({
+        kind: 30018,
+        content: JSON.stringify({
+          id: 'product-1',
+          name: 'Book',
+          currency: 'SATS',
+          price: 1200,
+          quantity: null,
+          images: [
+            'https://example.com/front.png',
+            42,
+            'https://example.com/back.png',
+            'https://example.com/front.png',
+            'https://localhost/x.png',
+          ],
+        }),
+      }),
+    )!;
+    expect(p.images).toEqual(['https://example.com/front.png', 'https://example.com/back.png']);
+    expect(p.image).toBe('https://example.com/front.png');
+  });
+
+  it('caps a gallery at 20 images', () => {
+    const urls = Array.from({ length: 30 }, (_, i) => `https://cdn.example.com/${i}.png`);
+    expect(safeMarketImages(urls)).toEqual(urls.slice(0, 20));
   });
 });
 

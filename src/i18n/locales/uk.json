@@ -596,6 +596,11 @@
     "imageLabel": "Повноекранне зображення",
     "close": "Закрити повноекранне зображення"
   },
+  "imageGallery": {
+    "open": "Відкрити зображення",
+    "position": "Зображення {{current}} з {{total}}",
+    "openHint": "Відкриває зображення на весь екран"
+  },
   "gifPickerSheet": {
     "title": "Надіслати GIF",
     "searchPlaceholder": "Пошук GIF",

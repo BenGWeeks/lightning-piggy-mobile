@@ -27,6 +27,24 @@ export function safeMarketUrl(value: unknown): string | null {
   }
 }
 
+/** Most images a listing's gallery keeps — plenty for a product page. */
+const MAX_LISTING_IMAGES = 20;
+
+/**
+ * A listing's images in the seller's order: each passed through
+ * {@link safeMarketUrl} (unsafe ones dropped, never replaced), de-duplicated,
+ * capped at {@link MAX_LISTING_IMAGES}.
+ */
+export function safeMarketImages(values: readonly unknown[]): string[] {
+  const images: string[] = [];
+  for (const value of values) {
+    const url = safeMarketUrl(value);
+    if (url && !images.includes(url)) images.push(url);
+    if (images.length >= MAX_LISTING_IMAGES) break;
+  }
+  return images;
+}
+
 /** Parse only supported, active listings; retain the signed event's actual identity. */
 export function parseMarketListing(event: Event, now = Date.now() / 1000): MarketProduct | null {
   if (![30018, 30402].includes(event.kind) || event.content.length > 32768) return null;
@@ -47,7 +65,7 @@ export function parseMarketListing(event: Event, now = Date.now() / 1000): Marke
   let description: unknown;
   let amount: unknown;
   let unit: unknown;
-  let image: unknown;
+  let rawImages: readonly unknown[] = [];
   let frequency: unknown;
   if (event.kind === 30018) {
     try {
@@ -62,7 +80,7 @@ export function parseMarketListing(event: Event, now = Date.now() / 1000): Marke
       description = p.description;
       amount = p.price;
       unit = p.currency;
-      image = Array.isArray(p.images) ? p.images[0] : undefined;
+      rawImages = Array.isArray(p.images) ? p.images : [];
     } catch {
       return null;
     }
@@ -77,7 +95,8 @@ export function parseMarketListing(event: Event, now = Date.now() / 1000): Marke
     amount = price?.[1];
     unit = price?.[2];
     frequency = price?.[3];
-    image = tag(event, 'image');
+    // NIP-99 / Gamma: one `["image", url, dimensions?]` tag per image.
+    rawImages = event.tags.filter((t) => t[0] === 'image').map((t) => t[1]);
   }
   if (typeof title !== 'string' || !title.trim() || title.length > 200) return null;
   if (typeof unit !== 'string' || !/^[a-zA-Z]{3,8}$/.test(unit)) return null;
@@ -101,6 +120,7 @@ export function parseMarketListing(event: Event, now = Date.now() / 1000): Marke
   // Placeholder until a profile name resolves: a short npub, never raw hex.
   const npub = nip19.npubEncode(event.pubkey);
   const sellerName = `${npub.slice(0, 12)}…${npub.slice(-4)}`;
+  const images = safeMarketImages(rawImages);
   const vendor: MarketVendor = {
     name: sellerName,
     country: '',
@@ -119,7 +139,8 @@ export function parseMarketListing(event: Event, now = Date.now() / 1000): Marke
     description: typeof description === 'string' ? description.slice(0, 12000) : '',
     priceSats: Math.round(sats),
     priceFiatLabel: priceLabel,
-    image: safeMarketUrl(image) ?? '',
+    image: images[0] ?? '',
+    images,
     sellerName,
     url,
     featured: false,
