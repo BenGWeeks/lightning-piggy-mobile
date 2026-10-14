@@ -1,3 +1,9 @@
+import {
+  loadBuyerOrderTitles,
+  retireBuyerOrderTitles,
+  reviveBuyerOrderTitles,
+  waitForBuyerOrderTitleWrites,
+} from '../services/buyerOrderTitles';
 import { act, renderHook } from '@testing-library/react-native';
 import { sendNip17Rumor } from '../services/nip17RumorSend';
 import { useMarketCheckout } from './useMarketCheckout';
@@ -187,3 +193,26 @@ test.each(['nsec', 'amber', 'nip46'])(
     ).resolves.toBe(outcome);
   },
 );
+
+test('a checkout finishing after sign-out and re-login cannot restore purchase titles', async () => {
+  reviveBuyerOrderTitles(buyer);
+  let release!: () => void;
+  const sending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  (nostrService.sendNip17ToManyWithSigner as jest.Mock).mockImplementationOnce(async () => {
+    await sending;
+    return { wrapOutcomes: [{ recipientPubkey: vendor, published: true }], errors: [] };
+  });
+  const { result } = renderHook(() => useMarketCheckout());
+  await act(async () => {
+    const checkout = result.current.placeOrder({ ...input, title: 'Private purchase' });
+    retireBuyerOrderTitles(buyer);
+    await waitForBuyerOrderTitleWrites();
+    reviveBuyerOrderTitles(buyer);
+    release();
+    await checkout;
+    await waitForBuyerOrderTitleWrites();
+  });
+  expect(await loadBuyerOrderTitles(buyer)).toEqual({});
+});

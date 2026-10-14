@@ -1,6 +1,6 @@
 import { wipeCheckoutAddress } from '../services/checkoutAddressStorage';
 import { wipeRemoteMediaForOwner } from '../services/remoteMediaCache';
-import { waitForBuyerOrderTitleWrites } from '../services/buyerOrderTitles';
+import { retireBuyerOrderTitles, waitForBuyerOrderTitleWrites } from '../services/buyerOrderTitles';
 import { FOLLOW_SNAPSHOT_KEY } from '../services/contactFollowFreshness';
 /**
  * wipeAccountCaches — delete every per-account persisted artifact for a
@@ -77,6 +77,7 @@ import {
 
 export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise<void> {
   if (!loggedOutPubkey) return;
+  retireBuyerOrderTitles(loggedOutPubkey);
   // Never let a SecureStore failure abort the rest of the per-account wipe.
   await wipeCheckoutAddress(loggedOutPubkey).catch(() => undefined);
   await cancelNotificationDefaults(loggedOutPubkey);

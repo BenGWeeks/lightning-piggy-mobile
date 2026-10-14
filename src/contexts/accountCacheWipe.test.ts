@@ -1,6 +1,10 @@
 import * as SecureStore from 'expo-secure-store';
 import { checkoutAddressKey } from '../services/checkoutAddressStorage';
-import { loadBuyerOrderTitles, recordBuyerOrderTitles } from '../services/buyerOrderTitles';
+import {
+  loadBuyerOrderTitles,
+  recordBuyerOrderTitles,
+  reviveBuyerOrderTitles,
+} from '../services/buyerOrderTitles';
 import { initialiseNotificationDefaults } from '../services/notificationDefaults';
 import * as marmotPush from '../services/marmotPushRegistration';
 import { setActivePubkeyForWalletStorage } from '../services/walletStorageService';
@@ -61,6 +65,11 @@ jest.mock('../services/decryptedMediaCache', () => ({
 
 const PK = 'a'.repeat(64);
 const OTHER_PK = 'b'.repeat(64);
+
+beforeEach(() => {
+  reviveBuyerOrderTitles(PK);
+  reviveBuyerOrderTitles(OTHER_PK);
+});
 
 it("removes the signed-out account's relay-list caches and baselines", async () => {
   const keys = [
@@ -365,4 +374,10 @@ it('deletes the saved delivery address from SecureStore on sign-out', async () =
   expect(remove).toHaveBeenCalledWith(checkoutAddressKey(PK));
   expect(remove).not.toHaveBeenCalledWith(checkoutAddressKey(OTHER_PK));
   remove.mockRestore();
+});
+
+it('rejects title writes from checkout resuming after the account wipe', async () => {
+  await wipeAccountCaches(PK);
+  await recordBuyerOrderTitles(PK, 'late-order', { item: 'Private purchase' });
+  expect(await AsyncStorage.getItem(`market-buyer-order-titles:${PK}`)).toBeNull();
 });

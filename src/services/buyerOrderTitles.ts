@@ -6,6 +6,20 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const MAX_ORDERS = 300;
 const key = (pubkey: string) => `market-buyer-order-titles:${pubkey}`;
 let writeChain: Promise<unknown> = Promise.resolve();
+const generations = new Map<string, number>();
+const retired = new Set<string>();
+export const buyerOrderTitleGeneration = (pubkey: string) => generations.get(pubkey) ?? 0;
+
+/** Invalidate checkout work synchronously, before any account cleanup awaits. */
+export function retireBuyerOrderTitles(pubkey: string): void {
+  retired.add(pubkey);
+  generations.set(pubkey, buyerOrderTitleGeneration(pubkey) + 1);
+}
+
+/** Called only on account activation; old checkout generations stay invalid. */
+export function reviveBuyerOrderTitles(pubkey: string): void {
+  retired.delete(pubkey);
+}
 
 /** Drain queued writes before deleting account caches. */
 export function waitForBuyerOrderTitleWrites(): Promise<void> {
@@ -39,11 +53,15 @@ export function recordBuyerOrderTitles(
   pubkey: string,
   orderId: string,
   titles: Record<string, string>,
+  generation = buyerOrderTitleGeneration(pubkey),
 ): Promise<void> {
+  const canWrite = () => !retired.has(pubkey) && buyerOrderTitleGeneration(pubkey) === generation;
   const run = writeChain.then(async () => {
+    if (!canWrite()) return;
     const all = await loadBuyerOrderTitles(pubkey);
     delete all[orderId];
     const kept = [[orderId, titles] as const, ...Object.entries(all)].slice(0, MAX_ORDERS);
+    if (!canWrite()) return;
     await AsyncStorage.setItem(key(pubkey), JSON.stringify(Object.fromEntries(kept)));
   });
   writeChain = run.catch(() => undefined);

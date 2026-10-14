@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import { useNostr } from '../contexts/NostrContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { Nip17SendError, canSendNip17, sendNip17Rumor } from '../services/nip17RumorSend';
-import { recordBuyerOrderTitles } from '../services/buyerOrderTitles';
+import { buyerOrderTitleGeneration, recordBuyerOrderTitles } from '../services/buyerOrderTitles';
 import {
   buildMarketOrder,
   productCoordinate,
@@ -114,6 +114,7 @@ export function useMarketCheckout(): UseMarketCheckout {
           );
         }
 
+        const titleGeneration = buyerOrderTitleGeneration(pubkey);
         setStatus('placing');
         // Build INSIDE the guarded section: a synchronous throw (RNG missing,
         // unexpected input) still flips status to 'error' with a message.
@@ -142,9 +143,12 @@ export function useMarketCheckout(): UseMarketCheckout {
 
         if (input.title) {
           // Best effort — only labels My orders.
-          void recordBuyerOrderTitles(pubkey, orderId, {
-            [productCoordinate(vendorPubkey, input.dTag)]: input.title,
-          }).catch(() => undefined);
+          void recordBuyerOrderTitles(
+            pubkey,
+            orderId,
+            { [productCoordinate(vendorPubkey, input.dTag)]: input.title },
+            titleGeneration,
+          ).catch(() => undefined);
         }
         setStatus('sent');
         return { orderId, totalSats };
