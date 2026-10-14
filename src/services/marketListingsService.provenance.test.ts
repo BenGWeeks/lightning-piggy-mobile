@@ -266,3 +266,42 @@ it.each([true, false])(
     expect(mergeMarketSnapshot([previous], result)).toEqual(wins ? [] : [previous]);
   },
 );
+
+it.each(['unavailable deletion', 'failed deletion checks', 'aborted'])(
+  'preserves carried listings when the snapshot is withheld: %s',
+  async (reason) => {
+    const book = listing('book');
+    const controller = new AbortController();
+    const deletion = finalizeEvent(
+      {
+        kind: 5,
+        created_at: 300,
+        content: reason === 'unavailable deletion' ? 'x'.repeat(1048577) : '',
+        tags: [['a', `30402:${author}:book`]],
+      },
+      key,
+    );
+    snapshot.mockImplementation(async (opts: Parameters<typeof collectRelaySnapshot>[0]) => {
+      if (opts.filters[0]?.kinds?.[0] === 5) {
+        if (reason === 'aborted') controller.abort();
+        else if (reason === 'failed deletion checks') {
+          for (let i = 0; i < 32; i++) {
+            const forged = finalizeEvent({ ...deletion, created_at: 300 + i }, key);
+            opts.onEvent({ ...forged, sig: '0'.repeat(128) }, SHOP);
+          }
+        } else opts.onEvent(deletion, SHOP);
+      } else opts.onEvent(copy(book), SHOP);
+      return { answered: [SHOP], responded: [SHOP], truncated: false, truncatedSince: null };
+    });
+    const result = await fetchMarketListings([author], [SHOP], controller.signal, undefined, {
+      carried: [book],
+    });
+    expect(result.incomplete).toBe(true);
+    expect(result.products).toEqual([]);
+    expect(result.answeredRelays).toEqual([]);
+    expect(result.withdrawn).toEqual([]);
+    const previous = parseMarketListing(book)!;
+    previous.listing!.seenOn = [SHOP];
+    expect(mergeMarketSnapshot([previous], result)).toEqual([previous]);
+  },
+);

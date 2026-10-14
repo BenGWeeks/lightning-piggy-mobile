@@ -487,6 +487,7 @@ async function runSnapshot(
       cappedProducts.push(robot);
     }
     const shown = new Set(cappedProducts.map((product) => product.id));
+    const withheld = signal.aborted || deletionChecksGaveUp || deletionUnavailable;
     const result: MarketListingsResult = {
       products: cappedProducts.map((product) => ({
         ...product,
@@ -495,8 +496,8 @@ async function runSnapshot(
           seenOn: [...(seenOn.get(product.id) ?? [])],
         },
       })),
-      answeredRelays: [...listings.answered],
-      withdrawn: signal.aborted
+      answeredRelays: withheld ? [] : [...listings.answered],
+      withdrawn: withheld
         ? []
         : [
             ...[...authenticatedListings]
