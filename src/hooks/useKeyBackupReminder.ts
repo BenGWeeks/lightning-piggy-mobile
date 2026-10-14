@@ -9,12 +9,8 @@ import {
   snoozeKeyBackupBanner,
 } from '../services/keyBackupReminder';
 
-// Re-reconcile at most this often while the account list is unchanged (picks
-// up a renamed account or a changed language in the reminder text).
-const RECONCILE_EVERY_MS = 60 * 60 * 1000;
 // Off the startup / resume hot path (CLAUDE.md → AppState handlers stagger).
 const STAGGER_MS = 3000;
-let lastReconciled = { key: '', at: 0 };
 
 /**
  * Weekly key-backup reminder (#1546), driven from the Wallets tab: keeps the
@@ -52,12 +48,10 @@ export function useKeyBackupReminder(): {
           .catch(() => undefined);
       const reconcile = () => {
         if (AppState.currentState !== 'active') return;
-        const now = Date.now();
-        if (accountsKey === lastReconciled.key && now - lastReconciled.at < RECONCILE_EVERY_MS)
-          return;
-        void reconcileKeyBackupReminders(now).then(() => {
-          lastReconciled = { key: accountsKey, at: now };
-        });
+        // Account removal can wipe an anchor even if the same key is re-added,
+        // and permission can change while backgrounded. Re-read both on every
+        // focus / resume; reconciliation preserves unchanged OS reminders.
+        void reconcileKeyBackupReminders();
       };
       const staggered = () => {
         if (timer) clearTimeout(timer);
@@ -81,6 +75,8 @@ export function useKeyBackupReminder(): {
         if (timer) clearTimeout(timer);
         sub.remove();
       };
+      // Registry changes must re-arm reconciliation even if the active account is unchanged.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isLoggedIn, pubkey, signerType, accountsKey]),
   );
 

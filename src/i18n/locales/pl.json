@@ -2932,6 +2932,8 @@
     "keptInSignerBody": "Lightning Piggy nigdy nie widzi klucza prywatnego tego konta. Zrób jego kopię zapasową w aplikacji podpisującej. Frazy odzyskiwania portfeli zapisane w Lightning Piggy wymagają osobnej kopii zapasowej przed wylogowaniem."
   },
   "keyBackupReminder": {
+    "channelName": "Przypomnienia",
+    "channelDescription": "Łagodne przypomnienia, na przykład o zapisaniu kopii zapasowej klucza konta",
     "title": "Kopia zapasowa klucza",
     "body": "Twoje konto {{name}} nie ma jeszcze kopii zapasowej. Jeśli zgubisz ten telefon, stracisz je. Stuknij, aby zapisać klucz.",
     "bannerBody": "To konto nie ma jeszcze kopii zapasowej. Jeśli zgubisz ten telefon, stracisz je. Stuknij, aby zapisać klucz.",

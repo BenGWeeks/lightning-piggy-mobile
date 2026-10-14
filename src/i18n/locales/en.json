@@ -2912,6 +2912,8 @@
     "keptInSignerBody": "Lightning Piggy never sees this account's secret key. Back it up from your signer app. Wallet recovery phrases stored in Lightning Piggy need a separate backup before signing out."
   },
   "keyBackupReminder": {
+    "channelName": "Reminders",
+    "channelDescription": "Gentle reminders, like backing up your account key",
     "title": "Back up your key",
     "body": "Your account {{name}} isn't backed up yet. If you lose this phone, you'll lose it. Tap to save your key.",
     "bannerBody": "This account isn't backed up yet. If you lose this phone, you'll lose it. Tap to save your key.",

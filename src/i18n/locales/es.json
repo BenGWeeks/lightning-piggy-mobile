@@ -2912,6 +2912,8 @@
     "keptInSignerBody": "Lightning Piggy nunca ve la clave secreta de esta cuenta. Haz una copia desde tu app de firma. Las frases de recuperación de carteras guardadas en Lightning Piggy necesitan una copia aparte antes de cerrar sesión."
   },
   "keyBackupReminder": {
+    "channelName": "Recordatorios",
+    "channelDescription": "Recordatorios amables, como hacer una copia de seguridad de la clave de tu cuenta",
     "title": "Respalda tu clave",
     "body": "Tu cuenta {{name}} aún no está respaldada. Si pierdes este teléfono, la perderás. Toca para guardar tu clave.",
     "bannerBody": "Esta cuenta aún no está respaldada. Si pierdes este teléfono, la perderás. Toca para guardar tu clave.",

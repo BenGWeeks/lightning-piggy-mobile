@@ -2,6 +2,9 @@
 // idempotent rescheduling, every cancel path, and the no-permission banner.
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Notifications from 'expo-notifications';
+import { Platform } from 'react-native';
+import i18n from '../i18n';
 import {
   BANNER_SNOOZE_KEY_BASE,
   REMINDER_ANCHOR_KEY_BASE,
@@ -94,6 +97,27 @@ describe('eligibility', () => {
 });
 
 describe('reconcile', () => {
+  it('creates the Android channel using the selected language', async () => {
+    const originalLocale = i18n.locale;
+    const os = jest.replaceProperty(Platform, 'OS', 'android');
+    i18n.locale = 'es';
+    mockIdentities = [nsec(A)];
+    try {
+      await reconcileKeyBackupReminders(WED_14);
+      expect(Notifications.setNotificationChannelAsync).toHaveBeenLastCalledWith(
+        'reminders',
+        expect.objectContaining({
+          name: 'Recordatorios',
+          description:
+            'Recordatorios amables, como hacer una copia de seguridad de la clave de tu cuenta',
+        }),
+      );
+    } finally {
+      i18n.locale = originalLocale;
+      os.restore();
+    }
+  });
+
   it('anchors a new account now and first fires no sooner than 7 days later', async () => {
     mockIdentities = [nsec(A), amber(B)];
     await reconcileKeyBackupReminders(WED_14);
@@ -248,6 +272,17 @@ describe('cancel paths', () => {
 });
 
 describe('without notification permission', () => {
+  it('schedules when permission is granted after a denied reconcile', async () => {
+    mockPermission.mockResolvedValue(false);
+    mockIdentities = [nsec(A)];
+    await reconcileKeyBackupReminders(WED_14);
+    expect(mockScheduled.size).toBe(0);
+    mockPermission.mockResolvedValue(true);
+    await reconcileKeyBackupReminders(WED_14 + 60_000);
+    expect(mockScheduled.has(reminderId(A))).toBe(true);
+    expect(await anchorOf(A)).toBe(WED_14);
+  });
+
   it('schedules nothing (and never asks) but still anchors the account', async () => {
     mockPermission.mockResolvedValue(false);
     mockIdentities = [nsec(A)];

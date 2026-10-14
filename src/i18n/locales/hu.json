@@ -2912,6 +2912,8 @@
     "keptInSignerBody": "A Lightning Piggy sosem látja ennek a fióknak a titkos kulcsát. Az aláíró alkalmazásodból mentsd el. A Lightning Piggyben tárolt pénztárca-helyreállító kifejezéseket kijelentkezés előtt külön kell menteni."
   },
   "keyBackupReminder": {
+    "channelName": "Emlékeztetők",
+    "channelDescription": "Barátságos emlékeztetők, például a fiókkulcsod biztonsági mentésére",
     "title": "Kulcs mentése",
     "body": "A(z) {{name}} fiókod még nincs elmentve. Ha elveszíted ezt a telefont, a fiók is elvész. Koppints a kulcsod mentéséhez.",
     "bannerBody": "Ez a fiók még nincs elmentve. Ha elveszíted ezt a telefont, a fiók is elvész. Koppints a kulcsod mentéséhez.",

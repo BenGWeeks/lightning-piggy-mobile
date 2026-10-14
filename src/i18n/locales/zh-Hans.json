@@ -2912,6 +2912,8 @@
     "keptInSignerBody": "Lightning Piggy永远看不到此账户的私钥。请在你的签名器应用中备份。保存在Lightning Piggy中的钱包助记词，退出登录前需要另外备份。"
   },
   "keyBackupReminder": {
+    "channelName": "提醒",
+    "channelDescription": "贴心提醒，例如备份你的账号密钥",
     "title": "备份你的私钥",
     "body": "你的账户 {{name}} 还没有备份。如果丢了这部手机，账户也会丢失。点按保存你的私钥。",
     "bannerBody": "这个账户还没有备份。如果丢了这部手机，账户也会丢失。点按保存你的私钥。",

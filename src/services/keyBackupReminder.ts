@@ -128,8 +128,8 @@ let channelReady: Promise<void> | null = null;
 function ensureReminderChannel(): Promise<void> {
   if (Platform.OS !== 'android') return Promise.resolve();
   channelReady ??= Notifications.setNotificationChannelAsync(REMINDER_CHANNEL, {
-    name: 'Reminders',
-    description: 'Gentle reminders, like backing up your account key',
+    name: t('keyBackupReminder.channelName'),
+    description: t('keyBackupReminder.channelDescription'),
     importance: Notifications.AndroidImportance.DEFAULT,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
   })
