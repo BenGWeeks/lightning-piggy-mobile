@@ -34,6 +34,9 @@ interface Props {
   variant: 'rail' | 'list' | 'grid';
   /** testID base, e.g. `market-product-card-<id>`. */
   testID?: string;
+  /** The seller publishes no usable shipping info (Ships-to filter): show
+   * "Shipping: ask the seller". */
+  shippingUnknown?: boolean;
 }
 
 /**
@@ -49,6 +52,7 @@ const MarketProductCard: React.FC<Props> = ({
   onPress,
   variant,
   testID,
+  shippingUnknown = false,
 }) => {
   // Shares the avatar's in-flight lookup and kind-0 cache; no extra relay query.
   const sellerProfile = usePubkeyProfile(product.listing?.event.pubkey ?? null);
@@ -139,6 +143,15 @@ const MarketProductCard: React.FC<Props> = ({
             {t('market.fromSeller', { seller: displaySellerName })}
           </Text>
         </View>
+        {shippingUnknown ? (
+          <Text
+            style={styles.shippingUnknown}
+            numberOfLines={1}
+            testID={testID ? `${testID}-shipping-unknown` : undefined}
+          >
+            {t('market.sell.detail.shippingNone')}
+          </Text>
+        ) : null}
         {variant === 'list' ? (
           <Text style={styles.description} numberOfLines={2}>
             {product.description}

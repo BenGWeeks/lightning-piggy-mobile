@@ -2,7 +2,7 @@
 // Thin I/O shell over the PURE parsing/filtering in utils/marketShipping —
 // query the merchant's addressable shipping-option events once per checkout
 // open, newest-revision-per-d.
-import type { Event } from 'nostr-tools';
+import type { Event, Filter } from 'nostr-tools';
 import { pool, trackRelays, DEFAULT_RELAYS } from './nostrService';
 import { acquireMarketListingsPool } from './marketListingsPool';
 import { verifyEventCached } from './nostrVerifyCache';
@@ -83,9 +83,87 @@ export async function fetchShippingOptions(input: {
   return parsed as ShippingOption[];
 }
 
+// Bound each query's requested coordinates and response size. Sellers can
+// share a filter only when they request exactly the same set of identifiers.
+const COORDINATES_PER_QUERY = 100;
+const AUTHORS_PER_QUERY = 20;
+/** A display fetch must stay bounded even when sellers publish thousands of refs. */
+export const MAX_DISPLAY_SHIPPING_REFERENCES = 200;
+const MAX_CONCURRENT_DISPLAY_QUERIES = 4;
+
+function displayReferences(coordinates: readonly string[]): Set<string> {
+  const references = new Set<string>();
+  for (const coordinate of coordinates) {
+    if (!/^30406:[a-f0-9]{64}:.+$/.test(coordinate)) continue;
+    references.add(coordinate);
+    if (references.size === MAX_DISPLAY_SHIPPING_REFERENCES) break;
+  }
+  return references;
+}
+
+/** Drain each small group before starting more work, including on failure.
+ * Both shipping and deletion lookups share this concurrency bound. */
+async function queryDisplayFilters(
+  queryPool: Parameters<typeof querySyncAbortable>[0],
+  relays: string[],
+  filters: Filter[],
+  params: Parameters<typeof querySyncAbortable>[3],
+): Promise<Event[]> {
+  const events: Event[] = [];
+  for (let i = 0; i < filters.length; i += MAX_CONCURRENT_DISPLAY_QUERIES) {
+    if (params.signal?.aborted) return [];
+    const results = await Promise.allSettled(
+      filters
+        .slice(i, i + MAX_CONCURRENT_DISPLAY_QUERIES)
+        .map((filter) => querySyncAbortable(queryPool, relays, filter, params)),
+    );
+    for (const result of results) {
+      if (result.status === 'rejected') throw result.reason;
+      events.push(...result.value);
+    }
+  }
+  return events;
+}
+
+/** Filters for at most 200 references; authors × #d matches only requested coordinates. */
+export function shippingOptionFilters(coordinates: readonly string[]): Filter[] {
+  const byAuthor = new Map<string, string[]>();
+  for (const coordinate of displayReferences(coordinates)) {
+    const author = coordinate.slice(6, 70);
+    const identifiers = byAuthor.get(author) ?? [];
+    identifiers.push(coordinate.slice(71));
+    byAuthor.set(author, identifiers);
+  }
+  const filters: Filter[] = [];
+  const shared = new Map<string, Filter>();
+  for (const [author, identifiers] of byAuthor) {
+    identifiers.sort();
+    for (let i = 0; i < identifiers.length; i += COORDINATES_PER_QUERY) {
+      const dTags = identifiers.slice(i, i + COORDINATES_PER_QUERY);
+      const key = JSON.stringify(dTags);
+      let filter = shared.get(key);
+      if (
+        !filter ||
+        filter.authors!.length >= AUTHORS_PER_QUERY ||
+        (filter.authors!.length + 1) * dTags.length > COORDINATES_PER_QUERY
+      ) {
+        filter = { kinds: [SHIPPING_OPTION_KIND], authors: [], '#d': dTags, limit: 100 };
+        filters.push(filter);
+        shared.set(key, filter);
+      }
+      filter.authors!.push(author);
+      // Allow a stale revision per coordinate without admitting cross-matches.
+      filter.limit = Math.max(100, 2 * filter.authors!.length * dTags.length);
+    }
+  }
+  return filters;
+}
+
 /**
- * Display-only variant for the product page (#1273): shows whatever valid
- * options at the listing's referenced coordinates within the deadline. Unlike
+ * Display-only fetch: whatever valid options exist at the given coordinates
+ * within the deadline — one listing's for its product page (#1273), or a whole
+ * Market page's for the Ships-to filter (batched by `shippingOptionFilters`,
+ * cached in `marketShippingCache`). Unlike
  * {@link fetchShippingOptions} (which gates a checkout and so fails closed on
  * any timeout or malformed option), a slow relay or one bad option here just
  * drops out; only a relay set that entirely fails is an error.
@@ -95,57 +173,32 @@ export async function fetchShippingOptionsForDisplay(input: {
   relays: string[];
   signal?: AbortSignal;
 }): Promise<ShippingOption[]> {
-  const references = new Set(input.coordinates.filter((c) => /^30406:[a-f0-9]{64}:.+$/.test(c)));
+  const references = displayReferences(input.coordinates);
   if (references.size === 0) return [];
   const relays = Array.from(new Set([...input.relays, ...DEFAULT_RELAYS]));
   trackRelays(relays);
-  const byAuthor = new Map<string, string[]>();
-  for (const coordinate of references) {
-    const author = coordinate.slice(6, 70);
-    const tags = byAuthor.get(author) ?? [];
-    tags.push(coordinate.slice(71));
-    byAuthor.set(author, tags);
-  }
   const params = {
     maxWait: FETCH_MAX_WAIT_MS,
     signal: input.signal,
     rejectOnAllRelaysFailure: true,
   };
-  const queries: Promise<Event[]>[] = [];
-  for (const [author, tags] of byAuthor) {
-    for (let i = 0; i < tags.length; i += 100) {
-      queries.push(
-        querySyncAbortable(
-          pool,
-          relays,
-          {
-            kinds: [SHIPPING_OPTION_KIND],
-            authors: [author],
-            '#d': tags.slice(i, i + 100),
-            limit: 100,
-          },
-          params,
-        ),
-      );
-    }
-  }
-  const events = (await Promise.all(queries))
-    .flat()
-    .filter(
-      (event) => event.kind === SHIPPING_OPTION_KIND && references.has(addressOf(event) ?? ''),
-    );
+  const events = (
+    await queryDisplayFilters(pool, relays, shippingOptionFilters([...references]), params)
+  ).filter(
+    (event) => event.kind === SHIPPING_OPTION_KIND && references.has(addressOf(event) ?? ''),
+  );
+  if (input.signal?.aborted) return [];
   // The shared pool verifies signatures synchronously during delivery. Keep
   // deletion crypto in the budget-paced loop below instead.
   const lease = acquireMarketListingsPool(relays);
   let deletions: Event[];
   try {
-    deletions = (
-      await Promise.all(
-        [...deletionFilters('a', addressRefs(events)), ...deletionFilters('e', idRefs(events))].map(
-          (filter) => querySyncAbortable(lease.pool, relays, filter, params),
-        ),
-      )
-    ).flat();
+    deletions = await queryDisplayFilters(
+      lease.pool,
+      relays,
+      [...deletionFilters('a', addressRefs(events)), ...deletionFilters('e', idRefs(events))],
+      params,
+    );
   } finally {
     lease.release();
   }

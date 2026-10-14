@@ -18,7 +18,13 @@ it('gates the first query until saved seller scope and all axes are restored', a
   const h = renderHook(() => useMarketPreferences());
   expect(h.result.current.ready).toBe(false);
   expect(AsyncStorage.setItem).not.toHaveBeenCalled();
-  const saved = { mode: 'wotFriends', merchant: 'Shop', country: 'UK', currency: 'GBP' };
+  const saved = {
+    mode: 'wotFriends',
+    merchant: 'Shop',
+    shipsTo: 'GB',
+    includeUnknownShipping: false,
+    currency: 'GBP',
+  };
   await act(async () => {}); // Let the coordinated storage read start.
   await act(async () => resolve(JSON.stringify(saved)));
   expect(h.result.current.ready).toBe(true);

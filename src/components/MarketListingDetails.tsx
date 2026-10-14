@@ -7,9 +7,11 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { countryName } from '../data/countries';
 import { useListingShippingQuotes } from '../hooks/useListingShippingQuotes';
+import { isDigitalListing } from '../utils/marketShipsTo';
 import {
   formatMarketAmount,
   listingCategories,
+  listingShippingRefs,
   listingStock,
 } from '../utils/marketListingShipping';
 import { createMarketListingDetailsStyles } from '../styles/MarketListingDetails.styles';
@@ -28,6 +30,13 @@ const MarketListingDetails: React.FC<Props> = ({ event, currency }) => {
   const stock = useMemo(() => listingStock(event), [event]);
   const categories = useMemo(() => listingCategories(event), [event]);
   const shipping = useListingShippingQuotes(event, currency);
+  // Keyed on the tags, not `shipping.status`: the hook reports 'none' until
+  // its focus effect starts, which would flash "ask the seller" for listings
+  // that do reference options.
+  const noShippingData = useMemo(
+    () => !isDigitalListing(event) && listingShippingRefs(event).length === 0,
+    [event],
+  );
 
   return (
     <View style={styles.container} testID="market-listing-details">
@@ -48,8 +57,9 @@ const MarketListingDetails: React.FC<Props> = ({ event, currency }) => {
           ))}
         </View>
       ) : null}
-      {shipping.status === 'ready' && shipping.quotes.length === 0 ? (
-        // Referenced options that aren't published (or don't parse): no empty card.
+      {noShippingData || (shipping.status === 'ready' && shipping.quotes.length === 0) ? (
+        // No shipping options referenced, or none published (or parseable):
+        // no empty card, just point the shopper at the seller.
         <View style={styles.row} testID="market-listing-shipping-contact">
           <Truck size={16} color={colors.textSupplementary} strokeWidth={2.25} />
           <Text style={styles.muted}>{t('market.sell.detail.shippingNone')}</Text>

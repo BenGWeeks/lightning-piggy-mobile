@@ -5,6 +5,35 @@ import { act, fireEvent, render } from '@testing-library/react-native';
 import MarketScreen from './MarketScreen';
 import type { ExploreNavigation, MarketRoute } from '../navigation/types';
 
+jest.mock('@gorhom/bottom-sheet', () => ({
+  BottomSheetModalProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
+jest.mock('react-native-gesture-handler', () => ({
+  GestureHandlerRootView: jest.requireActual('react-native').View,
+}));
+jest.mock('../components/CountryPickerSheet', () => {
+  const { TouchableOpacity } = jest.requireActual('react-native');
+  return function MockCountryPicker({
+    visible,
+    onSelect,
+    onClose,
+  }: {
+    visible: boolean;
+    onSelect: (code: string) => void;
+    onClose: () => void;
+  }) {
+    return visible ? (
+      <TouchableOpacity
+        testID="country-picker-row-JP"
+        onPress={() => {
+          onSelect('JP');
+          onClose();
+        }}
+      />
+    ) : null;
+  };
+});
+
 jest.mock('../hooks/useCollectionFilter', () => ({
   useCollectionFilter: function useMockCollectionFilter(
     products: unknown[],
@@ -39,9 +68,14 @@ let mockLoading = true;
 let mockInitialPreferences = {
   mode: 'preferred',
   merchant: null as string | null,
-  country: null as string | null,
+  shipsTo: null as string | null,
+  includeUnknownShipping: true,
   currency: null as string | null,
 };
+let mockShipsTo = new Map<string, import('../utils/marketShipsTo').ShipsTo>();
+jest.mock('../hooks/useMarketShipsTo', () => ({
+  useMarketShipsTo: () => ({ byProduct: mockShipsTo, deviceCountry: 'GB' }),
+}));
 const mockUpdate = jest.fn();
 let mockLiveProducts: typeof import('../data/marketProducts').MARKET_PRODUCTS = [];
 const mockPreferencesHook = function useMockPreferences() {
@@ -56,7 +90,10 @@ const mockPreferencesHook = function useMockPreferences() {
   };
 };
 jest.mock('../contexts/ThemeContext', () => ({ useThemeColors: () => ({}) }));
-jest.mock('../contexts/LocaleContext', () => ({ useTranslation: () => (key: string) => key }));
+jest.mock('../contexts/LocaleContext', () => ({
+  useTranslation: () => (key: string) => key,
+  useLocale: () => ({ t: (key: string) => key, locale: 'en', formatLocale: 'en-GB' }),
+}));
 jest.mock('../components/MarketProductCard', () => () => null);
 jest.mock('../hooks/usePreferredMarketListings', () => ({
   usePreferredMarketListings: () => ({
@@ -104,7 +141,14 @@ beforeEach(() => {
   mockCompleted = false;
   mockLoading = true;
   mockUpdate.mockClear();
-  mockInitialPreferences = { mode: 'preferred', merchant: null, country: null, currency: null };
+  mockInitialPreferences = {
+    mode: 'preferred',
+    merchant: null,
+    shipsTo: null,
+    includeUnknownShipping: true,
+    currency: null,
+  };
+  mockShipsTo = new Map();
   mockLiveProducts = [];
 });
 afterEach(() => {
@@ -199,7 +243,8 @@ it('preserves all restored WoT filters before the first completed current-scope 
   mockInitialPreferences = {
     mode: 'wotFriends',
     merchant: 'Saved merchant',
-    country: 'DE',
+    shipsTo: 'DE',
+    includeUnknownShipping: true,
     currency: 'EUR',
   };
   const screen = render(<MarketScreen navigation={navigation} />);
@@ -211,8 +256,59 @@ it('preserves all restored WoT filters before the first completed current-scope 
   mockCompleted = true;
   screen.rerender(<MarketScreen navigation={navigation} />);
   expect(mockUpdate).toHaveBeenCalledWith(
-    expect.objectContaining({ merchant: null, country: null, currency: null }),
+    // Ships-to is the shopper's destination, so it survives a catalogue
+    // that has no listings for it; catalogue-derived axes reset.
+    expect.objectContaining({ merchant: null, shipsTo: 'DE', currency: null }),
   );
+});
+
+it('filters by Ships to from shipping data, with unknown shipping behind the include toggle', () => {
+  mockLiveProducts = [
+    { ...MARKET_PRODUCTS[0], id: 'ships-gb' },
+    { ...MARKET_PRODUCTS[0], id: 'ships-de' },
+    { ...MARKET_PRODUCTS[0], id: 'worldwide' },
+    { ...MARKET_PRODUCTS[0], id: 'unknown' },
+  ];
+  mockShipsTo = new Map([
+    ['ships-gb', { kind: 'countries', countries: ['GB'] }],
+    ['ships-de', { kind: 'countries', countries: ['DE'] }],
+    ['worldwide', { kind: 'anywhere', reason: 'worldwide' }],
+    ['unknown', { kind: 'unknown' }],
+  ]);
+  const screen = render(<MarketScreen navigation={navigation} />);
+  const ids = () =>
+    screen.UNSAFE_getByType(FlatList).props.data.map((product: { id: string }) => product.id);
+  expect(ids()).toEqual(['ships-gb', 'ships-de', 'worldwide', 'unknown']);
+  fireEvent.press(screen.getByTestId('market-filter-button'));
+  // Phone's country (GB) leads the chips, after Worldwide.
+  expect(screen.getByTestId('market-filter-shipsto-anywhere')).toBeTruthy();
+  fireEvent.press(screen.getByTestId('market-filter-shipsto-GB'));
+  expect(ids()).toEqual(['ships-gb', 'worldwide', 'unknown']);
+  fireEvent(screen.getByTestId('market-filter-shipsto-include-unknown'), 'valueChange', false);
+  expect(ids()).toEqual(['ships-gb', 'worldwide']);
+  fireEvent.press(screen.getByTestId('market-filter-shipsto-anywhere'));
+  expect(ids()).toEqual(['ships-gb', 'ships-de', 'worldwide', 'unknown']);
+});
+
+it('offers the phone country for worldwide sellers and keeps a picker selection as a chip', () => {
+  mockLiveProducts = [{ ...MARKET_PRODUCTS[0], id: 'worldwide' }];
+  mockShipsTo = new Map([['worldwide', { kind: 'anywhere', reason: 'worldwide' }]]);
+  const screen = render(<MarketScreen navigation={navigation} />);
+  fireEvent.press(screen.getByTestId('market-filter-button'));
+  expect(screen.getByTestId('market-filter-shipsto-GB')).toBeTruthy();
+  fireEvent.press(screen.getByTestId('market-filter-shipsto-more'));
+  fireEvent.press(screen.getByTestId('country-picker-row-JP'));
+  expect(screen.queryByTestId('country-picker-row-JP')).toBeNull();
+  expect(screen.getByTestId('market-filter-shipsto-JP').props.accessibilityState.selected).toBe(
+    true,
+  );
+  expect(mockUpdate).toHaveBeenCalledWith({ shipsTo: 'JP' });
+  fireEvent(screen.getByTestId('market-filter-shipsto-include-unknown'), 'valueChange', false);
+  expect(
+    screen.UNSAFE_getByType(FlatList).props.data.map((product: { id: string }) => product.id),
+  ).toEqual(['worldwide']);
+  fireEvent.press(screen.getByTestId('market-filter-shipsto-JP'));
+  expect(mockUpdate).toHaveBeenCalledWith({ shipsTo: null });
 });
 
 it('shows live preferred listings rather than the bundled catalogue', () => {
@@ -277,7 +373,13 @@ it.each(['preferred', 'wotFriends'] as const)(
     const seller = 'a'.repeat(64);
     mockCompleted = true;
     mockLoading = false;
-    mockInitialPreferences = { mode, merchant: seller, country: 'DE', currency: 'EUR' };
+    mockInitialPreferences = {
+      mode,
+      merchant: seller,
+      shipsTo: 'DE',
+      includeUnknownShipping: false,
+      currency: 'EUR',
+    };
     mockSelectedCollection = `30405:${seller}:old-collection`;
     mockLiveProducts = [
       {
@@ -304,7 +406,8 @@ it.each(['preferred', 'wotFriends'] as const)(
     expect(mockUpdate).toHaveBeenCalledWith({
       merchant: seller,
       mode,
-      country: null,
+      shipsTo: null,
+      includeUnknownShipping: true,
       currency: null,
     });
     expect(mockSelectCollection).toHaveBeenCalledWith(null);

@@ -16,7 +16,7 @@ import { ChevronLeft, Search, SlidersHorizontal, Store, X } from 'lucide-react-n
 import MarketProductCard from '../components/MarketProductCard';
 import MarketFilterBar from '../components/MarketFilterBar';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useTranslation } from '../contexts/LocaleContext';
+import { useLocale } from '../contexts/LocaleContext';
 import { usePreferredMarketListings } from '../hooks/usePreferredMarketListings';
 import { useMarketListings } from '../hooks/useMarketListings';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
@@ -24,13 +24,15 @@ import { createMarketScreenStyles } from '../styles/MarketScreen.styles';
 import { sellerOf, type MarketProduct } from '../data/marketProducts';
 import { featuredFirst } from '../utils/marketVendors';
 import { useMarketPreferences } from '../hooks/useMarketPreferences';
+import { useMarketShipsTo } from '../hooks/useMarketShipsTo';
+import { localizedCountryName } from '../data/countries';
+import { SHIPS_TO_UNKNOWN, shipsToOptions } from '../utils/marketShipsTo';
 import { validateMarketPreferences } from '../utils/marketPreferences';
 import { marketLoadingStatus } from '../utils/marketLoadingStatus';
 import { DEFAULT_MARKET_MODE, type MarketMode } from '../utils/marketMode';
 import {
   canClearMarketFilters,
   countActiveMarketFilters,
-  distinctCountries,
   distinctCurrencies,
   filterMarketProducts,
   isMarketFilterActive,
@@ -48,7 +50,7 @@ interface Props {
 /** Preferred catalogue or foreground relay listings from the viewer's direct follows. */
 const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
-  const t = useTranslation();
+  const { t, locale, formatLocale } = useLocale();
   const styles = useMemo(() => createMarketScreenStyles(colors), [colors]);
 
   // Derive the square tile width from the live window so rotation / tablet
@@ -58,12 +60,16 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
   const tileWidth = useMemo(() => marketGridTileWidth(windowWidth), [windowWidth]);
 
   const { ready, preferences, update } = useMarketPreferences();
-  const { mode, merchant: savedMerchant, country, currency } = preferences;
+  const { mode, merchant: savedMerchant, shipsTo, includeUnknownShipping, currency } = preferences;
   const friends = useMarketListings(ready && mode === 'wotFriends');
   const preferred = usePreferredMarketListings(ready && mode === 'preferred');
   const live = mode === 'wotFriends' ? friends : preferred;
   const setMerchant = useCallback((merchant: string | null) => update({ merchant }), [update]);
-  const setCountry = useCallback((country: string | null) => update({ country }), [update]);
+  const setShipsTo = useCallback((shipsTo: string | null) => update({ shipsTo }), [update]);
+  const setIncludeUnknownShipping = useCallback(
+    (includeUnknownShipping: boolean) => update({ includeUnknownShipping }),
+    [update],
+  );
   const setCurrency = useCallback((currency: string | null) => update({ currency }), [update]);
   const selectMode = useCallback(
     (next: MarketMode) => {
@@ -77,11 +83,11 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
     perfLog(`[PerfBlock] market mode committed ${mode}`);
   }, [mode]);
 
-  // The category filters (merchant / country / currency) live in a right-anchored
+  // The category filters (merchant / ships to / currency) live in a right-anchored
   // slide-in panel to keep the main view compact; the search box stays inline.
   const [filtersOpen, setFiltersOpen] = useState(false);
 
-  // Search + merchant + country + currency filters. The query is debounced so
+  // Search + merchant + ships-to + currency filters. The query is debounced so
   // re-filtering stays off the per-keystroke path; the chip axes apply
   // immediately.
   const [query, setQuery] = useState('');
@@ -97,11 +103,27 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
   const merchantOptions = useMemo(() => marketMerchants(baseProducts), [baseProducts]);
   const merchants = useMemo(() => merchantOptions.map((option) => option.id), [merchantOptions]);
   const merchant = resolveMerchantSelection(savedMerchant, merchantOptions, live.merchantAliases);
-  const countries = useMemo(() => distinctCountries(baseProducts, sellerOf), [baseProducts]);
+  // Ships-to comes from the sellers' published shipping options, fetched in
+  // batches for the whole catalogue — never per card.
+  const shipping = useMarketShipsTo(baseProducts, ready);
+  const shipsToCountries = useMemo(
+    () =>
+      shipsToOptions(shipping.byProduct.values(), {
+        deviceCountry: shipping.deviceCountry,
+        selected: shipsTo,
+        nameOf: (code) => localizedCountryName(code, locale),
+        locale: formatLocale,
+      }),
+    [shipping, shipsTo, locale, formatLocale],
+  );
+  const resolveShipsTo = useCallback(
+    (product: MarketProduct) => shipping.byProduct.get(product.id) ?? SHIPS_TO_UNKNOWN,
+    [shipping],
+  );
   const currencies = useMemo(() => distinctCurrencies(baseProducts), [baseProducts]);
 
   // Reconcile the category selections with the option lists whenever the
-  // mode-scoped catalogue changes: a merchant / country / currency picked under
+  // mode-scoped catalogue changes: a merchant / currency picked under
   // one mode may not exist under the next, and a chip that no longer renders
   // can't be un-selected from its axis — the grid would just sit empty.
   useEffect(() => {
@@ -115,11 +137,11 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
       return;
     const validated = validateMarketPreferences(
       { ...preferences, merchant },
-      { merchants, countries, currencies },
+      { merchants, currencies },
     );
     if (
       validated.merchant !== savedMerchant ||
-      validated.country !== country ||
+      validated.shipsTo !== shipsTo ||
       validated.currency !== currency
     )
       update(validated);
@@ -131,37 +153,38 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
     live.loading,
     live.incomplete,
     merchants,
-    countries,
     currencies,
     merchant,
     savedMerchant,
-    country,
+    shipsTo,
     currency,
     preferences,
     update,
   ]);
 
   const filter = useMemo<MarketFilter>(
-    () => ({ query: debouncedQuery, merchant, country, currency }),
-    [debouncedQuery, merchant, country, currency],
+    () => ({ query: debouncedQuery, merchant, shipsTo, includeUnknownShipping, currency }),
+    [debouncedQuery, merchant, shipsTo, includeUnknownShipping, currency],
   );
+  // The live (un-debounced) query — drives the empty-state copy and badges.
+  const liveFilter: MarketFilter = { ...filter, query };
   // `active` tracks the live (un-debounced) query so the empty-state copy flips
   // as soon as the user types.
-  const filterActive = isMarketFilterActive({ query, merchant, country, currency });
+  const filterActive = isMarketFilterActive(liveFilter);
   // The seller scope counts toward the button badge whenever it narrows the
   // catalogue — including the default preferred-sellers view — so the button
   // never looks unfiltered while the list is scoped. Search also contributes,
   // but retains its own clear control.
-  const panelFilterCount = countActiveMarketFilters({ query, merchant, country, currency }, mode);
+  const panelFilterCount = countActiveMarketFilters(liveFilter, mode);
   const activeFilterCount = panelFilterCount + (query.trim().length > 0 ? 1 : 0);
   const filtersActive = activeFilterCount > 0;
   // The panel's Clear only shows when something can actually be reset.
-  const filtersClearable = canClearMarketFilters({ query, merchant, country, currency }, mode);
+  const filtersClearable = canClearMarketFilters(liveFilter, mode);
 
   const collectionFilter = useCollectionFilter(baseProducts, ready && merchant !== null, merchant);
   const products = useMemo(
-    () => filterMarketProducts(collectionFilter.products, filter, sellerOf),
-    [collectionFilter.products, filter],
+    () => filterMarketProducts(collectionFilter.products, filter, sellerOf, resolveShipsTo),
+    [collectionFilter.products, filter, resolveShipsTo],
   );
 
   // A See all request replaces filters on a reused grid, including a collection
@@ -176,7 +199,8 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
     update({
       merchant: request.merchant,
       ...(request.mode ? { mode: request.mode } : {}),
-      country: null,
+      shipsTo: null,
+      includeUnknownShipping: true,
       currency: null,
     });
     setQuery('');
@@ -184,11 +208,9 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [ready, request, update, selectCollection]);
 
   const clearFilters = useCallback(() => {
-    setMerchant(null);
-    setCountry(null);
-    setCurrency(null);
+    update({ merchant: null, shipsTo: null, includeUnknownShipping: true, currency: null });
     selectMode(DEFAULT_MARKET_MODE);
-  }, [selectMode, setMerchant, setCountry, setCurrency]);
+  }, [selectMode, update]);
 
   const openProduct = useCallback(
     (product: MarketProduct) => {
@@ -212,6 +234,7 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
             product={item}
             sellerName={vendor?.name ?? item.sellerName}
             vendor={vendor}
+            shippingUnknown={shipping.byProduct.get(item.id)?.kind === 'unknown'}
             variant="grid"
             onPress={openProduct}
             testID={`market-product-card-${item.id}`}
@@ -219,7 +242,7 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
         </View>
       );
     },
-    [tileWidth, openProduct],
+    [tileWidth, openProduct, shipping],
   );
 
   const emptyCopy =
@@ -367,9 +390,11 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
         merchants={merchantOptions}
         selectedMerchant={merchant}
         onSelectMerchant={setMerchant}
-        countries={countries}
-        selectedCountry={country}
-        onSelectCountry={setCountry}
+        shipsToCountries={shipsToCountries}
+        selectedShipsTo={shipsTo}
+        onSelectShipsTo={setShipsTo}
+        includeUnknownShipping={includeUnknownShipping}
+        onIncludeUnknownShippingChange={setIncludeUnknownShipping}
         currencies={currencies}
         selectedCurrency={currency}
         onSelectCurrency={setCurrency}

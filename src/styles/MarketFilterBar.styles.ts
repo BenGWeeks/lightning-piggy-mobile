@@ -4,6 +4,7 @@ import type { Palette } from './palettes';
 /** Styles for the Market's seller scope and category filter drawer. */
 export const createMarketFilterBarStyles = (colors: Palette) =>
   StyleSheet.create({
+    modalRoot: { flex: 1 },
     // ----- panel shell -----------------------------------------------------
     backdrop: {
       ...StyleSheet.absoluteFillObject,
@@ -97,6 +98,14 @@ export const createMarketFilterBarStyles = (colors: Palette) =>
       color: colors.white,
       fontWeight: '700',
     },
+    // ----- ships-to "include unknown shipping" toggle ---------------------
+    toggleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      marginTop: 12,
+    },
+    toggleLabel: { flex: 1, fontSize: 13, color: colors.textSupplementary },
     merchantListTitle: { fontSize: 20, fontWeight: '800', color: colors.textBody },
     merchantRowLabel: { flex: 1, fontSize: 14, color: colors.textBody },
     merchantSheetOverlay: { flex: 1, justifyContent: 'flex-end' },

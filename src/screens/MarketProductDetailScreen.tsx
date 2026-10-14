@@ -253,6 +253,12 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
               currency={product.listing.currency}
             />
           ) : null}
+          {product.listing ? null : (
+            // Curated catalogue items carry no Nostr shipping data.
+            <Text style={styles.shippingUnknown} testID="market-product-shipping-unknown">
+              {t('market.sell.detail.shippingNone')}
+            </Text>
+          )}
           {withdrawn ? (
             // A refresh found the listing deleted, sold or expired.
             <View style={styles.withdrawn} testID="market-product-detail-withdrawn">

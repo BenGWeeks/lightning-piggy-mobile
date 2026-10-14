@@ -1,9 +1,19 @@
 import { finalizeEvent, getPublicKey } from 'nostr-tools';
-import { fetchShippingOptions, fetchShippingOptionsForDisplay } from './marketShippingService';
+import {
+  fetchShippingOptions,
+  fetchShippingOptionsForDisplay,
+  shippingOptionFilters,
+} from './marketShippingService';
 import { querySyncAbortable } from './relayQuery';
 import { acquireMarketListingsPool } from './marketListingsPool';
 import * as pacing from '../contexts/nostrDecryptPacing';
 import * as verification from './nostrVerifyCache';
+// Exercise real hash/signature validation without the facade's dev perf timer.
+jest.mock('./nostrCrypto', () => {
+  const { getEventHash, verifyEvent } = jest.requireActual('nostr-tools/pure');
+  return { nostrGetEventHash: getEventHash, nostrVerifyEvent: verifyEvent };
+});
+afterEach(() => verification.__resetVerifiedEventCache());
 jest.mock('./marketListingsPool', () => ({
   acquireMarketListingsPool: jest.fn(),
 }));
@@ -150,18 +160,44 @@ test('fetches exact references grouped by embedded author and validates unsolici
     );
   const options = await fetchShippingOptionsForDisplay({ ...input, coordinates });
   expect(options.map((o) => o.coordinate).sort()).toEqual([...coordinates].sort());
-  const filters = (querySyncAbortable as jest.Mock).mock.calls.map((c) => c[2]);
-  expect(filters).toContainEqual({
-    kinds: [30406],
-    authors: [other],
-    '#d': ['std', 'zone:colon'],
-    limit: 100,
+  const filters = (querySyncAbortable as jest.Mock).mock.calls
+    .map((c) => c[2])
+    .filter((f) => f.kinds[0] === 30406);
+  // Different identifier sets cannot share a filter without cross-matches.
+  expect(filters).toEqual([
+    {
+      kinds: [30406],
+      authors: [input.merchantPubkey],
+      '#d': ['std'],
+      limit: 100,
+    },
+    {
+      kinds: [30406],
+      authors: [other],
+      '#d': ['std', 'zone:colon'],
+      limit: 100,
+    },
+  ]);
+});
+
+describe('shippingOptionFilters (batched across sellers)', () => {
+  const author = (i: number) => i.toString(16).padStart(64, '0');
+  test('caps each query at 20 authors and 100 coordinates, with a bounded limit', () => {
+    const many = Array.from({ length: 45 }, (_, i) => `30406:${author(i)}:std`);
+    const filters = shippingOptionFilters(many);
+    expect(filters.map((f) => f.authors!.length)).toEqual([20, 20, 5]);
+    expect(filters.every((f) => f['#d']!.length === 1 && f.limit === 100)).toBe(true);
+    const oneSeller = Array.from({ length: 150 }, (_, i) => `30406:${author(1)}:zone-${i}`);
+    const chunks = shippingOptionFilters(oneSeller);
+    expect(chunks.map((f) => f['#d']!.length)).toEqual([100, 50]);
+    expect(chunks.map((f) => f.limit)).toEqual([200, 100]);
   });
-  expect(filters).toContainEqual({
-    kinds: [30406],
-    authors: [input.merchantPubkey],
-    '#d': ['std'],
-    limit: 100,
+  test('dedupes and skips malformed coordinates', () => {
+    const ok = `30406:${author(2)}:std`;
+    expect(shippingOptionFilters([ok, ok, '30402:abc:std', `30406:${author(2)}:`])).toEqual([
+      { kinds: [30406], authors: [author(2)], '#d': ['std'], limit: 100 },
+    ]);
+    expect(shippingOptionFilters([])).toEqual([]);
   });
 });
 
@@ -296,4 +332,125 @@ test('releases the structure-only pool when a deletion query fails', async () =>
     });
   await expect(fetchShippingOptionsForDisplay(input)).rejects.toThrow('deletion query failed');
   expect(release).toHaveBeenCalledTimes(1);
+});
+
+test('retains all 20 requested pairs when 380 newer cross-matches would truncate a relay response', async () => {
+  const authors = Array.from({ length: 20 }, (_, i) => i.toString(16).padStart(64, '0'));
+  const coordinates = authors.map((author, i) => `30406:${author}:zone-${i}`);
+  const events = authors
+    .flatMap((pubkey, i) =>
+      authors.map((_, j) => ({
+        id: `${i}-${j}`,
+        pubkey,
+        kind: 30406,
+        created_at: i === j ? 1 : 2,
+        tags: [
+          ['d', `zone-${j}`],
+          ['price', '5', 'GBP'],
+          ['country', 'GB'],
+        ],
+      })),
+    )
+    .sort((a, b) => b.created_at - a.created_at);
+  (querySyncAbortable as jest.Mock)
+    .mockReset()
+    .mockImplementation(async (_pool, _relays, filter) => {
+      if (filter.kinds[0] === 5) return [];
+      // Model relay filtering and newest-first limit BEFORE client post-filtering.
+      return events
+        .filter(
+          (event) =>
+            filter.authors.includes(event.pubkey) && filter['#d'].includes(event.tags[0][1]),
+        )
+        .slice(0, filter.limit);
+    });
+  const options = await fetchShippingOptionsForDisplay({ ...input, coordinates });
+  expect(options.map((option) => option.coordinate).sort()).toEqual([...coordinates].sort());
+});
+
+describe('display fetch resource bounds', () => {
+  const references = Array.from(
+    { length: 10_000 },
+    (_, i) => `30406:${i.toString(16).padStart(64, '0')}:std`,
+  );
+
+  test('caps 10,000 seller references and limits shipping AND deletion concurrency', async () => {
+    let active = 0;
+    const peak = new Map<number, number>();
+    (querySyncAbortable as jest.Mock)
+      .mockReset()
+      .mockImplementation(async (_pool, _relays, filter) => {
+        active++;
+        const kind = filter.kinds[0];
+        peak.set(kind, Math.max(peak.get(kind) ?? 0, active));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        active--;
+        if (kind === 5) return [];
+        // Two revisions per coordinate create six deletion queries (2 address,
+        // 4 event-id), so deletion concurrency exercises the same bound.
+        return filter.authors.flatMap((pubkey: string) =>
+          filter['#d'].flatMap((d: string) =>
+            [1, 2].map((revision) => ({
+              id: `${pubkey}-${d}-${revision}`,
+              kind,
+              pubkey,
+              created_at: revision,
+              tags: [
+                ['d', d],
+                ['price', '5', 'GBP'],
+                ['country', 'GB'],
+              ],
+            })),
+          ),
+        );
+      });
+    const options = await fetchShippingOptionsForDisplay({ ...input, coordinates: references });
+    const filters = (querySyncAbortable as jest.Mock).mock.calls.map((call) => call[2]);
+    const shippingFilters = filters.filter((filter) => filter.kinds[0] === 30406);
+    expect(shippingFilters).toHaveLength(10); // Previously 500 simultaneous queries.
+    expect(options.map((option) => option.coordinate).sort()).toEqual(
+      references.slice(0, 200).sort(),
+    );
+    expect(peak.get(30406)).toBe(4);
+    expect(peak.get(5)).toBe(4);
+    expect(filters.filter((filter) => filter.kinds[0] === 5)).toHaveLength(6);
+    expect(active).toBe(0);
+  });
+
+  test('the reference cap counts unique valid coordinates', () => {
+    const duplicated = references.flatMap((coordinate) => ['invalid', coordinate, coordinate]);
+    const requested = shippingOptionFilters(duplicated).flatMap((filter) =>
+      filter.authors!.flatMap((author) => filter['#d']!.map((d) => `30406:${author}:${d}`)),
+    );
+    expect(requested).toEqual(references.slice(0, 200));
+  });
+
+  test.each(['abort', 'failure'])(
+    'stops queued work on %s and drains active queries',
+    async (reason) => {
+      const controller = new AbortController();
+      let active = 0;
+      let calls = 0;
+      (querySyncAbortable as jest.Mock).mockReset().mockImplementation(async () => {
+        const first = calls++ === 0;
+        active++;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        active--;
+        if (first) {
+          if (reason === 'failure') throw new Error('relay failure');
+          controller.abort();
+        }
+        return [];
+      });
+      const fetch = fetchShippingOptionsForDisplay({
+        ...input,
+        coordinates: references,
+        signal: controller.signal,
+      });
+      if (reason === 'failure') await expect(fetch).rejects.toThrow('relay failure');
+      else await expect(fetch).resolves.toEqual([]);
+      expect(calls).toBe(4);
+      expect(active).toBe(0);
+    },
+  );
 });
