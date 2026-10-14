@@ -625,6 +625,7 @@
     "close": "Zamknij obraz na pełnym ekranie"
   },
   "imageGallery": {
+    "open": "Otwórz obraz",
     "position": "Obraz {{current}} z {{total}}",
     "openHint": "Otwiera obraz na pełnym ekranie"
   },

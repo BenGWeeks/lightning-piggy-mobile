@@ -63,26 +63,39 @@ const SingleImage = ({
   title: string;
   styles: MarketProductGalleryStyles;
 }) => {
+  const t = useTranslation();
+  const [viewerUrl, setViewerUrl] = useState<string | null>(null);
+  const onCloseViewer = useCallback(() => setViewerUrl(null), []);
   const [failed, setFailed] = useState(false);
   const [aspect, setAspect] = useState<number | null>(null);
   return (
     <View style={[styles.imageWrap, aspect ? { aspectRatio: aspect } : null]}>
       {image && !failed ? (
-        <Image
-          source={{ uri: image }}
+        <Pressable
           style={styles.image}
-          contentFit="cover"
-          cachePolicy="memory-disk"
-          recyclingKey={image}
-          onLoad={(e) => {
-            const next = aspectOf(e);
-            if (next) setAspect(next);
-          }}
-          onError={() => setFailed(true)}
-        />
+          onPress={() => setViewerUrl(image)}
+          accessibilityRole="imagebutton"
+          accessibilityLabel={t('imageGallery.open')}
+          accessibilityHint={t('imageGallery.openHint')}
+          testID="market-product-image-open"
+        >
+          <Image
+            source={{ uri: image }}
+            style={styles.image}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            recyclingKey={image}
+            onLoad={(e) => {
+              const next = aspectOf(e);
+              if (next) setAspect(next);
+            }}
+            onError={() => setFailed(true)}
+          />
+        </Pressable>
       ) : (
         <Fallback title={title} styles={styles} />
       )}
+      <FullscreenImageModal url={viewerUrl} onClose={onCloseViewer} />
     </View>
   );
 };

@@ -74,6 +74,18 @@ const FullscreenGallery = React.memo(
       },
       [width, total],
     );
+    const onScrollEndDrag = useCallback(
+      (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+        const { contentOffset, velocity } = e.nativeEvent;
+        // iOS can finish a slow drag without emitting momentum scroll end.
+        if (
+          velocity?.x === 0 &&
+          Math.abs(contentOffset.x - Math.round(contentOffset.x / width) * width) < 0.5
+        )
+          onMomentumScrollEnd(e);
+      },
+      [width, onMomentumScrollEnd],
+    );
     const renderItem = useCallback(
       ({ item, index: i }: ListRenderItemInfo<string>) => (
         <ZoomableImage
@@ -107,6 +119,7 @@ const FullscreenGallery = React.memo(
           maxToRenderPerBatch={2}
           windowSize={3}
           onMomentumScrollEnd={onMomentumScrollEnd}
+          onScrollEndDrag={onScrollEndDrag}
         />
         <View style={[styles.counter, { top: topInset + 15 }]} pointerEvents="none">
           <Text style={styles.counterText} testID="fullscreen-image-counter">

@@ -625,6 +625,7 @@
     "close": "Teljes képernyős kép bezárása"
   },
   "imageGallery": {
+    "open": "Kép megnyitása",
     "position": "{{current}}. kép / {{total}}",
     "openHint": "Teljes képernyőn megnyitja a képet"
   },

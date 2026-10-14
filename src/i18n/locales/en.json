@@ -625,6 +625,7 @@
     "close": "Close full-screen image"
   },
   "imageGallery": {
+    "open": "Open image",
     "position": "Image {{current}} of {{total}}",
     "openHint": "Opens the image full screen"
   },
