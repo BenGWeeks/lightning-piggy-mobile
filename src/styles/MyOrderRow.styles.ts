@@ -4,7 +4,6 @@ import type { Palette } from './palettes';
 /** One order in the buyer's My orders list. */
 export const createMyOrderRowStyles = (colors: Palette) =>
   StyleSheet.create({
-    amount: { alignItems: 'flex-end', gap: 2 },
     row: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -31,9 +30,10 @@ export const createMyOrderRowStyles = (colors: Palette) =>
       alignItems: 'center',
       justifyContent: 'space-between',
       gap: 8,
+      flexWrap: 'wrap',
     },
     seller: { flex: 1, fontSize: 15, fontWeight: '600', color: colors.textHeader },
-    total: { fontSize: 14, fontWeight: '700', color: colors.textHeader },
+    total: { flexShrink: 1, fontSize: 14, fontWeight: '700', color: colors.textHeader },
     items: { fontSize: 13, color: colors.textBody },
     bottomLine: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 },
     date: { fontSize: 12, color: colors.textSupplementary },

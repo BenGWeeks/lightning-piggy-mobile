@@ -27,7 +27,7 @@ import {
   isSatsDenominated,
 } from '../utils/marketCheckoutPricing';
 import { MAX_ORDER_ADDRESS_LENGTH, normalizeOrderAddress } from '../utils/marketOrder';
-import { deviceCountryCode } from '../data/countries';
+import { useCheckoutCountry } from '../hooks/useCheckoutCountry';
 import MarketShippingSection from './MarketShippingSection';
 import CountryPickerSheet from './CountryPickerSheet';
 import Toast from './BrandedToast';
@@ -100,9 +100,13 @@ const MarketCheckoutSheet: React.FC<Props> = ({
 
   // --- Country-first shipping (#948 Option A) ---
   const shipping = useShippingOptions(visible ? vendorPubkey : null, visible, fulfilment);
-  const [countryCode, setCountryCode] = useState<string | null>(null);
+  const {
+    countryCode,
+    selectCountry: setCountryCode,
+    rememberCountry,
+  } = useCheckoutCountry(visible);
   const [countryPickerVisible, setCountryPickerVisible] = useState(false);
-  const [selectedCoordinate, setSelectedCoordinate] = useState<string | null>(null);
+  const [chosenCoordinate, setSelectedCoordinate] = useState<string | null>(null);
   // The seller's options this product can ship with: a listing's own
   // `shipping_option` refs, or every option the seller publishes.
   const sellerOptions = useMemo(
@@ -126,8 +130,6 @@ const MarketCheckoutSheet: React.FC<Props> = ({
       setQuantity(1);
       setAddress('');
       setImageFailed(false);
-      // Pre-select the device-locale country (spec: user can change it).
-      setCountryCode(deviceCountryCode());
       setSelectedCoordinate(null);
       reset();
       sheetRef.current?.present();
@@ -152,14 +154,19 @@ const MarketCheckoutSheet: React.FC<Props> = ({
     [hasShipping, sellerOptions, countryCode],
   );
 
-  // Reactivity: changing country re-filters; if the current selection became
-  // incompatible, clear it so the buyer must re-pick (spec §3).
+  // Automatic choices are derived, so they do not become implicit choices
+  // when a later country or option refresh offers several alternatives.
+  const selectedCoordinate =
+    compatibleOptions.length === 1
+      ? compatibleOptions[0].coordinate
+      : compatibleOptions.some((o) => o.coordinate === chosenCoordinate)
+        ? chosenCoordinate
+        : null;
   useEffect(() => {
-    if (!selectedCoordinate) return;
-    if (!compatibleOptions.some((o) => o.coordinate === selectedCoordinate)) {
+    if (chosenCoordinate && !compatibleOptions.some((o) => o.coordinate === chosenCoordinate)) {
       setSelectedCoordinate(null);
     }
-  }, [compatibleOptions, selectedCoordinate]);
+  }, [compatibleOptions, chosenCoordinate]);
 
   // All-in sats cost per option: the option's base (its own currency) plus a
   // listing's `shipping_option` surcharge (the listing currency). null = no rate.
@@ -306,6 +313,7 @@ const MarketCheckoutSheet: React.FC<Props> = ({
         ...(needsAddress ? { address: normalizeOrderAddress(address) } : {}),
         title: product.title,
       });
+      if (hasShipping) rememberCountry();
       Toast.show({
         type: 'success',
         text1: t('market.checkout.toastPlaced'),
@@ -336,6 +344,7 @@ const MarketCheckoutSheet: React.FC<Props> = ({
     selectedCoordinate,
     selectedShippingSats,
     countryCode,
+    rememberCountry,
     rateCurrencies,
     btcPriceByCurrency,
     refreshRates,
@@ -458,8 +467,8 @@ const MarketCheckoutSheet: React.FC<Props> = ({
                         amount: unitPriceSats?.toLocaleString(formatLocale) ?? '—',
                         fiat: product.priceFiatLabel,
                       })}
+                  <FiatAmount inline sats={unitPriceSats} testID="market-checkout-unit-fiat" />
                 </Text>
-                <FiatAmount sats={unitPriceSats} testID="market-checkout-unit-fiat" />
               </View>
             </View>
 
@@ -555,51 +564,47 @@ const MarketCheckoutSheet: React.FC<Props> = ({
               <>
                 <View style={styles.summaryRow}>
                   <Text style={styles.summaryLabel}>{t('market.checkout.subtotal')}</Text>
-                  <View style={styles.amountColumn}>
-                    <Text style={styles.summaryValue} testID="market-checkout-subtotal">
-                      {t('market.sats', {
-                        amount: subtotalSats?.toLocaleString(formatLocale) ?? '—',
-                      })}
-                    </Text>
-                    <FiatAmount sats={subtotalSats} testID="market-checkout-subtotal-fiat" />
-                  </View>
+                  <Text
+                    style={[styles.summaryValue, styles.amountColumn]}
+                    testID="market-checkout-subtotal"
+                  >
+                    {t('market.sats', {
+                      amount: subtotalSats?.toLocaleString(formatLocale) ?? '—',
+                    })}
+                    <FiatAmount inline sats={subtotalSats} testID="market-checkout-subtotal-fiat" />
+                  </Text>
                 </View>
                 <View style={styles.summaryRow}>
                   <Text style={styles.summaryLabel}>{t('market.checkout.shipping')}</Text>
-                  <View style={styles.amountColumn}>
-                    <Text style={styles.summaryValue} testID="market-checkout-shipping">
-                      {selectedShippingSats !== null
-                        ? selectedShippingSats === 0
-                          ? t('market.free')
-                          : t('market.sats', {
-                              amount: selectedShippingSats.toLocaleString(formatLocale),
-                            })
-                        : '—'}
-                    </Text>
+                  <Text
+                    style={[styles.summaryValue, styles.amountColumn]}
+                    testID="market-checkout-shipping"
+                  >
+                    {selectedShippingSats !== null
+                      ? selectedShippingSats === 0
+                        ? t('market.free')
+                        : t('market.sats', {
+                            amount: selectedShippingSats.toLocaleString(formatLocale),
+                          })
+                      : '—'}
                     <FiatAmount
+                      inline
                       sats={selectedShippingSats}
                       testID="market-checkout-shipping-fiat"
                     />
-                  </View>
+                  </Text>
                 </View>
               </>
             ) : null}
 
             <View style={styles.totalRow}>
               <Text style={styles.totalLabel}>{t('market.checkout.total')}</Text>
-              <View style={styles.amountColumn}>
-                <View style={styles.totalValue}>
-                  <Zap
-                    size={16}
-                    color={colors.brandPink}
-                    strokeWidth={2.5}
-                    fill={colors.brandPink}
-                  />
-                  <Text style={styles.totalSats} testID="market-checkout-total">
-                    {t('market.sats', { amount: totalSats?.toLocaleString(formatLocale) ?? '—' })}
-                  </Text>
-                </View>
-                <FiatAmount sats={totalSats} testID="market-checkout-total-fiat" />
+              <View style={styles.totalValue}>
+                <Zap size={16} color={colors.brandPink} strokeWidth={2.5} fill={colors.brandPink} />
+                <Text style={styles.totalSats} testID="market-checkout-total">
+                  {t('market.sats', { amount: totalSats?.toLocaleString(formatLocale) ?? '—' })}
+                  <FiatAmount inline sats={totalSats} testID="market-checkout-total-fiat" />
+                </Text>
               </View>
             </View>
 
@@ -667,7 +672,10 @@ const MarketCheckoutSheet: React.FC<Props> = ({
         visible={countryPickerVisible}
         onClose={() => setCountryPickerVisible(false)}
         selectedCode={countryCode}
-        onSelect={setCountryCode}
+        onSelect={(country) => {
+          setSelectedCoordinate(null);
+          setCountryCode(country);
+        }}
       />
     </BottomSheetModal>
   );

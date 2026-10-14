@@ -171,21 +171,19 @@ const MarketShippingSection: React.FC<Props> = ({
                     {scopeLabel(option, t)}
                   </Text>
                 </View>
-                <View style={styles.optionAmount}>
-                  <Text style={styles.optionCost}>
-                    {costSats === null || costSats === undefined
-                      ? // Fiat rate unavailable — show the merchant's own pricing
-                        // rather than a wrong sats figure; submit stays blocked.
-                        t('market.shipping.priceFallback', {
-                          amount: option.baseAmount,
-                          currency: option.currency || '?',
-                        })
-                      : costSats === 0
-                        ? t('market.free')
-                        : t('market.sats', { amount: costSats.toLocaleString(formatLocale) })}
-                  </Text>
-                  <FiatAmount sats={costSats} />
-                </View>
+                <Text style={styles.optionCost}>
+                  {costSats === null || costSats === undefined
+                    ? // Fiat rate unavailable — show the merchant's own pricing
+                      // rather than a wrong sats figure; submit stays blocked.
+                      t('market.shipping.priceFallback', {
+                        amount: option.baseAmount,
+                        currency: option.currency || '?',
+                      })
+                    : costSats === 0
+                      ? t('market.free')
+                      : t('market.sats', { amount: costSats.toLocaleString(formatLocale) })}
+                  <FiatAmount inline sats={costSats} />
+                </Text>
               </TouchableOpacity>
             );
           })

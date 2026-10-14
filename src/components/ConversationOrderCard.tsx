@@ -47,9 +47,13 @@ function ConversationOrderCard({ item, isInvoicePaid, onPayInvoice }: Props): Re
         {item.order.amountSats !== undefined ? (
           <Text style={styles.orderCardAmount}>
             {item.order.amountSats.toLocaleString(formatLocale)} sats
+            <FiatAmount
+              inline
+              sats={item.order.amountSats}
+              testID={`conversation-order-fiat-${item.id}`}
+            />
           </Text>
         ) : null}
-        <FiatAmount sats={item.order.amountSats} testID={`conversation-order-fiat-${item.id}`} />
         {item.order.status ? (
           <Text style={styles.orderCardMeta}>Status: {item.order.status}</Text>
         ) : null}

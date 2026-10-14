@@ -4,7 +4,7 @@ import type { Palette } from './palettes';
 /** Styles for the in-app Market checkout bottom sheet (#market). */
 export const createMarketCheckoutSheetStyles = (colors: Palette) =>
   StyleSheet.create({
-    amountColumn: { alignItems: 'flex-end', gap: 2 },
+    amountColumn: { flexShrink: 1, textAlign: 'right', marginLeft: 8 },
     sheetBackground: {
       backgroundColor: colors.background,
     },
@@ -63,6 +63,7 @@ export const createMarketCheckoutSheetStyles = (colors: Palette) =>
     },
     unitPrice: {
       fontSize: 13,
+      fontWeight: '600',
       color: colors.textBody,
       marginTop: 4,
     },
@@ -131,11 +132,14 @@ export const createMarketCheckoutSheetStyles = (colors: Palette) =>
       color: colors.textHeader,
     },
     totalValue: {
+      flexShrink: 1,
+      marginLeft: 8,
       flexDirection: 'row',
       alignItems: 'center',
       gap: 6,
     },
     totalSats: {
+      flexShrink: 1,
       fontSize: 18,
       fontWeight: '800',
       color: colors.textHeader,

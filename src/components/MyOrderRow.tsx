@@ -67,12 +67,10 @@ function MyOrderRow({ entry, itemsSummary, onPress }: Props): React.ReactElement
             {sellerName}
           </Text>
           {amount !== undefined ? (
-            <View style={styles.amount}>
-              <Text style={styles.total}>
-                {t('market.sats', { amount: amount.toLocaleString(formatLocale) })}
-              </Text>
-              <FiatAmount sats={amount} testID={`my-order-fiat-${id8}`} />
-            </View>
+            <Text style={styles.total}>
+              {t('market.sats', { amount: amount.toLocaleString(formatLocale) })}
+              <FiatAmount inline sats={amount} testID={`my-order-fiat-${id8}`} />
+            </Text>
           ) : null}
         </View>
         <Text style={styles.items} numberOfLines={2}>

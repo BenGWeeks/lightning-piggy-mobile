@@ -8,6 +8,7 @@ import * as dmWipe from './dmAccountWipe';
 import { deleteAsync, readDirectoryAsync } from 'expo-file-system/legacy';
 import { wipeRemoteMediaForOwner } from '../services/remoteMediaCache';
 import {
+  writeCheckoutCountry,
   readMarketPreferences,
   writeMarketPreferences,
   writeMarketSnapshot,
@@ -134,7 +135,7 @@ it("wipes only the signed-out account's group history, migrating legacy blobs fi
   expect((await loadGroupMessages(OTHER_PK, 'g_kids')).map((m) => m.text)).toEqual(['parent']);
 });
 
-it('wipes market filters and every follow scope only for the signed-out account', async () => {
+it('wipes market filters, checkout country and every follow scope only for the signed-out account', async () => {
   await readMarketPreferences(PK); // Account signs back in after earlier wipe tests.
   const preferences = {
     mode: 'wotFriends' as const,
@@ -145,10 +146,16 @@ it('wipes market filters and every follow scope only for the signed-out account'
   };
   await writeMarketPreferences(PK, preferences);
   await writeMarketPreferences(OTHER_PK, preferences);
+  await writeCheckoutCountry(PK, 'DE');
+  await writeCheckoutCountry(OTHER_PK, 'FR');
   await writeMarketSnapshot(`${PK}|follows-one`, { products: [], incomplete: false });
   await writeMarketSnapshot(`${PK}|follows-two`, { products: [], incomplete: false });
   await writeMarketSnapshot(`${OTHER_PK}|follows`, { products: [], incomplete: false });
   await wipeAccountCaches(PK);
+  expect(await AsyncStorage.getItem(perAccountKey('market_checkout_country_v1', PK))).toBeNull();
+  expect(await AsyncStorage.getItem(perAccountKey('market_checkout_country_v1', OTHER_PK))).toBe(
+    'FR',
+  );
   expect(await AsyncStorage.getItem(perAccountKey('market_filters_v1', PK))).toBeNull();
   expect(await AsyncStorage.getItem(perAccountKey('market_filters_v1', OTHER_PK))).not.toBeNull();
   expect(getMarketSnapshot(`${PK}|follows-one`)).toBeUndefined();

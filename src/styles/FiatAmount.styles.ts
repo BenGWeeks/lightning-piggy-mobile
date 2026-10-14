@@ -3,5 +3,5 @@ import type { Palette } from './palettes';
 
 export const createFiatAmountStyles = (colors: Palette) =>
   StyleSheet.create({
-    amount: { fontSize: 12, color: colors.textSupplementary },
+    amount: { fontSize: 12, fontWeight: '400', color: colors.textSupplementary },
   });

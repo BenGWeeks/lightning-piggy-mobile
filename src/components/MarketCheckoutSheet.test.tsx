@@ -47,9 +47,11 @@ jest.mock('lucide-react-native', () => new Proxy({}, { get: () => () => null }))
 jest.mock('./BrandedToast', () => ({ __esModule: true, default: { show: jest.fn() } }));
 jest.mock('./CountryPickerSheet', () => () => null);
 jest.mock('../data/countries', () => ({
+  ...jest.requireActual('../data/countries'),
   deviceCountryCode: () => 'GB',
   countryName: (code: string) => code,
 }));
+jest.mock('../contexts/NostrContext', () => ({ useNostr: () => ({ pubkey: 'buyer' }) }));
 jest.mock('../hooks/useMarketCheckout', () => ({ useMarketCheckout: jest.fn() }));
 jest.mock('../hooks/useShippingOptions', () => ({ useShippingOptions: jest.fn() }));
 jest.mock('../services/fiatService', () => ({
@@ -190,7 +192,8 @@ describe('physical product with merchant shipping options', () => {
     );
   });
 
-  test('blocks submit until an option is chosen', async () => {
+  test('blocks submit until an option is chosen when several apply', async () => {
+    setShipping('ready', [ukOption, { ...ukOption, coordinate: 'other', dTag: 'other' }]);
     const ui = await renderSettled();
     fireEvent.press(ui.getByTestId('market-checkout-place-order'));
     expect(placeOrder).not.toHaveBeenCalled();
@@ -201,7 +204,7 @@ describe('physical product with merchant shipping options', () => {
     const ui = await renderSettled();
     fireEvent.press(ui.getByTestId('market-shipping-option-uk'));
     await waitFor(() =>
-      expect(ui.getByTestId('market-checkout-shipping')).toHaveTextContent('market.sats'),
+      expect(ui.getByTestId('market-checkout-shipping')).toHaveTextContent(/market.sats/),
     );
     await act(async () => {
       fireEvent.press(ui.getByTestId('market-checkout-place-order'));
@@ -217,7 +220,7 @@ describe('physical product with merchant shipping options', () => {
     const ui = await renderSettled();
     fireEvent.press(ui.getByTestId('market-shipping-option-uk'));
     await waitFor(() =>
-      expect(ui.getByTestId('market-checkout-shipping')).toHaveTextContent('market.sats'),
+      expect(ui.getByTestId('market-checkout-shipping')).toHaveTextContent(/market.sats/),
     );
     await act(async () => {
       fireEvent.press(ui.getByTestId('market-checkout-place-order'));
@@ -319,7 +322,9 @@ describe('Nostr listing (Gamma kind 30402)', () => {
     const ui = renderSheet(physicalListing, listingProduct);
     await act(async () => {});
     expect(ui.queryByTestId('market-shipping-address-note')).toBeNull();
-    fireEvent.press(ui.getByTestId('market-shipping-option-uk'));
+    expect(ui.getByTestId('market-shipping-option-uk').props.accessibilityState.selected).toBe(
+      true,
+    );
     await act(async () => {
       fireEvent.press(ui.getByTestId('market-checkout-place-order'));
     });
@@ -370,10 +375,10 @@ it('shows wallet-currency equivalents for the selected checkout amounts', async 
   await waitFor(() => expect(view.getByTestId('market-shipping-option-uk')).toBeTruthy());
   fireEvent.press(view.getByTestId('market-shipping-option-uk'));
   await waitFor(() =>
-    expect(view.getByTestId('market-checkout-shipping-fiat').props.children).toBe('≈ $10.00'),
+    expect(view.getByTestId('market-checkout-shipping-fiat').props.children).toBe('  ≈ $10.00'),
   );
-  expect(view.getByTestId('market-checkout-subtotal-fiat').props.children).toBe('≈ $0.02');
-  expect(view.getByTestId('market-checkout-total-fiat').props.children).toBe('≈ $10.02');
+  expect(view.getByTestId('market-checkout-subtotal-fiat').props.children).toBe('  ≈ $0.02');
+  expect(view.getByTestId('market-checkout-total-fiat').props.children).toBe('  ≈ $10.02');
 });
 
 it('hides display equivalents without a wallet rate without blocking a sats order', async () => {
@@ -390,5 +395,48 @@ it('uses the chosen wallet currency for display equivalents', () => {
   mockBtcPrice = 50_000;
   setShipping('ready', []);
   const view = renderSheet({ ...physical, fulfilment: 'none' });
-  expect(view.getByTestId('market-checkout-total-fiat').props.children).toBe('≈ £0.01');
+  expect(view.getByTestId('market-checkout-total-fiat').props.children).toBe('  ≈ £0.01');
+});
+
+it('keeps a single applicable option automatic and requires a pick when a refresh offers several', async () => {
+  const other = { ...ukOption, coordinate: 'other', dTag: 'other' };
+  setShipping('ready', [ukOption]);
+  (getBtcPrice as jest.Mock).mockResolvedValue(50000);
+  const view = renderSheet();
+  await act(async () => {});
+  expect(view.getByTestId('market-shipping-option-uk').props.accessibilityState.selected).toBe(
+    true,
+  );
+  setShipping('ready', [ukOption, other]);
+  view.rerender(
+    <MarketCheckoutSheet
+      visible
+      onClose={jest.fn()}
+      product={product}
+      checkout={physical}
+      sellerName="Test seller"
+      onRequestSignIn={jest.fn()}
+      onPlaced={jest.fn()}
+    />,
+  );
+  expect(view.getByTestId('market-shipping-option-uk').props.accessibilityState.selected).toBe(
+    false,
+  );
+  fireEvent.press(view.getByTestId('market-checkout-place-order'));
+  expect(placeOrder).not.toHaveBeenCalled();
+});
+
+it('nests each chosen-currency conversion in its primary amount text', async () => {
+  setShipping('ready', [ukOption]);
+  (getBtcPrice as jest.Mock).mockResolvedValue(50000);
+  const view = renderSheet();
+  await act(async () => {});
+  for (const name of ['unit-price', 'subtotal', 'shipping', 'total']) {
+    const fiat = name === 'unit-price' ? 'unit' : name;
+    const amount = view.getByTestId(`market-checkout-${name}`);
+    const conversion = view.getByTestId(`market-checkout-${fiat}-fiat`);
+    let parent = conversion.parent;
+    while (parent && parent !== amount) parent = parent.parent;
+    expect(parent === amount).toBe(true);
+  }
 });
