@@ -16,6 +16,15 @@ import {
 
 type Row = OrderRowInput & { conversation: string };
 
+/** One account's loaded orders — tagged with its owner so an account switch never shows another account's purchases. */
+interface Snapshot {
+  owner: string | null;
+  rows: Row[];
+  titles: BuyerOrderTitles;
+}
+
+const EMPTY_SNAPSHOT: Snapshot = { owner: null, rows: [], titles: {} };
+
 /** Coalesce bursts of DM-store commits into one reload. */
 const RELOAD_DEBOUNCE_MS = 600;
 
@@ -36,9 +45,8 @@ export interface UseBuyerOrders {
 export function useBuyerOrders(): UseBuyerOrders {
   const { pubkey } = useNostr();
   const { wallets } = useWallet();
-  const [rows, setRows] = useState<Row[]>([]);
-  const [titles, setTitles] = useState<BuyerOrderTitles>({});
-  const [loading, setLoading] = useState(true);
+  const [snapshot, setSnapshot] = useState<Snapshot>(EMPTY_SNAPSHOT);
+  const [loadingState, setLoading] = useState(true);
   const [nowMs, setNowMs] = useState(Date.now);
   const loadId = useRef(0);
 
@@ -50,8 +58,9 @@ export function useBuyerOrders(): UseBuyerOrders {
         loadBuyerOrderTitles(owner),
       ]);
       if (id !== loadId.current) return;
-      setRows(
-        stored.map((r) => ({
+      setSnapshot({
+        owner,
+        rows: stored.map((r) => ({
           id: r.eventId,
           conversation: r.conversation,
           fromMe: r.fromMe,
@@ -59,10 +68,10 @@ export function useBuyerOrders(): UseBuyerOrders {
           wireKind: r.wireKind,
           createdAt: r.createdAt,
         })),
-      );
-      setTitles(storedTitles);
+        titles: storedTitles,
+      });
     } catch {
-      // Store unavailable: keep what we had.
+      // Store unavailable: keep what we had (only ever shown for its own owner).
     } finally {
       if (id === loadId.current) setLoading(false);
     }
@@ -71,7 +80,7 @@ export function useBuyerOrders(): UseBuyerOrders {
   useFocusEffect(
     useCallback(() => {
       if (!pubkey) {
-        setRows([]);
+        setSnapshot(EMPTY_SNAPSHOT);
         setLoading(false);
         return;
       }
@@ -89,6 +98,11 @@ export function useBuyerOrders(): UseBuyerOrders {
       };
     }, [pubkey, load]),
   );
+
+  const isCurrent = pubkey !== null && snapshot.owner === pubkey;
+  const rows = isCurrent ? snapshot.rows : EMPTY_SNAPSHOT.rows;
+  const titles = isCurrent ? snapshot.titles : EMPTY_SNAPSHOT.titles;
+  const loading = loadingState || (!!pubkey && !isCurrent);
 
   // Payment hashes my wallets paid out — the "our payment succeeded" signal.
   const paidHashes = useMemo(() => {

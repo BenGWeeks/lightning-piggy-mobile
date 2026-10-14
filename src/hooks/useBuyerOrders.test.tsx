@@ -15,12 +15,13 @@ const INVOICE = bech32.encode(
   2000,
 );
 let mockTransactions: WalletTransaction[] = [];
+let mockPubkey: string | null = 'a'.repeat(64);
 
 jest.mock('@react-navigation/native', () => ({
   useFocusEffect: (effect: () => void | (() => void)) =>
     jest.requireActual('react').useEffect(effect, [effect]),
 }));
-jest.mock('../contexts/NostrContext', () => ({ useNostr: () => ({ pubkey: 'a'.repeat(64) }) }));
+jest.mock('../contexts/NostrContext', () => ({ useNostr: () => ({ pubkey: mockPubkey }) }));
 jest.mock('../contexts/WalletContext', () => ({
   useWallet: () => ({ wallets: [{ transactions: mockTransactions }] }),
 }));
@@ -64,6 +65,7 @@ const rows = [
 ];
 
 beforeEach(() => {
+  mockPubkey = 'a'.repeat(64);
   (getOrderRows as jest.Mock).mockResolvedValue(rows);
   jest.useFakeTimers();
   jest.spyOn(Date, 'now').mockReturnValue(NOW * 1000);
@@ -90,4 +92,17 @@ it.each<[string, Partial<WalletTransaction>, boolean]>([
     jumpToRowId: paid ? 'order' : 'invoice',
   });
   expect(result.current.payNow).toBe(paid ? 0 : 1);
+});
+
+it("never shows the previous account's orders after an account switch, even if the new read fails", async () => {
+  const { result, rerender } = renderHook(() => useBuyerOrders());
+  await waitFor(() => expect(result.current.entries).toHaveLength(1));
+
+  (getOrderRows as jest.Mock).mockRejectedValue(new Error('store unavailable'));
+  mockPubkey = 'c'.repeat(64);
+  rerender({});
+
+  expect(result.current.entries).toHaveLength(0);
+  await waitFor(() => expect(getOrderRows).toHaveBeenLastCalledWith('c'.repeat(64)));
+  expect(result.current.entries).toHaveLength(0);
 });
