@@ -12,7 +12,15 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { ChevronLeft, Heart, ReceiptText, Search, SlidersHorizontal, Store, X } from 'lucide-react-native';
+import {
+  ChevronLeft,
+  Heart,
+  ReceiptText,
+  Search,
+  SlidersHorizontal,
+  Store,
+  X,
+} from 'lucide-react-native';
 import MarketProductCard from '../components/MarketProductCard';
 import MarketFilterBar from '../components/MarketFilterBar';
 import { useThemeColors } from '../contexts/ThemeContext';
