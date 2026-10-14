@@ -3,14 +3,16 @@ import { Share } from 'react-native';
 import { useNostr } from '../contexts/NostrContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { Toast } from '../components/BrandedToast';
+import { preferredDmProtocol } from '../services/preferredDmProtocol';
 import { sendSharedDm } from '../services/sendSharedDm';
 import { listingNaddr, listingShareContent } from '../utils/listingShare';
 import type { PickedFriend } from '../components/FriendPickerSheet';
 import type { MarketProduct } from '../data/marketProducts';
 
 /**
- * Share a kind-30402 Market listing (#1541): to a friend as a NIP-17 DM, or
- * through the OS share sheet. Both carry the title plus a `nostr:naddr1…`
+ * Share a kind-30402 Market listing (#1541): to a friend as a private message
+ * (Marmot when we already have a secure chat with them or they publish an
+ * invitation key, otherwise NIP-17), or through the OS share sheet. Both carry the title plus a `nostr:naddr1…`
  * reference (see utils/listingShare for why there's no web link).
  * `content` is null for products that can't be shared this way.
  */
@@ -38,8 +40,9 @@ export function useListingShare(product: MarketProduct) {
       if (!content || !pubkey || sending) return;
       setSending(true);
       try {
-        // NIP-17 explicitly: a listing share is an ordinary private message.
-        const protocol = 'nip17' as const;
+        // Same choice as starting a chat: an existing Marmot 1:1 or a usable
+        // invitation key means Marmot, otherwise NIP-17.
+        const protocol = await preferredDmProtocol(pubkey, friend.pubkey);
         const result = await sendSharedDm({
           peer: friend.pubkey,
           text: content.message,
