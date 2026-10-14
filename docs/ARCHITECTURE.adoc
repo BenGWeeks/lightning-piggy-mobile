@@ -288,6 +288,19 @@ otherwise the same kinds NIP-17 carries. See `PROTOCOLS.adoc` → "Marmot".
 | **NIP-46 remote signer / Nostr Connect** | Shipped. Clave (iOS), Aegis, nsec.app over relays (`nostrConnectService.ts`); see `nip46-clave.adoc`.
 |===
 
+Read subscriptions and queries use `relayReqTransport.ts` and `relayAuth.ts`
+for NIP-42 login when a relay closes a REQ with `auth-required:`. The active
+account signs kind 22242 with the connected URL and challenge. Local keys sign
+silently; Amber/NIP-46 only sign for the user's own kind-10050 inbox or NIP-65
+read relays (not default relays, overrides or another user's lists). Each remote
+signer is asked at most once per account/relay per app session; success, decline
+and timeout are cached. A new socket challenge cannot reuse that signature and
+waits until a new app session to ask again. Signing and acknowledgement each
+have a 15-second deadline; concurrent reads share one auth operation per relay.
+A successful AUTH re-arms each closed REQ once. Test-account lockdown permits
+AUTH only on the configured LAN relay. AUTH payloads and challenges are never
+logged by this path.
+
 == Wallets
 
 *Lightning (primary rail)* — Nostr Wallet Connect. A NWC connection string
