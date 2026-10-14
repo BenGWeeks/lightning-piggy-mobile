@@ -1,6 +1,5 @@
 // Spam hygiene for the Market's experimental "All" seller scope — listings
-// from anyone, with no author filter. Pure (no I/O) so the rules are
-// unit-testable.
+// from anyone, with no author filter. Authentication is injected by the snapshot.
 //
 // Rules (a listing must pass all of them):
 //   1. A title, a positive price and at least one image. Title and a valid
@@ -12,10 +11,9 @@
 //      once profiles resolve (`withKnownProfiles`), since the profile pass
 //      already runs for every listed seller.
 //
-// Rules 1-2 run twice: on raw events BEFORE signature checks (so a flood
-// can't buy verification work — `curateOpenListingEvents`) and on the final
-// products (`curateOpenListingProducts`), because a forged newest revision
-// that fails verification lets an older revision win.
+// Rules 1-2 run on authenticated revision winners, then on final products.
+// Unauthenticated revisions must never suppress a genuine listing or occupy
+// a seller slot. The snapshot owns verification budgets and pacing.
 import type { Event } from 'nostr-tools';
 import type { MarketProduct } from '../data/marketProducts';
 import { parseMarketListing } from './marketListings';
@@ -37,16 +35,18 @@ const newerFirst = (a: Event, b: Event) =>
   b.created_at - a.created_at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 /**
- * Rules 1-2 on raw, not-yet-verified events. Works per listing ADDRESS: the
- * address's newest revision decides (a newer sold / malformed revision must
- * still win, so older revisions are never judged on their own), and a kept
- * address keeps every revision for the verifier to fall back through.
- * Carried addresses bypass these filters so authenticated withdrawals can
- * remove the previous snapshot. Deletions pass through untouched.
+ * Authenticate newest revisions (falling back after invalid signatures) before
+ * applying rules 1-2. Carried addresses bypass hygiene and caps so signed
+ * withdrawals reach the snapshot reducer. Deletions pass through untouched.
  */
 export async function curateOpenListingEvents(
   events: readonly Event[],
-  opts: { maybeYield?: () => Promise<void>; now?: number; carried?: readonly Event[] } = {},
+  opts: {
+    verify: (event: Event) => boolean;
+    maybeYield?: () => Promise<void>;
+    now?: number;
+    carried?: readonly Event[];
+  },
 ): Promise<Event[]> {
   // Carried addresses are bounded by the displayed snapshot. Their revisions
   // must reach authentication even when hygiene or the seller cap excludes them.
@@ -76,9 +76,18 @@ export async function curateOpenListingEvents(
       retained.push(...list);
       continue;
     }
-    const product = parseMarketListing(list[0], opts.now);
+    let winner: Event | undefined;
+    for (const event of list) {
+      await opts.maybeYield?.();
+      if (opts.verify(event)) {
+        winner = event;
+        break;
+      }
+    }
+    if (!winner) continue;
+    const product = parseMarketListing(winner, opts.now);
     if (!product || !passesOpenScopeHygiene(product)) continue;
-    const entry = { newest: list[0], list };
+    const entry = { newest: winner, list: [winner] };
     const authored = byAuthor.get(list[0].pubkey);
     if (authored) authored.push(entry);
     else byAuthor.set(list[0].pubkey, [entry]);

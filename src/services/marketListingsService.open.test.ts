@@ -151,7 +151,7 @@ it('keeps listings from any seller, dropping ones without an image or a price', 
   expect(result.incomplete).toBe(false);
 });
 
-it('caps one seller at their newest listings, and the flood buys no extra signature checks', async () => {
+it('caps one seller at their newest authenticated listings', async () => {
   const pending = start();
   await flush();
   const [sub] = listingSubs();
@@ -167,7 +167,7 @@ it('caps one seller at their newest listings, and the flood buys no extra signat
     Array.from({ length: OPEN_SCOPE_PER_AUTHOR }, (_, i) => String(i)),
   );
   expect(products.some((p) => p.id.endsWith('-honest'))).toBe(true);
-  expect(verify.mock.calls.length).toBeLessThanOrEqual(OPEN_SCOPE_PER_AUTHOR + 1);
+  expect(verify.mock.calls.length).toBe(OPEN_SCOPE_PER_AUTHOR + 16);
 });
 
 it('treats a reply that fills its limit as the sample edge, not an incomplete load', async () => {
@@ -260,3 +260,53 @@ it.each(['sold', 'hidden', 'forged', 'older'])(
     expect(mergeMarketSnapshot(previous, result)).toHaveLength(withdrawn ? 0 : 1);
   },
 );
+
+it('keeps a genuine fallback when a forged newer sold revision arrives on first load', async () => {
+  const pending = start();
+  await flush();
+  const original = listing(1, 'lamp', NOW_S - 100);
+  const sold = finalizeEvent(
+    {
+      kind: original.kind,
+      created_at: NOW_S - 10,
+      content: original.content,
+      tags: [...original.tags, ['status', 'sold']],
+    },
+    keyOf(1),
+  );
+  deliver(listingSubs()[0], { ...sold, sig: '0'.repeat(128) });
+  deliver(listingSubs()[0], original);
+  await answerAll();
+  expect((await pending).products.map((p) => p.listing?.event.id)).toEqual([original.id]);
+});
+
+it('does not let forged addresses or inflated fallback timestamps consume seller slots', async () => {
+  const pending = start();
+  await flush();
+  const sub = listingSubs()[0];
+  for (let i = 0; i < OPEN_SCOPE_PER_AUTHOR; i++) {
+    deliver(sub, { ...listing(1, `fake-${i}`, NOW_S - i), sig: '0'.repeat(128) });
+    deliver(sub, listing(1, `real-${i}`, NOW_S - 100 - i));
+  }
+  const fallback = listing(1, 'old-fallback', NOW_S - 200);
+  deliver(sub, { ...listing(1, 'old-fallback', NOW_S), sig: '0'.repeat(128) });
+  deliver(sub, fallback);
+  await answerAll();
+  expect((await pending).products.map((p) => p.listing?.event.tags[0][1])).toEqual(
+    Array.from({ length: OPEN_SCOPE_PER_AUTHOR }, (_, i) => `real-${i}`),
+  );
+});
+
+it('keeps the existing forged-signature budget while authenticating All-scope winners', async () => {
+  const pending = start();
+  await flush();
+  for (let i = 0; i < 70; i++) {
+    deliver(listingSubs()[0], { ...listing(1, `forged-${i}`, NOW_S - i), sig: '0'.repeat(128) });
+  }
+  await answerAll();
+  const result = await pending;
+  expect(verify).toHaveBeenCalledTimes(64);
+  expect(result.products).toEqual([]);
+  expect(result.incomplete).toBe(true);
+  expect(result.budgetLimited).toBe(true);
+});

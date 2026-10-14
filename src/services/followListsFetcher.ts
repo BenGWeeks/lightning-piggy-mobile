@@ -29,6 +29,23 @@ const BATCH_TIMEOUT_MS = 8000;
 const GRACE_MS = 1500;
 /** A contact list beyond this many tags is not a person's follow list. */
 const MAX_TAGS = 5000;
+/** UTF-16 ceilings also bound serialized UTF-8/escaped payloads by a constant. */
+export const MAX_FOLLOW_CONTENT_CHARS = 32768;
+export const MAX_FOLLOW_TAG_CHARS = 512000;
+
+function boundedPayload(event: Event): boolean {
+  if (event.content.length > MAX_FOLLOW_CONTENT_CHARS || event.tags.length > MAX_TAGS) return false;
+  // Include per-string overhead: empty strings must not bypass the budget.
+  let chars = 0;
+  for (const tag of event.tags) {
+    chars += 2;
+    for (const value of tag) {
+      chars += value.length + 3;
+      if (chars > MAX_FOLLOW_TAG_CHARS) return false;
+    }
+  }
+  return chars <= MAX_FOLLOW_TAG_CHARS;
+}
 
 const HEX64 = /^[0-9a-f]{64}$/;
 const abortError = () =>
@@ -80,7 +97,7 @@ export async function fetchFollowLists(
       graceMs: GRACE_MS,
       relayPool: lease.pool,
       onEvent: (event) => {
-        if (event.kind !== 3 || !wanted.has(event.pubkey) || event.tags.length > MAX_TAGS) return;
+        if (event.kind !== 3 || !wanted.has(event.pubkey) || !boundedPayload(event)) return;
         if (supersedes(event, latest.get(event.pubkey))) latest.set(event.pubkey, event);
       },
     });

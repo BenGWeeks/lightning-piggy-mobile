@@ -1,6 +1,11 @@
 import { finalizeEvent, getPublicKey, type Filter } from 'nostr-tools';
 import { fetchFollowLists, followListRelays, FOLLOW_LIST_RELAYS } from './followListsFetcher';
-import { __resetVerifiedEventCache } from './nostrVerifyCache';
+import { verifyEventCached, __resetVerifiedEventCache } from './nostrVerifyCache';
+
+jest.mock('./nostrVerifyCache', () => {
+  const actual = jest.requireActual('./nostrVerifyCache');
+  return { ...actual, verifyEventCached: jest.fn(actual.verifyEventCached) };
+});
 
 jest.mock('../contexts/nostrDecryptPacing', () => ({
   createYieldScheduler: () => ({
@@ -50,6 +55,7 @@ beforeEach(() => {
   subs = [];
   __resetVerifiedEventCache();
   release.mockClear();
+  (verifyEventCached as jest.Mock).mockClear();
   ensureRelay.mockReset();
   ensureRelay.mockImplementation((url: string) =>
     url === 'wss://purplepag.es'
@@ -126,5 +132,30 @@ it.each([false, true])(
     } finally {
       jest.useRealTimers();
     }
+  },
+);
+
+it.each(['content', 'tag', 'total-tags', 'empty-values'])(
+  'rejects oversized %s before retaining or verifying it',
+  async (payload) => {
+    const pending = fetchFollowLists([friend(1), friend(2)], []);
+    await flush();
+    const original = contacts(1, 100, [hex(10)]);
+    const newer = {
+      ...contacts(1, 200, [hex(99)]),
+      ...(payload === 'content' ? { content: 'x'.repeat(2 * 1024 * 1024) } : {}),
+      ...(payload === 'tag' ? { tags: [['p', hex(99), 'x'.repeat(512000)]] } : {}),
+      ...(payload === 'total-tags'
+        ? { tags: Array.from({ length: 100 }, () => ['x', 'x'.repeat(6000)]) }
+        : {}),
+      ...(payload === 'empty-values' ? { tags: [Array(200000).fill('')] } : {}),
+    };
+    subs[0].c.onevent(original);
+    subs[0].c.onevent(newer);
+    subs[0].c.onevent({ ...newer, pubkey: friend(2) });
+    subs[0].c.oneose();
+    expect(await pending).toEqual({ [friend(1)]: [hex(10)] });
+    expect(verifyEventCached).toHaveBeenCalledTimes(1);
+    expect(verifyEventCached).toHaveBeenCalledWith(original);
   },
 );

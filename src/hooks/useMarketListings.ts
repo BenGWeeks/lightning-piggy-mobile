@@ -262,13 +262,16 @@ export function useMarketListings(enabled: boolean, scope?: MarketListingsScope)
     products: resolvedProducts,
     profilesReady,
     hasProfile,
+    profileLookupFailed,
   } = useMarketMerchantProfiles(currentProducts, enabled && focused);
   // All scope, rule 3 (utils/marketOpenScope): once the profile pass has
-  // answered, drop sellers who never published a kind-0.
+  // answered successfully for a seller, drop them if no kind-0 was found.
   const products = useMemo(
     () =>
-      open && profilesReady ? withKnownProfiles(resolvedProducts, hasProfile) : resolvedProducts,
-    [open, profilesReady, resolvedProducts, hasProfile],
+      open && profilesReady
+        ? withKnownProfiles(resolvedProducts, (pk) => hasProfile(pk) || profileLookupFailed(pk))
+        : resolvedProducts,
+    [open, profilesReady, resolvedProducts, hasProfile, profileLookupFailed],
   );
   return useMemo(
     () => ({

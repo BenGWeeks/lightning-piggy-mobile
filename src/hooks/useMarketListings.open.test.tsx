@@ -133,3 +133,22 @@ it('caps each seller again after merging successive All samples, including the c
     getMarketSnapshot(`${SCOPE.account}|*|wss://example.com`)?.result.products.map((p) => p.id),
   ).toEqual(fresh.map((p) => p.id));
 });
+
+it('keeps unresolved sellers during a profile outage and removes only confirmed missing sellers', async () => {
+  const sellers = [product(1), product(2), product(3)];
+  (fetchOpenMarketListings as jest.Mock).mockResolvedValue({
+    products: sellers,
+    incomplete: false,
+  });
+  (fetchMarketMerchantProfiles as jest.Mock).mockImplementation(
+    (_authors, _signal, onUnresolved) => {
+      onUnresolved(new Set([getPublicKey(keyOf(2))]));
+      return Promise.resolve(
+        new Map([[getPublicKey(keyOf(1)), { npub: 'npub1x', name: 'Cached' }]]),
+      );
+    },
+  );
+  const h = renderHook(() => useMarketListings(true, SCOPE));
+  await act(async () => {});
+  expect(h.result.current.products.map((p) => p.id)).toEqual([sellers[0].id, sellers[1].id]);
+});

@@ -1,5 +1,6 @@
 // Heuristic 4 (ranked cap) and the cached pipeline the Market's
 // friends-of-friends scope builds on.
+import { marketFofAuthors, MARKET_FOF_MAX } from '../utils/marketFofScope';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { buildFofSet, computeFofSet, loadFofCache } from './friendsOfFriendsService';
 
@@ -26,9 +27,15 @@ describe('buildFofSet maxSize (heuristic 4)', () => {
     expect([...set]).toEqual([pk('shared', 1), pk('shared', 2), pk('x', 1)]);
   });
 
-  it('is a no-op when the set already fits (or no cap is given)', () => {
+  it('ranks even when the set already fits, preserving discovery order without a cap)', () => {
     const uncapped = [...buildFofSet(user, [a, b, c], lists).set];
-    expect([...buildFofSet(user, [a, b, c], lists, 100).set]).toEqual(uncapped);
+    expect([...buildFofSet(user, [a, b, c], lists, 100).set]).toEqual([
+      pk('shared', 1),
+      pk('shared', 2),
+      pk('x', 1),
+      pk('y', 1),
+      pk('z', 1),
+    ]);
     expect(uncapped).toHaveLength(5);
   });
 });
@@ -63,4 +70,17 @@ describe('computeFofSet + cache with a ranked cap', () => {
     ).rejects.toBeDefined();
     expect(await loadFofCache(user, [a], 1)).toBeNull();
   });
+});
+
+it('counts distinct friends rather than duplicate follow tags or duplicate friend inputs', () => {
+  const lists = { [a]: [pk('x'), pk('x'), pk('y')], [b]: [pk('y')] };
+  expect([...buildFofSet(user, [a, a, b], lists, 100).set]).toEqual([pk('y'), pk('x')]);
+});
+
+it('retains the strongest FoF candidates when direct friends leave only two author slots', () => {
+  const friends = Array.from({ length: 1022 }, (_, i) => pk('friend', i));
+  const [first, second, shared] = [pk('first'), pk('second'), pk('shared')];
+  const lists = { [friends[0]]: [first, second, shared], [friends[1]]: [shared] };
+  const fof = buildFofSet(user, friends, lists, MARKET_FOF_MAX);
+  expect(marketFofAuthors(friends, [...fof.set]).slice(-2)).toEqual([shared, first]);
 });

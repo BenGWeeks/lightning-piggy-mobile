@@ -151,7 +151,7 @@ const ANY_AUTHOR: AuthorScope = { has: () => true };
  * relays + the user's read relays. Same two passes, verification, deletion
  * handling and budgets as the author-scoped snapshot; pass 1 is a bounded
  * newest-N sample (`limit` + a 90-day `since`, see `openListingFilters`), and
- * the spam rules in `utils/marketOpenScope` run before any signature check
+ * the spam rules in `utils/marketOpenScope` run after authenticating revision winners
  * and again on the final products.
  */
 export async function fetchOpenMarketListings(
@@ -174,8 +174,8 @@ export async function fetchOpenMarketListings(
       {
         filters: openListingFilters(openListingSince()),
         sampled: true,
-        prefilter: (events, maybeYield) =>
-          curateOpenListingEvents(events, { maybeYield, carried: options.carried }),
+        prefilter: (events, maybeYield, verify) =>
+          curateOpenListingEvents(events, { verify, maybeYield, carried: options.carried }),
         curate: curateOpenListingProducts,
       },
     ),
@@ -213,8 +213,12 @@ interface SnapshotPlan {
   /** Pass 1 is a deliberate newest-N sample: a reply that hits its `limit`
    * is the sample's edge, not a cut-off load. */
   sampled?: boolean;
-  /** Narrows the candidates before any signature check. */
-  prefilter?: (events: Event[], maybeYield: () => Promise<void>) => Promise<Event[]>;
+  /** Authenticates revision winners before narrowing the candidates. */
+  prefilter?: (
+    events: Event[],
+    maybeYield: () => Promise<void>,
+    verify: (event: Event) => boolean,
+  ) => Promise<Event[]>;
   /** Final say on the reduced products, before the display cap. */
   curate?: (products: MarketProduct[]) => MarketProduct[];
 }
@@ -523,10 +527,12 @@ async function runSnapshot(
     const deletionChecksGaveUp = failedDeletionChecks >= MAX_FAILED_DELETION_CHECKS;
     let failedListingChecks = 0;
     const verifyListing = (event: Event) => {
-      if (signal.aborted) return false;
+      if (signal.aborted || failedListingChecks >= MAX_FAILED_CHECKS) return false;
       const valid = trusted.has(event) || verified(event);
-      if (valid) noteAuthenticatedListing(event);
-      else failedListingChecks++;
+      if (valid) {
+        trusted.add(event);
+        noteAuthenticatedListing(event);
+      } else failedListingChecks++;
       return valid;
     };
     const eligible =
@@ -537,7 +543,7 @@ async function runSnapshot(
           );
     const selection = await selectVerifiedListings(
       plan.prefilter && eligible.length > 0
-        ? await plan.prefilter(eligible, scheduler.maybeYield)
+        ? await plan.prefilter(eligible, scheduler.maybeYield, verifyListing)
         : eligible,
       scope,
       {
@@ -618,6 +624,7 @@ async function runSnapshot(
         deletionChecksGaveUp ||
         deletionUnavailable ||
         withheldAuthors.size > 0 ||
+        failedListingChecks >= MAX_FAILED_CHECKS ||
         selection.gaveUp ||
         reserved.gaveUp ||
         cutMattered ||
@@ -645,6 +652,7 @@ async function runSnapshot(
       initiallyLimited ||
       limited ||
       deletionChecksGaveUp ||
+      failedListingChecks >= MAX_FAILED_CHECKS ||
       selection.gaveUp ||
       deletions.truncated ||
       cutMattered

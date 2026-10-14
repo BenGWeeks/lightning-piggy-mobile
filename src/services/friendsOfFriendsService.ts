@@ -31,7 +31,8 @@ export const FANOUT_CAP = 500;
 // drop the exclusion. Stops a 3-friends-over-cap user from getting an
 // FoF dominated by their remaining 2 friends.
 export const SOFT_CAP_MIN_RATIO = 0.5;
-const FOF_CACHE_KEY = '@lp:wot-fof:v1';
+// Invalidate discovery-ordered capped entries from before ranking was fixed.
+const FOF_CACHE_KEY = '@lp:wot-fof:v2';
 export const FOF_CACHE_TTL_MS = 24 * 60 * 60 * 1_000;
 
 export interface FofResult {
@@ -88,7 +89,7 @@ export const buildFofSet = (
   followListsByFriend: Record<string, readonly string[]>,
   maxSize?: number,
 ): { set: Set<string>; excludedFriends: number } => {
-  const friendsLower = myFollows.map((p) => p.toLowerCase());
+  const friendsLower = [...new Set(myFollows.map((p) => p.toLowerCase()))];
   const friendSet = new Set(friendsLower);
   const userLower = userPubkey ? userPubkey.toLowerCase() : null;
 
@@ -122,7 +123,7 @@ export const buildFofSet = (
     // Kind-3 `p` tags have no timestamps so "first N" is roughly add-order
     // and client-dependent — acknowledged in #535.
     const slice = list.slice(0, FANOUT_CAP);
-    for (const pk of slice) {
+    for (const pk of new Set(slice.map((p) => p.toLowerCase()))) {
       const lower = pk.toLowerCase();
       // FoF tier explicitly excludes the user + their direct friends —
       // those already pass under the Friends tier, so including them
@@ -134,7 +135,7 @@ export const buildFofSet = (
     }
   }
 
-  if (maxSize === undefined || fof.size <= maxSize) {
+  if (maxSize === undefined) {
     return { set: new Set(fof.keys()), excludedFriends };
   }
   // Stable sort: equal counts keep discovery order.
@@ -149,7 +150,7 @@ export const computeFofSet = async (
   myFollows: readonly string[],
   opts: ComputeFofOptions,
 ): Promise<FofResult> => {
-  const friendsLower = myFollows.map((p) => p.toLowerCase());
+  const friendsLower = [...new Set(myFollows.map((p) => p.toLowerCase()))];
   if (friendsLower.length === 0) {
     return { set: new Set(), excludedFriends: 0, computedAt: Date.now() };
   }

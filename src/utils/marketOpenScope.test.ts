@@ -1,4 +1,4 @@
-import { finalizeEvent, getPublicKey } from 'nostr-tools';
+import { finalizeEvent, getPublicKey, verifyEvent } from 'nostr-tools';
 import {
   curateOpenListingEvents,
   curateOpenListingProducts,
@@ -64,7 +64,10 @@ describe('curateOpenListingEvents', () => {
       ['price', '5', 'SAT'],
     ]);
     const honest = listing(4, 'honest', 800);
-    const out = await curateOpenListingEvents([...flood, noImage, honest], { now: 0 });
+    const out = await curateOpenListingEvents([...flood, noImage, honest], {
+      now: 0,
+      verify: verifyEvent,
+    });
     const fromSpammer = out.filter((e) => e.pubkey === getPublicKey(keyOf(2)));
     expect(fromSpammer).toHaveLength(OPEN_SCOPE_PER_AUTHOR);
     expect(fromSpammer.map((e) => e.tags[0][1])).toEqual(
@@ -74,7 +77,7 @@ describe('curateOpenListingEvents', () => {
     expect(out).toContain(honest);
   });
 
-  it('judges an address by its newest revision, keeping every revision of a kept address', async () => {
+  it('keeps the authenticated winner of each address', async () => {
     const older = listing(5, 'lamp', 100);
     const newer = listing(5, 'lamp', 200);
     const soldNewer = listing(6, 'chair', 300, [
@@ -87,8 +90,10 @@ describe('curateOpenListingEvents', () => {
     const deletion = finalizeEvent({ kind: 5, created_at: 400, content: '', tags: [] }, keyOf(5));
     const out = await curateOpenListingEvents([older, newer, soldNewer, chairOlder, deletion], {
       now: 0,
+      verify: verifyEvent,
     });
-    expect(out).toEqual(expect.arrayContaining([older, newer, deletion]));
+    expect(out).toEqual(expect.arrayContaining([newer, deletion]));
+    expect(out).not.toContain(older);
     // A sold newest revision drops the address — the older one never resurfaces.
     expect(out).not.toContain(chairOlder);
     expect(out).not.toContain(soldNewer);
