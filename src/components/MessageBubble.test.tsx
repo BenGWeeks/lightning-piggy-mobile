@@ -2,6 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import MessageBubble from './MessageBubble';
+import DecryptedImage from './DecryptedImage';
 import { parseFileAttachment } from '../utils/fileAttachment';
 import type { BubbleContent } from '../utils/messageContent';
 import { resolveRemoteMedia } from '../services/remoteMediaCache';
@@ -190,7 +191,7 @@ test('an unfollowed sender GIF waits for the placeholder tap before downloading'
 });
 
 test.each([true, false])(
-  'shared listings retain text and respect sender trust (autoLoadMedia=%s)',
+  'shared listings always load images but gate relay hints (sender trust=%s)',
   (autoLoadMedia) => {
     const { naddrEncode } = jest.requireActual('nostr-tools/nip19');
     const hints = ['wss://sender-hint.example'];
@@ -214,9 +215,27 @@ test.each([true, false])(
     expect(ui.getByText('Scam warning\nSender title')).toBeTruthy();
     expect(ui.getByText('Do not buy')).toBeTruthy();
     expect(ui.getByText('Afterword')).toBeTruthy();
-    expect(ui.getByTestId('listing-first').props.autoLoadMedia).toBe(autoLoadMedia);
-    expect(ui.getByTestId('listing-second').props.autoLoadMedia).toBe(autoLoadMedia);
+    expect(ui.getByTestId('listing-first').props.autoLoadMedia).toBe(true);
+    expect(ui.getByTestId('listing-second').props.autoLoadMedia).toBe(true);
     expect(ui.getByTestId('listing-first').props.relays).toEqual(autoLoadMedia ? hints : []);
     expect(ui.getByTestId('listing-second').props.relays).toEqual(autoLoadMedia ? hints : []);
   },
 );
+
+test('an unfollowed sender photo waits for a tap before mounting the image loader', async () => {
+  const ui = render(
+    <MessageBubble
+      {...props}
+      fromMe={false}
+      autoLoadMedia={false}
+      content={{ kind: 'text', text: 'https://example.com/photo.png' }}
+    />,
+  );
+  await act(async () => {});
+  expect(ui.getByTestId('conversation-image-placeholder-msg')).toBeTruthy();
+  expect(ui.UNSAFE_queryByType(DecryptedImage)).toBeNull();
+  expect(resolveRemoteMedia).not.toHaveBeenCalled();
+  fireEvent.press(ui.getByTestId('conversation-image-msg'));
+  expect(ui.queryByTestId('conversation-image-placeholder-msg')).toBeNull();
+  expect(ui.UNSAFE_getByType(DecryptedImage).props.url).toBe('https://example.com/photo.png');
+});

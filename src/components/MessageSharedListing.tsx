@@ -21,7 +21,9 @@ const MessageSharedListing: React.FC<{ token: EmbedRef; autoLoadMedia: boolean }
     () => (autoLoadMedia ? token : { ...token, relays: [] }),
     [token, autoLoadMedia],
   );
-  return <EmbeddedEventCard token={safeToken} styles={styles} autoLoadMedia={autoLoadMedia} />;
+  // Ben, 2026-10-14: listing card images always auto-load. The seller's image
+  // host can see the reader's IP/read time; sender trust still gates relay hints.
+  return <EmbeddedEventCard token={safeToken} styles={styles} autoLoadMedia={true} />;
 };
 
 export default React.memo(MessageSharedListing);
