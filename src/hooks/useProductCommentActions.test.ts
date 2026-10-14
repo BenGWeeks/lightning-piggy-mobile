@@ -92,7 +92,7 @@ describe('useProductCommentActions — edit in place (#1524)', () => {
     expect(addLocally).toHaveBeenCalledWith(replacement);
     expect(hideLocally).toHaveBeenCalledWith(a.id);
     expect(result.current.editDraft).toBeNull();
-    expect(result.current.savingEditId).toBeNull();
+    expect(result.current.savingEditIds.size).toBe(0);
   });
 
   it('keeps the editor open when the edit fails to publish', async () => {
@@ -104,7 +104,7 @@ describe('useProductCommentActions — edit in place (#1524)', () => {
       await result.current.saveEdit(a, 'changed');
     });
     expect(result.current.editDraft).toEqual({ comment: a, text: 'changed' });
-    expect(result.current.savingEditId).toBeNull();
+    expect(result.current.savingEditIds.size).toBe(0);
     expect(mockToastShow).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'error', text1: 'market.comments.editFailed' }),
     );
@@ -121,6 +121,79 @@ describe('useProductCommentActions — edit in place (#1524)', () => {
     expect(result.current.editDraft).not.toBeNull();
   });
 
+  it.each(['A first', 'B first'])(
+    'blocks duplicate saves across overlapping edits (%s)',
+    async (order) => {
+      let resolveA!: (value: unknown) => void;
+      let resolveB!: (value: unknown) => void;
+      mockEditComment
+        .mockReturnValueOnce(new Promise((resolve) => (resolveA = resolve)))
+        .mockReturnValueOnce(new Promise((resolve) => (resolveB = resolve)));
+      const { result, addLocally } = setup();
+      const replacementA = comment('c'.repeat(64), 'changed A');
+      const replacementB = comment('d'.repeat(64), 'changed B');
+      let pendingA!: Promise<void>;
+      let pendingB!: Promise<void>;
+      act(() => result.current.startEdit(a));
+      act(() => {
+        pendingA = result.current.saveEdit(a, 'changed A');
+        // A second tap before React renders must also be rejected.
+        void result.current.saveEdit(a, 'duplicate A');
+      });
+      act(() => result.current.startEdit(b));
+      act(() => {
+        pendingB = result.current.saveEdit(b, 'changed B');
+      });
+      act(() => result.current.startEdit(a));
+      expect(result.current.savingEditIds).toEqual(new Set([a.id, b.id]));
+      await act(async () => {
+        await result.current.saveEdit(a, 'another duplicate A');
+      });
+      expect(mockEditComment).toHaveBeenCalledTimes(2);
+
+      const aFirst = order === 'A first';
+      await act(async () => {
+        if (aFirst) resolveA({ replacement: replacementA, oldDeleted: true });
+        else resolveB({ replacement: replacementB, oldDeleted: true });
+        await (aFirst ? pendingA : pendingB);
+      });
+      const stillPending = aFirst ? b : a;
+      act(() => result.current.startEdit(stillPending));
+      expect(result.current.savingEditIds).toEqual(new Set([stillPending.id]));
+      await act(async () => {
+        await result.current.saveEdit(stillPending, 'duplicate after other save finished');
+      });
+      expect(mockEditComment).toHaveBeenCalledTimes(2);
+      await act(async () => {
+        if (aFirst) resolveB({ replacement: replacementB, oldDeleted: true });
+        else resolveA({ replacement: replacementA, oldDeleted: true });
+        await (aFirst ? pendingB : pendingA);
+      });
+      expect(result.current.savingEditIds.size).toBe(0);
+      expect(addLocally).toHaveBeenCalledTimes(2);
+      expect(addLocally).toHaveBeenCalledWith(replacementA);
+      expect(addLocally).toHaveBeenCalledWith(replacementB);
+    },
+  );
+
+  it('allows retrying the same comment after a failed save', async () => {
+    const replacement = comment('c'.repeat(64), 'changed');
+    mockEditComment
+      .mockRejectedValueOnce(new Error('no relay'))
+      .mockResolvedValueOnce({ replacement, oldDeleted: true });
+    const { result, addLocally } = setup();
+    act(() => result.current.startEdit(a));
+    await act(async () => {
+      await result.current.saveEdit(a, 'changed');
+    });
+    await act(async () => {
+      await result.current.saveEdit(a, 'changed');
+    });
+    expect(mockEditComment).toHaveBeenCalledTimes(2);
+    expect(addLocally).toHaveBeenCalledWith(replacement);
+    expect(result.current.savingEditIds.size).toBe(0);
+  });
+
   it('a save finishing after the user moved on leaves the newer edit open', async () => {
     let resolve: (v: unknown) => void = () => {};
     mockEditComment.mockReturnValue(new Promise((r) => (resolve = r)));
@@ -130,7 +203,7 @@ describe('useProductCommentActions — edit in place (#1524)', () => {
     act(() => {
       pending = result.current.saveEdit(a, 'changed');
     });
-    expect(result.current.savingEditId).toBe(a.id);
+    expect(result.current.savingEditIds.has(a.id)).toBe(true);
     act(() => result.current.startEdit(b));
     await act(async () => {
       resolve({ replacement: comment('d'.repeat(64), 'changed'), oldDeleted: true });

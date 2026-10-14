@@ -46,7 +46,7 @@ const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount, regi
     posting,
     canPublish,
     editDraft,
-    savingEditId,
+    savingEditIds,
     startEdit,
     setEditText,
     cancelEdit,
@@ -131,7 +131,7 @@ const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount, regi
               // Only the card being edited gets the draft, so typing
               // re-renders that one memoised row, not the whole list.
               editText={editDraft?.comment.id === c.id ? editDraft.text : null}
-              editSaving={savingEditId === c.id}
+              editSaving={savingEditIds.has(c.id)}
               onToggleMenu={toggleMenu}
               onEdit={startEdit}
               onDelete={requestDelete}

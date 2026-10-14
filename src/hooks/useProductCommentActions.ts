@@ -45,7 +45,9 @@ export function useProductCommentActions({
   const [posting, setPosting] = useState(false);
   // The comment being edited in place — at most one at a time.
   const [editDraft, setEditDraft] = useState<CommentEditDraft>(null);
-  const [savingEditId, setSavingEditId] = useState<string | null>(null);
+  // The ref rejects repeat calls synchronously, even before React re-renders.
+  const pendingEdits = useRef(new Set<string>());
+  const [savingEditIds, setSavingEditIds] = useState<ReadonlySet<string>>(new Set());
   const [menuFor, setMenuFor] = useState<string | null>(null);
 
   // The account switcher keeps screens mounted — a draft typed under one
@@ -96,8 +98,11 @@ export function useProductCommentActions({
   /** Publish the in-place edit of `original`. The card stays open on failure. */
   const saveEdit = useCallback(
     async (original: NostrEvent, text: string) => {
-      if (!canSaveCommentEdit(original.content, text)) return;
-      setSavingEditId(original.id);
+      if (pendingEdits.current.has(original.id) || !canSaveCommentEdit(original.content, text)) {
+        return;
+      }
+      pendingEdits.current.add(original.id);
+      setSavingEditIds(new Set(pendingEdits.current));
       try {
         const result = await editComment(original, text);
         // Only end THIS edit — the user may have moved on to another comment
@@ -116,7 +121,8 @@ export function useProductCommentActions({
         // The edit is kept in the card; tell the user it didn't go out.
         showError('market.comments.editFailed');
       } finally {
-        setSavingEditId((id) => (id === original.id ? null : id));
+        pendingEdits.current.delete(original.id);
+        setSavingEditIds(new Set(pendingEdits.current));
       }
     },
     [editComment, addLocally, hideLocally, t, showError],
@@ -183,7 +189,7 @@ export function useProductCommentActions({
     posting,
     canPublish,
     editDraft,
-    savingEditId,
+    savingEditIds,
     startEdit,
     setEditText,
     cancelEdit,
