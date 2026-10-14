@@ -11,6 +11,10 @@ import {
   planDmDeviceAdds,
   type DmDevicePlanInput,
 } from './marmotDmDeviceSync';
+import * as invitees from './marmotInvitees';
+import * as devices from './marmotDevices';
+import { AmberSignerError } from './amberErrors';
+import { NostrConnectError } from './signerErrors';
 import { MAX_DEVICES_PER_PERSON } from './marmotInvitees';
 import { createMemoryMarmotBackend } from './marmotStore';
 
@@ -45,7 +49,6 @@ function plan(overrides: Partial<DmDevicePlanInput>) {
     fresh: new Map(),
     peerOnWhiteNoise: false,
     invitedSlots: new Set(),
-    ownSlot: slot(99),
     signatureKeyOf: (e) => e.content,
     ...overrides,
   });
@@ -63,17 +66,37 @@ describe('planDmDeviceAdds', () => {
     expect(ids(plan({ fresh }))).toEqual({ b: ['peer-tablet'] });
   });
 
-  it("adds our own other installs, but never this install's slot", () => {
+  it('never adds our own installs, including a rotated key for this install', () => {
     const fresh = new Map([
       [ME, [kp(ME, slot(5), 'me-tablet'), kp(ME, slot(99), 'me-here-rotated')]],
     ]);
-    expect(ids(plan({ fresh }))).toEqual({ a: ['me-tablet'] });
+    expect(plan({ fresh }).size).toBe(0);
   });
 
   it('never re-adds a slot already invited into this group (rotated signing key)', () => {
     const fresh = new Map([[PEER, [kp(PEER, slot(1), 'peer-phone-rotated')]]]);
     expect(plan({ fresh, invitedSlots: new Set([`${PEER}:${slot(1)}`]) }).size).toBe(0);
     expect(ids(plan({ fresh }))).toEqual({ b: ['peer-phone-rotated'] });
+  });
+
+  it('never re-adds a White Noise slot with a rotated signing key and warns in dev', () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const fresh = new Map([[PEER, [kp(PEER, slot(1), 'peer-rotated', 'White Noise Android')]]]);
+      expect(
+        plan({ fresh, peerOnWhiteNoise: true, invitedSlots: new Set([`${PEER}:${slot(1)}`]) }).size,
+      ).toBe(0);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('White Noise invited slot'));
+      // Normal replenishment preserves the signing key and needs no warning.
+      warn.mockClear();
+      fresh.set(PEER, [kp(PEER, slot(1), 'peer-phone', 'White Noise Android')]);
+      expect(
+        plan({ fresh, peerOnWhiteNoise: true, invitedSlots: new Set([`${PEER}:${slot(1)}`]) }).size,
+      ).toBe(0);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('one leaf per install: two slots with one signing key add once (#1426)', () => {
@@ -106,12 +129,12 @@ describe('planDmDeviceAdds', () => {
     expect(plan({ fresh: lpOnly, peerOnWhiteNoise: true }).size).toBe(0);
   });
 
-  it('adds both people in one plan (one commit)', () => {
+  it('only adds the peer when both people publish fresh devices', () => {
     const fresh = new Map([
       [PEER, [kp(PEER, slot(2), 'peer-tablet')]],
       [ME, [kp(ME, slot(5), 'me-tablet')]],
     ]);
-    expect(ids(plan({ fresh }))).toEqual({ b: ['peer-tablet'], a: ['me-tablet'] });
+    expect(ids(plan({ fresh }))).toEqual({ b: ['peer-tablet'] });
   });
 });
 
@@ -128,7 +151,6 @@ describe('MarmotDmDeviceSync scheduling', () => {
       fetchKeyPackages,
       groupState,
       invite,
-      ownSlot: async () => slot(99),
       silentSigner: true,
       stopped: () => false,
       now: () => now,
@@ -144,17 +166,17 @@ describe('MarmotDmDeviceSync scheduling', () => {
     };
   }
 
-  it('looks each person up once, then not again until the cooldown has passed', async () => {
+  it('looks only the peer up once, then not again until the cooldown has passed', async () => {
     const { sync, fetchKeyPackages, tick } = makeSync();
     await sync.sync('g1', PEER, 'send');
-    expect(fetchKeyPackages.mock.calls.map((c) => c[0]).sort()).toEqual([ME, PEER]);
+    expect(fetchKeyPackages.mock.calls.map((c) => c[0])).toEqual([PEER]);
     await sync.sync('g1', PEER, 'send');
     tick(DM_DEVICE_SYNC_COOLDOWN_MS - 1);
     await sync.sync('g1', PEER, 'open');
-    expect(fetchKeyPackages).toHaveBeenCalledTimes(2);
+    expect(fetchKeyPackages).toHaveBeenCalledTimes(1);
     tick(2);
     await sync.sync('g1', PEER, 'send');
-    expect(fetchKeyPackages).toHaveBeenCalledTimes(4);
+    expect(fetchKeyPackages).toHaveBeenCalledTimes(2);
   });
 
   it('a failed lookup never throws, and is retried sooner than the cooldown', async () => {
@@ -164,10 +186,10 @@ describe('MarmotDmDeviceSync scheduling', () => {
     expect(invite).not.toHaveBeenCalled();
     tick(DM_DEVICE_SYNC_RETRY_MS - 1);
     await sync.sync('g1', PEER, 'send');
-    expect(fetchKeyPackages).toHaveBeenCalledTimes(2);
+    expect(fetchKeyPackages).toHaveBeenCalledTimes(1);
     tick(2);
     await sync.sync('g1', PEER, 'send');
-    expect(fetchKeyPackages).toHaveBeenCalledTimes(4);
+    expect(fetchKeyPackages).toHaveBeenCalledTimes(2);
   });
 
   it('a send waits for a slow lookup only briefly', async () => {
@@ -181,13 +203,116 @@ describe('MarmotDmDeviceSync scheduling', () => {
   it('opening a chat never commits for a remote signer — it only warms the lookup', async () => {
     const { sync, fetchKeyPackages, groupState, invite } = makeSync({ silentSigner: false });
     await sync.sync('g1', PEER, 'open');
-    expect(fetchKeyPackages).toHaveBeenCalledTimes(2);
+    expect(fetchKeyPackages).toHaveBeenCalledTimes(1);
     expect(groupState).not.toHaveBeenCalled();
     expect(invite).not.toHaveBeenCalled();
     // The send then reuses the warmed lookup.
     await sync.sync('g1', PEER, 'send');
-    expect(fetchKeyPackages).toHaveBeenCalledTimes(2);
+    expect(fetchKeyPackages).toHaveBeenCalledTimes(1);
     expect(groupState).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['Amber', () => new AmberSignerError('CANCELLED', 'declined', 'User declined')],
+    ['NIP-46', () => new NostrConnectError('permission', 'Signer denied sign_event')],
+  ])('%s never prompts again after a declined add, until a new session', async (_, error) => {
+    const selected = jest
+      .spyOn(invitees, 'selectDeviceKeyPackages')
+      .mockImplementation(async (p) => [kp(p, slot(2), 'new-device')]);
+    const signature = jest
+      .spyOn(devices, 'keyPackageSignatureKey')
+      .mockImplementation((e) => e.content);
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const invite = jest.fn().mockRejectedValue(error());
+      const { sync, fetchKeyPackages, tick } = makeSync({ silentSigner: false, invite });
+      await sync.sync('g1', PEER, 'send');
+      expect(invite).toHaveBeenCalledTimes(1);
+      // Subsequent sends and background opens remain quiet, even beyond cooldown.
+      for (const ms of [0, DM_DEVICE_SYNC_RETRY_MS + 1, DM_DEVICE_SYNC_COOLDOWN_MS + 1]) {
+        tick(ms);
+        await sync.sync('g1', PEER, 'send');
+        await sync.sync('g1', PEER, 'open');
+      }
+      expect(invite).toHaveBeenCalledTimes(1);
+      expect(fetchKeyPackages).toHaveBeenCalledTimes(1);
+      const restarted = makeSync({ silentSigner: false, invite });
+      await restarted.sync.sync('g1', PEER, 'open');
+      expect(invite).toHaveBeenCalledTimes(1);
+      await restarted.sync.sync('g1', PEER, 'send');
+      expect(invite).toHaveBeenCalledTimes(2);
+    } finally {
+      selected.mockRestore();
+      signature.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
+  it('suppresses a refusal even when Welcome delivery swallows the signer error', async () => {
+    const selected = jest
+      .spyOn(invitees, 'selectDeviceKeyPackages')
+      .mockImplementation(async (p) => [kp(p, slot(2), 'new-device')]);
+    const signature = jest
+      .spyOn(devices, 'keyPackageSignatureKey')
+      .mockImplementation((e) => e.content);
+    try {
+      const signEvent = jest
+        .fn()
+        .mockRejectedValue(new NostrConnectError('permission', 'Signer denied sign_event'));
+      const encrypt = jest
+        .fn()
+        .mockRejectedValue(new AmberSignerError('CANCELLED', 'declined', 'User declined'));
+      for (const method of ['signEvent', 'encrypt'] as const) {
+        const { sync, tick } = makeSync({
+          silentSigner: false,
+          // marmot-ts catches the error and resolves with a failed delivery outcome.
+          invite: async () => {
+            const signer = sync.observeSigner({
+              getPublicKey: async () => ME,
+              signEvent,
+              nip44: { encrypt, decrypt: async () => '' },
+            });
+            await Promise.resolve(
+              method === 'signEvent'
+                ? signer.signEvent({ kind: 13, created_at: 1, tags: [], content: '' })
+                : signer.nip44!.encrypt(PEER, 'welcome'),
+            ).catch(() => undefined);
+          },
+        });
+        await sync.sync('g1', PEER, 'send');
+        tick(DM_DEVICE_SYNC_COOLDOWN_MS + 1);
+        await sync.sync('g1', PEER, 'send');
+        expect(method === 'signEvent' ? signEvent : encrypt).toHaveBeenCalledTimes(1);
+      }
+    } finally {
+      selected.mockRestore();
+      signature.mockRestore();
+    }
+  });
+
+  it('retries a transient remote invite failure after one minute', async () => {
+    const selected = jest
+      .spyOn(invitees, 'selectDeviceKeyPackages')
+      .mockImplementation(async (p) => [kp(p, slot(2), 'new-device')]);
+    const signature = jest
+      .spyOn(devices, 'keyPackageSignatureKey')
+      .mockImplementation((e) => e.content);
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const invite = jest
+        .fn()
+        .mockRejectedValueOnce(new NostrConnectError('failed', 'network timeout'))
+        .mockResolvedValue(undefined);
+      const { sync, tick } = makeSync({ silentSigner: false, invite });
+      await sync.sync('g1', PEER, 'send');
+      tick(DM_DEVICE_SYNC_RETRY_MS + 1);
+      await sync.sync('g1', PEER, 'send');
+      expect(invite).toHaveBeenCalledTimes(2);
+    } finally {
+      selected.mockRestore();
+      signature.mockRestore();
+      warn.mockRestore();
+    }
   });
 
   it('a just-sent invite records its slots and skips the next check', async () => {

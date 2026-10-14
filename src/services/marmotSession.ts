@@ -267,8 +267,21 @@ export class MarmotSession {
     const cancelled = () => this.gate.stopped;
     const clientSigner =
       opts.signer ?? createMarmotSigner(this.pubkey, opts.signerType, { cancelled });
+    this.dmDevices = new MarmotDmDeviceSync({
+      self: opts.pubkey,
+      backend: this.backend,
+      fetchKeyPackages: (pk) => fetchKeyPackageEvents(network, opts.getLookupRelays(), pk),
+      groupState: async (mlsId) => (await this.client.groups.get(mlsId)).state,
+      invite: (mlsId, devices) => this.inviteAll(mlsId, devices, { partial: true }),
+      silentSigner: opts.signerType === 'nsec',
+      stopped: () => this.gate.stopped,
+      sendWaitMs: opts.dmDeviceSyncWaitMs,
+    });
     this.client = new MarmotClient({
-      signer: fence.fenceSigner(monotonicKeyPackageSigner(clientSigner), this.gate),
+      signer: fence.fenceSigner(
+        monotonicKeyPackageSigner(this.dmDevices.observeSigner(clientSigner)),
+        this.gate,
+      ),
       network: boundGroupQueries(trackKeyPackageAcceptance(network, this.acceptedKeyPackages), {
         watermarks: this.watermarks,
         persist: (h, createdAt) => void this.backend.set('watermark', h, String(createdAt)),
@@ -307,17 +320,6 @@ export class MarmotSession {
       groups: () => this.client.groups.loaded,
       fetchKeyPackages: (pk) => fetchKeyPackageEvents(network, opts.getLookupRelays(), pk),
       ownClient: CLIENT_NAME,
-    });
-    this.dmDevices = new MarmotDmDeviceSync({
-      self: opts.pubkey,
-      backend: this.backend,
-      fetchKeyPackages: (pk) => fetchKeyPackageEvents(network, opts.getLookupRelays(), pk),
-      groupState: async (mlsId) => (await this.client.groups.get(mlsId)).state,
-      invite: (mlsId, devices) => this.inviteAll(mlsId, devices, { partial: true }),
-      ownSlot: () => this.installationSlot(),
-      silentSigner: opts.signerType === 'nsec',
-      stopped: () => this.gate.stopped,
-      sendWaitMs: opts.dmDeviceSyncWaitMs,
     });
   }
 
@@ -599,7 +601,7 @@ export class MarmotSession {
     return result;
   }
 
-  /** Before a send / on open: add devices the 1:1's two people installed
+  /** Before a send / on open: add devices the 1:1's contact installed
    * since it began (#1559). Bounded; never throws, never blocks for long. */
   async syncDmDevices(appGroupId: string, reason: 'send' | 'open' = 'send'): Promise<void> {
     const dm = this.getGroup(appGroupId);

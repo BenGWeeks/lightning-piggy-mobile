@@ -4,7 +4,7 @@
 // But a device installed AFTER the chat began was never invited: the DM kept
 // going to the old installs only, and the new app never saw the chat. So
 // before a send (bounded wait) and when the chat is opened (staggered, in the
-// background) we compare each person's fresh key packages with the leaves
+// background) we compare the peer's fresh key packages with the leaves
 // already in the group, and add the missing devices in ONE commit — the same
 // invite path a new chat uses, so White Noise gets the commit shape it already
 // accepts.
@@ -16,25 +16,26 @@
 // leaf. Slots we invited ourselves are also remembered per group, which
 // covers older installs that rotated their signing key.
 //
-// Both people's devices: the contact's and our own other installs (a key
-// package is a public "invite me" — no linking or pairing, MIP-06 scope).
-// White Noise contacts are the exception, as for a new chat (devicesForDm):
-// released White Noise decides "is this a DM" by counting LEAVES, so a
-// White Noise user gets only their newest White Noise install, and we never
-// add our own extra installs to a 1:1 with them.
+// Only the contact's devices are added; adding our own other installs would
+// require device linking, which is outside this feature's scope.
+// White Noise contacts get only their newest White Noise install, as for a
+// new chat (devicesForDm): released White Noise counts leaves to detect DMs.
 //
 // Bounds (CLAUDE.md performance rules): at most one check per chat every
 // 10 minutes (1 minute after a failure), one key-package lookup per person
-// per 10 minutes, signature checks yield to the UI, at most
+// per 10 minutes (on focus and before sends only), signature checks yield to the UI, at most
 // MAX_DEVICES_PER_PERSON leaves per person, and a send waits at most a few
 // seconds — on timeout or failure it goes to the current members and the add
 // is retried later. Remote signers (Amber / NIP-46) are never prompted from a
 // background check: each added device costs an approval, so for them only
 // the lookup is warmed on open and the add waits for the user's next send.
 
+import type { EventSigner } from 'applesauce-core';
 import type { Event as NostrEvent } from 'nostr-tools';
 
 import { createYieldScheduler } from '../contexts/nostrDecryptPacing';
+import { amberFailureKind } from './amberErrors';
+import { NostrConnectError } from './signerErrors';
 import { keyPackageSignatureKey, readGroupLeaves, type GroupLeaf } from './marmotDevices';
 import {
   devicesForDm,
@@ -67,8 +68,6 @@ export interface DmDevicePlanInput {
   peerOnWhiteNoise: boolean;
   /** `pubkey:slot` already invited into this group. */
   invitedSlots: ReadonlySet<string>;
-  /** This install's own slot — never added (we ARE that leaf). */
-  ownSlot: string | null;
   /** Test seam: a key package's leaf signature key. */
   signatureKeyOf?: (e: NostrEvent) => string | null;
 }
@@ -84,32 +83,35 @@ export function planDmDeviceAdds(input: DmDevicePlanInput): Map<string, NostrEve
   const peer = input.peer.toLowerCase();
   const inTree = new Set(input.leaves.map((l) => l.key));
   const plan = new Map<string, NostrEvent[]>();
-  for (const person of [peer, self]) {
-    if (person === self && input.peerOnWhiteNoise) continue;
-    const leafCount = input.leaves.filter((l) => l.pubkey === person).length;
-    const room = MAX_DEVICES_PER_PERSON - leafCount;
-    const keys = new Set<string>();
-    const add: NostrEvent[] = [];
-    const fresh = input.fresh.get(person) ?? [];
-    // A White Noise contact: their newest White Noise install or nothing.
-    const candidates =
-      person === peer && input.peerOnWhiteNoise
-        ? fresh.filter(isWhiteNoise).slice(0, 1)
-        : devicesForDm(fresh);
-    for (const kp of candidates) {
-      if (add.length >= room) break;
-      const slot = slotOf(kp);
-      if (!slot || input.invitedSlots.has(slotId(person, slot))) continue;
-      if (person === self && slot === input.ownSlot) continue;
-      const key = sigKey(kp);
-      // One leaf per install: a key already in the tree (or twice in this
-      // batch — two slots of one install, #1426) is that install.
-      if (!key || inTree.has(key) || keys.has(key)) continue;
-      keys.add(key);
-      add.push(kp);
+  if (peer === self) return plan;
+  const person = peer;
+  const leafCount = input.leaves.filter((l) => l.pubkey === person).length;
+  const room = MAX_DEVICES_PER_PERSON - leafCount;
+  const keys = new Set<string>();
+  const add: NostrEvent[] = [];
+  const fresh = input.fresh.get(person) ?? [];
+  // A White Noise contact: their newest White Noise install or nothing.
+  const candidates = input.peerOnWhiteNoise
+    ? fresh.filter(isWhiteNoise).slice(0, 1)
+    : devicesForDm(fresh);
+  for (const kp of candidates) {
+    if (add.length >= room) break;
+    const slot = slotOf(kp);
+    if (!slot) continue;
+    const key = sigKey(kp);
+    if (input.invitedSlots.has(slotId(person, slot))) {
+      if (__DEV__ && input.peerOnWhiteNoise && key && !inTree.has(key)) {
+        console.warn('[Marmot] White Noise invited slot changed signing key; skipping device add');
+      }
+      continue;
     }
-    if (add.length > 0) plan.set(person, add);
+    // One leaf per install: a key already in the tree (or twice in this
+    // batch — two slots of one install, #1426) is that install.
+    if (!key || inTree.has(key) || keys.has(key)) continue;
+    keys.add(key);
+    add.push(kp);
   }
+  if (add.length > 0) plan.set(person, add);
   return plan;
 }
 
@@ -122,7 +124,6 @@ export interface DmDeviceSyncOptions {
   groupState: (mlsId: string) => Promise<Parameters<typeof readGroupLeaves>[0]>;
   /** Add the devices in one commit; resolves once it's sent. */
   invite: (mlsId: string, devices: Map<string, NostrEvent[]>) => Promise<unknown>;
-  ownSlot: () => Promise<string>;
   /** Local key: adding devices needs no approval, so a background check may commit. */
   silentSigner: boolean;
   stopped: () => boolean;
@@ -134,11 +135,47 @@ export interface DmDeviceSyncOptions {
 export class MarmotDmDeviceSync {
   private readonly opts: DmDeviceSyncOptions;
   private readonly nextCheck = new Map<string, number>();
+  // A declined device add stays suppressed for this session (app restart resets it).
+  private readonly inviting = new Set<string>();
+  private readonly declined = new Set<string>();
   private readonly running = new Map<string, Promise<void>>();
   private readonly lookups = new Map<string, { at: number; events: Promise<NostrEvent[]> }>();
 
   constructor(opts: DmDeviceSyncOptions) {
     this.opts = opts;
+  }
+
+  /** Observe typed refusals before marmot-ts turns them into delivery outcomes. */
+  observeSigner(signer: EventSigner): EventSigner {
+    const observe = async <T>(call: () => T | Promise<T>): Promise<T> => {
+      try {
+        return await call();
+      } catch (error) {
+        for (const id of this.inviting) this.noteDeclined(id, error);
+        throw error;
+      }
+    };
+    return {
+      ...signer,
+      getPublicKey: () => signer.getPublicKey(),
+      signEvent: (draft) => observe(() => signer.signEvent(draft)),
+      ...(signer.nip44 && {
+        nip44: {
+          encrypt: (peer, plaintext) => observe(() => signer.nip44!.encrypt(peer, plaintext)),
+          decrypt: (peer, ciphertext) => signer.nip44!.decrypt(peer, ciphertext),
+        },
+      }),
+    };
+  }
+
+  private noteDeclined(mlsId: string, error: unknown): void {
+    if (
+      !this.opts.silentSigner &&
+      (amberFailureKind(error) === 'declined' ||
+        (error instanceof NostrConnectError && error.kind === 'permission'))
+    ) {
+      this.declined.add(mlsId);
+    }
   }
 
   private now(): number {
@@ -150,12 +187,16 @@ export class MarmotDmDeviceSync {
    * at most. `open`: background; never prompts a remote signer. Never throws.
    */
   sync(mlsId: string, peer: string, reason: 'send' | 'open'): Promise<void> {
-    if (this.opts.stopped() || (this.nextCheck.get(mlsId) ?? 0) > this.now()) {
+    if (
+      this.opts.stopped() ||
+      this.declined.has(mlsId) ||
+      (this.nextCheck.get(mlsId) ?? 0) > this.now()
+    ) {
       return Promise.resolve();
     }
     if (reason === 'open' && !this.opts.silentSigner) {
       // Warm the lookup so the next send's check is quick.
-      for (const p of [peer, this.opts.self]) void this.lookup(p).catch(() => undefined);
+      void this.lookup(peer).catch(() => undefined);
       return Promise.resolve();
     }
     let run = this.running.get(mlsId);
@@ -219,22 +260,16 @@ export class MarmotDmDeviceSync {
   private async check(mlsId: string, peer: string): Promise<boolean> {
     const self = this.opts.self.toLowerCase();
     let ok = true;
-    const settled = await Promise.all(
-      [peer, self].map((p) =>
-        this.lookup(p).catch(() => {
-          ok = false;
-          return [] as NostrEvent[];
-        }),
-      ),
-    );
+    const events = await this.lookup(peer).catch(() => {
+      ok = false;
+      return [] as NostrEvent[];
+    });
     if (this.opts.stopped()) return ok;
     const fresh = new Map<string, NostrEvent[]>();
     const scheduler = createYieldScheduler({ safetyEvery: 4 });
     try {
-      for (const [i, p] of [peer, self].entries()) {
-        const opts = { yieldNow: scheduler.maybeYield, freshOnly: true };
-        fresh.set(p, await selectDeviceKeyPackages(p, settled[i], opts));
-      }
+      const opts = { yieldNow: scheduler.maybeYield, freshOnly: true };
+      fresh.set(peer, await selectDeviceKeyPackages(peer, events, opts));
     } finally {
       scheduler.dispose();
     }
@@ -243,12 +278,19 @@ export class MarmotDmDeviceSync {
       peer,
       leaves: readGroupLeaves(await this.opts.groupState(mlsId)),
       fresh,
-      peerOnWhiteNoise: settled[0].some(isWhiteNoise),
+      peerOnWhiteNoise: events.some(isWhiteNoise),
       invitedSlots: new Set(await this.invitedSlots(mlsId)),
-      ownSlot: await this.opts.ownSlot().catch(() => null),
     });
     if (plan.size === 0 || this.opts.stopped()) return ok;
-    await this.opts.invite(mlsId, plan);
+    this.inviting.add(mlsId);
+    try {
+      await this.opts.invite(mlsId, plan);
+    } catch (error) {
+      this.noteDeclined(mlsId, error);
+      throw error;
+    } finally {
+      this.inviting.delete(mlsId);
+    }
     return ok;
   }
 }

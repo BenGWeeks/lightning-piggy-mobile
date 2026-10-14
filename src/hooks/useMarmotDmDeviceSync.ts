@@ -1,4 +1,4 @@
-// While a Marmot 1:1 is open, add devices either person installed since the
+// While a Marmot 1:1 is open, add devices the contact installed since the
 // chat began (#1559) — so the contact's new app starts receiving before the
 // next message, not only from it. Per CLAUDE.md: armed by focus (a blurred
 // chat does nothing), staggered off the open (the relay lookup and
@@ -8,7 +8,6 @@
 import { useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 
-import { DM_DEVICE_SYNC_COOLDOWN_MS } from '../services/marmotDmDeviceSync';
 import { getMarmotSession } from '../services/marmotSession';
 
 /** Delay after the chat opens before the first check. */
@@ -26,11 +25,8 @@ export function useMarmotDmDeviceSync(peer: string | null, owner: string | null 
         if (dm) void session.syncDmDevices(dm.id, 'open').catch(() => undefined);
       };
       const first = setTimeout(check, DM_DEVICE_SYNC_OPEN_DELAY_MS);
-      // A chat left open re-checks once per cooldown (a no-op in between).
-      const again = setInterval(check, DM_DEVICE_SYNC_COOLDOWN_MS);
       return () => {
         clearTimeout(first);
-        clearInterval(again);
       };
     }, [peer, owner]),
   );

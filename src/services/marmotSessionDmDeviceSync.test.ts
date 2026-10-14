@@ -5,6 +5,7 @@ import type { Filter } from 'nostr-tools';
 
 import { DM_DEVICE_SYNC_COOLDOWN_MS } from './marmotDmDeviceSync';
 import { sendMarmotDm } from './marmotSend';
+import { NostrConnectError } from './signerErrors';
 import { setMarmotSession } from './marmotSession';
 import {
   makeInstall,
@@ -47,7 +48,7 @@ describe('MarmotSession: existing 1:1s add newer devices (no WebCrypto)', () => 
         .map((e) => e.tags.find((t) => t[0] === 'd')?.[1]),
     ).size;
 
-  it("adds the contact's new install and our own, in one commit, before sending", async () => {
+  it("adds the contact's new install before sending, never our own installs", async () => {
     const relay = makeRelay();
     const big = makeSession(relay, undefined, 'nsec', OPTS);
     const littleId = makeSigner();
@@ -68,37 +69,71 @@ describe('MarmotSession: existing 1:1s add newer devices (no WebCrypto)', () => 
     setMarmotSession(big.session);
     const sent = await sendMarmotDm(big.pubkey, littleId.pubkey, { kind: 14, content: 'hi all' });
     expect(sent.success).toBe(true);
-    // One Add commit for both: the two Welcomes carry the same MLS Welcome.
+    // The peer gets a Welcome; our other install is never invited.
     const toTablet = unwrapWelcomes(relay, littleId).filter((w) => w.id !== first.id);
     const toOwn = unwrapWelcomes(relay, big);
     expect(toTablet).toHaveLength(1);
-    expect(toOwn).toHaveLength(1);
-    expect(toTablet[0].content).toBe(toOwn[0].content);
+    expect(toOwn).toHaveLength(0);
     // Same chat, joined from the new installs — the DM is kept, not replaced.
     expect(await tablet.session.acceptWelcome(toTablet[0])).toMatchObject({
       id: dm.id,
       isDm: true,
       memberPubkeys: [big.pubkey],
     });
-    expect(await bigOther.session.acceptWelcome(toOwn[0])).toMatchObject({
-      id: dm.id,
-      isDm: true,
-      memberPubkeys: [littleId.pubkey],
-    });
     expect(big.session.findDm(littleId.pubkey)?.id).toBe(dm.id);
     expect(big.session.listGroups()).toHaveLength(1);
     // The message went out after the add, so the new installs can read it.
     const got = (d: typeof phone, text: string) => d.inbox.some((m) => m.rumor.content === text);
-    await waitFor(() => [phone, tablet, bigOther].every((d) => got(d, 'hi all')));
+    await waitFor(() => [phone, tablet].every((d) => got(d, 'hi all')));
 
     // Next check: everyone's already in — nothing is added again.
     later();
     const again = await sendMarmotDm(big.pubkey, littleId.pubkey, { kind: 14, content: 'again' });
     expect(again.success).toBe(true);
     expect(unwrapWelcomes(relay, littleId)).toHaveLength(2);
-    expect(unwrapWelcomes(relay, big)).toHaveLength(1);
+    expect(unwrapWelcomes(relay, big)).toHaveLength(0);
     await waitFor(() => [phone, tablet].every((d) => got(d, 'again')));
     [phone, tablet, bigOther].forEach((p) => p.session.stop());
+  }, 120_000);
+
+  it('a declined remote Welcome suppresses later device adds on the real MLS path', async () => {
+    const relay = makeRelay();
+    const identity = makeSigner();
+    const signEvent = jest.fn(async (draft: Parameters<typeof identity.signer.signEvent>[0]) =>
+      identity.signer.signEvent(draft),
+    );
+    const big = makeSession(relay, undefined, 'amber', {
+      ...OPTS,
+      pubkey: identity.pubkey,
+      signerType: 'nip46',
+      signer: { ...identity.signer, signEvent },
+    });
+    const little = makeSession(relay);
+    const tablet = makeInstall(relay, little);
+    const newer = makeInstall(relay, little);
+    try {
+      await Promise.all([big.session.start(), little.session.start()]);
+      await waitFor(() => slots(relay, little.pubkey) === 1);
+      const dm = await big.session.getOrCreateDm(little.pubkey);
+      await little.session.acceptWelcome(unwrapWelcomes(relay, little)[0]);
+      await tablet.session.start();
+      await waitFor(() => slots(relay, little.pubkey) === 2);
+      // Welcome signing fails, but marmot-ts resolves the commit with a delivery failure.
+      const beforeDecline = signEvent.mock.calls.length;
+      signEvent.mockRejectedValue(new NostrConnectError('permission', 'Signer denied sign_event'));
+      later();
+      await big.session.syncDmDevices(dm.id, 'send');
+      const attempts = signEvent.mock.calls.length;
+      expect(attempts).toBeGreaterThan(beforeDecline);
+      await newer.session.start();
+      await waitFor(() => slots(relay, little.pubkey) === 3);
+      later();
+      await big.session.syncDmDevices(dm.id, 'open');
+      await big.session.syncDmDevices(dm.id, 'send');
+      expect(signEvent).toHaveBeenCalledTimes(attempts);
+    } finally {
+      [big, little, tablet, newer].forEach((install) => install.session.stop());
+    }
   }, 120_000);
 
   it('a failed device lookup still sends to the current members', async () => {
