@@ -71,3 +71,19 @@ appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
     timeout: 90000
 - waitForAnimationToEnd:
     timeout: 5000
+# A chat opens at the first UNREAD message (unread divider, #1452). On a lane
+# that has run the suite before, that is an older run's backlog, so this run's
+# items sit below the fold. Jump to the latest message before any check looks
+# at the screen; tap twice in case the first tap only reaches the divider.
+- repeat:
+    times: 2
+    commands:
+      - runFlow:
+          when:
+            visible:
+              id: '(conversation-scroll-to-bottom|group-jump-to-latest)'
+          commands:
+            - tapOn:
+                id: '(conversation-scroll-to-bottom|group-jump-to-latest)'
+            - waitForAnimationToEnd:
+                timeout: 3000

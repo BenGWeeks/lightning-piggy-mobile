@@ -1,4 +1,4 @@
-appId: dev.ipf.whitenoise.android
+appId: ${WN_APP_ID || 'dev.ipf.whitenoise.android'}
 name: Interop — White Noise renders what Lightning Piggy sent (group), plus post-change messages
 ---
 # White Noise side of flow-147, then the membership-change checks: after the
@@ -142,14 +142,14 @@ name: Interop — White Noise renders what Lightning Piggy sent (group), plus po
     times: 12
     while:
       notVisible:
-        text: '.*IO${TAG}L deleteme should disappear.*'
+        text: '.*IO${TAG}L (deleteme|Delete-me) should disappear.*'
     commands:
       - swipe:
           direction: DOWN
           duration: 500
 - assertNotVisible:
     label: 'IO-CHECK lp.delete'
-    text: '.*IO${TAG}L deleteme should disappear.*'
+    text: '.*IO${TAG}L (deleteme|Delete-me) should disappear.*'
     optional: true
 - repeat:
     times: 12

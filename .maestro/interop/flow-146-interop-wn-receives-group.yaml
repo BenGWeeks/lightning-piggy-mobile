@@ -1,4 +1,4 @@
-appId: dev.ipf.whitenoise.android
+appId: ${WN_APP_ID || 'dev.ipf.whitenoise.android'}
 name: Interop — White Noise renders what the scripted Marmot sender sent (group)
 ---
 # White Noise side of flow-145: same group, same items, asserted with text
@@ -95,16 +95,18 @@ name: Interop — White Noise renders what the scripted Marmot sender sent (grou
                 direction: UP
                 duration: 300
 - takeScreenshot: wn-group-invoice
-# Swipe back (finger down = older messages) until it shows, then assert.
-- repeat:
-    times: 12
-    while:
-      notVisible:
-        text: '.*0.0[1-9].*'
-    commands:
-      - swipe:
-          direction: DOWN
-          duration: 500
+# The voice bubble is short: a 500 ms swipe loop flings it past the screen
+# between visibility checks. scrollUntilVisible steps and settles, and
+# centerElement keeps it on screen for the assertion.
+- scrollUntilVisible:
+    element:
+      text: '.*0.0[1-9].*'
+    direction: UP
+    timeout: 90000
+    centerElement: true
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
 - assertVisible:
     label: 'IO-CHECK voice'
     text: '.*0.0[1-9].*'

@@ -27,6 +27,9 @@
 #   LOCK_WAIT=3600              seconds to wait for the device lock per window.
 #   OUT=~/lp-interop-runs/<date>-<tag>
 #   SKIP_WN=1                   Lightning Piggy only (no White Noise flows).
+#   WN_APP_ID=<package>         White Noise build to drive (default the stock
+#                               dev.ipf.whitenoise.android; e.g.
+#                               dev.ipf.whitenoise.android.dev for a dev build).
 #
 # Never pays anything (the invoice item is an expired test invoice) and only
 # ever talks to the three Piggy test accounts.
@@ -38,6 +41,7 @@ export PATH="$PATH:$HOME/.maestro/bin"
 
 DEVICE="${DEVICE:-emulator-5554}"
 SENDER="${SENDER:-MIDDLE}"
+WN_APP_ID="${WN_APP_ID:-dev.ipf.whitenoise.android}"
 LOCK_DIR="${LOCK_DIR:-/tmp/claude-$(id -u)}"
 # The lane lock for $DEVICE (e.g. hulk-emu.lock for 127.0.0.1:5565).
 DEVICE_LOCK="${DEVICE_LOCK:-$LOCK_DIR/emulator.lock}"
@@ -142,7 +146,7 @@ with_device() {
 # has the sender act.
 export -f sender
 ROW_FILE="$OUT/logs/row-ids.env"
-export STATE DM_STATE BIG_HEX LITTLE_HEX SENDER_HEX SKIP_WN INTEROP_NSEC REPO ROW_FILE
+export STATE DM_STATE BIG_HEX LITTLE_HEX SENDER_HEX SKIP_WN INTEROP_NSEC REPO ROW_FILE WN_APP_ID
 
 # --- window 1: sender items → checks on both apps; Lightning Piggy sends ----
 say "window 1: sender $SENDER (${SENDER_HEX:0:8}) → group 'IO $TAG' (Big on Lightning Piggy + Little on White Noise) and a 1:1 with Big"
@@ -165,7 +169,7 @@ with_device '
   ROW="group-row-marmot:$GROUP_ID"
   flow "$FLOWS/flow-145-interop-lp-receives-group.yaml" ROW_ID="$ROW"
   flow "$FLOWS/flow-151-interop-lp-receives-dm.yaml" ROW_ID="conversation-row-$SENDER_HEX:marmot"
-  [ -z "${SKIP_WN:-}" ] && flow "$FLOWS/flow-146-interop-wn-receives-group.yaml" WN_CHAT="IO $TAG"
+  [ -z "${SKIP_WN:-}" ] && flow "$FLOWS/flow-146-interop-wn-receives-group.yaml" WN_CHAT="IO $TAG" WN_APP_ID="$WN_APP_ID"
   flow "$FLOWS/flow-147-interop-lp-sends-group.yaml" ROW_ID="$ROW"
   # Wire check of Lightning Piggy'"'"'s sends from the scripted member.
   sender listen --state "$STATE" --seconds 90 \
@@ -188,7 +192,7 @@ with_device '
     >"$OUT/logs/listen-after-rename.jsonl" || true
   sender say --state "$STATE" --text "IO$TAG after-rename" >"$OUT/logs/after-rename.json"
   flow "$FLOWS/flow-150-interop-lp-receives-after-rename.yaml" ROW_ID="'"$ROW"'"
-  [ -z "${SKIP_WN:-}" ] && flow "$FLOWS/flow-148-interop-wn-receives-lp.yaml" WN_CHAT="(?i)IO $TAG( renamed)?"
+  [ -z "${SKIP_WN:-}" ] && flow "$FLOWS/flow-148-interop-wn-receives-lp.yaml" WN_CHAT="(?i)IO $TAG( renamed)?" WN_APP_ID="$WN_APP_ID"
   sender info --state "$STATE" >"$OUT/logs/group-info.json"
 '
 

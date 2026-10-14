@@ -51,6 +51,9 @@ Prerequisites on the device (default `emulator-5554`):
 * White Noise (`dev.ipf.whitenoise.android`) signed in as *Little Piggy*, and
   that account active (White Noise supports several accounts; an invite for
   another account switches it).
+  To drive another White Noise build (e.g. a dev build installed alongside
+  the stock app), set `WN_APP_ID=<package>`; the flows default to the stock
+  package.
 * `.env` with `MAESTRO_NSEC_BIG`, `MAESTRO_NSEC_MIDDLE`, `MAESTRO_NSEC_LITTLE`.
 * Maestro on `PATH`, `jq`, Node.
 
@@ -61,6 +64,8 @@ bash scripts/interop/run.sh
 METRO_PORT=8271 bash scripts/interop/run.sh
 # Lightning Piggy only:
 SKIP_WN=1 bash scripts/interop/run.sh
+# against a White Noise dev build (separate package, same device):
+WN_APP_ID=dev.ipf.whitenoise.android.dev bash scripts/interop/run.sh
 # another lane (its own lock), waiting up to 2 h for a busy lane:
 DEVICE=127.0.0.1:5565 DEVICE_LOCK=/tmp/claude-$UID/hulk-emu.lock LOCK_WAIT=7200 \
   bash scripts/interop/run.sh
