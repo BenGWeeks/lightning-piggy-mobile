@@ -1,3 +1,4 @@
+import { isSellerAccountForgotten } from './sellerEventStore';
 // "Receive payments to" — the wallet a seller's order invoices are created
 // on. A device/account preference (like the shop currency in
 // sellerPreferences), never published to Nostr: a wallet id means nothing to
@@ -6,6 +7,7 @@
 // counts as unset.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+let writeChain: Promise<unknown> = Promise.resolve();
 const key = (pubkey: string) => `market-seller-receive-wallet:${pubkey}`;
 
 export async function loadSellerReceiveWallet(pubkey: string): Promise<string | null> {
@@ -21,6 +23,14 @@ export async function saveSellerReceiveWallet(
   pubkey: string,
   walletId: string | null,
 ): Promise<void> {
-  if (walletId) await AsyncStorage.setItem(key(pubkey), walletId);
-  else await AsyncStorage.removeItem(key(pubkey));
+  const run = writeChain.then(async () => {
+    if (isSellerAccountForgotten(pubkey)) return;
+    if (walletId) await AsyncStorage.setItem(key(pubkey), walletId);
+    else await AsyncStorage.removeItem(key(pubkey));
+  });
+  writeChain = run.catch(() => undefined);
+  await run;
+}
+export async function drainSellerReceiveWalletWrites(): Promise<void> {
+  await writeChain;
 }

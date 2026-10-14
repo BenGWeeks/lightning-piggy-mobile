@@ -1,5 +1,9 @@
 import { wipeCheckoutAddress } from '../services/checkoutAddressStorage';
 import { cancelSellerActivity } from '../services/sellerActivityService';
+import { drainSellerReceiveWalletWrites } from '../services/sellerReceiveWallet';
+import { drainBuyerOrderTitleWrites } from '../services/buyerOrderTitles';
+import { drainSellerInvoiceWrites } from '../services/sellerInvoiceStore';
+import { drainOrderAdmission, orderBudgetKey } from '../services/orderAdmission';
 import { wipeRemoteMediaForOwner } from '../services/remoteMediaCache';
 import { retireBuyerOrderTitles, waitForBuyerOrderTitleWrites } from '../services/buyerOrderTitles';
 import { FOLLOW_SNAPSHOT_KEY } from '../services/contactFollowFreshness';
@@ -172,6 +176,9 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
     `dm-kind4-exhausted:${loggedOutPubkey}`,
     // Product titles reveal this account's purchase history.
     `market-buyer-order-titles:${loggedOutPubkey}`,
+    `market-seller-invoices:${loggedOutPubkey}`,
+    `market-seller-receive-wallet:${loggedOutPubkey}`,
+    orderBudgetKey(loggedOutPubkey),
     `nostr_group_activity_${loggedOutPubkey}`,
     `nostr_groups_${loggedOutPubkey}`,
     `groups_following_only_${loggedOutPubkey}`,
@@ -184,6 +191,10 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
     sellerCacheStorageKey(loggedOutPubkey),
   ];
   forgetSellerAccount(loggedOutPubkey);
+  await drainOrderAdmission();
+  await drainSellerInvoiceWrites();
+  await drainSellerReceiveWalletWrites();
+  await drainBuyerOrderTitleWrites();
   forgetLinkPreviewMirror(loggedOutPubkey);
   forgetRevealedMedia(loggedOutPubkey);
   forgetAccountSettings(loggedOutPubkey);

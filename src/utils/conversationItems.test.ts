@@ -359,7 +359,7 @@ describe('buildConversationItems — structured NIP-88 polls (#203)', () => {
     }
   });
 
-  it('renders a valid kind-16 order as an order card, not unsupported', () => {
+  it('hides a valid kind-16 order from chat', () => {
     const orderJson = JSON.stringify({
       kind: 16,
       orderId: 'abc-123',
@@ -371,18 +371,17 @@ describe('buildConversationItems — structured NIP-88 polls (#203)', () => {
       [{ id: '1', fromMe: false, text: orderJson, createdAt: DAY2, wireKind: 16 }],
       [],
     ).filter((i) => i.kind !== 'dayHeader');
-    expect(items[0].kind).toBe('order');
+    expect(items).toEqual([]);
   });
 
-  it('maps an unparseable kind-16/17 row to `unsupported`, never a raw JSON bubble', () => {
+  it('hides an unparseable kind-16/17 row from chat', () => {
     // A non-order payload sharing the kind (e.g. a NIP-18 repost) or a corrupt row.
     const notAnOrder = JSON.stringify({ kind: 1, id: 'abc', content: 'gm' });
     const items = buildConversationItems(
       [{ id: '1', fromMe: false, text: notAnOrder, createdAt: DAY2, wireKind: 16 }],
       [],
     ).filter((i) => i.kind !== 'dayHeader');
-    expect(items[0].kind).toBe('unsupported');
-    expect(items[0].kind).not.toBe('message'); // never a raw text bubble
+    expect(items).toEqual([]);
   });
 });
 
@@ -429,17 +428,14 @@ describe('buildConversationItems — duplicate order-invoice note dedup', () => 
 
   it('suppresses the kind-14 note when a matching kind-16 order card exists', () => {
     const items = nonHeader([cardMsg(INVOICE), noteMsg(INVOICE)]);
-    expect(items).toHaveLength(1);
-    expect(items[0].kind).toBe('order');
-    expect(items.some((i) => i.kind === 'message')).toBe(false);
+    expect(items).toEqual([]);
   });
 
   it('suppresses regardless of arrival order (note before OR after the card)', () => {
     const noteFirst = nonHeader([noteMsg(INVOICE), cardMsg(INVOICE)]);
     const cardFirst = nonHeader([cardMsg(INVOICE), noteMsg(INVOICE)]);
     for (const items of [noteFirst, cardFirst]) {
-      expect(items).toHaveLength(1);
-      expect(items[0].kind).toBe('order');
+      expect(items).toEqual([]);
     }
   });
 
@@ -451,7 +447,7 @@ describe('buildConversationItems — duplicate order-invoice note dedup', () => 
 
   it('shows the note when the order card carries a DIFFERENT invoice', () => {
     const items = nonHeader([cardMsg(OTHER_INVOICE), noteMsg(INVOICE)]);
-    expect(items.some((i) => i.kind === 'order')).toBe(true);
+    expect(items.some((i) => i.kind === 'order')).toBe(false);
     expect(items.some((i) => i.kind === 'message' && i.id === 'dm-note')).toBe(true);
   });
 
@@ -553,79 +549,36 @@ describe('formatDayHeader', () => {
   });
 });
 
-describe('buyer-approved order totals', () => {
-  const orderMessage = (id: string, fromMe: boolean, type: string, amountSats: number) => ({
-    id,
-    fromMe,
-    createdAt: DAY2,
-    wireKind: 16,
-    text: JSON.stringify({
-      kind: 16,
-      type,
-      amountSats,
-      orderId: 'same-order',
-      items: [],
-      message: '',
-    }),
-  });
-  it('binds the payment request to the outgoing order, ignoring the merchant amount', () => {
-    const items = buildConversationItems(
-      [
-        orderMessage('request', false, 'payment', 999),
-        orderMessage('approved', true, 'order', 100),
-      ],
-      [],
-    );
-    expect(items.find((item) => item.id === 'dm-request')).toMatchObject({
-      expectedAmountSats: 100,
-    });
-  });
-  it('cannot establish an approved amount from a merchant-authored order', () => {
-    const items = buildConversationItems(
-      [orderMessage('request', false, 'payment', 999), orderMessage('forged', false, 'order', 999)],
-      [],
-    );
-    expect(
-      items.find((item) => item.kind === 'order' && item.expectedAmountSats !== undefined),
-    ).toBeUndefined();
-  });
-  it('fails closed when outgoing orders with the same ID disagree', () => {
-    const items = buildConversationItems(
-      [
-        orderMessage('approved', true, 'order', 100),
-        orderMessage('conflicting', true, 'order', 200),
-        orderMessage('request', false, 'payment', 100),
-      ],
-      [],
-    );
-    expect(
-      items.find((item) => item.kind === 'order' && item.expectedAmountSats !== undefined),
-    ).toBeUndefined();
-  });
-
-  it('binds to a store-resolved total when the outgoing order is older than the loaded slice', () => {
-    const items = buildConversationItems(
-      [orderMessage('request', false, 'payment', 999)],
-      [],
-      new Map([['same-order', 100]]),
-    );
-    expect(items.find((item) => item.id === 'dm-request')).toMatchObject({
-      expectedAmountSats: 100,
-    });
-  });
-  it('fails closed when an in-slice outgoing order disagrees with the store-resolved total', () => {
-    const items = buildConversationItems(
-      [
-        orderMessage('request', false, 'payment', 100),
-        orderMessage('approved', true, 'order', 100),
-      ],
-      [],
-      new Map([['same-order', 200]]),
-    );
-    const request = items.find((item) => item.id === 'dm-request');
-    expect(request?.kind).toBe('order');
-    expect((request as { expectedAmountSats?: number }).expectedAmountSats).toBeUndefined();
-  });
+describe('Gamma orders stay off chat', () => {
+  it.each(['order', 'payment', 'status', 'shipping', 'receipt'])(
+    'hides %s in both directions',
+    (type) => {
+      for (const fromMe of [true, false]) {
+        const wireKind = type === 'receipt' ? 17 : 16;
+        expect(
+          buildConversationItems(
+            [
+              {
+                id: 'order',
+                fromMe,
+                createdAt: DAY2,
+                wireKind,
+                text: JSON.stringify({
+                  kind: wireKind,
+                  type,
+                  orderId: 'o',
+                  items: [],
+                  message: 'private',
+                }),
+              },
+              { id: 'chat', fromMe: false, createdAt: DAY2, wireKind: 14, text: 'hello' },
+            ],
+            [],
+          ).filter((item) => item.kind !== 'dayHeader'),
+        ).toEqual([expect.objectContaining({ kind: 'message', id: 'dm-chat', text: 'hello' })]);
+      }
+    },
+  );
 });
 
 describe('orderIdsNeedingHistory', () => {
@@ -784,44 +737,4 @@ it.each([14, 15])('binds file actions to kind %s before geo detection', (wireKin
   if (wireKind === 15)
     expect(item).toMatchObject({ kind: 'message', file: { name: 'geo:1,2.pdf' } });
   else expect(item).not.toHaveProperty('file');
-});
-
-describe('awaitingInvoice (buyer waiting for the seller)', () => {
-  const stored = (type: '1' | '2' | '3', extra: string[][] = []) =>
-    JSON.stringify({
-      kind: 16,
-      type: type === '1' ? 'order' : type === '2' ? 'payment' : 'status',
-      orderId: 'o-42',
-      amountSats: 2100,
-      items: [{ ref: `30402:${PEER}:mug`, quantity: 1 }],
-      message: '',
-      ...(extra.length ? { status: extra[0][1] } : {}),
-    });
-  const orderItems = (msgs: ConversationMessageInput[]) =>
-    buildConversationItems(msgs, []).filter((i) => i.kind === 'order');
-
-  it('flags my placed order until the seller replies', () => {
-    const [placed] = orderItems([
-      { id: 'a', fromMe: true, text: stored('1'), createdAt: DAY2, wireKind: 16 },
-    ]);
-    expect(placed).toMatchObject({ awaitingInvoice: true });
-  });
-
-  it.each([
-    ['a payment request', stored('2')],
-    ['a status update (e.g. cancelled)', stored('3', [['status', 'cancelled']])],
-  ])('clears once the seller sends %s', (_label, reply) => {
-    const items = orderItems([
-      { id: 'a', fromMe: true, text: stored('1'), createdAt: DAY2, wireKind: 16 },
-      { id: 'b', fromMe: false, text: reply, createdAt: DAY2 + 60, wireKind: 16 },
-    ]);
-    expect(items.every((i) => i.kind === 'order' && !i.awaitingInvoice)).toBe(true);
-  });
-
-  it("never flags someone else's order (the seller's view of an incoming order)", () => {
-    const [incoming] = orderItems([
-      { id: 'a', fromMe: false, text: stored('1'), createdAt: DAY2, wireKind: 16 },
-    ]);
-    expect(incoming).not.toHaveProperty('awaitingInvoice');
-  });
 });

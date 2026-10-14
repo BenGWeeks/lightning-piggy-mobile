@@ -9,6 +9,8 @@ import { loadSellerInvoices } from '../services/sellerInvoiceStore';
 import { loadSellerReceiveWallet } from '../services/sellerReceiveWallet';
 import { amountSatsFromBolt11, paymentHashFromBolt11 } from '../utils/bolt11';
 
+jest.mock('../contexts/LocaleContext', () => ({ useTranslation: () => (key: string) => key }));
+
 jest.mock('../contexts/NostrContext', () => ({ useNostr: jest.fn() }));
 jest.mock('../contexts/WalletContext', () => ({ useWallet: jest.fn() }));
 jest.mock('../services/nwcService', () => ({ lookupInvoice: jest.fn() }));
@@ -69,7 +71,7 @@ it('creates the invoice on the CHOSEN wallet and sends a Gamma type-2 payment re
     ]),
   );
   const records = await loadSellerInvoices(SELLER);
-  expect(records['order-1']).toMatchObject({ walletId: 'shop-wallet', paymentHash: HASH });
+  expect(records[`${BUYER}:order-1`]).toMatchObject({ walletId: 'shop-wallet', paymentHash: HASH });
   // Not remembered unless asked.
   expect(await loadSellerReceiveWallet(SELLER)).toBeNull();
 });

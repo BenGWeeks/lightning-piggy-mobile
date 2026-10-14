@@ -57,6 +57,7 @@ jest.mock('./nostrDmCache', () => ({
 jest.mock('../utils/nip17Unwrap', () => ({
   partnerFromRumor: (rumor: { partnership?: { partnerPubkey: string; fromMe: boolean } }) =>
     rumor.partnership ?? null,
+  rumorEventId: (rumor: { kind: number }) => (rumor.kind === 16 ? 'unique-order-rumor' : undefined),
   textForRumor: (rumor: DecodedRumor) => {
     const { parseOrderEvent, serializeOrder } = jest.requireActual('../utils/orderEvents');
     const order = parseOrderEvent(rumor);
@@ -70,6 +71,7 @@ const BOB = 'b'.repeat(64);
 
 type TestRumor = {
   kind: number;
+  tags?: string[][];
   created_at: number;
   content: string;
   partnership?: { partnerPubkey: string; fromMe: boolean };
@@ -82,6 +84,7 @@ const wrap = (id: string) => ({ id });
 const rumorFrom = (partner: string, over: Partial<TestRumor> = {}): DecodedRumor =>
   ({
     kind: 14,
+    pubkey: partner,
     created_at: 100,
     content: `msg-from-${partner.slice(0, 4)}`,
     partnership: { partnerPubkey: partner, fromMe: false },
@@ -157,6 +160,7 @@ describe('dmWrapIngest.ingestInboxWraps', () => {
       kind: 16,
       content: '',
       tags: [
+        ['p', OWNER],
         ['type', '1'],
         ['order', 'abc-12345678'],
         ['amount', '21'],
@@ -171,12 +175,7 @@ describe('dmWrapIngest.ingestInboxWraps', () => {
       passesFollowGate: () => true,
       skipKey: 'skip_key',
     });
-    expect(res.entries[0].text).toBe('🛒 Order Placed · 21 sats');
-    expect(res.entries[0].text).not.toContain('{');
-    // renderText carries the raw order JSON so the conversation thread renders
-    // the order card on the FIRST open (the inbox `text` preview can't be parsed
-    // back into a card). #market
-    expect(res.entries[0].renderText).toBe(orderJson);
+    expect(res.entries).toEqual([]);
     const rows: DmMessageRow[] = mockUpsert.mock.calls[0][0];
     expect(rows[0].content).toBe(orderJson); // raw order JSON persisted
     expect(rows[0].wireKind).toBe(16);

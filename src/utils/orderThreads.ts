@@ -89,7 +89,7 @@ export function orderThreads(
       if (
         bolt11 &&
         expiresAt !== null &&
-        matchesExpectedOrderAmount(bolt11, thread.placed.amountSats)
+        (role === 'seller' || matchesExpectedOrderAmount(bolt11, thread.placed.amountSats))
       ) {
         thread.invoice = {
           bolt11,
@@ -156,6 +156,8 @@ export interface BuyerOrderEntry {
   jumpToRowId?: string;
   /** Allows a focused view to refresh when its payment request expires. */
   paymentExpiresAt?: number;
+  /** Validated invoice for the market detail, never a chat card. */
+  paymentRequest?: ParsedOrderEvent;
 }
 
 /**
@@ -181,6 +183,19 @@ export function buyerOrderEntries(
         status,
         order: thread.placed,
         paymentExpiresAt: status === 'payNow' ? thread.invoice?.expiresAt : undefined,
+        ...(thread.invoice && status === 'payNow'
+          ? {
+              paymentRequest: {
+                kind: 16,
+                type: 'payment' as const,
+                orderId: thread.orderId,
+                items: [],
+                message: '',
+                amountSats: thread.invoice.amountSats,
+                payment: { method: 'lightning', value: thread.invoice.bolt11 },
+              },
+            }
+          : {}),
         jumpToRowId:
           status === 'payNow' ? (thread.invoice?.rowId ?? thread.placedRowId) : thread.placedRowId,
       });

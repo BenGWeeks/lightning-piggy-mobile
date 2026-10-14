@@ -273,6 +273,23 @@ export const navigateFromNotification = (
     navigationRef.navigate('Main', { screen: 'MainTabs', params: { screen: 'Messages' } });
     return true;
   }
+  if ((data.shopOrderId || data.shopEventId) && data.shopBuyerPubkey) {
+    navigationRef.navigate('Main', {
+      screen: 'MainTabs',
+      params: {
+        screen: 'Explore',
+        params: {
+          screen: 'MarketShopOrders',
+          params: {
+            orderId: data.shopOrderId,
+            eventId: data.shopEventId,
+            buyerPubkey: data.shopBuyerPubkey,
+          },
+        },
+      },
+    });
+    return true;
+  }
   if (data.conversationPubkey || data.groupId || data.marmotGroupId) {
     return routeNotificationMessage(data, {
       getActivePubkey,
@@ -367,8 +384,13 @@ export const navigateFromNotification = (
         ? resolveWrapConversation(owner, data.wrapId, { shouldStop: cancelled }).then((target) =>
             target
               ? {
-                  conversationPubkey: target.pubkey,
-                  protocol: target.protocol,
+                  ...(target.shopEventId
+                    ? {
+                        shopEventId: target.shopEventId,
+                        shopOrderId: target.shopOrderId,
+                        shopBuyerPubkey: target.pubkey,
+                      }
+                    : { conversationPubkey: target.pubkey, protocol: target.protocol }),
                   threadKind: 'dm' as const,
                   messageId: data.messageId ?? data.wrapId,
                   owner,

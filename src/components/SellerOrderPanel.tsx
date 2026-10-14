@@ -47,7 +47,7 @@ function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.Reac
   const styles = useMemo(() => createSellerOrderPanelStyles(colors), [colors]);
   const { pubkey } = useNostr();
   const mine = pubkey ? orderOwnership(order, pubkey) === 'mine' : false;
-  const { quote, loading } = useSellerOrderQuote(mine ? order : null);
+  const { quote, quoteCurrent, loading } = useSellerOrderQuote(mine ? order : null);
   const invoice = useSellerInvoice(mine ? buyerPubkey : null, mine ? order.orderId : null);
   const [sheetVisible, setSheetVisible] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -59,17 +59,20 @@ function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.Reac
   );
   const onConfirm = useCallback(
     async (walletId: string, remember: boolean) => {
-      if (quote?.totalSats == null) return;
       setError(null);
       try {
-        await invoice.sendInvoice({ walletId, amountSats: quote.totalSats, remember });
+        const current = quoteCurrent();
+        if (current?.totalSats == null || current.totalSats !== quote?.totalSats) {
+          throw new SellerInvoiceError('shopChanged', 'Shop pricing changed; review the order');
+        }
+        await invoice.sendInvoice({ walletId, amountSats: current.totalSats, remember });
         Toast.show({ type: 'success', text1: t('sellerOrders.invoiceSent') });
       } catch (e) {
         setError(errorText(e));
         throw e;
       }
     },
-    [invoice, quote?.totalSats, t, errorText],
+    [invoice, quote?.totalSats, quoteCurrent, t, errorText],
   );
   const onMarkPaid = useCallback(async () => {
     try {
@@ -204,10 +207,15 @@ function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.Reac
           {order.address}
         </Text>
       ) : null}
-      {order.email || order.phone ? (
+      {order.email || order.phone || order.contact ? (
         <Text style={styles.detail} selectable>
           <Text style={styles.detailLabel}>{t('sellerOrders.contact')} </Text>
-          {[order.email, order.phone].filter(Boolean).join(' · ')}
+          {[order.email, order.phone, order.contact].filter(Boolean).join(' · ')}
+        </Text>
+      ) : null}
+      {order.message || order.notes ? (
+        <Text style={styles.detail} selectable>
+          {[order.message, order.notes].filter(Boolean).join(' · ')}
         </Text>
       ) : null}
       {thread?.receipt && !receiptVerified ? (

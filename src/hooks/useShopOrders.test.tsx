@@ -1,6 +1,6 @@
 import { renderHook, waitFor, act } from '@testing-library/react-native';
 import { useShopOrders } from './useShopOrders';
-import { getShopOrderRows, subscribeDmStorage } from '../services/dmDb';
+import { getOrderRows, subscribeDmStorage } from '../services/dmDb';
 import { serializeOrder } from '../utils/orderEvents';
 
 const SELLER = 'a'.repeat(64);
@@ -14,7 +14,7 @@ jest.mock('../contexts/NostrContext', () => ({ useNostr: () => ({ pubkey: 'a'.re
 let mockListener: ((owner: string) => void) | undefined;
 const mockUnsubscribe = jest.fn();
 jest.mock('../services/dmDb', () => ({
-  getShopOrderRows: jest.fn(),
+  getOrderRows: jest.fn(),
   subscribeDmStorage: jest.fn((listener: (owner: string) => void) => {
     mockListener = listener;
     return mockUnsubscribe;
@@ -45,21 +45,21 @@ beforeEach(() => {
 afterEach(() => jest.useRealTimers());
 
 it('reads orders from the DM store (no relay subscription) and names the lines', async () => {
-  (getShopOrderRows as jest.Mock).mockResolvedValue([orderRow('o1')]);
+  (getOrderRows as jest.Mock).mockResolvedValue([orderRow('o1')]);
   const titles = new Map([['mug', 'Piggy mug']]);
   const { result } = renderHook(() => useShopOrders(titles));
   expect(result.current.orders).toBeNull();
   await waitFor(() => expect(result.current.orders).toHaveLength(1));
   expect(result.current.orders![0].lines[0].title).toBe('Piggy mug');
-  expect(getShopOrderRows).toHaveBeenCalledWith(SELLER);
+  expect(getOrderRows).toHaveBeenCalledWith(SELLER);
 });
 
 it('re-reads once after a burst of store writes for this account only', async () => {
-  (getShopOrderRows as jest.Mock).mockResolvedValue([]);
+  (getOrderRows as jest.Mock).mockResolvedValue([]);
   const titles = new Map<string, string>();
   const { result, unmount } = renderHook(() => useShopOrders(titles));
   await waitFor(() => expect(result.current.orders).toEqual([]));
-  (getShopOrderRows as jest.Mock).mockResolvedValue([orderRow('o2')]);
+  (getOrderRows as jest.Mock).mockResolvedValue([orderRow('o2')]);
   act(() => {
     mockListener?.('someone-else');
     mockListener?.(SELLER);
@@ -67,7 +67,7 @@ it('re-reads once after a burst of store writes for this account only', async ()
     jest.advanceTimersByTime(500);
   });
   await waitFor(() => expect(result.current.orders).toHaveLength(1));
-  expect(getShopOrderRows).toHaveBeenCalledTimes(2);
+  expect(getOrderRows).toHaveBeenCalledTimes(2);
   expect(subscribeDmStorage).toHaveBeenCalledTimes(1);
   unmount();
   expect(mockUnsubscribe).toHaveBeenCalled();

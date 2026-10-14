@@ -2711,7 +2711,7 @@
       "orders": {
         "line": "{{title}} × {{quantity}}",
         "amount": "{{amount}} sats",
-        "hint": "买家对你商品的订单。点按即可打开聊天。",
+        "hint": "买家对你的商品的订单。点按查看订单。",
         "emptyBody": "有人购买你的商品后，订单会显示在这里。",
         "rowAccessibility": "来自 {{name}} 的订单：{{items}}，{{time}}"
       },
@@ -3593,6 +3593,7 @@
       "noWallet": "请选择接收付款的钱包。",
       "invoiceFailed": "该钱包无法创建发票。请检查它已连接并允许收款。",
       "amountMismatch": "钱包创建的发票金额不符，因此未发送。",
+      "shopChanged": "你的店铺价格或配送选项已更改。发送发票前请检查订单。",
       "sendFailed": "无法发送给买家。请检查网络后重试。",
       "notSignedIn": "请登录以管理订单。"
     },

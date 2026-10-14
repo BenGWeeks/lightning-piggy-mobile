@@ -2711,7 +2711,7 @@
       "orders": {
         "line": "{{title}} × {{quantity}}",
         "amount": "{{amount}} sats",
-        "hint": "Orders from buyers for your listings. Tap one to open the chat.",
+        "hint": "Orders from buyers for your listings. Tap one to view the order.",
         "emptyBody": "When someone buys one of your listings, their order shows up here.",
         "rowAccessibility": "Order from {{name}}: {{items}}, {{time}}"
       },
@@ -3593,6 +3593,7 @@
       "noWallet": "Choose a wallet to receive the payment.",
       "invoiceFailed": "That wallet couldn't create an invoice. Check it's connected and allowed to receive.",
       "amountMismatch": "The wallet created an invoice for a different amount, so it wasn't sent.",
+      "shopChanged": "Your shop prices or shipping changed. Review the order before sending an invoice.",
       "sendFailed": "Couldn't send to the buyer. Check your connection and try again.",
       "notSignedIn": "Sign in to manage orders."
     },

@@ -2711,7 +2711,7 @@
       "orders": {
         "line": "{{title}} × {{quantity}}",
         "amount": "{{amount}} sats",
-        "hint": "Vevők rendelései a hirdetéseidre. Koppints egyre a csevegés megnyitásához.",
+        "hint": "A hirdetéseidre érkezett vevői rendelések. Koppints egyre a rendelés megtekintéséhez.",
         "emptyBody": "Ha valaki megvesz egyet a hirdetéseid közül, a rendelése itt jelenik meg.",
         "rowAccessibility": "{{name}} rendelése: {{items}}, {{time}}"
       },
@@ -3593,6 +3593,7 @@
       "noWallet": "Válassz tárcát a fizetés fogadásához.",
       "invoiceFailed": "Ez a tárca nem tudott számlát létrehozni. Ellenőrizd, hogy csatlakozik-e és fogadhat-e.",
       "amountMismatch": "A tárca más összegű számlát hozott létre, ezért nem küldtük el.",
+      "shopChanged": "Megváltoztak a boltod árai vagy szállítási feltételei. Számla küldése előtt ellenőrizd a rendelést.",
       "sendFailed": "Nem sikerült elküldeni a vevőnek. Ellenőrizd a kapcsolatot, és próbáld újra.",
       "notSignedIn": "Jelentkezz be a rendelések kezeléséhez."
     },

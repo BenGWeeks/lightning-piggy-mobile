@@ -2711,7 +2711,7 @@
       "orders": {
         "line": "{{title}} × {{quantity}}",
         "amount": "{{amount}} sats",
-        "hint": "Bestellungen von Käufern für deine Angebote. Tippe eine an, um den Chat zu öffnen.",
+        "hint": "Bestellungen von Käufern für deine Angebote. Tippe auf eine, um die Bestellung anzusehen.",
         "emptyBody": "Wenn jemand eines deiner Angebote kauft, erscheint die Bestellung hier.",
         "rowAccessibility": "Bestellung von {{name}}: {{items}}, {{time}}"
       },
@@ -3593,6 +3593,7 @@
       "noWallet": "Wähle eine Wallet für den Zahlungseingang.",
       "invoiceFailed": "Diese Wallet konnte keine Rechnung erstellen. Prüfe, ob sie verbunden ist und empfangen darf.",
       "amountMismatch": "Die Wallet hat eine Rechnung über einen anderen Betrag erstellt, daher wurde sie nicht gesendet.",
+      "shopChanged": "Die Preise oder Versandoptionen deines Shops haben sich geändert. Prüfe die Bestellung, bevor du eine Rechnung sendest.",
       "sendFailed": "Senden an den Käufer fehlgeschlagen. Prüfe deine Verbindung und versuche es erneut.",
       "notSignedIn": "Melde dich an, um Bestellungen zu verwalten."
     },

@@ -1,4 +1,4 @@
-import { admitOrderLifecycle, admitUnfollowedOrder, isBoundedOrderRumor } from './orderRumorIngest';
+import { admitOrderLifecycle, isBoundedOrderRumor } from './orderRumorIngest';
 import { gateLiveDm } from './liveDmFollowGateDecision';
 import { getAppFormatLocale } from '../utils/appFormatLocale';
 import { dmThreadId, MARMOT_WELCOME_KIND, protocolForWireKind } from '../utils/dmProtocol';
@@ -24,8 +24,8 @@ import {
 } from '../services/dmWrapNotificationDedupe';
 import { routeMarmotWelcome } from '../services/marmotWelcomeRouter';
 import type { LiveSubFollowGateBuffer } from './liveSubFollowGate';
-import { sellerOrderSignal } from '../services/ownListingIndex';
-import { orderLinesSummary } from '../utils/sellerOrderSignal';
+import { acceptOrderRumor } from '../services/orderAdmission';
+import { parseOrderEvent } from '../utils/orderEvents';
 import { t } from '../i18n';
 
 /**
@@ -138,11 +138,18 @@ export function createLiveRumorSurfacer(
     // group surface, not the 1:1 inbox. tryRouteGroupRumor handles
     // appendGroupMessage + notifyGroupMessage internally so an open
     // GroupConversationScreen auto-refreshes.
-    const routeResult = await tryRouteGroupRumor(rumor, viewerPubkey, wrapId, shouldAbort, (pk) =>
-      followPubkeysRef.current.has(pk),
-    );
+    const routeResult =
+      rumor.kind === 16 || rumor.kind === 17
+        ? { kind: 'not-group' as const, deferredGroupRumor: undefined }
+        : await tryRouteGroupRumor(rumor, viewerPubkey, wrapId, shouldAbort, (pk) =>
+            followPubkeysRef.current.has(pk),
+          );
     if (shouldAbort()) return;
     if (routeResult.kind !== 'not-group') {
+      if (order && !showOrderInMessages) {
+        nothingToSee();
+        return;
+      }
       // OS notification (#279) — fired HERE (live path) not inside
       // tryRouteGroupRumor (which also runs on batch refresh). Only for
       // genuinely-fresh messages (backlog has old timestamps → silent),
@@ -181,16 +188,11 @@ export function createLiveRumorSurfacer(
       return;
     }
 
-    const orderRumor = isBoundedOrderRumor(rumor);
+    const order = parseOrderEvent(rumor);
     if (
       (rumor.kind === 16 || rumor.kind === 17) &&
-      (!orderRumor ||
-        !(await admitOrderLifecycle(
-          viewerPubkey,
-          partnership.partnerPubkey,
-          partnership.fromMe,
-          rumor,
-        )))
+      (!isBoundedOrderRumor(rumor) ||
+        !(await admitOrderLifecycle(viewerPubkey, partnership.partnerPubkey, partnership.fromMe, rumor)))
     ) {
       nothingToSee();
       return;
@@ -198,43 +200,39 @@ export function createLiveRumorSurfacer(
     if (shouldAbort()) return;
     const showOrderInMessages =
       followPubkeysRef.current.has(partnership.partnerPubkey) || includeNonFollowOrders();
-    if (
-      orderRumor &&
-      !followPubkeysRef.current.has(partnership.partnerPubkey) &&
-      !admitUnfollowedOrder(viewerPubkey)
-    ) {
-      releaseWrapClaim(wrapId);
-      nothingToSee();
-      return;
-    }
-    const shopSignal = await sellerOrderSignal(rumor, viewerPubkey);
-    const decision = orderRumor
-      ? 'pass'
-      : gateLiveDm({
-          entry: {
-            id: wrapId,
-            partnerPubkey: partnership.partnerPubkey,
-            fromMe: partnership.fromMe,
-            createdAt: rumor.created_at,
-            text: textForRumor(rumor),
-            wireKind: rumor.kind,
-          },
-          kind: 1059,
-          groupRumor: routeResult.deferredGroupRumor,
-          rumor,
-          onEvict: () => releaseWrapClaim(wrapId),
-          follows: followPubkeysRef.current,
-          hydrated: isFollowHydrated(),
-          cacheReady: isFollowCacheReady(),
-          buffer: followGateBuffer,
-          fresh: isFreshArrival(rumor.created_at),
-        });
+    const decision = order ? 'pass' : gateLiveDm({
+      entry: {
+        id: wrapId,
+        partnerPubkey: partnership.partnerPubkey,
+        fromMe: partnership.fromMe,
+        createdAt: rumor.created_at,
+        text: textForRumor(rumor),
+        wireKind: rumor.kind,
+      },
+      kind: 1059,
+      groupRumor: order ? rumor : routeResult.deferredGroupRumor,
+      rumor,
+      onEvict: () => releaseWrapClaim(wrapId),
+      follows: followPubkeysRef.current,
+      hydrated: isFollowHydrated(),
+      cacheReady: isFollowCacheReady(),
+      buffer: followGateBuffer,
+      fresh: isFreshArrival(rumor.created_at),
+    });
     if (decision !== 'pass') {
       if (decision === 'drop') nothingToSee();
       else if (placeholder) noteContentlessWrapAlert(wrapId);
       return;
     }
 
+    if (
+      (rumor.kind === 16 || rumor.kind === 17) &&
+      !(await acceptOrderRumor(viewerPubkey, rumor, partnership.fromMe))
+    ) {
+      nothingToSee();
+      return;
+    }
+    if (shouldAbort()) return;
     const wrapText = textForRumor(rumor);
     const wrapRow: DmMessageRow = {
       owner: viewerPubkey,
@@ -261,6 +259,49 @@ export function createLiveRumorSurfacer(
       rumorId: partnership.fromMe ? rumorEventId(rumor) : undefined,
     };
 
+    const surface = () => {
+      if (shouldAbort()) return;
+
+      if (!order || showOrderInMessages) queueInboxEntry(inboxEntry);
+      notifyDmMessage(partnership.partnerPubkey);
+      if (order && !showOrderInMessages) {
+        nothingToSee();
+        return;
+      }
+      // OS notification (#279) — only genuinely-fresh inbound (backlog has
+      // old rumor timestamps and stays silent), never my own echo;
+      // suppressed when the user is viewing this thread. claimWrapNotification
+      // dedupes vs the background watch running in the same JS context. A
+      // Marmot invite stays silent: its NIP-17 row is hidden (#1269).
+      if (partnership.fromMe || rumor.kind === MARMOT_WELCOME_KIND) nothingToSee();
+      else if (isFreshArrival(rumor.created_at)) {
+        if (claimWrapNotification(wrapId) || placeholder)
+          alertReplacing(
+            dmThreadId(partnership.partnerPubkey, protocolForWireKind(rumor.kind)),
+            () =>
+              fireMessageNotification({
+                owner: viewerPubkey,
+                kind: 'dm',
+                threadId: dmThreadId(partnership.partnerPubkey, protocolForWireKind(rumor.kind)),
+                title: order ? t('sellerOrders.yourShopOrder') : 'New message',
+                // Use the already-redacted preview, not raw `rumor.content`: a
+                // structured rumor (order JSON, or an NWC wallet-share bearer
+                // connection string) must never surface its payload in a push body.
+                body: inboxEntry.text,
+                data: {
+                  ...(order
+                    ? { shopOrderId: order.orderId, shopBuyerPubkey: partnership.partnerPubkey }
+                    : {
+                        conversationPubkey: partnership.partnerPubkey,
+                        conversationProtocol: protocolForWireKind(rumor.kind),
+                      }),
+                  messageId: wrapId,
+                },
+              }),
+          );
+        else markWrapHandled(wrapId); // alerted already
+      } // else: a real message we don't alert for now (not fresh) — keep any placeholder
+    };
     // Serialise store upserts so concurrent live wraps don't race each other.
     chainWrite(async () => {
       if (isCancelled()) return;
@@ -271,54 +312,13 @@ export function createLiveRumorSurfacer(
       // at-rest persistence (#850) — the plaintext inbox blob is retired.
       await upsertDmMessages([wrapRow]);
       knownWrapIds.add(wrapId);
-      // Conversation loaders read the store on this signal. Orders must
-      // refresh an open thread even when the Messages follow gate hides them.
-      if (orderRumor && !shouldAbort()) notifyDmMessage(partnership.partnerPubkey);
+      if (order) surface();
     });
     // Surface to the UI without awaiting the persist chain (#934 item 2) —
     // same reasoning as the kind-4 path. knownWrapIds was already
     // eagerly claimed at the top of the handler, so dedup doesn't depend
     // on the chain either.
-    if (shouldAbort()) return;
-
-    if (orderRumor && !showOrderInMessages) {
-      nothingToSee();
-      return;
-    }
-    queueInboxEntry(inboxEntry);
-    if (!orderRumor) notifyDmMessage(partnership.partnerPubkey);
-    // OS notification (#279) — only genuinely-fresh inbound (backlog has
-    // old rumor timestamps and stays silent), never my own echo;
-    // suppressed when the user is viewing this thread. claimWrapNotification
-    // dedupes vs the background watch running in the same JS context. A
-    // Marmot invite stays silent: its NIP-17 row is hidden (#1269).
-    if (partnership.fromMe || rumor.kind === MARMOT_WELCOME_KIND) nothingToSee();
-    else if (isFreshArrival(rumor.created_at)) {
-      if (claimWrapNotification(wrapId) || placeholder)
-        alertReplacing(dmThreadId(partnership.partnerPubkey, protocolForWireKind(rumor.kind)), () =>
-          fireMessageNotification({
-            owner: viewerPubkey,
-            kind: 'dm',
-            threadId: dmThreadId(partnership.partnerPubkey, protocolForWireKind(rumor.kind)),
-            title:
-              shopSignal?.kind === 'order'
-                ? t('sellerOrders.newOrderNotification', {
-                    items: orderLinesSummary(shopSignal.lines),
-                  })
-                : 'New message',
-            // Use the already-redacted preview, not raw `rumor.content`: a
-            // structured rumor (order JSON, or an NWC wallet-share bearer
-            // connection string) must never surface its payload in a push body.
-            body: inboxEntry.text,
-            data: {
-              conversationPubkey: partnership.partnerPubkey,
-              messageId: wrapId,
-              conversationProtocol: protocolForWireKind(rumor.kind),
-            },
-          }),
-        );
-      else markWrapHandled(wrapId); // alerted already
-    } // else: a real message we don't alert for now (not fresh) — keep any placeholder
+    if (!order) surface();
     if (__DEV__)
       console.log(
         `[Nostr] live wrap ${wrapId.slice(0, 8)} surfaced (partner=${partnership.partnerPubkey.slice(0, 8)})`,

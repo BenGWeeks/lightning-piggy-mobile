@@ -1,14 +1,11 @@
-// Seller exception on the live PLAINTEXT order path (#market): a stranger's
-// order for one of my own listings raises "New order: …"; anything else is
-// stored silently (anti-spam gate). Harness mirrors
-// nostrLiveDmSubFollowGate.test.ts.
+// Public events must never enter the Gamma rumor order pipeline.
 
 import {
   startLiveDmSubscription as openLiveDmSubscription,
   type LiveDmSubscriptionParams,
 } from './nostrLiveDmSub';
 import { createLiveSubFollowGateBuffer } from './liveSubFollowGate';
-import { hasConversationWith, upsertDmMessages } from '../services/dmDb';
+import { upsertDmMessages } from '../services/dmDb';
 
 jest.mock('../services/marmotWelcomeRouter', () => ({
   routeMarmotWelcome: jest.fn(async (rumor: { kind: number }) => rumor.kind === 444),
@@ -49,10 +46,6 @@ jest.mock('./nostrGroupRouting', () => ({
   tryRouteGroupRumor: jest.fn(async () => ({ kind: 'not-group' })),
 }));
 jest.mock('./knownWrapIdsCap', () => ({ capKnownWrapIds: jest.fn() }));
-const mockSellerSignal = jest.fn(async (..._args: unknown[]) => null as unknown);
-jest.mock('../services/ownListingIndex', () => ({
-  sellerOrderSignal: (...a: unknown[]) => mockSellerSignal(...a),
-}));
 jest.mock('./nostrDecryptPacing', () => ({
   createYieldScheduler: jest.fn(() => ({
     maybeYield: jest.fn(async () => {}),
@@ -133,59 +126,29 @@ function makeParams(overrides: Partial<LiveDmSubscriptionParams> = {}): LiveDmSu
   } as LiveDmSubscriptionParams;
 }
 
-describe('live plaintext order — seller exception to the notification gate', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-    jest.mocked(upsertDmMessages).mockReset().mockResolvedValue(undefined);
-    // A stranger: not followed, no prior conversation.
-    jest.mocked(hasConversationWith).mockResolvedValue(false);
-  });
-  afterEach(() => {
-    jest.mocked(hasConversationWith).mockResolvedValue(true);
-    mockSellerSignal.mockResolvedValue(null);
-  });
-
-  const newOrder = () => ({
-    id: 'plain-order',
-    kind: 16,
-    pubkey: ALICE,
-    created_at: Math.floor(Date.now() / 1000),
-    tags: [
-      ['p', VIEWER],
-      ['type', '1'],
-      ['order', 'order-9'],
-      ['amount', '4200'],
-      ['item', `30402:${VIEWER}:mug`, '2'],
-    ],
-    content: '',
-  });
-
-  it('notifies "New order: …" when the order is for my own listing', async () => {
-    mockSellerSignal.mockResolvedValue({ kind: 'order', lines: [{ title: 'Mug', quantity: 2 }] });
+describe('public kinds 16/17 never enter the shop or chat', () => {
+  beforeEach(() => jest.clearAllMocks());
+  it.each([16, 17])('rejects public kind %s despite order-shaped tags', async (kind) => {
     const teardown = startLiveDmSubscription(makeParams());
     await flush();
-    capturedOnEvent!(newOrder());
+    capturedOnEvent!({
+      id: 'public-order',
+      kind,
+      pubkey: ALICE,
+      created_at: Math.floor(Date.now() / 1000),
+      tags: [
+        ['p', VIEWER],
+        ['type', '1'],
+        ['order', 'order-9'],
+        ['subject', 'order-receipt'],
+        ['item', `30402:${VIEWER}:mug`, '2'],
+      ],
+      content: '',
+    });
     await flush();
-    await flush();
-    expect(upsertDmMessages).toHaveBeenCalledTimes(1);
-    expect(mockFireNotification).toHaveBeenCalledWith(
-      expect.objectContaining({
-        title: 'New order: Mug × 2',
-        data: expect.objectContaining({ conversationPubkey: ALICE, messageId: 'plain-order' }),
-      }),
-    );
-    teardown();
-  });
-
-  it('stays silent (stored only) when the order is not for my listing', async () => {
-    mockSellerSignal.mockResolvedValue(null);
-    const teardown = startLiveDmSubscription(makeParams());
-    await flush();
-    capturedOnEvent!(newOrder());
-    await flush();
-    await flush();
-    expect(upsertDmMessages).toHaveBeenCalledTimes(1);
+    expect(upsertDmMessages).not.toHaveBeenCalled();
     expect(mockFireNotification).not.toHaveBeenCalled();
+    expect(mockNotifyDm).not.toHaveBeenCalled();
     teardown();
   });
 });

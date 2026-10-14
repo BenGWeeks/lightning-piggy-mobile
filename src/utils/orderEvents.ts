@@ -1,24 +1,6 @@
-// Marketplace order / receipt events (#market). Plebeian / Gamma-style Nostr
-// markets address transactional updates to a buyer as PLAINTEXT events tagged
-// with the recipient's pubkey (`["p", <buyer>]`):
-//
-//   - kind 16, `["type","1"]`  → Order placed
-//   - kind 16, `["type","2"]`  → Payment (invoice to pay)
-//   - kind 16, `["type","3"]`  → Order status update (`["status", …]`)
-//   - kind 16, `["type","4"]`  → Shipping update (`["status", …]`, opt `["tracking", …]`)
-//   - kind 17                  → Payment receipt (`["subject","order-receipt"]`)
-//
-// Every order event carries an `["order", <uuid>]` tag plus, for kind 16, a
-// `["type","1".."4"]` tag. NIP-18 generic reposts ALSO use kind 16 but never
-// carry that pair (they have `["alt","Generic repost"]`, a `["k", …]` repost-
-// target tag, or JSON-of-another-event content), so `parseOrderEvent` rejects
-// anything that doesn't match the order shape — that's how we tell a market
-// order apart from a repost on the same kind.
-//
-// Dependency-light on purpose: `nip17Unwrap` (a hot decrypt-loop module) and
-// the conversation renderer both import it, so it must not pull in a heavy
-// graph or create an import cycle.
-
+// Gamma kind-16 order types 1–4 and kind-17 receipts are ONLY NIP-17 rumors.
+// Public events of those kinds have unrelated NIP-18 / NIP-25 meanings.
+// parseOrderEvent accepts decoded rumor shapes; transport boundaries reject public events.
 export type OrderEventType = 'order' | 'payment' | 'status' | 'shipping' | 'receipt';
 
 /** A product line on an order: its `a`-coordinate ref + quantity. */
@@ -61,6 +43,8 @@ export interface ParsedOrderEvent {
   /** Buyer contact on a type-1 order (Gamma `email` / `phone` tags). */
   email?: string;
   phone?: string;
+  contact?: string;
+  notes?: string;
   /** The event's free-text content. */
   message: string;
 }
@@ -68,6 +52,8 @@ export interface ParsedOrderEvent {
 /** Minimal event shape the parser needs — works for a raw event OR an unwrapped rumor. */
 export interface OrderEventInput {
   kind: number;
+  /** Signed public events must never be interpreted as order rumors. */
+  sig?: string;
   tags: string[][];
   content: string;
 }
@@ -95,7 +81,7 @@ const ORDER_TYPES = new Set<OrderEventType>(['order', 'payment', 'status', 'ship
  * never does.
  */
 export function parseOrderEvent(ev: OrderEventInput): ParsedOrderEvent | null {
-  if (ev.kind !== 16 && ev.kind !== 17) return null;
+  if (ev.sig !== undefined || (ev.kind !== 16 && ev.kind !== 17)) return null;
   if (!Array.isArray(ev.tags)) return null;
 
   // NIP-18 generic-repost guard: reposts ride on kind 16 but advertise
@@ -155,13 +141,13 @@ export function parseOrderEvent(ev: OrderEventInput): ParsedOrderEvent | null {
     type,
     orderId,
     amountSats,
-    status: tagValue(ev.tags, 'status'),
-    tracking: tagValue(ev.tags, 'tracking'),
+    status: boundedText(tagValue(ev.tags, 'status')),
+    tracking: boundedText(tagValue(ev.tags, 'tracking')),
     items,
     shipping: tagValue(ev.tags, 'shipping'),
     payment,
     ...contactFields(ev.tags),
-    message: typeof ev.content === 'string' ? ev.content : '',
+    message: typeof ev.content === 'string' ? ev.content.slice(0, 500) : '',
   };
 }
 
@@ -173,14 +159,18 @@ const boundedText = (raw: unknown): string | undefined =>
   typeof raw === 'string' && raw.trim() ? raw.trim().slice(0, MAX_CONTACT_LENGTH) : undefined;
 
 /** Buyer address / email / phone off a type-1 order's tags. */
-function contactFields(tags: string[][]): Pick<ParsedOrderEvent, 'address' | 'email' | 'phone'> {
-  const out: Pick<ParsedOrderEvent, 'address' | 'email' | 'phone'> = {};
+function contactFields(
+  tags: string[][],
+): Pick<ParsedOrderEvent, 'address' | 'email' | 'phone' | 'contact' | 'notes'> {
+  const out: Pick<ParsedOrderEvent, 'address' | 'email' | 'phone' | 'contact' | 'notes'> = {};
   const address = boundedText(tagValue(tags, 'address'));
   const email = boundedText(tagValue(tags, 'email'));
   const phone = boundedText(tagValue(tags, 'phone'));
   if (address) out.address = address;
   if (email) out.email = email;
   if (phone) out.phone = phone;
+  out.contact = boundedText(tagValue(tags, 'contact'));
+  out.notes = boundedText(tagValue(tags, 'notes'));
   return out;
 }
 
@@ -232,8 +222,8 @@ export function parseStoredOrder(content: string): ParsedOrderEvent | null {
       // Only a finite, non-negative integer — never NaN/Infinity/negative/float
       // (which would surface as "NaN sats" etc. for a corrupt row).
       amountSats: isFiniteNonNegInt(o.amountSats) ? o.amountSats : undefined,
-      status: typeof o.status === 'string' ? o.status : undefined,
-      tracking: typeof o.tracking === 'string' ? o.tracking : undefined,
+      status: boundedText(o.status),
+      tracking: boundedText(o.tracking),
       // Keep only well-formed items and coerce a missing/invalid quantity to 1
       // so a corrupt row can't render NaN totals downstream.
       items: Array.isArray(o.items)
@@ -255,7 +245,9 @@ export function parseStoredOrder(content: string): ParsedOrderEvent | null {
       address: boundedText(o.address),
       email: boundedText(o.email),
       phone: boundedText(o.phone),
-      message: typeof o.message === 'string' ? o.message : '',
+      contact: boundedText(o.contact),
+      notes: boundedText(o.notes),
+      message: typeof o.message === 'string' ? o.message.slice(0, 500) : '',
     };
   } catch {
     return null;

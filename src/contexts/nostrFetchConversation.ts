@@ -305,6 +305,7 @@ export async function fetchConversationFor(
         wraps: kind1059,
         unwrap,
         passesFollowGate: () => true,
+        passesOrderFollowGate: params.isFollowed ?? (() => false),
         isFollowed: params.isFollowed,
         onSkip,
         signal,

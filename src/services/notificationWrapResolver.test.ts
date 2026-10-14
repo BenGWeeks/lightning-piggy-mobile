@@ -47,3 +47,22 @@ it('treats a message alert for another signed-in account as not openable here', 
   expect(isForAnotherAccount({ kind: 'dm' }, PK)).toBe(false); // older alerts: no owner
   expect(isForAnotherAccount({ kind: 'payment', owner: PK }, PARTNER)).toBe(false);
 });
+
+it.each([16, 17])(
+  'resolves a stored order kind %s to the shop event rather than chat',
+  async (wireKind) => {
+    expect(
+      await resolveWrapConversation(PK, 'order-wrap', {
+        lookup: async () => ({ conversation: PARTNER, wireKind }),
+      }),
+    ).toEqual({ pubkey: PARTNER, protocol: 'nip17', shopEventId: 'order-wrap' });
+  },
+);
+
+it('routes a receipt wrap to its original shop order detail', async () => {
+  expect(
+    await resolveWrapConversation(PK, 'receipt-wrap', {
+      lookup: async () => ({ conversation: PARTNER, wireKind: 17, orderId: 'original-order' }),
+    }),
+  ).toMatchObject({ shopOrderId: 'original-order', shopEventId: 'receipt-wrap' });
+});

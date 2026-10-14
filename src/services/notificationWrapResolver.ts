@@ -4,12 +4,19 @@ import { protocolForWireKind, type DmProtocol } from '../utils/dmProtocol';
 export interface ResolvedConversation {
   pubkey: string;
   protocol: DmProtocol;
+  shopEventId?: string;
+  shopOrderId?: string;
 }
 
 type Lookup = (
   owner: string,
   eventId: string,
-) => Promise<{ conversation: string; wireKind: number; protocol?: DmProtocol } | null>;
+) => Promise<{
+  conversation: string;
+  wireKind: number;
+  protocol?: DmProtocol;
+  orderId?: string;
+} | null>;
 
 /**
  * The conversation a NIP-17 gift wrap belongs to (#1154). A message alert the
@@ -41,6 +48,9 @@ export async function resolveWrapConversation(
     if (row)
       return {
         pubkey: row.conversation,
+        ...(row.wireKind === 16 || row.wireKind === 17
+          ? { shopEventId: wrapId, ...(row.orderId ? { shopOrderId: row.orderId } : {}) }
+          : {}),
         protocol: protocolForWireKind(row.wireKind, row.protocol),
       };
     if (Date.now() + intervalMs > deadline) return null;

@@ -2711,7 +2711,7 @@
       "orders": {
         "line": "{{title}} × {{quantity}}",
         "amount": "{{amount}} sats",
-        "hint": "Pedidos de compradores para tus anuncios. Toca uno para abrir el chat.",
+        "hint": "Pedidos de compradores de tus anuncios. Toca uno para ver el pedido.",
         "emptyBody": "Cuando alguien compre uno de tus anuncios, su pedido aparecerá aquí.",
         "rowAccessibility": "Pedido de {{name}}: {{items}}, {{time}}"
       },
@@ -3593,6 +3593,7 @@
       "noWallet": "Elige un monedero para recibir el pago.",
       "invoiceFailed": "Ese monedero no pudo crear la factura. Comprueba que esté conectado y pueda recibir.",
       "amountMismatch": "El monedero creó una factura por otro importe, así que no se envió.",
+      "shopChanged": "Los precios o el envío de tu tienda han cambiado. Revisa el pedido antes de enviar una factura.",
       "sendFailed": "No se pudo enviar al comprador. Revisa tu conexión e inténtalo de nuevo.",
       "notSignedIn": "Inicia sesión para gestionar pedidos."
     },

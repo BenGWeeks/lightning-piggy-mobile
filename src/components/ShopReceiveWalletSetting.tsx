@@ -26,6 +26,7 @@ function ShopReceiveWalletSetting(): React.ReactElement {
   const [stored, setStored] = useState<string | null>(null);
 
   useEffect(() => {
+    setStored(null);
     if (!pubkey) return;
     let cancelled = false;
     void loadSellerReceiveWallet(pubkey).then((id) => {

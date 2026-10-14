@@ -1,3 +1,4 @@
+import { reviveSellerAccount } from '../services/sellerEventStore';
 import { useLiveFollowGate } from './useLiveFollowGate';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Kind4RetryStore } from './kind4RetryStore';
@@ -121,6 +122,10 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
     followHydrated = false,
     getReadRelays,
   } = options;
+
+  useEffect(() => {
+    if (isLoggedIn && pubkey) reviveSellerAccount(pubkey);
+  }, [isLoggedIn, pubkey]);
 
   // The inbox is tagged with the account that owns it (see dmInboxScope):
   // only the active account's entries are ever exposed, and writes computed

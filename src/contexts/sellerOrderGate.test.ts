@@ -1,6 +1,4 @@
-// Seller exception to the DM follow gate: a stranger's NIP-17 order for one
-// of MY current listings is stored and notified ("New order: Mug × 2");
-// orders for listings I don't own (or malformed refs) keep the gate.
+// Shop orders use the same follow gate as other untrusted inbound rumors.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import type { Event } from 'nostr-tools';
@@ -93,7 +91,7 @@ beforeEach(async () => {
 });
 
 describe('live gift-wrap path', () => {
-  function surfacer() {
+  function surfacer(followed = false) {
     const writes: Promise<void>[] = [];
     const surface = createLiveRumorSurfacer({
       viewerPubkey: SELLER,
@@ -101,7 +99,7 @@ describe('live gift-wrap path', () => {
       shouldAbort: () => false,
       isFollowHydrated: () => true,
       // The buyer is a stranger: not followed.
-      followPubkeysRef: { current: new Set() },
+      followPubkeysRef: { current: new Set(followed ? [STRANGER] : []) },
       followGateBuffer: { defer: jest.fn(), reevaluate: jest.fn(), clear: jest.fn(), size: 0 },
       isFreshArrival: () => true,
       queueInboxEntry: jest.fn(),
@@ -114,8 +112,8 @@ describe('live gift-wrap path', () => {
     return { surface, writes };
   }
 
-  it("stores and notifies a stranger's order for my own listing", async () => {
-    const { surface, writes } = surfacer();
+  it("stores a followed buyer's order and routes its notification to the shop", async () => {
+    const { surface, writes } = surfacer(true);
     await surface(orderRumor(`30402:${SELLER}:mug`), 'wrap-mine');
     await Promise.all(writes);
     await new Promise((r) => setTimeout(r, 0));
@@ -124,12 +122,17 @@ describe('live gift-wrap path', () => {
     ]);
     const history = await listNotifications(SELLER);
     expect(history).toHaveLength(1);
-    expect(history[0].title).toBe('New order: Mug × 2');
-    expect(history[0].data).toMatchObject({ conversationPubkey: STRANGER, messageId: 'wrap-mine' });
+    expect(history[0].title).toBe('Order for your shop');
+    expect(history[0].data).toMatchObject({
+      shopOrderId: 'order-1',
+      shopBuyerPubkey: STRANGER,
+      messageId: 'wrap-mine',
+    });
     expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledTimes(1);
   });
 
   it.each([
+    ['my own current listing', `30402:${SELLER}:mug`],
     ["another seller's listing", `30402:${OTHER_SELLER}:mug`],
     ['a listing I no longer have', `30402:${SELLER}:gone`],
     ['a malformed ref', 'mug'],
@@ -159,9 +162,10 @@ describe('live gift-wrap path', () => {
     expect(upsertDmMessages).not.toHaveBeenCalled();
   });
 
-  it("passes the buyer's receipt for an order I invoiced from this device", async () => {
+  it("keeps the gate for a stranger's receipt even after I invoiced them", async () => {
     await recordSellerInvoice(SELLER, {
       orderId: 'order-1',
+      buyerPubkey: STRANGER,
       walletId: 'w1',
       paymentHash: '0'.repeat(64),
       bolt11: 'lnbc1',
@@ -185,12 +189,12 @@ describe('live gift-wrap path', () => {
       'wrap-receipt',
     );
     await Promise.all(writes);
-    expect(upsertDmMessages).toHaveBeenCalledWith([expect.objectContaining({ wireKind: 17 })]);
+    expect(upsertDmMessages).not.toHaveBeenCalled();
   });
 });
 
 describe('batch ingest path', () => {
-  it("keeps a stranger's order for my listing and skips one for someone else's", async () => {
+  it('drops stranger orders irrespective of listing ownership', async () => {
     const rumors: Record<string, DecodedRumor> = {
       mine: orderRumor(`30402:${SELLER}:mug`),
       theirs: orderRumor(`30402:${OTHER_SELLER}:mug`),
@@ -202,7 +206,7 @@ describe('batch ingest path', () => {
       passesFollowGate: () => false,
       skipKey: 'skip',
     });
-    expect(res.entries.map((e) => e.id)).toEqual(['mine']);
-    expect(res.stored).toBe(1);
+    expect(res.entries).toEqual([]);
+    expect(res.stored).toBe(0);
   });
 });

@@ -147,7 +147,7 @@ describe('quoteSellerOrder', () => {
     });
     expect(quote.lines[0]).toMatchObject({ stock: 3, overStock: true });
     expect(quote.shippingMissing).toBe(true);
-    expect(quote.totalSats).toBe(500);
+    expect(quote.totalSats).toBeNull();
 
     const notOffered = quoteSellerOrder({
       order: order({ shipping: `30406:${SELLER}:eu` }),
@@ -162,7 +162,7 @@ describe('quoteSellerOrder', () => {
       rates: {},
     });
     expect(notOffered.shipping).toMatchObject({ notOffered: true, sats: 50 });
-    expect(notOffered.totalSats).toBe(250);
+    expect(notOffered.totalSats).toBeNull();
   });
 
   it.each([
@@ -220,4 +220,44 @@ it('orderItemsSummary uses titles when known', () => {
     ],
   });
   expect(orderItemsSummary(o, new Map([[`30402:${SELLER}:mug`, 'Mug']]))).toBe('Mug × 2, hat × 1');
+});
+
+it('refuses unsafe quantities before computing an invoice amount', () => {
+  const quote = quoteSellerOrder({
+    sellerPubkey: SELLER,
+    order: order({
+      items: [{ ref: `30402:${SELLER}:mug`, quantity: Number.MAX_SAFE_INTEGER + 1 }],
+    }),
+    listings: [],
+    zones: [],
+    rates: {},
+  });
+  expect(quote.totalSats).toBeNull();
+});
+
+it('requires the chosen shipping option to be offered by every item that specifies options', () => {
+  const quote = quoteSellerOrder({
+    sellerPubkey: SELLER,
+    order: order({
+      items: [
+        { ref: `30402:${SELLER}:mug`, quantity: 1 },
+        { ref: `30402:${SELLER}:hat`, quantity: 1 },
+      ],
+      shipping: `30406:${SELLER}:uk`,
+    }),
+    listings: [
+      listing('mug', [
+        ['price', '100', 'SATS'],
+        ['shipping_option', `30406:${SELLER}:uk`],
+      ]),
+      listing('hat', [
+        ['price', '200', 'SATS'],
+        ['shipping_option', `30406:${SELLER}:other`],
+      ]),
+    ],
+    zones: [zone('uk', 50, 'SATS')],
+    rates: {},
+  });
+  expect(quote.totalSats).toBeNull();
+  expect(quote.shipping?.notOffered).toBe(true);
 });

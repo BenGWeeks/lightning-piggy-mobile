@@ -12,7 +12,7 @@ import {
   payableBolt11,
   type ParsedOrderEvent,
 } from './orderEvents';
-import { sellerOrderThreads, type SellerOrderThread } from './shopOrderStatus';
+import { type SellerOrderThread } from './shopOrderStatus';
 import { indexMessagesById, resolveQuote, type MessageQuote } from './messageQuote';
 import { NWC_SHARE_KIND, parseNwcShare, type NwcShareCard } from './nwcShareMessage';
 import { MARMOT_WELCOME_KIND } from './dmProtocol';
@@ -366,56 +366,30 @@ export function orderIdsNeedingHistory(messages: ConversationMessageInput[]): st
 export function buildConversationItems(
   messages: ConversationMessageInput[],
   zapItems: TimedItem[],
-  olderOrderAmounts?: ReadonlyMap<string, number | undefined>,
+  _olderOrderAmounts?: ReadonlyMap<string, number | undefined>,
   failedInvites: readonly { id: string; createdAt: number }[] = [],
   locale?: string,
   deviceNotices: readonly DeviceNoticeInput[] = [],
   clearBoundary = 0,
 ): Item[] {
-  const expectedAmounts = collectApprovedOrderAmounts(messages, olderOrderAmounts);
-  const answered = answeredOrderIds(messages);
-  const sellerThreads = sellerOrderThreads(messages);
   const byId = indexMessagesById(messages);
+  const orderInvoices = new Set(
+    messages.flatMap((message) => {
+      if (message.wireKind !== 16) return [];
+      const order = parseStoredOrder(message.text);
+      const bolt11 = order ? payableBolt11(order) : null;
+      return bolt11 ? [bolt11] : [];
+    }),
+  );
   const msgItems: TimedItem[] = messages.flatMap((m): TimedItem[] => {
     // A Marmot invite's gift wrap: never a bubble. Joined ones have their
     // own chat; failed ones are drawn from the session's record below.
     if (m.wireKind === MARMOT_WELCOME_KIND) return [];
-    // Marketplace order / receipt rows (kind 16/17) store order JSON in `text`;
-    // render them as an order card rather than a chat bubble (#market).
-    if (m.wireKind === 16 || m.wireKind === 17) {
-      const order = parseStoredOrder(m.text);
-      if (order) {
-        return [
-          {
-            kind: 'order',
-            id: `dm-${m.id}`,
-            fromMe: m.fromMe,
-            order,
-            expectedAmountSats: expectedAmounts.get(order.orderId),
-            ...(m.fromMe && order.type === 'order' && !answered.has(order.orderId)
-              ? { awaitingInvoice: true }
-              : {}),
-            ...(!m.fromMe && order.type === 'order' && sellerThreads.has(order.orderId)
-              ? { sellerThread: sellerThreads.get(order.orderId) }
-              : {}),
-            createdAt: m.createdAt,
-          },
-        ];
-      }
-      // Unparseable order/receipt row (corrupt, or a non-order payload sharing
-      // the kind, e.g. a gift-wrapped NIP-18 repost) — render the muted
-      // placeholder rather than leaking the raw JSON blob into the thread
-      // (mirrors `orderPreviewFromContent` in the inbox preview).
-      return [
-        {
-          kind: 'unsupported',
-          id: `dm-${m.id}`,
-          fromMe: m.fromMe,
-          rawKind: m.wireKind,
-          createdAt: m.createdAt,
-        },
-      ];
-    }
+    // Gamma lifecycle content belongs exclusively to the market order screens.
+    if (m.wireKind === 16 || m.wireKind === 17) return [];
+    // Older clients also sent a kind-14 copy of the same invoice. Hide that
+    // duplicate alongside its order, while ordinary chat invoices still render.
+    if (m.wireKind === 14 && orderInvoices.has(bolt11FromText(m.text) ?? '')) return [];
     // NWC wallet share (inner kind NWC_SHARE_KIND) — the row's `text` is the
     // card JSON (bearer connection string + optional name). Render an "Add NWC
     // Wallet" card. An unparseable / corrupt row falls back to the muted

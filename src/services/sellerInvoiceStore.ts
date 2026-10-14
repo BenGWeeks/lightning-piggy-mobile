@@ -1,3 +1,4 @@
+import { isSellerAccountForgotten } from './sellerEventStore';
 // Per-account record of the invoices a seller sent for Gamma orders: which
 // wallet made each one (so payment is checked on THAT wallet, not whichever
 // is active), its payment hash, and when the wallet reported it paid.
@@ -7,6 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export interface SellerInvoiceRecord {
   orderId: string;
+  buyerPubkey: string;
   /** Wallet the invoice was created on. */
   walletId: string;
   paymentHash: string;
@@ -20,6 +22,8 @@ export interface SellerInvoiceRecord {
 }
 
 const MAX_RECORDS = 300;
+export const sellerInvoiceKey = (buyer: string, orderId: string) =>
+  `${buyer.toLowerCase()}:${orderId}`;
 const key = (pubkey: string) => `market-seller-invoices:${pubkey}`;
 const listeners = new Set<() => void>();
 let writeChain: Promise<unknown> = Promise.resolve();
@@ -29,6 +33,8 @@ function isRecord(v: unknown): v is SellerInvoiceRecord {
   return (
     !!r &&
     typeof r.orderId === 'string' &&
+    typeof r.buyerPubkey === 'string' &&
+    /^[0-9a-f]{64}$/i.test(r.buyerPubkey) &&
     typeof r.walletId === 'string' &&
     typeof r.paymentHash === 'string' &&
     typeof r.bolt11 === 'string' &&
@@ -45,7 +51,7 @@ export async function loadSellerInvoices(
     const out: Record<string, SellerInvoiceRecord> = {};
     if (parsed && typeof parsed === 'object') {
       for (const value of Object.values(parsed as Record<string, unknown>)) {
-        if (isRecord(value)) out[value.orderId] = value;
+        if (isRecord(value)) out[sellerInvoiceKey(value.buyerPubkey, value.orderId)] = value;
       }
     }
     return out;
@@ -60,14 +66,18 @@ function update(
   mutate: (records: Record<string, SellerInvoiceRecord>) => void,
 ): Promise<void> {
   const run = writeChain.then(async () => {
+    if (isSellerAccountForgotten(pubkey)) return;
     const records = await loadSellerInvoices(pubkey);
+    if (isSellerAccountForgotten(pubkey)) return;
     mutate(records);
     const kept = Object.values(records)
       .sort((a, b) => b.sentAt - a.sentAt)
       .slice(0, MAX_RECORDS);
     await AsyncStorage.setItem(
       key(pubkey),
-      JSON.stringify(Object.fromEntries(kept.map((r) => [r.orderId, r]))),
+      JSON.stringify(
+        Object.fromEntries(kept.map((r) => [sellerInvoiceKey(r.buyerPubkey, r.orderId), r])),
+      ),
     );
   });
   writeChain = run.catch(() => undefined);
@@ -77,22 +87,28 @@ function update(
 /** Remember an invoice just sent (replaces an earlier one for the order). */
 export function recordSellerInvoice(pubkey: string, record: SellerInvoiceRecord): Promise<void> {
   return update(pubkey, (records) => {
-    records[record.orderId] = record;
+    records[sellerInvoiceKey(record.buyerPubkey, record.orderId)] = record;
   });
 }
 
 export function patchSellerInvoice(
   pubkey: string,
   orderId: string,
+  buyerPubkey: string,
   patch: Partial<Pick<SellerInvoiceRecord, 'paidAt' | 'confirmedAt'>>,
 ): Promise<void> {
   return update(pubkey, (records) => {
-    const existing = records[orderId];
-    if (existing) records[orderId] = { ...existing, ...patch };
+    const id = sellerInvoiceKey(buyerPubkey, orderId);
+    const existing = records[id];
+    if (existing) records[id] = { ...existing, ...patch };
   });
 }
 
 export function subscribeSellerInvoices(listener: () => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
+}
+
+export async function drainSellerInvoiceWrites(): Promise<void> {
+  await writeChain;
 }

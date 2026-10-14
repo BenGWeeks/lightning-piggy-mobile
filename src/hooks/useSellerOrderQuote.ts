@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNostr } from '../contexts/NostrContext';
 import {
   fetchSellerEvents,
@@ -51,6 +51,7 @@ function ensureSellerSnapshot(pubkey: string, relays: string[]): Promise<void> {
 
 export interface UseSellerOrderQuote {
   quote: SellerOrderQuote | null;
+  quoteCurrent: () => SellerOrderQuote | null;
   /** The shop snapshot is still loading (first paint). */
   loading: boolean;
   /** Titles by item ref, for summaries. */
@@ -126,5 +127,22 @@ export function useSellerOrderQuote(order: ParsedOrderEvent | null): UseSellerOr
     () => new Map((quote?.lines ?? []).map((l) => [l.ref, l.title] as const)),
     [quote],
   );
-  return { quote, loading: active && loading && !(quote && quote.lines.length > 0), titles };
+  const quoteCurrent = useCallback(() => {
+    if (!order || !pubkey) return null;
+    const state = sellerStoreState(pubkey);
+    const current = reduceSellerSnapshot([...state.events.values()], pubkey, state.hidden);
+    return quoteSellerOrder({
+      order,
+      sellerPubkey: pubkey,
+      listings: current.listings,
+      zones: current.zones,
+      rates,
+    });
+  }, [order, pubkey, rates]);
+  return {
+    quote,
+    quoteCurrent,
+    loading: active && loading && !(quote && quote.lines.length > 0),
+    titles,
+  };
 }

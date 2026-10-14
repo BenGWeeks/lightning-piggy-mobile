@@ -243,6 +243,7 @@ export function buildDmSummaries(
 
   const winner = new Map<string, DmInboxEntry>();
   for (const entry of entries) {
+    if (entry.wireKind === 16 || entry.wireKind === 17) continue;
     const key = entry.partnerPubkey.toLowerCase();
     // Drop entries with a malformed partner pubkey (#849): junk rows stored
     // before the partnerFromRumor fix would otherwise show as un-nameable

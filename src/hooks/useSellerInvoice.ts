@@ -1,3 +1,4 @@
+import { useTranslation } from '../contexts/LocaleContext';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNostr } from '../contexts/NostrContext';
 import { useWallet } from '../contexts/WalletContext';
@@ -5,6 +6,7 @@ import { lookupInvoice } from '../services/nwcService';
 import { sendNip17Rumor, Nip17SendError } from '../services/nip17RumorSend';
 import {
   loadSellerInvoices,
+  sellerInvoiceKey,
   patchSellerInvoice,
   recordSellerInvoice,
   subscribeSellerInvoices,
@@ -14,17 +16,14 @@ import { saveSellerReceiveWallet } from '../services/sellerReceiveWallet';
 import { amountSatsFromBolt11, paymentHashFromBolt11 } from '../utils/bolt11';
 import { extractInvoice } from '../utils/messageContent';
 import { shortOrderId } from '../utils/marketOrder';
-import {
-  buildInvoiceChatNote,
-  buildPaymentRequestRumor,
-  buildStatusUpdateRumor,
-} from '../utils/sellerOrderMessages';
+import { buildPaymentRequestRumor, buildStatusUpdateRumor } from '../utils/sellerOrderMessages';
 
 /** Translatable reason an invoice action failed (`sellerOrders.errors.<code>`). */
 export type SellerInvoiceErrorCode =
   | 'noWallet'
   | 'invoiceFailed'
   | 'amountMismatch'
+  | 'shopChanged'
   | 'sendFailed'
   | 'notSignedIn';
 
@@ -72,10 +71,17 @@ export function useSellerInvoice(
   orderId: string | null,
 ): UseSellerInvoice {
   const { pubkey, signerType, relays } = useNostr();
+  const t = useTranslation();
   const { makeInvoiceForWallet } = useWallet();
-  const [record, setRecord] = useState<SellerInvoiceRecord | null>(null);
+  const [recordState, setRecordState] = useState<{
+    owner: string | null;
+    record: SellerInvoiceRecord | null;
+  }>({ owner: null, record: null });
+  const record = recordState.owner === pubkey ? recordState.record : null;
   const [sending, setSending] = useState(false);
   const [checking, setChecking] = useState(false);
+  const identityRef = useRef({ pubkey, buyerPubkey, orderId });
+  identityRef.current = { pubkey, buyerPubkey, orderId };
   const active = Boolean(pubkey && buyerPubkey && orderId);
 
   useEffect(() => {
@@ -83,7 +89,11 @@ export function useSellerInvoice(
     let cancelled = false;
     const load = () =>
       void loadSellerInvoices(pubkey).then((records) => {
-        if (!cancelled) setRecord(records[orderId] ?? null);
+        if (!cancelled)
+          setRecordState({
+            owner: pubkey,
+            record: records[sellerInvoiceKey(buyerPubkey!, orderId)] ?? null,
+          });
       });
     load();
     const unsubscribe = subscribeSellerInvoices(load);
@@ -91,7 +101,7 @@ export function useSellerInvoice(
       cancelled = true;
       unsubscribe();
     };
-  }, [active, pubkey, orderId]);
+  }, [active, pubkey, buyerPubkey, orderId]);
 
   const send = useCallback(
     (rumor: Parameters<typeof sendNip17Rumor>[0]['rumor']) =>
@@ -111,6 +121,12 @@ export function useSellerInvoice(
         throw new SellerInvoiceError('notSignedIn', 'Sign in to invoice orders');
       }
       if (!walletId) throw new SellerInvoiceError('noWallet', 'Choose a wallet');
+      if (!Number.isSafeInteger(amountSats) || amountSats <= 0)
+        throw new SellerInvoiceError('amountMismatch', 'Invalid invoice amount');
+      const stillCurrent = () =>
+        identityRef.current.pubkey === pubkey &&
+        identityRef.current.buyerPubkey === buyerPubkey &&
+        identityRef.current.orderId === orderId;
       setSending(true);
       try {
         let bolt11: string;
@@ -118,11 +134,12 @@ export function useSellerInvoice(
           bolt11 = await makeInvoiceForWallet(
             walletId,
             amountSats,
-            `Order #${shortOrderId(orderId)}`,
+            t('sellerOrders.orderNumber', { id: shortOrderId(orderId) }),
           );
         } catch (e) {
           throw new SellerInvoiceError('invoiceFailed', (e as Error)?.message ?? 'make_invoice');
         }
+        if (!stillCurrent()) throw new SellerInvoiceError('notSignedIn', 'Account changed');
         // Never send an invoice that charges anything but the total shown.
         if (amountSatsFromBolt11(bolt11) !== amountSats) {
           throw new SellerInvoiceError('amountMismatch', 'Wallet returned a different amount');
@@ -136,7 +153,7 @@ export function useSellerInvoice(
           amountSats,
           bolt11,
           expiresAt: extractInvoice(bolt11)?.expiresAt ?? null,
-          note: `⚡ Invoice for order #${shortOrderId(orderId)} — ${amountSats.toLocaleString('en-US')} sats`,
+          note: t('sellerOrders.invoiceSent'),
         });
         try {
           await send(rumor);
@@ -146,8 +163,10 @@ export function useSellerInvoice(
             (e as Error)?.message ?? 'send failed',
           );
         }
+        if (!stillCurrent()) throw new SellerInvoiceError('notSignedIn', 'Account changed');
         await recordSellerInvoice(pubkey, {
           orderId,
+          buyerPubkey,
           walletId,
           paymentHash,
           bolt11,
@@ -155,20 +174,17 @@ export function useSellerInvoice(
           sentAt: Date.now(),
         });
         if (remember) await saveSellerReceiveWallet(pubkey, walletId).catch(() => undefined);
-        // Best effort: the same invoice as readable chat text for buyers on
-        // generic NIP-17 clients (LP hides it beside the order card).
-        void send(
-          buildInvoiceChatNote({ sellerPubkey: pubkey, buyerPubkey, orderId, amountSats, bolt11 }),
-        ).catch(() => undefined);
       } finally {
         setSending(false);
       }
     },
-    [pubkey, buyerPubkey, orderId, makeInvoiceForWallet, send],
+    [pubkey, buyerPubkey, orderId, makeInvoiceForWallet, send, t],
   );
 
   const recordRef = useRef(record);
-  recordRef.current = record;
+  const currentRecord =
+    active && record?.buyerPubkey === buyerPubkey && record?.orderId === orderId ? record : null;
+  recordRef.current = currentRecord;
   const checkPaid = useCallback(async (): Promise<boolean> => {
     const current = recordRef.current;
     if (!pubkey || !current) return false;
@@ -180,7 +196,9 @@ export function useSellerInvoice(
         replyTimeoutMs: 5000,
       });
       if (result?.paid) {
-        await patchSellerInvoice(pubkey, current.orderId, { paidAt: Date.now() });
+        await patchSellerInvoice(pubkey, current.orderId, current.buyerPubkey, {
+          paidAt: Date.now(),
+        });
         return true;
       }
       return false;
@@ -190,7 +208,7 @@ export function useSellerInvoice(
   }, [pubkey]);
 
   // Bounded auto-check while the card is mounted and the invoice is unpaid.
-  const unpaidHash = record && !record.paidAt ? record.paymentHash : null;
+  const unpaidHash = currentRecord && !currentRecord.paidAt ? currentRecord.paymentHash : null;
   useEffect(() => {
     if (!unpaidHash) return;
     let checks = 0;
@@ -215,18 +233,18 @@ export function useSellerInvoice(
           buyerPubkey,
           orderId,
           status: 'confirmed',
-          note: `✅ Payment received for order #${shortOrderId(orderId)}. Thank you!`,
+          note: t('orderStatus.paid'),
         }),
       ).catch((e) => {
         throw new SellerInvoiceError('sendFailed', (e as Error)?.message ?? 'send failed');
       });
       if (recordRef.current) {
-        await patchSellerInvoice(pubkey, orderId, { confirmedAt: Date.now() });
+        await patchSellerInvoice(pubkey, orderId, buyerPubkey, { confirmedAt: Date.now() });
       }
     } finally {
       setSending(false);
     }
-  }, [pubkey, buyerPubkey, orderId, send]);
+  }, [pubkey, buyerPubkey, orderId, send, t]);
 
-  return { record, sending, checking, sendInvoice, checkPaid, markPaid };
+  return { record: currentRecord, sending, checking, sendInvoice, checkPaid, markPaid };
 }

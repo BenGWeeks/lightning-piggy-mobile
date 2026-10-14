@@ -9,6 +9,7 @@ import {
 } from '../utils/nip17Unwrap';
 import { dmRowPreview } from '../utils/dmRowPreview';
 import { liveMarkerPhaseOf } from '../services/liveLocationService';
+import { acceptOrderRumor } from '../services/orderAdmission';
 import { parseStoredOrder } from '../utils/orderEvents';
 import { ingestWraps, type IngestableWrap } from '../services/dmIngest';
 import type { DmMessageRow } from '../services/dmDb';
@@ -37,6 +38,9 @@ export interface InboxWrapIngestParams<W extends IngestableWrap> {
    * decrypted 1:1 rumor (the thread-open path, where the user explicitly
    * opened a conversation). */
   passesFollowGate: (pk: string) => boolean;
+  /** Thread opens may admit ordinary chat by explicit user intent; structured
+   * orders still require the account's usual inbound policy. */
+  passesOrderFollowGate?: (pk: string) => boolean;
   /** Actual follows, independent of permissive DM/WoT or thread-open policy. */
   isFollowed?: (pk: string) => boolean;
   /** Per-account skip-set file key (#743). Omit on the thread-open path,
@@ -170,13 +174,16 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
           return null;
         }
         // Multi-recipient group rumors also bypass the DM follow gate.
-        const routeResult = await tryRouteGroupRumor(
-          rumor,
-          owner,
-          wrap.id,
-          () => signal?.aborted === true,
-          passesFollowGate,
-        );
+        const routeResult =
+          rumor.kind === 16 || rumor.kind === 17
+            ? { kind: 'not-group' as const }
+            : await tryRouteGroupRumor(
+                rumor,
+                owner,
+                wrap.id,
+                () => signal?.aborted === true,
+                passesFollowGate,
+              );
         if (routeResult.kind !== 'not-group') {
           if (skipKey) {
             skipSet.add(wrap.id);
@@ -215,6 +222,7 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
         if (!followed && (rumor.kind === 16 || rumor.kind === 17)) {
           if (!orderRumor || !admitUnfollowedOrder(owner)) return null;
         }
+        if (!(await acceptOrderRumor(owner, rumor, partnership.fromMe))) return null;
         const text = textForRumor(rumor);
         // For a structured rumor (order kind 16/17, or an NWC wallet share) the
         // stored `text` is non-human JSON — the in-memory inbox preview must show

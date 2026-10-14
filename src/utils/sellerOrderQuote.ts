@@ -152,6 +152,8 @@ export function quoteSellerOrder(input: QuoteSellerOrderInput): SellerOrderQuote
   const listingsInOrder: Event[] = [];
   for (const item of order.items) {
     const { dTag } = parseCoordinate(item.ref, 30402)!;
+    if (!Number.isSafeInteger(item.quantity) || item.quantity <= 0)
+      return emptyQuote(order, 'badPrice');
     const listing = byD.get(dTag);
     if (!listing) return emptyQuote(order, 'missingListing');
     listingsInOrder.push(listing);
@@ -169,7 +171,7 @@ export function quoteSellerOrder(input: QuoteSellerOrderInput): SellerOrderQuote
     lines.push({
       ref: item.ref,
       dTag,
-      title: tag(listing, 'title')?.[1]?.trim() || dTag,
+      title: (tag(listing, 'title')?.[1]?.trim() || dTag).slice(0, 500),
       quantity: item.quantity,
       unitAmount,
       currency,
@@ -191,14 +193,14 @@ export function quoteSellerOrder(input: QuoteSellerOrderInput): SellerOrderQuote
       // Gamma: a listing's `shipping_option` extra cost is in the PRODUCT's
       // currency, added per ordered line that references this option.
       let sats = amountToSats(option.baseAmount, option.currency, rates);
-      let anyRefs = false;
-      let offered = false;
+      let notOffered = false;
       for (let i = 0; i < listingsInOrder.length; i++) {
         const refs = listingShippingRefs(listingsInOrder[i]);
-        if (refs.length > 0) anyRefs = true;
         const match = refs.find((r) => r.coordinate === option.coordinate);
-        if (!match) continue;
-        offered = true;
+        if (!match) {
+          if (refs.length > 0) notOffered = true;
+          continue;
+        }
         if (match.extraAmount > 0 && sats !== null) {
           const extra = amountToSats(match.extraAmount, lines[i].currency, rates);
           sats = extra === null ? null : sats + extra;
@@ -211,10 +213,12 @@ export function quoteSellerOrder(input: QuoteSellerOrderInput): SellerOrderQuote
         sats,
         baseAmount: option.baseAmount,
         baseCurrency: option.currency,
-        notOffered: anyRefs && !offered,
+        notOffered,
       };
     }
   }
+
+  if ((physical && !order.shipping) || shipping?.notOffered) problem = problem ?? 'unknownShipping';
 
   const subtotalSats = lines.every((l) => l.lineSats !== null)
     ? lines.reduce((sum, l) => sum + (l.lineSats ?? 0), 0)

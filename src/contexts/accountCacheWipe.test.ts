@@ -5,6 +5,7 @@ import {
   recordBuyerOrderTitles,
   reviveBuyerOrderTitles,
 } from '../services/buyerOrderTitles';
+import { resetSellerStore } from '../services/sellerEventStore';
 import { initialiseNotificationDefaults } from '../services/notificationDefaults';
 import * as marmotPush from '../services/marmotPushRegistration';
 import { setActivePubkeyForWalletStorage } from '../services/walletStorageService';
@@ -381,3 +382,22 @@ it('rejects title writes from checkout resuming after the account wipe', async (
   await recordBuyerOrderTitles(PK, 'late-order', { item: 'Private purchase' });
   expect(await AsyncStorage.getItem(`market-buyer-order-titles:${PK}`)).toBeNull();
 });
+it('wipes seller invoices, receive wallet, buyer titles and order counters only for the removed account', async () => {
+  const stores = [
+    'market-seller-invoices',
+    'market-seller-receive-wallet',
+    'market-buyer-order-titles',
+    'market-order-budget',
+  ];
+  for (const store of stores) {
+    await AsyncStorage.setItem(`${store}:${PK}`, 'private');
+    await AsyncStorage.setItem(`${store}:${OTHER_PK}`, 'other');
+  }
+  await wipeAccountCaches(PK);
+  for (const store of stores) {
+    expect(await AsyncStorage.getItem(`${store}:${PK}`)).toBeNull();
+    expect(await AsyncStorage.getItem(`${store}:${OTHER_PK}`)).toBe('other');
+  }
+});
+
+beforeEach(() => resetSellerStore());

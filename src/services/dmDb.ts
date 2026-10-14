@@ -1,3 +1,4 @@
+import { parseStoredOrder } from '../utils/orderEvents';
 import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
 import { getLocalDb } from './localDb';
 import type { MarmotEdit } from './marmotEdits';
@@ -506,12 +507,12 @@ export async function getInboxLatest(owner: string): Promise<DmMessageRow[]> {
     `SELECT m.* FROM dm_messages m
        JOIN (
          SELECT conversation, ${PROTOCOL_SQL} AS proto, MAX(created_at) AS mx
-         FROM dm_messages WHERE owner = ? AND wire_kind != ${MARMOT_WELCOME_KIND}
+         FROM dm_messages WHERE owner = ? AND wire_kind NOT IN (${MARMOT_WELCOME_KIND}, 16, 17)
          GROUP BY conversation, ${PROTOCOL_SQL}
        ) g ON m.conversation = g.conversation
           AND COALESCE(m.protocol, CASE WHEN m.wire_kind = 4 THEN 'nip04' ELSE 'nip17' END) = g.proto
           AND m.created_at = g.mx
-     WHERE m.owner = ? AND m.wire_kind != ${MARMOT_WELCOME_KIND}
+     WHERE m.owner = ? AND m.wire_kind NOT IN (${MARMOT_WELCOME_KIND}, 16, 17)
      ORDER BY m.created_at DESC;`,
     [owner, owner],
   );
@@ -533,16 +534,22 @@ export async function getConversationForEvent(
   wireKind: number;
   protocol?: DmProtocol;
   fromMe: boolean;
+  orderId?: string;
 } | null> {
   const db = await getLocalDb();
   const res = await db.execute(
-    `SELECT conversation, wire_kind, protocol, from_me FROM dm_messages
+    `SELECT conversation, wire_kind, protocol, from_me, content FROM dm_messages
       WHERE owner = ? AND event_id = ? LIMIT 1;`,
     [owner, eventId],
   );
   const row = (res.rows ?? [])[0];
   if (!row) return null;
+  const order =
+    Number(row.wire_kind) === 16 || Number(row.wire_kind) === 17
+      ? parseStoredOrder(String(row.content))
+      : null;
   return {
+    ...(order ? { orderId: order.orderId } : {}),
     conversation: String(row.conversation),
     wireKind: Number(row.wire_kind),
     fromMe: Number(row.from_me) === 1,

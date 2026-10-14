@@ -16,6 +16,12 @@ export async function resolveStoredNotificationTarget(
   if (shouldStop()) return null;
   const entry = (await lookup(owner).catch(() => [])).find((e) => e.id === historyId);
   if (shouldStop() || !entry || (entry.kind !== 'dm' && entry.kind !== 'group')) return null;
-  if (!entry.data.conversationPubkey && !entry.data.groupId) return null;
+  if (
+    !entry.data.conversationPubkey &&
+    !entry.data.groupId &&
+    !entry.data.shopOrderId &&
+    !entry.data.shopEventId
+  )
+    return null;
   return { ...entry.data, kind: entry.kind, owner };
 }

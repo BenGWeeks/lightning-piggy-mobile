@@ -2725,7 +2725,7 @@
       "orders": {
         "line": "{{title}} × {{quantity}}",
         "amount": "{{amount}} sats",
-        "hint": "Zamówienia od kupujących na twoje oferty. Dotknij, aby otworzyć czat.",
+        "hint": "Zamówienia kupujących dotyczące Twoich ofert. Dotknij zamówienia, aby je wyświetlić.",
         "emptyBody": "Gdy ktoś kupi jedną z twoich ofert, zamówienie pojawi się tutaj.",
         "rowAccessibility": "Zamówienie od {{name}}: {{items}}, {{time}}"
       },
@@ -3647,6 +3647,7 @@
       "noWallet": "Wybierz portfel do odbioru płatności.",
       "invoiceFailed": "Ten portfel nie mógł utworzyć faktury. Sprawdź, czy jest połączony i może odbierać.",
       "amountMismatch": "Portfel utworzył fakturę na inną kwotę, więc jej nie wysłano.",
+      "shopChanged": "Ceny lub opcje wysyłki w Twoim sklepie się zmieniły. Sprawdź zamówienie przed wysłaniem faktury.",
       "sendFailed": "Nie udało się wysłać do kupującego. Sprawdź połączenie i spróbuj ponownie.",
       "notSignedIn": "Zaloguj się, aby zarządzać zamówieniami."
     },

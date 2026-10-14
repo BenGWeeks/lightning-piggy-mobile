@@ -1,3 +1,4 @@
+import ShopReceiveWalletSetting from '../components/ShopReceiveWalletSetting';
 import React, { useCallback, useMemo, useState } from 'react';
 import { FlatList, Text, View } from 'react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -76,11 +77,7 @@ const MarketShopCurrenciesScreen: React.FC<Props> = ({ navigation }) => {
         testID="shop-currencies-back"
       />
       <View style={screenStyles.body}>
-        {/*
-         * Slot: "Receive payments to" wallet setting. ShopReceiveWalletSetting
-         * is being built in a parallel PR and goes here, above the currency
-         * list, e.g. <ShopReceiveWalletSetting />.
-         */}
+        <ShopReceiveWalletSetting />
         <View style={screenStyles.intro}>
           <Text style={styles.label}>{t('market.sell.currencies.defaultTitle')}</Text>
           <Text style={styles.hint}>{t('market.sell.currencies.hint')}</Text>

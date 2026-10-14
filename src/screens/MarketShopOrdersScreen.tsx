@@ -1,5 +1,11 @@
+import SellerOrderPanel from '../components/SellerOrderPanel';
+import OrderStatusChip from '../components/OrderStatusChip';
+import { shopOrderStatus, receiptProvesPayment } from '../utils/shopOrderStatus';
+import { paymentHashFromBolt11 } from '../utils/bolt11';
+import type { RouteProp } from '@react-navigation/native';
+import type { ExploreStackParamList } from '../navigation/types';
 import React, { useCallback, useMemo } from 'react';
-import { FlatList, Text, View } from 'react-native';
+import { FlatList, ScrollView, Text, View } from 'react-native';
 import { ShoppingBag } from 'lucide-react-native';
 import type { CompositeNavigationProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -25,21 +31,22 @@ type OrdersNavigation = CompositeNavigationProp<
 
 interface Props {
   navigation: OrdersNavigation;
+  route: RouteProp<ExploreStackParamList, 'MarketShopOrders'>;
 }
 
 const orderKey = (order: ShopOrder) => order.key;
 
 /** Incoming Gamma orders for the seller's own listings (#1534), read from
- * the encrypted DM store. Tapping one opens that buyer's NIP-17
- * conversation at the order message. */
-const MarketShopOrdersScreen: React.FC<Props> = ({ navigation }) => {
+ * the encrypted DM store. Tapping one opens its shop detail and explicit
+ * invoice actions, without entering a conversation. */
+const MarketShopOrdersScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createMarketSellerStyles(colors), [colors]);
   const orderStyles = useMemo(() => createMarketShopOrdersStyles(colors), [colors]);
   const { snapshot } = useSellerShop();
   const titles = useMemo(() => listingTitleMap(snapshot.listings), [snapshot.listings]);
-  const { orders } = useShopOrders(titles);
+  const { orders, threads, paidKeys } = useShopOrders(titles);
   const buyersKey = useMemo(
     () => [...new Set((orders ?? []).map((o) => o.buyer))].sort().join(','),
     [orders],
@@ -48,21 +55,29 @@ const MarketShopOrdersScreen: React.FC<Props> = ({ navigation }) => {
 
   const onOpen = useCallback(
     (order: ShopOrder) => {
-      const profile = profiles.get(order.buyer);
-      navigation.navigate('Conversation', {
-        pubkey: order.buyer,
-        name: merchantLabel(order.buyer, profile),
-        picture: profile?.picture ?? null,
-        protocol: 'nip17',
-        jumpToMessage: order.eventId,
+      navigation.push('MarketShopOrders', {
+        orderId: order.orderId,
+        buyerPubkey: order.buyer,
       });
     },
-    [navigation, profiles],
+    [navigation],
   );
 
   const renderItem = useCallback(
     ({ item }: { item: ShopOrder }) => {
       const profile = profiles.get(item.buyer);
+      const thread = threads.get(item.key);
+      const status = thread
+        ? shopOrderStatus(thread, {
+            walletPaid: paidKeys.has(item.key),
+            receiptVerified: receiptProvesPayment(
+              thread,
+              thread.invoice ? paymentHashFromBolt11(thread.invoice.bolt11) : null,
+            ),
+          })
+        : item.invoiceSent
+          ? 'invoiceSent'
+          : 'needsInvoice';
       return (
         <ShopOrderRow
           order={item}
@@ -70,12 +85,20 @@ const MarketShopOrdersScreen: React.FC<Props> = ({ navigation }) => {
           buyerPicture={profile?.picture ?? undefined}
           styles={orderStyles}
           onPress={onOpen}
+          accessory={<OrderStatusChip status={status} />}
         />
       );
     },
-    [profiles, orderStyles, onOpen],
+    [profiles, orderStyles, onOpen, threads, paidKeys],
   );
   const renderSeparator = useCallback(() => <View style={styles.separator} />, [styles]);
+
+  const selected = orders?.find(
+    (order) =>
+      (order.orderId === route.params?.orderId || order.eventId === route.params?.eventId) &&
+      order.buyer === route.params?.buyerPubkey,
+  );
+  const selectedThread = selected ? threads.get(selected.key) : undefined;
 
   return (
     <View style={styles.container} testID="shop-orders-screen">
@@ -90,6 +113,20 @@ const MarketShopOrdersScreen: React.FC<Props> = ({ navigation }) => {
         <View style={styles.centered}>
           <BrandedSpinner />
         </View>
+      ) : route.params?.orderId || route.params?.eventId ? (
+        <ScrollView contentContainerStyle={styles.listContent}>
+          {selected && selectedThread ? (
+            <SellerOrderPanel
+              key={selected.key}
+              order={selectedThread.placed}
+              thread={selectedThread}
+              buyerPubkey={selected.buyer}
+              id={selected.orderId}
+            />
+          ) : (
+            <Text style={styles.hint}>{t('market.sell.hub.noOrders')}</Text>
+          )}
+        </ScrollView>
       ) : (
         <FlatList
           data={orders}

@@ -62,15 +62,22 @@ function SellerInvoiceSheet({
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     if (visible) {
       setSelectedId(null);
       setRemember(false);
       setStored(undefined);
       sheetRef.current?.present();
-      if (pubkey) void loadSellerReceiveWallet(pubkey).then(setStored);
+      if (pubkey)
+        void loadSellerReceiveWallet(pubkey).then((value) => {
+          if (!cancelled) setStored(value);
+        });
     } else {
       sheetRef.current?.dismiss();
     }
+    return () => {
+      cancelled = true;
+    };
   }, [visible, pubkey]);
 
   // Pre-select the shop wallet once it's known to still make invoices.

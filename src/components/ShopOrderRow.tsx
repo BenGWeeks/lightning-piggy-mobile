@@ -31,7 +31,7 @@ function orderTime(seconds: number, locale: string): string {
 }
 
 /** One incoming order: buyer, what they ordered and when. Tapping opens the
- * buyer's conversation at the order. */
+ * shop order detail. */
 function ShopOrderRow({ order, buyerName, buyerPicture, styles, onPress, accessory }: Props) {
   const { t, formatLocale } = useLocale();
   const [imageFailed, setImageFailed] = useState(false);
@@ -76,13 +76,6 @@ function ShopOrderRow({ order, buyerName, buyerPicture, styles, onPress, accesso
         <Text style={styles.items} numberOfLines={2}>
           {items}
         </Text>
-        {order.amountSats !== undefined ? (
-          <Text style={styles.amount}>
-            {t('market.sell.orders.amount', {
-              amount: order.amountSats.toLocaleString(formatLocale),
-            })}
-          </Text>
-        ) : null}
         {accessory ? <View style={styles.accessory}>{accessory}</View> : null}
       </View>
     </TouchableOpacity>

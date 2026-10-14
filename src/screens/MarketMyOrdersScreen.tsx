@@ -1,5 +1,9 @@
-import React, { useCallback, useMemo } from 'react';
-import { FlatList, View, Text } from 'react-native';
+import OrderPaymentActions from '../components/OrderPaymentActions';
+import SendSheet from '../components/SendSheet';
+import type { RouteProp } from '@react-navigation/native';
+import type { ExploreStackParamList } from '../navigation/types';
+import React, { useCallback, useMemo, useState } from 'react';
+import { FlatList, ScrollView, View, Text } from 'react-native';
 import { ReceiptText } from 'lucide-react-native';
 import type { CompositeNavigationProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -21,6 +25,7 @@ type Navigation = CompositeNavigationProp<
 
 interface Props {
   navigation: Navigation;
+  route: RouteProp<ExploreStackParamList, 'MarketMyOrders'>;
 }
 
 /** "Mug × 2" from the titles recorded at checkout, else the listing id. */
@@ -36,25 +41,22 @@ function itemsSummary(entry: BuyerOrderEntry, titles: Record<string, string> | u
 /**
  * Buyer's My orders: every Gamma order I placed, newest first, with where it
  * stands (Awaiting invoice / Pay now / Paid / Shipped / Completed). Read from
- * the encrypted DM store — no relay subscription. A row opens the seller's
- * NIP-17 chat at the order (or at its invoice when there's one to pay).
+ * the encrypted DM store — no relay subscription. A row opens a market
+ * detail with its validated payment action, without entering chat.
  */
-const MarketMyOrdersScreen: React.FC<Props> = ({ navigation }) => {
+const MarketMyOrdersScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
   const t = useTranslation();
   const sellerStyles = useMemo(() => createMarketSellerStyles(colors), [colors]);
   const styles = useMemo(() => createMarketMyOrdersScreenStyles(colors), [colors]);
+  const [invoiceToPay, setInvoiceToPay] = useState<string | null>(null);
   const { entries, titles, loading } = useBuyerOrders();
 
   const openOrder = useCallback(
-    (entry: BuyerOrderEntry, sellerName: string, sellerPicture: string | null) => {
-      navigation.navigate('Conversation', {
-        pubkey: entry.sellerPubkey,
-        name: sellerName,
-        picture: sellerPicture,
-        // Gamma orders only ever ride NIP-17 gift wraps.
-        protocol: 'nip17',
-        ...(entry.jumpToRowId ? { jumpToMessage: entry.jumpToRowId } : {}),
+    (entry: BuyerOrderEntry) => {
+      navigation.push('MarketMyOrders', {
+        orderId: entry.orderId,
+        sellerPubkey: entry.sellerPubkey,
       });
     },
     [navigation],
@@ -71,6 +73,10 @@ const MarketMyOrdersScreen: React.FC<Props> = ({ navigation }) => {
     [titles, openOrder],
   );
 
+  const selected = entries.find(
+    (entry) =>
+      entry.orderId === route.params?.orderId && entry.sellerPubkey === route.params?.sellerPubkey,
+  );
   return (
     <View style={sellerStyles.container} testID="my-orders-screen">
       <MarketSellerHeader
@@ -84,6 +90,29 @@ const MarketMyOrdersScreen: React.FC<Props> = ({ navigation }) => {
         <View style={styles.empty}>
           <BrandedSpinner />
         </View>
+      ) : route.params?.orderId ? (
+        <ScrollView contentContainerStyle={styles.listContent}>
+          {selected ? (
+            <>
+              <Text style={styles.emptyText}>
+                {itemsSummary(selected, titles[selected.orderId])}
+              </Text>
+              <Text style={styles.emptyText}>{t(`orderStatus.${selected.status}`)}</Text>
+              {selected.paymentRequest ? (
+                <OrderPaymentActions
+                  order={selected.paymentRequest}
+                  expectedAmountSats={selected.order.amountSats}
+                  fromMe={false}
+                  onPayInvoice={setInvoiceToPay}
+                  testIdPrefix="my-order"
+                  id={selected.orderId}
+                />
+              ) : null}
+            </>
+          ) : (
+            <Text style={styles.emptyText}>{t('myOrders.empty')}</Text>
+          )}
+        </ScrollView>
       ) : (
         <FlatList
           style={styles.list}
@@ -100,6 +129,11 @@ const MarketMyOrdersScreen: React.FC<Props> = ({ navigation }) => {
           }
         />
       )}
+      <SendSheet
+        visible={invoiceToPay !== null}
+        onClose={() => setInvoiceToPay(null)}
+        initialAddress={invoiceToPay ?? undefined}
+      />
     </View>
   );
 };

@@ -478,3 +478,42 @@ describe('seller-side fields and spec-shaped receipts', () => {
     ).toBeNull();
   });
 });
+
+it('caps all order free text on ingest and on reading older stored rows', () => {
+  const long = 'x'.repeat(5000);
+  const parsed = parseOrderEvent({
+    kind: 16,
+    content: long,
+    tags: [
+      ['type', '1'],
+      ['order', 'o'],
+      ['address', long],
+      ['email', long],
+      ['phone', long],
+      ['contact', long],
+      ['notes', long],
+    ],
+  })!;
+  for (const field of ['message', 'address', 'email', 'phone', 'contact', 'notes'] as const)
+    expect(parsed[field]).toHaveLength(500);
+  const stored = parseStoredOrder(
+    JSON.stringify({ ...parsed, message: long, notes: long, contact: long }),
+  )!;
+  expect(stored.message).toHaveLength(500);
+  expect(stored.notes).toHaveLength(500);
+  expect(stored.contact).toHaveLength(500);
+});
+it.each([16, 17])('rejects signed public kind %s even with order tags', (kind) => {
+  expect(
+    parseOrderEvent({
+      kind,
+      sig: 'public signature',
+      content: '',
+      tags: [
+        ['type', '1'],
+        ['order', 'o'],
+        ['subject', 'order-receipt'],
+      ],
+    }),
+  ).toBeNull();
+});
