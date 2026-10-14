@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { acceptOrderRumor, orderBudgetKey } from './orderAdmission';
+import { acceptOrderRumor, completeOrderRumors, orderBudgetKey } from './orderAdmission';
 import { resetSellerStore } from './sellerEventStore';
-import type { DecodedRumor } from '../utils/nip17Unwrap';
+import { rumorEventId, type DecodedRumor } from '../utils/nip17Unwrap';
 const OWNER = 'a'.repeat(64);
 const rumor = (n: number): DecodedRumor => ({
   kind: 16,
@@ -39,5 +39,31 @@ it('fails closed on corrupted persisted counters and storage failure', async () 
   await AsyncStorage.clear();
   jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('disk'));
   expect(await acceptOrderRumor(OWNER, rumor(2), false)).toBe(false);
+  jest.restoreAllMocks();
+});
+
+it('recovers uncommitted reservations across restart without spending more budget', async () => {
+  // Simulate startup after a process died between reservation and payload writes.
+  await AsyncStorage.setItem(
+    orderBudgetKey(OWNER),
+    JSON.stringify({
+      accepted: [{ id: rumorEventId(rumor(1)), sender: rumor(1).pubkey, at: Date.now() }],
+      dropped: 0,
+      droppedSince: Date.now(),
+    }),
+  );
+  expect(await acceptOrderRumor(OWNER, rumor(1), false)).toBe(true);
+  const budget = JSON.parse((await AsyncStorage.getItem(orderBudgetKey(OWNER)))!);
+  expect(budget.accepted).toHaveLength(1);
+  expect(budget.dropped).toBe(0);
+  await completeOrderRumors(OWNER, [rumor(1)]);
+  expect(await acceptOrderRumor(OWNER, rumor(1), false)).toBe(false);
+});
+
+it('keeps a failed completion retryable', async () => {
+  expect(await acceptOrderRumor(OWNER, rumor(1), false)).toBe(true);
+  jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('disk'));
+  await completeOrderRumors(OWNER, [rumor(1)]);
+  expect(await acceptOrderRumor(OWNER, rumor(1), false)).toBe(true);
   jest.restoreAllMocks();
 });

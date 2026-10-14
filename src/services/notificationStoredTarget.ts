@@ -20,6 +20,7 @@ export async function resolveStoredNotificationTarget(
     !entry.data.conversationPubkey &&
     !entry.data.groupId &&
     !entry.data.shopOrderId &&
+    !entry.data.myOrderId &&
     !entry.data.shopEventId
   )
     return null;

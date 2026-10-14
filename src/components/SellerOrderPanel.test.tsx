@@ -75,14 +75,14 @@ beforeEach(() => {
   });
 });
 
-it('shows items, the seller total, the mismatch flag and Send invoice for my order', () => {
+it('shows the recomputed total but blocks invoicing an unapproved amount', () => {
   const ui = render(<SellerOrderPanel order={order()} buyerPubkey={'b'.repeat(64)} id="x" />);
   expect(ui.getByTestId('seller-order-total-x')).toHaveTextContent(/4,200/);
   expect(ui.getByTestId('seller-order-mismatch-x')).toBeTruthy();
   expect(ui.getByTestId('seller-order-address-x')).toHaveTextContent(/1 High St/);
   expect(ui.getByTestId('seller-order-status-x')).toHaveTextContent('orderStatus.needsInvoice');
   fireEvent.press(ui.getByTestId('seller-order-send-invoice-x'));
-  expect(ui.getByTestId('sheet-open')).toBeTruthy();
+  expect(ui.queryByTestId('sheet-open')).toBeNull();
 });
 
 it("renders nothing for an order naming someone else's listing", () => {
@@ -113,3 +113,47 @@ it('offers Mark paid once the chosen wallet saw the invoice paid', () => {
   expect(ui.getByTestId('seller-order-status-x')).toHaveTextContent('orderStatus.paid');
   expect(ui.getByTestId('seller-order-mark-paid-x')).toBeTruthy();
 });
+
+it('opens invoice confirmation when the computed total matches the placed amount', () => {
+  const ui = render(
+    <SellerOrderPanel
+      order={{ ...order(), amountSats: 4200 }}
+      buyerPubkey={'b'.repeat(64)}
+      id="x"
+    />,
+  );
+  fireEvent.press(ui.getByTestId('seller-order-send-invoice-x'));
+  expect(ui.getByTestId('sheet-open')).toBeTruthy();
+});
+
+it.each([true, false])(
+  'offers replacement of an expired invoice only with its local wallet record: %s',
+  (hasRecord) => {
+    (useSellerInvoice as jest.Mock).mockReturnValue({
+      sending: false,
+      checking: false,
+      checkPaid: jest.fn(),
+      sendInvoice: jest.fn(),
+      markPaid: jest.fn(),
+      record: hasRecord ? { bolt11: 'old-invoice', paymentHash: 'h', amountSats: 4200 } : null,
+    });
+    const placed = { ...order(), amountSats: 4200 };
+    const ui = render(
+      <SellerOrderPanel
+        order={placed}
+        buyerPubkey={'b'.repeat(64)}
+        id="x"
+        thread={{
+          placed,
+          orderId: 'o-1',
+          role: 'seller',
+          placedAt: 1,
+          cancelled: false,
+          invoices: [],
+          invoice: { bolt11: 'old-invoice', expiresAt: 1, at: 1 },
+        }}
+      />,
+    );
+    expect(Boolean(ui.queryByTestId('seller-order-send-invoice-x'))).toBe(hasRecord);
+  },
+);

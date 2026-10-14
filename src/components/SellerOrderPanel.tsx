@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { Check, RefreshCw, Zap } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -9,7 +9,7 @@ import { SellerInvoiceError, useSellerInvoice } from '../hooks/useSellerInvoice'
 import { createSellerOrderPanelStyles } from '../styles/SellerOrderPanel.styles';
 import { formatMarketAmount } from '../utils/marketListingShipping';
 import { orderOwnership } from '../utils/sellerOrderQuote';
-import { paymentHashFromBolt11 } from '../utils/bolt11';
+import { expiresAtFromBolt11, paymentHashFromBolt11 } from '../utils/bolt11';
 import {
   receiptProvesPayment,
   shopOrderStatus,
@@ -38,7 +38,7 @@ const CONFIRMED = new Set(['confirmed', 'processing', 'completed']);
  * every item is one of MY listings (anything else renders nothing — not mine
  * to invoice). Items, shipping and the total are priced from my OWN current
  * listing / shipping events (useSellerOrderQuote); the buyer's stated amount
- * is only compared, never invoiced. Then: Send invoice (on a wallet I pick)
+ * must match the computed total before invoicing. Then: Send invoice (on a wallet I pick)
  * → wait for payment on THAT wallet → Mark paid.
  */
 function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.ReactElement | null {
@@ -65,6 +65,9 @@ function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.Reac
         if (current?.totalSats == null || current.totalSats !== quote?.totalSats) {
           throw new SellerInvoiceError('shopChanged', 'Shop pricing changed; review the order');
         }
+        if (current.totalSats !== order.amountSats) {
+          throw new SellerInvoiceError('amountMismatch', 'Buyer has not approved this total');
+        }
         await invoice.sendInvoice({ walletId, amountSats: current.totalSats, remember });
         Toast.show({ type: 'success', text1: t('sellerOrders.invoiceSent') });
       } catch (e) {
@@ -72,7 +75,7 @@ function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.Reac
         throw e;
       }
     },
-    [invoice, quote?.totalSats, quoteCurrent, t, errorText],
+    [invoice, order.amountSats, quote?.totalSats, quoteCurrent, t, errorText],
   );
   const onMarkPaid = useCallback(async () => {
     try {
@@ -86,6 +89,20 @@ function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.Reac
     const paid = await invoice.checkPaid();
     if (!paid) Toast.show({ type: 'info', text1: t('sellerOrders.notPaidYet') });
   }, [invoice, t]);
+
+  const expiresAt =
+    thread?.invoice?.expiresAt ??
+    (invoice.record ? expiresAtFromBolt11(invoice.record.bolt11) : null);
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    setNow(Date.now());
+    if (expiresAt === null || expiresAt * 1000 <= Date.now()) return;
+    const timer = setTimeout(
+      () => setNow(Date.now()),
+      Math.min(expiresAt * 1000 - Date.now(), 2_147_483_647),
+    );
+    return () => clearTimeout(timer);
+  }, [expiresAt]);
 
   if (!mine) return null;
   if (!quote || (loading && quote.problem === 'missingListing')) {
@@ -112,7 +129,14 @@ function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.Reac
       : 'needsInvoice';
   const confirmedSent =
     Boolean(record?.confirmedAt) || (thread?.status !== undefined && CONFIRMED.has(thread.status));
+  const canReplace =
+    status === 'invoiceSent' &&
+    Boolean(record) &&
+    (!thread?.invoice || thread.invoice.bolt11 === record?.bolt11) &&
+    expiresAt !== null &&
+    expiresAt * 1000 <= now;
   const busy = invoice.sending;
+  const invoiceBlocked = quote.totalSats === null || quote.totalSats !== order.amountSats || busy;
   const sats = (n: number) => t('market.sats', { amount: n.toLocaleString(formatLocale) });
 
   return (
@@ -223,17 +247,14 @@ function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.Reac
       ) : null}
 
       <View style={styles.actions}>
-        {status === 'needsInvoice' ? (
+        {status === 'needsInvoice' || canReplace ? (
           <TouchableOpacity
-            style={[
-              styles.primaryButton,
-              (quote.totalSats === null || busy) && styles.buttonDisabled,
-            ]}
+            style={[styles.primaryButton, invoiceBlocked && styles.buttonDisabled]}
             onPress={() => {
               setError(null);
               setSheetVisible(true);
             }}
-            disabled={quote.totalSats === null || busy}
+            disabled={invoiceBlocked}
             accessibilityRole="button"
             accessibilityLabel={t('sellerOrders.sendInvoice')}
             testID={`seller-order-send-invoice-${id}`}

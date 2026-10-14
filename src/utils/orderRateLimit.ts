@@ -2,7 +2,7 @@
  * Only accepted ids are retained (at most 50); rejected payloads are never stored. */
 export const ORDER_WINDOW_MS = 24 * 60 * 60 * 1000;
 export interface OrderBudget {
-  accepted: { id: string; sender: string; at: number }[];
+  accepted: { id: string; sender: string; at: number; stored?: boolean }[];
   dropped: number;
   droppedSince: number;
 }

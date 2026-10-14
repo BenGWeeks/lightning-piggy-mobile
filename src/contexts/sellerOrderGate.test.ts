@@ -92,12 +92,12 @@ beforeEach(async () => {
 });
 
 describe('live gift-wrap path', () => {
-  function surfacer(followed = false) {
+  function surfacer(followed = false, isCancelled = () => false) {
     const writes: Promise<void>[] = [];
     const queueInboxEntry = jest.fn();
     const surface = createLiveRumorSurfacer({
       viewerPubkey: SELLER,
-      isCancelled: () => false,
+      isCancelled,
       shouldAbort: () => false,
       isFollowHydrated: () => true,
       // The buyer is a stranger: not followed.
@@ -193,6 +193,29 @@ describe('live gift-wrap path', () => {
     await Promise.all(writes);
     expect(upsertDmMessages).toHaveBeenCalledWith([expect.objectContaining({ wireKind: 17 })]);
   });
+  it('retries an order reserved before subscription teardown', async () => {
+    const first = surfacer(false, () => true);
+    const rumor = orderRumor(`30402:${SELLER}:mug`);
+    await first.surface(rumor, 'cancelled-wrap');
+    await Promise.all(first.writes);
+    expect(upsertDmMessages).not.toHaveBeenCalled();
+    const retry = surfacer();
+    await retry.surface(rumor, 'cancelled-wrap');
+    await Promise.all(retry.writes);
+    expect(upsertDmMessages).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases a failed live write so the reserved rumor can retry', async () => {
+    const { surface, writes } = surfacer();
+    (upsertDmMessages as jest.Mock).mockRejectedValueOnce(new Error('disk'));
+    await surface(orderRumor(`30402:${SELLER}:mug`), 'failed-wrap');
+    await expect(Promise.all(writes)).rejects.toThrow('disk');
+    writes.length = 0;
+    await surface(orderRumor(`30402:${SELLER}:mug`), 'failed-wrap');
+    await Promise.all(writes);
+    expect(upsertDmMessages).toHaveBeenCalledTimes(2);
+  });
+
   it.each([true, false])(
     'live stores a non-friend invoice; Messages Only friends=%s',
     async (onlyFriends) => {
@@ -205,6 +228,10 @@ describe('live gift-wrap path', () => {
       expect(buildDmSummaries(entries, [], onlyFriends ? new Set() : undefined)).toHaveLength(
         onlyFriends ? 0 : 1,
       );
+      expect((await listNotifications(SELLER))[0].data).toMatchObject({
+        myOrderId: 'buyer-order',
+        orderSellerPubkey: STRANGER,
+      });
       expect(JSON.stringify(entries)).not.toContain('private');
       expect(JSON.stringify(await listNotifications(SELLER))).not.toContain('private');
     },
@@ -212,6 +239,20 @@ describe('live gift-wrap path', () => {
 });
 
 describe('batch ingest path', () => {
+  it('retries after an encrypted batch write fails', async () => {
+    const rumor = orderRumor(`30402:${SELLER}:mug`);
+    const params = {
+      owner: SELLER,
+      wraps: [{ id: 'retry' }],
+      unwrap: () => rumor,
+      passesFollowGate: () => false,
+    };
+    (upsertDmMessages as jest.Mock).mockRejectedValueOnce(new Error('disk'));
+    await expect(ingestInboxWraps(params)).rejects.toThrow('disk');
+    expect((await ingestInboxWraps(params)).stored).toBe(1);
+    expect(upsertDmMessages).toHaveBeenCalledTimes(2);
+  });
+
   it('stores stranger orders irrespective of listing ownership', async () => {
     const rumors: Record<string, DecodedRumor> = {
       mine: orderRumor(`30402:${SELLER}:mug`),

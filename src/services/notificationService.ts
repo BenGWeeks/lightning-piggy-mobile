@@ -133,6 +133,8 @@ export interface NotificationData extends Partial<MessageNotificationTarget> {
   feedbackTab?: 'comments' | 'reviews';
   groupInvitation?: boolean;
   shopOrderId?: string;
+  myOrderId?: string;
+  orderSellerPubkey?: string;
   shopEventId?: string;
   shopBuyerPubkey?: string;
   conversationPubkey?: string;

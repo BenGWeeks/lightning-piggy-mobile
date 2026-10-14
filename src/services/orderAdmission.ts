@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { admitOrder, type OrderBudget } from '../utils/orderRateLimit';
+import { admitOrder, ORDER_WINDOW_MS, type OrderBudget } from '../utils/orderRateLimit';
 import { parseOrderEvent } from '../utils/orderEvents';
 import { rumorEventId, type DecodedRumor } from '../utils/nip17Unwrap';
 import { isSellerAccountForgotten } from './sellerEventStore';
@@ -26,6 +26,15 @@ export function acceptOrderRumor(
       const budget: OrderBudget = raw
         ? JSON.parse(raw)
         : { accepted: [], dropped: 0, droppedSince: now };
+      // Reservations survive crashes but remain retryable until the encrypted
+      // payload write succeeds. A retry consumes no additional budget slot.
+      const existing = budget.accepted.find(
+        (entry) =>
+          entry.id === rumorEventId(rumor) &&
+          entry.sender === rumor.pubkey.toLowerCase() &&
+          entry.at > now - ORDER_WINDOW_MS,
+      );
+      if (existing) return existing.stored !== true;
       const result = admitOrder(budget, rumor.pubkey, rumorEventId(rumor), now);
       if (isSellerAccountForgotten(owner)) return false;
       await AsyncStorage.setItem(orderBudgetKey(owner), JSON.stringify(result.budget));
@@ -38,4 +47,23 @@ export function acceptOrderRumor(
 /** Await in-flight reservations before account cleanup removes the persisted counters. */
 export async function drainOrderAdmission(): Promise<void> {
   await chain;
+}
+
+/** Commit only AFTER durable payload persistence; a failed commit is safely retryable. */
+export function completeOrderRumors(owner: string, rumors: readonly DecodedRumor[]): Promise<void> {
+  if (rumors.length === 0) return Promise.resolve();
+  const ids = new Set(rumors.map(rumorEventId));
+  const run = chain
+    .then(async () => {
+      if (isSellerAccountForgotten(owner)) return;
+      const raw = await AsyncStorage.getItem(orderBudgetKey(owner));
+      if (!raw) return;
+      const budget: OrderBudget = JSON.parse(raw);
+      for (const entry of budget.accepted) if (ids.has(entry.id)) entry.stored = true;
+      if (!isSellerAccountForgotten(owner))
+        await AsyncStorage.setItem(orderBudgetKey(owner), JSON.stringify(budget));
+    })
+    .catch(() => undefined);
+  chain = run;
+  return run;
 }

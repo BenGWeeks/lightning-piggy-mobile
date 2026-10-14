@@ -48,21 +48,33 @@ it('treats a message alert for another signed-in account as not openable here', 
   expect(isForAnotherAccount({ kind: 'payment', owner: PK }, PARTNER)).toBe(false);
 });
 
-it.each([16, 17])(
-  'resolves a stored order kind %s to the shop event rather than chat',
-  async (wireKind) => {
+it('falls back to chat for an unparseable marketplace row', async () => {
+  expect(
+    await resolveWrapConversation(PK, 'wrap', {
+      lookup: async () => ({ conversation: PARTNER, wireKind: 16 }),
+    }),
+  ).toEqual({ pubkey: PARTNER, protocol: 'nip17' });
+});
+
+it.each([
+  ['order', 16, { shopOrderId: 'original-order', shopBuyerPubkey: PARTNER }],
+  ['receipt', 17, { shopOrderId: 'original-order', shopBuyerPubkey: PARTNER }],
+  ['payment', 16, { myOrderId: 'original-order', orderSellerPubkey: PARTNER }],
+  ['status', 16, { myOrderId: 'original-order', orderSellerPubkey: PARTNER }],
+  ['shipping', 16, { myOrderId: 'original-order', orderSellerPubkey: PARTNER }],
+] as const)(
+  'preserves the account role for a background %s alert',
+  async (orderType, wireKind, target) => {
     expect(
-      await resolveWrapConversation(PK, 'order-wrap', {
-        lookup: async () => ({ conversation: PARTNER, wireKind }),
+      await resolveWrapConversation(PK, 'wrap', {
+        lookup: async () => ({
+          conversation: PARTNER,
+          wireKind,
+          orderId: 'original-order',
+          orderType,
+          fromMe: false,
+        }),
       }),
-    ).toEqual({ pubkey: PARTNER, protocol: 'nip17', shopEventId: 'order-wrap' });
+    ).toEqual({ pubkey: PARTNER, protocol: 'nip17', ...target });
   },
 );
-
-it('routes a receipt wrap to its original shop order detail', async () => {
-  expect(
-    await resolveWrapConversation(PK, 'receipt-wrap', {
-      lookup: async () => ({ conversation: PARTNER, wireKind: 17, orderId: 'original-order' }),
-    }),
-  ).toMatchObject({ shopOrderId: 'original-order', shopEventId: 'receipt-wrap' });
-});

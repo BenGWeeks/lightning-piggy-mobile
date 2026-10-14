@@ -1,3 +1,5 @@
+import { orderNotificationTarget } from '../utils/orderNotificationTarget';
+import type { ParsedOrderEvent } from '../utils/orderEvents';
 import { getConversationForEvent } from './dmDb';
 import { protocolForWireKind, type DmProtocol } from '../utils/dmProtocol';
 
@@ -6,6 +8,11 @@ export interface ResolvedConversation {
   protocol: DmProtocol;
   shopEventId?: string;
   shopOrderId?: string;
+  myOrderId?: string;
+  orderSellerPubkey?: string;
+  shopBuyerPubkey?: string;
+  conversationPubkey?: string;
+  conversationProtocol?: DmProtocol;
 }
 
 type Lookup = (
@@ -16,6 +23,9 @@ type Lookup = (
   wireKind: number;
   protocol?: DmProtocol;
   orderId?: string;
+  orderType?: ParsedOrderEvent['type'];
+  orderStatus?: string;
+  fromMe?: boolean;
 } | null>;
 
 /**
@@ -48,8 +58,12 @@ export async function resolveWrapConversation(
     if (row)
       return {
         pubkey: row.conversation,
-        ...(row.wireKind === 16 || row.wireKind === 17
-          ? { shopEventId: wrapId, ...(row.orderId ? { shopOrderId: row.orderId } : {}) }
+        ...(row.orderId && row.orderType
+          ? orderNotificationTarget(
+              { type: row.orderType, orderId: row.orderId, status: row.orderStatus },
+              row.conversation,
+              row.fromMe ?? false,
+            )
           : {}),
         protocol: protocolForWireKind(row.wireKind, row.protocol),
       };

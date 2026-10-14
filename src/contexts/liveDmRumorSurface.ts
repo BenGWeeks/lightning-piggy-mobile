@@ -24,9 +24,10 @@ import {
 } from '../services/dmWrapNotificationDedupe';
 import { routeMarmotWelcome } from '../services/marmotWelcomeRouter';
 import type { LiveSubFollowGateBuffer } from './liveSubFollowGate';
-import { acceptOrderRumor } from '../services/orderAdmission';
+import { acceptOrderRumor, completeOrderRumors } from '../services/orderAdmission';
 import { parseOrderEvent } from '../utils/orderEvents';
 import { t } from '../i18n';
+import { orderNotificationTarget } from '../utils/orderNotificationTarget';
 
 /**
  * The live sub's post-unwrap kind-1059 surface path: Welcome → group-route →
@@ -232,7 +233,10 @@ export function createLiveRumorSurfacer(
       nothingToSee();
       return;
     }
-    if (shouldAbort()) return;
+    if (shouldAbort()) {
+      releaseWrapClaim(wrapId);
+      return;
+    }
     const wrapText = textForRumor(rumor);
     const wrapRow: DmMessageRow = {
       owner: viewerPubkey,
@@ -283,14 +287,20 @@ export function createLiveRumorSurfacer(
                 owner: viewerPubkey,
                 kind: 'dm',
                 threadId: dmThreadId(partnership.partnerPubkey, protocolForWireKind(rumor.kind)),
-                title: order ? t('sellerOrders.yourShopOrder') : 'New message',
+                title: order
+                  ? t(
+                      order.type === 'order' || order.type === 'receipt'
+                        ? 'sellerOrders.yourShopOrder'
+                        : 'myOrders.title',
+                    )
+                  : 'New message',
                 // Use the already-redacted preview, not raw `rumor.content`: a
                 // structured rumor (order JSON, or an NWC wallet-share bearer
                 // connection string) must never surface its payload in a push body.
                 body: inboxEntry.text,
                 data: {
                   ...(order
-                    ? { shopOrderId: order.orderId, shopBuyerPubkey: partnership.partnerPubkey }
+                    ? orderNotificationTarget(order, partnership.partnerPubkey, partnership.fromMe)
                     : {
                         conversationPubkey: partnership.partnerPubkey,
                         conversationProtocol: protocolForWireKind(rumor.kind),
@@ -304,13 +314,22 @@ export function createLiveRumorSurfacer(
     };
     // Serialise store upserts so concurrent live wraps don't race each other.
     chainWrite(async () => {
-      if (isCancelled()) return;
+      if (isCancelled()) {
+        releaseWrapClaim(wrapId);
+        return;
+      }
       // Encrypted store write (#848) — idempotent by (owner, event_id), so
       // a wrap delivered by both the live sub and a near-simultaneous
       // refresh lands as one row (the old file read→merge→write dance and
       // its #811 clobbering hazard are gone). The store is the ONLY
       // at-rest persistence (#850) — the plaintext inbox blob is retired.
-      await upsertDmMessages([wrapRow]);
+      try {
+        await upsertDmMessages([wrapRow]);
+      } catch (error) {
+        releaseWrapClaim(wrapId);
+        throw error;
+      }
+      if (order && !partnership.fromMe) await completeOrderRumors(viewerPubkey, [rumor]);
       knownWrapIds.add(wrapId);
       if (order) surface();
     });

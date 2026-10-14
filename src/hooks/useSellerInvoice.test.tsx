@@ -5,8 +5,9 @@ import { useNostr } from '../contexts/NostrContext';
 import { useWallet } from '../contexts/WalletContext';
 import { lookupInvoice } from '../services/nwcService';
 import { sendNip17Rumor } from '../services/nip17RumorSend';
-import { loadSellerInvoices } from '../services/sellerInvoiceStore';
+import { loadSellerInvoices, recordSellerInvoice } from '../services/sellerInvoiceStore';
 import { loadSellerReceiveWallet } from '../services/sellerReceiveWallet';
+import { extractInvoice } from '../utils/messageContent';
 import { amountSatsFromBolt11, paymentHashFromBolt11 } from '../utils/bolt11';
 
 jest.mock('../contexts/LocaleContext', () => ({ useTranslation: () => (key: string) => key }));
@@ -23,7 +24,7 @@ jest.mock('../utils/bolt11', () => ({
   paymentHashFromBolt11: jest.fn(),
 }));
 jest.mock('../utils/messageContent', () => ({
-  extractInvoice: () => ({ expiresAt: 1_800_000_000 }),
+  extractInvoice: jest.fn(() => ({ expiresAt: 1_800_000_000 })),
 }));
 
 const SELLER = 'a'.repeat(64);
@@ -34,6 +35,7 @@ const makeInvoiceForWallet = jest.fn();
 
 beforeEach(async () => {
   jest.clearAllMocks();
+  (extractInvoice as jest.Mock).mockReturnValue({ expiresAt: 1_800_000_000 });
   await AsyncStorage.clear();
   (useNostr as jest.Mock).mockReturnValue({ pubkey: SELLER, signerType: 'nsec', relays: [] });
   (useWallet as jest.Mock).mockReturnValue({
@@ -124,3 +126,44 @@ it('watches the wallet the invoice was made on — not the active one — and ma
     ]),
   );
 });
+
+it.each(['unpaid', 'paid', 'unknown', 'live'])(
+  'checks the old invoice before replacement: %s',
+  async (state) => {
+    (extractInvoice as jest.Mock).mockReturnValue({
+      expiresAt: state === 'live' ? Date.now() / 1000 + 3600 : 1,
+    });
+    await recordSellerInvoice(SELLER, {
+      orderId: 'order-1',
+      buyerPubkey: BUYER,
+      walletId: 'old-wallet',
+      paymentHash: HASH,
+      bolt11: BOLT11,
+      amountSats: 4200,
+      sentAt: 1,
+    });
+    (lookupInvoice as jest.Mock).mockResolvedValue(
+      state === 'unknown' ? null : { paid: state === 'paid' },
+    );
+    const { result } = renderHook(() => useSellerInvoice(BUYER, 'order-1'));
+    await act(async () => {
+      const action = result.current.sendInvoice({
+        walletId: 'new-wallet',
+        amountSats: 4200,
+        remember: false,
+      });
+      if (state === 'unpaid') await action;
+      else await expect(action).rejects.toMatchObject({ code: 'invoiceFailed' });
+    });
+    if (state === 'unpaid') {
+      expect(lookupInvoice).toHaveBeenCalledWith('old-wallet', HASH, expect.anything());
+      expect(makeInvoiceForWallet).toHaveBeenCalledWith('new-wallet', 4200, expect.any(String));
+      expect(sendNip17Rumor).toHaveBeenCalledTimes(1);
+    } else {
+      expect(makeInvoiceForWallet).not.toHaveBeenCalled();
+      expect(sendNip17Rumor).not.toHaveBeenCalled();
+    }
+    if (state === 'paid')
+      expect((await loadSellerInvoices(SELLER))[`${BUYER}:order-1`].paidAt).toBeDefined();
+  },
+);

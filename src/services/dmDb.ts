@@ -1,4 +1,4 @@
-import { parseStoredOrder } from '../utils/orderEvents';
+import { type ParsedOrderEvent, parseStoredOrder } from '../utils/orderEvents';
 import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
 import { getLocalDb } from './localDb';
 import type { MarmotEdit } from './marmotEdits';
@@ -535,6 +535,8 @@ export async function getConversationForEvent(
   protocol?: DmProtocol;
   fromMe: boolean;
   orderId?: string;
+  orderType?: ParsedOrderEvent['type'];
+  orderStatus?: string;
 } | null> {
   const db = await getLocalDb();
   const res = await db.execute(
@@ -549,7 +551,7 @@ export async function getConversationForEvent(
       ? parseStoredOrder(String(row.content))
       : null;
   return {
-    ...(order ? { orderId: order.orderId } : {}),
+    ...(order ? { orderId: order.orderId, orderType: order.type, orderStatus: order.status } : {}),
     conversation: String(row.conversation),
     wireKind: Number(row.wire_kind),
     fromMe: Number(row.from_me) === 1,

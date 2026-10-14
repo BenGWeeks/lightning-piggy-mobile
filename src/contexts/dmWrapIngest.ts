@@ -9,7 +9,7 @@ import {
 } from '../utils/nip17Unwrap';
 import { dmRowPreview } from '../utils/dmRowPreview';
 import { liveMarkerPhaseOf } from '../services/liveLocationService';
-import { acceptOrderRumor } from '../services/orderAdmission';
+import { acceptOrderRumor, completeOrderRumors } from '../services/orderAdmission';
 import { parseStoredOrder } from '../utils/orderEvents';
 import { ingestWraps, type IngestableWrap } from '../services/dmIngest';
 import type { DmMessageRow } from '../services/dmDb';
@@ -103,6 +103,7 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
 ): Promise<InboxWrapIngestResult> {
   const { owner, wraps, unwrap, passesFollowGate, skipKey, signal } = params;
   const entries: DmInboxEntry[] = [];
+  const admittedOrders: DecodedRumor[] = [];
   let skipHits = 0;
   let misses = 0;
   let permissionDenied = false;
@@ -276,6 +277,7 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
             wireKind: rumor.kind,
             rumorId,
           });
+        if (orderRumor && !partnership.fromMe) admittedOrders.push(rumor);
         return {
           owner,
           eventId: wrap.id,
@@ -293,6 +295,8 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
   } finally {
     sched.dispose();
   }
+
+  await completeOrderRumors(owner, admittedOrders);
 
   // Persist skip-set growth only for completed runs. The skip-set's invariant
   // is "entry ⇒ decrypt was paid AND produced no stored row"; an aborted run

@@ -79,6 +79,7 @@ export function useSellerInvoice(
   }>({ owner: null, record: null });
   const record = recordState.owner === pubkey ? recordState.record : null;
   const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
   const [checking, setChecking] = useState(false);
   const identityRef = useRef({ pubkey, buyerPubkey, orderId });
   identityRef.current = { pubkey, buyerPubkey, orderId };
@@ -127,8 +128,42 @@ export function useSellerInvoice(
         identityRef.current.pubkey === pubkey &&
         identityRef.current.buyerPubkey === buyerPubkey &&
         identityRef.current.orderId === orderId;
+      if (sendingRef.current)
+        throw new SellerInvoiceError('sendFailed', 'Invoice action in progress');
+      sendingRef.current = true;
       setSending(true);
       try {
+        const records = await loadSellerInvoices(pubkey);
+        const previous = records[sellerInvoiceKey(buyerPubkey, orderId)];
+        if (!stillCurrent()) throw new SellerInvoiceError('notSignedIn', 'Account changed');
+        if (previous) {
+          const expiresAt = extractInvoice(previous.bolt11)?.expiresAt;
+          if (
+            previous.paidAt ||
+            previous.confirmedAt ||
+            expiresAt == null ||
+            expiresAt * 1000 > Date.now()
+          )
+            throw new SellerInvoiceError('invoiceFailed', 'Existing invoice cannot be replaced');
+          // A failed/unknown lookup must never authorize a second charge.
+          const settlement = await lookupInvoice(previous.walletId, previous.paymentHash, {
+            replyTimeoutMs: 5000,
+          });
+          if (!stillCurrent()) throw new SellerInvoiceError('notSignedIn', 'Account changed');
+          if (settlement?.paid) {
+            await patchSellerInvoice(pubkey, orderId, buyerPubkey, { paidAt: Date.now() });
+          }
+          if (!settlement || settlement.paid)
+            throw new SellerInvoiceError(
+              'invoiceFailed',
+              'Previous invoice is paid or settlement is unknown',
+            );
+          if (previous.amountSats !== amountSats)
+            throw new SellerInvoiceError(
+              'amountMismatch',
+              'Replacement must preserve the approved amount',
+            );
+        }
         let bolt11: string;
         try {
           bolt11 = await makeInvoiceForWallet(
@@ -175,6 +210,7 @@ export function useSellerInvoice(
         });
         if (remember) await saveSellerReceiveWallet(pubkey, walletId).catch(() => undefined);
       } finally {
+        sendingRef.current = false;
         setSending(false);
       }
     },
