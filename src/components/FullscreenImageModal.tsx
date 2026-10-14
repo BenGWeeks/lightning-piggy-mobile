@@ -1,112 +1,130 @@
 // Full-screen image viewer for avatars / profile pictures (#661), with
-// pinch-to-zoom + pan, double-tap-to-zoom, and single-tap-to-dismiss.
+// pinch-to-zoom + pan, double-tap-to-zoom, and single-tap-to-dismiss. Pass
+// `urls` (e.g. a Market listing's photos, #1531) to make it a swipeable
+// gallery that opens at `url`.
 //
 // NB: a Modal renders in its own native window outside the app's root view, so
 // the GestureHandlerRootView at App.tsx doesn't wrap it — we add a local one
 // here or the gestures silently no-op (known RNGH + Modal gotcha).
 
-import React, { useEffect } from 'react';
-import { Modal, StyleSheet, TouchableOpacity, useWindowDimensions } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import {
+  FlatList,
+  Modal,
+  Text,
+  TouchableOpacity,
+  View,
+  useWindowDimensions,
+  type ListRenderItemInfo,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Image as ExpoImage } from 'expo-image';
 import { X } from 'lucide-react-native';
-import { GestureHandlerRootView, GestureDetector, Gesture } from 'react-native-gesture-handler';
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withTiming,
-  runOnJS,
-} from 'react-native-reanimated';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useTranslation } from '../contexts/LocaleContext';
+import ZoomableImage from './ZoomableImage';
+import { fullscreenImageModalStyles as styles } from '../styles/FullscreenImageModal.styles';
 
 interface Props {
+  /** The image to show; `null` hides the viewer. */
   url: string | null;
+  onClose: () => void;
+  /**
+   * Optional set of images `url` belongs to, in display order. With two or
+   * more (and `url` among them) the viewer opens at `url` and swipes between
+   * them; otherwise it shows `url` alone.
+   */
+  urls?: readonly string[];
+}
+
+interface GalleryProps {
+  urls: readonly string[];
+  initialIndex: number;
+  width: number;
+  height: number;
+  topInset: number;
   onClose: () => void;
 }
 
-const MAX_SCALE = 5;
-const DOUBLE_TAP_SCALE = 2.5;
+const galleryKey = (url: string, index: number) => `${index}:${url}`;
 
-const FullscreenImageModal: React.FC<Props> = ({ url, onClose }) => {
+/** Horizontally paged gallery of zoomable images. */
+const FullscreenGallery = React.memo(
+  ({ urls, initialIndex, width, height, topInset, onClose }: GalleryProps) => {
+    const t = useTranslation();
+    const [index, setIndex] = useState(initialIndex);
+    // While an image is zoomed, drags pan it instead of paging the gallery.
+    const [zoomed, setZoomed] = useState(false);
+    const total = urls.length;
+
+    const getItemLayout = useCallback(
+      (_: ArrayLike<string> | null | undefined, i: number) => ({
+        length: width,
+        offset: width * i,
+        index: i,
+      }),
+      [width],
+    );
+    // Committed once a swipe settles — never per scroll frame.
+    const onMomentumScrollEnd = useCallback(
+      (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+        const page = Math.round(e.nativeEvent.contentOffset.x / width);
+        setIndex(Math.min(Math.max(page, 0), total - 1));
+      },
+      [width, total],
+    );
+    const renderItem = useCallback(
+      ({ item, index: i }: ListRenderItemInfo<string>) => (
+        <ZoomableImage
+          url={item}
+          width={width}
+          height={height}
+          accessibilityLabel={t('imageGallery.position', { current: i + 1, total })}
+          onClose={onClose}
+          panRequiresZoom
+          onZoomChange={setZoomed}
+          testID={`fullscreen-image-page-${i}`}
+        />
+      ),
+      [width, height, t, total, onClose],
+    );
+
+    return (
+      <>
+        <FlatList
+          testID="fullscreen-image-gallery"
+          data={urls}
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          scrollEnabled={!zoomed}
+          keyExtractor={galleryKey}
+          renderItem={renderItem}
+          getItemLayout={getItemLayout}
+          initialScrollIndex={initialIndex}
+          initialNumToRender={1}
+          maxToRenderPerBatch={2}
+          windowSize={3}
+          onMomentumScrollEnd={onMomentumScrollEnd}
+        />
+        <View style={[styles.counter, { top: topInset + 15 }]} pointerEvents="none">
+          <Text style={styles.counterText} testID="fullscreen-image-counter">
+            {index + 1} / {total}
+          </Text>
+        </View>
+      </>
+    );
+  },
+);
+
+FullscreenGallery.displayName = 'FullscreenGallery';
+
+const FullscreenImageModal: React.FC<Props> = ({ url, onClose, urls }) => {
   const t = useTranslation();
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const scale = useSharedValue(1);
-  const savedScale = useSharedValue(1);
-  const tx = useSharedValue(0);
-  const ty = useSharedValue(0);
-  const savedTx = useSharedValue(0);
-  const savedTy = useSharedValue(0);
-
-  // Reset transforms whenever a new image opens.
-  useEffect(() => {
-    if (url) {
-      scale.value = 1;
-      savedScale.value = 1;
-      tx.value = 0;
-      ty.value = 0;
-      savedTx.value = 0;
-      savedTy.value = 0;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url]);
-
-  const pinch = Gesture.Pinch()
-    .onUpdate((e) => {
-      scale.value = Math.min(Math.max(savedScale.value * e.scale, 0.5), MAX_SCALE);
-    })
-    .onEnd(() => {
-      if (scale.value < 1) {
-        scale.value = withTiming(1);
-        savedScale.value = 1;
-        tx.value = withTiming(0);
-        ty.value = withTiming(0);
-        savedTx.value = 0;
-        savedTy.value = 0;
-      } else {
-        savedScale.value = scale.value;
-      }
-    });
-
-  const pan = Gesture.Pan()
-    .onUpdate((e) => {
-      tx.value = savedTx.value + e.translationX;
-      ty.value = savedTy.value + e.translationY;
-    })
-    .onEnd(() => {
-      savedTx.value = tx.value;
-      savedTy.value = ty.value;
-    });
-
-  const doubleTap = Gesture.Tap()
-    .numberOfTaps(2)
-    .onEnd(() => {
-      if (scale.value > 1) {
-        scale.value = withTiming(1);
-        savedScale.value = 1;
-        tx.value = withTiming(0);
-        ty.value = withTiming(0);
-        savedTx.value = 0;
-        savedTy.value = 0;
-      } else {
-        scale.value = withTiming(DOUBLE_TAP_SCALE);
-        savedScale.value = DOUBLE_TAP_SCALE;
-      }
-    });
-
-  const singleTap = Gesture.Tap()
-    .numberOfTaps(1)
-    .onEnd(() => {
-      runOnJS(onClose)();
-    });
-
-  // pinch + pan run together; single tap dismisses but waits for a possible
-  // double tap (which zooms) to fail first.
-  const composed = Gesture.Simultaneous(pinch, pan, Gesture.Exclusive(doubleTap, singleTap));
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: tx.value }, { translateY: ty.value }, { scale: scale.value }],
-  }));
+  const galleryIndex = url && urls && urls.length > 1 ? urls.indexOf(url) : -1;
 
   return (
     <Modal
@@ -118,28 +136,34 @@ const FullscreenImageModal: React.FC<Props> = ({ url, onClose }) => {
       onRequestClose={onClose}
     >
       <GestureHandlerRootView style={styles.root}>
-        <GestureDetector gesture={composed}>
-          <Animated.View
-            style={styles.backdrop}
-            accessibilityLabel={t('fullscreenImageModal.backdropLabel')}
-            testID="fullscreen-image-backdrop"
-          >
-            {url ? (
-              <Animated.View style={[{ width, height }, animatedStyle]}>
-                <ExpoImage
-                  source={{ uri: url }}
-                  style={{ width, height }}
-                  contentFit="contain"
-                  cachePolicy="memory-disk"
-                  recyclingKey={url}
-                  autoplay={false}
-                  transition={150}
-                  accessibilityLabel={t('fullscreenImageModal.imageLabel')}
-                />
-              </Animated.View>
-            ) : null}
-          </Animated.View>
-        </GestureDetector>
+        <View
+          style={styles.backdrop}
+          accessibilityLabel={t('fullscreenImageModal.backdropLabel')}
+          testID="fullscreen-image-backdrop"
+        >
+          {url && urls && galleryIndex >= 0 ? (
+            // Keyed by the opened image so each opening starts at its page.
+            <FullscreenGallery
+              key={url}
+              urls={urls}
+              initialIndex={galleryIndex}
+              width={width}
+              height={height}
+              topInset={insets.top}
+              onClose={onClose}
+            />
+          ) : url ? (
+            // Keyed so a newly opened image starts un-zoomed.
+            <ZoomableImage
+              key={url}
+              url={url}
+              width={width}
+              height={height}
+              accessibilityLabel={t('fullscreenImageModal.imageLabel')}
+              onClose={onClose}
+            />
+          ) : null}
+        </View>
         {/* Explicit close affordance: the backdrop dismiss is a gesture, which
             isn't exposed as an accessibility action — screen-reader users (and
             iOS, with no hardware back) need a real button (#669 review). */}
@@ -157,27 +181,5 @@ const FullscreenImageModal: React.FC<Props> = ({ url, onClose }) => {
     </Modal>
   );
 };
-
-const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-  },
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.92)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  closeButton: {
-    position: 'absolute',
-    right: 16,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.4)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
 
 export default FullscreenImageModal;

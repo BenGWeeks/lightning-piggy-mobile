@@ -624,6 +624,10 @@
     "imageLabel": "Full-screen image",
     "close": "Close full-screen image"
   },
+  "imageGallery": {
+    "position": "Image {{current}} of {{total}}",
+    "openHint": "Opens the image full screen"
+  },
   "gifPickerSheet": {
     "title": "Send a GIF",
     "searchPlaceholder": "Search for GIFs",

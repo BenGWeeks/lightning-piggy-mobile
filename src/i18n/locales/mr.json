@@ -624,6 +624,10 @@
     "imageLabel": "फुल-स्क्रीन इमेज",
     "close": "फुल-स्क्रीन इमेज बंद करा"
   },
+  "imageGallery": {
+    "position": "चित्र {{current}} / {{total}}",
+    "openHint": "चित्र पूर्ण स्क्रीनवर उघडते"
+  },
   "gifPickerSheet": {
     "title": "GIF पाठवा",
     "searchPlaceholder": "GIF शोधा",

@@ -47,6 +47,9 @@ export interface MarketProduct {
   priceFiatLabel: string;
   /** Product image URL (absolute https). */
   image: string;
+  /** Every image of a relay listing, in the seller's order (`image` is the
+   * first). Absent for curated products, which carry just `image`. */
+  images?: string[];
   /** Display name of the seller/shop this product comes from. Must match a
    * `MarketVendor.name` in {@link MARKET_VENDORS} so the card can resolve
    * the seller (logo, Nostr identity, shop URL). */

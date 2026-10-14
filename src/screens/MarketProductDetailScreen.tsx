@@ -24,6 +24,7 @@ import { Toast } from '../components/BrandedToast';
 import { usePullToRefresh, useRegisterRefresher } from '../hooks/usePullToRefresh';
 import { useLatestListing } from '../hooks/useLatestListing';
 import MarketListingDetails from '../components/MarketListingDetails';
+import MarketProductGallery from '../components/MarketProductGallery';
 import MarkdownText from '../components/MarkdownText';
 import { usePubkeyProfile } from '../hooks/usePubkeyProfile';
 import type {
@@ -67,10 +68,6 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   // Pairs with `market product tap` on the Market screen: tap-to-first-commit.
   useEffect(() => perfLog('[PerfBlock] market product detail shown'), []);
   const styles = useMemo(() => createMarketProductDetailStyles(colors), [colors]);
-  const [imageFailed, setImageFailed] = useState(false);
-  // Real aspect ratio of the product image, learned on load, so the hero
-  // renders at the image's true proportions instead of a fixed square crop.
-  const [imageAspect, setImageAspect] = useState<number | null>(null);
   const [loginVisible, setLoginVisible] = useState(false);
   const [checkoutVisible, setCheckoutVisible] = useState(false);
   const { pubkey } = useNostr();
@@ -168,7 +165,6 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const listingEvent = product.listing?.event;
   const isOwnListing = !!listingEvent && !!pubkey && listingEvent.pubkey === pubkey;
   const listingDTag = listingEvent?.tags.find((tag) => tag[0] === 'd')?.[1];
-  const hasImage = product.image.length > 0 && !imageFailed;
 
   return (
     <View style={styles.container} testID="market-product-detail-screen">
@@ -211,26 +207,7 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
           ) : undefined
         }
       >
-        <View style={[styles.imageWrap, imageAspect ? { aspectRatio: imageAspect } : null]}>
-          {hasImage ? (
-            <Image
-              source={{ uri: product.image }}
-              style={styles.image}
-              contentFit="cover"
-              cachePolicy="memory-disk"
-              recyclingKey={product.image}
-              onLoad={(e) => {
-                const { width, height } = e.source ?? {};
-                if (width && height) setImageAspect(width / height);
-              }}
-              onError={() => setImageFailed(true)}
-            />
-          ) : (
-            <View style={styles.imageFallback}>
-              <Text style={styles.imageFallbackText}>{product.title.charAt(0).toUpperCase()}</Text>
-            </View>
-          )}
-        </View>
+        <MarketProductGallery image={product.image} images={product.images} title={product.title} />
 
         <View style={styles.body}>
           {preview ? (

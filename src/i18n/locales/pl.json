@@ -624,6 +624,10 @@
     "imageLabel": "Obraz na pełnym ekranie",
     "close": "Zamknij obraz na pełnym ekranie"
   },
+  "imageGallery": {
+    "position": "Obraz {{current}} z {{total}}",
+    "openHint": "Otwiera obraz na pełnym ekranie"
+  },
   "gifPickerSheet": {
     "title": "Wyślij GIF",
     "searchPlaceholder": "Szukaj GIF-ów",

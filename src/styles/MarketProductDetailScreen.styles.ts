@@ -32,23 +32,7 @@ export const createMarketProductDetailStyles = (colors: Palette) =>
 
     scrollContent: { paddingBottom: 40 },
 
-    // Product image. `aspectRatio: 1` is only the pre-load placeholder shape;
-    // once the image loads, MarketProductDetailScreen overrides it inline with
-    // the image's real aspect ratio so the hero isn't cropped to a square.
-    imageWrap: {
-      width: '100%',
-      aspectRatio: 1,
-      backgroundColor: colors.surface,
-    },
-    image: { width: '100%', height: '100%' },
-    imageFallback: {
-      width: '100%',
-      height: '100%',
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: colors.brandPinkLight,
-    },
-    imageFallbackText: { fontSize: 64, fontWeight: '800', color: colors.brandPink },
+    // Hero image / gallery styles live in MarketProductGallery.styles.ts.
 
     body: { padding: 16, gap: 12 },
     title: { fontSize: 22, fontWeight: '800', color: colors.textHeader },

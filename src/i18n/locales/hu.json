@@ -624,6 +624,10 @@
     "imageLabel": "Teljes képernyős kép",
     "close": "Teljes képernyős kép bezárása"
   },
+  "imageGallery": {
+    "position": "{{current}}. kép / {{total}}",
+    "openHint": "Teljes képernyőn megnyitja a képet"
+  },
   "gifPickerSheet": {
     "title": "GIF küldése",
     "searchPlaceholder": "GIF-ek keresése",
