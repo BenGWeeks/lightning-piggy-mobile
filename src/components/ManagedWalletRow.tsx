@@ -1,8 +1,7 @@
 import React, { memo, useMemo } from 'react';
-import { View, TouchableOpacity } from 'react-native';
+import { Text, TouchableOpacity, View } from 'react-native';
 import { Trash2, Eye, EyeOff, ChevronUp, ChevronDown, Wallet, Bitcoin } from 'lucide-react-native';
 import { Alert } from './BrandedAlert';
-import SettingsRow from './SettingsRow';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useLocale } from '../contexts/LocaleContext';
 import type { useWallet } from '../contexts/WalletContext';
@@ -11,6 +10,7 @@ import { cardThemes, defaultCardThemeFor } from '../themes/cardThemes';
 import { createManagedWalletRowStyles } from '../styles/ManagedWalletRow.styles';
 
 type WalletActions = ReturnType<typeof useWallet>;
+type Status = 'ok' | 'warn' | 'error' | 'unknown';
 interface Props {
   wallet: WalletState;
   index: number;
@@ -21,7 +21,21 @@ interface Props {
   onUpdateSettings: WalletActions['updateWalletSettings'];
 }
 
-/** One wallet and its unchanged reorder, balance and removal actions. */
+// Each 34 px action box already pads the 18 px icon by 8 px either side, so the
+// slop is vertical only — horizontal slop would overlap the adjacent action.
+const HIT_SLOP = { top: 8, bottom: 8, left: 0, right: 0 };
+
+function walletStatus(w: WalletState): Status {
+  if (w.walletType === 'onchain') return w.balance === null ? 'unknown' : 'ok';
+  if (w.connectionHealth === 'degraded') return 'warn';
+  return w.isConnected ? 'ok' : 'error';
+}
+
+/**
+ * One compact line per wallet: icon tile, name + balance/type, status dot and
+ * the inline reorder / balance-visibility / remove actions. Tapping the
+ * icon/name area opens the wallet's settings sheet.
+ */
 const ManagedWalletRow = memo(function ManagedWalletRow({
   wallet: w,
   index,
@@ -35,66 +49,82 @@ const ManagedWalletRow = memo(function ManagedWalletRow({
   const { t, formatLocale } = useLocale();
   const styles = useMemo(() => createManagedWalletRowStyles(colors), [colors]);
   const theme = cardThemes[w.theme] ?? cardThemes[defaultCardThemeFor(w.walletType)];
+  const Icon = w.walletType === 'onchain' ? Bitcoin : Wallet;
   const type = w.walletType === 'onchain' ? t('settingsPages.watchOnly') : t('settingsPages.nwc');
   const balance = w.hideBalance
     ? '***'
     : w.balance !== null
       ? t('walletsScreen.satsAmount', { amount: w.balance.toLocaleString(formatLocale) })
       : t('settingsKit.status.unknown');
+  // Balance first so it survives the ellipsis on narrow screens.
+  const detail = `${balance} · ${type}`;
+  const status = walletStatus(w);
+  const statusLabel = t(`settingsKit.status.${status}`);
+  const statusColor = {
+    ok: colors.green,
+    warn: colors.amber,
+    error: colors.red,
+    unknown: colors.textSupplementary,
+  }[status];
+  const isFirst = index === 0;
+  const isLast = index === walletCount - 1;
+
   return (
-    <View>
-      <SettingsRow
-        icon={w.walletType === 'onchain' ? Bitcoin : Wallet}
-        iconBackground={theme.gradientColors[0]}
-        iconColor={theme.textColor}
-        title={w.alias}
-        value={`${type} · ${balance}`}
-        status={
-          w.walletType === 'onchain'
-            ? w.balance === null
-              ? 'unknown'
-              : 'ok'
-            : w.connectionHealth === 'degraded'
-              ? 'warn'
-              : w.isConnected
-                ? 'ok'
-                : 'error'
-        }
-        testID={`wallet-row-${w.id}`}
+    <View style={styles.row}>
+      <TouchableOpacity
+        style={styles.body}
         onPress={() => onOpenSettings(w.id)}
-      />
-      <View style={styles.walletActions}>
+        testID={`wallet-row-${w.id}`}
+        accessibilityRole="link"
+        accessibilityLabel={w.alias}
+        accessibilityHint={`${detail}. ${statusLabel}`}
+      >
+        <View style={[styles.iconTile, { backgroundColor: theme.gradientColors[0] }]}>
+          <Icon size={18} color={theme.textColor} />
+        </View>
+        <View style={styles.text}>
+          <Text style={styles.name} numberOfLines={1}>
+            {w.alias}
+          </Text>
+          <Text style={styles.detail} numberOfLines={1}>
+            {detail}
+          </Text>
+        </View>
+        <View
+          style={[styles.status, { backgroundColor: statusColor }]}
+          accessible
+          accessibilityLabel={statusLabel}
+          accessibilityRole="text"
+        />
+      </TouchableOpacity>
+      <View style={styles.actions}>
         <TouchableOpacity
           style={styles.action}
           testID={`wallet-move-up-${w.id}`}
-          accessibilityState={{ disabled: index === 0 }}
+          accessibilityState={{ disabled: isFirst }}
           onPress={() => onReorder(w.id, 'up')}
-          disabled={index === 0}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          disabled={isFirst}
+          hitSlop={HIT_SLOP}
           accessibilityLabel={t('walletsScreen.moveUp', { alias: w.alias })}
         >
-          <ChevronUp size={18} color={colors.white} opacity={index === 0 ? 0.3 : 0.8} />
+          <ChevronUp size={18} color={colors.white} opacity={isFirst ? 0.3 : 0.8} />
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.action}
           testID={`wallet-move-down-${w.id}`}
-          accessibilityState={{ disabled: index === walletCount - 1 }}
+          accessibilityState={{ disabled: isLast }}
           onPress={() => onReorder(w.id, 'down')}
-          disabled={index === walletCount - 1}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          disabled={isLast}
+          hitSlop={HIT_SLOP}
           accessibilityLabel={t('walletsScreen.moveDown', { alias: w.alias })}
         >
-          <ChevronDown
-            size={18}
-            color={colors.white}
-            opacity={index === walletCount - 1 ? 0.3 : 0.8}
-          />
+          <ChevronDown size={18} color={colors.white} opacity={isLast ? 0.3 : 0.8} />
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.action}
           testID={`wallet-balance-visibility-${w.id}`}
           onPress={() => onUpdateSettings(w.id, { hideBalance: !w.hideBalance })}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          hitSlop={HIT_SLOP}
           accessibilityLabel={
             w.hideBalance
               ? t('walletsScreen.showBalance', { alias: w.alias })
@@ -124,7 +154,7 @@ const ManagedWalletRow = memo(function ManagedWalletRow({
               ],
             )
           }
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          hitSlop={HIT_SLOP}
           accessibilityLabel={t('walletsScreen.removeWalletA11y', { alias: w.alias })}
         >
           <Trash2 size={18} color={colors.white} opacity={0.8} />
