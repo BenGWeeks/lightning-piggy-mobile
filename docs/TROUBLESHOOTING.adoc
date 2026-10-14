@@ -1394,6 +1394,14 @@ recovers offline gaps beyond 500 events, including older epoch commits.
 Backoff survives replacement of the group connections. Backgrounding cancels
 pending timers; account teardown invalidates callbacks and closes routes.
 Group filters retain their watermark window and relay fan-out dedupe.
+Merged group REQs (#1399, `marmotGroupSubscriptions.ts`) are not per-relay
+routes, so `createMarmotNetwork` owns their resume: one `watchMarmotResume`
+watcher per network replaces every group relay's transport after the same
+three-second stagger and then reconnects the session once; a lost group socket
+re-arms the merged REQ with exponential backoff (one second doubling to a
+minute; it resets only after an arm stayed open for 30 seconds, so a relay
+that accepts the REQ and CLOSEs it at once keeps backing off) and runs per-group paged recovery, notifying
+the Welcome retry listener once its groups have caught up.
 
 Transport replacement isolates each SDK connection attempt's relay registry:
 a retired connecting publish timing out must not delete the fresh relay at
@@ -1539,3 +1547,68 @@ minutes. It pauses timers in background and preserves the deadline for a
 staggered resume; OS suspension can delay publication. Sign-out cancels the
 scheduler. Maintenance reuses the installation slot and only deletes replaced
 secrets after a relay confirms the fresh publication.
+
+== Missing Welcomes or DMs with "too many concurrent REQs" (#1399)
+
+A relay may reject the gift-wrap inbox when per-group and temporary queries
+exhaust its concurrent-subscription limit. This is especially visible when
+other configured relays are unreachable or IP-banned. Event `limit` bounds
+history; it does not limit the number of open subscriptions.
+
+Use a build containing the shared pool's REQ scheduler and merged Marmot
+subscriptions. In dev/performance-log builds, verify `[Relay] budget`,
+`[Marmot] inbox armed on`, and `[Marmot] group subs merged:` markers.
+The inbox should arm at login, even before opening Messages. Limit notices
+cause retries with backoff and a reduced budget. See PERFORMANCE.adoc,
+"Relay subscription capacity", for the fake-pool counts and grep command.
+A replay ending at 512 log lines alone does not establish a paging failure:
+the group backfill uses bounded 500-event pages and has a >512-event test.
+
+If groups never receive live events while the inbox remains active, inspect
+`group subs merged` and the budget's queued owners. Per-group-filter chunks
+consume separate live slots; equally prioritised tail chunks can stay queued
+indefinitely. Merge group ids into one live-only `#h` filter with a 60-second overlap and
+limit 100. Split only at 256 ids per filter or the 64 KiB message bound,
+keeping split filters in one physical REQ when possible; larger sets rotate
+every ten seconds on one group slot. Historical replay must never use a
+combined limit: 1,000 newer busy-group events can hide a quiet group's MLS
+commit, and relays can clamp limits further. Subscribe, scheduler resume and
+socket reconnect instead run independent paged per-group recovery as budgeted
+one-shots from each group's cursor. Live delivery waits behind its group's
+recovery. A pass that reaches the 40-page cap with older events unread (a relay
+clamping pages to 100) delivers nothing and continues below its oldest event on
+the next pass, so the cursor never skips the oldest commits. Memory is bounded
+at 20,000 events per group by retaining the oldest: the dropped newer events
+are re-read from the advanced cursor after that range is delivered. A
+duplicate-only page as full as any the relay served (more events in one second
+than a page holds) is stepped past with a warning instead of ending the range.
+A recovery read succeeds once any relay reaches EOSE and fails only when none
+does, so a dead or AUTH-gated relay in a group's list (the health layer always
+keeps two) cannot hold the group's live delivery. Live events buffered behind
+recovery are bounded to 1,000 distinct ids; on overflow the buffer is dropped
+and the next pass re-reads them from the unchanged cursor. Regressions cover
+the quiet commit behind 1,001 busy events, clamped pages past the page cap, a
+25,000-event history, saturated seconds, one dead relay of two, buffer
+overflow, all 41 groups at limit 4, splitting above 256 ids, re-arm backoff,
+reconnect and cleanup.
+
+
+
+=== Budget stays at 10/10 and Welcomes never join
+
+Live subscriptions occupying all slots can starve group-state reads and Welcome
+ownership verification in the failure path. A queued verification delays the
+Welcome failure log; a successful MLS join uses local key material. The absence
+of both join and failure logs alone does not identify the stopped await.
+Use the reservation-aware scheduler: at limit 10, at most 7 live REQs may open,
+leaving 3 slots for one-shots. One-shots close per relay at EOSE and have an
+independent 20-second deadline covering queueing and connection time. Raw
+snapshot reads and profile batches follow that lifecycle too. Socket close
+settles queued owners and releases every slot.
+
+Grep `[Relay] budget stall` for the oldest queued label and holder breakdown,
+and `[Relay] budget timeout` for forced recovery. Live group logs should show
+`N groups -> 1 REQs` per relay, including more than 100 groups. Welcome lookups
+combine their filters into one REQ and joins reuse the decrypted rumor and local
+keys. The no-network regression registers 10 live owners, admits only 7, then
+runs three one-shots without exceeding the relay cap.

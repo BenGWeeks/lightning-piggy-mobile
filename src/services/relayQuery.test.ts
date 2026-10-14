@@ -288,8 +288,21 @@ describe('strict shipping query completion', () => {
       { maxWait: 6000, rejectOnTimeout: true },
     );
     relay.params().oneose();
+    await jest.advanceTimersByTimeAsync(0);
     await expect(result).resolves.toEqual([]);
     await jest.advanceTimersByTimeAsync(6000);
     expect(relay.close).toHaveBeenCalledTimes(1);
   });
 });
+
+it.each(['query deadline', { url: 'wss://a', reason: 'query deadline' }])(
+  'preserves strict timeout rejection when budget close follows synthetic EOSE (%j)',
+  async (reason) => {
+    const { pool, params, close } = fakePool();
+    const result = querySyncAbortable(pool, ['wss://a'], {}, { rejectOnTimeout: true });
+    params().oneose();
+    params().onclose([reason] as never);
+    await expect(result).rejects.toThrow('Relay query timed out before EOSE');
+    expect(close).toHaveBeenCalledTimes(1);
+  },
+);

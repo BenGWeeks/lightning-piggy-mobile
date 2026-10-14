@@ -1,0 +1,93 @@
+import * as expoFetch from 'expo/fetch';
+import { discoverRelayReqLimit } from './relayReqLimit';
+
+jest.mock('expo/fetch', () => ({ fetch: jest.fn() }));
+
+beforeEach(() => jest.mocked(expoFetch.fetch).mockReset());
+afterEach(() => jest.restoreAllMocks());
+
+test('NIP-11 discovery uses HTTPS, advertises NIP-11, caches and respects a smaller max', async () => {
+  const fetch = (
+    jest.spyOn(expoFetch, 'fetch') as unknown as jest.MockedFunction<typeof global.fetch>
+  ).mockResolvedValue({
+    ok: true,
+    json: async () => ({ limitation: { max_subscriptions: 3 } }),
+  } as Response);
+  expect(await discoverRelayReqLimit('wss://relay.example.com/')).toBe(3);
+  expect(await discoverRelayReqLimit('wss://relay.example.com/')).toBe(3);
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(fetch).toHaveBeenCalledWith(
+    'https://relay.example.com/',
+    expect.objectContaining({
+      headers: { Accept: 'application/nostr+json' },
+      signal: expect.anything(),
+    }),
+  );
+});
+
+test('bad documents and failures keep the conservative default, private relays are never fetched', async () => {
+  const fetch = (
+    jest.spyOn(expoFetch, 'fetch') as unknown as jest.MockedFunction<typeof global.fetch>
+  ).mockResolvedValue({
+    ok: true,
+    json: async () => ({ limitation: { max_subscriptions: -1 } }),
+  } as Response);
+  expect(await discoverRelayReqLimit('wss://invalid.example.com/')).toBeUndefined();
+  fetch.mockRejectedValueOnce(new Error('offline'));
+  expect(await discoverRelayReqLimit('wss://offline.example.com/')).toBeUndefined();
+  expect(await discoverRelayReqLimit('wss://127.0.0.1/')).toBeUndefined();
+  expect(fetch).toHaveBeenCalledTimes(2);
+});
+
+test('concurrency is bounded to two and generous relay limits do not raise the app cap', async () => {
+  const resolvers: ((value: Response) => void)[] = [];
+  const fetch = (
+    jest.spyOn(expoFetch, 'fetch') as unknown as jest.MockedFunction<typeof global.fetch>
+  ).mockImplementation(
+    () =>
+      new Promise((r) => {
+        resolvers.push(r);
+      }),
+  );
+  const a = discoverRelayReqLimit('wss://a.example.com/');
+  const b = discoverRelayReqLimit('wss://b.example.com/');
+  expect(await discoverRelayReqLimit('wss://c.example.com/')).toBeUndefined();
+  await Promise.resolve();
+  expect(fetch).toHaveBeenCalledTimes(2);
+  // Both concurrent fetches must settle; use their own resolvers.
+  for (const resolve of resolvers)
+    resolve({
+      ok: true,
+      json: async () => ({ limitation: { max_subscriptions: 100 } }),
+    } as Response);
+  expect(await b).toBe(10);
+  expect(await a).toBe(10);
+});
+
+test.each(['http://127.0.0.1/admin', 'http://192.168.1.1/admin'])(
+  'NIP-11 discovery refuses redirects to %s without requesting the destination',
+  async (destination) => {
+    const requested: string[] = [];
+    const fetch = (
+      jest.spyOn(expoFetch, 'fetch') as unknown as jest.MockedFunction<typeof global.fetch>
+    ).mockImplementation(async (input, init) => {
+      requested.push(String(input));
+      // Model fetch's default automatic redirect, including its destination
+      // request, and the rejection required by redirect: 'error'.
+      if (init?.redirect === 'error') throw new TypeError('Redirect refused');
+      requested.push(destination);
+      return {
+        ok: true,
+        json: async () => ({ limitation: { max_subscriptions: 1 } }),
+      } as Response;
+    });
+    const url = `wss://redirect-${destination.includes('127') ? 'loopback' : 'private'}.example.com/`;
+    expect(await discoverRelayReqLimit(url)).toBeUndefined();
+    expect(requested).toEqual([url.replace(/^wss:/, 'https:')]);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledWith(
+      requested[0],
+      expect.objectContaining({ redirect: 'error' }),
+    );
+  },
+);

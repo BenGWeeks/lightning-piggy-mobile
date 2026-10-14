@@ -17,8 +17,24 @@ const mockResetTransports = jest.fn();
 jest.mock('./nostrPool', () => ({
   pool: {
     querySync: (...args: unknown[]) => mockQuery(...args),
+    // Group history and recovery read through the multi-filter one-shot (#1399).
+    querySyncFilters: (relays: string[], filters: Filter[]) =>
+      mockQuery(relays, filters.length === 1 ? filters[0] : filters),
     publish: (...args: unknown[]) => mockPublish(...args),
     subscribeMany: (...args: unknown[]) => mockSubscribe(...args),
+    // The merged group REQ arms one physical subscription per relay; model it
+    // on the same in-memory relay so the live-after-ingest assertions below
+    // see every kind-445 subscription the session opens.
+    subscribeMap: (
+      requests: { url: string; filter: Filter }[],
+      params: { onevent: (e: Event) => void; onReqOpen?: () => void },
+    ) => {
+      const subs = requests.map(({ url, filter }) =>
+        mockSubscribe([url], filter, { onevent: params.onevent }),
+      );
+      params.onReqOpen?.();
+      return { close: () => subs.forEach((sub: { close(): void }) => sub.close()) };
+    },
     resetTransports: async (...args: unknown[]) => mockResetTransports(...args),
   },
   trackRelays: jest.fn(),

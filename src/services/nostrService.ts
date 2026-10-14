@@ -1,3 +1,4 @@
+import { fetchSingleLatest } from './nostrLatestQuery';
 import {
   generateSecretKey,
   getPublicKey,
@@ -240,101 +241,8 @@ function tagsToRelayList(tags: string[][]): RelayConfig[] {
     });
 }
 
-// Race-to-first-event single-event fetch. The previous `pool.get()` based
-// implementation waited for EVERY relay in the set to send EOSE before
-// resolving — on Ben's Pixel 8 / Android 16 with the production relay
-// list this measured ~53 s for kind-3 (#372 logcat trace). Most relays
-// respond in ~1-2 s; the wait was paid against the slowest relay's EOSE.
-//
-// Contract:
-//   - Resolves with the first matching event's parsed value as soon as
-//     ANY relay returns one. This unblocks the caller in ~1-2 s rather
-//     than waiting for the slowest relay's EOSE.
-//   - Resolves with `null` if `softTimeoutMs` elapses with no event seen
-//     at all. `null` is distinct from "got an event with empty tags"
-//     (which parses to e.g. an empty contact list — a legitimate state
-//     for someone who follows nobody). Callers MUST distinguish:
-//       fresh === null  → don't touch the cache (network problem)
-//       fresh === []    → user really has zero contacts; persist + bump TS
-//   - The sub stays open for `keepOpenMs` after first resolve to absorb
-//     any newer events that race the slowest relays. If a strictly newer
-//     event is seen during that window, `onLatest` fires EXACTLY ONCE at
-//     sub close with the latest version — never inline during the stream.
-//     Firing once at the end avoids the race where an inline `onLatest`
-//     callback could overwrite cache that a still-pending `await` is
-//     about to write with the older first result.
-export async function fetchSingleLatest<T>(
-  filter: Filter,
-  relays: string[],
-  parse: (tags: string[][], createdAt: number) => T,
-  opts: {
-    softTimeoutMs?: number;
-    keepOpenMs?: number;
-    onLatest?: (parsed: T) => void;
-  } = {},
-): Promise<T | null> {
-  const softTimeoutMs = opts.softTimeoutMs ?? 5000;
-  const keepOpenMs = opts.keepOpenMs ?? 3000;
-  trackRelays(relays);
-
-  return new Promise<T | null>((resolve) => {
-    let firstResolved = false;
-    let bestEvent: { tags: string[][]; created_at: number } | null = null;
-    let firstResolvedCreatedAt: number | null = null;
-
-    const sub = pool.subscribeMany(relays, filter, {
-      onevent: (event: { tags: string[][]; created_at: number }) => {
-        if (!bestEvent || event.created_at > bestEvent.created_at) {
-          bestEvent = event;
-          if (!firstResolved) {
-            firstResolved = true;
-            firstResolvedCreatedAt = event.created_at;
-            resolve(parse(event.tags, event.created_at));
-          }
-          // Newer events keep updating bestEvent for the keepOpenMs
-          // window, but onLatest fires only once at sub close so it
-          // never races an awaiting caller's post-resolve microtask.
-        }
-      },
-    });
-
-    // Soft timeout: if no event has arrived by softTimeoutMs, resolve
-    // with `null` so the caller can distinguish "network couldn't
-    // produce a kind-3" from "kind-3 arrived but is empty". The sub
-    // stays open through keepOpenMs so a late relay can still surface
-    // the event via onLatest.
-    const softTimer = setTimeout(() => {
-      if (!firstResolved) {
-        firstResolved = true;
-        resolve(null);
-      }
-    }, softTimeoutMs);
-
-    // Hard close: at softTimeout + keepOpenMs, fire onLatest with the
-    // bestEvent IFF it's strictly newer than what we resolved with (or
-    // we resolved with null and got something during the keep-open
-    // window), then close the sub.
-    setTimeout(() => {
-      clearTimeout(softTimer);
-      if (opts.onLatest && bestEvent) {
-        const isNewer =
-          firstResolvedCreatedAt === null || bestEvent.created_at > firstResolvedCreatedAt;
-        if (isNewer) {
-          try {
-            opts.onLatest(parse(bestEvent.tags, bestEvent.created_at));
-          } catch {
-            // best-effort — onLatest failures must not crash the sub
-          }
-        }
-      }
-      try {
-        sub.close();
-      } catch {
-        // best-effort — sub may already be closed
-      }
-    }, softTimeoutMs + keepOpenMs);
-  });
-}
+// Back-compatible export; per-relay EOSE cleanup lives in the query helper.
+export { fetchSingleLatest } from './nostrLatestQuery';
 
 export async function fetchContactList(
   pubkey: string,
@@ -443,17 +351,11 @@ export async function fetchProfiles(
     // batch; this is the upper bound for the whole multi-batch run.
     const overallDeadline = Date.now() + 120000;
 
-    // Batch in groups of 50, run up to 3 batches concurrently. Per-batch
-    // soft timeout is 10s for the main pass — same ceiling as the old
-    // pool.querySync ceiling (15s minus a couple of seconds), since
-    // shrinking it further turned a slow-but-valid profile into a 24h
-    // miss when loadContacts() bumps PROFILES_TIMESTAMP_KEY on partial
-    // fetches (Copilot review on PR #385). The streaming pattern is
-    // still the win — events surface to the UI as they arrive instead
-    // of all-at-batch-end, so cold start FEELS fast even though the
-    // worst-case wait per batch is unchanged.
-    const batchSize = 50;
-    const concurrency = 3;
+    // Merge the former three parallel 50-author REQs into one bounded
+    // authors[] request (#1399). Stream the same 150-author round through
+    // one relay slot, retaining the timeout and newest-profile guards.
+    const batchSize = 150;
+    const concurrency = 1;
     const batches: string[][] = [];
     for (let i = 0; i < pubkeys.length; i += batchSize) {
       batches.push(pubkeys.slice(i, i + batchSize));
@@ -481,9 +383,11 @@ export async function fetchProfiles(
     if (missing.length > 0 && missing.length < pubkeys.length && Date.now() < overallDeadline) {
       if (__DEV__)
         console.log(`[Nostr] fetchProfiles: retrying ${missing.length} missing profiles`);
+      // Same 150-author batches as the main pass: one relay slot per round
+      // without turning 300 misses into fifteen sequential 8 s rounds.
       const retryBatches: string[][] = [];
-      for (let i = 0; i < missing.length; i += 20) {
-        retryBatches.push(missing.slice(i, i + 20));
+      for (let i = 0; i < missing.length; i += batchSize) {
+        retryBatches.push(missing.slice(i, i + batchSize));
       }
       for (let i = 0; i < retryBatches.length; i += concurrency) {
         if (Date.now() > overallDeadline) break;

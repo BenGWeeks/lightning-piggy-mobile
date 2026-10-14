@@ -174,15 +174,9 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
   // Marmot 1:1 chats land in the same store + list (protocol 'marmot').
   useMarmotDmInbound(isLoggedIn ? pubkey : null, setDmInboxForPubkey, followPubkeys);
   const [dmInboxLoading, setDmInboxLoading] = useState(false);
-  // Gates the live NIP-17 DM sub useEffect below. False on cold boot
-  // so we don't burn JS-thread cycles unwrapping wraps the user can't
-  // see yet (they're on Home, the Messages tab isn't mounted). Flipped
-  // to true the first time Messages / Conversation / any DM-receiving
-  // surface focuses via `armLiveDmSub()`. Once armed it stays armed for
-  // the rest of the session. Cold-start Home stays responsive because
-  // the per-wrap unwrap/route work moves to after the user has
-  // explicitly chosen to look at messages.
-  const [liveSubArmed, setLiveSubArmed] = useState(false);
+  // Welcomes and DMs must arrive before first Messages focus (#1399).
+  // The provider remains the sole owner; the pool reserves inbox capacity.
+  const [liveSubArmed, setLiveSubArmed] = useState(true);
   const [amberNip44Permission, setAmberNip44Permission] = useState<
     'unknown' | 'granted' | 'denied'
   >('unknown');
@@ -862,9 +856,8 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
     useLiveFollowGate(followPubkeys, followHydrated, pubkey);
 
   // Idempotent — any DM-surface (Messages tab, ConversationScreen)
-  // calls this on focus. The first call flips `liveSubArmed`, the
-  // gated useEffect below re-runs and opens the live NIP-17 sub.
-  // Subsequent calls are no-ops (React bails on identical setState).
+  // calls this on focus. The inbox is already armed at login (#1399);
+  // calls are no-ops (React bails on identical setState).
   const armLiveDmSub = useCallback(() => {
     setLiveSubArmed(true);
   }, []);
@@ -924,13 +917,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
   // single-flight guard in `refreshDmInbox` serialises on its side.
   useEffect(() => {
     if (!isLoggedIn || !pubkey || !signerType) return;
-    // Wait until a DM-surface (Messages tab, ConversationScreen) has
-    // focused at least once before opening the live sub. On cold boot
-    // the user is on Home, so we skip ~5 s of per-wrap unwrap/route/
-    // dedup JS-thread work. First Messages focus flips `liveSubArmed`,
-    // this effect re-runs, sub opens, drain happens then — when the
-    // user is explicitly looking at messages and a brief loading
-    // state is expected.
+    // Keep the gift-wrap inbox armed throughout the signed-in session.
     if (!liveSubArmed) return;
     // The subscription body lives in `nostrLiveDmSub` (#703). It closes
     // over the effect-instance snapshots (`viewerPubkey` / `activeSigner`)

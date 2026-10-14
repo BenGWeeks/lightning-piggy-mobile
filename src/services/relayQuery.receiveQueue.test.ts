@@ -2,12 +2,17 @@ import { AbstractRelay } from 'nostr-tools/abstract-relay';
 import { SimplePool } from 'nostr-tools/pool';
 import { finalizeEvent, type VerifiedEvent } from 'nostr-tools/pure';
 import { querySyncAbortable } from './relayQuery';
+import { withRelayHealth } from './healthAwarePool';
 import { paceRelayReceive } from './nostrRelayReceiveQueue';
 import {
   __resetVerifiedEventCache,
   flushVerifiedEventCache,
+  hydrateVerifiedEventCache,
   verifyEventCached,
 } from './nostrVerifyCache';
+
+jest.mock('./relayReqLimit', () => ({ discoverRelayReqLimit: async () => undefined }));
+class BudgetPool extends withRelayHealth(SimplePool) {}
 
 // Model a slow uncached receive backlog without blocking the test runner.
 jest.mock('../contexts/nostrDecryptPacing', () => ({
@@ -40,7 +45,7 @@ async function inboxQuery(params: { signal?: AbortSignal; rejectOnTimeout?: bool
   });
   jest.spyOn(relay, 'send').mockResolvedValue();
   paceRelayReceive(relay);
-  const pool = new SimplePool();
+  const pool = new BudgetPool();
   jest.spyOn(pool, 'ensureRelay').mockResolvedValue(relay);
   const result = querySyncAbortable(
     pool,
@@ -112,6 +117,31 @@ it('preserves strict timeout rejection after draining pre-deadline events', asyn
   await jest.advanceTimersByTimeAsync(16_000);
   await assertion;
   expect(verify).toHaveBeenCalledTimes(30);
+  expect(relay.openSubs.size).toBe(0);
+  relay.close();
+});
+
+it('keeps pending receive work alive at the budget deadline and rejects instead of resolving empty', async () => {
+  let hydrated!: () => void;
+  jest.mocked(hydrateVerifiedEventCache).mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        hydrated = resolve;
+      }),
+  );
+  const { relay, result, verify } = await inboxQuery({ rejectOnTimeout: true });
+  const completed = jest.fn();
+  const assertion = expect(result).rejects.toThrow('Relay query timed out before EOSE');
+  void result.then(completed, completed);
+  await jest.advanceTimersByTimeAsync(8000);
+  expect(verify).not.toHaveBeenCalled();
+  expect(completed).not.toHaveBeenCalled();
+  expect(relay.openSubs.size).toBe(1);
+  hydrated();
+  await jest.advanceTimersByTimeAsync(16_000);
+  await assertion;
+  expect(verify).toHaveBeenCalledTimes(30);
+  expect(completed).toHaveBeenCalledTimes(1);
   expect(relay.openSubs.size).toBe(0);
   relay.close();
 });

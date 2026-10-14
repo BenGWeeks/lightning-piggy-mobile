@@ -1,5 +1,6 @@
 import type { Event } from 'nostr-tools/core';
 import type { Filter } from 'nostr-tools/filter';
+import { subscribeRelayWithBudget } from './relayReqSubscription';
 import { pool, trackRelays } from './nostrService';
 
 // Relay-layer fetch helpers for NIP-25 reactions + NIP-09 retractions (#205).
@@ -26,7 +27,7 @@ async function queryAuthoritative(relays: string[], filter: Filter): Promise<Eve
           else resolve(events);
         };
         const timer = setTimeout(() => finish(new Error('Reaction read timed out')), 10000);
-        const subscription = relay.subscribe([filter], {
+        const subscription = subscribeRelayWithBudget(pool, relay, [filter], {
           eoseTimeout: 20000,
           onevent: (event) => events.push(event),
           oneose: () => finish(),

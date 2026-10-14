@@ -20,7 +20,7 @@ jest.mock('@react-navigation/native', () => ({
 jest.mock('../services/nostrPool', () => ({
   trackRelays: jest.fn(),
   pool: {
-    subscribeMany: jest.fn((_relays, _filter, handlers) => {
+    subscribeManyEose: jest.fn((_relays, _filter, handlers) => {
       mockOnEvent = handlers.onevent;
       return { close: mockClose };
     }),
@@ -46,12 +46,12 @@ afterEach(() => {
 });
 it('requests only the operator pubkey, then caches its display profile', async () => {
   const { result } = renderHook(() => useRelayOperator(PK));
-  await waitFor(() => expect(pool.subscribeMany).toHaveBeenCalled());
+  await waitFor(() => expect(pool.subscribeManyEose).toHaveBeenCalled());
   act(() =>
     mockOnEvent({ pubkey: PK, content: JSON.stringify({ name: 'Operator' }), created_at: 1 }),
   );
   await waitFor(() => expect(result.current.profile?.name).toBe('Operator'));
-  expect(pool.subscribeMany).toHaveBeenCalledWith(
+  expect(pool.subscribeManyEose).toHaveBeenCalledWith(
     expect.arrayContaining([mockRelays[0].url]),
     { kinds: [0], authors: [PK], limit: 1 },
     expect.anything(),
@@ -66,7 +66,7 @@ it('uses a fresh cache hit and shows NIP-05 only when it resolves to the operato
   mockFetch.mockResolvedValue({ ok: true, json: async () => ({ names: { operator: PK } }) });
   const { result } = renderHook(() => useRelayOperator(PK));
   await waitFor(() => expect(result.current.verifiedNip05).toBe('operator@example.com'));
-  expect(pool.subscribeMany).not.toHaveBeenCalled();
+  expect(pool.subscribeManyEose).not.toHaveBeenCalled();
   expect(mockFetch).toHaveBeenCalledWith(
     'https://example.com/.well-known/nostr.json?name=operator',
     expect.objectContaining({ signal: expect.anything() }),
@@ -84,13 +84,13 @@ it('does not display a claimed NIP-05 mapped to a different key', async () => {
 });
 it('does not fetch when NIP-11 omits an operator', () => {
   renderHook(() => useRelayOperator(undefined));
-  expect(pool.subscribeMany).not.toHaveBeenCalled();
+  expect(pool.subscribeManyEose).not.toHaveBeenCalled();
   expect(cache.get).not.toHaveBeenCalled();
 });
 
 it('closes a pending operator subscription on blur, ignores late events and starts again on focus', async () => {
   const { result, rerender } = renderHook(() => useRelayOperator(PK));
-  await waitFor(() => expect(pool.subscribeMany).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(pool.subscribeManyEose).toHaveBeenCalledTimes(1));
   mockFocused = false;
   rerender({});
   expect(mockClose).toHaveBeenCalledTimes(1);
@@ -99,7 +99,7 @@ it('closes a pending operator subscription on blur, ignores late events and star
   expect(cache.setMany).not.toHaveBeenCalled();
   mockFocused = true;
   rerender({});
-  await waitFor(() => expect(pool.subscribeMany).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(pool.subscribeManyEose).toHaveBeenCalledTimes(2));
 });
 it('does not start a subscription when a cache lookup completes after blur', async () => {
   let resolveCache!: (value: null) => void;
@@ -112,7 +112,7 @@ it('does not start a subscription when a cache lookup completes after blur', asy
   mockFocused = false;
   rerender({});
   await act(async () => resolveCache(null));
-  expect(pool.subscribeMany).not.toHaveBeenCalled();
+  expect(pool.subscribeManyEose).not.toHaveBeenCalled();
 });
 it('aborts pending NIP-05 verification on blur', async () => {
   (cache.get as jest.Mock).mockResolvedValue({ name: 'Operator', nip05: 'operator@example.com' });
@@ -133,5 +133,5 @@ it('does no work while initially blurred', () => {
   mockFocused = false;
   renderHook(() => useRelayOperator(PK));
   expect(cache.get).not.toHaveBeenCalled();
-  expect(pool.subscribeMany).not.toHaveBeenCalled();
+  expect(pool.subscribeManyEose).not.toHaveBeenCalled();
 });

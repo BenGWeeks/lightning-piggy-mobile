@@ -29,7 +29,7 @@ afterEach(() => {
 function captureEvents() {
   let emit!: (event: Event) => void;
   const close = jest.fn();
-  jest.spyOn(pool, 'subscribeMany').mockImplementation((_relays, _filter, handlers) => {
+  jest.spyOn(pool, 'subscribeManyEose').mockImplementation((_relays, _filter, handlers) => {
     emit = handlers.onevent!;
     return { close };
   });
