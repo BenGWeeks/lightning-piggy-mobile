@@ -16,7 +16,12 @@ const MessageSharedListing: React.FC<{ token: EmbedRef; autoLoadMedia: boolean }
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createNostrContentStyles(colors), [colors]);
-  return <EmbeddedEventCard token={token} styles={styles} autoLoadMedia={autoLoadMedia} />;
+  // Untrusted senders may reference listings, but can't choose our read relays.
+  const safeToken = useMemo(
+    () => (autoLoadMedia ? token : { ...token, relays: [] }),
+    [token, autoLoadMedia],
+  );
+  return <EmbeddedEventCard token={safeToken} styles={styles} autoLoadMedia={autoLoadMedia} />;
 };
 
 export default React.memo(MessageSharedListing);

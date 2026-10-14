@@ -45,6 +45,15 @@ describe('listingShareContent (share link choice)', () => {
     expect(uri.startsWith('nostr:naddr1')).toBe(true);
   });
 
+  it('drops a title that is a standalone listing reference', () => {
+    const other = listingNaddr({ ...listing, tags: [['d', 'other']] })!;
+    const { message } = listingShareContent(`  nostr:${other}  `, naddr);
+    expect(message).toBe(`nostr:${naddr}`);
+    expect(sharedListingParts(message)).toEqual([
+      expect.objectContaining({ identifier: 'widget' }),
+    ]);
+  });
+
   it('falls back to just the reference when the title is blank', () => {
     expect(listingShareContent('  ', naddr).message).toBe(`nostr:${naddr}`);
   });

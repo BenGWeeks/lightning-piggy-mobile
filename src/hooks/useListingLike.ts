@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { useNostr } from '../contexts/NostrContext';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -46,6 +46,16 @@ export function useListingLike(product: MarketProduct, onRequestSignIn: () => vo
   const mutationGeneration = useRef(0);
   const [busy, setBusy] = useState(false);
 
+  useEffect(() => {
+    setState(EMPTY);
+    busyRef.current = false;
+    setBusy(false);
+    // Invalidate both reads and mutations belonging to the previous identity.
+    return () => {
+      mutationGeneration.current += 1;
+    };
+  }, [pubkey, coordinate]);
+
   useFocusEffect(
     useCallback(() => {
       if (!coordinate || busyRef.current) return undefined;
@@ -62,7 +72,8 @@ export function useListingLike(product: MarketProduct, onRequestSignIn: () => vo
           setState({ count: likes.count, myIds: likes.myReactionIds });
         })
         .catch(() => {
-          // Every relay failed: keep what's shown; the heart still works.
+          // Keep the current identity's state. An unresolved first lookup
+          // must not allow a toggle; the next focus will retry it.
         });
       return () => controller.abort();
     }, [coordinate, pubkey, readRelays]),
@@ -76,11 +87,15 @@ export function useListingLike(product: MarketProduct, onRequestSignIn: () => vo
       onRequestSignIn();
       return;
     }
+    // Unlike needs every existing reaction id, including on the first tap.
+    if (state.count === null) return;
     const before = state;
-    mutationGeneration.current += 1;
+    const generation = ++mutationGeneration.current;
+    const isCurrent = () => generation === mutationGeneration.current;
     busyRef.current = true;
     setBusy(true);
     const fail = () => {
+      if (!isCurrent()) return;
       setState(before);
       Toast.show({
         type: 'error',
@@ -98,6 +113,7 @@ export function useListingLike(product: MarketProduct, onRequestSignIn: () => vo
           targetAddress: { coordinate, relayHint: LISTING_RELAY_HINT },
           extraRelays: MARKET_RELAYS,
         });
+        if (!isCurrent()) return;
         if (id) setState({ count: (before.count ?? 0) + 1, myIds: [id] });
         else fail();
       } else {
@@ -105,6 +121,7 @@ export function useListingLike(product: MarketProduct, onRequestSignIn: () => vo
         const results = await Promise.all(
           before.myIds.map((id) => deleteReaction(id, MARKET_RELAYS)),
         );
+        if (!isCurrent()) return;
         const remaining = before.myIds.filter((_, i) => !results[i]);
         if (remaining.length > 0) {
           setState({ count: before.count, myIds: remaining });
@@ -114,8 +131,10 @@ export function useListingLike(product: MarketProduct, onRequestSignIn: () => vo
     } catch {
       fail();
     } finally {
-      busyRef.current = false;
-      setBusy(false);
+      if (isCurrent()) {
+        busyRef.current = false;
+        setBusy(false);
+      }
     }
   }, [
     event,
@@ -129,5 +148,11 @@ export function useListingLike(product: MarketProduct, onRequestSignIn: () => vo
     t,
   ]);
 
-  return { available: !!coordinate, liked, count: state.count, busy, toggle };
+  return {
+    available: !!coordinate,
+    liked,
+    count: state.count,
+    busy: busy || (!!pubkey && !!coordinate && state.count === null),
+    toggle,
+  };
 }

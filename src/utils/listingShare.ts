@@ -16,6 +16,7 @@ import { MARKET_RELAYS } from './marketListingsQuery';
 import { LISTING_KIND } from './marketLikes';
 
 type AddressRef = Extract<NostrContentToken, { type: 'address' }>;
+const SHARE_LINE = /^nostr:naddr1[0-9a-z]+$/;
 
 /** `naddr1…` for a kind-30402 listing, with the Market relays as hints; null otherwise. */
 export function listingNaddr(event: Pick<Event, 'kind' | 'pubkey' | 'tags'>): string | null {
@@ -46,7 +47,7 @@ export function listingShareContent(
 ): { message: string; uri: string } {
   const uri = `nostr:${naddr}`;
   const label = title.replace(/\s+/g, ' ').trim();
-  return { message: label ? `${label}\n${uri}` : uri, uri };
+  return { message: label && !SHARE_LINE.test(label) ? `${label}\n${uri}` : uri, uri };
 }
 
 /**
@@ -57,7 +58,7 @@ export function extractSharedListing(text: string): AddressRef | null {
   if (!text || !text.includes('naddr1')) return null;
   for (const raw of text.split('\n')) {
     const line = raw.trim();
-    if (!/^nostr:naddr1[0-9a-z]+$/.test(line)) continue;
+    if (!SHARE_LINE.test(line)) continue;
     const ref = decodeNostrEntity(line);
     if (ref?.type === 'address' && ref.kind === LISTING_KIND) return ref;
   }
