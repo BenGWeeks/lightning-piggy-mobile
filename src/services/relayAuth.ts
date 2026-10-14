@@ -1,5 +1,5 @@
 import type { AbstractRelay } from 'nostr-tools/abstract-relay';
-import { verifyEvent, type Event, type EventTemplate } from 'nostr-tools/pure';
+import { verifyEvent, type Event, type EventTemplate, type VerifiedEvent } from 'nostr-tools/pure';
 import { normalizeURL } from 'nostr-tools/utils';
 import { getCurrentUserPubkey } from './nostrActiveAccount';
 import { isTestRelayLockdown, TEST_RELAY_URL } from '../config/testRelayLockdown';
@@ -15,7 +15,12 @@ let account: RelayAuthAccount | null = null;
 // Session decisions survive list refreshes and account switches, but never persist.
 const remoteAttempts = new Map<
   string,
-  { relay: AbstractRelay; challenge: string | undefined; result: Promise<void> }
+  {
+    relay: AbstractRelay;
+    challenge: string | undefined;
+    connection: Promise<void> | undefined;
+    result: Promise<void>;
+  }
 >();
 const inFlight = new Map<
   string,
@@ -25,7 +30,50 @@ const authenticatedAs = new WeakMap<AbstractRelay, string>();
 // nostr-tools caches AUTH across accounts on a shared socket. Its runtime fields
 // are private in the types; keep this compatibility seam here (SDK 2.23).
 function authState(relay: AbstractRelay) {
-  return relay as unknown as { challenge?: string; authPromise?: Promise<string> };
+  return relay as unknown as {
+    challenge?: string;
+    authPromise?: Promise<string>;
+    connectionPromise?: Promise<void>;
+    ws?: WebSocket;
+    openEventPublishes: Map<
+      string,
+      { reject: (error: Error) => void; timeout: ReturnType<typeof setTimeout> }
+    >;
+  };
+}
+
+/** SDK auth() ignores send() rejections. Keep its OK waiter/drain tracking,
+ * but send AUTH on the captured socket and settle failures without payloads. */
+async function sendAuth(
+  relay: AbstractRelay,
+  signed: VerifiedEvent,
+  current: () => boolean,
+): Promise<void> {
+  const originalSend = relay.send;
+  const safeSend: AbstractRelay['send'] = async (message) => {
+    if (!message.startsWith('["AUTH",')) return originalSend.call(relay, message);
+    try {
+      const socket = authState(relay).ws;
+      if (!current() || !socket || socket.readyState !== 1)
+        throw new Error('auth-required: originating socket disconnected');
+      // SDK send() starts a detached connectionPromise.then(). A synchronous
+      // socket send here lets us catch both throws and rejected test transports.
+      await socket.send(message);
+    } catch {
+      const pending = authState(relay).openEventPublishes.get(signed.id);
+      if (pending) {
+        clearTimeout(pending.timeout);
+        authState(relay).openEventPublishes.delete(signed.id);
+        pending.reject(new Error('auth was required but sending authentication failed'));
+      }
+    }
+  };
+  relay.send = safeSend;
+  try {
+    await bounded(relay.auth(async () => signed));
+  } finally {
+    if (relay.send === safeSend) relay.send = originalSend;
+  }
 }
 
 export function setRelayAuthAccount(next: RelayAuthAccount | null): void {
@@ -49,6 +97,23 @@ function bounded<T>(operation: Promise<T>): Promise<T> {
   });
 }
 
+async function signOnSocket(
+  owner: RelayAuthAccount,
+  template: EventTemplate,
+  socket: WebSocket | undefined,
+): Promise<Event | null> {
+  let disconnected!: () => void;
+  const closed = new Promise<never>((_, reject) => {
+    disconnected = () => reject(new Error('auth-required: originating socket disconnected'));
+  });
+  socket?.addEventListener?.('close', disconnected);
+  try {
+    return await bounded(Promise.race([owner.sign(template), closed]));
+  } finally {
+    socket?.removeEventListener?.('close', disconnected);
+  }
+}
+
 /** Sign only on CLOSED auth-required, never on unsolicited relay challenges. */
 export function authenticateRelay(relay: AbstractRelay): Promise<void> {
   const owner = account;
@@ -58,6 +123,8 @@ export function authenticateRelay(relay: AbstractRelay): Promise<void> {
     return Promise.reject(new Error('auth-required: relay outside test lockdown'));
   if (!owner || owner.pubkey !== pk)
     return Promise.reject(new Error('auth-required: no active signer'));
+  if (!relay.connected)
+    return Promise.reject(new Error('auth-required: originating socket disconnected'));
   const key = `${pk}:${url}`;
   const pending = inFlight.get(url);
   if (pending)
@@ -71,7 +138,9 @@ export function authenticateRelay(relay: AbstractRelay): Promise<void> {
   if (remote && previous) {
     // A new socket/challenge needs a new signature; never reuse an old AUTH event
     // or open the remote signer a second time this session.
-    return previous.relay === relay && previous.challenge === authState(relay).challenge
+    return previous.relay === relay &&
+      previous.challenge === authState(relay).challenge &&
+      previous.connection === authState(relay).connectionPromise
       ? previous.result.then(() => {
           if (authenticatedAs.get(relay) !== pk)
             throw new Error('auth-required: socket authenticated as another account');
@@ -80,6 +149,14 @@ export function authenticateRelay(relay: AbstractRelay): Promise<void> {
   }
   const current = () => getCurrentUserPubkey() === pk && account?.pubkey === pk;
   const result = (async () => {
+    const connection = authState(relay).connectionPromise;
+    const socket = authState(relay).ws;
+    const connected = () =>
+      relay.connected &&
+      !!connection &&
+      authState(relay).connectionPromise === connection &&
+      authState(relay).ws === socket;
+    if (!connected()) throw new Error('auth-required: originating socket disconnected');
     const challenge = authState(relay).challenge;
     if (!challenge) throw new Error('auth-required: no challenge');
     const template: EventTemplate = {
@@ -94,7 +171,8 @@ export function authenticateRelay(relay: AbstractRelay): Promise<void> {
     const expectedTags = JSON.stringify(template.tags);
     const expectedTime = template.created_at;
     // Sign before SDK auth(): its async executor swallows signer rejection.
-    const signed = await bounded(owner.sign(template));
+    const signed = await signOnSocket(owner, template, socket);
+    if (!connected()) throw new Error('auth-required: originating socket disconnected');
     if (!signed || !current() || authState(relay).challenge !== challenge || signed.pubkey !== pk)
       throw new Error('auth-required: signing declined or account/challenge changed');
     if (
@@ -106,17 +184,22 @@ export function authenticateRelay(relay: AbstractRelay): Promise<void> {
     )
       throw new Error('auth-required: invalid signed event');
     authState(relay).authPromise = undefined;
-    await bounded(
-      relay.auth(async () => {
-        if (!current()) throw new Error('auth-required: account changed');
-        return signed;
-      }),
+    await sendAuth(
+      relay,
+      signed,
+      () => current() && connected() && authState(relay).challenge === challenge,
     );
-    if (!current()) throw new Error('auth-required: account changed');
+    if (!current() || !connected()) throw new Error('auth-required: account or socket changed');
     authenticatedAs.set(relay, pk!);
   })();
   inFlight.set(url, { relay, pubkey: pk, result });
-  if (remote) remoteAttempts.set(key, { relay, challenge: authState(relay).challenge, result });
+  if (remote)
+    remoteAttempts.set(key, {
+      relay,
+      challenge: authState(relay).challenge,
+      connection: authState(relay).connectionPromise,
+      result,
+    });
   void result.then(
     () => inFlight.delete(url),
     () => inFlight.delete(url),

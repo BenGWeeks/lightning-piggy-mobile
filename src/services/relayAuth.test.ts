@@ -9,7 +9,12 @@ const pubkey = getPublicKey(secret);
 let serial = 0;
 function setup(signerType = 'nsec', own = true, url = `wss://auth-${serial++}.example/`) {
   const relay = new AbstractRelay(url, { verifyEvent: (() => true) as never });
-  Object.assign(relay, { challenge: 'challenge-value' });
+  Object.assign(relay, {
+    challenge: 'challenge-value',
+    _connected: true,
+    connectionPromise: Promise.resolve(),
+    ws: { readyState: 1, send: jest.fn(), close: jest.fn() },
+  });
   const sign = jest.fn(async (event: EventTemplate) => finalizeEvent(event, secret));
   const auth = jest.spyOn(relay, 'auth').mockImplementation(async (signer) => {
     await signer({ kind: 22242, tags: [], content: '', created_at: 0 });
@@ -50,7 +55,11 @@ test.each(['amber', 'nip46'])(
     await Promise.all([authenticateRelay(relay), authenticateRelay(relay)]);
     await authenticateRelay(relay);
     const reconnected = new AbstractRelay(relay.url, { verifyEvent: (() => true) as never });
-    Object.assign(reconnected, { challenge: 'new-challenge' });
+    Object.assign(reconnected, {
+      challenge: 'new-challenge',
+      _connected: true,
+      connectionPromise: Promise.resolve(),
+    });
     await expect(authenticateRelay(reconnected)).rejects.toThrow('already asked');
     expect(sign).toHaveBeenCalledTimes(1);
   },
@@ -132,4 +141,92 @@ test('locked test account authenticates only to LAN', async () => {
   } finally {
     (TEST_ACCOUNT_PUBKEYS as Set<string>).delete(pubkey);
   }
+});
+
+test.each(['disconnect', 'reconnect'])(
+  '%s while signing prevents AUTH on a retired socket with the same challenge',
+  async (scenario) => {
+    const { relay, sign, auth } = setup();
+    sign.mockImplementationOnce(async (event) => {
+      relay.close();
+      Object.assign(relay, { connectionPromise: undefined });
+      if (scenario === 'reconnect')
+        Object.assign(relay, {
+          _connected: true,
+          connectionPromise: Promise.resolve(),
+          ws: { readyState: 1, send: jest.fn(), close: jest.fn() },
+        });
+      return finalizeEvent(event, secret);
+    });
+    await expect(authenticateRelay(relay)).rejects.toThrow('originating socket disconnected');
+    expect(auth).not.toHaveBeenCalled();
+  },
+);
+
+test.each(['throw', 'reject', 'close before send'])(
+  'AUTH send failure (%s) is handled and sanitized without an unhandled rejection',
+  async (scenario) => {
+    const { relay, auth } = setup();
+    auth.mockRestore();
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const socket = {
+      readyState: 1,
+      send: jest.fn(() => {
+        const error = new Error('signed AUTH event and challenge-value');
+        if (scenario === 'reject') return Promise.reject(error);
+        throw error;
+      }),
+    };
+    Object.assign(relay, { ws: socket });
+    if (scenario === 'close before send')
+      jest.spyOn(relay, 'auth').mockImplementationOnce(async (signer) => {
+        // The SDK awaits its signer callback before sending, giving a close
+        // another microtask in which to race with send().
+        const sdkAuth = AbstractRelay.prototype.auth.call(relay, signer);
+        socket.readyState = 3;
+        return sdkAuth;
+      });
+    const originalSend = relay.send;
+    await expect(authenticateRelay(relay)).rejects.toThrow(
+      'auth was required but signing or authentication failed',
+    );
+    expect(warn).not.toHaveBeenCalled();
+    expect(relay.send).toBe(originalSend);
+    expect(
+      (relay as unknown as { openEventPublishes: Map<string, unknown> }).openEventPublishes.size,
+    ).toBe(0);
+    warn.mockRestore();
+  },
+);
+
+test('socket close aborts a pending signer immediately and late signing cannot send AUTH', async () => {
+  const { relay, sign, auth } = setup();
+  let close!: () => void;
+  const socket = {
+    addEventListener: jest.fn((_type, listener) => (close = listener)),
+    removeEventListener: jest.fn(),
+  };
+  Object.assign(relay, { ws: socket });
+  let finishSigning!: (event: ReturnType<typeof finalizeEvent>) => void;
+  sign.mockImplementationOnce(() => new Promise((resolve) => (finishSigning = resolve)));
+  const attempt = authenticateRelay(relay);
+  const assertion = expect(attempt).rejects.toThrow('signing or authentication failed');
+  relay.close();
+  close();
+  await assertion;
+  finishSigning(finalizeEvent(sign.mock.calls[0][0], secret));
+  await Promise.resolve();
+  expect(auth).not.toHaveBeenCalled();
+  expect(socket.removeEventListener).toHaveBeenCalledWith('close', close);
+});
+
+test('cached remote AUTH success cannot be reused after disconnect or a same-challenge reconnect', async () => {
+  const { relay, sign, auth } = setup('nip46');
+  await authenticateRelay(relay);
+  relay.close();
+  await expect(authenticateRelay(relay)).rejects.toThrow('originating socket disconnected');
+  Object.assign(relay, { _connected: true, connectionPromise: Promise.resolve() });
+  await expect(authenticateRelay(relay)).rejects.toThrow('already asked');
+  expect(sign).toHaveBeenCalledTimes(1);
+  expect(auth).toHaveBeenCalledTimes(1);
 });

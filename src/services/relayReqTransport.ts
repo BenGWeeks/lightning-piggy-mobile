@@ -19,12 +19,20 @@ export function openRelayReq(
   const connected = (relay: Awaited<ReturnType<AbstractSimplePool['ensureRelay']>>) => {
     const arm = (authenticated = false) => {
       if (stopped) return;
+      let retired = false;
       params.onReqOpen?.();
       sub = relay.subscribe(filters, {
         ...params,
         abort: undefined, // the budget handle owns cancellation, not the SDK's onabort field
         eoseTimeout: params.eoseTimeout ?? params.maxWait,
+        oneose: () => {
+          if (!stopped && !retired) params.oneose?.();
+        },
+        onevent: (event) => {
+          if (!stopped && !retired) params.onevent?.(event);
+        },
         receivedEvent: (source, id) => {
+          if (stopped || retired) return;
           if (pool.trackRelays) {
             const seen = pool.seenOn.get(id) ?? new Set();
             seen.add(source);
@@ -33,7 +41,8 @@ export function openRelayReq(
           params.receivedEvent?.(source, id);
         },
         onclose: (reason) => {
-          if (stopped) return;
+          if (stopped || retired) return;
+          retired = true; // SDK CLOSED leaves the old EOSE timer alive
           sub = undefined; // CLOSED/socket close already retired this physical sub
           if (!authenticated && reason.startsWith('auth-required:'))
             void authenticateRelay(relay)

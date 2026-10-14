@@ -29,7 +29,11 @@ test.each(['connection failed', 'connection timed out'])(
 test('rejected AUTH promise rejects the read instead of succeeding empty', async () => {
   const pool = new TestPool();
   const relay = new AbstractRelay(url, { verifyEvent: (() => true) as never });
-  Object.assign(relay, { challenge: 'test-challenge' });
+  Object.assign(relay, {
+    challenge: 'test-challenge',
+    _connected: true,
+    connectionPromise: Promise.resolve(),
+  });
   const secret = new Uint8Array(32).fill(2);
   setCurrentUserPubkey(getPublicKey(secret));
   jest.spyOn(relay, 'send').mockResolvedValue();
@@ -64,17 +68,29 @@ afterEach(() => {
   jest.useRealTimers();
 });
 
-test.each(['query', 'raw subscription'])(
-  'nsec auto-auth re-arms %s once and delivers events',
-  async (path) => {
+test.each([
+  ['query', 1000],
+  ['query', 5000],
+  ['raw subscription', 1000],
+  ['raw subscription', 5000],
+])(
+  'nsec auto-auth re-arms %s after %i ms and ignores the retired EOSE timer',
+  async (path, signDelay) => {
     const secret = new Uint8Array(32).fill(3);
     const pubkey = getPublicKey(secret);
     setCurrentUserPubkey(pubkey);
-    const sign = jest.fn(async (event) => finalizeEvent(event, secret));
+    const sign = jest.fn(async (event) => {
+      await new Promise((resolve) => setTimeout(resolve, signDelay as number));
+      return finalizeEvent(event, secret);
+    });
     setRelayAuthAccount({ pubkey, signerType: 'nsec', ownRelays: [], sign });
     const pool = new TestPool();
     const relay = new AbstractRelay(url, { verifyEvent: (() => true) as never });
-    Object.assign(relay, { challenge: 'test-challenge' });
+    Object.assign(relay, {
+      challenge: 'test-challenge',
+      _connected: true,
+      connectionPromise: Promise.resolve(),
+    });
     const send = jest.spyOn(relay, 'send').mockImplementation(async (message) => {
       const [type, event] = JSON.parse(message);
       if (type === 'AUTH') {
@@ -90,6 +106,7 @@ test.each(['query', 'raw subscription'])(
         state.openEventPublishes.delete(event.id);
       }
     });
+    Object.assign(relay, { ws: { readyState: 1, send } });
     jest.spyOn(pool, 'ensureRelay').mockResolvedValue(relay);
     const event = finalizeEvent({ kind: 4, tags: [], content: 'DM', created_at: 1 }, secret);
     const received = jest.fn();
@@ -98,14 +115,21 @@ test.each(['query', 'raw subscription'])(
         ? querySyncAbortable(pool, [url], { kinds: [4] }, {})
         : Promise.resolve(pool.subscribeRelay(relay, [{ kinds: [4] }], { onevent: received }, url));
     await Promise.resolve();
-    [...relay.openSubs.values()][0].close('auth-required: authenticate first');
+    const original = [...relay.openSubs.values()][0];
+    relay._onmessage({
+      data: JSON.stringify(['CLOSED', original.id, 'auth-required: authenticate first']),
+    } as MessageEvent);
+    await jest.advanceTimersByTimeAsync(signDelay as number);
     // Flush signing, SDK AUTH/OK and transport continuation.
     for (let i = 0; i < 20; i++) await Promise.resolve();
     expect(sign).toHaveBeenCalledTimes(1);
     expect(send.mock.calls.filter(([message]) => message.startsWith('["REQ"'))).toHaveLength(2);
+    await jest.advanceTimersByTimeAsync(Math.max(0, 4500 - (signDelay as number)));
     const retried = [...relay.openSubs.values()][0];
+    expect(retried).toBeDefined();
+    expect(retried).not.toBe(original);
     retried.onevent(event);
-    retried.oneose?.();
+    retried.receivedEose();
     if (path === 'query') expect(await result).toEqual([event]);
     else expect(received).toHaveBeenCalledWith(event);
     pool.destroy();
@@ -120,7 +144,11 @@ test('a repeated auth-required after successful AUTH terminates without looping'
   setRelayAuthAccount({ pubkey, signerType: 'nsec', ownRelays: [], sign });
   const pool = new TestPool();
   const relay = new AbstractRelay(url, { verifyEvent: (() => true) as never });
-  Object.assign(relay, { challenge: 'test-challenge' });
+  Object.assign(relay, {
+    challenge: 'test-challenge',
+    _connected: true,
+    connectionPromise: Promise.resolve(),
+  });
   jest.spyOn(relay, 'send').mockResolvedValue();
   jest.spyOn(relay, 'auth').mockResolvedValue('ok');
   jest.spyOn(pool, 'ensureRelay').mockResolvedValue(relay);

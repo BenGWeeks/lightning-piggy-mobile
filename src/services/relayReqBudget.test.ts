@@ -311,7 +311,11 @@ test('cancellation during AUTH prevents its eventual completion from opening a s
     ownRelays: [],
     sign: async (event) => finalizeEvent(event, secret),
   });
-  Object.assign(pool.relay, { auth, challenge: 'test-challenge' });
+  Object.assign(pool.relay, {
+    auth,
+    challenge: 'test-challenge',
+    connectionPromise: Promise.resolve(),
+  });
   const sub = pool.subscribeMap([{ url, filter: { kinds: [1], limit: 10 } }], {});
   await tick();
   const params = [...pool.active.values()][0];
