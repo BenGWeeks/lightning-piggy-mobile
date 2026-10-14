@@ -1,4 +1,4 @@
-import { admitUnfollowedOrder, isBoundedOrderRumor } from './orderRumorIngest';
+import { admitOrderLifecycle, admitUnfollowedOrder, isBoundedOrderRumor } from './orderRumorIngest';
 import { getAppFormatLocale } from '../utils/appFormatLocale';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
 import {
@@ -193,6 +193,17 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
         // the CHECK above so a newly-followed sender's wraps re-evaluate (#745).
         const showInMessages = passesFollowGate(partnership.partnerPubkey);
         const orderRumor = isBoundedOrderRumor(rumor);
+        if (
+          (rumor.kind === 16 || rumor.kind === 17) &&
+          (!orderRumor ||
+            !(await admitOrderLifecycle(
+              owner,
+              partnership.partnerPubkey,
+              partnership.fromMe,
+              rumor,
+            )))
+        )
+          return null;
         if (!showInMessages && !orderRumor) {
           if (skipKey) {
             skipSet.add(wrap.id);

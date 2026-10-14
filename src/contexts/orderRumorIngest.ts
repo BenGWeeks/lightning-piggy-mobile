@@ -1,4 +1,5 @@
-import { parseOrderEvent, type OrderEventInput } from '../utils/orderEvents';
+import { getOutgoingOrderRows } from '../services/dmDb';
+import { parseStoredOrder, parseOrderEvent, type OrderEventInput } from '../utils/orderEvents';
 
 // Only called on decoded NIP-17 rumors, never public kind-16/17 events.
 // Bound the unsolicited-order exception independently of ordinary DM policy.
@@ -35,4 +36,44 @@ export function admitUnfollowedOrder(owner: string, now = Date.now()): boolean {
   if (window.count >= ORDER_RUMOR_RATE_LIMIT) return false;
   window.count++;
   return true;
+}
+
+const droppedLifecycleCounts = new Map<string, number>();
+
+export function getDroppedOrderLifecycleCount(owner: string): number {
+  return droppedLifecycleCounts.get(owner) ?? 0;
+}
+
+/** Buyer lifecycle updates must come from the seller of an order we placed.
+ * Incoming type-1 orders still belong to the seller flow; our own echoes are
+ * locally authored. Apply this independently of follows and Messages policy. */
+export async function admitOrderLifecycle(
+  owner: string,
+  partner: string,
+  fromMe: boolean,
+  rumor: OrderEventInput,
+): Promise<boolean> {
+  const order = parseOrderEvent(rumor);
+  if (fromMe || order?.type === 'order') return true;
+  if (order) {
+    const placed = await getOutgoingOrderRows(owner, partner, [order.orderId]);
+    if (
+      placed.some((row) => {
+        const original = parseStoredOrder(row.content);
+        return (
+          row.fromMe &&
+          row.sender === owner &&
+          row.conversation === partner &&
+          original?.type === 'order' &&
+          original.orderId === order.orderId
+        );
+      })
+    )
+      return true;
+  }
+  if (droppedLifecycleCounts.size >= 8 && !droppedLifecycleCounts.has(owner)) {
+    droppedLifecycleCounts.delete(droppedLifecycleCounts.keys().next().value!);
+  }
+  droppedLifecycleCounts.set(owner, getDroppedOrderLifecycleCount(owner) + 1);
+  return false;
 }

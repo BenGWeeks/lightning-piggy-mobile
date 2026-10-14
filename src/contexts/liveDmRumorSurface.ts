@@ -1,4 +1,4 @@
-import { admitUnfollowedOrder, isBoundedOrderRumor } from './orderRumorIngest';
+import { admitOrderLifecycle, admitUnfollowedOrder, isBoundedOrderRumor } from './orderRumorIngest';
 import { gateLiveDm } from './liveDmFollowGateDecision';
 import { getAppFormatLocale } from '../utils/appFormatLocale';
 import { dmThreadId, MARMOT_WELCOME_KIND, protocolForWireKind } from '../utils/dmProtocol';
@@ -179,6 +179,20 @@ export function createLiveRumorSurfacer(
     }
 
     const orderRumor = isBoundedOrderRumor(rumor);
+    if (
+      (rumor.kind === 16 || rumor.kind === 17) &&
+      (!orderRumor ||
+        !(await admitOrderLifecycle(
+          viewerPubkey,
+          partnership.partnerPubkey,
+          partnership.fromMe,
+          rumor,
+        )))
+    ) {
+      nothingToSee();
+      return;
+    }
+    if (shouldAbort()) return;
     const showOrderInMessages =
       followPubkeysRef.current.has(partnership.partnerPubkey) || includeNonFollowOrders();
     if (
@@ -253,6 +267,9 @@ export function createLiveRumorSurfacer(
       // at-rest persistence (#850) — the plaintext inbox blob is retired.
       await upsertDmMessages([wrapRow]);
       knownWrapIds.add(wrapId);
+      // Conversation loaders read the store on this signal. Orders must
+      // refresh an open thread even when the Messages follow gate hides them.
+      if (orderRumor && !shouldAbort()) notifyDmMessage(partnership.partnerPubkey);
     });
     // Surface to the UI without awaiting the persist chain (#934 item 2) —
     // same reasoning as the kind-4 path. knownWrapIds was already
@@ -265,7 +282,7 @@ export function createLiveRumorSurfacer(
       return;
     }
     queueInboxEntry(inboxEntry);
-    notifyDmMessage(partnership.partnerPubkey);
+    if (!orderRumor) notifyDmMessage(partnership.partnerPubkey);
     // OS notification (#279) — only genuinely-fresh inbound (backlog has
     // old rumor timestamps and stays silent), never my own echo;
     // suppressed when the user is viewing this thread. claimWrapNotification

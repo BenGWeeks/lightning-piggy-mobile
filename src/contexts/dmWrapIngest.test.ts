@@ -22,7 +22,9 @@ jest.mock('../services/marmotWelcomeRouter', () => ({
 
 const mockSelectKnown = jest.fn();
 const mockUpsert = jest.fn();
+const mockOutgoingOrders = jest.fn();
 jest.mock('../services/dmDb', () => ({
+  getOutgoingOrderRows: (...args: unknown[]) => mockOutgoingOrders(...args),
   selectKnownEventIds: (...args: unknown[]) => mockSelectKnown(...args),
   upsertDmMessages: (...args: unknown[]) => mockUpsert(...args),
 }));
@@ -88,6 +90,24 @@ const rumorFrom = (partner: string, over: Partial<TestRumor> = {}): DecodedRumor
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockOutgoingOrders.mockImplementation(async (owner, seller, ids) => [
+    {
+      owner,
+      sender: owner,
+      conversation: seller,
+      fromMe: true,
+      content: serializeOrder(
+        parseOrderEvent({
+          kind: 16,
+          content: '',
+          tags: [
+            ['type', '1'],
+            ['order', ids[0]],
+          ],
+        })!,
+      ),
+    },
+  ]);
   mockSelectKnown.mockResolvedValue(new Set<string>());
   mockUpsert.mockResolvedValue(undefined);
   mockLoadSkipSet.mockResolvedValue(new Set<string>());
@@ -132,13 +152,18 @@ describe('dmWrapIngest.ingestInboxWraps', () => {
     // order-JSON blob (textForRumor returns order JSON for kind 16/17). The
     // stored row keeps the raw JSON so the thread renderer + dmInbox projection
     // re-derive from it.
-    const orderJson = JSON.stringify({
+    const orderRumor = {
+      ...rumorFrom(ALICE),
       kind: 16,
-      type: 'order',
-      orderId: 'abc-12345678',
-      amountSats: 21,
-    });
-    const unwrap = jest.fn(async () => rumorFrom(ALICE, { kind: 16, content: orderJson }));
+      content: '',
+      tags: [
+        ['type', '1'],
+        ['order', 'abc-12345678'],
+        ['amount', '21'],
+      ],
+    };
+    const orderJson = serializeOrder(parseOrderEvent(orderRumor)!);
+    const unwrap = jest.fn(async () => orderRumor);
     const res = await ingestInboxWraps({
       owner: OWNER,
       wraps: [wrap('o1')],
@@ -157,7 +182,7 @@ describe('dmWrapIngest.ingestInboxWraps', () => {
     expect(rows[0].wireKind).toBe(16);
   });
 
-  it('does not carry raw content for a kind-16 that is not a parseable order', async () => {
+  it('drops a kind-16 that is not a parseable order before storage or inbox projection', async () => {
     // textForRumor falls back to rumor.content for a non-order kind-16 (e.g. a
     // repost or malformed payload); that raw text must not become renderText.
     const raw = 'nostr+walletconnect://relay?secret=cafebabe';
@@ -168,8 +193,9 @@ describe('dmWrapIngest.ingestInboxWraps', () => {
       unwrap,
       passesFollowGate: () => true,
     });
-    expect(res.entries[0]).not.toHaveProperty('renderText');
-    expect(res.entries[0].text).not.toContain('cafebabe');
+    expect(res.entries).toEqual([]);
+    expect(res.stored).toBe(0);
+    expect(mockUpsert).not.toHaveBeenCalled();
   });
 
   it('never carries an NWC wallet-share secret into the inbox entry as renderText', async () => {
@@ -189,6 +215,24 @@ describe('dmWrapIngest.ingestInboxWraps', () => {
   });
 
   it('skips decrypt for DB-known wraps (decrypt-once) and reports them', async () => {
+    mockOutgoingOrders.mockImplementation(async (owner, seller, ids) => [
+      {
+        owner,
+        sender: owner,
+        conversation: seller,
+        fromMe: true,
+        content: serializeOrder(
+          parseOrderEvent({
+            kind: 16,
+            content: '',
+            tags: [
+              ['type', '1'],
+              ['order', ids[0]],
+            ],
+          })!,
+        ),
+      },
+    ]);
     mockSelectKnown.mockResolvedValue(new Set(['w1']));
     const unwrap = jest.fn(async () => rumorFrom(ALICE));
     const res = await ingestInboxWraps({
@@ -474,3 +518,19 @@ it('does not exempt oversized orders or reposts from the free-text follow gate',
   expect(result.stored).toBe(0);
   expect(result.entries).toEqual([]);
 });
+
+it.each([false, true])(
+  'drops unsolicited backfill lifecycle events with Messages allowed=%s',
+  async (allowed) => {
+    mockOutgoingOrders.mockResolvedValue([]);
+    const result = await ingestInboxWraps({
+      owner: OWNER,
+      wraps: [wrap('stranger-invoice')],
+      unwrap: () => sellerInvoice,
+      passesFollowGate: () => allowed,
+    });
+    expect(result.stored).toBe(0);
+    expect(mockUpsert).not.toHaveBeenCalled();
+    expect(result.entries).toEqual([]);
+  },
+);
