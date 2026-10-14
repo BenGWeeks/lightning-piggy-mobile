@@ -2715,6 +2715,33 @@
       "youMightLike": "猜你喜欢",
       "seeAll": "查看全部",
       "seeAllAccessibility": "查看 {{seller}} 的全部商品"
+    },
+    "like": {
+      "like": "喜欢",
+      "unlike": "取消喜欢",
+      "likeFailed": "无法喜欢此商品 — 请检查网络连接后重试。",
+      "unlikeFailed": "无法取消喜欢 — 请检查网络连接后重试。"
+    },
+    "share": {
+      "share": "分享",
+      "title": "分享此商品",
+      "sendToFriend": "发送给好友",
+      "shareLink": "分享链接",
+      "pickerTitle": "发送给好友",
+      "pickerSubtitle": "对方将以私信形式收到。",
+      "sentTo": "已发送给 {{name}}",
+      "sendFailed": "无法发送此商品",
+      "sharedItem": "分享的商品"
+    },
+    "liked": {
+      "title": "喜欢的商品",
+      "openAccessibility": "打开我喜欢的商品",
+      "back": "返回市场",
+      "empty": "你喜欢的商品会显示在这里。点按任意商品上的爱心即可收藏。",
+      "loading": "正在加载你喜欢的商品…",
+      "loadFailed": "无法加载你喜欢的商品 — 下拉即可重试。",
+      "signedOut": "使用 Nostr 登录以查看你喜欢的商品。",
+      "signIn": "登录"
     }
   },
   "dmProtocol": {

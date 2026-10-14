@@ -37,6 +37,8 @@ interface Props {
   /** The seller publishes no usable shipping info (Ships-to filter): show
    * "Shipping: ask the seller". */
   shippingUnknown?: boolean;
+  /** Chat embeds require explicit consent for untrusted remote images. */
+  autoLoadMedia?: boolean;
 }
 
 /**
@@ -53,6 +55,7 @@ const MarketProductCard: React.FC<Props> = ({
   variant,
   testID,
   shippingUnknown = false,
+  autoLoadMedia = true,
 }) => {
   // Shares the avatar's in-flight lookup and kind-0 cache; no extra relay query.
   const sellerProfile = usePubkeyProfile(product.listing?.event.pubkey ?? null);
@@ -71,6 +74,8 @@ const MarketProductCard: React.FC<Props> = ({
   );
   // Fall back to a branded placeholder tile if the image 404s / dead host.
   const [imageFailed, setImageFailed] = useState(false);
+  const [revealedImage, setRevealedImage] = useState<string | null>(null);
+  const canLoadImage = autoLoadMedia || revealedImage === product.image;
   const hasImage = product.image.length > 0 && !imageFailed;
 
   const isGrid = variant === 'grid';
@@ -79,7 +84,20 @@ const MarketProductCard: React.FC<Props> = ({
 
   const image = (
     <View style={isGrid ? styles.gridImageWrap : styles.imageWrap}>
-      {hasImage ? (
+      {hasImage && !canLoadImage ? (
+        <TouchableOpacity
+          style={styles.imageFallback}
+          onPress={(event) => {
+            event.stopPropagation();
+            setRevealedImage(product.image);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel={t('messageBubble.tapToLoadImage')}
+          testID={testID ? `${testID}-load-image` : undefined}
+        >
+          <Text style={styles.description}>{t('messageBubble.tapToLoadImage')}</Text>
+        </TouchableOpacity>
+      ) : hasImage ? (
         <Image
           source={{ uri: product.image }}
           style={styles.image}

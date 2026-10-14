@@ -12,7 +12,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { ChevronLeft, Search, SlidersHorizontal, Store, X } from 'lucide-react-native';
+import { ChevronLeft, Heart, Search, SlidersHorizontal, Store, X } from 'lucide-react-native';
 import MarketProductCard from '../components/MarketProductCard';
 import MarketFilterBar from '../components/MarketFilterBar';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -256,6 +256,14 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
             <ChevronLeft size={24} color={colors.white} strokeWidth={2.5} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>{t('market.screen.title')}</Text>
+          <TouchableOpacity
+            onPress={() => navigation.navigate('MarketLikedItems')}
+            accessibilityLabel={t('market.liked.openAccessibility')}
+            testID="market-liked-items-button"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Heart size={24} color={colors.white} strokeWidth={2.25} />
+          </TouchableOpacity>
           {/* Seller side (#1273): set up a shop and list your own items. */}
           <TouchableOpacity
             onPress={() => navigation.navigate('MarketMyShop')}

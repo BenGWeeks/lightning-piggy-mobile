@@ -1,5 +1,6 @@
 import React from 'react';
 import { render } from '@testing-library/react-native';
+import { Image } from 'expo-image';
 import MarketProductCard from './MarketProductCard';
 import { MARKET_PRODUCTS } from '../data/marketProducts';
 jest.mock('../contexts/ThemeContext', () => ({ useThemeColors: () => ({}) }));
@@ -44,4 +45,22 @@ it('prefers the kind-0 seller identity in the visible card and accessibility lab
     />,
   );
   expect(h.getByText('Fallback shop')).toBeTruthy();
+});
+
+it('auto-loads a shared listing image with the existing disk cache', () => {
+  const product = { ...MARKET_PRODUCTS[0], image: 'https://seller.example/photo.jpg' };
+  const h = render(
+    <MarketProductCard
+      product={product}
+      sellerName="Shop"
+      variant="list"
+      onPress={jest.fn()}
+      testID="product"
+      autoLoadMedia={true}
+    />,
+  );
+  expect(h.queryByTestId('product-load-image')).toBeNull();
+  const image = h.UNSAFE_getByType(Image);
+  expect(image.props.source.uri).toBe(product.image);
+  expect(image.props.cachePolicy).toBe('memory-disk');
 });

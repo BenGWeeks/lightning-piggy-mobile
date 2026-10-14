@@ -2715,6 +2715,33 @@
       "youMightLike": "Das könnte dir gefallen",
       "seeAll": "Alle anzeigen",
       "seeAllAccessibility": "Alle Angebote von {{seller}} anzeigen"
+    },
+    "like": {
+      "like": "Gefällt mir",
+      "unlike": "Gefällt mir nicht mehr",
+      "likeFailed": "Konnte diesen Artikel nicht liken – prüfe deine Verbindung und versuche es erneut.",
+      "unlikeFailed": "Konnte das Like nicht entfernen – prüfe deine Verbindung und versuche es erneut."
+    },
+    "share": {
+      "share": "Teilen",
+      "title": "Diesen Artikel teilen",
+      "sendToFriend": "An einen Freund senden",
+      "shareLink": "Link teilen",
+      "pickerTitle": "An einen Freund senden",
+      "pickerSubtitle": "Er bekommt ihn als private Nachricht.",
+      "sentTo": "An {{name}} gesendet",
+      "sendFailed": "Konnte diesen Artikel nicht senden",
+      "sharedItem": "Geteilter Artikel"
+    },
+    "liked": {
+      "title": "Gelikte Artikel",
+      "openAccessibility": "Meine gelikten Artikel öffnen",
+      "back": "Zurück zum Markt",
+      "empty": "Artikel, die dir gefallen, erscheinen hier. Tippe bei einem Produkt auf das Herz, um es zu speichern.",
+      "loading": "Deine gelikten Artikel werden geladen…",
+      "loadFailed": "Deine gelikten Artikel konnten nicht geladen werden – zum Aktualisieren nach unten ziehen.",
+      "signedOut": "Melde dich mit Nostr an, um deine gelikten Artikel zu sehen.",
+      "signIn": "Anmelden"
     }
   },
   "dmProtocol": {

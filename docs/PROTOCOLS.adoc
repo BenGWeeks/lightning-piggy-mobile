@@ -425,9 +425,12 @@ The Market (Explore → Market) reads and publishes the https://github.com/Gamma
 | 30406 | Shipping option | Read (any seller's, to price shipping on the product page) and written (one per zone; worldwide omits `country`).
 | 31555 | Product review | Read and written; `d` = `a:30402:<seller>:<d>`, ratings stored 0–1.
 | 1111 | NIP-22 comment | Read and written, rooted on the product (`A` / `K` / `P` root tags, lowercase parent tags).
-| 5 | NIP-09 deletion | Written for your own listings, zones, comments and reviews (`a` + `e` + `k`); read so a seller's or author's deletions hide what they deleted. Only the original author's deletion counts.
+| 7 | NIP-25 like | *Like* on a product page publishes a public kind 7, content `+`, with `e` (listing id + relay hint), `p` (seller), `a` (`30402:<seller>:<d>` + relay hint) and `k` `30402`, to your write relays plus the Market relays. Read by `#a` for the like count (one per person; `+`, empty, or a heart / thumbs-up count as likes) and by `authors` = you + `#k` `30402` for *Liked items*. Never sent inside DMs.
+| 5 | NIP-09 deletion | Written for your own listings, zones, comments and reviews (`a` + `e` + `k`), and to *Unlike* (`e` = your reaction, `k` `7`); read so a seller's or author's deletions hide what they deleted. Only the original author's deletion counts.
 | 16 / 17 | Order messages / payment receipt | The buyer gift-wraps (NIP-17) a kind-16 `type 1` order; payment requests (`type 2`), status (`3`) and shipping (`4`) updates and the kind-17 receipt render in the conversation. A kind 16 without the `order` + `type` pair is a NIP-18 repost, not an order.
 |===
+
+*Sharing* a product sends its title plus a `nostr:naddr1…` reference (Market relays as hints): to a friend as a NIP-17 DM, which the chat renders as the product card, or through the OS share sheet. There's no web link: the website has no per-product pages for Nostr listings yet, and njump isn't used.
 
 Edits republish under the same `d` with a strictly newer `created_at` and keep tags we don't manage. Not implemented yet: order handling for your own listings (#1290), checkout for every live Gamma listing (#1291), drafts and variants (#1293).
 

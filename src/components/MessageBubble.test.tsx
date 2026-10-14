@@ -2,6 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import MessageBubble from './MessageBubble';
+import DecryptedImage from './DecryptedImage';
 import { parseFileAttachment } from '../utils/fileAttachment';
 import type { BubbleContent } from '../utils/messageContent';
 import { resolveRemoteMedia } from '../services/remoteMediaCache';
@@ -17,7 +18,25 @@ jest.mock('../contexts/LocaleContext', () => ({
   useTranslation: () => (key: string) => key,
 }));
 jest.mock('../services/boltzService', () => ({ isBitcoinAddress: () => false }));
-jest.mock('./LinkifiedText', () => ({ LinkifiedText: () => null }));
+jest.mock('./LinkifiedText', () => ({
+  LinkifiedText: ({ text }: { text: string }) =>
+    jest.requireActual('react').createElement(jest.requireActual('react-native').Text, null, text),
+}));
+jest.mock('./nostr/EmbeddedEventCard', () => ({
+  __esModule: true,
+  default: ({
+    token,
+    autoLoadMedia,
+  }: {
+    token: { identifier: string; relays: string[] };
+    autoLoadMedia: boolean;
+  }) =>
+    jest.requireActual('react').createElement(jest.requireActual('react-native').View, {
+      testID: `listing-${token.identifier}`,
+      autoLoadMedia,
+      relays: token.relays,
+    }),
+}));
 jest.mock('./LibreMiniMap', () => () => null);
 jest.mock('./MessageLinkPreview', () => () => null);
 jest.mock('./MessageInvoiceActions', () => () => null);
@@ -169,4 +188,54 @@ test('an unfollowed sender GIF waits for the placeholder tap before downloading'
   await act(async () => {});
   fireEvent.press(ui.getByTestId('conversation-gif-msg'));
   expect(openFullscreen).toHaveBeenCalledWith('file:///cache/animation.gif');
+});
+
+test.each([true, false])(
+  'shared listings always load images but gate relay hints (sender trust=%s)',
+  (autoLoadMedia) => {
+    const { naddrEncode } = jest.requireActual('nostr-tools/nip19');
+    const hints = ['wss://sender-hint.example'];
+    const ref = (identifier: string) =>
+      naddrEncode({
+        kind: 30402,
+        pubkey: 'a'.repeat(64),
+        identifier,
+        relays: hints,
+      });
+    const ui = render(
+      <MessageBubble
+        {...props}
+        autoLoadMedia={autoLoadMedia}
+        content={{
+          kind: 'text',
+          text: `Scam warning\nSender title\nnostr:${ref('first')}\nDo not buy\nnostr:${ref('second')}\nAfterword`,
+        }}
+      />,
+    );
+    expect(ui.getByText('Scam warning\nSender title')).toBeTruthy();
+    expect(ui.getByText('Do not buy')).toBeTruthy();
+    expect(ui.getByText('Afterword')).toBeTruthy();
+    expect(ui.getByTestId('listing-first').props.autoLoadMedia).toBe(true);
+    expect(ui.getByTestId('listing-second').props.autoLoadMedia).toBe(true);
+    expect(ui.getByTestId('listing-first').props.relays).toEqual(autoLoadMedia ? hints : []);
+    expect(ui.getByTestId('listing-second').props.relays).toEqual(autoLoadMedia ? hints : []);
+  },
+);
+
+test('an unfollowed sender photo waits for a tap before mounting the image loader', async () => {
+  const ui = render(
+    <MessageBubble
+      {...props}
+      fromMe={false}
+      autoLoadMedia={false}
+      content={{ kind: 'text', text: 'https://example.com/photo.png' }}
+    />,
+  );
+  await act(async () => {});
+  expect(ui.getByTestId('conversation-image-placeholder-msg')).toBeTruthy();
+  expect(ui.UNSAFE_queryByType(DecryptedImage)).toBeNull();
+  expect(resolveRemoteMedia).not.toHaveBeenCalled();
+  fireEvent.press(ui.getByTestId('conversation-image-msg'));
+  expect(ui.queryByTestId('conversation-image-placeholder-msg')).toBeNull();
+  expect(ui.UNSAFE_getByType(DecryptedImage).props.url).toBe('https://example.com/photo.png');
 });

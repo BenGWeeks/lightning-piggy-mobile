@@ -2731,6 +2731,33 @@
       "youMightLike": "Może ci się spodobać",
       "seeAll": "Zobacz wszystkie",
       "seeAllAccessibility": "Zobacz wszystkie oferty od {{seller}}"
+    },
+    "like": {
+      "like": "Lubię to",
+      "unlike": "Nie lubię już",
+      "likeFailed": "Nie udało się polubić tego produktu — sprawdź połączenie i spróbuj ponownie.",
+      "unlikeFailed": "Nie udało się cofnąć polubienia — sprawdź połączenie i spróbuj ponownie."
+    },
+    "share": {
+      "share": "Udostępnij",
+      "title": "Udostępnij ten produkt",
+      "sendToFriend": "Wyślij znajomemu",
+      "shareLink": "Udostępnij link",
+      "pickerTitle": "Wyślij znajomemu",
+      "pickerSubtitle": "Otrzyma go jako prywatną wiadomość.",
+      "sentTo": "Wysłano do: {{name}}",
+      "sendFailed": "Nie udało się wysłać tego produktu",
+      "sharedItem": "Udostępniony produkt"
+    },
+    "liked": {
+      "title": "Polubione produkty",
+      "openAccessibility": "Otwórz moje polubione produkty",
+      "back": "Wróć do targu",
+      "empty": "Tutaj pojawią się produkty, które polubisz. Dotknij serca przy dowolnym produkcie, aby go zapisać.",
+      "loading": "Wczytywanie polubionych produktów…",
+      "loadFailed": "Nie udało się wczytać polubionych produktów — przeciągnij w dół, aby spróbować ponownie.",
+      "signedOut": "Zaloguj się przez Nostr, aby zobaczyć polubione produkty.",
+      "signIn": "Zaloguj się"
     }
   },
   "dmProtocol": {

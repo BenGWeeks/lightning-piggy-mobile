@@ -61,11 +61,23 @@ export function buildReactionEvent(
   targetEventId: string,
   targetAuthorPubkey: string,
   targetEventKind?: number,
+  /**
+   * For an addressable target (e.g. a kind-30402 Market listing): its
+   * `<kind>:<pubkey>:<d>` coordinate goes in an `a` tag so the like survives
+   * the listing being edited (a new revision = a new event id). `relayHint`
+   * is added to the `e` and `a` tags, per NIP-25. Never used for DMs — DM
+   * reactions are not public and target the rumor id only.
+   */
+  address?: { coordinate: string; relayHint?: string },
 ): ReactionEventInput {
+  const hint = address?.relayHint;
   const tags: string[][] = [
-    ['e', targetEventId],
+    hint ? ['e', targetEventId, hint] : ['e', targetEventId],
     ['p', targetAuthorPubkey.toLowerCase()],
   ];
+  if (address) {
+    tags.push(hint ? ['a', address.coordinate, hint] : ['a', address.coordinate]);
+  }
   if (typeof targetEventKind === 'number') {
     tags.push(['k', String(targetEventKind)]);
   }

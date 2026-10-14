@@ -1,0 +1,84 @@
+// Sharing a Market listing (#1541) — pure helpers, no I/O.
+//
+// Both share paths carry the listing as a NIP-21 `nostr:naddr1…` reference
+// (kind 30402 + seller + `d`, with Market relay hints), which other Nostr
+// clients resolve and Lightning Piggy's chat renders as a product card.
+//
+// Why not a web link: the Lightning Piggy website has no per-product pages
+// for Nostr listings (its `/market/p/<slug>` pages are still in an open PR,
+// slug-based and build-time only — no naddr route; checked against the live
+// site, 2026-10-14). njump is never used — it's slow and often broken. When
+// the website gains an naddr route, add it to `listingShareContent` here.
+import * as nip19 from 'nostr-tools/nip19';
+import type { Event } from 'nostr-tools';
+import { decodeNostrEntity, type NostrContentToken } from './nip27';
+import { MARKET_RELAYS } from './marketListingsQuery';
+import { LISTING_KIND } from './marketLikes';
+
+type AddressRef = Extract<NostrContentToken, { type: 'address' }>;
+const SHARE_LINE = /^nostr:naddr1[0-9a-z]+$/;
+
+/** `naddr1…` for a kind-30402 listing, with the Market relays as hints; null otherwise. */
+export function listingNaddr(event: Pick<Event, 'kind' | 'pubkey' | 'tags'>): string | null {
+  if (event.kind !== LISTING_KIND) return null;
+  const identifier = event.tags.find((t) => t[0] === 'd')?.[1];
+  if (!identifier) return null;
+  try {
+    return nip19.naddrEncode({
+      kind: event.kind,
+      pubkey: event.pubkey,
+      identifier,
+      relays: MARKET_RELAYS,
+    });
+  } catch {
+    // An identifier over 255 bytes can't be TLV-encoded.
+    return null;
+  }
+}
+
+/**
+ * What both share paths send: the listing title on the first line (readable
+ * in any client) and the `nostr:naddr1…` reference alone on the second — the
+ * shape `extractSharedListing` recognises as a product card.
+ */
+export function listingShareContent(
+  title: string,
+  naddr: string,
+): { message: string; uri: string } {
+  const uri = `nostr:${naddr}`;
+  const label = title.replace(/\s+/g, ' ').trim();
+  return { message: label && !SHARE_LINE.test(label) ? `${label}\n${uri}` : uri, uri };
+}
+
+/**
+ * A shared listing in a DM: a line that is only a `nostr:naddr1…` reference
+ * to a kind-30402 listing. A reference inside a sentence stays text.
+ */
+export function extractSharedListing(text: string): AddressRef | null {
+  if (!text || !text.includes('naddr1')) return null;
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (!SHARE_LINE.test(line)) continue;
+    const ref = decodeNostrEntity(line);
+    if (ref?.type === 'address' && ref.kind === LISTING_KIND) return ref;
+  }
+  return null;
+}
+
+/** Preserve all sender text and listing references in their original order. */
+export function sharedListingParts(text: string): (string | AddressRef)[] {
+  const parts: (string | AddressRef)[] = [];
+  let lines: string[] = [];
+  for (const line of text.split('\n')) {
+    const ref = extractSharedListing(line);
+    if (ref) {
+      if (lines.length) parts.push(lines.join('\n'));
+      lines = [];
+      parts.push(ref);
+    } else {
+      lines.push(line);
+    }
+  }
+  if (lines.length) parts.push(lines.join('\n'));
+  return parts;
+}
