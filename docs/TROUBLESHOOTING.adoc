@@ -1109,9 +1109,12 @@ If one installation logs several joins for the same group ("ghost leaves"),
 compare the stored Welcome commit fingerprints. Inviters send a separate
 rumor for each slot, but the MLS Welcome can be identical and contain the
 secret for this install in every copy. Rumor-id dedupe alone therefore cannot
-prevent rejoining. Welcome adoption is serialized and checks decrypted group
-identity before joining, ignoring extra Welcomes without overwriting local
-membership. The stack's SelfRemove operates on its tracked membership; it
+prevent rejoining. Welcome adoption is serialized, and a copy whose commit
+fingerprint (sha256 of the encrypted GroupInfo) matches a group this session
+already joined is ignored without any MLS work — `readInviteGroupInfo` is a
+full `joinGroup` in marmot-ts, so it is never run ahead of a join. A copy from
+a later commit still fails inside the library ("already exists") and is then
+recorded as joined. The stack's SelfRemove operates on its tracked membership; it
 cannot safely remove an extra leaf without first overwriting that membership.
 Account removal waits for pending key publication, requests deletion, and
 publishes an empty replacement for each local slot before wiping local state.

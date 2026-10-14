@@ -59,18 +59,24 @@ it('four concurrent Welcomes for locally held slots create only one membership',
     // Freeze rotation to isolate Welcome handling from the lifecycle fix.
     jest.spyOn(receiver.session, 'ensureKeyPackage').mockResolvedValue();
     const join = jest.spyOn(client, 'joinGroupFromWelcome');
+    // readInviteGroupInfo is a full ts-mls join in marmot-ts, not a peek:
+    // the duplicate check must not run MLS crypto before (or instead of) the
+    // one real join — one Welcome must cost one join on the JS thread.
+    const peek = jest.spyOn(client, 'readInviteGroupInfo');
     const group = await inviter.session.createGroup('Ghost leaves', [receiver.pubkey]);
     const welcomes = unwrapWelcomes(relay, receiver);
     expect(welcomes).toHaveLength(4);
     const results = await Promise.all(welcomes.map((w) => receiver.session.acceptWelcome(w)));
     expect(results.filter(Boolean)).toHaveLength(1);
     expect(join).toHaveBeenCalledTimes(1);
+    expect(peek).not.toHaveBeenCalled();
     expect(receiver.session.listGroups()).toHaveLength(1);
     expect(receiver.session.listGroups()[0].id).toBe(group.id);
     expect(await receiver.backend.keys('pendingWelcomes')).toEqual([]);
     // Re-delivery after the first join must also bypass the library join.
     await Promise.all(welcomes.map((w) => receiver.session.acceptWelcome(w)));
     expect(join).toHaveBeenCalledTimes(1);
+    expect(peek).not.toHaveBeenCalled();
   } finally {
     inviter.session.stop();
     receiver.session.stop();
@@ -90,6 +96,7 @@ it('the same Welcome delivered twice at once joins once and both callers see the
     jest.spyOn(receiver.session, 'ensureKeyPackage').mockResolvedValue();
     const client = (receiver.session as unknown as { client: MarmotClient }).client;
     const join = jest.spyOn(client, 'joinGroupFromWelcome');
+    const peek = jest.spyOn(client, 'readInviteGroupInfo');
     const group = await inviter.session.createGroup('Twice', [receiver.pubkey]);
     const [welcome] = unwrapWelcomes(relay, receiver);
     const results = await Promise.all([
@@ -97,6 +104,7 @@ it('the same Welcome delivered twice at once joins once and both callers see the
       receiver.session.acceptWelcome(welcome),
     ]);
     expect(join).toHaveBeenCalledTimes(1);
+    expect(peek).not.toHaveBeenCalled();
     expect(results.map((r) => r?.id)).toEqual([group.id, group.id]);
     expect(receiver.session.listGroups()).toHaveLength(1);
   } finally {
@@ -126,9 +134,11 @@ it('copies addressed to sibling installs cannot rejoin using our one matching se
     const welcomes = unwrapWelcomes(relay, receiver);
     expect(welcomes).toHaveLength(4);
     expect(new Set(welcomes.map((w) => w.content)).size).toBe(1);
+    const peek = jest.spyOn(client, 'readInviteGroupInfo');
     const results = await Promise.all(welcomes.map((w) => receiver.session.acceptWelcome(w)));
     expect(results.filter(Boolean)).toHaveLength(1);
     expect(join).toHaveBeenCalledTimes(1);
+    expect(peek).not.toHaveBeenCalled();
   } finally {
     installs.forEach((p) => p.session.stop());
   }

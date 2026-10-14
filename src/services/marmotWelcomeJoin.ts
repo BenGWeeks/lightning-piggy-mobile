@@ -3,10 +3,17 @@
 // group its registry already tracks ("already exists") — but only once the
 // first join has been tracked, so concurrent joins of several Welcomes for
 // one group all passed that check and the last one overwrote the membership
-// (#1426's ghost leaves). Joining one at a time closes the race; checking
-// the decrypted group id first skips the doomed MLS join. The library's leave
-// API operates on tracked state, so joining an extra leaf to SelfRemove it
-// would overwrite the membership we are protecting. Ignore the extra Welcome.
+// (#1426's ghost leaves). Joining one at a time closes the race. The library's
+// leave API operates on tracked state, so joining an extra leaf to SelfRemove
+// it would overwrite the membership we are protecting. Ignore the extra Welcome.
+//
+// Duplicates are recognised WITHOUT crypto: the inviter sends one Welcome per
+// invited key package, but every copy from one commit carries the same
+// encrypted GroupInfo, so its sha256 (welcomeCommitFingerprint) identifies the
+// group we joined from it. `readInviteGroupInfo` is not a cheap peek — in
+// marmot-ts it runs the full ts-mls `joinGroup` — so it is never used ahead
+// of a join; a Welcome from a later commit for a group we hold still fails
+// inside the library ("already exists") and is classified in the catch path.
 import type { MarmotClient, MarmotGroup, GroupRumorHistory } from '@internet-privacy/marmot-ts';
 
 import type { MarmotRumor } from './marmotSession';
@@ -17,6 +24,7 @@ import {
   countWelcomeAttempt,
   forgetWelcomeAttempts,
   permanentFailureOutcome,
+  welcomeCommitFingerprint,
   WELCOME_OUTCOMES_NS,
   type KeyPackageLookup,
   type WelcomeOutcome,
@@ -34,7 +42,21 @@ interface WelcomeJoinOptions {
 export class MarmotWelcomeJoin {
   private tail: Promise<unknown> = Promise.resolve();
   private readonly joining = new Map<string, Promise<MarmotGroup<GroupRumorHistory> | null>>();
+  /** Welcome commit fingerprint → group id joined from it (this session). */
+  private readonly joinedCommits = new Map<string, string>();
   constructor(private readonly options: WelcomeJoinOptions) {}
+
+  /** Cheap duplicate check: a copy of a Welcome whose group we already hold. */
+  private joinedFromSameCommit(welcomeRumor: MarmotRumor): boolean {
+    const commit = welcomeCommitFingerprint(welcomeRumor);
+    const idHex = commit && this.joinedCommits.get(commit);
+    return !!idHex && this.options.client.groups.loaded.some((g) => g.idStr === idHex);
+  }
+
+  private rememberJoined(welcomeRumor: MarmotRumor, idHex: string): void {
+    const commit = welcomeCommitFingerprint(welcomeRumor);
+    if (commit) this.joinedCommits.set(commit, idHex);
+  }
 
   accept(welcomeRumor: MarmotRumor): Promise<MarmotGroup<GroupRumorHistory> | null> {
     const id = welcomeRumor.id;
@@ -77,13 +99,13 @@ export class MarmotWelcomeJoin {
       // (marmotPendingWelcomes).
       await this.options.backend.set('pendingWelcomes', id, JSON.stringify(welcomeRumor));
       if (this.options.stopped()) return null;
-      if (await isWelcomeForJoinedGroup(this.options.client, welcomeRumor)) {
+      if (this.joinedFromSameCommit(welcomeRumor)) {
         await markHandled(buildWelcomeOutcome(welcomeRumor, 'joined'));
         if (__DEV__) console.log('[Marmot] ignored duplicate group Welcome');
         return null;
       }
-      if (this.options.stopped()) return null;
       const { group } = await this.options.client.joinGroupFromWelcome({ welcomeRumor });
+      this.rememberJoined(welcomeRumor, group.idStr);
       this.options.onJoined(); // the key is spent, even if outcome persistence fails
       await markHandled(buildWelcomeOutcome(welcomeRumor, 'joined'));
       if (__DEV__) console.log(`[Marmot] joined ${group.idStr.slice(0, 8)} from welcome`);
