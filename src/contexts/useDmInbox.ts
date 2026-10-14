@@ -902,19 +902,10 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
   //     broadcast to `dmMessageListeners` so an open
   //     ConversationScreen for that peer re-fetches.
   //
-  // Follow gate: matches `refreshDmInbox`'s default — non-followed
-  // sender wraps are decrypted (so we can group-route them) but NOT
-  // cached or surfaced to dmInbox state. The dev-mode "All (dev)"
-  // toggle still relies on the next pull-to-refresh to surface
-  // unfollowed live wraps; live delivery for that view is a
-  // follow-up. Rationale: storing unfollowed plaintext on disk
-  // violates the "B1 — never cache rumors from non-followed senders"
-  // invariant in `refreshDmInbox`.
-  //
-  // Store upserts + inbox-blob writes go through a serial queue to
-  // avoid racing with `refreshDmInbox` (both touch the same inbox
-  // summary blob). The queue is per-effect-instance; the
-  // single-flight guard in `refreshDmInbox` serialises on its side.
+  // Non-followed free text retains the follow gate. Bounded NIP-17 order
+  // rumors persist for Orders regardless of Messages policy; their inbox
+  // entries and alerts use the latest include-non-follows view setting.
+  // Store writes run through the subscription's serial queue.
   useEffect(() => {
     if (!isLoggedIn || !pubkey || !signerType) return;
     // Keep the gift-wrap inbox armed throughout the signed-in session.
@@ -938,6 +929,9 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       setDmInbox: inboxSetterFor(pubkey),
       setAmberNip44Permission,
       followGateBuffer: followGateBufferRef.current,
+      includeNonFollowOrders: () =>
+        dmInboxLastRefresh.current.pubkey === pubkey &&
+        dmInboxLastRefresh.current.includeNonFollows,
       setDeferredReplay,
       // Close the reconnect blind window (#1035): after a JS-sub socket-drop
       // or Doze-resume re-arm — or the native engine's relay reconnect

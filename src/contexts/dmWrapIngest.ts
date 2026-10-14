@@ -1,3 +1,4 @@
+import { admitUnfollowedOrder, isBoundedOrderRumor } from './orderRumorIngest';
 import { getAppFormatLocale } from '../utils/appFormatLocale';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
 import {
@@ -89,7 +90,8 @@ const isPermissionNotGranted = (error: unknown): boolean => {
 /**
  * Decrypt-once ingest of kind-1059 inbox wraps into the encrypted DM store.
  * Order of gates per wrap: DB known-id (inside ingestWraps) → skip-set →
- * decrypt → Welcome-route → group-route → follow-gate. Group-routed and non-followed rumors
+ * decrypt → Welcome-route → group-route → order-store exception → follow-gate.
+ * Group-routed and non-followed free-text rumors
  * are added to the skip-set exactly as before (#743). An aborted run PERSISTS
  * the DM rows it already decrypted (idempotent + owner-keyed, so a cut-short
  * post-login rebuild isn't wasted — F1/#849), but suppresses skip-set growth
@@ -184,16 +186,23 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
         }
         const partnership = partnerFromRumor(rumor, owner);
         if (!partnership) return null;
-        // B1 — drop non-follows at the data layer (parental control). A
+        // B1 — free-text non-follows stay gated. Valid bounded orders
+        // persist independently for Orders, but Messages keeps the gate. A
         // successful decrypt with no stored row goes to the skip-set so the
         // next refresh doesn't re-pay it; pull-to-refresh (force) bypasses
         // the CHECK above so a newly-followed sender's wraps re-evaluate (#745).
-        if (!passesFollowGate(partnership.partnerPubkey)) {
+        const showInMessages = passesFollowGate(partnership.partnerPubkey);
+        const orderRumor = isBoundedOrderRumor(rumor);
+        if (!showInMessages && !orderRumor) {
           if (skipKey) {
             skipSet.add(wrap.id);
             skipSetDirty = true;
           }
           return null;
+        }
+        const followed = params.isFollowed?.(partnership.partnerPubkey) ?? showInMessages;
+        if (!followed && (rumor.kind === 16 || rumor.kind === 17)) {
+          if (!orderRumor || !admitUnfollowedOrder(owner)) return null;
         }
         const text = textForRumor(rumor);
         // For a structured rumor (order kind 16/17, or an NWC wallet share) the
@@ -219,37 +228,38 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
         } catch {
           rumorId = undefined;
         }
-        entries.push({
-          id: wrap.id,
-          partnerPubkey: partnership.partnerPubkey,
-          fromMe: partnership.fromMe,
-          createdAt: rumor.created_at,
-          text: preview,
-          // Raw render content (order JSON for kind 16/17, else plaintext) so the
-          // conversation thread renders a freshly-decrypted order as its card on
-          // the FIRST open — `text` above is the inbox-list preview, which the
-          // card renderer can't parse (#market). ONLY for order kinds: an NWC
-          // wallet-share rumor's raw text is a bearer connection string that
-          // `preview` deliberately redacts, and DmInboxEntry reaches every
-          // inbox consumer — that secret stays in the encrypted store only
-          // (the thread re-derives it from the stored row). Gated on the
-          // content actually being canonical order JSON: `textForRumor` falls
-          // back to the raw `rumor.content` for a kind-16/17 that is NOT a
-          // parseable order (a repost, a malformed payload), and that raw text
-          // must stay redacted here too. A plain DM's preview IS its render
-          // text, so `renderText ?? text` covers it.
-          ...(((rumor.kind === 16 || rumor.kind === 17) &&
-            text !== preview &&
-            parseStoredOrder(text) !== null) ||
-          // A live-location marker (#1300): its preview is a label, and the
-          // thread / Full Map need the marker (its update key is meant for
-          // this recipient — it's no bearer secret like a wallet share's).
-          liveMarkerPhaseOf(text)
-            ? { renderText: text }
-            : {}),
-          wireKind: rumor.kind,
-          rumorId,
-        });
+        if (showInMessages)
+          entries.push({
+            id: wrap.id,
+            partnerPubkey: partnership.partnerPubkey,
+            fromMe: partnership.fromMe,
+            createdAt: rumor.created_at,
+            text: preview,
+            // Raw render content (order JSON for kind 16/17, else plaintext) so the
+            // conversation thread renders a freshly-decrypted order as its card on
+            // the FIRST open — `text` above is the inbox-list preview, which the
+            // card renderer can't parse (#market). ONLY for order kinds: an NWC
+            // wallet-share rumor's raw text is a bearer connection string that
+            // `preview` deliberately redacts, and DmInboxEntry reaches every
+            // inbox consumer — that secret stays in the encrypted store only
+            // (the thread re-derives it from the stored row). Gated on the
+            // content actually being canonical order JSON: `textForRumor` falls
+            // back to the raw `rumor.content` for a kind-16/17 that is NOT a
+            // parseable order (a repost, a malformed payload), and that raw text
+            // must stay redacted here too. A plain DM's preview IS its render
+            // text, so `renderText ?? text` covers it.
+            ...(((rumor.kind === 16 || rumor.kind === 17) &&
+              text !== preview &&
+              parseStoredOrder(text) !== null) ||
+            // A live-location marker (#1300): its preview is a label, and the
+            // thread / Full Map need the marker (its update key is meant for
+            // this recipient — it's no bearer secret like a wallet share's).
+            liveMarkerPhaseOf(text)
+              ? { renderText: text }
+              : {}),
+            wireKind: rumor.kind,
+            rumorId,
+          });
         return {
           owner,
           eventId: wrap.id,

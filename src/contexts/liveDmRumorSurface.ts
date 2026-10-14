@@ -1,3 +1,4 @@
+import { admitUnfollowedOrder, isBoundedOrderRumor } from './orderRumorIngest';
 import { gateLiveDm } from './liveDmFollowGateDecision';
 import { getAppFormatLocale } from '../utils/appFormatLocale';
 import { dmThreadId, MARMOT_WELCOME_KIND, protocolForWireKind } from '../utils/dmProtocol';
@@ -45,6 +46,7 @@ export interface LiveRumorSurfaceDeps {
   isFollowHydrated: () => boolean;
   isFollowCacheReady?: () => boolean;
   isFreshArrival: (createdAtSec: number) => boolean;
+  includeNonFollowOrders?: () => boolean;
   queueInboxEntry: (entry: DmInboxEntry) => void;
   knownWrapIds: Set<string>;
   releaseWrapClaim?: (wrapId: string) => void;
@@ -66,6 +68,7 @@ export function createLiveRumorSurfacer(
     isFollowHydrated,
     isFollowCacheReady = () => false,
     isFreshArrival,
+    includeNonFollowOrders = () => false,
     queueInboxEntry,
     knownWrapIds,
     seen,
@@ -175,25 +178,39 @@ export function createLiveRumorSurfacer(
       return;
     }
 
-    const decision = gateLiveDm({
-      entry: {
-        id: wrapId,
-        partnerPubkey: partnership.partnerPubkey,
-        fromMe: partnership.fromMe,
-        createdAt: rumor.created_at,
-        text: textForRumor(rumor),
-        wireKind: rumor.kind,
-      },
-      kind: 1059,
-      groupRumor: routeResult.deferredGroupRumor,
-      rumor,
-      onEvict: () => releaseWrapClaim(wrapId),
-      follows: followPubkeysRef.current,
-      hydrated: isFollowHydrated(),
-      cacheReady: isFollowCacheReady(),
-      buffer: followGateBuffer,
-      fresh: isFreshArrival(rumor.created_at),
-    });
+    const orderRumor = isBoundedOrderRumor(rumor);
+    const showOrderInMessages =
+      followPubkeysRef.current.has(partnership.partnerPubkey) || includeNonFollowOrders();
+    if (
+      orderRumor &&
+      !followPubkeysRef.current.has(partnership.partnerPubkey) &&
+      !admitUnfollowedOrder(viewerPubkey)
+    ) {
+      releaseWrapClaim(wrapId);
+      nothingToSee();
+      return;
+    }
+    const decision = orderRumor
+      ? 'pass'
+      : gateLiveDm({
+          entry: {
+            id: wrapId,
+            partnerPubkey: partnership.partnerPubkey,
+            fromMe: partnership.fromMe,
+            createdAt: rumor.created_at,
+            text: textForRumor(rumor),
+            wireKind: rumor.kind,
+          },
+          kind: 1059,
+          groupRumor: routeResult.deferredGroupRumor,
+          rumor,
+          onEvict: () => releaseWrapClaim(wrapId),
+          follows: followPubkeysRef.current,
+          hydrated: isFollowHydrated(),
+          cacheReady: isFollowCacheReady(),
+          buffer: followGateBuffer,
+          fresh: isFreshArrival(rumor.created_at),
+        });
     if (decision !== 'pass') {
       if (decision === 'drop') nothingToSee();
       else if (placeholder) noteContentlessWrapAlert(wrapId);
@@ -243,6 +260,10 @@ export function createLiveRumorSurfacer(
     // on the chain either.
     if (shouldAbort()) return;
 
+    if (orderRumor && !showOrderInMessages) {
+      nothingToSee();
+      return;
+    }
     queueInboxEntry(inboxEntry);
     notifyDmMessage(partnership.partnerPubkey);
     // OS notification (#279) — only genuinely-fresh inbound (backlog has

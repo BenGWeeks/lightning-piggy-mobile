@@ -1,4 +1,6 @@
 import { ingestInboxWraps } from './dmWrapIngest';
+import { parseOrderEvent, serializeOrder } from '../utils/orderEvents';
+import { ORDER_RUMOR_MAX_CHARS } from './orderRumorIngest';
 import { NWC_SHARE_KIND } from '../utils/nwcShareMessage';
 import type { DmMessageRow } from '../services/dmDb';
 import type { DecodedRumor } from '../utils/nip17Unwrap';
@@ -53,7 +55,11 @@ jest.mock('./nostrDmCache', () => ({
 jest.mock('../utils/nip17Unwrap', () => ({
   partnerFromRumor: (rumor: { partnership?: { partnerPubkey: string; fromMe: boolean } }) =>
     rumor.partnership ?? null,
-  textForRumor: (rumor: { content: string }) => rumor.content,
+  textForRumor: (rumor: DecodedRumor) => {
+    const { parseOrderEvent, serializeOrder } = jest.requireActual('../utils/orderEvents');
+    const order = parseOrderEvent(rumor);
+    return order ? serializeOrder(order) : rumor.content;
+  },
 }));
 
 const OWNER = 'f'.repeat(64);
@@ -372,3 +378,99 @@ it.each([true, false])(
     expect(mockWriteSkipSet).toHaveBeenCalledWith('skip_key', new Set(['welcome-wrap']));
   },
 );
+
+// Real Gamma tags exercise classification and address stripping at the seam.
+const sellerInvoice: DecodedRumor = {
+  pubkey: BOB,
+  kind: 16,
+  created_at: 100,
+  content: '',
+  tags: [
+    ['p', OWNER],
+    ['type', '2'],
+    ['order', 'purchase'],
+    ['payment', 'lightning', 'lnbc-invoice'],
+    ['address', 'PRIVATE DELIVERY ADDRESS'],
+  ],
+  ...{ partnership: { partnerPubkey: BOB, fromMe: false } },
+};
+
+it.each([false, true])(
+  'stores a non-friend invoice independently of Messages visibility (%s)',
+  async (includeNonFollows) => {
+    const result = await ingestInboxWraps({
+      owner: OWNER,
+      wraps: [wrap('seller-invoice')],
+      unwrap: () => sellerInvoice,
+      passesFollowGate: () => includeNonFollows,
+      skipKey: 'orders-skip',
+      isFollowed: () => false,
+    });
+    expect(result.stored).toBe(1);
+    const rows: DmMessageRow[] = mockUpsert.mock.calls[0][0];
+    expect(rows[0].content).toBe(serializeOrder(parseOrderEvent(sellerInvoice)!));
+    expect(rows[0].content).not.toContain('PRIVATE DELIVERY ADDRESS');
+    expect(result.entries).toHaveLength(includeNonFollows ? 1 : 0);
+    if (includeNonFollows) {
+      expect(result.entries[0].text).toBe('💳 Payment');
+      expect(result.entries[0].text).not.toContain('lnbc');
+    }
+    expect(mockWriteSkipSet).not.toHaveBeenCalled();
+  },
+);
+
+it.each([
+  {
+    kind: 16,
+    tags: [
+      ['type', '1'],
+      ['order', 'purchase'],
+    ],
+  },
+  {
+    kind: 16,
+    tags: [
+      ['type', '3'],
+      ['order', 'purchase'],
+      ['status', 'confirmed'],
+    ],
+  },
+  {
+    kind: 16,
+    tags: [
+      ['type', '4'],
+      ['order', 'purchase'],
+      ['status', 'shipped'],
+    ],
+  },
+  {
+    kind: 17,
+    tags: [
+      ['subject', 'order-receipt'],
+      ['order', 'purchase'],
+    ],
+  },
+])('retains non-friend lifecycle events for Orders ($kind $tags)', async (event) => {
+  const result = await ingestInboxWraps({
+    owner: OWNER,
+    wraps: [wrap('lifecycle')],
+    unwrap: () => ({ ...sellerInvoice, ...event }),
+    passesFollowGate: () => false,
+  });
+  expect(result.stored).toBe(1);
+  expect(result.entries).toEqual([]);
+});
+
+it('does not exempt oversized orders or reposts from the free-text follow gate', async () => {
+  const result = await ingestInboxWraps({
+    owner: OWNER,
+    wraps: [wrap('large'), wrap('repost')],
+    unwrap: (w) =>
+      w.id === 'large'
+        ? { ...sellerInvoice, content: 'x'.repeat(ORDER_RUMOR_MAX_CHARS + 1) }
+        : { ...sellerInvoice, tags: [...sellerInvoice.tags, ['k', '1']] },
+    passesFollowGate: () => false,
+  });
+  expect(result.stored).toBe(0);
+  expect(result.entries).toEqual([]);
+});
