@@ -15,6 +15,8 @@ export interface SellerInvoiceRecord {
   bolt11: string;
   amountSats: number;
   sentAt: number;
+  /** Persisted before publishing; retries reuse this invoice until delivery completes. */
+  deliveryPending?: boolean;
   /** When the wallet reported the invoice settled (ms). */
   paidAt?: number;
   /** When the `confirmed` status update went to the buyer (ms). */
@@ -84,7 +86,7 @@ function update(
   return run.then(() => listeners.forEach((listener) => listener()));
 }
 
-/** Remember an invoice just sent (replaces an earlier one for the order). */
+/** Persist a validated invoice before delivery (replaces an earlier one for the order). */
 export function recordSellerInvoice(pubkey: string, record: SellerInvoiceRecord): Promise<void> {
   return update(pubkey, (records) => {
     records[sellerInvoiceKey(record.buyerPubkey, record.orderId)] = record;
@@ -95,7 +97,7 @@ export function patchSellerInvoice(
   pubkey: string,
   orderId: string,
   buyerPubkey: string,
-  patch: Partial<Pick<SellerInvoiceRecord, 'paidAt' | 'confirmedAt'>>,
+  patch: Partial<Pick<SellerInvoiceRecord, 'paidAt' | 'confirmedAt' | 'deliveryPending'>>,
 ): Promise<void> {
   return update(pubkey, (records) => {
     const id = sellerInvoiceKey(buyerPubkey, orderId);

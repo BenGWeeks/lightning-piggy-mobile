@@ -1,3 +1,5 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { resetSellerStore } from '../services/sellerEventStore';
 import { ingestInboxWraps } from './dmWrapIngest';
 import { parseOrderEvent, serializeOrder } from '../utils/orderEvents';
 import { ORDER_RUMOR_MAX_CHARS } from './orderRumorIngest';
@@ -91,7 +93,9 @@ const rumorFrom = (partner: string, over: Partial<TestRumor> = {}): DecodedRumor
     ...over,
   }) as unknown as DecodedRumor;
 
-beforeEach(() => {
+beforeEach(async () => {
+  await AsyncStorage.clear();
+  resetSellerStore();
   jest.clearAllMocks();
   mockOutgoingOrders.mockImplementation(async (owner, seller, ids) => [
     {
@@ -535,3 +539,46 @@ it.each([false, true])(
     expect(result.entries).toEqual([]);
   },
 );
+it('stores one row for 100 distinct gift wraps of the same order rumor', async () => {
+  const order = rumorFrom(ALICE, {
+    kind: 16,
+    tags: [
+      ['p', OWNER],
+      ['order', 'batch-order'],
+      ['type', '1'],
+    ],
+    content: '',
+  });
+  const res = await ingestInboxWraps({
+    owner: OWNER,
+    wraps: Array.from({ length: 100 }, (_, n) => wrap(`duplicate-${n}`)),
+    unwrap: async () => order,
+    passesFollowGate: () => true,
+  });
+  expect(res.stored).toBe(1);
+  expect(res.entries).toHaveLength(1);
+  expect(mockUpsert.mock.calls[0][0]).toHaveLength(1);
+});
+
+it('releases batch delivery claims after a failed encrypted payload write', async () => {
+  const order = rumorFrom(ALICE, {
+    kind: 16,
+    tags: [
+      ['p', OWNER],
+      ['order', 'batch-order'],
+      ['type', '1'],
+    ],
+    content: '',
+  });
+  const params = {
+    owner: OWNER,
+    wraps: [wrap('failed-order')],
+    unwrap: async () => order,
+    passesFollowGate: () => true,
+  };
+  mockUpsert.mockRejectedValueOnce(new Error('encrypted store unavailable'));
+  await expect(ingestInboxWraps(params)).rejects.toThrow('encrypted store unavailable');
+  const retry = await ingestInboxWraps(params);
+  expect(retry.stored).toBe(1);
+  expect(mockUpsert).toHaveBeenCalledTimes(2);
+});

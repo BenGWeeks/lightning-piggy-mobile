@@ -9,7 +9,7 @@ import {
 } from '../utils/nip17Unwrap';
 import { dmRowPreview } from '../utils/dmRowPreview';
 import { liveMarkerPhaseOf } from '../services/liveLocationService';
-import { acceptOrderRumor, completeOrderRumors } from '../services/orderAdmission';
+import { acceptOrderRumor, completeOrderRumors, releaseOrderRumors } from '../services/orderAdmission';
 import { parseStoredOrder } from '../utils/orderEvents';
 import { ingestWraps, type IngestableWrap } from '../services/dmIngest';
 import type { DmMessageRow } from '../services/dmDb';
@@ -104,6 +104,7 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
   const { owner, wraps, unwrap, passesFollowGate, skipKey, signal } = params;
   const entries: DmInboxEntry[] = [];
   const admittedOrders: DecodedRumor[] = [];
+  const claimedOrders = new Set<DecodedRumor>();
   let skipHits = 0;
   let misses = 0;
   let permissionDenied = false;
@@ -221,6 +222,7 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
           if (!orderRumor || !admitUnfollowedOrder(owner)) return null;
         }
         if (!(await acceptOrderRumor(owner, rumor, partnership.fromMe))) return null;
+        if (orderRumor && !partnership.fromMe) claimedOrders.add(rumor);
         const text = textForRumor(rumor);
         // For a structured rumor (order kind 16/17, or an NWC wallet share) the
         // stored `text` is non-human JSON — the in-memory inbox preview must show
@@ -292,11 +294,14 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
       // Pacing is the scheduler above; disable ingestWraps' count-based yield.
       { yieldEvery: 0, signal },
     );
+
+    // Completion releases these claims itself; do not release a later retry claim.
+    for (const rumor of admittedOrders) claimedOrders.delete(rumor);
+    await completeOrderRumors(owner, admittedOrders);
   } finally {
+    releaseOrderRumors(owner, [...claimedOrders]);
     sched.dispose();
   }
-
-  await completeOrderRumors(owner, admittedOrders);
 
   // Persist skip-set growth only for completed runs. The skip-set's invariant
   // is "entry ⇒ decrypt was paid AND produced no stored row"; an aborted run

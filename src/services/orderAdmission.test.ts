@@ -1,5 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { acceptOrderRumor, completeOrderRumors, orderBudgetKey } from './orderAdmission';
+import {
+  acceptOrderRumor,
+  completeOrderRumors,
+  orderBudgetKey,
+  releaseOrderRumors,
+} from './orderAdmission';
 import { resetSellerStore } from './sellerEventStore';
 import { rumorEventId, type DecodedRumor } from '../utils/nip17Unwrap';
 const OWNER = 'a'.repeat(64);
@@ -15,6 +20,10 @@ const rumor = (n: number): DecodedRumor => ({
   ],
 });
 beforeEach(async () => {
+  releaseOrderRumors(
+    OWNER,
+    Array.from({ length: 100 }, (_, n) => rumor(n)),
+  );
   await AsyncStorage.clear();
   resetSellerStore();
 });
@@ -66,4 +75,39 @@ it('keeps a failed completion retryable', async () => {
   await completeOrderRumors(OWNER, [rumor(1)]);
   expect(await acceptOrderRumor(OWNER, rumor(1), false)).toBe(true);
   jest.restoreAllMocks();
+});
+
+it('admits one of 100 pending copies across simultaneous callers', async () => {
+  const results = await Promise.all(
+    Array.from({ length: 100 }, () => acceptOrderRumor(OWNER, rumor(1), false)),
+  );
+  expect(results.filter(Boolean)).toHaveLength(1);
+  const budget = JSON.parse((await AsyncStorage.getItem(orderBudgetKey(OWNER)))!);
+  expect(budget.accepted).toHaveLength(1);
+  expect(budget.dropped).toBe(0);
+});
+
+it('releases failed payload delivery without spending another budget slot', async () => {
+  expect(await acceptOrderRumor(OWNER, rumor(1), false)).toBe(true);
+  expect(await acceptOrderRumor(OWNER.toUpperCase(), rumor(1), false)).toBe(false);
+  releaseOrderRumors(OWNER, [rumor(1)]);
+  expect(await acceptOrderRumor(OWNER, rumor(1), false)).toBe(true);
+  const budget = JSON.parse((await AsyncStorage.getItem(orderBudgetKey(OWNER)))!);
+  expect(budget.accepted).toHaveLength(1);
+});
+
+it('scopes pending claims and completion to account and sender', async () => {
+  const otherOwner = 'c'.repeat(64);
+  const otherSender = { ...rumor(1), pubkey: 'd'.repeat(64) };
+  expect(await acceptOrderRumor(OWNER, rumor(1), false)).toBe(true);
+  expect(await acceptOrderRumor(otherOwner, rumor(1), false)).toBe(true);
+  expect(await acceptOrderRumor(OWNER, otherSender, false)).toBe(true);
+  await completeOrderRumors(OWNER, [rumor(1)]);
+  expect(await acceptOrderRumor(otherOwner, rumor(1), false)).toBe(false);
+  releaseOrderRumors(otherOwner, [rumor(1)]);
+  releaseOrderRumors(OWNER, [otherSender]);
+  expect(await acceptOrderRumor(otherOwner, rumor(1), false)).toBe(true);
+  expect(await acceptOrderRumor(OWNER, otherSender, false)).toBe(true);
+  await completeOrderRumors(otherOwner, [rumor(1)]);
+  await completeOrderRumors(OWNER, [otherSender]);
 });

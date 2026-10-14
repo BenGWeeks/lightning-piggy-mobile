@@ -136,8 +136,13 @@ export function useSellerInvoice(
         const records = await loadSellerInvoices(pubkey);
         const previous = records[sellerInvoiceKey(buyerPubkey, orderId)];
         if (!stillCurrent()) throw new SellerInvoiceError('notSignedIn', 'Account changed');
-        if (previous) {
-          const expiresAt = extractInvoice(previous.bolt11)?.expiresAt;
+        const expiresAt = previous ? extractInvoice(previous.bolt11)?.expiresAt : null;
+        const retry =
+          previous?.deliveryPending &&
+          !previous.paidAt &&
+          !previous.confirmedAt &&
+          (expiresAt == null || expiresAt * 1000 > Date.now());
+        if (previous && !retry) {
           if (
             previous.paidAt ||
             previous.confirmedAt ||
@@ -164,23 +169,42 @@ export function useSellerInvoice(
               'Replacement must preserve the approved amount',
             );
         }
-        let bolt11: string;
-        try {
-          bolt11 = await makeInvoiceForWallet(
+        let invoice = retry ? previous : undefined;
+        if (invoice && invoice.amountSats !== amountSats)
+          throw new SellerInvoiceError('amountMismatch', 'Retry must preserve the approved amount');
+        if (!invoice) {
+          let bolt11: string;
+          try {
+            bolt11 = await makeInvoiceForWallet(
+              walletId,
+              amountSats,
+              t('sellerOrders.orderNumber', { id: shortOrderId(orderId) }),
+            );
+          } catch (e) {
+            throw new SellerInvoiceError('invoiceFailed', (e as Error)?.message ?? 'make_invoice');
+          }
+          if (!stillCurrent()) throw new SellerInvoiceError('notSignedIn', 'Account changed');
+          // Never send an invoice that charges anything but the total shown.
+          if (amountSatsFromBolt11(bolt11) !== amountSats) {
+            throw new SellerInvoiceError('amountMismatch', 'Wallet returned a different amount');
+          }
+          const paymentHash = paymentHashFromBolt11(bolt11);
+          if (!paymentHash) throw new SellerInvoiceError('invoiceFailed', 'Invoice has no hash');
+          invoice = {
+            orderId,
+            buyerPubkey,
             walletId,
+            paymentHash,
+            bolt11,
             amountSats,
-            t('sellerOrders.orderNumber', { id: shortOrderId(orderId) }),
-          );
-        } catch (e) {
-          throw new SellerInvoiceError('invoiceFailed', (e as Error)?.message ?? 'make_invoice');
+            sentAt: Date.now(),
+            deliveryPending: true,
+          };
+          // The buyer must never receive a payable invoice without its wallet record.
+          await recordSellerInvoice(pubkey, invoice);
         }
         if (!stillCurrent()) throw new SellerInvoiceError('notSignedIn', 'Account changed');
-        // Never send an invoice that charges anything but the total shown.
-        if (amountSatsFromBolt11(bolt11) !== amountSats) {
-          throw new SellerInvoiceError('amountMismatch', 'Wallet returned a different amount');
-        }
-        const paymentHash = paymentHashFromBolt11(bolt11);
-        if (!paymentHash) throw new SellerInvoiceError('invoiceFailed', 'Invoice has no hash');
+        const { bolt11 } = invoice;
         const rumor = buildPaymentRequestRumor({
           sellerPubkey: pubkey,
           buyerPubkey,
@@ -189,6 +213,7 @@ export function useSellerInvoice(
           bolt11,
           expiresAt: extractInvoice(bolt11)?.expiresAt ?? null,
           note: t('sellerOrders.invoiceSent'),
+          createdAt: Math.floor(invoice.sentAt / 1000),
         });
         try {
           await send(rumor);
@@ -199,16 +224,9 @@ export function useSellerInvoice(
           );
         }
         if (!stillCurrent()) throw new SellerInvoiceError('notSignedIn', 'Account changed');
-        await recordSellerInvoice(pubkey, {
-          orderId,
-          buyerPubkey,
-          walletId,
-          paymentHash,
-          bolt11,
-          amountSats,
-          sentAt: Date.now(),
-        });
-        if (remember) await saveSellerReceiveWallet(pubkey, walletId).catch(() => undefined);
+        await patchSellerInvoice(pubkey, orderId, buyerPubkey, { deliveryPending: false });
+        if (remember)
+          await saveSellerReceiveWallet(pubkey, invoice.walletId).catch(() => undefined);
       } finally {
         sendingRef.current = false;
         setSending(false);

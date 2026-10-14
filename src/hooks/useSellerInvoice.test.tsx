@@ -167,3 +167,97 @@ it.each(['unpaid', 'paid', 'unknown', 'live'])(
       expect((await loadSellerInvoices(SELLER))[`${BUYER}:order-1`].paidAt).toBeDefined();
   },
 );
+
+it('persists the validated invoice before publishing and fails closed on a record write error', async () => {
+  const { result } = renderHook(() => useSellerInvoice(BUYER, 'order-1'));
+  (AsyncStorage.setItem as jest.Mock).mockRejectedValueOnce(new Error('disk'));
+  await act(async () => {
+    await expect(
+      result.current.sendInvoice({ walletId: 'shop-wallet', amountSats: 4200, remember: false }),
+    ).rejects.toThrow('disk');
+  });
+  expect(sendNip17Rumor).not.toHaveBeenCalled();
+  (sendNip17Rumor as jest.Mock).mockImplementationOnce(async () => {
+    expect((await loadSellerInvoices(SELLER))[`${BUYER}:order-1`]).toMatchObject({
+      walletId: 'shop-wallet',
+      bolt11: BOLT11,
+      paymentHash: HASH,
+      deliveryPending: true,
+    });
+  });
+  await act(async () => {
+    await result.current.sendInvoice({
+      walletId: 'shop-wallet',
+      amountSats: 4200,
+      remember: false,
+    });
+  });
+});
+
+it('reuses an undelivered invoice and its original wallet after remount', async () => {
+  (sendNip17Rumor as jest.Mock).mockRejectedValueOnce(new Error('relay unavailable'));
+  const first = renderHook(() => useSellerInvoice(BUYER, 'order-1'));
+  await act(async () => {
+    await expect(
+      first.result.current.sendInvoice({
+        walletId: 'shop-wallet',
+        amountSats: 4200,
+        remember: false,
+      }),
+    ).rejects.toMatchObject({ code: 'sendFailed' });
+  });
+  first.unmount();
+  const { result } = renderHook(() => useSellerInvoice(BUYER, 'order-1'));
+  await act(async () => {
+    await expect(
+      result.current.sendInvoice({ walletId: 'other-wallet', amountSats: 5000, remember: true }),
+    ).rejects.toMatchObject({ code: 'amountMismatch' });
+    await result.current.sendInvoice({
+      walletId: 'other-wallet',
+      amountSats: 4200,
+      remember: true,
+    });
+  });
+  expect(makeInvoiceForWallet).toHaveBeenCalledTimes(1);
+  expect((sendNip17Rumor as jest.Mock).mock.calls[1][0].rumor).toEqual(
+    (sendNip17Rumor as jest.Mock).mock.calls[0][0].rumor,
+  );
+  expect((await loadSellerInvoices(SELLER))[`${BUYER}:order-1`]).toMatchObject({
+    walletId: 'shop-wallet',
+    deliveryPending: false,
+  });
+  expect(await loadSellerReceiveWallet(SELLER)).toBe('shop-wallet');
+});
+
+it('keeps the same payable invoice when delivery succeeds but the completion write fails', async () => {
+  const originalWrite = (AsyncStorage.setItem as jest.Mock).getMockImplementation()!;
+  const write = (AsyncStorage.setItem as jest.Mock).mockImplementation((key, value) => {
+    if (key === `market-seller-invoices:${SELLER}` && value.includes('"deliveryPending":false'))
+      return Promise.reject(new Error('disk after send'));
+    return originalWrite(key, value);
+  });
+  const { result } = renderHook(() => useSellerInvoice(BUYER, 'order-1'));
+  await act(async () => {
+    await expect(
+      result.current.sendInvoice({ walletId: 'shop-wallet', amountSats: 4200, remember: false }),
+    ).rejects.toThrow('disk after send');
+  });
+  expect((await loadSellerInvoices(SELLER))[`${BUYER}:order-1`]).toMatchObject({
+    walletId: 'shop-wallet',
+    paymentHash: HASH,
+    bolt11: BOLT11,
+  });
+  write.mockImplementation(originalWrite);
+  await act(async () => {
+    await result.current.sendInvoice({
+      walletId: 'other-wallet',
+      amountSats: 4200,
+      remember: false,
+    });
+  });
+  expect(makeInvoiceForWallet).toHaveBeenCalledTimes(1);
+  expect(sendNip17Rumor).toHaveBeenCalledTimes(2);
+  expect((sendNip17Rumor as jest.Mock).mock.calls[1][0].rumor.tags).toEqual(
+    (sendNip17Rumor as jest.Mock).mock.calls[0][0].rumor.tags,
+  );
+});

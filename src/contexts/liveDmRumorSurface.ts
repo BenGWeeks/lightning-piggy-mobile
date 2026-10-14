@@ -24,7 +24,11 @@ import {
 } from '../services/dmWrapNotificationDedupe';
 import { routeMarmotWelcome } from '../services/marmotWelcomeRouter';
 import type { LiveSubFollowGateBuffer } from './liveSubFollowGate';
-import { acceptOrderRumor, completeOrderRumors } from '../services/orderAdmission';
+import {
+  acceptOrderRumor,
+  completeOrderRumors,
+  releaseOrderRumors,
+} from '../services/orderAdmission';
 import { parseOrderEvent } from '../utils/orderEvents';
 import { t } from '../i18n';
 import { orderNotificationTarget } from '../utils/orderNotificationTarget';
@@ -234,6 +238,7 @@ export function createLiveRumorSurfacer(
       return;
     }
     if (shouldAbort()) {
+      if (order && !partnership.fromMe) releaseOrderRumors(viewerPubkey, [rumor]);
       releaseWrapClaim(wrapId);
       return;
     }
@@ -315,6 +320,7 @@ export function createLiveRumorSurfacer(
     // Serialise store upserts so concurrent live wraps don't race each other.
     chainWrite(async () => {
       if (isCancelled()) {
+        if (order && !partnership.fromMe) releaseOrderRumors(viewerPubkey, [rumor]);
         releaseWrapClaim(wrapId);
         return;
       }
@@ -326,6 +332,7 @@ export function createLiveRumorSurfacer(
       try {
         await upsertDmMessages([wrapRow]);
       } catch (error) {
+        if (order && !partnership.fromMe) releaseOrderRumors(viewerPubkey, [rumor]);
         releaseWrapClaim(wrapId);
         throw error;
       }
