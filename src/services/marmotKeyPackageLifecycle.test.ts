@@ -271,8 +271,9 @@ describe('marmotKeyPackageLifecycle', () => {
       relays: [RELAY],
       identifier: 'cd'.repeat(32),
     });
-    await expect(maintain(client, { wasAccepted: (id) => accepted.has(id) })).rejects.toThrow(
-      'retirement not accepted',
+    // The fresh slot publishes; the rejected retirement is deferred, not a failure.
+    await expect(maintain(client, { wasAccepted: (id) => accepted.has(id) })).resolves.toBe(
+      'published',
     );
     expect(await client.keyPackages.getPrivateKey(legacy.keyPackageRef)).not.toBeNull();
     rejectDeletion = false;

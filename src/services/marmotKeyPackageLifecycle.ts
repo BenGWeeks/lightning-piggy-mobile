@@ -211,7 +211,20 @@ export async function maintainKeyPackage(
     // these secrets before a legacy retirement can fail or await a signer.
     await step(keyPackages.remove(kp.keyPackageRef));
   }
-  if (legacy.length > 0) await step(keyPackages.purge(legacy.map((kp) => kp.keyPackageRef)));
+  if (legacy.length > 0) {
+    // A relay that rejects or ignores the NIP-09 retirement must not turn a
+    // confirmed publication into a failed run: a manual Refresh would report
+    // failure and (for local keys) the replenisher would retry every few
+    // minutes. Keep the legacy rows — purge() leaves them when the deletion
+    // isn't accepted — and retire them on the next scheduled maintenance.
+    try {
+      await step(keyPackages.purge(legacy.map((kp) => kp.keyPackageRef)));
+    } catch (e) {
+      if (e instanceof KeyPackageMaintenanceCancelled) throw e;
+      if (opts.cancelled?.()) throw new KeyPackageMaintenanceCancelled();
+      if (__DEV__) console.warn('[Marmot] legacy key package retirement deferred:', e);
+    }
+  }
   return outcome;
 }
 
