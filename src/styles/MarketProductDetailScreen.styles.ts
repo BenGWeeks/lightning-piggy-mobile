@@ -36,9 +36,6 @@ export const createMarketProductDetailStyles = (colors: Palette) =>
 
     body: { padding: 16, gap: 12 },
     title: { fontSize: 22, fontWeight: '800', color: colors.textHeader },
-    priceRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-    priceSats: { fontSize: 18, fontWeight: '800', color: colors.brandPink },
-    priceFiat: { fontSize: 14, color: colors.textSupplementary },
 
     vendorRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     vendorName: { fontSize: 14, fontWeight: '700', color: colors.textHeader },

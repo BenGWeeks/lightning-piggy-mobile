@@ -12,11 +12,15 @@ jest.mock('../contexts/LocaleContext', () => ({
 let mockName: string | null = 'Profile shop';
 jest.mock('../hooks/usePubkeyProfile', () => ({ usePubkeyProfile: () => ({ name: mockName }) }));
 jest.mock('./VendorAvatar', () => () => null);
+jest.mock('../contexts/WalletContext', () => ({
+  useWallet: () => ({ currency: 'GBP' }),
+  useWalletLive: () => ({ btcPrice: null }),
+}));
 jest.mock('lucide-react-native', () => ({ Zap: () => null }));
 it('prefers the kind-0 seller identity in the visible card and accessibility label', () => {
   const product = {
     ...MARKET_PRODUCTS[0],
-    listing: { event: { pubkey: 'seller' }, priceLabel: '21 sats' },
+    listing: { event: { pubkey: 'seller' }, currency: 'SAT', amount: 21, priceLabel: '21 SAT' },
   } as (typeof MARKET_PRODUCTS)[number];
   const h = render(
     <MarketProductCard

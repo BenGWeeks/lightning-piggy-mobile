@@ -8,6 +8,12 @@ export interface MarketListing {
   event: Event;
   currency: string;
   priceLabel: string;
+  /** Numeric price in `currency` units (the parsed `price` tag / field).
+   * Optional so hand-built fixtures without it still type-check; display
+   * code falls back to `priceLabel` when it's absent. */
+  amount?: number;
+  /** Billing-period suffix such as `/month`, or `''` for one-off prices. */
+  recurrence?: string;
   vendor: MarketVendor;
 }
 
@@ -144,7 +150,7 @@ export function parseMarketListing(event: Event, now = Date.now() / 1000): Marke
     sellerName,
     url,
     featured: false,
-    listing: { event, currency, priceLabel, vendor },
+    listing: { event, currency, priceLabel, amount: price, recurrence, vendor },
   };
 }
 

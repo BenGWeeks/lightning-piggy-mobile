@@ -2292,6 +2292,8 @@
   },
   "market": {
     "sats": "{{amount}} sats",
+    "priceApprox": "≈ {{value}}",
+    "priceApproxBoth": "≈ {{fiat}} · {{sats}}",
     "free": "Ingyenes",
     "fromSeller": "eladó: {{seller}}",
     "screen": {
