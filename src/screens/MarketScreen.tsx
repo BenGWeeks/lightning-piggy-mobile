@@ -37,15 +37,16 @@ import {
   type MarketFilter,
 } from '../utils/marketFilters';
 import { MARKET_GRID_COLUMNS, marketGridTileWidth } from '../utils/marketGrid';
-import { ExploreNavigation } from '../navigation/types';
+import type { ExploreNavigation, MarketRoute } from '../navigation/types';
 import { perfLog } from '../utils/perfLog';
 
 interface Props {
   navigation: ExploreNavigation;
+  route?: MarketRoute;
 }
 
 /** Preferred catalogue or foreground relay listings from the viewer's direct follows. */
-const MarketScreen: React.FC<Props> = ({ navigation }) => {
+const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createMarketScreenStyles(colors), [colors]);
@@ -139,6 +140,20 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
     preferences,
     update,
   ]);
+
+  // Opened filtered to one seller (a product page's "More from <seller>" See
+  // all, #1542). Declared after the reconcile effect so, in the same commit,
+  // the requested merchant lands last.
+  const requestedMerchant = route?.params?.merchant;
+  const requestedMode = route?.params?.mode;
+  useEffect(() => {
+    if (!ready || !requestedMerchant) return;
+    update(
+      requestedMode
+        ? { merchant: requestedMerchant, mode: requestedMode }
+        : { merchant: requestedMerchant },
+    );
+  }, [ready, requestedMerchant, requestedMode, update]);
 
   const filter = useMemo<MarketFilter>(
     () => ({ query: debouncedQuery, merchant, country, currency }),

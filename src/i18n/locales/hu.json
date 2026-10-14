@@ -2618,6 +2618,12 @@
       "cancel": "Mégse",
       "showMore": "Több megjelenítése",
       "showLess": "Kevesebb megjelenítése"
+    },
+    "recommendations": {
+      "moreFromSeller": "Továbbiak tőle: {{seller}}",
+      "youMightLike": "Ez is tetszhet",
+      "seeAll": "Összes",
+      "seeAllAccessibility": "{{seller}} összes hirdetésének megtekintése"
     }
   },
   "dmProtocol": {

@@ -2578,6 +2578,12 @@
       "cancel": "Скасувати",
       "showMore": "Показати більше",
       "showLess": "Показати менше"
+    },
+    "recommendations": {
+      "moreFromSeller": "Більше від {{seller}}",
+      "youMightLike": "Вам може сподобатися",
+      "seeAll": "Усі",
+      "seeAllAccessibility": "Переглянути всі оголошення від {{seller}}"
     }
   },
   "nwcShareSheet": {

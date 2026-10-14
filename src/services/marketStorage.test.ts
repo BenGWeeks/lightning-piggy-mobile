@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   clearMarketSnapshotMemory,
   getMarketSnapshot,
+  loadedMarketSnapshots,
   readMarketPreferences,
   writeMarketPreferences,
   wipeMarketAccount,
@@ -235,4 +236,15 @@ it('blocks a late relay write after cleanup until a new account hydration', asyn
   await readMarketPreferences('late-relay');
   await writeMarketSnapshot('late-relay|scope', { products: [], incomplete: false });
   expect(getMarketSnapshot('late-relay|scope')).toBeDefined();
+});
+it('lists in-memory snapshots for the requested accounts only', async () => {
+  const product = { id: 'p1', sellerName: 'shop' } as never;
+  await writeMarketSnapshot('alice|x|r', { products: [product], incomplete: false });
+  await writeMarketSnapshot('team|y|r', { products: [], incomplete: false });
+  await writeMarketSnapshot('bob|z|r', { products: [product], incomplete: false });
+  const loaded = loadedMarketSnapshots(['alice', 'team']);
+  expect(loaded.map((s) => s.account).sort()).toEqual(['alice', 'team']);
+  expect(loaded.find((s) => s.account === 'alice')?.products).toEqual([product]);
+  await wipeMarketAccount('alice');
+  expect(loadedMarketSnapshots(['alice'])).toEqual([]);
 });

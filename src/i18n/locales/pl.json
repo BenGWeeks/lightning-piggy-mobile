@@ -2622,6 +2622,12 @@
       "cancel": "Anuluj",
       "showMore": "Pokaż więcej",
       "showLess": "Pokaż mniej"
+    },
+    "recommendations": {
+      "moreFromSeller": "Więcej od {{seller}}",
+      "youMightLike": "Może ci się spodobać",
+      "seeAll": "Zobacz wszystkie",
+      "seeAllAccessibility": "Zobacz wszystkie oferty od {{seller}}"
     }
   },
   "dmProtocol": {

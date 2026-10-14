@@ -2618,6 +2618,12 @@
       "cancel": "Cancelar",
       "showMore": "Mostrar más",
       "showLess": "Mostrar menos"
+    },
+    "recommendations": {
+      "moreFromSeller": "Más de {{seller}}",
+      "youMightLike": "Te puede gustar",
+      "seeAll": "Ver todo",
+      "seeAllAccessibility": "Ver todos los anuncios de {{seller}}"
     }
   },
   "dmProtocol": {

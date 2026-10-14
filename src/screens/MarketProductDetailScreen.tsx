@@ -26,6 +26,7 @@ import { usePullToRefresh, useRegisterRefresher } from '../hooks/usePullToRefres
 import { useLatestListing } from '../hooks/useLatestListing';
 import MarketListingDetails from '../components/MarketListingDetails';
 import MarkdownText from '../components/MarkdownText';
+import MarketProductRecommendations from '../components/MarketProductRecommendations';
 import { usePubkeyProfile } from '../hooks/usePubkeyProfile';
 import type {
   ExploreNavigation,
@@ -362,6 +363,11 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
           <View style={styles.noFeedback} testID="market-product-detail-no-feedback">
             <Text style={styles.noFeedbackText}>{t('market.detail.noFeedback')}</Text>
           </View>
+        )}
+
+        {/* More from this seller + You might like (#1542). */}
+        {preview ? null : (
+          <MarketProductRecommendations product={product} sellerName={sellerName} />
         )}
       </KeyboardAwareScrollView>
 

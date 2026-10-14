@@ -2618,6 +2618,12 @@
       "cancel": "रद्द करा",
       "showMore": "आणखी दाखवा",
       "showLess": "कमी दाखवा"
+    },
+    "recommendations": {
+      "moreFromSeller": "{{seller}} कडून आणखी",
+      "youMightLike": "तुम्हाला हे आवडू शकेल",
+      "seeAll": "सर्व पहा",
+      "seeAllAccessibility": "{{seller}} च्या सर्व लिस्टिंग पहा"
     }
   },
   "dmProtocol": {

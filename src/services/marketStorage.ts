@@ -156,6 +156,24 @@ export function getMarketSnapshot(key: string): MarketSnapshot | undefined {
   memory.delete(key);
   return undefined;
 }
+/**
+ * Every snapshot already held in memory for the given accounts — no disk or
+ * relay I/O. Product pages use it to recommend from the Market catalogue the
+ * user has already loaded (#1542).
+ */
+export function loadedMarketSnapshots(
+  accounts: readonly string[],
+): { account: string; products: MarketProduct[] }[] {
+  const wanted = new Set(accounts);
+  const snapshots: { account: string; products: MarketProduct[] }[] = [];
+  for (const key of [...memory.keys()]) {
+    const account = snapshotAccount(key);
+    if (!wanted.has(account)) continue;
+    const snapshot = getMarketSnapshot(key);
+    if (snapshot) snapshots.push({ account, products: snapshot.result.products });
+  }
+  return snapshots;
+}
 export function clearMarketSnapshotMemory() {
   memory.clear();
 }
