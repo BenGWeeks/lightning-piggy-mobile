@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useSyncExternalStore } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 import { getBtcPrice } from '../services/fiatService';
 
 // BTC spot prices for Market listing currencies other than the user's own
@@ -11,23 +11,45 @@ const FRESH_MS = 5 * 60 * 1000;
 // A failed lookup isn't retried on every mount — at most once a minute.
 const RETRY_MS = 60 * 1000;
 
-const prices = new Map<string, { price: number | null; at: number }>();
+const prices = new Map<string, { price: number | null; nextFetchAt: number }>();
 const inflight = new Set<string>();
-const listeners = new Set<() => void>();
+const listeners = new Map<string, Set<() => void>>();
+const timers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function scheduleRefresh(currency: string): void {
+  if (!listeners.has(currency) || timers.has(currency) || inflight.has(currency)) return;
+  const delay = Math.max(0, (prices.get(currency)?.nextFetchAt ?? 0) - Date.now());
+  timers.set(
+    currency,
+    setTimeout(() => {
+      timers.delete(currency);
+      ensureFresh(currency);
+    }, delay),
+  );
+}
 
 function ensureFresh(currency: string): void {
   const entry = prices.get(currency);
-  const age = entry ? Date.now() - entry.at : Infinity;
-  if (inflight.has(currency) || age < (entry?.price ? FRESH_MS : RETRY_MS)) return;
+  if (inflight.has(currency)) return;
+  if (entry && Date.now() < entry.nextFetchAt) {
+    scheduleRefresh(currency);
+    return;
+  }
   inflight.add(currency);
-  getBtcPrice(currency)
+  // Let this store preserve the displayed fallback so a failed refresh still
+  // retries after a minute instead of treating a service fallback as fresh.
+  getBtcPrice(currency, { allowStale: false })
     .catch(() => null)
     .then((price) => {
       // Keep the last good price over a failed refresh.
       const previous = prices.get(currency)?.price ?? null;
-      prices.set(currency, { price: price ?? previous, at: Date.now() });
+      prices.set(currency, {
+        price: price ?? previous,
+        nextFetchAt: Date.now() + (price === null ? RETRY_MS : FRESH_MS),
+      });
       inflight.delete(currency);
-      listeners.forEach((notify) => notify());
+      listeners.get(currency)?.forEach((notify) => notify());
+      scheduleRefresh(currency);
     });
 }
 
@@ -41,23 +63,30 @@ export function useListingBtcPrice(currency: string | null): number | null {
   const subscribe = useCallback(
     (notify: () => void) => {
       if (!currency) return noopUnsubscribe;
-      listeners.add(notify);
+      const subscribers = listeners.get(currency) ?? new Set<() => void>();
+      subscribers.add(notify);
+      listeners.set(currency, subscribers);
+      ensureFresh(currency);
       return () => {
-        listeners.delete(notify);
+        subscribers.delete(notify);
+        if (subscribers.size === 0) {
+          listeners.delete(currency);
+          clearTimeout(timers.get(currency));
+          timers.delete(currency);
+        }
       };
     },
     [currency],
   );
   const getSnapshot = () => (currency ? (prices.get(currency)?.price ?? null) : null);
   const price = useSyncExternalStore(subscribe, getSnapshot);
-  useEffect(() => {
-    if (currency) ensureFresh(currency);
-  }, [currency]);
   return price;
 }
 
 /** Test-only: forget every cached rate. */
 export function __resetListingBtcPricesForTests(): void {
+  timers.forEach((timer) => clearTimeout(timer));
+  timers.clear();
   prices.clear();
   inflight.clear();
 }
