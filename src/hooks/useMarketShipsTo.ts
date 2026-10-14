@@ -1,10 +1,10 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { useLocales } from 'expo-localization';
 import { useNostr } from '../contexts/NostrContext';
 import { deviceCountryCode } from '../data/countries';
 import type { MarketProduct } from '../data/marketProducts';
-import { resolveShippingOptions } from '../services/marketShippingCache';
+import { cachedShippingOption, resolveShippingOptions } from '../services/marketShippingCache';
 import type { ShippingOption } from '../utils/marketShipping';
 import {
   normalizeShipsToSelection,
@@ -45,14 +45,13 @@ export function useMarketShipsTo(
     [products],
   );
   const [answers, setAnswers] = useState(NO_ANSWERS);
-  const answersRef = useRef(answers);
-  answersRef.current = answers;
 
   useFocusEffect(
     useCallback(() => {
       if (!enabled || !coordinateKey) return;
-      const missing = coordinateKey.split('\n').filter((c) => !answersRef.current.has(c));
-      if (missing.length === 0) return;
+      // Revalidate retained answers on every focus. The shared cache owns
+      // expiry and retries; local display state must never bypass it.
+      const coordinates = coordinateKey.split('\n');
       const controller = new AbortController();
       // Merge a batch of answers — once per fetch, so one Map copy per batch.
       const commit = (batch: ReadonlyMap<string, ShippingOption | null>) => {
@@ -65,7 +64,7 @@ export function useMarketShipsTo(
       };
       const timer = setTimeout(() => {
         resolveShippingOptions({
-          coordinates: missing,
+          coordinates,
           relays: readKey ? readKey.split(',') : [],
           signal: controller.signal,
         })
@@ -73,7 +72,9 @@ export function useMarketShipsTo(
           // A failed relay set leaves these listings "shipping unknown" for
           // this visit (not cached), rather than loading forever; the next
           // focus retries.
-          .catch(() => commit(new Map(missing.map((c) => [c, null]))));
+          .catch(() =>
+            commit(new Map(coordinates.map((c) => [c, cachedShippingOption(c) ?? null]))),
+          );
       }, SETTLE_MS);
       return () => {
         clearTimeout(timer);

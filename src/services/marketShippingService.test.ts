@@ -8,6 +8,12 @@ import { querySyncAbortable } from './relayQuery';
 import { acquireMarketListingsPool } from './marketListingsPool';
 import * as pacing from '../contexts/nostrDecryptPacing';
 import * as verification from './nostrVerifyCache';
+// Exercise real hash/signature validation without the facade's dev perf timer.
+jest.mock('./nostrCrypto', () => {
+  const { getEventHash, verifyEvent } = jest.requireActual('nostr-tools/pure');
+  return { nostrGetEventHash: getEventHash, nostrVerifyEvent: verifyEvent };
+});
+afterEach(() => verification.__resetVerifiedEventCache());
 jest.mock('./marketListingsPool', () => ({
   acquireMarketListingsPool: jest.fn(),
 }));
@@ -157,11 +163,17 @@ test('fetches exact references grouped by embedded author and validates unsolici
   const filters = (querySyncAbortable as jest.Mock).mock.calls
     .map((c) => c[2])
     .filter((f) => f.kinds[0] === 30406);
-  // One batched query across both sellers, not one per seller.
+  // Different identifier sets cannot share a filter without cross-matches.
   expect(filters).toEqual([
     {
       kinds: [30406],
-      authors: [input.merchantPubkey, other],
+      authors: [input.merchantPubkey],
+      '#d': ['std'],
+      limit: 100,
+    },
+    {
+      kinds: [30406],
+      authors: [other],
       '#d': ['std', 'zone:colon'],
       limit: 100,
     },
@@ -320,4 +332,38 @@ test('releases the structure-only pool when a deletion query fails', async () =>
     });
   await expect(fetchShippingOptionsForDisplay(input)).rejects.toThrow('deletion query failed');
   expect(release).toHaveBeenCalledTimes(1);
+});
+
+test('retains all 20 requested pairs when 380 newer cross-matches would truncate a relay response', async () => {
+  const authors = Array.from({ length: 20 }, (_, i) => i.toString(16).padStart(64, '0'));
+  const coordinates = authors.map((author, i) => `30406:${author}:zone-${i}`);
+  const events = authors
+    .flatMap((pubkey, i) =>
+      authors.map((_, j) => ({
+        id: `${i}-${j}`,
+        pubkey,
+        kind: 30406,
+        created_at: i === j ? 1 : 2,
+        tags: [
+          ['d', `zone-${j}`],
+          ['price', '5', 'GBP'],
+          ['country', 'GB'],
+        ],
+      })),
+    )
+    .sort((a, b) => b.created_at - a.created_at);
+  (querySyncAbortable as jest.Mock)
+    .mockReset()
+    .mockImplementation(async (_pool, _relays, filter) => {
+      if (filter.kinds[0] === 5) return [];
+      // Model relay filtering and newest-first limit BEFORE client post-filtering.
+      return events
+        .filter(
+          (event) =>
+            filter.authors.includes(event.pubkey) && filter['#d'].includes(event.tags[0][1]),
+        )
+        .slice(0, filter.limit);
+    });
+  const options = await fetchShippingOptionsForDisplay({ ...input, coordinates });
+  expect(options.map((option) => option.coordinate).sort()).toEqual([...coordinates].sort());
 });

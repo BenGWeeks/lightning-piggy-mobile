@@ -83,44 +83,43 @@ export async function fetchShippingOptions(input: {
   return parsed as ShippingOption[];
 }
 
-// One query covers many sellers' options: a filter names up to this many
-// coordinates across at most this many authors, so a whole Market page of
-// listings resolves in a handful of round-trips instead of one per seller.
+// Bound each query's requested coordinates and response size. Sellers can
+// share a filter only when they request exactly the same set of identifiers.
 const COORDINATES_PER_QUERY = 100;
 const AUTHORS_PER_QUERY = 20;
 
-/**
- * Bounded relay filters for exact 30406 coordinates, batched across authors.
- * `authors` × `#d` can also match an author's option that another seller's
- * `d` names, so callers must keep only the coordinates they asked for.
- */
+/** Bounded filters whose authors × #d matches only requested coordinates. */
 export function shippingOptionFilters(coordinates: readonly string[]): Filter[] {
-  const filters: Filter[] = [];
-  let authors = new Set<string>();
-  let dTags = new Set<string>();
-  let count = 0;
-  const flush = () => {
-    if (count === 0) return;
-    filters.push({
-      kinds: [SHIPPING_OPTION_KIND],
-      authors: [...authors],
-      '#d': [...dTags],
-      // Room for a stale revision or a cross-matched option per coordinate.
-      limit: Math.max(100, 2 * count),
-    });
-    authors = new Set();
-    dTags = new Set();
-    count = 0;
-  };
+  const byAuthor = new Map<string, string[]>();
   for (const coordinate of new Set(coordinates)) {
     if (!/^30406:[a-f0-9]{64}:.+$/.test(coordinate)) continue;
     const author = coordinate.slice(6, 70);
-    if (!authors.has(author) && authors.size >= AUTHORS_PER_QUERY) flush();
-    authors.add(author);
-    dTags.add(coordinate.slice(71));
-    if (++count >= COORDINATES_PER_QUERY) flush();
+    const identifiers = byAuthor.get(author) ?? [];
+    identifiers.push(coordinate.slice(71));
+    byAuthor.set(author, identifiers);
   }
-  flush();
+  const filters: Filter[] = [];
+  const shared = new Map<string, Filter>();
+  for (const [author, identifiers] of byAuthor) {
+    identifiers.sort();
+    for (let i = 0; i < identifiers.length; i += COORDINATES_PER_QUERY) {
+      const dTags = identifiers.slice(i, i + COORDINATES_PER_QUERY);
+      const key = JSON.stringify(dTags);
+      let filter = shared.get(key);
+      if (
+        !filter ||
+        filter.authors!.length >= AUTHORS_PER_QUERY ||
+        (filter.authors!.length + 1) * dTags.length > COORDINATES_PER_QUERY
+      ) {
+        filter = { kinds: [SHIPPING_OPTION_KIND], authors: [], '#d': dTags, limit: 100 };
+        filters.push(filter);
+        shared.set(key, filter);
+      }
+      filter.authors!.push(author);
+      // Allow a stale revision per coordinate without admitting cross-matches.
+      filter.limit = Math.max(100, 2 * filter.authors!.length * dTags.length);
+    }
+  }
   return filters;
 }
 

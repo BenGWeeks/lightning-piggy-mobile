@@ -1379,6 +1379,16 @@ remove this independent cache timer, and reset the cache before restoring
 real timers in teardown. Do not clear all timers before a network assertion,
 as that would hide leaked network work.
 
+=== Shipping service Jest tests pass but the worker does not exit
+
+Real signature verification through `nostrCrypto` schedules a development
+performance-summary timer that can remain active for 60 seconds. In service
+tests that need real verification but not performance logging, mock the facade's
+`nostrGetEventHash` and `nostrVerifyEvent` with the real `nostr-tools/pure`
+functions, and reset the verification cache in teardown to cancel its separate
+persistence debounce. See `marketShippingService.test.ts`; signature and hash
+checks still run, and no production timer behavior changes.
+
 === Marmot sync stops after backgrounding
 
 Marmot's kind-445 group subscriptions use the shared JS SimplePool, whose
