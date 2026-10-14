@@ -237,6 +237,7 @@ export const navigateToUnsupportedEntity = (entity: string, detail?: string): bo
  *  - group         → the GroupConversation thread
  *  - payment / zap → the Home (wallet) tab
  *  - mention       → the Notifications screen (notification watcher push)
+ *  - keyBackup     → Back up your key for that account (#1546)
  *
  * Called from the notification-response listener in App.tsx. Returns false
  * if the nav tree isn't ready yet (caller retries on cold start).
@@ -343,6 +344,15 @@ export const navigateFromNotification = (
         if (target && !cancelled()) navigateFromNotification({ ...target, name: data.name });
       });
     }
+    return true;
+  }
+  // Weekly key-backup reminder (#1546) → Back up your key for that account.
+  // The screen handles a non-active account itself, so no switch is needed.
+  if (data.kind === 'keyBackup' && data.keyBackupPubkey) {
+    navigationRef.navigate('Main', {
+      screen: 'AccountKeyBackup',
+      params: { pubkey: data.keyBackupPubkey },
+    });
     return true;
   }
   // A mention (notification watcher push) → the Notifications screen.

@@ -2931,6 +2931,14 @@
     "keptInSigner": "Twój klucz jest przechowywany w aplikacji podpisującej",
     "keptInSignerBody": "Lightning Piggy nigdy nie widzi klucza prywatnego tego konta. Zrób jego kopię zapasową w aplikacji podpisującej. Frazy odzyskiwania portfeli zapisane w Lightning Piggy wymagają osobnej kopii zapasowej przed wylogowaniem."
   },
+  "keyBackupReminder": {
+    "title": "Kopia zapasowa klucza",
+    "body": "Twoje konto {{name}} nie ma jeszcze kopii zapasowej. Jeśli zgubisz ten telefon, stracisz je. Stuknij, aby zapisać klucz.",
+    "bannerBody": "To konto nie ma jeszcze kopii zapasowej. Jeśli zgubisz ten telefon, stracisz je. Stuknij, aby zapisać klucz.",
+    "bannerDismiss": "Przypomnij w przyszłym tygodniu",
+    "settingsTitle": "Przypomnienia o kopii",
+    "settingsDetails": "Raz w tygodniu przypomnienie o zrobieniu kopii każdego konta na tym telefonie, którego klucz nie jest jeszcze zapisany — dopóki nie potwierdzisz, że go zapisałeś. Tylko dla kont, których klucz jest w Lightning Piggy, nigdy dla kont Amber ani aplikacji do podpisywania. Gdy powiadomienia są wyłączone, pojawia się na karcie Portfele."
+  },
   "notificationSettingsScreen": {
     "title": "Powiadomienia",
     "permissionTitle": "Powiadomienia Lightning Piggy",

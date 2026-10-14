@@ -154,6 +154,8 @@ export interface NotificationData extends Partial<MessageNotificationTarget> {
   messageId?: string;
   marmotGroupId?: string;
   senderPubkey?: string;
+  /** Weekly key-backup reminder (kind 'keyBackup', #1546): the account to back up. */
+  keyBackupPubkey?: string;
 }
 
 /** Typed payload every caller passes to `fireNotification`. Centralising
