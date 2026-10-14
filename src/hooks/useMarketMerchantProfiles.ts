@@ -55,5 +55,9 @@ export function useMarketMerchantProfiles(products: MarketProduct[], enabled: bo
       }),
     [products, profiles],
   );
-  return { products: resolvedProducts, profilesReady: !authorsKey || state.key === authorsKey };
+  const profilesReady = !authorsKey || state.key === authorsKey;
+  // Whether a seller has a kind-0 profile (cached or just fetched). Only
+  // meaningful once `profilesReady` — the All scope's rule 3 keys off it.
+  const hasProfile = useCallback((pubkey: string) => profiles.has(pubkey), [profiles]);
+  return { products: resolvedProducts, profilesReady, hasProfile };
 }

@@ -111,8 +111,12 @@ jest.mock('../hooks/usePreferredMarketListings', () => ({
   }),
 }));
 jest.mock('../hooks/useMarketListings', () => ({
-  useMarketListings: (enabled: boolean) => {
-    mockLiveEnabled(enabled);
+  useMarketListings: (enabled: boolean, scope?: { open?: true; authors?: string[] }) => {
+    // One instance per scope: Friends (no scope), friends of friends
+    // (authors), All (open).
+    if (!scope) mockLiveEnabled(enabled);
+    else if (scope.open) mockAllEnabled(enabled);
+    else mockFofEnabled(enabled, scope.authors);
     return {
       products: mockLiveProducts,
       loading: enabled && mockLoading,
@@ -136,11 +140,35 @@ jest.mock('lucide-react-native', () => ({
   Lock: () => null,
 }));
 const mockLiveEnabled = jest.fn();
+const mockFofEnabled = jest.fn();
+const mockAllEnabled = jest.fn();
+let mockExperimental = false;
+jest.mock('../contexts/GroupsContext', () => ({
+  useGroups: () => ({ secretMode: mockExperimental }),
+}));
+jest.mock('../contexts/NostrContext', () => ({ useNostr: () => ({ pubkey: 'f'.repeat(64) }) }));
+let mockFof: {
+  authors: string[] | undefined;
+  progress: { done: number; total: number } | null;
+  failed: boolean;
+} = { authors: ['a'.repeat(64)], progress: null, failed: false };
+const mockFofArmed = jest.fn();
+jest.mock('../hooks/useMarketFofAuthors', () => ({
+  useMarketFofAuthors: (enabled: boolean) => {
+    mockFofArmed(enabled);
+    return mockFof;
+  },
+}));
 const navigation = { goBack: jest.fn(), navigate: jest.fn() } as unknown as ExploreNavigation;
 
 beforeEach(() => {
   jest.useFakeTimers();
   mockLiveEnabled.mockClear();
+  mockFofEnabled.mockClear();
+  mockAllEnabled.mockClear();
+  mockFofArmed.mockClear();
+  mockExperimental = false;
+  mockFof = { authors: ['a'.repeat(64)], progress: null, failed: false };
   mockCollectionScope.mockClear();
   mockSelectCollection.mockClear();
   mockSelectedCollection = null;
@@ -188,7 +216,7 @@ it('moves the single-choice seller scope into Filters and resets it from the sea
   expect(screen.queryByTestId('market-filter-clear')).toBeNull();
   const preferred = screen.getByTestId('market-filter-sellers-preferred');
   const friends = screen.getByTestId('market-filter-sellers-friends');
-  const fof = screen.getByTestId('market-filter-sellers-friends-of-friends');
+  const fof = screen.getByTestId('market-scope-fof');
   expect(preferred.props.accessibilityState).toEqual({ selected: true, disabled: false });
   expect(fof.props.accessibilityState).toEqual({ selected: false, disabled: true });
   fireEvent.press(fof);
@@ -550,4 +578,95 @@ it('opens Liked items from the header heart (#1541)', () => {
   const screen = render(<MarketScreen navigation={navigation} />);
   fireEvent.press(screen.getByTestId('market-liked-items-button'));
   expect(navigation.navigate).toHaveBeenCalledWith('MarketLikedItems');
+});
+
+describe('experimental seller scopes (friends of friends / All)', () => {
+  const openFilters = (screen: ReturnType<typeof render>) =>
+    fireEvent.press(screen.getByTestId('market-filter-button'));
+
+  it('keeps friends of friends "coming soon" and All hidden while experimental is off', () => {
+    const screen = render(<MarketScreen navigation={navigation} />);
+    openFilters(screen);
+    const fof = screen.getByTestId('market-scope-fof');
+    expect(fof.props.accessibilityState).toEqual({ selected: false, disabled: true });
+    expect(screen.getByText('market.filters.comingSoon')).toBeTruthy();
+    expect(screen.queryByTestId('market-scope-all')).toBeNull();
+    fireEvent.press(fof);
+    expect(mockFofEnabled).toHaveBeenLastCalledWith(false, expect.anything());
+    expect(mockFofArmed).toHaveBeenLastCalledWith(false);
+  });
+
+  it('unlocks both with experimental on; friends of friends queries the shared FoF set', () => {
+    mockExperimental = true;
+    const screen = render(<MarketScreen navigation={navigation} />);
+    openFilters(screen);
+    expect(screen.queryByText('market.filters.comingSoon')).toBeNull();
+    expect(screen.getByTestId('market-scope-all').props.accessibilityState.disabled).toBe(false);
+    fireEvent.press(screen.getByTestId('market-scope-fof'));
+    expect(mockFofArmed).toHaveBeenLastCalledWith(true);
+    expect(mockFofEnabled).toHaveBeenLastCalledWith(true, ['a'.repeat(64)]);
+    expect(mockUpdate).toHaveBeenLastCalledWith({ mode: 'wotFof' });
+    fireEvent.press(screen.getByTestId('market-filter-done'));
+    act(() => jest.runOnlyPendingTimers());
+    expect(screen.getByTestId('market-scope-pill-fof')).toHaveTextContent(
+      'market.filters.friendsOfFriendsChip',
+    );
+    // A narrowing scope: one filter on the button.
+    expect(screen.getByTestId('market-filter-active-count')).toHaveTextContent('1');
+    fireEvent.press(screen.getByTestId('market-scope-pill-fof'));
+    expect(screen.getByTestId('market-scope-pill-preferred')).toBeTruthy();
+  });
+
+  it('shows the build progress and holds the listings query until the FoF set is known', () => {
+    mockExperimental = true;
+    mockInitialPreferences = { ...mockInitialPreferences, mode: 'wotFof' };
+    mockFof = { authors: undefined, progress: { done: 2, total: 5 }, failed: false };
+    const screen = render(<MarketScreen navigation={navigation} />);
+    expect(screen.getByTestId('market-scope-fof-progress')).toHaveTextContent(
+      'market.screen.fofBuilding',
+    );
+    expect(mockFofEnabled).toHaveBeenLastCalledWith(false, []);
+    expect(screen.getByText('market.live.loadingNetwork')).toBeTruthy();
+  });
+
+  it('All: pill with the unvetted note, no filter badge, × back to Preferred', () => {
+    mockExperimental = true;
+    const screen = render(<MarketScreen navigation={navigation} />);
+    openFilters(screen);
+    fireEvent.press(screen.getByTestId('market-scope-all'));
+    expect(mockAllEnabled).toHaveBeenLastCalledWith(true);
+    fireEvent.press(screen.getByTestId('market-filter-done'));
+    act(() => jest.runOnlyPendingTimers());
+    expect(screen.getByTestId('market-scope-pill-all')).toHaveTextContent('market.filters.allChip');
+    expect(screen.getByTestId('market-scope-all-note')).toHaveTextContent(
+      'market.screen.allScopeNote',
+    );
+    // All is the unfiltered scope: no badge with nothing else selected.
+    expect(screen.queryByTestId('market-filter-badge')).toBeNull();
+    fireEvent.changeText(screen.getByTestId('market-search-input'), 'piggy');
+    expect(screen.getByTestId('market-filter-active-count')).toHaveTextContent('1');
+    fireEvent.press(screen.getByTestId('market-search-clear'));
+    fireEvent.press(screen.getByTestId('market-scope-pill-all'));
+    expect(mockAllEnabled).toHaveBeenLastCalledWith(false);
+    expect(screen.queryByTestId('market-scope-all-note')).toBeNull();
+    expect(screen.getByTestId('market-filter-active-count')).toHaveTextContent('1');
+  });
+
+  it('falls back to Preferred when experimental features are turned off', () => {
+    mockExperimental = true;
+    mockInitialPreferences = { ...mockInitialPreferences, mode: 'wotAll' };
+    const screen = render(<MarketScreen navigation={navigation} />);
+    expect(screen.getByTestId('market-scope-pill-all')).toBeTruthy();
+    expect(mockAllEnabled).toHaveBeenLastCalledWith(true);
+    mockExperimental = false;
+    screen.rerender(<MarketScreen navigation={navigation} />);
+    expect(screen.queryByTestId('market-scope-pill-all')).toBeNull();
+    expect(screen.getByTestId('market-scope-pill-preferred')).toBeTruthy();
+    expect(mockAllEnabled).toHaveBeenLastCalledWith(false);
+    openFilters(screen);
+    expect(
+      screen.getByTestId('market-filter-sellers-preferred').props.accessibilityState.selected,
+    ).toBe(true);
+    expect(screen.queryByTestId('market-scope-all')).toBeNull();
+  });
 });

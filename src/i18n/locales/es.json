@@ -2309,6 +2309,12 @@
       "emptyNoMatch": "Ningún producto coincide con tu búsqueda o filtros.",
       "emptyMerchantMissing": "Ahora mismo no hay anuncios de {{name}}. Desliza hacia abajo para actualizar.",
       "emptyNoFriends": "Ninguno de tus amigos de Nostr vende productos de Lightning Piggy todavía.",
+      "emptyNoFof": "Nadie en tu red de amigos de amigos vende todavía.",
+      "emptyNoAll": "No se encontraron anuncios en tus relays ahora mismo.",
+      "allScopeNote": "Experimental: anuncios de cualquiera, sin verificar",
+      "fofBuilding": "Creando tu red… {{done}}/{{total}}",
+      "fofBuildingStart": "Creando tu red…",
+      "fofFailed": "No se pudo crear tu red: se muestran los anuncios de tus amigos.",
       "emptyNone": "No hay productos disponibles en este momento."
     },
     "card": {
@@ -2350,7 +2356,11 @@
       "sellers": "Vendedores",
       "friends": "Amigos (personas a las que sigues)",
       "friendsOfFriends": "Amigos de amigos",
+      "allSellers": "Todos (cualquiera)",
+      "experimental": "Experimental",
       "friendsChip": "Amigos",
+      "friendsOfFriendsChip": "Amigos de amigos",
+      "allChip": "Todos",
       "comingSoon": "Próximamente",
       "clearScope": "Restablecer vendedores a los vendedores preferidos de Lightning Piggy",
       "changeScope": "{{label}}. Abre los filtros para cambiar de vendedores",
@@ -2470,6 +2480,8 @@
     },
     "live": {
       "loading": "Cargando anuncios de tus amigos…",
+      "loadingNetwork": "Cargando anuncios de tu red…",
+      "loadingAll": "Cargando anuncios de todos…",
       "partialToast": "Algunos vendedores no respondieron. Desliza hacia abajo para actualizar.",
       "contactSeller": "Enviar mensaje al vendedor"
     },

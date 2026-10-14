@@ -4,7 +4,11 @@ import { Toast } from '../components/BrandedToast';
 import { useTranslation } from '../contexts/LocaleContext';
 import { useMarketMerchantProfiles } from './useMarketMerchantProfiles';
 import { useNostr, useNostrContacts } from '../contexts/NostrContext';
-import { fetchMarketListings, type MarketListingsResult } from '../services/marketListingsService';
+import {
+  fetchMarketListings,
+  fetchOpenMarketListings,
+  type MarketListingsResult,
+} from '../services/marketListingsService';
 import {
   getMarketSnapshot,
   unexpiredMarketProducts,
@@ -12,6 +16,7 @@ import {
   writeMarketSnapshot,
 } from '../services/marketStorage';
 import { carriedListingEvents, mergeMarketSnapshot } from '../utils/marketSnapshotMerge';
+import { withKnownProfiles } from '../utils/marketOpenScope';
 import type { MarketProduct } from '../data/marketProducts';
 
 /**
@@ -21,20 +26,33 @@ import type { MarketProduct } from '../data/marketProducts';
  */
 export const MARKET_SNAPSHOT_FRESH_MS = 2 * 60 * 1000;
 
-export function useMarketListings(
-  enabled: boolean,
-  scope?: { account: string; authors: readonly string[] },
-) {
+/**
+ * Whose listings to load: an explicit author set (preferred sellers,
+ * friends of friends), or `open` — anyone (the experimental All scope).
+ * Omitted = the viewer's direct follows.
+ */
+export type MarketListingsScope =
+  | { account: string; authors: readonly string[] }
+  | { account: string; open: true };
+
+/** Snapshot-key stand-in for the author list of the open (All) scope. */
+const OPEN_SCOPE_KEY = '*';
+
+export function useMarketListings(enabled: boolean, scope?: MarketListingsScope) {
   const { pubkey, relays } = useNostr();
   const { contacts } = useNostrContacts();
   const t = useTranslation();
   const focused = useIsFocused();
+  const open = !!scope && 'open' in scope;
+  const scopedAuthors = scope && 'authors' in scope ? scope.authors : undefined;
   const authorsKey = useMemo(
     () =>
-      [...new Set(scope?.authors ?? contacts.map((contact) => contact.pubkey.toLowerCase()))]
-        .sort()
-        .join(','),
-    [contacts, scope?.authors],
+      open
+        ? OPEN_SCOPE_KEY
+        : [...new Set(scopedAuthors ?? contacts.map((contact) => contact.pubkey.toLowerCase()))]
+            .sort()
+            .join(','),
+    [contacts, scopedAuthors, open],
   );
   const relaysKey = useMemo(
     () =>
@@ -132,15 +150,21 @@ export function useMarketListings(
       let dismissToast: (() => void) | undefined;
       let retryTimer: ReturnType<typeof setTimeout> | undefined;
       const load = () =>
-        fetchMarketListings(
-          authorsKey.split(','),
-          relaysKey.split(','),
-          controller.signal,
-          onFirstPage,
-          {
-            carried: carriedListingEvents(confirmed.current.products),
-            previousProducts: confirmed.current.products,
-          },
+        (open
+          ? fetchOpenMarketListings(relaysKey.split(','), controller.signal, onFirstPage, {
+              carried: carriedListingEvents(confirmed.current.products),
+              previousProducts: confirmed.current.products,
+            })
+          : fetchMarketListings(
+              authorsKey.split(','),
+              relaysKey.split(','),
+              controller.signal,
+              onFirstPage,
+              {
+                carried: carriedListingEvents(confirmed.current.products),
+                previousProducts: confirmed.current.products,
+              },
+            )
         ).catch(
           (): MarketListingsResult => ({
             products: [],
@@ -209,7 +233,7 @@ export function useMarketListings(
         if (retryTimer) clearTimeout(retryTimer);
         dismissToast?.();
       };
-    }, [enabled, focused, key, account, authorsKey, relaysKey, revision, t]),
+    }, [enabled, focused, key, account, authorsKey, relaysKey, revision, t, open]),
   );
   // Legacy filters stored contact labels. Preserve those selections while
   // moving to pubkey keys, even when a petname differs from the shop profile.
@@ -233,9 +257,17 @@ export function useMarketListings(
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state, key, enabled, focused],
   );
-  const { products, profilesReady } = useMarketMerchantProfiles(
-    currentProducts,
-    enabled && focused,
+  const {
+    products: resolvedProducts,
+    profilesReady,
+    hasProfile,
+  } = useMarketMerchantProfiles(currentProducts, enabled && focused);
+  // All scope, rule 3 (utils/marketOpenScope): once the profile pass has
+  // answered, drop sellers who never published a kind-0.
+  const products = useMemo(
+    () =>
+      open && profilesReady ? withKnownProfiles(resolvedProducts, hasProfile) : resolvedProducts,
+    [open, profilesReady, resolvedProducts, hasProfile],
   );
   return useMemo(
     () => ({

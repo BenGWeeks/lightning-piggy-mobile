@@ -2309,6 +2309,12 @@
       "emptyNoMatch": "No products match your search or filters.",
       "emptyMerchantMissing": "No listings from {{name}} right now — pull to refresh.",
       "emptyNoFriends": "None of your Nostr friends are selling Lightning Piggy products yet.",
+      "emptyNoFof": "No one in your friends-of-friends network is selling yet.",
+      "emptyNoAll": "No listings found on your relays right now.",
+      "allScopeNote": "Experimental: listings from anyone, unvetted",
+      "fofBuilding": "Building your network… {{done}}/{{total}}",
+      "fofBuildingStart": "Building your network…",
+      "fofFailed": "Couldn’t build your network — showing your friends’ listings.",
       "emptyNone": "No products available right now."
     },
     "card": {
@@ -2350,7 +2356,11 @@
       "sellers": "Sellers",
       "friends": "Friends (people you follow)",
       "friendsOfFriends": "Friends of friends",
+      "allSellers": "All (anyone)",
+      "experimental": "Experimental",
       "friendsChip": "Friends",
+      "friendsOfFriendsChip": "Friends of friends",
+      "allChip": "All",
       "comingSoon": "Coming soon",
       "clearScope": "Reset sellers to Lightning Piggy Preferred Sellers",
       "changeScope": "{{label}}. Opens Filters to change sellers",
@@ -2470,6 +2480,8 @@
     },
     "live": {
       "loading": "Loading listings from your friends…",
+      "loadingNetwork": "Loading listings from your network…",
+      "loadingAll": "Loading listings from everyone…",
       "partialToast": "Some sellers didn’t respond. Pull to refresh.",
       "contactSeller": "Message seller"
     },

@@ -63,7 +63,7 @@ name: Market — grid → product detail → reviews/comments tabs (#948)
 - assertVisible:
     id: 'market-filter-sellers-preferred'
 - assertVisible:
-    id: 'market-filter-sellers-friends-of-friends'
+    id: 'market-scope-fof'
 # Ships to (replaced Country): chips come from sellers' published shipping
 # options; Worldwide is always offered and is the default selection.
 - assertVisible:

@@ -15,10 +15,11 @@ import { Image } from 'expo-image';
 import { ChevronLeft, Heart, Search, SlidersHorizontal, Store, X } from 'lucide-react-native';
 import MarketProductCard from '../components/MarketProductCard';
 import MarketFilterBar from '../components/MarketFilterBar';
+import MarketScopePill from '../components/MarketScopePill';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useLocale } from '../contexts/LocaleContext';
-import { usePreferredMarketListings } from '../hooks/usePreferredMarketListings';
-import { useMarketListings } from '../hooks/useMarketListings';
+import { useGroups } from '../contexts/GroupsContext';
+import { useMarketScopeListings } from '../hooks/useMarketScopeListings';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { createMarketScreenStyles } from '../styles/MarketScreen.styles';
 import { sellerOf, type MarketProduct } from '../data/marketProducts';
@@ -28,7 +29,7 @@ import { useMarketShipsTo } from '../hooks/useMarketShipsTo';
 import { localizedCountryName } from '../data/countries';
 import { SHIPS_TO_UNKNOWN, shipsToOptions } from '../utils/marketShipsTo';
 import { useMarketSelectionGuard } from '../hooks/useMarketSelectionGuard';
-import { DEFAULT_MARKET_MODE, type MarketMode } from '../utils/marketMode';
+import { DEFAULT_MARKET_MODE, effectiveMarketMode, type MarketMode } from '../utils/marketMode';
 import {
   canClearMarketFilters,
   countActiveMarketFilters,
@@ -46,7 +47,8 @@ interface Props {
   route?: MarketRoute;
 }
 
-/** Preferred catalogue or foreground relay listings from the viewer's direct follows. */
+/** Preferred catalogue, or foreground relay listings for the chosen seller scope
+ * (follows; experimental: friends of friends / anyone). */
 const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
   const { t, locale, formatLocale } = useLocale();
@@ -59,10 +61,13 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
   const tileWidth = useMemo(() => marketGridTileWidth(windowWidth), [windowWidth]);
 
   const { ready, preferences, update } = useMarketPreferences();
-  const { mode, merchant: savedMerchant, shipsTo, includeUnknownShipping, currency } = preferences;
-  const friends = useMarketListings(ready && mode === 'wotFriends');
-  const preferred = usePreferredMarketListings(ready && mode === 'preferred');
-  const live = mode === 'wotFriends' ? friends : preferred;
+  const { merchant: savedMerchant, shipsTo, includeUnknownShipping, currency } = preferences;
+  // "Show experimental features" unlocks the friends-of-friends and All
+  // scopes. With it off, a saved experimental scope reads as Preferred (it
+  // isn't overwritten: the setting hydrates after the Market may mount).
+  const { secretMode: experimental } = useGroups();
+  const mode = effectiveMarketMode(preferences.mode, experimental);
+  const { live, fofProgress, fofFailed } = useMarketScopeListings(mode, ready);
   const setMerchant = useCallback((merchant: string | null) => update({ merchant }), [update]);
   const setShipsTo = useCallback((shipsTo: string | null) => update({ shipsTo }), [update]);
   const setIncludeUnknownShipping = useCallback(
@@ -185,6 +190,7 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
     selectCollection(null);
   }, [ready, request, update, selectCollection]);
 
+  const resetScope = useCallback(() => selectMode(DEFAULT_MARKET_MODE), [selectMode]);
   const clearFilters = useCallback(() => {
     update({ merchant: null, shipsTo: null, includeUnknownShipping: true, currency: null });
     selectMode(DEFAULT_MARKET_MODE);
@@ -225,14 +231,22 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const emptyCopy =
     live.loading && baseProducts.length === 0
-      ? t('market.live.loading')
+      ? mode === 'wotFof'
+        ? t('market.live.loadingNetwork')
+        : mode === 'wotAll'
+          ? t('market.live.loadingAll')
+          : t('market.live.loading')
       : merchantMissing
         ? t('market.screen.emptyMerchantMissing', { name: merchantName ?? merchant ?? '' })
         : filterActive
           ? t('market.screen.emptyNoMatch')
           : mode === 'wotFriends'
             ? t('market.screen.emptyNoFriends')
-            : t('market.screen.emptyNone');
+            : mode === 'wotFof'
+              ? t('market.screen.emptyNoFof')
+              : mode === 'wotAll'
+                ? t('market.screen.emptyNoAll')
+                : t('market.screen.emptyNone');
 
   if (!ready) return <View style={styles.container} testID="market-screen" />;
 
@@ -329,35 +343,15 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
         </TouchableOpacity>
       </View>
 
-      {/* The seller scope is always shown as a pill. Preferred is the default
-          with no wider option yet, so it has no × — tapping it opens Filters
-          (Sellers leads the sheet); Friends' × returns to Preferred. */}
-      <View style={styles.scopeRow}>
-        {mode === DEFAULT_MARKET_MODE ? (
-          <TouchableOpacity
-            style={styles.scopeChip}
-            onPress={openFilters}
-            accessibilityLabel={t('market.filters.changeScope', {
-              label: t('market.modes.preferred'),
-            })}
-            testID="market-scope-pill-preferred"
-            activeOpacity={0.7}
-          >
-            <Text style={styles.scopeChipText}>{t('market.modes.preferred')}</Text>
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity
-            style={styles.scopeChip}
-            onPress={() => selectMode(DEFAULT_MARKET_MODE)}
-            accessibilityLabel={t('market.filters.clearScope')}
-            testID="market-scope-pill-friends"
-            activeOpacity={0.7}
-          >
-            <Text style={styles.scopeChipText}>{t('market.filters.friendsChip')}</Text>
-            <X size={14} color={colors.brandPink} strokeWidth={2.25} />
-          </TouchableOpacity>
-        )}
-      </View>
+      {/* The seller scope is always shown as a pill: Preferred's opens
+          Filters; every other scope's × returns to Preferred. */}
+      <MarketScopePill
+        mode={mode}
+        onOpenFilters={openFilters}
+        onReset={resetScope}
+        fofProgress={fofProgress}
+        fofFailed={fofFailed}
+      />
 
       {/* Pull-to-refresh replaces the old status row; only a load that missed
           some sellers says so, inline. */}
@@ -376,6 +370,7 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
       <MarketFilterBar
         mode={mode}
         onSelectMode={selectMode}
+        experimental={experimental}
         visible={filtersOpen}
         onClose={() => setFiltersOpen(false)}
         merchants={merchantOptions}

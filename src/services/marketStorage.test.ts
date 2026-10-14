@@ -18,11 +18,11 @@ beforeEach(() => {
   jest.clearAllMocks();
   (AsyncStorage.getItem as jest.Mock).mockResolvedValue(null);
 });
-it('rejects corrupt preferences and disabled scopes', async () => {
+it('rejects corrupt preferences and unknown scopes', async () => {
   (AsyncStorage.getItem as jest.Mock).mockResolvedValue('{broken');
   expect((await readMarketPreferences('alice')).mode).toBe('preferred');
   (AsyncStorage.getItem as jest.Mock).mockResolvedValue(
-    JSON.stringify({ mode: 'wotAll', merchant: 42 }),
+    JSON.stringify({ mode: 'wotEverything', merchant: 42 }),
   );
   expect(await readMarketPreferences('bob')).toEqual({
     mode: 'preferred',
@@ -31,6 +31,12 @@ it('rejects corrupt preferences and disabled scopes', async () => {
     includeUnknownShipping: true,
     currency: null,
   });
+});
+it('keeps saved experimental scopes (the screen clamps them while experimental is off)', async () => {
+  for (const mode of ['wotFof', 'wotAll']) {
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValue(JSON.stringify({ mode }));
+    expect((await readMarketPreferences(`exp-${mode}`)).mode).toBe(mode);
+  }
 });
 it('migrates the retired Country filter value to Anywhere and keeps a saved Ships-to', async () => {
   (AsyncStorage.getItem as jest.Mock).mockResolvedValue(

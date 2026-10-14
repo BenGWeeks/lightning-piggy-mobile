@@ -2309,6 +2309,12 @@
       "emptyNoMatch": "Nincs a keresésnek vagy szűrőknek megfelelő termék.",
       "emptyMerchantMissing": "{{name}} jelenleg nem kínál semmit — húzd le a frissítéshez.",
       "emptyNoFriends": "A Nostr-barátaid közül még senki sem árul Lightning Piggy termékeket.",
+      "emptyNoFof": "A barátaid barátainak hálózatában még senki sem árul.",
+      "emptyNoAll": "A relay-eiden most nem található hirdetés.",
+      "allScopeNote": "Kísérleti: bárki hirdetései, ellenőrzés nélkül",
+      "fofBuilding": "Hálózatod felépítése… {{done}}/{{total}}",
+      "fofBuildingStart": "Hálózatod felépítése…",
+      "fofFailed": "Nem sikerült felépíteni a hálózatodat – a barátaid hirdetései láthatók.",
       "emptyNone": "Jelenleg nincs elérhető termék."
     },
     "card": {
@@ -2350,7 +2356,11 @@
       "sellers": "Eladók",
       "friends": "Barátok (akiket követsz)",
       "friendsOfFriends": "Barátok barátai",
+      "allSellers": "Összes (bárki)",
+      "experimental": "Kísérleti",
       "friendsChip": "Barátok",
+      "friendsOfFriendsChip": "Barátok barátai",
+      "allChip": "Összes",
       "comingSoon": "Hamarosan",
       "clearScope": "Eladók visszaállítása a Lightning Piggy ajánlott eladóira",
       "changeScope": "{{label}}. Megnyitja a szűrőket az eladók módosításához",
@@ -2470,6 +2480,8 @@
     },
     "live": {
       "loading": "A barátaid hirdetéseinek betöltése…",
+      "loadingNetwork": "Hirdetések betöltése a hálózatodból…",
+      "loadingAll": "Mindenki hirdetéseinek betöltése…",
       "partialToast": "Néhány eladó nem válaszolt. Húzd lefelé a frissítéshez.",
       "contactSeller": "Üzenet az eladónak"
     },

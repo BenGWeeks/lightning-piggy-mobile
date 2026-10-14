@@ -2309,6 +2309,12 @@
       "emptyNoMatch": "Keine Produkte passen zu deiner Suche oder deinen Filtern.",
       "emptyMerchantMissing": "Gerade keine Angebote von {{name}} – zum Aktualisieren nach unten ziehen.",
       "emptyNoFriends": "Keiner deiner Nostr-Freunde verkauft bisher Lightning-Piggy-Produkte.",
+      "emptyNoFof": "In deinem Freunde-von-Freunden-Netzwerk verkauft noch niemand etwas.",
+      "emptyNoAll": "Auf deinen Relays wurden gerade keine Angebote gefunden.",
+      "allScopeNote": "Experimentell: Angebote von allen, ungeprüft",
+      "fofBuilding": "Dein Netzwerk wird aufgebaut… {{done}}/{{total}}",
+      "fofBuildingStart": "Dein Netzwerk wird aufgebaut…",
+      "fofFailed": "Dein Netzwerk konnte nicht aufgebaut werden – die Angebote deiner Freunde werden angezeigt.",
       "emptyNone": "Derzeit sind keine Produkte verfügbar."
     },
     "card": {
@@ -2350,7 +2356,11 @@
       "sellers": "Verkäufer",
       "friends": "Freunde (Personen, denen du folgst)",
       "friendsOfFriends": "Freunde von Freunden",
+      "allSellers": "Alle (jeder)",
+      "experimental": "Experimentell",
       "friendsChip": "Freunde",
+      "friendsOfFriendsChip": "Freunde von Freunden",
+      "allChip": "Alle",
       "comingSoon": "Demnächst verfügbar",
       "clearScope": "Verkäufer auf bevorzugte Verkäufer von Lightning Piggy zurücksetzen",
       "changeScope": "{{label}}. Öffnet die Filter, um die Verkäufer zu ändern",
@@ -2470,6 +2480,8 @@
     },
     "live": {
       "loading": "Angebote deiner Freunde werden geladen…",
+      "loadingNetwork": "Angebote aus deinem Netzwerk werden geladen…",
+      "loadingAll": "Angebote von allen werden geladen…",
       "partialToast": "Einige Verkäufer haben nicht geantwortet. Zum Aktualisieren nach unten ziehen.",
       "contactSeller": "Dem Verkäufer schreiben"
     },

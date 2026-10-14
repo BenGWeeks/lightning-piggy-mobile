@@ -40,20 +40,6 @@ export const createMarketScreenStyles = (colors: Palette) =>
       fontSize: 13,
       fontWeight: '500',
     },
-    // The active seller-scope pill, just under the search row.
-    scopeRow: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 8, alignItems: 'flex-start' },
-    scopeChip: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      paddingHorizontal: 10,
-      paddingVertical: 6,
-      borderRadius: 999,
-      borderWidth: 1,
-      borderColor: colors.brandPink,
-      backgroundColor: colors.surface,
-    },
-    scopeChipText: { fontSize: 12, fontWeight: '600', color: colors.brandPink },
     // ----- inline search + filter button -----------------------------------
     // A single compact row: the search pill (flex) plus a square filter icon
     // button. Replaces the old three always-visible chip rows so the grid
