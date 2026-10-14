@@ -16,8 +16,9 @@
 #                 from .env the bunker holds. Only Piggy fixtures are accepted.
 #   NIP46_DEVICE  adb serial for pair-from-screen (default emulator-5554)
 #   NIP46_PORT    control port on 127.0.0.1 (default 8746)
-#   NIP46_RELAYS  comma-separated relays (default primal, ditto.pub, nos.lol — the
-#                 relays the app pairs over, NIP46_PAIRING_RELAYS)
+#   EXPO_PUBLIC_TEST_RELAY_URL  LAN relay (default ws://192.168.1.89:7778)
+#   EXPO_PUBLIC_TEST_RELAY_LOCKDOWN=0  explicit public interop opt-out
+#   NIP46_RELAYS  comma-separated public relays (used only with lockdown=0)
 #
 # Secret handling: the nsec is read from .env by grep (the rest of .env is not
 # sourced) and handed to node on stdin — node runs with an allowlisted
@@ -71,10 +72,16 @@ case "${1:-}" in
     # Strip optional quotes; never echo the value.
     nsec="$(grep -E "^MAESTRO_NSEC_${PIGGY}=" .env | tail -1 | cut -d= -f2- | tr -d "\"' \r")"
     [[ "$nsec" == nsec1* ]] || die "MAESTRO_NSEC_$PIGGY missing or not an nsec in .env"
+    # Match Expo's .env settings without sourcing unrelated secrets. Exported
+    # settings take precedence; only these two non-secret keys are read.
+    relay_url="${EXPO_PUBLIC_TEST_RELAY_URL:-$(awk -F= '$1 == "EXPO_PUBLIC_TEST_RELAY_URL" {sub(/^[^=]*=/, ""); gsub(/[\047" \r]/, ""); print}' .env | tail -1)}"
+    relay_lockdown="${EXPO_PUBLIC_TEST_RELAY_LOCKDOWN:-$(awk -F= '$1 == "EXPO_PUBLIC_TEST_RELAY_LOCKDOWN" {sub(/^[^=]*=/, ""); gsub(/[\047" \r]/, ""); print}' .env | tail -1)}"
     # setsid + nohup: survive the calling shell / Maestro run ending.
     rm -f "$STATE_DIR/token"
     env -i PATH="$PATH" HOME="$HOME" \
       NIP46_STATE_DIR="$STATE_DIR" NIP46_PORT="$PORT" NIP46_DEVICE="$DEVICE" \
+      EXPO_PUBLIC_TEST_RELAY_URL="${relay_url:-ws://192.168.1.89:7778}" \
+      EXPO_PUBLIC_TEST_RELAY_LOCKDOWN="${relay_lockdown:-1}" \
       NIP46_RELAYS="${NIP46_RELAYS:-wss://relay.primal.net,wss://relay.ditto.pub,wss://nos.lol}" \
       setsid nohup node scripts/nip46-test-bunker.mjs >>"$LOG_FILE" 2>&1 < <(printf '%s\n' "$nsec") &
     echo $! >"$PID_FILE"

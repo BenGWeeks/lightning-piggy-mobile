@@ -1,4 +1,5 @@
 import { setCurrentUserPubkey } from './nostrActiveAccount';
+import { TEST_RELAY_URL } from '../config/testRelayLockdown';
 import { TEST_ACCOUNT_KEYS } from '../utils/testAccounts';
 /**
  * Unit tests for the NIP-46 ("Nostr Connect") signer service. The nostr-tools
@@ -318,4 +319,53 @@ it('discards a signer that finishes connecting after lockdown begins', async () 
   } finally {
     setCurrentUserPubkey(null);
   }
+});
+
+describe('pairing relay lockdown', () => {
+  afterEach(() => setCurrentUserPubkey(null));
+
+  it.each([TEST_ACCOUNT_KEYS.big, TEST_ACCOUNT_KEYS.middle, TEST_ACCOUNT_KEYS.evil, null])(
+    'pairs Little on LAN from active identity %s and keeps subsequent RPCs there',
+    async (activePubkey) => {
+      setCurrentUserPubkey(activePubkey);
+      const input = {
+        clientSecretKey: new Uint8Array([1, 2, 3, 4]),
+        clientPubkey: 'clientpub',
+        targetPubkey: TEST_ACCOUNT_KEYS.little,
+        relays: ['wss://public.example'],
+        secret: 'deadbeef',
+        perms: ['sign_event', 'nip44_decrypt'],
+        name: 'Lightning Piggy',
+      };
+      svc.buildPairingUri(input);
+      expect(mockCreateNostrConnectURI).toHaveBeenLastCalledWith(
+        expect.objectContaining({ relays: [TEST_RELAY_URL] }),
+      );
+      mockSigner.getPublicKey.mockResolvedValue(TEST_ACCOUNT_KEYS.little);
+      const result = await svc.awaitBunkerPair(input);
+      expect(result.connection.relays).toEqual([TEST_RELAY_URL]);
+      svc.adoptPairedSigner(result.connection, result.signer);
+      setCurrentUserPubkey(TEST_ACCOUNT_KEYS.little);
+      await svc.requestPublicKey();
+      await svc.requestNip44Decrypt('cipher', 'peer', TEST_ACCOUNT_KEYS.little);
+      await svc.requestEventSignature('{}', '', TEST_ACCOUNT_KEYS.little);
+      expect(mockFromBunker).toHaveBeenLastCalledWith(
+        expect.any(Uint8Array),
+        expect.objectContaining({ relays: [TEST_RELAY_URL] }),
+        { pool: {} },
+      );
+    },
+  );
+
+  it('routes the ordinary pairing button to LAN while a test identity is active', () => {
+    setCurrentUserPubkey(TEST_ACCOUNT_KEYS.big);
+    expect(svc.pairingRelays(['wss://public.example'])).toEqual([TEST_RELAY_URL]);
+  });
+
+  it('preserves ordinary and logged-out public pairing destinations', () => {
+    setCurrentUserPubkey(null);
+    expect(svc.pairingRelays(['wss://public.example'])).toEqual(['wss://public.example']);
+    setCurrentUserPubkey('a'.repeat(64));
+    expect(svc.pairingRelays(['wss://public.example'])).toEqual(['wss://public.example']);
+  });
 });

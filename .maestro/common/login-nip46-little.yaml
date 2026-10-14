@@ -40,7 +40,7 @@ name: Internal — sign Little Piggy in through the local NIP-46 test bunker
       - tapOn:
           id: 'account-switcher-add-existing'
 - tapOn:
-    id: 'nip46-button'
+    id: 'nip46-test-account-button'
 # QR + "Waiting for bunker…" are up once Cancel renders.
 - extendedWaitUntil:
     visible:

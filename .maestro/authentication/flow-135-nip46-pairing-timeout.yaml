@@ -24,7 +24,7 @@ name: NIP-46 pairing the bunker never answers → "took too long" error, Big sti
 - tapOn:
     id: 'account-switcher-add-existing'
 - tapOn:
-    id: 'nip46-button'
+    id: 'nip46-test-account-button'
 - extendedWaitUntil:
     visible:
       id: 'cancel-nip46'
@@ -42,7 +42,7 @@ name: NIP-46 pairing the bunker never answers → "took too long" error, Big sti
       text: 'Pairing took too long — try again'
     timeout: 150000
 - assertVisible:
-    id: 'nip46-button'
+    id: 'nip46-test-account-button'
 - takeScreenshot: signer-matrix-135-pairing-timed-out
 - runScript:
     file: ../common/nip46-bunker.js

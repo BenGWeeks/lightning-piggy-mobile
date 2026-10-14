@@ -1,4 +1,5 @@
-import { watchTestRelayLockdown } from './testRelayRouting';
+import { lockRelays } from '../config/testRelayLockdown';
+import { activeAccountRelays, watchTestRelayLockdown } from './testRelayRouting';
 import { pool } from './nostrPool';
 /**
  * NIP-46 ("Nostr Connect" / bunker) signer service.
@@ -144,7 +145,7 @@ async function getSigner(): Promise<BunkerSigner> {
   const promise = (async () => {
     const pointer: BunkerPointer = {
       pubkey: connection.remoteSignerPubkey,
-      relays: connection.relays,
+      relays: lockRelays(connection.relays, connection.userPubkey),
       secret: null,
     };
     const clientSecretKey = hexToBytes(connection.clientSecretKeyHex);
@@ -329,6 +330,11 @@ export async function requestNip44DecryptSilent(
   throw new Error('NIP-46 does not support silent batch decrypt — use requestNip44Decrypt');
 }
 
+/** Explicit target identity allows fixture pairing before an account is active. */
+export function pairingRelays(relays: string[], targetPubkey?: string): string[] {
+  return [...lockRelays(activeAccountRelays(relays), targetPubkey)];
+}
+
 /**
  * Build a `nostrconnect://` pairing URI. The bunker (Clave / Aegis /
  * nsec.app / etc.) scans this and replies with a `connect` ack that
@@ -346,6 +352,7 @@ export async function requestNip44DecryptSilent(
  */
 export function buildPairingUri(input: {
   clientPubkey: string;
+  targetPubkey?: string;
   relays: string[];
   secret: string;
   perms: string[];
@@ -356,7 +363,7 @@ export function buildPairingUri(input: {
   // in sync with what BunkerSigner.fromURI parses on the other side.
   return createNostrConnectURI({
     clientPubkey: input.clientPubkey,
-    relays: input.relays,
+    relays: pairingRelays(input.relays, input.targetPubkey),
     secret: input.secret,
     perms: input.perms,
     name: input.name,
@@ -395,6 +402,7 @@ export function buildPairingUri(input: {
 export async function awaitBunkerPair(input: {
   clientSecretKey: Uint8Array;
   clientPubkey: string;
+  targetPubkey?: string;
   relays: string[];
   secret: string;
   perms: string[];
@@ -402,9 +410,10 @@ export async function awaitBunkerPair(input: {
   maxWaitSeconds?: number;
   signal?: AbortSignal;
 }): Promise<{ signer: BunkerSigner; connection: Nip46Connection; userPubkey: string }> {
+  const relays = pairingRelays(input.relays, input.targetPubkey);
   const uri = buildPairingUri({
     clientPubkey: input.clientPubkey,
-    relays: input.relays,
+    relays,
     secret: input.secret,
     perms: input.perms,
     name: input.name,
@@ -444,7 +453,7 @@ export async function awaitBunkerPair(input: {
   const connection: Nip46Connection = {
     remoteSignerPubkey: signer.bp.pubkey,
     userPubkey,
-    relays: input.relays,
+    relays,
     clientSecretKeyHex: bytesToHex(input.clientSecretKey),
     perms: input.perms.join(','),
   };

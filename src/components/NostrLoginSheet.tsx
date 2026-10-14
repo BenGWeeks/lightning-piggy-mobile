@@ -1,3 +1,5 @@
+import { TEST_ACCOUNT_KEYS } from '../utils/testAccounts';
+import { isTestRelayLockdown, TEST_RELAY_URL } from '../config/testRelayLockdown';
 import BrandedSpinner from './BrandedSpinner';
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
@@ -239,7 +241,7 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
    *  - 120s timeout reached → reject with a clear "took too long" so
    *    the user can retry without thinking it's an app bug.
    */
-  const handleNip46 = async () => {
+  const handleNip46 = async (targetPubkey?: string) => {
     // Single-flight guard: a live `nip46AbortRef` means a pairing run is
     // already in progress. Without this, a double-tap (before `setMode`
     // re-renders the button away) would start a second run whose
@@ -261,9 +263,10 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
     const secretBytes = new Uint8Array(16);
     crypto.getRandomValues(secretBytes);
     const secret = bytesToHex(secretBytes);
+    const relays = nostrConnectService.pairingRelays(NIP46_PAIRING_RELAYS, targetPubkey);
     const uri = nostrConnectService.buildPairingUri({
       clientPubkey,
-      relays: NIP46_PAIRING_RELAYS,
+      relays,
       secret,
       perms: NIP46_PERMS,
       name: 'Lightning Piggy',
@@ -281,7 +284,7 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
       const { signer, connection } = await nostrConnectService.awaitBunkerPair({
         clientSecretKey,
         clientPubkey,
-        relays: NIP46_PAIRING_RELAYS,
+        relays,
         secret,
         perms: NIP46_PERMS,
         name: 'Lightning Piggy',
@@ -461,7 +464,7 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
               accessibilityRole="button"
               accessibilityState={{ disabled: isLoggingIn }}
               style={styles.amberButton}
-              onPress={handleNip46}
+              onPress={() => handleNip46()}
               disabled={isLoggingIn}
               accessibilityLabel={t('nostrLoginSheet.useNip46A11y')}
               testID="nip46-button"
@@ -472,6 +475,23 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
                   : t('nostrLoginSheet.useNip46Android')}
               </Text>
             </TouchableOpacity>
+
+            {isTestRelayLockdown(TEST_ACCOUNT_KEYS.little) && (
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityState={{ disabled: isLoggingIn }}
+                style={styles.amberButton}
+                onPress={() => handleNip46(TEST_ACCOUNT_KEYS.little)}
+                disabled={isLoggingIn}
+                accessibilityLabel={t('nostrScreen.testRelayLockdown', { url: TEST_RELAY_URL })}
+                testID="nip46-test-account-button"
+              >
+                <Text style={styles.amberButtonText}>{t('nostrLoginSheet.useNip46A11y')}</Text>
+                <Text style={styles.amberButtonText}>
+                  {t('nostrScreen.testRelayLockdown', { url: TEST_RELAY_URL })}
+                </Text>
+              </TouchableOpacity>
+            )}
 
             <View style={styles.dividerRow}>
               <View style={styles.dividerLine} />

@@ -1628,3 +1628,37 @@ and `[Relay] budget timeout` for forced recovery. Live group logs should show
 combine their filters into one REQ and joins reuse the decrypted rumor and local
 keys. The no-network regression registers 10 live owners, admits only 7, then
 runs three one-shots without exceeding the relay cap.
+
+
+=== NIP-46 fixture pairing times out or RPCs stop after account activation
+
+The QR's advertised relays, the app's signer subscription and the fixture
+bunker's reply destinations must agree. Active TEST accounts route pairing
+URIs to the LAN relay. When logged out, use the DEV-only test-account Nostr
+Connect button (`nip46-test-account-button`), which selects LAN before the
+bunker reveals its account. The ordinary pairing button retains public
+relays when no TEST account is active. The Little Piggy Maestro login and
+pairing-timeout flows use the test-account button.
+
+`scripts/nip46-test-bunker.sh` reads the two `EXPO_PUBLIC_TEST_RELAY_*`
+settings from the environment or `.env`, without sourcing unrelated secrets.
+The bunker defaults to LAN, rejects public pairing URIs under lockdown and
+routes restored client subscriptions and subsequent signing/decrypt replies
+only to LAN. Set `EXPO_PUBLIC_TEST_RELAY_LOCKDOWN=0` in both app and bunker
+for deliberate public interop; restart both after changing relay settings.
+
+=== An account switch must not change a pending DM's relay policy
+
+NIP-17 nsec sends yield between wraps; external-signer sends await encryption
+and signing. Lock relay destinations to the sender identity before those
+waits. Reading only the currently active account at publish time can let an
+old TEST account's pending wraps escape to public relays after an account
+switch. `nostrNip17Send` retains the sender's locked relay snapshot for the
+whole send, including delivery tracking and stale-socket retries.
+
+=== Related crypto Jest suites take up to one minute to exit
+
+`nostrCrypto` schedules a DEV summary timer at most once per 60 seconds.
+`npx jest --silent --detectOpenHandles` identifies `scheduleSummary` when a
+suite passes but stays alive briefly. Allow the summary timer to settle;
+this is separate from relay subscriptions and does not require force-exit.
