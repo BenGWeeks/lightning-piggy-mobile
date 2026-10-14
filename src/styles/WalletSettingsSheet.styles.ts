@@ -1,5 +1,5 @@
 import { Platform, StyleSheet } from 'react-native';
-import type { Palette } from './palettes';
+import { lightPalette, type Palette } from './palettes';
 
 export const createWalletSettingsSheetStyles = (colors: Palette) =>
   StyleSheet.create({
@@ -97,7 +97,7 @@ export const createWalletSettingsSheetStyles = (colors: Palette) =>
       color: colors.textBody,
     },
     qrPanel: {
-      backgroundColor: colors.white,
+      backgroundColor: colors.white, // White quiet zone preserves QR scanning
       borderRadius: 12,
       padding: 16,
       alignItems: 'center',
@@ -106,7 +106,7 @@ export const createWalletSettingsSheetStyles = (colors: Palette) =>
     },
     qrHint: {
       fontSize: 12,
-      color: colors.textSupplementary,
+      color: lightPalette.textBody, // Dark ink on white QR plate
       textAlign: 'center',
     },
     hintText: {

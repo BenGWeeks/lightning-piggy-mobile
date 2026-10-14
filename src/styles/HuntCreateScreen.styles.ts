@@ -306,7 +306,7 @@ export const createHuntCreateScreenStyles = (colors: Palette) =>
       width: 20,
       height: 20,
       borderRadius: 10,
-      backgroundColor: colors.white,
+      backgroundColor: colors.white, // White thumb contrasts toggle track
       alignSelf: 'flex-start',
     },
     lockToggleKnobOn: { alignSelf: 'flex-end' },
@@ -583,7 +583,7 @@ export const createHuntCreateScreenStyles = (colors: Palette) =>
       width: 22,
       height: 22,
       borderRadius: 11,
-      backgroundColor: colors.white,
+      backgroundColor: colors.white, // White thumb contrasts toggle track
     },
     toggleThumbOn: { alignSelf: 'flex-end' },
     warning: {

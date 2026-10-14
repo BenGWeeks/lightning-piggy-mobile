@@ -77,7 +77,7 @@ export const createPublishedRelayListsSectionStyles = (colors: Palette) =>
       marginTop: 12,
       height: 48,
       borderRadius: 12,
-      backgroundColor: colors.white,
+      backgroundColor: colors.white, // White button contrasts brand background
       justifyContent: 'center',
       alignItems: 'center',
     },

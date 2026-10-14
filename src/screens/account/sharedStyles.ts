@@ -55,7 +55,7 @@ export const createSharedAccountStyles = (colors: Palette) =>
       width: 24,
       height: 24,
       borderRadius: 12,
-      backgroundColor: colors.white,
+      backgroundColor: colors.white, // White thumb contrasts toggle track
     },
     sslToggleThumbActive: {
       alignSelf: 'flex-end',

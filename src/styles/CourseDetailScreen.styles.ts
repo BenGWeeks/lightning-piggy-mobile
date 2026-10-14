@@ -19,7 +19,7 @@ export const createCourseDetailScreenStyles = (colors: Palette) =>
       width: 36,
       height: 36,
       borderRadius: 18,
-      backgroundColor: colors.white,
+      backgroundColor: colors.white, // White pill contrasts hero imagery
       justifyContent: 'center',
       alignItems: 'center',
       zIndex: 10,

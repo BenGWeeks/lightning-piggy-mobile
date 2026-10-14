@@ -65,7 +65,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   // for all three — pink (production), blue (dev), purple (preview) — so the
   // three installs stay instantly distinguishable on the home screen.
   icon: getIconPath(),
-  userInterfaceStyle: 'light',
+  userInterfaceStyle: 'automatic',
   // Splash screen: the pig + brand wordmark on brand-pink. Same asset
   // IntroScreen uses so first-time users get a continuous pig → Home
   // transition without the pink-spinner gap. `contain` leaves padding

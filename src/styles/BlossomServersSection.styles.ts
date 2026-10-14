@@ -7,7 +7,7 @@ export const createBlossomServersSectionStyles = (colors: Palette) =>
       paddingHorizontal: 8,
       paddingVertical: 2,
       borderRadius: 10,
-      backgroundColor: colors.white,
+      backgroundColor: colors.white, // White badge contrasts brand background
     },
     primaryBadgeText: {
       color: colors.brandPink,

@@ -22,6 +22,7 @@ export const createRelayDetailsScreenStyles = (colors: Palette) =>
     iconBox: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
     icon: { width: 48, height: 48, borderRadius: 12, position: 'absolute' },
     toggle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    // White button contrasts brand background
     remove: { backgroundColor: colors.white, padding: 14, borderRadius: 12, alignItems: 'center' },
     disabled: { opacity: 0.45 },
     removeText: { color: colors.brandPink, fontWeight: '700', fontSize: 15 },

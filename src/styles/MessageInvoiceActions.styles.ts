@@ -1,5 +1,5 @@
 import { StyleSheet } from 'react-native';
-import type { Palette } from './palettes';
+import { lightPalette, type Palette } from './palettes';
 
 export type MessageInvoiceActionsStyles = ReturnType<typeof createMessageInvoiceActionsStyles>;
 
@@ -53,13 +53,13 @@ export const createMessageInvoiceActionsStyles = (colors: Palette) =>
       alignItems: 'center',
       paddingVertical: 12,
       paddingHorizontal: 12,
-      backgroundColor: colors.white,
+      backgroundColor: colors.white, // White quiet zone preserves QR scanning
       borderRadius: 12,
       alignSelf: 'center',
     },
     qrHint: {
       fontSize: 11,
-      color: colors.textSupplementary,
+      color: lightPalette.textBody, // Dark ink on white QR plate
       marginTop: 8,
       textAlign: 'center',
     },

@@ -32,7 +32,7 @@ export const createMarmotPushSectionStyles = (colors: Palette) =>
       paddingHorizontal: 14,
       paddingVertical: 8,
       borderRadius: 18,
-      backgroundColor: colors.white,
+      backgroundColor: colors.white, // White button contrasts brand background
     },
     pillButtonText: {
       color: colors.brandPink,

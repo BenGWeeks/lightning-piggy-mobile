@@ -81,6 +81,7 @@
     "expo-secure-store": "~55.0.15",
     "expo-sharing": "~55.0.21",
     "expo-status-bar": "~55.0.6",
+    "expo-system-ui": "~55.0.19",
     "expo-task-manager": "~55.0.17",
     "i18n-js": "^4.5.3",
     "light-bolt11-decoder": "^3.2.0",

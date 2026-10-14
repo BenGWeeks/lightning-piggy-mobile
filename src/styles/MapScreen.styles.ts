@@ -402,7 +402,7 @@ export const createMapScreenStyles = (colors: Palette) =>
       width: 20,
       height: 20,
       borderRadius: 10,
-      backgroundColor: colors.white,
+      backgroundColor: colors.white, // White thumb contrasts toggle track
     },
     filterToggleThumbOn: {
       transform: [{ translateX: 16 }],
