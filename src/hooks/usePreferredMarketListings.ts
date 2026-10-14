@@ -3,7 +3,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Toast } from '../components/BrandedToast';
 import { useTranslation } from '../contexts/LocaleContext';
 import { useNostr } from '../contexts/NostrContext';
-import { MARKET_PRODUCTS } from '../data/marketProducts';
+import { MARKET_PRODUCTS, PIG_TEST_PRODUCTS } from '../data/marketProducts';
 import {
   fetchPreferredSellers,
   getPreferredSellers,
@@ -78,16 +78,29 @@ export function usePreferredMarketListings(enabled = true) {
     setRevision((value) => value + 1);
     refreshListings();
   }, [refreshListings]);
+  // Dev builds keep the 21-sat pig test items (#948) next to the live
+  // catalogue, so the in-app checkout can be exercised end to end; release
+  // builds have none (PIG_TEST_PRODUCTS is empty outside __DEV__).
+  const products = useMemo(
+    () => (live.hasSnapshot ? [...PIG_TEST_PRODUCTS, ...live.products] : MARKET_PRODUCTS),
+    [live.hasSnapshot, live.products],
+  );
   return {
     ...live,
     refresh,
     incomplete: failed || live.incomplete,
     loading: enabled && !failed && (authors === undefined || live.loading),
-    products: live.hasSnapshot ? live.products : MARKET_PRODUCTS,
+    products,
   };
 }
 
+const PIG_TEST_IDS = new Set(PIG_TEST_PRODUCTS.map((product) => product.id));
+
 export function usePreferredMarketSample() {
   const { products } = usePreferredMarketListings();
-  return useMemo(() => samplePreferredProducts(products), [products]);
+  // The dev-only pig test items belong in the Market grid, not the Explore rail.
+  return useMemo(
+    () => samplePreferredProducts(products.filter((product) => !PIG_TEST_IDS.has(product.id))),
+    [products],
+  );
 }
