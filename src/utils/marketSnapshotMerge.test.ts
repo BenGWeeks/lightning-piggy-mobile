@@ -107,12 +107,22 @@ it('takes a newer fetched revision over the cached one', () => {
   expect(mergeMarketSnapshot([cached], result([fetched], [MARKET_RELAY]))[0]).toBe(fetched);
 });
 
-it('never brings back a newer cached revision that this round withdrew', () => {
+it('shows neither a withdrawn newer revision nor an older fallback of the same listing', () => {
   const deletedNewer = product('shop-mug', 200, [EDEN_RELAY]);
   const olderActive = product('shop-mug', 100, [MARKET_RELAY]);
   const merged = mergeMarketSnapshot(
     [deletedNewer],
     result([olderActive], [MARKET_RELAY], { withdrawn: ['shop-mug'] }),
   );
-  expect(merged).toEqual([olderActive]);
+  expect(merged).toEqual([]);
+});
+
+it('still takes a fetched revision when the withdrawn cached one was older', () => {
+  const olderWithdrawn = product('shop-mug', 100, [EDEN_RELAY]);
+  const newerFetched = product('shop-mug', 200, [MARKET_RELAY]);
+  const merged = mergeMarketSnapshot(
+    [olderWithdrawn],
+    result([newerFetched], [MARKET_RELAY], { withdrawn: ['shop-mug'] }),
+  );
+  expect(merged).toEqual([newerFetched]);
 });

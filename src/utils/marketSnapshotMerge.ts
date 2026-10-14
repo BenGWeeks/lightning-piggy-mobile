@@ -62,12 +62,25 @@ export function mergeMarketSnapshot(
   if (next.answeredRelays === undefined)
     return next.transportFailed && next.products.length === 0 ? [...previous] : next.products;
   if (previous.length === 0) return next.products;
-  // A cached revision this round withdrew (e.g. deleted by its author) must
-  // never win over the fresh one, however new it is.
+  // A withdrawn listing (e.g. its newest revision deleted by the author) is
+  // gone: neither the withdrawn cached revision nor an older fetched fallback
+  // of the same listing may reappear.
   const withdrawn = new Set(next.withdrawn ?? []);
+  const supersededByWithdrawn = new Set(
+    previous
+      .filter((product) => withdrawn.has(product.id))
+      .flatMap((old) => {
+        const fetched = next.products.find((product) => product.id === old.id);
+        return old.listing &&
+          fetched?.listing &&
+          supersedes(old.listing.event, fetched.listing.event)
+          ? [old.id]
+          : [];
+      }),
+  );
   const fresh = newestRevisions(
     previous.filter((product) => !withdrawn.has(product.id)),
-    next.products,
+    next.products.filter((product) => !supersededByWithdrawn.has(product.id)),
   );
   const room = Math.max(0, MARKET_MERGE_CAP - fresh.length);
   const carried = carriedOver(previous, next)
