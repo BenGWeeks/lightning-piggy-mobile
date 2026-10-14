@@ -2123,7 +2123,8 @@
     "typeLightning": "Lightning",
     "typeOnchain": "On-chain",
     "owl": "Bagoly",
-    "invaders": "Hódítók"
+    "invaders": "Hódítók",
+    "carouselPosition": "{{current}}. pénztárca / {{total}}"
   },
   "walletCardPicker": {
     "selectedTheme": "Kiválasztott kártyakinézet: {{name}}"

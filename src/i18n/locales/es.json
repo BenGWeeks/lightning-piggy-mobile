@@ -2123,7 +2123,8 @@
     "typeLightning": "Lightning",
     "typeOnchain": "On-chain",
     "owl": "Búho",
-    "invaders": "Invasores"
+    "invaders": "Invasores",
+    "carouselPosition": "Cartera {{current}} de {{total}}"
   },
   "walletCardPicker": {
     "selectedTheme": "Tema de tarjeta seleccionado: {{name}}"

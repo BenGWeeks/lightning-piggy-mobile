@@ -1,0 +1,56 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Internal — swipe the wallet carousel until a page is selected
+---
+# PAGE is a carousel index (0, 1, …) or `add` for the trailing Add-wallet page.
+# DIRECTION is LEFT (later cards) or RIGHT (earlier cards); `add` always swipes
+# LEFT. A peeking neighbour is visible but not selected, so wait for the
+# selected page. Gentle swipes on the carousel testID advance one card at a
+# time, with no screen coordinates.
+- runFlow:
+    when:
+      true: ${PAGE === 'add'}
+    commands:
+      - repeat:
+          times: 20
+          while:
+            notVisible: { id: 'home-add-wallet-empty' }
+          commands:
+            - swipe:
+                from: { id: 'wallet-carousel' }
+                direction: LEFT
+                duration: 500
+            - waitForAnimationToEnd: { timeout: 2000 }
+      - assertVisible: { id: 'home-add-wallet-empty' }
+- runFlow:
+    when:
+      true: ${PAGE !== 'add' && DIRECTION === 'LEFT'}
+    commands:
+      - repeat:
+          times: 20
+          while:
+            notVisible: { id: 'wallet-carousel-page-${PAGE}', selected: true }
+          commands:
+            - swipe:
+                from: { id: 'wallet-carousel' }
+                direction: LEFT
+                duration: 500
+            - waitForAnimationToEnd: { timeout: 2000 }
+- runFlow:
+    when:
+      true: ${PAGE !== 'add' && DIRECTION === 'RIGHT'}
+    commands:
+      - repeat:
+          times: 20
+          while:
+            notVisible: { id: 'wallet-carousel-page-${PAGE}', selected: true }
+          commands:
+            - swipe:
+                from: { id: 'wallet-carousel' }
+                direction: RIGHT
+                duration: 500
+            - waitForAnimationToEnd: { timeout: 2000 }
+- runFlow:
+    when:
+      true: ${PAGE !== 'add'}
+    commands:
+      - assertVisible: { id: 'wallet-carousel-page-${PAGE}', selected: true }

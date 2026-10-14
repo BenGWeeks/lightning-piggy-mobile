@@ -2,39 +2,15 @@ appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Internal — select Add Wallet and open the wizard
 ---
 # Select the page before opening it. A peeking neighbour is not the active page.
-# The fallback also supports the baseline build and the hidden one-wallet strip.
+# With no wallets the Add-wallet card is the only page, so there is nothing to swipe.
 - runFlow:
     when:
-      visible: { id: 'wallet-strip' }
+      visible: { id: 'wallet-card-.*' }
     commands:
       - runFlow:
-          file: scroll-wallet-strip.yaml
+          file: scroll-wallet-carousel.yaml
           env:
-            CHIP_ID: wallet-chip-add
-            STRIP_DIRECTION: LEFT
-      - tapOn: { id: 'wallet-chip-add' }
-      - extendedWaitUntil:
-          visible: { id: 'home-add-wallet-empty' }
-          timeout: 5000
-- runFlow:
-    when:
-      notVisible: { id: 'wallet-strip' }
-    commands:
-      - runFlow:
-          when:
-            visible: { id: 'wallet-card-.*' }
-          commands:
-            - repeat:
-                while:
-                  notVisible: { id: 'home-add-wallet-empty' }
-                times: 20
-                commands:
-                  - swipe:
-                      from: { id: 'wallet-card-.*' }
-                      direction: LEFT
-                      duration: 200
-                  - waitForAnimationToEnd: { timeout: 2000 }
-# The selected add state is reported before a chip jump finishes scrolling.
+            PAGE: add
 - waitForAnimationToEnd: { timeout: 10000 }
 - tapOn: { id: 'add-wallet-card', retryTapIfNoChange: true }
 - extendedWaitUntil:

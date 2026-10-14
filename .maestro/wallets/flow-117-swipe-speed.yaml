@@ -4,11 +4,10 @@ name: Wallet Swipe Speed Test
 # Requires at least two wallets with transaction history. Slow element-scoped swipes advance one card; hard flings are tested separately.
 - tapOn: { id: 'tab-wallets' }
 - runFlow:
-    file: ../common/scroll-wallet-strip.yaml
+    file: ../common/scroll-wallet-carousel.yaml
     env:
-      CHIP_ID: wallet-chip-0
-      STRIP_DIRECTION: RIGHT
-- tapOn: { id: 'wallet-chip-0' }
+      PAGE: 0
+      DIRECTION: RIGHT
 - extendedWaitUntil:
     visible: { id: 'wallet-carousel-page-0', selected: true }
     timeout: 5000
@@ -23,7 +22,7 @@ name: Wallet Swipe Speed Test
 - extendedWaitUntil:
     visible: { id: 'wallet-carousel-page-1', selected: true }
     timeout: 5000
-- assertVisible: { id: 'wallet-chip-1', selected: true }
+- assertVisible: { id: 'wallet-carousel-dot-1', selected: true }
 # Initial transaction load.
 - extendedWaitUntil:
     visible: { id: 'transaction-row-.*' }
@@ -35,7 +34,7 @@ name: Wallet Swipe Speed Test
 - extendedWaitUntil:
     visible: { id: 'wallet-carousel-page-0', selected: true }
     timeout: 5000
-- assertVisible: { id: 'wallet-chip-0', selected: true }
+- assertVisible: { id: 'wallet-carousel-dot-0', selected: true }
 # Cached transactions should reappear within two seconds.
 - extendedWaitUntil:
     visible: { id: 'transaction-row-.*' }
@@ -47,7 +46,7 @@ name: Wallet Swipe Speed Test
 - extendedWaitUntil:
     visible: { id: 'wallet-carousel-page-1', selected: true }
     timeout: 5000
-- assertVisible: { id: 'wallet-chip-1', selected: true }
+- assertVisible: { id: 'wallet-carousel-dot-1', selected: true }
 # Cached transactions should reappear within two seconds.
 - extendedWaitUntil:
     visible: { id: 'transaction-row-.*' }

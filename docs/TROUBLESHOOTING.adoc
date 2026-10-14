@@ -1470,14 +1470,17 @@ normalizes those newlines to spaces before validation. Keep fixtures in env
 variables, verify names before leaving the alias step, and never print process
 arguments for Maestro commands that pass credentials with `-e`.
 
-=== Maestro cannot reveal a chip in the wallet strip
+=== Maestro selects the wrong wallet carousel page
 
-`scrollUntilVisible` starts its swipe in the middle of the screen, below the
-wallet strip, so a horizontal chip search can time out without moving the
-strip. Use `common/scroll-wallet-strip.yaml`: its bounded loop swipes from the
-`wallet-strip` testID until the requested chip is visible. Pass `LEFT` to
-reveal later chips and `RIGHT` to reveal earlier ones. This keeps gestures
-inside the list without screen coordinates (#1462).
+The carousel peeks its neighbours, so `wallet-carousel-page-N` can be visible
+without being the active page, and `scrollUntilVisible` stops as soon as the
+peek appears. Use `common/scroll-wallet-carousel.yaml`: its bounded loop swipes
+from the `wallet-carousel` testID until `wallet-carousel-page-${PAGE}` is
+visible with `selected: true` (or, for `PAGE: add`, until the Add-wallet
+prompt shows). Pass `DIRECTION: LEFT` for later cards and `RIGHT` for earlier
+ones. The dots under the carousel (`wallet-carousel-dot-N`) report the same
+settled selection. This keeps gestures inside the list without screen
+coordinates.
 
 === Maestro reporting fails for a flow name containing a slash
 

@@ -26,23 +26,9 @@ name: Home Send and Receive buttons stay enabled after swiping to Add card
 
 # Select the add page explicitly: a neighbour's peek is not the active page.
 - runFlow:
-    when:
-      visible: { id: 'wallet-strip' }
-    commands:
-      - runFlow:
-          file: ../common/scroll-wallet-strip.yaml
-          env:
-            CHIP_ID: wallet-chip-add
-            STRIP_DIRECTION: LEFT
-      - tapOn: { id: 'wallet-chip-add' }
-- runFlow:
-    when:
-      notVisible: { id: 'wallet-strip' }
-    commands:
-      - swipe:
-          from: { id: 'wallet-card-.*' }
-          direction: LEFT
-          duration: 200
+    file: ../common/scroll-wallet-carousel.yaml
+    env:
+      PAGE: add
 - extendedWaitUntil:
     visible: { id: 'home-add-wallet-empty' }
     timeout: 5000

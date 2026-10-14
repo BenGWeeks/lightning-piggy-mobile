@@ -2123,7 +2123,8 @@
     "typeLightning": "Lightning",
     "typeOnchain": "链上",
     "owl": "猫头鹰",
-    "invaders": "入侵者"
+    "invaders": "入侵者",
+    "carouselPosition": "第 {{current}} 个钱包，共 {{total}} 个"
   },
   "walletCardPicker": {
     "selectedTheme": "已选卡片主题：{{name}}"

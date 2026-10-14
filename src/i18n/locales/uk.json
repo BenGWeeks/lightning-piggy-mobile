@@ -2097,7 +2097,8 @@
     "typeLightning": "Lightning",
     "typeOnchain": "Ончейн",
     "owl": "Сова",
-    "invaders": "Загарбники"
+    "invaders": "Загарбники",
+    "carouselPosition": "Гаманець {{current}} з {{total}}"
   },
   "walletCardPicker": {
     "selectedTheme": "Вибрана тема картки: {{name}}"

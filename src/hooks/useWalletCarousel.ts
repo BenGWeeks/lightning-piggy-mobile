@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FlatList, ViewToken } from 'react-native';
 import type { WalletState } from '../types/wallet';
-import { CAROUSEL_INTERVAL, CHIP_INTERVAL } from '../styles/WalletCarousel.styles';
+import { CAROUSEL_INTERVAL } from '../styles/WalletCarousel.styles';
 import { markWalletSwipeSettled, markWalletSwitchRequested } from '../utils/walletSwipeTiming';
 
 export type CarouselItem = { type: 'wallet'; wallet: WalletState } | { type: 'add' };
@@ -29,8 +29,6 @@ export function useWalletCarousel(
   const pendingIndex = useRef<number | null>(null);
   const previousWalletCount = useRef(wallets.length);
   const flatListRef = useRef<FlatList<CarouselItem>>(null);
-  const stripRef = useRef<FlatList<CarouselItem>>(null);
-  const stripLaidOut = useRef(false);
   // Native viewability requires a stable callback, with the latest wallet data.
   const latest = useRef({ data, onWalletChange, onAddCardActiveChange });
   latest.current = { data, onWalletChange, onAddCardActiveChange };
@@ -56,7 +54,9 @@ export function useWalletCarousel(
     }
   }, []);
 
-  const onChipPress = useCallback(
+  // Programmatic jump (Add wallet, external selection, an import replacing the
+  // add page). Commits the destination now so passing cards never select.
+  const scrollToIndex = useCallback(
     (index: number) => {
       pendingIndex.current = index;
       selectIndex(index);
@@ -71,7 +71,7 @@ export function useWalletCarousel(
       if (index == null) return;
       // Viewability is only for initial hydration. Never commit wallets mid-fling.
       if (dragging.current || selectionReported.current) return;
-      // A chip jump can pass several wallets. Keep its destination selected.
+      // A programmatic jump can pass several wallets. Keep its destination selected.
       if (pendingIndex.current !== null && index !== pendingIndex.current) return;
       selectIndex(index);
     },
@@ -108,40 +108,15 @@ export function useWalletCarousel(
       selectedKey.current === 'add' &&
       latest.current.data[indexRef.current]?.type === 'wallet'
     ) {
-      onChipPress(indexRef.current);
+      scrollToIndex(indexRef.current);
       return;
     }
     const index = latest.current.data.findIndex(
       (item) => item.type === 'wallet' && item.wallet.id === activeWalletId,
     );
     if (index >= 0 && (index !== indexRef.current || selectedKey.current !== activeWalletId))
-      onChipPress(index);
-  }, [walletOrder, wallets.length, activeWalletId, onChipPress]);
-
-  const onStripLayout = useCallback(() => {
-    stripLaidOut.current = true;
-    stripRef.current?.scrollToIndex({
-      index: Math.min(indexRef.current, latest.current.data.length - 1),
-      animated: true,
-      viewPosition: 0.5,
-    });
-  }, []);
-
-  useEffect(() => {
-    if (wallets.length <= 1) {
-      stripLaidOut.current = false;
-      return;
-    }
-    // FlatList has no measured viewport before layout. Centring then uses a
-    // zero width and clips the first chip instead of keeping it visible.
-    if (stripLaidOut.current) {
-      stripRef.current?.scrollToIndex({
-        index: Math.min(currentIndex, wallets.length),
-        animated: true,
-        viewPosition: 0.5,
-      });
-    }
-  }, [currentIndex, wallets.length]);
+      scrollToIndex(index);
+  }, [walletOrder, wallets.length, activeWalletId, scrollToIndex]);
 
   const snapToOffsets = useMemo(
     () => Array.from({ length: wallets.length + 1 }, (_, index) => index * CAROUSEL_INTERVAL),
@@ -153,11 +128,9 @@ export function useWalletCarousel(
     currentIndex,
     initialIndex,
     flatListRef,
-    stripRef,
-    onStripLayout,
     snapToOffsets,
     viewabilityConfig,
-    onChipPress,
+    scrollToIndex,
     onViewableItemsChanged,
     onScrollBeginDrag,
     onMomentumScrollEnd,
@@ -169,10 +142,5 @@ export const carouselItemKey = (item: CarouselItem) =>
 export const carouselItemLayout = (_: unknown, index: number) => ({
   length: CAROUSEL_INTERVAL,
   offset: CAROUSEL_INTERVAL * index,
-  index,
-});
-export const walletChipLayout = (_: unknown, index: number) => ({
-  length: CHIP_INTERVAL,
-  offset: 16 + CHIP_INTERVAL * index,
   index,
 });

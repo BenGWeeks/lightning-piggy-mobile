@@ -14,10 +14,10 @@ const wallets = ['first', 'second', 'third', 'fourth'].map(
 );
 const visible = (index: number) => ({ viewableItems: [{ index, isViewable: true } as ViewToken] });
 
-it('keeps the chip destination selected while intermediate cards pass, then resumes swipes', () => {
+it('keeps a programmatic jump destination selected while intermediate cards pass, then resumes swipes', () => {
   const change = jest.fn();
   const { result } = renderHook(() => useWalletCarousel(wallets, 'first', change));
-  act(() => result.current.onChipPress(3));
+  act(() => result.current.scrollToIndex(3));
   act(() => result.current.onViewableItemsChanged(visible(1)));
   expect(result.current.currentIndex).toBe(3);
   expect(change.mock.calls).toEqual([['fourth']]);
@@ -50,12 +50,12 @@ it('preserves the add page and active wallet through balance updates', () => {
       initialProps: { data: wallets },
     },
   );
-  act(() => result.current.onChipPress(4));
+  act(() => result.current.scrollToIndex(4));
   rerender({ data: wallets.map((wallet) => ({ ...wallet, balance: 10 })) });
   expect(result.current.currentIndex).toBe(4);
   expect(change).not.toHaveBeenCalled();
   expect(addChange.mock.calls).toEqual([[true]]);
-  act(() => result.current.onChipPress(0));
+  act(() => result.current.scrollToIndex(0));
   expect(addChange).toHaveBeenLastCalledWith(false);
   expect(change).toHaveBeenLastCalledWith('first');
 });
@@ -72,30 +72,28 @@ it('follows external selection and handles a wallet replacing the add page at th
   );
   rerender({ data: wallets, active: 'third' });
   expect(result.current.currentIndex).toBe(2);
-  act(() => result.current.onChipPress(4));
+  act(() => result.current.scrollToIndex(4));
   rerender({ data: [...wallets, { id: 'new' } as WalletState], active: 'new' });
   expect(result.current.currentIndex).toBe(4);
   expect(addChange).toHaveBeenLastCalledWith(false);
   expect(change).toHaveBeenLastCalledWith('new');
 });
 
-it('keeps strip scrolling within bounds when a wallet is removed from the add page', () => {
+it('returns to the active wallet when a wallet is removed from the add page', () => {
   const { result, rerender } = renderHook(
     ({ data }: { data: WalletState[] }) => useWalletCarousel(data, 'first', jest.fn()),
     { initialProps: { data: wallets } },
   );
-  let lastIndex = wallets.length;
-  const scrollToIndex = jest.fn(({ index }: { index: number }) =>
-    expect(index).toBeLessThanOrEqual(lastIndex),
-  );
-  result.current.stripRef.current = { scrollToIndex } as unknown as FlatList<CarouselItem>;
-  act(() => result.current.onStripLayout());
-  act(() => result.current.onChipPress(4));
-  expect(scrollToIndex).toHaveBeenLastCalledWith({ index: 4, animated: true, viewPosition: 0.5 });
-  lastIndex = 3;
+  const scrollToOffset = jest.fn();
+  result.current.flatListRef.current = { scrollToOffset } as unknown as FlatList<CarouselItem>;
+  act(() => result.current.scrollToIndex(4));
+  expect(scrollToOffset).toHaveBeenLastCalledWith({
+    offset: 4 * CAROUSEL_INTERVAL,
+    animated: true,
+  });
   rerender({ data: wallets.slice(0, 3) });
   expect(result.current.currentIndex).toBe(0);
-  expect(scrollToIndex).toHaveBeenLastCalledWith({ index: 0, animated: true, viewPosition: 0.5 });
+  expect(scrollToOffset).toHaveBeenLastCalledWith({ offset: 0, animated: true });
 });
 
 it('selects an imported wallet that replaces the add page before context selection changes', () => {
@@ -105,7 +103,7 @@ it('selects an imported wallet that replaces the add page before context selecti
     ({ data }: { data: WalletState[] }) => useWalletCarousel(data, 'first', change, addChange),
     { initialProps: { data: wallets } },
   );
-  act(() => result.current.onChipPress(4));
+  act(() => result.current.scrollToIndex(4));
   rerender({ data: [...wallets, { id: 'imported' } as WalletState] });
   expect(result.current.currentIndex).toBe(4);
   expect(change).toHaveBeenLastCalledWith('imported');
@@ -124,10 +122,10 @@ it('restores an active wallet after empty hydration without treating it as an im
   expect(change).toHaveBeenLastCalledWith('third');
 });
 
-it('keeps the committed wallet stable when a drag interrupts a chip jump', () => {
+it('keeps the committed wallet stable when a drag interrupts a programmatic jump', () => {
   const change = jest.fn();
   const { result } = renderHook(() => useWalletCarousel(wallets, 'first', change));
-  act(() => result.current.onChipPress(3));
+  act(() => result.current.scrollToIndex(3));
   act(() => result.current.onViewableItemsChanged(visible(1)));
   act(() => result.current.onScrollBeginDrag());
   expect(result.current.currentIndex).toBe(3);
@@ -138,16 +136,6 @@ it('keeps the committed wallet stable when a drag interrupts a chip jump', () =>
   );
   expect(result.current.currentIndex).toBe(1);
   expect(change).toHaveBeenLastCalledWith('second');
-});
-
-it('defers strip centring until the viewport has been laid out', () => {
-  const { result } = renderHook(() => useWalletCarousel(wallets, 'first', jest.fn()));
-  const scrollToIndex = jest.fn();
-  result.current.stripRef.current = { scrollToIndex } as unknown as FlatList<CarouselItem>;
-  act(() => result.current.onChipPress(2));
-  expect(scrollToIndex).not.toHaveBeenCalled();
-  act(() => result.current.onStripLayout());
-  expect(scrollToIndex).toHaveBeenLastCalledWith({ index: 2, animated: true, viewPosition: 0.5 });
 });
 
 it('reports the initial card once so the parent clears a previously selected add page', () => {
