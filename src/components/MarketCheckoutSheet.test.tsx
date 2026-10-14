@@ -155,6 +155,7 @@ test('a no-shipping product orders the seller listing id, once, on a double tap'
     priceSats: 21,
     quantity: 1,
     shipping: undefined,
+    title: 'Test Item',
   });
 });
 
@@ -217,6 +218,7 @@ describe('physical product with merchant shipping options', () => {
       quantity: 1,
       // £5 at £50,000/BTC.
       shipping: { coordinate: ukOption.coordinate, costSats: 10000, title: 'Royal Mail' },
+      title: 'Test Item',
     });
   });
 });
@@ -259,6 +261,7 @@ describe('Nostr listing (Gamma kind 30402)', () => {
       priceSats: 20000,
       quantity: 1,
       shipping: undefined,
+      title: expect.any(String),
     });
   });
 
@@ -323,6 +326,7 @@ describe('Nostr listing (Gamma kind 30402)', () => {
       // (£5 base + £1 surcharge) at £50,000/BTC.
       shipping: { coordinate: ukOption.coordinate, costSats: 12000, title: 'Royal Mail' },
       address: '1 High St\nLondon',
+      title: 'Test Item',
     });
   });
 

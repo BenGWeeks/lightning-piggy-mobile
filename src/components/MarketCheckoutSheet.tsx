@@ -47,6 +47,8 @@ interface Props {
   onRequestSignIn: () => void;
   /** Fired after a successful order so the parent can navigate to the vendor conversation. */
   onPlaced: (info: { vendorPubkey: string; vendorName: string; vendorLogo?: string }) => void;
+  /** Open My orders from the order-placed state. */
+  onViewOrders?: () => void;
 }
 
 /**
@@ -72,6 +74,7 @@ const MarketCheckoutSheet: React.FC<Props> = ({
   vendorLogo,
   onRequestSignIn,
   onPlaced,
+  onViewOrders,
 }) => {
   const { vendorPubkey, listingDTag, fulfilment } = checkout;
   const isListing = checkout.source === 'listing';
@@ -300,6 +303,7 @@ const MarketCheckoutSheet: React.FC<Props> = ({
         quantity,
         shipping: shippingInput,
         ...(needsAddress ? { address: normalizeOrderAddress(address) } : {}),
+        title: product.title,
       });
       Toast.show({
         type: 'success',
@@ -401,6 +405,20 @@ const MarketCheckoutSheet: React.FC<Props> = ({
                 {t('market.checkout.goToChat')}
               </Text>
             </TouchableOpacity>
+            {onViewOrders ? (
+              <TouchableOpacity
+                style={styles.fallbackLink}
+                onPress={() => {
+                  onClose();
+                  onViewOrders();
+                }}
+                accessibilityRole="link"
+                accessibilityLabel={t('myOrders.open')}
+                testID="market-checkout-my-orders"
+              >
+                <Text style={styles.fallbackLinkText}>{t('myOrders.viewAll')}</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         ) : (
           <>

@@ -3555,5 +3555,23 @@
   },
   "orderCard": {
     "waitingForInvoice": "Czekamy na fakturę od sprzedawcy"
+  },
+  "myOrders": {
+    "title": "Moje zamówienia",
+    "empty": "Brak zamówień — stuknij Kup przy ogłoszeniu.",
+    "open": "Moje zamówienia",
+    "openWithPayNow": "Moje zamówienia — do zapłaty: {{invoices}}",
+    "viewAll": "Zobacz moje zamówienia",
+    "rowA11y": "Zamówienie u {{seller}}: {{items}}. {{status}}"
+  },
+  "orderStatus": {
+    "awaitingInvoice": "Czeka na fakturę",
+    "payNow": "Zapłać teraz",
+    "paid": "Opłacone",
+    "shipped": "Wysłane",
+    "completed": "Zrealizowane",
+    "cancelled": "Anulowane",
+    "needsInvoice": "Wymaga faktury",
+    "invoiceSent": "Faktura wysłana"
   }
 }

@@ -3501,5 +3501,23 @@
   },
   "orderCard": {
     "waitingForInvoice": "Várakozás az eladó számlájára"
+  },
+  "myOrders": {
+    "title": "Rendeléseim",
+    "empty": "Még nincs rendelés – koppints a Vásárlás gombra egy hirdetésnél.",
+    "open": "Rendeléseim",
+    "openWithPayNow": "Rendeléseim – {{invoices}} fizetendő",
+    "viewAll": "Rendeléseim megtekintése",
+    "rowA11y": "Rendelés tőle: {{seller}}: {{items}}. {{status}}"
+  },
+  "orderStatus": {
+    "awaitingInvoice": "Számlára vár",
+    "payNow": "Fizetés most",
+    "paid": "Kifizetve",
+    "shipped": "Feladva",
+    "completed": "Teljesítve",
+    "cancelled": "Lemondva",
+    "needsInvoice": "Számla szükséges",
+    "invoiceSent": "Számla elküldve"
   }
 }

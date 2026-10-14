@@ -380,6 +380,7 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
           vendorLogo={vendor?.logo}
           onRequestSignIn={onRequestSignIn}
           onPlaced={onOrderPlaced}
+          onViewOrders={() => navigation.navigate('MarketMyOrders')}
         />
       ) : null}
 

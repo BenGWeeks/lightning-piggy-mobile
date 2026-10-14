@@ -458,6 +458,24 @@ export async function getShopOrderRows(
 }
 
 /**
+ * The owner's Gamma order rows (kinds 16/17 — orders, payment requests,
+ * status / shipping updates, receipts) across every conversation, newest
+ * first and bounded — the source for My orders and My shop → Orders. No
+ * relay traffic: just the encrypted store.
+ */
+export async function getOrderRows(owner: string, limit = 500): Promise<DmMessageRow[]> {
+  const db = await getLocalDb();
+  const res = await db.execute(
+    `SELECT * FROM dm_messages
+      WHERE owner = ? AND wire_kind IN (16, 17)
+      ORDER BY created_at DESC
+      LIMIT ?;`,
+    [owner, Math.max(1, Math.min(2000, Math.floor(limit)))],
+  );
+  return (res.rows ?? []).map(toRow);
+}
+
+/**
  * The latest message in each of this owner's conversations, newest-first —
  * the inbox list. This is the read that replaces the whole-inbox blob parse:
  * the DB does the per-conversation MAX in one indexed query instead of JS

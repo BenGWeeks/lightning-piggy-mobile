@@ -12,7 +12,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { ChevronLeft, Heart, Search, SlidersHorizontal, Store, X } from 'lucide-react-native';
+import { ChevronLeft, Heart, ReceiptText, Search, SlidersHorizontal, Store, X } from 'lucide-react-native';
 import MarketProductCard from '../components/MarketProductCard';
 import MarketFilterBar from '../components/MarketFilterBar';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -20,6 +20,7 @@ import { useLocale } from '../contexts/LocaleContext';
 import { usePreferredMarketListings } from '../hooks/usePreferredMarketListings';
 import { useMarketListings } from '../hooks/useMarketListings';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
+import { useBuyerOrders } from '../hooks/useBuyerOrders';
 import { createMarketScreenStyles } from '../styles/MarketScreen.styles';
 import { sellerOf, type MarketProduct } from '../data/marketProducts';
 import { featuredFirst } from '../utils/marketVendors';
@@ -50,6 +51,7 @@ interface Props {
 const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
   const { t, locale, formatLocale } = useLocale();
+  const { payNow } = useBuyerOrders();
   const styles = useMemo(() => createMarketScreenStyles(colors), [colors]);
 
   // Derive the square tile width from the live window so rotation / tablet
@@ -263,6 +265,22 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <Heart size={24} color={colors.white} strokeWidth={2.25} />
+          </TouchableOpacity>
+          {/* Buyer side: orders I placed; the badge counts invoices to pay. */}
+          <TouchableOpacity
+            onPress={() => navigation.navigate('MarketMyOrders')}
+            accessibilityLabel={
+              payNow > 0 ? t('myOrders.openWithPayNow', { invoices: payNow }) : t('myOrders.open')
+            }
+            testID="market-my-orders-button"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <ReceiptText size={24} color={colors.white} strokeWidth={2.25} />
+            {payNow > 0 ? (
+              <View style={styles.filterBadge} testID="market-my-orders-badge">
+                <Text style={styles.filterBadgeText}>{payNow > 9 ? '9+' : payNow}</Text>
+              </View>
+            ) : null}
           </TouchableOpacity>
           {/* Seller side (#1273): set up a shop and list your own items. */}
           <TouchableOpacity

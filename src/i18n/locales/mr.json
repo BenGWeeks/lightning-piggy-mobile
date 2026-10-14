@@ -3501,5 +3501,23 @@
   },
   "orderCard": {
     "waitingForInvoice": "विक्रेत्याच्या इनव्हॉइसची प्रतीक्षा आहे"
+  },
+  "myOrders": {
+    "title": "माझे ऑर्डर",
+    "empty": "अजून ऑर्डर नाहीत — एखाद्या लिस्टिंगवर खरेदी करा टॅप करा.",
+    "open": "माझे ऑर्डर",
+    "openWithPayNow": "माझे ऑर्डर — {{invoices}} भरायचे बाकी",
+    "viewAll": "माझे ऑर्डर पाहा",
+    "rowA11y": "{{seller}} यांच्याकडील ऑर्डर: {{items}}. {{status}}"
+  },
+  "orderStatus": {
+    "awaitingInvoice": "इनव्हॉइसची प्रतीक्षा",
+    "payNow": "आता पैसे भरा",
+    "paid": "पैसे भरले",
+    "shipped": "पाठवले",
+    "completed": "पूर्ण",
+    "cancelled": "रद्द",
+    "needsInvoice": "इनव्हॉइस पाठवायचे आहे",
+    "invoiceSent": "इनव्हॉइस पाठवले"
   }
 }

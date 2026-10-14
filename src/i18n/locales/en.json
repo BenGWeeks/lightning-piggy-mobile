@@ -3501,5 +3501,23 @@
   },
   "orderCard": {
     "waitingForInvoice": "Waiting for the seller's invoice"
+  },
+  "myOrders": {
+    "title": "My orders",
+    "empty": "No orders yet — tap Buy on a listing.",
+    "open": "My orders",
+    "openWithPayNow": "My orders — {{invoices}} to pay",
+    "viewAll": "View my orders",
+    "rowA11y": "Order from {{seller}}: {{items}}. {{status}}"
+  },
+  "orderStatus": {
+    "awaitingInvoice": "Awaiting invoice",
+    "payNow": "Pay now",
+    "paid": "Paid",
+    "shipped": "Shipped",
+    "completed": "Completed",
+    "cancelled": "Cancelled",
+    "needsInvoice": "Needs invoice",
+    "invoiceSent": "Invoice sent"
   }
 }

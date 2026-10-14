@@ -3555,5 +3555,23 @@
   },
   "orderCard": {
     "waitingForInvoice": "Очікуємо рахунок від продавця"
+  },
+  "myOrders": {
+    "title": "Мої замовлення",
+    "empty": "Замовлень ще немає — торкніться «Купити» в оголошенні.",
+    "open": "Мої замовлення",
+    "openWithPayNow": "Мої замовлення — до оплати: {{invoices}}",
+    "viewAll": "Переглянути мої замовлення",
+    "rowA11y": "Замовлення в {{seller}}: {{items}}. {{status}}"
+  },
+  "orderStatus": {
+    "awaitingInvoice": "Очікує рахунок",
+    "payNow": "Сплатити",
+    "paid": "Оплачено",
+    "shipped": "Відправлено",
+    "completed": "Виконано",
+    "cancelled": "Скасовано",
+    "needsInvoice": "Потрібен рахунок",
+    "invoiceSent": "Рахунок надіслано"
   }
 }

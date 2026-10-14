@@ -3501,5 +3501,23 @@
   },
   "orderCard": {
     "waitingForInvoice": "Esperando la factura del vendedor"
+  },
+  "myOrders": {
+    "title": "Mis pedidos",
+    "empty": "Aún no hay pedidos: toca Comprar en un anuncio.",
+    "open": "Mis pedidos",
+    "openWithPayNow": "Mis pedidos: {{invoices}} por pagar",
+    "viewAll": "Ver mis pedidos",
+    "rowA11y": "Pedido a {{seller}}: {{items}}. {{status}}"
+  },
+  "orderStatus": {
+    "awaitingInvoice": "Esperando factura",
+    "payNow": "Pagar ahora",
+    "paid": "Pagado",
+    "shipped": "Enviado",
+    "completed": "Completado",
+    "cancelled": "Cancelado",
+    "needsInvoice": "Falta factura",
+    "invoiceSent": "Factura enviada"
   }
 }

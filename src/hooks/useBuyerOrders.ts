@@ -1,0 +1,112 @@
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
+import { useNostr } from '../contexts/NostrContext';
+import { useWallet } from '../contexts/WalletContext';
+import { getOrderRows, subscribeDmStorage } from '../services/dmDb';
+import { loadBuyerOrderTitles, type BuyerOrderTitles } from '../services/buyerOrderTitles';
+import { paymentHashFromBolt11 } from '../utils/bolt11';
+import {
+  buyerOrderEntries,
+  groupRowsByConversation,
+  payNowCount,
+  type BuyerOrderEntry,
+  type OrderRowInput,
+} from '../utils/orderThreads';
+
+type Row = OrderRowInput & { conversation: string };
+
+/** Coalesce bursts of DM-store commits into one reload. */
+const RELOAD_DEBOUNCE_MS = 600;
+
+export interface UseBuyerOrders {
+  entries: BuyerOrderEntry[];
+  titles: BuyerOrderTitles;
+  loading: boolean;
+  /** Orders with an invoice waiting to be paid. */
+  payNow: number;
+}
+
+/**
+ * My orders, from the encrypted DM store only (no relay subscription): every
+ * order I placed, newest first, with its status. Focus-armed — loads when the
+ * screen gains focus and follows store commits while focused. "Paid" also
+ * reads wallet history: an outgoing payment with the invoice's hash.
+ */
+export function useBuyerOrders(): UseBuyerOrders {
+  const { pubkey } = useNostr();
+  const { wallets } = useWallet();
+  const [rows, setRows] = useState<Row[]>([]);
+  const [titles, setTitles] = useState<BuyerOrderTitles>({});
+  const [loading, setLoading] = useState(true);
+  const loadId = useRef(0);
+
+  const load = useCallback(async (owner: string) => {
+    const id = ++loadId.current;
+    try {
+      const [stored, storedTitles] = await Promise.all([
+        getOrderRows(owner),
+        loadBuyerOrderTitles(owner),
+      ]);
+      if (id !== loadId.current) return;
+      setRows(
+        stored.map((r) => ({
+          id: r.eventId,
+          conversation: r.conversation,
+          fromMe: r.fromMe,
+          text: r.content,
+          wireKind: r.wireKind,
+          createdAt: r.createdAt,
+        })),
+      );
+      setTitles(storedTitles);
+    } catch {
+      // Store unavailable: keep what we had.
+    } finally {
+      if (id === loadId.current) setLoading(false);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!pubkey) {
+        setRows([]);
+        setLoading(false);
+        return;
+      }
+      void load(pubkey);
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const unsubscribe = subscribeDmStorage((owner) => {
+        if (owner !== pubkey) return;
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => void load(pubkey), RELOAD_DEBOUNCE_MS);
+      });
+      return () => {
+        unsubscribe();
+        if (timer) clearTimeout(timer);
+        loadId.current += 1;
+      };
+    }, [pubkey, load]),
+  );
+
+  // Payment hashes my wallets paid out — the "our payment succeeded" signal.
+  const paidHashes = useMemo(() => {
+    const set = new Set<string>();
+    for (const wallet of wallets) {
+      for (const tx of wallet.transactions) {
+        if (tx.type === 'outgoing' && tx.paymentHash) set.add(tx.paymentHash.toLowerCase());
+      }
+    }
+    return set;
+  }, [wallets]);
+
+  const entries = useMemo(
+    () =>
+      buyerOrderEntries(groupRowsByConversation(rows), (bolt11) => {
+        const hash = paymentHashFromBolt11(bolt11);
+        return hash !== null && paidHashes.has(hash.toLowerCase());
+      }),
+    [rows, paidHashes],
+  );
+
+  return { entries, titles, loading, payNow: payNowCount(entries) };
+}

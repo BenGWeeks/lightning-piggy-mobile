@@ -3501,5 +3501,23 @@
   },
   "orderCard": {
     "waitingForInvoice": "正在等待卖家的发票"
+  },
+  "myOrders": {
+    "title": "我的订单",
+    "empty": "还没有订单——在商品页点击“购买”。",
+    "open": "我的订单",
+    "openWithPayNow": "我的订单——{{invoices}} 笔待付款",
+    "viewAll": "查看我的订单",
+    "rowA11y": "来自 {{seller}} 的订单：{{items}}。{{status}}"
+  },
+  "orderStatus": {
+    "awaitingInvoice": "等待发票",
+    "payNow": "立即付款",
+    "paid": "已付款",
+    "shipped": "已发货",
+    "completed": "已完成",
+    "cancelled": "已取消",
+    "needsInvoice": "待开发票",
+    "invoiceSent": "发票已发送"
   }
 }

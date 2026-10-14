@@ -2,8 +2,10 @@ import { useCallback, useState } from 'react';
 import { useNostr } from '../contexts/NostrContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { Nip17SendError, canSendNip17, sendNip17Rumor } from '../services/nip17RumorSend';
+import { recordBuyerOrderTitles } from '../services/buyerOrderTitles';
 import {
   buildMarketOrder,
+  productCoordinate,
   type MarketOrderLine,
   type OrderShippingInput,
 } from '../utils/marketOrder';
@@ -66,6 +68,8 @@ export interface PlaceOrderInput {
   shipping?: OrderShippingInput;
   /** Shipping address for a physical order (Gamma `address` tag). */
   address?: string;
+  /** Product title, remembered locally for My orders (never sent). */
+  title?: string;
 }
 
 export interface PlaceOrderResult {
@@ -136,6 +140,12 @@ export function useMarketCheckout(): UseMarketCheckout {
           recipientPubkey: vendorPubkey,
         });
 
+        if (input.title) {
+          // Best effort — only labels My orders.
+          void recordBuyerOrderTitles(pubkey, orderId, {
+            [productCoordinate(vendorPubkey, input.dTag)]: input.title,
+          }).catch(() => undefined);
+        }
         setStatus('sent');
         return { orderId, totalSats };
       } catch (e) {

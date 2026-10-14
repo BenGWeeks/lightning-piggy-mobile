@@ -3501,5 +3501,23 @@
   },
   "orderCard": {
     "waitingForInvoice": "Warte auf die Rechnung des Verkäufers"
+  },
+  "myOrders": {
+    "title": "Meine Bestellungen",
+    "empty": "Noch keine Bestellungen – tippe bei einem Angebot auf „Kaufen“.",
+    "open": "Meine Bestellungen",
+    "openWithPayNow": "Meine Bestellungen – {{invoices}} zu bezahlen",
+    "viewAll": "Meine Bestellungen ansehen",
+    "rowA11y": "Bestellung bei {{seller}}: {{items}}. {{status}}"
+  },
+  "orderStatus": {
+    "awaitingInvoice": "Warte auf Rechnung",
+    "payNow": "Jetzt bezahlen",
+    "paid": "Bezahlt",
+    "shipped": "Versendet",
+    "completed": "Abgeschlossen",
+    "cancelled": "Storniert",
+    "needsInvoice": "Rechnung fällig",
+    "invoiceSent": "Rechnung gesendet"
   }
 }
