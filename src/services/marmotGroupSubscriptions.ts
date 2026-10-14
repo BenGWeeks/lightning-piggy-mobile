@@ -49,10 +49,13 @@ export function mergedGroupFilters(filters: Filter[]): Filter[] {
 const MAX_REQ_BYTES = 64 * 1024;
 const FRAMING_BYTES = 256;
 /** Re-arm backoff for a relay whose socket keeps failing (DNS, refused, device
- * offline). Doubles per consecutive loss and resets on a successful arm, so an
- * unreachable group relay costs a connect attempt a minute, not one a second. */
+ * offline) or that CLOSEs the group REQ as soon as it is sent. Doubles per
+ * consecutive loss and resets only after an arm stayed up for
+ * ROUTE_STABLE_MS, so a hostile or full relay costs a connect attempt (and a
+ * group recovery) a minute, not one a second. */
 export const ROUTE_RETRY_BASE_MS = 1_000;
 export const ROUTE_RETRY_MAX_MS = 60_000;
+export const ROUTE_STABLE_MS = 30_000;
 const filterBytes = (filter: Filter) => utf8ToBytes(JSON.stringify(filter)).length + 1;
 
 /** Keep split filters in the same physical REQ when they fit, conserving live slots. */
@@ -97,6 +100,7 @@ export function createGroupSubscriptionMux(
       timer?: ReturnType<typeof setTimeout>;
       recovering?: boolean;
       lost?: boolean;
+      openedAt?: number;
       generation: number;
       retryDelay: number;
     }
@@ -153,7 +157,9 @@ export function createGroupSubscriptionMux(
             // lost socket is a reconnect. Either way, catching up means "back".
             const rearm = ++opens > 1 || route.lost === true;
             route.lost = false;
-            route.retryDelay = ROUTE_RETRY_BASE_MS;
+            // Don't reset the backoff here: sending the REQ proves nothing if
+            // the relay CLOSEs it at once. onClose resets it after a stable arm.
+            route.openedAt = Date.now();
             if (!route.recovering) {
               route.recovering = true;
               void Promise.all([...route.owners].map((o) => o.recovery?.recover())).finally(() => {
@@ -173,6 +179,12 @@ export function createGroupSubscriptionMux(
                     !route.timer
                   ) {
                     route.lost = true;
+                    if (
+                      route.openedAt !== undefined &&
+                      Date.now() - route.openedAt >= ROUTE_STABLE_MS
+                    )
+                      route.retryDelay = ROUTE_RETRY_BASE_MS;
+                    route.openedAt = undefined;
                     const delay = route.retryDelay;
                     route.retryDelay = Math.min(delay * 2, ROUTE_RETRY_MAX_MS);
                     route.timer = setTimeout(() => update(url), delay);

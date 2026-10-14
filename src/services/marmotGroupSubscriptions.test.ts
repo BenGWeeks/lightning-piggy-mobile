@@ -4,6 +4,7 @@ import {
   mergedGroupFilters,
   ROUTE_RETRY_BASE_MS,
   ROUTE_RETRY_MAX_MS,
+  ROUTE_STABLE_MS,
 } from './marmotGroupSubscriptions';
 import type { Event } from 'nostr-tools/pure';
 import { matchFilter, type Filter } from 'nostr-tools/filter';
@@ -314,6 +315,34 @@ test('subscribe starts independent history even while the physical live REQ is q
   jest.useRealTimers();
 });
 
+test('a relay that CLOSEs the group REQ right after it is sent keeps backing off (no 1 s recovery loop)', () => {
+  jest.useFakeTimers({ now: 1_000_000 });
+  const open = jest.fn(
+    (
+      _url: string,
+      _filters: Filter[],
+      _next: (e: Event) => void,
+      onOpen: () => void,
+      onClose: () => void,
+    ) => {
+      // The socket is up and the REQ goes out, then the relay refuses it.
+      onOpen();
+      setTimeout(onClose, 5);
+      return { close: jest.fn() };
+    },
+  );
+  const subscribe = createGroupSubscriptionMux(open);
+  const owner = subscribe(['wss://full.example'], [{ kinds: [445], '#h': ['a'], limit: 500 }], {
+    next: jest.fn(),
+  });
+  jest.advanceTimersByTime(60_000);
+  // Backoff grows exactly as for a dead socket: about seven arms a minute, not sixty.
+  expect(open.mock.calls.length).toBeLessThanOrEqual(7);
+  owner.unsubscribe();
+  jest.runOnlyPendingTimers();
+  jest.useRealTimers();
+});
+
 test('a relay whose socket keeps failing re-arms with exponential backoff, reset by a successful arm', () => {
   jest.useFakeTimers({ now: 1_000_000 });
   let failing = true;
@@ -341,11 +370,12 @@ test('a relay whose socket keeps failing re-arms with exponential backoff, reset
   expect(open.mock.calls.length).toBeLessThanOrEqual(7);
   jest.advanceTimersByTime(10 * 60_000);
   expect(open.mock.calls.length).toBeLessThanOrEqual(7 + 10);
-  // The relay comes back: the next arm opens and the backoff resets.
+  // The relay comes back: the next arm opens, stays up, and the backoff resets.
   failing = false;
   jest.advanceTimersByTime(ROUTE_RETRY_MAX_MS + 10);
   const opened = open.mock.calls.length;
   expect(opened).toBeGreaterThan(7);
+  jest.advanceTimersByTime(ROUTE_STABLE_MS);
   failing = true;
   open.mock.calls[opened - 1][4]();
   jest.advanceTimersByTime(ROUTE_RETRY_BASE_MS + 10);
