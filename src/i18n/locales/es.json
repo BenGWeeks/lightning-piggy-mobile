@@ -2711,7 +2711,7 @@
       "orders": {
         "line": "{{title}} × {{quantity}}",
         "amount": "{{amount}} sats",
-        "hint": "Pedidos de compradores para tus anuncios. Toca uno para abrir el chat.",
+        "hint": "Pedidos de compradores de tus anuncios. Toca uno para ver el pedido.",
         "emptyBody": "Cuando alguien compre uno de tus anuncios, su pedido aparecerá aquí.",
         "rowAccessibility": "Pedido de {{name}}: {{items}}, {{time}}"
       },
@@ -3525,15 +3525,18 @@
     "unverified": "sin verificar"
   },
   "orderCard": {
-    "waitingForInvoice": "Esperando la factura del vendedor"
+    "waitingForInvoice": "Esperando la factura del vendedor",
+    "viewOrder": "Ver pedido"
   },
   "myOrders": {
+    "moreItems": "+{{count}} más",
     "title": "Mis pedidos",
     "empty": "Aún no hay pedidos: toca Comprar en un anuncio.",
     "open": "Mis pedidos",
     "openWithPayNow": "Mis pedidos: {{invoices}} por pagar",
     "viewAll": "Ver mis pedidos",
-    "rowA11y": "Pedido a {{seller}}: {{items}}. {{status}}"
+    "rowA11y": "Pedido a {{seller}}: {{items}}. {{status}}",
+    "askForNewInvoice": "Pide al vendedor una nueva factura"
   },
   "orderStatus": {
     "awaitingInvoice": "Esperando factura",
@@ -3543,7 +3546,10 @@
     "completed": "Completado",
     "cancelled": "Cancelado",
     "needsInvoice": "Falta factura",
-    "invoiceSent": "Factura enviada"
+    "invoiceSent": "Esperando pago",
+    "all": "Todos",
+    "empty": "No hay pedidos con este estado.",
+    "invoiceExpired": "Factura caducada"
   },
   "sellerActivity": {
     "settings": "Comentarios y reseñas de mis anuncios",
@@ -3554,5 +3560,63 @@
     "comment": "Nuevo comentario en %{title}",
     "review": "Nueva reseña de %{title} ★%{stars}",
     "replyAction": "Responder"
+  },
+  "sellerOrders": {
+    "buyerNote": "Nota del comprador",
+    "newOrderNotification": "Nuevo pedido: {{items}}",
+    "yourShopOrder": "Pedido para tu tienda",
+    "loadingShop": "Cargando tu tienda para calcular este pedido…",
+    "lineTitle": "{{title}} × {{qty}}",
+    "unitPrice": "{{amount}} {{currency}} cada uno",
+    "overStock": "Más que tu stock (quedan {{stock}})",
+    "shippingLine": "Envío: {{title}}",
+    "shippingNotOffered": "Tu anuncio no ofrece esta opción de envío.",
+    "shippingMissing": "El comprador no eligió envío para un artículo físico.",
+    "total": "Total",
+    "waitingForRate": "Esperando el tipo de cambio…",
+    "fiatAtRate": "{{amount}} {{currency}}, convertido al cambio de hoy",
+    "amountDiffers": "El pedido del comprador indicaba {{buyer}} sats, lo que no coincide con tus precios actuales. No puedes enviar una factura hasta que el comprador haga un nuevo pedido con el total actual.",
+    "shipTo": "Enviar a:",
+    "contact": "Contacto:",
+    "receiptUnverified": "El comprador envió un recibo de pago, pero no demuestra el pago de tu factura.",
+    "sendInvoice": "Enviar factura",
+    "confirmSend": "Crear y enviar factura",
+    "checkPayment": "Comprobar pago",
+    "waitingForPayment": "Factura enviada: esperando el pago",
+    "markPaid": "Marcar como pagado",
+    "buyerNotified": "Pagado: comprador avisado",
+    "invoiceSent": "Factura enviada",
+    "notPaidYet": "Aún no está pagado",
+    "couldNotConfirmPayment": "No se pudo confirmar el pago",
+    "orderNumber": "Pedido n.º {{id}}",
+    "rowA11y": "Pedido de {{buyer}}: {{items}}. {{status}}",
+    "problems": {
+      "notMine": "Este pedido es de anuncios que no son tuyos.",
+      "missingListing": "Uno de estos artículos ya no está en tu tienda.",
+      "badPrice": "Uno de estos anuncios no tiene un precio fijo para facturar.",
+      "unknownShipping": "La opción de envío elegida no es una de las que publicas.",
+      "noRate": "Esperando el tipo de cambio…"
+    },
+    "errors": {
+      "noWallet": "Elige un monedero para recibir el pago.",
+      "invoiceFailed": "Ese monedero no pudo crear la factura. Comprueba que esté conectado y pueda recibir.",
+      "amountMismatch": "El monedero creó una factura por otro importe, así que no se envió.",
+      "shopChanged": "Los precios o el envío de tu tienda han cambiado. Revisa el pedido antes de enviar una factura.",
+      "sendFailed": "No se pudo enviar al comprador. Revisa tu conexión e inténtalo de nuevo.",
+      "notSignedIn": "Inicia sesión para gestionar pedidos."
+    },
+    "wallet": {
+      "none": "Ninguno de tus monederos puede crear facturas. Añade un monedero Lightning (NWC) con permiso para recibir.",
+      "checking": "Comprobando si puede recibir…",
+      "offline": "No conectado",
+      "receiveTo": "Recibir pagos en",
+      "receiveToHint": "Las facturas de pedidos se crean en este monedero. Se guarda en este dispositivo.",
+      "remember": "Recordar para mi tienda",
+      "choose": "Elige un monedero",
+      "saveFailed": "No se pudo guardar el monedero elegido."
+    },
+    "sendNewInvoice": "Enviar nueva factura",
+    "checkWalletFirst": "Revisa tu cartera primero",
+    "unknownInvoiceWarning": "No pudimos confirmar si se pagó la factura anterior. Si se pagó, no envíes una nueva."
   }
 }

@@ -7,11 +7,19 @@
 | Seller activity skips events across relays, or a busy listing blocks reviews and replies
 | Relay query limits apply per relay. Select the globally newest limited page before deriving the inclusive timestamp boundary; an older event from a sparse relay must not move that boundary past unprocessed activity on a busy relay. Isolate failures per activity filter, finish the other coordinate/review/reply filters, and retain the checkpoint for retry when any filter remains incomplete. `sellerActivityService.test.ts` covers mixed relay histories and a saturated timestamp alongside independent activity.
 
+| My shop → Orders or View order shows "No orders yet" despite a stored incoming Gamma order
+| Seller screens must use `getShopOrderRows`, not buyer-scoped `getOrderRows` (which requires an outgoing placed order). Bound seller history by incoming placed orders and fetch all kind-16/17 lifecycle rows for each selected buyer/order pair. Verify the owner, buyer and direction against the encrypted DM rows; `useShopOrders.test.tsx`, `dmDbOrders.test.ts` and `MarketShopOrdersScreen.test.tsx` cover list loading, update bursts and detail routing.
+
 | Android Marmot push alerts disappear after NIP-46 login, or background work replaces foreground relay routing
 | DEV background routing must prefer a live foreground mirror, then the foreground legacy signer keys (NIP-46 uses the validated connection's `userPubkey`, not `identities_v1` or the legacy pubkey slot). Unknown/unreadable identities must not suppress generic push alerts; only known locked test accounts disable push alerts. Release builds skip routing hydration and push/location guards entirely; background sync retains its original registry lookup. Regressions cover all three release signers and missing/corrupt/locked DEV storage.
 
 | DEV Nostr Connect QR pairing fails with "subscription closed before connection was established" after approval
 | `nostr-tools` 2.23.3 closes the pairing subscription before setting its handshake success flag. The shared health-aware pool must retire the REQ immediately but defer the caller-initiated aggregate `onclose` callback to a Promise microtask, matching the SDK pool timing. A synchronous callback rejects even a valid encrypted acknowledgement. `healthAwarePool.test.ts` exercises the real `BunkerSigner.fromURI` with both health and resumable pool mixins, and checks that closing before an acknowledgement still rejects. DM subscription tests must likewise assert immediate REQ retirement, then await the Promise microtask before asserting the close callback; a synchronous callback assertion is stale after this fix.
+| A Gamma order or payment update disappears after an interrupted encrypted-store write
+| Admission counters reserve each rumor before ingest, but mark it stored only after the encrypted payload write succeeds. Live write failures and subscription teardown release delivery claims; batch write failures leave reservations retryable. Replayed reservations reuse their budget slot instead of blocking the rumor for 24 hours. Regression coverage: `orderAdmission.test.ts` and `sellerOrderGate.test.ts`.
+
+| A seller cannot replace an expired Gamma invoice, or the buyer cannot pay a changed total
+| Seller order detail offers Send invoice again once the locally recorded invoice expires. Confirmation checks settlement on the original receive wallet and blocks replacement when paid or unknown; an unpaid replacement retains the approved amount. Current shop prices must equal the placed order amount before any invoice is sent. Price/rate differences require a new agreed order until an amendment approval flow exists.
 
 | "Unread messages" appears below the newest DM, or remains after everything is read
 | React Native's inverted list cells use `column-reverse`, so a Fragment containing the divider and message reverses their visual order. Keep them inside a normal-column `View` (`ConversationScreen.tsx`). `utils/unreadDivider.ts` selects real incoming messages in reading order, excluding local device notices, failed invites and date headers. The shared `useChatReadPosition` hook keeps the opening boundary while unread messages remain and retires it when the live count reaches zero, for both DMs and groups. Do not recompute the boundary from the advancing live marker on every viewability report.
@@ -717,39 +725,27 @@ done &
 *Symptom in our app:* `ExploreHomeScreen` mini-map shows "Locating you…" indefinitely, the "Places near you" rail shows "Grant location to discover Bitcoin-accepting shops near you" even after the OS-level permission was granted, and `MapScreen` opens but stays at the world view (no recentre). +
 *History note:* during the Explore-tab PR's screenshot pass we hit this on a Medium_Phone API 36.1 AVD with `emu geo fix` returning OK but no fix ever reaching the app. The Maestro screenshot tour (`.maestro/ui/flow-104-explore-tour.yaml`) reproduces it. The seed coords `0.04039, 52.28897` (Ladywalk, Longstanton, Cambridge CB24 3ED) were chosen to match the live test event published earlier in the PR (kind 37516, geohash u1212vz).
 
-| Receive sheet slow to mark invoice as paid — fast `lookupInvoice` poll
-never fires settlement, only the slow balance-diff fallback eventually
-catches it (~30 s – 3 min lag, see #553)
-| The `expectPayment` poll calls `nwcService.lookupInvoice` every 1 s and
-checks the returned `paid` flag. Two non-obvious gotchas around the result
-shape: +
-**(1) WebLN vs NIP-47.** We use `NostrWebLNProvider` from `@getalby/sdk`,
-whose `lookupInvoice` translates the underlying NIP-47 `Nip47Transaction`
-response into the **WebLN** `LookupInvoiceResponse` shape. So *even though
-LNbits' nwcprovider correctly emits the spec-compliant
-`{type, invoice, settled_at, payment_hash, …}`*, what we receive is
-`{preimage, paymentRequest, paid}`. A predicate that only checks
-`result.settled_at` or `result.state` is dead code on this path and will
-never fire — every tick returns `false`, and settlement only catches via
-the slow balance-diff fallback. Fix: check `result.paid === true`. +
-**(2) Field rename.** WebLN names the bolt11 field `paymentRequest`, not
-`invoice`. Returning `result.invoice` to consumers gives them `undefined`
-forever. `nwcService.lookupInvoice` maps `paymentRequest → invoice` once
-inside the function, so callers can keep using `.invoice`. +
-**Where the layer-confusion bites:** the Alby SDK's *type declaration*
-for `NWCClient.lookupInvoice` returns `Nip47Transaction` (with
-`settled_at`/`state`), but we don't call that — we call
-`NostrWebLNProvider.lookupInvoice`, which returns the WebLN shape. The
-type cast on the result must reflect the WebLN shape, not the NIP-47
-spec. If you ever refactor to the raw `NWCClient`, flip both the field
-names AND the settlement predicate. +
-**Diagnostic recipe** if this regresses: temporarily add
-`console.warn('keys:', Object.keys(result), 'raw:', JSON.stringify(result));`
-inside `nwcService.lookupInvoice` after the call resolves, then issue a
-small test invoice and watch `adb logcat | grep '\[NWC lookupInvoice\]'`
-— the wire shape will tell you immediately whether you're on the WebLN
-or NIP-47 path. Cross-reference: PR #555 (`fix(nwc): cap lookupInvoice
-reply timeout`).
+| Seller order shows Paid for an expired unpaid invoice, or receive settlement is misclassified
+| `NostrWebLNProvider.lookupInvoice` reduces the wallet's raw NIP-47 response to
+`paid: !!settled_at`, dropping state and payment-hash evidence. A truthy field
+alone cannot prove payment. `nwcService.lookupInvoice` now calls the raw
+`provider.client.lookupInvoice` and validates a positive integer `settled_at`,
+`state === 'settled'` when supplied, the requested payment hash, and a preimage
+whose SHA-256 matches that hash. For responses without `state`, LNbits can
+return both the real incoming preimage and `settled_at = created_at` for an
+expired failed invoice. Confirm these responses through bounded raw
+`list_transactions` with `type: incoming` and `unpaid: false`; require the
+same payment hash and a settlement timestamp in that successful history.
+An unsupported, failed or missing list match stays unknown and cannot
+permit replacement. The settlement cache uses a new version and local seller
+paid records require verification version 2, discarding earlier false positives.
+Any returned BOLT11 must match too. Errors,
+contradictory states and missing proof never report paid. Seller records retain
+`settledAt` and the verified preimage; loading repairs old unproven `paidAt` and
+`confirmedAt` markers while retaining invoice and wallet bindings. Regression
+coverage: `nwcInvoiceSettlement.test.ts`, `nwcService.test.ts`,
+`sellerInvoiceStore.test.ts` and `useSellerInvoice.test.tsx`.
+
 
 | `[Perf]` / `[PerfTab]` / `[PerfBlock]` log lines missing on a real device
 | Production release builds strip every `console.log` via `babel.config.js`'s `transform-remove-console` plugin. `src/utils/perfLog.ts` is gated by the same `__DEV__ \|\| EXPO_PUBLIC_KEEP_PERF_LOGS === '1'` flag, so the whole module dead-code-eliminates in plain release builds. **The preview profile (`eas.json`) sets `EXPO_PUBLIC_KEEP_PERF_LOGS=1`** — so install the preview APK (`com.lightningpiggy.app.preview`), not the production one, when you need logcat-based perf attribution on a real device. `adb -s <serial> logcat -v time '*:S' ReactNativeJS:V` filters down to just JS console output.
@@ -1757,3 +1753,47 @@ nostr-tools retains AUTH challenges received on connect, before any CLOSED.
 The transport uses that challenge when the first auth-required CLOSED arrives,
 signs once, and re-arms once after successful AUTH. A second auth-required or
 restricted CLOSED ends the read without another authentication attempt.
+
+=== Rebasing seller order ingest onto buyer lifecycle admission
+
+The buyer and seller branches both change the shared NIP-17 live/backfill
+paths. Keep lifecycle admission scoped to the buyer's placed order and its
+seller; incoming type-1 seller orders bypass the Messages follow gate for
+storage but still consume the persistent admission budget. A buyer's receipt
+or cancellation must match an incoming placed order from that buyer with the
+same order ID (`hasIncomingOrder`); no local invoice is required. Keep order history
+paged by placed orders, and signal an open conversation after persistence,
+even when Only friends hides the order preview. Contact fields belong only
+to type-1 orders and must stay out of inbox entries and notifications.
+
+In Jest, decoded order fixtures need the author's `pubkey` and recipient
+`p` tag for persistent admission. Clear AsyncStorage between cases so a
+completed reservation in one test does not suppress another test's rumor.
+
+Conversation order navigation seeds Explore home, the order list and the
+selected detail so Back returns through the list. Tests of View order must
+expect the nested `state.routes` target from `orderNavigationTarget`, including
+the buyer/seller counterparty, rather than a direct `screen` target.
+
+=== Buyer orders show Awaiting invoice after the seller sent a payment request
+
+Check the payment request in the app's encrypted order history and inspect only
+its parsed amount and BOLT11 expiry in development diagnostics. Seller
+`Awaiting payment` records can outlive the invoice: the buyer correctly returns
+to `Awaiting invoice` once its BOLT11 expires. Do not bypass expiry or change the
+device clock to obtain a `Pay now` screenshot. A replacement requires an
+explicit seller action.
+
+There is also a distinct cold-ingest failure: lifecycle admission checks the
+stored placed order before the batch has persisted it. Retry rejected lifecycle
+updates once after persisting the batch, reusing decoded rumors and retaining
+the account, counterparty and order-ID checks. Cover both arrival orders in
+regression tests; a live-ingest test with an already stored order misses this
+failure.
+
+=== Seller replacement warning shows a missing Cancel translation
+
+If the wallet-check warning renders a missing `common.cancel` translation,
+use the existing `market.sell.cancel` key, which is translated in every
+supported locale. Key-only translation mocks can hide this error; verify
+alert button keys against the locale files when reviewing the warning.

@@ -1,6 +1,12 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { resetSellerStore } from '../services/sellerEventStore';
 import { ingestInboxWraps } from './dmWrapIngest';
 import { parseOrderEvent, serializeOrder } from '../utils/orderEvents';
-import { ORDER_RUMOR_MAX_CHARS } from './orderRumorIngest';
+import {
+  admitUnfollowedOrder,
+  ORDER_RUMOR_MAX_CHARS,
+  ORDER_RUMOR_RATE_LIMIT,
+} from './orderRumorIngest';
 import { NWC_SHARE_KIND } from '../utils/nwcShareMessage';
 import type { DmMessageRow } from '../services/dmDb';
 import type { DecodedRumor } from '../utils/nip17Unwrap';
@@ -25,6 +31,7 @@ const mockUpsert = jest.fn();
 const mockOutgoingOrders = jest.fn();
 jest.mock('../services/dmDb', () => ({
   getOutgoingOrderRows: (...args: unknown[]) => mockOutgoingOrders(...args),
+  hasIncomingOrder: jest.fn().mockResolvedValue(false),
   selectKnownEventIds: (...args: unknown[]) => mockSelectKnown(...args),
   upsertDmMessages: (...args: unknown[]) => mockUpsert(...args),
 }));
@@ -57,6 +64,7 @@ jest.mock('./nostrDmCache', () => ({
 jest.mock('../utils/nip17Unwrap', () => ({
   partnerFromRumor: (rumor: { partnership?: { partnerPubkey: string; fromMe: boolean } }) =>
     rumor.partnership ?? null,
+  rumorEventId: (rumor: { kind: number }) => (rumor.kind === 16 ? 'unique-order-rumor' : undefined),
   textForRumor: (rumor: DecodedRumor) => {
     const { parseOrderEvent, serializeOrder } = jest.requireActual('../utils/orderEvents');
     const order = parseOrderEvent(rumor);
@@ -70,6 +78,7 @@ const BOB = 'b'.repeat(64);
 
 type TestRumor = {
   kind: number;
+  tags?: string[][];
   created_at: number;
   content: string;
   partnership?: { partnerPubkey: string; fromMe: boolean };
@@ -82,13 +91,16 @@ const wrap = (id: string) => ({ id });
 const rumorFrom = (partner: string, over: Partial<TestRumor> = {}): DecodedRumor =>
   ({
     kind: 14,
+    pubkey: partner,
     created_at: 100,
     content: `msg-from-${partner.slice(0, 4)}`,
     partnership: { partnerPubkey: partner, fromMe: false },
     ...over,
   }) as unknown as DecodedRumor;
 
-beforeEach(() => {
+beforeEach(async () => {
+  await AsyncStorage.clear();
+  resetSellerStore();
   jest.clearAllMocks();
   mockOutgoingOrders.mockImplementation(async (owner, seller, ids) => [
     {
@@ -157,6 +169,7 @@ describe('dmWrapIngest.ingestInboxWraps', () => {
       kind: 16,
       content: '',
       tags: [
+        ['p', OWNER],
         ['type', '1'],
         ['order', 'abc-12345678'],
         ['amount', '21'],
@@ -171,12 +184,9 @@ describe('dmWrapIngest.ingestInboxWraps', () => {
       passesFollowGate: () => true,
       skipKey: 'skip_key',
     });
-    expect(res.entries[0].text).toBe('🛒 Order Placed · 21 sats');
-    expect(res.entries[0].text).not.toContain('{');
-    // renderText carries the raw order JSON so the conversation thread renders
-    // the order card on the FIRST open (the inbox `text` preview can't be parsed
-    // back into a card). #market
-    expect(res.entries[0].renderText).toBe(orderJson);
+    expect(res.entries).toEqual([
+      expect.objectContaining({ text: '🛒 Order Placed · 21 sats', wireKind: 16 }),
+    ]);
     const rows: DmMessageRow[] = mockUpsert.mock.calls[0][0];
     expect(rows[0].content).toBe(orderJson); // raw order JSON persisted
     expect(rows[0].wireKind).toBe(16);
@@ -498,7 +508,7 @@ it.each([
   const result = await ingestInboxWraps({
     owner: OWNER,
     wraps: [wrap('lifecycle')],
-    unwrap: () => ({ ...sellerInvoice, ...event }),
+    unwrap: () => ({ ...sellerInvoice, ...event, tags: [['p', OWNER], ...event.tags] }),
     passesFollowGate: () => false,
   });
   expect(result.stored).toBe(1);
@@ -534,3 +544,167 @@ it.each([false, true])(
     expect(result.entries).toEqual([]);
   },
 );
+it('stores one row for 100 distinct gift wraps of the same order rumor', async () => {
+  const order = rumorFrom(ALICE, {
+    kind: 16,
+    tags: [
+      ['p', OWNER],
+      ['order', 'batch-order'],
+      ['type', '1'],
+    ],
+    content: '',
+  });
+  const res = await ingestInboxWraps({
+    owner: OWNER,
+    wraps: Array.from({ length: 100 }, (_, n) => wrap(`duplicate-${n}`)),
+    unwrap: async () => order,
+    passesFollowGate: () => true,
+  });
+  expect(res.stored).toBe(1);
+  expect(res.entries).toHaveLength(1);
+  expect(mockUpsert.mock.calls[0][0]).toHaveLength(1);
+});
+
+it('releases batch delivery claims after a failed encrypted payload write', async () => {
+  const order = rumorFrom(ALICE, {
+    kind: 16,
+    tags: [
+      ['p', OWNER],
+      ['order', 'batch-order'],
+      ['type', '1'],
+    ],
+    content: '',
+  });
+  const params = {
+    owner: OWNER,
+    wraps: [wrap('failed-order')],
+    unwrap: async () => order,
+    passesFollowGate: () => true,
+  };
+  mockUpsert.mockRejectedValueOnce(new Error('encrypted store unavailable'));
+  await expect(ingestInboxWraps(params)).rejects.toThrow('encrypted store unavailable');
+  const retry = await ingestInboxWraps(params);
+  expect(retry.stored).toBe(1);
+  expect(mockUpsert).toHaveBeenCalledTimes(2);
+});
+
+it.each(['malformed', 'limited', 'over-cap'])(
+  'remembers %s order wraps in the skip-set across refreshes',
+  async (reason) => {
+    const order = rumorFrom(ALICE, {
+      kind: 16,
+      tags:
+        reason === 'malformed'
+          ? []
+          : [
+              ['type', '1'],
+              ['order', 'limited'],
+              ...(reason === 'over-cap'
+                ? Array.from({ length: 51 }, () => ['item', 'product', '1'])
+                : []),
+            ],
+    });
+    if (reason === 'limited') {
+      const { orderBudgetKey } = jest.requireActual('../services/orderAdmission');
+      await AsyncStorage.setItem(
+        orderBudgetKey(OWNER),
+        JSON.stringify({
+          accepted: Array.from({ length: 5 }, (_, n) => ({
+            id: String(n),
+            sender: ALICE,
+            at: Date.now(),
+            stored: true,
+          })),
+          dropped: 0,
+          droppedSince: Date.now(),
+        }),
+      );
+    }
+    const unwrap = jest.fn(() => order);
+    const params = {
+      owner: OWNER,
+      wraps: [wrap('rejected-order')],
+      unwrap,
+      passesFollowGate: () => true,
+      skipKey: 'orders-skip',
+    };
+    expect((await ingestInboxWraps(params)).stored).toBe(0);
+    expect(mockWriteSkipSet).toHaveBeenCalledWith('orders-skip', new Set(['rejected-order']));
+    mockLoadSkipSet.mockResolvedValue(mockWriteSkipSet.mock.calls[0][1]);
+    expect((await ingestInboxWraps(params)).skipHits).toBe(1);
+    expect(unwrap).toHaveBeenCalledTimes(1);
+  },
+);
+
+it('keeps order wraps retryable after a budget storage failure', async () => {
+  const unwrap = jest.fn(() =>
+    rumorFrom(BOB, {
+      kind: 16,
+      tags: [
+        ['type', '1'],
+        ['order', 'retry-storage'],
+      ],
+    }),
+  );
+  const storage = jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('storage'));
+  const params = {
+    owner: OWNER,
+    wraps: [wrap('retry-storage')],
+    unwrap,
+    passesFollowGate: () => true,
+    skipKey: 'orders-skip',
+  };
+  expect((await ingestInboxWraps(params)).stored).toBe(0);
+  expect(mockWriteSkipSet).not.toHaveBeenCalled();
+  storage.mockRestore();
+  expect((await ingestInboxWraps(params)).stored).toBe(1);
+  expect(unwrap).toHaveBeenCalledTimes(2);
+});
+
+it('retries a rate-limited incoming order on ordinary refresh after the window expires', async () => {
+  const owner = 'rate-limited-backfill';
+  const now = jest.spyOn(Date, 'now').mockReturnValue(100_000);
+  try {
+    for (let i = 0; i < ORDER_RUMOR_RATE_LIMIT; i++) admitUnfollowedOrder(owner);
+    const params = {
+      owner,
+      wraps: [wrap('retryable-invoice')],
+      unwrap: jest.fn(() => sellerInvoice),
+      passesFollowGate: () => false,
+      isFollowed: () => false,
+      skipKey: 'rate-limited-skip',
+    };
+    expect((await ingestInboxWraps(params)).stored).toBe(0);
+    expect(mockWriteSkipSet).not.toHaveBeenCalled();
+    expect(mockUpsert).not.toHaveBeenCalled();
+    now.mockReturnValue(160_000);
+    expect((await ingestInboxWraps(params)).stored).toBe(1);
+    expect(params.unwrap).toHaveBeenCalledTimes(2);
+    expect(mockWriteSkipSet).not.toHaveBeenCalled();
+  } finally {
+    now.mockRestore();
+  }
+});
+
+it('stores sent copies to non-friends without consuming or depending on the incoming budget', async () => {
+  const owner = 'outgoing-backfill-budget';
+  const params = {
+    owner,
+    wraps: [wrap('outgoing-invoice')],
+    unwrap: () => ({
+      ...sellerInvoice,
+      pubkey: owner,
+      partnership: { partnerPubkey: BOB, fromMe: true },
+    }),
+    passesFollowGate: () => false,
+    isFollowed: () => false,
+    skipKey: 'outgoing-skip',
+  };
+  expect((await ingestInboxWraps(params)).stored).toBe(1);
+  for (let i = 0; i < ORDER_RUMOR_RATE_LIMIT; i++) {
+    expect(admitUnfollowedOrder(owner)).toBe(true);
+  }
+  expect(admitUnfollowedOrder(owner)).toBe(false);
+  expect((await ingestInboxWraps(params)).stored).toBe(1);
+  expect(mockWriteSkipSet).not.toHaveBeenCalled();
+});

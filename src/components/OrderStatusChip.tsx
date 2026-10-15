@@ -12,6 +12,7 @@ type Tone = 'waiting' | 'action' | 'done' | 'moving' | 'stopped';
 const TONE: Record<OrderChipStatus, Tone> = {
   awaitingInvoice: 'waiting',
   needsInvoice: 'waiting',
+  invoiceExpired: 'stopped',
   payNow: 'action',
   invoiceSent: 'action',
   paid: 'done',

@@ -2711,7 +2711,7 @@
       "orders": {
         "line": "{{title}} × {{quantity}}",
         "amount": "{{amount}} sats",
-        "hint": "Orders from buyers for your listings. Tap one to open the chat.",
+        "hint": "Orders from buyers for your listings. Tap one to view the order.",
         "emptyBody": "When someone buys one of your listings, their order shows up here.",
         "rowAccessibility": "Order from {{name}}: {{items}}, {{time}}"
       },
@@ -3525,15 +3525,18 @@
     "unverified": "unverified"
   },
   "orderCard": {
-    "waitingForInvoice": "Waiting for the seller's invoice"
+    "waitingForInvoice": "Waiting for the seller's invoice",
+    "viewOrder": "View order"
   },
   "myOrders": {
+    "moreItems": "+{{count}} more",
     "title": "My orders",
     "empty": "No orders yet — tap Buy on a listing.",
     "open": "My orders",
     "openWithPayNow": "My orders — {{invoices}} to pay",
     "viewAll": "View my orders",
-    "rowA11y": "Order from {{seller}}: {{items}}. {{status}}"
+    "rowA11y": "Order from {{seller}}: {{items}}. {{status}}",
+    "askForNewInvoice": "Ask the seller for a new invoice"
   },
   "orderStatus": {
     "awaitingInvoice": "Awaiting invoice",
@@ -3543,7 +3546,10 @@
     "completed": "Completed",
     "cancelled": "Cancelled",
     "needsInvoice": "Needs invoice",
-    "invoiceSent": "Invoice sent"
+    "invoiceSent": "Awaiting payment",
+    "all": "All",
+    "empty": "No orders match this status.",
+    "invoiceExpired": "Invoice expired"
   },
   "sellerActivity": {
     "settings": "Comments & reviews on my listings",
@@ -3554,5 +3560,63 @@
     "comment": "New comment on %{title}",
     "review": "New review on %{title} ★%{stars}",
     "replyAction": "Reply"
+  },
+  "sellerOrders": {
+    "buyerNote": "Note from buyer",
+    "newOrderNotification": "New order: {{items}}",
+    "yourShopOrder": "Order for your shop",
+    "loadingShop": "Loading your shop to price this order…",
+    "lineTitle": "{{title}} × {{qty}}",
+    "unitPrice": "{{amount}} {{currency}} each",
+    "overStock": "More than your stock ({{stock}} left)",
+    "shippingLine": "Shipping: {{title}}",
+    "shippingNotOffered": "This shipping option isn't one your listing offers.",
+    "shippingMissing": "The buyer didn't choose shipping for a physical item.",
+    "total": "Total",
+    "waitingForRate": "Waiting for exchange rate…",
+    "fiatAtRate": "{{amount}} {{currency}}, converted at today's rate",
+    "amountDiffers": "The buyer's order said {{buyer}} sats, which doesn't match your current prices. Invoicing is blocked until the buyer places a new order at the current total.",
+    "shipTo": "Ship to:",
+    "contact": "Contact:",
+    "receiptUnverified": "The buyer sent a payment receipt, but it doesn't prove payment of your invoice.",
+    "sendInvoice": "Send invoice",
+    "confirmSend": "Create and send invoice",
+    "checkPayment": "Check payment",
+    "waitingForPayment": "Invoice sent — waiting for payment",
+    "markPaid": "Mark paid",
+    "buyerNotified": "Paid — buyer notified",
+    "invoiceSent": "Invoice sent",
+    "notPaidYet": "Not paid yet",
+    "couldNotConfirmPayment": "Couldn't confirm payment",
+    "orderNumber": "Order #{{id}}",
+    "rowA11y": "Order from {{buyer}}: {{items}}. {{status}}",
+    "problems": {
+      "notMine": "This order is for listings that aren't yours.",
+      "missingListing": "One of these items isn't in your shop any more.",
+      "badPrice": "One of these listings has no fixed price to invoice.",
+      "unknownShipping": "The chosen shipping option isn't one you publish.",
+      "noRate": "Waiting for exchange rate…"
+    },
+    "errors": {
+      "noWallet": "Choose a wallet to receive the payment.",
+      "invoiceFailed": "That wallet couldn't create an invoice. Check it's connected and allowed to receive.",
+      "amountMismatch": "The wallet created an invoice for a different amount, so it wasn't sent.",
+      "shopChanged": "Your shop prices or shipping changed. Review the order before sending an invoice.",
+      "sendFailed": "Couldn't send to the buyer. Check your connection and try again.",
+      "notSignedIn": "Sign in to manage orders."
+    },
+    "wallet": {
+      "none": "None of your wallets can create invoices. Add a Lightning (NWC) wallet with permission to receive.",
+      "checking": "Checking it can receive…",
+      "offline": "Not connected",
+      "receiveTo": "Receive payments to",
+      "receiveToHint": "Order invoices are created on this wallet. Saved on this device.",
+      "remember": "Remember for my shop",
+      "choose": "Choose a wallet",
+      "saveFailed": "Couldn't save the wallet choice."
+    },
+    "sendNewInvoice": "Send new invoice",
+    "checkWalletFirst": "Check your wallet first",
+    "unknownInvoiceWarning": "We couldn't confirm whether the earlier invoice was paid. If it was, don't send a new one."
   }
 }

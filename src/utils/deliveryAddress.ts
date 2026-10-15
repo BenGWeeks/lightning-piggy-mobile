@@ -1,4 +1,4 @@
-import { countryName } from '../data/countries';
+import { countryName, isKnownCountry, localizedCountryName } from '../data/countries';
 import { MAX_ORDER_ADDRESS_LENGTH } from './marketOrder';
 
 export interface DeliveryAddress {
@@ -54,4 +54,16 @@ export function parseDeliveryAddress(address: string): string[] {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
+}
+
+/** Display legacy ISO country endings without changing the stored address or other lines. */
+export function localizeDeliveryAddress(address: string, locale: string): string {
+  const lines = address.split('\n');
+  let last = lines.length - 1;
+  while (last >= 0 && !lines[last].trim()) last--;
+  if (last < 0) return address;
+  const code = lines[last].trim();
+  if (!/^[a-z]{2}$/i.test(code) || !isKnownCountry(code)) return address;
+  lines[last] = lines[last].replace(code, localizedCountryName(code, locale));
+  return lines.join('\n');
 }

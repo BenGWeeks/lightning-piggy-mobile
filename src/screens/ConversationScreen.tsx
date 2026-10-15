@@ -551,6 +551,7 @@ const ConversationScreen: React.FC = () => {
           onToggleReaction={buildOnToggleReaction(item)}
           onAddNwc={addSharedWallet}
           peerName={name}
+          peerPubkey={pubkey}
           onAskForInvite={askForInvite}
           peerMediaTrusted={peerMediaTrusted}
         />
@@ -568,6 +569,7 @@ const ConversationScreen: React.FC = () => {
     },
     [
       read.dividerId,
+      pubkey,
       peerMediaTrusted,
       openLocation,
       isInvoicePaid,

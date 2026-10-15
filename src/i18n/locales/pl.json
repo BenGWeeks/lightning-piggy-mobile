@@ -2725,7 +2725,7 @@
       "orders": {
         "line": "{{title}} × {{quantity}}",
         "amount": "{{amount}} sats",
-        "hint": "Zamówienia od kupujących na twoje oferty. Dotknij, aby otworzyć czat.",
+        "hint": "Zamówienia kupujących dotyczące Twoich ofert. Dotknij zamówienia, aby je wyświetlić.",
         "emptyBody": "Gdy ktoś kupi jedną z twoich ofert, zamówienie pojawi się tutaj.",
         "rowAccessibility": "Zamówienie od {{name}}: {{items}}, {{time}}"
       },
@@ -3579,15 +3579,18 @@
     "unverified": "niezweryfikowany"
   },
   "orderCard": {
-    "waitingForInvoice": "Czekamy na fakturę od sprzedawcy"
+    "waitingForInvoice": "Czekamy na fakturę od sprzedawcy",
+    "viewOrder": "Zobacz zamówienie"
   },
   "myOrders": {
+    "moreItems": "+{{count}} więcej",
     "title": "Moje zamówienia",
     "empty": "Brak zamówień — stuknij Kup przy ogłoszeniu.",
     "open": "Moje zamówienia",
     "openWithPayNow": "Moje zamówienia — do zapłaty: {{invoices}}",
     "viewAll": "Zobacz moje zamówienia",
-    "rowA11y": "Zamówienie u {{seller}}: {{items}}. {{status}}"
+    "rowA11y": "Zamówienie u {{seller}}: {{items}}. {{status}}",
+    "askForNewInvoice": "Poproś sprzedawcę o nową fakturę"
   },
   "orderStatus": {
     "awaitingInvoice": "Czeka na fakturę",
@@ -3597,7 +3600,10 @@
     "completed": "Zrealizowane",
     "cancelled": "Anulowane",
     "needsInvoice": "Wymaga faktury",
-    "invoiceSent": "Faktura wysłana"
+    "invoiceSent": "Czeka na płatność",
+    "all": "Wszystkie",
+    "empty": "Brak zamówień z tym statusem.",
+    "invoiceExpired": "Faktura wygasła"
   },
   "sellerActivity": {
     "settings": "Komentarze i recenzje moich ofert",
@@ -3608,5 +3614,63 @@
     "comment": "Nowy komentarz do %{title}",
     "review": "Nowa recenzja %{title} ★%{stars}",
     "replyAction": "Odpowiedz"
+  },
+  "sellerOrders": {
+    "buyerNote": "Notatka od kupującego",
+    "newOrderNotification": "Nowe zamówienie: {{items}}",
+    "yourShopOrder": "Zamówienie w Twoim sklepie",
+    "loadingShop": "Wczytywanie sklepu, aby wycenić zamówienie…",
+    "lineTitle": "{{title}} × {{qty}}",
+    "unitPrice": "{{amount}} {{currency}} za sztukę",
+    "overStock": "Więcej niż masz w magazynie (zostało {{stock}})",
+    "shippingLine": "Wysyłka: {{title}}",
+    "shippingNotOffered": "Twoje ogłoszenie nie oferuje tej opcji wysyłki.",
+    "shippingMissing": "Kupujący nie wybrał wysyłki dla fizycznego przedmiotu.",
+    "total": "Suma",
+    "waitingForRate": "Czekam na kurs wymiany…",
+    "fiatAtRate": "{{amount}} {{currency}}, przeliczone po dzisiejszym kursie",
+    "amountDiffers": "Zamówienie kupującego opiewało na {{buyer}} sats, co nie odpowiada Twoim aktualnym cenom. Nie możesz wysłać faktury, dopóki kupujący nie złoży nowego zamówienia na aktualną kwotę.",
+    "shipTo": "Wyślij do:",
+    "contact": "Kontakt:",
+    "receiptUnverified": "Kupujący wysłał potwierdzenie płatności, ale nie dowodzi ono zapłaty Twojej faktury.",
+    "sendInvoice": "Wyślij fakturę",
+    "confirmSend": "Utwórz i wyślij fakturę",
+    "checkPayment": "Sprawdź płatność",
+    "waitingForPayment": "Faktura wysłana — czekam na płatność",
+    "markPaid": "Oznacz jako opłacone",
+    "buyerNotified": "Opłacone — kupujący powiadomiony",
+    "invoiceSent": "Faktura wysłana",
+    "notPaidYet": "Jeszcze nieopłacone",
+    "couldNotConfirmPayment": "Nie udało się potwierdzić płatności",
+    "orderNumber": "Zamówienie nr {{id}}",
+    "rowA11y": "Zamówienie od {{buyer}}: {{items}}. {{status}}",
+    "problems": {
+      "notMine": "To zamówienie dotyczy nie Twoich ogłoszeń.",
+      "missingListing": "Jednego z tych przedmiotów nie ma już w Twoim sklepie.",
+      "badPrice": "Jedno z tych ogłoszeń nie ma stałej ceny do zafakturowania.",
+      "unknownShipping": "Wybrana opcja wysyłki nie jest jedną z Twoich.",
+      "noRate": "Czekam na kurs wymiany…"
+    },
+    "errors": {
+      "noWallet": "Wybierz portfel do odbioru płatności.",
+      "invoiceFailed": "Ten portfel nie mógł utworzyć faktury. Sprawdź, czy jest połączony i może odbierać.",
+      "amountMismatch": "Portfel utworzył fakturę na inną kwotę, więc jej nie wysłano.",
+      "shopChanged": "Ceny lub opcje wysyłki w Twoim sklepie się zmieniły. Sprawdź zamówienie przed wysłaniem faktury.",
+      "sendFailed": "Nie udało się wysłać do kupującego. Sprawdź połączenie i spróbuj ponownie.",
+      "notSignedIn": "Zaloguj się, aby zarządzać zamówieniami."
+    },
+    "wallet": {
+      "none": "Żaden z Twoich portfeli nie może tworzyć faktur. Dodaj portfel Lightning (NWC) z uprawnieniem do odbioru.",
+      "checking": "Sprawdzam, czy może odbierać…",
+      "offline": "Niepołączony",
+      "receiveTo": "Odbieraj płatności na",
+      "receiveToHint": "Faktury za zamówienia są tworzone w tym portfelu. Zapisane na tym urządzeniu.",
+      "remember": "Zapamiętaj dla mojego sklepu",
+      "choose": "Wybierz portfel",
+      "saveFailed": "Nie udało się zapisać wyboru portfela."
+    },
+    "sendNewInvoice": "Wyślij nową fakturę",
+    "checkWalletFirst": "Najpierw sprawdź portfel",
+    "unknownInvoiceWarning": "Nie udało się potwierdzić, czy poprzednia faktura została opłacona. Jeśli tak, nie wysyłaj nowej."
   }
 }

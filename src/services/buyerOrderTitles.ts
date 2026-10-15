@@ -1,3 +1,4 @@
+import { isSellerAccountForgotten } from './sellerEventStore';
 // Item titles for orders I placed, recorded at checkout. A Gamma order only
 // carries `30402:<pubkey>:<d>` refs — no titles — so My orders would
 // otherwise show raw listing ids. Device-local, per account, bounded.
@@ -58,7 +59,9 @@ export function recordBuyerOrderTitles(
   const canWrite = () => !retired.has(pubkey) && buyerOrderTitleGeneration(pubkey) === generation;
   const run = writeChain.then(async () => {
     if (!canWrite()) return;
+    if (isSellerAccountForgotten(pubkey)) return;
     const all = await loadBuyerOrderTitles(pubkey);
+    if (isSellerAccountForgotten(pubkey)) return;
     delete all[orderId];
     const kept = [[orderId, titles] as const, ...Object.entries(all)].slice(0, MAX_ORDERS);
     if (!canWrite()) return;
@@ -66,4 +69,8 @@ export function recordBuyerOrderTitles(
   });
   writeChain = run.catch(() => undefined);
   return run;
+}
+
+export async function drainBuyerOrderTitleWrites(): Promise<void> {
+  await writeChain;
 }

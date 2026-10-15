@@ -2,6 +2,7 @@ import { useSellerActivityChecks } from '../hooks/useSellerActivityChecks';
 import { resolveActivityListing } from '../services/sellerActivityService';
 import { getCurrentUserReadRelays } from '../services/nostrActiveAccount';
 import { DEFAULT_RELAYS } from '../services/nostrService';
+import { orderNavigationTarget } from '../utils/orderNavigation';
 import { resolveStoredNotificationTarget } from '../services/notificationStoredTarget';
 import { routeNotificationMessage } from '../services/notificationGroupNavigation';
 import { getMarmotSession } from '../services/marmotSession';
@@ -273,6 +274,27 @@ export const navigateFromNotification = (
     navigationRef.navigate('Main', { screen: 'MainTabs', params: { screen: 'Messages' } });
     return true;
   }
+  if (data.myOrderId && data.orderSellerPubkey) {
+    navigationRef.navigate(
+      'Main',
+      orderNavigationTarget('MarketMyOrders', {
+        orderId: data.myOrderId,
+        sellerPubkey: data.orderSellerPubkey,
+      }),
+    );
+    return true;
+  }
+  if ((data.shopOrderId || data.shopEventId) && data.shopBuyerPubkey) {
+    navigationRef.navigate(
+      'Main',
+      orderNavigationTarget('MarketShopOrders', {
+        orderId: data.shopOrderId,
+        eventId: data.shopEventId,
+        buyerPubkey: data.shopBuyerPubkey,
+      }),
+    );
+    return true;
+  }
   if (data.conversationPubkey || data.groupId || data.marmotGroupId) {
     return routeNotificationMessage(data, {
       getActivePubkey,
@@ -367,8 +389,9 @@ export const navigateFromNotification = (
         ? resolveWrapConversation(owner, data.wrapId, { shouldStop: cancelled }).then((target) =>
             target
               ? {
-                  conversationPubkey: target.pubkey,
-                  protocol: target.protocol,
+                  ...(target.shopOrderId || target.myOrderId || target.conversationPubkey
+                    ? target
+                    : { conversationPubkey: target.pubkey, protocol: target.protocol }),
                   threadKind: 'dm' as const,
                   messageId: data.messageId ?? data.wrapId,
                   owner,

@@ -2711,7 +2711,7 @@
       "orders": {
         "line": "{{title}} × {{quantity}}",
         "amount": "{{amount}} sats",
-        "hint": "Vevők rendelései a hirdetéseidre. Koppints egyre a csevegés megnyitásához.",
+        "hint": "A hirdetéseidre érkezett vevői rendelések. Koppints egyre a rendelés megtekintéséhez.",
         "emptyBody": "Ha valaki megvesz egyet a hirdetéseid közül, a rendelése itt jelenik meg.",
         "rowAccessibility": "{{name}} rendelése: {{items}}, {{time}}"
       },
@@ -3525,15 +3525,18 @@
     "unverified": "nem ellenőrzött"
   },
   "orderCard": {
-    "waitingForInvoice": "Várakozás az eladó számlájára"
+    "waitingForInvoice": "Várakozás az eladó számlájára",
+    "viewOrder": "Rendelés megtekintése"
   },
   "myOrders": {
+    "moreItems": "+{{count}} további",
     "title": "Rendeléseim",
     "empty": "Még nincs rendelés – koppints a Vásárlás gombra egy hirdetésnél.",
     "open": "Rendeléseim",
     "openWithPayNow": "Rendeléseim – {{invoices}} fizetendő",
     "viewAll": "Rendeléseim megtekintése",
-    "rowA11y": "Rendelés tőle: {{seller}}: {{items}}. {{status}}"
+    "rowA11y": "Rendelés tőle: {{seller}}: {{items}}. {{status}}",
+    "askForNewInvoice": "Kérj új számlát az eladótól"
   },
   "orderStatus": {
     "awaitingInvoice": "Számlára vár",
@@ -3543,7 +3546,10 @@
     "completed": "Teljesítve",
     "cancelled": "Lemondva",
     "needsInvoice": "Számla szükséges",
-    "invoiceSent": "Számla elküldve"
+    "invoiceSent": "Fizetésre vár",
+    "all": "Összes",
+    "empty": "Nincs ilyen állapotú rendelés.",
+    "invoiceExpired": "A számla lejárt"
   },
   "sellerActivity": {
     "settings": "Hozzászólások és értékelések a hirdetéseimen",
@@ -3554,5 +3560,63 @@
     "comment": "Új hozzászólás: %{title}",
     "review": "Új értékelés: %{title} ★%{stars}",
     "replyAction": "Válasz"
+  },
+  "sellerOrders": {
+    "buyerNote": "A vásárló megjegyzése",
+    "newOrderNotification": "Új rendelés: {{items}}",
+    "yourShopOrder": "Rendelés a boltodba",
+    "loadingShop": "A boltod betöltése a rendelés árazásához…",
+    "lineTitle": "{{title}} × {{qty}}",
+    "unitPrice": "{{amount}} {{currency}} darabonként",
+    "overStock": "Több, mint a készleted ({{stock}} maradt)",
+    "shippingLine": "Szállítás: {{title}}",
+    "shippingNotOffered": "Ezt a szállítási módot a hirdetésed nem kínálja.",
+    "shippingMissing": "A vevő nem választott szállítást egy fizikai termékhez.",
+    "total": "Összesen",
+    "waitingForRate": "Várakozás az árfolyamra…",
+    "fiatAtRate": "{{amount}} {{currency}}, a mai árfolyamon átváltva",
+    "amountDiffers": "A vevő rendelésében {{buyer}} sats szerepelt, ami nem egyezik a jelenlegi áraiddal. Addig nem küldhetsz számlát, amíg a vevő nem ad le új rendelést az aktuális végösszeggel.",
+    "shipTo": "Szállítási cím:",
+    "contact": "Elérhetőség:",
+    "receiptUnverified": "A vevő küldött fizetési bizonylatot, de az nem igazolja a számlád kifizetését.",
+    "sendInvoice": "Számla küldése",
+    "confirmSend": "Számla létrehozása és küldése",
+    "checkPayment": "Fizetés ellenőrzése",
+    "waitingForPayment": "Számla elküldve – várakozás a fizetésre",
+    "markPaid": "Megjelölés kifizetettként",
+    "buyerNotified": "Kifizetve – vevő értesítve",
+    "invoiceSent": "Számla elküldve",
+    "notPaidYet": "Még nincs kifizetve",
+    "couldNotConfirmPayment": "Nem sikerült megerősíteni a fizetést",
+    "orderNumber": "Rendelés #{{id}}",
+    "rowA11y": "Rendelés tőle: {{buyer}}: {{items}}. {{status}}",
+    "problems": {
+      "notMine": "Ez a rendelés nem a te hirdetéseidre szól.",
+      "missingListing": "Az egyik termék már nincs a boltodban.",
+      "badPrice": "Az egyik hirdetésnek nincs számlázható fix ára.",
+      "unknownShipping": "A választott szállítási mód nem szerepel a közzétett módjaid között.",
+      "noRate": "Várakozás az árfolyamra…"
+    },
+    "errors": {
+      "noWallet": "Válassz tárcát a fizetés fogadásához.",
+      "invoiceFailed": "Ez a tárca nem tudott számlát létrehozni. Ellenőrizd, hogy csatlakozik-e és fogadhat-e.",
+      "amountMismatch": "A tárca más összegű számlát hozott létre, ezért nem küldtük el.",
+      "shopChanged": "Megváltoztak a boltod árai vagy szállítási feltételei. Számla küldése előtt ellenőrizd a rendelést.",
+      "sendFailed": "Nem sikerült elküldeni a vevőnek. Ellenőrizd a kapcsolatot, és próbáld újra.",
+      "notSignedIn": "Jelentkezz be a rendelések kezeléséhez."
+    },
+    "wallet": {
+      "none": "Egyik tárcád sem tud számlát létrehozni. Adj hozzá fogadási engedéllyel rendelkező Lightning (NWC) tárcát.",
+      "checking": "Ellenőrzés, hogy tud-e fogadni…",
+      "offline": "Nincs csatlakoztatva",
+      "receiveTo": "Fizetések fogadása ide",
+      "receiveToHint": "A rendelések számlái ezen a tárcán készülnek. Ezen az eszközön mentve.",
+      "remember": "Megjegyzés a boltomhoz",
+      "choose": "Válassz tárcát",
+      "saveFailed": "Nem sikerült menteni a tárcaválasztást."
+    },
+    "sendNewInvoice": "Új számla küldése",
+    "checkWalletFirst": "Először ellenőrizd a tárcádat",
+    "unknownInvoiceWarning": "Nem tudtuk megerősíteni, hogy az előző számlát kifizették-e. Ha igen, ne küldj újat."
   }
 }

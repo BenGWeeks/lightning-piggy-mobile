@@ -1,3 +1,4 @@
+import { type ParsedOrderEvent, parseStoredOrder } from '../utils/orderEvents';
 import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
 import { getLocalDb } from './localDb';
 import type { MarmotEdit } from './marmotEdits';
@@ -433,34 +434,86 @@ export async function getOutgoingOrderRows(
   return out;
 }
 
-/** Bound for the seller Orders read — far more than a hobby shop's history. */
+/** Whether this account received a placed order from this buyer, on any device.
+ * Target the buyer/order pair directly so older orders remain eligible even
+ * outside the bounded seller list. Invalid legacy JSON cannot satisfy admission.
+ */
+export async function hasIncomingOrder(
+  owner: string,
+  buyer: string,
+  orderId: string,
+): Promise<boolean> {
+  const db = await getLocalDb();
+  const content = "CASE WHEN json_valid(content) THEN content ELSE '{}' END";
+  const res = await db.execute(
+    `SELECT 1 FROM dm_messages
+      WHERE owner = ? AND conversation = ? AND sender = ?
+        AND from_me = 0 AND wire_kind = 16
+        AND json_extract(${content}, '$.type') = 'order'
+        AND json_extract(${content}, '$.orderId') = ?
+      LIMIT 1;`,
+    [owner, buyer, buyer, orderId],
+  );
+  return (res.rows?.length ?? 0) > 0;
+}
+
+/** Bound for the seller Orders read — number of placed orders, not rows. */
 export const SHOP_ORDER_ROW_LIMIT = 500;
 
 /**
- * The owner's newest kind-16 order rows in BOTH directions (incoming orders
- * plus our own payment requests) for the seller's Orders screen (#1534). The
- * caller (`deriveShopOrders`) keeps only orders for the seller's own listings
- * and pairs them with the invoices already sent. Bounded by `limit`.
+ * Seller history is bounded by the newest incoming placed orders. Retrieve
+ * the first placed order and latest row per lifecycle type/direction for those buyer/order pairs.
+ * At most twelve rows per order reach the seller screen, even for legacy floods;
+ * updates and receipts cannot push the placed order or invoice out of the list.
+ * The caller keeps only orders for the seller's own listings.
  */
 export async function getShopOrderRows(
   owner: string,
   limit = SHOP_ORDER_ROW_LIMIT,
 ): Promise<DmMessageRow[]> {
   const db = await getLocalDb();
+  const content = "CASE WHEN json_valid(content) THEN content ELSE '{}' END";
   const res = await db.execute(
-    `SELECT * FROM dm_messages
-      WHERE owner = ? AND wire_kind = 16
-      ORDER BY created_at DESC
-      LIMIT ?;`,
-    [owner, limit],
+    `WITH placed AS (
+      SELECT conversation, json_extract(${content}, '$.orderId') AS order_id
+      FROM dm_messages
+      WHERE owner = ? AND sender = conversation AND from_me = 0 AND wire_kind = 16
+        AND json_extract(${content}, '$.type') = 'order'
+      ORDER BY created_at DESC, event_id DESC
+      LIMIT ?
+    ), ranked AS (
+    SELECT *, ROW_NUMBER() OVER (
+      PARTITION BY conversation, json_extract(${content}, '$.orderId'),
+        json_extract(${content}, '$.type'), from_me,
+        CASE WHEN json_extract(${content}, '$.type') = 'status'
+          AND json_extract(${content}, '$.status') = 'cancelled' THEN 1 ELSE 0 END
+      ORDER BY
+        CASE WHEN json_extract(${content}, '$.type') = 'order' THEN created_at END ASC,
+        CASE WHEN json_extract(${content}, '$.type') = 'order' THEN event_id END ASC,
+        created_at DESC, event_id DESC
+    ) AS lifecycle_rank FROM dm_messages
+      WHERE owner = ? AND wire_kind IN (16, 17)
+        AND EXISTS (
+          SELECT 1 FROM placed
+          WHERE placed.conversation = dm_messages.conversation
+            AND placed.order_id = json_extract(${content}, '$.orderId')
+            AND ((from_me = 1 AND sender = owner) OR
+                 (from_me = 0 AND sender = placed.conversation))
+        )
+        AND json_extract(${content}, '$.type') IN ('order', 'payment', 'status', 'shipping', 'receipt')
+    )
+    SELECT * FROM ranked WHERE lifecycle_rank = 1
+      ORDER BY created_at DESC, event_id DESC;`,
+    [owner, Math.max(1, Math.min(2000, Math.floor(limit))), owner],
   );
   return (res.rows ?? []).map(toRow);
 }
 
 /**
  * Buyer history is bounded by the newest placed orders, never by lifecycle
- * row count. Retrieve every update for those order ids and sellers so a busy
- * order cannot push its original row (or another purchase) out of history.
+ * row count. Retain each distinct payment request for settlement correlation,
+ * plus the first order and latest other lifecycle rows, so invoice replacements
+ * cannot hide a successful payment of an earlier invoice.
  * Invalid legacy JSON is ignored without aborting the read.
  */
 export async function getOrderRows(owner: string, limit = 500): Promise<DmMessageRow[]> {
@@ -474,8 +527,19 @@ export async function getOrderRows(owner: string, limit = 500): Promise<DmMessag
         AND json_extract(${content}, '$.type') = 'order'
       ORDER BY created_at DESC, event_id DESC
       LIMIT ?
-    )
-    SELECT * FROM dm_messages
+    ), ranked AS (
+    SELECT *, ROW_NUMBER() OVER (
+      PARTITION BY conversation, json_extract(${content}, '$.orderId'),
+        json_extract(${content}, '$.type'), from_me,
+        CASE WHEN json_extract(${content}, '$.type') = 'payment'
+          THEN json_extract(${content}, '$.payment.value') ELSE '' END,
+        CASE WHEN json_extract(${content}, '$.type') = 'status'
+          AND json_extract(${content}, '$.status') = 'cancelled' THEN 1 ELSE 0 END
+      ORDER BY
+        CASE WHEN json_extract(${content}, '$.type') = 'order' THEN created_at END ASC,
+        CASE WHEN json_extract(${content}, '$.type') = 'order' THEN event_id END ASC,
+        created_at DESC, event_id DESC
+    ) AS lifecycle_rank FROM dm_messages
       WHERE owner = ? AND wire_kind IN (16, 17)
         AND EXISTS (
           SELECT 1 FROM placed
@@ -484,6 +548,9 @@ export async function getOrderRows(owner: string, limit = 500): Promise<DmMessag
             AND ((from_me = 1 AND sender = owner) OR
                  (from_me = 0 AND sender = placed.conversation))
         )
+        AND json_extract(${content}, '$.type') IN ('order', 'payment', 'status', 'shipping', 'receipt')
+    )
+    SELECT * FROM ranked WHERE lifecycle_rank = 1
       ORDER BY created_at DESC, event_id DESC;`,
     [owner, owner, Math.max(1, Math.min(2000, Math.floor(limit))), owner],
   );
@@ -506,12 +573,12 @@ export async function getInboxLatest(owner: string): Promise<DmMessageRow[]> {
     `SELECT m.* FROM dm_messages m
        JOIN (
          SELECT conversation, ${PROTOCOL_SQL} AS proto, MAX(created_at) AS mx
-         FROM dm_messages WHERE owner = ? AND wire_kind != ${MARMOT_WELCOME_KIND}
+         FROM dm_messages WHERE owner = ? AND wire_kind NOT IN (${MARMOT_WELCOME_KIND})
          GROUP BY conversation, ${PROTOCOL_SQL}
        ) g ON m.conversation = g.conversation
           AND COALESCE(m.protocol, CASE WHEN m.wire_kind = 4 THEN 'nip04' ELSE 'nip17' END) = g.proto
           AND m.created_at = g.mx
-     WHERE m.owner = ? AND m.wire_kind != ${MARMOT_WELCOME_KIND}
+     WHERE m.owner = ? AND m.wire_kind NOT IN (${MARMOT_WELCOME_KIND})
      ORDER BY m.created_at DESC;`,
     [owner, owner],
   );
@@ -533,16 +600,24 @@ export async function getConversationForEvent(
   wireKind: number;
   protocol?: DmProtocol;
   fromMe: boolean;
+  orderId?: string;
+  orderType?: ParsedOrderEvent['type'];
+  orderStatus?: string;
 } | null> {
   const db = await getLocalDb();
   const res = await db.execute(
-    `SELECT conversation, wire_kind, protocol, from_me FROM dm_messages
+    `SELECT conversation, wire_kind, protocol, from_me, content FROM dm_messages
       WHERE owner = ? AND event_id = ? LIMIT 1;`,
     [owner, eventId],
   );
   const row = (res.rows ?? [])[0];
   if (!row) return null;
+  const order =
+    Number(row.wire_kind) === 16 || Number(row.wire_kind) === 17
+      ? parseStoredOrder(String(row.content))
+      : null;
   return {
+    ...(order ? { orderId: order.orderId, orderType: order.type, orderStatus: order.status } : {}),
     conversation: String(row.conversation),
     wireKind: Number(row.wire_kind),
     fromMe: Number(row.from_me) === 1,

@@ -47,3 +47,34 @@ it('treats a message alert for another signed-in account as not openable here', 
   expect(isForAnotherAccount({ kind: 'dm' }, PK)).toBe(false); // older alerts: no owner
   expect(isForAnotherAccount({ kind: 'payment', owner: PK }, PARTNER)).toBe(false);
 });
+
+it('falls back to chat for an unparseable marketplace row', async () => {
+  expect(
+    await resolveWrapConversation(PK, 'wrap', {
+      lookup: async () => ({ conversation: PARTNER, wireKind: 16 }),
+    }),
+  ).toEqual({ pubkey: PARTNER, protocol: 'nip17' });
+});
+
+it.each([
+  ['order', 16, { shopOrderId: 'original-order', shopBuyerPubkey: PARTNER }],
+  ['receipt', 17, { shopOrderId: 'original-order', shopBuyerPubkey: PARTNER }],
+  ['payment', 16, { myOrderId: 'original-order', orderSellerPubkey: PARTNER }],
+  ['status', 16, { myOrderId: 'original-order', orderSellerPubkey: PARTNER }],
+  ['shipping', 16, { myOrderId: 'original-order', orderSellerPubkey: PARTNER }],
+] as const)(
+  'preserves the account role for a background %s alert',
+  async (orderType, wireKind, target) => {
+    expect(
+      await resolveWrapConversation(PK, 'wrap', {
+        lookup: async () => ({
+          conversation: PARTNER,
+          wireKind,
+          orderId: 'original-order',
+          orderType,
+          fromMe: false,
+        }),
+      }),
+    ).toEqual({ pubkey: PARTNER, protocol: 'nip17', ...target });
+  },
+);

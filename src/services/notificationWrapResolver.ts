@@ -1,15 +1,32 @@
+import { orderNotificationTarget } from '../utils/orderNotificationTarget';
+import type { ParsedOrderEvent } from '../utils/orderEvents';
 import { getConversationForEvent } from './dmDb';
 import { protocolForWireKind, type DmProtocol } from '../utils/dmProtocol';
 
 export interface ResolvedConversation {
   pubkey: string;
   protocol: DmProtocol;
+  shopEventId?: string;
+  shopOrderId?: string;
+  myOrderId?: string;
+  orderSellerPubkey?: string;
+  shopBuyerPubkey?: string;
+  conversationPubkey?: string;
+  conversationProtocol?: DmProtocol;
 }
 
 type Lookup = (
   owner: string,
   eventId: string,
-) => Promise<{ conversation: string; wireKind: number; protocol?: DmProtocol } | null>;
+) => Promise<{
+  conversation: string;
+  wireKind: number;
+  protocol?: DmProtocol;
+  orderId?: string;
+  orderType?: ParsedOrderEvent['type'];
+  orderStatus?: string;
+  fromMe?: boolean;
+} | null>;
 
 /**
  * The conversation a NIP-17 gift wrap belongs to (#1154). A message alert the
@@ -41,6 +58,13 @@ export async function resolveWrapConversation(
     if (row)
       return {
         pubkey: row.conversation,
+        ...(row.orderId && row.orderType
+          ? orderNotificationTarget(
+              { type: row.orderType, orderId: row.orderId, status: row.orderStatus },
+              row.conversation,
+              row.fromMe ?? false,
+            )
+          : {}),
         protocol: protocolForWireKind(row.wireKind, row.protocol),
       };
     if (Date.now() + intervalMs > deadline) return null;

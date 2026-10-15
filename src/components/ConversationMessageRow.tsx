@@ -62,6 +62,8 @@ export interface ConversationMessageRowProps {
   onAddNwc: (card: NwcShareCardData) => void;
   /** The contact's display name — who a 1:1 reply's quoted parent is from. */
   peerName?: string;
+  /** The contact's pubkey (hex) — the buyer on an order I received. */
+  peerPubkey?: string;
   /** A failed Marmot invite's "Ask for a new invite" (#1269). */
   onAskForInvite?: () => void;
   /** I follow the peer (#1338): their media / link previews load without a
@@ -105,6 +107,7 @@ function ConversationMessageRow({
   onToggleReaction,
   onAddNwc,
   peerName,
+  peerPubkey,
   onAskForInvite,
   peerMediaTrusted,
 }: ConversationMessageRowProps): React.ReactElement {
@@ -170,6 +173,7 @@ function ConversationMessageRow({
     return (
       <ConversationOrderCard
         item={item}
+        peerPubkey={peerPubkey}
         isInvoicePaid={isInvoicePaid}
         onPayInvoice={onPayInvoice}
       />

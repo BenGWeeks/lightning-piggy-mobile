@@ -1,6 +1,7 @@
 import {
   composeDeliveryAddress,
   emptyDeliveryAddress,
+  localizeDeliveryAddress,
   parseDeliveryAddress,
   validPostcode,
 } from './deliveryAddress';
@@ -13,6 +14,27 @@ const fields = {
   town: 'London',
   postcode: 'SW1A 1AA',
 };
+
+it.each([
+  ['GB', 'en', 'United Kingdom'],
+  ['United Kingdom', 'en', 'United Kingdom'],
+  ['GB', 'de', 'Vereinigtes Königreich'],
+  ['United Kingdom', 'de', 'United Kingdom'],
+  ['gb', 'es', 'Reino Unido'],
+  ['ZZ', 'en', 'ZZ'],
+])('displays country ending %s in %s as %s', (ending, locale, expected) => {
+  const prefix = 'Testy McTestface\n1 Nowhere Lane\nFlat 2\nFaketown\nZZ1 1ZZ\n';
+  expect(localizeDeliveryAddress(prefix + ending, locale)).toBe(prefix + expected);
+});
+
+it('preserves free text, earlier codes, whitespace and line endings', () => {
+  for (const address of ['', ' \n', '1 High St, London', 'GB\nLondon']) {
+    expect(localizeDeliveryAddress(address, 'en')).toBe(address);
+  }
+  expect(localizeDeliveryAddress('Buyer\r\n  GB \r\n\n', 'en')).toBe(
+    'Buyer\r\n  United Kingdom \r\n\n',
+  );
+});
 it('round-trips one Gamma address tag and accepts old single-line orders', () => {
   const address = composeDeliveryAddress(fields, 'GB')!;
   const { rumor } = buildMarketOrder({

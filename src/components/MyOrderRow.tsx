@@ -4,29 +4,49 @@ import { View, Text, TouchableOpacity } from 'react-native';
 import { Image } from 'expo-image';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useLocale } from '../contexts/LocaleContext';
-import { usePubkeyProfile } from '../hooks/usePubkeyProfile';
+import type { CachedZapSenderProfile } from '../services/zapSenderProfileStorage';
+import { merchantLabel } from '../utils/marketMerchants';
 import { createMyOrderRowStyles } from '../styles/MyOrderRow.styles';
 import { shortOrderId } from '../utils/marketOrder';
 import type { BuyerOrderEntry } from '../utils/orderThreads';
+import OrderItemThumbnails from './OrderItemThumbnails';
+import { distinctOrderItems, type OrderListingPreview } from '../utils/orderPresentation';
 import OrderStatusChip from './OrderStatusChip';
 
 interface Props {
   entry: BuyerOrderEntry;
   /** "Mug × 2, Hat × 1". */
   itemsSummary: string;
+  profile?: CachedZapSenderProfile;
+  itemTitles?: Record<string, string>;
+  listings?: ReadonlyMap<string, OrderListingPreview>;
   /** Opens the seller conversation at this order. */
   onPress: (entry: BuyerOrderEntry, sellerName: string, sellerPicture: string | null) => void;
 }
 
 /** One order in My orders: seller, items, total, date and status chip. */
-function MyOrderRow({ entry, itemsSummary, onPress }: Props): React.ReactElement {
+function MyOrderRow({
+  entry,
+  itemsSummary,
+  itemTitles,
+  profile,
+  listings,
+  onPress,
+}: Props): React.ReactElement {
+  const items = useMemo(
+    () =>
+      distinctOrderItems(
+        entry.order.items.map((item) => ({ ...item, title: itemTitles?.[item.ref] })),
+        listings,
+      ),
+    [entry.order.items, itemTitles, listings],
+  );
   const colors = useThemeColors();
   const { t, formatLocale } = useLocale();
   const styles = useMemo(() => createMyOrderRowStyles(colors), [colors]);
-  const profile = usePubkeyProfile(entry.sellerPubkey);
   const [imageFailed, setImageFailed] = useState(false);
-  const sellerName = profile.name || `${entry.sellerPubkey.slice(0, 8)}…`;
-  const picture = profile.picture ?? null;
+  const sellerName = merchantLabel(entry.sellerPubkey, profile);
+  const picture = profile?.picture ?? null;
   const id8 = shortOrderId(entry.orderId);
   const amount = entry.order.amountSats;
   const date = new Date(entry.placedAt * 1000).toLocaleDateString(formatLocale, {
@@ -76,6 +96,10 @@ function MyOrderRow({ entry, itemsSummary, onPress }: Props): React.ReactElement
         <Text style={styles.items} numberOfLines={2}>
           {itemsSummary}
         </Text>
+        <OrderItemThumbnails items={items} orderId={entry.orderId} />
+        {entry.status === 'invoiceExpired' ? (
+          <Text style={styles.expiredNote}>{t('myOrders.askForNewInvoice')}</Text>
+        ) : null}
         <View style={styles.bottomLine}>
           <OrderStatusChip status={entry.status} testID={`my-order-status-${id8}`} />
           <Text style={styles.date}>{date}</Text>

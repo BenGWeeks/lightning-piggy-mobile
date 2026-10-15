@@ -1,6 +1,10 @@
+import { orderNavigationTarget } from '../utils/orderNavigation';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { RootStackParamList } from '../navigation/types';
 import FiatAmount from './FiatAmount';
 import React, { useMemo } from 'react';
-import { View, Text } from 'react-native';
+import { View, Text, TouchableOpacity } from 'react-native';
 import { Clock } from 'lucide-react-native';
 import OrderPaymentActions from './OrderPaymentActions';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -14,6 +18,8 @@ type OrderItem = Extract<Item, { kind: 'order' }>;
 
 interface Props {
   item: OrderItem;
+  /** The conversation's peer (hex) — the buyer, on an order I received. */
+  peerPubkey?: string;
   /** 1:1 settlement predicate (NWC poll + wallet-tx history). */
   isInvoicePaid?: (paymentHash: string, fromMe: boolean) => boolean;
   onPayInvoice: (rawInvoice: string) => void;
@@ -26,7 +32,13 @@ interface Props {
  * the order lifecycle (waiting for the seller's invoice, pay, paid) lives in
  * one place.
  */
-function ConversationOrderCard({ item, isInvoicePaid, onPayInvoice }: Props): React.ReactElement {
+function ConversationOrderCard({
+  item,
+  peerPubkey,
+  isInvoicePaid,
+  onPayInvoice,
+}: Props): React.ReactElement {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const colors = useThemeColors();
   const { formatLocale, t } = useLocale();
   const styles = useMemo(() => createConversationOrderCardStyles(colors), [colors]);
@@ -89,6 +101,29 @@ function ConversationOrderCard({ item, isInvoicePaid, onPayInvoice }: Props): Re
           testIdPrefix="conversation"
           id={item.id}
         />
+        {peerPubkey && item.order.type === 'order' ? (
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel={t('orderCard.viewOrder')}
+            testID={`conversation-order-view-${item.id}`}
+            onPress={() =>
+              navigation.navigate(
+                'Main',
+                item.fromMe
+                  ? orderNavigationTarget('MarketMyOrders', {
+                      orderId: item.order.orderId,
+                      sellerPubkey: peerPubkey,
+                    })
+                  : orderNavigationTarget('MarketShopOrders', {
+                      orderId: item.order.orderId,
+                      buyerPubkey: peerPubkey,
+                    }),
+              )
+            }
+          >
+            <Text style={styles.orderCardMeta}>{t('orderCard.viewOrder')}</Text>
+          </TouchableOpacity>
+        ) : null}
         <Text style={styles.orderCardTime}>{formatTime(item.createdAt)}</Text>
       </View>
     </View>

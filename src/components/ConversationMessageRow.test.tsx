@@ -1,11 +1,17 @@
 import React from 'react';
-import { render } from '@testing-library/react-native';
+import { fireEvent, render } from '@testing-library/react-native';
 import ConversationMessageRow, { type ConversationMessageRowProps } from './ConversationMessageRow';
 import { createConversationScreenStyles } from '../styles/ConversationScreen.styles';
 import { lightPalette } from '../styles/palettes';
 import i18n from '../i18n';
 import type MessageBubble from './MessageBubble';
+const mockNavigate = jest.fn();
+jest.mock('@react-navigation/native', () => ({
+  useNavigation: () => ({ navigate: mockNavigate }),
+}));
 
+// The seller panel (wallet + relay hooks) is covered by SellerOrderPanel.test.
+jest.mock('./SellerOrderPanel', () => () => null);
 jest.mock('../contexts/ThemeContext', () => ({
   useThemeColors: () => jest.requireActual('../styles/palettes').lightPalette,
 }));
@@ -80,3 +86,56 @@ test.each([
     i18n.locale = 'en';
   }
 });
+
+it.each([false, true])(
+  'opens the appropriate order detail without rendering contact fields (fromMe=%s)',
+  (fromMe) => {
+    const ui = render(
+      <ConversationMessageRow
+        {...props}
+        peerPubkey="peer"
+        item={{
+          kind: 'order',
+          id: 'order-row',
+          fromMe,
+          createdAt: 100,
+          order: {
+            kind: 16,
+            type: 'order',
+            orderId: 'order-1',
+            items: [{ ref: 'product', quantity: 1 }],
+            message: '',
+            address: 'PRIVATE ADDRESS',
+            email: 'PRIVATE EMAIL',
+            phone: 'PRIVATE PHONE',
+            contact: 'PRIVATE CONTACT',
+          },
+        }}
+      />,
+    );
+    for (const value of ['PRIVATE ADDRESS', 'PRIVATE EMAIL', 'PRIVATE PHONE', 'PRIVATE CONTACT'])
+      expect(ui.queryByText(value)).toBeNull();
+    fireEvent.press(ui.getByTestId('conversation-order-view-order-row'));
+    expect(mockNavigate).toHaveBeenLastCalledWith('Main', {
+      screen: 'MainTabs',
+      params: {
+        screen: 'Explore',
+        params: {
+          state: {
+            index: 2,
+            routes: [
+              { name: 'ExploreHome' },
+              { name: fromMe ? 'MarketMyOrders' : 'MarketShopOrders' },
+              {
+                name: fromMe ? 'MarketMyOrders' : 'MarketShopOrders',
+                params: fromMe
+                  ? { orderId: 'order-1', sellerPubkey: 'peer' }
+                  : { orderId: 'order-1', buyerPubkey: 'peer' },
+              },
+            ],
+          },
+        },
+      },
+    });
+  },
+);

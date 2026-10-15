@@ -183,13 +183,13 @@ export type ExploreStackParamList = {
   // shipping zones) and the listing editor (`dTag` = edit that listing).
   MarketMyShop: undefined;
   // Buyer side: every Gamma order I placed, from the encrypted DM store.
-  MarketMyOrders: undefined;
+  MarketMyOrders: { orderId: string; sellerPubkey: string } | undefined;
   // My shop hub sub-screens (#1534).
   MarketShopCurrencies: undefined;
   MarketShopShipping: undefined;
   MarketShopCollections: undefined;
   MarketShopListings: undefined;
-  MarketShopOrders: undefined;
+  MarketShopOrders: { orderId?: string; eventId?: string; buyerPubkey: string } | undefined;
   // `digital` presets a new listing's item type (the "It's a digital item"
   // way past the shipping gate).
   MarketListingEditor: { dTag?: string; returnToMyShop?: boolean; digital?: boolean } | undefined;

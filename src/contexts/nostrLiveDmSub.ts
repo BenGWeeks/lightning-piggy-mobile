@@ -1,7 +1,5 @@
 import { gateLiveDm, startFollowGateFallback } from './liveDmFollowGateDecision';
-import { isFollowed } from '../utils/followPubkeys';
 import { loadKind4ReplayCursor } from './kind4RetryStore';
-import { getAppFormatLocale } from '../utils/appFormatLocale';
 import { dmThreadId, protocolForWireKind } from '../utils/dmProtocol';
 import React from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -12,13 +10,7 @@ import type { SignerType } from '../types/nostr';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
 import { unwrapWrapNsec, unwrapWrapViaNip44, type DecodedRumor } from '../utils/nip17Unwrap';
 import { listPersistedGroupWrapIds } from '../services/groupMessagesStorageService';
-import {
-  selectDmWrapIds,
-  upsertDmMessages,
-  hasConversationWith,
-  type DmMessageRow,
-} from '../services/dmDb';
-import { parseOrderEvent, serializeOrder, orderPreviewText } from '../utils/orderEvents';
+import { selectDmWrapIds, upsertDmMessages, type DmMessageRow } from '../services/dmDb';
 import { nip04PlaintextCache, getMemoisedSecretKey } from './nostrSecretKeyCache';
 import { notifyDmMessage } from './nostrEventBus';
 import { fireMessageNotification, isThreadActivelyViewed } from '../services/notificationService';
@@ -557,113 +549,8 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       return;
     }
 
-    // Marketplace order / receipt (kind-16 / kind-17) — PLAINTEXT events a
-    // Plebeian/Gamma-style market addresses to the buyer via a `#p` tag (#market).
-    // No decryption: `parseOrderEvent` both classifies the event and rejects
-    // NIP-18 reposts that share kind 16. These bypass the follow-gate — the
-    // user transacted with the market even though they don't "follow" it — and
-    // are stored with `wireKind` 16/17 so the conversation renderer shows an
-    // order card and the inbox derives a readable preview.
-    if (ev.kind === 16 || ev.kind === 17) {
-      const order = parseOrderEvent(ev);
-      if (!order) {
-        if (__DEV__) console.log(`[Nostr] live kind-${ev.kind} ${ev.id.slice(0, 8)} not-an-order`);
-        return;
-      }
-      const fromMe = ev.pubkey === viewerPubkey;
-      const recipientTag = ev.tags.find((t) => t[0] === 'p')?.[1]?.toLowerCase();
-      const partnerPubkey = fromMe ? recipientTag : ev.pubkey.toLowerCase();
-      if (fromMe || isFreshArrival(ev.created_at)) markWrapHandled(ev.id); // see kind-4
-      if (!partnerPubkey || !/^[0-9a-f]{64}$/.test(partnerPubkey)) {
-        if (__DEV__) console.log(`[Nostr] live kind-${ev.kind} ${ev.id.slice(0, 8)} no-partner`);
-        return;
-      }
-      const serialized = serializeOrder(order);
-      const preview = orderPreviewText(order, getAppFormatLocale());
-      const orderRow: DmMessageRow = {
-        owner: viewerPubkey,
-        eventId: ev.id,
-        conversation: partnerPubkey,
-        createdAt: ev.created_at,
-        sender: fromMe ? viewerPubkey : partnerPubkey,
-        content: serialized,
-        fromMe,
-        wireKind: ev.kind,
-      };
-      const orderInboxEntry: DmInboxEntry = {
-        id: ev.id,
-        partnerPubkey,
-        fromMe,
-        createdAt: ev.created_at,
-        text: preview,
-        wireKind: ev.kind,
-      };
-      // Anti-spam gate for the OS notification (Copilot #927). Orders bypass
-      // the follow-gate for STORAGE (a buyer transacted with the market even
-      // though they don't follow it), but the events are PLAINTEXT and addressed
-      // by `#p`, so any sender can craft an order-shaped kind-16/17 to the
-      // viewer. To avoid OS-level notification spam, only raise a push when the
-      // market is already trusted: followed, OR an existing conversation in the
-      // encrypted store (#850 — replaces the retired plaintext inbox blob scan).
-      // Unknown senders are still stored + surfaced in-app silently.
-      // (Follow-up: record markets the user actively ordered from — e.g. via the
-      // Explore Market checkout — into a trust set so a first legitimate order
-      // notifies too.) `partnerKnown` is checked BEFORE this event's own upsert,
-      // so the very first order from a stranger can't self-qualify.
-      const partnerFollowed = isFollowed(followPubkeysRef.current, partnerPubkey);
-      let partnerKnown = partnerFollowed;
-      let persisted = false;
-      writeChain = writeChain
-        .then(async () => {
-          if (cancelled || !isCurrentOwner()) return;
-          if (!partnerKnown) {
-            partnerKnown = await hasConversationWith(viewerPubkey, partnerPubkey).catch(
-              () => false,
-            );
-          }
-          await upsertDmMessages([orderRow]);
-          persisted = true;
-        })
-        .catch((e) => {
-          if (__DEV__) console.warn('[Nostr] live order persist failed:', e);
-        });
-      // Keep the inbox responsive, but the conversation reload reads SQLite:
-      // notify only after this order is durable, otherwise a fast reload can
-      // finish before the queued write and miss the invoice indefinitely.
-      if (cancelled || !isCurrentOwner() || viewerPubkey !== pubkey || activeSigner !== signerType)
-        return;
-      queueInboxEntry(orderInboxEntry);
-      void writeChain.then(() => {
-        if (
-          !persisted ||
-          cancelled ||
-          !isCurrentOwner() ||
-          viewerPubkey !== pubkey ||
-          activeSigner !== signerType
-        )
-          return;
-        notifyDmMessage(partnerPubkey);
-        if (!fromMe && isFreshArrival(ev.created_at) && partnerKnown) {
-          void fireMessageNotification({
-            owner: viewerPubkey,
-            kind: 'dm',
-            threadId: dmThreadId(partnerPubkey, protocolForWireKind(ev.kind)),
-            title: 'Marketplace update',
-            body: preview,
-            data: {
-              conversationPubkey: partnerPubkey,
-              messageId: ev.id,
-              conversationProtocol: protocolForWireKind(ev.kind),
-            },
-          });
-        }
-      });
-      if (__DEV__)
-        console.log(
-          `[Nostr] live kind-${ev.kind} ${ev.id.slice(0, 8)} surfaced (order=${order.orderId.slice(0, 8)}, partner=${partnerPubkey.slice(0, 8)})`,
-        );
-      return;
-    }
+    // Public kinds 16/17 are reposts / website reactions, never Gamma orders.
+    if (ev.kind === 16 || ev.kind === 17) return;
 
     // NIP-17 (kind-1059) — existing gift-wrap unwrap path. Local alias preserves original variable name without renaming through the body below.
     const wrap = ev;
@@ -779,7 +666,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     viewerPubkey,
     readRelays,
     // Engine mode: the native pool owns the kind-1059 filter; the JS sub
-    // keeps kind-4/16/17 (and the close-driven re-arm moves to the kind-4
+    // keeps kind-4 (and the close-driven re-arm moves to the kind-4
     // sub — see subscribeInboxDmsForViewer). Read per-arm so the fallback
     // re-arm restores the wrap filter if the engine fails to start.
     skipWraps: () => engineActive,
