@@ -4,7 +4,8 @@ import { View, Text, TouchableOpacity } from 'react-native';
 import { Image } from 'expo-image';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useLocale } from '../contexts/LocaleContext';
-import { usePubkeyProfile } from '../hooks/usePubkeyProfile';
+import type { CachedZapSenderProfile } from '../services/zapSenderProfileStorage';
+import { merchantLabel } from '../utils/marketMerchants';
 import { createMyOrderRowStyles } from '../styles/MyOrderRow.styles';
 import { shortOrderId } from '../utils/marketOrder';
 import type { BuyerOrderEntry } from '../utils/orderThreads';
@@ -16,6 +17,7 @@ interface Props {
   entry: BuyerOrderEntry;
   /** "Mug × 2, Hat × 1". */
   itemsSummary: string;
+  profile?: CachedZapSenderProfile;
   itemTitles?: Record<string, string>;
   listings?: ReadonlyMap<string, OrderListingPreview>;
   /** Opens the seller conversation at this order. */
@@ -27,6 +29,7 @@ function MyOrderRow({
   entry,
   itemsSummary,
   itemTitles,
+  profile,
   listings,
   onPress,
 }: Props): React.ReactElement {
@@ -41,10 +44,9 @@ function MyOrderRow({
   const colors = useThemeColors();
   const { t, formatLocale } = useLocale();
   const styles = useMemo(() => createMyOrderRowStyles(colors), [colors]);
-  const profile = usePubkeyProfile(entry.sellerPubkey);
   const [imageFailed, setImageFailed] = useState(false);
-  const sellerName = profile.name || `${entry.sellerPubkey.slice(0, 8)}…`;
-  const picture = profile.picture ?? null;
+  const sellerName = merchantLabel(entry.sellerPubkey, profile);
+  const picture = profile?.picture ?? null;
   const id8 = shortOrderId(entry.orderId);
   const amount = entry.order.amountSats;
   const date = new Date(entry.placedAt * 1000).toLocaleDateString(formatLocale, {

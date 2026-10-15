@@ -5,6 +5,7 @@ import {
   distinctOrderItems,
   orderListingPreviews,
   orderProductPreviews,
+  orderItemsSummary,
 } from './orderPresentation';
 
 describe('buyerOrderNote', () => {
@@ -97,4 +98,18 @@ it('displays legacy comma-separated addresses on separate lines without breaking
     'GB',
   ]);
   expect(orderAddressLines('')).toEqual([]);
+});
+
+it('uses catalogue titles for text and images, then checkout titles, then unknown d-tags', () => {
+  const ref = '30402:seller:test-little-piggy-nostr-21sat';
+  const lines = [{ ref, quantity: 1 }];
+  const catalogue = new Map([
+    [ref, { title: 'Little Piggy Nostr Listing', image: 'https://example.com/pig.png' }],
+  ]);
+  expect(orderItemsSummary(lines, undefined, catalogue)).toBe('Little Piggy Nostr Listing × 1');
+  expect(orderItemsSummary(lines, { [ref]: 'Old title' }, catalogue)).toBe(
+    'Little Piggy Nostr Listing × 1',
+  );
+  expect(orderItemsSummary(lines, { [ref]: 'Checkout title' })).toBe('Checkout title × 1');
+  expect(orderItemsSummary(lines)).toBe('test-little-piggy-nostr-21sat × 1');
 });

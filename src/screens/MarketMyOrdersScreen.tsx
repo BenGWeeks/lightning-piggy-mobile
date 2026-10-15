@@ -1,6 +1,7 @@
 import { PREFERRED_SELLERS_ACCOUNT } from '../services/marketPreferredSellers';
 import { loadedMarketSnapshots } from '../services/marketStorage';
-import { orderProductPreviews } from '../utils/orderPresentation';
+import { useBuyerProfiles } from '../hooks/useBuyerProfiles';
+import { orderItemsSummary, orderProductPreviews } from '../utils/orderPresentation';
 import { useNostr } from '../contexts/NostrContext';
 import OrderPaymentActions from '../components/OrderPaymentActions';
 import SendSheet from '../components/SendSheet';
@@ -32,16 +33,6 @@ interface Props {
   route: RouteProp<ExploreStackParamList, 'MarketMyOrders'>;
 }
 
-/** "Mug × 2" from the titles recorded at checkout, else the listing id. */
-function itemsSummary(entry: BuyerOrderEntry, titles: Record<string, string> | undefined): string {
-  return entry.order.items
-    .map(
-      (item) =>
-        `${titles?.[item.ref] ?? item.ref.split(':').slice(2).join(':')} × ${item.quantity}`,
-    )
-    .join(', ');
-}
-
 /**
  * Buyer's My orders: every Gamma order I placed, newest first, with where it
  * stands (Awaiting invoice / Pay now / Paid / Shipped / Completed). Read from
@@ -56,6 +47,11 @@ const MarketMyOrdersScreen: React.FC<Props> = ({ navigation, route }) => {
   const [invoiceToPay, setInvoiceToPay] = useState<string | null>(null);
   const { entries, titles, loading } = useBuyerOrders();
   const { pubkey } = useNostr();
+  const sellersKey = useMemo(
+    () => [...new Set(entries.map((entry) => entry.sellerPubkey))].sort().join(','),
+    [entries],
+  );
+  const profiles = useBuyerProfiles(sellersKey);
   // Reuse the public preferred catalogue and this account's loaded friends catalogue.
   const previews = useMemo(
     () =>
@@ -83,11 +79,12 @@ const MarketMyOrdersScreen: React.FC<Props> = ({ navigation, route }) => {
         entry={item}
         listings={previews}
         itemTitles={titles[item.orderId]}
-        itemsSummary={itemsSummary(item, titles[item.orderId])}
+        profile={profiles.get(item.sellerPubkey)}
+        itemsSummary={orderItemsSummary(item.order.items, titles[item.orderId], previews)}
         onPress={openOrder}
       />
     ),
-    [titles, openOrder, previews],
+    [titles, openOrder, previews, profiles],
   );
 
   const selected = entries.find(
@@ -112,7 +109,7 @@ const MarketMyOrdersScreen: React.FC<Props> = ({ navigation, route }) => {
           {selected ? (
             <>
               <Text style={styles.emptyText}>
-                {itemsSummary(selected, titles[selected.orderId])}
+                {orderItemsSummary(selected.order.items, titles[selected.orderId], previews)}
               </Text>
               <Text style={styles.emptyText}>{t(`orderStatus.${selected.status}`)}</Text>
               {selected.paymentRequest ? (

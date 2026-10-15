@@ -67,3 +67,17 @@ export function orderAddressLines(address: string): string[] {
     .map((line) => line.trim())
     .filter(Boolean);
 }
+
+/** Use the same catalogue title as the thumbnail, then checkout titles, then the d-tag. */
+export function orderItemsSummary(
+  lines: readonly { ref: string; quantity: number }[],
+  titles?: Record<string, string>,
+  listings?: ReadonlyMap<string, OrderListingPreview>,
+): string {
+  return distinctOrderItems(
+    lines.map((line) => ({ ...line, title: titles?.[line.ref] })),
+    listings,
+  )
+    .map((item) => `${item.title} × ${item.quantity}`)
+    .join(', ');
+}
