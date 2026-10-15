@@ -944,6 +944,17 @@ A symlink is fine for Jest. For a worktree that serves Metro to an emulator,
 install dependencies locally instead (see "Dynamic imports fail in an emulator
 worktree with shared dependencies" above).
 
+=== Plain-image Jest test downloads but never resolves an image URI
+
+If `remoteMediaRendering.test.tsx` fetches once but never calls `onResolved`,
+check its account setup. `useImageMediaUri` checks the captured account session
+after the download, including for plain images. Setting only
+`setRemoteMediaOwner` leaves that session invalid. Initialise the active pubkey,
+decrypted-media owner and remote-media owner to the same account, matching
+`useActiveNostrAccount` and `useIdentityMemoryReset` in the app. Keep the session
+guard intact; the rendering test should assert both the callback and the local
+URI passed to the image.
+
 === A blocked Jest storage mock exhausts the Node heap
 
 Binding an existing `jest.fn` before replacing its implementation does not
