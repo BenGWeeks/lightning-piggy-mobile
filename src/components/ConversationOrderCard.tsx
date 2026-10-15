@@ -1,3 +1,4 @@
+import { orderNavigationTarget } from '../utils/orderNavigation';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
@@ -106,21 +107,18 @@ function ConversationOrderCard({
             accessibilityLabel={t('orderCard.viewOrder')}
             testID={`conversation-order-view-${item.id}`}
             onPress={() =>
-              navigation.navigate('Main', {
-                screen: 'MainTabs',
-                params: {
-                  screen: 'Explore',
-                  params: item.fromMe
-                    ? {
-                        screen: 'MarketMyOrders',
-                        params: { orderId: item.order.orderId, sellerPubkey: peerPubkey },
-                      }
-                    : {
-                        screen: 'MarketShopOrders',
-                        params: { orderId: item.order.orderId, buyerPubkey: peerPubkey },
-                      },
-                },
-              })
+              navigation.navigate(
+                'Main',
+                item.fromMe
+                  ? orderNavigationTarget('MarketMyOrders', {
+                      orderId: item.order.orderId,
+                      sellerPubkey: peerPubkey,
+                    })
+                  : orderNavigationTarget('MarketShopOrders', {
+                      orderId: item.order.orderId,
+                      buyerPubkey: peerPubkey,
+                    }),
+              )
             }
           >
             <Text style={styles.orderCardMeta}>{t('orderCard.viewOrder')}</Text>

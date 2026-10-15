@@ -3571,7 +3571,7 @@
     "total": "总计",
     "waitingForRate": "正在获取汇率…",
     "fiatAtRate": "{{amount}} {{currency}}，按今日汇率换算",
-    "amountDiffers": "买家订单写的是 {{buyer}} sats。发票将按你当前的价格开具。",
+    "amountDiffers": "买家订单的金额为 {{buyer}} sats，与您当前的价格不符。在买家按当前总额重新下单之前，无法开具发票。",
     "shipTo": "收货地址：",
     "contact": "联系方式：",
     "receiptUnverified": "买家发送了付款凭证，但无法证明已支付你的发票。",

@@ -51,7 +51,7 @@ export function distinctOrderItems(
       const listing = listings?.get(line.ref);
       items.set(line.ref, {
         ref: line.ref,
-        title: listing?.title || line.title || line.ref.split(':').slice(2).join(':'),
+        title: line.title || listing?.title || line.ref.split(':').slice(2).join(':'),
         image: listing?.image,
         quantity: line.quantity,
       });
@@ -68,7 +68,7 @@ export function orderAddressLines(address: string): string[] {
     .filter(Boolean);
 }
 
-/** Use the same catalogue title as the thumbnail, then checkout titles, then the d-tag. */
+/** Preserve checkout titles for text and thumbnails, then use catalogue titles or the d-tag. */
 export function orderItemsSummary(
   lines: readonly { ref: string; quantity: number }[],
   titles?: Record<string, string>,

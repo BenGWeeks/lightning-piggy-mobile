@@ -3571,7 +3571,7 @@
     "total": "Total",
     "waitingForRate": "Esperando el tipo de cambio…",
     "fiatAtRate": "{{amount}} {{currency}}, convertido al cambio de hoy",
-    "amountDiffers": "El pedido del comprador indicaba {{buyer}} sats. La factura usa tus precios actuales.",
+    "amountDiffers": "El pedido del comprador indicaba {{buyer}} sats, lo que no coincide con tus precios actuales. No puedes enviar una factura hasta que el comprador haga un nuevo pedido con el total actual.",
     "shipTo": "Enviar a:",
     "contact": "Contacto:",
     "receiptUnverified": "El comprador envió un recibo de pago, pero no demuestra el pago de tu factura.",

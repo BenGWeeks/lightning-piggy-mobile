@@ -2,7 +2,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { resetSellerStore } from '../services/sellerEventStore';
 import { ingestInboxWraps } from './dmWrapIngest';
 import { parseOrderEvent, serializeOrder } from '../utils/orderEvents';
-import { ORDER_RUMOR_MAX_CHARS } from './orderRumorIngest';
+import {
+  admitUnfollowedOrder,
+  ORDER_RUMOR_MAX_CHARS,
+  ORDER_RUMOR_RATE_LIMIT,
+} from './orderRumorIngest';
 import { NWC_SHARE_KIND } from '../utils/nwcShareMessage';
 import type { DmMessageRow } from '../services/dmDb';
 import type { DecodedRumor } from '../utils/nip17Unwrap';
@@ -655,4 +659,52 @@ it('keeps order wraps retryable after a budget storage failure', async () => {
   storage.mockRestore();
   expect((await ingestInboxWraps(params)).stored).toBe(1);
   expect(unwrap).toHaveBeenCalledTimes(2);
+});
+
+it('retries a rate-limited incoming order on ordinary refresh after the window expires', async () => {
+  const owner = 'rate-limited-backfill';
+  const now = jest.spyOn(Date, 'now').mockReturnValue(100_000);
+  try {
+    for (let i = 0; i < ORDER_RUMOR_RATE_LIMIT; i++) admitUnfollowedOrder(owner);
+    const params = {
+      owner,
+      wraps: [wrap('retryable-invoice')],
+      unwrap: jest.fn(() => sellerInvoice),
+      passesFollowGate: () => false,
+      isFollowed: () => false,
+      skipKey: 'rate-limited-skip',
+    };
+    expect((await ingestInboxWraps(params)).stored).toBe(0);
+    expect(mockWriteSkipSet).not.toHaveBeenCalled();
+    expect(mockUpsert).not.toHaveBeenCalled();
+    now.mockReturnValue(160_000);
+    expect((await ingestInboxWraps(params)).stored).toBe(1);
+    expect(params.unwrap).toHaveBeenCalledTimes(2);
+    expect(mockWriteSkipSet).not.toHaveBeenCalled();
+  } finally {
+    now.mockRestore();
+  }
+});
+
+it('stores sent copies to non-friends without consuming or depending on the incoming budget', async () => {
+  const owner = 'outgoing-backfill-budget';
+  const params = {
+    owner,
+    wraps: [wrap('outgoing-invoice')],
+    unwrap: () => ({
+      ...sellerInvoice,
+      pubkey: owner,
+      partnership: { partnerPubkey: BOB, fromMe: true },
+    }),
+    passesFollowGate: () => false,
+    isFollowed: () => false,
+    skipKey: 'outgoing-skip',
+  };
+  expect((await ingestInboxWraps(params)).stored).toBe(1);
+  for (let i = 0; i < ORDER_RUMOR_RATE_LIMIT; i++) {
+    expect(admitUnfollowedOrder(owner)).toBe(true);
+  }
+  expect(admitUnfollowedOrder(owner)).toBe(false);
+  expect((await ingestInboxWraps(params)).stored).toBe(1);
+  expect(mockWriteSkipSet).not.toHaveBeenCalled();
 });

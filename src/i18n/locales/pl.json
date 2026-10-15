@@ -3625,7 +3625,7 @@
     "total": "Suma",
     "waitingForRate": "Czekam na kurs wymiany…",
     "fiatAtRate": "{{amount}} {{currency}}, przeliczone po dzisiejszym kursie",
-    "amountDiffers": "W zamówieniu kupującego było {{buyer}} sats. Faktura używa Twoich aktualnych cen.",
+    "amountDiffers": "Zamówienie kupującego opiewało na {{buyer}} sats, co nie odpowiada Twoim aktualnym cenom. Nie możesz wysłać faktury, dopóki kupujący nie złoży nowego zamówienia na aktualną kwotę.",
     "shipTo": "Wyślij do:",
     "contact": "Kontakt:",
     "receiptUnverified": "Kupujący wysłał potwierdzenie płatności, ale nie dowodzi ono zapłaty Twojej faktury.",

@@ -224,7 +224,8 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
         }
         const followed = params.isFollowed?.(partnership.partnerPubkey) ?? showInMessages;
         if (!followed && (rumor.kind === 16 || rumor.kind === 17)) {
-          if (!orderRumor || !admitUnfollowedOrder(owner)) return skipOrderWrap(wrap.id);
+          // A transient rate-limit rejection must remain retryable; sent copies use no budget.
+          if (!partnership.fromMe && !admitUnfollowedOrder(owner)) return null;
         }
         if (
           !(await acceptOrderRumor(owner, rumor, partnership.fromMe, () => {

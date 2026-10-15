@@ -2,6 +2,7 @@ import { useSellerActivityChecks } from '../hooks/useSellerActivityChecks';
 import { resolveActivityListing } from '../services/sellerActivityService';
 import { getCurrentUserReadRelays } from '../services/nostrActiveAccount';
 import { DEFAULT_RELAYS } from '../services/nostrService';
+import { orderNavigationTarget } from '../utils/orderNavigation';
 import { resolveStoredNotificationTarget } from '../services/notificationStoredTarget';
 import { routeNotificationMessage } from '../services/notificationGroupNavigation';
 import { getMarmotSession } from '../services/marmotSession';
@@ -274,33 +275,24 @@ export const navigateFromNotification = (
     return true;
   }
   if (data.myOrderId && data.orderSellerPubkey) {
-    navigationRef.navigate('Main', {
-      screen: 'MainTabs',
-      params: {
-        screen: 'Explore',
-        params: {
-          screen: 'MarketMyOrders',
-          params: { orderId: data.myOrderId, sellerPubkey: data.orderSellerPubkey },
-        },
-      },
-    });
+    navigationRef.navigate(
+      'Main',
+      orderNavigationTarget('MarketMyOrders', {
+        orderId: data.myOrderId,
+        sellerPubkey: data.orderSellerPubkey,
+      }),
+    );
     return true;
   }
   if ((data.shopOrderId || data.shopEventId) && data.shopBuyerPubkey) {
-    navigationRef.navigate('Main', {
-      screen: 'MainTabs',
-      params: {
-        screen: 'Explore',
-        params: {
-          screen: 'MarketShopOrders',
-          params: {
-            orderId: data.shopOrderId,
-            eventId: data.shopEventId,
-            buyerPubkey: data.shopBuyerPubkey,
-          },
-        },
-      },
-    });
+    navigationRef.navigate(
+      'Main',
+      orderNavigationTarget('MarketShopOrders', {
+        orderId: data.shopOrderId,
+        eventId: data.shopEventId,
+        buyerPubkey: data.shopBuyerPubkey,
+      }),
+    );
     return true;
   }
   if (data.conversationPubkey || data.groupId || data.marmotGroupId) {

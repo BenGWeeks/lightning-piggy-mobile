@@ -3571,7 +3571,7 @@
     "total": "Összesen",
     "waitingForRate": "Várakozás az árfolyamra…",
     "fiatAtRate": "{{amount}} {{currency}}, a mai árfolyamon átváltva",
-    "amountDiffers": "A vevő rendelésében {{buyer}} sats szerepelt. A számla a jelenlegi áraidat használja.",
+    "amountDiffers": "A vevő rendelésében {{buyer}} sats szerepelt, ami nem egyezik a jelenlegi áraiddal. Addig nem küldhetsz számlát, amíg a vevő nem ad le új rendelést az aktuális végösszeggel.",
     "shipTo": "Szállítási cím:",
     "contact": "Elérhetőség:",
     "receiptUnverified": "A vevő küldött fizetési bizonylatot, de az nem igazolja a számlád kifizetését.",

@@ -75,7 +75,7 @@ it('groups distinct items, totals their badges and retains order and unknown tit
   ]);
   const items = distinctOrderItems(lines, previews);
   expect(items).toEqual([
-    { ref: lines[0].ref, title: 'Mug', image: 'https://example.com/mug.png', quantity: 4 },
+    { ref: lines[0].ref, title: 'Old title', image: 'https://example.com/mug.png', quantity: 4 },
     { ref: lines[1].ref, title: 'hat', quantity: 2 },
     { ref: lines[3].ref, title: 'Scarf', quantity: 1 },
     { ref: lines[4].ref, title: 'pin', quantity: 1 },
@@ -100,16 +100,14 @@ it('displays legacy comma-separated addresses on separate lines without breaking
   expect(orderAddressLines('')).toEqual([]);
 });
 
-it('uses catalogue titles for text and images, then checkout titles, then unknown d-tags', () => {
+it('preserves checkout titles for text and images, then catalogue titles, then unknown d-tags', () => {
   const ref = '30402:seller:test-little-piggy-nostr-21sat';
   const lines = [{ ref, quantity: 1 }];
   const catalogue = new Map([
     [ref, { title: 'Little Piggy Nostr Listing', image: 'https://example.com/pig.png' }],
   ]);
   expect(orderItemsSummary(lines, undefined, catalogue)).toBe('Little Piggy Nostr Listing × 1');
-  expect(orderItemsSummary(lines, { [ref]: 'Old title' }, catalogue)).toBe(
-    'Little Piggy Nostr Listing × 1',
-  );
+  expect(orderItemsSummary(lines, { [ref]: 'Old title' }, catalogue)).toBe('Old title × 1');
   expect(orderItemsSummary(lines, { [ref]: 'Checkout title' })).toBe('Checkout title × 1');
   expect(orderItemsSummary(lines)).toBe('test-little-piggy-nostr-21sat × 1');
 });

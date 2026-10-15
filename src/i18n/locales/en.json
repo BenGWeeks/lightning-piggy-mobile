@@ -3571,7 +3571,7 @@
     "total": "Total",
     "waitingForRate": "Waiting for exchange rate…",
     "fiatAtRate": "{{amount}} {{currency}}, converted at today's rate",
-    "amountDiffers": "The buyer's order said {{buyer}} sats. The invoice uses your current prices.",
+    "amountDiffers": "The buyer's order said {{buyer}} sats, which doesn't match your current prices. Invoicing is blocked until the buyer places a new order at the current total.",
     "shipTo": "Ship to:",
     "contact": "Contact:",
     "receiptUnverified": "The buyer sent a payment receipt, but it doesn't prove payment of your invoice.",

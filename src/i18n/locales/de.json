@@ -3571,7 +3571,7 @@
     "total": "Summe",
     "waitingForRate": "Warte auf Wechselkurs …",
     "fiatAtRate": "{{amount}} {{currency}}, zum heutigen Kurs umgerechnet",
-    "amountDiffers": "In der Bestellung standen {{buyer}} sats. Die Rechnung verwendet deine aktuellen Preise.",
+    "amountDiffers": "Die Bestellung des Käufers enthielt {{buyer}} sats und stimmt nicht mit deinen aktuellen Preisen überein. Du kannst erst eine Rechnung senden, wenn der Käufer eine neue Bestellung zum aktuellen Gesamtbetrag aufgibt.",
     "shipTo": "Lieferung an:",
     "contact": "Kontakt:",
     "receiptUnverified": "Der Käufer hat einen Zahlungsbeleg geschickt, der aber die Zahlung deiner Rechnung nicht belegt.",
