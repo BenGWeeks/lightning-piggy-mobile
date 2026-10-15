@@ -1,3 +1,5 @@
+import OrderStatusFilter from '../components/OrderStatusFilter';
+import { useOrderStatusFilter } from '../hooks/useOrderStatusFilter';
 import { PREFERRED_SELLERS_ACCOUNT } from '../services/marketPreferredSellers';
 import { loadedMarketSnapshots } from '../services/marketStorage';
 import { useBuyerProfiles } from '../hooks/useBuyerProfiles';
@@ -23,6 +25,8 @@ import { createMarketMyOrdersScreenStyles } from '../styles/MarketMyOrdersScreen
 import type { BuyerOrderEntry } from '../utils/orderThreads';
 import type { ExploreNavigation, RootStackParamList } from '../navigation/types';
 
+const statusOf = (entry: BuyerOrderEntry) => entry.status;
+
 type Navigation = CompositeNavigationProp<
   ExploreNavigation,
   NativeStackNavigationProp<RootStackParamList>
@@ -46,6 +50,7 @@ const MarketMyOrdersScreen: React.FC<Props> = ({ navigation, route }) => {
   const styles = useMemo(() => createMarketMyOrdersScreenStyles(colors), [colors]);
   const [invoiceToPay, setInvoiceToPay] = useState<string | null>(null);
   const { entries, titles, loading } = useBuyerOrders();
+  const filter = useOrderStatusFilter(entries, statusOf);
   const { pubkey } = useNostr();
   const sellersKey = useMemo(
     () => [...new Set(entries.map((entry) => entry.sellerPubkey))].sort().join(','),
@@ -131,15 +136,20 @@ const MarketMyOrdersScreen: React.FC<Props> = ({ navigation, route }) => {
         <FlatList
           style={styles.list}
           contentContainerStyle={styles.listContent}
-          data={entries}
+          data={filter.filtered}
+          ListHeaderComponent={<OrderStatusFilter {...filter} />}
           keyExtractor={(entry) => `${entry.sellerPubkey}:${entry.orderId}`}
           renderItem={renderItem}
           testID="my-orders-list"
           ListEmptyComponent={
-            <View style={styles.empty} testID="my-orders-empty">
-              <ReceiptText size={36} color={colors.textSupplementary} strokeWidth={1.75} />
-              <Text style={styles.emptyText}>{t('myOrders.empty')}</Text>
-            </View>
+            entries.length > 0 ? (
+              <Text style={styles.emptyText}>{t('orderStatus.empty')}</Text>
+            ) : (
+              <View style={styles.empty} testID="my-orders-empty">
+                <ReceiptText size={36} color={colors.textSupplementary} strokeWidth={1.75} />
+                <Text style={styles.emptyText}>{t('myOrders.empty')}</Text>
+              </View>
+            )
           }
         />
       )}

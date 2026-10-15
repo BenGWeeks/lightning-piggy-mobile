@@ -3599,7 +3599,9 @@
     "completed": "Zrealizowane",
     "cancelled": "Anulowane",
     "needsInvoice": "Wymaga faktury",
-    "invoiceSent": "Czeka na płatność"
+    "invoiceSent": "Czeka na płatność",
+    "all": "Wszystkie",
+    "empty": "Brak zamówień z tym statusem."
   },
   "sellerActivity": {
     "settings": "Komentarze i recenzje moich ofert",

@@ -3545,7 +3545,9 @@
     "completed": "Abgeschlossen",
     "cancelled": "Storniert",
     "needsInvoice": "Rechnung fällig",
-    "invoiceSent": "Warte auf Zahlung"
+    "invoiceSent": "Warte auf Zahlung",
+    "all": "Alle",
+    "empty": "Keine Bestellungen mit diesem Status."
   },
   "sellerActivity": {
     "settings": "Kommentare & Bewertungen zu meinen Angeboten",

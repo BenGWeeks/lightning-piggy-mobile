@@ -3545,7 +3545,9 @@
     "completed": "Completado",
     "cancelled": "Cancelado",
     "needsInvoice": "Falta factura",
-    "invoiceSent": "Esperando pago"
+    "invoiceSent": "Esperando pago",
+    "all": "Todos",
+    "empty": "No hay pedidos con este estado."
   },
   "sellerActivity": {
     "settings": "Comentarios y reseñas de mis anuncios",

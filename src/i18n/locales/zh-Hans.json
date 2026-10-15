@@ -3545,7 +3545,9 @@
     "completed": "已完成",
     "cancelled": "已取消",
     "needsInvoice": "待开发票",
-    "invoiceSent": "等待付款"
+    "invoiceSent": "等待付款",
+    "all": "全部",
+    "empty": "没有此状态的订单。"
   },
   "sellerActivity": {
     "settings": "我的商品的评论和评价",

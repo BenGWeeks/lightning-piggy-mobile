@@ -1,3 +1,5 @@
+import OrderStatusFilter from '../components/OrderStatusFilter';
+import { useOrderStatusFilter } from '../hooks/useOrderStatusFilter';
 import { orderListingPreviews } from '../utils/orderPresentation';
 import SellerOrderPanel from '../components/SellerOrderPanel';
 import OrderStatusChip from '../components/OrderStatusChip';
@@ -55,6 +57,26 @@ const MarketShopOrdersScreen: React.FC<Props> = ({ navigation, route }) => {
   );
   const profiles = useBuyerProfiles(buyersKey);
 
+  const statusOf = useCallback(
+    (order: ShopOrder) => {
+      const thread = threads.get(order.key);
+      return thread
+        ? shopOrderStatus(thread, {
+            walletPaid: paidKeys.has(order.key),
+            receiptVerified: receiptProvesPayment(
+              thread,
+              thread.invoice ? paymentHashFromBolt11(thread.invoice.bolt11) : null,
+            ),
+          })
+        : order.invoiceSent
+          ? 'invoiceSent'
+          : 'needsInvoice';
+    },
+    [threads, paidKeys],
+  );
+  const loadedOrders = useMemo(() => orders ?? [], [orders]);
+  const filter = useOrderStatusFilter(loadedOrders, statusOf);
+
   const onOpen = useCallback(
     (order: ShopOrder) => {
       navigation.push('MarketShopOrders', {
@@ -68,18 +90,6 @@ const MarketShopOrdersScreen: React.FC<Props> = ({ navigation, route }) => {
   const renderItem = useCallback(
     ({ item }: { item: ShopOrder }) => {
       const profile = profiles.get(item.buyer);
-      const thread = threads.get(item.key);
-      const status = thread
-        ? shopOrderStatus(thread, {
-            walletPaid: paidKeys.has(item.key),
-            receiptVerified: receiptProvesPayment(
-              thread,
-              thread.invoice ? paymentHashFromBolt11(thread.invoice.bolt11) : null,
-            ),
-          })
-        : item.invoiceSent
-          ? 'invoiceSent'
-          : 'needsInvoice';
       return (
         <ShopOrderRow
           order={item}
@@ -88,11 +98,11 @@ const MarketShopOrdersScreen: React.FC<Props> = ({ navigation, route }) => {
           buyerPicture={profile?.picture ?? undefined}
           styles={orderStyles}
           onPress={onOpen}
-          accessory={<OrderStatusChip status={status} />}
+          accessory={<OrderStatusChip status={statusOf(item)} />}
         />
       );
     },
-    [profiles, orderStyles, onOpen, threads, paidKeys, previews],
+    [profiles, orderStyles, onOpen, statusOf, previews],
   );
   const renderSeparator = useCallback(() => <View style={styles.separator} />, [styles]);
 
@@ -132,23 +142,30 @@ const MarketShopOrdersScreen: React.FC<Props> = ({ navigation, route }) => {
         </ScrollView>
       ) : (
         <FlatList
-          data={orders}
+          data={filter.filtered}
           keyExtractor={orderKey}
           renderItem={renderItem}
           ItemSeparatorComponent={renderSeparator}
           ListHeaderComponent={
             orders.length > 0 ? (
-              <View style={orderStyles.listHeader}>
-                <Text style={styles.hint}>{t('market.sell.orders.hint')}</Text>
-              </View>
+              <>
+                <View style={orderStyles.listHeader}>
+                  <Text style={styles.hint}>{t('market.sell.orders.hint')}</Text>
+                </View>
+                <OrderStatusFilter {...filter} />
+              </>
             ) : null
           }
           ListEmptyComponent={
-            <View style={orderStyles.empty} testID="shop-orders-empty">
-              <ShoppingBag size={40} color={colors.brandPink} strokeWidth={2} />
-              <Text style={orderStyles.emptyTitle}>{t('market.sell.hub.noOrders')}</Text>
-              <Text style={orderStyles.emptyBody}>{t('market.sell.orders.emptyBody')}</Text>
-            </View>
+            orders.length > 0 ? (
+              <Text style={styles.hint}>{t('orderStatus.empty')}</Text>
+            ) : (
+              <View style={orderStyles.empty} testID="shop-orders-empty">
+                <ShoppingBag size={40} color={colors.brandPink} strokeWidth={2} />
+                <Text style={orderStyles.emptyTitle}>{t('market.sell.hub.noOrders')}</Text>
+                <Text style={orderStyles.emptyBody}>{t('market.sell.orders.emptyBody')}</Text>
+              </View>
+            )
           }
           contentContainerStyle={styles.listContent}
           style={styles.flex1}

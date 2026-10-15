@@ -3545,7 +3545,9 @@
     "completed": "Teljesítve",
     "cancelled": "Lemondva",
     "needsInvoice": "Számla szükséges",
-    "invoiceSent": "Fizetésre vár"
+    "invoiceSent": "Fizetésre vár",
+    "all": "Összes",
+    "empty": "Nincs ilyen állapotú rendelés."
   },
   "sellerActivity": {
     "settings": "Hozzászólások és értékelések a hirdetéseimen",
