@@ -199,6 +199,7 @@ const GroupConversationScreen: React.FC = () => {
   const memberPubkeys = group?.memberPubkeys ?? EMPTY_PUBKEYS;
   const memberProfiles = useGroupMemberProfiles({
     memberPubkeys,
+    messages,
     selfPubkey: myPubkey,
     contacts,
     // One bounded batch supplies sender avatars while the thread is focused.
