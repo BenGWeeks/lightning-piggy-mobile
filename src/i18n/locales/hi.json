@@ -280,6 +280,14 @@
     "shareTitle": "{{name}} को शेयर करें",
     "shareSubtitle": "उन्हें कॉन्टैक्ट कार्ड के साथ एन्क्रिप्टेड Nostr डायरेक्ट मैसेज मिलेगा।"
   },
+  "geocacheRail": {
+    "nearest": "सबसे नज़दीकी Piglets",
+    "empty": "अभी आस-पास कोई Piglets नहीं हैं",
+    "hide": "एक Piglet छिपाएँ",
+    "error": "आस-पास के Piglets लोड नहीं हो सके।",
+    "retry": "फिर कोशिश करें",
+    "hidden": "आपके भरोसे के फ़िल्टर ने आस-पास के कुछ कैश छिपाए हैं।"
+  },
   "contentRail": {
     "seeAllAccessibility": "{{title}} — सभी देखें",
     "seeAll": "सभी देखें"

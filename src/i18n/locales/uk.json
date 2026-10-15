@@ -280,6 +280,14 @@
     "shareTitle": "Поділитися контактом: {{name}}",
     "shareSubtitle": "Вони отримають зашифроване Nostr-повідомлення з карткою людини."
   },
+  "geocacheRail": {
+    "nearest": "Найближчі Piglets",
+    "empty": "Поблизу ще немає Piglets",
+    "hide": "Сховати Piglet",
+    "error": "Не вдалося завантажити Piglets поблизу.",
+    "retry": "Повторити",
+    "hidden": "Деякі схованки поблизу приховано вашим фільтром довіри."
+  },
   "contentRail": {
     "seeAllAccessibility": "{{title}} — переглянути все",
     "seeAll": "Переглянути все"

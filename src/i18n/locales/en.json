@@ -280,6 +280,14 @@
     "shareTitle": "Share {{name}}",
     "shareSubtitle": "They'll receive an encrypted Nostr DM with a person card."
   },
+  "geocacheRail": {
+    "nearest": "Nearest Piglets",
+    "empty": "No Piglets nearby yet",
+    "hide": "Hide a Piglet",
+    "error": "Couldn’t load nearby Piglets.",
+    "retry": "Retry",
+    "hidden": "Some nearby caches are hidden by your trust filter."
+  },
   "contentRail": {
     "seeAllAccessibility": "{{title}} — see all",
     "seeAll": "See all"

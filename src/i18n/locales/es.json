@@ -280,6 +280,14 @@
     "shareTitle": "Compartir {{name}}",
     "shareSubtitle": "Recibirán un mensaje directo cifrado de Nostr con una tarjeta de contacto."
   },
+  "geocacheRail": {
+    "nearest": "Piglets más cercanos",
+    "empty": "Aún no hay Piglets cerca",
+    "hide": "Esconder un Piglet",
+    "error": "No se pudieron cargar los Piglets cercanos.",
+    "retry": "Reintentar",
+    "hidden": "Tu filtro de confianza oculta algunos cachés cercanos."
+  },
   "contentRail": {
     "seeAllAccessibility": "{{title}} — ver todo",
     "seeAll": "Ver todo"
