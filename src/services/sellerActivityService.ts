@@ -56,7 +56,11 @@ const query = (input: Pick<Input, 'relays' | 'signal'>, filter: Filter) =>
 async function* activityPages(input: Input, filter: Filter, now: number) {
   let until = now + 120;
   for (let page = 0; page < 25; page++) {
-    const events = await query(input, { ...filter, until });
+    // Each relay applies limit independently. Keep the globally newest page
+    // so an older result from a sparse relay cannot skip a busy relay's tail.
+    const events = (await query(input, { ...filter, until }))
+      .sort((a, b) => b.created_at - a.created_at || a.id.localeCompare(b.id))
+      .slice(0, filter.limit);
     yield events;
     if (events.length < filter.limit!) return;
     const oldest = Math.min(...events.map((event) => event.created_at));
@@ -108,6 +112,7 @@ export async function checkSellerActivity(input: Input): Promise<void> {
     const byCoord = new Map(listings.map((e) => [addressableCoord(e), e]));
     const parents = new Map<string, Event>();
     const coords = new Set(byCoord.keys());
+    let failure: { error: unknown } | undefined;
     // Sequential chunks and pages bound relay pressure.
     for (const filter of activityFilters(
       [...coords],
@@ -115,95 +120,106 @@ export async function checkSellerActivity(input: Input): Promise<void> {
       activitySince(cursor.lastSeen, now),
       owner,
     )) {
-      for await (const events of activityPages(input, filter, now)) {
-        if (!current()) return;
-        // Resolve the actual parent, even when it was posted years ago. Never
-        // trust a stranger's p-tag to establish that the user wrote the parent.
-        const ids = [
-          ...new Set(
-            events
-              .filter((e) => e.kind === 1111)
-              .map((e) => getTagValue(e, 'e'))
-              .filter((id): id is string => !!id && !parents.has(id)),
-          ),
-        ];
-        for (let i = 0; i < ids.length; i += 25) {
-          const chunk = ids.slice(i, i + 25);
-          const fetched = await query(input, {
-            kinds: [1111],
-            authors: [owner],
-            ids: chunk,
-            since: 0,
-            limit: 25,
-          });
-          for (const parent of fetched)
-            if (parent.kind === 1111 && parent.pubkey === owner && chunk.includes(parent.id))
-              parents.set(parent.id, parent);
-        }
-        if (!current()) return;
-        for (const event of events.sort(
-          (a, b) => a.created_at - b.created_at || a.id.localeCompare(b.id),
-        )) {
-          const target = activityTarget(event, owner, coords, parents);
-          if (!target) continue;
-          const review =
-            target.tab === 'reviews' ? parseReviewEvent(event, `a:${target.coord}`) : null;
-          if (target.tab === 'reviews' && !review) continue;
-          const friend = friends.has(event.pubkey);
-          // Stage acceptance: cancellation or a failed delivery must not consume
-          // the seen ID or stranger quota before history has been recorded.
-          const staged = { ...cursor, seen: [...cursor.seen], strangers: { ...cursor.strangers } };
-          const commit = () => {
-            Object.assign(cursor, staged);
-            progress!.dirty = true;
-          };
-          if (!acceptActivity(staged, event, target.coord, friend, now)) {
-            commit();
-            continue;
-          }
-          const title =
-            getTagValue(byCoord.get(target.coord) ?? event, 'title')?.slice(0, 120) ||
-            t('sellerActivity.listing');
-          const text = target.sellerReply
-            ? t('sellerActivity.sellerReplied')
-            : target.reply
-              ? t('sellerActivity.reply', {
-                  name: friends.get(event.pubkey) || event.pubkey.slice(0, 12),
-                })
-              : review
-                ? t('sellerActivity.review', { title, stars: review.stars })
-                : t('sellerActivity.comment', { title });
-          const data = {
-            listingCoord: target.coord,
-            feedbackTab: target.tab,
-            senderPubkey: event.pubkey,
-            owner,
-          };
-          const muted = await shouldMuteNotification(owner, data, 'market');
+      try {
+        for await (const events of activityPages(input, filter, now)) {
           if (!current()) return;
-          if (muted) {
-            commit();
-            continue;
+          // Resolve the actual parent, even when it was posted years ago. Never
+          // trust a stranger's p-tag to establish that the user wrote the parent.
+          const ids = [
+            ...new Set(
+              events
+                .filter((e) => e.kind === 1111)
+                .map((e) => getTagValue(e, 'e'))
+                .filter((id): id is string => !!id && !parents.has(id)),
+            ),
+          ];
+          for (let i = 0; i < ids.length; i += 25) {
+            const chunk = ids.slice(i, i + 25);
+            const fetched = await query(input, {
+              kinds: [1111],
+              authors: [owner],
+              ids: chunk,
+              since: 0,
+              limit: 25,
+            });
+            for (const parent of fetched)
+              if (parent.kind === 1111 && parent.pubkey === owner && chunk.includes(parent.id))
+                parents.set(parent.id, parent);
           }
-          await fireNotification({
-            kind: 'market',
-            title: text,
-            body: '',
-            data,
-            owner,
-            historyKey: `market:${event.id}`,
-            shouldSuppress: async () =>
-              !current() ||
-              !enabled ||
-              !(await loadSellerActivityEnabled(owner)) ||
-              (input.onlyFriends && !friend) ||
-              event.created_at < now - (raw ? 86400 : 120),
-          });
-          commit();
-          await scheduler.maybeYield();
+          if (!current()) return;
+          for (const event of events.sort(
+            (a, b) => a.created_at - b.created_at || a.id.localeCompare(b.id),
+          )) {
+            const target = activityTarget(event, owner, coords, parents);
+            if (!target) continue;
+            const review =
+              target.tab === 'reviews' ? parseReviewEvent(event, `a:${target.coord}`) : null;
+            if (target.tab === 'reviews' && !review) continue;
+            const friend = friends.has(event.pubkey);
+            // Stage acceptance: cancellation or a failed delivery must not consume
+            // the seen ID or stranger quota before history has been recorded.
+            const staged = {
+              ...cursor,
+              seen: [...cursor.seen],
+              strangers: { ...cursor.strangers },
+            };
+            const commit = () => {
+              Object.assign(cursor, staged);
+              progress!.dirty = true;
+            };
+            if (!acceptActivity(staged, event, target.coord, friend, now)) {
+              commit();
+              continue;
+            }
+            const title =
+              getTagValue(byCoord.get(target.coord) ?? event, 'title')?.slice(0, 120) ||
+              t('sellerActivity.listing');
+            const text = target.sellerReply
+              ? t('sellerActivity.sellerReplied')
+              : target.reply
+                ? t('sellerActivity.reply', {
+                    name: friends.get(event.pubkey) || event.pubkey.slice(0, 12),
+                  })
+                : review
+                  ? t('sellerActivity.review', { title, stars: review.stars })
+                  : t('sellerActivity.comment', { title });
+            const data = {
+              listingCoord: target.coord,
+              feedbackTab: target.tab,
+              senderPubkey: event.pubkey,
+              owner,
+            };
+            const muted = await shouldMuteNotification(owner, data, 'market');
+            if (!current()) return;
+            if (muted) {
+              commit();
+              continue;
+            }
+            await fireNotification({
+              kind: 'market',
+              title: text,
+              body: '',
+              data,
+              owner,
+              historyKey: `market:${event.id}`,
+              shouldSuppress: async () =>
+                !current() ||
+                !enabled ||
+                !(await loadSellerActivityEnabled(owner)) ||
+                (input.onlyFriends && !friend) ||
+                event.created_at < now - (raw ? 86400 : 120),
+            });
+            commit();
+            await scheduler.maybeYield();
+          }
         }
+      } catch (error) {
+        if (!current()) return;
+        // Retry incomplete ranges next pass without starving later filters.
+        failure ??= { error };
       }
     }
+    if (failure) throw failure.error;
     if (!current()) return;
     cursor.lastSeen = now;
     progress.dirty = true;

@@ -269,7 +269,7 @@ it('retains the checkpoint when a timestamp is saturated instead of skipping old
   );
   await expect(checkSellerActivity(opts())).rejects.toThrow('range remains saturated');
   expect(JSON.parse((await AsyncStorage.getItem(cursorKey))!).lastSeen).toBe(now - 2000);
-  expect(querySyncAbortable).toHaveBeenCalledTimes(2);
+  expect(querySyncAbortable).toHaveBeenCalledTimes(4);
 });
 
 it('retries an event interrupted during mute lookup without consuming its stranger quota', async () => {
@@ -307,4 +307,94 @@ it('does not commit an event whose history delivery rejects', async () => {
   expect(await AsyncStorage.getItem(cursorKey)).toBeNull();
   await checkSellerActivity(opts());
   expect(fireNotification).toHaveBeenCalledTimes(2);
+});
+
+it('drains a busy relay without skipping its tail when another relay returns older activity', async () => {
+  const recent = Array.from({ length: 250 }, (_, i) => ({
+    ...comment(`recent-${i}`),
+    created_at: now - 1000 - i,
+  }));
+  const older = { ...comment('sparse-relay'), created_at: now - 1500 };
+  await AsyncStorage.setItem(
+    cursorKey,
+    JSON.stringify({ lastSeen: now - 2000, seen: [], strangers: {} }),
+  );
+  jest.mocked(querySyncAbortable).mockImplementation(async (_p, relays, f) => {
+    if (!f['#A']) return [];
+    expect(relays).toEqual(['wss://busy', 'wss://sparse']);
+    const matches = (event: Event) => event.created_at >= f.since! && event.created_at <= f.until!;
+    // querySyncAbortable returns the deduplicated union, not a global limit.
+    // Put the sparse relay first to also exercise unordered arrival.
+    return [older].filter(matches).concat(recent.filter(matches).slice(0, f.limit));
+  });
+  await checkSellerActivity({ ...opts(), relays: ['wss://busy', 'wss://sparse'] });
+  expect(fireNotification).toHaveBeenCalledTimes(251);
+  expect(fireNotification).toHaveBeenCalledWith(
+    expect.objectContaining({ historyKey: 'market:recent-249' }),
+  );
+  expect(fireNotification).toHaveBeenCalledWith(
+    expect.objectContaining({ historyKey: 'market:sparse-relay' }),
+  );
+  expect(JSON.parse((await AsyncStorage.getItem(cursorKey))!).lastSeen).toBeGreaterThanOrEqual(now);
+});
+
+it('continues reviews, later coordinate chunks and replies after a saturated filter, then retries it', async () => {
+  const listings = Array.from({ length: 26 }, (_, i) => ({
+    ...listing,
+    id: `listing-${i}`,
+    tags: listing.tags.map((tag) => (tag[0] === 'd' ? ['d', `thing-${i}`] : tag)),
+  }));
+  jest.mocked(fetchSellerEvents).mockResolvedValue(listings);
+  const parent = {
+    ...comment('old-parent', owner),
+    created_at: now - 86400 * 365,
+    tags: buildCommentTags({ ...listing, pubkey: friend }),
+  };
+  const reply = {
+    ...comment('independent-reply'),
+    tags: buildCommentTags({ ...listing, pubkey: friend }, parent),
+  };
+  const review = {
+    ...comment('independent-review'),
+    kind: 31555,
+    tags: [
+      ['d', `a:30402:${owner}:thing-0`],
+      ['rating', '0.8', 'thumb'],
+    ],
+  };
+  const later = { ...comment('later-chunk'), tags: buildCommentTags(listings[25]) };
+  const saturated = Array.from({ length: 200 }, (_, i) => ({
+    ...comment(`saturated-${i}`),
+    created_at: now - 500,
+    tags: buildCommentTags(listings[0]),
+  }));
+  await AsyncStorage.setItem(
+    cursorKey,
+    JSON.stringify({ lastSeen: now - 2000, seen: [], strangers: {} }),
+  );
+  jest.mocked(querySyncAbortable).mockImplementation(async (_p, _r, f) => {
+    if (f.ids) return [parent];
+    if (f['#p']) return [reply];
+    if (f['#d']?.includes(`a:30402:${owner}:thing-0`)) return [review];
+    if (f['#A']?.includes(`30402:${owner}:thing-0`)) return saturated;
+    if (f['#A']) return [later];
+    return [];
+  });
+  await expect(checkSellerActivity(opts())).rejects.toThrow('range remains saturated');
+  for (const id of ['independent-review', 'later-chunk', 'independent-reply']) {
+    expect(fireNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ historyKey: `market:${id}` }),
+    );
+  }
+  const cursor = JSON.parse((await AsyncStorage.getItem(cursorKey))!);
+  expect(cursor.lastSeen).toBe(now - 2000);
+  expect(cursor.seen).toEqual(
+    expect.arrayContaining(['independent-review', 'later-chunk', 'independent-reply']),
+  );
+  const delivered = jest.mocked(fireNotification).mock.calls.length;
+  // Once the busy range can drain, retry without redelivering successful work.
+  saturated.pop();
+  await checkSellerActivity(opts());
+  expect(fireNotification).toHaveBeenCalledTimes(delivered);
+  expect(JSON.parse((await AsyncStorage.getItem(cursorKey))!).lastSeen).toBeGreaterThanOrEqual(now);
 });
