@@ -1561,6 +1561,8 @@
     "failedToRemoveRelay": "移除中继失败。",
     "geoCacheRelays": "地理藏宝中继",
     "geoCacheRelaysHint": "专用于Piglet和其他地理藏宝（NIP-GC）的中继。它们与treasures.to网页应用读取和搜索的内容保持一致，让你的Piglet在网页上也能被发现。除了你在上方添加的中继外，发布和读取地理藏宝时始终会使用它们。",
+    "marmotRelays": "群聊中继（Marmot）",
+    "marmotRelaysHint": "用于 Marmot 群聊的知名中继，White Noise 也使用这些中继。你的邀请密钥（密钥包）会发布到这里和你自己的中继上，因此即使你的中继离线，其他人也能与你发起加密群聊。这些中继会在你的密钥包中继列表（类型 10051）中公布。",
     "encryptedMessages": "加密消息（NIP-17）",
     "amberPermissionHint": "Amber尚未向此应用授予NIP-44解密权限——点按下方即可授权。只需确认一次，之后的加密消息就会静默解密。无论如何，你未关注的人发来的消息仍会保持隐藏。",
     "amberPermissionTitle": "Amber权限",

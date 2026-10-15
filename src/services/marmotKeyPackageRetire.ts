@@ -31,6 +31,8 @@ import { newestEvent } from './marmotKeyPackages';
 import { rememberKeyPackageTimestamp } from './marmotInstallationSlot';
 import { pool, trackRelays } from './nostrPool';
 import { DEFAULT_RELAYS } from './nostrService';
+import { keyPackageRelayHistory } from './marmotKeyPackageHistory';
+import { visitKeyPackageRelays } from './marmotKeyPackageRelays';
 
 const KEY_PACKAGE_KIND = 30443;
 const QUERY_MAX_WAIT_MS = 5_000;
@@ -89,8 +91,11 @@ export async function localKeyPackageFootprint(
 ): Promise<KeyPackageFootprint> {
   const slots = new Set<string>();
   const eventIds = new Set<string>();
-  const relays = new Set<string>();
-  let expiresAt: number | undefined;
+  const history = await keyPackageRelayHistory(backend);
+  const relays = new Set(Object.keys(history));
+  let expiresAt: number | undefined = Object.values(history).length
+    ? Math.max(...Object.values(history))
+    : undefined;
   const slot = await backend.get('meta', 'keyPackageSlot');
   if (slot) slots.add(slot);
   for (const key of await backend.keys('keyPackages')) {
@@ -101,8 +106,9 @@ export async function localKeyPackageFootprint(
       if (kp.identifier) slots.add(kp.identifier);
       for (const e of kp.published ?? []) {
         eventIds.add(e.id);
-        for (const url of safely(() => getKeyPackageRelays(e)) ?? []) relays.add(url);
         const notAfter = safely(() => getKeyPackageLifetime(e))?.notAfter;
+        if (notAfter !== undefined && Number(notAfter) + 3600 < Date.now() / 1000) continue;
+        for (const url of safely(() => getKeyPackageRelays(e)) ?? []) relays.add(url);
         if (notAfter !== undefined) expiresAt = Math.max(expiresAt ?? 0, Number(notAfter));
       }
     } catch {
@@ -175,7 +181,19 @@ const slotOf = (e: NostrEvent) => e.tags.find((t) => t[0] === 'd')?.[1];
  */
 export async function retireFootprint(opts: RetireFootprintOptions): Promise<RetireOutcome> {
   const { owner, footprint } = opts;
-  const transport = opts.transport ?? poolTransport;
+  const source = opts.transport ?? poolTransport;
+  const transport: RetireTransport = {
+    query: (relays, filter) =>
+      visitKeyPackageRelays(relays, (batch) => {
+        if (opts.cancelled?.()) throw new Error('retirement cancelled');
+        return source.query(batch, filter);
+      }),
+    publish: (relays, event) =>
+      visitKeyPackageRelays(relays, (batch) => {
+        if (opts.cancelled?.()) throw new Error('retirement cancelled');
+        return source.publish(batch, event);
+      }),
+  };
   const abandoned = () => {
     if (opts.cancelled?.()) throw new Error('retirement cancelled');
   };

@@ -20,6 +20,7 @@ import { requireRelayAcknowledgement } from '../utils/relayPublishResult';
 import { dmInboxRelaysFromTags, isRelayUrl } from '../utils/relayListEvents';
 import { isPublicRelayUrl } from '../utils/publicUrl';
 import { pool, trackRelays } from './nostrPool';
+import { selectHealthyRelays } from './relayHealth';
 import { DEFAULT_RELAYS, MARMOT_PUSH_SERVER_RELAYS } from './nostrRelayDefaults';
 
 const REQUEST_MAX_WAIT_MS = 6_000;
@@ -129,7 +130,10 @@ export function createMarmotNetwork(
 
   return {
     async publish(relays, event) {
-      const targets = relaysOr(relays);
+      const requested = relaysOr(relays);
+      const targets = [443, 30443, 10051].includes(event.kind)
+        ? selectHealthyRelays(requested)
+        : requested;
       trackRelays(targets);
       const settled = await Promise.allSettled(
         pool

@@ -1,3 +1,5 @@
+import { isTestRelayLockdown, TEST_RELAY_URL } from '../config/testRelayLockdown';
+import { MARMOT_KEY_PACKAGE_RELAYS, parseKeyPackageRelayList } from './marmotKeyPackageRelays';
 // Relay side of "Devices that can get new chats" (#1236): a bounded inventory
 // of the account's public invitation keys, and removing other devices' keys
 // through #1230's retirement path. No private key material is read or
@@ -29,6 +31,8 @@ export interface InvitationInventory {
   keys: InvitationKey[];
   /** Some relay failed or hit the limit: the list may be missing devices. */
   partial: boolean;
+  /** Last local key/list maintenance failed; Refresh retries it. */
+  publicationFailed?: boolean;
   /** This phone's current publication slot, if it has one. */
   localSlot?: string;
 }
@@ -64,18 +68,33 @@ export async function loadInvitationKeys(
   fetch: InventoryQuery = queryInvitationKeys,
 ): Promise<InvitationInventory> {
   const backend = createSqliteMarmotBackend(owner);
-  const lookup = [...new Set([...relays, ...DEFAULT_RELAYS])]
+  const locked = isTestRelayLockdown(owner);
+  const lookup = [
+    ...new Set(
+      locked ? [TEST_RELAY_URL] : [...MARMOT_KEY_PACKAGE_RELAYS, ...relays, ...DEFAULT_RELAYS],
+    ),
+  ]
     .filter(isRelayUrl)
     .slice(0, MAX_RELAYS);
   let discoveryFailed = false;
-  const lists = await fetch(lookup, { kinds: [10002], authors: [owner], limit: 5 }).catch(() => {
-    discoveryFailed = true;
-    return [];
-  });
+  const lists = await fetch(lookup, { kinds: [10002, 10051], authors: [owner], limit: 5 }).catch(
+    () => {
+      discoveryFailed = true;
+      return [];
+    },
+  );
   const latest = newestEvent(lists.filter((e) => e.pubkey === owner && e.kind === 10002));
-  const allTargets = [
-    ...new Set([...(latest ? relayListFromTags(latest.tags).map((r) => r.url) : []), ...lookup]),
-  ].filter(isRelayUrl);
+  const keyList = newestEvent(lists.filter((e) => e.pubkey === owner && e.kind === 10051));
+  const allTargets = locked
+    ? [TEST_RELAY_URL]
+    : [
+        ...new Set([
+          ...MARMOT_KEY_PACKAGE_RELAYS,
+          ...(keyList ? parseKeyPackageRelayList(keyList.tags) : []),
+          ...(latest ? relayListFromTags(latest.tags).map((r) => r.url) : []),
+          ...lookup,
+        ]),
+      ].filter(isRelayUrl);
   const targets = allTargets.slice(0, MAX_RELAYS);
   // No since: old and expired keys are precisely what this screen manages.
   const results = await Promise.allSettled(
@@ -90,6 +109,7 @@ export async function loadInvitationKeys(
   const localSlot = (await backend.get('meta', 'keyPackageSlot')) ?? undefined;
   return {
     keys: shapeInvitationKeys(owner, responses, local.slots),
+    publicationFailed: (await backend.get('keyPackageDiscovery', 'failed')) === 'true',
     partial:
       discoveryFailed ||
       allTargets.length > MAX_RELAYS ||

@@ -1561,6 +1561,8 @@
     "failedToRemoveRelay": "No se pudo eliminar el relé.",
     "geoCacheRelays": "Relays de geocaché",
     "geoCacheRelaysHint": "Relays dedicados a los Piglets y otros geocachés (NIP-GC). Reflejan lo que la app web treasures.to lee y busca, para que tus Piglets sigan siendo visibles en la web. Se usan siempre para publicar y leer geocachés, además de cualquier relé que añadas arriba.",
+    "marmotRelays": "Relays de mensajes grupales (Marmot)",
+    "marmotRelaysHint": "Relays conocidos para mensajes grupales de Marmot, compartidos con White Noise. Tus claves de invitación (paquetes de claves) se publican aquí y en tus propios relays, para que otros puedan iniciar un chat grupal cifrado contigo aunque tus relays estén desconectados. Se anuncian en tu lista de relays de paquetes de claves (tipo 10051).",
     "encryptedMessages": "Mensajes cifrados (NIP-17)",
     "amberPermissionHint": "Amber aún no ha concedido a esta app el permiso de descifrado NIP-44 — toca abajo para concederlo. Un solo diálogo y, luego, los mensajes cifrados se descifran en silencio. Los mensajes de personas que no sigues quedan ocultos de todos modos.",
     "amberPermissionTitle": "Permiso de Amber",
