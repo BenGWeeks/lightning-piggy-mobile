@@ -306,3 +306,30 @@ test('includes copied key destinations in the local retirement footprint', async
     expect.arrayContaining([HINT, 'wss://relay.eu.whitenoise.chat', 'wss://relay.primal.net']),
   );
 });
+
+test('batches sign-out queries and publications and excludes expired copied destinations', async () => {
+  const backend = await publishedBackend();
+  const expiry = Math.floor(Date.now() / 1000) + 1000;
+  const relays = Array.from({ length: 40 }, (_, i) => `wss://copied-${i}.example`);
+  await backend.set(
+    'keyPackageDiscovery',
+    'relayHistory',
+    JSON.stringify({
+      ...Object.fromEntries(relays.map((relay) => [relay, expiry])),
+      'wss://expired.example': 1,
+    }),
+  );
+  const { t, published } = transport([]);
+  const query = jest.fn(t.query);
+  t.query = query;
+  expect(await retireMarmotKeyPackages({ owner, sign, backend, transport: t })).toBe('deleted');
+  expect(query.mock.calls.every(([batch]) => batch.length <= 12)).toBe(true);
+  expect(published.every(({ relays: batch }) => batch.length <= 12)).toBe(true);
+  for (const kind of [5, 30443]) {
+    const destinations = published
+      .filter(({ event }) => event.kind === kind)
+      .flatMap(({ relays: batch }) => batch);
+    expect(destinations).toEqual(expect.arrayContaining(relays));
+    expect(destinations).not.toContain('wss://expired.example');
+  }
+});

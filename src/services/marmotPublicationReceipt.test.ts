@@ -50,3 +50,23 @@ it('uses fresh-key acknowledgements without repeating its initial publication', 
   expect(await publishWithReceipt(args)).toBe(true);
   expect(publish.mock.calls[0][0]).toEqual([B]);
 });
+
+it('persists completed batches if a later batch fails and retries only the remainder', async () => {
+  const backend = createMemoryMarmotBackend();
+  const targets = Array.from({ length: 30 }, (_, i) => `wss://relay-${i}.example`);
+  let fail = true;
+  const publish = jest.fn(async (batch: string[]) => {
+    if (batch.includes(targets[12]) && fail) throw new Error('disconnected');
+    return Object.fromEntries(batch.map((relay) => [relay, { from: relay, ok: true }]));
+  });
+  const args = { network: { publish }, backend, key: 'listAcks', event, targets };
+  await expect(publishWithReceipt(args)).rejects.toThrow('disconnected');
+  fail = false;
+  expect(await publishWithReceipt(args)).toBe(true);
+  expect(publish.mock.calls.map(([batch]) => batch)).toEqual([
+    targets.slice(0, 12),
+    targets.slice(12, 24),
+    targets.slice(12, 24),
+    targets.slice(24),
+  ]);
+});

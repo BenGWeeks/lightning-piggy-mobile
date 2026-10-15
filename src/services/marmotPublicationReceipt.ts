@@ -4,6 +4,7 @@ import type { NostrNetworkInterface } from '@internet-privacy/marmot-ts';
 import type { Event as NostrEvent } from 'nostr-tools';
 import { selectHealthyRelays } from './relayHealth';
 import type { MarmotKvBackend } from './marmotStore';
+import { MAX_KEY_PACKAGE_RELAYS } from './marmotKeyPackageRelays';
 
 const canonical = (url: string) => new URL(url).href.replace(/\/+$/, '');
 
@@ -28,18 +29,27 @@ export async function publishWithReceipt(args: {
   ]);
   const pending = selectHealthyRelays(targets).filter((r) => !accepted.has(r));
   if (cancelled?.()) throw new Error('marmot: discovery cancelled');
-  if (pending.length && !args.alreadyAttempted) {
-    const result = await network.publish(pending, event);
+  const save = () =>
+    backend.set(
+      'keyPackageDiscovery',
+      key,
+      JSON.stringify({ id: event.id, relays: [...accepted] }),
+    );
+  for (
+    let offset = 0;
+    !args.alreadyAttempted && offset < pending.length;
+    offset += MAX_KEY_PACKAGE_RELAYS
+  ) {
+    const batch = pending.slice(offset, offset + MAX_KEY_PACKAGE_RELAYS);
+    const result = await network.publish(batch, event);
     if (cancelled?.()) throw new Error('marmot: discovery cancelled');
     for (const [relay, response] of Object.entries(result)) {
-      if (response.ok && pending.includes(canonical(relay))) accepted.add(canonical(relay));
+      if (response.ok && batch.includes(canonical(relay))) accepted.add(canonical(relay));
     }
+    await save();
+    if (cancelled?.()) throw new Error('marmot: discovery cancelled');
   }
-  await backend.set(
-    'keyPackageDiscovery',
-    key,
-    JSON.stringify({ id: event.id, relays: [...accepted] }),
-  );
+  await save();
   if (!accepted.size) throw new Error('marmot: discovery not accepted');
   return targets.every((r) => accepted.has(r));
 }

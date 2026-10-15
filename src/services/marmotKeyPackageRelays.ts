@@ -45,3 +45,15 @@ export function buildKeyPackageRelayList(
   const targets = isTestRelayLockdown(owner) ? [TEST_RELAY_URL] : cleanKeyPackageRelays(relays);
   return { kind: 10051, created_at: nowSecs, tags: targets.map((r) => ['relay', r]), content: '' };
 }
+
+/** History can exceed selection size; visit it in sequential, bounded batches. */
+export async function visitKeyPackageRelays<T>(
+  relays: string[],
+  visit: (batch: string[]) => Promise<T[]>,
+): Promise<T[]> {
+  const results: T[] = [];
+  for (let offset = 0; offset < relays.length; offset += MAX_KEY_PACKAGE_RELAYS) {
+    results.push(...(await visit(relays.slice(offset, offset + MAX_KEY_PACKAGE_RELAYS))));
+  }
+  return results;
+}

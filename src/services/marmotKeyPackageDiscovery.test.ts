@@ -259,3 +259,46 @@ it('corrects a partially published relay edit when settings revert, retrying the
   await maintainDiscoverableKeyPackage(t.client, t.backend, owner, t.opts);
   expect(t.publish).toHaveBeenCalledTimes(calls);
 });
+
+it('bounds every batch across 30 relay edits without retaining acknowledged corrections', async () => {
+  const t = setup();
+  t.signEvent.mockImplementation(async (draft) => ({
+    ...draft,
+    id: `list-${draft.created_at}`,
+    pubkey: owner,
+    sig: '',
+  }));
+  let recovered = false;
+  const rejecting = 'wss://edit-0-0.example';
+  t.publish.mockImplementation(async (relays) =>
+    Object.fromEntries(relays.map((r) => [r, { from: r, ok: r !== rejecting || recovered }])),
+  );
+  for (let edit = 0; edit < 30; edit++) {
+    await expect(
+      maintainDiscoverableKeyPackage(t.client, t.backend, owner, {
+        ...t.opts,
+        relays: Array.from({ length: 9 }, (_, i) => `wss://edit-${edit}-${i}.example`),
+      }),
+    ).resolves.toBe('failed');
+    expect(JSON.parse((await t.backend.get('keyPackageDiscovery', 'pendingListTargets'))!)).toEqual(
+      [rejecting],
+    );
+  }
+  expect(t.publish.mock.calls.every(([relays]) => relays.length <= 12)).toBe(true);
+  const finalList = t.publish.mock.calls.filter(([, signed]) => signed.kind === 10051).at(-1)![1];
+  expect(
+    t.publish.mock.calls
+      .filter(([, signed]) => signed.id === finalList.id)
+      .flatMap(([relays]) => relays),
+  ).not.toContain('wss://edit-0-1.example');
+
+  // Restart with the persisted queue: the rejecting destination gets the same
+  // signed correction, and acknowledged removed destinations stay retired.
+  recovered = true;
+  const calls = t.publish.mock.calls.length;
+  await maintainDiscoverableKeyPackage(t.client, t.backend, owner, {
+    ...t.opts,
+    relays: Array.from({ length: 9 }, (_, i) => `wss://edit-29-${i}.example`),
+  });
+  expect(t.publish.mock.calls.slice(calls)).toEqual([[[rejecting], finalList]]);
+});
