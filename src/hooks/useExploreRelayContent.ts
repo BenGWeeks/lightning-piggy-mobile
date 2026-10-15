@@ -257,7 +257,7 @@ export function useExploreRelayContent(
 
       // Each query completes within eight seconds. Allow all three stages
       // to run even when the initial query completes at its deadline.
-      const received = new Set<string>();
+      const received = new Map<string, ParsedCache>();
       let searchDone = false;
       let allFailed = true;
       let closeWidening: (() => void) | undefined;
@@ -290,7 +290,8 @@ export function useExploreRelayContent(
               countUntrusted('caches');
               return;
             }
-            received.add(c.coord);
+            const previous = received.get(c.coord);
+            if (!previous || previous.createdAt < c.createdAt) received.set(c.coord, c);
             enqueueCache(c.coord, c);
           },
           undefined,
@@ -305,11 +306,35 @@ export function useExploreRelayContent(
             }
             flushPendingCaches();
             flushCounts();
-            const known = new Set([...cachesRef.current.keys(), ...received]);
+            // Include pending relay items before React commits the coalesced
+            // flush, retaining the same newest-wins rule as the caches Map.
+            const known = new Map(cachesRef.current);
+            for (const [coord, cache] of received) {
+              const previous = known.get(coord);
+              if (!previous || previous.createdAt < cache.createdAt) known.set(coord, cache);
+            }
+            const lowerPubkey = signedInPubkey?.toLowerCase();
+            let eligibleCount = 0;
+            for (const cache of known.values()) {
+              if (isHiddenInProd(cache.hiderPubkey)) continue;
+              const center = cache.geohash ? decodeGeohash(cache.geohash) : null;
+              const distance = center
+                ? haversineMetres(
+                    { lat: posLat, lon: posLon },
+                    { lat: center.lat, lon: center.lng },
+                  )
+                : Number.POSITIVE_INFINITY;
+              // Count only candidates for the nearby rail or nearest fallback.
+              // Distant own caches must not prevent the next wider query.
+              const nearby = maxDistanceMetres === null || distance <= maxDistanceMetres;
+              const fallback =
+                cache.hiderPubkey.toLowerCase() !== lowerPubkey && Number.isFinite(distance);
+              if (nearby || fallback) eligibleCount++;
+            }
             console.log(
-              `[PerfBlock] Explore cache search: precision=${precision} known=${known.size} elapsed=${Math.round(performance.now() - startedAt)}ms`,
+              `[PerfBlock] Explore cache search: precision=${precision} eligible=${eligibleCount} elapsed=${Math.round(performance.now() - startedAt)}ms`,
             );
-            if (known.size < NEAREST_FALLBACK_COUNT && precision > 3) query(precision - 1);
+            if (eligibleCount < NEAREST_FALLBACK_COUNT && precision > 3) query(precision - 1);
             else finish();
           },
         );
@@ -352,6 +377,8 @@ export function useExploreRelayContent(
     }, [
       posBucketKey,
       refreshKey,
+      signedInPubkey,
+      maxDistanceMetres,
       flushPendingCaches,
       flushPendingEvents,
       enqueueCache,

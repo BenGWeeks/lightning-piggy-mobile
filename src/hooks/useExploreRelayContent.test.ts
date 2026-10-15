@@ -6,6 +6,7 @@ import { useExploreRelayContent } from './useExploreRelayContent';
 
 const mockSubscribeCaches = jest.fn();
 const mockClose = jest.fn();
+const mockFetchByAuthor = jest.fn(async (): Promise<ParsedCache[]> => []);
 const mockIsTrusted = jest.fn(() => true);
 let mockPubkey: string | null = null;
 let mockSeed: ParsedCache[] = [];
@@ -23,7 +24,7 @@ jest.mock('../contexts/TrustGraphContext', () => ({
   useTrustGraph: () => ({ isTrusted: mockIsTrusted }),
 }));
 jest.mock('../services/nostrPlacesPublisher', () => ({
-  fetchCachesByAuthor: async () => [],
+  fetchCachesByAuthor: () => mockFetchByAuthor(),
   subscribeNearbyCaches: (...args: unknown[]) => mockSubscribeCaches(...args),
   subscribeNearbyEvents: () => jest.fn(),
 }));
@@ -59,6 +60,7 @@ const callbacks = (index = 0) => ({
 beforeEach(() => {
   jest.useFakeTimers();
   jest.clearAllMocks();
+  mockFetchByAuthor.mockResolvedValue([]);
   mockSeed = [];
   mockPubkey = null;
   mockIsTrusted.mockReturnValue(true);
@@ -266,4 +268,86 @@ it('still widens when the initial query completes at its eight-second deadline',
   });
   expect(mockSubscribeCaches).toHaveBeenCalledTimes(2);
   expect(result.current.cacheRailState).toBe('loading');
+});
+
+it.each(['disk', 'by-author', 'relay'])(
+  'widens past ten distant own caches from %s, including on retry',
+  async (source) => {
+    mockPubkey = 'MINE';
+    const own = Array.from({ length: 10 }, (_, i) => ({
+      ...cache,
+      coord: `own-${i}`,
+      hiderPubkey: 'mine',
+      geohash: 'u4pru',
+    }));
+    if (source === 'disk') mockSeed = own;
+    if (source === 'by-author') mockFetchByAuthor.mockResolvedValue(own);
+    const { result, rerender } = renderHook(
+      ({ key }: { key: number }) => useExploreRelayContent(pos, key, 1000),
+      {
+        initialProps: { key: 0 },
+      },
+    );
+    await act(async () => {});
+    act(() => {
+      if (source === 'relay') own.forEach((c) => callbacks().event(c));
+      callbacks().complete({ allRelaysFailed: false });
+    });
+    expect(mockSubscribeCaches).toHaveBeenCalledTimes(2);
+    expect(result.current.cacheRailState).toBe('loading');
+    act(() => {
+      callbacks(1).complete({ allRelaysFailed: false });
+      callbacks(2).complete({ allRelaysFailed: false });
+    });
+    expect(result.current.cacheRailState).toBe('empty');
+
+    rerender({ key: 1 });
+    await act(async () => {});
+    act(() => callbacks(3).complete({ allRelaysFailed: false }));
+    expect(mockSubscribeCaches).toHaveBeenCalledTimes(5);
+    act(() => {
+      callbacks(4).complete({ allRelaysFailed: false });
+      for (let i = 0; i < 10; i++) {
+        callbacks(5).event({ ...cache, coord: `other-${i}`, geohash: 'u4pru' });
+      }
+      callbacks(5).complete({ allRelaysFailed: false });
+    });
+    expect(mockSubscribeCaches.mock.calls.map((c) => c[0][0].length)).toEqual([5, 4, 3, 5, 4, 3]);
+    expect(result.current.cacheRailIsNearestFallback).toBe(true);
+    expect(result.current.sortedCaches).toHaveLength(10);
+    expect(result.current.sortedCaches.every((c) => c.cache.hiderPubkey === 'hider')).toBe(true);
+  },
+);
+
+it('counts nearby own caches toward the widening threshold', async () => {
+  mockPubkey = 'mine';
+  mockSeed = Array.from({ length: 10 }, (_, i) => ({
+    ...cache,
+    coord: `own-${i}`,
+    hiderPubkey: 'mine',
+    geohash: encodeGeohash(pos.lat, pos.lon, 9),
+  }));
+  renderHook(() => useExploreRelayContent(pos, 0, 1000));
+  await act(async () => {});
+  act(() => callbacks().complete({ allRelaysFailed: false }));
+  expect(mockSubscribeCaches).toHaveBeenCalledTimes(1);
+});
+
+it('does not count hidden disk caches or caches without fallback coordinates', async () => {
+  mockSeed = Array.from({ length: 10 }, (_, i) => ({
+    ...cache,
+    coord: `hidden-${i}`,
+    hiderPubkey: 'hidden-in-prod',
+  }));
+  mockSeed.push(
+    ...Array.from({ length: 10 }, (_, i) => ({
+      ...cache,
+      coord: `unlocated-${i}`,
+      geohash: null,
+    })),
+  );
+  renderHook(() => useExploreRelayContent(pos, 0, 1000));
+  await act(async () => {});
+  act(() => callbacks().complete({ allRelaysFailed: false }));
+  expect(mockSubscribeCaches).toHaveBeenCalledTimes(2);
 });
