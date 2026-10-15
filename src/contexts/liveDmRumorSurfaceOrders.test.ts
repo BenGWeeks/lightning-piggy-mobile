@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import { createLiveRumorSurfacer } from './liveDmRumorSurface';
-import { getOutgoingOrderRows, upsertDmMessages } from '../services/dmDb';
+import { getOutgoingOrderRows, hasIncomingOrder, upsertDmMessages } from '../services/dmDb';
 import { notifyDmMessage } from './nostrEventBus';
 import { serializeOrder, parseOrderEvent } from '../utils/orderEvents';
 import { admitUnfollowedOrder, ORDER_RUMOR_RATE_LIMIT } from './orderRumorIngest';
@@ -185,7 +185,7 @@ it.each([false, true])(
       },
       'unsolicited-wrap',
     );
-    expect(chainWrite).not.toHaveBeenCalled();
+    expect(chainWrite).toHaveBeenCalledTimes(1);
     expect(queueInboxEntry).not.toHaveBeenCalled();
     expect(notifyDmMessage).not.toHaveBeenCalled();
   },
@@ -234,3 +234,76 @@ it('notifies the open order conversation only after persistence completes', asyn
   await Promise.all(writes);
   expect(notifyDmMessage).toHaveBeenCalledTimes(1);
 });
+
+it.each(['invoice', 'cancelled'])(
+  'retries a live %s after queued persistence or a later relay replay',
+  async (type) => {
+    jest.clearAllMocks();
+    let persisted = false;
+    (getOutgoingOrderRows as jest.Mock).mockImplementation(async () =>
+      persisted && type === 'invoice'
+        ? [
+            {
+              fromMe: true,
+              sender: 'c'.repeat(64),
+              conversation: 'd'.repeat(64),
+              content: serializeOrder(
+                parseOrderEvent({
+                  kind: 16,
+                  content: '',
+                  tags: [
+                    ['type', '1'],
+                    ['order', 'purchase'],
+                  ],
+                })!,
+              ),
+            },
+          ]
+        : [],
+    );
+    (hasIncomingOrder as jest.Mock).mockImplementation(
+      async () => persisted && type === 'cancelled',
+    );
+    const knownWrapIds = new Set(['early-wrap']);
+    const seen = new Set(['early-wrap']);
+    const tasks: (() => Promise<void>)[] = [];
+    const surface = createLiveRumorSurfacer({
+      viewerPubkey: 'c'.repeat(64),
+      isCancelled: () => false,
+      shouldAbort: () => false,
+      isFollowHydrated: () => true,
+      followPubkeysRef: { current: new Set(['d'.repeat(64)]) },
+      followGateBuffer: { defer: jest.fn(), reevaluate: jest.fn(), clear: jest.fn(), size: 0 },
+      isFreshArrival: () => false,
+      queueInboxEntry: jest.fn(),
+      knownWrapIds,
+      seen,
+      chainWrite: (task) => {
+        tasks.push(task);
+      },
+    });
+    const rumor = {
+      pubkey: 'd'.repeat(64),
+      kind: 16,
+      created_at: 100,
+      content: '',
+      tags: [
+        ['p', 'c'.repeat(64)],
+        ['type', type === 'invoice' ? '2' : '3'],
+        ['order', 'purchase'],
+        ...(type === 'cancelled' ? [['status', 'cancelled']] : []),
+      ],
+    };
+    await surface(rumor, 'early-wrap');
+    expect(knownWrapIds.has('early-wrap')).toBe(false);
+    expect(seen.has('early-wrap')).toBe(false);
+    await tasks.shift()!();
+    expect(upsertDmMessages).not.toHaveBeenCalled();
+    // A second relay delivery races with the placed order's queued write.
+    await surface(rumor, 'early-wrap');
+    persisted = true;
+    while (tasks.length) await tasks.shift()!();
+    expect(upsertDmMessages).toHaveBeenCalledTimes(1);
+    expect(knownWrapIds.has('early-wrap')).toBe(true);
+  },
+);

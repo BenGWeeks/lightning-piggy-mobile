@@ -87,7 +87,7 @@ export function createLiveRumorSurfacer(
     chainWrite,
   } = deps;
 
-  return async (rumor: DecodedRumor, wrapId: string): Promise<void> => {
+  const surfaceRumor = async (rumor: DecodedRumor, wrapId: string): Promise<void> => {
     if (shouldAbort()) return;
     // A contentless alert the background watch posted for this wrap (remote
     // signer, #279) is a placeholder — never deleted in the hope another alert
@@ -200,7 +200,31 @@ export function createLiveRumorSurfacer(
           rumor,
         )))
     ) {
-      nothingToSee();
+      // The placed order may still be in the serial write queue. Retry after
+      // those writes; if it has not arrived yet, a later relay replay can retry.
+      releaseWrapClaim(wrapId);
+      if (placeholder) noteContentlessWrapAlert(wrapId);
+      if (!isBoundedOrderRumor(rumor)) {
+        nothingToSee();
+        return;
+      }
+      chainWrite(async () => {
+        if (shouldAbort()) return;
+        if (
+          isBoundedOrderRumor(rumor) &&
+          (await admitOrderLifecycle(
+            viewerPubkey,
+            partnership.partnerPubkey,
+            partnership.fromMe,
+            rumor,
+          ))
+        ) {
+          await surfaceRumor(rumor, wrapId);
+        } else {
+          releaseWrapClaim(wrapId);
+          if (placeholder) noteContentlessWrapAlert(wrapId);
+        }
+      });
       return;
     }
     if (shouldAbort()) return;
@@ -363,4 +387,5 @@ export function createLiveRumorSurfacer(
         `[Nostr] live wrap ${wrapId.slice(0, 8)} surfaced (partner=${partnership.partnerPubkey.slice(0, 8)})`,
       );
   };
+  return surfaceRumor;
 }

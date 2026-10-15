@@ -68,6 +68,7 @@ export interface UseSellerInvoice {
   record: SellerInvoiceRecord | null;
   sending: boolean;
   checking: boolean;
+  unpaidInvoice: string | null;
   sendInvoice: (input: SendInvoiceInput) => Promise<void>;
   /** Ask the wallet the invoice was made on whether it's paid. */
   checkPaid: () => Promise<boolean>;
@@ -84,6 +85,7 @@ export interface UseSellerInvoice {
 export function useSellerInvoice(
   buyerPubkey: string | null,
   orderId: string | null,
+  existingBolt11?: string,
 ): UseSellerInvoice {
   const { pubkey, signerType, relays } = useNostr();
   const t = useTranslation();
@@ -96,6 +98,7 @@ export function useSellerInvoice(
   const [sending, setSending] = useState(false);
   const sendingRef = useRef(false);
   const [checking, setChecking] = useState(false);
+  const [unpaidRecord, setUnpaidRecord] = useState<SellerInvoiceRecord | null>(null);
   const identityRef = useRef({ pubkey, buyerPubkey, orderId });
   identityRef.current = { pubkey, buyerPubkey, orderId };
   const lifecycleRef = useRef({ mounted: false, generation: 0 });
@@ -169,6 +172,8 @@ export function useSellerInvoice(
             const records = await loadSellerInvoices(pubkey);
             const previous = records[sellerInvoiceKey(buyerPubkey, orderId)];
             if (!stillCurrent()) throw new SellerInvoiceError('notSignedIn', 'Account changed');
+            if (existingBolt11 && previous?.bolt11 !== existingBolt11)
+              throw new SellerInvoiceError('invoiceFailed', 'Original invoice wallet is unknown');
             const expiresAt = previous ? extractInvoice(previous.bolt11)?.expiresAt : null;
             const retry =
               previous?.deliveryPending &&
@@ -186,6 +191,8 @@ export function useSellerInvoice(
                   'invoiceFailed',
                   'Existing invoice cannot be replaced',
                 );
+              if (!previous.walletId || !previous.paymentHash)
+                throw new SellerInvoiceError('invoiceFailed', 'Original invoice wallet is unknown');
               // A failed/unknown lookup must never authorize a second charge.
               const settlement = await lookupInvoice(previous.walletId, previous.paymentHash, {
                 replyTimeoutMs: 5000,
@@ -194,7 +201,7 @@ export function useSellerInvoice(
               if (settlement?.paid) {
                 await patchSellerInvoice(pubkey, orderId, buyerPubkey, { paidAt: Date.now() });
               }
-              if (!settlement || settlement.paid)
+              if (settlement?.paid !== false)
                 throw new SellerInvoiceError(
                   'invoiceFailed',
                   'Previous invoice is paid or settlement is unknown',
@@ -282,7 +289,7 @@ export function useSellerInvoice(
         if (lifecycleRef.current.mounted) setSending(false);
       }
     },
-    [pubkey, buyerPubkey, orderId, makeInvoiceForWallet, send, t],
+    [pubkey, buyerPubkey, orderId, existingBolt11, makeInvoiceForWallet, send, t],
   );
 
   const recordRef = useRef(record);
@@ -294,6 +301,7 @@ export function useSellerInvoice(
     if (!pubkey || !current) return false;
     if (current.paidAt) return true;
     setChecking(true);
+    setUnpaidRecord(null);
     try {
       // THE wallet that made the invoice — not whichever wallet is active.
       const result = await lookupInvoice(current.walletId, current.paymentHash, {
@@ -305,6 +313,7 @@ export function useSellerInvoice(
         });
         return true;
       }
+      if (result?.paid === false) setUnpaidRecord(current);
       return false;
     } finally {
       setChecking(false);
@@ -372,5 +381,17 @@ export function useSellerInvoice(
     }
   }, [pubkey, buyerPubkey, orderId, send, t]);
 
-  return { record: currentRecord, sending, checking, sendInvoice, checkPaid, markPaid };
+  const unpaidInvoice =
+    recordState.owner === pubkey && currentRecord === unpaidRecord && !currentRecord?.paidAt
+      ? (currentRecord?.bolt11 ?? null)
+      : null;
+  return {
+    record: currentRecord,
+    unpaidInvoice,
+    sending,
+    checking,
+    sendInvoice,
+    checkPaid,
+    markPaid,
+  };
 }

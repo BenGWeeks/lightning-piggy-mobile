@@ -52,7 +52,11 @@ function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.Reac
   const { pubkey } = useNostr();
   const mine = pubkey ? orderOwnership(order, pubkey) === 'mine' : false;
   const { quote, quoteCurrent, loading } = useSellerOrderQuote(mine ? order : null);
-  const invoice = useSellerInvoice(mine ? buyerPubkey : null, mine ? order.orderId : null);
+  const invoice = useSellerInvoice(
+    mine ? buyerPubkey : null,
+    mine ? order.orderId : null,
+    thread?.invoice?.bolt11,
+  );
   const [sheetVisible, setSheetVisible] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -138,7 +142,8 @@ function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.Reac
     Boolean(record?.confirmedAt) || (thread?.status !== undefined && CONFIRMED.has(thread.status));
   const canReplace =
     status === 'invoiceExpired' &&
-    (!record || !thread?.invoice || thread.invoice.bolt11 === record.bolt11);
+    Boolean(record?.walletId && record.paymentHash && invoice.unpaidInvoice === record.bolt11) &&
+    (!thread?.invoice || thread.invoice.bolt11 === record?.bolt11);
   const canRetry =
     status === 'invoiceSent' &&
     Boolean(record?.deliveryPending) &&

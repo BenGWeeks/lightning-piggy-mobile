@@ -394,3 +394,58 @@ it('polls only while focused and active, with a staggered resume', async () => {
     jest.useRealTimers();
   }
 });
+
+it.each(['missing', 'different'])(
+  'refuses replacement when the original invoice wallet binding is %s',
+  async (binding) => {
+    mockFocused = false;
+    if (binding === 'different')
+      await recordSellerInvoice(SELLER, {
+        orderId: 'order-1',
+        buyerPubkey: BUYER,
+        walletId: 'other-wallet',
+        paymentHash: HASH,
+        bolt11: 'different-invoice',
+        amountSats: 4200,
+        sentAt: 1,
+      });
+    const { result } = renderHook(() => useSellerInvoice(BUYER, 'order-1', BOLT11));
+    await act(async () => {
+      await expect(
+        result.current.sendInvoice({ walletId: 'new-wallet', amountSats: 4200, remember: false }),
+      ).rejects.toMatchObject({ code: 'invoiceFailed' });
+    });
+    expect(result.current.unpaidInvoice).toBeNull();
+    expect(makeInvoiceForWallet).not.toHaveBeenCalled();
+    expect(sendNip17Rumor).not.toHaveBeenCalled();
+  },
+);
+
+it.each(['unpaid', 'paid', 'unknown', 'error'])(
+  'exposes replacement eligibility only after a proven unpaid lookup: %s',
+  async (settlement) => {
+    mockFocused = false;
+    await recordSellerInvoice(SELLER, {
+      orderId: 'order-1',
+      buyerPubkey: BUYER,
+      walletId: 'original-wallet',
+      paymentHash: HASH,
+      bolt11: BOLT11,
+      amountSats: 4200,
+      sentAt: 1,
+    });
+    const { result } = renderHook(() => useSellerInvoice(BUYER, 'order-1', BOLT11));
+    await waitFor(() => expect(result.current.record).not.toBeNull());
+    expect(result.current.unpaidInvoice).toBeNull();
+    if (settlement === 'error')
+      (lookupInvoice as jest.Mock).mockRejectedValueOnce(new Error('offline'));
+    else
+      (lookupInvoice as jest.Mock).mockResolvedValue(
+        settlement === 'unknown' ? null : { paid: settlement === 'paid' },
+      );
+    await act(async () => {
+      await result.current.checkPaid().catch(() => undefined);
+    });
+    expect(result.current.unpaidInvoice).toBe(settlement === 'unpaid' ? BOLT11 : null);
+  },
+);

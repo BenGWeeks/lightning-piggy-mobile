@@ -140,16 +140,25 @@ it('opens invoice confirmation when the computed total matches the placed amount
   expect(ui.getByTestId('sheet-open')).toBeTruthy();
 });
 
-it.each([true, false])(
-  'offers expired-invoice replacement through confirmation (local record: %s)',
-  (hasRecord) => {
+it.each(['unpaid', 'paid', 'unknown', 'missing', 'unbound'])(
+  'offers replacement only for an unpaid invoice with its wallet binding: %s',
+  (settlement) => {
     (useSellerInvoice as jest.Mock).mockReturnValue({
       sending: false,
       checking: false,
       checkPaid: jest.fn(),
       sendInvoice: jest.fn(),
       markPaid: jest.fn(),
-      record: hasRecord ? { bolt11: 'old-invoice', paymentHash: 'h', amountSats: 4200 } : null,
+      unpaidInvoice: settlement === 'unpaid' || settlement === 'unbound' ? 'old-invoice' : null,
+      record:
+        settlement === 'missing'
+          ? null
+          : {
+              bolt11: 'old-invoice',
+              paymentHash: 'h',
+              amountSats: 4200,
+              walletId: settlement === 'unbound' ? undefined : 'original-wallet',
+            },
     });
     const placed = { ...order(), amountSats: 4200 };
     const ui = render(
@@ -169,6 +178,10 @@ it.each([true, false])(
       />,
     );
     expect(ui.getByTestId('seller-order-status-x')).toHaveTextContent('orderStatus.invoiceExpired');
+    if (settlement !== 'unpaid') {
+      expect(ui.queryByTestId('seller-order-send-invoice-x')).toBeNull();
+      return;
+    }
     expect(ui.getByTestId('seller-order-send-invoice-x')).toHaveTextContent(
       'sellerOrders.sendNewInvoice',
     );
