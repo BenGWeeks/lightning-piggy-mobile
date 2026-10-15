@@ -1780,3 +1780,8 @@ to type-1 orders and must stay out of inbox entries and notifications.
 In Jest, decoded order fixtures need the author's `pubkey` and recipient
 `p` tag for persistent admission. Clear AsyncStorage between cases so a
 completed reservation in one test does not suppress another test's rumor.
+
+Conversation order navigation seeds Explore home, the order list and the
+selected detail so Back returns through the list. Tests of View order must
+expect the nested `state.routes` target from `orderNavigationTarget`, including
+the buyer/seller counterparty, rather than a direct `screen` target.

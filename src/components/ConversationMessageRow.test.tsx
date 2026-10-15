@@ -120,9 +120,21 @@ it.each([false, true])(
       screen: 'MainTabs',
       params: {
         screen: 'Explore',
-        params: fromMe
-          ? { screen: 'MarketMyOrders', params: { orderId: 'order-1', sellerPubkey: 'peer' } }
-          : { screen: 'MarketShopOrders', params: { orderId: 'order-1', buyerPubkey: 'peer' } },
+        params: {
+          state: {
+            index: 2,
+            routes: [
+              { name: 'ExploreHome' },
+              { name: fromMe ? 'MarketMyOrders' : 'MarketShopOrders' },
+              {
+                name: fromMe ? 'MarketMyOrders' : 'MarketShopOrders',
+                params: fromMe
+                  ? { orderId: 'order-1', sellerPubkey: 'peer' }
+                  : { orderId: 'order-1', buyerPubkey: 'peer' },
+              },
+            ],
+          },
+        },
       },
     });
   },
