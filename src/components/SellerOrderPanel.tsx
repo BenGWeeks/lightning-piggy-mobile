@@ -8,6 +8,7 @@ import { useSellerOrderQuote } from '../hooks/useSellerOrderQuote';
 import { SellerInvoiceError, useSellerInvoice } from '../hooks/useSellerInvoice';
 import { createSellerOrderPanelStyles } from '../styles/SellerOrderPanel.styles';
 import { formatMarketAmount } from '../utils/marketListingShipping';
+import { localizeDeliveryAddress } from '../utils/deliveryAddress';
 import { orderOwnership } from '../utils/sellerOrderQuote';
 import { expiresAtFromBolt11, paymentHashFromBolt11 } from '../utils/bolt11';
 import {
@@ -43,7 +44,7 @@ const CONFIRMED = new Set(['confirmed', 'processing', 'completed']);
  */
 function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.ReactElement | null {
   const colors = useThemeColors();
-  const { t, formatLocale } = useLocale();
+  const { t, locale, formatLocale } = useLocale();
   const styles = useMemo(() => createSellerOrderPanelStyles(colors), [colors]);
   const { pubkey } = useNostr();
   const mine = pubkey ? orderOwnership(order, pubkey) === 'mine' : false;
@@ -239,7 +240,7 @@ function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.Reac
       {order.address ? (
         <Text style={styles.detail} selectable testID={`seller-order-address-${id}`}>
           <Text style={styles.detailLabel}>{t('sellerOrders.shipTo')} </Text>
-          {order.address}
+          {localizeDeliveryAddress(order.address, locale)}
         </Text>
       ) : null}
       {order.email || order.phone || order.contact ? (

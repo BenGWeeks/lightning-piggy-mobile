@@ -10,7 +10,7 @@ import type { SellerOrderQuote } from '../utils/sellerOrderQuote';
 jest.mock('../contexts/ThemeContext', () => ({ useThemeColors: () => ({}) }));
 jest.mock('../contexts/LocaleContext', () => {
   const t = (key: string, o?: Record<string, unknown>) => (o ? `${key} ${JSON.stringify(o)}` : key);
-  return { useTranslation: () => t, useLocale: () => ({ t, formatLocale: 'en' }) };
+  return { useTranslation: () => t, useLocale: () => ({ t, locale: 'en', formatLocale: 'en' }) };
 });
 jest.mock('../contexts/NostrContext', () => ({ useNostr: () => ({ pubkey: 'a'.repeat(64) }) }));
 jest.mock('../hooks/useSellerOrderQuote', () => ({ useSellerOrderQuote: jest.fn() }));
@@ -90,6 +90,19 @@ it("renders nothing for an order naming someone else's listing", () => {
     <SellerOrderPanel order={order('c'.repeat(64))} buyerPubkey={'b'.repeat(64)} id="x" />,
   );
   expect(ui.toJSON()).toBeNull();
+});
+
+it.each(['GB', 'United Kingdom'])('renders the full country name for address ending %s', (end) => {
+  const ui = render(
+    <SellerOrderPanel
+      order={{ ...order(), address: `Testy McTestface\n1 Nowhere Lane\nFaketown\nZZ1 1ZZ\n${end}` }}
+      buyerPubkey={'b'.repeat(64)}
+      id="x"
+    />,
+  );
+  expect(ui.getByTestId('seller-order-address-x')).toHaveTextContent(
+    /Testy McTestface\s+1 Nowhere Lane\s+Faketown\s+ZZ1 1ZZ\s+United Kingdom$/,
+  );
 });
 
 it('offers Mark paid once the chosen wallet saw the invoice paid', () => {
