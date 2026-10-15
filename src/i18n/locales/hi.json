@@ -1304,7 +1304,7 @@
     "unknownSender": "किसी ने",
     "file": "फ़ाइल",
     "fileBytes": "{{size}} बाइट",
-    "fileShare": "सहेजें / साझा करें",
+    "fileShare": "साझा करें",
     "filePreparing": "फ़ाइल तैयार हो रही है…",
     "fileUnavailable": "फ़ाइल उपलब्ध नहीं है",
     "fileShareFailed": "यह फ़ाइल तैयार या साझा नहीं हो सकी। फिर से कोशिश करें।",
@@ -1322,7 +1322,10 @@
     "uploadFailedAllServers": "किसी भी स्टोरेज सर्वर पर अपलोड नहीं हो सका। अपना कनेक्शन जाँचें और फिर से कोशिश करें, या सेटिंग्स में कोई दूसरा स्टोरेज सर्वर जोड़ें।",
     "fileLabelText": "पाठ",
     "fileLabelAudio": "ऑडियो",
-    "fileLabelVideo": "वीडियो"
+    "fileLabelVideo": "वीडियो",
+    "fileSaveLabel": "%{filename} सहेजें",
+    "fileShareLabel": "%{filename} साझा करें",
+    "fileSaved": "%{folder} में सहेजा गया"
   },
   "messageBubbleFooter": {
     "edited": "एडिट किया गया",

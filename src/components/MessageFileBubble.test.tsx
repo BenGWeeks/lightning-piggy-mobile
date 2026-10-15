@@ -33,15 +33,15 @@ beforeEach(() => {
   jest.clearAllMocks();
   __resetForTests();
 });
-it('offers only Save for dangerous files and requires the explicit warning', async () => {
+it('offers Save and Share for dangerous files and requires the explicit warning', async () => {
   let approved: boolean | undefined;
   (shareFileAttachment as jest.Mock).mockImplementationOnce(async (_file, confirm) => {
     approved = await confirm();
   });
   const ui = bubble(file('invoice.pdf.exe'));
   expect(ui.getByText('messageBubble.fileSave')).toBeTruthy();
-  expect(ui.queryByText('messageBubble.fileShare')).toBeNull();
-  fireEvent.press(ui.getByTestId('chat-file-share-file'));
+  expect(ui.getByText('messageBubble.fileShare')).toBeTruthy();
+  fireEvent.press(ui.getByTestId('file-share-file'));
   await waitFor(() => expect(Alert.alert).toHaveBeenCalled());
   const [title, body, buttons] = (Alert.alert as jest.Mock).mock.calls[0];
   expect(title).toBe('messageBubble.fileWarningTitle');
@@ -53,7 +53,7 @@ it('offers only Save for dangerous files and requires the explicit warning', asy
 it('shows the localized verification failure after a hash mismatch', async () => {
   (shareFileAttachment as jest.Mock).mockRejectedValueOnce(new FileVerificationError());
   const ui = bubble();
-  fireEvent.press(ui.getByTestId('chat-file-share-file'));
+  fireEvent.press(ui.getByTestId('file-share-file'));
   await waitFor(() => expect(ui.getByText('messageBubble.fileVerificationFailed')).toBeTruthy());
 });
 it('shows type mismatch and replaces declared MIME with the verified type', async () => {
@@ -62,7 +62,7 @@ it('shows type mismatch and replaces declared MIME with the verified type', asyn
   });
   const ui = bubble(file('invoice.exe'));
   expect(ui.getByText('messageBubble.fileTypeMismatch')).toBeTruthy();
-  fireEvent.press(ui.getByTestId('chat-file-share-file'));
+  fireEvent.press(ui.getByTestId('file-share-file'));
   await waitFor(() => expect(ui.getByText('EXE · messageBubble.fileBytes')).toBeTruthy());
   expect(ui.queryByText('application/pdf')).toBeNull();
 });
@@ -79,7 +79,7 @@ it('explains unavailable hashless files and offers no share action', () => {
   )!;
   const ui = bubble(attachment);
   expect(ui.getByText('messageBubble.fileUnavailable')).toBeTruthy();
-  expect(ui.queryByTestId('chat-file-share-file')).toBeNull();
+  expect(ui.queryByTestId('file-share-file')).toBeNull();
   expect(shareFileAttachment).not.toHaveBeenCalled();
 });
 
@@ -120,6 +120,6 @@ it('shows a mismatch discovered while sharing a plain link', async () => {
   });
   const ui = bubble(parsePlainFileAttachment('https://example.com/invoice.pdf')!);
   expect(ui.queryByText('messageBubble.fileTypeMismatch')).toBeNull();
-  fireEvent.press(ui.getByTestId('chat-file-share-file'));
+  fireEvent.press(ui.getByTestId('file-share-file'));
   await waitFor(() => expect(ui.getByText('messageBubble.fileTypeMismatch')).toBeTruthy());
 });

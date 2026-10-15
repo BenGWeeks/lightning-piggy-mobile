@@ -1304,7 +1304,7 @@
     "unknownSender": "Jemand",
     "file": "Datei",
     "fileBytes": "{{size}} Bytes",
-    "fileShare": "Speichern / Teilen",
+    "fileShare": "Teilen",
     "filePreparing": "Datei wird vorbereitet…",
     "fileUnavailable": "Datei nicht verfügbar",
     "fileShareFailed": "Diese Datei konnte nicht vorbereitet oder geteilt werden. Versuche es erneut.",
@@ -1322,7 +1322,10 @@
     "uploadFailedAllServers": "Hochladen auf einen Speicherserver ist fehlgeschlagen. Prüfe deine Verbindung und versuche es erneut oder füge in den Einstellungen einen weiteren Speicherserver hinzu.",
     "fileLabelText": "Text",
     "fileLabelAudio": "Audio",
-    "fileLabelVideo": "Video"
+    "fileLabelVideo": "Video",
+    "fileSaveLabel": "%{filename} speichern",
+    "fileShareLabel": "%{filename} teilen",
+    "fileSaved": "In %{folder} gespeichert"
   },
   "messageBubbleFooter": {
     "edited": "Bearbeitet",

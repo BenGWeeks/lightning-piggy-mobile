@@ -1304,7 +1304,7 @@
     "unknownSender": "Someone",
     "file": "File",
     "fileBytes": "{{size}} bytes",
-    "fileShare": "Save / Share",
+    "fileShare": "Share",
     "filePreparing": "Preparing file…",
     "fileUnavailable": "File unavailable",
     "fileShareFailed": "Could not prepare or share this file. Try again.",
@@ -1322,7 +1322,10 @@
     "uploadFailedAllServers": "Couldn't upload to any storage server. Check your connection and try again, or add another storage server in Settings.",
     "fileLabelText": "Text",
     "fileLabelAudio": "Audio",
-    "fileLabelVideo": "Video"
+    "fileLabelVideo": "Video",
+    "fileSaveLabel": "Save %{filename}",
+    "fileShareLabel": "Share %{filename}",
+    "fileSaved": "Saved to %{folder}"
   },
   "messageBubbleFooter": {
     "edited": "Edited",

@@ -1304,7 +1304,7 @@
     "unknownSender": "Alguien",
     "file": "Archivo",
     "fileBytes": "{{size}} bytes",
-    "fileShare": "Guardar / Compartir",
+    "fileShare": "Compartir",
     "filePreparing": "Preparando archivo…",
     "fileUnavailable": "Archivo no disponible",
     "fileShareFailed": "No se pudo preparar o compartir este archivo. Inténtalo de nuevo.",
@@ -1322,7 +1322,10 @@
     "uploadFailedAllServers": "No se pudo subir a ningún servidor de almacenamiento. Comprueba tu conexión y vuelve a intentarlo, o añade otro servidor de almacenamiento en Ajustes.",
     "fileLabelText": "Texto",
     "fileLabelAudio": "Audio",
-    "fileLabelVideo": "Vídeo"
+    "fileLabelVideo": "Vídeo",
+    "fileSaveLabel": "Guardar %{filename}",
+    "fileShareLabel": "Compartir %{filename}",
+    "fileSaved": "Guardado en %{folder}"
   },
   "messageBubbleFooter": {
     "edited": "Editado",

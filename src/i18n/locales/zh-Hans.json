@@ -1304,7 +1304,7 @@
     "unknownSender": "有人",
     "file": "文件",
     "fileBytes": "{{size}} 字节",
-    "fileShare": "保存 / 分享",
+    "fileShare": "分享",
     "filePreparing": "正在准备文件…",
     "fileUnavailable": "文件不可用",
     "fileShareFailed": "无法准备或分享此文件。请重试。",
@@ -1322,7 +1322,10 @@
     "uploadFailedAllServers": "无法上传到任何存储服务器。请检查网络连接后重试，或在设置中添加其他存储服务器。",
     "fileLabelText": "文本",
     "fileLabelAudio": "音频",
-    "fileLabelVideo": "视频"
+    "fileLabelVideo": "视频",
+    "fileSaveLabel": "保存 %{filename}",
+    "fileShareLabel": "分享 %{filename}",
+    "fileSaved": "已保存到 %{folder}"
   },
   "messageBubbleFooter": {
     "edited": "已编辑",

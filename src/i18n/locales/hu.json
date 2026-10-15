@@ -1304,7 +1304,7 @@
     "unknownSender": "Valaki",
     "file": "Fájl",
     "fileBytes": "{{size}} bájt",
-    "fileShare": "Mentés / Megosztás",
+    "fileShare": "Megosztás",
     "filePreparing": "Fájl előkészítése…",
     "fileUnavailable": "A fájl nem érhető el",
     "fileShareFailed": "Nem sikerült előkészíteni vagy megosztani a fájlt. Próbáld újra.",
@@ -1322,7 +1322,10 @@
     "uploadFailedAllServers": "Egyik tárolószerverre sem sikerült feltölteni. Ellenőrizd a kapcsolatot, és próbáld újra, vagy adj hozzá másik tárolószervert a Beállításokban.",
     "fileLabelText": "Szöveg",
     "fileLabelAudio": "Hang",
-    "fileLabelVideo": "Videó"
+    "fileLabelVideo": "Videó",
+    "fileSaveLabel": "%{filename} mentése",
+    "fileShareLabel": "%{filename} megosztása",
+    "fileSaved": "Mentve ide: %{folder}"
   },
   "messageBubbleFooter": {
     "edited": "Szerkesztve",

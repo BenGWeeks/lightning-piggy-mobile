@@ -612,7 +612,7 @@ it.each(['ciphertext hash', 'plaintext hash', 'authentication'] as const)(
         footer: null,
       }),
     );
-    fireEvent.press(ui.getByTestId('chat-file-share-verify'));
+    fireEvent.press(ui.getByTestId('file-share-verify'));
     await waitFor(() => expect(ui.getByText('messageBubble.fileVerificationFailed')).toBeTruthy());
     expect(ui.queryByText('messageBubble.fileShareFailed')).toBeNull();
     expect(Sharing.shareAsync).not.toHaveBeenCalled();

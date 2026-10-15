@@ -13,6 +13,7 @@ export const createMessageFileBubbleStyles = (colors: Palette) =>
       overflow: 'hidden',
       backgroundColor: colors.surface,
     },
+    sentBubble: { backgroundColor: colors.brandPinkLight },
     body: { padding: 12 },
     preview: {
       width: '100%',
@@ -23,6 +24,19 @@ export const createMessageFileBubbleStyles = (colors: Palette) =>
     },
     name: { color: colors.textBody, fontWeight: '600', marginTop: 6 },
     caption: { color: colors.textSupplementary, fontSize: 12, marginTop: 4 },
-    action: { paddingVertical: 10 },
+    actions: { flexDirection: 'row', gap: 8, marginTop: 12 },
+    action: {
+      flex: 1,
+      minHeight: 40,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      borderWidth: 1.5,
+      borderColor: colors.brandPink,
+      borderRadius: 20,
+      backgroundColor: colors.surface,
+    },
+    busy: { opacity: 0.5 },
     actionText: { color: colors.brandPink, fontWeight: '600' },
   });

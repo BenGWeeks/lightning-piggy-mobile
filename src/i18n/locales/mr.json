@@ -1304,7 +1304,7 @@
     "unknownSender": "कोणीतरी",
     "file": "फाइल",
     "fileBytes": "{{size}} बाइट",
-    "fileShare": "जतन करा / शेअर करा",
+    "fileShare": "शेअर करा",
     "filePreparing": "फाइल तयार होत आहे…",
     "fileUnavailable": "फाइल उपलब्ध नाही",
     "fileShareFailed": "ही फाइल तयार किंवा शेअर करता आली नाही. पुन्हा प्रयत्न करा.",
@@ -1322,7 +1322,10 @@
     "uploadFailedAllServers": "कोणत्याही स्टोरेज सर्व्हरवर अपलोड करता आले नाही. तुमचे कनेक्शन तपासा आणि पुन्हा प्रयत्न करा, किंवा सेटिंग्जमध्ये दुसरा स्टोरेज सर्व्हर जोडा.",
     "fileLabelText": "मजकूर",
     "fileLabelAudio": "ऑडिओ",
-    "fileLabelVideo": "व्हिडिओ"
+    "fileLabelVideo": "व्हिडिओ",
+    "fileSaveLabel": "%{filename} जतन करा",
+    "fileShareLabel": "%{filename} शेअर करा",
+    "fileSaved": "%{folder} मध्ये जतन केले"
   },
   "messageBubbleFooter": {
     "edited": "एडिट केले",

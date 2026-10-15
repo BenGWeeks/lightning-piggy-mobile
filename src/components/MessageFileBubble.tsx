@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { Pressable, Text, TouchableOpacity, View } from 'react-native';
-import { FileText, ShieldOff } from 'lucide-react-native';
+import { Download, FileText, Share2, ShieldOff } from 'lucide-react-native';
+import { Toast } from './BrandedToast';
 import { Alert } from './BrandedAlert';
 import { FileVerificationError } from '../services/fileDownload';
 import { useLocale } from '../contexts/LocaleContext';
@@ -14,6 +15,7 @@ import { attachmentTypeLabel, formatAttachmentSize } from '../utils/attachmentPr
 import { isSafeFileUrl } from '../utils/fileAttachment';
 
 type FileShareModule = typeof import('../services/fileShare');
+type FileSaveModule = typeof import('../services/fileSave');
 
 export default React.memo(function MessageFileBubble({
   id,
@@ -45,36 +47,43 @@ export default React.memo(function MessageFileBubble({
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<'verification' | 'share' | null>(null);
   const [verified, setVerified] = useState<{ size: number; mime: string } | null>(null);
-  const share = useCallback(async () => {
-    if (busy) return;
-    setBusy(true);
-    setFailed(null);
-    try {
-      // Load crypto and native sharing only on an explicit user action.
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { shareFileAttachment } = require('../services/fileShare') as FileShareModule;
-      await shareFileAttachment(
-        file,
-        () =>
-          new Promise<boolean>((resolve) => {
-            Alert.alert(
-              t('messageBubble.fileWarningTitle'),
-              t('messageBubble.fileWarning'),
-              [
-                { text: t('common.cancel'), style: 'cancel', onPress: () => resolve(false) },
-                { text: t('messageBubble.fileSave'), onPress: () => resolve(true) },
-              ],
-              { onDismiss: () => resolve(false) },
-            );
-          }),
-        setVerified,
-      );
-    } catch (error) {
-      setFailed(error instanceof FileVerificationError ? 'verification' : 'share');
-    } finally {
-      setBusy(false);
-    }
-  }, [busy, file, t]);
+  const act = useCallback(
+    async (action: 'save' | 'share') => {
+      if (busy) return;
+      setBusy(true);
+      setFailed(null);
+      try {
+        // Load crypto and native sharing only on an explicit user action.
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { shareFileAttachment } = require('../services/fileShare') as FileShareModule;
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { saveFileAttachment } = require('../services/fileSave') as FileSaveModule;
+        await (action === 'save' ? saveFileAttachment : shareFileAttachment)(
+          file,
+          () =>
+            new Promise<boolean>((resolve) => {
+              Alert.alert(
+                t('messageBubble.fileWarningTitle'),
+                t('messageBubble.fileWarning'),
+                [
+                  { text: t('common.cancel'), style: 'cancel', onPress: () => resolve(false) },
+                  { text: t('messageBubble.fileSave'), onPress: () => resolve(true) },
+                ],
+                { onDismiss: () => resolve(false) },
+              );
+            }),
+          setVerified,
+          (folder: string) =>
+            Toast.show({ type: 'success', text1: t('messageBubble.fileSaved', { folder }) }),
+        );
+      } catch (error) {
+        setFailed(error instanceof FileVerificationError ? 'verification' : 'share');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [busy, file, t],
+  );
   const type = attachmentTypeLabel(verified?.mime ?? file.mime, file.name);
   const friendlyType = ['Text', 'Audio', 'Video'].includes(type)
     ? t(`messageBubble.fileLabel${type}` as 'messageBubble.fileLabelText')
@@ -89,7 +98,7 @@ export default React.memo(function MessageFileBubble({
   return (
     <View style={[styles.row, fromMe && styles.sent]}>
       <Pressable
-        style={styles.bubble}
+        style={[styles.bubble, fromMe && styles.sentBubble]}
         onLongPress={onLongPress}
         delayLongPress={350}
         accessible={false}
@@ -135,26 +144,32 @@ export default React.memo(function MessageFileBubble({
           )}
           {file.caption ? <Text style={styles.name}>{file.caption}</Text> : null}
           {file.available && isSafeFileUrl(file.url) ? (
-            <TouchableOpacity
-              testID={`chat-file-share-${shortId}`}
-              accessibilityLabel={t(
-                file.dangerous ? 'messageBubble.fileSave' : 'messageBubble.fileShare',
-              )}
-              accessibilityRole="button"
-              disabled={busy}
-              onPress={share}
-              style={styles.action}
-            >
-              <Text style={styles.actionText}>
-                {t(
-                  busy
-                    ? 'messageBubble.filePreparing'
-                    : file.dangerous
-                      ? 'messageBubble.fileSave'
-                      : 'messageBubble.fileShare',
-                )}
-              </Text>
-            </TouchableOpacity>
+            <View style={styles.actions}>
+              {(['save', 'share'] as const).map((action) => {
+                const Icon = action === 'save' ? Download : Share2;
+                return (
+                  <TouchableOpacity
+                    key={action}
+                    testID={`file-${action}-${id}`}
+                    accessibilityLabel={t(
+                      action === 'save'
+                        ? 'messageBubble.fileSaveLabel'
+                        : 'messageBubble.fileShareLabel',
+                      { filename: file.name || t('messageBubble.file') },
+                    )}
+                    accessibilityRole="button"
+                    disabled={busy}
+                    onPress={() => void act(action)}
+                    style={[styles.action, busy && styles.busy]}
+                  >
+                    <Icon size={18} color={colors.brandPink} />
+                    <Text style={styles.actionText}>
+                      {t(action === 'save' ? 'messageBubble.fileSave' : 'messageBubble.fileShare')}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
           ) : (
             <Text style={styles.caption}>{t('messageBubble.fileUnavailable')}</Text>
           )}

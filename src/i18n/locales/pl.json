@@ -1304,7 +1304,7 @@
     "unknownSender": "Ktoś",
     "file": "Plik",
     "fileBytes": "{{size}} bajtów",
-    "fileShare": "Zapisz / Udostępnij",
+    "fileShare": "Udostępnij",
     "filePreparing": "Przygotowywanie pliku…",
     "fileUnavailable": "Plik niedostępny",
     "fileShareFailed": "Nie udało się przygotować lub udostępnić pliku. Spróbuj ponownie.",
@@ -1322,7 +1322,10 @@
     "uploadFailedAllServers": "Nie udało się przesłać na żaden serwer przechowywania. Sprawdź połączenie i spróbuj ponownie albo dodaj inny serwer przechowywania w Ustawieniach.",
     "fileLabelText": "Tekst",
     "fileLabelAudio": "Audio",
-    "fileLabelVideo": "Wideo"
+    "fileLabelVideo": "Wideo",
+    "fileSaveLabel": "Zapisz %{filename}",
+    "fileShareLabel": "Udostępnij %{filename}",
+    "fileSaved": "Zapisano w %{folder}"
   },
   "messageBubbleFooter": {
     "edited": "Edytowano",

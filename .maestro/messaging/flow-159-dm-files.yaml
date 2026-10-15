@@ -29,7 +29,7 @@ name: NIP-17 and NIP-04 file bubbles
 - assertVisible:
     text: 'report.docx'
 - assertVisible:
-    id: 'chat-file-share-dmfile01'
+    id: 'file-share-dm-dmfile0100000000000000000000000000000000000000000000000000000000'
 # Exercise the native picker bridge; cancel without selecting or sending.
 - tapOn:
     id: 'conversation-attach'
@@ -54,4 +54,4 @@ name: NIP-17 and NIP-04 file bubbles
 - assertVisible:
     text: 'invoice-nip04.pdf'
 - assertVisible:
-    id: 'chat-file-share-dmfile03'
+    id: 'file-share-dm-dmfile0300000000000000000000000000000000000000000000000000000000'
