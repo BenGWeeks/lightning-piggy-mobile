@@ -5,8 +5,7 @@ import { marketMerchants, resolveMerchantSelection } from '../utils/marketMercha
 import { useCollectionFilter } from '../hooks/useCollectionFilter';
 import MarketCollectionChips from '../components/MarketCollectionChips';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, FlatList, useWindowDimensions } from 'react-native';
-import { X } from 'lucide-react-native';
+import { View, Text, FlatList, useWindowDimensions } from 'react-native';
 import MarketProductCard from '../components/MarketProductCard';
 import MarketFilterBar from '../components/MarketFilterBar';
 import MarketScopePill from '../components/MarketScopePill';
