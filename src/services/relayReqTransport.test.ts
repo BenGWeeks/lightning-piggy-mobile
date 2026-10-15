@@ -5,6 +5,7 @@ import { SimplePool } from 'nostr-tools/pool';
 import { AbstractRelay } from 'nostr-tools/abstract-relay';
 import { withRelayHealth } from './healthAwarePool';
 import { querySyncAbortable } from './relayQuery';
+import { openRelayReq } from './relayReqTransport';
 
 jest.mock('./relayReqLimit', () => ({ discoverRelayReqLimit: async () => undefined }));
 jest.mock('./relayHealth', () => ({
@@ -74,6 +75,7 @@ test.each([
       [
         'auth-required: authenticate first',
         'ERROR: auth-required: this event may only be read by its recipients',
+        'eRrOr: AUTH-REQUIRED: authenticate first',
       ].map((reason) => [path, delay, reason] as const),
     ),
   ),
@@ -152,6 +154,36 @@ test.each([
     pool.destroy();
   },
 );
+
+test.each([
+  'policy: auth-required: authenticate first',
+  'ERROR: policy: auth-required: authenticate first',
+  'not-auth-required: authenticate first',
+])('CLOSED %s never prompts a remote signer', async (reason) => {
+  const secret = new Uint8Array(32).fill(5);
+  const pubkey = getPublicKey(secret);
+  setCurrentUserPubkey(pubkey);
+  const sign = jest.fn(async (event) => finalizeEvent(event, secret));
+  setRelayAuthAccount({ pubkey, signerType: 'nip46', ownRelays: [url], sign });
+  const pool = new TestPool();
+  const relay = new AbstractRelay(url, { verifyEvent: (() => true) as never });
+  Object.assign(relay, {
+    challenge: 'test-challenge',
+    _connected: true,
+    connectionPromise: Promise.resolve(),
+  });
+  jest.spyOn(relay, 'send').mockResolvedValue();
+  const auth = jest.spyOn(relay, 'auth').mockResolvedValue('ok');
+  const onclose = jest.fn();
+  const request = openRelayReq(pool, url, [{ kinds: [4] }], { onclose }, relay);
+  [...relay.openSubs.values()][0].close(reason);
+  for (let i = 0; i < 20; i++) await Promise.resolve();
+  expect(auth).not.toHaveBeenCalled();
+  expect(sign).not.toHaveBeenCalled();
+  expect(onclose).toHaveBeenCalledWith([reason]);
+  request.close();
+  pool.destroy();
+});
 
 test.each([
   'auth-required: again',
