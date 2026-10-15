@@ -4,6 +4,9 @@
 |===
 | Problem | Solution
 
+| A document link shows only “📎 File” on the first DM thread load, then becomes a card after reopening
+| With an empty DM store, `fetchConversationFor` renders freshly ingested wrap entries before a stored-row read can supply the original content. Keep recognized kind-14 document URLs in the entry's `renderText` while `text` retains the redacted inbox/notification label. Do not broaden this to wallet-share bearer secrets. Regression: `src/contexts/nostrFetchConversationAttachments.test.ts` exercises the real ingest and thread projection from an empty store, plus attachment classification and inbox redaction.
+
 | Seller activity skips events across relays, or a busy listing blocks reviews and replies
 | Relay query limits apply per relay. Select the globally newest limited page before deriving the inclusive timestamp boundary; an older event from a sparse relay must not move that boundary past unprocessed activity on a busy relay. Isolate failures per activity filter, finish the other coordinate/review/reply filters, and retain the checkpoint for retry when any filter remains incomplete. `sellerActivityService.test.ts` covers mixed relay histories and a saturated timestamp alongside independent activity.
 
