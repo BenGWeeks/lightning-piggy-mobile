@@ -276,6 +276,49 @@ it('skips a saturated second, logs its returned count and continues to older act
   }
 });
 
+it('cannot pin the checkpoint with saturated p-tag spam when the owner has no listings', async () => {
+  jest.mocked(fetchSellerEvents).mockResolvedValue([]);
+  const parent = { ...comment('owned-parent', owner), created_at: now - 86400 * 365 };
+  const reply = {
+    ...comment('genuine-reply'),
+    created_at: now - 501,
+    tags: buildCommentTags(listing, parent),
+  };
+  const spam = Array.from({ length: 200 }, (_, i) => ({
+    ...comment(`p-spam-${i}`, stranger),
+    created_at: now - 500,
+    tags: [
+      ['p', owner],
+      ['K', '30402'],
+      ['k', '1111'],
+    ],
+  }));
+  await AsyncStorage.setItem(
+    cursorKey,
+    JSON.stringify({ lastSeen: now - 2000, seen: [], strangers: {} }),
+  );
+  respondWith(async (_p, _r, f) => {
+    if (f.ids) return [parent];
+    return [...spam, reply]
+      .filter((event) => event.created_at >= f.since! && event.created_at <= f.until!)
+      .slice(0, f.limit);
+  });
+  await checkSellerActivity({ ...opts(), onlyFriends: false });
+  expect(fireNotification).toHaveBeenCalledTimes(1);
+  expect(fireNotification).toHaveBeenCalledWith(
+    expect.objectContaining({ historyKey: 'market:genuine-reply' }),
+  );
+  const cursor = JSON.parse((await AsyncStorage.getItem(cursorKey))!);
+  expect(cursor.lastSeen).toBeGreaterThanOrEqual(now);
+  expect(cursor.seen).toEqual(['genuine-reply']);
+  expect(cursor.strangers).toEqual({});
+
+  jest.mocked(querySyncAbortable).mockClear();
+  await checkSellerActivity({ ...opts(), onlyFriends: false });
+  expect(querySyncAbortable).toHaveBeenCalledTimes(1);
+  expect(fireNotification).toHaveBeenCalledTimes(1);
+});
+
 it('retries an event interrupted during mute lookup without consuming its stranger quota', async () => {
   let release!: (muted: boolean) => void;
   jest.mocked(shouldMuteNotification).mockImplementationOnce(
