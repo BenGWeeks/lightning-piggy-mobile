@@ -627,6 +627,7 @@
   "imageGallery": {
     "open": "Otwórz obraz",
     "position": "Obraz {{current}} z {{total}}",
+    "showImage": "Pokaż obraz {{current}} z {{total}}",
     "openHint": "Otwiera obraz na pełnym ekranie"
   },
   "gifPickerSheet": {

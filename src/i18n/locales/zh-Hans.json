@@ -627,6 +627,7 @@
   "imageGallery": {
     "open": "打开图片",
     "position": "第 {{current}} 张图片，共 {{total}} 张",
+    "showImage": "显示第 {{current}} 张图片，共 {{total}} 张",
     "openHint": "全屏打开图片"
   },
   "gifPickerSheet": {
