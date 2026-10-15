@@ -1232,6 +1232,29 @@ A store button in the Market header opens *My shop* (`MarketMyShopScreen`), a hu
 
 Pure logic lives in `src/utils/` (`marketSellerEvents.ts` build/parse, `marketSellerSnapshot.ts`, `marketSellerRevision.ts`, `marketListingShipping.ts`), relay I/O in `src/services/marketSellerService.ts`. Out of scope so far: order handling for your own listings (#1290), drafts and variants (#1293).
 
+=== Listing relay coverage and republishing (#1603)
+
+*My shop → Listings* checks kind-30402 coverage on focus and cancels on blur.
+`listingRepublish` queries each relay once with the seller's author and all displayed
+listing identifiers, bounded to at most 1,000 events per relay. Targets are the
+union of NIP-65 write relays and `MARKET_RELAYS`; test-account lockdown resolves
+that union to the LAN test relay only. No age cutoff is used because an old
+listing can still be the latest revision. React receives one combined snapshot.
+
+`listingRelayCoverage` counts relays holding the newest verified version (same id
+or same/newer timestamp at the same address). A warning means fewer than two
+copies, or fewer than every relay when there are only one or two targets.
+*Republish* verifies the existing signature and author again, skips targets already
+holding that revision, and reports each relay's acceptance, rejection reason or
+lack of response. It never invokes a signer. *Republish all* processes listings
+sequentially with the shared yield scheduler and presents one summary.
+
+When no valid signed copy exists locally or on the queried relays, the row offers
+*Re-sign and publish*. A branded confirmation precedes rebuilding from the stored
+listing draft through `useSellerActions.saveListing`; this path requires one
+signer approval. The bulk action skips missing copies instead of asking to sign.
+
+
 = Languages (i18n)
 
 Nine locales: `en` (source of truth), `de`, `es`, `hu`, `pl`, `uk`, `hi`, `mr`, `zh-Hans` (`SUPPORTED_LOCALES` in `src/i18n/index.ts`, catalogues in `src/i18n/locales/`). The language is chosen per account (Account → Display & language, or "System"), and device-locale detection uses the full language tag (`zh`, `zh-CN`, `zh-Hans-*` → Simplified; Traditional Chinese also gets Simplified until a catalogue exists). English is the fallback for any missing key.

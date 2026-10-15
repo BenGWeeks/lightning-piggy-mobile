@@ -2795,6 +2795,22 @@
       "loadFailed": "No se pudieron cargar los artículos que te gustan: desliza hacia abajo para reintentar.",
       "signedOut": "Inicia sesión con Nostr para ver los artículos que te gustan.",
       "signIn": "Iniciar sesión"
+    },
+    "republish": {
+      "coverage": "En %{count} de %{total} relays",
+      "checking": "Comprobando relays…",
+      "action": "Republicar",
+      "all": "Republicar todo",
+      "missing": "No está en los relays",
+      "resign": "Volver a firmar y publicar",
+      "confirm": "No hay una copia firmada. ¿Reconstruir este anuncio y aprobar una firma para publicarlo de nuevo?",
+      "results": "Resultados de republicación",
+      "accepted": "Aceptado",
+      "rejected": "Rechazado",
+      "noResponse": "Sin respuesta",
+      "alreadyPresent": "Ya está presente",
+      "close": "Cerrar",
+      "failed": "Error al republicar"
     }
   },
   "dmProtocol": {
