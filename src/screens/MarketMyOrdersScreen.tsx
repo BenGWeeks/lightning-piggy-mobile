@@ -1,3 +1,4 @@
+import { PREFERRED_SELLERS_ACCOUNT } from '../services/marketPreferredSellers';
 import { loadedMarketSnapshots } from '../services/marketStorage';
 import { orderProductPreviews } from '../utils/orderPresentation';
 import { useNostr } from '../contexts/NostrContext';
@@ -55,11 +56,13 @@ const MarketMyOrdersScreen: React.FC<Props> = ({ navigation, route }) => {
   const [invoiceToPay, setInvoiceToPay] = useState<string | null>(null);
   const { entries, titles, loading } = useBuyerOrders();
   const { pubkey } = useNostr();
-  // Reuse only this account's already-loaded catalogue; no new relay requests.
+  // Reuse the public preferred catalogue and this account's loaded friends catalogue.
   const previews = useMemo(
     () =>
       orderProductPreviews(
-        loadedMarketSnapshots(pubkey ? [pubkey] : []).flatMap((s) => s.products),
+        loadedMarketSnapshots(
+          pubkey ? [PREFERRED_SELLERS_ACCOUNT, pubkey] : [PREFERRED_SELLERS_ACCOUNT],
+        ).flatMap((s) => s.products),
       ),
     [pubkey],
   );
