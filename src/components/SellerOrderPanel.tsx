@@ -1,3 +1,5 @@
+import { buyerOrderNote } from '../utils/orderPresentation';
+import { OrderItemImage } from './OrderItemThumbnails';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { Check, RefreshCw, Zap } from 'lucide-react-native';
@@ -149,6 +151,7 @@ function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.Reac
     (expiresAt === null || expiresAt * 1000 > now);
   const busy = invoice.sending;
   const invoiceBlocked = quote.totalSats === null || quote.totalSats !== order.amountSats || busy;
+  const note = [buyerOrderNote(order.message), order.notes?.trim()].filter(Boolean).join('\n\n');
   const sats = (n: number) => t('market.sats', { amount: n.toLocaleString(formatLocale) });
 
   return (
@@ -167,19 +170,25 @@ function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.Reac
       {quote.lines.map((line) => (
         <View key={line.ref}>
           <View style={styles.lineRow}>
-            <Text style={styles.lineTitle} numberOfLines={2}>
-              {t('sellerOrders.lineTitle', { title: line.title, qty: line.quantity })}
-            </Text>
-            <Text style={styles.lineAmount}>
-              {line.lineSats !== null ? sats(line.lineSats) : '—'}
-            </Text>
+            <OrderItemImage item={line} large />
+            <View style={styles.lineText}>
+              <Text style={styles.lineTitle} numberOfLines={2}>
+                {line.title}
+              </Text>
+              <Text style={styles.lineSub}>
+                {t('sellerOrders.unitPrice', {
+                  amount: formatMarketAmount(line.unitAmount, line.currency),
+                  currency: line.currency === 'SATS' ? 'sats' : line.currency,
+                })}
+              </Text>
+            </View>
+            <View style={styles.lineValues}>
+              <Text style={styles.lineSub}>× {line.quantity}</Text>
+              <Text style={styles.lineAmount}>
+                {line.lineSats !== null ? sats(line.lineSats) : '—'}
+              </Text>
+            </View>
           </View>
-          <Text style={styles.lineSub}>
-            {t('sellerOrders.unitPrice', {
-              amount: formatMarketAmount(line.unitAmount, line.currency),
-              currency: line.currency,
-            })}
-          </Text>
           {line.overStock ? (
             <Text style={styles.warning}>
               {t('sellerOrders.overStock', { stock: line.stock ?? 0 })}
@@ -188,6 +197,7 @@ function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.Reac
         </View>
       ))}
 
+      <View style={styles.divider} />
       {quote.shipping ? (
         <View style={styles.lineRow}>
           <Text style={styles.lineTitle}>
@@ -238,21 +248,28 @@ function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.Reac
       ) : null}
 
       {order.address ? (
-        <Text style={styles.detail} selectable testID={`seller-order-address-${id}`}>
-          <Text style={styles.detailLabel}>{t('sellerOrders.shipTo')} </Text>
-          {localizeDeliveryAddress(order.address, locale)}
-        </Text>
+        <View style={styles.section}>
+          <Text style={styles.detailLabel}>{t('sellerOrders.shipTo')}</Text>
+          <Text style={styles.detail} selectable testID={`seller-order-address-${id}`}>
+            {localizeDeliveryAddress(order.address, locale)}
+          </Text>
+        </View>
       ) : null}
       {order.email || order.phone || order.contact ? (
-        <Text style={styles.detail} selectable>
-          <Text style={styles.detailLabel}>{t('sellerOrders.contact')} </Text>
-          {[order.email, order.phone, order.contact].filter(Boolean).join(' · ')}
-        </Text>
+        <View style={styles.section}>
+          <Text style={styles.detailLabel}>{t('sellerOrders.contact')}</Text>
+          <Text style={styles.detail} selectable>
+            {[order.email, order.phone, order.contact].filter(Boolean).join(' · ')}
+          </Text>
+        </View>
       ) : null}
-      {order.message || order.notes ? (
-        <Text style={styles.detail} selectable>
-          {[order.message, order.notes].filter(Boolean).join(' · ')}
-        </Text>
+      {note ? (
+        <View style={styles.section}>
+          <Text style={styles.detailLabel}>{t('sellerOrders.buyerNote')}</Text>
+          <Text style={styles.detail} selectable>
+            {note}
+          </Text>
+        </View>
       ) : null}
       {thread?.receipt && !receiptVerified ? (
         <Text style={styles.muted}>{t('sellerOrders.receiptUnverified')}</Text>

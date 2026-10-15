@@ -1,0 +1,83 @@
+import { buildMarketOrder } from './marketOrder';
+import {
+  buyerOrderNote,
+  distinctOrderItems,
+  orderListingPreviews,
+  orderProductPreviews,
+} from './orderPresentation';
+
+describe('buyerOrderNote', () => {
+  const input = {
+    buyerPubkey: 'buyer',
+    vendorPubkey: 'seller',
+    orderId: '1234',
+    lines: [{ merchantPubkey: 'seller', dTag: 'mug', quantity: 2, priceSats: 2100 }],
+    shipping: { coordinate: '30406:seller:post', costSats: 0, title: 'Standard (tracked)' },
+  };
+  test.each([undefined, '', 'Please leave at the door.\nThanks!'])(
+    'extracts note %p from actual checkout content',
+    (note) => {
+      const content = buildMarketOrder({ ...input, note }).rumor.content;
+      expect(buyerOrderNote(content)).toBe(note ?? '');
+      expect(buyerOrderNote(content.replace(/\n/g, '\r\n'))).toBe(
+        (note ?? '').replace(/\n/g, '\r\n'),
+      );
+    },
+  );
+  it('preserves free text and incomplete or non-generated summaries', () => {
+    for (const text of [
+      'Subtotal: my request',
+      'Total: 21 sats',
+      'Subtotal: 21 sats\nShipping: Free\nTotal: 21 sats',
+      'My note\n\nSubtotal: 21 sats\nShipping (Post): 0 sats\nTotal: 21 sats\n\nBuyer follow-up',
+    ]) {
+      expect(buyerOrderNote(text)).toBe(text);
+    }
+    expect(buyerOrderNote('  Just a note  ')).toBe('Just a note');
+    expect(buyerOrderNote()).toBe('');
+  });
+});
+
+it('maps listings by full coordinate and falls back to the listing id', () => {
+  const previews = orderListingPreviews([
+    {
+      pubkey: 'seller',
+      tags: [
+        ['d', 'mug'],
+        ['title', 'Mug'],
+        ['image', 'https://example.com/mug.png'],
+      ],
+    },
+    { pubkey: 'other', tags: [['d', 'mug']] },
+    { pubkey: 'ignored', tags: [] },
+  ]);
+  expect(previews.get('30402:seller:mug')).toEqual({
+    title: 'Mug',
+    image: 'https://example.com/mug.png',
+  });
+  expect(previews.get('30402:other:mug')?.title).toBe('mug');
+  expect(previews.size).toBe(2);
+  expect(orderProductPreviews([]).size).toBe(0);
+});
+
+it('groups distinct items, totals their badges and retains order and unknown titles', () => {
+  const lines = [
+    { ref: '30402:seller:mug', title: 'Old title', quantity: 1 },
+    { ref: '30402:other:hat', quantity: 2 },
+    { ref: '30402:seller:mug', quantity: 3 },
+    { ref: '30402:seller:scarf', title: 'Scarf', quantity: 1 },
+    { ref: '30402:seller:pin', quantity: 1 },
+  ];
+  const previews = new Map([
+    ['30402:seller:mug', { title: 'Mug', image: 'https://example.com/mug.png' }],
+  ]);
+  const items = distinctOrderItems(lines, previews);
+  expect(items).toEqual([
+    { ref: lines[0].ref, title: 'Mug', image: 'https://example.com/mug.png', quantity: 4 },
+    { ref: lines[1].ref, title: 'hat', quantity: 2 },
+    { ref: lines[3].ref, title: 'Scarf', quantity: 1 },
+    { ref: lines[4].ref, title: 'pin', quantity: 1 },
+  ]);
+  expect(lines[0].quantity).toBe(1);
+  expect(distinctOrderItems([])).toEqual([]);
+});

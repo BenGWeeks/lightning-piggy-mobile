@@ -8,18 +8,36 @@ import { usePubkeyProfile } from '../hooks/usePubkeyProfile';
 import { createMyOrderRowStyles } from '../styles/MyOrderRow.styles';
 import { shortOrderId } from '../utils/marketOrder';
 import type { BuyerOrderEntry } from '../utils/orderThreads';
+import OrderItemThumbnails from './OrderItemThumbnails';
+import { distinctOrderItems, type OrderListingPreview } from '../utils/orderPresentation';
 import OrderStatusChip from './OrderStatusChip';
 
 interface Props {
   entry: BuyerOrderEntry;
   /** "Mug × 2, Hat × 1". */
   itemsSummary: string;
+  itemTitles?: Record<string, string>;
+  listings?: ReadonlyMap<string, OrderListingPreview>;
   /** Opens the seller conversation at this order. */
   onPress: (entry: BuyerOrderEntry, sellerName: string, sellerPicture: string | null) => void;
 }
 
 /** One order in My orders: seller, items, total, date and status chip. */
-function MyOrderRow({ entry, itemsSummary, onPress }: Props): React.ReactElement {
+function MyOrderRow({
+  entry,
+  itemsSummary,
+  itemTitles,
+  listings,
+  onPress,
+}: Props): React.ReactElement {
+  const items = useMemo(
+    () =>
+      distinctOrderItems(
+        entry.order.items.map((item) => ({ ...item, title: itemTitles?.[item.ref] })),
+        listings,
+      ),
+    [entry.order.items, itemTitles, listings],
+  );
   const colors = useThemeColors();
   const { t, formatLocale } = useLocale();
   const styles = useMemo(() => createMyOrderRowStyles(colors), [colors]);
@@ -76,6 +94,7 @@ function MyOrderRow({ entry, itemsSummary, onPress }: Props): React.ReactElement
         <Text style={styles.items} numberOfLines={2}>
           {itemsSummary}
         </Text>
+        <OrderItemThumbnails items={items} orderId={entry.orderId} />
         <View style={styles.bottomLine}>
           <OrderStatusChip status={entry.status} testID={`my-order-status-${id8}`} />
           <Text style={styles.date}>{date}</Text>

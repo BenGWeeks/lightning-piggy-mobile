@@ -3529,6 +3529,7 @@
     "viewOrder": "View order"
   },
   "myOrders": {
+    "moreItems": "+{{count}} more",
     "title": "My orders",
     "empty": "No orders yet — tap Buy on a listing.",
     "open": "My orders",
@@ -3557,6 +3558,7 @@
     "replyAction": "Reply"
   },
   "sellerOrders": {
+    "buyerNote": "Note from buyer",
     "newOrderNotification": "New order: {{items}}",
     "yourShopOrder": "Order for your shop",
     "loadingShop": "Loading your shop to price this order…",

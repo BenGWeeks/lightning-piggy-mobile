@@ -3529,6 +3529,7 @@
     "viewOrder": "Ver pedido"
   },
   "myOrders": {
+    "moreItems": "+{{count}} más",
     "title": "Mis pedidos",
     "empty": "Aún no hay pedidos: toca Comprar en un anuncio.",
     "open": "Mis pedidos",
@@ -3557,6 +3558,7 @@
     "replyAction": "Responder"
   },
   "sellerOrders": {
+    "buyerNote": "Nota del comprador",
     "newOrderNotification": "Nuevo pedido: {{items}}",
     "yourShopOrder": "Pedido para tu tienda",
     "loadingShop": "Cargando tu tienda para calcular este pedido…",

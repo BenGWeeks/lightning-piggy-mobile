@@ -3583,6 +3583,7 @@
     "viewOrder": "Zobacz zamówienie"
   },
   "myOrders": {
+    "moreItems": "+{{count}} więcej",
     "title": "Moje zamówienia",
     "empty": "Brak zamówień — stuknij Kup przy ogłoszeniu.",
     "open": "Moje zamówienia",
@@ -3611,6 +3612,7 @@
     "replyAction": "Odpowiedz"
   },
   "sellerOrders": {
+    "buyerNote": "Notatka od kupującego",
     "newOrderNotification": "Nowe zamówienie: {{items}}",
     "yourShopOrder": "Zamówienie w Twoim sklepie",
     "loadingShop": "Wczytywanie sklepu, aby wycenić zamówienie…",

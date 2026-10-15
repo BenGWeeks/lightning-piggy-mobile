@@ -48,6 +48,7 @@ export interface SellerOrderLine {
   ref: string;
   dTag: string;
   title: string;
+  image?: string;
   quantity: number;
   /** Listing price in its own currency. */
   unitAmount: number;
@@ -172,6 +173,7 @@ export function quoteSellerOrder(input: QuoteSellerOrderInput): SellerOrderQuote
       ref: item.ref,
       dTag,
       title: (tag(listing, 'title')?.[1]?.trim() || dTag).slice(0, 500),
+      image: tag(listing, 'image')?.[1],
       quantity: item.quantity,
       unitAmount,
       currency,

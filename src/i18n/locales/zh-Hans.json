@@ -3529,6 +3529,7 @@
     "viewOrder": "查看订单"
   },
   "myOrders": {
+    "moreItems": "另有 {{count}} 件",
     "title": "我的订单",
     "empty": "还没有订单——在商品页点击“购买”。",
     "open": "我的订单",
@@ -3557,6 +3558,7 @@
     "replyAction": "回复"
   },
   "sellerOrders": {
+    "buyerNote": "买家留言",
     "newOrderNotification": "新订单：{{items}}",
     "yourShopOrder": "你店铺的订单",
     "loadingShop": "正在加载你的店铺以计算此订单…",

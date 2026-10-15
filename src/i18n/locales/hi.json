@@ -3529,6 +3529,7 @@
     "viewOrder": "ऑर्डर देखें"
   },
   "myOrders": {
+    "moreItems": "+{{count}} और",
     "title": "मेरे ऑर्डर",
     "empty": "अभी कोई ऑर्डर नहीं — किसी लिस्टिंग पर खरीदें टैप करें।",
     "open": "मेरे ऑर्डर",
@@ -3557,6 +3558,7 @@
     "replyAction": "जवाब दें"
   },
   "sellerOrders": {
+    "buyerNote": "खरीदार का नोट",
     "newOrderNotification": "नया ऑर्डर: {{items}}",
     "yourShopOrder": "आपकी दुकान का ऑर्डर",
     "loadingShop": "इस ऑर्डर की कीमत तय करने के लिए आपकी दुकान लोड हो रही है…",

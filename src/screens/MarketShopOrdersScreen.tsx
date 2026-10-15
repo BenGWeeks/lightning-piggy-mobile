@@ -1,3 +1,4 @@
+import { orderListingPreviews } from '../utils/orderPresentation';
 import SellerOrderPanel from '../components/SellerOrderPanel';
 import OrderStatusChip from '../components/OrderStatusChip';
 import { shopOrderStatus, receiptProvesPayment } from '../utils/shopOrderStatus';
@@ -45,6 +46,7 @@ const MarketShopOrdersScreen: React.FC<Props> = ({ navigation, route }) => {
   const styles = useMemo(() => createMarketSellerStyles(colors), [colors]);
   const orderStyles = useMemo(() => createMarketShopOrdersStyles(colors), [colors]);
   const { snapshot } = useSellerShop();
+  const previews = useMemo(() => orderListingPreviews(snapshot.listings), [snapshot.listings]);
   const titles = useMemo(() => listingTitleMap(snapshot.listings), [snapshot.listings]);
   const { orders, threads, paidKeys } = useShopOrders(titles);
   const buyersKey = useMemo(
@@ -81,6 +83,7 @@ const MarketShopOrdersScreen: React.FC<Props> = ({ navigation, route }) => {
       return (
         <ShopOrderRow
           order={item}
+          listings={previews}
           buyerName={merchantLabel(item.buyer, profile)}
           buyerPicture={profile?.picture ?? undefined}
           styles={orderStyles}
@@ -89,7 +92,7 @@ const MarketShopOrdersScreen: React.FC<Props> = ({ navigation, route }) => {
         />
       );
     },
-    [profiles, orderStyles, onOpen, threads, paidKeys],
+    [profiles, orderStyles, onOpen, threads, paidKeys, previews],
   );
   const renderSeparator = useCallback(() => <View style={styles.separator} />, [styles]);
 

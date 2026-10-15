@@ -1,3 +1,6 @@
+import { loadedMarketSnapshots } from '../services/marketStorage';
+import { orderProductPreviews } from '../utils/orderPresentation';
+import { useNostr } from '../contexts/NostrContext';
 import OrderPaymentActions from '../components/OrderPaymentActions';
 import SendSheet from '../components/SendSheet';
 import type { RouteProp } from '@react-navigation/native';
@@ -51,6 +54,15 @@ const MarketMyOrdersScreen: React.FC<Props> = ({ navigation, route }) => {
   const styles = useMemo(() => createMarketMyOrdersScreenStyles(colors), [colors]);
   const [invoiceToPay, setInvoiceToPay] = useState<string | null>(null);
   const { entries, titles, loading } = useBuyerOrders();
+  const { pubkey } = useNostr();
+  // Reuse only this account's already-loaded catalogue; no new relay requests.
+  const previews = useMemo(
+    () =>
+      orderProductPreviews(
+        loadedMarketSnapshots(pubkey ? [pubkey] : []).flatMap((s) => s.products),
+      ),
+    [pubkey],
+  );
 
   const openOrder = useCallback(
     (entry: BuyerOrderEntry) => {
@@ -66,11 +78,13 @@ const MarketMyOrdersScreen: React.FC<Props> = ({ navigation, route }) => {
     ({ item }: { item: BuyerOrderEntry }) => (
       <MyOrderRow
         entry={item}
+        listings={previews}
+        itemTitles={titles[item.orderId]}
         itemsSummary={itemsSummary(item, titles[item.orderId])}
         onPress={openOrder}
       />
     ),
-    [titles, openOrder],
+    [titles, openOrder, previews],
   );
 
   const selected = entries.find(

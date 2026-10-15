@@ -3529,6 +3529,7 @@
     "viewOrder": "Rendelés megtekintése"
   },
   "myOrders": {
+    "moreItems": "+{{count}} további",
     "title": "Rendeléseim",
     "empty": "Még nincs rendelés – koppints a Vásárlás gombra egy hirdetésnél.",
     "open": "Rendeléseim",
@@ -3557,6 +3558,7 @@
     "replyAction": "Válasz"
   },
   "sellerOrders": {
+    "buyerNote": "A vásárló megjegyzése",
     "newOrderNotification": "Új rendelés: {{items}}",
     "yourShopOrder": "Rendelés a boltodba",
     "loadingShop": "A boltod betöltése a rendelés árazásához…",
