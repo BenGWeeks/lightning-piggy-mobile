@@ -1560,6 +1560,8 @@
     "failedToRemoveRelay": "Nie udało się usunąć przekaźnika.",
     "geoCacheRelays": "Przekaźniki geocache",
     "geoCacheRelaysHint": "Dedykowane przekaźniki do skrytek Piglet i innych skrytek geocachingowych (NIP-GC). Odzwierciedlają to, co odczytuje i przeszukuje aplikacja internetowa treasures.to, dzięki czemu twoje skrytki Piglet pozostają widoczne w sieci. Są zawsze używane do publikowania i odczytu skrytek, oprócz przekaźników dodanych powyżej.",
+    "marmotRelays": "Przekaźniki czatów grupowych (Marmot)",
+    "marmotRelaysHint": "Znane przekaźniki czatów grupowych Marmot, używane też przez White Noise. Twoje klucze zaproszeń (pakiety kluczy) są publikowane tutaj i na twoich przekaźnikach, aby inni mogli rozpocząć z tobą szyfrowany czat grupowy, nawet gdy twoje przekaźniki są offline. Są ogłaszane na twojej liście przekaźników pakietów kluczy (typ 10051).",
     "encryptedMessages": "Wiadomości szyfrowane (NIP-17)",
     "amberPermissionHint": "Amber nie przyznał jeszcze tej aplikacji uprawnienia do odszyfrowywania NIP-44 — dotknij poniżej, aby je przyznać. Jedno okno, a potem kolejne szyfrowane wiadomości będą odszyfrowywane po cichu. Wiadomości od osób, których nie obserwujesz, i tak pozostają ukryte.",
     "amberPermissionTitle": "Uprawnienie Amber",

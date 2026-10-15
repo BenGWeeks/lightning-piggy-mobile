@@ -7,6 +7,7 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { DEFAULT_RELAYS } from '../services/nostrService';
 import { GC_RELAYS } from '../services/geocacheRelays';
+import { MARMOT_KEY_PACKAGE_RELAYS } from '../services/marmotKeyPackageRelays';
 import { createAdvancedRelaysSectionStyles } from '../styles/AdvancedRelaysSection.styles';
 import RelaySettingsRow from './RelaySettingsRow';
 import { RELAY_LIST_INDEXERS } from '../utils/relayListEvents';
@@ -26,7 +27,7 @@ interface Props {
 
 /**
  * Relays the app uses that aren't the user's own published lists (#1148):
- * the built-in fallbacks, the geo-cache set, and any legacy device-only
+ * the built-in fallbacks, geo-cache and Marmot sets, and any legacy device-only
  * additions. Collapsed by default — most people never need it.
  */
 export default function AdvancedRelaysSection({
@@ -98,6 +99,13 @@ export default function AdvancedRelaysSection({
             testID="geoCacheRelays"
           />
           {readOnlyList(GC_RELAYS, 'gc-relay-list')}
+
+          <NetworkSectionHeading
+            title={t('nostrScreen.marmotRelays')}
+            explanation={t('nostrScreen.marmotRelaysHint')}
+            testID="marmotRelays"
+          />
+          {readOnlyList(MARMOT_KEY_PACKAGE_RELAYS, 'marmot-relay-list')}
 
           {deviceRelays.length > 0 && (
             <>

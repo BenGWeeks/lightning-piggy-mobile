@@ -1560,6 +1560,8 @@
     "failedToRemoveRelay": "Failed to remove relay.",
     "geoCacheRelays": "Geo-cache relays",
     "geoCacheRelaysHint": "Dedicated relays for Piglets and other geo-caches (NIP-GC). These mirror what the treasures.to web app reads and searches, so your Piglets stay discoverable on the web. They’re always used for geo-cache publishing and reading, in addition to any relays you add above.",
+    "marmotRelays": "Group messaging relays (Marmot)",
+    "marmotRelaysHint": "Well-known relays for Marmot group messaging, shared with White Noise. Your invitation keys (key packages) are published here and to your own relays, so people can start an encrypted group chat with you even if your relays are offline. Advertised in your key-package relay list (kind 10051).",
     "encryptedMessages": "Encrypted Messages (NIP-17)",
     "amberPermissionHint": "Amber hasn’t granted NIP-44 decrypt permission to this app yet — tap below to grant it. One dialog, then subsequent encrypted messages decrypt silently. Messages from people you don’t follow stay hidden either way.",
     "amberPermissionTitle": "Amber permission",
