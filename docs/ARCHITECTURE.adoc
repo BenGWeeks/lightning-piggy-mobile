@@ -301,6 +301,13 @@ A successful AUTH re-arms each closed REQ once. Test-account lockdown permits
 AUTH only on the configured LAN relay. AUTH payloads and challenges are never
 logged by this path.
 
+At the next connect/re-pair, Amber's NIP-55 `get_public_key` permissions extra
+and the NIP-46 pairing URI request pre-approval for kind 22242. NIP-46 `connect`
+requests also carry the pairing's saved permissions. Both formats derive from
+`SIGNER_PREAPPROVED_EVENT_KINDS` in `signerPermissions.ts`. Approval remains the
+signer's/user's choice, so relay-login prompts can still occur if it is denied.
+Existing pairings keep their saved permissions; no forced re-pair occurs.
+
 == Wallets
 
 *Lightning (primary rail)* — Nostr Wallet Connect. A NWC connection string
