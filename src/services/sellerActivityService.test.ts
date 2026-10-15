@@ -7,6 +7,7 @@ import {
 } from './sellerActivityService';
 import { querySyncAbortable } from './relayQuery';
 import { fetchSellerEvents } from './marketSellerService';
+import { shouldMuteNotification } from './mutedSenders';
 import { fireNotification } from './notificationService';
 import { setSellerActivityEnabled } from './sellerActivityPreference';
 import { buildCommentTags } from '../utils/productComments';
@@ -22,6 +23,7 @@ jest.mock('./marketSellerService', () => ({
   fetchSellerEvents: jest.fn(),
   loadHiddenListings: jest.fn(async () => new Map()),
 }));
+jest.mock('./mutedSenders', () => ({ shouldMuteNotification: jest.fn(async () => false) }));
 jest.mock('./notificationService', () => ({ fireNotification: jest.fn(async () => null) }));
 jest.mock('../contexts/nostrDecryptPacing', () => ({
   createYieldScheduler: () => ({ maybeYield: async () => {}, dispose: () => {} }),
@@ -224,4 +226,85 @@ it('persists consumed stranger quotas when a later relay chunk fails, without ad
     .mockImplementation(async (_p, _r, f) => (f['#A'] ? [comment('more spam', stranger)] : []));
   await checkSellerActivity(opts());
   expect(fireNotification).toHaveBeenCalledTimes(20);
+});
+
+it('drains capped pages including timestamp ties before advancing the checkpoint', async () => {
+  const events = Array.from({ length: 201 }, (_, i) => ({
+    ...comment(`busy-${i}`),
+    created_at: now - 1000 - Math.floor(i / 2),
+  }));
+  await AsyncStorage.setItem(
+    cursorKey,
+    JSON.stringify({ lastSeen: now - 2000, seen: [], strangers: {} }),
+  );
+  jest
+    .mocked(querySyncAbortable)
+    .mockImplementation(async (_p, _r, f) =>
+      f['#A']
+        ? events
+            .filter((e) => e.created_at >= f.since! && e.created_at <= f.until!)
+            .slice(0, f.limit)
+        : [],
+    );
+  await checkSellerActivity(opts());
+  expect(fireNotification).toHaveBeenCalledTimes(201);
+  expect(fireNotification).toHaveBeenCalledWith(
+    expect.objectContaining({ historyKey: 'market:busy-200' }),
+  );
+  expect(JSON.parse((await AsyncStorage.getItem(cursorKey))!).lastSeen).toBeGreaterThanOrEqual(now);
+});
+
+it('retains the checkpoint when a timestamp is saturated instead of skipping older activity', async () => {
+  await AsyncStorage.setItem(
+    cursorKey,
+    JSON.stringify({ lastSeen: now - 2000, seen: [], strangers: {} }),
+  );
+  jest.mocked(querySyncAbortable).mockImplementation(async (_p, _r, f) =>
+    f['#A']
+      ? Array.from({ length: 200 }, (_, i) => ({
+          ...comment(`same-${i}`),
+          created_at: now - 500,
+        }))
+      : [],
+  );
+  await expect(checkSellerActivity(opts())).rejects.toThrow('range remains saturated');
+  expect(JSON.parse((await AsyncStorage.getItem(cursorKey))!).lastSeen).toBe(now - 2000);
+  expect(querySyncAbortable).toHaveBeenCalledTimes(2);
+});
+
+it('retries an event interrupted during mute lookup without consuming its stranger quota', async () => {
+  let release!: (muted: boolean) => void;
+  jest.mocked(shouldMuteNotification).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+  );
+  jest
+    .mocked(querySyncAbortable)
+    .mockImplementation(async (_p, _r, f) => (f['#A'] ? [comment('interrupted', stranger)] : []));
+  const controller = new AbortController();
+  const pending = checkSellerActivity({ ...opts(), signal: controller.signal });
+  while (!release) await Promise.resolve();
+  controller.abort();
+  release(false);
+  await pending;
+  expect(fireNotification).not.toHaveBeenCalled();
+  expect(await AsyncStorage.getItem(cursorKey)).toBeNull();
+  await checkSellerActivity(opts());
+  expect(fireNotification).toHaveBeenCalledTimes(1);
+  const cursor = JSON.parse((await AsyncStorage.getItem(cursorKey))!);
+  expect(cursor.seen).toContain('interrupted');
+  expect(Object.values(cursor.strangers)).toEqual([1]);
+});
+
+it('does not commit an event whose history delivery rejects', async () => {
+  jest
+    .mocked(querySyncAbortable)
+    .mockImplementation(async (_p, _r, f) => (f['#A'] ? [comment('retry')] : []));
+  jest.mocked(fireNotification).mockRejectedValueOnce(new Error('history failed'));
+  await expect(checkSellerActivity(opts())).rejects.toThrow('history failed');
+  expect(await AsyncStorage.getItem(cursorKey)).toBeNull();
+  await checkSellerActivity(opts());
+  expect(fireNotification).toHaveBeenCalledTimes(2);
 });

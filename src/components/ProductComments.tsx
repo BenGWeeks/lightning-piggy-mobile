@@ -1,6 +1,6 @@
 import type { Event as NostrEvent } from 'nostr-tools';
 import { useAccountState } from '../contexts/useAccountState';
-import { threadedComments, commentRootRef } from '../utils/productComments';
+import { commentRootRef } from '../utils/productComments';
 import ProductReplyComposer from './ProductReplyComposer';
 import BrandedSpinner from './BrandedSpinner';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -39,7 +39,7 @@ const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount, regi
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createProductCommentsStyles(colors), [colors]);
-  const { allComments, topLevel, loading, error, refetch, refresh, addLocally, hideLocally } =
+  const { thread, topLevel, loading, error, refetch, refresh, addLocally, hideLocally } =
     useProductComments(root);
   useRegisterRefresher(registerRefresh, refresh);
   const { pubkey } = useNostr();
@@ -48,7 +48,6 @@ const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount, regi
     null,
   );
   const cancelReply = React.useCallback(() => setReplyTo(null), [setReplyTo]);
-  const thread = useMemo(() => threadedComments(allComments, root), [allComments, root]);
   const isSeller = !(root instanceof URL) && root.pubkey === pubkey;
   const {
     content,
