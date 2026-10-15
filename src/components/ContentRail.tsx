@@ -1,9 +1,9 @@
 import React, { useMemo } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity } from 'react-native';
 import { ChevronRight } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import type { Palette } from '../styles/palettes';
+import { createContentRailStyles } from '../styles/ContentRail.styles';
 
 interface Props<T> {
   /** Section title — short, sentence case ("Places near you"). */
@@ -44,7 +44,7 @@ export function ContentRail<T>({
 }: Props<T>): React.ReactElement {
   const colors = useThemeColors();
   const t = useTranslation();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createContentRailStyles(colors), [colors]);
 
   return (
     <View style={styles.section}>
@@ -87,59 +87,3 @@ export function ContentRail<T>({
     </View>
   );
 }
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    section: {
-      marginBottom: 22,
-    },
-    header: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 16,
-      marginBottom: 10,
-      gap: 12,
-    },
-    headerText: { flex: 1 },
-    title: {
-      fontSize: 16,
-      fontWeight: '700',
-      color: colors.textHeader,
-    },
-    caption: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      marginTop: 2,
-    },
-    seeAll: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 2,
-    },
-    seeAllText: {
-      fontSize: 13,
-      fontWeight: '700',
-      color: colors.brandPink,
-    },
-    list: {
-      paddingHorizontal: 16,
-    },
-    separator: {
-      width: 10,
-    },
-    placeholderRow: {
-      flexDirection: 'row',
-      paddingHorizontal: 16,
-      gap: 10,
-    },
-    placeholderCard: {
-      width: 160,
-      height: 130,
-      backgroundColor: colors.surface,
-      borderRadius: 12,
-      opacity: 0.5,
-    },
-    emptyWrap: {
-      paddingHorizontal: 16,
-    },
-  });

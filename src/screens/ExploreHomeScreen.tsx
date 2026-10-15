@@ -9,6 +9,7 @@ import { ChevronRight, Compass, MapPin, PiggyBank, Sparkles } from 'lucide-react
 import TabHeader from '../components/TabHeader';
 import { useTranslation } from '../contexts/LocaleContext';
 import BrandPatternBackground from '../components/BrandPatternBackground';
+import { GeocacheRailEmptyState } from '../components/GeocacheRailEmptyState';
 import { ContentRail } from '../components/ContentRail';
 import { ExploreMiniMap } from '../components/ExploreMiniMap';
 import { LpPayoutBadge } from '../components/LpPayoutBadge';
@@ -144,16 +145,16 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   const [refreshKey, setRefreshKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const {
-    caches,
+    sortedCaches,
     events,
     cachesArr,
+    cacheRailState,
     eventsArr,
-    signedInPubkey,
     untrustedCacheCount,
     untrustedEventCount,
     setUntrustedCacheCount,
     setUntrustedEventCount,
-  } = useExploreRelayContent(pos, refreshKey);
+  } = useExploreRelayContent(pos, refreshKey, maxDistanceMetres);
   // Mini-map pin-tap selections — open `MerchantDetailSheet` /
   // `CacheDetailSheet` (same components MapScreen uses) so the
   // interaction shape matches the full map. Events have no dedicated
@@ -356,57 +357,6 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     [merchants],
   );
 
-  const sortedCaches = useMemo(() => {
-    const lowerPubkey = signedInPubkey?.toLowerCase() ?? null;
-    const haveFix = typeof posLat === 'number' && typeof posLon === 'number';
-    // Re-apply the prod test-account filter at render — cold-start caches
-    // hydrated from AsyncStorage bypass the ingestion callback.
-    let items = [...caches.values()]
-      .filter((cache) => !isHiddenInProd(cache.hiderPubkey))
-      .map((cache) => {
-        const center = cache.geohash ? decodeGeohash(cache.geohash) : null;
-        const distance =
-          haveFix && center
-            ? haversineMetres({ lat: posLat, lon: posLon }, { lat: center.lat, lon: center.lng })
-            : Number.POSITIVE_INFINITY;
-        const isOwn = lowerPubkey !== null && cache.hiderPubkey.toLowerCase() === lowerPubkey;
-        return { cache, distance, isOwn };
-      });
-    // Trace own-listing trajectory so a missing-own-cache regression
-    // can be diagnosed from logcat alone (#73 follow-up).
-    const ownItems = items.filter((c) => c.isOwn);
-    if (ownItems.length > 0) {
-      console.log(
-        `[PerfBlock] sortedCaches own=${ownItems.length} maxDistance=${maxDistanceMetres ?? 'null'}m posSet=${haveFix} ` +
-          ownItems
-            .map(
-              (c) =>
-                `${c.cache.name ?? c.cache.d}@gh=${c.cache.geohash ?? 'null'} dist=${Number.isFinite(c.distance) ? Math.round(c.distance) + 'm' : 'inf'}`,
-            )
-            .join(' | '),
-      );
-    } else if (caches.size > 0 && signedInPubkey) {
-      console.log(
-        `[PerfBlock] sortedCaches own=0 (caches.size=${caches.size}, signedInPubkey=${signedInPubkey.slice(0, 8)}…) — by-author merge may not have landed yet`,
-      );
-    }
-    if (maxDistanceMetres !== null) {
-      items = items.filter((c) => c.distance <= maxDistanceMetres);
-    }
-    // Own listings still sort to the front WITHIN the radius — the user
-    // wants their own work visible first when it's nearby, but a cache
-    // they hid 100 km away shouldn't crowd the "nearby" rail.
-    items.sort((a, b) => {
-      if (a.isOwn !== b.isOwn) return a.isOwn ? -1 : 1;
-      return a.distance - b.distance;
-    });
-    // Cap at 50 — the hub rail is a horizontal-scroll teaser and 50 is
-    // enough for any practical density without making the rail
-    // disproportionately heavy. The "See all → Geo-caches" page
-    // (HuntScreen) has no cap for the full list.
-    return items.slice(0, 50);
-  }, [caches, posLat, posLon, maxDistanceMetres, signedInPubkey]);
-
   const sortedEvents = useMemo(() => {
     const haveFix = typeof posLat === 'number' && typeof posLon === 'number';
     // Re-apply future-only + prod test-account filters at render — a cached
@@ -511,12 +461,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
               : 'Piglets + classic NIP-GC caches'
           }
           items={sortedCaches}
-          // Loading skeleton only while we haven't received *anything*.
-          // If WoT has dropped one or more nearby caches the relay query
-          // has clearly returned — keep loading false so the empty state
-          // can explain *why* the rail is empty instead of looping the
-          // skeleton forever.
-          loading={!!pos && caches.size === 0 && untrustedCacheCount === 0}
+          loading={cacheRailState === 'loading'}
           // "See all" lands on the merged Geo-caches page (map + list
           // + [+] in header for the hider flow). Was a two-screen
           // Hunt/Discover split before the May 2026 UX merge.
@@ -524,17 +469,12 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           seeAllTestId="explore-card-hunt"
           keyExtractor={(c) => c.cache.coord}
           emptyState={
-            untrustedCacheCount > 0 ? (
-              <Text style={localStyles.emptyText}>
-                {untrustedCacheCount} nearby {untrustedCacheCount === 1 ? 'cache is' : 'caches are'}{' '}
-                hidden because their hider isn't in your Web-of-Trust. Follow people who hide
-                Piggies on Nostr to start seeing their caches here.
-              </Text>
-            ) : (
-              <Text style={localStyles.emptyText}>
-                No caches in your area yet. Tap See all → Hide a Piggy to be the first.
-              </Text>
-            )
+            <GeocacheRailEmptyState
+              state={cacheRailState}
+              hiddenCount={untrustedCacheCount}
+              onHide={() => navigation.navigate('HuntCreate')}
+              onRetry={() => setRefreshKey((n) => n + 1)}
+            />
           }
           renderItem={({ cache, distance }) => (
             <CacheCard

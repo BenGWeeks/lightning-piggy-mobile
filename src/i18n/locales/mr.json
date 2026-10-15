@@ -280,6 +280,13 @@
     "shareTitle": "{{name}} शेअर करा",
     "shareSubtitle": "त्यांना संपर्क कार्डसह एन्क्रिप्टेड Nostr DM मिळेल."
   },
+  "geocacheRail": {
+    "empty": "जवळपास अजून Piglets नाहीत",
+    "hide": "एक Piglet लपवा",
+    "error": "जवळपासचे Piglets लोड करता आले नाहीत.",
+    "retry": "पुन्हा प्रयत्न करा",
+    "hidden": "तुमच्या विश्वास फिल्टरमुळे जवळपासचे काही कॅश लपवले आहेत."
+  },
   "contentRail": {
     "seeAllAccessibility": "{{title}} — सर्व पहा",
     "seeAll": "सर्व पहा"

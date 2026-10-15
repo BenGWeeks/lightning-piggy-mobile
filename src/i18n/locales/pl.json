@@ -280,6 +280,13 @@
     "shareTitle": "Udostępnij: {{name}}",
     "shareSubtitle": "Odbiorca dostanie zaszyfrowaną wiadomość prywatną Nostr z kartą osoby."
   },
+  "geocacheRail": {
+    "empty": "W pobliżu nie ma jeszcze Piglets",
+    "hide": "Ukryj Piglet",
+    "error": "Nie udało się wczytać pobliskich Piglets.",
+    "retry": "Ponów",
+    "hidden": "Twój filtr zaufania ukrywa niektóre pobliskie skrytki."
+  },
   "contentRail": {
     "seeAllAccessibility": "{{title}} — zobacz wszystko",
     "seeAll": "Zobacz wszystko"

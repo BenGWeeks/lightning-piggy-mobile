@@ -3,6 +3,7 @@ import { useNostr } from '../contexts/NostrContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { joinExploreByAuthorFetch } from '../utils/exploreFetchGuard';
 import {
+  type NearbyCachesCompletion,
   fetchCachesByAuthor,
   subscribeNearbyCaches,
   subscribeNearbyEvents,
@@ -14,7 +15,8 @@ import {
   peekCachedEventsSync,
 } from '../services/nostrPlacesStorage';
 import { type ParsedCache, type ParsedEvent } from '../services/nostrPlacesService';
-import { encodeGeohash, geohashNeighbours } from '../utils/geohash';
+import { decodeGeohash, encodeGeohash, geohashNeighbours, haversineMetres } from '../utils/geohash';
+import { deriveGeocacheRailState } from '../utils/geocacheRailState';
 import { isFutureEvent } from '../utils/futureEvent';
 import { isHiddenInProd, visibleCaches, visibleEvents } from '../utils/exploreContentFilter';
 import { usePersistCaches, usePersistEvents } from './useExplorePlacesPersist';
@@ -23,7 +25,11 @@ import { useFocusEffect } from '@react-navigation/native';
 import type { LiveUserLocation } from './useLiveUserLocation';
 
 /** Owns Explore's coalesced relay data and disk hydration. */
-export function useExploreRelayContent(pos: LiveUserLocation | null, refreshKey: number) {
+export function useExploreRelayContent(
+  pos: LiveUserLocation | null,
+  refreshKey: number,
+  maxDistanceMetres: number | null = null,
+) {
   // ----- NIP-GC caches + NIP-52 events (live subs) ------------------------
 
   // Web-of-trust filter — kept in a ref so the subscription callbacks
@@ -201,6 +207,7 @@ export function useExploreRelayContent(pos: LiveUserLocation | null, refreshKey:
     },
     [],
   );
+  const [cacheCompletion, setCacheCompletion] = useState<NearbyCachesCompletion | null>(null);
   const subsCloserRef = useRef<(() => void)[]>([]);
   // Gate re-subscription on coarse movement (~500 m via 0.005° quantisation)
   // via the posBucketKey in the effect's deps below — NOT a body-level skip:
@@ -230,6 +237,7 @@ export function useExploreRelayContent(pos: LiveUserLocation | null, refreshKey:
       // timer that fires after the cleanup. Mirrors NostrContext.tsx's
       // DM inbox precedent.
       let cancelled = false;
+      setCacheCompletion(null);
       // Caches sit at precision 5 (~5 km) — geocaching is inherently
       // hyper-local. Events broaden to precision 3 (~150 km) so a rural
       // user catches the nearest city's Bitcoin meetup; most NIP-52
@@ -263,6 +271,13 @@ export function useExploreRelayContent(pos: LiveUserLocation | null, refreshKey:
           },
           undefined,
           { limit: 200 },
+          (result) => {
+            if (cancelled) return;
+            // Commit staged content/counts before retiring the loading state.
+            flushPendingCaches();
+            flushCounts();
+            setCacheCompletion(result);
+          },
         ),
       );
       subsCloserRef.current.push(
@@ -305,10 +320,63 @@ export function useExploreRelayContent(pos: LiveUserLocation | null, refreshKey:
     ]),
   );
 
+  const sortedCaches = useMemo(() => {
+    const lowerPubkey = signedInPubkey?.toLowerCase() ?? null;
+    const haveFix = typeof posLat === 'number' && typeof posLon === 'number';
+    // Re-apply the prod test-account filter at render — cold-start caches
+    // hydrated from AsyncStorage bypass the ingestion callback.
+    let items = [...caches.values()]
+      .filter((cache) => !isHiddenInProd(cache.hiderPubkey))
+      .map((cache) => {
+        const center = cache.geohash ? decodeGeohash(cache.geohash) : null;
+        const distance =
+          haveFix && center
+            ? haversineMetres({ lat: posLat, lon: posLon }, { lat: center.lat, lon: center.lng })
+            : Number.POSITIVE_INFINITY;
+        const isOwn = lowerPubkey !== null && cache.hiderPubkey.toLowerCase() === lowerPubkey;
+        return { cache, distance, isOwn };
+      });
+    // Trace own-listing trajectory so a missing-own-cache regression
+    // can be diagnosed from logcat alone (#73 follow-up).
+    const ownItems = items.filter((c) => c.isOwn);
+    if (ownItems.length > 0) {
+      console.log(
+        `[PerfBlock] sortedCaches own=${ownItems.length} maxDistance=${maxDistanceMetres ?? 'null'}m posSet=${haveFix} ` +
+          ownItems
+            .map(
+              (c) =>
+                `${c.cache.name ?? c.cache.d}@gh=${c.cache.geohash ?? 'null'} dist=${Number.isFinite(c.distance) ? Math.round(c.distance) + 'm' : 'inf'}`,
+            )
+            .join(' | '),
+      );
+    } else if (caches.size > 0 && signedInPubkey) {
+      console.log(
+        `[PerfBlock] sortedCaches own=0 (caches.size=${caches.size}, signedInPubkey=${signedInPubkey.slice(0, 8)}…) — by-author merge may not have landed yet`,
+      );
+    }
+    if (maxDistanceMetres !== null) {
+      items = items.filter((c) => c.distance <= maxDistanceMetres);
+    }
+    // Own listings still sort to the front WITHIN the radius — the user
+    // wants their own work visible first when it's nearby, but a cache
+    // they hid 100 km away shouldn't crowd the "nearby" rail.
+    items.sort((a, b) => {
+      if (a.isOwn !== b.isOwn) return a.isOwn ? -1 : 1;
+      return a.distance - b.distance;
+    });
+    // Cap at 50 — the hub rail is a horizontal-scroll teaser and 50 is
+    // enough for any practical density without making the rail
+    // disproportionately heavy. The "See all → Geo-caches" page
+    // (HuntScreen) has no cap for the full list.
+    return items.slice(0, 50);
+  }, [caches, posLat, posLon, maxDistanceMetres, signedInPubkey]);
+
   return {
     caches,
+    sortedCaches,
     events,
     cachesArr,
+    cacheRailState: deriveGeocacheRailState(sortedCaches.length, pos !== null, cacheCompletion),
     eventsArr,
     signedInPubkey,
     untrustedCacheCount,

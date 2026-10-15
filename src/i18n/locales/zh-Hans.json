@@ -280,6 +280,13 @@
     "shareTitle": "分享{{name}}",
     "shareSubtitle": "对方会收到一条带有名片的加密Nostr私信。"
   },
+  "geocacheRail": {
+    "empty": "附近还没有 Piglets",
+    "hide": "藏一个 Piglet",
+    "error": "无法加载附近的 Piglets。",
+    "retry": "重试",
+    "hidden": "你的信任筛选器隐藏了附近的部分藏宝点。"
+  },
   "contentRail": {
     "seeAllAccessibility": "{{title}}——查看全部",
     "seeAll": "查看全部"

@@ -63,6 +63,10 @@ export const publishCacheEvent = async (
   notifyOwnCachesChanged();
 };
 
+export interface NearbyCachesCompletion {
+  allRelaysFailed: boolean;
+}
+
 /**
  * Subscribe to nearby caches by geohash prefix. `prefixes` should
  * come from `geohashPrefixes(currentGh, 5)` — yields a single filter
@@ -70,15 +74,22 @@ export const publishCacheEvent = async (
  * LP Piggies AND treasures.to / TapTheSatsMap caches; caller branches
  * on `parsed.isLpPiggy` to render the 🐷 vs 📍 pin distinction).
  *
- * Returns a closer; call it to terminate the subscription.
+ * `onEose` fires once after all queried relays reach EOSE/close, or after
+ * eight seconds. Total closure without any event is a failure; a timeout
+ * alone is inconclusive. Completion does not stop live event delivery.
+ * Returns a closer that cancels pending completion and event delivery.
  */
 export const subscribeNearbyCaches = (
   prefixes: string[],
   onEvent: (cache: ParsedCache) => void,
   relays: string[] = GC_RELAYS,
   filterExtras: Partial<Filter> = {},
+  onEose?: (result: NearbyCachesCompletion) => void,
 ): (() => void) => {
-  if (prefixes.length === 0) return () => {};
+  if (prefixes.length === 0) {
+    onEose?.({ allRelaysFailed: false });
+    return () => {};
+  }
   relays = withGcRelays(relays);
   const filter: Filter = {
     kinds: [GC_LISTING_KIND],
@@ -106,8 +117,29 @@ export const subscribeNearbyCaches = (
     __burstMs = 0;
     __burstFlushTimer = null;
   };
+  let cancelled = false;
+  let completed = false;
+  let receivedEvent = false;
+  const complete = (allRelaysFailed: boolean): void => {
+    if (cancelled || completed) return;
+    completed = true;
+    clearTimeout(completionTimer);
+    onEose?.({ allRelaysFailed });
+  };
+  // Independent of the SDK's connection/EOSE timers: even a stalled relay
+  // must not leave the rail loading forever. Keep the live sub for late data.
+  const completionTimer = setTimeout(() => complete(false), 8000);
   const sub = pool.subscribeMany(relays, filter, {
+    // SimplePool counts both EOSE and close towards this aggregate signal.
+    // On total connection failure it calls oneose immediately BEFORE onclose.
+    // Defer success one microtask so onclose can report failure first.
+    oneose: () => {
+      void Promise.resolve().then(() => complete(false));
+    },
+    onclose: () => complete(!receivedEvent),
     onevent: (e: NostrEvent) => {
+      if (cancelled) return;
+      receivedEvent = true;
       // Filter out orphaned dev-leftover signers (see devEventDenylist.ts)
       // before parsing — these are kind-37516 events from disposable nsecs
       // we no longer hold a key for, so they sit on relays forever.
@@ -137,6 +169,8 @@ export const subscribeNearbyCaches = (
     },
   });
   return () => {
+    cancelled = true;
+    clearTimeout(completionTimer);
     if (__burstFlushTimer) clearTimeout(__burstFlushTimer);
     sub.close();
   };

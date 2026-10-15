@@ -280,6 +280,13 @@
     "shareTitle": "Megosztás: {{name}}",
     "shareSubtitle": "Titkosított Nostr-üzenetben kapja meg, személykártyaként."
   },
+  "geocacheRail": {
+    "empty": "Még nincsenek Piglets a közelben",
+    "hide": "Piglet elrejtése",
+    "error": "Nem sikerült betölteni a közeli Piglets rejtekhelyeket.",
+    "retry": "Újra",
+    "hidden": "A bizalmi szűrőd elrejt néhány közeli geoládát."
+  },
   "contentRail": {
     "seeAllAccessibility": "{{title}} – összes megtekintése",
     "seeAll": "Mind"
