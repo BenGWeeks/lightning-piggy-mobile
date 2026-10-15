@@ -4,10 +4,11 @@ import { orderListingPreviews } from '../utils/orderPresentation';
 import SellerOrderPanel from '../components/SellerOrderPanel';
 import OrderStatusChip from '../components/OrderStatusChip';
 import { shopOrderStatus, receiptProvesPayment } from '../utils/shopOrderStatus';
-import { paymentHashFromBolt11 } from '../utils/bolt11';
+import { expiresAtFromBolt11, paymentHashFromBolt11 } from '../utils/bolt11';
 import type { RouteProp } from '@react-navigation/native';
 import type { ExploreStackParamList } from '../navigation/types';
-import React, { useCallback, useMemo } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
+import React, { useCallback, useMemo, useState } from 'react';
 import { FlatList, ScrollView, Text, View } from 'react-native';
 import { ShoppingBag } from 'lucide-react-native';
 import type { CompositeNavigationProp } from '@react-navigation/native';
@@ -50,7 +51,29 @@ const MarketShopOrdersScreen: React.FC<Props> = ({ navigation, route }) => {
   const { snapshot } = useSellerShop();
   const previews = useMemo(() => orderListingPreviews(snapshot.listings), [snapshot.listings]);
   const titles = useMemo(() => listingTitleMap(snapshot.listings), [snapshot.listings]);
-  const { orders, threads, paidKeys } = useShopOrders(titles);
+  const { orders, threads, paidKeys, invoices } = useShopOrders(titles);
+  const [nowMs, setNowMs] = useState(Date.now);
+  useFocusEffect(
+    useCallback(() => {
+      const nextExpiry = Math.min(
+        ...[...threads.values()].flatMap((thread) =>
+          thread.invoice && thread.invoice.expiresAt * 1000 > nowMs
+            ? [thread.invoice.expiresAt * 1000]
+            : [],
+        ),
+        ...Object.values(invoices).flatMap((record) => {
+          const expiry = expiresAtFromBolt11(record.bolt11);
+          return expiry !== null && expiry * 1000 > nowMs ? [expiry * 1000] : [];
+        }),
+      );
+      if (!Number.isFinite(nextExpiry)) return;
+      const timer = setTimeout(
+        () => setNowMs(Date.now()),
+        Math.min(Math.max(0, nextExpiry - Date.now()), 2_147_483_647),
+      );
+      return () => clearTimeout(timer);
+    }, [threads, invoices, nowMs]),
+  );
   const buyersKey = useMemo(
     () => [...new Set((orders ?? []).map((o) => o.buyer))].sort().join(','),
     [orders],
@@ -60,19 +83,19 @@ const MarketShopOrdersScreen: React.FC<Props> = ({ navigation, route }) => {
   const statusOf = useCallback(
     (order: ShopOrder) => {
       const thread = threads.get(order.key);
-      return thread
-        ? shopOrderStatus(thread, {
-            walletPaid: paidKeys.has(order.key),
-            receiptVerified: receiptProvesPayment(
+      return shopOrderStatus(thread, {
+        invoiceRecord: invoices[order.key],
+        walletPaid: paidKeys.has(order.key),
+        nowMs: Math.max(nowMs, Date.now()),
+        receiptVerified: thread
+          ? receiptProvesPayment(
               thread,
               thread.invoice ? paymentHashFromBolt11(thread.invoice.bolt11) : null,
-            ),
-          })
-        : order.invoiceSent
-          ? 'invoiceSent'
-          : 'needsInvoice';
+            )
+          : false,
+      });
     },
-    [threads, paidKeys],
+    [threads, paidKeys, invoices, nowMs],
   );
   const loadedOrders = useMemo(() => orders ?? [], [orders]);
   const filter = useOrderStatusFilter(loadedOrders, statusOf);

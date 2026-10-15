@@ -40,3 +40,16 @@ test('handles empty and single-status lists and buyer lifecycle statuses', () =>
     'completed',
   ]);
 });
+
+test('expired invoices follow needs-invoice before sent invoices', () => {
+  const statuses = ['invoiceSent', 'invoiceExpired', 'needsInvoice', 'paid'] as const;
+  expect(countOrderStatuses(statuses, (status) => status).map((item) => item.status)).toEqual([
+    'needsInvoice',
+    'invoiceExpired',
+    'invoiceSent',
+    'paid',
+  ]);
+  expect(filterOrdersByStatus(statuses, (status) => status, 'invoiceExpired')).toEqual([
+    'invoiceExpired',
+  ]);
+});

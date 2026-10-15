@@ -14,11 +14,18 @@
 //   cancelled    — either side sent a `cancelled` status
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
-import { paymentHashFromBolt11 } from './bolt11';
+import type { SellerInvoiceRecord } from '../services/sellerInvoiceStore';
+import { expiresAtFromBolt11, paymentHashFromBolt11 } from './bolt11';
 import type { ParsedOrderEvent } from './orderEvents';
 import { PAID_STATUSES, orderThreads, type OrderRowInput, type OrderThread } from './orderThreads';
 
-export type ShopOrderStatus = 'needsInvoice' | 'invoiceSent' | 'paid' | 'shipped' | 'cancelled';
+export type ShopOrderStatus =
+  | 'needsInvoice'
+  | 'invoiceExpired'
+  | 'invoiceSent'
+  | 'paid'
+  | 'shipped'
+  | 'cancelled';
 
 /** An order I received, with what's happened since. */
 export type SellerOrderThread = OrderThread;
@@ -57,19 +64,34 @@ export function receiptProvesPayment(
 
 /** The chip for an order I received. `walletPaid` = my wallet saw it settle. */
 export function shopOrderStatus(
-  thread: SellerOrderThread,
-  opts: { walletPaid?: boolean; receiptVerified?: boolean } = {},
+  thread: SellerOrderThread | undefined,
+  opts: {
+    walletPaid?: boolean;
+    receiptVerified?: boolean;
+    nowMs?: number;
+    invoiceRecord?: Pick<SellerInvoiceRecord, 'bolt11' | 'paidAt' | 'confirmedAt' | 'paymentHash'>;
+  } = {},
 ): ShopOrderStatus {
-  if (thread.cancelled) return 'cancelled';
-  if (thread.shipping === 'shipped' || thread.shipping === 'delivered') return 'shipped';
+  if (thread?.cancelled) return 'cancelled';
+  if (thread?.shipping === 'shipped' || thread?.shipping === 'delivered') return 'shipped';
   if (
     opts.walletPaid ||
+    opts.invoiceRecord?.paidAt ||
+    opts.invoiceRecord?.confirmedAt ||
     opts.receiptVerified ||
-    (thread.status !== undefined && PAID_STATUSES.has(thread.status))
+    (thread?.status !== undefined && PAID_STATUSES.has(thread.status))
   ) {
     return 'paid';
   }
-  if (thread.invoice) return 'invoiceSent';
+  // A delivered buyer wrap may have no seller self-copy. Keep the durable
+  // local invoice usable until the payment request appears in the thread.
+  const expiresAt =
+    thread?.invoice?.expiresAt ??
+    (opts.invoiceRecord ? expiresAtFromBolt11(opts.invoiceRecord.bolt11) : null);
+  if (thread?.invoice || opts.invoiceRecord)
+    return expiresAt !== null && expiresAt * 1000 <= (opts.nowMs ?? Date.now())
+      ? 'invoiceExpired'
+      : 'invoiceSent';
   return 'needsInvoice';
 }
 

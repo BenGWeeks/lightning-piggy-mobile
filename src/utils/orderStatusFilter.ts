@@ -5,6 +5,7 @@ export type OrderStatusFilter = 'all' | OrderChipStatus;
 // Actionable orders lead, followed by the remaining lifecycle stages.
 const LIFECYCLE: readonly OrderChipStatus[] = [
   'needsInvoice',
+  'invoiceExpired',
   'payNow',
   'awaitingInvoice',
   'invoiceSent',

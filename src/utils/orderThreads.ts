@@ -115,6 +115,7 @@ export function orderThreads(
 /** Buyer-side chip for My orders. */
 export type BuyerOrderStatus =
   | 'awaitingInvoice'
+  | 'invoiceExpired'
   | 'payNow'
   | 'paid'
   | 'shipped'
@@ -139,8 +140,10 @@ export function buyerOrderStatus(
   ) {
     return 'paid';
   }
-  if (thread.invoice && thread.invoice.expiresAt * 1000 > (opts.nowMs ?? Date.now()))
-    return 'payNow';
+  if (thread.invoice)
+    return thread.invoice.expiresAt * 1000 > (opts.nowMs ?? Date.now())
+      ? 'payNow'
+      : 'invoiceExpired';
   return 'awaitingInvoice';
 }
 

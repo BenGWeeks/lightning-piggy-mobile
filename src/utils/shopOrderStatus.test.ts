@@ -63,6 +63,9 @@ const myInvoice = row(true, 20, {
 });
 const thread = (rows: OrderRowInput[]) => sellerOrderThreads(rows).get('o-1')!;
 
+beforeEach(() => jest.spyOn(Date, 'now').mockReturnValue(NOW * 1000));
+afterEach(() => jest.restoreAllMocks());
+
 describe('shopOrderStatus', () => {
   it('Needs invoice → Invoice sent → Paid → Shipped', () => {
     expect(shopOrderStatus(thread([received]))).toBe('needsInvoice');
@@ -138,4 +141,44 @@ it('shopOrderEntries lists received orders newest first with chips and jump rows
     ['o-2', 'needsInvoice', 'r50'],
     ['o-1', 'paid', 'r10'],
   ]);
+});
+
+it('expires at the BOLT11 boundary and returns to invoice sent for a replacement', () => {
+  const original = thread([received, myInvoice]);
+  const expiryMs = (NOW + 3600) * 1000;
+  expect(shopOrderStatus(original, { nowMs: expiryMs - 1 })).toBe('invoiceSent');
+  expect(shopOrderStatus(original, { nowMs: expiryMs })).toBe('invoiceExpired');
+  expect(shopOrderStatus(original, { nowMs: expiryMs, walletPaid: true })).toBe('paid');
+  const replacement = row(true, 30, {
+    type: 'payment',
+    payment: { method: 'lightning', value: bolt11('lnbc21u', NOW + 3600) },
+  });
+  expect(shopOrderStatus(thread([received, myInvoice, replacement]), { nowMs: expiryMs })).toBe(
+    'invoiceSent',
+  );
+});
+
+it('uses the durable invoice for a placed-only thread, including expiry and settlement', () => {
+  const placedOnly = thread([received]);
+  const invoiceRecord = { bolt11: BOLT11, paymentHash: HASH };
+  const expiryMs = (NOW + 3600) * 1000;
+  expect(shopOrderStatus(placedOnly, { invoiceRecord, nowMs: expiryMs - 1 })).toBe('invoiceSent');
+  expect(shopOrderStatus(placedOnly, { invoiceRecord, nowMs: expiryMs })).toBe('invoiceExpired');
+  expect(
+    shopOrderStatus(placedOnly, {
+      invoiceRecord: { ...invoiceRecord, paidAt: expiryMs },
+      nowMs: expiryMs,
+    }),
+  ).toBe('paid');
+  expect(
+    shopOrderStatus(placedOnly, {
+      invoiceRecord: { ...invoiceRecord, bolt11: bolt11('lnbc21u', NOW + 3600) },
+      nowMs: expiryMs,
+    }),
+  ).toBe('invoiceSent');
+  expect(
+    shopOrderStatus(thread([received, myInvoice]), {
+      invoiceRecord: { ...invoiceRecord, bolt11: bolt11('lnbc21u', NOW - 3600) },
+    }),
+  ).toBe('invoiceSent');
 });

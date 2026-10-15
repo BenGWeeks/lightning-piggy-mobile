@@ -152,7 +152,7 @@ it.each(['live', 'cold'])(
     ]);
     expect((await entries(EXPIRY * 1000 - 1))[0].status).toBe('payNow');
     // Expiry is independent of admission: the valid request stays stored.
-    expect((await entries(EXPIRY * 1000))[0].status).toBe('awaitingInvoice');
+    expect((await entries(EXPIRY * 1000))[0].status).toBe('invoiceExpired');
     expect((await getOrderRows(BUYER)).map((r) => r.eventId)).toContain('invoice');
   },
 );

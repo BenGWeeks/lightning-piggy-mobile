@@ -36,5 +36,6 @@ export const createMyOrderRowStyles = (colors: Palette) =>
     total: { flexShrink: 1, fontSize: 14, fontWeight: '700', color: colors.textHeader },
     items: { fontSize: 13, color: colors.textBody },
     bottomLine: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 },
+    expiredNote: { fontSize: 13, color: colors.textSupplementary },
     date: { fontSize: 12, color: colors.textSupplementary },
   });

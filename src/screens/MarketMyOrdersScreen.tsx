@@ -1,3 +1,4 @@
+import OrderStatusChip from '../components/OrderStatusChip';
 import OrderStatusFilter from '../components/OrderStatusFilter';
 import { useOrderStatusFilter } from '../hooks/useOrderStatusFilter';
 import { PREFERRED_SELLERS_ACCOUNT } from '../services/marketPreferredSellers';
@@ -116,7 +117,10 @@ const MarketMyOrdersScreen: React.FC<Props> = ({ navigation, route }) => {
               <Text style={styles.emptyText}>
                 {orderItemsSummary(selected.order.items, titles[selected.orderId], previews)}
               </Text>
-              <Text style={styles.emptyText}>{t(`orderStatus.${selected.status}`)}</Text>
+              <OrderStatusChip status={selected.status} />
+              {selected.status === 'invoiceExpired' ? (
+                <Text style={styles.emptyText}>{t('myOrders.askForNewInvoice')}</Text>
+              ) : null}
               {selected.paymentRequest ? (
                 <OrderPaymentActions
                   order={selected.paymentRequest}

@@ -3535,7 +3535,8 @@
     "open": "Rendeléseim",
     "openWithPayNow": "Rendeléseim – {{invoices}} fizetendő",
     "viewAll": "Rendeléseim megtekintése",
-    "rowA11y": "Rendelés tőle: {{seller}}: {{items}}. {{status}}"
+    "rowA11y": "Rendelés tőle: {{seller}}: {{items}}. {{status}}",
+    "askForNewInvoice": "Kérj új számlát az eladótól"
   },
   "orderStatus": {
     "awaitingInvoice": "Számlára vár",
@@ -3547,7 +3548,8 @@
     "needsInvoice": "Számla szükséges",
     "invoiceSent": "Fizetésre vár",
     "all": "Összes",
-    "empty": "Nincs ilyen állapotú rendelés."
+    "empty": "Nincs ilyen állapotú rendelés.",
+    "invoiceExpired": "A számla lejárt"
   },
   "sellerActivity": {
     "settings": "Hozzászólások és értékelések a hirdetéseimen",
@@ -3611,6 +3613,7 @@
       "remember": "Megjegyzés a boltomhoz",
       "choose": "Válassz tárcát",
       "saveFailed": "Nem sikerült menteni a tárcaválasztást."
-    }
+    },
+    "sendNewInvoice": "Új számla küldése"
   }
 }

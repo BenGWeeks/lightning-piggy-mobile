@@ -28,6 +28,7 @@ export function useShopOrders(titles: ReadonlyMap<string, string>): {
   orders: ShopOrder[] | null;
   threads: ReadonlyMap<string, SellerOrderThread>;
   paidKeys: ReadonlySet<string>;
+  invoices: Readonly<Record<string, SellerInvoiceRecord>>;
 } {
   const { pubkey } = useNostr();
   const [state, setState] = useState<{
@@ -107,5 +108,5 @@ export function useShopOrders(titles: ReadonlyMap<string, string>): {
       ),
     [state.owner, state.invoices, pubkey],
   );
-  return { orders, threads, paidKeys };
+  return { orders, threads, paidKeys, invoices: state.owner === pubkey ? state.invoices : {} };
 }

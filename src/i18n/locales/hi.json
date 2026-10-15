@@ -3535,7 +3535,8 @@
     "open": "मेरे ऑर्डर",
     "openWithPayNow": "मेरे ऑर्डर — {{invoices}} का भुगतान बाकी",
     "viewAll": "मेरे ऑर्डर देखें",
-    "rowA11y": "{{seller}} से ऑर्डर: {{items}}। {{status}}"
+    "rowA11y": "{{seller}} से ऑर्डर: {{items}}। {{status}}",
+    "askForNewInvoice": "विक्रेता से नया इनवॉइस माँगें"
   },
   "orderStatus": {
     "awaitingInvoice": "इनवॉइस की प्रतीक्षा",
@@ -3547,7 +3548,8 @@
     "needsInvoice": "इनवॉइस भेजना है",
     "invoiceSent": "भुगतान की प्रतीक्षा",
     "all": "सभी",
-    "empty": "इस स्थिति में कोई ऑर्डर नहीं है।"
+    "empty": "इस स्थिति में कोई ऑर्डर नहीं है।",
+    "invoiceExpired": "इनवॉइस की समय सीमा समाप्त"
   },
   "sellerActivity": {
     "settings": "मेरी लिस्टिंग पर टिप्पणियाँ और समीक्षाएँ",
@@ -3611,6 +3613,7 @@
       "remember": "मेरी दुकान के लिए याद रखें",
       "choose": "वॉलेट चुनें",
       "saveFailed": "वॉलेट का चुनाव सहेजा नहीं जा सका।"
-    }
+    },
+    "sendNewInvoice": "नया इनवॉइस भेजें"
   }
 }

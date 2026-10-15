@@ -141,7 +141,7 @@ it('opens invoice confirmation when the computed total matches the placed amount
 });
 
 it.each([true, false])(
-  'offers replacement of an expired invoice only with its local wallet record: %s',
+  'offers expired-invoice replacement through confirmation (local record: %s)',
   (hasRecord) => {
     (useSellerInvoice as jest.Mock).mockReturnValue({
       sending: false,
@@ -168,7 +168,12 @@ it.each([true, false])(
         }}
       />,
     );
-    expect(Boolean(ui.queryByTestId('seller-order-send-invoice-x'))).toBe(hasRecord);
+    expect(ui.getByTestId('seller-order-status-x')).toHaveTextContent('orderStatus.invoiceExpired');
+    expect(ui.getByTestId('seller-order-send-invoice-x')).toHaveTextContent(
+      'sellerOrders.sendNewInvoice',
+    );
+    fireEvent.press(ui.getByTestId('seller-order-send-invoice-x'));
+    expect(ui.getByTestId('sheet-open')).toBeTruthy();
   },
 );
 
@@ -211,3 +216,33 @@ it.each([true, false])(
     }
   },
 );
+
+it('keeps payment controls when the buyer received an invoice without a seller self-copy', () => {
+  (useSellerInvoice as jest.Mock).mockReturnValue({
+    record: { bolt11: 'persisted-invoice', paymentHash: 'h', amountSats: 4200 },
+    sending: false,
+    checking: false,
+    checkPaid: jest.fn(),
+    sendInvoice: jest.fn(),
+    markPaid: jest.fn(),
+  });
+  const placed = { ...order(), amountSats: 4200 };
+  const ui = render(
+    <SellerOrderPanel
+      order={placed}
+      buyerPubkey={'b'.repeat(64)}
+      id="x"
+      thread={{
+        placed,
+        orderId: 'o-1',
+        role: 'seller',
+        placedAt: 1,
+        cancelled: false,
+        invoices: [],
+      }}
+    />,
+  );
+  expect(ui.getByTestId('seller-order-status-x')).toHaveTextContent('orderStatus.invoiceSent');
+  expect(ui.queryByTestId('seller-order-send-invoice-x')).toBeNull();
+  expect(ui.getByTestId('seller-order-check-paid-x')).toBeTruthy();
+});

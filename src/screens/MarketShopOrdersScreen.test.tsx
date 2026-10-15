@@ -6,6 +6,8 @@ import { sellerOrderThreads, type SellerOrderThread } from '../utils/shopOrderSt
 import { serializeOrder } from '../utils/orderEvents';
 import SellerOrderPanel from '../components/SellerOrderPanel';
 
+jest.mock('@react-navigation/native', () => ({ useFocusEffect: jest.fn() }));
+
 jest.mock('../contexts/ThemeContext', () => ({
   useThemeColors: () => new Proxy({}, { get: () => '#000' }),
 }));
@@ -20,7 +22,12 @@ jest.mock('../hooks/useSellerShop', () => ({
   useSellerShop: () => ({ snapshot: { listings: [] } }),
 }));
 jest.mock('../hooks/useShopOrders', () => ({
-  useShopOrders: () => ({ orders: mockOrders, threads: mockThreads, paidKeys: new Set() }),
+  useShopOrders: () => ({
+    orders: mockOrders,
+    threads: mockThreads,
+    paidKeys: new Set(),
+    invoices: {},
+  }),
 }));
 jest.mock('../hooks/useBuyerProfiles', () => ({ useBuyerProfiles: () => mockProfiles }));
 jest.mock('../components/SellerOrderPanel', () => jest.fn(() => null));

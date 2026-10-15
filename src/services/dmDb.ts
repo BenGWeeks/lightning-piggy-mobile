@@ -462,7 +462,7 @@ export const SHOP_ORDER_ROW_LIMIT = 500;
 
 /**
  * Seller history is bounded by the newest incoming placed orders. Retrieve
- * the latest row per lifecycle type/direction for those buyer/order pairs.
+ * the first placed order and latest row per lifecycle type/direction for those buyer/order pairs.
  * At most twelve rows per order reach the seller screen, even for legacy floods;
  * updates and receipts cannot push the placed order or invoice out of the list.
  * The caller keeps only orders for the seller's own listings.
@@ -487,7 +487,10 @@ export async function getShopOrderRows(
         json_extract(${content}, '$.type'), from_me,
         CASE WHEN json_extract(${content}, '$.type') = 'status'
           AND json_extract(${content}, '$.status') = 'cancelled' THEN 1 ELSE 0 END
-      ORDER BY created_at DESC, event_id DESC
+      ORDER BY
+        CASE WHEN json_extract(${content}, '$.type') = 'order' THEN created_at END ASC,
+        CASE WHEN json_extract(${content}, '$.type') = 'order' THEN event_id END ASC,
+        created_at DESC, event_id DESC
     ) AS lifecycle_rank FROM dm_messages
       WHERE owner = ? AND wire_kind IN (16, 17)
         AND EXISTS (

@@ -3535,7 +3535,8 @@
     "open": "我的订单",
     "openWithPayNow": "我的订单——{{invoices}} 笔待付款",
     "viewAll": "查看我的订单",
-    "rowA11y": "来自 {{seller}} 的订单：{{items}}。{{status}}"
+    "rowA11y": "来自 {{seller}} 的订单：{{items}}。{{status}}",
+    "askForNewInvoice": "请卖家提供新发票"
   },
   "orderStatus": {
     "awaitingInvoice": "等待发票",
@@ -3547,7 +3548,8 @@
     "needsInvoice": "待开发票",
     "invoiceSent": "等待付款",
     "all": "全部",
-    "empty": "没有此状态的订单。"
+    "empty": "没有此状态的订单。",
+    "invoiceExpired": "发票已过期"
   },
   "sellerActivity": {
     "settings": "我的商品的评论和评价",
@@ -3611,6 +3613,7 @@
       "remember": "为我的店铺记住",
       "choose": "选择钱包",
       "saveFailed": "无法保存所选钱包。"
-    }
+    },
+    "sendNewInvoice": "发送新发票"
   }
 }

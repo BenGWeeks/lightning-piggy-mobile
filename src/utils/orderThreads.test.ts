@@ -174,7 +174,8 @@ describe('buyerOrderEntries', () => {
     ];
     const conversations = new Map([[SELLER, rows]]);
     const entries = buyerOrderEntries(conversations);
-    expect(entries[0]).toMatchObject({ status: 'awaitingInvoice', jumpToRowId: 'r10' });
+    expect(entries[0]).toMatchObject({ status: 'invoiceExpired', jumpToRowId: 'r10' });
+    expect(entries[0].paymentRequest).toBeUndefined();
     expect(payNowCount(entries)).toBe(0);
     // Expiry does not undo a settled payment.
     expect(buyerOrderEntries(conversations, () => true)[0].status).toBe('paid');
@@ -186,7 +187,7 @@ describe('buyerOrderEntries', () => {
       'payNow',
     );
     const entries = buyerOrderEntries(conversations, undefined, (NOW + 3600) * 1000);
-    expect(entries[0]).toMatchObject({ status: 'awaitingInvoice', jumpToRowId: 'r10' });
+    expect(entries[0]).toMatchObject({ status: 'invoiceExpired', jumpToRowId: 'r10' });
     expect(payNowCount(entries)).toBe(0);
   });
 
@@ -282,4 +283,22 @@ describe('buyerOrderEntries', () => {
     expect(grouped.get(SELLER)).toHaveLength(2);
     expect(grouped.get('x')).toHaveLength(1);
   });
+});
+
+it('returns to Pay now when an expired invoice is replaced at the approved amount', () => {
+  const expired = row(false, 20, {
+    type: 'payment',
+    payment: { method: 'lightning', value: bolt11('lnbc21u', NOW - 3600) },
+  });
+  const replacement = { ...invoice(false), createdAt: 30, id: 'replacement' };
+  const entries = buyerOrderEntries(new Map([[SELLER, [placed(true), expired, replacement]]]));
+  expect(entries[0]).toMatchObject({
+    status: 'payNow',
+    jumpToRowId: 'replacement',
+    paymentRequest: { payment: { value: BOLT11 } },
+  });
+  expect(payNowCount(entries)).toBe(1);
+  const current = orderThreads([placed(true), replacement], 'buyer').get('o-1')!;
+  expect(buyerOrderStatus(current, { nowMs: (NOW + 3600) * 1000 - 1 })).toBe('payNow');
+  expect(buyerOrderStatus(current, { nowMs: (NOW + 3600) * 1000 })).toBe('invoiceExpired');
 });

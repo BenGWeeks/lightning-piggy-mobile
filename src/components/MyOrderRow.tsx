@@ -97,6 +97,9 @@ function MyOrderRow({
           {itemsSummary}
         </Text>
         <OrderItemThumbnails items={items} orderId={entry.orderId} />
+        {entry.status === 'invoiceExpired' ? (
+          <Text style={styles.expiredNote}>{t('myOrders.askForNewInvoice')}</Text>
+        ) : null}
         <View style={styles.bottomLine}>
           <OrderStatusChip status={entry.status} testID={`my-order-status-${id8}`} />
           <Text style={styles.date}>{date}</Text>

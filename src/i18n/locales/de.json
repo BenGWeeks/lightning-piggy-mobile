@@ -3535,7 +3535,8 @@
     "open": "Meine Bestellungen",
     "openWithPayNow": "Meine Bestellungen – {{invoices}} zu bezahlen",
     "viewAll": "Meine Bestellungen ansehen",
-    "rowA11y": "Bestellung bei {{seller}}: {{items}}. {{status}}"
+    "rowA11y": "Bestellung bei {{seller}}: {{items}}. {{status}}",
+    "askForNewInvoice": "Bitte den Verkäufer um eine neue Rechnung"
   },
   "orderStatus": {
     "awaitingInvoice": "Warte auf Rechnung",
@@ -3547,7 +3548,8 @@
     "needsInvoice": "Rechnung fällig",
     "invoiceSent": "Warte auf Zahlung",
     "all": "Alle",
-    "empty": "Keine Bestellungen mit diesem Status."
+    "empty": "Keine Bestellungen mit diesem Status.",
+    "invoiceExpired": "Rechnung abgelaufen"
   },
   "sellerActivity": {
     "settings": "Kommentare & Bewertungen zu meinen Angeboten",
@@ -3611,6 +3613,7 @@
       "remember": "Für meinen Shop merken",
       "choose": "Wallet wählen",
       "saveFailed": "Die Wallet-Auswahl konnte nicht gespeichert werden."
-    }
+    },
+    "sendNewInvoice": "Neue Rechnung senden"
   }
 }

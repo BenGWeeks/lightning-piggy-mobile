@@ -128,21 +128,17 @@ function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.Reac
     : (record?.paymentHash ?? null);
   const receiptVerified = thread ? receiptProvesPayment(thread, invoiceHash) : false;
   const walletPaid = Boolean(record?.paidAt);
-  const status = thread
-    ? shopOrderStatus(thread, { walletPaid, receiptVerified })
-    : record
-      ? walletPaid
-        ? 'paid'
-        : 'invoiceSent'
-      : 'needsInvoice';
+  const status = shopOrderStatus(thread, {
+    walletPaid,
+    receiptVerified,
+    nowMs: now,
+    invoiceRecord: record ?? undefined,
+  });
   const confirmedSent =
     Boolean(record?.confirmedAt) || (thread?.status !== undefined && CONFIRMED.has(thread.status));
   const canReplace =
-    status === 'invoiceSent' &&
-    Boolean(record) &&
-    (!thread?.invoice || thread.invoice.bolt11 === record?.bolt11) &&
-    expiresAt !== null &&
-    expiresAt * 1000 <= now;
+    status === 'invoiceExpired' &&
+    (!record || !thread?.invoice || thread.invoice.bolt11 === record.bolt11);
   const canRetry =
     status === 'invoiceSent' &&
     Boolean(record?.deliveryPending) &&
@@ -288,11 +284,15 @@ function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.Reac
             }}
             disabled={invoiceBlocked}
             accessibilityRole="button"
-            accessibilityLabel={t('sellerOrders.sendInvoice')}
+            accessibilityLabel={t(
+              canReplace ? 'sellerOrders.sendNewInvoice' : 'sellerOrders.sendInvoice',
+            )}
             testID={`seller-order-send-invoice-${id}`}
           >
             <Zap size={14} color={colors.white} strokeWidth={2.5} fill={colors.white} />
-            <Text style={styles.primaryButtonText}>{t('sellerOrders.sendInvoice')}</Text>
+            <Text style={styles.primaryButtonText}>
+              {t(canReplace ? 'sellerOrders.sendNewInvoice' : 'sellerOrders.sendInvoice')}
+            </Text>
           </TouchableOpacity>
         ) : null}
         {status === 'invoiceSent' && record ? (

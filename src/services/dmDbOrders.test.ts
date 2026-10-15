@@ -172,3 +172,35 @@ it('retains cancellation even when later status updates arrive', async () => {
     'incoming',
   ]);
 });
+
+it('retains the earliest placed goods when a buyer resends a paid order id', async () => {
+  const put = (id: string, at: number, amountSats: number, quantity: number, address: string) => {
+    mockDb.prepare('INSERT INTO dm_messages VALUES (?, ?, ?, ?, ?, ?, ?, 16)').run(
+      'seller',
+      id,
+      'buyer',
+      at,
+      'buyer',
+      serializeOrder({
+        kind: 16,
+        type: 'order',
+        orderId: 'purchase',
+        message: address,
+        amountSats,
+        items: [{ ref: '30402:seller:goods', quantity }],
+      }),
+      0,
+    );
+  };
+  put('original', 1, 21, 1, 'Original address');
+  insert('invoice', 'purchase', '2', 2, 'buyer', 'seller', true);
+  insert('confirmed', 'purchase', '3', 3, 'buyer', 'seller', true);
+  put('resend', 4, 210, 10, 'Changed address');
+  const rows = await getShopOrderRows('seller');
+  expect(rows.map((row) => row.eventId)).toEqual(['confirmed', 'invoice', 'original']);
+  expect(JSON.parse(rows[2].content)).toMatchObject({
+    amountSats: 21,
+    items: [{ quantity: 1 }],
+    message: 'Original address',
+  });
+});

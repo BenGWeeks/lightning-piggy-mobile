@@ -3535,7 +3535,8 @@
     "open": "My orders",
     "openWithPayNow": "My orders — {{invoices}} to pay",
     "viewAll": "View my orders",
-    "rowA11y": "Order from {{seller}}: {{items}}. {{status}}"
+    "rowA11y": "Order from {{seller}}: {{items}}. {{status}}",
+    "askForNewInvoice": "Ask the seller for a new invoice"
   },
   "orderStatus": {
     "awaitingInvoice": "Awaiting invoice",
@@ -3547,7 +3548,8 @@
     "needsInvoice": "Needs invoice",
     "invoiceSent": "Awaiting payment",
     "all": "All",
-    "empty": "No orders match this status."
+    "empty": "No orders match this status.",
+    "invoiceExpired": "Invoice expired"
   },
   "sellerActivity": {
     "settings": "Comments & reviews on my listings",
@@ -3611,6 +3613,7 @@
       "remember": "Remember for my shop",
       "choose": "Choose a wallet",
       "saveFailed": "Couldn't save the wallet choice."
-    }
+    },
+    "sendNewInvoice": "Send new invoice"
   }
 }

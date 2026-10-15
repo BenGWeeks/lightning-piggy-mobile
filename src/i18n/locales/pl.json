@@ -3589,7 +3589,8 @@
     "open": "Moje zamówienia",
     "openWithPayNow": "Moje zamówienia — do zapłaty: {{invoices}}",
     "viewAll": "Zobacz moje zamówienia",
-    "rowA11y": "Zamówienie u {{seller}}: {{items}}. {{status}}"
+    "rowA11y": "Zamówienie u {{seller}}: {{items}}. {{status}}",
+    "askForNewInvoice": "Poproś sprzedawcę o nową fakturę"
   },
   "orderStatus": {
     "awaitingInvoice": "Czeka na fakturę",
@@ -3601,7 +3602,8 @@
     "needsInvoice": "Wymaga faktury",
     "invoiceSent": "Czeka na płatność",
     "all": "Wszystkie",
-    "empty": "Brak zamówień z tym statusem."
+    "empty": "Brak zamówień z tym statusem.",
+    "invoiceExpired": "Faktura wygasła"
   },
   "sellerActivity": {
     "settings": "Komentarze i recenzje moich ofert",
@@ -3665,6 +3667,7 @@
       "remember": "Zapamiętaj dla mojego sklepu",
       "choose": "Wybierz portfel",
       "saveFailed": "Nie udało się zapisać wyboru portfela."
-    }
+    },
+    "sendNewInvoice": "Wyślij nową fakturę"
   }
 }
