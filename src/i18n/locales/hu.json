@@ -627,6 +627,7 @@
   "imageGallery": {
     "open": "Kép megnyitása",
     "position": "{{current}}. kép / {{total}}",
+    "showImage": "{{current}}. kép megjelenítése (összesen {{total}})",
     "openHint": "Teljes képernyőn megnyitja a képet"
   },
   "gifPickerSheet": {

@@ -627,6 +627,7 @@
   "imageGallery": {
     "open": "चित्र खोलें",
     "position": "चित्र {{current}} / {{total}}",
+    "showImage": "{{total}} में से चित्र {{current}} दिखाएँ",
     "openHint": "चित्र को पूर्ण स्क्रीन में खोलता है"
   },
   "gifPickerSheet": {
