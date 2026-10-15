@@ -73,7 +73,7 @@ export default function InvitationKeysScreen() {
             testID="invitation-keys-retry-publish"
             style={[styles.link, disabled && styles.disabled]}
             disabled={disabled}
-            onPress={state.refresh}
+            onPress={state.retryPublication}
           >
             <Text style={styles.linkText}>{t('invitationKeys.refresh')}</Text>
           </TouchableOpacity>

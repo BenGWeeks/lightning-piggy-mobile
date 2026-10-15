@@ -210,7 +210,7 @@ export class MarmotSession {
     if (invites && !this.gate.stopped) publishFailedMarmotInvites(this.pubkey, invites);
   });
   private readonly gate = fence.createStopGate();
-  private readonly acceptedKeyPackages = new Set<string>();
+  private readonly acceptedKeyPackages = new Map<string, string[]>();
   private readonly refreshes = new KeyPackageRefreshRequests();
   private readonly replenisher = new KeyPackageReplenisher(() => this.ensureKeyPackage());
   /** Each chat's devices per person (#1267) — read-only over group state. */
@@ -460,6 +460,7 @@ export class MarmotSession {
         client: CLIENT_NAME,
         isUpToDate: refresh.forced ? () => false : advertisesMediaV2,
         wasAccepted: (id) => this.acceptedKeyPackages.has(id),
+        acceptedRelays: (id) => this.acceptedKeyPackages.get(id) ?? [],
         cancelled,
       });
       refresh.settle(outcome === 'published');

@@ -89,8 +89,8 @@ export async function loadInvitationKeys(
     ? [TEST_RELAY_URL]
     : [
         ...new Set([
-          ...(keyList ? parseKeyPackageRelayList(keyList.tags) : []),
           ...MARMOT_KEY_PACKAGE_RELAYS,
+          ...(keyList ? parseKeyPackageRelayList(keyList.tags) : []),
           ...(latest ? relayListFromTags(latest.tags).map((r) => r.url) : []),
           ...lookup,
         ]),

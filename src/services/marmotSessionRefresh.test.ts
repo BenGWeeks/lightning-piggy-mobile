@@ -31,15 +31,16 @@ const RELAY = 'wss://relay.test';
 function makeRelay() {
   const events: NostrEvent[] = [];
   const asArray = (f: Filter | Filter[]) => (Array.isArray(f) ? f : [f]);
-  const state = { accept: true, gate: Promise.resolve() };
+  const state = { accept: true, acceptList: true, gate: Promise.resolve() };
   return {
     events,
     state,
     network: {
       async publish(relays: string[], event: NostrEvent) {
         if (event.kind === 30443) await state.gate;
-        if (state.accept) events.push(event);
-        return Object.fromEntries(relays.map((r) => [r, { from: r, ok: state.accept }]));
+        const ok = state.accept && (event.kind !== 10051 || state.acceptList);
+        if (ok) events.push(event);
+        return Object.fromEntries(relays.map((r) => [r, { from: r, ok }]));
       },
       async request(_relays: string[], filters: Filter | Filter[]) {
         return asArray(filters).flatMap((f) => events.filter((e) => matchFilters([f], e)));
@@ -147,4 +148,21 @@ describe('MarmotSession.refreshInvitationKey', () => {
     await expect(refreshed).rejects.toThrow('stopped');
     await expect(session.refreshInvitationKey()).resolves.toBe(false);
   }, 30_000);
+});
+
+test('maintenance retries a failed list without rotating its accepted key', async () => {
+  const relay = makeRelay();
+  relay.state.acceptList = false;
+  const { session } = makeSession(relay);
+  try {
+    await session.ensureKeyPackage();
+    const [key] = keyPackages(relay);
+    expect(key).toBeDefined();
+    relay.state.acceptList = true;
+    await session.ensureKeyPackage();
+    expect(keyPackages(relay)).toEqual([key]);
+    expect(relay.events.filter((e) => e.kind === 10051)).toHaveLength(1);
+  } finally {
+    session.stop();
+  }
 });

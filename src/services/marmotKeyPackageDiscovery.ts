@@ -5,7 +5,7 @@ import type { Event as NostrEvent } from 'nostr-tools';
 
 import { isTestRelayLockdown, TEST_RELAY_URL } from '../config/testRelayLockdown';
 import { RELAY_LIST_INDEXERS } from '../utils/relayListEvents';
-import { selectHealthyRelays } from './relayHealth';
+import { publishWithReceipt } from './marmotPublicationReceipt';
 import {
   currentKeyPackage,
   maintainKeyPackage,
@@ -19,11 +19,15 @@ import {
 } from './marmotKeyPackageRelays';
 import type { MarmotKvBackend } from './marmotStore';
 
+interface DiscoveryOptions extends MaintainKeyPackageOptions {
+  acceptedRelays?: (eventId: string) => string[];
+}
+
 export async function maintainDiscoverableKeyPackage(
   client: Pick<MarmotClient, 'keyPackages' | 'network' | 'signer'>,
   backend: MarmotKvBackend,
   owner: string,
-  opts: MaintainKeyPackageOptions,
+  opts: DiscoveryOptions,
 ): Promise<'published' | 'unchanged' | 'failed'> {
   try {
     const outcome = await maintainDiscovery(client, backend, owner, opts);
@@ -40,7 +44,7 @@ async function maintainDiscovery(
   client: Pick<MarmotClient, 'keyPackages' | 'network' | 'signer'>,
   backend: MarmotKvBackend,
   owner: string,
-  opts: MaintainKeyPackageOptions,
+  opts: DiscoveryOptions,
 ): Promise<'published' | 'unchanged' | 'failed'> {
   const relays = keyPackagePublishRelays(owner, opts.relays);
   // Include copies of older signed keys in sign-out retirement, whose
@@ -62,19 +66,19 @@ async function maintainDiscovery(
   if (!event || opts.cancelled?.()) return 'failed';
   const namespace = 'keyPackageDiscovery';
   const fingerprint = JSON.stringify([...relays].sort());
-  const receipt = `${event.id}:${fingerprint}`;
-  const publish = async (targets: string[], signed: NostrEvent) => {
-    if (opts.cancelled?.()) throw new Error('marmot: discovery cancelled');
-    const result = await client.network.publish(selectHealthyRelays(targets), signed);
-    if (opts.cancelled?.()) throw new Error('marmot: discovery cancelled');
-    if (!Object.values(result).some((r) => r.ok)) throw new Error('marmot: discovery not accepted');
-  };
-  if ((await backend.get(namespace, 'key')) !== receipt) {
-    // create() already published a fresh key to these relays. An unchanged
-    // key on upgrade/relay edits only needs copying, never another signature.
-    if (outcome !== 'published') await publish(relays, event);
-    await backend.set(namespace, 'key', receipt);
-  }
+  const publish = (targets: string[], signed: NostrEvent, key: string, fresh = false) =>
+    publishWithReceipt({
+      network: client.network,
+      backend,
+      key,
+      event: signed,
+      targets,
+      initial: fresh ? opts.acceptedRelays?.(signed.id) : [],
+      alreadyAttempted: fresh,
+      cancelled: opts.cancelled,
+    });
+  const keyComplete = await publish(relays, event, 'keyAcks', outcome === 'published');
+  let listComplete = true;
   const previousList = await backend.get(namespace, 'list');
   if (previousList !== fingerprint) {
     const pending = await backend.get(namespace, 'pendingList');
@@ -96,7 +100,7 @@ async function maintainDiscovery(
       await backend.set(namespace, 'timestamp', String(signed.created_at));
       await backend.set(namespace, 'pendingList', JSON.stringify(signed));
     }
-    await publish(
+    listComplete = await publish(
       isTestRelayLockdown(owner)
         ? [TEST_RELAY_URL]
         : [
@@ -107,8 +111,9 @@ async function maintainDiscovery(
             ]),
           ],
       signed,
+      'listAcks',
     );
-    await backend.set(namespace, 'list', fingerprint);
+    if (listComplete) await backend.set(namespace, 'list', fingerprint);
   }
-  return outcome;
+  return keyComplete && listComplete ? outcome : 'failed';
 }

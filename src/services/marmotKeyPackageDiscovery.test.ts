@@ -43,6 +43,7 @@ function setup() {
     slot: 'slot',
     client: 'test',
     isUpToDate: () => true,
+    acceptedRelays: () => ['wss://own.example', ...MARMOT_KEY_PACKAGE_RELAYS],
   };
   return { backend, client, publish, signEvent, opts };
 }
@@ -178,4 +179,30 @@ it('checks cancellation after storage waits before asking a signer', async () =>
     }),
   ).rejects.toThrow('cancelled');
   expect(t.signEvent).not.toHaveBeenCalled();
+});
+
+it('advertises accepted keys while retaining partial receipts for later retries', async () => {
+  const t = setup();
+  let recovered = false;
+  t.publish.mockImplementation(async (relays) =>
+    Object.fromEntries(
+      relays.map((r) => [r, { from: r, ok: !r.includes('us.whitenoise') || recovered }]),
+    ),
+  );
+  await expect(maintainDiscoverableKeyPackage(t.client, t.backend, owner, t.opts)).resolves.toBe(
+    'failed',
+  );
+  expect(t.publish.mock.calls.map((c) => c[1].kind)).toEqual([30443, 10051]);
+  expect(await t.backend.get('keyPackageDiscovery', 'list')).toBeNull();
+  recovered = true;
+  await expect(maintainDiscoverableKeyPackage(t.client, t.backend, owner, t.opts)).resolves.toBe(
+    'unchanged',
+  );
+  expect(t.publish.mock.calls.slice(2).map((c) => c[0])).toEqual([
+    ['wss://relay.us.whitenoise.chat'],
+    ['wss://relay.us.whitenoise.chat'],
+  ]);
+  expect(t.signEvent).toHaveBeenCalledTimes(1);
+  await maintainDiscoverableKeyPackage(t.client, t.backend, owner, t.opts);
+  expect(t.publish).toHaveBeenCalledTimes(4);
 });

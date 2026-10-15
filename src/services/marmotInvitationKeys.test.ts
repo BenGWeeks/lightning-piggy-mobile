@@ -225,3 +225,28 @@ test('inventory discovers 10051 destinations and exposes local publication failu
   expect(fetch.mock.calls.some(([rs]) => rs.includes('wss://key-package.example'))).toBe(true);
   expect(fetch.mock.calls.some(([rs]) => rs.includes('wss://relay.eu.whitenoise.chat'))).toBe(true);
 });
+
+test('reserves inventory slots for well-known relays with an oversized 10051', async () => {
+  const fetch = jest.fn(async (_relays: string[], filter) =>
+    filter.kinds.includes(10051)
+      ? [
+          {
+            ...event('list'),
+            kind: 10051,
+            tags: Array.from({ length: 20 }, (_, i) => ['relay', `wss://owner${i}.example`]),
+          },
+        ]
+      : [],
+  );
+  const result = await loadInvitationKeys(owner, [], fetch);
+  const targets = fetch.mock.calls.filter(([, f]) => f.kinds[0] === 30443).flatMap(([rs]) => rs);
+  expect(targets).toHaveLength(12);
+  expect(targets).toEqual(
+    expect.arrayContaining([
+      'wss://relay.eu.whitenoise.chat',
+      'wss://relay.us.whitenoise.chat',
+      'wss://relay.primal.net',
+    ]),
+  );
+  expect(result.partial).toBe(true);
+});
