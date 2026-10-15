@@ -38,7 +38,7 @@ const MessageSharedListing: React.FC<{
         sellerName={product.sellerName}
         onPress={open}
         variant="list"
-        autoLoadMedia={true}
+        autoLoadMedia={autoLoadMedia}
         testID="message-shared-listing-product"
       />
     );

@@ -34,7 +34,7 @@ it('keeps a titled product placeholder while loading or unavailable', () => {
   expect(ui.getByText('market.share.marketListing')).toBeTruthy();
 });
 it.each([true, false])(
-  'uses the product card and gates relay hints by sender trust (%s)',
+  'uses the product card and gates images and relay hints by sender trust (%s)',
   (trusted) => {
     jest
       .mocked(useSharedListing)
@@ -44,6 +44,6 @@ it.each([true, false])(
       ...token,
       relays: trusted ? token.relays : [],
     });
-    expect(ui.getByTestId('message-shared-listing-product').props.autoLoadMedia).toBe(true);
+    expect(ui.getByTestId('message-shared-listing-product').props.autoLoadMedia).toBe(trusted);
   },
 );
