@@ -47,15 +47,20 @@ test('avatar initials and name both open the sender profile', () => {
   expect(props.onOpenSender).toHaveBeenNthCalledWith(2, props.senderPubkey);
 });
 
-test('uses cached expo-image and falls back to initials on an image error', () => {
-  const ui = render(<GroupMessageRow {...props} senderPicture="https://example.com/photo.png" />);
-  const image = ui.UNSAFE_getByType(Image);
-  expect(image.props.cachePolicy).toBe('memory-disk');
-  expect(image.props.autoplay).toBe(false);
-  fireEvent(image, 'error');
-  expect(ui.getByText('CF')).toBeTruthy();
-  expect(ui.UNSAFE_queryByType(Image)).toBeNull();
-});
+test.each([null, 'https://example.com/photo.svg'])(
+  'uses a supported sender avatar when the resolved picture is %p, then initials on failure',
+  (resolvedPicture) => {
+    jest.mocked(useMentionProfile).mockReturnValue({ name: null, picture: resolvedPicture });
+    const ui = render(<GroupMessageRow {...props} senderPicture="https://example.com/photo.png" />);
+    const image = ui.UNSAFE_getByType(Image);
+    expect(image.props.source).toEqual({ uri: 'https://example.com/photo.png' });
+    expect(image.props.cachePolicy).toBe('memory-disk');
+    expect(image.props.autoplay).toBe(false);
+    fireEvent(image, 'error');
+    expect(ui.getByText('CF')).toBeTruthy();
+    expect(ui.UNSAFE_queryByType(Image)).toBeNull();
+  },
+);
 
 test.each([{ showSender: false }, { fromMe: true }])(
   'omits sender controls for repeated or outgoing messages: %o',

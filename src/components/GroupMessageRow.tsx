@@ -32,7 +32,8 @@ const GroupMessageRow = React.memo(function GroupMessageRow({
       : null;
   const profile = useMentionProfile(senderPubkey, memberProfile);
   const name = profile.name || senderName || shortNpubLabel(senderPubkey);
-  const avatar = profile.picture || senderPicture;
+  const avatar =
+    profile.picture && isSupportedImageUrl(profile.picture) ? profile.picture : senderPicture;
   const colors = useThemeColors();
   const styles = useMemo(() => createGroupMessageRowStyles(colors), [colors]);
   const [failedPicture, setFailedPicture] = useState<string | null>(null);
