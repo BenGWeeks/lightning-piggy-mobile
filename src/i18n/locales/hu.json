@@ -2875,7 +2875,8 @@
       "payment": "Fizetés",
       "zap": "Zap",
       "cache": "Piglet-találat",
-      "swap": "Swap"
+      "swap": "Swap",
+      "market": "Hirdetési tevékenység"
     }
   },
   "blossomServers": {
@@ -3543,5 +3544,15 @@
     "cancelled": "Lemondva",
     "needsInvoice": "Számla szükséges",
     "invoiceSent": "Számla elküldve"
+  },
+  "sellerActivity": {
+    "settings": "Hozzászólások és értékelések a hirdetéseimen",
+    "generic": "Új hirdetési tevékenység",
+    "listing": "a hirdetésed",
+    "sellerReplied": "Az eladó válaszolt",
+    "reply": "%{name} válaszolt a hozzászólásodra",
+    "comment": "Új hozzászólás: %{title}",
+    "review": "Új értékelés: %{title} ★%{stars}",
+    "replyAction": "Válasz"
   }
 }

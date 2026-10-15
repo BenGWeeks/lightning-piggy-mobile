@@ -1,3 +1,7 @@
+import { useSellerActivityChecks } from '../hooks/useSellerActivityChecks';
+import { resolveActivityListing } from '../services/sellerActivityService';
+import { getCurrentUserReadRelays } from '../services/nostrActiveAccount';
+import { DEFAULT_RELAYS } from '../services/nostrService';
 import { resolveStoredNotificationTarget } from '../services/notificationStoredTarget';
 import { routeNotificationMessage } from '../services/notificationGroupNavigation';
 import { getMarmotSession } from '../services/marmotSession';
@@ -291,6 +295,37 @@ export const navigateFromNotification = (
     });
   }
 
+  if (data.kind === 'market' && data.listingCoord) {
+    if (!getActivePubkey()) return false;
+    if (data.owner && data.owner !== getActivePubkey()) {
+      navigationRef.navigate('Notifications');
+      return true;
+    }
+    const owner = getActivePubkey();
+    const urls = getCurrentUserReadRelays();
+    const controller = new AbortController();
+    void resolveActivityListing(
+      data.listingCoord,
+      urls.length ? urls : DEFAULT_RELAYS,
+      controller.signal,
+    )
+      .then((product) => {
+        if (generation !== notificationNavGeneration || owner !== getActivePubkey()) return;
+        if (product)
+          navigationRef.navigate('ProductDetail', {
+            productId: product.id,
+            product,
+            feedbackTab: data.feedbackTab,
+          });
+        else navigationRef.navigate('Notifications');
+      })
+      .catch(() => {
+        if (generation === notificationNavGeneration && owner === getActivePubkey())
+          navigationRef.navigate('Notifications');
+      });
+    return true;
+  }
+
   // Find-log on one of my caches (#740) → open that cache detail. The
   // background detect-and-ping path passes the sentinel `__background__`
   // coord (it didn't resolve to a specific cache) — fall through to the
@@ -479,6 +514,7 @@ function ExploreStackNavigator() {
 }
 
 function HomeTabs() {
+  useSellerActivityChecks('resume');
   const { colors } = useTheme();
   const t = useTranslation();
   // Reserve the real system-bar inset so the edge-to-edge tab bar clears gesture/3-button nav (see #862).

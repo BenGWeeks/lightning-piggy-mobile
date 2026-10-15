@@ -2875,7 +2875,8 @@
       "payment": "Payment",
       "zap": "Zap",
       "cache": "Piglet find",
-      "swap": "Swap"
+      "swap": "Swap",
+      "market": "Listing activity"
     }
   },
   "blossomServers": {
@@ -3543,5 +3544,15 @@
     "cancelled": "Cancelled",
     "needsInvoice": "Needs invoice",
     "invoiceSent": "Invoice sent"
+  },
+  "sellerActivity": {
+    "settings": "Comments & reviews on my listings",
+    "generic": "New listing activity",
+    "listing": "your listing",
+    "sellerReplied": "Seller replied",
+    "reply": "%{name} replied to your comment",
+    "comment": "New comment on %{title}",
+    "review": "New review on %{title} ★%{stars}",
+    "replyAction": "Reply"
   }
 }

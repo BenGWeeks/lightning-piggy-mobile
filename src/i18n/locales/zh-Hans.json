@@ -2875,7 +2875,8 @@
       "payment": "付款",
       "zap": "打闪",
       "cache": "Piglet寻宝记录",
-      "swap": "兑换"
+      "swap": "兑换",
+      "market": "商品动态"
     }
   },
   "blossomServers": {
@@ -3543,5 +3544,15 @@
     "cancelled": "已取消",
     "needsInvoice": "待开发票",
     "invoiceSent": "发票已发送"
+  },
+  "sellerActivity": {
+    "settings": "我的商品的评论和评价",
+    "generic": "商品有新动态",
+    "listing": "你的商品",
+    "sellerReplied": "卖家已回复",
+    "reply": "%{name} 回复了你的评论",
+    "comment": "%{title} 有新评论",
+    "review": "%{title} 有新评价 ★%{stars}",
+    "replyAction": "回复"
   }
 }

@@ -7,7 +7,7 @@ import { queryCommentDeletions, queryCommentEvents } from '../services/productFe
 import {
   commentRootRef,
   directReplies,
-  topLevelComments,
+  threadedComments,
   type CommentRoot,
 } from '../utils/productComments';
 import { reconcileComments } from '../utils/commentEdits';
@@ -17,7 +17,8 @@ export interface UseProductComments {
   /** Every visible comment in the thread (all depths) — deleted and
    * superseded (edited) versions already removed. */
   allComments: NostrEvent[];
-  /** Comments rooted directly on the product, newest-first. */
+  thread: ReturnType<typeof threadedComments>;
+  /** Thread roots, including replies whose parent is gone, newest-first. */
   topLevel: NostrEvent[];
   /** Direct replies to a given comment id, oldest-first. */
   getDirectReplies: (parentId: string) => NostrEvent[];
@@ -130,16 +131,19 @@ export function useProductComments(root: CommentRoot | null): UseProductComments
     }, [rootRef, readRelays, tick]),
   );
 
+  const ancestry = useMemo(() => [...events, ...localAdded], [events, localAdded]);
   const visible = useMemo(
-    () =>
-      reconcileComments(
-        localAdded.length > 0 ? [...events, ...localAdded] : events,
-        deletions,
-        localHidden,
-      ),
-    [events, localAdded, deletions, localHidden],
+    () => reconcileComments(ancestry, deletions, localHidden),
+    [ancestry, deletions, localHidden],
   );
-  const topLevel = useMemo(() => (root ? topLevelComments(visible, root) : []), [visible, root]);
+  const thread = useMemo(
+    () => (root ? threadedComments(visible, root, ancestry) : []),
+    [visible, root, ancestry],
+  );
+  const topLevel = useMemo(
+    () => thread.filter(({ depth }) => depth === 0).map(({ comment }) => comment),
+    [thread],
+  );
   const getDirectReplies = useCallback(
     (parentId: string) => directReplies(visible, parentId),
     [visible],
@@ -191,6 +195,7 @@ export function useProductComments(root: CommentRoot | null): UseProductComments
 
   return {
     allComments: visible,
+    thread,
     topLevel,
     getDirectReplies,
     loading,

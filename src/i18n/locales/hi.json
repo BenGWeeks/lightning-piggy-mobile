@@ -2875,7 +2875,8 @@
       "payment": "पेमेंट",
       "zap": "ज़ैप",
       "cache": "Piglet मिला",
-      "swap": "स्वैप"
+      "swap": "स्वैप",
+      "market": "लिस्टिंग गतिविधि"
     }
   },
   "blossomServers": {
@@ -3543,5 +3544,15 @@
     "cancelled": "रद्द",
     "needsInvoice": "इनवॉइस भेजना है",
     "invoiceSent": "इनवॉइस भेजा गया"
+  },
+  "sellerActivity": {
+    "settings": "मेरी लिस्टिंग पर टिप्पणियाँ और समीक्षाएँ",
+    "generic": "लिस्टिंग पर नई गतिविधि",
+    "listing": "आपकी लिस्टिंग",
+    "sellerReplied": "विक्रेता ने जवाब दिया",
+    "reply": "%{name} ने आपकी टिप्पणी का जवाब दिया",
+    "comment": "%{title} पर नई टिप्पणी",
+    "review": "%{title} पर नई समीक्षा ★%{stars}",
+    "replyAction": "जवाब दें"
   }
 }

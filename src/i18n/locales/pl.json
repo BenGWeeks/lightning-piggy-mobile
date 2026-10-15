@@ -2895,7 +2895,8 @@
       "payment": "Płatność",
       "zap": "Zap",
       "cache": "Znaleziony Piglet",
-      "swap": "Wymiana"
+      "swap": "Wymiana",
+      "market": "Aktywność w ofercie"
     }
   },
   "blossomServers": {
@@ -3597,5 +3598,15 @@
     "cancelled": "Anulowane",
     "needsInvoice": "Wymaga faktury",
     "invoiceSent": "Faktura wysłana"
+  },
+  "sellerActivity": {
+    "settings": "Komentarze i recenzje moich ofert",
+    "generic": "Nowa aktywność w ofercie",
+    "listing": "Twoja oferta",
+    "sellerReplied": "Sprzedawca odpowiedział",
+    "reply": "%{name} odpowiedział(a) na Twój komentarz",
+    "comment": "Nowy komentarz do %{title}",
+    "review": "Nowa recenzja %{title} ★%{stars}",
+    "replyAction": "Odpowiedz"
   }
 }

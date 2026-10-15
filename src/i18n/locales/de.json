@@ -2875,7 +2875,8 @@
       "payment": "Zahlung",
       "zap": "Zap",
       "cache": "Piglet-Fund",
-      "swap": "Swap"
+      "swap": "Swap",
+      "market": "Angebotsaktivität"
     }
   },
   "blossomServers": {
@@ -3543,5 +3544,15 @@
     "cancelled": "Storniert",
     "needsInvoice": "Rechnung fällig",
     "invoiceSent": "Rechnung gesendet"
+  },
+  "sellerActivity": {
+    "settings": "Kommentare & Bewertungen zu meinen Angeboten",
+    "generic": "Neue Angebotsaktivität",
+    "listing": "dein Angebot",
+    "sellerReplied": "Verkäufer hat geantwortet",
+    "reply": "%{name} hat auf deinen Kommentar geantwortet",
+    "comment": "Neuer Kommentar zu %{title}",
+    "review": "Neue Bewertung für %{title} ★%{stars}",
+    "replyAction": "Antworten"
   }
 }

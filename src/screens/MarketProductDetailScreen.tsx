@@ -352,6 +352,8 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         {preview ? null : feedback ? (
           <View style={styles.feedbackWrap}>
             <ProductFeedbackTabs
+              key={`${feedback.reviewCoord}:${route.params.feedbackTab ?? 'reviews'}`}
+              initialTab={route.params.feedbackTab}
               coord={feedback.reviewCoord}
               commentRoot={feedback.commentRoot}
               onRequestSignIn={onRequestSignIn}

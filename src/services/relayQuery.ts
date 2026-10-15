@@ -29,9 +29,36 @@ export function querySyncAbortable(
     signal?: AbortSignal;
     rejectOnAllRelaysFailure?: boolean;
     rejectOnTimeout?: boolean;
+    /** Collect only completed relay snapshots; callers reuse this set for pagination. */
+    completedRelays?: Set<string>;
   },
 ): Promise<NostrEvent[]> {
   relays = activeAccountRelays(relays);
+  if (params.completedRelays) {
+    const completed = params.completedRelays;
+    completed.clear();
+    return Promise.allSettled(
+      [...new Set(relays)].map(async (relay) => {
+        const events = await querySyncAbortable(pool, [relay], filter, {
+          ...params,
+          completedRelays: undefined,
+          rejectOnAllRelaysFailure: true,
+          rejectOnTimeout: true,
+        });
+        if (params.signal?.aborted) return [];
+        completed.add(relay);
+        return events;
+      }),
+    ).then((results) => {
+      if (!completed.size && !params.signal?.aborted)
+        throw new Error('No relay completed the query');
+      const events = new Map<string, NostrEvent>();
+      for (const result of results)
+        if (result.status === 'fulfilled')
+          for (const event of result.value) events.set(event.id, event);
+      return [...events.values()];
+    });
+  }
   return new Promise((resolve, reject) => {
     const events: NostrEvent[] = [];
     // SimplePool already de-dupes across relays (`_knownIds`), but this is
@@ -111,7 +138,7 @@ export function querySyncAbortable(
         const allFailed =
           params.rejectOnAllRelaysFailure &&
           !params.signal?.aborted &&
-          events.length === 0 &&
+          (events.length === 0 || params.rejectOnTimeout) &&
           reasons.length > 0 &&
           reasons.every((reason) =>
             /^(?:relay )?connection (?:failed|timed out|closed|skipped by allowConnectingToRelay)$|^websocket closed$|^auth timed out$|^auth was required|(^|:\s*)(?:auth-required|restricted):/i.test(
