@@ -70,7 +70,10 @@ function respondWith(implementation: typeof querySyncAbortable) {
 const cursorKey = `seller_activity_cursor_v1_${owner}`;
 beforeEach(async () => {
   jest.clearAllMocks();
-  jest.mocked(fireNotification).mockImplementation(async () => null);
+  jest.mocked(fireNotification).mockImplementation(async (payload) => {
+    payload.onHistoryRecorded?.();
+    return null;
+  });
   await AsyncStorage.clear();
   mockOwner = owner;
   jest.mocked(fetchSellerEvents).mockResolvedValue([listing]);
@@ -571,6 +574,7 @@ it('retains the newest 200 source events from a 400-comment paginated catch-up',
   // Keep the real bounded history store while avoiding native delivery.
   jest.mocked(fireNotification).mockImplementation(async (payload) => {
     await recordNotification(owner, payload, payload.historyCreatedAt);
+    payload.onHistoryRecorded?.();
     return null;
   });
   await checkSellerActivity(opts());
@@ -606,4 +610,87 @@ it('marks muted comments seen without consuming the quota for unmuted strangers'
   } finally {
     jest.mocked(shouldMuteNotification).mockImplementation(async () => false);
   }
+});
+
+it.each(['blur', 'account switch', 'account removal'])(
+  'retries unrecorded activity after %s during notification checks',
+  async (mode) => {
+    const checkpoint = now - 600;
+    const event = { ...comment('interrupted', stranger), created_at: now - 300 };
+    await AsyncStorage.setItem(
+      cursorKey,
+      JSON.stringify({ lastSeen: checkpoint, seen: [], strangers: {} }),
+    );
+    respondWith(async (_p, _r, f) => (f['#A'] ? [event] : []));
+    const controller = new AbortController();
+    let cancelled: Promise<void> | undefined;
+    jest.mocked(fireNotification).mockImplementationOnce(async (payload) => {
+      if (mode === 'blur') controller.abort();
+      if (mode === 'account switch') mockOwner = friend;
+      if (mode === 'account removal') cancelled = cancelSellerActivity(owner);
+      expect(await payload.mayRecord?.()).toBe(false);
+      return null;
+    });
+    await checkSellerActivity({ ...opts(), signal: controller.signal });
+    await cancelled;
+    expect(JSON.parse((await AsyncStorage.getItem(cursorKey))!)).toEqual({
+      lastSeen: checkpoint,
+      seen: [],
+      strangers: {},
+    });
+    mockOwner = owner;
+    await checkSellerActivity(opts());
+    expect(fireNotification).toHaveBeenCalledTimes(2);
+    const cursor = JSON.parse((await AsyncStorage.getItem(cursorKey))!);
+    expect(cursor.seen).toContain(event.id);
+    expect(Object.values(cursor.strangers)).toEqual([1]);
+  },
+);
+
+it('retains the retry checkpoint when notification history is not recorded', async () => {
+  const checkpoint = now - 600;
+  await AsyncStorage.setItem(
+    cursorKey,
+    JSON.stringify({ lastSeen: checkpoint, seen: [], strangers: {} }),
+  );
+  respondWith(async (_p, _r, f) => (f['#A'] ? [comment('unrecorded', stranger)] : []));
+  jest.mocked(fireNotification).mockImplementationOnce(async () => null);
+  await expect(checkSellerActivity(opts())).rejects.toThrow('history was not recorded');
+  expect(JSON.parse((await AsyncStorage.getItem(cursorKey))!)).toEqual({
+    lastSeen: checkpoint,
+    seen: [],
+    strangers: {},
+  });
+  await checkSellerActivity(opts());
+  expect(fireNotification).toHaveBeenCalledTimes(2);
+});
+
+it('resolves a listing from a healthy relay when another relay is unavailable', async () => {
+  respondWith(async (_p, _r, _f, params) => {
+    params.completedRelays?.delete('wss://offline');
+    return [listing];
+  });
+  const product = await resolveActivityListing(
+    `30402:${owner}:thing`,
+    ['wss://healthy', 'wss://offline'],
+    new AbortController().signal,
+  );
+  expect(product?.title).toBe('Piggy');
+});
+
+it('commits recorded history even if the screen blurs before alert delivery returns', async () => {
+  const controller = new AbortController();
+  const event = comment('recorded-before-blur', stranger);
+  respondWith(async (_p, _r, f) => (f['#A'] ? [event] : []));
+  jest.mocked(fireNotification).mockImplementationOnce(async (payload) => {
+    payload.onHistoryRecorded?.();
+    controller.abort();
+    return null;
+  });
+  await checkSellerActivity({ ...opts(), signal: controller.signal });
+  const cursor = JSON.parse((await AsyncStorage.getItem(cursorKey))!);
+  expect(cursor.seen).toContain(event.id);
+  expect(Object.values(cursor.strangers)).toEqual([1]);
+  await checkSellerActivity(opts());
+  expect(fireNotification).toHaveBeenCalledTimes(1);
 });

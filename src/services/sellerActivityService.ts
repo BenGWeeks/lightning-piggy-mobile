@@ -225,6 +225,7 @@ export async function checkSellerActivity(input: Input): Promise<void> {
               commit();
               continue;
             }
+            let recorded = false;
             await fireNotification({
               kind: 'market',
               title: text,
@@ -234,6 +235,9 @@ export async function checkSellerActivity(input: Input): Promise<void> {
               historyKey: `market:${event.id}`,
               historyCreatedAt: event.created_at * 1000,
               mayRecord,
+              onHistoryRecorded: () => {
+                recorded = true;
+              },
               shouldSuppress: async () =>
                 !current() ||
                 !enabled ||
@@ -241,6 +245,10 @@ export async function checkSellerActivity(input: Input): Promise<void> {
                 (input.onlyFriends && !friend) ||
                 event.created_at < now - (raw ? 86400 : 120),
             });
+            if (!recorded) {
+              if (!current()) return;
+              throw new Error('Seller activity history was not recorded');
+            }
             commit();
             await scheduler.maybeYield();
           }
@@ -279,6 +287,8 @@ export async function resolveActivityListing(coord: string, relays: string[], si
   const events = await query(
     { relays, signal },
     { kinds: [30402], authors: [author], '#d': [parts.join(':')], since: 0, limit: 5 },
+    // A tap can use a completed snapshot even if another relay is unavailable.
+    new Set<string>(),
   );
   const latest = events
     .filter((e) => addressableCoord(e) === coord)

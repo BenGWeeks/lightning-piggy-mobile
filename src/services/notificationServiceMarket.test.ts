@@ -32,7 +32,16 @@ beforeEach(async () => {
 it('checks the history preference gate before recording a market notification', async () => {
   const owner = 'e'.repeat(64);
   const mayRecord = jest.fn(async () => false);
-  await fireNotification({ kind: 'market', title: 'Comment', body: '', owner, mayRecord });
+  const onHistoryRecorded = jest.fn();
+  await fireNotification({
+    kind: 'market',
+    title: 'Comment',
+    body: '',
+    owner,
+    mayRecord,
+    onHistoryRecorded,
+  });
+  expect(onHistoryRecorded).not.toHaveBeenCalled();
   expect(mayRecord).toHaveBeenCalledTimes(1);
   expect(await listNotifications(owner)).toEqual([]);
   expect(mockScheduleNotificationAsync).not.toHaveBeenCalled();
@@ -41,6 +50,7 @@ it('checks the history preference gate before recording a market notification', 
 it('records market history using the source event timestamp', async () => {
   const owner = 'seller-history-owner';
   const historyCreatedAt = Date.now() - 5 * 86400 * 1000;
+  const onHistoryRecorded = jest.fn();
   await fireNotification({
     kind: 'market',
     title: 'Catch-up comment',
@@ -48,9 +58,38 @@ it('records market history using the source event timestamp', async () => {
     owner,
     historyKey: 'market:old-comment',
     historyCreatedAt,
+    onHistoryRecorded,
     shouldSuppress: async () => true,
   });
+  expect(onHistoryRecorded).toHaveBeenCalledTimes(1);
   expect(await listNotifications(owner)).toEqual([
     expect.objectContaining({ key: 'market:old-comment', createdAt: historyCreatedAt }),
   ]);
+});
+
+it('does not confirm history when cancelled during an asynchronous preference check', async () => {
+  const owner = 'cancelled-seller';
+  const controller = new AbortController();
+  let release!: () => void;
+  const onHistoryRecorded = jest.fn();
+  const pending = fireNotification({
+    kind: 'market',
+    title: 'Comment',
+    body: '',
+    owner,
+    onHistoryRecorded,
+    mayRecord: async () => {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return !controller.signal.aborted;
+    },
+  });
+  while (!release) await Promise.resolve();
+  controller.abort();
+  release();
+  expect(await pending).toBeNull();
+  expect(onHistoryRecorded).not.toHaveBeenCalled();
+  expect(await listNotifications(owner)).toEqual([]);
+  expect(mockScheduleNotificationAsync).not.toHaveBeenCalled();
 });

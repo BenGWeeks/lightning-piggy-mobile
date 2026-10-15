@@ -181,6 +181,8 @@ export interface NotificationPayload {
   historyCreatedAt?: number;
   /** Preference/account gate checked before recording any history. */
   mayRecord?: () => Promise<boolean>;
+  /** Called after the history write completes, even when no OS alert is sent. */
+  onHistoryRecorded?: () => void;
   /** Rechecked immediately before scheduling, including durable deletion state. */
   shouldSuppress?: () => Promise<boolean>;
 }
@@ -420,6 +422,7 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
       },
       payload.historyCreatedAt,
     );
+    payload.onHistoryRecorded?.();
     // Same source already shown in the tray: report it as delivered (so the
     // caller doesn't keep retrying) without posting a second entry.
     if (duplicateDelivered) return historyId;
