@@ -1,4 +1,7 @@
 // Execute the real DAL SQL against SQLite, including JSON extraction and limits.
+import { bech32 } from 'bech32';
+import { buyerOrderEntries, groupRowsByConversation } from '../utils/orderThreads';
+import { paymentHashFromBolt11 } from '../utils/bolt11';
 import { DatabaseSync } from 'node:sqlite';
 import { getOrderRows, getShopOrderRows, hasIncomingOrder } from './dmDb';
 import { admitOrderLifecycle } from '../contexts/orderRumorIngest';
@@ -212,4 +215,73 @@ it('returns bounded lifecycle rows with a one-purchase limit after 1,000 merchan
   insert('shipping', 'purchase', '4', 1011);
   const rows = await getOrderRows('buyer', 1);
   expect(rows.map((row) => row.eventId)).toEqual(['shipping', 'invoice', 'update-999', 'placed']);
+});
+
+it('keeps payment correlation for superseded invoices within the selected buyer orders', async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const words = (value: number, length: number) =>
+    Array.from({ length }, (_, i) => Math.floor(value / 32 ** (length - i - 1)) % 32);
+  const invoice = (seed: number, timestamp: number) =>
+    bech32.encode(
+      'lnbc21u',
+      [
+        ...words(timestamp, 7),
+        1,
+        1,
+        20,
+        ...bech32.toWords(Buffer.alloc(32, seed)),
+        ...Array(104).fill(0),
+      ],
+      2000,
+    );
+  const original = invoice(1, now - 7200);
+  const replacement = invoice(2, now);
+  insert('older-purchase', 'old', '1', 1);
+  insert('placed', 'purchase', '1', 2);
+  mockDb.exec(
+    "UPDATE dm_messages SET content = json_set(content, '$.amountSats', 2100) WHERE event_id = 'placed'",
+  );
+  const put = (id: string, value: string, at: number, orderId = 'purchase') => {
+    mockDb.prepare('INSERT INTO dm_messages VALUES (?, ?, ?, ?, ?, ?, ?, 16)').run(
+      'buyer',
+      id,
+      'seller',
+      at,
+      'seller',
+      serializeOrder({
+        kind: 16,
+        type: 'payment',
+        orderId,
+        items: [],
+        message: '',
+        amountSats: 2100,
+        payment: { method: 'lightning', value },
+      }),
+      0,
+    );
+  };
+  put('old-invoice', original, 3);
+  put('replacement', replacement, 4);
+  for (let i = 0; i < 1000; i++) put(`replay-${i}`, replacement, 5 + i);
+  put('excluded-order-invoice', invoice(3, now), 2000, 'old');
+  const rows = await getOrderRows('buyer', 1);
+  expect(rows.map((r) => r.eventId)).toEqual(['replay-999', 'old-invoice', 'placed']);
+  const conversations = groupRowsByConversation(
+    rows.map((r) => ({
+      id: r.eventId,
+      conversation: r.conversation,
+      fromMe: r.fromMe,
+      text: r.content,
+      wireKind: r.wireKind,
+      createdAt: r.createdAt,
+    })),
+  );
+  expect(buyerOrderEntries(conversations)[0].status).toBe('payNow');
+  const paidHash = paymentHashFromBolt11(original);
+  const [paid] = buyerOrderEntries(
+    conversations,
+    (bolt11) => paymentHashFromBolt11(bolt11) === paidHash,
+  );
+  expect(paid.status).toBe('paid');
+  expect(paid.paymentRequest).toBeUndefined();
 });

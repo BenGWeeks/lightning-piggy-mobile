@@ -21,10 +21,30 @@ export function hasInvoiceSettlementProof(
   );
 }
 
+/** LNbits can label expired invoices settled and reuse their creation timestamp. */
+export function needsInvoiceHistoryConfirmation(result: {
+  state?: unknown;
+  created_at?: unknown;
+  settled_at?: unknown;
+}): boolean {
+  return (
+    result.state === undefined ||
+    (result.settled_at !== undefined && result.settled_at === result.created_at)
+  );
+}
+
 /** Fail closed on malformed, contradictory or unrelated wallet responses. */
 export function parseInvoiceSettlement(
   value: unknown,
   paymentHash: string,
+): InvoiceSettlement | null {
+  return parseSettlement(value, paymentHash, false);
+}
+
+function parseSettlement(
+  value: unknown,
+  paymentHash: string,
+  historyConfirmed: boolean,
 ): InvoiceSettlement | null {
   if (!value || typeof value !== 'object') return null;
   const result = value as Record<string, unknown>;
@@ -44,9 +64,8 @@ export function parseInvoiceSettlement(
     settledAt: typeof result.settled_at === 'number' ? result.settled_at : undefined,
     preimage: typeof result.preimage === 'string' ? result.preimage : undefined,
   };
-  // Stateless wallets (notably LNbits) can expose the incoming preimage and
-  // a settlement timestamp for failed/expired invoices. Lookup alone is unknown.
-  if (result.state === undefined) return null;
+  // A preimage, timestamp and even settled state can describe an expired LNbits invoice.
+  if (!historyConfirmed && needsInvoiceHistoryConfirmation(result)) return null;
   const paid = result.state === 'settled' && hasInvoiceSettlementProof(proof, paymentHash);
   // Contradictory settlement claims are unknown, so they cannot authorize
   // replacing the invoice either.
@@ -54,7 +73,7 @@ export function parseInvoiceSettlement(
   return paid ? { paid, invoice, ...proof } : { paid: false, invoice };
 }
 
-/** Confirm a stateless lookup against the wallet's successful incoming history.
+/** Confirm an ambiguous lookup against successful history of the same direction.
  * Absence from a bounded page cannot prove unpaid; keep replacement fail-closed. */
 export function confirmListedInvoiceSettlement(
   lookup: unknown,
@@ -63,20 +82,23 @@ export function confirmListedInvoiceSettlement(
 ): InvoiceSettlement | null {
   if (!lookup || typeof lookup !== 'object' || !Array.isArray(transactions)) return null;
   const raw = lookup as Record<string, unknown>;
-  if (raw.state !== undefined || raw.type !== 'incoming' || raw.error != null) return null;
+  if ((raw.type !== 'incoming' && raw.type !== 'outgoing') || raw.error != null) return null;
+  if (raw.state !== undefined && raw.state !== 'settled') return null;
   for (const value of transactions) {
     if (!value || typeof value !== 'object') continue;
     const tx = value as Record<string, unknown>;
-    if (tx.type !== 'incoming' || (tx.state !== undefined && tx.state !== 'settled')) continue;
-    const listed = parseInvoiceSettlement(
+    if (tx.type !== raw.type || (tx.state !== undefined && tx.state !== 'settled')) continue;
+    const listed = parseSettlement(
       { ...tx, preimage: tx.preimage ?? raw.preimage, state: 'settled' },
       paymentHash,
+      true,
     );
     if (!listed?.paid) continue;
     // Validate lookup hash/invoice/proof as well, using the confirmed timestamp.
-    return parseInvoiceSettlement(
+    return parseSettlement(
       { ...raw, state: 'settled', settled_at: listed.settledAt },
       paymentHash,
+      true,
     );
   }
   return null;

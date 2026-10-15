@@ -424,52 +424,69 @@ describe('raw invoice settlement lookup', () => {
   );
 });
 
-it.each([
-  'absent',
-  'listed',
-  'listed-no-preimage',
-  'unsupported',
-  'wrong-hash',
-  'unsettled',
-  'failed',
-])(
-  'confirms the exact stateless LNbits expired shape against successful history: %s',
-  async (history) => {
-    const response = {
-      type: 'incoming',
-      payment_hash: mockPaymentHash,
-      preimage: 'c'.repeat(64),
-      created_at: 100,
-      settled_at: 100,
-      expires_at: 200,
-    };
-    mockRawLookupInvoice.mockResolvedValueOnce(response);
-    if (history === 'unsupported')
-      mockRawListTransactions.mockRejectedValueOnce(new Error('NOT_IMPLEMENTED'));
-    else
-      mockRawListTransactions.mockResolvedValueOnce({
-        transactions:
-          history === 'absent'
-            ? []
-            : [
-                {
-                  ...response,
-                  payment_hash: history === 'wrong-hash' ? 'd'.repeat(64) : mockPaymentHash,
-                  settled_at: history === 'unsettled' ? undefined : 100,
-                  preimage: history === 'listed-no-preimage' ? undefined : response.preimage,
-                  ...(history === 'failed' ? { state: 'failed' } : {}),
-                },
-              ],
+describe.each(['incoming', 'outgoing'])('ambiguous %s LNbits lookups', (type) => {
+  it.each([undefined, 'settled'])('checks successful history with state %s', async (state) => {
+    for (const history of [
+      'absent',
+      'listed',
+      'listed-no-preimage',
+      'unsupported',
+      'wrong-hash',
+      'wrong-direction',
+      'unsettled',
+      'failed',
+    ]) {
+      const response = {
+        type,
+        state,
+        invoice: 'lnbc1fixture',
+        payment_hash: mockPaymentHash,
+        preimage: 'c'.repeat(64),
+        created_at: 100,
+        settled_at: 100,
+        expires_at: 200,
+      };
+      mockRawLookupInvoice.mockResolvedValueOnce(response);
+      if (history === 'unsupported')
+        mockRawListTransactions.mockRejectedValueOnce(new Error('NOT_IMPLEMENTED'));
+      else
+        mockRawListTransactions.mockResolvedValueOnce({
+          transactions:
+            history === 'absent'
+              ? []
+              : [
+                  {
+                    ...response,
+                    type:
+                      history === 'wrong-direction'
+                        ? type === 'incoming'
+                          ? 'outgoing'
+                          : 'incoming'
+                        : type,
+                    payment_hash: history === 'wrong-hash' ? 'd'.repeat(64) : mockPaymentHash,
+                    settled_at: history === 'unsettled' ? undefined : 100,
+                    preimage: history === 'listed-no-preimage' ? undefined : response.preimage,
+                    invoice: undefined,
+                    ...(history === 'failed' ? { state: 'failed' } : {}),
+                  },
+                ],
+        });
+      const result = await lookupInvoice(WALLET_ID, mockPaymentHash, { replyTimeoutMs: 5000 });
+      expect(result?.paid === true).toBe(history.startsWith('listed'));
+      if (!history.startsWith('listed')) expect(result).toBeNull();
+      else
+        expect(result).toMatchObject({
+          invoice: response.invoice,
+          preimage: response.preimage,
+          settledAt: 100,
+        });
+      expect(mockRawListTransactions).toHaveBeenLastCalledWith({
+        from: 40,
+        until: Math.floor(Date.now() / 1000),
+        type,
+        unpaid: false,
+        limit: 50,
       });
-    const result = await lookupInvoice(WALLET_ID, mockPaymentHash, { replyTimeoutMs: 5000 });
-    expect(result?.paid === true).toBe(history.startsWith('listed'));
-    if (!history.startsWith('listed')) expect(result).toBeNull();
-    expect(mockRawListTransactions).toHaveBeenLastCalledWith({
-      from: 40,
-      until: Math.floor(Date.now() / 1000),
-      type: 'incoming',
-      unpaid: false,
-      limit: 50,
-    });
-  },
-);
+    }
+  });
+});

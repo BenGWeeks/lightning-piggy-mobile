@@ -54,3 +54,9 @@ it('binds the returned invoice to the requested hash', () => {
     decode.mockRestore();
   }
 });
+
+it('requires history even with settled state when LNbits reuses the creation timestamp', () => {
+  expect(
+    parseInvoiceSettlement({ ...SETTLED, type: 'incoming', created_at: 100 }, HASH),
+  ).toBeNull();
+});

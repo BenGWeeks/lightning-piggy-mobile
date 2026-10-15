@@ -511,8 +511,9 @@ export async function getShopOrderRows(
 
 /**
  * Buyer history is bounded by the newest placed orders, never by lifecycle
- * row count. Retrieve the first order and latest lifecycle rows so a busy
- * order cannot push its original row (or another purchase) out of history.
+ * row count. Retain each distinct payment request for settlement correlation,
+ * plus the first order and latest other lifecycle rows, so invoice replacements
+ * cannot hide a successful payment of an earlier invoice.
  * Invalid legacy JSON is ignored without aborting the read.
  */
 export async function getOrderRows(owner: string, limit = 500): Promise<DmMessageRow[]> {
@@ -530,6 +531,8 @@ export async function getOrderRows(owner: string, limit = 500): Promise<DmMessag
     SELECT *, ROW_NUMBER() OVER (
       PARTITION BY conversation, json_extract(${content}, '$.orderId'),
         json_extract(${content}, '$.type'), from_me,
+        CASE WHEN json_extract(${content}, '$.type') = 'payment'
+          THEN json_extract(${content}, '$.payment.value') ELSE '' END,
         CASE WHEN json_extract(${content}, '$.type') = 'status'
           AND json_extract(${content}, '$.status') = 'cancelled' THEN 1 ELSE 0 END
       ORDER BY

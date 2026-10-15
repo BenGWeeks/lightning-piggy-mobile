@@ -1,6 +1,7 @@
 import { sanitizeDisplayText } from '../utils/sanitizeDisplayText';
 import {
   confirmListedInvoiceSettlement,
+  needsInvoiceHistoryConfirmation,
   parseInvoiceSettlement,
   type InvoiceSettlement,
 } from './nwcInvoiceSettlement';
@@ -925,12 +926,13 @@ export async function lookupInvoice(
     const result = await (options.replyTimeoutMs !== undefined
       ? withTimeout(call, options.replyTimeoutMs, `lookupInvoice(${walletId})`)
       : call);
-    if (result.state !== undefined) return parseInvoiceSettlement(result, paymentHash);
+    if (!needsInvoiceHistoryConfirmation(result))
+      return parseInvoiceSettlement(result, paymentHash);
     if (!Number.isSafeInteger(result.created_at) || result.created_at <= 0) return null;
     const listing = provider.client.listTransactions({
       from: Math.max(0, result.created_at - 60),
       until: Math.floor(Date.now() / 1000),
-      type: 'incoming',
+      type: result.type === 'outgoing' ? 'outgoing' : 'incoming',
       unpaid: false,
       limit: 50,
     });
