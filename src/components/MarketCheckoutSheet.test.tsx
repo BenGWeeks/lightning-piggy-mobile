@@ -10,6 +10,7 @@ import type { MarketProduct } from '../data/marketProducts';
 import type { MarketCheckoutTarget } from '../utils/marketCheckout';
 import type { ShippingOption } from '../utils/marketShipping';
 
+jest.mock('./MarketHeader', () => () => null);
 jest.mock('@gorhom/bottom-sheet', () => {
   const R = require('react');
   const { View, TextInput } = require('react-native');

@@ -2316,7 +2316,8 @@
       "fofBuilding": "Hálózatod felépítése… {{done}}/{{total}}",
       "fofBuildingStart": "Hálózatod felépítése…",
       "fofFailed": "Nem sikerült felépíteni a hálózatodat – a barátaid hirdetései láthatók.",
-      "emptyNone": "Jelenleg nincs elérhető termék."
+      "emptyNone": "Jelenleg nincs elérhető termék.",
+      "myOrders": "Rendeléseim"
     },
     "card": {
       "featured": "Kiemelt",

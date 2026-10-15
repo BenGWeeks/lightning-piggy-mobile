@@ -48,6 +48,9 @@ interface Props {
   onIconPress?: () => void;
   /** Accessibility label for the badge when `onIconPress` is set. */
   iconAccessibilityLabel?: string;
+  iconTestID?: string;
+  iconDisabled?: boolean;
+  insetTop?: boolean;
 }
 
 /**
@@ -70,6 +73,9 @@ const TabHeader: React.FC<Props> = ({
   titleStyle,
   onIconPress,
   iconAccessibilityLabel,
+  iconTestID,
+  iconDisabled = false,
+  insetTop = true,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createTabHeaderStyles(colors), [colors]);
@@ -90,14 +96,16 @@ const TabHeader: React.FC<Props> = ({
   );
 
   return (
-    <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
+    <View style={[styles.header, { paddingTop: (insetTop ? insets.top : 0) + 12 }]}>
       {onIconPress ? (
         <TouchableOpacity
           style={styles.badge}
           onPress={onIconPress}
+          disabled={iconDisabled}
+          accessibilityState={{ disabled: iconDisabled }}
           accessibilityLabel={iconAccessibilityLabel ?? 'Back'}
           accessibilityRole="button"
-          testID="tab-header-icon-button"
+          testID={iconTestID ?? 'tab-header-icon-button'}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
           {icon}

@@ -2316,7 +2316,8 @@
       "fofBuilding": "Dein Netzwerk wird aufgebaut… {{done}}/{{total}}",
       "fofBuildingStart": "Dein Netzwerk wird aufgebaut…",
       "fofFailed": "Dein Netzwerk konnte nicht aufgebaut werden – die Angebote deiner Freunde werden angezeigt.",
-      "emptyNone": "Derzeit sind keine Produkte verfügbar."
+      "emptyNone": "Derzeit sind keine Produkte verfügbar.",
+      "myOrders": "Meine Bestellungen"
     },
     "card": {
       "featured": "Empfohlen",

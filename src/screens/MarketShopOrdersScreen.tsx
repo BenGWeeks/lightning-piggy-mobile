@@ -145,7 +145,6 @@ const MarketShopOrdersScreen: React.FC<Props> = ({ navigation, route }) => {
         title={t('market.sell.hub.orders')}
         backLabel={t('market.sell.back')}
         onBack={() => navigation.goBack()}
-        styles={styles}
         testID="shop-orders-back"
       />
       {!orders ? (

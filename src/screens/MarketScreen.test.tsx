@@ -98,6 +98,23 @@ jest.mock('../contexts/LocaleContext', () => ({
   useTranslation: () => (key: string) => key,
   useLocale: () => ({ t: (key: string) => key, locale: 'en', formatLocale: 'en-GB' }),
 }));
+jest.mock('../components/MarketHeader', () => {
+  const { View, Text } = jest.requireActual('react-native');
+  return function MockMarketHeader({
+    title,
+    children,
+  }: {
+    title: string;
+    children: React.ReactNode;
+  }) {
+    return (
+      <View>
+        <Text>{title}</Text>
+        {children}
+      </View>
+    );
+  };
+});
 jest.mock('../components/MarketProductCard', () => () => null);
 jest.mock('../hooks/useBuyerOrders', () => ({ useBuyerOrders: () => ({ payNow: 0 }) }));
 jest.mock('../hooks/usePreferredMarketListings', () => ({
@@ -133,6 +150,8 @@ jest.mock('../hooks/useMarketListings', () => ({
 jest.mock('lucide-react-native', () => ({
   ChevronLeft: () => null,
   Heart: () => null,
+  MoreVertical: () => null,
+  ShoppingBag: () => null,
   Search: () => null,
   SlidersHorizontal: () => null,
   Store: () => null,
@@ -251,6 +270,7 @@ it('clears seller scope with the sheet filters and badges a non-empty search', (
   fireEvent.press(screen.getByTestId('market-filter-done'));
   act(() => jest.runOnlyPendingTimers());
   expect(screen.getByTestId('market-filter-active-count')).toHaveTextContent('1');
+  fireEvent.press(screen.getByTestId('market-header-search'));
   fireEvent.changeText(screen.getByTestId('market-search-input'), 'piggy');
   expect(screen.getByTestId('market-filter-active-count')).toHaveTextContent('2');
   fireEvent.press(screen.getByTestId('market-search-clear'));
@@ -277,6 +297,7 @@ it('shows no-match copy instead of full loading when filters hide an existing sn
   const screen = render(<MarketScreen navigation={navigation} />);
   fireEvent.press(screen.getByTestId('market-filter-button'));
   fireEvent.press(screen.getByTestId('market-filter-sellers-friends'));
+  fireEvent.press(screen.getByTestId('market-header-search'));
   fireEvent.changeText(screen.getByTestId('market-search-input'), 'no such product');
   act(() => jest.advanceTimersByTime(300));
   expect(screen.queryByText('market.live.loading')).toBeNull();
@@ -547,6 +568,7 @@ it.each(['preferred', 'wotFriends'] as const)(
       } as unknown as (typeof MARKET_PRODUCTS)[number],
     ];
     const screen = render(<MarketScreen navigation={navigation} />);
+    fireEvent.press(screen.getByTestId('market-header-search'));
     fireEvent.changeText(screen.getByTestId('market-search-input'), 'unrelated search');
     act(() => jest.advanceTimersByTime(300));
     expect(screen.UNSAFE_getByType(FlatList).props.data).toEqual([]);
@@ -576,8 +598,9 @@ it.each(['preferred', 'wotFriends'] as const)(
   },
 );
 
-it('opens Liked items from the header heart (#1541)', () => {
+it('opens Liked items from the header menu', () => {
   const screen = render(<MarketScreen navigation={navigation} />);
+  fireEvent.press(screen.getByTestId('market-header-menu'));
   fireEvent.press(screen.getByTestId('market-liked-items-button'));
   expect(navigation.navigate).toHaveBeenCalledWith('MarketLikedItems');
 });
@@ -645,6 +668,7 @@ describe('experimental seller scopes (friends of friends / All)', () => {
     );
     // All is the unfiltered scope: no badge with nothing else selected.
     expect(screen.queryByTestId('market-filter-badge')).toBeNull();
+    fireEvent.press(screen.getByTestId('market-header-search'));
     fireEvent.changeText(screen.getByTestId('market-search-input'), 'piggy');
     expect(screen.getByTestId('market-filter-active-count')).toHaveTextContent('1');
     fireEvent.press(screen.getByTestId('market-search-clear'));
@@ -671,4 +695,26 @@ describe('experimental seller scopes (friends of friends / All)', () => {
     ).toBe(true);
     expect(screen.queryByTestId('market-scope-all')).toBeNull();
   });
+});
+
+it('expands and closes header search, clearing the query', () => {
+  const screen = render(<MarketScreen navigation={navigation} />);
+  expect(screen.queryByTestId('market-search-input')).toBeNull();
+  fireEvent.press(screen.getByTestId('market-header-search'));
+  fireEvent.changeText(screen.getByTestId('market-search-input'), 'sats');
+  fireEvent.press(screen.getByTestId('market-search-clear'));
+  expect(screen.queryByTestId('market-search-input')).toBeNull();
+  fireEvent.press(screen.getByTestId('market-header-search'));
+  expect(screen.getByTestId('market-search-input').props.value).toBe('');
+});
+
+it.each([
+  ['market-my-shop-button', 'MarketMyShop'],
+  ['market-my-orders-button', 'MarketMyOrders'],
+])('opens %s from the single header menu', (id, route) => {
+  const screen = render(<MarketScreen navigation={navigation} />);
+  fireEvent.press(screen.getByTestId('market-header-menu'));
+  fireEvent.press(screen.getByTestId(id));
+  expect(navigation.navigate).toHaveBeenCalledWith(route);
+  expect(screen.queryByTestId('market-menu-close')).toBeNull();
 });

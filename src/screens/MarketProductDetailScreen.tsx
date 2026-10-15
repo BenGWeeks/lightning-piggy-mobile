@@ -1,10 +1,10 @@
+import MarketHeader from '../components/MarketHeader';
 import BrandedRefreshControl from '../components/BrandedRefreshControl';
 import { marketEditorDestination } from '../utils/marketEditorNavigation';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, Linking } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
-import { Image } from 'expo-image';
-import { ChevronLeft, Zap, ExternalLink } from 'lucide-react-native';
+import { Zap, ExternalLink } from 'lucide-react-native';
 import type { CompositeNavigationProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -179,28 +179,12 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
 
   return (
     <View style={styles.container} testID="market-product-detail-screen">
-      <View style={styles.header}>
-        <Image
-          source={require('../../assets/images/learn-header-bg.png')}
-          style={styles.headerImage}
-          resizeMode="cover"
-        />
-        <View style={styles.headerOverlay} />
-        <View style={styles.headerRow}>
-          <TouchableOpacity
-            onPress={() => navigation.goBack()}
-            accessibilityLabel={t('market.detail.back')}
-            testID="market-product-detail-back"
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <ChevronLeft size={24} color={colors.white} strokeWidth={2.5} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle} numberOfLines={1}>
-            {product.title}
-          </Text>
-          <View style={styles.headerSpacer} />
-        </View>
-      </View>
+      <MarketHeader
+        title={product.title}
+        backLabel={t('market.detail.back')}
+        onBack={() => navigation.goBack()}
+        testID="market-product-detail-back"
+      />
 
       {/* Keyboard-aware so the review / comment inputs — the top composer and
           a comment card being edited in place (#1524) — scroll above the IME

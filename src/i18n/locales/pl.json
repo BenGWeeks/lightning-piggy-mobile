@@ -2318,7 +2318,8 @@
       "fofBuilding": "Budowanie twojej sieci… {{done}}/{{total}}",
       "fofBuildingStart": "Budowanie twojej sieci…",
       "fofFailed": "Nie udało się zbudować twojej sieci — pokazujemy oferty twoich znajomych.",
-      "emptyNone": "Brak dostępnych produktów."
+      "emptyNone": "Brak dostępnych produktów.",
+      "myOrders": "Moje zamówienia"
     },
     "card": {
       "featured": "Polecane",
