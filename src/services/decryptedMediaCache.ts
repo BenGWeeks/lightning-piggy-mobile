@@ -82,6 +82,7 @@ export class DecryptedMediaCancelledError extends Error {
   }
 }
 
+export const PDF_PREVIEW_WIDTH = 480;
 const ROOT_DIR = 'decrypted';
 export const LEGACY_CLEANUP_FLAG_KEY = 'decrypted_media_legacy_cleanup_v1';
 const LEGACY_FILE_RE = /^lp-(voice|img)-/;
@@ -145,7 +146,7 @@ export async function deleteDecryptedFile(uri: string): Promise<void> {
   retainedFiles.delete(uri);
   verifiedFiles.delete(uri);
   for (const [key, value] of memory) if (value === uri) memory.delete(key);
-  await deleteAsync(`${uri}.preview-480.png`, { idempotent: true });
+  await deleteAsync(`${uri}.preview-${PDF_PREVIEW_WIDTH}.png`, { idempotent: true });
   await deleteAsync(`${uri}.share/`, { idempotent: true });
   await deleteAsync(uri, { idempotent: true });
 }

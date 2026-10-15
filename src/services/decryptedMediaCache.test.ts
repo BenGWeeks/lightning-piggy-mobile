@@ -911,15 +911,15 @@ it('retires captured sessions on switches, round trips, and account wipes', asyn
 });
 
 it.each([false, true])(
-  'cancels a real share during HEAD (return to original account=%s)',
+  'cancels a real share during download (return to original account=%s)',
   async (roundTrip) => {
     setDecryptedMediaOwner(A);
     jest.mocked(Sharing.shareAsync).mockClear();
     let finish!: () => void;
-    const head = jest.spyOn(remoteUrlPolicy, 'fetchBounded').mockImplementationOnce(
+    const download = jest.spyOn(remoteUrlPolicy, 'fetchBounded').mockImplementationOnce(
       () =>
         new Promise((resolve) => {
-          finish = () => resolve(undefined as never);
+          finish = () => resolve({ bytes: new TextEncoder().encode('%PDF-1.7') } as never);
         }),
     );
     try {
@@ -929,17 +929,17 @@ it.each([false, true])(
         jest.fn(),
       );
       const rejected = expect(sharing).rejects.toBeInstanceOf(DecryptedMediaCancelledError);
-      await waitFor(() => expect(head).toHaveBeenCalled());
+      await waitFor(() => expect(download).toHaveBeenCalled());
       setDecryptedMediaOwner(B);
       if (roundTrip) setDecryptedMediaOwner(A);
       finish();
       await rejected;
-      expect(head).toHaveBeenCalledTimes(1);
+      expect(download).toHaveBeenCalledTimes(1);
       expect(fetchMock).not.toHaveBeenCalled();
       expect(Sharing.shareAsync).not.toHaveBeenCalled();
       expect(filesUnder(B)).toEqual([]);
     } finally {
-      head.mockRestore();
+      download.mockRestore();
     }
   },
 );

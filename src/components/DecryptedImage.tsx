@@ -105,7 +105,7 @@ const DecryptedImage: React.FC<Props> = ({
       style={style}
       onLoad={onLoad}
       contentFit="contain"
-      cachePolicy="memory-disk"
+      cachePolicy="memory"
       accessibilityLabel={accessibilityLabel}
     />
   );

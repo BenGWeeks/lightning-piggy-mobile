@@ -12,10 +12,6 @@ jest.mock('expo-sharing', () => ({
   isAvailableAsync: jest.fn(async () => true),
   shareAsync: jest.fn(async () => {}),
 }));
-jest.mock('../utils/remoteUrlPolicy', () => ({
-  ...jest.requireActual('../utils/remoteUrlPolicy'),
-  fetchBounded: jest.fn(),
-}));
 const mockRelease = jest.fn();
 jest.mock('./decryptedMediaCache', () => ({
   captureDecryptedMediaSession: jest.fn((owner = 'alice') => ({ owner, assertCurrent: jest.fn() })),
@@ -124,42 +120,43 @@ it.each(['invoice.pdf', 'report.csv', 'budget.xlsx'])(
   },
 );
 
-it('keeps optional HEAD behind a tap and keeps the plain-URL GET independent of its advertised size', async () => {
+it('keeps plain-URL downloads independent of advertised size', async () => {
   const { parsePlainFileAttachment } = jest.requireActual('../utils/fileAttachment');
-  const file = parsePlainFileAttachment('https://example.com/invoice.pdf')!;
-  const { fetchBounded } = jest.requireMock('../utils/remoteUrlPolicy');
-  fetchBounded.mockResolvedValueOnce({ headers: { get: () => '42' } });
-  await shareFileAttachment(file, jest.fn(), jest.fn());
-  expect(fetchBounded).toHaveBeenCalledWith(
-    file.url,
-    expect.objectContaining({ method: 'HEAD', maxBytes: 50 * 1024 * 1024 }),
-  );
-  expect(resolveDecryptedMedia).toHaveBeenCalledWith(
-    expect.objectContaining({ size: undefined, plainUrl: true, kind: 'file' }),
-    'alice',
-  );
-  expect(Sharing.shareAsync).toHaveBeenCalledWith(
-    expect.any(String),
-    expect.objectContaining({ mimeType: 'application/pdf' }),
-  );
-});
-
-it('falls back to the capped GET when the server rejects HEAD', async () => {
-  const { parsePlainFileAttachment } = jest.requireActual('../utils/fileAttachment');
-  const { fetchBounded } = jest.requireMock('../utils/remoteUrlPolicy');
-  fetchBounded.mockRejectedValueOnce(new Error('HEAD unsupported'));
   await shareFileAttachment(
     parsePlainFileAttachment('https://example.com/invoice.pdf')!,
     jest.fn(),
     jest.fn(),
   );
   expect(resolveDecryptedMedia).toHaveBeenCalledWith(
-    expect.objectContaining({ kind: 'file', size: undefined }),
+    expect.objectContaining({ size: undefined, plainUrl: true, kind: 'file' }),
     'alice',
+  );
+  expect(Sharing.shareAsync).toHaveBeenCalledWith(
+    'file:///safe.bin.share/invoice.pdf',
+    expect.objectContaining({ mimeType: 'application/pdf' }),
   );
 });
 
-it.each(['confirmation', 'availability', 'HEAD', 'download', 'export'])(
+it('exports mismatched plain-URL content as generic bytes and reports the verified type', async () => {
+  const { parsePlainFileAttachment } = jest.requireActual('../utils/fileAttachment');
+  jest
+    .mocked(verifiedFileMetadata)
+    .mockReturnValueOnce({ mime: 'application/octet-stream', size: 9 });
+  const verified = jest.fn();
+  await shareFileAttachment(
+    parsePlainFileAttachment('https://example.com/invoice.pdf')!,
+    jest.fn(),
+    verified,
+  );
+  expect(verified).toHaveBeenCalledWith({ mime: 'application/octet-stream', size: 9 });
+  expect(namedFileExport).toHaveBeenCalledWith('file:///safe.bin', 'attachment.bin');
+  expect(Sharing.shareAsync).toHaveBeenCalledWith(
+    'file:///safe.bin.share/attachment.bin',
+    expect.objectContaining({ mimeType: 'application/octet-stream' }),
+  );
+});
+
+it.each(['confirmation', 'availability', 'download', 'export'])(
   'cancels sharing when the session changes during %s',
   async (stage) => {
     let current = true;
@@ -173,11 +170,8 @@ it.each(['confirmation', 'availability', 'HEAD', 'download', 'export'])(
       current = false;
       return true;
     };
-    const { fetchBounded } = jest.requireMock('../utils/remoteUrlPolicy');
-    const { parsePlainFileAttachment } = jest.requireActual('../utils/fileAttachment');
     if (stage === 'availability')
       jest.mocked(Sharing.isAvailableAsync).mockImplementationOnce(changed);
-    if (stage === 'HEAD') fetchBounded.mockImplementationOnce(changed);
     if (stage === 'download')
       jest.mocked(resolveDecryptedMedia).mockImplementationOnce(async () => {
         current = false;
@@ -190,15 +184,13 @@ it.each(['confirmation', 'availability', 'HEAD', 'download', 'export'])(
       });
     await expect(
       shareFileAttachment(
-        stage === 'HEAD'
-          ? parsePlainFileAttachment('https://example.com/invoice.pdf')!
-          : file('a.pdf', stage === 'confirmation' ? 'text/html' : 'application/pdf'),
+        file('a.pdf', stage === 'confirmation' ? 'text/html' : 'application/pdf'),
         changed,
         jest.fn(),
       ),
     ).rejects.toThrow('session cancelled');
     expect(Sharing.shareAsync).not.toHaveBeenCalled();
-    if (['confirmation', 'availability', 'HEAD'].includes(stage))
+    if (['confirmation', 'availability'].includes(stage))
       expect(resolveDecryptedMedia).not.toHaveBeenCalled();
     else expect(resolveDecryptedMedia).toHaveBeenCalledWith(expect.any(Object), 'alice');
   },

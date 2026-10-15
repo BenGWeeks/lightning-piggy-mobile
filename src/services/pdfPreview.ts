@@ -4,6 +4,7 @@ import {
   resolveDecryptedMedia,
   publishDecryptedPreview,
   verifiedFileMetadata,
+  PDF_PREVIEW_WIDTH,
 } from './decryptedMediaCache';
 import type { FileAttachment } from '../utils/fileAttachment';
 
@@ -21,7 +22,12 @@ export async function resolvePdfPreview(
     const native = requireOptionalNativeModule<{
       renderPdfFirstPageAsync?: (uri: string, width: number) => Promise<string | null>;
     }>('DocumentMetadata');
-    if (!native?.renderPdfFirstPageAsync || (file.size ?? 0) > MAX_PREVIEW_BYTES) return null;
+    if (
+      !native?.renderPdfFirstPageAsync ||
+      file.size === undefined ||
+      file.size > MAX_PREVIEW_BYTES
+    )
+      return null;
     const uri = await resolveDecryptedMedia({ ...file, kind: 'file' }, owner);
     session.assertCurrent();
     const metadata = verifiedFileMetadata(uri);
@@ -29,7 +35,9 @@ export async function resolvePdfPreview(
       return null;
     let pending = previews.get(uri);
     if (!pending) {
-      pending = publishDecryptedPreview(uri, () => native.renderPdfFirstPageAsync!(uri, 480))
+      pending = publishDecryptedPreview(uri, () =>
+        native.renderPdfFirstPageAsync!(uri, PDF_PREVIEW_WIDTH),
+      )
         .catch(() => null)
         .finally(() => previews.delete(uri));
       previews.set(uri, pending);

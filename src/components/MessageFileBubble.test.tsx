@@ -1,11 +1,12 @@
 import React from 'react';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import MessageFileBubble from './MessageFileBubble';
+import { __resetForTests } from '../services/mediaRevealStore';
 import { usePdfPreview } from '../hooks/usePdfPreview';
 import { Alert } from './BrandedAlert';
 import { shareFileAttachment } from '../services/fileShare';
 import { FileVerificationError } from '../services/fileDownload';
-import { parseFileAttachment } from '../utils/fileAttachment';
+import { parseFileAttachment, parsePlainFileAttachment } from '../utils/fileAttachment';
 
 jest.mock('../hooks/usePdfPreview', () => ({ usePdfPreview: jest.fn(() => null) }));
 jest.mock('../contexts/ThemeContext', () => ({
@@ -28,7 +29,10 @@ const file = (name = 'invoice.pdf', mime = 'application/pdf') =>
   )!;
 const bubble = (attachment = file()) =>
   render(<MessageFileBubble id="file" file={attachment} fromMe={false} footer={null} />);
-beforeEach(() => jest.clearAllMocks());
+beforeEach(() => {
+  jest.clearAllMocks();
+  __resetForTests();
+});
 it('offers only Save for dangerous files and requires the explicit warning', async () => {
   let approved: boolean | undefined;
   (shareFileAttachment as jest.Mock).mockImplementationOnce(async (_file, confirm) => {
@@ -96,4 +100,26 @@ it('never previews a dangerous file even from a trusted sender', () => {
   const attachment = file('invoice.pdf.exe');
   render(<MessageFileBubble id="danger" file={attachment} fromMe autoLoad footer={null} />);
   expect(usePdfPreview).toHaveBeenLastCalledWith(attachment, false);
+});
+
+it.each([false, true])(
+  'requires a tap for plain links even with trust or ownership (fromMe=%s)',
+  (fromMe) => {
+    const attachment = parsePlainFileAttachment('https://example.com/invoice.pdf')!;
+    const ui = render(
+      <MessageFileBubble id="plain" file={attachment} fromMe={fromMe} autoLoad footer={null} />,
+    );
+    expect(usePdfPreview).toHaveBeenLastCalledWith(attachment, false);
+    fireEvent.press(ui.getByTestId('chat-file-load-plain'));
+    expect(usePdfPreview).toHaveBeenLastCalledWith(attachment, true);
+  },
+);
+it('shows a mismatch discovered while sharing a plain link', async () => {
+  (shareFileAttachment as jest.Mock).mockImplementationOnce(async (_file, _confirm, verified) => {
+    verified({ mime: 'application/octet-stream', size: 3 });
+  });
+  const ui = bubble(parsePlainFileAttachment('https://example.com/invoice.pdf')!);
+  expect(ui.queryByText('messageBubble.fileTypeMismatch')).toBeNull();
+  fireEvent.press(ui.getByTestId('chat-file-share-file'));
+  await waitFor(() => expect(ui.getByText('messageBubble.fileTypeMismatch')).toBeTruthy());
 });

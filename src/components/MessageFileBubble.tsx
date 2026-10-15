@@ -36,7 +36,10 @@ export default React.memo(function MessageFileBubble({
   const colors = useThemeColors();
   const styles = useMemo(() => createMessageFileBubbleStyles(colors), [colors]);
   const safe = file.available && isSafeFileUrl(file.url);
-  const [allowed, reveal] = useTapToReveal(`pdf:${id}:${file.url}`, (autoLoad || fromMe) && safe);
+  const [allowed, reveal] = useTapToReveal(
+    `pdf:${id}:${file.url}`,
+    (autoLoad || fromMe) && safe && !file.plainUrl,
+  );
   const isPdf = file.mime === 'application/pdf' && !file.dangerous && !file.typeMismatch;
   const preview = usePdfPreview(file, safe && allowed && isPdf);
   const [busy, setBusy] = useState(false);
@@ -97,7 +100,7 @@ export default React.memo(function MessageFileBubble({
           <Image
             source={{ uri: preview }}
             style={styles.preview}
-            cachePolicy="memory-disk"
+            cachePolicy="memory"
             contentFit="contain"
           />
         )}
@@ -125,7 +128,7 @@ export default React.memo(function MessageFileBubble({
               <Text style={styles.actionText}>{t('chatMenu.loadMedia')}</Text>
             </TouchableOpacity>
           )}
-          {file.typeMismatch && (
+          {(file.typeMismatch || (file.plainUrl && verified && verified.mime !== file.mime)) && (
             <Text style={styles.caption}>
               {t('messageBubble.fileTypeMismatch', { type: friendlyType })}
             </Text>

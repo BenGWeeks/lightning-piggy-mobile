@@ -1,5 +1,3 @@
-import { fetchBounded } from '../utils/remoteUrlPolicy';
-import { MAX_FILE_BYTES } from './fileDownload';
 import * as Sharing from 'expo-sharing';
 import type { FileAttachment } from '../utils/fileAttachment';
 import {
@@ -23,22 +21,6 @@ export async function shareFileAttachment(
   session.assertCurrent();
   if (!(await Sharing.isAvailableAsync())) throw new Error('Sharing unavailable');
   session.assertCurrent();
-  if (file.plainUrl) {
-    // HEAD is optional and user initiated too; GET independently enforces the
-    // cap when a server omits metadata, rejects HEAD, or changes the payload.
-    try {
-      await fetchBounded(file.url, {
-        method: 'HEAD',
-        maxBytes: MAX_FILE_BYTES,
-        timeoutMs: 5000,
-        redirects: 'https-only',
-        maxRedirects: 3,
-      });
-    } catch {
-      /* Download remains bounded when HEAD is unavailable. */
-    }
-  }
-  session.assertCurrent();
   const uri = await resolveDecryptedMedia(
     {
       ...file,
@@ -53,10 +35,11 @@ export async function shareFileAttachment(
     const metadata = verifiedFileMetadata(uri);
     if (metadata) onVerified(metadata);
     session.assertCurrent();
-    const exportUri = await namedFileExport(uri, file.dangerous ? 'attachment.bin' : file.name);
+    const generic = file.dangerous || (file.plainUrl && metadata?.mime !== file.mime);
+    const exportUri = await namedFileExport(uri, generic ? 'attachment.bin' : file.name);
     session.assertCurrent();
     await Sharing.shareAsync(exportUri, {
-      mimeType: file.dangerous
+      mimeType: generic
         ? 'application/octet-stream'
         : (metadata?.mime ?? 'application/octet-stream'),
       dialogTitle: file.name,

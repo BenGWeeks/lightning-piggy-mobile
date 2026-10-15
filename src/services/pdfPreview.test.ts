@@ -10,6 +10,7 @@ import type { FileAttachment } from '../utils/fileAttachment';
 
 jest.mock('expo-modules-core', () => ({ requireOptionalNativeModule: jest.fn() }));
 jest.mock('./decryptedMediaCache', () => ({
+  PDF_PREVIEW_WIDTH: 480,
   captureDecryptedMediaSession: jest.fn((owner = 'alice') => ({ owner, assertCurrent: jest.fn() })),
   resolveDecryptedMedia: jest.fn(),
   verifiedFileMetadata: jest.fn(),
@@ -88,4 +89,10 @@ it('discards a preview if the captured session ends during native rendering', as
     return 'file:///old-preview.png';
   });
   expect(await resolvePdfPreview(file, 'alice')).toBeNull();
+});
+
+it('skips files of unknown size before fetching or rendering', async () => {
+  expect(await resolvePdfPreview({ ...file, size: undefined }, 'alice')).toBeNull();
+  expect(resolveDecryptedMedia).not.toHaveBeenCalled();
+  expect(render).not.toHaveBeenCalled();
 });
