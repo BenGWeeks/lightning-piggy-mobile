@@ -484,6 +484,7 @@ export function useGroupComposerActions(params: {
     sendFile,
     setAttachPanelOpen,
     canSend,
+    group?.id,
   );
   return {
     ...actions,

@@ -402,7 +402,10 @@ async function requestOwner(): Promise<{ owner: string; epoch: number }> {
  * Rejects on fetch / decrypt failure (wrong keys, bad hashes) and with
  * `DecryptedMediaCancelledError` if the account's session ended meanwhile.
  */
-export async function resolveDecryptedMedia(ref: EncryptedMediaRef): Promise<string> {
+export async function resolveDecryptedMedia(
+  ref: EncryptedMediaRef,
+  expectedOwner?: string | null,
+): Promise<string> {
   if (!checkRemoteUrl(ref.url, { kind: 'media' }).ok) throw new Error('Blocked remote URL');
   if (
     ref.size !== undefined &&
@@ -413,7 +416,11 @@ export async function resolveDecryptedMedia(ref: EncryptedMediaRef): Promise<str
     throw ref.kind === 'file'
       ? new FileVerificationError()
       : new Error('Media ciphertext hash mismatch');
+  if (expectedOwner !== undefined && (!expectedOwner || activeOwner !== expectedOwner))
+    throw new DecryptedMediaCancelledError();
   const { owner, epoch } = await requestOwner();
+  if (expectedOwner !== undefined && owner !== expectedOwner)
+    throw new DecryptedMediaCancelledError();
   const ownerDir = ownerDirName(owner);
   await wiping.get(ownerDir);
   if (epoch !== sessionEpoch || activeOwner !== owner) throw new DecryptedMediaCancelledError();

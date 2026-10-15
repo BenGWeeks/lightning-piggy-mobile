@@ -1,4 +1,5 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { getActivePubkey } from '../services/walletStorageService';
 import { Buffer } from 'buffer';
 import { Alert } from '../components/BrandedAlert';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -16,12 +17,39 @@ export function useNip17FileComposer(
   send: (file: EncryptedUpload, kind: 'file', protocol: DmProtocol) => Promise<boolean>,
   setPanelOpen: (open: boolean) => void,
   canSend?: () => boolean,
+  targetId?: string,
 ) {
   const t = useTranslation();
-  const { isLoggedIn, signEvent } = useNostr();
+  const { isLoggedIn, pubkey, signEvent } = useNostr();
+  const latest = useRef({ isLoggedIn, pubkey, protocol, send, canSend, targetId });
+  useLayoutEffect(() => {
+    latest.current = { isLoggedIn, pubkey, protocol, send, canSend, targetId };
+  }, [isLoggedIn, pubkey, protocol, send, canSend, targetId]);
+  const mounted = useRef(false);
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const [uploading, setUploading] = useState(false);
   const pickFile = useCallback(async () => {
-    if (uploading || !isLoggedIn || protocol !== 'nip17' || canSend?.() === false) return;
+    // Picker and upload may outlive an identity, conversation or roster update.
+    // Keep the original identity/target, but use the latest authorized send.
+    const authorized = () => {
+      const current = latest.current;
+      return (
+        mounted.current &&
+        !!pubkey &&
+        current.isLoggedIn &&
+        current.pubkey === pubkey &&
+        getActivePubkey() === pubkey &&
+        current.targetId === targetId &&
+        current.protocol === 'nip17' &&
+        current.canSend?.() !== false
+      );
+    };
+    if (uploading || protocol !== 'nip17' || !authorized()) return;
     setPanelOpen(false);
     setUploading(true);
     try {
@@ -34,6 +62,7 @@ export function useNip17FileComposer(
       const file = Array.isArray(result) ? result[0] : result;
       if (!file) return;
       try {
+        if (!authorized()) return;
         // Bound JS encryption/base64 memory before reading, then check actual
         // bytes as well: provider metadata is not authoritative.
         if (file.size <= 0 || file.size > MAX_UPLOAD_BYTES) throw new RangeError('File size');
@@ -41,10 +70,14 @@ export function useNip17FileComposer(
         const size = Buffer.byteLength(base64, 'base64');
         if (size <= 0 || size > MAX_UPLOAD_BYTES) throw new RangeError('File size');
         const filename = sanitizeAttachmentText(await selectedDocumentName(file));
+        if (!authorized()) return;
         const started = performance.now();
         const uploaded = await upload.uploadEncryptedBlob(
           file.uri,
-          signEvent,
+          async (...args) => {
+            if (!authorized()) throw new Error('File picking was cancelled: target changed');
+            return signEvent(...args);
+          },
           file.type || 'application/octet-stream',
           base64,
         );
@@ -53,7 +86,8 @@ export function useNip17FileComposer(
             `[PerfBlock] file encrypt+upload bytes=${size} ms=${(performance.now() - started).toFixed(1)}`,
           );
         }
-        await send({ ...uploaded, filename }, 'file', 'nip17');
+        if (!authorized()) return;
+        await latest.current.send({ ...uploaded, filename }, 'file', 'nip17');
       } finally {
         // iOS returns a temporary copy. Never delete the user's original.
         if (file.uri.startsWith(Paths.cache.uri)) file.delete();
@@ -71,6 +105,6 @@ export function useNip17FileComposer(
     } finally {
       setUploading(false);
     }
-  }, [uploading, isLoggedIn, protocol, canSend, setPanelOpen, signEvent, send, t]);
+  }, [uploading, pubkey, protocol, targetId, setPanelOpen, signEvent, t]);
   return { uploading, pickFile: protocol === 'nip17' ? pickFile : undefined };
 }

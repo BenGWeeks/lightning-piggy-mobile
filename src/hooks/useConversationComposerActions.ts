@@ -426,7 +426,13 @@ export function useConversationComposerActions(params: {
     [offerNip17, sendText],
   );
 
-  const fileComposer = useNip17FileComposer(protocol, sendFile, setAttachPanelOpen);
+  const fileComposer = useNip17FileComposer(
+    protocol,
+    sendFile,
+    setAttachPanelOpen,
+    undefined,
+    pubkey,
+  );
 
   return {
     ...actions,

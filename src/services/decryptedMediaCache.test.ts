@@ -880,3 +880,10 @@ it('removes the derived preview when a decrypted file expires', async () => {
   await deleteDecryptedFile(uri);
   expect(mockFiles.has(`${uri}.preview-480.png`)).toBe(false);
 });
+
+it('rejects a deferred attachment bound to the previous account before downloading', async () => {
+  setDecryptedMediaOwner(A);
+  setDecryptedMediaOwner(B);
+  await expect(resolveDecryptedMedia(ref, A)).rejects.toBeInstanceOf(DecryptedMediaCancelledError);
+  expect(fetchMock).not.toHaveBeenCalled();
+});

@@ -16,6 +16,7 @@ import { parseFileAttachment } from '../utils/fileAttachment';
 import { renderHook, act } from '@testing-library/react-native';
 import { useGroupComposerActions } from './useGroupComposerActions';
 import type { GroupSendHooks } from '../contexts/useGroupMessaging';
+import type { Group } from '../types/groups';
 
 // ---------------------------------------------------------------------------
 // Mocks — note: jest.mock factories are hoisted to module top and cannot
@@ -35,8 +36,24 @@ jest.mock('../contexts/NostrContext', () => ({
   useNostr: () => ({
     sendGroupMessage: mockSendGroupMessage,
     pubkey: mockMyPubkey,
+    isLoggedIn: true,
+    signEvent: jest.fn(),
   }),
   notifyGroupMessage: (...args: unknown[]) => mockNotifyGroupMessage(...args),
+}));
+
+const mockFilePicker = jest.fn();
+const mockFileUpload = jest.fn();
+jest.mock('../services/walletStorageService', () => ({ getActivePubkey: () => mockMyPubkey }));
+jest.mock('expo-file-system', () => ({
+  File: { pickFileAsync: () => mockFilePicker() },
+  Paths: { cache: { uri: 'file:///cache/' } },
+}));
+jest.mock('../services/imageUploadService', () => ({
+  uploadEncryptedBlob: (...args: unknown[]) => mockFileUpload(...args),
+}));
+jest.mock('../services/documentMetadata', () => ({
+  selectedDocumentName: async () => 'invoice.pdf',
 }));
 
 // Storage mock: track calls and control return values per-test.
@@ -415,5 +432,56 @@ it('retains the encrypted document metadata in NIP-17 group optimistic rows', as
   expect(mockSendGroupMessage).toHaveBeenCalledWith(
     expect.objectContaining({ file }),
     expect.any(Object),
+  );
+});
+
+it('excludes a member removed while the document upload is pending', async () => {
+  let finishUpload!: (file: EncryptedUpload) => void;
+  mockFilePicker.mockResolvedValue({
+    uri: 'content://documents/invoice',
+    type: 'application/pdf',
+    size: 8,
+    base64: async () => Buffer.from('%PDF-1.4').toString('base64'),
+  });
+  mockFileUpload.mockImplementation(
+    () =>
+      new Promise<EncryptedUpload>((resolve) => {
+        finishUpload = resolve;
+      }),
+  );
+  mockSendGroupMessage.mockResolvedValue({ success: true });
+  const { result, rerender } = renderHook(
+    ({ group }: { group: Group }) =>
+      useGroupComposerActions({
+        group,
+        draft: '',
+        setDraft: jest.fn(),
+        setMessages: jest.fn(),
+        scrollToEnd: jest.fn(),
+        setAttachPanelOpen: jest.fn(),
+        setGifPickerOpen: jest.fn(),
+        setContactPickerOpen: jest.fn(),
+        setVoiceSheetOpen: jest.fn(),
+      }),
+    { initialProps: { group: GROUP } },
+  );
+  let pending!: Promise<void>;
+  await act(async () => {
+    pending = result.current.handlePickAndSendFile!();
+  });
+  expect(mockFileUpload).toHaveBeenCalledTimes(1);
+  rerender({ group: { ...GROUP, memberPubkeys: [MY_PUBKEY, MEMBER_1] } });
+  await act(async () => {
+    finishUpload({
+      url: 'https://example.com/file',
+      mime: 'application/pdf',
+      keyHex: 'ab'.repeat(32),
+      nonceHex: 'cd'.repeat(12),
+    } as EncryptedUpload);
+    await pending;
+  });
+  expect(mockSendGroupMessage).toHaveBeenCalledWith(
+    expect.objectContaining({ memberPubkeys: [MY_PUBKEY, MEMBER_1] }),
+    expect.anything(),
   );
 });

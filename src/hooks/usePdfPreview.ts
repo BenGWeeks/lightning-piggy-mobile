@@ -9,8 +9,14 @@ export function usePdfPreview(file: FileAttachment, enabled: boolean) {
   useEffect(() => {
     let cancelled = false;
     if (enabled) {
-      void import('../services/pdfPreview')
-        .then(({ resolvePdfPreview }) => resolvePdfPreview(file))
+      void Promise.resolve()
+        .then(() => {
+          if (cancelled) return null;
+          const { resolvePdfPreview }: typeof import('../services/pdfPreview') =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('../services/pdfPreview');
+          return resolvePdfPreview(file, owner);
+        })
         .then(
           (uri) => {
             if (!cancelled) setResult({ identity, uri });

@@ -10,13 +10,16 @@ const previews = new Map<string, Promise<string | null>>();
 const MAX_PREVIEW_BYTES = 10 * 1024 * 1024;
 
 /** Resolve only after trust consent. Native output is beside the account's hash-keyed local file. */
-export async function resolvePdfPreview(file: FileAttachment): Promise<string | null> {
+export async function resolvePdfPreview(
+  file: FileAttachment,
+  owner: string | null,
+): Promise<string | null> {
   try {
     const native = requireOptionalNativeModule<{
       renderPdfFirstPageAsync?: (uri: string, width: number) => Promise<string | null>;
     }>('DocumentMetadata');
     if (!native?.renderPdfFirstPageAsync || (file.size ?? 0) > MAX_PREVIEW_BYTES) return null;
-    const uri = await resolveDecryptedMedia({ ...file, kind: 'file' });
+    const uri = await resolveDecryptedMedia({ ...file, kind: 'file' }, owner);
     const metadata = verifiedFileMetadata(uri);
     if (!metadata || metadata.mime !== 'application/pdf' || metadata.size > MAX_PREVIEW_BYTES)
       return null;

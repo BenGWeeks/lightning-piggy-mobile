@@ -28,26 +28,26 @@ beforeEach(() => {
 });
 it.each([null, {}])('skips downloads on old dev clients (%s)', async (native) => {
   jest.mocked(requireOptionalNativeModule).mockReturnValue(native);
-  expect(await resolvePdfPreview(file)).toBeNull();
+  expect(await resolvePdfPreview(file, 'alice')).toBeNull();
   expect(resolveDecryptedMedia).not.toHaveBeenCalled();
 });
 it('skips declared oversized files before download and verified oversized files before rendering', async () => {
-  expect(await resolvePdfPreview({ ...file, size: 10 * 1024 * 1024 + 1 })).toBeNull();
+  expect(await resolvePdfPreview({ ...file, size: 10 * 1024 * 1024 + 1 }, 'alice')).toBeNull();
   expect(resolveDecryptedMedia).not.toHaveBeenCalled();
   jest
     .mocked(verifiedFileMetadata)
     .mockReturnValue({ size: 10 * 1024 * 1024 + 1, mime: 'application/pdf' });
-  expect(await resolvePdfPreview(file)).toBeNull();
+  expect(await resolvePdfPreview(file, 'alice')).toBeNull();
   expect(render).not.toHaveBeenCalled();
 });
 it('rejects a misleading PDF declaration and download failures silently', async () => {
   jest
     .mocked(verifiedFileMetadata)
     .mockReturnValue({ size: 414, mime: 'application/octet-stream' });
-  expect(await resolvePdfPreview(file)).toBeNull();
+  expect(await resolvePdfPreview(file, 'alice')).toBeNull();
   expect(render).not.toHaveBeenCalled();
   jest.mocked(resolveDecryptedMedia).mockRejectedValueOnce(new Error('verification failed'));
-  expect(await resolvePdfPreview(file)).toBeNull();
+  expect(await resolvePdfPreview(file, 'alice')).toBeNull();
 });
 it('shares one in-flight render of the hash-keyed local file under the cleanup barrier', async () => {
   let finish!: (uri: string) => void;
@@ -57,10 +57,11 @@ it('shares one in-flight render of the hash-keyed local file under the cleanup b
         finish = resolve;
       }),
   );
-  const a = resolvePdfPreview(file);
-  const b = resolvePdfPreview(file);
+  const a = resolvePdfPreview(file, 'alice');
+  const b = resolvePdfPreview(file, 'alice');
   await Promise.resolve();
   expect(render).toHaveBeenCalledTimes(1);
+  expect(resolveDecryptedMedia).toHaveBeenCalledWith({ ...file, kind: 'file' }, 'alice');
   expect(render).toHaveBeenCalledWith('file:///cache/account/hash.pdf', 480);
   expect(publishDecryptedPreview).toHaveBeenCalledTimes(1);
   finish('file:///cache/preview.png');
@@ -69,5 +70,5 @@ it('shares one in-flight render of the hash-keyed local file under the cleanup b
 });
 it('silently falls back when native rendering fails', async () => {
   render.mockRejectedValueOnce(new Error('broken PDF'));
-  expect(await resolvePdfPreview(file)).toBeNull();
+  expect(await resolvePdfPreview(file, 'alice')).toBeNull();
 });
