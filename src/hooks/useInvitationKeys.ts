@@ -194,6 +194,7 @@ export function useInvitationKeys() {
   return {
     devices,
     partial: inventory.partial,
+    publicationFailed: inventory.publicationFailed,
     loading,
     busy,
     error,

@@ -293,3 +293,16 @@ describe('marmotKeyPackageRetire', () => {
     expect(JSON.parse((await AsyncStorage.getItem(PENDING))!).attempts).toBe(0);
   });
 });
+
+test('includes copied key destinations in the local retirement footprint', async () => {
+  const backend = await publishedBackend();
+  await backend.set(
+    'keyPackageDiscovery',
+    'relays',
+    JSON.stringify(['wss://relay.eu.whitenoise.chat', 'wss://relay.primal.net']),
+  );
+  const footprint = await localKeyPackageFootprint(backend);
+  expect(footprint.relays).toEqual(
+    expect.arrayContaining([HINT, 'wss://relay.eu.whitenoise.chat', 'wss://relay.primal.net']),
+  );
+});

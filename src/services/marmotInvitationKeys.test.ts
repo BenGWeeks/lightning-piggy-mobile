@@ -212,3 +212,16 @@ describe('queryInvitationKeys', () => {
     jest.useRealTimers();
   });
 });
+
+test('inventory discovers 10051 destinations and exposes local publication failure', async () => {
+  await backend.set('keyPackageDiscovery', 'failed', 'true');
+  const fetch = jest.fn(async (_relays: string[], filter) => {
+    if (filter.kinds.includes(10051))
+      return [{ ...event('list'), kind: 10051, tags: [['relay', 'wss://key-package.example']] }];
+    return [];
+  });
+  const result = await loadInvitationKeys(owner, [], fetch);
+  expect(result.publicationFailed).toBe(true);
+  expect(fetch.mock.calls.some(([rs]) => rs.includes('wss://key-package.example'))).toBe(true);
+  expect(fetch.mock.calls.some(([rs]) => rs.includes('wss://relay.eu.whitenoise.chat'))).toBe(true);
+});

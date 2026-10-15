@@ -84,7 +84,23 @@ describe('MarmotSession.refreshInvitationKey', () => {
     const { session } = makeSession(relay);
     await session.ensureKeyPackage();
     expect(keyPackages(relay)).toHaveLength(1);
+    expect(relay.events.filter((e) => e.kind === 10051)).toHaveLength(1);
+    expect(
+      keyPackages(relay)[0]
+        .tags.find((t) => t[0] === 'relays')
+        ?.map((r) => r.replace(/\/+$/, '')),
+    ).toEqual(
+      expect.arrayContaining([
+        'wss://relay.eu.whitenoise.chat',
+        'wss://relay.us.whitenoise.chat',
+        'wss://relay.primal.net',
+      ]),
+    );
+    const before = relay.events.length;
+    await session.ensureKeyPackage();
+    expect(relay.events).toHaveLength(before);
     await expect(session.refreshInvitationKey()).resolves.toBe(true);
+    expect(relay.events.filter((e) => e.kind === 10051)).toHaveLength(1);
     const [first, second] = keyPackages(relay);
     expect(second.created_at).toBeGreaterThan(first.created_at);
     const slot = (e: NostrEvent) => e.tags.find((t) => t[0] === 'd')?.[1];

@@ -552,11 +552,17 @@ test('session-owned Welcome lookup and anonymous publications stay on LAN after 
   finishLookup([inboxEvent(['wss://public.example'])]);
   const inbox = await pending;
   expect(inbox).toEqual([TEST_RELAY_URL]);
-  for (const kind of [1059, 445, 443]) {
+  for (const kind of [1059, 445, 443, 30443, 10051]) {
     await network.publish(['wss://public.example'], { kind, pubkey: SERVER } as Event);
     expect(mockPublish.mock.calls.at(-1)[0]).toEqual([TEST_RELAY_URL]);
   }
   mockQuerySync.mockResolvedValue([]);
-  await network.request(['wss://public.example'], { kinds: [443], limit: 1 });
+  await network.request(
+    ['wss://public.example'],
+    [
+      { kinds: [10051], authors: [SERVER], limit: 1 },
+      { kinds: [10002], authors: [SERVER], limit: 1 },
+    ],
+  );
   expect(mockQuerySync.mock.calls.at(-1)[0]).toEqual([TEST_RELAY_URL]);
 });

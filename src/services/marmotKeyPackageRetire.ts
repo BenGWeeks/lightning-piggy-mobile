@@ -89,7 +89,13 @@ export async function localKeyPackageFootprint(
 ): Promise<KeyPackageFootprint> {
   const slots = new Set<string>();
   const eventIds = new Set<string>();
-  const relays = new Set<string>();
+  const copied = await backend.get('keyPackageDiscovery', 'relays');
+  const parsed: unknown = safely(() => JSON.parse(copied ?? '[]'));
+  const relays = new Set<string>(
+    Array.isArray(parsed)
+      ? parsed.filter((r): r is string => typeof r === 'string' && isRelayUrl(r))
+      : [],
+  );
   let expiresAt: number | undefined;
   const slot = await backend.get('meta', 'keyPackageSlot');
   if (slot) slots.add(slot);

@@ -1,3 +1,4 @@
+import { maintainDiscoverableKeyPackage } from './marmotKeyPackageDiscovery';
 import { previewInvitationWelcome } from './marmotInvitationPreview';
 // One Marmot (MLS-over-Nostr) client per signed-in account.
 //
@@ -10,7 +11,7 @@ import { previewInvitationWelcome } from './marmotInvitationPreview';
 // Conventions shared with White Noise (interop):
 //   - a DM is a 2-member group with an EMPTY name where both people are admins;
 //   - chat text is kind 9 (Marmot's default chat kind);
-//   - key packages (kind 30443) live on the account's NIP-65 write relays,
+//   - key packages (kind 30443) live on NIP-65 + well-known Marmot relays;
 //     Welcomes are gift-wrapped to the invitee's kind-10050 inbox relays.
 
 import {
@@ -43,7 +44,6 @@ import { forgetMediaKeys, loadOrDeriveMediaKeys, rememberMediaKeys } from './mar
 import {
   advertisesMediaV2,
   ensureKeyPackageSlot,
-  maintainKeyPackage,
   monotonicKeyPackageSigner,
   SingleFlight,
   trackKeyPackageAcceptance,
@@ -451,12 +451,10 @@ export class MarmotSession {
     if (this.gate.stopped) return; // a rerun queued before sign-out
     const refresh = this.refreshes.claim(); // a manual Refresh forces a publish
     try {
-      // Refresh weekly into the same slot, and republish when ours predates
-      // a capability White Noise requires of every invitee (encrypted media
-      // v2, 0x800b). Replaced keys are retired per the retention policy.
+      // Weekly maintenance also updates key-package relay discovery when changed.
       const cancelled = () => this.gate.stopped;
       const slot = await this.installationSlot();
-      const outcome = await maintainKeyPackage(this.client.keyPackages, {
+      const outcome = await maintainDiscoverableKeyPackage(this.client, this.backend, this.pubkey, {
         relays: this.writeRelays(),
         slot,
         client: CLIENT_NAME,
