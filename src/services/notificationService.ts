@@ -116,7 +116,7 @@ const PERMISSION_REQUESTED_KEY = 'notif_pref_permission_asked_v1';
  * Add a new kind here BEFORE adding a new caller — keeps the routing
  * logic exhaustive.
  */
-export type NotificationKind = 'dm' | 'group' | 'payment' | 'zap' | 'cache' | 'swap';
+export type NotificationKind = 'dm' | 'group' | 'payment' | 'zap' | 'cache' | 'swap' | 'market';
 
 /** Tap-routing data shipped with every notification. The deep-link
  * router (TODO — follow-up) reads these on tap to navigate to the
@@ -129,6 +129,8 @@ export type NotificationKind = 'dm' | 'group' | 'payment' | 'zap' | 'cache' | 's
  *  - cache     → cacheCoord (open the cache detail; #740)
  */
 export interface NotificationData extends Partial<MessageNotificationTarget> {
+  listingCoord?: string;
+  feedbackTab?: 'comments' | 'reviews';
   groupInvitation?: boolean;
   conversationPubkey?: string;
   conversationProtocol?: DmProtocol;
@@ -363,6 +365,7 @@ function channelForKind(kind: NotificationKind): string {
     case 'dm':
     case 'group':
     case 'cache':
+    case 'market':
       return CHANNEL_MESSAGES;
     case 'payment':
     case 'zap':
@@ -411,6 +414,7 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
     // Same source already shown in the tray: report it as delivered (so the
     // caller doesn't keep retrying) without posting a second entry.
     if (duplicateDelivered) return historyId;
+    if (await payload.shouldSuppress?.()) return null;
     const granted = await hasNotificationPermission();
     if (!granted) return null;
 

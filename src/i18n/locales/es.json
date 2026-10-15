@@ -2875,7 +2875,8 @@
       "payment": "Pago",
       "zap": "Zap",
       "cache": "Hallazgo de Piglet",
-      "swap": "Intercambio"
+      "swap": "Intercambio",
+      "market": "Actividad del anuncio"
     }
   },
   "blossomServers": {
@@ -3543,5 +3544,15 @@
     "cancelled": "Cancelado",
     "needsInvoice": "Falta factura",
     "invoiceSent": "Factura enviada"
+  },
+  "sellerActivity": {
+    "settings": "Comentarios y reseñas de mis anuncios",
+    "generic": "Nueva actividad en un anuncio",
+    "listing": "tu anuncio",
+    "sellerReplied": "El vendedor respondió",
+    "reply": "%{name} respondió a tu comentario",
+    "comment": "Nuevo comentario en %{title}",
+    "review": "Nueva reseña de %{title} ★%{stars}",
+    "replyAction": "Responder"
   }
 }

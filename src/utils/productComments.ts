@@ -158,3 +158,31 @@ export function directReplies(events: NostrEvent[], parentId: string): NostrEven
     .filter((c) => getTagValue(c, 'e') === parentId)
     .sort((a, b) => (a.created_at ?? 0) - (b.created_at ?? 0));
 }
+
+/** Flatten a bounded thread in parent/reply order, guarding malformed cycles. */
+export function threadedComments(
+  events: NostrEvent[],
+  root: CommentRoot,
+): { comment: NostrEvent; depth: number }[] {
+  const children = new Map<string, NostrEvent[]>();
+  for (const event of events) {
+    const parent = getTagValue(event, 'e');
+    if (parent) children.set(parent, [...(children.get(parent) ?? []), event]);
+  }
+  const out: { comment: NostrEvent; depth: number }[] = [];
+  const seen = new Set<string>();
+  const pending = topLevelComments(events, root)
+    .map((comment) => ({ comment, depth: 0 }))
+    .reverse();
+  while (pending.length) {
+    const row = pending.pop()!;
+    if (seen.has(row.comment.id)) continue;
+    seen.add(row.comment.id);
+    out.push(row);
+    const replies = (children.get(row.comment.id) ?? []).sort(
+      (a, b) => a.created_at - b.created_at,
+    );
+    for (const comment of [...replies].reverse()) pending.push({ comment, depth: row.depth + 1 });
+  }
+  return out;
+}

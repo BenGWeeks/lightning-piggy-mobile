@@ -1,4 +1,5 @@
 import { wipeCheckoutAddress } from '../services/checkoutAddressStorage';
+import { cancelSellerActivity } from '../services/sellerActivityService';
 import { wipeRemoteMediaForOwner } from '../services/remoteMediaCache';
 import { retireBuyerOrderTitles, waitForBuyerOrderTitleWrites } from '../services/buyerOrderTitles';
 import { FOLLOW_SNAPSHOT_KEY } from '../services/contactFollowFreshness';
@@ -81,6 +82,7 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
   // Never let a SecureStore failure abort the rest of the per-account wipe.
   await wipeCheckoutAddress(loggedOutPubkey).catch(() => undefined);
   await cancelNotificationDefaults(loggedOutPubkey);
+  await cancelSellerActivity(loggedOutPubkey);
   // Its weekly "Back up your key" reminder goes with it (#1546).
   await retireKeyBackupReminder(loggedOutPubkey).catch(() => undefined);
   try {
@@ -118,6 +120,8 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
   );
 
   const toRemove: string[] = [
+    perAccountKey('seller_activity_enabled_v1', loggedOutPubkey),
+    perAccountKey('seller_activity_cursor_v1', loggedOutPubkey),
     // Per-account namespaced caches (#288 storage refactor)
     perAccountKey(FOLLOW_SNAPSHOT_KEY, loggedOutPubkey),
     perAccountKey(CONTACTS_CACHE_KEY_BASE, loggedOutPubkey),
