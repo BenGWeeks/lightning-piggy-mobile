@@ -545,6 +545,9 @@ const MarketCheckoutSheet: React.FC<Props> = ({
                 delivery={delivery}
                 countryCode={countryCode}
                 disabled={submitting || isPlacing}
+                onOpenCountryPicker={() => {
+                  if (!submitting && !isPlacing) setCountryPickerVisible(true);
+                }}
                 sellerName={sellerName}
               />
             ) : null}

@@ -244,8 +244,16 @@ export const createMarketCheckoutSheetStyles = (colors: Palette) =>
       fontSize: 15,
       textAlignVertical: 'center',
     },
-    addressInputDisabled: {
-      color: colors.textSupplementary,
+    addressCountry: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+    },
+    addressCountryText: {
+      flex: 1,
+      color: colors.textBody,
+      fontSize: 15,
     },
     addressHint: {
       fontSize: 12,

@@ -45,7 +45,37 @@ jest.mock('../styles/MarketShippingSection.styles', () => ({
 jest.mock('expo-image', () => ({ Image: require('react-native').Image }));
 jest.mock('lucide-react-native', () => new Proxy({}, { get: () => () => null }));
 jest.mock('./BrandedToast', () => ({ __esModule: true, default: { show: jest.fn() } }));
-jest.mock('./CountryPickerSheet', () => () => null);
+jest.mock('./CountryPickerSheet', () => {
+  const { View, Button } = require('react-native');
+  return function MockCountryPicker({
+    visible,
+    selectedCode,
+    onSelect,
+    onClose,
+  }: {
+    visible: boolean;
+    selectedCode: string | null;
+    onSelect: (code: string) => void;
+    onClose: () => void;
+  }) {
+    if (!visible) return null;
+    return (
+      <View testID="country-picker-sheet" accessibilityLabel={selectedCode ?? ''}>
+        {['GB', 'US', 'DE'].map((code) => (
+          <Button
+            key={code}
+            title={code}
+            testID={`country-picker-row-${code}`}
+            onPress={() => {
+              onSelect(code);
+              onClose();
+            }}
+          />
+        ))}
+      </View>
+    );
+  };
+});
 jest.mock('../data/countries', () => ({
   ...jest.requireActual('../data/countries'),
   deviceCountryCode: () => 'GB',
@@ -445,4 +475,59 @@ it('nests each chosen-currency conversion in its primary amount text', async () 
     while (parent && parent !== amount) parent = parent.parent;
     expect(parent === amount).toBe(true);
   }
+});
+
+test('the address country opens the shared picker and re-evaluates shipping', async () => {
+  const usOption: ShippingOption = {
+    ...ukOption,
+    coordinate: `30406:${vendorPubkey}:us`,
+    dTag: 'us',
+    title: 'US shipping',
+    countries: ['US'],
+    baseAmount: 123,
+    currency: 'SAT',
+  };
+  setShipping('ready', [ukOption, usOption]);
+  (getBtcPrice as jest.Mock).mockResolvedValue(50000);
+  const ui = renderSheet({
+    ...physical,
+    source: 'listing',
+    price: { amount: 21, currency: 'SAT' },
+  });
+  await act(async () => {});
+  expect(ui.getByTestId('market-checkout-country')).toHaveTextContent('United Kingdom');
+  expect(ui.getByTestId('market-shipping-option-uk').props.accessibilityState.selected).toBe(true);
+  expect(ui.queryByTestId('country-picker-sheet')).toBeNull();
+
+  fireEvent.press(ui.getByTestId('market-checkout-country'));
+  expect(ui.getByTestId('country-picker-sheet').props.accessibilityLabel).toBe('GB');
+  fireEvent.press(ui.getByTestId('country-picker-row-US'));
+  expect(ui.queryByTestId('country-picker-sheet')).toBeNull();
+  expect(ui.getByTestId('market-checkout-country')).toHaveTextContent('United States');
+  expect(ui.getByTestId('market-shipping-country')).toHaveTextContent('US');
+  expect(ui.queryByTestId('market-shipping-option-uk')).toBeNull();
+  expect(ui.getByTestId('market-shipping-option-us').props.accessibilityState.selected).toBe(true);
+
+  fireEvent.changeText(ui.getByTestId('market-checkout-address-line1'), '1 Test Street');
+  fireEvent.changeText(ui.getByTestId('market-checkout-address-town'), 'Test Town');
+  fireEvent.changeText(ui.getByTestId('market-checkout-address-postcode'), '12345');
+  await act(async () => {
+    fireEvent.press(ui.getByTestId('market-checkout-place-order'));
+  });
+  expect(placeOrder).toHaveBeenCalledWith(
+    expect.objectContaining({
+      shipping: { coordinate: usOption.coordinate, costSats: 123, title: 'US shipping' },
+      address: 'Buyer\n1 Test Street\nTest Town\n12345\nUS',
+    }),
+  );
+
+  // The Ship to entry point uses the same picker and updates the address field too.
+  fireEvent.press(ui.getByTestId('market-shipping-country'));
+  expect(ui.getByTestId('country-picker-sheet').props.accessibilityLabel).toBe('US');
+  fireEvent.press(ui.getByTestId('country-picker-row-DE'));
+  expect(ui.getByTestId('market-checkout-country')).toHaveTextContent('Germany');
+  expect(ui.getByTestId('market-shipping-country')).toHaveTextContent('DE');
+  expect(ui.queryByTestId('market-shipping-option-us')).toBeNull();
+  expect(ui.getByTestId('market-shipping-empty')).toBeTruthy();
+  expect(ui.getByTestId('market-checkout-place-order')).toBeDisabled();
 });

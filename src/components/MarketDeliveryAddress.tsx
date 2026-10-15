@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
+import { ChevronRight } from 'lucide-react-native';
 import { BottomSheetTextInput } from '@gorhom/bottom-sheet';
 import { useLocale } from '../contexts/LocaleContext';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -17,6 +18,7 @@ interface Props {
   delivery: ReturnType<typeof useCheckoutAddress>;
   countryCode: string | null;
   disabled: boolean;
+  onOpenCountryPicker: () => void;
   sellerName: string;
 }
 const fields: (keyof DeliveryAddress)[] = ['name', 'line1', 'line2', 'town', 'postcode'];
@@ -24,6 +26,7 @@ export default function MarketDeliveryAddress({
   delivery,
   countryCode,
   disabled,
+  onOpenCountryPicker,
   sellerName,
 }: Props) {
   const colors = useThemeColors();
@@ -61,14 +64,22 @@ export default function MarketDeliveryAddress({
       ))}
       <View style={styles.addressField}>
         <Text style={styles.addressLabel}>{t('market.checkout.delivery.country')}</Text>
-        <BottomSheetTextInput
-          style={[styles.addressInput, styles.addressInputDisabled]}
-          value={countryCode ? localizedCountryName(countryCode, locale) : '—'}
-          editable={false}
+        <TouchableOpacity
+          style={[styles.addressInput, styles.addressCountry]}
+          onPress={onOpenCountryPicker}
+          disabled={disabled}
+          accessibilityRole="button"
           accessibilityLabel={t('market.checkout.delivery.country')}
-          accessibilityState={{ disabled: true }}
-          testID="market-checkout-address-country"
-        />
+          accessibilityState={{ disabled }}
+          testID="market-checkout-country"
+        >
+          <Text style={styles.addressCountryText}>
+            {countryCode
+              ? localizedCountryName(countryCode, locale)
+              : t('market.shipping.chooseCountryPlaceholder')}
+          </Text>
+          <ChevronRight size={16} color={colors.textSupplementary} strokeWidth={2.5} />
+        </TouchableOpacity>
         {complete &&
         !postcodeInvalid &&
         countryCode &&
