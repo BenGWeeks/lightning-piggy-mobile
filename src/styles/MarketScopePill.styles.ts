@@ -5,7 +5,8 @@ import type { Palette } from './palettes';
  * under the Market search row, plus its one-line scope note. */
 export const createMarketScopePillStyles = (colors: Palette) =>
   StyleSheet.create({
-    scopeRow: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 8, alignItems: 'flex-start' },
+    // 16 above; the grid's own 16 paddingTop supplies the matching gap below.
+    scopeRow: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 0, alignItems: 'flex-start' },
     scopeChip: {
       flexDirection: 'row',
       alignItems: 'center',
