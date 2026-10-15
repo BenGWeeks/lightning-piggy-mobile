@@ -184,3 +184,14 @@ test('equal-time alternate revisions still receive the chosen signed event', asy
     expect.objectContaining({ id: winner.id }),
   );
 });
+
+test('different valid signatures for the same event id both count as held copies', async () => {
+  const first = sign(10);
+  const second = sign(10);
+  expect(first.id).toBe(second.id);
+  expect(first.sig).not.toBe(second.sig);
+  (querySyncAbortable as jest.Mock).mockResolvedValueOnce([first]).mockResolvedValueOnce([second]);
+  const snapshot = await fetchListingCoverage(me, ['wss://a', 'wss://b'], [first], signal());
+  expect(snapshot.relays.get('wss://a')).toHaveLength(1);
+  expect(snapshot.relays.get('wss://b')).toHaveLength(1);
+});

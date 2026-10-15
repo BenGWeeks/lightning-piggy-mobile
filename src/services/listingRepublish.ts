@@ -97,15 +97,16 @@ export async function fetchListingCoverage(
       }),
     );
     const relays = new Map<string, Event[]>();
-    // Verify each id once, then reuse the clean copies across relay snapshots.
+    // Verify each distinct signed copy once, then reuse it across relay snapshots.
     const all = [...local, ...results.flatMap(([, events]) => events)];
     const valid = await validListingCopies(all, pubkey, signal);
     const byId = new Map(valid.map((event) => [event.id, event]));
+    const bySignature = new Map(valid.map((event) => [`${event.id}:${event.sig}`, event]));
     for (const [url, events] of results)
       relays.set(
         url,
         events.flatMap((event) => {
-          const clean = byId.get(event.id);
+          const clean = bySignature.get(`${event.id}:${event.sig}`);
           return clean &&
             clean.sig === event.sig &&
             clean.content === event.content &&
