@@ -167,7 +167,11 @@ export function createLiveRumorSurfacer(
               kind: 'group',
               threadId: routed.group.id,
               title: routed.group.name || 'New group message',
-              body: routed.message.text,
+              body: dmRowPreview(
+                routed.message.text,
+                routed.message.wireKind ?? rumor.kind,
+                getAppFormatLocale(),
+              ),
               data: {
                 groupId: routed.group.id,
                 messageId: routed.message.id,
