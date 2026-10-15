@@ -10,6 +10,7 @@ export interface MentionProfile {
 const EMPTY: MentionProfile = { name: null, picture: null };
 const MAX_BATCH = 64;
 const owners = new Map<string, Set<(profile: MentionProfile) => void>>();
+const lookupOwners = new Map<string, number>();
 const pending = new Set<string>();
 const cache = new Map<string, { profile: MentionProfile; at: number }>();
 let timer: ReturnType<typeof setTimeout> | undefined;
@@ -45,8 +46,8 @@ function schedule(): void {
   if (!timer && !active && pending.size) timer = setTimeout(() => void flush(), 60);
 }
 
-/** Each focused consumer owns its interest. The last blur aborts a running
- * batch; remaining consumers keep shared work alive. Cosmetic kind-0 fields
+/** Each focused consumer owns its interest. The last lookup-enabled blur aborts
+ * a running batch; cache-only consumers keep observing storage. Cosmetic kind-0 fields
  * never enter the verified payment cache. */
 export function subscribeMentionProfile(
   pubkey: string,
@@ -63,6 +64,7 @@ export function subscribeMentionProfile(
   listeners.add(receive);
   owners.set(pubkey, listeners);
   if (allowRelayLookup) {
+    lookupOwners.set(pubkey, (lookupOwners.get(pubkey) ?? 0) + 1);
     readRelays = [...new Set(relays)].slice(0, 6);
     retryRelays = [...new Set(fallbackRelays)]
       .filter((url) => !readRelays.includes(url))
@@ -77,10 +79,18 @@ export function subscribeMentionProfile(
     pending.add(pubkey);
     schedule();
   }
+  let subscribed = true;
   return () => {
+    if (!subscribed) return;
+    subscribed = false;
     listeners.delete(receive);
-    if (!listeners.size) {
-      owners.delete(pubkey);
+    if (!listeners.size) owners.delete(pubkey);
+    if (allowRelayLookup) {
+      const remaining = (lookupOwners.get(pubkey) ?? 1) - 1;
+      if (remaining) lookupOwners.set(pubkey, remaining);
+      else lookupOwners.delete(pubkey);
+    }
+    if (!lookupOwners.has(pubkey)) {
       pending.delete(pubkey);
     }
     if (!owners.size) {
@@ -89,7 +99,7 @@ export function subscribeMentionProfile(
       if (notifyTimer) clearTimeout(notifyTimer);
       notifyTimer = undefined;
     }
-    if (active && active.keys.every((key) => !owners.has(key))) active.controller.abort();
+    if (active && active.keys.every((key) => !lookupOwners.has(key))) active.controller.abort();
     if (!pending.size && timer) {
       clearTimeout(timer);
       timer = undefined;
@@ -119,13 +129,13 @@ async function flush(): Promise<void> {
         picture: profile.picture,
       });
     }
-    const missing = keys.filter((key) => !resolved.has(key) && owners.has(key));
+    const missing = keys.filter((key) => !resolved.has(key) && lookupOwners.has(key));
     // Snapshot relay configuration for this shared batch. Retry only missing
     // authors, once, with the same abort signal and bounded filter.
     const attempts = [readRelays, retryRelays];
     const best = new Map<string, number>();
     for (const relays of attempts) {
-      const unresolved = missing.filter((key) => !resolved.get(key)?.name && owners.has(key));
+      const unresolved = missing.filter((key) => !resolved.get(key)?.name && lookupOwners.has(key));
       if (signal.aborted) return;
       if (!unresolved.length || !relays.length) continue;
       unresolved.forEach((key) => queried.add(key));
@@ -167,7 +177,7 @@ async function flush(): Promise<void> {
       if (!resolved.has(key) && !queried.has(key)) {
         // A consumer can return after the relay filter was built. Its key
         // has not been queried, so a negative cache entry would be fabricated.
-        if (owners.has(key) && readRelays.length) pending.add(key);
+        if (lookupOwners.has(key) && readRelays.length) pending.add(key);
         continue;
       }
       const profile = resolved.get(key) ?? { ...EMPTY };
@@ -196,6 +206,7 @@ export function __resetMentionProfilesForTests(): void {
   if (timer) clearTimeout(timer);
   timer = undefined;
   owners.clear();
+  lookupOwners.clear();
   pending.clear();
   cache.clear();
   readRelays = [];

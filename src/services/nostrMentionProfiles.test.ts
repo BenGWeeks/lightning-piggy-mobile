@@ -248,3 +248,80 @@ it('keeps mention relay configuration when a cache-only sender row subscribes', 
   expect(query.mock.calls[1][1]).toEqual(['wss://retry']);
   expect(query.mock.calls[0][2].authors).toEqual(['mention']);
 });
+
+it('cancels queued lookup when only a cache-only listener remains and still observes storage', async () => {
+  const blur = subscribeMentionProfile('a', relays, jest.fn());
+  const receive = jest.fn();
+  const stopObserving = subscribeMentionProfile('a', relays, receive, [], null, false);
+  blur();
+  await jest.advanceTimersByTimeAsync(120);
+  expect(storage.getMany).not.toHaveBeenCalled();
+  expect(query).not.toHaveBeenCalled();
+
+  jest
+    .mocked(storage.peekSync)
+    .mockReturnValueOnce({ name: 'Cached Alice', picture: null } as never);
+  jest.mocked(storage.subscribeProfilesChanged).mock.calls.at(-1)![0]();
+  await jest.advanceTimersByTimeAsync(60);
+  expect(receive).toHaveBeenCalledWith({ name: 'Cached Alice', picture: null });
+  stopObserving();
+});
+
+it('aborts active work after the last lookup listener leaves despite cache-only listeners', async () => {
+  query.mockImplementationOnce(
+    (_pool, _relays, _filter, opts) =>
+      new Promise((resolve) => {
+        opts.signal?.addEventListener('abort', () => resolve([]), { once: true });
+      }),
+  );
+  const first = subscribeMentionProfile('a', relays, jest.fn(), ['wss://retry']);
+  const second = subscribeMentionProfile('a', relays, jest.fn(), ['wss://retry']);
+  const receive = jest.fn();
+  subscribeMentionProfile('a', relays, receive, [], null, false);
+  const stopObserving = subscribeMentionProfile('a', relays, jest.fn(), [], null, false);
+  await jest.advanceTimersByTimeAsync(60);
+  const signal = query.mock.calls[0][3].signal!;
+  stopObserving();
+  first();
+  first();
+  expect(signal.aborted).toBe(false);
+  second();
+  expect(signal.aborted).toBe(true);
+  await jest.advanceTimersByTimeAsync(120);
+  expect(query).toHaveBeenCalledTimes(1);
+  expect(receive).not.toHaveBeenCalled();
+});
+
+it('excludes cache-only keys after disk lookup and from retries while other lookups remain', async () => {
+  let finishDisk!: (profiles: Map<string, never>) => void;
+  let finishQuery!: (events: never[]) => void;
+  jest.mocked(storage.getMany).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finishDisk = resolve;
+      }),
+  );
+  query.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finishQuery = resolve;
+      }),
+  );
+  subscribeMentionProfile('a', relays, jest.fn(), ['wss://retry']);
+  const blurB = subscribeMentionProfile('b', relays, jest.fn(), ['wss://retry']);
+  const blurC = subscribeMentionProfile('c', relays, jest.fn(), ['wss://retry']);
+  subscribeMentionProfile('b', relays, jest.fn(), [], null, false);
+  subscribeMentionProfile('c', relays, jest.fn(), [], null, false);
+  await jest.advanceTimersByTimeAsync(60);
+  blurB();
+  finishDisk(new Map<string, never>());
+  await jest.advanceTimersByTimeAsync(0);
+  expect(query.mock.calls[0][2].authors).toEqual(['a', 'c']);
+  blurC();
+  expect(query.mock.calls[0][3].signal!.aborted).toBe(false);
+  finishQuery([]);
+  await jest.advanceTimersByTimeAsync(120);
+  expect(query).toHaveBeenCalledTimes(2);
+  expect(query.mock.calls[1][2].authors).toEqual(['a']);
+  expect(query.mock.calls[1][1]).toEqual(['wss://retry']);
+});
