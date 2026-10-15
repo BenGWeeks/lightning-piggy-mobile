@@ -1,4 +1,9 @@
-import { classifyRumor, subjectFromRumor, type DecodedRumor } from '../utils/nip17Unwrap';
+import {
+  classifyRumor,
+  subjectFromRumor,
+  textForRumor,
+  type DecodedRumor,
+} from '../utils/nip17Unwrap';
 import {
   findGroupForParticipants,
   reconcileSyntheticGroup,
@@ -44,11 +49,12 @@ export async function tryRouteGroupRumor(
 ): Promise<GroupRouteResult> {
   const cls = classifyRumor(rumor, viewerPubkey);
   if (!cls || cls.type === 'order') return { kind: 'not-group' };
-  // Two-party specialized rumors must reach the DM handlers even when
-  // a subject classifies them as a group (wallet-share redaction, Marmot
-  // Welcome joins, and encrypted-file metadata conversion).
+  // Two-party specialized rumors stay on their DM handlers, except files
+  // explicitly addressed to a named room via subject. Subjectless files
+  // remain DMs even when a room has the same participants.
   const isTwoParty = cls.type === 'dm' || cls.otherParticipants.size === 1;
-  if (isTwoParty && rumor.kind !== 14) return { kind: 'not-group' };
+  const isGroupFile = rumor.kind === 15 && cls.type === 'group';
+  if (isTwoParty && rumor.kind !== 14 && !isGroupFile) return { kind: 'not-group' };
   // NIP-17 does not require a subject on every message. A two-party
   // rumor can therefore belong to an already-known named room.
   const otherParticipants =
@@ -149,7 +155,8 @@ export async function tryRouteGroupRumor(
   const message: GroupMessage = {
     id: wrapId,
     senderPubkey: rumor.pubkey.toLowerCase(),
-    text: rumor.content,
+    text: textForRumor(rumor),
+    wireKind: rumor.kind,
     createdAt: rumor.created_at,
   };
   try {

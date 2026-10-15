@@ -12,6 +12,7 @@ import { routeMarmotWelcome } from '../services/marmotWelcomeRouter';
 import { fireMessageNotification } from '../services/notificationService';
 import { notifyDmMessage, notifyGroupMessage } from './nostrEventBus';
 import { textForRumor, type DecodedRumor } from '../utils/nip17Unwrap';
+import { dmRowPreview } from '../utils/dmRowPreview';
 import { NWC_SHARE_KIND, serializeNwcShare } from '../utils/nwcShareMessage';
 import type { Group } from '../types/groups';
 
@@ -234,6 +235,67 @@ describe.each([
     );
   }
 
+  if (hasSubject) {
+    it.each([
+      ['image/jpeg', false, false],
+      ['audio/mp4', false, false],
+      ['application/pdf', false, false],
+      ['application/pdf', true, false],
+      ['application/pdf', false, true],
+    ] as const)(
+      'routes %s to group storage and redacts notifications (sender echo=%s, multi-party=%s)',
+      async (mime, senderEcho, multiParty) => {
+        const third = 'c'.repeat(64);
+        const members = multiParty ? [PEER, third] : [PEER];
+        setKnownGroups(
+          [{ id: 'family', name: 'Family', memberPubkeys: members, createdAt: 1, updatedAt: 1 }],
+          ME,
+        );
+        const message = rumor(15);
+        message.pubkey = senderEcho ? ME : PEER;
+        message.content = 'https://files.example/attachment?token=private';
+        message.tags = [
+          ['p', senderEcho ? PEER : ME],
+          ...(multiParty ? [['p', third]] : []),
+          ['file-type', mime],
+          ['decryption-key', SECRET],
+          ['decryption-nonce', 'e'.repeat(24)],
+          ['imeta', 'name statement.pdf', 'size 2048'],
+        ];
+        const entry = await receive(message, 0);
+        const converted = textForRumor(message);
+        expect(converted).toContain(SECRET);
+        expect(entry).toBeUndefined();
+        expect(upsertDmMessages).not.toHaveBeenCalled();
+        expect(notifyDmMessage).not.toHaveBeenCalled();
+        expect(appendGroupMessage).toHaveBeenCalledWith(
+          ME,
+          'family',
+          expect.objectContaining({ text: converted, wireKind: 15 }),
+        );
+        expect(notifyGroupMessage).toHaveBeenCalledWith(
+          'family',
+          expect.objectContaining({ text: converted, wireKind: 15 }),
+        );
+        if (path === 'live' && !senderEcho) {
+          expect(fireMessageNotification).toHaveBeenCalledWith(
+            expect.objectContaining({
+              kind: 'group',
+              threadId: 'family',
+              body: dmRowPreview(converted, 15),
+            }),
+          );
+          const notifications = JSON.stringify(jest.mocked(fireMessageNotification).mock.calls);
+          for (const secret of [SECRET, 'e'.repeat(24), 'token=private', '[FILE]', '#lpe=1']) {
+            expect(notifications).not.toContain(secret);
+          }
+        } else {
+          expect(fireMessageNotification).not.toHaveBeenCalled();
+        }
+      },
+    );
+  }
+
   it('redacts wallet-share previews and notifications while retaining the encrypted-store payload', async () => {
     const content = serializeNwcShare({
       nwcUrl: `nostr+walletconnect://${PEER}?relay=wss%3A%2F%2Frelay.example&secret=${SECRET}`,
@@ -281,18 +343,28 @@ describe.each([
       ['decryption-key', SECRET],
       ['decryption-nonce', 'e'.repeat(24)],
     );
-    const entry = await receive(message);
+    const entry = await receive(message, hasSubject ? 0 : 1);
     const converted = textForRumor(message);
     expect(converted).toContain('#lpe=1');
     expect(converted).toContain(SECRET);
-    expect(upsertDmMessages).toHaveBeenCalledWith([
-      expect.objectContaining({ conversation: PEER, content: converted, wireKind: 15 }),
-    ]);
-    expect(entry.text).toBe('📎 Attachment');
-    expect(appendGroupMessage).not.toHaveBeenCalled();
+    if (hasSubject) {
+      expect(entry).toBeUndefined();
+      expect(upsertDmMessages).not.toHaveBeenCalled();
+      expect(appendGroupMessage).toHaveBeenCalledWith(
+        ME,
+        'family',
+        expect.objectContaining({ text: converted, wireKind: 15 }),
+      );
+    } else {
+      expect(upsertDmMessages).toHaveBeenCalledWith([
+        expect.objectContaining({ conversation: PEER, content: converted, wireKind: 15 }),
+      ]);
+      expect(entry.text).toBe('📎 Attachment');
+      expect(appendGroupMessage).not.toHaveBeenCalled();
+    }
     if (path === 'live') {
       expect(fireMessageNotification).toHaveBeenCalledWith(
-        expect.objectContaining({ kind: 'dm', body: '📎 Attachment' }),
+        expect.objectContaining({ kind: hasSubject ? 'group' : 'dm', body: '📎 Attachment' }),
       );
     }
   });

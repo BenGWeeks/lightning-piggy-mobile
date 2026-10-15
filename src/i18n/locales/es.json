@@ -1305,10 +1305,12 @@
     "unknownSender": "Alguien",
     "file": "Archivo",
     "fileBytes": "{{size}} bytes",
-    "fileShare": "Guardar / Compartir",
+    "fileShare": "Compartir",
     "filePreparing": "Preparando archivo…",
     "fileUnavailable": "Archivo no disponible",
     "fileShareFailed": "No se pudo preparar o compartir este archivo. Inténtalo de nuevo.",
+    "filePlainUrl": "Sin cifrado de extremo a extremo · Sin verificar",
+    "fileUploadLimit": "Elige archivos de hasta 16 MB.",
     "devFiles": "Archivos de prueba",
     "devFilesA11y": "Crear una conversación de prueba con archivos",
     "fileSave": "Guardar",
@@ -1318,7 +1320,13 @@
     "fileTypeMismatch": "El nombre del archivo no coincide con el tipo declarado: {{type}}",
     "blockedLink": "Enlace bloqueado",
     "invalidUpload": "El servidor de almacenamiento devolvió una URL de contenido no válida. Prueba otro servidor.",
-    "uploadFailedAllServers": "No se pudo subir a ningún servidor de almacenamiento. Comprueba tu conexión y vuelve a intentarlo, o añade otro servidor de almacenamiento en Ajustes."
+    "uploadFailedAllServers": "No se pudo subir a ningún servidor de almacenamiento. Comprueba tu conexión y vuelve a intentarlo, o añade otro servidor de almacenamiento en Ajustes.",
+    "fileLabelText": "Texto",
+    "fileLabelAudio": "Audio",
+    "fileLabelVideo": "Vídeo",
+    "fileSaveLabel": "Guardar %{filename}",
+    "fileShareLabel": "Compartir %{filename}",
+    "fileSaved": "Guardado en %{folder}"
   },
   "messageBubbleFooter": {
     "edited": "Editado",

@@ -196,6 +196,7 @@ it.each([false, true])(
         senderPubkey: ALICE,
         text: 'hello while hydrating',
         createdAt: now,
+        wireKind: 14,
       };
       expect(reconcile).toHaveBeenCalledTimes(1);
       expect(appendGroupMessage).toHaveBeenCalledWith(VIEWER, groupId, message);
@@ -284,7 +285,13 @@ it('replays a subject-tagged message before its subjectless follow-up after foll
   expect(notifyGroupMessage).toHaveBeenCalledTimes(2);
   expect(mockFireNotification).toHaveBeenCalledTimes(2);
   messages.forEach((message, index) => {
-    const stored = { id: message.id, senderPubkey: ALICE, text: message.text, createdAt: now };
+    const stored = {
+      id: message.id,
+      senderPubkey: ALICE,
+      text: message.text,
+      createdAt: now,
+      wireKind: 14,
+    };
     expect(appendGroupMessage).toHaveBeenNthCalledWith(index + 1, VIEWER, groupId, stored);
     expect(notifyGroupMessage).toHaveBeenNthCalledWith(index + 1, groupId, stored);
     expect(mockFireNotification).toHaveBeenNthCalledWith(

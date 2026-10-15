@@ -1,3 +1,4 @@
+import { useChatCardWidth } from '../styles/chatCardWidth';
 import { useGifMedia } from '../hooks/useGifMedia';
 import TapToLoadMedia, { displayHost } from './TapToLoadMedia';
 import { sanitizeDisplayText } from '../utils/sanitizeDisplayText';
@@ -212,7 +213,8 @@ const MessageBubble: React.FC<Props> = ({
     autoLoadMedia,
   );
   const colors = useThemeColors();
-  const styles = useMemo(() => createMessageBubbleStyles(colors), [colors]);
+  const cardWidth = useChatCardWidth();
+  const styles = useMemo(() => createMessageBubbleStyles(colors, cardWidth), [colors, cardWidth]);
   const { t } = useLocale();
   const {
     uri: gifUri,
@@ -288,7 +290,7 @@ const MessageBubble: React.FC<Props> = ({
   // Reusable footer (time + delivery tick) shared by every bubble variant so a
   // sent GIF / image / voice note / location / invoice all show the tick, not
   // just plain text (#856). Each variant passes its own time style.
-  const renderFooter = (timeStyle: object | (object | undefined)[]) => (
+  const renderFooter = (timeStyle: object | (object | undefined)[], surface = false) => (
     <BubbleFooter
       styles={styles}
       messageId={id}
@@ -297,7 +299,8 @@ const MessageBubble: React.FC<Props> = ({
       timeStyle={timeStyle}
       deliveryStatus={deliveryStatus}
       onOpenInfo={openInfo}
-      infoTint={infoTint}
+      infoTint={surface ? colors.textSupplementary : infoTint}
+      deliveryTint={surface ? colors.textSupplementary : undefined}
       edited={edited}
     />
   );
@@ -565,10 +568,11 @@ const MessageBubble: React.FC<Props> = ({
       <MessageFileBubble
         id={id}
         file={content.file}
+        autoLoad={autoLoadMedia}
         fromMe={fromMe}
         header={BubbleHeader}
         onLongPress={onLongPress}
-        footer={renderFooter([styles.bubbleTime])}
+        footer={renderFooter([styles.bubbleTime], true)}
       />,
     );
 

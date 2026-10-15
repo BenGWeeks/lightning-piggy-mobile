@@ -1305,10 +1305,12 @@
     "unknownSender": "Someone",
     "file": "File",
     "fileBytes": "{{size}} bytes",
-    "fileShare": "Save / Share",
+    "fileShare": "Share",
     "filePreparing": "Preparing file…",
     "fileUnavailable": "File unavailable",
     "fileShareFailed": "Could not prepare or share this file. Try again.",
+    "filePlainUrl": "Not end-to-end encrypted · Unverified",
+    "fileUploadLimit": "Choose files up to 16 MB.",
     "devFiles": "Dev files",
     "devFilesA11y": "Seed a dev file conversation",
     "fileSave": "Save",
@@ -1318,7 +1320,13 @@
     "fileTypeMismatch": "Filename does not match the declared type: {{type}}",
     "blockedLink": "Blocked link",
     "invalidUpload": "The storage server returned an invalid media URL. Please try another server.",
-    "uploadFailedAllServers": "Couldn't upload to any storage server. Check your connection and try again, or add another storage server in Settings."
+    "uploadFailedAllServers": "Couldn't upload to any storage server. Check your connection and try again, or add another storage server in Settings.",
+    "fileLabelText": "Text",
+    "fileLabelAudio": "Audio",
+    "fileLabelVideo": "Video",
+    "fileSaveLabel": "Save %{filename}",
+    "fileShareLabel": "Share %{filename}",
+    "fileSaved": "Saved to %{folder}"
   },
   "messageBubbleFooter": {
     "edited": "Edited",

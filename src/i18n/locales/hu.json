@@ -1305,10 +1305,12 @@
     "unknownSender": "Valaki",
     "file": "Fájl",
     "fileBytes": "{{size}} bájt",
-    "fileShare": "Mentés / Megosztás",
+    "fileShare": "Megosztás",
     "filePreparing": "Fájl előkészítése…",
     "fileUnavailable": "A fájl nem érhető el",
     "fileShareFailed": "Nem sikerült előkészíteni vagy megosztani a fájlt. Próbáld újra.",
+    "filePlainUrl": "Nincs végpontok közötti titkosítás · Nem ellenőrzött",
+    "fileUploadLimit": "Legfeljebb 16 MB méretű fájlt válassz.",
     "devFiles": "Tesztfájlok",
     "devFilesA11y": "Tesztbeszélgetés létrehozása fájlokkal",
     "fileSave": "Mentés",
@@ -1318,7 +1320,13 @@
     "fileTypeMismatch": "A fájlnév nem egyezik a megadott típussal: {{type}}",
     "blockedLink": "Blokkolt hivatkozás",
     "invalidUpload": "A tárolószerver érvénytelen média-URL-t adott vissza. Próbálj másik szervert.",
-    "uploadFailedAllServers": "Egyik tárolószerverre sem sikerült feltölteni. Ellenőrizd a kapcsolatot, és próbáld újra, vagy adj hozzá másik tárolószervert a Beállításokban."
+    "uploadFailedAllServers": "Egyik tárolószerverre sem sikerült feltölteni. Ellenőrizd a kapcsolatot, és próbáld újra, vagy adj hozzá másik tárolószervert a Beállításokban.",
+    "fileLabelText": "Szöveg",
+    "fileLabelAudio": "Hang",
+    "fileLabelVideo": "Videó",
+    "fileSaveLabel": "%{filename} mentése",
+    "fileShareLabel": "%{filename} megosztása",
+    "fileSaved": "Mentve ide: %{folder}"
   },
   "messageBubbleFooter": {
     "edited": "Szerkesztve",

@@ -10,6 +10,7 @@ import { wrapEvent } from 'nostr-tools/nip59';
 import * as nip44 from 'nostr-tools/nip44';
 import {
   subjectFromRumor,
+  fileMetaFromRumor,
   textForRumor,
   partnerFromRumor,
   classifyRumor,
@@ -146,11 +147,10 @@ describe('textForRumor (kind-15 → bubble text)', () => {
     expect(out).toContain('m=image%2Fjpeg');
   });
 
-  it('does NOT leak the key for an unrenderable mime kind-15 (keeps bare content)', () => {
+  it('encodes AES-GCM documents into the shared file URL', () => {
     const out = textForRumor(fileRumor('application/pdf', 'aes-gcm'));
-    expect(out).toBe('https://blossom.example/abc.bin');
-    expect(out).not.toContain('lpe=1');
-    expect(out).not.toContain('a'.repeat(64)); // the decryption key
+    expect(out).toContain('#lpe=1');
+    expect(out).toContain('m=application%2Fpdf');
   });
 
   it('does NOT leak the key for a non-aes-gcm audio kind-15', () => {
@@ -468,4 +468,20 @@ it('validates kind-15 URLs and carries the advertised size into render text', ()
       tags: [...rumor.tags.filter((t) => t[0] !== 'size'), ['size', String(50 * 1024 * 1024 + 1)]],
     }),
   ).not.toContain('#lpe=1');
+});
+
+it('bounds incoming kind-15 filenames before metadata storage', () => {
+  expect(
+    fileMetaFromRumor({
+      pubkey: PK_A,
+      created_at: 1,
+      kind: 15,
+      content: 'https://example.com/file',
+      tags: [
+        ['decryption-key', '11'.repeat(32)],
+        ['decryption-nonce', '22'.repeat(12)],
+        ['filename', 'a'.repeat(1000)],
+      ],
+    })?.filename,
+  ).toHaveLength(255);
 });

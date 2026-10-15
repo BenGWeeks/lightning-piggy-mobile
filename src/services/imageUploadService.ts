@@ -197,6 +197,7 @@ export interface EncryptedUpload {
   nonceHex: string;
   /** SHA-256 of the ciphertext — the `x` tag. */
   sha256Hex: string;
+  filename?: string;
   /** Ciphertext byte length — the `size` tag. */
   size: number;
   /** Original (decrypted) mime — the `file-type` tag. */

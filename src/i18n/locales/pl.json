@@ -1305,10 +1305,12 @@
     "unknownSender": "Ktoś",
     "file": "Plik",
     "fileBytes": "{{size}} bajtów",
-    "fileShare": "Zapisz / Udostępnij",
+    "fileShare": "Udostępnij",
     "filePreparing": "Przygotowywanie pliku…",
     "fileUnavailable": "Plik niedostępny",
     "fileShareFailed": "Nie udało się przygotować lub udostępnić pliku. Spróbuj ponownie.",
+    "filePlainUrl": "Bez szyfrowania end-to-end · Niezweryfikowany",
+    "fileUploadLimit": "Wybierz pliki o rozmiarze do 16 MB.",
     "devFiles": "Pliki testowe",
     "devFilesA11y": "Utwórz rozmowę testową z plikami",
     "fileSave": "Zapisz",
@@ -1318,7 +1320,13 @@
     "fileTypeMismatch": "Nazwa pliku nie odpowiada zadeklarowanemu typowi: {{type}}",
     "blockedLink": "Zablokowany link",
     "invalidUpload": "Serwer przechowywania zwrócił nieprawidłowy adres URL multimediów. Spróbuj innego serwera.",
-    "uploadFailedAllServers": "Nie udało się przesłać na żaden serwer przechowywania. Sprawdź połączenie i spróbuj ponownie albo dodaj inny serwer przechowywania w Ustawieniach."
+    "uploadFailedAllServers": "Nie udało się przesłać na żaden serwer przechowywania. Sprawdź połączenie i spróbuj ponownie albo dodaj inny serwer przechowywania w Ustawieniach.",
+    "fileLabelText": "Tekst",
+    "fileLabelAudio": "Audio",
+    "fileLabelVideo": "Wideo",
+    "fileSaveLabel": "Zapisz %{filename}",
+    "fileShareLabel": "Udostępnij %{filename}",
+    "fileSaved": "Zapisano w %{folder}"
   },
   "messageBubbleFooter": {
     "edited": "Edytowano",

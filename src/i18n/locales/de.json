@@ -1305,10 +1305,12 @@
     "unknownSender": "Jemand",
     "file": "Datei",
     "fileBytes": "{{size}} Bytes",
-    "fileShare": "Speichern / Teilen",
+    "fileShare": "Teilen",
     "filePreparing": "Datei wird vorbereitet…",
     "fileUnavailable": "Datei nicht verfügbar",
     "fileShareFailed": "Diese Datei konnte nicht vorbereitet oder geteilt werden. Versuche es erneut.",
+    "filePlainUrl": "Nicht Ende-zu-Ende-verschlüsselt · Ungeprüft",
+    "fileUploadLimit": "Wähle Dateien bis zu 16 MB.",
     "devFiles": "Testdateien",
     "devFilesA11y": "Eine Testunterhaltung mit Dateien erstellen",
     "fileSave": "Speichern",
@@ -1318,7 +1320,13 @@
     "fileTypeMismatch": "Dateiname passt nicht zum angegebenen Typ: {{type}}",
     "blockedLink": "Blockierter Link",
     "invalidUpload": "Der Speicherserver hat eine ungültige Medien-URL zurückgegeben. Bitte versuche einen anderen Server.",
-    "uploadFailedAllServers": "Hochladen auf einen Speicherserver ist fehlgeschlagen. Prüfe deine Verbindung und versuche es erneut oder füge in den Einstellungen einen weiteren Speicherserver hinzu."
+    "uploadFailedAllServers": "Hochladen auf einen Speicherserver ist fehlgeschlagen. Prüfe deine Verbindung und versuche es erneut oder füge in den Einstellungen einen weiteren Speicherserver hinzu.",
+    "fileLabelText": "Text",
+    "fileLabelAudio": "Audio",
+    "fileLabelVideo": "Video",
+    "fileSaveLabel": "%{filename} speichern",
+    "fileShareLabel": "%{filename} teilen",
+    "fileSaved": "In %{folder} gespeichert"
   },
   "messageBubbleFooter": {
     "edited": "Bearbeitet",

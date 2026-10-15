@@ -1,3 +1,4 @@
+import { classifyStoredMessage } from './messageContent';
 import { npubEncode } from 'nostr-tools/nip19';
 import { tryRouteGroupRumor } from '../contexts/nostrGroupRouting';
 import { notifyGroupMessage } from '../contexts/nostrEventBus';
@@ -59,6 +60,7 @@ it.each([false, true])('routes a subject-tagged two-member group (fromMe=%s)', a
     id: 'wrap',
     senderPubkey: message.pubkey,
     text: 'hello',
+    wireKind: 14,
     createdAt: 20,
   });
   expect(notifyGroupMessage).toHaveBeenCalledWith(
@@ -168,5 +170,38 @@ it('preserves multi-member group routing without a subject', async () => {
   expect(await tryRouteGroupRumor(message, ME, 'multi')).toMatchObject({
     kind: 'routed',
     group: larger,
+  });
+});
+
+it('preserves kind-15 document metadata when routing a multi-recipient rumor', async () => {
+  const room = { ...group, memberPubkeys: [PEER, THIRD] };
+  setKnownGroups([room], ME);
+  const message: DecodedRumor = {
+    ...rumor(),
+    kind: 15,
+    content: 'https://example.com/cipher',
+    tags: [
+      ['p', ME],
+      ['p', THIRD],
+      ['file-type', 'application/pdf'],
+      ['filename', 'invoice.pdf'],
+      ['decryption-key', '11'.repeat(32)],
+      ['decryption-nonce', '22'.repeat(12)],
+      ['x', '33'.repeat(32)],
+      ['size', '123'],
+    ],
+  };
+  const routed = await tryRouteGroupRumor(message, ME, 'document');
+  expect(routed.kind).toBe('routed');
+  const stored = jest.mocked(appendGroupMessage).mock.calls[0][2];
+  expect(stored.wireKind).toBe(15);
+  expect(classifyStoredMessage(stored.text, stored.wireKind)).toMatchObject({
+    kind: 'file',
+    file: {
+      name: 'invoice.pdf',
+      keyHex: '11'.repeat(32),
+      nonceHex: '22'.repeat(12),
+      sha256: '33'.repeat(32),
+    },
   });
 });

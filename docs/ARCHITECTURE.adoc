@@ -22,7 +22,7 @@ custom native modules, so Expo Go is not used).
 |===
 | Layer | Responsibility
 
-| **Native / config** | Expo config plugins (`plugins/`) + four local native modules (`modules/`): the Amber signer bridge, the opt-in Android background service, a rust-nostr wrapper and a secure clipboard. See <<native>>.
+| **Native / config** | Expo config plugins (`plugins/`) + five local native modules (`modules/`): the Amber signer bridge, the opt-in Android background service, a rust-nostr wrapper a secure clipboard and Android document metadata. See <<native>>.
 | **Contexts** | Long-lived React state providers (`src/contexts/`) — identity, wallets, DMs, groups, live-location. Composed once near the app root.
 | **i18n** | `src/i18n/` — 9 locale catalogues (`en` is the source of truth), per-locale CLDR plural rules (`plurals.ts`) and a per-account app language. See `i18n/GLOSSARY.md`.
 | **Hooks / services** | Per-responsibility logic. UI-facing hooks (`src/hooks/`) and a large stateless service layer (`src/services/`) split by domain (Nostr, wallet, location, media, NFC, notifications).
@@ -443,3 +443,49 @@ See `SOLUTION_DESIGN.adoc` → "Explore tab" and `PROTOCOLS.adoc` →
 * `architecture/notifications.adoc` — background + notification model.
 * `architecture/perf-and-state.adoc` — state management and performance notes.
 * `DEPLOYMENT.adoc` — build variants and the release workflow.
+
+== DM document attachments
+
+NIP-17 kind-15 documents use the same `MessageFileBubble`, `fileShare` and
+account-scoped `decryptedMediaCache` as Marmot files. `textForRumor` folds
+AES-GCM metadata into the internal `#lpe=1` URL, retaining the ciphertext
+`x` hash and encrypted size; the hash is checked before authenticated decrypt.
+The NIP-17 composer uses Expo FileSystem's system picker and uploads ciphertext
+to Blossom, with a 16 MiB plaintext upload limit. Android reads the provider's
+display name through the local `document-metadata` native module (a native
+rebuild is required). An optional `filename` tag carries the sanitized filename.
+Blossom learns the uploader's public key through signed BUD-02 authorization
+and sees their IP address. Downloading a file reveals the recipient's IP address
+to its hosting server; plain URLs can use an arbitrary sender-chosen host.
+Plain URL bubbles are labelled as unencrypted and unverified.
+
+Whole-message document URLs in NIP-04 kind 4 and NIP-17 kind 14 are classified
+by extension, without fetching. They have no sender-provided integrity hash;
+only this explicit plain-URL path may use the cache without one. Unencrypted
+Marmot imeta files still require their plaintext hash. Ordinary links remain
+links. Safe PDF previews follow image trust rules: followed senders and own
+messages load automatically; other senders require tap-to-load consent.
+Non-preview downloads and optional HEAD size metadata require a tap.
+HEAD is advisory; GET is independently
+stream-bounded to 50 MiB using `fetchBounded` and `checkRemoteUrl` at each
+redirect. Only public HTTPS endpoints are accepted.
+
+Names and MIME declarations pass the shared dangerous-type blocklist. Dangerous
+files require a warning and export as `attachment.bin` with generic MIME; other
+files share only a content-sniffed MIME. Sender-declared types never reach the
+OS chooser. File exports retain the existing account wipe and delayed cleanup
+rules. Inbox/notification previews redact document URLs and encryption metadata.
+The local-only dev fixtures and `messaging/flow-159-dm-files.yaml` exercise both
+DM protocols without publishing or changing accounts.
+
+PDF cards render the first page from the verified account-scoped local file,
+using `document-metadata.renderPdfFirstPageAsync` (Android PdfRenderer / iOS
+PDFKit) on a native async queue. PDFs over 10 MiB skip previews. Missing native
+support and rendering failures silently retain the icon card. Thumbnails live
+beside the attachment's hash-keyed cached file; native cache hits avoid repeat
+rendering. Preview writes join the account wipe publication barrier, and file
+expiry deletes the thumbnail too. No plaintext is sent to a rendering service.
+File cards share image bubble width and margins, display a friendly file type
+and human-readable size, and omit hosting domains and raw MIME declarations.
+Images prefer imeta dimensions, otherwise their loaded source dimensions,
+with aspect ratios clamped to 0.6–1.8.

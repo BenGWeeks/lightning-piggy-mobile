@@ -8,6 +8,7 @@ import {
   type DecodedRumor,
 } from '../utils/nip17Unwrap';
 import { dmRowPreview } from '../utils/dmRowPreview';
+import { parsePlainFileAttachment } from '../utils/fileAttachment';
 import { liveMarkerPhaseOf } from '../services/liveLocationService';
 import {
   acceptOrderRumor,
@@ -275,8 +276,13 @@ async function ingestInboxWrapsRun<W extends IngestableWrap>(
             fromMe: partnership.fromMe,
             createdAt: rumor.created_at,
             text: preview,
-            // Contact details and order payloads stay in the encrypted store.
-            ...(liveMarkerPhaseOf(text) ? { renderText: text } : {}),
+            // Order payloads stay in the encrypted store (#1550). Document
+            // links and kind-15 attachments need their content on the first thread load.
+            ...(rumor.kind === 15 ||
+            (rumor.kind === 14 && parsePlainFileAttachment(text) !== null) ||
+            liveMarkerPhaseOf(text)
+              ? { renderText: text }
+              : {}),
             wireKind: rumor.kind,
             rumorId,
           });

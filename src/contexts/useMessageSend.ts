@@ -358,6 +358,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
           nonceHex: file.nonceHex,
           sha256Hex: file.sha256Hex,
           size: file.size,
+          filename: file.filename,
         });
         const preferred = await preferredDmProtocol(pubkey, normalizedRecipientPubkey, protocol);
         if (preferred === 'marmot') {

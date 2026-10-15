@@ -1,3 +1,4 @@
+import { useChatCardWidth } from '../styles/chatCardWidth';
 import { preferredConversationParams } from '../services/preferredDmProtocol';
 import BrandedRefreshControl from '../components/BrandedRefreshControl';
 import BrandedSpinner from '../components/BrandedSpinner';
@@ -85,7 +86,11 @@ type ConversationNavigation = NativeStackNavigationProp<RootStackParamList, 'Con
 const ConversationScreen: React.FC = () => {
   const colors = useThemeColors();
   const t = useTranslation();
-  const styles = useMemo(() => createConversationScreenStyles(colors), [colors]);
+  const cardWidth = useChatCardWidth();
+  const styles = useMemo(
+    () => createConversationScreenStyles(colors, cardWidth),
+    [colors, cardWidth],
+  );
   const navigation = useNavigation<ConversationNavigation>();
   const route = useRoute<ConversationRoute>();
   const insets = useSafeAreaInsets();
@@ -315,6 +320,7 @@ const ConversationScreen: React.FC = () => {
     handleSend,
     handleShareLocation,
     handlePickAndSendImage,
+    handlePickAndSendFile,
     handleTakeAndSendPhoto,
     handleShareContactPicked,
     handleSendGif,
@@ -787,6 +793,7 @@ const ConversationScreen: React.FC = () => {
               <AttachPanel
                 onShareLocation={openLocationChooser}
                 onSendImage={handlePickAndSendImage}
+                onSendFile={handlePickAndSendFile}
                 onTakePhoto={handleTakeAndSendPhoto}
                 onSendZap={() => {
                   closeAttachPanel();
