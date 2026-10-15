@@ -5,14 +5,14 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { View, Text, Image, TouchableOpacity, ScrollView } from 'react-native';
 import { useExploreRailsPosition } from '../hooks/useExploreRailsPosition';
 import { useFocusEffect } from '@react-navigation/native';
-import { ChevronRight, Compass, MapPin, PiggyBank, Sparkles } from 'lucide-react-native';
+import { ChevronRight, Compass, Sparkles } from 'lucide-react-native';
 import TabHeader from '../components/TabHeader';
 import { useTranslation } from '../contexts/LocaleContext';
 import BrandPatternBackground from '../components/BrandPatternBackground';
 import { GeocacheRailEmptyState } from '../components/GeocacheRailEmptyState';
 import { ContentRail } from '../components/ContentRail';
 import { ExploreMiniMap } from '../components/ExploreMiniMap';
-import { LpPayoutBadge } from '../components/LpPayoutBadge';
+import CacheCard from '../components/ExploreCacheCard';
 import { MerchantDetailSheet } from '../components/MerchantDetailSheet';
 import { CacheDetailSheet } from '../components/CacheDetailSheet';
 import LegendSheet from '../components/LegendSheet';
@@ -149,6 +149,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     events,
     cachesArr,
     cacheRailState,
+    cacheRailIsNearestFallback,
     eventsArr,
     untrustedCacheCount,
     untrustedEventCount,
@@ -454,7 +455,8 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
         />
 
         <ContentRail<{ cache: ParsedCache; distance: number }>
-          title="Geo-caches near you"
+          title={cacheRailIsNearestFallback ? t('geocacheRail.nearest') : 'Geo-caches near you'}
+          titleTestId={cacheRailIsNearestFallback ? 'explore-geocache-nearest-label' : undefined}
           caption={
             untrustedCacheCount > 0
               ? `Piglets + classic NIP-GC caches · ${untrustedCacheCount} hidden from outside your trust graph`
@@ -654,55 +656,6 @@ const PlaceCard: React.FC<{
     </TouchableOpacity>
   );
 };
-
-const CacheCard: React.FC<{
-  cache: ParsedCache;
-  distance: number;
-  onPress: () => void;
-  colors: Palette;
-  styles: ReturnType<typeof createExploreHomeRailStyles>;
-}> = ({ cache, distance, onPress, colors, styles }) => (
-  <TouchableOpacity style={styles.card} onPress={onPress} testID={`cache-card-${cache.d}`}>
-    <View style={styles.cardThumbWrap}>
-      {cache.imageUrl ? (
-        <Image source={{ uri: cache.imageUrl }} style={styles.cardThumb} resizeMode="cover" />
-      ) : (
-        // Same-shape placeholder so cards align visually whether or
-        // not the hider attached a hint photo. LP Piggies get a pink
-        // panel + piggy glyph; vanilla NIP-GC caches get a slate
-        // panel + map-pin glyph.
-        <View
-          style={[
-            styles.cardThumb,
-            styles.cardThumbPlaceholder,
-            cache.isLpPiggy ? styles.cardIconLightning : styles.cardIconStandard,
-          ]}
-        >
-          {cache.isLpPiggy ? (
-            <PiggyBank size={32} color={colors.white} strokeWidth={2} />
-          ) : (
-            <MapPin size={32} color={colors.white} strokeWidth={2} />
-          )}
-        </View>
-      )}
-      <LpPayoutBadge
-        isLpPiggy={cache.isLpPiggy}
-        payoutSats={cache.payoutSats}
-        offset={{ top: 4, right: 4 }}
-      />
-    </View>
-    <Text style={styles.cardTitle} numberOfLines={2}>
-      {cache.name}
-    </Text>
-    <Text style={styles.cardSub} numberOfLines={1}>
-      {cache.isLpPiggy ? 'Piglet' : 'NIP-GC cache'}
-      {Number.isFinite(distance) ? ` · ${formatDistance(distance)}` : ''}
-    </Text>
-    <Text style={styles.cardSubSmall} numberOfLines={1}>
-      {cache.cacheType ?? 'traditional'} · {cache.size ?? 'micro'}
-    </Text>
-  </TouchableOpacity>
-);
 
 const LessonCard: React.FC<{
   course: Course;

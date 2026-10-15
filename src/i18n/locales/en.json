@@ -281,6 +281,7 @@
     "shareSubtitle": "They'll receive an encrypted Nostr DM with a person card."
   },
   "geocacheRail": {
+    "nearest": "Nearest Piglets",
     "empty": "No Piglets nearby yet",
     "hide": "Hide a Piglet",
     "error": "Couldn’t load nearby Piglets.",

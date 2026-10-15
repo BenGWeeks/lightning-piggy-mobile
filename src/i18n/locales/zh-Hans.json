@@ -281,6 +281,7 @@
     "shareSubtitle": "对方会收到一条带有名片的加密Nostr私信。"
   },
   "geocacheRail": {
+    "nearest": "最近的 Piglets",
     "empty": "附近还没有 Piglets",
     "hide": "藏一个 Piglet",
     "error": "无法加载附近的 Piglets。",

@@ -24,6 +24,8 @@ import { useCoalescedMap } from '../utils/useCoalescedMap';
 import { useFocusEffect } from '@react-navigation/native';
 import type { LiveUserLocation } from './useLiveUserLocation';
 
+export const NEAREST_FALLBACK_COUNT = 10;
+
 /** Owns Explore's coalesced relay data and disk hydration. */
 export function useExploreRelayContent(
   pos: LiveUserLocation | null,
@@ -207,6 +209,8 @@ export function useExploreRelayContent(
     },
     [],
   );
+  const cachesRef = useRef(caches);
+  cachesRef.current = caches;
   const [cacheCompletion, setCacheCompletion] = useState<NearbyCachesCompletion | null>(null);
   const subsCloserRef = useRef<(() => void)[]>([]);
   // Gate re-subscription on coarse movement (~500 m via 0.005° quantisation)
@@ -249,37 +253,74 @@ export function useExploreRelayContent(
       // which returned only the user's own truncation chain — caches
       // hidden in an adjacent precision-5 tile (e.g. 500 m across a
       // tile boundary) never matched the `#g` filter.
-      const cachePrefixes = geohashNeighbours(encodeGeohash(posLat, posLon, 5));
       const eventPrefixes = geohashNeighbours(encodeGeohash(posLat, posLon, 3));
 
-      subsCloserRef.current.push(
-        subscribeNearbyCaches(
-          cachePrefixes,
+      // Each query completes within eight seconds. Allow all three stages
+      // to run even when the initial query completes at its deadline.
+      const received = new Set<string>();
+      let searchDone = false;
+      let allFailed = true;
+      let closeWidening: (() => void) | undefined;
+      const finish = () => {
+        if (cancelled || searchDone) return;
+        searchDone = true;
+        clearTimeout(deadline);
+        closeWidening?.();
+        flushPendingCaches();
+        flushCounts();
+        setCacheCompletion({ allRelaysFailed: allFailed });
+      };
+      const deadline = setTimeout(() => {
+        // A deadline alone is inconclusive, just like the nearby query.
+        allFailed = false;
+        finish();
+      }, 3 * 8000);
+      subsCloserRef.current.push(() => clearTimeout(deadline));
+      const query = (precision: number) => {
+        if (cancelled || searchDone) return;
+        const startedAt = performance.now();
+        let completed = false;
+        let close: (() => void) | undefined;
+        close = subscribeNearbyCaches(
+          geohashNeighbours(encodeGeohash(posLat, posLon, precision)),
           (c) => {
-            if (cancelled) return;
-            // Hide test-account ("Piggy") Piglets in prod (kept in dev/preview).
+            if (cancelled || (precision < 5 && (completed || searchDone))) return;
             if (isHiddenInProd(c.hiderPubkey)) return;
-            // WoT filter: silently drop caches from pubkeys outside the
-            // trust graph (an unverified cache could be a phishing LNURL
-            // or, worse, a physical lure). Surfaced as a count instead so
-            // users know they exist without being lured into inspecting them.
             if (!isTrustedRef.current(c.hiderPubkey)) {
               countUntrusted('caches');
               return;
             }
+            received.add(c.coord);
             enqueueCache(c.coord, c);
           },
           undefined,
-          { limit: 200 },
+          { limit: precision === 5 ? 200 : 100 },
           (result) => {
-            if (cancelled) return;
-            // Commit staged content/counts before retiring the loading state.
+            if (cancelled || searchDone || completed) return;
+            completed = true;
+            allFailed = allFailed && result.allRelaysFailed;
+            if (precision < 5) {
+              closeWidening = undefined;
+              close?.();
+            }
             flushPendingCaches();
             flushCounts();
-            setCacheCompletion(result);
+            const known = new Set([...cachesRef.current.keys(), ...received]);
+            console.log(
+              `[PerfBlock] Explore cache search: precision=${precision} known=${known.size} elapsed=${Math.round(performance.now() - startedAt)}ms`,
+            );
+            if (known.size < NEAREST_FALLBACK_COUNT && precision > 3) query(precision - 1);
+            else finish();
           },
-        ),
-      );
+        );
+        // Also handles a synchronous completion from a relay adapter.
+        if (precision < 5) {
+          if (completed || searchDone) close();
+          else closeWidening = close;
+        }
+        subsCloserRef.current.push(close);
+      };
+      query(5);
       subsCloserRef.current.push(
         subscribeNearbyEvents(eventPrefixes, (e) => {
           if (cancelled) return;
@@ -320,7 +361,7 @@ export function useExploreRelayContent(
     ]),
   );
 
-  const sortedCaches = useMemo(() => {
+  const { sortedCaches, cacheRailIsNearestFallback } = useMemo(() => {
     const lowerPubkey = signedInPubkey?.toLowerCase() ?? null;
     const haveFix = typeof posLat === 'number' && typeof posLon === 'number';
     // Re-apply the prod test-account filter at render — cold-start caches
@@ -354,9 +395,20 @@ export function useExploreRelayContent(
         `[PerfBlock] sortedCaches own=0 (caches.size=${caches.size}, signedInPubkey=${signedInPubkey.slice(0, 8)}…) — by-author merge may not have landed yet`,
       );
     }
-    if (maxDistanceMetres !== null) {
-      items = items.filter((c) => c.distance <= maxDistanceMetres);
+    const nearby =
+      maxDistanceMetres === null ? items : items.filter((c) => c.distance <= maxDistanceMetres);
+    const cacheRailIsNearestFallback =
+      haveFix && nearby.length === 0 && items.some((c) => !c.isOwn && Number.isFinite(c.distance));
+    if (cacheRailIsNearestFallback) {
+      return {
+        sortedCaches: items
+          .filter((c) => !c.isOwn && Number.isFinite(c.distance))
+          .sort((a, b) => a.distance - b.distance)
+          .slice(0, NEAREST_FALLBACK_COUNT),
+        cacheRailIsNearestFallback,
+      };
     }
+    items = nearby;
     // Own listings still sort to the front WITHIN the radius — the user
     // wants their own work visible first when it's nearby, but a cache
     // they hid 100 km away shouldn't crowd the "nearby" rail.
@@ -368,12 +420,13 @@ export function useExploreRelayContent(
     // enough for any practical density without making the rail
     // disproportionately heavy. The "See all → Geo-caches" page
     // (HuntScreen) has no cap for the full list.
-    return items.slice(0, 50);
+    return { sortedCaches: items.slice(0, 50), cacheRailIsNearestFallback };
   }, [caches, posLat, posLon, maxDistanceMetres, signedInPubkey]);
 
   return {
     caches,
     sortedCaches,
+    cacheRailIsNearestFallback,
     events,
     cachesArr,
     cacheRailState: deriveGeocacheRailState(sortedCaches.length, pos !== null, cacheCompletion),

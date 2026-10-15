@@ -8,6 +8,7 @@ import { createContentRailStyles } from '../styles/ContentRail.styles';
 interface Props<T> {
   /** Section title — short, sentence case ("Places near you"). */
   title: string;
+  titleTestId?: string;
   /** Optional small caption rendered under the title in supplementary
    * text colour ("Powered by BTC Map" etc). */
   caption?: string;
@@ -33,6 +34,7 @@ interface Props<T> {
  */
 export function ContentRail<T>({
   title,
+  titleTestId,
   caption,
   items,
   renderItem,
@@ -56,7 +58,9 @@ export function ContentRail<T>({
         activeOpacity={0.7}
       >
         <View style={styles.headerText}>
-          <Text style={styles.title}>{title}</Text>
+          <Text style={styles.title} testID={titleTestId}>
+            {title}
+          </Text>
           {caption ? <Text style={styles.caption}>{caption}</Text> : null}
         </View>
         <View style={styles.seeAll}>

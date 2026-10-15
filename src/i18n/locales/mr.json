@@ -281,6 +281,7 @@
     "shareSubtitle": "त्यांना संपर्क कार्डसह एन्क्रिप्टेड Nostr DM मिळेल."
   },
   "geocacheRail": {
+    "nearest": "सर्वात जवळचे Piglets",
     "empty": "जवळपास अजून Piglets नाहीत",
     "hide": "एक Piglet लपवा",
     "error": "जवळपासचे Piglets लोड करता आले नाहीत.",

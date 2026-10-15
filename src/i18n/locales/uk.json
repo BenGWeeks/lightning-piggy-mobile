@@ -281,6 +281,7 @@
     "shareSubtitle": "Вони отримають зашифроване Nostr-повідомлення з карткою людини."
   },
   "geocacheRail": {
+    "nearest": "Найближчі Piglets",
     "empty": "Поблизу ще немає Piglets",
     "hide": "Сховати Piglet",
     "error": "Не вдалося завантажити Piglets поблизу.",

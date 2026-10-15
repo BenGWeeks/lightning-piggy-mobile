@@ -281,6 +281,7 @@
     "shareSubtitle": "Die Person erhält eine verschlüsselte Nostr-DM mit einer Personenkarte."
   },
   "geocacheRail": {
+    "nearest": "Nächstgelegene Piglets",
     "empty": "Noch keine Piglets in der Nähe",
     "hide": "Ein Piglet verstecken",
     "error": "Piglets in der Nähe konnten nicht geladen werden.",

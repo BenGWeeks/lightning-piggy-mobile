@@ -281,6 +281,7 @@
     "shareSubtitle": "Recibirán un mensaje directo cifrado de Nostr con una tarjeta de contacto."
   },
   "geocacheRail": {
+    "nearest": "Piglets más cercanos",
     "empty": "Aún no hay Piglets cerca",
     "hide": "Esconder un Piglet",
     "error": "No se pudieron cargar los Piglets cercanos.",

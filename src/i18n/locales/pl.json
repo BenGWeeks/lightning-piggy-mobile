@@ -281,6 +281,7 @@
     "shareSubtitle": "Odbiorca dostanie zaszyfrowaną wiadomość prywatną Nostr z kartą osoby."
   },
   "geocacheRail": {
+    "nearest": "Najbliższe Piglets",
     "empty": "W pobliżu nie ma jeszcze Piglets",
     "hide": "Ukryj Piglet",
     "error": "Nie udało się wczytać pobliskich Piglets.",
