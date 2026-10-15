@@ -12,9 +12,19 @@ export function listingTargetRelays(
   pubkey: string,
   relays: readonly { url: string; write: boolean }[],
 ): string[] {
-  const urls = [...relays.filter((r) => r.write).map((r) => r.url), ...MARKET_RELAYS]
-    .map((url) => url.trim().replace(/\/+$/, '').toLowerCase())
-    .filter((url) => /^wss?:\/\/[^/\s]+/.test(url));
+  const urls = [...relays.filter((r) => r.write).map((r) => r.url), ...MARKET_RELAYS].flatMap(
+    (url) => {
+      try {
+        const parsed = new URL(url.trim());
+        if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') return [];
+        // URL normalizes the host; paths and query values remain case-sensitive.
+        // Only remove a root slash, never a path or query's trailing slash.
+        return [parsed.toString().replace(/^(wss?:\/\/[^/?#]+)\/(?=[?#]|$)/, '$1')];
+      } catch {
+        return [];
+      }
+    },
+  );
   return [...new Set(lockRelays(urls, pubkey))];
 }
 

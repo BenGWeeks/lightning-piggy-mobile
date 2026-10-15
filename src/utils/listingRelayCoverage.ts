@@ -22,7 +22,7 @@ export function relayHasListing(events: readonly Event[], latest: Event): boolea
       event.pubkey === latest.pubkey &&
       event.kind === 30402 &&
       listingDTag(event) === listingDTag(latest) &&
-      (event.id === latest.id || event.created_at >= latest.created_at),
+      newestListing([latest, event])?.id === event.id,
   );
 }
 

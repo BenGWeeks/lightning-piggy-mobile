@@ -45,3 +45,19 @@ test('one or two targets require every relay; larger sets require two', () => {
   ).toBe(true);
   expect(listingRelayCoverage(null, new Map([['a', []]])).missing).toBe(true);
 });
+test('equal-time losing revisions do not suppress the low-coverage warning', () => {
+  const winner = event('a', 20);
+  const loser = event('b', 20);
+  expect(newestListing([loser, winner])).toEqual(winner);
+  expect(relayHasListing([loser], winner)).toBe(false);
+  expect(relayHasListing([winner], loser)).toBe(true);
+  expect(
+    listingRelayCoverage(
+      winner,
+      new Map([
+        ['present', [winner]],
+        ['outdated', [loser]],
+      ]),
+    ),
+  ).toEqual({ count: 1, total: 2, warning: true, missing: false });
+});

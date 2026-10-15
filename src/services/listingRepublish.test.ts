@@ -48,6 +48,26 @@ test('forged copies, other authors and kinds never become publish candidates, ev
     ),
   ).toEqual([valid]);
 });
+test('relay targets normalize hosts while preserving case-sensitive paths and query values', () => {
+  expect(
+    listingTargetRelays(me, [
+      { url: ' WSS://Relay.Example/PrivateShop?token=AbCd ', write: true },
+      { url: 'wss://relay.example/PrivateShop?token=AbCd', write: true },
+      { url: 'wss://relay.example/privateShop?token=AbCd', write: true },
+      { url: 'wss://relay.example/PrivateShop?token=abcd', write: true },
+      { url: 'wss://relay.example/PrivateShop/', write: true },
+      { url: 'wss://relay.example?token=AbCd/', write: true },
+      { url: 'not a relay', write: true },
+    ]),
+  ).toEqual([
+    'wss://relay.example/PrivateShop?token=AbCd',
+    'wss://relay.example/privateShop?token=AbCd',
+    'wss://relay.example/PrivateShop?token=abcd',
+    'wss://relay.example/PrivateShop/',
+    'wss://relay.example?token=AbCd/',
+    ...MARKET_RELAYS,
+  ]);
+});
 test('one bounded batched request per relay, newest valid local or remote copy', async () => {
   const local = sign(10);
   const newer = sign(20);
