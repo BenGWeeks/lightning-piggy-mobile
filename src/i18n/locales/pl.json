@@ -2800,7 +2800,8 @@
       "pickerSubtitle": "Otrzyma go jako prywatną wiadomość.",
       "sentTo": "Wysłano do: {{name}}",
       "sendFailed": "Nie udało się wysłać tego produktu",
-      "sharedItem": "Udostępniony produkt"
+      "sharedItem": "Udostępniony produkt",
+      "marketListing": "Oferta na rynku"
     },
     "liked": {
       "title": "Polubione produkty",

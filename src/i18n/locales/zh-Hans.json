@@ -2784,7 +2784,8 @@
       "pickerSubtitle": "对方将以私信形式收到。",
       "sentTo": "已发送给 {{name}}",
       "sendFailed": "无法发送此商品",
-      "sharedItem": "分享的商品"
+      "sharedItem": "分享的商品",
+      "marketListing": "市场商品"
     },
     "liked": {
       "title": "喜欢的商品",

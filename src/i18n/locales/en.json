@@ -2784,7 +2784,8 @@
       "pickerSubtitle": "They'll get it as a private message.",
       "sentTo": "Sent to {{name}}",
       "sendFailed": "Couldn't send this item",
-      "sharedItem": "Shared item"
+      "sharedItem": "Shared item",
+      "marketListing": "Market listing"
     },
     "liked": {
       "title": "Liked items",

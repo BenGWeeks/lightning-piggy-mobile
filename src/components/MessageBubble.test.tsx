@@ -22,7 +22,7 @@ jest.mock('./LinkifiedText', () => ({
   LinkifiedText: ({ text }: { text: string }) =>
     jest.requireActual('react').createElement(jest.requireActual('react-native').Text, null, text),
 }));
-jest.mock('./nostr/EmbeddedEventCard', () => ({
+jest.mock('./MessageSharedListing', () => ({
   __esModule: true,
   default: ({
     token,
@@ -194,7 +194,7 @@ test('an unfollowed sender GIF waits for the placeholder tap before downloading'
 });
 
 test.each([true, false])(
-  'shared listings always load images but gate relay hints (sender trust=%s)',
+  'shared listings pass sender trust to the card (sender trust=%s)',
   (autoLoadMedia) => {
     const { naddrEncode } = jest.requireActual('nostr-tools/nip19');
     const hints = ['wss://sender-hint.example'];
@@ -218,10 +218,10 @@ test.each([true, false])(
     expect(ui.getByText('Scam warning\nSender title')).toBeTruthy();
     expect(ui.getByText('Do not buy')).toBeTruthy();
     expect(ui.getByText('Afterword')).toBeTruthy();
-    expect(ui.getByTestId('listing-first').props.autoLoadMedia).toBe(true);
-    expect(ui.getByTestId('listing-second').props.autoLoadMedia).toBe(true);
-    expect(ui.getByTestId('listing-first').props.relays).toEqual(autoLoadMedia ? hints : []);
-    expect(ui.getByTestId('listing-second').props.relays).toEqual(autoLoadMedia ? hints : []);
+    expect(ui.getByTestId('listing-first').props.autoLoadMedia).toBe(autoLoadMedia);
+    expect(ui.getByTestId('listing-second').props.autoLoadMedia).toBe(autoLoadMedia);
+    expect(ui.getByTestId('listing-first').props.relays).toEqual(hints);
+    expect(ui.getByTestId('listing-second').props.relays).toEqual(hints);
   },
 );
 
@@ -242,3 +242,21 @@ test('an unfollowed sender photo waits for a tap before mounting the image loade
   expect(ui.queryByTestId('conversation-image-placeholder-msg')).toBeNull();
   expect(ui.UNSAFE_getByType(DecryptedImage).props.url).toBe('https://example.com/photo.png');
 });
+
+test.each([undefined, { eventId: 'rumor', kind: 14, delivered: false, relayResults: {} }])(
+  'a trailing listing renders immediately without delivery acknowledgement (%j)',
+  (deliveryStatus) => {
+    const { naddrEncode } = jest.requireActual('nostr-tools/nip19');
+    const uri = naddrEncode({ kind: 30402, pubkey: 'a'.repeat(64), identifier: 'pending' });
+    const ui = render(
+      <MessageBubble
+        {...props}
+        deliveryStatus={deliveryStatus}
+        content={{ kind: 'text', text: `Bitcoin Satskull nostr:${uri}` }}
+      />,
+    );
+    expect(ui.getByTestId('conversation-listing-msg')).toBeTruthy();
+    expect(ui.getByTestId('listing-pending')).toBeTruthy();
+    expect(ui.getByText('Bitcoin Satskull')).toBeTruthy();
+  },
+);

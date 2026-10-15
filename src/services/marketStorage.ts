@@ -338,3 +338,29 @@ export function wipeMarketAccount(account: string): Promise<void> {
   diskQueue = wipe.catch(() => {}); // Keep later accounts usable if storage fails.
   return wipe;
 }
+
+const catalogueReads = new Map<string, Promise<ReturnType<typeof loadedMarketSnapshots>>>();
+
+/** Hydrate this account's existing catalogue before a shared listing relay lookup. */
+export function readLoadedMarketSnapshots(account: string) {
+  const running = catalogueReads.get(account);
+  if (running) return running;
+  const pending = hydrateMarketCatalogue(account).finally(() => catalogueReads.delete(account));
+  catalogueReads.set(account, pending);
+  return pending;
+}
+
+async function hydrateMarketCatalogue(account: string) {
+  const epoch = generation(account);
+  const entries = await diskEntries();
+  if (signedOut.has(account) || generation(account) !== epoch) return [];
+  for (const entry of entries) {
+    if (snapshotAccount(entry.key) !== account) continue;
+    const current = memory.get(entry.key);
+    if (!current || current.at < entry.at) memory.set(entry.key, entry);
+  }
+  const retained = bounded([...memory.values()]);
+  memory.clear();
+  for (const entry of retained) memory.set(entry.key, entry);
+  return loadedMarketSnapshots([account]);
+}

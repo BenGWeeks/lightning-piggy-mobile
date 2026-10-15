@@ -1811,3 +1811,21 @@ If the wallet-check warning renders a missing `common.cancel` translation,
 use the existing `market.sell.cancel` key, which is translated in every
 supported locale. Key-only translation mocks can hide this error; verify
 alert button keys against the locale files when reviewing the warning.
+
+== Shared Market listing appears as a raw naddr in chat (#1598)
+
+A listing share contains a title followed by a `nostr:naddr` for kind 30402.
+The share helper, NIP-17 rumor and local sent row preserve the newline;
+delivery acknowledgement only changes the footer, not rich-card selection.
+A title and reference on the same line previously missed the standalone-line
+parser. The parser now also accepts a listing as the final whitespace token,
+while references embedded inside prose remain text. Existing standalone
+references and surrounding warnings retain their original order.
+
+A chat listing always paints a titled product placeholder until resolution,
+including offline and pending sends. Resolution checks the active account's
+loaded and persisted Market snapshots before the bounded, verified embed
+batch and its relay hints. Focus cleanup removes the reader; when the last
+reader of a batch leaves, both the initial lookup and seller reconciliation
+are aborted. Missing results keep the placeholder instead of a web-link-only
+unavailable state.
