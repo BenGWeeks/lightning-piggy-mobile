@@ -1,6 +1,7 @@
 import { buildMarketOrder } from './marketOrder';
 import {
   buyerOrderNote,
+  orderAddressLines,
   distinctOrderItems,
   orderListingPreviews,
   orderProductPreviews,
@@ -80,4 +81,20 @@ it('groups distinct items, totals their badges and retains order and unknown tit
   ]);
   expect(lines[0].quantity).toBe(1);
   expect(distinctOrderItems([])).toEqual([]);
+});
+
+it('displays legacy comma-separated addresses on separate lines without breaking structured streets', () => {
+  expect(orderAddressLines('Testy McTestface, 1 Nowhere Lane, Faketown, ZZ1 1ZZ, GB')).toEqual([
+    'Testy McTestface',
+    '1 Nowhere Lane',
+    'Faketown',
+    'ZZ1 1ZZ',
+    'GB',
+  ]);
+  expect(orderAddressLines('Testy\r\nUnit 2, Business Park\r\n\r\nGB')).toEqual([
+    'Testy',
+    'Unit 2, Business Park',
+    'GB',
+  ]);
+  expect(orderAddressLines('')).toEqual([]);
 });

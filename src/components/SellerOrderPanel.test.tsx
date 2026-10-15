@@ -24,6 +24,7 @@ jest.mock('./SellerInvoiceSheet', () => {
     p.visible ? <Text testID="sheet-open">open</Text> : null;
   return MockSheet;
 });
+jest.mock('./FiatAmount', () => () => null);
 jest.mock('./BrandedToast', () => ({ Toast: { show: jest.fn() } }));
 jest.mock('lucide-react-native', () => new Proxy({}, { get: () => () => null }));
 

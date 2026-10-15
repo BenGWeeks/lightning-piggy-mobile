@@ -1,4 +1,5 @@
-import { buyerOrderNote } from '../utils/orderPresentation';
+import FiatAmount from './FiatAmount';
+import { buyerOrderNote, orderAddressLines } from '../utils/orderPresentation';
 import { OrderItemImage } from './OrderItemThumbnails';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
@@ -236,7 +237,9 @@ function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.Reac
                 currency: quote.fiatTotal.currency,
               })}
             </Text>
-          ) : null}
+          ) : (
+            <FiatAmount sats={quote.totalSats} testID={`seller-order-fiat-${id}`} />
+          )}
         </View>
       </View>
       {quote.amountMismatch && quote.buyerAmountSats !== null ? (
@@ -251,7 +254,7 @@ function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.Reac
         <View style={styles.section}>
           <Text style={styles.detailLabel}>{t('sellerOrders.shipTo')}</Text>
           <Text style={styles.detail} selectable testID={`seller-order-address-${id}`}>
-            {localizeDeliveryAddress(order.address, locale)}
+            {localizeDeliveryAddress(orderAddressLines(order.address).join('\n'), locale)}
           </Text>
         </View>
       ) : null}

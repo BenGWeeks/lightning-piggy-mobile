@@ -59,3 +59,11 @@ export function distinctOrderItems(
   }
   return [...items.values()];
 }
+
+/** Keep structured address lines intact; display older comma-separated checkout addresses vertically. */
+export function orderAddressLines(address: string): string[] {
+  return address
+    .split(address.includes('\n') ? /\r?\n/ : /,/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
