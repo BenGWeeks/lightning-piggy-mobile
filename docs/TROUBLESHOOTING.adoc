@@ -1724,3 +1724,33 @@ Marmot networks capture the session owner's lockdown at construction; inbox
 lookups, anonymous kind-445 messages, Welcomes and key packages all use it
 through asynchronous waits and account switches. The Nostr network settings
 show the effective LAN destinations for every relay list during lockdown.
+
+=== Auth-only relay reads finish empty or report an unhandled AUTH send rejection
+
+In nostr-tools 2.23.3, CLOSED leaves a subscription's EOSE timer running.
+A slow NIP-42 signer can let that timer finish a one-shot read empty or close
+its authenticated replacement. `relayReqTransport` invalidates callbacks from
+each retired physical request before awaiting AUTH.
+
+The SDK also ignores the promise returned by AUTH `send()`. A disconnect
+while signing retains the challenge, so checking only the challenge can send
+on a closed connection and expose the signed event in an unhandled rejection.
+`relayAuth` captures the originating socket/connection, cancels signing on its
+close event, and guards the AUTH send through the SDK's existing OK waiter.
+Send failures clear that waiter and reject with a sanitized error; late signer
+completion and reconnects cannot authenticate the retired socket.
+
+
+=== strfry auth-only reads never authenticate
+
+strfry can close a restricted REQ with
+`ERROR: auth-required: this event may only be read by its recipients`.
+Checking only the start of the reason misses its `ERROR:` wrapper.
+`relayReqTransport` recognises `auth-required:` at colon-separated token
+boundaries, case-insensitively; `relayQuery` does the same for authentication
+and `restricted:` refusals so failed reads cannot appear to succeed empty.
+
+nostr-tools retains AUTH challenges received on connect, before any CLOSED.
+The transport uses that challenge when the first auth-required CLOSED arrives,
+signs once, and re-arms once after successful AUTH. A second auth-required or
+restricted CLOSED ends the read without another authentication attempt.

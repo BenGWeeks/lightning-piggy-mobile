@@ -3,7 +3,7 @@ import { useFollowHydration } from './useFollowHydration';
 import { reconcileCachedContactFollows } from './reconcileContactFollows';
 import { buildFollowSet } from '../utils/followPubkeys';
 import { readFollowSnapshot } from '../services/contactFollowFreshness';
-import { signAccountEvent } from '../services/signAccountEvent';
+import { useRelayAuthSigner } from './useRelayAuthSigner';
 import React, {
   createContext,
   useContext,
@@ -1357,11 +1357,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     relays,
   });
 
-  const signEvent = useCallback(
-    (event: Parameters<typeof signAccountEvent>[0]) =>
-      signAccountEvent(event, { pubkey, isLoggedIn, signerType }),
-    [pubkey, isLoggedIn, signerType],
-  );
+  const signEvent = useRelayAuthSigner(pubkey, isLoggedIn, signerType, nip65Relays, dmInboxRelays);
 
   const signZapRequest = useCallback(
     async (
