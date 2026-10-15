@@ -33,7 +33,7 @@ it.each([
   expect(parseInvoiceSettlement(response, HASH)?.paid).not.toBe(true);
 });
 
-it.each(['settled', undefined])('accepts matching settlement proof with state %s', (state) => {
+it.each(['settled'])('accepts matching settlement proof with state %s', (state) => {
   expect(parseInvoiceSettlement({ ...SETTLED, state }, HASH)).toEqual({
     paid: true,
     settledAt: 100,

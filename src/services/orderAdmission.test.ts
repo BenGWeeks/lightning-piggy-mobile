@@ -113,7 +113,7 @@ it('scopes pending claims and completion to account and sender', async () => {
   await completeOrderRumors(OWNER, [otherSender]);
 });
 
-it('budgets buyer orders and receipts while merchant lifecycle updates bypass a full window', async () => {
+it('budgets every inbound lifecycle rumor in a full window', async () => {
   for (let n = 0; n < 5; n++) await acceptOrderRumor(OWNER, rumor(n), false);
   for (const type of ['2', '3', '4']) {
     const update = {
@@ -123,7 +123,7 @@ it('budgets buyer orders and receipts while merchant lifecycle updates bypass a 
         ['type', type],
       ],
     };
-    expect(await acceptOrderRumor(OWNER, update, false)).toBe(true);
+    expect(await acceptOrderRumor(OWNER, update, false)).toBe(false);
     await completeOrderRumors(OWNER, [update]);
   }
   expect(await acceptOrderRumor(OWNER, rumor(30), false)).toBe(false);
@@ -169,3 +169,28 @@ it('persists a daily bound for distinct buyer cancellations, including across re
   expect(budget.accepted.every((entry: { stored: boolean }) => entry.stored)).toBe(true);
   expect(budget.dropped).toBe(6);
 });
+
+it.each(['2', '3', '4'])(
+  'deduplicates completed merchant type %s across fresh wraps and bounds updates',
+  async (type) => {
+    const update = {
+      ...rumor(900),
+      tags: [
+        ['order', 'placed'],
+        ['type', type],
+      ],
+    };
+    expect(await acceptOrderRumor(OWNER, update, false)).toBe(true);
+    await completeOrderRumors(OWNER, [update]);
+    for (let n = 0; n < 1000; n++) expect(await acceptOrderRumor(OWNER, update, false)).toBe(false);
+    let allowed = 0;
+    for (let n = 0; n < 10; n++) {
+      const next = { ...update, created_at: 1000 + n };
+      if (await acceptOrderRumor(OWNER, next, false)) {
+        allowed++;
+        await completeOrderRumors(OWNER, [next]);
+      }
+    }
+    expect(allowed).toBe(4);
+  },
+);

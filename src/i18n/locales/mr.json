@@ -3587,6 +3587,7 @@
     "buyerNotified": "पैसे मिळाले — खरेदीदाराला कळवले",
     "invoiceSent": "इनव्हॉइस पाठवले",
     "notPaidYet": "अजून पैसे आले नाहीत",
+    "couldNotConfirmPayment": "पेमेंटची पुष्टी करता आली नाही",
     "orderNumber": "ऑर्डर #{{id}}",
     "rowA11y": "{{buyer}} यांची ऑर्डर: {{items}}. {{status}}",
     "problems": {

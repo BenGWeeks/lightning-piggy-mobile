@@ -35,6 +35,7 @@ jest.mock('light-bolt11-decoder', () => ({
 
 let mockGetBalanceImpl: () => Promise<{ balance: number }> = async () => ({ balance: 0 });
 const mockRawLookupInvoice = jest.fn();
+const mockRawListTransactions = jest.fn();
 const mockGetInfo = jest.fn();
 const mockEnable = jest.fn(async () => undefined);
 // pay_invoice + lookupInvoice are driven per-test for the ambiguous
@@ -60,7 +61,12 @@ jest.mock('@getalby/sdk', () => ({
     close: jest.fn(),
     // `client.connected` is read by ensureConnected(); make it look
     // healthy so the reconnect path isn't triggered mid-test.
-    client: { connected: true, pool: undefined, lookupInvoice: mockRawLookupInvoice },
+    client: {
+      connected: true,
+      pool: undefined,
+      lookupInvoice: mockRawLookupInvoice,
+      listTransactions: mockRawListTransactions,
+    },
   })),
 }));
 
@@ -417,3 +423,53 @@ describe('raw invoice settlement lookup', () => {
     },
   );
 });
+
+it.each([
+  'absent',
+  'listed',
+  'listed-no-preimage',
+  'unsupported',
+  'wrong-hash',
+  'unsettled',
+  'failed',
+])(
+  'confirms the exact stateless LNbits expired shape against successful history: %s',
+  async (history) => {
+    const response = {
+      type: 'incoming',
+      payment_hash: mockPaymentHash,
+      preimage: 'c'.repeat(64),
+      created_at: 100,
+      settled_at: 100,
+      expires_at: 200,
+    };
+    mockRawLookupInvoice.mockResolvedValueOnce(response);
+    if (history === 'unsupported')
+      mockRawListTransactions.mockRejectedValueOnce(new Error('NOT_IMPLEMENTED'));
+    else
+      mockRawListTransactions.mockResolvedValueOnce({
+        transactions:
+          history === 'absent'
+            ? []
+            : [
+                {
+                  ...response,
+                  payment_hash: history === 'wrong-hash' ? 'd'.repeat(64) : mockPaymentHash,
+                  settled_at: history === 'unsettled' ? undefined : 100,
+                  preimage: history === 'listed-no-preimage' ? undefined : response.preimage,
+                  ...(history === 'failed' ? { state: 'failed' } : {}),
+                },
+              ],
+      });
+    const result = await lookupInvoice(WALLET_ID, mockPaymentHash, { replyTimeoutMs: 5000 });
+    expect(result?.paid === true).toBe(history.startsWith('listed'));
+    if (!history.startsWith('listed')) expect(result).toBeNull();
+    expect(mockRawListTransactions).toHaveBeenLastCalledWith({
+      from: 40,
+      until: Math.floor(Date.now() / 1000),
+      type: 'incoming',
+      unpaid: false,
+      limit: 50,
+    });
+  },
+);

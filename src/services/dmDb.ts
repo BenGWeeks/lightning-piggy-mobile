@@ -511,7 +511,7 @@ export async function getShopOrderRows(
 
 /**
  * Buyer history is bounded by the newest placed orders, never by lifecycle
- * row count. Retrieve every update for those order ids and sellers so a busy
+ * row count. Retrieve the first order and latest lifecycle rows so a busy
  * order cannot push its original row (or another purchase) out of history.
  * Invalid legacy JSON is ignored without aborting the read.
  */
@@ -526,8 +526,17 @@ export async function getOrderRows(owner: string, limit = 500): Promise<DmMessag
         AND json_extract(${content}, '$.type') = 'order'
       ORDER BY created_at DESC, event_id DESC
       LIMIT ?
-    )
-    SELECT * FROM dm_messages
+    ), ranked AS (
+    SELECT *, ROW_NUMBER() OVER (
+      PARTITION BY conversation, json_extract(${content}, '$.orderId'),
+        json_extract(${content}, '$.type'), from_me,
+        CASE WHEN json_extract(${content}, '$.type') = 'status'
+          AND json_extract(${content}, '$.status') = 'cancelled' THEN 1 ELSE 0 END
+      ORDER BY
+        CASE WHEN json_extract(${content}, '$.type') = 'order' THEN created_at END ASC,
+        CASE WHEN json_extract(${content}, '$.type') = 'order' THEN event_id END ASC,
+        created_at DESC, event_id DESC
+    ) AS lifecycle_rank FROM dm_messages
       WHERE owner = ? AND wire_kind IN (16, 17)
         AND EXISTS (
           SELECT 1 FROM placed
@@ -536,6 +545,9 @@ export async function getOrderRows(owner: string, limit = 500): Promise<DmMessag
             AND ((from_me = 1 AND sender = owner) OR
                  (from_me = 0 AND sender = placed.conversation))
         )
+        AND json_extract(${content}, '$.type') IN ('order', 'payment', 'status', 'shipping', 'receipt')
+    )
+    SELECT * FROM ranked WHERE lifecycle_rank = 1
       ORDER BY created_at DESC, event_id DESC;`,
     [owner, owner, Math.max(1, Math.min(2000, Math.floor(limit))), owner],
   );

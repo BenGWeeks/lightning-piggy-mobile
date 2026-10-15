@@ -182,3 +182,17 @@ it('uses the durable invoice for a placed-only thread, including expiry and sett
     }),
   ).toBe('invoiceSent');
 });
+
+it('uses the durable replacement expiry while the expired original remains in relay history', () => {
+  const old = bolt11('lnbc21u', NOW - 7200, 3600);
+  const current = thread([
+    received,
+    row(true, 20, { type: 'payment', payment: { method: 'lightning', value: old } }),
+  ]);
+  expect(shopOrderStatus(current)).toBe('invoiceExpired');
+  expect(
+    shopOrderStatus(current, {
+      invoiceRecord: { bolt11: BOLT11, paymentHash: HASH, sentAt: NOW * 1000, replacesBolt11: old },
+    }),
+  ).toBe('invoiceSent');
+});

@@ -1,7 +1,8 @@
 /* eslint-disable @typescript-eslint/no-require-imports -- jest.mock factories must require lazily */
 import React from 'react';
-import { fireEvent, render } from '@testing-library/react-native';
+import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import SellerOrderPanel from './SellerOrderPanel';
+import { Toast } from './BrandedToast';
 import { useSellerOrderQuote } from '../hooks/useSellerOrderQuote';
 import { useSellerInvoice } from '../hooks/useSellerInvoice';
 import type { ParsedOrderEvent } from '../utils/orderEvents';
@@ -178,6 +179,7 @@ it.each(['unpaid', 'paid', 'unknown', 'missing', 'unbound'])(
       />,
     );
     expect(ui.getByTestId('seller-order-status-x')).toHaveTextContent('orderStatus.invoiceExpired');
+    expect(Boolean(ui.queryByTestId('seller-order-check-paid-x'))).toBe(settlement !== 'missing');
     if (settlement !== 'unpaid') {
       expect(ui.queryByTestId('seller-order-send-invoice-x')).toBeNull();
       return;
@@ -258,4 +260,82 @@ it('keeps payment controls when the buyer received an invoice without a seller s
   expect(ui.getByTestId('seller-order-status-x')).toHaveTextContent('orderStatus.invoiceSent');
   expect(ui.queryByTestId('seller-order-send-invoice-x')).toBeNull();
   expect(ui.getByTestId('seller-order-check-paid-x')).toBeTruthy();
+});
+
+it.each([true, false])(
+  'uses a persisted replacement with a stale expired self-copy (pending %s)',
+  (deliveryPending) => {
+    (useSellerInvoice as jest.Mock).mockReturnValue({
+      record: {
+        bolt11: 'new-invoice',
+        replacesBolt11: 'old-invoice',
+        paymentHash: 'h',
+        amountSats: 4200,
+        sentAt: Date.now(),
+        deliveryPending,
+      },
+      sending: false,
+      checking: false,
+      checkPaid: jest.fn(),
+      sendInvoice: jest.fn(),
+      markPaid: jest.fn(),
+    });
+    const placed = { ...order(), amountSats: 4200 };
+    const ui = render(
+      <SellerOrderPanel
+        order={placed}
+        buyerPubkey={'b'.repeat(64)}
+        id="x"
+        thread={{
+          placed,
+          orderId: 'o-1',
+          role: 'seller',
+          placedAt: 1,
+          cancelled: false,
+          invoices: [],
+          invoice: { bolt11: 'old-invoice', expiresAt: 1, at: 1 },
+        }}
+      />,
+    );
+    expect(ui.getByTestId('seller-order-status-x')).toHaveTextContent('orderStatus.invoiceSent');
+    expect(Boolean(ui.queryByTestId('seller-order-send-invoice-x'))).toBe(deliveryPending);
+    expect(ui.getByTestId('seller-order-check-paid-x')).toBeTruthy();
+  },
+);
+
+it('shows neutral feedback when payment cannot be confirmed and keeps replacement gated', async () => {
+  (useSellerInvoice as jest.Mock).mockReturnValue({
+    record: { bolt11: 'old-invoice', paymentHash: 'h', walletId: 'wallet', amountSats: 4200 },
+    unpaidInvoice: null,
+    sending: false,
+    checking: false,
+    checkPaid: jest.fn(async () => null),
+    sendInvoice: jest.fn(),
+    markPaid: jest.fn(),
+  });
+  const placed = { ...order(), amountSats: 4200 };
+  const ui = render(
+    <SellerOrderPanel
+      order={placed}
+      buyerPubkey={'b'.repeat(64)}
+      id="x"
+      thread={{
+        placed,
+        orderId: 'o-1',
+        role: 'seller',
+        placedAt: 1,
+        cancelled: false,
+        invoices: [],
+        invoice: { bolt11: 'old-invoice', expiresAt: 1, at: 1 },
+      }}
+    />,
+  );
+  fireEvent.press(ui.getByTestId('seller-order-check-paid-x'));
+  await waitFor(() =>
+    expect(Toast.show).toHaveBeenCalledWith({
+      type: 'info',
+      text1: 'sellerOrders.couldNotConfirmPayment',
+    }),
+  );
+  expect(ui.queryByTestId('seller-order-send-invoice-x')).toBeNull();
 });

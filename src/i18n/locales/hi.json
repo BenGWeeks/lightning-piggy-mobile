@@ -3587,6 +3587,7 @@
     "buyerNotified": "भुगतान हो गया — खरीदार को सूचित किया",
     "invoiceSent": "इनवॉइस भेजा गया",
     "notPaidYet": "अभी भुगतान नहीं हुआ",
+    "couldNotConfirmPayment": "भुगतान की पुष्टि नहीं हो सकी",
     "orderNumber": "ऑर्डर #{{id}}",
     "rowA11y": "{{buyer}} का ऑर्डर: {{items}}। {{status}}",
     "problems": {

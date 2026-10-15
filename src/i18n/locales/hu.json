@@ -3587,6 +3587,7 @@
     "buyerNotified": "Kifizetve – vevő értesítve",
     "invoiceSent": "Számla elküldve",
     "notPaidYet": "Még nincs kifizetve",
+    "couldNotConfirmPayment": "Nem sikerült megerősíteni a fizetést",
     "orderNumber": "Rendelés #{{id}}",
     "rowA11y": "Rendelés tőle: {{buyer}}: {{items}}. {{status}}",
     "problems": {

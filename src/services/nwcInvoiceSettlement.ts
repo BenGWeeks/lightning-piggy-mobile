@@ -44,11 +44,40 @@ export function parseInvoiceSettlement(
     settledAt: typeof result.settled_at === 'number' ? result.settled_at : undefined,
     preimage: typeof result.preimage === 'string' ? result.preimage : undefined,
   };
-  const paid =
-    (result.state === undefined || result.state === 'settled') &&
-    hasInvoiceSettlementProof(proof, paymentHash);
+  // Stateless wallets (notably LNbits) can expose the incoming preimage and
+  // a settlement timestamp for failed/expired invoices. Lookup alone is unknown.
+  if (result.state === undefined) return null;
+  const paid = result.state === 'settled' && hasInvoiceSettlementProof(proof, paymentHash);
   // Contradictory settlement claims are unknown, so they cannot authorize
   // replacing the invoice either.
   if (!paid && (result.state === 'settled' || result.settled_at)) return null;
   return paid ? { paid, invoice, ...proof } : { paid: false, invoice };
+}
+
+/** Confirm a stateless lookup against the wallet's successful incoming history.
+ * Absence from a bounded page cannot prove unpaid; keep replacement fail-closed. */
+export function confirmListedInvoiceSettlement(
+  lookup: unknown,
+  transactions: unknown,
+  paymentHash: string,
+): InvoiceSettlement | null {
+  if (!lookup || typeof lookup !== 'object' || !Array.isArray(transactions)) return null;
+  const raw = lookup as Record<string, unknown>;
+  if (raw.state !== undefined || raw.type !== 'incoming' || raw.error != null) return null;
+  for (const value of transactions) {
+    if (!value || typeof value !== 'object') continue;
+    const tx = value as Record<string, unknown>;
+    if (tx.type !== 'incoming' || (tx.state !== undefined && tx.state !== 'settled')) continue;
+    const listed = parseInvoiceSettlement(
+      { ...tx, preimage: tx.preimage ?? raw.preimage, state: 'settled' },
+      paymentHash,
+    );
+    if (!listed?.paid) continue;
+    // Validate lookup hash/invoice/proof as well, using the confirmed timestamp.
+    return parseInvoiceSettlement(
+      { ...raw, state: 'settled', settled_at: listed.settledAt },
+      paymentHash,
+    );
+  }
+  return null;
 }

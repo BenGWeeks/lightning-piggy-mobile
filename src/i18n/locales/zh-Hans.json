@@ -3587,6 +3587,7 @@
     "buyerNotified": "已付款——已通知买家",
     "invoiceSent": "发票已发送",
     "notPaidYet": "尚未付款",
+    "couldNotConfirmPayment": "无法确认付款",
     "orderNumber": "订单 #{{id}}",
     "rowA11y": "来自 {{buyer}} 的订单：{{items}}。{{status}}",
     "problems": {

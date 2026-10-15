@@ -46,7 +46,7 @@ function insert(
     .run(owner, id, seller, at, fromMe ? owner : seller, content, fromMe ? 1 : 0);
 }
 
-it('keeps placed orders and every lifecycle row after 600 newer updates', async () => {
+it('bounds buyer lifecycle history after 600 newer updates', async () => {
   insert('original', 'purchase', '1', 1);
   insert('second', 'other-purchase', '1', 2);
   insert('invoice', 'purchase', '2', 3);
@@ -58,7 +58,7 @@ it('keeps placed orders and every lifecycle row after 600 newer updates', async 
     .prepare('INSERT INTO dm_messages VALUES (?, ?, ?, ?, ?, ?, ?, 16)')
     .run('buyer', 'bad-json', 'seller', 1003, 'buyer', '{broken', 1);
   const rows = await getOrderRows('buyer');
-  expect(rows).toHaveLength(603);
+  expect(rows).toHaveLength(4);
   expect(rows.map((row) => row.eventId)).toEqual(
     expect.arrayContaining(['original', 'second', 'invoice']),
   );
@@ -203,4 +203,13 @@ it('retains the earliest placed goods when a buyer resends a paid order id', asy
     items: [{ quantity: 1 }],
     message: 'Original address',
   });
+});
+
+it('returns bounded lifecycle rows with a one-purchase limit after 1,000 merchant updates', async () => {
+  insert('placed', 'purchase', '1', 1);
+  for (let n = 0; n < 1000; n++) insert(`update-${n}`, 'purchase', '3', 10 + n);
+  insert('invoice', 'purchase', '2', 1010);
+  insert('shipping', 'purchase', '4', 1011);
+  const rows = await getOrderRows('buyer', 1);
+  expect(rows.map((row) => row.eventId)).toEqual(['shipping', 'invoice', 'update-999', 'placed']);
 });

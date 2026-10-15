@@ -17,6 +17,7 @@ import { expiresAtFromBolt11, paymentHashFromBolt11 } from '../utils/bolt11';
 import {
   receiptProvesPayment,
   shopOrderStatus,
+  sellerRecordIsCurrent,
   type SellerOrderThread,
 } from '../utils/shopOrderStatus';
 import type { ParsedOrderEvent } from '../utils/orderEvents';
@@ -56,6 +57,7 @@ function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.Reac
     mine ? buyerPubkey : null,
     mine ? order.orderId : null,
     thread?.invoice?.bolt11,
+    thread?.invoice?.at,
   );
   const [sheetVisible, setSheetVisible] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -96,15 +98,24 @@ function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.Reac
   const onCheckPaid = useCallback(async () => {
     try {
       const paid = await invoice.checkPaid();
-      if (!paid) Toast.show({ type: 'info', text1: t('sellerOrders.notPaidYet') });
+      if (paid !== true)
+        Toast.show({
+          type: 'info',
+          text1: t(
+            paid === false ? 'sellerOrders.notPaidYet' : 'sellerOrders.couldNotConfirmPayment',
+          ),
+        });
     } catch (e) {
       Toast.show({ type: 'error', text1: errorText(e) });
     }
   }, [invoice, t, errorText]);
 
+  const recordCurrent = sellerRecordIsCurrent(invoice.record, thread?.invoice);
   const expiresAt =
-    thread?.invoice?.expiresAt ??
-    (invoice.record ? expiresAtFromBolt11(invoice.record.bolt11) : null);
+    recordCurrent && invoice.record
+      ? (expiresAtFromBolt11(invoice.record.bolt11) ??
+        (invoice.record.bolt11 === thread?.invoice?.bolt11 ? thread.invoice.expiresAt : null))
+      : (thread?.invoice?.expiresAt ?? null);
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     setNow(Date.now());
@@ -127,9 +138,11 @@ function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.Reac
 
   // Which invoice to watch: the one I recorded on this device for this order.
   const record = invoice.record;
-  const invoiceHash = thread?.invoice
-    ? paymentHashFromBolt11(thread.invoice.bolt11)
-    : (record?.paymentHash ?? null);
+  const invoiceHash = recordCurrent
+    ? (record?.paymentHash ?? null)
+    : thread?.invoice
+      ? paymentHashFromBolt11(thread.invoice.bolt11)
+      : null;
   const receiptVerified = thread ? receiptProvesPayment(thread, invoiceHash) : false;
   const walletPaid = Boolean(record?.paidAt);
   const status = shopOrderStatus(thread, {
@@ -143,13 +156,13 @@ function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.Reac
   const canReplace =
     status === 'invoiceExpired' &&
     Boolean(record?.walletId && record.paymentHash && invoice.unpaidInvoice === record.bolt11) &&
-    (!thread?.invoice || thread.invoice.bolt11 === record?.bolt11);
+    recordCurrent;
   const canRetry =
     status === 'invoiceSent' &&
     Boolean(record?.deliveryPending) &&
     !record?.paidAt &&
     !confirmedSent &&
-    (!thread?.invoice || thread.invoice.bolt11 === record?.bolt11) &&
+    recordCurrent &&
     (expiresAt === null || expiresAt * 1000 > now);
   const busy = invoice.sending;
   const invoiceBlocked = quote.totalSats === null || quote.totalSats !== order.amountSats || busy;
@@ -300,7 +313,7 @@ function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.Reac
             </Text>
           </TouchableOpacity>
         ) : null}
-        {status === 'invoiceSent' && record ? (
+        {(status === 'invoiceSent' || status === 'invoiceExpired') && record ? (
           <TouchableOpacity
             style={[styles.secondaryButton, invoice.checking && styles.buttonDisabled]}
             onPress={onCheckPaid}

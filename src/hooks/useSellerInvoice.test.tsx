@@ -476,10 +476,56 @@ it.each([
   const { result, unmount } = renderHook(() => useSellerInvoice(BUYER, 'order-1'));
   await waitFor(() => expect(lookupInvoice).toHaveBeenCalled());
   await act(async () => {
-    expect(await result.current.checkPaid()).toBe(false);
+    expect(await result.current.checkPaid()).toBeNull();
   });
   expect((await loadSellerInvoices(SELLER))[`${BUYER}:order-1`].paidAt).toBeUndefined();
   unmount();
   listener.mockRestore();
   AppState.currentState = originalState;
+});
+
+it('retries a persisted replacement after remount while the original self-copy remains', async () => {
+  mockFocused = false;
+  const replacement = 'replacement-invoice';
+  (extractInvoice as jest.Mock).mockImplementation((value) => ({
+    expiresAt: value === BOLT11 ? 1 : Math.floor(Date.now() / 1000) + 3600,
+  }));
+  await recordSellerInvoice(SELLER, {
+    orderId: 'order-1',
+    buyerPubkey: BUYER,
+    walletId: 'original-wallet',
+    paymentHash: HASH,
+    bolt11: BOLT11,
+    amountSats: 4200,
+    sentAt: 1,
+  });
+  makeInvoiceForWallet.mockResolvedValueOnce(replacement);
+  (sendNip17Rumor as jest.Mock).mockRejectedValueOnce(new Error('publish failed'));
+  const first = renderHook(() => useSellerInvoice(BUYER, 'order-1', BOLT11, 1));
+  await act(async () => {
+    await expect(
+      first.result.current.sendInvoice({
+        walletId: 'replacement-wallet',
+        amountSats: 4200,
+        remember: false,
+      }),
+    ).rejects.toMatchObject({ code: 'sendFailed' });
+  });
+  first.unmount();
+  const retry = renderHook(() => useSellerInvoice(BUYER, 'order-1', BOLT11, 1));
+  await waitFor(() => expect(retry.result.current.record?.bolt11).toBe(replacement));
+  await act(async () => {
+    await retry.result.current.sendInvoice({
+      walletId: 'other-wallet',
+      amountSats: 4200,
+      remember: true,
+    });
+  });
+  expect(makeInvoiceForWallet).toHaveBeenCalledTimes(1);
+  expect(await loadSellerReceiveWallet(SELLER)).toBe('replacement-wallet');
+  expect((await loadSellerInvoices(SELLER))[`${BUYER}:order-1`]).toMatchObject({
+    bolt11: replacement,
+    deliveryPending: false,
+    replacesBolt11: BOLT11,
+  });
 });

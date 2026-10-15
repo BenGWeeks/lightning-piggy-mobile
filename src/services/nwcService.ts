@@ -1,5 +1,9 @@
 import { sanitizeDisplayText } from '../utils/sanitizeDisplayText';
-import { parseInvoiceSettlement, type InvoiceSettlement } from './nwcInvoiceSettlement';
+import {
+  confirmListedInvoiceSettlement,
+  parseInvoiceSettlement,
+  type InvoiceSettlement,
+} from './nwcInvoiceSettlement';
 import { confirmNwcPayment } from './nwcPaymentCompletion';
 import { isSettledPayment, matchesPaymentHash } from '../utils/paymentCompletion';
 import { listTransactionsWithRetry } from './nwcTransactionRetry';
@@ -921,7 +925,19 @@ export async function lookupInvoice(
     const result = await (options.replyTimeoutMs !== undefined
       ? withTimeout(call, options.replyTimeoutMs, `lookupInvoice(${walletId})`)
       : call);
-    return parseInvoiceSettlement(result, paymentHash);
+    if (result.state !== undefined) return parseInvoiceSettlement(result, paymentHash);
+    if (!Number.isSafeInteger(result.created_at) || result.created_at <= 0) return null;
+    const listing = provider.client.listTransactions({
+      from: Math.max(0, result.created_at - 60),
+      until: Math.floor(Date.now() / 1000),
+      type: 'incoming',
+      unpaid: false,
+      limit: 50,
+    });
+    const history = await (options.replyTimeoutMs !== undefined
+      ? withTimeout(listing, options.replyTimeoutMs, `confirmInvoice(${walletId})`)
+      : listing);
+    return confirmListedInvoiceSettlement(result, history.transactions, paymentHash);
   } catch (error) {
     if (isTerminalLookupError(error)) {
       recordFailedLookup(walletId, paymentHash);

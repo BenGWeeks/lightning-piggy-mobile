@@ -18,6 +18,7 @@ import {
 import { saveSellerReceiveWallet } from '../services/sellerReceiveWallet';
 import { amountSatsFromBolt11, paymentHashFromBolt11 } from '../utils/bolt11';
 import { extractInvoice } from '../utils/messageContent';
+import { sellerRecordIsCurrent } from '../utils/shopOrderStatus';
 import { shortOrderId } from '../utils/marketOrder';
 import { buildPaymentRequestRumor, buildStatusUpdateRumor } from '../utils/sellerOrderMessages';
 
@@ -72,7 +73,7 @@ export interface UseSellerInvoice {
   unpaidInvoice: string | null;
   sendInvoice: (input: SendInvoiceInput) => Promise<void>;
   /** Ask the wallet the invoice was made on whether it's paid. */
-  checkPaid: () => Promise<boolean>;
+  checkPaid: () => Promise<boolean | null>;
   /** Tell the buyer the order is paid (kind-16 type-3 `confirmed`). */
   markPaid: () => Promise<void>;
 }
@@ -87,6 +88,7 @@ export function useSellerInvoice(
   buyerPubkey: string | null,
   orderId: string | null,
   existingBolt11?: string,
+  existingInvoiceAt = 0,
 ): UseSellerInvoice {
   const { pubkey, signerType, relays } = useNostr();
   const t = useTranslation();
@@ -173,7 +175,14 @@ export function useSellerInvoice(
             const records = await loadSellerInvoices(pubkey);
             const previous = records[sellerInvoiceKey(buyerPubkey, orderId)];
             if (!stillCurrent()) throw new SellerInvoiceError('notSignedIn', 'Account changed');
-            if (existingBolt11 && previous?.bolt11 !== existingBolt11)
+            if (
+              existingBolt11 &&
+              !sellerRecordIsCurrent(previous, {
+                bolt11: existingBolt11,
+                at: existingInvoiceAt,
+                expiresAt: 0,
+              })
+            )
               throw new SellerInvoiceError('invoiceFailed', 'Original invoice wallet is unknown');
             const expiresAt = previous ? extractInvoice(previous.bolt11)?.expiresAt : null;
             const retry =
@@ -202,6 +211,7 @@ export function useSellerInvoice(
               if (settlement?.paid && hasInvoiceSettlementProof(settlement, previous.paymentHash)) {
                 await patchSellerInvoice(pubkey, orderId, buyerPubkey, {
                   paidAt: Date.now(),
+                  settlementVersion: 2,
                   settledAt: settlement.settledAt,
                   preimage: settlement.preimage,
                 });
@@ -257,6 +267,7 @@ export function useSellerInvoice(
                 amountSats,
                 sentAt: Date.now(),
                 deliveryPending: true,
+                replacesBolt11: existingBolt11 ?? previous?.bolt11,
               };
               // The buyer must never receive a payable invoice without its wallet record.
               await recordSellerInvoice(pubkey, invoice);
@@ -294,16 +305,25 @@ export function useSellerInvoice(
         if (lifecycleRef.current.mounted) setSending(false);
       }
     },
-    [pubkey, buyerPubkey, orderId, existingBolt11, makeInvoiceForWallet, send, t],
+    [
+      pubkey,
+      buyerPubkey,
+      orderId,
+      existingBolt11,
+      existingInvoiceAt,
+      makeInvoiceForWallet,
+      send,
+      t,
+    ],
   );
 
   const recordRef = useRef(record);
   const currentRecord =
     active && record?.buyerPubkey === buyerPubkey && record?.orderId === orderId ? record : null;
   recordRef.current = currentRecord;
-  const checkPaid = useCallback(async (): Promise<boolean> => {
+  const checkPaid = useCallback(async (): Promise<boolean | null> => {
     const current = recordRef.current;
-    if (!pubkey || !current) return false;
+    if (!pubkey || !current) return null;
     if (current.paidAt) return true;
     setChecking(true);
     setUnpaidRecord(null);
@@ -315,13 +335,14 @@ export function useSellerInvoice(
       if (result?.paid && hasInvoiceSettlementProof(result, current.paymentHash)) {
         await patchSellerInvoice(pubkey, current.orderId, current.buyerPubkey, {
           paidAt: Date.now(),
+          settlementVersion: 2,
           settledAt: result.settledAt,
           preimage: result.preimage,
         });
         return true;
       }
       if (result?.paid === false) setUnpaidRecord(current);
-      return false;
+      return result?.paid === false ? false : null;
     } finally {
       setChecking(false);
     }

@@ -10,7 +10,7 @@ import {
 import { resetSellerStore } from './sellerEventStore';
 const PREIMAGE = 'c'.repeat(64);
 const HASH = bytesToHex(sha256(hexToBytes(PREIMAGE)));
-const PROOF = { settledAt: 100, preimage: PREIMAGE };
+const PROOF = { settledAt: 100, preimage: PREIMAGE, settlementVersion: 2 };
 const OWNER = 'a'.repeat(64);
 beforeEach(async () => {
   await AsyncStorage.clear();
@@ -122,6 +122,7 @@ it.each([
   { settledAt: 100 },
   { preimage: PREIMAGE },
   { settledAt: 100, preimage: 'd'.repeat(64) },
+  { settledAt: 100, preimage: PREIMAGE },
   PROOF,
 ])('repairs persisted false-paid records and retains verified proof: %j', async (proof) => {
   const record = { ...invoiceRecord(0), paidAt: 200, confirmedAt: 300, ...proof };

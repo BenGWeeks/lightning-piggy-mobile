@@ -3641,6 +3641,7 @@
     "buyerNotified": "Opłacone — kupujący powiadomiony",
     "invoiceSent": "Faktura wysłana",
     "notPaidYet": "Jeszcze nieopłacone",
+    "couldNotConfirmPayment": "Nie udało się potwierdzić płatności",
     "orderNumber": "Zamówienie nr {{id}}",
     "rowA11y": "Zamówienie od {{buyer}}: {{items}}. {{status}}",
     "problems": {

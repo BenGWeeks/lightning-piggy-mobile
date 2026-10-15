@@ -62,6 +62,20 @@ export function receiptProvesPayment(
   return sameInvoice && preimageMatches(receipt.payment.preimage, invoicePaymentHash);
 }
 
+/** Prefer a durable replacement while the relay still exposes the old self-copy. */
+export function sellerRecordIsCurrent(
+  record: Pick<SellerInvoiceRecord, 'bolt11' | 'sentAt' | 'replacesBolt11'> | null | undefined,
+  invoice: SellerOrderThread['invoice'],
+): boolean {
+  return Boolean(
+    record &&
+    (!invoice ||
+      record.bolt11 === invoice.bolt11 ||
+      record.replacesBolt11 === invoice.bolt11 ||
+      (invoice.at > 0 && record.sentAt > invoice.at * 1000)),
+  );
+}
+
 /** The chip for an order I received. `walletPaid` = my wallet saw it settle. */
 export function shopOrderStatus(
   thread: SellerOrderThread | undefined,
@@ -69,7 +83,8 @@ export function shopOrderStatus(
     walletPaid?: boolean;
     receiptVerified?: boolean;
     nowMs?: number;
-    invoiceRecord?: Pick<SellerInvoiceRecord, 'bolt11' | 'paidAt' | 'confirmedAt' | 'paymentHash'>;
+    invoiceRecord?: Pick<SellerInvoiceRecord, 'bolt11' | 'paidAt' | 'confirmedAt' | 'paymentHash'> &
+      Partial<Pick<SellerInvoiceRecord, 'sentAt' | 'replacesBolt11'>>;
   } = {},
 ): ShopOrderStatus {
   if (thread?.cancelled) return 'cancelled';
@@ -86,8 +101,14 @@ export function shopOrderStatus(
   // A delivered buyer wrap may have no seller self-copy. Keep the durable
   // local invoice usable until the payment request appears in the thread.
   const expiresAt =
-    thread?.invoice?.expiresAt ??
-    (opts.invoiceRecord ? expiresAtFromBolt11(opts.invoiceRecord.bolt11) : null);
+    opts.invoiceRecord &&
+    sellerRecordIsCurrent(
+      { ...opts.invoiceRecord, sentAt: opts.invoiceRecord.sentAt ?? 0 },
+      thread?.invoice,
+    )
+      ? (expiresAtFromBolt11(opts.invoiceRecord.bolt11) ??
+        (opts.invoiceRecord.bolt11 === thread?.invoice?.bolt11 ? thread.invoice.expiresAt : null))
+      : (thread?.invoice?.expiresAt ?? null);
   if (thread?.invoice || opts.invoiceRecord)
     return expiresAt !== null && expiresAt * 1000 <= (opts.nowMs ?? Date.now())
       ? 'invoiceExpired'

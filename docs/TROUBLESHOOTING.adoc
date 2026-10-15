@@ -731,7 +731,15 @@ done &
 alone cannot prove payment. `nwcService.lookupInvoice` now calls the raw
 `provider.client.lookupInvoice` and validates a positive integer `settled_at`,
 `state === 'settled'` when supplied, the requested payment hash, and a preimage
-whose SHA-256 matches that hash. Any returned BOLT11 must match too. Errors,
+whose SHA-256 matches that hash. For responses without `state`, LNbits can
+return both the real incoming preimage and `settled_at = created_at` for an
+expired failed invoice. Confirm these responses through bounded raw
+`list_transactions` with `type: incoming` and `unpaid: false`; require the
+same payment hash and a settlement timestamp in that successful history.
+An unsupported, failed or missing list match stays unknown and cannot
+permit replacement. The settlement cache uses a new version and local seller
+paid records require verification version 2, discarding earlier false positives.
+Any returned BOLT11 must match too. Errors,
 contradictory states and missing proof never report paid. Seller records retain
 `settledAt` and the verified preimage; loading repairs old unproven `paidAt` and
 `confirmedAt` markers while retaining invoice and wallet bindings. Regression

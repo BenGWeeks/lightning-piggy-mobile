@@ -3587,6 +3587,7 @@
     "buyerNotified": "Paid — buyer notified",
     "invoiceSent": "Invoice sent",
     "notPaidYet": "Not paid yet",
+    "couldNotConfirmPayment": "Couldn't confirm payment",
     "orderNumber": "Order #{{id}}",
     "rowA11y": "Order from {{buyer}}: {{items}}. {{status}}",
     "problems": {

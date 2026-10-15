@@ -16,6 +16,10 @@ export interface SellerInvoiceRecord {
   bolt11: string;
   amountSats: number;
   sentAt: number;
+  /** Original self-copy that this durable replacement supersedes. */
+  replacesBolt11?: string;
+  /** Version of the fail-closed wallet settlement verification. */
+  settlementVersion?: number;
   /** Persisted before publishing; retries reuse this invoice until delivery completes. */
   deliveryPending?: boolean;
   /** When the wallet reported the invoice settled (ms). */
@@ -60,7 +64,10 @@ async function readSellerInvoices(pubkey: string): Promise<{
     for (const value of Object.values(parsed as Record<string, unknown>)) {
       if (isRecord(value)) {
         const record = { ...value };
-        if (record.paidAt && !hasInvoiceSettlementProof(record, record.paymentHash)) {
+        if (
+          record.paidAt &&
+          (record.settlementVersion !== 2 || !hasInvoiceSettlementProof(record, record.paymentHash))
+        ) {
           repaired = true;
           delete record.paidAt;
           delete record.confirmedAt;
@@ -127,7 +134,7 @@ export function patchSellerInvoice(
   patch: Partial<
     Pick<
       SellerInvoiceRecord,
-      'paidAt' | 'settledAt' | 'preimage' | 'confirmedAt' | 'deliveryPending'
+      'paidAt' | 'settledAt' | 'preimage' | 'confirmedAt' | 'deliveryPending' | 'settlementVersion'
     >
   >,
 ): Promise<void> {

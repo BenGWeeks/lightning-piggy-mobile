@@ -3641,6 +3641,7 @@
     "buyerNotified": "Оплачено — покупця повідомлено",
     "invoiceSent": "Рахунок надіслано",
     "notPaidYet": "Ще не оплачено",
+    "couldNotConfirmPayment": "Не вдалося підтвердити оплату",
     "orderNumber": "Замовлення №{{id}}",
     "rowA11y": "Замовлення від {{buyer}}: {{items}}. {{status}}",
     "problems": {

@@ -33,17 +33,8 @@ export function acceptOrderRumor(
       if (isSellerAccountForgotten(owner)) return false;
       const key = deliveryKey(owner, rumor);
       if (pending.has(key)) return false;
-      // Merchant updates passed the placed-order/seller gate. Buyer cancellations
-      // share the persisted budget with orders/receipts; knowing an order is
-      // not permission to store unlimited distinct lifecycle events.
-      if (
-        order.type !== 'order' &&
-        order.type !== 'receipt' &&
-        !(order.type === 'status' && order.status === 'cancelled')
-      ) {
-        pending.add(key);
-        return true;
-      }
+      // Every inbound lifecycle rumor uses the same durable budget and completed-id
+      // check. A known purchase does not authorize unlimited merchant updates.
       const raw = await AsyncStorage.getItem(orderBudgetKey(owner));
       const now = Date.now();
       let budget: OrderBudget = { accepted: [], dropped: 0, droppedSince: now };
