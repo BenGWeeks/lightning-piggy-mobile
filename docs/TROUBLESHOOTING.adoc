@@ -1771,8 +1771,9 @@ restricted CLOSED ends the read without another authentication attempt.
 The buyer and seller branches both change the shared NIP-17 live/backfill
 paths. Keep lifecycle admission scoped to the buyer's placed order and its
 seller; incoming type-1 seller orders bypass the Messages follow gate for
-storage but still consume the persistent admission budget. Seller receipts
-and cancellations must match an invoice for that buyer. Keep order history
+storage but still consume the persistent admission budget. A buyer's receipt
+or cancellation must match an incoming placed order from that buyer with the
+same order ID (`hasIncomingOrder`); no local invoice is required. Keep order history
 paged by placed orders, and signal an open conversation after persistence,
 even when Only friends hides the order preview. Contact fields belong only
 to type-1 orders and must stay out of inbox entries and notifications.
