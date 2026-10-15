@@ -5,6 +5,7 @@ import {
   needsInvoiceCount,
   preimageMatches,
   receiptProvesPayment,
+  effectiveSellerInvoice,
   sellerOrderThreads,
   shopOrderEntries,
   shopOrderStatus,
@@ -125,6 +126,27 @@ describe('receipt verification', () => {
       }),
     ]);
     expect(receiptProvesPayment(otherInvoice, HASH)).toBe(false);
+  });
+
+  it('verifies against the durable invoice when the relay self-copy is missing', () => {
+    const receiptOnly = thread([
+      received,
+      row(false, 30, {
+        type: 'receipt',
+        payment: { method: 'lightning', value: BOLT11, preimage: PREIMAGE },
+      }),
+    ]);
+    // No relay invoice in the thread: only the persisted record knows the bolt11.
+    expect(receiptProvesPayment(receiptOnly, HASH)).toBe(false);
+    expect(receiptProvesPayment(receiptOnly, HASH, BOLT11)).toBe(true);
+    const record = { bolt11: BOLT11, sentAt: 1, paymentHash: HASH };
+    expect(effectiveSellerInvoice(record, receiptOnly.invoice)).toEqual({
+      bolt11: BOLT11,
+      paymentHash: HASH,
+    });
+    expect(effectiveSellerInvoice(null, receiptOnly.invoice)).toBeNull();
+    // A wrong preimage still fails even with the durable invoice.
+    expect(receiptProvesPayment(receiptOnly, 'ab'.repeat(32), BOLT11)).toBe(false);
   });
 });
 

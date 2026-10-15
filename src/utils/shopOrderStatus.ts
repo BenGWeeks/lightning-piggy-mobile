@@ -47,19 +47,40 @@ export function preimageMatches(preimage: string | undefined, paymentHash: strin
 }
 
 /** The buyer's receipt proves payment of MY invoice: same bolt11, and a
- * preimage hashing to its payment hash. */
+ * preimage hashing to its payment hash. `effectiveBolt11` is the invoice this
+ * device considers current (a durable record can outlive a missing or stale
+ * relay self-copy); it defaults to the thread's invoice. */
 export function receiptProvesPayment(
   thread: Pick<SellerOrderThread, 'invoice' | 'receipt'>,
   invoicePaymentHash: string | null,
+  effectiveBolt11?: string | null,
 ): boolean {
   const receipt = thread.receipt;
-  if (!receipt?.payment || !thread.invoice) return false;
+  const bolt11 = effectiveBolt11 ?? thread.invoice?.bolt11;
+  if (!receipt?.payment || !bolt11) return false;
   const sameInvoice =
     receipt.payment.value
       .trim()
       .toLowerCase()
-      .replace(/^lightning:/, '') === thread.invoice.bolt11;
+      .replace(/^lightning:/, '') === bolt11.toLowerCase();
   return sameInvoice && preimageMatches(receipt.payment.preimage, invoicePaymentHash);
+}
+
+/** The invoice a seller should verify against: the durable record when it is
+ * current, otherwise the thread's relay self-copy. */
+export function effectiveSellerInvoice(
+  record:
+    | Pick<SellerInvoiceRecord, 'bolt11' | 'sentAt' | 'replacesBolt11' | 'paymentHash'>
+    | null
+    | undefined,
+  invoice: SellerOrderThread['invoice'],
+): { bolt11: string; paymentHash: string | null } | null {
+  if (record && sellerRecordIsCurrent(record, invoice)) {
+    return { bolt11: record.bolt11, paymentHash: record.paymentHash };
+  }
+  return invoice
+    ? { bolt11: invoice.bolt11, paymentHash: paymentHashFromBolt11(invoice.bolt11) }
+    : null;
 }
 
 /** Prefer a durable replacement while the relay still exposes the old self-copy. */

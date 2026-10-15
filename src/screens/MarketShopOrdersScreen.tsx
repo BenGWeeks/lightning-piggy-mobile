@@ -3,8 +3,12 @@ import { useOrderStatusFilter } from '../hooks/useOrderStatusFilter';
 import { orderListingPreviews } from '../utils/orderPresentation';
 import SellerOrderPanel from '../components/SellerOrderPanel';
 import OrderStatusChip from '../components/OrderStatusChip';
-import { shopOrderStatus, receiptProvesPayment } from '../utils/shopOrderStatus';
-import { expiresAtFromBolt11, paymentHashFromBolt11 } from '../utils/bolt11';
+import {
+  effectiveSellerInvoice,
+  receiptProvesPayment,
+  shopOrderStatus,
+} from '../utils/shopOrderStatus';
+import { expiresAtFromBolt11 } from '../utils/bolt11';
 import type { RouteProp } from '@react-navigation/native';
 import type { ExploreStackParamList } from '../navigation/types';
 import { useFocusEffect } from '@react-navigation/native';
@@ -83,16 +87,15 @@ const MarketShopOrdersScreen: React.FC<Props> = ({ navigation, route }) => {
   const statusOf = useCallback(
     (order: ShopOrder) => {
       const thread = threads.get(order.key);
+      const effective = thread ? effectiveSellerInvoice(invoices[order.key], thread.invoice) : null;
       return shopOrderStatus(thread, {
         invoiceRecord: invoices[order.key],
         walletPaid: paidKeys.has(order.key),
         nowMs: Math.max(nowMs, Date.now()),
-        receiptVerified: thread
-          ? receiptProvesPayment(
-              thread,
-              thread.invoice ? paymentHashFromBolt11(thread.invoice.bolt11) : null,
-            )
-          : false,
+        receiptVerified:
+          thread && effective
+            ? receiptProvesPayment(thread, effective.paymentHash, effective.bolt11)
+            : false,
       });
     },
     [threads, paidKeys, invoices, nowMs],

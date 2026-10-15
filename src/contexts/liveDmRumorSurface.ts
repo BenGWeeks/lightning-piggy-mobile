@@ -230,8 +230,11 @@ export function createLiveRumorSurfacer(
     if (shouldAbort()) return;
     const showOrderInMessages =
       followPubkeysRef.current.has(partnership.partnerPubkey) || includeNonFollowOrders();
+    // Our own sent self-copies never spend the inbound allowance (batch ingest
+    // exempts them the same way).
     if (
       order &&
+      !partnership.fromMe &&
       !followPubkeysRef.current.has(partnership.partnerPubkey) &&
       !admitUnfollowedOrder(viewerPubkey)
     ) {

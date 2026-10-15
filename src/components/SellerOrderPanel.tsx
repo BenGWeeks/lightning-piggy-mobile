@@ -150,7 +150,12 @@ function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.Reac
     : thread?.invoice
       ? paymentHashFromBolt11(thread.invoice.bolt11)
       : null;
-  const receiptVerified = thread ? receiptProvesPayment(thread, invoiceHash) : false;
+  const effectiveBolt11 = recordCurrent
+    ? (record?.bolt11 ?? null)
+    : (thread?.invoice?.bolt11 ?? null);
+  const receiptVerified = thread
+    ? receiptProvesPayment(thread, invoiceHash, effectiveBolt11)
+    : false;
   const walletPaid = Boolean(record?.paidAt);
   const status = shopOrderStatus(thread, {
     walletPaid,
