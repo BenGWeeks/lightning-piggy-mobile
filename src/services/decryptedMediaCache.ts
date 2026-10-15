@@ -98,16 +98,28 @@ export const verifiedFileMetadata = (uri: string) => verifiedFiles.get(uri);
 // Keep a bounded number of shares through the chooser and for ten minutes after.
 export const FILE_SHARE_RETENTION_MS = 10 * 60 * 1000;
 const MAX_RETAINED_FILES = 16;
-const retainedFiles = new Map<string, { users: number; timer?: ReturnType<typeof setTimeout> }>();
+const retainedFiles = new Map<
+  string,
+  { users: number; shared: boolean; timer?: ReturnType<typeof setTimeout> }
+>();
 
 /** Release schedules cleanup; repeated/concurrent shares extend the same lease. */
 export function retainDecryptedFile(uri: string): () => void {
+  return retainFile(uri, true);
+}
+
+/** Preview-only leases protect rendering from eviction without reserving share slots. */
+function retainFile(uri: string, forShare: boolean): () => void {
   let lease = retainedFiles.get(uri);
+  if (forShare && !lease?.shared) {
+    const shares = [...retainedFiles.values()].filter((entry) => entry.shared).length;
+    if (shares >= MAX_RETAINED_FILES) throw new Error('Too many retained file shares');
+  }
   if (!lease) {
-    if (retainedFiles.size >= MAX_RETAINED_FILES) throw new Error('Too many retained file shares');
-    lease = { users: 0 };
+    lease = { users: 0, shared: false };
     retainedFiles.set(uri, lease);
   }
+  if (forShare) lease.shared = true;
   if (lease.timer) clearTimeout(lease.timer);
   lease.users++;
   const current = lease;
@@ -116,6 +128,10 @@ export function retainDecryptedFile(uri: string): () => void {
     if (released || retainedFiles.get(uri) !== current) return;
     released = true;
     if (--current.users > 0) return;
+    if (!current.shared) {
+      retainedFiles.delete(uri);
+      return;
+    }
     current.timer = setTimeout(() => {
       void deleteDecryptedFile(uri).catch(() => {});
     }, FILE_SHARE_RETENTION_MS);
@@ -147,7 +163,7 @@ export async function publishDecryptedPreview(
   if (!dir || !uri.startsWith(dir)) throw new DecryptedMediaCancelledError();
   const ownerDir = ownerDirName(owner);
   const gen = generationOf(ownerDir);
-  const release = retainDecryptedFile(uri);
+  const release = retainFile(uri, false);
   try {
     let result: string | null = null;
     await trackPublish(
