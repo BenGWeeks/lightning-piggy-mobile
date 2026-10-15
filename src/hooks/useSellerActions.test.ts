@@ -434,3 +434,56 @@ it('legacy migration deletes a current owned legacy revision after both checks',
   expect(publishSellerEvent).toHaveBeenCalledTimes(1);
   expect((publishSellerEvent as jest.Mock).mock.calls[0][0].tags).toContainEqual(['e', legacy.id]);
 });
+
+it.each(['hidden', 'on-sale'])(
+  're-signs a %s subscription with its complete stored payload',
+  async (visibility) => {
+    const stored: Event = {
+      id: 'missing-signature',
+      sig: '',
+      pubkey,
+      kind: 30402,
+      created_at: Math.floor(Date.now() / 1000) + 60,
+      content: '  Original description\n',
+      tags: [
+        ['d', 'subscription'],
+        ['title', ' Subscription '],
+        ['visibility', visibility],
+        ['type', 'subscription', 'digital'],
+        ['price', '005', 'SAT', 'month'],
+        ['published_at', '100'],
+        ['extension', 'first', 'extra'],
+        ['extension', 'second'],
+      ],
+    };
+    const original = JSON.parse(JSON.stringify(stored));
+    const { result } = renderHook(() => useSellerActions(snapshot));
+    await act(async () => {
+      const signed = await result.current.resignListing(stored);
+      expect(signed.kind).toBe(stored.kind);
+      expect(signed.content).toBe(stored.content);
+      expect(signed.tags).toEqual(stored.tags);
+      expect(signed.tags).not.toBe(stored.tags);
+      expect(signed.tags[0]).not.toBe(stored.tags[0]);
+      expect(signed.created_at).toBe(stored.created_at + 1);
+      expect(publishSellerEvent).toHaveBeenCalledWith(signed, ['wss://example.com']);
+    });
+    expect(mockSign).toHaveBeenCalledTimes(1);
+    expect(fetchLatestRevision).not.toHaveBeenCalled();
+    expect(stored).toEqual(original);
+  },
+);
+
+it.each(['author', 'kind'])('rejects re-signing an unexpected listing %s', async (field) => {
+  const stored = {
+    ...oldZone,
+    kind: field === 'kind' ? 30406 : 30402,
+    pubkey: field === 'author' ? 'someone-else' : pubkey,
+  };
+  const { result } = renderHook(() => useSellerActions(snapshot));
+  await act(async () => {
+    await expect(result.current.resignListing(stored)).rejects.toThrow('Unexpected listing');
+  });
+  expect(mockSign).not.toHaveBeenCalled();
+  expect(publishSellerEvent).not.toHaveBeenCalled();
+});

@@ -37,8 +37,8 @@ const MarketShopListingsScreen: React.FC<Props> = ({ navigation }) => {
   const t = useTranslation();
   const styles = useMemo(() => createMarketSellerStyles(colors), [colors]);
   const { snapshot, status, refresh } = useSellerShop();
-  const { deleteListing, saveListing, busy } = useSellerActions(snapshot);
-  const republish = useListingRepublish(snapshot.listings, saveListing);
+  const { deleteListing, resignListing, busy } = useSellerActions(snapshot);
+  const republish = useListingRepublish(snapshot.listings, resignListing);
   const onSellItem = useSellItem({
     navigation,
     zoneCount: snapshot.zones.length,

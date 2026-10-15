@@ -15,7 +15,7 @@ import {
   type ListingRepublishResult,
 } from '../services/listingRepublish';
 import { listingDTag, listingRelayCoverage } from '../utils/listingRelayCoverage';
-import { parseListingDraft, type ListingDraft } from '../utils/marketSellerEvents';
+import { parseListingDraft } from '../utils/marketSellerEvents';
 
 export interface RepublishSummary {
   title: string;
@@ -25,7 +25,7 @@ export interface RepublishSummary {
 
 export function useListingRepublish(
   listings: readonly Event[],
-  saveListing: (draft: ListingDraft, base: Event | null) => Promise<Event>,
+  resignListing: (event: Event) => Promise<Event>,
 ) {
   const { pubkey, relays } = useNostr();
   const t = useTranslation();
@@ -122,7 +122,7 @@ export function useListingRepublish(
             if (running.current || !abort || abort.signal.aborted) return;
             running.current = true;
             setBusy(true);
-            void saveListing(parseListingDraft(event), null)
+            void resignListing(event)
               .then(() => {
                 if (!abort.signal.aborted) setRevision((v) => v + 1);
               })
@@ -141,7 +141,7 @@ export function useListingRepublish(
         },
       ]);
     },
-    [coverage, run, saveListing, t],
+    [coverage, run, resignListing, t],
   );
   const republishAll = useCallback(() => {
     void run(listings);
