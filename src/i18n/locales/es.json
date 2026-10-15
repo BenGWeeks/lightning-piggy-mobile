@@ -2318,7 +2318,8 @@
       "fofBuilding": "Creando tu red… {{done}}/{{total}}",
       "fofBuildingStart": "Creando tu red…",
       "fofFailed": "No se pudo crear tu red: se muestran los anuncios de tus amigos.",
-      "emptyNone": "No hay productos disponibles en este momento."
+      "emptyNone": "No hay productos disponibles en este momento.",
+      "myOrders": "Mis pedidos"
     },
     "card": {
       "featured": "Destacado",

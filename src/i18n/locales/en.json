@@ -2318,7 +2318,8 @@
       "fofBuilding": "Building your network… {{done}}/{{total}}",
       "fofBuildingStart": "Building your network…",
       "fofFailed": "Couldn’t build your network — showing your friends’ listings.",
-      "emptyNone": "No products available right now."
+      "emptyNone": "No products available right now.",
+      "myOrders": "My orders"
     },
     "card": {
       "featured": "Featured",

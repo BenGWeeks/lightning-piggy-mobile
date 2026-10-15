@@ -17,12 +17,7 @@ export const createMarketCheckoutSheetStyles = (colors: Palette) =>
       paddingTop: 4,
       paddingBottom: 28,
     },
-    title: {
-      fontSize: 20,
-      fontWeight: '700',
-      color: colors.textHeader,
-      marginBottom: 16,
-    },
+    header: { marginHorizontal: -20, marginTop: -4, marginBottom: 16 },
     productRow: {
       flexDirection: 'row',
       alignItems: 'center',

@@ -1,4 +1,5 @@
 import FiatAmount from './FiatAmount';
+import MarketHeader from './MarketHeader';
 import BrandedSpinner from './BrandedSpinner';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, Linking } from 'react-native';
@@ -436,7 +437,16 @@ const MarketCheckoutSheet: React.FC<Props> = ({
           </View>
         ) : (
           <>
-            <Text style={styles.title}>{t('market.detail.buyFrom', { seller: sellerName })}</Text>
+            <View style={styles.header}>
+              <MarketHeader
+                title={t('market.detail.buyFrom', { seller: sellerName })}
+                backLabel={t('market.detail.back')}
+                onBack={onClose}
+                testID="market-checkout-back"
+                insetTop={false}
+                backDisabled={dismissLocked}
+              />
+            </View>
 
             <View style={styles.productRow}>
               {hasThumb ? (

@@ -13,10 +13,11 @@ import type { RouteProp } from '@react-navigation/native';
 import type { ExploreStackParamList } from '../navigation/types';
 import { useFocusEffect } from '@react-navigation/native';
 import React, { useCallback, useMemo, useState } from 'react';
-import { FlatList, ScrollView, Text, View } from 'react-native';
+import { FlatList, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { ShoppingBag } from 'lucide-react-native';
 import type { CompositeNavigationProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import NostrLoginSheet from '../components/NostrLoginSheet';
 import BrandedSpinner from '../components/BrandedSpinner';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -52,7 +53,8 @@ const MarketShopOrdersScreen: React.FC<Props> = ({ navigation, route }) => {
   const t = useTranslation();
   const styles = useMemo(() => createMarketSellerStyles(colors), [colors]);
   const orderStyles = useMemo(() => createMarketShopOrdersStyles(colors), [colors]);
-  const { snapshot } = useSellerShop();
+  const { pubkey, snapshot } = useSellerShop();
+  const [loginVisible, setLoginVisible] = useState(false);
   const previews = useMemo(() => orderListingPreviews(snapshot.listings), [snapshot.listings]);
   const titles = useMemo(() => listingTitleMap(snapshot.listings), [snapshot.listings]);
   const { orders, threads, paidKeys, invoices } = useShopOrders(titles);
@@ -145,10 +147,24 @@ const MarketShopOrdersScreen: React.FC<Props> = ({ navigation, route }) => {
         title={t('market.sell.hub.orders')}
         backLabel={t('market.sell.back')}
         onBack={() => navigation.goBack()}
-        styles={styles}
         testID="shop-orders-back"
       />
-      {!orders ? (
+      {!pubkey ? (
+        <View style={styles.centered} testID="shop-orders-signed-out">
+          <ShoppingBag size={40} color={colors.brandPink} strokeWidth={2} />
+          <Text style={styles.cardTitle}>{t('market.sell.signInTitle')}</Text>
+          <Text style={[styles.cardBody, styles.centerText]}>{t('market.sell.signInBody')}</Text>
+          <TouchableOpacity
+            style={styles.primaryButton}
+            onPress={() => setLoginVisible(true)}
+            accessibilityRole="button"
+            accessibilityLabel={t('market.sell.signIn')}
+            testID="shop-orders-sign-in"
+          >
+            <Text style={styles.primaryButtonText}>{t('market.sell.signIn')}</Text>
+          </TouchableOpacity>
+        </View>
+      ) : !orders ? (
         <View style={styles.centered}>
           <BrandedSpinner />
         </View>
@@ -200,6 +216,7 @@ const MarketShopOrdersScreen: React.FC<Props> = ({ navigation, route }) => {
           testID="shop-order-list"
         />
       )}
+      <NostrLoginSheet visible={loginVisible} onClose={() => setLoginVisible(false)} />
     </View>
   );
 };

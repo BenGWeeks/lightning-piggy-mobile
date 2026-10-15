@@ -1,26 +1,11 @@
+import MarketHeader from '../components/MarketHeader';
+import MarketHeaderActions from '../components/MarketHeaderActions';
 import BrandedRefreshControl from '../components/BrandedRefreshControl';
 import { marketMerchants, resolveMerchantSelection } from '../utils/marketMerchants';
 import { useCollectionFilter } from '../hooks/useCollectionFilter';
 import MarketCollectionChips from '../components/MarketCollectionChips';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  FlatList,
-  useWindowDimensions,
-} from 'react-native';
-import { Image } from 'expo-image';
-import {
-  ChevronLeft,
-  Heart,
-  ReceiptText,
-  Search,
-  SlidersHorizontal,
-  Store,
-  X,
-} from 'lucide-react-native';
+import { View, Text, FlatList, useWindowDimensions } from 'react-native';
 import MarketProductCard from '../components/MarketProductCard';
 import MarketFilterBar from '../components/MarketFilterBar';
 import MarketScopePill from '../components/MarketScopePill';
@@ -262,112 +247,22 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
 
   return (
     <View style={styles.container} testID="market-screen">
-      <View style={styles.header}>
-        <Image
-          source={require('../../assets/images/learn-header-bg.png')}
-          style={styles.headerImage}
-          contentFit="cover"
-          cachePolicy="memory-disk"
+      <MarketHeader
+        title={t('market.screen.title')}
+        backLabel={t('market.screen.back')}
+        onBack={() => navigation.goBack()}
+        testID="market-back-button"
+      >
+        <MarketHeaderActions
+          query={query}
+          onChangeQuery={setQuery}
+          filtersActive={filtersActive}
+          activeFilterCount={activeFilterCount}
+          onOpenFilters={openFilters}
+          navigation={navigation}
+          payNow={payNow}
         />
-        <View style={styles.headerOverlay} />
-        <View style={styles.headerRow}>
-          <TouchableOpacity
-            onPress={() => navigation.goBack()}
-            accessibilityLabel={t('market.screen.back')}
-            testID="market-back-button"
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <ChevronLeft size={24} color={colors.white} strokeWidth={2.5} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>{t('market.screen.title')}</Text>
-          <TouchableOpacity
-            onPress={() => navigation.navigate('MarketLikedItems')}
-            accessibilityLabel={t('market.liked.openAccessibility')}
-            testID="market-liked-items-button"
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <Heart size={24} color={colors.white} strokeWidth={2.25} />
-          </TouchableOpacity>
-          {/* Buyer side: orders I placed; the badge counts invoices to pay. */}
-          <TouchableOpacity
-            onPress={() => navigation.navigate('MarketMyOrders')}
-            accessibilityLabel={
-              payNow > 0 ? t('myOrders.openWithPayNow', { invoices: payNow }) : t('myOrders.open')
-            }
-            testID="market-my-orders-button"
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <ReceiptText size={24} color={colors.white} strokeWidth={2.25} />
-            {payNow > 0 ? (
-              <View style={styles.filterBadge} testID="market-my-orders-badge">
-                <Text style={styles.filterBadgeText}>{payNow > 9 ? '9+' : payNow}</Text>
-              </View>
-            ) : null}
-          </TouchableOpacity>
-          {/* Seller side (#1273): set up a shop and list your own items. */}
-          <TouchableOpacity
-            onPress={() => navigation.navigate('MarketMyShop')}
-            accessibilityLabel={t('market.sell.myShopAccessibility')}
-            testID="market-my-shop-button"
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <Store size={24} color={colors.white} strokeWidth={2.25} />
-          </TouchableOpacity>
-        </View>
-        <Text style={styles.headerTagline}>{t('market.screen.tagline')}</Text>
-      </View>
-
-      <View style={styles.searchBar}>
-        <View style={styles.searchRow}>
-          <Search size={16} color={colors.textSupplementary} strokeWidth={2.25} />
-          <TextInput
-            style={styles.searchInput}
-            value={query}
-            onChangeText={setQuery}
-            placeholder={t('market.screen.searchPlaceholder')}
-            placeholderTextColor={colors.textSupplementary}
-            autoCapitalize="none"
-            autoCorrect={false}
-            returnKeyType="search"
-            testID="market-search-input"
-          />
-          {query.length > 0 ? (
-            <TouchableOpacity
-              onPress={() => setQuery('')}
-              accessibilityLabel={t('market.screen.clearSearch')}
-              testID="market-search-clear"
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <X size={16} color={colors.textSupplementary} strokeWidth={2.25} />
-            </TouchableOpacity>
-          ) : null}
-        </View>
-        <TouchableOpacity
-          style={[styles.filterButton, filtersActive && styles.filterButtonActive]}
-          onPress={openFilters}
-          accessibilityLabel={
-            filtersActive
-              ? t('market.screen.filtersApplied', { count: activeFilterCount })
-              : t('market.screen.filters')
-          }
-          accessibilityState={{ selected: filtersActive }}
-          testID="market-filter-button"
-          activeOpacity={0.7}
-        >
-          <SlidersHorizontal
-            size={18}
-            color={filtersActive ? colors.white : colors.textBody}
-            strokeWidth={2.25}
-          />
-          {filtersActive ? (
-            <View style={styles.filterBadge} testID="market-filter-badge">
-              <Text style={styles.filterBadgeText} testID="market-filter-active-count">
-                {activeFilterCount}
-              </Text>
-            </View>
-          ) : null}
-        </TouchableOpacity>
-      </View>
+      </MarketHeader>
 
       {/* The seller scope is always shown as a pill: Preferred's opens
           Filters; every other scope's × returns to Preferred. */}

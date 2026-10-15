@@ -50,6 +50,50 @@ name: Market — grid → product detail → reviews/comments tabs (#948)
 - assertVisible:
     id: 'market-product-card-robotechy-lightning-piggy'
 
+# Search expands within the patterned header and closes with a cleared query.
+- assertNotVisible:
+    id: 'market-search-input'
+- tapOn:
+    id: 'market-header-search'
+- assertVisible:
+    id: 'market-search-input'
+- tapOn:
+    id: 'market-search-input'
+- inputText: 'piggy'
+- tapOn:
+    id: 'market-search-clear'
+- assertNotVisible:
+    id: 'market-search-input'
+
+# One menu contains all Market destinations; the old standalone icons are gone.
+- tapOn:
+    id: 'market-header-menu'
+- assertVisible:
+    id: 'market-my-shop-button'
+- assertVisible:
+    id: 'market-my-orders-button'
+# Buyer's order history replaces the standalone receipt icon.
+- tapOn:
+    id: 'market-my-orders-button'
+- extendedWaitUntil:
+    visible:
+      id: 'my-orders-screen'
+    timeout: 10000
+- tapOn:
+    id: 'my-orders-back'
+- extendedWaitUntil:
+    visible:
+      id: 'market-screen'
+    timeout: 10000
+- tapOn:
+    id: 'market-header-menu'
+- tapOn:
+    id: 'market-liked-items-button'
+- assertVisible:
+    id: 'market-liked-items-screen'
+- tapOn:
+    id: 'market-liked-items-back'
+
 # The default preferred-sellers scope narrows the list, so the filter button
 # is already active with one filter.
 - assertVisible:

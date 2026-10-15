@@ -19,7 +19,7 @@ jest.mock('../contexts/LocaleContext', () => ({
   }),
 }));
 jest.mock('../hooks/useSellerShop', () => ({
-  useSellerShop: () => ({ snapshot: { listings: [] } }),
+  useSellerShop: () => ({ pubkey: mockPubkey, snapshot: { listings: [] } }),
 }));
 jest.mock('../hooks/useShopOrders', () => ({
   useShopOrders: () => ({
@@ -32,9 +32,21 @@ jest.mock('../hooks/useShopOrders', () => ({
 jest.mock('../hooks/useBuyerProfiles', () => ({ useBuyerProfiles: () => mockProfiles }));
 jest.mock('../components/SellerOrderPanel', () => jest.fn(() => null));
 jest.mock('../components/MarketSellerHeader', () => () => null);
-jest.mock('../components/BrandedSpinner', () => () => null);
+jest.mock('../components/BrandedSpinner', () => {
+  const { Text } = jest.requireActual('react-native');
+  return function MockSpinner() {
+    return <Text testID="orders-spinner" />;
+  };
+});
+jest.mock('../components/NostrLoginSheet', () => {
+  const { TouchableOpacity } = jest.requireActual('react-native');
+  return function MockLoginSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+    return visible ? <TouchableOpacity testID="orders-login-sheet" onPress={onClose} /> : null;
+  };
+});
 jest.mock('lucide-react-native', () => ({ ShoppingBag: () => null }));
 
+let mockPubkey: string | null = 'a'.repeat(64);
 const BUYER = 'b'.repeat(64);
 let mockOrders: ShopOrder[] | null = [];
 let mockThreads = new Map<string, SellerOrderThread>();
@@ -54,6 +66,7 @@ const order: ShopOrder = {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockPubkey = 'a'.repeat(64);
   mockOrders = [];
   mockThreads = new Map();
   mockProfiles = new Map();
@@ -133,4 +146,39 @@ it('resolves the incoming order by route id and renders the seller detail', () =
     order: placed,
     thread,
   });
+});
+
+it('offers sign-in instead of spinning when opened anonymously, then shows orders after login', () => {
+  mockPubkey = null;
+  mockOrders = null;
+  const screen = render(
+    <MarketShopOrdersScreen
+      navigation={navigation as never}
+      route={{ params: undefined } as never}
+    />,
+  );
+  expect(screen.getByTestId('shop-orders-signed-out')).toBeTruthy();
+  expect(screen.queryByTestId('orders-spinner')).toBeNull();
+  fireEvent.press(screen.getByTestId('shop-orders-sign-in'));
+  expect(screen.getByTestId('orders-login-sheet')).toBeTruthy();
+  fireEvent.press(screen.getByTestId('orders-login-sheet'));
+  expect(screen.queryByTestId('orders-login-sheet')).toBeNull();
+
+  mockPubkey = 'a'.repeat(64);
+  screen.rerender(
+    <MarketShopOrdersScreen
+      navigation={navigation as never}
+      route={{ params: undefined } as never}
+    />,
+  );
+  expect(screen.queryByTestId('shop-orders-signed-out')).toBeNull();
+  expect(screen.getByTestId('orders-spinner')).toBeTruthy();
+  mockOrders = [];
+  screen.rerender(
+    <MarketShopOrdersScreen
+      navigation={navigation as never}
+      route={{ params: undefined } as never}
+    />,
+  );
+  expect(screen.getByTestId('shop-orders-empty')).toBeTruthy();
 });

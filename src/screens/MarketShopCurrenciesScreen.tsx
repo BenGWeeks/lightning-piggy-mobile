@@ -73,7 +73,6 @@ const MarketShopCurrenciesScreen: React.FC<Props> = ({ navigation }) => {
         title={t('market.sell.hub.currencies')}
         backLabel={t('market.sell.back')}
         onBack={() => navigation.goBack()}
-        styles={styles}
         testID="shop-currencies-back"
       />
       <View style={screenStyles.body}>
