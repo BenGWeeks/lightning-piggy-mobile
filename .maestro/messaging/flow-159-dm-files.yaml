@@ -4,6 +4,9 @@ name: NIP-17 and NIP-04 file bubbles
 # Existing signed-in Piggy test account only. Seeds local rows, never sends.
 # Cold encrypted download/share and integrity failures are covered by Jest.
 - tapOn:
+    id: 'conversation-back'
+    optional: true
+- tapOn:
     id: 'tab-messages'
 - extendedWaitUntil:
     visible:
