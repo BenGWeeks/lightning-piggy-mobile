@@ -277,8 +277,9 @@ async function ingestInboxWrapsRun<W extends IngestableWrap>(
             createdAt: rumor.created_at,
             text: preview,
             // Order payloads stay in the encrypted store (#1550). Document
-            // links need their URL for the first thread load, not just a label.
-            ...((rumor.kind === 14 && parsePlainFileAttachment(text) !== null) ||
+            // links and kind-15 attachments need their content on the first thread load.
+            ...(rumor.kind === 15 ||
+            (rumor.kind === 14 && parsePlainFileAttachment(text) !== null) ||
             liveMarkerPhaseOf(text)
               ? { renderText: text }
               : {}),
