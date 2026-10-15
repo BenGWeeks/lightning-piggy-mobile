@@ -159,9 +159,10 @@ jobs:
         # Zapstore kinds; see docs/DEPLOYMENT.adoc.
         timeout-minutes: 30
         env:
-          SIGN_WITH: ${{ secrets.ZAPSTORE_BUNKER_URI }}
           XDG_CONFIG_HOME: ${{ runner.temp }}/zsp-config
           GITHUB_TOKEN: ${{ github.token }}
+        # SIGN_WITH comes from the pre-flight via GITHUB_ENV, without the
+        # one-time pairing secret. The stable client key is already authorised.
         run: zsp publish --quiet --skip-metadata --no-color .zapstore-ci.yaml
 
       - name: Summary

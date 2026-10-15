@@ -6,8 +6,8 @@
 //    generates a new client key on every fresh runner, so the bunker sees an
 //    unknown client and the bunker URI's one-time secret fails on the second
 //    release.
-// 2. Connects with that same client key and refuses to continue unless the
-//    bunker signs for the Lightning Piggy team account. zsp checks the
+// 2. Reuses an authorised client, or pairs it once, and refuses to continue
+//    unless the bunker signs for the Lightning Piggy team account. zsp checks the
 //    zapstore.yaml `pubkey` against local signers only, never against a bunker,
 //    and whoever signs the first Zapstore release owns the listing.
 import fs from 'node:fs';
@@ -59,29 +59,62 @@ export function installClientKey(configDir, host, hex) {
   return file;
 }
 
-export async function verifySigner(
-  signer,
-  { expectedPubkey = LP_TEAM_PUBKEY, timeoutMs = APPROVAL_TIMEOUT_MS } = {},
-) {
+// Preserve all relay parameters, but never give zsp the consumed pairing token.
+export function secretFreeBunkerUri(uri) {
+  bunkerHost(uri);
+  const url = new URL(uri);
+  url.searchParams.delete('secret');
+  return url.toString();
+}
+
+async function withTimeout(operation, timeoutMs, error) {
   let timer;
   try {
-    const pubkey = await Promise.race([
-      (async () => {
-        await signer.connect();
-        return signer.getPublicKey();
-      })(),
+    return await Promise.race([
+      operation(),
       new Promise((_, reject) => {
-        timer = setTimeout(
-          () =>
-            reject(
-              new PreflightError(
-                `Bunker approval timed out after ${Math.round(timeoutMs / 60_000)} minutes. Approve the connection in the signer and re-run.`,
-              ),
-            ),
-          timeoutMs,
-        );
+        timer = setTimeout(() => reject(error), timeoutMs);
       }),
     ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function verifySigner(
+  signer,
+  {
+    expectedPubkey = LP_TEAM_PUBKEY,
+    timeoutMs = APPROVAL_TIMEOUT_MS,
+    probeTimeoutMs = 10_000,
+  } = {},
+) {
+  try {
+    const pubkey = await withTimeout(
+      async () => {
+        // Existing clients must not resend a one-time secret: nsec.app ignores it.
+        // A new client may be rejected or ignored until connect is approved.
+        try {
+          return await withTimeout(
+            () => signer.getPublicKey(),
+            Math.min(probeTimeoutMs, timeoutMs),
+            new Error('Client is not yet authorised.'),
+          );
+        } catch {
+          try {
+            await signer.connect();
+          } catch {
+            // Some signers reply "already connected". Only get_public_key can
+            // establish whether this client is authorised for the right account.
+          }
+          return signer.getPublicKey();
+        }
+      },
+      timeoutMs,
+      new PreflightError(
+        `Bunker approval timed out after ${Math.round(timeoutMs / 60_000)} minutes. Approve the connection in the signer and re-run.`,
+      ),
+    );
     if (pubkey !== expectedPubkey) {
       throw new PreflightError(
         'The bunker signs for a different account, not Lightning Piggy. Publishing refused.',
@@ -89,7 +122,6 @@ export async function verifySigner(
     }
     return pubkey;
   } finally {
-    clearTimeout(timer);
     try {
       // close() can wait on a relay that never answers; don't hold the job open.
       await Promise.race([signer.close(), new Promise((resolve) => setTimeout(resolve, 3000))]);
@@ -106,6 +138,7 @@ async function main() {
   const uri = (process.env.ZAPSTORE_BUNKER_URI || '').trim();
   const configDir = process.env.XDG_CONFIG_HOME;
   if (!configDir) throw new PreflightError('XDG_CONFIG_HOME must be set.');
+  if (!process.env.GITHUB_ENV) throw new PreflightError('GITHUB_ENV must be set.');
   const host = bunkerHost(uri);
   const pointer = await parseBunkerInput(uri);
   if (!pointer?.relays.length || pointer.pubkey !== host) {
@@ -131,6 +164,8 @@ async function main() {
     pool.destroy();
     key.bytes.fill(0);
   }
+  // Publish inherits this value instead of reconnecting with the original secret.
+  fs.appendFileSync(process.env.GITHUB_ENV, `SIGN_WITH=${secretFreeBunkerUri(uri)}\n`);
   console.log('Bunker signs for the Lightning Piggy team account.');
 }
 

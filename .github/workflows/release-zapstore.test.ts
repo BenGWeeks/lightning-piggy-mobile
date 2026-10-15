@@ -9,7 +9,8 @@ import { nip19 } from 'nostr-tools';
 const root = path.join(__dirname, '../..');
 const listing = parse(fs.readFileSync(path.join(root, 'zapstore.yaml'), 'utf8'));
 const workflow = parse(fs.readFileSync(path.join(__dirname, 'release-zapstore.yml'), 'utf8'));
-const steps: { name?: string; run?: string }[] = workflow.jobs.publish.steps;
+const steps: { name?: string; run?: string; env?: Record<string, string> }[] =
+  workflow.jobs.publish.steps;
 const LP_TEAM_PUBKEY = '22818ec33d8078e64964b561c839b74433f2371552d7f5bd6ab0af325a79f429';
 
 describe('zapstore.yaml', () => {
@@ -65,4 +66,15 @@ test('the workflow pins zsp to the tag being published', () => {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('publishing inherits the verified, secret-free URI from the pre-flight', () => {
+  const preflight = steps.find(
+    (step) => step.name === 'Pair client key and verify the signer account',
+  );
+  const publish = steps.find((step) => step.name === 'Publish to Zapstore');
+  expect(steps.indexOf(preflight!)).toBeLessThan(steps.indexOf(publish!));
+  expect(preflight!.env!.XDG_CONFIG_HOME).toBe(publish!.env!.XDG_CONFIG_HOME);
+  expect(publish!.env).not.toHaveProperty('SIGN_WITH');
+  expect(preflight!.run).toBe('node scripts/zapstore-signer-preflight.mjs');
 });
