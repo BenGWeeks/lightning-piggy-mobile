@@ -79,7 +79,6 @@ jest.mock('./CountryPickerSheet', () => {
 jest.mock('../data/countries', () => ({
   ...jest.requireActual('../data/countries'),
   deviceCountryCode: () => 'GB',
-  countryName: (code: string) => code,
 }));
 jest.mock('../contexts/NostrContext', () => ({ useNostr: () => ({ pubkey: 'buyer' }) }));
 jest.mock('../hooks/useMarketCheckout', () => ({ useMarketCheckout: jest.fn() }));
@@ -377,7 +376,7 @@ describe('Nostr listing (Gamma kind 30402)', () => {
       quantity: 1,
       // (£5 base + £1 surcharge) at £50,000/BTC.
       shipping: { coordinate: ukOption.coordinate, costSats: 12000, title: 'Royal Mail' },
-      address: 'Buyer\n1 High St\nLondon\nSW1A 1AA\nGB',
+      address: 'Buyer\n1 High St\nLondon\nSW1A 1AA\nUnited Kingdom',
       title: 'Test Item',
     });
   });
@@ -504,7 +503,7 @@ test('the address country opens the shared picker and re-evaluates shipping', as
   fireEvent.press(ui.getByTestId('country-picker-row-US'));
   expect(ui.queryByTestId('country-picker-sheet')).toBeNull();
   expect(ui.getByTestId('market-checkout-country')).toHaveTextContent('United States');
-  expect(ui.getByTestId('market-shipping-country')).toHaveTextContent('US');
+  expect(ui.getByTestId('market-shipping-country')).toHaveTextContent('United States');
   expect(ui.queryByTestId('market-shipping-option-uk')).toBeNull();
   expect(ui.getByTestId('market-shipping-option-us').props.accessibilityState.selected).toBe(true);
 
@@ -517,7 +516,7 @@ test('the address country opens the shared picker and re-evaluates shipping', as
   expect(placeOrder).toHaveBeenCalledWith(
     expect.objectContaining({
       shipping: { coordinate: usOption.coordinate, costSats: 123, title: 'US shipping' },
-      address: 'Buyer\n1 Test Street\nTest Town\n12345\nUS',
+      address: 'Buyer\n1 Test Street\nTest Town\n12345\nUnited States',
     }),
   );
 
@@ -526,7 +525,7 @@ test('the address country opens the shared picker and re-evaluates shipping', as
   expect(ui.getByTestId('country-picker-sheet').props.accessibilityLabel).toBe('US');
   fireEvent.press(ui.getByTestId('country-picker-row-DE'));
   expect(ui.getByTestId('market-checkout-country')).toHaveTextContent('Germany');
-  expect(ui.getByTestId('market-shipping-country')).toHaveTextContent('DE');
+  expect(ui.getByTestId('market-shipping-country')).toHaveTextContent('Germany');
   expect(ui.queryByTestId('market-shipping-option-us')).toBeNull();
   expect(ui.getByTestId('market-shipping-empty')).toBeTruthy();
   expect(ui.getByTestId('market-checkout-place-order')).toBeDisabled();

@@ -24,7 +24,7 @@ it('round-trips one Gamma address tag and accepts old single-line orders', () =>
   expect(rumor.tags.filter((tag) => tag[0] === 'address')).toEqual([['address', address]]);
   expect(parseDeliveryAddress(rumor.tags.find((tag) => tag[0] === 'address')![1])).toEqual([
     ...Object.values(fields),
-    'GB',
+    'United Kingdom',
   ]);
   expect(parseOrderEvent(rumor)?.type).toBe('order');
   expect(
@@ -37,6 +37,18 @@ it('round-trips one Gamma address tag and accepts old single-line orders', () =>
   ).toBe('order');
   expect(parseDeliveryAddress('1 High St, London')).toEqual(['1 High St, London']);
 });
+it.each([
+  ['US', '90210', 'United States'],
+  ['DE', '10115', 'Germany'],
+])(
+  'composes the English country name for %s without changing address fields',
+  (country, postcode, name) => {
+    const addressFields = { ...fields, postcode };
+    const address = composeDeliveryAddress(addressFields, country)!;
+    expect(parseDeliveryAddress(address)).toEqual([...Object.values(addressFields), name]);
+    expect(addressFields).toEqual({ ...fields, postcode });
+  },
+);
 it('blocks missing required fields and never truncates the complete address', () => {
   expect(composeDeliveryAddress(emptyDeliveryAddress(), 'GB')).toBeNull();
   for (const key of ['name', 'line1', 'town', 'postcode'] as const)
@@ -50,7 +62,7 @@ it('blocks missing required fields and never truncates the complete address', ()
     composeDeliveryAddress({ ...fields, name: 'a'.repeat(501 - withoutName) }, 'GB'),
   ).toBeNull();
   expect(composeDeliveryAddress({ ...fields, line2: '' }, 'GB')).toBe(
-    'Buyer\n1 High St\nLondon\nSW1A 1AA\nGB',
+    'Buyer\n1 High St\nLondon\nSW1A 1AA\nUnited Kingdom',
   );
 });
 it.each([

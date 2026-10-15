@@ -1,3 +1,4 @@
+import { countryName } from '../data/countries';
 import { MAX_ORDER_ADDRESS_LENGTH } from './marketOrder';
 
 export interface DeliveryAddress {
@@ -43,7 +44,7 @@ export function composeDeliveryAddress(fields: DeliveryAddress, country: string)
     ...[fields.name, fields.line1, fields.line2, fields.town, fields.postcode]
       .map(singleLine)
       .filter(Boolean),
-    country,
+    countryName(country),
   ].join('\n');
   return address.length <= MAX_ORDER_ADDRESS_LENGTH ? address : null;
 }
