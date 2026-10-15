@@ -10,7 +10,29 @@ const NAMESPACE = 'keyPackageDiscovery';
 export const KEY_PACKAGE_HISTORY_SECS = 84 * 24 * 60 * 60 + 60 * 60;
 type RelayHistory = Record<string, number>;
 
-export async function keyPackageRelayHistory(backend: MarmotKvBackend): Promise<RelayHistory> {
+// Match the Marmot per-account promise chains (marmotSignatureKey). SQL
+// adapters and their fenced session wrappers share an owner; in-memory test
+// stores without an owner are independent by backend identity.
+const pending = new Map<string | MarmotKvBackend, Promise<unknown>>();
+
+function serialized<T>(backend: MarmotKvBackend, task: () => Promise<T>): Promise<T> {
+  const account = backend.owner ?? backend;
+  const run = (pending.get(account) ?? Promise.resolve()).catch(() => undefined).then(task);
+  pending.set(account, run);
+  void run
+    .finally(() => {
+      if (pending.get(account) === run) pending.delete(account);
+    })
+    .catch(() => undefined);
+  return run;
+}
+
+export function keyPackageRelayHistory(backend: MarmotKvBackend): Promise<RelayHistory> {
+  return serialized(backend, () => loadRelayHistory(backend));
+}
+
+/** Migration and pruning also write: call only inside the account's chain. */
+async function loadRelayHistory(backend: MarmotKvBackend): Promise<RelayHistory> {
   const now = Math.floor(Date.now() / 1000);
   const history = JSON.parse(
     (await backend.get(NAMESPACE, 'relayHistory')) ?? '{}',
@@ -35,13 +57,15 @@ export async function rememberKeyPackageRelays(
   relays: string[],
   event: NostrEvent,
 ): Promise<void> {
-  const history = await keyPackageRelayHistory(backend);
-  const lifetime = getKeyPackageLifetime(event);
-  const expiry = lifetime
-    ? Number(lifetime.notAfter) + 60 * 60
-    : event.created_at + KEY_PACKAGE_HISTORY_SECS;
-  if (expiry > Math.floor(Date.now() / 1000)) {
-    for (const relay of relays) history[relay] = Math.max(history[relay] ?? 0, expiry);
-  }
-  await backend.set(NAMESPACE, 'relayHistory', JSON.stringify(history));
+  return serialized(backend, async () => {
+    const history = await loadRelayHistory(backend);
+    const lifetime = getKeyPackageLifetime(event);
+    const expiry = lifetime
+      ? Number(lifetime.notAfter) + 60 * 60
+      : event.created_at + KEY_PACKAGE_HISTORY_SECS;
+    if (expiry > Math.floor(Date.now() / 1000)) {
+      for (const relay of relays) history[relay] = Math.max(history[relay] ?? 0, expiry);
+    }
+    await backend.set(NAMESPACE, 'relayHistory', JSON.stringify(history));
+  });
 }
