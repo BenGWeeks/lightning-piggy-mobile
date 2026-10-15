@@ -6,6 +6,7 @@ import { useTranslation } from '../contexts/LocaleContext';
 import { createOrderItemThumbnailsStyles } from '../styles/OrderItemThumbnails.styles';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import type { OrderItemPreview } from '../utils/orderPresentation';
+import { titleInitial } from '../utils/titleInitial';
 
 export const OrderItemImage = React.memo(function OrderItemImage({
   item,
@@ -34,7 +35,7 @@ export const OrderItemImage = React.memo(function OrderItemImage({
           accessibilityLabel={item.title}
         />
       ) : (
-        <Text style={styles.initial}>{item.title.charAt(0).toUpperCase()}</Text>
+        <Text style={styles.initial}>{titleInitial(item.title)}</Text>
       )}
     </View>
   );

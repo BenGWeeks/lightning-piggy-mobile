@@ -5,6 +5,7 @@ import type { Event } from 'nostr-tools';
 import { useTranslation } from '../contexts/LocaleContext';
 import type { ListingDraft } from '../utils/marketSellerEvents';
 import type { MarketSellerStyles } from '../styles/MarketSeller.styles';
+import { titleInitial } from '../utils/titleInitial';
 
 interface Props {
   event: Event;
@@ -42,7 +43,7 @@ const SellerListingRow: React.FC<Props> = ({
         />
       ) : (
         <View style={[styles.listingImage, styles.listingImageFallback]}>
-          <Text style={styles.listingImageInitial}>{title.charAt(0).toUpperCase()}</Text>
+          <Text style={styles.listingImageInitial}>{titleInitial(title)}</Text>
         </View>
       )}
       <View style={styles.listingBody}>

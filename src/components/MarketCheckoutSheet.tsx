@@ -34,6 +34,7 @@ import CountryPickerSheet from './CountryPickerSheet';
 import Toast from './BrandedToast';
 import type { MarketProduct } from '../data/marketProducts';
 import { maxOrderQuantity, type MarketCheckoutTarget } from '../utils/marketCheckout';
+import { titleInitial } from '../utils/titleInitial';
 
 interface Props {
   visible: boolean;
@@ -449,9 +450,7 @@ const MarketCheckoutSheet: React.FC<Props> = ({
                 />
               ) : (
                 <View style={styles.thumbFallback}>
-                  <Text style={styles.thumbFallbackText}>
-                    {product.title.charAt(0).toUpperCase()}
-                  </Text>
+                  <Text style={styles.thumbFallbackText}>{titleInitial(product.title)}</Text>
                 </View>
               )}
               <View style={styles.productInfo}>

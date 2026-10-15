@@ -27,6 +27,7 @@ import {
   createMarketProductGalleryStyles,
   type MarketProductGalleryStyles,
 } from '../styles/MarketProductGallery.styles';
+import { titleInitial } from '../utils/titleInitial';
 
 interface Props {
   /** The product's main image (`''` when it has none). */
@@ -49,7 +50,7 @@ const aspectOf = (e: ImageLoadEventData): number | null => {
 
 const Fallback = ({ title, styles }: { title: string; styles: MarketProductGalleryStyles }) => (
   <View style={styles.imageFallback}>
-    <Text style={styles.imageFallbackText}>{title.charAt(0).toUpperCase()}</Text>
+    <Text style={styles.imageFallbackText}>{titleInitial(title)}</Text>
   </View>
 );
 
