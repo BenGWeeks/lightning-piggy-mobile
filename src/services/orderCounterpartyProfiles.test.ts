@@ -1,10 +1,12 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { cacheMessageDisplayProfiles } from './cachedDisplayProfiles';
+import type { NostrProfile } from '../types/nostr';
 import { readOrderCounterpartyProfiles } from './orderCounterpartyProfiles';
 import * as cache from './zapSenderProfileStorage';
 import { perAccountKey } from './perAccountStorage';
 import { OWN_PROFILE_CACHE_KEY_BASE } from '../contexts/nostrCacheKeys';
 
-jest.mock('./zapSenderProfileStorage', () => ({ getMany: jest.fn() }));
+jest.mock('./zapSenderProfileStorage', () => ({ getMany: jest.fn(), setMany: jest.fn() }));
 const OWNER = 'a'.repeat(64);
 const PEER = 'b'.repeat(64);
 const LOCAL = 'c'.repeat(64);
@@ -50,4 +52,30 @@ it('ignores corrupt or mismatched identity entries and retains the shared cache'
     JSON.stringify({ pubkey: LOCAL, npub: 'wrong', name: 'Wrong' }),
   );
   expect((await readOrderCounterpartyProfiles(OWNER, [PEER])).get(PEER)).toEqual(cached);
+});
+
+it('mirrors a Messages batch without payment metadata', async () => {
+  await cacheMessageDisplayProfiles(
+    new Map([
+      [
+        PEER,
+        {
+          npub: 'peer',
+          name: 'Name',
+          displayName: 'Peer',
+          picture: 'avatar',
+          lud16: 'unverified',
+        } as NostrProfile,
+      ],
+    ]),
+  );
+  const batch = jest.mocked(cache.setMany).mock.calls.at(-1)![0];
+  expect(batch.get(PEER)).toEqual({
+    npub: 'peer',
+    name: 'Name',
+    displayName: 'Peer',
+    picture: 'avatar',
+    nip05: null,
+  });
+  expect(batch.get(PEER)).not.toHaveProperty('lud16');
 });

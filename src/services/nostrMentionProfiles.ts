@@ -1,3 +1,4 @@
+import { readCachedDisplayProfiles } from './cachedDisplayProfiles';
 import { pool, trackRelays } from './nostrPool';
 import { querySyncAbortable } from './relayQuery';
 import * as storage from './zapSenderProfileStorage';
@@ -14,10 +15,28 @@ const cache = new Map<string, { profile: MentionProfile; at: number }>();
 let timer: ReturnType<typeof setTimeout> | undefined;
 let active: { keys: string[]; controller: AbortController } | undefined;
 let readRelays: string[] = [];
+let retryRelays: string[] = [];
+let profileOwner: string | null = null;
+let unsubscribeStorage: (() => void) | undefined;
+let notifyTimer: ReturnType<typeof setTimeout> | undefined;
+
+function watchStorage(): void {
+  unsubscribeStorage ??= storage.subscribeProfilesChanged(() => {
+    if (notifyTimer) return;
+    notifyTimer = setTimeout(() => {
+      notifyTimer = undefined;
+      for (const [key, listeners] of owners) {
+        const profile = peekMentionProfile(key);
+        if (profile !== EMPTY) for (const receive of listeners) receive(profile);
+      }
+    }, 60);
+  });
+}
 
 export function peekMentionProfile(pubkey: string): MentionProfile {
   const stored = storage.peekSync(pubkey);
-  if (stored) return { name: stored.displayName ?? stored.name ?? null, picture: stored.picture };
+  const name = stored?.displayName?.trim() || stored?.name?.trim();
+  if (name) return { name, picture: stored?.picture ?? null };
   const hit = cache.get(pubkey);
   return hit && Date.now() - hit.at < 10 * 60 * 1000 ? hit.profile : EMPTY;
 }
@@ -33,11 +52,16 @@ export function subscribeMentionProfile(
   pubkey: string,
   relays: string[],
   receive: (profile: MentionProfile) => void,
+  fallbackRelays: string[] = [],
+  owner: string | null = null,
 ): () => void {
+  profileOwner = owner;
+  watchStorage();
   const listeners = owners.get(pubkey) ?? new Set();
   listeners.add(receive);
   owners.set(pubkey, listeners);
-  readRelays = relays.slice(0, 6);
+  readRelays = [...new Set(relays)].slice(0, 6);
+  retryRelays = [...new Set(fallbackRelays)].filter((url) => !readRelays.includes(url)).slice(0, 6);
   const hit = peekMentionProfile(pubkey);
   if (hit !== EMPTY) receive(hit);
   else if (!active?.keys.includes(pubkey) || active.controller.signal.aborted) {
@@ -49,6 +73,12 @@ export function subscribeMentionProfile(
     if (!listeners.size) {
       owners.delete(pubkey);
       pending.delete(pubkey);
+    }
+    if (!owners.size) {
+      unsubscribeStorage?.();
+      unsubscribeStorage = undefined;
+      if (notifyTimer) clearTimeout(notifyTimer);
+      notifyTimer = undefined;
     }
     if (active && active.keys.every((key) => !owners.has(key))) active.controller.abort();
     if (!pending.size && timer) {
@@ -62,39 +92,48 @@ async function flush(): Promise<void> {
   timer = undefined;
   const keys = [...pending].slice(0, MAX_BATCH);
   keys.forEach((key) => pending.delete(key));
-  const batch = { keys, controller: new AbortController() };
+  const batch = { keys, controller: new AbortController(), owner: profileOwner };
   active = batch;
   const signal = batch.controller.signal;
   const resolved = new Map<string, MentionProfile>();
   const queried = new Set<string>();
   try {
-    const stored = await storage.getMany(keys);
+    const stored = await (
+      batch.owner ? readCachedDisplayProfiles(batch.owner, keys) : storage.getMany(keys)
+    ).catch(() => new Map<string, storage.CachedZapSenderProfile>());
     if (signal.aborted) return;
     for (const [key, profile] of stored) {
+      const name = profile.displayName?.trim() || profile.name?.trim();
+      if (!name) continue;
       resolved.set(key, {
-        name: profile.displayName ?? profile.name ?? null,
+        name,
         picture: profile.picture,
       });
     }
     const missing = keys.filter((key) => !resolved.has(key) && owners.has(key));
-    if (missing.length && readRelays.length) {
-      missing.forEach((key) => queried.add(key));
-      const relays = readRelays;
+    // Snapshot relay configuration for this shared batch. Retry only missing
+    // authors, once, with the same abort signal and bounded filter.
+    const attempts = [readRelays, retryRelays];
+    const best = new Map<string, number>();
+    for (const relays of attempts) {
+      const unresolved = missing.filter((key) => !resolved.get(key)?.name && owners.has(key));
+      if (signal.aborted) return;
+      if (!unresolved.length || !relays.length) continue;
+      unresolved.forEach((key) => queried.add(key));
       trackRelays(relays);
       // kind-0 is structure-only in the shared pool. Display fields don't
       // need schnorr checks; payment fields are fetched on the profile page.
       const events = await querySyncAbortable(
         pool,
         relays,
-        { kinds: [0], authors: missing, limit: missing.length * 2 },
+        { kinds: [0], authors: unresolved, limit: unresolved.length * 2 },
         { signal, maxWait: 3000 },
-      );
-      const best = new Map<string, number>();
+      ).catch(() => []);
       for (const event of events) {
         if (signal.aborted) return;
         if (
           event.kind !== 0 ||
-          !missing.includes(event.pubkey) ||
+          !unresolved.includes(event.pubkey) ||
           event.content.length > 32768 ||
           event.created_at > Date.now() / 1000 + 300 ||
           event.created_at <= (best.get(event.pubkey) ?? -Infinity)
@@ -102,7 +141,8 @@ async function flush(): Promise<void> {
           continue;
         try {
           const data = JSON.parse(event.content);
-          const field = (value: unknown) => (typeof value === 'string' ? value : null);
+          const field = (value: unknown) =>
+            typeof value === 'string' ? value.trim() || null : null;
           resolved.set(event.pubkey, {
             name: field(data.display_name) ?? field(data.name),
             picture: field(data.picture),
@@ -124,7 +164,10 @@ async function flush(): Promise<void> {
       const profile = resolved.get(key) ?? { ...EMPTY };
       cache.delete(key);
       cache.set(key, { profile, at: Date.now() });
-      for (const receive of owners.get(key) ?? []) receive(profile);
+      // A member/cache write may have arrived while the relay query waited.
+      // Preserve the higher-priority local name instead of flashing a miss.
+      const latest = peekMentionProfile(key);
+      for (const receive of owners.get(key) ?? []) receive(latest);
     }
     while (cache.size > 300) cache.delete(cache.keys().next().value!);
   } catch {
@@ -136,6 +179,10 @@ async function flush(): Promise<void> {
 }
 
 export function __resetMentionProfilesForTests(): void {
+  unsubscribeStorage?.();
+  unsubscribeStorage = undefined;
+  if (notifyTimer) clearTimeout(notifyTimer);
+  notifyTimer = undefined;
   active?.controller.abort();
   if (timer) clearTimeout(timer);
   timer = undefined;
@@ -143,4 +190,6 @@ export function __resetMentionProfilesForTests(): void {
   pending.clear();
   cache.clear();
   readRelays = [];
+  retryRelays = [];
+  profileOwner = null;
 }

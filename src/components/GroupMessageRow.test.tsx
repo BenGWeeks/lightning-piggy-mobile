@@ -2,6 +2,9 @@ import React from 'react';
 import { fireEvent, render } from '@testing-library/react-native';
 import { Image } from 'expo-image';
 import GroupMessageRow from './GroupMessageRow';
+import { useMentionProfile } from '../hooks/useMentionProfile';
+
+jest.mock('../hooks/useMentionProfile', () => ({ useMentionProfile: jest.fn() }));
 
 jest.mock('../contexts/ThemeContext', () => ({
   useThemeColors: () => jest.requireActual('../styles/palettes').lightPalette,
@@ -30,7 +33,10 @@ const props = {
   onOpenLocation: jest.fn(),
 };
 
-beforeEach(() => jest.clearAllMocks());
+beforeEach(() => {
+  jest.clearAllMocks();
+  jest.mocked(useMentionProfile).mockReturnValue({ name: null, picture: null });
+});
 
 test('avatar initials and name both open the sender profile', () => {
   const ui = render(<GroupMessageRow {...props} />);
@@ -60,3 +66,12 @@ test.each([{ showSender: false }, { fromMe: true }])(
     expect(ui.getByText('msg1')).toBeTruthy();
   },
 );
+
+test('uses the shared resolver for a sender and updates an already-mounted label', () => {
+  const ui = render(<GroupMessageRow {...props} senderName={undefined} />);
+  expect(ui.getByTestId('group-msg-sender-msg1').props.accessibilityLabel).toMatch(/^npub1.*…/);
+  expect(useMentionProfile).toHaveBeenCalledWith(props.senderPubkey, null);
+  jest.mocked(useMentionProfile).mockReturnValue({ name: 'Resolved Fox', picture: null });
+  ui.rerender(<GroupMessageRow {...props} senderName="Stale snapshot" />);
+  expect(ui.getByText('Resolved Fox')).toBeTruthy();
+});

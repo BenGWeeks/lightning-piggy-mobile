@@ -4,6 +4,8 @@ import { __resetMentionProfilesForTests } from '../services/nostrMentionProfiles
 import { querySyncAbortable } from '../services/relayQuery';
 
 let mockFocused = true;
+let mockNostr: Record<string, unknown>;
+
 const mockVerifiedFetch = jest.fn();
 jest.mock('@react-navigation/native', () => ({
   useFocusEffect: (callback: () => (() => void) | undefined) => {
@@ -13,7 +15,8 @@ jest.mock('@react-navigation/native', () => ({
   },
 }));
 jest.mock('../contexts/NostrContext', () => ({
-  useNostr: () => ({ relays: [{ url: 'wss://read', read: true }] }),
+  useNostr: () => mockNostr,
+  useNostrContacts: () => mockNostr,
 }));
 jest.mock('../services/nostrService', () => ({
   fetchProfile: (...args: unknown[]) => mockVerifiedFetch(...args),
@@ -25,11 +28,13 @@ jest.mock('../services/zapSenderProfileStorage', () => ({
   get: async () => null,
   getMany: async () => new Map(),
   setMany: jest.fn(),
+  subscribeProfilesChanged: jest.fn(() => () => {}),
 }));
 const query = jest.mocked(querySyncAbortable);
 beforeEach(() => {
   jest.useFakeTimers();
   mockFocused = true;
+  mockNostr = { relays: [{ url: 'wss://read', read: true, write: false }], contacts: [] };
   jest.clearAllMocks();
   __resetMentionProfilesForTests();
   query.mockResolvedValue([]);
@@ -46,7 +51,7 @@ it('shares one cosmetic batch across mention hooks without verified payment look
   await act(async () => {
     await jest.advanceTimersByTimeAsync(60);
   });
-  expect(query).toHaveBeenCalledTimes(1);
+  expect(query).toHaveBeenCalledTimes(2);
   expect(query.mock.calls[0][2].authors).toEqual(['a', 'b']);
   expect(mockVerifiedFetch).not.toHaveBeenCalled();
   a.unmount();
@@ -68,6 +73,7 @@ it('does not query while blurred, and cancels the subscription on blur before un
       }),
   );
   mockFocused = true;
+  mockNostr = { relays: [{ url: 'wss://read', read: true, write: false }], contacts: [] };
   hook.rerender({});
   await act(async () => {
     await jest.advanceTimersByTimeAsync(60);
@@ -77,5 +83,83 @@ it('does not query while blurred, and cancels the subscription on blur before un
   mockFocused = false;
   hook.rerender({});
   expect(signal.aborted).toBe(true);
+  hook.unmount();
+});
+
+it('resolves the signed-in profile before contacts without a relay lookup', async () => {
+  mockNostr = {
+    ...mockNostr,
+    pubkey: 'a',
+    profile: { displayName: 'Me', name: 'old' },
+    contacts: [{ pubkey: 'a', profile: { displayName: 'Stale contact' } }],
+  };
+  const hook = renderHook(() => useMentionProfile('a'));
+  expect(hook.result.current.name).toBe('Me');
+  await act(async () => {
+    await jest.advanceTimersByTimeAsync(120);
+  });
+  expect(query).not.toHaveBeenCalled();
+  mockNostr = { ...mockNostr, profile: { displayName: 'Updated me' } };
+  hook.rerender({});
+  expect(hook.result.current.name).toBe('Updated me');
+  hook.unmount();
+});
+
+it('uses the shared Friends/Messages contacts and reacts to later hydration', async () => {
+  mockNostr = { ...mockNostr, contacts: [{ pubkey: 'a', profile: { displayName: 'Alice' } }] };
+  const hook = renderHook(() => useMentionProfile('a'));
+  expect(hook.result.current.name).toBe('Alice');
+  await act(async () => {
+    await jest.advanceTimersByTimeAsync(120);
+  });
+  expect(query).not.toHaveBeenCalled();
+  mockNostr = { ...mockNostr, contacts: [{ pubkey: 'a', profile: { displayName: 'New Alice' } }] };
+  hook.rerender({});
+  expect(hook.result.current.name).toBe('New Alice');
+  hook.unmount();
+});
+
+it('updates an already-mounted miss when a contact arrives', async () => {
+  const hook = renderHook(() => useMentionProfile('a'));
+  await act(async () => {
+    await jest.advanceTimersByTimeAsync(120);
+  });
+  expect(query).toHaveBeenCalled();
+  expect(hook.result.current.name).toBeNull();
+  mockNostr = { ...mockNostr, contacts: [{ pubkey: 'a', profile: { name: 'Arrived' } }] };
+  hook.rerender({});
+  expect(hook.result.current.name).toBe('Arrived');
+  hook.unmount();
+});
+
+it('uses a supplied Marmot member profile before lower caches and relay work', async () => {
+  const hook = renderHook(() => useMentionProfile('a', { name: 'Member', picture: null }));
+  expect(hook.result.current.name).toBe('Member');
+  await act(async () => {
+    await jest.advanceTimersByTimeAsync(120);
+  });
+  expect(query).not.toHaveBeenCalled();
+  mockNostr = { ...mockNostr, contacts: [{ pubkey: 'a', profile: { name: 'Friend' } }] };
+  hook.rerender({});
+  expect(hook.result.current.name).toBe('Friend');
+  hook.unmount();
+});
+
+it('retries a cache miss once using the account write relays and both indexers', async () => {
+  mockNostr = {
+    ...mockNostr,
+    relays: [
+      { url: 'wss://read', read: true, write: false },
+      { url: 'wss://write', read: false, write: true },
+    ],
+  };
+  const hook = renderHook(() => useMentionProfile('a'));
+  await act(async () => {
+    await jest.advanceTimersByTimeAsync(1000);
+  });
+  expect(query).toHaveBeenCalledTimes(2);
+  expect(query.mock.calls[1][1]).toEqual(
+    expect.arrayContaining(['wss://write', 'wss://purplepag.es', 'wss://user.kindpag.es']),
+  );
   hook.unmount();
 });
