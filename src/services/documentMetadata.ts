@@ -18,6 +18,5 @@ export async function selectedDocumentName(file: { uri: string; name: string }):
     return file.name;
   }
   const name = await native.displayNameAsync(file.uri);
-  if (!name) throw new Error('Document provider returned no display name');
-  return name;
+  return name || file.name;
 }

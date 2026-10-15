@@ -12,6 +12,13 @@ it('uses the provider display name for opaque Android content URIs', async () =>
   expect(displayNameAsync).toHaveBeenCalledWith('content://downloads/document/1234');
 });
 
+it('falls back to the basename when the provider has no display name', async () => {
+  jest.mocked(requireOptionalNativeModule).mockReturnValue({ displayNameAsync: async () => null });
+  await expect(
+    selectedDocumentName({ uri: 'content://downloads/document/1234', name: '1234' }),
+  ).resolves.toBe('1234');
+});
+
 it('retains local file names without a native query', async () => {
   await expect(
     selectedDocumentName({ uri: 'file:///cache/invoice.pdf', name: 'invoice.pdf' }),
