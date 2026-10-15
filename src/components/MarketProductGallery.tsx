@@ -179,7 +179,6 @@ const GalleryThumbnail = React.memo(
     const highlight = useAnimatedStyle(() => ({
       borderColor: scrollIndex.value === index ? activeColor : inactiveColor,
       borderWidth: scrollIndex.value === index ? 2 : styles.thumbnail.borderWidth,
-      opacity: scrollIndex.value === index ? 1 : 0.6,
     }));
     return (
       <Pressable
