@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNostr } from '../contexts/NostrContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { joinExploreByAuthorFetch } from '../utils/exploreFetchGuard';
@@ -210,7 +210,9 @@ export function useExploreRelayContent(
     [],
   );
   const cachesRef = useRef(caches);
-  cachesRef.current = caches;
+  useLayoutEffect(() => {
+    cachesRef.current = caches;
+  }, [caches]);
   const [cacheCompletion, setCacheCompletion] = useState<NearbyCachesCompletion | null>(null);
   const subsCloserRef = useRef<(() => void)[]>([]);
   // Gate re-subscription on coarse movement (~500 m via 0.005° quantisation)
@@ -313,8 +315,7 @@ export function useExploreRelayContent(
               const previous = known.get(coord);
               if (!previous || previous.createdAt < cache.createdAt) known.set(coord, cache);
             }
-            const lowerPubkey = signedInPubkey?.toLowerCase();
-            let eligibleCount = 0;
+            let nearbyCount = 0;
             for (const cache of known.values()) {
               if (isHiddenInProd(cache.hiderPubkey)) continue;
               const center = cache.geohash ? decodeGeohash(cache.geohash) : null;
@@ -324,17 +325,14 @@ export function useExploreRelayContent(
                     { lat: center.lat, lon: center.lng },
                   )
                 : Number.POSITIVE_INFINITY;
-              // Count only candidates for the nearby rail or nearest fallback.
-              // Distant own caches must not prevent the next wider query.
-              const nearby = maxDistanceMetres === null || distance <= maxDistanceMetres;
-              const fallback =
-                cache.hiderPubkey.toLowerCase() !== lowerPubkey && Number.isFinite(distance);
-              if (nearby || fallback) eligibleCount++;
+              // Only in-radius caches stop widening. Keep distant candidates
+              // in the Map for the fallback rail if no nearby caches are found.
+              if (maxDistanceMetres === null || distance <= maxDistanceMetres) nearbyCount++;
             }
             console.log(
-              `[PerfBlock] Explore cache search: precision=${precision} eligible=${eligibleCount} elapsed=${Math.round(performance.now() - startedAt)}ms`,
+              `[PerfBlock] Explore cache search: precision=${precision} nearby=${nearbyCount} elapsed=${Math.round(performance.now() - startedAt)}ms`,
             );
-            if (eligibleCount < NEAREST_FALLBACK_COUNT && precision > 3) query(precision - 1);
+            if (nearbyCount < NEAREST_FALLBACK_COUNT && precision > 3) query(precision - 1);
             else finish();
           },
         );

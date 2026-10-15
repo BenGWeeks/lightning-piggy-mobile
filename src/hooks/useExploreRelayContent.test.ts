@@ -159,7 +159,13 @@ it('returns the ten closest when the radius excludes all, excluding distant own 
   );
   expect(result.current.cacheRailState).toBe('ready');
   act(() => callbacks().complete({ allRelaysFailed: false }));
-  expect(mockSubscribeCaches).toHaveBeenCalledTimes(1);
+  expect(mockSubscribeCaches).toHaveBeenCalledTimes(2);
+  act(() => {
+    callbacks(1).complete({ allRelaysFailed: false });
+    callbacks(2).complete({ allRelaysFailed: false });
+  });
+  expect(result.current.cacheRailIsNearestFallback).toBe(true);
+  expect(result.current.sortedCaches).toHaveLength(10);
 });
 
 it('widens only under ten known caches, stops at precision 3, and stays loading until done', async () => {
@@ -350,4 +356,27 @@ it('does not count hidden disk caches or caches without fallback coordinates', a
   await act(async () => {});
   act(() => callbacks().complete({ allRelaysFailed: false }));
   expect(mockSubscribeCaches).toHaveBeenCalledTimes(2);
+});
+
+it('widens past ten cached fallback candidates to discover an in-radius cache', async () => {
+  mockSeed = Array.from({ length: 10 }, (_, i) => ({
+    ...cache,
+    coord: `fallback-${i}`,
+    geohash: encodeGeohash(53 + i * 0.1, -0.1, 9),
+  }));
+  const { result } = renderHook(() => useExploreRelayContent(pos, 0, 1000));
+  await act(async () => {});
+  expect(result.current.cacheRailIsNearestFallback).toBe(true);
+  act(() => callbacks().complete({ allRelaysFailed: false }));
+  expect(mockSubscribeCaches).toHaveBeenCalledTimes(2);
+  const nearby = { ...cache, coord: 'nearby', geohash: encodeGeohash(pos.lat, pos.lon, 9) };
+  act(() => {
+    callbacks(1).event(nearby);
+    callbacks(1).complete({ allRelaysFailed: false });
+  });
+  expect(mockSubscribeCaches).toHaveBeenCalledTimes(3);
+  act(() => callbacks(2).complete({ allRelaysFailed: false }));
+  expect(result.current.cacheRailIsNearestFallback).toBe(false);
+  expect(result.current.sortedCaches.map((item) => item.cache)).toEqual([nearby]);
+  expect(result.current.cacheRailState).toBe('ready');
 });
