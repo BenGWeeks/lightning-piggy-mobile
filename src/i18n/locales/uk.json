@@ -3599,7 +3599,7 @@
     "completed": "Виконано",
     "cancelled": "Скасовано",
     "needsInvoice": "Потрібен рахунок",
-    "invoiceSent": "Рахунок надіслано"
+    "invoiceSent": "Очікує оплату"
   },
   "sellerActivity": {
     "settings": "Коментарі та відгуки до моїх оголошень",

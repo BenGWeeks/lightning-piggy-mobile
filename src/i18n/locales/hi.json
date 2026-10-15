@@ -3545,7 +3545,7 @@
     "completed": "पूरा हुआ",
     "cancelled": "रद्द",
     "needsInvoice": "इनवॉइस भेजना है",
-    "invoiceSent": "इनवॉइस भेजा गया"
+    "invoiceSent": "भुगतान की प्रतीक्षा"
   },
   "sellerActivity": {
     "settings": "मेरी लिस्टिंग पर टिप्पणियाँ और समीक्षाएँ",

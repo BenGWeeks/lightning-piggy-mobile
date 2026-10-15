@@ -3545,7 +3545,7 @@
     "completed": "Completed",
     "cancelled": "Cancelled",
     "needsInvoice": "Needs invoice",
-    "invoiceSent": "Invoice sent"
+    "invoiceSent": "Awaiting payment"
   },
   "sellerActivity": {
     "settings": "Comments & reviews on my listings",

@@ -3599,7 +3599,7 @@
     "completed": "Zrealizowane",
     "cancelled": "Anulowane",
     "needsInvoice": "Wymaga faktury",
-    "invoiceSent": "Faktura wysłana"
+    "invoiceSent": "Czeka na płatność"
   },
   "sellerActivity": {
     "settings": "Komentarze i recenzje moich ofert",
