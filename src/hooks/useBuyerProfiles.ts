@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import * as cache from '../services/zapSenderProfileStorage';
+import { readOrderCounterpartyProfiles } from '../services/orderCounterpartyProfiles';
 
 const EMPTY: ReadonlyMap<string, cache.CachedZapSenderProfile> = new Map();
 
@@ -44,7 +45,7 @@ export function useBuyerProfiles(
       let cancelled = false;
       const authors = buyersKey.split(',');
       void (async () => {
-        const cached = await cache.getMany(authors);
+        const cached = await readOrderCounterpartyProfiles(pubkey, authors);
         if (cancelled) return;
         setState({ owner: pubkey, key: buyersKey, profiles: cached });
         const missing = authors.filter((pk) => {

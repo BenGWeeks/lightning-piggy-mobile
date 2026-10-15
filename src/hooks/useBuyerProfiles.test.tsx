@@ -1,6 +1,7 @@
 import { renderHook, waitFor } from '@testing-library/react-native';
 import { useBuyerProfiles } from './useBuyerProfiles';
 import * as cache from '../services/zapSenderProfileStorage';
+import { readOrderCounterpartyProfiles } from '../services/orderCounterpartyProfiles';
 import type { NostrContact } from '../types/nostr';
 
 const BUYER = 'b'.repeat(64);
@@ -16,6 +17,9 @@ jest.mock('@react-navigation/native', () => ({
   useFocusEffect: (effect: () => void | (() => void)) =>
     jest.requireActual('react').useEffect(effect, [effect]),
 }));
+jest.mock('../services/orderCounterpartyProfiles', () => ({
+  readOrderCounterpartyProfiles: jest.fn(),
+}));
 jest.mock('../services/zapSenderProfileStorage', () => ({
   getMany: jest.fn(),
   setMany: jest.fn(),
@@ -25,7 +29,7 @@ beforeEach(() => {
   mockOwner = 'a'.repeat(64);
   mockContacts = [];
   jest.clearAllMocks();
-  jest.mocked(cache.getMany).mockResolvedValue(new Map());
+  jest.mocked(readOrderCounterpartyProfiles).mockResolvedValue(new Map());
   jest.mocked(cache.setMany).mockResolvedValue(undefined);
   mockFetch.mockResolvedValue(new Map());
 });
@@ -47,13 +51,13 @@ it('uses Friends names and pictures without a relay request', async () => {
   const { result } = renderHook(() => useBuyerProfiles(BUYER));
   expect(result.current.get(BUYER)?.displayName).toBe('Little Piggy');
   expect(result.current.get(BUYER)?.picture).toBe('https://example.com/pig.png');
-  await waitFor(() => expect(cache.getMany).toHaveBeenCalled());
+  await waitFor(() => expect(readOrderCounterpartyProfiles).toHaveBeenCalled());
   expect(mockFetch).not.toHaveBeenCalled();
 });
 
 it('reuses cached avatars and batches missing counterparties through the existing fetch', async () => {
   jest
-    .mocked(cache.getMany)
+    .mocked(readOrderCounterpartyProfiles)
     .mockResolvedValue(
       new Map([
         [BUYER, { npub: 'npub', name: 'Cached', displayName: null, picture: null, nip05: null }],
@@ -112,7 +116,7 @@ it('discards a late result after the account or counterparty set changes', async
 });
 
 it('fetches a name when an older avatar cache entry has no display metadata', async () => {
-  jest.mocked(cache.getMany).mockResolvedValue(
+  jest.mocked(readOrderCounterpartyProfiles).mockResolvedValue(
     new Map([
       [
         BUYER,
