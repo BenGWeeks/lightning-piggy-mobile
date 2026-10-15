@@ -80,13 +80,31 @@ async function maintainDiscovery(
   const keyComplete = await publish(relays, event, 'keyAcks', outcome === 'published');
   let listComplete = true;
   const previousList = await backend.get(namespace, 'list');
-  if (previousList !== fingerprint) {
-    const pending = await backend.get(namespace, 'pendingList');
-    const cached = pending ? (JSON.parse(pending) as NostrEvent) : undefined;
-    let signed =
-      cached && JSON.stringify(cached.tags.map((t) => t[1]).sort()) === fingerprint
-        ? cached
-        : undefined;
+  const pending = await backend.get(namespace, 'pendingList');
+  const cached = pending ? (JSON.parse(pending) as NostrEvent) : undefined;
+  const pendingFingerprint = cached && JSON.stringify(cached.tags.map((t) => t[1]).sort());
+  const pendingTargets = JSON.parse(
+    (await backend.get(namespace, 'pendingListTargets')) ?? '[]',
+  ) as string[];
+  // A newer, partially accepted list can supersede the completed list even
+  // when settings revert. Correct it with a strictly newer signed event.
+  if (
+    previousList !== fingerprint ||
+    (cached && pendingFingerprint !== fingerprint) ||
+    pendingTargets.length
+  ) {
+    const targets = isTestRelayLockdown(owner)
+      ? [TEST_RELAY_URL]
+      : [
+          ...new Set([
+            ...relays,
+            ...cleanKeyPackageRelays(previousList ? (JSON.parse(previousList) as string[]) : []),
+            ...cleanKeyPackageRelays(cached ? cached.tags.map((t) => t[1]) : []),
+            ...pendingTargets,
+            ...RELAY_LIST_INDEXERS,
+          ]),
+        ];
+    let signed = cached && pendingFingerprint === fingerprint ? cached : undefined;
     if (!signed) {
       const previous = Number(await backend.get(namespace, 'timestamp')) || 0;
       const draft = buildKeyPackageRelayList(
@@ -100,20 +118,13 @@ async function maintainDiscovery(
       await backend.set(namespace, 'timestamp', String(signed.created_at));
       await backend.set(namespace, 'pendingList', JSON.stringify(signed));
     }
-    listComplete = await publish(
-      isTestRelayLockdown(owner)
-        ? [TEST_RELAY_URL]
-        : [
-            ...new Set([
-              ...relays,
-              ...cleanKeyPackageRelays(previousList ? (JSON.parse(previousList) as string[]) : []),
-              ...RELAY_LIST_INDEXERS,
-            ]),
-          ],
-      signed,
-      'listAcks',
-    );
-    if (listComplete) await backend.set(namespace, 'list', fingerprint);
+    // Keep superseded destinations until every relay accepts the correction.
+    await backend.set(namespace, 'pendingListTargets', JSON.stringify(targets));
+    listComplete = await publish(targets, signed, 'listAcks');
+    if (listComplete) {
+      await backend.set(namespace, 'list', fingerprint);
+      await backend.remove(namespace, 'pendingListTargets');
+    }
   }
   return keyComplete && listComplete ? outcome : 'failed';
 }

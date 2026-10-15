@@ -206,3 +206,56 @@ it('advertises accepted keys while retaining partial receipts for later retries'
   await maintainDiscoverableKeyPackage(t.client, t.backend, owner, t.opts);
   expect(t.publish).toHaveBeenCalledTimes(4);
 });
+
+it('corrects a partially published relay edit when settings revert, retrying the same corrective event', async () => {
+  const t = setup();
+  t.signEvent.mockImplementation(async (draft) => ({
+    ...draft,
+    id: `list-${draft.created_at}`,
+    pubkey: owner,
+    sig: '',
+  }));
+  await maintainDiscoverableKeyPackage(t.client, t.backend, owner, t.opts);
+  const original = t.publish.mock.calls.find(([, signed]) => signed.kind === 10051)![1];
+  let rejectedRelay: string | undefined = 'wss://purplepag.es';
+  t.publish.mockImplementation(async (relays) =>
+    Object.fromEntries(relays.map((r) => [r, { from: r, ok: r !== rejectedRelay }])),
+  );
+  await expect(
+    maintainDiscoverableKeyPackage(t.client, t.backend, owner, {
+      ...t.opts,
+      relays: ['wss://changed.example'],
+    }),
+  ).resolves.toBe('failed');
+  const partial = JSON.parse(
+    (await t.backend.get('keyPackageDiscovery', 'pendingList'))!,
+  ) as NostrEvent;
+  expect(partial.created_at).toBeGreaterThan(original.created_at);
+  expect(await t.backend.get('keyPackageDiscovery', 'failed')).toBe('true');
+
+  // Fail the corrective event on the removed relay, then recover on a later run.
+  rejectedRelay = 'wss://changed.example';
+  await expect(maintainDiscoverableKeyPackage(t.client, t.backend, owner, t.opts)).resolves.toBe(
+    'failed',
+  );
+  const corrective = JSON.parse(
+    (await t.backend.get('keyPackageDiscovery', 'pendingList'))!,
+  ) as NostrEvent;
+  expect(corrective.created_at).toBeGreaterThan(partial.created_at);
+  expect(corrective.tags).toEqual(original.tags);
+  expect(t.publish.mock.calls.at(-1)![0]).toEqual(
+    expect.arrayContaining(['wss://own.example', 'wss://changed.example', 'wss://purplepag.es']),
+  );
+  expect(await t.backend.get('keyPackageDiscovery', 'failed')).toBe('true');
+
+  rejectedRelay = undefined;
+  await expect(maintainDiscoverableKeyPackage(t.client, t.backend, owner, t.opts)).resolves.toBe(
+    'unchanged',
+  );
+  expect(t.publish.mock.calls.at(-1)).toEqual([['wss://changed.example'], corrective]);
+  expect(t.signEvent).toHaveBeenCalledTimes(3);
+  expect(await t.backend.get('keyPackageDiscovery', 'failed')).toBe('false');
+  const calls = t.publish.mock.calls.length;
+  await maintainDiscoverableKeyPackage(t.client, t.backend, owner, t.opts);
+  expect(t.publish).toHaveBeenCalledTimes(calls);
+});
