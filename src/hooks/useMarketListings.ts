@@ -153,7 +153,6 @@ export function useMarketListings(enabled: boolean, scope?: MarketListingsScope)
         (open
           ? fetchOpenMarketListings(relaysKey.split(','), controller.signal, onFirstPage, {
               carried: carriedListingEvents(confirmed.current.products),
-              previousProducts: confirmed.current.products,
             })
           : fetchMarketListings(
               authorsKey.split(','),
@@ -262,16 +261,13 @@ export function useMarketListings(enabled: boolean, scope?: MarketListingsScope)
     products: resolvedProducts,
     profilesReady,
     hasProfile,
-    profileLookupFailed,
   } = useMarketMerchantProfiles(currentProducts, enabled && focused);
   // All scope, rule 3 (utils/marketOpenScope): once the profile pass has
-  // answered successfully for a seller, drop them if no kind-0 was found.
+  // completed, retain only sellers with a known kind-0, even after lookup failures.
   const products = useMemo(
     () =>
-      open && profilesReady
-        ? withKnownProfiles(resolvedProducts, (pk) => hasProfile(pk) || profileLookupFailed(pk))
-        : resolvedProducts,
-    [open, profilesReady, resolvedProducts, hasProfile, profileLookupFailed],
+      open && profilesReady ? withKnownProfiles(resolvedProducts, hasProfile) : resolvedProducts,
+    [open, profilesReady, resolvedProducts, hasProfile],
   );
   return useMemo(
     () => ({

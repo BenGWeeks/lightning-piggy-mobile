@@ -632,21 +632,22 @@ async function runSnapshot(
         listings.answered.length === 0 ||
         deletions.answered.length === 0,
     };
-    result.unreachableSellers = signal.aborted || !(scope instanceof Set)
-      ? []
-      : unreachableMarketSellers(
-          scope,
-          urls,
-          listings.answered,
-          // Unchecked candidates withheld by internal work/display limits
-          // cannot establish a missing seller. Otherwise only authenticated
-          // listings count: a forged payload must not hide a transport failure.
-          withheld || limited || selection.gaveUp || reserved.gaveUp || selection.overflow
-            ? new Set([...receivedAuthors, ...observedAuthors])
-            : new Set([...receivedAuthors, ...withheldAuthors]),
-          previousProducts,
-          mergeMarketSnapshot(previousProducts, result),
-        );
+    result.unreachableSellers =
+      signal.aborted || !(scope instanceof Set)
+        ? []
+        : unreachableMarketSellers(
+            scope,
+            urls,
+            listings.answered,
+            // Unchecked candidates withheld by internal work/display limits
+            // cannot establish a missing seller. Otherwise only authenticated
+            // listings count: a forged payload must not hide a transport failure.
+            withheld || limited || selection.gaveUp || reserved.gaveUp || selection.overflow
+              ? new Set([...receivedAuthors, ...observedAuthors])
+              : new Set([...receivedAuthors, ...withheldAuthors]),
+            previousProducts,
+            mergeMarketSnapshot(previousProducts, result),
+          );
     // Diagnostics are optional so old cached envelopes remain valid.
     if (
       initiallyLimited ||
