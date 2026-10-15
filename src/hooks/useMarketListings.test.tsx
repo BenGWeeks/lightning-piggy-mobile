@@ -10,6 +10,9 @@ import { MARKET_SNAPSHOT_FRESH_MS, useMarketListings } from './useMarketListings
 import { fetchMarketListings } from '../services/marketListingsService';
 import type { MarketListingsResult } from '../services/marketListingsService';
 jest.mock('../services/marketListingsService', () => ({ fetchMarketListings: jest.fn() }));
+jest.mock('../services/marketMerchantProfiles', () => ({
+  fetchMarketMerchantProfiles: jest.fn(async () => new Map()),
+}));
 let mockViewer = 'mockViewer-a';
 let mockFocused = true;
 const mockContacts = [{ pubkey: 'a'.repeat(64), petname: 'Friend', profile: null }];
@@ -272,15 +275,19 @@ describe('partial snapshot recovery', () => {
     (Toast.showOwned as jest.Mock).mockClear();
   });
   afterEach(() => jest.useRealTimers());
-  it('retries once with backoff and only toasts if the retry still fails', async () => {
+  it('retries once with backoff and only warns if the seller is still unreachable', async () => {
     const h = renderHook(() => useMarketListings(true));
-    await act(async () => finish({ products: [], incomplete: true }));
+    await act(async () =>
+      finish({ products: [], incomplete: true, unreachableSellers: [mockContacts[0].pubkey] }),
+    );
     expect(Toast.showOwned).not.toHaveBeenCalled();
     act(() => jest.advanceTimersByTime(1499));
     expect(fetch).toHaveBeenCalledTimes(1);
     act(() => jest.advanceTimersByTime(1));
     expect(fetch).toHaveBeenCalledTimes(2);
-    await act(async () => finish({ products: [], incomplete: true }));
+    await act(async () =>
+      finish({ products: [], incomplete: true, unreachableSellers: [mockContacts[0].pubkey] }),
+    );
     expect(Toast.showOwned).toHaveBeenCalledWith(
       expect.objectContaining({
         autoHide: true,
@@ -343,9 +350,13 @@ it.each(['blur', 'mode', 'account', 'unmount'])(
     const h = renderHook(({ enabled }: { enabled: boolean }) => useMarketListings(enabled), {
       initialProps: { enabled: true },
     });
-    await act(async () => finish({ products: [], incomplete: true }));
+    await act(async () =>
+      finish({ products: [], incomplete: true, unreachableSellers: [mockContacts[0].pubkey] }),
+    );
     act(() => jest.advanceTimersByTime(1500));
-    await act(async () => finish({ products: [], incomplete: true }));
+    await act(async () =>
+      finish({ products: [], incomplete: true, unreachableSellers: [mockContacts[0].pubkey] }),
+    );
     if (cleanup === 'blur') {
       mockFocused = false;
       h.rerender({ enabled: true });
@@ -387,6 +398,7 @@ describe('stale-while-revalidate across partial refreshes', () => {
     // The shown listings ride along so pass 2 can check their deletions.
     expect(fetch.mock.calls[1][4]).toEqual({
       carried: [shop.listing!.event, eden.listing!.event],
+      previousProducts: [shop, eden],
     });
     await act(async () =>
       finish({ products: [shop], incomplete: false, answeredRelays: ['wss://example.com'] }),
@@ -421,4 +433,55 @@ describe('stale-while-revalidate across partial refreshes', () => {
     );
     expect(h.result.current.products.map((p) => p.id)).toEqual(['shop']);
   });
+});
+
+describe('unreachable seller banner signal', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    (Toast.showOwned as jest.Mock).mockClear();
+  });
+  afterEach(() => jest.useRealTimers());
+
+  it.each(['internal', 'unreachable', 'cached', 'recovered', 'retry-only'])(
+    'only surfaces a persistent missing seller after retry: %s',
+    async (scenario) => {
+      const author = mockContacts[0].pubkey;
+      const cached = {
+        ...cachedProduct,
+        listing: { event: { pubkey: author }, seenOn: ['wss://example.com'], vendor: {} },
+      } as MarketListingsResult['products'][number];
+      const h = renderHook(() => useMarketListings(true));
+      if (scenario === 'cached') {
+        await act(async () => finish({ products: [cached], incomplete: false }));
+        act(() => h.result.current.refresh());
+      }
+      const partial = (unreachable: boolean): MarketListingsResult => ({
+        products: [],
+        incomplete: true,
+        budgetLimited: scenario === 'internal',
+        answeredRelays: [],
+        unreachableSellers: unreachable ? [author] : [],
+      });
+      await act(async () => finish(partial(!['internal', 'retry-only'].includes(scenario))));
+      expect(h.result.current.sellersUnreachable).toBe(false);
+      expect(Toast.showOwned).not.toHaveBeenCalled();
+      act(() => jest.advanceTimersByTime(1500));
+      await act(async () => finish(partial(!['internal', 'recovered'].includes(scenario))));
+      expect(h.result.current.sellersUnreachable).toBe(scenario === 'unreachable');
+      expect(Toast.showOwned).toHaveBeenCalledTimes(scenario === 'unreachable' ? 1 : 0);
+      if (scenario === 'cached')
+        expect(h.result.current.products.map((p) => p.id)).toEqual([cached.id]);
+      h.unmount();
+    },
+  );
+});
+
+it('keeps the existing retry policy when a complete first pass carries an unreachable signal', async () => {
+  const h = renderHook(() => useMarketListings(true));
+  await act(async () =>
+    finish({ products: [], incomplete: false, unreachableSellers: [mockContacts[0].pubkey] }),
+  );
+  expect(h.result.current.sellersUnreachable).toBe(false);
+  expect(fetch).toHaveBeenCalledTimes(1);
+  h.unmount();
 });

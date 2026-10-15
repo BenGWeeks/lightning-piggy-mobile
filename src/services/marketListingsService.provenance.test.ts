@@ -322,6 +322,7 @@ it.each(['unavailable deletion', 'failed deletion checks', 'aborted'])(
       carried: [book],
     });
     expect(result.incomplete).toBe(true);
+    expect(result.unreachableSellers).toEqual([]);
     expect(result.products).toEqual([]);
     expect(result.answeredRelays).toEqual([]);
     expect(result.withdrawn).toEqual([]);
@@ -350,3 +351,33 @@ it.each(['forged first', 'genuine first'])(
     expect(result.products[0].listing?.seenOn).toEqual([SHOP]);
   },
 );
+
+it('reports a seller missing from an unanswered listings pass without cached products', async () => {
+  relays({});
+  const result = await fetchMarketListings([author], [SHOP], new AbortController().signal);
+  expect(result.unreachableSellers).toEqual([author]);
+});
+
+it('does not report an unreachable seller whose cached products remain in the merge', async () => {
+  const book = listing('book');
+  const previous = parseMarketListing(book)!;
+  previous.listing!.seenOn = [SHOP];
+  relays({ [FAMILY]: {} });
+  const result = await fetchMarketListings(
+    [author],
+    [SHOP, FAMILY],
+    new AbortController().signal,
+    undefined,
+    { carried: [book], previousProducts: [previous] },
+  );
+  expect(mergeMarketSnapshot([previous], result)).toEqual([previous]);
+  expect(result.unreachableSellers).toEqual([]);
+});
+
+it('does not let a forged listing suppress a missing seller warning', async () => {
+  const forged = { ...copy(listing('forged')), sig: '0'.repeat(128) };
+  relays({ [SHOP]: { listings: [forged] } });
+  const result = await fetchMarketListings([author], [SHOP, FAMILY], new AbortController().signal);
+  expect(result.products).toEqual([]);
+  expect(result.unreachableSellers).toEqual([author]);
+});
