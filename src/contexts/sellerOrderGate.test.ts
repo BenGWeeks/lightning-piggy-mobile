@@ -4,9 +4,13 @@ import * as Notifications from 'expo-notifications';
 import type { Event } from 'nostr-tools';
 import { createLiveRumorSurfacer } from './liveDmRumorSurface';
 import { ingestInboxWraps } from './dmWrapIngest';
-import { getOutgoingOrderRows, selectKnownEventIds, upsertDmMessages } from '../services/dmDb';
+import {
+  getOutgoingOrderRows,
+  hasIncomingOrder,
+  selectKnownEventIds,
+  upsertDmMessages,
+} from '../services/dmDb';
 import { addSellerEvents, resetSellerStore } from '../services/sellerEventStore';
-import { recordSellerInvoice } from '../services/sellerInvoiceStore';
 import { listNotifications } from '../services/notificationHistory';
 import { __resetForTests } from '../services/dmWrapNotificationDedupe';
 import { serializeOrder, parseOrderEvent } from '../utils/orderEvents';
@@ -26,6 +30,7 @@ jest.mock('../services/dmDb', () => ({
   upsertDmMessages: jest.fn().mockResolvedValue(undefined),
   selectKnownEventIds: jest.fn(),
   getOutgoingOrderRows: jest.fn(),
+  hasIncomingOrder: jest.fn(),
 }));
 jest.mock('./nostrEventBus', () => ({ notifyDmMessage: jest.fn() }));
 jest.mock('./nostrGroupRouting', () => ({
@@ -86,6 +91,7 @@ function orderRumor(itemRef: string, qty = 2): DecodedRumor {
 
 beforeEach(async () => {
   jest.clearAllMocks();
+  (hasIncomingOrder as jest.Mock).mockResolvedValue(false);
   (getOutgoingOrderRows as jest.Mock).mockImplementation(async (owner, seller, ids) => [
     {
       owner,
@@ -185,35 +191,22 @@ describe('live gift-wrap path', () => {
     expect(upsertDmMessages).not.toHaveBeenCalled();
   });
 
-  it("stores a stranger's receipt after I invoiced them", async () => {
-    await recordSellerInvoice(SELLER, {
-      orderId: 'order-1',
-      buyerPubkey: STRANGER,
-      walletId: 'w1',
-      paymentHash: '0'.repeat(64),
-      bolt11: 'lnbc1',
-      amountSats: 4200,
-      sentAt: 1,
-    });
-    const { surface, writes } = surfacer();
-    await surface(
-      {
-        pubkey: STRANGER,
-        kind: 17,
-        created_at: Math.floor(Date.now() / 1000),
-        content: '',
-        tags: [
-          ['p', SELLER],
-          ['subject', 'order-receipt'],
-          ['order', 'order-1'],
-          ['payment', 'lightning', 'lnbc1', '11'.repeat(32)],
-        ],
-      } as DecodedRumor,
-      'wrap-receipt',
-    );
-    await Promise.all(writes);
-    expect(upsertDmMessages).toHaveBeenCalledWith([expect.objectContaining({ wireKind: 17 })]);
-  });
+  it.each(['receipt', 'cancelled'])(
+    'stores a buyer %s from incoming history without a local invoice',
+    async (type) => {
+      (getOutgoingOrderRows as jest.Mock).mockResolvedValue([]);
+      (hasIncomingOrder as jest.Mock).mockImplementation(
+        async (owner, buyer, id) => owner === SELLER && buyer === STRANGER && id === 'order-1',
+      );
+      const rumor = buyerLifecycle(type);
+      const { surface, writes } = surfacer();
+      await surface(rumor, 'wrap-lifecycle');
+      await Promise.all(writes);
+      expect(upsertDmMessages).toHaveBeenCalledWith([
+        expect.objectContaining({ wireKind: rumor.kind }),
+      ]);
+    },
+  );
   it('retries an order reserved before subscription teardown', async () => {
     const first = surfacer(false, () => true);
     const rumor = orderRumor(`30402:${SELLER}:mug`);
@@ -263,6 +256,27 @@ describe('live gift-wrap path', () => {
 });
 
 describe('batch ingest path', () => {
+  it.each(['receipt', 'cancelled'])(
+    'stores a buyer %s from incoming history without a local invoice',
+    async (type) => {
+      (getOutgoingOrderRows as jest.Mock).mockResolvedValue([]);
+      (hasIncomingOrder as jest.Mock).mockImplementation(
+        async (owner, buyer, id) => owner === SELLER && buyer === STRANGER && id === 'order-1',
+      );
+      const rumor = buyerLifecycle(type);
+      const result = await ingestInboxWraps({
+        owner: SELLER,
+        wraps: [{ id: 'buyer-lifecycle' }],
+        unwrap: () => rumor,
+        passesFollowGate: () => false,
+      });
+      expect(result.stored).toBe(1);
+      expect(upsertDmMessages).toHaveBeenCalledWith([
+        expect.objectContaining({ wireKind: rumor.kind }),
+      ]);
+    },
+  );
+
   it('retries after an encrypted batch write fails', async () => {
     const rumor = orderRumor(`30402:${SELLER}:mug`);
     const params = {
@@ -326,3 +340,22 @@ it.each([true, false])(
     expect(JSON.stringify(res.entries)).not.toContain('private');
   },
 );
+
+function buyerLifecycle(type: string): DecodedRumor {
+  return {
+    pubkey: STRANGER,
+    kind: type === 'receipt' ? 17 : 16,
+    created_at: Math.floor(Date.now() / 1000),
+    content: '',
+    tags: [
+      ['p', SELLER],
+      ['order', 'order-1'],
+      ...(type === 'receipt'
+        ? [['subject', 'order-receipt']]
+        : [
+            ['type', '3'],
+            ['status', 'cancelled'],
+          ]),
+    ],
+  };
+}

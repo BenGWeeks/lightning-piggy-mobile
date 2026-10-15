@@ -434,6 +434,29 @@ export async function getOutgoingOrderRows(
   return out;
 }
 
+/** Whether this account received a placed order from this buyer, on any device.
+ * Target the buyer/order pair directly so older orders remain eligible even
+ * outside the bounded seller list. Invalid legacy JSON cannot satisfy admission.
+ */
+export async function hasIncomingOrder(
+  owner: string,
+  buyer: string,
+  orderId: string,
+): Promise<boolean> {
+  const db = await getLocalDb();
+  const content = "CASE WHEN json_valid(content) THEN content ELSE '{}' END";
+  const res = await db.execute(
+    `SELECT 1 FROM dm_messages
+      WHERE owner = ? AND conversation = ? AND sender = ?
+        AND from_me = 0 AND wire_kind = 16
+        AND json_extract(${content}, '$.type') = 'order'
+        AND json_extract(${content}, '$.orderId') = ?
+      LIMIT 1;`,
+    [owner, buyer, buyer, orderId],
+  );
+  return (res.rows?.length ?? 0) > 0;
+}
+
 /** Bound for the seller Orders read — number of placed orders, not rows. */
 export const SHOP_ORDER_ROW_LIMIT = 500;
 

@@ -27,6 +27,7 @@ const mockUpsert = jest.fn();
 const mockOutgoingOrders = jest.fn();
 jest.mock('../services/dmDb', () => ({
   getOutgoingOrderRows: (...args: unknown[]) => mockOutgoingOrders(...args),
+  hasIncomingOrder: jest.fn().mockResolvedValue(false),
   selectKnownEventIds: (...args: unknown[]) => mockSelectKnown(...args),
   upsertDmMessages: (...args: unknown[]) => mockUpsert(...args),
 }));

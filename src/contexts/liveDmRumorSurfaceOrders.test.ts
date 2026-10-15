@@ -20,6 +20,7 @@ jest.mock('expo-notifications', () => ({
 jest.mock('../services/dmDb', () => ({
   upsertDmMessages: jest.fn().mockResolvedValue(undefined),
   getOutgoingOrderRows: jest.fn(),
+  hasIncomingOrder: jest.fn().mockResolvedValue(false),
 }));
 
 beforeEach(async () => {

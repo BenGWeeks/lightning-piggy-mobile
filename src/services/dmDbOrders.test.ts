@@ -1,6 +1,7 @@
 // Execute the real DAL SQL against SQLite, including JSON extraction and limits.
 import { DatabaseSync } from 'node:sqlite';
-import { getOrderRows, getShopOrderRows } from './dmDb';
+import { getOrderRows, getShopOrderRows, hasIncomingOrder } from './dmDb';
+import { admitOrderLifecycle } from '../contexts/orderRumorIngest';
 import { parseOrderEvent, serializeOrder } from '../utils/orderEvents';
 
 let mockDb: DatabaseSync;
@@ -118,3 +119,35 @@ it('limits seller history by incoming orders and isolates identical ids across b
     'new',
   ]);
 });
+
+it.each(['receipt', 'cancelled'])(
+  'admits seller %s from incoming account history without any invoice record',
+  async (type) => {
+    // The same id under another account/buyer or in an outgoing row is insufficient.
+    insert('other-account', 'sale', '1', 1, 'buyer', 'other-seller', false);
+    insert('other-buyer', 'sale', '1', 2, 'stranger', 'seller', false);
+    insert('outgoing', 'sale', '1', 3, 'merchant', 'seller', true);
+    insert('not-placed', 'sale', '3', 4, 'buyer', 'seller', false);
+    mockDb
+      .prepare('INSERT INTO dm_messages VALUES (?, ?, ?, ?, ?, ?, ?, 16)')
+      .run('seller', 'invalid', 'buyer', 5, 'buyer', '{broken', 0);
+    const rumor = {
+      kind: type === 'receipt' ? 17 : 16,
+      content: '',
+      tags: [
+        ['order', 'sale'],
+        ...(type === 'receipt'
+          ? [['subject', 'order-receipt']]
+          : [
+              ['type', '3'],
+              ['status', 'cancelled'],
+            ]),
+      ],
+    };
+    expect(await hasIncomingOrder('seller', 'buyer', 'sale')).toBe(false);
+    expect(await admitOrderLifecycle('seller', 'buyer', false, rumor)).toBe(false);
+    insert('incoming', 'sale', '1', 6, 'buyer', 'seller', false);
+    expect(await admitOrderLifecycle('seller', 'buyer', false, rumor)).toBe(true);
+    expect(await hasIncomingOrder('seller', 'buyer', 'different')).toBe(false);
+  },
+);

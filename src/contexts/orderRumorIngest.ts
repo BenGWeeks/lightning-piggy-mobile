@@ -1,5 +1,4 @@
-import { loadSellerInvoices, sellerInvoiceKey } from '../services/sellerInvoiceStore';
-import { getOutgoingOrderRows } from '../services/dmDb';
+import { getOutgoingOrderRows, hasIncomingOrder } from '../services/dmDb';
 import { parseStoredOrder, parseOrderEvent, type OrderEventInput } from '../utils/orderEvents';
 
 // Only called on decoded NIP-17 rumors, never public kind-16/17 events.
@@ -45,7 +44,7 @@ export function getDroppedOrderLifecycleCount(owner: string): number {
   return droppedLifecycleCounts.get(owner) ?? 0;
 }
 
-/** Buyer lifecycle updates must come from the seller of an order we placed.
+/** Lifecycle updates must come from the counterparty of a stored placed order.
  * Incoming type-1 orders still belong to the seller flow; our own echoes are
  * locally authored. Apply this independently of follows and Messages policy. */
 export async function admitOrderLifecycle(
@@ -56,12 +55,10 @@ export async function admitOrderLifecycle(
 ): Promise<boolean> {
   const order = parseOrderEvent(rumor);
   if (fromMe || order?.type === 'order') return true;
-  // A seller receives receipts/cancellations from the buyer they invoiced.
+  // A seller receives receipts/cancellations from the buyer who placed the order.
   // This role-specific exception never admits merchant payment/shipping updates.
   if (order?.type === 'receipt' || (order?.type === 'status' && order.status === 'cancelled')) {
-    const invoices = await loadSellerInvoices(owner);
-    const invoice = invoices[sellerInvoiceKey(partner, order.orderId)];
-    if (invoice?.buyerPubkey === partner && invoice.orderId === order.orderId) return true;
+    if (await hasIncomingOrder(owner, partner, order.orderId)) return true;
   }
   if (order) {
     const placed = await getOutgoingOrderRows(owner, partner, [order.orderId]);

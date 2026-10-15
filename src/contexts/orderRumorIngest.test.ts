@@ -1,5 +1,4 @@
-import { recordSellerInvoice } from '../services/sellerInvoiceStore';
-import { getOutgoingOrderRows } from '../services/dmDb';
+import { getOutgoingOrderRows, hasIncomingOrder } from '../services/dmDb';
 import { serializeOrder, parseOrderEvent } from '../utils/orderEvents';
 import {
   admitOrderLifecycle,
@@ -10,7 +9,10 @@ import {
   ORDER_RUMOR_MAX_CHARS,
 } from './orderRumorIngest';
 
-jest.mock('../services/dmDb', () => ({ getOutgoingOrderRows: jest.fn() }));
+jest.mock('../services/dmDb', () => ({
+  getOutgoingOrderRows: jest.fn(),
+  hasIncomingOrder: jest.fn().mockResolvedValue(false),
+}));
 
 it('caps the shared live/backfill account budget and permits retries in the next window', () => {
   for (let i = 0; i < ORDER_RUMOR_RATE_LIMIT; i++) {
@@ -104,37 +106,53 @@ it.each(['2', '3', '4', 'receipt'])(
   },
 );
 
-it('binds seller receipts to the invoiced buyer without admitting their merchant updates', async () => {
-  const owner = 'seller-role';
-  const partner = 'e'.repeat(64);
-  const rumor = {
-    kind: 17,
-    content: '',
-    tags: [
-      ['subject', 'order-receipt'],
-      ['order', 'sold-order'],
-    ],
-  };
-  (getOutgoingOrderRows as jest.Mock).mockResolvedValue([]);
-  await recordSellerInvoice(owner, {
-    orderId: 'sold-order',
-    buyerPubkey: partner,
-    walletId: 'wallet',
-    paymentHash: '0'.repeat(64),
-    bolt11: 'lnbc1',
-    amountSats: 21,
-    sentAt: 1,
-  });
-  expect(await admitOrderLifecycle(owner, partner, false, rumor)).toBe(true);
-  expect(await admitOrderLifecycle(owner, 'impostor', false, rumor)).toBe(false);
-  expect(
-    await admitOrderLifecycle(owner, partner, false, {
-      ...rumor,
-      kind: 16,
+it.each(['receipt', 'cancelled'])(
+  'admits buyer %s against incoming history without a local invoice',
+  async (type) => {
+    const owner = 'seller-role';
+    const partner = 'buyer';
+    const rumor = {
+      kind: type === 'receipt' ? 17 : 16,
+      content: '',
       tags: [
-        ['type', '2'],
         ['order', 'sold-order'],
+        ...(type === 'receipt'
+          ? [['subject', 'order-receipt']]
+          : [
+              ['type', '3'],
+              ['status', 'cancelled'],
+            ]),
       ],
-    }),
-  ).toBe(false);
-});
+    };
+    (getOutgoingOrderRows as jest.Mock).mockResolvedValue([]);
+    (hasIncomingOrder as jest.Mock).mockImplementation(
+      async (account, buyer, id) => account === owner && buyer === partner && id === 'sold-order',
+    );
+    expect(await admitOrderLifecycle(owner, partner, false, rumor)).toBe(true);
+    expect(hasIncomingOrder).toHaveBeenLastCalledWith(owner, partner, 'sold-order');
+    expect(await admitOrderLifecycle(owner, 'impostor', false, rumor)).toBe(false);
+    expect(await admitOrderLifecycle('other-account', partner, false, rumor)).toBe(false);
+    expect(
+      await admitOrderLifecycle(owner, partner, false, {
+        ...rumor,
+        tags: [['order', 'unknown'], ...rumor.tags.slice(1)],
+      }),
+    ).toBe(false);
+    for (const tags of [
+      [['type', '2']],
+      [
+        ['type', '3'],
+        ['status', 'paid'],
+      ],
+      [['type', '4']],
+    ]) {
+      expect(
+        await admitOrderLifecycle(owner, partner, false, {
+          kind: 16,
+          content: '',
+          tags: [['order', 'sold-order'], ...tags],
+        }),
+      ).toBe(false);
+    }
+  },
+);
