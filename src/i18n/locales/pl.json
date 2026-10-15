@@ -2811,6 +2811,22 @@
       "loadFailed": "Nie udało się wczytać polubionych produktów — przeciągnij w dół, aby spróbować ponownie.",
       "signedOut": "Zaloguj się przez Nostr, aby zobaczyć polubione produkty.",
       "signIn": "Zaloguj się"
+    },
+    "republish": {
+      "coverage": "Na %{count} z %{total} przekaźników",
+      "checking": "Sprawdzanie przekaźników…",
+      "action": "Opublikuj ponownie",
+      "all": "Opublikuj wszystko ponownie",
+      "missing": "Brak na przekaźnikach",
+      "resign": "Podpisz i opublikuj ponownie",
+      "confirm": "Brak podpisanej kopii. Odtworzyć tę ofertę i zatwierdzić jeden podpis, aby opublikować ją ponownie?",
+      "results": "Wyniki ponownej publikacji",
+      "accepted": "Zaakceptowano",
+      "rejected": "Odrzucono",
+      "noResponse": "Brak odpowiedzi",
+      "alreadyPresent": "Już istnieje",
+      "close": "Zamknij",
+      "failed": "Ponowna publikacja nie powiodła się"
     }
   },
   "dmProtocol": {

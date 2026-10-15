@@ -2795,6 +2795,22 @@
       "loadFailed": "无法加载你喜欢的商品 — 下拉即可重试。",
       "signedOut": "使用 Nostr 登录以查看你喜欢的商品。",
       "signIn": "登录"
+    },
+    "republish": {
+      "coverage": "位于 %{total} 个中继中的 %{count} 个",
+      "checking": "正在检查中继…",
+      "action": "重新发布",
+      "all": "全部重新发布",
+      "missing": "中继上缺失",
+      "resign": "重新签名并发布",
+      "confirm": "没有可用的已签名副本。是否重建此商品信息并批准一次签名以重新发布？",
+      "results": "重新发布结果",
+      "accepted": "已接受",
+      "rejected": "已拒绝",
+      "noResponse": "无响应",
+      "alreadyPresent": "已存在",
+      "close": "关闭",
+      "failed": "重新发布失败"
     }
   },
   "dmProtocol": {

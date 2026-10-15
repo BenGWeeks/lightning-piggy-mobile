@@ -2795,6 +2795,22 @@
       "loadFailed": "Couldn't load your liked items — pull down to try again.",
       "signedOut": "Sign in with Nostr to see the items you have liked.",
       "signIn": "Sign in"
+    },
+    "republish": {
+      "coverage": "On %{count} of %{total} relays",
+      "checking": "Checking relays…",
+      "action": "Republish",
+      "all": "Republish all",
+      "missing": "Missing from relays",
+      "resign": "Re-sign and publish",
+      "confirm": "No signed copy is available. Rebuild this listing and approve signing once to publish it again?",
+      "results": "Republish results",
+      "accepted": "Accepted",
+      "rejected": "Rejected",
+      "noResponse": "No response",
+      "alreadyPresent": "Already present",
+      "close": "Close",
+      "failed": "Republish failed"
     }
   },
   "dmProtocol": {

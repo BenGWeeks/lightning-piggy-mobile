@@ -219,6 +219,25 @@ export function useSellerActions(_snapshot: SellerSnapshot) {
     [pubkey, currentRevision, signAndPublish, run],
   );
 
+  /** Re-sign a stored listing without the editor's lossy draft round-trip. */
+  const resignListing = useCallback(
+    (event: Event) =>
+      run(async () => {
+        if (!pubkey || event.pubkey !== pubkey || event.kind !== LISTING_KIND)
+          throw new SellerSigningError('Unexpected listing author or kind');
+        const current = await currentRevision(LISTING_KIND, dTagOf(event), event);
+        return signAndPublish(
+          {
+            kind: event.kind,
+            content: event.content,
+            tags: event.tags.map((tag) => [...tag]),
+          },
+          current,
+        );
+      }),
+    [pubkey, currentRevision, signAndPublish, run],
+  );
+
   /** NIP-09 delete + hide locally until relays catch up. */
   const deleteListing = useCallback(
     (event: Event) =>
@@ -306,6 +325,7 @@ export function useSellerActions(_snapshot: SellerSnapshot) {
     busy,
     saveShop,
     saveListing,
+    resignListing,
     deleteListing,
     saveCollection,
     deleteCollection,

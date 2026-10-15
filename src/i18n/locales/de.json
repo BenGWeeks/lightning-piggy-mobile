@@ -2795,6 +2795,22 @@
       "loadFailed": "Deine gelikten Artikel konnten nicht geladen werden – zum Aktualisieren nach unten ziehen.",
       "signedOut": "Melde dich mit Nostr an, um deine gelikten Artikel zu sehen.",
       "signIn": "Anmelden"
+    },
+    "republish": {
+      "coverage": "Auf %{count} von %{total} Relays",
+      "checking": "Relays werden geprüft…",
+      "action": "Erneut veröffentlichen",
+      "all": "Alle erneut veröffentlichen",
+      "missing": "Fehlt auf Relays",
+      "resign": "Neu signieren und veröffentlichen",
+      "confirm": "Keine signierte Kopie verfügbar. Dieses Angebot neu erstellen und einmalig zum Veröffentlichen signieren?",
+      "results": "Ergebnisse der Veröffentlichung",
+      "accepted": "Akzeptiert",
+      "rejected": "Abgelehnt",
+      "noResponse": "Keine Antwort",
+      "alreadyPresent": "Bereits vorhanden",
+      "close": "Schließen",
+      "failed": "Erneute Veröffentlichung fehlgeschlagen"
     }
   },
   "dmProtocol": {

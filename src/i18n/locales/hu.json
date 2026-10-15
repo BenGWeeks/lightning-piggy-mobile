@@ -2795,6 +2795,22 @@
       "loadFailed": "Nem sikerült betölteni a kedvelt termékeidet – húzd le az újrapróbáláshoz.",
       "signedOut": "Jelentkezz be Nostrral a kedvelt termékeid megtekintéséhez.",
       "signIn": "Bejelentkezés"
+    },
+    "republish": {
+      "coverage": "%{count} / %{total} relén",
+      "checking": "Relék ellenőrzése…",
+      "action": "Újraközzététel",
+      "all": "Összes újraközzététele",
+      "missing": "Hiányzik a relékről",
+      "resign": "Új aláírás és közzététel",
+      "confirm": "Nincs aláírt példány. Újra létrehozza a hirdetést, és egyszeri aláírással ismét közzéteszi?",
+      "results": "Újraközzététel eredménye",
+      "accepted": "Elfogadva",
+      "rejected": "Elutasítva",
+      "noResponse": "Nincs válasz",
+      "alreadyPresent": "Már létezik",
+      "close": "Bezárás",
+      "failed": "Sikertelen újraközzététel"
     }
   },
   "dmProtocol": {
