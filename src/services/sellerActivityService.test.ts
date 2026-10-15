@@ -12,6 +12,7 @@ import { fireNotification } from './notificationService';
 import { setSellerActivityEnabled } from './sellerActivityPreference';
 import { buildCommentTags } from '../utils/productComments';
 import i18n from '../i18n';
+import * as perf from '../utils/perfLog';
 const owner = 'a'.repeat(64);
 const friend = 'b'.repeat(64);
 const stranger = 'c'.repeat(64);
@@ -59,6 +60,12 @@ const opts = () => ({
   t: (key: string, options?: object) => i18n.t(key, options),
   signal: new AbortController().signal,
 });
+function respondWith(implementation: typeof querySyncAbortable) {
+  jest.mocked(querySyncAbortable).mockImplementation(async (pool, relays, filter, params) => {
+    for (const relay of relays) params.completedRelays?.add(relay);
+    return implementation(pool, relays, filter, params);
+  });
+}
 const cursorKey = `seller_activity_cursor_v1_${owner}`;
 beforeEach(async () => {
   jest.clearAllMocks();
@@ -67,7 +74,7 @@ beforeEach(async () => {
   jest.mocked(fetchSellerEvents).mockResolvedValue([listing]);
   jest.mocked(querySyncAbortable).mockResolvedValue([]);
 });
-it('produces comment/review history targets, dedupes repeated checks and suppresses stranger alerts only', async () => {
+it('produces comment/review history targets and dedupes repeated checks', async () => {
   const review: Event = {
     ...comment('review', stranger),
     kind: 31555,
@@ -76,12 +83,10 @@ it('produces comment/review history targets, dedupes repeated checks and suppres
       ['rating', '0.8', 'thumb'],
     ],
   };
-  jest
-    .mocked(querySyncAbortable)
-    .mockImplementation(async (_pool, _relays, filter) =>
-      filter['#A'] ? [comment('comment')] : filter['#d'] ? [review] : [],
-    );
-  await checkSellerActivity(opts());
+  respondWith(async (_pool, _relays, filter) =>
+    filter['#A'] ? [comment('comment')] : filter['#d'] ? [review] : [],
+  );
+  await checkSellerActivity({ ...opts(), onlyFriends: false });
   expect(fireNotification).toHaveBeenCalledTimes(2);
   const calls = jest.mocked(fireNotification).mock.calls.map(([p]) => p);
   expect(calls[0]).toMatchObject({
@@ -94,7 +99,7 @@ it('produces comment/review history targets, dedupes repeated checks and suppres
     data: { feedbackTab: 'reviews' },
   });
   expect(await calls[0].shouldSuppress?.()).toBe(false);
-  expect(await calls[1].shouldSuppress?.()).toBe(true);
+  expect(await calls[1].shouldSuppress?.()).toBe(false);
   await checkSellerActivity(opts());
   expect(fireNotification).toHaveBeenCalledTimes(2);
   expect(JSON.parse((await AsyncStorage.getItem(cursorKey))!).lastSeen).toBeGreaterThanOrEqual(now);
@@ -108,11 +113,7 @@ it('discovers a seller reply to an old comment on another listing via its actual
     tags: buildCommentTags(otherListing),
   };
   const reply = { ...comment('reply'), tags: buildCommentTags(otherListing, parent) };
-  jest
-    .mocked(querySyncAbortable)
-    .mockImplementation(async (_p, _r, filter) =>
-      filter.ids ? [parent] : filter['#p'] ? [reply] : [],
-    );
+  respondWith(async (_p, _r, filter) => (filter.ids ? [parent] : filter['#p'] ? [reply] : []));
   await checkSellerActivity(opts());
   expect(fireNotification).toHaveBeenCalledWith(
     expect.objectContaining({
@@ -131,16 +132,14 @@ it('discovers a seller reply to an old comment on another listing via its actual
       ),
   ).toBe(true);
 });
-it('retains history while the setting is off, rejects forged recipients, and rechecks toggles before delivery', async () => {
-  jest
-    .mocked(querySyncAbortable)
-    .mockImplementation(async (_p, _r, f) => (f['#A'] ? [comment('comment')] : []));
+it('rejects forged recipients and rechecks toggles before delivery', async () => {
+  respondWith(async (_p, _r, f) => (f['#A'] ? [comment('comment')] : []));
   await checkSellerActivity(opts());
   const payload = jest.mocked(fireNotification).mock.calls[0][0];
   await setSellerActivityEnabled(owner, false);
   expect(await payload.shouldSuppress?.()).toBe(true);
   jest.mocked(fetchSellerEvents).mockResolvedValue([]);
-  jest.mocked(querySyncAbortable).mockImplementation(async (_p, _r, f) =>
+  respondWith(async (_p, _r, f) =>
     f['#p']
       ? [
           {
@@ -165,7 +164,7 @@ it('does not advance last-seen on relay failure or an account switch', async () 
   jest.mocked(querySyncAbortable).mockRejectedValueOnce(new Error('offline'));
   await expect(checkSellerActivity(opts())).rejects.toThrow('offline');
   expect(JSON.parse((await AsyncStorage.getItem(cursorKey))!).lastSeen).toBe(now - 60);
-  jest.mocked(querySyncAbortable).mockImplementation(async () => {
+  respondWith(async () => {
     mockOwner = stranger;
     return [comment('late')];
   });
@@ -214,17 +213,17 @@ it('persists consumed stranger quotas when a later relay chunk fails, without ad
     cursorKey,
     JSON.stringify({ lastSeen: now - 60, seen: [], strangers: {} }),
   );
-  jest.mocked(querySyncAbortable).mockImplementation(async (_p, _r, f) => {
+  respondWith(async (_p, _r, f) => {
     if (f['#A']) return Array.from({ length: 20 }, (_, i) => comment(`spam${i}`, stranger));
     throw new Error('later chunk offline');
   });
-  await expect(checkSellerActivity(opts())).rejects.toThrow('later chunk offline');
+  await expect(checkSellerActivity({ ...opts(), onlyFriends: false })).rejects.toThrow(
+    'later chunk offline',
+  );
   expect(fireNotification).toHaveBeenCalledTimes(20);
   expect(JSON.parse((await AsyncStorage.getItem(cursorKey))!).lastSeen).toBe(now - 60);
-  jest
-    .mocked(querySyncAbortable)
-    .mockImplementation(async (_p, _r, f) => (f['#A'] ? [comment('more spam', stranger)] : []));
-  await checkSellerActivity(opts());
+  respondWith(async (_p, _r, f) => (f['#A'] ? [comment('more spam', stranger)] : []));
+  await checkSellerActivity({ ...opts(), onlyFriends: false });
   expect(fireNotification).toHaveBeenCalledTimes(20);
 });
 
@@ -237,15 +236,11 @@ it('drains capped pages including timestamp ties before advancing the checkpoint
     cursorKey,
     JSON.stringify({ lastSeen: now - 2000, seen: [], strangers: {} }),
   );
-  jest
-    .mocked(querySyncAbortable)
-    .mockImplementation(async (_p, _r, f) =>
-      f['#A']
-        ? events
-            .filter((e) => e.created_at >= f.since! && e.created_at <= f.until!)
-            .slice(0, f.limit)
-        : [],
-    );
+  respondWith(async (_p, _r, f) =>
+    f['#A']
+      ? events.filter((e) => e.created_at >= f.since! && e.created_at <= f.until!).slice(0, f.limit)
+      : [],
+  );
   await checkSellerActivity(opts());
   expect(fireNotification).toHaveBeenCalledTimes(201);
   expect(fireNotification).toHaveBeenCalledWith(
@@ -254,22 +249,31 @@ it('drains capped pages including timestamp ties before advancing the checkpoint
   expect(JSON.parse((await AsyncStorage.getItem(cursorKey))!).lastSeen).toBeGreaterThanOrEqual(now);
 });
 
-it('retains the checkpoint when a timestamp is saturated instead of skipping older activity', async () => {
-  await AsyncStorage.setItem(
-    cursorKey,
-    JSON.stringify({ lastSeen: now - 2000, seen: [], strangers: {} }),
+it('skips a saturated second, logs its returned count and continues to older activity', async () => {
+  const saturated = Array.from({ length: 200 }, (_, i) => ({
+    ...comment(`same-${i}`),
+    created_at: now - 500,
+  }));
+  const older = { ...comment('older'), created_at: now - 501 };
+  respondWith(async (_p, _r, f) =>
+    f['#A'] ? [...saturated, older].filter((e) => e.created_at <= f.until!).slice(0, f.limit) : [],
   );
-  jest.mocked(querySyncAbortable).mockImplementation(async (_p, _r, f) =>
-    f['#A']
-      ? Array.from({ length: 200 }, (_, i) => ({
-          ...comment(`same-${i}`),
-          created_at: now - 500,
-        }))
-      : [],
-  );
-  await expect(checkSellerActivity(opts())).rejects.toThrow('range remains saturated');
-  expect(JSON.parse((await AsyncStorage.getItem(cursorKey))!).lastSeen).toBe(now - 2000);
-  expect(querySyncAbortable).toHaveBeenCalledTimes(4);
+  const log = jest.spyOn(perf, 'perfLog').mockImplementation(() => {});
+  try {
+    await checkSellerActivity(opts());
+    expect(fireNotification).toHaveBeenCalledTimes(201);
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining('skipped saturated second (200 returned events)'),
+    );
+    expect(JSON.parse((await AsyncStorage.getItem(cursorKey))!).lastSeen).toBeGreaterThanOrEqual(
+      now,
+    );
+    expect(
+      jest.mocked(querySyncAbortable).mock.calls.some(([, , f]) => f.until === now - 501),
+    ).toBe(true);
+  } finally {
+    log.mockRestore();
+  }
 });
 
 it('retries an event interrupted during mute lookup without consuming its stranger quota', async () => {
@@ -280,18 +284,16 @@ it('retries an event interrupted during mute lookup without consuming its strang
         release = resolve;
       }),
   );
-  jest
-    .mocked(querySyncAbortable)
-    .mockImplementation(async (_p, _r, f) => (f['#A'] ? [comment('interrupted', stranger)] : []));
+  respondWith(async (_p, _r, f) => (f['#A'] ? [comment('interrupted', stranger)] : []));
   const controller = new AbortController();
-  const pending = checkSellerActivity({ ...opts(), signal: controller.signal });
+  const pending = checkSellerActivity({ ...opts(), onlyFriends: false, signal: controller.signal });
   while (!release) await Promise.resolve();
   controller.abort();
   release(false);
   await pending;
   expect(fireNotification).not.toHaveBeenCalled();
   expect(await AsyncStorage.getItem(cursorKey)).toBeNull();
-  await checkSellerActivity(opts());
+  await checkSellerActivity({ ...opts(), onlyFriends: false });
   expect(fireNotification).toHaveBeenCalledTimes(1);
   const cursor = JSON.parse((await AsyncStorage.getItem(cursorKey))!);
   expect(cursor.seen).toContain('interrupted');
@@ -299,9 +301,7 @@ it('retries an event interrupted during mute lookup without consuming its strang
 });
 
 it('does not commit an event whose history delivery rejects', async () => {
-  jest
-    .mocked(querySyncAbortable)
-    .mockImplementation(async (_p, _r, f) => (f['#A'] ? [comment('retry')] : []));
+  respondWith(async (_p, _r, f) => (f['#A'] ? [comment('retry')] : []));
   jest.mocked(fireNotification).mockRejectedValueOnce(new Error('history failed'));
   await expect(checkSellerActivity(opts())).rejects.toThrow('history failed');
   expect(await AsyncStorage.getItem(cursorKey)).toBeNull();
@@ -319,7 +319,7 @@ it('drains a busy relay without skipping its tail when another relay returns old
     cursorKey,
     JSON.stringify({ lastSeen: now - 2000, seen: [], strangers: {} }),
   );
-  jest.mocked(querySyncAbortable).mockImplementation(async (_p, relays, f) => {
+  respondWith(async (_p, relays, f) => {
     if (!f['#A']) return [];
     expect(relays).toEqual(['wss://busy', 'wss://sparse']);
     const matches = (event: Event) => event.created_at >= f.since! && event.created_at <= f.until!;
@@ -338,7 +338,7 @@ it('drains a busy relay without skipping its tail when another relay returns old
   expect(JSON.parse((await AsyncStorage.getItem(cursorKey))!).lastSeen).toBeGreaterThanOrEqual(now);
 });
 
-it('continues reviews, later coordinate chunks and replies after a saturated filter, then retries it', async () => {
+it('continues reviews, later coordinate chunks and replies after a saturated second', async () => {
   const listings = Array.from({ length: 26 }, (_, i) => ({
     ...listing,
     id: `listing-${i}`,
@@ -372,7 +372,7 @@ it('continues reviews, later coordinate chunks and replies after a saturated fil
     cursorKey,
     JSON.stringify({ lastSeen: now - 2000, seen: [], strangers: {} }),
   );
-  jest.mocked(querySyncAbortable).mockImplementation(async (_p, _r, f) => {
+  respondWith(async (_p, _r, f) => {
     if (f.ids) return [parent];
     if (f['#p']) return [reply];
     if (f['#d']?.includes(`a:30402:${owner}:thing-0`)) return [review];
@@ -380,14 +380,14 @@ it('continues reviews, later coordinate chunks and replies after a saturated fil
     if (f['#A']) return [later];
     return [];
   });
-  await expect(checkSellerActivity(opts())).rejects.toThrow('range remains saturated');
+  await checkSellerActivity(opts());
   for (const id of ['independent-review', 'later-chunk', 'independent-reply']) {
     expect(fireNotification).toHaveBeenCalledWith(
       expect.objectContaining({ historyKey: `market:${id}` }),
     );
   }
   const cursor = JSON.parse((await AsyncStorage.getItem(cursorKey))!);
-  expect(cursor.lastSeen).toBe(now - 2000);
+  expect(cursor.lastSeen).toBeGreaterThanOrEqual(now);
   expect(cursor.seen).toEqual(
     expect.arrayContaining(['independent-review', 'later-chunk', 'independent-reply']),
   );
@@ -398,3 +398,55 @@ it('continues reviews, later coordinate chunks and replies after a saturated fil
   expect(fireNotification).toHaveBeenCalledTimes(delivered);
   expect(JSON.parse((await AsyncStorage.getItem(cursorKey))!).lastSeen).toBeGreaterThanOrEqual(now);
 });
+
+it('excludes unfinished relays from later pages and advances using completed snapshots', async () => {
+  const events = Array.from({ length: 201 }, (_, i) => ({
+    ...comment(`completed-${i}`),
+    created_at: now - i,
+  }));
+  const pageRelays: string[][] = [];
+  respondWith(async (_p, relays, f, params) => {
+    params.completedRelays?.delete('wss://stalled');
+    if (!f['#A']) return [];
+    pageRelays.push(relays);
+    return events.filter((e) => e.created_at <= f.until!).slice(0, f.limit);
+  });
+  await checkSellerActivity({ ...opts(), relays: ['wss://good', 'wss://stalled'] });
+  expect(pageRelays).toEqual([['wss://good', 'wss://stalled'], ['wss://good']]);
+  expect(fireNotification).toHaveBeenCalledTimes(201);
+  expect(JSON.parse((await AsyncStorage.getItem(cursorKey))!).lastSeen).toBeGreaterThanOrEqual(now);
+});
+
+it('drops events newer than the requested page before selecting its newest results', async () => {
+  const events = Array.from({ length: 201 }, (_, i) => ({
+    ...comment(`bounded-${i}`),
+    created_at: now - i,
+  }));
+  respondWith(async (_p, _r, f) => {
+    if (!f['#A']) return [];
+    const matches = events.filter((e) => e.created_at <= f.until!).slice(0, f.limit);
+    return f.until! < now ? [...events.slice(0, 199), ...matches] : matches;
+  });
+  await checkSellerActivity(opts());
+  expect(fireNotification).toHaveBeenCalledTimes(201);
+  expect(fireNotification).toHaveBeenCalledWith(
+    expect.objectContaining({ historyKey: 'market:bounded-200' }),
+  );
+});
+
+it.each(['disabled', 'only friends', 'disabled during mute lookup'])(
+  'records no history or alerts for activity excluded by %s',
+  async (mode) => {
+    if (mode === 'disabled') await setSellerActivityEnabled(owner, false);
+    if (mode === 'disabled during mute lookup')
+      jest.mocked(shouldMuteNotification).mockImplementationOnce(async () => {
+        await setSellerActivityEnabled(owner, false);
+        return false;
+      });
+    respondWith(async (_p, _r, f) =>
+      f['#A'] ? [comment('excluded', mode === 'only friends' ? stranger : friend)] : [],
+    );
+    await checkSellerActivity(opts());
+    expect(fireNotification).not.toHaveBeenCalled();
+  },
+);

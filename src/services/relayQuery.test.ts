@@ -306,3 +306,55 @@ it.each(['query deadline', { url: 'wss://a', reason: 'query deadline' }])(
     expect(close).toHaveBeenCalledTimes(1);
   },
 );
+
+describe('completed relay snapshots', () => {
+  afterEach(() => jest.useRealTimers());
+
+  it('keeps completed events and empty EOSE relays, discarding stalled or failed partial snapshots', async () => {
+    jest.useFakeTimers();
+    const peers = new Map<string, ReturnType<typeof fakePool>>();
+    const pool = {
+      subscribeMany: (relays: string[], filter: unknown, params: SubParams) => {
+        const peer = fakePool();
+        peers.set(relays[0], peer);
+        return peer.pool.subscribeMany(relays, filter as never, params);
+      },
+    } as unknown as SimplePool;
+    const completedRelays = new Set<string>();
+    const result = querySyncAbortable(
+      pool,
+      ['wss://good', 'wss://empty', 'wss://stalled', 'wss://failed'],
+      {},
+      { maxWait: 1000, completedRelays },
+    );
+    peers.get('wss://good')!.params().onevent(makeEvent('good'));
+    peers.get('wss://good')!.params().oneose();
+    peers.get('wss://empty')!.params().oneose();
+    peers.get('wss://stalled')!.params().onevent(makeEvent('unfinished'));
+    peers.get('wss://failed')!.params().onevent(makeEvent('failed'));
+    peers.get('wss://failed')!.params().oneose();
+    peers.get('wss://failed')!.params().onclose(['relay connection closed']);
+    await jest.advanceTimersByTimeAsync(1000);
+    expect((await result).map((e) => e.id)).toEqual(['good']);
+    expect([...completedRelays]).toEqual(['wss://good', 'wss://empty']);
+    for (const peer of peers.values()) expect(peer.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects when no relay completes so the checkpoint can be retried', async () => {
+    jest.useFakeTimers();
+    const peer = fakePool();
+    const result = querySyncAbortable(
+      peer.pool,
+      ['wss://stalled'],
+      {},
+      {
+        maxWait: 1000,
+        completedRelays: new Set(),
+      },
+    );
+    const assertion = expect(result).rejects.toThrow('No relay completed');
+    peer.params().onevent(makeEvent('partial'));
+    await jest.advanceTimersByTimeAsync(1000);
+    await assertion;
+  });
+});

@@ -1,6 +1,7 @@
 import type { Event } from 'nostr-tools';
 import {
   acceptActivity,
+  stageActivity,
   parseActivityCursor,
   activityFilters,
   activitySince,
@@ -195,4 +196,23 @@ it('recovers corrupt cursors and bounds persisted dedupe state and future last-s
       now,
     ).seen,
   ).toHaveLength(4000);
+});
+
+it('stages an ID and quota without copying or mutating the cursor before commit', () => {
+  const state = cursor();
+  const ids = state.seen;
+  const quotas = state.strangers;
+  const seen = new Set(state.seen);
+  const staged = stageActivity(state, seen, event('pending'), coord, false, now);
+  expect(staged.accepted).toBe(true);
+  expect(seen.has('pending')).toBe(false);
+  expect(state.seen).toEqual([]);
+  expect(state.strangers).toEqual({});
+  staged.commit();
+  staged.commit();
+  expect(state.seen).toBe(ids);
+  expect(state.strangers).toBe(quotas);
+  expect(state.seen).toEqual(['pending']);
+  expect(Object.values(state.strangers)).toEqual([1]);
+  expect(stageActivity(state, seen, event('pending'), coord, false, now).accepted).toBe(false);
 });

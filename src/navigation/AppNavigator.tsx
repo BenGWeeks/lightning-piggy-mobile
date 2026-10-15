@@ -320,7 +320,8 @@ export const navigateFromNotification = (
         else navigationRef.navigate('Notifications');
       })
       .catch(() => {
-        if (generation === notificationNavGeneration) navigationRef.navigate('Notifications');
+        if (generation === notificationNavGeneration && owner === getActivePubkey())
+          navigationRef.navigate('Notifications');
       });
     return true;
   }

@@ -101,6 +101,41 @@ export function activityTarget(
   };
 }
 
+/** Stage only the event ID and quota delta until delivery has completed. */
+export function stageActivity(
+  cursor: ActivityCursor,
+  seen: Set<string>,
+  event: Event,
+  coord: string,
+  friend: boolean,
+  now: number,
+): { accepted: boolean; commit: () => void } {
+  if (
+    event.created_at < activitySince(cursor.lastSeen, now) ||
+    event.created_at > now + 120 ||
+    seen.has(event.id)
+  )
+    return { accepted: false, commit: () => {} };
+  const day = Math.floor(now / 86400);
+  const key = `${day}:${coord}`;
+  const count = cursor.strangers[key] ?? 0;
+  const accepted = friend || count < 20;
+  return {
+    accepted,
+    commit: () => {
+      if (seen.has(event.id)) return;
+      seen.add(event.id);
+      cursor.seen.push(event.id);
+      if (cursor.seen.length > 4000) seen.delete(cursor.seen.shift()!);
+      if (!friend && accepted) cursor.strangers[key] = count + 1;
+      const keys = Object.keys(cursor.strangers);
+      const current = keys.filter((k) => k.startsWith(`${day}:`));
+      const retained = new Set(current.slice(-500));
+      for (const k of keys) if (!retained.has(k)) delete cursor.strangers[k];
+    },
+  };
+}
+
 /** Mutates the bounded cursor only once per id; overlapping since windows are safe. */
 export function acceptActivity(
   cursor: ActivityCursor,
@@ -109,24 +144,7 @@ export function acceptActivity(
   friend: boolean,
   now: number,
 ): boolean {
-  if (
-    event.created_at < activitySince(cursor.lastSeen, now) ||
-    event.created_at > now + 120 ||
-    cursor.seen.includes(event.id)
-  )
-    return false;
-  cursor.seen.push(event.id);
-  cursor.seen = cursor.seen.slice(-4000);
-  const day = Math.floor(now / 86400);
-  const key = `${day}:${coord}`;
-  if (!friend) {
-    if ((cursor.strangers[key] ?? 0) >= 20) return false;
-    cursor.strangers[key] = (cursor.strangers[key] ?? 0) + 1;
-  }
-  cursor.strangers = Object.fromEntries(
-    Object.entries(cursor.strangers)
-      .filter(([k]) => k.startsWith(`${day}:`))
-      .slice(-500),
-  );
-  return true;
+  const staged = stageActivity(cursor, new Set(cursor.seen), event, coord, friend, now);
+  staged.commit();
+  return staged.accepted;
 }

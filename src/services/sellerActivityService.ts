@@ -10,7 +10,7 @@ import { addressableCoord, getTagValue } from '../utils/productComments';
 import { parseReviewEvent } from '../utils/productReviews';
 import { parseMarketListing } from '../utils/marketListings';
 import {
-  acceptActivity,
+  stageActivity,
   activityTarget,
   activityFilters,
   activitySince,
@@ -42,31 +42,43 @@ export async function cancelSellerActivity(owner: string): Promise<void> {
   flight.cancelled = true;
   await flight.settled;
 }
-const query = (input: Pick<Input, 'relays' | 'signal'>, filter: Filter) =>
+const query = (
+  input: Pick<Input, 'relays' | 'signal'>,
+  filter: Filter,
+  completedRelays = new Set<string>(),
+) =>
   querySyncAbortable(pool, input.relays, filter, {
     signal: input.signal,
     maxWait: 5000,
     rejectOnAllRelaysFailure: true,
     rejectOnTimeout: true,
+    completedRelays,
   });
 
 /** Inclusive page boundaries retain events sharing the oldest timestamp.
- * A saturated second or page budget leaves lastSeen unchanged for retry.
+ * Saturated seconds are skipped; a page budget leaves lastSeen unchanged for retry.
  */
 async function* activityPages(input: Input, filter: Filter, now: number) {
   let until = now + 120;
+  let relays = input.relays;
+  const completedRelays = new Set<string>();
   for (let page = 0; page < 25; page++) {
     // Each relay applies limit independently. Keep the globally newest page
     // so an older result from a sparse relay cannot skip a busy relay's tail.
-    const events = (await query(input, { ...filter, until }))
+    const events = (await query({ ...input, relays }, { ...filter, until }, completedRelays))
+      .filter((event) => event.created_at <= until)
       .sort((a, b) => b.created_at - a.created_at || a.id.localeCompare(b.id))
       .slice(0, filter.limit);
+    relays = [...completedRelays];
     yield events;
     if (events.length < filter.limit!) return;
     const oldest = Math.min(...events.map((event) => event.created_at));
-    if (oldest >= until || oldest < filter.since!)
-      throw new Error('Seller activity range remains saturated');
-    until = oldest;
+    if (oldest < filter.since!) return;
+    if (oldest >= until) {
+      perfLog(`[SellerActivity] skipped saturated second (${events.length} returned events)`);
+      until = oldest - 1;
+    } else until = oldest;
+    if (until < filter.since!) return;
   }
   throw new Error('Seller activity page budget exhausted');
 }
@@ -99,6 +111,7 @@ export async function checkSellerActivity(input: Input): Promise<void> {
     const raw = await AsyncStorage.getItem(storageKey);
     const cursor = parseActivityCursor(raw, now);
     progress = { key: storageKey, cursor, dirty: false };
+    const seen = new Set(cursor.seen);
     trackRelays(input.relays);
     const [snapshot, hidden, enabled] = await Promise.all([
       fetchSellerEvents({ pubkey: owner, relays: input.relays, signal }),
@@ -158,16 +171,12 @@ export async function checkSellerActivity(input: Input): Promise<void> {
             const friend = friends.has(event.pubkey);
             // Stage acceptance: cancellation or a failed delivery must not consume
             // the seen ID or stranger quota before history has been recorded.
-            const staged = {
-              ...cursor,
-              seen: [...cursor.seen],
-              strangers: { ...cursor.strangers },
-            };
+            const staged = stageActivity(cursor, seen, event, target.coord, friend, now);
             const commit = () => {
-              Object.assign(cursor, staged);
+              staged.commit();
               progress!.dirty = true;
             };
-            if (!acceptActivity(staged, event, target.coord, friend, now)) {
+            if (!staged.accepted) {
               commit();
               continue;
             }
@@ -195,6 +204,15 @@ export async function checkSellerActivity(input: Input): Promise<void> {
               commit();
               continue;
             }
+            const mayRecord = async () => {
+              const settingEnabled = await loadSellerActivityEnabled(owner);
+              return current() && enabled && settingEnabled && (!input.onlyFriends || friend);
+            };
+            if (!(await mayRecord())) {
+              if (!current()) return;
+              commit();
+              continue;
+            }
             await fireNotification({
               kind: 'market',
               title: text,
@@ -202,6 +220,7 @@ export async function checkSellerActivity(input: Input): Promise<void> {
               data,
               owner,
               historyKey: `market:${event.id}`,
+              mayRecord,
               shouldSuppress: async () =>
                 !current() ||
                 !enabled ||

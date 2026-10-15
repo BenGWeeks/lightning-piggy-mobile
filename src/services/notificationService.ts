@@ -177,6 +177,8 @@ export interface NotificationPayload {
   /** Stable source id (e.g. a payment hash) so a retried notification
    * doesn't add a second history row. */
   historyKey?: string;
+  /** Preference/account gate checked before recording any history. */
+  mayRecord?: () => Promise<boolean>;
   /** Rechecked immediately before scheduling, including durable deletion state. */
   shouldSuppress?: () => Promise<boolean>;
 }
@@ -403,6 +405,7 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
     // Record history even without OS permission; muted senders never alert.
     const owner = payload.owner ?? getActivePubkey() ?? undefined;
     if (await shouldMuteNotification(owner, payload.data, payload.kind)) return null;
+    if (payload.mayRecord && !(await payload.mayRecord())) return null;
     const collapseKey = threadCollapseKey(payload.kind, payload.data);
     // Awaited (best-effort, never throws): a headless background task can be
     // torn down as soon as delivery resolves, losing a detached write.

@@ -979,3 +979,12 @@ it.each([
     expect.arrayContaining([expect.objectContaining({ title: expectedTitle, body: expectedBody })]),
   );
 });
+
+it('checks the history preference gate before recording a market notification', async () => {
+  const owner = 'e'.repeat(64);
+  const mayRecord = jest.fn(async () => false);
+  await fireNotification({ kind: 'market', title: 'Comment', body: '', owner, mayRecord });
+  expect(mayRecord).toHaveBeenCalledTimes(1);
+  expect(await listNotifications(owner)).toEqual([]);
+  expect(mockScheduleNotificationAsync).not.toHaveBeenCalled();
+});
