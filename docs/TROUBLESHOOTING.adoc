@@ -1790,3 +1790,10 @@ updates once after persisting the batch, reusing decoded rumors and retaining
 the account, counterparty and order-ID checks. Cover both arrival orders in
 regression tests; a live-ingest test with an already stored order misses this
 failure.
+
+=== Seller replacement warning shows a missing Cancel translation
+
+If the wallet-check warning renders a missing `common.cancel` translation,
+use the existing `market.sell.cancel` key, which is translated in every
+supported locale. Key-only translation mocks can hide this error; verify
+alert button keys against the locale files when reviewing the warning.

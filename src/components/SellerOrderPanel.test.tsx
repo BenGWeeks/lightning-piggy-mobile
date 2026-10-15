@@ -199,7 +199,7 @@ it.each(['unpaid', 'paid', 'unknown', 'missing', 'unbound'])(
         expect.any(Array),
       );
       const buttons = (Alert.alert as jest.Mock).mock.calls.at(-1)[2];
-      expect(buttons[0]).toMatchObject({ text: 'common.cancel', style: 'cancel' });
+      expect(buttons[0]).toMatchObject({ text: 'market.sell.cancel', style: 'cancel' });
       expect(buttons[0].onPress).toBeUndefined();
       act(() => buttons[1].onPress());
     }

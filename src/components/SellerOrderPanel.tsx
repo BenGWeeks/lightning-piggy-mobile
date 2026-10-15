@@ -315,7 +315,7 @@ function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.Reac
                   t('sellerOrders.checkWalletFirst'),
                   t('sellerOrders.unknownInvoiceWarning'),
                   [
-                    { text: t('common.cancel'), style: 'cancel' },
+                    { text: t('market.sell.cancel'), style: 'cancel' },
                     {
                       text: t('sellerOrders.sendNewInvoice'),
                       onPress: () => {
