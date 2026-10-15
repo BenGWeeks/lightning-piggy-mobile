@@ -177,6 +177,8 @@ export interface NotificationPayload {
   /** Stable source id (e.g. a payment hash) so a retried notification
    * doesn't add a second history row. */
   historyKey?: string;
+  /** Source event time in epoch ms, preserving catch-up history order. */
+  historyCreatedAt?: number;
   /** Preference/account gate checked before recording any history. */
   mayRecord?: () => Promise<boolean>;
   /** Rechecked immediately before scheduling, including durable deletion state. */
@@ -409,11 +411,15 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
     const collapseKey = threadCollapseKey(payload.kind, payload.data);
     // Awaited (best-effort, never throws): a headless background task can be
     // torn down as soon as delivery resolves, losing a detached write.
-    const { duplicateDelivered, id: historyId } = await recordNotification(owner ?? null, {
-      ...payload,
-      id: payload.historyKey ?? `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
-      collapseKey,
-    });
+    const { duplicateDelivered, id: historyId } = await recordNotification(
+      owner ?? null,
+      {
+        ...payload,
+        id: payload.historyKey ?? `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+        collapseKey,
+      },
+      payload.historyCreatedAt,
+    );
     // Same source already shown in the tray: report it as delivered (so the
     // caller doesn't keep retrying) without posting a second entry.
     if (duplicateDelivered) return historyId;

@@ -4,6 +4,7 @@ import type { Event, Filter } from 'nostr-tools';
 import type { TranslateOptions } from 'i18n-js';
 import { pool, trackRelays } from './nostrPool';
 import { querySyncAbortable } from './relayQuery';
+import { activeAccountRelays } from './testRelayRouting';
 import { fetchSellerEvents, loadHiddenListings } from './marketSellerService';
 import { reduceSellerSnapshot } from '../utils/marketSellerSnapshot';
 import { addressableCoord, getTagValue } from '../utils/productComments';
@@ -42,25 +43,35 @@ export async function cancelSellerActivity(owner: string): Promise<void> {
   flight.cancelled = true;
   await flight.settled;
 }
-const query = (
+const query = async (
   input: Pick<Input, 'relays' | 'signal'>,
   filter: Filter,
-  completedRelays = new Set<string>(),
-) =>
-  querySyncAbortable(pool, input.relays, filter, {
+  completedRelays?: Set<string>,
+) => {
+  const relays = [...new Set(activeAccountRelays(input.relays))];
+  const completed = completedRelays ?? new Set<string>();
+  const events = await querySyncAbortable(pool, relays, filter, {
     signal: input.signal,
     maxWait: 5000,
     rejectOnAllRelaysFailure: true,
     rejectOnTimeout: true,
-    completedRelays,
+    completedRelays: completed,
   });
+  if (!completedRelays && completed.size < relays.length)
+    throw new Error('Seller activity relay query incomplete');
+  return events;
+};
 
 /** Inclusive page boundaries retain events sharing the oldest timestamp.
  * Saturated seconds are skipped; a page budget leaves lastSeen unchanged for retry.
  */
 async function* activityPages(input: Input, filter: Filter, now: number) {
   let until = now + 120;
-  let relays = input.relays;
+  let relays = [...new Set(activeAccountRelays(input.relays))];
+  let incomplete = false;
+  const finish = () => {
+    if (incomplete) throw new Error('Seller activity relay query incomplete');
+  };
   const completedRelays = new Set<string>();
   for (let page = 0; page < 25; page++) {
     // Each relay applies limit independently. Keep the globally newest page
@@ -69,16 +80,17 @@ async function* activityPages(input: Input, filter: Filter, now: number) {
       .filter((event) => event.created_at <= until)
       .sort((a, b) => b.created_at - a.created_at || a.id.localeCompare(b.id))
       .slice(0, filter.limit);
+    incomplete ||= completedRelays.size < relays.length;
     relays = [...completedRelays];
     yield events;
-    if (events.length < filter.limit!) return;
+    if (events.length < filter.limit!) return finish();
     const oldest = Math.min(...events.map((event) => event.created_at));
-    if (oldest < filter.since!) return;
+    if (oldest < filter.since!) return finish();
     if (oldest >= until) {
       perfLog(`[SellerActivity] skipped saturated second (${events.length} returned events)`);
       until = oldest - 1;
     } else until = oldest;
-    if (until < filter.since!) return;
+    if (until < filter.since!) return finish();
   }
   throw new Error('Seller activity page budget exhausted');
 }
@@ -172,8 +184,8 @@ export async function checkSellerActivity(input: Input): Promise<void> {
             // Stage acceptance: cancellation or a failed delivery must not consume
             // the seen ID or stranger quota before history has been recorded.
             const staged = stageActivity(cursor, seen, event, target.coord, friend, now);
-            const commit = () => {
-              staged.commit();
+            const commit = (consumeQuota = true) => {
+              staged.commit(consumeQuota);
               progress!.dirty = true;
             };
             if (!staged.accepted) {
@@ -201,7 +213,7 @@ export async function checkSellerActivity(input: Input): Promise<void> {
             const muted = await shouldMuteNotification(owner, data, 'market');
             if (!current()) return;
             if (muted) {
-              commit();
+              commit(false);
               continue;
             }
             const mayRecord = async () => {
@@ -220,6 +232,7 @@ export async function checkSellerActivity(input: Input): Promise<void> {
               data,
               owner,
               historyKey: `market:${event.id}`,
+              historyCreatedAt: event.created_at * 1000,
               mayRecord,
               shouldSuppress: async () =>
                 !current() ||

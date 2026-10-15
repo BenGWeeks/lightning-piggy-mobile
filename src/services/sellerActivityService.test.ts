@@ -9,6 +9,7 @@ import { querySyncAbortable } from './relayQuery';
 import { fetchSellerEvents } from './marketSellerService';
 import { shouldMuteNotification } from './mutedSenders';
 import { fireNotification } from './notificationService';
+import { recordNotification, listNotifications } from './notificationHistory';
 import { setSellerActivityEnabled } from './sellerActivityPreference';
 import { buildCommentTags } from '../utils/productComments';
 import i18n from '../i18n';
@@ -69,10 +70,11 @@ function respondWith(implementation: typeof querySyncAbortable) {
 const cursorKey = `seller_activity_cursor_v1_${owner}`;
 beforeEach(async () => {
   jest.clearAllMocks();
+  jest.mocked(fireNotification).mockImplementation(async () => null);
   await AsyncStorage.clear();
   mockOwner = owner;
   jest.mocked(fetchSellerEvents).mockResolvedValue([listing]);
-  jest.mocked(querySyncAbortable).mockResolvedValue([]);
+  respondWith(async () => []);
 });
 it('produces comment/review history targets and dedupes repeated checks', async () => {
   const review: Event = {
@@ -189,7 +191,7 @@ it('cancels an in-flight check before account removal and waits for it to settle
   expect(fireNotification).not.toHaveBeenCalled();
 });
 it('resolves the correct latest listing only after a tap, preserving colon-containing identifiers', async () => {
-  jest.mocked(querySyncAbortable).mockResolvedValue([
+  respondWith(async () => [
     {
       ...listing,
       tags: [
@@ -442,11 +444,16 @@ it('continues reviews, later coordinate chunks and replies after a saturated sec
   expect(JSON.parse((await AsyncStorage.getItem(cursorKey))!).lastSeen).toBeGreaterThanOrEqual(now);
 });
 
-it('excludes unfinished relays from later pages and advances using completed snapshots', async () => {
+it('drains completed relays but retains the checkpoint for unfinished relays', async () => {
   const events = Array.from({ length: 201 }, (_, i) => ({
     ...comment(`completed-${i}`),
     created_at: now - i,
   }));
+  const checkpoint = now - 1000;
+  await AsyncStorage.setItem(
+    cursorKey,
+    JSON.stringify({ lastSeen: checkpoint, seen: [], strangers: {} }),
+  );
   const pageRelays: string[][] = [];
   respondWith(async (_p, relays, f, params) => {
     params.completedRelays?.delete('wss://stalled');
@@ -454,10 +461,12 @@ it('excludes unfinished relays from later pages and advances using completed sna
     pageRelays.push(relays);
     return events.filter((e) => e.created_at <= f.until!).slice(0, f.limit);
   });
-  await checkSellerActivity({ ...opts(), relays: ['wss://good', 'wss://stalled'] });
+  await expect(
+    checkSellerActivity({ ...opts(), relays: ['wss://good', 'wss://stalled'] }),
+  ).rejects.toThrow('relay query incomplete');
   expect(pageRelays).toEqual([['wss://good', 'wss://stalled'], ['wss://good']]);
   expect(fireNotification).toHaveBeenCalledTimes(201);
-  expect(JSON.parse((await AsyncStorage.getItem(cursorKey))!).lastSeen).toBeGreaterThanOrEqual(now);
+  expect(JSON.parse((await AsyncStorage.getItem(cursorKey))!).lastSeen).toBe(checkpoint);
 });
 
 it('drops events newer than the requested page before selecting its newest results', async () => {
@@ -528,3 +537,73 @@ it.each(['disabled', 'disabled during mute lookup'])(
     expect(fireNotification).not.toHaveBeenCalled();
   },
 );
+
+it('retries a failed relay after activity has fallen outside the overlap window', async () => {
+  const checkpoint = now - 600;
+  const missed = { ...comment('missed-on-offline-relay'), created_at: now - 300 };
+  await AsyncStorage.setItem(
+    cursorKey,
+    JSON.stringify({ lastSeen: checkpoint, seen: [], strangers: {} }),
+  );
+  respondWith(async (_p, _r, _f, params) => {
+    params.completedRelays?.delete('wss://offline');
+    return [];
+  });
+  const input = { ...opts(), relays: ['wss://empty', 'wss://offline'] };
+  await expect(checkSellerActivity(input)).rejects.toThrow('relay query incomplete');
+  expect(JSON.parse((await AsyncStorage.getItem(cursorKey))!).lastSeen).toBe(checkpoint);
+  respondWith(async (_p, _r, f) => (f['#A'] && missed.created_at >= f.since! ? [missed] : []));
+  await checkSellerActivity(input);
+  expect(fireNotification).toHaveBeenCalledWith(
+    expect.objectContaining({ historyKey: `market:${missed.id}` }),
+  );
+  expect(JSON.parse((await AsyncStorage.getItem(cursorKey))!).lastSeen).toBeGreaterThanOrEqual(now);
+});
+
+it('retains the newest 200 source events from a 400-comment paginated catch-up', async () => {
+  const events = Array.from({ length: 400 }, (_, i) => ({
+    ...comment(`history-${i}`),
+    created_at: now - i,
+  }));
+  respondWith(async (_p, _r, f) =>
+    f['#A'] ? events.filter((e) => e.created_at <= f.until!).slice(0, f.limit) : [],
+  );
+  // Keep the real bounded history store while avoiding native delivery.
+  jest.mocked(fireNotification).mockImplementation(async (payload) => {
+    await recordNotification(owner, payload, payload.historyCreatedAt);
+    return null;
+  });
+  await checkSellerActivity(opts());
+  const history = await listNotifications(owner);
+  expect(history.map((e) => e.key)).toEqual(events.slice(0, 200).map((e) => `market:${e.id}`));
+  expect(history.map((e) => e.createdAt)).toEqual(
+    events.slice(0, 200).map((e) => e.created_at * 1000),
+  );
+  jest.mocked(fireNotification).mockImplementation(async () => null);
+});
+
+it('marks muted comments seen without consuming the quota for unmuted strangers', async () => {
+  const muted = Array.from({ length: 20 }, (_, i) => ({
+    ...comment(`muted-${i}`, stranger),
+    created_at: now - 100 + i,
+  }));
+  const allowed = comment('unmuted-stranger', 'd'.repeat(64));
+  jest
+    .mocked(shouldMuteNotification)
+    .mockImplementation(async (_owner, data) => data?.senderPubkey === stranger);
+  respondWith(async (_p, _r, f) => (f['#A'] ? [...muted, allowed] : []));
+  try {
+    await checkSellerActivity({ ...opts(), onlyFriends: false });
+    expect(fireNotification).toHaveBeenCalledTimes(1);
+    expect(fireNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ historyKey: `market:${allowed.id}` }),
+    );
+    const cursor = JSON.parse((await AsyncStorage.getItem(cursorKey))!);
+    expect(cursor.seen).toEqual(expect.arrayContaining([...muted, allowed].map((e) => e.id)));
+    expect(Object.values(cursor.strangers)).toEqual([1]);
+    await checkSellerActivity(opts());
+    expect(fireNotification).toHaveBeenCalledTimes(1);
+  } finally {
+    jest.mocked(shouldMuteNotification).mockImplementation(async () => false);
+  }
+});

@@ -109,7 +109,7 @@ export function stageActivity(
   coord: string,
   friend: boolean,
   now: number,
-): { accepted: boolean; commit: () => void } {
+): { accepted: boolean; commit: (consumeQuota?: boolean) => void } {
   if (
     event.created_at < activitySince(cursor.lastSeen, now) ||
     event.created_at > now + 120 ||
@@ -122,12 +122,12 @@ export function stageActivity(
   const accepted = friend || count < 20;
   return {
     accepted,
-    commit: () => {
+    commit: (consumeQuota = true) => {
       if (seen.has(event.id)) return;
       seen.add(event.id);
       cursor.seen.push(event.id);
       if (cursor.seen.length > 4000) seen.delete(cursor.seen.shift()!);
-      if (!friend && accepted) cursor.strangers[key] = count + 1;
+      if (consumeQuota && !friend && accepted) cursor.strangers[key] = count + 1;
       const keys = Object.keys(cursor.strangers);
       const current = keys.filter((k) => k.startsWith(`${day}:`));
       const retained = new Set(current.slice(-500));
