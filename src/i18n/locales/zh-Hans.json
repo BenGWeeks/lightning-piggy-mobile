@@ -2309,6 +2309,12 @@
       "emptyNoMatch": "没有符合搜索或筛选条件的商品。",
       "emptyMerchantMissing": "{{name}} 目前没有商品——下拉刷新。",
       "emptyNoFriends": "你的Nostr好友暂时还没有人销售Lightning Piggy商品。",
+      "emptyNoFof": "你的好友的好友网络中还没有人在出售商品。",
+      "emptyNoAll": "目前在你的中继上没有找到商品。",
+      "allScopeNote": "实验性：来自任何人的商品，未经审核",
+      "fofBuilding": "正在构建你的网络…… {{done}}/{{total}}",
+      "fofBuildingStart": "正在构建你的网络……",
+      "fofFailed": "无法构建你的网络——正在显示好友的商品。",
       "emptyNone": "目前没有可购买的商品。"
     },
     "card": {
@@ -2353,7 +2359,11 @@
       "sellers": "卖家",
       "friends": "好友（你关注的人）",
       "friendsOfFriends": "好友的好友",
+      "allSellers": "所有人（任何人）",
+      "experimental": "实验性",
       "friendsChip": "好友",
+      "friendsOfFriendsChip": "好友的好友",
+      "allChip": "所有人",
       "comingSoon": "即将推出",
       "clearScope": "将卖家重置为 Lightning Piggy 首选卖家",
       "changeScope": "{{label}}。打开筛选以更换卖家",
@@ -2491,6 +2501,8 @@
     },
     "live": {
       "loading": "正在加载好友的商品……",
+      "loadingNetwork": "正在加载你网络中的商品……",
+      "loadingAll": "正在加载所有人的商品……",
       "partialToast": "部分卖家未响应。下拉刷新。",
       "contactSeller": "给卖家发消息"
     },

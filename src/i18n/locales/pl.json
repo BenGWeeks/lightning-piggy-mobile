@@ -2311,6 +2311,12 @@
       "emptyNoMatch": "Żaden produkt nie pasuje do wyszukiwania ani filtrów.",
       "emptyMerchantMissing": "Brak ofert od {{name}} w tej chwili — pociągnij, aby odświeżyć.",
       "emptyNoFriends": "Nikt z twoich znajomych z Nostr nie sprzedaje jeszcze produktów Lightning Piggy.",
+      "emptyNoFof": "Nikt w twojej sieci znajomych znajomych jeszcze nic nie sprzedaje.",
+      "emptyNoAll": "Na twoich przekaźnikach nie znaleziono teraz żadnych ofert.",
+      "allScopeNote": "Eksperymentalne: oferty od kogokolwiek, niezweryfikowane",
+      "fofBuilding": "Budowanie twojej sieci… {{done}}/{{total}}",
+      "fofBuildingStart": "Budowanie twojej sieci…",
+      "fofFailed": "Nie udało się zbudować twojej sieci — pokazujemy oferty twoich znajomych.",
       "emptyNone": "Brak dostępnych produktów."
     },
     "card": {
@@ -2355,7 +2361,11 @@
       "sellers": "Sprzedawcy",
       "friends": "Znajomi (osoby, które obserwujesz)",
       "friendsOfFriends": "Znajomi znajomych",
+      "allSellers": "Wszyscy (ktokolwiek)",
+      "experimental": "Eksperymentalne",
       "friendsChip": "Znajomi",
+      "friendsOfFriendsChip": "Znajomi znajomych",
+      "allChip": "Wszyscy",
       "comingSoon": "Wkrótce",
       "clearScope": "Przywróć preferowanych sprzedawców Lightning Piggy",
       "changeScope": "{{label}}. Otwiera filtry, aby zmienić sprzedawców",
@@ -2495,6 +2505,8 @@
     },
     "live": {
       "loading": "Wczytywanie ofert od twoich znajomych…",
+      "loadingNetwork": "Ładowanie ofert z twojej sieci…",
+      "loadingAll": "Ładowanie ofert od wszystkich…",
       "partialToast": "Niektórzy sprzedawcy nie odpowiedzieli. Pociągnij w dół, aby odświeżyć.",
       "contactSeller": "Napisz do sprzedawcy"
     },

@@ -68,7 +68,11 @@ export async function readMarketPreferences(account: string): Promise<MarketPref
     const value = JSON.parse((await AsyncStorage.getItem(preferencesKey(account))) ?? '{}');
     if (generation(account) !== epoch) return { ...DEFAULT_MARKET_PREFERENCES };
     return {
-      mode: value?.mode === 'wotFriends' ? 'wotFriends' : DEFAULT_MARKET_MODE,
+      // Experimental scopes persist as chosen; the screen clamps them back to
+      // the default while experimental features are off (effectiveMarketMode).
+      mode: ['wotFriends', 'wotFof', 'wotAll'].includes(value?.mode)
+        ? (value.mode as MarketMode)
+        : DEFAULT_MARKET_MODE,
       merchant: typeof value?.merchant === 'string' ? value.merchant : null,
       // The retired Country filter saved a vendor-directory name under
       // `country`; it is deliberately not carried over (→ Anywhere).
