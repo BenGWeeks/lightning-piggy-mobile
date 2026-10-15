@@ -13,6 +13,14 @@ export const chatCardWidth = (windowWidth: number): number =>
 
 export const useChatCardWidth = (): number => chatCardWidth(useWindowDimensions().width);
 
-/** Preserve the source aspect ratio; invalid or unknown dimensions start square. */
+/** Sender-supplied `dim` is untrusted: keep bubbles between a tall portrait
+ * (0.6, ~1.7× the width) and a wide panorama (1.8) so forged metadata can't
+ * produce a giant row. */
+export const CHAT_IMAGE_MIN_ASPECT = 0.6;
+export const CHAT_IMAGE_MAX_ASPECT = 1.8;
+
+/** Preserve the source aspect ratio within bounds; invalid or unknown dimensions start square. */
 export const chatImageAspectRatio = (width: number, height: number): number =>
-  Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0 ? width / height : 1;
+  Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0
+    ? Math.min(Math.max(width / height, CHAT_IMAGE_MIN_ASPECT), CHAT_IMAGE_MAX_ASPECT)
+    : 1;
