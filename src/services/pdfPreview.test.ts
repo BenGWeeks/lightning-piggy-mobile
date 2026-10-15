@@ -1,6 +1,7 @@
 import { requireOptionalNativeModule } from 'expo-modules-core';
 import { resolvePdfPreview } from './pdfPreview';
 import {
+  captureDecryptedMediaSession,
   resolveDecryptedMedia,
   publishDecryptedPreview,
   verifiedFileMetadata,
@@ -9,6 +10,7 @@ import type { FileAttachment } from '../utils/fileAttachment';
 
 jest.mock('expo-modules-core', () => ({ requireOptionalNativeModule: jest.fn() }));
 jest.mock('./decryptedMediaCache', () => ({
+  captureDecryptedMediaSession: jest.fn((owner = 'alice') => ({ owner, assertCurrent: jest.fn() })),
   resolveDecryptedMedia: jest.fn(),
   verifiedFileMetadata: jest.fn(),
   publishDecryptedPreview: jest.fn((_uri, render) => render()),
@@ -70,5 +72,20 @@ it('shares one in-flight render of the hash-keyed local file under the cleanup b
 });
 it('silently falls back when native rendering fails', async () => {
   render.mockRejectedValueOnce(new Error('broken PDF'));
+  expect(await resolvePdfPreview(file, 'alice')).toBeNull();
+});
+
+it('discards a preview if the captured session ends during native rendering', async () => {
+  let current = true;
+  jest.mocked(captureDecryptedMediaSession).mockReturnValueOnce({
+    owner: 'alice',
+    assertCurrent: () => {
+      if (!current) throw new Error('cancelled');
+    },
+  });
+  render.mockImplementationOnce(async () => {
+    current = false;
+    return 'file:///old-preview.png';
+  });
   expect(await resolvePdfPreview(file, 'alice')).toBeNull();
 });

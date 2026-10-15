@@ -1,10 +1,14 @@
 import { act, renderHook, waitFor } from '@testing-library/react-native';
+import { captureDecryptedMediaSession } from '../services/decryptedMediaCache';
 import { usePdfPreview } from './usePdfPreview';
 import { resolvePdfPreview } from '../services/pdfPreview';
 import type { FileAttachment } from '../utils/fileAttachment';
 
 let mockOwner = 'alice';
 jest.mock('./useActivePubkey', () => ({ useActivePubkey: () => mockOwner }));
+jest.mock('../services/decryptedMediaCache', () => ({
+  captureDecryptedMediaSession: jest.fn((owner = 'alice') => ({ owner, assertCurrent: jest.fn() })),
+}));
 jest.mock('../services/pdfPreview', () => ({ resolvePdfPreview: jest.fn() }));
 const file = { url: 'https://example.com/file.pdf', mime: 'application/pdf' } as FileAttachment;
 beforeEach(() => {
@@ -26,7 +30,11 @@ it('cancels the old deferred import and binds the new resolution to the current 
   rerender({});
   await waitFor(() => expect(result.current).toBe('file:///bob/preview.png'));
   expect(resolvePdfPreview).toHaveBeenCalledTimes(1);
-  expect(resolvePdfPreview).toHaveBeenCalledWith(file, 'bob');
+  expect(resolvePdfPreview).toHaveBeenCalledWith(
+    file,
+    'bob',
+    expect.objectContaining({ owner: 'bob' }),
+  );
 });
 
 it('ignores a previous account preview that finishes after the switch', async () => {
@@ -50,4 +58,16 @@ it('ignores a previous account preview that finishes after the switch', async ()
     finish('file:///alice/preview.png');
   });
   expect(result.current).toBe('file:///bob/preview.png');
+});
+
+it('does not resolve after its session ends before the deferred import', async () => {
+  jest.mocked(captureDecryptedMediaSession).mockReturnValueOnce({
+    owner: 'alice',
+    assertCurrent: () => {
+      throw new Error('cancelled');
+    },
+  });
+  renderHook(() => usePdfPreview(file, true));
+  await act(async () => {});
+  expect(resolvePdfPreview).not.toHaveBeenCalled();
 });

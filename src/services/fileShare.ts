@@ -3,6 +3,7 @@ import { MAX_FILE_BYTES } from './fileDownload';
 import * as Sharing from 'expo-sharing';
 import type { FileAttachment } from '../utils/fileAttachment';
 import {
+  captureDecryptedMediaSession,
   namedFileExport,
   retainDecryptedFile,
   resolveDecryptedMedia,
@@ -15,9 +16,13 @@ export async function shareFileAttachment(
   confirmSave: () => Promise<boolean>,
   onVerified: (metadata: { size: number; mime: string }) => void,
 ): Promise<void> {
+  const session = captureDecryptedMediaSession();
+  session.assertCurrent();
   if (!file.available) throw new Error('File unavailable');
   if (file.dangerous && !(await confirmSave())) return;
+  session.assertCurrent();
   if (!(await Sharing.isAvailableAsync())) throw new Error('Sharing unavailable');
+  session.assertCurrent();
   if (file.plainUrl) {
     // HEAD is optional and user initiated too; GET independently enforces the
     // cap when a server omits metadata, rejects HEAD, or changes the payload.
@@ -33,16 +38,23 @@ export async function shareFileAttachment(
       /* Download remains bounded when HEAD is unavailable. */
     }
   }
-  const uri = await resolveDecryptedMedia({
-    ...file,
-    size: file.plainUrl ? undefined : file.size,
-    kind: 'file',
-  });
+  session.assertCurrent();
+  const uri = await resolveDecryptedMedia(
+    {
+      ...file,
+      size: file.plainUrl ? undefined : file.size,
+      kind: 'file',
+    },
+    session.owner,
+  );
+  session.assertCurrent();
   const release = retainDecryptedFile(uri);
   try {
     const metadata = verifiedFileMetadata(uri);
     if (metadata) onVerified(metadata);
+    session.assertCurrent();
     const exportUri = await namedFileExport(uri, file.dangerous ? 'attachment.bin' : file.name);
+    session.assertCurrent();
     await Sharing.shareAsync(exportUri, {
       mimeType: file.dangerous
         ? 'application/octet-stream'

@@ -45,7 +45,10 @@ jest.mock('expo-audio', () => ({
   useAudioPlayerStatus: () => ({ playing: false, duration: 10, currentTime: 0 }),
   setAudioModeAsync: jest.fn(),
 }));
-jest.mock('../services/decryptedMediaCache', () => ({ resolveDecryptedMedia: jest.fn() }));
+jest.mock('../services/decryptedMediaCache', () => ({
+  captureDecryptedMediaSession: jest.fn((owner = 'alice') => ({ owner, assertCurrent: jest.fn() })),
+  resolveDecryptedMedia: jest.fn(),
+}));
 jest.mock('./DecryptedImage', () => () => null);
 
 beforeEach(() => {

@@ -1,4 +1,7 @@
 import React from 'react';
+import { shareFileAttachment } from './fileShare';
+import * as remoteUrlPolicy from '../utils/remoteUrlPolicy';
+import { parsePlainFileAttachment } from '../utils/fileAttachment';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import * as Sharing from 'expo-sharing';
 import MessageFileBubble from '../components/MessageFileBubble';
@@ -14,6 +17,7 @@ import { encryptFile } from './encryptedFile';
 import { encodeEncryptedFileUrl } from '../utils/encryptedFileUrl';
 import { parseVoiceNote } from '../utils/messageContent';
 import {
+  captureDecryptedMediaSession,
   namedFileExport,
   publishDecryptedPreview,
   deleteDecryptedFile,
@@ -887,3 +891,77 @@ it('rejects a deferred attachment bound to the previous account before downloadi
   await expect(resolveDecryptedMedia(ref, A)).rejects.toBeInstanceOf(DecryptedMediaCancelledError);
   expect(fetchMock).not.toHaveBeenCalled();
 });
+
+it('retires captured sessions on switches, round trips, and account wipes', async () => {
+  setDecryptedMediaOwner(A);
+  const session = captureDecryptedMediaSession();
+  expect(session.owner).toBe(A);
+  session.assertCurrent();
+  setDecryptedMediaOwner(B);
+  expect(() => session.assertCurrent()).toThrow(DecryptedMediaCancelledError);
+  setDecryptedMediaOwner(A);
+  expect(() => session.assertCurrent()).toThrow(DecryptedMediaCancelledError);
+  await clearDecryptedMediaCache(A);
+  const fresh = captureDecryptedMediaSession(A);
+  await wipeDecryptedMediaForOwner(A);
+  expect(() => fresh.assertCurrent()).toThrow(DecryptedMediaCancelledError);
+  expect(() => captureDecryptedMediaSession().assertCurrent()).toThrow(
+    DecryptedMediaCancelledError,
+  );
+});
+
+it.each([false, true])(
+  'cancels a real share during HEAD (return to original account=%s)',
+  async (roundTrip) => {
+    setDecryptedMediaOwner(A);
+    jest.mocked(Sharing.shareAsync).mockClear();
+    let finish!: () => void;
+    const head = jest.spyOn(remoteUrlPolicy, 'fetchBounded').mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = () => resolve(undefined as never);
+        }),
+    );
+    try {
+      const sharing = shareFileAttachment(
+        parsePlainFileAttachment('https://example.com/invoice.pdf')!,
+        async () => true,
+        jest.fn(),
+      );
+      const rejected = expect(sharing).rejects.toBeInstanceOf(DecryptedMediaCancelledError);
+      await waitFor(() => expect(head).toHaveBeenCalled());
+      setDecryptedMediaOwner(B);
+      if (roundTrip) setDecryptedMediaOwner(A);
+      finish();
+      await rejected;
+      expect(head).toHaveBeenCalledTimes(1);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(Sharing.shareAsync).not.toHaveBeenCalled();
+      expect(filesUnder(B)).toEqual([]);
+    } finally {
+      head.mockRestore();
+    }
+  },
+);
+
+it.each(['export', 'preview'])(
+  'cancels a deferred %s after an account round trip',
+  async (operation) => {
+    setDecryptedMediaOwner(A);
+    const uri = `file:///cache/decrypted/${ownerDirName(A)}/file-export.bin`;
+    mockFiles.set(uri, 'YQ==');
+    const release = retainDecryptedFile(uri);
+    const render = jest.fn(async () => `${uri}.preview-480.png`);
+    const pending =
+      operation === 'export'
+        ? namedFileExport(uri, 'invoice.pdf')
+        : publishDecryptedPreview(uri, render);
+    const rejected = expect(pending).rejects.toBeInstanceOf(DecryptedMediaCancelledError);
+    setDecryptedMediaOwner(B);
+    setDecryptedMediaOwner(A);
+    await rejected;
+    expect(render).not.toHaveBeenCalled();
+    expect(mockFiles.has(`${uri}.share/invoice.pdf`)).toBe(false);
+    release();
+  },
+);

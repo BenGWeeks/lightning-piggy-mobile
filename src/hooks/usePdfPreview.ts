@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { captureDecryptedMediaSession } from '../services/decryptedMediaCache';
 import { useActivePubkey } from './useActivePubkey';
 import type { FileAttachment } from '../utils/fileAttachment';
 
@@ -9,13 +10,15 @@ export function usePdfPreview(file: FileAttachment, enabled: boolean) {
   useEffect(() => {
     let cancelled = false;
     if (enabled) {
+      const session = captureDecryptedMediaSession(owner);
       void Promise.resolve()
         .then(() => {
           if (cancelled) return null;
           const { resolvePdfPreview }: typeof import('../services/pdfPreview') =
             // eslint-disable-next-line @typescript-eslint/no-require-imports
             require('../services/pdfPreview');
-          return resolvePdfPreview(file, owner);
+          session.assertCurrent();
+          return resolvePdfPreview(file, owner, session);
         })
         .then(
           (uri) => {

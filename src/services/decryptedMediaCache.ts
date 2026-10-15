@@ -139,7 +139,10 @@ export async function publishDecryptedPreview(
   uri: string,
   render: () => Promise<string | null>,
 ): Promise<string | null> {
+  const session = captureDecryptedMediaSession();
+  session.assertCurrent();
   const { owner, epoch } = await requestOwner();
+  session.assertCurrent();
   const dir = ownerDirUri(owner);
   if (!dir || !uri.startsWith(dir)) throw new DecryptedMediaCancelledError();
   const ownerDir = ownerDirName(owner);
@@ -155,6 +158,7 @@ export async function publishDecryptedPreview(
     );
     if (epoch !== sessionEpoch || generationOf(ownerDir) !== gen)
       throw new DecryptedMediaCancelledError();
+    session.assertCurrent();
     return result;
   } finally {
     release();
@@ -163,7 +167,10 @@ export async function publishDecryptedPreview(
 
 /** Named exports share the source lease, account directory, and wipe generation. */
 export async function namedFileExport(uri: string, name: string): Promise<string> {
+  const session = captureDecryptedMediaSession();
+  session.assertCurrent();
   const { owner } = await requestOwner();
+  session.assertCurrent();
   const dir = ownerDirUri(owner);
   if (!dir || !uri.startsWith(dir) || !retainedFiles.has(uri))
     throw new DecryptedMediaCancelledError();
@@ -181,6 +188,7 @@ export async function namedFileExport(uri: string, name: string): Promise<string
     })(),
   );
   if (generationOf(ownerDir) !== gen) throw new DecryptedMediaCancelledError();
+  session.assertCurrent();
   return target;
 }
 
@@ -365,6 +373,25 @@ export function clearDecryptedMediaMemory(): void {
 export function peekDecryptedMedia(ref: EncryptedMediaRef): string | null {
   if (!activeOwner || !hasValidDeclaredHash(ref)) return null;
   return memory.get(`${ownerDirName(activeOwner)}/${mediaCacheKey(ref)}`) ?? null;
+}
+
+/** Capture synchronously before any await; an account round trip also retires this token. */
+export function captureDecryptedMediaSession(expectedOwner = activeOwner) {
+  const owner = expectedOwner;
+  const epoch = sessionEpoch;
+  const gen = owner ? generationOf(ownerDirName(owner)) : 0;
+  return {
+    owner,
+    assertCurrent() {
+      if (
+        !owner ||
+        owner !== activeOwner ||
+        epoch !== sessionEpoch ||
+        generationOf(ownerDirName(owner)) !== gen
+      )
+        throw new DecryptedMediaCancelledError();
+    },
+  };
 }
 
 /** Cold start only: wait up to OWNER_WAIT_MS for the first owner. */

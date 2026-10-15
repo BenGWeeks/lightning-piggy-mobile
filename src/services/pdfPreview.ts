@@ -1,5 +1,6 @@
 import { requireOptionalNativeModule } from 'expo-modules-core';
 import {
+  captureDecryptedMediaSession,
   resolveDecryptedMedia,
   publishDecryptedPreview,
   verifiedFileMetadata,
@@ -13,13 +14,16 @@ const MAX_PREVIEW_BYTES = 10 * 1024 * 1024;
 export async function resolvePdfPreview(
   file: FileAttachment,
   owner: string | null,
+  session = captureDecryptedMediaSession(owner),
 ): Promise<string | null> {
   try {
+    session.assertCurrent();
     const native = requireOptionalNativeModule<{
       renderPdfFirstPageAsync?: (uri: string, width: number) => Promise<string | null>;
     }>('DocumentMetadata');
     if (!native?.renderPdfFirstPageAsync || (file.size ?? 0) > MAX_PREVIEW_BYTES) return null;
     const uri = await resolveDecryptedMedia({ ...file, kind: 'file' }, owner);
+    session.assertCurrent();
     const metadata = verifiedFileMetadata(uri);
     if (!metadata || metadata.mime !== 'application/pdf' || metadata.size > MAX_PREVIEW_BYTES)
       return null;
@@ -30,7 +34,9 @@ export async function resolvePdfPreview(
         .finally(() => previews.delete(uri));
       previews.set(uri, pending);
     }
-    return await pending;
+    const result = await pending;
+    session.assertCurrent();
+    return result;
   } catch {
     return null;
   }

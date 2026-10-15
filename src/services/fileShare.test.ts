@@ -2,6 +2,7 @@ import { shareFileAttachment } from './fileShare';
 import { parseFileAttachment } from '../utils/fileAttachment';
 import * as Sharing from 'expo-sharing';
 import {
+  captureDecryptedMediaSession,
   namedFileExport,
   retainDecryptedFile,
   resolveDecryptedMedia,
@@ -17,6 +18,7 @@ jest.mock('../utils/remoteUrlPolicy', () => ({
 }));
 const mockRelease = jest.fn();
 jest.mock('./decryptedMediaCache', () => ({
+  captureDecryptedMediaSession: jest.fn((owner = 'alice') => ({ owner, assertCurrent: jest.fn() })),
   namedFileExport: jest.fn(
     async (_uri: string, name: string) => `file:///safe.bin.share/${encodeURIComponent(name)}`,
   ),
@@ -134,6 +136,7 @@ it('keeps optional HEAD behind a tap and keeps the plain-URL GET independent of 
   );
   expect(resolveDecryptedMedia).toHaveBeenCalledWith(
     expect.objectContaining({ size: undefined, plainUrl: true, kind: 'file' }),
+    'alice',
   );
   expect(Sharing.shareAsync).toHaveBeenCalledWith(
     expect.any(String),
@@ -152,5 +155,51 @@ it('falls back to the capped GET when the server rejects HEAD', async () => {
   );
   expect(resolveDecryptedMedia).toHaveBeenCalledWith(
     expect.objectContaining({ kind: 'file', size: undefined }),
+    'alice',
   );
 });
+
+it.each(['confirmation', 'availability', 'HEAD', 'download', 'export'])(
+  'cancels sharing when the session changes during %s',
+  async (stage) => {
+    let current = true;
+    jest.mocked(captureDecryptedMediaSession).mockReturnValueOnce({
+      owner: 'alice',
+      assertCurrent: () => {
+        if (!current) throw new Error('session cancelled');
+      },
+    });
+    const changed = async () => {
+      current = false;
+      return true;
+    };
+    const { fetchBounded } = jest.requireMock('../utils/remoteUrlPolicy');
+    const { parsePlainFileAttachment } = jest.requireActual('../utils/fileAttachment');
+    if (stage === 'availability')
+      jest.mocked(Sharing.isAvailableAsync).mockImplementationOnce(changed);
+    if (stage === 'HEAD') fetchBounded.mockImplementationOnce(changed);
+    if (stage === 'download')
+      jest.mocked(resolveDecryptedMedia).mockImplementationOnce(async () => {
+        current = false;
+        return 'file:///safe.bin';
+      });
+    if (stage === 'export')
+      jest.mocked(namedFileExport).mockImplementationOnce(async () => {
+        current = false;
+        return 'file:///safe.bin.share/a.pdf';
+      });
+    await expect(
+      shareFileAttachment(
+        stage === 'HEAD'
+          ? parsePlainFileAttachment('https://example.com/invoice.pdf')!
+          : file('a.pdf', stage === 'confirmation' ? 'text/html' : 'application/pdf'),
+        changed,
+        jest.fn(),
+      ),
+    ).rejects.toThrow('session cancelled');
+    expect(Sharing.shareAsync).not.toHaveBeenCalled();
+    if (['confirmation', 'availability', 'HEAD'].includes(stage))
+      expect(resolveDecryptedMedia).not.toHaveBeenCalled();
+    else expect(resolveDecryptedMedia).toHaveBeenCalledWith(expect.any(Object), 'alice');
+  },
+);
