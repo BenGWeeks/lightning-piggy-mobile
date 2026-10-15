@@ -10,10 +10,21 @@ import type { MarketProduct } from '../data/marketProducts';
 import type { MarketCheckoutTarget } from '../utils/marketCheckout';
 import type { ShippingOption } from '../utils/marketShipping';
 
-jest.mock('./MarketHeader', () => () => null);
+// Render the real MarketHeader and TabHeader outside a NavigationContainer,
+// matching the bottom-sheet portal's location in App.tsx.
+jest.mock('./BrandPatternBackground', () => () => null);
+jest.mock('./ProfileIcon', () => () => null);
+jest.mock('../contexts/NostrContext', () => ({
+  useNostr: () => {
+    throw new Error('Checkout headers must not mount the default account action');
+  },
+}));
+jest.mock('react-native-safe-area-context', () => ({
+  useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
+}));
 jest.mock('@gorhom/bottom-sheet', () => {
-  const R = require('react');
-  const { View, TextInput } = require('react-native');
+  const R = jest.requireActual('react');
+  const { View, TextInput } = jest.requireActual('react-native');
   return {
     BottomSheetTextInput: TextInput,
     BottomSheetModal: R.forwardRef(
@@ -43,7 +54,7 @@ jest.mock('../styles/MarketCheckoutSheet.styles', () => ({
 jest.mock('../styles/MarketShippingSection.styles', () => ({
   createMarketShippingSectionStyles: () => ({}),
 }));
-jest.mock('expo-image', () => ({ Image: require('react-native').Image }));
+jest.mock('expo-image', () => ({ Image: jest.requireActual('react-native').Image }));
 jest.mock('lucide-react-native', () => new Proxy({}, { get: () => () => null }));
 jest.mock('./BrandedToast', () => ({ __esModule: true, default: { show: jest.fn() } }));
 jest.mock('./CountryPickerSheet', () => {
@@ -165,6 +176,37 @@ beforeEach(() => {
     placeOrder,
     reset,
   });
+});
+
+test('renders the real checkout header without navigation context and closes on back', () => {
+  setShipping('ready', []);
+  const onClose = jest.fn();
+  const ui = render(
+    <MarketCheckoutSheet
+      visible
+      onClose={onClose}
+      product={product}
+      checkout={{ ...physical, fulfilment: 'none' }}
+      sellerName="Big Piggy (TEST)"
+      onRequestSignIn={jest.fn()}
+      onPlaced={jest.fn()}
+    />,
+  );
+  fireEvent.press(ui.getByTestId('market-checkout-back'));
+  expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+test('disables the real header back button while placing an order', () => {
+  setShipping('ready', []);
+  (useMarketCheckout as jest.Mock).mockReturnValue({
+    status: 'idle',
+    isPlacing: true,
+    canOrder: true,
+    placeOrder,
+    reset,
+  });
+  const ui = renderSheet({ ...physical, fulfilment: 'none' });
+  expect(ui.getByTestId('market-checkout-back')).toBeDisabled();
 });
 
 test('a physical product whose shipping fetch failed or came back empty cannot be ordered', () => {

@@ -53,6 +53,24 @@ interface Props {
   insetTop?: boolean;
 }
 
+/** Navigation is only required when the default account action is mounted. */
+function AccountHeaderAction() {
+  const navigation = useNavigation();
+  const { profile } = useNostr();
+
+  // Profile icon opens the account drawer (wraps MainTabs). See issue #100.
+  return (
+    <ProfileIcon
+      uri={profile?.picture}
+      size={36}
+      onPress={() => {
+        const parent = navigation.getParent<AccountDrawerNavigation>();
+        parent?.openDrawer();
+      }}
+    />
+  );
+}
+
 /**
  * Shared header row for the four top-level tabs (Home, Messages, Explore,
  * Friends). Fixes the prior inconsistency where each screen rolled its
@@ -80,20 +98,6 @@ const TabHeader: React.FC<Props> = ({
   const colors = useThemeColors();
   const styles = useMemo(() => createTabHeaderStyles(colors), [colors]);
   const insets = useSafeAreaInsets();
-  const navigation = useNavigation();
-  const { profile } = useNostr();
-
-  // Profile icon opens the account drawer (wraps MainTabs). See issue #100.
-  const defaultRight = (
-    <ProfileIcon
-      uri={profile?.picture}
-      size={36}
-      onPress={() => {
-        const parent = navigation.getParent<AccountDrawerNavigation>();
-        parent?.openDrawer();
-      }}
-    />
-  );
 
   return (
     <View style={[styles.header, { paddingTop: (insetTop ? insets.top : 0) + 12 }]}>
@@ -129,7 +133,7 @@ const TabHeader: React.FC<Props> = ({
       </Text>
       <View style={styles.spacer} />
       {rightAccessory}
-      {rightAction ?? defaultRight}
+      {rightAction ?? <AccountHeaderAction />}
     </View>
   );
 };
