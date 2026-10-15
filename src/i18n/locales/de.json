@@ -3615,6 +3615,8 @@
       "choose": "Wallet wählen",
       "saveFailed": "Die Wallet-Auswahl konnte nicht gespeichert werden."
     },
-    "sendNewInvoice": "Neue Rechnung senden"
+    "sendNewInvoice": "Neue Rechnung senden",
+    "checkWalletFirst": "Prüfe zuerst deine Wallet",
+    "unknownInvoiceWarning": "Wir konnten nicht bestätigen, ob die vorherige Rechnung bezahlt wurde. Falls ja, sende keine neue."
   }
 }

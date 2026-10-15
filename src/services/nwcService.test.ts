@@ -473,7 +473,7 @@ describe.each(['incoming', 'outgoing'])('ambiguous %s LNbits lookups', (type) =>
         });
       const result = await lookupInvoice(WALLET_ID, mockPaymentHash, { replyTimeoutMs: 5000 });
       expect(result?.paid === true).toBe(history.startsWith('listed'));
-      if (!history.startsWith('listed')) expect(result).toBeNull();
+      if (!history.startsWith('listed')) expect(result).toEqual({ paid: null });
       else
         expect(result).toMatchObject({
           invoice: response.invoice,
@@ -490,3 +490,42 @@ describe.each(['incoming', 'outgoing'])('ambiguous %s LNbits lookups', (type) =>
     }
   });
 });
+
+it.each([undefined, 'settled'])(
+  'trusts LNbits proof before expiry without list permission (state %s)',
+  async (state) => {
+    mockRawLookupInvoice.mockResolvedValueOnce({
+      type: 'incoming',
+      state,
+      invoice: 'lnbc1fixture',
+      payment_hash: mockPaymentHash,
+      preimage: 'c'.repeat(64),
+      created_at: 100,
+      settled_at: 100,
+      expires_at: Math.floor(Date.now() / 1000) + 3600,
+    });
+    const calls = mockRawListTransactions.mock.calls.length;
+    expect(await lookupInvoice(WALLET_ID, mockPaymentHash)).toMatchObject({ paid: true });
+    expect(mockRawListTransactions).toHaveBeenCalledTimes(calls);
+  },
+);
+
+it.each(['NOT_IMPLEMENTED', 'RESTRICTED', 'UNAUTHORIZED', 'timeout'])(
+  'returns explicit unknown for expired LNbits when history fails: %s',
+  async (code) => {
+    mockRawLookupInvoice.mockResolvedValueOnce({
+      type: 'incoming',
+      payment_hash: mockPaymentHash,
+      preimage: 'c'.repeat(64),
+      created_at: 100,
+      settled_at: 100,
+      expires_at: 200,
+    });
+    if (code === 'timeout')
+      mockRawListTransactions.mockImplementationOnce(() => new Promise(() => {}));
+    else mockRawListTransactions.mockRejectedValueOnce(Object.assign(new Error(code), { code }));
+    const pending = lookupInvoice(WALLET_ID, mockPaymentHash, { replyTimeoutMs: 10 });
+    await jest.advanceTimersByTimeAsync(10);
+    expect(await pending).toEqual({ paid: null });
+  },
+);

@@ -3615,6 +3615,8 @@
       "choose": "Elige un monedero",
       "saveFailed": "No se pudo guardar el monedero elegido."
     },
-    "sendNewInvoice": "Enviar nueva factura"
+    "sendNewInvoice": "Enviar nueva factura",
+    "checkWalletFirst": "Revisa tu cartera primero",
+    "unknownInvoiceWarning": "No pudimos confirmar si se pagó la factura anterior. Si se pagó, no envíes una nueva."
   }
 }

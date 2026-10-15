@@ -164,6 +164,7 @@ it.each(['unpaid', 'paid', 'unknown', 'live'])(
         walletId: 'new-wallet',
         amountSats: 4200,
         remember: false,
+        allowUnknownInvoice: BOLT11,
       });
       if (state === 'unpaid') await action;
       else await expect(action).rejects.toMatchObject({ code: 'invoiceFailed' });
@@ -529,3 +530,38 @@ it('retries a persisted replacement after remount while the original self-copy r
     replacesBolt11: BOLT11,
   });
 });
+
+it.each([undefined, 'other-invoice', BOLT11])(
+  'requires consent for the exact unknown invoice: %s',
+  async (allowUnknownInvoice) => {
+    mockFocused = false;
+    (extractInvoice as jest.Mock).mockReturnValue({ expiresAt: 1 });
+    await recordSellerInvoice(SELLER, {
+      orderId: 'order-1',
+      buyerPubkey: BUYER,
+      walletId: 'old-wallet',
+      paymentHash: HASH,
+      bolt11: BOLT11,
+      amountSats: 4200,
+      sentAt: 1,
+    });
+    (lookupInvoice as jest.Mock).mockResolvedValue({ paid: null });
+    const { result } = renderHook(() => useSellerInvoice(BUYER, 'order-1'));
+    await waitFor(() => expect(result.current.record).not.toBeNull());
+    await act(async () => {
+      await result.current.checkPaid();
+    });
+    expect(result.current.unknownInvoice).toBe(BOLT11);
+    await act(async () => {
+      const action = result.current.sendInvoice({
+        walletId: 'new-wallet',
+        amountSats: 4200,
+        remember: false,
+        allowUnknownInvoice,
+      });
+      if (allowUnknownInvoice === BOLT11) await action;
+      else await expect(action).rejects.toMatchObject({ code: 'invoiceFailed' });
+    });
+    expect(makeInvoiceForWallet).toHaveBeenCalledTimes(allowUnknownInvoice === BOLT11 ? 1 : 0);
+  },
+);

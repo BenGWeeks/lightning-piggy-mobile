@@ -929,17 +929,24 @@ export async function lookupInvoice(
     if (!needsInvoiceHistoryConfirmation(result))
       return parseInvoiceSettlement(result, paymentHash);
     if (!Number.isSafeInteger(result.created_at) || result.created_at <= 0) return null;
-    const listing = provider.client.listTransactions({
-      from: Math.max(0, result.created_at - 60),
-      until: Math.floor(Date.now() / 1000),
-      type: result.type === 'outgoing' ? 'outgoing' : 'incoming',
-      unpaid: false,
-      limit: 50,
-    });
-    const history = await (options.replyTimeoutMs !== undefined
-      ? withTimeout(listing, options.replyTimeoutMs, `confirmInvoice(${walletId})`)
-      : listing);
-    return confirmListedInvoiceSettlement(result, history.transactions, paymentHash);
+    try {
+      const listing = provider.client.listTransactions({
+        from: Math.max(0, result.created_at - 60),
+        until: Math.floor(Date.now() / 1000),
+        type: result.type === 'outgoing' ? 'outgoing' : 'incoming',
+        unpaid: false,
+        limit: 50,
+      });
+      const history = await (options.replyTimeoutMs !== undefined
+        ? withTimeout(listing, options.replyTimeoutMs, `confirmInvoice(${walletId})`)
+        : listing);
+      return (
+        confirmListedInvoiceSettlement(result, history.transactions, paymentHash) ?? { paid: null }
+      );
+    } catch {
+      // An unavailable history cannot establish paid or unpaid.
+      return { paid: null };
+    }
   } catch (error) {
     if (isTerminalLookupError(error)) {
       recordFailedLookup(walletId, paymentHash);

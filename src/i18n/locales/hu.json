@@ -3615,6 +3615,8 @@
       "choose": "Válassz tárcát",
       "saveFailed": "Nem sikerült menteni a tárcaválasztást."
     },
-    "sendNewInvoice": "Új számla küldése"
+    "sendNewInvoice": "Új számla küldése",
+    "checkWalletFirst": "Először ellenőrizd a tárcádat",
+    "unknownInvoiceWarning": "Nem tudtuk megerősíteni, hogy az előző számlát kifizették-e. Ha igen, ne küldj újat."
   }
 }

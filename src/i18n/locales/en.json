@@ -3615,6 +3615,8 @@
       "choose": "Choose a wallet",
       "saveFailed": "Couldn't save the wallet choice."
     },
-    "sendNewInvoice": "Send new invoice"
+    "sendNewInvoice": "Send new invoice",
+    "checkWalletFirst": "Check your wallet first",
+    "unknownInvoiceWarning": "We couldn't confirm whether the earlier invoice was paid. If it was, don't send a new one."
   }
 }

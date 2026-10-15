@@ -1,7 +1,8 @@
 /* eslint-disable @typescript-eslint/no-require-imports -- jest.mock factories must require lazily */
 import React from 'react';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import SellerOrderPanel from './SellerOrderPanel';
+import { Alert } from './BrandedAlert';
 import { Toast } from './BrandedToast';
 import { useSellerOrderQuote } from '../hooks/useSellerOrderQuote';
 import { useSellerInvoice } from '../hooks/useSellerInvoice';
@@ -26,6 +27,7 @@ jest.mock('./SellerInvoiceSheet', () => {
   return MockSheet;
 });
 jest.mock('./FiatAmount', () => () => null);
+jest.mock('./BrandedAlert', () => ({ Alert: { alert: jest.fn() } }));
 jest.mock('./BrandedToast', () => ({ Toast: { show: jest.fn() } }));
 jest.mock('lucide-react-native', () => new Proxy({}, { get: () => () => null }));
 
@@ -142,7 +144,7 @@ it('opens invoice confirmation when the computed total matches the placed amount
 });
 
 it.each(['unpaid', 'paid', 'unknown', 'missing', 'unbound'])(
-  'offers replacement only for an unpaid invoice with its wallet binding: %s',
+  'gates expired replacement by settlement and wallet binding: %s',
   (settlement) => {
     (useSellerInvoice as jest.Mock).mockReturnValue({
       sending: false,
@@ -150,6 +152,7 @@ it.each(['unpaid', 'paid', 'unknown', 'missing', 'unbound'])(
       checkPaid: jest.fn(),
       sendInvoice: jest.fn(),
       markPaid: jest.fn(),
+      unknownInvoice: settlement === 'unknown' ? 'old-invoice' : null,
       unpaidInvoice: settlement === 'unpaid' || settlement === 'unbound' ? 'old-invoice' : null,
       record:
         settlement === 'missing'
@@ -180,7 +183,7 @@ it.each(['unpaid', 'paid', 'unknown', 'missing', 'unbound'])(
     );
     expect(ui.getByTestId('seller-order-status-x')).toHaveTextContent('orderStatus.invoiceExpired');
     expect(Boolean(ui.queryByTestId('seller-order-check-paid-x'))).toBe(settlement !== 'missing');
-    if (settlement !== 'unpaid') {
+    if (settlement !== 'unpaid' && settlement !== 'unknown') {
       expect(ui.queryByTestId('seller-order-send-invoice-x')).toBeNull();
       return;
     }
@@ -188,6 +191,18 @@ it.each(['unpaid', 'paid', 'unknown', 'missing', 'unbound'])(
       'sellerOrders.sendNewInvoice',
     );
     fireEvent.press(ui.getByTestId('seller-order-send-invoice-x'));
+    if (settlement === 'unknown') {
+      expect(ui.queryByTestId('sheet-open')).toBeNull();
+      expect(Alert.alert).toHaveBeenCalledWith(
+        'sellerOrders.checkWalletFirst',
+        'sellerOrders.unknownInvoiceWarning',
+        expect.any(Array),
+      );
+      const buttons = (Alert.alert as jest.Mock).mock.calls.at(-1)[2];
+      expect(buttons[0]).toMatchObject({ text: 'common.cancel', style: 'cancel' });
+      expect(buttons[0].onPress).toBeUndefined();
+      act(() => buttons[1].onPress());
+    }
     expect(ui.getByTestId('sheet-open')).toBeTruthy();
   },
 );

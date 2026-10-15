@@ -1,7 +1,7 @@
 import * as bolt11 from '../utils/bolt11';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
-import { parseInvoiceSettlement } from './nwcInvoiceSettlement';
+import { needsInvoiceHistoryConfirmation, parseInvoiceSettlement } from './nwcInvoiceSettlement';
 
 const PREIMAGE = 'c'.repeat(64);
 const HASH = bytesToHex(sha256(hexToBytes(PREIMAGE)));
@@ -59,4 +59,19 @@ it('requires history even with settled state when LNbits reuses the creation tim
   expect(
     parseInvoiceSettlement({ ...SETTLED, type: 'incoming', created_at: 100 }, HASH),
   ).toBeNull();
+});
+
+it.each([undefined, 'settled'])('requires history only at expiry for LNbits state %s', (state) => {
+  const now = Date.now();
+  const clock = jest.spyOn(Date, 'now').mockReturnValue(now);
+  const response = { ...SETTLED, state, created_at: 100, expires_at: Math.ceil(now / 1000) + 1 };
+  try {
+    expect(needsInvoiceHistoryConfirmation(response)).toBe(false);
+    expect(parseInvoiceSettlement(response, HASH)?.paid).toBe(true);
+    clock.mockReturnValue(response.expires_at * 1000);
+    expect(needsInvoiceHistoryConfirmation(response)).toBe(true);
+    expect(parseInvoiceSettlement(response, HASH)).toBeNull();
+  } finally {
+    clock.mockRestore();
+  }
 });

@@ -23,6 +23,7 @@ import {
 import type { ParsedOrderEvent } from '../utils/orderEvents';
 import OrderStatusChip from './OrderStatusChip';
 import SellerInvoiceSheet from './SellerInvoiceSheet';
+import { Alert } from './BrandedAlert';
 import { Toast } from './BrandedToast';
 
 interface Props {
@@ -60,6 +61,7 @@ function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.Reac
     thread?.invoice?.at,
   );
   const [sheetVisible, setSheetVisible] = useState(false);
+  const [allowUnknownInvoice, setAllowUnknownInvoice] = useState<string | undefined>();
   const [error, setError] = useState<string | null>(null);
 
   const errorText = useCallback(
@@ -78,14 +80,19 @@ function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.Reac
         if (current.totalSats !== order.amountSats) {
           throw new SellerInvoiceError('amountMismatch', 'Buyer has not approved this total');
         }
-        await invoice.sendInvoice({ walletId, amountSats: current.totalSats, remember });
+        await invoice.sendInvoice({
+          walletId,
+          amountSats: current.totalSats,
+          remember,
+          allowUnknownInvoice,
+        });
         Toast.show({ type: 'success', text1: t('sellerOrders.invoiceSent') });
       } catch (e) {
         setError(errorText(e));
         throw e;
       }
     },
-    [invoice, order.amountSats, quote?.totalSats, quoteCurrent, t, errorText],
+    [invoice, allowUnknownInvoice, order.amountSats, quote?.totalSats, quoteCurrent, t, errorText],
   );
   const onMarkPaid = useCallback(async () => {
     try {
@@ -155,7 +162,11 @@ function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.Reac
     Boolean(record?.confirmedAt) || (thread?.status !== undefined && CONFIRMED.has(thread.status));
   const canReplace =
     status === 'invoiceExpired' &&
-    Boolean(record?.walletId && record.paymentHash && invoice.unpaidInvoice === record.bolt11) &&
+    Boolean(
+      record?.walletId &&
+      record.paymentHash &&
+      (invoice.unpaidInvoice === record.bolt11 || invoice.unknownInvoice === record.bolt11),
+    ) &&
     recordCurrent;
   const canRetry =
     status === 'invoiceSent' &&
@@ -298,7 +309,23 @@ function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.Reac
             style={[styles.primaryButton, invoiceBlocked && styles.buttonDisabled]}
             onPress={() => {
               setError(null);
-              setSheetVisible(true);
+              setAllowUnknownInvoice(undefined);
+              if (canReplace && invoice.unknownInvoice === record?.bolt11) {
+                Alert.alert(
+                  t('sellerOrders.checkWalletFirst'),
+                  t('sellerOrders.unknownInvoiceWarning'),
+                  [
+                    { text: t('common.cancel'), style: 'cancel' },
+                    {
+                      text: t('sellerOrders.sendNewInvoice'),
+                      onPress: () => {
+                        setAllowUnknownInvoice(record.bolt11);
+                        setSheetVisible(true);
+                      },
+                    },
+                  ],
+                );
+              } else setSheetVisible(true);
             }}
             disabled={invoiceBlocked}
             accessibilityRole="button"

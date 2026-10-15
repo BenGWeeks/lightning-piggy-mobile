@@ -3669,6 +3669,8 @@
       "choose": "Wybierz portfel",
       "saveFailed": "Nie udało się zapisać wyboru portfela."
     },
-    "sendNewInvoice": "Wyślij nową fakturę"
+    "sendNewInvoice": "Wyślij nową fakturę",
+    "checkWalletFirst": "Najpierw sprawdź portfel",
+    "unknownInvoiceWarning": "Nie udało się potwierdzić, czy poprzednia faktura została opłacona. Jeśli tak, nie wysyłaj nowej."
   }
 }

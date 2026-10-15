@@ -63,6 +63,8 @@ export interface SendInvoiceInput {
   amountSats: number;
   /** Save `walletId` as the shop's "Receive payments to" wallet. */
   remember: boolean;
+  /** Explicit wallet-check warning consent, bound to the invoice being replaced. */
+  allowUnknownInvoice?: string;
 }
 
 export interface UseSellerInvoice {
@@ -71,6 +73,7 @@ export interface UseSellerInvoice {
   sending: boolean;
   checking: boolean;
   unpaidInvoice: string | null;
+  unknownInvoice: string | null;
   sendInvoice: (input: SendInvoiceInput) => Promise<void>;
   /** Ask the wallet the invoice was made on whether it's paid. */
   checkPaid: () => Promise<boolean | null>;
@@ -102,6 +105,7 @@ export function useSellerInvoice(
   const sendingRef = useRef(false);
   const [checking, setChecking] = useState(false);
   const [unpaidRecord, setUnpaidRecord] = useState<SellerInvoiceRecord | null>(null);
+  const [unknownRecord, setUnknownRecord] = useState<SellerInvoiceRecord | null>(null);
   const identityRef = useRef({ pubkey, buyerPubkey, orderId });
   identityRef.current = { pubkey, buyerPubkey, orderId };
   const lifecycleRef = useRef({ mounted: false, generation: 0 });
@@ -149,7 +153,7 @@ export function useSellerInvoice(
   );
 
   const sendInvoice = useCallback(
-    async ({ walletId, amountSats, remember }: SendInvoiceInput) => {
+    async ({ walletId, amountSats, remember, allowUnknownInvoice }: SendInvoiceInput) => {
       if (!pubkey || !buyerPubkey || !orderId) {
         throw new SellerInvoiceError('notSignedIn', 'Sign in to invoice orders');
       }
@@ -203,7 +207,7 @@ export function useSellerInvoice(
                 );
               if (!previous.walletId || !previous.paymentHash)
                 throw new SellerInvoiceError('invoiceFailed', 'Original invoice wallet is unknown');
-              // A failed/unknown lookup must never authorize a second charge.
+              // Recheck settlement even after the seller acknowledges the unknown-outcome warning.
               const settlement = await lookupInvoice(previous.walletId, previous.paymentHash, {
                 replyTimeoutMs: 5000,
               });
@@ -216,7 +220,10 @@ export function useSellerInvoice(
                   preimage: settlement.preimage,
                 });
               }
-              if (settlement?.paid !== false)
+              if (
+                settlement?.paid !== false &&
+                !(settlement?.paid === null && allowUnknownInvoice === previous.bolt11)
+              )
                 throw new SellerInvoiceError(
                   'invoiceFailed',
                   'Previous invoice is paid or settlement is unknown',
@@ -327,6 +334,7 @@ export function useSellerInvoice(
     if (current.paidAt) return true;
     setChecking(true);
     setUnpaidRecord(null);
+    setUnknownRecord(null);
     try {
       // THE wallet that made the invoice — not whichever wallet is active.
       const result = await lookupInvoice(current.walletId, current.paymentHash, {
@@ -342,6 +350,7 @@ export function useSellerInvoice(
         return true;
       }
       if (result?.paid === false) setUnpaidRecord(current);
+      if (result?.paid === null) setUnknownRecord(current);
       return result?.paid === false ? false : null;
     } finally {
       setChecking(false);
@@ -416,6 +425,10 @@ export function useSellerInvoice(
   return {
     record: currentRecord,
     unpaidInvoice,
+    unknownInvoice:
+      recordState.owner === pubkey && currentRecord === unknownRecord && !currentRecord?.paidAt
+        ? (currentRecord?.bolt11 ?? null)
+        : null,
     sending,
     checking,
     sendInvoice,

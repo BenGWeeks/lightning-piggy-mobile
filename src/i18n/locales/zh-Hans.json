@@ -3615,6 +3615,8 @@
       "choose": "选择钱包",
       "saveFailed": "无法保存所选钱包。"
     },
-    "sendNewInvoice": "发送新发票"
+    "sendNewInvoice": "发送新发票",
+    "checkWalletFirst": "请先检查你的钱包",
+    "unknownInvoiceWarning": "我们无法确认之前的账单是否已支付。如果已支付，请勿发送新账单。"
   }
 }

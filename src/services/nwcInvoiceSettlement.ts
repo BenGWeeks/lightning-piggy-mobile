@@ -2,7 +2,8 @@ import { paymentHashFromBolt11 } from '../utils/bolt11';
 import { matchesPaymentHash } from '../utils/paymentCompletion';
 
 export interface InvoiceSettlement {
-  paid: boolean;
+  /** null explicitly means history could not resolve an ambiguous lookup. */
+  paid: boolean | null;
   invoice?: string;
   preimage?: string;
   /** Wallet settlement timestamp, in Unix seconds. */
@@ -26,10 +27,16 @@ export function needsInvoiceHistoryConfirmation(result: {
   state?: unknown;
   created_at?: unknown;
   settled_at?: unknown;
+  expires_at?: unknown;
 }): boolean {
   return (
-    result.state === undefined ||
-    (result.settled_at !== undefined && result.settled_at === result.created_at)
+    (result.state === undefined ||
+      (result.settled_at !== undefined && result.settled_at === result.created_at)) &&
+    !(
+      typeof result.expires_at === 'number' &&
+      Number.isSafeInteger(result.expires_at) &&
+      Date.now() < result.expires_at * 1000
+    )
   );
 }
 
@@ -66,7 +73,9 @@ function parseSettlement(
   };
   // A preimage, timestamp and even settled state can describe an expired LNbits invoice.
   if (!historyConfirmed && needsInvoiceHistoryConfirmation(result)) return null;
-  const paid = result.state === 'settled' && hasInvoiceSettlementProof(proof, paymentHash);
+  const paid =
+    (result.state === 'settled' || result.state === undefined) &&
+    hasInvoiceSettlementProof(proof, paymentHash);
   // Contradictory settlement claims are unknown, so they cannot authorize
   // replacing the invoice either.
   if (!paid && (result.state === 'settled' || result.settled_at)) return null;
