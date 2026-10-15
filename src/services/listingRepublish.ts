@@ -3,6 +3,7 @@ import { lockRelays } from '../config/testRelayLockdown';
 import { MARKET_RELAYS } from '../utils/marketListingsQuery';
 import { listingDTag, newestListing } from '../utils/listingRelayCoverage';
 import { acquireMarketListingsPool } from './marketListingsPool';
+import { isConnectionFailure } from './nostrDmPublish';
 import { querySyncAbortable } from './relayQuery';
 import { PERF_LOGS_ENABLED } from '../utils/perfLog';
 import { startJsStallProbe } from '../utils/jsStallProbe';
@@ -187,8 +188,7 @@ export async function republishListing(
             .then(() => lease.pool.publish([url], event)[0])
             .then(
               (reason): ListingRepublishResult =>
-                reason === undefined ||
-                /connection (failure|failed|timed out|closed)|timeout/i.test(reason)
+                reason === undefined || isConnectionFailure(reason)
                   ? { url, status: 'noResponse' }
                   : { url, status: 'accepted' },
               (error: unknown): ListingRepublishResult => {

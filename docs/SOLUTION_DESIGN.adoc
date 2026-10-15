@@ -1250,9 +1250,11 @@ lack of response. It never invokes a signer. *Republish all* processes listings
 sequentially with the shared yield scheduler and presents one summary.
 
 When no valid signed copy exists locally or on the queried relays, the row offers
-*Re-sign and publish*. A branded confirmation precedes rebuilding from the stored
-listing draft through `useSellerActions.saveListing`; this path requires one
-signer approval. The bulk action skips missing copies instead of asking to sign.
+*Re-sign and publish*. After a branded confirmation, `useSellerActions.resignListing`
+checks the current revision and re-signs the stored event's kind, content and tags
+directly, without a listing draft round-trip. Newer revisions, deletions and failed
+revision queries prevent signing. This path requires one signer approval. The bulk
+action skips missing copies instead of asking to sign.
 
 
 = Languages (i18n)

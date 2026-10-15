@@ -136,6 +136,23 @@ test('timeouts and abort report no response; no signed copy never publishes', as
     republishListing(me, 'item', { ...snapshot, copies: [] }, controller.signal),
   ).rejects.toThrow('No signed listing copy');
 });
+test.each([
+  ['', 'accepted'],
+  ['accepted: timeout policy allows this listing', 'accepted'],
+  ['accepted: connection closed after receipt', 'accepted'],
+  ['connection failure: relay connection timed out', 'noResponse'],
+  [undefined, 'noResponse'],
+])('classifies resolved publish response %p as %s', async (response, status) => {
+  publish.mockReturnValue([Promise.resolve(response)]);
+  expect(
+    await republishListing(
+      me,
+      'item',
+      { copies: [sign(10)], relays: new Map([['wss://relay', []]]) },
+      signal(),
+    ),
+  ).toEqual([{ url: 'wss://relay', status }]);
+});
 test('lockdown query cannot reach public destinations', async () => {
   (querySyncAbortable as jest.Mock).mockResolvedValue([]);
   const locked = [...TEST_ACCOUNT_PUBKEYS][0];

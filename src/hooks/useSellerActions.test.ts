@@ -469,8 +469,46 @@ it.each(['hidden', 'on-sale'])(
       expect(publishSellerEvent).toHaveBeenCalledWith(signed, ['wss://example.com']);
     });
     expect(mockSign).toHaveBeenCalledTimes(1);
-    expect(fetchLatestRevision).not.toHaveBeenCalled();
+    expect(fetchLatestRevision).toHaveBeenCalledWith({
+      pubkey,
+      kind: 30402,
+      dTag: 'subscription',
+      baseId: stored.id,
+      relays: ['wss://example.com'],
+    });
     expect(stored).toEqual(original);
+  },
+);
+
+it.each(['newer', 'deleted-address', 'deleted-id', 'unreachable'])(
+  'refuses to re-sign a stored listing when the current revision is %s',
+  async (revision) => {
+    const stored = finalizeEvent(
+      { kind: 30402, tags: [['d', 'item']], content: 'Original', created_at: 100 },
+      key,
+    );
+    const fetch = jest.mocked(fetchLatestRevision);
+    if (revision === 'unreachable') fetch.mockRejectedValueOnce(new Error('offline'));
+    else if (revision === 'newer')
+      fetch.mockResolvedValueOnce({
+        event: finalizeEvent({ ...stored, created_at: 200 }, key),
+        deletedAt: -1,
+        deletedIds: [],
+      });
+    else
+      fetch.mockResolvedValueOnce({
+        event: null,
+        deletedAt: revision === 'deleted-address' ? 100 : -1,
+        deletedIds: revision === 'deleted-id' ? [stored.id] : [],
+      });
+    const { result } = renderHook(() => useSellerActions(snapshot));
+    await act(async () => {
+      await expect(result.current.resignListing(stored)).rejects.toThrow(
+        revision === 'unreachable' ? 'offline' : 'A newer revision exists',
+      );
+    });
+    expect(mockSign).not.toHaveBeenCalled();
+    expect(publishSellerEvent).not.toHaveBeenCalled();
   },
 );
 

@@ -126,13 +126,14 @@ export function useListingRepublish(
               .then(() => {
                 if (!abort.signal.aborted) setRevision((v) => v + 1);
               })
-              .catch((error: unknown) =>
+              .catch((error: unknown) => {
+                if (abort.signal.aborted) return;
                 Toast.show({
                   type: 'error',
                   text1: t('market.republish.failed'),
                   text2: String(error),
-                }),
-              )
+                });
+              })
               .finally(() => {
                 running.current = false;
                 setBusy(false);
