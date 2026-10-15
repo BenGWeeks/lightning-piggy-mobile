@@ -1786,3 +1786,19 @@ Conversation order navigation seeds Explore home, the order list and the
 selected detail so Back returns through the list. Tests of View order must
 expect the nested `state.routes` target from `orderNavigationTarget`, including
 the buyer/seller counterparty, rather than a direct `screen` target.
+
+=== Buyer orders show Awaiting invoice after the seller sent a payment request
+
+Check the payment request in the app's encrypted order history and inspect only
+its parsed amount and BOLT11 expiry in development diagnostics. Seller
+`Awaiting payment` records can outlive the invoice: the buyer correctly returns
+to `Awaiting invoice` once its BOLT11 expires. Do not bypass expiry or change the
+device clock to obtain a `Pay now` screenshot. A replacement requires an
+explicit seller action.
+
+There is also a distinct cold-ingest failure: lifecycle admission checks the
+stored placed order before the batch has persisted it. Retry rejected lifecycle
+updates once after persisting the batch, reusing decoded rumors and retaining
+the account, counterparty and order-ID checks. Cover both arrival orders in
+regression tests; a live-ingest test with an already stored order misses this
+failure.

@@ -33,8 +33,14 @@ export function acceptOrderRumor(
       if (isSellerAccountForgotten(owner)) return false;
       const key = deliveryKey(owner, rumor);
       if (pending.has(key)) return false;
-      // Merchant lifecycle updates already passed the placed-order/seller gate.
-      if (order.type !== 'order' && order.type !== 'receipt') {
+      // Merchant updates passed the placed-order/seller gate. Buyer cancellations
+      // share the persisted budget with orders/receipts; knowing an order is
+      // not permission to store unlimited distinct lifecycle events.
+      if (
+        order.type !== 'order' &&
+        order.type !== 'receipt' &&
+        !(order.type === 'status' && order.status === 'cancelled')
+      ) {
         pending.add(key);
         return true;
       }

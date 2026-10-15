@@ -104,6 +104,14 @@ const isPermissionNotGranted = (error: unknown): boolean => {
 export async function ingestInboxWraps<W extends IngestableWrap>(
   params: InboxWrapIngestParams<W>,
 ): Promise<InboxWrapIngestResult> {
+  return ingestInboxWrapsRun(params, true);
+}
+
+async function ingestInboxWrapsRun<W extends IngestableWrap>(
+  params: InboxWrapIngestParams<W>,
+  retryLifecycle: boolean,
+): Promise<InboxWrapIngestResult> {
+  const deferred: { wrap: W; rumor: DecodedRumor }[] = [];
   const { owner, wraps, unwrap, passesFollowGate, skipKey, signal } = params;
   const entries: DmInboxEntry[] = [];
   const admittedOrders: DecodedRumor[] = [];
@@ -213,8 +221,10 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
         if (
           orderRumor &&
           !(await admitOrderLifecycle(owner, partnership.partnerPubkey, partnership.fromMe, rumor))
-        )
+        ) {
+          if (retryLifecycle) deferred.push({ wrap, rumor });
           return null;
+        }
         if (!showInMessages && !orderRumor) {
           if (skipKey) {
             skipSet.add(wrap.id);
@@ -304,13 +314,27 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
     await writeNip17SkipSet(skipKey, skipSet);
   }
 
+  // The first pass persists placed orders before resolving their updates.
+  // Reuse decoded rumors: relay ordering is arbitrary and crypto is expensive.
+  const retried =
+    deferred.length > 0 && !signal?.aborted
+      ? await ingestInboxWrapsRun(
+          {
+            ...params,
+            wraps: deferred.map(({ wrap, rumor }) => ({ ...wrap, decoded: rumor })),
+            unwrap: (wrap) => wrap.decoded,
+          },
+          false,
+        )
+      : undefined;
+
   return {
-    entries: signal?.aborted ? [] : entries,
+    entries: signal?.aborted ? [] : [...entries, ...(retried?.entries ?? [])],
     alreadyKnown: ingestResult.alreadyKnown,
     skipHits,
     misses,
-    stored: ingestResult.ingested,
-    yields: sched.yieldCount,
+    stored: ingestResult.ingested + (retried?.stored ?? 0),
+    yields: sched.yieldCount + (retried?.yields ?? 0),
     permissionDenied,
   };
 }

@@ -77,7 +77,7 @@ it('limits by newest placed orders, including older invoices only for selected o
   ]);
 });
 
-it('keeps incoming seller orders and all lifecycle kinds despite newer update bursts', async () => {
+it('bounds seller lifecycle bursts while retaining each kind and placed orders', async () => {
   insert('incoming', 'purchase', '1', 1, 'buyer', 'seller', false);
   insert('second-incoming', 'second-purchase', '1', 2, 'buyer', 'seller', false);
   insert('invoice', 'purchase', '2', 3, 'buyer', 'seller', true);
@@ -102,7 +102,7 @@ it('keeps incoming seller orders and all lifecycle kinds despite newer update bu
     .prepare('INSERT INTO dm_messages VALUES (?, ?, ?, ?, ?, ?, ?, 16)')
     .run('seller', 'bad-json', 'buyer', 1004, 'buyer', '{broken', 0);
   const rows = await getShopOrderRows('seller');
-  expect(rows).toHaveLength(605);
+  expect(rows).toHaveLength(6);
   expect(rows.map((row) => row.eventId)).toEqual(
     expect.arrayContaining(['incoming', 'second-incoming', 'invoice', 'shipping', 'receipt']),
   );
@@ -151,3 +151,24 @@ it.each(['receipt', 'cancelled'])(
     expect(await hasIncomingOrder('seller', 'buyer', 'different')).toBe(false);
   },
 );
+
+it('retains cancellation even when later status updates arrive', async () => {
+  insert('incoming', 'purchase', '1', 1, 'buyer', 'seller', false);
+  const cancelled = serializeOrder({
+    kind: 16,
+    type: 'status',
+    orderId: 'purchase',
+    message: '',
+    items: [],
+    status: 'cancelled',
+  });
+  mockDb
+    .prepare('INSERT INTO dm_messages VALUES (?, ?, ?, ?, ?, ?, ?, 16)')
+    .run('seller', 'cancelled', 'buyer', 2, 'buyer', cancelled, 0);
+  insert('later-status', 'purchase', '3', 3, 'buyer', 'seller', false);
+  expect((await getShopOrderRows('seller')).map((row) => row.eventId)).toEqual([
+    'later-status',
+    'cancelled',
+    'incoming',
+  ]);
+});

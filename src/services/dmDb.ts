@@ -462,8 +462,9 @@ export const SHOP_ORDER_ROW_LIMIT = 500;
 
 /**
  * Seller history is bounded by the newest incoming placed orders. Retrieve
- * all kind-16/17 lifecycle rows for those buyer/order pairs, so updates and
- * receipts cannot push the original order out of the seller's list/detail.
+ * the latest row per lifecycle type/direction for those buyer/order pairs.
+ * At most twelve rows per order reach the seller screen, even for legacy floods;
+ * updates and receipts cannot push the placed order or invoice out of the list.
  * The caller keeps only orders for the seller's own listings.
  */
 export async function getShopOrderRows(
@@ -480,8 +481,14 @@ export async function getShopOrderRows(
         AND json_extract(${content}, '$.type') = 'order'
       ORDER BY created_at DESC, event_id DESC
       LIMIT ?
-    )
-    SELECT * FROM dm_messages
+    ), ranked AS (
+    SELECT *, ROW_NUMBER() OVER (
+      PARTITION BY conversation, json_extract(${content}, '$.orderId'),
+        json_extract(${content}, '$.type'), from_me,
+        CASE WHEN json_extract(${content}, '$.type') = 'status'
+          AND json_extract(${content}, '$.status') = 'cancelled' THEN 1 ELSE 0 END
+      ORDER BY created_at DESC, event_id DESC
+    ) AS lifecycle_rank FROM dm_messages
       WHERE owner = ? AND wire_kind IN (16, 17)
         AND EXISTS (
           SELECT 1 FROM placed
@@ -490,6 +497,9 @@ export async function getShopOrderRows(
             AND ((from_me = 1 AND sender = owner) OR
                  (from_me = 0 AND sender = placed.conversation))
         )
+        AND json_extract(${content}, '$.type') IN ('order', 'payment', 'status', 'shipping', 'receipt')
+    )
+    SELECT * FROM ranked WHERE lifecycle_rank = 1
       ORDER BY created_at DESC, event_id DESC;`,
     [owner, Math.max(1, Math.min(2000, Math.floor(limit))), owner],
   );

@@ -68,9 +68,12 @@ function update(
     const records = await loadSellerInvoices(pubkey);
     if (isSellerAccountForgotten(pubkey)) return;
     mutate(records);
-    const kept = Object.values(records)
-      .sort((a, b) => b.sentAt - a.sentAt)
-      .slice(0, MAX_RECORDS);
+    const sorted = Object.values(records).sort((a, b) => b.sentAt - a.sentAt);
+    // Wallet bindings and retries must survive until settlement AND confirmation.
+    const active = sorted.filter((r) => r.deliveryPending || !r.paidAt || !r.confirmedAt);
+    if (active.length > MAX_RECORDS) throw new Error('Seller invoice capacity reached');
+    const completed = sorted.filter((r) => !r.deliveryPending && r.paidAt && r.confirmedAt);
+    const kept = [...active, ...completed.slice(0, MAX_RECORDS - active.length)];
     await AsyncStorage.setItem(
       key(pubkey),
       JSON.stringify(

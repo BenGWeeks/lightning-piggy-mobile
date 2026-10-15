@@ -73,3 +73,41 @@ it.each(['read', 'record', 'patch', 'corrupt'])(
     ).toBe(300);
   },
 );
+
+const invoiceRecord = (n: number) => ({
+  buyerPubkey: 'b'.repeat(64),
+  orderId: String(n),
+  walletId: 'wallet',
+  paymentHash: `hash-${n}`,
+  bolt11: 'invoice',
+  amountSats: 10,
+  sentAt: n,
+});
+
+it.each([true, false])(
+  'refuses overflow without deleting pending/unsettled invoices (%s)',
+  async (deliveryPending) => {
+    for (let n = 0; n < 300; n++)
+      await recordSellerInvoice(OWNER, { ...invoiceRecord(n), deliveryPending });
+    const before = await loadSellerInvoices(OWNER);
+    await expect(recordSellerInvoice(OWNER, invoiceRecord(300))).rejects.toThrow('capacity');
+    expect(await loadSellerInvoices(OWNER)).toEqual(before);
+    // Existing invoices remain patchable and replaceable at capacity.
+    await patchSellerInvoice(OWNER, '0', invoiceRecord(0).buyerPubkey, { paidAt: 1000 });
+    await recordSellerInvoice(OWNER, { ...invoiceRecord(1), bolt11: 'replacement' });
+    expect(Object.keys(await loadSellerInvoices(OWNER))).toHaveLength(300);
+  },
+);
+
+it('prunes completed records before older active invoices', async () => {
+  for (let n = 0; n < 300; n++)
+    await recordSellerInvoice(OWNER, {
+      ...invoiceRecord(n),
+      ...(n === 1 ? { paidAt: 100, confirmedAt: 101 } : {}),
+    });
+  await recordSellerInvoice(OWNER, invoiceRecord(300));
+  const records = await loadSellerInvoices(OWNER);
+  expect(Object.keys(records)).toHaveLength(300);
+  expect(records[sellerInvoiceKey(invoiceRecord(0).buyerPubkey, '0')]).toBeDefined();
+  expect(records[sellerInvoiceKey(invoiceRecord(1).buyerPubkey, '1')]).toBeUndefined();
+});

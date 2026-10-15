@@ -143,3 +143,29 @@ it('budgets buyer orders and receipts while merchant lifecycle updates bypass a 
   ).toBe(false);
   expect(JSON.parse((await AsyncStorage.getItem(orderBudgetKey(OWNER)))!).accepted).toHaveLength(5);
 });
+
+it('persists a daily bound for distinct buyer cancellations, including across restarts', async () => {
+  const original = rumor(1);
+  expect(await acceptOrderRumor(OWNER, original, false)).toBe(true);
+  await completeOrderRumors(OWNER, [original]);
+  let allowed = 0;
+  for (let n = 0; n < 10; n++) {
+    const cancellation = {
+      ...rumor(100 + n),
+      tags: [
+        ['type', '3'],
+        ['order', '1'],
+        ['status', 'cancelled'],
+      ],
+    };
+    if (await acceptOrderRumor(OWNER, cancellation, false)) {
+      allowed++;
+      await completeOrderRumors(OWNER, [cancellation]);
+    }
+  }
+  expect(allowed).toBe(4);
+  const budget = JSON.parse((await AsyncStorage.getItem(orderBudgetKey(OWNER)))!);
+  expect(budget.accepted).toHaveLength(5);
+  expect(budget.accepted.every((entry: { stored: boolean }) => entry.stored)).toBe(true);
+  expect(budget.dropped).toBe(6);
+});
