@@ -1,3 +1,5 @@
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   loadSellerInvoices,
@@ -6,6 +8,9 @@ import {
   sellerInvoiceKey,
 } from './sellerInvoiceStore';
 import { resetSellerStore } from './sellerEventStore';
+const PREIMAGE = 'c'.repeat(64);
+const HASH = bytesToHex(sha256(hexToBytes(PREIMAGE)));
+const PROOF = { settledAt: 100, preimage: PREIMAGE };
 const OWNER = 'a'.repeat(64);
 beforeEach(async () => {
   await AsyncStorage.clear();
@@ -17,7 +22,7 @@ it('keeps different buyers invoices isolated even when order IDs are identical',
       buyerPubkey,
       orderId: 'same',
       walletId: buyerPubkey,
-      paymentHash: 'hash',
+      paymentHash: HASH,
       bolt11: 'invoice',
       amountSats: 10,
       sentAt: 100,
@@ -34,7 +39,7 @@ it('ignores legacy records without a buyer binding', async () => {
       same: {
         orderId: 'same',
         walletId: 'old',
-        paymentHash: 'hash',
+        paymentHash: HASH,
         bolt11: 'invoice',
         amountSats: 10,
       },
@@ -50,7 +55,7 @@ it.each(['read', 'record', 'patch', 'corrupt'])(
       buyerPubkey: 'b'.repeat(64),
       orderId: 'old',
       walletId: 'wallet',
-      paymentHash: 'hash',
+      paymentHash: HASH,
       bolt11: 'invoice',
       amountSats: 10,
       sentAt: 100,
@@ -67,7 +72,7 @@ it.each(['read', 'record', 'patch', 'corrupt'])(
           : loadSellerInvoices(OWNER);
     await expect(result).rejects.toThrow();
     expect(await AsyncStorage.getItem(`market-seller-invoices:${OWNER}`)).toBe(before);
-    await patchSellerInvoice(OWNER, 'old', record.buyerPubkey, { paidAt: 300 });
+    await patchSellerInvoice(OWNER, 'old', record.buyerPubkey, { paidAt: 300, ...PROOF });
     expect(
       (await loadSellerInvoices(OWNER))[sellerInvoiceKey(record.buyerPubkey, 'old')].paidAt,
     ).toBe(300);
@@ -78,7 +83,7 @@ const invoiceRecord = (n: number) => ({
   buyerPubkey: 'b'.repeat(64),
   orderId: String(n),
   walletId: 'wallet',
-  paymentHash: `hash-${n}`,
+  paymentHash: HASH,
   bolt11: 'invoice',
   amountSats: 10,
   sentAt: n,
@@ -103,11 +108,35 @@ it('prunes completed records before older active invoices', async () => {
   for (let n = 0; n < 300; n++)
     await recordSellerInvoice(OWNER, {
       ...invoiceRecord(n),
-      ...(n === 1 ? { paidAt: 100, confirmedAt: 101 } : {}),
+      ...(n === 1 ? { paidAt: 100, confirmedAt: 101, ...PROOF } : {}),
     });
   await recordSellerInvoice(OWNER, invoiceRecord(300));
   const records = await loadSellerInvoices(OWNER);
   expect(Object.keys(records)).toHaveLength(300);
   expect(records[sellerInvoiceKey(invoiceRecord(0).buyerPubkey, '0')]).toBeDefined();
   expect(records[sellerInvoiceKey(invoiceRecord(1).buyerPubkey, '1')]).toBeUndefined();
+});
+
+it.each([
+  {},
+  { settledAt: 100 },
+  { preimage: PREIMAGE },
+  { settledAt: 100, preimage: 'd'.repeat(64) },
+  PROOF,
+])('repairs persisted false-paid records and retains verified proof: %j', async (proof) => {
+  const record = { ...invoiceRecord(0), paidAt: 200, confirmedAt: 300, ...proof };
+  const storageKey = `market-seller-invoices:${OWNER}`;
+  await AsyncStorage.setItem(
+    storageKey,
+    JSON.stringify({ [sellerInvoiceKey(record.buyerPubkey, record.orderId)]: record }),
+  );
+  const records = await loadSellerInvoices(OWNER);
+  const repaired = records[sellerInvoiceKey(record.buyerPubkey, record.orderId)];
+  if (proof === PROOF) expect(repaired.paidAt).toBe(200);
+  else {
+    expect(repaired.paidAt).toBeUndefined();
+    expect(repaired.confirmedAt).toBeUndefined();
+  }
+  expect(JSON.parse((await AsyncStorage.getItem(storageKey))!)).toEqual(records);
+  expect(repaired.walletId).toBe(record.walletId);
 });

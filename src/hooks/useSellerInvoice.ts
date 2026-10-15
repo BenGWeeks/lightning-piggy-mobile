@@ -1,3 +1,4 @@
+import { hasInvoiceSettlementProof } from '../services/nwcInvoiceSettlement';
 import { useFocusEffect } from '@react-navigation/native';
 import { AppState } from 'react-native';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -198,8 +199,12 @@ export function useSellerInvoice(
                 replyTimeoutMs: 5000,
               });
               if (!stillCurrent()) throw new SellerInvoiceError('notSignedIn', 'Account changed');
-              if (settlement?.paid) {
-                await patchSellerInvoice(pubkey, orderId, buyerPubkey, { paidAt: Date.now() });
+              if (settlement?.paid && hasInvoiceSettlementProof(settlement, previous.paymentHash)) {
+                await patchSellerInvoice(pubkey, orderId, buyerPubkey, {
+                  paidAt: Date.now(),
+                  settledAt: settlement.settledAt,
+                  preimage: settlement.preimage,
+                });
               }
               if (settlement?.paid !== false)
                 throw new SellerInvoiceError(
@@ -307,9 +312,11 @@ export function useSellerInvoice(
       const result = await lookupInvoice(current.walletId, current.paymentHash, {
         replyTimeoutMs: 5000,
       });
-      if (result?.paid) {
+      if (result?.paid && hasInvoiceSettlementProof(result, current.paymentHash)) {
         await patchSellerInvoice(pubkey, current.orderId, current.buyerPubkey, {
           paidAt: Date.now(),
+          settledAt: result.settledAt,
+          preimage: result.preimage,
         });
         return true;
       }

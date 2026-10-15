@@ -15,6 +15,7 @@
 // real Nostr relays. The mock provider stores a configurable
 // implementation that each test swaps in.
 import {
+  lookupInvoice,
   connect,
   disconnect,
   getBalance,
@@ -33,6 +34,7 @@ jest.mock('light-bolt11-decoder', () => ({
 }));
 
 let mockGetBalanceImpl: () => Promise<{ balance: number }> = async () => ({ balance: 0 });
+const mockRawLookupInvoice = jest.fn();
 const mockGetInfo = jest.fn();
 const mockEnable = jest.fn(async () => undefined);
 // pay_invoice + lookupInvoice are driven per-test for the ambiguous
@@ -58,7 +60,7 @@ jest.mock('@getalby/sdk', () => ({
     close: jest.fn(),
     // `client.connected` is read by ensureConnected(); make it look
     // healthy so the reconnect path isn't triggered mid-test.
-    client: { connected: true, pool: undefined },
+    client: { connected: true, pool: undefined, lookupInvoice: mockRawLookupInvoice },
   })),
 }));
 
@@ -392,3 +394,26 @@ it.each([
 });
 // Expo fetch requires a native module; these SDK tests never use HTTPS verification.
 jest.mock('expo/fetch', () => ({ fetch: jest.fn() }));
+
+describe('raw invoice settlement lookup', () => {
+  it.each(['settled', 'expired', 'pending', 'failed', 'missing', 'mismatch', 'error'])(
+    'checks raw proof rather than the lossy WebLN paid flag: %s',
+    async (state) => {
+      const preimage = 'c'.repeat(64);
+      const response = {
+        payment_hash: state === 'mismatch' ? 'd'.repeat(64) : mockPaymentHash,
+        settled_at: state === 'missing' ? undefined : 100,
+        state,
+        preimage,
+        invoice: 'lnbc1fixture',
+      };
+      if (state === 'error') mockRawLookupInvoice.mockRejectedValueOnce(new Error('NOT_FOUND'));
+      else mockRawLookupInvoice.mockResolvedValueOnce(response);
+      mockLookupInvoiceImpl = async () => ({ paid: true, preimage });
+      const result = await lookupInvoice(WALLET_ID, mockPaymentHash, { replyTimeoutMs: 5000 });
+      expect(mockRawLookupInvoice).toHaveBeenLastCalledWith({ payment_hash: mockPaymentHash });
+      expect(result?.paid === true).toBe(state === 'settled');
+      if (state === 'settled') expect(result).toMatchObject({ settledAt: 100, preimage });
+    },
+  );
+});

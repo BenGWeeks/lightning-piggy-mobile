@@ -1,3 +1,5 @@
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import { AppState, type AppStateStatus } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, renderHook, waitFor } from '@testing-library/react-native';
@@ -38,7 +40,9 @@ jest.mock('../utils/messageContent', () => ({
 const SELLER = 'a'.repeat(64);
 const BUYER = 'b'.repeat(64);
 const BOLT11 = `lnbc42u1${'q'.repeat(80)}`;
-const HASH = 'c'.repeat(64);
+const PREIMAGE = 'c'.repeat(64);
+const HASH = bytesToHex(sha256(hexToBytes(PREIMAGE)));
+const PAID = { paid: true, settledAt: 100, preimage: PREIMAGE };
 const makeInvoiceForWallet = jest.fn();
 
 beforeEach(async () => {
@@ -116,7 +120,7 @@ it('watches the wallet the invoice was made on — not the active one — and ma
     });
   });
   await waitFor(() => expect(result.current.record?.walletId).toBe('shop-wallet'));
-  (lookupInvoice as jest.Mock).mockResolvedValue({ paid: true });
+  (lookupInvoice as jest.Mock).mockResolvedValue(PAID);
   await act(async () => {
     expect(await result.current.checkPaid()).toBe(true);
   });
@@ -152,7 +156,7 @@ it.each(['unpaid', 'paid', 'unknown', 'live'])(
       sentAt: 1,
     });
     (lookupInvoice as jest.Mock).mockResolvedValue(
-      state === 'unknown' ? null : { paid: state === 'paid' },
+      state === 'unknown' ? null : state === 'paid' ? PAID : { paid: false },
     );
     const { result } = renderHook(() => useSellerInvoice(BUYER, 'order-1'));
     await act(async () => {
@@ -441,7 +445,7 @@ it.each(['unpaid', 'paid', 'unknown', 'error'])(
       (lookupInvoice as jest.Mock).mockRejectedValueOnce(new Error('offline'));
     else
       (lookupInvoice as jest.Mock).mockResolvedValue(
-        settlement === 'unknown' ? null : { paid: settlement === 'paid' },
+        settlement === 'unknown' ? null : settlement === 'paid' ? PAID : { paid: false },
       );
     await act(async () => {
       await result.current.checkPaid().catch(() => undefined);
@@ -449,3 +453,33 @@ it.each(['unpaid', 'paid', 'unknown', 'error'])(
     expect(result.current.unpaidInvoice).toBe(settlement === 'unpaid' ? BOLT11 : null);
   },
 );
+
+it.each([
+  { paid: true },
+  { paid: true, preimage: PREIMAGE },
+  { paid: true, settledAt: 100 },
+  { paid: true, settledAt: 100, preimage: 'd'.repeat(64) },
+])('does not persist an unproven automatic paid result: %j', async (response) => {
+  const originalState = AppState.currentState;
+  AppState.currentState = 'active';
+  const listener = jest.spyOn(AppState, 'addEventListener').mockReturnValue({ remove: jest.fn() });
+  await recordSellerInvoice(SELLER, {
+    orderId: 'order-1',
+    buyerPubkey: BUYER,
+    walletId: 'shop-wallet',
+    paymentHash: HASH,
+    bolt11: BOLT11,
+    amountSats: 4200,
+    sentAt: 1,
+  });
+  (lookupInvoice as jest.Mock).mockResolvedValue(response);
+  const { result, unmount } = renderHook(() => useSellerInvoice(BUYER, 'order-1'));
+  await waitFor(() => expect(lookupInvoice).toHaveBeenCalled());
+  await act(async () => {
+    expect(await result.current.checkPaid()).toBe(false);
+  });
+  expect((await loadSellerInvoices(SELLER))[`${BUYER}:order-1`].paidAt).toBeUndefined();
+  unmount();
+  listener.mockRestore();
+  AppState.currentState = originalState;
+});

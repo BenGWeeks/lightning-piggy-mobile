@@ -1,3 +1,4 @@
+import { hasInvoiceSettlementProof } from './nwcInvoiceSettlement';
 import { isSellerAccountForgotten } from './sellerEventStore';
 // Per-account record of the invoices a seller sent for Gamma orders: which
 // wallet made each one (so payment is checked on THAT wallet, not whichever
@@ -19,6 +20,9 @@ export interface SellerInvoiceRecord {
   deliveryPending?: boolean;
   /** When the wallet reported the invoice settled (ms). */
   paidAt?: number;
+  /** Positive wallet proof retained with the local paid marker. */
+  settledAt?: number;
+  preimage?: string;
   /** When the `confirmed` status update went to the buyer (ms). */
   confirmedAt?: number;
 }
@@ -44,18 +48,42 @@ function isRecord(v: unknown): v is SellerInvoiceRecord {
   );
 }
 
-export async function loadSellerInvoices(
-  pubkey: string,
-): Promise<Record<string, SellerInvoiceRecord>> {
+async function readSellerInvoices(pubkey: string): Promise<{
+  records: Record<string, SellerInvoiceRecord>;
+  repaired: boolean;
+}> {
   const raw = await AsyncStorage.getItem(key(pubkey));
   const parsed: unknown = raw ? JSON.parse(raw) : {};
   const out: Record<string, SellerInvoiceRecord> = {};
+  let repaired = false;
   if (parsed && typeof parsed === 'object') {
     for (const value of Object.values(parsed as Record<string, unknown>)) {
-      if (isRecord(value)) out[sellerInvoiceKey(value.buyerPubkey, value.orderId)] = value;
+      if (isRecord(value)) {
+        const record = { ...value };
+        if (record.paidAt && !hasInvoiceSettlementProof(record, record.paymentHash)) {
+          repaired = true;
+          delete record.paidAt;
+          delete record.confirmedAt;
+          delete record.settledAt;
+          delete record.preimage;
+        }
+        out[sellerInvoiceKey(record.buyerPubkey, record.orderId)] = record;
+      }
     }
   }
-  return out;
+  return { records: out, repaired };
+}
+
+/** Repair legacy false-paid records under the same lock as invoice writes. */
+export function loadSellerInvoices(pubkey: string): Promise<Record<string, SellerInvoiceRecord>> {
+  const run = writeChain.then(async () => {
+    const { records, repaired } = await readSellerInvoices(pubkey);
+    if (repaired && !isSellerAccountForgotten(pubkey))
+      await AsyncStorage.setItem(key(pubkey), JSON.stringify(records));
+    return records;
+  });
+  writeChain = run.catch(() => undefined);
+  return run;
 }
 
 /** Serialised read-modify-write so concurrent cards can't clobber each other. */
@@ -65,7 +93,7 @@ function update(
 ): Promise<void> {
   const run = writeChain.then(async () => {
     if (isSellerAccountForgotten(pubkey)) return;
-    const records = await loadSellerInvoices(pubkey);
+    const { records } = await readSellerInvoices(pubkey);
     if (isSellerAccountForgotten(pubkey)) return;
     mutate(records);
     const sorted = Object.values(records).sort((a, b) => b.sentAt - a.sentAt);
@@ -96,7 +124,12 @@ export function patchSellerInvoice(
   pubkey: string,
   orderId: string,
   buyerPubkey: string,
-  patch: Partial<Pick<SellerInvoiceRecord, 'paidAt' | 'confirmedAt' | 'deliveryPending'>>,
+  patch: Partial<
+    Pick<
+      SellerInvoiceRecord,
+      'paidAt' | 'settledAt' | 'preimage' | 'confirmedAt' | 'deliveryPending'
+    >
+  >,
 ): Promise<void> {
   return update(pubkey, (records) => {
     const id = sellerInvoiceKey(buyerPubkey, orderId);
