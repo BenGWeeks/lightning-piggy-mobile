@@ -93,8 +93,8 @@ it('serves repeats from the cache and de-dupes in-flight requests', async () => 
   mockQuery.mockResolvedValue([ev({ id: id('1') })]);
   const first = resolveEmbed(eventRef(id('1')), ['wss://read']);
   const again = resolveEmbed(eventRef(id('1')), ['wss://read']);
-  expect(again).toBe(first);
-  await settle(first);
+  const [a, b] = await settle(Promise.all([first, again]));
+  expect(a).toBe(b);
   expect(peekEmbed(`e:${id('1')}`)?.event?.id).toBe(id('1'));
   await settle(resolveEmbed(eventRef(id('1')), ['wss://read']));
   expect(mockQuery).toHaveBeenCalledTimes(1);
@@ -146,7 +146,7 @@ it('applies the seller deletions to an embedded product', async () => {
   mockQuery.mockResolvedValue([listing]);
   mockRevision.mockResolvedValue(new Map([[listing.id, null]])); // withdrawn
   const r = await settle(resolveEmbed(addrRef(30402, 'mug'), ['wss://read']));
-  expect(mockRevision).toHaveBeenCalledWith([listing], ['wss://read'], 5000);
+  expect(mockRevision).toHaveBeenCalledWith([listing], ['wss://read'], 5000, expect.anything());
   expect(r.product).toBeNull();
 });
 
@@ -160,7 +160,7 @@ it('reconciles twenty products in one batch instead of twenty independent revisi
   );
   expect(mockQuery).toHaveBeenCalledTimes(1);
   expect(mockRevision).toHaveBeenCalledTimes(1);
-  expect(mockRevision).toHaveBeenCalledWith(listings, ['wss://read'], 5000);
+  expect(mockRevision).toHaveBeenCalledWith(listings, ['wss://read'], 5000, expect.anything());
 });
 
 it('prunes idle connections after every hinted batch, including failed queries', async () => {
@@ -205,4 +205,34 @@ it('delivers ordinary embeds while a product query and seller reconciliation are
   await Promise.all([ordinary, product]);
   expect(receiveProduct).toHaveBeenCalledWith({ event: listing, product: null });
   expect(mockPrune).toHaveBeenCalledTimes(1);
+});
+
+it('cancels a queued reader without querying or caching a miss', async () => {
+  const controller = new AbortController();
+  const result = resolveEmbed(eventRef(id('1')), ['wss://read'], controller.signal);
+  controller.abort();
+  await settle(result);
+  expect(mockQuery).not.toHaveBeenCalled();
+  expect(peekEmbed(`e:${id('1')}`)).toBeUndefined();
+});
+
+it('keeps a shared query until its last focused reader leaves, then aborts', async () => {
+  mockQuery.mockImplementation(
+    (_pool, _relays, _filter, { signal }) =>
+      new Promise((resolve) => {
+        signal.addEventListener('abort', () => resolve([]));
+      }),
+  );
+  const a = new AbortController();
+  const b = new AbortController();
+  const first = resolveEmbed(eventRef(id('1')), ['wss://read'], a.signal);
+  const second = resolveEmbed(eventRef(id('1')), ['wss://read'], b.signal);
+  await jest.advanceTimersByTimeAsync(60);
+  const signal = mockQuery.mock.calls[0][3].signal;
+  a.abort();
+  expect(signal.aborted).toBe(false);
+  b.abort();
+  expect(signal.aborted).toBe(true);
+  await settle(Promise.all([first, second]));
+  expect(peekEmbed(`e:${id('1')}`)).toBeUndefined();
 });

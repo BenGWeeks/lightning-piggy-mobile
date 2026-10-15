@@ -800,6 +800,7 @@ const MessageBubble: React.FC<Props> = ({
   // A Market listing shared as `nostr:naddr1…` (#1541) renders as its product card.
   const sharedListing = extractSharedListing(text);
   if (sharedListing) {
+    const parts = sharedListingParts(text);
     return wrapWithReactionRow(
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
         <Pressable
@@ -813,7 +814,7 @@ const MessageBubble: React.FC<Props> = ({
           <Text style={[styles.contactLabel, fromMe && styles.contactLabelMe]}>
             {t('market.share.sharedItem')}
           </Text>
-          {sharedListingParts(text).map((part, index) =>
+          {parts.map((part, index) =>
             typeof part === 'string' ? (
               <LinkifiedText
                 key={index}
@@ -824,7 +825,16 @@ const MessageBubble: React.FC<Props> = ({
                 testIdPrefix={testIdPrefix}
               />
             ) : (
-              <MessageSharedListing key={index} token={part} autoLoadMedia={autoLoadMedia} />
+              <MessageSharedListing
+                key={index}
+                token={part}
+                title={
+                  typeof parts[index - 1] === 'string'
+                    ? (parts[index - 1] as string).split('\n').at(-1)
+                    : undefined
+                }
+                autoLoadMedia={autoLoadMedia}
+              />
             ),
           )}
           {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}

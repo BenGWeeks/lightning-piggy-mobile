@@ -4,6 +4,7 @@ import {
   clearMarketSnapshotMemory,
   getMarketSnapshot,
   loadedMarketSnapshots,
+  readLoadedMarketSnapshots,
   readMarketPreferences,
   writeMarketPreferences,
   wipeMarketAccount,
@@ -346,4 +347,21 @@ it('fails closed for overlapping snapshots with equal timestamps, regardless of 
   await readMarketSnapshot(`tie-new|${seller}|r`);
   await readMarketSnapshot(`tie-old|${seller}|r`);
   expect(loadedMarketSnapshots(['tie-new', 'tie-old']).flatMap((s) => s.products)).toEqual([]);
+});
+
+it('hydrates only the requested account and shares concurrent catalogue disk reads', async () => {
+  const entries = ['catalogue-alice', 'catalogue-bob'].map((account) => ({
+    key: `${account}|scope`,
+    at: Date.now(),
+    result: { products: [{ id: account, sellerName: 'shop' }], incomplete: false },
+  }));
+  jest.mocked(AsyncStorage.getItem).mockResolvedValue(JSON.stringify(entries));
+  const first = readLoadedMarketSnapshots('catalogue-alice');
+  const second = readLoadedMarketSnapshots('catalogue-alice');
+  expect(second).toBe(first);
+  expect((await first).flatMap((snapshot) => snapshot.products).map((p) => p.id)).toEqual([
+    'catalogue-alice',
+  ]);
+  expect(loadedMarketSnapshots(['catalogue-bob'])).toEqual([]);
+  expect(AsyncStorage.getItem).toHaveBeenCalledTimes(1);
 });

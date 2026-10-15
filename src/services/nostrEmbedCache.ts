@@ -58,9 +58,12 @@ interface Pending {
   ref: EmbedRef;
   resolve: (r: EmbedResult) => void;
   promise: Promise<EmbedResult>;
+  consumers: Set<symbol>;
+  controller?: AbortController;
+  batch?: Pending[];
 }
 const queue = new Map<string, Pending>();
-const inFlight = new Map<string, Promise<EmbedResult>>();
+const inFlight = new Map<string, Pending>();
 let timer: ReturnType<typeof setTimeout> | null = null;
 let batchRelays: string[] = [];
 
@@ -92,18 +95,50 @@ export function peekEmbed(key: string): EmbedResult | undefined {
 }
 
 /** Resolve one reference; concurrent callers for the same ref share a fetch. */
-export function resolveEmbed(ref: EmbedRef, readRelays: readonly string[]): Promise<EmbedResult> {
+export function resolveEmbed(
+  ref: EmbedRef,
+  readRelays: readonly string[],
+  signal?: AbortSignal,
+): Promise<EmbedResult> {
+  if (signal?.aborted) return Promise.resolve({ event: null });
   const key = embedKey(ref);
   const cached = peekEmbed(key);
   if (cached) return Promise.resolve(cached);
-  const running = inFlight.get(key) ?? queue.get(key)?.promise;
-  if (running) return running;
-  let resolve!: (r: EmbedResult) => void;
-  const promise = new Promise<EmbedResult>((r) => (resolve = r));
-  queue.set(key, { ref, resolve, promise });
-  if (readRelays.length > 0) batchRelays = [...readRelays];
-  if (!timer) timer = setTimeout(flush, BATCH_MS);
-  return promise;
+  let item = inFlight.get(key) ?? queue.get(key);
+  if (!item) {
+    let resolve!: (r: EmbedResult) => void;
+    const promise = new Promise<EmbedResult>((r) => (resolve = r));
+    item = { ref, resolve, promise, consumers: new Set() };
+    queue.set(key, item);
+    if (readRelays.length > 0) batchRelays = [...readRelays];
+    if (!timer) timer = setTimeout(flush, BATCH_MS);
+  }
+  const pending = item;
+  const consumer = Symbol();
+  pending.consumers.add(consumer);
+  return new Promise((resolve) => {
+    const release = () => {
+      pending.consumers.delete(consumer);
+      signal?.removeEventListener('abort', abort);
+    };
+    const abort = () => {
+      release();
+      resolve({ event: null });
+      if (!pending.consumers.size) {
+        if (queue.get(key) === pending) {
+          queue.delete(key);
+          pending.resolve({ event: null });
+        }
+        if (inFlight.get(key) === pending) inFlight.delete(key);
+        if (pending.batch?.every((entry) => !entry.consumers.size)) pending.controller?.abort();
+      }
+    };
+    signal?.addEventListener('abort', abort, { once: true });
+    void pending.promise.then((result) => {
+      release();
+      resolve(result);
+    });
+  });
 }
 
 function relaysFor(refs: EmbedRef[]): string[] {
@@ -126,9 +161,12 @@ const newer = (a: Event, b: Event | undefined) =>
 async function flush(): Promise<void> {
   timer = null;
   const batch = [...queue.entries()].slice(0, MAX_BATCH);
+  const controller = new AbortController();
   for (const [key, item] of batch) {
+    item.controller = controller;
+    item.batch = batch.map(([, entry]) => entry);
     queue.delete(key);
-    inFlight.set(key, item.promise);
+    inFlight.set(key, item);
   }
   if (queue.size > 0) timer = setTimeout(flush, BATCH_MS);
   const refs = batch.map(([, p]) => p.ref);
@@ -139,8 +177,8 @@ async function flush(): Promise<void> {
   const deliver = (key: string, item: Pending, result: EmbedResult): void => {
     if (delivered.has(key)) return;
     delivered.add(key);
-    remember(key, result);
-    inFlight.delete(key);
+    if (!controller.signal.aborted && item.consumers.size) remember(key, result);
+    if (inFlight.get(key) === item) inFlight.delete(key);
     item.resolve(result);
   };
   const deliverOrdinary = (matches: (ref: EmbedRef) => boolean): void => {
@@ -154,9 +192,10 @@ async function flush(): Promise<void> {
     if (relays.length > 0) {
       trackRelays(relays);
       const query = (filter: Parameters<typeof querySyncAbortable>[2]) =>
-        querySyncAbortable(pool, relays, filter, { maxWait: TIMEOUT_MS }).catch(
-          () => [] as Event[],
-        );
+        querySyncAbortable(pool, relays, filter, {
+          maxWait: TIMEOUT_MS,
+          signal: controller.signal,
+        }).catch(() => [] as Event[]);
       const eventRefs = refs.filter(
         (r): r is Extract<EmbedRef, { type: 'event' }> => r.type === 'event',
       );
@@ -213,7 +252,7 @@ async function flush(): Promise<void> {
     ];
     let products: Awaited<ReturnType<typeof reconcileEmbedProducts>>;
     try {
-      products = await reconcileEmbedProducts(listings, relays, TIMEOUT_MS);
+      products = await reconcileEmbedProducts(listings, relays, TIMEOUT_MS, controller.signal);
     } catch {
       // Keep the previous best-effort fallback on transport failure.
       products = new Map(listings.map((event) => [event.id, parseMarketListing(event)]));

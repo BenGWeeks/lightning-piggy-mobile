@@ -2784,7 +2784,8 @@
       "pickerSubtitle": "Er bekommt ihn als private Nachricht.",
       "sentTo": "An {{name}} gesendet",
       "sendFailed": "Konnte diesen Artikel nicht senden",
-      "sharedItem": "Geteilter Artikel"
+      "sharedItem": "Geteilter Artikel",
+      "marketListing": "Marktplatzangebot"
     },
     "liked": {
       "title": "Gelikte Artikel",

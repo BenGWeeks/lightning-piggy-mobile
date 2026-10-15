@@ -2784,7 +2784,8 @@
       "pickerSubtitle": "Privát üzenetként kapja meg.",
       "sentTo": "Elküldve neki: {{name}}",
       "sendFailed": "Nem sikerült elküldeni ezt a terméket",
-      "sharedItem": "Megosztott termék"
+      "sharedItem": "Megosztott termék",
+      "marketListing": "Piactéri hirdetés"
     },
     "liked": {
       "title": "Kedvelt termékek",
