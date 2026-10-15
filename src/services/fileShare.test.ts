@@ -11,6 +11,10 @@ jest.mock('expo-sharing', () => ({
   isAvailableAsync: jest.fn(async () => true),
   shareAsync: jest.fn(async () => {}),
 }));
+jest.mock('../utils/remoteUrlPolicy', () => ({
+  ...jest.requireActual('../utils/remoteUrlPolicy'),
+  fetchBounded: jest.fn(),
+}));
 const mockRelease = jest.fn();
 jest.mock('./decryptedMediaCache', () => ({
   namedFileExport: jest.fn(
@@ -117,3 +121,36 @@ it.each(['invoice.pdf', 'report.csv', 'budget.xlsx'])(
     );
   },
 );
+
+it('keeps optional HEAD behind a tap and bounds the plain-URL GET using its advertised size', async () => {
+  const { parsePlainFileAttachment } = jest.requireActual('../utils/fileAttachment');
+  const file = parsePlainFileAttachment('https://example.com/invoice.pdf')!;
+  const { fetchBounded } = jest.requireMock('../utils/remoteUrlPolicy');
+  fetchBounded.mockResolvedValueOnce({ headers: { get: () => '42' } });
+  await shareFileAttachment(file, jest.fn(), jest.fn());
+  expect(fetchBounded).toHaveBeenCalledWith(
+    file.url,
+    expect.objectContaining({ method: 'HEAD', maxBytes: 50 * 1024 * 1024 }),
+  );
+  expect(resolveDecryptedMedia).toHaveBeenCalledWith(
+    expect.objectContaining({ size: 42, plainUrl: true, kind: 'file' }),
+  );
+  expect(Sharing.shareAsync).toHaveBeenCalledWith(
+    expect.any(String),
+    expect.objectContaining({ mimeType: 'application/pdf' }),
+  );
+});
+
+it('falls back to the capped GET when the server rejects HEAD', async () => {
+  const { parsePlainFileAttachment } = jest.requireActual('../utils/fileAttachment');
+  const { fetchBounded } = jest.requireMock('../utils/remoteUrlPolicy');
+  fetchBounded.mockRejectedValueOnce(new Error('HEAD unsupported'));
+  await shareFileAttachment(
+    parsePlainFileAttachment('https://example.com/invoice.pdf')!,
+    jest.fn(),
+    jest.fn(),
+  );
+  expect(resolveDecryptedMedia).toHaveBeenCalledWith(
+    expect.objectContaining({ kind: 'file', size: undefined }),
+  );
+});

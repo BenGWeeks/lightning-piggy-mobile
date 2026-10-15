@@ -783,3 +783,66 @@ it('rejects a kind-15 that declares an empty hash, end to end (encode → parse 
     resolveDecryptedMedia(toRef(bytesToHex(sha256(sealed.ciphertext)))),
   ).resolves.toMatch(/\.m4a$/);
 });
+
+it('decrypts and verifies a NIP-17 PDF, failing closed on a changed ciphertext hash', async () => {
+  setDecryptedMediaOwner(A);
+  const sealed = encryptFile(PLAIN);
+  const file = parseFileAttachment(
+    encodeEncryptedFileUrl({
+      url: 'https://example.com/file.bin',
+      mime: 'application/pdf',
+      keyHex: sealed.keyHex,
+      nonceHex: sealed.nonceHex,
+      sha256: sealed.sha256Hex,
+      size: sealed.ciphertext.length,
+      filename: 'invoice.pdf',
+    }),
+  )!;
+  (globalThis.fetch as jest.Mock).mockResolvedValue({
+    ok: true,
+    arrayBuffer: async () => sealed.ciphertext.buffer,
+  });
+  const uri = await resolveDecryptedMedia({ ...file, kind: 'file' });
+  expect(verifiedFileMetadata(uri)?.size).toBe(PLAIN.length);
+  await expect(
+    resolveDecryptedMedia({ ...file, kind: 'file', sha256: '00'.repeat(32) }),
+  ).rejects.toBeInstanceOf(FileVerificationError);
+});
+
+it('allows hashless plain text URLs only with the explicit classifier flag, preserving imeta hash requirements', async () => {
+  setDecryptedMediaOwner(A);
+  const ref: EncryptedMediaRef = {
+    url: 'https://example.com/a.pdf',
+    kind: 'file',
+    encrypted: false,
+  };
+  (globalThis.fetch as jest.Mock).mockResolvedValue({
+    ok: true,
+    arrayBuffer: async () => PLAIN.buffer,
+  });
+  await expect(resolveDecryptedMedia(ref)).rejects.toBeInstanceOf(FileVerificationError);
+  const uri = await resolveDecryptedMedia({ ...ref, plainUrl: true });
+  expect(verifiedFileMetadata(uri)?.size).toBe(PLAIN.length);
+});
+
+it('does not fetch file bubbles from an unfollowed sender before a user tap', () => {
+  const file = parseFileAttachment(
+    encodeEncryptedFileUrl({
+      url: 'https://example.com/file.bin',
+      mime: 'application/pdf',
+      keyHex: '11'.repeat(32),
+      nonceHex: '22'.repeat(12),
+      sha256: '33'.repeat(32),
+    }),
+  )!;
+  render(
+    React.createElement(MessageFileBubble, {
+      id: 'dm-no-fetch',
+      file,
+      fromMe: false,
+      footer: null,
+    }),
+  );
+  expect(globalThis.fetch).not.toHaveBeenCalled();
+  expect(Sharing.shareAsync).not.toHaveBeenCalled();
+});

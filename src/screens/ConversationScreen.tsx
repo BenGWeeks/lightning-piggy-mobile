@@ -315,6 +315,7 @@ const ConversationScreen: React.FC = () => {
     handleSend,
     handleShareLocation,
     handlePickAndSendImage,
+    handlePickAndSendFile,
     handleTakeAndSendPhoto,
     handleShareContactPicked,
     handleSendGif,
@@ -787,6 +788,7 @@ const ConversationScreen: React.FC = () => {
               <AttachPanel
                 onShareLocation={openLocationChooser}
                 onSendImage={handlePickAndSendImage}
+                onSendFile={handlePickAndSendFile}
                 onTakePhoto={handleTakeAndSendPhoto}
                 onSendZap={() => {
                   closeAttachPanel();

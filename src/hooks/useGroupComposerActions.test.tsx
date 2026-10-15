@@ -11,6 +11,8 @@
  *     a successful relay send) does NOT remove the row.
  */
 
+import type { EncryptedUpload } from '../services/imageUploadService';
+import { parseFileAttachment } from '../utils/fileAttachment';
 import { renderHook, act } from '@testing-library/react-native';
 import { useGroupComposerActions } from './useGroupComposerActions';
 import type { GroupSendHooks } from '../contexts/useGroupMessaging';
@@ -21,6 +23,7 @@ import type { GroupSendHooks } from '../contexts/useGroupMessaging';
 // `mock`-prefixed vars (allowed by jest's hoisting heuristic) instead.
 // ---------------------------------------------------------------------------
 
+let mockSendFile: (file: EncryptedUpload, kind: 'file') => Promise<boolean>;
 const mockSendGroupMessage = jest.fn();
 const mockNotifyGroupMessage = jest.fn();
 
@@ -64,9 +67,13 @@ jest.mock('./useComposerActions', () => ({
     strategy: {
       sendText: (text: string) => Promise<boolean>;
       sendMessage?: (text: string) => Promise<boolean>;
+      sendFile: typeof mockSendFile;
     };
     draft: string;
-  }) => ({ handleSend: () => (strategy.sendMessage ?? strategy.sendText)(draft) }),
+  }) => {
+    mockSendFile = strategy.sendFile;
+    return { handleSend: () => (strategy.sendMessage ?? strategy.sendText)(draft) };
+  },
 }));
 
 // ---------------------------------------------------------------------------
@@ -378,3 +385,34 @@ it.each(['reply-a', undefined])(
     expect(onReplySent).toHaveBeenCalledWith(target);
   },
 );
+
+it('retains the encrypted document metadata in NIP-17 group optimistic rows', async () => {
+  mockSendGroupMessage.mockImplementation(async (_input: unknown, hooks?: GroupSendHooks) => {
+    hooks?.onRumorReady?.({ rumorId: 'group-file', kind: 15 });
+    return { success: true };
+  });
+  setup();
+  const file: EncryptedUpload = {
+    url: 'https://example.com/cipher.bin',
+    mime: 'application/pdf',
+    filename: 'invoice.pdf',
+    keyHex: '11'.repeat(32),
+    nonceHex: '22'.repeat(12),
+    sha256Hex: '33'.repeat(32),
+    size: 123,
+  };
+  await act(async () => {
+    await mockSendFile(file, 'file');
+  });
+  const row = mockAppendGroupMessage.mock.calls[0][2];
+  expect(parseFileAttachment(row.text)).toMatchObject({
+    available: true,
+    name: 'invoice.pdf',
+    sha256: file.sha256Hex,
+    size: 123,
+  });
+  expect(mockSendGroupMessage).toHaveBeenCalledWith(
+    expect.objectContaining({ file }),
+    expect.any(Object),
+  );
+});

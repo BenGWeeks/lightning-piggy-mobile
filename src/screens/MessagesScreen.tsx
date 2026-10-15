@@ -631,6 +631,23 @@ const MessagesScreen: React.FC = () => {
       });
   }, [navigation, pubkey, t]);
 
+  const handleSeedDevDmFiles = useCallback(
+    async (protocol: 'nip17' | 'nip04') => {
+      if (!__DEV__ || !pubkey) return;
+      const { seedDevDmFiles } = await import('../utils/devSeedDmFiles');
+      const seeded = await seedDevDmFiles(pubkey);
+      if (seeded)
+        navigation.navigate('Conversation', {
+          pubkey: seeded.pubkey,
+          name: t('messageBubble.devFiles'),
+          picture: null,
+          lightningAddress: null,
+          protocol,
+        });
+    },
+    [navigation, pubkey, t],
+  );
+
   const [preferredProtocol, setPreferredProtocol] = useState<DmProtocol>(DEFAULT_DM_PROTOCOL);
   const handlePickerSelect = useCallback(
     async (friend: PickedFriend) => {
@@ -822,6 +839,19 @@ const MessagesScreen: React.FC = () => {
                 <Text style={styles.filterChipText}>{t('messageBubble.devFiles')}</Text>
               </TouchableOpacity>
             )}
+            {__DEV__ &&
+              (['nip17', 'nip04'] as const).map((protocol) => (
+                <TouchableOpacity
+                  key={protocol}
+                  style={styles.filterChipInteractive}
+                  onPress={() => void handleSeedDevDmFiles(protocol)}
+                  accessibilityLabel={`${t('messageBubble.devFiles')} ${protocol}`}
+                  accessibilityRole="button"
+                  testID={`messages-dev-seed-files-${protocol}`}
+                >
+                  <Text style={styles.filterChipText}>{protocol}</Text>
+                </TouchableOpacity>
+              ))}
             {__DEV__ && (
               // Dev-only fixture launcher for the marketplace order cards. Never
               // present in release builds (see handleSeedDevOrder).

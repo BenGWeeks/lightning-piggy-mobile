@@ -62,6 +62,7 @@ export interface EncryptedMediaRef {
   mime?: string;
   size?: number;
   plaintextSha256?: string;
+  plainUrl?: boolean;
   /** Explicitly unencrypted imeta files are still cached per account. */
   encrypted?: boolean;
   /** Declared NIP-17 ciphertext hash, checked before decryption. */
@@ -232,7 +233,7 @@ export function mediaCacheKey(ref: EncryptedMediaRef): string {
     JSON.stringify([
       ref.url,
       ...(ref.kind === 'file'
-        ? [['safe-file-v2', ref.encrypted, ref.plaintextSha256, ref.size]]
+        ? [['safe-file-v2', ref.encrypted, ref.plaintextSha256, ref.size, ref.plainUrl]]
         : []),
       ref.keyHex ?? '',
       ref.nonceHex ?? '',
@@ -377,7 +378,10 @@ export async function resolveDecryptedMedia(ref: EncryptedMediaRef): Promise<str
     (!Number.isSafeInteger(ref.size) || ref.size <= 0 || ref.size > MEDIA_MAX_BYTES)
   )
     throw new Error('Invalid media size');
-  if (!hasValidDeclaredHash(ref)) throw new Error('Media ciphertext hash mismatch');
+  if (!hasValidDeclaredHash(ref))
+    throw ref.kind === 'file'
+      ? new FileVerificationError()
+      : new Error('Media ciphertext hash mismatch');
   const { owner, epoch } = await requestOwner();
   const ownerDir = ownerDirName(owner);
   await wiping.get(ownerDir);
@@ -449,7 +453,9 @@ async function resolveUncached(
     // A kind-15 that declares its ciphertext hash (`x` tag) must match it —
     // and a declared-but-malformed hash is a mismatch, never "no hash".
     if (ref.sha256 !== undefined && bytesToHex(sha256(cipher)) !== ref.sha256.toLowerCase()) {
-      throw new Error('Media ciphertext hash mismatch');
+      throw ref.kind === 'file'
+        ? new FileVerificationError()
+        : new Error('Media ciphertext hash mismatch');
     }
     let plain: Uint8Array;
     try {
@@ -469,6 +475,7 @@ async function resolveUncached(
     }
     if (
       unencrypted &&
+      (!ref.plainUrl || ref.plaintextSha256 !== undefined) &&
       (!ref.plaintextSha256 || bytesToHex(sha256(plain)) !== ref.plaintextSha256.toLowerCase())
     ) {
       await deleteDecryptedFile(uri);

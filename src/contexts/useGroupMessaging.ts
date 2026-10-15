@@ -144,6 +144,7 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
               nonceHex: input.file.nonceHex,
               sha256Hex: input.file.sha256Hex,
               size: input.file.size,
+              filename: input.file.filename,
             })
           : nostrService.createGroupChatRumor({
               senderPubkey: pubkey,

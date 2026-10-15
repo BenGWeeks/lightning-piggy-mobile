@@ -7,6 +7,7 @@ import { useLocale } from '../contexts/LocaleContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createMessageFileBubbleStyles } from '../styles/MessageFileBubble.styles';
 import type { FileAttachment } from '../utils/fileAttachment';
+import { displayHost } from './TapToLoadMedia';
 import { isSafeFileUrl } from '../utils/fileAttachment';
 
 type FileShareModule = typeof import('../services/fileShare');
@@ -76,6 +77,7 @@ export default React.memo(function MessageFileBubble({
         {header}
         <FileText size={24} color={colors.textSupplementary} />
         <Text style={styles.name}>{file.name || t('messageBubble.file')}</Text>
+        <Text style={styles.caption}>{displayHost(file.url)}</Text>
         <Text style={styles.caption}>{verified?.mime ?? file.mime}</Text>
         {file.typeMismatch && (
           <Text style={styles.caption}>

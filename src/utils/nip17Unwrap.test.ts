@@ -146,11 +146,10 @@ describe('textForRumor (kind-15 → bubble text)', () => {
     expect(out).toContain('m=image%2Fjpeg');
   });
 
-  it('does NOT leak the key for an unrenderable mime kind-15 (keeps bare content)', () => {
+  it('encodes AES-GCM documents into the shared file URL', () => {
     const out = textForRumor(fileRumor('application/pdf', 'aes-gcm'));
-    expect(out).toBe('https://blossom.example/abc.bin');
-    expect(out).not.toContain('lpe=1');
-    expect(out).not.toContain('a'.repeat(64)); // the decryption key
+    expect(out).toContain('#lpe=1');
+    expect(out).toContain('m=application%2Fpdf');
   });
 
   it('does NOT leak the key for a non-aes-gcm audio kind-15', () => {

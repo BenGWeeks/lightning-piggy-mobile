@@ -1,4 +1,8 @@
-import { parseFileAttachment, type FileAttachment } from './fileAttachment';
+import {
+  parseFileAttachment,
+  parsePlainFileAttachment,
+  type FileAttachment,
+} from './fileAttachment';
 import { checkRemoteUrl } from './remoteUrlPolicy';
 import { decode as bolt11Decode } from 'light-bolt11-decoder';
 import { decodeProfileReference } from '../services/nostrService';
@@ -183,7 +187,9 @@ export function parseVoiceNote(text: string): ParsedVoiceNote | null {
  */
 export function deriveGroupWireKind(text: string): 14 | 15 {
   const isEncryptedFile =
-    parseVoiceNote(text)?.encrypted === true || parseImageMessage(text)?.encrypted === true;
+    parseVoiceNote(text)?.encrypted === true ||
+    parseImageMessage(text)?.encrypted === true ||
+    parseFileAttachment(text)?.encrypted === true;
   return isEncryptedFile ? 15 : 14;
 }
 
@@ -457,6 +463,11 @@ export function classifyMessageContent(text: string): BubbleContent {
 
 /** Files are wire-kind bound and must precede caption/filename URL detection. */
 export function classifyStoredMessage(text: string, wireKind?: number): BubbleContent {
-  const file = wireKind === 15 ? parseFileAttachment(text) : null;
+  const file =
+    wireKind === 15
+      ? parseFileAttachment(text)
+      : wireKind === 4 || wireKind === 14 || wireKind === undefined
+        ? parsePlainFileAttachment(text)
+        : null;
   return file ? { kind: 'file', file } : classifyMessageContent(text);
 }

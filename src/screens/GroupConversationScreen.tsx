@@ -264,6 +264,7 @@ const GroupConversationScreen: React.FC = () => {
     sendText,
     handleSend,
     handlePickAndSendImage,
+    handlePickAndSendFile,
     handleTakeAndSendPhoto,
     handleShareLocation,
     handleSendGif,
@@ -744,6 +745,7 @@ const GroupConversationScreen: React.FC = () => {
               <AttachPanel
                 onShareLocation={liveLoc.openLocation}
                 onSendImage={handlePickAndSendImage}
+                onSendFile={handlePickAndSendFile}
                 onTakePhoto={handleTakeAndSendPhoto}
                 onSendGif={isGifConfigured() ? () => setGifPickerOpen(true) : undefined}
                 // Zap renders but stays disabled — there's no single recipient
