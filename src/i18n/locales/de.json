@@ -1319,7 +1319,10 @@
     "fileTypeMismatch": "Dateiname passt nicht zum angegebenen Typ: {{type}}",
     "blockedLink": "Blockierter Link",
     "invalidUpload": "Der Speicherserver hat eine ungültige Medien-URL zurückgegeben. Bitte versuche einen anderen Server.",
-    "uploadFailedAllServers": "Hochladen auf einen Speicherserver ist fehlgeschlagen. Prüfe deine Verbindung und versuche es erneut oder füge in den Einstellungen einen weiteren Speicherserver hinzu."
+    "uploadFailedAllServers": "Hochladen auf einen Speicherserver ist fehlgeschlagen. Prüfe deine Verbindung und versuche es erneut oder füge in den Einstellungen einen weiteren Speicherserver hinzu.",
+    "fileLabelText": "Text",
+    "fileLabelAudio": "Audio",
+    "fileLabelVideo": "Video"
   },
   "messageBubbleFooter": {
     "edited": "Bearbeitet",

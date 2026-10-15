@@ -129,8 +129,36 @@ export async function deleteDecryptedFile(uri: string): Promise<void> {
   retainedFiles.delete(uri);
   verifiedFiles.delete(uri);
   for (const [key, value] of memory) if (value === uri) memory.delete(key);
+  await deleteAsync(`${uri}.preview-480.png`, { idempotent: true });
   await deleteAsync(`${uri}.share/`, { idempotent: true });
   await deleteAsync(uri, { idempotent: true });
+}
+
+/** Derived previews join the account's publish barrier so logout cannot leave plaintext behind. */
+export async function publishDecryptedPreview(
+  uri: string,
+  render: () => Promise<string | null>,
+): Promise<string | null> {
+  const { owner, epoch } = await requestOwner();
+  const dir = ownerDirUri(owner);
+  if (!dir || !uri.startsWith(dir)) throw new DecryptedMediaCancelledError();
+  const ownerDir = ownerDirName(owner);
+  const gen = generationOf(ownerDir);
+  const release = retainDecryptedFile(uri);
+  try {
+    let result: string | null = null;
+    await trackPublish(
+      ownerDir,
+      (async () => {
+        result = await render();
+      })(),
+    );
+    if (epoch !== sessionEpoch || generationOf(ownerDir) !== gen)
+      throw new DecryptedMediaCancelledError();
+    return result;
+  } finally {
+    release();
+  }
 }
 
 /** Named exports share the source lease, account directory, and wipe generation. */
@@ -160,7 +188,10 @@ export async function namedFileExport(uri: string, name: string): Promise<string
 async function evictDiskFiles(dir: string): Promise<void> {
   const names = (await readDirectoryAsync(dir)).filter(
     (name) =>
-      name.startsWith('file-') && !name.endsWith('.share') && !retainedFiles.has(`${dir}${name}`),
+      name.startsWith('file-') &&
+      !name.endsWith('.share') &&
+      !name.includes('.preview-') &&
+      !retainedFiles.has(`${dir}${name}`),
   );
   const entries = await Promise.all(
     names.map(async (name) => ({

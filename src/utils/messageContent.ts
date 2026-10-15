@@ -194,6 +194,7 @@ export function deriveGroupWireKind(text: string): 14 | 15 {
 }
 
 export interface ParsedImageMessage {
+  dim?: string;
   /** Fetch URL with the fragment stripped. */
   url: string;
   mime: string;
@@ -250,6 +251,7 @@ export function parseImageMessage(text: string): ParsedImageMessage | null {
             nonceHex,
             marmot,
             ...(blocked ? { blocked } : {}),
+            dim: params.get('dim') ?? undefined,
             size,
           }
         );
@@ -268,6 +270,7 @@ export function parseImageMessage(text: string): ParsedImageMessage | null {
         keyHex,
         nonceHex,
         ...(blocked ? { blocked } : {}),
+        dim: params.get('dim') ?? undefined,
         size,
         ...(params.has('x') ? { sha256: params.get('x')! } : {}),
       };

@@ -337,6 +337,7 @@ export function participantsFromRumor(rumor: DecodedRumor): Set<string> {
  * it, `mime` is the original (decrypted) content type.
  */
 export interface ConversationFileMeta {
+  dim?: string;
   url: string;
   mime: string;
   algorithm: string;
@@ -368,6 +369,12 @@ export function fileMetaFromRumor(rumor: DecodedRumor): ConversationFileMeta | u
   return {
     url,
     filename: tag('filename')?.slice(0, 255),
+    dim:
+      tag('dim') ??
+      rumor.tags
+        .find((t) => t[0] === 'imeta')
+        ?.find((v) => v.startsWith('dim '))
+        ?.slice(4),
     mime: tag('file-type') ?? 'application/octet-stream',
     algorithm: tag('encryption-algorithm') ?? 'aes-gcm',
     keyHex,

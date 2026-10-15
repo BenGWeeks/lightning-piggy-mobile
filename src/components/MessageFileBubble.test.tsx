@@ -1,11 +1,13 @@
 import React from 'react';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import MessageFileBubble from './MessageFileBubble';
+import { usePdfPreview } from '../hooks/usePdfPreview';
 import { Alert } from './BrandedAlert';
 import { shareFileAttachment } from '../services/fileShare';
 import { FileVerificationError } from '../services/fileDownload';
 import { parseFileAttachment } from '../utils/fileAttachment';
 
+jest.mock('../hooks/usePdfPreview', () => ({ usePdfPreview: jest.fn(() => null) }));
 jest.mock('../contexts/ThemeContext', () => ({
   useThemeColors: () => jest.requireActual('../styles/palettes').lightPalette,
 }));
@@ -57,7 +59,7 @@ it('shows type mismatch and replaces declared MIME with the verified type', asyn
   const ui = bubble(file('invoice.exe'));
   expect(ui.getByText('messageBubble.fileTypeMismatch')).toBeTruthy();
   fireEvent.press(ui.getByTestId('chat-file-share-file'));
-  await waitFor(() => expect(ui.getByText('application/octet-stream')).toBeTruthy());
+  await waitFor(() => expect(ui.getByText('EXE · messageBubble.fileBytes')).toBeTruthy());
   expect(ui.queryByText('application/pdf')).toBeNull();
 });
 
@@ -75,4 +77,23 @@ it('explains unavailable hashless files and offers no share action', () => {
   expect(ui.getByText('messageBubble.fileUnavailable')).toBeTruthy();
   expect(ui.queryByTestId('chat-file-share-file')).toBeNull();
   expect(shareFileAttachment).not.toHaveBeenCalled();
+});
+
+it('requires stranger consent but auto-loads a trusted PDF', () => {
+  const attachment = file();
+  const ui = bubble(attachment);
+  expect(usePdfPreview).toHaveBeenLastCalledWith(attachment, false);
+  fireEvent.press(ui.getByTestId('chat-file-load-file'));
+  expect(usePdfPreview).toHaveBeenLastCalledWith(attachment, true);
+  ui.unmount();
+  const trusted = render(
+    <MessageFileBubble id="trusted" file={attachment} fromMe={false} autoLoad footer={null} />,
+  );
+  expect(usePdfPreview).toHaveBeenLastCalledWith(attachment, true);
+  expect(trusted.queryByTestId('chat-file-load-trusted')).toBeNull();
+});
+it('never previews a dangerous file even from a trusted sender', () => {
+  const attachment = file('invoice.pdf.exe');
+  render(<MessageFileBubble id="danger" file={attachment} fromMe autoLoad footer={null} />);
+  expect(usePdfPreview).toHaveBeenLastCalledWith(attachment, false);
 });

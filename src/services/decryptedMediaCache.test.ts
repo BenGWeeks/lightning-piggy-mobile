@@ -15,6 +15,7 @@ import { encodeEncryptedFileUrl } from '../utils/encryptedFileUrl';
 import { parseVoiceNote } from '../utils/messageContent';
 import {
   namedFileExport,
+  publishDecryptedPreview,
   deleteDecryptedFile,
   retainDecryptedFile,
   FILE_SHARE_RETENTION_MS,
@@ -845,4 +846,37 @@ it('does not fetch file bubbles from an unfollowed sender before a user tap', ()
   );
   expect(globalThis.fetch).not.toHaveBeenCalled();
   expect(Sharing.shareAsync).not.toHaveBeenCalled();
+});
+
+it('waits for native preview publication before wiping the account, then rejects its stale URI', async () => {
+  setDecryptedMediaOwner(A);
+  const uri = `file:///cache/decrypted/${ownerDirName(A)}/file-preview.bin`;
+  mockFiles.set(uri, 'YQ==');
+  let finish!: () => void;
+  const rendering = publishDecryptedPreview(uri, async () => {
+    await new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    mockFiles.set(`${uri}.preview-480.png`, 'YQ==');
+    return `${uri}.preview-480.png`;
+  });
+  const rejected = expect(rendering).rejects.toThrow(DecryptedMediaCancelledError);
+  await Promise.resolve();
+  let wiped = false;
+  const wipe = wipeDecryptedMediaForOwner(A).then(() => {
+    wiped = true;
+  });
+  await Promise.resolve();
+  expect(wiped).toBe(false);
+  finish();
+  await rejected;
+  await wipe;
+  expect(filesUnder(A)).toEqual([]);
+});
+it('removes the derived preview when a decrypted file expires', async () => {
+  const uri = 'file:///cache/decrypted/account/file-pdf.bin';
+  mockFiles.set(uri, 'YQ==');
+  mockFiles.set(`${uri}.preview-480.png`, 'YQ==');
+  await deleteDecryptedFile(uri);
+  expect(mockFiles.has(`${uri}.preview-480.png`)).toBe(false);
 });

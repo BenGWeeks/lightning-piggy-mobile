@@ -1319,7 +1319,10 @@
     "fileTypeMismatch": "Nazwa pliku nie odpowiada zadeklarowanemu typowi: {{type}}",
     "blockedLink": "Zablokowany link",
     "invalidUpload": "Serwer przechowywania zwrócił nieprawidłowy adres URL multimediów. Spróbuj innego serwera.",
-    "uploadFailedAllServers": "Nie udało się przesłać na żaden serwer przechowywania. Sprawdź połączenie i spróbuj ponownie albo dodaj inny serwer przechowywania w Ustawieniach."
+    "uploadFailedAllServers": "Nie udało się przesłać na żaden serwer przechowywania. Sprawdź połączenie i spróbuj ponownie albo dodaj inny serwer przechowywania w Ustawieniach.",
+    "fileLabelText": "Tekst",
+    "fileLabelAudio": "Audio",
+    "fileLabelVideo": "Wideo"
   },
   "messageBubbleFooter": {
     "edited": "Edytowano",

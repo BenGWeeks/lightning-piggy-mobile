@@ -21,6 +21,7 @@ export function encodeEncryptedFileUrl(input: {
   nonceHex: string;
   algorithm?: string;
   filename?: string;
+  dim?: string;
   size?: number;
   sha256?: string;
 }): string {
@@ -36,8 +37,9 @@ export function encodeEncryptedFileUrl(input: {
   // `!== undefined`, not truthiness: a kind-15 with an empty `x` tag has
   // *declared* a (bad) hash. Dropping it here would turn it into "no hash"
   // and skip the cache's ciphertext check (#1500 M9).
+  const dimensions = input.dim ? `&dim=${encodeURIComponent(input.dim)}` : '';
   const hash = input.sha256 !== undefined ? `&x=${encodeURIComponent(input.sha256)}` : '';
-  return `${base}#${frag}${hash}${input.filename ? `&f=${encodeURIComponent(input.filename)}` : ''}`;
+  return `${base}#${frag}${hash}${dimensions}${input.filename ? `&f=${encodeURIComponent(input.filename)}` : ''}`;
 }
 
 // --- Marmot encrypted media (MIP-04 `encrypted-media-v1` / `-v2`) ---

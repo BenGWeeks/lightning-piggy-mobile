@@ -1,5 +1,6 @@
 import { StyleSheet } from 'react-native';
 import type { Palette } from './palettes';
+import { ATTACHMENT_WIDTH } from './attachmentGeometry';
 
 // Presentation for MessageBubble + its ImageBubble sub-component. Extracted
 // from the component (#703 size cap) — pure data, no state closure.
@@ -470,8 +471,8 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       backgroundColor: colors.surface,
     },
     imageBubbleImage: {
-      width: 240,
-      height: 240,
+      width: ATTACHMENT_WIDTH,
+      aspectRatio: 1,
       backgroundColor: colors.background,
     },
     imageBubbleTime: {
