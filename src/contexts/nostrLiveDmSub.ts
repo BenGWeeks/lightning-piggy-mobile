@@ -1,5 +1,7 @@
 import { gateLiveDm, startFollowGateFallback } from './liveDmFollowGateDecision';
 import { loadKind4ReplayCursor } from './kind4RetryStore';
+import { getAppFormatLocale } from '../utils/appFormatLocale';
+import { dmRowPreview } from '../utils/dmRowPreview';
 import { dmThreadId, protocolForWireKind } from '../utils/dmProtocol';
 import React from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -522,7 +524,8 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       if (cancelled || !isCurrentOwner() || viewerPubkey !== pubkey || activeSigner !== signerType)
         return;
 
-      queueInboxEntry(k4InboxEntry);
+      const preview = dmRowPreview(plaintext, 4, getAppFormatLocale());
+      queueInboxEntry({ ...k4InboxEntry, text: preview });
       notifyDmMessage(partnerPubkey);
       // OS notification (#279) — only genuinely-fresh inbound (the
       // historical backlog the relay replays on open has old timestamps
@@ -534,7 +537,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
           kind: 'dm',
           threadId: dmThreadId(partnerPubkey, protocolForWireKind(ev.kind)),
           title: 'New message',
-          body: plaintext,
+          body: preview,
           data: {
             conversationPubkey: partnerPubkey,
             messageId: ev.id,
