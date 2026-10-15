@@ -24,7 +24,7 @@ import { useCoalescedMap } from '../utils/useCoalescedMap';
 import { useFocusEffect } from '@react-navigation/native';
 import type { LiveUserLocation } from './useLiveUserLocation';
 
-export const NEAREST_FALLBACK_COUNT = 10;
+export const CACHE_BACKFILL_TARGET = 10;
 
 /** Owns Explore's coalesced relay data and disk hydration. */
 export function useExploreRelayContent(
@@ -244,8 +244,8 @@ export function useExploreRelayContent(
       // DM inbox precedent.
       let cancelled = false;
       setCacheCompletion(null);
-      // Caches sit at precision 5 (~5 km) — geocaching is inherently
-      // hyper-local. Events broaden to precision 3 (~150 km) so a rural
+      // Caches start at precision 5 and widen to 3 when sparse.
+      // Events use precision 3 (~150 km) so a rural
       // user catches the nearest city's Bitcoin meetup; most NIP-52
       // publishers emit g tags at every precision 3..9.
       //
@@ -283,8 +283,9 @@ export function useExploreRelayContent(
         const startedAt = performance.now();
         let completed = false;
         let close: (() => void) | undefined;
+        const prefixes = geohashNeighbours(encodeGeohash(posLat, posLon, precision));
         close = subscribeNearbyCaches(
-          geohashNeighbours(encodeGeohash(posLat, posLon, precision)),
+          prefixes,
           (c) => {
             if (cancelled || (precision < 5 && (completed || searchDone))) return;
             if (isHiddenInProd(c.hiderPubkey)) return;
@@ -315,24 +316,18 @@ export function useExploreRelayContent(
               const previous = known.get(coord);
               if (!previous || previous.createdAt < cache.createdAt) known.set(coord, cache);
             }
-            let nearbyCount = 0;
-            for (const cache of known.values()) {
-              if (isHiddenInProd(cache.hiderPubkey)) continue;
-              const center = cache.geohash ? decodeGeohash(cache.geohash) : null;
-              const distance = center
-                ? haversineMetres(
-                    { lat: posLat, lon: posLon },
-                    { lat: center.lat, lon: center.lng },
-                  )
-                : Number.POSITIVE_INFINITY;
-              // Only in-radius caches stop widening. Keep distant candidates
-              // in the Map for the fallback rail if no nearby caches are found.
-              if (maxDistanceMetres === null || distance <= maxDistanceMetres) nearbyCount++;
-            }
+            // Only candidates in the searched cells stop widening: cached or
+            // by-author listings on another continent must not hide closer ones.
+            const candidateCount = [...known.values()].filter(
+              (cache) =>
+                !isHiddenInProd(cache.hiderPubkey) &&
+                cache.geohash &&
+                prefixes.some((prefix) => cache.geohash!.startsWith(prefix)),
+            ).length;
             console.log(
-              `[PerfBlock] Explore cache search: precision=${precision} nearby=${nearbyCount} elapsed=${Math.round(performance.now() - startedAt)}ms`,
+              `[PerfBlock] Explore cache search: precision=${precision} candidates=${candidateCount} elapsed=${Math.round(performance.now() - startedAt)}ms`,
             );
-            if (nearbyCount < NEAREST_FALLBACK_COUNT && precision > 3) query(precision - 1);
+            if (candidateCount < CACHE_BACKFILL_TARGET && precision > 3) query(precision - 1);
             else finish();
           },
         );
@@ -376,7 +371,6 @@ export function useExploreRelayContent(
       posBucketKey,
       refreshKey,
       signedInPubkey,
-      maxDistanceMetres,
       flushPendingCaches,
       flushPendingEvents,
       enqueueCache,
@@ -386,12 +380,12 @@ export function useExploreRelayContent(
     ]),
   );
 
-  const { sortedCaches, cacheRailIsNearestFallback } = useMemo(() => {
+  const sortedCaches = useMemo(() => {
     const lowerPubkey = signedInPubkey?.toLowerCase() ?? null;
     const haveFix = typeof posLat === 'number' && typeof posLon === 'number';
-    // Re-apply the prod test-account filter at render — cold-start caches
-    // hydrated from AsyncStorage bypass the ingestion callback.
-    let items = [...caches.values()]
+    // With a fix, every known cache competes on distance, including own caches.
+    // Keep the existing radius/own-first behaviour only when location is absent.
+    const items = [...caches.values()]
       .filter((cache) => !isHiddenInProd(cache.hiderPubkey))
       .map((cache) => {
         const center = cache.geohash ? decodeGeohash(cache.geohash) : null;
@@ -401,57 +395,21 @@ export function useExploreRelayContent(
             : Number.POSITIVE_INFINITY;
         const isOwn = lowerPubkey !== null && cache.hiderPubkey.toLowerCase() === lowerPubkey;
         return { cache, distance, isOwn };
-      });
-    // Trace own-listing trajectory so a missing-own-cache regression
-    // can be diagnosed from logcat alone (#73 follow-up).
-    const ownItems = items.filter((c) => c.isOwn);
-    if (ownItems.length > 0) {
-      console.log(
-        `[PerfBlock] sortedCaches own=${ownItems.length} maxDistance=${maxDistanceMetres ?? 'null'}m posSet=${haveFix} ` +
-          ownItems
-            .map(
-              (c) =>
-                `${c.cache.name ?? c.cache.d}@gh=${c.cache.geohash ?? 'null'} dist=${Number.isFinite(c.distance) ? Math.round(c.distance) + 'm' : 'inf'}`,
-            )
-            .join(' | '),
+      })
+      .filter(
+        (item) => haveFix || maxDistanceMetres === null || item.distance <= maxDistanceMetres,
       );
-    } else if (caches.size > 0 && signedInPubkey) {
-      console.log(
-        `[PerfBlock] sortedCaches own=0 (caches.size=${caches.size}, signedInPubkey=${signedInPubkey.slice(0, 8)}…) — by-author merge may not have landed yet`,
-      );
-    }
-    const nearby =
-      maxDistanceMetres === null ? items : items.filter((c) => c.distance <= maxDistanceMetres);
-    const cacheRailIsNearestFallback =
-      haveFix && nearby.length === 0 && items.some((c) => !c.isOwn && Number.isFinite(c.distance));
-    if (cacheRailIsNearestFallback) {
-      return {
-        sortedCaches: items
-          .filter((c) => !c.isOwn && Number.isFinite(c.distance))
-          .sort((a, b) => a.distance - b.distance)
-          .slice(0, NEAREST_FALLBACK_COUNT),
-        cacheRailIsNearestFallback,
-      };
-    }
-    items = nearby;
-    // Own listings still sort to the front WITHIN the radius — the user
-    // wants their own work visible first when it's nearby, but a cache
-    // they hid 100 km away shouldn't crowd the "nearby" rail.
     items.sort((a, b) => {
-      if (a.isOwn !== b.isOwn) return a.isOwn ? -1 : 1;
+      if (!haveFix && a.isOwn !== b.isOwn) return a.isOwn ? -1 : 1;
       return a.distance - b.distance;
     });
-    // Cap at 50 — the hub rail is a horizontal-scroll teaser and 50 is
-    // enough for any practical density without making the rail
-    // disproportionately heavy. The "See all → Geo-caches" page
-    // (HuntScreen) has no cap for the full list.
-    return { sortedCaches: items.slice(0, 50), cacheRailIsNearestFallback };
+    // The horizontal teaser retains its existing cap; See all opens the full list.
+    return items.slice(0, 50);
   }, [caches, posLat, posLon, maxDistanceMetres, signedInPubkey]);
 
   return {
     caches,
     sortedCaches,
-    cacheRailIsNearestFallback,
     events,
     cachesArr,
     cacheRailState: deriveGeocacheRailState(sortedCaches.length, pos !== null, cacheCompletion),

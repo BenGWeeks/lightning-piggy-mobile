@@ -68,7 +68,7 @@ beforeEach(() => {
 });
 afterEach(() => jest.useRealTimers());
 
-it('derives loading → empty from query completion', async () => {
+it('shows empty only after every widening stage finds nothing', async () => {
   const { result } = renderHook(() => useExploreRelayContent(pos, 0));
   await act(async () => {});
   expect(result.current.cacheRailState).toBe('loading');
@@ -143,29 +143,27 @@ it('keeps visible disk content ready even if every relay fails', async () => {
   expect(result.current.cacheRailState).toBe('ready');
 });
 
-it('returns the ten closest when the radius excludes all, excluding distant own caches', async () => {
+it('always sorts by distance ignoring radius, includes own caches, and caps at fifty', async () => {
   mockPubkey = 'mine';
-  mockSeed = Array.from({ length: 15 }, (_, i) => ({
+  mockSeed = Array.from({ length: 55 }, (_, i) => ({
     ...cache,
     coord: `cache-${i}`,
-    geohash: encodeGeohash(53 + i * 0.1, -0.1, 9),
-  }));
+    geohash: encodeGeohash(53 + i * 0.01, -0.1, 9),
+  })).reverse();
   mockSeed.push({ ...cache, coord: 'own', hiderPubkey: 'mine', geohash: 'u4pru' });
-  const { result } = renderHook(() => useExploreRelayContent(pos, 0, 1000));
-  await act(async () => {});
-  expect(result.current.cacheRailIsNearestFallback).toBe(true);
-  expect(result.current.sortedCaches.map((c) => c.cache.coord)).toEqual(
-    Array.from({ length: 10 }, (_, i) => `cache-${i}`),
+  const { result, rerender } = renderHook(
+    ({ radius }: { radius: number }) => useExploreRelayContent(pos, 0, radius),
+    {
+      initialProps: { radius: 1000 },
+    },
   );
-  expect(result.current.cacheRailState).toBe('ready');
-  act(() => callbacks().complete({ allRelaysFailed: false }));
-  expect(mockSubscribeCaches).toHaveBeenCalledTimes(2);
-  act(() => {
-    callbacks(1).complete({ allRelaysFailed: false });
-    callbacks(2).complete({ allRelaysFailed: false });
-  });
-  expect(result.current.cacheRailIsNearestFallback).toBe(true);
-  expect(result.current.sortedCaches).toHaveLength(10);
+  await act(async () => {});
+  const expected = Array.from({ length: 50 }, (_, i) => `cache-${i}`);
+  expect(result.current.sortedCaches.map((c) => c.cache.coord)).toEqual(expected);
+  expect(result.current.sortedCaches.every((c) => Number.isFinite(c.distance))).toBe(true);
+  rerender({ radius: 1_000_000 });
+  expect(result.current.sortedCaches.map((c) => c.cache.coord)).toEqual(expected);
+  expect(mockSubscribeCaches).toHaveBeenCalledTimes(1);
 });
 
 it('widens only under ten known caches, stops at precision 3, and stays loading until done', async () => {
@@ -232,20 +230,18 @@ it('does not query or load forever without a location', async () => {
   expect(result.current.cacheRailState).toBe('empty');
 });
 
-it('keeps nearby own caches first and uses the normal heading flag', async () => {
+it('orders own caches by distance alongside everyone else', async () => {
   mockPubkey = 'mine';
-  mockSeed = [cache, { ...cache, coord: 'own', hiderPubkey: 'mine' }];
+  mockSeed = [cache, { ...cache, coord: 'own', hiderPubkey: 'mine', geohash: 'u4pru' }];
   const { result } = renderHook(() => useExploreRelayContent(pos, 0, 100_000));
   await act(async () => {});
-  expect(result.current.cacheRailIsNearestFallback).toBe(false);
-  expect(result.current.sortedCaches.map((c) => c.cache.coord)).toEqual(['own', 'cache']);
+  expect(result.current.sortedCaches.map((c) => c.cache.coord)).toEqual(['cache', 'own']);
 });
 
 it('preserves radius filtering without a position fix', async () => {
   mockSeed = [cache];
   const { result } = renderHook(() => useExploreRelayContent(null, 0, 100_000));
   await act(async () => {});
-  expect(result.current.cacheRailIsNearestFallback).toBe(false);
   expect(result.current.sortedCaches).toEqual([]);
   expect(result.current.cacheRailState).toBe('empty');
 });
@@ -276,55 +272,6 @@ it('still widens when the initial query completes at its eight-second deadline',
   expect(result.current.cacheRailState).toBe('loading');
 });
 
-it.each(['disk', 'by-author', 'relay'])(
-  'widens past ten distant own caches from %s, including on retry',
-  async (source) => {
-    mockPubkey = 'MINE';
-    const own = Array.from({ length: 10 }, (_, i) => ({
-      ...cache,
-      coord: `own-${i}`,
-      hiderPubkey: 'mine',
-      geohash: 'u4pru',
-    }));
-    if (source === 'disk') mockSeed = own;
-    if (source === 'by-author') mockFetchByAuthor.mockResolvedValue(own);
-    const { result, rerender } = renderHook(
-      ({ key }: { key: number }) => useExploreRelayContent(pos, key, 1000),
-      {
-        initialProps: { key: 0 },
-      },
-    );
-    await act(async () => {});
-    act(() => {
-      if (source === 'relay') own.forEach((c) => callbacks().event(c));
-      callbacks().complete({ allRelaysFailed: false });
-    });
-    expect(mockSubscribeCaches).toHaveBeenCalledTimes(2);
-    expect(result.current.cacheRailState).toBe('loading');
-    act(() => {
-      callbacks(1).complete({ allRelaysFailed: false });
-      callbacks(2).complete({ allRelaysFailed: false });
-    });
-    expect(result.current.cacheRailState).toBe('empty');
-
-    rerender({ key: 1 });
-    await act(async () => {});
-    act(() => callbacks(3).complete({ allRelaysFailed: false }));
-    expect(mockSubscribeCaches).toHaveBeenCalledTimes(5);
-    act(() => {
-      callbacks(4).complete({ allRelaysFailed: false });
-      for (let i = 0; i < 10; i++) {
-        callbacks(5).event({ ...cache, coord: `other-${i}`, geohash: 'u4pru' });
-      }
-      callbacks(5).complete({ allRelaysFailed: false });
-    });
-    expect(mockSubscribeCaches.mock.calls.map((c) => c[0][0].length)).toEqual([5, 4, 3, 5, 4, 3]);
-    expect(result.current.cacheRailIsNearestFallback).toBe(true);
-    expect(result.current.sortedCaches).toHaveLength(10);
-    expect(result.current.sortedCaches.every((c) => c.cache.hiderPubkey === 'hider')).toBe(true);
-  },
-);
-
 it('counts nearby own caches toward the widening threshold', async () => {
   mockPubkey = 'mine';
   mockSeed = Array.from({ length: 10 }, (_, i) => ({
@@ -339,7 +286,7 @@ it('counts nearby own caches toward the widening threshold', async () => {
   expect(mockSubscribeCaches).toHaveBeenCalledTimes(1);
 });
 
-it('does not count hidden disk caches or caches without fallback coordinates', async () => {
+it('does not count hidden disk caches or caches without coordinates', async () => {
   mockSeed = Array.from({ length: 10 }, (_, i) => ({
     ...cache,
     coord: `hidden-${i}`,
@@ -358,7 +305,7 @@ it('does not count hidden disk caches or caches without fallback coordinates', a
   expect(mockSubscribeCaches).toHaveBeenCalledTimes(2);
 });
 
-it('widens past ten cached fallback candidates to discover an in-radius cache', async () => {
+it('widens past distant cached candidates to discover closer caches', async () => {
   mockSeed = Array.from({ length: 10 }, (_, i) => ({
     ...cache,
     coord: `fallback-${i}`,
@@ -366,7 +313,6 @@ it('widens past ten cached fallback candidates to discover an in-radius cache', 
   }));
   const { result } = renderHook(() => useExploreRelayContent(pos, 0, 1000));
   await act(async () => {});
-  expect(result.current.cacheRailIsNearestFallback).toBe(true);
   act(() => callbacks().complete({ allRelaysFailed: false }));
   expect(mockSubscribeCaches).toHaveBeenCalledTimes(2);
   const nearby = { ...cache, coord: 'nearby', geohash: encodeGeohash(pos.lat, pos.lon, 9) };
@@ -376,7 +322,6 @@ it('widens past ten cached fallback candidates to discover an in-radius cache', 
   });
   expect(mockSubscribeCaches).toHaveBeenCalledTimes(3);
   act(() => callbacks(2).complete({ allRelaysFailed: false }));
-  expect(result.current.cacheRailIsNearestFallback).toBe(false);
-  expect(result.current.sortedCaches.map((item) => item.cache)).toEqual([nearby]);
+  expect(result.current.sortedCaches.map((item) => item.cache)).toEqual([nearby, ...mockSeed]);
   expect(result.current.cacheRailState).toBe('ready');
 });

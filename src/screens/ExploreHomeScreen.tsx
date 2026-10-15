@@ -149,7 +149,6 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     events,
     cachesArr,
     cacheRailState,
-    cacheRailIsNearestFallback,
     eventsArr,
     untrustedCacheCount,
     untrustedEventCount,
@@ -455,8 +454,8 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
         />
 
         <ContentRail<{ cache: ParsedCache; distance: number }>
-          title={cacheRailIsNearestFallback ? t('geocacheRail.nearest') : 'Geo-caches near you'}
-          titleTestId={cacheRailIsNearestFallback ? 'explore-geocache-nearest-label' : undefined}
+          title={t('geocacheRail.nearest')}
+          titleTestId="explore-geocache-nearest-label"
           caption={
             untrustedCacheCount > 0
               ? `Piglets + classic NIP-GC caches · ${untrustedCacheCount} hidden from outside your trust graph`
