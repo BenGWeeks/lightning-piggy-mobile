@@ -1,3 +1,4 @@
+import { useChatCardWidth } from '../styles/chatCardWidth';
 import { orderNavigationTarget } from '../utils/orderNavigation';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -41,7 +42,11 @@ function ConversationOrderCard({
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const colors = useThemeColors();
   const { formatLocale, t } = useLocale();
-  const styles = useMemo(() => createConversationOrderCardStyles(colors), [colors]);
+  const cardWidth = useChatCardWidth();
+  const styles = useMemo(
+    () => createConversationOrderCardStyles(colors, cardWidth),
+    [colors, cardWidth],
+  );
   const header = orderCardHeader(item.order.type);
   const totalItems = item.order.items.reduce((sum, i) => sum + i.quantity, 0);
   return (

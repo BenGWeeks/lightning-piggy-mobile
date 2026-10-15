@@ -1,3 +1,4 @@
+import { useChatCardWidth } from '../styles/chatCardWidth';
 import { useGifMedia } from '../hooks/useGifMedia';
 import TapToLoadMedia, { displayHost } from './TapToLoadMedia';
 import { sanitizeDisplayText } from '../utils/sanitizeDisplayText';
@@ -212,7 +213,8 @@ const MessageBubble: React.FC<Props> = ({
     autoLoadMedia,
   );
   const colors = useThemeColors();
-  const styles = useMemo(() => createMessageBubbleStyles(colors), [colors]);
+  const cardWidth = useChatCardWidth();
+  const styles = useMemo(() => createMessageBubbleStyles(colors, cardWidth), [colors, cardWidth]);
   const { t } = useLocale();
   const {
     uri: gifUri,

@@ -1,3 +1,4 @@
+import { CHAT_CARD_MAX_WIDTH } from './chatCardWidth';
 import { StyleSheet } from 'react-native';
 import type { Palette } from '../styles/palettes';
 
@@ -5,7 +6,7 @@ import type { Palette } from '../styles/palettes';
 // screen file under the #703 size cap. Themed via the active Palette.
 export type ConversationStyles = ReturnType<typeof createConversationScreenStyles>;
 
-export const createConversationScreenStyles = (colors: Palette) =>
+export const createConversationScreenStyles = (colors: Palette, cardWidth = CHAT_CARD_MAX_WIDTH) =>
   StyleSheet.create({
     container: {
       flex: 1,
@@ -125,8 +126,7 @@ export const createConversationScreenStyles = (colors: Palette) =>
     zapCard: {
       flexDirection: 'row',
       alignItems: 'center',
-      maxWidth: '85%',
-      minWidth: 240,
+      width: cardWidth,
       paddingTop: 12,
       paddingBottom: 4,
       paddingHorizontal: 14,

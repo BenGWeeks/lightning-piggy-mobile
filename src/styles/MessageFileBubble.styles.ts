@@ -1,14 +1,13 @@
+import { CHAT_CARD_MAX_WIDTH } from './chatCardWidth';
 import { StyleSheet } from 'react-native';
 import type { Palette } from './palettes';
-import { ATTACHMENT_WIDTH } from './attachmentGeometry';
 
-export const createMessageFileBubbleStyles = (colors: Palette) =>
+export const createMessageFileBubbleStyles = (colors: Palette, cardWidth = CHAT_CARD_MAX_WIDTH) =>
   StyleSheet.create({
     row: { flexDirection: 'row', marginVertical: 2 },
     sent: { justifyContent: 'flex-end' },
     bubble: {
-      width: ATTACHMENT_WIDTH,
-      maxWidth: '85%',
+      width: cardWidth,
       borderRadius: 14,
       overflow: 'hidden',
       backgroundColor: colors.surface,

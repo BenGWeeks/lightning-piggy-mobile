@@ -1,3 +1,4 @@
+import { useChatCardWidth } from '../styles/chatCardWidth';
 import React, { useCallback, useMemo, useState } from 'react';
 import { Pressable, Text, TouchableOpacity, View } from 'react-native';
 import { Download, FileText, Share2, ShieldOff } from 'lucide-react-native';
@@ -36,7 +37,11 @@ export default React.memo(function MessageFileBubble({
 }) {
   const { t } = useLocale();
   const colors = useThemeColors();
-  const styles = useMemo(() => createMessageFileBubbleStyles(colors), [colors]);
+  const cardWidth = useChatCardWidth();
+  const styles = useMemo(
+    () => createMessageFileBubbleStyles(colors, cardWidth),
+    [colors, cardWidth],
+  );
   const safe = file.available && isSafeFileUrl(file.url);
   const [allowed, reveal] = useTapToReveal(
     `pdf:${id}:${file.url}`,

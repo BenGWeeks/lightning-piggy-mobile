@@ -1,8 +1,12 @@
+import { CHAT_CARD_MAX_WIDTH } from './chatCardWidth';
 import { StyleSheet } from 'react-native';
 import type { Palette } from './palettes';
 
 /** Marketplace order card in a 1:1 conversation (Gamma Markets kind 16/17). */
-export const createConversationOrderCardStyles = (colors: Palette) =>
+export const createConversationOrderCardStyles = (
+  colors: Palette,
+  cardWidth = CHAT_CARD_MAX_WIDTH,
+) =>
   StyleSheet.create({
     // A structured card for a kind-16/17 event, distinct from a chat bubble.
     // Accent uses the bitcoin orange to read as transactional.
@@ -13,8 +17,7 @@ export const createConversationOrderCardStyles = (colors: Palette) =>
     orderRowLeft: { justifyContent: 'flex-start' },
     orderRowRight: { justifyContent: 'flex-end' },
     orderCard: {
-      maxWidth: '85%',
-      minWidth: 220,
+      width: cardWidth,
       paddingVertical: 12,
       paddingHorizontal: 14,
       borderRadius: 14,

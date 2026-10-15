@@ -1,4 +1,4 @@
-import { clampAttachmentAspect } from '../utils/attachmentPresentation';
+import { chatImageAspectRatio } from '../styles/chatCardWidth';
 import { attachmentAspectStyle } from '../styles/attachmentGeometry';
 import OutgoingBubbleBackground from './OutgoingBubbleBackground';
 import React, { useCallback, useState } from 'react';
@@ -61,8 +61,8 @@ const MessageImageBubble: React.FC<Props> = ({
   const [sourceSize, setSourceSize] = useState({ width: 1, height: 1 });
   const dim = image.dim?.match(/^(\d+)x(\d+)$/);
   const aspect = dim
-    ? clampAttachmentAspect(Number(dim[1]), Number(dim[2]))
-    : clampAttachmentAspect(sourceSize.width, sourceSize.height);
+    ? chatImageAspectRatio(Number(dim[1]), Number(dim[2]))
+    : chatImageAspectRatio(sourceSize.width, sourceSize.height);
   const onImageLoad = useCallback((event: { source: { width: number; height: number } }) => {
     setSourceSize({ width: event.source.width, height: event.source.height });
   }, []);
