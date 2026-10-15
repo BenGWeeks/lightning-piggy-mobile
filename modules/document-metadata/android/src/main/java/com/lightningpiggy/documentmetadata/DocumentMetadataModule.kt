@@ -35,7 +35,13 @@ class DocumentMetadataModule : Module() {
                 try {
                   bitmap.eraseColor(Color.WHITE)
                   page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                  target.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                  val temporary = File.createTempFile(target.name, ".tmp", target.parentFile)
+                  try {
+                    temporary.outputStream().use {
+                      check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it))
+                    }
+                    check(temporary.renameTo(target))
+                  } finally { temporary.delete() }
                 } finally { bitmap.recycle() }
               }
             }
