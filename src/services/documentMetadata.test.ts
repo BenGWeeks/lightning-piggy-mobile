@@ -18,9 +18,36 @@ it('retains local file names without a native query', async () => {
   ).resolves.toBe('invoice.pdf');
 });
 
-it('refuses opaque names when an older client lacks the metadata module', async () => {
+it('retains the basename without logging in production when the metadata module is absent', async () => {
+  const previousDev = __DEV__;
+  const devGlobal = globalThis as unknown as { __DEV__: boolean };
+  const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  jest.replaceProperty(devGlobal, '__DEV__', false);
   jest.mocked(requireOptionalNativeModule).mockReturnValue(null);
-  await expect(
-    selectedDocumentName({ uri: 'content://downloads/document/1234', name: '1234' }),
-  ).rejects.toThrow('native module is unavailable');
+  try {
+    await expect(
+      selectedDocumentName({ uri: 'content://downloads/document/1234', name: '1234' }),
+    ).resolves.toBe('1234');
+    expect(warn).not.toHaveBeenCalled();
+  } finally {
+    jest.replaceProperty(devGlobal, '__DEV__', previousDev);
+    warn.mockRestore();
+  }
+});
+
+it('retains basenames and warns only once in development when the metadata module is absent', async () => {
+  const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  jest.mocked(requireOptionalNativeModule).mockReturnValue(null);
+  try {
+    await expect(
+      selectedDocumentName({ uri: 'content://downloads/document/1234', name: '1234' }),
+    ).resolves.toBe('1234');
+    await expect(
+      selectedDocumentName({ uri: 'content://downloads/document/5678', name: '5678' }),
+    ).resolves.toBe('5678');
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Rebuild the dev client'));
+  } finally {
+    warn.mockRestore();
+  }
 });
