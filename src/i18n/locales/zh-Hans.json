@@ -1308,6 +1308,8 @@
     "filePreparing": "正在准备文件…",
     "fileUnavailable": "文件不可用",
     "fileShareFailed": "无法准备或分享此文件。请重试。",
+    "filePlainUrl": "未端到端加密 · 未验证",
+    "fileUploadLimit": "请选择不超过 16 MB 的文件。",
     "devFiles": "测试文件",
     "devFilesA11y": "创建包含文件的测试会话",
     "fileSave": "保存",

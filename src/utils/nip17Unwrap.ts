@@ -367,7 +367,7 @@ export function fileMetaFromRumor(rumor: DecodedRumor): ConversationFileMeta | u
     return undefined;
   return {
     url,
-    filename: tag('filename'),
+    filename: tag('filename')?.slice(0, 255),
     mime: tag('file-type') ?? 'application/octet-stream',
     algorithm: tag('encryption-algorithm') ?? 'aes-gcm',
     keyHex,

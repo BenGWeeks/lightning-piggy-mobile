@@ -122,7 +122,7 @@ it.each(['invoice.pdf', 'report.csv', 'budget.xlsx'])(
   },
 );
 
-it('keeps optional HEAD behind a tap and bounds the plain-URL GET using its advertised size', async () => {
+it('keeps optional HEAD behind a tap and keeps the plain-URL GET independent of its advertised size', async () => {
   const { parsePlainFileAttachment } = jest.requireActual('../utils/fileAttachment');
   const file = parsePlainFileAttachment('https://example.com/invoice.pdf')!;
   const { fetchBounded } = jest.requireMock('../utils/remoteUrlPolicy');
@@ -133,7 +133,7 @@ it('keeps optional HEAD behind a tap and bounds the plain-URL GET using its adve
     expect.objectContaining({ method: 'HEAD', maxBytes: 50 * 1024 * 1024 }),
   );
   expect(resolveDecryptedMedia).toHaveBeenCalledWith(
-    expect.objectContaining({ size: 42, plainUrl: true, kind: 'file' }),
+    expect.objectContaining({ size: undefined, plainUrl: true, kind: 'file' }),
   );
   expect(Sharing.shareAsync).toHaveBeenCalledWith(
     expect.any(String),

@@ -1308,6 +1308,8 @@
     "filePreparing": "Fájl előkészítése…",
     "fileUnavailable": "A fájl nem érhető el",
     "fileShareFailed": "Nem sikerült előkészíteni vagy megosztani a fájlt. Próbáld újra.",
+    "filePlainUrl": "Nincs végpontok közötti titkosítás · Nem ellenőrzött",
+    "fileUploadLimit": "Legfeljebb 16 MB méretű fájlt válassz.",
     "devFiles": "Tesztfájlok",
     "devFilesA11y": "Tesztbeszélgetés létrehozása fájlokkal",
     "fileSave": "Mentés",

@@ -5,8 +5,10 @@ import { useTranslation } from '../contexts/LocaleContext';
 import { useNostr } from '../contexts/NostrContext';
 import type { DmProtocol } from '../utils/dmProtocol';
 import { sanitizeAttachmentText } from '../utils/fileAttachment';
-import { MAX_FILE_BYTES } from '../services/fileDownload';
+import { selectedDocumentName } from '../services/documentMetadata';
 import type { EncryptedUpload } from '../services/imageUploadService';
+
+export const MAX_UPLOAD_BYTES = 16 * 1024 * 1024;
 
 /** Keep the system picker, local reads and upload off the chat startup path. */
 export function useNip17FileComposer(
@@ -32,19 +34,25 @@ export function useNip17FileComposer(
       const file = Array.isArray(result) ? result[0] : result;
       if (!file) return;
       try {
-        // Reserve the GCM tag in the encrypted download budget. Check before
-        // reading and again afterwards: provider metadata isn't authoritative.
-        if (file.size <= 0 || file.size > MAX_FILE_BYTES - 16) throw new Error('File size');
+        // Bound JS encryption/base64 memory before reading, then check actual
+        // bytes as well: provider metadata is not authoritative.
+        if (file.size <= 0 || file.size > MAX_UPLOAD_BYTES) throw new RangeError('File size');
         const base64 = await file.base64();
         const size = Buffer.byteLength(base64, 'base64');
-        if (size <= 0 || size > MAX_FILE_BYTES - 16) throw new Error('File size');
-        const filename = sanitizeAttachmentText(file.name);
+        if (size <= 0 || size > MAX_UPLOAD_BYTES) throw new RangeError('File size');
+        const filename = sanitizeAttachmentText(await selectedDocumentName(file));
+        const started = performance.now();
         const uploaded = await upload.uploadEncryptedBlob(
           file.uri,
           signEvent,
           file.type || 'application/octet-stream',
           base64,
         );
+        if (__DEV__ || process.env.EXPO_PUBLIC_KEEP_PERF_LOGS === '1') {
+          console.log(
+            `[PerfBlock] file encrypt+upload bytes=${size} ms=${(performance.now() - started).toFixed(1)}`,
+          );
+        }
         await send({ ...uploaded, filename }, 'file', 'nip17');
       } finally {
         // iOS returns a temporary copy. Never delete the user's original.
@@ -52,7 +60,14 @@ export function useNip17FileComposer(
       }
     } catch (error) {
       if (error instanceof Error && /cancelled|canceled/i.test(error.message)) return;
-      Alert.alert(t('messageBubble.file'), t('messageBubble.fileShareFailed'));
+      Alert.alert(
+        t('messageBubble.file'),
+        t(
+          error instanceof RangeError
+            ? 'messageBubble.fileUploadLimit'
+            : 'messageBubble.fileShareFailed',
+        ),
+      );
     } finally {
       setUploading(false);
     }

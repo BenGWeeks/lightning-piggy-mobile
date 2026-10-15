@@ -18,25 +18,26 @@ export async function shareFileAttachment(
   if (!file.available) throw new Error('File unavailable');
   if (file.dangerous && !(await confirmSave())) return;
   if (!(await Sharing.isAvailableAsync())) throw new Error('Sharing unavailable');
-  let size = file.size;
   if (file.plainUrl) {
     // HEAD is optional and user initiated too; GET independently enforces the
     // cap when a server omits metadata, rejects HEAD, or changes the payload.
     try {
-      const { headers } = await fetchBounded(file.url, {
+      await fetchBounded(file.url, {
         method: 'HEAD',
         maxBytes: MAX_FILE_BYTES,
         timeoutMs: 5000,
         redirects: 'https-only',
         maxRedirects: 3,
       });
-      const length = Number(headers.get('content-length'));
-      if (Number.isSafeInteger(length) && length > 0) size = length;
     } catch {
       /* Download remains bounded when HEAD is unavailable. */
     }
   }
-  const uri = await resolveDecryptedMedia({ ...file, size, kind: 'file' });
+  const uri = await resolveDecryptedMedia({
+    ...file,
+    size: file.plainUrl ? undefined : file.size,
+    kind: 'file',
+  });
   const release = retainDecryptedFile(uri);
   try {
     const metadata = verifiedFileMetadata(uri);

@@ -1308,6 +1308,8 @@
     "filePreparing": "Datei wird vorbereitet…",
     "fileUnavailable": "Datei nicht verfügbar",
     "fileShareFailed": "Diese Datei konnte nicht vorbereitet oder geteilt werden. Versuche es erneut.",
+    "filePlainUrl": "Nicht Ende-zu-Ende-verschlüsselt · Ungeprüft",
+    "fileUploadLimit": "Wähle Dateien bis zu 16 MB.",
     "devFiles": "Testdateien",
     "devFilesA11y": "Eine Testunterhaltung mit Dateien erstellen",
     "fileSave": "Speichern",

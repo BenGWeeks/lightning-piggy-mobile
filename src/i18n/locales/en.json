@@ -1308,6 +1308,8 @@
     "filePreparing": "Preparing file…",
     "fileUnavailable": "File unavailable",
     "fileShareFailed": "Could not prepare or share this file. Try again.",
+    "filePlainUrl": "Not end-to-end encrypted · Unverified",
+    "fileUploadLimit": "Choose files up to 16 MB.",
     "devFiles": "Dev files",
     "devFilesA11y": "Seed a dev file conversation",
     "fileSave": "Save",

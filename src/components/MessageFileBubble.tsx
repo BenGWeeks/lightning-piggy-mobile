@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { Pressable, Text, TouchableOpacity, View } from 'react-native';
-import { FileText } from 'lucide-react-native';
+import { FileText, ShieldOff } from 'lucide-react-native';
 import { Alert } from './BrandedAlert';
 import { FileVerificationError } from '../services/fileDownload';
 import { useLocale } from '../contexts/LocaleContext';
@@ -75,7 +75,12 @@ export default React.memo(function MessageFileBubble({
         accessibilityLabel={file.name || t('messageBubble.file')}
       >
         {header}
-        <FileText size={24} color={colors.textSupplementary} />
+        {file.plainUrl ? (
+          <ShieldOff size={24} color={colors.textSupplementary} />
+        ) : (
+          <FileText size={24} color={colors.textSupplementary} />
+        )}
+        {file.plainUrl && <Text style={styles.caption}>{t('messageBubble.filePlainUrl')}</Text>}
         <Text style={styles.name}>{file.name || t('messageBubble.file')}</Text>
         <Text style={styles.caption}>{displayHost(file.url)}</Text>
         <Text style={styles.caption}>{verified?.mime ?? file.mime}</Text>

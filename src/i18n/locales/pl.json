@@ -1308,6 +1308,8 @@
     "filePreparing": "Przygotowywanie pliku…",
     "fileUnavailable": "Plik niedostępny",
     "fileShareFailed": "Nie udało się przygotować lub udostępnić pliku. Spróbuj ponownie.",
+    "filePlainUrl": "Bez szyfrowania end-to-end · Niezweryfikowany",
+    "fileUploadLimit": "Wybierz pliki o rozmiarze do 16 MB.",
     "devFiles": "Pliki testowe",
     "devFilesA11y": "Utwórz rozmowę testową z plikami",
     "fileSave": "Zapisz",

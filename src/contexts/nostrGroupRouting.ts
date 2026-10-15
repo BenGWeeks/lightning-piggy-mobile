@@ -1,4 +1,9 @@
-import { classifyRumor, subjectFromRumor, type DecodedRumor } from '../utils/nip17Unwrap';
+import {
+  classifyRumor,
+  subjectFromRumor,
+  textForRumor,
+  type DecodedRumor,
+} from '../utils/nip17Unwrap';
 import {
   findGroupForParticipants,
   reconcileSyntheticGroup,
@@ -149,7 +154,8 @@ export async function tryRouteGroupRumor(
   const message: GroupMessage = {
     id: wrapId,
     senderPubkey: rumor.pubkey.toLowerCase(),
-    text: rumor.content,
+    text: textForRumor(rumor),
+    wireKind: rumor.kind,
     createdAt: rumor.created_at,
   };
   try {

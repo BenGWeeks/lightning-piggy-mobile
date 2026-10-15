@@ -1,12 +1,15 @@
 import { act, renderHook } from '@testing-library/react-native';
 import { Buffer } from 'buffer';
 import { useNip17FileComposer } from './useNip17FileComposer';
-import { MAX_FILE_BYTES } from '../services/fileDownload';
+import { MAX_UPLOAD_BYTES } from './useNip17FileComposer';
 
 const mockPicker = jest.fn();
 const mockUpload = jest.fn();
 const mockAlert = jest.fn();
 const mockSigner = jest.fn();
+jest.mock('../services/documentMetadata', () => ({
+  selectedDocumentName: jest.fn(async () => '../invoice\u202e.pdf'),
+}));
 jest.mock('expo-file-system', () => ({
   File: { pickFileAsync: (...args: unknown[]) => mockPicker(...args) },
   Paths: { cache: { uri: 'file:///cache/' } },
@@ -60,7 +63,7 @@ it.each(['marmot', 'nip04'] as const)('does not expose a NIP-17 file picker in %
   expect(result.current.pickFile).toBeUndefined();
 });
 it('rejects oversized provider metadata before reading or uploading', async () => {
-  const file = { ...picked(), size: MAX_FILE_BYTES };
+  const file = { ...picked(), size: MAX_UPLOAD_BYTES + 1 };
   mockPicker.mockResolvedValue(file);
   const { result } = renderHook(() => useNip17FileComposer('nip17', jest.fn(), jest.fn()));
   await act(async () => {
@@ -68,7 +71,7 @@ it('rejects oversized provider metadata before reading or uploading', async () =
   });
   expect(file.base64).not.toHaveBeenCalled();
   expect(mockUpload).not.toHaveBeenCalled();
-  expect(mockAlert).toHaveBeenCalled();
+  expect(mockAlert).toHaveBeenCalledWith('messageBubble.file', 'messageBubble.fileUploadLimit');
 });
 it('treats picker cancellation as no send and no error', async () => {
   mockPicker.mockRejectedValue(new Error('File picking was cancelled by the user'));
@@ -89,4 +92,18 @@ it('does not open the picker when the group send target is unavailable', async (
     await result.current.pickFile?.();
   });
   expect(mockPicker).not.toHaveBeenCalled();
+});
+
+it('checks actual bytes against the upload cap even when provider metadata is smaller', async () => {
+  const file = {
+    ...picked(),
+    base64: jest.fn(async () => Buffer.alloc(MAX_UPLOAD_BYTES + 1).toString('base64')),
+  };
+  mockPicker.mockResolvedValue(file);
+  const { result } = renderHook(() => useNip17FileComposer('nip17', jest.fn(), jest.fn()));
+  await act(async () => {
+    await result.current.pickFile?.();
+  });
+  expect(mockUpload).not.toHaveBeenCalled();
+  expect(mockAlert).toHaveBeenCalledWith('messageBubble.file', 'messageBubble.fileUploadLimit');
 });

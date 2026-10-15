@@ -98,6 +98,7 @@ export function useGroupComposerActions(params: {
       targetGroup = group,
       targetPubkey = myPubkey,
       parent?: string,
+      wireKind?: number,
     ): { row: GroupMessage; persisted: Promise<boolean> } | null => {
       if (!targetGroup || !targetPubkey) return null;
       const local: GroupMessage = {
@@ -105,6 +106,7 @@ export function useGroupComposerActions(params: {
         senderPubkey: targetPubkey,
         ...(parent ? { replyTo: parent } : {}),
         text,
+        ...(wireKind !== undefined ? { wireKind } : {}),
         createdAt: Math.floor(Date.now() / 1000),
       };
       // Paint the bubble immediately in UI state — storage is async. The
@@ -269,8 +271,14 @@ export function useGroupComposerActions(params: {
           file,
         },
         {
-          onRumorReady: () => {
-            optimistic.current = appendOptimisticGroupRow(fileText);
+          onRumorReady: ({ kind: wireKind }) => {
+            optimistic.current = appendOptimisticGroupRow(
+              fileText,
+              group,
+              myPubkey,
+              undefined,
+              wireKind,
+            );
           },
         },
       );

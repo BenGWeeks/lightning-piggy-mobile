@@ -405,6 +405,7 @@ it('retains the encrypted document metadata in NIP-17 group optimistic rows', as
     await mockSendFile(file, 'file');
   });
   const row = mockAppendGroupMessage.mock.calls[0][2];
+  expect(row.wireKind).toBe(15);
   expect(parseFileAttachment(row.text)).toMatchObject({
     available: true,
     name: 'invoice.pdf',

@@ -10,6 +10,7 @@ import { wrapEvent } from 'nostr-tools/nip59';
 import * as nip44 from 'nostr-tools/nip44';
 import {
   subjectFromRumor,
+  fileMetaFromRumor,
   textForRumor,
   partnerFromRumor,
   classifyRumor,
@@ -467,4 +468,20 @@ it('validates kind-15 URLs and carries the advertised size into render text', ()
       tags: [...rumor.tags.filter((t) => t[0] !== 'size'), ['size', String(50 * 1024 * 1024 + 1)]],
     }),
   ).not.toContain('#lpe=1');
+});
+
+it('bounds incoming kind-15 filenames before metadata storage', () => {
+  expect(
+    fileMetaFromRumor({
+      pubkey: PK_A,
+      created_at: 1,
+      kind: 15,
+      content: 'https://example.com/file',
+      tags: [
+        ['decryption-key', '11'.repeat(32)],
+        ['decryption-nonce', '22'.repeat(12)],
+        ['filename', 'a'.repeat(1000)],
+      ],
+    })?.filename,
+  ).toHaveLength(255);
 });

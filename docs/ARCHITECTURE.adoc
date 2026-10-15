@@ -22,7 +22,7 @@ custom native modules, so Expo Go is not used).
 |===
 | Layer | Responsibility
 
-| **Native / config** | Expo config plugins (`plugins/`) + four local native modules (`modules/`): the Amber signer bridge, the opt-in Android background service, a rust-nostr wrapper and a secure clipboard. See <<native>>.
+| **Native / config** | Expo config plugins (`plugins/`) + five local native modules (`modules/`): the Amber signer bridge, the opt-in Android background service, a rust-nostr wrapper a secure clipboard and Android document metadata. See <<native>>.
 | **Contexts** | Long-lived React state providers (`src/contexts/`) — identity, wallets, DMs, groups, live-location. Composed once near the app root.
 | **i18n** | `src/i18n/` — 9 locale catalogues (`en` is the source of truth), per-locale CLDR plural rules (`plurals.ts`) and a per-account app language. See `i18n/GLOSSARY.md`.
 | **Hooks / services** | Per-responsibility logic. UI-facing hooks (`src/hooks/`) and a large stateless service layer (`src/services/`) split by domain (Nostr, wallet, location, media, NFC, notifications).
@@ -444,7 +444,13 @@ account-scoped `decryptedMediaCache` as Marmot files. `textForRumor` folds
 AES-GCM metadata into the internal `#lpe=1` URL, retaining the ciphertext
 `x` hash and encrypted size; the hash is checked before authenticated decrypt.
 The NIP-17 composer uses Expo FileSystem's system picker and uploads ciphertext
-to Blossom. An optional `filename` tag carries the sanitized filename.
+to Blossom, with a 16 MiB plaintext upload limit. Android reads the provider's
+display name through the local `document-metadata` native module (a native
+rebuild is required). An optional `filename` tag carries the sanitized filename.
+Blossom learns the uploader's public key through signed BUD-02 authorization
+and sees their IP address. Tapping any file reveals the recipient's IP address
+to its hosting server; plain URLs can use an arbitrary sender-chosen host.
+Plain URL bubbles are labelled as unencrypted and unverified.
 
 Whole-message document URLs in NIP-04 kind 4 and NIP-17 kind 14 are classified
 by extension, without fetching. They have no sender-provided integrity hash;
