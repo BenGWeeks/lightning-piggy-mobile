@@ -72,6 +72,21 @@ name: Market — grid → product detail → reviews/comments tabs (#948)
     id: 'market-my-shop-button'
 - assertVisible:
     id: 'market-my-orders-button'
+# Buyer's order history replaces the standalone receipt icon.
+- tapOn:
+    id: 'market-my-orders-button'
+- extendedWaitUntil:
+    visible:
+      id: 'my-orders-screen'
+    timeout: 10000
+- tapOn:
+    id: 'my-orders-back'
+- extendedWaitUntil:
+    visible:
+      id: 'market-screen'
+    timeout: 10000
+- tapOn:
+    id: 'market-header-menu'
 - tapOn:
     id: 'market-liked-items-button'
 - assertVisible:

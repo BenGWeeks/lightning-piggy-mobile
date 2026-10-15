@@ -185,13 +185,15 @@ export default function MarketHeaderActions({
                   navigation.navigate(route);
                 }}
               >
-                <Icon size={22} color={colors.textBody} />
+                <View>
+                  <Icon size={22} color={colors.textBody} />
+                  {route === 'MarketMyOrders' && payNow > 0 ? (
+                    <View style={styles.badge} testID="market-my-orders-badge">
+                      <Text style={styles.badgeText}>{payNow > 9 ? '9+' : payNow}</Text>
+                    </View>
+                  ) : null}
+                </View>
                 <Text style={menu.text}>{label}</Text>
-                {route === 'MarketMyOrders' && payNow > 0 ? (
-                  <View style={styles.badge} testID="market-my-orders-badge">
-                    <Text style={styles.badgeText}>{payNow > 9 ? '9+' : payNow}</Text>
-                  </View>
-                ) : null}
               </TouchableOpacity>
             ))}
           </Pressable>

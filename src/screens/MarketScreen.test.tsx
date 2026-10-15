@@ -116,7 +116,8 @@ jest.mock('../components/MarketHeader', () => {
   };
 });
 jest.mock('../components/MarketProductCard', () => () => null);
-jest.mock('../hooks/useBuyerOrders', () => ({ useBuyerOrders: () => ({ payNow: 0 }) }));
+let mockPayNow = 0;
+jest.mock('../hooks/useBuyerOrders', () => ({ useBuyerOrders: () => ({ payNow: mockPayNow }) }));
 jest.mock('../hooks/usePreferredMarketListings', () => ({
   usePreferredMarketListings: () => ({
     products: mockLiveProducts.length
@@ -183,6 +184,7 @@ jest.mock('../hooks/useMarketFofAuthors', () => ({
 const navigation = { goBack: jest.fn(), navigate: jest.fn() } as unknown as ExploreNavigation;
 
 beforeEach(() => {
+  mockPayNow = 0;
   jest.useFakeTimers();
   mockLiveEnabled.mockClear();
   mockFofEnabled.mockClear();
@@ -717,4 +719,14 @@ it.each([
   fireEvent.press(screen.getByTestId(id));
   expect(navigation.navigate).toHaveBeenCalledWith(route);
   expect(screen.queryByTestId('market-menu-close')).toBeNull();
+});
+
+it.each([1, 12])('keeps the buyer invoice badge in the menu for %s invoices', (count) => {
+  mockPayNow = count;
+  const screen = render(<MarketScreen navigation={navigation} />);
+  expect(screen.queryByTestId('market-my-orders-button')).toBeNull();
+  fireEvent.press(screen.getByTestId('market-header-menu'));
+  expect(screen.getByTestId('market-my-orders-badge')).toHaveTextContent(count > 9 ? '9+' : '1');
+  fireEvent.press(screen.getByTestId('market-my-orders-button'));
+  expect(navigation.navigate).toHaveBeenCalledWith('MarketMyOrders');
 });

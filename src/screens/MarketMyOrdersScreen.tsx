@@ -103,7 +103,6 @@ const MarketMyOrdersScreen: React.FC<Props> = ({ navigation, route }) => {
         title={t('myOrders.title')}
         backLabel={t('market.sell.back')}
         onBack={() => navigation.goBack()}
-        styles={sellerStyles}
         testID="my-orders-back"
       />
       {loading && entries.length === 0 ? (
