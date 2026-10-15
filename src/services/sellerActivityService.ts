@@ -206,7 +206,7 @@ export async function checkSellerActivity(input: Input): Promise<void> {
             }
             const mayRecord = async () => {
               const settingEnabled = await loadSellerActivityEnabled(owner);
-              return current() && enabled && settingEnabled && (!input.onlyFriends || friend);
+              return current() && enabled && settingEnabled;
             };
             if (!(await mayRecord())) {
               if (!current()) return;

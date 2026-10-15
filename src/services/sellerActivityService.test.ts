@@ -477,7 +477,44 @@ it('drops events newer than the requested page before selecting its newest resul
   );
 });
 
-it.each(['disabled', 'only friends', 'disabled during mute lookup'])(
+it.each(['comment', 'review'])(
+  'records stranger %s history without an Only friends alert',
+  async (kind) => {
+    const event =
+      kind === 'comment'
+        ? comment('stranger-activity', stranger)
+        : {
+            ...comment('stranger-activity', stranger),
+            kind: 31555,
+            tags: [
+              ['d', `a:30402:${owner}:thing`],
+              ['rating', '0.8', 'thumb'],
+            ],
+          };
+    respondWith(async (_p, _r, f) => ((kind === 'comment' ? f['#A'] : f['#d']) ? [event] : []));
+    await checkSellerActivity(opts());
+    expect(fireNotification).toHaveBeenCalledTimes(1);
+    const payload = jest.mocked(fireNotification).mock.calls[0][0];
+    expect(payload.historyKey).toBe('market:stranger-activity');
+    expect(await payload.mayRecord?.()).toBe(true);
+    expect(await payload.shouldSuppress?.()).toBe(true);
+    const cursor = JSON.parse((await AsyncStorage.getItem(cursorKey))!);
+    expect(cursor.seen).toContain(event.id);
+    expect(Object.values(cursor.strangers)).toEqual([1]);
+
+    // Broadening the audience must not replay activity already recorded silently.
+    await checkSellerActivity({ ...opts(), onlyFriends: false });
+    expect(fireNotification).toHaveBeenCalledTimes(1);
+
+    await setSellerActivityEnabled(owner, false);
+    expect(await payload.mayRecord?.()).toBe(false);
+    await setSellerActivityEnabled(owner, true);
+    mockOwner = friend;
+    expect(await payload.mayRecord?.()).toBe(false);
+  },
+);
+
+it.each(['disabled', 'disabled during mute lookup'])(
   'records no history or alerts for activity excluded by %s',
   async (mode) => {
     if (mode === 'disabled') await setSellerActivityEnabled(owner, false);
@@ -486,9 +523,7 @@ it.each(['disabled', 'only friends', 'disabled during mute lookup'])(
         await setSellerActivityEnabled(owner, false);
         return false;
       });
-    respondWith(async (_p, _r, f) =>
-      f['#A'] ? [comment('excluded', mode === 'only friends' ? stranger : friend)] : [],
-    );
+    respondWith(async (_p, _r, f) => (f['#A'] ? [comment('excluded')] : []));
     await checkSellerActivity(opts());
     expect(fireNotification).not.toHaveBeenCalled();
   },
