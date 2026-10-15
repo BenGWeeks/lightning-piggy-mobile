@@ -1,4 +1,5 @@
 import { useCallback, useLayoutEffect, useState } from 'react';
+import { reviveBuyerOrderTitles } from '../services/buyerOrderTitles';
 import { setCurrentUserPubkey } from '../services/nostrActiveAccount';
 import { setActivePubkeyForWalletStorage } from '../services/walletStorageService';
 
@@ -6,6 +7,7 @@ import { setActivePubkeyForWalletStorage } from '../services/walletStorageServic
 export function useActiveNostrAccount() {
   const [pubkey, setPubkeyState] = useState<string | null>(null);
   const setPubkey = useCallback((pk: string | null) => {
+    if (pk) reviveBuyerOrderTitles(pk);
     if (__DEV__) setCurrentUserPubkey(pk);
     setPubkeyState(pk);
   }, []);

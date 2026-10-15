@@ -1,4 +1,6 @@
+import { wipeCheckoutAddress } from '../services/checkoutAddressStorage';
 import { wipeRemoteMediaForOwner } from '../services/remoteMediaCache';
+import { retireBuyerOrderTitles, waitForBuyerOrderTitleWrites } from '../services/buyerOrderTitles';
 import { FOLLOW_SNAPSHOT_KEY } from '../services/contactFollowFreshness';
 /**
  * wipeAccountCaches — delete every per-account persisted artifact for a
@@ -75,6 +77,9 @@ import {
 
 export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise<void> {
   if (!loggedOutPubkey) return;
+  retireBuyerOrderTitles(loggedOutPubkey);
+  // Never let a SecureStore failure abort the rest of the per-account wipe.
+  await wipeCheckoutAddress(loggedOutPubkey).catch(() => undefined);
   await cancelNotificationDefaults(loggedOutPubkey);
   // Its weekly "Back up your key" reminder goes with it (#1546).
   await retireKeyBackupReminder(loggedOutPubkey).catch(() => undefined);
@@ -161,6 +166,8 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
     inboxLastSeenKey(loggedOutPubkey),
     `dm-kind4-retries:${loggedOutPubkey}`,
     `dm-kind4-exhausted:${loggedOutPubkey}`,
+    // Product titles reveal this account's purchase history.
+    `market-buyer-order-titles:${loggedOutPubkey}`,
     `nostr_group_activity_${loggedOutPubkey}`,
     `nostr_groups_${loggedOutPubkey}`,
     `groups_following_only_${loggedOutPubkey}`,
@@ -194,6 +201,7 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
     if (__DEV__) console.warn('[wipeAccountCaches] group history wipe failed:', e);
   }
   // Best-effort so a transient multiRemove rejection can't abort the wipe below.
+  await waitForBuyerOrderTitleWrites();
   await bestEffortMultiRemove(toRemove);
   // All per-wallet caches (balance / txs / receipt-dedup), not just txs_ —
   // deleteWalletCaches wipes the full set so a deleted-identity wallet leaves

@@ -2323,7 +2323,10 @@
       "buyFrom": "Bei {{seller}} kaufen",
       "buyAccessibility": "{{title}} bei {{seller}} kaufen",
       "noFeedback": "Bewertungen und Kommentare sind für diesen Verkäufer noch nicht verfügbar – dafür braucht er eine Nostr-Identität.",
-      "refreshFailed": "Dieses Produkt konnte nicht aktualisiert werden – prüfe deine Verbindung und versuche es erneut."
+      "refreshFailed": "Dieses Produkt konnte nicht aktualisiert werden – prüfe deine Verbindung und versuche es erneut.",
+      "buy": "Kaufen",
+      "outOfStock": "Ausverkauft",
+      "invoiceNote": "Der Verkäufer schickt dir eine Rechnung für deine Bestellung"
     },
     "modes": {
       "comingSoon": "{{label}} – demnächst",
@@ -2443,7 +2446,25 @@
         "relayUnreachable": "Es war kein Relay erreichbar, um deine Bestellung aufzugeben. Bitte versuche es erneut.",
         "generic": "Beim Aufgeben deiner Bestellung ist etwas schiefgelaufen. Bitte versuche es erneut."
       },
-      "rateUpdated": "Die Versandkosten wurden aktualisiert. Prüfe die neue Summe und tippe erneut auf „Bestellen“."
+      "rateUpdated": "Der Wechselkurs hat sich geändert, daher auch die Summe. Prüfe die neue Summe und tippe erneut auf „Bestellen“.",
+      "unitPriceSats": "{{amount}} sats pro Stück",
+      "addressLabel": "Lieferadresse",
+      "addressPlaceholder": "Name, Straße, Ort, Postleitzahl, Land",
+      "addressHint": "Wird privat (verschlüsselt verpackt) mit deiner Bestellung gesendet, nur an {{seller}}.",
+      "outOfStock": "Ausverkauft",
+      "inStock": "Auf Lager: {{stock}}",
+      "delivery": {
+        "name": "Name",
+        "line1": "Adresszeile 1",
+        "line2": "Adresszeile 2 (optional)",
+        "town": "Ort / Stadt",
+        "postcode": "Postleitzahl",
+        "country": "Land",
+        "nameHint": "Ein Name, an den der Zusteller liefern kann — ein Spitzname ist in Ordnung, wenn er am Briefkasten steht",
+        "remember": "Auf diesem Telefon speichern",
+        "postcodeInvalid": "Gib eine gültige Postleitzahl für das gewählte Land ein",
+        "tooLong": "Die vollständige Lieferadresse darf höchstens 500 Zeichen enthalten"
+      }
     },
     "shipping": {
       "label": "Versand",
@@ -3489,5 +3510,26 @@
   "profileSafety": {
     "unavailable": "Profil nicht verfügbar",
     "unverified": "nicht verifiziert"
+  },
+  "orderCard": {
+    "waitingForInvoice": "Warte auf die Rechnung des Verkäufers"
+  },
+  "myOrders": {
+    "title": "Meine Bestellungen",
+    "empty": "Noch keine Bestellungen – tippe bei einem Angebot auf „Kaufen“.",
+    "open": "Meine Bestellungen",
+    "openWithPayNow": "Meine Bestellungen – {{invoices}} zu bezahlen",
+    "viewAll": "Meine Bestellungen ansehen",
+    "rowA11y": "Bestellung bei {{seller}}: {{items}}. {{status}}"
+  },
+  "orderStatus": {
+    "awaitingInvoice": "Warte auf Rechnung",
+    "payNow": "Jetzt bezahlen",
+    "paid": "Bezahlt",
+    "shipped": "Versendet",
+    "completed": "Abgeschlossen",
+    "cancelled": "Storniert",
+    "needsInvoice": "Rechnung fällig",
+    "invoiceSent": "Rechnung gesendet"
   }
 }

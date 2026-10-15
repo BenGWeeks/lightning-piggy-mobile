@@ -87,6 +87,7 @@ export interface LiveDmSubscriptionParams {
   // when follows update, re-surfacing + re-notifying entries that now pass.
   followGateBuffer: LiveSubFollowGateBuffer;
   setDeferredReplay: (fn: ((item: DeferredFollowGateEntry) => void) | null) => void;
+  includeNonFollowOrders?: () => boolean;
   /** Optional: called once after a RECONNECT re-arm settles (JS sub — see
    * nostrLiveDmReconnect.ts) or after the native engine reports a relay
    * reconnect (settle-delayed — see liveDmEngineBridge.ts), to flush any
@@ -319,6 +320,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     isFollowCacheReady: followGate.ready,
     isFreshArrival,
     queueInboxEntry,
+    includeNonFollowOrders: params.includeNonFollowOrders,
     knownWrapIds,
     releaseWrapClaim: (id) => {
       knownWrapIds.delete(id);

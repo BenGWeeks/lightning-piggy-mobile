@@ -6,7 +6,7 @@ import {
   PREFERRED_SELLERS_ACCOUNT,
 } from '../services/marketPreferredSellers';
 import { useMarketListings } from './useMarketListings';
-import { MARKET_PRODUCTS } from '../data/marketProducts';
+import { MARKET_PRODUCTS, PIG_TEST_PRODUCTS } from '../data/marketProducts';
 import { preferredMarketScope } from '../utils/preferredMarketScope';
 import { ROBOTECHY_PUBKEY } from '../utils/marketSample';
 jest.mock('@react-navigation/native', () => ({
@@ -74,7 +74,7 @@ it('preserves cached listings on failure and respects a successful empty snapsho
   });
   const h = renderHook(() => usePreferredMarketListings());
   await act(async () => {});
-  expect(h.result.current.products).toBe(cached);
+  expect(h.result.current.products).toEqual([...PIG_TEST_PRODUCTS, ...cached]);
   live.mockReturnValue({
     products: [],
     hasSnapshot: true,
@@ -83,7 +83,7 @@ it('preserves cached listings on failure and respects a successful empty snapsho
     refresh,
   });
   h.rerender({});
-  expect(h.result.current.products).toEqual([]);
+  expect(h.result.current.products).toEqual(PIG_TEST_PRODUCTS);
 });
 
 describe('follow recovery', () => {

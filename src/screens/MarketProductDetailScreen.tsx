@@ -116,11 +116,12 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     () => (product ? marketFeedbackContext(product, vendor) : null),
     [product, vendor],
   );
-  // In-app checkout only for products explicitly opted in with the seller's
-  // real listing id — an npub alone doesn't prove the seller accepts orders.
+  // In-app checkout: curated products explicitly opted in with the seller's
+  // real listing id, and any other person's priced kind-30402 relay listing
+  // (a Gamma Markets order the seller answers with an invoice).
   const checkoutTarget = useMemo(
-    () => (product ? marketCheckoutTarget(product, vendor) : null),
-    [product, vendor],
+    () => (product ? marketCheckoutTarget(product, vendor, pubkey) : null),
+    [product, vendor, pubkey],
   );
 
   const onRequestSignIn = useCallback(() => setLoginVisible(true), []);
@@ -138,7 +139,9 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const onOrderPlaced = useCallback(
     (info: { vendorPubkey: string; vendorName: string; vendorLogo?: string }) => {
-      // The order went out as a NIP-17 gift wrap: open the thread it's in.
+      // The order went out as a NIP-17 gift wrap (Gamma kinds never ride
+      // Marmot): open the NIP-17 thread it's in, where its card waits for
+      // the seller's invoice.
       navigation.navigate('Conversation', {
         pubkey: info.vendorPubkey,
         name: info.vendorName,
@@ -171,6 +174,8 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const listingEvent = product.listing?.event;
   const isOwnListing = !!listingEvent && !!pubkey && listingEvent.pubkey === pubkey;
   const listingDTag = listingEvent?.tags.find((tag) => tag[0] === 'd')?.[1];
+  const listingCheckout = checkoutTarget?.source === 'listing';
+  const outOfStock = checkoutTarget?.stock === 0;
 
   return (
     <View style={styles.container} testID="market-product-detail-screen">
@@ -297,32 +302,47 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                 </TouchableOpacity>
               ) : null}
 
-              {/* Nostr listings without in-app checkout used to get an "Open listing"
-                button that only ever reached njump (slow and often broken), so it's
-                gone: those buyers use Message seller. Curated products still link to
-                the seller's website, and opted-in listings keep in-app checkout. */}
+              {/* Curated products link to the seller's website unless opted in
+                to in-app checkout; Nostr listings get Buy (a Gamma order) when
+                priced and not your own, else just Message seller. */}
               {product.listing && !checkoutTarget ? null : (
                 <TouchableOpacity
-                  style={styles.buyButton}
+                  style={[styles.buyButton, outOfStock && styles.buyButtonDisabled]}
                   onPress={openShop}
+                  disabled={outOfStock}
                   testID="market-product-detail-buy"
                   activeOpacity={0.85}
-                  accessibilityLabel={t('market.detail.buyAccessibility', {
-                    title: product.title,
-                    seller: sellerName,
-                  })}
+                  accessibilityState={{ disabled: outOfStock }}
+                  accessibilityLabel={
+                    outOfStock
+                      ? t('market.detail.outOfStock')
+                      : t('market.detail.buyAccessibility', {
+                          title: product.title,
+                          seller: sellerName,
+                        })
+                  }
                 >
                   <Zap size={16} color={colors.white} strokeWidth={2.5} fill={colors.white} />
                   <Text style={styles.buyText}>
-                    {t('market.detail.buyFrom', { seller: sellerName })}
+                    {outOfStock
+                      ? t('market.detail.outOfStock')
+                      : listingCheckout
+                        ? t('market.detail.buy')
+                        : t('market.detail.buyFrom', { seller: sellerName })}
                   </Text>
-                  {/* In-app checkout for opted-in products; the external-link glyph is
-                    only shown when tapping Buy leaves the app for the seller's website. */}
+                  {/* The external-link glyph only when Buy leaves the app. */}
                   {checkoutTarget ? null : (
                     <ExternalLink size={16} color={colors.white} strokeWidth={2.5} />
                   )}
                 </TouchableOpacity>
               )}
+              {listingCheckout ? (
+                // The seller may not run a Gamma-aware client: say what happens
+                // next, and Message seller stays above as the fallback.
+                <Text style={styles.invoiceNote} testID="market-product-detail-invoice-note">
+                  {t('market.detail.invoiceNote')}
+                </Text>
+              ) : null}
             </>
           )}
         </View>
@@ -360,6 +380,12 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
           vendorLogo={vendor?.logo}
           onRequestSignIn={onRequestSignIn}
           onPlaced={onOrderPlaced}
+          onViewOrders={() =>
+            navigation.navigate('Main', {
+              screen: 'MainTabs',
+              params: { screen: 'Explore', params: { screen: 'MarketMyOrders' } },
+            })
+          }
         />
       ) : null}
 

@@ -78,6 +78,7 @@ const PlaceDetailScreen = lazyScreen(() => import('../screens/PlaceDetailScreen'
 const MarketScreen = lazyScreen(() => import('../screens/MarketScreen'));
 const MarketProductDetailScreen = lazyScreen(() => import('../screens/MarketProductDetailScreen'));
 const MarketMyShopScreen = lazyScreen(() => import('../screens/MarketMyShopScreen'));
+const MarketMyOrdersScreen = lazyScreen(() => import('../screens/MarketMyOrdersScreen'));
 const MarketShopCurrenciesScreen = lazyScreen(
   () => import('../screens/MarketShopCurrenciesScreen'),
 );
@@ -457,6 +458,7 @@ function ExploreStackNavigator() {
       <ExploreStack.Screen name="Market" component={MarketScreen} />
       <ExploreStack.Screen name="MarketProductDetail" component={MarketProductDetailScreen} />
       <ExploreStack.Screen name="MarketMyShop" component={MarketMyShopScreen} />
+      <ExploreStack.Screen name="MarketMyOrders" component={MarketMyOrdersScreen} />
       <ExploreStack.Screen name="MarketShopCurrencies" component={MarketShopCurrenciesScreen} />
       <ExploreStack.Screen name="MarketShopShipping" component={MarketShopShippingScreen} />
       <ExploreStack.Screen name="MarketShopCollections" component={MarketShopCollectionsScreen} />

@@ -173,6 +173,8 @@ export type ExploreStackParamList = {
   // Seller side (#1273): the user's own shop, its settings (name, currency,
   // shipping zones) and the listing editor (`dTag` = edit that listing).
   MarketMyShop: undefined;
+  // Buyer side: every Gamma order I placed, from the encrypted DM store.
+  MarketMyOrders: undefined;
   // My shop hub sub-screens (#1534).
   MarketShopCurrencies: undefined;
   MarketShopShipping: undefined;

@@ -785,3 +785,43 @@ it.each([14, 15])('binds file actions to kind %s before geo detection', (wireKin
     expect(item).toMatchObject({ kind: 'message', file: { name: 'geo:1,2.pdf' } });
   else expect(item).not.toHaveProperty('file');
 });
+
+describe('awaitingInvoice (buyer waiting for the seller)', () => {
+  const stored = (type: '1' | '2' | '3', extra: string[][] = []) =>
+    JSON.stringify({
+      kind: 16,
+      type: type === '1' ? 'order' : type === '2' ? 'payment' : 'status',
+      orderId: 'o-42',
+      amountSats: 2100,
+      items: [{ ref: `30402:${PEER}:mug`, quantity: 1 }],
+      message: '',
+      ...(extra.length ? { status: extra[0][1] } : {}),
+    });
+  const orderItems = (msgs: ConversationMessageInput[]) =>
+    buildConversationItems(msgs, []).filter((i) => i.kind === 'order');
+
+  it('flags my placed order until the seller replies', () => {
+    const [placed] = orderItems([
+      { id: 'a', fromMe: true, text: stored('1'), createdAt: DAY2, wireKind: 16 },
+    ]);
+    expect(placed).toMatchObject({ awaitingInvoice: true });
+  });
+
+  it.each([
+    ['a payment request', stored('2')],
+    ['a status update (e.g. cancelled)', stored('3', [['status', 'cancelled']])],
+  ])('clears once the seller sends %s', (_label, reply) => {
+    const items = orderItems([
+      { id: 'a', fromMe: true, text: stored('1'), createdAt: DAY2, wireKind: 16 },
+      { id: 'b', fromMe: false, text: reply, createdAt: DAY2 + 60, wireKind: 16 },
+    ]);
+    expect(items.every((i) => i.kind === 'order' && !i.awaitingInvoice)).toBe(true);
+  });
+
+  it("never flags someone else's order (the seller's view of an incoming order)", () => {
+    const [incoming] = orderItems([
+      { id: 'a', fromMe: false, text: stored('1'), createdAt: DAY2, wireKind: 16 },
+    ]);
+    expect(incoming).not.toHaveProperty('awaitingInvoice');
+  });
+});

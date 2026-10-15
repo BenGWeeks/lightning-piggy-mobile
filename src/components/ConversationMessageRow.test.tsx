@@ -21,6 +21,10 @@ jest.mock('./MessageBubble', () => {
     ),
   };
 });
+jest.mock('../contexts/WalletContext', () => ({
+  useWallet: () => ({ currency: 'USD' }),
+  useWalletLive: () => ({ btcPrice: null }),
+}));
 jest.mock('./OrderPaymentActions', () => () => null);
 jest.mock('./NwcShareCard', () => () => null);
 jest.mock('./MarmotInviteFailedNotice', () => () => null);

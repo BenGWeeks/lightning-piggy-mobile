@@ -2323,7 +2323,10 @@
       "buyFrom": "Buy from {{seller}}",
       "buyAccessibility": "Buy {{title}} from {{seller}}",
       "noFeedback": "Reviews and comments aren't available for this seller yet — they need a Nostr identity to anchor feedback on.",
-      "refreshFailed": "Couldn't refresh this product — check your connection and try again."
+      "refreshFailed": "Couldn't refresh this product — check your connection and try again.",
+      "buy": "Buy",
+      "outOfStock": "Out of stock",
+      "invoiceNote": "The seller sends an invoice for your order"
     },
     "modes": {
       "comingSoon": "{{label}} — coming soon",
@@ -2443,7 +2446,25 @@
         "relayUnreachable": "Couldn't reach a relay to place your order. Please try again.",
         "generic": "Something went wrong placing your order. Please try again."
       },
-      "rateUpdated": "Shipping cost updated. Check the new total and tap Place order again."
+      "rateUpdated": "The exchange rate moved, so the total changed. Check the new total and tap Place order again.",
+      "unitPriceSats": "{{amount}} sats each",
+      "addressLabel": "Delivery address",
+      "addressPlaceholder": "Name, street, town, postcode, country",
+      "addressHint": "Sent privately (gift-wrapped) with your order, only to {{seller}}.",
+      "outOfStock": "Out of stock",
+      "inStock": "In stock: {{stock}}",
+      "delivery": {
+        "name": "Name",
+        "line1": "Address line 1",
+        "line2": "Address line 2 (optional)",
+        "town": "Town / city",
+        "postcode": "Postcode",
+        "country": "Country",
+        "nameHint": "Any name the courier can deliver to — a nickname is fine if it’s on your letterbox",
+        "remember": "Remember on this phone",
+        "postcodeInvalid": "Enter a valid postcode for the selected country",
+        "tooLong": "Keep the complete delivery address within 500 characters"
+      }
     },
     "shipping": {
       "label": "Shipping",
@@ -3489,5 +3510,26 @@
   "profileSafety": {
     "unavailable": "Profile unavailable",
     "unverified": "unverified"
+  },
+  "orderCard": {
+    "waitingForInvoice": "Waiting for the seller's invoice"
+  },
+  "myOrders": {
+    "title": "My orders",
+    "empty": "No orders yet — tap Buy on a listing.",
+    "open": "My orders",
+    "openWithPayNow": "My orders — {{invoices}} to pay",
+    "viewAll": "View my orders",
+    "rowA11y": "Order from {{seller}}: {{items}}. {{status}}"
+  },
+  "orderStatus": {
+    "awaitingInvoice": "Awaiting invoice",
+    "payNow": "Pay now",
+    "paid": "Paid",
+    "shipped": "Shipped",
+    "completed": "Completed",
+    "cancelled": "Cancelled",
+    "needsInvoice": "Needs invoice",
+    "invoiceSent": "Invoice sent"
   }
 }

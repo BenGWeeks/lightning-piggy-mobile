@@ -502,17 +502,13 @@ describe('startLiveDmSubscription — follow-gate race + teardown (#851 F2)', ()
     expect(buffer.size).toBe(0);
   });
 
-  it('an order wrap from a not-yet-followed partner buffers a friendly preview, not raw JSON (#market)', async () => {
-    // Regression for the follow-gate deferred path leaking order JSON into the
-    // conversation-list preview: the deferred entry must run the order content
-    // through `orderPreviewFromContent` (as the non-deferred path does), not
-    // surface the raw `textForRumor` blob. A market the user transacted with
-    // (a kind-16 order) is virtually never in their follow set, so this path
-    // is the common case for marketplace previews.
+  it('persists a bounded incoming order while the unhydrated Messages gate hides its preview', async () => {
+    // Order persistence bypasses follow hydration; Messages keeps its gate.
     const followPubkeysRef = { current: new Set<string>() };
     const buffer = createLiveSubFollowGateBuffer();
 
-    startLiveDmSubscription(makeParams({ followPubkeysRef, followGateBuffer: buffer }));
+    const params = makeParams({ followPubkeysRef, followGateBuffer: buffer });
+    startLiveDmSubscription(params);
     await flush();
 
     const now = Math.floor(Date.now() / 1000);
@@ -533,23 +529,23 @@ describe('startLiveDmSubscription — follow-gate race + teardown (#851 F2)', ()
       content: 'x',
       rumor: {
         kind: 16,
+        tags: [
+          ['type', '1'],
+          ['order', 'abc-12345678'],
+          ['amount', '21'],
+        ],
         created_at: now,
         content: orderJson,
         partnership: { partnerPubkey: ALICE, fromMe: false },
       },
     });
     await flush();
-    expect(buffer.size).toBe(1);
-
-    // Capture the buffered entry on replay and assert its preview is the
-    // human-readable summary, never the raw order-JSON blob.
-    let surfaced: { text?: string } | null = null;
-    buffer.reevaluate(new Set([ALICE]), (item: unknown) => {
-      surfaced = (item as { entry: { text?: string } }).entry;
-    });
-    expect(surfaced).toBeTruthy();
-    expect(surfaced!.text).toMatch(/^🛒 Order Placed/);
-    expect(surfaced!.text).not.toContain('{');
+    expect(buffer.size).toBe(0);
+    expect(upsertDmMessages).toHaveBeenCalledWith([
+      expect.objectContaining({ eventId: 'order-wrap', content: orderJson, wireKind: 16 }),
+    ]);
+    expect(params.setDmInbox).not.toHaveBeenCalled();
+    expect(mockNotifyDm).toHaveBeenCalledWith(ALICE);
   });
 
   it('un-claims a wrap id from knownWrapIds when teardown lands while parked on the yield (Copilot #1039 review)', async () => {

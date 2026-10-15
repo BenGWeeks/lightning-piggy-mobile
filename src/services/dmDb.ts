@@ -458,6 +458,39 @@ export async function getShopOrderRows(
 }
 
 /**
+ * Buyer history is bounded by the newest placed orders, never by lifecycle
+ * row count. Retrieve every update for those order ids and sellers so a busy
+ * order cannot push its original row (or another purchase) out of history.
+ * Invalid legacy JSON is ignored without aborting the read.
+ */
+export async function getOrderRows(owner: string, limit = 500): Promise<DmMessageRow[]> {
+  const db = await getLocalDb();
+  const content = "CASE WHEN json_valid(content) THEN content ELSE '{}' END";
+  const res = await db.execute(
+    `WITH placed AS (
+      SELECT conversation, json_extract(${content}, '$.orderId') AS order_id
+      FROM dm_messages
+      WHERE owner = ? AND sender = ? AND from_me = 1 AND wire_kind = 16
+        AND json_extract(${content}, '$.type') = 'order'
+      ORDER BY created_at DESC, event_id DESC
+      LIMIT ?
+    )
+    SELECT * FROM dm_messages
+      WHERE owner = ? AND wire_kind IN (16, 17)
+        AND EXISTS (
+          SELECT 1 FROM placed
+          WHERE placed.conversation = dm_messages.conversation
+            AND placed.order_id = json_extract(${content}, '$.orderId')
+            AND ((from_me = 1 AND sender = owner) OR
+                 (from_me = 0 AND sender = placed.conversation))
+        )
+      ORDER BY created_at DESC, event_id DESC;`,
+    [owner, owner, Math.max(1, Math.min(2000, Math.floor(limit))), owner],
+  );
+  return (res.rows ?? []).map(toRow);
+}
+
+/**
  * The latest message in each of this owner's conversations, newest-first —
  * the inbox list. This is the read that replaces the whole-inbox blob parse:
  * the DB does the per-conversation MAX in one indexed query instead of JS

@@ -2325,7 +2325,10 @@
       "buyFrom": "Kup — sprzedawca: {{seller}}",
       "buyAccessibility": "Kup: {{title}}, sprzedawca: {{seller}}",
       "noFeedback": "Opinie i komentarze nie są jeszcze dostępne dla tego sprzedawcy — potrzebuje on tożsamości Nostr, do której można je przypiąć.",
-      "refreshFailed": "Nie udało się odświeżyć produktu — sprawdź połączenie i spróbuj ponownie."
+      "refreshFailed": "Nie udało się odświeżyć produktu — sprawdź połączenie i spróbuj ponownie.",
+      "buy": "Kup",
+      "outOfStock": "Brak w magazynie",
+      "invoiceNote": "Sprzedawca wyśle fakturę za Twoje zamówienie"
     },
     "modes": {
       "comingSoon": "{{label}} — wkrótce",
@@ -2447,7 +2450,25 @@
         "relayUnreachable": "Nie udało się połączyć z przekaźnikiem, aby złożyć zamówienie. Spróbuj ponownie.",
         "generic": "Coś poszło nie tak przy składaniu zamówienia. Spróbuj ponownie."
       },
-      "rateUpdated": "Koszt dostawy został zaktualizowany. Sprawdź nową sumę i dotknij Złóż zamówienie ponownie."
+      "rateUpdated": "Kurs wymiany się zmienił, więc zmieniła się suma. Sprawdź nową sumę i ponownie stuknij Złóż zamówienie.",
+      "unitPriceSats": "{{amount}} sats za sztukę",
+      "addressLabel": "Adres dostawy",
+      "addressPlaceholder": "Imię i nazwisko, ulica, miasto, kod pocztowy, kraj",
+      "addressHint": "Wysyłany prywatnie (zaszyfrowany) razem z zamówieniem, tylko do {{seller}}.",
+      "outOfStock": "Brak w magazynie",
+      "inStock": "W magazynie: {{stock}}",
+      "delivery": {
+        "name": "Imię",
+        "line1": "Adres, wiersz 1",
+        "line2": "Adres, wiersz 2 (opcjonalnie)",
+        "town": "Miejscowość / miasto",
+        "postcode": "Kod pocztowy",
+        "country": "Kraj",
+        "nameHint": "Dowolne imię, pod które kurier może dostarczyć przesyłkę — pseudonim jest w porządku, jeśli widnieje na skrzynce pocztowej",
+        "remember": "Zapamiętaj na tym telefonie",
+        "postcodeInvalid": "Wpisz prawidłowy kod pocztowy dla wybranego kraju",
+        "tooLong": "Pełny adres dostawy może mieć najwyżej 500 znaków"
+      }
     },
     "shipping": {
       "label": "Dostawa",
@@ -3543,5 +3564,26 @@
   "profileSafety": {
     "unavailable": "Profil niedostępny",
     "unverified": "niezweryfikowany"
+  },
+  "orderCard": {
+    "waitingForInvoice": "Czekamy na fakturę od sprzedawcy"
+  },
+  "myOrders": {
+    "title": "Moje zamówienia",
+    "empty": "Brak zamówień — stuknij Kup przy ogłoszeniu.",
+    "open": "Moje zamówienia",
+    "openWithPayNow": "Moje zamówienia — do zapłaty: {{invoices}}",
+    "viewAll": "Zobacz moje zamówienia",
+    "rowA11y": "Zamówienie u {{seller}}: {{items}}. {{status}}"
+  },
+  "orderStatus": {
+    "awaitingInvoice": "Czeka na fakturę",
+    "payNow": "Zapłać teraz",
+    "paid": "Opłacone",
+    "shipped": "Wysłane",
+    "completed": "Zrealizowane",
+    "cancelled": "Anulowane",
+    "needsInvoice": "Wymaga faktury",
+    "invoiceSent": "Faktura wysłana"
   }
 }

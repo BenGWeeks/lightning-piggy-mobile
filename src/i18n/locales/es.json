@@ -2323,7 +2323,10 @@
       "buyFrom": "Comprar a {{seller}}",
       "buyAccessibility": "Comprar {{title}} a {{seller}}",
       "noFeedback": "Las reseñas y los comentarios aún no están disponibles para este vendedor: necesita una identidad de Nostr a la que asociar las opiniones.",
-      "refreshFailed": "No se pudo actualizar este producto: comprueba tu conexión y vuelve a intentarlo."
+      "refreshFailed": "No se pudo actualizar este producto: comprueba tu conexión y vuelve a intentarlo.",
+      "buy": "Comprar",
+      "outOfStock": "Agotado",
+      "invoiceNote": "El vendedor te envía una factura por tu pedido"
     },
     "modes": {
       "comingSoon": "{{label}} — próximamente",
@@ -2443,7 +2446,25 @@
         "relayUnreachable": "No se pudo contactar con un relé para realizar tu pedido. Inténtalo de nuevo.",
         "generic": "Algo salió mal al realizar tu pedido. Inténtalo de nuevo."
       },
-      "rateUpdated": "El coste de envío se ha actualizado. Revisa el nuevo total y vuelve a pulsar Realizar pedido."
+      "rateUpdated": "El tipo de cambio ha variado y el total ha cambiado. Revisa el nuevo total y vuelve a tocar Realizar pedido.",
+      "unitPriceSats": "{{amount}} sats cada uno",
+      "addressLabel": "Dirección de entrega",
+      "addressPlaceholder": "Nombre, calle, ciudad, código postal, país",
+      "addressHint": "Se envía en privado (cifrado) con tu pedido, solo a {{seller}}.",
+      "outOfStock": "Agotado",
+      "inStock": "En stock: {{stock}}",
+      "delivery": {
+        "name": "Nombre",
+        "line1": "Dirección, línea 1",
+        "line2": "Dirección, línea 2 (opcional)",
+        "town": "Localidad / ciudad",
+        "postcode": "Código postal",
+        "country": "País",
+        "nameHint": "Cualquier nombre al que el repartidor pueda entregar — un apodo sirve si aparece en tu buzón",
+        "remember": "Recordar en este teléfono",
+        "postcodeInvalid": "Introduce un código postal válido para el país seleccionado",
+        "tooLong": "La dirección de entrega completa debe tener como máximo 500 caracteres"
+      }
     },
     "shipping": {
       "label": "Envío",
@@ -3489,5 +3510,26 @@
   "profileSafety": {
     "unavailable": "Perfil no disponible",
     "unverified": "sin verificar"
+  },
+  "orderCard": {
+    "waitingForInvoice": "Esperando la factura del vendedor"
+  },
+  "myOrders": {
+    "title": "Mis pedidos",
+    "empty": "Aún no hay pedidos: toca Comprar en un anuncio.",
+    "open": "Mis pedidos",
+    "openWithPayNow": "Mis pedidos: {{invoices}} por pagar",
+    "viewAll": "Ver mis pedidos",
+    "rowA11y": "Pedido a {{seller}}: {{items}}. {{status}}"
+  },
+  "orderStatus": {
+    "awaitingInvoice": "Esperando factura",
+    "payNow": "Pagar ahora",
+    "paid": "Pagado",
+    "shipped": "Enviado",
+    "completed": "Completado",
+    "cancelled": "Cancelado",
+    "needsInvoice": "Falta factura",
+    "invoiceSent": "Factura enviada"
   }
 }

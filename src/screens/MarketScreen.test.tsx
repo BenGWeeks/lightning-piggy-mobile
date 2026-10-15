@@ -99,6 +99,7 @@ jest.mock('../contexts/LocaleContext', () => ({
   useLocale: () => ({ t: (key: string) => key, locale: 'en', formatLocale: 'en-GB' }),
 }));
 jest.mock('../components/MarketProductCard', () => () => null);
+jest.mock('../hooks/useBuyerOrders', () => ({ useBuyerOrders: () => ({ payNow: 0 }) }));
 jest.mock('../hooks/usePreferredMarketListings', () => ({
   usePreferredMarketListings: () => ({
     products: mockLiveProducts.length
@@ -131,6 +132,7 @@ jest.mock('lucide-react-native', () => ({
   Search: () => null,
   SlidersHorizontal: () => null,
   Store: () => null,
+  ReceiptText: () => null,
   X: () => null,
   Check: () => null,
   Lock: () => null,

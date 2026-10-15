@@ -27,6 +27,38 @@ const generations = new Map<string, number>();
 const generation = (account: string) => generations.get(account) ?? 0;
 const snapshotAccount = (key: string) => key.split('|')[0];
 const preferencesKey = (account: string) => perAccountKey('market_filters_v1', account);
+const checkoutCountryKey = (account: string) =>
+  perAccountKey('market_checkout_country_v1', account);
+
+/** Separate from catalogue filters: checkout remembers the buyer's destination. */
+export async function readCheckoutCountry(account: string): Promise<string | null> {
+  signedOut.delete(account);
+  const epoch = generation(account);
+  try {
+    await diskQueue;
+    const country = normalizeShipsToSelection(
+      await AsyncStorage.getItem(checkoutCountryKey(account)),
+    );
+    return generation(account) === epoch ? country : null;
+  } catch {
+    return null;
+  }
+}
+export async function writeCheckoutCountry(account: string, country: string) {
+  const normalized = normalizeShipsToSelection(country);
+  if (!normalized || signedOut.has(account)) return;
+  const epoch = generation(account);
+  diskQueue = diskQueue.then(async () => {
+    if (generation(account) !== epoch) return;
+    try {
+      await AsyncStorage.setItem(checkoutCountryKey(account), normalized);
+    } catch {
+      // Best effort: checkout stays usable if storage is unavailable.
+    }
+  });
+  await diskQueue;
+}
+
 export async function readMarketPreferences(account: string): Promise<MarketPreferences> {
   // A new preferences hydration is the account becoming active again.
   signedOut.delete(account);
@@ -288,6 +320,7 @@ export function wipeMarketAccount(account: string): Promise<void> {
   for (const key of memory.keys()) if (snapshotAccount(key) === account) memory.delete(key);
   const wipe = diskQueue.then(async () => {
     await AsyncStorage.removeItem(preferencesKey(account));
+    await AsyncStorage.removeItem(checkoutCountryKey(account));
     const kept = (await diskEntries()).filter((entry) => snapshotAccount(entry.key) !== account);
     if (kept.length) {
       await AsyncStorage.setItem(
