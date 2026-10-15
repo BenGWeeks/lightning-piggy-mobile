@@ -11,7 +11,12 @@ jest.mock('../contexts/ThemeContext', () => ({
 }));
 jest.mock('./MessageBubble', () => {
   const { Text } = jest.requireActual('react-native');
-  return { __esModule: true, default: ({ id }: { id: string }) => <Text>{id}</Text> };
+  return {
+    __esModule: true,
+    default: ({ id, senderName }: { id: string; senderName?: string | null }) => (
+      <Text>{senderName ?? id}</Text>
+    ),
+  };
 });
 jest.mock('expo-image', () => ({ Image: jest.requireActual('react-native').Image }));
 
@@ -75,8 +80,25 @@ test.each([{ showSender: false }, { fromMe: true }])(
 test('uses the shared resolver for a sender and updates an already-mounted label', () => {
   const ui = render(<GroupMessageRow {...props} senderName={undefined} />);
   expect(ui.getByTestId('group-msg-sender-msg1').props.accessibilityLabel).toMatch(/^npub1.*…/);
-  expect(useMentionProfile).toHaveBeenCalledWith(props.senderPubkey, null);
+  expect(useMentionProfile).toHaveBeenCalledWith(props.senderPubkey, null, false);
   jest.mocked(useMentionProfile).mockReturnValue({ name: 'Resolved Fox', picture: null });
   ui.rerender(<GroupMessageRow {...props} senderName="Stale snapshot" />);
   expect(ui.getByText('Resolved Fox')).toBeTruthy();
 });
+
+test.each(['You', 'Tú', 'Ви'])(
+  'preserves the supplied self label %s on outgoing unsupported notices',
+  (senderName) => {
+    jest.mocked(useMentionProfile).mockReturnValue({ name: 'Account name', picture: null });
+    const ui = render(
+      <GroupMessageRow
+        {...props}
+        fromMe
+        senderName={senderName}
+        content={{ kind: 'unsupported', rawKind: 999 }}
+      />,
+    );
+    expect(ui.getByText(senderName)).toBeTruthy();
+    expect(ui.queryByText('Account name')).toBeNull();
+  },
+);

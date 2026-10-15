@@ -13,7 +13,11 @@ import {
 } from '../services/nostrMentionProfiles';
 
 /** Display-only lookup, shared across all mentions on focused screens. */
-export function useMentionProfile(pubkey: string, memberProfile: MentionProfile | null = null) {
+export function useMentionProfile(
+  pubkey: string,
+  memberProfile: MentionProfile | null = null,
+  allowRelayLookup = true,
+) {
   const { relays, pubkey: selfPubkey, profile: ownProfile } = useNostr();
   const { contacts } = useNostrContacts();
   const relayScope = useAppRelayPrefs();
@@ -55,9 +59,10 @@ export function useMentionProfile(pubkey: string, memberProfile: MentionProfile 
         (profile) => setState({ pubkey, profile }),
         retryKey.split('|'),
         selfPubkey,
+        allowRelayLookup,
       );
       // eslint-disable-next-line react-hooks/exhaustive-deps -- App relay defaults are read inside the service.
-    }, [pubkey, relayKey, retryKey, name, selfPubkey, relayScope]),
+    }, [pubkey, relayKey, retryKey, name, selfPubkey, allowRelayLookup, relayScope]),
   );
   if (knownProfile) return knownProfile;
   return state.pubkey === pubkey ? state.profile : peekMentionProfile(pubkey);

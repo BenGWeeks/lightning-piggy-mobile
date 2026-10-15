@@ -217,3 +217,34 @@ it('uses the Messages non-follow profile cache before relay lookup', async () =>
   expect(receive).toHaveBeenCalledWith({ name: 'Cached Messages peer', picture: null });
   expect(query).not.toHaveBeenCalled();
 });
+
+it('observes the screen-owned member batch without querying and receives its cache write', async () => {
+  const receive = jest.fn();
+  const cancel = subscribeMentionProfile('member', relays, receive, [], null, false);
+  await jest.advanceTimersByTimeAsync(120);
+  expect(query).not.toHaveBeenCalled();
+  expect(storage.getMany).not.toHaveBeenCalled();
+  expect(receive).not.toHaveBeenCalled();
+
+  jest.mocked(storage.peekSync).mockReturnValueOnce({
+    name: 'Member name',
+    displayName: null,
+    picture: null,
+  } as never);
+  const notify = jest.mocked(storage.subscribeProfilesChanged).mock.calls[0][0];
+  notify();
+  await jest.advanceTimersByTimeAsync(60);
+  expect(receive).toHaveBeenCalledWith({ name: 'Member name', picture: null });
+  expect(query).not.toHaveBeenCalled();
+  cancel();
+});
+
+it('keeps mention relay configuration when a cache-only sender row subscribes', async () => {
+  subscribeMentionProfile('mention', ['wss://mention'], jest.fn(), ['wss://retry']);
+  subscribeMentionProfile('member', ['wss://other'], jest.fn(), [], null, false);
+  await jest.advanceTimersByTimeAsync(120);
+  expect(query).toHaveBeenCalledTimes(2);
+  expect(query.mock.calls[0][1]).toEqual(['wss://mention']);
+  expect(query.mock.calls[1][1]).toEqual(['wss://retry']);
+  expect(query.mock.calls[0][2].authors).toEqual(['mention']);
+});

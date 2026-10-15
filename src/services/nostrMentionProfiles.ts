@@ -54,17 +54,26 @@ export function subscribeMentionProfile(
   receive: (profile: MentionProfile) => void,
   fallbackRelays: string[] = [],
   owner: string | null = null,
+  // Group sender rows observe the screen-owned member batch through storage.
+  allowRelayLookup = true,
 ): () => void {
-  profileOwner = owner;
+  if (allowRelayLookup) profileOwner = owner;
   watchStorage();
   const listeners = owners.get(pubkey) ?? new Set();
   listeners.add(receive);
   owners.set(pubkey, listeners);
-  readRelays = [...new Set(relays)].slice(0, 6);
-  retryRelays = [...new Set(fallbackRelays)].filter((url) => !readRelays.includes(url)).slice(0, 6);
+  if (allowRelayLookup) {
+    readRelays = [...new Set(relays)].slice(0, 6);
+    retryRelays = [...new Set(fallbackRelays)]
+      .filter((url) => !readRelays.includes(url))
+      .slice(0, 6);
+  }
   const hit = peekMentionProfile(pubkey);
   if (hit !== EMPTY) receive(hit);
-  else if (!active?.keys.includes(pubkey) || active.controller.signal.aborted) {
+  else if (
+    allowRelayLookup &&
+    (!active?.keys.includes(pubkey) || active.controller.signal.aborted)
+  ) {
     pending.add(pubkey);
     schedule();
   }

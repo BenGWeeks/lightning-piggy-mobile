@@ -24,13 +24,13 @@ const GroupMessageRow = React.memo(function GroupMessageRow({
   senderName,
   ...bubble
 }: Props) {
-  // The screen's member snapshot precedes the general display cache, but
-  // its npub placeholder must still be allowed to resolve.
+  // Observe the screen-owned member lookup through shared cache updates;
+  // rows must not start a second kind-0 request for unresolved senders.
   const memberProfile =
     senderName && !senderName.startsWith('npub1')
       ? { name: senderName, picture: senderPicture }
       : null;
-  const profile = useMentionProfile(senderPubkey, memberProfile);
+  const profile = useMentionProfile(senderPubkey, memberProfile, false);
   const name = profile.name || senderName || shortNpubLabel(senderPubkey);
   const avatar =
     profile.picture && isSupportedImageUrl(profile.picture) ? profile.picture : senderPicture;
@@ -42,7 +42,7 @@ const GroupMessageRow = React.memo(function GroupMessageRow({
     return (
       <MessageBubble
         {...bubble}
-        senderName={bubble.content.kind === 'unsupported' ? name : undefined}
+        senderName={bubble.content.kind === 'unsupported' ? senderName : undefined}
       />
     );
   const picture = avatar && isSupportedImageUrl(avatar) && failedPicture !== avatar ? avatar : null;

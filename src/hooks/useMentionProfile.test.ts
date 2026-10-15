@@ -163,3 +163,13 @@ it('retries a cache miss once using the account write relays and both indexers',
   );
   hook.unmount();
 });
+
+it('lets the screen own member relay work while the row observes the shared cache', async () => {
+  const hook = renderHook(() => useMentionProfile('a', null, false));
+  await act(async () => {
+    await jest.advanceTimersByTimeAsync(120);
+  });
+  expect(query).not.toHaveBeenCalled();
+  expect(hook.result.current.name).toBeNull();
+  hook.unmount();
+});
