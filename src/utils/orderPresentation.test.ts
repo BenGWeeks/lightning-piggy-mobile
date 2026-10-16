@@ -1,3 +1,4 @@
+import { parseOrderEvent, parseStoredOrder, serializeOrder } from './orderEvents';
 import { buildMarketOrder } from './marketOrder';
 import {
   buyerOrderNote,
@@ -24,6 +25,22 @@ describe('buyerOrderNote', () => {
       expect(buyerOrderNote(content.replace(/\n/g, '\r\n'))).toBe(
         (note ?? '').replace(/\n/g, '\r\n'),
       );
+    },
+  );
+  test.each([450, 475, 490, 500, 550])(
+    'strips generated totals before bounding a %i-character note on ingest and stored reads',
+    (length) => {
+      const note = 'x'.repeat(length);
+      const rumor = buildMarketOrder({ ...input, note }).rumor;
+      const original = rumor.content;
+      const parsed = parseOrderEvent(rumor)!;
+      expect(parsed.message).toBe(note.slice(0, 500));
+      expect(parseStoredOrder(serializeOrder(parsed))?.message).toBe(note.slice(0, 500));
+      expect(parseStoredOrder(serializeOrder({ ...parsed, message: original }))?.message).toBe(
+        note.slice(0, 500),
+      );
+      expect(rumor.content).toBe(original);
+      expect(original).toContain('Subtotal: 4,200 sats');
     },
   );
   it('preserves free text and incomplete or non-generated summaries', () => {
