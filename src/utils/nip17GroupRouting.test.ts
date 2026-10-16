@@ -79,9 +79,10 @@ it('keeps an unknown two-party message without a subject on the 1:1 path', async
   expect(notifyGroupMessage).not.toHaveBeenCalled();
 });
 
-it('routes subsequent subjectless messages to the known named room', async () => {
+it('keeps subjectless messages in the direct chat despite a known named room', async () => {
   setKnownGroups([group], ME);
-  expect(await tryRouteGroupRumor(rumor(), ME, 'later')).toMatchObject({ kind: 'routed', group });
+  expect(await tryRouteGroupRumor(rumor(), ME, 'later')).toMatchObject({ kind: 'not-group' });
+  expect(appendGroupMessage).not.toHaveBeenCalled();
 });
 
 it('does not divert a 1:1 to a Marmot room or a different participant set', async () => {
@@ -150,9 +151,9 @@ it('materialises a two-member room and keeps its id and history across a subject
   });
   expect(jest.mocked(appendGroupMessage).mock.calls.map((call) => call[1])).toEqual([id, id]);
   expect(await tryRouteGroupRumor(rumor(), ME, 'subjectless')).toMatchObject({
-    kind: 'routed',
-    group: { id, name: 'Renamed' },
+    kind: 'not-group',
   });
+  expect(appendGroupMessage).toHaveBeenCalledTimes(2);
 });
 
 it('never falls through to the 1:1 when a subject-tagged group cannot yet be resolved', async () => {

@@ -7,7 +7,6 @@ import {
 import {
   findGroupForParticipants,
   reconcileSyntheticGroup,
-  waitForPendingGroupReconciliation,
 } from '../services/groupRoutingRegistry';
 import { isSyntheticGroupId, syntheticGroupIdForParticipants } from '../utils/syntheticGroupId';
 import { appendGroupMessage, type GroupMessage } from '../services/groupMessagesStorageService';
@@ -55,32 +54,23 @@ export async function tryRouteGroupRumor(
   const isTwoParty = cls.type === 'dm' || cls.otherParticipants.size === 1;
   const isGroupFile = rumor.kind === 15 && cls.type === 'group';
   if (isTwoParty && rumor.kind !== 14 && !isGroupFile) return { kind: 'not-group' };
-  // NIP-17 does not require a subject on every message. A two-party
-  // rumor can therefore belong to an already-known named room.
-  const otherParticipants =
-    cls.type === 'group' ? cls.otherParticipants : new Set([cls.partnerPubkey]);
+  // An unmarked two-party rumor is a direct message even if a named
+  // group has the same members. Our group sends include subject on EVERY
+  // text/file rumor; membership alone cannot disambiguate these two UIs.
+  if (cls.type === 'dm') return { kind: 'not-group', deferredGroupRumor: rumor };
+  const otherParticipants = cls.otherParticipants;
   let group = findGroupForParticipants(otherParticipants, viewerPubkey);
-  if (!group && cls.type === 'dm') {
-    // Ordinary live callbacks run concurrently. A preceding subject-tagged
-    // message may still be creating this room; don't split its follow-up
-    // into the DM inbox while the registry is awaiting reconciliation.
-    await waitForPendingGroupReconciliation(otherParticipants, viewerPubkey);
-    if (shouldAbort()) return { kind: 'group-no-match' };
-    group = findGroupForParticipants(otherParticipants, viewerPubkey);
-  }
   // A subject names a room; it does not authenticate an unknown peer.
   // Before promoting a two-party DM, preserve the receive caller's follow
   // policy. Known rooms retain membership as their trust signal. Returning
   // not-group lets the caller apply its usual drop/defer/skip-set behavior.
-  // Preserve every two-party chat rumor so follow hydration can retry routing.
-  // A preceding deferred subject may establish a room for a subjectless follow-up.
+  // Preserve marked rumors so follow hydration can retry group routing.
   if (!group && isTwoParty && !passesFollowGate(Array.from(otherParticipants)[0])) {
     return {
       kind: 'not-group',
       deferredGroupRumor: rumor,
     };
   }
-  if (cls.type === 'dm' && !group) return { kind: 'not-group' };
   if (shouldAbort()) return { kind: 'group-no-match' };
   // Always run the synthetic-reconcile path when the matched group is
   // synthetic (no kind-30200 backing it) — that's the only way later

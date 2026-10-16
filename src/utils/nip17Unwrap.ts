@@ -430,8 +430,8 @@ export function textForRumor(rumor: DecodedRumor): string {
  * Classify a kind-14 rumor as either a 1:1 DM or a group message.
  * Returns null if the rumor is malformed (e.g. no resolvable partner).
  *
- *  - DM: one OTHER participant and no valid, nonempty subject; the caller can still
- *    resolve it to a known named room (subjects are optional on later messages).
+ *  - DM: one OTHER participant and no valid, nonempty subject, even when a
+ *    named group with the same membership exists (app routing policy).
  *  - Group: a valid, nonempty subject or two or more OTHER participants. Caller looks
  *    up the room by its participant set; changing the subject renames it.
  *
