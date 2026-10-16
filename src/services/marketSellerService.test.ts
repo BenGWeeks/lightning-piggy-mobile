@@ -269,6 +269,90 @@ describe('marketplace-only seller events', () => {
   });
 });
 
+describe('displaced seller write relays', () => {
+  const writeRelays = Array.from({ length: 8 }, (_, i) => `wss://write${i}.example`);
+  const displacedRelays = writeRelays.slice(8 - MARKET_RELAYS.length);
+
+  it.each(displacedRelays)('recovers a shop and its newest revision from %s', async (source) => {
+    const shop = sign(
+      buildShopTemplate({
+        shop: { name: 'TEST displaced', description: '', currency: 'GBP' },
+        pubkey,
+        productCoordinates: [],
+        zoneCoordinates: [],
+      }),
+      200,
+    );
+    (querySyncAbortable as jest.Mock).mockImplementation((_pool, relays, filter) =>
+      Promise.resolve(relays[0] === source && filter.kinds.includes(shop.kind) ? [shop] : []),
+    );
+    await expect(fetchSellerEvents({ pubkey, relays: writeRelays })).resolves.toEqual([shop]);
+    await expect(
+      fetchLatestRevision({
+        pubkey,
+        kind: shop.kind,
+        dTag: 'lightning-piggy-shop',
+        relays: writeRelays,
+      }),
+    ).resolves.toMatchObject({ event: shop });
+    const leases = (acquireMarketListingsPool as jest.Mock).mock.calls.map((call) => call[0]);
+    expect(leases).toContainEqual([...MARKET_RELAYS, ...writeRelays.slice(0, 4)]);
+    expect(leases).toContainEqual(displacedRelays);
+    for (const relays of leases) expect(relays.length).toBeLessThanOrEqual(8);
+  });
+
+  it.each(['a', 'e'])(
+    'includes displaced-relay %s deletions in revision checks',
+    async (target) => {
+      const base = listing('deleted', 100);
+      const deletion = sign(
+        {
+          kind: 5,
+          content: '',
+          tags: [[target, target === 'a' ? coordinateOf(30402, pubkey, 'deleted') : base.id]],
+        },
+        200,
+      );
+      (querySyncAbortable as jest.Mock).mockImplementation((_pool, relays, filter) =>
+        Promise.resolve(
+          filter.kinds[0] !== 5
+            ? [base]
+            : relays[0] === displacedRelays[0] && filter[`#${target}`]
+              ? [deletion]
+              : [],
+        ),
+      );
+      await expect(
+        fetchLatestRevision({ pubkey, kind: 30402, dTag: 'deleted', relays: writeRelays }),
+      ).resolves.toMatchObject({ event: null });
+    },
+  );
+
+  it.each(['snapshot', 'revision', 'address deletion', 'id deletion'])(
+    'fails closed when the displaced batch cannot complete the %s read',
+    async (failedQuery) => {
+      (querySyncAbortable as jest.Mock).mockImplementation((_pool, relays, filter) => {
+        const query = filter['#d'] ? 'revision' : filter['#a'] ? 'address deletion' : 'id deletion';
+        return displacedRelays.includes(relays[0]) &&
+          (failedQuery === 'snapshot' || query === failedQuery)
+          ? Promise.reject(new Error('Relay query timed out before EOSE'))
+          : Promise.resolve([]);
+      });
+      const pending =
+        failedQuery === 'snapshot'
+          ? fetchSellerEvents({ pubkey, relays: writeRelays })
+          : fetchLatestRevision({
+              pubkey,
+              kind: 30402,
+              dTag: 'cached',
+              baseId: 'cached-id',
+              relays: writeRelays,
+            });
+      await expect(pending).rejects.toThrow('Only 0 of 4 relays answered');
+    },
+  );
+});
+
 describe('queryQuorum', () => {
   const filter = { kinds: [30405], authors: ['a'.repeat(64)], limit: 5 };
   it('counts an answer only when at least half the relays complete', async () => {
