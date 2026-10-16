@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 import { isTestRelayLockdown, TEST_RELAY_URL } from '../config/testRelayLockdown';
 import { getCurrentUserPubkey } from './nostrActiveAccount';
 import { perAccountKey } from './perAccountStorage';
@@ -99,6 +100,22 @@ export function setAppRelayEnabled(
       await AsyncStorage.setItem(perAccountKey(APP_RELAY_PREFS_KEY, pubkey), JSON.stringify(next));
       accounts.set(pubkey, next);
       notify();
+      if (
+        group === 'default' &&
+        Platform.OS === 'android' &&
+        getCurrentUserPubkey()?.toLowerCase() === pubkey
+      ) {
+        // Load lazily: the background watch itself reads this preference store.
+        // Re-arm only after persistence so its relay resolution sees the new set.
+        try {
+          const { rearmBackgroundDmWatchForActiveIdentity } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports -- Avoid the watch/store import cycle.
+            require('./backgroundDmService') as typeof import('./backgroundDmService');
+          await rearmBackgroundDmWatchForActiveIdentity();
+        } catch (error) {
+          console.warn('[AppRelayPrefs] background DM re-arm failed:', error);
+        }
+      }
     });
   writes = task;
   return task;

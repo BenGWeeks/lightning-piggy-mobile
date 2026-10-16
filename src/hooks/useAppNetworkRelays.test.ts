@@ -18,6 +18,11 @@ beforeEach(async () => {
   setCurrentUserPubkey(owner);
 });
 afterEach(() => setCurrentUserPubkey(null));
+it('keeps default relays available to public consumers while signed out', () => {
+  setCurrentUserPubkey(null);
+  const { result } = renderHook(() => useAppNetworkRelays(null, empty, empty));
+  expect(result.current.map((r) => r.url)).toEqual(DEFAULT_RELAYS);
+});
 it('rebuilds the foreground relay set when a default is switched off and restored', async () => {
   const { result } = renderHook(() => useAppNetworkRelays(owner, empty, empty));
   expect(result.current.map((r) => r.url)).toContain(DEFAULT_RELAYS[0]);

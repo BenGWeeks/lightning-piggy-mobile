@@ -17,7 +17,7 @@ export function useAppNetworkRelays(
       mergeRelays({
         nip65,
         user,
-        defaults: pubkey ? enabledAppRelays('default', DEFAULT_RELAYS, pubkey) : [],
+        defaults: enabledAppRelays('default', DEFAULT_RELAYS, pubkey),
       }),
     // enabledAppRelays reads the external preference store synchronously.
     // eslint-disable-next-line react-hooks/exhaustive-deps
