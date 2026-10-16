@@ -278,6 +278,23 @@ export async function upsertDmMessages(rows: readonly DmMessageRow[]): Promise<v
   notifyDmStorage(rows);
 }
 
+/** Import a legacy misfiled group row only if neither its wrap nor its rumor
+ * already exists in the direct thread. Keep the check and write in one SQL
+ * transaction; existing delivery status and edited content always win. */
+export async function importRepairedDmMessage(row: DmMessageRow): Promise<void> {
+  const db = await getLocalDb();
+  await db.transaction(async (tx) => {
+    const existing = await tx.execute(
+      `SELECT event_id FROM dm_messages
+        WHERE owner = ? AND conversation = ? AND ${PROTOCOL_SQL} = 'nip17'
+          AND (event_id = ? OR (? IS NOT NULL AND rumor_id = ?)) LIMIT 1;`,
+      [row.owner, row.conversation, row.eventId, row.rumorId ?? null, row.rumorId ?? null],
+    );
+    if (!existing.rows?.length) await upsertOne(tx as Executor, row);
+  });
+  notifyDmStorage([row]);
+}
+
 /**
  * Import rows without clobbering anything already stored (#850 blob
  * migration): an existing row's content/metadata always wins; the import only

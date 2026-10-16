@@ -1,3 +1,4 @@
+import { forgetNip17GroupHistoryRepair } from './nip17GroupHistoryRepairRunner';
 import { File, Paths } from 'expo-file-system';
 import { deleteInstallationSignatureKey } from '../services/marmotSignatureKey';
 import { deleteDmMessagesForOwner } from '../services/dmDb';
@@ -59,6 +60,7 @@ export async function wipeDmStoresForAccount(pubkey: string): Promise<void> {
   // Await any in-flight migration first — wiping under it would let a late
   // upsert resurrect rows and re-set the migration flag after removal (N4).
   await pendingDmStoreMigration(pubkey)?.catch(() => {});
+  await forgetNip17GroupHistoryRepair(pubkey).catch(() => {});
   try {
     await deleteDmMessagesForOwner(pubkey);
   } catch (e) {

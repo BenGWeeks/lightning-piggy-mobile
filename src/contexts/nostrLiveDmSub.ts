@@ -36,6 +36,7 @@ import {
   mergeInboxEntries,
 } from './nostrDmCache';
 import { ensureDmStoreMigrated } from './dmStoreMigrationRunner';
+import { ensureNip17GroupHistoryRepaired } from './nip17GroupHistoryRepairRunner';
 import { createCoalescedFlushQueue } from '../utils/coalescedFlushQueue';
 import type { RefreshDmInboxOptions } from './nostrContextTypes';
 import { createLiveDmReconnectController } from './nostrLiveDmReconnect';
@@ -740,6 +741,26 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       recoverySince === undefined
         ? sinceK4Cursor
         : Math.min(sinceK4Cursor ?? recoverySince, recoverySince),
+    );
+    // Repair legacy history independently: slow/missing relay wraps must not
+    // delay arming live delivery. Uses its own bounded fetch, not replay dedup.
+    void ensureNip17GroupHistoryRepaired(
+      viewerPubkey,
+      activeSigner,
+      readRelays,
+      wrapYieldAbort.signal,
+      (row) => {
+        if (cancelled || !isCurrentOwner()) return;
+        queueInboxEntry({
+          id: row.eventId,
+          partnerPubkey: row.conversation,
+          fromMe: row.fromMe,
+          createdAt: row.createdAt,
+          text: dmRowPreview(row.content, row.wireKind, getAppFormatLocale()),
+          wireKind: row.wireKind,
+          rumorId: row.rumorId,
+        });
+      },
     );
     // Native engine (Stage 2 M2, #1036) — started AFTER the knownWrapIds
     // seed so the engine's native dedupe set is seeded with the same ids.

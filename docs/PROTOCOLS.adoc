@@ -84,10 +84,14 @@ and now appears in the direct chat. This is an app policy, not a NIP-17 requirem
 Groups with three or more participants still route by membership without a subject.
 Multiple named groups with identical membership are not given distinct wire identities.
 
-No stored rows, group ids, schema, or existing history are migrated or reclassified.
-Persisted group wrap ids continue to suppress live replay, and persisted direct rows
-keep the decrypt-once gate. Previously misrouted history remains where it was stored;
-an uncached rumor fetched again is subject to the new policy.
+A one-time per-account repair re-fetches legacy two-person NIP-17 group wraps
+in batches of 20 and unwraps them with the account signer. Only authenticated
+subjectless two-party text/file rumors move to the direct thread. The direct
+store is written first (deduplicated by wrap or rumor id), then the group copy
+is removed. Marked groups, larger rooms, optimistic group sends and Marmot
+are preserved. Missing wraps, denied decrypts and interruption leave the done
+flag unset for retry; rows without a verifiable original rumor stay in place.
+The repair uses the yield scheduler and persists completion per account.
 
 ==== Code references
 
